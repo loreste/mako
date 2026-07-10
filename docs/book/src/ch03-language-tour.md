@@ -841,6 +841,25 @@ fn main() {
 }
 ```
 
+## Concurrent Maps (CMap)
+
+For thread-safe key-value storage shared across concurrent tasks, use `CMap`:
+
+```mko
+fn main() {
+    let m = cmap_new()
+    cmap_set(m, "key", "value")
+    print(cmap_get(m, "key"))       // "value"
+    print_int(cmap_has(m, "key"))   // 1
+    print_int(cmap_len(m))          // 1
+    let n = cmap_incr(m, "hits", 1) // atomic increment -> 1
+    print_int(n)
+}
+```
+
+CMap uses lock-free reads and striped spinlock writes internally, so it can be
+shared across `crew` tasks without wrapping in channels or mutexes.
+
 ## Channels
 
 Typed channels for communication between concurrent tasks:

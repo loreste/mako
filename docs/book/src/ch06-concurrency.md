@@ -696,6 +696,68 @@ fn main() {
 
 ---
 
+## Concurrent Maps (CMap)
+
+When multiple crew tasks need to share mutable key-value state, `CMap` is the
+built-in solution. It is a concurrent hashmap with lock-free reads and
+per-stripe spinlock writes (512 stripes, FNV-1a hash, 1M initial capacity).
+
+Unlike regular maps, a `CMap` can be read and written from any number of crew
+tasks simultaneously without channels, mutexes, or `hold`/`share` annotations:
+
+```mko
+fn worker(m: CMap, id: int) -> int {
+    let key = "worker_" + string(id)
+    cmap_set(m, key, "done")
+    let _ = cmap_incr(m, "total", 1)
+    return 0
+}
+
+fn main() {
+    let m = cmap_new()
+    cmap_set(m, "total", "0")
+
+    crew t {
+        let w1 = t.kick(worker(m, 1))
+        let w2 = t.kick(worker(m, 2))
+        let w3 = t.kick(worker(m, 3))
+        let _ = w1.join()
+        let _ = w2.join()
+        let _ = w3.join()
+    }
+
+    print_int(cmap_len(m))             // 4 (total + 3 worker keys)
+    print(cmap_get(m, "worker_1"))     // "done"
+    print_int(cmap_incr(m, "total", 0)) // 3 (read current value)
+}
+```
+
+### CMap API
+
+| Function | Purpose |
+|----------|---------|
+| `cmap_new()` | Create a new concurrent map |
+| `cmap_set(m, key, value)` | Set a key-value pair |
+| `cmap_get(m, key)` | Get value (`""` if missing) |
+| `cmap_has(m, key)` | Check if key exists (1 or 0) |
+| `cmap_del(m, key)` | Delete key (returns 1 if existed) |
+| `cmap_len(m)` | Number of entries |
+| `cmap_incr(m, key, delta)` | Atomic increment, returns new value |
+
+### When to use CMap vs Channels
+
+Use **CMap** when you need shared mutable state with random-access reads and
+writes -- counters, caches, lookup tables, result aggregation.
+
+Use **channels** when you need ordered message passing, pipeline stages, or
+producer-consumer coordination.
+
+CMap has no ordering guarantees between operations from different tasks. If you
+need "set A then read A" ordering across tasks, coordinate with channels or
+join handles.
+
+---
+
 ## Colorless I/O
 
 Mako uses **colorless** concurrency: there is no `async`/`await` distinction.

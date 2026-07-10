@@ -59,6 +59,8 @@ pub enum Type {
     Mutex,
     /// Readers–writer mutex (`rwmutex_new`)
     RWMutex,
+    /// Concurrent hashmap (`cmap_new`)
+    CMap,
     /// Buffered reader (`buf_reader_new`)
     BufReader,
     /// Buffered writer (`buf_writer_new`)
@@ -105,6 +107,7 @@ impl Type {
             Type::StrBuilder => "StrBuilder".into(),
             Type::Mutex => "Mutex".into(),
             Type::RWMutex => "RWMutex".into(),
+            Type::CMap => "CMap".into(),
             Type::BufReader => "BufReader".into(),
             Type::BufWriter => "BufWriter".into(),
             Type::HttpRequest => "HttpRequest".into(),
@@ -734,6 +737,35 @@ impl TypeChecker {
         fns.insert(
             "rwmutex_unlock".into(),
             Type::Fn(vec![Type::RWMutex], Box::new(Type::Void)),
+        );
+        // Concurrent hashmap
+        fns.insert(
+            "cmap_new".into(),
+            Type::Fn(vec![], Box::new(Type::CMap)),
+        );
+        fns.insert(
+            "cmap_set".into(),
+            Type::Fn(vec![Type::CMap, Type::String, Type::String], Box::new(Type::Void)),
+        );
+        fns.insert(
+            "cmap_get".into(),
+            Type::Fn(vec![Type::CMap, Type::String], Box::new(Type::String)),
+        );
+        fns.insert(
+            "cmap_has".into(),
+            Type::Fn(vec![Type::CMap, Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "cmap_del".into(),
+            Type::Fn(vec![Type::CMap, Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "cmap_len".into(),
+            Type::Fn(vec![Type::CMap], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "cmap_incr".into(),
+            Type::Fn(vec![Type::CMap, Type::String, Type::Int], Box::new(Type::Int)),
         );
         fns.insert(
             "random_bytes".into(),
@@ -5454,6 +5486,7 @@ impl TypeChecker {
                 "StrBuilder" => Ok(Type::StrBuilder),
                 "Mutex" => Ok(Type::Mutex),
                 "RWMutex" => Ok(Type::RWMutex),
+                "CMap" => Ok(Type::CMap),
                 "BufReader" => Ok(Type::BufReader),
                 "BufWriter" => Ok(Type::BufWriter),
                 "HttpRequest" => Ok(Type::HttpRequest),

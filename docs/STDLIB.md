@@ -281,6 +281,7 @@ Examples: `examples/http_lib/`, `examples/api_backend/`. Smoke: `./scripts/http-
 | `mutex_new` / `mutex_lock` / `mutex_unlock` | mutex |
 | `rwmutex_new` / `rwmutex_rlock` / `runlock` / `lock` / `unlock` | RWMutex |
 | `wait_group_new` / `wait_group_add` / `done` / `wait` | WaitGroup |
+| `cmap_new` / `cmap_set` / `cmap_get` / `cmap_has` / `cmap_del` / `cmap_len` / `cmap_incr` | CMap (concurrent hashmap with lock-free reads) |
 | `chan_new` / `chan_try_send` / `chan_len` / `chan_cap` / `chan_select*` | bounded channels and backpressure |
 | `runtime_stats_json` / `runtime_stats_reset` | runtime scheduler/channel introspection |
 | `crew` / `go` / cancel policy | structured concurrency |

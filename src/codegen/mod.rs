@@ -237,6 +237,7 @@ impl Codegen {
         self.out.push_str("#include \"mako_quiche.h\"\n");
         self.out.push_str("#include \"mako_ws.h\"\n");
         self.out.push_str("#include \"mako_db.h\"\n");
+        self.out.push_str("#include \"mako_cmap.h\"\n");
         self.out.push_str("#endif /* MAKO_WASI */\n\n");
 
         // Collect interfaces for method dispatch sugar
@@ -853,6 +854,7 @@ impl Codegen {
                 "StrBuilder" => "MakoStrBuilder*".into(),
                 "Mutex" => "MakoMutex*".into(),
                 "RWMutex" => "MakoRWMutex*".into(),
+                "CMap" => "MakoCMap*".into(),
                 "BufReader" => "MakoBufReader*".into(),
                 "BufWriter" => "MakoBufWriter*".into(),
                 "HttpRequest" => "MakoHttpRequest".into(),
@@ -2492,6 +2494,53 @@ impl Codegen {
                             let (_, m) = self.emit_expr(&args[0]);
                             self.line(&format!("mako_rwmutex_unlock({m});"));
                             return ("void".into(), "/*void*/".into());
+                        }
+                        "cmap_new" => {
+                            let tmp = self.fresh("cm");
+                            self.line(&format!("MakoCMap *{tmp} = mako_cmap_new();"));
+                            return ("MakoCMap*".into(), tmp);
+                        }
+                        "cmap_set" => {
+                            let (_, m) = self.emit_expr(&args[0]);
+                            let (_, k) = self.emit_expr(&args[1]);
+                            let (_, v) = self.emit_expr(&args[2]);
+                            self.line(&format!("mako_cmap_set({m}, {k}, {v});"));
+                            return ("void".into(), "/*void*/".into());
+                        }
+                        "cmap_get" => {
+                            let (_, m) = self.emit_expr(&args[0]);
+                            let (_, k) = self.emit_expr(&args[1]);
+                            let tmp = self.fresh("cg");
+                            self.line(&format!("MakoString {tmp} = mako_cmap_get({m}, {k});"));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "cmap_has" => {
+                            let (_, m) = self.emit_expr(&args[0]);
+                            let (_, k) = self.emit_expr(&args[1]);
+                            let tmp = self.fresh("ch");
+                            self.line(&format!("int64_t {tmp} = mako_cmap_has({m}, {k});"));
+                            return ("int64_t".into(), tmp);
+                        }
+                        "cmap_del" => {
+                            let (_, m) = self.emit_expr(&args[0]);
+                            let (_, k) = self.emit_expr(&args[1]);
+                            let tmp = self.fresh("cd");
+                            self.line(&format!("int64_t {tmp} = mako_cmap_del({m}, {k});"));
+                            return ("int64_t".into(), tmp);
+                        }
+                        "cmap_len" => {
+                            let (_, m) = self.emit_expr(&args[0]);
+                            let tmp = self.fresh("cl");
+                            self.line(&format!("int64_t {tmp} = mako_cmap_len({m});"));
+                            return ("int64_t".into(), tmp);
+                        }
+                        "cmap_incr" => {
+                            let (_, m) = self.emit_expr(&args[0]);
+                            let (_, k) = self.emit_expr(&args[1]);
+                            let (_, d) = self.emit_expr(&args[2]);
+                            let tmp = self.fresh("ci");
+                            self.line(&format!("int64_t {tmp} = mako_cmap_incr({m}, {k}, {d});"));
+                            return ("int64_t".into(), tmp);
                         }
                         "random_bytes" => {
                             let (_, n) = self.emit_expr(&args[0]);

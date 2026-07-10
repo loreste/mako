@@ -416,6 +416,36 @@ This prevents HTTP response splitting attacks at the API level.
 
 ---
 
+## Thread-Safe Data Structures
+
+For concurrent workloads that need shared mutable state, Mako provides `CMap` --
+a concurrent hashmap with lock-free reads and per-stripe spinlock writes. It can
+be shared across crew tasks without channels, mutexes, or ownership annotations:
+
+```mko
+fn main() {
+    let counters = cmap_new()
+    crew t {
+        let _ = t.kick(increment(counters, "a"))
+        let _ = t.kick(increment(counters, "b"))
+        let _ = t.kick(increment(counters, "a"))
+    }
+    print_int(cmap_incr(counters, "a", 0))  // 2
+    print_int(cmap_incr(counters, "b", 0))  // 1
+}
+
+fn increment(m: CMap, key: string) -> int {
+    let _ = cmap_incr(m, key, 1)
+    return 0
+}
+```
+
+CMap is safe by construction: the runtime uses 512 stripes with FNV-1a hashing
+to minimize contention, and reads are lock-free. For most concurrent key-value
+patterns, prefer CMap over channel-based coordination.
+
+---
+
 ## Memory Safety Contract Summary
 
 | Risk               | Prevention                                  |
@@ -423,7 +453,7 @@ This prevents HTTP response splitting attacks at the API level.
 | Use-after-move     | CFG NLL + `hold` checker at compile time    |
 | Buffer overflow    | Bounds checks on every index (release too)  |
 | Orphan threads     | `crew` structured concurrency -- cancel/join|
-| Data races         | Channels + crew isolation (no shared mutable state) |
+| Data races         | Channels + crew isolation + CMap (thread-safe by design) |
 | Header injection   | `http_header_ok` rejects CR/LF             |
 | Secret residue     | `secret_from_str` + `secret_drop` zeroing  |
 | Timing side-channel| `const_eq` constant-time comparison         |

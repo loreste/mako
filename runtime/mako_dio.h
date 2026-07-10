@@ -1,0 +1,310 @@
+/* Mako direct I/O — high-performance database primitives.
+ * mmap, pread/pwrite, fsync, O_DIRECT, fallocate, WAL-style append.
+ * Designed for building databases, LSM trees, B-trees. */
+#ifndef MAKO_DIO_H
+#define MAKO_DIO_H
+
+#include "mako_rt.h"
+#include <fcntl.h>
+#include <unistd.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <string.h>
+#include <stdlib.h>
+
+/* ---- File descriptor operations ---- */
+
+/* Open file with flags. Returns fd or -1.
+ * mode: 0=read-only, 1=write-only, 2=read-write
+ * flags: bit 0=create, bit 1=truncate, bit 2=append, bit 3=sync, bit 4=direct */
+static inline int64_t mako_file_open(MakoString path, int64_t mode, int64_t flags) {
+    char pbuf[4096];
+    if (!path.data || path.len >= sizeof(pbuf)) return -1;
+    memcpy(pbuf, path.data, path.len);
+    pbuf[path.len] = 0;
+
+    int oflags = 0;
+    if (mode == 0) oflags = O_RDONLY;
+    else if (mode == 1) oflags = O_WRONLY;
+    else oflags = O_RDWR;
+
+    if (flags & 1) oflags |= O_CREAT;
+    if (flags & 2) oflags |= O_TRUNC;
+    if (flags & 4) oflags |= O_APPEND;
+#ifdef O_DSYNC
+    if (flags & 8) oflags |= O_DSYNC;
+#endif
+#ifdef O_DIRECT
+    if (flags & 16) oflags |= O_DIRECT;
+#endif
+#if defined(__APPLE__) && !defined(O_DIRECT)
+    /* macOS: use F_NOCACHE after open instead */
+#endif
+
+    int fd = open(pbuf, oflags, 0644);
+    if (fd < 0) return -1;
+
+#if defined(__APPLE__)
+    if (flags & 16) {
+        fcntl(fd, F_NOCACHE, 1);   /* macOS equivalent of O_DIRECT */
+    }
+#endif
+
+    return (int64_t)fd;
+}
+
+/* Close a file descriptor. */
+static inline int64_t mako_file_close(int64_t fd) {
+    if (fd < 0) return -1;
+    return close((int)fd) == 0 ? 0 : -1;
+}
+
+/* ---- Positional I/O (no seek needed, thread-safe) ---- */
+
+/* Read up to `count` bytes at file offset. Returns bytes read or -1. */
+static inline MakoString mako_pread(int64_t fd, int64_t count, int64_t offset) {
+    if (fd < 0 || count <= 0) return mako_str_from_cstr("");
+    char *buf = (char *)malloc((size_t)count + 1);
+    if (!buf) return mako_str_from_cstr("");
+    ssize_t n = pread((int)fd, buf, (size_t)count, (off_t)offset);
+    if (n <= 0) {
+        free(buf);
+        return mako_str_from_cstr("");
+    }
+    buf[n] = 0;
+    return (MakoString){buf, (size_t)n};
+}
+
+/* Write data at file offset. Returns bytes written or -1. */
+static inline int64_t mako_pwrite(int64_t fd, MakoString data, int64_t offset) {
+    if (fd < 0 || !data.data || data.len == 0) return -1;
+    ssize_t n = pwrite((int)fd, data.data, data.len, (off_t)offset);
+    return (int64_t)n;
+}
+
+/* Append data to end of file. Returns bytes written. */
+static inline int64_t mako_file_append(int64_t fd, MakoString data) {
+    if (fd < 0 || !data.data || data.len == 0) return -1;
+    ssize_t n = write((int)fd, data.data, data.len);
+    return (int64_t)n;
+}
+
+/* ---- Durability ---- */
+
+/* Flush file data + metadata to disk. */
+static inline int64_t mako_fsync(int64_t fd) {
+    if (fd < 0) return -1;
+#if defined(__APPLE__)
+    return fcntl((int)fd, F_FULLFSYNC) == 0 ? 0 : -1;  /* True flush on macOS */
+#else
+    return fsync((int)fd) == 0 ? 0 : -1;
+#endif
+}
+
+/* Flush file data only (no metadata). Faster than fsync. */
+static inline int64_t mako_fdatasync(int64_t fd) {
+    if (fd < 0) return -1;
+#if defined(__APPLE__)
+    return fcntl((int)fd, F_FULLFSYNC) == 0 ? 0 : -1;
+#elif defined(_POSIX_SYNCHRONIZED_IO) && _POSIX_SYNCHRONIZED_IO > 0
+    return fdatasync((int)fd) == 0 ? 0 : -1;
+#else
+    return fsync((int)fd) == 0 ? 0 : -1;
+#endif
+}
+
+/* ---- Memory-mapped I/O ---- */
+
+/* MMap handle: tracks pointer + size for unmap */
+typedef struct {
+    void *ptr;
+    size_t length;
+    int fd;
+} MakoMMap;
+
+/* Memory-map a file. mode: 0=read-only, 1=read-write, 2=private (copy-on-write).
+ * Returns MakoMMap pointer or NULL. */
+static inline MakoMMap *mako_mmap_open(MakoString path, int64_t mode) {
+    char pbuf[4096];
+    if (!path.data || path.len >= sizeof(pbuf)) return NULL;
+    memcpy(pbuf, path.data, path.len);
+    pbuf[path.len] = 0;
+
+    int oflags = (mode >= 1) ? O_RDWR : O_RDONLY;
+    int fd = open(pbuf, oflags);
+    if (fd < 0) return NULL;
+
+    struct stat st;
+    if (fstat(fd, &st) < 0) { close(fd); return NULL; }
+    size_t len = (size_t)st.st_size;
+    if (len == 0) { close(fd); return NULL; }
+
+    int prot = PROT_READ;
+    int flags = MAP_SHARED;
+    if (mode == 1) { prot |= PROT_WRITE; }
+    if (mode == 2) { prot |= PROT_WRITE; flags = MAP_PRIVATE; }
+
+    void *ptr = mmap(NULL, len, prot, flags, fd, 0);
+    if (ptr == MAP_FAILED) { close(fd); return NULL; }
+
+    MakoMMap *m = (MakoMMap *)malloc(sizeof(MakoMMap));
+    if (!m) { munmap(ptr, len); close(fd); return NULL; }
+    m->ptr = ptr;
+    m->length = len;
+    m->fd = fd;
+    return m;
+}
+
+/* Create/extend a file and mmap it read-write. Good for pre-allocated DB files. */
+static inline MakoMMap *mako_mmap_create(MakoString path, int64_t size) {
+    char pbuf[4096];
+    if (!path.data || path.len >= sizeof(pbuf) || size <= 0) return NULL;
+    memcpy(pbuf, path.data, path.len);
+    pbuf[path.len] = 0;
+
+    int fd = open(pbuf, O_RDWR | O_CREAT, 0644);
+    if (fd < 0) return NULL;
+
+    /* Extend file to requested size */
+    if (ftruncate(fd, (off_t)size) < 0) { close(fd); return NULL; }
+
+    void *ptr = mmap(NULL, (size_t)size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    if (ptr == MAP_FAILED) { close(fd); return NULL; }
+
+    MakoMMap *m = (MakoMMap *)malloc(sizeof(MakoMMap));
+    if (!m) { munmap(ptr, (size_t)size); close(fd); return NULL; }
+    m->ptr = ptr;
+    m->length = (size_t)size;
+    m->fd = fd;
+    return m;
+}
+
+/* Read bytes from mmap at offset. Zero-copy — returns a view into the mapped region. */
+static inline MakoString mako_mmap_read(MakoMMap *m, int64_t offset, int64_t count) {
+    if (!m || !m->ptr || offset < 0) return mako_str_from_cstr("");
+    if ((size_t)(offset + count) > m->length) {
+        count = (int64_t)(m->length - (size_t)offset);
+    }
+    if (count <= 0) return mako_str_from_cstr("");
+    /* Return a copy (safe across potential remap) */
+    char *buf = (char *)malloc((size_t)count + 1);
+    if (!buf) return mako_str_from_cstr("");
+    memcpy(buf, (char *)m->ptr + offset, (size_t)count);
+    buf[count] = 0;
+    return (MakoString){buf, (size_t)count};
+}
+
+/* Write bytes into mmap at offset. Direct memory write — very fast. */
+static inline int64_t mako_mmap_write(MakoMMap *m, int64_t offset, MakoString data) {
+    if (!m || !m->ptr || offset < 0 || !data.data) return -1;
+    if ((size_t)(offset + (int64_t)data.len) > m->length) return -1;
+    memcpy((char *)m->ptr + offset, data.data, data.len);
+    return (int64_t)data.len;
+}
+
+/* Flush mmap dirty pages to disk. flags: 0=async, 1=sync. */
+static inline int64_t mako_mmap_sync(MakoMMap *m, int64_t flags) {
+    if (!m || !m->ptr) return -1;
+    int mflags = (flags & 1) ? MS_SYNC : MS_ASYNC;
+    return msync(m->ptr, m->length, mflags) == 0 ? 0 : -1;
+}
+
+/* Get the total size of the mmap. */
+static inline int64_t mako_mmap_size(MakoMMap *m) {
+    if (!m) return 0;
+    return (int64_t)m->length;
+}
+
+/* Unmap and close. */
+static inline int64_t mako_mmap_close(MakoMMap *m) {
+    if (!m) return -1;
+    int r = 0;
+    if (m->ptr && m->length > 0) {
+        r = munmap(m->ptr, m->length);
+    }
+    if (m->fd >= 0) close(m->fd);
+    free(m);
+    return r == 0 ? 0 : -1;
+}
+
+/* ---- Pre-allocation ---- */
+
+/* Pre-allocate disk space for a file (avoids fragmentation). */
+static inline int64_t mako_fallocate(int64_t fd, int64_t size) {
+    if (fd < 0 || size <= 0) return -1;
+#if defined(__APPLE__)
+    fstore_t store = {F_ALLOCATECONTIG, F_PEOFPOSMODE, 0, (off_t)size, 0};
+    int r = fcntl((int)fd, F_PREALLOCATE, &store);
+    if (r < 0) {
+        store.fst_flags = F_ALLOCATEALL;
+        r = fcntl((int)fd, F_PREALLOCATE, &store);
+    }
+    if (r >= 0) ftruncate((int)fd, (off_t)size);
+    return r >= 0 ? 0 : -1;
+#elif defined(__linux__)
+    return posix_fallocate((int)fd, 0, (off_t)size) == 0 ? 0 : -1;
+#else
+    return ftruncate((int)fd, (off_t)size) == 0 ? 0 : -1;
+#endif
+}
+
+/* ---- File size/stat ---- */
+
+/* Get file size by fd. */
+static inline int64_t mako_file_size(int64_t fd) {
+    if (fd < 0) return -1;
+    struct stat st;
+    if (fstat((int)fd, &st) < 0) return -1;
+    return (int64_t)st.st_size;
+}
+
+/* Truncate or extend file to given size. */
+static inline int64_t mako_file_truncate(int64_t fd, int64_t size) {
+    if (fd < 0) return -1;
+    return ftruncate((int)fd, (off_t)size) == 0 ? 0 : -1;
+}
+
+/* Seek to position (for sequential read/write with file_append patterns).
+ * whence: 0=SET, 1=CUR, 2=END. Returns new offset or -1. */
+static inline int64_t mako_file_seek(int64_t fd, int64_t offset, int64_t whence) {
+    if (fd < 0) return -1;
+    int w = SEEK_SET;
+    if (whence == 1) w = SEEK_CUR;
+    if (whence == 2) w = SEEK_END;
+    off_t r = lseek((int)fd, (off_t)offset, w);
+    return (int64_t)r;
+}
+
+/* ---- Batch / vectored I/O ---- */
+
+/* Write multiple strings in one syscall (writev). Returns total bytes written. */
+static inline int64_t mako_file_writev(int64_t fd, MakoString *parts, int64_t count) {
+    if (fd < 0 || !parts || count <= 0) return -1;
+    struct iovec *iov = (struct iovec *)alloca(sizeof(struct iovec) * (size_t)count);
+    for (int64_t i = 0; i < count; i++) {
+        iov[i].iov_base = (void *)parts[i].data;
+        iov[i].iov_len = parts[i].len;
+    }
+    ssize_t n = writev((int)fd, iov, (int)count);
+    return (int64_t)n;
+}
+
+/* ---- Read helpers ---- */
+
+/* Read exactly `count` bytes from fd at current position. Retries on short reads. */
+static inline MakoString mako_file_read_exact(int64_t fd, int64_t count) {
+    if (fd < 0 || count <= 0) return mako_str_from_cstr("");
+    char *buf = (char *)malloc((size_t)count + 1);
+    if (!buf) return mako_str_from_cstr("");
+    size_t total = 0;
+    while (total < (size_t)count) {
+        ssize_t n = read((int)fd, buf + total, (size_t)count - total);
+        if (n <= 0) break;
+        total += (size_t)n;
+    }
+    if (total == 0) { free(buf); return mako_str_from_cstr(""); }
+    buf[total] = 0;
+    return (MakoString){buf, total};
+}
+
+#endif /* MAKO_DIO_H */

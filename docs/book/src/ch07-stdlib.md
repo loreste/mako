@@ -501,6 +501,45 @@ fn main() {
 
 Atomic operations are available for lock-free counters and flags.
 
+### CMap (Concurrent Hashmap)
+
+`CMap` is a built-in concurrent hashmap optimized for high-throughput workloads.
+It uses lock-free reads and per-stripe spinlock writes (512 stripes, FNV-1a
+hash, 1M initial capacity). No import needed -- it is a builtin type.
+
+```mko
+fn main() {
+    let m = cmap_new()
+    cmap_set(m, "greeting", "hello")
+    print(cmap_get(m, "greeting"))    // "hello"
+    print_int(cmap_has(m, "greeting")) // 1
+    print_int(cmap_len(m))            // 1
+
+    // Atomic counter
+    let n = cmap_incr(m, "hits", 1)
+    print_int(n)                      // 1
+    let n2 = cmap_incr(m, "hits", 4)
+    print_int(n2)                     // 5
+
+    // Delete
+    print_int(cmap_del(m, "greeting")) // 1
+    print_int(cmap_len(m))             // 1
+}
+```
+
+| Builtin | Purpose |
+|---------|---------|
+| `cmap_new()` | Create new concurrent map |
+| `cmap_set(m, key, value)` | Set key-value pair |
+| `cmap_get(m, key)` | Get value (`""` if missing) |
+| `cmap_has(m, key)` | Key exists (1/0) |
+| `cmap_del(m, key)` | Delete (returns 1 if existed) |
+| `cmap_len(m)` | Entry count |
+| `cmap_incr(m, key, delta)` | Atomic increment, returns new value |
+
+Safe to share across crew tasks without mutexes or channels. Runtime:
+`runtime/mako_cmap.h`.
+
 ---
 
 ## reflect

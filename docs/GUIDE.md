@@ -536,7 +536,44 @@ ms["x"] = "hello"
 
 Wrong key type rejected at check (`examples/bad/map_key_type.mko`). Tests: `map_test`.
 
-**Later:** more key/value types, concurrent maps.
+---
+
+## 4c-2. Concurrent Maps (CMap)
+
+`CMap` is a built-in concurrent hashmap designed for high-throughput key-value
+workloads. It uses lock-free reads and per-stripe spinlock writes (512 stripes,
+FNV-1a hash, 1M initial capacity). Safe to share across `crew` tasks without
+`hold`/`share` concerns.
+
+```mko
+// examples/cmap.mko
+fn main() {
+    let m = cmap_new()
+    cmap_set(m, "hello", "world")
+    print(cmap_get(m, "hello"))       // "world"
+    print_int(cmap_has(m, "hello"))   // 1
+    print_int(cmap_len(m))            // 1
+
+    let new_val = cmap_incr(m, "counter", 5)   // atomic increment
+    print_int(new_val)                          // 5
+
+    print_int(cmap_del(m, "hello"))   // 1 (existed)
+    print_int(cmap_len(m))            // 1 (only "counter" remains)
+}
+```
+
+| Op | Notes |
+|----|-------|
+| `cmap_new()` | Create a new concurrent map |
+| `cmap_set(m, key, value)` | Set a key-value pair |
+| `cmap_get(m, key)` | Get value (returns `""` if missing) |
+| `cmap_has(m, key)` | Check existence (1/0) |
+| `cmap_del(m, key)` | Delete key (returns 1 if existed) |
+| `cmap_len(m)` | Entry count |
+| `cmap_incr(m, key, delta)` | Atomic increment, returns new value |
+
+Thread-safe by design: multiple `crew` tasks can read and write the same `CMap`
+concurrently without channels or mutexes. Runtime: `runtime/mako_cmap.h`.
 
 ---
 

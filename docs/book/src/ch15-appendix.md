@@ -361,6 +361,18 @@ Supported patterns: literals, `.`, `*`, `+`, `?`, `|`, `[abc]`, `[a-z]`,
 | `uuid_is_nil`     | `(Uuid) -> bool`                | Check nil            |
 | `uuid_check`      | `(string) -> Result[int, string]` | Validate with error |
 
+### Concurrent Map (CMap)
+
+| Function          | Signature                               | Purpose              |
+|-------------------|-----------------------------------------|----------------------|
+| `cmap_new`        | `() -> CMap`                            | Create concurrent map |
+| `cmap_set`        | `(CMap, string, string)`                | Set key-value pair   |
+| `cmap_get`        | `(CMap, string) -> string`              | Get value (`""` if missing) |
+| `cmap_has`        | `(CMap, string) -> int`                 | Key exists (1/0)     |
+| `cmap_del`        | `(CMap, string) -> int`                 | Delete (1 if existed)|
+| `cmap_len`        | `(CMap) -> int`                         | Entry count          |
+| `cmap_incr`       | `(CMap, string, int) -> int`            | Atomic increment, returns new value |
+
 ### Channels
 
 | Function          | Signature                        | Purpose              |

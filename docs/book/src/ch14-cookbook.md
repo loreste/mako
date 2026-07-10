@@ -351,6 +351,49 @@ fn main() {
 
 ---
 
+## Concurrent Cache with CMap
+
+Use `CMap` as a shared cache across worker tasks -- no channels or mutexes needed:
+
+```mko
+fn fetch_and_cache(cache: CMap, key: string) -> int {
+    // Check cache first
+    if cmap_has(cache, key) == 1 {
+        return 0
+    }
+    // Simulate expensive computation
+    sleep_ms(10)
+    let value = "result_for_" + key
+    cmap_set(cache, key, value)
+    let _ = cmap_incr(cache, "misses", 1)
+    return 1
+}
+
+fn main() {
+    let cache = cmap_new()
+    let keys = ["user:1", "user:2", "user:3", "user:1", "user:2"]
+
+    crew t {
+        for i in range keys {
+            let _ = t.kick(fetch_and_cache(cache, keys[i]))
+        }
+    }
+
+    // After all workers complete:
+    print(cmap_get(cache, "user:1"))   // "result_for_user:1"
+    print(cmap_get(cache, "user:2"))   // "result_for_user:2"
+    print(cmap_get(cache, "user:3"))   // "result_for_user:3"
+    print_int(cmap_len(cache))         // 4 (3 keys + "misses" counter)
+    print_int(cmap_incr(cache, "misses", 0))  // 3 (read counter)
+}
+```
+
+CMap handles all synchronization internally. Multiple tasks can read and write
+the same keys concurrently. Use `cmap_incr` for atomic counters (e.g., cache
+hit/miss stats).
+
+---
+
 ## Arena-Scoped Request Handling
 
 For server workloads, allocate all per-request memory from an arena:
