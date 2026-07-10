@@ -584,6 +584,35 @@ function activate(context) {
     )
   );
 
+  // Format on save — runs `mako fmt -w` and returns the formatted text
+  context.subscriptions.push(
+    vscode.languages.registerDocumentFormattingEditProvider("mako", {
+      provideDocumentFormattingEdits(document) {
+        return new Promise((resolve) => {
+          const filePath = document.uri.fsPath;
+          const mako = makoPath();
+          cp.execFile(mako, ["fmt", "-w", filePath], { cwd: workspaceCwd() }, (err) => {
+            if (err) {
+              resolve([]);
+              return;
+            }
+            const fs = require("fs");
+            try {
+              const formatted = fs.readFileSync(filePath, "utf8");
+              const fullRange = new vscode.Range(
+                document.positionAt(0),
+                document.positionAt(document.getText().length)
+              );
+              resolve([vscode.TextEdit.replace(fullRange, formatted)]);
+            } catch (_) {
+              resolve([]);
+            }
+          });
+        });
+      }
+    })
+  );
+
   const client = new MakoLanguageClient(context);
   context.makoLanguageClient = client;
   registerLspProviders(context, client);

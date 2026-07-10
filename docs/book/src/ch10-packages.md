@@ -1,83 +1,699 @@
-# 10. Packages, workspaces, fmt, test
+# 10. Packages, Workspaces, and Tooling
 
-## `mako.toml`
+Mako uses a file-based package system with a `mako.toml` manifest. Dependencies
+can be local paths or git repositories. The `mako pkg` command manages the full
+lifecycle: initializing, adding, fetching, locking, and auditing packages.
+
+---
+
+## mako.toml Format
+
+Every Mako package has a `mako.toml` at its root:
 
 ```toml
 [package]
-name = "hello"
+name = "myapp"
 version = "0.1.0"
 
 [dependencies]
 "helper" = { path = "../helper", version = "0.1.0" }
+"logger" = { git = "https://github.com/org/mako-logger.git", version = "0.2.0" }
 ```
 
-Path deps merge at compile time (transitive). Symbols are namespaced by the
-dependency key: `"helper" = { path = "…" }` → `helper.add(...)`.
+### Package section
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `name` | Yes | Package name (used for import namespacing) |
+| `version` | Yes | SemVer version string (e.g., "0.1.0") |
+
+### Dependencies section
+
+Each dependency is keyed by its import name and specifies a source:
+
+```toml
+[dependencies]
+"dep_name" = { path = "../relative/path", version = "0.1.0" }
+"dep_name" = { git = "https://...", version = "1.0.0" }
+"dep_name" = { git = "https://...", branch = "main" }
+"dep_name" = { git = "https://...", tag = "v1.2.3" }
+```
+
+| Source | Description |
+|--------|-------------|
+| `path` | Local filesystem path (relative to the manifest) |
+| `git` | Git repository URL (cloned to `.mako/deps/`) |
+
+Additional fields:
+- `version` — SemVer constraint for resolution
+- `branch` — Git branch to track (default: main)
+- `tag` — Specific git tag to pin
+
+---
+
+## How Imports Work
+
+Once a dependency is declared in `mako.toml`, its symbols are available under the
+dependency key as a namespace:
+
+```toml
+# mako.toml
+[dependencies]
+"helper" = { path = "../helper", version = "0.1.0" }
+```
+
+```mko
+// main.mko — symbols accessed via helper.fn_name()
+fn main() {
+    print_int(helper.add(20, 22))
+    print(helper.greet("world"))
+}
+```
+
+```mko
+// helper/lib.mko — exports functions directly
+fn add(a: int, b: int) -> int {
+    return a + b
+}
+
+fn greet(name: string) -> string {
+    return "hi " + name
+}
+```
+
+Path dependencies are merged at compile time. The compiler resolves transitive
+dependencies automatically.
+
+---
+
+## File-Level Imports
+
+For single-file imports within the same package (no `mako.toml` needed):
+
+```mko
+import "./helpers.mko"
+
+fn main() {
+    print_int(lib_add(2, 3))
+    print(lib_greet("mako"))
+}
+```
+
+The imported file's functions become available in the importing file's scope.
+By convention, helper files prefix their functions with `lib_` or a meaningful
+module prefix.
+
+### Standard library imports
+
+```mko
+import "strings"
+import "path"
+import "sync"
+```
+
+These resolve from the standard library directory (`std/`, overrideable via the
+`MAKO_STD` environment variable).
+
+### Grouped imports
+
+When you have multiple imports, use the grouped syntax:
+
+```mko
+import (
+    "strings"
+    "path"
+    "sync"
+    "fmt"
+)
+
+fn main() {
+    print(strings.trim("  hi  "))
+    print(path.clean("/a/../b"))
+}
+```
+
+The formatter (`mako fmt`) automatically rewrites two or more single `import`
+statements into a grouped block.
+
+---
+
+## mako pkg Commands
+
+The `mako pkg` subcommand manages the dependency lifecycle:
+
+### mako pkg init
+
+Initialize a new package with a `mako.toml`:
 
 ```bash
 mako pkg init mylib
-mako pkg add helper ../helper
-mako pkg list
-mako pkg lock
-mako pkg audit
-mako pkg fetch          # git deps → .mako/deps/ (needs network)
 ```
 
-Registry-style SemVer resolves from `.mako/registry/<name>/<ver>/` — see
-`examples/pkg_manager/`.
-Audits are local and reproducible: `mako-cve.toml` supplies advisory ranges, and
-`mako-license.toml` supplies allow/deny license policy for locked packages.
+Creates:
+```
+mylib/
+  mako.toml
+  main.mko
+```
+
+The generated `mako.toml`:
+```toml
+[package]
+name = "mylib"
+version = "0.1.0"
+
+[dependencies]
+```
+
+### mako pkg add
+
+Add a dependency to the current package:
+
+```bash
+# Add a local path dependency
+mako pkg add helper ../helper
+
+# Add a git dependency
+mako pkg add logger https://github.com/org/mako-logger.git
+
+# Add with specific version
+mako pkg add utils ../utils --version 0.2.0
+```
+
+This appends to `[dependencies]` in `mako.toml`.
+
+### mako pkg remove
+
+Remove a dependency:
+
+```bash
+mako pkg remove helper
+```
+
+Removes the entry from `[dependencies]` and cleans cached artifacts.
+
+### mako pkg fetch
+
+Download git dependencies to the local cache:
+
+```bash
+mako pkg fetch
+```
+
+Git dependencies are cloned into `.mako/deps/<name>/`. This command requires
+network access. Path dependencies do not need fetching.
+
+### mako pkg lock
+
+Generate or update the lockfile (`mako.lock`):
+
+```bash
+mako pkg lock
+```
+
+The lockfile pins exact versions and git commit hashes for reproducible builds:
+
+```toml
+# mako.lock (auto-generated, do not edit)
+[[package]]
+name = "helper"
+version = "0.1.0"
+source = "path:../helper"
+
+[[package]]
+name = "logger"
+version = "0.2.0"
+source = "git:https://github.com/org/mako-logger.git#abc1234"
+```
+
+Commit `mako.lock` to version control for reproducible builds across
+environments.
+
+### mako pkg update
+
+Update dependencies to their latest compatible versions:
+
+```bash
+# Update all
+mako pkg update
+
+# Update specific dependency
+mako pkg update logger
+```
+
+Re-resolves versions within SemVer constraints and updates `mako.lock`.
+
+### mako pkg list
+
+List all dependencies (direct and transitive):
+
+```bash
+mako pkg list
+```
+
+Output:
+```
+helper  0.1.0  (path: ../helper)
+logger  0.2.0  (git: https://github.com/org/mako-logger.git @ abc1234)
+```
+
+### mako pkg audit
+
+Run security and license audits on locked dependencies:
+
+```bash
+mako pkg audit
+```
+
+Auditing checks:
+- **CVE advisories**: matches against `mako-cve.toml` advisory database
+- **License policy**: checks against `mako-license.toml` allow/deny rules
+- **Integrity**: verifies git checksums match lockfile
+
+```bash
+$ mako pkg audit
+[ok] helper 0.1.0 — no advisories
+[ok] logger 0.2.0 — license: MIT (allowed)
+audit: 2 packages checked, 0 issues
+```
+
+---
 
 ## Workspaces
 
-```bash
-mako init myws --workspace
-cd myws
-mako check .
-mako run -p app
-mako test .
-mako fmt .
-```
+A workspace groups multiple related packages under a single root. This is useful
+for monorepo-style projects with shared libraries.
 
-Root:
+### Workspace mako.toml
 
 ```toml
 [workspace]
-members = ["lib", "app"]
+members = ["core", "helper", "app"]
 ```
 
-## Format
+The workspace root has no `[package]` section — it only declares members.
 
-```bash
-mako fmt path.mko          # stdout
-mako fmt -w .              # write
-mako fmt -l .              # list dirty
-mako fmt -d .              # diff
+### Directory structure
+
+```
+my-project/
+  mako.toml          # workspace root
+  core/
+    lib.mko
+  helper/
+    lib.mko
+  app/
+    main.mko
 ```
 
-Two or more imports are rewritten as a grouped `import ( … )` block.
+### Transitive dependencies in workspaces
 
-## Test
+Workspace members can depend on each other. The compiler resolves these
+transitively:
+
+```mko
+// core/lib.mko
+fn scale(n: int) -> int {
+    return n * 2
+}
+```
+
+```mko
+// helper/lib.mko — depends on core
+fn add(a: int, b: int) -> int {
+    return core.scale(a) + b
+}
+
+fn greet(name: string) -> string {
+    return "hi " + name
+}
+```
+
+```mko
+// app/main.mko — depends on helper (which depends on core)
+fn main() {
+    print_int(helper.add(20, 22))   // core.scale(20) + 22 = 62
+    print(helper.greet("path-dep"))
+}
+```
+
+### Workspace commands
 
 ```bash
+# Check all members
+mako check .
+
+# Run a specific member
+mako run -p app
+
+# Test all members
+mako test .
+
+# Format all members
+mako fmt -w .
+```
+
+---
+
+## Multi-File Projects
+
+### Project layout conventions
+
+```
+my-service/
+  mako.toml
+  main.mko
+  handlers/
+    users.mko
+    health.mko
+  models/
+    user.mko
+  db/
+    queries.mko
+```
+
+### Importing local files
+
+```mko
+import "./handlers/users.mko"
+import "./handlers/health.mko"
+import "./db/queries.mko"
+
+fn main() {
+    let fd = http_bind(18100)
+    // ...
+}
+```
+
+### Namespace conventions
+
+Since file imports bring symbols into the same scope, use prefixes to avoid
+collisions:
+
+```mko
+// handlers/users.mko
+fn users_list(c: int) {
+    let _ = http_respond_json(c, 200, "[]")
+}
+
+fn users_create(c: int) {
+    let body = http_body(c)
+    let _ = http_respond_json(c, 201, body)
+}
+```
+
+```mko
+// handlers/health.mko
+fn health_check(c: int) {
+    let _ = http_respond_json(c, 200, "{\"ok\":true}")
+}
+```
+
+---
+
+## mako fmt (Formatter)
+
+The built-in formatter enforces consistent style:
+
+```bash
+# Print formatted output to stdout
+mako fmt path.mko
+
+# Write formatted files in place
+mako fmt -w .
+
+# List files that need formatting
+mako fmt -l .
+
+# Show diff of what would change
+mako fmt -d .
+```
+
+### What the formatter does
+
+- Normalizes indentation (4 spaces)
+- Groups multiple `import` statements into `import ( ... )` blocks
+- Aligns struct fields
+- Normalizes whitespace around operators
+- Trims trailing whitespace
+
+### Import rewriting
+
+Before formatting:
+```mko
+import "strings"
+import "path"
+import "sync"
+```
+
+After `mako fmt`:
+```mko
+import (
+    "strings"
+    "path"
+    "sync"
+)
+```
+
+---
+
+## mako test (Testing)
+
+Run tests with the built-in test runner:
+
+```bash
+# Run all tests in a directory
 mako test examples/testing
+
+# Filter by test name
 mako test examples/testing -r TestAdd -v
+
+# Run tests multiple times
 mako test examples/testing --count 3
 ```
+
+### Writing tests
+
+Test functions are named with the `Test` prefix:
 
 ```mko
 fn TestAdd() {
     assert_eq(1 + 1, 2)
 }
+
+fn TestStringConcat() {
+    let s = "hello" + " " + "world"
+    assert_eq(s, "hello world")
+}
+
+fn TestMapOperations() {
+    let mut m = make(map[string]int)
+    m["x"] = 42
+    assert_eq(m["x"], 42)
+    assert_eq(len(m), 1)
+}
 ```
 
-Default suite stays green without live TLS/QUIC. Optional:
+### Test assertions
+
+| Function | Purpose |
+|----------|---------|
+| `assert_eq(a, b)` | Assert equality (integers, strings) |
+| `assert(cond)` | Assert boolean condition is true |
+
+### Optional live tests
+
+Some tests require external services (databases, TLS). These are gated behind
+environment variables:
 
 ```bash
+# Enable TLS tests (requires OpenSSL)
 MAKO_LIVE_TLS=1 mako test examples/testing
+
+# Enable HTTP/2 tests
+MAKO_LIVE_NGHTTP2=1 mako test examples/testing
+
+# Enable QUIC tests
+MAKO_LIVE_QUIC=1 mako test examples/testing
 ```
 
-How-tos: [04-packages](../../howto/04-packages.md) ·
-[08-testing](../../howto/08-testing.md).
+The default test suite runs green without any live services.
+
+---
+
+## Registry Resolution
+
+For published packages, Mako resolves from the local registry cache:
+
+```
+.mako/registry/<name>/<version>/
+```
+
+SemVer resolution follows standard rules:
+- `"0.1.0"` — exact version
+- `"^0.1"` — compatible with 0.1.x
+- `"~0.1.2"` — approximately 0.1.2 (patch-level changes)
+
+The registry format stores package metadata and source tarballs locally after
+`mako pkg fetch`.
+
+---
+
+## Build and Run
+
+```bash
+# Build to binary
+mako build main.mko -o out/myapp
+
+# Run directly (build + execute)
+mako run main.mko
+
+# Run with arguments
+mako run main.mko -- --port 8080
+
+# Check without building (type checking only)
+mako check main.mko
+```
+
+---
+
+## Environment Variables
+
+| Variable | Purpose |
+|----------|---------|
+| `MAKO_STD` | Override standard library path |
+| `MAKO_LIVE_TLS` | Enable TLS tests |
+| `MAKO_LIVE_NGHTTP2` | Enable HTTP/2 tests |
+| `MAKO_LIVE_QUIC` | Enable QUIC tests |
+
+---
+
+## Complete Project Example
+
+A realistic project structure:
+
+```
+my-api/
+  mako.toml
+  main.mko
+  lib/
+    router.mko
+    db.mko
+    models.mko
+```
+
+**mako.toml:**
+```toml
+[package]
+name = "my-api"
+version = "0.1.0"
+
+[dependencies]
+```
+
+**main.mko:**
+```mko
+import "./lib/router.mko"
+import "./lib/db.mko"
+
+fn main() {
+    db_init()
+    let fd = http_bind(18100)
+    if fd < 0 {
+        print("bind failed")
+        return
+    }
+    print("my-api on :18100")
+
+    let mut n = 0
+    while n < 1000 {
+        let c = http_accept(fd)
+        if c >= 0 {
+            router_dispatch(c)
+            let _ = http_close(c)
+            n = n + 1
+        }
+    }
+    let _ = http_close_listener(fd)
+}
+```
+
+**lib/router.mko:**
+```mko
+fn router_dispatch(c: int) {
+    let method = http_method(c)
+    let path = http_path(c)
+
+    if str_eq(path, "/health") {
+        let _ = http_respond_json(c, 200, "{\"ok\":true}")
+    } else {
+        if str_eq(path, "/api/items") {
+            if str_eq(method, "GET") {
+                router_items_list(c)
+            } else {
+                if str_eq(method, "POST") {
+                    router_items_create(c)
+                } else {
+                    let _ = http_respond(c, 405, "method not allowed\n")
+                }
+            }
+        } else {
+            let _ = http_respond(c, 404, "not found\n")
+        }
+    }
+}
+
+fn router_items_list(c: int) {
+    let count = db_item_count()
+    let resp = json_ss("count", format_int(count))
+    let _ = http_respond_json(c, 200, resp)
+}
+
+fn router_items_create(c: int) {
+    let body = http_body(c)
+    let name = json_get_string(body, "name")
+    if len(name) == 0 {
+        let _ = http_respond_json(c, 400, "{\"error\":\"name required\"}")
+    } else {
+        let _ = db_add_item(name)
+        let _ = http_respond_json(c, 201, json_ss("name", name, "status", "created"))
+    }
+}
+```
+
+**lib/db.mko:**
+```mko
+fn db_init() {
+    let _ = sqlite_query_int("/tmp/myapi.sqlite", "CREATE TABLE IF NOT EXISTS items(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT)")
+}
+
+fn db_item_count() -> int {
+    return sqlite_query_int("/tmp/myapi.sqlite", "SELECT COUNT(*) FROM items")
+}
+
+fn db_add_item(name: string) -> int {
+    return sqlite_query_int("/tmp/myapi.sqlite", "INSERT INTO items(name) VALUES ('" + name + "')")
+}
+```
+
+---
+
+## Summary
+
+| Command | Purpose |
+|---------|---------|
+| `mako pkg init <name>` | Create new package |
+| `mako pkg add <name> <source>` | Add dependency |
+| `mako pkg remove <name>` | Remove dependency |
+| `mako pkg fetch` | Download git dependencies |
+| `mako pkg lock` | Generate/update lockfile |
+| `mako pkg update` | Update to latest compatible versions |
+| `mako pkg list` | List all dependencies |
+| `mako pkg audit` | Security and license audit |
+| `mako fmt -w .` | Format all files |
+| `mako test <dir>` | Run tests |
+| `mako build <file> -o <out>` | Compile to binary |
+| `mako run <file>` | Build and run |
+| `mako check <file>` | Type-check only |
 
 Next: [Speed & memory safety](ch11-speed-safety.md).

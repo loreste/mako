@@ -4519,6 +4519,12 @@ impl Codegen {
                             self.line(&format!("int64_t {tmp} = mako_tcp_read_print({f});"));
                             return ("int64_t".into(), tmp);
                         }
+                        "tcp_read" => {
+                            let (_, f) = self.emit_expr(&args[0]);
+                            let tmp = self.fresh("trd");
+                            self.line(&format!("MakoString {tmp} = mako_tcp_read({f});"));
+                            return ("MakoString".into(), tmp);
+                        }
                         "json_object" => {
                             let (_, k) = self.emit_expr(&args[0]);
                             let (_, v) = self.emit_expr(&args[1]);

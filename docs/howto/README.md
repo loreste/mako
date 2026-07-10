@@ -1,19 +1,32 @@
-# How-to guides
+# How-To Guides
 
-Practical guides for building with Mako. Guided tour: **[The Mako Book](../book/)**
-(chapter 14 indexes these pages). Syntax reference: [GUIDE.md](../GUIDE.md);
-verified matrix: [STATUS.md](../STATUS.md).
+Practical, hands-on tutorials for building with Mako. Each guide includes
+working code you can run immediately.
 
-| Guide | Topic |
-|-------|--------|
-| [01-getting-started.md](01-getting-started.md) | Install, init, run, check, `mako version` |
-| [02-http-apis.md](02-http-apis.md) | HTTP library — client & server |
-| [03-errors-debugging.md](03-errors-debugging.md) | Result, dbg, lldb, sanitizers |
-| [04-packages.md](04-packages.md) | mako.toml, pkg, workspaces |
-| [05-concurrency.md](05-concurrency.md) | crew, channels, select, actors |
-| [06-memory.md](06-memory.md) | arena, hold, share, NLL |
-| [07-wasi.md](07-wasi.md) | WASM / WASI preview1 |
-| [08-testing.md](08-testing.md) | Tests |
-| [09-release-builds.md](09-release-builds.md) | `--release`, cache, perf |
+## Guides
 
-Also: [BUILD.md](../BUILD.md) · [PERFORMANCE.md](../PERFORMANCE.md) · [DEBUG.md](../DEBUG.md) · [STDLIB.md](../STDLIB.md) · [SECURITY.md](../SECURITY.md).
+| # | Guide | What you will build / learn |
+|---|-------|----------------------------|
+| 01 | [Getting Started](01-getting-started.md) | Install Mako, create a project, build and run your first program |
+| 02 | [HTTP APIs](02-http-apis.md) | Build a JSON API server with routing, request parsing, and a client |
+| 03 | [Errors and Debugging](03-errors-debugging.md) | Handle errors with Result and `?`, wrap context, debug with `dbg` and lldb |
+| 04 | [Packages](04-packages.md) | Create reusable packages, manage dependencies, set up workspaces |
+| 05 | [Concurrency](05-concurrency.md) | Use crew blocks, channels, select, fan, and actors for parallel work |
+| 06 | [Memory](06-memory.md) | Understand ownership with hold/share, use arenas, choose the right strategy |
+| 07 | [WASI](07-wasi.md) | Compile to WebAssembly, run with wasmtime, pass args and access files |
+| 08 | [Testing](08-testing.md) | Write tests, run them, filter by name, measure coverage, use subtests |
+| 09 | [Release Builds](09-release-builds.md) | Optimize binaries, cross-compile, static link, package for deployment |
+
+## Prerequisites
+
+All guides assume you have Mako installed (`mako version` prints output).
+Guide 01 covers installation from scratch.
+
+## Related documentation
+
+- [The Mako Book](../book/) -- guided language tour
+- [GUIDE.md](../GUIDE.md) -- syntax reference
+- [STDLIB.md](../STDLIB.md) -- standard library surface
+- [BUILD.md](../BUILD.md) -- incremental build system
+- [DEBUG.md](../DEBUG.md) -- debugger integration
+- [PERFORMANCE.md](../PERFORMANCE.md) -- benchmarks and optimization

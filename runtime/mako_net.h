@@ -94,6 +94,18 @@ static inline int64_t mako_tcp_read_print(int64_t fd) {
     return (int64_t)n;
 }
 
+/* Read up to 4096 bytes from fd; returns data as MakoString. */
+static inline MakoString mako_tcp_read(int64_t fd) {
+    char buf[4096];
+    ssize_t n = recv((int)fd, buf, sizeof(buf), 0);
+    if (n <= 0) return mako_str_from_cstr("");
+    char *d = (char *)malloc((size_t)n + 1);
+    if (!d) return mako_str_from_cstr("");
+    memcpy(d, buf, (size_t)n);
+    d[n] = 0;
+    return (MakoString){d, (size_t)n};
+}
+
 /* ---- UDP datagram helpers (IPv4 dotted hosts) ---- */
 
 static inline int64_t mako_udp_bind(int64_t port) {

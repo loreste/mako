@@ -1,57 +1,520 @@
-# 11. Building for speed & memory safety
+# 11. Speed and Safety
 
-## Release builds
+Mako compiles to C, then to native machine code via clang. There is no garbage
+collector. Memory is managed through ownership (`hold`/`share`) and arena
+allocation. This chapter explains how Mako keeps your programs both fast and
+safe, and the tools you have when you need to push further in either direction.
+
+---
+
+## Release Builds
+
+By default, `mako build` produces a debug binary with `-O0 -g` -- fast compile
+times, full debug symbols, and all runtime safety checks enabled. When you are
+ready to ship:
 
 ```bash
 mako build --release main.mko -o bin/app
-# → clang -O3 -flto (see PERFORMANCE.md)
 ```
 
-Debug defaults to `-O0 -g` for fast edit loops. Measure frontend vs clang with
-`mako build --time`.
+The `--release` flag tells the backend to compile with `-O3 -flto`:
 
-## Incremental & parallel
+- **`-O3`** enables aggressive optimizations: inlining, vectorization, loop
+  unrolling, dead code elimination, and constant propagation.
+- **`-flto`** (link-time optimization) lets the optimizer see across translation
+  units, eliminating unused functions and inlining across module boundaries.
 
-| Flag / env | Meaning |
-|------------|---------|
-| (default) | Incremental **on** (`.mako/cache/`) |
-| `--no-incremental` | Bypass caches |
-| `-j N` / `MAKO_JOBS` | Parallel `clang -c` |
-| `MAKO_CACHE` | Cache root override |
+You can measure where time is spent:
 
-Details: [BUILD.md](../../BUILD.md).
+```bash
+mako build --time main.mko          # prints frontend + backend + link durations
+mako profile main.mko --json        # structured output for CI dashboards
+```
 
-## Performance habits
+A typical release binary for a small service is under 200 KB on arm64.
 
-1. Pre-size `make([]T, 0, n)` / `make(map[K]V, n)`.
-2. Arena-per-request for temporary buffers.
-3. Prefer `hold` over `share` when uniqueness is enough.
-4. Avoid needless string copies; use builders (`str_builder` / `bytes.Buffer`).
-5. Benchmark/profile: `./scripts/bench-vs-go-rust.sh`, `mako bench`,
-   `mako profile --json`.
+---
 
-Mako’s bar: **fast and lean** on the same hardware
-when you lean on arenas and skip mandatory GC — [PERFORMANCE.md](../../PERFORMANCE.md).
+## Incremental and Parallel Builds
 
-## Memory safety contract
+Mako uses an incremental compilation cache by default. Object files are stored
+in `.mako/cache/` and reused when source has not changed.
 
-| Risk | Prevention |
-|------|------------|
-| Use-after-move | CFG NLL + `hold` |
-| Buffer overflow | Bounds checks; `unsafe` opt-out only |
-| Orphan threads | Crew cancel_joins |
-| Header injection | `http_header_ok` |
-| Secret residue | `secret_drop` |
-| SQL injection | Parameterized DB APIs |
+| Flag / Environment Variable | Meaning |
+|-----------------------------|---------|
+| (default)                   | Incremental on, cache at `.mako/cache/` |
+| `--no-incremental`          | Bypass the object cache entirely |
+| `-j N` / `MAKO_JOBS`       | Number of parallel clang invocations |
+| `MAKO_CACHE`               | Override the cache directory path |
 
-`[package] systems = true` forbids GC-weakening of hold/share rules if optional
-GC appears later. Full write-up: [SECURITY.md](../../SECURITY.md).
+Example: building a workspace with 8 parallel jobs:
+
+```bash
+mako build -j 8 . --release
+```
+
+On a cold build the frontend (lex, parse, typecheck, C codegen) is typically
+under 100 ms. The clang backend dominates. Incremental builds skip unchanged
+translation units entirely.
+
+---
+
+## Bounds Checking: Debug vs Release
+
+All slice and array accesses are bounds-checked at runtime in **both** debug and
+release builds. An out-of-bounds index aborts the program immediately with a
+message indicating the file, line, index, and length:
+
+```text
+abort: index 5 out of bounds (len 3) at main.mko:12
+```
+
+This prevents buffer overflows from ever becoming exploitable. The cost of a
+bounds check is typically a single comparison and branch -- modern CPUs predict
+the taken (in-bounds) path with near-zero overhead.
+
+### When You Need to Opt Out
+
+In extremely hot loops where profiling shows the bounds check is measurable, you
+can use `unsafe_index`:
+
+```mko
+fn sum_hot(xs: []int) -> int {
+    let mut total = 0
+    let n = len(xs)
+    let mut i = 0
+    while i < n {
+        unsafe {
+            total = total + unsafe_index(xs, i)
+        }
+        i = i + 1
+    }
+    return total
+}
+```
+
+`unsafe_index` skips the bounds check. It must appear inside an `unsafe` block.
+If you pass an invalid index, behavior is undefined -- there is no safety net.
+
+**Guideline:** Only use `unsafe_index` when you have profiled and confirmed the
+bounds check is the bottleneck. In most code, the checked path is free.
+
+---
+
+## The Hold/Share Move Checker
+
+Mako enforces ownership at compile time through `hold` and `share` bindings. The
+checker runs during `mako check` and prevents use-after-move, double-free, and
+aliasing violations without any runtime cost.
+
+### Hold: Unique Ownership
+
+A `hold` binding has exclusive ownership. When the value is rebound or passed
+to a function, ownership transfers and the original binding is dead:
+
+```mko
+fn consume(s: string) {
+    print(s)
+}
+
+fn main() {
+    hold let x = "hello"
+    consume(x)          // x moved into consume
+    // print(x)        // COMPILE ERROR: use of moved value `x`
+}
+```
+
+### Partial Moves on Structs
+
+For struct values, individual fields can be moved independently:
+
+```mko
+struct Pair {
+    left: string
+    right: string
+}
+
+fn main() {
+    hold let p = Pair { left: "a", right: "b" }
+    let l = p.left      // moves only `left`
+    print(p.right)      // `right` still usable
+    // print(p.left)    // COMPILE ERROR: field already moved
+}
+```
+
+### Copy Types
+
+Primitive types (`int`, `int64`, `int32`, `int8`, `uint64`, `byte`, `float64`,
+`bool`) are Copy. A `hold` binding of a Copy type can be read multiple times
+without consuming it:
+
+```mko
+fn main() {
+    hold let n = 42
+    print_int(n)        // fine
+    print_int(n)        // still fine -- int is Copy
+}
+```
+
+### Share: Borrowed Access
+
+`share` creates an immutable borrow. While a share is live, the source cannot
+be mutated:
+
+```mko
+fn main() {
+    let mut x = 10
+    share let s = share_int(x)
+    print_int(share_get(s))
+    // x = 20           // COMPILE ERROR: cannot mutate while share is live
+    share_drop(s)
+    x = 20              // fine now
+}
+```
+
+The checker uses control-flow-graph analysis to determine precisely when a share
+ends. A share that is last used on line 5 does not block mutations on line 7,
+even within the same scope (mid-scope drop).
+
+---
+
+## Non-Lexical Lifetimes (NLL)
+
+The move checker does not use lexical scopes to determine when a binding is
+live. Instead, it traces actual control flow through the program.
+
+### If/Else Branches
+
+```mko
+fn main() {
+    hold let x = "data"
+    if some_condition() {
+        consume(x)      // moves x on this path
+    } else {
+        // x not moved here
+    }
+    // After the if: x MAY be moved (moved on one arm)
+    // print(x)         // COMPILE ERROR
+}
+```
+
+If x is moved on **all** non-diverging branches, it is dead after the join. If
+moved on no branches, it remains live.
+
+### Diverging Arms
+
+A branch that always returns, breaks, or continues does not contribute to the
+join point:
+
+```mko
+fn process(data: string) -> int {
+    hold let x = data
+    if len(x) == 0 {
+        return -1       // diverges -- this arm's move state is irrelevant
+    }
+    // x is still live here because the only non-diverging path did not move it
+    print(x)
+    return 0
+}
+```
+
+### Loop-Carried Analysis
+
+The checker iterates loop bodies to detect moves that could be reached on a
+second iteration:
+
+```mko
+fn main() {
+    hold let x = "once"
+    let mut i = 0
+    while i < 3 {
+        // print(x)     // COMPILE ERROR: loop-carried move
+        i = i + 1
+    }
+}
+```
+
+An always-break loop body does not trigger the second-pass check:
+
+```mko
+fn main() {
+    hold let x = "data"
+    while true {
+        print(x)        // OK: always breaks, never re-enters
+        break
+    }
+}
+```
+
+### Const-Bool Edge Pruning
+
+The checker recognizes constant booleans. `if false { ... }` is dead code and
+does not affect move state:
+
+```mko
+fn main() {
+    hold let x = "kept"
+    if false {
+        consume(x)      // dead -- does not move x
+    }
+    print(x)            // fine
+}
+```
+
+---
+
+## Arena Allocators for Predictable Latency
+
+Arenas provide bump-pointer allocation: many allocations, one bulk free at scope
+exit. There is no per-object free and no fragmentation within the arena's
+lifetime.
+
+```mko
+fn handle_request(fd: int) {
+    arena a {
+        // All allocations below come from the arena
+        let mut buf = make([]byte, 0, 4096)
+        let mut headers = make([]string, 0, 16)
+        let body = read_body(fd, buf)
+        let response = process(body, headers)
+        send_response(fd, response)
+    }
+    // One free here -- no GC pause, no per-allocation overhead
+}
+```
+
+### Arena-Backed Structs and Slices
+
+Inside an `arena` block, `make` allocates from that arena:
+
+```mko
+struct Point {
+    x: int
+    y: int
+}
+
+fn main() {
+    arena a {
+        let mut xs = make([]Point, 2, 4)
+        xs[0] = Point { x: 1, y: 2 }
+        xs[1] = Point { x: 3, y: 4 }
+        xs = append(xs, Point { x: 5, y: 6 })
+        print_int(len(xs))   // 3
+        print_int(xs[2].x)   // 5
+    }
+}
+```
+
+### When to Use Arenas
+
+- **Request-scoped buffers** in servers: allocate everything for one request
+  from a single arena, free it all when the response is sent.
+- **Batch processing**: parse a document into many small nodes, process them,
+  then discard everything at once.
+- **Latency-sensitive paths**: avoid unpredictable allocation times from the
+  system allocator's free-list walk.
+
+Arenas are not appropriate for data that must outlive a scope. For long-lived
+data, use normal allocations with `hold` ownership.
+
+---
+
+## Unsafe Blocks
+
+The `unsafe` keyword marks code where the compiler's safety guarantees are
+suspended. Today this means:
+
+- `unsafe_index(slice, i)` -- unchecked bounds access.
+
+```mko
+fn main() {
+    let xs = [10, 20, 30]
+    unsafe {
+        let v = unsafe_index(xs, 1)
+        print_int(v)    // 20
+    }
+}
+```
+
+Unsafe blocks are syntactically visible and greppable. Code review tools and
+`mako lint` flag them. The goal is that 99.9% of code never needs `unsafe`.
+
+### Guidelines for Unsafe
+
+1. **Prove correctness locally.** The code immediately around `unsafe_index`
+   should make it obvious why the index is valid (e.g., a preceding length
+   check or loop bound).
+2. **Keep unsafe blocks small.** Wrap a single operation, not an entire
+   function.
+3. **Document the invariant.** A comment above the unsafe block should state
+   why it is safe.
+4. **Profile first.** Do not reach for `unsafe_index` without profiling
+   evidence that bounds checking is the bottleneck.
+
+---
+
+## Secret Handling
+
+Mako provides primitives for handling sensitive data (API keys, passwords,
+tokens) that should not linger in memory:
+
+```mko
+fn main() {
+    let key = secret_from_str("sk-live-abc123xyz")
+    // ... use key for authentication ...
+    secret_drop(key)    // zeroes the memory before freeing
+}
+```
+
+### How It Works
+
+- `secret_from_str(s)` copies the string into a dedicated allocation and
+  returns an opaque handle.
+- `secret_drop(handle)` overwrites the allocation with zeroes, then frees it.
+  The original string `s` is a normal Mako string (GC-free but not zeroed);
+  `secret_from_str` exists so you can control the lifetime of the sensitive
+  copy.
+
+This prevents secrets from persisting in freed memory where they could be
+exposed by a crash dump, memory inspector, or allocation reuse.
+
+---
+
+## Constant-Time Compare
+
+When comparing secrets (tokens, HMACs, password hashes), a naive `==` leaks
+information through timing differences. Mako provides `const_eq`:
+
+```mko
+fn verify_token(got: string, want: string) -> bool {
+    return const_eq(got, want) == 1
+}
+```
+
+`const_eq` always examines every byte of both strings, regardless of where they
+differ. It returns `1` for equal, `0` for not equal. Use this for any
+security-sensitive comparison.
+
+---
+
+## Header Injection Prevention
+
+The HTTP builtins include `http_header_ok` which rejects header names or values
+containing CR/LF characters:
+
+```mko
+fn safe_set_header(name: string, val: string) -> bool {
+    if http_header_ok(name, val) == 1 {
+        // safe to use
+        return true
+    }
+    return false
+}
+```
+
+This prevents HTTP response splitting attacks at the API level.
+
+---
+
+## Memory Safety Contract Summary
+
+| Risk               | Prevention                                  |
+|--------------------|---------------------------------------------|
+| Use-after-move     | CFG NLL + `hold` checker at compile time    |
+| Buffer overflow    | Bounds checks on every index (release too)  |
+| Orphan threads     | `crew` structured concurrency -- cancel/join|
+| Data races         | Channels + crew isolation (no shared mutable state) |
+| Header injection   | `http_header_ok` rejects CR/LF             |
+| Secret residue     | `secret_from_str` + `secret_drop` zeroing  |
+| Timing side-channel| `const_eq` constant-time comparison         |
+| SQL injection      | Parameterized queries only (`sqlite_query_int_params`) |
+
+---
+
+## Performance Habits
+
+1. **Pre-size slices and maps.** `make([]T, 0, n)` avoids repeated growth
+   copies. `make(map[K]V, n)` avoids rehashing.
+
+2. **Use arenas for request-scoped work.** One bulk free is cheaper than many
+   individual frees.
+
+3. **Prefer `hold` over `share`.** Unique ownership has zero runtime cost.
+   Shared references add reference counting overhead.
+
+4. **Avoid string copies in hot paths.** Use `str_builder` for concatenation.
+   Use `[]byte` when building output incrementally.
+
+5. **Measure with `now_ns`.** The monotonic nanosecond clock is the right tool
+   for benchmarking:
+
+```mko
+fn main() {
+    let start = now_ns()
+    // ... work ...
+    let elapsed = now_ns() - start
+    print_int(elapsed)
+}
+```
+
+6. **Use `black_box` in benchmarks.** Prevents the optimizer from eliminating
+   work that has no observable side effect:
+
+```mko
+fn main() {
+    let start = now_ns()
+    let mut sum = 0
+    for i in range 1000000 {
+        sum = sum + i
+    }
+    let _ = black_box(sum)
+    print_int(now_ns() - start)
+}
+```
+
+7. **Profile before optimizing.** `mako profile main.mko --json` reports
+   frontend, backend, and run time. Focus on what the profile shows.
+
+---
 
 ## Sanitizers
 
+For catching memory and threading bugs that slip past static analysis:
+
 ```bash
-mako build --sanitize=address path.mko
-mako build --sanitize=thread path.mko
+mako build --sanitize=address path.mko    # AddressSanitizer: buffer overruns, use-after-free
+mako build --sanitize=thread path.mko     # ThreadSanitizer: data races
 ```
 
-Next: [Cross-platform & WASI](ch12-cross-platform.md).
+These add runtime instrumentation. Binaries are slower but report precise
+diagnostics on violation. Use them in CI test runs.
+
+---
+
+## The `[package] systems = true` Marker
+
+In `mako.toml`, a package can declare:
+
+```toml
+[package]
+name = "mykernel"
+systems = true
+```
+
+This opts into stricter rules: if a future optional GC mode is added, this
+package will never use it. The `hold`/`share` ownership rules remain fully
+enforced with no runtime weakening.
+
+---
+
+## Summary
+
+Mako achieves speed through direct compilation to C with `-O3 -flto`, arena
+allocation, zero-cost ownership, and no garbage collector. It achieves safety
+through compile-time move analysis, runtime bounds checks, structured
+concurrency, and explicit `unsafe` opt-out. The two goals reinforce each other:
+the ownership system eliminates the need for a GC (speed) while preventing
+use-after-free (safety). Bounds checks prevent overflows (safety) with negligible
+performance cost on modern hardware (speed).
+
+Next: [Cross-platform and WASI](ch12-cross-platform.md).

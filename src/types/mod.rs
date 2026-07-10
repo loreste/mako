@@ -1999,6 +1999,10 @@ impl TypeChecker {
             "tcp_read_print".into(),
             Type::Fn(vec![Type::Int], Box::new(Type::Int)),
         );
+        fns.insert(
+            "tcp_read".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::String)),
+        );
         // JSON / crypto / log / metrics / share / slice / safe_add
         fns.insert(
             "json_object".into(),

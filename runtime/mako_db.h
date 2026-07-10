@@ -11,6 +11,25 @@
 #endif
 #include <ctype.h>
 
+/* Windows lacks strtok_r and may deprecate strdup — provide shims. */
+#if defined(_WIN32)
+#ifndef strtok_r
+static inline char *mako_strtok_r(char *str, const char *delim, char **saveptr) {
+    if (!str) str = *saveptr;
+    if (!str) return NULL;
+    str += strspn(str, delim);
+    if (*str == '\0') { *saveptr = NULL; return NULL; }
+    char *end = str + strcspn(str, delim);
+    if (*end) { *end = '\0'; *saveptr = end + 1; } else { *saveptr = NULL; }
+    return str;
+}
+#define strtok_r mako_strtok_r
+#endif
+#ifndef strdup
+#define strdup _strdup
+#endif
+#endif
+
 #if defined(MAKO_HAS_SQLITE)
 #include <sqlite3.h>
 #endif
@@ -616,11 +635,11 @@ static inline int mako_redis_tcp_connect(MakoString host, int64_t port) {
     addr.sin_family = AF_INET;
     addr.sin_port = htons((uint16_t)port);
     if (inet_pton(AF_INET, hbuf, &addr.sin_addr) != 1) {
-        close(fd);
+        mako_sock_close(fd);
         return -1;
     }
     if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
-        close(fd);
+        mako_sock_close(fd);
         return -1;
     }
     return fd;
@@ -633,6 +652,8 @@ typedef struct {
     int64_t db;
     int64_t has_db;
 } MakoRedisUrl;
+
+/* MakoRedisConn is defined in mako_std.h */
 
 static inline MakoRedisUrl mako_redis_parse_url(MakoString url) {
     MakoRedisUrl out;
@@ -772,11 +793,11 @@ static inline MakoString mako_redis_ping(MakoString host, int64_t port) {
     if (fd < 0) return mako_str_from_cstr("");
     const char *ping = "*1\r\n$4\r\nPING\r\n";
     if (send(fd, ping, strlen(ping), 0) < 0) {
-        close(fd);
+        mako_sock_close(fd);
         return mako_str_from_cstr("");
     }
     MakoString out = mako_redis_recv_simple(fd);
-    close(fd);
+    mako_sock_close(fd);
     return out;
 }
 
@@ -786,12 +807,12 @@ static inline MakoRedisConn mako_redis_connect(MakoString url) {
     if (fd < 0) return (MakoRedisConn){0};
     if (u.pass.len > 0) {
         if (mako_redis_send_array(fd, "AUTH", u.pass, (MakoString){0}) < 0) {
-            close(fd);
+            mako_sock_close(fd);
             return (MakoRedisConn){0};
         }
         MakoString auth = mako_redis_recv_simple(fd);
         if (!mako_str_eq(auth, mako_str_from_cstr("OK"))) {
-            close(fd);
+            mako_sock_close(fd);
             return (MakoRedisConn){0};
         }
     }
@@ -799,12 +820,12 @@ static inline MakoRedisConn mako_redis_connect(MakoString url) {
         char dbuf[32];
         snprintf(dbuf, sizeof(dbuf), "%lld", (long long)u.db);
         if (mako_redis_send_array(fd, "SELECT", mako_str_from_cstr(dbuf), (MakoString){0}) < 0) {
-            close(fd);
+            mako_sock_close(fd);
             return (MakoRedisConn){0};
         }
         MakoString sel = mako_redis_recv_simple(fd);
         if (!mako_str_eq(sel, mako_str_from_cstr("OK"))) {
-            close(fd);
+            mako_sock_close(fd);
             return (MakoRedisConn){0};
         }
     }
@@ -816,7 +837,7 @@ static inline int64_t mako_redis_ok(MakoRedisConn c) {
 }
 
 static inline int64_t mako_redis_close(MakoRedisConn c) {
-    if (c.handle > 0) close((int)c.handle);
+    if (c.handle > 0) mako_sock_close((int)c.handle);
     return 0;
 }
 
@@ -868,20 +889,20 @@ static inline MakoString mako_redis_set(
     size_t off = 0;
     const char *hdr = "*3\r\n$3\r\nSET\r\n";
     size_t hl = strlen(hdr);
-    if (hl >= sizeof(cmd)) { close(fd); return mako_str_from_cstr(""); }
+    if (hl >= sizeof(cmd)) { mako_sock_close(fd); return mako_str_from_cstr(""); }
     memcpy(cmd, hdr, hl);
     off = hl;
     if (mako_redis_append_bulk(cmd, sizeof(cmd), &off, key) < 0
         || mako_redis_append_bulk(cmd, sizeof(cmd), &off, val) < 0) {
-        close(fd);
+        mako_sock_close(fd);
         return mako_str_from_cstr("");
     }
     if (send(fd, cmd, off, 0) < 0) {
-        close(fd);
+        mako_sock_close(fd);
         return mako_str_from_cstr("");
     }
     MakoString out = mako_redis_recv_simple(fd);
-    close(fd);
+    mako_sock_close(fd);
     return out;
 }
 
@@ -896,15 +917,15 @@ static inline MakoString mako_redis_get(MakoString host, int64_t port, MakoStrin
     memcpy(cmd, hdr, hl);
     off = hl;
     if (mako_redis_append_bulk(cmd, sizeof(cmd), &off, key) < 0) {
-        close(fd);
+        mako_sock_close(fd);
         return mako_str_from_cstr("");
     }
     if (send(fd, cmd, off, 0) < 0) {
-        close(fd);
+        mako_sock_close(fd);
         return mako_str_from_cstr("");
     }
     MakoString out = mako_redis_recv_simple(fd);
-    close(fd);
+    mako_sock_close(fd);
     return out;
 }
 
@@ -919,15 +940,15 @@ static inline MakoString mako_redis_del(MakoString host, int64_t port, MakoStrin
     memcpy(cmd, hdr, hl);
     off = hl;
     if (mako_redis_append_bulk(cmd, sizeof(cmd), &off, key) < 0) {
-        close(fd);
+        mako_sock_close(fd);
         return mako_str_from_cstr("");
     }
     if (send(fd, cmd, off, 0) < 0) {
-        close(fd);
+        mako_sock_close(fd);
         return mako_str_from_cstr("");
     }
     MakoString out = mako_redis_recv_simple(fd);
-    close(fd);
+    mako_sock_close(fd);
     return out;
 }
 
@@ -942,15 +963,15 @@ static inline MakoString mako_redis_exists(MakoString host, int64_t port, MakoSt
     memcpy(cmd, hdr, hl);
     off = hl;
     if (mako_redis_append_bulk(cmd, sizeof(cmd), &off, key) < 0) {
-        close(fd);
+        mako_sock_close(fd);
         return mako_str_from_cstr("");
     }
     if (send(fd, cmd, off, 0) < 0) {
-        close(fd);
+        mako_sock_close(fd);
         return mako_str_from_cstr("");
     }
     MakoString out = mako_redis_recv_simple(fd);
-    close(fd);
+    mako_sock_close(fd);
     return out;
 }
 
@@ -966,17 +987,17 @@ static inline int64_t mako_redis_mock_once(int64_t port) {
     addr.sin_addr.s_addr = htonl(INADDR_ANY);
     addr.sin_port = htons((uint16_t)port);
     if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
-        close(fd);
+        mako_sock_close(fd);
         return 1;
     }
     if (listen(fd, 8) < 0) {
-        close(fd);
+        mako_sock_close(fd);
         return 1;
     }
     fprintf(stderr, "mako redis_mock_once on :%lld\n", (long long)port);
     int cfd = accept(fd, NULL, NULL);
     if (cfd < 0) {
-        close(fd);
+        mako_sock_close(fd);
         return 1;
     }
     char buf[256];
@@ -991,7 +1012,7 @@ static inline int64_t mako_redis_mock_once(int64_t port) {
         (void)send(cfd, err, strlen(err), 0);
     }
     close(cfd);
-    close(fd);
+    mako_sock_close(fd);
     return 0;
 }
 
@@ -1008,11 +1029,11 @@ static inline int64_t mako_redis_mock_kv(int64_t port, int64_t max_cmds) {
     addr.sin_addr.s_addr = htonl(INADDR_ANY);
     addr.sin_port = htons((uint16_t)port);
     if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
-        close(fd);
+        mako_sock_close(fd);
         return 1;
     }
     if (listen(fd, 8) < 0) {
-        close(fd);
+        mako_sock_close(fd);
         return 1;
     }
     fprintf(stderr, "mako redis_mock_kv on :%lld\n", (long long)port);
@@ -1157,7 +1178,7 @@ static inline int64_t mako_redis_mock_kv(int64_t port, int64_t max_cmds) {
         }
         close(cfd);
     }
-    close(fd);
+    mako_sock_close(fd);
     return 0;
 }
 
@@ -1172,6 +1193,8 @@ typedef struct {
     int64_t port;
     MakoString db;
 } MakoMysqlUrl;
+
+/* MakoMysqlConn is defined in mako_std.h */
 
 static inline MakoMysqlUrl mako_mysql_parse_url(MakoString url) {
     MakoMysqlUrl out;

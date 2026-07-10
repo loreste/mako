@@ -1,10 +1,48 @@
 # 8. Networking & HTTP
 
-Beachhead: **HTTP/1.1**, HTTPS (OpenSSL when linked), HTTP/2 TLS server,
-gRPC/H3-client pieces, and a small HTTP library with a typed `Request`. This is
-a systems beachhead — not a full web framework.
+Mako provides a systems-level HTTP stack: synchronous, one-request-at-a-time
+per connection, with no colored async. You scale concurrency by running handlers
+inside crew blocks. This chapter covers TCP, HTTP/1.1, HTTPS, HTTP/2, WebSockets,
+REST APIs, and request routing patterns.
 
-## Minimal HTTP/1.1 server
+---
+
+## TCP Fundamentals
+
+At the lowest level, Mako provides raw TCP socket operations:
+
+```mko
+fn main() {
+    // Server side
+    let fd = tcp_listen(18082)
+    let client = tcp_accept(fd)
+    let _ = tcp_write(client, "hello from server\n")
+    let _ = tcp_close(client)
+    let _ = tcp_close(fd)
+}
+```
+
+```mko
+fn main() {
+    // Client side
+    let peer = tcp_connect("127.0.0.1", 18082)
+    let data = tcp_read(peer)
+    print(data)
+    let _ = tcp_close(peer)
+}
+```
+
+TCP operations block the calling thread. Use crew blocks to handle multiple
+connections concurrently.
+
+---
+
+## HTTP/1.1 Server
+
+The HTTP server API is synchronous and explicit. You bind a port, accept
+connections in a loop, inspect the request, send a response, and close.
+
+### Minimal server
 
 ```mko
 fn main() {
@@ -13,13 +51,553 @@ fn main() {
         print("bind failed")
         return
     }
+    print("listening on :18100")
+
+    let c = http_accept(fd)
+    if c >= 0 {
+        let _ = http_respond(c, 200, "hello from mako\n")
+        let _ = http_close(c)
+    }
+    let _ = http_close_listener(fd)
+}
+```
+
+### Core API functions
+
+| Function | Purpose |
+|----------|---------|
+| `http_bind(port)` | Bind and listen on a TCP port. Returns listener fd (< 0 on error). |
+| `http_accept(fd)` | Accept one connection, parse the HTTP request. Returns connection handle. |
+| `http_method(c)` | Get the request method (GET, POST, PUT, DELETE, etc.). |
+| `http_path(c)` | Get the request path (e.g., "/users/42"). |
+| `http_body(c)` | Get the request body as a string. |
+| `http_header(c, name)` | Get a specific request header value. |
+| `http_respond(c, status, body)` | Send response with text/plain content type. |
+| `http_respond_ct(c, status, content_type, body)` | Send response with explicit content type. |
+| `http_respond_json(c, status, json)` | Send response with application/json content type. |
+| `http_close(c)` | Close the connection (frees the slot). |
+| `http_close_listener(fd)` | Close the listening socket. |
+
+### Multi-request server loop
+
+```mko
+fn main() {
+    let fd = http_bind(18100)
+    if fd < 0 {
+        print("bind failed")
+        return
+    }
+    print("http_server on :18100")
+
+    let mut n = 0
+    while n < 50 {
+        let c = http_accept(fd)
+        if c < 0 {
+            // accept failed, skip
+        } else {
+            let p = http_path(c)
+            if str_eq(p, "/health") {
+                let _ = http_respond_ct(
+                    c,
+                    200,
+                    "application/json",
+                    "{\"ok\":true}\n"
+                )
+            } else {
+                if str_eq(p, "/") {
+                    let _ = http_respond(c, 200, "hello from mako\n")
+                } else {
+                    let _ = http_respond(c, 404, "not found\n")
+                }
+            }
+            let _ = http_close(c)
+            n = n + 1
+        }
+    }
+    let _ = http_close_listener(fd)
+    print("server done")
+}
+```
+
+---
+
+## Request Inspection
+
+### Method
+
+```mko
+let c = http_accept(fd)
+let method = http_method(c)
+if str_eq(method, "POST") {
+    // handle POST
+} else {
+    if str_eq(method, "GET") {
+        // handle GET
+    }
+}
+```
+
+### Path
+
+```mko
+let path = http_path(c)
+// path is the raw URI path, e.g. "/users/42"
+```
+
+### Body
+
+```mko
+let body = http_body(c)
+// body contains the raw request body (up to Content-Length or 1MB max)
+```
+
+### Headers
+
+```mko
+let host = http_header(c, "Host")
+let ua = http_header(c, "User-Agent")
+let ct = http_header(c, "Content-Type")
+print(host)
+print(ua)
+print(ct)
+```
+
+Header lookup is case-insensitive. The runtime validates header names and values,
+rejecting CR/LF/NUL to prevent header injection attacks.
+
+---
+
+## Response Functions
+
+### Plain text response
+
+```mko
+let _ = http_respond(c, 200, "OK\n")
+```
+
+### Response with content type
+
+```mko
+let _ = http_respond_ct(c, 200, "text/html", "<h1>Hello</h1>")
+```
+
+### JSON response
+
+```mko
+let _ = http_respond_json(c, 200, "{\"status\":\"ok\"}")
+```
+
+This is equivalent to `http_respond_ct(c, 200, "application/json", body)`.
+
+### Status codes
+
+The runtime maps standard status codes to reason phrases automatically:
+
+| Code | Meaning |
+|------|---------|
+| 200 | OK |
+| 201 | Created |
+| 204 | No Content |
+| 400 | Bad Request |
+| 401 | Unauthorized |
+| 403 | Forbidden |
+| 404 | Not Found |
+| 405 | Method Not Allowed |
+| 500 | Internal Server Error |
+
+---
+
+## Request Routing Patterns
+
+### Simple path-based routing
+
+```mko
+fn handle_request(c: int) {
+    let method = http_method(c)
+    let path = http_path(c)
+
+    if str_eq(path, "/") {
+        let _ = http_respond(c, 200, "home\n")
+    } else {
+        if str_eq(path, "/health") {
+            let _ = http_respond_json(c, 200, "{\"ok\":true}\n")
+        } else {
+            if str_eq(path, "/api/users") {
+                if str_eq(method, "GET") {
+                    let _ = http_respond_json(c, 200, "[]\n")
+                } else {
+                    if str_eq(method, "POST") {
+                        let body = http_body(c)
+                        let _ = http_respond_json(c, 201, body)
+                    } else {
+                        let _ = http_respond(c, 405, "method not allowed\n")
+                    }
+                }
+            } else {
+                let _ = http_respond(c, 404, "not found\n")
+            }
+        }
+    }
+}
+
+fn main() {
+    let fd = http_bind(18090)
+    if fd < 0 {
+        print("bind failed")
+        return
+    }
+    print("routes on :18090")
+
+    while 1 == 1 {
+        let c = http_accept(fd)
+        if c >= 0 {
+            handle_request(c)
+            let _ = http_close(c)
+        }
+    }
+}
+```
+
+### Prefix-based routing
+
+```mko
+fn handle_request(c: int) {
+    let path = http_path(c)
+
+    if str_contains(path, "/api/") {
+        // API routes
+        if str_eq(path, "/api/status") {
+            let _ = http_respond_json(c, 200, "{\"status\":\"running\"}\n")
+        } else {
+            let _ = http_respond_json(c, 404, "{\"error\":\"not found\"}\n")
+        }
+    } else {
+        // Static/page routes
+        let _ = http_respond(c, 200, "page\n")
+    }
+}
+```
+
+---
+
+## Concurrent Request Handling
+
+Use crew blocks to serve multiple requests in parallel:
+
+```mko
+fn handle_connection(fd: int) -> int {
     let c = http_accept(fd)
     if c >= 0 {
         let p = http_path(c)
-        if str_eq(p, "/health") {
-            let _ = http_respond_ct(c, 200, "application/json", "{\"ok\":true}\n")
+        if str_eq(p, "/slow") {
+            sleep_ms(100)
+            let _ = http_respond(c, 200, "done\n")
         } else {
-            let _ = http_respond(c, 200, "hello from mako\n")
+            let _ = http_respond(c, 200, "fast\n")
+        }
+        let _ = http_close(c)
+    }
+    return 0
+}
+
+fn main() {
+    let fd = http_bind(18100)
+    if fd < 0 {
+        print("bind failed")
+        return
+    }
+
+    crew t {
+        // Kick multiple handlers — each accepts one connection
+        let h1 = t.kick(handle_connection(fd))
+        let h2 = t.kick(handle_connection(fd))
+        let h3 = t.kick(handle_connection(fd))
+        let _ = h1.join()
+        let _ = h2.join()
+        let _ = h3.join()
+    }
+    let _ = http_close_listener(fd)
+}
+```
+
+---
+
+## TLS / HTTPS
+
+When OpenSSL is linked, Mako supports HTTPS with TLS termination:
+
+```mko
+fn main() {
+    let code = tls_serve_n(
+        18443,
+        "runtime/certs/dev.crt",
+        "runtime/certs/dev.key",
+        "hello from mako https\n",
+        3   // serve 3 requests then exit
+    )
+    if code != 0 {
+        print("tls_serve_n failed (OpenSSL missing or bind error)")
+        return
+    }
+    print("https_server done")
+}
+```
+
+### TLS configuration
+
+- Certificate and key files are specified as paths.
+- Self-signed certificates work for development (`runtime/certs/dev.crt`).
+- In production, use certificates from a trusted CA.
+- Never ship with TLS verification disabled.
+
+### TLS client
+
+```mko
+fn main() {
+    let result = tls_connect("example.com", 443)
+    if result >= 0 {
+        print("connected via TLS")
+    }
+}
+```
+
+---
+
+## HTTP/2
+
+HTTP/2 support uses TLS with ALPN `h2` negotiation:
+
+```mko
+fn main() {
+    let code = tls_serve_h2_routes(
+        18446,
+        "runtime/certs/dev.crt",
+        "runtime/certs/dev.key",
+        "hello from mako h2\n",      // body for /
+        "{\"ok\":true}\n",            // body for /health
+        2                             // max requests
+    )
+    if code != 0 {
+        print("h2 server failed (OpenSSL missing or bind error)")
+        return
+    }
+    print("h2_server done")
+}
+```
+
+HTTP/2 features:
+- Multiplexed streams over a single TLS connection
+- HPACK header compression
+- ALPN protocol negotiation (`h2`)
+
+Test with: `curl -sk --http2 https://127.0.0.1:18446/health`
+
+---
+
+## WebSocket
+
+Mako provides WebSocket server support with RFC6455 upgrade, text/binary frames,
+and automatic ping/pong handling.
+
+### Echo server
+
+```mko
+fn main() {
+    // Starts a WebSocket server that echoes one client's messages then exits
+    print_int(ws_echo_once(18092))
+}
+```
+
+The `ws_echo_once` builtin:
+1. Binds the specified port
+2. Accepts one TCP connection
+3. Performs the WebSocket upgrade handshake (SHA-1 + base64 accept key)
+4. Echoes text and binary frames back to the client
+5. Responds to ping frames with pong automatically
+6. Closes when the client disconnects or sends a close frame
+
+### Ping/pong
+
+```mko
+fn main() {
+    // WebSocket server with ping/pong support
+    print_int(ws_echo_once(18095))
+}
+```
+
+WebSocket ping/pong is handled automatically by the runtime. When a ping frame
+arrives, a pong frame with the same payload is sent back immediately.
+
+### WebSocket protocol details
+
+- Upgrade negotiation uses `Sec-WebSocket-Key` + magic GUID, SHA-1 hashed,
+  base64 encoded.
+- Text frames (opcode 0x1) and binary frames (opcode 0x2) are supported.
+- Close frames (opcode 0x8) trigger graceful shutdown.
+- Frame masking from client-to-server is enforced per RFC6455.
+
+---
+
+## Building REST APIs
+
+A complete REST API example combining routing, JSON, and proper HTTP methods:
+
+```mko
+fn handle_users_get(c: int) {
+    let _ = http_respond_json(c, 200, "[{\"id\":1,\"name\":\"Ada\"}]\n")
+}
+
+fn handle_users_post(c: int) {
+    let body = http_body(c)
+    let name = json_get_string(body, "name")
+    if len(name) == 0 {
+        let _ = http_respond_json(c, 400, "{\"error\":\"name required\"}\n")
+    } else {
+        let resp = json_ss("id", "2", "name", name)
+        let _ = http_respond_json(c, 201, resp)
+    }
+}
+
+fn handle_health(c: int) {
+    let _ = http_respond_json(c, 200, "{\"status\":\"healthy\"}\n")
+}
+
+fn route(c: int) {
+    let method = http_method(c)
+    let path = http_path(c)
+
+    if str_eq(path, "/health") {
+        handle_health(c)
+    } else {
+        if str_eq(path, "/api/users") {
+            if str_eq(method, "GET") {
+                handle_users_get(c)
+            } else {
+                if str_eq(method, "POST") {
+                    handle_users_post(c)
+                } else {
+                    let _ = http_respond(c, 405, "method not allowed\n")
+                }
+            }
+        } else {
+            let _ = http_respond_json(c, 404, "{\"error\":\"not found\"}\n")
+        }
+    }
+}
+
+fn main() {
+    let fd = http_bind(18100)
+    if fd < 0 {
+        print("bind failed")
+        return
+    }
+    print("REST API on :18100")
+
+    let mut n = 0
+    while n < 100 {
+        let c = http_accept(fd)
+        if c >= 0 {
+            route(c)
+            let _ = http_close(c)
+            n = n + 1
+        }
+    }
+    let _ = http_close_listener(fd)
+}
+```
+
+### Testing the API
+
+```bash
+# Health check
+curl -s http://127.0.0.1:18100/health
+
+# List users
+curl -s http://127.0.0.1:18100/api/users
+
+# Create user
+curl -s -X POST http://127.0.0.1:18100/api/users \
+  -H "Content-Type: application/json" \
+  -d '{"name":"Grace"}'
+
+# 404
+curl -s http://127.0.0.1:18100/api/unknown
+```
+
+---
+
+## Graceful Shutdown
+
+The runtime provides shutdown coordination for long-running servers:
+
+```mko
+fn main() {
+    let fd = http_bind(18100)
+    if fd < 0 {
+        return
+    }
+
+    // Begin graceful shutdown with 5-second grace period
+    let deadline = http_shutdown_begin(5000)
+
+    // Check shutdown state
+    if http_shutdown_requested() == 1 {
+        // Drain in-flight requests
+        while http_active_connections() > 0 {
+            if http_shutdown_expired() == 1 {
+                break
+            }
+            sleep_ms(100)
+        }
+    }
+
+    let _ = http_close_listener(fd)
+}
+```
+
+Shutdown API:
+
+| Function | Purpose |
+|----------|---------|
+| `http_shutdown_begin(grace_ms)` | Start graceful shutdown with grace period |
+| `http_shutdown_requested()` | Check if shutdown was requested (returns 1 or 0) |
+| `http_shutdown_ready()` | Check if server is ready to accept (returns 1 or 0) |
+| `http_shutdown_remaining()` | Milliseconds until grace period expires |
+| `http_shutdown_expired()` | Check if grace period has elapsed |
+| `http_active_connections()` | Count of currently active connection slots |
+| `http_shutdown_reset()` | Reset shutdown state (for testing) |
+
+---
+
+## Security Checklist
+
+| Concern | Practice |
+|---------|----------|
+| Header injection | Runtime validates all header names/values, rejects CR/LF/NUL |
+| Content-Length | Enforced automatically on responses |
+| Request body limits | 1MB default (or Content-Length, whichever is smaller) |
+| Secrets in memory | Use `secret_from_str` / `secret_drop` |
+| TLS in production | Use trusted CA certificates; never disable verification |
+| Concurrent safety | Each connection fd is independent; do not share across tasks |
+| Header validation | Use `http_header_ok` for custom header checks |
+
+### Validating headers
+
+```mko
+fn main() {
+    let fd = http_bind(18100)
+    if fd < 0 {
+        return
+    }
+    let c = http_accept(fd)
+    if c >= 0 {
+        let auth = http_header(c, "Authorization")
+        // Header values are already validated by the runtime
+        // (no CR/LF/NUL injection possible)
+        if len(auth) == 0 {
+            let _ = http_respond(c, 401, "unauthorized\n")
+        } else {
+            let _ = http_respond(c, 200, "ok\n")
         }
         let _ = http_close(c)
     }
@@ -27,46 +605,75 @@ fn main() {
 }
 ```
 
-Full loop: `examples/http_server.mko`. Smoke: `./scripts/http-server-smoke.sh`.
+---
 
-## TCP
+## HTTP Client
+
+Client-side HTTP helpers for making outbound requests:
 
 ```mko
-let fd = tcp_listen(18082)
-let c = tcp_accept(fd)
-let _ = tcp_write(c, "hi\n")
-let _ = tcp_close(c)
-let peer = tcp_connect("127.0.0.1", 18082)
+fn main() {
+    let body = http_get("http://127.0.0.1:18100/health")
+    print(body)
+}
 ```
 
-## HTTPS / HTTP/2
+For production use:
+- Always set explicit timeouts
+- Validate URLs before making requests
+- Use parameterized URL construction (no string concatenation of user input)
 
-- HTTPS listener wrap when OpenSSL is linked — `examples/https_server.mko`
-- HTTP/2 TLS + ALPN `h2` — `examples/h2_server.mko`
-- Live optional tests: `MAKO_LIVE_TLS=1`, `MAKO_LIVE_NGHTTP2=1`, `MAKO_LIVE_QUIC=1`
+---
 
-## HTTP library & `Request`
+## Keep-Alive Connections
 
-Higher-level helpers and a typed request surface live under the HTTP library
-(see `examples/http_lib/` and [howto/02-http-apis.md](../../howto/02-http-apis.md)).
-Prefer validating headers with `http_header_ok` to reject CR/LF injection.
+HTTP/1.1 connections support keep-alive by default. The runtime detects the
+`Connection: keep-alive` header and maintains the connection slot:
 
-## Client notes
+```mko
+fn main() {
+    let fd = http_bind(18100)
+    if fd < 0 {
+        return
+    }
+    // The runtime automatically handles Connection: keep-alive
+    // and Connection: close headers on incoming requests.
+    // Use http_close(c) when you want to force-close regardless.
+    let c = http_accept(fd)
+    if c >= 0 {
+        let _ = http_respond(c, 200, "first response\n")
+        // For one-shot servers, close explicitly:
+        let _ = http_close(c)
+    }
+    let _ = http_close_listener(fd)
+}
+```
 
-Client GET/POST helpers and httptest utilities ship in std (`testing/httptest`,
-net/http builtins). Prefer parameterized URLs and explicit timeouts via
-`context` helpers where available.
+---
 
-## Security checklist
+## Connection Limits
 
-| Concern | Practice |
-|---------|----------|
-| Header injection | `http_header_ok` |
-| Secrets | `secret_from_str` / `secret_drop` |
-| TLS | Use linked OpenSSL paths; don’t ship with verify disabled in prod |
-| Crews | Serve under a crew so cancel joins workers |
+The runtime maintains a fixed connection table (32 slots by default). Each
+`http_accept` occupies one slot; `http_close` frees it. If all slots are in use,
+`http_accept` blocks until a slot becomes available.
 
-Details: [STDLIB.md](../../STDLIB.md) · [GUIDE.md](../../GUIDE.md) §11 ·
-[TLS_LIVE.md](../../TLS_LIVE.md).
+Design accordingly:
+- Close connections promptly after responding
+- Use crew blocks to serve connections concurrently within the slot limit
+- For high-concurrency scenarios, dispatch to worker tasks quickly
+
+---
+
+## Summary
+
+| Layer | Functions |
+|-------|-----------|
+| TCP | `tcp_listen`, `tcp_accept`, `tcp_connect`, `tcp_read`, `tcp_write`, `tcp_close` |
+| HTTP Server | `http_bind`, `http_accept`, `http_method`, `http_path`, `http_body`, `http_header` |
+| HTTP Response | `http_respond`, `http_respond_ct`, `http_respond_json`, `http_close` |
+| HTTPS | `tls_serve_n`, `tls_serve_h2_routes`, `tls_connect` |
+| WebSocket | `ws_echo_once` |
+| Shutdown | `http_shutdown_begin`, `http_shutdown_requested`, `http_active_connections` |
+| Listener | `http_close_listener` |
 
 Next: [Data](ch09-data.md).

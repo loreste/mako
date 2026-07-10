@@ -1,19 +1,298 @@
-# 6. Concurrency: crew, channels, cancel, actors
+# 6. Concurrency: Crews, Channels, and Actors
 
-Mako concurrency is **structured**. Jobs cannot outlive their `crew`. That is
-the main footgun killer versus fire-and-forget threads.
+Mako concurrency is **structured**. Every concurrent task lives inside a `crew`
+block, and no task can outlive its crew. When the crew block ends, all kicked
+tasks are joined automatically. This eliminates orphan threads, dangling
+references, and the fire-and-forget bugs that plague concurrent systems.
 
-## Crew, kick, join
+This chapter covers:
+
+- Crew blocks and task management (`crew`, `t.kick()`, `t.join()`)
+- Cancellation (`t.cancel()`, `t.cancelled()`)
+- Data-parallel fan
+- Channels (`chan_new`, `send`, `recv`, `close`, `for v in range ch`)
+- Channel select (`select`, `chan_select2`, `chan_select_value`)
+- Actors (`actor`, `receive`, `Session_spawn`, `Session_send`, `Session_loop`)
+- Practical concurrent patterns
+
+---
+
+## Crew Blocks
+
+A `crew` block declares a structured concurrency scope. You name the crew handle
+(conventionally `t` or `c`) and use it to kick off concurrent tasks:
+
+```mko
+fn work(n: int) -> int {
+    return n * n
+}
+
+fn main() {
+    crew t {
+        let a = t.kick(work(7))
+        let b = t.kick(work(9))
+        let x = a.join()
+        let y = b.join()
+        print_int(x + y)   // 49 + 81 = 130
+    }
+}
+```
+
+### Key rules
+
+1. **`t.kick(expr)`** spawns a new concurrent task that evaluates `expr`. It
+   returns a join handle immediately.
+2. **`handle.join()`** blocks the caller until the kicked task completes and
+   returns its result value.
+3. **Automatic join on scope exit**: when the closing `}` of the crew block is
+   reached, any un-joined tasks are joined implicitly. No task escapes.
+4. **One crew at a time per scope**: you cannot nest crews in the same function
+   without giving them different names.
+
+### Why structured?
+
+Because tasks cannot outlive their crew, the compiler can guarantee that any
+reference passed into a kicked task remains valid for the task's entire lifetime.
+This is what makes `hold` and `share` ownership work correctly across threads.
+
+---
+
+## t.kick() In Detail
+
+`t.kick()` accepts any expression that returns a value. The expression becomes
+the body of a new thread:
+
+```mko
+fn fetch_user(id: int) -> string {
+    // ... network call ...
+    return "user_" + string(id)
+}
+
+fn fetch_score(id: int) -> int {
+    // ... database call ...
+    return id * 10
+}
+
+fn main() {
+    crew t {
+        let user_handle = t.kick(fetch_user(42))
+        let score_handle = t.kick(fetch_score(42))
+
+        // Both tasks run concurrently. Join them:
+        let user = user_handle.join()
+        let score = score_handle.join()
+
+        print(user)
+        print_int(score)
+    }
+}
+```
+
+Each kicked task runs on its own OS thread. The runtime tracks spawned and joined
+counts for observability (accessible via `runtime_stats_json()`).
+
+---
+
+## t.join()
+
+Calling `.join()` on a kick handle does two things:
+
+1. Blocks the calling thread until the task finishes.
+2. Returns the task's result value.
+
+You can join tasks in any order. Join the fastest-completing task first to keep
+the pipeline flowing:
+
+```mko
+fn slow_work() -> int {
+    sleep_ms(100)
+    return 1
+}
+
+fn fast_work() -> int {
+    sleep_ms(10)
+    return 2
+}
+
+fn main() {
+    crew t {
+        let slow = t.kick(slow_work())
+        let fast = t.kick(fast_work())
+
+        // Join fast first — we can use its result while slow is still running
+        let f = fast.join()
+        print_int(f)
+
+        let s = slow.join()
+        print_int(s)
+    }
+}
+```
+
+---
+
+## Cancellation
+
+### t.cancel()
+
+Calling `t.cancel()` on a crew handle signals that no new work should be
+scheduled. Tasks already kicked continue to run, but subsequent `t.kick()` calls
+return immediately with a zero/default value instead of spawning a thread:
+
+```mko
+fn work(n: int) -> int {
+    return n * n
+}
+
+fn main() {
+    crew t {
+        let a = t.kick(work(3))
+        print_int(a.join())     // 9
+
+        t.cancel()
+
+        // After cancel, new kicks do not start threads
+        let b = t.kick(work(9))
+        print_int(b.join())     // 0 (never executed)
+
+        if t.cancelled() {
+            print("crew cancelled")
+        }
+    }
+}
+```
+
+### t.cancelled()
+
+Returns `true` if `cancel()` has been called on this crew. Use it for
+cooperative checking inside long-running tasks:
+
+```mko
+fn long_task(t_ref: crew_ref) -> int {
+    let mut i = 0
+    while i < 1000000 {
+        if t_ref.cancelled() {
+            return i    // early exit
+        }
+        i = i + 1
+    }
+    return i
+}
+```
+
+### Cancellation semantics
+
+- Cancel is **cooperative**, not preemptive. Running tasks are not killed mid-instruction.
+- Cancel affects only the crew it is called on.
+- On crew scope exit, all tasks (cancelled or not) are joined.
+
+---
+
+## Data-Parallel Fan
+
+For simple map-over-a-collection parallelism, use `fan`. It kicks one task per
+element, distributes across available cores, and collects results in order:
+
+```mko
+fn main() {
+    let xs = [1, 2, 3, 4, 5, 6, 7, 8]
+    let ys = fan(xs, |x| x * x)
+    for v in ys {
+        print_int(v)
+    }
+}
+```
+
+Output:
+```
+1
+4
+9
+16
+25
+36
+49
+64
+```
+
+`fan` is syntactic sugar over a crew block with one kick per element. Use it when
+the operation is uniform and order-preserving. For heterogeneous tasks or tasks
+that need different scheduling, use explicit crew blocks.
+
+---
+
+## Channels
+
+Channels are typed, bounded FIFO queues for communication between tasks.
+
+### Creating a channel
+
+```mko
+let ch = chan_new(4)    // buffered channel with capacity 4
+```
+
+The argument is the buffer size. A capacity of 0 creates an unbuffered
+(rendezvous) channel where `send` blocks until a receiver is ready.
+
+### Sending and receiving
+
+```mko
+let _ = ch.send(42)    // blocks if buffer is full
+let v = ch.recv()      // blocks if buffer is empty
+```
+
+Both `send` and `recv` block the calling thread when the buffer is at capacity
+(for send) or empty (for recv).
+
+### Closing a channel
+
+```mko
+ch.close()
+```
+
+After close:
+- Further sends are no-ops (return immediately).
+- Receivers drain any remaining buffered values, then receive the zero value.
+
+### Range over a channel
+
+Use `for v in range ch` to receive values until the channel is closed and
+drained:
 
 ```mko
 fn producer(ch: chan[int], n: int) -> int {
-    let mut i = 0
-    while i < n {
-        let _ = ch.send(i)
-        i = i + 1
+    for i in n {
+        let _ = ch.send(i + 1)
     }
     ch.close()
-    0
+    return n
+}
+
+fn main() {
+    let ch = chan_new(4)
+    crew t {
+        let p = t.kick(producer(ch, 5))
+        let mut sum = 0
+        for v in range ch {
+            sum = sum + v
+        }
+        let _ = p.join()
+        print_int(sum)  // 1+2+3+4+5 = 15
+    }
+}
+```
+
+### Producer-consumer pattern
+
+The classic pattern: one task produces, another consumes, connected by a channel:
+
+```mko
+fn producer(ch: chan[int], n: int) -> int {
+    for i in n {
+        let _ = ch.send(i + 1)
+    }
+    ch.close()
+    return n
 }
 
 fn consumer(ch: chan[int]) -> int {
@@ -21,7 +300,7 @@ fn consumer(ch: chan[int]) -> int {
     for v in range ch {
         sum = sum + v
     }
-    sum
+    return sum
 }
 
 fn main() {
@@ -30,86 +309,474 @@ fn main() {
         let p = t.kick(producer(ch, 5))
         let c = t.kick(consumer(ch))
         let _ = p.join()
-        print_int(c.join())
+        print_int(c.join())   // 15
     }
 }
 ```
 
-On crew exit, cancel **joins** kicked work — no orphan threads
-([SECURITY.md](../../SECURITY.md)).
+---
 
-## Cancel
+## Channel Select
+
+When you need to wait on multiple channels simultaneously, use `select`:
+
+### Select syntax
 
 ```mko
-crew c {
-    let a = c.kick(work(4))
-    c.cancel()
-    assert(c.cancelled())
-    // further kicks observe cancel policy
+fn sender(ch: chan[int], v: int, delay: int) -> int {
+    sleep_ms(delay)
+    let _ = ch.send(v)
+    return 0
 }
-```
 
-## Fan — data parallel
-
-```mko
 fn main() {
-    let xs = [1, 2, 3, 4]
-    let ys = fan(xs, |x| x * x)
-    for v in ys {
-        print_int(v)
+    let a = chan_new(2)
+    let b = chan_new(2)
+    crew t {
+        let _ = t.kick(sender(a, 11, 40))
+        let _ = t.kick(sender(b, 22, 15))
+
+        select timeout 500 {
+            a => {
+                print("got a")
+                print_int(chan_select_value())
+            }
+            b => {
+                print("got b")
+                print_int(chan_select_value())
+            }
+        }
     }
 }
 ```
 
-## Channels and `select`
+The `select` block waits until one of the listed channels has a value ready, then
+executes the corresponding arm. `timeout` specifies the maximum milliseconds to
+wait.
 
-```mko
-let ch = chan_new(4)
-let _ = ch.send(1)
-let v = ch.recv()
-ch.close()
-```
+### chan_select_value()
+
+After a select arm fires, call `chan_select_value()` to retrieve the value that
+was received. This returns the integer value from whichever channel became ready.
+
+### Default arm
+
+If no channel is ready within the timeout, the `default` (or `_`) arm fires:
 
 ```mko
 select timeout 30 {
     a => { print("got a") }
     b => { print("got b") }
-    default => { print("default ok") }
+    default => { print("nothing ready") }
 }
 ```
 
-Ready-arm value: `chan_select_value()`. Fairness is round-robin when many arms
-are ready. Helpers: `chan_select2` / `3` / `4`.
+### chan_select2 / chan_select3 / chan_select4
+
+For programmatic use (outside the `select` syntax), call the builtin functions
+directly:
+
+```mko
+// Returns which channel fired: 1 for first, 2 for second, 0 for timeout
+let which = chan_select2(a, b, 500)
+let value = chan_select_value()
+print_int(which)
+print_int(value)
+```
+
+`chan_select3` takes three channels, `chan_select4` takes four. All accept a
+timeout in milliseconds as the last argument.
+
+### Fairness
+
+When multiple channels are ready simultaneously, selection uses round-robin
+ordering. This prevents starvation of any single channel.
+
+### Multi-channel drain example
+
+```mko
+fn sender(ch: chan[int], v: int, delay: int) -> int {
+    sleep_ms(delay)
+    let _ = ch.send(v)
+    return 0
+}
+
+fn main() {
+    let a = chan_new(2)
+    let b = chan_new(2)
+    let c = chan_new(2)
+    let d = chan_new(2)
+
+    crew t {
+        let _ = t.kick(sender(a, 11, 50))
+        let _ = t.kick(sender(b, 22, 20))
+        let _ = t.kick(sender(c, 33, 35))
+        let _ = t.kick(sender(d, 44, 10))
+
+        // Drain all four with repeated select
+        let w1 = chan_select4(a, b, c, d, 500)
+        print_int(w1)
+        print_int(chan_select_value())
+
+        let w2 = chan_select4(a, b, c, d, 500)
+        print_int(w2)
+        print_int(chan_select_value())
+
+        let w3 = chan_select4(a, b, c, d, 500)
+        print_int(w3)
+        print_int(chan_select_value())
+
+        let w4 = chan_select4(a, b, c, d, 500)
+        print_int(w4)
+        print_int(chan_select_value())
+    }
+}
+```
+
+---
 
 ## Actors
 
-Actors desugar to a mailbox + crew loop — great for session state:
+Actors provide a higher-level concurrency pattern: a mailbox-driven event loop
+with typed messages. They desugar to a channel (the mailbox) plus a crew loop.
+
+### Defining an actor
 
 ```mko
 actor Session {
-    receive Invite { print("invite") }
-    receive Timer { print("tick") }
-    receive Bye { print("bye") }
+    receive Invite {
+        print("invite received")
+    }
+    receive Timer {
+        print("tick")
+    }
+    receive Bye {
+        print("goodbye")
+    }
 }
+```
 
+This declaration generates:
+
+- **Message tags**: `Session_Invite()`, `Session_Timer()`, `Session_Bye()`
+- **Spawn**: `Session_spawn()` creates a new actor instance (allocates mailbox)
+- **Send**: `Session_send(actor, message)` posts a message to the mailbox
+- **Loop**: `Session_loop(actor)` runs the receive loop (blocking, processes messages in order)
+
+### Using an actor
+
+```mko
 fn main() {
     let session = Session_spawn()
     crew t {
         let loopj = t.kick(Session_loop(session))
         let _ = Session_send(session, Session_Invite())
+        let _ = Session_send(session, Session_Timer())
+        let _ = Session_send(session, Session_Timer())
         let _ = Session_send(session, Session_Bye())
         print_int(loopj.join())
     }
 }
 ```
 
-`Bye` / `Stop` end the loop by convention. See `examples/actor.mko`.
+Output:
+```
+invite received
+tick
+tick
+goodbye
+0
+```
 
-## Async I/O note
+### Termination convention
 
-Mako prefers **colorless** I/O with crews rather than colored `async`/`await`
-everywhere. See [ASYNC.md](../../ASYNC.md) for the design stance.
+By convention, a `Bye` or `Stop` message type ends the actor loop. The loop
+function returns 0 when it receives the termination message. Without a
+termination message, the actor loop runs indefinitely (or until the crew is
+cancelled).
 
-How-to: [howto/05-concurrency.md](../../howto/05-concurrency.md).
+### Actor design patterns
+
+**State machine actor**: use the receive handlers to transition between states.
+Each message type represents an event in the state machine.
+
+```mko
+actor Connection {
+    receive Connect {
+        print("connected")
+    }
+    receive Data {
+        print("processing data")
+    }
+    receive Disconnect {
+        print("disconnected")
+    }
+}
+
+fn main() {
+    let conn = Connection_spawn()
+    crew t {
+        let loop_handle = t.kick(Connection_loop(conn))
+        let _ = Connection_send(conn, Connection_Connect())
+        let _ = Connection_send(conn, Connection_Data())
+        let _ = Connection_send(conn, Connection_Data())
+        let _ = Connection_send(conn, Connection_Disconnect())
+        print_int(loop_handle.join())
+    }
+}
+```
+
+**Supervision pattern**: spawn multiple actors under one crew. If one actor needs
+to notify another, send a message to the other actor's mailbox:
+
+```mko
+actor Worker {
+    receive Job {
+        print("working")
+    }
+    receive Stop {
+        print("worker stopping")
+    }
+}
+
+actor Supervisor {
+    receive Start {
+        print("supervisor started")
+    }
+    receive Stop {
+        print("supervisor stopping")
+    }
+}
+
+fn main() {
+    let sup = Supervisor_spawn()
+    let w1 = Worker_spawn()
+    let w2 = Worker_spawn()
+
+    crew t {
+        let sl = t.kick(Supervisor_loop(sup))
+        let wl1 = t.kick(Worker_loop(w1))
+        let wl2 = t.kick(Worker_loop(w2))
+
+        let _ = Supervisor_send(sup, Supervisor_Start())
+        let _ = Worker_send(w1, Worker_Job())
+        let _ = Worker_send(w2, Worker_Job())
+        let _ = Worker_send(w1, Worker_Stop())
+        let _ = Worker_send(w2, Worker_Stop())
+        let _ = Supervisor_send(sup, Supervisor_Stop())
+
+        let _ = wl1.join()
+        let _ = wl2.join()
+        let _ = sl.join()
+    }
+}
+```
+
+---
+
+## Practical Concurrent Patterns
+
+### Pipeline (chain of channels)
+
+```mko
+fn stage1(input: chan[int], output: chan[int]) -> int {
+    for v in range input {
+        let _ = output.send(v * 2)
+    }
+    output.close()
+    return 0
+}
+
+fn stage2(input: chan[int], output: chan[int]) -> int {
+    for v in range input {
+        let _ = output.send(v + 1)
+    }
+    output.close()
+    return 0
+}
+
+fn main() {
+    let ch1 = chan_new(4)
+    let ch2 = chan_new(4)
+    let ch3 = chan_new(4)
+
+    crew t {
+        let s1 = t.kick(stage1(ch1, ch2))
+        let s2 = t.kick(stage2(ch2, ch3))
+
+        // Feed the pipeline
+        let _ = ch1.send(1)
+        let _ = ch1.send(2)
+        let _ = ch1.send(3)
+        ch1.close()
+
+        // Collect results: (1*2)+1=3, (2*2)+1=5, (3*2)+1=7
+        for v in range ch3 {
+            print_int(v)
+        }
+
+        let _ = s1.join()
+        let _ = s2.join()
+    }
+}
+```
+
+### Fan-out / fan-in
+
+Distribute work across N workers, collect results through a single channel:
+
+```mko
+fn worker(id: int, jobs: chan[int], results: chan[int]) -> int {
+    for job in range jobs {
+        let _ = results.send(job * job)
+    }
+    return 0
+}
+
+fn main() {
+    let jobs = chan_new(10)
+    let results = chan_new(10)
+
+    crew t {
+        // Fan out: 3 workers
+        let w1 = t.kick(worker(1, jobs, results))
+        let w2 = t.kick(worker(2, jobs, results))
+        let w3 = t.kick(worker(3, jobs, results))
+
+        // Send work
+        for i in 9 {
+            let _ = jobs.send(i + 1)
+        }
+        jobs.close()
+
+        // Wait for workers, then close results
+        let _ = w1.join()
+        let _ = w2.join()
+        let _ = w3.join()
+        results.close()
+
+        // Fan in: collect all results
+        let mut total = 0
+        for v in range results {
+            total = total + v
+        }
+        print_int(total)
+    }
+}
+```
+
+### Timeout pattern
+
+Use select with a timeout to implement deadline-aware operations:
+
+```mko
+fn slow_operation(ch: chan[int]) -> int {
+    sleep_ms(200)
+    let _ = ch.send(42)
+    return 0
+}
+
+fn main() {
+    let ch = chan_new(1)
+    crew t {
+        let _ = t.kick(slow_operation(ch))
+
+        select timeout 50 {
+            ch => {
+                print("got result")
+                print_int(chan_select_value())
+            }
+            default => {
+                print("timed out")
+            }
+        }
+    }
+}
+```
+
+---
+
+## Colorless I/O
+
+Mako uses **colorless** concurrency: there is no `async`/`await` distinction.
+All functions have the same calling convention regardless of whether they perform
+I/O. Instead of coloring functions, you use crews to run blocking I/O operations
+concurrently:
+
+```mko
+fn fetch_data(url: string, ch: chan[string]) -> int {
+    let body = http_get(url)
+    let _ = ch.send(body)
+    return 0
+}
+
+fn main() {
+    let ch = chan_new(2)
+    crew t {
+        let _ = t.kick(fetch_data("/api/users", ch))
+        let _ = t.kick(fetch_data("/api/posts", ch))
+
+        let r1 = ch.recv()
+        let r2 = ch.recv()
+        print(r1)
+        print(r2)
+    }
+}
+```
+
+This means every function in your codebase composes the same way. No function
+signatures change when you add concurrency. No viral annotations propagate
+through your call graph.
+
+---
+
+## Runtime Observability
+
+The runtime tracks concurrency metrics automatically:
+
+- `tasks_spawned` / `tasks_joined` counts
+- `channels_created` / `channel_sends` / `channel_recvs` counts
+- `channel_select_timeouts` count
+- `channel_peak_depth` (high-water mark)
+
+Access them via `runtime_stats_json()` for diagnostics:
+
+```mko
+fn main() {
+    let ch = chan_new(4)
+    crew t {
+        let _ = ch.send(1)
+        let _ = ch.send(2)
+        let _ = ch.recv()
+    }
+    let stats = runtime_stats_json()
+    print(stats)
+}
+```
+
+---
+
+## Summary
+
+| Primitive | Purpose |
+|-----------|---------|
+| `crew t { }` | Structured scope — tasks cannot escape |
+| `t.kick(expr)` | Spawn concurrent task, get join handle |
+| `handle.join()` | Block until task completes, get result |
+| `t.cancel()` | Signal no more new work |
+| `t.cancelled()` | Check if cancel was signaled |
+| `fan(xs, fn)` | Data-parallel map across cores |
+| `chan_new(cap)` | Create bounded channel |
+| `ch.send(v)` | Send value (blocks if full) |
+| `ch.recv()` | Receive value (blocks if empty) |
+| `ch.close()` | Close channel |
+| `for v in range ch` | Drain channel until closed |
+| `select timeout N { }` | Multiplex across channels |
+| `chan_select2/3/4(...)` | Programmatic multi-channel wait |
+| `chan_select_value()` | Get value from last select |
+| `actor Name { }` | Declare actor with typed messages |
+| `Name_spawn()` | Create actor instance |
+| `Name_send(a, msg)` | Post message to actor |
+| `Name_loop(a)` | Run actor receive loop |
 
 Next: [Standard Library](ch07-stdlib.md).
