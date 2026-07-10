@@ -2668,6 +2668,7 @@ fn compile_cflags(opts: &BuildOpts) -> Vec<String> {
     // Defines that affect codegen of headers included at -c time.
     if find_openssl().is_some() {
         v.push("-DMAKO_HAS_OPENSSL".into());
+        v.push("-DMAKO_USE_OPENSSL".into());
     }
     if find_nghttp2().is_some() {
         v.push("-DMAKO_HAS_NGHTTP2".into());
@@ -2718,6 +2719,7 @@ fn link_args_native(opts: &BuildOpts, _runtime_dir: &Path) -> Vec<String> {
         args.push(format!("-I{}", inc.display()));
         args.push(format!("-L{}", lib.display()));
         args.push("-DMAKO_HAS_OPENSSL".into());
+        args.push("-DMAKO_USE_OPENSSL".into());
         args.push("-lssl".into());
         args.push("-lcrypto".into());
     }
