@@ -1,6 +1,6 @@
 # Testing
 
-Go-like `TestXxx` in `*_test.mko`:
+`TestXxx` in `*_test.mko`:
 
 ```bash
 mako test examples/testing

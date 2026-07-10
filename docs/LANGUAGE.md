@@ -1,7 +1,7 @@
 # Mako language
 
 Mako is a systems and backend language: clear to write, strict at compile time,
-fast at runtime, and designed so **builds stay competitive with `go build`**.
+fast at runtime, and designed so **builds stay fast**.
 
 **Guided tour:** [The Mako Book](book/).  
 **Full syntax guide with verified `.mko` examples:** [GUIDE.md](GUIDE.md).  
@@ -24,7 +24,6 @@ Honest matrix: [STATUS.md](STATUS.md). How-tos: [howto/](howto/).
 
 Mako is its own language. Ideas can inspire, but syntax decisions should be
 judged by whether they make Mako clearer, safer, and easier to teach. The goal
-is not "Go syntax with Rust safety" or "Rust syntax with Go tooling"; the goal
 is a distinct Mako surface that backend developers recognize quickly and keep
 using comfortably.
 
@@ -77,10 +76,10 @@ fn handleCall(call: Call) -> Result {
 `error("...")` as sugar for `Err(...)`. Generics currently use `[T]`; the
 vision prefers `List<T>`, `Map<K,V>`, `Result<T,E>` — see [VISION.md](VISION.md).
 
-## Compile speed (Go-competitive target)
+## Compile speed (fast compile target)
 
-**Target:** for typical backend service size, compile times in the same league as
-`go build`.
+**Target:** for typical backend service size, compile times should be fast enough
+for interactive edit-run loops.
 
 **v0.1 reality**
 
@@ -204,12 +203,12 @@ mako check path/to/bad.mko
 
 Mako testing keeps the low-friction package workflow developers expect:
 
-| Go | Mako |
-|----|------|
-| `foo_test.go` | `foo_test.mko` (same directory as code) |
-| `func TestAdd(t *testing.T)` | `fn TestAdd() { ... }` |
-| `go test ./...` | `mako test [path]` |
-| `t.Fatal` / assert | `fail("msg")`, `assert`, `assert_eq`, `assert_eq_str` |
+| Convention | Mako |
+|------------|------|
+| Test file | `foo_test.mko` (same directory as code) |
+| Test function | `fn TestAdd() { ... }` |
+| Run tests | `mako test [path]` |
+| Assertions | `fail("msg")`, `assert`, `assert_eq`, `assert_eq_str` |
 
 ```mko
 // add.mko
@@ -231,10 +230,10 @@ fn TestAddTable() {
 ```
 
 `mako test` discovers `*_test.mko`, merges sibling `.mko` package files, compiles a
-harness that runs each `TestXxx`, and continues after a failed assert (like Go).
+harness that runs each `TestXxx`, and continues after a failed assert.
 Exit code is non-zero if any test failed. Legacy `test_*.mko` with `main` still runs.
 
-Filter like Go: `mako test --run TestAdd` or `-r 'Test*'`.
+Filter: `mako test --run TestAdd` or `-r 'Test*'`.
 
 Subtests (seed): call `t_run("case")` before asserts; failures print `TestXxx/case`.
 

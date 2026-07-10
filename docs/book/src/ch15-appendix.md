@@ -15,7 +15,7 @@ Operators (`==`, `&&`, `&`, …) are not keywords; see chapter 3.
 | Scope | Approx. |
 |-------|---------|
 | MVP / STATUS north-star | **100%** |
-| Stdlib vs Go major *areas* | **~98%** (Wave 9) |
+| Stdlib coverage major *areas* | **~98%** (Wave 9) |
 | Suite | **130** passed |
 
 True residuals: complete Unicode property database / full PCRE, interoperable
@@ -24,7 +24,7 @@ Huffman JPEG, live reflect field values, full SMTP AUTH-over-TLS, symbol-level p
 
 ## Roadmap
 
-Landed: compiler → C → native, Go-like operators & imports, `mako version`,
+Landed: compiler → C → native, operators & imports, `mako version`,
 Waves 1–9 stdlib, CFG NLL, HTTP beachhead, WASI preview1.
 
 Next / Later: complete Unicode property database / PCRE depth, optional GC, SIMD/GPU, deep LSP, WASI

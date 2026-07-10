@@ -87,9 +87,9 @@ fn json_get_str<'a>(obj: &'a str, key: &str) -> Option<&'a str> {
     let after = &obj[i + pat.len()..];
     let colon = after.find(':')?;
     let rest = after[colon + 1..].trim_start();
-    if rest.starts_with('"') {
-        let end = rest[1..].find('"')?;
-        Some(&rest[1..1 + end])
+    if let Some(stripped) = rest.strip_prefix('"') {
+        let end = stripped.find('"')?;
+        Some(&stripped[..end])
     } else {
         None
     }
@@ -127,9 +127,9 @@ fn json_get_id(obj: &str) -> String {
         let after = &obj[i + 4..];
         if let Some(colon) = after.find(':') {
             let rest = after[colon + 1..].trim_start();
-            if rest.starts_with('"') {
-                if let Some(end) = rest[1..].find('"') {
-                    return format!("\"{}\"", &rest[1..1 + end]);
+            if let Some(stripped) = rest.strip_prefix('"') {
+                if let Some(end) = stripped.find('"') {
+                    return format!("\"{}\"", &stripped[..end]);
                 }
             } else {
                 let num: String = rest

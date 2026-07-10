@@ -3,12 +3,12 @@
 Welcome to **The Mako Book**.
 
 Mako is a systems and backend language: clear to write, strict at compile time,
-fast at runtime, and designed so builds stay competitive with `go build`. Sources
+fast at runtime, and designed so builds stay fast. Sources
 use the **`.mko`** extension. The compiler emits C, then links with clang into a
 single native binary — no mandatory garbage collector.
 
 This book teaches **idiomatic Mako** as it ships today (v0.1 · STATUS north-star
-**100%** · stdlib ~**98%** of major Go package *areas* · suite **130**). For the
+**100%** · stdlib ~**98%** of major standard library *areas* · suite **130**). For the
 exhaustive syntax matrix, keep [GUIDE.md](../../GUIDE.md) open beside you. For
 “is this Done?”, trust [STATUS.md](../../STATUS.md).
 
@@ -16,7 +16,7 @@ exhaustive syntax matrix, keep [GUIDE.md](../../GUIDE.md) open beside you. For
 |---------|----------------|
 | [1. Preface](ch01-preface.md) | Why Mako exists |
 | [2. Getting Started](ch02-getting-started.md) | Install, `mako version`, hello |
-| [3. Language Tour](ch03-language-tour.md) | Syntax, types, Go-like operators |
+| [3. Language Tour](ch03-language-tour.md) | Syntax, types, operators |
 | [4. Ownership](ch04-ownership.md) | `hold` / `share` / arenas / NLL |
 | [5. Errors](ch05-errors.md) | `Result`, wrapping, `?` |
 | [6. Concurrency](ch06-concurrency.md) | crew, channels, actors |

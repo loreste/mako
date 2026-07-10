@@ -1,6 +1,6 @@
 # Mako standard library
 
-Batteries for **web and backends**, Go/Rust-inspired naming adapted to Mako.
+Batteries for **web and backends**, with naming conventions adapted to Mako.
 
 Call builtins directly (`str_split`, `path_join`, …) **or** import std packages:
 
@@ -19,7 +19,7 @@ and auto-alias so `strings.split` works. Relative `import "./x.mko"` unchanged.
 Note: method names that are keywords (`join`, `match`, …) use aliases
 (`concat`, `matches`, `join_path`).
 
-Performance bar: **faster and leaner than typical Go services** on the same
+Performance bar: **fast and lean** on the same
 hardware — no *mandatory* GC, arena-per-request, few copies, structured
 concurrency.
 
@@ -62,7 +62,7 @@ Runtime: `mako_rt.h` + `mako_goext.h` (Waves 1–9). Tests: `goext_wave{,3,4,5,6
 
 ---
 
-## Go-breadth APIs (Wave 1–9)
+## Core APIs (Wave 1–9)
 
 | Builtin | Package |
 |---------|---------|
@@ -358,10 +358,10 @@ See [howto/04-packages.md](howto/04-packages.md).
 
 ---
 
-## Gaps vs Go / Rust (honest)
+## Known gaps (honest)
 
-| Go/Rust | Mako today |
-|---------|------------|
+| Area | Mako today |
+|------|------------|
 | `strings` package import | Done — `import "strings"` → `std/strings/` (also path, fmt, sync, …) |
 | `bufio.Reader/Writer` | Done |
 | `net/http.Request` typed | Done (`HttpRequest`) |
@@ -369,8 +369,8 @@ See [howto/04-packages.md](howto/04-packages.md).
 | Full `regexp` engine | RE2-ish (`\d\w\s`, `{n,m}`, `\b`, find_all/replace); not full RE2/PCRE |
 | `sync.WaitGroup` / RWMutex / atomic | Done |
 | Generics collections | slices + maps helpers Done; `List<T>` Later |
-| zip multi-file · png/gif/jpeg · reflect · httptest · gob/mail/smtp/slog/binary | Done (area-level; not every Go symbol) |
-| Full golang.org/pkg parity | **Not claimed** (~98% major *areas*; not every symbol) |
+| zip multi-file · png/gif/jpeg · reflect · httptest · gob/mail/smtp/slog/binary | Done (area-level; not every symbol) |
+| Full stdlib symbol parity | **Not claimed** (~98% major *areas*; not every symbol) |
 
 ---
 

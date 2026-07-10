@@ -20,7 +20,7 @@ cargo build --release
 mako version
 ```
 
-You need **Rust** (to build the compiler) and **clang** (Xcode / apt / LLVM).
+You need **cargo/rustc** (to build the compiler) and **clang** (Xcode / apt / LLVM).
 Optional: OpenSSL, libnghttp2, SQLite, libpq, quiche. Headers live under
 `$PREFIX/share/mako/runtime` (`MAKO_RUNTIME` overrides).
 
@@ -85,7 +85,7 @@ cd myws && mako check . && mako run -p app
 
 | Command | Use |
 |---------|-----|
-| `mako version` | Go-like version + OS/arch |
+| `mako version` | Version + OS/arch |
 | `mako check` | Fast typecheck (incremental) |
 | `mako run` | Compile + execute |
 | `mako build -j 8` | Parallel object compile |

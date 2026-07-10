@@ -12,13 +12,13 @@ STATUS north-star / MVP: **100%** (homebrew-core publish remains an external blo
 - GUIDE “Target” section corrected (CFG NLL / H2 / WASI preview1 already Done)
 - Suite: **130 passed**, 0 failed · stdlib ~**98%** major areas
 
-### Go-breadth stdlib Wave 9 regexp increment (Done)
+### Stdlib Wave 9 regexp increment (Done)
 
 - Regexp `\p{...}` now decodes UTF-8 and recognizes common categories/scripts (`L`, `N`, `Nd`, Latin, Greek, Cyrillic, and several major letter/digit ranges).
 - Added simple zero-width lookahead support: `(?=...)` and `(?!...)`.
 - Tests: `goext_wave9_test.mko`
 - Suite: **130 passed**, 0 failed
-- Honest Go coverage: **~98%** of major golang.org/pkg *areas*
+- Honest stdlib coverage: **~98%** of major standard library *areas*
 
 ### General-purpose package offline/private registry increment (Done)
 
@@ -27,7 +27,7 @@ STATUS north-star / MVP: **100%** (homebrew-core publish remains an external blo
 - Tests: `offline_git_requires_cached_dep`
 - Product intention: Toolchain/IDE track **100%**.
 
-### Go-breadth stdlib Wave 8 + CLI polish (Done)
+### Stdlib Wave 8 + CLI polish (Done)
 
 - RE2 backrefs `\1`–`\9` · `\p{L}`/`\p{N}` (ASCII) · `[:lower:]`/`[:upper:]`/`[:punct:]`
 - JFIF grayscale encode/detect; codegen reflect type schema registry
@@ -35,7 +35,7 @@ STATUS north-star / MVP: **100%** (homebrew-core publish remains an external blo
 - CLI: richer `build`/`run`/`check`/`test` help; `version` listed before `lsp`; after_help
 - Tests: `goext_wave8_test.mko`
 - Suite: **129 passed**, 0 failed
-- Honest Go coverage: **~97%** of major golang.org/pkg *areas*
+- Honest stdlib coverage: **~97%** of major standard library *areas*
 
 ### General-purpose Toolchain/IDE debug increment (Done)
 
@@ -158,45 +158,45 @@ STATUS north-star / MVP: **100%** (homebrew-core publish remains an external blo
 - Tests: `sql_pool_test.mko`
 - Product intention advanced through the Data/SQL pooling milestone.
 
-### Go-breadth stdlib Wave 7 (Done)
+### Stdlib Wave 7 (Done)
 
 - RE2 `\xHH` / `\n` / `(?:…)`; GIF LZW dictionary decode; JPEG Huffman-block APP9
 - html/template nested; gob `[]string`; smtp AUTH PLAIN + STARTTLS probe
 - reflect clone/equal
 - Tests: `goext_wave7_test.mko`
 - Suite: **90 passed**, 0 failed
-- Honest Go coverage: **~95%** of major golang.org/pkg *areas* (not full symbol parity)
+- Honest stdlib coverage: **~95%** of major standard library *areas* (not full symbol parity)
 
-### `mako version` (Go-like) — Done
+### `mako version` — Done
 
-- `mako version` → `mako version mako0.1.0 darwin/arm64` (Cargo.toml + GOOS/GOARCH-style)
+- `mako version` → `mako version mako0.1.0 darwin/arm64` (Cargo.toml + os/arch)
 - `mako --version` / `-V` aligned; `mako version -v` optional commit (`MAKO_GIT_HASH` / git)
 - Docs: README · GUIDE · howto/01
 
-### Go-style grouped imports — Done
+### Grouped imports — Done
 
 - `import ( "a" \n "b" )` · brace `import { "a"; "b" }` · `alias "path"` · `"path" as x`
 - `mako fmt` emits `import ( … )` for 2+ imports
 - Tests: `import_group_test.mko` · `import_brace_test.mko`
 
-### Go-breadth stdlib Wave 6 (Done)
+### Stdlib Wave 6 (Done)
 
 - binary BE; html/template `range`/`with`; gob struct bag; GIF LZW decode
 - smtp dialog soft; reflect field_at/schema; regexp `\Q`/`\G`
 - Tests: `goext_wave6_test.mko`
 - Suite: **89 passed**, 0 failed
-- Honest Go coverage: **~93%** of major golang.org/pkg *areas* (not full symbol parity)
+- Honest stdlib coverage: **~93%** of major standard library *areas* (not full symbol parity)
 
-### Go-breadth stdlib Wave 5 (Done)
+### Stdlib Wave 5 (Done)
 
 - Multi-file zip writer/list; RE2-ish `{n,m}` `\b` `\A` `\z`; html/template `if`/multi-key
 - gob `map[string]string`; encoding/binary LE; net/smtp format + soft dial
 - reflect value bag; JPEG DCT DC marker path; GIF LZW encode
 - Tests: `goext_wave5_test.mko`
 - Suite: **86 passed**, 0 failed
-- Honest Go coverage: **~91%** of major golang.org/pkg *areas* (not full symbol parity)
+- Honest stdlib coverage: **~91%** of major standard library *areas* (not full symbol parity)
 
-### Go-idiomatic operators (Done)
+### Operators (Done)
 
 - Comparison: `==` `!=` `<` `>` `<=` `>=` (`=` remains assignment only)
 - Logical: `&&` `||` `!` (+ `and`/`or`/`not`); **short-circuit** codegen for `&&`/`||`
@@ -204,15 +204,15 @@ STATUS north-star / MVP: **100%** (homebrew-core publish remains an external blo
 - Docs: KEYWORDS / GUIDE §2c / LANGUAGE · Tests: `operators_go_test.mko`
 - Suite: **85 passed**, 0 failed
 
-### Go-breadth stdlib Wave 4 (Done)
+### Stdlib Wave 4 (Done)
 
 - zip **deflate** (zlib raw) · GIF/JPEG roundtrip seeds · reflect struct schema
 - html/template (auto-escape) · encoding/gob · net/mail · log/slog
 - regexp: `[:digit:]`/escapes in classes · `regex_valid` / `regex_quote_meta`
 - Tests: `goext_wave4_test.mko`
-- Honest Go coverage: **~86%** of major golang.org/pkg *areas* (not full symbol parity)
+- Honest stdlib coverage: **~86%** of major standard library *areas* (not full symbol parity)
 
-### Go-breadth stdlib Wave 3 (Done — raised area coverage)
+### Stdlib Wave 3 (Done — raised area coverage)
 
 - `runtime/mako_goext.h`: archive/zip (store), image/png, maps helpers, reflect (minimal),
   testing/httptest, AES-GCM + ChaCha20-Poly1305 (OpenSSL), mime/multipart, recursive
@@ -221,10 +221,10 @@ STATUS north-star / MVP: **100%** (homebrew-core publish remains an external blo
 - `std/`: archive/zip, image/png, maps, reflect, testing/httptest, mime/multipart + crypto/regexp updates
 - Tests: `examples/testing/goext_wave3_test.mko`
 - Suite: **83 passed**, 0 failed
-- Honest Go coverage: **~72%** of major golang.org/pkg *areas* for backends (not full symbol parity)
+- Honest stdlib coverage: **~72%** of major standard library *areas* for backends (not full symbol parity)
 - Remaining gaps: full RE2, zip deflate, JPEG/GIF, deep reflect, gob/mail/slog, …
 
-### Go-breadth stdlib Waves 1–2 (Done — Partials noted)
+### Stdlib Waves 1–2 (Done — Partials noted)
 
 - `runtime/mako_goext.h`: flag, exec, url, csv/xml, gzip (+ zlib auto-link), tar, mime,
   context deadlines, bytes.Buffer, rand, template, html, base32, sha1/sha512, DNS/IP,
@@ -232,7 +232,7 @@ STATUS north-star / MVP: **100%** (homebrew-core publish remains an external blo
 - `std/` wrappers for new packages; zlib via `find_zlib` / `-DMAKO_HAS_ZLIB`
 - Tests: `examples/testing/goext_wave_test.mko`
 - Suite: **82 passed**, 0 failed
-- Honest Go coverage: **~55%** of golang.org/pkg for backends (not full parity)
+- Honest stdlib coverage: **~55%** of target standard library areas for backends (not full parity)
 - Partials (closed in Wave 3): zip, image, reflect, httptest, maps helpers, AEAD ciphers
 
 ### Stdlib polish (Done)
@@ -311,7 +311,7 @@ STATUS north-star / MVP: **100%** (homebrew-core publish remains an external blo
 - Map pre-size + move rehash; slice make zeros only `len`; fast-path append
 - HTTP `arena_cstr` / `arena_text_n` (no malloc→arena double copy)
 - Release `-DNDEBUG` elides bounds checks (debug still aborts) — [PERFORMANCE.md](docs/PERFORMANCE.md)
-- Measured: Mako beats Go on fib/map; near Rust on map; see PERFORMANCE.md table
+- Measured: fast on fib/map benchmarks; optimized map operations; see PERFORMANCE.md table
 
 ### Incremental builds + native objects (Done)
 
@@ -384,7 +384,7 @@ STATUS north-star / MVP: **100%** (homebrew-core publish remains an external blo
 ### Language / runtime (already in tree)
 
 - Compiler pipeline `.mko` → C → native; `crew` / actors / arenas / Result
-- Go-like `mako test`; tooling: fmt / lint / bench / doc / lsp / pkg
+- `mako test`; tooling: fmt / lint / bench / doc / lsp / pkg
 - OpenSSL / nghttp2 / quiche client seeds (opt-in)
 - **WASI preview1:** `mako build --target wasm32-wasi` uses wasi-sdk clang
   (`wasm32-wasip1`), `-DMAKO_WASI` minimal runtime; `examples/wasi_hello.mko`,

@@ -13,7 +13,7 @@ verified matrix: [STATUS.md](../STATUS.md).
 | [05-concurrency.md](05-concurrency.md) | crew, channels, select, actors |
 | [06-memory.md](06-memory.md) | arena, hold, share, NLL |
 | [07-wasi.md](07-wasi.md) | WASM / WASI preview1 |
-| [08-testing.md](08-testing.md) | Go-like tests |
+| [08-testing.md](08-testing.md) | Tests |
 | [09-release-builds.md](09-release-builds.md) | `--release`, cache, perf |
 
 Also: [BUILD.md](../BUILD.md) · [PERFORMANCE.md](../PERFORMANCE.md) · [DEBUG.md](../DEBUG.md) · [STDLIB.md](../STDLIB.md) · [SECURITY.md](../SECURITY.md).

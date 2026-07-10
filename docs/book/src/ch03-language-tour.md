@@ -1,7 +1,7 @@
 # 3. Language Tour
 
-Mako feels like a practical backend language: braces, local inference, Go-like
-operators, and explicit types where they matter. Sources are `.mko`. Entry point
+Mako feels like a practical backend language: braces, local inference,
+familiar operators, and explicit types where they matter. Sources are `.mko`. Entry point
 is `fn main()`.
 
 ## Program shape
@@ -30,7 +30,7 @@ explicit `return` while learning.
 | `int` | Platform natural (checker-distinct; C backend → `int64_t`) |
 | `int64` / `int32` / `int8` / `uint64` / `byte` | Fixed widths; no silent mix |
 | `float` / `float64`, `bool`, `string` | No silent mix with ints |
-| `[]T` | Go-like slices (`[]int`, `[]byte`, …) |
+| `[]T` | Slices (`[]int`, `[]byte`, …) |
 | `map[K]V` | Maps |
 | `Option[T]`, `Result[T, E]` | No nil |
 | `chan[T]` | Typed channels |
@@ -45,7 +45,7 @@ let buf = bytes("hi")
 print(string(buf))
 ```
 
-## Operators (Go-idiomatic)
+## Operators
 
 `=` is **assignment only**. Equality is `==`.
 

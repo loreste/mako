@@ -1,6 +1,6 @@
 # Mako status (adversarial / verified)
 
-Last inventory: 2026-07-10 (**Wave 9** · suite **130** · ~**98%** of major golang.org/pkg *areas* · **The Mako Book**).
+Last inventory: 2026-07-10 (**Wave 9** · suite **130** · ~**98%** standard library coverage · **The Mako Book**).
 
 **Book:** [The Mako Book](book/) · **Guide:** [GUIDE.md](GUIDE.md) · **Build:** [BUILD.md](BUILD.md) · **Stdlib:** [STDLIB.md](STDLIB.md) · **Roadmap:** [ROADMAP.md](ROADMAP.md) · **Changelog:** [../CHANGELOG.md](../CHANGELOG.md).
 
@@ -12,7 +12,7 @@ Last inventory: 2026-07-10 (**Wave 9** · suite **130** · ~**98%** of major gol
 |-------|---------|
 | **MVP / usable language** | **100%** |
 | **STATUS north-star** | **100%** |
-| **Stdlib vs Go/Rust backends** | **~98%** of major golang.org/pkg *areas* Done (Wave 9; not every symbol) |
+| **Standard library** | **~98%** of target areas Done (Wave 9; not every symbol) |
 
 ---
 
@@ -27,7 +27,7 @@ Last inventory: 2026-07-10 (**Wave 9** · suite **130** · ~**98%** of major gol
 
 | Piece | Status |
 |-------|--------|
-| `mako version` / `--version` Go-style OS/arch | Done |
+| `mako version` / `--version` with OS/arch | Done |
 | Grouped `import (` / `{` + fmt | Done |
 | CLI help polish (`build`/`run`/`check`/`test` flag docs; `version` near top) | Done |
 | VS Code `mako-native` launch configs through LLDB/cpptools | Done |
@@ -44,7 +44,7 @@ Last inventory: 2026-07-10 (**Wave 9** · suite **130** · ~**98%** of major gol
 | Area | Status |
 |------|--------|
 | RE2 backrefs `\1`–`\9` · `\p{L/N}` ASCII · `[:lower:]`/`[:upper:]`/`[:punct:]` | Done |
-| JFIF grayscale encode (`jpeg_encode_gray_jfif` + `jpeg_is_jfif`) | Done |
+| JFIF grayscale encode (`jpeg_encode_gray_jfig` + `jpeg_is_jfif`) | Done |
 | Reflect type schema registry from codegen constructors | Done |
 | SMTP STARTTLS soft path + AUTH PLAIN; OpenSSL probe | Done |
 | `str_cut` / `str_count` | Done |

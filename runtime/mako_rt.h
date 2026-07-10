@@ -69,7 +69,11 @@ static inline void mako_runtime_stats_reset(void) {
     atomic_store_explicit(&mako_rt_channel_peak_depth, 0, memory_order_relaxed);
 }
 
-/* ---- Strings (owned, null-terminated) ---- */
+/* ---- Strings (owned, null-terminated) ----
+ * MakoString is the primary string type. Strings own their buffer (heap-allocated,
+ * NUL-terminated). `data` is never NULL for owned strings. `len` does not count
+ * the trailing NUL. Free with free(s.data) when done, or let scope/arena handle it.
+ */
 typedef struct {
     char *data;
     size_t len;
@@ -77,6 +81,7 @@ typedef struct {
 
 #include "mako_security.h"
 
+/* Create an owned MakoString by copying a C string. NULL is treated as "". */
 static inline MakoString mako_str_from_cstr(const char *s) {
     if (!s) s = "";
     size_t n = strlen(s);
@@ -115,7 +120,8 @@ static inline MakoString mako_runtime_stats_json(void) {
     return (MakoString){d, (size_t)n};
 }
 
-/* Borrowed view of [p, p+n) — caller must keep storage alive; do not free. */
+/* Borrowed (non-owning) view of [p, p+n). Caller must keep the underlying
+ * storage alive for the lifetime of the returned MakoString. Do NOT free. */
 static inline MakoString mako_str_view(const char *p, size_t n) {
     static char empty_ch = 0;
     MakoString out = {(char *)(uintptr_t)(p ? p : &empty_ch), n};
@@ -150,7 +156,11 @@ static inline void mako_print_bool(bool b) {
     puts(b ? "true" : "false");
 }
 
-/* ---- Dynamic int arrays ---- */
+/* ---- Dynamic int arrays ----
+ * Growable int64 slice. `len` is the number of live elements, `cap` is the
+ * allocated capacity. Append grows with 2x strategy. Thread-unsafe — protect
+ * with hold/share at the Mako level.
+ */
 typedef struct {
     int64_t *data;
     size_t len;
@@ -171,7 +181,8 @@ static inline MakoIntArray mako_int_array_of(const int64_t *vals, size_t n) {
     return a;
 }
 
-/* Go-like make([]int, len) / make([]int, len, cap) */
+/* Go-like make([]int, len) / make([]int, len, cap).
+ * Allocates `cap` slots, zeroes the first `len`. Aborts on OOM. */
 static inline MakoIntArray mako_int_array_make(int64_t len, int64_t cap) {
     if (len < 0) len = 0;
     if (cap < len) cap = len;
@@ -194,7 +205,10 @@ static inline MakoIntArray mako_int_array_make(int64_t len, int64_t cap) {
 static inline void mako_abort(const char *msg); /* defined below */
 static inline MakoString mako_str_clone(MakoString s); /* defined below */
 
-/* ---- Go-like []byte (uint8) ---- */
+/* ---- Go-like []byte (uint8) ----
+ * Growable byte slice. Same semantics as MakoIntArray but for uint8.
+ * Used for raw I/O buffers, binary data, and byte-level string operations.
+ */
 typedef struct {
     uint8_t *data;
     size_t len;
@@ -1376,7 +1390,12 @@ static inline int64_t mako_slice_copy(MakoIntArray dst, MakoIntArray src) {
     return (int64_t)n;
 }
 
-/* ---- Int channels (pthread-safe ring buffer) ---- */
+/* ---- Int channels (pthread-safe ring buffer) ----
+ * Bounded MPMC channel for int64 values. Thread-safe via pthread mutex + condvars.
+ * send() blocks when full; recv() blocks when empty. close() wakes all waiters.
+ * After close, recv() returns 0 once drained. send() after close is a no-op (-1).
+ * select() polls multiple channels with optional timeout.
+ */
 typedef struct {
     int64_t *buf;
     size_t cap;
@@ -1607,6 +1626,11 @@ typedef struct {
     bool cancelled_start; /* set if cancel before/during — cooperative */
 } MakoTask;
 
+/* MakoNursery — structured concurrency scope (Mako `crew` block).
+ * Owns a set of spawned tasks. On scope exit, cancel_join cancels all tasks
+ * then joins them — no orphaned threads. Tasks observe cancellation via
+ * mako_nursery_cancelled() and should exit cooperatively.
+ */
 typedef struct {
     MakoTask *tasks;
     size_t len;
@@ -1753,7 +1777,13 @@ static inline MakoIntArray mako_par_map_int(MakoIntArray in, MakoMapFn fn) {
     return out;
 }
 
-/* ---- Arena (bump region) — free all at once, no GC ---- */
+/* ---- Arena (bump region) — free all at once, no GC ----
+ * Linear allocator: allocations bump a pointer forward, individual frees are
+ * impossible. Call mako_arena_free() or mako_arena_reset() to release everything.
+ * Ideal for request-scoped work: allocate many small objects, free them all when
+ * the request is done. 8-byte aligned. Grows by doubling (starts at 4KB).
+ * Thread-local — do not share across threads without external synchronization.
+ */
 typedef struct {
     char *buf;
     size_t len;

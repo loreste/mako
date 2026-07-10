@@ -30,7 +30,7 @@ Details: [BUILD.md](../../BUILD.md).
 5. Benchmark/profile: `./scripts/bench-vs-go-rust.sh`, `mako bench`,
    `mako profile --json`.
 
-Mako’s bar: **faster and leaner than typical Go services** on the same hardware
+Mako’s bar: **fast and lean** on the same hardware
 when you lean on arenas and skip mandatory GC — [PERFORMANCE.md](../../PERFORMANCE.md).
 
 ## Memory safety contract

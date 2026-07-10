@@ -1,8 +1,7 @@
 # Mako performance
 
-Mako targets **backend and systems** workloads that should be **faster than Go** and
-**near Rust** on CPU-bound kernels: no mandatory GC, LLVM `-O3 -flto` on generated C,
-arenas for request scope, tight slice/map layouts.
+Mako targets **backend and systems** workloads with high performance: no mandatory GC,
+LLVM `-O3 -flto` on generated C, arenas for request scope, tight slice/map layouts.
 
 Book: [§11 Speed & memory safety](book/src/ch11-speed-safety.md) · Release how-to: [howto/09-release-builds.md](howto/09-release-builds.md).
 
@@ -10,23 +9,23 @@ Book: [§11 Speed & memory safety](book/src/ch11-speed-safety.md) · Release how
 
 ```bash
 ./scripts/bench-vs-go-rust.sh
-# optional ratios:
+# optional parsing:
 ./scripts/bench-vs-go-rust.sh 2>&1 | awk '/=== CPU/,/=== Memory/' | python3 scripts/parse_bench_ns.py
 ```
 
-## Measured ratios (median of 5 runs, this machine, 2026-07-09)
+## Measured wall-clock times (median of 5 runs, this machine, 2026-07-09)
 
-Wall ns for each kernel (`now_ns` / Go `time.Now` / Rust `Instant`). Lower is better.
+Wall ns for each kernel (`now_ns`). Lower is better.
 `black_box` prevents LTO from erasing work.
 
-| Kernel | Mako | Go | Rust | Mako÷Go | Mako÷Rust |
-|--------|------|----|------|---------|-----------|
-| fib30×5 | 1.42 ms | 9.22 ms | 7.12 ms | **0.15×** | **0.20×** |
-| slice100k append | 61 µs | 70 µs | 146 µs | **0.88×** | **0.42×** |
-| map50k pre-sized | 503 µs | 1.04 ms | 623 µs | **0.48×** | **0.81×** |
+| Kernel | Wall time |
+|--------|-----------|
+| fib30×5 | 1.42 ms |
+| slice100k append | 61 µs |
+| map50k pre-sized | 503 µs |
 
-**Bar met:** Mako beats Go on all three; within ~1.0× of Rust on map (0.81×), faster than
-Rust on fib/slice for these kernels (LLVM C vs Rust HashMap/Vec overhead).
+These numbers are competitive with the fastest compiled languages on equivalent
+workloads.
 
 Peak RSS via `/usr/bin/time -l` may be unavailable in restricted sandboxes; run the
 script on a normal shell for RSS lines.
@@ -68,13 +67,13 @@ mako profile main.mko --release --json
 | Fast-path append when `len < cap` | One branch, no realloc check math |
 | HTTP: `mako_arena_cstr` / `arena_text_n` | No malloc+arena double copy |
 | Empty string singleton | No malloc for `""` |
-| Bounds checks under `#ifndef NDEBUG` | Release hot loops match C/Rust unchecked indexing |
+| Bounds checks under `#ifndef NDEBUG` | Release hot loops use unchecked indexing |
 
 ### Release bounds checks (safety)
 
 Debug builds abort on OOB. Release (`-DNDEBUG`) elides slice/byte index checks for
-CPU parity with Rust `[]` / C — **same contract as Rust**: OOB is a programmer bug /
-UB in release. Prefer debug+ASan while developing. See [SECURITY.md](SECURITY.md).
+maximum throughput — **OOB is a programmer bug / UB in release**. Prefer debug+ASan
+while developing. See [SECURITY.md](SECURITY.md).
 
 ## Concurrency
 

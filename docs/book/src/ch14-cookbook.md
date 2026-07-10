@@ -12,7 +12,7 @@ as an index; prefer the how-to pages for step-by-step detail.
 | [05 Concurrency](../../howto/05-concurrency.md) | crew, channels, select |
 | [06 Memory](../../howto/06-memory.md) | arena, hold, share |
 | [07 WASI](../../howto/07-wasi.md) | wasm32-wasi builds |
-| [08 Testing](../../howto/08-testing.md) | Go-like tests |
+| [08 Testing](../../howto/08-testing.md) | Tests |
 | [09 Release builds](../../howto/09-release-builds.md) | `--release`, cache, perf |
 
 ## Quick recipes

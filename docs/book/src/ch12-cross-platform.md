@@ -10,7 +10,7 @@ When **zig cc** is available, cross-compile uses it automatically. Release /
 OS matrix: [RELEASE.md](../../RELEASE.md). Windows install: `scripts/install.ps1`
 (LLVM clang on PATH).
 
-`mako version` prints OS/arch Go-style:
+`mako version` prints OS/arch:
 
 ```text
 mako version mako0.1.0 darwin/arm64

@@ -2,8 +2,7 @@
 
 Source of truth: `src/lexer/mod.rs` → `lex_ident` (38 reserved words).  
 Every identifier that matches one of these strings is always a keyword token — never
-an `Ident`. There are **no contextual keywords** today (unlike Rust’s `async`/`await`
-in some positions): you cannot name a variable `crew` or `default`.
+an `Ident`. There are **no contextual keywords** today: you cannot name a variable `crew` or `default`.
 
 **Not keywords** (ordinary identifiers / builtins): type names (`int`, `int8`, `int32`, `int64`,
 `uint64`, `byte`, `float`/`float64`, `string`, …), `map` (type constructor `map[K]V`, not reserved),
@@ -26,7 +25,7 @@ Guided tour: [The Mako Book](book/) · Full syntax: [GUIDE.md](GUIDE.md) · Desi
 | `interface` | Named method set (light interfaces) |
 | `extern` | Foreign declaration (`extern "C" fn …`) |
 | `const` | Compile-time constant binding |
-| `import` | Merge another `.mko` / std package: `import "strings"`, Go group `import ( "a" \n "b" )`, brace `import { "a"; "b" }`, alias `import x "path"` or `import "path" as x` |
+| `import` | Merge another `.mko` / std package: `import "strings"`, grouped `import ( "a" \n "b" )`, brace `import { "a"; "b" }`, alias `import x "path"` or `import "path" as x` |
 | `let` | Local binding |
 | `mut` | Mutable parameter or binding marker |
 
@@ -47,9 +46,9 @@ Guided tour: [The Mako Book](book/) · Full syntax: [GUIDE.md](GUIDE.md) · Desi
 | Keyword | Meaning |
 |---------|---------|
 | `true` / `false` | Bool literals |
-| `and` / `or` / `not` | Boolean operators (word forms; Go-style `&&` / `\|\|` / `!` also work) |
+| `and` / `or` / `not` | Boolean operators (word forms; `&&` / `\|\|` / `!` also work) |
 
-## Operators (Go-idiomatic; not keywords)
+## Operators (not keywords)
 
 | Form | Meaning |
 |------|---------|
@@ -57,7 +56,7 @@ Guided tour: [The Mako Book](book/) · Full syntax: [GUIDE.md](GUIDE.md) · Desi
 | `==` `!=` `<` `>` `<=` `>=` | Comparison |
 | `&&` `\|\|` `!` | Logical and / or / not (short-circuit `&&`/`\|\|`); `!!x` is two `!` |
 | `and` `or` `not` | Same as `&&` / `\|\|` / `!` |
-| `&` `\|` `^` `&^` `<<` `>>` | Bitwise (Go); unary `^x` is bitwise complement |
+| `&` `\|` `^` `&^` `<<` `>>` | Bitwise; unary `^x` is bitwise complement |
 | Leading `\|…\|` | Still a lambda; infix `\|` is bitwise or |
 
 ## Concurrency

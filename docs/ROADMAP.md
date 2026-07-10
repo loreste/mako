@@ -12,7 +12,7 @@ Last roadmap sync: **2026-07-10** (general-purpose intention tracker · profile 
 
 - Compiler → C → native; `.mko`; crew / actors / arenas / Result  
 - Mako operators + grouped `import (` · `mako version` · `mako test`  
-- Core stdlib + Waves 1–9 Go-breadth  
+- Core stdlib + Waves 1–9 standard library  
 - Suite **130**  
 - **The Mako Book** (`docs/book/`)
 
@@ -85,7 +85,7 @@ Weighted from the track table below; STATUS remains the MVP implementation bar.
 
 ### 1. Language Identity And Core Type System — 10%
 
-- [x] Define Mako-owned syntax identity; not a Go/Rust/TypeScript clone.
+- [x] Define Mako-owned syntax identity; has its own identity.
 - [x] Static types, local inference, `Result`, `Option`, enums, `match`.
 - [x] Interfaces seed and dynamic interface dispatch.
 - [ ] Finalize unique generic syntax and migrate docs/examples consistently.
@@ -243,7 +243,7 @@ Weighted from the track table below; STATUS remains the MVP implementation bar.
 - [ ] AI inference service helpers: model loading, batching, accelerator hooks.
 - [ ] SIMD portable vector APIs.
 - [ ] GPU/accelerator optional track.
-- [ ] Interop beyond C: C++, Rust, Go, Python, JavaScript, Java, and .NET bridges.
+- [ ] Interop beyond C: bridges to other languages.
 - [ ] Hot code reload with state-preserving editor iteration.
 - [ ] Compile-time execution and safe domain extensions.
 

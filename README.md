@@ -1,17 +1,28 @@
 # Mako
 
-Mako is a programming language for people who build backend software and want
-something between Go and Rust. You get Go's simplicity and fast deploys with
-stronger memory safety and more predictable performance — without Rust's steep
-learning curve for everyday services.
+Mako started because I love programming and kept running into the same
+frustrations: garbage collector pauses killing tail latency, slow compile times
+breaking flow, and the feeling that safe code shouldn't be this hard to write.
 
-Sources use **`.mko`**. The compiler emits C, then hands off to clang or zig for
-native binaries. No mandatory garbage collector. One binary out the door.
+So I built a language. Mako gives you memory safety through ownership and arenas
+instead of a garbage collector, structured concurrency that cleans up after
+itself, and a standard library that covers what you actually need for backend
+work — HTTP, TLS, JSON, databases, crypto, all there out of the box.
 
-**Status:** 0.1.0 MVP complete. 130 tests passing. Standard library covers ~98%
-of major Go stdlib areas. See [STATUS.md](docs/STATUS.md) for the honest matrix.
+The compiler turns `.mko` source files into C, then clang (or zig) produces
+a native binary. One file in, one binary out. No runtime to deploy, no VM to
+configure.
 
-## Install
+This is **version 0.1.0**. The core language works, 130 tests are passing, and
+the standard library has real coverage. But this is early days — expect rough
+edges, breaking changes, and things that aren't done yet. If that's exciting to
+you rather than scary, you're in the right place.
+
+[Full status](docs/STATUS.md) · [What's next](docs/ROADMAP.md)
+
+---
+
+## Get started
 
 **macOS / Linux**
 
@@ -22,11 +33,11 @@ curl -fsSL https://github.com/loreste/mako/releases/latest/download/install-rele
 Or build from source:
 
 ```bash
-make install                    # installs to ~/.local/bin/mako
-mako version                    # mako version mako0.1.0 darwin/arm64
+make install
+mako version
 ```
 
-**Windows (PowerShell)**
+**Windows**
 
 ```powershell
 cargo build --release
@@ -34,12 +45,14 @@ cargo build --release
 mako version
 ```
 
-You'll need **Rust** and **clang** (Xcode on macOS, `apt install clang` on Linux,
-or LLVM on Windows). Optional deps for specific features: OpenSSL, libnghttp2,
-SQLite, libpq, quiche.
+You need **clang** installed — Xcode on macOS, `apt install clang` on Linux,
+LLVM on Windows. Some optional features use OpenSSL, libnghttp2, SQLite, libpq,
+or quiche, but the core language works without them.
 
-Cross-compile with `mako build --target <triple>` — uses zig cc when available.
-Full details: [RELEASE.md](docs/RELEASE.md).
+Cross-compile: `mako build --target <triple>` — zig cc is used automatically
+when available. Details in [RELEASE.md](docs/RELEASE.md).
+
+---
 
 ## Hello, Mako
 
@@ -60,147 +73,329 @@ fn fib(n: int) -> int {
 }
 ```
 
-## Why Mako
+---
 
-**Memory safety without a GC.** Mako uses ownership (`hold`/`share`) and a
-move checker to prevent use-after-free and leaks at compile time. Arena
-allocators let you scope memory to a request — allocate many, free once:
+## What Mako gives you
+
+### Memory safety without a garbage collector
+
+Mako tracks ownership at compile time. `hold` bindings move on use — the
+compiler catches use-after-free before your code ever runs. When you need
+short-lived allocations (a request handler, a batch job), arenas let you
+allocate many objects and free them all at once:
 
 ```mko
 arena a {
     let msg = arena_text(a, "hello arena")
     let xs = arena_ints(a, 1000)
-    // use msg, xs freely...
+    // use them freely
 }
 // everything in `a` is freed here — one call, no GC pause
 ```
 
-**Concurrency that won't bite you.** `crew` blocks manage concurrent work and
-guarantee cleanup. No orphaned threads, no forgotten joins:
+### Structured concurrency
+
+The `crew` block manages concurrent tasks and guarantees cleanup. When the
+block ends, every task is joined. No orphaned threads, no forgotten cleanup,
+no leaked goroutines. Channels handle communication between tasks:
 
 ```mko
+fn producer(ch: chan[int], n: int) -> int {
+    for i in n {
+        let _ = ch.send(i + 1)
+    }
+    ch.close()
+    return n
+}
+
+fn consumer(ch: chan[int]) -> int {
+    let mut sum = 0
+    for i in 5 {
+        sum = sum + ch.recv()
+    }
+    return sum
+}
+
 fn main() {
     let ch = chan_new(4)
     crew t {
         let p = t.kick(producer(ch, 5))
         let c = t.kick(consumer(ch))
         let _ = p.join()
-        print_int(c.join())
+        print_int(c.join())     // 15
     }
-    // all tasks joined and cleaned up here, always
 }
 ```
 
-**Errors are values, not surprises.** `Result` types are enforced — the compiler
-rejects code that ignores a `Result`. Wrapping and propagation feel natural:
+### Errors you can't ignore
+
+`Result` types are enforced. The compiler won't build code that throws away
+a `Result`. Error propagation with `?` and wrapping are built in:
 
 ```mko
-fn load_config(path: string) -> Result[int, string] {
-    let fd = open_cfg(path)?          // propagate errors with ?
+fn open_cfg(path: string) -> Result[int, string] {
+    if str_eq(path, "") {
+        return error("empty path")
+    }
+    Ok(1)
+}
+
+fn load() -> Result[int, string] {
+    let fd = open_cfg("config.toml")?   // propagates on error
     Ok(fd)
 }
 ```
 
-**Batteries included.** The standard library covers HTTP servers, TLS, WebSocket,
-JSON, database drivers (SQLite, Postgres), crypto, compression, regular
-expressions, and more. Build a JSON API in one file:
+### A standard library you can actually use
+
+HTTP servers, TLS, WebSocket, JSON, database drivers (SQLite, Postgres), crypto,
+compression, regex, email, encoding, file I/O, and more. Build a JSON API in
+one file:
 
 ```mko
 fn main() {
     let fd = http_bind(8080)
+    print("listening on :8080")
     while true {
         let c = http_accept(fd)
+        let method = http_method(c)
         let path = http_path(c)
+
         if str_eq(path, "/health") {
             let _ = http_respond_json(c, 200, "{\"ok\":true}")
+        } else {
+            if str_eq(method, "POST") {
+                let body = http_body(c)
+                let _ = http_respond_json(c, 201, body)
+            } else {
+                let _ = http_respond_json(c, 404, "{\"error\":\"not found\"}")
+            }
         }
         let _ = http_close(c)
     }
 }
 ```
 
-**Fast builds, small binaries.** Incremental compilation is on by default.
-Release builds use `-O3 -flto`. Benchmarks show performance faster than Go and
-competitive with Rust on common workloads.
-See [PERFORMANCE.md](docs/PERFORMANCE.md).
+### Fast builds
 
-## Common Commands
+Incremental compilation is on by default. The compiler caches intermediate
+objects and only rebuilds what changed. Release builds optimize with
+`-O3 -flto`. [Benchmarks](docs/PERFORMANCE.md).
+
+---
+
+## More of the language
+
+**Defer** — cleanup that runs on function exit, last-in first-out:
+
+```mko
+fn main() {
+    defer print("third")
+    defer print("second")
+    print("first")
+}
+// output: first, second, third
+```
+
+**Enums with methods:**
+
+```mko
+enum Shape {
+    Circle(int),
+    Rect(int, int),
+    Point,
+}
+
+fn Shape_area(self: Shape) -> int {
+    match self {
+        Circle(r) => r * r,
+        Rect(w, h) => w * h,
+        Point => 0,
+    }
+}
+
+fn main() {
+    print_int(Circle(5).area())   // 25
+    print_int(Rect(3, 4).area())  // 12
+}
+```
+
+**Generics and interfaces:**
+
+```mko
+interface Writer {
+    fn write(string) -> int
+}
+
+fn takes_result(r: Result<int, string>) -> int {
+    return result_unwrap_or(r, 0)
+}
+
+fn main() {
+    let xs: List<int> = [1, 2, 3]
+    print_int(len(xs))
+    print_int(takes_result(Ok(42)))
+}
+```
+
+**Derive macros** — generate JSON serialization from a struct:
+
+```mko
+#[derive(json)]
+struct Person {
+    name: string
+    age: int
+}
+
+fn main() {
+    let j = Person_to_json("Ada", 36)
+    print(j)
+    let name = Person_name_from_json(j)
+    let age = Person_age_from_json(j)
+    print(name)
+    print_int(age)
+}
+```
+
+**Channel select** — multiplex across channels with a timeout:
+
+```mko
+fn sender(ch: chan[int], v: int) -> int {
+    sleep_ms(30)
+    let _ = ch.send(v)
+    return 0
+}
+
+fn main() {
+    let a = chan_new(2)
+    let b = chan_new(2)
+    crew t {
+        let _ = t.kick(sender(a, 11))
+        let _ = t.kick(sender(b, 22))
+        let which = chan_select2(a, b, 500)
+        print_int(chan_select_value())
+    }
+}
+```
+
+**Actors** — message-passing concurrency with a mailbox:
+
+```mko
+actor Session {
+    receive Invite { print("invite") }
+    receive Timer  { print("tick") }
+    receive Bye    { print("bye") }
+}
+
+fn main() {
+    let session = Session_spawn()
+    crew t {
+        let loopj = t.kick(Session_loop(session))
+        let _ = Session_send(session, Session_Invite())
+        let _ = Session_send(session, Session_Timer())
+        let _ = Session_send(session, Session_Bye())
+        print_int(loopj.join())
+    }
+}
+```
+
+**C FFI** — call into C directly:
+
+```mko
+extern "C" fn mako_c_abs(n: int) -> int
+extern "C" fn mako_c_add(a: int, b: int) -> int
+
+fn main() {
+    print_int(mako_c_abs(0 - 42))  // 42
+    print_int(mako_c_add(20, 22))  // 42
+}
+```
+
+More examples in [examples/](examples/) and [The Mako Book](docs/book/).
+
+---
+
+## Day-to-day commands
 
 ```bash
-mako init myapp                  # scaffold a new project
+mako init myapp                  # start a new project
 mako run main.mko                # compile and run
-mako build main.mko              # compile to native binary
-mako build --release main.mko    # optimized release build (-O3 -flto)
-mako test examples/testing       # run test suite
-mako test -r TestAdd -v          # run specific tests, verbose
-mako fmt -w                      # format source files in place
-mako lint                        # static analysis
-mako check main.mko              # type-check without compiling
-mako build --target wasm32-wasip1 main.mko  # compile to WebAssembly
+mako build main.mko              # just compile
+mako build --release main.mko    # optimized build
+mako test examples/testing       # run the test suite
+mako test -r TestAdd -v          # run one test, verbose
+mako fmt -w                      # format your code
+mako lint                        # catch issues early
+mako check main.mko              # type-check without building
+mako build --target wasm32-wasip1 main.mko  # target WebAssembly
 ```
 
 ## Packages
 
-Projects use `mako.toml` for dependencies and metadata:
+Mako projects use `mako.toml`:
 
 ```bash
-mako init mylib                  # create a new package
-mako pkg add helper ../helper    # add a local dependency
-mako pkg fetch                   # fetch git dependencies
-mako pkg lock                    # pin versions in mako.lock
-mako pkg audit                   # check advisories and licenses
+mako init mylib
+mako pkg add helper ../helper
+mako pkg fetch
+mako pkg lock
+mako pkg audit
 ```
 
 ## Documentation
 
 | | |
 |---|---|
-| **[The Mako Book](docs/book/)** | Guided tour — install through concurrency, HTTP, WASI |
-| [How-to Guides](docs/howto/README.md) | Getting started, HTTP APIs, errors, packages, concurrency |
-| [Language Guide](docs/GUIDE.md) | Complete syntax reference with examples |
-| [Standard Library](docs/STDLIB.md) | Library catalog and API surface |
-| [Security](docs/SECURITY.md) | Memory safety model, ownership, secure defaults |
-| [Performance](docs/PERFORMANCE.md) | Benchmarks vs Go and Rust |
-| [Status](docs/STATUS.md) | What works, what's left, verified test matrix |
-| [Vision](docs/VISION.md) | Where Mako is headed |
-| [Roadmap](docs/ROADMAP.md) | Engineering queue and priorities |
-| [Release](docs/RELEASE.md) | Packaging, cross-compilation, install targets |
-| [Debug](docs/DEBUG.md) | lldb/gdb, `dbg()`, sanitizers |
-| [Changelog](CHANGELOG.md) | Release notes |
+| **[The Mako Book](docs/book/)** | Start here — walks you from install to shipping |
+| [How-to Guides](docs/howto/README.md) | Practical guides for HTTP, errors, concurrency, and more |
+| [Language Guide](docs/GUIDE.md) | The full syntax reference |
+| [Standard Library](docs/STDLIB.md) | What's in the box |
+| [Security](docs/SECURITY.md) | How Mako keeps your code safe |
+| [Performance](docs/PERFORMANCE.md) | Numbers |
+| [Status](docs/STATUS.md) | Honest accounting of what works and what's left |
+| [Vision](docs/VISION.md) | Where this is all going |
+| [Roadmap](docs/ROADMAP.md) | What's next |
+| [Release](docs/RELEASE.md) | Packaging and cross-compilation |
+| [Debug](docs/DEBUG.md) | lldb, gdb, `dbg()`, sanitizers |
+| [Changelog](CHANGELOG.md) | What changed |
 
-## Editor Support
+## Editor support
 
-**VS Code** — full extension with syntax highlighting, LSP (completions, hover,
-go-to-definition, rename), debugging via CodeLLDB, and built-in commands for
-build/run/test/format. See [editors/vscode/](editors/vscode/).
+There's a **VS Code** extension with syntax highlighting, LSP, debugging, and
+commands for build/run/test/format. Details in [editors/vscode/](editors/vscode/).
 
-The language server runs via `mako lsp` and works with any editor that speaks LSP.
+The language server (`mako lsp`) speaks standard LSP, so it works with any
+editor that supports it.
 
 ## Testing
 
 ```bash
-mako test examples/testing              # full suite (130 tests)
-mako test examples/testing -r TestAdd -v  # filter by name
-mako test --coverage                    # coverage report
+mako test examples/testing
+mako test examples/testing -r TestAdd -v
+mako test --coverage
 ```
 
-Test categories: unit, property, fuzz, snapshot, fixture, mock.
+The suite covers unit, property, fuzz, snapshot, fixture, and mock tests.
+Some tests need live services — enable with `MAKO_LIVE_TLS=1`,
+`MAKO_LIVE_NGHTTP2=1`, or `MAKO_LIVE_QUIC=1`. The default suite runs clean
+without them.
 
-Some tests need live services. Set `MAKO_LIVE_TLS=1`, `MAKO_LIVE_NGHTTP2=1`, or
-`MAKO_LIVE_QUIC=1` to enable them. The default suite runs clean without these.
+## What's not done yet
 
-## Known Limitations
+This is 0.1.0. Some things are still in progress:
 
-This is version 0.1.0. A few things are still in progress:
-
-- Unicode property escapes work for common scripts but the full PCRE database isn't there yet
+- Unicode property escapes work for common scripts but the full database isn't there yet
 - JPEG encoding uses JFIF headers with a custom payload — not yet readable by all viewers
-- Struct field reflection has a schema registry but field values are still string-typed at runtime
+- Struct field reflection has a schema registry but field values are still string-typed
 - SMTP AUTH works over plaintext; full AUTH over TLS is partial
-- Generics syntax (`List<T>`, `Map<K,V>`) is working but may see refinements
+- Generics syntax is working but may see refinements
 
-The full list lives in [STATUS.md](docs/STATUS.md) under "True hard residuals."
+The honest list lives in [STATUS.md](docs/STATUS.md).
+
+## Contributing
+
+[CONTRIBUTING.md](CONTRIBUTING.md) has the details.
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT — [LICENSE](LICENSE).

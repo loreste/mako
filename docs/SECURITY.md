@@ -53,8 +53,8 @@ unsafe {
 ```
 
 Default indexing stays checked in debug (`-O0 -g`). Release may elide checks
-under `NDEBUG` (same contract as Rust `[]`). Prefer `unsafe { }` only when you
-have proven the index is in range.
+under `NDEBUG`. Prefer `unsafe { }` only when you have proven the index is in
+range.
 
 ### HTTP header validation (Done)
 

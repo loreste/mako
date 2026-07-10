@@ -1,8 +1,8 @@
 # 7. Standard Library
 
-Mako’s stdlib aims at **Go/Rust-shaped backends**: strings, net/http, encoding,
+Mako’s stdlib aims at **backends**: strings, net/http, encoding,
 crypto, sync, SQL clients, templates, and more. Honest coverage today is
-~**98%** of major golang.org/pkg *areas* (Wave 9) — not every symbol.
+~**98%** of major target areas (Wave 9) — not every symbol.
 
 Call builtins directly (`str_split`, `path_join`, …) **or** import packages:
 

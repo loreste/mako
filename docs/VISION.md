@@ -5,16 +5,20 @@
 > Memory safety · simple concurrency · fast builds · no mandatory GC · great tooling · clean errors · single binary · strong stdlib.
 
 **Product contract:** Mako is a versatile, general-purpose backend and
-infrastructure language between Go and Rust. It should feel as approachable and
-deployable as Go, give stronger safety and more predictable performance, and
-avoid Rust-level cognitive overhead for normal backend work.
+infrastructure language. It is approachable and deployable, with strong safety
+guarantees, predictable performance, and low cognitive overhead for everyday
+backend work.
 
-| Borrow from | Keep | Avoid |
-|-------------|------|-------|
-| Go | Simple syntax, fast builds, easy deploy, channels, practical stdlib | Mandatory GC, nil, weak enums/errors, race-prone sharing |
-| Rust | Memory safety, explicit ownership, predictable performance, zero-cost abstractions | Steep lifetime ergonomics for everyday services |
-| Erlang | Actor/session thinking, supervision-shaped systems | VM dependency as the only deployment story |
-| Zig/C | Control, FFI, static binaries | Unsafe-by-default memory management |
+| Principle | What it means |
+|-----------|---------------|
+| Simple syntax | Clean, readable code that gets out of your way |
+| Fast builds | Compile times stay short even as projects grow |
+| Easy deploy | Static binaries, no runtime dependencies |
+| Channels & actors | Structured concurrency without shared-memory bugs |
+| Practical stdlib | Batteries included for real backend work |
+| Memory safety | Ownership, arenas, and explicit resource control — no use-after-free, no data races |
+| Predictable performance | No mandatory GC pauses, no hidden allocations on the hot path |
+| Zero-cost abstractions | High-level constructs that compile to efficient machine code |
 
 Mako is for **backend software, cloud infrastructure, networking systems,
 developer tools, databases, and high-performance services** — without academic
@@ -29,14 +33,13 @@ work over time:
 - **Realtime and telecom systems** (actors, timers, protocol stacks, session state)
 - **Fast native binaries** (release `-O3 -flto`, no mandatory GC — [PERFORMANCE.md](PERFORMANCE.md))
 
-**Core promise:** Go-level productivity and versatility with stronger safety,
-better abstractions, and more predictable performance, without requiring
-Rust-level complexity.
+**Core promise:** A simple, productive workflow with strong safety guarantees,
+expressive abstractions, and predictable performance.
 
-**Syntax promise:** Mako must have its own surface identity. It may borrow proven
+**Syntax promise:** Mako has its own surface identity. It incorporates proven
 ideas, but keywords, declarations, concurrency forms, ownership forms, imports,
-errors, and package ergonomics should compose into a language that feels like
-Mako, not a Go/Rust/TypeScript dialect.
+errors, and package ergonomics compose into a language that feels distinctly
+like Mako.
 
 Honest status lives in [STATUS.md](STATUS.md). **How to write Mako today:**
 [The Mako Book](book/) (guided tour) and [GUIDE.md](GUIDE.md) (verified syntax).
@@ -71,7 +74,7 @@ Mako should be equally comfortable for:
 - Data systems: databases, caches, search engines, queues, storage engines
 - AI inference services, realtime applications, telecom platforms, edge/WASM apps
 
-The standard for “general purpose” is practical: a beginner should be able to
+The standard for "general purpose" is practical: a beginner should be able to
 ship a simple API, and an expert should be able to build a database, proxy,
 compiler, or distributed runtime.
 
@@ -273,15 +276,15 @@ API stability annotations — Later. Module isolation — Later.
 | Docs generator | Later |
 | LSP: rename / extract / debug / profile | Later (day-one intent) |
 | Cross-compile | Later |
-| Incremental compile (1M LOC &lt; 2s rebuild) | Later |
+| Incremental compile (1M LOC < 2s rebuild) | Later |
 | WASM target | Later |
 | Runtime introspection / AI compiler metadata hooks | Later |
 | Domain extensions without fragmentation | Later |
 
-The official toolchain should feel closer to Go plus Java/C# IDE expectations:
-compiler, package manager, formatter, linter, tests, benchmarks, docs,
-dependency auditor, profiler, debugger integration, LSP, cross-compiler, and
-build system as one coherent product.
+The official toolchain should be a single coherent product: compiler, package
+manager, formatter, linter, tests, benchmarks, docs, dependency auditor,
+profiler, debugger integration, LSP, cross-compiler, and build system — all
+working together out of the box.
 
 ---
 

@@ -6,10 +6,10 @@ iteration**. Most stacks force a trade:
 
 - Managed runtimes give safety and a rich stdlib, but pay with GC pauses and
   heavier deploy stories.
-- Low-level C/C++ give control, but leave ownership and concurrency races to
-  discipline.
-- Newer ownership languages give safety, but can feel heavy for everyday HTTP
-  and session servers.
+- Low-level systems languages give control, but leave ownership and concurrency
+  races to discipline.
+- Newer ownership-focused languages give safety, but can feel heavy for everyday
+  HTTP and session servers.
 
 Mako’s bet is practical:
 
@@ -19,13 +19,13 @@ Mako’s bet is practical:
 ## Product Shape
 
 Mako aims to be a **general-purpose backend and infrastructure language** with
-Go-level versatility and deployment, stronger safety, and lower runtime
+broad versatility and easy deployment, strong safety, and low runtime
 surprises. It should be natural for REST APIs, CLIs, agents, workers, proxies,
 databases, protocol stacks, AI services, and realtime systems.
 
-Mako's syntax should also be its own. The language can learn from Go, Rust,
-Erlang, Zig, Java, and C#, but the final surface should feel like Mako: compact,
-explicit where safety matters, and consistent under `mako fmt`.
+Mako's syntax should also be its own. The language draws on proven ideas, but the
+final surface should feel like Mako: compact, explicit where safety matters, and
+consistent under `mako fmt`.
 
 Session-shaped servers are still a proving ground: long-lived connections,
 messages, deterministic latency, no shared-memory races. Actors + crews +
@@ -47,7 +47,7 @@ As of the Wave 9 inventory:
 | Claim | Meaning |
 |-------|---------|
 | STATUS / MVP **100%** | Current north-star shipped; homebrew-core publish is external |
-| Stdlib ~**98%** areas | Major golang.org/pkg *areas* for backends — not every symbol |
+| Stdlib ~**98%** areas | Major target standard library *areas* for backends — not every symbol |
 | Suite **130** | `mako test examples/testing` green without live TLS/QUIC flags |
 
 We will not pretend complete Unicode/PCRE, viewer-perfect Huffman JPEG, or live

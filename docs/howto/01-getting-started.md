@@ -9,7 +9,7 @@ mako version          # mako version mako0.1.0 darwin/arm64
 mako --version        # same info
 ```
 
-Needs **Rust** (to build the compiler) and **clang**. Optional: OpenSSL, libnghttp2, SQLite, libpq.
+Needs **cargo/rustc** (to build the compiler) and **clang**. Optional: OpenSSL, libnghttp2, SQLite, libpq.
 
 ## First program
 
@@ -39,7 +39,7 @@ cd myws && mako check . && mako run -p app
 
 | Command | Use |
 |---------|-----|
-| `mako version` | Go-like version + OS/arch (`mako version -v` for commit) |
+| `mako version` | Version + OS/arch (`mako version -v` for commit) |
 | `mako check` | Fast typecheck (incremental) |
 | `mako run` | Compile + execute |
 | `mako build -j 8` | Parallel object compile |

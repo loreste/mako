@@ -42,6 +42,6 @@ mako build main.mko --sanitize=address
 mako build main.mko --sanitize=thread
 ```
 
-## Errors (Go-like)
+## Errors
 
 See GUIDE § Errors: `error` / `errorf` / `wrap_err` / `error_is` / `error_string` / `?`.

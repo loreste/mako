@@ -55,9 +55,9 @@ mako fmt -l .              # list dirty
 mako fmt -d .              # diff
 ```
 
-Two or more imports are rewritten as a Go-style `import ( … )` group.
+Two or more imports are rewritten as a grouped `import ( … )` block.
 
-## Test (Go-like)
+## Test
 
 ```bash
 mako test examples/testing

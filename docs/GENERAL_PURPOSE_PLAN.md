@@ -29,12 +29,12 @@ identity.
 ## Non-Negotiables
 
 - Mako-owned syntax is required: familiar enough to learn quickly, but not a
-  clone of Go, Rust, TypeScript, or any single existing language.
-- Go-level simplicity and fast iteration stay central.
+  clone of any single existing language.
+- Simplicity and fast iteration stay central.
 - No mandatory GC.
 - Safe defaults: no null, checked conversions, explicit unsafe, typed errors.
-- Rust-like control exists, but normal backend services should not require
-  lifetime expertise.
+- Fine-grained ownership control exists, but normal backend services should not
+  require lifetime expertise.
 - Raw escape hatches remain available for systems work.
 - Compile-time generation should replace heavy runtime reflection where possible.
 

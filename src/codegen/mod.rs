@@ -1100,7 +1100,7 @@ impl Codegen {
             let vtmp = self.fresh("cv");
             let ok = self.fresh("cok");
             self.line(&format!("int64_t {vtmp};"));
-            self.line(&format!("while (1) {{"));
+            self.line("while (1) {");
             self.indent += 1;
             self.line(&format!(
                 "int64_t {ok} = mako_chan_recv_ok({val}, &{vtmp});"
@@ -1238,8 +1238,7 @@ impl Codegen {
                 "double {name} = mako_float_array_get({arr}, (int64_t){idx});"
             ));
             self.locals.insert(name.to_string(), "double".into());
-        } else if arr_ty.starts_with("MakoArr_") {
-            let sn = &arr_ty["MakoArr_".len()..];
+        } else if let Some(sn) = arr_ty.strip_prefix("MakoArr_") {
             self.line(&format!(
                 "{sn} {name} = mako_arr_{sn}_get({arr}, (int64_t){idx});"
             ));
@@ -1452,9 +1451,8 @@ impl Codegen {
                     let tmp = self.fresh("iass");
                     self.line(&format!("int64_t {tmp} = {i};"));
                     self.line(&format!("mako_float_array_set({b}, {tmp}, {v});"));
-                } else if bty.starts_with("MakoArr_") {
+                } else if let Some(sn) = bty.strip_prefix("MakoArr_") {
                     let tmp = self.fresh("iass");
-                    let sn = &bty["MakoArr_".len()..];
                     self.line(&format!("int64_t {tmp} = {i};"));
                     self.line(&format!("mako_arr_{sn}_set({b}, {tmp}, {v});"));
                 } else {
@@ -8691,8 +8689,7 @@ impl Codegen {
                             if ty == "MakoFloatArray" {
                                 return ("int64_t".into(), format!("mako_float_array_len({v})"));
                             }
-                            if ty.starts_with("MakoArr_") {
-                                let sn = &ty["MakoArr_".len()..];
+                            if let Some(sn) = ty.strip_prefix("MakoArr_") {
                                 return ("int64_t".into(), format!("mako_arr_{sn}_len({v})"));
                             }
                             if ty == "MakoMapSI*" {
@@ -8746,8 +8743,7 @@ impl Codegen {
                             if ty == "MakoFloatArray" {
                                 return ("int64_t".into(), format!("mako_float_array_cap({v})"));
                             }
-                            if ty.starts_with("MakoArr_") {
-                                let sn = &ty["MakoArr_".len()..];
+                            if let Some(sn) = ty.strip_prefix("MakoArr_") {
                                 return ("int64_t".into(), format!("mako_arr_{sn}_cap({v})"));
                             }
                             return ("int64_t".into(), format!("mako_array_cap({v})"));
@@ -8774,8 +8770,8 @@ impl Codegen {
                                 ));
                                 return ("MakoFloatArray".into(), tmp);
                             }
-                            if sty.starts_with("MakoArr_") {
-                                let sn = sty["MakoArr_".len()..].to_string();
+                            if let Some(sn) = sty.strip_prefix("MakoArr_") {
+                                let sn = sn.to_string();
                                 if let Some(arena) = self.current_arena.clone() {
                                     self.line(&format!(
                                         "MakoArr_{sn} {tmp} = mako_arr_{sn}_arena_append(&{arena}, {s}, {v});"
@@ -9082,8 +9078,7 @@ impl Codegen {
                 if bty == "MakoFloatArray" {
                     return ("double".into(), format!("mako_float_array_get({b}, {tmp})"));
                 }
-                if bty.starts_with("MakoArr_") {
-                    let sn = &bty["MakoArr_".len()..];
+                if let Some(sn) = bty.strip_prefix("MakoArr_") {
                     let out = self.fresh("sg");
                     self.line(&format!("{sn} {out} = mako_arr_{sn}_get({b}, {tmp});"));
                     return (sn.to_string(), out);
@@ -9333,7 +9328,7 @@ impl Codegen {
                             }
                         }
                         // Fat-pointer interface: recv.method(args) → recv.vtable->method(recv.data, ...)
-                        if rty.starts_with("MakoIface_") {
+                        if let Some(iname_prefix) = rty.strip_prefix("MakoIface_") {
                             let mut arg_vals = Vec::new();
                             for a in args {
                                 let (_, v) = self.emit_expr(a);
@@ -9342,8 +9337,7 @@ impl Codegen {
                             let mut call_args = vec![format!("{rv}.data")];
                             call_args.extend(arg_vals);
                             let call = format!("{rv}.vtable->{other}({})", call_args.join(", "));
-                            let iname = &rty["MakoIface_".len()..];
-                            let key = format!("{iname}_{other}");
+                            let key = format!("{iname_prefix}_{other}");
                             let ret = self
                                 .fn_rets
                                 .get(&key)

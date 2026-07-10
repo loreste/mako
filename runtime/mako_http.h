@@ -1,5 +1,17 @@
-/* HTTP connection API — accept one request, expose method/path/body, reply.
- * Handler logic stays in Mako (no colored async). */
+/* HTTP connection API — synchronous, one-request-at-a-time server.
+ *
+ * Usage: bind a port, accept connections in a loop, read method/path/headers/body,
+ * send a response, close. Handler logic stays in Mako (no colored async).
+ *
+ * Security: header names/values are validated (rejects CR/LF/NUL injection).
+ * Content-Length is enforced on responses. No HTTP/1.0 chunked by default.
+ *
+ * Thread safety: each connection fd is independent. Do not share a single fd
+ * across threads. Use one fd per crew task for concurrent request handling.
+ *
+ * Limits: header buffer is 8KB. Request body reads up to Content-Length or 1MB
+ * (whichever is smaller) unless overridden.
+ */
 #ifndef MAKO_HTTP_H
 #define MAKO_HTTP_H
 

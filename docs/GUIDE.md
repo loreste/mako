@@ -1,7 +1,7 @@
 # Mako language guide
 
 **What works today** — syntax and APIs the compiler accepts, with examples under
-`examples/`. Sources use the **`.mko`** extension (not Python Mako / Make `.mk`).
+`examples/`. Sources use the **`.mko`** extension (not `.mk`).
 
 | Doc | Role |
 |-----|------|
@@ -9,7 +9,7 @@
 | **[The Mako Book](book/)** | Guided tour (idiomatic Mako) |
 | [STATUS.md](STATUS.md) | Done matrix (adversarial) |
 | [BUILD.md](BUILD.md) | Incremental cache, `-j`, residual clang |
-| [PERFORMANCE.md](PERFORMANCE.md) | Release `-O3 -flto`, benches vs Go |
+| [PERFORMANCE.md](PERFORMANCE.md) | Release `-O3 -flto`, benchmarks |
 | [DEBUG.md](DEBUG.md) | lldb/gdb, `dbg`, sanitizers |
 | [SECURITY.md](SECURITY.md) | Memory safety + cache guarantees |
 | [STDLIB.md](STDLIB.md) | HTTP library + std surface |
@@ -47,12 +47,12 @@ mako check .
 mako run -p app
 ```
 
-`mako version` (also `mako --version` / `-V`) prints Go-style `mako version mako0.1.0 darwin/arm64`. Use `mako version -v` for an optional commit line.
+`mako version` (also `mako --version` / `-V`) prints `mako version mako0.1.0 darwin/arm64`. Use `mako version -v` for an optional commit line.
 Override headers if needed: `export MAKO_RUNTIME=/path/to/runtime`.
 
-Incremental builds are **on by default** (`-j` / `MAKO_JOBS`, `--no-incremental` to disable) — see [BUILD.md](BUILD.md). Release: `mako build --release` → `-O3 -flto` ([PERFORMANCE.md](PERFORMANCE.md): faster than Go / near Rust on microbenches).
+Incremental builds are **on by default** (`-j` / `MAKO_JOBS`, `--no-incremental` to disable) — see [BUILD.md](BUILD.md). Release: `mako build --release` → `-O3 -flto` ([PERFORMANCE.md](PERFORMANCE.md): optimized on microbenches).
 
-For speed: pre-size `make([]T, 0, n)` / `make(map[K]V, n)`, use arenas for request scope, prefer `hold` over `share`, measure with `now_ns` + `./scripts/bench-vs-go-rust.sh`.
+For speed: pre-size `make([]T, 0, n)` / `make(map[K]V, n)`, use arenas for request scope, prefer `hold` over `share`, measure with `now_ns` + `./scripts/bench.sh`.
 
 From a source tree without installing:
 
@@ -197,17 +197,17 @@ fn fib(n: int) -> int {
 
 | Type | Notes |
 |------|--------|
-| `int` | Platform natural (Go-like); C backend → `int64_t`, distinct in checker |
+| `int` | Platform natural; C backend → `int64_t`, distinct in checker |
 | `int64` / `int32` / `int8` | Fixed widths; `int8(x)` range-checks `-128..127` at runtime |
 | `uint64` | Unsigned 64-bit; reject negative on convert from signed |
-| `byte` | Unsigned 8-bit (Go `byte`); element of `[]byte` |
+| `byte` | Unsigned 8-bit; element of `[]byte` |
 | `float`, `bool`, `string` | No silent mix with ints |
-| `[]int` / `[]int64` / `[]byte` | Go-like slices (see § Slices / Bytes) |
+| `[]int` / `[]int64` / `[]byte` | Slices (see § Slices / Bytes) |
 | `Option[T]`, `Result[T, E]` | No nil |
 | `chan[T]` | Typed channels (`chan[int]` common) |
 | Named structs / enums | User-defined |
 
-### Integer family (Go-inspired)
+### Integer family
 
 ```mko
 // examples/integers.mko · examples/bytes.mko
@@ -238,7 +238,7 @@ let a: int = 10
 let b = int64(a)
 let f = float64(a)
 print(string(a))           // "10"
-let buf = bytes("hi")      // Go []byte(s)
+let buf = bytes("hi")      // string → []byte
 print(string(buf))
 ```
 
@@ -249,7 +249,7 @@ print(string(buf))
 | `string` | — | — | — | — | — | identity | `bytes(s)` |
 | `[]byte` | — | — | — | index | — | `string(b)` | identity |
 
-`float` ≡ `float64` today. Prefer **`[]byte(s)`** (Go sugar) or `bytes(s)`.
+`float` ≡ `float64` today. Prefer **`[]byte(s)`** or `bytes(s)`.
 
 Compile-time range: constant `int8(n)` / `byte(n)` / `uint64(n)` checked at
 `mako check`; non-constants still runtime-abort.
@@ -279,7 +279,7 @@ fn main() {
 }
 ```
 
-## 2c. Operators (Go-idiomatic)
+## 2c. Operators
 
 Assignment is `=` only. Equality is `==` (never single `=`).
 
@@ -291,7 +291,7 @@ Assignment is `=` only. Equality is `==` (never single `=`).
 | Bitwise | `&` `\|` `^` `&^` `<<` `>>` · unary `^x` (complement) |
 
 - `&&` / `||` **short-circuit** (right side not evaluated when unnecessary).
-- `!!x` is two unary `!` (Go-style); there is no special `!!` token.
+- `!!x` is two unary `!`; there is no special `!!` token.
 - Leading `|params| { … }` is still a lambda; infix `|` is bitwise or.
 - Tests: `examples/testing/operators_go_test.mko`.
 
@@ -305,7 +305,7 @@ assert(!!ok)
 
 ---
 
-## 2b. Slices (Go-like)
+## 2b. Slices
 
 Literals `[1, 2, 3]` are **slices** (header: ptr, len, cap). Default element type is
 `int`; annotate for `[]int64` / `[]int32` / `[]byte`:
@@ -316,7 +316,7 @@ let mut a: []int64 = [10, 20, 30]  // []int64
 let mut b: []byte = [72, 105]      // []byte
 ```
 
-Type syntax: Go-like `[]T` (preferred) or `[T]`.
+Type syntax: `[]T` (preferred) or `[T]`.
 
 ```mko
 // examples/slice.mko · examples/slice64.mko · examples/bytes.mko
@@ -326,17 +326,17 @@ print_int(cap(s))
 
 let t = s[1:3]      // shares backing store
 t[0] = 99           // visible on s[1]
-s = append(s, 4)    // may grow; assign result (like Go)
+s = append(s, 4)    // may grow; assign result back
 
-let n = copy(dst, s)   // Go-like; returns count
+let n = copy(dst, s)   // returns count copied
 
 // string <-> []byte (copying bridge)
 let c = bytes("mako")     // helper
-let d = []byte("mako")    // Go-like sugar (same)
+let d = []byte("mako")    // sugar (same as bytes())
 print(string(c))
 print(string(d[1:3]))
 
-// Go-like make
+// pre-sized make
 let s = make([]int, 3, 8) // len 3, cap 8
 let z = make([]byte, 2)
 let names = make([]string, 0, 4)
@@ -345,14 +345,14 @@ let fs = make([]float, 2)          // examples/float_slice.mko
 // also: let xs: []string = ["a", "b"]  · examples/str_slice.mko
 ```
 
-| Go | Mako |
-|----|------|
-| `[]int{…}` / `[]byte{…}` | `[…]` / `let b: []byte = […]` |
-| `[]string{"a","b"}` | `let xs: []string = ["a", "b"]` or `["a","b"]` |
-| `[]float64{…}` | `let xs: []float = [1.0, 2.0]` / `make([]float, n[, cap])` |
-| `[]byte(s)` / `string(b)` | `[]byte(s)` or `bytes(s)` / `string(b)` |
-| `make([]T, n[, cap])` | `make([]int\|[]byte\|[]string\|[]float, …)` |
-| `s[i:j]`, `len`/`cap`/`append`/`copy` | same |
+| Syntax | Meaning |
+|--------|---------|
+| `[…]` / `let b: []byte = […]` | Slice literal (`[]int` / `[]byte`) |
+| `let xs: []string = ["a", "b"]` or `["a","b"]` | String slice |
+| `let xs: []float = [1.0, 2.0]` / `make([]float, n[, cap])` | Float slice |
+| `[]byte(s)` or `bytes(s)` / `string(b)` | String ↔ bytes conversion |
+| `make([]int\|[]byte\|[]string\|[]float, …)` | Pre-sized allocation |
+| `s[i:j]`, `len`/`cap`/`append`/`copy` | Slice operations |
 
 Compile-time: `int8(200)` / `byte(300)` rejected at `mako check` when the arg is a constant
 (`examples/bad/int8_literal_oor.mko`, `byte_literal_oor.mko`). Runtime still aborts for non-const OOR.
@@ -407,7 +407,7 @@ fn main() {
     for _, v in range s { } // values only (`_` is blank)
     for range s { }        // no binders
 
-    for i in range 3 { }   // 0..2 (Go-style int range)
+    for i in range 3 { }   // 0..2 (integer range)
     for j in 3 { }         // legacy: same as range n
     for v in s { }         // legacy: values only
 
@@ -417,7 +417,7 @@ fn main() {
 ```
 
 `range` over `[]int` / `[]int64` / `[]byte` / `string`.  
-On **strings**, `for i, r in range s` yields **runes** (Unicode code points as `int`); `i` is the **byte** offset (Go-like).  
+On **strings**, `for i, r in range s` yields **runes** (Unicode code points as `int`); `i` is the **byte** offset.  
 `len(s)` / `s[i]` / `s[i:j]` stay **byte**-based. Use `rune_count(s)` for rune length.  
 `break` / `continue` only inside `for` / `while` (`examples/bad/break_outside.mko`).
 **Labeled loops:** `outer: while … { break outer }` / `continue outer`
@@ -454,7 +454,7 @@ fn main() {
     if str_eq("a", "a") { }
     if str_contains("hello", "ell") { }
 
-    // Go-like: range yields runes; index is byte offset
+    // range yields runes; index is byte offset
     for i, r in range "café" {
         print_int(i)
         print_int(r)          // é → 233
@@ -495,7 +495,7 @@ print_int(builder_len(b))
 
 ## 4c. Maps
 
-Go-like hash maps (open addressing in the runtime). Supported today:
+Hash maps (open addressing in the runtime). Supported today:
 `map[string]int`, `map[int]int`, `map[string]string`.
 
 ```mko
@@ -503,9 +503,9 @@ Go-like hash maps (open addressing in the runtime). Supported today:
 let mut m = make(map[string]int)
 m["a"] = 1
 print_int(m["a"])          // 1
-print_int(m["missing"])    // 0 — Go zero value (no panic)
+print_int(m["missing"])    // 0 — zero value (no panic)
 if has(m, "a") { }         // presence
-let v, ok = m["a"]         // Go-like comma-ok
+let v, ok = m["a"]         // comma-ok pattern
 if ok {
     print_int(v)
 }
@@ -624,7 +624,7 @@ fn option_or(o: Option[int], fallback: int) -> int {
 ```
 
 ```mko
-// examples/wrap_err.mko · examples/errors_wrap.mko — Go-like wrap / is
+// examples/wrap_err.mko · examples/errors_wrap.mko — wrap / is
 let r = wrap_err(error("boom"), "parse")  // Err("parse: boom")
 let ok = wrap_err(Ok(7), "unused")        // still Ok(7)
 let e = errorf("missing %s", "config.toml")
@@ -1412,7 +1412,7 @@ print_int(elapsed_ms(t0))
 
 Regex seed supports literals, `.`, `X*`/`X+`/`X?`, `|`, `[abc]`/`[a-z]`/`[^…]`, `(…)` groups, and `^`/`$`. Groups compose only (no `$1` extraction).
 
-Multi-file modules (merge imports; optional `as` / Go alias namespace):
+Multi-file modules (merge imports; optional `as` alias namespace):
 
 ```mko
 // examples/import_lib.mko — flat merge
@@ -1429,7 +1429,7 @@ import "sync"
 assert(strings.contains("hi", "h"))
 let m = sync.rwmutex()
 
-// Go-style grouped import (preferred for multiple paths)
+// Grouped import (preferred for multiple paths)
 import (
     "strings"
     "path"
@@ -1448,19 +1448,19 @@ import { "fmt"; "strings" }
 
 ---
 
-## 15. Testing (Go-like)
+## 15. Testing
 
-| Go | Mako |
-|----|------|
-| `foo_test.go` | `foo_test.mko` (same dir as code) |
-| `func TestAdd(t *testing.T)` | `fn TestAdd() { … }` |
-| `go test ./...` | `mako test [path]` |
-| `go test -run Add` | `mako test --run TestAdd` or `-r 'Test*'` or `-r '/^TestAdd$/'` |
-| `go test -v` | `mako test -v` / `--verbose` (lists matched test functions) |
-| `go test -count=N` | `mako test --count N` |
-| coverage summary | `mako test --coverage` |
-| fuzz/property/snapshot/mock/fixture seeds | `fn FuzzXxx()` / `PropertyXxx()` / `SnapshotXxx()` / `MockXxx()` / `FixtureXxx()` |
-| `t.Run` | `t_run("name")` · nest with `t_run_nested("child")` → `Parent/child` |
+| Feature | Syntax |
+|---------|--------|
+| Test file | `foo_test.mko` (same dir as code) |
+| Test function | `fn TestAdd() { … }` |
+| Run all | `mako test [path]` |
+| Filter | `mako test --run TestAdd` or `-r 'Test*'` or `-r '/^TestAdd$/'` |
+| Verbose | `mako test -v` / `--verbose` (lists matched test functions) |
+| Repeat | `mako test --count N` |
+| Coverage | `mako test --coverage` |
+| Categories | `fn FuzzXxx()` / `PropertyXxx()` / `SnapshotXxx()` / `MockXxx()` / `FixtureXxx()` |
+| Subtests | `t_run("name")` · nest with `t_run_nested("child")` → `Parent/child` |
 
 ```mko
 // examples/testing/add.mko
@@ -1533,7 +1533,7 @@ mako build path.mko -o bin   # → C → .o cache → link (debug -O0; --release
 mako build -j 8 --no-incremental path.mko   # parallel jobs; disable cache
 mako run path.mko [-- args...]   # compile + run; trailing args → argc/args
 mako test [path] [--run PAT] [-v] [--count N] [--coverage]  # tests + categories
-mako fmt [paths...] [-w|-l|-d] [-p NAME]   # gofmt-like: stdout / write / list / diff
+mako fmt [paths...] [-w|-l|-d] [-p NAME]   # formatter: stdout / write / list / diff
 mako lint [path] [-p NAME]            # workspace-aware typecheck + rules
 mako bench [path] [-p NAME] [--json]  # workspace-aware bench_*.mko wall time
 mako profile [path] [-p NAME] [--release] [--json] -- [args...]  # compile/run profile
@@ -1648,7 +1648,7 @@ python3 -m http.server -d wasm-dist 8080
 ## Target / roadmap (not in this guide as “works”)
 
 **Already Done** (see STATUS): CFG NLL, HTTP/1.1 + HTTPS + H2 TLS beachhead,
-gRPC/H3-client pieces, WASI preview1, Go-like operators/imports/`mako version`,
+gRPC/H3-client pieces, WASI preview1, operators/imports/`mako version`,
 stdlib Waves 1–9 (~98% major areas).
 
 Still **Target / Later** (VISION): colored `async`/`await`, complete Unicode property database / PCRE,
@@ -1688,7 +1688,7 @@ publish (external). See [VISION.md](VISION.md) and [STATUS.md](STATUS.md).
 | HTTP library | `examples/http_lib/` (`./scripts/http-lib-smoke.sh`) · `testing/http_lib_test.mko` |
 | Systems append log | `examples/systems_log/` |
 | Mini KV engine | `examples/db_engine/` · `testing/db_engine_test.mko` |
-| Microbench vs Go | `examples/bench/` · `./scripts/bench-vs-go.sh` |
+| Microbench | `examples/bench/` · `./scripts/bench.sh` |
 | HTTPS server (OpenSSL) | `examples/https_server.mko` (`./scripts/https-server-smoke.sh`) |
 | HTTP/2 TLS server | `examples/h2_server.mko` (`./scripts/h2-server-smoke.sh`) |
 | HTTP client | `examples/http_get.mko` |

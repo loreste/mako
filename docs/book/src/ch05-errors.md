@@ -31,7 +31,7 @@ fn load_port(s: string) -> Result[int, string] {
 }
 ```
 
-## Go-like wrapping
+## Error wrapping
 
 ```mko
 fn open_cfg(path: string) -> Result[int, string] {
