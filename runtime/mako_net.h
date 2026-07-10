@@ -9,6 +9,7 @@
 #include <sys/select.h>
 #include <sys/socket.h>
 #include <sys/un.h>
+#include <netinet/tcp.h>
 #endif
 
 #ifdef __cplusplus
@@ -94,9 +95,9 @@ static inline int64_t mako_tcp_read_print(int64_t fd) {
     return (int64_t)n;
 }
 
-/* Read up to 4096 bytes from fd; returns data as MakoString. */
+/* Read up to 65536 bytes from fd; returns data as MakoString. */
 static inline MakoString mako_tcp_read(int64_t fd) {
-    char buf[4096];
+    char buf[65536];
     ssize_t n = recv((int)fd, buf, sizeof(buf), 0);
     if (n <= 0) return mako_str_from_cstr("");
     char *d = (char *)malloc((size_t)n + 1);
@@ -104,6 +105,12 @@ static inline MakoString mako_tcp_read(int64_t fd) {
     memcpy(d, buf, (size_t)n);
     d[n] = 0;
     return (MakoString){d, (size_t)n};
+}
+
+/* Disable Nagle's algorithm for low-latency writes. */
+static inline int64_t mako_tcp_nodelay(int64_t fd) {
+    int flag = 1;
+    return setsockopt((int)fd, IPPROTO_TCP, TCP_NODELAY, &flag, sizeof(flag)) == 0 ? 1 : 0;
 }
 
 /* ---- UDP datagram helpers (IPv4 dotted hosts) ---- */

@@ -117,7 +117,10 @@ static inline int mako_setenv(const char *k, const char *v) {
 /* clock_gettime / nanosleep come from winpthreads */
 #else
 
-#if !defined(__MINGW32__) && !defined(__MINGW64__)
+/* Always provide shims on MSVC and zig-cc cross builds. MinGW may or may not
+ * have these; guard with a feature check rather than MinGW detection so that
+ * zig cross-compiles (which define __MINGW64__) still get the shims. */
+#if !defined(MAKO_HAS_CLOCK_GETTIME)
 static inline int clock_gettime(int clock_id, struct timespec *ts) {
     (void)clock_id;
     FILETIME ft;
@@ -140,7 +143,7 @@ static inline int nanosleep(const struct timespec *req, struct timespec *rem) {
     mako_sleep_ms(ms <= 0 ? 1 : ms);
     return 0;
 }
-#endif
+#endif /* !MAKO_HAS_CLOCK_GETTIME */
 
 typedef CRITICAL_SECTION pthread_mutex_t;
 typedef CONDITION_VARIABLE pthread_cond_t;

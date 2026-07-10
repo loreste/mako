@@ -4525,6 +4525,12 @@ impl Codegen {
                             self.line(&format!("MakoString {tmp} = mako_tcp_read({f});"));
                             return ("MakoString".into(), tmp);
                         }
+                        "tcp_nodelay" => {
+                            let (_, f) = self.emit_expr(&args[0]);
+                            let tmp = self.fresh("tnd");
+                            self.line(&format!("int64_t {tmp} = mako_tcp_nodelay({f});"));
+                            return ("int64_t".into(), tmp);
+                        }
                         "json_object" => {
                             let (_, k) = self.emit_expr(&args[0]);
                             let (_, v) = self.emit_expr(&args[1]);

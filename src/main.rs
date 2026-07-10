@@ -3043,6 +3043,15 @@ fn find_openssl() -> Option<(PathBuf, PathBuf)> {
             }
         }
     }
+    // System include path (Linux distro packages)
+    if PathBuf::from("/usr/include/openssl/ssl.h").exists() {
+        return Some((PathBuf::from("/usr/include"), PathBuf::from("/usr/lib")));
+    }
+    // Also check multiarch (Debian/Ubuntu)
+    let arch_lib = PathBuf::from("/usr/lib").join(std::env::consts::ARCH.to_string() + "-linux-gnu");
+    if PathBuf::from("/usr/include/openssl/ssl.h").exists() && arch_lib.exists() {
+        return Some((PathBuf::from("/usr/include"), arch_lib));
+    }
     None
 }
 
