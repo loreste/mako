@@ -509,6 +509,7 @@ Working examples live in `examples/db_engine/` (file imports) and
 | [How-to Guides](docs/howto/README.md) | Practical guides for HTTP, errors, concurrency, and more |
 | [Language Guide](docs/GUIDE.md) | The full syntax reference |
 | [Standard Library](docs/STDLIB.md) | What's in the box |
+| [Built-in Functions](docs/BUILTINS.md) | Complete reference — every function, signature, and description |
 | [Security](docs/SECURITY.md) | How Mako keeps your code safe |
 | [Performance](docs/PERFORMANCE.md) | Numbers |
 | [Status](docs/STATUS.md) | Honest accounting of what works and what's left |
