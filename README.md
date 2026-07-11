@@ -195,6 +195,60 @@ cmap_set(m, "key", "value")
 extern "C" fn my_c_function(n: int) -> int
 ```
 
+**Putting it all together** — struct, database, error handling, arenas, and
+concurrency in one program ([examples/showcase.mko](examples/showcase.mko)):
+
+```mko
+#[derive(json)]
+struct Task {
+    id: int
+    title: string
+    done: int
+}
+
+fn insert_task(db: SqlDB, title: string) -> Result[int, string] {
+    let _ = sql_exec_str4(db, "INSERT INTO tasks (title, done) VALUES ($1, $2)", title, "0", "", "")?
+    Ok(0)
+}
+
+fn worker(ch: chan[int], id: int, results: CMap) -> int {
+    arena a {
+        let label = arena_text(a, format_int(id))
+        while true {
+            let task_id = ch.recv()
+            if task_id == 0 { break }
+            cmap_set(results, format_int(task_id), "worker " + label + " done")
+        }
+    }
+    return id
+}
+
+fn main() {
+    let db = sql_open_sqlite("/tmp/showcase.db")
+    let _ = sql_exec_plain(db, "CREATE TABLE IF NOT EXISTS tasks (id INTEGER PRIMARY KEY, title TEXT, done INTEGER)")
+
+    match insert_task(db, "write tests") {
+        Ok(_) => print("inserted"),
+        Err(e) => print("error: " + e),
+    }
+
+    let results = cmap_new()
+    let ch = chan_new(10)
+    crew t {
+        let w1 = t.kick(worker(ch, 1, results))
+        let w2 = t.kick(worker(ch, 2, results))
+        for i in 5 { let _ = ch.send(i + 1) }
+        let _ = ch.send(0)
+        let _ = ch.send(0)
+        let _ = w1.join()
+        let _ = w2.join()
+    }
+
+    for i in 5 { print(cmap_get(results, format_int(i + 1))) }
+    let _ = sql_close(db)
+}
+```
+
 More in [examples/](examples/) and [The Mako Book](docs/book/).
 
 ---

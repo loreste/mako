@@ -929,6 +929,107 @@ TestDivideSubtests/by zero ... ok
 
 ---
 
+## 15. Showcase — everything together
+
+Struct, database, error handling, ownership, arenas, and concurrency in one
+program. See [examples/showcase.mko](../examples/showcase.mko).
+
+```mko
+#[derive(json)]
+struct Task {
+    id: int
+    title: string
+    done: int
+}
+
+fn create_table(db: SqlDB) -> Result[int, string] {
+    let _ = sql_exec_plain(db, "CREATE TABLE IF NOT EXISTS tasks (id INTEGER PRIMARY KEY, title TEXT, done INTEGER)")?
+    Ok(0)
+}
+
+fn insert_task(db: SqlDB, title: string) -> Result[int, string] {
+    let _ = sql_exec_str4(db, "INSERT INTO tasks (title, done) VALUES ($1, $2)", title, "0", "", "")?
+    Ok(0)
+}
+
+fn get_task(db: SqlDB, title: string) -> Result[string, string] {
+    let row = sql_query_str(db, "SELECT title FROM tasks WHERE title = $1", title)
+    if str_eq(row, "") {
+        return error("task not found")
+    }
+    Ok(row)
+}
+
+fn worker(ch: chan[int], id: int, results: CMap) -> int {
+    arena a {
+        let label = arena_text(a, format_int(id))
+        while true {
+            let task_id = ch.recv()
+            if task_id == 0 { break }
+            cmap_set(results, format_int(task_id), "worker " + label + " processed task " + format_int(task_id))
+        }
+    }
+    return id
+}
+
+fn main() {
+    let db = sql_open_sqlite("/tmp/mako_showcase.db")
+    let _ = create_table(db)
+
+    let titles = ["build parser", "write tests", "deploy service", "fix bug", "review PR"]
+    for i in 5 {
+        match insert_task(db, titles[i]) {
+            Ok(_) => {}
+            Err(e) => print("insert error: " + e)
+        }
+    }
+
+    match get_task(db, "write tests") {
+        Ok(title) => print("found: " + title),
+        Err(e) => print("error: " + e),
+    }
+
+    let results = cmap_new()
+    let ch = chan_new(10)
+
+    crew t {
+        let w1 = t.kick(worker(ch, 1, results))
+        let w2 = t.kick(worker(ch, 2, results))
+        let w3 = t.kick(worker(ch, 3, results))
+
+        for i in 5 { let _ = ch.send(i + 1) }
+        let _ = ch.send(0)
+        let _ = ch.send(0)
+        let _ = ch.send(0)
+
+        let _ = w1.join()
+        let _ = w2.join()
+        let _ = w3.join()
+    }
+
+    for i in 5 { print(cmap_get(results, format_int(i + 1))) }
+    let _ = sql_close(db)
+    let _ = remove_file("/tmp/mako_showcase.db")
+    print("done")
+}
+```
+
+```bash
+mako run examples/showcase.mko
+```
+
+**What this covers:**
+
+- `#[derive(json)]` struct
+- SQLite database (create, insert, query with parameterized queries)
+- `Result` with `?` propagation and `match` on `Ok`/`Err`
+- `arena` block for worker-scoped memory
+- `crew` with 3 concurrent workers
+- `chan` for distributing work
+- `CMap` for thread-safe shared results
+
+---
+
 ## What next
 
 - **[GUIDE.md](GUIDE.md)** -- full language reference with all syntax details.
