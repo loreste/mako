@@ -13,6 +13,38 @@ Book: [§11 Speed & memory safety](book/src/ch11-speed-safety.md) · Release how
 ./scripts/bench-vs-go-rust.sh 2>&1 | awk '/=== CPU/,/=== Memory/' | python3 scripts/parse_bench_ns.py
 ```
 
+## Publishing benchmark claims
+
+Do not publish a throughput number by itself. Any req/sec claim must include
+the test setup and the exact command used to produce it. At
+minimum, include:
+
+- Hardware: CPU model, core count, RAM, OS, and whether the client and server
+  ran on the same machine.
+- Build: Mako commit, `mako build` flags, C compiler, optimization flags, and
+  linked optional libraries.
+- Server workload: source file, route, response body size, keep-alive setting,
+  TLS on/off, logging on/off, and concurrency model.
+- Load generator: tool name/version, command line, duration, warmup, concurrent
+  connections, threads, pipelining, and whether latency percentiles were
+  recorded.
+- Result: requests/sec, p50/p95/p99 latency, error count, CPU utilization, and
+  peak RSS.
+
+Example format:
+
+```text
+HTTP throughput: N req/sec
+Server: commit <sha>, `mako build --release examples/http_server.mko -o out/http_server`
+Client: `wrk -t8 -c256 -d30s http://127.0.0.1:18080/`
+Machine: <CPU>, <RAM>, <OS>; client and server on localhost
+Response: <bytes>, keep-alive on, no TLS, access logs off
+Latency: p50 <x> ms, p95 <y> ms, p99 <z> ms; errors: 0
+```
+
+If any of those details are missing, describe the number as an informal local
+experiment, not a benchmark result.
+
 ## Measured wall-clock times (median of 5 runs, this machine, 2026-07-09)
 
 Wall ns for each kernel (`now_ns`). Lower is better.
@@ -24,8 +56,9 @@ Wall ns for each kernel (`now_ns`). Lower is better.
 | slice100k append | 61 µs |
 | map50k pre-sized | 503 µs |
 
-These numbers are competitive with the fastest compiled languages on equivalent
-workloads.
+These are narrow local microbenchmarks, not proof of end-to-end service
+performance. Use them to sanity-check codegen changes, then measure your own
+service workload with the methodology above.
 
 Peak RSS via `/usr/bin/time -l` may be unavailable in restricted sandboxes; run the
 script on a normal shell for RSS lines.

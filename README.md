@@ -262,6 +262,7 @@ helper = { path = "../helper" }
 | [Standard Library](docs/STDLIB.md) | What's included |
 | [Built-in Functions](docs/BUILTINS.md) | Every function, every signature |
 | [Language Spec](LANGUAGE_SPEC.md) | Formal specification |
+| [CLI Reference](docs/CLI.md) | Every command, flag, and workflow |
 | [Tutorials](website/tutorials/) | Backend, game networking, databases, FFI, concurrency, cloud |
 | [Security](docs/SECURITY.md) | Safety model |
 | [Performance](docs/PERFORMANCE.md) | Benchmarks |
