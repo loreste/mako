@@ -1949,6 +1949,159 @@ unsafe { let v = unsafe_index(xs, i) }    // explicit bounds opt-out
 // Crew exit cancel_joins; [package] systems = true forbids GC weakening
 ```
 
+### Session Management, Authentication & Authorization
+
+Mako ships a complete toolkit for cookies, sessions, CSRF protection,
+authentication, signed tokens, and role-based access control. All security-
+sensitive comparisons use constant-time equality to prevent timing attacks.
+
+Runtime: `runtime/mako_security.h`.
+
+#### Cookies
+
+| Builtin | Signature | Purpose |
+|---------|-----------|---------|
+| `cookie_get` | `(header: string, name: string) -> string` | Parse a cookie value from a `Cookie:` header |
+| `cookie_make` | `(name: string, value: string, max_age: int) -> string` | Create a `Set-Cookie` header string (HttpOnly, SameSite=Lax, Path=/) |
+
+```mko
+let cookie_hdr = http_header(c, "Cookie")
+let sid = cookie_get(cookie_hdr, "sid")
+
+let set_cookie = cookie_make("sid", session_id, 86400)  // 24-hour expiry
+let _ = http_respond_ct(c, 200, "application/json", body, set_cookie)
+```
+
+#### Sessions
+
+| Builtin | Signature | Purpose |
+|---------|-----------|---------|
+| `session_id_new` | `() -> string` | Generate a 32-char random hex session ID (16 bytes of cryptographic randomness) |
+| `auth_session_cookie` | `(cookie_header: string, cookie_name: string, expected: string) -> int` | Constant-time check of a session cookie against expected value (1=match, 0=no) |
+
+```mko
+let sid = session_id_new()           // e.g. "a3f8...c210" (32 hex chars)
+cmap_set(sessions, sid, user)
+
+// Later, on a protected route:
+let cookie_hdr = http_header(c, "Cookie")
+if auth_session_cookie(cookie_hdr, "sid", expected_sid) == 1 {
+    // session valid
+}
+```
+
+#### CSRF Protection
+
+| Builtin | Signature | Purpose |
+|---------|-----------|---------|
+| `csrf_token` | `() -> string` | Generate a random CSRF token |
+| `csrf_check` | `(expected: string, submitted: string) -> int` | Constant-time comparison (1=match, 0=no) |
+
+```mko
+let token = csrf_token()
+// embed token in the HTML form or return it as a response header
+
+// On form submission:
+let submitted = json_get_string(body, "csrf_token")
+if csrf_check(token, submitted) == 0 {
+    let _ = http_respond_json(c, 403, "{\"error\":\"CSRF token mismatch\"}")
+    return
+}
+```
+
+#### Authentication
+
+| Builtin | Signature | Purpose |
+|---------|-----------|---------|
+| `auth_bearer` | `(authorization: string) -> string` | Extract token from "Bearer \<token\>" header |
+| `auth_check_bearer` | `(authorization: string, expected_token: string) -> int` | Constant-time bearer token verification |
+| `auth_basic_header` | `(user: string, pass: string) -> string` | Build a "Basic \<base64\>" authorization header |
+| `auth_check_basic` | `(authorization: string, user: string, pass: string) -> int` | Verify Basic auth credentials |
+
+```mko
+// Bearer token
+let auth_hdr = http_header(c, "Authorization")
+let token = auth_bearer(auth_hdr)                       // extract raw token
+if auth_check_bearer(auth_hdr, expected_token) == 1 {
+    // authorized
+}
+
+// Basic auth
+let hdr = auth_basic_header("admin", "s3cret")          // build header
+if auth_check_basic(auth_hdr, "admin", "s3cret") == 1 {
+    // credentials valid
+}
+```
+
+#### Signed Tokens (HMAC-SHA256)
+
+| Builtin | Signature | Purpose |
+|---------|-----------|---------|
+| `auth_token_sign` | `(subject: string, secret: string) -> string` | Sign a subject, returns "subject.hmac_signature" |
+| `auth_token_check` | `(token: string, secret: string) -> int` | Verify a signed token (1=valid, 0=invalid) |
+| `auth_token_subject` | `(token: string) -> string` | Extract subject from "subject.signature" token |
+
+```mko
+let secret = "my_signing_key"
+let token = auth_token_sign("user:42", secret)   // "user:42.abc123..."
+if auth_token_check(token, secret) == 1 {
+    let sub = auth_token_subject(token)           // "user:42"
+}
+```
+
+#### Role-Based Access Control
+
+| Builtin | Signature | Purpose |
+|---------|-----------|---------|
+| `auth_role_has` | `(roles_csv: string, role: string) -> int` | Check if a comma-separated roles string contains a role |
+| `authz_allow_role` | `(user_roles_csv: string, required_roles_csv: string) -> int` | Check if user has any of the required roles |
+
+```mko
+let user_roles = "editor,viewer"
+if auth_role_has(user_roles, "admin") == 0 {
+    // user is not an admin
+}
+if authz_allow_role(user_roles, "editor,admin") == 1 {
+    // user has at least one of the required roles
+}
+```
+
+#### Practical Session Flow
+
+```mko
+let sessions = cmap_new()
+
+fn handle_login(c: int) {
+    let body = http_body(c)
+    let user = json_get_string(body, "user")
+    let pass = json_get_string(body, "pass")
+
+    // verify credentials (your logic here)
+
+    let sid = session_id_new()
+    cmap_set(sessions, sid, user)
+    let cookie = cookie_make("sid", sid, 86400)  // 24h
+    let _ = http_respond_ct(c, 200, "application/json", "{\"ok\":true}", cookie)
+}
+
+fn handle_protected(c: int) {
+    let cookie_hdr = http_header(c, "Cookie")
+    let sid = cookie_get(cookie_hdr, "sid")
+    if cmap_has(sessions, sid) == 0 {
+        let _ = http_respond_json(c, 401, "{\"error\":\"unauthorized\"}")
+        return
+    }
+    let user = cmap_get(sessions, sid)
+    let _ = http_respond_json(c, 200, json_object("user", user))
+}
+```
+
+Security properties:
+- All token/password comparisons use constant-time equality (prevents timing attacks)
+- Cookies default to HttpOnly (no JS access), SameSite=Lax (CSRF protection), Path=/
+- Session IDs use cryptographic random bytes (`mako_random_bytes`)
+- Secrets can be wiped from memory with `secret_from_str` / `secret_drop`
+
 ---
 
 ## 17. Extern C

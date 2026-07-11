@@ -813,6 +813,122 @@ loop.
 
 ---
 
+## Sessions and Authentication
+
+Mako provides built-in session management and authentication primitives that
+integrate with the HTTP server. These live in `runtime/mako_security.h` and
+use constant-time comparisons throughout to prevent timing attacks.
+
+### Cookie-Based Sessions with CMap
+
+Use `CMap` as a thread-safe session store. Session IDs are generated with
+cryptographic randomness, and cookies default to HttpOnly + SameSite=Lax:
+
+```mko
+let sessions = cmap_new()
+
+fn handle_login(c: int) {
+    let body = http_body(c)
+    let user = json_get_string(body, "user")
+    let pass = json_get_string(body, "pass")
+
+    // verify credentials against your database
+
+    let sid = session_id_new()                     // 32-char hex, crypto-random
+    cmap_set(sessions, sid, user)
+    let cookie = cookie_make("sid", sid, 86400)    // HttpOnly; SameSite=Lax; Path=/; 24h
+    let _ = http_respond_ct(c, 200, "application/json", "{\"ok\":true}", cookie)
+}
+
+fn handle_protected(c: int) {
+    let cookie_hdr = http_header(c, "Cookie")
+    let sid = cookie_get(cookie_hdr, "sid")
+    if cmap_has(sessions, sid) == 0 {
+        let _ = http_respond_json(c, 401, "{\"error\":\"unauthorized\"}")
+        return
+    }
+    let user = cmap_get(sessions, sid)
+    let _ = http_respond_json(c, 200, json_object("user", user))
+}
+
+fn handle_logout(c: int) {
+    let cookie_hdr = http_header(c, "Cookie")
+    let sid = cookie_get(cookie_hdr, "sid")
+    let _ = cmap_del(sessions, sid)
+    let expired = cookie_make("sid", "", 0)        // expire the cookie
+    let _ = http_respond_ct(c, 200, "application/json", "{\"ok\":true}", expired)
+}
+```
+
+### Bearer Token Authentication
+
+For API-to-API or mobile clients that send tokens in the `Authorization` header:
+
+```mko
+fn handle_api(c: int) {
+    let auth_hdr = http_header(c, "Authorization")
+    if auth_check_bearer(auth_hdr, expected_api_key) == 0 {
+        let _ = http_respond_json(c, 401, "{\"error\":\"invalid token\"}")
+        return
+    }
+    // authorized -- proceed
+    let _ = http_respond_json(c, 200, "{\"data\":\"secret\"}")
+}
+```
+
+### CSRF Protection
+
+For browser-facing forms, generate a CSRF token per session and verify it on
+state-changing requests:
+
+```mko
+fn handle_form_page(c: int) {
+    let token = csrf_token()
+    // store token in session
+    let cookie_hdr = http_header(c, "Cookie")
+    let sid = cookie_get(cookie_hdr, "sid")
+    cmap_set(csrf_store, sid, token)
+    // include token in the HTML form as a hidden field
+    let html = "<form><input type=\"hidden\" name=\"csrf\" value=\"" + token + "\">...</form>"
+    let _ = http_respond_ct(c, 200, "text/html", html)
+}
+
+fn handle_form_submit(c: int) {
+    let cookie_hdr = http_header(c, "Cookie")
+    let sid = cookie_get(cookie_hdr, "sid")
+    let expected = cmap_get(csrf_store, sid)
+    let body = http_body(c)
+    let submitted = json_get_string(body, "csrf")
+    if csrf_check(expected, submitted) == 0 {
+        let _ = http_respond_json(c, 403, "{\"error\":\"CSRF token mismatch\"}")
+        return
+    }
+    // CSRF valid -- process form
+}
+```
+
+### Session/Auth API Reference
+
+| Function | Purpose |
+|----------|---------|
+| `cookie_get(header, name)` | Parse cookie value from Cookie header |
+| `cookie_make(name, value, max_age)` | Create Set-Cookie string (HttpOnly, SameSite=Lax) |
+| `session_id_new()` | 32-char crypto-random hex session ID |
+| `auth_session_cookie(header, name, expected)` | Constant-time session cookie check |
+| `csrf_token()` | Generate random CSRF token |
+| `csrf_check(expected, submitted)` | Constant-time CSRF comparison |
+| `auth_bearer(authorization)` | Extract token from Bearer header |
+| `auth_check_bearer(authorization, expected)` | Constant-time bearer verification |
+| `auth_basic_header(user, pass)` | Build Basic auth header |
+| `auth_check_basic(authorization, user, pass)` | Verify Basic auth credentials |
+| `auth_token_sign(subject, secret)` | HMAC-SHA256 sign: "subject.signature" |
+| `auth_token_check(token, secret)` | Verify signed token |
+| `auth_token_subject(token)` | Extract subject from signed token |
+| `auth_role_has(roles_csv, role)` | Check role membership |
+| `authz_allow_role(user_roles, required_roles)` | Check if user has any required role |
+
+---
+
 ## Summary
 
 | Layer | Functions |
@@ -827,6 +943,7 @@ loop.
 | Game UDP | `game_udp_bind`, `game_udp_recv`, `game_udp_send`, `game_udp_broadcast` |
 | HTTP Engine | `httpengine_new`, `httpengine_route`, `httpengine_start`, `httpengine_stop` |
 | Shutdown | `http_shutdown_begin`, `http_shutdown_requested`, `http_active_connections` |
+| Sessions/Auth | `session_id_new`, `cookie_get`, `cookie_make`, `auth_bearer`, `auth_check_bearer`, `csrf_token`, `csrf_check` |
 | Listener | `http_close_listener` |
 
 Next: [Data](ch09-data.md).

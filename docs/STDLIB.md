@@ -167,7 +167,7 @@ High-level HTTP server with declarative routing:
 | `ecs_*` | ECS seed: entities, components, queries, archetype masks, system updates |
 | `ring_*` / `lfq_*` / `sg_*` | fixed-capacity rings, SPSC queue seed, scatter/gather string helpers |
 | `fsm_rule` / `fsm_can` / `fsm_transition` / `fsm_is` | finite-state-machine helpers for session systems |
-| `cookie_get` / `cookie_make` / `session_id_new` / `csrf_*` / `auth_*` / `authz_*` | cookies, sessions, CSRF, authentication, authorization |
+| `cookie_get` / `cookie_make` / `session_id_new` / `csrf_*` / `auth_*` / `authz_*` | cookies, sessions, CSRF, authentication, authorization (see Session/Auth section below) |
 | `rate_allow` / `rate_remaining` / `cache_*` / `http_compress_if_accepted` | backend rate limiting, TTL cache, compression negotiation |
 | `job_schedule` / `job_due` / `job_delay_ms` / `job_cancel` | background job scheduling primitives |
 | `conn_pool_slot` / `conn_pool_next` / `lb_pick2` / `lb_pick3` | connection-pool slotting and load balancing |
@@ -469,6 +469,57 @@ See [howto/04-packages.md](howto/04-packages.md).
 | Generics collections | slices + maps helpers Done; `List<T>` Later |
 | zip multi-file · png/gif/jpeg · reflect · httptest · gob/mail/smtp/slog/binary | Done (area-level; not every symbol) |
 | Full stdlib symbol parity | **Not claimed** (~98% major *areas*; not every symbol) |
+
+---
+
+## Session Management, Authentication & Authorization
+
+Cookies, sessions, CSRF, auth, signed tokens, and RBAC (`runtime/mako_security.h`).
+
+### Cookies
+
+| Builtin | Purpose |
+|---------|---------|
+| `cookie_get(header, name) -> string` | Parse a cookie value from a `Cookie:` header |
+| `cookie_make(name, value, max_age) -> string` | Create a `Set-Cookie` header (HttpOnly, SameSite=Lax, Path=/) |
+
+### Sessions
+
+| Builtin | Purpose |
+|---------|---------|
+| `session_id_new() -> string` | Generate a 32-char random hex session ID (16 bytes of cryptographic randomness) |
+| `auth_session_cookie(cookie_header, cookie_name, expected) -> int` | Constant-time session cookie check (1=match, 0=no) |
+
+### CSRF
+
+| Builtin | Purpose |
+|---------|---------|
+| `csrf_token() -> string` | Generate a random CSRF token |
+| `csrf_check(expected, submitted) -> int` | Constant-time comparison (1=match, 0=no) |
+
+### Authentication
+
+| Builtin | Purpose |
+|---------|---------|
+| `auth_bearer(authorization) -> string` | Extract token from "Bearer \<token\>" header |
+| `auth_check_bearer(authorization, expected_token) -> int` | Constant-time bearer token verification |
+| `auth_basic_header(user, pass) -> string` | Build a "Basic \<base64\>" authorization header |
+| `auth_check_basic(authorization, user, pass) -> int` | Verify Basic auth credentials |
+
+### Signed Tokens (HMAC-SHA256)
+
+| Builtin | Purpose |
+|---------|---------|
+| `auth_token_sign(subject, secret) -> string` | Sign a subject, returns "subject.hmac_signature" |
+| `auth_token_check(token, secret) -> int` | Verify a signed token (1=valid, 0=invalid) |
+| `auth_token_subject(token) -> string` | Extract subject from "subject.signature" token |
+
+### Role-Based Access Control
+
+| Builtin | Purpose |
+|---------|---------|
+| `auth_role_has(roles_csv, role) -> int` | Check if a CSV roles string contains a role |
+| `authz_allow_role(user_roles_csv, required_roles_csv) -> int` | Check if user has any required role |
 
 ---
 

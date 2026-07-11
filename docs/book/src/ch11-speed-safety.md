@@ -527,6 +527,37 @@ safety for networked services.
 
 ---
 
+## Session and Authentication Security
+
+Mako's session management and authentication toolkit (`runtime/mako_security.h`)
+extends the safety-by-default philosophy to web security:
+
+- **Constant-time comparisons everywhere.** All token, password, session, and
+  CSRF comparisons use `const_eq` internally. Functions like
+  `auth_session_cookie`, `auth_check_bearer`, `auth_check_basic`,
+  `auth_token_check`, and `csrf_check` are immune to timing attacks by
+  construction. Application code never needs to implement its own comparison
+  logic.
+
+- **Secure cookie defaults.** `cookie_make` produces cookies with `HttpOnly`
+  (prevents JavaScript access), `SameSite=Lax` (mitigates cross-site request
+  forgery), and `Path=/`. There is no "insecure cookie" API to misuse.
+
+- **Cryptographic session IDs.** `session_id_new` generates 16 bytes of
+  cryptographic randomness (via `mako_random_bytes`), formatted as 32 hex
+  characters. This provides 128 bits of entropy, making session ID guessing
+  computationally infeasible.
+
+- **Secret memory wiping.** Signing keys and API tokens can be stored via
+  `secret_from_str` and explicitly zeroed with `secret_drop`, preventing
+  sensitive material from lingering in freed memory where crash dumps or
+  allocation reuse could expose it.
+
+- **HMAC-SHA256 signed tokens.** `auth_token_sign` produces tamper-evident
+  tokens using HMAC-SHA256. Verification via `auth_token_check` is constant-time.
+
+---
+
 ## Memory Safety Contract Summary
 
 | Risk               | Prevention                                  |
@@ -537,7 +568,9 @@ safety for networked services.
 | Data races         | Channels + crew isolation + CMap (thread-safe by design) |
 | Header injection   | `http_header_ok` rejects CR/LF             |
 | Secret residue     | `secret_from_str` + `secret_drop` zeroing  |
-| Timing side-channel| `const_eq` constant-time comparison         |
+| Timing side-channel| `const_eq` constant-time comparison (all auth/session/CSRF functions) |
+| Session hijacking  | Crypto-random session IDs (128-bit entropy), HttpOnly cookies |
+| CSRF               | `csrf_token` / `csrf_check` with constant-time verify; SameSite=Lax cookies |
 | SQL injection      | Parameterized queries only (`sqlite_query_int_params`) |
 
 ---

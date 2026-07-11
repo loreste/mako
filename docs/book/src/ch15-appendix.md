@@ -403,6 +403,51 @@ Supported patterns: literals, `.`, `*`, `+`, `?`, `|`, `[abc]`, `[a-z]`,
 | `secret_drop`     | `(Secret)`                      | Zero and free secret |
 | `http_header_ok`  | `(name, val) -> int`            | Reject CR/LF injection |
 
+### Cookies
+
+| Function          | Signature                                                    | Purpose              |
+|-------------------|--------------------------------------------------------------|----------------------|
+| `cookie_get`      | `(header: string, name: string) -> string`                   | Parse cookie value from Cookie header |
+| `cookie_make`     | `(name: string, value: string, max_age: int) -> string`      | Create Set-Cookie string (HttpOnly, SameSite=Lax, Path=/) |
+
+### Sessions
+
+| Function               | Signature                                                              | Purpose              |
+|------------------------|------------------------------------------------------------------------|----------------------|
+| `session_id_new`       | `() -> string`                                                         | Generate 32-char crypto-random hex session ID |
+| `auth_session_cookie`  | `(cookie_header: string, cookie_name: string, expected: string) -> int` | Constant-time session cookie check (1=match, 0=no) |
+
+### CSRF Protection
+
+| Function          | Signature                                          | Purpose              |
+|-------------------|----------------------------------------------------|----------------------|
+| `csrf_token`      | `() -> string`                                     | Generate random CSRF token |
+| `csrf_check`      | `(expected: string, submitted: string) -> int`     | Constant-time comparison (1=match, 0=no) |
+
+### Authentication
+
+| Function              | Signature                                                           | Purpose              |
+|-----------------------|---------------------------------------------------------------------|----------------------|
+| `auth_bearer`         | `(authorization: string) -> string`                                 | Extract token from "Bearer \<token\>" header |
+| `auth_check_bearer`   | `(authorization: string, expected_token: string) -> int`            | Constant-time bearer verification (1=match, 0=no) |
+| `auth_basic_header`   | `(user: string, pass: string) -> string`                            | Build "Basic \<base64\>" authorization header |
+| `auth_check_basic`    | `(authorization: string, user: string, pass: string) -> int`       | Verify Basic auth credentials (1=match, 0=no) |
+
+### Signed Tokens (HMAC-SHA256)
+
+| Function              | Signature                                          | Purpose              |
+|-----------------------|----------------------------------------------------|----------------------|
+| `auth_token_sign`     | `(subject: string, secret: string) -> string`      | Sign subject, returns "subject.hmac_signature" |
+| `auth_token_check`    | `(token: string, secret: string) -> int`           | Verify signed token (1=valid, 0=invalid) |
+| `auth_token_subject`  | `(token: string) -> string`                        | Extract subject from "subject.signature" token |
+
+### Role-Based Access Control
+
+| Function              | Signature                                                          | Purpose              |
+|-----------------------|--------------------------------------------------------------------|----------------------|
+| `auth_role_has`       | `(roles_csv: string, role: string) -> int`                         | Check if CSV roles contains a role |
+| `authz_allow_role`    | `(user_roles_csv: string, required_roles_csv: string) -> int`      | Check if user has any required role |
+
 ### Error Handling
 
 | Function          | Signature                               | Purpose              |

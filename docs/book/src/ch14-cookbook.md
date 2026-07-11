@@ -1267,4 +1267,181 @@ The circuit breaker transitions:
 
 This pattern prevents cascading failures in microservice architectures.
 
+## Authenticated API Server
+
+A complete server with login, session creation, cookie management, protected
+routes, CSRF tokens, role checking, and logout. Uses `CMap` as a thread-safe
+session store.
+
+```mko
+let sessions = cmap_new()    // sid -> user
+let roles = cmap_new()       // user -> comma-separated roles
+let csrf_store = cmap_new()  // sid -> csrf_token
+
+fn handle_login(c: int) {
+    let body = http_body(c)
+    let user = json_get_string(body, "user")
+    let pass = json_get_string(body, "pass")
+
+    // In production, verify credentials against a database.
+    // Here we accept a hardcoded demo user.
+    if str_eq(user, "admin") == 0 or str_eq(pass, "s3cret") == 0 {
+        let _ = http_respond_json(c, 401, "{\"error\":\"bad credentials\"}")
+        return
+    }
+
+    // Create session
+    let sid = session_id_new()
+    cmap_set(sessions, sid, user)
+    cmap_set(roles, user, "admin,editor")
+
+    // Generate CSRF token and store it
+    let token = csrf_token()
+    cmap_set(csrf_store, sid, token)
+
+    // Set HttpOnly cookie (SameSite=Lax, Path=/, 24h expiry)
+    let cookie = cookie_make("sid", sid, 86400)
+    let resp = json_ss("csrf_token", token)
+    let _ = http_respond_ct(c, 200, "application/json", resp, cookie)
+}
+
+fn require_session(c: int) -> string {
+    let cookie_hdr = http_header(c, "Cookie")
+    let sid = cookie_get(cookie_hdr, "sid")
+    if cmap_has(sessions, sid) == 0 {
+        return ""
+    }
+    return sid
+}
+
+fn handle_profile(c: int) {
+    let sid = require_session(c)
+    if str_eq(sid, "") {
+        let _ = http_respond_json(c, 401, "{\"error\":\"unauthorized\"}")
+        return
+    }
+    let user = cmap_get(sessions, sid)
+    let user_roles = cmap_get(roles, user)
+    let resp = json_ss("user", user, "roles", user_roles)
+    let _ = http_respond_json(c, 200, resp)
+}
+
+fn handle_admin_action(c: int) {
+    let sid = require_session(c)
+    if str_eq(sid, "") {
+        let _ = http_respond_json(c, 401, "{\"error\":\"unauthorized\"}")
+        return
+    }
+
+    // Check CSRF token (constant-time)
+    let body = http_body(c)
+    let submitted_csrf = json_get_string(body, "csrf_token")
+    let expected_csrf = cmap_get(csrf_store, sid)
+    if csrf_check(expected_csrf, submitted_csrf) == 0 {
+        let _ = http_respond_json(c, 403, "{\"error\":\"CSRF token mismatch\"}")
+        return
+    }
+
+    // Check role
+    let user = cmap_get(sessions, sid)
+    let user_roles = cmap_get(roles, user)
+    if authz_allow_role(user_roles, "admin") == 0 {
+        let _ = http_respond_json(c, 403, "{\"error\":\"admin role required\"}")
+        return
+    }
+
+    let _ = http_respond_json(c, 200, "{\"action\":\"completed\"}")
+}
+
+fn handle_logout(c: int) {
+    let sid = require_session(c)
+    if str_eq(sid, "") == 0 {
+        let _ = cmap_del(csrf_store, sid)
+        let _ = cmap_del(sessions, sid)
+    }
+    let expired = cookie_make("sid", "", 0)   // expire the cookie
+    let _ = http_respond_ct(c, 200, "application/json", "{\"ok\":true}", expired)
+}
+
+fn route(c: int) {
+    let method = http_method(c)
+    let path = http_path(c)
+
+    if str_eq(method, "POST") and str_eq(path, "/login") {
+        handle_login(c)
+    } else {
+        if str_eq(method, "GET") and str_eq(path, "/profile") {
+            handle_profile(c)
+        } else {
+            if str_eq(method, "POST") and str_eq(path, "/admin/action") {
+                handle_admin_action(c)
+            } else {
+                if str_eq(method, "POST") and str_eq(path, "/logout") {
+                    handle_logout(c)
+                } else {
+                    let _ = http_respond_json(c, 404, "{\"error\":\"not found\"}")
+                }
+            }
+        }
+    }
+}
+
+fn main() {
+    let fd = http_bind(8080)
+    if fd < 0 {
+        print("bind failed")
+        return
+    }
+    print("auth server on :8080")
+
+    while 1 == 1 {
+        let c = http_accept(fd)
+        if c >= 0 {
+            route(c)
+            let _ = http_close(c)
+        }
+    }
+    let _ = http_close_listener(fd)
+}
+```
+
+Build and test:
+
+```bash
+mako build auth_server.mko -o out/auth_server
+out/auth_server &
+
+# Login and get session cookie + CSRF token
+curl -s -c cookies.txt -X POST http://127.0.0.1:8080/login \
+  -d '{"user":"admin","pass":"s3cret"}'
+# {"csrf_token":"..."}
+
+# Access protected route with session cookie
+curl -s -b cookies.txt http://127.0.0.1:8080/profile
+# {"user":"admin","roles":"admin,editor"}
+
+# Admin action with CSRF token
+curl -s -b cookies.txt -X POST http://127.0.0.1:8080/admin/action \
+  -d '{"csrf_token":"<token from login response>"}'
+# {"action":"completed"}
+
+# Logout (expires cookie, removes session)
+curl -s -b cookies.txt -X POST http://127.0.0.1:8080/logout
+# {"ok":true}
+```
+
+This recipe demonstrates:
+- **Session creation** with cryptographic session IDs (`session_id_new`)
+- **Cookie management** with secure defaults (`cookie_make`: HttpOnly, SameSite=Lax, Path=/)
+- **CSRF protection** with per-session tokens and constant-time verification (`csrf_token`, `csrf_check`)
+- **Role-based access control** checking user roles against required roles (`authz_allow_role`)
+- **Logout** by deleting session data and expiring the cookie
+- **Thread-safe state** using `CMap` for concurrent session storage
+
+For bearer-token APIs (mobile clients, service-to-service), replace the cookie
+flow with `auth_check_bearer`. For signed stateless tokens, use
+`auth_token_sign` / `auth_token_check`.
+
+---
+
 Next: [Appendix](ch15-appendix.md).

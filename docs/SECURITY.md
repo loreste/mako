@@ -74,6 +74,56 @@ if const_eq(got, want) == 1 { /* ok */ }
 // alias: crypto_eq
 ```
 
+### Session security (Done)
+
+Mako's session management, authentication, and authorization toolkit uses
+defense-in-depth to prevent common web security vulnerabilities.
+
+**Constant-time cookie and token checks.** All session and auth comparisons use
+`const_eq` internally, preventing timing side-channel attacks:
+
+```mko
+// All of these are constant-time by construction:
+auth_session_cookie(cookie_hdr, "sid", expected)  // session cookie check
+auth_check_bearer(auth_hdr, expected_token)       // bearer token check
+auth_check_basic(auth_hdr, user, pass)            // basic auth check
+auth_token_check(token, secret)                   // HMAC-SHA256 token verify
+csrf_check(expected, submitted)                   // CSRF token verify
+```
+
+**HttpOnly cookie defaults.** `cookie_make` always sets `HttpOnly` (prevents
+JavaScript access via `document.cookie`), `SameSite=Lax` (blocks cross-site
+POST requests from carrying the cookie), and `Path=/`. There is no API to
+create insecure cookies -- safe defaults are the only option.
+
+**Cryptographic session IDs.** `session_id_new` uses `mako_random_bytes` (backed
+by the OS CSPRNG) to generate 16 random bytes, formatted as 32 hex characters.
+This provides 128 bits of entropy -- brute-force guessing is computationally
+infeasible.
+
+**CSRF token generation and verification.** `csrf_token` generates a random token
+for embedding in forms or response headers. `csrf_check` verifies it with
+constant-time comparison. Combined with SameSite=Lax cookies, this provides
+layered CSRF protection.
+
+**Secret wiping.** Signing keys used with `auth_token_sign` and API tokens can be
+stored via `secret_from_str` and explicitly zeroed with `secret_drop`. This
+prevents key material from persisting in freed memory:
+
+```mko
+let key = secret_from_str("my-hmac-key")
+let token = auth_token_sign("user:42", "my-hmac-key")
+// ... after use ...
+secret_drop(key)   // zeroes memory via mako_secure_zero
+```
+
+**HMAC-SHA256 signed tokens.** `auth_token_sign` produces tokens in the form
+`subject.signature` using HMAC-SHA256. The signature is verified by
+`auth_token_check` in constant time. The subject can be extracted with
+`auth_token_subject` without verification (always verify first).
+
+Runtime: `runtime/mako_security.h` (`MakoSession`, `MakoCSRF`, `MakoAuth`).
+
 ### Channels + cancel policy (Done)
 
 `crew` exit calls `mako_nursery_cancel_join` — cancel flag set, then all tasks
