@@ -48,6 +48,72 @@
         "path": "./syntaxes/mako.tmLanguage.json"
       }
     ],
+    "themes": [
+      {
+        "label": "Mako Dark",
+        "uiTheme": "vs-dark",
+        "path": "./themes/mako-dark.json"
+      }
+    ],
+    "configurationDefaults": {
+      "[mako]": {
+        "editor.semanticHighlighting.enabled": true,
+        "editor.bracketPairColorization.enabled": true,
+        "editor.guides.bracketPairs": true
+      },
+      "editor.tokenColorCustomizations": {
+        "textMateRules": [
+          {
+            "scope": "string.quoted.double.mako",
+            "settings": { "foreground": "#9ece6a" }
+          },
+          {
+            "scope": "constant.character.escape.mako",
+            "settings": { "foreground": "#73daca", "fontStyle": "bold" }
+          },
+          {
+            "scope": "keyword.control.flow.mako",
+            "settings": { "foreground": "#bb9af7" }
+          },
+          {
+            "scope": "keyword.declaration.mako",
+            "settings": { "foreground": "#7aa2f7" }
+          },
+          {
+            "scope": "keyword.control.concurrency.mako",
+            "settings": { "foreground": "#7dcfff", "fontStyle": "bold" }
+          },
+          {
+            "scope": "keyword.control.memory.mako",
+            "settings": { "foreground": "#f7768e" }
+          },
+          {
+            "scope": "entity.name.function.definition.mako",
+            "settings": { "foreground": "#e0af68", "fontStyle": "bold" }
+          },
+          {
+            "scope": "entity.name.function.call.mako",
+            "settings": { "foreground": "#e0af68" }
+          },
+          {
+            "scope": ["support.type.primitive.mako", "support.type.builtin.mako"],
+            "settings": { "foreground": "#2ac3de" }
+          },
+          {
+            "scope": "constant.numeric.integer.mako",
+            "settings": { "foreground": "#ff9e64" }
+          },
+          {
+            "scope": "comment.line.double-slash.mako",
+            "settings": { "foreground": "#565f89", "fontStyle": "italic" }
+          },
+          {
+            "scope": "keyword.operator.arrow.mako",
+            "settings": { "foreground": "#89ddff" }
+          }
+        ]
+      }
+    },
     "commands": [
       {
         "command": "mako.check",

@@ -3,24 +3,23 @@
   "name": "Mako",
   "scopeName": "source.mako",
   "patterns": [
-    {
-      "include": "#comments"
-    },
-    {
-      "include": "#strings"
-    },
-    {
-      "include": "#numbers"
-    },
-    {
-      "include": "#keywords"
-    },
-    {
-      "include": "#types"
-    },
-    {
-      "include": "#functions"
-    }
+    { "include": "#comments" },
+    { "include": "#strings" },
+    { "include": "#numbers" },
+    { "include": "#attributes" },
+    { "include": "#function-definition" },
+    { "include": "#struct-definition" },
+    { "include": "#enum-definition" },
+    { "include": "#actor-definition" },
+    { "include": "#interface-definition" },
+    { "include": "#import-statement" },
+    { "include": "#keywords" },
+    { "include": "#types" },
+    { "include": "#constants" },
+    { "include": "#variables" },
+    { "include": "#operators" },
+    { "include": "#function-call" },
+    { "include": "#punctuation" }
   ],
   "repository": {
     "comments": {
@@ -32,7 +31,10 @@
         {
           "name": "comment.block.mako",
           "begin": "/\\*",
-          "end": "\\*/"
+          "end": "\\*/",
+          "captures": {
+            "0": { "name": "punctuation.definition.comment.mako" }
+          }
         }
       ]
     },
@@ -42,10 +44,16 @@
           "name": "string.quoted.double.mako",
           "begin": "\"",
           "end": "\"",
+          "beginCaptures": { "0": { "name": "punctuation.definition.string.begin.mako" } },
+          "endCaptures": { "0": { "name": "punctuation.definition.string.end.mako" } },
           "patterns": [
             {
               "name": "constant.character.escape.mako",
-              "match": "\\\\[ntr\\\\\"]"
+              "match": "\\\\[ntr\\\\\"0]"
+            },
+            {
+              "name": "constant.character.escape.format.mako",
+              "match": "%[sdf%]|%\\d*[sdf]|%ll[du]"
             }
           ]
         }
@@ -54,52 +62,311 @@
     "numbers": {
       "patterns": [
         {
+          "name": "constant.numeric.hex.mako",
+          "match": "\\b0[xX][0-9a-fA-F_]+\\b"
+        },
+        {
+          "name": "constant.numeric.binary.mako",
+          "match": "\\b0[bB][01_]+\\b"
+        },
+        {
           "name": "constant.numeric.float.mako",
-          "match": "\\b[0-9]+\\.[0-9]+\\b"
+          "match": "\\b[0-9][0-9_]*\\.[0-9][0-9_]*\\b"
         },
         {
           "name": "constant.numeric.integer.mako",
-          "match": "\\b[0-9]+\\b"
+          "match": "\\b[0-9][0-9_]*\\b"
+        }
+      ]
+    },
+    "attributes": {
+      "patterns": [
+        {
+          "name": "meta.attribute.mako",
+          "match": "#\\[([a-zA-Z_][a-zA-Z0-9_]*)(?:\\(([^)]*)\\))?\\]",
+          "captures": {
+            "0": { "name": "meta.attribute.mako" },
+            "1": { "name": "entity.other.attribute-name.mako" },
+            "2": { "name": "string.unquoted.attribute-value.mako" }
+          }
+        }
+      ]
+    },
+    "function-definition": {
+      "patterns": [
+        {
+          "match": "\\b(fn)\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*(?=\\()",
+          "captures": {
+            "1": { "name": "keyword.declaration.function.mako" },
+            "2": { "name": "entity.name.function.definition.mako" }
+          }
+        }
+      ]
+    },
+    "struct-definition": {
+      "patterns": [
+        {
+          "match": "\\b(struct)\\s+([A-Z][A-Za-z0-9_]*)",
+          "captures": {
+            "1": { "name": "keyword.declaration.struct.mako" },
+            "2": { "name": "entity.name.type.struct.mako" }
+          }
+        }
+      ]
+    },
+    "enum-definition": {
+      "patterns": [
+        {
+          "match": "\\b(enum)\\s+([A-Z][A-Za-z0-9_]*)",
+          "captures": {
+            "1": { "name": "keyword.declaration.enum.mako" },
+            "2": { "name": "entity.name.type.enum.mako" }
+          }
+        }
+      ]
+    },
+    "actor-definition": {
+      "patterns": [
+        {
+          "match": "\\b(actor)\\s+([A-Z][A-Za-z0-9_]*)",
+          "captures": {
+            "1": { "name": "keyword.declaration.actor.mako" },
+            "2": { "name": "entity.name.type.actor.mako" }
+          }
+        }
+      ]
+    },
+    "interface-definition": {
+      "patterns": [
+        {
+          "match": "\\b(interface)\\s+([A-Z][A-Za-z0-9_]*)",
+          "captures": {
+            "1": { "name": "keyword.declaration.interface.mako" },
+            "2": { "name": "entity.name.type.interface.mako" }
+          }
+        }
+      ]
+    },
+    "import-statement": {
+      "patterns": [
+        {
+          "match": "\\b(import)\\s+(\"[^\"]*\")",
+          "captures": {
+            "1": { "name": "keyword.control.import.mako" },
+            "2": { "name": "string.quoted.double.import.mako" }
+          }
+        },
+        {
+          "match": "\\b(import)\\s+(\"[^\"]*\")\\s+(as)\\s+([a-zA-Z_][a-zA-Z0-9_]*)",
+          "captures": {
+            "1": { "name": "keyword.control.import.mako" },
+            "2": { "name": "string.quoted.double.import.mako" },
+            "3": { "name": "keyword.control.as.mako" },
+            "4": { "name": "entity.name.namespace.mako" }
+          }
         }
       ]
     },
     "keywords": {
       "patterns": [
         {
-          "name": "keyword.control.mako",
-          "match": "\\b(if|else|while|for|in|range|break|continue|return|defer|match|select|timeout|default)\\b"
+          "name": "keyword.control.flow.mako",
+          "match": "\\b(if|else|while|for|in|range|break|continue|return|match|select|timeout|default)\\b"
         },
         {
           "name": "keyword.declaration.mako",
           "match": "\\b(fn|let|mut|struct|enum|actor|receive|interface|extern|const|import|as)\\b"
         },
         {
-          "name": "keyword.operator.word.mako",
+          "name": "keyword.operator.logical.mako",
           "match": "\\b(and|or|not)\\b"
         },
         {
-          "name": "keyword.other.mako",
-          "match": "\\b(crew|kick|join|fan|arena|hold|share|unsafe)\\b"
+          "name": "keyword.control.concurrency.mako",
+          "match": "\\b(crew|kick|join|fan|cancel|cancelled)\\b"
         },
         {
-          "name": "constant.language.boolean.mako",
-          "match": "\\b(true|false)\\b"
+          "name": "keyword.control.memory.mako",
+          "match": "\\b(arena|hold|share|defer|unsafe)\\b"
+        },
+        {
+          "name": "keyword.other.mako",
+          "match": "\\b(Ok|Err|Some|None|error|errorf)\\b"
         }
       ]
     },
     "types": {
       "patterns": [
         {
-          "name": "storage.type.mako",
-          "match": "\\b(int|int64|int32|int8|uint64|byte|float|bool|string|void|Result|Option|Job|Crew|HttpRequest|CMap|MMap|EvLoop|Buf|GameUDP|CHash|RateLimiter|CircuitBreaker|HttpEngine|SqlDB|Mutex|RWMutex|BufReader|BufWriter|StrBuilder|chan)\\b"
+          "name": "support.type.primitive.mako",
+          "match": "\\b(int|int64|int32|int8|uint64|byte|float|float64|bool|string|void)\\b"
+        },
+        {
+          "name": "support.type.builtin.mako",
+          "match": "\\b(Result|Option|Job|Crew|HttpRequest|CMap|MMap|EvLoop|Buf|GameUDP|CHash|RateLimiter|CircuitBreaker|HttpEngine|SqlDB|Mutex|RWMutex|BufReader|BufWriter|StrBuilder|chan|List|Map)\\b"
+        },
+        {
+          "comment": "Type annotations after colon",
+          "match": ":\\s*([A-Z][A-Za-z0-9_]*)",
+          "captures": {
+            "1": { "name": "support.type.user.mako" }
+          }
+        },
+        {
+          "comment": "Return type after ->",
+          "match": "->\\s*([A-Z][A-Za-z0-9_]*)",
+          "captures": {
+            "1": { "name": "support.type.user.mako" }
+          }
+        },
+        {
+          "comment": "Generic type parameters",
+          "match": "\\b([A-Z][A-Za-z0-9_]*)\\s*[<\\[]",
+          "captures": {
+            "1": { "name": "support.type.generic.mako" }
+          }
+        },
+        {
+          "comment": "Slice type []T",
+          "match": "\\[\\]\\s*(int|int64|int32|byte|float|bool|string|[A-Z][A-Za-z0-9_]*)",
+          "captures": {
+            "1": { "name": "support.type.primitive.mako" }
+          }
+        },
+        {
+          "comment": "Map type map[K]V",
+          "match": "\\b(map)\\[",
+          "captures": {
+            "1": { "name": "support.type.builtin.mako" }
+          }
         }
       ]
     },
-    "functions": {
+    "constants": {
       "patterns": [
         {
-          "name": "entity.name.function.mako",
-          "match": "\\b([A-Za-z_][A-Za-z0-9_]*)\\s*(?=\\()"
+          "name": "constant.language.boolean.mako",
+          "match": "\\b(true|false)\\b"
+        },
+        {
+          "name": "constant.language.null.mako",
+          "match": "\\b(nil)\\b"
+        },
+        {
+          "comment": "Enum variants (PascalCase used as values)",
+          "name": "variable.other.enummember.mako",
+          "match": "\\b([A-Z][a-zA-Z0-9_]*)\\s*(?=\\(|\\.|\\s*=>)"
+        }
+      ]
+    },
+    "variables": {
+      "patterns": [
+        {
+          "comment": "self parameter",
+          "name": "variable.language.self.mako",
+          "match": "\\b(self)\\b"
+        },
+        {
+          "comment": "Underscore discard",
+          "name": "variable.language.discard.mako",
+          "match": "\\b_\\b"
+        }
+      ]
+    },
+    "operators": {
+      "patterns": [
+        {
+          "name": "keyword.operator.arrow.mako",
+          "match": "->"
+        },
+        {
+          "name": "keyword.operator.fat-arrow.mako",
+          "match": "=>"
+        },
+        {
+          "name": "keyword.operator.question.mako",
+          "match": "\\?"
+        },
+        {
+          "name": "keyword.operator.comparison.mako",
+          "match": "==|!=|<=|>=|<|>"
+        },
+        {
+          "name": "keyword.operator.assignment.mako",
+          "match": "=|\\+=|-=|\\*=|/=|%=|&=|\\|=|\\^=|<<=|>>="
+        },
+        {
+          "name": "keyword.operator.arithmetic.mako",
+          "match": "\\+|-|\\*|/|%"
+        },
+        {
+          "name": "keyword.operator.bitwise.mako",
+          "match": "&\\^|<<|>>|&|\\||\\^"
+        },
+        {
+          "name": "keyword.operator.logical.symbol.mako",
+          "match": "&&|\\|\\||!"
+        }
+      ]
+    },
+    "function-call": {
+      "patterns": [
+        {
+          "comment": "Method call: expr.method()",
+          "match": "\\.([a-zA-Z_][a-zA-Z0-9_]*)\\s*(?=\\()",
+          "captures": {
+            "1": { "name": "entity.name.function.method.mako" }
+          }
+        },
+        {
+          "comment": "Free function call",
+          "match": "\\b([a-z_][a-zA-Z0-9_]*)\\s*(?=\\()",
+          "captures": {
+            "1": { "name": "entity.name.function.call.mako" }
+          }
+        },
+        {
+          "comment": "Type-associated function call (Shape_area, Person_to_json)",
+          "match": "\\b([A-Z][a-zA-Z0-9_]*_[a-z][a-zA-Z0-9_]*)\\s*(?=\\()",
+          "captures": {
+            "1": { "name": "entity.name.function.associated.mako" }
+          }
+        }
+      ]
+    },
+    "punctuation": {
+      "patterns": [
+        {
+          "name": "punctuation.separator.comma.mako",
+          "match": ","
+        },
+        {
+          "name": "punctuation.terminator.semicolon.mako",
+          "match": ";"
+        },
+        {
+          "name": "punctuation.section.braces.begin.mako",
+          "match": "\\{"
+        },
+        {
+          "name": "punctuation.section.braces.end.mako",
+          "match": "\\}"
+        },
+        {
+          "name": "punctuation.section.brackets.begin.mako",
+          "match": "\\["
+        },
+        {
+          "name": "punctuation.section.brackets.end.mako",
+          "match": "\\]"
+        },
+        {
+          "name": "punctuation.section.parens.begin.mako",
+          "match": "\\("
+        },
+        {
+          "name": "punctuation.section.parens.end.mako",
+          "match": "\\)"
         }
       ]
     }
