@@ -1,0 +1,20 @@
+// EXPECT: use of moved
+// Partial field move + break poisons post-loop field use.
+struct Pair {
+    a: string
+    b: string
+}
+
+fn main() {
+    hold let p = Pair { a: "x", b: "y" }
+    let mut i = 0
+    while i < 2 {
+        i = i + 1
+        if i == 1 {
+            let x = p.a
+            print(x)
+            break
+        }
+    }
+    print(p.a)
+}

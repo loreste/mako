@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.0 — 2026-07-12 (wave 16 queue)
+
+- Break-path NLL: move+break poisons post-loop (partial if + labeled outer)
+- Generic `Result[T, E]` Ok: match/let resolve monomorphized ok kind
+- Regex `\p{Bengali}` / `\p{Sinhala}` seeds
+- TSan CI: `wave15_queue_test`
+- Tests: `examples/testing/wave16_queue_test.mko`
+
 ## 0.1.0 — 2026-07-12 (wave 15 queue)
 
 - `Result[[]Struct, E]` Ok (boxed `MakoArr_*`)

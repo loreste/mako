@@ -185,3 +185,4 @@ jobs:
           ./target/release/mako test --race examples/testing/fan_string_test.mko
           ./target/release/mako test --race examples/testing/kick_string_test.mko
           ./target/release/mako test --race examples/testing/wave14_queue_test.mko
+          ./target/release/mako test --race examples/testing/wave15_queue_test.mko

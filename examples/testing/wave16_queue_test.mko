@@ -1,0 +1,32 @@
+// Wave 16: generic Result[T] Ok mono, more unicode scripts.
+
+fn wrap_ok[T](x: T) -> Result[T, string] {
+    return Ok(x)
+}
+
+fn TestGenResultIntOk() {
+    match wrap_ok(42) {
+        Ok(v) => assert_eq(v, 42),
+        Err(_) => assert(false),
+    }
+}
+
+fn TestGenResultStrOk() {
+    match wrap_ok("hi") {
+        Ok(s) => assert_eq_str(s, "hi"),
+        Err(_) => assert(false),
+    }
+}
+
+fn TestGenResultFloatOk() {
+    match wrap_ok(1.5) {
+        Ok(f) => assert(f > 1.0),
+        Err(_) => assert(false),
+    }
+}
+
+fn TestRegexUnicodeBengaliSinhala() {
+    assert(regex_match("\\p{Bengali}+", "বাংলা"))
+    assert(regex_match("\\p{Sinhala}+", "සිංහල"))
+    assert(regex_match("\\p{Georgian}+", "ქ"))
+}

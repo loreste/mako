@@ -2997,6 +2997,10 @@ static inline int mako_re_unicode_prop_match(const char *name, size_t nlen, uint
         return (cp >= 0x10A0 && cp <= 0x10FF);
     if (nlen == 8 && memcmp(name, "Cherokee", 8) == 0)
         return (cp >= 0x13A0 && cp <= 0x13FF);
+    if (nlen == 7 && memcmp(name, "Bengali", 7) == 0)
+        return (cp >= 0x0980 && cp <= 0x09FF);
+    if (nlen == 7 && memcmp(name, "Sinhala", 7) == 0)
+        return (cp >= 0x0D80 && cp <= 0x0DFF);
     return 0;
 }
 
