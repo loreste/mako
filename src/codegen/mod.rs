@@ -148,7 +148,11 @@ impl Codegen {
                 match &args[0] {
                     TypeExpr::Named(t) if t == "string" => "string",
                     TypeExpr::Named(t) if t == "float" || t == "float64" => "float",
-                    TypeExpr::Array(_) => "slice",
+                    TypeExpr::Array(inner) => match inner.as_ref() {
+                        TypeExpr::Named(n) if n == "string" => "slice_str",
+                        TypeExpr::Named(n) if n == "float" || n == "float64" => "slice_float",
+                        _ => "slice",
+                    },
                     TypeExpr::Map(k, v) => match (k.as_ref(), v.as_ref()) {
                         (TypeExpr::Named(kk), TypeExpr::Named(vv))
                             if kk == "int" && (vv == "int" || vv == "int64") =>
@@ -2370,11 +2374,33 @@ impl Codegen {
                                     format!("mako_ok_ptr((void*){boxn})"),
                                 );
                             }
-                            // []int Ok: box the array
+                            // []int / []string / []float Ok: box the array
                             if vty == "MakoIntArray" {
                                 let boxn = self.fresh("iabox");
                                 self.line(&format!(
                                     "MakoIntArray *{boxn} = (MakoIntArray*)malloc(sizeof(MakoIntArray));"
+                                ));
+                                self.line(&format!("*{boxn} = {v};"));
+                                return (
+                                    "MakoResultInt".into(),
+                                    format!("mako_ok_ptr((void*){boxn})"),
+                                );
+                            }
+                            if vty == "MakoStrArray" {
+                                let boxn = self.fresh("sabox");
+                                self.line(&format!(
+                                    "MakoStrArray *{boxn} = (MakoStrArray*)malloc(sizeof(MakoStrArray));"
+                                ));
+                                self.line(&format!("*{boxn} = {v};"));
+                                return (
+                                    "MakoResultInt".into(),
+                                    format!("mako_ok_ptr((void*){boxn})"),
+                                );
+                            }
+                            if vty == "MakoFloatArray" {
+                                let boxn = self.fresh("fabox");
+                                self.line(&format!(
+                                    "MakoFloatArray *{boxn} = (MakoFloatArray*)malloc(sizeof(MakoFloatArray));"
                                 ));
                                 self.line(&format!("*{boxn} = {v};"));
                                 return (
@@ -12524,6 +12550,28 @@ impl Codegen {
                                 "MakoIntArray *{p} = (MakoIntArray*)mako_result_ok_ptr({scrut});"
                             ));
                             self.line(&format!("MakoIntArray {b};"));
+                            self.line(&format!(
+                                "if ({p}) {{ {b} = *{p}; free({p}); }} else {{ {b}.data = NULL; {b}.len = 0; {b}.cap = 0; }}"
+                            ));
+                        } else if ok_kind == "slice_str" {
+                            let b = mangle(&bindings[0]);
+                            let p = self.fresh("oks");
+                            self.locals.insert(bindings[0].clone(), "MakoStrArray".into());
+                            self.line(&format!(
+                                "MakoStrArray *{p} = (MakoStrArray*)mako_result_ok_ptr({scrut});"
+                            ));
+                            self.line(&format!("MakoStrArray {b};"));
+                            self.line(&format!(
+                                "if ({p}) {{ {b} = *{p}; free({p}); }} else {{ {b}.data = NULL; {b}.len = 0; {b}.cap = 0; }}"
+                            ));
+                        } else if ok_kind == "slice_float" {
+                            let b = mangle(&bindings[0]);
+                            let p = self.fresh("oks");
+                            self.locals.insert(bindings[0].clone(), "MakoFloatArray".into());
+                            self.line(&format!(
+                                "MakoFloatArray *{p} = (MakoFloatArray*)mako_result_ok_ptr({scrut});"
+                            ));
+                            self.line(&format!("MakoFloatArray {b};"));
                             self.line(&format!(
                                 "if ({p}) {{ {b} = *{p}; free({p}); }} else {{ {b}.data = NULL; {b}.len = 0; {b}.cap = 0; }}"
                             ));

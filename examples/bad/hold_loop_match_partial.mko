@@ -1,0 +1,26 @@
+// EXPECT: use of moved
+// Loop × match multi-level: partial fields joined across match arms, then loop-carried.
+struct Pair {
+    a: string
+    b: string
+}
+
+fn main() {
+    hold let p = Pair { a: "x", b: "y" }
+    let mut i = 0
+    while i < 2 {
+        let _ = match i {
+            0 => {
+                let x = p.a
+                len(x)
+            },
+            _ => {
+                let y = p.b
+                len(y)
+            },
+        }
+        // After match join both a and b may be moved; loop re-entry poisons further.
+        print(p.a)
+        i = i + 1
+    }
+}

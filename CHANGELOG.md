@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.0 — 2026-07-12 (wave 14 queue)
+
+- `Result[[]string, E]` and `Result[[]float, E]` Ok (boxed arrays)
+- NLL loop × match partial products (`hold_loop_match_partial`, `_product_exit`)
+- Regex `\p{Tamil}` / `\p{Armenian}` / `\p{Ethiopic}` seeds
+- TSan CI: `fan_string_test`, `kick_string_test`
+- Tests: `examples/testing/wave14_queue_test.mko`
+
 ## 0.1.0 — 2026-07-12 (wave 13 queue)
 
 - `Result[map[int]int, E]` and `Result[map[string]string, E]` Ok

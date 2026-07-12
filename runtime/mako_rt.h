@@ -2987,6 +2987,12 @@ static inline int mako_re_unicode_prop_match(const char *name, size_t nlen, uint
         return (cp >= 0x0E00 && cp <= 0x0E7F);
     if (nlen == 10 && memcmp(name, "Devanagari", 10) == 0)
         return (cp >= 0x0900 && cp <= 0x097F);
+    if (nlen == 5 && memcmp(name, "Tamil", 5) == 0)
+        return (cp >= 0x0B80 && cp <= 0x0BFF);
+    if (nlen == 8 && memcmp(name, "Armenian", 8) == 0)
+        return (cp >= 0x0530 && cp <= 0x058F);
+    if (nlen == 8 && memcmp(name, "Ethiopic", 8) == 0)
+        return (cp >= 0x1200 && cp <= 0x137F);
     return 0;
 }
 

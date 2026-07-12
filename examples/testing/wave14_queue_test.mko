@@ -1,0 +1,38 @@
+// Wave 14: Result []string/[]float Ok, more unicode scripts.
+
+fn strs_ok() -> Result[[]string, string] {
+    return Ok(["a", "b", "c"])
+}
+
+fn floats_ok() -> Result[[]float, string] {
+    return Ok([1.5, 2.5])
+}
+
+fn TestResultSliceStrOk() {
+    match strs_ok() {
+        Ok(xs) => {
+            assert_eq(len(xs), 3)
+            assert_eq_str(xs[0], "a")
+            assert_eq_str(xs[2], "c")
+        },
+        Err(_) => assert(false),
+    }
+}
+
+fn TestResultSliceFloatOk() {
+    match floats_ok() {
+        Ok(xs) => {
+            assert_eq(len(xs), 2)
+            assert(xs[0] > 1.0)
+            assert(xs[1] > 2.0)
+        },
+        Err(_) => assert(false),
+    }
+}
+
+fn TestRegexUnicodeMoreScripts() {
+    assert(regex_match("\\p{Tamil}+", "தமிழ்"))
+    assert(regex_match("\\p{Armenian}+", "Հայերեն"))
+    assert(regex_match("\\p{Ethiopic}+", "አማርኛ"))
+    assert(regex_match("\\p{Thai}+", "ไทย"))
+}
