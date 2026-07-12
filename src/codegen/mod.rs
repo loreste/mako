@@ -8752,6 +8752,38 @@ impl Codegen {
                             ));
                             return ("MakoReflectValue*".into(), tmp);
                         }
+                        "reflect_value_of" => {
+                            // POD struct → bag via field values (int fields as strings).
+                            let (vty, v) = self.emit_expr(&args[0]);
+                            let fields_opt = self
+                                .structs
+                                .get(&vty)
+                                .or_else(|| self.structs.values().find(|s| s.c_name == vty))
+                                .map(|info| (info.c_name.clone(), info.fields.clone()));
+                            let tmp = self.fresh("rvo");
+                            if let Some((sn, fields)) = fields_opt {
+                                if fields.len() >= 2
+                                    && fields.iter().take(2).all(|(_, ft)| {
+                                        ft == "int64_t" || ft == "double" || ft == "bool"
+                                    })
+                                {
+                                    let f0 = fields[0].0.clone();
+                                    let f1 = fields[1].0.clone();
+                                    let a = self.fresh("ra");
+                                    let b = self.fresh("rb");
+                                    self.line(&format!("int64_t {a} = (int64_t)({v}.{f0});"));
+                                    self.line(&format!("int64_t {b} = (int64_t)({v}.{f1});"));
+                                    self.line(&format!(
+                                        "MakoReflectValue *{tmp} = mako_reflect_value_from_2_int(mako_str_from_cstr(\"{sn}\"), {a}, {b});"
+                                    ));
+                                    return ("MakoReflectValue*".into(), tmp);
+                                }
+                            }
+                            self.line(&format!(
+                                "MakoReflectValue *{tmp} = mako_reflect_value_new(mako_str_from_cstr(\"{vty}\"));"
+                            ));
+                            return ("MakoReflectValue*".into(), tmp);
+                        }
                         "reflect_value_set" => {
                             let (_, v) = self.emit_expr(&args[0]);
                             let (_, f) = self.emit_expr(&args[1]);
@@ -11444,6 +11476,27 @@ impl Codegen {
                                         self.line(&format!(
                                             "{arg_name}[{i}] = (intptr_t)mako_f64_to_bits({v});"
                                         ));
+                                    } else if self.structs.contains_key(&aty)
+                                        || self.structs.values().any(|s| s.c_name == aty)
+                                        || self.structs.contains_key(pty)
+                                        || self.structs.values().any(|s| s.c_name == *pty)
+                                    {
+                                        // POD struct: heap-box copy for kick.
+                                        let cname = if self.structs.contains_key(&aty) {
+                                            aty.clone()
+                                        } else if self.structs.contains_key(pty) {
+                                            pty.to_string()
+                                        } else {
+                                            aty.clone()
+                                        };
+                                        let boxn = self.fresh("podbox");
+                                        self.line(&format!(
+                                            "{cname} *{boxn} = ({cname}*)malloc(sizeof({cname}));"
+                                        ));
+                                        self.line(&format!("*{boxn} = {v};"));
+                                        self.line(&format!(
+                                            "{arg_name}[{i}] = (intptr_t){boxn};"
+                                        ));
                                     } else if pty.contains('*') || aty.contains('*') {
                                         self.line(&format!("{arg_name}[{i}] = (intptr_t){v};"));
                                     } else {
@@ -11639,39 +11692,43 @@ impl Codegen {
                             _ => self.job_rets.get(&rv).cloned(),
                         }
                         .unwrap_or_else(|| "int64_t".into());
-                        // Timed join returns Result-like for non-int: ok flag packed as
-                        // int path; string/Result unbox when ready else empty/zero.
+                        // Always MakoResultInt: Ok(payload) or Err("timeout").
                         let out = self.fresh("jto");
                         let ok = self.fresh("jok");
+                        let tmp = self.fresh("jtr");
                         self.line(&format!("int64_t {out} = 0;"));
                         self.line(&format!(
                             "int64_t {ok} = mako_await_timeout_ms({rv}, {ms}, &{out});"
                         ));
+                        self.line(&format!("MakoResultInt {tmp};"));
                         if ret_ty == "MakoString" {
-                            let tmp = self.fresh("jts");
-                            self.line(&format!("MakoString {tmp};"));
                             self.line(&format!(
                                 "if ({ok}) {{ MakoString *p = (MakoString*)(intptr_t){out}; \
-                                 if (p) {{ {tmp} = *p; free(p); }} else {{ {tmp} = mako_str_from_cstr(\"\"); }} }} \
-                                 else {{ {tmp} = mako_str_from_cstr(\"\"); }}"
+                                 if (p) {{ {tmp} = mako_ok_str(*p); free(p); }} else {{ {tmp} = mako_ok_str(mako_str_from_cstr(\"\")); }} }} \
+                                 else {{ {tmp} = mako_err_int(mako_str_from_cstr(\"timeout\")); }}"
                             ));
-                            ("MakoString".into(), tmp)
                         } else if ret_ty == "MakoResultInt" {
-                            let tmp = self.fresh("jtr");
-                            self.line(&format!("MakoResultInt {tmp};"));
+                            // Nest: Ok(inner Result) packs via value pointer? Keep simple:
+                            // on success return the job Result as the outer Result itself
+                            // (flatten) so callers match Ok/Err for job outcome; on timeout Err.
                             self.line(&format!(
                                 "if ({ok}) {{ MakoResultInt *p = (MakoResultInt*)(intptr_t){out}; \
                                  if (p) {{ {tmp} = *p; free(p); }} else {{ memset(&{tmp}, 0, sizeof({tmp})); {tmp}.ok = false; }} }} \
-                                 else {{ memset(&{tmp}, 0, sizeof({tmp})); {tmp}.ok = false; {tmp}.err = mako_str_from_cstr(\"timeout\"); }}"
+                                 else {{ {tmp} = mako_err_int(mako_str_from_cstr(\"timeout\")); }}"
                             ));
-                            ("MakoResultInt".into(), tmp)
+                        } else if ret_ty == "double" {
+                            self.line(&format!(
+                                "if ({ok}) {{ {tmp} = mako_ok_float_res(mako_bits_to_f64({out})); }} \
+                                 else {{ {tmp} = mako_err_int(mako_str_from_cstr(\"timeout\")); }}"
+                            ));
                         } else {
-                            // int: 0 on timeout (may also be a real zero result)
-                            let tmp = self.fresh("jtv");
-                            self.line(&format!("int64_t {tmp} = ({ok} ? {out} : 0);"));
-                            let _ = rty;
-                            ("int64_t".into(), tmp)
+                            self.line(&format!(
+                                "if ({ok}) {{ {tmp} = mako_ok_int({out}); }} \
+                                 else {{ {tmp} = mako_err_int(mako_str_from_cstr(\"timeout\")); }}"
+                            ));
                         }
+                        let _ = rty;
+                        ("MakoResultInt".into(), tmp)
                     }
                     "len" => {
                         // Prefer Type_len user method (Go-style receivers) over builtin.
@@ -12483,6 +12540,13 @@ impl Codegen {
             } else if ty == "double" {
                 unpack.push_str(&format!(
                     "double {local} = mako_bits_to_f64((int64_t)a[{i}]);\n"
+                ));
+                call_args.push(local);
+            } else if self.structs.contains_key(ty)
+                || self.structs.values().any(|s| s.c_name == *ty)
+            {
+                unpack.push_str(&format!(
+                    "{ty} {local} = *({ty}*)a[{i}]; free((void*)a[{i}]);\n"
                 ));
                 call_args.push(local);
             } else if ty.contains('*') {

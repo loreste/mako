@@ -54,6 +54,8 @@ fn slow_result() -> Result[int, string] {
 }
 
 fn TestJoinTimeoutResultMiss() {
+    // Job returns Result[int,string]; join_timeout wraps as Result[Result[…], string]
+    // Codegen flattens: timeout → Err("timeout"); success → job Result as outer.
     crew t {
         let j = t.kick(slow_result())
         match j.join_timeout(20) {

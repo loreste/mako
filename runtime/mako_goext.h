@@ -1629,6 +1629,7 @@ static inline MakoString mako_httptest_header(MakoString name) {
 #include <openssl/evp.h>
 #include <openssl/ssl.h>
 #include <openssl/err.h>
+#include <openssl/x509.h>
 #define MAKO_AEAD_OPENSSL 1
 #endif
 
@@ -4181,7 +4182,16 @@ static inline int64_t mako_smtp_send_starttls(
             mako_sock_close(fd);
             return -2;
         }
-        SSL_CTX_set_verify(ctx, SSL_VERIFY_NONE, NULL);
+        /* Opt-in peer verify: MAKO_SMTP_TLS_VERIFY=1 enables SSL_VERIFY_PEER. */
+        {
+            const char *ver = getenv("MAKO_SMTP_TLS_VERIFY");
+            if (ver && ver[0] == '1' && ver[1] == 0) {
+                SSL_CTX_set_default_verify_paths(ctx);
+                SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER, NULL);
+            } else {
+                SSL_CTX_set_verify(ctx, SSL_VERIFY_NONE, NULL);
+            }
+        }
         SSL *ssl = SSL_new(ctx);
         if (!ssl) {
             SSL_CTX_free(ctx);
@@ -4194,6 +4204,14 @@ static inline int64_t mako_smtp_send_starttls(
             SSL_CTX_free(ctx);
             mako_sock_close(fd);
             return -3; /* TLS handshake failed */
+        }
+        if (getenv("MAKO_SMTP_TLS_VERIFY") && getenv("MAKO_SMTP_TLS_VERIFY")[0] == '1') {
+            if (SSL_get_verify_result(ssl) != X509_V_OK) {
+                SSL_free(ssl);
+                SSL_CTX_free(ctx);
+                mako_sock_close(fd);
+                return -4; /* peer cert verify failed */
+            }
         }
         MakoString auth = mako_smtp_auth_plain(user, pass);
         SSL_write(ssl, auth.data, (int)auth.len);
