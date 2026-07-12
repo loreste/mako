@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.0 — 2026-07-12 (wave 15 queue)
+
+- `Result[[]Struct, E]` Ok (boxed `MakoArr_*`)
+- Labeled `continue outer` records NLL moves on the outer loop frame
+- Regex `\p{Georgian}` / `\p{Cherokee}` seeds
+- TSan CI: `wave14_queue_test`
+- Tests: `examples/testing/wave15_queue_test.mko`
+
 ## 0.1.0 — 2026-07-12 (wave 14 queue)
 
 - `Result[[]string, E]` and `Result[[]float, E]` Ok (boxed arrays)

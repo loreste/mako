@@ -669,7 +669,7 @@ Kick **args** that are sendable: Copy scalars, **POD structs** (int/float/bool/*
 `reflect_value_of(s)` snapshots POD struct fields (any field count) into a reflect bag,
 flattening nested POD structs leaf-first. Structs with maps/slices remain rejected
 (`examples/bad/reflect_non_pod.mko`).
-`Result[[]int|[]string|[]float, E]` and
+`Result[[]int|[]string|[]float|[]Struct, E]` and
 `Result[map[string]int|map[int]int|map[string]string, E]` Ok are supported
 (heap-boxed arrays / map pointers).
 
@@ -2209,6 +2209,7 @@ Tests: `examples/testing/overflow_shutdown_test.mko`. Multi-error recovery:
 | `[]int` | heap-boxed `MakoIntArray` via `mako_ok_ptr` (`slice`) |
 | `[]string` | heap-boxed `MakoStrArray` via `mako_ok_ptr` (`slice_str`) |
 | `[]float` | heap-boxed `MakoFloatArray` via `mako_ok_ptr` (`slice_float`) |
+| `[]Struct` | heap-boxed `MakoArr_{Name}` via `mako_ok_ptr` (`slice_struct`) |
 | `map[string]int` | map pointer via `mako_ok_ptr` (`map_si`) |
 | `map[int]int` | map pointer via `mako_ok_ptr` (`map_ii`) |
 | `map[string]string` | map pointer via `mako_ok_ptr` (`map_ss`) |
@@ -2249,7 +2250,8 @@ match open(1) {
 Tests: `result_enum_test.mko`, `job_join_typed_test.mko` (Result across kick/join),
 `wave11_queue_test.mko` (`[]int` Ok), `wave12_queue_test.mko` (`map[string]int` Ok),
 `wave13_queue_test.mko` (`map[int]int` / `map[string]string` Ok),
-`wave14_queue_test.mko` (`[]string` / `[]float` Ok).
+`wave14_queue_test.mko` (`[]string` / `[]float` Ok),
+`wave15_queue_test.mko` (`[]Struct` Ok).
 
 ---
 

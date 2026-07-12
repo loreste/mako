@@ -6214,9 +6214,25 @@ impl TypeChecker {
         }
     }
 
-    /// Record current hold-move state onto the innermost loop's continue accumulator.
-    fn record_continue_path_moves(&mut self) {
-        let Some((acc_moved, acc_fields)) = self.loop_continue_moved.last_mut() else {
+    /// Record current hold-move state onto a loop's continue accumulator.
+    /// Unlabeled → innermost. Labeled → the matching outer loop (not only the
+    /// innermost frame), so `continue outer` poisons the outer next-iter / exit.
+    fn record_continue_path_moves(&mut self, label: &Option<String>) {
+        if self.loop_continue_moved.is_empty() {
+            return;
+        }
+        let target = match label {
+            None => self.loop_continue_moved.len() - 1,
+            Some(name) => match self
+                .loop_labels
+                .iter()
+                .position(|l| l.as_deref() == Some(name.as_str()))
+            {
+                Some(i) => i,
+                None => self.loop_continue_moved.len() - 1,
+            },
+        };
+        let Some((acc_moved, acc_fields)) = self.loop_continue_moved.get_mut(target) else {
             return;
         };
         for (name, was) in &self.moved_holds {
@@ -7740,9 +7756,8 @@ impl TypeChecker {
             Stmt::Continue(label) => {
                 self.resolve_loop_label(label)?;
                 // Capture moves on this path for next-iter / post-loop join.
-                // Labeled continue targeting an outer loop still records on the
-                // innermost continue accumulator (conservative / sound).
-                self.record_continue_path_moves();
+                // Labeled `continue outer` writes the outer frame's accumulator.
+                self.record_continue_path_moves(label);
                 Ok(())
             }
             Stmt::Defer { body } => {

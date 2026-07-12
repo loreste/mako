@@ -172,19 +172,19 @@ Last inventory: 2026-07-11 (**unique Mako surface** · pack/pull · pain map · 
 | `chan_open[Struct]` via MakoChanPtr heap-box | Done |
 | `error_tag(tag, msg)` enum-like string errors | Done |
 
-**Closed (wave 7–14):** join_timeout **flatten** · POD kick + string fields ·
-`reflect_value_of` N + nested POD · `Result` Ok for `[]int`/`[]string`/`[]float` +
-map SI·II·SS · NLL if/else/match/nested + **loop×match** products · script `\p{…}`
-(Tamil/Armenian/Ethiopic) · expanded TSan · prior work.
+**Closed (wave 7–15):** join_timeout **flatten** · POD kick + string fields ·
+`reflect_value_of` N + nested POD · `Result` Ok for `[]int`/`[]string`/`[]float`/
+`[]Struct` + map SI·II·SS · NLL if/else/match/nested/loop×match + **labeled
+continue outer** · script `\p{…}` (Georgian/Cherokee) · expanded TSan · prior work.
 
-**Wave 14 tests:** `examples/testing/wave14_queue_test.mko` · bad
-`hold_loop_match_partial` · `hold_loop_match_product_exit`.
+**Wave 15 tests:** `examples/testing/wave15_queue_test.mko` · bad
+`hold_continue_outer` · `hold_continue_outer_field`.
 
 **Pain residuals (language) still open:** see [PAIN_POINTS.md](PAIN_POINTS.md) §4.
 
 1. Fuller data-race model beyond expanded TSan smoke (no full type-level race system)  
-2. More Result Ok shapes (generic monomorphized containers / struct slices)  
-3. Stronger NLL (labeled multi-loop products, more CFG edge cases)  
+2. More Result Ok shapes (generic monomorphized containers)  
+3. Stronger NLL (more labeled multi-loop CFG / break-join edge cases)  
 
 **Stdlib / product residuals:**
 

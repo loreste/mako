@@ -2993,6 +2993,10 @@ static inline int mako_re_unicode_prop_match(const char *name, size_t nlen, uint
         return (cp >= 0x0530 && cp <= 0x058F);
     if (nlen == 8 && memcmp(name, "Ethiopic", 8) == 0)
         return (cp >= 0x1200 && cp <= 0x137F);
+    if (nlen == 8 && memcmp(name, "Georgian", 8) == 0)
+        return (cp >= 0x10A0 && cp <= 0x10FF);
+    if (nlen == 8 && memcmp(name, "Cherokee", 8) == 0)
+        return (cp >= 0x13A0 && cp <= 0x13FF);
     return 0;
 }
 
