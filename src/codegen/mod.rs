@@ -253,6 +253,7 @@ impl Codegen {
         self.out.push_str("#ifndef MAKO_WASI\n");
         self.out.push_str("#include \"mako_uuid.h\"\n");
         self.out.push_str("#include \"mako_net.h\"\n");
+        self.out.push_str("#include \"mako_proxy.h\"\n");
         self.out.push_str("#include \"mako_http.h\"\n");
         self.out.push_str("#include \"mako_std.h\"\n");
         self.out.push_str("#include \"mako_tls.h\"\n");
@@ -418,6 +419,7 @@ impl Codegen {
         if let Some(tests) = &self.test_fns {
             self.out.push_str("\nint main(int argc, char **argv) {\n");
             self.out.push_str("    mako_set_args(argc, argv);\n");
+            self.out.push_str("    mako_test_install_crash_handler();\n");
             self.out.push_str("    int failed = 0;\n");
             for t in tests {
                 let _ = writeln!(self.out, "    failed += mako_test_run(\"{t}\", {t});");
@@ -917,6 +919,9 @@ impl Codegen {
                 "BufReader" => "MakoBufReader*".into(),
                 "BufWriter" => "MakoBufWriter*".into(),
                 "HttpRequest" => "MakoHttpRequest".into(),
+                "HttpForwardResult" => "MakoHttpForwardResult".into(),
+                "ProxyIoResult" => "MakoProxyIoResult".into(),
+                "HttpParsed" => "MakoHttpParsed".into(),
                 "SqlDB" => "MakoSqlDB".into(),
                 "WaitGroup" => "MakoWaitGroup*".into(),
                 "AtomicInt" => "MakoAtomicInt*".into(),
@@ -3990,6 +3995,38 @@ impl Codegen {
                                 "MakoString {tmp} = mako_http2_response({st}, {code}, {body});"
                             ));
                             return ("MakoString".into(), tmp);
+                        }
+                        "http2_ready_streams" => {
+                            return ("int64_t".into(), "mako_http2_ready_streams()".into());
+                        }
+                        "http2_next_ready_stream" => {
+                            return ("int64_t".into(), "mako_http2_next_ready_stream()".into());
+                        }
+                        "http2_stream_take" => {
+                            let (_, s) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_http2_stream_take({s})"));
+                        }
+                        "http2_stream_body" => {
+                            let (_, s) = self.emit_expr(&args[0]);
+                            let tmp = self.fresh("h2body");
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_http2_stream_body({s});"
+                            ));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "http2_stream_body_len" => {
+                            let (_, s) = self.emit_expr(&args[0]);
+                            return (
+                                "int64_t".into(),
+                                format!("mako_http2_stream_body_len_of({s})"),
+                            );
+                        }
+                        "http2_stream_body_done" => {
+                            let (_, s) = self.emit_expr(&args[0]);
+                            return (
+                                "int64_t".into(),
+                                format!("mako_http2_stream_body_done({s})"),
+                            );
                         }
                         "http2_frame_payload" => {
                             let (_, s) = self.emit_expr(&args[0]);
@@ -8811,6 +8848,58 @@ impl Codegen {
                             self.line(&format!("void *{tmp} = mako_tls_accept({ctx}, {fd});"));
                             return ("void*".into(), tmp);
                         }
+                        "tls_accept_start" => {
+                            let (_, ctx) = self.emit_expr(&args[0]);
+                            let (_, fd) = self.emit_expr(&args[1]);
+                            let tmp = self.fresh("tas");
+                            self.line(&format!(
+                                "void *{tmp} = mako_tls_accept_start({ctx}, {fd});"
+                            ));
+                            return ("void*".into(), tmp);
+                        }
+                        "tls_handshake_step" => {
+                            let (_, c) = self.emit_expr(&args[0]);
+                            return (
+                                "int64_t".into(),
+                                format!("mako_tls_handshake_step({c})"),
+                            );
+                        }
+                        "tls_is_init_finished" => {
+                            let (_, c) = self.emit_expr(&args[0]);
+                            return (
+                                "int64_t".into(),
+                                format!("mako_tls_is_init_finished({c})"),
+                            );
+                        }
+                        "tls_want_read" => {
+                            let (_, c) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_tls_want_read({c})"));
+                        }
+                        "tls_want_write" => {
+                            let (_, c) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_tls_want_write({c})"));
+                        }
+                        "tls_conn_fd" => {
+                            let (_, c) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_tls_conn_fd({c})"));
+                        }
+                        "tls_read_nb" => {
+                            let (_, c) = self.emit_expr(&args[0]);
+                            let (_, n) = self.emit_expr(&args[1]);
+                            let tmp = self.fresh("trnb");
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_tls_read_nb({c}, {n});"
+                            ));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "tls_write_nb" => {
+                            let (_, c) = self.emit_expr(&args[0]);
+                            let (_, d) = self.emit_expr(&args[1]);
+                            return (
+                                "int64_t".into(),
+                                format!("mako_tls_write_nb({c}, {d})"),
+                            );
+                        }
                         "tls_read" => {
                             let (_, c) = self.emit_expr(&args[0]);
                             let (_, n) = self.emit_expr(&args[1]);
@@ -9026,6 +9115,64 @@ impl Codegen {
                             let tmp = self.fresh("qstop");
                             self.line(&format!("int64_t {tmp} = mako_quiche_stop_server({pid});"));
                             return ("int64_t".into(), tmp);
+                        }
+                        "h3_server_available" => {
+                            return ("int64_t".into(), "mako_h3_server_available()".into());
+                        }
+                        "h3_server_new" => {
+                            let (_, c) = self.emit_expr(&args[0]);
+                            let (_, k) = self.emit_expr(&args[1]);
+                            return (
+                                "int64_t".into(),
+                                format!("mako_h3_server_new({c}, {k})"),
+                            );
+                        }
+                        "h3_server_bind" => {
+                            let (_, h) = self.emit_expr(&args[0]);
+                            let (_, host) = self.emit_expr(&args[1]);
+                            let (_, p) = self.emit_expr(&args[2]);
+                            return (
+                                "int64_t".into(),
+                                format!("mako_h3_server_bind({h}, {host}, {p})"),
+                            );
+                        }
+                        "h3_server_fd" => {
+                            let (_, h) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_h3_server_fd({h})"));
+                        }
+                        "h3_server_poll" => {
+                            let (_, h) = self.emit_expr(&args[0]);
+                            let (_, ms) = self.emit_expr(&args[1]);
+                            return (
+                                "int64_t".into(),
+                                format!("mako_h3_server_poll({h}, {ms})"),
+                            );
+                        }
+                        "h3_accept_stream" => {
+                            let (_, h) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_h3_accept_stream({h})"));
+                        }
+                        "h3_stream_read" => {
+                            let (_, h) = self.emit_expr(&args[0]);
+                            let (_, s) = self.emit_expr(&args[1]);
+                            let tmp = self.fresh("h3r");
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_h3_stream_read({h}, {s});"
+                            ));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "h3_stream_write" => {
+                            let (_, h) = self.emit_expr(&args[0]);
+                            let (_, s) = self.emit_expr(&args[1]);
+                            let (_, d) = self.emit_expr(&args[2]);
+                            return (
+                                "int64_t".into(),
+                                format!("mako_h3_stream_write({h}, {s}, {d})"),
+                            );
+                        }
+                        "h3_server_close" => {
+                            let (_, h) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_h3_server_close({h})"));
                         }
                         "nghttp2_get" => {
                             let (_, h) = self.emit_expr(&args[0]);
@@ -9881,6 +10028,119 @@ impl Codegen {
                             let (_, p) = self.emit_expr(&args[1]);
                             return ("int64_t".into(), format!("mako_tcp_connect({h}, {p})"));
                         }
+                        "tcp_connect_nb" => {
+                            let (_, h) = self.emit_expr(&args[0]);
+                            let (_, p) = self.emit_expr(&args[1]);
+                            return ("int64_t".into(), format!("mako_tcp_connect_nb({h}, {p})"));
+                        }
+                        "tcp_connect_check" => {
+                            let (_, f) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_tcp_connect_check({f})"));
+                        }
+                        "tcp_connect_wait" => {
+                            let (_, f) = self.emit_expr(&args[0]);
+                            let (_, ms) = self.emit_expr(&args[1]);
+                            return (
+                                "int64_t".into(),
+                                format!("mako_tcp_connect_wait({f}, {ms})"),
+                            );
+                        }
+                        "tcp_pool_open" => {
+                            let (_, h) = self.emit_expr(&args[0]);
+                            let (_, p) = self.emit_expr(&args[1]);
+                            let (_, m) = self.emit_expr(&args[2]);
+                            let (_, ms) = self.emit_expr(&args[3]);
+                            return (
+                                "int64_t".into(),
+                                format!("mako_tcp_pool_open({h}, {p}, {m}, {ms})"),
+                            );
+                        }
+                        "tcp_pool_acquire" => {
+                            let (_, p) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_tcp_pool_acquire({p})"));
+                        }
+                        "tcp_pool_release" => {
+                            let (_, p) = self.emit_expr(&args[0]);
+                            let (_, f) = self.emit_expr(&args[1]);
+                            let (_, r) = self.emit_expr(&args[2]);
+                            return (
+                                "int64_t".into(),
+                                format!("mako_tcp_pool_release({p}, {f}, {r})"),
+                            );
+                        }
+                        "tcp_pool_close" => {
+                            let (_, p) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_tcp_pool_close({p})"));
+                        }
+                        "tcp_pool_idle" => {
+                            let (_, p) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_tcp_pool_idle({p})"));
+                        }
+                        "tcp_pool_open_count" => {
+                            let (_, p) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_tcp_pool_open_count({p})"));
+                        }
+                        "tcp_fd_copy" => {
+                            let (_, s) = self.emit_expr(&args[0]);
+                            let (_, d) = self.emit_expr(&args[1]);
+                            let (_, m) = self.emit_expr(&args[2]);
+                            return (
+                                "int64_t".into(),
+                                format!("mako_tcp_fd_copy({s}, {d}, {m})"),
+                            );
+                        }
+                        "tcp_splice" => {
+                            let (_, s) = self.emit_expr(&args[0]);
+                            let (_, d) = self.emit_expr(&args[1]);
+                            let (_, m) = self.emit_expr(&args[2]);
+                            return (
+                                "int64_t".into(),
+                                format!("mako_tcp_splice({s}, {d}, {m})"),
+                            );
+                        }
+                        "tcp_proxy_pump" => {
+                            let (_, a) = self.emit_expr(&args[0]);
+                            let (_, b) = self.emit_expr(&args[1]);
+                            let (_, ms) = self.emit_expr(&args[2]);
+                            let (_, m) = self.emit_expr(&args[3]);
+                            return (
+                                "int64_t".into(),
+                                format!("mako_tcp_proxy_pump({a}, {b}, {ms}, {m})"),
+                            );
+                        }
+                        "tcp_set_recv_buf" => {
+                            let (_, f) = self.emit_expr(&args[0]);
+                            let (_, s) = self.emit_expr(&args[1]);
+                            return (
+                                "int64_t".into(),
+                                format!("mako_tcp_set_recv_buf({f}, {s})"),
+                            );
+                        }
+                        "tcp_set_send_buf" => {
+                            let (_, f) = self.emit_expr(&args[0]);
+                            let (_, s) = self.emit_expr(&args[1]);
+                            return (
+                                "int64_t".into(),
+                                format!("mako_tcp_set_send_buf({f}, {s})"),
+                            );
+                        }
+                        "tcp_reuseport" => {
+                            let (_, f) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_tcp_reuseport({f})"));
+                        }
+                        "tcp_listen_reuseport" => {
+                            let (_, h) = self.emit_expr(&args[0]);
+                            let (_, p) = self.emit_expr(&args[1]);
+                            let (_, bl) = self.emit_expr(&args[2]);
+                            return (
+                                "int64_t".into(),
+                                format!("mako_tcp_listen_reuseport({h}, {p}, {bl})"),
+                            );
+                        }
+                        "tcp_accept4" => {
+                            let (_, f) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_tcp_accept4({f})"));
+                        }
                         "http_forward" => {
                             let (_, h) = self.emit_expr(&args[0]);
                             let (_, p) = self.emit_expr(&args[1]);
@@ -9890,6 +10150,184 @@ impl Codegen {
                             let tmp = self.fresh("fwd");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_http_forward({h}, {p}, {m}, {path}, {body});"
+                            ));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "http_forward_full" => {
+                            let (_, h) = self.emit_expr(&args[0]);
+                            let (_, p) = self.emit_expr(&args[1]);
+                            let (_, m) = self.emit_expr(&args[2]);
+                            let (_, path) = self.emit_expr(&args[3]);
+                            let (_, headers) = self.emit_expr(&args[4]);
+                            let (_, body) = self.emit_expr(&args[5]);
+                            let (_, ms) = self.emit_expr(&args[6]);
+                            let tmp = self.fresh("fwd_full");
+                            self.line(&format!(
+                                "MakoHttpForwardResult {tmp} = mako_http_forward_full({h}, {p}, {m}, {path}, {headers}, {body}, {ms});"
+                            ));
+                            return ("MakoHttpForwardResult".into(), tmp);
+                        }
+                        "http_forward_fd" => {
+                            let (_, f) = self.emit_expr(&args[0]);
+                            let (_, m) = self.emit_expr(&args[1]);
+                            let (_, path) = self.emit_expr(&args[2]);
+                            let (_, host) = self.emit_expr(&args[3]);
+                            let (_, headers) = self.emit_expr(&args[4]);
+                            let (_, body) = self.emit_expr(&args[5]);
+                            let (_, ms) = self.emit_expr(&args[6]);
+                            let tmp = self.fresh("fwd_fd");
+                            self.line(&format!(
+                                "MakoHttpForwardResult {tmp} = mako_http_forward_fd({f}, {m}, {path}, {host}, {headers}, {body}, {ms});"
+                            ));
+                            return ("MakoHttpForwardResult".into(), tmp);
+                        }
+                        "http_forward_ok" => {
+                            let (_, r) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_http_forward_ok({r})"));
+                        }
+                        "http_forward_status" => {
+                            let (_, r) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_http_forward_status({r})"));
+                        }
+                        "http_forward_body_len" => {
+                            let (_, r) = self.emit_expr(&args[0]);
+                            return (
+                                "int64_t".into(),
+                                format!("mako_http_forward_body_len({r})"),
+                            );
+                        }
+                        "http_forward_total_bytes" => {
+                            let (_, r) = self.emit_expr(&args[0]);
+                            return (
+                                "int64_t".into(),
+                                format!("mako_http_forward_total_bytes({r})"),
+                            );
+                        }
+                        "http_forward_body" => {
+                            let (_, r) = self.emit_expr(&args[0]);
+                            let tmp = self.fresh("fwd_body");
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_http_forward_body({r});"
+                            ));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "http_forward_headers" => {
+                            let (_, r) = self.emit_expr(&args[0]);
+                            let tmp = self.fresh("fwd_hdr");
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_http_forward_headers({r});"
+                            ));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "http_proxy_raw" => {
+                            let (_, c) = self.emit_expr(&args[0]);
+                            let (_, b) = self.emit_expr(&args[1]);
+                            let (_, req) = self.emit_expr(&args[2]);
+                            let (_, ms) = self.emit_expr(&args[3]);
+                            let tmp = self.fresh("proxy_raw");
+                            self.line(&format!(
+                                "MakoProxyIoResult {tmp} = mako_http_proxy_raw({c}, {b}, {req}, {ms});"
+                            ));
+                            return ("MakoProxyIoResult".into(), tmp);
+                        }
+                        "proxy_io_ok" => {
+                            let (_, r) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_proxy_io_ok({r})"));
+                        }
+                        "proxy_io_bytes_written" => {
+                            let (_, r) = self.emit_expr(&args[0]);
+                            return (
+                                "int64_t".into(),
+                                format!("mako_proxy_io_bytes_written({r})"),
+                            );
+                        }
+                        "proxy_io_bytes_read" => {
+                            let (_, r) = self.emit_expr(&args[0]);
+                            return (
+                                "int64_t".into(),
+                                format!("mako_proxy_io_bytes_read({r})"),
+                            );
+                        }
+                        "http_parse" => {
+                            let (_, s) = self.emit_expr(&args[0]);
+                            let tmp = self.fresh("http_parsed");
+                            self.line(&format!(
+                                "MakoHttpParsed {tmp} = mako_http_parse({s});"
+                            ));
+                            return ("MakoHttpParsed".into(), tmp);
+                        }
+                        "http_parsed_ok" => {
+                            let (_, r) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_http_parsed_ok({r})"));
+                        }
+                        "http_parsed_content_length" => {
+                            let (_, r) = self.emit_expr(&args[0]);
+                            return (
+                                "int64_t".into(),
+                                format!("mako_http_parsed_content_length({r})"),
+                            );
+                        }
+                        "http_parsed_chunked" => {
+                            let (_, r) = self.emit_expr(&args[0]);
+                            return (
+                                "int64_t".into(),
+                                format!("mako_http_parsed_chunked({r})"),
+                            );
+                        }
+                        "http_parsed_method" => {
+                            let (_, r) = self.emit_expr(&args[0]);
+                            let tmp = self.fresh("pm");
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_http_parsed_method({r});"
+                            ));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "http_parsed_path" => {
+                            let (_, r) = self.emit_expr(&args[0]);
+                            let tmp = self.fresh("pp");
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_http_parsed_path({r});"
+                            ));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "http_parsed_host" => {
+                            let (_, r) = self.emit_expr(&args[0]);
+                            let tmp = self.fresh("ph");
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_http_parsed_host({r});"
+                            ));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "http_parsed_headers" => {
+                            let (_, r) = self.emit_expr(&args[0]);
+                            let tmp = self.fresh("phdr");
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_http_parsed_headers({r});"
+                            ));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "http_parsed_body" => {
+                            let (_, r) = self.emit_expr(&args[0]);
+                            let tmp = self.fresh("pb");
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_http_parsed_body({r});"
+                            ));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "http_parsed_header" => {
+                            let (_, r) = self.emit_expr(&args[0]);
+                            let (_, n) = self.emit_expr(&args[1]);
+                            let tmp = self.fresh("phdr1");
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_http_parsed_header({r}, {n});"
+                            ));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "http_decode_chunked" => {
+                            let (_, s) = self.emit_expr(&args[0]);
+                            let tmp = self.fresh("chunked");
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_http_decode_chunked({s});"
                             ));
                             return ("MakoString".into(), tmp);
                         }

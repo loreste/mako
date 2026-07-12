@@ -1,5 +1,69 @@
 # Changelog
 
+## 0.1.0 — 2026-07-12 (proxy hot path)
+
+### Networking / reverse-proxy runtime
+
+- **TCP connection pool** — `tcp_pool_open` / `acquire` / `release` / `close`
+  keeps backend fds per host:port, validates before reuse, closes on error.
+- **`http_forward_full`** — returns `HttpForwardResult` with status, body,
+  body length, and total bytes; supports Content-Length, chunked, and close.
+- **`http_proxy_raw`** — raw request → backend → raw response → client pump.
+- **`http_parse`** — C hot-path request parser (`HttpParsed`: method/path/host/
+  headers/body/chunked) without Mako `str_split` allocations.
+- **Chunked decode** — `http_decode_chunked` + integrated in forward/proxy.
+- **Nonblocking connect** — `tcp_connect_nb` / `connect_check` / `connect_wait`.
+- **fd-to-fd copy** — `tcp_fd_copy` / `tcp_splice` (Linux `splice`) / `tcp_proxy_pump`.
+- **Socket tuning** — `tcp_listen_reuseport`, `tcp_set_recv_buf`/`send_buf`,
+  `tcp_accept4` (`NONBLOCK|CLOEXEC`).
+- **Async TLS accept** — `tls_accept_start` / `tls_handshake_step` /
+  `tls_want_read`/`write` / `tls_read_nb`/`write_nb` for worker-friendly handshakes.
+- **HTTP/2 multiplexing** — 32 stream slots, ready queue
+  (`http2_next_ready_stream` / `stream_take` / `stream_body`), concurrent bodies.
+- **HTTP/3 surface** — `h3_server_new` / `bind` / `poll` / `accept_stream` /
+  `stream_read`/`write` (UDP event integration; crypto depth via quiche).
+- Tests: `examples/testing/proxy_pool_test.mko`.
+- **Edge cases** — request builder normalizes caller headers (trailing CRLF),
+  skips duplicate Host/Content-Length; chunked supports extensions/trailers/
+  bare LF/incomplete→empty; parse truncates to Content-Length, LF-only headers,
+  case-insensitive lookup; no-body statuses (1xx/204/304); pool/connect/proxy
+  bad-arg guards; nonblocking reusable peek. Tests:
+  `examples/testing/proxy_edge_test.mko`.
+
+## 0.1.0 — 2026-07-12 (networking & auth)
+
+### Networking
+
+- **Reverse proxy** — `http_forward(host, port, method, path, body)` forwards a
+  request to an upstream HTTP/1.1 backend and returns the response body. With
+  the HTTP/2 server this is a complete reverse proxy
+  (`examples/h2_reverse_proxy.mko`), verified `curl --http2` → proxy → backend.
+- **Bind-address control** — `tcp_listen_addr(host, port)` binds a specific
+  address (loopback-only, a chosen NIC, or `"*"` for all). Verified on Linux.
+- **Session controls** — `tcp_set_timeout(fd, ms)` (recv/send timeouts),
+  `tcp_keepalive(fd, idle, interval, count)` (dead-peer detection),
+  `tcp_listen_backlog(host, port, backlog)` (bound the accept queue).
+- **Socket-style TLS server** — `tls_server_new` / `tls_accept` / `tls_read` /
+  `tls_write` / `tls_conn_alpn` (ALPN `h2`), plus `tls_server_new_tls13` to
+  require TLS 1.3. Verified on Linux: a 1.2 client is rejected with a
+  protocol_version alert, a 1.3 client negotiates `TLS_AES_256_GCM_SHA384`.
+
+### Security / auth
+
+- **bcrypt** — `crypto.bcrypt(password, cost)` / `bcrypt_check` / `bcrypt_ok`
+  (`$2b$` via libxcrypt on Linux; Argon2id remains the recommendation for new
+  systems). Verified on Linux against a round-trip with distinct salts.
+- **SCRAM-SHA-256** — `crypto.scram_*` toolkit (salted password, client/server
+  keys, stored key, signatures, client proof, server-side proof verification)
+  plus raw primitives `sha256_raw`, `hmac_sha256_raw`, `xor_bytes`. Verified
+  byte-for-byte against the RFC 7677 test vector.
+
+### Fixes
+
+- Runtime header include order (`mako_net.h` before `mako_http.h`) so
+  `mako_bind_ipv4_addr` is declared before use.
+- `game_udp_bind` now calls the address helper with a wildcard host.
+
 ## 0.1.0 — 2026-07-12 (expressions & assignment)
 
 ### Language

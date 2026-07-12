@@ -2030,11 +2030,13 @@ static inline int64_t mako_http2_push_promise_stream(MakoString s) {
     return v & 0x7fffffff;
 }
 
-/* HTTP/2 stream state seed (up to 3 stream ids — priority tree seed).
+/* HTTP/2 stream state — concurrent stream slots for multiplexing.
  * States: 0 idle, 1 open, 2 half-closed (local and/or remote), 3 closed.
  * Direction flags track END_STREAM: remote=received, local=sent. */
-#define MAKO_H2_STREAM_SLOTS 3
+#define MAKO_H2_STREAM_SLOTS 32
 #define MAKO_H2_DEFAULT_WINDOW 65535
+#define MAKO_H2_READY_MAX 32
+#define MAKO_H2_STREAM_BODY_MAX 16384
 static int64_t mako_h2_sids[MAKO_H2_STREAM_SLOTS];
 static int64_t mako_h2_states[MAKO_H2_STREAM_SLOTS];
 static int mako_h2_es_remote[MAKO_H2_STREAM_SLOTS];
@@ -2054,10 +2056,57 @@ static int mako_h2_hdr_assembling = 0;
 static int64_t mako_h2_hdr_stream = 0;
 static char mako_h2_hdr_acc[MAKO_H2_HDR_MAX];
 static size_t mako_h2_hdr_acc_len = 0;
-/* Last completed header block from conn_recv. */
+/* Last completed header block from conn_recv (compat with one-at-a-time API). */
 static int64_t mako_h2_hdr_done_stream = 0;
 static char mako_h2_hdr_done[MAKO_H2_HDR_MAX];
 static size_t mako_h2_hdr_done_len = 0;
+
+/* Multiplexed ready queue: completed HEADERS blocks for concurrent streams.
+ * Workers call http2_next_ready_stream / http2_stream_take without blocking
+ * other streams on the same connection. */
+static int64_t mako_h2_ready_sids[MAKO_H2_READY_MAX];
+static char mako_h2_ready_hdr[MAKO_H2_READY_MAX][MAKO_H2_HDR_MAX];
+static size_t mako_h2_ready_hdr_len[MAKO_H2_READY_MAX];
+static int mako_h2_ready_taken[MAKO_H2_READY_MAX];
+static int mako_h2_ready_n = 0;
+/* Per-stream DATA body accumulation (indexed by stream slot). */
+static char mako_h2_stream_body[MAKO_H2_STREAM_SLOTS][MAKO_H2_STREAM_BODY_MAX];
+static size_t mako_h2_stream_body_len[MAKO_H2_STREAM_SLOTS];
+static int mako_h2_stream_body_done[MAKO_H2_STREAM_SLOTS];
+
+static inline void mako_http2_ready_reset(void) {
+    mako_h2_ready_n = 0;
+    for (int i = 0; i < MAKO_H2_READY_MAX; i++) {
+        mako_h2_ready_sids[i] = 0;
+        mako_h2_ready_hdr_len[i] = 0;
+        mako_h2_ready_taken[i] = 0;
+    }
+    for (int i = 0; i < MAKO_H2_STREAM_SLOTS; i++) {
+        mako_h2_stream_body_len[i] = 0;
+        mako_h2_stream_body_done[i] = 0;
+    }
+}
+
+static inline void mako_http2_ready_push(int64_t sid, const char *hdr, size_t hlen) {
+    if (sid <= 0 || !hdr) return;
+    /* Update existing entry for this stream if present. */
+    for (int i = 0; i < mako_h2_ready_n; i++) {
+        if (mako_h2_ready_sids[i] == sid) {
+            if (hlen > MAKO_H2_HDR_MAX) hlen = MAKO_H2_HDR_MAX;
+            memcpy(mako_h2_ready_hdr[i], hdr, hlen);
+            mako_h2_ready_hdr_len[i] = hlen;
+            mako_h2_ready_taken[i] = 0;
+            return;
+        }
+    }
+    if (mako_h2_ready_n >= MAKO_H2_READY_MAX) return;
+    int i = mako_h2_ready_n++;
+    mako_h2_ready_sids[i] = sid;
+    if (hlen > MAKO_H2_HDR_MAX) hlen = MAKO_H2_HDR_MAX;
+    memcpy(mako_h2_ready_hdr[i], hdr, hlen);
+    mako_h2_ready_hdr_len[i] = hlen;
+    mako_h2_ready_taken[i] = 0;
+}
 
 static inline void mako_http2_hdr_assembly_reset(void) {
     mako_h2_hdr_assembling = 0;
@@ -2065,6 +2114,7 @@ static inline void mako_http2_hdr_assembly_reset(void) {
     mako_h2_hdr_acc_len = 0;
     mako_h2_hdr_done_stream = 0;
     mako_h2_hdr_done_len = 0;
+    mako_http2_ready_reset();
 }
 
 static inline int mako_http2_hdr_append(const unsigned char *p, size_t n) {
@@ -2080,6 +2130,7 @@ static inline void mako_http2_hdr_finish(void) {
     memcpy(mako_h2_hdr_done, mako_h2_hdr_acc, n);
     mako_h2_hdr_done_len = n;
     mako_h2_hdr_done_stream = mako_h2_hdr_stream;
+    mako_http2_ready_push(mako_h2_hdr_stream, mako_h2_hdr_acc, n);
     mako_h2_hdr_assembling = 0;
     mako_h2_hdr_stream = 0;
     mako_h2_hdr_acc_len = 0;
@@ -2102,6 +2153,8 @@ static inline void mako_http2_stream_reset(void) {
         mako_h2_pri_dep[i] = 0;
         mako_h2_pri_weight[i] = 16; /* RFC default weight */
         mako_h2_pri_excl[i] = 0;
+        mako_h2_stream_body_len[i] = 0;
+        mako_h2_stream_body_done[i] = 0;
     }
     mako_h2_last_sid = 0;
     mako_h2_conn_window = MAKO_H2_DEFAULT_WINDOW;
@@ -2180,6 +2233,15 @@ typedef struct {
     int ping_ack_needed;
     unsigned char ping_opaque[8];
     int is_server;
+    /* Multiplex ready queue + bodies */
+    int64_t ready_sids[MAKO_H2_READY_MAX];
+    char ready_hdr[MAKO_H2_READY_MAX][MAKO_H2_HDR_MAX];
+    size_t ready_hdr_len[MAKO_H2_READY_MAX];
+    int ready_taken[MAKO_H2_READY_MAX];
+    int ready_n;
+    char stream_body[MAKO_H2_STREAM_SLOTS][MAKO_H2_STREAM_BODY_MAX];
+    size_t stream_body_len[MAKO_H2_STREAM_SLOTS];
+    int stream_body_done[MAKO_H2_STREAM_SLOTS];
 } MakoHttp2Conn;
 
 /* The handle whose state is currently loaded into the globals (NULL = the
@@ -2217,6 +2279,14 @@ static inline void mako_h2_conn_save(MakoHttp2Conn *c) {
     c->ping_ack_needed = mako_h2_ping_ack_needed;
     memcpy(c->ping_opaque, mako_h2_ping_opaque, sizeof(mako_h2_ping_opaque));
     c->is_server = mako_h2_is_server;
+    memcpy(c->ready_sids, mako_h2_ready_sids, sizeof(mako_h2_ready_sids));
+    memcpy(c->ready_hdr, mako_h2_ready_hdr, sizeof(mako_h2_ready_hdr));
+    memcpy(c->ready_hdr_len, mako_h2_ready_hdr_len, sizeof(mako_h2_ready_hdr_len));
+    memcpy(c->ready_taken, mako_h2_ready_taken, sizeof(mako_h2_ready_taken));
+    c->ready_n = mako_h2_ready_n;
+    memcpy(c->stream_body, mako_h2_stream_body, sizeof(mako_h2_stream_body));
+    memcpy(c->stream_body_len, mako_h2_stream_body_len, sizeof(mako_h2_stream_body_len));
+    memcpy(c->stream_body_done, mako_h2_stream_body_done, sizeof(mako_h2_stream_body_done));
 }
 
 /* Load `c` into the live globals. */
@@ -2250,6 +2320,14 @@ static inline void mako_h2_conn_load(const MakoHttp2Conn *c) {
     mako_h2_ping_ack_needed = c->ping_ack_needed;
     memcpy(mako_h2_ping_opaque, c->ping_opaque, sizeof(mako_h2_ping_opaque));
     mako_h2_is_server = c->is_server;
+    memcpy(mako_h2_ready_sids, c->ready_sids, sizeof(mako_h2_ready_sids));
+    memcpy(mako_h2_ready_hdr, c->ready_hdr, sizeof(mako_h2_ready_hdr));
+    memcpy(mako_h2_ready_hdr_len, c->ready_hdr_len, sizeof(mako_h2_ready_hdr_len));
+    memcpy(mako_h2_ready_taken, c->ready_taken, sizeof(mako_h2_ready_taken));
+    mako_h2_ready_n = c->ready_n;
+    memcpy(mako_h2_stream_body, c->stream_body, sizeof(mako_h2_stream_body));
+    memcpy(mako_h2_stream_body_len, c->stream_body_len, sizeof(mako_h2_stream_body_len));
+    memcpy(mako_h2_stream_body_done, c->stream_body_done, sizeof(mako_h2_stream_body_done));
 }
 
 /* Allocate a fresh connection in the default (reset) state. */
@@ -2554,6 +2632,21 @@ static inline int64_t mako_http2_conn_recv(MakoString s) {
                     free(frame.data);
                     return -1;
                 }
+                /* Accumulate body for concurrent stream reads. */
+                int si = mako_http2_stream_find(stream);
+                if (si >= 0) {
+                    size_t room = MAKO_H2_STREAM_BODY_MAX - mako_h2_stream_body_len[si];
+                    size_t take = (size_t)len < room ? (size_t)len : room;
+                    if (take > 0) {
+                        memcpy(mako_h2_stream_body[si] + mako_h2_stream_body_len[si],
+                               p + off + 9, take);
+                        mako_h2_stream_body_len[si] += take;
+                    }
+                }
+            }
+            if (typ == 0 && (flags & 0x1) != 0) {
+                int si = mako_http2_stream_find(stream);
+                if (si >= 0) mako_h2_stream_body_done[si] = 1;
             }
             int64_t st = mako_http2_stream_apply(frame);
             free(frame.data);
@@ -2564,16 +2657,28 @@ static inline int64_t mako_http2_conn_recv(MakoString s) {
     return 0;
 }
 
-/* Last header block completed by conn_recv for `stream` (empty if none/mismatch). */
+/* Last header block completed by conn_recv for `stream` (empty if none/mismatch).
+ * Also searches the multiplexed ready queue so concurrent streams work. */
 static inline MakoString mako_http2_conn_header_block(int64_t stream) {
-    if (stream <= 0 || stream != mako_h2_hdr_done_stream)
-        return (MakoString){NULL, 0};
-    if (mako_h2_hdr_done_len == 0) return mako_str_from_cstr("");
-    char *d = (char *)malloc(mako_h2_hdr_done_len + 1);
-    if (!d) return (MakoString){NULL, 0};
-    memcpy(d, mako_h2_hdr_done, mako_h2_hdr_done_len);
-    d[mako_h2_hdr_done_len] = 0;
-    return (MakoString){d, mako_h2_hdr_done_len};
+    if (stream <= 0) return (MakoString){NULL, 0};
+    if (stream == mako_h2_hdr_done_stream && mako_h2_hdr_done_len > 0) {
+        char *d = (char *)malloc(mako_h2_hdr_done_len + 1);
+        if (!d) return (MakoString){NULL, 0};
+        memcpy(d, mako_h2_hdr_done, mako_h2_hdr_done_len);
+        d[mako_h2_hdr_done_len] = 0;
+        return (MakoString){d, mako_h2_hdr_done_len};
+    }
+    for (int i = 0; i < mako_h2_ready_n; i++) {
+        if (mako_h2_ready_sids[i] == stream && mako_h2_ready_hdr_len[i] > 0) {
+            size_t n = mako_h2_ready_hdr_len[i];
+            char *d = (char *)malloc(n + 1);
+            if (!d) return (MakoString){NULL, 0};
+            memcpy(d, mako_h2_ready_hdr[i], n);
+            d[n] = 0;
+            return (MakoString){d, n};
+        }
+    }
+    return (MakoString){NULL, 0};
 }
 static inline int64_t mako_http2_conn_header_stream(void) {
     return mako_h2_hdr_done_stream;
@@ -2581,6 +2686,62 @@ static inline int64_t mako_http2_conn_header_stream(void) {
 static inline int64_t mako_http2_conn_header_assembling(void) {
     return mako_h2_hdr_assembling ? 1 : 0;
 }
+
+/* ---- HTTP/2 stream multiplexing (ready queue + body) --------------------- */
+
+/* Count streams with completed HEADERS not yet taken by a worker. */
+static inline int64_t mako_http2_ready_streams(void) {
+    int64_t n = 0;
+    for (int i = 0; i < mako_h2_ready_n; i++) {
+        if (!mako_h2_ready_taken[i] && mako_h2_ready_sids[i] > 0) n++;
+    }
+    return n;
+}
+
+/* Next untaken ready stream id, or -1. */
+static inline int64_t mako_http2_next_ready_stream(void) {
+    for (int i = 0; i < mako_h2_ready_n; i++) {
+        if (!mako_h2_ready_taken[i] && mako_h2_ready_sids[i] > 0)
+            return mako_h2_ready_sids[i];
+    }
+    return -1;
+}
+
+/* Mark stream as taken by a worker (so next_ready skips it). Returns 1 if found. */
+static inline int64_t mako_http2_stream_take(int64_t sid) {
+    for (int i = 0; i < mako_h2_ready_n; i++) {
+        if (mako_h2_ready_sids[i] == sid) {
+            mako_h2_ready_taken[i] = 1;
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/* Accumulated DATA body for stream (may be partial until END_STREAM). */
+static inline MakoString mako_http2_stream_body(int64_t sid) {
+    int i = mako_http2_stream_find(sid);
+    if (i < 0 || mako_h2_stream_body_len[i] == 0) return mako_str_from_cstr("");
+    size_t n = mako_h2_stream_body_len[i];
+    char *d = (char *)malloc(n + 1);
+    if (!d) return mako_str_from_cstr("");
+    memcpy(d, mako_h2_stream_body[i], n);
+    d[n] = 0;
+    return (MakoString){d, n};
+}
+
+static inline int64_t mako_http2_stream_body_len_of(int64_t sid) {
+    int i = mako_http2_stream_find(sid);
+    if (i < 0) return -1;
+    return (int64_t)mako_h2_stream_body_len[i];
+}
+
+static inline int64_t mako_http2_stream_body_done(int64_t sid) {
+    int i = mako_http2_stream_find(sid);
+    if (i < 0) return -1;
+    return mako_h2_stream_body_done[i] ? 1 : 0;
+}
+
 
 /* Record that we sent server/client SETTINGS bootstrap. */
 static inline int64_t mako_http2_conn_send_settings(void) {

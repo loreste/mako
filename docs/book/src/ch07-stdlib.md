@@ -350,12 +350,15 @@ Never store raw or plain-hashed (`sha256`) passwords — always use
 `password_hash`. `crypto.password_hashing_ok()` reports whether the backend is
 available on the current build.
 
+For interop with an existing **bcrypt** store, `crypto.bcrypt(password, cost)`
+produces a `$2b$` hash and `crypto.bcrypt_check(hash, password)` verifies it
+(needs libxcrypt — `crypto.bcrypt_ok()` reports availability). Prefer Argon2id
+for new systems.
+
 ### Key derivation
 
 `crypto.pbkdf2(password, salt, iterations, key_len)` computes PBKDF2-HMAC-SHA256
 — a building block for SCRAM-SHA-256 authentication and legacy password KDFs.
-Combined with `hmac_sha256`, `sha256`, `random_bytes`, and constant-time
-comparison, you have the pieces to implement SCRAM directly.
 
 ```mko
 pull "crypto"
@@ -365,6 +368,33 @@ fn main() {
     print(len(salted))   // 32-byte derived key
 }
 ```
+
+### SCRAM-SHA-256
+
+For Postgres-style challenge-response auth, the `crypto.scram_*` functions
+provide the SCRAM-SHA-256 core (RFC 5802 / RFC 7677). They work on **raw
+bytes** (`sha256_raw`, `hmac_sha256_raw`, `xor_bytes` back them); you assemble
+the `AuthMessage` from the protocol strings. A server verifies a client without
+ever storing the password:
+
+```mko
+pull "crypto"
+
+// salt is raw bytes — base64-decode the value from the wire first.
+let salted = crypto.scram_salted_password(password, salt, iterations)
+let stored_key = crypto.scram_stored_key(crypto.scram_client_key(salted))
+
+// AuthMessage = client-first-bare + "," + server-first + "," + client-final-no-proof
+// On auth, check the client's proof against the stored key:
+if crypto.scram_verify_proof(stored_key, auth_message, client_proof) == 1 {
+    // authenticated — reply with the server signature
+    let server_key = crypto.scram_server_key(salted)
+    let sig = crypto.scram_server_signature(server_key, auth_message)
+}
+```
+
+The implementation is checked byte-for-byte against the RFC 7677 test vector
+(`examples/testing/scram_test.mko`).
 
 ---
 

@@ -345,6 +345,113 @@ static inline void *mako_tls_accept(void *ctx, int64_t fd) {
     return (void *)c;
 }
 
+/* Nonblocking TLS accept start: puts fd in nonblocking mode, creates SSL, and
+ * kicks SSL_accept once. Handshake may be incomplete — drive with
+ * tls_handshake_step / poll on want-read/want-write. Returns conn or NULL. */
+static inline void *mako_tls_accept_start(void *ctx, int64_t fd) {
+    if (!ctx || fd < 0) return NULL;
+#if !defined(_WIN32)
+    int flags = fcntl((int)fd, F_GETFL, 0);
+    if (flags >= 0) fcntl((int)fd, F_SETFL, flags | O_NONBLOCK);
+#else
+    u_long mode = 1UL;
+    ioctlsocket((mako_sock_t)fd, FIONBIO, &mode);
+#endif
+    SSL *ssl = SSL_new((SSL_CTX *)ctx);
+    if (!ssl) return NULL;
+    SSL_set_fd(ssl, (int)fd);
+    SSL_set_accept_state(ssl);
+    int rc = SSL_accept(ssl);
+    if (rc <= 0) {
+        int err = SSL_get_error(ssl, rc);
+        if (err != SSL_ERROR_WANT_READ && err != SSL_ERROR_WANT_WRITE) {
+            SSL_free(ssl);
+            return NULL;
+        }
+    }
+    MakoTlsConn *c = (MakoTlsConn *)malloc(sizeof(MakoTlsConn));
+    if (!c) { SSL_free(ssl); return NULL; }
+    c->ssl = ssl;
+    c->fd = (int)fd;
+    return (void *)c;
+}
+
+/* Drive a nonblocking handshake one step.
+ * Returns: 1 = finished, 0 = want read, 2 = want write, -1 = error. */
+static inline int64_t mako_tls_handshake_step(void *conn) {
+    MakoTlsConn *c = (MakoTlsConn *)conn;
+    if (!c || !c->ssl) return -1;
+    if (SSL_is_init_finished(c->ssl)) return 1;
+    int rc = SSL_do_handshake(c->ssl);
+    if (rc == 1) return 1;
+    int err = SSL_get_error(c->ssl, rc);
+    if (err == SSL_ERROR_WANT_READ) return 0;
+    if (err == SSL_ERROR_WANT_WRITE) return 2;
+    return -1;
+}
+
+static inline int64_t mako_tls_is_init_finished(void *conn) {
+    MakoTlsConn *c = (MakoTlsConn *)conn;
+    if (!c || !c->ssl) return 0;
+    return SSL_is_init_finished(c->ssl) ? 1 : 0;
+}
+
+/* 1 if last handshake/IO wants readable socket. */
+static inline int64_t mako_tls_want_read(void *conn) {
+    MakoTlsConn *c = (MakoTlsConn *)conn;
+    if (!c || !c->ssl) return 0;
+    if (SSL_is_init_finished(c->ssl)) return 0;
+    /* Probe without advancing: OpenSSL tracks want via SSL_get_error after op.
+     * We re-issue do_handshake which is idempotent for WANT_* states. */
+    int rc = SSL_do_handshake(c->ssl);
+    if (rc == 1) return 0;
+    return SSL_get_error(c->ssl, rc) == SSL_ERROR_WANT_READ ? 1 : 0;
+}
+
+static inline int64_t mako_tls_want_write(void *conn) {
+    MakoTlsConn *c = (MakoTlsConn *)conn;
+    if (!c || !c->ssl) return 0;
+    if (SSL_is_init_finished(c->ssl)) return 0;
+    int rc = SSL_do_handshake(c->ssl);
+    if (rc == 1) return 0;
+    return SSL_get_error(c->ssl, rc) == SSL_ERROR_WANT_WRITE ? 1 : 0;
+}
+
+/* Underlying TCP fd for event-loop registration. */
+static inline int64_t mako_tls_conn_fd(void *conn) {
+    MakoTlsConn *c = (MakoTlsConn *)conn;
+    if (!c) return -1;
+    return (int64_t)c->fd;
+}
+
+/* Nonblocking TLS read: empty string on WANT_READ / close; check want flags. */
+static inline MakoString mako_tls_read_nb(void *conn, int64_t max) {
+    MakoTlsConn *c = (MakoTlsConn *)conn;
+    if (!c || !c->ssl || max <= 0) return mako_str_from_cstr("");
+    if (max > 65536) max = 65536;
+    char *buf = (char *)malloc((size_t)max + 1);
+    if (!buf) return mako_str_from_cstr("");
+    int n = SSL_read(c->ssl, buf, (int)max);
+    if (n <= 0) {
+        free(buf);
+        return mako_str_from_cstr("");
+    }
+    buf[n] = 0;
+    return (MakoString){buf, (size_t)n};
+}
+
+static inline int64_t mako_tls_write_nb(void *conn, MakoString data) {
+    MakoTlsConn *c = (MakoTlsConn *)conn;
+    if (!c || !c->ssl || !data.data) return -1;
+    int n = SSL_write(c->ssl, data.data, (int)data.len);
+    if (n <= 0) {
+        int err = SSL_get_error(c->ssl, n);
+        if (err == SSL_ERROR_WANT_READ || err == SSL_ERROR_WANT_WRITE) return 0;
+        return -1;
+    }
+    return (int64_t)n;
+}
+
 /* Read up to `max` bytes of decrypted data. Empty on close/error. */
 static inline MakoString mako_tls_read(void *conn, int64_t max) {
     MakoTlsConn *c = (MakoTlsConn *)conn;
@@ -2901,6 +3008,20 @@ static inline void *mako_tls_server_new_tls13(MakoString cert, MakoString key) {
 }
 static inline void *mako_tls_accept(void *ctx, int64_t fd) {
     (void)ctx; (void)fd; return NULL;
+}
+static inline void *mako_tls_accept_start(void *ctx, int64_t fd) {
+    (void)ctx; (void)fd; return NULL;
+}
+static inline int64_t mako_tls_handshake_step(void *conn) { (void)conn; return -1; }
+static inline int64_t mako_tls_is_init_finished(void *conn) { (void)conn; return 0; }
+static inline int64_t mako_tls_want_read(void *conn) { (void)conn; return 0; }
+static inline int64_t mako_tls_want_write(void *conn) { (void)conn; return 0; }
+static inline int64_t mako_tls_conn_fd(void *conn) { (void)conn; return -1; }
+static inline MakoString mako_tls_read_nb(void *conn, int64_t max) {
+    (void)conn; (void)max; return mako_str_from_cstr("");
+}
+static inline int64_t mako_tls_write_nb(void *conn, MakoString data) {
+    (void)conn; (void)data; return -1;
 }
 static inline MakoString mako_tls_read(void *conn, int64_t max) {
     (void)conn; (void)max; return mako_str_from_cstr("");

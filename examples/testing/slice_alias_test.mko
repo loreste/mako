@@ -1,0 +1,39 @@
+// Regression: a growing append must not free a backing array that an aliased
+// slice header still points at. Structs are passed by value, so a slice field
+// is shallow-copied (shared backing); appending through one copy used to
+// realloc-and-free the shared buffer, dangling the other copy — a double-free
+// on the next append (found in faydb's xid_status handling).
+
+struct Box {
+    xs: []int
+}
+
+fn grow(mut b: Box, n: int) -> Box {
+    var i = 0
+    while i < n {
+        b.xs = append(b.xs, i)
+        i++
+    }
+    return b
+}
+
+func TestSliceAliasNoDoubleFree() {
+    // Start with a small backing so appends force several grows.
+    var a = Box{ xs: make([]int, 0, 2) }
+    a.xs = append(a.xs, 100)
+
+    // Copy the struct by value — b.xs shares a's backing array.
+    var b = a
+
+    // Grow both through many reallocations. The old buffers must stay valid.
+    a = grow(a, 50)
+    b = grow(b, 50)
+
+    // Both independent now; verify contents and lengths.
+    assert_eq(len(a.xs), 51)
+    assert_eq(len(b.xs), 51)
+    assert_eq(a.xs[0], 100)
+    assert_eq(b.xs[0], 100)
+    assert_eq(a.xs[50], 49)
+    assert_eq(b.xs[50], 49)
+}

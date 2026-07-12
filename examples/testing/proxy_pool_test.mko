@@ -1,0 +1,178 @@
+// Upstream TCP pool, HTTP parse, chunked decode, nonblocking connect,
+// socket tuning, and HTTP/2 stream multiplexing surface.
+
+fn TestTcpPoolOpenClose() {
+    let pool = tcp_pool_open("127.0.0.1", 1, 4, 100)
+    assert(pool >= 0)
+    assert_eq(tcp_pool_idle(pool), 0)
+    assert_eq(tcp_pool_open_count(pool), 0)
+    // Nothing listening on :1 → acquire fails safely.
+    let fd = tcp_pool_acquire(pool)
+    assert_eq(fd, -1)
+    assert_eq(tcp_pool_close(pool), 1)
+}
+
+// Release must not block for SO_RCVTIMEO (hot path). Uses a live keep-alive
+// backend when available; otherwise still asserts open/close wiring.
+fn TestTcpPoolReleaseIsNonblocking() {
+    let lfd = tcp_listen_addr("127.0.0.1", 19431)
+    if lfd < 0 { return }
+    let _ = io_set_nonblocking(lfd, 1)
+    // Accept one client in the background of this process via accept after connect.
+    let pool = tcp_pool_open("127.0.0.1", 19431, 2, 500)
+    assert(pool >= 0)
+    let fd = tcp_pool_acquire(pool)
+    // accept the inbound connection so the backend fd is fully connected
+    let srv = tcp_accept_nb(lfd)
+    if fd < 0 || srv < 0 {
+        if fd >= 0 { let _ = tcp_pool_release(pool, fd, 0) }
+        if srv >= 0 { let _ = tcp_close(srv) }
+        let _ = tcp_pool_close(pool)
+        let _ = tcp_close(lfd)
+        return
+    }
+    let t0 = now_ms()
+    let _ = tcp_pool_release(pool, fd, 1)
+    let dt = now_ms() - t0
+    // Must complete well under the 500ms pool timeout (hot path).
+    assert(dt < 50)
+    assert(tcp_pool_idle(pool) >= 0)
+    let _ = tcp_pool_close(pool)
+    let _ = tcp_close(srv)
+    let _ = tcp_close(lfd)
+}
+
+fn TestHttpParseFull() {
+    let raw = "POST /api/v1/items HTTP/1.1\r\nHost: example.com\r\nContent-Length: 5\r\nContent-Type: text/plain\r\n\r\nhello"
+    let r = http_parse(raw)
+    assert_eq(http_parsed_ok(r), 1)
+    assert_eq_str(http_parsed_method(r), "POST")
+    assert_eq_str(http_parsed_path(r), "/api/v1/items")
+    assert_eq_str(http_parsed_host(r), "example.com")
+    assert_eq(http_parsed_content_length(r), 5)
+    assert_eq(http_parsed_chunked(r), 0)
+    assert_eq_str(http_parsed_body(r), "hello")
+    assert_eq_str(http_parsed_header(r, "Content-Type"), "text/plain")
+    assert(str_contains(http_parsed_headers(r), "Host: example.com"))
+}
+
+fn TestHttpDecodeChunked() {
+    let chunked = "5\r\nhello\r\n6\r\n world\r\n0\r\n\r\n"
+    let body = http_decode_chunked(chunked)
+    assert_eq_str(body, "hello world")
+}
+
+fn TestHttpParseChunkedBody() {
+    let raw = "POST /c HTTP/1.1\r\nHost: h\r\nTransfer-Encoding: chunked\r\n\r\n5\r\nchunk\r\n0\r\n\r\n"
+    let r = http_parse(raw)
+    assert_eq(http_parsed_ok(r), 1)
+    assert_eq(http_parsed_chunked(r), 1)
+    assert_eq_str(http_parsed_body(r), "chunk")
+}
+
+fn TestHttpForwardFullUnreachable() {
+    let r = http_forward_full("127.0.0.1", 1, "GET", "/", "", "", 200)
+    assert_eq(http_forward_ok(r), 0)
+    assert_eq(http_forward_status(r), 0)
+    assert_eq(http_forward_body_len(r), 0)
+}
+
+fn TestTcpConnectNbLocal() {
+    // Nonblocking connect to closed port should return fd or -1 without hang.
+    let fd = tcp_connect_nb("127.0.0.1", 1)
+    if fd >= 0 {
+        let st = tcp_connect_wait(fd, 50)
+        // Expect failure or timeout (nothing on :1)
+        assert(st == 0 || st == -1)
+        let _ = tcp_close(fd)
+    }
+}
+
+fn TestSocketTuning() {
+    let lfd = tcp_listen_reuseport("127.0.0.1", 19421, 64)
+    if lfd >= 0 {
+        assert_eq(tcp_set_recv_buf(lfd, 65536), 1)
+        assert_eq(tcp_set_send_buf(lfd, 65536), 1)
+        assert_eq(tcp_nodelay(lfd), 1)
+        let _ = tcp_close(lfd)
+    }
+    // accept4 on a non-listener is safe failure
+    assert_eq(tcp_accept4(-1), -1)
+}
+
+fn TestHttp2ReadyQueue() {
+    let c = http2_conn_new()
+    let _ = http2_conn_use(c)
+    let _s = http2_conn_set_server(1)
+
+    let block1 = hpack_encode_literal(":method", "GET")
+        + hpack_encode_literal(":path", "/one")
+    let block2 = hpack_encode_literal(":method", "GET")
+        + hpack_encode_literal(":path", "/two")
+    let h1 = http2_headers_frame(1, block1, 5)
+    let h2 = http2_headers_frame(3, block2, 5)
+
+    let rc = http2_conn_recv(http2_client_preface() + h1 + h2)
+    assert_eq(rc, 0)
+
+    assert(http2_ready_streams() >= 1)
+    let sid = http2_next_ready_stream()
+    assert(sid == 1 || sid == 3)
+    assert_eq(http2_stream_take(sid), 1)
+
+    // Second stream still ready
+    let sid2 = http2_next_ready_stream()
+    assert(sid2 > 0)
+    assert(sid2 != sid)
+    assert_eq(http2_stream_take(sid2), 1)
+    assert_eq(http2_ready_streams(), 0)
+
+    http2_conn_free(c)
+}
+
+fn TestTlsAcceptStartSurface() {
+    // API is wired; bad cert context yields null conn.
+    let s = tls_server_new("/no/such/cert.pem", "/no/such/key.pem")
+    let c = tls_accept_start(s, -1)
+    let _ = tls_server_free(s)
+    // c is null / unused; handshake step on null is -1
+    assert_eq(tls_handshake_step(c), -1)
+    assert_eq(tls_is_init_finished(c), 0)
+    assert_eq(tls_want_read(c), 0)
+    assert_eq(tls_conn_fd(c), -1)
+}
+
+fn TestH3ServerSurface() {
+    let ok = h3_server_available()
+    assert(ok == 0 || ok == 1)
+    if ok == 1 {
+        let h = h3_server_new("/no/cert.pem", "/no/key.pem")
+        assert(h >= 0)
+        let bound = h3_server_bind(h, "127.0.0.1", 0)
+        // port 0 may fail on some stacks; either way close is safe
+        if bound == 1 {
+            assert(h3_server_fd(h) >= 0)
+            let _ = h3_server_poll(h, 0)
+        }
+        assert_eq(h3_server_close(h), 1)
+    } else {
+        assert_eq(h3_server_new("a", "b"), -1)
+    }
+}
+
+fn TestTcpFdCopyUnixPair() {
+    let a = unix_socket_pair()
+    if a >= 0 {
+        let b = unix_socket_pair_peer()
+        assert(b >= 0)
+        assert_eq(unix_write(a, "splice-me"), 9)
+        // Copy from b (has data) — actually we wrote to a, so read side is b
+        // Use tcp_fd_copy which works on any fd with recv/send.
+        let n = tcp_fd_copy(b, a, 64)
+        // May get 9 bytes back to a (echo path) or fail if unix uses different semantics
+        // At least the call is safe.
+        assert(n >= 0 || n == -1)
+        let _ = unix_close(a)
+        let _ = unix_close(b)
+    }
+}

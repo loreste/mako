@@ -3,6 +3,11 @@
 #define MAKO_RT_H
 
 #ifndef _WIN32
+/* _GNU_SOURCE (glibc) exposes splice/accept4 used by the proxy hot path; it
+ * implies _DEFAULT_SOURCE/_POSIX_C_SOURCE. Must precede any system header. */
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE 1
+#endif
 #ifndef _DEFAULT_SOURCE
 #define _DEFAULT_SOURCE 1
 #endif
@@ -16,6 +21,10 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <signal.h>
+#if defined(__GLIBC__) || defined(__APPLE__)
+#include <execinfo.h>
+#endif
 #include <string.h>
 #include <inttypes.h>
 #include <errno.h>
@@ -282,8 +291,10 @@ static inline MakoByteArray mako_byte_append(MakoByteArray s, int64_t v) {
     }
     size_t ncap = s.cap ? s.cap * 2 : 1;
     if (ncap < s.len + 1) ncap = s.len + 1;
-    uint8_t *nd = (uint8_t *)realloc(s.data, ncap);
+    /* Fresh backing on grow (never free the old) — see mako_slice_append. */
+    uint8_t *nd = (uint8_t *)malloc(ncap);
     if (!nd) mako_abort("append: out of memory");
+    if (s.len) memcpy(nd, s.data, s.len);
     s.data = nd;
     s.cap = ncap;
     s.data[s.len++] = (uint8_t)v;
@@ -479,8 +490,10 @@ static inline MakoStrArray mako_str_array_append(MakoStrArray s, MakoString v) {
     if (s.len + 1 > s.cap) {
         size_t ncap = s.cap ? s.cap * 2 : 1;
         if (ncap < s.len + 1) ncap = s.len + 1;
-        MakoString *nd = (MakoString *)realloc(s.data, ncap * sizeof(MakoString));
+        /* Fresh backing on grow (never free the old) — see mako_slice_append. */
+        MakoString *nd = (MakoString *)malloc(ncap * sizeof(MakoString));
         if (!nd) mako_abort("append: out of memory");
+        if (s.len) memcpy(nd, s.data, s.len * sizeof(MakoString));
         s.data = nd;
         s.cap = ncap;
     }
@@ -568,8 +581,10 @@ static inline MakoFloatArray mako_float_array_append(MakoFloatArray s, double v)
     if (s.len + 1 > s.cap) {
         size_t ncap = s.cap ? s.cap * 2 : 1;
         if (ncap < s.len + 1) ncap = s.len + 1;
-        double *nd = (double *)realloc(s.data, ncap * sizeof(double));
+        /* Fresh backing on grow (never free the old) — see mako_slice_append. */
+        double *nd = (double *)malloc(ncap * sizeof(double));
         if (!nd) mako_abort("append: out of memory");
+        if (s.len) memcpy(nd, s.data, s.len * sizeof(double));
         s.data = nd;
         s.cap = ncap;
     }
@@ -1356,7 +1371,12 @@ static inline int64_t mako_array_cap(MakoIntArray a) {
     return (int64_t)a.cap;
 }
 
-/* Go-like append: may reallocate; returns new header (caller must assign). */
+/* Go-like append: may reallocate; returns new header (caller must assign).
+ * Growing allocates a *fresh* backing array and copies — it never frees the old
+ * one. This matches Go: after a growing append the source slice still points at
+ * a valid (older) backing array, so a struct passed by value (which shallow-
+ * copies the slice header, sharing the backing store) can't be left holding a
+ * freed pointer. Freeing here would double-free / use-after-free such aliases. */
 static inline MakoIntArray mako_slice_append(MakoIntArray s, int64_t v) {
     if (s.len < s.cap) {
         s.data[s.len++] = v;
@@ -1364,8 +1384,9 @@ static inline MakoIntArray mako_slice_append(MakoIntArray s, int64_t v) {
     }
     size_t ncap = s.cap ? s.cap * 2 : 1;
     if (ncap < s.len + 1) ncap = s.len + 1;
-    int64_t *nd = (int64_t *)realloc(s.data, ncap * sizeof(int64_t));
+    int64_t *nd = (int64_t *)malloc(ncap * sizeof(int64_t));
     if (!nd) mako_abort("append: out of memory");
+    if (s.len) memcpy(nd, s.data, s.len * sizeof(int64_t));
     s.data = nd;
     s.cap = ncap;
     s.data[s.len++] = v;
@@ -3535,6 +3556,54 @@ static inline void mako_assert_eq_str(MakoString a, MakoString b) {
 }
 
 /* Run one TestXxx; returns 0 on pass, 1 on fail. Continues to next test after fail. */
+/* On a native fault (SIGABRT/SIGSEGV/SIGBUS/SIGFPE) inside a test, report which
+ * test was running and a backtrace before dying, so a crash points at a place
+ * instead of just "killed by signal N". */
+static void mako_test_crash_handler(int sig) {
+    const char *nm = mako_test_current ? mako_test_current : "(none)";
+    const char *sn =
+        sig == SIGSEGV ? "SIGSEGV" :
+        sig == SIGABRT ? "SIGABRT" :
+        sig == SIGBUS  ? "SIGBUS"  :
+        sig == SIGFPE  ? "SIGFPE"  : "signal";
+    fprintf(stderr, "\n--- CRASH: %s during test '%s'\n", sn, nm);
+#if defined(__GLIBC__) || defined(__APPLE__)
+    void *frames[32];
+    int n = backtrace(frames, 32);
+    backtrace_symbols_fd(frames, n, 2 /* stderr */);
+#endif
+    fflush(stderr);
+    signal(sig, SIG_DFL);
+    raise(sig);
+}
+
+static inline void mako_test_install_crash_handler(void) {
+#if defined(_WIN32)
+    signal(SIGSEGV, mako_test_crash_handler);
+    signal(SIGABRT, mako_test_crash_handler);
+    signal(SIGFPE, mako_test_crash_handler);
+#else
+    /* Run the handler on a dedicated stack (SA_ONSTACK) so even a
+     * stack-overflow SIGSEGV — which leaves no room on the normal stack — can
+     * still report which test crashed. */
+    static char alt_stack[64 * 1024];
+    stack_t ss;
+    ss.ss_sp = alt_stack;
+    ss.ss_size = sizeof(alt_stack);
+    ss.ss_flags = 0;
+    sigaltstack(&ss, NULL);
+    struct sigaction sa;
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_handler = mako_test_crash_handler;
+    sa.sa_flags = SA_ONSTACK | SA_RESETHAND;
+    sigemptyset(&sa.sa_mask);
+    sigaction(SIGSEGV, &sa, NULL);
+    sigaction(SIGABRT, &sa, NULL);
+    sigaction(SIGBUS, &sa, NULL);
+    sigaction(SIGFPE, &sa, NULL);
+#endif
+}
+
 static inline int mako_test_run(const char *name, void (*fn)(void)) {
     mako_test_begin(name);
     if (setjmp(mako_test_jmp) == 0) {

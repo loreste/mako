@@ -3341,7 +3341,10 @@ pub fn test_name_matches(name: &str, filter: &str) -> bool {
     if filter.contains('*') || filter.contains('?') {
         return glob_match(filter, name);
     }
-    name.contains(filter)
+    // A plain filter matches by exact name so focused runs are unambiguous:
+    // `--run TestConnect` never also selects `TestConnectPool`. Use a `*`/`?`
+    // glob or `/regex/` for intentional fuzzy matching.
+    name == filter
 }
 
 /// `/pattern/` → Some("pattern"); otherwise None.
@@ -3620,10 +3623,13 @@ mod test_filter_tests {
     use super::test_name_matches;
 
     #[test]
-    fn substring_and_glob() {
-        assert!(test_name_matches("TestAdd", "Add"));
+    fn exact_and_glob() {
+        // A plain filter matches by exact name (no substring surprises):
         assert!(test_name_matches("TestAdd", "TestAdd"));
+        assert!(!test_name_matches("TestAdd", "Add"));
+        assert!(!test_name_matches("TestAddTable", "TestAdd"));
         assert!(!test_name_matches("TestAdd", "Subs"));
+        // Globs and regex opt into fuzzy matching:
         assert!(test_name_matches("TestAddTable", "TestAdd*"));
         assert!(test_name_matches("TestSubs", "Test?ubs"));
         assert!(!test_name_matches("TestAdd", "TestSubs*"));

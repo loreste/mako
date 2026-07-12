@@ -1486,6 +1486,31 @@ impl TypeChecker {
                 Box::new(Type::String),
             ),
         );
+        // Stream multiplexing: concurrent ready streams + bodies.
+        fns.insert(
+            "http2_ready_streams".into(),
+            Type::Fn(vec![], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "http2_next_ready_stream".into(),
+            Type::Fn(vec![], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "http2_stream_take".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "http2_stream_body".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::String)),
+        );
+        fns.insert(
+            "http2_stream_body_len".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "http2_stream_body_done".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
         fns.insert(
             "http2_frame_payload".into(),
             Type::Fn(vec![Type::String], Box::new(Type::String)),
@@ -5137,6 +5162,44 @@ impl TypeChecker {
             ),
         );
         fns.insert(
+            "tls_accept_start".into(),
+            Type::Fn(
+                vec![Type::Named("TlsServer".into()), Type::Int],
+                Box::new(Type::Named("TlsConn".into())),
+            ),
+        );
+        fns.insert(
+            "tls_handshake_step".into(),
+            Type::Fn(vec![Type::Named("TlsConn".into())], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "tls_is_init_finished".into(),
+            Type::Fn(vec![Type::Named("TlsConn".into())], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "tls_want_read".into(),
+            Type::Fn(vec![Type::Named("TlsConn".into())], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "tls_want_write".into(),
+            Type::Fn(vec![Type::Named("TlsConn".into())], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "tls_conn_fd".into(),
+            Type::Fn(vec![Type::Named("TlsConn".into())], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "tls_read_nb".into(),
+            Type::Fn(vec![Type::Named("TlsConn".into()), Type::Int], Box::new(Type::String)),
+        );
+        fns.insert(
+            "tls_write_nb".into(),
+            Type::Fn(
+                vec![Type::Named("TlsConn".into()), Type::String],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
             "tls_read".into(),
             Type::Fn(vec![Type::Named("TlsConn".into()), Type::Int], Box::new(Type::String)),
         );
@@ -5336,6 +5399,48 @@ impl TypeChecker {
         );
         fns.insert(
             "quiche_stop_server".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "h3_server_available".into(),
+            Type::Fn(vec![], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "h3_server_new".into(),
+            Type::Fn(vec![Type::String, Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "h3_server_bind".into(),
+            Type::Fn(
+                vec![Type::Int, Type::String, Type::Int],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "h3_server_fd".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "h3_server_poll".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "h3_accept_stream".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "h3_stream_read".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::String)),
+        );
+        fns.insert(
+            "h3_stream_write".into(),
+            Type::Fn(
+                vec![Type::Int, Type::Int, Type::String],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "h3_server_close".into(),
             Type::Fn(vec![Type::Int], Box::new(Type::Int)),
         );
         fns.insert(
@@ -5662,6 +5767,83 @@ impl TypeChecker {
             "tcp_connect".into(),
             Type::Fn(vec![Type::String, Type::Int], Box::new(Type::Int)),
         );
+        fns.insert(
+            "tcp_connect_nb".into(),
+            Type::Fn(vec![Type::String, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "tcp_connect_check".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "tcp_connect_wait".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "tcp_pool_open".into(),
+            Type::Fn(
+                vec![Type::String, Type::Int, Type::Int, Type::Int],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "tcp_pool_acquire".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "tcp_pool_release".into(),
+            Type::Fn(vec![Type::Int, Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "tcp_pool_close".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "tcp_pool_idle".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "tcp_pool_open_count".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "tcp_fd_copy".into(),
+            Type::Fn(vec![Type::Int, Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "tcp_splice".into(),
+            Type::Fn(vec![Type::Int, Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "tcp_proxy_pump".into(),
+            Type::Fn(
+                vec![Type::Int, Type::Int, Type::Int, Type::Int],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "tcp_set_recv_buf".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "tcp_set_send_buf".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "tcp_reuseport".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "tcp_listen_reuseport".into(),
+            Type::Fn(
+                vec![Type::String, Type::Int, Type::Int],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "tcp_accept4".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
         // Reverse-proxy upstream forward: (host, port, method, path, body) -> body.
         fns.insert(
             "http_forward".into(),
@@ -5669,6 +5851,145 @@ impl TypeChecker {
                 vec![Type::String, Type::Int, Type::String, Type::String, Type::String],
                 Box::new(Type::String),
             ),
+        );
+        // Full forward: status + body + byte counts.
+        fns.insert(
+            "http_forward_full".into(),
+            Type::Fn(
+                vec![
+                    Type::String,
+                    Type::Int,
+                    Type::String,
+                    Type::String,
+                    Type::String,
+                    Type::String,
+                    Type::Int,
+                ],
+                Box::new(Type::Named("HttpForwardResult".into())),
+            ),
+        );
+        fns.insert(
+            "http_forward_fd".into(),
+            Type::Fn(
+                vec![
+                    Type::Int,
+                    Type::String,
+                    Type::String,
+                    Type::String,
+                    Type::String,
+                    Type::String,
+                    Type::Int,
+                ],
+                Box::new(Type::Named("HttpForwardResult".into())),
+            ),
+        );
+        fns.insert(
+            "http_forward_ok".into(),
+            Type::Fn(
+                vec![Type::Named("HttpForwardResult".into())],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "http_forward_status".into(),
+            Type::Fn(
+                vec![Type::Named("HttpForwardResult".into())],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "http_forward_body_len".into(),
+            Type::Fn(
+                vec![Type::Named("HttpForwardResult".into())],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "http_forward_total_bytes".into(),
+            Type::Fn(
+                vec![Type::Named("HttpForwardResult".into())],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "http_forward_body".into(),
+            Type::Fn(
+                vec![Type::Named("HttpForwardResult".into())],
+                Box::new(Type::String),
+            ),
+        );
+        fns.insert(
+            "http_forward_headers".into(),
+            Type::Fn(
+                vec![Type::Named("HttpForwardResult".into())],
+                Box::new(Type::String),
+            ),
+        );
+        fns.insert(
+            "http_proxy_raw".into(),
+            Type::Fn(
+                vec![Type::Int, Type::Int, Type::String, Type::Int],
+                Box::new(Type::Named("ProxyIoResult".into())),
+            ),
+        );
+        fns.insert(
+            "proxy_io_ok".into(),
+            Type::Fn(vec![Type::Named("ProxyIoResult".into())], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "proxy_io_bytes_written".into(),
+            Type::Fn(vec![Type::Named("ProxyIoResult".into())], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "proxy_io_bytes_read".into(),
+            Type::Fn(vec![Type::Named("ProxyIoResult".into())], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "http_parse".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Named("HttpParsed".into()))),
+        );
+        fns.insert(
+            "http_parsed_ok".into(),
+            Type::Fn(vec![Type::Named("HttpParsed".into())], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "http_parsed_content_length".into(),
+            Type::Fn(vec![Type::Named("HttpParsed".into())], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "http_parsed_chunked".into(),
+            Type::Fn(vec![Type::Named("HttpParsed".into())], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "http_parsed_method".into(),
+            Type::Fn(vec![Type::Named("HttpParsed".into())], Box::new(Type::String)),
+        );
+        fns.insert(
+            "http_parsed_path".into(),
+            Type::Fn(vec![Type::Named("HttpParsed".into())], Box::new(Type::String)),
+        );
+        fns.insert(
+            "http_parsed_host".into(),
+            Type::Fn(vec![Type::Named("HttpParsed".into())], Box::new(Type::String)),
+        );
+        fns.insert(
+            "http_parsed_headers".into(),
+            Type::Fn(vec![Type::Named("HttpParsed".into())], Box::new(Type::String)),
+        );
+        fns.insert(
+            "http_parsed_body".into(),
+            Type::Fn(vec![Type::Named("HttpParsed".into())], Box::new(Type::String)),
+        );
+        fns.insert(
+            "http_parsed_header".into(),
+            Type::Fn(
+                vec![Type::Named("HttpParsed".into()), Type::String],
+                Box::new(Type::String),
+            ),
+        );
+        fns.insert(
+            "http_decode_chunked".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::String)),
         );
         // Channel select
         fns.insert(
@@ -6078,6 +6399,9 @@ impl TypeChecker {
                 "BufReader" => Ok(Type::BufReader),
                 "BufWriter" => Ok(Type::BufWriter),
                 "HttpRequest" => Ok(Type::HttpRequest),
+                "HttpForwardResult" => Ok(Type::Named("HttpForwardResult".into())),
+                "ProxyIoResult" => Ok(Type::Named("ProxyIoResult".into())),
+                "HttpParsed" => Ok(Type::Named("HttpParsed".into())),
                 "SqlDB" => Ok(Type::SqlDB),
                 "WaitGroup" => Ok(Type::WaitGroup),
                 "AtomicInt" => Ok(Type::Named("AtomicInt".into())),

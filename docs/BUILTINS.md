@@ -434,8 +434,39 @@ Signatures use the form `function_name(param: type, ...) -> return_type`.
 | `sha1` | `sha1(data: string) -> string` | Compute SHA-1 hash (raw bytes) |
 | `sha256` | `sha256(data: string) -> string` | Compute SHA-256 hash (raw bytes) |
 | `sha512` | `sha512(data: string) -> string` | Compute SHA-512 hash (raw bytes) |
-| `hmac_sha256` | `hmac_sha256(key: string, data: string) -> string` | Compute HMAC-SHA256 (raw bytes) |
+| `hmac_sha256` | `hmac_sha256(key: string, data: string) -> string` | Compute HMAC-SHA256 (hex) |
+| `sha256_raw` | `sha256_raw(data: string) -> string` | Compute SHA-256 (raw 32 bytes) |
+| `hmac_sha256_raw` | `hmac_sha256_raw(key: string, data: string) -> string` | Compute HMAC-SHA256 (raw 32 bytes) |
+| `xor_bytes` | `xor_bytes(a: string, b: string) -> string` | Pairwise XOR of two equal-length byte strings |
 | `random_bytes` | `random_bytes(n: int) -> string` | Generate n cryptographically random bytes |
+
+### Password Hashing
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `argon2id_hash` | `argon2id_hash(password: string) -> string` | Hash a password with Argon2id (PHC string). Preferred for new systems |
+| `argon2id_verify` | `argon2id_verify(phc: string, password: string) -> int` | Verify a password against an Argon2id PHC string (1/0) |
+| `bcrypt_hash` | `bcrypt_hash(password: string, cost: int) -> string` | Hash a password with bcrypt (`$2b$`). Cost 4–31; needs libxcrypt (Linux) |
+| `bcrypt_verify` | `bcrypt_verify(hash: string, password: string) -> int` | Verify a password against a bcrypt hash (1/0) |
+| `bcrypt_available` | `bcrypt_available() -> int` | Whether bcrypt is available in this build (1/0) |
+| `pbkdf2_sha256` | `pbkdf2_sha256(password: string, salt: string, iterations: int, dklen: int) -> string` | PBKDF2-HMAC-SHA256 derived key (raw bytes) |
+
+### SCRAM-SHA-256
+
+Crypto core for SCRAM-SHA-256 (RFC 5802 / RFC 7677) challenge-response auth,
+exposed via the `crypto` package (`crypto.scram_*`). Compose the `AuthMessage`
+from the protocol strings yourself. See `examples/testing/scram_test.mko`.
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `crypto.scram_salted_password` | `(password, salt, iterations) -> string` | PBKDF2 salted password (salt is raw bytes) |
+| `crypto.scram_client_key` | `(salted) -> string` | `HMAC(salted, "Client Key")` |
+| `crypto.scram_server_key` | `(salted) -> string` | `HMAC(salted, "Server Key")` |
+| `crypto.scram_stored_key` | `(client_key) -> string` | `SHA256(client_key)` |
+| `crypto.scram_client_signature` | `(stored_key, auth) -> string` | `HMAC(stored_key, auth)` |
+| `crypto.scram_server_signature` | `(server_key, auth) -> string` | `HMAC(server_key, auth)` |
+| `crypto.scram_client_proof` | `(client_key, client_sig) -> string` | `client_key XOR client_sig` |
+| `crypto.scram_verify_proof` | `(stored_key, auth, proof) -> int` | Server-side: validate a client proof (1/0) |
 | `const_eq` | `const_eq(a: string, b: string) -> int` | Constant-time string comparison |
 | `crypto_eq` | `crypto_eq(a: string, b: string) -> int` | Constant-time byte comparison |
 | `secret_from_str` | `secret_from_str(s: string) -> Secret` | Wrap a string as a secret (zeroized on drop) |
@@ -933,15 +964,42 @@ Signatures use the form `function_name(param: type, ...) -> return_type`.
 
 | Function | Signature | Description |
 |----------|-----------|-------------|
-| `tcp_listen` | `tcp_listen(port: int) -> int` | Listen on a TCP port |
+| `tcp_listen` | `tcp_listen(port: int) -> int` | Listen on a TCP port (all interfaces) |
+| `tcp_listen_addr` | `tcp_listen_addr(host: string, port: int) -> int` | Listen bound to a specific address (`"127.0.0.1"`, `"*"` for all) |
+| `tcp_listen_backlog` | `tcp_listen_backlog(host: string, port: int, backlog: int) -> int` | Listen with an explicit accept backlog (bounds inbound queue) |
 | `tcp_accept` | `tcp_accept(listener: int) -> int` | Accept a TCP connection |
 | `tcp_accept_nb` | `tcp_accept_nb(listener: int) -> int` | Non-blocking TCP accept |
 | `tcp_connect` | `tcp_connect(host: string, port: int) -> int` | Connect to a TCP server |
+| `tcp_connect_nb` | `tcp_connect_nb(host: string, port: int) -> int` | Nonblocking connect; returns fd while still connecting |
+| `tcp_connect_check` | `tcp_connect_check(fd: int) -> int` | `1` connected, `0` pending, `-1` failed |
+| `tcp_connect_wait` | `tcp_connect_wait(fd: int, timeout_ms: int) -> int` | Poll until connect completes (`1`/`0`/`-1`) |
+| `tcp_pool_open` | `tcp_pool_open(host: string, port: int, max: int, timeout_ms: int) -> int` | Upstream connection pool handle |
+| `tcp_pool_acquire` | `tcp_pool_acquire(pool: int) -> int` | Borrow a live fd (validates reuse) |
+| `tcp_pool_release` | `tcp_pool_release(pool: int, fd: int, reusable: int) -> int` | Return fd; close if not reusable |
+| `tcp_pool_close` | `tcp_pool_close(pool: int) -> int` | Close pool and all idle fds |
+| `tcp_pool_idle` / `tcp_pool_open_count` | `…(pool) -> int` | Idle / total open connection counts |
+| `tcp_fd_copy` / `tcp_splice` | `tcp_fd_copy(src, dst, max) -> int` | Efficient fd-to-fd copy (`splice` on Linux) |
+| `tcp_proxy_pump` | `tcp_proxy_pump(a, b, timeout_ms, max) -> int` | Bidirectional stream pump |
 | `tcp_write` | `tcp_write(conn: int, data: string) -> int` | Write data to a TCP connection |
 | `tcp_read` | `tcp_read(conn: int) -> string` | Read data from a TCP connection |
 | `tcp_read_print` | `tcp_read_print(conn: int) -> int` | Read and print TCP data |
 | `tcp_nodelay` | `tcp_nodelay(conn: int) -> int` | Set TCP_NODELAY on a connection |
+| `tcp_set_timeout` | `tcp_set_timeout(conn: int, ms: int) -> int` | Set recv+send timeout in ms (0 = block forever) |
+| `tcp_keepalive` | `tcp_keepalive(conn: int, idle: int, interval: int, count: int) -> int` | Enable TCP keepalive; tune idle/interval (s) and probe count |
+| `tcp_set_recv_buf` / `tcp_set_send_buf` | `…(fd, size) -> int` | Socket buffer sizing |
+| `tcp_reuseport` | `tcp_reuseport(fd: int) -> int` | Enable `SO_REUSEPORT` (before bind) |
+| `tcp_listen_reuseport` | `tcp_listen_reuseport(host, port, backlog) -> int` | Listen with reuseport |
+| `tcp_accept4` | `tcp_accept4(listener: int) -> int` | Accept with `NONBLOCK\|CLOEXEC` |
 | `tcp_close` | `tcp_close(conn: int) -> int` | Close a TCP connection |
+| `http_forward` | `http_forward(host, port, method, path, body) -> string` | Forward to HTTP/1.1 backend; returns body only |
+| `http_forward_full` | `http_forward_full(host, port, method, path, headers, body, timeout_ms) -> HttpForwardResult` | Status + body + byte counts (chunked OK) |
+| `http_forward_fd` | `http_forward_fd(fd, method, path, host, headers, body, timeout_ms) -> HttpForwardResult` | Forward on pooled fd |
+| `http_forward_ok` / `status` / `body` / `body_len` / `total_bytes` / `headers` | accessors on `HttpForwardResult` | |
+| `http_proxy_raw` | `http_proxy_raw(client_fd, backend_fd, raw_request, timeout_ms) -> ProxyIoResult` | Raw request/response byte pump |
+| `proxy_io_ok` / `bytes_written` / `bytes_read` | accessors on `ProxyIoResult` | |
+| `http_parse` | `http_parse(raw: string) -> HttpParsed` | C hot-path request parse (method/path/host/headers/body) |
+| `http_parsed_*` | accessors + `http_parsed_header(r, name)` | |
+| `http_decode_chunked` | `http_decode_chunked(chunked_body: string) -> string` | Decode a chunked body |
 
 ### UDP
 
@@ -982,6 +1040,30 @@ Signatures use the form `function_name(param: type, ...) -> return_type`.
 | `tls_post` | `tls_post(host: string, port: int, path: string, ca: string, body: string) -> string` | TLS POST with CA certificate |
 | `tls_handshake_ok` | `tls_handshake_ok(host: string, port: int, ca: string) -> string` | Test TLS handshake |
 | `tls_handshake_version` | `tls_handshake_version(host: string, port: int, ca: string) -> string` | Get negotiated TLS version |
+
+### Socket-style TLS server
+
+A blocking, socket-style API for terminating TLS on an accepted TCP fd (also
+supports STARTTLS-style upgrades). ALPN advertises `h2`. Requires an OpenSSL
+build; `tls_server_available()` reports 1 when present.
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `tls_server_available` | `tls_server_available() -> int` | Whether the TLS server backend is available (1/0) |
+| `tls_server_new` | `tls_server_new(cert: string, key: string) -> TlsServer` | Create a TLS server context (min TLS 1.2) |
+| `tls_server_new_tls13` | `tls_server_new_tls13(cert: string, key: string) -> TlsServer` | Create a TLS server that requires TLS 1.3 (rejects older clients) |
+| `tls_accept` | `tls_accept(srv: TlsServer, fd: int) -> TlsConn` | Perform the TLS handshake on an accepted TCP fd |
+| `tls_accept_start` | `tls_accept_start(srv: TlsServer, fd: int) -> TlsConn` | Nonblocking TLS accept start (handshake may be incomplete) |
+| `tls_handshake_step` | `tls_handshake_step(conn: TlsConn) -> int` | Drive handshake: `1` done, `0` want-read, `2` want-write, `-1` error |
+| `tls_is_init_finished` | `tls_is_init_finished(conn: TlsConn) -> int` | Handshake complete? |
+| `tls_want_read` / `tls_want_write` | `…(conn) -> int` | Event-loop interest flags |
+| `tls_conn_fd` | `tls_conn_fd(conn: TlsConn) -> int` | Underlying TCP fd for poll/epoll |
+| `tls_read_nb` / `tls_write_nb` | nonblocking TLS I/O | Empty / `0` on want-read/write |
+| `tls_read` | `tls_read(conn: TlsConn, max: int) -> string` | Read decrypted bytes (empty on close) |
+| `tls_write` | `tls_write(conn: TlsConn, data: string) -> int` | Write plaintext (encrypted on the wire); bytes written or -1 |
+| `tls_conn_alpn` | `tls_conn_alpn(conn: TlsConn) -> string` | Negotiated ALPN protocol (e.g. `"h2"`) |
+| `tls_conn_close` | `tls_conn_close(conn: TlsConn) -> int` | Close a TLS connection |
+| `tls_server_free` | `tls_server_free(srv: TlsServer) -> int` | Free a TLS server context |
 
 ### TLS Crypto Primitives
 

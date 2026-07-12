@@ -440,6 +440,50 @@ fn main() {
 For plain HTTPS (no pre-TLS bytes), just `tcp_accept` then `tls_accept`
 immediately. `tls_server_available()` reports whether a TLS backend is linked.
 
+### Require TLS 1.3
+
+`tls_server_new_tls13(cert, key)` is the same context but with the minimum
+protocol pinned to TLS 1.3 — clients that only offer 1.2 or older are rejected
+at the handshake with a `protocol_version` alert. Use it when policy forbids
+legacy TLS:
+
+```mko
+let srv = tls_server_new_tls13("cert.pem", "key.pem")
+```
+
+The default `tls_server_new` negotiates TLS 1.2+ (picking 1.3 when the client
+supports it).
+
+---
+
+## Bind address & session controls
+
+By default `tcp_listen(port)` binds all interfaces. To bind a specific address —
+loopback-only, or one NIC on a multi-homed host — use `tcp_listen_addr`:
+
+```mko
+let fd = tcp_listen_addr("127.0.0.1", 5432)   // loopback only
+let all = tcp_listen_addr("*", 5432)          // every interface (same as tcp_listen)
+```
+
+An unbindable address (not present on the host) returns `< 0`.
+
+Once a connection is accepted, several socket controls keep sessions healthy:
+
+| Call | Purpose |
+|------|---------|
+| `tcp_set_timeout(fd, ms)` | recv+send timeout — a stalled peer can't hold the session open forever (`0` blocks forever) |
+| `tcp_keepalive(fd, idle, interval, count)` | detect dead peers and reap half-open connections (seconds; `0` keeps the OS default) |
+| `tcp_listen_backlog(host, port, backlog)` | bound the kernel accept queue — the first lever against inbound floods |
+| `tcp_nodelay(fd)` | disable Nagle for low-latency writes |
+
+```mko
+let lfd = tcp_listen_backlog("0.0.0.0", 5432, 256)
+let fd = tcp_accept(lfd)
+let _ = tcp_keepalive(fd, 30, 10, 3)   // 30s idle, 10s probes, 3 tries
+let _2 = tcp_set_timeout(fd, 5000)     // 5s recv/send timeout
+```
+
 ---
 
 ## HTTP/2

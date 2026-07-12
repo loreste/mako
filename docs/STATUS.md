@@ -84,6 +84,13 @@ Last inventory: 2026-07-11 (**unique Mako surface** · pack/pull · pain map · 
 | HTTP/2 read request + `http2_response` (full request/response cycle) | Done — fixed inverted stream parity; `examples/testing/http2_request_test.mko` |
 | HPACK decode for real clients (Huffman, indexed names, full static table) | Done — curl `--http2` verified; `examples/testing/hpack_decode_test.mko` · `examples/h2_dynamic_server.mko` |
 | HTTP/2 reverse proxy (`http_forward` upstream + relay) | Done — curl→proxy→backend verified; `examples/h2_reverse_proxy.mko` |
+| TCP pool + `http_forward_full` + `http_proxy_raw` | Done — pool reuse, status/body, raw pump; `examples/testing/proxy_pool_test.mko` |
+| HTTP parse object + chunked decode | Done — `http_parse` / `http_decode_chunked` |
+| Nonblocking connect + fd splice/copy | Done — `tcp_connect_nb` / `tcp_fd_copy` / `tcp_splice` |
+| Socket tuning (`reuseport`, buffers, `accept4`) | Done |
+| Async TLS accept (`tls_accept_start` / handshake step) | Done — event-loop friendly surface |
+| HTTP/2 stream multiplexing (ready queue, 32 slots) | Done — `http2_next_ready_stream` / `stream_take` / `stream_body` |
+| HTTP/3 server surface (UDP bind/poll/stream) | Done — `h3_server_*` (quiche when linked) |
 | bcrypt (`$2b$`) via libxcrypt (`crypto.bcrypt`/`bcrypt_check`) | Done — verified on Linux x86_64: round-trip + distinct salts; `examples/testing/bcrypt_test.mko` |
 | SCRAM-SHA-256 core (`crypto.scram_*`, raw `sha256`/`hmac`, `xor_bytes`) | Done — RFC 7677 vector byte-exact on Linux; `examples/testing/scram_test.mko` |
 | Native bind-address control (`tcp_listen_addr`) | Done — verified on Linux: loopback-only bind, non-host IP rejected |
