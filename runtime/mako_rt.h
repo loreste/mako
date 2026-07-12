@@ -3645,8 +3645,11 @@ static void mako_test_crash_handler(int sig) {
     const char *sn =
         sig == SIGSEGV ? "SIGSEGV" :
         sig == SIGABRT ? "SIGABRT" :
+        sig == SIGFPE  ? "SIGFPE"  :
+#if defined(SIGBUS)
         sig == SIGBUS  ? "SIGBUS"  :
-        sig == SIGFPE  ? "SIGFPE"  : "signal";
+#endif
+        "signal";
     fprintf(stderr, "\n--- CRASH: %s during test '%s'\n", sn, nm);
 #if defined(__GLIBC__) || defined(__APPLE__)
     void *frames[32];
