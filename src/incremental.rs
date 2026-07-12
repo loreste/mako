@@ -356,6 +356,38 @@ pub struct ObjectUnit {
     pub fp: String,
 }
 
+/// Content fingerprint of the bundled runtime headers. Folded into every object
+/// key so that editing a `runtime/*.h` (which the generated C `#include`s but
+/// does not copy) invalidates the cached `.o` even when the generated C is byte
+/// identical. For a released compiler the headers are fixed, so this is a stable
+/// per-release constant.
+pub fn runtime_headers_fp(runtime_dir: &Path) -> String {
+    let mut paths: Vec<PathBuf> = match fs::read_dir(runtime_dir) {
+        Ok(rd) => rd
+            .filter_map(|e| e.ok().map(|e| e.path()))
+            .filter(|p| {
+                p.extension()
+                    .and_then(|x| x.to_str())
+                    .map(|x| x == "h")
+                    .unwrap_or(false)
+            })
+            .collect(),
+        Err(_) => return String::new(),
+    };
+    paths.sort();
+    let mut parts: Vec<Vec<u8>> = Vec::new();
+    for p in &paths {
+        if let Some(n) = p.file_name().and_then(|s| s.to_str()) {
+            parts.push(n.as_bytes().to_vec());
+        }
+        if let Ok(bytes) = fs::read(p) {
+            parts.push(bytes);
+        }
+    }
+    let refs: Vec<&[u8]> = parts.iter().map(|v| v.as_slice()).collect();
+    fingerprint_bytes(&refs)
+}
+
 /// Plan compile units: program C (+ optional extern demo as separate `.o`).
 pub fn plan_object_units(
     program: &Program,
@@ -365,10 +397,12 @@ pub fn plan_object_units(
     let c = Codegen::new().emit(program);
     // Release: -O3 -flto (see docs/PERFORMANCE.md). Fingerprint must match clang flags.
     let opt = if opts.release { "O3flto" } else { "O0g" };
+    let rt_fp = runtime_headers_fp(runtime_dir);
     let fp = fingerprint_bytes(&[
         COMPILER_CACHE_VERSION.as_bytes(),
         opt.as_bytes(),
         opts.flags_fp.as_bytes(),
+        rt_fp.as_bytes(),
         b"unit:program",
         c.as_bytes(),
     ]);
@@ -385,6 +419,7 @@ pub fn plan_object_units(
                 COMPILER_CACHE_VERSION.as_bytes(),
                 opt.as_bytes(),
                 opts.flags_fp.as_bytes(),
+                rt_fp.as_bytes(),
                 b"unit:extern_demo",
                 src.as_bytes(),
             ]);
