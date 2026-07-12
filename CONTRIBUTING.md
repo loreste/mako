@@ -90,8 +90,9 @@ Steps:
 1. Create a branch from `main`
 2. Make your changes
 3. Add or update tests if behavior changes
-4. **Update docs in the same change** (builtins, stdlib, book/guide, CHANGELOG,
-   STATUS when relevant) — see [Agents.md](Agents.md) *Always update the docs*
+4. **Update docs in the same change** — no feature without docs. Touch every
+   applicable surface (BUILTINS, STDLIB, GUIDE/book, CLI/DEBUG/PERFORMANCE,
+   CHANGELOG, STATUS/ROADMAP). See [Agents.md](Agents.md) *Always update the docs*
 5. Run `cargo clippy` and `cargo fmt`
 6. Run `cargo run --release -- test examples/testing` and make sure it passes
 7. Open a PR with a clear description of what and why

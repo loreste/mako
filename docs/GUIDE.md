@@ -982,17 +982,39 @@ crew t {
 
 | Tool | Role |
 |------|------|
-| `crew` / `kick` / `join` | Structured concurrency |
-| `fan(collection, mapper)` | Data-parallel map (`mako_par_map`) |
-| channels + `select` | Message-passing |
+| `crew` / `kick` / `join` | Structured concurrency; **join** returns the job’s type (`int`, `string`, `Result`, …) |
+| `crew.drain(ms)` | Cancel + join with timeout |
+| `fan(collection, mapper)` | Data-parallel map: `[]int` / `[]float` / `[]string` / `[]Struct` |
+| channels + `select` | Message-passing (`chan_open[T]` for int/bool/float/string/struct) |
 | `actor` / `receive` | Long-lived concurrent entities |
+
+```mko
+// string / Result across kick
+fn greet() -> string { return "hi" }
+fn open() -> Result[int, string] { return Ok(1) }
+
+crew t {
+    let a = t.kick(greet())
+    let b = t.kick(open())
+    print(a.join())
+    match b.join() {
+        Ok(v) => print_int(v),
+        Err(e) => print(e),
+    }
+}
+```
+
+Tests: `examples/testing/crew_fan_test.mko`, `job_join_typed_test.mko`,
+`fan_struct_test.mko`.
 
 ---
 
 ## 9. Channels and `select`
 
 ```mko
-let ch = chan_new(4)
+let ch = chan_new(4)              // int
+let fs = chan_open[float](2)      // float (bitcast ring)
+let ps = chan_open[Point](2)      // struct (heap box)
 let _ = ch.send(1)
 let v = ch.recv()
 ch.close()
@@ -1000,6 +1022,7 @@ ch.close()
 
 ```mko
 // examples/select_default.mko — timeout + default + up to 16 arms
+// select / chan_select* multiplex **int** channels today
 select timeout 30 {
     a => { print("got a") }
     b => { print("got b") }
@@ -1009,6 +1032,7 @@ select timeout 30 {
 
 Value of the ready arm: `chan_select_value()`. Fairness: round-robin when many
 are ready (`examples/select_fair.mko`). Helpers: `chan_select2` / `3` / `4`.
+NLL: `select` arms are joined independently (moves in one arm do not poison others).
 
 ---
 

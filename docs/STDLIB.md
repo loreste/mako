@@ -450,18 +450,19 @@ plus session controls (`tcp_set_timeout`, `tcp_keepalive`, `tcp_nodelay`,
 
 | Area | Surface |
 |------|---------|
-| Overflow | `checked_add` / `sub` / `mul`, `would_overflow_*`, `--overflow trap` |
+| Overflow | `checked_add` / `sub` / `mul` (abort), `would_overflow_*`, `--overflow trap` |
 | Shutdown | `signal_on_term`, `server_drain`, `register_listener`, `shutdown_requested` |
-| Leak | `leak_scope_enter` / `exit`, `leak_check` (+ existing `leak_mark`) |
-| Trace | `trace_id`, `trace_begin` / `end`, `trace_log` |
+| Leak | `leak_scope_enter` / `exit`, `leak_check` (+ `leak_mark` / `bytes_since`) |
+| Trace | `trace_id` / `set` / `current` / `begin` / `end` / `log` |
+| Logs + trace | `log_*` and `slog_with` print `trace=<hex>` when a trace is active |
 
-See [BUILTINS.md](BUILTINS.md) §§71–74 and [CLI.md](CLI.md) (`mako dev`).
+See [BUILTINS.md](BUILTINS.md) §§71–75 and [CLI.md](CLI.md) (`mako dev`, `--race`).
 
 ### Upstream pool & reverse proxy
 
 | Builtin | Role |
 |---------|------|
-| `tcp_pool_open` / `acquire` / `release` / `close` | Per host:port connection pool; nonblocking reuse check |
+| `tcp_pool_open` / `acquire` / `release` / `close` | Per host:port pool; **mutex-protected**; nonblocking reuse probe |
 | `tcp_connect_nb` / `connect_check` / `connect_wait` | Nonblocking connect for slow/unhealthy backends |
 | `tcp_fd_copy` / `tcp_splice` / `tcp_proxy_pump` | Efficient stream copy (Linux `splice` when available) |
 | `http_forward` | Simple upstream forward → body only |
@@ -776,11 +777,14 @@ import "sync"
 | `rwmutex_new` / `rwmutex_rlock` / `runlock` / `lock` / `unlock` | RWMutex |
 | `wait_group_new` / `wait_group_add` / `done` / `wait` | WaitGroup |
 | `cmap_new` / `cmap_set` / `cmap_get` / `cmap_has` / `cmap_del` / `cmap_len` / `cmap_incr` | CMap (concurrent hashmap with lock-free reads) |
-| `chan_new` / `chan_try_send` / `chan_len` / `chan_cap` / `chan_select*` | bounded channels and backpressure |
+| `chan_new` / `chan_open[T]` / `send` / `recv` / `chan_select*` | channels: int/bool/float/string/struct; select is int-ring |
 | `runtime_stats_json` / `runtime_stats_reset` | runtime scheduler/channel introspection |
-| `crew` / `go` / cancel policy | structured concurrency |
+| `crew` / `kick` / `join` / `drain` / cancel | structured concurrency; join returns job type |
+| `fan` | parallel map over `[]int` / `[]float` / `[]string` / `[]Struct` |
 | `actor_spawn` / `actor_send` / `actor_recv` / `actor_stop` | actors |
 | `actor` / `receive` syntax | desugar (see GUIDE) |
+
+Race smoke: `mako test --race` (CI TSan job).
 
 ### Mutex usage example
 

@@ -42,8 +42,9 @@ Not “use a package.” Not colored `async`/`await`. Keywords in the language:
 |------|------|
 | `crew t { … }` | Structured scope — jobs cannot outlive the crew |
 | `t.kick(work())` | Start concurrent work on the crew |
-| `job.join()` | Wait for a result |
-| channels + `select` | Message-passing, multi-way wait |
+| `job.join()` | Wait for result (`int` / `string` / `Result` / float; heap-box non-int) |
+| `t.drain(ms)` | Cancel + join with timeout |
+| channels + `select` | Message-passing (`chan_open[T]`; select is int-ring today) |
 | `actor` / `receive` | Long-lived concurrent entities |
 
 ```mko
@@ -58,24 +59,30 @@ crew t {
 **Vs Go:** no free `go f()` leaks.  
 **Vs Rust:** no async coloring / executor maze for the default path.
 
+Race smoke: `mako test --race` · CI TSan job on concurrency tests.
+
 ---
 
 ## Parallelism (first-class)
 
 | Tool | Role |
 |------|------|
-| `fan` | Data-parallel map over a collection/range (use the cores) |
+| `fan` | Data-parallel map: `[]int` / `[]float` / `[]string` / `[]Struct` (`mako_par_map_*`) |
 | `crew` + many `kick`s | Task parallelism within a scope |
 
 ```mko
 // Parallel map — first-class, not a third-party pool
 let out = fan(items, fn(x) { heavy(x) })
 // also: fan(items, |x| heavy(x))
+// structs: fan(points, |p| Point { x: p.x * 2, y: p.y * 2 })
 ```
 
 Parallelism should be **easy to spell** and **hard to misuse** (scoped, joinable).
 
-Runnable: `examples/concurrency.mko`, `examples/parallel.mko` · tests: `examples/testing/crew_fan_test.mko`, `kick_send_test.mko`.
+Runnable: `examples/concurrency.mko`, `examples/parallel.mko` · tests:
+`crew_fan_test.mko`, `fan_struct_test.mko`, `fan_float_test.mko`, `kick_send_test.mko`.
+
+**CI speed bar:** `./scripts/bench-gate.sh` (ubuntu job; default ≤2.0× Rust).
 
 ### Send-like kick (seed)
 

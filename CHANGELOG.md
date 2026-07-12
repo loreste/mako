@@ -8,6 +8,8 @@
 - select arm NLL join; recovery multi-error hints
 - `log_*` / slog emit active `trace=` id
 - CI: `bench-gate` and TSan concurrency smoke jobs
+- Docs: BUILTINS §§23–24/71–75, GUIDE crew/channels, STDLIB sync, SPEED,
+  ROADMAP, DEBUG TSan, PERFORMANCE bench-gate CI note
 
 ## 0.1.0 — 2026-07-12 (wiring audit)
 
