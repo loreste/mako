@@ -1,0 +1,32 @@
+// SCRAM-SHA-256 core, checked against the RFC 7677 §3 test vector
+// (username "user", password "pencil"). Verifies the ClientProof and
+// ServerSignature byte-for-byte, plus the server-side proof check.
+
+pull "crypto"
+
+fn auth_message() -> string {
+    let client_first_bare = "n=user,r=rOprNGfwEbeRWgbNEkqO"
+    let server_first = "r=rOprNGfwEbeRWgbNEkqO%hvYDpWUa2RaTCAfuxFIlj)hNlF$k0,s=W22ZaJ0SNY7soEsUEjb6gQ==,i=4096"
+    let client_final_no_proof = "c=biws,r=rOprNGfwEbeRWgbNEkqO%hvYDpWUa2RaTCAfuxFIlj)hNlF$k0"
+    return client_first_bare + "," + server_first + "," + client_final_no_proof
+}
+
+func TestScramSha256RfcVector() {
+    let salt = base64_decode("W22ZaJ0SNY7soEsUEjb6gQ==")
+    let salted = crypto.scram_salted_password("pencil", salt, 4096)
+    let auth = auth_message()
+
+    let client_key = crypto.scram_client_key(salted)
+    let stored_key = crypto.scram_stored_key(client_key)
+    let client_sig = crypto.scram_client_signature(stored_key, auth)
+    let proof = crypto.scram_client_proof(client_key, client_sig)
+    assert(base64_encode(proof) == "dHzbZapWIk4jUhN+Ute9ytag9zjfMHgsqmmiz7AndVQ=")
+
+    let server_key = crypto.scram_server_key(salted)
+    let server_sig = crypto.scram_server_signature(server_key, auth)
+    assert(base64_encode(server_sig) == "6rriTRBi23WpRR/wtup+mMhUZUn/dB5nLTJRsjl95G4=")
+
+    // Server side: a valid proof verifies; a wrong AuthMessage does not.
+    assert_eq(crypto.scram_verify_proof(stored_key, auth, proof), 1)
+    assert_eq(crypto.scram_verify_proof(stored_key, auth + "x", proof), 0)
+}

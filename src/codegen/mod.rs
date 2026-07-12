@@ -5811,6 +5811,28 @@ impl Codegen {
                             ));
                             return ("MakoString".into(), tmp);
                         }
+                        "sha256_raw" => {
+                            let (_, s) = self.emit_expr(&args[0]);
+                            let tmp = self.fresh("shr");
+                            self.line(&format!("MakoString {tmp} = mako_sha256_raw({s});"));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "xor_bytes" => {
+                            let (_, a) = self.emit_expr(&args[0]);
+                            let (_, b) = self.emit_expr(&args[1]);
+                            let tmp = self.fresh("xb");
+                            self.line(&format!("MakoString {tmp} = mako_xor_bytes({a}, {b});"));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "hmac_sha256_raw" => {
+                            let (_, k) = self.emit_expr(&args[0]);
+                            let (_, m) = self.emit_expr(&args[1]);
+                            let tmp = self.fresh("hmr");
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_hmac_sha256_raw({k}, {m});"
+                            ));
+                            return ("MakoString".into(), tmp);
+                        }
                         "pbkdf2_sha256" => {
                             let (_, p) = self.emit_expr(&args[0]);
                             let (_, s) = self.emit_expr(&args[1]);

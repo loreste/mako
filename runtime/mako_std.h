@@ -2288,6 +2288,17 @@ static inline MakoString mako_sha256_raw(MakoString s) {
     }
 }
 
+/* Pairwise XOR of two equal-length byte strings (e.g. SCRAM ClientProof).
+ * Returns "" when lengths differ. */
+static inline MakoString mako_xor_bytes(MakoString a, MakoString b) {
+    if (a.len != b.len) return mako_str_from_cstr("");
+    char *d = (char *)malloc(a.len + 1);
+    if (!d) return mako_str_from_cstr("");
+    for (size_t i = 0; i < a.len; i++) d[i] = (char)(a.data[i] ^ b.data[i]);
+    d[a.len] = 0;
+    return (MakoString){d, a.len};
+}
+
 static inline MakoString mako_hmac_sha256_hex(MakoString key, MakoString msg) {
     unsigned char dig[32];
 #if defined(MAKO_HAS_CC)

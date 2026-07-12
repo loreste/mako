@@ -2558,6 +2558,19 @@ impl TypeChecker {
             "hmac_sha256".into(),
             Type::Fn(vec![Type::String, Type::String], Box::new(Type::String)),
         );
+        // Raw-byte variants (for binary protocols like SCRAM-SHA-256).
+        fns.insert(
+            "sha256_raw".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::String)),
+        );
+        fns.insert(
+            "hmac_sha256_raw".into(),
+            Type::Fn(vec![Type::String, Type::String], Box::new(Type::String)),
+        );
+        fns.insert(
+            "xor_bytes".into(),
+            Type::Fn(vec![Type::String, Type::String], Box::new(Type::String)),
+        );
         // PBKDF2-HMAC-SHA256 (password, salt, iterations, dklen) -> derived key.
         fns.insert(
             "pbkdf2_sha256".into(),

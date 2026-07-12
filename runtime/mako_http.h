@@ -49,7 +49,7 @@ static inline int mako_http_listen_fd_addr(MakoString host, int64_t port) {
         mako_sock_close(fd);
         return -1;
     }
-    if (listen(fd, 128) < 0) {
+    if (listen(fd, 4096) < 0) {
         mako_sock_close(fd);
         return -1;
     }
