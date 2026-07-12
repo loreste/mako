@@ -68,6 +68,11 @@
 
 ### Fixes
 
+- **build cache** — object cache keys now include a fingerprint of the bundled
+  runtime headers, so updating the compiler (or editing a `runtime/*.h`)
+  invalidates stale `.o` objects even when the generated C is byte-identical.
+  Previously a runtime change could be masked by a cached object until the cache
+  was cleared by hand.
 - array of positional struct literals `[P{1}, P{2}]` now compiles as a struct array
 - inline tuple literals emit their typedef when first seen in a function body
 - identifiers that shadow C/POSIX library names (`read`, `write`, `time`, …) now
