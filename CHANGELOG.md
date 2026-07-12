@@ -42,6 +42,12 @@
 - **`http2_response(stream, status, body)`** — builds a full response (HEADERS
   with `:status` + `content-length`, then DATA with END_STREAM) in one call,
   completing the read-request → write-response cycle for an H2 server.
+- **HPACK decode handles real clients** — the decoder now does Huffman-encoded
+  strings, indexed names, incremental indexing, never-indexed literals, varint
+  lengths, and the full 61-entry static table (previously a partial table with
+  wrong indices and no Huffman). A complete H2-over-TLS server built from these
+  primitives is verified end-to-end against `curl --http2`, routing by `:path`.
+  Example: `examples/h2_dynamic_server.mko`.
 
 ### TLS
 

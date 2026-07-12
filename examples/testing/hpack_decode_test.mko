@@ -1,0 +1,29 @@
+// HPACK decode of a real-client request block (Huffman-encoded values + indexed
+// names + incremental indexing), as sent by curl/browsers. The bytes below are a
+// GET /hello request encoded by a standard HPACK encoder.
+
+fn field(name: string) -> string {
+    var i = 0
+    let n = hpack_decoded_count()
+    for i < n {
+        if hpack_decoded_name(i) == name {
+            return hpack_decoded_value(i)
+        }
+        i++
+    }
+    return ""
+}
+
+func TestHpackDecodeRealRequest() {
+    // :method GET, :path /hello, :scheme https, :authority localhost:18500,
+    // user-agent curl/8.4.0, accept */*  (Huffman where the encoder chose it).
+    let block = hex_decode("8244856272d141ff87418ba0e41d139d09b8179b003f7a8825b650c3cbb4b83f5383f963e7")
+    let count = hpack_decode_block(block)
+    assert_eq(count, 6)
+    assert_eq_str(field(":method"), "GET")
+    assert_eq_str(field(":path"), "/hello")        // Huffman-decoded
+    assert_eq_str(field(":scheme"), "https")
+    assert_eq_str(field(":authority"), "localhost:18500")
+    assert_eq_str(field("user-agent"), "curl/8.4.0")
+    assert_eq_str(field("accept"), "*/*")
+}

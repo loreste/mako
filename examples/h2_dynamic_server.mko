@@ -1,0 +1,76 @@
+// A complete HTTP/2 server built from Mako's own primitives — not the fixed-route
+// `tls_serve_h2_routes` seed. This is the shape of an H2 reverse proxy: terminate
+// TLS (ALPN h2), read the request headers, and write a dynamic response.
+//
+//   tls_server_new / tls_accept              TLS termination, ALPN negotiates "h2"
+//   http2_conn_new / _use / _set_server(1)   per-connection state
+//   http2_conn_pump(bytes)                   process frames + auto-ACK SETTINGS
+//   http2_conn_header_stream / _block        the completed request
+//   hpack_decode_block + hpack_decoded_*     read :method / :path
+//   http2_response(stream, status, body)     build the reply frames
+//
+// Run it, then: `curl -sk --http2 https://localhost:18500/`
+// (verified: curl reports http_version=2, status=200).
+
+fn request_path() -> string {
+    var i = 0
+    let n = hpack_decoded_count()
+    for i < n {
+        if hpack_decoded_name(i) == ":path" {
+            return hpack_decoded_value(i)
+        }
+        i++
+    }
+    return "/"
+}
+
+fn serve(conn: TlsConn) {
+    let c = http2_conn_new()
+    let _u = http2_conn_use(c)
+    let _s = http2_conn_set_server(1)
+    let _w = tls_write(conn, http2_empty_settings())   // server's SETTINGS
+
+    var done = 0
+    for done == 0 {
+        let bytes = tls_read(conn, 8192)
+        if len(bytes) == 0 {
+            done = 1
+        } else {
+            let back = http2_conn_pump(bytes)          // recv + auto SETTINGS ACK
+            if len(back) > 0 {
+                let _b = tls_write(conn, back)
+            }
+            let stream = http2_conn_header_stream()
+            if stream > 0 {
+                let _d = hpack_decode_block(http2_conn_header_block(stream))
+                let body = "hello from mako h2: " + request_path() + "\n"
+                let _r = tls_write(conn, http2_response(stream, 200, body))
+                done = 1
+            }
+        }
+    }
+    let _c = tls_conn_close(conn)
+    http2_conn_free(c)
+}
+
+fn main() {
+    if tls_server_available() == 0 {
+        print("TLS backend not available in this build")
+        return
+    }
+    let srv = tls_server_new("runtime/certs/dev.crt", "runtime/certs/dev.key")
+    let lfd = tcp_listen(18500)
+    if lfd < 0 {
+        print("bind failed")
+        return
+    }
+    print("h2 server on https://localhost:18500")
+    while true {
+        let fd = tcp_accept(lfd)
+        if fd < 0 {
+            continue
+        }
+        let conn = tls_accept(srv, fd)
+        serve(conn)
+    }
+}

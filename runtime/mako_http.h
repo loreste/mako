@@ -1423,25 +1423,26 @@ static inline MakoString mako_hpack_literal_value(MakoString block) {
 
 /* Static table index → name (RFC 7541 Appendix A subset). Index ≥62 → dynamic.
  * Limits: names only for static; dyn cap MAKO_HPACK_DYN_CAP; no Huffman. */
+/* Full HPACK static table names (RFC 7541 Appendix A, entries 1–61). */
 static inline MakoString mako_hpack_static_name(int64_t index) {
     if (index >= 62) return mako_hpack_dyn_name_at(index);
-    const char *n = NULL;
-    switch (index) {
-        case 1: n = ":authority"; break;
-        case 2: n = ":method"; break;
-        case 3: n = ":method"; break;
-        case 4: n = ":path"; break;
-        case 5: n = ":path"; break;
-        case 6: n = ":scheme"; break;
-        case 7: n = ":scheme"; break;
-        case 8: n = ":status"; break;
-        case 15: n = "accept-encoding"; break;
-        case 31: n = "content-type"; break;
-        case 54: n = "user-agent"; break;
-        default: break;
-    }
-    if (!n) return (MakoString){NULL, 0};
-    return mako_str_from_cstr(n);
+    static const char *const names[62] = {
+        NULL, ":authority", ":method", ":method", ":path", ":path", ":scheme",
+        ":scheme", ":status", ":status", ":status", ":status", ":status",
+        ":status", ":status", "accept-charset", "accept-encoding",
+        "accept-language", "accept-ranges", "accept", "access-control-allow-origin",
+        "age", "allow", "authorization", "cache-control", "content-disposition",
+        "content-encoding", "content-language", "content-length", "content-location",
+        "content-range", "content-type", "cookie", "date", "etag", "expect",
+        "expires", "from", "host", "if-match", "if-modified-since", "if-none-match",
+        "if-range", "if-unmodified-since", "last-modified", "link", "location",
+        "max-forwards", "proxy-authenticate", "proxy-authorization", "range",
+        "referer", "refresh", "retry-after", "server", "set-cookie",
+        "strict-transport-security", "transfer-encoding", "user-agent", "vary",
+        "via", "www-authenticate"
+    };
+    if (index < 1 || index > 61) return (MakoString){NULL, 0};
+    return mako_str_from_cstr(names[index]);
 }
 
 /* Static table index → value when the entry has a fixed value; else empty. */
@@ -1456,6 +1457,13 @@ static inline MakoString mako_hpack_static_value(int64_t index) {
         case 6: v = "http"; break;
         case 7: v = "https"; break;
         case 8: v = "200"; break;
+        case 9: v = "204"; break;
+        case 10: v = "206"; break;
+        case 11: v = "304"; break;
+        case 12: v = "400"; break;
+        case 13: v = "404"; break;
+        case 14: v = "500"; break;
+        case 16: v = "gzip, deflate"; break;
         default: break;
     }
     if (!v) return (MakoString){NULL, 0};
@@ -1465,7 +1473,7 @@ static inline MakoString mako_hpack_static_value(int64_t index) {
 /* Decode a full HPACK header block (indexed + literal-new-name only) into a
  * process-global table. For use after http2_header_block merge. Limits: no
  * Huffman, no name-indexed literals, max MAKO_HPACK_DECODE_MAX fields. */
-#define MAKO_HPACK_DECODE_MAX 16
+#define MAKO_HPACK_DECODE_MAX 64
 static char *mako_hpack_dec_names[MAKO_HPACK_DECODE_MAX];
 static size_t mako_hpack_dec_nlen[MAKO_HPACK_DECODE_MAX];
 static char *mako_hpack_dec_vals[MAKO_HPACK_DECODE_MAX];
@@ -1501,7 +1509,79 @@ static inline int mako_hpack_decode_push(MakoString name, MakoString value) {
     return 1;
 }
 
-/* Returns field count, or -1 on malformed block. */
+/* Read an HPACK integer with an N-bit prefix (RFC 7541 §5.1). */
+static inline int mako_hpack_read_int(const unsigned char *p, size_t n, size_t *off,
+                                      int prefix_bits, size_t *out) {
+    if (!p || *off >= n) return 0;
+    size_t max = ((size_t)1 << prefix_bits) - 1;
+    size_t val = (size_t)(p[*off] & max);
+    (*off)++;
+    if (val < max) { *out = val; return 1; }
+    int m = 0;
+    while (*off < n) {
+        unsigned char b = p[*off];
+        (*off)++;
+        val += (size_t)(b & 0x7f) << m;
+        m += 7;
+        if ((b & 0x80) == 0) { *out = val; return 1; }
+        if (m > 56) return 0;
+    }
+    return 0;
+}
+
+/* Read an HPACK string (RFC 7541 §5.2): H-bit + length + octets, Huffman-decoded
+ * when H is set. Returns an owned MakoString (caller frees .data). */
+static inline int mako_hpack_read_str(const unsigned char *p, size_t n, size_t *off,
+                                      MakoString *out) {
+    if (*off >= n) return 0;
+    int huff = (p[*off] & 0x80) != 0;
+    size_t len = 0;
+    if (!mako_hpack_read_int(p, n, off, 7, &len)) return 0;
+    if (*off + len > n) return 0;
+    MakoString raw = {(char *)(p + *off), len};
+    *off += len;
+    if (huff) {
+        *out = (len == 0) ? mako_str_from_cstr("") : mako_hpack_huffman_decode(raw);
+        return out->data != NULL;
+    }
+    char *d = (char *)malloc(len + 1);
+    if (!d) return 0;
+    if (len) memcpy(d, raw.data, len);
+    d[len] = 0;
+    *out = (MakoString){d, len};
+    return 1;
+}
+
+/* Resolve an HPACK index (§2.3.3) to owned name + optional value copies. */
+static inline int mako_hpack_index_lookup(size_t idx, MakoString *name, MakoString *value) {
+    if (idx >= 1 && idx <= 61) {
+        *name = mako_hpack_static_name((int64_t)idx);
+        if (value) *value = mako_hpack_static_value((int64_t)idx);
+        return name->data != NULL;
+    }
+    size_t di = (idx >= 62) ? idx - 62 : (size_t)-1;
+    if (di < (size_t)mako_hpack_dyn_count) {
+        MakoHpackDynEntry *e = &mako_hpack_dyn_tab[di];
+        char *nn = (char *)malloc(e->nlen + 1);
+        if (!nn) return 0;
+        memcpy(nn, e->n, e->nlen);
+        nn[e->nlen] = 0;
+        *name = (MakoString){nn, e->nlen};
+        if (value) {
+            char *vv = (char *)malloc(e->vlen + 1);
+            if (!vv) { free(nn); return 0; }
+            memcpy(vv, e->v, e->vlen);
+            vv[e->vlen] = 0;
+            *value = (MakoString){vv, e->vlen};
+        }
+        return 1;
+    }
+    return 0;
+}
+
+/* Returns field count, or -1 on malformed block. Handles the full literal
+ * representations (indexed name, incremental indexing, never-indexed), varint
+ * lengths, and Huffman strings — so real clients (curl, browsers) decode. */
 static inline int64_t mako_hpack_decode_block(MakoString block) {
     mako_hpack_decode_clear();
     if (!block.data) return 0;
@@ -1510,51 +1590,46 @@ static inline int64_t mako_hpack_decode_block(MakoString block) {
     size_t off = 0;
     while (off < n) {
         unsigned char b = p[off];
-        if ((b & 0x80) != 0) {
+        MakoString nm = {NULL, 0}, vv = {NULL, 0};
+        if (b & 0x80) {
             /* Indexed Header Field */
-            int64_t idx = (int64_t)(b & 0x7f);
-            off += 1;
-            if (idx < 1) { mako_hpack_decode_clear(); return -1; }
-            MakoString nm = mako_hpack_static_name(idx);
-            MakoString vl = mako_hpack_static_value(idx);
-            if (!nm.data && idx < 62) { free(vl.data); mako_hpack_decode_clear(); return -1; }
-            if (!mako_hpack_decode_push(nm, vl)) {
-                free(nm.data); free(vl.data);
-                mako_hpack_decode_clear();
-                return -1;
-            }
-            free(nm.data);
-            free(vl.data);
-        } else if (b == 0x00) {
-            /* Literal without Indexing — New Name */
-            size_t start = off;
-            off += 1;
-            size_t ns = 0, nl = 0, vs = 0, vl = 0;
-            if (!mako_hpack_parse_string(p, n, &off, &ns, &nl)) {
-                mako_hpack_decode_clear();
-                return -1;
-            }
-            if (!mako_hpack_parse_string(p, n, &off, &vs, &vl)) {
-                mako_hpack_decode_clear();
-                return -1;
-            }
-            (void)start;
-            MakoString nm = mako_str_slice(block, (int64_t)ns, (int64_t)(ns + nl));
-            MakoString vv = mako_str_slice(block, (int64_t)vs, (int64_t)(vs + vl));
-            if (!mako_hpack_decode_push(nm, vv)) {
-                free(nm.data); free(vv.data);
-                mako_hpack_decode_clear();
-                return -1;
-            }
-            free(nm.data);
-            free(vv.data);
+            size_t idx = 0;
+            if (!mako_hpack_read_int(p, n, &off, 7, &idx) || idx < 1) goto fail;
+            if (!mako_hpack_index_lookup(idx, &nm, &vv)) goto fail;
+            int ok = mako_hpack_decode_push(nm, vv);
+            free(nm.data); free(vv.data);
+            if (!ok) goto fail;
+        } else if ((b & 0xc0) == 0x40) {
+            /* Literal with Incremental Indexing — 6-bit name index. */
+            size_t ni = 0;
+            if (!mako_hpack_read_int(p, n, &off, 6, &ni)) goto fail;
+            if (ni == 0) { if (!mako_hpack_read_str(p, n, &off, &nm)) goto fail; }
+            else if (!mako_hpack_index_lookup(ni, &nm, NULL)) goto fail;
+            if (!mako_hpack_read_str(p, n, &off, &vv)) { free(nm.data); goto fail; }
+            int ok = mako_hpack_decode_push(nm, vv);
+            mako_hpack_dyn_insert(nm, vv);
+            free(nm.data); free(vv.data);
+            if (!ok) goto fail;
+        } else if ((b & 0xe0) == 0x20) {
+            /* Dynamic Table Size Update — consume and ignore. */
+            size_t sz = 0;
+            if (!mako_hpack_read_int(p, n, &off, 5, &sz)) goto fail;
         } else {
-            /* Other forms (name-indexed literal, table size update) unsupported */
-            mako_hpack_decode_clear();
-            return -1;
+            /* Literal without Indexing (0x0x) or Never Indexed (0x1x): 4-bit name index. */
+            size_t ni = 0;
+            if (!mako_hpack_read_int(p, n, &off, 4, &ni)) goto fail;
+            if (ni == 0) { if (!mako_hpack_read_str(p, n, &off, &nm)) goto fail; }
+            else if (!mako_hpack_index_lookup(ni, &nm, NULL)) goto fail;
+            if (!mako_hpack_read_str(p, n, &off, &vv)) { free(nm.data); goto fail; }
+            int ok = mako_hpack_decode_push(nm, vv);
+            free(nm.data); free(vv.data);
+            if (!ok) goto fail;
         }
     }
     return (int64_t)mako_hpack_dec_count;
+fail:
+    mako_hpack_decode_clear();
+    return -1;
 }
 
 static inline int64_t mako_hpack_decoded_count(void) {
