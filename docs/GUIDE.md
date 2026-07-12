@@ -1023,7 +1023,7 @@ ch.close()
 
 ```mko
 // examples/select_default.mko — timeout + default + up to 16 arms
-// select / chan_select* multiplex **int** channels today
+// select / chan_select* : int or string arms (same family)
 select timeout 30 {
     a => { print("got a") }
     b => { print("got b") }
@@ -1031,9 +1031,9 @@ select timeout 30 {
 }
 ```
 
-Value of the ready arm: `chan_select_value()`. Fairness: round-robin when many
-are ready (`examples/select_fair.mko`). Helpers: `chan_select2` / `3` / `4`.
-NLL: `select` arms are joined independently (moves in one arm do not poison others).
+Value: `chan_select_value()` (int) or `chan_select_value_str()` (string).
+Helpers: `chan_select2` / `3` / `4`, `chan_str_select2`. Fairness: round-robin.
+NLL: select arms and crew bodies keep hold-move joins.
 
 ---
 
