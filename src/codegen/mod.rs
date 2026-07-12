@@ -1437,10 +1437,10 @@ impl Codegen {
                     {
                         self.emit_float_array_lit(elems)
                     } else if !elems.is_empty()
-                        && elems.iter().all(|e| matches!(e, Expr::StructLit { .. }))
+                        && elems.iter().all(|e| struct_lit_name(e).is_some())
                     {
-                        if let Expr::StructLit { name, .. } = &elems[0] {
-                            let sn = name.clone();
+                        if let Some(name) = struct_lit_name(&elems[0]) {
+                            let sn = name.to_string();
                             self.emit_struct_array_lit(&sn, elems)
                         } else {
                             self.emit_expr(init)
@@ -9886,8 +9886,10 @@ impl Codegen {
                     for (i, t) in tys.iter().enumerate() {
                         fields.push_str(&format!("    {t} _{i};\n"));
                     }
-                    // Hoist typedef to the top of the C unit (before forward decls).
-                    self.pending_tuple_typedefs.push(format!(
+                    // Insert at the helpers marker so an inline tuple literal (e.g.
+                    // parallel assignment `a, b = b, a`) has its type declared even
+                    // when first seen during body emission.
+                    self.insert_helper(&format!(
                         "typedef struct {{\n{fields}}} {cname};\n"
                     ));
                 }
@@ -9940,9 +9942,9 @@ impl Codegen {
                 if !elems.is_empty() && elems.iter().all(|e| matches!(e, Expr::Float(_))) {
                     return self.emit_float_array_lit(elems);
                 }
-                if !elems.is_empty() && elems.iter().all(|e| matches!(e, Expr::StructLit { .. })) {
-                    if let Expr::StructLit { name, .. } = &elems[0] {
-                        let sn = name.clone();
+                if !elems.is_empty() && elems.iter().all(|e| struct_lit_name(e).is_some()) {
+                    if let Some(name) = struct_lit_name(&elems[0]) {
+                        let sn = name.to_string();
                         return self.emit_struct_array_lit(&sn, elems);
                     }
                 }
@@ -11125,6 +11127,14 @@ impl Codegen {
             }
             _ => "0".into(),
         }
+    }
+}
+
+/// The struct name of a named or positional struct literal, if `e` is one.
+fn struct_lit_name(e: &Expr) -> Option<&str> {
+    match e {
+        Expr::StructLit { name, .. } | Expr::StructLitPos { name, .. } => Some(name),
+        _ => None,
     }
 }
 

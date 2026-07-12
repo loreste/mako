@@ -1099,7 +1099,19 @@ impl Parser {
                     ) {
                         let mutable = matches!(self.peek_kind(), TokenKind::ColonAssign);
                         self.bump();
-                        let init = self.parse_expr()?;
+                        // RHS may be a single tuple-valued expression (`a, b = f()`)
+                        // or a parallel list (`a, b = b, a`). A list is packed into a
+                        // tuple so it is evaluated fully before any target is written.
+                        let mut vals = vec![self.parse_expr()?];
+                        while matches!(self.peek_kind(), TokenKind::Comma) {
+                            self.bump();
+                            vals.push(self.parse_expr()?);
+                        }
+                        let init = if vals.len() == 1 {
+                            vals.into_iter().next().unwrap()
+                        } else {
+                            Expr::Tuple(vals)
+                        };
                         if matches!(self.peek_kind(), TokenKind::Semicolon) {
                             self.bump();
                         }
@@ -1374,7 +1386,18 @@ impl Parser {
                 return Err(self.err("expected `=` or `:=` after multi-name binding".into()));
             }
             self.bump();
-            let init = self.parse_expr()?;
+            // RHS: a single tuple-valued / index expression, or a parallel list
+            // (`let a, b = 1, 2`) packed into a tuple for full evaluation first.
+            let mut vals = vec![self.parse_expr()?];
+            while matches!(self.peek_kind(), TokenKind::Comma) {
+                self.bump();
+                vals.push(self.parse_expr()?);
+            }
+            let init = if vals.len() == 1 {
+                vals.into_iter().next().unwrap()
+            } else {
+                Expr::Tuple(vals)
+            };
             if matches!(self.peek_kind(), TokenKind::Semicolon) {
                 self.bump();
             }

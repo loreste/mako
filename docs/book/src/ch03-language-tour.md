@@ -806,6 +806,20 @@ let mut p = Point{0, 0}
 p.x++               // on a field
 ```
 
+**Parallel binding and assignment** bind or update several targets at once. The
+right-hand side is evaluated in full before any target is written, so a swap
+needs no temporary:
+
+```mko
+var a, b = 1, 2     // parallel binding
+a, b = b, a         // swap: a is now 2, b is now 1
+
+var x, y, z = 1, 2, 3
+x, y, z = z, x, y   // rotate
+
+var p, q = pair()   // unpack a function's multiple return values
+```
+
 ### Comparison operators
 
 | Operator | Meaning |
