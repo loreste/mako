@@ -1606,6 +1606,45 @@ static inline MakoString mako_http2_data_frame(int64_t stream, MakoString payloa
     return mako_http2_build_frame(0, stream, flags, payload);
 }
 
+/* Build a complete HTTP/2 response for `stream`: a HEADERS frame carrying
+ * `:status` + `content-length`, followed by a DATA frame with the body and
+ * END_STREAM. Returns the bytes to write to the connection. Encapsulates the
+ * HPACK encode + framing so an accept loop is just: read request → build
+ * response → write. */
+static inline MakoString mako_http2_response(int64_t stream, int64_t status, MakoString body) {
+    /* :status — indexed for the common static-table codes, else literal. */
+    MakoString sh;
+    switch (status) {
+        case 200: sh = mako_hpack_encode_indexed(8); break;
+        case 204: sh = mako_hpack_encode_indexed(9); break;
+        case 206: sh = mako_hpack_encode_indexed(10); break;
+        case 304: sh = mako_hpack_encode_indexed(11); break;
+        case 400: sh = mako_hpack_encode_indexed(12); break;
+        case 404: sh = mako_hpack_encode_indexed(13); break;
+        case 500: sh = mako_hpack_encode_indexed(14); break;
+        default: {
+            char code[16];
+            snprintf(code, sizeof(code), "%lld", (long long)status);
+            sh = mako_hpack_encode_literal(mako_str_from_cstr(":status"),
+                                           mako_str_from_cstr(code));
+        }
+    }
+    char clen[24];
+    snprintf(clen, sizeof(clen), "%zu", body.len);
+    MakoString clh = mako_hpack_encode_literal(mako_str_from_cstr("content-length"),
+                                               mako_str_from_cstr(clen));
+    MakoString block = mako_str_concat(sh, clh);
+    free(sh.data);
+    free(clh.data);
+    MakoString hf = mako_http2_headers_frame(stream, block, 0x4); /* END_HEADERS */
+    free(block.data);
+    MakoString df = mako_http2_data_frame(stream, body, 0x1);     /* END_STREAM */
+    MakoString out = mako_str_concat(hf, df);
+    free(hf.data);
+    free(df.data);
+    return out;
+}
+
 /* CONTINUATION (type=9) — header-block fragment. END_HEADERS=0x4. */
 static inline MakoString mako_http2_continuation_frame(int64_t stream, MakoString block, int64_t flags) {
     return mako_http2_build_frame(9, stream, flags, block);

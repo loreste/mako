@@ -493,9 +493,18 @@ fn read_request(conn: Http2Conn, bytes: string) -> string {
 }
 ```
 
-Build the response from `hpack_encode_indexed` / `hpack_encode_literal` blocks
-wrapped in `http2_headers_frame` + `http2_data_frame`, and write them back over
-the TLS connection. Pair with `tls_accept` (ALPN `h2`) to terminate TLS.
+Reply with `http2_response(stream, status, body)`, which builds the whole
+response — a HEADERS frame carrying `:status` and `content-length`, then a DATA
+frame with the body and END_STREAM — ready to write back over the connection:
+
+```mko
+let bytes = http2_response(stream, 200, "hello from mako\n")
+let _ = tls_write(conn, bytes)
+```
+
+Pair with `tls_accept` (ALPN `h2`) to terminate TLS. For finer control you can
+still build frames by hand from `hpack_encode_indexed` / `hpack_encode_literal`
+blocks wrapped in `http2_headers_frame` + `http2_data_frame`.
 
 ---
 

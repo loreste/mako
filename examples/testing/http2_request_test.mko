@@ -41,3 +41,18 @@ func TestHttp2ReadRequest() {
 
     http2_conn_free(c)
 }
+
+func TestHttp2Response() {
+    // http2_response builds a complete response: HEADERS(:status) then DATA(body).
+    let resp = http2_response(1, 200, "hello world")
+
+    // First frame is HEADERS (type 1), carrying the status.
+    assert_eq(http2_frame_type(resp), 1)
+    let _d = hpack_decode_block(http2_frame_payload(resp))
+    assert_eq_str(header_value(":status"), "200")
+
+    // Second frame is DATA (type 0) with the body.
+    let data = http2_frame_at(resp, 1)
+    assert_eq(http2_frame_type(data), 0)
+    assert_eq_str(http2_frame_payload(data), "hello world")
+}

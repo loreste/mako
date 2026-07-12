@@ -39,6 +39,9 @@
   request ever assembled. A received HEADERS now correctly opens a client
   (odd-id) stream, so `header_block` + HPACK decode recover `:method` / `:path` —
   the basis for an H2 accept loop / reverse proxy.
+- **`http2_response(stream, status, body)`** — builds a full response (HEADERS
+  with `:status` + `content-length`, then DATA with END_STREAM) in one call,
+  completing the read-request → write-response cycle for an H2 server.
 
 ### TLS
 

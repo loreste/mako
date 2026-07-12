@@ -1476,6 +1476,15 @@ impl TypeChecker {
                 Box::new(Type::String),
             ),
         );
+        // Build a complete response (HEADERS :status + content-length, then DATA
+        // with END_STREAM) for a stream — the "write response" half of a server.
+        fns.insert(
+            "http2_response".into(),
+            Type::Fn(
+                vec![Type::Int, Type::Int, Type::String],
+                Box::new(Type::String),
+            ),
+        );
         fns.insert(
             "http2_frame_payload".into(),
             Type::Fn(vec![Type::String], Box::new(Type::String)),

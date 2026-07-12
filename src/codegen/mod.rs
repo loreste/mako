@@ -3971,6 +3971,16 @@ impl Codegen {
                             ));
                             return ("MakoString".into(), tmp);
                         }
+                        "http2_response" => {
+                            let (_, st) = self.emit_expr(&args[0]);
+                            let (_, code) = self.emit_expr(&args[1]);
+                            let (_, body) = self.emit_expr(&args[2]);
+                            let tmp = self.fresh("h2rsp");
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_http2_response({st}, {code}, {body});"
+                            ));
+                            return ("MakoString".into(), tmp);
+                        }
                         "http2_frame_payload" => {
                             let (_, s) = self.emit_expr(&args[0]);
                             let tmp = self.fresh("h2p");
