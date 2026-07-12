@@ -134,12 +134,13 @@ impl Codegen {
         crate::errors::result_err_enum_c(ty, |en| self.enums.contains_key(en))
     }
 
-    /// Ok payload kind for Result[T, _]: "string" or "int".
+    /// Ok payload kind for Result[T, _]: "string", "float", or "int".
     fn result_ok_kind(ty: &TypeExpr) -> &'static str {
         match ty {
             TypeExpr::Generic(n, args) if n == "Result" && !args.is_empty() => {
                 match &args[0] {
                     TypeExpr::Named(t) if t == "string" => "string",
+                    TypeExpr::Named(t) if t == "float" || t == "float64" => "float",
                     _ => "int",
                 }
             }
@@ -548,6 +549,7 @@ impl Codegen {
         let _ = writeln!(self.out, "    int tag;");
         let _ = writeln!(self.out, "    int64_t i0;");
         let _ = writeln!(self.out, "    int64_t i1;");
+        let _ = writeln!(self.out, "    int64_t i2;");
         let _ = writeln!(self.out, "    MakoString s0;");
         let _ = writeln!(self.out, "    MakoString s1;");
         let _ = writeln!(self.out, "}} {c_name};");
@@ -1898,13 +1900,30 @@ impl Codegen {
                 let which = self.fresh("sel");
                 let arr = self.fresh("selchs");
                 let n = arms.len();
-                self.line(&format!("MakoChan *{arr}[{n}];"));
-                for (i, (ch, _)) in arms.iter().enumerate() {
-                    self.line(&format!("{arr}[{i}] = {ch};"));
+                // Prefer string-channel select when every arm is MakoChanStr*.
+                let all_str = arms.iter().all(|(ch, _)| {
+                    self.locals
+                        .get(ch)
+                        .map(|t| t.as_str() == "MakoChanStr*")
+                        .unwrap_or(false)
+                });
+                if all_str {
+                    self.line(&format!("MakoChanStr *{arr}[{n}];"));
+                    for (i, (ch, _)) in arms.iter().enumerate() {
+                        self.line(&format!("{arr}[{i}] = {ch};"));
+                    }
+                    self.line(&format!(
+                        "int64_t {which} = mako_chan_str_selectn({arr}, {n}, {ms});"
+                    ));
+                } else {
+                    self.line(&format!("MakoChan *{arr}[{n}];"));
+                    for (i, (ch, _)) in arms.iter().enumerate() {
+                        self.line(&format!("{arr}[{i}] = {ch};"));
+                    }
+                    self.line(&format!(
+                        "int64_t {which} = mako_chan_selectn({arr}, {n}, {ms});"
+                    ));
                 }
-                self.line(&format!(
-                    "int64_t {which} = mako_chan_selectn({arr}, {n}, {ms});"
-                ));
                 for (i, (_ch, body)) in arms.iter().enumerate() {
                     if i == 0 {
                         self.line(&format!("if ({which} == {i}) {{"));
@@ -2209,6 +2228,12 @@ impl Codegen {
                             if vty == "MakoString" {
                                 return ("MakoResultInt".into(), format!("mako_ok_str({v})"));
                             }
+                            if vty == "double" {
+                                return (
+                                    "MakoResultInt".into(),
+                                    format!("mako_ok_float_res({v})"),
+                                );
+                            }
                             return (
                                 "MakoResultInt".into(),
                                 format!("mako_ok_int((int64_t)({v}))"),
@@ -2219,7 +2244,7 @@ impl Codegen {
                             if ty.starts_with("MakoEnum_") {
                                 let tmp = self.fresh("erre");
                                 self.line(&format!(
-                                    "MakoResultInt {tmp} = mako_err_enum((int)({v}).tag, ({v}).i0, ({v}).i1, ({v}).s0);"
+                                    "MakoResultInt {tmp} = mako_err_enum_ex((int)({v}).tag, ({v}).i0, ({v}).i1, ({v}).i2, ({v}).s0, ({v}).s1);"
                                 ));
                                 return ("MakoResultInt".into(), tmp);
                             }
@@ -8641,6 +8666,16 @@ impl Codegen {
                             ));
                             return ("MakoReflectValue*".into(), tmp);
                         }
+                        "reflect_value_from_2" => {
+                            let (_, s) = self.emit_expr(&args[0]);
+                            let (_, a) = self.emit_expr(&args[1]);
+                            let (_, b) = self.emit_expr(&args[2]);
+                            let tmp = self.fresh("rv2");
+                            self.line(&format!(
+                                "MakoReflectValue *{tmp} = mako_reflect_value_from_2({s}, {a}, {b});"
+                            ));
+                            return ("MakoReflectValue*".into(), tmp);
+                        }
                         "reflect_value_set" => {
                             let (_, v) = self.emit_expr(&args[0]);
                             let (_, f) = self.emit_expr(&args[1]);
@@ -9537,6 +9572,22 @@ impl Codegen {
                                 "int64_t".into(),
                                 format!("mako_chan_select2({a}, {b}, {ms})"),
                             );
+                        }
+                        "chan_str_select2" => {
+                            let (_, a) = self.emit_expr(&args[0]);
+                            let (_, b) = self.emit_expr(&args[1]);
+                            let (_, ms) = self.emit_expr(&args[2]);
+                            return (
+                                "int64_t".into(),
+                                format!("mako_chan_str_select2({a}, {b}, {ms})"),
+                            );
+                        }
+                        "chan_select_value_str" => {
+                            let tmp = self.fresh("sels");
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_chan_select_value_str();"
+                            ));
+                            return ("MakoString".into(), tmp);
                         }
                         "chan_select3" => {
                             let (_, a) = self.emit_expr(&args[0]);
@@ -11307,6 +11358,10 @@ impl Codegen {
                                         self.line(&format!(
                                             "{arg_name}[{i}] = (intptr_t){boxn};"
                                         ));
+                                    } else if aty == "double" || pty == "double" {
+                                        self.line(&format!(
+                                            "{arg_name}[{i}] = (intptr_t)mako_f64_to_bits({v});"
+                                        ));
                                     } else if pty.contains('*') || aty.contains('*') {
                                         self.line(&format!("{arg_name}[{i}] = (intptr_t){v};"));
                                     } else {
@@ -11829,21 +11884,35 @@ impl Codegen {
         self.line(&format!("{tmp}.tag = {tag};"));
         self.line(&format!("{tmp}.i0 = 0;"));
         self.line(&format!("{tmp}.i1 = 0;"));
+        self.line(&format!("{tmp}.i2 = 0;"));
         self.line(&format!("{tmp}.s0 = (MakoString){{NULL, 0}};"));
         self.line(&format!("{tmp}.s1 = (MakoString){{NULL, 0}};"));
         let mut int_slot = 0usize;
         let mut str_slot = 0usize;
         for (i, a) in args.iter().enumerate() {
-            let (_, v) = self.emit_expr(a);
+            let (aty, v) = self.emit_expr(a);
             let kind = fields.get(i).copied().unwrap_or("int");
             match kind {
                 "string" => {
-                    self.line(&format!("{tmp}.s{str_slot} = {v};"));
-                    str_slot += 1;
+                    if str_slot < 2 {
+                        self.line(&format!("{tmp}.s{str_slot} = {v};"));
+                        str_slot += 1;
+                    }
+                }
+                "float" => {
+                    if int_slot < 3 {
+                        self.line(&format!(
+                            "{tmp}.i{int_slot} = mako_f64_to_bits((double)({v}));"
+                        ));
+                        int_slot += 1;
+                    }
+                    let _ = aty;
                 }
                 _ => {
-                    self.line(&format!("{tmp}.i{int_slot} = (int64_t){v};"));
-                    int_slot += 1;
+                    if int_slot < 3 {
+                        self.line(&format!("{tmp}.i{int_slot} = (int64_t){v};"));
+                        int_slot += 1;
+                    }
                 }
             }
         }
@@ -12141,6 +12210,12 @@ impl Codegen {
                                 "MakoString {} = {scrut}.ok_s;",
                                 mangle(&bindings[0])
                             ));
+                        } else if ok_kind == "float" {
+                            self.locals.insert(bindings[0].clone(), "double".into());
+                            self.line(&format!(
+                                "double {} = {scrut}.ok_f;",
+                                mangle(&bindings[0])
+                            ));
                         } else {
                             self.locals.insert(bindings[0].clone(), "int64_t".into());
                             self.line(&format!(
@@ -12158,8 +12233,9 @@ impl Codegen {
                                  {b}.tag = {scrut}.err_tag; \
                                  {b}.i0 = {scrut}.err_i0; \
                                  {b}.i1 = {scrut}.err_i1; \
+                                 {b}.i2 = {scrut}.err_i2; \
                                  {b}.s0 = {scrut}.err_s0; \
-                                 {b}.s1 = (MakoString){{NULL, 0}};"
+                                 {b}.s1 = {scrut}.err_s1;"
                             ));
                         } else {
                             self.locals.insert(bindings[0].clone(), "MakoString".into());
@@ -12259,6 +12335,11 @@ impl Codegen {
                     "MakoString {local} = *(MakoString*)a[{i}]; free((void*)a[{i}]);\n"
                 ));
                 // callee owns the clone for the call duration; free buffer after if needed
+                call_args.push(local);
+            } else if ty == "double" {
+                unpack.push_str(&format!(
+                    "double {local} = mako_bits_to_f64((int64_t)a[{i}]);\n"
+                ));
                 call_args.push(local);
             } else if ty.contains('*') {
                 unpack.push_str(&format!("{ty} {local} = ({ty})a[{i}];\n"));

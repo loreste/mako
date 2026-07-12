@@ -983,6 +983,7 @@ crew t {
 | Tool | Role |
 |------|------|
 | `crew` / `kick` / `join` | Structured concurrency; **join** returns the job’s type (`int`, `string`, `Result`, …) |
+| `job.join_timeout(ms)` | Timed join; returns 0 if still running (task may finish later) |
 | `crew.drain(ms)` | Cancel + join with timeout |
 | `fan(collection, mapper)` | Data-parallel map: `[]int` / `[]float` / `[]string` / `[]Struct` |
 | channels + `select` | Message-passing (`chan_open[T]` for int/bool/float/string/struct) |

@@ -4533,6 +4533,13 @@ impl TypeChecker {
             ),
         );
         fns.insert(
+            "reflect_value_from_2".into(),
+            Type::Fn(
+                vec![Type::String, Type::String, Type::String],
+                Box::new(Type::Named("ReflectValue".into())),
+            ),
+        );
+        fns.insert(
             "reflect_value_set".into(),
             Type::Fn(
                 vec![
@@ -6092,7 +6099,7 @@ impl TypeChecker {
             "http_decode_chunked".into(),
             Type::Fn(vec![Type::String], Box::new(Type::String)),
         );
-        // Channel select
+        // Channel select (int family; string via chan_str_select2 / select syntax)
         fns.insert(
             "chan_select2".into(),
             Type::Fn(
@@ -6107,6 +6114,21 @@ impl TypeChecker {
         fns.insert(
             "chan_select_value".into(),
             Type::Fn(vec![], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "chan_str_select2".into(),
+            Type::Fn(
+                vec![
+                    Type::Chan(Box::new(Type::String)),
+                    Type::Chan(Box::new(Type::String)),
+                    Type::Int,
+                ],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "chan_select_value_str".into(),
+            Type::Fn(vec![], Box::new(Type::String)),
         );
         // share_of: Mako-native alias for share_int (extensible later)
         fns.insert(
@@ -7837,12 +7859,31 @@ impl TypeChecker {
                 Ok(())
             }
             Stmt::Crew { name, body } => {
+                // NLL: outer hold moves inside crew survive after the block
+                // (crew body always runs synchronously to cancel_join). Snapshot
+                // only for share/borrow join; hold moves use normal sequential flow.
+                let before_moved = self.moved_holds.clone();
+                let before_fields = self.hold_moved_fields.clone();
                 self.push_scope();
                 self.define(name, Type::Crew, false);
                 for stmt in &body.stmts {
                     self.check_stmt(stmt)?;
                 }
                 self.pop_scope();
+                // Union: moves that existed before or happened inside crew.
+                for (n, m) in before_moved {
+                    if m {
+                        self.moved_holds.insert(n, true);
+                    }
+                }
+                for (n, fields) in before_fields {
+                    if !fields.is_empty() {
+                        self.hold_moved_fields
+                            .entry(n)
+                            .or_default()
+                            .extend(fields);
+                    }
+                }
                 Ok(())
             }
             Stmt::Arena { name, body } => {
@@ -7882,9 +7923,22 @@ impl TypeChecker {
                 let before_fields = self.hold_moved_fields.clone();
                 let mut joined_moved = before_moved.clone();
                 let mut joined_fields = before_fields.clone();
+                // All arms must share the same channel element family (int/float
+                // share the int ring; string uses str select).
+                let mut arm_kind: Option<&'static str> = None;
                 for (ch, body) in arms {
-                    match self.lookup(ch) {
-                        Some((Type::Chan(_), _)) => {}
+                    let kind = match self.lookup(ch) {
+                        Some((Type::Chan(inner), _)) => match inner.as_ref() {
+                            Type::String => "str",
+                            Type::Float => "float",
+                            Type::Int
+                            | Type::Int64
+                            | Type::Int32
+                            | Type::Int8
+                            | Type::Byte
+                            | Type::Bool => "int",
+                            _ => "other",
+                        },
                         Some((t, _)) => {
                             return Err(TypeError::new(format!(
                                 "select arm `{ch}` must be a channel, got {}",
@@ -7896,6 +7950,20 @@ impl TypeChecker {
                                 "select arm `{ch}`: undefined channel"
                             )));
                         }
+                    };
+                    if kind == "other" {
+                        return Err(TypeError::new(format!(
+                            "select arm `{ch}`: select supports int/float/string channels today"
+                        )));
+                    }
+                    match arm_kind {
+                        None => arm_kind = Some(kind),
+                        Some(k) if k != kind => {
+                            return Err(TypeError::new(
+                                "select arms must use the same channel element family (all int/float or all string)",
+                            ));
+                        }
+                        _ => {}
                     }
                     self.moved_holds = before_moved.clone();
                     self.hold_moved_fields = before_fields.clone();

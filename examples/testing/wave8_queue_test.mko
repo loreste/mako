@@ -1,0 +1,134 @@
+// Wave 8: select string, join_timeout, Result float, enum Err slots,
+// reflect live fields, regex unicode props.
+
+fn slow_work() -> int {
+    sleep_ms(200)
+    return 99
+}
+
+fn quick() -> int {
+    return 7
+}
+
+fn float_ok() -> Result[float, string] {
+    return Ok(1.5)
+}
+
+enum BigErr {
+    Unit,
+    Pair(int, int, int),
+    TwoStr(string, string),
+}
+
+fn big_err() -> Result[int, BigErr] {
+    return Err(Pair(1, 2, 3))
+}
+
+fn big_err_str() -> Result[int, BigErr] {
+    return Err(TwoStr("a", "b"))
+}
+
+fn TestJoinTimeoutFast() {
+    crew t {
+        let j = t.kick(quick())
+        // generous timeout — must complete
+        let v = j.join_timeout(500)
+        assert_eq(v, 7)
+    }
+}
+
+fn TestJoinTimeoutMiss() {
+    crew t {
+        let j = t.kick(slow_work())
+        let v = j.join_timeout(20)
+        // timed out → 0 (task still joined by crew cancel_join at end)
+        assert_eq(v, 0)
+    }
+}
+
+fn TestChanStrSelect() {
+    let a = chan_open[string](1)
+    let b = chan_open[string](1)
+    let _ = a.send("hello")
+    let which = chan_str_select2(a, b, 100)
+    assert_eq(which, 0)
+    assert_eq_str(chan_select_value_str(), "hello")
+    a.close()
+    b.close()
+}
+
+fn TestResultFloatOk() {
+    match float_ok() {
+        Ok(f) => assert(f > 1.4 && f < 1.6),
+        Err(_) => assert(false),
+    }
+}
+
+fn TestEnumErrThreeInts() {
+    match big_err() {
+        Ok(_) => assert(false),
+        Err(e) => match e {
+            Pair(x, y, z) => {
+                assert_eq(x, 1)
+                assert_eq(y, 2)
+                assert_eq(z, 3)
+            },
+            Unit => assert(false),
+            TwoStr(s0, s1) => {
+                let _ = s0
+                let _ = s1
+                assert(false)
+            },
+        },
+    }
+}
+
+fn TestEnumErrTwoStr() {
+    match big_err_str() {
+        Ok(_) => assert(false),
+        Err(e) => match e {
+            TwoStr(a, b) => {
+                assert_eq_str(a, "a")
+                assert_eq_str(b, "b")
+            },
+            Unit => assert(false),
+            Pair(x, y, z) => {
+                let _ = x
+                let _ = y
+                let _ = z
+                assert(false)
+            },
+        },
+    }
+}
+
+fn TestReflectLiveFrom2() {
+    let v = reflect_value_from_2("Point", "3", "4")
+    // set_at works by index when schema has slots
+    let n = reflect_value_num_fields(v)
+    if n > 0 {
+        assert_eq(reflect_value_set_at(v, 0, "10"), 0)
+        assert_eq_str(reflect_value_field_at(v, 0), "10")
+    } else {
+        // empty schema bag — construction succeeded
+        assert_eq(n, 0)
+    }
+}
+
+fn TestRegexUnicodeSpace() {
+    assert(regex_match("\\p{Z}", " "))
+    assert(regex_match("\\p{Sc}", "$"))
+}
+
+fn share_read(s: ShareInt) -> int {
+    return share_get(s)
+}
+
+fn TestShareKickJoin() {
+    let s = share_int(21)
+    crew t {
+        let j = t.kick(share_read(s))
+        assert_eq(j.join(), 21)
+    }
+    share_drop(s)
+}

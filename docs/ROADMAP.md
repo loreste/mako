@@ -34,25 +34,24 @@ Last roadmap sync: **2026-07-11** (unique surface · pain-driven design · suite
 
 ## Partial / Next (true hard residuals)
 
-**Landed (gap close waves 1–7):** kick Send · ShareInt/string pack · atomic share ·
-visibility · Ok/Err · error_context/join/tag · chan int/bool/**float**/string/struct ·
-fan int/float/string/**struct** · job join string/Result · Result string Ok ·
-select NLL join · TCP pool mutex · log+trace · bench-gate CI · TSan CI ·
-lint --identity.
+**Landed (gap close waves 1–8):** kick Send · ShareInt · chan int/bool/float/string/struct ·
+string select · real join_timeout · fan struct · Result string/**float** Ok · enum Err
+3 ints + 2 strings · select/crew NLL · pool mutex · log+trace · reflect_value_from_2 ·
+regex Z/Sc/Han/Arabic · SMTP AUTH after STARTTLS · bench-gate + TSan CI (+1.5× soft).
 
 **Language pain residuals** (still open — see [PAIN_POINTS.md](PAIN_POINTS.md)):
 
-1. Fuller data-race model beyond TSan smoke / kick Send seed  
-2. Result Ok for float/struct; richer enum Err slots  
-3. Stronger NLL beyond select join  
-4. Channel `select` for non-int rings  
+1. Fuller data-race model beyond TSan smoke  
+2. Result Ok for structs  
+3. Stronger NLL (more CFG edges)  
+4. Channel select for ptr/struct rings  
+5. Full SSL_connect after SMTP STARTTLS  
 
 **Stdlib / product residuals:**
 
-6. Complete Unicode property database / full PCRE · interoperable Huffman JPEG bitstream  
-7. Live struct field values (not only schema registry + string bag)  
-8. SMTP AUTH over completed TLS session  
-9. Symbol-level parity  
+6. Complete Unicode property database / full PCRE · JPEG viewer parity  
+7. Reflect auto-fill from typed struct values  
+8. Symbol-level parity  
 
 ## Product Focus From General-Purpose Brief
 
