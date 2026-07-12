@@ -11,6 +11,25 @@ fn recv_wait(u: GameUDP) -> string {
     return ""
 }
 
+// Multiple UDP frontends: wrap the handle in a struct and hold them in an
+// array (a struct array stores handles; a bare `[]GameUDP` does not).
+struct Front { u: GameUDP, name: string }
+
+func TestMultipleFrontends() {
+    let fronts = [
+        Front { u: game_udp_bind(0), name: "sip" },
+        Front { u: game_udp_bind(0), name: "rtp" },   // trailing comma ok
+    ]
+    assert_eq(len(fronts), 2)
+    var i = 0
+    for i < len(fronts) {
+        let f = fronts[i]
+        assert(udp_local_port(game_udp_fd(f.u)) > 0)
+        game_udp_close(f.u)
+        i++
+    }
+}
+
 func TestUdpSenderAddrAndReply() {
     let srv = game_udp_bind(0)
     let cli = game_udp_bind(0)

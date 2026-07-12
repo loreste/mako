@@ -803,6 +803,23 @@ fn main() {
 }
 ```
 
+**Running several frontends.** To hold more than one listener, wrap the handle in
+a struct — a struct field stores a `GameUDP`, and a struct array holds many. This
+is also where per-frontend state (name, upstream, a transaction table) naturally
+lives:
+
+```mko
+struct Front { u: GameUDP, name: string, upstream: string }
+
+fn main() {
+    let fronts = [
+        Front { u: game_udp_bind(5060), name: "sip", upstream: "10.0.0.2" },
+        Front { u: game_udp_bind(5061), name: "sip-tls", upstream: "10.0.0.3" },
+    ]
+    // poll each front's fd through an event loop and route per upstream
+}
+```
+
 ---
 
 ## HTTP Engine (Declarative Routing)
