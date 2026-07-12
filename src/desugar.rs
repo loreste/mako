@@ -90,6 +90,7 @@ fn expand_json_derive(s: &StructDef) -> Vec<Item> {
             stmts: vec![Stmt::Return(Some(json_expr))],
         },
         exported: s.exported,
+    is_const: false,
     }));
 
     for (fname_field, ty) in &s.fields {
@@ -114,6 +115,7 @@ fn expand_json_derive(s: &StructDef) -> Vec<Item> {
                 }))],
             },
             exported: s.exported,
+        is_const: false,
         }));
     }
 
@@ -157,6 +159,7 @@ fn expand_actor(actor: ActorDef) -> Vec<Item> {
                 stmts: vec![Stmt::Return(Some(Expr::Int(tag)))],
             },
             exported: false,
+        is_const: false,
         }));
     }
 
@@ -176,6 +179,7 @@ fn expand_actor(actor: ActorDef) -> Vec<Item> {
             }))],
         },
         exported: false,
+    is_const: false,
     }));
 
     // Session_send(mbox, tag) -> bool
@@ -202,6 +206,7 @@ fn expand_actor(actor: ActorDef) -> Vec<Item> {
             }))],
         },
         exported: false,
+    is_const: false,
     }));
 
     // Session_loop(mbox) — message dispatch
@@ -272,6 +277,7 @@ fn expand_actor(actor: ActorDef) -> Vec<Item> {
         ret: Some(TypeExpr::Named("int".into())),
         body: Block { stmts: loop_stmts },
         exported: false,
+    is_const: false,
     }));
 
     items

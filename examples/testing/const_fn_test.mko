@@ -1,0 +1,27 @@
+// const fn — compile-time evaluation for sizes and configs.
+
+const fn double(x: int) -> int {
+    return x * 2
+}
+
+const fn area(w: int, h: int) -> int {
+    let a = w * h
+    return a
+}
+
+const MAX_BUF = double(512)
+const TILE = area(16, 16)
+
+fn TestConstFnFold() {
+    // Folded at compile time into integer literals
+    assert_eq(MAX_BUF, 1024)
+    assert_eq(TILE, 256)
+    assert_eq(double(21), 42)
+    assert_eq(area(3, 7), 21)
+}
+
+fn TestConstFnAsArraySize() {
+    // Using const values in ordinary arithmetic still works
+    let n = MAX_BUF + TILE
+    assert_eq(n, 1280)
+}

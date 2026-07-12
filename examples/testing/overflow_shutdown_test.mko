@@ -1,0 +1,69 @@
+// Checked arithmetic, leak scopes, tracing, graceful shutdown surface.
+
+fn TestWouldOverflowAdd() {
+    assert_eq(would_overflow_add(1, 2), 0)
+    // INT64_MAX is not a literal we hardcode fully — use large near-max via shift
+    let big = 9223372036854775807  // INT64_MAX
+    assert_eq(would_overflow_add(big, 1), 1)
+    assert_eq(would_overflow_add(big, 0), 0)
+}
+
+fn TestWouldOverflowMul() {
+    assert_eq(would_overflow_mul(2, 3), 0)
+    let big = 9223372036854775807
+    assert_eq(would_overflow_mul(big, 2), 1)
+    assert_eq(would_overflow_mul(0, big), 0)
+}
+
+fn TestWouldOverflowSub() {
+    assert_eq(would_overflow_sub(5, 3), 0)
+    let min = -9223372036854775807 - 1  // INT64_MIN
+    assert_eq(would_overflow_sub(min, 1), 1)
+    assert_eq(would_overflow_sub(min, 0), 0)
+    let big = 9223372036854775807
+    assert_eq(would_overflow_sub(big, -1), 1)
+}
+
+fn TestCheckedAddOk() {
+    assert_eq(checked_add(40, 2), 42)
+    assert_eq(checked_sub(50, 8), 42)
+    assert_eq(checked_mul(6, 7), 42)
+}
+
+fn TestLeakScope() {
+    let _ = leak_scope_enter()
+    // Scope exit with no tracked allocs → 0 leak
+    let leaked = leak_scope_exit()
+    assert_eq(leaked, 0)
+    assert_eq(leak_assert_scope(), 1)
+}
+
+fn TestTraceId() {
+    let id = trace_id()
+    assert_eq(len(id), 32)
+    assert_eq(trace_set(id), 1)
+    assert_eq_str(trace_current(), id)
+    assert_eq(trace_begin("span"), 1)
+    let _ = trace_end()
+    assert_eq(trace_clear(), 1)
+    assert_eq(len(trace_current()), 0)
+}
+
+fn TestShutdownSurface() {
+    // Install handlers and poll flags without actually signalling.
+    assert_eq(install_graceful_shutdown(100), 1)
+    assert_eq(signal_on_term(), 1)
+    // Not yet requested
+    assert_eq(shutdown_requested(), 0)
+    assert_eq(should_stop_accepting(), 0)
+    // Begin drain programmatically
+    let _ = server_shutdown_begin(50)
+    assert_eq(shutdown_requested(), 1)
+    assert_eq(should_stop_accepting(), 1)
+    // Drain short timeout
+    let _ = server_drain(10)
+    // Register invalid listener is safe
+    assert_eq(register_listener(-1), 0)
+    let n = close_listeners()
+    assert(n >= 0)
+}

@@ -1,5 +1,57 @@
 # Changelog
 
+## 0.1.0 — 2026-07-12 (wiring audit)
+
+- **`would_overflow_sub`** — fully wired (types + codegen + docs + tests); was runtime-only.
+- **Parser recovery** — `recover_to_next_decl` no longer consumes the next item's start
+  keyword; unit test proves following good `fn`s stay in the AST.
+- **`BuildOpts`** — test path fills `overflow` / `bounds_always` (cargo test compiles).
+- Removed unused `fold_const_c` wrapper (fold path is `fold_const_c_env` only).
+
+## 0.1.0 — 2026-07-12 (module layout)
+
+### Compiler modules (implementation order)
+
+1. `src/overflow.rs` + `runtime/mako_overflow.h` + codegen trap path
+2. `src/recovery.rs` + multi-error emit via `diag`
+3. `src/shutdown.rs` + `runtime/mako_shutdown.h`
+4. `runtime/mako_rt.h` — `MAKO_BOUNDS_CHECK` / `MAKO_BOUNDS_ALWAYS`
+5. `src/errors.rs` — `Result[T, Enum]` helpers for codegen
+6. `src/leak.rs` + `runtime/mako_leak.h`
+
+## 0.1.0 — 2026-07-12 (complete: Result enum, const fn, crew drain)
+
+### Language / runtime (completion pass)
+
+- **`Result[int, Enum]`** — `Err(MyError::…)` packs enum tag/payload; `match Err(e)`
+  reconstructs the enum for nested match.
+- **`const fn`** — parse + fold at typecheck/codegen; `const X = f(…)` works.
+- **`crew.drain(ms)`** / `crew_drain` — cancel+join with timeout budget.
+- **`evloop_shutdown`** — free event loop.
+- **NLL** — fold more integer comparisons for dead-edge pruning.
+- Tests: `result_enum_test.mko`, `const_fn_test.mko`, `crew_drain_test.mko`.
+
+## 0.1.0 — 2026-07-12 (overflow, shutdown, recovery, leak, trace)
+
+### Compiler / runtime safety
+
+- **Checked arithmetic** — `runtime/mako_overflow.h`; `checked_add` / `checked_sub` /
+  `checked_mul`, `would_overflow_*`. CLI `--overflow trap|wrap|ignore` (build/run).
+  Trap mode emits `mako_add_i64` etc. for `+ - *` on ints.
+- **Parser multi-error recovery** — `parse_with_errors` + `recover_to_next_decl`;
+  `mako check` reports all top-level parse errors (`examples/bad/multi_error.mko`).
+- **Graceful shutdown** — `signal_on_term`, `register_listener` / `close_listeners`,
+  `server_shutdown_begin`, `server_drain`, `shutdown_requested`,
+  `install_graceful_shutdown` (`runtime/mako_shutdown.h`).
+- **Leak scopes** — `leak_scope_enter` / `leak_scope_exit` / `leak_check` on top of
+  alloc tracking (`runtime/mako_leak.h`).
+- **Tracing seed** — `trace_id` / `trace_set` / `trace_begin` / `trace_end` /
+  `trace_log` (`runtime/mako_trace.h`).
+- **`mako dev`** — watch source mtime and rebuild+rerun (hot-reload seed).
+- **`--bounds always`** on build/run keeps bounds checks under release.
+
+Tests: `examples/testing/overflow_shutdown_test.mko`.
+
 ## 0.1.0 — 2026-07-12 (proxy hot path)
 
 ### Networking / reverse-proxy runtime

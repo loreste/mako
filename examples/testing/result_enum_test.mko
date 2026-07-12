@@ -1,0 +1,60 @@
+// Result[int, Enum] — typed errors with match dispatch.
+
+enum IoError {
+    NotFound,
+    Permission(int),
+    Other(string),
+}
+
+fn open_path(code: int) -> Result[int, IoError] {
+    if code == 0 {
+        return Ok(42)
+    }
+    if code == 1 {
+        return Err(NotFound)
+    }
+    if code == 2 {
+        return Err(Permission(7))
+    }
+    return Err(Other("boom"))
+}
+
+fn TestResultEnumOk() {
+    match open_path(0) {
+        Ok(v) => assert_eq(v, 42),
+        Err(_) => assert(false),
+    }
+}
+
+fn TestResultEnumUnitErr() {
+    match open_path(1) {
+        Ok(_) => assert(false),
+        Err(e) => match e {
+            NotFound => assert(true),
+            Permission(_) => assert(false),
+            Other(_) => assert(false),
+        },
+    }
+}
+
+fn TestResultEnumPayloadErr() {
+    match open_path(2) {
+        Ok(_) => assert(false),
+        Err(e) => match e {
+            NotFound => assert(false),
+            Permission(code) => assert_eq(code, 7),
+            Other(_) => assert(false),
+        },
+    }
+}
+
+fn TestResultEnumStringPayload() {
+    match open_path(3) {
+        Ok(_) => assert(false),
+        Err(e) => match e {
+            Other(msg) => assert_eq_str(msg, "boom"),
+            NotFound => assert(false),
+            Permission(_) => assert(false),
+        },
+    }
+}

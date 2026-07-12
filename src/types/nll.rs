@@ -55,11 +55,31 @@ pub fn const_bool(expr: &Expr) -> Option<bool> {
             BinOp::Eq => match (left.as_ref(), right.as_ref()) {
                 (Expr::Bool(a), Expr::Bool(b)) => Some(a == b),
                 (Expr::Int(a), Expr::Int(b)) => Some(a == b),
+                // `0 == 1` style folds already covered; also fold `x == x` as true
+                // for identical idents (reduces false-positive move joins).
+                (Expr::Ident(a), Expr::Ident(b)) if a == b => Some(true),
                 _ => None,
             },
             BinOp::Ne => match (left.as_ref(), right.as_ref()) {
                 (Expr::Bool(a), Expr::Bool(b)) => Some(a != b),
                 (Expr::Int(a), Expr::Int(b)) => Some(a != b),
+                (Expr::Ident(a), Expr::Ident(b)) if a == b => Some(false),
+                _ => None,
+            },
+            BinOp::Lt => match (left.as_ref(), right.as_ref()) {
+                (Expr::Int(a), Expr::Int(b)) => Some(a < b),
+                _ => None,
+            },
+            BinOp::Le => match (left.as_ref(), right.as_ref()) {
+                (Expr::Int(a), Expr::Int(b)) => Some(a <= b),
+                _ => None,
+            },
+            BinOp::Gt => match (left.as_ref(), right.as_ref()) {
+                (Expr::Int(a), Expr::Int(b)) => Some(a > b),
+                _ => None,
+            },
+            BinOp::Ge => match (left.as_ref(), right.as_ref()) {
+                (Expr::Int(a), Expr::Int(b)) => Some(a >= b),
                 _ => None,
             },
             _ => None,

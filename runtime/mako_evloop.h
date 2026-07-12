@@ -299,6 +299,13 @@ static inline int64_t mako_evloop_close(MakoEvLoop *el) {
     return 0;
 }
 
+/* Graceful shutdown: close backend (kqueue/epoll/IOCP) and free the loop.
+ * Callers must close application sockets separately (or via close_listeners).
+ * Safe to call once; subsequent ops on el are invalid. */
+static inline int64_t mako_evloop_shutdown(MakoEvLoop *el) {
+    return mako_evloop_close(el);
+}
+
 /* ---- Non-blocking TCP helpers ---- */
 
 static inline int64_t mako_nb_listen(int64_t port) {

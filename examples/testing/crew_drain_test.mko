@@ -1,0 +1,19 @@
+// Crew drain with timeout + evloop shutdown surface.
+
+fn worker() -> int {
+    return 1
+}
+
+fn TestCrewDrain() {
+    crew c {
+        let _ = c.kick(worker())
+        let joined = c.drain(100)
+        assert(joined >= 0)
+    }
+}
+
+fn TestEvloopShutdown() {
+    let el = evloop_new()
+    // shutdown frees the loop (same as close for current seed)
+    assert_eq(evloop_shutdown(el), 0)
+}

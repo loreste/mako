@@ -1,0 +1,14 @@
+// Two top-level errors — recovery should report both under parse_with_errors.
+fn broken(
+// missing params / body
+
+fn ok_after() {
+    let x = 1
+}
+
+struct AlsoBroken {
+// missing fields and brace
+
+fn still_ok() {
+    return
+}

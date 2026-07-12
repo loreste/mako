@@ -446,6 +446,17 @@ TCP: `tcp_listen` / `tcp_accept` / `tcp_connect` / `tcp_write` / `tcp_close`,
 plus session controls (`tcp_set_timeout`, `tcp_keepalive`, `tcp_nodelay`,
 `tcp_listen_backlog` / `tcp_listen_reuseport`, buffer sizing, `tcp_accept4`).
 
+### Safety / ops (overflow, shutdown, leak, trace)
+
+| Area | Surface |
+|------|---------|
+| Overflow | `checked_add` / `sub` / `mul`, `would_overflow_*`, `--overflow trap` |
+| Shutdown | `signal_on_term`, `server_drain`, `register_listener`, `shutdown_requested` |
+| Leak | `leak_scope_enter` / `exit`, `leak_check` (+ existing `leak_mark`) |
+| Trace | `trace_id`, `trace_begin` / `end`, `trace_log` |
+
+See [BUILTINS.md](BUILTINS.md) §§71–74 and [CLI.md](CLI.md) (`mako dev`).
+
 ### Upstream pool & reverse proxy
 
 | Builtin | Role |

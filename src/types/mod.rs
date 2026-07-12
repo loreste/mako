@@ -253,6 +253,8 @@ pub struct TypeChecker {
     fn_mut_params: HashMap<String, Vec<bool>>,
     /// Comptime-folded `const` integers.
     const_ints: HashMap<String, i64>,
+    /// `const fn` definitions for compile-time evaluation.
+    const_fns: HashMap<String, FnDef>,
     /// Nesting depth of `for` / `while` (for `break` / `continue`).
     loop_depth: usize,
     /// Innermost-first stack of loop labels (`None` = unlabeled).
@@ -976,6 +978,14 @@ impl TypeChecker {
         fns.insert(
             "evloop_close".into(),
             Type::Fn(vec![Type::EvLoop], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "evloop_shutdown".into(),
+            Type::Fn(vec![Type::EvLoop], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "crew_drain".into(),
+            Type::Fn(vec![Type::Crew, Type::Int], Box::new(Type::Int)),
         );
         // Non-blocking I/O helpers
         fns.insert(
@@ -2859,6 +2869,97 @@ impl TypeChecker {
         fns.insert(
             "leak_report_json".into(),
             Type::Fn(vec![Type::Int], Box::new(Type::String)),
+        );
+        fns.insert(
+            "leak_scope_enter".into(),
+            Type::Fn(vec![], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "leak_scope_exit".into(),
+            Type::Fn(vec![], Box::new(Type::Int)),
+        );
+        fns.insert("leak_check".into(), Type::Fn(vec![], Box::new(Type::Int)));
+        fns.insert(
+            "leak_assert_scope".into(),
+            Type::Fn(vec![], Box::new(Type::Int)),
+        );
+        // Checked arithmetic (always trap on overflow).
+        fns.insert(
+            "checked_add".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "checked_sub".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "checked_mul".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "would_overflow_add".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "would_overflow_sub".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "would_overflow_mul".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        // Graceful shutdown.
+        fns.insert(
+            "signal_on_term".into(),
+            Type::Fn(vec![], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "register_listener".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "close_listeners".into(),
+            Type::Fn(vec![], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "server_shutdown_begin".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "server_drain".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "shutdown_requested".into(),
+            Type::Fn(vec![], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "should_stop_accepting".into(),
+            Type::Fn(vec![], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "install_graceful_shutdown".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        // Tracing.
+        fns.insert("trace_id".into(), Type::Fn(vec![], Box::new(Type::String)));
+        fns.insert(
+            "trace_current".into(),
+            Type::Fn(vec![], Box::new(Type::String)),
+        );
+        fns.insert(
+            "trace_set".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
+        fns.insert("trace_clear".into(), Type::Fn(vec![], Box::new(Type::Int)));
+        fns.insert(
+            "trace_begin".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
+        fns.insert("trace_end".into(), Type::Fn(vec![], Box::new(Type::Int)));
+        fns.insert(
+            "trace_log".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
         );
         fns.insert(
             "ecs_world_new".into(),
@@ -6028,6 +6129,7 @@ impl TypeChecker {
             share_scope_depth: HashMap::new(),
             fn_mut_params: HashMap::new(),
             const_ints: HashMap::new(),
+            const_fns: HashMap::new(),
             loop_depth: 0,
             loop_labels: Vec::new(),
             loop_continue_moved: Vec::new(),
@@ -6201,6 +6303,9 @@ impl TypeChecker {
                     );
                 }
                 Item::Fn(f) => {
+                    if f.is_const {
+                        self.const_fns.insert(f.name.clone(), f.clone());
+                    }
                     if !f.type_params.is_empty() {
                         // Generic template — monomorphized on call.
                         self.generic_fns.insert(f.name.clone(), f.clone());
@@ -6251,7 +6356,7 @@ impl TypeChecker {
                 }
                 Item::Import { .. } => {}
                 Item::Const(c) => {
-                    let v = fold_const_expr(&c.value)?;
+                    let v = fold_const_expr_with(&c.value, &self.const_ints, &self.const_fns)?;
                     self.const_ints.insert(c.name.clone(), v);
                     self.define(&c.name, Type::Int, false);
                 }
@@ -6263,6 +6368,20 @@ impl TypeChecker {
             if let Item::Fn(f) = item {
                 if f.type_params.is_empty() {
                     self.check_fn(f)?;
+                    if f.is_const {
+                        // Ensure body is const-evaluable with zero params or dummy zeros
+                        let mut env = self.const_ints.clone();
+                        for p in &f.params {
+                            env.insert(p.name.clone(), 0);
+                        }
+                        if let Err(e) = eval_const_fn_body(&f.body, &env, &self.const_fns) {
+                            return Err(TypeError::new(format!(
+                                "const fn `{}` body is not compile-time foldable: {}",
+                                f.name,
+                                e.message()
+                            )));
+                        }
+                    }
                 }
             }
         }
@@ -8751,6 +8870,18 @@ impl TypeChecker {
                         }
                         Ok(Type::Void)
                     }
+                    (Type::Crew, "drain") => {
+                        if args.len() != 1 {
+                            return Err(TypeError::new(
+                                "crew.drain(timeout_ms) takes one argument",
+                            ));
+                        }
+                        let t = self.check_expr(&args[0])?;
+                        if !matches!(t, Type::Int | Type::Int64 | Type::Int32) {
+                            return Err(TypeError::new("crew.drain expects int timeout_ms"));
+                        }
+                        Ok(Type::Int)
+                    }
                     (Type::Crew, "cancelled") => {
                         if !args.is_empty() {
                             return Err(TypeError::new("crew.cancelled takes no arguments"));
@@ -10183,11 +10314,24 @@ fn try_fold_const(expr: &Expr) -> Result<i64, ()> {
 }
 
 fn fold_const_expr(expr: &Expr) -> Result<i64, TypeError> {
+    fold_const_expr_with(expr, &HashMap::new(), &HashMap::new())
+}
+
+/// Fold with const bindings and const-fn table (for `const fn` evaluation).
+fn fold_const_expr_with(
+    expr: &Expr,
+    consts: &HashMap<String, i64>,
+    const_fns: &HashMap<String, FnDef>,
+) -> Result<i64, TypeError> {
     match expr {
         Expr::Int(n) => Ok(*n),
+        Expr::Ident(n) => consts
+            .get(n)
+            .copied()
+            .ok_or_else(|| TypeError::new(format!("`{n}` is not a const integer"))),
         Expr::Binary { op, left, right } => {
-            let l = fold_const_expr(left)?;
-            let r = fold_const_expr(right)?;
+            let l = fold_const_expr_with(left, consts, const_fns)?;
+            let r = fold_const_expr_with(right, consts, const_fns)?;
             match op {
                 BinOp::Add => Ok(l.wrapping_add(r)),
                 BinOp::Sub => Ok(l.wrapping_sub(r)),
@@ -10218,17 +10362,70 @@ fn fold_const_expr(expr: &Expr) -> Result<i64, TypeError> {
             }
         }
         Expr::Unary { op, expr } => {
-            let v = fold_const_expr(expr)?;
+            let v = fold_const_expr_with(expr, consts, const_fns)?;
             match op {
-                UnaryOp::Neg => Ok(-v),
+                UnaryOp::Neg => Ok(v.wrapping_neg()),
                 UnaryOp::BitNot => Ok(!v),
                 UnaryOp::Not => Err(TypeError::new("const does not support not")),
             }
+        }
+        Expr::Call { callee, args } => {
+            let Expr::Ident(fname) = callee.as_ref() else {
+                return Err(TypeError::new("const call must name a const fn"));
+            };
+            let Some(f) = const_fns.get(fname) else {
+                return Err(TypeError::new(format!(
+                    "`{fname}` is not a const fn (mark with `const fn`)"
+                )));
+            };
+            if f.params.len() != args.len() {
+                return Err(TypeError::new(format!(
+                    "const fn `{fname}` expects {} args",
+                    f.params.len()
+                )));
+            }
+            let mut locals = consts.clone();
+            for (p, a) in f.params.iter().zip(args.iter()) {
+                let v = fold_const_expr_with(a, consts, const_fns)?;
+                locals.insert(p.name.clone(), v);
+            }
+            // Body must be a single return of a foldable expr (or block ending in return).
+            eval_const_fn_body(&f.body, &locals, const_fns)
         }
         _ => Err(TypeError::new(
             "const initializer must be a comptime-foldable integer expression",
         )),
     }
+}
+
+fn eval_const_fn_body(
+    body: &Block,
+    locals: &HashMap<String, i64>,
+    const_fns: &HashMap<String, FnDef>,
+) -> Result<i64, TypeError> {
+    // Support: `{ return expr }` or `{ expr }` trailing, and nested const lets.
+    let mut env = locals.clone();
+    for (i, stmt) in body.stmts.iter().enumerate() {
+        match stmt {
+            Stmt::Return(Some(e)) => return fold_const_expr_with(e, &env, const_fns),
+            Stmt::Return(None) => {
+                return Err(TypeError::new("const fn cannot return void"));
+            }
+            Stmt::Let { name, init, .. } => {
+                let v = fold_const_expr_with(init, &env, const_fns)?;
+                env.insert(name.clone(), v);
+            }
+            Stmt::Expr(e) if i + 1 == body.stmts.len() => {
+                return fold_const_expr_with(e, &env, const_fns);
+            }
+            _ => {
+                return Err(TypeError::new(
+                    "const fn body may only use let/return of const expressions",
+                ));
+            }
+        }
+    }
+    Err(TypeError::new("const fn body has no return value"))
 }
 
 /// Substitute concrete types for type parameters in a type expression.
@@ -10306,6 +10503,7 @@ pub fn specialize_fn(template: &FnDef, mono_name: &str, subst: &HashMap<String, 
             .map(|t| subst_type_expr(t, subst)),
         body: subst_block(&template.body, subst),
         exported: template.exported,
+    is_const: false,
     }
 }
 
