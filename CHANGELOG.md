@@ -49,6 +49,9 @@
   `signal_ignore("PIPE")` for HUP/TERM/INT/USR1/USR2/QUIT/PIPE/CHLD. Distinct
   per-signal flags (reload vs shutdown), and handlers interrupt blocking calls so
   an accept loop can react.
+- **File-system watch** — `watch_new` / `watch_add(path)` / `watch_poll(timeout)`
+  / `watch_close` over kqueue (macOS/BSD) and inotify (Linux). `watch_poll`
+  returns the path that changed. Pairs with SIGHUP for config reloads.
 
 ### Networking
 

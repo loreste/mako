@@ -3694,6 +3694,27 @@ impl TypeChecker {
             "signal_ignore".into(),
             Type::Fn(vec![Type::String], Box::new(Type::Int)),
         );
+        // File-system watch (kqueue / inotify): watch paths, poll for changes.
+        fns.insert(
+            "watch_available".into(),
+            Type::Fn(vec![], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "watch_new".into(),
+            Type::Fn(vec![], Box::new(Type::Named("Watcher".into()))),
+        );
+        fns.insert(
+            "watch_add".into(),
+            Type::Fn(vec![Type::Named("Watcher".into()), Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "watch_poll".into(),
+            Type::Fn(vec![Type::Named("Watcher".into()), Type::Int], Box::new(Type::String)),
+        );
+        fns.insert(
+            "watch_close".into(),
+            Type::Fn(vec![Type::Named("Watcher".into())], Box::new(Type::Int)),
+        );
         fns.insert(
             "atomic_new".into(),
             Type::Fn(vec![Type::Int], Box::new(Type::Named("AtomicInt".into()))),

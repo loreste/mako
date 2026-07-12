@@ -1,0 +1,23 @@
+// File-system watch (kqueue / inotify). Live change detection needs an external
+// writer, so this covers the wiring: availability, adding a real vs missing path,
+// and that a poll with a short timeout returns "" when nothing has changed.
+
+func TestWatchAvailable() {
+    let ok = watch_available()
+    assert(ok == 0 or ok == 1)
+}
+
+func TestWatchAddAndPoll() {
+    if watch_available() == 0 {
+        return // no backend on this platform
+    }
+    let w = watch_new()
+    // The scratch dir the test runs from always exists.
+    assert_eq(watch_add(w, "."), 0)
+    // A missing path is rejected.
+    assert_eq(watch_add(w, "/no/such/path/xyz"), -1)
+    // Nothing changed → a short poll returns "".
+    let changed = watch_poll(w, 10)
+    assert_eq(len(changed), 0)
+    let _ = watch_close(w)
+}

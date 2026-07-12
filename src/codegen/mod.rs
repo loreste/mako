@@ -909,7 +909,7 @@ impl Codegen {
                 "Buf" => "MakoBuf*".into(),
                 "GameUDP" => "MakoGameUDP*".into(),
                 "Http2Conn" => "MakoHttp2Conn*".into(),
-                "TlsServer" | "TlsConn" => "void*".into(),
+                "TlsServer" | "TlsConn" | "Watcher" => "void*".into(),
                 "CHash" => "MakoCHash*".into(),
                 "RateLimiter" => "MakoRateLimiter*".into(),
                 "CircuitBreaker" => "MakoCircuitBreaker*".into(),
@@ -7394,6 +7394,33 @@ impl Codegen {
                         "signal_ignore" => {
                             let (_, n) = self.emit_expr(&args[0]);
                             return ("int64_t".into(), format!("mako_signal_ignore({n})"));
+                        }
+                        "watch_available" => {
+                            return ("int64_t".into(), "mako_watch_available()".into());
+                        }
+                        "watch_new" => {
+                            let tmp = self.fresh("wch");
+                            self.line(&format!("void *{tmp} = mako_watch_new();"));
+                            return ("void*".into(), tmp);
+                        }
+                        "watch_add" => {
+                            let (_, w) = self.emit_expr(&args[0]);
+                            let (_, p) = self.emit_expr(&args[1]);
+                            let tmp = self.fresh("wad");
+                            self.line(&format!("int64_t {tmp} = mako_watch_add({w}, {p});"));
+                            return ("int64_t".into(), tmp);
+                        }
+                        "watch_poll" => {
+                            let (_, w) = self.emit_expr(&args[0]);
+                            let (_, t) = self.emit_expr(&args[1]);
+                            let tmp = self.fresh("wpl");
+                            self.line(&format!("MakoString {tmp} = mako_watch_poll({w}, {t});"));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "watch_close" => {
+                            let (_, w) = self.emit_expr(&args[0]);
+                            self.line(&format!("mako_watch_close({w});"));
+                            return ("int64_t".into(), "0".into());
                         }
                         "atomic_new" => {
                             let (_, v) = self.emit_expr(&args[0]);

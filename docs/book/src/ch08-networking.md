@@ -350,6 +350,23 @@ fn main() {
 
 Names: `HUP`, `TERM`, `INT`, `QUIT`, `USR1`, `USR2`, `PIPE`, `CHLD`.
 
+To reload automatically when a config file changes (rather than waiting for a
+`HUP`), watch it. `watch_poll` blocks up to a timeout and returns the path that
+changed, over kqueue (macOS/BSD) or inotify (Linux):
+
+```mko
+fn main() {
+    let w = watch_new()
+    let _ = watch_add(w, "servers.conf")
+    while true {
+        let changed = watch_poll(w, 1000)   // wait up to 1s
+        if len(changed) > 0 {
+            reload_config()
+        }
+    }
+}
+```
+
 ---
 
 ## TLS / HTTPS
