@@ -633,7 +633,8 @@ static inline int64_t mako_to_uint64_from_signed(int64_t v) {
     return v;
 }
 
-/* ---- Result[int, E] (common backend shape) ----
+/* ---- Result[T, E] (common backend shape) ----
+ * Ok: int family in `value`; string Ok in `ok_s` (value unused).
  * E may be string (err_kind=0) or a user enum (err_kind=1):
  *   err_kind 0: err string is the error payload
  *   err_kind 1: err_tag / err_i0 / err_i1 / err_s0 reconstruct the enum
@@ -641,6 +642,7 @@ static inline int64_t mako_to_uint64_from_signed(int64_t v) {
 typedef struct {
     bool ok;
     int64_t value;
+    MakoString ok_s;  /* Ok string payload for Result[string, E] */
     MakoString err;   /* string Err payload (err_kind==0) */
     int err_kind;     /* 0=string, 1=enum */
     int err_tag;      /* enum .tag when err_kind==1 */
@@ -654,6 +656,14 @@ static inline MakoResultInt mako_ok_int(int64_t v) {
     memset(&r, 0, sizeof(r));
     r.ok = true;
     r.value = v;
+    return r;
+}
+
+static inline MakoResultInt mako_ok_str(MakoString s) {
+    MakoResultInt r;
+    memset(&r, 0, sizeof(r));
+    r.ok = true;
+    r.ok_s = s;
     return r;
 }
 
@@ -2165,6 +2175,67 @@ static inline MakoStrArray mako_par_map_str(MakoStrArray in, MakoMapFnStr fn) {
     free(threads);
     free(chunks);
     return out;
+}
+
+/* Parallel map over POD struct / byte arrays (element size esz).
+ * fn writes one output element from one input element (no alias). */
+typedef void (*MakoMapFnBytes)(void *dst, const void *src);
+
+typedef struct {
+    const char *in;
+    char *out;
+    size_t esz;
+    MakoMapFnBytes fn;
+    size_t start;
+    size_t end;
+} MakoParChunkBytes;
+
+static void *mako_par_worker_bytes(void *arg) {
+    MakoParChunkBytes *c = (MakoParChunkBytes *)arg;
+    for (size_t i = c->start; i < c->end; i++) {
+        c->fn(c->out + i * c->esz, c->in + i * c->esz);
+    }
+    return NULL;
+}
+
+static inline void mako_par_map_bytes(
+    const void *in, void *out, size_t n, size_t esz, MakoMapFnBytes fn
+) {
+    if (!in || !out || !fn || esz == 0 || n == 0) return;
+    size_t nthreads = mako_par_nthreads(n);
+    if (nthreads == 1) {
+        for (size_t i = 0; i < n; i++) {
+            fn((char *)out + i * esz, (const char *)in + i * esz);
+        }
+        return;
+    }
+    pthread_t *threads = (pthread_t *)malloc(nthreads * sizeof(pthread_t));
+    MakoParChunkBytes *chunks =
+        (MakoParChunkBytes *)malloc(nthreads * sizeof(MakoParChunkBytes));
+    size_t chunk = (n + nthreads - 1) / nthreads;
+    for (size_t t = 0; t < nthreads; t++) {
+        size_t start = t * chunk;
+        size_t end = start + chunk;
+        if (end > n) end = n;
+        chunks[t] = (MakoParChunkBytes){
+            (const char *)in, (char *)out, esz, fn, start, end};
+        pthread_create(&threads[t], NULL, mako_par_worker_bytes, &chunks[t]);
+    }
+    for (size_t t = 0; t < nthreads; t++) pthread_join(threads[t], NULL);
+    free(threads);
+    free(chunks);
+}
+
+/* float64 bits ↔ int64 for int-ring channels */
+static inline int64_t mako_f64_to_bits(double d) {
+    union { double d; int64_t i; } u;
+    u.d = d;
+    return u.i;
+}
+static inline double mako_bits_to_f64(int64_t i) {
+    union { double d; int64_t i; } u;
+    u.i = i;
+    return u.d;
 }
 
 /* ---- Arena (bump region) — free all at once, no GC ----

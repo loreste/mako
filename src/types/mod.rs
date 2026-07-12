@@ -7876,6 +7876,12 @@ impl TypeChecker {
                 if arms.is_empty() || arms.len() > 16 {
                     return Err(TypeError::new("select needs 1..16 channel arms"));
                 }
+                // NLL: snapshot; check each arm independently; join moves from
+                // reachable (non-diverging) arms — same model as match.
+                let before_moved = self.moved_holds.clone();
+                let before_fields = self.hold_moved_fields.clone();
+                let mut joined_moved = before_moved.clone();
+                let mut joined_fields = before_fields.clone();
                 for (ch, body) in arms {
                     match self.lookup(ch) {
                         Some((Type::Chan(_), _)) => {}
@@ -7891,11 +7897,45 @@ impl TypeChecker {
                             )));
                         }
                     }
+                    self.moved_holds = before_moved.clone();
+                    self.hold_moved_fields = before_fields.clone();
+                    let diverges = block_always_diverges(body);
                     self.check_block(body)?;
+                    if !diverges {
+                        for (name, moved) in &self.moved_holds {
+                            if *moved {
+                                joined_moved.insert(name.clone(), true);
+                            }
+                        }
+                        for (name, fields) in &self.hold_moved_fields {
+                            joined_fields
+                                .entry(name.clone())
+                                .or_default()
+                                .extend(fields.iter().cloned());
+                        }
+                    }
                 }
                 if let Some(def) = default_arm {
+                    self.moved_holds = before_moved.clone();
+                    self.hold_moved_fields = before_fields.clone();
+                    let diverges = block_always_diverges(def);
                     self.check_block(def)?;
+                    if !diverges {
+                        for (name, moved) in &self.moved_holds {
+                            if *moved {
+                                joined_moved.insert(name.clone(), true);
+                            }
+                        }
+                        for (name, fields) in &self.hold_moved_fields {
+                            joined_fields
+                                .entry(name.clone())
+                                .or_default()
+                                .extend(fields.iter().cloned());
+                        }
+                    }
                 }
+                self.moved_holds = joined_moved;
+                self.hold_moved_fields = joined_fields;
                 Ok(())
             }
         }
@@ -8177,13 +8217,15 @@ impl TypeChecker {
                 }
                 let et = self.resolve_type(elem)?;
                 match &et {
-                    // int family + bool → int ring; string → str ring; named structs → ptr ring
+                    // int family + bool → int ring; float → int ring bitcast;
+                    // string → str ring; named structs → ptr ring
                     Type::Int
                     | Type::Int64
                     | Type::Int32
                     | Type::Int8
                     | Type::Byte
                     | Type::Bool
+                    | Type::Float
                     | Type::String => Ok(Type::Chan(Box::new(et))),
                     Type::Named(n)
                         if n != "ShareInt"
@@ -8195,7 +8237,7 @@ impl TypeChecker {
                     }
                     Type::Struct { .. } => Ok(Type::Chan(Box::new(et))),
                     other => Err(TypeError::new(format!(
-                        "chan_open supports int family, bool, string, and named structs, got {}",
+                        "chan_open supports int family, bool, float, string, and named structs, got {}",
                         other.display()
                     ))
                     .hint("chan_new(n) remains the int channel API (backward compatible)")),
@@ -9641,8 +9683,8 @@ impl TypeChecker {
                         )))
                     }
                 };
-                // Codegen: int family, float, string parallel maps (speed path).
-                if !matches!(
+                // Codegen: int family, float, string, named struct parallel maps.
+                let elem_ok = matches!(
                     elem,
                     Type::Int
                         | Type::Int64
@@ -9652,12 +9694,13 @@ impl TypeChecker {
                         | Type::Bool
                         | Type::Float
                         | Type::String
-                ) {
+                ) || matches!(&elem, Type::Named(n) if self.structs_named(n))
+                    || matches!(&elem, Type::Struct { .. });
+                if !elem_ok {
                     return Err(TypeError::new(format!(
-                        "fan supports []int, []float, and []string today, got []{}",
+                        "fan supports []int, []float, []string, and []Struct, got []{}",
                         elem.display()
-                    ))
-                    .hint("struct fan is not yet implemented — map in a loop or use fan on fields"));
+                    )));
                 }
                 // Type mapper with param type = element type (not always int).
                 let ret = match mapper.as_ref() {

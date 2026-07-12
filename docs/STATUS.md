@@ -172,13 +172,17 @@ Last inventory: 2026-07-11 (**unique Mako surface** · pack/pull · pain map · 
 | `chan_open[Struct]` via MakoChanPtr heap-box | Done |
 | `error_tag(tag, msg)` enum-like string errors | Done |
 
+**Closed (this queue):** job join string/Result · `Result[string,E]` Ok · float chan ·
+`fan` on `[]Struct` · select NLL join · TCP pool mutex · log+trace id · recovery hints ·
+bench-gate + TSan CI jobs.
+
 **Pain residuals (language) still open:** see [PAIN_POINTS.md](PAIN_POINTS.md) §4.
 
-1. Fuller data-race model (atomics / share-across-crew) beyond kick Send seed  
-2. Richer error *enums* (codegen still `MakoResultInt` fast path)  
-3. Stronger NLL / ownership edges  
-4. `mako lint --identity`  
-5. `fan` / channels for structs & generic element types (not only int map + int/string/bool chan)  
+1. Fuller data-race model (atomics / share-across-crew) beyond kick Send + TSan smoke  
+2. Richer error *enums* / more Ok payload shapes (float/struct Result)  
+3. Stronger NLL / ownership edges beyond select join  
+4. Channel `select` for non-int rings  
+5. Generic fan/channel element types beyond current families  
 
 **Stdlib / product residuals:**
 
@@ -186,8 +190,7 @@ Last inventory: 2026-07-11 (**unique Mako surface** · pack/pull · pain map · 
 7. Huffman JPEG bitstream readable by arbitrary viewers  
 8. Reflect field *values* from live Mako structs  
 9. Full SMTP AUTH over a real TLS session  
-10. Symbol-level parity inside Done packages  
-11. Continuous bench-vs-Rust CI regression gate
+10. Symbol-level parity inside Done packages
 
 ---
 

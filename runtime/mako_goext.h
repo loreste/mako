@@ -2810,7 +2810,17 @@ static inline void mako_slog_debug(MakoString msg) {
 }
 static inline void mako_slog_with(MakoString level, MakoString msg, MakoString k1, MakoString v1) {
     if ((int)mako_slog_level_num(level) < mako_slog_min_level) return;
-    fprintf(stderr, "level=%.*s msg=", (int)level.len, level.data ? level.data : "");
+    fprintf(stderr, "level=%.*s ", (int)level.len, level.data ? level.data : "");
+#if defined(MAKO_TRACE_H)
+    {
+        MakoString tid = mako_trace_current();
+        if (tid.data && tid.len > 0) {
+            fprintf(stderr, "trace=%.*s ", (int)tid.len, tid.data);
+        }
+        free(tid.data);
+    }
+#endif
+    fprintf(stderr, "msg=");
     fwrite(msg.data, 1, msg.len, stderr);
     fprintf(stderr, " %.*s=", (int)k1.len, k1.data ? k1.data : "");
     fwrite(v1.data, 1, v1.len, stderr);

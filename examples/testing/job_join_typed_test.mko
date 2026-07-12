@@ -1,0 +1,50 @@
+// Job.join for string and Result[int, string] return types.
+
+fn make_name() -> string {
+    return "mako"
+}
+
+fn maybe_open(code: int) -> Result[int, string] {
+    if code == 0 {
+        return Ok(42)
+    }
+    return Err("nope")
+}
+
+fn str_ok() -> Result[string, string] {
+    return Ok("hello")
+}
+
+fn TestJoinString() {
+    crew t {
+        let j = t.kick(make_name())
+        assert_eq_str(j.join(), "mako")
+    }
+}
+
+fn TestJoinResultOk() {
+    crew t {
+        let j = t.kick(maybe_open(0))
+        match j.join() {
+            Ok(v) => assert_eq(v, 42),
+            Err(_) => assert(false),
+        }
+    }
+}
+
+fn TestJoinResultErr() {
+    crew t {
+        let j = t.kick(maybe_open(1))
+        match j.join() {
+            Ok(_) => assert(false),
+            Err(msg) => assert_eq_str(msg, "nope"),
+        }
+    }
+}
+
+fn TestResultStringOk() {
+    match str_ok() {
+        Ok(s) => assert_eq_str(s, "hello"),
+        Err(_) => assert(false),
+    }
+}

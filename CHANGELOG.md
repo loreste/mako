@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.0 — 2026-07-12 (concurrency / result / CI)
+
+- `job.join` for string and `Result` returns (heap-box across kick)
+- `Result[string, E]` Ok via `ok_s` / `mako_ok_str`
+- `chan_open[float]`, `fan` on `[]Struct`, TCP pool mutex
+- select arm NLL join; recovery multi-error hints
+- `log_*` / slog emit active `trace=` id
+- CI: `bench-gate` and TSan concurrency smoke jobs
+
 ## 0.1.0 — 2026-07-12 (wiring audit)
 
 - **`would_overflow_sub`** — fully wired (types + codegen + docs + tests); was runtime-only.

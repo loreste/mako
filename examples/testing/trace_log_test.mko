@@ -1,0 +1,9 @@
+// log_info includes active trace id (surface smoke).
+
+fn TestTraceLogSurface() {
+    let id = trace_id()
+    assert_eq(len(id), 32)
+    assert_eq(trace_set(id), 1)
+    log_info("traced")
+    assert_eq(trace_clear(), 1)
+}

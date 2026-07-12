@@ -34,15 +34,40 @@ pub fn parse_errors_to_diagnostics(
     source: &str,
     errors: &[ParseError],
 ) -> Vec<Diagnostic> {
+    let n = errors.len();
     errors
         .iter()
-        .map(|e| {
+        .enumerate()
+        .map(|(i, e)| {
             let ParseError::Message { message, line, col } = e;
-            Diagnostic::error(file, source, Span::new(*line, *col), message).with_hint(
-                "check brackets, commas, and keywords around this spot; recovery continues at next fn/struct/enum",
-            )
+            let mut hint = recovery_hint(message);
+            if n > 1 && i + 1 < n {
+                hint = format!(
+                    "{hint}; recovery continues ({} more error(s))",
+                    n - i - 1
+                );
+            } else if n > 1 && i + 1 == n {
+                hint = format!("{hint}; last recovered error in this file");
+            }
+            Diagnostic::error(file, source, Span::new(*line, *col), message).with_hint(hint)
         })
         .collect()
+}
+
+fn recovery_hint(message: &str) -> String {
+    let m = message.to_ascii_lowercase();
+    if m.contains("found fn") || m.contains("found struct") || m.contains("found enum") {
+        "incomplete previous declaration — this token starts the next item; recovery kept it"
+            .into()
+    } else if m.contains("expected") && m.contains("found eof") {
+        "file ended mid-declaration — close braces/parens or finish the signature".into()
+    } else if m.contains("expected") {
+        "check brackets, commas, and keywords around this spot; recovery continues at next fn/struct/enum"
+            .into()
+    } else {
+        "check brackets, commas, and keywords around this spot; recovery continues at next fn/struct/enum"
+            .into()
+    }
 }
 
 /// Emit all parse diagnostics to stderr; returns true if any error was emitted.

@@ -73,6 +73,16 @@ pub struct Codegen {
     result_err_enums: HashMap<String, String>,
     /// Function name → Result Err enum C type.
     fn_result_err_enum: HashMap<String, String>,
+    /// Function name → Ok payload kind: "int" | "string".
+    fn_result_ok_kind: HashMap<String, String>,
+    /// Local Result binding → Ok payload kind.
+    result_ok_kinds: HashMap<String, String>,
+    /// Job local / temp name → C return type of the kicked function.
+    job_rets: HashMap<String, String>,
+    /// Job local / temp → Result Ok kind when ret is MakoResultInt.
+    job_ok_kinds: HashMap<String, String>,
+    /// Channel local / temp name that carries float via int-ring bitcast.
+    chan_float: std::collections::HashSet<String>,
     /// Names of `const fn`s (bodies foldable at compile time when args are const).
     const_fns: HashMap<String, FnDef>,
 }
@@ -110,6 +120,11 @@ impl Codegen {
             current_result_err_enum: None,
             result_err_enums: HashMap::new(),
             fn_result_err_enum: HashMap::new(),
+            fn_result_ok_kind: HashMap::new(),
+            result_ok_kinds: HashMap::new(),
+            job_rets: HashMap::new(),
+            job_ok_kinds: HashMap::new(),
+            chan_float: std::collections::HashSet::new(),
             const_fns: HashMap::new(),
         }
     }
@@ -117,6 +132,19 @@ impl Codegen {
     /// Extract `MakoEnum_X` if `ty` is `Result[_, X]` and X is a known enum.
     fn result_err_enum_c(&self, ty: &TypeExpr) -> Option<String> {
         crate::errors::result_err_enum_c(ty, |en| self.enums.contains_key(en))
+    }
+
+    /// Ok payload kind for Result[T, _]: "string" or "int".
+    fn result_ok_kind(ty: &TypeExpr) -> &'static str {
+        match ty {
+            TypeExpr::Generic(n, args) if n == "Result" && !args.is_empty() => {
+                match &args[0] {
+                    TypeExpr::Named(t) if t == "string" => "string",
+                    _ => "int",
+                }
+            }
+            _ => "int",
+        }
     }
 
     fn push_share_scope(&mut self) {
@@ -283,10 +311,10 @@ impl Codegen {
         self.out.push_str("#include \"mako_net.h\"\n");
         self.out.push_str("#include \"mako_proxy.h\"\n");
         self.out.push_str("#include \"mako_http.h\"\n");
+        self.out.push_str("#include \"mako_trace.h\"\n"); /* before std so log_* can emit trace= */
         self.out.push_str("#include \"mako_std.h\"\n");
         self.out.push_str("#include \"mako_leak.h\"\n");
         self.out.push_str("#include \"mako_shutdown.h\"\n");
-        self.out.push_str("#include \"mako_trace.h\"\n");
         self.out.push_str("#include \"mako_tls.h\"\n");
         self.out.push_str("#include \"mako_nghttp2.h\"\n");
         self.out.push_str("#include \"mako_quiche.h\"\n");
@@ -350,6 +378,15 @@ impl Codegen {
                     }
                     let ret = self.c_ret_type_resolved(f);
                     self.fn_rets.insert(f.name.clone(), ret);
+                    if let Some(rt) = f.ret.as_ref() {
+                        if let Some(ec) = self.result_err_enum_c(rt) {
+                            self.fn_result_err_enum.insert(f.name.clone(), ec);
+                        }
+                        if matches!(rt, TypeExpr::Generic(n, _) if n == "Result") {
+                            self.fn_result_ok_kind
+                                .insert(f.name.clone(), Self::result_ok_kind(rt).into());
+                        }
+                    }
                     let param_tys: Vec<String> =
                         f.params.iter().map(|p| self.type_expr_c(&p.ty)).collect();
                     self.fn_params.insert(f.name.clone(), param_tys);
@@ -1535,6 +1572,17 @@ impl Codegen {
                         self.chan_ptr_elems.insert(name.clone(), st);
                     }
                 }
+                if self.chan_float.contains(&val) {
+                    self.chan_float.insert(name.clone());
+                }
+                if ty == "MakoTask*" {
+                    if let Some(rt) = self.job_rets.get(&val).cloned() {
+                        self.job_rets.insert(name.clone(), rt);
+                    }
+                    if let Some(ok) = self.job_ok_kinds.get(&val).cloned() {
+                        self.job_ok_kinds.insert(name.clone(), ok);
+                    }
+                }
                 self.locals.insert(name.clone(), ty.clone());
                 // Propagate Result Err enum type from call
                 if ty == "MakoResultInt" {
@@ -1542,6 +1590,9 @@ impl Codegen {
                         if let Expr::Ident(fname) = callee.as_ref() {
                             if let Some(ec) = self.fn_result_err_enum.get(fname).cloned() {
                                 self.result_err_enums.insert(name.clone(), ec);
+                            }
+                            if let Some(ok) = self.fn_result_ok_kind.get(fname).cloned() {
+                                self.result_ok_kinds.insert(name.clone(), ok);
                             }
                         }
                     }
@@ -2154,7 +2205,10 @@ impl Codegen {
                             return ("MakoString".into(), format!("mako_int_to_string({v})"));
                         }
                         "Ok" => {
-                            let (_, v) = self.emit_expr(&args[0]);
+                            let (vty, v) = self.emit_expr(&args[0]);
+                            if vty == "MakoString" {
+                                return ("MakoResultInt".into(), format!("mako_ok_str({v})"));
+                            }
                             return (
                                 "MakoResultInt".into(),
                                 format!("mako_ok_int((int64_t)({v}))"),
@@ -10872,6 +10926,11 @@ impl Codegen {
                         ));
                         ("MakoChanStr*".into(), tmp)
                     }
+                    TypeExpr::Named(n) if n == "float" || n == "float64" => {
+                        self.line(&format!("MakoChan *{tmp} = mako_chan_new({c});"));
+                        self.chan_float.insert(tmp.clone());
+                        ("MakoChan*".into(), tmp)
+                    }
                     TypeExpr::Named(n)
                         if n != "int"
                             && n != "int64"
@@ -11261,6 +11320,15 @@ impl Codegen {
                             self.line(&format!(
                                 "MakoTask *{task} = mako_spawn(&{crew}, {helper}, {arg_name});"
                             ));
+                            let ret = self
+                                .fn_rets
+                                .get(fname)
+                                .cloned()
+                                .unwrap_or_else(|| "int64_t".into());
+                            self.job_rets.insert(task.clone(), ret);
+                            if let Some(ok) = self.fn_result_ok_kind.get(fname).cloned() {
+                                self.job_ok_kinds.insert(task.clone(), ok);
+                            }
                             return ("MakoTask*".into(), task);
                         }
                     }
@@ -11272,11 +11340,12 @@ impl Codegen {
             }
             Expr::Join(inner) => {
                 let (_, t) = self.emit_expr(inner);
-                let tmp = self.fresh("jn");
-                self.line(&format!(
-                    "int64_t {tmp} = (int64_t)(intptr_t)mako_await({t});"
-                ));
-                ("int64_t".into(), tmp)
+                let ret_ty = match inner.as_ref() {
+                    Expr::Ident(n) => self.job_rets.get(n).cloned(),
+                    _ => self.job_rets.get(&t).cloned(),
+                }
+                .unwrap_or_else(|| "int64_t".into());
+                self.emit_job_join(&t, &ret_ty)
             }
             Expr::Method {
                 receiver,
@@ -11296,7 +11365,7 @@ impl Codegen {
                 let (rty, rv) = self.emit_expr(receiver);
                 match method.as_str() {
                     "send" => {
-                        let (_, v) = self.emit_expr(&args[0]);
+                        let (vty, v) = self.emit_expr(&args[0]);
                         let tmp = self.fresh("ok");
                         if rty == "MakoChanStr*" {
                             self.line(&format!(
@@ -11330,7 +11399,18 @@ impl Codegen {
                                 "bool {tmp} = mako_chan_ptr_send({rv}, {boxn}) != 0;"
                             ));
                         } else {
-                            self.line(&format!("bool {tmp} = mako_chan_send({rv}, {v}) != 0;"));
+                            let is_f64 = vty == "double"
+                                || matches!(receiver.as_ref(), Expr::Ident(n) if self.chan_float.contains(n))
+                                || self.chan_float.contains(&rv);
+                            if is_f64 {
+                                self.line(&format!(
+                                    "bool {tmp} = mako_chan_send({rv}, mako_f64_to_bits({v})) != 0;"
+                                ));
+                            } else {
+                                self.line(&format!(
+                                    "bool {tmp} = mako_chan_send({rv}, {v}) != 0;"
+                                ));
+                            }
                         }
                         ("bool".into(), tmp)
                     }
@@ -11368,8 +11448,17 @@ impl Codegen {
                             ));
                             (cname, tmp)
                         } else {
-                            self.line(&format!("int64_t {tmp} = mako_chan_recv({rv});"));
-                            ("int64_t".into(), tmp)
+                            let is_f64 = matches!(receiver.as_ref(), Expr::Ident(n) if self.chan_float.contains(n))
+                                || self.chan_float.contains(&rv);
+                            if is_f64 {
+                                let bits = self.fresh("bits");
+                                self.line(&format!("int64_t {bits} = mako_chan_recv({rv});"));
+                                self.line(&format!("double {tmp} = mako_bits_to_f64({bits});"));
+                                ("double".into(), tmp)
+                            } else {
+                                self.line(&format!("int64_t {tmp} = mako_chan_recv({rv});"));
+                                ("int64_t".into(), tmp)
+                            }
                         }
                     }
                     "close" => {
@@ -11399,11 +11488,12 @@ impl Codegen {
                         format!("(mako_nursery_cancelled(&{rv}) != 0)"),
                     ),
                     "join" => {
-                        let tmp = self.fresh("jn");
-                        self.line(&format!(
-                            "int64_t {tmp} = (int64_t)(intptr_t)mako_await({rv});"
-                        ));
-                        ("int64_t".into(), tmp)
+                        let ret_ty = match receiver.as_ref() {
+                            Expr::Ident(n) => self.job_rets.get(n).cloned(),
+                            _ => self.job_rets.get(&rv).cloned(),
+                        }
+                        .unwrap_or_else(|| "int64_t".into());
+                        self.emit_job_join(&rv, &ret_ty)
                     }
                     "join_timeout" => {
                         let (_, ms) = self.emit_expr(&args[0]);
@@ -11664,6 +11754,22 @@ impl Codegen {
                         ));
                         return ("MakoStrArray".into(), tmp);
                     }
+                    // Struct array: MakoArr_Name
+                    if let Some(sn) = cty.strip_prefix("MakoArr_") {
+                        let map_one = format!("{helper}_one");
+                        let helper_src = format!(
+                            "static void {map_one}(void *dst, const void *src) {{\n\
+                             \t{sn} {p} = *({sn} const *)src;\n\
+                             \t*({sn} *)dst = ({body_c});\n\
+                             }}\n"
+                        );
+                        self.insert_helper(&helper_src);
+                        self.line(&format!("{cty} {tmp} = mako_arr_{sn}_make({coll}.len, 0);"));
+                        self.line(&format!(
+                            "mako_par_map_bytes({coll}.data, {tmp}.data, (size_t){coll}.len, sizeof({sn}), {map_one});"
+                        ));
+                        return (cty, tmp);
+                    }
                     let helper_src =
                         format!("static int64_t {helper}(int64_t {p}) {{ return {body_c}; }}\n");
                     self.insert_helper(&helper_src);
@@ -11694,6 +11800,7 @@ impl Codegen {
                 else_block,
             } => self.emit_if_expr(cond, then_block, else_block),
             Expr::Field { base, field } => {
+                // (handled below — pure-c helper also supports fields)
                 let (bty, b) = self.emit_expr(base);
                 if let Some(info) = self.structs.get(&bty) {
                     let fty = info
@@ -11842,6 +11949,32 @@ impl Codegen {
             .or_else(|| self.current_result_err_enum.clone());
             if let Some(ec) = err_c {
                 self.result_err_enums.insert(scrut.clone(), ec);
+            }
+            let ok_c = match scrutinee {
+                Expr::Ident(n) => self.result_ok_kinds.get(n).cloned(),
+                Expr::Call { callee, .. } => {
+                    if let Expr::Ident(fname) = callee.as_ref() {
+                        self.fn_result_ok_kind.get(fname).cloned()
+                    } else {
+                        None
+                    }
+                }
+                Expr::Join(inner) => match inner.as_ref() {
+                    Expr::Ident(n) => self.job_ok_kinds.get(n).cloned(),
+                    _ => self.result_ok_kinds.get(&sval).cloned(),
+                },
+                Expr::Method {
+                    receiver,
+                    method,
+                    ..
+                } if method == "join" => match receiver.as_ref() {
+                    Expr::Ident(n) => self.job_ok_kinds.get(n).cloned(),
+                    _ => self.result_ok_kinds.get(&sval).cloned(),
+                },
+                _ => self.result_ok_kinds.get(&sval).cloned(),
+            };
+            if let Some(ok) = ok_c {
+                self.result_ok_kinds.insert(scrut.clone(), ok);
             }
         }
 
@@ -11997,8 +12130,24 @@ impl Codegen {
             Pattern::Variant { name, bindings } => {
                 if sty == "MakoResultInt" {
                     if name == "Ok" && bindings.len() == 1 {
-                        self.locals.insert(bindings[0].clone(), "int64_t".into());
-                        self.line(&format!("int64_t {} = {scrut}.value;", mangle(&bindings[0])));
+                        let ok_kind = self
+                            .result_ok_kinds
+                            .get(scrut)
+                            .cloned()
+                            .unwrap_or_else(|| "int".into());
+                        if ok_kind == "string" {
+                            self.locals.insert(bindings[0].clone(), "MakoString".into());
+                            self.line(&format!(
+                                "MakoString {} = {scrut}.ok_s;",
+                                mangle(&bindings[0])
+                            ));
+                        } else {
+                            self.locals.insert(bindings[0].clone(), "int64_t".into());
+                            self.line(&format!(
+                                "int64_t {} = {scrut}.value;",
+                                mangle(&bindings[0])
+                            ));
+                        }
                     } else if name == "Err" && bindings.len() == 1 {
                         let b = mangle(&bindings[0]);
                         if let Some(cty) = self.result_err_enums.get(scrut).cloned() {
@@ -12064,10 +12213,33 @@ impl Codegen {
 
     fn emit_spawn_helper_typed(&mut self, helper: &str, fname: &str, param_tys: &[String]) {
         if param_tys.is_empty() {
-            let helper_src = format!(
-                "static void *{helper}(void *arg) {{ (void)arg; return (void*)(intptr_t){}(); }}\n",
-                mangle(fname)
-            );
+            let ret_ty = self
+                .fn_rets
+                .get(fname)
+                .map(|s| s.as_str())
+                .unwrap_or("int64_t");
+            let call = format!("{}()", mangle(fname));
+            let body = if ret_ty == "MakoString" {
+                format!(
+                    "MakoString __r = {call};\n\
+                     MakoString *__box = (MakoString*)malloc(sizeof(MakoString));\n\
+                     *__box = __r;\nreturn (void*)__box;\n"
+                )
+            } else if ret_ty == "MakoResultInt" {
+                format!(
+                    "MakoResultInt __r = {call};\n\
+                     MakoResultInt *__box = (MakoResultInt*)malloc(sizeof(MakoResultInt));\n\
+                     *__box = __r;\nreturn (void*)__box;\n"
+                )
+            } else if ret_ty == "double" {
+                format!("return (void*)(intptr_t)mako_f64_to_bits({call});\n")
+            } else if ret_ty.contains('*') {
+                format!("return (void*){call};\n")
+            } else {
+                format!("return (void*)(intptr_t)(int64_t){call};\n")
+            };
+            let helper_src =
+                format!("static void *{helper}(void *arg) {{ (void)arg;\n{body}}}\n");
             self.insert_helper(&helper_src);
             return;
         }
@@ -12104,10 +12276,23 @@ impl Codegen {
         let call = format!("{}({})", mangle(fname), call_args.join(", "));
         let body = if ret_ty == "MakoString" {
             format!(
-                "{unpack}MakoString __r = {call};\n{cleanup}return (void*)(intptr_t)0; /* string job result seed */\n"
+                "{unpack}MakoString __r = {call};\n\
+                 MakoString *__box = (MakoString*)malloc(sizeof(MakoString));\n\
+                 *__box = __r;\n{cleanup}return (void*)__box;\n"
+            )
+        } else if ret_ty == "MakoResultInt" {
+            format!(
+                "{unpack}MakoResultInt __r = {call};\n\
+                 MakoResultInt *__box = (MakoResultInt*)malloc(sizeof(MakoResultInt));\n\
+                 *__box = __r;\n{cleanup}return (void*)__box;\n"
             )
         } else if ret_ty.contains('*') {
             format!("{unpack}void *__r = (void*){call};\n{cleanup}return __r;\n")
+        } else if ret_ty == "double" {
+            format!(
+                "{unpack}double __r = {call};\n\
+                 return (void*)(intptr_t)mako_f64_to_bits(__r);\n"
+            )
         } else {
             format!(
                 "{unpack}int64_t __r = (int64_t){call};\n{cleanup}return (void*)(intptr_t)__r;\n"
@@ -12115,6 +12300,43 @@ impl Codegen {
         };
         let helper_src = format!("static void *{helper}(void *arg) {{\n{body}}}\n");
         self.insert_helper(&helper_src);
+    }
+
+    /// Unbox `mako_await` result according to the kicked function's C return type.
+    fn emit_job_join(&mut self, task: &str, ret_ty: &str) -> (String, String) {
+        let tmp = self.fresh("jn");
+        if ret_ty == "MakoString" {
+            let p = self.fresh("jsp");
+            self.line(&format!("MakoString *{p} = (MakoString*)mako_await({task});"));
+            self.line(&format!("MakoString {tmp};"));
+            self.line(&format!(
+                "if ({p}) {{ {tmp} = *{p}; free({p}); }} else {{ {tmp} = mako_str_from_cstr(\"\"); }}"
+            ));
+            ("MakoString".into(), tmp)
+        } else if ret_ty == "MakoResultInt" {
+            let p = self.fresh("jrp");
+            self.line(&format!(
+                "MakoResultInt *{p} = (MakoResultInt*)mako_await({task});"
+            ));
+            self.line(&format!("MakoResultInt {tmp};"));
+            self.line(&format!(
+                "if ({p}) {{ {tmp} = *{p}; free({p}); }} else {{ memset(&{tmp}, 0, sizeof({tmp})); {tmp}.ok = false; }}"
+            ));
+            if let Some(ok) = self.job_ok_kinds.get(task).cloned() {
+                self.result_ok_kinds.insert(tmp.clone(), ok);
+            }
+            ("MakoResultInt".into(), tmp)
+        } else if ret_ty == "double" {
+            self.line(&format!(
+                "double {tmp} = mako_bits_to_f64((int64_t)(intptr_t)mako_await({task}));"
+            ));
+            ("double".into(), tmp)
+        } else {
+            self.line(&format!(
+                "int64_t {tmp} = (int64_t)(intptr_t)mako_await({task});"
+            ));
+            ("int64_t".into(), tmp)
+        }
     }
 
     fn expr_as_pure_c(&self, expr: &Expr, param: &str) -> String {
@@ -12184,6 +12406,39 @@ impl Codegen {
                     UnaryOp::Neg => format!("(-{e})"),
                     UnaryOp::Not => format!("(!{e})"),
                     UnaryOp::BitNot => format!("(~{e})"),
+                }
+            }
+            Expr::Field { base, field } => {
+                let b = self.expr_as_pure_c(base, param);
+                format!("{b}.{}", mangle(field))
+            }
+            Expr::StructLit { name, fields } => {
+                let mut parts = Vec::new();
+                for (fname, fexpr) in fields {
+                    parts.push(format!(
+                        ".{} = {}",
+                        mangle(fname),
+                        self.expr_as_pure_c(fexpr, param)
+                    ));
+                }
+                format!("({name}){{ {} }}", parts.join(", "))
+            }
+            Expr::StructLitPos { name, values } => {
+                // Positional: rely on declaration order field names from structs map.
+                if let Some(info) = self.structs.get(name) {
+                    let mut parts = Vec::new();
+                    for (i, v) in values.iter().enumerate() {
+                        if let Some((fname, _)) = info.fields.get(i) {
+                            parts.push(format!(
+                                ".{} = {}",
+                                mangle(fname),
+                                self.expr_as_pure_c(v, param)
+                            ));
+                        }
+                    }
+                    format!("({name}){{ {} }}", parts.join(", "))
+                } else {
+                    "0".into()
                 }
             }
             Expr::Call { callee, args } => {

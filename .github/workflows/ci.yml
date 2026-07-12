@@ -128,3 +128,35 @@ jobs:
           path: |
             /tmp/mako-cross/hello.exe
             /tmp/mako-musl/hello-static
+
+  bench-gate:
+    name: Bench gate vs Rust
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Install clang
+        run: sudo apt-get update && sudo apt-get install -y clang
+      - name: Build mako
+        run: cargo build --release
+      - name: Run bench-gate (≤2.0× Rust)
+        run: ./scripts/bench-gate.sh
+
+  tsan:
+    name: TSan concurrency smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Install clang
+        run: sudo apt-get update && sudo apt-get install -y clang
+      - name: Build mako
+        run: cargo build --release
+      - name: Race-test concurrent suite
+        run: |
+          ./target/release/mako test --race examples/testing/crew_fan_test.mko
+          ./target/release/mako test --race examples/testing/kick_send_test.mko
+          ./target/release/mako test --race examples/testing/chan_struct_test.mko
+          ./target/release/mako test --race examples/testing/crew_drain_test.mko

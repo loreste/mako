@@ -629,6 +629,7 @@ typedef struct {
 } MakoTcpPoolSlot;
 
 static MakoTcpPoolSlot mako_tcp_pools[MAKO_TCP_POOL_MAX];
+static pthread_mutex_t mako_tcp_pools_mu = PTHREAD_MUTEX_INITIALIZER;
 
 static inline int64_t mako_tcp_pool_open(
     MakoString host, int64_t port, int64_t max, int64_t timeout_ms
@@ -642,11 +643,15 @@ static inline int64_t mako_tcp_pool_open(
     if (max <= 0) max = 8;
     if (max > MAKO_TCP_POOL_IDLE) max = MAKO_TCP_POOL_IDLE;
     if (timeout_ms < 0) timeout_ms = 0;
+    pthread_mutex_lock(&mako_tcp_pools_mu);
     int slot = -1;
     for (int i = 0; i < MAKO_TCP_POOL_MAX; i++) {
         if (!mako_tcp_pools[i].live) { slot = i; break; }
     }
-    if (slot < 0) return -1;
+    if (slot < 0) {
+        pthread_mutex_unlock(&mako_tcp_pools_mu);
+        return -1;
+    }
     MakoTcpPoolSlot *p = &mako_tcp_pools[slot];
     memset(p, 0, sizeof(*p));
     memcpy(p->host, host.data, host.len);
@@ -655,6 +660,7 @@ static inline int64_t mako_tcp_pool_open(
     p->max = (int)max;
     p->timeout_ms = (int)timeout_ms;
     p->live = 1;
+    pthread_mutex_unlock(&mako_tcp_pools_mu);
     return (int64_t)slot;
 }
 
@@ -671,48 +677,73 @@ static inline int64_t mako_tcp_pool_connect_one(MakoTcpPoolSlot *p) {
 
 static inline int64_t mako_tcp_pool_acquire(int64_t pool) {
     if (pool < 0 || pool >= MAKO_TCP_POOL_MAX) return -1;
+    pthread_mutex_lock(&mako_tcp_pools_mu);
     MakoTcpPoolSlot *p = &mako_tcp_pools[pool];
-    if (!p->live) return -1;
+    if (!p->live) {
+        pthread_mutex_unlock(&mako_tcp_pools_mu);
+        return -1;
+    }
     /* Prefer idle reusable fds */
     while (p->idle_n > 0) {
         int fd = p->idle_fds[--p->idle_n];
         if (mako_tcp_fd_reusable(fd)) {
             if (p->timeout_ms > 0) mako_proxy_set_timeout(fd, p->timeout_ms);
+            pthread_mutex_unlock(&mako_tcp_pools_mu);
             return (int64_t)fd;
         }
         mako_sock_close(fd);
         p->open_n--;
     }
-    if (p->open_n >= p->max) return -1;
+    if (p->open_n >= p->max) {
+        pthread_mutex_unlock(&mako_tcp_pools_mu);
+        return -1;
+    }
+    /* Connect outside lock would race open_n; keep lock for bookkeeping. */
     int64_t fd = mako_tcp_pool_connect_one(p);
-    if (fd < 0) return -1;
+    if (fd < 0) {
+        pthread_mutex_unlock(&mako_tcp_pools_mu);
+        return -1;
+    }
     p->open_n++;
+    pthread_mutex_unlock(&mako_tcp_pools_mu);
     return fd;
 }
 
 static inline int64_t mako_tcp_pool_release(int64_t pool, int64_t fd, int64_t reusable) {
     if (pool < 0 || pool >= MAKO_TCP_POOL_MAX) return 0;
+    /* Probe without holding the pool lock (may block briefly on peek). */
+    int can_reuse = reusable && mako_tcp_fd_reusable((int)fd);
+    pthread_mutex_lock(&mako_tcp_pools_mu);
     MakoTcpPoolSlot *p = &mako_tcp_pools[pool];
-    if (!p->live || fd < 0) return 0;
+    if (!p->live || fd < 0) {
+        pthread_mutex_unlock(&mako_tcp_pools_mu);
+        return 0;
+    }
     /* Cap idle list; never exceed max. */
-    if (reusable && p->idle_n < p->max && p->idle_n < MAKO_TCP_POOL_IDLE
-        && mako_tcp_fd_reusable((int)fd)) {
+    if (can_reuse && p->idle_n < p->max && p->idle_n < MAKO_TCP_POOL_IDLE) {
         p->idle_fds[p->idle_n++] = (int)fd;
+        pthread_mutex_unlock(&mako_tcp_pools_mu);
         return 1;
     }
     mako_sock_close((int)fd);
     if (p->open_n > 0) p->open_n--;
+    pthread_mutex_unlock(&mako_tcp_pools_mu);
     return 1;
 }
 
 static inline int64_t mako_tcp_pool_close(int64_t pool) {
     if (pool < 0 || pool >= MAKO_TCP_POOL_MAX) return 0;
+    pthread_mutex_lock(&mako_tcp_pools_mu);
     MakoTcpPoolSlot *p = &mako_tcp_pools[pool];
-    if (!p->live) return 0;
+    if (!p->live) {
+        pthread_mutex_unlock(&mako_tcp_pools_mu);
+        return 0;
+    }
     for (int i = 0; i < p->idle_n; i++) {
         if (p->idle_fds[i] >= 0) mako_sock_close(p->idle_fds[i]);
     }
     memset(p, 0, sizeof(*p));
+    pthread_mutex_unlock(&mako_tcp_pools_mu);
     return 1;
 }
 
@@ -720,14 +751,18 @@ static inline int64_t mako_tcp_pool_close(int64_t pool) {
 
 static inline int64_t mako_tcp_pool_idle(int64_t pool) {
     if (pool < 0 || pool >= MAKO_TCP_POOL_MAX) return -1;
-    if (!mako_tcp_pools[pool].live) return -1;
-    return mako_tcp_pools[pool].idle_n;
+    pthread_mutex_lock(&mako_tcp_pools_mu);
+    int64_t n = !mako_tcp_pools[pool].live ? -1 : mako_tcp_pools[pool].idle_n;
+    pthread_mutex_unlock(&mako_tcp_pools_mu);
+    return n;
 }
 
 static inline int64_t mako_tcp_pool_open_count(int64_t pool) {
     if (pool < 0 || pool >= MAKO_TCP_POOL_MAX) return -1;
-    if (!mako_tcp_pools[pool].live) return -1;
-    return mako_tcp_pools[pool].open_n;
+    pthread_mutex_lock(&mako_tcp_pools_mu);
+    int64_t n = !mako_tcp_pools[pool].live ? -1 : mako_tcp_pools[pool].open_n;
+    pthread_mutex_unlock(&mako_tcp_pools_mu);
+    return n;
 }
 
 /* ---- HTTP/1.1 forward full ----------------------------------------------- */

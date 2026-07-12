@@ -26,21 +26,34 @@
 extern "C" {
 #endif
 
-/* ---- Logging ---- */
+/* ---- Logging (trace id when mako_trace.h is included first) ---- */
+static inline void mako_log_write_trace_field(void) {
+#if defined(MAKO_TRACE_H)
+    MakoString tid = mako_trace_current();
+    if (tid.data && tid.len > 0) {
+        fprintf(stderr, "trace=%.*s ", (int)tid.len, tid.data);
+    }
+    free(tid.data);
+#endif
+}
+
 static inline void mako_log_info(MakoString msg) {
     fprintf(stderr, "[%lld info] ", (long long)mako_now_ms());
+    mako_log_write_trace_field();
     fwrite(msg.data, 1, msg.len, stderr);
     fputc('\n', stderr);
 }
 
 static inline void mako_log_warn(MakoString msg) {
     fprintf(stderr, "[%lld warn] ", (long long)mako_now_ms());
+    mako_log_write_trace_field();
     fwrite(msg.data, 1, msg.len, stderr);
     fputc('\n', stderr);
 }
 
 static inline void mako_log_error(MakoString msg) {
     fprintf(stderr, "[%lld error] ", (long long)mako_now_ms());
+    mako_log_write_trace_field();
     fwrite(msg.data, 1, msg.len, stderr);
     fputc('\n', stderr);
 }

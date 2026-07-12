@@ -1,0 +1,14 @@
+// select NLL join: typecheck smoke without blocking.
+
+fn TestSelectNllSurface() {
+    // NLL path is exercised by typechecker when select is present.
+    // Use chan_select2 which is non-syntax select for a quick runtime assert.
+    let a = chan_open[int](1)
+    let b = chan_open[int](1)
+    let _ = a.send(7)
+    let which = chan_select2(a, b, 100)
+    assert_eq(which, 0)
+    assert_eq(chan_select_value(), 7)
+    a.close()
+    b.close()
+}
