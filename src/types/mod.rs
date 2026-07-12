@@ -9640,8 +9640,11 @@ fn is_kick_sendable(t: &Type) -> bool {
     }
     match t {
         Type::String | Type::Chan(_) | Type::Job(_) | Type::Void => true,
+        // Thread-safe shared handles: sending the handle shares the same object
+        // across tasks, which is their whole purpose (internal locking / atomics).
+        Type::CMap | Type::Mutex | Type::RWMutex => true,
         // ShareInt: atomic RC + kick auto-clones onto the heap (see codegen).
-        Type::Named(n) if n == "ShareInt" => true,
+        Type::Named(n) if n == "ShareInt" || n == "AtomicInt" => true,
         Type::Named(n) if n == "Arena" || n == "Crew" => false,
         Type::Named(_) => false, // structs — use channels
         Type::Array(_) | Type::Map(_, _) | Type::Tuple(_) | Type::Option(_) | Type::Result(_, _) => {

@@ -14,11 +14,20 @@
 - **Password hashing** — `crypto.password_hash` / `password_verify` (Argon2id,
   OWASP parameters, PHC string format) backed by OpenSSL's trusted implementation
 
+### Concurrency
+
+- **Sendable synchronization handles** — `CMap`, `Mutex`, `RWMutex`, and
+  `AtomicInt` may now be passed into a kicked task; the same object is shared
+  (matching the documented CMap behaviour). Structs / arrays / arenas stay
+  non-sendable.
+
 ### Networking
 
 - **UDP request/response routing** — `game_udp_sender_addr` (the `host:port` of
   the last sender) and `game_udp_send_to` (send to an arbitrary address). Enables
   forwarding traffic upstream and routing replies back to the original sender.
+- multiple UDP frontends by wrapping a `GameUDP` handle in a struct (struct
+  arrays hold handles); array literals accept a trailing comma.
 
 ### Fixes
 

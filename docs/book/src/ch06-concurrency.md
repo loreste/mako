@@ -775,6 +775,36 @@ CMap has no ordering guarantees between operations from different tasks. If you
 need "set A then read A" ordering across tasks, coordinate with channels or
 join handles.
 
+### Shared synchronization handles
+
+`CMap` is not the only value you can hand to a kicked task. The thread-safe
+handles — `CMap`, `Mutex`, `RWMutex`, and `AtomicInt` — are all **sendable**:
+passing one into `kick` shares the same underlying object, so tasks coordinate
+through it directly. Use `AtomicInt` for lock-free counters, `Mutex` / `RWMutex`
+to guard a critical section, and `CMap` for shared key-value state.
+
+```mko
+fn add_worker(c: AtomicInt, n: int) -> int {
+    var i = 0
+    for i < n { let _ = atomic_add(c, 1); i++ }
+    return 0
+}
+
+fn main() {
+    let total = atomic_new(0)
+    crew t {
+        let a = t.kick(add_worker(total, 1000))
+        let b = t.kick(add_worker(total, 1000))
+        let _ = a.join()
+        let _ = b.join()
+    }
+    print(atomic_load(total))   // 2000 — race-free
+}
+```
+
+Ordinary structs, arrays, and arenas are **not** sendable — the compiler rejects
+kicking them; pass their contents through a channel or a shared handle instead.
+
 ---
 
 ## Event Loop Integration

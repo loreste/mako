@@ -67,7 +67,7 @@ Last inventory: 2026-07-11 (**unique Mako surface** · pack/pull · pain map · 
 |-------|--------|
 | `cargo build --release` | PASS (prior) |
 | Book samples `mako check` / `run` | PASS — `docs/book/examples/book_*.mko` |
-| `mako test examples/testing` | PASS — **158 passed**, 0 failed |
+| `mako test examples/testing` | PASS — **159 passed**, 0 failed |
 | `if init; cond { }` + both-branches-return body | Done — `examples/testing/if_init_test.mko` |
 | Go `switch`/`case`/`default` (value, expr-less, init) | Done — `examples/testing/switch_test.mko` |
 | Positional struct literals `Point{1, 2}` / `Point{}` | Done — `examples/testing/struct_positional_test.mko` |
@@ -78,6 +78,7 @@ Last inventory: 2026-07-11 (**unique Mako surface** · pack/pull · pain map · 
 | `if` as an expression (`let x = if c { a } else { b }`) | Done — `examples/testing/if_expr_test.mko` |
 | Argon2id password hashing (`crypto.password_hash`) | Done (OpenSSL) — `examples/testing/password_hash_test.mko` |
 | UDP proxy routing (`game_udp_sender_addr` / `send_to`) | Done — `examples/testing/udp_proxy_test.mko` |
+| Sendable sync handles across kick (CMap/Mutex/RWMutex/AtomicInt) | Done — `examples/testing/kick_sync_test.mko` |
 | Contextual `pack`/`pull`/`switch`/`go` (usable as identifiers) | Fixed — no longer reserved words |
 | C keyword / stdlib-name identifiers (`switch`, `read`, `time`, …) emit valid C | Fixed — codegen mangles reserved & libc names |
 | `mako fmt` doubled `export` on structs | Fixed |

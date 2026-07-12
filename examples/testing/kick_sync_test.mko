@@ -1,0 +1,56 @@
+// Thread-safe shared handles (CMap, Mutex, RWMutex, AtomicInt) may be sent into
+// kicked tasks — the same object is shared, which is their purpose.
+
+fn cmap_worker(m: CMap, id: int) -> int {
+    cmap_set(m, "k" + format_int(id), "done")
+    return id
+}
+
+fn counter_worker(c: AtomicInt, times: int) -> int {
+    var i = 0
+    for i < times {
+        let _ = atomic_add(c, 1)
+        i++
+    }
+    return 0
+}
+
+fn lock_worker(l: RWMutex, id: int) -> int {
+    rwmutex_lock(l)
+    rwmutex_unlock(l)
+    return id
+}
+
+func TestSharedCMapAcrossKick() {
+    let shared = cmap_new()
+    crew t {
+        let a = t.kick(cmap_worker(shared, 1))
+        let b = t.kick(cmap_worker(shared, 2))
+        let _ = a.join()
+        let _ = b.join()
+    }
+    assert_eq_str(cmap_get(shared, "k1"), "done")
+    assert_eq_str(cmap_get(shared, "k2"), "done")
+    assert_eq(cmap_len(shared), 2)
+}
+
+func TestSharedAtomicAcrossKick() {
+    let c = atomic_new(0)
+    crew t {
+        let a = t.kick(counter_worker(c, 1000))
+        let b = t.kick(counter_worker(c, 1000))
+        let _ = a.join()
+        let _ = b.join()
+    }
+    // Atomic add is race-free — the total is exact.
+    assert_eq(atomic_load(c), 2000)
+}
+
+func TestSharedRWMutexAcrossKick() {
+    let l = rwmutex_new()
+    crew t {
+        let a = t.kick(lock_worker(l, 1))
+        let _ = a.join()
+    }
+    assert(true) // compiles + runs: the lock handle crossed the kick boundary
+}
