@@ -1,0 +1,35 @@
+// Richer Err/Ok: match expected Result[T, E] of the enclosing function.
+
+fn parse_pos(n: int) -> Result[int, string] {
+    if n < 0 {
+        return Err("negative")
+    }
+    return Ok(n)
+}
+
+fn TestOkErrMatchReturn() {
+    match parse_pos(5) {
+        Ok(v) => assert_eq(v, 5),
+        Err(_) => assert(false),
+    }
+    match parse_pos(-1) {
+        Ok(_) => assert(false),
+        Err(e) => assert_eq_str(e, "negative"),
+    }
+}
+
+fn TestChanOpenInt() {
+    let ch = chan_open[int](1)
+    let _ = ch.send(7)
+    assert_eq(ch.recv(), 7)
+    ch.close()
+}
+
+fn TestChanOpenBool() {
+    // bool channels use the int ring (0/1) for speed seed
+    let ch = chan_open[bool](2)
+    let _ = ch.send(true)
+    let v = ch.recv()
+    assert(v)
+    ch.close()
+}

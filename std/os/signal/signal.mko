@@ -1,0 +1,4 @@
+// std/os/signal — seed (process signal hooks)
+fn notify_ready() -> bool {
+    return true
+}

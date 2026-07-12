@@ -40,7 +40,11 @@ const KEYWORDS: &[&str] = &[
     "match",
     "mut",
     "not",
+    "on",
     "or",
+    "pack",
+    "package",
+    "pull",
     "range",
     "receive",
     "return",
@@ -891,7 +895,9 @@ fn collect_imports(src: &str) -> Vec<(String, Option<String>)> {
     let mut out = Vec::new();
     let mut i = 0;
     while i < tokens.len() {
-        if matches!(tokens[i].kind, TokenKind::Import) {
+        let is_import_kw = matches!(tokens[i].kind, TokenKind::Import)
+            || matches!(tokens[i].kind, TokenKind::Ident(ref s) if s == "pull");
+        if is_import_kw {
             if i + 1 < tokens.len() {
                 if let TokenKind::String(ref path) = tokens[i + 1].kind {
                     let mut alias = None;

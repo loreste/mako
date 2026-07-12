@@ -76,14 +76,23 @@ pub fn stmts_always_diverges(stmts: &[Stmt]) -> bool {
     match stmts.last() {
         Some(Stmt::Return(_)) | Some(Stmt::Break(_)) | Some(Stmt::Continue(_)) => true,
         Some(Stmt::If {
+            init: _,
+            cond,
             then_block,
             else_block,
-            ..
         }) => {
-            let then_d = block_always_diverges(then_block);
-            match else_block {
-                Some(eb) => then_d && block_always_diverges(eb),
-                None => false,
+            // A constant-condition `if` only takes one arm (this is how the
+            // `if init; cond` desugar's `if true { … }` scope stays transparent).
+            match const_bool(cond) {
+                Some(true) => block_always_diverges(then_block),
+                Some(false) => else_block.as_ref().map(block_always_diverges).unwrap_or(false),
+                None => {
+                    let then_d = block_always_diverges(then_block);
+                    match else_block {
+                        Some(eb) => then_d && block_always_diverges(eb),
+                        None => false,
+                    }
+                }
             }
         }
         Some(Stmt::While { .. }) | Some(Stmt::For { .. }) => false,

@@ -206,15 +206,18 @@ mako pkg audit
 
 This checks offline -- no network required.
 
-## Imports (multi-file)
+## Pulls (multi-file)
 
-Most real projects need more than one file. Mako's `import` statement handles
-this -- and `mako run` automatically compiles everything that's imported.
+Most real projects need more than one file. Mako **pulls** are always
+**pack-qualified** so call sites stay clear. `mako run` compiles everything
+that’s pulled.
 
-### Basic file import
+### Basic file pull
 
 ```mko
 // utils.mko
+pack utils
+
 fn format_name(first: string, last: string) -> string {
     return first + " " + last
 }
@@ -222,10 +225,10 @@ fn format_name(first: string, last: string) -> string {
 
 ```mko
 // main.mko
-import "./utils.mko"
+pull "./utils.mko"
 
 fn main() {
-    print(format_name("Grace", "Hopper"))
+    print(utils.format_name("Grace", "Hopper"))
 }
 ```
 
@@ -234,14 +237,15 @@ mako run main.mko
 # Grace Hopper
 ```
 
-### Aliased imports
+Default qualifier: the pulled file’s `pack` name (if not `main`), else the
+path basename (`utils` from `utils.mko`).
 
-Use `as` to give an import a namespace. This avoids naming conflicts and makes
-it clear where each function comes from:
+### Explicit aliases
 
 ```mko
-import "./db.mko" as db
-import "./routes.mko" as routes
+pull "./db.mko" as db
+pull "./routes.mko" as routes
+// dual: import db "./db.mko"
 
 fn main() {
     db.connect()
@@ -249,29 +253,34 @@ fn main() {
 }
 ```
 
-### Grouped imports
-
-When you have several imports, group them into one block:
+### Blank and dot
 
 ```mko
-import (
-    "./routes.mko"
-    "./db.mko"
+pull _ "fmt"           // load/typecheck only — no names
+pull . "./helpers.mko" // merge without prefix (use sparingly)
+```
+
+### Grouped pulls
+
+When you have several pulls, group them into one block:
+
+```mko
+pull (
     "strings"
     "net/http"
+    "./db.mko" as db
+    "./routes.mko" as routes
 )
 ```
 
-`mako fmt` will rewrite separate `import` lines into this grouped form
-automatically.
+`mako fmt` rewrites separate `pull` lines into this grouped form automatically.
 
-### Standard library imports
+### Standard library
 
-Import standard library modules by name (no `./` prefix). They're accessed
-through their module name:
+Pull standard library units by name (no `./` prefix). Always qualify:
 
 ```mko
-import "strings"
+pull "strings"
 
 fn main() {
     print(strings.trim("  hello  "))
@@ -298,17 +307,19 @@ Create `db.mko` alongside `main.mko`:
 
 ```mko
 // db.mko
-fn db_init() {
+pack db
+
+fn init() {
     let _ = sqlite_query_int("/tmp/tasks.db",
         "CREATE TABLE IF NOT EXISTS tasks(id INTEGER PRIMARY KEY, title TEXT, done INT)")
 }
 
-fn db_add_task(title: string) -> int {
+fn add_task(title: string) -> int {
     return sqlite_query_int("/tmp/tasks.db",
         "INSERT INTO tasks(title, done) VALUES ('" + title + "', 0)")
 }
 
-fn db_task_count() -> int {
+fn task_count() -> int {
     return sqlite_query_int("/tmp/tasks.db", "SELECT COUNT(*) FROM tasks")
 }
 ```
@@ -319,19 +330,23 @@ Create `routes.mko`:
 
 ```mko
 // routes.mko
-fn route_health(c: int) {
+pack routes
+
+pull "./db.mko"
+
+fn health(c: int) {
     let _ = http_respond_json(c, 200, "{\"ok\":true}")
 }
 
-fn route_add_task(c: int) {
+fn add_task(c: int) {
     let body = http_body(c)
     let title = json_get_string(body, "title")
-    let _ = db_add_task(title)
+    let _ = db.add_task(title)
     let _ = http_respond_json(c, 201, "{\"created\":true}")
 }
 
-fn route_stats(c: int) {
-    let count = db_task_count()
+fn stats(c: int) {
+    let count = db.task_count()
     let _ = http_respond_json(c, 200, json_ss("count", format_int(count)))
 }
 ```
@@ -340,11 +355,11 @@ fn route_stats(c: int) {
 
 ```mko
 // main.mko
-import "./db.mko"
-import "./routes.mko"
+pull "./db.mko"
+pull "./routes.mko"
 
 fn main() {
-    db_init()
+    db.init()
     let fd = http_bind(8080)
     print("taskapi on :8080")
 
@@ -353,13 +368,13 @@ fn main() {
         let path = http_path(c)
 
         if str_eq(path, "/health") {
-            route_health(c)
+            routes.health(c)
         } else {
             if str_eq(path, "/tasks") {
-                route_add_task(c)
+                routes.add_task(c)
             } else {
                 if str_eq(path, "/stats") {
-                    route_stats(c)
+                    routes.stats(c)
                 } else {
                     let _ = http_respond(c, 404, "not found\n")
                 }

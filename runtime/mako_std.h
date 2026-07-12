@@ -2548,7 +2548,7 @@ static inline MakoString mako_hex_decode(MakoString hex) {
     return (MakoString){d, n};
 }
 
-/* ---- share / RC (cycle-free shared heap seed) ---- */
+/* ---- share / RC (cycle-free shared heap; atomic refcount for crew-safe clones) ---- */
 typedef struct {
     int64_t *ptr;
     int64_t *refcount;
@@ -2564,7 +2564,10 @@ static inline MakoShareInt mako_share_int(int64_t v) {
 }
 
 static inline MakoShareInt mako_share_clone(MakoShareInt s) {
-    if (s.refcount) (*s.refcount)++;
+    if (s.refcount) {
+        /* Atomic so clone+drop is safe across crew tasks after explicit clone. */
+        __atomic_add_fetch(s.refcount, (int64_t)1, __ATOMIC_SEQ_CST);
+    }
     return s;
 }
 
@@ -2572,10 +2575,15 @@ static inline int64_t mako_share_get(MakoShareInt s) {
     return s.ptr ? *s.ptr : 0;
 }
 
+static inline void mako_share_set(MakoShareInt s, int64_t v) {
+    if (s.ptr) {
+        __atomic_store_n(s.ptr, v, __ATOMIC_SEQ_CST);
+    }
+}
+
 static inline void mako_share_drop(MakoShareInt s) {
     if (!s.refcount) return;
-    (*s.refcount)--;
-    if (*s.refcount <= 0) {
+    if (__atomic_sub_fetch(s.refcount, (int64_t)1, __ATOMIC_SEQ_CST) <= 0) {
         free(s.ptr);
         free(s.refcount);
     }

@@ -1,0 +1,21 @@
+// String args across kick: heap-cloned for pthread safety.
+
+fn greet(name: string) -> int {
+    // side-effect free: return length
+    return str_len(name)
+}
+
+fn TestKickStringArg() {
+    crew t {
+        let j = t.kick(greet("mako"))
+        assert_eq(j.join(), 4)
+    }
+}
+
+fn TestKickStringVar() {
+    let name = "crew"
+    crew t {
+        let j = t.kick(greet(name))
+        assert_eq(j.join(), 4)
+    }
+}

@@ -1,0 +1,5 @@
+pack logrus
+
+fn info(msg: string) {
+    print(msg)
+}

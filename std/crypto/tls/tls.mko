@@ -1,0 +1,7 @@
+// std/crypto/tls — seed surface (OpenSSL-backed when linked)
+fn serve(port: int, cert: string, key: string, body: string) -> int {
+    return tls_serve(port, cert, key, body)
+}
+fn serve_once(port: int, cert: string, key: string, body: string) -> int {
+    return tls_serve_once(port, cert, key, body)
+}

@@ -1,8 +1,13 @@
 # Mako keywords
 
-Source of truth: `src/lexer/mod.rs` → `lex_ident` (38 reserved words).  
+Source of truth: `src/lexer/mod.rs` → `lex_ident` (**46** reserved words, including duals).  
 Every identifier that matches one of these strings is always a keyword token — never
 an `Ident`. There are **no contextual keywords** today: you cannot name a variable `crew` or `default`.
+
+**Mako flair (preferred):** `fn`, `let`, `pack`, `pull`, `on`, `hold`, `share`, `arena`,
+`crew`, `kick`, `join`, `fan`, `export`, … — see [IDENTITY.md](IDENTITY.md).
+
+**Dual / compat:** `func`, `var`, `package`, `import`, `type`, plus `:=` (token, not a keyword).
 
 **Not keywords** (ordinary identifiers / builtins): type names (`int`, `int8`, `int32`, `int64`,
 `uint64`, `byte`, `float`/`float64`, `string`, …), `map` (type constructor `map[K]V`, not reserved),
@@ -17,7 +22,10 @@ Guided tour: [The Mako Book](book/) · Full syntax: [GUIDE.md](GUIDE.md) · Desi
 
 | Keyword | Meaning |
 |---------|---------|
-| `fn` | Function (or interface method) declaration |
+| `fn` / `func` | Function (or interface method) — `fn` preferred; `func` dual |
+| `var` | Mutable local (`var x = 1`) — dual of `let mut` |
+| `pack` / `package` | Unit name (`pack lib`) — default pull qualifier; `package` dual |
+| `type` | Dual type decl: `type Point struct { … }` |
 | `struct` | Product type with named fields |
 | `enum` | Sum type with variants |
 | `actor` | Actor type with `receive` arms |
@@ -25,9 +33,11 @@ Guided tour: [The Mako Book](book/) · Full syntax: [GUIDE.md](GUIDE.md) · Desi
 | `interface` | Named method set (light interfaces) |
 | `extern` | Foreign declaration (`extern "C" fn …`) |
 | `const` | Compile-time constant binding |
-| `import` | Merge another `.mko` / std package: `import "strings"`, grouped `import ( "a" \n "b" )`, brace `import { "a"; "b" }`, alias `import x "path"` or `import "path" as x` |
+| `pull` / `import` | Bring in another `.mko` / std unit — always qualify; `pull` preferred |
 | `let` | Local binding |
 | `mut` | Mutable parameter or binding marker |
+| `export` | Package-public declaration (`export fn` / `export struct` / `export on`) |
+| `on` | Method block: `on Point { fn distance(self) … }` (desugars to `Point_distance`) |
 
 ## Control flow
 

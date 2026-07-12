@@ -1,7 +1,24 @@
 # Mako performance
 
-Mako targets **backend and systems** workloads with high performance: no mandatory GC,
-LLVM `-O3 -flto` on generated C, arenas for request scope, tight slice/map layouts.
+**The name of the game is speed.**  
+**Bar: as close to Rust as possible.**
+
+Mako is not a Rust dialect, but on hot paths it must **compete with Rust** —
+not with GC languages. Concurrent and parallel work is **first-class** and must
+stay fast too (`crew`, `fan`, channels) — see [SPEED.md](SPEED.md).
+
+| Principle | Practice |
+|-----------|----------|
+| Speed first | Prefer the fast design; convenience features stay off the hot path or opt-in |
+| No mandatory GC | Scope cleanup, `hold` / `share` / `arena` — no stop-the-world tax |
+| Native codegen | `.mko` → C → clang; release **`-O3 -flto`** |
+| Zero-cost default | Everyday constructs should not allocate or synchronize under the hood |
+| Explicit cost | Heavier tools (`share`, channels, `crew`) are visible when they cost |
+| First-class concurrent/parallel | Language keywords, structured joins — not a slow thread-pool package |
+| Measure | Prefer `./scripts/bench-vs-go-rust.sh` and real workloads over vibes |
+
+Targets **backend and systems** workloads: arenas for request scope, tight
+slice/map layouts, single static binaries.
 
 Book: [§11 Speed & memory safety](book/src/ch11-speed-safety.md) · Release how-to: [howto/09-release-builds.md](howto/09-release-builds.md).
 
@@ -11,6 +28,10 @@ Book: [§11 Speed & memory safety](book/src/ch11-speed-safety.md) · Release how
 ./scripts/bench-vs-go-rust.sh
 # optional parsing:
 ./scripts/bench-vs-go-rust.sh 2>&1 | awk '/=== CPU/,/=== Memory/' | python3 scripts/parse_bench_ns.py
+
+# CI-style gate (fib/slice/map vs Rust; default max 2.0×):
+./scripts/bench-gate.sh
+./scripts/bench-gate.sh 1.5   # stricter
 ```
 
 ## Publishing benchmark claims

@@ -1,0 +1,4 @@
+// std/crypto/x509 — seed (cert helpers when OpenSSL linked)
+fn available() -> bool {
+    return true
+}

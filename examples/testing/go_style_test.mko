@@ -1,0 +1,52 @@
+// Go syntax tests — no colons required on types
+
+type Vec2 struct {
+    x int
+    y int
+}
+
+func (v Vec2) len() int {
+    return v.x + v.y
+}
+
+func split(n int) (int, int) {
+    return (n / 2, n - n / 2)
+}
+
+func sum3(a, b, c int) int {
+    return a + b + c
+}
+
+func TestGoShortDecl() {
+    x := 5
+    assert_eq(x, 5)
+}
+
+func TestGoVar() {
+    var y = 1
+    y = y + 2
+    assert_eq(y, 3)
+}
+
+func TestGoReceiver() {
+    v := Vec2 { x: 2, y: 3 }
+    assert_eq(v.len(), 5)
+}
+
+func TestGoMultiReturn() {
+    a, b := split(10)
+    assert_eq(a, 5)
+    assert_eq(b, 5)
+    // Reassignment form (not redefinition)
+    a, b = split(8)
+    assert_eq(a, 4)
+    assert_eq(b, 4)
+}
+
+func TestGoSharedParamType() {
+    assert_eq(sum3(1, 2, 3), 6)
+}
+
+func TestGoFuncKeyword() {
+    assert_eq(1 + 1, 2)
+}

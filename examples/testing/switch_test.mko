@@ -1,0 +1,67 @@
+// Go-style `switch`, desugared to an if/else-if chain.
+
+func label(n int) string {
+    switch n {
+    case 1:
+        return "one"
+    case 2, 3:
+        return "two-three"
+    default:
+        return "other"
+    }
+}
+
+func sign(n int) string {
+    // expression-less switch: cases are boolean conditions
+    switch {
+    case n > 0:
+        return "pos"
+    case n < 0:
+        return "neg"
+    default:
+        return "zero"
+    }
+}
+
+func withInit(n int) string {
+    // switch with init clause + compound scrutinee (evaluated once)
+    switch v := n * 2; v {
+    case 4:
+        return "four"
+    case 6:
+        return "six"
+    default:
+        return "other"
+    }
+}
+
+func TestSwitchValue() {
+    assert_eq_str(label(1), "one")
+    assert_eq_str(label(2), "two-three")
+    assert_eq_str(label(3), "two-three")
+    assert_eq_str(label(9), "other")
+}
+
+func TestSwitchExpressionless() {
+    assert_eq_str(sign(5), "pos")
+    assert_eq_str(sign(-2), "neg")
+    assert_eq_str(sign(0), "zero")
+}
+
+func TestSwitchWithInit() {
+    assert_eq_str(withInit(2), "four")
+    assert_eq_str(withInit(3), "six")
+    assert_eq_str(withInit(10), "other")
+}
+
+func TestSwitchNoDefaultFallsThrough() {
+    // No matching case and no default → nothing happens.
+    var out = 0
+    switch 99 {
+    case 1:
+        out = 1
+    case 2:
+        out = 2
+    }
+    assert_eq(out, 0)
+}

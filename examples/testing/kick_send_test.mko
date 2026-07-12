@@ -1,0 +1,34 @@
+// Send-like seed: kick only Copy / string / channel args across crew tasks.
+
+fn kick_add(a: int, b: int) -> int {
+    return a + b
+}
+
+fn kick_flag(b: bool) -> int {
+    if b {
+        return 1
+    }
+    return 0
+}
+
+fn TestKickCopyArgs() {
+    crew t {
+        let j = t.kick(kick_add(20, 22))
+        assert_eq(j.join(), 42)
+    }
+}
+
+fn TestKickBoolArg() {
+    crew t {
+        let j = t.kick(kick_flag(true))
+        assert_eq(j.join(), 1)
+    }
+}
+
+fn TestKickMulti() {
+    crew t {
+        let a = t.kick(kick_add(1, 2))
+        let b = t.kick(kick_add(3, 4))
+        assert_eq(a.join() + b.join(), 10)
+    }
+}

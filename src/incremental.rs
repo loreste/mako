@@ -39,7 +39,7 @@ use crate::tooling::{find_nearest_manifest_dir, parse_manifest_deps, resolve_dep
 use crate::types::{TypeChecker, TypeError};
 
 /// Bump when fingerprint inputs or cache layout change (invalidates all caches).
-pub const COMPILER_CACHE_VERSION: &str = "mako-incr-4";
+pub const COMPILER_CACHE_VERSION: &str = "mako-incr-5";
 
 #[derive(Clone, Debug)]
 pub struct IncrOptions {
@@ -266,9 +266,10 @@ pub fn record_typecheck_ok(entry: &Path, opts: &IncrOptions) -> Result<(), Strin
 
 /// Run typecheck unless full-program fingerprint cache hits.
 /// On hit, borrow/NLL was already proven for identical source bytes.
+/// On miss, append monomorphized generic specializations to `program`.
 pub fn typecheck_incremental(
     entry: &Path,
-    program: &Program,
+    program: &mut Program,
     src_for_diag: &str,
     opts: &IncrOptions,
 ) -> Result<bool /* hit */, ()> {
@@ -276,6 +277,28 @@ pub fn typecheck_incremental(
     match typecheck_cache_hit(entry, opts) {
         Ok(true) => {
             cache_log(opts, &format!("typecheck HIT {}", entry.display()));
+            // Cache hit: still expand generics for codegen (cheap re-check of mono only).
+            // Full recheck when mono needed — fingerprint includes sources so rare.
+            // Re-run typecheck to rehydrate mono_fns (typecheck cache only stores stamp).
+            let mut tc = TypeChecker::new();
+            if let Some(dir) = crate::tooling::find_nearest_manifest_dir(entry) {
+                let manifest = dir.join("mako.toml");
+                if let Ok(text) = std::fs::read_to_string(&manifest) {
+                    crate::tooling::apply_package_safety_flags(&mut tc, &text);
+                }
+            }
+            // Fast path: if no generics in program, keep cache hit without work.
+            let has_generics = program.items.iter().any(|i| {
+                matches!(i, crate::ast::Item::Fn(f) if !f.type_params.is_empty())
+            });
+            if has_generics {
+                let _ = tc.check(program);
+                for f in tc.mono_fns {
+                    if !program.items.iter().any(|i| matches!(i, crate::ast::Item::Fn(x) if x.name == f.name)) {
+                        program.items.push(crate::ast::Item::Fn(f));
+                    }
+                }
+            }
             return Ok(true);
         }
         Ok(false) => cache_log(opts, &format!("typecheck MISS {}", entry.display())),
@@ -309,6 +332,16 @@ pub fn typecheck_incremental(
         }
         d.emit();
     })?;
+
+    for f in tc.mono_fns {
+        if !program
+            .items
+            .iter()
+            .any(|i| matches!(i, crate::ast::Item::Fn(x) if x.name == f.name))
+        {
+            program.items.push(crate::ast::Item::Fn(f));
+        }
+    }
 
     if let Err(e) = record_typecheck_ok(entry, opts) {
         cache_log(opts, &format!("typecheck store failed: {e}"));

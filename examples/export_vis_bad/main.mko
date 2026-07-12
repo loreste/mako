@@ -1,0 +1,4 @@
+pull "../export_vis/lib.mko"
+fn main() {
+    print(secret.private_mul(2, 3))
+}

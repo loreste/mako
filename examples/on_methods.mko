@@ -1,0 +1,28 @@
+// Mako-native method surface: `on Type { … }` → Type_method
+
+struct Point {
+    x: int
+    y: int
+}
+
+on Point {
+    fn distance(self) -> int {
+        return self.x + self.y
+    }
+
+    fn scale(self, k: int) -> int {
+        return (self.x + self.y) * k
+    }
+}
+
+// Free-function style still works (backward compatible)
+fn Point_manhattan(self: Point) -> int {
+    return self.x + self.y
+}
+
+fn main() {
+    let p = Point { x: 3, y: 4 }
+    print_int(p.distance())
+    print_int(p.scale(2))
+    print_int(p.manhattan())
+}

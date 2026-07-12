@@ -57,6 +57,18 @@ pub enum TokenKind {
     And,
     Or,
     Not,
+    /// Package export: `export fn` / `export struct` / `export on`
+    Export,
+    /// Method block: `on Point { fn distance(self) … }`
+    On,
+    /// Dual: `func` → same as `fn`
+    Func,
+    /// Dual: `var x = …` → mutable binding
+    Var,
+    /// Unit name: preferred `pack lib`, dual `package lib`
+    Package,
+    /// Dual: `type Point struct { … }`
+    Type,
 
     // Punctuation
     LParen,
@@ -67,6 +79,8 @@ pub enum TokenKind {
     RBracket,
     Comma,
     Colon,
+    /// Go short declaration `:=`
+    ColonAssign,
     Semicolon,
     Dot,
     Arrow,
@@ -281,7 +295,12 @@ impl<'a> Lexer<'a> {
             }
             b':' => {
                 self.bump();
-                TokenKind::Colon
+                if self.peek() == Some(b'=') {
+                    self.bump();
+                    TokenKind::ColonAssign
+                } else {
+                    TokenKind::Colon
+                }
             }
             b'-' => {
                 self.bump();
@@ -493,8 +512,15 @@ impl<'a> Lexer<'a> {
         let s = std::str::from_utf8(&self.src[start..self.pos]).unwrap();
         match s {
             "fn" => TokenKind::Fn,
+            "func" => TokenKind::Func,
             "let" => TokenKind::Let,
+            "var" => TokenKind::Var,
             "mut" => TokenKind::Mut,
+            // Preferred Mako `pack` is a *contextual* keyword: only a package
+            // declaration when it leads a top-level item (handled in the parser).
+            // Elsewhere it stays a plain identifier so `let pack = …` still works.
+            "package" => TokenKind::Package,
+            "type" => TokenKind::Type,
             "if" => TokenKind::If,
             "else" => TokenKind::Else,
             "while" => TokenKind::While,
@@ -527,10 +553,15 @@ impl<'a> Lexer<'a> {
             "timeout" => TokenKind::Timeout,
             "default" => TokenKind::Default,
             "const" => TokenKind::Const,
+            // Preferred Mako `pull` is a *contextual* keyword: only an import when
+            // it leads a top-level item (handled in the parser). Elsewhere it stays
+            // a plain identifier so `let pull = …` still works.
             "import" => TokenKind::Import,
             "and" => TokenKind::And,
             "or" => TokenKind::Or,
             "not" => TokenKind::Not,
+            "export" => TokenKind::Export,
+            "on" => TokenKind::On,
             _ => TokenKind::Ident(s.to_string()),
         }
     }

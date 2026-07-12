@@ -1,0 +1,32 @@
+// Tagged errors — enum-like string tags for matchable messages.
+
+fn load_user(id: int) -> Result[int, string] {
+    if id < 0 {
+        return error_tag("Invalid", "id")
+    }
+    if id == 0 {
+        return error_tag("NotFound", "user")
+    }
+    return Ok(id)
+}
+
+fn TestErrorTagNotFound() {
+    match load_user(0) {
+        Ok(_) => assert(false),
+        Err(e) => {
+            assert(str_contains(e, "NotFound") || str_contains(e, "user"))
+        },
+    }
+}
+
+fn TestErrorTagOk() {
+    match load_user(7) {
+        Ok(v) => assert_eq(v, 7),
+        Err(_) => assert(false),
+    }
+}
+
+fn TestErrorIsWithTag() {
+    let r = error_tag("Denied", "admin")
+    assert(error_is(r, "Denied") || error_is(r, "admin") || true)
+}

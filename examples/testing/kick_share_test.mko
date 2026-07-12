@@ -1,0 +1,26 @@
+// ShareInt across kick: auto-clone + atomic RC (wave 5).
+
+fn read_share(s: ShareInt) -> int {
+    return share_get(s)
+}
+
+fn TestKickShareInt() {
+    let s = share_int(21)
+    crew t {
+        let j = t.kick(read_share(s))
+        assert_eq(j.join(), 21)
+    }
+    // original still valid
+    assert_eq(share_get(s), 21)
+    share_drop(s)
+}
+
+fn TestKickShareCloneIndependent() {
+    let s = share_int(1)
+    crew t {
+        let j1 = t.kick(read_share(s))
+        let j2 = t.kick(read_share(s))
+        assert_eq(j1.join() + j2.join(), 2)
+    }
+    share_drop(s)
+}

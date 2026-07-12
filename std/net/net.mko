@@ -1,0 +1,4 @@
+// std/net — seed (dial/listen live under net/http and runtime)
+fn available() -> bool {
+    return true
+}

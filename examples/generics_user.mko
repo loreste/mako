@@ -1,0 +1,15 @@
+// User generics + monomorphization (backward compatible with existing code)
+
+fn identity[T](x: T) -> T {
+    return x
+}
+
+fn first[T](a: T, b: T) -> T {
+    return a
+}
+
+fn main() {
+    print_int(identity(42))
+    print(identity("mako"))
+    print_int(first(1, 2))
+}

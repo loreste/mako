@@ -1,4 +1,13 @@
-fn format(fmt: string, arg: string) -> Result[int, string] { return errorf(fmt, arg) }
-fn wrap(r: Result[int, string], msg: string) -> Result[int, string] { return wrap_err(r, msg) }
-fn is(r: Result[int, string], needle: string) -> int { return error_is(r, needle) }
-fn as_string(r: Result[int, string]) -> string { return error_string(r) }
+// std/errors — pull "errors" → errors.*
+fn format(fmt: string, arg: string) -> Result[int, string] {
+    return errorf(fmt, arg)
+}
+fn wrap(r: Result[int, string], msg: string) -> Result[int, string] {
+    return wrap_err(r, msg)
+}
+fn is(r: Result[int, string], needle: string) -> bool {
+    return error_is(r, needle)
+}
+fn as_string(r: Result[int, string]) -> string {
+    return error_string(r)
+}

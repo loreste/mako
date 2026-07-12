@@ -1,0 +1,29 @@
+// First-class fan on []float (parallel map, HW threads).
+
+fn TestFanFloatPipe() {
+    let xs = [1.0, 2.0, 3.0, 4.0]
+    let ys = fan(xs, |x| x * 2.0)
+    assert_eq(len(ys), 4)
+    // float compare via int cast of *10
+    assert(ys[0] > 1.9)
+    assert(ys[0] < 2.1)
+    assert(ys[3] > 7.9)
+    assert(ys[3] < 8.1)
+}
+
+fn TestFanFloatFn() {
+    let xs = [10.0, 20.0]
+    let ys = fan(xs, fn(x) { x + 0.5 })
+    assert(ys[0] > 10.4)
+    assert(ys[0] < 10.6)
+    assert(ys[1] > 20.4)
+    assert(ys[1] < 20.6)
+}
+
+fn TestFanIntStillWorks() {
+    let xs = [1, 2, 3]
+    let ys = fan(xs, |x| x * x)
+    assert_eq(ys[0], 1)
+    assert_eq(ys[1], 4)
+    assert_eq(ys[2], 9)
+}

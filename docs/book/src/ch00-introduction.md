@@ -5,14 +5,18 @@ programming language.
 
 ## What is Mako?
 
-Mako is a systems and backend programming language built for clarity, safety, and
-speed. It compiles `.mko` source files to C, then links them via clang into a
-single native binary. There is no mandatory garbage collector. Memory safety is
-achieved through an ownership system based on `hold` and `share` semantics, arena
-allocators for request-scoped work, and scope-based cleanup via `defer`.
+Mako is a systems and backend language built for **speed first**, with
+**first-class concurrency and parallelism**, plus clarity and safety.
+**Syntax is Mako’s own** — not a Go or Rust clone. Safety comes from ownership
+and arenas — **not a GC**. The performance bar is **as close to Rust as possible**.
+
+It compiles `.mko` source files to C, then links them via clang into a single
+native binary. Memory safety uses `hold` / `share` and arenas. Concurrency and
+parallelism are language features: structured `crew` / `kick` / `join`, `fan`
+across cores, channels, actors — no free-fire leaks, no async coloring.
 
 Mako is currently at version **0.1.0**. This book teaches idiomatic Mako as it
-ships today.
+ships today. Identity checklist: [IDENTITY.md](../../IDENTITY.md) (**~86%**).
 
 ## Who is this book for?
 
@@ -31,7 +35,7 @@ principles and builds up to advanced topics.
 
 ## A quick taste
 
-Here is a small Mako program that computes Fibonacci numbers:
+Here is a small Mako program (Fibonacci):
 
 ```mko
 fn main() {
@@ -55,7 +59,34 @@ mako run hello.mko
 # 55
 ```
 
-Here is a taste of error handling with Result types:
+Methods use Mako’s `on` form; multi-return uses tuples:
+
+```mko
+struct Point {
+    x: int
+    y: int
+}
+
+on Point {
+    fn distance(self) -> int {
+        return self.x + self.y
+    }
+}
+
+fn divmod(a: int, b: int) -> (int, int) {
+    return (a / b, a % b)
+}
+
+fn main() {
+    let p = Point { x: 3, y: 4 }
+    print_int(p.distance())
+    let q, r = divmod(17, 5)
+    print_int(q)
+    print_int(r)
+}
+```
+
+Error handling with `Result` (compiler enforces handling):
 
 ```mko
 fn parse_port(s: string) -> Result[int, string] {

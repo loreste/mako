@@ -1,7 +1,7 @@
-import "strings"
-import "path"
-import "fmt"
-import "sync"
+pull "strings"
+pull "path"
+pull "fmt"
+pull "sync"
 
 fn TestStdImportStrings() {
     assert(strings.contains("hello", "ell"))

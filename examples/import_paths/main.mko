@@ -1,0 +1,33 @@
+// Large grouped import — std, remote vendor, module-local (like real services).
+// Dual `import` and preferred `pull` both work.
+import (
+    "bytes"
+    "context"
+    "crypto/tls"
+    "encoding/json"
+    "errors"
+    "fmt"
+    "net"
+    "net/http"
+    "os"
+    "path/filepath"
+    "strconv"
+    "strings"
+    "sync"
+    "time"
+
+    "github.com/sirupsen/logrus"
+
+    redisv8 "github.com/go-redis/redis/v8"
+    "izi-iva/pkg/acd"
+)
+
+fn main() {
+    print(strings.trim_space("  hi  "))
+    print(fmt.int(42))
+    print(json.object_str("ok", "true"))
+    print(filepath.join_path("a", "b"))
+    print(acd.ready())
+    print(redisv8.ping())
+    logrus.info("boot")
+}

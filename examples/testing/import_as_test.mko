@@ -1,4 +1,4 @@
-import "../import_ns_lib.mko" as lib
+pull "../import_ns_lib.mko" as lib
 
 fn TestImportAs() {
     assert_eq(lib.add(2, 40), 42)

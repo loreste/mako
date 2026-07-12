@@ -1,0 +1,5 @@
+pack acd
+
+fn ready() -> bool {
+    return true
+}

@@ -1,26 +1,27 @@
-import "../db_engine/lib.mko"
+// Go-style: always use package qualifier
+pull "../db_engine/lib.mko"
 
 fn TestKvPutGet() {
-    kv_reset()
-    assert_eq(kv_put("x", "42"), 0)
-    let m = kv_load()
-    assert_eq_str(kv_get(m, "x"), "42")
+    lib.kv_reset()
+    assert_eq(lib.kv_put("x", "42"), 0)
+    let m = lib.kv_load()
+    assert_eq_str(lib.kv_get(m, "x"), "42")
 }
 
 fn TestKvLastWriteWins() {
-    kv_reset()
-    let _ = kv_put("k", "one")
-    let _ = kv_put("k", "two")
-    let m = kv_load()
-    assert_eq_str(kv_get(m, "k"), "two")
+    lib.kv_reset()
+    let _ = lib.kv_put("k", "one")
+    let _ = lib.kv_put("k", "two")
+    let m = lib.kv_load()
+    assert_eq_str(lib.kv_get(m, "k"), "two")
 }
 
 fn TestKvDelete() {
-    kv_reset()
-    let _ = kv_put("a", "1")
-    let _ = kv_put("b", "2")
-    let _ = kv_del("a")
-    let m = kv_load()
-    assert_eq_str(kv_get(m, "a"), "")
-    assert_eq_str(kv_get(m, "b"), "2")
+    lib.kv_reset()
+    let _ = lib.kv_put("a", "1")
+    let _ = lib.kv_put("b", "2")
+    let _ = lib.kv_del("a")
+    let m = lib.kv_load()
+    assert_eq_str(lib.kv_get(m, "a"), "")
+    assert_eq_str(lib.kv_get(m, "b"), "2")
 }

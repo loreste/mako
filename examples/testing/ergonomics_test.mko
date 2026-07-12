@@ -1,0 +1,65 @@
+// Low-ceremony ergonomics — real work without extra typing.
+pull "strings"
+
+fn divmod(a: int, b: int) -> (int, int) {
+    return (a / b, a % b)
+}
+
+fn TestPrintPolymorphic() {
+    // print accepts string / int / bool / float — no print_int tax
+    print(1)
+    print("ok")
+    print(true)
+    print(1.5)
+    assert(true)
+}
+
+fn TestStringEq() {
+    let a = "mako"
+    assert(a == "mako")
+    assert(a != "go")
+    assert(strings.contains(a, "ma"))
+}
+
+fn TestMultiReturn() {
+    let q, r = divmod(17, 5)
+    assert_eq(q, 3)
+    assert_eq(r, 2)
+}
+
+fn TestStringMatch() {
+    let path = "/health"
+    let mut code = 0
+    match path {
+        "/health" => {
+            code = 200
+        },
+        "/" => {
+            code = 200
+        },
+        _ => {
+            code = 404
+        },
+    }
+    assert_eq(code, 200)
+}
+
+fn TestElseIf() {
+    let n = 1
+    let mut label = ""
+    if n < 0 {
+        label = "neg"
+    } else if n == 0 {
+        label = "zero"
+    } else {
+        label = "pos"
+    }
+    assert_eq_str(label, "pos")
+}
+
+fn TestLocalInfer() {
+    let x = 10
+    let mut y = x + 2
+    y = y + 1
+    assert_eq(y, 13)
+}

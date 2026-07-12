@@ -1,8 +1,8 @@
 # Mako status (adversarial / verified)
 
-Last inventory: 2026-07-10 (**Wave 9** · suite **130** · ~**98%** standard library coverage · **The Mako Book**).
+Last inventory: 2026-07-11 (**unique Mako surface** · pack/pull · pain map · suite **130+** · **The Mako Book**).
 
-**Book:** [The Mako Book](book/) · **Guide:** [GUIDE.md](GUIDE.md) · **Build:** [BUILD.md](BUILD.md) · **Stdlib:** [STDLIB.md](STDLIB.md) · **Roadmap:** [ROADMAP.md](ROADMAP.md) · **Changelog:** [../CHANGELOG.md](../CHANGELOG.md).
+**Book:** [The Mako Book](book/) · **Guide:** [GUIDE.md](GUIDE.md) · **Identity:** [IDENTITY.md](IDENTITY.md) · **Pain points:** [PAIN_POINTS.md](PAIN_POINTS.md) · **Build:** [BUILD.md](BUILD.md) · **Stdlib:** [STDLIB.md](STDLIB.md) · **Roadmap:** [ROADMAP.md](ROADMAP.md) · **Changelog:** [../CHANGELOG.md](../CHANGELOG.md).
 
 ---
 
@@ -12,6 +12,9 @@ Last inventory: 2026-07-10 (**Wave 9** · suite **130** · ~**98%** standard lib
 |-------|---------|
 | **MVP / usable language** | **100%** |
 | **STATUS north-star** | **100%** |
+| **Mako identity (preferred syntax)** | **~90%** — [IDENTITY.md](IDENTITY.md) |
+| **Go/Rust pain coverage** | **~80%** strong rows — [PAIN_POINTS.md](PAIN_POINTS.md) |
+| **Dual-form coverage (optional sugar)** | **~78%** — [GO_SYNTAX_CHECKLIST.md](GO_SYNTAX_CHECKLIST.md) |
 | **Standard library** | **~98%** of target areas Done (Wave 9; not every symbol) |
 
 ---
@@ -29,6 +32,11 @@ Last inventory: 2026-07-10 (**Wave 9** · suite **130** · ~**98%** standard lib
 |-------|--------|
 | `mako version` / `--version` with OS/arch | Done |
 | Grouped `import (` / `{` + fmt | Done |
+| Packs & pulls (`pack`/`pull` flair, always qualify, `import`/`package` dual, internal rewrite) | Done |
+| Low-ceremony ergonomics doc + tests (`print` poly, `==` strings, match routes) | Done |
+| Path-style import blocks (nested std, vendor/, module=, aliases, blank-line groups) | Done |
+| Speed / concurrency / parallelism north star ([SPEED.md](SPEED.md)) | Done (product bar) |
+| `fan` + Mako `fn` lambdas (block body codegen + types) · crew/fan tests | Done |
 | CLI help polish (`build`/`run`/`check`/`test` flag docs; `version` near top) | Done |
 | VS Code `mako-native` launch configs through LLDB/cpptools | Done |
 | `mako pkg audit` offline advisory and license policy checks | Done |
@@ -59,18 +67,86 @@ Last inventory: 2026-07-10 (**Wave 9** · suite **130** · ~**98%** standard lib
 |-------|--------|
 | `cargo build --release` | PASS (prior) |
 | Book samples `mako check` / `run` | PASS — `docs/book/examples/book_*.mko` |
-| `mako test examples/testing` | PASS — **130 passed**, 0 failed |
+| `mako test examples/testing` | PASS — **151 passed**, 0 failed |
+| `if init; cond { }` + both-branches-return body | Done — `examples/testing/if_init_test.mko` |
+| Go `switch`/`case`/`default` (value, expr-less, init) | Done — `examples/testing/switch_test.mko` |
+| Positional struct literals `Point{1, 2}` / `Point{}` | Done — `examples/testing/struct_positional_test.mko` |
+| Contextual `pack`/`pull`/`switch` (usable as identifiers) | Fixed — no longer reserved words |
 | The Mako Book + docs accuracy | Done |
 
 ---
 
+## Wave 10 — language core (compat-safe)
+
+| Piece | Status |
+|-------|--------|
+| User generics monomorphization `fn id[T](x: T) -> T` | Done |
+| Mako methods `on Type { fn m(self) … }` | Done (desugars to `Type_m`) |
+| Tuples + tuple patterns | Done |
+| `export` + `visibility = "explicit"` seed | Done (default open) |
+| `chan_open[T]` / `make(chan[T], n)` (int + string) | Done; `chan_new` unchanged |
+| `#line` source maps + `bounds_checks = "on"` profile | Done |
+| Compat policy | [COMPAT.md](COMPAT.md) |
+| Tests | `examples/testing/lang_wave10_test.mko` (6 tests) |
+
+## Wave 10b — Go-first surface
+
+| Piece | Status |
+|-------|--------|
+| `func` alias for `fn` | Done |
+| `var` / `:=` short declaration | Done |
+| Go method receivers `func (p Point) m() int` | Done |
+| `type Point struct { x int }` (no colon) | Done |
+| Params `a int` / `a, b int` (no colon) | Done |
+| Bare returns `func f() int` | Done |
+| `package main` clause | Done |
+| Multi-return `a, b := f()` | Done |
+| Capitalized export (Go-style) | Done |
+| Checklist with % | [GO_SYNTAX_CHECKLIST.md](GO_SYNTAX_CHECKLIST.md) **~78%** |
+| Example / tests | `examples/go_style.mko`, `go_style_test.mko` (6 tests) |
+
 ## True hard residuals
 
-1. Complete Unicode property database / full PCRE  
-2. Huffman JPEG bitstream readable by arbitrary viewers (JFIF headers + MAKOJPG payload today)  
-3. Reflect field *values* from live Mako structs (schema registry Done; bag still stringly)  
-4. Full SMTP AUTH over a real TLS session (STARTTLS negotiate + OpenSSL upgrade path soft)  
-5. Symbol-level parity inside Done packages  
+**Closed this pass (gap close):**
+
+| Piece | Status |
+|-------|--------|
+| Send-like kick rules (Copy / string / chan only) | Done — tests `kick_send_test`, bad `kick_array_arg` |
+| `visibility = "explicit"` filters pulled symbols | Done — `examples/export_vis/` |
+| `Ok`/`Err` respect enclosing `Result[T, E]` | Done — `errors_typed_test` |
+| `chan_open` int family + bool | Done |
+| `fan` uses HW concurrency (not fixed 4 threads) | Done |
+| `fan` on `[]float` (`mako_par_map_float`) | Done |
+| ShareInt/Arena rejected across kick | Done |
+| `scripts/bench-gate.sh` vs Rust (fib/slice/map, default ≤2.5×) | Done |
+| `chan_open[string]` + kick with chan handle | Done |
+| `error_context` (wrap_err alias) | Done |
+| `mako lint --identity` (dual spellings as style) | Done |
+| Atomic `share` RC + `share_set` | Done |
+| `fan` on `[]string` (`mako_par_map_str`) | Done |
+| `error_join` combine Results | Done |
+| bench-gate default ≤2.0× Rust (fib/slice/map) | Done |
+| ShareInt + string kick auto-clone heap pack | Done |
+| bench-gate strict 1.5× (`MAKO_BENCH_STRICT=1` or arg) | Done (passes locally) |
+| `chan_open[Struct]` via MakoChanPtr heap-box | Done |
+| `error_tag(tag, msg)` enum-like string errors | Done |
+
+**Pain residuals (language) still open:** see [PAIN_POINTS.md](PAIN_POINTS.md) §4.
+
+1. Fuller data-race model (atomics / share-across-crew) beyond kick Send seed  
+2. Richer error *enums* (codegen still `MakoResultInt` fast path)  
+3. Stronger NLL / ownership edges  
+4. `mako lint --identity`  
+5. `fan` / channels for structs & generic element types (not only int map + int/string/bool chan)  
+
+**Stdlib / product residuals:**
+
+6. Complete Unicode property database / full PCRE  
+7. Huffman JPEG bitstream readable by arbitrary viewers  
+8. Reflect field *values* from live Mako structs  
+9. Full SMTP AUTH over a real TLS session  
+10. Symbol-level parity inside Done packages  
+11. Continuous bench-vs-Rust CI regression gate
 
 ---
 

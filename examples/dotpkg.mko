@@ -1,0 +1,5 @@
+pack dotpkg
+
+fn times2(n: int) -> int {
+    return n * 2
+}

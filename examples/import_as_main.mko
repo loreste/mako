@@ -1,4 +1,5 @@
-import "./import_ns_lib.mko" as lib
+// Explicit alias: pull "…" as name
+pull "./import_ns_lib.mko" as lib
 
 fn main() {
     print_int(lib.add(10, 32))

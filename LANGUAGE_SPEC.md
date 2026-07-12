@@ -1,7 +1,7 @@
 # Mako Language Specification
 
 **Version:** 0.1.0
-**Date:** 2026-07-10
+**Date:** 2026-07-11
 **Status:** Draft
 
 This document is the formal specification for the Mako programming language. It
@@ -10,6 +10,10 @@ ownership model, concurrency primitives, error handling, module system, standard
 library surface, compiler pipeline, and platform support.
 
 Source files use the **`.mko`** extension.
+
+**Preferred surface is Mako-native** (`fn`, `let`, `x: T`, `on Type`, `hold` /
+`share` / `arena`, `crew` / `kick`). See [docs/IDENTITY.md](docs/IDENTITY.md).
+Dual spellings (`func`, `:=`, bare `a int`) remain valid as compat sugar only.
 
 ---
 
@@ -77,24 +81,30 @@ Identifiers are case-sensitive. The identifier `_` (a single underscore) is the
 
 ### 1.5 Keywords
 
-Mako has **38 reserved words**. Every identifier matching one of these strings
-is always a keyword token, never an `Ident`. There are no contextual keywords.
+Mako has **46 reserved words** (including duals `func`, `var`, `package`,
+`import`, `type`). Preferred flair: `fn`, `pack`, `pull`, `on`, `hold`, `crew`,
+…. Every matching identifier is always a keyword token, never an `Ident`.
+There are no contextual keywords.
 
 #### Declaration Keywords
 
 | Keyword     | Meaning                                          |
 |-------------|--------------------------------------------------|
-| `fn`        | Function or interface method declaration         |
+| `fn` / `func` | Function or interface method (`fn` preferred)  |
 | `struct`    | Product type with named fields                   |
+| `type`      | Dual type decl: `type T struct { … }`            |
 | `enum`      | Sum type with variants                           |
 | `actor`     | Actor type with `receive` arms                   |
 | `receive`   | Actor message handler arm                        |
 | `interface` | Named method set (light interfaces)              |
 | `extern`    | Foreign declaration (`extern "C" fn ...`)        |
 | `const`     | Compile-time constant binding                    |
-| `import`    | Module import                                    |
-| `let`       | Local variable binding                           |
+| `pull` / `import` | Bring in another unit (`pull` preferred)   |
+| `pack` / `package` | Unit name (`pack lib` preferred)          |
+| `let` / `var` | Local binding (`let` preferred)                |
 | `mut`       | Mutable parameter or binding marker              |
+| `export`    | Explicit unit export                             |
+| `on`        | Method block: `on T { fn … }`                    |
 
 #### Control Flow Keywords
 
@@ -146,9 +156,9 @@ is always a keyword token, never an `Ident`. There are no contextual keywords.
 #### Complete Alphabetical List
 
 ```
-actor and arena as break const continue crew default defer else enum extern false
-fan fn for hold if import in interface join kick let match mut not or range receive
-return select share struct timeout true while
+actor and arena as break const continue crew default defer else enum export extern
+false fan fn for func hold if import in interface join kick let match mut not on or
+pack package pull range receive return select share struct timeout true type var while
 ```
 
 ### 1.6 Non-Keywords (Builtins)
@@ -1659,65 +1669,83 @@ fn option_or(o: Option[int], fallback: int) -> int {
 
 ---
 
-## 9. Modules and Imports
+## 9. Modules — packs & pulls
 
-### 9.1 File Imports
+Mako units are **packs**. You **pull** them in. Normal pulls always use a pack
+name at the call site. The default qualifier is the pulled file’s optional
+`pack` clause (if not `main`), otherwise the last path element (with `.mko`
+stripped). Call sites use `pkg.name(...)`; the compiler mangles definitions to
+`pkg__name` internally and rewrites references inside the pulled unit.
 
-Import another `.mko` file with flat symbol merging:
+Preferred spellings: `pack` / `pull`. Dual: `package` / `import`. See
+[docs/IDENTITY.md](docs/IDENTITY.md).
+
+### 9.1 File pulls
 
 ```mko
-import "./math_utils.mko"
+// math_utils.mko has `pack math` (or path basename math_utils)
+pull "./math_utils.mko"
+
+fn main() {
+    print_int(math.add(2, 3))
+}
 ```
 
-All public symbols from the imported file are merged into the current scope.
+Without an explicit alias, symbols are **not** merged bare into the importer.
 
-### 9.2 Aliased Imports
-
-Import with a namespace alias:
+### 9.2 Aliased pulls
 
 ```mko
-import "./math_utils.mko" as math
-math.add(10, 32)    // calls math__add
-```
+pull "./math_utils.mko" as math
+math.add(10, 32)
 
-The alternative syntax is also accepted:
-
-```mko
+// Dual form still accepted
 import math "./math_utils.mko"
 ```
 
-### 9.3 Standard Library Imports
-
-Standard library packages are imported by name (resolved under `std/`):
+### 9.3 Blank and Dot
 
 ```mko
-import "strings"
-import "sync"
+// Blank: compile dependency only; no names bound
+pull _ "fmt"
+
+// Dot: merge symbols without a prefix (specialized; use sparingly)
+pull . "./helpers.mko"
+// then: helper_fn() bare
+```
+
+### 9.4 Standard library
+
+Std units are pulled by name (resolved under `std/`) and always qualified:
+
+```mko
+pull "strings"
+pull "sync"
 
 strings.contains("hi", "h")
 let m = sync.rwmutex()
 ```
 
-### 9.4 Grouped Imports
+### 9.5 Grouped pulls
 
-Multiple imports may be grouped with parentheses or braces:
+Multiple pulls may be grouped with parentheses or braces:
 
 ```mko
 // Parenthesized form (preferred)
-import (
+pull (
     "strings"
     "path"
-    lib "./import_ns_lib.mko"
+    "./import_ns_lib.mko" as lib
 )
 
 // Brace form
-import { "fmt"; "strings" }
+pull { "fmt"; "strings" }
 ```
 
-`mako fmt` normalizes imports into a single `import ( ... )` block when there
-are two or more.
+`mako fmt` normalizes into a single `pull ( ... )` block when there are two or
+more, and emits `"path" as name` for aliases.
 
-### 9.5 Package Manifest (`mako.toml`)
+### 9.6 Package Manifest (`mako.toml`)
 
 Each package has a `mako.toml` manifest at its root:
 

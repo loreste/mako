@@ -31,12 +31,18 @@ pub fn format_program(program: &Program) -> String {
             Item::Import {
                 path: p1,
                 alias: a1,
+                mode: m1,
             },
             Item::Import {
                 path: p2,
                 alias: a2,
+                mode: m2,
             },
-        ) => p1.cmp(p2).then(a1.cmp(a2)),
+        ) => import_group_kind(p1)
+            .cmp(&import_group_kind(p2))
+            .then(p1.cmp(p2))
+            .then(a1.cmp(a2))
+            .then(m1.cmp(m2)),
         _ => std::cmp::Ordering::Equal,
     });
 
@@ -71,16 +77,47 @@ pub fn format_program(program: &Program) -> String {
     }
 }
 
-/// Emit imports Go-style: one path → single line; 2+ → `import ( … )` block.
+/// Emit imports in Mako-preferred form: one path → single line; 2+ → `pull ( … )`.
+/// Groups with a blank line between std-like, remote (host), and relative — like goimports.
+/// Keyword is `pull` (not dual `import`). Aliases use `"path" as name`.
 fn fmt_imports(imports: &[Item]) -> String {
     if imports.len() == 1 {
         return fmt_item(&imports[0]);
     }
-    let mut o = String::from("import (\n");
-    for it in imports {
-        if let Item::Import { path, alias } = it {
+    let mut items: Vec<&Item> = imports.iter().collect();
+    items.sort_by(|a, b| match (a, b) {
+        (
+            Item::Import {
+                path: pa,
+                alias: aa,
+                mode: ma,
+            },
+            Item::Import {
+                path: pb,
+                alias: ab,
+                mode: mb,
+            },
+        ) => import_group_kind(pa)
+            .cmp(&import_group_kind(pb))
+            .then(pa.cmp(pb))
+            .then(aa.cmp(ab))
+            .then(ma.cmp(mb)),
+        _ => std::cmp::Ordering::Equal,
+    });
+
+    let mut o = String::from("pull (\n");
+    let mut prev_kind: Option<u8> = None;
+    for it in items {
+        if let Item::Import { path, alias, mode } = it {
+            let kind = import_group_kind(path);
+            if let Some(pk) = prev_kind {
+                if pk != kind {
+                    o.push('\n');
+                }
+            }
+            prev_kind = Some(kind);
             o.push_str(INDENT);
-            o.push_str(&fmt_import_spec(path, alias.as_deref()));
+            o.push_str(&fmt_import_spec(path, alias.as_deref(), *mode));
             o.push('\n');
         }
     }
@@ -88,18 +125,45 @@ fn fmt_imports(imports: &[Item]) -> String {
     o
 }
 
-fn fmt_import_spec(path: &str, alias: Option<&str>) -> String {
-    match alias {
-        Some(a) => format!("{a} \"{}\"", escape_str(path)),
-        None => format!("\"{}\"", escape_str(path)),
+/// 0 = std-like, 1 = remote module (host in first segment), 2 = relative.
+fn import_group_kind(path: &str) -> u8 {
+    if path.starts_with("./") || path.starts_with("../") || path.starts_with('/') {
+        return 2;
+    }
+    let first = path.split('/').next().unwrap_or(path);
+    if first.contains('.') {
+        return 1; // github.com, … 
+    }
+    0
+}
+
+fn fmt_import_spec(path: &str, alias: Option<&str>, mode: ImportMode) -> String {
+    let p = escape_str(path);
+    match mode {
+        ImportMode::Blank => format!("_ \"{p}\""),
+        ImportMode::Dot => format!(". \"{p}\""),
+        ImportMode::Normal => match alias {
+            Some(a) => format!("\"{p}\" as {a}"),
+            None => format!("\"{p}\""),
+        },
     }
 }
 
 fn fmt_item(item: &Item) -> String {
     match item {
         Item::Fn(f) => {
-            let mut o = String::from("fn ");
+            let mut o = String::new();
+            if f.exported {
+                o.push_str("export ");
+            }
+            // Mako-native spelling: `fn`, `name: Type`, `-> Ret`
+            o.push_str("fn ");
             o.push_str(&f.name);
+            if !f.type_params.is_empty() {
+                o.push('[');
+                o.push_str(&f.type_params.join(", "));
+                o.push(']');
+            }
             o.push('(');
             for (i, p) in f.params.iter().enumerate() {
                 if i > 0 {
@@ -109,8 +173,10 @@ fn fmt_item(item: &Item) -> String {
                     o.push_str("mut ");
                 }
                 o.push_str(&p.name);
-                o.push_str(": ");
-                o.push_str(&fmt_type(&p.ty));
+                if !matches!(&p.ty, TypeExpr::Named(n) if n == "__self") {
+                    o.push_str(": ");
+                    o.push_str(&fmt_type(&p.ty));
+                }
             }
             o.push(')');
             if let Some(ret) = &f.ret {
@@ -121,12 +187,37 @@ fn fmt_item(item: &Item) -> String {
             o.push_str(&fmt_block(&f.body, 0));
             o
         }
+        Item::On(on) => {
+            let mut o = String::new();
+            if on.exported {
+                o.push_str("export ");
+            }
+            o.push_str("on ");
+            o.push_str(&on.ty);
+            o.push_str(" {\n");
+            for m in &on.methods {
+                // Format methods with short name (before desugar Type_ prefix)
+                let mf = m.clone();
+                o.push_str(INDENT);
+                o.push_str(&fmt_item(&Item::Fn(mf)).replace('\n', "\n    "));
+                o.push('\n');
+            }
+            o.push('}');
+            o
+        }
         Item::Struct(s) => {
             let mut o = String::new();
             if !s.derives.is_empty() {
                 o.push_str("#[derive(");
                 o.push_str(&s.derives.join(", "));
                 o.push_str(")]\n");
+            }
+            if s.exported {
+                o.push_str("export ");
+            }
+            // Mako-native: `struct Name { x: T }` (optional export)
+            if s.exported {
+                o.push_str("export ");
             }
             o.push_str("struct ");
             o.push_str(&s.name);
@@ -142,7 +233,11 @@ fn fmt_item(item: &Item) -> String {
             o
         }
         Item::Enum(e) => {
-            let mut o = format!("enum {} {{\n", e.name);
+            let mut o = String::new();
+            if e.exported {
+                o.push_str("export ");
+            }
+            o.push_str(&format!("enum {} {{\n", e.name));
             for v in &e.variants {
                 o.push_str(INDENT);
                 o.push_str(&v.name);
@@ -213,13 +308,10 @@ fn fmt_item(item: &Item) -> String {
             }
             o
         }
-        Item::Import { path, alias } => {
-            // Single-line form (used when only one import, or by callers of fmt_item).
-            match alias {
-                Some(a) => format!("import {a} \"{}\"", escape_str(path)),
-                None => format!("import \"{}\"", escape_str(path)),
-            }
+        Item::Import { path, alias, mode } => {
+            format!("pull {}", fmt_import_spec(path, alias.as_deref(), *mode))
         }
+        Item::Package { name } => format!("pack {name}"),
         Item::Const(c) => {
             format!("const {} = {}", c.name, fmt_expr(&c.value, 0))
         }
@@ -237,11 +329,16 @@ fn fmt_type(t: &TypeExpr) -> String {
                 return format!("map[{}]{}", fmt_type(&args[0]), fmt_type(&args[1]));
             }
             let a: Vec<_> = args.iter().map(fmt_type).collect();
-            format!("{n}<{}>", a.join(", "))
+            // Mako dual generics: keep [] form as canonical in fmt
+            format!("{n}[{}]", a.join(", "))
         }
         TypeExpr::Fn(params, ret) => {
             let p: Vec<_> = params.iter().map(fmt_type).collect();
             format!("fn({}) -> {}", p.join(", "), fmt_type(ret))
+        }
+        TypeExpr::Tuple(elems) => {
+            let e: Vec<_> = elems.iter().map(fmt_type).collect();
+            format!("({})", e.join(", "))
         }
     }
 }
@@ -262,6 +359,15 @@ fn fmt_block(b: &Block, indent: usize) -> String {
 
 fn fmt_stmt(s: &Stmt, indent: usize) -> String {
     match s {
+        Stmt::LetMulti {
+            names,
+            mutable: _,
+            init,
+        } => {
+            // Mako-native multi-bind (not `:=`)
+            let ns = names.join(", ");
+            format!("let {ns} = {}", fmt_expr(init, 0))
+        }
         Stmt::Let {
             name,
             mutable,
@@ -275,6 +381,7 @@ fn fmt_stmt(s: &Stmt, indent: usize) -> String {
                 Ownership::Share => o.push_str("share "),
                 Ownership::None => {}
             }
+            // Mako-native: `let` / `let mut` (not `var` / `:=`)
             o.push_str("let ");
             if *mutable {
                 o.push_str("mut ");
@@ -323,15 +430,22 @@ fn fmt_stmt(s: &Stmt, indent: usize) -> String {
         Stmt::Return(None) => "return".into(),
         Stmt::Return(Some(e)) => format!("return {}", fmt_expr(e, 0)),
         Stmt::If {
+            init,
             cond,
             then_block,
             else_block,
         } => {
-            let mut o = format!("if {} {}", fmt_expr(cond, 0), fmt_block(then_block, indent));
+            // Preserve the Go-style init clause: `if x := f(); cond { … }`.
+            let head = match init {
+                Some(i) => format!("if {}; {}", fmt_stmt(i, 0), fmt_expr(cond, 0)),
+                None => format!("if {}", fmt_expr(cond, 0)),
+            };
+            let mut o = format!("{head} {}", fmt_block(then_block, indent));
             if let Some(eb) = else_block {
                 // else-if chain: if single stmt is If, print `else if`
                 if eb.stmts.len() == 1 {
                     if let Stmt::If {
+                        init: i2,
                         cond: c2,
                         then_block: t2,
                         else_block: e2,
@@ -340,6 +454,7 @@ fn fmt_stmt(s: &Stmt, indent: usize) -> String {
                         o.push_str(" else ");
                         o.push_str(&fmt_stmt(
                             &Stmt::If {
+                                init: i2.clone(),
                                 cond: c2.clone(),
                                 then_block: t2.clone(),
                                 else_block: e2.clone(),
@@ -478,6 +593,17 @@ fn fmt_expr(e: &Expr, parent_prec: u8) -> String {
             let a: Vec<_> = elems.iter().map(|x| fmt_expr(x, 0)).collect();
             format!("[{}]", a.join(", "))
         }
+        Expr::Tuple(elems) => {
+            let a: Vec<_> = elems.iter().map(|x| fmt_expr(x, 0)).collect();
+            if elems.len() == 1 {
+                format!("({},)", a[0])
+            } else {
+                format!("({})", a.join(", "))
+            }
+        }
+        Expr::ChanOpen { elem, cap } => {
+            format!("chan_open[{}]({})", fmt_type(elem), fmt_expr(cap, 0))
+        }
         Expr::Convert { ty, args } => {
             let a: Vec<_> = args.iter().map(|x| fmt_expr(x, 0)).collect();
             format!("{}({})", fmt_type(ty), a.join(", "))
@@ -522,6 +648,10 @@ fn fmt_expr(e: &Expr, parent_prec: u8) -> String {
                     .collect();
                 format!("{name} {{ {} }}", parts.join(", "))
             }
+        }
+        Expr::StructLitPos { name, values } => {
+            let parts: Vec<_> = values.iter().map(|e| fmt_expr(e, 0)).collect();
+            format!("{name}{{{}}}", parts.join(", "))
         }
         Expr::Method {
             receiver,
@@ -583,6 +713,10 @@ fn fmt_pattern(p: &Pattern) -> String {
         Pattern::Or(ps) => {
             let parts: Vec<_> = ps.iter().map(fmt_pattern).collect();
             parts.join(" | ")
+        }
+        Pattern::Tuple(ps) => {
+            let parts: Vec<_> = ps.iter().map(fmt_pattern).collect();
+            format!("({})", parts.join(", "))
         }
     }
 }
@@ -698,8 +832,9 @@ fn main() {
 }
 "#;
         let out = format_program(&parse(src));
-        assert!(out.contains("import ("));
-        let a = out.find("a \"./a.mko\"").unwrap();
+        // Preferred Mako keyword + alias spelling
+        assert!(out.contains("pull ("));
+        let a = out.find("\"./a.mko\" as a").unwrap();
         let b = out.find("\"./b.mko\"").unwrap();
         assert!(a < b);
     }
@@ -707,7 +842,7 @@ fn main() {
     #[test]
     fn fmt_grouped_import_roundtrip() {
         let src = r#"
-import (
+pull (
     "strings"
     "path"
 )
@@ -717,9 +852,23 @@ fn main() {
         let once = format_program(&parse(src));
         let twice = format_program(&parse(&once));
         assert_eq!(once, twice);
-        assert!(once.contains("import ("));
+        assert!(once.contains("pull ("));
         assert!(once.contains("\"path\""));
         assert!(once.contains("\"strings\""));
+    }
+
+    #[test]
+    fn fmt_pack_and_pull_preferred() {
+        let src = r#"
+package lib
+import "./x.mko" as x
+fn main() {}
+"#;
+        let out = format_program(&parse(src));
+        assert!(out.contains("pack lib"));
+        assert!(out.contains("pull \"./x.mko\" as x"));
+        assert!(!out.contains("package "));
+        assert!(!out.contains("import "));
     }
 
     #[test]
@@ -740,3 +889,4 @@ fn main() {
         assert!(once.contains("match "));
     }
 }
+

@@ -4,11 +4,14 @@ Mako is a compiled programming language. You write `.mko` files, the compiler
 turns them into native binaries, and that's what you ship. No garbage collector,
 no virtual machine, no runtime.
 
-I built it because I wanted memory safety without paying for it with GC pauses
-or slow compile times. Mako uses ownership tracking and arena allocators to
-manage memory at compile time. It has structured concurrency that actually
-cleans up after itself, error handling the compiler enforces, and a standard
-library with enough in it to build real things without chasing dependencies.
+**Speed is the name of the game** — runtime as close to **Rust** as possible,
+with **first-class concurrency and parallelism** (`crew` / `kick` / `join` /
+`fan`, channels, actors). Memory safety without GC pauses. Fast builds. A
+simpler everyday surface that is still **Mako**, not a clone.
+
+Ownership and arenas manage memory at compile time. Structured crews clean up
+after themselves. The compiler enforces errors. The stdlib is batteries-included
+so you can ship real services without dependency maze.
 
 This is **version 0.1.0**. It works. 130 tests pass. The standard library
 covers a lot of ground. But it's still early — things will change, some corners
@@ -57,7 +60,7 @@ mako run main.mko
 ```mko
 fn main() {
     print("hello from mako")
-    print_int(fib(10))
+    print(fib(10))
 }
 
 fn fib(n: int) -> int {
@@ -66,9 +69,19 @@ fn fib(n: int) -> int {
 }
 ```
 
+Real work, low ceremony: infer locals, one `print`, `?` for errors, `match` for
+routes, power (`hold` / `crew` / `arena`) only when you need it.
+[Ergonomics](docs/ERGONOMICS.md).
+
 ---
 
 ## How it works
+
+### Speed first
+
+Native binaries, no mandatory GC, release `-O3 -flto`. Concurrent and parallel
+work is **first-class** (`crew`, `fan`) — not a slow afterthought.
+[Speed](docs/SPEED.md) · [Performance](docs/PERFORMANCE.md).
 
 ### Ownership instead of garbage collection
 
@@ -207,7 +220,8 @@ struct Task {
 }
 
 fn insert_task(db: SqlDB, title: string) -> Result[int, string] {
-    let _ = sql_exec_str4(db, "INSERT INTO tasks (title, done) VALUES ($1, $2)", title, "0", "", "")?
+    let rc = sql_exec_str4(db, "INSERT INTO tasks (title, done) VALUES ($1, $2)", title, "0", "", "")
+    if rc != 0 { return error("insert failed") }
     Ok(0)
 }
 
@@ -311,14 +325,17 @@ helper = { path = "../helper" }
 | | |
 |---|---|
 | **[The Mako Book](docs/book/)** | Start here |
+| **[Identity](docs/IDENTITY.md)** | Our syntax + **~86%** identity checklist |
+| [Dual-form inventory](docs/GO_SYNTAX_CHECKLIST.md) | Optional sugar (not preferred) |
 | [How-to Guides](docs/howto/README.md) | Practical walkthroughs |
-| [Language Guide](docs/GUIDE.md) | Full syntax reference |
+| [Language Guide](docs/GUIDE.md) | Full syntax reference (Mako-native) |
+| [Compat](docs/COMPAT.md) | Dual forms / what won't break |
 | [Standard Library](docs/STDLIB.md) | What's included |
 | [Built-in Functions](docs/BUILTINS.md) | Every function, every signature |
 | [Language Spec](LANGUAGE_SPEC.md) | Formal specification |
 | [CLI Reference](docs/CLI.md) | Every command, flag, and workflow |
 | [Tutorials](website/tutorials/) | Backend, game networking, databases, FFI, concurrency, cloud |
-| [Examples](docs/EXAMPLES.md) | 14 complete runnable programs for newcomers |
+| [Examples](docs/EXAMPLES.md) | Complete runnable programs |
 | [Debugging](docs/DEBUG.md) | dbg(), lldb, sanitizers, error messages |
 | [Security](docs/SECURITY.md) | Safety model |
 | [Performance](docs/PERFORMANCE.md) | Benchmarks |
@@ -344,13 +361,59 @@ mako test --coverage
 Unit, property, fuzz, snapshot, fixture, and mock tests. Default suite runs
 without external services.
 
+## Our syntax — unique, not a clone
+
+Mako is **its own language** with **its own syntax**. Not a Go dialect. Not a
+Rust dialect. We take simplicity and control as *goals* — and we exist to fix
+their **pain points** (GC/nil/err noise/goroutine leaks; lifetime/trait/async
+ceremony) with Mako tools, not by copying their look.
+
+Keywords: `fn`, `on`, `pack`, `pull`, `hold`, `share`, `arena`, `crew`, `kick`,
+`match`, `export`.  
+[Identity](docs/IDENTITY.md) · [Pain points](docs/PAIN_POINTS.md).
+
+```mko
+export struct Point {
+    x: int
+    y: int
+}
+
+on Point {
+    fn distance(self) -> int {
+        return self.x + self.y
+    }
+}
+
+fn divmod(a: int, b: int) -> (int, int) {
+    return (a / b, a % b)
+}
+
+fn main() {
+    let p = Point { x: 3, y: 4 }
+    print(p.distance())
+
+    let q, r = divmod(17, 5)
+    print(q)
+    print(r)
+
+    // Structured concurrency (no orphan tasks)
+    crew t {
+        let j = t.kick(work())
+        print(j.join())
+    }
+}
+```
+
+Identity: [docs/IDENTITY.md](docs/IDENTITY.md).  
+Sample: [examples/mako_style.mko](examples/mako_style.mko).  
+Dual spellings (`func`, `:=`, …) still parse for compatibility.
+
 ## What's not done yet
 
 - Full Unicode property database for regex
 - JPEG readable by standard viewers
 - Struct field reflection beyond schema registry
 - SMTP AUTH over TLS
-- Generics syntax may change
 - Direct I/O and HTTP engine are POSIX-only for now
 
 Full list in [STATUS.md](docs/STATUS.md).

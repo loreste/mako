@@ -1,12 +1,13 @@
-import "./lib.mko"
+// Pull pack lib → lib.kv_*
+pull "./lib.mko"
 
 fn main() {
-    kv_reset()
-    let _ = kv_put("a", "1")
-    let _ = kv_put("b", "2")
-    let _ = kv_put("a", "3")
-    let _ = kv_del("b")
-    let m = kv_load()
-    print(kv_get(m, "a"))
-    print(kv_get(m, "b"))
+    lib.kv_reset()
+    let _ = lib.kv_put("a", "1")
+    let _ = lib.kv_put("b", "2")
+    let _ = lib.kv_put("a", "3")
+    let _ = lib.kv_del("b")
+    let m = lib.kv_load()
+    print(lib.kv_get(m, "a"))
+    print(lib.kv_get(m, "b"))
 }

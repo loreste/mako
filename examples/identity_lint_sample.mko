@@ -1,0 +1,9 @@
+// Sample for `mako lint --identity` — dual forms on purpose.
+func dual() int {
+    x := 1
+    return x
+}
+
+fn main() {
+    print(dual())
+}

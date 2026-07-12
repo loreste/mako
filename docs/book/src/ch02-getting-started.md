@@ -277,16 +277,18 @@ mako run fib.mko
 
 ## Working with multiple files
 
-Most projects need more than one file. Mako handles this with `import` -- you
-point at a file, and its functions become available. When you `mako run main.mko`,
-the compiler automatically pulls in everything that's imported.
+Most projects need more than one file. Mako uses **packs** and **pulls**:
+name a unit with `pack`, bring it in with `pull`, and always call through the
+pack name. When you `mako run main.mko`, the compiler pulls everything in.
 
-### Basic file import
+### Basic file pull
 
 Start with two files side by side:
 
 ```mko
 // lib.mko
+pack lib
+
 fn add(a: int, b: int) -> int {
     return a + b
 }
@@ -298,11 +300,11 @@ fn greet(name: string) -> string {
 
 ```mko
 // main.mko
-import "./lib.mko"
+pull "./lib.mko"
 
 fn main() {
-    print_int(lib_add(2, 3))
-    print(lib_greet("mako"))
+    print_int(lib.add(2, 3))
+    print(lib.greet("mako"))
 }
 ```
 
@@ -312,24 +314,23 @@ mako run main.mko
 # hi mako
 ```
 
-Without an alias, the imported file's functions merge into your scope directly.
-By convention, prefix them (e.g. `lib_add`) to avoid collisions.
+The default qualifier is the pulled file’s `pack` name (if not `main`),
+otherwise the path basename. Symbols are **not** merged bare into the importer.
 
-### Aliased imports
-
-Give the import a name and access everything through that namespace:
+### Explicit aliases
 
 ```mko
 // main.mko
-import "./lib.mko" as lib
+pull "./lib.mko" as lib
+// dual: import lib "./lib.mko"
 
 fn main() {
     print_int(lib.add(2, 3))
 }
 ```
 
-This is especially useful when you import multiple files that might have
-overlapping function names.
+Also available: blank `pull _ "fmt"` (load only) and dot `pull . "./h.mko"`
+(bare names — specialized; use sparingly).
 
 ### Growing into a multi-file project
 
@@ -351,57 +352,60 @@ myservice/
 
 ```mko
 // db.mko
-fn db_init() {
+pack db
+
+fn init() {
     print("database ready")
 }
 
-fn db_count() -> int {
+fn count() -> int {
     return 42
 }
 ```
 
 ```mko
 // routes.mko
-fn routes_health(c: int) {
+pack routes
+
+fn health(c: int) {
     let _ = http_respond_json(c, 200, "{\"ok\":true}")
 }
 ```
 
 ```mko
 // main.mko
-import "./routes.mko"
-import "./db.mko"
+pull "./routes.mko"
+pull "./db.mko"
 
 fn main() {
-    db_init()
+    db.init()
     let fd = http_bind(8080)
     print("listening on :8080")
-    // handle requests...
+    // handle requests with routes.health(c) ...
 }
 ```
 
-### Grouped imports
+### Grouped pulls
 
-When you have several imports, group them into a single block:
+When you have several pulls, group them into a single block:
 
 ```mko
-import (
-    "./routes.mko"
-    "./db.mko"
+pull (
     "strings"
+    "./db.mko" as db
+    "./routes.mko" as routes
 )
 ```
 
-The formatter (`mako fmt`) will automatically rewrite multiple single `import`
-lines into this grouped form.
+The formatter (`mako fmt`) rewrites multiple `pull` lines into this grouped form.
 
-### Standard library imports
+### Standard library
 
-Mako ships with a standard library. Import its modules by name (no `./` prefix):
+Pull std units by name (no `./` prefix) and always qualify:
 
 ```mko
-import "strings"
-import "net/http"
+pull "strings"
+pull "net/http"
 
 fn main() {
     print(strings.trim("  hello  "))

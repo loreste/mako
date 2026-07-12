@@ -1,0 +1,59 @@
+// Wave 10 language features: generics, on-methods, tuples, typed chan
+
+fn identity[T](x: T) -> T {
+    return x
+}
+
+struct Pt {
+    x: int
+    y: int
+}
+
+on Pt {
+    fn sum(self) -> int {
+        return self.x + self.y
+    }
+    // Regression: self must not share type with following params
+    fn scale(self, k: int) -> int {
+        return (self.x + self.y) * k
+    }
+}
+
+fn TestGenerics() {
+    assert_eq(identity(7), 7)
+    assert_eq_str(identity("ok"), "ok")
+}
+
+fn TestOnMethods() {
+    let p = Pt { x: 1, y: 2 }
+    assert_eq(p.sum(), 3)
+    assert_eq(p.scale(4), 12)
+}
+
+fn TestTuples() {
+    let t = (4, 5)
+    match t {
+        (a, b) => assert_eq(a + b, 9),
+    }
+}
+
+fn TestChanOpenInt() {
+    let ch = chan_open[int](1)
+    let _ = ch.send(11)
+    assert_eq(ch.recv(), 11)
+    ch.close()
+}
+
+fn TestChanOpenString() {
+    let cs = make(chan[string], 1)
+    let _ = cs.send("wave10")
+    assert_eq_str(cs.recv(), "wave10")
+    cs.close()
+}
+
+fn TestChanNewCompat() {
+    let ch = chan_new(1)
+    let _ = ch.send(3)
+    assert_eq(ch.recv(), 3)
+    ch.close()
+}

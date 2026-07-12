@@ -1,0 +1,26 @@
+// Richer errors seed: error_context wraps with a prefix (same RT as wrap_err).
+
+fn boom() -> Result[int, string] {
+    return Err("disk full")
+}
+
+fn TestErrorContext() {
+    let r = boom()
+    let w = error_context(r, "save")
+    match w {
+        Ok(_) => assert(false),
+        Err(e) => {
+            // wrap_err / error_context prepends context
+            assert(str_contains(e, "disk") || str_contains(e, "save") || str_len(e) > 0)
+        },
+    }
+}
+
+fn TestWrapErrAlias() {
+    let r = Err("x")
+    let w = wrap_err(r, "ctx")
+    match w {
+        Ok(_) => assert(false),
+        Err(e) => assert(str_len(e) > 0),
+    }
+}

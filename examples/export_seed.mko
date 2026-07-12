@@ -1,0 +1,19 @@
+// export marks package-public API (enforced when visibility=explicit)
+
+export fn public_add(a: int, b: int) -> int {
+    return a + b
+}
+
+fn private_helper(n: int) -> int {
+    return n * 2
+}
+
+export struct Config {
+    port: int
+}
+
+fn main() {
+    print_int(public_add(2, private_helper(3)))
+    let c = Config { port: 8080 }
+    print_int(c.port)
+}

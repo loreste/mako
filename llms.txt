@@ -7,15 +7,22 @@
 ## What is Mako?
 
 Mako is a compiled, statically typed programming language. Source files use the
-`.mko` extension. The compiler translates Mako source to C, then to a native
-binary via clang. There is no garbage collector. Memory safety is achieved
-through an ownership model based on `hold` (move semantics) and `share`
-(reference-counted) bindings, plus arena allocators for scoped bulk allocation.
+`.mko` extension. **Unique language, unique syntax** (Mako flair: `fn`, `let`,
+`on`, `pack`, `pull`, `hold`, `share`, `arena`, `crew`, `kick`). Exists to fix
+Go/Rust *pain* (GC/nil/err noise/leaks; lifetimes/traits/async coloring) without
+cloning either — docs/PAIN_POINTS.md. Dual spellings are compat sugar only.
+Identity: docs/IDENTITY.md (~90%). Compiles to C then native via clang. No GC.
 
 Key properties:
+- Mako surface: fn, let, on Type, pack/pull, hold/share/arena, crew/kick/join, match, export
+- Low ceremony: infer locals, print(any common), string ==, ?, match routes — docs/ERGONOMICS.md
+- Units: always pack-qualified; preferred `pull "p" as n` (dual: import)
+- Dual sugar still parses: func, :=, var, package, import, type T struct, receivers
+- Speed is the game: as close to Rust as possible (no GC; -O3 -flto; docs/SPEED.md)
+- Concurrency first-class: crew/kick/join, channels, select, actor (structured)
+- Parallelism first-class: fan + multi-kick crews
 - Compiles .mko -> C -> native binary (debug -O0, release -O3 -flto)
 - No GC: ownership via hold/share, arenas for scoped allocation
-- Structured concurrency via crew blocks (jobs cannot outlive their crew)
 - Result/Option types enforced (no null, unused Result is a compile error)
 - Batteries-included stdlib: HTTP server, JSON, SQL, crypto, regex, UUID, etc.
 - WASM/WASI target support (wasm32-wasip1)
@@ -40,7 +47,7 @@ mako run main.mko
 mako build main.mko
 ```
 
-## Hello World
+## Hello World (preferred Mako syntax)
 
 ```mko
 fn main() {
@@ -56,16 +63,20 @@ fn fib(n: int) -> int {
 }
 ```
 
+Identity: docs/IDENTITY.md. Dual sugar: func, :=, a int still parse.
+
 ## Core Concepts
 
 - **Types:** int, int8, int32, int64, uint64, float, bool, string, byte, void
-- **Composite:** []T (slices), map[K]V, chan[T], Option[T], Result[T, E]
-- **Declarations:** fn, struct, enum, actor, interface, const, extern "C"
+- **Composite:** []T (slices), map[K]V, chan[T], Option[T], Result[T, E], (T, U) tuples
+- **Declarations:** fn, struct, enum, actor, interface, const, export (preferred)
+- **Methods:** on T { fn M(self) … } preferred; T_M free functions; dual Go receivers
+- **Locals:** let / let mut preferred; dual := / var
 - **Control flow:** if/else, while, for/in/range, match, break, continue, return, defer
 - **Ownership:** hold (move), share (RC), arena (bump allocator)
-- **Concurrency:** crew { t.kick(f()); t.join() }, fan(xs, |x| x * 2), channels, select
-- **Error handling:** Result[T, E], Ok(v), Err(e), error("msg"), ?, wrap_err, match
-- **Imports:** import "./file.mko", import "strings", import "pkg" as alias
+- **Concurrency:** crew { t.kick(f()); j.join() }, fan, channels, select
+- **Error handling:** Result[T, E], Ok/Err, error("msg"), ?, multi-return
+- **Units:** `pack name`; `pull "path"` / `pull "path" as name` / `pull ( … )`; always qualify (`pkg.fn`); dual `import`/`package`; specialized `_` / `.`
 - **Testing:** fn TestFoo() { assert_eq(1, 1) } in *_test.mko files
 
 ## Build Commands

@@ -1,7 +1,10 @@
-fn lib_add(a: int, b: int) -> int {
+// Local pack — importers qualify as lib.*
+pack lib
+
+fn add(a: int, b: int) -> int {
     return a + b
 }
 
-fn lib_greet(name: string) -> string {
+fn greet(name: string) -> string {
     return "hi " + name
 }

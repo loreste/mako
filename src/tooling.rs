@@ -106,6 +106,15 @@ pub fn check_file(path: &Path) -> Result<Program, ()> {
         }
         d.emit();
     })?;
+    for f in tc.mono_fns {
+        if !program
+            .items
+            .iter()
+            .any(|i| matches!(i, Item::Fn(x) if x.name == f.name))
+        {
+            program.items.push(Item::Fn(f));
+        }
+    }
     Ok(program)
 }
 
@@ -170,6 +179,15 @@ fn check_file_structured(path: &Path) -> Result<Program, Diagnostic> {
     }
     tc.check(&program)
         .map_err(|e| diagnostic_from_type_error(&path_s, &src, e))?;
+    for f in tc.mono_fns {
+        if !program
+            .items
+            .iter()
+            .any(|i| matches!(i, Item::Fn(x) if x.name == f.name))
+        {
+            program.items.push(Item::Fn(f));
+        }
+    }
     Ok(program)
 }
 
@@ -221,14 +239,17 @@ fn top_level_symbol_count(program: &Program) -> usize {
                     | Item::Interface(_)
                     | Item::ExternC(_)
                     | Item::Const(_)
+                    | Item::On(_)
+                    | Item::Package { .. }
             )
         })
         .count()
 }
 
-/// Apply `[package] systems = true` / `gc = true` from mako.toml.
+/// Apply `[package] systems = true` / `gc = true` / visibility / profile from mako.toml.
 pub fn apply_package_safety_flags(tc: &mut TypeChecker, toml: &str) {
     let mut in_package = false;
+    let mut in_profile_release = false;
     for line in toml.lines() {
         let t = line.trim();
         if t.starts_with('#') || t.is_empty() {
@@ -236,28 +257,95 @@ pub fn apply_package_safety_flags(tc: &mut TypeChecker, toml: &str) {
         }
         if t == "[package]" {
             in_package = true;
+            in_profile_release = false;
+            continue;
+        }
+        if t == "[profile.release]" {
+            in_package = false;
+            in_profile_release = true;
             continue;
         }
         if t.starts_with('[') {
             in_package = false;
+            in_profile_release = false;
             continue;
         }
-        if !in_package {
-            continue;
+        if in_package {
+            if t.starts_with("systems") && t.contains('=') {
+                let v = t.split('=').nth(1).unwrap_or("").trim();
+                tc.systems_crate = v == "true" || v == "1";
+            }
+            if (t.starts_with("gc") || t.starts_with("optional_gc")) && t.contains('=') {
+                let v = t.split('=').nth(1).unwrap_or("").trim();
+                tc.gc_enabled = v == "true" || v == "1";
+            }
+            if t.starts_with("visibility") && t.contains('=') {
+                let v = t
+                    .split('=')
+                    .nth(1)
+                    .unwrap_or("")
+                    .trim()
+                    .trim_matches('"')
+                    .trim_matches('\'');
+                tc.explicit_visibility = v == "explicit";
+            }
         }
-        if t.starts_with("systems") && t.contains('=') {
-            let v = t.split('=').nth(1).unwrap_or("").trim();
-            tc.systems_crate = v == "true" || v == "1";
-        }
-        if (t.starts_with("gc") || t.starts_with("optional_gc")) && t.contains('=') {
-            let v = t.split('=').nth(1).unwrap_or("").trim();
-            tc.gc_enabled = v == "true" || v == "1";
+        if in_profile_release && t.starts_with("bounds_checks") && t.contains('=') {
+            let v = t
+                .split('=')
+                .nth(1)
+                .unwrap_or("")
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            // "on" | "always" → keep checks even under NDEBUG; default/debug_only = current
+            tc.bounds_checks_always = v == "on" || v == "always" || v == "true" || v == "1";
         }
     }
     // Systems crates never allow GC to weaken ownership.
     if tc.systems_crate {
         tc.gc_enabled = false;
     }
+}
+
+/// Release/profile flags for codegen (bounds checks, source maps).
+#[derive(Clone, Debug, Default)]
+pub struct CodegenProfile {
+    pub bounds_checks_always: bool,
+    pub source_file: Option<String>,
+}
+
+pub fn codegen_profile_from_toml(toml: &str, source_file: Option<String>) -> CodegenProfile {
+    let mut p = CodegenProfile {
+        bounds_checks_always: false,
+        source_file,
+    };
+    let mut in_profile_release = false;
+    for line in toml.lines() {
+        let t = line.trim();
+        if t.starts_with('#') || t.is_empty() {
+            continue;
+        }
+        if t == "[profile.release]" {
+            in_profile_release = true;
+            continue;
+        }
+        if t.starts_with('[') {
+            in_profile_release = false;
+            continue;
+        }
+        if in_profile_release && t.starts_with("bounds_checks") && t.contains('=') {
+            let v = t
+                .split('=')
+                .nth(1)
+                .unwrap_or("")
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            p.bounds_checks_always = v == "on" || v == "always" || v == "true" || v == "1";
+        }
+    }
+    p
 }
 
 /// Canonical pretty-printer — see `crate::fmt`.
@@ -315,7 +403,7 @@ fn fmt_type(t: &TypeExpr) -> String {
     format!("{t}")
 }
 
-pub fn run_lint(path: &Path) -> Result<(), ()> {
+pub fn run_lint(path: &Path, identity: bool) -> Result<(), ()> {
     let files = collect_mako_files(path);
     let mut issues = 0;
     for f in &files {
@@ -357,14 +445,88 @@ pub fn run_lint(path: &Path) -> Result<(), ()> {
                 issues += 1;
             }
         }
+        if identity {
+            issues += lint_identity_surface(f);
+        }
     }
     if issues == 0 {
-        println!("mako lint: ok ({} file(s))", files.len());
+        if identity {
+            println!(
+                "mako lint: ok ({} file(s), identity surface clean)",
+                files.len()
+            );
+        } else {
+            println!("mako lint: ok ({} file(s))", files.len());
+        }
         Ok(())
     } else {
         eprintln!("mako lint: {issues} issue(s)");
         Err(())
     }
+}
+
+/// Style-only: dual spellings are valid, but preferred surface is Mako flair.
+/// See docs/IDENTITY.md — does not fail typecheck.
+fn lint_identity_surface(path: &Path) -> usize {
+    let Ok(src) = fs::read_to_string(path) else {
+        return 0;
+    };
+    let mut n = 0;
+    for (i, line) in src.lines().enumerate() {
+        let line_no = i + 1;
+        let trimmed = line.trim();
+        if trimmed.starts_with("//") {
+            continue;
+        }
+        // Strip // comments for scanning
+        let code = trimmed.split("//").next().unwrap_or(trimmed);
+        let checks: &[(&str, &str)] = &[
+            ("func ", "prefer `fn` (Mako) over dual `func`"),
+            ("\tfunc ", "prefer `fn` (Mako) over dual `func`"),
+            ("func(", "prefer `fn` (Mako) over dual `func`"),
+            (" var ", "prefer `let mut` (Mako) over dual `var`"),
+            ("\tvar ", "prefer `let mut` (Mako) over dual `var`"),
+            ("package ", "prefer `pack` (Mako) over dual `package`"),
+            ("type ", "prefer `struct`/`enum` (Mako) over dual `type … struct`"),
+            (":=", "prefer `let` / `let mut` (Mako) over dual `:="),
+        ];
+        for (pat, msg) in checks {
+            if code.contains(pat) {
+                // Avoid `typeof` / false positives for type in comments already stripped
+                if *pat == "type " && !code.contains("struct") && !code.contains("enum") {
+                    continue;
+                }
+                if *pat == " var " || *pat == "\tvar " {
+                    // skip `variant` etc.
+                    if !code.split_whitespace().any(|w| w == "var" || w.starts_with("var "))
+                        && !code.contains(" var ")
+                        && !code.starts_with("var ")
+                    {
+                        continue;
+                    }
+                }
+                eprintln!(
+                    "lint(identity): {}:{}: {msg}",
+                    path.display(),
+                    line_no
+                );
+                n += 1;
+                break; // one identity hit per line
+            }
+        }
+        // import vs pull (prefer pull)
+        if code.starts_with("import ") || code.starts_with("import(") || code.contains("\nimport ") {
+            if code.trim_start().starts_with("import") {
+                eprintln!(
+                    "lint(identity): {}:{}: prefer `pull` (Mako) over dual `import`",
+                    path.display(),
+                    line_no
+                );
+                n += 1;
+            }
+        }
+    }
+    n
 }
 
 pub fn run_doc(path: &Path, out_dir: &Path) -> Result<(), ()> {
@@ -540,17 +702,19 @@ pub fn run_doc(path: &Path, out_dir: &Path) -> Result<(), ()> {
                     md.push_str(&c.name);
                     md.push_str(" = ...\n```\n\n");
                 }
-                Item::Import { path, alias } => {
-                    md.push_str("## import\n\n```mako\nimport \"");
-                    md.push_str(path);
-                    md.push('"');
-                    if let Some(a) = alias {
-                        md.push_str(" as ");
-                        md.push_str(a);
-                    }
+                Item::Import { path, alias, mode } => {
+                    md.push_str("## import\n\n```mako\n");
+                    md.push_str(&match mode {
+                        crate::ast::ImportMode::Blank => format!("pull _ \"{path}\""),
+                        crate::ast::ImportMode::Dot => format!("pull . \"{path}\""),
+                        crate::ast::ImportMode::Normal => match alias {
+                            Some(a) => format!("pull \"{path}\" as {a}"),
+                            None => format!("pull \"{path}\""),
+                        },
+                    });
                     md.push_str("\n```\n\n");
                 }
-                Item::Actor(_) | Item::ExternC(_) => {}
+                Item::Actor(_) | Item::ExternC(_) | Item::On(_) | Item::Package { .. } => {}
             }
         }
         let out = out_dir.join(format!("{stem}.md"));
@@ -643,16 +807,33 @@ pub fn run_metadata(path: &Path) -> Result<(), ()> {
                 )),
                 Item::Interface(i) => symbols.push(interface_symbol_json(&file, i)),
                 Item::ExternC(e) => symbols.push(extern_symbol_json(&file, e)),
+                Item::On(on) => symbols.push(format!(
+                    r#"{{"id":"{}","kind":"on","name":"{}","methods":{}}}"#,
+                    json_escape(&symbol_id(&file, &on.ty)),
+                    json_escape(&on.ty),
+                    on.methods.len()
+                )),
+                Item::Package { name } => symbols.push(format!(
+                    r#"{{"id":"{}","kind":"package","name":"{}"}}"#,
+                    json_escape(&symbol_id(&file, name)),
+                    json_escape(name)
+                )),
                 Item::Const(c) => symbols.push(format!(
                     r#"{{"id":"{}","kind":"const","name":"{}"}}"#,
                     json_escape(&symbol_id(&file, &c.name)),
                     json_escape(&c.name)
                 )),
-                Item::Import { path, alias } => {
+                Item::Import { path, alias, mode } => {
+                    let mode_s = match mode {
+                        crate::ast::ImportMode::Normal => "normal",
+                        crate::ast::ImportMode::Blank => "blank",
+                        crate::ast::ImportMode::Dot => "dot",
+                    };
                     imports.push(format!(
-                        r#"{{"path":"{}","alias":{}}}"#,
+                        r#"{{"path":"{}","alias":{},"mode":"{}"}}"#,
                         json_escape(path),
-                        optional_string_json(alias.as_deref())
+                        optional_string_json(alias.as_deref()),
+                        mode_s
                     ));
                     edge_json.push(format!(
                         r#"{{"from":"{}","to":"{}","kind":"import"}}"#,
@@ -738,7 +919,11 @@ fn api_item_signature(item: &Item) -> Option<(String, String)> {
         Item::Interface(i) => Some((i.name.clone(), api_interface_signature(i))),
         Item::ExternC(e) => Some((e.name.clone(), api_extern_signature(e))),
         Item::Const(c) => Some((c.name.clone(), format!("const {}", c.name))),
-        Item::Import { .. } => None,
+        Item::On(on) => Some((
+            on.ty.clone(),
+            format!("on {} ({} methods)", on.ty, on.methods.len()),
+        )),
+        Item::Package { .. } | Item::Import { .. } => None,
     }
 }
 
@@ -961,7 +1146,7 @@ fn collect_calls_block(block: &Block, out: &mut Vec<String>) {
 
 fn collect_calls_stmt(stmt: &Stmt, out: &mut Vec<String>) {
     match stmt {
-        Stmt::Let { init, .. } => collect_calls_expr(init, out),
+        Stmt::Let { init, .. } | Stmt::LetMulti { init, .. } => collect_calls_expr(init, out),
         Stmt::LetCommaOk { base, index, .. } | Stmt::IndexAssign { base, index, .. } => {
             collect_calls_expr(base, out);
             collect_calls_expr(index, out);
@@ -978,10 +1163,14 @@ fn collect_calls_stmt(stmt: &Stmt, out: &mut Vec<String>) {
         Stmt::Return(Some(expr)) => collect_calls_expr(expr, out),
         Stmt::Return(None) | Stmt::Break(_) | Stmt::Continue(_) => {}
         Stmt::If {
+            init,
             cond,
             then_block,
             else_block,
         } => {
+            if let Some(init) = init {
+                collect_calls_stmt(init, out);
+            }
             collect_calls_expr(cond, out);
             collect_calls_block(then_block, out);
             if let Some(block) = else_block {
@@ -1065,16 +1254,22 @@ fn collect_calls_expr(expr: &Expr, out: &mut Vec<String>) {
                 collect_calls_expr(bound, out);
             }
         }
+        Expr::StructLitPos { values, .. } => {
+            for value in values {
+                collect_calls_expr(value, out);
+            }
+        }
         Expr::StructLit { fields, .. } => {
             for (_, value) in fields {
                 collect_calls_expr(value, out);
             }
         }
-        Expr::Array(items) => {
+        Expr::Array(items) | Expr::Tuple(items) => {
             for item in items {
                 collect_calls_expr(item, out);
             }
         }
+        Expr::ChanOpen { cap, .. } => collect_calls_expr(cap, out),
         Expr::Convert { args, .. } => {
             for arg in args {
                 collect_calls_expr(arg, out);
@@ -1673,7 +1868,85 @@ pub fn sibling_package_files(test_file: &Path) -> Vec<PathBuf> {
     out
 }
 
-fn prefix_item_names(item: &mut Item, alias: &str) {
+/// Package-level names for prefix rewrite.
+///
+/// Critical: function names must **not** rewrite ordinary Idents (params/locals).
+/// e.g. `fn body(...)` + `http_post(url, body)` must leave the param `body` alone;
+/// only call callees `body(...)` and const refs are rewritten.
+/// Types are separate so `fn int` in `fmt` never rewrites the builtin type `int`.
+struct ImportNameSets {
+    /// Callables: fns, actors, externs, free methods — rewrite only as call callees.
+    fns: std::collections::HashSet<String>,
+    /// Consts — rewrite bare Ident refs.
+    consts: std::collections::HashSet<String>,
+    /// Structs, enums, interfaces, and `on Type` type names.
+    types: std::collections::HashSet<String>,
+}
+
+/// Make a C-safe / Mako-internal qualifier (`github.com/x` → `github_com_x`).
+pub fn sanitize_pkg_alias(alias: &str) -> String {
+    let mut out = String::with_capacity(alias.len());
+    for c in alias.chars() {
+        if c.is_ascii_alphanumeric() || c == '_' {
+            out.push(c);
+        } else {
+            out.push('_');
+        }
+    }
+    if out.is_empty() || out.as_bytes()[0].is_ascii_digit() {
+        out.insert(0, '_');
+    }
+    out
+}
+
+/// Apply package qualifier: rename defs and rewrite internal references.
+fn apply_import_prefix(program: &mut Program, alias: &str) {
+    let alias = sanitize_pkg_alias(alias);
+    let alias = alias.as_str();
+    let mut names = ImportNameSets {
+        fns: std::collections::HashSet::new(),
+        consts: std::collections::HashSet::new(),
+        types: std::collections::HashSet::new(),
+    };
+    for item in &program.items {
+        match item {
+            Item::Fn(f) => {
+                names.fns.insert(f.name.clone());
+            }
+            Item::Const(c) => {
+                names.consts.insert(c.name.clone());
+            }
+            Item::Struct(s) => {
+                names.types.insert(s.name.clone());
+            }
+            Item::Enum(e) => {
+                names.types.insert(e.name.clone());
+            }
+            Item::Interface(i) => {
+                names.types.insert(i.name.clone());
+            }
+            Item::Actor(a) => {
+                names.fns.insert(a.name.clone());
+            }
+            Item::ExternC(e) => {
+                names.fns.insert(e.name.clone());
+            }
+            Item::On(on) => {
+                names.types.insert(on.ty.clone());
+                for m in &on.methods {
+                    names.fns.insert(m.name.clone());
+                }
+            }
+            Item::Package { .. } | Item::Import { .. } => {}
+        }
+    }
+    for item in &mut program.items {
+        prefix_item_def(item, alias);
+        rewrite_item_refs(item, alias, &names);
+    }
+}
+
+fn prefix_item_def(item: &mut Item, alias: &str) {
     match item {
         Item::Fn(f) => {
             f.name = format!("{alias}__{}", f.name);
@@ -1696,7 +1969,294 @@ fn prefix_item_names(item: &mut Item, alias: &str) {
         Item::ExternC(e) => {
             e.name = format!("{alias}__{}", e.name);
         }
-        Item::Import { .. } => {}
+        Item::On(on) => {
+            on.ty = format!("{alias}__{}", on.ty);
+            for m in &mut on.methods {
+                m.name = format!("{alias}__{}", m.name);
+            }
+        }
+        Item::Package { .. } | Item::Import { .. } => {}
+    }
+}
+
+fn rewrite_item_refs(item: &mut Item, alias: &str, names: &ImportNameSets) {
+    match item {
+        Item::Fn(f) => {
+            for p in &mut f.params {
+                rewrite_type_expr(&mut p.ty, alias, names);
+            }
+            if let Some(ret) = &mut f.ret {
+                rewrite_type_expr(ret, alias, names);
+            }
+            rewrite_block(&mut f.body, alias, names);
+        }
+        Item::Const(c) => rewrite_expr(&mut c.value, alias, names),
+        Item::Struct(s) => {
+            for (_, ty) in &mut s.fields {
+                rewrite_type_expr(ty, alias, names);
+            }
+        }
+        Item::Enum(e) => {
+            for v in &mut e.variants {
+                for t in &mut v.fields {
+                    rewrite_type_expr(t, alias, names);
+                }
+            }
+        }
+        Item::Interface(i) => {
+            for (_, params, ret) in &mut i.methods {
+                for t in params {
+                    rewrite_type_expr(t, alias, names);
+                }
+                rewrite_type_expr(ret, alias, names);
+            }
+        }
+        Item::ExternC(e) => {
+            for p in &mut e.params {
+                rewrite_type_expr(&mut p.ty, alias, names);
+            }
+            if let Some(ret) = &mut e.ret {
+                rewrite_type_expr(ret, alias, names);
+            }
+        }
+        Item::On(on) => {
+            for m in &mut on.methods {
+                for p in &mut m.params {
+                    rewrite_type_expr(&mut p.ty, alias, names);
+                }
+                if let Some(ret) = &mut m.ret {
+                    rewrite_type_expr(ret, alias, names);
+                }
+                rewrite_block(&mut m.body, alias, names);
+            }
+        }
+        Item::Actor(a) => {
+            for arm in &mut a.receives {
+                rewrite_block(&mut arm.body, alias, names);
+            }
+        }
+        Item::Package { .. } | Item::Import { .. } => {}
+    }
+}
+
+fn rewrite_type_expr(ty: &mut TypeExpr, alias: &str, names: &ImportNameSets) {
+    match ty {
+        TypeExpr::Named(n) => {
+            if names.types.contains(n) {
+                *n = format!("{alias}__{n}");
+            }
+        }
+        TypeExpr::Array(inner) => rewrite_type_expr(inner, alias, names),
+        TypeExpr::Map(k, v) => {
+            rewrite_type_expr(k, alias, names);
+            rewrite_type_expr(v, alias, names);
+        }
+        TypeExpr::Generic(_, args) | TypeExpr::Tuple(args) => {
+            for a in args {
+                rewrite_type_expr(a, alias, names);
+            }
+        }
+        TypeExpr::Fn(params, ret) => {
+            for p in params {
+                rewrite_type_expr(p, alias, names);
+            }
+            rewrite_type_expr(ret, alias, names);
+        }
+    }
+}
+
+fn rewrite_block(b: &mut Block, alias: &str, names: &ImportNameSets) {
+    for s in &mut b.stmts {
+        rewrite_stmt(s, alias, names);
+    }
+}
+
+fn rewrite_stmt(s: &mut Stmt, alias: &str, names: &ImportNameSets) {
+    match s {
+        Stmt::Let { ty, init, .. } => {
+            if let Some(t) = ty {
+                rewrite_type_expr(t, alias, names);
+            }
+            rewrite_expr(init, alias, names);
+        }
+        Stmt::LetMulti { init, .. } => rewrite_expr(init, alias, names),
+        Stmt::Assign { value, .. } => rewrite_expr(value, alias, names),
+        Stmt::IndexAssign {
+            base,
+            index,
+            value,
+        } => {
+            rewrite_expr(base, alias, names);
+            rewrite_expr(index, alias, names);
+            rewrite_expr(value, alias, names);
+        }
+        Stmt::FieldAssign { base, value, .. } => {
+            rewrite_expr(base, alias, names);
+            rewrite_expr(value, alias, names);
+        }
+        Stmt::Expr(e) | Stmt::Return(Some(e)) => rewrite_expr(e, alias, names),
+        Stmt::Return(None) | Stmt::Break(_) | Stmt::Continue(_) => {}
+        Stmt::If {
+            init,
+            cond,
+            then_block,
+            else_block,
+        } => {
+            if let Some(init) = init {
+                rewrite_stmt(init, alias, names);
+            }
+            rewrite_expr(cond, alias, names);
+            rewrite_block(then_block, alias, names);
+            if let Some(eb) = else_block {
+                rewrite_block(eb, alias, names);
+            }
+        }
+        Stmt::While { cond, body, .. } => {
+            rewrite_expr(cond, alias, names);
+            rewrite_block(body, alias, names);
+        }
+        Stmt::For { iter, body, .. } => {
+            rewrite_expr(iter, alias, names);
+            rewrite_block(body, alias, names);
+        }
+        Stmt::Defer { body }
+        | Stmt::Crew { body, .. }
+        | Stmt::Arena { body, .. }
+        | Stmt::Unsafe { body } => rewrite_block(body, alias, names),
+        Stmt::Select {
+            timeout_ms,
+            arms,
+            default_arm,
+        } => {
+            rewrite_expr(timeout_ms, alias, names);
+            for (_, b) in arms {
+                rewrite_block(b, alias, names);
+            }
+            if let Some(d) = default_arm {
+                rewrite_block(d, alias, names);
+            }
+        }
+        Stmt::LetCommaOk { base, index, .. } => {
+            rewrite_expr(base, alias, names);
+            rewrite_expr(index, alias, names);
+        }
+    }
+}
+
+fn rewrite_expr(e: &mut Expr, alias: &str, names: &ImportNameSets) {
+    match e {
+        Expr::Ident(n) => {
+            // Const refs only — never rewrite params/locals that share a fn name.
+            if names.consts.contains(n) {
+                *n = format!("{alias}__{n}");
+            }
+        }
+        Expr::Call { callee, args } => {
+            // Rewrite package fn callees: `add(1,2)` → `lib__add(1,2)`.
+            if let Expr::Ident(n) = callee.as_mut() {
+                if names.fns.contains(n) {
+                    *n = format!("{alias}__{n}");
+                }
+            } else {
+                rewrite_expr(callee, alias, names);
+            }
+            for a in args {
+                rewrite_expr(a, alias, names);
+            }
+        }
+        Expr::Method {
+            receiver,
+            args,
+            ..
+        } => {
+            rewrite_expr(receiver, alias, names);
+            for a in args {
+                rewrite_expr(a, alias, names);
+            }
+        }
+        Expr::Binary { left, right, .. } => {
+            rewrite_expr(left, alias, names);
+            rewrite_expr(right, alias, names);
+        }
+        Expr::Unary { expr, .. }
+        | Expr::Field { base: expr, .. }
+        | Expr::Try(expr)
+        | Expr::Join(expr)
+        | Expr::Kick { expr, .. } => rewrite_expr(expr, alias, names),
+        Expr::Index { base, index } => {
+            rewrite_expr(base, alias, names);
+            rewrite_expr(index, alias, names);
+        }
+        Expr::Slice {
+            base,
+            low,
+            high,
+            max,
+        } => {
+            rewrite_expr(base, alias, names);
+            if let Some(x) = low {
+                rewrite_expr(x, alias, names);
+            }
+            if let Some(x) = high {
+                rewrite_expr(x, alias, names);
+            }
+            if let Some(x) = max {
+                rewrite_expr(x, alias, names);
+            }
+        }
+        Expr::StructLit { name, fields } => {
+            if names.types.contains(name) {
+                *name = format!("{alias}__{name}");
+            }
+            for (_, v) in fields {
+                rewrite_expr(v, alias, names);
+            }
+        }
+        Expr::StructLitPos { name, values } => {
+            if names.types.contains(name) {
+                *name = format!("{alias}__{name}");
+            }
+            for v in values {
+                rewrite_expr(v, alias, names);
+            }
+        }
+        Expr::Array(xs) | Expr::Tuple(xs) => {
+            for x in xs {
+                rewrite_expr(x, alias, names);
+            }
+        }
+        Expr::Convert { ty, args } => {
+            rewrite_type_expr(ty, alias, names);
+            for a in args {
+                rewrite_expr(a, alias, names);
+            }
+        }
+        Expr::Make { ty, len, cap } => {
+            rewrite_type_expr(ty, alias, names);
+            if let Some(l) = len {
+                rewrite_expr(l, alias, names);
+            }
+            if let Some(c) = cap {
+                rewrite_expr(c, alias, names);
+            }
+        }
+        Expr::ChanOpen { elem, cap } => {
+            rewrite_type_expr(elem, alias, names);
+            rewrite_expr(cap, alias, names);
+        }
+        Expr::Lambda { body, .. } => rewrite_expr(body, alias, names),
+        Expr::Match { scrutinee, arms } => {
+            rewrite_expr(scrutinee, alias, names);
+            for a in arms {
+                rewrite_expr(&mut a.body, alias, names);
+            }
+        }
+        Expr::Block(b) => rewrite_block(b, alias, names),
+        Expr::Fan { collection, mapper } => {
+            rewrite_expr(collection, alias, names);
+            rewrite_expr(mapper, alias, names);
+        }
+        Expr::Int(_) | Expr::Float(_) | Expr::Bool(_) | Expr::String(_) => {}
     }
 }
 
@@ -1832,10 +2392,24 @@ pub fn valid_dep_cache_name(name: &str) -> bool {
     !name.is_empty()
         && name != "."
         && name != ".."
-        && name
-            .bytes()
-            .all(|b| matches!(b, b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_' | b'-' | b'.'))
         && !name.contains("..")
+        && name.bytes().all(|b| {
+            matches!(
+                b,
+                b'a'..=b'z'
+                    | b'A'..=b'Z'
+                    | b'0'..=b'9'
+                    | b'_'
+                    | b'-'
+                    | b'.'
+                    | b'/'
+            )
+        })
+}
+
+/// Sanitize import-path dep names for filesystem cache keys (`a/b` → `a!b`).
+pub fn dep_cache_key(name: &str) -> String {
+    name.replace('/', "!").replace('\\', "!")
 }
 
 /// Extract `"value"` after `key` in a TOML-ish inline table line.
@@ -1925,15 +2499,13 @@ pub fn parse_manifest_deps(text: &str) -> Vec<ManifestDep> {
     deps
 }
 
-/// Relative cache dir for a fetched git dep: `.mako/deps/<name>`.
+/// Relative cache dir for a fetched git dep: `.mako/deps/<sanitized>`.
 pub fn git_dep_cache_rel(name: &str) -> String {
-    debug_assert!(valid_dep_cache_name(name));
-    format!(".mako/deps/{name}")
+    format!(".mako/deps/{}", dep_cache_key(name))
 }
 
 pub fn git_dep_cache_abs(root: &Path, name: &str) -> PathBuf {
-    debug_assert!(valid_dep_cache_name(name));
-    root.join(".mako").join("deps").join(name)
+    root.join(".mako").join("deps").join(dep_cache_key(name))
 }
 
 /// Resolve on-disk roots for compile/list: path deps as declared; git deps from
@@ -2187,6 +2759,7 @@ fn merge_path_deps_from_manifest(
                 e
             }
         })?;
+        let mut pkg_prog = Program { items: Vec::new() };
         for src in sources {
             let canon = src
                 .canonicalize()
@@ -2196,10 +2769,11 @@ fn merge_path_deps_from_manifest(
             }
             let mut imported = parse_program_file(&canon)?;
             strip_main_fn(&mut imported);
-            for item in &mut imported.items {
-                prefix_item_names(item, &dep.name);
-            }
-            program.items.extend(imported.items);
+            pkg_prog.items.extend(imported.items);
+        }
+        if !pkg_prog.items.is_empty() {
+            apply_import_prefix(&mut pkg_prog, &dep.name);
+            program.items.extend(pkg_prog.items);
         }
         // Transitive: walk the dependency's package directory (or parent of a .mko file).
         let next_dir = if full.is_file() {
@@ -2244,6 +2818,8 @@ pub fn merge_path_dependencies(entry: &Path, mut program: Program) -> Result<Pro
 
 /// Resolve `import "./path.mko"` items by merging imported files (cycle-safe).
 /// Imports are relative to `from_file`'s directory. Nested imports are followed.
+/// When importer `mako.toml` has `visibility = "explicit"`, only `export`/capital
+/// items from pulled packs are merged.
 pub fn resolve_imports(from_file: &Path, program: Program) -> Result<Program, String> {
     let mut seen = std::collections::HashSet::new();
     if let Some(canon) = from_file.canonicalize().ok() {
@@ -2251,13 +2827,64 @@ pub fn resolve_imports(from_file: &Path, program: Program) -> Result<Program, St
     } else {
         seen.insert(from_file.to_path_buf());
     }
-    resolve_imports_rec(from_file, program, &mut seen)
+    let explicit = read_visibility_explicit(from_file);
+    resolve_imports_rec(from_file, program, &mut seen, explicit)
+}
+
+/// `visibility = "explicit"` from nearest `mako.toml` (importer).
+fn read_visibility_explicit(from_file: &Path) -> bool {
+    let Some(dir) = find_nearest_manifest_dir(from_file) else {
+        return false;
+    };
+    let Ok(text) = fs::read_to_string(dir.join("mako.toml")) else {
+        return false;
+    };
+    for line in text.lines() {
+        let t = line.trim();
+        if t.starts_with('#') {
+            continue;
+        }
+        if t.starts_with("visibility") && t.contains('=') {
+            let v = t
+                .split('=')
+                .nth(1)
+                .unwrap_or("")
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            return v == "explicit";
+        }
+    }
+    false
+}
+
+fn name_looks_exported(name: &str) -> bool {
+    name.chars()
+        .next()
+        .map(|c| c.is_ascii_uppercase())
+        .unwrap_or(false)
+}
+
+/// Drop non-exported items when `visibility = "explicit"`.
+fn filter_exported_only(program: &mut Program) {
+    program.items.retain(|item| match item {
+        Item::Fn(f) => f.exported,
+        Item::Struct(s) => s.exported,
+        Item::Enum(e) => e.exported,
+        Item::Interface(i) => name_looks_exported(&i.name),
+        Item::On(o) => o.exported,
+        Item::Const(c) => name_looks_exported(&c.name),
+        Item::Actor(a) => name_looks_exported(&a.name),
+        Item::ExternC(e) => name_looks_exported(&e.name),
+        Item::Package { .. } | Item::Import { .. } => false,
+    });
 }
 
 fn resolve_imports_rec(
     from_file: &Path,
     program: Program,
     seen: &mut std::collections::HashSet<PathBuf>,
+    explicit_visibility: bool,
 ) -> Result<Program, String> {
     let base = from_file
         .parent()
@@ -2266,23 +2893,60 @@ fn resolve_imports_rec(
     let mut out = Program { items: Vec::new() };
     for item in program.items {
         match item {
-            Item::Import { path, alias } => {
-                let (target, default_alias) = resolve_import_target(&base, &path)?;
-                let canon = target.canonicalize().map_err(|e| {
-                    format!("import \"{path}\": cannot open {}: {e}", target.display())
-                })?;
-                if !seen.insert(canon.clone()) {
-                    continue; // already merged (cycle or duplicate)
-                }
-                let imported = parse_program_file_raw(&canon)?;
-                let mut merged = resolve_imports_rec(&canon, imported, seen)?;
-                let alias = alias.or(default_alias);
-                if let Some(a) = alias {
-                    for item in &mut merged.items {
-                        prefix_item_names(item, &a);
+            Item::Import { path, alias, mode } => {
+                let targets = resolve_import_targets(&base, &path)?;
+                for target in targets {
+                    let canon = target.canonicalize().map_err(|e| {
+                        format!("import \"{path}\": cannot open {}: {e}", target.display())
+                    })?;
+                    if !seen.insert(canon.clone()) {
+                        continue; // already merged (cycle or duplicate)
+                    }
+                    let imported = parse_program_file_raw(&canon)?;
+                    let pkg_name = package_name_of(&imported);
+                    let path_alias = path_default_alias(&path, &target);
+                    let mut merged =
+                        resolve_imports_rec(&canon, imported, seen, explicit_visibility)?;
+                    // Strip package clauses from merged unit (importer keeps its own).
+                    merged
+                        .items
+                        .retain(|i| !matches!(i, Item::Package { .. }));
+                    match mode {
+                        ImportMode::Blank => {
+                            // Blank import: load/typecheck dependency only.
+                            // Mako has no init(); drop symbols so they stay private.
+                            continue;
+                        }
+                        ImportMode::Dot => {
+                            if explicit_visibility {
+                                filter_exported_only(&mut merged);
+                            }
+                            out.items.extend(merged.items);
+                        }
+                        ImportMode::Normal => {
+                            // Always package-qualify. Default: package clause (≠ main), else path.
+                            let a = alias
+                                .clone()
+                                .or_else(|| {
+                                    pkg_name
+                                        .clone()
+                                        .filter(|n| n != "main" && !n.is_empty())
+                                })
+                                .or(path_alias)
+                                .ok_or_else(|| {
+                                    format!(
+                                        "pull \"{path}\": cannot derive pack name \
+                                         (add `pack name` or use `pull \"{path}\" as name`)"
+                                    )
+                                })?;
+                            if explicit_visibility {
+                                filter_exported_only(&mut merged);
+                            }
+                            apply_import_prefix(&mut merged, &a);
+                            out.items.extend(merged.items);
+                        }
                     }
                 }
-                out.items.extend(merged.items);
             }
             other => out.items.push(other),
         }
@@ -2290,9 +2954,36 @@ fn resolve_imports_rec(
     Ok(out)
 }
 
-/// Resolve `import "./x.mko"` (relative) or `import "strings"` (std package).
-/// Bare std names auto-alias to the package basename (`strings.split`).
-fn resolve_import_target(base: &Path, path: &str) -> Result<(PathBuf, Option<String>), String> {
+/// First `package name` in a program, if any.
+fn package_name_of(program: &Program) -> Option<String> {
+    for item in &program.items {
+        if let Item::Package { name } = item {
+            return Some(name.clone());
+        }
+    }
+    None
+}
+
+/// Default import name from path (last element, strip `.mko`).
+fn path_default_alias(import_path: &str, resolved: &Path) -> Option<String> {
+    let from_import = Path::new(import_path.trim_end_matches('/'))
+        .file_name()
+        .and_then(|s| s.to_str())
+        .map(|s| s.trim_end_matches(".mko").to_string())
+        .filter(|s| !s.is_empty() && s != "." && s != "..");
+    if from_import.is_some() {
+        return from_import;
+    }
+    resolved
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .map(|s| s.to_string())
+}
+
+/// Resolve `import "./x.mko"`, `import "./pkg"`, `import "strings"`,
+/// `import "encoding/json"`, or module paths (`github.com/…`, `izi-iva/pkg/…`).
+/// Returns one or more source files (directory packages may expand to lib + siblings).
+fn resolve_import_targets(base: &Path, path: &str) -> Result<Vec<PathBuf>, String> {
     let is_rel = path.starts_with("./")
         || path.starts_with("../")
         || path.starts_with('/')
@@ -2304,37 +2995,202 @@ fn resolve_import_target(base: &Path, path: &str) -> Result<(PathBuf, Option<Str
         } else {
             base.join(rel)
         };
-        return Ok((target, None));
+        return sources_at_path(&target)
+            .map_err(|e| format!("import \"{path}\": {e}"));
     }
-    // Std package: `strings`, `encoding/json`, `database/sql`, …
-    let std_root = find_std_root().ok_or_else(|| {
-        format!("import \"{path}\": std library not found (set MAKO_STD or run from a checkout)")
-    })?;
     let pkg = path.trim_matches('/');
+
+    // 1) Std: `strings`, `encoding/json`, `net/http`, …
+    if let Some(std_root) = find_std_root() {
+        if let Ok(srcs) = sources_under_root(&std_root, pkg) {
+            return Ok(srcs);
+        }
+    }
+
+    // 2) Module / vendor / dependency paths (Go-style import paths)
+    if let Ok(srcs) = resolve_module_import_path(base, pkg) {
+        return Ok(srcs);
+    }
+
+    let std_hint = find_std_root()
+        .map(|p| p.display().to_string())
+        .unwrap_or_else(|| "(std not found)".into());
+    Err(format!(
+        "import \"{path}\": not found\n  looked under std ({std_hint}), \
+         vendor/, .mako/pkg/, module path, and [dependencies]"
+    ))
+}
+
+/// Prefer `dir/name.mko`, `dir/lib.mko`, `dir/mod.mko`, then package dir scan.
+fn sources_under_root(root: &Path, pkg: &str) -> Result<Vec<PathBuf>, String> {
+    let base_name = Path::new(pkg)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or(pkg);
     let candidates = [
-        std_root.join(pkg).join(format!(
-            "{}.mko",
-            Path::new(pkg)
-                .file_name()
-                .and_then(|s| s.to_str())
-                .unwrap_or(pkg)
-        )),
-        std_root.join(pkg).join("mod.mko"),
-        std_root.join(format!("{pkg}.mko")),
+        root.join(pkg).join(format!("{base_name}.mko")),
+        root.join(pkg).join("mod.mko"),
+        root.join(pkg).join("lib.mko"),
+        root.join(format!("{pkg}.mko")),
     ];
     for c in &candidates {
         if c.is_file() {
-            let alias = Path::new(pkg)
-                .file_name()
-                .and_then(|s| s.to_str())
-                .map(|s| s.to_string());
-            return Ok((c.clone(), alias));
+            return Ok(vec![c.clone()]);
         }
     }
+    let dir = root.join(pkg);
+    if dir.is_dir() {
+        return package_dir_sources(&dir);
+    }
+    Err(format!("no sources for `{pkg}` under {}", root.display()))
+}
+
+fn sources_at_path(target: &Path) -> Result<Vec<PathBuf>, String> {
+    if target.is_file() {
+        return Ok(vec![target.to_path_buf()]);
+    }
+    if target.is_dir() {
+        return package_dir_sources(target);
+    }
+    let with_ext = target.with_extension("mko");
+    if with_ext.is_file() {
+        return Ok(vec![with_ext]);
+    }
     Err(format!(
-        "import \"{path}\": unknown std package (looked under {})",
-        std_root.display()
+        "not found at {} (file, dir, or .mko)",
+        target.display()
     ))
+}
+
+/// Resolve non-std import paths:
+/// - `[dependencies]` key equal to the import path
+/// - `module = "izi-iva"` → `izi-iva/pkg/acd` maps to `<root>/pkg/acd`
+/// - `vendor/<path>/`
+/// - `.mako/pkg/<path>/`
+fn resolve_module_import_path(from_dir: &Path, path: &str) -> Result<Vec<PathBuf>, String> {
+    let Some(manifest_dir) = find_nearest_manifest_dir(from_dir) else {
+        return Err("no mako.toml for module resolution".into());
+    };
+    let manifest = manifest_dir.join("mako.toml");
+    let text = fs::read_to_string(&manifest).unwrap_or_default();
+
+    // Dependency keyed by full import path
+    for dep in parse_manifest_deps(&text) {
+        if dep.name == path {
+            let root = resolve_dep_root(&manifest_dir, &dep)?;
+            return sources_at_path(&root).or_else(|_| {
+                if root.is_dir() {
+                    package_dir_sources(&root)
+                } else {
+                    Err(format!("dep `{path}` has no .mko sources at {}", root.display()))
+                }
+            });
+        }
+    }
+
+    // Module path: module = "izi-iva"  (top-level or [package])
+    if let Some(mod_path) = parse_module_path(&text) {
+        if path == mod_path {
+            return package_dir_sources(&manifest_dir);
+        }
+        let prefix = format!("{mod_path}/");
+        if let Some(rest) = path.strip_prefix(&prefix) {
+            let target = manifest_dir.join(rest);
+            if let Ok(srcs) = sources_at_path(&target) {
+                return Ok(srcs);
+            }
+        }
+    }
+
+    // vendor/<import path>
+    let vendor = manifest_dir.join("vendor").join(path);
+    if let Ok(srcs) = sources_at_path(&vendor) {
+        return Ok(srcs);
+    }
+
+    // .mako/pkg/<import path> (fetched modules)
+    let cached = manifest_dir.join(".mako").join("pkg").join(path);
+    if let Ok(srcs) = sources_at_path(&cached) {
+        return Ok(srcs);
+    }
+
+    Err(format!("module path `{path}` not resolved from {}", manifest_dir.display()))
+}
+
+/// `module = "izi-iva"` at top level or under `[package]`.
+fn parse_module_path(text: &str) -> Option<String> {
+    let mut in_package = false;
+    for line in text.lines() {
+        let t = line.trim();
+        if t.starts_with('#') || t.is_empty() {
+            continue;
+        }
+        if t == "[package]" {
+            in_package = true;
+            continue;
+        }
+        if t.starts_with('[') {
+            in_package = false;
+            continue;
+        }
+        // Top-level or [package] `module = "…"`
+        if let Some(rest) = t.strip_prefix("module") {
+            let rest = rest.trim().trim_start_matches('=').trim();
+            let v = rest.trim_matches('"').trim_matches('\'').trim();
+            if !v.is_empty() && (in_package || !t.contains('[')) {
+                return Some(v.to_string());
+            }
+        }
+    }
+    // Also accept bare top-level before any table
+    let mut saw_table = false;
+    for line in text.lines() {
+        let t = line.trim();
+        if t.starts_with('[') {
+            saw_table = true;
+        }
+        if saw_table {
+            continue;
+        }
+        if let Some(rest) = t.strip_prefix("module") {
+            let rest = rest.trim().trim_start_matches('=').trim();
+            let v = rest.trim_matches('"').trim_matches('\'').trim();
+            if !v.is_empty() {
+                return Some(v.to_string());
+            }
+        }
+    }
+    None
+}
+
+/// Sources for a package directory: prefer `lib.mko`, else all non-test `.mko`.
+fn package_dir_sources(dir: &Path) -> Result<Vec<PathBuf>, String> {
+    let lib = dir.join("lib.mko");
+    if lib.is_file() {
+        return Ok(vec![lib]);
+    }
+    let main = dir.join("main.mko");
+    if main.is_file() {
+        return Ok(vec![main]);
+    }
+    let mut files = Vec::new();
+    let rd = fs::read_dir(dir).map_err(|e| format!("read {}: {e}", dir.display()))?;
+    for ent in rd.flatten() {
+        let p = ent.path();
+        if p.extension().and_then(|e| e.to_str()) != Some("mko") {
+            continue;
+        }
+        let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
+        if is_test_file(&p) || name.starts_with('.') {
+            continue;
+        }
+        files.push(p);
+    }
+    files.sort();
+    if files.is_empty() {
+        return Err(format!("package dir {} has no .mko sources", dir.display()));
+    }
+    Ok(files)
 }
 
 /// Locate `std/` next to the repo / install (mirrors runtime discovery).
@@ -2413,9 +3269,17 @@ pub fn load_test_package(test_file: &Path) -> Result<(Program, Vec<String>), Str
     program
         .items
         .retain(|item| !matches!(item, Item::Fn(f) if f.name == "main"));
-    TypeChecker::new()
-        .check(&program)
-        .map_err(|e| format!("{e}"))?;
+    let mut tc = TypeChecker::new();
+    tc.check(&program).map_err(|e| format!("{e}"))?;
+    for f in tc.mono_fns {
+        if !program
+            .items
+            .iter()
+            .any(|i| matches!(i, Item::Fn(x) if x.name == f.name))
+        {
+            program.items.push(Item::Fn(f));
+        }
+    }
     let tests = list_test_fns(&program);
     if tests.is_empty() {
         return Err(format!(
