@@ -1,0 +1,32 @@
+// UDP proxy primitives: capture the sender's address and route replies back to
+// it (or forward to an arbitrary upstream). Loopback exercise.
+
+fn recv_wait(u: GameUDP) -> string {
+    for i := 0; i < 200000; i++ {
+        let m = game_udp_recv(u)
+        if len(m) > 0 {
+            return m
+        }
+    }
+    return ""
+}
+
+func TestUdpSenderAddrAndReply() {
+    let srv = game_udp_bind(0)
+    let cli = game_udp_bind(0)
+    let sp = udp_local_port(game_udp_fd(srv))
+    let cp = udp_local_port(game_udp_fd(cli))
+
+    // client → server
+    let _ = game_udp_send_to(cli, "127.0.0.1", sp, "PING")
+    assert_eq_str(recv_wait(srv), "PING")
+
+    // server learns the client's real address and replies to it
+    let from = game_udp_sender_addr(srv)
+    assert(str_contains(from, "127.0.0.1:"))
+    let _2 = game_udp_send_to(srv, "127.0.0.1", cp, "PONG")
+    assert_eq_str(recv_wait(cli), "PONG")
+
+    game_udp_close(srv)
+    game_udp_close(cli)
+}

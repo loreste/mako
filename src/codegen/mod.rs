@@ -3102,6 +3102,25 @@ impl Codegen {
                             self.line(&format!("int64_t {tmp} = mako_game_udp_sender({u});"));
                             return ("int64_t".into(), tmp);
                         }
+                        "game_udp_sender_addr" => {
+                            let (_, u) = self.emit_expr(&args[0]);
+                            let tmp = self.fresh("gsa");
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_game_udp_sender_addr({u});"
+                            ));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "game_udp_send_to" => {
+                            let (_, u) = self.emit_expr(&args[0]);
+                            let (_, h) = self.emit_expr(&args[1]);
+                            let (_, p) = self.emit_expr(&args[2]);
+                            let (_, d) = self.emit_expr(&args[3]);
+                            let tmp = self.fresh("gst");
+                            self.line(&format!(
+                                "int64_t {tmp} = mako_game_udp_send_to({u}, {h}, {p}, {d});"
+                            ));
+                            return ("int64_t".into(), tmp);
+                        }
                         "game_udp_send" => {
                             let (_, u) = self.emit_expr(&args[0]);
                             let (_, p) = self.emit_expr(&args[1]);

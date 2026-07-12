@@ -4,16 +4,16 @@ Mako is a compiled programming language. You write `.mko` files, the compiler
 turns them into native binaries, and that's what you ship. No garbage collector,
 no virtual machine, no runtime.
 
-**Speed is the name of the game** — runtime as close to **Rust** as possible,
-with **first-class concurrency and parallelism** (`crew` / `kick` / `join` /
-`fan`, channels, actors). Memory safety without GC pauses. Fast builds. A
-simpler everyday surface that is still **Mako**, not a clone.
+**Speed is the name of the game** — native machine code, no GC pauses, with
+**first-class concurrency and parallelism** (`crew` / `kick` / `join` / `fan`,
+channels, actors). Memory safety without a garbage collector. Fast builds. A
+simple everyday surface that stays out of your way.
 
 Ownership and arenas manage memory at compile time. Structured crews clean up
 after themselves. The compiler enforces errors. The stdlib is batteries-included
 so you can ship real services without dependency maze.
 
-This is **version 0.1.0**. It works. 130 tests pass. The standard library
+This is **version 0.1.0**. It works. 158 tests pass. The standard library
 covers a lot of ground. But it's still early — things will change, some corners
 are rough, and there's plenty left to build.
 
@@ -361,12 +361,13 @@ mako test --coverage
 Unit, property, fuzz, snapshot, fixture, and mock tests. Default suite runs
 without external services.
 
-## Our syntax — unique, not a clone
+## Our syntax — its own
 
-Mako is **its own language** with **its own syntax**. Not a Go dialect. Not a
-Rust dialect. We take simplicity and control as *goals* — and we exist to fix
-their **pain points** (GC/nil/err noise/goroutine leaks; lifetime/trait/async
-ceremony) with Mako tools, not by copying their look.
+Mako is **its own language** with **its own syntax**. We take simplicity and
+control as *goals*, and we design the surface around the problems backend
+engineers actually hit — GC pauses, null, error-handling noise, leaked tasks,
+and lifetime ceremony — solving them with Mako's own tools rather than borrowing
+another look.
 
 Keywords: `fn`, `on`, `pack`, `pull`, `hold`, `share`, `arena`, `crew`, `kick`,
 `match`, `export`.  

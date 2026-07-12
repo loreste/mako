@@ -394,6 +394,37 @@ static inline int64_t mako_game_udp_sender(MakoGameUDP *u) {
     return u ? (int64_t)u->last_recv_peer : -1;
 }
 
+/* Address `host:port` of the last received packet's sender. Enables routing a
+ * response back to whoever sent the request (proxy / SIP transaction mapping). */
+static inline MakoString mako_game_udp_sender_addr(MakoGameUDP *u) {
+    if (!u) return mako_str_from_cstr("");
+    char host[INET_ADDRSTRLEN];
+    if (!inet_ntop(AF_INET, &u->last_addr.sin_addr, host, sizeof(host)))
+        return mako_str_from_cstr("");
+    char out[80];
+    snprintf(out, sizeof(out), "%s:%d", host, (int)ntohs(u->last_addr.sin_port));
+    return mako_str_from_cstr(out);
+}
+
+/* Send to an arbitrary `host` / `port` (IPv4 dotted). Lets a frontend forward to
+ * an upstream that is not a registered peer. Returns bytes sent, or -1. */
+static inline int64_t mako_game_udp_send_to(MakoGameUDP *u, MakoString host,
+                                            int64_t port, MakoString data) {
+    if (!u || !host.data || !data.data) return -1;
+    char hbuf[64];
+    size_t hn = host.len < sizeof(hbuf) - 1 ? host.len : sizeof(hbuf) - 1;
+    memcpy(hbuf, host.data, hn);
+    hbuf[hn] = 0;
+    struct sockaddr_in dst;
+    memset(&dst, 0, sizeof(dst));
+    dst.sin_family = AF_INET;
+    dst.sin_port = htons((uint16_t)port);
+    if (inet_pton(AF_INET, hbuf, &dst.sin_addr) != 1) return -1;
+    ssize_t n = sendto(u->fd, data.data, data.len, 0,
+                       (struct sockaddr *)&dst, sizeof(dst));
+    return (int64_t)n;
+}
+
 /* Send to a specific peer by index */
 static inline int64_t mako_game_udp_send(MakoGameUDP *u, int64_t peer, MakoString data) {
     if (!u || peer < 0 || peer >= u->peer_count || !data.data) return -1;
