@@ -1997,6 +1997,7 @@ impl Parser {
                 self.no_struct_lit = saved;
                 Ok(Expr::Array(elems))
             }
+            TokenKind::If => self.parse_if_expr(),
             TokenKind::LBrace => Ok(Expr::Block(self.parse_block()?)),
             TokenKind::Fn => self.parse_fn_lambda(),
             TokenKind::Pipe => self.parse_lambda(),
@@ -2065,6 +2066,34 @@ impl Parser {
         Ok(Expr::Lambda {
             params,
             body: Box::new(body),
+        })
+    }
+
+    /// `if cond { … } else { … }` in expression position. An `else` branch is
+    /// required; `else if` chains nest as a trailing if-expression. Each branch's
+    /// value is the trailing expression of its block.
+    fn parse_if_expr(&mut self) -> Result<Expr, ParseError> {
+        self.expect(TokenKind::If)?;
+        let cond = self.parse_header_expr()?;
+        let then_block = self.parse_block()?;
+        if !matches!(self.peek_kind(), TokenKind::Else) {
+            return Err(self.err(
+                "an `if` used as a value needs an `else` branch".into(),
+            ));
+        }
+        self.bump(); // else
+        let else_block = if matches!(self.peek_kind(), TokenKind::If) {
+            // else-if: the else branch is itself an if-expression.
+            Block {
+                stmts: vec![Stmt::Expr(self.parse_if_expr()?)],
+            }
+        } else {
+            self.parse_block()?
+        };
+        Ok(Expr::IfExpr {
+            cond: Box::new(cond),
+            then_block,
+            else_block,
         })
     }
 

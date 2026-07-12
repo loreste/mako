@@ -1292,6 +1292,15 @@ fn collect_calls_expr(expr: &Expr, out: &mut Vec<String>) {
             }
         }
         Expr::Lambda { body, .. } => collect_calls_expr(body, out),
+        Expr::IfExpr {
+            cond,
+            then_block,
+            else_block,
+        } => {
+            collect_calls_expr(cond, out);
+            collect_calls_block(then_block, out);
+            collect_calls_block(else_block, out);
+        }
         Expr::Match { scrutinee, arms } => {
             collect_calls_expr(scrutinee, out);
             for arm in arms {
@@ -2261,6 +2270,15 @@ fn rewrite_expr(e: &mut Expr, alias: &str, names: &ImportNameSets) {
             rewrite_expr(cap, alias, names);
         }
         Expr::Lambda { body, .. } => rewrite_expr(body, alias, names),
+        Expr::IfExpr {
+            cond,
+            then_block,
+            else_block,
+        } => {
+            rewrite_expr(cond, alias, names);
+            rewrite_block(then_block, alias, names);
+            rewrite_block(else_block, alias, names);
+        }
         Expr::Match { scrutinee, arms } => {
             rewrite_expr(scrutinee, alias, names);
             for a in arms {

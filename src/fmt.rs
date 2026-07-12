@@ -562,6 +562,18 @@ fn bin_prec(op: &BinOp) -> u8 {
 
 fn fmt_expr(e: &Expr, parent_prec: u8) -> String {
     match e {
+        Expr::IfExpr {
+            cond,
+            then_block,
+            else_block,
+        } => {
+            format!(
+                "if {} {} else {}",
+                fmt_expr(cond, 0),
+                fmt_block(then_block, 0),
+                fmt_block(else_block, 0)
+            )
+        }
         Expr::Int(n) => n.to_string(),
         Expr::Float(n) => {
             let s = n.to_string();

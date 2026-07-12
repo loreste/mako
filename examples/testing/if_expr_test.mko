@@ -1,0 +1,48 @@
+// `if` used as an expression: each branch's value is its trailing expression.
+
+func classify(n int) int {
+    return if n < 0 { -n } else { n }
+}
+
+func TestIfExprBasic() {
+    let x = if 3 > 2 { 10 } else { 20 }
+    assert_eq(x, 10)
+    assert_eq(classify(-7), 7)
+    assert_eq(classify(4), 4)
+}
+
+func TestIfExprElseChain() {
+    let g = if false { 1 } else if true { 2 } else { 3 }
+    assert_eq(g, 2)
+}
+
+func TestIfExprWithLeadingStatements() {
+    let y = if 6 > 5 {
+        let a = 6 * 2
+        a + 1
+    } else {
+        0
+    }
+    assert_eq(y, 13)
+}
+
+func TestIfExprNested() {
+    let z = if true { if false { 1 } else { 2 } } else { 3 }
+    assert_eq(z, 2)
+}
+
+func TestIfExprStringValue() {
+    let s = if 1 == 1 { "yes" } else { "no" }
+    assert_eq_str(s, "yes")
+}
+
+func TestIfExprDivergingBranch() {
+    // A branch may diverge; the value comes from the other branch.
+    let v = pick(5)
+    assert_eq(v, 10)
+}
+
+func pick(n int) int {
+    let v = if n > 0 { n } else { return 0 }
+    return v * 2
+}

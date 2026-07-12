@@ -3868,6 +3868,18 @@ impl TypeChecker {
             Type::Fn(vec![], Box::new(Type::Int)),
         );
         fns.insert(
+            "argon2_available".into(),
+            Type::Fn(vec![], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "argon2id_hash".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::String)),
+        );
+        fns.insert(
+            "argon2id_verify".into(),
+            Type::Fn(vec![Type::String, Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
             "aes_gcm_seal".into(),
             Type::Fn(
                 vec![Type::String, Type::String, Type::String, Type::String],
@@ -6132,6 +6144,46 @@ impl TypeChecker {
         Ok(())
     }
 
+    /// Check a block and return the type of its trailing expression (the block's
+    /// value), or `Void` if it does not end in an expression. Used by if-expressions.
+    fn check_block_value(&mut self, block: &Block) -> Result<Type, TypeError> {
+        self.push_scope();
+        let stmts = &block.stmts;
+        let n = stmts.len();
+        let mut value = Type::Void;
+        for (i, stmt) in stmts.iter().enumerate() {
+            if i + 1 == n {
+                match stmt {
+                    Stmt::Expr(e) => {
+                        value = self.check_expr(e)?;
+                        break;
+                    }
+                    // A trailing `if … else …` statement yields the block value.
+                    Stmt::If {
+                        init: None,
+                        cond,
+                        then_block,
+                        else_block: Some(eb),
+                    } => {
+                        value = self.check_expr(&Expr::IfExpr {
+                            cond: Box::new(cond.clone()),
+                            then_block: then_block.clone(),
+                            else_block: eb.clone(),
+                        })?;
+                        break;
+                    }
+                    _ => {}
+                }
+            }
+            self.check_stmt(stmt)?;
+            if Self::stmt_always_diverges(stmt) {
+                break;
+            }
+        }
+        self.pop_scope();
+        Ok(value)
+    }
+
     /// Check loop body stmts with the same diverge / mid-scope share rules as `check_block`,
     /// but without an extra scope (for-loop binders live in the caller scope).
     fn check_loop_body_stmts(&mut self, stmts: &[Stmt]) -> Result<(), TypeError> {
@@ -6297,6 +6349,15 @@ impl TypeChecker {
             Expr::Match { scrutinee, arms } => {
                 Self::expr_mentions(scrutinee, name)
                     || arms.iter().any(|a| Self::expr_mentions(&a.body, name))
+            }
+            Expr::IfExpr {
+                cond,
+                then_block,
+                else_block,
+            } => {
+                Self::expr_mentions(cond, name)
+                    || then_block.stmts.iter().any(|s| Self::stmt_mentions(s, name))
+                    || else_block.stmts.iter().any(|s| Self::stmt_mentions(s, name))
             }
             Expr::Fan { collection, mapper } => {
                 Self::expr_mentions(collection, name) || Self::expr_mentions(mapper, name)
@@ -8759,6 +8820,32 @@ impl TypeChecker {
                     params.iter().map(|_| Type::Int).collect(),
                     Box::new(ret),
                 ))
+            }
+            Expr::IfExpr {
+                cond,
+                then_block,
+                else_block,
+            } => {
+                let ct = self.check_expr(cond)?;
+                if ct != Type::Bool {
+                    return Err(TypeError::new("if condition must be bool"));
+                }
+                let tty = self.check_block_value(then_block)?;
+                let ety = self.check_block_value(else_block)?;
+                // A branch that diverges (ends in `return`/`break`) yields Void and
+                // takes its type from the other branch. Two live branches must agree.
+                if tty != Type::Void
+                    && ety != Type::Void
+                    && !self.compatible(&tty, &ety)
+                    && !self.compatible(&ety, &tty)
+                {
+                    return Err(TypeError::new(format!(
+                        "if/else branches yield different types: {} and {}",
+                        tty.display(),
+                        ety.display()
+                    )));
+                }
+                Ok(if tty != Type::Void { tty } else { ety })
             }
             Expr::Match { scrutinee, arms } => {
                 let st = self.check_expr(scrutinee)?;

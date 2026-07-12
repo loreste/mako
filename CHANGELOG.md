@@ -1,18 +1,41 @@
 # Changelog
 
-## 0.1.0 — 2026-07-12 (Go syntax surface)
+## 0.1.0 — 2026-07-12 (expressions & assignment)
+
+### Language
+
+- **`if` as an expression** — `let x = if c { a } else { b }`; each branch yields
+  its trailing expression, `else` required, both branches must agree on type
+- **Parallel binding & assignment** — `var a, b = 1, 2` and `a, b = b, a`
+  (swap/rotate); the right-hand side is evaluated before any target is written
+
+### Security / stdlib
+
+- **Password hashing** — `crypto.password_hash` / `password_verify` (Argon2id,
+  OWASP parameters, PHC string format) backed by OpenSSL's trusted implementation
+
+### Fixes
+
+- array of positional struct literals `[P{1}, P{2}]` now compiles as a struct array
+- inline tuple literals emit their typedef when first seen in a function body
+- identifiers that shadow C/POSIX library names (`read`, `write`, `time`, …) now
+  emit valid, linkable C
+
+- Tests: `if_expr_test`, `parallel_assign_test`, `password_hash_test`
+
+---
+
+## 0.1.0 — 2026-07-12 (control-flow surface)
 
 ### Control flow & statements
 
-- **`if init; cond { … }`** — Go if-with-init, scoped to the if/else
+- **`if init; cond { … }`** — init clause scoped to the if/else
 - **`switch` / `case` / `default`** — value, expression-less, and init forms;
   arbitrary case expressions, single tag evaluation, optional default
-- **`for` (all four Go forms)** — C-style `for i := 0; i < n; i++`, while-style
-  `for cond {}`, infinite `for {}`, plus existing range `for i, v in range xs`
+- **`for` (four forms)** — three-clause `for i := 0; i < n; i++`, condition-only
+  `for cond {}`, infinite `for {}`, plus range `for i, v in range xs`
 - **Compound assignment & inc/dec** — `+= -= *= /= %=` and `++` / `--` on
   identifiers, struct fields, and index targets
-- **Parallel binding & assignment** — `var a, b = 1, 2` and `a, b = b, a`
-  (swap/rotate); the right-hand side is evaluated before any target is written
 - **Positional struct literals** — `Point{1, 2}` and zero-value `Point{}`;
   composite-literal-in-condition ambiguity resolved
 - **`go f()`** — schedules a call onto the innermost `crew` (errors outside one)

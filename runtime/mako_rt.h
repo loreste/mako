@@ -80,6 +80,8 @@ typedef struct {
     size_t len;
 } MakoString;
 
+static inline MakoString mako_str_from_cstr(const char *s);
+
 #include "mako_security.h"
 
 /* Create an owned MakoString by copying a C string. NULL is treated as "". */

@@ -171,11 +171,11 @@
       "patterns": [
         {
           "name": "keyword.control.flow.mako",
-          "match": "\\b(if|else|while|for|in|range|break|continue|return|match|select|timeout|default)\\b"
+          "match": "\\b(if|else|while|for|in|range|break|continue|return|match|switch|case|fallthrough|select|timeout|default|defer|go)\\b"
         },
         {
           "name": "keyword.declaration.mako",
-          "match": "\\b(fn|let|mut|struct|enum|actor|receive|interface|extern|const|import|as)\\b"
+          "match": "\\b(fn|func|let|var|mut|struct|enum|actor|receive|interface|extern|const|import|pull|package|pack|export|as)\\b"
         },
         {
           "name": "keyword.operator.logical.mako",

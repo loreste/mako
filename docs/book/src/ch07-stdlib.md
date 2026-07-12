@@ -325,6 +325,31 @@ fn main() {
 }
 ```
 
+### Password hashing
+
+Store passwords with `crypto.password_hash`, which uses **Argon2id** (OWASP
+parameters) and returns a self-describing PHC string — the salt and cost
+parameters travel with the hash, so verification needs nothing else. Comparison
+is constant-time.
+
+```mko
+pull "crypto"
+
+fn main() {
+    let stored = crypto.password_hash("correct horse battery staple")
+    // stored: $argon2id$v=19$m=19456,t=2,p=1$<salt>$<hash>
+
+    if crypto.password_verify(stored, "correct horse battery staple") == 1 {
+        print("welcome")
+    }
+    print(crypto.password_verify(stored, "guess"))   // 0
+}
+```
+
+Never store raw or plain-hashed (`sha256`) passwords — always use
+`password_hash`. `crypto.password_hashing_ok()` reports whether the backend is
+available on the current build.
+
 ---
 
 ## compress/gzip

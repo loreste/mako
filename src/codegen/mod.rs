@@ -7574,6 +7574,24 @@ impl Codegen {
                         "aead_available" => {
                             return ("int64_t".into(), "mako_aead_available()".into());
                         }
+                        "argon2_available" => {
+                            return ("int64_t".into(), "mako_argon2_available()".into());
+                        }
+                        "argon2id_hash" => {
+                            let (_, p) = self.emit_expr(&args[0]);
+                            let tmp = self.fresh("a2h");
+                            self.line(&format!("MakoString {tmp} = mako_argon2id_hash({p});"));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "argon2id_verify" => {
+                            let (_, h) = self.emit_expr(&args[0]);
+                            let (_, p) = self.emit_expr(&args[1]);
+                            let tmp = self.fresh("a2v");
+                            self.line(&format!(
+                                "int64_t {tmp} = mako_argon2id_verify({h}, {p});"
+                            ));
+                            return ("int64_t".into(), tmp);
+                        }
                         "aes_gcm_seal" => {
                             let (_, k) = self.emit_expr(&args[0]);
                             let (_, n) = self.emit_expr(&args[1]);
@@ -10718,6 +10736,11 @@ impl Codegen {
             }
             Expr::Lambda { .. } => ("/*fn*/".into(), "NULL".into()),
             Expr::Match { scrutinee, arms } => self.emit_match(scrutinee, arms),
+            Expr::IfExpr {
+                cond,
+                then_block,
+                else_block,
+            } => self.emit_if_expr(cond, then_block, else_block),
             Expr::Field { base, field } => {
                 let (bty, b) = self.emit_expr(base);
                 if let Some(info) = self.structs.get(&bty) {
@@ -10766,6 +10789,79 @@ impl Codegen {
             }
         }
         (info.c_name, tmp)
+    }
+
+    /// Emit a block and return the value of its trailing expression (or void if
+    /// the block does not end in an expression). Non-trailing statements are
+    /// emitted normally.
+    fn emit_block_trailing(&mut self, block: &Block) -> (String, String) {
+        let n = block.stmts.len();
+        for (i, stmt) in block.stmts.iter().enumerate() {
+            if i + 1 == n {
+                match stmt {
+                    Stmt::Expr(e) => return self.emit_expr(e),
+                    // A trailing `if … else …` statement is itself the block value.
+                    Stmt::If {
+                        init: None,
+                        cond,
+                        then_block,
+                        else_block: Some(eb),
+                    } => return self.emit_if_expr(cond, then_block, eb),
+                    _ => {}
+                }
+            }
+            self.emit_stmt(stmt);
+        }
+        ("void".into(), "/*void*/".into())
+    }
+
+    fn emit_if_expr(
+        &mut self,
+        cond: &Expr,
+        then_block: &Block,
+        else_block: &Block,
+    ) -> (String, String) {
+        let result = self.fresh("ife");
+        let (_, c) = self.emit_expr(cond);
+        // Declare `result` before the `if`; its type is filled in once a branch's
+        // value type is known (marker replaced below).
+        let marker = format!("/*__IFE_DECL_{result}__*/");
+        self.line(&marker);
+        self.line(&format!("if ({c}) {{"));
+        self.indent += 1;
+        self.push_share_scope();
+        let (tty, tval) = self.emit_block_trailing(then_block);
+        if tval != "/*void*/" {
+            self.line(&format!("{result} = {tval};"));
+        }
+        self.pop_share_scope();
+        self.indent -= 1;
+        self.line("} else {");
+        self.indent += 1;
+        self.push_share_scope();
+        let (ety, eval) = self.emit_block_trailing(else_block);
+        if eval != "/*void*/" {
+            self.line(&format!("{result} = {eval};"));
+        }
+        self.pop_share_scope();
+        self.indent -= 1;
+        self.line("}");
+        let ty = if tty != "void" {
+            tty
+        } else if ety != "void" {
+            ety
+        } else {
+            "int64_t".into()
+        };
+        let decl = if ty == "void" {
+            format!("int64_t {result} = 0; /* void if-expr */")
+        } else {
+            format!("{ty} {result};")
+        };
+        if let Some(pos) = self.out.find(&marker) {
+            self.out.replace_range(pos..pos + marker.len(), &decl);
+        }
+        (ty, result)
     }
 
     fn emit_match(&mut self, scrutinee: &Expr, arms: &[MatchArm]) -> (String, String) {
@@ -11142,13 +11238,55 @@ fn mangle(name: &str) -> String {
     if name == "main" {
         return "mako_main".into();
     }
-    // Rename Mako identifiers that collide with C keywords / reserved words so the
-    // generated C stays valid (`let switch = 1` → `mk_switch`). Applied uniformly
-    // at declaration and use sites, so the mapping stays consistent.
-    if is_c_reserved(name) {
+    // Rename Mako identifiers that collide with C keywords or common C/POSIX
+    // library symbols so the generated C stays valid and links (`fn read` →
+    // `mk_read`). Applied uniformly at declaration and use sites so the mapping
+    // stays consistent; `extern` functions bypass mangling and keep their real
+    // symbol name.
+    if is_c_reserved(name) || is_c_stdlib_name(name) {
         return format!("mk_{name}");
     }
     name.to_string()
+}
+
+/// Common C / POSIX library function names that are plausible Mako identifiers.
+/// A user function or local with one of these names would otherwise clash with a
+/// libc declaration (a real problem for backend code: `read`, `write`, `time`, …).
+fn is_c_stdlib_name(name: &str) -> bool {
+    matches!(
+        name,
+        // I/O and files
+        "read" | "write" | "open" | "close" | "creat" | "lseek" | "pread" | "pwrite"
+        | "remove" | "rename" | "unlink" | "link" | "symlink" | "readlink" | "access"
+        | "stat" | "fstat" | "lstat" | "chmod" | "chown" | "truncate" | "ftruncate"
+        | "mkdir" | "rmdir" | "chdir" | "getcwd" | "fsync" | "fdatasync" | "sync"
+        | "dup" | "dup2" | "pipe" | "fcntl" | "ioctl" | "flock" | "umask"
+        // process / signals
+        | "fork" | "exec" | "execve" | "execvp" | "wait" | "waitpid" | "exit" | "_exit"
+        | "abort" | "kill" | "raise" | "signal" | "alarm" | "pause" | "sleep" | "usleep"
+        | "getpid" | "getppid" | "getuid" | "getgid" | "setuid" | "setgid" | "nice"
+        | "system" | "atexit" | "getenv" | "setenv" | "putenv" | "unsetenv"
+        // memory / strings
+        | "malloc" | "calloc" | "realloc" | "free" | "memcpy" | "memmove" | "memset"
+        | "memcmp" | "strcpy" | "strncpy" | "strcat" | "strcmp" | "strlen" | "strdup"
+        | "strchr" | "strstr" | "strtok" | "index" | "rindex"
+        // stdio
+        | "printf" | "fprintf" | "sprintf" | "snprintf" | "scanf" | "sscanf"
+        | "puts" | "gets" | "putchar" | "getchar" | "perror" | "fopen" | "fclose"
+        | "fread" | "fwrite" | "fseek" | "ftell" | "fflush"
+        // math
+        | "abs" | "labs" | "div" | "ldiv" | "atoi" | "atol" | "atof" | "strtol"
+        | "rand" | "srand" | "random" | "srandom" | "exp" | "log" | "log2" | "log10"
+        | "pow" | "sqrt" | "cbrt" | "sin" | "cos" | "tan" | "floor" | "ceil"
+        | "round" | "trunc" | "fabs" | "fmod" | "hypot"
+        // sockets / net
+        | "socket" | "bind" | "listen" | "accept" | "connect" | "send" | "recv"
+        | "sendto" | "recvfrom" | "shutdown" | "select" | "poll" | "htons" | "ntohs"
+        // time
+        | "time" | "clock" | "mktime" | "gmtime" | "localtime" | "ctime" | "difftime"
+        // sorting
+        | "qsort" | "bsearch"
+    )
 }
 
 /// C reserved words (C11 keywords plus a few common typedefs) that are legal Mako

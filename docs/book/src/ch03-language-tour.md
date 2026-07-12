@@ -520,6 +520,21 @@ fn classify(n: int) -> string {
 Conditions must be `bool` -- there is no truthy/falsy concept for integers or
 strings.
 
+**`if` is also an expression.** In value position each branch yields its trailing
+expression, so you can bind or return the result directly. An `else` branch is
+required, and both branches must yield the same type:
+
+```mko
+let label = if n > 0 { "positive" } else { "non-positive" }
+
+fn classify(n: int) -> int {
+    return if n < 0 { -n } else { n }
+}
+```
+
+A branch may end in `return`/`break` instead of a value; the result then comes
+from the other branch.
+
 **if with an init clause** — declare a value used only by the `if`/`else`:
 
 ```mko

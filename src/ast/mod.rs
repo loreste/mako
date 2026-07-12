@@ -397,6 +397,14 @@ pub enum Expr {
         scrutinee: Box<Expr>,
         arms: Vec<MatchArm>,
     },
+    /// `if cond { … } else { … }` used as an expression. Each branch's value is
+    /// the trailing expression of its block; both branches must be present and
+    /// yield compatible types.
+    IfExpr {
+        cond: Box<Expr>,
+        then_block: Block,
+        else_block: Block,
+    },
     Try(Box<Expr>),
     Block(Block),
     /// `crew.kick(expr)` — schedule work on a crew

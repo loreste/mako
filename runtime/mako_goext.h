@@ -1737,6 +1737,138 @@ static inline MakoString mako_chacha20_poly1305_open(
 #endif
 }
 
+/* ------------------------------------------------------------------------- */
+/* Password hashing — Argon2id (OWASP-recommended), backed by OpenSSL's        */
+/* trusted EVP_KDF implementation. Never rolls its own primitive.              */
+/* ------------------------------------------------------------------------- */
+
+#if (defined(MAKO_HAS_OPENSSL) || defined(MAKO_USE_OPENSSL)) \
+    && defined(OPENSSL_VERSION_NUMBER) && OPENSSL_VERSION_NUMBER >= 0x30200000L
+#include <openssl/kdf.h>
+#include <openssl/core_names.h>
+#include <openssl/params.h>
+#define MAKO_ARGON2_OPENSSL 1
+#endif
+
+static inline int64_t mako_argon2_available(void) {
+#if defined(MAKO_ARGON2_OPENSSL)
+    EVP_KDF *kdf = EVP_KDF_fetch(NULL, "ARGON2ID", NULL);
+    if (kdf) { EVP_KDF_free(kdf); return 1; }
+    return 0;
+#else
+    return 0;
+#endif
+}
+
+#if defined(MAKO_ARGON2_OPENSSL)
+static inline int mako__argon2id_derive(
+    const unsigned char *pass, size_t passlen,
+    const unsigned char *salt, size_t saltlen,
+    uint32_t m_cost, uint32_t t_cost, uint32_t lanes,
+    unsigned char *out, size_t outlen) {
+    EVP_KDF *kdf = EVP_KDF_fetch(NULL, "ARGON2ID", NULL);
+    if (!kdf) return 0;
+    EVP_KDF_CTX *kctx = EVP_KDF_CTX_new(kdf);
+    EVP_KDF_free(kdf);
+    if (!kctx) return 0;
+    uint32_t threads = lanes;
+    OSSL_PARAM params[7], *p = params;
+    *p++ = OSSL_PARAM_construct_octet_string(OSSL_KDF_PARAM_PASSWORD,
+                                             (void *)pass, passlen);
+    *p++ = OSSL_PARAM_construct_octet_string(OSSL_KDF_PARAM_SALT,
+                                             (void *)salt, saltlen);
+    *p++ = OSSL_PARAM_construct_uint32(OSSL_KDF_PARAM_ITER, &t_cost);
+    *p++ = OSSL_PARAM_construct_uint32(OSSL_KDF_PARAM_ARGON2_MEMCOST, &m_cost);
+    *p++ = OSSL_PARAM_construct_uint32(OSSL_KDF_PARAM_ARGON2_LANES, &lanes);
+    *p++ = OSSL_PARAM_construct_uint32(OSSL_KDF_PARAM_THREADS, &threads);
+    *p++ = OSSL_PARAM_construct_end();
+    int ok = EVP_KDF_derive(kctx, out, outlen, params) == 1;
+    EVP_KDF_CTX_free(kctx);
+    return ok;
+}
+
+/* Standard-base64 without padding, as used by the PHC string format. */
+static inline MakoString mako__b64_nopad(const unsigned char *data, size_t n) {
+    MakoString in = {(char *)data, n};
+    MakoString b = mako_base64_encode(in);
+    while (b.len > 0 && b.data[b.len - 1] == '=') b.len--;
+    return b;
+}
+#endif
+
+/* Argon2id hash → PHC string `$argon2id$v=19$m=..,t=..,p=..$salt$hash`, or ""
+ * when unavailable. Uses a fresh 16-byte random salt each call. */
+static inline MakoString mako_argon2id_hash(MakoString password) {
+#if defined(MAKO_ARGON2_OPENSSL)
+    const uint32_t m_cost = 19456, t_cost = 2, lanes = 1;
+    MakoString saltbuf = mako_random_bytes(16);
+    if (saltbuf.len != 16) return mako_str_from_cstr("");
+    unsigned char salt[16];
+    memcpy(salt, saltbuf.data, 16);
+    unsigned char hash[32];
+    if (!mako__argon2id_derive((const unsigned char *)(password.data ? password.data : ""),
+                               password.len, salt, 16, m_cost, t_cost, lanes,
+                               hash, sizeof(hash))) {
+        return mako_str_from_cstr("");
+    }
+    MakoString bsalt = mako__b64_nopad(salt, 16);
+    MakoString bhash = mako__b64_nopad(hash, 32);
+    size_t cap = bsalt.len + bhash.len + 96;
+    char *out = (char *)malloc(cap);
+    if (!out) return mako_str_from_cstr("");
+    int len = snprintf(out, cap,
+                       "$argon2id$v=19$m=%u,t=%u,p=%u$%.*s$%.*s",
+                       m_cost, t_cost, lanes,
+                       (int)bsalt.len, bsalt.data, (int)bhash.len, bhash.data);
+    mako_secure_zero(hash, sizeof(hash));
+    return (MakoString){out, (size_t)len};
+#else
+    (void)password;
+    return mako_str_from_cstr("");
+#endif
+}
+
+/* Verify a password against a PHC Argon2id hash. Returns 1 on match, else 0. */
+static inline int64_t mako_argon2id_verify(MakoString phc, MakoString password) {
+#if defined(MAKO_ARGON2_OPENSSL)
+    if (!phc.data) return 0;
+    /* Copy to a NUL-terminated scratch for parsing. */
+    char *s = (char *)malloc(phc.len + 1);
+    if (!s) return 0;
+    memcpy(s, phc.data, phc.len);
+    s[phc.len] = 0;
+    uint32_t m_cost = 0, t_cost = 0, lanes = 0;
+    char b64salt[128] = {0}, b64hash[128] = {0};
+    int n = sscanf(s, "$argon2id$v=19$m=%u,t=%u,p=%u$%127[^$]$%127[^$]",
+                   &m_cost, &t_cost, &lanes, b64salt, b64hash);
+    free(s);
+    if (n != 5 || lanes == 0 || m_cost == 0 || t_cost == 0) return 0;
+    /* Re-pad base64 and decode salt + expected hash. */
+    char salt_p[132], hash_p[132];
+    size_t sl = strlen(b64salt), hl = strlen(b64hash);
+    if (sl + 3 >= sizeof(salt_p) || hl + 3 >= sizeof(hash_p)) return 0;
+    memcpy(salt_p, b64salt, sl); while (sl % 4) salt_p[sl++] = '=';
+    salt_p[sl] = 0;
+    memcpy(hash_p, b64hash, hl); while (hl % 4) hash_p[hl++] = '=';
+    hash_p[hl] = 0;
+    MakoString salt = mako_base64_decode((MakoString){salt_p, strlen(salt_p)});
+    MakoString want = mako_base64_decode((MakoString){hash_p, strlen(hash_p)});
+    if (salt.len == 0 || want.len == 0 || want.len > 128) return 0;
+    unsigned char got[128];
+    int ok = mako__argon2id_derive(
+        (const unsigned char *)(password.data ? password.data : ""), password.len,
+        (const unsigned char *)salt.data, salt.len, m_cost, t_cost, lanes,
+        got, want.len);
+    int64_t match = ok && mako_const_eq_bytes(got, want.len,
+                                              (const unsigned char *)want.data, want.len);
+    mako_secure_zero(got, sizeof(got));
+    return match;
+#else
+    (void)phc; (void)password;
+    return 0;
+#endif
+}
+
 /* ---- mime/multipart (form-data parse) ---- */
 static inline const char *mako_multipart_memmem(
     const char *hay, size_t hay_len, const char *needle, size_t needle_len
