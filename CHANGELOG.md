@@ -66,6 +66,13 @@
 - multiple UDP frontends by wrapping a `GameUDP` handle in a struct (struct
   arrays hold handles); array literals accept a trailing comma.
 
+### Tooling
+
+- **test failures explain themselves** — when a test process crashes it now
+  reports the terminating signal (e.g. "killed by signal 11 (SIGSEGV)") and says
+  it is a runtime fault rather than a failed assertion, instead of a bare `FAIL`
+  with no detail. Assertion failures already print their own message.
+
 ### Fixes
 
 - **build cache** — object cache keys now include a fingerprint of the bundled
