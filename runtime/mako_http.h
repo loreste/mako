@@ -34,17 +34,17 @@
 extern "C" {
 #endif
 
-static inline int mako_http_listen_fd(int64_t port) {
+static inline int mako_http_listen_fd_addr(MakoString host, int64_t port) {
     if (!mako_net_init()) return -1;
     mako_sock_t fd = socket(AF_INET, SOCK_STREAM, 0);
     if (fd == MAKO_INVALID_SOCK) return -1;
     int yes = 1;
     setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, (const char *)&yes, sizeof(yes));
     struct sockaddr_in addr;
-    memset(&addr, 0, sizeof(addr));
-    addr.sin_family = AF_INET;
-    addr.sin_addr.s_addr = htonl(INADDR_ANY);
-    addr.sin_port = htons((uint16_t)port);
+    if (!mako_bind_ipv4_addr(&addr, host, port)) {
+        mako_sock_close(fd);
+        return -1;
+    }
     if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
         mako_sock_close(fd);
         return -1;
@@ -54,6 +54,10 @@ static inline int mako_http_listen_fd(int64_t port) {
         return -1;
     }
     return (int)fd;
+}
+
+static inline int mako_http_listen_fd(int64_t port) {
+    return mako_http_listen_fd_addr(mako_str_from_cstr(""), port);
 }
 
 static inline const char *mako_http_reason(int status) {
@@ -305,14 +309,18 @@ static inline void mako_http_fill_conn(MakoHttpConn *c, const char *req, size_t 
     }
 }
 
-static inline int64_t mako_http_bind(int64_t port) {
-    int fd = mako_http_listen_fd(port);
+static inline int64_t mako_http_bind_addr(MakoString host, int64_t port) {
+    int fd = mako_http_listen_fd_addr(host, port);
     if (fd < 0) {
-        fprintf(stderr, "error: http_bind(:%lld) failed\n", (long long)port);
+        fprintf(stderr, "error: http_bind failed\n");
         return -1;
     }
-    fprintf(stderr, "mako http_bind on :%lld\n", (long long)port);
+    fprintf(stderr, "mako http_bind on configured address:%lld\n", (long long)port);
     return (int64_t)fd;
+}
+
+static inline int64_t mako_http_bind(int64_t port) {
+    return mako_http_bind_addr(mako_str_from_cstr(""), port);
 }
 
 /* Reap keep-alive slots whose peer has closed (curl/default KA left open).

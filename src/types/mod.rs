@@ -1039,6 +1039,7 @@ impl TypeChecker {
         fns.insert("buf_read_u32be".into(), Type::Fn(vec![Type::Buf], Box::new(Type::Int)));
         // Game UDP
         fns.insert("game_udp_bind".into(), Type::Fn(vec![Type::Int], Box::new(Type::GameUDP)));
+        fns.insert("game_udp_bind_addr".into(), Type::Fn(vec![Type::String, Type::Int], Box::new(Type::GameUDP)));
         fns.insert("game_udp_recv".into(), Type::Fn(vec![Type::GameUDP], Box::new(Type::String)));
         fns.insert("game_udp_sender".into(), Type::Fn(vec![Type::GameUDP], Box::new(Type::Int)));
         fns.insert("game_udp_sender_addr".into(), Type::Fn(vec![Type::GameUDP], Box::new(Type::String)));
@@ -2361,6 +2362,10 @@ impl TypeChecker {
         fns.insert(
             "tcp_listen".into(),
             Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "tcp_listen_addr".into(),
+            Type::Fn(vec![Type::String, Type::Int], Box::new(Type::Int)),
         );
         fns.insert(
             "tcp_accept".into(),
@@ -3947,6 +3952,18 @@ impl TypeChecker {
             Type::Fn(vec![Type::String, Type::String], Box::new(Type::Int)),
         );
         fns.insert(
+            "bcrypt_hash".into(),
+            Type::Fn(vec![Type::String, Type::Int], Box::new(Type::String)),
+        );
+        fns.insert(
+            "bcrypt_verify".into(),
+            Type::Fn(vec![Type::String, Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "bcrypt_available".into(),
+            Type::Fn(vec![], Box::new(Type::Int)),
+        );
+        fns.insert(
             "aes_gcm_seal".into(),
             Type::Fn(
                 vec![Type::String, Type::String, Type::String, Type::String],
@@ -4958,6 +4975,10 @@ impl TypeChecker {
         fns.insert(
             "http_bind".into(),
             Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "http_bind_addr".into(),
+            Type::Fn(vec![Type::String, Type::Int], Box::new(Type::Int)),
         );
         fns.insert(
             "http_accept".into(),

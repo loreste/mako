@@ -2745,6 +2745,11 @@ fn compile_cflags(opts: &BuildOpts) -> Vec<String> {
     if find_zlib().is_some() {
         v.push("-DMAKO_HAS_ZLIB".into());
     }
+    if cc::classify_target(opts.target.as_deref()) == cc::OsKind::Linux
+        && Path::new("/usr/include/crypt.h").exists()
+    {
+        v.push("-DMAKO_HAS_CRYPT".into());
+    }
     if let Some((inc, _)) = find_openssl() {
         v.push(format!("-I{}", inc.display()));
     }
@@ -2838,6 +2843,11 @@ fn link_args_native(opts: &BuildOpts, _runtime_dir: &Path) -> Vec<String> {
         }
         args.push("-DMAKO_HAS_ZLIB".into());
         args.push("-lz".into());
+    }
+    // bcrypt via libxcrypt: Linux ships <crypt.h> + libcrypt with crypt_gensalt_rn.
+    if os == cc::OsKind::Linux && Path::new("/usr/include/crypt.h").exists() {
+        args.push("-DMAKO_HAS_CRYPT".into());
+        args.push("-lcrypt".into());
     }
     args
 }

@@ -16,7 +16,26 @@
 extern "C" {
 #endif
 
-static inline int64_t mako_tcp_listen(int64_t port) {
+static inline int mako_bind_ipv4_addr(struct sockaddr_in *addr, MakoString host, int64_t port) {
+    char hbuf[256];
+    memset(addr, 0, sizeof(*addr));
+    addr->sin_family = AF_INET;
+    addr->sin_port = htons((uint16_t)port);
+    if (!host.data || host.len == 0 || (host.len == 1 && host.data[0] == '*')) {
+        addr->sin_addr.s_addr = htonl(INADDR_ANY);
+        return 1;
+    }
+    if (host.len >= sizeof(hbuf)) return 0;
+    memcpy(hbuf, host.data, host.len);
+    hbuf[host.len] = 0;
+    if (strcmp(hbuf, "0.0.0.0") == 0) {
+        addr->sin_addr.s_addr = htonl(INADDR_ANY);
+        return 1;
+    }
+    return inet_pton(AF_INET, hbuf, &addr->sin_addr) == 1;
+}
+
+static inline int64_t mako_tcp_listen_addr(MakoString host, int64_t port) {
     if (!mako_net_init()) return -1;
     mako_sock_t fd = socket(AF_INET, SOCK_STREAM, 0);
     if (fd == MAKO_INVALID_SOCK) {
@@ -26,12 +45,13 @@ static inline int64_t mako_tcp_listen(int64_t port) {
     int yes = 1;
     setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, (const char *)&yes, sizeof(yes));
     struct sockaddr_in addr;
-    memset(&addr, 0, sizeof(addr));
-    addr.sin_family = AF_INET;
-    addr.sin_addr.s_addr = htonl(INADDR_ANY);
-    addr.sin_port = htons((uint16_t)port);
+    if (!mako_bind_ipv4_addr(&addr, host, port)) {
+        fprintf(stderr, "error: tcp: invalid bind host\n");
+        mako_sock_close(fd);
+        return -1;
+    }
     if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
-        fprintf(stderr, "error: tcp: bind(:%lld) failed\n", (long long)port);
+        fprintf(stderr, "error: tcp: bind failed\n");
         mako_sock_close(fd);
         return -1;
     }
@@ -41,6 +61,10 @@ static inline int64_t mako_tcp_listen(int64_t port) {
         return -1;
     }
     return (int64_t)fd;
+}
+
+static inline int64_t mako_tcp_listen(int64_t port) {
+    return mako_tcp_listen_addr(mako_str_from_cstr(""), port);
 }
 
 static inline int64_t mako_tcp_accept(int64_t listen_fd) {

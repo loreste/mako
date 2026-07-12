@@ -1942,6 +1942,78 @@ static inline int64_t mako_argon2id_verify(MakoString phc, MakoString password) 
 #endif
 }
 
+/* ---- bcrypt (libxcrypt `$2b$`) ---- */
+/* Available where <crypt.h> ships crypt_gensalt_rn + crypt_r (Linux/libxcrypt).
+ * Elsewhere (e.g. macOS system crypt lacks $2b$) these are safe stubs; prefer
+ * Argon2id when bcrypt is unavailable. */
+#if defined(MAKO_HAS_CRYPT)
+#include <crypt.h>
+
+/* bcrypt hash → 60-char `$2b$<cost>$<22-salt><31-hash>`, or "" on failure.
+ * `cost` is clamped to bcrypt's valid range [4,31]. */
+static inline MakoString mako_bcrypt_hash(MakoString password, int64_t cost) {
+    if (cost < 4) cost = 10;
+    if (cost > 31) cost = 31;
+    MakoString rnd = mako_random_bytes(16);
+    if (rnd.len != 16) return mako_str_from_cstr("");
+    char setting[64];
+    char *gs = crypt_gensalt_rn("$2b$", (unsigned long)cost,
+                                rnd.data, 16, setting, sizeof(setting));
+    if (!gs) return mako_str_from_cstr("");
+    /* crypt_r needs a NUL-terminated password. */
+    char *pw = (char *)malloc(password.len + 1);
+    if (!pw) return mako_str_from_cstr("");
+    if (password.len) memcpy(pw, password.data, password.len);
+    pw[password.len] = 0;
+    struct crypt_data d;
+    memset(&d, 0, sizeof(d));
+    char *h = crypt_r(pw, gs, &d);
+    MakoString out = (h && h[0] != '*') ? mako_str_from_cstr(h) : mako_str_from_cstr("");
+    mako_secure_zero(pw, password.len + 1);
+    free(pw);
+    mako_secure_zero(&d, sizeof(d));
+    return out;
+}
+
+/* Verify a password against a `$2b$` bcrypt hash. Returns 1 on match, else 0. */
+static inline int64_t mako_bcrypt_verify(MakoString hash, MakoString password) {
+    if (hash.len < 4 || hash.len >= 128 || !hash.data) return 0;
+    char setting[128];
+    memcpy(setting, hash.data, hash.len);
+    setting[hash.len] = 0;
+    char *pw = (char *)malloc(password.len + 1);
+    if (!pw) return 0;
+    if (password.len) memcpy(pw, password.data, password.len);
+    pw[password.len] = 0;
+    struct crypt_data d;
+    memset(&d, 0, sizeof(d));
+    char *got = crypt_r(pw, setting, &d);
+    int64_t match = 0;
+    if (got && got[0] != '*') {
+        size_t gl = strlen(got);
+        match = (gl == hash.len) &&
+                mako_const_eq_bytes((const unsigned char *)got, gl,
+                                    (const unsigned char *)setting, hash.len);
+    }
+    mako_secure_zero(pw, password.len + 1);
+    free(pw);
+    mako_secure_zero(&d, sizeof(d));
+    return match;
+}
+
+static inline int64_t mako_bcrypt_available(void) { return 1; }
+#else
+static inline MakoString mako_bcrypt_hash(MakoString password, int64_t cost) {
+    (void)password; (void)cost;
+    return mako_str_from_cstr("");
+}
+static inline int64_t mako_bcrypt_verify(MakoString hash, MakoString password) {
+    (void)hash; (void)password;
+    return 0;
+}
+static inline int64_t mako_bcrypt_available(void) { return 0; }
+#endif
+
 /* ---- mime/multipart (form-data parse) ---- */
 static inline const char *mako_multipart_memmem(
     const char *hay, size_t hay_len, const char *needle, size_t needle_len
