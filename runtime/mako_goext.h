@@ -885,6 +885,79 @@ static inline int64_t mako_http_shutdown_from_signal(int64_t sig, int64_t grace_
     return 0;
 }
 
+/* ---- os/signal by name: distinguish HUP (reload) / TERM / INT / USR1 / … ----
+ * `signal_watch("HUP")` installs a handler that raises a per-signal flag;
+ * `signal_fired("HUP")` returns and clears it. Handlers do not use SA_RESTART,
+ * so a signal interrupts a blocking accept/read and the loop can react (reload
+ * or shut down). `signal_ignore("PIPE")` is the usual choice for socket servers. */
+#if !defined(_WIN32)
+#define MAKO_SIG_MAX 64
+static volatile sig_atomic_t mako_sig_flags[MAKO_SIG_MAX];
+static void mako_sig_named_handler(int sig) {
+    if (sig >= 0 && sig < MAKO_SIG_MAX) mako_sig_flags[sig] = 1;
+}
+static inline int mako__sig_from_name(MakoString name) {
+    const char *n = name.data ? name.data : "";
+    size_t l = name.len;
+#define MAKO_SIGEQ(s) (l == sizeof(s) - 1 && memcmp(n, s, l) == 0)
+    if (MAKO_SIGEQ("HUP")) return SIGHUP;
+    if (MAKO_SIGEQ("TERM")) return SIGTERM;
+    if (MAKO_SIGEQ("INT")) return SIGINT;
+    if (MAKO_SIGEQ("QUIT")) return SIGQUIT;
+    if (MAKO_SIGEQ("USR1")) return SIGUSR1;
+    if (MAKO_SIGEQ("USR2")) return SIGUSR2;
+    if (MAKO_SIGEQ("PIPE")) return SIGPIPE;
+    if (MAKO_SIGEQ("CHLD")) return SIGCHLD;
+#undef MAKO_SIGEQ
+    return -1;
+}
+#endif
+
+static inline int64_t mako_signal_watch(MakoString name) {
+#if defined(_WIN32)
+    (void)name;
+    return -1;
+#else
+    int s = mako__sig_from_name(name);
+    if (s < 0 || s >= MAKO_SIG_MAX) return -1;
+    mako_sig_flags[s] = 0;
+    struct sigaction sa;
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_handler = mako_sig_named_handler;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = 0; /* no SA_RESTART — let signals interrupt blocking calls */
+    if (sigaction(s, &sa, NULL) != 0) return -1;
+    return 0;
+#endif
+}
+
+static inline int64_t mako_signal_fired(MakoString name) {
+#if defined(_WIN32)
+    (void)name;
+    return 0;
+#else
+    int s = mako__sig_from_name(name);
+    if (s < 0 || s >= MAKO_SIG_MAX) return 0;
+    if (mako_sig_flags[s]) {
+        mako_sig_flags[s] = 0;
+        return 1;
+    }
+    return 0;
+#endif
+}
+
+static inline int64_t mako_signal_ignore(MakoString name) {
+#if defined(_WIN32)
+    (void)name;
+    return -1;
+#else
+    int s = mako__sig_from_name(name);
+    if (s < 0) return -1;
+    signal(s, SIG_IGN);
+    return 0;
+#endif
+}
+
 /* ---- sync/atomic ---- */
 typedef struct {
     _Atomic int64_t v;

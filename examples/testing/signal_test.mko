@@ -1,0 +1,20 @@
+// Per-signal, name-based hooks. A live delivery needs an external `kill`, so
+// this covers the wiring: watch/ignore succeed for known names, an unknown name
+// is rejected, and nothing is pending before a signal arrives.
+
+func TestSignalWatchKnownNames() {
+    assert_eq(signal_watch("HUP"), 0)
+    assert_eq(signal_watch("TERM"), 0)
+    assert_eq(signal_ignore("PIPE"), 0)
+}
+
+func TestSignalUnknownNameRejected() {
+    assert_eq(signal_watch("NOPE"), -1)
+    assert_eq(signal_fired("NOPE"), 0)
+}
+
+func TestSignalNotFiredIsZero() {
+    let _ = signal_watch("USR1")
+    // No signal was sent, so nothing is pending.
+    assert_eq(signal_fired("USR1"), 0)
+}

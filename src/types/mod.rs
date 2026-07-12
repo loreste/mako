@@ -3681,6 +3681,19 @@ impl TypeChecker {
             "signal_received".into(),
             Type::Fn(vec![], Box::new(Type::Int)),
         );
+        // Per-signal, name-based hooks ("HUP"/"TERM"/"INT"/"USR1"/"USR2"/"PIPE"/…).
+        fns.insert(
+            "signal_watch".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "signal_fired".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "signal_ignore".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
         fns.insert(
             "atomic_new".into(),
             Type::Fn(vec![Type::Int], Box::new(Type::Named("AtomicInt".into()))),

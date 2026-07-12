@@ -43,6 +43,13 @@
   on the same socket (verified against Postgres-style `SSLRequest` negotiation).
   ALPN negotiates `h2` / `http/1.1` for proxy use.
 
+### OS
+
+- **Signal hooks by name** — `signal_watch("HUP")`, `signal_fired("HUP")`,
+  `signal_ignore("PIPE")` for HUP/TERM/INT/USR1/USR2/QUIT/PIPE/CHLD. Distinct
+  per-signal flags (reload vs shutdown), and handlers interrupt blocking calls so
+  an accept loop can react.
+
 ### Networking
 
 - **UDP request/response routing** — `game_udp_sender_addr` (the `host:port` of

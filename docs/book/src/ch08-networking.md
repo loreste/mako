@@ -322,6 +322,36 @@ fn main() {
 
 ---
 
+## Reload & graceful shutdown (signals)
+
+Long-running servers react to OS signals — reload config on `HUP`, drain and exit
+on `TERM`/`INT`. `signal_watch` installs a hook by name; `signal_fired` reports
+(and clears) whether that signal arrived. Because the handlers interrupt blocking
+calls, a `TERM` breaks out of a blocking `accept`.
+
+```mko
+fn main() {
+    let _ = signal_ignore("PIPE")   // don't die writing to a closed socket
+    let _ = signal_watch("HUP")     // reload
+    let _ = signal_watch("TERM")    // shutdown
+
+    let fd = http_bind(8080)
+    while true {
+        if signal_fired("TERM") == 1 { break }
+        if signal_fired("HUP") == 1 { reload_config() }
+        let c = http_accept(fd)     // interrupted (returns < 0) when a signal arrives
+        if c < 0 { continue }
+        handle(c)
+        let _ = http_close(c)
+    }
+    // drain in-flight work, then exit cleanly
+}
+```
+
+Names: `HUP`, `TERM`, `INT`, `QUIT`, `USR1`, `USR2`, `PIPE`, `CHLD`.
+
+---
+
 ## TLS / HTTPS
 
 When OpenSSL is linked, Mako supports HTTPS with TLS termination:

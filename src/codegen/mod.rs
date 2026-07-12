@@ -7383,6 +7383,18 @@ impl Codegen {
                         "signal_received" => {
                             return ("int64_t".into(), "mako_signal_received()".into());
                         }
+                        "signal_watch" => {
+                            let (_, n) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_signal_watch({n})"));
+                        }
+                        "signal_fired" => {
+                            let (_, n) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_signal_fired({n})"));
+                        }
+                        "signal_ignore" => {
+                            let (_, n) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_signal_ignore({n})"));
+                        }
                         "atomic_new" => {
                             let (_, v) = self.emit_expr(&args[0]);
                             let tmp = self.fresh("at");
