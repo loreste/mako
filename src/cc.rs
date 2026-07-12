@@ -307,6 +307,8 @@ mod tests {
             target: Some("x86_64-unknown-linux-musl".into()),
             sanitize: None,
             static_link: true,
+            overflow: crate::overflow::OverflowMode::Wrap,
+            bounds_always: false,
         });
         assert!(args.iter().any(|a| a == "-static"));
         assert!(args.iter().any(|a| a == "-pthread"));

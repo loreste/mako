@@ -2,11 +2,13 @@
 
 **North star**
 
-> **Speed · speed · speed** · concurrency & parallelism first-class · memory safety · no mandatory GC · fast builds · single binary · strong stdlib.
+> **Speed · speed · speed** · concurrency & parallelism **first-class** · security **first-class** · no mandatory GC · fast builds · single binary · strong stdlib.
 
 **The game:** run **as close to Rust as possible**, with **first-class concurrency
 and parallelism** (`crew` / `kick` / `join` / `fan` / channels / actors) that do
-not leak work or color the whole language. Full write-up: [SPEED.md](SPEED.md).
+not leak work or color the whole language, and **first-class security** (memory,
+crews, secrets, secure defaults) that does not silently tax the hot path.
+Write-ups: [SPEED.md](SPEED.md) · [SECURITY.md](SECURITY.md).
 
 **Why Mako exists:** fix the real **pain points of Go and Rust** without cloning
 either language. Go’s GC/nil/err-noise/goroutine leaks and Rust’s
@@ -24,6 +26,7 @@ cognitive overhead for everyday backend work.
 | **Speed first** | **The name of the game** — as close to Rust as possible ([PERFORMANCE.md](PERFORMANCE.md), [SPEED.md](SPEED.md)) |
 | **Concurrency first-class** | `crew` / `kick` / `join` / channels / `select` / `actor` — structured, no free-fire leaks |
 | **Parallelism first-class** | `fan` + multi-kick crews — use the cores without a third-party pool |
+| **Security first-class** | Compiler + runtime contract — NLL, bounds, secrets, secure stdlib ([SECURITY.md](SECURITY.md)) |
 | Simple syntax | Clean, readable code that gets out of your way |
 | **Low ceremony** | Real work without a lot of typing ([ERGONOMICS.md](ERGONOMICS.md)) |
 | Fast builds | Compile times stay short even as projects grow |

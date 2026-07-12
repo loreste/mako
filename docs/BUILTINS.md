@@ -2041,3 +2041,134 @@ ready queue so workers can multiplex without one-request-at-a-time stalls.
 |----------|-----------|-------------|
 | `mime_type` | `mime_type(ext: string) -> string` | Get MIME type for a file extension |
 
+
+---
+
+## 71. Checked arithmetic & overflow
+
+CLI: `mako build --overflow trap|wrap|ignore` (also on `mako run`).  
+Trap mode rewrites integer `+ - *` to `mako_add_i64` / `sub` / `mul` (abort on overflow).
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `checked_add` | `checked_add(a: int, b: int) -> int` | Add; abort on overflow |
+| `checked_sub` | `checked_sub(a: int, b: int) -> int` | Subtract; abort on overflow |
+| `checked_mul` | `checked_mul(a: int, b: int) -> int` | Multiply; abort on overflow |
+| `would_overflow_add` | `would_overflow_add(a, b) -> int` | `1` if `a+b` would overflow |
+| `would_overflow_sub` | `would_overflow_sub(a, b) -> int` | `1` if `a-b` would overflow |
+| `would_overflow_mul` | `would_overflow_mul(a, b) -> int` | `1` if `a*b` would overflow |
+
+Runtime: `runtime/mako_overflow.h`.
+
+---
+
+## 72. Graceful shutdown
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `signal_on_term` | `signal_on_term() -> int` | Install SIGTERM/SIGINT → set shutdown flag |
+| `install_graceful_shutdown` | `install_graceful_shutdown(grace_ms: int) -> int` | signal_on_term + store grace |
+| `register_listener` | `register_listener(fd: int) -> int` | Track listen fd for close on drain |
+| `close_listeners` | `close_listeners() -> int` | Close registered listeners |
+| `server_shutdown_begin` | `server_shutdown_begin(grace_ms: int) -> int` | Flag drain + close listeners |
+| `server_drain` | `server_drain(timeout_ms: int) -> int` | Wait up to timeout (10ms slices) |
+| `shutdown_requested` | `shutdown_requested() -> int` | `1` if SIGTERM/begin seen |
+| `should_stop_accepting` | `should_stop_accepting() -> int` | Accept-loop stop flag |
+
+Runtime: `runtime/mako_shutdown.h`. Pairs with existing `http_shutdown_*` / `signal_watch`.
+
+---
+
+## 73. Leak detector (scopes)
+
+Builds on `leak_mark` / `alloc_track_*`. Nestable scopes:
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `leak_scope_enter` | `leak_scope_enter() -> int` | Push mark (live bytes) |
+| `leak_scope_exit` | `leak_scope_exit() -> int` | Pop; returns leaked bytes; warns on stderr if >0 |
+| `leak_check` | `leak_check() -> int` | Bytes over current mark (or live if none) |
+| `leak_assert_scope` | `leak_assert_scope() -> int` | `1` if no leak in current scope |
+
+Runtime: `runtime/mako_leak.h`.
+
+---
+
+## 74. Distributed tracing (seed)
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `trace_id` | `trace_id() -> string` | New 128-bit id (32 hex chars); installs as current |
+| `trace_current` | `trace_current() -> string` | Current id or `""` |
+| `trace_set` | `trace_set(hex: string) -> int` | Install 32-hex id |
+| `trace_clear` | `trace_clear() -> int` | Clear TLS context |
+| `trace_begin` | `trace_begin(name: string) -> int` | Start named span |
+| `trace_end` | `trace_end() -> int` | End span; JSON line to stderr; returns duration ms |
+| `trace_log` | `trace_log(msg: string) -> int` | Log with current trace context |
+
+Runtime: `runtime/mako_trace.h`.
+
+---
+
+## CLI notes
+
+| Flag / command | Meaning |
+|----------------|---------|
+| `--overflow trap\|wrap\|ignore` | Integer overflow codegen (build/run) |
+| `--bounds always` | Keep bounds checks in release |
+| `mako dev [file]` | Watch mtime → rebuild + rerun (hot reload seed) |
+
+Tests: `examples/testing/overflow_shutdown_test.mko`. Multi-error recovery:
+`examples/bad/multi_error.mko`.
+
+---
+
+## 75. Result[T, Enum] typed errors
+
+`Result[int, string]` remains the default. **`Result[int, MyError]`** where
+`MyError` is a user `enum` is fully supported:
+
+```mko
+enum IoError { NotFound, Permission(int), Other(string) }
+
+fn open(code: int) -> Result[int, IoError] {
+    if code == 0 { return Ok(1) }
+    return Err(NotFound)
+}
+
+match open(1) {
+    Ok(v) => print_int(v),
+    Err(e) => match e {
+        NotFound => print("missing"),
+        Permission(c) => print_int(c),
+        Other(msg) => print(msg),
+    },
+}
+```
+
+Runtime packs enum tags/payloads into `MakoResultInt` (`mako_err_enum`).
+
+---
+
+## 76. const fn
+
+```mko
+const fn double(x: int) -> int { return x * 2 }
+const SIZE = double(512)   // folded at compile time to 1024
+```
+
+Rules:
+- Body may use `let` of const expressions and a final `return` / trailing expr.
+- Only integer ops (`+ - * / % & | ^ << >>`).
+- Calls with const args are folded to integer literals in generated C.
+
+---
+
+## 77. crew.drain / evloop_shutdown
+
+| API | Role |
+|-----|------|
+| `crew.drain(timeout_ms)` | Cancel + join all kicks (timeout budget per task) |
+| `crew_drain(crew, timeout_ms)` | Free-function form |
+| `evloop_shutdown(el)` | Close event-loop backend and free |
+

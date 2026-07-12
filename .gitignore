@@ -14,11 +14,26 @@
 /app
 /udp_debug
 
+# Accidental local binaries from `mako build` / experiments in repo root
+/trap_ov
+/trap_*
+/hello
+/bench_*
+
 # Debug symbol bundles
 *.dSYM/
 
 # Internal working docs (not for public repo)
 /docs/internal/
+
+# Local agent / editor state (do not commit)
+.claude/
+.cursor/
+.grok/
+.idea/
+*.local.md
+AGENTS.local.md
+CLAUDE.local.md
 
 # Third-party build artifacts
 runtime/third_party/quiche/build_attempt.log

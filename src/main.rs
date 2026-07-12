@@ -3,12 +3,17 @@ mod cc;
 mod codegen;
 mod desugar;
 mod diag;
+mod errors;
 mod fmt;
 mod incremental;
+mod leak;
 mod lexer;
 mod lsp;
+mod overflow;
 mod parser;
 mod pkg;
+mod recovery;
+mod shutdown;
 mod tooling;
 mod types;
 
@@ -21,7 +26,8 @@ use std::time::Instant;
 use codegen::Codegen;
 use diag::{json_escape, Diagnostic, Span};
 use lexer::{LexError, Lexer};
-use parser::{ParseError, Parser};
+use overflow::{OverflowCli, OverflowMode};
+use parser::Parser;
 
 #[derive(ClapParser)]
 #[command(
@@ -118,6 +124,30 @@ enum Commands {
         /// Parallel compile jobs (default: `MAKO_JOBS` or CPU count)
         #[arg(short = 'j', long = "jobs")]
         jobs: Option<usize>,
+        /// Integer overflow: `trap` (abort), `wrap` (C default), `ignore` (same as wrap)
+        #[arg(long, value_enum, default_value_t = OverflowCli::Wrap)]
+        overflow: OverflowCli,
+        /// Keep bounds checks on even in release (`always`)
+        #[arg(long, value_enum, default_value_t = BoundsCli::Default)]
+        bounds: BoundsCli,
+    },
+    /// Watch `.mko` sources and rebuild+rerun on change (hot reload seed)
+    Dev {
+        /// Source file or package directory
+        #[arg(default_value = ".")]
+        file: PathBuf,
+        /// Focus a single workspace member
+        #[arg(short = 'p', long = "package")]
+        package: Option<String>,
+        /// Poll interval in milliseconds
+        #[arg(long, default_value_t = 500)]
+        interval_ms: u64,
+        /// Optimize builds (`-O3`)
+        #[arg(long, default_value_t = false)]
+        release: bool,
+        /// Integer overflow mode for rebuilds
+        #[arg(long, value_enum, default_value_t = OverflowCli::Trap)]
+        overflow: OverflowCli,
     },
     /// Compile (debug) and run (workspace root: `-p NAME` or unique default main)
     Run {
@@ -139,6 +169,12 @@ enum Commands {
         /// Parallel compile jobs (default: `MAKO_JOBS` or CPU count)
         #[arg(short = 'j', long = "jobs")]
         jobs: Option<usize>,
+        /// Integer overflow: `trap` / `wrap` / `ignore`
+        #[arg(long, value_enum, default_value_t = OverflowCli::Wrap)]
+        overflow: OverflowCli,
+        /// Bounds checks: `default` (debug-only) or `always`
+        #[arg(long, value_enum, default_value_t = BoundsCli::Default)]
+        bounds: BoundsCli,
         /// Arguments forwarded to the compiled program (`argc` / `args` / `arg_get`)
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
@@ -471,6 +507,29 @@ pub(crate) struct BuildOpts {
     pub(crate) target: Option<String>,
     pub(crate) sanitize: Option<String>,
     pub(crate) static_link: bool,
+    pub(crate) overflow: OverflowMode,
+    pub(crate) bounds_always: bool,
+}
+
+impl Default for BuildOpts {
+    fn default() -> Self {
+        Self {
+            target: None,
+            sanitize: None,
+            static_link: false,
+            overflow: OverflowMode::Wrap,
+            bounds_always: false,
+        }
+    }
+}
+
+
+
+#[derive(Clone, Copy, Debug, Default, ValueEnum)]
+enum BoundsCli {
+    #[default]
+    Default,
+    Always,
 }
 
 fn static_link_default(target: Option<&str>) -> bool {
@@ -731,6 +790,8 @@ fn run(cli: Cli) -> Result<(), ()> {
             no_static_link,
             no_incremental,
             jobs,
+            overflow,
+            bounds,
         } => {
             let static_link = effective_static_link(target.as_deref(), static_link, no_static_link);
             cmd_build(
@@ -745,6 +806,8 @@ fn run(cli: Cli) -> Result<(), ()> {
                 static_link,
                 !no_incremental,
                 jobs,
+                overflow.into(),
+                matches!(bounds, BoundsCli::Always),
             )
         }
         Commands::Run {
@@ -754,6 +817,8 @@ fn run(cli: Cli) -> Result<(), ()> {
             time,
             no_incremental,
             jobs,
+            overflow,
+            bounds,
             args,
         } => cmd_run(
             &file,
@@ -762,7 +827,22 @@ fn run(cli: Cli) -> Result<(), ()> {
             time,
             !no_incremental,
             jobs,
+            overflow.into(),
+            matches!(bounds, BoundsCli::Always),
             &args,
+        ),
+        Commands::Dev {
+            file,
+            package,
+            interval_ms,
+            release,
+            overflow,
+        } => cmd_dev(
+            &file,
+            package.as_deref(),
+            interval_ms,
+            release,
+            overflow.into(),
         ),
         Commands::Fmt {
             paths,
@@ -1225,6 +1305,10 @@ fn make_incr_opts(
     if build.static_link {
         flags.push_str("static;");
     }
+    flags.push_str(build.overflow.cache_tag());
+    if build.bounds_always {
+        flags.push_str("bounds=always;");
+    }
     incremental::IncrOptions {
         incremental,
         jobs: jobs.unwrap_or_else(incremental::default_jobs).max(1),
@@ -1232,6 +1316,8 @@ fn make_incr_opts(
         verbose_cache: std::env::var_os("MAKO_CACHE_LOG").is_some(),
         flags_fp: flags,
         cc: cc::resolve_cc(build),
+        overflow: build.overflow,
+        bounds_always: build.bounds_always,
     }
 }
 
@@ -1263,16 +1349,66 @@ fn default_out_bin(file: &Path) -> PathBuf {
     {
         cc::with_exe_suffix(
             base,
-            &BuildOpts {
-                target: None,
-                sanitize: None,
-                static_link: false,
-            },
+            &BuildOpts::default(),
         )
     }
     #[cfg(not(target_os = "windows"))]
     {
         base
+    }
+}
+
+/// `mako dev` — poll source mtime and rebuild+rerun (hot reload seed).
+fn cmd_dev(
+    path: &Path,
+    package: Option<&str>,
+    interval_ms: u64,
+    release: bool,
+    overflow: OverflowMode,
+) -> Result<(), ()> {
+    use std::time::Duration;
+    let file = resolve_run_entry(path, package)?;
+    eprintln!(
+        "mako dev: watching {} (interval {}ms, Ctrl-C to stop)",
+        file.display(),
+        interval_ms
+    );
+    let mut last_mtime = fs::metadata(&file)
+        .and_then(|m| m.modified())
+        .ok();
+    // Initial run
+    let _ = cmd_run(
+        path,
+        package,
+        release,
+        false,
+        true,
+        None,
+        overflow,
+        false,
+        &[],
+    );
+    loop {
+        std::thread::sleep(Duration::from_millis(interval_ms.max(50)));
+        let mtime = match fs::metadata(&file).and_then(|m| m.modified()) {
+            Ok(t) => t,
+            Err(_) => continue,
+        };
+        if last_mtime.map(|t| mtime > t).unwrap_or(true) {
+            last_mtime = Some(mtime);
+            eprintln!("mako dev: change detected — rebuild");
+            let _ = cmd_run(
+                path,
+                package,
+                release,
+                false,
+                true,
+                None,
+                overflow,
+                false,
+                &[],
+            );
+        }
     }
 }
 
@@ -1300,6 +1436,8 @@ fn cmd_check(path: &Path, package: Option<&str>, incremental: bool, json: bool) 
             target: None,
             sanitize: None,
             static_link: false,
+            overflow: OverflowMode::Wrap,
+            bounds_always: false,
         },
     );
     for t in &targets {
@@ -1331,6 +1469,8 @@ fn cmd_build(
     static_link: bool,
     incremental: bool,
     jobs: Option<usize>,
+    overflow: OverflowMode,
+    bounds_always: bool,
 ) -> Result<(), ()> {
     let level = opt_level(release);
     let targets = resolve_package_entries(path, true, package)?;
@@ -1340,10 +1480,15 @@ fn cmd_build(
         );
         return Err(());
     }
+    // Release defaults to bounds-always for safer production binaries unless
+    // caller already requested always; debug stays default (NDEBUG strips).
+    let bounds_always = bounds_always || release;
     let opts = BuildOpts {
         target,
         sanitize,
         static_link,
+        overflow,
+        bounds_always,
     };
     let incr = make_incr_opts(incremental, release, jobs, &opts);
     for file in &targets {
@@ -1373,6 +1518,8 @@ fn cmd_run(
     time: bool,
     incremental: bool,
     jobs: Option<usize>,
+    overflow: OverflowMode,
+    bounds_always: bool,
     args: &[String],
 ) -> Result<(), ()> {
     let file = resolve_run_entry(path, package)?;
@@ -1381,6 +1528,8 @@ fn cmd_run(
         target: None,
         sanitize: None,
         static_link: false,
+        overflow,
+        bounds_always,
     };
     let incr = make_incr_opts(incremental, release, jobs, &opts);
     let out_bin = std::env::temp_dir().join(format!(
@@ -1476,6 +1625,8 @@ fn cmd_profile(
         target: None,
         sanitize: None,
         static_link: false,
+        overflow: OverflowMode::Wrap,
+        bounds_always: false,
     };
     let incr = make_incr_opts(incremental, release, jobs, &opts);
     let out_bin = std::env::temp_dir().join(format!(
@@ -1621,6 +1772,8 @@ fn run_file_with_stdio(file: &Path, silent: bool) -> Result<(), ()> {
             target: None,
             sanitize: None,
             static_link: false,
+            overflow: OverflowMode::Wrap,
+            bounds_always: false,
         },
     )?;
     let mut cmd = Command::new(&out_bin);
@@ -1660,6 +1813,8 @@ fn run_test_package(
             target: None,
             sanitize: sanitize.map(|s| s.to_string()),
             static_link: false,
+            overflow: OverflowMode::Wrap,
+            bounds_always: false,
         },
     )?;
     let status = Command::new(&out_bin).status().map_err(|e| {
@@ -2609,12 +2764,10 @@ fn compile_to_ast_with(file: &Path, incr: &incremental::IncrOptions) -> Result<a
         d.emit();
     })?;
 
-    let program = Parser::new(tokens).parse().map_err(|e| {
-        let ParseError::Message { message, line, col } = e;
-        Diagnostic::error(&path, &src, Span::new(line, col), message)
-            .with_hint("check brackets, commas, and keywords around this spot")
-            .emit();
-    })?;
+    let (program, parse_errs) = Parser::new(tokens).parse_with_errors();
+    if recovery::emit_parse_errors(&path, &src, &parse_errs) {
+        return Err(());
+    }
 
     let program = desugar::desugar(program);
     let program = tooling::resolve_imports(file, program).map_err(|e| {
@@ -2676,7 +2829,11 @@ fn build_incremental(
     let frontend_ms = t0.elapsed().as_secs_f64() * 1000.0;
 
     if !use_sep {
-        let c = Codegen::new().emit(&program);
+        let mut cg = Codegen::new();
+        cg.overflow_mode = opts.overflow;
+        cg.bounds_checks_always = opts.bounds_always;
+        cg.source_file = Some(file.display().to_string());
+        let c = cg.emit(&program);
         let backend_ms = build_c(&c, out_bin, emit_c, file, level, opts)?;
         return Ok((frontend_ms, backend_ms));
     }

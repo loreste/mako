@@ -1,9 +1,20 @@
 # Agent / contributor north star
 
+## The name of the game
+
+| Pillar | Bar |
+|--------|-----|
+| **Speed** | **The name of the game.** Hot path as close to **Rust** as possible. No mandatory GC. Native `-O3 -flto`. Silent slowdowns are bugs. Measure: [docs/PERFORMANCE.md](docs/PERFORMANCE.md) · [docs/SPEED.md](docs/SPEED.md) · `./scripts/bench-gate.sh`. |
+| **Concurrency** | **First-class** — language tools, not a package. `crew` / `kick` / `join` / `fan` / channels / `select` / `actor`. Structured (no orphan tasks). No async coloring as the primary model. |
+| **Security** | **First-class** — compiler + runtime contract, not a style guide. Memory safety (NLL, `hold`/`share`/`arena`), bounds, secrets wipe, secure stdlib defaults. See [docs/SECURITY.md](docs/SECURITY.md). |
+
+Speed wins only if concurrent work stays safe and security does not force a slow path. Prefer **fast and safe by construction**; costlier checks stay **opt-in** or debug-only.
+
 ## Mako is its own language
 
 **Do not treat Mako as a Go dialect or a Rust dialect.**  
-It is a **unique language** with **unique syntax**. That is non-negotiable.
+It is a **unique language** with **unique syntax**. That is non-negotiable.  
+Identity is Mako’s own — **speed, concurrency, and security still ship first-class**.
 
 ## What the game is
 
@@ -16,13 +27,16 @@ It is a **unique language** with **unique syntax**. That is non-negotiable.
    Structured (no orphan tasks). No async coloring as the primary model.  
    See [docs/SPEED.md](docs/SPEED.md).
 
-3. **Fix Go/Rust pain** with Mako-shaped answers — never by cloning their syntax.  
+3. **Security is first-class** — prevent footguns by construction (moves, bounds, crews, secrets, parameterized DB).  
+   Do not trade the default hot path for advisory-only safety. See [docs/SECURITY.md](docs/SECURITY.md).
+
+4. **Fix Go/Rust pain** with Mako-shaped answers — never by cloning their syntax.  
    See [docs/PAIN_POINTS.md](docs/PAIN_POINTS.md).
 
-4. **Real work, less typing** — short happy path; power opt-in.  
+5. **Real work, less typing** — short happy path; power opt-in.  
    See [docs/ERGONOMICS.md](docs/ERGONOMICS.md).
 
-5. **Preferred surface is Mako-only.** Docs, examples, tests, and `mako fmt` lead with it.  
+6. **Preferred surface is Mako-only.** Docs, examples, tests, and `mako fmt` lead with it.  
    Dual spellings (`func`, `:=`, `import`, `package`, …) are **compat sugar only**.
 
 ### Canonical Mako surface (use these)
@@ -46,10 +60,11 @@ It is a **unique language** with **unique syntax**. That is non-negotiable.
 1. Does this look like **Mako** (not Go/Rust wearing a costume)?
 2. Does it **hurt speed** on a hot path? If yes, opt-in or reject.
 3. Does it make **concurrency/parallelism** clearer, safer, or faster — or weaker?
-4. Which **pain point** does it close? ([docs/PAIN_POINTS.md](docs/PAIN_POINTS.md))
-5. Does the **happy path get shorter**? ([docs/ERGONOMICS.md](docs/ERGONOMICS.md))
-6. Dual forms only for migration; preferred forms stay in [docs/IDENTITY.md](docs/IDENTITY.md).
-7. Pitch **what Mako does** (speed, crew, fan) — not “like Go/Rust.”
+4. Does it strengthen **security** (memory, secrets, isolation, secure defaults) without silent cost — or weaken it?
+5. Which **pain point** does it close? ([docs/PAIN_POINTS.md](docs/PAIN_POINTS.md))
+6. Does the **happy path get shorter**? ([docs/ERGONOMICS.md](docs/ERGONOMICS.md))
+7. Dual forms only for migration; preferred forms stay in [docs/IDENTITY.md](docs/IDENTITY.md).
+8. Pitch **what Mako does** (speed, crew, fan, safety) — not “like Go/Rust.”
 
 ### Always update the docs
 
@@ -76,13 +91,16 @@ Before calling a change done, **re-run and report evidence** (do not claim PASS 
 2. **Tests** — related `mako test examples/testing/…` and negative `examples/bad/…`
 3. **Demos** — `mako run` for examples you touched
 4. **Speed** — if concurrency/runtime/codegen changed: `./scripts/bench-gate.sh` (and `1.5` when relevant)
-5. **Identity** — preferred surface should stay clean under `mako lint --identity` on Mako-native samples
-6. **Docs** — tables/examples match the new surface (see above)
+5. **Concurrency** — crews join/cancel; no orphan tasks; hot-path must not block on SO timeouts
+6. **Security** — no new footguns (bounds, secrets, injection); prefer hard errors over soft advice
+7. **Identity** — preferred surface should stay clean under `mako lint --identity` on Mako-native samples
+8. **Docs** — tables/examples match the new surface (see above)
 
 ### Source of truth
 
 - [docs/SPEED.md](docs/SPEED.md) — **speed + concurrency + parallelism**  
 - [docs/PERFORMANCE.md](docs/PERFORMANCE.md) — measure, profiles, bar vs Rust  
+- [docs/SECURITY.md](docs/SECURITY.md) — **security as a first-class contract**  
 - [docs/IDENTITY.md](docs/IDENTITY.md) — flair + identity  
 - [docs/PAIN_POINTS.md](docs/PAIN_POINTS.md) — Go/Rust pain → Mako  
 - [docs/ERGONOMICS.md](docs/ERGONOMICS.md) — less typing  

@@ -1,17 +1,20 @@
-# Speed · concurrency · parallelism
+# Speed · concurrency · parallelism · security
 
 **The name of the game is speed.**  
 Mako exists to run **as close to Rust as possible** on real workloads — then go
 further with **first-class concurrency and parallelism** that do not leak tasks
-or paint the language with async colors.
+or paint the language with async colors, and **first-class security** that does
+not silently tax the hot path.
 
 | Priority | Bar |
 |----------|-----|
-| **1. Speed** | Hot path ≈ Rust: native binary, no GC, release `-O3 -flto`, zero-cost defaults |
-| **2. Concurrency** | First-class: `crew` / `kick` / `join` / channels / `select` / actors |
-| **3. Parallelism** | First-class: `fan` and crew work across cores — not a library afterthought |
+| **1. Speed** | **Name of the game.** Hot path ≈ Rust: native binary, no GC, release `-O3 -flto`, zero-cost defaults |
+| **2. Concurrency** | **First-class:** `crew` / `kick` / `join` / channels / `select` / actors |
+| **3. Parallelism** | **First-class:** `fan` and crew work across cores — not a library afterthought |
+| **4. Security** | **First-class:** memory + resource contracts, secure defaults — see [SECURITY.md](SECURITY.md) |
 
 Syntax stays **Mako’s own**. Speed is not optional. Concurrency is not bolted on.
+Security is not a linter plugin.
 
 ---
 
@@ -24,6 +27,10 @@ Syntax stays **Mako’s own**. Speed is not optional. Concurrency is not bolted 
 - **Measure** — [PERFORMANCE.md](PERFORMANCE.md), `scripts/bench-vs-go-rust.sh`
 
 Any feature that silently slows the hot path must justify itself or stay opt-in.
+
+Security tools that cost (bounds-always, overflow trap, sanitizers) stay **opt-in**
+or debug-default so release hot paths stay Rust-competitive. Safe-by-construction
+features (NLL, structured crews, parameterized DB) are free at steady state.
 
 ---
 

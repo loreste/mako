@@ -58,13 +58,26 @@ pub struct Codegen {
     generic_templates: HashMap<String, FnDef>,
     /// Keep bounds checks under NDEBUG when true.
     pub bounds_checks_always: bool,
+    /// Integer overflow: Wrap (C default), Trap (abort), Ignore (same as wrap).
+    pub overflow_mode: OverflowMode,
     /// Source path for `#line` directives (debug mapping).
     pub source_file: Option<String>,
     /// Emitted tuple typedef tags.
     tuple_typedefs: std::collections::HashSet<String>,
     /// Tuple typedef C snippets to hoist before forward decls.
     pending_tuple_typedefs: Vec<String>,
+    /// When emitting a function whose return is `Result[T, Enum]`, the C enum type
+    /// name for Err payload (e.g. `MakoEnum_IoError`). Used by match `Err(e)`.
+    current_result_err_enum: Option<String>,
+    /// Local/temp name → Result Err enum C type (for match on locals).
+    result_err_enums: HashMap<String, String>,
+    /// Function name → Result Err enum C type.
+    fn_result_err_enum: HashMap<String, String>,
+    /// Names of `const fn`s (bodies foldable at compile time when args are const).
+    const_fns: HashMap<String, FnDef>,
 }
+
+pub use crate::overflow::OverflowMode;
 
 impl Codegen {
     pub fn new() -> Self {
@@ -90,29 +103,33 @@ impl Codegen {
             unsafe_depth: 0,
             generic_templates: HashMap::new(),
             bounds_checks_always: false,
+            overflow_mode: OverflowMode::Wrap,
             source_file: None,
             tuple_typedefs: std::collections::HashSet::new(),
             pending_tuple_typedefs: Vec::new(),
+            current_result_err_enum: None,
+            result_err_enums: HashMap::new(),
+            fn_result_err_enum: HashMap::new(),
+            const_fns: HashMap::new(),
         }
+    }
+
+    /// Extract `MakoEnum_X` if `ty` is `Result[_, X]` and X is a known enum.
+    fn result_err_enum_c(&self, ty: &TypeExpr) -> Option<String> {
+        crate::errors::result_err_enum_c(ty, |en| self.enums.contains_key(en))
     }
 
     fn push_share_scope(&mut self) {
         self.share_scopes.push(Vec::new());
     }
 
-    /// Emit a debug bounds check unless inside `unsafe { }` or NDEBUG release.
-    /// When `bounds_checks_always`, checks stay on even under `-DNDEBUG` (fast-safe profile).
+    /// Emit a bounds check unless inside `unsafe { }`.
+    /// Uses `MAKO_BOUNDS_CHECK` from mako_rt.h (honors `MAKO_BOUNDS_ALWAYS` / NDEBUG).
     fn emit_bounds_check(&mut self, cond_c: &str, msg: &str) {
         if self.unsafe_depth > 0 {
             return;
         }
-        if self.bounds_checks_always {
-            self.line(&format!("if ({cond_c}) {{ mako_abort(\"{msg}\"); }}"));
-        } else {
-            self.line(&format!(
-                "#ifndef NDEBUG\nif ({cond_c}) {{ mako_abort(\"{msg}\"); }}\n#endif"
-            ));
-        }
+        self.line(&format!("MAKO_BOUNDS_CHECK({cond_c}, \"{msg}\");"));
     }
 
     fn pop_share_scope(&mut self) {
@@ -250,12 +267,26 @@ impl Codegen {
         // Native builds pull the full runtime surface. WASI preview1 builds
         // (`-DMAKO_WASI`) keep only `mako_rt.h` — sockets/TLS/DB need host POSIX.
         self.out.push_str("#include \"mako_rt.h\"\n");
+        // Overflow mode for checked integer ops (must precede mako_overflow.h use).
+        self.out.push_str(&format!(
+            "#define MAKO_OVERFLOW_MODE {}\n",
+            self.overflow_mode.c_define_value()
+        ));
+        // Default release-safe bounds when requested via codegen flag.
+        if self.bounds_checks_always {
+            self.out.push_str("#define MAKO_BOUNDS_ALWAYS 1\n");
+            self.out.push_str("#ifndef NDEBUG\n/* bounds also forced under NDEBUG via MAKO_BOUNDS_ALWAYS */\n#endif\n");
+        }
+        self.out.push_str("#include \"mako_overflow.h\"\n");
         self.out.push_str("#ifndef MAKO_WASI\n");
         self.out.push_str("#include \"mako_uuid.h\"\n");
         self.out.push_str("#include \"mako_net.h\"\n");
         self.out.push_str("#include \"mako_proxy.h\"\n");
         self.out.push_str("#include \"mako_http.h\"\n");
         self.out.push_str("#include \"mako_std.h\"\n");
+        self.out.push_str("#include \"mako_leak.h\"\n");
+        self.out.push_str("#include \"mako_shutdown.h\"\n");
+        self.out.push_str("#include \"mako_trace.h\"\n");
         self.out.push_str("#include \"mako_tls.h\"\n");
         self.out.push_str("#include \"mako_nghttp2.h\"\n");
         self.out.push_str("#include \"mako_quiche.h\"\n");
@@ -322,6 +353,12 @@ impl Codegen {
                     let param_tys: Vec<String> =
                         f.params.iter().map(|p| self.type_expr_c(&p.ty)).collect();
                     self.fn_params.insert(f.name.clone(), param_tys);
+                    if let Some(ec) = f.ret.as_ref().and_then(|t| self.result_err_enum_c(t)) {
+                        self.fn_result_err_enum.insert(f.name.clone(), ec);
+                    }
+                    if f.is_const {
+                        self.const_fns.insert(f.name.clone(), f.clone());
+                    }
                 }
                 Item::ExternC(ext) => {
                     let ret = ext
@@ -408,9 +445,15 @@ impl Codegen {
                 | Item::Import { .. } => {}
                 Item::ExternC(_) => {}
                 Item::Const(c) => {
-                    if let Some(v) = fold_const_c(&c.value) {
+                    if let Some(v) = fold_const_c_env(&c.value, &self.const_ints, &self.const_fns) {
                         self.const_ints.insert(c.name.clone(), v);
-                        let _ = writeln!(self.out, "/* const {} = {} */", c.name, v);
+                        // Emit as #define so uses in C are valid integer constants
+                        let _ = writeln!(
+                            self.out,
+                            "#define {} ((int64_t){})",
+                            mangle(&c.name),
+                            v
+                        );
                     }
                 }
             }
@@ -998,6 +1041,11 @@ impl Codegen {
         self.defer_stack.clear();
         self.share_scopes.clear();
         self.share_live.clear();
+        self.result_err_enums.clear();
+        self.current_result_err_enum = f
+            .ret
+            .as_ref()
+            .and_then(|t| self.result_err_enum_c(t));
         self.push_share_scope();
         for p in &f.params {
             self.locals.insert(p.name.clone(), self.type_expr_c(&p.ty));
@@ -1488,6 +1536,16 @@ impl Codegen {
                     }
                 }
                 self.locals.insert(name.clone(), ty.clone());
+                // Propagate Result Err enum type from call
+                if ty == "MakoResultInt" {
+                    if let Expr::Call { callee, .. } = init {
+                        if let Expr::Ident(fname) = callee.as_ref() {
+                            if let Some(ec) = self.fn_result_err_enum.get(fname).cloned() {
+                                self.result_err_enums.insert(name.clone(), ec);
+                            }
+                        }
+                    }
+                }
                 self.line(&format!("{ty} {name} = {val};"));
                 if *ownership == Ownership::Share {
                     self.register_share_local(name);
@@ -1909,6 +1967,38 @@ impl Codegen {
                     };
                     return (ty.into(), format!("(({lv}) & ~({rv}))"));
                 }
+                let ty = match op {
+                    BinOp::Eq
+                    | BinOp::Ne
+                    | BinOp::Lt
+                    | BinOp::Le
+                    | BinOp::Gt
+                    | BinOp::Ge
+                    | BinOp::And
+                    | BinOp::Or => "bool",
+                    _ => {
+                        if lt == "double" {
+                            "double"
+                        } else {
+                            "int64_t"
+                        }
+                    }
+                };
+                let _ = rt;
+                // Checked integer arithmetic when trap mode is on (float always raw).
+                if ty == "int64_t" {
+                    let op_ch = match op {
+                        BinOp::Add => Some('+'),
+                        BinOp::Sub => Some('-'),
+                        BinOp::Mul => Some('*'),
+                        _ => None,
+                    };
+                    if let Some(ch) = op_ch {
+                        if let Some(fn_name) = self.overflow_mode.trap_fn(ch) {
+                            return (ty.into(), format!("{fn_name}({lv}, {rv})"));
+                        }
+                    }
+                }
                 let cop = match op {
                     BinOp::Add => "+",
                     BinOp::Sub => "-",
@@ -1929,24 +2019,6 @@ impl Codegen {
                     BinOp::Shl => "<<",
                     BinOp::Shr => ">>",
                 };
-                let ty = match op {
-                    BinOp::Eq
-                    | BinOp::Ne
-                    | BinOp::Lt
-                    | BinOp::Le
-                    | BinOp::Gt
-                    | BinOp::Ge
-                    | BinOp::And
-                    | BinOp::Or => "bool",
-                    _ => {
-                        if lt == "double" {
-                            "double"
-                        } else {
-                            "int64_t"
-                        }
-                    }
-                };
-                let _ = rt;
                 (ty.into(), format!("({lv} {cop} {rv})"))
             }
             Expr::Unary { op, expr } => {
@@ -1959,6 +2031,25 @@ impl Codegen {
             }
             Expr::Call { callee, args } => {
                 if let Expr::Ident(name) = callee.as_ref() {
+                    // const fn: fold when all args are const-foldable
+                    if self.const_fns.contains_key(name) {
+                        if let Some(v) = fold_const_c_env(
+                            &Expr::Call {
+                                callee: callee.clone(),
+                                args: args.clone(),
+                            },
+                            &self.const_ints,
+                            &self.const_fns,
+                        ) {
+                            return ("int64_t".into(), v.to_string());
+                        }
+                    }
+                    // Track Result[T, Enum] err type for match Err(e)
+                    if let Some(ec) = self.fn_result_err_enum.get(name).cloned() {
+                        // Will attach to the returned temp if caller binds it via Let —
+                        // also attach to any fresh temp created below by recording after emit.
+                        let _ = ec; // used in Let path via fn_result_err_enum lookup
+                    }
                     match name.as_str() {
                         "print" => {
                             let (ty, v) = self.emit_expr(&args[0]);
@@ -2064,10 +2155,29 @@ impl Codegen {
                         }
                         "Ok" => {
                             let (_, v) = self.emit_expr(&args[0]);
-                            return ("MakoResultInt".into(), format!("mako_ok_int({v})"));
+                            return (
+                                "MakoResultInt".into(),
+                                format!("mako_ok_int((int64_t)({v}))"),
+                            );
                         }
                         "Err" => {
-                            let (_, v) = self.emit_expr(&args[0]);
+                            let (ty, v) = self.emit_expr(&args[0]);
+                            if ty.starts_with("MakoEnum_") {
+                                let tmp = self.fresh("erre");
+                                self.line(&format!(
+                                    "MakoResultInt {tmp} = mako_err_enum((int)({v}).tag, ({v}).i0, ({v}).i1, ({v}).s0);"
+                                ));
+                                return ("MakoResultInt".into(), tmp);
+                            }
+                            // string (or coerce) error
+                            if ty != "MakoString" {
+                                // int tag as synthetic enum-less error via string
+                                let tmp = self.fresh("errs");
+                                self.line(&format!(
+                                    "MakoResultInt {tmp} = mako_err_int(mako_int_to_string((int64_t)({v})));"
+                                ));
+                                return ("MakoResultInt".into(), tmp);
+                            }
                             return ("MakoResultInt".into(), format!("mako_err_int({v})"));
                         }
                         "error" => {
@@ -2949,6 +3059,21 @@ impl Codegen {
                             let (_, el) = self.emit_expr(&args[0]);
                             let tmp = self.fresh("ecl");
                             self.line(&format!("int64_t {tmp} = mako_evloop_close({el});"));
+                            return ("int64_t".into(), tmp);
+                        }
+                        "evloop_shutdown" => {
+                            let (_, el) = self.emit_expr(&args[0]);
+                            let tmp = self.fresh("evs");
+                            self.line(&format!("int64_t {tmp} = mako_evloop_shutdown({el});"));
+                            return ("int64_t".into(), tmp);
+                        }
+                        "crew_drain" => {
+                            let (_, c) = self.emit_expr(&args[0]);
+                            let (_, ms) = self.emit_expr(&args[1]);
+                            let tmp = self.fresh("cdr");
+                            self.line(&format!(
+                                "int64_t {tmp} = mako_crew_drain(&{c}, {ms});"
+                            ));
                             return ("int64_t".into(), tmp);
                         }
                         "nb_listen" => {
@@ -6254,6 +6379,119 @@ impl Codegen {
                                 "MakoString {tmp} = mako_leak_report_json({mark});"
                             ));
                             return ("MakoString".into(), tmp);
+                        }
+                        "leak_scope_enter" => {
+                            return ("int64_t".into(), "mako_leak_scope_enter()".into());
+                        }
+                        "leak_scope_exit" => {
+                            return ("int64_t".into(), "mako_leak_scope_exit()".into());
+                        }
+                        "leak_check" => {
+                            return ("int64_t".into(), "mako_leak_check()".into());
+                        }
+                        "leak_assert_scope" => {
+                            return ("int64_t".into(), "mako_leak_assert_scope()".into());
+                        }
+                        "checked_add" => {
+                            let (_, a) = self.emit_expr(&args[0]);
+                            let (_, b) = self.emit_expr(&args[1]);
+                            return ("int64_t".into(), format!("mako_checked_add({a}, {b})"));
+                        }
+                        "checked_sub" => {
+                            let (_, a) = self.emit_expr(&args[0]);
+                            let (_, b) = self.emit_expr(&args[1]);
+                            return ("int64_t".into(), format!("mako_checked_sub({a}, {b})"));
+                        }
+                        "checked_mul" => {
+                            let (_, a) = self.emit_expr(&args[0]);
+                            let (_, b) = self.emit_expr(&args[1]);
+                            return ("int64_t".into(), format!("mako_checked_mul({a}, {b})"));
+                        }
+                        "would_overflow_add" => {
+                            let (_, a) = self.emit_expr(&args[0]);
+                            let (_, b) = self.emit_expr(&args[1]);
+                            return (
+                                "int64_t".into(),
+                                format!("mako_would_overflow_add({a}, {b})"),
+                            );
+                        }
+                        "would_overflow_sub" => {
+                            let (_, a) = self.emit_expr(&args[0]);
+                            let (_, b) = self.emit_expr(&args[1]);
+                            return (
+                                "int64_t".into(),
+                                format!("mako_would_overflow_sub({a}, {b})"),
+                            );
+                        }
+                        "would_overflow_mul" => {
+                            let (_, a) = self.emit_expr(&args[0]);
+                            let (_, b) = self.emit_expr(&args[1]);
+                            return (
+                                "int64_t".into(),
+                                format!("mako_would_overflow_mul({a}, {b})"),
+                            );
+                        }
+                        "signal_on_term" => {
+                            return ("int64_t".into(), "mako_signal_on_term()".into());
+                        }
+                        "register_listener" => {
+                            let (_, f) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_register_listener({f})"));
+                        }
+                        "close_listeners" => {
+                            return ("int64_t".into(), "mako_close_listeners()".into());
+                        }
+                        "server_shutdown_begin" => {
+                            let (_, ms) = self.emit_expr(&args[0]);
+                            return (
+                                "int64_t".into(),
+                                format!("mako_server_shutdown_begin({ms})"),
+                            );
+                        }
+                        "server_drain" => {
+                            let (_, ms) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_server_drain({ms})"));
+                        }
+                        "shutdown_requested" => {
+                            return ("int64_t".into(), "mako_shutdown_requested()".into());
+                        }
+                        "should_stop_accepting" => {
+                            return ("int64_t".into(), "mako_should_stop_accepting()".into());
+                        }
+                        "install_graceful_shutdown" => {
+                            let (_, ms) = self.emit_expr(&args[0]);
+                            return (
+                                "int64_t".into(),
+                                format!("mako_install_graceful_shutdown({ms})"),
+                            );
+                        }
+                        "trace_id" => {
+                            let tmp = self.fresh("tid");
+                            self.line(&format!("MakoString {tmp} = mako_trace_id();"));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "trace_current" => {
+                            let tmp = self.fresh("tcur");
+                            self.line(&format!("MakoString {tmp} = mako_trace_current();"));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "trace_set" => {
+                            let (_, s) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_trace_set({s})"));
+                        }
+                        "trace_clear" => {
+                            return ("int64_t".into(), "mako_trace_clear()".into());
+                        }
+                        "trace_begin" => {
+                            let (_, n) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_trace_begin({n})"));
+                        }
+                        "trace_end" => {
+                            return ("int64_t".into(), "mako_trace_end()".into());
+                        }
+                        "trace_log" => {
+                            let (_, m) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_trace_log({m})"));
                         }
                         "ecs_world_new" => {
                             let (_, cap) = self.emit_expr(&args[0]);
@@ -11148,6 +11386,14 @@ impl Codegen {
                         self.line(&format!("mako_nursery_cancel(&{rv});"));
                         ("void".into(), "/*void*/".into())
                     }
+                    "drain" => {
+                        let (_, ms) = self.emit_expr(&args[0]);
+                        let tmp = self.fresh("cdr");
+                        self.line(&format!(
+                            "int64_t {tmp} = mako_crew_drain(&{rv}, {ms});"
+                        ));
+                        ("int64_t".into(), tmp)
+                    }
                     "cancelled" => (
                         "bool".into(),
                         format!("(mako_nursery_cancelled(&{rv}) != 0)"),
@@ -11580,6 +11826,24 @@ impl Codegen {
         let mut result_ty: Option<String> = None;
         let scrut = self.fresh("scrut");
         self.line(&format!("{sty} {scrut} = {sval};"));
+        // Propagate Result Err enum type from local/ident, call target, or current fn return.
+        if sty == "MakoResultInt" {
+            let err_c = match scrutinee {
+                Expr::Ident(n) => self.result_err_enums.get(n).cloned(),
+                Expr::Call { callee, .. } => {
+                    if let Expr::Ident(fname) = callee.as_ref() {
+                        self.fn_result_err_enum.get(fname).cloned()
+                    } else {
+                        None
+                    }
+                }
+                _ => None,
+            }
+            .or_else(|| self.current_result_err_enum.clone());
+            if let Some(ec) = err_c {
+                self.result_err_enums.insert(scrut.clone(), ec);
+            }
+        }
 
         let marker = format!("/*__MATCH_DECL_{result}__*/");
         self.line(&marker);
@@ -11736,8 +12000,22 @@ impl Codegen {
                         self.locals.insert(bindings[0].clone(), "int64_t".into());
                         self.line(&format!("int64_t {} = {scrut}.value;", mangle(&bindings[0])));
                     } else if name == "Err" && bindings.len() == 1 {
-                        self.locals.insert(bindings[0].clone(), "MakoString".into());
-                        self.line(&format!("MakoString {} = {scrut}.err;", mangle(&bindings[0])));
+                        let b = mangle(&bindings[0]);
+                        if let Some(cty) = self.result_err_enums.get(scrut).cloned() {
+                            // Enum Err: reconstruct full enum value from packed fields.
+                            self.locals.insert(bindings[0].clone(), cty.clone());
+                            self.line(&format!(
+                                "{cty} {b}; \
+                                 {b}.tag = {scrut}.err_tag; \
+                                 {b}.i0 = {scrut}.err_i0; \
+                                 {b}.i1 = {scrut}.err_i1; \
+                                 {b}.s0 = {scrut}.err_s0; \
+                                 {b}.s1 = (MakoString){{NULL, 0}};"
+                            ));
+                        } else {
+                            self.locals.insert(bindings[0].clone(), "MakoString".into());
+                            self.line(&format!("MakoString {b} = {scrut}.err;"));
+                        }
                     }
                 } else if sty == "MakoOptionInt" {
                     if name == "Some" && bindings.len() == 1 {
@@ -12298,12 +12576,17 @@ impl Codegen {
     }
 }
 
-fn fold_const_c(expr: &Expr) -> Option<i64> {
+fn fold_const_c_env(
+    expr: &Expr,
+    consts: &HashMap<String, i64>,
+    const_fns: &HashMap<String, FnDef>,
+) -> Option<i64> {
     match expr {
         Expr::Int(n) => Some(*n),
+        Expr::Ident(n) => consts.get(n).copied(),
         Expr::Binary { op, left, right } => {
-            let l = fold_const_c(left)?;
-            let r = fold_const_c(right)?;
+            let l = fold_const_c_env(left, consts, const_fns)?;
+            let r = fold_const_c_env(right, consts, const_fns)?;
             match op {
                 BinOp::Add => Some(l.wrapping_add(r)),
                 BinOp::Sub => Some(l.wrapping_sub(r)),
@@ -12320,12 +12603,42 @@ fn fold_const_c(expr: &Expr) -> Option<i64> {
             }
         }
         Expr::Unary { op, expr } => {
-            let v = fold_const_c(expr)?;
+            let v = fold_const_c_env(expr, consts, const_fns)?;
             match op {
-                UnaryOp::Neg => Some(-v),
+                UnaryOp::Neg => Some(v.wrapping_neg()),
                 UnaryOp::BitNot => Some(!v),
                 UnaryOp::Not => None,
             }
+        }
+        Expr::Call { callee, args } => {
+            let Expr::Ident(fname) = callee.as_ref() else {
+                return None;
+            };
+            let f = const_fns.get(fname)?;
+            if f.params.len() != args.len() {
+                return None;
+            }
+            let mut env = consts.clone();
+            for (p, a) in f.params.iter().zip(args.iter()) {
+                let v = fold_const_c_env(a, consts, const_fns)?;
+                env.insert(p.name.clone(), v);
+            }
+            // Evaluate body
+            let mut locals = env;
+            for (i, stmt) in f.body.stmts.iter().enumerate() {
+                match stmt {
+                    Stmt::Return(Some(e)) => return fold_const_c_env(e, &locals, const_fns),
+                    Stmt::Let { name, init, .. } => {
+                        let v = fold_const_c_env(init, &locals, const_fns)?;
+                        locals.insert(name.clone(), v);
+                    }
+                    Stmt::Expr(e) if i + 1 == f.body.stmts.len() => {
+                        return fold_const_c_env(e, &locals, const_fns);
+                    }
+                    _ => return None,
+                }
+            }
+            None
         }
         _ => None,
     }

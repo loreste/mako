@@ -34,6 +34,7 @@ use std::time::Instant;
 
 use crate::ast::{Item, Program};
 use crate::codegen::Codegen;
+use crate::overflow::OverflowMode;
 use crate::diag::{Diagnostic, Span};
 use crate::tooling::{find_nearest_manifest_dir, parse_manifest_deps, resolve_dep_root};
 use crate::types::{TypeChecker, TypeError};
@@ -51,6 +52,10 @@ pub struct IncrOptions {
     pub flags_fp: String,
     /// C driver (`clang`, `zig`, or `MAKO_CC`). Empty → `clang`.
     pub cc: PathBuf,
+    /// Integer overflow codegen mode.
+    pub overflow: OverflowMode,
+    /// Keep bounds checks in release.
+    pub bounds_always: bool,
 }
 
 impl Default for IncrOptions {
@@ -62,6 +67,8 @@ impl Default for IncrOptions {
             verbose_cache: std::env::var_os("MAKO_CACHE_LOG").is_some(),
             flags_fp: String::new(),
             cc: PathBuf::from("clang"),
+            overflow: OverflowMode::Wrap,
+            bounds_always: false,
         }
     }
 }
@@ -394,7 +401,10 @@ pub fn plan_object_units(
     opts: &IncrOptions,
     runtime_dir: &Path,
 ) -> Vec<ObjectUnit> {
-    let c = Codegen::new().emit(program);
+    let mut cg = Codegen::new();
+    cg.overflow_mode = opts.overflow;
+    cg.bounds_checks_always = opts.bounds_always;
+    let c = cg.emit(program);
     // Release: -O3 -flto (see docs/PERFORMANCE.md). Fingerprint must match clang flags.
     let opt = if opts.release { "O3flto" } else { "O0g" };
     let rt_fp = runtime_headers_fp(runtime_dir);

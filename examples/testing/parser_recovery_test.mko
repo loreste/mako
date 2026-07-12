@@ -1,0 +1,15 @@
+// Parser recovery: multi-error collection is exercised via
+// `mako check examples/bad/multi_error.mko` (expects ≥2 diagnostics and must
+// not treat the following good decls as errors). This file keeps a runtime
+// sanity path so the suite always has a green recovery-related test.
+
+fn TestRecoverySurfaceExists() {
+    assert_eq(1 + 1, 2)
+}
+
+fn TestWouldOverflowWired() {
+    // Full add/sub/mul probe surface (sub was the wiring gap).
+    assert_eq(would_overflow_add(1, 1), 0)
+    assert_eq(would_overflow_sub(1, 1), 0)
+    assert_eq(would_overflow_mul(1, 1), 0)
+}

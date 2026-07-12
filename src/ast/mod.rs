@@ -112,6 +112,8 @@ pub struct FnDef {
     pub body: Block,
     /// `export fn` — package boundary marker (enforced when visibility=explicit).
     pub exported: bool,
+    /// `const fn` — body must be comptime-foldable; calls with const args fold at compile time.
+    pub is_const: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]

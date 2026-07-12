@@ -1,10 +1,19 @@
 # Mako security
 
+**Security is first-class** — same tier as concurrency, under a speed-first product.
+
 Mako treats safety as a **compiler and runtime contract**, not a style guide.
 The goal: make leaks, memory corruption, and common backend footguns hard to
-ship — by construction where possible, by hard errors where not.
+ship — by construction where possible, by hard errors where not — **without**
+making the default hot path slower than Rust.
 
-Guided tour: [The Mako Book §11](book/src/ch11-speed-safety.md).
+| Pillar | How it shows up |
+|--------|-----------------|
+| **Speed** | Secure-by-construction (NLL, crews, params) stays zero-cost at steady state; trap/bounds-always/sanitizers are **opt-in** |
+| **Concurrency** | Structured `crew` cancel-joins — no orphan tasks that outlive security boundaries |
+| **Security** | Memory, secrets, injection, bounds — hard errors preferred over soft advice |
+
+Guided tour: [The Mako Book §11](book/src/ch11-speed-safety.md) · Speed bar: [SPEED.md](SPEED.md).
 
 ## Principles
 
@@ -16,6 +25,8 @@ Guided tour: [The Mako Book §11](book/src/ch11-speed-safety.md).
    hold/share/move rules.
 3. **Secure defaults in the stdlib** — parameterized DB APIs, header validation,
    constant-time token compare, zero-on-drop secrets.
+4. **Speed is the name of the game** — security features that cost cycles stay
+   opt-in or debug-only; do not silently tax every release binary.
 
 ## Memory and resources
 

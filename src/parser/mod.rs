@@ -50,14 +50,80 @@ impl Parser {
 
     pub fn parse(mut self) -> Result<Program, ParseError> {
         let mut items = Vec::new();
+        let mut errors: Vec<ParseError> = Vec::new();
         while !self.is_eof() {
             if matches!(self.peek_kind(), TokenKind::Import) || self.at_pull_kw() {
-                items.extend(self.parse_import()?);
+                match self.parse_import() {
+                    Ok(imps) => items.extend(imps),
+                    Err(e) => {
+                        errors.push(e);
+                        self.recover_to_next_decl();
+                    }
+                }
             } else {
-                items.push(self.parse_item()?);
+                match self.parse_item() {
+                    Ok(item) => items.push(item),
+                    Err(e) => {
+                        errors.push(e);
+                        self.recover_to_next_decl();
+                    }
+                }
             }
         }
+        if let Some(first) = errors.into_iter().next() {
+            // Surface the first error for CLI compatibility; recovery still
+            // parsed later items so typecheck/LSP can see partial ASTs when
+            // callers use `parse_with_errors`.
+            return Err(first);
+        }
         Ok(Program { items })
+    }
+
+    /// Parse collecting **all** top-level errors (recovery between decls).
+    /// Returns `(program, errors)` — program may be partial; errors empty on success.
+    pub fn parse_with_errors(mut self) -> (Program, Vec<ParseError>) {
+        let mut items = Vec::new();
+        let mut errors: Vec<ParseError> = Vec::new();
+        while !self.is_eof() {
+            if matches!(self.peek_kind(), TokenKind::Import) || self.at_pull_kw() {
+                match self.parse_import() {
+                    Ok(imps) => items.extend(imps),
+                    Err(e) => {
+                        errors.push(e);
+                        self.recover_to_next_decl();
+                    }
+                }
+            } else {
+                match self.parse_item() {
+                    Ok(item) => items.push(item),
+                    Err(e) => {
+                        errors.push(e);
+                        self.recover_to_next_decl();
+                    }
+                }
+            }
+        }
+        (Program { items }, errors)
+    }
+
+    /// Skip tokens until the next top-level declaration boundary
+    /// (`fn`/`func`/`struct`/`enum`/`pack`/`package`/`const`/`export`/`on`/`import`/`pull`/`type`/`actor`/`interface`/`extern` or EOF).
+    ///
+    /// When a failed item leaves the cursor already on the next item's start
+    /// keyword (e.g. `fn broken(` then `fn ok()` — error reported at the second
+    /// `fn`), do **not** consume that keyword. Decl parsers always bump their
+    /// own start token first, so re-entering on the same failed start cannot
+    /// infinite-loop without progress past that keyword.
+    fn recover_to_next_decl(&mut self) {
+        if crate::recovery::is_decl_start(self.peek_kind()) {
+            return;
+        }
+        while !self.is_eof() {
+            self.bump();
+            if crate::recovery::is_decl_start(self.peek_kind()) {
+                return;
+            }
+        }
     }
 
     /// True if the cursor is on the contextual import keyword `pull`.
@@ -135,11 +201,21 @@ impl Parser {
         } else {
             false
         };
+        // `const fn` — compile-time foldable function
+        let is_const_fn = matches!(self.peek_kind(), TokenKind::Const)
+            && matches!(
+                self.tokens.get(self.pos + 1).map(|t| &t.kind),
+                Some(TokenKind::Fn | TokenKind::Func)
+            );
+        if is_const_fn {
+            self.bump(); // const
+        }
         match self.peek_kind() {
             TokenKind::Fn | TokenKind::Func => {
                 let mut f = self.parse_fn()?;
                 // Go-style: Capitalized names are exported; `export` forces it.
                 f.exported = exported || is_exported_name(&f.name);
+                f.is_const = is_const_fn;
                 Ok(Item::Fn(f))
             }
             TokenKind::On => {
@@ -758,6 +834,7 @@ impl Parser {
             ret,
             body,
             exported: false,
+        is_const: false,
         })
     }
 
@@ -2579,6 +2656,41 @@ fn main() {}
             .filter(|i| matches!(i, Item::Import { .. }))
             .count();
         assert_eq!(n, 2);
+    }
+
+    /// Recovery must not eat the next top-level `fn`/`struct` after a broken item.
+    #[test]
+    fn parse_with_errors_keeps_following_good_decls() {
+        let src = r#"
+fn broken(
+fn good() { return 1 }
+struct AlsoBroken {
+fn still_ok() { return 2 }
+"#;
+        let tokens = Lexer::new(src).tokenize().unwrap();
+        let (prog, errs) = Parser::new(tokens).parse_with_errors();
+        assert!(
+            errs.len() >= 2,
+            "expected ≥2 parse errors, got {}: {:?}",
+            errs.len(),
+            errs
+        );
+        let fn_names: Vec<&str> = prog
+            .items
+            .iter()
+            .filter_map(|i| match i {
+                Item::Fn(f) => Some(f.name.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            fn_names.contains(&"good"),
+            "recovery ate `good`; items={fn_names:?}"
+        );
+        assert!(
+            fn_names.contains(&"still_ok"),
+            "recovery ate `still_ok`; items={fn_names:?}"
+        );
     }
 }
 

@@ -633,27 +633,56 @@ static inline int64_t mako_to_uint64_from_signed(int64_t v) {
     return v;
 }
 
-/* ---- Result[int, string] (common backend shape) ---- */
+/* ---- Result[int, E] (common backend shape) ----
+ * E may be string (err_kind=0) or a user enum (err_kind=1):
+ *   err_kind 0: err string is the error payload
+ *   err_kind 1: err_tag / err_i0 / err_i1 / err_s0 reconstruct the enum
+ */
 typedef struct {
     bool ok;
     int64_t value;
-    MakoString err;
+    MakoString err;   /* string Err payload (err_kind==0) */
+    int err_kind;     /* 0=string, 1=enum */
+    int err_tag;      /* enum .tag when err_kind==1 */
+    int64_t err_i0;
+    int64_t err_i1;
+    MakoString err_s0;
 } MakoResultInt;
 
 static inline MakoResultInt mako_ok_int(int64_t v) {
     MakoResultInt r;
+    memset(&r, 0, sizeof(r));
     r.ok = true;
     r.value = v;
-    r.err = (MakoString){NULL, 0};
     return r;
 }
 
 static inline MakoResultInt mako_err_int(MakoString e) {
     MakoResultInt r;
+    memset(&r, 0, sizeof(r));
     r.ok = false;
     r.value = 0;
     r.err = e;
+    r.err_kind = 0;
     return r;
+}
+
+/* Err with enum payload: tag + optional int/string fields (unit enums use tag only). */
+static inline MakoResultInt mako_err_enum(int tag, int64_t i0, int64_t i1, MakoString s0) {
+    MakoResultInt r;
+    memset(&r, 0, sizeof(r));
+    r.ok = false;
+    r.value = 0;
+    r.err_kind = 1;
+    r.err_tag = tag;
+    r.err_i0 = i0;
+    r.err_i1 = i1;
+    r.err_s0 = s0;
+    return r;
+}
+
+static inline int64_t mako_result_err_tag(MakoResultInt r) {
+    return r.ok ? -1 : (r.err_kind == 1 ? (int64_t)r.err_tag : -1);
 }
 
 typedef struct {
@@ -1337,6 +1366,20 @@ static inline void mako_abort(const char *msg) {
     abort();
 }
 
+/* ---- Bounds checks policy ----
+ * Debug builds always check. Release (`-DNDEBUG`) strips checks unless
+ * MAKO_BOUNDS_ALWAYS is set (codegen `--bounds always` / `mako build --release`).
+ */
+#if defined(MAKO_BOUNDS_ALWAYS)
+#define MAKO_BOUNDS_CHECK(cond, msg) \
+    do { if (cond) mako_abort(msg); } while (0)
+#elif defined(NDEBUG)
+#define MAKO_BOUNDS_CHECK(cond, msg) ((void)0)
+#else
+#define MAKO_BOUNDS_CHECK(cond, msg) \
+    do { if (cond) mako_abort(msg); } while (0)
+#endif
+
 /* Abort with file:line (prefer this from generated code). */
 static inline void mako_abort_at(const char *file, int line, const char *msg) {
     fprintf(stderr, "error: %s\n", msg ? msg : "runtime abort");
@@ -1915,6 +1958,44 @@ static inline void mako_nursery_join_all(MakoNursery *n) {
 static inline void mako_nursery_cancel_join(MakoNursery *n) {
     mako_nursery_cancel(n);
     mako_nursery_join_all(n);
+}
+
+/* Forward — defined later in this header (time helpers). */
+static inline int64_t mako_now_ms(void);
+
+/* Drain crew with timeout: cancel, then join each task (sleep-poll).
+ * Returns number of tasks joined; always best-effort completes joins. */
+static inline int64_t mako_nursery_drain(MakoNursery *n, int64_t timeout_ms) {
+    if (!n) return 0;
+    if (timeout_ms < 0) timeout_ms = 0;
+    mako_nursery_cancel(n);
+    int64_t start = mako_now_ms();
+    int64_t joined = 0;
+    for (size_t i = 0; i < n->len; i++) {
+        int64_t left = timeout_ms - (mako_now_ms() - start);
+        if (left < 0) left = 0;
+        int64_t out = 0;
+        if (mako_await_timeout_ms(&n->tasks[i], left, &out) == 0) {
+            /* timed out — force join without further wait budget */
+            mako_await(&n->tasks[i]);
+        }
+        joined++;
+    }
+    free(n->tasks);
+    n->tasks = NULL;
+    n->len = n->cap = 0;
+    return joined;
+}
+
+/* Global: drain is per-nursery; this records last drain count for metrics. */
+static int64_t mako_last_crew_drain_joined = 0;
+static inline int64_t mako_crew_drain(MakoNursery *n, int64_t timeout_ms) {
+    int64_t j = mako_nursery_drain(n, timeout_ms);
+    mako_last_crew_drain_joined = j;
+    return j;
+}
+static inline int64_t mako_crew_drain_joined(void) {
+    return mako_last_crew_drain_joined;
 }
 
 /* ---- Parallel map over int arrays ---- */

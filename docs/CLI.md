@@ -78,6 +78,8 @@ mako build -p app                           # build one workspace member
 | `--target <TRIPLE>` | Cross-compile target |
 | `--sanitize <TYPE>` | Pass `-fsanitize=` to clang (e.g. `address`, `thread`) |
 | `--static-link` | Force static linking |
+| `--overflow <MODE>` | Integer overflow: `wrap` (default), `trap` (abort), `ignore` |
+| `--bounds <MODE>` | Bounds checks: `default` or `always`. **Release builds force always** |
 | `--no-incremental` | Disable build caching |
 | `-j, --jobs <N>` | Parallel compile jobs (default: CPU count) |
 | `-p, --package <NAME>` | Build one workspace member |
@@ -120,12 +122,37 @@ Arguments after `--` are forwarded to the compiled program. Access them with
 | `--time` | Print compile timings |
 | `--no-incremental` | Disable build caching |
 | `-j, --jobs <N>` | Parallel compile jobs |
+| `--overflow <MODE>` | `wrap` / `trap` / `ignore` (integer `+ - *`) |
+| `--bounds always` | Keep bounds checks in release |
+
+---
+
+## mako dev
+
+Hot-reload seed: poll the entry file mtime, rebuild and rerun on change.
+
+```bash
+mako dev main.mko
+mako dev . -p app --interval-ms 300
+mako dev main.mko --overflow trap
+```
+
+| Flag | Description |
+|------|-------------|
+| `[FILE]` | Source or package directory (default: `.`) |
+| `-p, --package` | Workspace member |
+| `--interval-ms <N>` | Poll interval (default 500) |
+| `--release` | Optimized rebuilds |
+| `--overflow` | Same as `build`/`run` (default `trap` for dev) |
+
+Ctrl-C stops the watcher.
 
 ---
 
 ## mako check
 
-Type-check without compiling.
+Type-check without compiling. Parse recovery reports **all** top-level parse
+errors in a file (not only the first).
 
 ```bash
 mako check main.mko               # check one file

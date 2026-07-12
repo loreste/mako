@@ -74,6 +74,19 @@ Key modules:
 
 ## Making changes
 
+Process bar (same as [Agents.md](Agents.md)):
+
+1. **Speed is the name of the game** (≈ Rust) — no silent cost on the default hot path.
+   Runtime/codegen/concurrency changes: `./scripts/bench-gate.sh` ([docs/SPEED.md](docs/SPEED.md)).
+2. **Concurrency first-class** — structured `crew` / `fan` / channels; no orphan tasks; no async coloring as the default model.
+3. **Security first-class** — hard errors over advice; secure defaults; costly checks stay opt-in ([docs/SECURITY.md](docs/SECURITY.md)).
+4. **Always check your work** — report command + outcome; do not claim green from intent.
+5. **Be adversarial** — empty/null, overflow, timeout, double-close, races, injection edges.
+6. **Always test** — automated coverage that would fail on regression.
+7. **Build consensus** — **speed first**, then concurrency/security, then identity; one path only.
+
+Steps:
+
 1. Create a branch from `main`
 2. Make your changes
 3. Add or update tests if behavior changes
@@ -82,6 +95,17 @@ Key modules:
 5. Run `cargo clippy` and `cargo fmt`
 6. Run `cargo run --release -- test examples/testing` and make sure it passes
 7. Open a PR with a clear description of what and why
+
+### Do not commit
+
+| Keep out of commits | Why |
+|---------------------|-----|
+| Accidental binaries (`trap_ov`, root `hello`, `/out/…`) | Build artifacts — listed in `.gitignore` |
+| `.claude/`, `.cursor/`, `.grok/`, `*.local.md` | Local agent/editor state |
+| Secrets, certs, personal env files | Security |
+| Unrelated local edits to `AGENTS.md` process notes | Prefer human-facing policy in this file / `docs/`; only change `AGENTS.md` when the **project** north star intentionally changes |
+
+Never `git add -A` / `git add .` blindly — stage only source, tests, docs, and intentional config for the change.
 
 ## Style
 
