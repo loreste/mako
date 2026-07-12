@@ -1988,6 +1988,10 @@ impl Parser {
                         elems.push(self.parse_expr()?);
                         if matches!(self.peek_kind(), TokenKind::Comma) {
                             self.bump();
+                            // Allow a trailing comma before the closing `]`.
+                            if matches!(self.peek_kind(), TokenKind::RBracket) {
+                                break;
+                            }
                         } else {
                             break;
                         }
