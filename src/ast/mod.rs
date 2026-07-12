@@ -267,6 +267,16 @@ pub enum Stmt {
         iter: Expr,
         body: Block,
     },
+    /// Go C-style three-clause loop: `for init; cond; post { body }`. `init` and
+    /// `post` are simple statements (short decl / assignment); `cond` re-evaluates
+    /// each iteration. `continue` runs `post` (lowered to a real C `for`).
+    CFor {
+        label: Option<String>,
+        init: Box<Stmt>,
+        cond: Expr,
+        post: Box<Stmt>,
+        body: Block,
+    },
     /// `break` or `break label`
     Break(Option<String>),
     /// `continue` or `continue label`

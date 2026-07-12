@@ -1185,6 +1185,14 @@ fn collect_calls_stmt(stmt: &Stmt, out: &mut Vec<String>) {
             collect_calls_expr(iter, out);
             collect_calls_block(body, out);
         }
+        Stmt::CFor {
+            init, cond, post, body, ..
+        } => {
+            collect_calls_stmt(init, out);
+            collect_calls_expr(cond, out);
+            collect_calls_stmt(post, out);
+            collect_calls_block(body, out);
+        }
         Stmt::Defer { body }
         | Stmt::Crew { body, .. }
         | Stmt::Arena { body, .. }
@@ -2117,6 +2125,14 @@ fn rewrite_stmt(s: &mut Stmt, alias: &str, names: &ImportNameSets) {
         }
         Stmt::For { iter, body, .. } => {
             rewrite_expr(iter, alias, names);
+            rewrite_block(body, alias, names);
+        }
+        Stmt::CFor {
+            init, cond, post, body, ..
+        } => {
+            rewrite_stmt(init, alias, names);
+            rewrite_expr(cond, alias, names);
+            rewrite_stmt(post, alias, names);
             rewrite_block(body, alias, names);
         }
         Stmt::Defer { body }

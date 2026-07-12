@@ -886,7 +886,7 @@ impl Codegen {
         }
         f.params
             .iter()
-            .map(|p| format!("{} {}", self.type_expr_c(&p.ty), p.name))
+            .map(|p| format!("{} {}", self.type_expr_c(&p.ty), mangle(&p.name)))
             .collect::<Vec<_>>()
             .join(", ")
     }
@@ -1089,8 +1089,8 @@ impl Codegen {
 
         if ty == "int64_t" {
             let idx_name = match binders {
-                [a] if a != "_" => a.clone(),
-                [a, _] if a != "_" => a.clone(),
+                [a] if a != "_" => mangle(a),
+                [a, _] if a != "_" => mangle(a),
                 _ => self.fresh("_ri"),
             };
             if let [a] = binders {
@@ -1137,17 +1137,17 @@ impl Codegen {
                 [] => {}
                 [a] => {
                     if a != "_" {
-                        self.line(&format!("int64_t {a} = (int64_t){i};"));
+                        self.line(&format!("int64_t {} = (int64_t){i};", mangle(a)));
                         self.locals.insert(a.clone(), "int64_t".into());
                     }
                 }
                 [a, b] => {
                     if a != "_" {
-                        self.line(&format!("int64_t {a} = (int64_t){i};"));
+                        self.line(&format!("int64_t {} = (int64_t){i};", mangle(a)));
                         self.locals.insert(a.clone(), "int64_t".into());
                     }
                     if b != "_" {
-                        self.line(&format!("int64_t {b} = {rune};"));
+                        self.line(&format!("int64_t {} = {rune};", mangle(b)));
                         self.locals.insert(b.clone(), "int64_t".into());
                     }
                 }
@@ -1182,7 +1182,7 @@ impl Codegen {
             match binders {
                 [] => {}
                 [a] if a != "_" => {
-                    self.line(&format!("int64_t {a} = {vtmp};"));
+                    self.line(&format!("int64_t {} = {vtmp};", mangle(a)));
                     self.locals.insert(a.clone(), "int64_t".into());
                 }
                 _ => {}
@@ -1214,10 +1214,10 @@ impl Codegen {
                 [a] => {
                     if a != "_" {
                         if ty == "MakoMapSI*" || ty == "MakoMapSS*" {
-                            self.line(&format!("MakoString {a} = {val}->keys[{i}];"));
+                            self.line(&format!("MakoString {} = {val}->keys[{i}];", mangle(a)));
                             self.locals.insert(a.clone(), "MakoString".into());
                         } else {
-                            self.line(&format!("int64_t {a} = {val}->keys[{i}];"));
+                            self.line(&format!("int64_t {} = {val}->keys[{i}];", mangle(a)));
                             self.locals.insert(a.clone(), "int64_t".into());
                         }
                     }
@@ -1225,19 +1225,19 @@ impl Codegen {
                 [a, b] => {
                     if a != "_" {
                         if ty == "MakoMapSI*" || ty == "MakoMapSS*" {
-                            self.line(&format!("MakoString {a} = {val}->keys[{i}];"));
+                            self.line(&format!("MakoString {} = {val}->keys[{i}];", mangle(a)));
                             self.locals.insert(a.clone(), "MakoString".into());
                         } else {
-                            self.line(&format!("int64_t {a} = {val}->keys[{i}];"));
+                            self.line(&format!("int64_t {} = {val}->keys[{i}];", mangle(a)));
                             self.locals.insert(a.clone(), "int64_t".into());
                         }
                     }
                     if b != "_" {
                         if ty == "MakoMapSS*" {
-                            self.line(&format!("MakoString {b} = {val}->vals[{i}];"));
+                            self.line(&format!("MakoString {} = {val}->vals[{i}];", mangle(b)));
                             self.locals.insert(b.clone(), "MakoString".into());
                         } else {
-                            self.line(&format!("int64_t {b} = {val}->vals[{i}];"));
+                            self.line(&format!("int64_t {} = {val}->vals[{i}];", mangle(b)));
                             self.locals.insert(b.clone(), "int64_t".into());
                         }
                     }
@@ -1267,7 +1267,7 @@ impl Codegen {
             [] => {}
             [a] if is_range => {
                 if a != "_" {
-                    self.line(&format!("int64_t {a} = (int64_t){i};"));
+                    self.line(&format!("int64_t {} = (int64_t){i};", mangle(a)));
                     self.locals.insert(a.clone(), "int64_t".into());
                 }
             }
@@ -1278,7 +1278,7 @@ impl Codegen {
             }
             [a, b] => {
                 if a != "_" {
-                    self.line(&format!("int64_t {a} = (int64_t){i};"));
+                    self.line(&format!("int64_t {} = (int64_t){i};", mangle(a)));
                     self.locals.insert(a.clone(), "int64_t".into());
                 }
                 if b != "_" {
@@ -1295,34 +1295,61 @@ impl Codegen {
         self.line("}");
     }
 
+    /// Render a C-style `for` post clause as a single C expression for the loop
+    /// header (so `continue` runs it). Handles the assignment / `i++` forms that a
+    /// post is in practice; anything else is emitted as a statement and the header
+    /// post is left empty.
+    fn post_c_expr(&mut self, post: &Stmt) -> String {
+        match post {
+            Stmt::Assign { name, value } => {
+                let (_, v) = self.emit_expr(value);
+                format!("{} = {}", mangle(name), v)
+            }
+            Stmt::FieldAssign { base, field, value } => {
+                let (_, b) = self.emit_expr(base);
+                let (_, v) = self.emit_expr(value);
+                format!("{b}.{field} = {v}")
+            }
+            Stmt::Expr(e) => self.emit_expr(e).1,
+            other => {
+                // Exotic post (rare): emit it and use an empty header post.
+                self.emit_stmt(other);
+                String::new()
+            }
+        }
+    }
+
     fn emit_range_value(&mut self, arr_ty: &str, arr: &str, idx: &str, name: &str) {
+        // Emit the C variable under its mangled name (so reserved words stay valid),
+        // but key `locals` by the raw Mako name for identifier lookups.
+        let cname = mangle(name);
         if arr_ty == "MakoByteArray" {
             self.line(&format!(
-                "int64_t {name} = mako_byte_get({arr}, (int64_t){idx});"
+                "int64_t {cname} = mako_byte_get({arr}, (int64_t){idx});"
             ));
             self.locals.insert(name.to_string(), "int64_t".into());
         } else if arr_ty == "MakoStrArray" {
             self.line(&format!(
-                "MakoString {name} = mako_str_array_get({arr}, (int64_t){idx});"
+                "MakoString {cname} = mako_str_array_get({arr}, (int64_t){idx});"
             ));
             self.locals.insert(name.to_string(), "MakoString".into());
         } else if arr_ty == "MakoFloatArray" {
             self.line(&format!(
-                "double {name} = mako_float_array_get({arr}, (int64_t){idx});"
+                "double {cname} = mako_float_array_get({arr}, (int64_t){idx});"
             ));
             self.locals.insert(name.to_string(), "double".into());
         } else if let Some(sn) = arr_ty.strip_prefix("MakoArr_") {
             self.line(&format!(
-                "{sn} {name} = mako_arr_{sn}_get({arr}, (int64_t){idx});"
+                "{sn} {cname} = mako_arr_{sn}_get({arr}, (int64_t){idx});"
             ));
             self.locals.insert(name.to_string(), sn.to_string());
         } else if arr_ty == "MakoString" {
             self.line(&format!(
-                "int64_t {name} = mako_str_get({arr}, (int64_t){idx});"
+                "int64_t {cname} = mako_str_get({arr}, (int64_t){idx});"
             ));
             self.locals.insert(name.to_string(), "int64_t".into());
         } else {
-            self.line(&format!("int64_t {name} = {arr}.data[{idx}];"));
+            self.line(&format!("int64_t {cname} = {arr}.data[{idx}];"));
             self.locals.insert(name.to_string(), "int64_t".into());
         }
     }
@@ -1352,6 +1379,10 @@ impl Codegen {
                     }
                     return;
                 }
+                // Keep the C variable name consistent with its uses (Ident emission
+                // also mangles), so a name colliding with a C keyword stays valid.
+                let name = mangle(name);
+                let name = &name;
                 let as_bytes = matches!(
                     ann,
                     Some(TypeExpr::Array(inner))
@@ -1479,10 +1510,10 @@ impl Codegen {
                     };
                     if self.locals.contains_key(n) {
                         // Reassignment: `a, b = f()`
-                        self.line(&format!("{n} = {tmp}._{i};"));
+                        self.line(&format!("{} = {tmp}._{i};", mangle(n)));
                     } else {
                         self.locals.insert(n.clone(), cty.into());
-                        self.line(&format!("{cty} {n} = {tmp}._{i};"));
+                        self.line(&format!("{cty} {} = {tmp}._{i};", mangle(n)));
                     }
                 }
             }
@@ -1505,13 +1536,13 @@ impl Codegen {
                     }
                 };
                 if value != "_" {
-                    self.line(&format!("{vty} {value} = {get_fn}({b}, {i});"));
+                    self.line(&format!("{vty} {} = {get_fn}({b}, {i});", mangle(value)));
                     self.locals.insert(value.clone(), vty.into());
                 } else {
                     self.line(&format!("(void){get_fn}({b}, {i});"));
                 }
                 if ok != "_" {
-                    self.line(&format!("bool {ok} = {has_fn}({b}, {i});"));
+                    self.line(&format!("bool {} = {has_fn}({b}, {i});", mangle(ok)));
                     self.locals.insert(ok.clone(), "bool".into());
                 }
             }
@@ -1537,7 +1568,7 @@ impl Codegen {
                 } else {
                     val
                 };
-                self.line(&format!("{name} = {val};"));
+                self.line(&format!("{} = {val};", mangle(name)));
             }
             Stmt::IndexAssign { base, index, value } => {
                 let (bty, b) = self.emit_expr(base);
@@ -1680,6 +1711,41 @@ impl Codegen {
                 body,
             } => {
                 self.emit_for(label.as_deref(), binders, *is_range, iter, body);
+            }
+            Stmt::CFor {
+                label,
+                init,
+                cond,
+                post,
+                body,
+            } => {
+                // Lower to a real C `for (;; post)` inside a scope for `init`. The
+                // condition is re-checked at the top of the body (so it may use
+                // temporaries); `post` sits in the header so C's own `continue`
+                // runs it.
+                self.line("{");
+                self.indent += 1;
+                self.emit_stmt(init);
+                let post_str = self.post_c_expr(post);
+                self.line(&format!("for (;; {post_str}) {{"));
+                self.indent += 1;
+                let (_, c) = self.emit_expr(cond);
+                self.line(&format!("if (!({c})) break;"));
+                self.push_share_scope();
+                for s in &body.stmts {
+                    self.emit_stmt(s);
+                }
+                self.pop_share_scope();
+                if let Some(lab) = label {
+                    self.line(&format!("__mako_cont_{lab}: ;"));
+                }
+                self.indent -= 1;
+                self.line("}");
+                if let Some(lab) = label {
+                    self.line(&format!("__mako_break_{lab}: ;"));
+                }
+                self.indent -= 1;
+                self.line("}");
             }
             Stmt::Crew { name, body } => {
                 self.locals.insert(name.clone(), "MakoNursery".into());
@@ -10858,21 +10924,21 @@ impl Codegen {
                     }
                 }
                 self.locals.insert(n.clone(), sty.to_string());
-                self.line(&format!("{sty} {n} = {scrut};"));
+                self.line(&format!("{sty} {} = {scrut};", mangle(n)));
             }
             Pattern::Variant { name, bindings } => {
                 if sty == "MakoResultInt" {
                     if name == "Ok" && bindings.len() == 1 {
                         self.locals.insert(bindings[0].clone(), "int64_t".into());
-                        self.line(&format!("int64_t {} = {scrut}.value;", bindings[0]));
+                        self.line(&format!("int64_t {} = {scrut}.value;", mangle(&bindings[0])));
                     } else if name == "Err" && bindings.len() == 1 {
                         self.locals.insert(bindings[0].clone(), "MakoString".into());
-                        self.line(&format!("MakoString {} = {scrut}.err;", bindings[0]));
+                        self.line(&format!("MakoString {} = {scrut}.err;", mangle(&bindings[0])));
                     }
                 } else if sty == "MakoOptionInt" {
                     if name == "Some" && bindings.len() == 1 {
                         self.locals.insert(bindings[0].clone(), "int64_t".into());
-                        self.line(&format!("int64_t {} = {scrut}.value;", bindings[0]));
+                        self.line(&format!("int64_t {} = {scrut}.value;", mangle(&bindings[0])));
                     }
                 } else if let Some(enum_name) = self.variant_to_enum.get(name).cloned() {
                     let fields = self.enums[&enum_name].variants[name].1.clone();
@@ -10883,17 +10949,17 @@ impl Codegen {
                         match kind {
                             "string" => {
                                 self.locals.insert(b.clone(), "MakoString".into());
-                                self.line(&format!("MakoString {b} = {scrut}.s{str_slot};"));
+                                self.line(&format!("MakoString {} = {scrut}.s{str_slot};", mangle(b)));
                                 str_slot += 1;
                             }
                             "bool" => {
                                 self.locals.insert(b.clone(), "bool".into());
-                                self.line(&format!("bool {b} = (bool){scrut}.i{int_slot};"));
+                                self.line(&format!("bool {} = (bool){scrut}.i{int_slot};", mangle(b)));
                                 int_slot += 1;
                             }
                             _ => {
                                 self.locals.insert(b.clone(), "int64_t".into());
-                                self.line(&format!("int64_t {b} = {scrut}.i{int_slot};"));
+                                self.line(&format!("int64_t {} = {scrut}.i{int_slot};", mangle(b)));
                                 int_slot += 1;
                             }
                         }
@@ -11064,10 +11130,60 @@ impl Codegen {
 
 fn mangle(name: &str) -> String {
     if name == "main" {
-        "mako_main".into()
-    } else {
-        name.to_string()
+        return "mako_main".into();
     }
+    // Rename Mako identifiers that collide with C keywords / reserved words so the
+    // generated C stays valid (`let switch = 1` → `mk_switch`). Applied uniformly
+    // at declaration and use sites, so the mapping stays consistent.
+    if is_c_reserved(name) {
+        return format!("mk_{name}");
+    }
+    name.to_string()
+}
+
+/// C reserved words (C11 keywords plus a few common typedefs) that are legal Mako
+/// identifiers and would otherwise produce invalid C when emitted verbatim.
+fn is_c_reserved(name: &str) -> bool {
+    matches!(
+        name,
+        "auto"
+            | "break"
+            | "case"
+            | "char"
+            | "const"
+            | "continue"
+            | "default"
+            | "do"
+            | "double"
+            | "else"
+            | "enum"
+            | "extern"
+            | "float"
+            | "for"
+            | "goto"
+            | "if"
+            | "inline"
+            | "int"
+            | "long"
+            | "register"
+            | "restrict"
+            | "return"
+            | "short"
+            | "signed"
+            | "sizeof"
+            | "static"
+            | "struct"
+            | "switch"
+            | "typedef"
+            | "union"
+            | "unsigned"
+            | "void"
+            | "volatile"
+            | "while"
+            | "_Bool"
+            | "_Complex"
+            | "_Atomic"
+    )
 }
 
 fn type_expr_schema(t: &TypeExpr) -> String {

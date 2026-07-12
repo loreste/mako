@@ -22,6 +22,10 @@ pub struct Parser {
     /// `(…)`/`[…]` so `if valid(Config{1, 2}) { … }` still allows the literal.
     /// This resolves the Go composite-literal-in-condition ambiguity.
     no_struct_lit: bool,
+    /// Lexically-enclosing `crew` names, innermost last. A `go f()` statement
+    /// schedules onto the innermost crew; empty means `go` is used outside any
+    /// crew (an error).
+    crew_stack: Vec<String>,
 }
 
 impl Parser {
@@ -30,6 +34,7 @@ impl Parser {
             tokens,
             pos: 0,
             no_struct_lit: false,
+            crew_stack: Vec::new(),
         }
     }
 
@@ -956,6 +961,10 @@ impl Parser {
         if self.at_switch_kw() {
             return self.parse_switch();
         }
+        // Contextual `go f()` — schedule a call onto the enclosing crew.
+        if self.at_go_kw() {
+            return self.parse_go();
+        }
         match self.peek_kind() {
             TokenKind::Hold | TokenKind::Share | TokenKind::Let | TokenKind::Var => self.parse_let(),
             TokenKind::Unsafe => {
@@ -1029,8 +1038,10 @@ impl Parser {
             TokenKind::Crew => {
                 self.bump();
                 let name = self.expect_ident()?;
-                let body = self.parse_block()?;
-                Ok(Stmt::Crew { name, body })
+                self.crew_stack.push(name.clone());
+                let body = self.parse_block();
+                self.crew_stack.pop();
+                Ok(Stmt::Crew { name, body: body? })
             }
             TokenKind::Arena => {
                 self.bump();
@@ -1109,6 +1120,37 @@ impl Parser {
                     }
                     return Ok(Stmt::Assign { name, value });
                 }
+                // Compound assignment `i += e` / `i -= e` … and `i++` / `i--`,
+                // desugared to `i = i <op> e` / `i = i <op> 1`.
+                if let Some(op) = compound_binop(self.peek_kind()) {
+                    self.bump();
+                    let rhs = self.parse_expr()?;
+                    if matches!(self.peek_kind(), TokenKind::Semicolon) {
+                        self.bump();
+                    }
+                    return Ok(Stmt::Assign {
+                        value: Expr::Binary {
+                            op,
+                            left: Box::new(Expr::Ident(name.clone())),
+                            right: Box::new(rhs),
+                        },
+                        name,
+                    });
+                }
+                if let Some(op) = incdec_binop(self.peek_kind()) {
+                    self.bump();
+                    if matches!(self.peek_kind(), TokenKind::Semicolon) {
+                        self.bump();
+                    }
+                    return Ok(Stmt::Assign {
+                        value: Expr::Binary {
+                            op,
+                            left: Box::new(Expr::Ident(name.clone())),
+                            right: Box::new(Expr::Int(1)),
+                        },
+                        name,
+                    });
+                }
                 // `name.field = value` or `name.a.b = value` (nested field assign)
                 if matches!(self.peek_kind(), TokenKind::Dot) {
                     let mut base = Expr::Ident(name);
@@ -1122,6 +1164,46 @@ impl Parser {
                                 self.bump();
                             }
                             return Ok(Stmt::FieldAssign { base, field, value });
+                        }
+                        // `obj.field += e` / `obj.field++`
+                        if let Some(op) = compound_binop(self.peek_kind()) {
+                            self.bump();
+                            let rhs = self.parse_expr()?;
+                            if matches!(self.peek_kind(), TokenKind::Semicolon) {
+                                self.bump();
+                            }
+                            let cur = Expr::Field {
+                                base: Box::new(base.clone()),
+                                field: field.clone(),
+                            };
+                            return Ok(Stmt::FieldAssign {
+                                base,
+                                field,
+                                value: Expr::Binary {
+                                    op,
+                                    left: Box::new(cur),
+                                    right: Box::new(rhs),
+                                },
+                            });
+                        }
+                        if let Some(op) = incdec_binop(self.peek_kind()) {
+                            self.bump();
+                            if matches!(self.peek_kind(), TokenKind::Semicolon) {
+                                self.bump();
+                            }
+                            let cur = Expr::Field {
+                                base: Box::new(base.clone()),
+                                field: field.clone(),
+                            };
+                            return Ok(Stmt::FieldAssign {
+                                base,
+                                field,
+                                value: Expr::Binary {
+                                    op,
+                                    left: Box::new(cur),
+                                    right: Box::new(Expr::Int(1)),
+                                },
+                            });
                         }
                         if matches!(self.peek_kind(), TokenKind::Dot) {
                             base = Expr::Field {
@@ -1148,6 +1230,34 @@ impl Parser {
                             base: Expr::Ident(name),
                             index,
                             value,
+                        });
+                    }
+                    // `arr[i] += e` / `arr[i]++`
+                    let compound = compound_binop(self.peek_kind())
+                        .map(|op| (op, false))
+                        .or_else(|| incdec_binop(self.peek_kind()).map(|op| (op, true)));
+                    if let Some((op, is_incdec)) = compound {
+                        self.bump();
+                        let rhs = if is_incdec {
+                            Expr::Int(1)
+                        } else {
+                            self.parse_expr()?
+                        };
+                        if matches!(self.peek_kind(), TokenKind::Semicolon) {
+                            self.bump();
+                        }
+                        let cur = Expr::Index {
+                            base: Box::new(Expr::Ident(name.clone())),
+                            index: Box::new(index.clone()),
+                        };
+                        return Ok(Stmt::IndexAssign {
+                            base: Expr::Ident(name),
+                            index,
+                            value: Expr::Binary {
+                                op,
+                                left: Box::new(cur),
+                                right: Box::new(rhs),
+                            },
                         });
                     }
                     self.pos = checkpoint;
@@ -1978,6 +2088,42 @@ impl Parser {
         )
     }
 
+    /// True if the cursor is on a contextual `go` statement (`go f()`). Not the
+    /// keyword when `go` is used as an identifier (`go = …`, `go(…)`, `go.x`,
+    /// `go[i]`) so the name stays free.
+    fn at_go_kw(&self) -> bool {
+        if !matches!(self.peek_kind(), TokenKind::Ident(s) if s == "go") {
+            return false;
+        }
+        matches!(
+            self.tokens.get(self.pos + 1).map(|t| &t.kind),
+            Some(TokenKind::Ident(_))
+        )
+    }
+
+    /// `go f()` / `go obj.method()` — schedule the call onto the innermost
+    /// enclosing crew as a fire-and-forget task (`crew.kick(call)`), matching Go's
+    /// `go` but keeping Mako's structured-concurrency guarantee (the crew joins it).
+    fn parse_go(&mut self) -> Result<Stmt, ParseError> {
+        self.bump(); // `go`
+        let call = self.parse_expr()?;
+        if !matches!(call, Expr::Call { .. } | Expr::Method { .. }) {
+            return Err(self.err("`go` requires a function call, e.g. `go worker()`".into()));
+        }
+        let Some(crew) = self.crew_stack.last().cloned() else {
+            return Err(self.err(
+                "`go` must be inside a `crew { … }` (Mako has no orphan tasks)".into(),
+            ));
+        };
+        if matches!(self.peek_kind(), TokenKind::Semicolon) {
+            self.bump();
+        }
+        Ok(Stmt::Expr(Expr::Kick {
+            crew,
+            expr: Box::new(call),
+        }))
+    }
+
     /// Go-style `switch`, desugared to an if/else-if chain — more faithful to Go
     /// than `match`: `case` takes arbitrary expressions, the tag is evaluated once,
     /// `default` is optional, and there is no exhaustiveness requirement.
@@ -2223,9 +2369,62 @@ impl Parser {
         Ok(Stmt::While { label, cond, body })
     }
 
+    /// Parse the post clause of a C-style `for` (an assignment / `i++` / expr).
+    /// Struct literals are suppressed because the loop body `{` follows.
+    fn parse_simple_post(&mut self) -> Result<Stmt, ParseError> {
+        let saved = std::mem::replace(&mut self.no_struct_lit, true);
+        let r = self.parse_stmt();
+        self.no_struct_lit = saved;
+        r
+    }
+
+    /// True if `in` appears at bracket-depth 0 before the next `{` — the marker of
+    /// a range `for` (`for i in xs`) versus a while-style `for cond {}`.
+    fn has_in_before_block(&self) -> bool {
+        let mut depth: i32 = 0;
+        let mut i = self.pos;
+        while i < self.tokens.len() {
+            match &self.tokens[i].kind {
+                TokenKind::In if depth == 0 => return true,
+                TokenKind::LBrace if depth == 0 => return false,
+                TokenKind::LParen | TokenKind::LBracket | TokenKind::LBrace => depth += 1,
+                TokenKind::RParen | TokenKind::RBracket | TokenKind::RBrace => depth -= 1,
+                TokenKind::Eof => return false,
+                _ => {}
+            }
+            i += 1;
+        }
+        false
+    }
+
     fn parse_for(&mut self, label: Option<String>) -> Result<Stmt, ParseError> {
         self.bump(); // for
-                     // `for range expr { ... }` — no binders
+        // `for { ... }` — infinite loop (Go form) → `while true`.
+        if matches!(self.peek_kind(), TokenKind::LBrace) {
+            let body = self.parse_block()?;
+            return Ok(Stmt::While {
+                label,
+                cond: Expr::Bool(true),
+                body,
+            });
+        }
+        // C-style three-clause `for init; cond; post { … }` — a top-level `;`
+        // before the block distinguishes it from the range and while forms.
+        if self.has_stmt_before_block() {
+            let init = self.parse_stmt()?; // consumes the first `;`
+            let cond = self.parse_expr()?;
+            self.expect(TokenKind::Semicolon)?;
+            let post = self.parse_simple_post()?;
+            let body = self.parse_block()?;
+            return Ok(Stmt::CFor {
+                label,
+                init: Box::new(init),
+                cond,
+                post: Box::new(post),
+                body,
+            });
+        }
+        // `for range expr { ... }` — no binders
         if matches!(self.peek_kind(), TokenKind::Range) {
             self.bump();
             let iter = self.parse_header_expr()?;
@@ -2237,6 +2436,12 @@ impl Parser {
                 iter,
                 body,
             });
+        }
+        // `for cond { ... }` — while-style loop (no `in` before the block).
+        if !self.has_in_before_block() {
+            let cond = self.parse_header_expr()?;
+            let body = self.parse_block()?;
+            return Ok(Stmt::While { label, cond, body });
         }
         let mut binders = vec![self.expect_binder()?];
         if matches!(self.peek_kind(), TokenKind::Comma) {
@@ -2325,4 +2530,26 @@ fn main() {}
 /// Go-style: names starting with an uppercase letter are package-exported.
 fn is_exported_name(name: &str) -> bool {
     name.chars().next().map(|c| c.is_ascii_uppercase()).unwrap_or(false)
+}
+
+/// Maps a compound-assignment token (`+=`, `-=`, `*=`, `/=`, `%=`) to its binary
+/// operator, so `x += e` desugars to `x = x <op> e`.
+fn compound_binop(kind: &TokenKind) -> Option<BinOp> {
+    match kind {
+        TokenKind::PlusEq => Some(BinOp::Add),
+        TokenKind::MinusEq => Some(BinOp::Sub),
+        TokenKind::StarEq => Some(BinOp::Mul),
+        TokenKind::SlashEq => Some(BinOp::Div),
+        TokenKind::PercentEq => Some(BinOp::Mod),
+        _ => None,
+    }
+}
+
+/// Maps `++` / `--` to the operator used against a literal `1`.
+fn incdec_binop(kind: &TokenKind) -> Option<BinOp> {
+    match kind {
+        TokenKind::PlusPlus => Some(BinOp::Add),
+        TokenKind::MinusMinus => Some(BinOp::Sub),
+        _ => None,
+    }
 }

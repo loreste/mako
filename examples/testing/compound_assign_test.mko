@@ -1,0 +1,38 @@
+// Compound assignment (`+= -= *= /= %=`) and increment/decrement (`++`, `--`).
+// Desugar to `x = x <op> e`; work on identifiers, fields, and index targets.
+
+struct Counter { n: int }
+
+func TestCompoundOnIdent() {
+    var i = 0
+    i++
+    i += 5
+    i -= 2
+    i *= 3
+    assert_eq(i, 12)
+
+    var j = 10
+    j--
+    j /= 3
+    j %= 2
+    assert_eq(j, 1)
+}
+
+func TestCompoundOnField() {
+    let mut c = Counter { n: 0 }
+    c.n += 7
+    c.n++
+    assert_eq(c.n, 8)
+    c.n -= 3
+    assert_eq(c.n, 5)
+}
+
+func TestCompoundOnIndex() {
+    var xs = [1, 2, 3]
+    xs[1] += 10
+    xs[0]++
+    xs[2]--
+    assert_eq(xs[0], 2)
+    assert_eq(xs[1], 12)
+    assert_eq(xs[2], 2)
+}

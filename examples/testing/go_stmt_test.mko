@@ -1,0 +1,29 @@
+// Go-style `go f()` — schedule a call onto the enclosing crew (fire-and-forget).
+// Desugars to `crew.kick(f())`; the crew still joins it (no orphan tasks).
+
+fn work(n int) int {
+    return n * 2
+}
+
+fn TestGoRunsInCrew() {
+    crew t {
+        go work(7)
+        go work(9)
+    }
+    // Reaching here means the crew scheduled and joined the go-tasks.
+    assert_eq(1 + 1, 2)
+}
+
+fn TestGoAlongsideKick() {
+    crew t {
+        go work(3)               // fire-and-forget
+        let a = t.kick(work(5))  // explicitly joined
+        assert_eq(a.join(), 10)
+    }
+}
+
+fn TestGoIsNotAReservedWord() {
+    // `go` is contextual: still usable as an identifier.
+    let go = 41
+    assert_eq(go + 1, 42)
+}

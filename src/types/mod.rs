@@ -6213,6 +6213,14 @@ impl TypeChecker {
                 Self::expr_mentions(iter, name)
                     || body.stmts.iter().any(|s| Self::stmt_mentions(s, name))
             }
+            Stmt::CFor {
+                init, cond, post, body, ..
+            } => {
+                Self::stmt_mentions(init, name)
+                    || Self::expr_mentions(cond, name)
+                    || Self::stmt_mentions(post, name)
+                    || body.stmts.iter().any(|s| Self::stmt_mentions(s, name))
+            }
             Stmt::Defer { body }
             | Stmt::Crew { body, .. }
             | Stmt::Arena { body, .. }
@@ -6983,6 +6991,29 @@ impl TypeChecker {
                     let _ = (&entry_moved, &entry_fields);
                 }
                 self.pop_loop();
+                Ok(())
+            }
+            Stmt::CFor {
+                label,
+                init,
+                cond,
+                post,
+                body,
+            } => {
+                // `init` is scoped to the loop (like Go). Check init, then the
+                // condition (must be bool), the body, and the post clause.
+                self.push_scope();
+                self.check_stmt(init)?;
+                let ct = self.check_expr(cond)?;
+                if ct != Type::Bool {
+                    self.pop_scope();
+                    return Err(TypeError::new("for condition must be bool"));
+                }
+                self.push_loop(label.clone());
+                self.check_block(body)?;
+                self.check_stmt(post)?;
+                self.pop_loop();
+                self.pop_scope();
                 Ok(())
             }
             Stmt::Break(label) => {

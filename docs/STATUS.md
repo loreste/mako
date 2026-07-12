@@ -67,11 +67,16 @@ Last inventory: 2026-07-11 (**unique Mako surface** · pack/pull · pain map · 
 |-------|--------|
 | `cargo build --release` | PASS (prior) |
 | Book samples `mako check` / `run` | PASS — `docs/book/examples/book_*.mko` |
-| `mako test examples/testing` | PASS — **151 passed**, 0 failed |
+| `mako test examples/testing` | PASS — **154 passed**, 0 failed |
 | `if init; cond { }` + both-branches-return body | Done — `examples/testing/if_init_test.mko` |
 | Go `switch`/`case`/`default` (value, expr-less, init) | Done — `examples/testing/switch_test.mko` |
 | Positional struct literals `Point{1, 2}` / `Point{}` | Done — `examples/testing/struct_positional_test.mko` |
-| Contextual `pack`/`pull`/`switch` (usable as identifiers) | Fixed — no longer reserved words |
+| `go f()` → kick onto enclosing crew | Done — `examples/testing/go_stmt_test.mko` |
+| Compound assign `+= … ++ --` (ident/field/index) | Done — `examples/testing/compound_assign_test.mko` |
+| Go `for` forms (C-style, while, infinite, range) | Done — `examples/testing/for_forms_test.mko` |
+| Contextual `pack`/`pull`/`switch`/`go` (usable as identifiers) | Fixed — no longer reserved words |
+| C-keyword identifiers (`let switch = 1`) emit valid C | Fixed — codegen mangles reserved words |
+| `mako fmt` doubled `export` on structs | Fixed |
 | The Mako Book + docs accuracy | Done |
 
 ---

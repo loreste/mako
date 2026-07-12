@@ -55,6 +55,25 @@ Because tasks cannot outlive their crew, the compiler can guarantee that any
 reference passed into a kicked task remains valid for the task's entire lifetime.
 This is what makes `hold` and `share` ownership work correctly across threads.
 
+### `go f()` — fire-and-forget
+
+When you don't need the join handle, `go f()` schedules a call onto the innermost
+enclosing crew — the same as `t.kick(f())` with the result discarded. The crew
+still joins it at scope exit, so there are no orphan tasks:
+
+```mko
+fn main() {
+    crew t {
+        go log_metrics()      // == t.kick(log_metrics())
+        go flush_cache()
+        // both are joined here, at the end of the crew
+    }
+}
+```
+
+Unlike Go's `go`, this is not a detached goroutine: `go` outside any `crew` is a
+compile error, because Mako never lets a task escape its scope.
+
 ---
 
 ## t.kick() In Detail

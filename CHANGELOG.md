@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.1.0 — 2026-07-12 (Go syntax surface)
+
+### Control flow & statements
+
+- **`if init; cond { … }`** — Go if-with-init, scoped to the if/else
+- **`switch` / `case` / `default`** — value, expression-less, and init forms;
+  arbitrary case expressions, single tag evaluation, optional default
+- **`for` (all four Go forms)** — C-style `for i := 0; i < n; i++`, while-style
+  `for cond {}`, infinite `for {}`, plus existing range `for i, v in range xs`
+- **Compound assignment & inc/dec** — `+= -= *= /= %=` and `++` / `--` on
+  identifiers, struct fields, and index targets
+- **Positional struct literals** — `Point{1, 2}` and zero-value `Point{}`;
+  composite-literal-in-condition ambiguity resolved
+- **`go f()`** — schedules a call onto the innermost `crew` (errors outside one)
+- A function body that provably returns on every path is accepted with no
+  trailing `return`
+
+### Fixes
+
+- Identifiers colliding with C keywords (`let switch = 1`, params named `int`, …)
+  now emit valid C — codegen mangles reserved words consistently
+- `pack` / `pull` / `switch` / `go` are contextual keywords — usable as names
+- Labeled `break` / `continue` only bind a label on the same source line
+- `mako fmt` no longer doubles `export` on structs
+
+- Tests: `if_init_test`, `switch_test`, `for_forms_test`, `compound_assign_test`,
+  `struct_positional_test`, `go_stmt_test`
+
+---
+
 ## 0.1.0 — 2026-07-11 (gap close wave 6)
 
 ### Struct channels · tagged errors

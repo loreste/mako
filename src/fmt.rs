@@ -212,9 +212,6 @@ fn fmt_item(item: &Item) -> String {
                 o.push_str(&s.derives.join(", "));
                 o.push_str(")]\n");
             }
-            if s.exported {
-                o.push_str("export ");
-            }
             // Mako-native: `struct Name { x: T }` (optional export)
             if s.exported {
                 o.push_str("export ");
@@ -494,6 +491,22 @@ fn fmt_stmt(s: &Stmt, indent: usize) -> String {
                 let r = if *is_range { "range " } else { "" };
                 format!("{pref}for {bs} in {r}{iter_s} {body_s}")
             }
+        }
+        Stmt::CFor {
+            label,
+            init,
+            cond,
+            post,
+            body,
+        } => {
+            let pref = label.as_ref().map(|l| format!("{l}: ")).unwrap_or_default();
+            format!(
+                "{pref}for {}; {}; {} {}",
+                fmt_stmt(init, 0),
+                fmt_expr(cond, 0),
+                fmt_stmt(post, 0),
+                fmt_block(body, indent)
+            )
         }
         Stmt::Break(None) => "break".into(),
         Stmt::Break(Some(l)) => format!("break {l}"),

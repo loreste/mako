@@ -102,6 +102,14 @@ pub enum TokenKind {
     Star,
     Slash,
     Percent,
+    // Compound assignment and increment/decrement (desugared in the parser).
+    PlusEq,
+    MinusEq,
+    StarEq,
+    SlashEq,
+    PercentEq,
+    PlusPlus,
+    MinusMinus,
     EqEq,
     BangEq,
     Lt,
@@ -275,15 +283,33 @@ impl<'a> Lexer<'a> {
             }
             b'%' => {
                 self.bump();
-                TokenKind::Percent
+                if self.peek() == Some(b'=') {
+                    self.bump();
+                    TokenKind::PercentEq
+                } else {
+                    TokenKind::Percent
+                }
             }
             b'+' => {
                 self.bump();
-                TokenKind::Plus
+                if self.peek() == Some(b'=') {
+                    self.bump();
+                    TokenKind::PlusEq
+                } else if self.peek() == Some(b'+') {
+                    self.bump();
+                    TokenKind::PlusPlus
+                } else {
+                    TokenKind::Plus
+                }
             }
             b'*' => {
                 self.bump();
-                TokenKind::Star
+                if self.peek() == Some(b'=') {
+                    self.bump();
+                    TokenKind::StarEq
+                } else {
+                    TokenKind::Star
+                }
             }
             b'?' => {
                 self.bump();
@@ -307,6 +333,12 @@ impl<'a> Lexer<'a> {
                 if self.peek() == Some(b'>') {
                     self.bump();
                     TokenKind::Arrow
+                } else if self.peek() == Some(b'=') {
+                    self.bump();
+                    TokenKind::MinusEq
+                } else if self.peek() == Some(b'-') {
+                    self.bump();
+                    TokenKind::MinusMinus
                 } else {
                     TokenKind::Minus
                 }
@@ -362,7 +394,12 @@ impl<'a> Lexer<'a> {
             }
             b'/' => {
                 self.bump();
-                TokenKind::Slash
+                if self.peek() == Some(b'=') {
+                    self.bump();
+                    TokenKind::SlashEq
+                } else {
+                    TokenKind::Slash
+                }
             }
             b'|' => {
                 self.bump();

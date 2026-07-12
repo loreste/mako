@@ -1,0 +1,62 @@
+// Go's four `for` forms: C-style three-clause, while-style, infinite, and range.
+
+func TestCStyleFor() {
+    var s = 0
+    for i := 0; i < 5; i++ {
+        s += i
+    }
+    assert_eq(s, 10) // 0+1+2+3+4
+}
+
+func TestCStyleForContinueRunsPost() {
+    // `continue` must run the post clause (`i++`), else this never terminates.
+    var t = 0
+    for i := 0; i < 6; i++ {
+        if i % 2 == 0 {
+            continue
+        }
+        t += i
+    }
+    assert_eq(t, 9) // 1+3+5
+}
+
+func TestCStyleForSiblingScope() {
+    // Each loop's `i` is scoped to that loop — no collision.
+    var a = 0
+    for i := 0; i < 3; i++ {
+        a += i
+    }
+    for i := 0; i < 3; i++ {
+        a += i
+    }
+    assert_eq(a, 6) // (0+1+2) twice
+}
+
+func TestWhileStyleFor() {
+    var n = 4
+    var acc = 0
+    for n > 0 {
+        acc += n
+        n--
+    }
+    assert_eq(acc, 10) // 4+3+2+1
+}
+
+func TestInfiniteForWithBreak() {
+    var k = 0
+    for {
+        k++
+        if k == 7 {
+            break
+        }
+    }
+    assert_eq(k, 7)
+}
+
+func TestRangeForStillWorks() {
+    var sum = 0
+    for i in 4 {
+        sum += i
+    }
+    assert_eq(sum, 6) // 0+1+2+3
+}

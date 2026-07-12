@@ -98,8 +98,9 @@ Overall ≈ Σ (weight × track%).
 | [x] | `var x = expr` | Done | Mutable |
 | [x] | `let` / `let mut` (legacy) | Done | Kept |
 | [x] | `a, b := f()` multi-assign | Done | When `f` returns tuple; `a, b = f()` reassigns existing mutables |
+| [x] | Compound assign `+= -= *= /= %=` and `++` / `--` | Done | On idents, fields, and index targets; desugar to `x = x <op> e` |
 | [x] | `if` / `for` / `while` braces | Done | Go-like control keywords |
-| [ ] | `for` range forms fully like Go | Partial | Have `for i in n`, `for i, v in range s` |
+| [x] | `for` forms fully like Go | Done | C-style `for i := 0; i < n; i++`, while-style `for cond {}`, infinite `for {}`, and range `for i, v in range s` |
 | [x] | `switch` / `case` / `default` | Done | Value, expression-less, and `switch init; x {…}` forms; desugars to an if/else-if chain (arbitrary `case` exprs, single tag eval, optional default) |
 | [x] | `if init; cond { }` Go if-with-init | Done | `if x := f(); x > 0 { … }`; init scoped to if/else, no sibling collision |
 | [ ] | `fallthrough` / Go switch semantics | Not yet | |
@@ -115,7 +116,7 @@ Overall ≈ Σ (weight × track%).
 | [x] | Channels `chan` / `send` / `recv` | Done | `chan_new`, typed `chan_open[T]` |
 | [x] | `select` multi-wait | Done | Mako `select timeout` form |
 | [x] | Structured tasks (`crew`/`kick`/`join`) | Done | Safer than free goroutines |
-| [ ] | `go f()` keyword | Not yet | Prefer `t.kick(f())` inside `crew` |
+| [x] | `go f()` keyword | Done | Schedules onto the innermost `crew` (`crew.kick(f())`); errors outside a crew — no orphan tasks |
 | [ ] | Unbuffered channels default like Go | Partial | Buffered `chan_new(n)` primary |
 | [ ] | `close` / range over channel like Go | Partial | `.close()` exists; range forms seed |
 
@@ -171,7 +172,7 @@ Priority order for the next pass:
 
 1. [x] `switch` / `case` / `default` — **done** (desugars to an if/else-if chain: arbitrary case exprs, single tag eval, optional default; no `fallthrough` yet)  
 2. [x] `if v := f(); cond { }` if-with-init — **done** (also: `if … { return a } else { return b }` now satisfies a non-void body, matching Go)  
-3. [ ] `go f()` → kick inside enclosing crew (or error if no crew)  
+3. [x] `go f()` → kick inside enclosing crew — **done** (errors outside a crew)  
 4. [x] Positional struct literals `T{a, b}` — **done** (also `T{}` zero-value; composite-literal-in-condition ambiguity handled)  
 5. [ ] Stronger package-per-directory model  
 6. [ ] `error` interface + `errors.Is` / `errors.As` style std helpers  

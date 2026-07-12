@@ -315,10 +315,18 @@ struct Person {
 }
 
 fn main() {
-    // Struct literal
+    // Named struct literal
     let p = Point { x: 10, y: 20 }
     print_int(p.x)
     print_int(p.y)
+
+    // Positional literal (fields in declaration order), Go-style
+    let q = Point{3, 4}
+    print_int(q.x)     // 3
+
+    // Zero value — every field defaulted
+    let z = Point{}
+    print_int(z.x)     // 0
 
     // Mutable struct
     let mut person = Person { name: "Ada", age: 30 }
@@ -327,6 +335,10 @@ fn main() {
     print_int(person.age)
 }
 ```
+
+> Positional literals are suppressed inside `if` / `for` / `while` / `switch`
+> conditions, so `if p { … }` is still an identifier followed by a block. Wrap
+> the literal in parentheses or a call if you need one in a condition.
 
 ### Nested structs
 
@@ -508,6 +520,22 @@ fn classify(n: int) -> string {
 Conditions must be `bool` -- there is no truthy/falsy concept for integers or
 strings.
 
+**if with an init clause** — declare a value used only by the `if`/`else`:
+
+```mko
+fn lookup(n: int) -> string {
+    if v := n * 2; v > 10 {
+        return "big"      // `v` is in scope here
+    } else {
+        return "small"    // ...and here
+    }
+    // `v` is not visible past the if
+}
+```
+
+A function whose body always returns on every path is accepted even without a
+trailing `return` — `if c { return a } else { return b }` is a complete body.
+
 ### while loops
 
 ```mko
@@ -520,7 +548,38 @@ fn main() {
 }
 ```
 
-### for / range loops
+### for loops
+
+Mako's `for` has four forms, matching Go:
+
+```mko
+fn main() {
+    // C-style three-clause: init; condition; post
+    for i := 0; i < 5; i++ {
+        print_int(i)
+    }
+
+    // while-style: loop while a condition holds
+    var n = 3
+    for n > 0 {
+        print_int(n)
+        n--
+    }
+
+    // infinite loop (exit with break)
+    var k = 0
+    for {
+        k++
+        if k == 4 { break }
+    }
+}
+```
+
+In the C-style form the loop variable is scoped to the loop, the condition is
+re-checked each iteration, and `continue` runs the post clause (so `i++` still
+happens) before the next check.
+
+### range loops
 
 ```mko
 fn main() {
@@ -657,6 +716,48 @@ fn unwrap_or(o: Option[int], fallback: int) -> int {
 }
 ```
 
+### switch
+
+`switch` is Go-style multi-way branching. Unlike `match`, cases take arbitrary
+expressions, `default` is optional, and a case that matches nothing simply does
+nothing (there is no fall-through):
+
+```mko
+fn label(n: int) -> string {
+    switch n {
+    case 1:
+        return "one"
+    case 2, 3:            // comma = multiple values
+        return "few"
+    default:
+        return "many"
+    }
+}
+
+fn sign(n: int) -> string {
+    switch {              // expression-less: cases are conditions
+    case n > 0:
+        return "positive"
+    case n < 0:
+        return "negative"
+    default:
+        return "zero"
+    }
+}
+
+fn describe(n: int) -> string {
+    switch v := n * n; v {    // optional init clause
+    case 0:
+        return "zero"
+    default:
+        return "nonzero"
+    }
+}
+```
+
+Reach for `match` when you want exhaustiveness over an enum or `Result`/`Option`;
+reach for `switch` for value dispatch and condition chains.
+
 ### defer
 
 `defer` schedules a statement to run when the enclosing function exits, in
@@ -687,6 +788,22 @@ Use `defer` for cleanup: closing files, releasing resources, printing logs.
 ```mko
 let mut x = 0
 x = 42
+```
+
+Compound assignment and increment/decrement work on variables, struct fields,
+and index targets. They are shorthand for `target = target <op> value`:
+
+```mko
+var i = 0
+i++                 // i = i + 1
+i--                 // i = i - 1
+i += 5              // also -=  *=  /=  %=
+
+var xs = [1, 2, 3]
+xs[0] += 10         // on an index
+
+let mut p = Point{0, 0}
+p.x++               // on a field
 ```
 
 ### Comparison operators
