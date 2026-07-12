@@ -5494,6 +5494,34 @@ impl Codegen {
                             self.line(&format!("int64_t {tmp} = mako_tcp_nodelay({f});"));
                             return ("int64_t".into(), tmp);
                         }
+                        "tcp_set_timeout" => {
+                            let (_, f) = self.emit_expr(&args[0]);
+                            let (_, ms) = self.emit_expr(&args[1]);
+                            let tmp = self.fresh("tst");
+                            self.line(&format!("int64_t {tmp} = mako_tcp_set_timeout({f}, {ms});"));
+                            return ("int64_t".into(), tmp);
+                        }
+                        "tcp_keepalive" => {
+                            let (_, f) = self.emit_expr(&args[0]);
+                            let (_, idle) = self.emit_expr(&args[1]);
+                            let (_, itv) = self.emit_expr(&args[2]);
+                            let (_, cnt) = self.emit_expr(&args[3]);
+                            let tmp = self.fresh("tka");
+                            self.line(&format!(
+                                "int64_t {tmp} = mako_tcp_keepalive({f}, {idle}, {itv}, {cnt});"
+                            ));
+                            return ("int64_t".into(), tmp);
+                        }
+                        "tcp_listen_backlog" => {
+                            let (_, h) = self.emit_expr(&args[0]);
+                            let (_, p) = self.emit_expr(&args[1]);
+                            let (_, bl) = self.emit_expr(&args[2]);
+                            let tmp = self.fresh("tlb");
+                            self.line(&format!(
+                                "int64_t {tmp} = mako_tcp_listen_backlog({h}, {p}, {bl});"
+                            ));
+                            return ("int64_t".into(), tmp);
+                        }
                         "json_object" => {
                             let (_, k) = self.emit_expr(&args[0]);
                             let (_, v) = self.emit_expr(&args[1]);
@@ -8765,6 +8793,15 @@ impl Codegen {
                             let (_, k) = self.emit_expr(&args[1]);
                             let tmp = self.fresh("tsv");
                             self.line(&format!("void *{tmp} = mako_tls_server_new({c}, {k});"));
+                            return ("void*".into(), tmp);
+                        }
+                        "tls_server_new_tls13" => {
+                            let (_, c) = self.emit_expr(&args[0]);
+                            let (_, k) = self.emit_expr(&args[1]);
+                            let tmp = self.fresh("tsv13");
+                            self.line(&format!(
+                                "void *{tmp} = mako_tls_server_new_tls13({c}, {k});"
+                            ));
                             return ("void*".into(), tmp);
                         }
                         "tls_accept" => {

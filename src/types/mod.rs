@@ -2391,6 +2391,19 @@ impl TypeChecker {
             "tcp_nodelay".into(),
             Type::Fn(vec![Type::Int], Box::new(Type::Int)),
         );
+        // Session controls: timeouts, keepalive, accept backlog.
+        fns.insert(
+            "tcp_set_timeout".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "tcp_keepalive".into(),
+            Type::Fn(vec![Type::Int, Type::Int, Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "tcp_listen_backlog".into(),
+            Type::Fn(vec![Type::String, Type::Int, Type::Int], Box::new(Type::Int)),
+        );
         // JSON / crypto / log / metrics / share / slice / safe_add
         fns.insert(
             "json_object".into(),
@@ -5104,6 +5117,13 @@ impl TypeChecker {
         );
         fns.insert(
             "tls_server_new".into(),
+            Type::Fn(
+                vec![Type::String, Type::String],
+                Box::new(Type::Named("TlsServer".into())),
+            ),
+        );
+        fns.insert(
+            "tls_server_new_tls13".into(),
             Type::Fn(
                 vec![Type::String, Type::String],
                 Box::new(Type::Named("TlsServer".into())),
