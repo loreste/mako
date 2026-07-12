@@ -1,0 +1,25 @@
+// Per-connection HTTP/2 state: a server/proxy can juggle several connections on
+// one thread. `http2_conn_use` saves the active connection and loads another;
+// each keeps independent state.
+
+func TestHttp2MultiConnIsolation() {
+    let c1 = http2_conn_new()
+    let c2 = http2_conn_new()
+
+    // Configure c1 as a server and feed it the client preface.
+    let _ = http2_conn_use(c1)
+    let _ = http2_conn_set_server(1)
+    let _r = http2_conn_recv(http2_client_preface())
+    assert_eq(http2_conn_is_server(), 1)
+
+    // c2 is a separate connection — untouched.
+    let _2 = http2_conn_use(c2)
+    assert_eq(http2_conn_is_server(), 0)
+
+    // Switching back to c1 restores its state exactly.
+    let _3 = http2_conn_use(c1)
+    assert_eq(http2_conn_is_server(), 1)
+
+    http2_conn_free(c1)
+    http2_conn_free(c2)
+}

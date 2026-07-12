@@ -1,0 +1,24 @@
+// PBKDF2-HMAC-SHA256 — a SCRAM-SHA-256 / password-KDF primitive.
+// Checked against published test vectors.
+
+func TestPbkdf2KnownVectors() {
+    // PBKDF2-HMAC-SHA256("password", "salt", 1, 32)
+    assert_eq_str(
+        hex_encode(pbkdf2_sha256("password", "salt", 1, 32)),
+        "120fb6cffcf8b32c43e7225256c4f837a86548c92ccc35480805987cb70be17b"
+    )
+    // 2 iterations
+    assert_eq_str(
+        hex_encode(pbkdf2_sha256("password", "salt", 2, 32)),
+        "ae4d0c95af6b46d32d0adff928f06dd02a303f8ef3c251dfd6e2d85a95474c43"
+    )
+}
+
+func TestPbkdf2Deterministic() {
+    let a = pbkdf2_sha256("secret", "s4lt", 1000, 32)
+    let b = pbkdf2_sha256("secret", "s4lt", 1000, 32)
+    assert_eq_str(hex_encode(a), hex_encode(b))
+    // A different salt gives a different key.
+    let c = pbkdf2_sha256("secret", "other", 1000, 32)
+    assert(not (hex_encode(a) == hex_encode(c)))
+}

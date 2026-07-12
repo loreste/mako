@@ -11,6 +11,7 @@
 #if defined(__APPLE__)
 #include <CommonCrypto/CommonDigest.h>
 #include <CommonCrypto/CommonHMAC.h>
+#include <CommonCrypto/CommonKeyDerivation.h>
 #define MAKO_HAS_CC 1
 #elif defined(MAKO_USE_OPENSSL)
 #include <openssl/sha.h>
@@ -2337,6 +2338,31 @@ static inline MakoString mako_hmac_sha256_raw(MakoString key, MakoString msg) {
         d[32] = 0;
         return (MakoString){d, 32};
     }
+}
+
+/* PBKDF2-HMAC-SHA256 → derived key of `dklen` bytes. A SCRAM-SHA-256 / password
+ * KDF primitive, backed by the platform crypto library. Empty on failure or when
+ * no crypto backend is available. */
+static inline MakoString mako_pbkdf2_sha256(MakoString password, MakoString salt,
+                                            int64_t iterations, int64_t dklen) {
+    if (iterations <= 0 || dklen <= 0 || dklen > 1024) return mako_str_from_cstr("");
+    unsigned char *out = (unsigned char *)malloc((size_t)dklen + 1);
+    if (!out) return mako_str_from_cstr("");
+    int ok = 0;
+#if defined(MAKO_HAS_CC)
+    ok = CCKeyDerivationPBKDF(kCCPBKDF2,
+                              password.data ? password.data : "", password.len,
+                              (const uint8_t *)(salt.data ? salt.data : ""), salt.len,
+                              kCCPRFHmacAlgSHA256, (unsigned)iterations,
+                              out, (size_t)dklen) == 0; /* kCCSuccess */
+#elif defined(MAKO_HAS_OPENSSL)
+    ok = PKCS5_PBKDF2_HMAC(password.data ? password.data : "", (int)password.len,
+                           (const unsigned char *)(salt.data ? salt.data : ""), (int)salt.len,
+                           (int)iterations, EVP_sha256(), (int)dklen, out) == 1;
+#endif
+    if (!ok) { free(out); return mako_str_from_cstr(""); }
+    out[dklen] = 0;
+    return (MakoString){(char *)out, (size_t)dklen};
 }
 
 /* HKDF-Expand-Label seed (RFC 8446 / QUIC initial secrets demo).

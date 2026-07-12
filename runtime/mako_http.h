@@ -2022,6 +2022,144 @@ static inline void mako_http2_conn_reset(void) {
     mako_http2_stream_reset();
 }
 
+/* ------------------------------------------------------------------------- */
+/* Per-connection HTTP/2 state.                                                */
+/*                                                                             */
+/* The frame processor above works on process-global state (one connection).  */
+/* A `MakoHttp2Conn` handle snapshots that whole block so a server/proxy can   */
+/* juggle several connections on one thread: `http2_conn_use(c)` saves the     */
+/* active connection's state and loads `c` before you pump its bytes. Leaving  */
+/* the handles unused keeps the original single-connection behaviour exactly.  */
+/* ------------------------------------------------------------------------- */
+
+typedef struct {
+    int64_t sids[MAKO_H2_STREAM_SLOTS];
+    int64_t states[MAKO_H2_STREAM_SLOTS];
+    int es_remote[MAKO_H2_STREAM_SLOTS];
+    int es_local[MAKO_H2_STREAM_SLOTS];
+    int64_t stream_windows[MAKO_H2_STREAM_SLOTS];
+    int64_t pri_dep[MAKO_H2_STREAM_SLOTS];
+    int64_t pri_weight[MAKO_H2_STREAM_SLOTS];
+    int64_t pri_excl[MAKO_H2_STREAM_SLOTS];
+    int64_t last_sid;
+    int64_t conn_window;
+    int hdr_assembling;
+    int64_t hdr_stream;
+    char hdr_acc[MAKO_H2_HDR_MAX];
+    size_t hdr_acc_len;
+    int64_t hdr_done_stream;
+    char hdr_done[MAKO_H2_HDR_MAX];
+    size_t hdr_done_len;
+    int conn_preface_rx, conn_settings_rx, conn_settings_ack_rx;
+    int conn_settings_tx, conn_settings_ack_tx, conn_closing;
+    int64_t goaway_last;
+    int conn_settings_ack_needed;
+    int64_t max_concurrent;
+    int ping_ack_needed;
+    unsigned char ping_opaque[8];
+    int is_server;
+} MakoHttp2Conn;
+
+/* The handle whose state is currently loaded into the globals (NULL = the
+ * implicit default connection). */
+static MakoHttp2Conn *mako_h2_active = NULL;
+
+/* Copy the live globals into `c`. */
+static inline void mako_h2_conn_save(MakoHttp2Conn *c) {
+    memcpy(c->sids, mako_h2_sids, sizeof(mako_h2_sids));
+    memcpy(c->states, mako_h2_states, sizeof(mako_h2_states));
+    memcpy(c->es_remote, mako_h2_es_remote, sizeof(mako_h2_es_remote));
+    memcpy(c->es_local, mako_h2_es_local, sizeof(mako_h2_es_local));
+    memcpy(c->stream_windows, mako_h2_stream_windows, sizeof(mako_h2_stream_windows));
+    memcpy(c->pri_dep, mako_h2_pri_dep, sizeof(mako_h2_pri_dep));
+    memcpy(c->pri_weight, mako_h2_pri_weight, sizeof(mako_h2_pri_weight));
+    memcpy(c->pri_excl, mako_h2_pri_excl, sizeof(mako_h2_pri_excl));
+    c->last_sid = mako_h2_last_sid;
+    c->conn_window = mako_h2_conn_window;
+    c->hdr_assembling = mako_h2_hdr_assembling;
+    c->hdr_stream = mako_h2_hdr_stream;
+    memcpy(c->hdr_acc, mako_h2_hdr_acc, sizeof(mako_h2_hdr_acc));
+    c->hdr_acc_len = mako_h2_hdr_acc_len;
+    c->hdr_done_stream = mako_h2_hdr_done_stream;
+    memcpy(c->hdr_done, mako_h2_hdr_done, sizeof(mako_h2_hdr_done));
+    c->hdr_done_len = mako_h2_hdr_done_len;
+    c->conn_preface_rx = mako_h2_conn_preface_rx;
+    c->conn_settings_rx = mako_h2_conn_settings_rx;
+    c->conn_settings_ack_rx = mako_h2_conn_settings_ack_rx;
+    c->conn_settings_tx = mako_h2_conn_settings_tx;
+    c->conn_settings_ack_tx = mako_h2_conn_settings_ack_tx;
+    c->conn_closing = mako_h2_conn_closing;
+    c->goaway_last = mako_h2_goaway_last;
+    c->conn_settings_ack_needed = mako_h2_conn_settings_ack_needed;
+    c->max_concurrent = mako_h2_max_concurrent;
+    c->ping_ack_needed = mako_h2_ping_ack_needed;
+    memcpy(c->ping_opaque, mako_h2_ping_opaque, sizeof(mako_h2_ping_opaque));
+    c->is_server = mako_h2_is_server;
+}
+
+/* Load `c` into the live globals. */
+static inline void mako_h2_conn_load(const MakoHttp2Conn *c) {
+    memcpy(mako_h2_sids, c->sids, sizeof(mako_h2_sids));
+    memcpy(mako_h2_states, c->states, sizeof(mako_h2_states));
+    memcpy(mako_h2_es_remote, c->es_remote, sizeof(mako_h2_es_remote));
+    memcpy(mako_h2_es_local, c->es_local, sizeof(mako_h2_es_local));
+    memcpy(mako_h2_stream_windows, c->stream_windows, sizeof(mako_h2_stream_windows));
+    memcpy(mako_h2_pri_dep, c->pri_dep, sizeof(mako_h2_pri_dep));
+    memcpy(mako_h2_pri_weight, c->pri_weight, sizeof(mako_h2_pri_weight));
+    memcpy(mako_h2_pri_excl, c->pri_excl, sizeof(mako_h2_pri_excl));
+    mako_h2_last_sid = c->last_sid;
+    mako_h2_conn_window = c->conn_window;
+    mako_h2_hdr_assembling = c->hdr_assembling;
+    mako_h2_hdr_stream = c->hdr_stream;
+    memcpy(mako_h2_hdr_acc, c->hdr_acc, sizeof(mako_h2_hdr_acc));
+    mako_h2_hdr_acc_len = c->hdr_acc_len;
+    mako_h2_hdr_done_stream = c->hdr_done_stream;
+    memcpy(mako_h2_hdr_done, c->hdr_done, sizeof(mako_h2_hdr_done));
+    mako_h2_hdr_done_len = c->hdr_done_len;
+    mako_h2_conn_preface_rx = c->conn_preface_rx;
+    mako_h2_conn_settings_rx = c->conn_settings_rx;
+    mako_h2_conn_settings_ack_rx = c->conn_settings_ack_rx;
+    mako_h2_conn_settings_tx = c->conn_settings_tx;
+    mako_h2_conn_settings_ack_tx = c->conn_settings_ack_tx;
+    mako_h2_conn_closing = c->conn_closing;
+    mako_h2_goaway_last = c->goaway_last;
+    mako_h2_conn_settings_ack_needed = c->conn_settings_ack_needed;
+    mako_h2_max_concurrent = c->max_concurrent;
+    mako_h2_ping_ack_needed = c->ping_ack_needed;
+    memcpy(mako_h2_ping_opaque, c->ping_opaque, sizeof(mako_h2_ping_opaque));
+    mako_h2_is_server = c->is_server;
+}
+
+/* Allocate a fresh connection in the default (reset) state. */
+static inline MakoHttp2Conn *mako_http2_conn_new(void) {
+    MakoHttp2Conn *c = (MakoHttp2Conn *)malloc(sizeof(MakoHttp2Conn));
+    if (!c) return NULL;
+    /* Derive the default field values from conn_reset without disturbing the
+     * currently-active connection: stash globals, reset, snapshot, restore. */
+    MakoHttp2Conn tmp;
+    mako_h2_conn_save(&tmp);
+    mako_http2_conn_reset();
+    mako_h2_conn_save(c);
+    mako_h2_conn_load(&tmp);
+    return c;
+}
+
+/* Make `conn` the active connection (saving whichever was active). */
+static inline int64_t mako_http2_conn_use(MakoHttp2Conn *conn) {
+    if (!conn) return -1;
+    if (mako_h2_active) mako_h2_conn_save(mako_h2_active);
+    mako_h2_conn_load(conn);
+    mako_h2_active = conn;
+    return 0;
+}
+
+/* Free a connection handle (deactivating it if it was current). */
+static inline void mako_http2_conn_free(MakoHttp2Conn *conn) {
+    if (!conn) return;
+    if (mako_h2_active == conn) mako_h2_active = NULL;
+    free(conn);
+}
+
 static inline int64_t mako_http2_conn_set_server(int64_t is_server) {
     mako_h2_is_server = is_server ? 1 : 0;
     return mako_h2_is_server;

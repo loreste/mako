@@ -19,7 +19,21 @@
 - **Sendable synchronization handles** — `CMap`, `Mutex`, `RWMutex`, and
   `AtomicInt` may now be passed into a kicked task; the same object is shared
   (matching the documented CMap behaviour). Structs / arrays / arenas stay
-  non-sendable.
+  non-sendable. The `kick` error hint now lists them.
+
+### Security / KDF
+
+- **PBKDF2-HMAC-SHA256** — `crypto.pbkdf2` / `pbkdf2_sha256(password, salt,
+  iterations, dklen)`, verified against published test vectors. Completes the
+  SCRAM-SHA-256 primitive set (with `hmac_sha256`, `sha256`, `random_bytes`,
+  `const_eq`).
+
+### HTTP/2
+
+- **Per-connection state handles** — `http2_conn_new` / `http2_conn_use` /
+  `http2_conn_free`. A server or proxy can juggle several HTTP/2 connections on
+  one thread; each keeps independent stream/settings/flow-control state. Leaving
+  the handles unused keeps the original single-connection behaviour.
 
 ### Networking
 

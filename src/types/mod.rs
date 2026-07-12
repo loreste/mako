@@ -1288,6 +1288,20 @@ impl TypeChecker {
             "http2_conn_reset".into(),
             Type::Fn(vec![], Box::new(Type::Int)),
         );
+        // Per-connection HTTP/2 state handles (for servers/proxies juggling many
+        // connections on one thread).
+        fns.insert(
+            "http2_conn_new".into(),
+            Type::Fn(vec![], Box::new(Type::Named("Http2Conn".into()))),
+        );
+        fns.insert(
+            "http2_conn_use".into(),
+            Type::Fn(vec![Type::Named("Http2Conn".into())], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "http2_conn_free".into(),
+            Type::Fn(vec![Type::Named("Http2Conn".into())], Box::new(Type::Int)),
+        );
         fns.insert(
             "http2_conn_recv".into(),
             Type::Fn(vec![Type::String], Box::new(Type::Int)),
@@ -2529,6 +2543,14 @@ impl TypeChecker {
         fns.insert(
             "hmac_sha256".into(),
             Type::Fn(vec![Type::String, Type::String], Box::new(Type::String)),
+        );
+        // PBKDF2-HMAC-SHA256 (password, salt, iterations, dklen) -> derived key.
+        fns.insert(
+            "pbkdf2_sha256".into(),
+            Type::Fn(
+                vec![Type::String, Type::String, Type::Int, Type::Int],
+                Box::new(Type::String),
+            ),
         );
         fns.insert(
             "log_info".into(),
@@ -9568,7 +9590,8 @@ impl TypeChecker {
                             t.display()
                         ))
                         .hint(
-                            "kick allows Copy, string, ShareInt (auto-cloned), and channels — \
+                            "kick allows Copy, string, channels, ShareInt (auto-cloned), \
+                             and the thread-safe handles CMap / Mutex / RWMutex / AtomicInt — \
                              not arrays/maps/structs/arenas",
                         ));
                     }

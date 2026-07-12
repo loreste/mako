@@ -350,6 +350,22 @@ Never store raw or plain-hashed (`sha256`) passwords — always use
 `password_hash`. `crypto.password_hashing_ok()` reports whether the backend is
 available on the current build.
 
+### Key derivation
+
+`crypto.pbkdf2(password, salt, iterations, key_len)` computes PBKDF2-HMAC-SHA256
+— a building block for SCRAM-SHA-256 authentication and legacy password KDFs.
+Combined with `hmac_sha256`, `sha256`, `random_bytes`, and constant-time
+comparison, you have the pieces to implement SCRAM directly.
+
+```mko
+pull "crypto"
+
+fn main() {
+    let salted = crypto.pbkdf2("password", "salt", 4096, 32)
+    print(len(salted))   // 32-byte derived key
+}
+```
+
 ---
 
 ## compress/gzip

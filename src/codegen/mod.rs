@@ -908,6 +908,7 @@ impl Codegen {
                 "EvLoop" => "MakoEvLoop*".into(),
                 "Buf" => "MakoBuf*".into(),
                 "GameUDP" => "MakoGameUDP*".into(),
+                "Http2Conn" => "MakoHttp2Conn*".into(),
                 "CHash" => "MakoCHash*".into(),
                 "RateLimiter" => "MakoRateLimiter*".into(),
                 "CircuitBreaker" => "MakoCircuitBreaker*".into(),
@@ -3679,6 +3680,26 @@ impl Codegen {
                             self.line("mako_http2_conn_reset();");
                             return ("int64_t".into(), "0".into());
                         }
+                        "http2_conn_new" => {
+                            let tmp = self.fresh("h2c");
+                            self.line(&format!(
+                                "MakoHttp2Conn *{tmp} = mako_http2_conn_new();"
+                            ));
+                            return ("MakoHttp2Conn*".into(), tmp);
+                        }
+                        "http2_conn_use" => {
+                            let (_, c) = self.emit_expr(&args[0]);
+                            let tmp = self.fresh("h2u");
+                            self.line(&format!(
+                                "int64_t {tmp} = mako_http2_conn_use({c});"
+                            ));
+                            return ("int64_t".into(), tmp);
+                        }
+                        "http2_conn_free" => {
+                            let (_, c) = self.emit_expr(&args[0]);
+                            self.line(&format!("mako_http2_conn_free({c});"));
+                            return ("int64_t".into(), "0".into());
+                        }
                         "http2_conn_recv" => {
                             let (_, s) = self.emit_expr(&args[0]);
                             let tmp = self.fresh("h2cr");
@@ -5759,6 +5780,17 @@ impl Codegen {
                             let tmp = self.fresh("hm");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_hmac_sha256_hex({k}, {m});"
+                            ));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "pbkdf2_sha256" => {
+                            let (_, p) = self.emit_expr(&args[0]);
+                            let (_, s) = self.emit_expr(&args[1]);
+                            let (_, it) = self.emit_expr(&args[2]);
+                            let (_, dk) = self.emit_expr(&args[3]);
+                            let tmp = self.fresh("pbk");
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_pbkdf2_sha256({p}, {s}, {it}, {dk});"
                             ));
                             return ("MakoString".into(), tmp);
                         }
