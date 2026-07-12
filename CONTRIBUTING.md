@@ -77,9 +77,11 @@ Key modules:
 1. Create a branch from `main`
 2. Make your changes
 3. Add or update tests if behavior changes
-4. Run `cargo clippy` and `cargo fmt`
-5. Run `cargo run --release -- test examples/testing` and make sure it passes
-6. Open a PR with a clear description of what and why
+4. **Update docs in the same change** (builtins, stdlib, book/guide, CHANGELOG,
+   STATUS when relevant) — see [Agents.md](Agents.md) *Always update the docs*
+5. Run `cargo clippy` and `cargo fmt`
+6. Run `cargo run --release -- test examples/testing` and make sure it passes
+7. Open a PR with a clear description of what and why
 
 ## Style
 
@@ -97,7 +99,7 @@ implementation in `runtime/mako_*.h`. If you're adding a new stdlib module:
 2. Implement the runtime in `runtime/mako_<name>.h`
 3. Wire it into codegen (see existing patterns in `src/codegen/mod.rs`)
 4. Add tests in `examples/testing/`
-5. Document in `docs/STDLIB.md`
+5. Document in `docs/STDLIB.md`, `docs/BUILTINS.md`, and the book/guide as needed
 
 ## Reporting bugs
 

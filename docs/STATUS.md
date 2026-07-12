@@ -91,6 +91,7 @@ Last inventory: 2026-07-11 (**unique Mako surface** · pack/pull · pain map · 
 | Async TLS accept (`tls_accept_start` / handshake step) | Done — event-loop friendly surface |
 | HTTP/2 stream multiplexing (ready queue, 32 slots) | Done — `http2_next_ready_stream` / `stream_take` / `stream_body` |
 | HTTP/3 server surface (UDP bind/poll/stream) | Done — `h3_server_*` (quiche when linked) |
+| Proxy edge cases (headers, chunked, 204/304, pool release latency) | Done — `examples/testing/proxy_edge_test.mko`; docs in BUILTINS *Reverse-proxy notes* |
 | bcrypt (`$2b$`) via libxcrypt (`crypto.bcrypt`/`bcrypt_check`) | Done — verified on Linux x86_64: round-trip + distinct salts; `examples/testing/bcrypt_test.mko` |
 | SCRAM-SHA-256 core (`crypto.scram_*`, raw `sha256`/`hmac`, `xor_bytes`) | Done — RFC 7677 vector byte-exact on Linux; `examples/testing/scram_test.mko` |
 | Native bind-address control (`tcp_listen_addr`) | Done — verified on Linux: loopback-only bind, non-host IP rejected |

@@ -475,13 +475,39 @@ Once a connection is accepted, several socket controls keep sessions healthy:
 | `tcp_set_timeout(fd, ms)` | recv+send timeout — a stalled peer can't hold the session open forever (`0` blocks forever) |
 | `tcp_keepalive(fd, idle, interval, count)` | detect dead peers and reap half-open connections (seconds; `0` keeps the OS default) |
 | `tcp_listen_backlog(host, port, backlog)` | bound the kernel accept queue — the first lever against inbound floods |
+| `tcp_listen_reuseport(host, port, backlog)` | listen with `SO_REUSEPORT` when available |
 | `tcp_nodelay(fd)` | disable Nagle for low-latency writes |
+| `tcp_set_recv_buf` / `tcp_set_send_buf` | socket buffer sizing |
+| `tcp_accept4(listener)` | accept with nonblocking + cloexec flags |
+| `tcp_connect_nb` / `tcp_connect_wait` | nonblocking connect for slow backends |
 
 ```mko
 let lfd = tcp_listen_backlog("0.0.0.0", 5432, 256)
 let fd = tcp_accept(lfd)
 let _ = tcp_keepalive(fd, 30, 10, 3)   // 30s idle, 10s probes, 3 tries
 let _2 = tcp_set_timeout(fd, 5000)     // 5s recv/send timeout
+```
+
+### Upstream connection pool
+
+Keep backend TCP connections warm per `host:port`:
+
+```mko
+let pool = tcp_pool_open("127.0.0.1", 8080, 16, 2000)
+let fd = tcp_pool_acquire(pool)
+// … use fd, then:
+let _ = tcp_pool_release(pool, fd, 1)   // 1 = reusable if still healthy
+let _2 = tcp_pool_close(pool)
+```
+
+Release validates the fd **without blocking** (hot path). Closed peers and
+fds with unexpected buffered data are not returned to the idle list.
+
+### Efficient stream copy
+
+```mko
+let n = tcp_fd_copy(src_fd, dst_fd, 65536)   // Linux: splice when possible
+let n2 = tcp_proxy_pump(a, b, 1000, 16 * 1024 * 1024)
 ```
 
 ---
@@ -552,18 +578,93 @@ blocks wrapped in `http2_headers_frame` + `http2_data_frame`.
 
 ### Reverse proxy
 
-To forward a request to an upstream backend instead of answering locally, use
-`http_forward(host, port, method, path, body)` — it opens an HTTP/1.1 connection
-to the backend and returns the response body. Relay that back to the client:
+**Body-only (simple):**
 
 ```mko
 let upstream = http_forward("127.0.0.1", 8080, "GET", request_path(), "")
 let _ = tls_write(conn, http2_response(stream, 200, upstream))
 ```
 
+**Full result (status + body + headers, chunked OK):**
+
+```mko
+let r = http_forward_full("127.0.0.1", 8080, "GET", "/api", "", "", 2000)
+if http_forward_ok(r) == 1 {
+    let status = http_forward_status(r)
+    let body = http_forward_body(r)
+    // …
+}
+```
+
+**Pooled fd:**
+
+```mko
+let fd = tcp_pool_acquire(pool)
+let r = http_forward_fd(fd, "GET", "/api", "127.0.0.1", "", "", 2000)
+let reusable = if http_forward_ok(r) == 1 { 1 } else { 0 }
+let _ = tcp_pool_release(pool, fd, reusable)
+```
+
+**Raw byte pump** (no header rewrite):
+
+```mko
+let io = http_proxy_raw(client_fd, backend_fd, raw_request, 2000)
+if proxy_io_ok(io) == 1 {
+    // proxy_io_bytes_written(io) went to the client
+}
+```
+
+**C-side request parse** (avoid repeated `str_split` in Mako):
+
+```mko
+let req = http_parse(raw_bytes)
+if http_parsed_ok(req) == 1 {
+    let path = http_parsed_path(req)
+    let host = http_parsed_host(req)
+}
+```
+
+Edge cases: caller headers without trailing CRLF are normalized; Host and
+Content-Length are not duplicated if already present; 1xx/204/304 yield empty
+bodies; incomplete chunked is a failure; CR/LF in method/path is rejected.
+See [BUILTINS.md](https://github.com/loreste/mako/blob/main/docs/BUILTINS.md)
+*Reverse-proxy notes*.
+
 [`examples/h2_reverse_proxy.mko`](https://github.com/loreste/mako/blob/main/examples/h2_reverse_proxy.mko)
 is a complete reverse proxy — verified end-to-end: `curl --http2` → the Mako
-proxy → a plain-HTTP backend → relayed response.
+proxy → a plain-HTTP backend → relayed response. Unit coverage:
+`examples/testing/proxy_pool_test.mko`, `proxy_edge_test.mko`.
+
+### HTTP/2 stream multiplexing
+
+After `http2_conn_recv`, completed HEADERS land in a ready queue (up to 32
+stream slots):
+
+```mko
+let sid = http2_next_ready_stream()
+if sid > 0 {
+    let _ = http2_stream_take(sid)
+    let body = http2_stream_body(sid)
+    let out = http2_response(sid, 200, body)
+}
+```
+
+### Async TLS accept
+
+Avoid blocking the accept loop on slow handshakes:
+
+```mko
+let conn = tls_accept_start(srv, client_fd)
+// poll tls_conn_fd(conn) until:
+//   tls_handshake_step(conn) == 1  (done)
+//   or == 0 want-read / == 2 want-write
+```
+
+### HTTP/3 surface
+
+`h3_server_new` / `bind` / `poll` / `accept_stream` / `stream_read` / `write`
+provide UDP event-loop wiring. Full crypto depth still uses quiche client helpers
+(`quiche_h3_get`, …) when `MAKO_HAS_QUICHE` is linked.
 
 ---
 

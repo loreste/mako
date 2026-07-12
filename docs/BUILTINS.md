@@ -993,13 +993,57 @@ from the protocol strings yourself. See `examples/testing/scram_test.mko`.
 | `tcp_close` | `tcp_close(conn: int) -> int` | Close a TCP connection |
 | `http_forward` | `http_forward(host, port, method, path, body) -> string` | Forward to HTTP/1.1 backend; returns body only |
 | `http_forward_full` | `http_forward_full(host, port, method, path, headers, body, timeout_ms) -> HttpForwardResult` | Status + body + byte counts (chunked OK) |
-| `http_forward_fd` | `http_forward_fd(fd, method, path, host, headers, body, timeout_ms) -> HttpForwardResult` | Forward on pooled fd |
-| `http_forward_ok` / `status` / `body` / `body_len` / `total_bytes` / `headers` | accessors on `HttpForwardResult` | |
-| `http_proxy_raw` | `http_proxy_raw(client_fd, backend_fd, raw_request, timeout_ms) -> ProxyIoResult` | Raw request/response byte pump |
-| `proxy_io_ok` / `bytes_written` / `bytes_read` | accessors on `ProxyIoResult` | |
+| `http_forward_fd` | `http_forward_fd(fd, method, path, host, headers, body, timeout_ms) -> HttpForwardResult` | Forward on pooled fd (`Connection: keep-alive`) |
+| `http_forward_ok` | `http_forward_ok(r: HttpForwardResult) -> int` | `1` if response fully read |
+| `http_forward_status` | `http_forward_status(r) -> int` | HTTP status (0 if fail) |
+| `http_forward_body` | `http_forward_body(r) -> string` | Decoded body (chunked already decoded) |
+| `http_forward_body_len` | `http_forward_body_len(r) -> int` | Body length |
+| `http_forward_total_bytes` | `http_forward_total_bytes(r) -> int` | Raw response size (headers+body wire) |
+| `http_forward_headers` | `http_forward_headers(r) -> string` | Raw header block after status line |
+| `http_proxy_raw` | `http_proxy_raw(client_fd, backend_fd, raw_request, timeout_ms) -> ProxyIoResult` | Raw request/response byte pump (no rebuild) |
+| `proxy_io_ok` / `proxy_io_bytes_written` / `proxy_io_bytes_read` | accessors on `ProxyIoResult` | |
 | `http_parse` | `http_parse(raw: string) -> HttpParsed` | C hot-path request parse (method/path/host/headers/body) |
-| `http_parsed_*` | accessors + `http_parsed_header(r, name)` | |
-| `http_decode_chunked` | `http_decode_chunked(chunked_body: string) -> string` | Decode a chunked body |
+| `http_parsed_ok` | `http_parsed_ok(r) -> int` | `1` if method+path parsed |
+| `http_parsed_method` / `path` / `host` / `headers` / `body` | accessors | |
+| `http_parsed_content_length` | `…(r) -> int` | `-1` if absent / invalid |
+| `http_parsed_chunked` | `…(r) -> int` | `1` if `Transfer-Encoding: chunked` |
+| `http_parsed_header` | `http_parsed_header(r, name) -> string` | Case-insensitive single header |
+| `http_decode_chunked` | `http_decode_chunked(chunked_body: string) -> string` | Decode a chunked body; incomplete/malformed → `""` |
+
+### Reverse-proxy notes (edge cases)
+
+**Pool (`tcp_pool_*`)**
+
+- `release(..., reusable=1)` validates the fd with a **nonblocking** probe (never waits on `SO_RCVTIMEO`).
+- Closed peer / unexpected buffered data → fd is closed, not returned to idle.
+- Bad host/port, empty host, or CR/LF in host → `open` returns `-1`.
+- `max` connections: further `acquire` returns `-1` until a fd is released.
+- Double `close` is safe (`0` on already-closed).
+
+**`http_forward_full` / `http_forward_fd`**
+
+- Builds the request with Host + Content-Length unless the caller already supplied them.
+- Normalizes caller header blocks that omit a trailing `\r\n`.
+- Rejects method/path/host containing CR/LF (request-smuggling seed).
+- Reads body by **Content-Length**, **chunked** (extensions + trailers), or connection close.
+- Statuses **1xx / 204 / 304** → empty body.
+- Chunked incomplete on EOF → failure (`ok=0`).
+- Max response size 16 MiB.
+
+**`http_parse` / `http_decode_chunked`**
+
+- Accepts CRLF or bare LF headers.
+- Truncates body to Content-Length when the buffer is longer.
+- Case-insensitive header names; trims trailing SP/HTAB on values.
+- Incomplete headers still yield method/path with `ok=1` and empty body.
+- Incomplete/malformed chunked → empty body string.
+
+**`http_proxy_raw`**
+
+- Same-fd client/backend is refused.
+- Empty request → `ok=0`.
+
+Tests: `examples/testing/proxy_pool_test.mko`, `examples/testing/proxy_edge_test.mko`.
 
 ### UDP
 
@@ -1052,13 +1096,15 @@ build; `tls_server_available()` reports 1 when present.
 | `tls_server_available` | `tls_server_available() -> int` | Whether the TLS server backend is available (1/0) |
 | `tls_server_new` | `tls_server_new(cert: string, key: string) -> TlsServer` | Create a TLS server context (min TLS 1.2) |
 | `tls_server_new_tls13` | `tls_server_new_tls13(cert: string, key: string) -> TlsServer` | Create a TLS server that requires TLS 1.3 (rejects older clients) |
-| `tls_accept` | `tls_accept(srv: TlsServer, fd: int) -> TlsConn` | Perform the TLS handshake on an accepted TCP fd |
+| `tls_accept` | `tls_accept(srv: TlsServer, fd: int) -> TlsConn` | Blocking TLS handshake on an accepted TCP fd |
 | `tls_accept_start` | `tls_accept_start(srv: TlsServer, fd: int) -> TlsConn` | Nonblocking TLS accept start (handshake may be incomplete) |
 | `tls_handshake_step` | `tls_handshake_step(conn: TlsConn) -> int` | Drive handshake: `1` done, `0` want-read, `2` want-write, `-1` error |
 | `tls_is_init_finished` | `tls_is_init_finished(conn: TlsConn) -> int` | Handshake complete? |
 | `tls_want_read` / `tls_want_write` | `…(conn) -> int` | Event-loop interest flags |
 | `tls_conn_fd` | `tls_conn_fd(conn: TlsConn) -> int` | Underlying TCP fd for poll/epoll |
 | `tls_read_nb` / `tls_write_nb` | nonblocking TLS I/O | Empty / `0` on want-read/write |
+
+Use `tls_accept_start` + `tls_handshake_step` (or poll on `tls_conn_fd` with want-read/write) so the accept loop is not blocked by slow handshakes. Requires OpenSSL (`tls_server_available()`).
 | `tls_read` | `tls_read(conn: TlsConn, max: int) -> string` | Read decrypted bytes (empty on close) |
 | `tls_write` | `tls_write(conn: TlsConn, data: string) -> int` | Write plaintext (encrypted on the wire); bytes written or -1 |
 | `tls_conn_alpn` | `tls_conn_alpn(conn: TlsConn) -> string` | Negotiated ALPN protocol (e.g. `"h2"`) |
@@ -1242,6 +1288,15 @@ build; `tls_server_available()` reports 1 when present.
 | `http2_stream_apply_local` | `http2_stream_apply_local(frame: string) -> int` | Apply a locally-sent frame |
 | `http2_stream_half_closed_remote` | `http2_stream_half_closed_remote(stream: int) -> int` | Check if remote half is closed |
 | `http2_stream_half_closed_local` | `http2_stream_half_closed_local(stream: int) -> int` | Check if local half is closed |
+| `http2_ready_streams` | `http2_ready_streams() -> int` | Count streams with complete HEADERS not yet taken |
+| `http2_next_ready_stream` | `http2_next_ready_stream() -> int` | Next untaken ready stream id, or `-1` |
+| `http2_stream_take` | `http2_stream_take(stream: int) -> int` | Mark stream taken by a worker (`1` if found) |
+| `http2_stream_body` | `http2_stream_body(stream: int) -> string` | Accumulated DATA body for stream |
+| `http2_stream_body_len` | `http2_stream_body_len(stream: int) -> int` | Body byte count (`-1` if unknown stream) |
+| `http2_stream_body_done` | `http2_stream_body_done(stream: int) -> int` | `1` if END_STREAM seen on DATA |
+
+Up to **32 concurrent stream slots** per connection; completed HEADERS push into a
+ready queue so workers can multiplex without one-request-at-a-time stalls.
 
 ### Priority
 
@@ -1398,6 +1453,14 @@ build; `tls_server_available()` reports 1 when present.
 | `quiche_h3_get_two` | `quiche_h3_get_two(host: string, port: int, ca: string, path1: string, path2: string, timeout: int) -> string` | Two multiplexed HTTP/3 GETs |
 | `quiche_start_server` | `quiche_start_server(port: int, cert: string, key: string, ca: string, response: string) -> int` | Start a QUIC server |
 | `quiche_stop_server` | `quiche_stop_server(handle: int) -> int` | Stop a QUIC server |
+| `h3_server_available` | `h3_server_available() -> int` | H3/UDP surface available (`1` when quiche linked) |
+| `h3_server_new` | `h3_server_new(cert: string, key: string) -> int` | Create H3 server handle (cert/key paths) |
+| `h3_server_bind` | `h3_server_bind(handle, host, port) -> int` | Bind UDP for QUIC |
+| `h3_server_fd` | `h3_server_fd(handle) -> int` | UDP fd for event-loop registration |
+| `h3_server_poll` | `h3_server_poll(handle, timeout_ms) -> int` | `1` readable, `0` timeout, `-1` error |
+| `h3_accept_stream` | `h3_accept_stream(handle) -> int` | Next stream id marker (or `-1`) |
+| `h3_stream_read` / `h3_stream_write` | stream I/O | Read last datagram / write (surface; crypto depth via quiche) |
+| `h3_server_close` | `h3_server_close(handle) -> int` | Close server and UDP fd |
 | `nghttp2_available` | `nghttp2_available() -> int` | Check if nghttp2 is available |
 | `nghttp2_get` | `nghttp2_get(host: string, port: int, ca: string, path: string) -> string` | HTTP/2 GET via nghttp2 |
 | `nghttp2_post` | `nghttp2_post(host: string, port: int, ca: string, path: string, body: string) -> string` | HTTP/2 POST via nghttp2 |

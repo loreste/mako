@@ -442,7 +442,26 @@ fn main() {
 
 ## `net` / `http`
 
-TCP: `tcp_listen` / `tcp_accept` / `tcp_connect` / `tcp_write` / `tcp_close`.
+TCP: `tcp_listen` / `tcp_accept` / `tcp_connect` / `tcp_write` / `tcp_close`,
+plus session controls (`tcp_set_timeout`, `tcp_keepalive`, `tcp_nodelay`,
+`tcp_listen_backlog` / `tcp_listen_reuseport`, buffer sizing, `tcp_accept4`).
+
+### Upstream pool & reverse proxy
+
+| Builtin | Role |
+|---------|------|
+| `tcp_pool_open` / `acquire` / `release` / `close` | Per host:port connection pool; nonblocking reuse check |
+| `tcp_connect_nb` / `connect_check` / `connect_wait` | Nonblocking connect for slow/unhealthy backends |
+| `tcp_fd_copy` / `tcp_splice` / `tcp_proxy_pump` | Efficient stream copy (Linux `splice` when available) |
+| `http_forward` | Simple upstream forward → body only |
+| `http_forward_full` / `http_forward_fd` | Status + body + headers (`HttpForwardResult`); chunked OK |
+| `http_proxy_raw` | Raw request → backend → raw response → client |
+| `http_parse` / `http_parsed_*` | C hot-path request parse (`HttpParsed`) |
+| `http_decode_chunked` | Standalone chunked body decode |
+
+Edge cases (duplicate Host/CL, incomplete chunked, 204/304, bad args) are
+documented under **Reverse-proxy notes** in [BUILTINS.md](BUILTINS.md).
+Tests: `examples/testing/proxy_pool_test.mko`, `proxy_edge_test.mko`.
 
 ### HTTP server
 

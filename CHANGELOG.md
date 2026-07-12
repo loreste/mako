@@ -28,7 +28,8 @@
   bare LF/incomplete→empty; parse truncates to Content-Length, LF-only headers,
   case-insensitive lookup; no-body statuses (1xx/204/304); pool/connect/proxy
   bad-arg guards; nonblocking reusable peek. Tests:
-  `examples/testing/proxy_edge_test.mko`.
+  `examples/testing/proxy_edge_test.mko`. Docs: BUILTINS *Reverse-proxy notes*,
+  STDLIB pool section, book ch08 reverse proxy / mux / async TLS / H3.
 
 ## 0.1.0 — 2026-07-12 (networking & auth)
 

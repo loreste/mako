@@ -1050,6 +1050,21 @@ let _ = tcp_close(c)
 let peer = tcp_connect("127.0.0.1", 18082)
 ```
 
+### Upstream pool & reverse proxy
+
+| Helper | Meaning |
+|--------|---------|
+| `tcp_pool_open` / `acquire` / `release` / `close` | Backend connection pool |
+| `http_forward` | Forward → body only |
+| `http_forward_full` / `http_forward_fd` | Status + body + headers (`HttpForwardResult`) |
+| `http_proxy_raw` | Raw request/response byte pump |
+| `http_parse` / `http_decode_chunked` | C hot-path parse / chunked decode |
+| `tcp_connect_nb` / `tcp_fd_copy` | Nonblocking connect / efficient copy |
+
+Full notes and edge cases: [BUILTINS.md](BUILTINS.md) *Reverse-proxy notes* · book
+[ch08-networking](book/src/ch08-networking.md). Tests: `proxy_pool_test.mko`,
+`proxy_edge_test.mko`.
+
 ### HTTP/1.1 server (Done — beachhead, not a framework)
 
 Sync handler surface: `http_bind` → `http_accept` → read fields → `http_respond` →
