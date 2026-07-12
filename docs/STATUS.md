@@ -83,6 +83,7 @@ Last inventory: 2026-07-11 (**unique Mako surface** · pack/pull · pain map · 
 | Per-connection HTTP/2 state (`http2_conn_new`/`use`/`free`) | Done — `examples/testing/http2_multiconn_test.mko` |
 | HTTP/2 read request + `http2_response` (full request/response cycle) | Done — fixed inverted stream parity; `examples/testing/http2_request_test.mko` |
 | HPACK decode for real clients (Huffman, indexed names, full static table) | Done — curl `--http2` verified; `examples/testing/hpack_decode_test.mko` · `examples/h2_dynamic_server.mko` |
+| HTTP/2 reverse proxy (`http_forward` upstream + relay) | Done — curl→proxy→backend verified; `examples/h2_reverse_proxy.mko` |
 | Socket-style TLS server (`tls_server_new`/`tls_accept`/`read`/`write`/`alpn`) | Done — STARTTLS-upgrade verified; `examples/testing/tls_server_test.mko` |
 | Signal hooks by name (`signal_watch`/`fired`/`ignore` HUP/TERM/…) | Done — reload/shutdown verified; `examples/testing/signal_test.mko` |
 | File-system watch (`watch_new`/`add`/`poll`/`close`, kqueue+inotify) | Done — change detection verified; `examples/testing/watch_test.mko` |

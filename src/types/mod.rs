@@ -5608,6 +5608,14 @@ impl TypeChecker {
             "tcp_connect".into(),
             Type::Fn(vec![Type::String, Type::Int], Box::new(Type::Int)),
         );
+        // Reverse-proxy upstream forward: (host, port, method, path, body) -> body.
+        fns.insert(
+            "http_forward".into(),
+            Type::Fn(
+                vec![Type::String, Type::Int, Type::String, Type::String, Type::String],
+                Box::new(Type::String),
+            ),
+        );
         // Channel select
         fns.insert(
             "chan_select2".into(),

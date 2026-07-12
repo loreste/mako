@@ -9773,6 +9773,18 @@ impl Codegen {
                             let (_, p) = self.emit_expr(&args[1]);
                             return ("int64_t".into(), format!("mako_tcp_connect({h}, {p})"));
                         }
+                        "http_forward" => {
+                            let (_, h) = self.emit_expr(&args[0]);
+                            let (_, p) = self.emit_expr(&args[1]);
+                            let (_, m) = self.emit_expr(&args[2]);
+                            let (_, path) = self.emit_expr(&args[3]);
+                            let (_, body) = self.emit_expr(&args[4]);
+                            let tmp = self.fresh("fwd");
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_http_forward({h}, {p}, {m}, {path}, {body});"
+                            ));
+                            return ("MakoString".into(), tmp);
+                        }
                         "chan_select_value" => {
                             return ("int64_t".into(), "mako_chan_select_value()".into());
                         }

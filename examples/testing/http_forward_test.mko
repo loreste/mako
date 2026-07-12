@@ -1,0 +1,9 @@
+// Reverse-proxy upstream forward. A live forward needs a backend (verified
+// end-to-end separately, `curl --http2` → proxy → backend), so this covers the
+// wiring: an unreachable upstream fails gracefully with an empty body, no crash.
+
+func TestHttpForwardUnreachableIsSafe() {
+    // Nothing is listening on this port → connect fails → empty body.
+    let body = http_forward("127.0.0.1", 1, "GET", "/", "")
+    assert_eq(len(body), 0)
+}

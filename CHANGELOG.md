@@ -48,6 +48,11 @@
   wrong indices and no Huffman). A complete H2-over-TLS server built from these
   primitives is verified end-to-end against `curl --http2`, routing by `:path`.
   Example: `examples/h2_dynamic_server.mko`.
+- **HTTP/2 reverse proxy** — `http_forward(host, port, method, path, body)`
+  forwards a request to an upstream HTTP backend and returns its response body.
+  Composed with the H2 server, `examples/h2_reverse_proxy.mko` is a complete
+  reverse proxy verified end-to-end: `curl --http2` → Mako proxy → backend →
+  relayed response.
 
 ### TLS
 

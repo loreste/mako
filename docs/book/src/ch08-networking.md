@@ -506,6 +506,21 @@ Pair with `tls_accept` (ALPN `h2`) to terminate TLS. For finer control you can
 still build frames by hand from `hpack_encode_indexed` / `hpack_encode_literal`
 blocks wrapped in `http2_headers_frame` + `http2_data_frame`.
 
+### Reverse proxy
+
+To forward a request to an upstream backend instead of answering locally, use
+`http_forward(host, port, method, path, body)` — it opens an HTTP/1.1 connection
+to the backend and returns the response body. Relay that back to the client:
+
+```mko
+let upstream = http_forward("127.0.0.1", 8080, "GET", request_path(), "")
+let _ = tls_write(conn, http2_response(stream, 200, upstream))
+```
+
+[`examples/h2_reverse_proxy.mko`](https://github.com/loreste/mako/blob/main/examples/h2_reverse_proxy.mko)
+is a complete reverse proxy — verified end-to-end: `curl --http2` → the Mako
+proxy → a plain-HTTP backend → relayed response.
+
 ---
 
 ## WebSocket

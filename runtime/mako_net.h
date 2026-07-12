@@ -113,6 +113,60 @@ static inline int64_t mako_tcp_nodelay(int64_t fd) {
     return setsockopt((int)fd, IPPROTO_TCP, TCP_NODELAY, &flag, sizeof(flag)) == 0 ? 1 : 0;
 }
 
+/* Reverse-proxy upstream forward: open an HTTP/1.1 connection to host:port, send
+ * `method path` with `body`, read the whole response, and return its body (the
+ * bytes after the header block). "" on connect failure. Uses Connection: close,
+ * so it works with any plain-HTTP backend. */
+static inline MakoString mako_http_forward(MakoString host, int64_t port,
+                                           MakoString method, MakoString path,
+                                           MakoString body) {
+    int64_t fd = mako_tcp_connect(host, port);
+    if (fd < 0) return mako_str_from_cstr("");
+    char hbuf[256];
+    size_t hn = (host.len < sizeof(hbuf) - 1) ? host.len : sizeof(hbuf) - 1;
+    memcpy(hbuf, host.data ? host.data : "", hn);
+    hbuf[hn] = 0;
+    const char *m = (method.len && method.data) ? method.data : "GET";
+    int mlen = (int)(method.len ? method.len : 3);
+    const char *pp = (path.len && path.data) ? path.data : "/";
+    int plen = (int)(path.len ? path.len : 1);
+    char head[2560];
+    int hlen = snprintf(head, sizeof(head),
+        "%.*s %.*s HTTP/1.1\r\nHost: %s\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n",
+        mlen, m, plen, pp, hbuf, body.len);
+    if (hlen < 0 || (size_t)hlen >= sizeof(head)) { mako_tcp_close(fd); return mako_str_from_cstr(""); }
+    mako_tcp_write(fd, (MakoString){head, (size_t)hlen});
+    if (body.len) mako_tcp_write(fd, body);
+    char *buf = NULL;
+    size_t total = 0;
+    for (;;) {
+        MakoString chunk = mako_tcp_read(fd);
+        if (chunk.len == 0) { free(chunk.data); break; }
+        char *nb = (char *)realloc(buf, total + chunk.len);
+        if (!nb) { free(chunk.data); break; }
+        buf = nb;
+        memcpy(buf + total, chunk.data, chunk.len);
+        total += chunk.len;
+        free(chunk.data);
+    }
+    mako_tcp_close(fd);
+    if (!buf) return mako_str_from_cstr("");
+    size_t bstart = total; /* default: no body */
+    for (size_t i = 0; i + 3 < total; i++) {
+        if (buf[i] == '\r' && buf[i + 1] == '\n' && buf[i + 2] == '\r' && buf[i + 3] == '\n') {
+            bstart = i + 4;
+            break;
+        }
+    }
+    size_t blen = total - bstart;
+    char *out = (char *)malloc(blen + 1);
+    if (!out) { free(buf); return mako_str_from_cstr(""); }
+    memcpy(out, buf + bstart, blen);
+    out[blen] = 0;
+    free(buf);
+    return (MakoString){out, blen};
+}
+
 /* ---- UDP datagram helpers (IPv4 dotted hosts) ---- */
 
 static inline int64_t mako_udp_bind(int64_t port) {
