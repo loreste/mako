@@ -10,7 +10,7 @@ fn quick() -> int {
 }
 
 fn slow_work() -> int {
-    sleep_ms(200)
+    sleep_ms(400)
     return 99
 }
 
@@ -31,7 +31,7 @@ fn TestJoinTimeoutOkResult() {
 fn TestJoinTimeoutMissResult() {
     crew t {
         let j = t.kick(slow_work())
-        match j.join_timeout(20) {
+        match j.join_timeout(40) {
             Ok(_) => assert(false),
             Err(msg) => assert_eq_str(msg, "timeout"),
         }

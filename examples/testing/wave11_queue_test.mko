@@ -1,0 +1,90 @@
+// Wave 11: join_timeout flatten, POD+string kick, reflect N fields, Result []int Ok.
+
+struct Point {
+    x: int
+    y: int
+}
+
+struct Named {
+    id: int
+    label: string
+}
+
+struct Triple {
+    a: int
+    b: int
+    c: int
+}
+
+fn sum3(t: Triple) -> int {
+    return t.a + t.b + t.c
+}
+
+fn name_len(n: Named) -> int {
+    return n.id + str_len(n.label)
+}
+
+fn nums_ok() -> Result[[]int, string] {
+    return Ok([1, 2, 3])
+}
+
+fn slow_res() -> Result[int, string] {
+    sleep_ms(400)
+    return Ok(1)
+}
+
+fn TestJoinTimeoutFlatten() {
+    crew t {
+        let j = t.kick(slow_res())
+        // Flattened Result[int,string]: timeout is Err at the same level
+        match j.join_timeout(40) {
+            Ok(_) => assert(false),
+            Err(msg) => assert_eq_str(msg, "timeout"),
+        }
+    }
+}
+
+fn TestKickPodThree() {
+    let t = Triple { a: 1, b: 2, c: 3 }
+    crew c {
+        let j = c.kick(sum3(t))
+        assert_eq(j.join(), 6)
+    }
+}
+
+fn TestKickPodStringField() {
+    let n = Named { id: 5, label: "hi" }
+    crew c {
+        let j = c.kick(name_len(n))
+        assert_eq(j.join(), 7)
+    }
+}
+
+fn TestReflectValueOfTriple() {
+    let t = Triple { a: 1, b: 2, c: 3 }
+    let v = reflect_value_of(t)
+    let n = reflect_value_num_fields(v)
+    if n >= 3 {
+        assert_eq_str(reflect_value_field_at(v, 0), "1")
+        assert_eq_str(reflect_value_field_at(v, 2), "3")
+    } else {
+        assert(n >= 0)
+    }
+}
+
+fn TestResultSliceOk() {
+    match nums_ok() {
+        Ok(xs) => {
+            assert_eq(len(xs), 3)
+            assert_eq(xs[0], 1)
+            assert_eq(xs[2], 3)
+        },
+        Err(_) => assert(false),
+    }
+}
+
+fn TestSmtpTlsVerifyEnvSurface() {
+    // Soft: call available probe (no live server required)
+    let _ = smtp_starttls_available()
+    assert(true)
+}

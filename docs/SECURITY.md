@@ -31,9 +31,9 @@ Guided tour: [The Mako Book §11](book/src/ch11-speed-safety.md) · Speed bar: [
 ### Concurrency Send seed (kick)
 
 `crew.kick(f(args…))` only accepts **sendable** argument types: Copy scalars
-(including float), **POD structs** (only int/float/bool fields; heap-boxed),
-`string` (heap-cloned), channels, `ShareInt` / `AtomicInt` (RC clone), and locked
-handles (`CMap` / `Mutex` / `RWMutex`).  
+(including float), **POD structs** (int/float/bool/**string** fields; heap-boxed,
+strings cloned), `string` (heap-cloned), channels, `ShareInt` / `AtomicInt`
+(RC clone), and locked handles (`CMap` / `Mutex` / `RWMutex`).  
 Rejected: arrays, maps, non-POD structs, `Arena`, nested `Crew`.  
 Race detection: `mako test --race` (CI TSan job includes proxy pool/edge). Prefer
 channels over shared mutable state.

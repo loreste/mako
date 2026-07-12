@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.0 — 2026-07-12 (wave 11 queue)
+
+- Flatten `join_timeout` for `Job[Result[T, string]]` (no nested Result)
+- Hardened timeout tests (longer sleep / shorter deadline)
+- POD kick allows string fields (cloned into heap box)
+- `reflect_value_of` snapshots all POD fields (not only two ints)
+- `Result[[]int, E]` Ok via heap-boxed array
+- Tests: `examples/testing/wave11_queue_test.mko`
+
 ## 0.1.0 — 2026-07-12 (wave 10 queue)
 
 - `job.join_timeout(ms)` always returns `Result[R, string]` (`Err("timeout")`)

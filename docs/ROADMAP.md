@@ -34,20 +34,19 @@ Last roadmap sync: **2026-07-11** (unique surface · pain-driven design · suite
 
 ## Partial / Next (true hard residuals)
 
-**Landed (gap close waves 1–10):** kick POD structs · join_timeout as Result ·
-reflect_value_of · C-for NLL · SMTP SSL + opt-in verify · TSan proxy · prior
-chan/Result/select/fan surfaces.
+**Landed (gap close waves 1–11):** join_timeout flatten · POD+string kick ·
+reflect_value_of N fields · Result[[]int] Ok · prior concurrency/Result/SMTP work.
 
 **Language pain residuals** (still open — see [PAIN_POINTS.md](PAIN_POINTS.md)):
 
 1. Fuller data-race model beyond TSan smoke  
-2. Nested/richer Result shapes  
-3. Stronger NLL (partial-field depth)  
+2. More Result Ok shapes  
+3. Stronger NLL product cases  
 
 **Stdlib / product residuals:**
 
 6. Complete Unicode / PCRE · JPEG viewer parity  
-7. Reflect for arbitrary structs  
+7. Reflect for non-POD structs  
 8. Symbol-level parity  
 
 ## Product Focus From General-Purpose Brief

@@ -172,21 +172,21 @@ Last inventory: 2026-07-11 (**unique Mako surface** · pack/pull · pain map · 
 | `chan_open[Struct]` via MakoChanPtr heap-box | Done |
 | `error_tag(tag, msg)` enum-like string errors | Done |
 
-**Closed (wave 7–10):** job join · Result string/float/struct Ok · channel select families ·
-`join_timeout` → **Result[R,string]** · POD struct kick · `reflect_value_of` ·
-C-for NLL fixpoint · SMTP SSL_connect + **opt-in peer verify** · TSan proxy suite.
+**Closed (wave 7–11):** join_timeout **flatten** for `Job[Result[T,string]]` · POD kick
+with **string fields** · `reflect_value_of` N fields · `Result[[]int,E]` Ok ·
+flaky timeout tests hardened · prior Result/select/SMTP/TSan work.
 
 **Pain residuals (language) still open:** see [PAIN_POINTS.md](PAIN_POINTS.md) §4.
 
 1. Fuller data-race model beyond TSan smoke  
-2. Nested/richer Result shapes  
-3. Stronger NLL (more partial-field edges)  
+2. More Result Ok shapes (maps, generic)  
+3. Stronger NLL (nested partial-field product cases)  
 
 **Stdlib / product residuals:**
 
 6. Complete Unicode property database / full PCRE  
 7. Huffman JPEG bitstream readable by arbitrary viewers  
-8. Reflect for non-POD / >2 fields auto-codegen  
+8. Reflect for non-POD structs  
 9. Symbol-level parity inside Done packages
 
 ---

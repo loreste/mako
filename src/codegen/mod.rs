@@ -140,13 +140,14 @@ impl Codegen {
         crate::errors::result_err_enum_c(ty, |en| self.enums.contains_key(en))
     }
 
-    /// Ok payload kind for Result[T, _]: "string", "float", "struct", or "int".
+    /// Ok payload kind for Result[T, _]: "string", "float", "struct", "slice", or "int".
     fn result_ok_kind(ty: &TypeExpr) -> &'static str {
         match ty {
             TypeExpr::Generic(n, args) if n == "Result" && !args.is_empty() => {
                 match &args[0] {
                     TypeExpr::Named(t) if t == "string" => "string",
                     TypeExpr::Named(t) if t == "float" || t == "float64" => "float",
+                    TypeExpr::Array(_) => "slice",
                     TypeExpr::Named(t)
                         if t != "int"
                             && t != "int64"
@@ -2293,6 +2294,18 @@ impl Codegen {
                                 let boxn = self.fresh("okbox");
                                 self.line(&format!(
                                     "{vty} *{boxn} = ({vty}*)malloc(sizeof({vty}));"
+                                ));
+                                self.line(&format!("*{boxn} = {v};"));
+                                return (
+                                    "MakoResultInt".into(),
+                                    format!("mako_ok_ptr((void*){boxn})"),
+                                );
+                            }
+                            // []int Ok: box the array
+                            if vty == "MakoIntArray" {
+                                let boxn = self.fresh("iabox");
+                                self.line(&format!(
+                                    "MakoIntArray *{boxn} = (MakoIntArray*)malloc(sizeof(MakoIntArray));"
                                 ));
                                 self.line(&format!("*{boxn} = {v};"));
                                 return (
@@ -8753,7 +8766,7 @@ impl Codegen {
                             return ("MakoReflectValue*".into(), tmp);
                         }
                         "reflect_value_of" => {
-                            // POD struct → bag via field values (int fields as strings).
+                            // POD struct → bag: each field as string via set_at.
                             let (vty, v) = self.emit_expr(&args[0]);
                             let fields_opt = self
                                 .structs
@@ -8762,20 +8775,36 @@ impl Codegen {
                                 .map(|info| (info.c_name.clone(), info.fields.clone()));
                             let tmp = self.fresh("rvo");
                             if let Some((sn, fields)) = fields_opt {
-                                if fields.len() >= 2
-                                    && fields.iter().take(2).all(|(_, ft)| {
-                                        ft == "int64_t" || ft == "double" || ft == "bool"
+                                if !fields.is_empty()
+                                    && fields.iter().all(|(_, ft)| {
+                                        ft == "int64_t"
+                                            || ft == "double"
+                                            || ft == "bool"
+                                            || ft == "MakoString"
                                     })
                                 {
-                                    let f0 = fields[0].0.clone();
-                                    let f1 = fields[1].0.clone();
-                                    let a = self.fresh("ra");
-                                    let b = self.fresh("rb");
-                                    self.line(&format!("int64_t {a} = (int64_t)({v}.{f0});"));
-                                    self.line(&format!("int64_t {b} = (int64_t)({v}.{f1});"));
                                     self.line(&format!(
-                                        "MakoReflectValue *{tmp} = mako_reflect_value_from_2_int(mako_str_from_cstr(\"{sn}\"), {a}, {b});"
+                                        "MakoReflectValue *{tmp} = mako_reflect_value_new(mako_str_from_cstr(\"{sn}\"));"
                                     ));
+                                    for (i, (fname, ft)) in fields.iter().enumerate() {
+                                        let s = self.fresh("rfs");
+                                        if ft == "MakoString" {
+                                            self.line(&format!(
+                                                "MakoString {s} = mako_str_clone({v}.{fname});"
+                                            ));
+                                        } else if ft == "double" {
+                                            self.line(&format!(
+                                                "MakoString {s} = mako_int_to_string((int64_t)({v}.{fname}));"
+                                            ));
+                                        } else {
+                                            self.line(&format!(
+                                                "MakoString {s} = mako_int_to_string((int64_t)({v}.{fname}));"
+                                            ));
+                                        }
+                                        self.line(&format!(
+                                            "mako_reflect_value_set_at({tmp}, {i}, {s}); free({s}.data);"
+                                        ));
+                                    }
                                     return ("MakoReflectValue*".into(), tmp);
                                 }
                             }
@@ -11481,7 +11510,7 @@ impl Codegen {
                                         || self.structs.contains_key(pty)
                                         || self.structs.values().any(|s| s.c_name == *pty)
                                     {
-                                        // POD struct: heap-box copy for kick.
+                                        // POD struct: heap-box copy; clone string fields.
                                         let cname = if self.structs.contains_key(&aty) {
                                             aty.clone()
                                         } else if self.structs.contains_key(pty) {
@@ -11489,11 +11518,26 @@ impl Codegen {
                                         } else {
                                             aty.clone()
                                         };
+                                        let fields = self
+                                            .structs
+                                            .get(&cname)
+                                            .or_else(|| {
+                                                self.structs.values().find(|s| s.c_name == cname)
+                                            })
+                                            .map(|s| s.fields.clone())
+                                            .unwrap_or_default();
                                         let boxn = self.fresh("podbox");
                                         self.line(&format!(
                                             "{cname} *{boxn} = ({cname}*)malloc(sizeof({cname}));"
                                         ));
                                         self.line(&format!("*{boxn} = {v};"));
+                                        for (fname, ft) in &fields {
+                                            if ft == "MakoString" {
+                                                self.line(&format!(
+                                                    "{boxn}->{fname} = mako_str_clone({v}.{fname});"
+                                                ));
+                                            }
+                                        }
                                         self.line(&format!(
                                             "{arg_name}[{i}] = (intptr_t){boxn};"
                                         ));
@@ -12416,6 +12460,17 @@ impl Codegen {
                             self.line(&format!("{cname} {b};"));
                             self.line(&format!(
                                 "if ({p}) {{ {b} = *{p}; free({p}); }} else {{ memset(&{b}, 0, sizeof({b})); }}"
+                            ));
+                        } else if ok_kind == "slice" {
+                            let b = mangle(&bindings[0]);
+                            let p = self.fresh("oks");
+                            self.locals.insert(bindings[0].clone(), "MakoIntArray".into());
+                            self.line(&format!(
+                                "MakoIntArray *{p} = (MakoIntArray*)mako_result_ok_ptr({scrut});"
+                            ));
+                            self.line(&format!("MakoIntArray {b};"));
+                            self.line(&format!(
+                                "if ({p}) {{ {b} = *{p}; free({p}); }} else {{ {b}.data = NULL; {b}.len = 0; {b}.cap = 0; }}"
                             ));
                         } else {
                             self.locals.insert(bindings[0].clone(), "int64_t".into());

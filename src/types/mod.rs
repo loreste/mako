@@ -8510,7 +8510,7 @@ impl TypeChecker {
                                     Ok(Type::Named("ReflectValue".into()))
                                 }
                                 _ => Err(TypeError::new(
-                                    "reflect_value_of expects a POD struct (int/float/bool fields)",
+                                    "reflect_value_of expects a POD struct (int/float/bool/string fields)",
                                 )),
                             };
                         }
@@ -9046,12 +9046,20 @@ impl TypeChecker {
                             return Err(TypeError::new("job.join_timeout takes milliseconds"));
                         }
                         let _ = self.check_expr(&args[0])?;
-                        // Always Result[R, string]: Ok(value) or Err("timeout").
-                        // When R is already Result[T, E], nest as Result[Result[T,E], string].
-                        Ok(Type::Result(
-                            Box::new(*inner.clone()),
-                            Box::new(Type::String),
-                        ))
+                        // Ok(value) or Err("timeout"). When the job returns Result[T, E]
+                        // with string Err, flatten so timeout is Err("timeout") at the
+                        // same type (no Result[Result[…], string] nest).
+                        match inner.as_ref() {
+                            Type::Result(ok, err)
+                                if matches!(err.as_ref(), Type::String) =>
+                            {
+                                Ok(Type::Result(ok.clone(), err.clone()))
+                            }
+                            other => Ok(Type::Result(
+                                Box::new(other.clone()),
+                                Box::new(Type::String),
+                            )),
+                        }
                     }
                     (Type::Interface { name: iname }, m) => {
                         let Some(iface) = self.interfaces.iter().find(|i| i.name == *iname) else {
@@ -10368,6 +10376,7 @@ impl TypeChecker {
                         | Type::Byte
                         | Type::Bool
                         | Type::Float
+                        | Type::String
                 )
             }),
             _ => false,

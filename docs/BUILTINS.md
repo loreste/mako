@@ -650,7 +650,7 @@ Tests: `chan_struct_test`, `chan_float_test`, `wave8_queue_test`, `wave9_queue_t
 | `crew t { … }` | Structured scope; cancel+join on exit (no orphan tasks) |
 | `t.kick(f(args…))` | Spawn on crew; returns `Job[R]` |
 | `job.join()` / `join(job)` | Wait for result of type `R` |
-| `job.join_timeout(ms)` | Timed join → **`Result[R, string]`**: `Ok(value)` or `Err("timeout")` |
+| `job.join_timeout(ms)` | Timed join → **`Result[R, string]`** (`Ok`/`Err("timeout")`). If `R` is already `Result[T, string]`, **flattens** (no nest). |
 | `t.drain(ms)` / `crew_drain` | Cancel + join with timeout budget |
 | `t.cancel()` / `t.cancelled()` | Cooperative cancel flag |
 | `fan(xs, \|x\| …)` | Parallel map over array |
@@ -664,7 +664,10 @@ Tests: `chan_struct_test`, `chan_float_test`, `wave8_queue_test`, `wave9_queue_t
 | `Result[T, E]` | Heap-boxed `MakoResultInt`; join unboxes |
 | float | Bitcast through `intptr_t` |
 
-Kick **args** that are sendable: Copy scalars, **POD structs** (int/float/bool fields, heap-boxed), string (cloned), chan handles, ShareInt/sync handles. Arrays/maps/non-POD structs remain rejected.
+Kick **args** that are sendable: Copy scalars, **POD structs** (int/float/bool/**string** fields, heap-boxed; strings cloned), string (cloned), chan handles, ShareInt/sync handles. Arrays/maps/non-POD structs remain rejected.
+
+`reflect_value_of(s)` snapshots POD struct fields (any field count) into a reflect bag.
+`Result[[]int, E]` Ok is supported (heap-boxed array).
 
 **`fan` element types:** `[]int`, `[]float`, `[]string`, `[]Struct` (POD named structs via `mako_par_map_bytes`).
 
