@@ -2251,7 +2251,8 @@ Tests: `result_enum_test.mko`, `job_join_typed_test.mko` (Result across kick/joi
 `wave11_queue_test.mko` (`[]int` Ok), `wave12_queue_test.mko` (`map[string]int` Ok),
 `wave13_queue_test.mko` (`map[int]int` / `map[string]string` Ok),
 `wave14_queue_test.mko` (`[]string` / `[]float` Ok),
-`wave15_queue_test.mko` (`[]Struct` Ok).
+`wave15_queue_test.mko` (`[]Struct` Ok),
+`wave16_queue_test.mko` (generic `Result[T, string]` Ok mono).
 
 ---
 

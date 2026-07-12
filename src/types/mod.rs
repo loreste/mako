@@ -263,6 +263,9 @@ pub struct TypeChecker {
     /// iteration / post-loop). Fall-through if-join still skips diverging arms;
     /// these accumulate separately so continue-only moves are not lost.
     loop_continue_moved: Vec<(HashMap<String, bool>, HashMap<String, HashSet<String>>)>,
+    /// Per nested loop: holds moved on a `break` path. If-join drops diverging
+    /// arms, so break-only moves would otherwise vanish after the loop.
+    loop_break_moved: Vec<(HashMap<String, bool>, HashMap<String, HashSet<String>>)>,
     /// `defer` bodies — typechecked at function exit against final NLL state.
     pending_defers: Vec<Block>,
     /// Nesting depth of `unsafe { }` (bounds-check opt-out in codegen).
@@ -6162,6 +6165,7 @@ impl TypeChecker {
             loop_depth: 0,
             loop_labels: Vec::new(),
             loop_continue_moved: Vec::new(),
+            loop_break_moved: Vec::new(),
             pending_defers: Vec::new(),
             unsafe_depth: 0,
             systems_crate: false,
@@ -6180,9 +6184,12 @@ impl TypeChecker {
         self.loop_labels.push(label);
         self.loop_continue_moved
             .push((HashMap::new(), HashMap::new()));
+        self.loop_break_moved
+            .push((HashMap::new(), HashMap::new()));
     }
 
     fn pop_loop(&mut self) {
+        self.loop_break_moved.pop();
         self.loop_continue_moved.pop();
         self.loop_labels.pop();
         self.loop_depth -= 1;
@@ -6253,6 +6260,62 @@ impl TypeChecker {
     /// Union continue-path moves into the live hold-move state (next iter / post-loop).
     fn apply_continue_path_moves(&mut self) {
         let Some((acc_moved, acc_fields)) = self.loop_continue_moved.last() else {
+            return;
+        };
+        for (name, was) in acc_moved {
+            if *was {
+                self.moved_holds.insert(name.clone(), true);
+            }
+        }
+        for (name, fields) in acc_fields {
+            if !fields.is_empty() {
+                self.hold_moved_fields
+                    .entry(name.clone())
+                    .or_default()
+                    .extend(fields.iter().cloned());
+            }
+        }
+        self.hold_moved_fields.retain(|_, u| !u.is_empty());
+    }
+
+    /// Record current hold-move state onto a loop's break accumulator.
+    /// Unlabeled → innermost. Labeled → matching outer loop frame.
+    fn record_break_path_moves(&mut self, label: &Option<String>) {
+        if self.loop_break_moved.is_empty() {
+            return;
+        }
+        let target = match label {
+            None => self.loop_break_moved.len() - 1,
+            Some(name) => match self
+                .loop_labels
+                .iter()
+                .position(|l| l.as_deref() == Some(name.as_str()))
+            {
+                Some(i) => i,
+                None => self.loop_break_moved.len() - 1,
+            },
+        };
+        let Some((acc_moved, acc_fields)) = self.loop_break_moved.get_mut(target) else {
+            return;
+        };
+        for (name, was) in &self.moved_holds {
+            if *was {
+                acc_moved.insert(name.clone(), true);
+            }
+        }
+        for (name, fields) in &self.hold_moved_fields {
+            if !fields.is_empty() {
+                acc_fields
+                    .entry(name.clone())
+                    .or_default()
+                    .extend(fields.iter().cloned());
+            }
+        }
+    }
+
+    /// Union break-path moves into the live hold-move state (post-loop only).
+    fn apply_break_path_moves(&mut self) {
+        let Some((acc_moved, acc_fields)) = self.loop_break_moved.last() else {
             return;
         };
         for (name, was) in acc_moved {
@@ -7710,6 +7773,8 @@ impl TypeChecker {
                     self.shared_borrows = loop_borrows;
                     let _ = (&entry_moved, &entry_fields);
                 }
+                // Break-path moves (if-join drops diverging arms) poison post-loop.
+                self.apply_break_path_moves();
                 self.pop_loop();
                 Ok(())
             }
@@ -7745,12 +7810,15 @@ impl TypeChecker {
                     self.check_stmt(post)?;
                     self.apply_continue_path_moves();
                 }
+                self.apply_break_path_moves();
                 self.pop_loop();
                 self.pop_scope();
                 Ok(())
             }
             Stmt::Break(label) => {
                 self.resolve_loop_label(label)?;
+                // Capture moves on break path for post-loop join (if-join skips them).
+                self.record_break_path_moves(label);
                 Ok(())
             }
             Stmt::Continue(label) => {
@@ -7889,6 +7957,7 @@ impl TypeChecker {
                     self.share_scope_depth = loop_share_depth;
                     self.shared_borrows = loop_borrows;
                 }
+                self.apply_break_path_moves();
                 self.pop_loop();
                 self.pop_scope();
                 Ok(())

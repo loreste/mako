@@ -278,6 +278,78 @@ impl Codegen {
         }
     }
 
+    /// Best-effort C type for an expression (for generic mono tags without re-emit).
+    fn peek_expr_c_ty(&self, e: &Expr) -> String {
+        match e {
+            Expr::Int(_) => "int64_t".into(),
+            Expr::Float(_) => "double".into(),
+            Expr::Bool(_) => "bool".into(),
+            Expr::String(_) => "MakoString".into(),
+            Expr::Ident(n) => self
+                .locals
+                .get(n)
+                .cloned()
+                .unwrap_or_else(|| "int64_t".into()),
+            Expr::Unary { expr, .. } => self.peek_expr_c_ty(expr),
+            Expr::Binary { left, .. } => self.peek_expr_c_ty(left),
+            Expr::Call { callee, .. } => {
+                if let Expr::Ident(fname) = callee.as_ref() {
+                    if let Some(rt) = self.fn_rets.get(fname) {
+                        return rt.clone();
+                    }
+                }
+                "int64_t".into()
+            }
+            _ => "int64_t".into(),
+        }
+    }
+
+    /// Resolve `id(args)` → `id__tag` monomorphization name (matches emit_expr).
+    fn generic_mono_name_for_call(&self, name: &str, args: &[Expr]) -> String {
+        let Some(tmpl) = self.generic_templates.get(name) else {
+            return name.to_string();
+        };
+        let mut tags = Vec::new();
+        for tp in &tmpl.type_params {
+            let mut found = None;
+            for (i, p) in tmpl.params.iter().enumerate() {
+                if matches!(&p.ty, TypeExpr::Named(n) if n == tp) {
+                    if let Some(a) = args.get(i) {
+                        found = Some(c_type_mono_tag(&self.peek_expr_c_ty(a)));
+                    }
+                    break;
+                }
+            }
+            tags.push(found.unwrap_or_else(|| "int".into()));
+        }
+        format!("{name}__{}", tags.join("__"))
+    }
+
+    /// Result Ok kind for a call, resolving generic monomorphizations.
+    fn call_result_ok_kind(&self, fname: &str, args: &[Expr]) -> Option<String> {
+        let mono = self.generic_mono_name_for_call(fname, args);
+        self.fn_result_ok_kind
+            .get(&mono)
+            .or_else(|| self.fn_result_ok_kind.get(fname))
+            .cloned()
+    }
+
+    fn call_result_ok_struct(&self, fname: &str, args: &[Expr]) -> Option<String> {
+        let mono = self.generic_mono_name_for_call(fname, args);
+        self.fn_result_ok_struct
+            .get(&mono)
+            .or_else(|| self.fn_result_ok_struct.get(fname))
+            .cloned()
+    }
+
+    fn call_result_err_enum(&self, fname: &str, args: &[Expr]) -> Option<String> {
+        let mono = self.generic_mono_name_for_call(fname, args);
+        self.fn_result_err_enum
+            .get(&mono)
+            .or_else(|| self.fn_result_err_enum.get(fname))
+            .cloned()
+    }
+
     fn push_share_scope(&mut self) {
         self.share_scopes.push(Vec::new());
     }
@@ -1721,15 +1793,15 @@ impl Codegen {
                 self.locals.insert(name.clone(), ty.clone());
                 // Propagate Result Err enum type from call
                 if ty == "MakoResultInt" {
-                    if let Expr::Call { callee, .. } = init {
+                    if let Expr::Call { callee, args } = init {
                         if let Expr::Ident(fname) = callee.as_ref() {
-                            if let Some(ec) = self.fn_result_err_enum.get(fname).cloned() {
+                            if let Some(ec) = self.call_result_err_enum(fname, args) {
                                 self.result_err_enums.insert(name.clone(), ec);
                             }
-                            if let Some(ok) = self.fn_result_ok_kind.get(fname).cloned() {
+                            if let Some(ok) = self.call_result_ok_kind(fname, args) {
                                 self.result_ok_kinds.insert(name.clone(), ok);
                             }
-                            if let Some(sn) = self.fn_result_ok_struct.get(fname).cloned() {
+                            if let Some(sn) = self.call_result_ok_struct(fname, args) {
                                 self.result_ok_structs.insert(name.clone(), sn);
                             }
                         }
@@ -12332,9 +12404,9 @@ impl Codegen {
         if sty == "MakoResultInt" {
             let err_c = match scrutinee {
                 Expr::Ident(n) => self.result_err_enums.get(n).cloned(),
-                Expr::Call { callee, .. } => {
+                Expr::Call { callee, args } => {
                     if let Expr::Ident(fname) = callee.as_ref() {
-                        self.fn_result_err_enum.get(fname).cloned()
+                        self.call_result_err_enum(fname, args)
                     } else {
                         None
                     }
@@ -12347,9 +12419,9 @@ impl Codegen {
             }
             let ok_c = match scrutinee {
                 Expr::Ident(n) => self.result_ok_kinds.get(n).cloned(),
-                Expr::Call { callee, .. } => {
+                Expr::Call { callee, args } => {
                     if let Expr::Ident(fname) = callee.as_ref() {
-                        self.fn_result_ok_kind.get(fname).cloned()
+                        self.call_result_ok_kind(fname, args)
                     } else {
                         None
                     }
@@ -12373,9 +12445,9 @@ impl Codegen {
             }
             let ok_st = match scrutinee {
                 Expr::Ident(n) => self.result_ok_structs.get(n).cloned(),
-                Expr::Call { callee, .. } => {
+                Expr::Call { callee, args } => {
                     if let Expr::Ident(fname) = callee.as_ref() {
-                        self.fn_result_ok_struct.get(fname).cloned()
+                        self.call_result_ok_struct(fname, args)
                     } else {
                         None
                     }

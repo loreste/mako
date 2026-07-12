@@ -1,0 +1,16 @@
+// EXPECT: use of moved
+// Break-path NLL: move + break on one arm must poison post-loop (if-join alone drops it).
+fn consume(t: string) {}
+
+fn main() {
+    hold let s = "hi"
+    let mut i = 0
+    while i < 2 {
+        i = i + 1
+        if i == 1 {
+            consume(s)
+            break
+        }
+    }
+    print(s)
+}
