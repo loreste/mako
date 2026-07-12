@@ -765,7 +765,9 @@ fn main() {
 | `game_udp_bind(port)` | Bind UDP game socket |
 | `game_udp_recv(u)` | Receive packet (tracks sender) |
 | `game_udp_sender(u)` | Get peer ID of last sender |
+| `game_udp_sender_addr(u)` | `host:port` of the last sender (for routing replies) |
 | `game_udp_send(u, peer, data)` | Send to specific peer |
+| `game_udp_send_to(u, host, port, data)` | Send to an arbitrary address (upstream forwarding) |
 | `game_udp_broadcast(u, data)` | Send to all connected peers |
 | `game_udp_kick(u, peer)` | Disconnect a peer |
 | `game_udp_peers(u)` | Number of connected peers |
@@ -776,6 +778,30 @@ fn main() {
 
 The `game_udp_fd` function returns the raw file descriptor so you can integrate
 the game socket into an event loop alongside other I/O sources.
+
+**Request/response routing.** `game_udp_sender_addr` and `game_udp_send_to` make
+the socket usable as a frontend that forwards traffic and routes replies back to
+the original sender — the basis for a UDP proxy:
+
+```mko
+fn main() {
+    let front = game_udp_bind(5060)
+    while true {
+        let req = game_udp_recv(front)
+        if len(req) == 0 { continue }
+        let client = game_udp_sender_addr(front)   // remember who asked
+
+        // forward upstream, then route the reply back to `client`
+        let _ = game_udp_send_to(front, "10.0.0.2", 5060, req)
+        let resp = game_udp_recv(front)
+        let parts = str_split(client, ":")
+        match parse_int(parts[1]) {
+            Ok(port) => { let _ = game_udp_send_to(front, parts[0], port, resp) },
+            Err(_) => {},
+        }
+    }
+}
+```
 
 ---
 

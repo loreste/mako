@@ -1041,7 +1041,9 @@ impl TypeChecker {
         fns.insert("game_udp_bind".into(), Type::Fn(vec![Type::Int], Box::new(Type::GameUDP)));
         fns.insert("game_udp_recv".into(), Type::Fn(vec![Type::GameUDP], Box::new(Type::String)));
         fns.insert("game_udp_sender".into(), Type::Fn(vec![Type::GameUDP], Box::new(Type::Int)));
+        fns.insert("game_udp_sender_addr".into(), Type::Fn(vec![Type::GameUDP], Box::new(Type::String)));
         fns.insert("game_udp_send".into(), Type::Fn(vec![Type::GameUDP, Type::Int, Type::String], Box::new(Type::Int)));
+        fns.insert("game_udp_send_to".into(), Type::Fn(vec![Type::GameUDP, Type::String, Type::Int, Type::String], Box::new(Type::Int)));
         fns.insert("game_udp_broadcast".into(), Type::Fn(vec![Type::GameUDP, Type::String], Box::new(Type::Int)));
         fns.insert("game_udp_kick".into(), Type::Fn(vec![Type::GameUDP, Type::Int], Box::new(Type::Void)));
         fns.insert("game_udp_peers".into(), Type::Fn(vec![Type::GameUDP], Box::new(Type::Int)));
