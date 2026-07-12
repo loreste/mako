@@ -69,7 +69,10 @@ Identity is Mako’s own — **speed, concurrency, and security still ship first
 ### Always update the docs
 
 **Every behavior or surface change ships with matching docs in the same change.**  
-Do not leave documentation for a follow-up. Update all of these that apply:
+Do not leave documentation for a follow-up. **No “docs later.”**  
+A change is incomplete until docs that users read match the new surface.
+
+Update all of these that apply:
 
 | Surface | Where |
 |---------|--------|
@@ -78,10 +81,12 @@ Do not leave documentation for a follow-up. Update all of these that apply:
 | Guide / book chapters | [docs/GUIDE.md](docs/GUIDE.md) · [docs/book/](docs/book/) |
 | Status / roadmap | [docs/STATUS.md](docs/STATUS.md) · [docs/ROADMAP.md](docs/ROADMAP.md) when milestones move |
 | Changelog | [CHANGELOG.md](CHANGELOG.md) — user-visible notes |
+| CLI / debug / performance | [docs/CLI.md](docs/CLI.md) · [docs/DEBUG.md](docs/DEBUG.md) · [docs/PERFORMANCE.md](docs/PERFORMANCE.md) when flags or gates change |
 | Language / identity | [LANGUAGE_SPEC.md](LANGUAGE_SPEC.md) · [docs/IDENTITY.md](docs/IDENTITY.md) when syntax changes |
 | Examples | Prefer a small `examples/` or `examples/testing/` sample that matches the docs |
 
 Edge cases, failure modes, and hot-path constraints belong in the docs — not only in tests.
+Prefer correcting outdated signatures over leaving “aspirational” tables.
 
 ### Always check your work
 
