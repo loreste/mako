@@ -664,10 +664,11 @@ Tests: `chan_struct_test`, `chan_float_test`, `wave8_queue_test`, `wave9_queue_t
 | `Result[T, E]` | Heap-boxed `MakoResultInt`; join unboxes |
 | float | Bitcast through `intptr_t` |
 
-Kick **args** that are sendable: Copy scalars, **POD structs** (int/float/bool/**string** fields, heap-boxed; strings cloned), string (cloned), chan handles, ShareInt/sync handles. Arrays/maps/non-POD structs remain rejected.
+Kick **args** that are sendable: Copy scalars, **POD structs** (int/float/bool/**string** fields, heap-boxed; strings cloned), string (cloned), chan handles, ShareInt/sync handles. Arrays/maps/non-POD structs remain rejected (`examples/bad/kick_non_pod.mko`).
 
 `reflect_value_of(s)` snapshots POD struct fields (any field count) into a reflect bag.
-`Result[[]int, E]` Ok is supported (heap-boxed array).
+Nested / non-POD structs are rejected (`examples/bad/reflect_non_pod.mko`).
+`Result[[]int, E]` and `Result[map[string]int, E]` Ok are supported (heap-boxed / map pointer).
 
 **`fan` element types:** `[]int`, `[]float`, `[]string`, `[]Struct` (POD named structs via `mako_par_map_bytes`).
 
@@ -1923,8 +1924,8 @@ ready queue so workers can multiplex without one-request-at-a-time stalls.
 | `jpeg_dct_dc` | `jpeg_dct_dc(data: string) -> int` | Get DCT DC coefficient |
 | `jpeg_encode_gray_huff` | `jpeg_encode_gray_huff(width: int, height: int, pixels: string) -> string` | Encode JPEG with Huffman |
 | `jpeg_huff_block` | `jpeg_huff_block(data: string) -> string` | Get Huffman-encoded block |
-| `jpeg_encode_gray_jfif` | `jpeg_encode_gray_jfif(width: int, height: int, pixels: string) -> string` | Encode JPEG with JFIF header |
-| `jpeg_is_jfif` | `jpeg_is_jfif(data: string) -> int` | Check if data is JFIF |
+| `jpeg_encode_gray_jfif` | `jpeg_encode_gray_jfif(width: int, height: int, pixels: string) -> string` | Encode grayscale with SOI+APP0(JFIF)+SOF0 headers; pixels in APP7 (`MAKOJPG`) for `jpeg_decode_gray` roundtrip. External viewers see a JFIF shell, not a full Huffman bitstream. |
+| `jpeg_is_jfif` | `jpeg_is_jfif(data: string) -> int` | Check if data has JFIF APP0 marker |
 
 ---
 
@@ -2202,6 +2203,8 @@ Tests: `examples/testing/overflow_shutdown_test.mko`. Multi-error recovery:
 | string | `MakoResultInt.ok_s` via `mako_ok_str` |
 | float | `MakoResultInt.ok_f` via `mako_ok_float_res` |
 | named struct | heap box via `mako_ok_ptr`; match Ok unboxes and frees |
+| `[]int` | heap-boxed `MakoIntArray` via `mako_ok_ptr` |
+| `map[string]int` | map pointer via `mako_ok_ptr` |
 
 | Err type `E` | Encoding |
 |--------------|----------|
@@ -2220,6 +2223,12 @@ fn name() -> Result[string, string] {
     return Ok("mako")
 }
 
+fn scores() -> Result[map[string]int, string] {
+    let mut m = make(map[string]int)
+    m["a"] = 1
+    return Ok(m)
+}
+
 match open(1) {
     Ok(v) => print_int(v),
     Err(e) => match e {
@@ -2230,8 +2239,8 @@ match open(1) {
 }
 ```
 
-Float/struct Ok payloads are not first-class yet. Tests: `result_enum_test.mko`,
-`job_join_typed_test.mko` (Result across kick/join).
+Tests: `result_enum_test.mko`, `job_join_typed_test.mko` (Result across kick/join),
+`wave11_queue_test.mko` (`[]int` Ok), `wave12_queue_test.mko` (`map[string]int` Ok).
 
 ---
 

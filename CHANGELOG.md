@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.0 — 2026-07-12 (wave 12 queue)
+
+- `Result[map[string]int, E]` Ok via `mako_ok_ptr` (map pointer)
+- Bad: non-POD kick (`kick_non_pod`), nested reflect (`reflect_non_pod`)
+- NLL if/else partial-field product (`hold_if_else_partial_product`)
+- Regex `\p{Hiragana}` / `\p{Katakana}` / `\p{Hangul}` seeds
+- JPEG JFIF docs: external header + APP7 Mako payload
+- Tests: `examples/testing/wave12_queue_test.mko`
+
 ## 0.1.0 — 2026-07-12 (wave 11 queue)
 
 - Flatten `join_timeout` for `Job[Result[T, string]]` (no nested Result)

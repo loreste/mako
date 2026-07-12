@@ -1,0 +1,17 @@
+// EXPECT: cannot kick value of type
+// Non-POD struct (contains map) cannot cross kick.
+struct Bag {
+    m: map[string]int
+}
+
+fn use_bag(b: Bag) -> int {
+    return 0
+}
+
+fn main() {
+    let b = Bag { m: make(map[string]int) }
+    crew t {
+        let j = t.kick(use_bag(b))
+        let _ = j.join()
+    }
+}

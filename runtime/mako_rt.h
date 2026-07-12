@@ -2977,6 +2977,12 @@ static inline int mako_re_unicode_prop_match(const char *name, size_t nlen, uint
             || (cp >= 0x2070 && cp <= 0x2079);
     if (nlen == 1 && name[0] == 'M') /* mark category seed */
         return (cp >= 0x0300 && cp <= 0x036F);
+    if (nlen == 8 && memcmp(name, "Hiragana", 8) == 0)
+        return (cp >= 0x3040 && cp <= 0x309F);
+    if (nlen == 8 && memcmp(name, "Katakana", 8) == 0)
+        return (cp >= 0x30A0 && cp <= 0x30FF);
+    if (nlen == 6 && memcmp(name, "Hangul", 6) == 0)
+        return (cp >= 0xAC00 && cp <= 0xD7AF);
     return 0;
 }
 

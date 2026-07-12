@@ -148,6 +148,7 @@ impl Codegen {
                     TypeExpr::Named(t) if t == "string" => "string",
                     TypeExpr::Named(t) if t == "float" || t == "float64" => "float",
                     TypeExpr::Array(_) => "slice",
+                    TypeExpr::Map(_, _) => "map",
                     TypeExpr::Named(t)
                         if t != "int"
                             && t != "int64"
@@ -2311,6 +2312,13 @@ impl Codegen {
                                 return (
                                     "MakoResultInt".into(),
                                     format!("mako_ok_ptr((void*){boxn})"),
+                                );
+                            }
+                            // map[string]int Ok: pass map pointer (owned by Result)
+                            if vty == "MakoMapSI*" {
+                                return (
+                                    "MakoResultInt".into(),
+                                    format!("mako_ok_ptr((void*){v})"),
                                 );
                             }
                             return (
@@ -12471,6 +12479,12 @@ impl Codegen {
                             self.line(&format!("MakoIntArray {b};"));
                             self.line(&format!(
                                 "if ({p}) {{ {b} = *{p}; free({p}); }} else {{ {b}.data = NULL; {b}.len = 0; {b}.cap = 0; }}"
+                            ));
+                        } else if ok_kind == "map" {
+                            let b = mangle(&bindings[0]);
+                            self.locals.insert(bindings[0].clone(), "MakoMapSI*".into());
+                            self.line(&format!(
+                                "MakoMapSI *{b} = (MakoMapSI*)mako_result_ok_ptr({scrut});"
                             ));
                         } else {
                             self.locals.insert(bindings[0].clone(), "int64_t".into());
