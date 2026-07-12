@@ -4540,6 +4540,13 @@ impl TypeChecker {
             ),
         );
         fns.insert(
+            "reflect_value_from_2_int".into(),
+            Type::Fn(
+                vec![Type::String, Type::Int, Type::Int],
+                Box::new(Type::Named("ReflectValue".into())),
+            ),
+        );
+        fns.insert(
             "reflect_value_set".into(),
             Type::Fn(
                 vec![
@@ -7937,6 +7944,8 @@ impl TypeChecker {
                             | Type::Int8
                             | Type::Byte
                             | Type::Bool => "int",
+                            Type::Named(n) if self.structs_named(n) => "ptr",
+                            Type::Struct { .. } => "ptr",
                             _ => "other",
                         },
                         Some((t, _)) => {
@@ -7953,7 +7962,7 @@ impl TypeChecker {
                     };
                     if kind == "other" {
                         return Err(TypeError::new(format!(
-                            "select arm `{ch}`: select supports int/float/string channels today"
+                            "select arm `{ch}`: select supports int/float/string/struct channels"
                         )));
                     }
                     match arm_kind {

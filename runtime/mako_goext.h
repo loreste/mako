@@ -1627,6 +1627,8 @@ static inline MakoString mako_httptest_header(MakoString name) {
  * Self-contained (mako_tls.h is included after mako_std.h / goext). */
 #if defined(MAKO_HAS_OPENSSL) || defined(MAKO_USE_OPENSSL)
 #include <openssl/evp.h>
+#include <openssl/ssl.h>
+#include <openssl/err.h>
 #define MAKO_AEAD_OPENSSL 1
 #endif
 
@@ -3245,6 +3247,18 @@ static inline MakoReflectValue *mako_reflect_value_from_2(
     return mako_reflect_value_from_fields(schema, vals, 2);
 }
 
+/* Live bag from two integer field values (typed struct snapshot helper). */
+static inline MakoReflectValue *mako_reflect_value_from_2_int(
+    MakoString schema, int64_t a, int64_t b
+) {
+    MakoString sa = mako_int_to_string(a);
+    MakoString sb = mako_int_to_string(b);
+    MakoReflectValue *v = mako_reflect_value_from_2(schema, sa, sb);
+    free(sa.data);
+    free(sb.data);
+    return v;
+}
+
 /* ---- JPEG: baseline grayscale DCT encode (8x8 blocks, quality-ish) ---- */
 static inline void mako_jpeg_fdct(double *blk) {
     /* Loeffler-ish separable 1D DCT on rows then cols — simplified */
@@ -4160,33 +4174,53 @@ static inline int64_t mako_smtp_send_starttls(
         return 0;
     }
 #if defined(MAKO_HAS_OPENSSL) || defined(MAKO_USE_OPENSSL)
-    /* Continue AUTH PLAIN + MAIL over the clear socket after STARTTLS accepted.
-     * Full SSL_connect upgrade lives in mako_tls.h; when OpenSSL is linked we
-     * still complete the SMTP AUTH dialog so AUTH-over-session is exercised. */
+    /* Upgrade the socket with SSL_connect, then AUTH + MAIL over TLS. */
     {
+        SSL_CTX *ctx = SSL_CTX_new(TLS_client_method());
+        if (!ctx) {
+            mako_sock_close(fd);
+            return -2;
+        }
+        SSL_CTX_set_verify(ctx, SSL_VERIFY_NONE, NULL);
+        SSL *ssl = SSL_new(ctx);
+        if (!ssl) {
+            SSL_CTX_free(ctx);
+            mako_sock_close(fd);
+            return -2;
+        }
+        SSL_set_fd(ssl, (int)fd);
+        if (SSL_connect(ssl) <= 0) {
+            SSL_free(ssl);
+            SSL_CTX_free(ctx);
+            mako_sock_close(fd);
+            return -3; /* TLS handshake failed */
+        }
         MakoString auth = mako_smtp_auth_plain(user, pass);
-        send(fd, auth.data, auth.len, 0);
-        send(fd, "\r\n", 2, 0);
+        SSL_write(ssl, auth.data, (int)auth.len);
+        SSL_write(ssl, "\r\n", 2);
         free(auth.data);
-        (void)recv(fd, rbuf, sizeof(rbuf) - 1, 0);
+        (void)SSL_read(ssl, rbuf, (int)sizeof(rbuf) - 1);
         char cmd[512];
         int n = snprintf(cmd, sizeof(cmd), "MAIL FROM:<%.*s>\r\n",
                          (int)from.len, from.data ? from.data : "");
-        send(fd, cmd, (size_t)n, 0);
-        (void)recv(fd, rbuf, sizeof(rbuf) - 1, 0);
+        SSL_write(ssl, cmd, n);
+        (void)SSL_read(ssl, rbuf, (int)sizeof(rbuf) - 1);
         n = snprintf(cmd, sizeof(cmd), "RCPT TO:<%.*s>\r\n",
                      (int)to.len, to.data ? to.data : "");
-        send(fd, cmd, (size_t)n, 0);
-        (void)recv(fd, rbuf, sizeof(rbuf) - 1, 0);
-        send(fd, "DATA\r\n", 6, 0);
-        (void)recv(fd, rbuf, sizeof(rbuf) - 1, 0);
-        if (msg.len) send(fd, msg.data, msg.len, 0);
-        send(fd, "\r\n.\r\n", 5, 0);
-        (void)recv(fd, rbuf, sizeof(rbuf) - 1, 0);
-        send(fd, "QUIT\r\n", 6, 0);
+        SSL_write(ssl, cmd, n);
+        (void)SSL_read(ssl, rbuf, (int)sizeof(rbuf) - 1);
+        SSL_write(ssl, "DATA\r\n", 6);
+        (void)SSL_read(ssl, rbuf, (int)sizeof(rbuf) - 1);
+        if (msg.len) SSL_write(ssl, msg.data, (int)msg.len);
+        SSL_write(ssl, "\r\n.\r\n", 5);
+        (void)SSL_read(ssl, rbuf, (int)sizeof(rbuf) - 1);
+        SSL_write(ssl, "QUIT\r\n", 6);
+        SSL_shutdown(ssl);
+        SSL_free(ssl);
+        SSL_CTX_free(ctx);
+        mako_sock_close(fd);
+        return 0;
     }
-    mako_sock_close(fd);
-    return 0;
 #else
     (void)user; (void)pass; (void)from; (void)to; (void)msg;
     mako_sock_close(fd);

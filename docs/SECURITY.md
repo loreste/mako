@@ -28,6 +28,15 @@ Guided tour: [The Mako Book §11](book/src/ch11-speed-safety.md) · Speed bar: [
 4. **Speed is the name of the game** — security features that cost cycles stay
    opt-in or debug-only; do not silently tax every release binary.
 
+### Concurrency Send seed (kick)
+
+`crew.kick(f(args…))` only accepts **sendable** argument types: Copy scalars
+(including float), `string` (heap-cloned), channels, `ShareInt` / `AtomicInt`
+(RC clone), and locked handles (`CMap` / `Mutex` / `RWMutex`).  
+Rejected: arrays, maps, plain structs, `Arena`, nested `Crew`.  
+Race detection: `mako test --race` (CI TSan job). Prefer channels over shared
+mutable state.
+
 ## Memory and resources
 
 | Risk | Mako prevention |

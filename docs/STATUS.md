@@ -172,24 +172,23 @@ Last inventory: 2026-07-11 (**unique Mako surface** · pack/pull · pain map · 
 | `chan_open[Struct]` via MakoChanPtr heap-box | Done |
 | `error_tag(tag, msg)` enum-like string errors | Done |
 
-**Closed (wave 7–8):** job join string/Result · Result string/float Ok · float + string
-select · real `join_timeout` · enum Err i0–i2/s0–s1 · crew NLL · ShareInt kick ·
-`fan` structs · pool mutex · log+trace · recovery hints · reflect_value_from_2 ·
-regex `\p{Z,Sc,…}` · SMTP AUTH after STARTTLS · bench-gate + TSan CI (+1.5× soft).
+**Closed (wave 7–9):** job join · Result string/float/**struct** Ok · int/string/**struct**
+select · real `join_timeout` (typed Result timeout) · enum Err i0–i2/s0–s1 · crew NLL ·
+ShareInt kick · fan structs · pool mutex · log+trace · reflect_value_from_2(_int) ·
+regex props · SMTP **SSL_connect** after STARTTLS (OpenSSL) · bench/TSan CI.
 
 **Pain residuals (language) still open:** see [PAIN_POINTS.md](PAIN_POINTS.md) §4.
 
 1. Fuller data-race model beyond TSan smoke / kick Send seed  
-2. Result Ok for structs; even richer Err  
+2. Even richer Result/Err shapes  
 3. Stronger NLL (more CFG edges)  
-4. Channel select for ptr/struct rings  
-5. Full SSL_connect upgrade path for SMTP STARTTLS  
+4. Peer-verified SMTP TLS (cert validation)  
 
 **Stdlib / product residuals:**
 
 6. Complete Unicode property database / full PCRE  
 7. Huffman JPEG bitstream readable by arbitrary viewers  
-8. Reflect auto-fill from typed struct values (codegen)  
+8. Reflect auto-fill from arbitrary typed structs (codegen)  
 9. Symbol-level parity inside Done packages
 
 ---

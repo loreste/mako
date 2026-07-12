@@ -678,6 +678,19 @@ static inline MakoResultInt mako_ok_float_res(double v) {
     return r;
 }
 
+/* Ok payload for Result[Struct, E]: heap-owned box; match Ok unboxes and frees. */
+static inline MakoResultInt mako_ok_ptr(void *p) {
+    MakoResultInt r;
+    memset(&r, 0, sizeof(r));
+    r.ok = true;
+    r.value = (int64_t)(intptr_t)p; /* pointer bits in value slot */
+    return r;
+}
+
+static inline void *mako_result_ok_ptr(MakoResultInt r) {
+    return r.ok ? (void *)(intptr_t)r.value : NULL;
+}
+
 static inline MakoResultInt mako_err_int(MakoString e) {
     MakoResultInt r;
     memset(&r, 0, sizeof(r));
@@ -1946,6 +1959,73 @@ static inline void mako_chan_ptr_close(MakoChanPtr *c) {
     pthread_mutex_unlock(&c->mu);
 }
 
+/* Nonblocking try-recv for pointer channels. */
+static inline int64_t mako_chan_ptr_try_recv(MakoChanPtr *c, void **out) {
+    if (!c) return 0;
+    pthread_mutex_lock(&c->mu);
+    if (c->count == 0) {
+        pthread_mutex_unlock(&c->mu);
+        return 0;
+    }
+    void *v = c->buf[c->head];
+    c->buf[c->head] = NULL;
+    c->head = (c->head + 1) % c->cap;
+    c->count--;
+    pthread_cond_signal(&c->can_send);
+    pthread_mutex_unlock(&c->mu);
+    if (out) *out = v;
+    else free(v);
+    return 1;
+}
+
+static void *mako_select_last_ptr = NULL;
+static int64_t mako_select_rr_ptr = 0;
+
+static inline void *mako_chan_select_value_ptr(void) {
+    return mako_select_last_ptr;
+}
+
+static inline int64_t mako_chan_ptr_selectn(
+    MakoChanPtr **chs, int64_t n, int64_t timeout_ms
+) {
+    if (n < 1 || n > MAKO_SELECT_MAX || chs == NULL) return -1;
+    struct timeval start, now;
+    mako_gettimeofday(&start, NULL);
+    for (;;) {
+        int64_t start_i = mako_select_rr_ptr % n;
+        for (int64_t k = 0; k < n; k++) {
+            int64_t i = (start_i + k) % n;
+            if (chs[i] == NULL) continue;
+            void *v = NULL;
+            if (mako_chan_ptr_try_recv(chs[i], &v)) {
+                /* previous last_ptr not freed here — arm must free after take */
+                mako_select_last_ptr = v;
+                mako_select_rr_ptr = (i + 1) % n;
+                return i;
+            }
+        }
+        if (timeout_ms >= 0) {
+            mako_gettimeofday(&now, NULL);
+            int64_t elapsed =
+                (now.tv_sec - start.tv_sec) * 1000 +
+                (now.tv_usec - start.tv_usec) / 1000;
+            if (elapsed >= timeout_ms) {
+                mako_rt_counter_inc(&mako_rt_channel_select_timeouts);
+                return -1;
+            }
+        }
+        struct timespec ts = {0, 2000000L};
+        nanosleep(&ts, NULL);
+    }
+}
+
+static inline int64_t mako_chan_ptr_select2(
+    MakoChanPtr *a, MakoChanPtr *b, int64_t timeout_ms
+) {
+    MakoChanPtr *chs[2] = {a, b};
+    return mako_chan_ptr_selectn(chs, 2, timeout_ms);
+}
+
 
 /* ---- Structured concurrency nursery ---- */
 typedef void *(*MakoTaskFn)(void *);
@@ -2890,6 +2970,13 @@ static inline int mako_re_unicode_prop_match(const char *name, size_t nlen, uint
         return (cp >= 0x0590 && cp <= 0x05FF);
     if (nlen == 3 && memcmp(name, "Han", 3) == 0)
         return (cp >= 0x3400 && cp <= 0x9FFF);
+    if (nlen == 2 && memcmp(name, "Nl", 2) == 0) /* letter numbers */
+        return (cp >= 0x16EE && cp <= 0x16F0) || (cp >= 0x2160 && cp <= 0x2188);
+    if (nlen == 2 && memcmp(name, "No", 2) == 0) /* other numbers */
+        return (cp >= 0x00B2 && cp <= 0x00B3) || cp == 0x00B9
+            || (cp >= 0x2070 && cp <= 0x2079);
+    if (nlen == 1 && name[0] == 'M') /* mark category seed */
+        return (cp >= 0x0300 && cp <= 0x036F);
     return 0;
 }
 

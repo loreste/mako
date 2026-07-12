@@ -73,10 +73,14 @@ pub struct Codegen {
     result_err_enums: HashMap<String, String>,
     /// Function name → Result Err enum C type.
     fn_result_err_enum: HashMap<String, String>,
-    /// Function name → Ok payload kind: "int" | "string".
+    /// Function name → Ok payload kind: "int" | "string" | "float" | "struct".
     fn_result_ok_kind: HashMap<String, String>,
+    /// Function name → struct C name when Ok is a named struct.
+    fn_result_ok_struct: HashMap<String, String>,
     /// Local Result binding → Ok payload kind.
     result_ok_kinds: HashMap<String, String>,
+    /// Local Result → struct name for Ok struct payloads.
+    result_ok_structs: HashMap<String, String>,
     /// Job local / temp name → C return type of the kicked function.
     job_rets: HashMap<String, String>,
     /// Job local / temp → Result Ok kind when ret is MakoResultInt.
@@ -121,7 +125,9 @@ impl Codegen {
             result_err_enums: HashMap::new(),
             fn_result_err_enum: HashMap::new(),
             fn_result_ok_kind: HashMap::new(),
+            fn_result_ok_struct: HashMap::new(),
             result_ok_kinds: HashMap::new(),
+            result_ok_structs: HashMap::new(),
             job_rets: HashMap::new(),
             job_ok_kinds: HashMap::new(),
             chan_float: std::collections::HashSet::new(),
@@ -134,17 +140,44 @@ impl Codegen {
         crate::errors::result_err_enum_c(ty, |en| self.enums.contains_key(en))
     }
 
-    /// Ok payload kind for Result[T, _]: "string", "float", or "int".
+    /// Ok payload kind for Result[T, _]: "string", "float", "struct", or "int".
     fn result_ok_kind(ty: &TypeExpr) -> &'static str {
         match ty {
             TypeExpr::Generic(n, args) if n == "Result" && !args.is_empty() => {
                 match &args[0] {
                     TypeExpr::Named(t) if t == "string" => "string",
                     TypeExpr::Named(t) if t == "float" || t == "float64" => "float",
+                    TypeExpr::Named(t)
+                        if t != "int"
+                            && t != "int64"
+                            && t != "int32"
+                            && t != "int8"
+                            && t != "byte"
+                            && t != "bool"
+                            && t != "string"
+                            && t != "float"
+                            && t != "float64" =>
+                    {
+                        "struct"
+                    }
                     _ => "int",
                 }
             }
             _ => "int",
+        }
+    }
+
+    fn result_ok_struct_name(&self, ty: &TypeExpr) -> Option<String> {
+        match ty {
+            TypeExpr::Generic(n, args) if n == "Result" && !args.is_empty() => {
+                if let TypeExpr::Named(t) = &args[0] {
+                    if self.structs.contains_key(t) {
+                        return Some(t.clone());
+                    }
+                }
+                None
+            }
+            _ => None,
         }
     }
 
@@ -386,6 +419,9 @@ impl Codegen {
                         if matches!(rt, TypeExpr::Generic(n, _) if n == "Result") {
                             self.fn_result_ok_kind
                                 .insert(f.name.clone(), Self::result_ok_kind(rt).into());
+                            if let Some(sn) = self.result_ok_struct_name(rt) {
+                                self.fn_result_ok_struct.insert(f.name.clone(), sn);
+                            }
                         }
                     }
                     let param_tys: Vec<String> =
@@ -1596,6 +1632,9 @@ impl Codegen {
                             if let Some(ok) = self.fn_result_ok_kind.get(fname).cloned() {
                                 self.result_ok_kinds.insert(name.clone(), ok);
                             }
+                            if let Some(sn) = self.fn_result_ok_struct.get(fname).cloned() {
+                                self.result_ok_structs.insert(name.clone(), sn);
+                            }
                         }
                     }
                 }
@@ -1900,11 +1939,16 @@ impl Codegen {
                 let which = self.fresh("sel");
                 let arr = self.fresh("selchs");
                 let n = arms.len();
-                // Prefer string-channel select when every arm is MakoChanStr*.
                 let all_str = arms.iter().all(|(ch, _)| {
                     self.locals
                         .get(ch)
                         .map(|t| t.as_str() == "MakoChanStr*")
+                        .unwrap_or(false)
+                });
+                let all_ptr = arms.iter().all(|(ch, _)| {
+                    self.locals
+                        .get(ch)
+                        .map(|t| t.as_str() == "MakoChanPtr*")
                         .unwrap_or(false)
                 });
                 if all_str {
@@ -1914,6 +1958,14 @@ impl Codegen {
                     }
                     self.line(&format!(
                         "int64_t {which} = mako_chan_str_selectn({arr}, {n}, {ms});"
+                    ));
+                } else if all_ptr {
+                    self.line(&format!("MakoChanPtr *{arr}[{n}];"));
+                    for (i, (ch, _)) in arms.iter().enumerate() {
+                        self.line(&format!("{arr}[{i}] = {ch};"));
+                    }
+                    self.line(&format!(
+                        "int64_t {which} = mako_chan_ptr_selectn({arr}, {n}, {ms});"
                     ));
                 } else {
                     self.line(&format!("MakoChan *{arr}[{n}];"));
@@ -2232,6 +2284,20 @@ impl Codegen {
                                 return (
                                     "MakoResultInt".into(),
                                     format!("mako_ok_float_res({v})"),
+                                );
+                            }
+                            // Named struct Ok: heap-box and pack pointer in value.
+                            if self.structs.contains_key(&vty)
+                                || self.structs.values().any(|s| s.c_name == vty)
+                            {
+                                let boxn = self.fresh("okbox");
+                                self.line(&format!(
+                                    "{vty} *{boxn} = ({vty}*)malloc(sizeof({vty}));"
+                                ));
+                                self.line(&format!("*{boxn} = {v};"));
+                                return (
+                                    "MakoResultInt".into(),
+                                    format!("mako_ok_ptr((void*){boxn})"),
                                 );
                             }
                             return (
@@ -8676,6 +8742,16 @@ impl Codegen {
                             ));
                             return ("MakoReflectValue*".into(), tmp);
                         }
+                        "reflect_value_from_2_int" => {
+                            let (_, s) = self.emit_expr(&args[0]);
+                            let (_, a) = self.emit_expr(&args[1]);
+                            let (_, b) = self.emit_expr(&args[2]);
+                            let tmp = self.fresh("rvi");
+                            self.line(&format!(
+                                "MakoReflectValue *{tmp} = mako_reflect_value_from_2_int({s}, {a}, {b});"
+                            ));
+                            return ("MakoReflectValue*".into(), tmp);
+                        }
                         "reflect_value_set" => {
                             let (_, v) = self.emit_expr(&args[0]);
                             let (_, f) = self.emit_expr(&args[1]);
@@ -9588,6 +9664,12 @@ impl Codegen {
                                 "MakoString {tmp} = mako_chan_select_value_str();"
                             ));
                             return ("MakoString".into(), tmp);
+                        }
+                        "chan_select_value_ptr" => {
+                            return (
+                                "void*".into(),
+                                "mako_chan_select_value_ptr()".into(),
+                            );
                         }
                         "chan_select3" => {
                             let (_, a) = self.emit_expr(&args[0]);
@@ -11552,17 +11634,44 @@ impl Codegen {
                     }
                     "join_timeout" => {
                         let (_, ms) = self.emit_expr(&args[0]);
+                        let ret_ty = match receiver.as_ref() {
+                            Expr::Ident(n) => self.job_rets.get(n).cloned(),
+                            _ => self.job_rets.get(&rv).cloned(),
+                        }
+                        .unwrap_or_else(|| "int64_t".into());
+                        // Timed join returns Result-like for non-int: ok flag packed as
+                        // int path; string/Result unbox when ready else empty/zero.
                         let out = self.fresh("jto");
                         let ok = self.fresh("jok");
                         self.line(&format!("int64_t {out} = 0;"));
                         self.line(&format!(
                             "int64_t {ok} = mako_await_timeout_ms({rv}, {ms}, &{out});"
                         ));
-                        // On timeout return 0; value in out when ok
-                        let tmp = self.fresh("jtv");
-                        self.line(&format!("int64_t {tmp} = ({ok} ? {out} : 0);"));
-                        let _ = rty;
-                        ("int64_t".into(), tmp)
+                        if ret_ty == "MakoString" {
+                            let tmp = self.fresh("jts");
+                            self.line(&format!("MakoString {tmp};"));
+                            self.line(&format!(
+                                "if ({ok}) {{ MakoString *p = (MakoString*)(intptr_t){out}; \
+                                 if (p) {{ {tmp} = *p; free(p); }} else {{ {tmp} = mako_str_from_cstr(\"\"); }} }} \
+                                 else {{ {tmp} = mako_str_from_cstr(\"\"); }}"
+                            ));
+                            ("MakoString".into(), tmp)
+                        } else if ret_ty == "MakoResultInt" {
+                            let tmp = self.fresh("jtr");
+                            self.line(&format!("MakoResultInt {tmp};"));
+                            self.line(&format!(
+                                "if ({ok}) {{ MakoResultInt *p = (MakoResultInt*)(intptr_t){out}; \
+                                 if (p) {{ {tmp} = *p; free(p); }} else {{ memset(&{tmp}, 0, sizeof({tmp})); {tmp}.ok = false; }} }} \
+                                 else {{ memset(&{tmp}, 0, sizeof({tmp})); {tmp}.ok = false; {tmp}.err = mako_str_from_cstr(\"timeout\"); }}"
+                            ));
+                            ("MakoResultInt".into(), tmp)
+                        } else {
+                            // int: 0 on timeout (may also be a real zero result)
+                            let tmp = self.fresh("jtv");
+                            self.line(&format!("int64_t {tmp} = ({ok} ? {out} : 0);"));
+                            let _ = rty;
+                            ("int64_t".into(), tmp)
+                        }
                     }
                     "len" => {
                         // Prefer Type_len user method (Go-style receivers) over builtin.
@@ -12045,6 +12154,20 @@ impl Codegen {
             if let Some(ok) = ok_c {
                 self.result_ok_kinds.insert(scrut.clone(), ok);
             }
+            let ok_st = match scrutinee {
+                Expr::Ident(n) => self.result_ok_structs.get(n).cloned(),
+                Expr::Call { callee, .. } => {
+                    if let Expr::Ident(fname) = callee.as_ref() {
+                        self.fn_result_ok_struct.get(fname).cloned()
+                    } else {
+                        None
+                    }
+                }
+                _ => self.result_ok_structs.get(&sval).cloned(),
+            };
+            if let Some(sn) = ok_st {
+                self.result_ok_structs.insert(scrut.clone(), sn);
+            }
         }
 
         let marker = format!("/*__MATCH_DECL_{result}__*/");
@@ -12215,6 +12338,27 @@ impl Codegen {
                             self.line(&format!(
                                 "double {} = {scrut}.ok_f;",
                                 mangle(&bindings[0])
+                            ));
+                        } else if ok_kind == "struct" {
+                            let sn = self
+                                .result_ok_structs
+                                .get(scrut)
+                                .cloned()
+                                .unwrap_or_else(|| "int64_t".into());
+                            let cname = self
+                                .structs
+                                .get(&sn)
+                                .map(|s| s.c_name.clone())
+                                .unwrap_or(sn);
+                            let b = mangle(&bindings[0]);
+                            let p = self.fresh("okp");
+                            self.locals.insert(bindings[0].clone(), cname.clone());
+                            self.line(&format!(
+                                "{cname} *{p} = ({cname}*)mako_result_ok_ptr({scrut});"
+                            ));
+                            self.line(&format!("{cname} {b};"));
+                            self.line(&format!(
+                                "if ({p}) {{ {b} = *{p}; free({p}); }} else {{ memset(&{b}, 0, sizeof({b})); }}"
                             ));
                         } else {
                             self.locals.insert(bindings[0].clone(), "int64_t".into());

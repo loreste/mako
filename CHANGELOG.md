@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.0 — 2026-07-12 (wave 9 queue)
+
+- Struct channel **select** (`mako_chan_ptr_selectn`); arm must not `recv` again
+- `Result[Struct, E]` Ok via heap `mako_ok_ptr`
+- `join_timeout` for Result → `Err("timeout")`; string → empty
+- SMTP STARTTLS path runs **SSL_connect** when OpenSSL is linked
+- `reflect_value_from_2_int`; regex Mark/Nl/No seeds
+- Docs: kick Send rules in SECURITY; STATUS/ROADMAP wave 9
+- Tests: `examples/testing/wave9_queue_test.mko`
+
 ## 0.1.0 — 2026-07-12 (wave 8 queue)
 
 - Real `join_timeout` (poll task done; return 0 if still running)

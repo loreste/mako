@@ -633,10 +633,11 @@ from the protocol strings yourself. See `examples/testing/scram_test.mko`.
 | int family / bool | `MakoChan` | Default int ring |
 | float | `MakoChan` | Bitcast via `mako_f64_to_bits` / `mako_bits_to_f64` |
 | string | `MakoChanStr` | Owned strings; `chan_str_select2` / select syntax |
-| named struct | `MakoChanPtr` | Heap-box on send; free on recv |
+| named struct | `MakoChanPtr` | Heap-box on send; free on recv; **select takes the message** (do not `recv` again in the arm) |
 
-`select timeout … { }` uses int or string select when all arms match.
-Tests: `chan_struct_test`, `chan_float_test`, `wave8_queue_test` (string select).
+`select timeout … { }` uses int, string, or **struct/ptr** select when all arms match.
+Helpers: `chan_select_value` / `chan_select_value_str` / `mako_chan_select_value_ptr`.
+Tests: `chan_struct_test`, `chan_float_test`, `wave8_queue_test`, `wave9_queue_test`.
 
 ---
 
@@ -649,6 +650,7 @@ Tests: `chan_struct_test`, `chan_float_test`, `wave8_queue_test` (string select)
 | `crew t { … }` | Structured scope; cancel+join on exit (no orphan tasks) |
 | `t.kick(f(args…))` | Spawn on crew; returns `Job[R]` |
 | `job.join()` / `join(job)` | Wait for result of type `R` |
+| `job.join_timeout(ms)` | Timed join: int → 0 on timeout; `Result` → `Err("timeout")`; string → empty |
 | `t.drain(ms)` / `crew_drain` | Cancel + join with timeout budget |
 | `t.cancel()` / `t.cancelled()` | Cooperative cancel flag |
 | `fan(xs, \|x\| …)` | Parallel map over array |
@@ -2196,6 +2198,7 @@ Tests: `examples/testing/overflow_shutdown_test.mko`. Multi-error recovery:
 | int family / bool | `MakoResultInt.value` via `mako_ok_int` |
 | string | `MakoResultInt.ok_s` via `mako_ok_str` |
 | float | `MakoResultInt.ok_f` via `mako_ok_float_res` |
+| named struct | heap box via `mako_ok_ptr`; match Ok unboxes and frees |
 
 | Err type `E` | Encoding |
 |--------------|----------|
