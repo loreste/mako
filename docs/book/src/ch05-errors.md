@@ -399,6 +399,64 @@ fn process_data(path: string) -> Result[int, string] {
 The `defer` ensures `close_file` runs whether the function returns via `Ok` or
 an early `?` return.
 
+## Typed Result enums
+
+While `Result[T, string]` covers most cases, you can use enum error types for
+structured error handling where callers need to distinguish error categories
+programmatically:
+
+```mko
+enum DbError {
+    NotFound(string),
+    Conflict(string),
+    Timeout,
+}
+
+fn find_user(id: int) -> Result[string, DbError] {
+    if id <= 0 {
+        return Err(DbError.NotFound("user " + string(id)))
+    }
+    return Ok("Ada")
+}
+
+fn main() {
+    match find_user(0) {
+        Ok(name) => print(name),
+        Err(e) => match e {
+            NotFound(msg) => print("not found: " + msg),
+            Conflict(msg) => print("conflict: " + msg),
+            Timeout => print("timed out"),
+        },
+    }
+}
+```
+
+Typed Result enums give you exhaustive match checking on error variants, so the
+compiler ensures every error case is handled.
+
+## Multi-error recovery
+
+When multiple independent operations can fail and you want to collect all errors
+rather than stopping at the first, use `error_join`:
+
+```mko
+fn validate_config(port: int, host: string, timeout: int) -> Result[int, string] {
+    let r1 = validate_port(port)
+    let r2 = if host == "" { error("host required") } else { Ok(1) }
+    let r3 = if timeout <= 0 { error("timeout must be positive") } else { Ok(1) }
+
+    let combined = error_join(r1, error_join(r2, r3))
+    match combined {
+        Ok(_) => Ok(1),
+        Err(e) => Err(e),
+    }
+}
+```
+
+`error_join` combines two Results: if both are Ok, the result is Ok. If either
+or both are Err, the error messages are joined. This lets callers see all
+validation failures at once rather than fixing them one at a time.
+
 ## Style guide for errors
 
 1. **Return `Result[T, string]`** from fallible functions. Use richer error

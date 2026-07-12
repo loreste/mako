@@ -279,6 +279,63 @@ into graceful degradation. When the circuit opens, `/api/data` returns
 
 ---
 
+## Distributed Tracing
+
+For observability across services, Mako provides lightweight distributed tracing
+built in. Wrap work in `trace_begin` / `trace_end` spans, attach log events, and
+propagate the trace ID across service boundaries.
+
+```mko
+fn handle_request(c: int) {
+    trace_begin("handle_request")
+    let tid = trace_id()
+
+    let method = http_method(c)
+    let path = http_path(c)
+    trace_log("method=" + method + " path=" + path)
+
+    // Forward trace ID to downstream services via header
+    let body = http_get_timeout("http://backend:9000/work?trace=" + tid, 2000)
+    trace_log("downstream responded")
+
+    let _ = http_respond_json(c, 200, json_ss("status", "ok", "trace", tid))
+    trace_end()
+}
+
+fn main() {
+    let fd = http_bind(18400)
+    if fd < 0 {
+        print("bind failed")
+        return
+    }
+    print("traced gateway on :18400")
+
+    let mut n = 0
+    while n < 50 {
+        let c = http_accept(fd)
+        if c < 0 { continue }
+        handle_request(c)
+        let _ = http_close(c)
+        n = n + 1
+    }
+    let _ = http_close_listener(fd)
+}
+```
+
+### Tracing API
+
+| Function | Purpose |
+|----------|---------|
+| `trace_begin(name)` | Start a named span |
+| `trace_end()` | End the current span |
+| `trace_id()` | Get the current trace ID (hex string) |
+| `trace_log(msg)` | Attach a log event to the active span |
+
+Trace IDs are generated per top-level `trace_begin` call. Pass the ID in headers
+or query parameters to correlate spans across services.
+
+---
+
 ## API Reference
 
 | Function | Purpose |

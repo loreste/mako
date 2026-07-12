@@ -295,6 +295,84 @@ fn main() {
 
 ---
 
+## Crew Drain
+
+When a crew block has many outstanding jobs and you want to wait for all of
+them with a timeout, use `crew_drain`. This avoids manually joining each job
+handle.
+
+```mko
+fn long_task(id: int) -> int {
+    sleep_ms(500)
+    return id
+}
+
+fn main() {
+    crew t {
+        let _ = t.kick(long_task(1))
+        let _ = t.kick(long_task(2))
+        let _ = t.kick(long_task(3))
+        // Wait up to 5 seconds for all jobs to finish
+        let status = crew_drain(5000)
+        if status == 0 {
+            print("all jobs completed")
+        } else {
+            print("drain timed out")
+        }
+    }
+}
+```
+
+`crew_drain(timeout_ms)` returns 0 when all jobs finish before the timeout,
+or 1 if the timeout elapsed with jobs still running.
+
+---
+
+## Checked Arithmetic
+
+For numeric operations where overflow must not go undetected, use the
+`checked_*` family. They return `Result[int, string]` so overflow is handled
+explicitly rather than wrapping silently.
+
+```mko
+fn safe_total(prices: []int) -> Result[int, string] {
+    let mut total = 0
+    for _, p in range prices {
+        match checked_add(total, p) {
+            Ok(sum) => { total = sum }
+            Err(e) => { return error("total overflow: " + e) }
+        }
+    }
+    return Ok(total)
+}
+
+fn main() {
+    let prices = [1000000000, 2000000000, 3000000000]
+    match safe_total(prices) {
+        Ok(t) => print_int(t),
+        Err(e) => print(e),
+    }
+
+    // Pre-check before computing
+    let x = 9000000000000000000
+    let y = 9000000000000000000
+    if would_overflow_mul(x, y) == 1 {
+        print("multiplication would overflow")
+    }
+}
+```
+
+| Function | Purpose |
+|----------|---------|
+| `checked_add(a, b)` | Add, returns Err on overflow |
+| `checked_sub(a, b)` | Subtract, returns Err on overflow |
+| `checked_mul(a, b)` | Multiply, returns Err on overflow |
+| `would_overflow_add(a, b)` | 1 if addition would overflow |
+| `would_overflow_sub(a, b)` | 1 if subtraction would overflow |
+| `would_overflow_mul(a, b)` | 1 if multiplication would overflow |
+
+---
+
 ## Key Takeaways
 
 - `crew` blocks guarantee that no task outlives its scope

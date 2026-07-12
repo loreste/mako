@@ -802,7 +802,43 @@ curl -s http://127.0.0.1:18100/api/unknown
 
 ## Graceful Shutdown
 
-The runtime provides shutdown coordination for long-running servers:
+The runtime provides two approaches to shutdown coordination for long-running
+servers.
+
+### Simple: install_graceful_shutdown
+
+The simplest approach installs SIGTERM/SIGINT handlers and provides a single
+check function for the accept loop:
+
+```mko
+fn main() {
+    install_graceful_shutdown()
+    let fd = http_bind(18100)
+    if fd < 0 {
+        return
+    }
+    print("server on :18100")
+
+    while shutdown_requested() == 0 {
+        let c = http_accept(fd)
+        if c < 0 { continue }
+        let _ = http_respond(c, 200, "ok\n")
+        let _ = http_close(c)
+    }
+
+    let _ = http_close_listener(fd)
+    print("shutting down")
+}
+```
+
+| Function | Purpose |
+|----------|---------|
+| `install_graceful_shutdown()` | Register SIGTERM/SIGINT handlers |
+| `shutdown_requested()` | 1 if a shutdown signal was received, else 0 |
+
+### Advanced: http_shutdown_begin
+
+For servers that need a grace period to drain in-flight connections:
 
 ```mko
 fn main() {

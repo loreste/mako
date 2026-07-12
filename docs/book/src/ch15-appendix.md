@@ -609,6 +609,61 @@ Supported patterns: literals, `.`, `*`, `+`, `?`, `|`, `[abc]`, `[a-z]`,
 | `httpengine_stop`       | `(HttpEngine)`                         | Stop engine                   |
 | `httpengine_free`       | `(HttpEngine)`                         | Destroy engine                |
 
+### Checked Arithmetic
+
+| Function                | Signature                              | Purpose                       |
+|-------------------------|----------------------------------------|-------------------------------|
+| `checked_add`           | `(int, int) -> Result[int, string]`    | Add with overflow detection   |
+| `checked_sub`           | `(int, int) -> Result[int, string]`    | Subtract with overflow detection |
+| `checked_mul`           | `(int, int) -> Result[int, string]`    | Multiply with overflow detection |
+| `would_overflow_add`    | `(int, int) -> int`                    | 1 if add would overflow       |
+| `would_overflow_sub`    | `(int, int) -> int`                    | 1 if sub would overflow       |
+| `would_overflow_mul`    | `(int, int) -> int`                    | 1 if mul would overflow       |
+
+### Graceful Shutdown
+
+| Function                    | Signature                          | Purpose                       |
+|-----------------------------|-------------------------------------|-------------------------------|
+| `install_graceful_shutdown`  | `() -> int`                        | Register SIGTERM/SIGINT handler |
+| `shutdown_requested`         | `() -> int`                        | 1 if shutdown was signaled    |
+| `server_shutdown_begin`      | `(int) -> int`                     | Begin drain, close listeners  |
+| `server_drain`               | `(int) -> int`                     | Wait for connections to drain |
+| `http_shutdown_begin`        | `() -> int`                        | Begin HTTP server shutdown    |
+| `http_shutdown_ready`        | `() -> int`                        | 1 if all connections drained  |
+| `http_shutdown_from_signal`  | `() -> int`                        | Trigger from signal handler   |
+
+### Distributed Tracing
+
+| Function                | Signature                              | Purpose                       |
+|-------------------------|----------------------------------------|-------------------------------|
+| `trace_begin`           | `(string) -> int`                      | Start a named trace span      |
+| `trace_end`             | `() -> int`                            | End current span              |
+| `trace_id`              | `() -> string`                         | Get current trace ID (hex)    |
+| `trace_set`             | `(string) -> int`                      | Set trace ID for propagation  |
+| `trace_current`         | `() -> string`                         | Get current span name         |
+| `trace_log`             | `(string) -> int`                      | Log with trace context        |
+| `trace_clear`           | `() -> int`                            | Reset trace state             |
+| `middleware_trace`      | `(int) -> string`                      | Extract/generate trace from request |
+
+### Leak Detection
+
+| Function                | Signature                              | Purpose                       |
+|-------------------------|----------------------------------------|-------------------------------|
+| `leak_mark`             | `() -> int`                            | Snapshot allocation count     |
+| `leak_check`            | `(int) -> int`                         | Check for leaks since mark    |
+| `leak_detected`         | `() -> int`                            | Whether last check found leak |
+| `leak_scope_enter`      | `() -> int`                            | Enter nestable leak scope     |
+| `leak_scope_exit`       | `() -> int`                            | Exit scope, returns leaked bytes |
+| `leak_assert_scope`     | `() -> int`                            | 1 if no leak in scope         |
+| `leak_bytes_since`      | `(int) -> int`                         | Bytes allocated since mark    |
+| `leak_report_json`      | `() -> string`                         | JSON leak report              |
+
+### Crew Drain
+
+| Function                | Signature                              | Purpose                       |
+|-------------------------|----------------------------------------|-------------------------------|
+| `crew_drain`            | `(int) -> int`                         | Drain all crew tasks with timeout |
+
 ---
 
 ## E. Compiler Flags

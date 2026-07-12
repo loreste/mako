@@ -7,7 +7,7 @@
 # This file contains everything an LLM needs to write correct Mako code.
 # Mako compiles .mko files to C, then to native binaries via clang.
 # No garbage collector. Memory safety via ownership (hold/share) and arenas.
-# 169 tests passing. Mako identity ~92%.
+# 178 tests passing. Mako identity ~92%.
 
 ================================================================================
 1. OVERVIEW
@@ -1290,6 +1290,12 @@ Below are the most important built-in functions organized by category.
   rand_float() -> float                       Random float in [0.0, 1.0)
   random_int(lo: int, hi: int) -> int         Crypto-random int in [lo, hi]
   safe_add(a: int, b: int) -> int             Overflow-checked addition
+  checked_add(a: int, b: int) -> Result[int, string]  Checked addition (Err on overflow)
+  checked_sub(a: int, b: int) -> Result[int, string]  Checked subtraction
+  checked_mul(a: int, b: int) -> Result[int, string]  Checked multiplication
+  would_overflow_add(a: int, b: int) -> int   1 if a+b would overflow, else 0
+  would_overflow_sub(a: int, b: int) -> int   1 if a-b would overflow, else 0
+  would_overflow_mul(a: int, b: int) -> int   1 if a*b would overflow, else 0
 
 --------------------------------------------------------------------------------
 26.4 Parsing & Conversion
@@ -1970,6 +1976,8 @@ Below are the most important built-in functions organized by category.
   leak_mark() -> int
   leak_bytes_since(mark: int) -> int
   leak_detected(mark: int) -> int
+  leak_check(mark: int) -> int                1 if leak detected since mark, else 0
+  leak_report_json() -> string                JSON report of leaked allocations
   alloc_track_reset() -> int
   alloc_live_bytes() -> int
   alloc_high_bytes() -> int
@@ -1997,6 +2005,99 @@ Below are the most important built-in functions organized by category.
   reqctx_set(ctx: int, key: string, val: string) -> int
   reqctx_get(ctx: int, key: string) -> string
   middleware_allow_methods(req: HttpRequest, methods: string) -> int
+
+================================================================================
+26.33 Checked Arithmetic
+--------------------------------------------------------------------------------
+
+  checked_add(a: int, b: int) -> Result[int, string]  Add with overflow check
+  checked_sub(a: int, b: int) -> Result[int, string]  Subtract with overflow check
+  checked_mul(a: int, b: int) -> Result[int, string]  Multiply with overflow check
+  would_overflow_add(a: int, b: int) -> int   1 if addition would overflow
+  would_overflow_sub(a: int, b: int) -> int   1 if subtraction would overflow
+  would_overflow_mul(a: int, b: int) -> int   1 if multiplication would overflow
+
+  // Example:
+  match checked_add(a, b) {
+      Ok(sum) => print(sum),
+      Err(e) => print("overflow: " + e),
+  }
+  if would_overflow_mul(x, y) == 1 {
+      print("would overflow")
+  }
+
+--------------------------------------------------------------------------------
+26.34 Graceful Shutdown
+--------------------------------------------------------------------------------
+
+  install_graceful_shutdown() -> void          Install SIGTERM/SIGINT handlers
+  shutdown_requested() -> int                  1 if shutdown signal received, else 0
+
+  // Example: HTTP server with graceful shutdown
+  fn main() {
+      install_graceful_shutdown()
+      let fd = http_bind(8080)
+      while shutdown_requested() == 0 {
+          let c = http_accept(fd)
+          if c < 0 { continue }
+          let _ = http_respond(c, 200, "ok\n")
+          let _ = http_close(c)
+      }
+      let _ = http_close_listener(fd)
+      print("shutting down")
+  }
+
+--------------------------------------------------------------------------------
+26.35 Distributed Tracing
+--------------------------------------------------------------------------------
+
+  trace_begin(name: string) -> void           Start a trace span
+  trace_end() -> void                         End the current span
+  trace_id() -> string                        Current trace ID (hex string)
+  trace_log(msg: string) -> void              Attach a log event to the current span
+
+  // Example:
+  fn handle_request(c: int) {
+      trace_begin("handle_request")
+      let tid = trace_id()
+      // ... do work ...
+      trace_log("processed request")
+      trace_end()
+  }
+
+--------------------------------------------------------------------------------
+26.36 Leak Detection
+--------------------------------------------------------------------------------
+
+  leak_mark() -> int                          Snapshot current allocation state
+  leak_check(mark: int) -> int                1 if allocations leaked since mark
+  leak_report_json() -> string                JSON report of leaked allocations
+
+  // Example:
+  fn main() {
+      let mark = leak_mark()
+      // ... allocate things ...
+      if leak_check(mark) != 0 {
+          print("leak detected: " + leak_report_json())
+      }
+  }
+
+--------------------------------------------------------------------------------
+26.37 Crew Drain
+--------------------------------------------------------------------------------
+
+  crew_drain(timeout_ms: int) -> int          Wait for all crew jobs, with timeout
+
+  // Example:
+  crew t {
+      let j = t.kick(long_running_work())
+      // drain with 5-second timeout
+      crew_drain(5000)
+  }
+
+  crew_drain waits for all outstanding jobs in the enclosing crew block to
+  complete, up to the specified timeout in milliseconds. Returns 0 if all
+  jobs finished, 1 if the timeout elapsed.
 
 ================================================================================
 27. COMMON PATTERNS

@@ -1444,4 +1444,143 @@ flow with `auth_check_bearer`. For signed stateless tokens, use
 
 ---
 
+## Checked Arithmetic
+
+Use checked arithmetic when overflow is a possible error condition rather than
+a bug. The `checked_*` functions return `Result[int, string]`, so overflow
+becomes a normal error you can handle with `match` or `?`:
+
+```mko
+fn compute_total(prices: []int) -> Result[int, string] {
+    let mut total = 0
+    for i in range prices {
+        match checked_add(total, prices[i]) {
+            Ok(v) => { total = v }
+            Err(e) => return error("overflow computing total")
+        }
+    }
+    return Ok(total)
+}
+
+fn main() {
+    let prices = [1000000000, 2000000000, 3000000000]
+    match compute_total(prices) {
+        Ok(t) => print_int(t),
+        Err(e) => log_error(e),
+    }
+
+    // Quick check without performing the operation
+    let a = 9223372036854775800
+    let b = 100
+    if would_overflow_add(a, b) == 1 {
+        print("would overflow, using fallback")
+    }
+}
+```
+
+---
+
+## Graceful HTTP Shutdown
+
+A production HTTP server that drains in-flight requests on SIGTERM/SIGINT:
+
+```mko
+fn handle(c: int) {
+    let path = http_path(c)
+    if str_eq(path, "/health") {
+        let _ = http_respond_json(c, 200, "{\"ok\":true}\n")
+    } else {
+        let _ = http_respond_json(c, 200, "{\"hello\":\"world\"}\n")
+    }
+}
+
+fn main() {
+    install_graceful_shutdown()
+    let fd = http_bind(8080)
+    if fd < 0 {
+        print("bind failed")
+        return
+    }
+    print("listening on :8080")
+
+    // Accept loop — exits when signal arrives
+    while shutdown_requested() == 0 {
+        let c = http_accept(fd)
+        if c < 0 { continue }
+        handle(c)
+        let _ = http_close(c)
+    }
+
+    // Drain phase: give in-flight work 5 seconds to finish
+    server_shutdown_begin(5000)
+    server_drain(5000)
+    let _ = http_close_listener(fd)
+    print("graceful exit complete")
+}
+```
+
+Build and test:
+
+```bash
+mako build server.mko -o out/server
+out/server &
+curl http://127.0.0.1:8080/health
+kill -TERM $!    # triggers graceful drain
+```
+
+---
+
+## Distributed Tracing
+
+Propagate trace IDs across HTTP services for request correlation:
+
+```mko
+fn handle_request(c: int) {
+    // Extract or generate trace ID from incoming request
+    let tid = middleware_trace(c)
+
+    trace_begin("handle_request")
+    trace_log("processing path=" + http_path(c))
+
+    // ... do work ...
+    sleep_ms(5)
+
+    trace_end()
+
+    // Include trace ID in response for client correlation
+    let body = "{\"trace_id\":\"" + tid + "\"}\n"
+    let _ = http_respond_json(c, 200, body)
+}
+
+fn main() {
+    let fd = http_bind(8080)
+    if fd < 0 { return }
+
+    let mut n = 0
+    while n < 100 {
+        let c = http_accept(fd)
+        if c < 0 { continue }
+        handle_request(c)
+        let _ = http_close(c)
+        n = n + 1
+    }
+    let _ = http_close_listener(fd)
+}
+```
+
+For outgoing calls, propagate the trace ID via headers:
+
+```mko
+fn call_downstream(url: string) -> string {
+    let tid = trace_id()
+    // Pass trace ID as X-Trace-Id header to downstream
+    trace_begin("call_downstream")
+    let resp = http_get(url)
+    trace_end()
+    return resp
+}
+```
+
+---
+
 Next: [Appendix](ch15-appendix.md).

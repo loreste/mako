@@ -8,7 +8,7 @@
 
 Mako is a compiled, statically typed programming language with its own unique
 syntax and identity. Source files use the `.mko` extension. Compiles to C then
-native via clang. No garbage collector. 169 tests passing.
+native via clang. No garbage collector. 178 tests passing.
 
 **Unique surface:** `fn`, `let`, `on Type {}`, `pack`/`pull`/`export`,
 `hold`/`share`/`arena`, `crew`/`kick`/`join`/`fan`, `match`, `switch`/`case`.
@@ -32,6 +32,12 @@ Key properties:
 - If with initializer: if init; cond { }
 - No GC: ownership via hold/share, arenas for scoped allocation
 - Result/Option types enforced (no null, unused Result is a compile error)
+- Checked arithmetic: checked_add/sub/mul return Result[int, string]; would_overflow_add/sub/mul
+- Graceful shutdown: install_graceful_shutdown, shutdown_requested, server drain lifecycle
+- Distributed tracing: trace_begin/end/id/set/current/log/clear, middleware_trace
+- Leak detection: leak_mark/check/scope_enter/exit/assert_scope/bytes_since/report_json
+- Const functions: const fn for compile-time evaluation
+- Parser recovery: multi-error reporting per file
 - Speed: as close to native as possible (-O3 -flto; bench-gate <=1.5x)
 - Compiles .mko -> C -> native binary (debug -O0, release -O3 -flto)
 - WASM/WASI target support (wasm32-wasip1)
@@ -144,7 +150,8 @@ Database (SQLite/Postgres), Crypto (SHA, HMAC, AES-GCM, ChaCha20, bcrypt,
 PBKDF2, SCRAM-SHA-256), Encoding (base64, hex, gzip), Regex, UUID,
 Cookies/Sessions/Auth, Channels, Concurrency (mutex, atomics, CMap), Event Loop,
 Binary Buffer, Game Networking, Signal Handling, File-System Watch, UDP Proxy,
-Cloud (consistent hashing, rate limiting, circuit breaker), Testing.
+Cloud (consistent hashing, rate limiting, circuit breaker), Checked Arithmetic,
+Graceful Shutdown, Distributed Tracing, Leak Detection, Testing.
 
 ## Documentation Links
 

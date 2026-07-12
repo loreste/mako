@@ -2051,12 +2051,12 @@ Trap mode rewrites integer `+ - *` to `mako_add_i64` / `sub` / `mul` (abort on o
 
 | Function | Signature | Description |
 |----------|-----------|-------------|
-| `checked_add` | `checked_add(a: int, b: int) -> int` | Add; abort on overflow |
-| `checked_sub` | `checked_sub(a: int, b: int) -> int` | Subtract; abort on overflow |
-| `checked_mul` | `checked_mul(a: int, b: int) -> int` | Multiply; abort on overflow |
-| `would_overflow_add` | `would_overflow_add(a, b) -> int` | `1` if `a+b` would overflow |
-| `would_overflow_sub` | `would_overflow_sub(a, b) -> int` | `1` if `a-b` would overflow |
-| `would_overflow_mul` | `would_overflow_mul(a, b) -> int` | `1` if `a*b` would overflow |
+| `checked_add` | `checked_add(a: int, b: int) -> Result[int, string]` | Add with overflow detection |
+| `checked_sub` | `checked_sub(a: int, b: int) -> Result[int, string]` | Subtract with overflow detection |
+| `checked_mul` | `checked_mul(a: int, b: int) -> Result[int, string]` | Multiply with overflow detection |
+| `would_overflow_add` | `would_overflow_add(a: int, b: int) -> int` | `1` if `a+b` would overflow |
+| `would_overflow_sub` | `would_overflow_sub(a: int, b: int) -> int` | `1` if `a-b` would overflow |
+| `would_overflow_mul` | `would_overflow_mul(a: int, b: int) -> int` | `1` if `a*b` would overflow |
 
 Runtime: `runtime/mako_overflow.h`.
 
@@ -2066,16 +2066,25 @@ Runtime: `runtime/mako_overflow.h`.
 
 | Function | Signature | Description |
 |----------|-----------|-------------|
+| `install_graceful_shutdown` | `install_graceful_shutdown() -> int` | Register SIGTERM/SIGINT handler |
+| `shutdown_requested` | `shutdown_requested() -> int` | `1` if shutdown was signaled |
 | `signal_on_term` | `signal_on_term() -> int` | Install SIGTERM/SIGINT → set shutdown flag |
-| `install_graceful_shutdown` | `install_graceful_shutdown(grace_ms: int) -> int` | signal_on_term + store grace |
 | `register_listener` | `register_listener(fd: int) -> int` | Track listen fd for close on drain |
 | `close_listeners` | `close_listeners() -> int` | Close registered listeners |
 | `server_shutdown_begin` | `server_shutdown_begin(grace_ms: int) -> int` | Flag drain + close listeners |
 | `server_drain` | `server_drain(timeout_ms: int) -> int` | Wait up to timeout (10ms slices) |
-| `shutdown_requested` | `shutdown_requested() -> int` | `1` if SIGTERM/begin seen |
 | `should_stop_accepting` | `should_stop_accepting() -> int` | Accept-loop stop flag |
+| `http_shutdown_begin` | `http_shutdown_begin() -> int` | Begin HTTP server shutdown |
+| `http_shutdown_requested` | `http_shutdown_requested() -> int` | Check if HTTP shutdown in progress |
+| `http_shutdown_drain_conn` | `http_shutdown_drain_conn(fd: int) -> int` | Drain a single HTTP connection |
+| `http_shutdown_expired` | `http_shutdown_expired() -> int` | Check if grace period expired |
+| `http_shutdown_remaining` | `http_shutdown_remaining() -> int` | Remaining ms in grace window |
+| `http_shutdown_ready` | `http_shutdown_ready() -> int` | `1` if all connections drained |
+| `http_shutdown_reset` | `http_shutdown_reset() -> int` | Reset shutdown state |
+| `http_shutdown_deadline` | `http_shutdown_deadline(ms: int) -> int` | Set deadline for drain |
+| `http_shutdown_from_signal` | `http_shutdown_from_signal() -> int` | Trigger shutdown from signal handler |
 
-Runtime: `runtime/mako_shutdown.h`. Pairs with existing `http_shutdown_*` / `signal_watch`.
+Runtime: `runtime/mako_shutdown.h`. Pairs with `signal_watch`.
 
 ---
 
@@ -2085,26 +2094,35 @@ Builds on `leak_mark` / `alloc_track_*`. Nestable scopes:
 
 | Function | Signature | Description |
 |----------|-----------|-------------|
-| `leak_scope_enter` | `leak_scope_enter() -> int` | Push mark (live bytes) |
+| `leak_mark` | `leak_mark() -> int` | Snapshot current allocation count |
+| `leak_check` | `leak_check(mark: int) -> int` | Check for leaks since mark |
+| `leak_detected` | `leak_detected() -> int` | Whether last check found a leak |
+| `leak_scope_enter` | `leak_scope_enter() -> int` | Push mark (nestable scope) |
 | `leak_scope_exit` | `leak_scope_exit() -> int` | Pop; returns leaked bytes; warns on stderr if >0 |
-| `leak_check` | `leak_check() -> int` | Bytes over current mark (or live if none) |
 | `leak_assert_scope` | `leak_assert_scope() -> int` | `1` if no leak in current scope |
+| `leak_clear` | `leak_clear() -> int` | Reset leak detection state |
+| `leak_bytes_since` | `leak_bytes_since(mark: int) -> int` | Bytes allocated since mark |
+| `leak_report_json` | `leak_report_json() -> string` | JSON leak report |
+| `alloc_track_alloc` | `alloc_track_alloc() -> int` | Record an allocation |
+| `alloc_track_free` | `alloc_track_free() -> int` | Record a free |
+| `alloc_track_reset` | `alloc_track_reset() -> int` | Reset allocation tracking |
 
 Runtime: `runtime/mako_leak.h`.
 
 ---
 
-## 74. Distributed tracing (seed)
+## 74. Distributed tracing
 
 | Function | Signature | Description |
 |----------|-----------|-------------|
-| `trace_id` | `trace_id() -> string` | New 128-bit id (32 hex chars); installs as current |
-| `trace_current` | `trace_current() -> string` | Current id or `""` |
-| `trace_set` | `trace_set(hex: string) -> int` | Install 32-hex id |
-| `trace_clear` | `trace_clear() -> int` | Clear TLS context |
-| `trace_begin` | `trace_begin(name: string) -> int` | Start named span |
-| `trace_end` | `trace_end() -> int` | End span; JSON line to stderr; returns duration ms |
-| `trace_log` | `trace_log(msg: string) -> int` | Log with current trace context |
+| `trace_begin` | `trace_begin(name: string) -> int` | Start a named trace span |
+| `trace_end` | `trace_end() -> int` | End current span; JSON line to stderr; returns duration ms |
+| `trace_id` | `trace_id() -> string` | Get current 128-bit trace ID as hex (32 chars) |
+| `trace_set` | `trace_set(id: string) -> int` | Set trace ID (for propagation from headers) |
+| `trace_current` | `trace_current() -> string` | Get current span name |
+| `trace_log` | `trace_log(msg: string) -> int` | Log with trace context |
+| `trace_clear` | `trace_clear() -> int` | Reset trace state |
+| `middleware_trace` | `middleware_trace(c: int) -> string` | Extract/generate trace ID from HTTP request |
 
 Runtime: `runtime/mako_trace.h`.
 
@@ -2164,11 +2182,10 @@ Rules:
 
 ---
 
-## 77. crew.drain / evloop_shutdown
+## 77. crew_drain / evloop_shutdown
 
-| API | Role |
-|-----|------|
-| `crew.drain(timeout_ms)` | Cancel + join all kicks (timeout budget per task) |
-| `crew_drain(crew, timeout_ms)` | Free-function form |
-| `evloop_shutdown(el)` | Close event-loop backend and free |
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `crew_drain` | `crew_drain(timeout_ms: int) -> int` | Drain all crew tasks with timeout |
+| `evloop_shutdown` | `evloop_shutdown(el: EvLoop) -> int` | Close event-loop backend and free |
 

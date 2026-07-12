@@ -304,6 +304,52 @@ curl -sS -X DELETE -H 'X-Note-Key: hello' http://127.0.0.1:18300/v1/notes
 
 ---
 
+## Graceful Shutdown
+
+Production servers need to stop cleanly when receiving a termination signal.
+Use `install_graceful_shutdown()` to register signal handlers, then check
+`shutdown_requested()` in the accept loop:
+
+```mko
+fn main() {
+    install_graceful_shutdown()
+
+    let fd = http_bind(18300)
+    if fd < 0 {
+        print("bind failed")
+        return
+    }
+    print("notes-api on :18300 (graceful shutdown enabled)")
+
+    let mut notes = make(map[string]string)
+
+    while shutdown_requested() == 0 {
+        let c = http_accept(fd)
+        if c < 0 { continue }
+
+        let path = http_path(c)
+        if path == "/health" {
+            let _ = http_respond_json(c, 200, "{\"ok\":true}\n")
+        } else if path == "/v1/notes" {
+            let body = json_object_from_map_ss(notes)
+            let _ = http_respond_json(c, 200, body)
+        } else {
+            let _ = http_respond_json(c, 404, json_object("error", "not found"))
+        }
+        let _ = http_close(c)
+    }
+
+    let _ = http_close_listener(fd)
+    print("notes-api shut down cleanly")
+}
+```
+
+When the process receives SIGTERM or SIGINT, `shutdown_requested()` returns 1,
+the loop exits, and the listener is closed. In-flight requests finish before
+the server exits.
+
+---
+
 ## Key Takeaways
 
 - `http_bind` / `http_accept` / `http_respond_json` / `http_close` form the

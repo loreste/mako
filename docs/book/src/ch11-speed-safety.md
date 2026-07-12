@@ -651,6 +651,119 @@ enforced with no runtime weakening.
 
 ---
 
+## Checked Integer Arithmetic
+
+Integer overflow is a common source of security vulnerabilities and silent
+corruption. Mako provides checked arithmetic functions that return
+`Result[int, string]` on overflow instead of wrapping or aborting:
+
+```mko
+fn safe_transfer(balance: int, amount: int) -> Result[int, string] {
+    let new_balance = checked_sub(balance, amount)?
+    return Ok(new_balance)
+}
+
+fn main() {
+    match safe_transfer(100, 50) {
+        Ok(v) => print_int(v),       // 50
+        Err(e) => log_error(e),
+    }
+
+    // Check before performing the operation
+    if would_overflow_add(9223372036854775807, 1) == 1 {
+        print("would overflow, skipping")
+    }
+}
+```
+
+The checked functions:
+
+| Function | Purpose |
+|----------|---------|
+| `checked_add(a, b)` | Add with overflow detection |
+| `checked_sub(a, b)` | Subtract with overflow detection |
+| `checked_mul(a, b)` | Multiply with overflow detection |
+| `would_overflow_add(a, b)` | Returns 1 if add would overflow |
+| `would_overflow_sub(a, b)` | Returns 1 if sub would overflow |
+| `would_overflow_mul(a, b)` | Returns 1 if mul would overflow |
+
+For blanket protection, use `mako build --overflow trap` which rewrites all
+integer `+`, `-`, `*` to abort on overflow. The checked functions give you
+finer-grained control where you want to handle overflow as a normal error path.
+
+---
+
+## Leak Detection
+
+Mako provides a built-in leak detector for finding memory leaks during
+development and testing. It tracks allocations at scope boundaries:
+
+```mko
+fn TestNoLeaks() {
+    leak_scope_enter()
+
+    let mut buf = make([]byte, 0, 1024)
+    // ... use buf ...
+    // buf freed at scope end
+
+    let leaked = leak_scope_exit()
+    assert_eq(leaked, 0)
+}
+```
+
+For more detailed investigation:
+
+```mko
+fn main() {
+    let mark = leak_mark()
+
+    // ... code under test ...
+
+    let bytes = leak_bytes_since(mark)
+    if leak_check(mark) > 0 {
+        print(leak_report_json())
+    }
+}
+```
+
+The leak detector is intended for testing and debugging. It has minimal overhead
+but should not be relied upon in production builds. Use it in your test suite to
+catch regressions early.
+
+---
+
+## Graceful Shutdown
+
+Production servers need to drain in-flight requests before exiting. Mako
+provides a shutdown lifecycle that integrates with signal handling:
+
+```mko
+fn main() {
+    install_graceful_shutdown()
+    let fd = http_bind(8080)
+
+    while shutdown_requested() == 0 {
+        let c = http_accept(fd)
+        if c < 0 { continue }
+        handle(c)
+        let _ = http_close(c)
+    }
+
+    // Drain remaining connections
+    server_shutdown_begin(5000)
+    server_drain(5000)
+    let _ = http_close_listener(fd)
+    print("clean exit")
+}
+```
+
+The shutdown functions handle the full lifecycle: signal registration, stop
+accepting new connections, drain in-flight work, and clean exit. The HTTP-specific
+variants (`http_shutdown_begin`, `http_shutdown_drain_conn`, etc.) give finer
+control over per-connection drain when needed.
+
+---
+
 ## Summary
 
 Mako achieves speed through direct compilation to C with `-O3 -flto`, arena

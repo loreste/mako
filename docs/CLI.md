@@ -568,7 +568,7 @@ Default is the number of CPU cores.
 
 ## Current status
 
-The compiler and runtime pass **169 tests** covering:
+The compiler and runtime pass **178 tests** covering:
 
 - `on Type { fn method(self) -> T { ... } }` method blocks
 - `pack` / `pull` / `export` module system
@@ -581,6 +581,13 @@ The compiler and runtime pass **169 tests** covering:
 - If-expressions (`let x = if c { a } else { b }`)
 - Polymorphic `print`
 - `==` on strings
+- Checked arithmetic (`checked_add/sub/mul`, `would_overflow_*`)
+- Graceful shutdown (`install_graceful_shutdown`, `shutdown_requested`, drain lifecycle)
+- Distributed tracing (`trace_begin/end/id/set/current/log`, `middleware_trace`)
+- Leak detection (`leak_mark/check/scope_enter/exit`, `leak_report_json`)
+- `crew_drain(timeout_ms)` for draining crew tasks
+- `const fn` compile-time evaluation
+- Parser multi-error recovery
 
 Init scaffolds (`mako init`) generate projects using the current `pack`/`pull`/
 `export` conventions by default.

@@ -32,12 +32,66 @@ Guided tour: [The Mako Book §11](book/src/ch11-speed-safety.md) · Speed bar: [
 
 | Risk | Mako prevention |
 |------|-----------------|
+| Integer overflow | `checked_add/sub/mul` + `--overflow trap` mode |
+| Leaks (testing) | `leak_mark/check/scope_enter/exit` + `leak_report_json` |
 | Leaks (scoped work) | Values and `arena` regions are released at scope end |
 | Orphan threads | `crew` **cancel_joins** all kicked jobs on exit |
 | Buffer overflow | Array/string index bounds-checked in debug; `unsafe` / `unsafe_index` opt-out |
 | Use-after-move | CFG NLL + `hold` move checker (`use of moved value`) |
 | Secrets in memory | `secret_from_str` / `secret_drop` — wipe via `mako_secure_zero` |
 | Raw pointer games | Not available in safe Mako |
+
+### Integer overflow protection (Done)
+
+Integer overflow leads to incorrect calculations, truncated values, and security
+vulnerabilities (e.g., buffer size calculations wrapping to small allocations).
+Mako provides two layers of protection:
+
+**Checked arithmetic functions** return `Result[int, string]` on overflow:
+
+```mko
+match checked_add(a, b) {
+    Ok(v) => use(v),
+    Err(e) => log_error(e),
+}
+```
+
+**Compile-time overflow mode** rewrites all `+`, `-`, `*` to abort on overflow:
+
+```bash
+mako build --overflow trap main.mko
+```
+
+**Predicate functions** let you test without performing the operation:
+
+```mko
+if would_overflow_mul(count, size) == 1 {
+    return error("allocation too large")
+}
+```
+
+Runtime: `runtime/mako_overflow.h`.
+
+### Leak detection (Done)
+
+Mako includes a built-in leak detector for catching memory leaks in tests and
+during development. Scoped leak checking ensures that code under test frees
+everything it allocates:
+
+```mko
+fn TestNoLeaks() {
+    leak_scope_enter()
+    // ... code under test ...
+    let leaked = leak_scope_exit()
+    assert_eq(leaked, 0)
+}
+```
+
+For detailed investigation, `leak_bytes_since(mark)` reports bytes allocated
+since a snapshot, and `leak_report_json()` produces structured output suitable
+for CI integration.
+
+Runtime: `runtime/mako_leak.h`.
 
 ### Move checker (Done)
 
