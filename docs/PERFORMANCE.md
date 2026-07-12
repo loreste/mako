@@ -32,6 +32,7 @@ Book: [§11 Speed & memory safety](book/src/ch11-speed-safety.md) · Release how
 # CI-style gate (fib/slice/map vs Rust; default max 2.0×):
 ./scripts/bench-gate.sh
 ./scripts/bench-gate.sh 1.5   # stricter
+# GitHub Actions: job "Bench gate vs Rust" on ubuntu-latest
 ```
 
 ## Publishing benchmark claims

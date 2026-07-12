@@ -612,18 +612,59 @@ from the protocol strings yourself. See `examples/testing/scram_test.mko`.
 
 | Function | Signature | Description |
 |----------|-----------|-------------|
-| `chan_new` | `chan_new(capacity: int) -> chan[int]` | Create a new buffered channel |
+| `chan_new` | `chan_new(capacity: int) -> chan[int]` | Create a new buffered int channel |
+| `chan_open[T]` | `chan_open[T](capacity: int) -> chan[T]` | Typed channel (see element types below) |
 | `chan_try_send` | `chan_try_send(ch: chan[int], val: int) -> int` | Non-blocking send; returns 0 on success |
 | `chan_len` | `chan_len(ch: chan[int]) -> int` | Return the number of items in the channel |
 | `chan_cap` | `chan_cap(ch: chan[int]) -> int` | Return the capacity of the channel |
-| `chan_select2` | `chan_select2(a: chan[int], b: chan[int], timeout_ms: int) -> int` | Select from two channels with timeout |
-| `chan_select3` | `chan_select3(a: chan[int], b: chan[int], c: chan[int], timeout_ms: int) -> int` | Select from three channels with timeout |
-| `chan_select4` | `chan_select4(a: chan[int], b: chan[int], c: chan[int], d: chan[int], timeout_ms: int) -> int` | Select from four channels with timeout |
+| `chan_select2` | `chan_select2(a: chan[int], b: chan[int], timeout_ms: int) -> int` | Select from two **int** channels with timeout |
+| `chan_select3` | `chan_select3(a: chan[int], b: chan[int], c: chan[int], timeout_ms: int) -> int` | Select from three int channels with timeout |
+| `chan_select4` | `chan_select4(a: chan[int], b: chan[int], c: chan[int], d: chan[int], timeout_ms: int) -> int` | Select from four int channels with timeout |
 | `chan_select_value` | `chan_select_value() -> int` | Get the value from the last select operation |
+
+**Methods on `ch`:** `ch.send(v)`, `ch.recv()`, `ch.close()`.
+
+**`chan_open[T]` element types**
+
+| `T` | Runtime | Notes |
+|-----|---------|--------|
+| int family / bool | `MakoChan` | Default int ring |
+| float | `MakoChan` | Bitcast via `mako_f64_to_bits` / `mako_bits_to_f64` |
+| string | `MakoChanStr` | Owned strings |
+| named struct | `MakoChanPtr` | Heap-box on send; free on recv |
+
+`select timeout … { }` and `chan_select*` are **int-channel** multiplex today.
+Tests: `examples/testing/chan_struct_test.mko`, `chan_float_test.mko`, `chan_string_test.mko`.
 
 ---
 
 ## 24. Concurrency
+
+### Crew / kick / join / fan (language)
+
+| Construct | Meaning |
+|-----------|---------|
+| `crew t { … }` | Structured scope; cancel+join on exit (no orphan tasks) |
+| `t.kick(f(args…))` | Spawn on crew; returns `Job[R]` |
+| `job.join()` / `join(job)` | Wait for result of type `R` |
+| `t.drain(ms)` / `crew_drain` | Cancel + join with timeout budget |
+| `t.cancel()` / `t.cancelled()` | Cooperative cancel flag |
+| `fan(xs, \|x\| …)` | Parallel map over array |
+
+**Job return types (`join`)**
+
+| `R` | Behavior |
+|-----|----------|
+| int / bool | Packed in `intptr_t` |
+| string | Heap-boxed across pthread; join unboxes |
+| `Result[T, E]` | Heap-boxed `MakoResultInt`; join unboxes |
+| float | Bitcast through `intptr_t` |
+
+Kick **args** that are sendable: Copy scalars, string (cloned), chan handles, ShareInt/sync handles. Arrays/maps as args remain rejected (Send seed).
+
+**`fan` element types:** `[]int`, `[]float`, `[]string`, `[]Struct` (POD named structs via `mako_par_map_bytes`).
+
+Tests: `crew_fan_test.mko`, `job_join_typed_test.mko`, `fan_struct_test.mko`, `fan_float_test.mko`, `fan_string_test.mko`, `crew_drain_test.mko`.
 
 ### Mutexes
 
@@ -1014,7 +1055,8 @@ from the protocol strings yourself. See `examples/testing/scram_test.mko`.
 
 **Pool (`tcp_pool_*`)**
 
-- `release(..., reusable=1)` validates the fd with a **nonblocking** probe (never waits on `SO_RCVTIMEO`).
+- Global pool table is **mutex-protected** (`pthread_mutex`) for multi-crew / multi-kick use.
+- `release(..., reusable=1)` validates the fd with a **nonblocking** probe (never waits on `SO_RCVTIMEO`); probe runs outside the pool lock.
 - Closed peer / unexpected buffered data → fd is closed, not returned to idle.
 - Bad host/port, empty host, or CR/LF in host → `open` returns `-1`.
 - `max` connections: further `acquire` returns `-1` until a fd is released.
@@ -2051,9 +2093,9 @@ Trap mode rewrites integer `+ - *` to `mako_add_i64` / `sub` / `mul` (abort on o
 
 | Function | Signature | Description |
 |----------|-----------|-------------|
-| `checked_add` | `checked_add(a: int, b: int) -> Result[int, string]` | Add with overflow detection |
-| `checked_sub` | `checked_sub(a: int, b: int) -> Result[int, string]` | Subtract with overflow detection |
-| `checked_mul` | `checked_mul(a: int, b: int) -> Result[int, string]` | Multiply with overflow detection |
+| `checked_add` | `checked_add(a: int, b: int) -> int` | Add; **abort** on overflow |
+| `checked_sub` | `checked_sub(a: int, b: int) -> int` | Subtract; abort on overflow |
+| `checked_mul` | `checked_mul(a: int, b: int) -> int` | Multiply; abort on overflow |
 | `would_overflow_add` | `would_overflow_add(a: int, b: int) -> int` | `1` if `a+b` would overflow |
 | `would_overflow_sub` | `would_overflow_sub(a: int, b: int) -> int` | `1` if `a-b` would overflow |
 | `would_overflow_mul` | `would_overflow_mul(a: int, b: int) -> int` | `1` if `a*b` would overflow |
@@ -2066,7 +2108,7 @@ Runtime: `runtime/mako_overflow.h`.
 
 | Function | Signature | Description |
 |----------|-----------|-------------|
-| `install_graceful_shutdown` | `install_graceful_shutdown() -> int` | Register SIGTERM/SIGINT handler |
+| `install_graceful_shutdown` | `install_graceful_shutdown(grace_ms: int) -> int` | `signal_on_term` + store preferred grace |
 | `shutdown_requested` | `shutdown_requested() -> int` | `1` if shutdown was signaled |
 | `signal_on_term` | `signal_on_term() -> int` | Install SIGTERM/SIGINT → set shutdown flag |
 | `register_listener` | `register_listener(fd: int) -> int` | Track listen fd for close on drain |
@@ -2094,37 +2136,37 @@ Builds on `leak_mark` / `alloc_track_*`. Nestable scopes:
 
 | Function | Signature | Description |
 |----------|-----------|-------------|
-| `leak_mark` | `leak_mark() -> int` | Snapshot current allocation count |
-| `leak_check` | `leak_check(mark: int) -> int` | Check for leaks since mark |
-| `leak_detected` | `leak_detected() -> int` | Whether last check found a leak |
-| `leak_scope_enter` | `leak_scope_enter() -> int` | Push mark (nestable scope) |
+| `leak_mark` | `leak_mark() -> int` | Snapshot live alloc bytes |
+| `leak_bytes_since` | `leak_bytes_since(mark: int) -> int` | Bytes still live since mark |
+| `leak_detected` | `leak_detected(mark: int) -> int` | `1` if bytes grew since mark |
+| `leak_assert_clear` | `leak_assert_clear(mark: int) -> int` | Assert no growth since mark |
+| `leak_report_json` | `leak_report_json(mark: int) -> string` | JSON report since mark |
+| `leak_scope_enter` | `leak_scope_enter() -> int` | Push nestable scope mark |
 | `leak_scope_exit` | `leak_scope_exit() -> int` | Pop; returns leaked bytes; warns on stderr if >0 |
+| `leak_check` | `leak_check() -> int` | Bytes over current scope mark (or live if none) |
 | `leak_assert_scope` | `leak_assert_scope() -> int` | `1` if no leak in current scope |
-| `leak_clear` | `leak_clear() -> int` | Reset leak detection state |
-| `leak_bytes_since` | `leak_bytes_since(mark: int) -> int` | Bytes allocated since mark |
-| `leak_report_json` | `leak_report_json() -> string` | JSON leak report |
-| `alloc_track_alloc` | `alloc_track_alloc() -> int` | Record an allocation |
-| `alloc_track_free` | `alloc_track_free() -> int` | Record a free |
-| `alloc_track_reset` | `alloc_track_reset() -> int` | Reset allocation tracking |
 
-Runtime: `runtime/mako_leak.h`.
+Runtime: `runtime/mako_leak.h` (builds on `alloc_track_*` in `mako_std.h`).
 
 ---
 
-## 74. Distributed tracing
+## 74. Distributed tracing + logs
 
 | Function | Signature | Description |
 |----------|-----------|-------------|
-| `trace_begin` | `trace_begin(name: string) -> int` | Start a named trace span |
-| `trace_end` | `trace_end() -> int` | End current span; JSON line to stderr; returns duration ms |
-| `trace_id` | `trace_id() -> string` | Get current 128-bit trace ID as hex (32 chars) |
-| `trace_set` | `trace_set(id: string) -> int` | Set trace ID (for propagation from headers) |
-| `trace_current` | `trace_current() -> string` | Get current span name |
-| `trace_log` | `trace_log(msg: string) -> int` | Log with trace context |
-| `trace_clear` | `trace_clear() -> int` | Reset trace state |
+| `trace_begin` | `trace_begin(name: string) -> int` | Start a named span under current (or new) trace |
+| `trace_end` | `trace_end() -> int` | End span; JSON line to stderr; returns duration ms |
+| `trace_id` | `trace_id() -> string` | Install new 128-bit id; return hex (32 chars) |
+| `trace_set` | `trace_set(id: string) -> int` | Install existing 32-hex id |
+| `trace_current` | `trace_current() -> string` | Current **trace id hex**, or empty |
+| `trace_log` | `trace_log(msg: string) -> int` | JSON log line with trace context |
+| `trace_clear` | `trace_clear() -> int` | Clear TLS trace state |
 | `middleware_trace` | `middleware_trace(c: int) -> string` | Extract/generate trace ID from HTTP request |
+| `log_info` / `log_warn` / `log_error` / `log_debug` | `log_*(msg: string)` | Stderr logs; when a trace is active, include `trace=<hex>` |
+| `slog_with` | `slog_with(level, msg, key, val)` | Structured log; also emits `trace=` when active |
 
-Runtime: `runtime/mako_trace.h`.
+Runtime: `runtime/mako_trace.h` · log helpers in `mako_std.h` / `mako_goext.h` (include order: trace before std).
+Test: `examples/testing/trace_log_test.mko`.
 
 ---
 
@@ -2134,17 +2176,28 @@ Runtime: `runtime/mako_trace.h`.
 |----------------|---------|
 | `--overflow trap\|wrap\|ignore` | Integer overflow codegen (build/run) |
 | `--bounds always` | Keep bounds checks in release |
+| `mako test --race` | ThreadSanitizer (also `mako build --sanitize thread`) |
 | `mako dev [file]` | Watch mtime → rebuild + rerun (hot reload seed) |
+| `./scripts/bench-gate.sh [2.0\|1.5]` | Microbench vs Rust (CI job on ubuntu) |
 
 Tests: `examples/testing/overflow_shutdown_test.mko`. Multi-error recovery:
-`examples/bad/multi_error.mko`.
+`examples/bad/multi_error.mko` (`mako check` reports all top-level parse errors).
+
+**CI** (`.github/workflows/ci.yml`): native matrix · cross-smoke · **bench-gate** · **TSan** concurrency smoke (`crew_fan`, `kick_send`, `chan_struct`, `crew_drain`).
 
 ---
 
-## 75. Result[T, Enum] typed errors
+## 75. Result[T, E] typed errors
 
-`Result[int, string]` remains the default. **`Result[int, MyError]`** where
-`MyError` is a user `enum` is fully supported:
+| Ok type `T` | Encoding |
+|-------------|----------|
+| int family / bool | `MakoResultInt.value` via `mako_ok_int` |
+| string | `MakoResultInt.ok_s` via `mako_ok_str` |
+
+| Err type `E` | Encoding |
+|--------------|----------|
+| string | `err_kind=0`, `err` string (`mako_err_int`) |
+| user `enum` | `err_kind=1`, tag + i0/i1/s0 (`mako_err_enum`); `match Err(e)` reconstructs enum |
 
 ```mko
 enum IoError { NotFound, Permission(int), Other(string) }
@@ -2152,6 +2205,10 @@ enum IoError { NotFound, Permission(int), Other(string) }
 fn open(code: int) -> Result[int, IoError] {
     if code == 0 { return Ok(1) }
     return Err(NotFound)
+}
+
+fn name() -> Result[string, string] {
+    return Ok("mako")
 }
 
 match open(1) {
@@ -2164,7 +2221,8 @@ match open(1) {
 }
 ```
 
-Runtime packs enum tags/payloads into `MakoResultInt` (`mako_err_enum`).
+Float/struct Ok payloads are not first-class yet. Tests: `result_enum_test.mko`,
+`job_join_typed_test.mko` (Result across kick/join).
 
 ---
 

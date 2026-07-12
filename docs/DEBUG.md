@@ -220,6 +220,11 @@ For tests:
 
 ```bash
 mako test --race
+# CI smoke (subset):
+mako test --race examples/testing/crew_fan_test.mko
+mako test --race examples/testing/kick_send_test.mko
+mako test --race examples/testing/chan_struct_test.mko
+mako test --race examples/testing/crew_drain_test.mko
 ```
 
 For a standalone build:
@@ -227,6 +232,8 @@ For a standalone build:
 ```bash
 mako build --sanitize thread main.mko
 ```
+
+CI: `.github/workflows/ci.yml` job **TSan concurrency smoke** (ubuntu).
 
 ### What TSan catches
 

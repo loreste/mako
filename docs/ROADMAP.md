@@ -34,16 +34,18 @@ Last roadmap sync: **2026-07-11** (unique surface · pain-driven design · suite
 
 ## Partial / Next (true hard residuals)
 
-**Landed (gap close waves 1–6):** kick Send · ShareInt/string pack · atomic share ·
-visibility · Ok/Err · error_context/join/tag · chan int/bool/string/**struct** ·
-fan int/float/string · bench-gate ≤2× (1.5× ok) · lint --identity.
+**Landed (gap close waves 1–7):** kick Send · ShareInt/string pack · atomic share ·
+visibility · Ok/Err · error_context/join/tag · chan int/bool/**float**/string/struct ·
+fan int/float/string/**struct** · job join string/Result · Result string Ok ·
+select NLL join · TCP pool mutex · log+trace · bench-gate CI · TSan CI ·
+lint --identity.
 
 **Language pain residuals** (still open — see [PAIN_POINTS.md](PAIN_POINTS.md)):
 
-1. TSan defaults in CI · job results beyond int (string job join)  
-2. True error enums in ABI (today: string tags via `error_tag`)  
-3. Stronger NLL / ownership edges without new ceremony  
-4. fan for structs
+1. Fuller data-race model beyond TSan smoke / kick Send seed  
+2. Result Ok for float/struct; richer enum Err slots  
+3. Stronger NLL beyond select join  
+4. Channel `select` for non-int rings  
 
 **Stdlib / product residuals:**
 
