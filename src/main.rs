@@ -1666,9 +1666,47 @@ fn run_test_package(
         emit_plain_error(&format!("could not run test binary: {e}"));
     })?;
     if !status.success() {
+        report_test_exit(file, &status);
         return Err(());
     }
     Ok(())
+}
+
+/// Explain *why* a test binary failed. Assertion failures print their own detail
+/// to stderr and exit non-zero; a crash is killed by a signal and would otherwise
+/// leave "no assertion detail". Surfacing the signal makes CI logs actionable.
+fn report_test_exit(file: &Path, status: &std::process::ExitStatus) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::ExitStatusExt;
+        if let Some(sig) = status.signal() {
+            emit_plain_error(&format!(
+                "{}: test process crashed — killed by signal {} ({}); this is a runtime fault (e.g. segfault/abort), not a failed assertion",
+                file.display(),
+                sig,
+                signal_name(sig),
+            ));
+            return;
+        }
+    }
+    if let Some(code) = status.code() {
+        emit_plain_error(&format!(
+            "{}: test process exited with code {} (see the assertion output above)",
+            file.display(),
+            code
+        ));
+    }
+}
+
+fn signal_name(sig: i32) -> &'static str {
+    match sig {
+        4 => "SIGILL",
+        6 => "SIGABRT",
+        8 => "SIGFPE",
+        11 => "SIGSEGV",
+        13 => "SIGPIPE",
+        _ => "signal",
+    }
 }
 
 fn default_pkg_name(path: &Path, name: Option<&str>) -> String {
