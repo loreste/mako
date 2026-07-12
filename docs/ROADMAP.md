@@ -6,7 +6,10 @@ vision source: internal design document (not tracked in repo).
 **Book:** [The Mako Book](book/).
 
 STATUS north-star / MVP: **100%**. Prefer STATUS over this list when claiming Done.  
-Last roadmap sync: **2026-07-10** (general-purpose intention tracker · profile reports + full internal docs packaging · suite **130**).
+**Mako identity:** [IDENTITY.md](IDENTITY.md) (**~90%**).  
+**Pain map (Go/Rust → Mako):** [PAIN_POINTS.md](PAIN_POINTS.md).  
+Dual sugar only: [GO_SYNTAX_CHECKLIST.md](GO_SYNTAX_CHECKLIST.md).  
+Last roadmap sync: **2026-07-11** (unique surface · pain-driven design · suite **130+**).
 
 ## Landed
 
@@ -31,10 +34,23 @@ Last roadmap sync: **2026-07-10** (general-purpose intention tracker · profile 
 
 ## Partial / Next (true hard residuals)
 
-1. Complete Unicode property database / full PCRE · interoperable Huffman JPEG bitstream  
-2. Live struct field values (not only schema registry + string bag)  
-3. SMTP AUTH over completed TLS session  
-4. Symbol-level parity  
+**Landed (gap close waves 1–6):** kick Send · ShareInt/string pack · atomic share ·
+visibility · Ok/Err · error_context/join/tag · chan int/bool/string/**struct** ·
+fan int/float/string · bench-gate ≤2× (1.5× ok) · lint --identity.
+
+**Language pain residuals** (still open — see [PAIN_POINTS.md](PAIN_POINTS.md)):
+
+1. TSan defaults in CI · job results beyond int (string job join)  
+2. True error enums in ABI (today: string tags via `error_tag`)  
+3. Stronger NLL / ownership edges without new ceremony  
+4. fan for structs
+
+**Stdlib / product residuals:**
+
+6. Complete Unicode property database / full PCRE · interoperable Huffman JPEG bitstream  
+7. Live struct field values (not only schema registry + string bag)  
+8. SMTP AUTH over completed TLS session  
+9. Symbol-level parity  
 
 ## Product Focus From General-Purpose Brief
 
@@ -67,12 +83,13 @@ This is the checklist for reaching **100% of the product intention**, not just
 the current MVP/STATUS bar. Percentages are weighted by product importance and
 should be updated whenever a task is checked off.
 
-**Overall intention completion:** **~78% / 100%**  
-Weighted from the track table below; STATUS remains the MVP implementation bar.
+**Overall intention completion:** **~81% / 100%**  
+Weighted from the track table below; STATUS remains the MVP implementation bar.  
+**Mako identity (preferred syntax):** **~86%** — [IDENTITY.md](IDENTITY.md).
 
 | Track | Weight | Current |
 |-------|--------|---------|
-| 1. Language identity and core type system | 10% | 55% |
+| 1. Language identity and core type system | 10% | 90% |
 | 2. Memory safety and allocation control | 10% | 75% |
 | 3. Concurrency and runtime trust | 10% | 55% |
 | 4. Backend app surface | 12% | 100% |
@@ -88,18 +105,25 @@ Weighted from the track table below; STATUS remains the MVP implementation bar.
 - [x] Define Mako-owned syntax identity; has its own identity.
 - [x] Static types, local inference, `Result`, `Option`, enums, `match`.
 - [x] Interfaces seed and dynamic interface dispatch.
-- [ ] Finalize unique generic syntax and migrate docs/examples consistently.
-- [ ] Add tuples and richer pattern matching over structs/errors/messages.
-- [ ] Public/internal/private module visibility and package boundaries.
+- [x] User generics with monomorphization (`fn id[T](x: T) -> T`; dual `[]`/`<>` for built-ins).
+- [x] Unique Mako surface preferred; dual sugar only (`func`, `:=`, …) — [IDENTITY.md](IDENTITY.md).
+- [x] Packs/pulls: `pack` / `pull` (dual `package` / `import`).
+- [x] Tuples + multi-return: `(int, int)` + `let a, b = f()`.
+- [x] Explicit `export`; opt-in `visibility = "explicit"`.
+- [x] Typed channels: `chan_open[T]` / `make(chan[T], n)`.
+- [x] Pain map: [PAIN_POINTS.md](PAIN_POINTS.md) — design driven by Go/Rust pain, not clones.
+- [ ] Close language pain residuals (races, richer errors, NLL, visibility, identity lint).
+- [ ] `if init; cond { }` Go if-with-init.
+- [ ] `go f()` sugar → kick inside crew.
 - [ ] Compiler-enforced API stability annotations.
-- [ ] Immutable-by-default policy and explicit mutability syntax review.
+- [ ] Richer pattern matching over structs/errors/messages beyond tuples/enums.
 
 ### 2. Memory Safety And Allocation Control — 10%
 
 - [x] No null by default; explicit `Option`.
 - [x] Scope ownership, `arena`, `hold`, `share` seed, CFG/NLL checks.
 - [x] Debug bounds checks and explicit `unsafe` blocks.
-- [ ] Release safety policy review for bounds checks and unsafe contracts.
+- [x] Release safety profile: `[profile.release] bounds_checks = "on"` (default unchanged).
 - [x] Memory pools and reusable buffers as first-class stdlib/runtime tools.
 - [x] Borrowed string/byte views and zero-copy packet/file APIs.
 - [ ] Optional GC for app workloads only, never mandatory.

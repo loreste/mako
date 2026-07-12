@@ -1,0 +1,7 @@
+name = "import-paths-demo"
+version = "0.1.0"
+module = "izi-iva"
+
+[dependencies]
+# import path as key → on-disk path (also available via vendor/)
+"github.com/go-redis/redis/v8" = { path = "vendor/github.com/go-redis/redis/v8" }

@@ -3,10 +3,17 @@
 **What works today** — syntax and APIs the compiler accepts, with examples under
 `examples/`. Sources use the **`.mko`** extension (not `.mk`).
 
+**Idiomatic style is Mako’s own.** Prefer `fn`, `let`, `struct`, `on Type { }`,
+`hold` / `share` / `arena`, `crew` / `kick`. Dual Go-like spellings (`func`,
+`:=`, bare `a int`) remain valid as **compat sugar**, not the brand.
+
 | Doc | Role |
 |-----|------|
 | **This guide** | Verified syntax + how to use it |
+| **[IDENTITY.md](IDENTITY.md)** | Our syntax identity + **% checklist** |
+| [GO_SYNTAX_CHECKLIST.md](GO_SYNTAX_CHECKLIST.md) | Optional dual-form inventory (not preferred) |
 | **[The Mako Book](book/)** | Guided tour (idiomatic Mako) |
+| [COMPAT.md](COMPAT.md) | Dual forms / backward compatibility |
 | [STATUS.md](STATUS.md) | Done matrix (adversarial) |
 | [BUILD.md](BUILD.md) | Incremental cache, `-j`, residual clang |
 | [PERFORMANCE.md](PERFORMANCE.md) | Release `-O3 -flto`, benchmarks |
@@ -19,8 +26,65 @@
 | [VISION.md](VISION.md) | North star |
 | [ROADMAP.md](ROADMAP.md) | Sequencing |
 
-**Legend:** unmarked = verified · **Target** = aspirational (VISION Later). STATUS
-north-star / MVP: **100%** (homebrew-core publish is the only external blocker).
+**Legend:** unmarked = verified · **Target** = aspirational (VISION Later).  
+**Mako identity strength:** [IDENTITY.md](IDENTITY.md) (**~86%**).  
+STATUS north-star / MVP: **100%** (homebrew-core publish is the only external blocker).
+
+---
+
+## Mako-native syntax (preferred)
+
+Canonical sample: [`examples/mako_style.mko`](../examples/mako_style.mko).
+
+```mko
+export struct Point {
+    x: int
+    y: int
+}
+
+on Point {
+    fn distance(self) -> int {
+        return self.x + self.y
+    }
+}
+
+fn divmod(a: int, b: int) -> (int, int) {
+    return (a / b, a % b)
+}
+
+fn main() {
+    let p = Point { x: 3, y: 4 }
+    print_int(p.distance())
+
+    let q, r = divmod(17, 5)
+    print_int(q)
+    print_int(r)
+
+    hold let n = 10
+    arena a {
+        let label = arena_text(a, "mako")
+        print(label)
+    }
+
+    crew t {
+        let job = t.kick(work())
+        print_int(job.join())
+    }
+}
+```
+
+| Prefer (Mako) | Dual (compat) |
+|---------------|---------------|
+| `fn f(a: int) -> int` | `func f(a int) int` |
+| `on T { fn M(self) … }` | `func (p T) M()` |
+| `struct T { x: int }` | `type T struct { x int }` |
+| `let` / `let mut` | `:=` / `var` |
+| `export fn` | Capitalized names |
+| `crew` / `kick` / `join` | — |
+| `hold` / `share` / `arena` | — |
+
+Goal: **simple everyday code**, **systems-grade control**, **unique Mako surface** —
+and close the real [pain points of Go and Rust](PAIN_POINTS.md) without cloning either.
 
 ## Quickstart (install + init)
 
@@ -879,30 +943,32 @@ OK — `hold_continue_noll_ok`). Share joins / mid-scope / diverge arms unchange
 
 ---
 
-## 8. Concurrency: crew, kick, join, fan, cancel
+## 8. Concurrency & parallelism (first-class)
 
-Jobs cannot outlive their `crew`.
+**Speed is the game.** Concurrent and parallel work are **language features**,
+not packages — see [SPEED.md](SPEED.md).
+
+Jobs cannot outlive their `crew` (no free-fire leaks, no async coloring).
 
 ```mko
-// examples/concurrency.mko / channels.mko
+// examples/concurrency.mko — task concurrency
 fn main() {
-    let ch = chan_new(4)
     crew t {
-        let p = t.kick(producer(ch, 5))
-        let c = t.kick(consumer(ch))
-        let _ = p.join()
-        print_int(c.join())
+        let a = t.kick(work(7))
+        let b = t.kick(work(9))
+        print(a.join() + b.join())
     }
 }
 ```
 
 ```mko
-// examples/parallel.mko
+// examples/parallel.mko — data parallelism across cores
 fn main() {
     let xs = [1, 2, 3, 4]
-    let ys = fan(xs, |x| x * x)
+    let ys = fan(xs, |x| x * x)           // pipe lambda
+    let zs = fan(xs, fn(x) { x + 1 })     // Mako fn lambda
     for v in ys {
-        print_int(v)
+        print(v)
     }
 }
 ```
@@ -913,6 +979,13 @@ crew t {
     // t.cancel() / t.cancelled()
 }
 ```
+
+| Tool | Role |
+|------|------|
+| `crew` / `kick` / `join` | Structured concurrency |
+| `fan(collection, mapper)` | Data-parallel map (`mako_par_map`) |
+| channels + `select` | Message-passing |
+| `actor` / `receive` | Long-lived concurrent entities |
 
 ---
 
@@ -1777,37 +1850,68 @@ print_int(elapsed_ms(t0))
 
 Regex seed supports literals, `.`, `X*`/`X+`/`X?`, `|`, `[abc]`/`[a-z]`/`[^…]`, `(…)` groups, and `^`/`$`. Groups compose only (no `$1` extraction).
 
-Multi-file modules (merge imports; optional `as` alias namespace):
+### Pulls (Mako packs)
+
+Normal pulls always bind a **pack name** used as a qualifier. That keeps call
+sites clear — with Mako flair (see [IDENTITY.md](IDENTITY.md)).
 
 ```mko
-// examples/import_lib.mko — flat merge
-import "./import_lib.mko"
-print_int(lib_add(2, 3))
+// Default name from `pack lib` in the pulled file (or last path segment)
+pull "./import_lib.mko"
+print(lib.add(2, 3))
 
-// examples/import_as_main.mko — namespaced
-import "./import_ns_lib.mko" as lib
-print_int(lib.add(10, 32))   // calls lib__add
+// Explicit alias
+pull "./import_ns_lib.mko" as lib
 
-// Std packages (resolve under std/; auto-alias)
-import "strings"
-import "sync"
+// Dual still accepted: import … · import lib "path"
+
+// Nested std paths
+pull "strings"
+pull "encoding/json"
+pull "net/http"
 assert(strings.contains("hi", "h"))
-let m = sync.rwmutex()
+print(json.object_str("k", "v"))
 
-// Grouped import (preferred for multiple paths)
+// Large grouped list — blank lines separate std / remote / local (like goimports)
 import (
+    "fmt"
+    "net/http"
     "strings"
-    "path"
-    lib "./import_ns_lib.mko"
-)
-assert(strings.contains("hi", "h"))
-assert_eq_str(path.join_path("a", "b"), "a/b")
 
-// Brace form also accepted
-import { "fmt"; "strings" }
+    "github.com/sirupsen/logrus"
+
+    redisv8 "github.com/go-redis/redis/v8"
+    "izi-iva/pkg/acd"
+)
+
+// Blank — load only, no names
+pull _ "fmt"
+
+// Dot — merge without prefix (specialized; use sparingly)
+pull . "./import_lib.mko"
 ```
 
-`mako fmt` sorts imports and emits a single `import ( … )` block when there are two or more.
+| Form | Meaning |
+|------|---------|
+| `pull "strings"` | Std pack → `strings.*` |
+| `pull "encoding/json"` | Nested std → default name `json` |
+| `pull "path" as lib` | Explicit alias → `lib.*` |
+| `import name "path"` | Dual alias form |
+| `import ( … )` / `pull ( … )` | Grouped list (blank lines ok) |
+| `pull _ "path"` | Blank: dependency only |
+| `pull . "path"` | Dot: no prefix (specialized) |
+
+**Resolution order** for a path like `"izi-iva/pkg/acd"` or `"github.com/…"`:
+
+1. Relative (`./`, `../`, `.mko`)
+2. Std under `std/`
+3. `[dependencies]` key matching the import path
+4. `module = "izi-iva"` in `mako.toml` → strip prefix, resolve under project root
+5. `vendor/<path>/`
+6. `.mako/pkg/<path>/`
+
+See `examples/import_paths/` for a full service-style import block.  
+`mako fmt` groups into `pull ( … )` with blank lines between std / remote / relative.
 
 `mako run prog.mko -- arg1 arg2` forwards args to the program.
 

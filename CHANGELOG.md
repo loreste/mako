@@ -1,5 +1,79 @@
 # Changelog
 
+## 0.1.0 — 2026-07-11 (gap close wave 6)
+
+### Struct channels · tagged errors
+
+- **`chan_open[Point]`** — `MakoChanPtr` heap-box send / unbox recv
+- **`error_tag("NotFound", "user")`** — enum-like string error tags
+- Tests: `chan_struct_test`, `error_tag_test`
+
+### Waves 1–5
+
+- Send-like kick · ShareInt/string pack · atomic share · fan int/float/string ·
+  visibility · error_context/join · bench-gate · lint --identity
+
+---
+
+## 0.1.0 — 2026-07-11 (path-style import blocks)
+
+### Imports — service-scale groups
+
+- Nested std: `"encoding/json"`, `"net/http"`, `"path/filepath"`, …
+- Module paths: `module = "izi-iva"` → `"izi-iva/pkg/acd"`; `vendor/<path>/`; `[dependencies]` keyed by import path
+- Alias form: `redisv9 "github.com/…"` (and `"path" as name`)
+- Blank lines inside `import (` / `pull (` groups
+- Fix: prefix rewrite no longer rewrites params/locals that share fn names (`body`, `path`, …)
+- Fix: `encoding/json`, `errors`, `net/http` importable; seed packs for `crypto/tls`, `os/signal`, `syscall`, `net`
+- Example: `examples/import_paths/` · test: `import_paths_test.mko`
+
+---
+
+## 0.1.0 — 2026-07-11 (low ceremony + pain map + flair)
+
+### Product — real work, less typing
+
+- New [docs/ERGONOMICS.md](docs/ERGONOMICS.md): happy path stays short (infer locals, one `print`, string `==`, `match` routes, opt-in power)
+- Tests: `examples/testing/ergonomics_test.mko`
+- Canonical sample updated: `examples/mako_style.mko`
+- Pillar wired into VISION / IDENTITY / AGENTS / README
+
+### Product — Go/Rust pain → Mako answers
+
+- [docs/PAIN_POINTS.md](docs/PAIN_POINTS.md): honest map of Go/Rust pain vs Mako tools
+- Residuals queued (races, richer errors, NLL, visibility, identity lint)
+- Identity rule unchanged: unique language, unique syntax — not a clone
+
+### Units — Done
+
+- **Preferred flair:** `pack name` · `pull "path"` · `pull "path" as name` · `pull ( … )`
+- Dual: `package` / `import` (all previous forms still parse)
+- Always pack-qualify normal pulls: `pkg.fn(...)` (internal `pkg__fn`)
+- Default name from `pack` clause (≠ `main`), else path basename
+- `mako fmt` emits `pack` / `pull` / `"path" as name`
+- Prefix rewrite splits value vs type names (`fmt.int` safe)
+- Identity: `docs/IDENTITY.md` flair table · **~90%**
+
+---
+
+## 0.1.0 — 2026-07-11 (docs + syntax identity)
+
+### Mako-owned syntax (Done)
+
+- **Preferred** forms are Mako-native: `fn`, `let`, `struct`, `on Type`, `hold`/`share`/`arena`, `crew`/`kick`, `export`, `match`
+- Dual Go-like spellings (`func`, `:=`, `var`, bare `a int`, receivers) remain **compat sugar only**
+- Identity doc + checklist: `docs/IDENTITY.md` (**~86%** identity strength)
+- Dual-form inventory: `docs/GO_SYNTAX_CHECKLIST.md` (optional; not preferred)
+- Canonical sample: `examples/mako_style.mko` · `mako fmt` emits Mako-native spellings
+- Docs re-centered: GUIDE, LANGUAGE, COMPAT, STATUS, book, README, llms.txt
+
+### Language wave 10 (Done)
+
+- User generics monomorphization, `on Type` methods, tuples, typed `chan_open[T]`
+- Compat policy: `docs/COMPAT.md`
+
+---
+
 ## 0.1.0 — 2026-07-10
 
 STATUS north-star / MVP: **100%** (homebrew-core publish remains an external blocker).

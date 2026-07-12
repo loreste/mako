@@ -1,0 +1,43 @@
+// Go-style if-with-init: `if init; cond { … }`.
+// The init runs before the condition and is scoped to the whole if/else.
+
+func classify(n int) int {
+    if v := n * 2; v > 10 {
+        return v
+    } else {
+        return 0
+    }
+}
+
+func TestIfInitShortDecl() {
+    assert_eq(classify(6), 12) // v = 12 > 10
+    assert_eq(classify(3), 0)  // v = 6, else
+}
+
+func TestIfInitSiblingReuse() {
+    // Same init name in sibling ifs must not collide (each is its own scope).
+    var out = 0
+    if x := 5; x > 0 {
+        out = out + x
+    }
+    if x := 7; x > 0 {
+        out = out + x
+    }
+    assert_eq(out, 12)
+}
+
+func TestIfInitLetForm() {
+    if let y = 40 + 2; y > 40 {
+        assert_eq(y, 42)
+    } else {
+        assert(false)
+    }
+}
+
+func TestPlainIfStillWorks() {
+    if 1 + 1 == 2 {
+        assert(true)
+    } else {
+        assert(false)
+    }
+}

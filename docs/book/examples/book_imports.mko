@@ -1,5 +1,5 @@
-// Book sample — grouped imports (ch03 / ch07)
-import (
+// Book sample — grouped pulls (ch03 / ch07)
+pull (
     "strings"
     "path"
 )

@@ -770,27 +770,40 @@ fn main() {
 }
 ```
 
-## Imports
+## Packs & pulls
+
+Normal pulls are always pack-qualified (`pkg.fn(...)`). Default name comes
+from the pulled `pack` clause (if not `main`), else the path basename.
 
 ```mko
-// Single import
-import "strings"
+// Std — always strings.contains(...)
+pull "strings"
 
-// Local file import with alias
-import "./lib.mko" as lib
+// Local file (pack lib → lib.add)
+pull "./lib.mko"
 
-// Multiple imports
-import (
+// Explicit alias
+pull "./other.mko" as helper
+
+// Dual form still works
+import lib "./lib.mko"
+
+// Blank / dot (specialized)
+pull _ "fmt"
+pull . "./helpers.mko"
+
+// Grouped
+pull (
     "path"
     "fmt"
-    x "./other.mko"
+    "./other.mko" as x
 )
 ```
 
-Bare names like `"strings"` resolve to standard library packages under `std/`.
-The `MAKO_STD` environment variable overrides the standard library path.
+Bare path names like `"strings"` resolve under `std/`.
+`MAKO_STD` overrides the standard library root.
 
-`mako fmt` automatically groups two or more imports into parenthesized form.
+`mako fmt` groups two or more pulls and emits `pull` + `"path" as name`.
 
 ## Constants
 

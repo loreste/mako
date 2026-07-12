@@ -1,0 +1,14 @@
+// Historical: ShareInt used to be rejected. Now allowed with auto-clone.
+// Keep file as documentation — redirected to positive test.
+// This file intentionally still typechecks (ShareInt is sendable).
+fn use_share(s: ShareInt) -> int {
+    return share_get(s)
+}
+fn main() {
+    let s = share_int(1)
+    crew t {
+        let j = t.kick(use_share(s))
+        print(j.join())
+    }
+    share_drop(s)
+}

@@ -1,0 +1,51 @@
+// First-class concurrency + parallelism — speed path, structured work.
+
+fn square(n: int) -> int {
+    return n * n
+}
+
+fn TestCrewKickJoin() {
+    crew t {
+        let a = t.kick(square(3))
+        let b = t.kick(square(4))
+        assert_eq(a.join() + b.join(), 25)
+    }
+}
+
+fn TestFanPipeLambda() {
+    let xs = [1, 2, 3, 4]
+    let ys = fan(xs, |x| x * 2)
+    assert_eq(len(ys), 4)
+    assert_eq(ys[0], 2)
+    assert_eq(ys[1], 4)
+    assert_eq(ys[2], 6)
+    assert_eq(ys[3], 8)
+}
+
+fn TestFanFnLambda() {
+    let xs = [10, 20, 30]
+    let ys = fan(xs, fn(x) { x / 10 })
+    assert_eq(ys[0], 1)
+    assert_eq(ys[1], 2)
+    assert_eq(ys[2], 3)
+}
+
+fn TestFanFnReturn() {
+    let xs = [1, 2, 3]
+    let ys = fan(xs, fn(x) { return x * x })
+    assert_eq(ys[0], 1)
+    assert_eq(ys[1], 4)
+    assert_eq(ys[2], 9)
+}
+
+fn TestCrewParallelKicks() {
+    // Task parallelism: many kicks, join all before crew ends
+    crew t {
+        let j1 = t.kick(square(1))
+        let j2 = t.kick(square(2))
+        let j3 = t.kick(square(3))
+        let j4 = t.kick(square(4))
+        let s = j1.join() + j2.join() + j3.join() + j4.join()
+        assert_eq(s, 30)
+    }
+}

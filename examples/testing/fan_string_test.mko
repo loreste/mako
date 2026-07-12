@@ -1,0 +1,24 @@
+// fan on []string — parallel map (clones elements).
+
+fn TestFanStringId() {
+    let xs = ["a", "b", "c"]
+    let ys = fan(xs, |x| x)
+    assert_eq(len(ys), 3)
+    assert_eq_str(ys[0], "a")
+    assert_eq_str(ys[1], "b")
+    assert_eq_str(ys[2], "c")
+}
+
+fn TestFanStringConcat() {
+    let xs = ["hi", "yo"]
+    let ys = fan(xs, |x| x + "!")
+    assert_eq_str(ys[0], "hi!")
+    assert_eq_str(ys[1], "yo!")
+}
+
+fn TestFanStringFn() {
+    let xs = ["m", "k"]
+    let ys = fan(xs, fn(x) { x + "ako" })
+    assert_eq_str(ys[0], "mako")
+    assert_eq_str(ys[1], "kako")
+}

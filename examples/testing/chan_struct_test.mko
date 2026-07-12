@@ -1,0 +1,27 @@
+// Struct channels — heap-box send, unbox on recv (MakoChanPtr).
+
+struct Point {
+    x: int
+    y: int
+}
+
+fn TestChanStructRoundtrip() {
+    let ch = chan_open[Point](2)
+    let p = Point { x: 3, y: 4 }
+    let _ = ch.send(p)
+    let q = ch.recv()
+    assert_eq(q.x, 3)
+    assert_eq(q.y, 4)
+    ch.close()
+}
+
+fn TestChanStructTwo() {
+    let ch = chan_open[Point](4)
+    let _ = ch.send(Point { x: 1, y: 2 })
+    let _ = ch.send(Point { x: 5, y: 6 })
+    let a = ch.recv()
+    let b = ch.recv()
+    assert_eq(a.x + b.x, 6)
+    assert_eq(a.y + b.y, 8)
+    ch.close()
+}

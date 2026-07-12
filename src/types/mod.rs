@@ -89,6 +89,8 @@ pub enum Type {
     WaitGroup,
     /// RFC 4122 UUID (16 bytes)
     Uuid,
+    /// Product type `(T, U, …)`
+    Tuple(Vec<Type>),
 }
 
 impl Type {
@@ -138,6 +140,38 @@ impl Type {
             Type::SqlDB => "SqlDB".into(),
             Type::WaitGroup => "WaitGroup".into(),
             Type::Uuid => "Uuid".into(),
+            Type::Tuple(elems) => {
+                let e: Vec<_> = elems.iter().map(|t| t.display()).collect();
+                format!("({})", e.join(", "))
+            }
+        }
+    }
+
+    /// Stable monomorphization tag for a concrete type (used in specialized fn names).
+    pub fn mono_tag(&self) -> String {
+        match self {
+            Type::Int => "int".into(),
+            Type::Int64 => "int64".into(),
+            Type::Int32 => "int32".into(),
+            Type::Int8 => "int8".into(),
+            Type::UInt64 => "uint64".into(),
+            Type::Byte => "byte".into(),
+            Type::Float => "float".into(),
+            Type::Bool => "bool".into(),
+            Type::String => "string".into(),
+            Type::Void => "void".into(),
+            Type::Array(t) => format!("arr_{}", t.mono_tag()),
+            Type::Chan(t) => format!("chan_{}", t.mono_tag()),
+            Type::Named(n) => n.clone(),
+            Type::Tuple(elems) => {
+                let e: Vec<_> = elems.iter().map(|t| t.mono_tag()).collect();
+                format!("tup_{}", e.join("_"))
+            }
+            other => other
+                .display()
+                .chars()
+                .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+                .collect(),
         }
     }
 }
@@ -235,6 +269,18 @@ pub struct TypeChecker {
     pub systems_crate: bool,
     /// Optional GC enabled for this compile (never weakens systems crates).
     pub gc_enabled: bool,
+    /// `visibility = "explicit"` — non-exported items stay package-private (seed).
+    pub explicit_visibility: bool,
+    /// Keep bounds checks even in release (`[profile.release] bounds_checks = "on"`).
+    pub bounds_checks_always: bool,
+    /// Generic function templates: `fn id[T](x: T) -> T`
+    generic_fns: HashMap<String, FnDef>,
+    /// Active type parameters while checking a generic template body.
+    active_type_params: HashSet<String>,
+    /// Specialized monomorphizations produced during typecheck (for codegen).
+    pub mono_fns: Vec<FnDef>,
+    /// mono name already generated
+    mono_generated: HashSet<String>,
 }
 
 impl TypeChecker {
@@ -335,6 +381,35 @@ impl TypeChecker {
                     Type::Result(Box::new(Type::Int), Box::new(Type::String)),
                     Type::String,
                 ],
+                Box::new(Type::Result(Box::new(Type::Int), Box::new(Type::String))),
+            ),
+        );
+        // Prefer this name in docs — richer error context seed
+        fns.insert(
+            "error_context".into(),
+            Type::Fn(
+                vec![
+                    Type::Result(Box::new(Type::Int), Box::new(Type::String)),
+                    Type::String,
+                ],
+                Box::new(Type::Result(Box::new(Type::Int), Box::new(Type::String))),
+            ),
+        );
+        fns.insert(
+            "error_join".into(),
+            Type::Fn(
+                vec![
+                    Type::Result(Box::new(Type::Int), Box::new(Type::String)),
+                    Type::Result(Box::new(Type::Int), Box::new(Type::String)),
+                ],
+                Box::new(Type::Result(Box::new(Type::Int), Box::new(Type::String))),
+            ),
+        );
+        // error_tag("NotFound", "user") → Err("NotFound: user") — enum-like string tags
+        fns.insert(
+            "error_tag".into(),
+            Type::Fn(
+                vec![Type::String, Type::String],
                 Box::new(Type::Result(Box::new(Type::Int), Box::new(Type::String))),
             ),
         );
@@ -2958,6 +3033,13 @@ impl TypeChecker {
             Type::Fn(vec![Type::Int], Box::new(Type::Named("ShareInt".into()))),
         );
         fns.insert(
+            "share_set".into(),
+            Type::Fn(
+                vec![Type::Named("ShareInt".into()), Type::Int],
+                Box::new(Type::Void),
+            ),
+        );
+        fns.insert(
             "share_clone".into(),
             Type::Fn(
                 vec![Type::Named("ShareInt".into())],
@@ -5421,6 +5503,11 @@ impl TypeChecker {
             "chan_select_value".into(),
             Type::Fn(vec![], Box::new(Type::Int)),
         );
+        // share_of: Mako-native alias for share_int (extensible later)
+        fns.insert(
+            "share_of".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Named("ShareInt".into()))),
+        );
         Self {
             types: HashMap::new(),
             fns,
@@ -5444,6 +5531,12 @@ impl TypeChecker {
             unsafe_depth: 0,
             systems_crate: false,
             gc_enabled: false,
+            explicit_visibility: false,
+            bounds_checks_always: false,
+            generic_fns: HashMap::new(),
+            active_type_params: HashSet::new(),
+            mono_fns: Vec::new(),
+            mono_generated: HashSet::new(),
         }
     }
 
@@ -5532,14 +5625,25 @@ impl TypeChecker {
         match stmt {
             Stmt::Return(_) | Stmt::Break(_) | Stmt::Continue(_) => true,
             Stmt::If {
+                init: _,
+                cond,
                 then_block,
                 else_block,
-                ..
             } => {
-                let then_d = block_always_diverges(then_block);
-                match else_block {
-                    Some(eb) => then_d && block_always_diverges(eb),
-                    None => false,
+                // A constant-condition `if` only takes one arm — keeps the
+                // `if init; cond` desugar's `if true { … }` scope transparent.
+                match const_bool(cond) {
+                    Some(true) => block_always_diverges(then_block),
+                    Some(false) => {
+                        else_block.as_ref().map(block_always_diverges).unwrap_or(false)
+                    }
+                    None => {
+                        let then_d = block_always_diverges(then_block);
+                        match else_block {
+                            Some(eb) => then_d && block_always_diverges(eb),
+                            None => false,
+                        }
+                    }
                 }
             }
             _ => false,
@@ -5593,21 +5697,28 @@ impl TypeChecker {
                     );
                 }
                 Item::Fn(f) => {
-                    let params: Result<Vec<_>, _> =
-                        f.params.iter().map(|p| self.resolve_type(&p.ty)).collect();
-                    let ret = f
-                        .ret
-                        .as_ref()
-                        .map(|t| self.resolve_type(t))
-                        .transpose()?
-                        .unwrap_or(Type::Void);
-                    self.fn_mut_params
-                        .insert(f.name.clone(), f.params.iter().map(|p| p.mutable).collect());
-                    self.fns
-                        .insert(f.name.clone(), Type::Fn(params?, Box::new(ret)));
+                    if !f.type_params.is_empty() {
+                        // Generic template — monomorphized on call.
+                        self.generic_fns.insert(f.name.clone(), f.clone());
+                        self.fn_mut_params
+                            .insert(f.name.clone(), f.params.iter().map(|p| p.mutable).collect());
+                    } else {
+                        let params: Result<Vec<_>, _> =
+                            f.params.iter().map(|p| self.resolve_type(&p.ty)).collect();
+                        let ret = f
+                            .ret
+                            .as_ref()
+                            .map(|t| self.resolve_type(t))
+                            .transpose()?
+                            .unwrap_or(Type::Void);
+                        self.fn_mut_params
+                            .insert(f.name.clone(), f.params.iter().map(|p| p.mutable).collect());
+                        self.fns
+                            .insert(f.name.clone(), Type::Fn(params?, Box::new(ret)));
+                    }
                 }
-                Item::Actor(_) => {
-                    // Desugared before typecheck; if still present, ignore.
+                Item::Actor(_) | Item::On(_) | Item::Package { .. } => {
+                    // Desugared / informational; ignore.
                 }
                 Item::Interface(iface) => {
                     // Validate method type expressions; presence checked after fns collected.
@@ -5643,10 +5754,12 @@ impl TypeChecker {
             }
         }
 
-        // Second pass: check bodies
+        // Second pass: check bodies (skip generic templates — specialized on call)
         for item in &program.items {
             if let Item::Fn(f) = item {
-                self.check_fn(f)?;
+                if f.type_params.is_empty() {
+                    self.check_fn(f)?;
+                }
             }
         }
 
@@ -5739,6 +5852,31 @@ impl TypeChecker {
     }
 
     fn resolve_type(&self, t: &TypeExpr) -> Result<Type, TypeError> {
+        self.resolve_type_with(t, &self.active_type_params)
+    }
+
+    fn resolve_type_with(
+        &self,
+        t: &TypeExpr,
+        type_params: &HashSet<String>,
+    ) -> Result<Type, TypeError> {
+        match t {
+            TypeExpr::Tuple(elems) => {
+                let mut out = Vec::new();
+                for e in elems {
+                    out.push(self.resolve_type_with(e, type_params)?);
+                }
+                return Ok(Type::Tuple(out));
+            }
+            TypeExpr::Named(n) if type_params.contains(n) => {
+                return Ok(Type::Named(n.clone()));
+            }
+            _ => {}
+        }
+        self.resolve_type_inner(t)
+    }
+
+    fn resolve_type_inner(&self, t: &TypeExpr) -> Result<Type, TypeError> {
         match t {
             TypeExpr::Named(n) => match n.as_str() {
                 "int" => Ok(Type::Int),
@@ -5856,6 +5994,14 @@ impl TypeChecker {
                     params.iter().map(|p| self.resolve_type(p)).collect();
                 Ok(Type::Fn(params?, Box::new(self.resolve_type(ret)?)))
             }
+            TypeExpr::Tuple(elems) => {
+                // Handled in resolve_type_with; keep arm for exhaustiveness.
+                let mut out = Vec::new();
+                for e in elems {
+                    out.push(self.resolve_type(e)?);
+                }
+                Ok(Type::Tuple(out))
+            }
         }
     }
 
@@ -5922,7 +6068,12 @@ impl TypeChecker {
         }
         let stmts = &f.body.stmts;
         let ret_void = self.current_ret == Type::Void;
-        let has_explicit_return = stmts.iter().any(|s| matches!(s, Stmt::Return(_)));
+        // A non-void function is satisfied by a top-level `return`, a trailing
+        // expression, or a body that provably returns on every path (e.g. an
+        // `if cond { return a } else { return b }` with no fall-through) — the
+        // last matching Go's rule and making `if init; cond { … }` bodies usable.
+        let has_explicit_return = stmts.iter().any(|s| matches!(s, Stmt::Return(_)))
+            || nll::stmts_always_diverges(stmts);
         let trailing =
             !ret_void && !has_explicit_return && matches!(stmts.last(), Some(Stmt::Expr(_)));
 
@@ -6020,6 +6171,7 @@ impl TypeChecker {
     fn stmt_mentions(stmt: &Stmt, name: &str) -> bool {
         match stmt {
             Stmt::Let { init, .. } => Self::expr_mentions(init, name),
+            Stmt::LetMulti { init, .. } => Self::expr_mentions(init, name),
             Stmt::LetCommaOk { base, index, .. } => {
                 Self::expr_mentions(base, name) || Self::expr_mentions(index, name)
             }
@@ -6035,11 +6187,15 @@ impl TypeChecker {
             Stmt::Expr(e) | Stmt::Return(Some(e)) => Self::expr_mentions(e, name),
             Stmt::Return(None) | Stmt::Break(_) | Stmt::Continue(_) => false,
             Stmt::If {
+                init,
                 cond,
                 then_block,
                 else_block,
             } => {
-                Self::expr_mentions(cond, name)
+                init.as_ref()
+                    .map(|s| Self::stmt_mentions(s, name))
+                    .unwrap_or(false)
+                    || Self::expr_mentions(cond, name)
                     || then_block
                         .stmts
                         .iter()
@@ -6120,8 +6276,13 @@ impl TypeChecker {
                         .unwrap_or(false)
             }
             Expr::Array(elems) => elems.iter().any(|e| Self::expr_mentions(e, name)),
+            Expr::Tuple(elems) => elems.iter().any(|e| Self::expr_mentions(e, name)),
+            Expr::ChanOpen { cap, .. } => Self::expr_mentions(cap, name),
             Expr::StructLit { fields, .. } => {
                 fields.iter().any(|(_, e)| Self::expr_mentions(e, name))
+            }
+            Expr::StructLitPos { values, .. } => {
+                values.iter().any(|e| Self::expr_mentions(e, name))
             }
             Expr::Block(b) => b.stmts.iter().any(|s| Self::stmt_mentions(s, name)),
             Expr::Lambda { body, .. } => Self::expr_mentions(body, name),
@@ -6243,6 +6404,53 @@ impl TypeChecker {
                                 }
                             }
                         }
+                    }
+                }
+                Ok(())
+            }
+            Stmt::LetMulti {
+                names,
+                mutable,
+                init,
+            } => {
+                // Go multi-return: `a, b := f()` (declare) or `a, b = f()` (assign existing)
+                let t = self.check_expr(init)?;
+                let Type::Tuple(elems) = t else {
+                    return Err(TypeError::new(format!(
+                        "multi-name binding needs a tuple value, got {}",
+                        t.display()
+                    ))
+                    .hint("return (a, b) from the function, Go-style"));
+                };
+                if elems.len() != names.len() {
+                    return Err(TypeError::new(format!(
+                        "multi-name binding: {} names but tuple has {} elements",
+                        names.len(),
+                        elems.len()
+                    )));
+                }
+                for (n, et) in names.iter().zip(elems.iter()) {
+                    if n == "_" {
+                        continue;
+                    }
+                    if let Some((existing, is_mut)) = self.lookup(n).cloned() {
+                        // Reassignment path (`a, b = f()`)
+                        if !is_mut {
+                            return Err(TypeError::new(format!(
+                                "cannot assign to immutable `{n}`"
+                            ))
+                            .hint("use `var {n}` / `let mut {n}` or `:=` on first declaration"));
+                        }
+                        if !self.compatible(et, &existing) {
+                            return Err(TypeError::new(format!(
+                                "cannot assign {} to `{n}` (type {})",
+                                et.display(),
+                                existing.display()
+                            )));
+                        }
+                    } else {
+                        // Fresh binding (`a, b := f()` or `let a, b = …`)
+                        self.define(n, et.clone(), *mutable);
                     }
                 }
                 Ok(())
@@ -6485,10 +6693,18 @@ impl TypeChecker {
                 Ok(())
             }
             Stmt::If {
+                init,
                 cond,
                 then_block,
                 else_block,
             } => {
+                // Go-style init (`if x := f(); cond`): check it in a fresh scope so
+                // the binding is visible to cond/arms but not after the if.
+                let has_init = init.is_some();
+                if let Some(init) = init {
+                    self.push_scope();
+                    self.check_stmt(init)?;
+                }
                 let ct = self.check_expr(cond)?;
                 if ct != Type::Bool {
                     return Err(TypeError::new("if condition must be bool"));
@@ -6712,6 +6928,9 @@ impl TypeChecker {
                     self.share_vars = joined_vars;
                     self.share_sources = joined_sources;
                     self.share_scope_depth = joined_depth;
+                }
+                if has_init {
+                    self.pop_scope();
                 }
                 Ok(())
             }
@@ -7234,15 +7453,82 @@ impl TypeChecker {
                     _ => Err(TypeError::new("invalid unary operand")),
                 }
             }
+            Expr::Tuple(elems) => {
+                if elems.len() < 2 {
+                    return Err(TypeError::new("tuple needs at least 2 elements"));
+                }
+                let mut tys = Vec::new();
+                for e in elems {
+                    tys.push(self.check_expr(e)?);
+                }
+                Ok(Type::Tuple(tys))
+            }
+            Expr::ChanOpen { elem, cap } => {
+                let cap_t = self.check_expr(cap)?;
+                if cap_t != Type::Int {
+                    return Err(TypeError::new("chan_open capacity must be int")
+                        .hint("use chan_open[T](n) where n is int"));
+                }
+                let et = self.resolve_type(elem)?;
+                match &et {
+                    // int family + bool → int ring; string → str ring; named structs → ptr ring
+                    Type::Int
+                    | Type::Int64
+                    | Type::Int32
+                    | Type::Int8
+                    | Type::Byte
+                    | Type::Bool
+                    | Type::String => Ok(Type::Chan(Box::new(et))),
+                    Type::Named(n)
+                        if n != "ShareInt"
+                            && n != "Arena"
+                            && n != "Crew"
+                            && self.structs_named(n) =>
+                    {
+                        Ok(Type::Chan(Box::new(et)))
+                    }
+                    Type::Struct { .. } => Ok(Type::Chan(Box::new(et))),
+                    other => Err(TypeError::new(format!(
+                        "chan_open supports int family, bool, string, and named structs, got {}",
+                        other.display()
+                    ))
+                    .hint("chan_new(n) remains the int channel API (backward compatible)")),
+                }
+            }
             Expr::Call { callee, args } => {
                 if let Expr::Ident(name) = callee.as_ref() {
+                    // User-defined generic: monomorphize on call
+                    if self.generic_fns.contains_key(name) {
+                        return self.check_generic_call(name, args);
+                    }
                     match name.as_str() {
                         "Ok" if args.len() == 1 => {
                             let t = self.check_expr(&args[0])?;
+                            // Prefer expected return shape when checking a Result-returning fn
+                            if let Type::Result(ok, err) = &self.current_ret {
+                                if !self.compatible(&t, ok) {
+                                    return Err(TypeError::new(format!(
+                                        "Ok(...) type mismatch: expected {}, got {}",
+                                        ok.display(),
+                                        t.display()
+                                    )));
+                                }
+                                return Ok(Type::Result(ok.clone(), err.clone()));
+                            }
                             return Ok(Type::Result(Box::new(t), Box::new(Type::String)));
                         }
                         "Err" if args.len() == 1 => {
                             let e = self.check_expr(&args[0])?;
+                            if let Type::Result(ok, err) = &self.current_ret {
+                                if !self.compatible(&e, err) {
+                                    return Err(TypeError::new(format!(
+                                        "Err(...) type mismatch: expected {}, got {}",
+                                        err.display(),
+                                        e.display()
+                                    )));
+                                }
+                                return Ok(Type::Result(ok.clone(), err.clone()));
+                            }
                             return Ok(Type::Result(Box::new(Type::Int), Box::new(e)));
                         }
                         "error" if args.len() == 1 => {
@@ -7252,14 +7538,15 @@ impl TypeChecker {
                             }
                             return Ok(Type::Result(Box::new(Type::Int), Box::new(Type::String)));
                         }
-                        "wrap_err" if args.len() == 2 => {
+                        // error_context(r, msg) — richer error seed (alias of wrap_err)
+                        "error_context" | "wrap_err" if args.len() == 2 => {
                             let r = self.check_expr(&args[0])?;
                             let msg = self.check_expr(&args[1])?;
                             match &r {
                                 Type::Result(_, e) if **e == Type::String => {
                                     if msg != Type::String {
                                         return Err(TypeError::new(
-                                            "wrap_err prefix must be string",
+                                            "wrap_err / error_context prefix must be string",
                                         ));
                                     }
                                     return Ok(r);
@@ -7281,6 +7568,41 @@ impl TypeChecker {
                                 ));
                             }
                             return Ok(Type::Result(Box::new(Type::Int), Box::new(Type::String)));
+                        }
+                        // error_join(a, b): if either Err, return Err with both messages; else Ok(a)
+                        "error_join" if args.len() == 2 => {
+                            let a = self.check_expr(&args[0])?;
+                            let b = self.check_expr(&args[1])?;
+                            match (&a, &b) {
+                                (Type::Result(_, e1), Type::Result(_, e2))
+                                    if **e1 == Type::String && **e2 == Type::String =>
+                                {
+                                    return Ok(a);
+                                }
+                                _ => {
+                                    return Err(TypeError::new(
+                                        "error_join expects two Result[_, string] values",
+                                    ));
+                                }
+                            }
+                        }
+                        "error_tag" if args.len() == 2 => {
+                            let tag = self.check_expr(&args[0])?;
+                            let msg = self.check_expr(&args[1])?;
+                            if tag != Type::String || msg != Type::String {
+                                return Err(TypeError::new(
+                                    "error_tag(tag, msg) expects two strings",
+                                ));
+                            }
+                            if let Type::Result(ok, err) = &self.current_ret {
+                                if **err == Type::String {
+                                    return Ok(Type::Result(ok.clone(), err.clone()));
+                                }
+                            }
+                            return Ok(Type::Result(
+                                Box::new(Type::Int),
+                                Box::new(Type::String),
+                            ));
                         }
                         "error_is" if args.len() == 2 => {
                             let r = self.check_expr(&args[0])?;
@@ -7892,9 +8214,15 @@ impl TypeChecker {
                         Ok(self.resolve_type(ret)?)
                     }
                     (other, m) => {
-                        // Enum associated method: `Shape_area(self, ...)` → `s.area(...)`
-                        if let Type::Enum { name: ename, .. } = other {
-                            let key = format!("{ename}_{m}");
+                        // Struct / enum associated method: `Point_distance(self, …)` → `p.distance(…)`
+                        // Also covers `on Point { fn distance(self) … }` desugar.
+                        let type_name = match other {
+                            Type::Enum { name, .. } | Type::Struct { name, .. } => Some(name.as_str()),
+                            Type::Named(n) if self.types.contains_key(n) => Some(n.as_str()),
+                            _ => None,
+                        };
+                        if let Some(tname) = type_name {
+                            let key = format!("{tname}_{m}");
                             if let Some(Type::Fn(fp, fr)) = self.fns.get(&key).cloned() {
                                 let has_self =
                                     !fp.is_empty() && self.types_equal_iface_self(&fp[0], other);
@@ -7905,7 +8233,7 @@ impl TypeChecker {
                                 };
                                 if arg_tys.len() != arg_expected.len() {
                                     return Err(TypeError::new(format!(
-                                        "enum method `{ename}.{m}` expects {} args, got {}",
+                                        "method `{tname}.{m}` expects {} args, got {}",
                                         arg_expected.len(),
                                         arg_tys.len()
                                     )));
@@ -7915,7 +8243,7 @@ impl TypeChecker {
                                 {
                                     if !self.compatible(at, exp) {
                                         return Err(TypeError::new(format!(
-                                            "enum method `{ename}.{m}` arg {i}: expected {}, got {}",
+                                            "method `{tname}.{m}` arg {i}: expected {}, got {}",
                                             exp.display(),
                                             at.display()
                                         )));
@@ -8196,6 +8524,49 @@ impl TypeChecker {
                     fields: decl,
                 })
             }
+            Expr::StructLitPos { name, values } => {
+                let Some(Type::Struct {
+                    name: sname,
+                    fields: decl,
+                }) = self.types.get(name).cloned()
+                else {
+                    return Err(TypeError::new(format!("unknown struct `{name}`")));
+                };
+                // `Point{}` is the zero value (all fields default), like Go.
+                // Otherwise every field must be given, in order.
+                if !values.is_empty() && values.len() != decl.len() {
+                    return Err(TypeError::new(format!(
+                        "struct `{sname}` expects {} positional field(s), got {}",
+                        decl.len(),
+                        values.len()
+                    )));
+                }
+                for (vexpr, (fname, expected)) in values.iter().zip(decl.iter()) {
+                    let got = if matches!(vexpr, Expr::Int(_)) && is_literal_int_kind(expected) {
+                        expected.clone()
+                    } else if matches!(vexpr, Expr::String(_)) && *expected == Type::String {
+                        Type::String
+                    } else if matches!(vexpr, Expr::Float(_)) && *expected == Type::Float {
+                        Type::Float
+                    } else if matches!(vexpr, Expr::Bool(_)) && *expected == Type::Bool {
+                        Type::Bool
+                    } else {
+                        self.check_expr(vexpr)?
+                    };
+                    if !self.compatible(&got, expected) {
+                        return Err(TypeError::new(format!(
+                            "struct `{sname}` field `{fname}` (position {}): expected {}, got {}",
+                            decl.iter().position(|(n, _)| n == fname).unwrap_or(0) + 1,
+                            expected.display(),
+                            got.display()
+                        )));
+                    }
+                }
+                Ok(Type::Struct {
+                    name: sname,
+                    fields: decl,
+                })
+            }
             Expr::Array(elems) => {
                 if elems.is_empty() {
                     return Ok(Type::Array(Box::new(Type::Int)));
@@ -8238,6 +8609,34 @@ impl TypeChecker {
             Expr::Make { ty, len, cap } => {
                 let target = self.resolve_type(ty)?;
                 match target {
+                    Type::Chan(elem) => {
+                        // make(chan[T], cap) — additive typed open (int/string)
+                        let Some(l) = len else {
+                            return Err(TypeError::new(
+                                "make(chan[T]) needs capacity: make(chan[int], n)",
+                            ));
+                        };
+                        let lt = if matches!(l.as_ref(), Expr::Int(_)) {
+                            Type::Int
+                        } else {
+                            self.check_expr(l)?
+                        };
+                        if lt != Type::Int {
+                            return Err(TypeError::new("make(chan[T]) capacity must be int"));
+                        }
+                        if cap.is_some() {
+                            return Err(TypeError::new(
+                                "make(chan[T], n) takes one capacity argument",
+                            ));
+                        }
+                        match elem.as_ref() {
+                            Type::Int | Type::String => Ok(Type::Chan(elem)),
+                            other => Err(TypeError::new(format!(
+                                "make(chan[T]) supports int and string, got {}",
+                                other.display()
+                            ))),
+                        }
+                    }
                     Type::Map(k, v) => {
                         if let Some(l) = len {
                             let lt = if matches!(l.as_ref(), Expr::Int(_)) {
@@ -8308,7 +8707,22 @@ impl TypeChecker {
                 for p in params {
                     self.define(p, Type::Int, false); // inferred as int for v0.1
                 }
-                let ret = self.check_expr(body)?;
+                // `fn(x) { x * 2 }` / `fn(x) { return x * 2 }` — block last value is ret type
+                let ret = match body.as_ref() {
+                    Expr::Block(b) => {
+                        let mut last = Type::Void;
+                        for stmt in &b.stmts {
+                            match stmt {
+                                Stmt::Return(Some(e)) | Stmt::Expr(e) => {
+                                    last = self.check_expr(e)?;
+                                }
+                                other => self.check_stmt(other)?,
+                            }
+                        }
+                        last
+                    }
+                    other => self.check_expr(other)?,
+                };
                 self.pop_scope();
                 Ok(Type::Fn(
                     params.iter().map(|_| Type::Int).collect(),
@@ -8458,6 +8872,8 @@ impl TypeChecker {
                     return Err(TypeError::new(format!("`{crew}` is not a crew")));
                 }
                 let t = self.check_expr(expr)?;
+                // Send-like seed after typecheck (no second check_expr — avoids double hold moves).
+                self.assert_kick_sendable(expr)?;
                 Ok(Type::Job(Box::new(t)))
             }
             Expr::Join(inner) => {
@@ -8472,7 +8888,6 @@ impl TypeChecker {
             }
             Expr::Fan { collection, mapper } => {
                 let ct = self.check_expr(collection)?;
-                let mt = self.check_expr(mapper)?;
                 let elem = match ct {
                     Type::Array(e) => *e,
                     other => {
@@ -8482,18 +8897,86 @@ impl TypeChecker {
                         )))
                     }
                 };
-                match mt {
-                    Type::Fn(params, ret) => {
-                        if params.len() != 1 || !self.compatible(&elem, &params[0]) {
-                            return Err(TypeError::new("fan lambda arity/type mismatch"));
-                        }
-                        Ok(Type::Array(ret))
-                    }
-                    other => Err(TypeError::new(format!(
-                        "fan needs function, got {}",
-                        other.display()
-                    ))),
+                // Codegen: int family, float, string parallel maps (speed path).
+                if !matches!(
+                    elem,
+                    Type::Int
+                        | Type::Int64
+                        | Type::Int32
+                        | Type::Int8
+                        | Type::Byte
+                        | Type::Bool
+                        | Type::Float
+                        | Type::String
+                ) {
+                    return Err(TypeError::new(format!(
+                        "fan supports []int, []float, and []string today, got []{}",
+                        elem.display()
+                    ))
+                    .hint("struct fan is not yet implemented — map in a loop or use fan on fields"));
                 }
+                // Type mapper with param type = element type (not always int).
+                let ret = match mapper.as_ref() {
+                    Expr::Lambda { params, body } => {
+                        if params.len() != 1 {
+                            return Err(TypeError::new("fan lambda needs exactly one parameter"));
+                        }
+                        self.push_scope();
+                        self.define(&params[0], elem.clone(), false);
+                        let r = match body.as_ref() {
+                            Expr::Block(b) => {
+                                let mut last = Type::Void;
+                                for stmt in &b.stmts {
+                                    match stmt {
+                                        Stmt::Return(Some(e)) | Stmt::Expr(e) => {
+                                            last = self.check_expr(e)?;
+                                        }
+                                        other => self.check_stmt(other)?,
+                                    }
+                                }
+                                last
+                            }
+                            other => self.check_expr(other)?,
+                        };
+                        self.pop_scope();
+                        r
+                    }
+                    _ => {
+                        let mt = self.check_expr(mapper)?;
+                        match mt {
+                            Type::Fn(params, ret) => {
+                                if params.len() != 1 || !self.compatible(&elem, &params[0]) {
+                                    return Err(TypeError::new("fan mapper arity/type mismatch"));
+                                }
+                                *ret
+                            }
+                            other => {
+                                return Err(TypeError::new(format!(
+                                    "fan needs function, got {}",
+                                    other.display()
+                                )))
+                            }
+                        }
+                    }
+                };
+                if matches!(elem, Type::Float) && !matches!(ret, Type::Float) {
+                    return Err(TypeError::new(
+                        "fan on []float expects a float→float mapper",
+                    ));
+                }
+                if matches!(elem, Type::String) && !matches!(ret, Type::String) {
+                    return Err(TypeError::new(
+                        "fan on []string expects a string→string mapper",
+                    ));
+                }
+                if matches!(elem, Type::Int | Type::Int64 | Type::Int32 | Type::Int8 | Type::Byte | Type::Bool)
+                    && matches!(ret, Type::Float | Type::String)
+                {
+                    return Err(TypeError::new(
+                        "fan on []int expects an int→int mapper",
+                    ));
+                }
+                Ok(Type::Array(Box::new(ret)))
             }
         }
     }
@@ -8512,10 +8995,154 @@ impl TypeChecker {
             (Type::Result(a1, _), Type::Result(a2, _)) => self.compatible(a1, a2),
             (Type::Job(a), Type::Job(b)) => self.compatible(a, b),
             (Type::Chan(a), Type::Chan(b)) => self.compatible(a, b),
+            (Type::Tuple(a), Type::Tuple(b)) if a.len() == b.len() => a
+                .iter()
+                .zip(b.iter())
+                .all(|(x, y)| self.compatible(x, y)),
             (Type::Enum { name: a, .. }, Type::Enum { name: b, .. }) if a == b => true,
             (Type::Interface { name: a }, Type::Interface { name: b }) if a == b => true,
             (got, Type::Interface { name: iname }) => self.implements_iface(got, iname),
+            // Struct/enum name aliases (existing)
+            (Type::Struct { name: a, .. }, Type::Named(b)) => a == b,
+            (Type::Named(a), Type::Struct { name: b, .. }) => a == b,
+            (Type::Enum { name: a, .. }, Type::Named(b)) => a == b,
+            (Type::Named(a), Type::Enum { name: b, .. }) => a == b,
             _ => false,
+        }
+    }
+
+    /// Infer type args and monomorphize a generic function call.
+    fn check_generic_call(&mut self, name: &str, args: &[Expr]) -> Result<Type, TypeError> {
+        let template = self
+            .generic_fns
+            .get(name)
+            .cloned()
+            .ok_or_else(|| TypeError::new(format!("unknown generic function `{name}`")))?;
+        if args.len() != template.params.len() {
+            return Err(TypeError::new(format!(
+                "generic `{name}` expects {} args, got {}",
+                template.params.len(),
+                args.len()
+            )));
+        }
+        let mut arg_tys = Vec::new();
+        for a in args {
+            arg_tys.push(self.check_expr(a)?);
+        }
+        let mut subst: HashMap<String, Type> = HashMap::new();
+        let tp_set: HashSet<String> = template.type_params.iter().cloned().collect();
+        for (param, aty) in template.params.iter().zip(arg_tys.iter()) {
+            let pty = self.resolve_type_with(&param.ty, &tp_set)?;
+            self.unify_generic(&pty, aty, &tp_set, &mut subst)?;
+        }
+        // All type params must be inferred
+        for tp in &template.type_params {
+            if !subst.contains_key(tp) {
+                return Err(TypeError::new(format!(
+                    "cannot infer type parameter `{tp}` for `{name}`"
+                ))
+                .hint("pass arguments that determine T, or use a concrete helper"));
+            }
+        }
+        let mono_name = {
+            let tags: Vec<String> = template
+                .type_params
+                .iter()
+                .map(|tp| subst[tp].mono_tag())
+                .collect();
+            format!("{name}__{}", tags.join("__"))
+        };
+        let ret_te = template.ret.clone().unwrap_or(TypeExpr::Named("void".into()));
+        let ret_ty = {
+            let subst_te = subst_type_expr(&ret_te, &subst);
+            self.resolve_type(&subst_te)?
+        };
+        if !self.mono_generated.contains(&mono_name) {
+            let mono = specialize_fn(&template, &mono_name, &subst);
+            // Register signature before checking body (recursion / mutual)
+            let params: Result<Vec<_>, _> = mono
+                .params
+                .iter()
+                .map(|p| self.resolve_type(&p.ty))
+                .collect();
+            self.fn_mut_params.insert(
+                mono_name.clone(),
+                mono.params.iter().map(|p| p.mutable).collect(),
+            );
+            self.fns
+                .insert(mono_name.clone(), Type::Fn(params?, Box::new(ret_ty.clone())));
+            self.mono_generated.insert(mono_name.clone());
+            self.mono_fns.push(mono.clone());
+            self.check_fn(&mono)?;
+        }
+        // Mark call target for codegen: store mapping original→mono via mono_fns only;
+        // codegen monomorphizes by the same naming scheme.
+        let _ = mono_name;
+        Ok(ret_ty)
+    }
+
+    fn unify_generic(
+        &self,
+        pattern: &Type,
+        concrete: &Type,
+        type_params: &HashSet<String>,
+        subst: &mut HashMap<String, Type>,
+    ) -> Result<(), TypeError> {
+        match pattern {
+            Type::Named(n) if type_params.contains(n) => {
+                if let Some(prev) = subst.get(n) {
+                    if !self.compatible(concrete, prev) {
+                        return Err(TypeError::new(format!(
+                            "type parameter `{n}` cannot be both {} and {}",
+                            prev.display(),
+                            concrete.display()
+                        )));
+                    }
+                } else {
+                    subst.insert(n.clone(), concrete.clone());
+                }
+                Ok(())
+            }
+            Type::Array(a) => match concrete {
+                Type::Array(b) => self.unify_generic(a, b, type_params, subst),
+                _ => Err(TypeError::new(format!(
+                    "expected {}, got {}",
+                    pattern.display(),
+                    concrete.display()
+                ))),
+            },
+            Type::Chan(a) => match concrete {
+                Type::Chan(b) => self.unify_generic(a, b, type_params, subst),
+                _ => Err(TypeError::new(format!(
+                    "expected {}, got {}",
+                    pattern.display(),
+                    concrete.display()
+                ))),
+            },
+            Type::Tuple(ps) => match concrete {
+                Type::Tuple(cs) if ps.len() == cs.len() => {
+                    for (p, c) in ps.iter().zip(cs.iter()) {
+                        self.unify_generic(p, c, type_params, subst)?;
+                    }
+                    Ok(())
+                }
+                _ => Err(TypeError::new(format!(
+                    "expected {}, got {}",
+                    pattern.display(),
+                    concrete.display()
+                ))),
+            },
+            _ => {
+                if self.compatible(concrete, pattern) {
+                    Ok(())
+                } else {
+                    Err(TypeError::new(format!(
+                        "type mismatch: expected {}, got {}",
+                        pattern.display(),
+                        concrete.display()
+                    )))
+                }
+            }
         }
     }
 
@@ -8656,6 +9283,18 @@ impl TypeChecker {
                 }
                 Ok(())
             }
+            Pattern::Tuple(parts) => match scrut {
+                Type::Tuple(elems) if elems.len() == parts.len() => {
+                    for (p, t) in parts.iter().zip(elems.iter()) {
+                        self.bind_pattern(p, t)?;
+                    }
+                    Ok(())
+                }
+                other => Err(TypeError::new(format!(
+                    "tuple pattern does not match {}",
+                    other.display()
+                ))),
+            },
             Pattern::Variant { name, bindings } => match scrut {
                 Type::Result(ok, err) => {
                     if name == "Ok" {
@@ -8743,6 +9382,10 @@ impl TypeChecker {
                     Self::cover_pattern(a, scrut, has_wildcard, covered);
                 }
             }
+            Pattern::Tuple(_) => {
+                // Tuple patterns are treated as covering when present with wildcard fields.
+                *has_wildcard = true;
+            }
         }
     }
 
@@ -8790,6 +9433,102 @@ impl TypeChecker {
             );
         }
         Ok(())
+    }
+
+    /// Seed Send-like rules for `crew.kick(f(args…))` after the kick expr is typed.
+    /// Allows Copy, string, and channels. Rejects arrays/maps/structs/arenas.
+    fn assert_kick_sendable(&self, expr: &Expr) -> Result<(), TypeError> {
+        match expr {
+            Expr::Call { args, .. } => {
+                for a in args {
+                    let t = self.peek_type(a)?;
+                    if !is_kick_sendable(&t) {
+                        return Err(TypeError::new(format!(
+                            "cannot kick value of type {} across a crew task",
+                            t.display()
+                        ))
+                        .hint(
+                            "kick allows Copy, string, ShareInt (auto-cloned), and channels — \
+                             not arrays/maps/structs/arenas",
+                        ));
+                    }
+                }
+                Ok(())
+            }
+            _ => Ok(()),
+        }
+    }
+
+    /// Best-effort type of an expression without re-running ownership effects.
+    fn peek_type(&self, expr: &Expr) -> Result<Type, TypeError> {
+        match expr {
+            Expr::Int(_) => Ok(Type::Int),
+            Expr::Float(_) => Ok(Type::Float),
+            Expr::Bool(_) => Ok(Type::Bool),
+            Expr::String(_) => Ok(Type::String),
+            Expr::Ident(n) => {
+                if let Some((t, _)) = self.lookup(n) {
+                    Ok(t.clone())
+                } else if let Some(t) = self.fns.get(n) {
+                    Ok(t.clone())
+                } else {
+                    Ok(Type::Int) // fallback; already typechecked
+                }
+            }
+            Expr::Unary { expr, .. } => self.peek_type(expr),
+            Expr::Binary { left, .. } => self.peek_type(left),
+            Expr::Call { callee, .. } => {
+                if let Expr::Ident(name) = callee.as_ref() {
+                    if let Some(Type::Fn(_, ret)) = self.fns.get(name) {
+                        return Ok((**ret).clone());
+                    }
+                }
+                Ok(Type::Int)
+            }
+            Expr::Array(xs) => {
+                let e = if let Some(x) = xs.first() {
+                    self.peek_type(x)?
+                } else {
+                    Type::Int
+                };
+                Ok(Type::Array(Box::new(e)))
+            }
+            Expr::Make { ty, .. } | Expr::Convert { ty, .. } => {
+                // Fall through — Make already typechecked
+                let _ = ty;
+                Ok(Type::Int)
+            }
+            Expr::ChanOpen { elem, .. } => {
+                let et = match elem {
+                    TypeExpr::Named(n) if n == "string" => Type::String,
+                    TypeExpr::Named(n) if n == "int" || n == "int64" => Type::Int,
+                    TypeExpr::Named(n) if n == "bool" => Type::Bool,
+                    TypeExpr::Named(n) if n == "float" => Type::Float,
+                    _ => Type::Int,
+                };
+                Ok(Type::Chan(Box::new(et)))
+            }
+            _ => Ok(Type::Int),
+        }
+    }
+}
+
+/// Types that may cross a `crew.kick` boundary (Send-like seed).
+fn is_kick_sendable(t: &Type) -> bool {
+    if is_copy_type(t) {
+        return true;
+    }
+    match t {
+        Type::String | Type::Chan(_) | Type::Job(_) | Type::Void => true,
+        // ShareInt: atomic RC + kick auto-clones onto the heap (see codegen).
+        Type::Named(n) if n == "ShareInt" => true,
+        Type::Named(n) if n == "Arena" || n == "Crew" => false,
+        Type::Named(_) => false, // structs — use channels
+        Type::Array(_) | Type::Map(_, _) | Type::Tuple(_) | Type::Option(_) | Type::Result(_, _) => {
+            false
+        }
+        Type::Fn(_, _) | Type::Interface { .. } | Type::Enum { .. } => false,
+        _ => false,
     }
 }
 
@@ -8872,5 +9611,229 @@ fn fold_const_expr(expr: &Expr) -> Result<i64, TypeError> {
         _ => Err(TypeError::new(
             "const initializer must be a comptime-foldable integer expression",
         )),
+    }
+}
+
+/// Substitute concrete types for type parameters in a type expression.
+pub fn subst_type_expr(t: &TypeExpr, subst: &HashMap<String, Type>) -> TypeExpr {
+    match t {
+        TypeExpr::Named(n) => {
+            if let Some(ty) = subst.get(n) {
+                type_to_type_expr(ty)
+            } else {
+                TypeExpr::Named(n.clone())
+            }
+        }
+        TypeExpr::Array(inner) => TypeExpr::Array(Box::new(subst_type_expr(inner, subst))),
+        TypeExpr::Map(k, v) => TypeExpr::Map(
+            Box::new(subst_type_expr(k, subst)),
+            Box::new(subst_type_expr(v, subst)),
+        ),
+        TypeExpr::Generic(n, args) => TypeExpr::Generic(
+            n.clone(),
+            args.iter().map(|a| subst_type_expr(a, subst)).collect(),
+        ),
+        TypeExpr::Fn(params, ret) => TypeExpr::Fn(
+            params.iter().map(|p| subst_type_expr(p, subst)).collect(),
+            Box::new(subst_type_expr(ret, subst)),
+        ),
+        TypeExpr::Tuple(elems) => {
+            TypeExpr::Tuple(elems.iter().map(|e| subst_type_expr(e, subst)).collect())
+        }
+    }
+}
+
+pub fn type_to_type_expr(t: &Type) -> TypeExpr {
+    match t {
+        Type::Int => TypeExpr::Named("int".into()),
+        Type::Int64 => TypeExpr::Named("int64".into()),
+        Type::Int32 => TypeExpr::Named("int32".into()),
+        Type::Int8 => TypeExpr::Named("int8".into()),
+        Type::UInt64 => TypeExpr::Named("uint64".into()),
+        Type::Byte => TypeExpr::Named("byte".into()),
+        Type::Float => TypeExpr::Named("float".into()),
+        Type::Bool => TypeExpr::Named("bool".into()),
+        Type::String => TypeExpr::Named("string".into()),
+        Type::Void => TypeExpr::Named("void".into()),
+        Type::Array(inner) => TypeExpr::Array(Box::new(type_to_type_expr(inner))),
+        Type::Chan(inner) => TypeExpr::Generic("chan".into(), vec![type_to_type_expr(inner)]),
+        Type::Named(n) => TypeExpr::Named(n.clone()),
+        Type::Tuple(elems) => TypeExpr::Tuple(elems.iter().map(type_to_type_expr).collect()),
+        Type::Option(inner) => TypeExpr::Generic("Option".into(), vec![type_to_type_expr(inner)]),
+        Type::Result(a, b) => {
+            TypeExpr::Generic("Result".into(), vec![type_to_type_expr(a), type_to_type_expr(b)])
+        }
+        Type::Job(inner) => TypeExpr::Generic("Job".into(), vec![type_to_type_expr(inner)]),
+        Type::Map(k, v) => TypeExpr::Map(Box::new(type_to_type_expr(k)), Box::new(type_to_type_expr(v))),
+        other => TypeExpr::Named(other.display()),
+    }
+}
+
+/// Produce a concrete monomorphization of a generic function.
+pub fn specialize_fn(template: &FnDef, mono_name: &str, subst: &HashMap<String, Type>) -> FnDef {
+    FnDef {
+        name: mono_name.to_string(),
+        type_params: Vec::new(),
+        params: template
+            .params
+            .iter()
+            .map(|p| Param {
+                name: p.name.clone(),
+                ty: subst_type_expr(&p.ty, subst),
+                mutable: p.mutable,
+            })
+            .collect(),
+        ret: template
+            .ret
+            .as_ref()
+            .map(|t| subst_type_expr(t, subst)),
+        body: subst_block(&template.body, subst),
+        exported: template.exported,
+    }
+}
+
+fn subst_block(b: &Block, subst: &HashMap<String, Type>) -> Block {
+    Block {
+        stmts: b.stmts.iter().map(|s| subst_stmt(s, subst)).collect(),
+    }
+}
+
+fn subst_stmt(s: &Stmt, subst: &HashMap<String, Type>) -> Stmt {
+    match s {
+        Stmt::Let {
+            name,
+            mutable,
+            ownership,
+            ty,
+            init,
+        } => Stmt::Let {
+            name: name.clone(),
+            mutable: *mutable,
+            ownership: *ownership,
+            ty: ty.as_ref().map(|t| subst_type_expr(t, subst)),
+            init: subst_expr(init, subst),
+        },
+        Stmt::LetMulti {
+            names,
+            mutable,
+            init,
+        } => Stmt::LetMulti {
+            names: names.clone(),
+            mutable: *mutable,
+            init: subst_expr(init, subst),
+        },
+        Stmt::Return(e) => Stmt::Return(e.as_ref().map(|e| subst_expr(e, subst))),
+        Stmt::Expr(e) => Stmt::Expr(subst_expr(e, subst)),
+        Stmt::If {
+            init,
+            cond,
+            then_block,
+            else_block,
+        } => Stmt::If {
+            init: init.as_ref().map(|s| Box::new(subst_stmt(s, subst))),
+            cond: subst_expr(cond, subst),
+            then_block: subst_block(then_block, subst),
+            else_block: else_block.as_ref().map(|b| subst_block(b, subst)),
+        },
+        Stmt::While { label, cond, body } => Stmt::While {
+            label: label.clone(),
+            cond: subst_expr(cond, subst),
+            body: subst_block(body, subst),
+        },
+        Stmt::For {
+            label,
+            binders,
+            is_range,
+            iter,
+            body,
+        } => Stmt::For {
+            label: label.clone(),
+            binders: binders.clone(),
+            is_range: *is_range,
+            iter: subst_expr(iter, subst),
+            body: subst_block(body, subst),
+        },
+        Stmt::Assign { name, value } => Stmt::Assign {
+            name: name.clone(),
+            value: subst_expr(value, subst),
+        },
+        Stmt::Defer { body } => Stmt::Defer {
+            body: subst_block(body, subst),
+        },
+        Stmt::Crew { name, body } => Stmt::Crew {
+            name: name.clone(),
+            body: subst_block(body, subst),
+        },
+        Stmt::Arena { name, body } => Stmt::Arena {
+            name: name.clone(),
+            body: subst_block(body, subst),
+        },
+        Stmt::Unsafe { body } => Stmt::Unsafe {
+            body: subst_block(body, subst),
+        },
+        other => other.clone(),
+    }
+}
+
+fn subst_expr(e: &Expr, subst: &HashMap<String, Type>) -> Expr {
+    match e {
+        Expr::Call { callee, args } => Expr::Call {
+            callee: Box::new(subst_expr(callee, subst)),
+            args: args.iter().map(|a| subst_expr(a, subst)).collect(),
+        },
+        Expr::Binary { op, left, right } => Expr::Binary {
+            op: *op,
+            left: Box::new(subst_expr(left, subst)),
+            right: Box::new(subst_expr(right, subst)),
+        },
+        Expr::Unary { op, expr } => Expr::Unary {
+            op: *op,
+            expr: Box::new(subst_expr(expr, subst)),
+        },
+        Expr::Tuple(elems) => Expr::Tuple(elems.iter().map(|x| subst_expr(x, subst)).collect()),
+        Expr::Array(elems) => Expr::Array(elems.iter().map(|x| subst_expr(x, subst)).collect()),
+        Expr::Match { scrutinee, arms } => Expr::Match {
+            scrutinee: Box::new(subst_expr(scrutinee, subst)),
+            arms: arms
+                .iter()
+                .map(|a| MatchArm {
+                    pattern: a.pattern.clone(),
+                    body: subst_expr(&a.body, subst),
+                })
+                .collect(),
+        },
+        Expr::Block(b) => Expr::Block(subst_block(b, subst)),
+        Expr::Lambda { params, body } => Expr::Lambda {
+            params: params.clone(),
+            body: Box::new(subst_expr(body, subst)),
+        },
+        Expr::Try(inner) => Expr::Try(Box::new(subst_expr(inner, subst))),
+        Expr::Field { base, field } => Expr::Field {
+            base: Box::new(subst_expr(base, subst)),
+            field: field.clone(),
+        },
+        Expr::Index { base, index } => Expr::Index {
+            base: Box::new(subst_expr(base, subst)),
+            index: Box::new(subst_expr(index, subst)),
+        },
+        Expr::Method {
+            receiver,
+            method,
+            args,
+        } => Expr::Method {
+            receiver: Box::new(subst_expr(receiver, subst)),
+            method: method.clone(),
+            args: args.iter().map(|a| subst_expr(a, subst)).collect(),
+        },
+        Expr::ChanOpen { elem, cap } => Expr::ChanOpen {
+            elem: subst_type_expr(elem, subst),
+            cap: Box::new(subst_expr(cap, subst)),
+        },
+        Expr::Make { ty, len, cap } => Expr::Make {
+            ty: subst_type_expr(ty, subst),
+            len: len.as_ref().map(|e| Box::new(subst_expr(e, subst))),
+            cap: cap.as_ref().map(|e| Box::new(subst_expr(e, subst))),
+        },
+        other => other.clone(),
     }
 }

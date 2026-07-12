@@ -1,0 +1,6 @@
+// With visibility=explicit, only export/Capital symbols are pulled.
+pull "./lib.mko"
+
+fn main() {
+    print(secret.public_add(2, 3))
+}

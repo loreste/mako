@@ -1,0 +1,68 @@
+// Canonical Mako — real work, low ceremony, our own flair.
+// Docs and mako fmt prefer this surface.
+
+pull "strings"
+
+export struct Point {
+    x: int
+    y: int
+}
+
+on Point {
+    fn distance(self) -> int {
+        return self.x + self.y
+    }
+
+    fn scale(self, k: int) -> int {
+        return (self.x + self.y) * k
+    }
+}
+
+fn divmod(a: int, b: int) -> (int, int) {
+    return (a / b, a % b)
+}
+
+fn work() -> int {
+    return 42
+}
+
+fn main() {
+    // Infer locals — type the boundaries, not every line
+    let p = Point { x: 3, y: 4 }
+    print(p.distance())
+    print(p.scale(2))
+
+    // Multi-return
+    let q, r = divmod(17, 5)
+    print(q)
+    print(r)
+
+    // One print for everyday values
+    print(strings.contains("mako", "ma"))
+
+    // String compare without str_eq ceremony
+    let path = "/health"
+    if path == "/health" {
+        print("healthy")
+    }
+
+    // Ownership when it matters — not on every binding
+    hold let owned = 7
+    print(owned)
+
+    arena a {
+        let label = arena_text(a, "mako")
+        print(label)
+    }
+
+    // First-class concurrency — no free-fire tasks
+    crew t {
+        let job = t.kick(work())
+        print(job.join())
+    }
+
+    // First-class parallelism — fan across cores
+    let xs = [1, 2, 3, 4]
+    let ys = fan(xs, fn(x) { x * x })
+    print(ys[0] + ys[1] + ys[2] + ys[3]) // 1+4+9+16 = 30
+}

@@ -24,6 +24,7 @@
 #include "mako_platform.h"
 #if !defined(_WIN32)
 #include <sys/time.h>
+#include <unistd.h>
 #endif
 
 #ifdef __cplusplus
@@ -668,6 +669,23 @@ static inline MakoResultInt mako_wrap_err(MakoResultInt r, MakoString prefix) {
     MakoString mid = mako_str_concat(prefix, sep);
     MakoString out = mako_str_concat(mid, r.err);
     return mako_err_int(out);
+}
+
+/* Join two Results: prefer first Err; if both Err, combine messages; if both Ok, keep a. */
+static inline MakoResultInt mako_error_join(MakoResultInt a, MakoResultInt b) {
+    if (a.ok && b.ok) return a;
+    if (!a.ok && b.ok) return a;
+    if (a.ok && !b.ok) return b;
+    MakoString sep = mako_str_from_cstr("; ");
+    MakoString mid = mako_str_concat(a.err, sep);
+    return mako_err_int(mako_str_concat(mid, b.err));
+}
+
+/* Enum-like tagged errors: error_tag("NotFound", "user 7") → Err("NotFound: user 7"). */
+static inline MakoResultInt mako_error_tag(MakoString tag, MakoString msg) {
+    MakoString sep = mako_str_from_cstr(": ");
+    MakoString mid = mako_str_concat(tag, sep);
+    return mako_err_int(mako_str_concat(mid, msg));
 }
 
 /* errorf("open %s", path) — format a string error (printf-style, one %s or plain). */
@@ -1614,6 +1632,149 @@ static inline int64_t mako_chan_select4(
     return mako_chan_selectn(chs, 4, timeout_ms);
 }
 
+/* ---- String channels (ownership transfer of MakoString payloads) ----
+ * Same ring-buffer design as int channels; send copies string into the buffer.
+ * recv returns an owned MakoString (caller owns the result).
+ */
+typedef struct {
+    MakoString *buf;
+    size_t cap;
+    size_t head;
+    size_t tail;
+    size_t count;
+    bool closed;
+    pthread_mutex_t mu;
+    pthread_cond_t can_send;
+    pthread_cond_t can_recv;
+} MakoChanStr;
+
+static inline MakoChanStr *mako_chan_str_new(int64_t capacity) {
+    size_t cap = capacity < 1 ? 1 : (size_t)capacity;
+    MakoChanStr *c = (MakoChanStr *)calloc(1, sizeof(MakoChanStr));
+    c->buf = (MakoString *)calloc(cap, sizeof(MakoString));
+    c->cap = cap;
+    pthread_mutex_init(&c->mu, NULL);
+    pthread_cond_init(&c->can_send, NULL);
+    pthread_cond_init(&c->can_recv, NULL);
+    return c;
+}
+
+static inline int64_t mako_chan_str_send(MakoChanStr *c, MakoString v) {
+    pthread_mutex_lock(&c->mu);
+    while (c->count == c->cap && !c->closed) {
+        pthread_cond_wait(&c->can_send, &c->mu);
+    }
+    if (c->closed) {
+        pthread_mutex_unlock(&c->mu);
+        return 0;
+    }
+    c->buf[c->tail] = mako_str_clone(v);
+    c->tail = (c->tail + 1) % c->cap;
+    c->count++;
+    pthread_cond_signal(&c->can_recv);
+    pthread_mutex_unlock(&c->mu);
+    return 1;
+}
+
+static inline MakoString mako_chan_str_recv(MakoChanStr *c) {
+    pthread_mutex_lock(&c->mu);
+    while (c->count == 0 && !c->closed) {
+        pthread_cond_wait(&c->can_recv, &c->mu);
+    }
+    if (c->count == 0 && c->closed) {
+        pthread_mutex_unlock(&c->mu);
+        return mako_str_from_cstr("");
+    }
+    MakoString v = c->buf[c->head];
+    c->buf[c->head] = (MakoString){NULL, 0};
+    c->head = (c->head + 1) % c->cap;
+    c->count--;
+    pthread_cond_signal(&c->can_send);
+    pthread_mutex_unlock(&c->mu);
+    return v;
+}
+
+static inline void mako_chan_str_close(MakoChanStr *c) {
+    if (!c) return;
+    pthread_mutex_lock(&c->mu);
+    c->closed = true;
+    pthread_cond_broadcast(&c->can_send);
+    pthread_cond_broadcast(&c->can_recv);
+    pthread_mutex_unlock(&c->mu);
+}
+
+/* ---- Pointer channels (opaque / heap-boxed struct handles) ----
+ * Send/recv transfer ownership of a void* (caller allocates; receiver frees).
+ * Used for chan[Struct] seed: send boxes a copy, recv unboxes.
+ */
+typedef struct {
+    void **buf;
+    size_t cap;
+    size_t head;
+    size_t tail;
+    size_t count;
+    bool closed;
+    pthread_mutex_t mu;
+    pthread_cond_t can_send;
+    pthread_cond_t can_recv;
+} MakoChanPtr;
+
+static inline MakoChanPtr *mako_chan_ptr_new(int64_t capacity) {
+    size_t cap = capacity < 1 ? 1 : (size_t)capacity;
+    MakoChanPtr *c = (MakoChanPtr *)calloc(1, sizeof(MakoChanPtr));
+    c->buf = (void **)calloc(cap, sizeof(void *));
+    c->cap = cap;
+    pthread_mutex_init(&c->mu, NULL);
+    pthread_cond_init(&c->can_send, NULL);
+    pthread_cond_init(&c->can_recv, NULL);
+    return c;
+}
+
+static inline int64_t mako_chan_ptr_send(MakoChanPtr *c, void *v) {
+    pthread_mutex_lock(&c->mu);
+    while (c->count == c->cap && !c->closed) {
+        pthread_cond_wait(&c->can_send, &c->mu);
+    }
+    if (c->closed) {
+        pthread_mutex_unlock(&c->mu);
+        return 0;
+    }
+    c->buf[c->tail] = v;
+    c->tail = (c->tail + 1) % c->cap;
+    c->count++;
+    pthread_cond_signal(&c->can_recv);
+    pthread_mutex_unlock(&c->mu);
+    return 1;
+}
+
+static inline void *mako_chan_ptr_recv(MakoChanPtr *c) {
+    pthread_mutex_lock(&c->mu);
+    while (c->count == 0 && !c->closed) {
+        pthread_cond_wait(&c->can_recv, &c->mu);
+    }
+    if (c->count == 0 && c->closed) {
+        pthread_mutex_unlock(&c->mu);
+        return NULL;
+    }
+    void *v = c->buf[c->head];
+    c->buf[c->head] = NULL;
+    c->head = (c->head + 1) % c->cap;
+    c->count--;
+    pthread_cond_signal(&c->can_send);
+    pthread_mutex_unlock(&c->mu);
+    return v;
+}
+
+static inline void mako_chan_ptr_close(MakoChanPtr *c) {
+    if (!c) return;
+    pthread_mutex_lock(&c->mu);
+    c->closed = true;
+    pthread_cond_broadcast(&c->can_send);
+    pthread_cond_broadcast(&c->can_recv);
+    pthread_mutex_unlock(&c->mu);
+}
+
+
 /* ---- Structured concurrency nursery ---- */
 typedef void *(*MakoTaskFn)(void *);
 
@@ -1752,12 +1913,33 @@ static void *mako_par_worker(void *arg) {
     return NULL;
 }
 
+static inline size_t mako_par_nthreads(size_t len) {
+    size_t nthreads = 4;
+#if defined(_SC_NPROCESSORS_ONLN)
+    long hw = sysconf(_SC_NPROCESSORS_ONLN);
+    if (hw > 0) nthreads = (size_t)hw;
+#endif
+    if (nthreads < 1) nthreads = 1;
+    if (nthreads > 64) nthreads = 64;
+    if (len < nthreads) nthreads = len;
+    /* Small inputs: stay single-threaded to avoid spawn overhead (speed bar). */
+    if (len < 64) nthreads = 1;
+    if (nthreads < 1) nthreads = 1;
+    return nthreads;
+}
+
 static inline MakoIntArray mako_par_map_int(MakoIntArray in, MakoMapFn fn) {
     MakoIntArray out = mako_int_array_new(in.len);
     if (in.len == 0) return out;
 
-    size_t nthreads = 4;
-    if (in.len < nthreads) nthreads = in.len;
+    size_t nthreads = mako_par_nthreads(in.len);
+    if (nthreads == 1) {
+        for (size_t i = 0; i < in.len; i++) {
+            out.data[i] = fn(in.data[i]);
+        }
+        return out;
+    }
+
     pthread_t *threads = (pthread_t *)malloc(nthreads * sizeof(pthread_t));
     MakoParChunk *chunks = (MakoParChunk *)malloc(nthreads * sizeof(MakoParChunk));
     size_t chunk = (in.len + nthreads - 1) / nthreads;
@@ -1768,6 +1950,110 @@ static inline MakoIntArray mako_par_map_int(MakoIntArray in, MakoMapFn fn) {
         if (end > in.len) end = in.len;
         chunks[t] = (MakoParChunk){in.data, out.data, fn, start, end};
         pthread_create(&threads[t], NULL, mako_par_worker, &chunks[t]);
+    }
+    for (size_t t = 0; t < nthreads; t++) {
+        pthread_join(threads[t], NULL);
+    }
+    free(threads);
+    free(chunks);
+    return out;
+}
+
+/* ---- Parallel map over float arrays ---- */
+typedef double (*MakoMapFnF64)(double);
+
+typedef struct {
+    const double *in;
+    double *out;
+    MakoMapFnF64 fn;
+    size_t start;
+    size_t end;
+} MakoParChunkF64;
+
+static void *mako_par_worker_f64(void *arg) {
+    MakoParChunkF64 *c = (MakoParChunkF64 *)arg;
+    for (size_t i = c->start; i < c->end; i++) {
+        c->out[i] = c->fn(c->in[i]);
+    }
+    return NULL;
+}
+
+static inline MakoFloatArray mako_par_map_float(MakoFloatArray in, MakoMapFnF64 fn) {
+    MakoFloatArray out = mako_float_array_new(in.len);
+    if (in.len == 0) return out;
+
+    size_t nthreads = mako_par_nthreads(in.len);
+    if (nthreads == 1) {
+        for (size_t i = 0; i < in.len; i++) {
+            out.data[i] = fn(in.data[i]);
+        }
+        return out;
+    }
+
+    pthread_t *threads = (pthread_t *)malloc(nthreads * sizeof(pthread_t));
+    MakoParChunkF64 *chunks = (MakoParChunkF64 *)malloc(nthreads * sizeof(MakoParChunkF64));
+    size_t chunk = (in.len + nthreads - 1) / nthreads;
+
+    for (size_t t = 0; t < nthreads; t++) {
+        size_t start = t * chunk;
+        size_t end = start + chunk;
+        if (end > in.len) end = in.len;
+        chunks[t] = (MakoParChunkF64){in.data, out.data, fn, start, end};
+        pthread_create(&threads[t], NULL, mako_par_worker_f64, &chunks[t]);
+    }
+    for (size_t t = 0; t < nthreads; t++) {
+        pthread_join(threads[t], NULL);
+    }
+    free(threads);
+    free(chunks);
+    return out;
+}
+
+/* ---- Parallel map over string arrays (clones; mapper owns/returns string) ---- */
+typedef MakoString (*MakoMapFnStr)(MakoString);
+
+typedef struct {
+    const MakoString *in;
+    MakoString *out;
+    MakoMapFnStr fn;
+    size_t start;
+    size_t end;
+} MakoParChunkStr;
+
+static void *mako_par_worker_str(void *arg) {
+    MakoParChunkStr *c = (MakoParChunkStr *)arg;
+    for (size_t i = c->start; i < c->end; i++) {
+        c->out[i] = c->fn(mako_str_clone(c->in[i]));
+    }
+    return NULL;
+}
+
+static inline MakoStrArray mako_par_map_str(MakoStrArray in, MakoMapFnStr fn) {
+    MakoStrArray out = mako_str_array_new(in.len);
+    if (in.len == 0) return out;
+
+    size_t nthreads = mako_par_nthreads(in.len);
+    /* String map: prefer fewer threads (alloc pressure) */
+    if (nthreads > 8) nthreads = 8;
+    if (in.len < 32) nthreads = 1;
+
+    if (nthreads == 1) {
+        for (size_t i = 0; i < in.len; i++) {
+            out.data[i] = fn(mako_str_clone(in.data[i]));
+        }
+        return out;
+    }
+
+    pthread_t *threads = (pthread_t *)malloc(nthreads * sizeof(pthread_t));
+    MakoParChunkStr *chunks = (MakoParChunkStr *)malloc(nthreads * sizeof(MakoParChunkStr));
+    size_t chunk = (in.len + nthreads - 1) / nthreads;
+
+    for (size_t t = 0; t < nthreads; t++) {
+        size_t start = t * chunk;
+        size_t end = start + chunk;
+        if (end > in.len) end = in.len;
+        chunks[t] = (MakoParChunkStr){in.data, out.data, fn, start, end};
+        pthread_create(&threads[t], NULL, mako_par_worker_str, &chunks[t]);
     }
     for (size_t t = 0; t < nthreads; t++) {
         pthread_join(threads[t], NULL);

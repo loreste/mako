@@ -1,0 +1,20 @@
+// Atomic share RC — clone/drop safe under concurrent use (same process).
+
+fn TestShareCloneDrop() {
+    let s = share_int(7)
+    let s2 = share_clone(s)
+    assert_eq(share_get(s), 7)
+    assert_eq(share_get(s2), 7)
+    share_set(s, 9)
+    assert_eq(share_get(s2), 9)
+    share_drop(s)
+    share_drop(s2)
+    assert(true)
+}
+
+fn TestShareGetSet() {
+    let s = share_int(1)
+    share_set(s, 42)
+    assert_eq(share_get(s), 42)
+    share_drop(s)
+}

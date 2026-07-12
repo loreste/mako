@@ -1,0 +1,26 @@
+// Typed string channels — first-class concurrency message path.
+
+fn produce_str(ch: chan[string]) -> int {
+    let _ = ch.send("from-crew")
+    return 0
+}
+
+fn TestChanOpenString() {
+    let ch = chan_open[string](2)
+    let _ = ch.send("hello")
+    let _ = ch.send("mako")
+    assert_eq_str(ch.recv(), "hello")
+    assert_eq_str(ch.recv(), "mako")
+    ch.close()
+}
+
+fn TestChanStringCrew() {
+    // Channel handle is Send-like across kick
+    let ch = chan_open[string](1)
+    crew t {
+        let j = t.kick(produce_str(ch))
+        let _ = j.join()
+    }
+    assert_eq_str(ch.recv(), "from-crew")
+    ch.close()
+}

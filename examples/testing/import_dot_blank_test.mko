@@ -1,0 +1,13 @@
+// Dot import: symbols without package prefix
+pull . "../dotpkg.mko"
+
+// Blank import: load dependency only (no names from fmt)
+pull _ "fmt"
+
+fn TestDotImport() {
+    assert_eq(times2(21), 42)
+}
+
+fn TestBlankImportCompiles() {
+    assert(true)
+}

@@ -25,7 +25,9 @@ Guide 01 covers installation from scratch.
 ## Related documentation
 
 - [The Mako Book](../book/) -- guided language tour
-- [GUIDE.md](../GUIDE.md) -- syntax reference
+- [GUIDE.md](../GUIDE.md) -- syntax reference (Mako-native)
+- [IDENTITY.md](../IDENTITY.md) -- our syntax identity + **%**
+- [COMPAT.md](../COMPAT.md) -- dual forms / compatibility
 - [STDLIB.md](../STDLIB.md) -- standard library surface
 - [BUILD.md](../BUILD.md) -- incremental build system
 - [DEBUG.md](../DEBUG.md) -- debugger integration

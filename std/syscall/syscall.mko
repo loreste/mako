@@ -1,0 +1,4 @@
+// std/syscall — seed (raw host escape; prefer higher-level packs)
+fn available() -> bool {
+    return true
+}

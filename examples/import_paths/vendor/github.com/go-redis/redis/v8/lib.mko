@@ -1,0 +1,5 @@
+pack redis
+
+fn ping() -> string {
+    return "PONG"
+}

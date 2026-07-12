@@ -28,6 +28,8 @@ pub struct Codegen {
     fn_params: HashMap<String, Vec<String>>,
     /// Local variable → C type
     locals: HashMap<String, String>,
+    /// Local `MakoChanPtr*` → Mako struct type name (for send/recv boxing)
+    chan_ptr_elems: HashMap<String, String>,
     /// Enum type name → info
     enums: HashMap<String, EnumInfo>,
     /// Struct type name → info
@@ -52,6 +54,16 @@ pub struct Codegen {
     share_live: std::collections::HashSet<String>,
     /// Nesting of `unsafe { }` — skip debug bounds checks when > 0.
     unsafe_depth: usize,
+    /// Generic templates (not emitted; specialized as `name__tag`).
+    generic_templates: HashMap<String, FnDef>,
+    /// Keep bounds checks under NDEBUG when true.
+    pub bounds_checks_always: bool,
+    /// Source path for `#line` directives (debug mapping).
+    pub source_file: Option<String>,
+    /// Emitted tuple typedef tags.
+    tuple_typedefs: std::collections::HashSet<String>,
+    /// Tuple typedef C snippets to hoist before forward decls.
+    pending_tuple_typedefs: Vec<String>,
 }
 
 impl Codegen {
@@ -63,6 +75,7 @@ impl Codegen {
             fn_rets: HashMap::new(),
             fn_params: HashMap::new(),
             locals: HashMap::new(),
+            chan_ptr_elems: HashMap::new(),
             enums: HashMap::new(),
             structs: HashMap::new(),
             variant_to_enum: HashMap::new(),
@@ -75,6 +88,11 @@ impl Codegen {
             share_scopes: Vec::new(),
             share_live: std::collections::HashSet::new(),
             unsafe_depth: 0,
+            generic_templates: HashMap::new(),
+            bounds_checks_always: false,
+            source_file: None,
+            tuple_typedefs: std::collections::HashSet::new(),
+            pending_tuple_typedefs: Vec::new(),
         }
     }
 
@@ -83,13 +101,18 @@ impl Codegen {
     }
 
     /// Emit a debug bounds check unless inside `unsafe { }` or NDEBUG release.
+    /// When `bounds_checks_always`, checks stay on even under `-DNDEBUG` (fast-safe profile).
     fn emit_bounds_check(&mut self, cond_c: &str, msg: &str) {
         if self.unsafe_depth > 0 {
             return;
         }
-        self.line(&format!(
-            "#ifndef NDEBUG\nif ({cond_c}) {{ mako_abort(\"{msg}\"); }}\n#endif"
-        ));
+        if self.bounds_checks_always {
+            self.line(&format!("if ({cond_c}) {{ mako_abort(\"{msg}\"); }}"));
+        } else {
+            self.line(&format!(
+                "#ifndef NDEBUG\nif ({cond_c}) {{ mako_abort(\"{msg}\"); }}\n#endif"
+            ));
+        }
     }
 
     fn pop_share_scope(&mut self) {
@@ -289,6 +312,10 @@ impl Codegen {
         for item in &program.items {
             match item {
                 Item::Fn(f) => {
+                    if !f.type_params.is_empty() {
+                        self.generic_templates.insert(f.name.clone(), f.clone());
+                        continue; // templates are not emitted; mono specializations are
+                    }
                     let ret = self.c_ret_type_resolved(f);
                     self.fn_rets.insert(f.name.clone(), ret);
                     let param_tys: Vec<String> =
@@ -315,10 +342,21 @@ impl Codegen {
         // Fat-pointer interface typedefs (before forward decls that use them)
         self.emit_iface_typedefs();
 
+        // Source map seed for debuggers (maps generated C back to .mko)
+        if let Some(src) = &self.source_file {
+            let _ = writeln!(self.out, "#line 1 \"{}\"", escape_c(src));
+        }
+
+        // Hoist all tuple typedefs needed by signatures (and known literal tuples).
+        self.predeclare_tuples(program);
+
         // Forward declarations
         for item in &program.items {
             match item {
                 Item::Fn(f) => {
+                    if !f.type_params.is_empty() {
+                        continue;
+                    }
                     let ret = self
                         .fn_rets
                         .get(&f.name)
@@ -355,11 +393,17 @@ impl Codegen {
 
         for item in &program.items {
             match item {
-                Item::Fn(f) => self.emit_fn(f),
+                Item::Fn(f) => {
+                    if f.type_params.is_empty() {
+                        self.emit_fn(f);
+                    }
+                }
                 Item::Struct(_)
                 | Item::Enum(_)
                 | Item::Actor(_)
                 | Item::Interface(_)
+                | Item::On(_)
+                | Item::Package { .. }
                 | Item::Import { .. } => {}
                 Item::ExternC(_) => {}
                 Item::Const(c) => {
@@ -921,8 +965,22 @@ impl Codegen {
             },
             TypeExpr::Generic(n, _) if n == "Result" => "MakoResultInt".into(),
             TypeExpr::Generic(n, _) if n == "Option" => "MakoOptionInt".into(),
-            TypeExpr::Generic(n, _) if n == "chan" => "MakoChan*".into(),
+            TypeExpr::Generic(n, args) if n == "chan" => {
+                if matches!(args.first(), Some(TypeExpr::Named(t)) if t == "string") {
+                    "MakoChanStr*".into()
+                } else {
+                    "MakoChan*".into()
+                }
+            }
             TypeExpr::Generic(n, _) if n == "List" => "MakoIntArray".into(),
+            TypeExpr::Tuple(elems) => {
+                let tag = elems
+                    .iter()
+                    .map(|e| c_type_mono_tag(&self.type_expr_c(e)))
+                    .collect::<Vec<_>>()
+                    .join("_");
+                format!("MakoTup_{tag}")
+            }
             TypeExpr::Fn(_, _) => "void*".into(),
             _ => "int64_t".into(),
         }
@@ -1385,10 +1443,47 @@ impl Codegen {
                 } else {
                     (ty, val)
                 };
+                // Propagate ptr-chan element type from rhs temporary
+                if ty == "MakoChanPtr*" {
+                    if let Some(st) = self.chan_ptr_elems.get(&val).cloned() {
+                        self.chan_ptr_elems.insert(name.clone(), st);
+                    }
+                }
                 self.locals.insert(name.clone(), ty.clone());
                 self.line(&format!("{ty} {name} = {val};"));
                 if *ownership == Ownership::Share {
                     self.register_share_local(name);
+                }
+            }
+            Stmt::LetMulti { names, init, .. } => {
+                let (ty, val) = self.emit_expr(init);
+                let tmp = self.fresh("mr");
+                self.line(&format!("{ty} {tmp} = {val};"));
+                // Unpack MakoTup_* fields — declare new locals or assign existing
+                let tags: Vec<&str> = ty
+                    .strip_prefix("MakoTup_")
+                    .unwrap_or("")
+                    .split('_')
+                    .filter(|s| !s.is_empty())
+                    .collect();
+                for (i, n) in names.iter().enumerate() {
+                    if n == "_" {
+                        continue;
+                    }
+                    let tag = tags.get(i).copied().unwrap_or("int");
+                    let cty = match tag {
+                        "string" => "MakoString",
+                        "float" => "double",
+                        "bool" => "bool",
+                        _ => "int64_t",
+                    };
+                    if self.locals.contains_key(n) {
+                        // Reassignment: `a, b = f()`
+                        self.line(&format!("{n} = {tmp}._{i};"));
+                    } else {
+                        self.locals.insert(n.clone(), cty.into());
+                        self.line(&format!("{cty} {n} = {tmp}._{i};"));
+                    }
                 }
             }
             Stmt::LetCommaOk {
@@ -1512,10 +1607,19 @@ impl Codegen {
                 self.defer_stack.push(body.clone());
             }
             Stmt::If {
+                init,
                 cond,
                 then_block,
                 else_block,
             } => {
+                // `if init; cond { … }`: run the init in a fresh C scope so its
+                // binding is confined to this if/else (and cannot collide with a
+                // sibling `if x := …` in the same block).
+                if let Some(init) = init {
+                    self.line("{");
+                    self.indent += 1;
+                    self.emit_stmt(init);
+                }
                 let (_, c) = self.emit_expr(cond);
                 self.line(&format!("if ({c}) {{"));
                 self.indent += 1;
@@ -1536,6 +1640,10 @@ impl Codegen {
                     self.indent -= 1;
                 }
                 self.line("}");
+                if init.is_some() {
+                    self.indent -= 1;
+                    self.line("}");
+                }
             }
             Stmt::While { label, cond, body } => {
                 if let Some(lab) = label {
@@ -1893,11 +2001,29 @@ impl Codegen {
                             let (_, v) = self.emit_expr(&args[0]);
                             return ("MakoResultInt".into(), format!("mako_err_int({v})"));
                         }
-                        "wrap_err" => {
+                        "wrap_err" | "error_context" => {
                             let (_, r) = self.emit_expr(&args[0]);
                             let (_, msg) = self.emit_expr(&args[1]);
                             let tmp = self.fresh("we");
                             self.line(&format!("MakoResultInt {tmp} = mako_wrap_err({r}, {msg});"));
+                            return ("MakoResultInt".into(), tmp);
+                        }
+                        "error_join" => {
+                            let (_, a) = self.emit_expr(&args[0]);
+                            let (_, b) = self.emit_expr(&args[1]);
+                            let tmp = self.fresh("ej");
+                            self.line(&format!(
+                                "MakoResultInt {tmp} = mako_error_join({a}, {b});"
+                            ));
+                            return ("MakoResultInt".into(), tmp);
+                        }
+                        "error_tag" => {
+                            let (_, tag) = self.emit_expr(&args[0]);
+                            let (_, msg) = self.emit_expr(&args[1]);
+                            let tmp = self.fresh("et");
+                            self.line(&format!(
+                                "MakoResultInt {tmp} = mako_error_tag({tag}, {msg});"
+                            ));
                             return ("MakoResultInt".into(), tmp);
                         }
                         "errorf" => {
@@ -2262,6 +2388,13 @@ impl Codegen {
                             let tmp = self.fresh("ch");
                             self.line(&format!("MakoChan *{tmp} = mako_chan_new({cap});"));
                             return ("MakoChan*".into(), tmp);
+                        }
+                        "share_of" => {
+                            // Backward-compatible alias: share_of(int) → share_int
+                            let (_, v) = self.emit_expr(&args[0]);
+                            let tmp = self.fresh("sh");
+                            self.line(&format!("MakoShareInt {tmp} = mako_share_int({v});"));
+                            return ("MakoShareInt".into(), tmp);
                         }
                         "chan_try_send" => {
                             let (_, ch) = self.emit_expr(&args[0]);
@@ -6306,6 +6439,12 @@ impl Codegen {
                             let (_, s) = self.emit_expr(&args[0]);
                             return ("int64_t".into(), format!("mako_share_get({s})"));
                         }
+                        "share_set" => {
+                            let (_, s) = self.emit_expr(&args[0]);
+                            let (_, v) = self.emit_expr(&args[1]);
+                            self.line(&format!("mako_share_set({s}, {v});"));
+                            return ("void".into(), "/*void*/".into());
+                        }
                         "share_drop" => {
                             let (_, s) = self.emit_expr(&args[0]);
                             if let Expr::Ident(name) = &args[0] {
@@ -9543,12 +9682,46 @@ impl Codegen {
                             if let Some(enum_name) = self.variant_to_enum.get(name).cloned() {
                                 return self.emit_enum_construct(&enum_name, name, args);
                             }
-                            let expected = self.fn_params.get(name).cloned().unwrap_or_default();
-                            let mut arg_vals = Vec::new();
-                            for (i, a) in args.iter().enumerate() {
+                            // Emit args first (needed for generic mono tag inference).
+                            let mut arg_tys = Vec::new();
+                            let mut arg_raw = Vec::new();
+                            for a in args {
                                 let (aty, v) = self.emit_expr(a);
+                                arg_tys.push(aty);
+                                arg_raw.push(v);
+                            }
+                            // Generic call: `id(x)` → `id__int(x)` monomorphization.
+                            // Tag only by type *parameters* (not each argument), matching typecheck.
+                            let resolved = if let Some(tmpl) = self.generic_templates.get(name) {
+                                let mut tags = Vec::new();
+                                for tp in &tmpl.type_params {
+                                    // Find first param whose type is this type param
+                                    let mut found = None;
+                                    for (i, p) in tmpl.params.iter().enumerate() {
+                                        if matches!(&p.ty, TypeExpr::Named(n) if n == tp) {
+                                            if let Some(aty) = arg_tys.get(i) {
+                                                found = Some(c_type_mono_tag(aty));
+                                            }
+                                            break;
+                                        }
+                                    }
+                                    tags.push(found.unwrap_or_else(|| "int".into()));
+                                }
+                                format!("{name}__{}", tags.join("__"))
+                            } else {
+                                name.clone()
+                            };
+                            let expected = self
+                                .fn_params
+                                .get(&resolved)
+                                .cloned()
+                                .or_else(|| self.fn_params.get(name).cloned())
+                                .unwrap_or_default();
+                            let mut arg_vals = Vec::new();
+                            for (i, (aty, v)) in arg_tys.iter().zip(arg_raw.into_iter()).enumerate()
+                            {
                                 let v = if let Some(exp) = expected.get(i) {
-                                    if exp.starts_with("MakoIface_") && aty != *exp {
+                                    if exp.starts_with("MakoIface_") && aty != exp {
                                         let iname = &exp["MakoIface_".len()..];
                                         let box_fn = format!("mako_iface_{iname}_from_{aty}");
                                         let tmp = self.fresh("ibox");
@@ -9562,10 +9735,12 @@ impl Codegen {
                                 };
                                 arg_vals.push(v);
                             }
-                            let call_name = if self.extern_fns.contains(name) {
-                                name.clone()
+                            let call_name = if self.extern_fns.contains(&resolved)
+                                || self.extern_fns.contains(name)
+                            {
+                                resolved.clone()
                             } else {
-                                mangle(name)
+                                mangle(&resolved)
                             };
                             let call = format!("{call_name}({})", arg_vals.join(", "));
                             let tmp = self.fresh("r");
@@ -9575,8 +9750,9 @@ impl Codegen {
                             }
                             let ret = self
                                 .fn_rets
-                                .get(name)
+                                .get(&resolved)
                                 .cloned()
+                                .or_else(|| self.fn_rets.get(name).cloned())
                                 .unwrap_or_else(|| "int64_t".into());
                             if ret == "void" {
                                 self.line(&format!("{call};"));
@@ -9603,6 +9779,93 @@ impl Codegen {
                     self.line(&format!("{tmp}.{fname} = {v};"));
                 }
                 (cty, tmp)
+            }
+            Expr::StructLitPos { name, values } => {
+                // Resolve positional values to declared field names (in order).
+                let info = self.structs.get(name).cloned();
+                let cty = info
+                    .as_ref()
+                    .map(|s| s.c_name.clone())
+                    .unwrap_or_else(|| name.clone());
+                let field_names: Vec<String> = info
+                    .map(|s| s.fields.iter().map(|(n, _)| n.clone()).collect())
+                    .unwrap_or_default();
+                let tmp = self.fresh("st");
+                self.line(&format!("{cty} {tmp};"));
+                self.line(&format!("memset(&{tmp}, 0, sizeof({tmp}));"));
+                for (i, vexpr) in values.iter().enumerate() {
+                    let (_, v) = self.emit_expr(vexpr);
+                    if let Some(fname) = field_names.get(i) {
+                        self.line(&format!("{tmp}.{fname} = {v};"));
+                    }
+                }
+                (cty, tmp)
+            }
+            Expr::Tuple(elems) => {
+                let mut tys = Vec::new();
+                let mut vals = Vec::new();
+                for e in elems {
+                    let (t, v) = self.emit_expr(e);
+                    tys.push(t);
+                    vals.push(v);
+                }
+                let tag = tys
+                    .iter()
+                    .map(|t| c_type_mono_tag(t))
+                    .collect::<Vec<_>>()
+                    .join("_");
+                let cname = format!("MakoTup_{tag}");
+                if self.tuple_typedefs.insert(cname.clone()) {
+                    let mut fields = String::new();
+                    for (i, t) in tys.iter().enumerate() {
+                        fields.push_str(&format!("    {t} _{i};\n"));
+                    }
+                    // Hoist typedef to the top of the C unit (before forward decls).
+                    self.pending_tuple_typedefs.push(format!(
+                        "typedef struct {{\n{fields}}} {cname};\n"
+                    ));
+                }
+                let tmp = self.fresh("tup");
+                self.line(&format!("{cname} {tmp};"));
+                for (i, v) in vals.iter().enumerate() {
+                    self.line(&format!("{tmp}._{i} = {v};"));
+                }
+                (cname, tmp)
+            }
+            Expr::ChanOpen { elem, cap } => {
+                let (_, c) = self.emit_expr(cap);
+                let tmp = self.fresh("ch");
+                match elem {
+                    TypeExpr::Named(n) if n == "string" => {
+                        self.line(&format!(
+                            "MakoChanStr *{tmp} = mako_chan_str_new({c});"
+                        ));
+                        ("MakoChanStr*".into(), tmp)
+                    }
+                    TypeExpr::Named(n)
+                        if n != "int"
+                            && n != "int64"
+                            && n != "int32"
+                            && n != "int8"
+                            && n != "byte"
+                            && n != "bool"
+                            && n != "float"
+                            && n != "float64"
+                            && n != "string"
+                            && self.structs.contains_key(n) =>
+                    {
+                        self.line(&format!(
+                            "MakoChanPtr *{tmp} = mako_chan_ptr_new({c});"
+                        ));
+                        // Remember element type for this temporary / binding
+                        self.chan_ptr_elems.insert(tmp.clone(), n.clone());
+                        ("MakoChanPtr*".into(), tmp)
+                    }
+                    _ => {
+                        self.line(&format!("MakoChan *{tmp} = mako_chan_new({c});"));
+                        ("MakoChan*".into(), tmp)
+                    }
+                }
             }
             Expr::Array(elems) => {
                 if !elems.is_empty() && elems.iter().all(|e| matches!(e, Expr::String(_))) {
@@ -9653,6 +9916,31 @@ impl Codegen {
                 ("int64_t".into(), "0".into())
             }
             Expr::Make { ty, len, cap } => {
+                // make(chan[T], n) — typed channel open
+                if let TypeExpr::Generic(n, args) = ty {
+                    if n == "chan" && args.len() == 1 {
+                        let cap_e = len.as_ref().map(|e| e.as_ref()).or(cap.as_ref().map(|e| e.as_ref()));
+                        let c = if let Some(ce) = cap_e {
+                            let (_, v) = self.emit_expr(ce);
+                            v
+                        } else {
+                            "1".into()
+                        };
+                        let tmp = self.fresh("ch");
+                        match &args[0] {
+                            TypeExpr::Named(en) if en == "string" => {
+                                self.line(&format!(
+                                    "MakoChanStr *{tmp} = mako_chan_str_new({c});"
+                                ));
+                                return ("MakoChanStr*".into(), tmp);
+                            }
+                            _ => {
+                                self.line(&format!("MakoChan *{tmp} = mako_chan_new({c});"));
+                                return ("MakoChan*".into(), tmp);
+                            }
+                        }
+                    }
+                }
                 if let TypeExpr::Map(k, v) = ty {
                     let hint = if let Some(l) = len {
                         let (_, h) = self.emit_expr(l);
@@ -9906,7 +10194,31 @@ impl Codegen {
                                     let (aty, v) = self.emit_expr(a);
                                     let pty =
                                         param_tys.get(i).map(|s| s.as_str()).unwrap_or("int64_t");
-                                    if pty.contains('*') || aty.contains('*') {
+                                    // Multi-word values: heap-box (and clone where needed) so
+                                    // intptr_t packing is safe across pthread spawn.
+                                    if aty == "MakoShareInt" || pty == "MakoShareInt" {
+                                        let boxn = self.fresh("shbox");
+                                        self.line(&format!(
+                                            "MakoShareInt *{boxn} = (MakoShareInt*)malloc(sizeof(MakoShareInt));"
+                                        ));
+                                        self.line(&format!(
+                                            "*{boxn} = mako_share_clone({v});"
+                                        ));
+                                        self.line(&format!(
+                                            "{arg_name}[{i}] = (intptr_t){boxn};"
+                                        ));
+                                    } else if aty == "MakoString" || pty == "MakoString" {
+                                        let boxn = self.fresh("sbox");
+                                        self.line(&format!(
+                                            "MakoString *{boxn} = (MakoString*)malloc(sizeof(MakoString));"
+                                        ));
+                                        self.line(&format!(
+                                            "*{boxn} = mako_str_clone({v});"
+                                        ));
+                                        self.line(&format!(
+                                            "{arg_name}[{i}] = (intptr_t){boxn};"
+                                        ));
+                                    } else if pty.contains('*') || aty.contains('*') {
                                         self.line(&format!("{arg_name}[{i}] = (intptr_t){v};"));
                                     } else {
                                         self.line(&format!("{arg_name}[{i}] = (intptr_t){v};"));
@@ -9956,16 +10268,88 @@ impl Codegen {
                     "send" => {
                         let (_, v) = self.emit_expr(&args[0]);
                         let tmp = self.fresh("ok");
-                        self.line(&format!("bool {tmp} = mako_chan_send({rv}, {v}) != 0;"));
+                        if rty == "MakoChanStr*" {
+                            self.line(&format!(
+                                "bool {tmp} = mako_chan_str_send({rv}, {v}) != 0;"
+                            ));
+                        } else if rty == "MakoChanPtr*" {
+                            let st = self
+                                .chan_ptr_elems
+                                .get(&rv)
+                                .cloned()
+                                .or_else(|| {
+                                    // receiver might be expression; try local name
+                                    if let Expr::Ident(n) = receiver.as_ref() {
+                                        self.chan_ptr_elems.get(n).cloned()
+                                    } else {
+                                        None
+                                    }
+                                })
+                                .unwrap_or_else(|| "int64_t".into());
+                            let cname = self
+                                .structs
+                                .get(&st)
+                                .map(|s| s.c_name.clone())
+                                .unwrap_or(st);
+                            let boxn = self.fresh("sbox");
+                            self.line(&format!(
+                                "{cname} *{boxn} = ({cname}*)malloc(sizeof({cname}));"
+                            ));
+                            self.line(&format!("*{boxn} = {v};"));
+                            self.line(&format!(
+                                "bool {tmp} = mako_chan_ptr_send({rv}, {boxn}) != 0;"
+                            ));
+                        } else {
+                            self.line(&format!("bool {tmp} = mako_chan_send({rv}, {v}) != 0;"));
+                        }
                         ("bool".into(), tmp)
                     }
                     "recv" => {
                         let tmp = self.fresh("rv");
-                        self.line(&format!("int64_t {tmp} = mako_chan_recv({rv});"));
-                        ("int64_t".into(), tmp)
+                        if rty == "MakoChanStr*" {
+                            self.line(&format!("MakoString {tmp} = mako_chan_str_recv({rv});"));
+                            ("MakoString".into(), tmp)
+                        } else if rty == "MakoChanPtr*" {
+                            let st = self
+                                .chan_ptr_elems
+                                .get(&rv)
+                                .cloned()
+                                .or_else(|| {
+                                    if let Expr::Ident(n) = receiver.as_ref() {
+                                        self.chan_ptr_elems.get(n).cloned()
+                                    } else {
+                                        None
+                                    }
+                                })
+                                .unwrap_or_else(|| "int64_t".into());
+                            let cname = self
+                                .structs
+                                .get(&st)
+                                .map(|s| s.c_name.clone())
+                                .unwrap_or(st.clone());
+                            let ptr = self.fresh("pp");
+                            self.line(&format!(
+                                "{cname} *{ptr} = ({cname}*)mako_chan_ptr_recv({rv});"
+                            ));
+                            // Zero-init fallback if closed empty
+                            self.line(&format!("{cname} {tmp};"));
+                            self.line(&format!(
+                                "if ({ptr}) {{ {tmp} = *{ptr}; free({ptr}); }} else {{ memset(&{tmp}, 0, sizeof({tmp})); }}"
+                            ));
+                            (cname, tmp)
+                        } else {
+                            self.line(&format!("int64_t {tmp} = mako_chan_recv({rv});"));
+                            ("int64_t".into(), tmp)
+                        }
                     }
                     "close" => {
-                        self.line(&format!("mako_chan_close({rv});"));
+                        if rty == "MakoChanStr*" {
+                            self.line(&format!("mako_chan_str_close({rv});"));
+                        } else if rty == "MakoChanPtr*" {
+                            self.line(&format!("mako_chan_ptr_close({rv});"));
+                        } else {
+                            self.line(&format!("mako_chan_close({rv});"));
+                        }
                         ("void".into(), "/*void*/".into())
                     }
                     "cancel" => {
@@ -9998,7 +10382,40 @@ impl Codegen {
                         ("int64_t".into(), tmp)
                     }
                     "len" => {
-                        if rty == "MakoString" {
+                        // Prefer Type_len user method (Go-style receivers) over builtin.
+                        let user_len = {
+                            let tname = self
+                                .structs
+                                .iter()
+                                .find(|(n, info)| *n == &rty || info.c_name == rty)
+                                .map(|(n, _)| n.clone())
+                                .or_else(|| {
+                                    if self.structs.contains_key(&rty) {
+                                        Some(rty.clone())
+                                    } else {
+                                        None
+                                    }
+                                });
+                            tname.and_then(|tn| {
+                                let k = format!("{tn}_len");
+                                if self.fn_rets.contains_key(&k) {
+                                    Some(k)
+                                } else {
+                                    None
+                                }
+                            })
+                        };
+                        if let Some(key) = user_len {
+                            let call = format!("{}({})", mangle(&key), rv);
+                            let ret = self
+                                .fn_rets
+                                .get(&key)
+                                .cloned()
+                                .unwrap_or_else(|| "int64_t".into());
+                            let tmp = self.fresh("ul");
+                            self.line(&format!("{ret} {tmp} = {call};"));
+                            (ret, tmp)
+                        } else if rty == "MakoString" {
                             ("int64_t".into(), format!("mako_str_len({rv})"))
                         } else if rty == "MakoFloatArray" {
                             ("int64_t".into(), format!("mako_float_array_len({rv})"))
@@ -10006,20 +10423,53 @@ impl Codegen {
                             ("int64_t".into(), format!("mako_str_array_len({rv})"))
                         } else if rty == "MakoByteArray" {
                             ("int64_t".into(), format!("mako_byte_array_len({rv})"))
-                        } else {
+                        } else if rty == "MakoIntArray"
+                            || rty.starts_with("MakoArr_")
+                        {
                             ("int64_t".into(), format!("mako_array_len({rv})"))
+                        } else {
+                            // Unknown .len — try Type_len by rty name
+                            let key = format!("{rty}_len");
+                            if self.fn_rets.contains_key(&key) {
+                                let call = format!("{}({})", mangle(&key), rv);
+                                let ret = self
+                                    .fn_rets
+                                    .get(&key)
+                                    .cloned()
+                                    .unwrap_or_else(|| "int64_t".into());
+                                let tmp = self.fresh("ul");
+                                self.line(&format!("{ret} {tmp} = {call};"));
+                                (ret, tmp)
+                            } else {
+                                ("int64_t".into(), format!("mako_array_len({rv})"))
+                            }
                         }
                     }
                     other => {
-                        // Enum associated method: Enum_method(self, ...)
+                        // Struct/enum associated method: Type_method(self, ...)
+                        // Includes `on Type { fn method… }` desugar.
                         {
-                            let ename = self
+                            let tname = self
                                 .enums
                                 .iter()
                                 .find(|(n, info)| *n == &rty || info.c_name == rty)
-                                .map(|(n, _)| n.clone());
-                            let key = if let Some(ref en) = ename {
-                                let k = format!("{en}_{other}");
+                                .map(|(n, _)| n.clone())
+                                .or_else(|| {
+                                    self.structs
+                                        .iter()
+                                        .find(|(n, info)| *n == &rty || info.c_name == rty)
+                                        .map(|(n, _)| n.clone())
+                                })
+                                .or_else(|| {
+                                    // Receiver C type often equals struct name
+                                    if self.structs.contains_key(&rty) {
+                                        Some(rty.clone())
+                                    } else {
+                                        None
+                                    }
+                                });
+                            let key = if let Some(ref tn) = tname {
+                                let k = format!("{tn}_{other}");
                                 if self.fn_rets.contains_key(&k) {
                                     k
                                 } else {
@@ -10149,22 +10599,42 @@ impl Codegen {
                 }
             }
             Expr::Fan { collection, mapper } => {
-                let (_, coll) = self.emit_expr(collection);
+                let (cty, coll) = self.emit_expr(collection);
                 let map_fn = self.fresh("mapfn");
                 if let Expr::Lambda { params, body } = mapper.as_ref() {
                     let p = params.first().cloned().unwrap_or_else(|| "x".into());
                     let helper = format!("__fan_{map_fn}");
                     let body_c = self.expr_as_pure_c(body, &p);
+                    let tmp = self.fresh("pm");
+                    if cty == "MakoFloatArray" {
+                        let helper_src = format!(
+                            "static double {helper}(double {p}) {{ return (double)({body_c}); }}\n"
+                        );
+                        self.insert_helper(&helper_src);
+                        self.line(&format!(
+                            "MakoFloatArray {tmp} = mako_par_map_float({coll}, {helper});"
+                        ));
+                        return ("MakoFloatArray".into(), tmp);
+                    }
+                    if cty == "MakoStrArray" {
+                        let helper_src = format!(
+                            "static MakoString {helper}(MakoString {p}) {{ return {body_c}; }}\n"
+                        );
+                        self.insert_helper(&helper_src);
+                        self.line(&format!(
+                            "MakoStrArray {tmp} = mako_par_map_str({coll}, {helper});"
+                        ));
+                        return ("MakoStrArray".into(), tmp);
+                    }
                     let helper_src =
                         format!("static int64_t {helper}(int64_t {p}) {{ return {body_c}; }}\n");
                     self.insert_helper(&helper_src);
-                    let tmp = self.fresh("pm");
                     self.line(&format!(
                         "MakoIntArray {tmp} = mako_par_map_int({coll}, {helper});"
                     ));
                     return ("MakoIntArray".into(), tmp);
                 }
-                ("MakoIntArray".into(), coll)
+                (cty, coll)
             }
             Expr::Block(b) => {
                 self.line("{");
@@ -10345,12 +10815,37 @@ impl Codegen {
                     .collect();
                 format!("({})", parts.join(" || "))
             }
+            Pattern::Tuple(_) => "1".into(), // irrefutable when types match
         }
     }
 
     fn bind_pattern_locals(&mut self, scrut: &str, sty: &str, pattern: &Pattern) {
         match pattern {
             Pattern::Or(_) => {}
+            Pattern::Tuple(parts) => {
+                // sty like MakoTup_int_string → field C types
+                let tags: Vec<&str> = sty
+                    .strip_prefix("MakoTup_")
+                    .unwrap_or("")
+                    .split('_')
+                    .collect();
+                for (i, p) in parts.iter().enumerate() {
+                    if let Pattern::Ident(n) = p {
+                        if n == "_" {
+                            continue;
+                        }
+                        let tag = tags.get(i).copied().unwrap_or("int");
+                        let cty = match tag {
+                            "string" => "MakoString",
+                            "float" => "double",
+                            "bool" => "bool",
+                            _ => "int64_t",
+                        };
+                        self.locals.insert(n.clone(), cty.into());
+                        self.line(&format!("{cty} {n} = {scrut}._{i};"));
+                    }
+                }
+            }
             Pattern::Ident(n) if n != "None" && n != "_" => {
                 // Unit variant: no binding
                 if let Some(enum_name) = self.variant_to_enum.get(n) {
@@ -10420,27 +10915,57 @@ impl Codegen {
     }
 
     fn emit_spawn_helper_typed(&mut self, helper: &str, fname: &str, param_tys: &[String]) {
-        let call_args: Vec<String> = param_tys
-            .iter()
-            .enumerate()
-            .map(|(i, ty)| {
-                if ty.contains('*') {
-                    format!("({ty})a[{i}]")
-                } else {
-                    format!("({ty})a[{i}]")
-                }
-            })
-            .collect();
-        let body = if param_tys.is_empty() {
-            format!("return (void*)(intptr_t){}();", mangle(fname))
+        if param_tys.is_empty() {
+            let helper_src = format!(
+                "static void *{helper}(void *arg) {{ (void)arg; return (void*)(intptr_t){}(); }}\n",
+                mangle(fname)
+            );
+            self.insert_helper(&helper_src);
+            return;
+        }
+        let mut unpack = String::from("intptr_t *a = (intptr_t*)arg;\n");
+        let mut call_args = Vec::new();
+        let mut cleanup = String::new();
+        for (i, ty) in param_tys.iter().enumerate() {
+            let local = format!("p{i}");
+            if ty == "MakoShareInt" {
+                unpack.push_str(&format!(
+                    "MakoShareInt {local} = *(MakoShareInt*)a[{i}]; free((void*)a[{i}]);\n"
+                ));
+                cleanup.push_str(&format!("mako_share_drop({local});\n"));
+                call_args.push(local);
+            } else if ty == "MakoString" {
+                unpack.push_str(&format!(
+                    "MakoString {local} = *(MakoString*)a[{i}]; free((void*)a[{i}]);\n"
+                ));
+                // callee owns the clone for the call duration; free buffer after if needed
+                call_args.push(local);
+            } else if ty.contains('*') {
+                unpack.push_str(&format!("{ty} {local} = ({ty})a[{i}];\n"));
+                call_args.push(local);
+            } else {
+                unpack.push_str(&format!("{ty} {local} = ({ty})a[{i}];\n"));
+                call_args.push(local);
+            }
+        }
+        let ret_ty = self
+            .fn_rets
+            .get(fname)
+            .map(|s| s.as_str())
+            .unwrap_or("int64_t");
+        let call = format!("{}({})", mangle(fname), call_args.join(", "));
+        let body = if ret_ty == "MakoString" {
+            format!(
+                "{unpack}MakoString __r = {call};\n{cleanup}return (void*)(intptr_t)0; /* string job result seed */\n"
+            )
+        } else if ret_ty.contains('*') {
+            format!("{unpack}void *__r = (void*){call};\n{cleanup}return __r;\n")
         } else {
             format!(
-                "intptr_t *a = (intptr_t*)arg; return (void*)(intptr_t){}({});",
-                mangle(fname),
-                call_args.join(", ")
+                "{unpack}int64_t __r = (int64_t){call};\n{cleanup}return (void*)(intptr_t)__r;\n"
             )
         };
-        let helper_src = format!("static void *{helper}(void *arg) {{ {body} }}\n");
+        let helper_src = format!("static void *{helper}(void *arg) {{\n{body}}}\n");
         self.insert_helper(&helper_src);
     }
 
@@ -10449,9 +10974,44 @@ impl Codegen {
             Expr::Ident(n) if n == param => n.clone(),
             Expr::Ident(n) => mangle(n),
             Expr::Int(n) => n.to_string(),
+            Expr::String(s) => format!("mako_str_from_cstr(\"{}\")", escape_c(s)),
+            Expr::Float(n) => {
+                // Ensure C double literal
+                let s = n.to_string();
+                if s.contains('.') || s.contains('e') || s.contains('E') {
+                    s
+                } else {
+                    format!("{s}.0")
+                }
+            }
+            Expr::Bool(b) => if *b { "1".into() } else { "0".into() },
             Expr::Binary { op, left, right } => {
                 let l = self.expr_as_pure_c(left, param);
                 let r = self.expr_as_pure_c(right, param);
+                // String concat in pure fan mappers
+                if matches!(op, BinOp::Add)
+                    && (l.contains("MakoString")
+                        || r.contains("MakoString")
+                        || l.contains("mako_str")
+                        || r.contains("mako_str")
+                        || l == *param
+                        || r == *param)
+                {
+                    // Prefer mako_str_concat when either side looks stringy; for pure
+                    // string fan bodies `|x| x` just returns x (Ident).
+                    if matches!(left.as_ref(), Expr::String(_))
+                        || matches!(right.as_ref(), Expr::String(_))
+                        || matches!(left.as_ref(), Expr::Ident(n) if n == param)
+                        || matches!(right.as_ref(), Expr::Ident(n) if n == param)
+                    {
+                        // Only force concat when one side is a string literal
+                        if matches!(left.as_ref(), Expr::String(_))
+                            || matches!(right.as_ref(), Expr::String(_))
+                        {
+                            return format!("mako_str_concat({l}, {r})");
+                        }
+                    }
+                }
                 let cop = match op {
                     BinOp::Add => "+",
                     BinOp::Sub => "-",
@@ -10485,6 +11045,18 @@ impl Codegen {
                 }
                 "0".into()
             }
+            // `fn(x) { x * 2 }` / `fn(x) { return x * 2 }` — last expr/return is the map body
+            Expr::Block(b) => {
+                for s in b.stmts.iter().rev() {
+                    match s {
+                        Stmt::Return(Some(e)) | Stmt::Expr(e) => {
+                            return self.expr_as_pure_c(e, param);
+                        }
+                        _ => {}
+                    }
+                }
+                "0".into()
+            }
             _ => "0".into(),
         }
     }
@@ -10511,6 +11083,10 @@ fn type_expr_schema(t: &TypeExpr) -> String {
             let p: Vec<_> = params.iter().map(type_expr_schema).collect();
             format!("fn({})->{}", p.join(","), type_expr_schema(ret))
         }
+        TypeExpr::Tuple(elems) => {
+            let e: Vec<_> = elems.iter().map(type_expr_schema).collect();
+            format!("({})", e.join(","))
+        }
     }
 }
 
@@ -10527,6 +11103,229 @@ fn escape_c(s: &str) -> String {
         }
     }
     out
+}
+
+
+fn c_type_mono_tag(c_ty: &str) -> String {
+    match c_ty {
+        "int64_t" => "int".into(),
+        "double" => "float".into(),
+        "bool" => "bool".into(),
+        "MakoString" => "string".into(),
+        "MakoChan*" => "chan_int".into(),
+        "MakoChanStr*" => "chan_string".into(),
+        other => other
+            .chars()
+            .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+            .collect(),
+    }
+}
+
+impl Codegen {
+    fn predeclare_tuples(&mut self, program: &Program) {
+        let mut tuples: Vec<Vec<TypeExpr>> = Vec::new();
+        fn walk_ty(t: &TypeExpr, out: &mut Vec<Vec<TypeExpr>>) {
+            if let TypeExpr::Tuple(elems) = t {
+                out.push(elems.clone());
+                for e in elems {
+                    walk_ty(e, out);
+                }
+            }
+            match t {
+                TypeExpr::Array(i) => walk_ty(i, out),
+                TypeExpr::Map(k, v) => {
+                    walk_ty(k, out);
+                    walk_ty(v, out);
+                }
+                TypeExpr::Generic(_, args) => {
+                    for a in args {
+                        walk_ty(a, out);
+                    }
+                }
+                TypeExpr::Tuple(elems) => {
+                    for e in elems {
+                        walk_ty(e, out);
+                    }
+                }
+                TypeExpr::Named(_) => {}
+                TypeExpr::Fn(params, ret) => {
+                    for p in params {
+                        walk_ty(p, out);
+                    }
+                    walk_ty(ret, out);
+                }
+            }
+        }
+        fn walk_expr(e: &Expr, out: &mut Vec<Vec<TypeExpr>>) {
+            match e {
+                Expr::Tuple(elems) => {
+                    // Infer from literals when possible
+                    let mut tys = Vec::new();
+                    let mut ok = true;
+                    for el in elems {
+                        match el {
+                            Expr::Int(_) => tys.push(TypeExpr::Named("int".into())),
+                            Expr::String(_) => tys.push(TypeExpr::Named("string".into())),
+                            Expr::Bool(_) => tys.push(TypeExpr::Named("bool".into())),
+                            Expr::Float(_) => tys.push(TypeExpr::Named("float".into())),
+                            _ => {
+                                ok = false;
+                                break;
+                            }
+                        }
+                    }
+                    if ok && tys.len() >= 2 {
+                        out.push(tys);
+                    }
+                    for el in elems {
+                        walk_expr(el, out);
+                    }
+                }
+                Expr::Call { callee, args } => {
+                    walk_expr(callee, out);
+                    for a in args {
+                        walk_expr(a, out);
+                    }
+                }
+                Expr::Binary { left, right, .. } => {
+                    walk_expr(left, out);
+                    walk_expr(right, out);
+                }
+                Expr::Unary { expr, .. }
+                | Expr::Field { base: expr, .. }
+                | Expr::Try(expr)
+                | Expr::Join(expr)
+                | Expr::Kick { expr, .. } => walk_expr(expr, out),
+                Expr::Array(xs) => {
+                    for x in xs {
+                        walk_expr(x, out);
+                    }
+                }
+                Expr::Match { scrutinee, arms } => {
+                    walk_expr(scrutinee, out);
+                    for a in arms {
+                        walk_expr(&a.body, out);
+                    }
+                }
+                Expr::Block(b) => {
+                    for s in &b.stmts {
+                        walk_stmt(s, out);
+                    }
+                }
+                Expr::Lambda { body, .. } => walk_expr(body, out),
+                Expr::Method { receiver, args, .. } => {
+                    walk_expr(receiver, out);
+                    for a in args {
+                        walk_expr(a, out);
+                    }
+                }
+                Expr::Make { ty, len, cap } => {
+                    walk_ty(ty, out);
+                    if let Some(l) = len {
+                        walk_expr(l, out);
+                    }
+                    if let Some(c) = cap {
+                        walk_expr(c, out);
+                    }
+                }
+                Expr::ChanOpen { elem, cap } => {
+                    walk_ty(elem, out);
+                    walk_expr(cap, out);
+                }
+                _ => {}
+            }
+        }
+        fn walk_stmt(s: &Stmt, out: &mut Vec<Vec<TypeExpr>>) {
+            match s {
+                Stmt::Let { ty, init, .. } => {
+                    if let Some(t) = ty {
+                        walk_ty(t, out);
+                    }
+                    walk_expr(init, out);
+                }
+                Stmt::LetMulti { init, .. } => walk_expr(init, out),
+                Stmt::Return(Some(e)) | Stmt::Expr(e) | Stmt::Assign { value: e, .. } => {
+                    walk_expr(e, out)
+                }
+                Stmt::If {
+                    init,
+                    cond,
+                    then_block,
+                    else_block,
+                } => {
+                    if let Some(init) = init {
+                        walk_stmt(init, out);
+                    }
+                    walk_expr(cond, out);
+                    for st in &then_block.stmts {
+                        walk_stmt(st, out);
+                    }
+                    if let Some(eb) = else_block {
+                        for st in &eb.stmts {
+                            walk_stmt(st, out);
+                        }
+                    }
+                }
+                Stmt::While { cond, body, .. } => {
+                    walk_expr(cond, out);
+                    for st in &body.stmts {
+                        walk_stmt(st, out);
+                    }
+                }
+                Stmt::For { iter, body, .. } => {
+                    walk_expr(iter, out);
+                    for st in &body.stmts {
+                        walk_stmt(st, out);
+                    }
+                }
+                Stmt::Defer { body }
+                | Stmt::Crew { body, .. }
+                | Stmt::Arena { body, .. }
+                | Stmt::Unsafe { body } => {
+                    for st in &body.stmts {
+                        walk_stmt(st, out);
+                    }
+                }
+                _ => {}
+            }
+        }
+        for item in &program.items {
+            if let Item::Fn(f) = item {
+                for p in &f.params {
+                    walk_ty(&p.ty, &mut tuples);
+                }
+                if let Some(r) = &f.ret {
+                    walk_ty(r, &mut tuples);
+                }
+                for s in &f.body.stmts {
+                    walk_stmt(s, &mut tuples);
+                }
+            }
+        }
+        for elems in tuples {
+            let c_tys: Vec<String> = elems.iter().map(|e| self.type_expr_c(e)).collect();
+            let tag = c_tys
+                .iter()
+                .map(|t| c_type_mono_tag(t))
+                .collect::<Vec<_>>()
+                .join("_");
+            let cname = format!("MakoTup_{tag}");
+            if self.tuple_typedefs.insert(cname.clone()) {
+                let mut fields = String::new();
+                for (i, t) in c_tys.iter().enumerate() {
+                    fields.push_str(&format!("    {t} _{i};\n"));
+                }
+                let _ = writeln!(
+                    self.out,
+                    "typedef struct {{\n{fields}}} {cname};\n"
+                );
+            }
+        }
+        // Flush any pending (should be empty here)
+        for td in self.pending_tuple_typedefs.drain(..) {
+            self.out.push_str(&td);
+        }
+    }
 }
 
 fn fold_const_c(expr: &Expr) -> Option<i64> {

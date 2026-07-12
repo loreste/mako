@@ -1,0 +1,40 @@
+// Pure Go-shaped Mako syntax (memory-safe, no GC).
+
+package main
+
+type Point struct {
+    x int
+    y int
+}
+
+func (p Point) distance() int {
+    return p.x + p.y
+}
+
+func (p Point) scale(k int) int {
+    return (p.x + p.y) * k
+}
+
+func divmod(a int, b int) (int, int) {
+    return (a / b, a % b)
+}
+
+func Add(a int, b int) int {
+    return a + b
+}
+
+func main() {
+    p := Point { x: 3, y: 4 }
+    print_int(p.distance())
+    print_int(p.scale(2))
+
+    var n = 10
+    n = n + 1
+    print_int(n)
+
+    q, r := divmod(17, 5)
+    print_int(q)
+    print_int(r)
+
+    print_int(Add(2, 3))
+}

@@ -1,0 +1,11 @@
+// EXPECT: cannot kick value of type
+fn sum_first(xs: []int) -> int {
+    return xs[0]
+}
+fn main() {
+    let xs = [1, 2, 3]
+    crew t {
+        let j = t.kick(sum_first(xs))
+        print(j.join())
+    }
+}

@@ -3,10 +3,15 @@
 Complete, runnable programs that demonstrate core Mako features. Copy any
 example into a `.mko` file and run it with `mako run`.
 
+**Preferred style is Mako-native** (`fn`, `let`, `on`, `crew`, `hold`…).  
+See [IDENTITY.md](IDENTITY.md) and [`examples/mako_style.mko`](../examples/mako_style.mko).  
+Dual Go-like forms still work for compatibility.
+
 ---
 
 ## Table of contents
 
+0. [Mako-style tour](#0-mako-style-tour)
 1. [Hello world](#1-hello-world)
 2. [Fibonacci (functions, recursion)](#2-fibonacci)
 3. [Read and write files](#3-read-and-write-files)
@@ -24,9 +29,44 @@ example into a `.mko` file and run it with `mako run`.
 
 ---
 
+## 0. Mako-style tour
+
+Full file: [`examples/mako_style.mko`](../examples/mako_style.mko).
+
+```mko
+export struct Point {
+    x: int
+    y: int
+}
+
+on Point {
+    fn distance(self) -> int {
+        return self.x + self.y
+    }
+}
+
+fn divmod(a: int, b: int) -> (int, int) {
+    return (a / b, a % b)
+}
+
+fn main() {
+    let p = Point { x: 3, y: 4 }
+    print_int(p.distance())
+    let q, r = divmod(17, 5)
+    print_int(q)
+    print_int(r)
+}
+```
+
+```bash
+mako run examples/mako_style.mko
+```
+
+---
+
 ## 1. Hello world
 
-The simplest Mako program. Every program needs a `fn main()`.
+The simplest Mako program. Every program needs `fn main()`.
 
 ```mko
 // hello.mko

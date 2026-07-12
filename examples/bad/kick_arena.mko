@@ -1,0 +1,12 @@
+// EXPECT: cannot kick
+fn use_arena(a: Arena) -> int {
+    return 0
+}
+fn main() {
+    arena a {
+        crew t {
+            let j = t.kick(use_arena(a))
+            print(j.join())
+        }
+    }
+}

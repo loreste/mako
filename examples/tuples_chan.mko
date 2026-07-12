@@ -1,0 +1,30 @@
+// Tuples + typed channels (chan_new stays int; chan_open is additive)
+
+fn pair_sum(t: (int, int)) -> int {
+    match t {
+        (a, b) => a + b,
+    }
+}
+
+fn main() {
+    let t = (10, 20)
+    print_int(pair_sum(t))
+
+    // Backward compatible int channel
+    let ch = chan_new(2)
+    let _ = ch.send(7)
+    print_int(ch.recv())
+    ch.close()
+
+    // Typed string channel (new)
+    let cs = chan_open[string](2)
+    let _ = cs.send("hello")
+    print(cs.recv())
+    cs.close()
+
+    // make(chan[int], n) form
+    let ch2 = make(chan[int], 1)
+    let _ = ch2.send(99)
+    print_int(ch2.recv())
+    ch2.close()
+}

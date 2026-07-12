@@ -48,7 +48,7 @@ After `mako init hello --name hello`:
 ```
 hello/
   mako.toml        # package manifest (name, version, dependencies)
-  main.mko         # entry point — must contain fn main()
+  main.mko         # entry point — must contain func main() / fn main()
 ```
 
 The `mako.toml` looks like:
@@ -60,7 +60,7 @@ version = "0.1.0"
 
 ## Write your first program
 
-Open `hello/main.mko`:
+Open `hello/main.mko` (Mako-native syntax preferred):
 
 ```mko
 fn main() {
@@ -75,6 +75,9 @@ fn fib(n: int) -> int {
     return fib(n - 1) + fib(n - 2)
 }
 ```
+
+Identity guide: [IDENTITY.md](../IDENTITY.md).  
+Dual forms (`func`, `:=`, …) still work for compatibility.
 
 ## The development loop
 

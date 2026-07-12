@@ -1,8 +1,8 @@
-//! Desugar high-level syntax into core AST (actors, derive, etc.).
+//! Desugar high-level syntax into core AST (actors, derive, `on` methods, etc.).
 
 use crate::ast::*;
 
-/// Expand `actor` / `#[derive(json)]` into helper functions.
+/// Expand `actor` / `#[derive(json)]` / `on Type { … }` into helper functions.
 pub fn desugar(mut program: Program) -> Program {
     let mut extras: Vec<Item> = Vec::new();
     let mut kept: Vec<Item> = Vec::new();
@@ -11,6 +11,9 @@ pub fn desugar(mut program: Program) -> Program {
         match item {
             Item::Actor(actor) => {
                 extras.extend(expand_actor(actor));
+            }
+            Item::On(on) => {
+                extras.extend(expand_on(on));
             }
             Item::Struct(s) => {
                 if s.derives.iter().any(|d| d == "json") {
@@ -24,6 +27,34 @@ pub fn desugar(mut program: Program) -> Program {
 
     kept.extend(extras);
     Program { items: kept }
+}
+
+/// `on Point { fn distance(self) -> int { … } }` → `fn Point_distance(self: Point, …)`
+fn expand_on(on: OnDef) -> Vec<Item> {
+    let mut items = Vec::new();
+    for mut method in on.methods {
+        // Fill bare `self` / `__self` type with the receiver type.
+        for p in &mut method.params {
+            if p.name == "self" {
+                if matches!(&p.ty, TypeExpr::Named(n) if n == "__self") {
+                    p.ty = TypeExpr::Named(on.ty.clone());
+                }
+            }
+        }
+        // If first param is self without proper type still Named(__self), fix it.
+        if let Some(p) = method.params.first_mut() {
+            if p.name == "self" {
+                if matches!(&p.ty, TypeExpr::Named(n) if n == "__self" || n.is_empty()) {
+                    p.ty = TypeExpr::Named(on.ty.clone());
+                }
+            }
+        }
+        method.name = format!("{}_{}", on.ty, method.name);
+        method.exported = on.exported;
+        // Methods from `on` are concrete (no free type params unless user wrote them).
+        items.push(Item::Fn(method));
+    }
+    items
 }
 
 /// `Person_to_json(...)` plus `Person_<field>_from_json(j)` extractors.
@@ -52,11 +83,13 @@ fn expand_json_derive(s: &StructDef) -> Vec<Item> {
 
     items.push(Item::Fn(FnDef {
         name: fname,
+        type_params: Vec::new(),
         params,
         ret: Some(TypeExpr::Named("string".into())),
         body: Block {
             stmts: vec![Stmt::Return(Some(json_expr))],
         },
+        exported: s.exported,
     }));
 
     for (fname_field, ty) in &s.fields {
@@ -67,6 +100,7 @@ fn expand_json_derive(s: &StructDef) -> Vec<Item> {
         };
         items.push(Item::Fn(FnDef {
             name: format!("{}_{}_from_json", s.name, fname_field),
+            type_params: Vec::new(),
             params: vec![Param {
                 name: "j".into(),
                 ty: TypeExpr::Named("string".into()),
@@ -79,6 +113,7 @@ fn expand_json_derive(s: &StructDef) -> Vec<Item> {
                     args: vec![Expr::Ident("j".into()), Expr::String(fname_field.clone())],
                 }))],
             },
+            exported: s.exported,
         }));
     }
 
@@ -115,17 +150,20 @@ fn expand_actor(actor: ActorDef) -> Vec<Item> {
         let tag = (i + 1) as i64;
         items.push(Item::Fn(FnDef {
             name: format!("{name}_{}", arm.message),
+            type_params: Vec::new(),
             params: vec![],
             ret: Some(TypeExpr::Named("int".into())),
             body: Block {
                 stmts: vec![Stmt::Return(Some(Expr::Int(tag)))],
             },
+            exported: false,
         }));
     }
 
     // Session_spawn() -> chan[int]
     items.push(Item::Fn(FnDef {
         name: format!("{name}_spawn"),
+        type_params: Vec::new(),
         params: vec![],
         ret: Some(TypeExpr::Generic(
             "chan".into(),
@@ -137,11 +175,13 @@ fn expand_actor(actor: ActorDef) -> Vec<Item> {
                 args: vec![Expr::Int(16)],
             }))],
         },
+        exported: false,
     }));
 
     // Session_send(mbox, tag) -> bool
     items.push(Item::Fn(FnDef {
         name: format!("{name}_send"),
+        type_params: Vec::new(),
         params: vec![
             Param {
                 name: "__mbox".into(),
@@ -161,6 +201,7 @@ fn expand_actor(actor: ActorDef) -> Vec<Item> {
                 args: vec![Expr::Ident("__mbox".into()), Expr::Ident("__tag".into())],
             }))],
         },
+        exported: false,
     }));
 
     // Session_loop(mbox) — message dispatch
@@ -194,6 +235,7 @@ fn expand_actor(actor: ActorDef) -> Vec<Item> {
             });
         }
         while_body.push(Stmt::If {
+            init: None,
             cond: Expr::Binary {
                 op: BinOp::Eq,
                 left: Box::new(Expr::Ident("__m".into())),
@@ -221,6 +263,7 @@ fn expand_actor(actor: ActorDef) -> Vec<Item> {
 
     items.push(Item::Fn(FnDef {
         name: format!("{name}_loop"),
+        type_params: Vec::new(),
         params: vec![Param {
             name: "__mbox".into(),
             ty: TypeExpr::Generic("chan".into(), vec![TypeExpr::Named("int".into())]),
@@ -228,6 +271,7 @@ fn expand_actor(actor: ActorDef) -> Vec<Item> {
         }],
         ret: Some(TypeExpr::Named("int".into())),
         body: Block { stmts: loop_stmts },
+        exported: false,
     }));
 
     items

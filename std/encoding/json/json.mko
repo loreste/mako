@@ -1,4 +1,18 @@
-fn object_str(key: string, val: string) -> string { return json_ss(key, val) }
-fn get_string(obj: string, key: string) -> string { return json_get_string(obj, key) }
-fn get_int(obj: string, key: string) -> int { return json_get_int(obj, key) }
-fn has(obj: string, key: string) -> bool { return json_has(obj, key) }
+// std/encoding/json — pull "encoding/json" → json.*
+fn object_str(key: string, val: string) -> string {
+    return json_object(key, val)
+}
+fn get_string(obj: string, key: string) -> string {
+    return json_get_string(obj, key)
+}
+fn get_int(obj: string, key: string) -> int {
+    return json_get_int(obj, key)
+}
+fn has(obj: string, key: string) -> bool {
+    // true when key is present and non-empty string (seed)
+    let v = json_get_string(obj, key)
+    return !str_eq(v, "")
+}
+fn object_ss(k1: string, v1: string, k2: string, v2: string) -> string {
+    return json_ss(k1, v1, k2, v2)
+}

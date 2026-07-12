@@ -9,21 +9,24 @@ struct Task {
 }
 
 fn create_table(db: SqlDB) -> Result[int, string] {
-    let _ = sql_exec_plain(db, "CREATE TABLE IF NOT EXISTS tasks (id INTEGER PRIMARY KEY, title TEXT, done INTEGER)")?
+    let rc = sql_exec_plain(db, "CREATE TABLE IF NOT EXISTS tasks (id INTEGER PRIMARY KEY, title TEXT, done INTEGER)")
+    if rc != 0 {
+        return error("create table failed")
+    }
     Ok(0)
 }
 
 fn insert_task(db: SqlDB, title: string) -> Result[int, string] {
-    let _ = sql_exec_str4(db, "INSERT INTO tasks (title, done) VALUES ($1, $2)", title, "0", "", "")?
+    let rc = sql_exec_str4(db, "INSERT INTO tasks (title, done) VALUES ($1, $2)", title, "0", "", "")
+    if rc != 0 {
+        return error("insert failed")
+    }
     Ok(0)
 }
 
-fn get_task(db: SqlDB, title: string) -> Result[string, string] {
+fn get_task(db: SqlDB, title: string) -> string {
     let row = sql_query_str(db, "SELECT title FROM tasks WHERE title = $1", title)
-    if str_eq(row, "") {
-        return error("task not found")
-    }
-    Ok(row)
+    return row
 }
 
 fn worker(ch: chan[int], id: int, results: CMap) -> int {
@@ -55,9 +58,11 @@ fn main() {
     }
 
     // query back
-    match get_task(db, "write tests") {
-        Ok(title) => print("found: " + title),
-        Err(e) => print("error: " + e),
+    let found = get_task(db, "write tests")
+    if str_eq(found, "") {
+        print("error: task not found")
+    } else {
+        print("found: " + found)
     }
 
     // concurrent workers with shared results

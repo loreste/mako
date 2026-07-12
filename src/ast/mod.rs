@@ -16,12 +16,59 @@ pub enum Item {
     Interface(InterfaceDef),
     ExternC(ExternCDef),
     Const(ConstDef),
-    /// `import "./path.mko"` or `import "./path.mko" as foo` — merge another source file.
-    /// With `as`, top-level fns are renamed `foo__name` and called as `foo.name()`.
+    /// Mako-native method block: `on Point { fn distance(self) -> int { … } }`
+    /// Desugars to free functions `Point_distance` (backward compatible with existing style).
+    On(OnDef),
+    /// Unit name: preferred `pack lib`, dual `package lib`.
+    /// Optional; for libraries, the name is the default pull qualifier.
+    Package {
+        name: String,
+    },
+    /// Pull another file or package (always package-qualified when Normal).
+    ///
+    /// Preferred Mako spellings:
+    /// ```text
+    /// pull "strings"                   // strings.contains → strings__contains
+    /// pull "./helper.mko" as lib       // explicit alias
+    /// pull (
+    ///     "fmt"
+    ///     "./math.mko" as math
+    /// )
+    /// ```
+    /// Dual / specialized (still accepted):
+    /// ```text
+    /// import "strings"                 // dual of pull
+    /// import lib "./helper.mko"
+    /// pull _ "sidefx"                  // blank: load only
+    /// pull . "./local.mko"             // dot: no prefix
+    /// ```
     Import {
         path: String,
+        /// Explicit alias (`"path" as lib` preferred; `lib "path"` dual).
+        /// `None` → derive from imported `pack` clause or path basename.
         alias: Option<String>,
+        mode: ImportMode,
     },
+}
+
+/// How an import binds names into the importer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default)]
+pub enum ImportMode {
+    /// Qualify with package name / alias: `strings.contains(...)`.
+    #[default]
+    Normal,
+    /// `_ "path"` — compile dependency only; no exported names.
+    Blank,
+    /// `. "path"` — merge symbols without a prefix (specialized).
+    Dot,
+}
+
+/// `on TypeName { fn method… }` — Mako method surface (not Rust `impl`, not Go methods).
+#[derive(Debug, Clone, PartialEq)]
+pub struct OnDef {
+    pub ty: String,
+    pub methods: Vec<FnDef>,
+    pub exported: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -58,9 +105,13 @@ pub struct ExternCDef {
 #[derive(Debug, Clone, PartialEq)]
 pub struct FnDef {
     pub name: String,
+    /// User generics: `fn id[T](x: T) -> T` or `fn id<T>(x: T) -> T` (dual syntax).
+    pub type_params: Vec<String>,
     pub params: Vec<Param>,
     pub ret: Option<TypeExpr>,
     pub body: Block,
+    /// `export fn` — package boundary marker (enforced when visibility=explicit).
+    pub exported: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -76,12 +127,14 @@ pub struct StructDef {
     pub fields: Vec<(String, TypeExpr)>,
     /// e.g. ["json"] from `#[derive(json)]`
     pub derives: Vec<String>,
+    pub exported: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct EnumDef {
     pub name: String,
     pub variants: Vec<EnumVariant>,
+    pub exported: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -98,6 +151,8 @@ pub enum TypeExpr {
     Map(Box<TypeExpr>, Box<TypeExpr>),
     Array(Box<TypeExpr>),
     Fn(Vec<TypeExpr>, Box<TypeExpr>),
+    /// Product type: `(int, string)` — Mako tuples (additive).
+    Tuple(Vec<TypeExpr>),
 }
 
 impl fmt::Display for TypeExpr {
@@ -126,6 +181,16 @@ impl fmt::Display for TypeExpr {
                 }
                 write!(f, ") -> {ret}")
             }
+            TypeExpr::Tuple(elems) => {
+                write!(f, "(")?;
+                for (i, e) in elems.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{e}")?;
+                }
+                write!(f, ")")
+            }
         }
     }
 }
@@ -143,6 +208,12 @@ pub enum Stmt {
         /// `hold` = unique/move; `share` = RC; none = ordinary
         ownership: Ownership,
         ty: Option<TypeExpr>,
+        init: Expr,
+    },
+    /// Go multi-return unpack: `let a, b = f()` or `a, b := f()` when `f` returns a tuple.
+    LetMulti {
+        names: Vec<String>,
+        mutable: bool,
         init: Expr,
     },
     /// Go-like comma-ok map lookup: `let v, ok = m[k]`
@@ -172,6 +243,9 @@ pub enum Stmt {
     Expr(Expr),
     Return(Option<Expr>),
     If {
+        /// Optional Go-style init clause: `if x := f(); cond { … }`. Runs before
+        /// `cond` and is scoped to the whole if/else.
+        init: Option<Box<Stmt>>,
         cond: Expr,
         then_block: Block,
         else_block: Option<Block>,
@@ -279,7 +353,16 @@ pub enum Expr {
         name: String,
         fields: Vec<(String, Expr)>,
     },
+    /// Go-style positional literal `Point{1, 2}` — values in declaration order.
+    /// Field names are resolved against the struct definition during type-check
+    /// and codegen.
+    StructLitPos {
+        name: String,
+        values: Vec<Expr>,
+    },
     Array(Vec<Expr>),
+    /// Tuple literal: `(a, b)` (single `(a)` remains grouping).
+    Tuple(Vec<Expr>),
     /// Go-like `[]byte("x")` / `[]T(arg)` conversion call.
     Convert {
         ty: TypeExpr,
@@ -290,6 +373,11 @@ pub enum Expr {
         ty: TypeExpr,
         len: Option<Box<Expr>>,
         cap: Option<Box<Expr>>,
+    },
+    /// Mako typed channel open: `chan_open[string](4)` (int form equals `chan_new`).
+    ChanOpen {
+        elem: TypeExpr,
+        cap: Box<Expr>,
     },
     Lambda {
         params: Vec<String>,
@@ -332,6 +420,8 @@ pub enum Pattern {
     Literal(Expr),
     /// Fallthrough-free multi-match: `0 | 1 | 2 => ...`
     Or(Vec<Pattern>),
+    /// Tuple destructure: `(a, b)`
+    Tuple(Vec<Pattern>),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

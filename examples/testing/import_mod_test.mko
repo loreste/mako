@@ -1,6 +1,7 @@
-import "../import_lib.mko"
+// Default alias from package clause (`package lib` in import_lib.mko)
+pull "../import_lib.mko"
 
 fn TestImportMod() {
-    assert_eq(lib_add(2, 40), 42)
-    assert_eq_str(lib_greet("m"), "hi m")
+    assert_eq(lib.add(2, 40), 42)
+    assert_eq_str(lib.greet("m"), "hi m")
 }

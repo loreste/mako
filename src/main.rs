@@ -195,6 +195,9 @@ enum Commands {
         /// Focus a single workspace member
         #[arg(short = 'p', long = "package")]
         package: Option<String>,
+        /// Flag dual/compat spellings (`func`, `:=`, `import`, …) as style — Mako flair preferred
+        #[arg(long, default_value_t = false)]
+        identity: bool,
     },
     /// Time compile+run of bench_*.mko (workspace-aware; optional `-p`)
     Bench {
@@ -819,8 +822,12 @@ fn run(cli: Cli) -> Result<(), ()> {
             }
             last_ok
         }
-        Commands::Lint { path, package } => cmd_tool_paths(&path, package.as_deref(), |member| {
-            tooling::run_lint(member)
+        Commands::Lint {
+            path,
+            package,
+            identity,
+        } => cmd_tool_paths(&path, package.as_deref(), |member| {
+            tooling::run_lint(member, identity)
         }),
         Commands::Bench {
             path,
@@ -2575,18 +2582,33 @@ fn compile_to_ast_with(file: &Path, incr: &incremental::IncrOptions) -> Result<a
     let program = tooling::resolve_imports(file, program).map_err(|e| {
         Diagnostic::error(&path, &src, Span::unknown(), e).emit();
     })?;
-    let program = tooling::merge_path_dependencies(file, program).map_err(|e| {
+    let mut program = tooling::merge_path_dependencies(file, program).map_err(|e| {
         Diagnostic::error(&path, &src, Span::unknown(), e).emit();
     })?;
 
-    incremental::typecheck_incremental(file, &program, &src, incr)?;
+    incremental::typecheck_incremental(file, &mut program, &src, incr)?;
     Ok(program)
 }
 
 fn compile_to_c_timed(file: &Path) -> Result<(String, f64), ()> {
     let t0 = Instant::now();
     let program = compile_to_ast(file)?;
-    let c = Codegen::new().emit(&program);
+    let mut cg = Codegen::new();
+    cg.source_file = Some(file.display().to_string());
+    if let Some(dir) = tooling::find_nearest_manifest_dir(file) {
+        let manifest = dir.join("mako.toml");
+        if let Ok(text) = fs::read_to_string(&manifest) {
+            let prof = tooling::codegen_profile_from_toml(
+                &text,
+                Some(file.display().to_string()),
+            );
+            cg.bounds_checks_always = prof.bounds_checks_always;
+            if prof.source_file.is_some() {
+                cg.source_file = prof.source_file;
+            }
+        }
+    }
+    let c = cg.emit(&program);
     Ok((c, t0.elapsed().as_secs_f64() * 1000.0))
 }
 

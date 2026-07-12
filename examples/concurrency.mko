@@ -1,4 +1,6 @@
-// Structured concurrency: jobs cannot outlive their crew.
+// First-class concurrency — structured crew (no orphan tasks).
+// Speed path: native threads via runtime; join before crew ends.
+
 fn work(n: int) -> int {
     return n * n
 }
@@ -9,6 +11,6 @@ fn main() {
         let b = t.kick(work(9))
         let x = a.join()
         let y = b.join()
-        print_int(x + y)
+        print(x + y) // 49 + 81 = 130
     }
 }

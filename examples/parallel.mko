@@ -1,8 +1,22 @@
-// Data-parallel fan across cores
+// First-class parallelism — fan maps across cores (mako_par_map_int / float).
+// Prefer Mako `fn` lambdas or short `|x| …` form.
+
 fn main() {
     let xs = [1, 2, 3, 4, 5, 6, 7, 8]
+    // Pipe form (int)
     let ys = fan(xs, |x| x * x)
     for v in ys {
-        print_int(v)
+        print(v)
+    }
+    // Mako fn form (block body)
+    let zs = fan(xs, fn(x) { x + 1 })
+    for v in zs {
+        print(v)
+    }
+    // Float parallel map
+    let fs = [1.0, 2.0, 3.0, 4.0]
+    let gs = fan(fs, |x| x * 2.0)
+    for v in gs {
+        print(v)
     }
 }

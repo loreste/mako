@@ -1,5 +1,6 @@
 // Append-only key-value store library (mini embedded engine).
 // Format: lines `PUT <key> <value>\n` and `DEL <key>\n`. Last write wins.
+pack lib
 
 fn kv_path() -> string {
     return "/tmp/mako_kv_engine.log"
