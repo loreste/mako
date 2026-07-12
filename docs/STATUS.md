@@ -172,21 +172,26 @@ Last inventory: 2026-07-11 (**unique Mako surface** · pack/pull · pain map · 
 | `chan_open[Struct]` via MakoChanPtr heap-box | Done |
 | `error_tag(tag, msg)` enum-like string errors | Done |
 
-**Closed (wave 7–11):** join_timeout **flatten** for `Job[Result[T,string]]` · POD kick
+**Closed (wave 7–12):** join_timeout **flatten** for `Job[Result[T,string]]` · POD kick
 with **string fields** · `reflect_value_of` N fields · `Result[[]int,E]` Ok ·
-flaky timeout tests hardened · prior Result/select/SMTP/TSan work.
+`Result[map[string]int,E]` Ok · non-POD kick/reflect rejects · NLL if/else partial
+product · Hiragana/Katakana/Hangul `\p{…}` · flaky timeout tests hardened ·
+prior Result/select/SMTP/TSan work.
+
+**Wave 12 tests:** `examples/testing/wave12_queue_test.mko` · bad
+`kick_non_pod` · `reflect_non_pod` · `hold_if_else_partial_product`.
 
 **Pain residuals (language) still open:** see [PAIN_POINTS.md](PAIN_POINTS.md) §4.
 
 1. Fuller data-race model beyond TSan smoke  
-2. More Result Ok shapes (maps, generic)  
-3. Stronger NLL (nested partial-field product cases)  
+2. More Result Ok shapes (generic / other map key-value families)  
+3. Stronger NLL (deeper nested partial products beyond if/else join)  
 
 **Stdlib / product residuals:**
 
-6. Complete Unicode property database / full PCRE  
-7. Huffman JPEG bitstream readable by arbitrary viewers  
-8. Reflect for non-POD structs  
+6. Complete Unicode property database / full PCRE (script seeds expanded)  
+7. Huffman JPEG bitstream readable by arbitrary viewers (JFIF header + APP7 payload today)  
+8. Reflect for non-POD / nested structs (POD N-field done; nested rejected)  
 9. Symbol-level parity inside Done packages
 
 ---

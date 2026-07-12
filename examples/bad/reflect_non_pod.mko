@@ -1,0 +1,15 @@
+// EXPECT: reflect_value_of expects a POD struct
+// Nested / map fields are non-POD — reflect_value_of rejects them.
+struct Inner {
+    n: int
+}
+
+struct Nested {
+    inner: Inner
+    tag: int
+}
+
+fn main() {
+    let n = Nested { inner: Inner { n: 1 }, tag: 2 }
+    let _ = reflect_value_of(n)
+}

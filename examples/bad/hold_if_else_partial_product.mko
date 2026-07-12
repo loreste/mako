@@ -1,0 +1,19 @@
+// EXPECT: cannot use
+// NLL product: different fields moved on each branch → both tainted after join.
+struct Pair {
+    a: string
+    b: string
+}
+
+fn main() {
+    hold let p = Pair { a: "x", b: "y" }
+    if 1 == 1 {
+        let x = p.a
+        print(x)
+    } else {
+        let y = p.b
+        print(y)
+    }
+    // After join, both a and b may have been moved → whole / either field unsafe.
+    print(p.a)
+}

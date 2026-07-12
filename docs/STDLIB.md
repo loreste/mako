@@ -52,9 +52,9 @@ Tests: `examples/testing/stdlib_*`, plus area tests (`base64_test`, `regex_*`,
 | `mime` / `multipart` · `context` · `crypto` | **Done** | |
 | `math` / `rand` · `text/template` / `html/template` | **Done** | if/range/with/nested |
 | `html` · `utf8` · `sync` / `atomic` · `slices` / `maps` | **Done** | |
-| `errors` / `testing` / `httptest` / `regexp` / `log` / `slog` / `sql` | **Done** | RE2-ish + `\x` `(?:)` `\p{...}` lookahead |
-| `image/png` / `gif` / `jpeg` | **Done** | LZW dict; DCT + Huffman block |
-| `reflect` | **Done** | value bag + clone/equal |
+| `errors` / `testing` / `httptest` / `regexp` / `log` / `slog` / `sql` | **Done** | RE2-ish + `\x` `(?:)` `\p{...}` scripts/categories + lookahead |
+| `image/png` / `gif` / `jpeg` | **Done** | LZW dict; DCT + Huffman block; JFIF shell + APP7 Mako payload |
+| `reflect` | **Done** | POD value bag (N fields) + clone/equal; nested rejected |
 | `plugin` / `syscall` | skip | VISION |
 | `embed` | **Done** | helper (not compile-time) |
 
