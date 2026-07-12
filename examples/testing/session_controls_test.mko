@@ -1,0 +1,28 @@
+// Network/session controls: accept backlog, recv/send timeouts, TCP keepalive.
+// Exercised over a real loopback connection so the options apply to a live fd.
+// The recv-timeout is proven by a read that returns (empty) even though the
+// connected peer never sends anything.
+
+func TestSessionControls() {
+    let lfd = tcp_listen_backlog("127.0.0.1", 19311, 128)
+    assert(lfd >= 0)
+
+    // Connect a client that stays silent (completes into the accept backlog).
+    let cfd = tcp_connect("127.0.0.1", 19311)
+    assert(cfd >= 0)
+
+    let sfd = tcp_accept(lfd)
+    assert(sfd >= 0)
+
+    // Keepalive + a short recv timeout on the accepted connection.
+    assert_eq(tcp_keepalive(sfd, 30, 10, 3), 1)
+    assert_eq(tcp_set_timeout(sfd, 200), 1)
+
+    // Peer is silent → the read must time out and return empty, not hang.
+    let got = tcp_read(sfd)
+    assert_eq(len(got), 0)
+
+    let _a = tcp_close(sfd)
+    let _b = tcp_close(cfd)
+    let _c = tcp_close(lfd)
+}

@@ -8,6 +8,7 @@
 #include <fcntl.h>
 #include <sys/select.h>
 #include <sys/socket.h>
+#include <sys/time.h>
 #include <sys/un.h>
 #include <netinet/tcp.h>
 #endif
@@ -35,7 +36,10 @@ static inline int mako_bind_ipv4_addr(struct sockaddr_in *addr, MakoString host,
     return inet_pton(AF_INET, hbuf, &addr->sin_addr) == 1;
 }
 
-static inline int64_t mako_tcp_listen_addr(MakoString host, int64_t port) {
+/* Bind host:port and listen with an explicit accept backlog. backlog<=0 uses
+ * 4096. Backlog bounds the kernel's queue of unaccepted connections, the first
+ * lever for limiting inbound load. */
+static inline int64_t mako_tcp_listen_backlog(MakoString host, int64_t port, int64_t backlog) {
     if (!mako_net_init()) return -1;
     mako_sock_t fd = socket(AF_INET, SOCK_STREAM, 0);
     if (fd == MAKO_INVALID_SOCK) {
@@ -55,12 +59,17 @@ static inline int64_t mako_tcp_listen_addr(MakoString host, int64_t port) {
         mako_sock_close(fd);
         return -1;
     }
-    if (listen(fd, 4096) < 0) {
+    int bl = (backlog > 0 && backlog < 65536) ? (int)backlog : 4096;
+    if (listen(fd, bl) < 0) {
         fprintf(stderr, "error: tcp: listen failed\n");
         mako_sock_close(fd);
         return -1;
     }
     return (int64_t)fd;
+}
+
+static inline int64_t mako_tcp_listen_addr(MakoString host, int64_t port) {
+    return mako_tcp_listen_backlog(host, port, 4096);
 }
 
 static inline int64_t mako_tcp_listen(int64_t port) {
@@ -135,6 +144,52 @@ static inline MakoString mako_tcp_read(int64_t fd) {
 static inline int64_t mako_tcp_nodelay(int64_t fd) {
     int flag = 1;
     return setsockopt((int)fd, IPPROTO_TCP, TCP_NODELAY, &flag, sizeof(flag)) == 0 ? 1 : 0;
+}
+
+/* Set recv+send timeouts on a connection so a stalled peer cannot hold a
+ * session open indefinitely. ms<=0 clears the timeout (blocks forever).
+ * Returns 1 on success, 0 on error. */
+static inline int64_t mako_tcp_set_timeout(int64_t fd, int64_t ms) {
+#if defined(_WIN32)
+    DWORD tv = (ms > 0) ? (DWORD)ms : 0;
+    int a = setsockopt((mako_sock_t)fd, SOL_SOCKET, SO_RCVTIMEO, (const char *)&tv, sizeof(tv));
+    int b = setsockopt((mako_sock_t)fd, SOL_SOCKET, SO_SNDTIMEO, (const char *)&tv, sizeof(tv));
+#else
+    struct timeval tv;
+    tv.tv_sec = (ms > 0) ? (time_t)(ms / 1000) : 0;
+    tv.tv_usec = (ms > 0) ? (suseconds_t)((ms % 1000) * 1000) : 0;
+    int a = setsockopt((int)fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+    int b = setsockopt((int)fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+#endif
+    return (a == 0 && b == 0) ? 1 : 0;
+}
+
+/* Enable TCP keepalive and tune idle/interval/count so dead peers are detected
+ * and half-open connections reaped. idle/interval in seconds; any arg <=0 keeps
+ * the OS default for that knob. Returns 1 on success, 0 on error. */
+static inline int64_t mako_tcp_keepalive(int64_t fd, int64_t idle, int64_t interval, int64_t count) {
+    int on = 1;
+    if (setsockopt((mako_sock_t)fd, SOL_SOCKET, SO_KEEPALIVE, (const char *)&on, sizeof(on)) != 0) {
+        return 0;
+    }
+#if defined(__linux__)
+    if (idle > 0)     { int v = (int)idle;     setsockopt((int)fd, IPPROTO_TCP, TCP_KEEPIDLE, &v, sizeof(v)); }
+    if (interval > 0) { int v = (int)interval; setsockopt((int)fd, IPPROTO_TCP, TCP_KEEPINTVL, &v, sizeof(v)); }
+    if (count > 0)    { int v = (int)count;    setsockopt((int)fd, IPPROTO_TCP, TCP_KEEPCNT, &v, sizeof(v)); }
+#elif defined(__APPLE__)
+#if defined(TCP_KEEPALIVE)
+    if (idle > 0)     { int v = (int)idle;     setsockopt((int)fd, IPPROTO_TCP, TCP_KEEPALIVE, &v, sizeof(v)); }
+#endif
+#if defined(TCP_KEEPINTVL)
+    if (interval > 0) { int v = (int)interval; setsockopt((int)fd, IPPROTO_TCP, TCP_KEEPINTVL, &v, sizeof(v)); }
+#endif
+#if defined(TCP_KEEPCNT)
+    if (count > 0)    { int v = (int)count;    setsockopt((int)fd, IPPROTO_TCP, TCP_KEEPCNT, &v, sizeof(v)); }
+#endif
+#else
+    (void)idle; (void)interval; (void)count;
+#endif
+    return 1;
 }
 
 /* Reverse-proxy upstream forward: open an HTTP/1.1 connection to host:port, send

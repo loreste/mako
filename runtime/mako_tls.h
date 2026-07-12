@@ -323,6 +323,14 @@ static inline void *mako_tls_server_new(MakoString cert, MakoString key) {
     return (void *)ctx;
 }
 
+/* Like tls_server_new but requires TLS 1.3: clients offering only 1.2 or below
+ * are rejected at handshake. NULL on failure. */
+static inline void *mako_tls_server_new_tls13(MakoString cert, MakoString key) {
+    SSL_CTX *ctx = (SSL_CTX *)mako_tls_server_new(cert, key);
+    if (ctx) SSL_CTX_set_min_proto_version(ctx, TLS1_3_VERSION);
+    return (void *)ctx;
+}
+
 /* Server TLS handshake on an already-accepted TCP fd (also used for STARTTLS-
  * style upgrades on the same socket). NULL on failure. */
 static inline void *mako_tls_accept(void *ctx, int64_t fd) {
@@ -2886,6 +2894,9 @@ static inline MakoString mako_tls_post(
 
 /* Socket-style TLS server API — unavailable without a linked TLS backend. */
 static inline void *mako_tls_server_new(MakoString cert, MakoString key) {
+    (void)cert; (void)key; return NULL;
+}
+static inline void *mako_tls_server_new_tls13(MakoString cert, MakoString key) {
     (void)cert; (void)key; return NULL;
 }
 static inline void *mako_tls_accept(void *ctx, int64_t fd) {
