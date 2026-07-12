@@ -172,23 +172,21 @@ Last inventory: 2026-07-11 (**unique Mako surface** · pack/pull · pain map · 
 | `chan_open[Struct]` via MakoChanPtr heap-box | Done |
 | `error_tag(tag, msg)` enum-like string errors | Done |
 
-**Closed (wave 7–9):** job join · Result string/float/**struct** Ok · int/string/**struct**
-select · real `join_timeout` (typed Result timeout) · enum Err i0–i2/s0–s1 · crew NLL ·
-ShareInt kick · fan structs · pool mutex · log+trace · reflect_value_from_2(_int) ·
-regex props · SMTP **SSL_connect** after STARTTLS (OpenSSL) · bench/TSan CI.
+**Closed (wave 7–10):** job join · Result string/float/struct Ok · channel select families ·
+`join_timeout` → **Result[R,string]** · POD struct kick · `reflect_value_of` ·
+C-for NLL fixpoint · SMTP SSL_connect + **opt-in peer verify** · TSan proxy suite.
 
 **Pain residuals (language) still open:** see [PAIN_POINTS.md](PAIN_POINTS.md) §4.
 
-1. Fuller data-race model beyond TSan smoke / kick Send seed  
-2. Even richer Result/Err shapes  
-3. Stronger NLL (more CFG edges)  
-4. Peer-verified SMTP TLS (cert validation)  
+1. Fuller data-race model beyond TSan smoke  
+2. Nested/richer Result shapes  
+3. Stronger NLL (more partial-field edges)  
 
 **Stdlib / product residuals:**
 
 6. Complete Unicode property database / full PCRE  
 7. Huffman JPEG bitstream readable by arbitrary viewers  
-8. Reflect auto-fill from arbitrary typed structs (codegen)  
+8. Reflect for non-POD / >2 fields auto-codegen  
 9. Symbol-level parity inside Done packages
 
 ---

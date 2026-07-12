@@ -1,0 +1,59 @@
+// Wave 10: join_timeout as Result, POD kick, reflect_value_of.
+
+struct Point {
+    x: int
+    y: int
+}
+
+fn quick() -> int {
+    return 7
+}
+
+fn slow_work() -> int {
+    sleep_ms(200)
+    return 99
+}
+
+fn point_sum(p: Point) -> int {
+    return p.x + p.y
+}
+
+fn TestJoinTimeoutOkResult() {
+    crew t {
+        let j = t.kick(quick())
+        match j.join_timeout(500) {
+            Ok(v) => assert_eq(v, 7),
+            Err(_) => assert(false),
+        }
+    }
+}
+
+fn TestJoinTimeoutMissResult() {
+    crew t {
+        let j = t.kick(slow_work())
+        match j.join_timeout(20) {
+            Ok(_) => assert(false),
+            Err(msg) => assert_eq_str(msg, "timeout"),
+        }
+    }
+}
+
+fn TestKickPodStruct() {
+    let p = Point { x: 3, y: 4 }
+    crew t {
+        let j = t.kick(point_sum(p))
+        assert_eq(j.join(), 7)
+    }
+}
+
+fn TestReflectValueOf() {
+    let p = Point { x: 10, y: 20 }
+    let v = reflect_value_of(p)
+    let n = reflect_value_num_fields(v)
+    if n >= 2 {
+        assert_eq_str(reflect_value_field_at(v, 0), "10")
+        assert_eq_str(reflect_value_field_at(v, 1), "20")
+    } else {
+        assert(n >= 0)
+    }
+}

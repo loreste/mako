@@ -7704,8 +7704,9 @@ impl TypeChecker {
                 post,
                 body,
             } => {
-                // `init` is scoped to the loop (like Go). Check init, then the
-                // condition (must be bool), the body, and the post clause.
+                // `init` is scoped to the loop (like Go). Loop-carried NLL:
+                // when the body can re-enter, run a second pass so field/hold
+                // moves on iteration N poison iteration N+1 and the exit.
                 self.push_scope();
                 self.check_stmt(init)?;
                 let ct = self.check_expr(cond)?;
@@ -7716,6 +7717,18 @@ impl TypeChecker {
                 self.push_loop(label.clone());
                 self.check_block(body)?;
                 self.check_stmt(post)?;
+                self.apply_continue_path_moves();
+                if loop_body_may_reach_header(body) {
+                    let ct2 = self.check_expr(cond)?;
+                    if ct2 != Type::Bool {
+                        self.pop_loop();
+                        self.pop_scope();
+                        return Err(TypeError::new("for condition must be bool"));
+                    }
+                    self.check_block(body)?;
+                    self.check_stmt(post)?;
+                    self.apply_continue_path_moves();
+                }
                 self.pop_loop();
                 self.pop_scope();
                 Ok(())
@@ -8487,6 +8500,20 @@ impl TypeChecker {
                             }
                             return Ok(Type::String);
                         }
+                        "reflect_value_of" if args.len() == 1 => {
+                            let t = self.check_expr(&args[0])?;
+                            return match &t {
+                                Type::Named(n) if self.is_pod_struct(n) => {
+                                    Ok(Type::Named("ReflectValue".into()))
+                                }
+                                Type::Struct { name, .. } if self.is_pod_struct(name) => {
+                                    Ok(Type::Named("ReflectValue".into()))
+                                }
+                                _ => Err(TypeError::new(
+                                    "reflect_value_of expects a POD struct (int/float/bool fields)",
+                                )),
+                            };
+                        }
                         "share_int" if args.len() == 1 => {
                             let t = self.check_expr(&args[0])?;
                             if t != Type::Int {
@@ -9018,8 +9045,13 @@ impl TypeChecker {
                         if args.len() != 1 {
                             return Err(TypeError::new("job.join_timeout takes milliseconds"));
                         }
-                        // Returns the value (0 on timeout for int jobs in v0.1)
-                        Ok(*inner.clone())
+                        let _ = self.check_expr(&args[0])?;
+                        // Always Result[R, string]: Ok(value) or Err("timeout").
+                        // When R is already Result[T, E], nest as Result[Result[T,E], string].
+                        Ok(Type::Result(
+                            Box::new(*inner.clone()),
+                            Box::new(Type::String),
+                        ))
                     }
                     (Type::Interface { name: iname }, m) => {
                         let Some(iface) = self.interfaces.iter().find(|i| i.name == *iname) else {
@@ -10300,27 +10332,56 @@ impl TypeChecker {
     }
 
     /// Seed Send-like rules for `crew.kick(f(args…))` after the kick expr is typed.
-    /// Allows Copy, string, and channels. Rejects arrays/maps/structs/arenas.
+    /// Allows Copy, string, channels, POD structs (int/float/bool fields), ShareInt.
     fn assert_kick_sendable(&self, expr: &Expr) -> Result<(), TypeError> {
         match expr {
             Expr::Call { args, .. } => {
                 for a in args {
                     let t = self.peek_type(a)?;
-                    if !is_kick_sendable(&t) {
+                    if !self.is_kick_sendable_ty(&t) {
                         return Err(TypeError::new(format!(
                             "cannot kick value of type {} across a crew task",
                             t.display()
                         ))
                         .hint(
-                            "kick allows Copy, string, channels, ShareInt (auto-cloned), \
-                             and the thread-safe handles CMap / Mutex / RWMutex / AtomicInt — \
-                             not arrays/maps/structs/arenas",
+                            "kick allows Copy, string, channels, POD structs (int/float/bool fields), \
+                             ShareInt (auto-cloned), CMap / Mutex / RWMutex / AtomicInt — \
+                             not arrays/maps/non-POD structs/arenas",
                         ));
                     }
                 }
                 Ok(())
             }
             _ => Ok(()),
+        }
+    }
+
+    fn is_pod_struct(&self, name: &str) -> bool {
+        match self.types.get(name) {
+            Some(Type::Struct { fields, .. }) => fields.iter().all(|(_, t)| {
+                matches!(
+                    t,
+                    Type::Int
+                        | Type::Int64
+                        | Type::Int32
+                        | Type::Int8
+                        | Type::Byte
+                        | Type::Bool
+                        | Type::Float
+                )
+            }),
+            _ => false,
+        }
+    }
+
+    fn is_kick_sendable_ty(&self, t: &Type) -> bool {
+        if is_kick_sendable(t) {
+            return true;
+        }
+        match t {
+            Type::Named(n) if self.is_pod_struct(n) => true,
+            Type::Struct { name, .. } if self.is_pod_struct(name) => true,
+            _ => false,
         }
     }
 
@@ -10379,6 +10440,7 @@ impl TypeChecker {
 }
 
 /// Types that may cross a `crew.kick` boundary (Send-like seed).
+/// POD structs are handled in `TypeChecker::is_kick_sendable_ty`.
 fn is_kick_sendable(t: &Type) -> bool {
     if is_copy_type(t) {
         return true;
@@ -10391,7 +10453,7 @@ fn is_kick_sendable(t: &Type) -> bool {
         // ShareInt: atomic RC + kick auto-clones onto the heap (see codegen).
         Type::Named(n) if n == "ShareInt" || n == "AtomicInt" => true,
         Type::Named(n) if n == "Arena" || n == "Crew" => false,
-        Type::Named(_) => false, // structs — use channels
+        Type::Named(_) => false, // non-POD structs — use channels
         Type::Array(_) | Type::Map(_, _) | Type::Tuple(_) | Type::Option(_) | Type::Result(_, _) => {
             false
         }

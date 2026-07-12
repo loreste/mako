@@ -31,11 +31,16 @@ Guided tour: [The Mako Book §11](book/src/ch11-speed-safety.md) · Speed bar: [
 ### Concurrency Send seed (kick)
 
 `crew.kick(f(args…))` only accepts **sendable** argument types: Copy scalars
-(including float), `string` (heap-cloned), channels, `ShareInt` / `AtomicInt`
-(RC clone), and locked handles (`CMap` / `Mutex` / `RWMutex`).  
-Rejected: arrays, maps, plain structs, `Arena`, nested `Crew`.  
-Race detection: `mako test --race` (CI TSan job). Prefer channels over shared
-mutable state.
+(including float), **POD structs** (only int/float/bool fields; heap-boxed),
+`string` (heap-cloned), channels, `ShareInt` / `AtomicInt` (RC clone), and locked
+handles (`CMap` / `Mutex` / `RWMutex`).  
+Rejected: arrays, maps, non-POD structs, `Arena`, nested `Crew`.  
+Race detection: `mako test --race` (CI TSan job includes proxy pool/edge). Prefer
+channels over shared mutable state.
+
+SMTP TLS: `smtp_send_starttls` uses `SSL_connect`. Set **`MAKO_SMTP_TLS_VERIFY=1`**
+to enable peer certificate verification (`SSL_VERIFY_PEER`); default is off for
+dev soft paths.
 
 ## Memory and resources
 

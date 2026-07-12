@@ -31,18 +31,20 @@ fn big_err_str() -> Result[int, BigErr] {
 fn TestJoinTimeoutFast() {
     crew t {
         let j = t.kick(quick())
-        // generous timeout — must complete
-        let v = j.join_timeout(500)
-        assert_eq(v, 7)
+        match j.join_timeout(500) {
+            Ok(v) => assert_eq(v, 7),
+            Err(_) => assert(false),
+        }
     }
 }
 
 fn TestJoinTimeoutMiss() {
     crew t {
         let j = t.kick(slow_work())
-        let v = j.join_timeout(20)
-        // timed out → 0 (task still joined by crew cancel_join at end)
-        assert_eq(v, 0)
+        match j.join_timeout(20) {
+            Ok(_) => assert(false),
+            Err(msg) => assert_eq_str(msg, "timeout"),
+        }
     }
 }
 

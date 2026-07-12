@@ -34,22 +34,20 @@ Last roadmap sync: **2026-07-11** (unique surface · pain-driven design · suite
 
 ## Partial / Next (true hard residuals)
 
-**Landed (gap close waves 1–9):** kick Send · ShareInt · full chan families ·
-int/string/**struct select** · real join_timeout · Result string/float/**struct** Ok ·
-enum Err slots · select/crew NLL · pool mutex · reflect_value_from_2(_int) ·
-SMTP **SSL_connect** after STARTTLS · bench/TSan CI.
+**Landed (gap close waves 1–10):** kick POD structs · join_timeout as Result ·
+reflect_value_of · C-for NLL · SMTP SSL + opt-in verify · TSan proxy · prior
+chan/Result/select/fan surfaces.
 
 **Language pain residuals** (still open — see [PAIN_POINTS.md](PAIN_POINTS.md)):
 
 1. Fuller data-race model beyond TSan smoke  
-2. Richer Result/Err shapes  
-3. Stronger NLL (more CFG edges)  
-4. Peer-verified SMTP TLS  
+2. Nested/richer Result shapes  
+3. Stronger NLL (partial-field depth)  
 
 **Stdlib / product residuals:**
 
 6. Complete Unicode / PCRE · JPEG viewer parity  
-7. Reflect codegen for arbitrary structs  
+7. Reflect for arbitrary structs  
 8. Symbol-level parity  
 
 ## Product Focus From General-Purpose Brief

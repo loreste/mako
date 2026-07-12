@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.0 — 2026-07-12 (wave 10 queue)
+
+- `job.join_timeout(ms)` always returns `Result[R, string]` (`Err("timeout")`)
+- Kick allows **POD structs** (int/float/bool fields), heap-boxed
+- `reflect_value_of(struct)` for POD 2-field snapshots
+- C-style `for` NLL loop-carried fixpoint
+- SMTP TLS: `MAKO_SMTP_TLS_VERIFY=1` enables peer cert check
+- TSan CI includes `proxy_edge_test`
+- Tests: `examples/testing/wave10_queue_test.mko`
+
 ## 0.1.0 — 2026-07-12 (wave 9 queue)
 
 - Struct channel **select** (`mako_chan_ptr_selectn`); arm must not `recv` again
