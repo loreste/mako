@@ -11,6 +11,8 @@
   `for cond {}`, infinite `for {}`, plus existing range `for i, v in range xs`
 - **Compound assignment & inc/dec** — `+= -= *= /= %=` and `++` / `--` on
   identifiers, struct fields, and index targets
+- **Parallel binding & assignment** — `var a, b = 1, 2` and `a, b = b, a`
+  (swap/rotate); the right-hand side is evaluated before any target is written
 - **Positional struct literals** — `Point{1, 2}` and zero-value `Point{}`;
   composite-literal-in-condition ambiguity resolved
 - **`go f()`** — schedules a call onto the innermost `crew` (errors outside one)
@@ -26,7 +28,7 @@
 - `mako fmt` no longer doubles `export` on structs
 
 - Tests: `if_init_test`, `switch_test`, `for_forms_test`, `compound_assign_test`,
-  `struct_positional_test`, `go_stmt_test`
+  `struct_positional_test`, `go_stmt_test`, `parallel_assign_test`
 
 ---
 

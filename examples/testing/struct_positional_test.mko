@@ -30,6 +30,17 @@ func TestNamedStillWorks() {
     assert_eq(sumP(b), 7)
 }
 
+func TestArrayOfPositional() {
+    // An array of positional literals must be recognized as a struct array.
+    let xs = [Point{1, 1}, Point{2, 2}, Point{3, 3}]
+    var s = 0
+    for i, v in range xs {
+        s += v.x
+    }
+    assert_eq(s, 6)
+    assert_eq(xs[2].y, 3)
+}
+
 func TestLiteralInConditionCallIsUnambiguous() {
     // `if ok(Point{9, 0}) { … }` — nested literal inside a call in a condition.
     var hit = 0

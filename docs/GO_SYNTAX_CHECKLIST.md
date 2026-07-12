@@ -97,7 +97,7 @@ Overall ≈ Σ (weight × track%).
 | [x] | `x := expr` short declaration | Done | Mutable binding |
 | [x] | `var x = expr` | Done | Mutable |
 | [x] | `let` / `let mut` (legacy) | Done | Kept |
-| [x] | `a, b := f()` multi-assign | Done | When `f` returns tuple; `a, b = f()` reassigns existing mutables |
+| [x] | `a, b := f()` multi-assign | Done | Also parallel binding/assignment `a, b = b, a` (swap/rotate); RHS evaluated before any write |
 | [x] | Compound assign `+= -= *= /= %=` and `++` / `--` | Done | On idents, fields, and index targets; desugar to `x = x <op> e` |
 | [x] | `if` / `for` / `while` braces | Done | Go-like control keywords |
 | [x] | `for` forms fully like Go | Done | C-style `for i := 0; i < n; i++`, while-style `for cond {}`, infinite `for {}`, and range `for i, v in range s` |

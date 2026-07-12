@@ -1,0 +1,38 @@
+// Parallel binding and assignment: multiple targets, multiple values.
+// The right-hand side is evaluated fully before any target is written, so
+// swaps and rotations work without a temporary.
+
+func pair() (int, int) {
+    return (5, 9)
+}
+
+func TestParallelDeclaration() {
+    var a, b = 1, 2
+    assert_eq(a, 1)
+    assert_eq(b, 2)
+
+    var x, y, z = 10, 20, 30
+    assert_eq(x + y + z, 60)
+}
+
+func TestSwap() {
+    var a = 1
+    var b = 2
+    a, b = b, a
+    assert_eq(a, 2)
+    assert_eq(b, 1)
+}
+
+func TestRotate() {
+    var x, y, z = 1, 2, 3
+    x, y, z = z, x, y
+    assert_eq(x, 3)
+    assert_eq(y, 1)
+    assert_eq(z, 2)
+}
+
+func TestUnpackReturn() {
+    var p, q = pair()
+    assert_eq(p, 5)
+    assert_eq(q, 9)
+}
