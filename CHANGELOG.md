@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.0 — 2026-07-12 (wave 13 queue)
+
+- `Result[map[int]int, E]` and `Result[map[string]string, E]` Ok
+- `reflect_value_of` flattens nested POD structs
+- NLL match / nested-path partial products (bad examples)
+- Regex `\p{Thai}` / `\p{Devanagari}` seeds
+- TSan CI: `kick_sync_test`, `wave11_queue_test`
+- Tests: `examples/testing/wave13_queue_test.mko`
+
 ## 0.1.0 — 2026-07-12 (wave 12 queue)
 
 - `Result[map[string]int, E]` Ok via `mako_ok_ptr` (map pointer)

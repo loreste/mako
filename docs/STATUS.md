@@ -172,26 +172,25 @@ Last inventory: 2026-07-11 (**unique Mako surface** · pack/pull · pain map · 
 | `chan_open[Struct]` via MakoChanPtr heap-box | Done |
 | `error_tag(tag, msg)` enum-like string errors | Done |
 
-**Closed (wave 7–12):** join_timeout **flatten** for `Job[Result[T,string]]` · POD kick
-with **string fields** · `reflect_value_of` N fields · `Result[[]int,E]` Ok ·
-`Result[map[string]int,E]` Ok · non-POD kick/reflect rejects · NLL if/else partial
-product · Hiragana/Katakana/Hangul `\p{…}` · flaky timeout tests hardened ·
-prior Result/select/SMTP/TSan work.
+**Closed (wave 7–13):** join_timeout **flatten** · POD kick + string fields ·
+`reflect_value_of` N + nested POD flatten · `Result[[]int]` / map SI·II·SS Ok ·
+non-POD kick/map-field reflect rejects · NLL if/else/match/nested-path products ·
+script `\p{…}` (incl. Thai/Devanagari) · TSan suite expanded · prior work.
 
-**Wave 12 tests:** `examples/testing/wave12_queue_test.mko` · bad
-`kick_non_pod` · `reflect_non_pod` · `hold_if_else_partial_product`.
+**Wave 13 tests:** `examples/testing/wave13_queue_test.mko` · bad
+`hold_match_partial_product` · `hold_nested_if_product` · `reflect_non_pod` (map field).
 
 **Pain residuals (language) still open:** see [PAIN_POINTS.md](PAIN_POINTS.md) §4.
 
-1. Fuller data-race model beyond TSan smoke  
-2. More Result Ok shapes (generic / other map key-value families)  
-3. Stronger NLL (deeper nested partial products beyond if/else join)  
+1. Fuller data-race model beyond expanded TSan smoke (no full type-level race system)  
+2. More Result Ok shapes (generic monomorphized containers)  
+3. Stronger NLL (loop × match multi-level products)  
 
 **Stdlib / product residuals:**
 
-6. Complete Unicode property database / full PCRE (script seeds expanded)  
-7. Huffman JPEG bitstream readable by arbitrary viewers (JFIF header + APP7 payload today)  
-8. Reflect for non-POD / nested structs (POD N-field done; nested rejected)  
+6. Complete Unicode property database / full PCRE (more script seeds landed)  
+7. Huffman JPEG bitstream readable by arbitrary viewers (JFIF shell + APP7 today)  
+8. Reflect for non-POD fields (maps/slices); nested POD done  
 9. Symbol-level parity inside Done packages
 
 ---

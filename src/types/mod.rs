@@ -8503,14 +8503,15 @@ impl TypeChecker {
                         "reflect_value_of" if args.len() == 1 => {
                             let t = self.check_expr(&args[0])?;
                             return match &t {
-                                Type::Named(n) if self.is_pod_struct(n) => {
+                                Type::Named(n) if self.is_reflectable_struct(n) => {
                                     Ok(Type::Named("ReflectValue".into()))
                                 }
-                                Type::Struct { name, .. } if self.is_pod_struct(name) => {
+                                Type::Struct { name, .. } if self.is_reflectable_struct(name) => {
                                     Ok(Type::Named("ReflectValue".into()))
                                 }
                                 _ => Err(TypeError::new(
-                                    "reflect_value_of expects a POD struct (int/float/bool/string fields)",
+                                    "reflect_value_of expects a POD struct (int/float/bool/string \
+                                     fields, or nested POD structs)",
                                 )),
                             };
                         }
@@ -10364,6 +10365,7 @@ impl TypeChecker {
         }
     }
 
+    /// Flat POD only (kick Send): scalars/string fields — no nested structs/maps.
     fn is_pod_struct(&self, name: &str) -> bool {
         match self.types.get(name) {
             Some(Type::Struct { fields, .. }) => fields.iter().all(|(_, t)| {
@@ -10378,6 +10380,26 @@ impl TypeChecker {
                         | Type::Float
                         | Type::String
                 )
+            }),
+            _ => false,
+        }
+    }
+
+    /// Reflect bag: flat POD fields or nested POD structs (leaf-flattened).
+    fn is_reflectable_struct(&self, name: &str) -> bool {
+        match self.types.get(name) {
+            Some(Type::Struct { fields, .. }) => fields.iter().all(|(_, t)| match t {
+                Type::Int
+                | Type::Int64
+                | Type::Int32
+                | Type::Int8
+                | Type::Byte
+                | Type::Bool
+                | Type::Float
+                | Type::String => true,
+                Type::Named(n) => self.is_reflectable_struct(n),
+                Type::Struct { name: sn, .. } => self.is_reflectable_struct(sn),
+                _ => false,
             }),
             _ => false,
         }

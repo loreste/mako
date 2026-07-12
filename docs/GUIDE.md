@@ -2314,9 +2314,9 @@ gRPC/H3-client pieces, WASI preview1, operators/imports/`mako version`,
 stdlib Waves 1–9 (~98% major areas).
 
 Still **Target / Later** (VISION): colored `async`/`await`, complete Unicode property database / full PCRE
-(script seeds: Latin/Greek/Cyrillic/Arabic/Hebrew/Han/Hiragana/Katakana/Hangul + categories),
-Huffman JPEG viewer parity (JFIF shell + APP7 Mako payload today), reflect for non-POD/nested
-structs (POD N-field done), full SMTP AUTH-over-TLS polish, native WASI preview2 / browser DOM,
+(script seeds: Latin/Greek/Cyrillic/Arabic/Hebrew/Han/Hiragana/Katakana/Hangul/Thai/Devanagari + categories),
+Huffman JPEG viewer parity (JFIF shell + APP7 Mako payload today), reflect for non-POD fields
+(nested POD flatten done), full SMTP AUTH-over-TLS polish, native WASI preview2 / browser DOM,
 optional GC, SIMD/GPU, deep LSP, homebrew-core publish (external). See [VISION.md](VISION.md)
 and [STATUS.md](STATUS.md).
 

@@ -1,0 +1,23 @@
+// EXPECT: cannot use
+// Nested path product: if/else moves different nested leaves.
+struct Inner {
+    a: string
+    b: string
+}
+
+struct Outer {
+    inner: Inner
+    n: int
+}
+
+fn main() {
+    hold let o = Outer { inner: Inner { a: "x", b: "y" }, n: 1 }
+    if 1 == 1 {
+        let x = o.inner.a
+        print(x)
+    } else {
+        let y = o.inner.b
+        print(y)
+    }
+    print(o.inner.a)
+}

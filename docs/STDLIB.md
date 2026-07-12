@@ -54,7 +54,7 @@ Tests: `examples/testing/stdlib_*`, plus area tests (`base64_test`, `regex_*`,
 | `html` · `utf8` · `sync` / `atomic` · `slices` / `maps` | **Done** | |
 | `errors` / `testing` / `httptest` / `regexp` / `log` / `slog` / `sql` | **Done** | RE2-ish + `\x` `(?:)` `\p{...}` scripts/categories + lookahead |
 | `image/png` / `gif` / `jpeg` | **Done** | LZW dict; DCT + Huffman block; JFIF shell + APP7 Mako payload |
-| `reflect` | **Done** | POD value bag (N fields) + clone/equal; nested rejected |
+| `reflect` | **Done** | POD value bag (N fields + nested POD flatten) + clone/equal; map fields rejected |
 | `plugin` / `syscall` | skip | VISION |
 | `embed` | **Done** | helper (not compile-time) |
 

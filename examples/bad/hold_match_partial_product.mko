@@ -1,0 +1,22 @@
+// EXPECT: cannot use
+// NLL match product: different non-Copy fields moved on different arms.
+struct Pair {
+    a: string
+    b: string
+}
+
+fn main() {
+    hold let p = Pair { a: "x", b: "y" }
+    let _ = match 1 {
+        0 => {
+            let x = p.a
+            len(x)
+        },
+        _ => {
+            let y = p.b
+            len(y)
+        },
+    }
+    // After match join, both a and b may have been moved.
+    print(p.a)
+}

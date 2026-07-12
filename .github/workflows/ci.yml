@@ -174,9 +174,11 @@ jobs:
           ./target/release/mako test --race examples/testing/crew_fan_test.mko
           ./target/release/mako test --race examples/testing/kick_send_test.mko
           ./target/release/mako test --race examples/testing/kick_share_test.mko
+          ./target/release/mako test --race examples/testing/kick_sync_test.mko
           ./target/release/mako test --race examples/testing/chan_struct_test.mko
           ./target/release/mako test --race examples/testing/chan_float_test.mko
           ./target/release/mako test --race examples/testing/crew_drain_test.mko
           ./target/release/mako test --race examples/testing/job_join_typed_test.mko
           ./target/release/mako test --race examples/testing/proxy_pool_test.mko
           ./target/release/mako test --race examples/testing/proxy_edge_test.mko
+          ./target/release/mako test --race examples/testing/wave11_queue_test.mko

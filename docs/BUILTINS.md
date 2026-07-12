@@ -666,9 +666,11 @@ Tests: `chan_struct_test`, `chan_float_test`, `wave8_queue_test`, `wave9_queue_t
 
 Kick **args** that are sendable: Copy scalars, **POD structs** (int/float/bool/**string** fields, heap-boxed; strings cloned), string (cloned), chan handles, ShareInt/sync handles. Arrays/maps/non-POD structs remain rejected (`examples/bad/kick_non_pod.mko`).
 
-`reflect_value_of(s)` snapshots POD struct fields (any field count) into a reflect bag.
-Nested / non-POD structs are rejected (`examples/bad/reflect_non_pod.mko`).
-`Result[[]int, E]` and `Result[map[string]int, E]` Ok are supported (heap-boxed / map pointer).
+`reflect_value_of(s)` snapshots POD struct fields (any field count) into a reflect bag,
+flattening nested POD structs leaf-first. Structs with maps/slices remain rejected
+(`examples/bad/reflect_non_pod.mko`).
+`Result[[]int, E]` and `Result[map[string]int|map[int]int|map[string]string, E]` Ok
+are supported (heap-boxed / map pointer).
 
 **`fan` element types:** `[]int`, `[]float`, `[]string`, `[]Struct` (POD named structs via `mako_par_map_bytes`).
 
@@ -2204,7 +2206,9 @@ Tests: `examples/testing/overflow_shutdown_test.mko`. Multi-error recovery:
 | float | `MakoResultInt.ok_f` via `mako_ok_float_res` |
 | named struct | heap box via `mako_ok_ptr`; match Ok unboxes and frees |
 | `[]int` | heap-boxed `MakoIntArray` via `mako_ok_ptr` |
-| `map[string]int` | map pointer via `mako_ok_ptr` |
+| `map[string]int` | map pointer via `mako_ok_ptr` (`map_si`) |
+| `map[int]int` | map pointer via `mako_ok_ptr` (`map_ii`) |
+| `map[string]string` | map pointer via `mako_ok_ptr` (`map_ss`) |
 
 | Err type `E` | Encoding |
 |--------------|----------|
@@ -2240,7 +2244,8 @@ match open(1) {
 ```
 
 Tests: `result_enum_test.mko`, `job_join_typed_test.mko` (Result across kick/join),
-`wave11_queue_test.mko` (`[]int` Ok), `wave12_queue_test.mko` (`map[string]int` Ok).
+`wave11_queue_test.mko` (`[]int` Ok), `wave12_queue_test.mko` (`map[string]int` Ok),
+`wave13_queue_test.mko` (`map[int]int` / `map[string]string` Ok).
 
 ---
 

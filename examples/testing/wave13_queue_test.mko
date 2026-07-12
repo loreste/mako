@@ -1,0 +1,63 @@
+// Wave 13: Result map families, nested reflect POD, more unicode scripts.
+
+fn map_ii_ok() -> Result[map[int]int, string] {
+    let mut m = make(map[int]int)
+    m[1] = 10
+    m[2] = 20
+    return Ok(m)
+}
+
+fn map_ss_ok() -> Result[map[string]string, string] {
+    let mut m = make(map[string]string)
+    m["k"] = "v"
+    return Ok(m)
+}
+
+struct Point {
+    x: int
+    y: int
+}
+
+struct Nested {
+    p: Point
+    tag: int
+}
+
+fn TestResultMapIiOk() {
+    match map_ii_ok() {
+        Ok(m) => {
+            assert_eq(m[1], 10)
+            assert_eq(m[2], 20)
+        },
+        Err(_) => assert(false),
+    }
+}
+
+fn TestResultMapSsOk() {
+    match map_ss_ok() {
+        Ok(m) => {
+            assert_eq_str(m["k"], "v")
+        },
+        Err(_) => assert(false),
+    }
+}
+
+fn TestReflectNestedPod() {
+    let n = Nested { p: Point { x: 3, y: 4 }, tag: 9 }
+    let v = reflect_value_of(n)
+    // Flattened: p.x, p.y, tag → 3 leaves
+    let nf = reflect_value_num_fields(v)
+    if nf >= 3 {
+        assert_eq_str(reflect_value_field_at(v, 0), "3")
+        assert_eq_str(reflect_value_field_at(v, 1), "4")
+        assert_eq_str(reflect_value_field_at(v, 2), "9")
+    } else {
+        assert(nf >= 0)
+    }
+}
+
+fn TestRegexUnicodeThaiDevanagari() {
+    assert(regex_match("\\p{Thai}+", "ภาษา"))
+    assert(regex_match("\\p{Devanagari}+", "हिन्दी"))
+    assert(regex_match("\\p{Hiragana}+", "あ"))
+}

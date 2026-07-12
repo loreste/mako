@@ -34,21 +34,20 @@ Last roadmap sync: **2026-07-11** (unique surface · pain-driven design · suite
 
 ## Partial / Next (true hard residuals)
 
-**Landed (gap close waves 1–12):** join_timeout flatten · POD+string kick ·
-reflect_value_of N fields · Result[[]int] / Result[map[string]int] Ok ·
-non-POD kick/reflect reject · NLL if/else partial product · script `\p{…}` seeds ·
-prior concurrency/Result/SMTP work.
+**Landed (gap close waves 1–13):** join_timeout flatten · POD+string kick ·
+reflect N + nested POD · Result maps SI/II/SS · NLL match/nested products ·
+Thai/Devanagari `\p{…}` · expanded TSan · prior concurrency/Result/SMTP work.
 
 **Language pain residuals** (still open — see [PAIN_POINTS.md](PAIN_POINTS.md)):
 
-1. Fuller data-race model beyond TSan smoke  
-2. More Result Ok shapes (other map families / generics)  
-3. Stronger NLL product cases (deeper nested)  
+1. Fuller data-race model beyond expanded TSan  
+2. More Result Ok shapes (generic containers)  
+3. Stronger NLL product cases (loop × match multi-level)  
 
 **Stdlib / product residuals:**
 
 6. Complete Unicode / PCRE · JPEG viewer parity (JFIF+APP7 today)  
-7. Reflect for non-POD / nested structs  
+7. Reflect for non-POD field types (maps/slices)  
 8. Symbol-level parity  
 
 ## Product Focus From General-Purpose Brief

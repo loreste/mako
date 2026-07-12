@@ -140,7 +140,8 @@ impl Codegen {
         crate::errors::result_err_enum_c(ty, |en| self.enums.contains_key(en))
     }
 
-    /// Ok payload kind for Result[T, _]: "string", "float", "struct", "slice", or "int".
+    /// Ok payload kind for Result[T, _]: "string", "float", "struct", "slice",
+    /// "map"/"map_si", "map_ii", "map_ss", or "int".
     fn result_ok_kind(ty: &TypeExpr) -> &'static str {
         match ty {
             TypeExpr::Generic(n, args) if n == "Result" && !args.is_empty() => {
@@ -148,7 +149,20 @@ impl Codegen {
                     TypeExpr::Named(t) if t == "string" => "string",
                     TypeExpr::Named(t) if t == "float" || t == "float64" => "float",
                     TypeExpr::Array(_) => "slice",
-                    TypeExpr::Map(_, _) => "map",
+                    TypeExpr::Map(k, v) => match (k.as_ref(), v.as_ref()) {
+                        (TypeExpr::Named(kk), TypeExpr::Named(vv))
+                            if kk == "int" && (vv == "int" || vv == "int64") =>
+                        {
+                            "map_ii"
+                        }
+                        (TypeExpr::Named(kk), TypeExpr::Named(vv))
+                            if kk == "string" && vv == "string" =>
+                        {
+                            "map_ss"
+                        }
+                        // map[string]int (and unknown → SI)
+                        _ => "map_si",
+                    },
                     TypeExpr::Named(t)
                         if t != "int"
                             && t != "int64"
@@ -166,6 +180,60 @@ impl Codegen {
                 }
             }
             _ => "int",
+        }
+    }
+
+    /// True when every field is a reflect leaf (int/float/bool/string) or nested POD struct.
+    fn fields_are_reflect_pod(&self, fields: &[(String, String)]) -> bool {
+        fields.iter().all(|(_, ft)| {
+            ft == "int64_t"
+                || ft == "double"
+                || ft == "bool"
+                || ft == "MakoString"
+                || self
+                    .structs
+                    .get(ft)
+                    .or_else(|| self.structs.values().find(|s| s.c_name == *ft))
+                    .map(|info| !info.fields.is_empty() && self.fields_are_reflect_pod(&info.fields))
+                    .unwrap_or(false)
+        })
+    }
+
+    /// Flatten POD (and nested POD) fields into `tmp` bag starting at `*idx`.
+    fn emit_reflect_pod_fields(
+        &mut self,
+        tmp: &str,
+        base: &str,
+        fields: &[(String, String)],
+        idx: &mut usize,
+    ) {
+        for (fname, ft) in fields {
+            let access = format!("{base}.{fname}");
+            if ft == "MakoString" {
+                let s = self.fresh("rfs");
+                self.line(&format!("MakoString {s} = mako_str_clone({access});"));
+                self.line(&format!(
+                    "mako_reflect_value_set_at({tmp}, {idx}, {s}); free({s}.data);"
+                ));
+                *idx += 1;
+            } else if ft == "int64_t" || ft == "double" || ft == "bool" {
+                let s = self.fresh("rfs");
+                self.line(&format!(
+                    "MakoString {s} = mako_int_to_string((int64_t)({access}));"
+                ));
+                self.line(&format!(
+                    "mako_reflect_value_set_at({tmp}, {idx}, {s}); free({s}.data);"
+                ));
+                *idx += 1;
+            } else if let Some(info) = self
+                .structs
+                .get(ft)
+                .or_else(|| self.structs.values().find(|s| s.c_name == *ft))
+                .cloned()
+            {
+                let nested = info.fields.clone();
+                self.emit_reflect_pod_fields(tmp, &access, &nested, idx);
+            }
         }
     }
 
@@ -2314,8 +2382,11 @@ impl Codegen {
                                     format!("mako_ok_ptr((void*){boxn})"),
                                 );
                             }
-                            // map[string]int Ok: pass map pointer (owned by Result)
-                            if vty == "MakoMapSI*" {
+                            // map Ok: pass map pointer (owned by Result)
+                            if matches!(
+                                vty.as_str(),
+                                "MakoMapSI*" | "MakoMapII*" | "MakoMapSS*"
+                            ) {
                                 return (
                                     "MakoResultInt".into(),
                                     format!("mako_ok_ptr((void*){v})"),
@@ -8774,7 +8845,7 @@ impl Codegen {
                             return ("MakoReflectValue*".into(), tmp);
                         }
                         "reflect_value_of" => {
-                            // POD struct → bag: each field as string via set_at.
+                            // POD / nested-POD struct → bag: leaf fields as string via set_at.
                             let (vty, v) = self.emit_expr(&args[0]);
                             let fields_opt = self
                                 .structs
@@ -8783,36 +8854,12 @@ impl Codegen {
                                 .map(|info| (info.c_name.clone(), info.fields.clone()));
                             let tmp = self.fresh("rvo");
                             if let Some((sn, fields)) = fields_opt {
-                                if !fields.is_empty()
-                                    && fields.iter().all(|(_, ft)| {
-                                        ft == "int64_t"
-                                            || ft == "double"
-                                            || ft == "bool"
-                                            || ft == "MakoString"
-                                    })
-                                {
+                                if !fields.is_empty() && self.fields_are_reflect_pod(&fields) {
                                     self.line(&format!(
                                         "MakoReflectValue *{tmp} = mako_reflect_value_new(mako_str_from_cstr(\"{sn}\"));"
                                     ));
-                                    for (i, (fname, ft)) in fields.iter().enumerate() {
-                                        let s = self.fresh("rfs");
-                                        if ft == "MakoString" {
-                                            self.line(&format!(
-                                                "MakoString {s} = mako_str_clone({v}.{fname});"
-                                            ));
-                                        } else if ft == "double" {
-                                            self.line(&format!(
-                                                "MakoString {s} = mako_int_to_string((int64_t)({v}.{fname}));"
-                                            ));
-                                        } else {
-                                            self.line(&format!(
-                                                "MakoString {s} = mako_int_to_string((int64_t)({v}.{fname}));"
-                                            ));
-                                        }
-                                        self.line(&format!(
-                                            "mako_reflect_value_set_at({tmp}, {i}, {s}); free({s}.data);"
-                                        ));
-                                    }
+                                    let mut idx = 0usize;
+                                    self.emit_reflect_pod_fields(&tmp, &v, &fields, &mut idx);
                                     return ("MakoReflectValue*".into(), tmp);
                                 }
                             }
@@ -12480,11 +12527,23 @@ impl Codegen {
                             self.line(&format!(
                                 "if ({p}) {{ {b} = *{p}; free({p}); }} else {{ {b}.data = NULL; {b}.len = 0; {b}.cap = 0; }}"
                             ));
-                        } else if ok_kind == "map" {
+                        } else if ok_kind == "map" || ok_kind == "map_si" {
                             let b = mangle(&bindings[0]);
                             self.locals.insert(bindings[0].clone(), "MakoMapSI*".into());
                             self.line(&format!(
                                 "MakoMapSI *{b} = (MakoMapSI*)mako_result_ok_ptr({scrut});"
+                            ));
+                        } else if ok_kind == "map_ii" {
+                            let b = mangle(&bindings[0]);
+                            self.locals.insert(bindings[0].clone(), "MakoMapII*".into());
+                            self.line(&format!(
+                                "MakoMapII *{b} = (MakoMapII*)mako_result_ok_ptr({scrut});"
+                            ));
+                        } else if ok_kind == "map_ss" {
+                            let b = mangle(&bindings[0]);
+                            self.locals.insert(bindings[0].clone(), "MakoMapSS*".into());
+                            self.line(&format!(
+                                "MakoMapSS *{b} = (MakoMapSS*)mako_result_ok_ptr({scrut});"
                             ));
                         } else {
                             self.locals.insert(bindings[0].clone(), "int64_t".into());

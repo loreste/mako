@@ -2983,6 +2983,10 @@ static inline int mako_re_unicode_prop_match(const char *name, size_t nlen, uint
         return (cp >= 0x30A0 && cp <= 0x30FF);
     if (nlen == 6 && memcmp(name, "Hangul", 6) == 0)
         return (cp >= 0xAC00 && cp <= 0xD7AF);
+    if (nlen == 4 && memcmp(name, "Thai", 4) == 0)
+        return (cp >= 0x0E00 && cp <= 0x0E7F);
+    if (nlen == 10 && memcmp(name, "Devanagari", 10) == 0)
+        return (cp >= 0x0900 && cp <= 0x097F);
     return 0;
 }
 

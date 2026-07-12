@@ -36,8 +36,9 @@ strings cloned), `string` (heap-cloned), channels, `ShareInt` / `AtomicInt`
 (RC clone), and locked handles (`CMap` / `Mutex` / `RWMutex`).  
 Rejected: arrays, maps, non-POD structs, `Arena`, nested `Crew`
 (`examples/bad/kick_non_pod.mko`, `kick_array_arg.mko`).  
-Race detection: `mako test --race` (CI TSan job includes proxy pool/edge). Prefer
-channels over shared mutable state.
+Race detection: `mako test --race` (CI TSan job: crew/kick/share, chan, proxy pool/edge,
+`kick_sync_test`, `wave11_queue_test`). Prefer channels over shared mutable state;
+full type-level race freedom remains residual.
 
 SMTP TLS: `smtp_send_starttls` uses `SSL_connect`. Set **`MAKO_SMTP_TLS_VERIFY=1`**
 to enable peer certificate verification (`SSL_VERIFY_PEER`); default is off for
