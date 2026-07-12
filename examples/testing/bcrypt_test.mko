@@ -1,0 +1,18 @@
+// bcrypt via libxcrypt ($2b$). Only meaningful where bcrypt is available
+// (Linux/libxcrypt); elsewhere the runtime returns "" and this is a no-op.
+pull "crypto"
+
+func TestBcryptRoundTrip() {
+    if crypto.bcrypt_ok() == 0 {
+        return
+    }
+    let h = crypto.bcrypt("correct horse", 8)
+    assert_eq(len(h), 60)
+    assert(str_has_prefix(h, "$2b$08$"))
+    assert_eq(crypto.bcrypt_check(h, "correct horse"), 1)
+    assert_eq(crypto.bcrypt_check(h, "wrong"), 0)
+    // Distinct salts → distinct hashes for the same password.
+    let h2 = crypto.bcrypt("correct horse", 8)
+    assert(h != h2)
+    assert_eq(crypto.bcrypt_check(h2, "correct horse"), 1)
+}

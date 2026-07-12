@@ -309,7 +309,7 @@ typedef struct {
     struct sockaddr_in last_addr;
 } MakoGameUDP;
 
-static inline MakoGameUDP *mako_game_udp_bind(int64_t port) {
+static inline MakoGameUDP *mako_game_udp_bind_addr(MakoString host, int64_t port) {
     MakoGameUDP *u = (MakoGameUDP *)calloc(1, sizeof(MakoGameUDP));
     if (!u) return NULL;
 
@@ -326,10 +326,15 @@ static inline MakoGameUDP *mako_game_udp_bind(int64_t port) {
     setsockopt(u->fd, SOL_SOCKET, SO_REUSEADDR, (const char *)&yes, sizeof(yes));
 
     struct sockaddr_in addr;
-    memset(&addr, 0, sizeof(addr));
-    addr.sin_family = AF_INET;
-    addr.sin_addr.s_addr = htonl(INADDR_ANY);
-    addr.sin_port = htons((uint16_t)port);
+    if (!mako_bind_ipv4_addr(&addr, host, port)) {
+#if defined(_WIN32)
+        closesocket(u->fd);
+#else
+        close(u->fd);
+#endif
+        free(u);
+        return NULL;
+    }
 
     if (bind(u->fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
 #if defined(_WIN32)

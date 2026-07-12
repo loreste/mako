@@ -252,8 +252,8 @@ impl Codegen {
         self.out.push_str("#include \"mako_rt.h\"\n");
         self.out.push_str("#ifndef MAKO_WASI\n");
         self.out.push_str("#include \"mako_uuid.h\"\n");
-        self.out.push_str("#include \"mako_http.h\"\n");
         self.out.push_str("#include \"mako_net.h\"\n");
+        self.out.push_str("#include \"mako_http.h\"\n");
         self.out.push_str("#include \"mako_std.h\"\n");
         self.out.push_str("#include \"mako_tls.h\"\n");
         self.out.push_str("#include \"mako_nghttp2.h\"\n");
@@ -3089,7 +3089,17 @@ impl Codegen {
                         "game_udp_bind" => {
                             let (_, p) = self.emit_expr(&args[0]);
                             let tmp = self.fresh("gub");
-                            self.line(&format!("MakoGameUDP *{tmp} = mako_game_udp_bind({p});"));
+                            // Bind all interfaces: wildcard host through the addr helper.
+                            self.line(&format!(
+                                "MakoGameUDP *{tmp} = mako_game_udp_bind_addr(mako_str_from_cstr(\"*\"), {p});"
+                            ));
+                            return ("MakoGameUDP*".into(), tmp);
+                        }
+                        "game_udp_bind_addr" => {
+                            let (_, h) = self.emit_expr(&args[0]);
+                            let (_, p) = self.emit_expr(&args[1]);
+                            let tmp = self.fresh("guba");
+                            self.line(&format!("MakoGameUDP *{tmp} = mako_game_udp_bind_addr({h}, {p});"));
                             return ("MakoGameUDP*".into(), tmp);
                         }
                         "game_udp_recv" => {
@@ -5440,6 +5450,13 @@ impl Codegen {
                             self.line(&format!("int64_t {tmp} = mako_tcp_listen({p});"));
                             return ("int64_t".into(), tmp);
                         }
+                        "tcp_listen_addr" => {
+                            let (_, h) = self.emit_expr(&args[0]);
+                            let (_, p) = self.emit_expr(&args[1]);
+                            let tmp = self.fresh("tla");
+                            self.line(&format!("int64_t {tmp} = mako_tcp_listen_addr({h}, {p});"));
+                            return ("int64_t".into(), tmp);
+                        }
                         "tcp_accept" => {
                             let (_, f) = self.emit_expr(&args[0]);
                             let tmp = self.fresh("ta");
@@ -7693,6 +7710,31 @@ impl Codegen {
                             ));
                             return ("int64_t".into(), tmp);
                         }
+                        "bcrypt_hash" => {
+                            let (_, p) = self.emit_expr(&args[0]);
+                            let (_, c) = self.emit_expr(&args[1]);
+                            let tmp = self.fresh("bch");
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_bcrypt_hash({p}, {c});"
+                            ));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "bcrypt_verify" => {
+                            let (_, h) = self.emit_expr(&args[0]);
+                            let (_, p) = self.emit_expr(&args[1]);
+                            let tmp = self.fresh("bcv");
+                            self.line(&format!(
+                                "int64_t {tmp} = mako_bcrypt_verify({h}, {p});"
+                            ));
+                            return ("int64_t".into(), tmp);
+                        }
+                        "bcrypt_available" => {
+                            let tmp = self.fresh("bca");
+                            self.line(&format!(
+                                "int64_t {tmp} = mako_bcrypt_available();"
+                            ));
+                            return ("int64_t".into(), tmp);
+                        }
                         "aes_gcm_seal" => {
                             let (_, k) = self.emit_expr(&args[0]);
                             let (_, n) = self.emit_expr(&args[1]);
@@ -9526,6 +9568,13 @@ impl Codegen {
                             let (_, p) = self.emit_expr(&args[0]);
                             let tmp = self.fresh("hb");
                             self.line(&format!("int64_t {tmp} = mako_http_bind({p});"));
+                            return ("int64_t".into(), tmp);
+                        }
+                        "http_bind_addr" => {
+                            let (_, h) = self.emit_expr(&args[0]);
+                            let (_, p) = self.emit_expr(&args[1]);
+                            let tmp = self.fresh("hba");
+                            self.line(&format!("int64_t {tmp} = mako_http_bind_addr({h}, {p});"));
                             return ("int64_t".into(), tmp);
                         }
                         "http_accept" => {

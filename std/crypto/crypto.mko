@@ -14,6 +14,13 @@ fn password_hash(password: string) -> string { return argon2id_hash(password) }
 fn password_verify(hash: string, password: string) -> int { return argon2id_verify(hash, password) }
 fn password_hashing_ok() -> int { return argon2_available() }
 
+// bcrypt (`$2b$`) — for interop with existing bcrypt password stores. Needs
+// libxcrypt (Linux); `bcrypt_ok` reports availability. Prefer Argon2id for new
+// systems. `cost` is the work factor (4–31); 10–12 is typical.
+fn bcrypt(password: string, cost: int) -> string { return bcrypt_hash(password, cost) }
+fn bcrypt_check(hash: string, password: string) -> int { return bcrypt_verify(hash, password) }
+fn bcrypt_ok() -> int { return bcrypt_available() }
+
 // Key derivation — PBKDF2-HMAC-SHA256 (password, salt, iterations, key length).
 // A building block for SCRAM-SHA-256 and legacy password KDFs.
 fn pbkdf2(password: string, salt: string, iterations: int, dklen: int) -> string {
