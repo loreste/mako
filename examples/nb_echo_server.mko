@@ -1,0 +1,51 @@
+// Non-blocking multi-client server: one thread, an event loop, and the nb_*
+// socket API. This is the shape of a real protocol server (e.g. pgwire) — accept
+// many connections and service whichever is ready, without a thread per client.
+//
+//   nb_listen(port)          -> non-blocking listener fd
+//   evloop_new()             -> reactor
+//   evloop_add(el, fd, 1)    -> watch fd for readability (flag 1 = read)
+//   evloop_wait(el, ms)      -> number of ready fds (0 on timeout)
+//   evloop_event_fd(el, i)   -> the i-th ready fd
+//   nb_accept / nb_read / nb_write / nb_close
+//
+// Run it, then: `printf 'hello' | nc 127.0.0.1 9099` → "echo:hello".
+
+fn main() {
+    let lfd = nb_listen(9099)
+    if lfd < 0 {
+        print("listen failed")
+        return
+    }
+    let el = evloop_new()
+    let _ = evloop_add(el, lfd, 1)
+
+    while true {
+        let n = evloop_wait(el, 1000)   // block up to 1s for activity
+        if n <= 0 {
+            continue                    // timeout — do periodic work here
+        }
+        var i = 0
+        for i < n {
+            let fd = evloop_event_fd(el, i)
+            if fd == lfd {
+                // Listener is readable: accept the pending connection(s).
+                let cfd = nb_accept(lfd)
+                if cfd >= 0 {
+                    let _ = evloop_add(el, cfd, 1)
+                }
+            } else {
+                // A client fd is readable.
+                let data = nb_read(fd)
+                if len(data) == 0 {
+                    // Empty read = peer closed; stop watching and close.
+                    let _1 = evloop_del(el, fd)
+                    let _2 = nb_close(fd)
+                } else {
+                    let _3 = nb_write(fd, "echo:" + data)
+                }
+            }
+            i = i + 1
+        }
+    }
+}

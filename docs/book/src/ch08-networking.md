@@ -808,6 +808,11 @@ fn main() {
 }
 ```
 
+A complete, runnable version — the template to build a real protocol server (e.g.
+a database wire protocol) on one thread — is in
+[`examples/nb_echo_server.mko`](https://github.com/loreste/mako/blob/main/examples/nb_echo_server.mko).
+Test it with `printf 'hello' | nc 127.0.0.1 9099`.
+
 ### Event Loop API
 
 | Function | Purpose |

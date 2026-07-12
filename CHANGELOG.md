@@ -66,6 +66,13 @@
 - multiple UDP frontends by wrapping a `GameUDP` handle in a struct (struct
   arrays hold handles); array literals accept a trailing comma.
 
+### Examples
+
+- **non-blocking multi-client server** — `examples/nb_echo_server.mko`, a complete
+  one-thread reactor over `evloop_*` + `nb_*` (accept many clients, service the
+  ready ones). Verified with concurrent clients — the template for a protocol
+  server such as pgwire.
+
 ### Tooling
 
 - **test failures explain themselves** — when a test process crashes it now
