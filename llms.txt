@@ -6,26 +6,37 @@
 
 ## What is Mako?
 
-Mako is a compiled, statically typed programming language. Source files use the
-`.mko` extension. **Unique language, unique syntax** (Mako flair: `fn`, `let`,
-`on`, `pack`, `pull`, `hold`, `share`, `arena`, `crew`, `kick`). Exists to fix
-Go/Rust *pain* (GC/nil/err noise/leaks; lifetimes/traits/async coloring) without
-cloning either — docs/PAIN_POINTS.md. Dual spellings are compat sugar only.
-Identity: docs/IDENTITY.md (~90%). Compiles to C then native via clang. No GC.
+Mako is a compiled, statically typed programming language with its own unique
+syntax and identity. Source files use the `.mko` extension. Compiles to C then
+native via clang. No garbage collector. 169 tests passing.
+
+**Unique surface:** `fn`, `let`, `on Type {}`, `pack`/`pull`/`export`,
+`hold`/`share`/`arena`, `crew`/`kick`/`join`/`fan`, `match`, `switch`/`case`.
+
+Exists to fix real pain (GC/nil/err noise/leaks; lifetimes/traits/async coloring)
+without cloning any other language. Dual spellings (`func`, `:=`, `import`) are
+compat sugar only. Identity: docs/IDENTITY.md (~92%).
 
 Key properties:
-- Mako surface: fn, let, on Type, pack/pull, hold/share/arena, crew/kick/join, match, export
-- Low ceremony: infer locals, print(any common), string ==, ?, match routes — docs/ERGONOMICS.md
-- Units: always pack-qualified; preferred `pull "p" as n` (dual: import)
-- Dual sugar still parses: func, :=, var, package, import, type T struct, receivers
-- Speed is the game: as close to Rust as possible (no GC; -O3 -flto; docs/SPEED.md)
-- Concurrency first-class: crew/kick/join, channels, select, actor (structured)
-- Parallelism first-class: fan + multi-kick crews
-- Compiles .mko -> C -> native binary (debug -O0, release -O3 -flto)
+- Mako surface: fn, let, on Type {}, pack/pull/export, hold/share/arena, crew/kick/join/fan
+- User generics: fn id[T](x: T) -> T (monomorphization)
+- Tuples: (int, int), multi-return with let a, b = f()
+- Methods: on Type { fn method(self) -> T { ... } }
+- Module system: pack name / pull "path" / pull "path" as name / export fn/struct
+- Switch: switch expr { case v: ...; default: ... }
+- Parallelism: fan(xs, fn(x) { x * x }) — data parallelism across cores
+- Concurrency: crew/kick/join, go f(), channels, select, actor (structured)
+- Compound assignments: +=, -=, *=, /=, ++, --
+- Parallel assignment: a, b = b, a
+- If-expressions: let x = if c { a } else { b }
+- If with initializer: if init; cond { }
 - No GC: ownership via hold/share, arenas for scoped allocation
 - Result/Option types enforced (no null, unused Result is a compile error)
-- Batteries-included stdlib: HTTP server, JSON, SQL, crypto, regex, UUID, etc.
+- Speed: as close to native as possible (-O3 -flto; bench-gate <=1.5x)
+- Compiles .mko -> C -> native binary (debug -O0, release -O3 -flto)
 - WASM/WASI target support (wasm32-wasip1)
+- Batteries-included stdlib: HTTP/2, TLS 1.3, bcrypt, PBKDF2, SCRAM-SHA-256,
+  signal handling, file-system watch, UDP proxy, JSON, SQL, regex, UUID, etc.
 
 ## Installation
 
@@ -47,12 +58,12 @@ mako run main.mko
 mako build main.mko
 ```
 
-## Hello World (preferred Mako syntax)
+## Hello World (idiomatic Mako)
 
 ```mko
 fn main() {
     print("hello from mako")
-    print_int(fib(10))
+    print(fib(10))
 }
 
 fn fib(n: int) -> int {
@@ -63,20 +74,55 @@ fn fib(n: int) -> int {
 }
 ```
 
-Identity: docs/IDENTITY.md. Dual sugar: func, :=, a int still parse.
+## Canonical Mako Style
+
+```mko
+pull "strings"
+
+export struct Point {
+    x: int
+    y: int
+}
+
+on Point {
+    fn distance(self) -> int {
+        return self.x + self.y
+    }
+}
+
+fn divmod(a: int, b: int) -> (int, int) {
+    return (a / b, a % b)
+}
+
+fn main() {
+    let p = Point { x: 3, y: 4 }
+    print(p.distance())
+
+    let q, r = divmod(17, 5)
+
+    let xs = [1, 2, 3, 4]
+    let ys = fan(xs, fn(x) { x * x })
+
+    crew t {
+        let job = t.kick(work())
+        print(job.join())
+    }
+}
+```
 
 ## Core Concepts
 
 - **Types:** int, int8, int32, int64, uint64, float, bool, string, byte, void
 - **Composite:** []T (slices), map[K]V, chan[T], Option[T], Result[T, E], (T, U) tuples
-- **Declarations:** fn, struct, enum, actor, interface, const, export (preferred)
-- **Methods:** on T { fn M(self) … } preferred; T_M free functions; dual Go receivers
-- **Locals:** let / let mut preferred; dual := / var
-- **Control flow:** if/else, while, for/in/range, match, break, continue, return, defer
+- **Declarations:** fn, struct, enum, actor, interface, const, export
+- **Generics:** fn id[T](x: T) -> T, Result[T, E], Option[T]
+- **Methods:** on T { fn M(self) ... } preferred; dual: free functions T_M
+- **Locals:** let / let mut; compound: +=, -=, *=, /=, ++, --
+- **Control flow:** if/else, if-expr, if init;cond, while, for/in/range, switch/case, match, break, continue, return, defer
 - **Ownership:** hold (move), share (RC), arena (bump allocator)
-- **Concurrency:** crew { t.kick(f()); j.join() }, fan, channels, select
-- **Error handling:** Result[T, E], Ok/Err, error("msg"), ?, multi-return
-- **Units:** `pack name`; `pull "path"` / `pull "path" as name` / `pull ( … )`; always qualify (`pkg.fn`); dual `import`/`package`; specialized `_` / `.`
+- **Concurrency:** crew { t.kick(f()); j.join() }, go f(), fan, channels, select
+- **Error handling:** Result[T, E], Ok/Err, error("msg"), ?, match
+- **Units:** pack name; pull "path" / pull "path" as name; export fn/struct; always qualify (pkg.fn)
 - **Testing:** fn TestFoo() { assert_eq(1, 1) } in *_test.mko files
 
 ## Build Commands
@@ -93,20 +139,17 @@ mako build --target wasm32-wasip1 file.mko -o out.wasm
 
 ## Stdlib Categories
 
-Output, Strings, Math, File I/O, HTTP Server/Client, JSON, Database (SQLite/
-Postgres), Crypto (SHA, HMAC, AES-GCM, ChaCha20), Encoding (base64, hex, gzip),
-Regex, UUID, Cookies/Sessions/Auth, Channels, Concurrency (mutex, atomics, CMap),
-Event Loop, Binary Buffer, Game Networking, Cloud (consistent hashing, rate
-limiting, circuit breaker), Testing.
+Output, Strings, Math, File I/O, HTTP Server/Client, HTTP/2, TLS 1.3, JSON,
+Database (SQLite/Postgres), Crypto (SHA, HMAC, AES-GCM, ChaCha20, bcrypt,
+PBKDF2, SCRAM-SHA-256), Encoding (base64, hex, gzip), Regex, UUID,
+Cookies/Sessions/Auth, Channels, Concurrency (mutex, atomics, CMap), Event Loop,
+Binary Buffer, Game Networking, Signal Handling, File-System Watch, UDP Proxy,
+Cloud (consistent hashing, rate limiting, circuit breaker), Testing.
 
 ## Documentation Links
 
+- Website: https://mako-lang.com
 - Language Guide: https://mako-lang.com/docs/guide
 - Standard Library: https://mako-lang.com/docs/stdlib
 - The Mako Book: https://mako-lang.com/docs/book
-- Builtins Reference: https://mako-lang.com/docs/builtins
-- Keywords: https://mako-lang.com/docs/keywords
-- Memory Safety: https://mako-lang.com/docs/security
-- Build System: https://mako-lang.com/docs/build
-- WASM/WASI: https://mako-lang.com/docs/wasm
 - Full LLM Reference: https://mako-lang.com/llms-full.txt

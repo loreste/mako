@@ -17,7 +17,7 @@ fn main() {
     crew t {
         let a = t.kick(compute(7))
         let b = t.kick(compute(9))
-        print_int(a.join() + b.join())  // 130
+        print(a.join() + b.join())  // 130
     }
 }
 ```
@@ -38,7 +38,7 @@ fn main() {
         // Consumer: receive values
         let c = t.kick(consume(ch))
         let _ = p.join()
-        print_int(c.join())
+        print(c.join())
     }
 }
 
@@ -96,7 +96,7 @@ fn main() {
         let _ = t.kick(generate(s1, 5))
         let _ = t.kick(double(s1, s2))
         let c = t.kick(collect(s2))
-        print_int(c.join())  // 2+4+6+8+10 = 30
+        print(c.join())  // 2+4+6+8+10 = 30
     }
 }
 ```
@@ -121,8 +121,8 @@ fn main() {
         let _ = t.kick(sender(a, 10, 50))
         let _ = t.kick(sender(b, 20, 20))
         select timeout 500 {
-            a => { print("got a") print_int(chan_select_value()) }
-            b => { print("got b") print_int(chan_select_value()) }
+            a => { print("got a") print(chan_select_value()) }
+            b => { print("got b") print(chan_select_value()) }
             default => { print("nothing ready") }
         }
     }
@@ -142,9 +142,9 @@ across cores and collecting results.
 ```mko
 fn main() {
     let data = [1, 2, 3, 4, 5, 6, 7, 8]
-    let squared = fan(data, |x| x * x)
+    let squared = fan(data, fn(x) { x * x })
     for v in squared {
-        print_int(v)
+        print(v)
     }
 }
 ```
@@ -186,7 +186,7 @@ fn main() {
         let _ = Session_send(session, Session_Timer())
         let _ = Session_send(session, Session_Bye())
 
-        print_int(loopj.join())
+        print(loopj.join())
     }
 }
 ```
@@ -214,7 +214,7 @@ fn main() {
         let _ = a.join()
         let _ = b.join()
     }
-    print_int(cmap_len(store))
+    print(cmap_len(store))
     print(cmap_get(store, "worker-1"))
 }
 ```
@@ -233,7 +233,7 @@ fn work(n: int) -> int { return n * n }
 fn main() {
     crew t {
         let a = t.kick(work(3))
-        print_int(a.join())
+        print(a.join())
         t.cancel()
         if t.cancelled() { print("crew cancelled") }
     }
@@ -245,7 +245,7 @@ For channel timeouts, use `select timeout`:
 ```mko
 let ch = chan_new(1)
 select timeout 100 {
-    ch => { print_int(chan_select_value()) }
+    ch => { print(chan_select_value()) }
     _ => { print("timed out") }
 }
 ```
@@ -288,7 +288,7 @@ fn main() {
             sum = sum + done.recv()
             got = got + 1
         }
-        print_int(sum)
+        print(sum)
     }
 }
 ```
@@ -302,7 +302,7 @@ fn main() {
 - Channels (`chan_new`, `send`, `recv`, `close`) are the primary
   communication primitive
 - `select timeout` multiplexes multiple channels with a deadline
-- `fan(slice, fn)` provides one-line data parallelism
+- `fan(slice, fn(x) { ... })` provides one-line data parallelism
 - Actors (`actor` / `receive`) encapsulate stateful message handling
 - `CMap` gives lock-free shared state across tasks
 - `t.cancel()` / `t.cancelled()` enable cooperative cancellation

@@ -35,10 +35,10 @@ fn main() {
 
 ```mko
 let data = game_udp_recv(u)
-if not str_eq(data, "") {
+if data != "" {
     let peer = game_udp_sender(u)
     print("received from peer:")
-    print_int(peer)
+    print(peer)
     print(data)
 
     // Echo back to sender
@@ -61,7 +61,7 @@ let _ = game_udp_broadcast(u, "server:hello-all")
 // Check how many peers are connected
 let count = game_udp_peers(u)
 print("connected peers:")
-print_int(count)
+print(count)
 
 // Kick a misbehaving peer
 game_udp_kick(u, bad_peer_id)
@@ -86,7 +86,7 @@ fn game_loop(u: int) {
         let mut processed = 0
         while processed < 64 {
             let data = game_udp_recv(u)
-            if str_eq(data, "") {
+            if data == "" {
                 break
             }
             let peer = game_udp_sender(u)
@@ -106,7 +106,7 @@ fn game_loop(u: int) {
 
 fn handle_packet(u: int, peer: int, data: string) {
     print("peer:")
-    print_int(peer)
+    print(peer)
     print(data)
     let _ = game_udp_send(u, peer, "ack:" + data)
 }
@@ -122,7 +122,19 @@ over the wire format.
 
 ### Packing a Message
 
+You can organize protocol helpers using `on` methods on a struct:
+
 ```mko
+struct GamePacket {
+    msg_type: int
+    seq: int
+}
+
+on GamePacket {
+    fn is_move(self) -> bool { return self.msg_type == 2 }
+    fn is_leave(self) -> bool { return self.msg_type == 4 }
+}
+
 fn pack_move(seq: int, x: int, y: int) -> string {
     let b = buf_pack_new(64)
     buf_write_u8(b, 2)            // msg_type = move
@@ -152,8 +164,8 @@ fn parse_message(wire: string) -> int {
             let x = buf_read_i32(b)
             let y = buf_read_i32(b)
             print("move to:")
-            print_int(x)
-            print_int(y)
+            print(x)
+            print(y)
         } else {
             if msg_type == 3 {
                 let text = buf_read_str(b, payload_len)
@@ -187,7 +199,7 @@ while 1 == 1 {
     let n = evloop_wait(el, 16)  // ~60 Hz
     if n > 0 {
         let data = game_udp_recv(u)
-        if not str_eq(data, "") {
+        if data != "" {
             let peer = game_udp_sender(u)
             let _ = game_udp_send(u, peer, "echo:" + data)
         }
@@ -233,7 +245,7 @@ fn main() {
         let mut pkt = 0
         while pkt < 128 {
             let data = game_udp_recv(u)
-            if str_eq(data, "") {
+            if data == "" {
                 break
             }
             let peer = game_udp_sender(u)
@@ -247,7 +259,7 @@ fn main() {
                 if msg_type == 4 {
                     // Leave message — kick the peer
                     print("peer leaving:")
-                    print_int(peer)
+                    print(peer)
                     game_udp_kick(u, peer)
                 } else {
                     // Echo back to sender

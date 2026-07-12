@@ -2,32 +2,48 @@
 #
 # Source: https://mako-lang.com
 # Repository: https://github.com/loreste/mako
-# Version: mako0.1.0
+# Version: mako 0.1.0
 #
 # This file contains everything an LLM needs to write correct Mako code.
 # Mako compiles .mko files to C, then to native binaries via clang.
 # No garbage collector. Memory safety via ownership (hold/share) and arenas.
+# 169 tests passing. Mako identity ~92%.
 
 ================================================================================
 1. OVERVIEW
 ================================================================================
 
-Mako is a compiled, statically typed language. Source files use the .mko
-extension. The compilation pipeline is: .mko -> C -> .o (cached) -> native
-binary. Debug builds use -O0; release builds use -O3 -flto.
+Mako is a compiled, statically typed language with its own unique syntax and
+identity. Source files use the .mko extension. The compilation pipeline is:
+.mko -> C -> .o (cached) -> native binary. Debug builds use -O0; release builds
+use -O3 -flto.
+
+Mako is NOT a clone of any other language. It has its own surface:
+- fn, let, on Type {}, pack/pull/export, hold/share/arena, crew/kick/join/fan
+- Dual spellings (func, :=, import, package) exist as compat sugar, not the brand
 
 Key design points:
 - No garbage collector
 - Ownership model: hold (move semantics), share (reference counting)
 - Arena allocators for scoped bulk allocation
 - Structured concurrency via crew blocks (jobs cannot outlive their crew)
+- Data parallelism via fan (across all cores)
+- User generics with monomorphization
+- Tuples and multi-return values
+- Method blocks via on Type { ... }
+- Module system via pack/pull/export
+- switch/case for value matching
 - Result and Option types enforced (no null pointers)
 - Unused Result values are compile errors
+- Compound assignments (+=, -=, *=, /=, ++, --)
+- Parallel assignment (a, b = b, a)
+- If-expressions (let x = if c { a } else { b })
 - Batteries-included standard library
 - WASM/WASI preview1 target support
+- Bench-gate: within 1.5x of native performance on microbenchmarks
 
 Entry point is fn main(). A program is a .mko file with top-level fn, struct,
-enum, actor, interface, const, extern "C", and import declarations.
+enum, actor, interface, const, extern "C", pack, pull, export, and on declarations.
 
 ================================================================================
 2. INSTALLATION
@@ -62,6 +78,7 @@ mako fmt file.mko                    # format to stdout
 mako fmt file.mko -w                 # format in place
 mako fmt file.mko -d                 # show diff
 mako lint path/                      # lint checks
+mako lint --identity path/           # flag dual-form spellings as style
 mako bench path/                     # run bench_*.mko files
 mako doc path/                       # generate API docs
 mako init myapp                      # scaffold a new project
@@ -108,13 +125,28 @@ No implicit mixing: int + int64 is a type error. Convert explicitly.
 
   []T                 Slice (dynamic array): []int, []string, []byte, []float, []Point
   map[K]V             Hash map: map[string]int, map[int]int, map[string]string
-  chan[T]              Typed channel: chan[int]
+  chan[T]              Typed channel: chan[int], chan[string], chan[bool]
   Option[T]           Some(value) or None
   Result[T, E]        Ok(value) or Err(error)
+  (T, U)              Tuple: (int, int), (int, string), etc.
   Named structs       User-defined product types
   Named enums         User-defined sum types
 
-4.3 Explicit Conversions
+4.3 Tuples
+----------
+
+  // Tuple type annotation:
+  fn divmod(a: int, b: int) -> (int, int) {
+      return (a / b, a % b)
+  }
+
+  // Tuple destructuring / multi-return:
+  let q, r = divmod(17, 5)
+
+  // Tuple types in declarations:
+  let pair: (int, string) = (42, "hello")
+
+4.4 Explicit Conversions
 ------------------------
 
   let a: int = 10
@@ -140,19 +172,50 @@ argument is a constant.
 
 Assignment is = only. Equality comparison is ==.
 
+5.1 Compound Assignments
+-------------------------
+
+  let mut x = 10
+  x += 5                     // x = x + 5
+  x -= 2                     // x = x - 2
+  x *= 3                     // x = x * 3
+  x /= 2                     // x = x / 2
+
+  // Increment / Decrement:
+  x++                        // x = x + 1
+  x--                        // x = x - 1
+
+  // Works on struct fields and array indices:
+  p.x += 1
+  arr[0] += 10
+
+5.2 Parallel Assignment
+------------------------
+
+  // Swap without temporaries:
+  a, b = b, a
+
+  // Multiple assignment from expressions:
+  let a, b = divmod(17, 5)
+
+  // Reassignment:
+  let mut x = 1
+  let mut y = 2
+  x, y = y, x               // swap
+
 ================================================================================
 6. OPERATORS
 ================================================================================
 
 Comparison:   ==  !=  <  >  <=  >=
 Arithmetic:   +  -  *  /  %
+Compound:     +=  -=  *=  /=  ++  --
 Logical:      &&  ||  !     (also keywords: and  or  not)
 Bitwise:      &  |  ^  &^  <<  >>   (unary ^x = bitwise complement)
 String:       +              (concatenation)
 String cmp:   ==  !=         (no < > on strings)
 
 Short-circuit: && and || do not evaluate the right side when unnecessary.
-!!x is two unary ! operators (no special !! token).
 
 ================================================================================
 7. FUNCTIONS
@@ -178,12 +241,42 @@ Short-circuit: && and || do not evaluate the right side when unnecessary.
 
 Missing return on a non-void function is a type error.
 
-Lambdas / closures:
+7.1 User Generics
+------------------
+
+  // Generic functions with monomorphization:
+  fn id[T](x: T) -> T {
+      return x
+  }
+
+  fn first[T](a: T, b: T) -> T {
+      return a
+  }
+
+  // Called with inferred or explicit type:
+  let n = id(42)             // T = int, inferred
+  let s = id("hello")       // T = string, inferred
+
+  // Generic types:
+  Result[T, E]               // built-in generic
+  Option[T]                  // built-in generic
+  chan[T]                    // typed channels
+
+7.2 Lambdas / Closures
+------------------------
 
   let double = |x| x * 2
   let ys = fan(xs, |x| x * x)
 
-Lambda syntax: |params| { body } or |params| expr
+  // Block body lambda:
+  let compute = fn(x: int) -> int {
+      return x * x + 1
+  }
+
+  // Lambda with fan:
+  let results = fan(items, fn(item) { item * 2 })
+
+Lambda syntax: |params| { body } or |params| expr or fn(params) { body }
 
 ================================================================================
 8. CONTROL FLOW
@@ -200,7 +293,27 @@ Lambda syntax: |params| { body } or |params| expr
       print("negative")
   }
 
-8.2 While Loop
+8.2 If with Initializer
+-------------------------
+
+  if let val = try_get(); val > 0 {
+      print("got positive value")
+  }
+
+  if let err = validate(input); err != "" {
+      print("invalid: " + err)
+  }
+
+8.3 If as Expression
+---------------------
+
+  let x = if condition { a } else { b }
+
+  let label = if count > 1 { "items" } else { "item" }
+
+  // Both branches must return the same type.
+
+8.4 While Loop
 --------------
 
   let mut i = 0
@@ -208,7 +321,7 @@ Lambda syntax: |params| { body } or |params| expr
       i = i + 1
   }
 
-8.3 For / Range
+8.5 For / Range
 ---------------
 
   let s = [10, 20, 30]
@@ -225,6 +338,16 @@ Lambda syntax: |params| { body } or |params| expr
   for i in 3 { }             // legacy: same as range n
   for v in s { }             // legacy: values only
 
+  // C-style for:
+  for let mut i = 0; i < 10; i++ {
+      print_int(i)
+  }
+
+  // Infinite loop:
+  for {
+      if done { break }
+  }
+
   // Range over strings yields runes (Unicode code points):
   for i, r in range "cafe" {
       // i = byte offset, r = rune (int)
@@ -240,7 +363,38 @@ Lambda syntax: |params| { body } or |params| expr
       print_int(v)
   }
 
-8.4 Break / Continue
+8.6 Switch / Case
+------------------
+
+  // Value switch:
+  switch status {
+      case 200:
+          print("ok")
+      case 404:
+          print("not found")
+      default:
+          print("other")
+  }
+
+  // Expression-less switch (like chained if/else):
+  switch {
+      case x > 10:
+          print("big")
+      case x > 0:
+          print("positive")
+      default:
+          print("non-positive")
+  }
+
+  // Switch with initializer:
+  switch let v = compute(); v {
+      case 0:
+          print("zero")
+      default:
+          print("nonzero")
+  }
+
+8.7 Break / Continue
 --------------------
 
   break                      // exit innermost loop
@@ -253,7 +407,7 @@ Lambda syntax: |params| { body } or |params| expr
       }
   }
 
-8.5 Defer
+8.8 Defer
 ---------
 
   defer print("cleanup")     // runs on function exit (LIFO order)
@@ -262,7 +416,7 @@ Lambda syntax: |params| { body } or |params| expr
       close(fd)
   }
 
-8.6 Match
+8.9 Match
 ---------
 
   // Match on enums:
@@ -302,9 +456,19 @@ Match must be exhaustive on enums, Option, and Result.
       y: int
   }
 
+  // Exported struct (visible outside pack):
+  export struct Point {
+      x: int
+      y: int
+  }
+
   let mut p = Point { x: 3, y: 4 }
   print_int(p.x)
   p.x = 10
+
+  // Positional struct literals:
+  let p = Point{1, 2}         // x=1, y=2 (by field order)
+  let zero = Point{}           // all fields zero-initialized
 
   // Nested structs:
   struct Addr { city: string  zip: int }
@@ -316,14 +480,113 @@ Match must be exhaustive on enums, Option, and Result.
   let mut xs = make([]Point, 0, 4)
   xs = append(xs, Point { x: 1, y: 2 })
 
-  // Struct methods (free functions with naming convention):
-  fn Point_distance(self: Point) -> float {
-      sqrt(float64(self.x * self.x + self.y * self.y))
+================================================================================
+10. METHODS (on Type blocks)
+================================================================================
+
+Methods are defined using `on Type { ... }` blocks:
+
+  on Point {
+      fn distance(self) -> int {
+          return self.x + self.y
+      }
+
+      fn scale(self, k: int) -> int {
+          return (self.x + self.y) * k
+      }
   }
-  // Called as: p.distance()
+
+  // Call methods with dot syntax:
+  let p = Point { x: 3, y: 4 }
+  print(p.distance())
+  print(p.scale(2))
+
+  // Multiple methods in one block:
+  on Circle {
+      fn area(self) -> float {
+          return 3.14159 * float64(self.r * self.r)
+      }
+
+      fn circumference(self) -> float {
+          return 2.0 * 3.14159 * float64(self.r)
+      }
+  }
+
+  // Methods desugar to Type_method free functions internally:
+  // on Point { fn distance(self) -> int } becomes fn Point_distance(self: Point) -> int
+
+  // Legacy free-function style also works:
+  fn Point_translate(self: Point, dx: int, dy: int) -> Point {
+      return Point { x: self.x + dx, y: self.y + dy }
+  }
 
 ================================================================================
-10. ENUMS
+11. MODULE SYSTEM (pack / pull / export)
+================================================================================
+
+11.1 Pack Declaration
+---------------------
+
+  // At the top of a file, declare which pack this belongs to:
+  pack mylib
+
+11.2 Pull (Import)
+-------------------
+
+  // Pull a standard library package:
+  pull "strings"
+  pull "crypto"
+
+  // Pull with alias:
+  pull "strings" as str
+
+  // Pull a local file:
+  pull "./my_lib.mko"
+  pull "./my_lib.mko" as lib
+
+  // Grouped pull:
+  pull (
+      "strings"
+      "path"
+      lib "./my_lib.mko"
+  )
+
+  // Usage is always qualified:
+  strings.contains("hello", "ell")
+  lib.add(1, 2)
+
+11.3 Export (Visibility)
+-------------------------
+
+  // By default, symbols are visible within the pack.
+  // Use export to make them available to other packs:
+
+  export fn add(a: int, b: int) -> int {
+      return a + b
+  }
+
+  export struct Point {
+      x: int
+      y: int
+  }
+
+  export const VERSION = "1.0.0"
+
+  // Non-exported symbols are pack-private:
+  fn helper() -> int {        // only visible within this pack
+      return 42
+  }
+
+11.4 Dual Forms (compat sugar)
+-------------------------------
+
+  // These parse but are not the preferred surface:
+  import "strings"            // dual of: pull "strings"
+  import "lib" as l           // dual of: pull "lib" as l
+  package main                // dual of: pack main
+
+================================================================================
+12. ENUMS
 ================================================================================
 
   enum Shape {
@@ -340,12 +603,19 @@ Match must be exhaustive on enums, Option, and Result.
       }
   }
 
-  // Enum methods:
-  fn Shape_area(self: Shape) -> int { ... }
-  // Called as: Circle(5).area()
+  // Enum methods via on block:
+  on Shape {
+      fn area(self) -> int {
+          match self {
+              Circle(r) => r * r,
+              Rect(w, h) => w * h,
+              Point => 0,
+          }
+      }
+  }
 
 ================================================================================
-11. INTERFACES
+13. INTERFACES
 ================================================================================
 
   interface Writer {
@@ -366,22 +636,33 @@ Match must be exhaustive on enums, Option, and Result.
   fn Adder_add(self: Counter, delta: int) -> int {
       return self.val + delta
   }
-  // Called as: c.add(5) passes c as self
-
-  // Multiple implementations:
-  fn Adder_Counter_add(self: Counter, delta: int) -> int { ... }
-  fn Adder_Doubler_add(self: Doubler, delta: int) -> int { ... }
 
   // Dynamic dispatch (interface values box concrete receivers):
   let a: Adder = my_counter    // boxes into fat pointer
 
 ================================================================================
-12. GENERICS
+14. GENERICS
 ================================================================================
 
-  // Generic types are supported with angle brackets:
-  // Result[T, E], Option[T], List[T]
+  // User-defined generic functions (monomorphized at compile time):
+  fn id[T](x: T) -> T {
+      return x
+  }
 
+  fn swap[T](a: T, b: T) -> (T, T) {
+      return (b, a)
+  }
+
+  fn first[T](a: T, b: T) -> T {
+      return a
+  }
+
+  // Usage (type inferred from arguments):
+  let n = id(42)             // instantiates id[int]
+  let s = id("hello")       // instantiates id[string]
+  let a, b = swap(1, 2)     // instantiates swap[int]
+
+  // Built-in generic types:
   fn parse_positive(n: int) -> Result[int, string] {
       if n <= 0 {
           return error("must be positive")
@@ -396,13 +677,17 @@ Match must be exhaustive on enums, Option, and Result.
       }
   }
 
+  // Typed channels:
+  let ch = chan_open[int](8)
+  let sch = chan_open[string](4)
+
 ================================================================================
-13. ERROR HANDLING
+15. ERROR HANDLING
 ================================================================================
 
 Mako uses Result[T, E] and Option[T] instead of null or exceptions.
 
-13.1 Result Type
+15.1 Result Type
 ----------------
 
   fn parse(s: string) -> Result[int, string] {
@@ -424,25 +709,28 @@ Mako uses Result[T, E] and Option[T] instead of null or exceptions.
       Err(e) => print(e),
   }
 
-13.2 Error Construction
+15.2 Error Construction
 -----------------------
 
   error("message")                           // -> Result with Err
   errorf("missing %s", "config.toml")        // formatted error
 
-13.3 Error Wrapping
+15.3 Error Wrapping
 -------------------
 
   let r = wrap_err(error("boom"), "parse")   // Err("parse: boom")
   let ok = wrap_err(Ok(7), "unused")         // still Ok(7)
+  error_context(err_result, "context")       // alias for wrap_err
 
-13.4 Error Inspection
----------------------
+15.4 Error Utilities
+--------------------
 
   error_is(err_result, "substring")          // bool: error contains substring
   error_string(err_result)                   // extract error message string
+  error_tag("not_found", "user 42")          // enum-like string error
+  error_join(r1, r2)                         // combine Results
 
-13.5 Rules
+15.5 Rules
 ----------
 
   - Unused Result as a statement is a compile error
@@ -450,7 +738,7 @@ Mako uses Result[T, E] and Option[T] instead of null or exceptions.
   - Prefer Result + ? + wrap_err over abort for expected failures
 
 ================================================================================
-14. SLICES
+16. SLICES
 ================================================================================
 
   let mut s = [1, 2, 3]                // []int
@@ -481,10 +769,8 @@ Mako uses Result[T, E] and Option[T] instead of null or exceptions.
   let buf2 = []byte("mako")            // same as bytes()
   print(string(buf))                   // []byte -> string
 
-  // Type syntax: []T (preferred) or [T]
-
 ================================================================================
-15. MAPS
+17. MAPS
 ================================================================================
 
   let mut m = make(map[string]int)
@@ -510,11 +796,8 @@ Mako uses Result[T, E] and Option[T] instead of null or exceptions.
       print_int(v)
   }
 
-  // Supported key/value types:
-  // map[string]int, map[int]int, map[string]string
-
 ================================================================================
-16. STRINGS
+18. STRINGS
 ================================================================================
 
   let s = "hello"
@@ -532,7 +815,7 @@ Mako uses Result[T, E] and Option[T] instead of null or exceptions.
   print(s[1:4])                       // byte substring "ell"
 
   // Unicode:
-  print_int(rune_count("cafe"))       // rune count (4 for "cafe", differs from len for multibyte)
+  print_int(rune_count("cafe"))       // rune count
 
   // Range yields runes:
   for i, r in range "cafe" {
@@ -545,17 +828,17 @@ Mako uses Result[T, E] and Option[T] instead of null or exceptions.
   print(string(b))                    // []byte -> string
 
 ================================================================================
-17. OWNERSHIP MODEL
+19. OWNERSHIP MODEL
 ================================================================================
 
-17.1 let / mut
+19.1 let / mut
 --------------
 
   let x = 1                           // immutable
   let mut y = 2                       // mutable
   y = y + 1
 
-17.2 hold (Move Semantics)
+19.2 hold (Move Semantics)
 --------------------------
 
   hold let x = 7
@@ -583,7 +866,7 @@ Mako uses Result[T, E] and Option[T] instead of null or exceptions.
   let a = n                           // Copy: n still usable
   print_int(n)                        // OK for Copy types
 
-17.3 share (Reference Counting)
+19.3 share (Reference Counting)
 -------------------------------
 
   hold let a = 1
@@ -593,8 +876,9 @@ Mako uses Result[T, E] and Option[T] instead of null or exceptions.
 
   // share let is always immutable (share let mut is rejected)
   // Cannot mutate source while share is live
+  // Atomic RC: share_set for updates
 
-17.4 arena (Bump Allocation)
+19.4 arena (Bump Allocation)
 ----------------------------
 
   arena a {
@@ -604,17 +888,17 @@ Mako uses Result[T, E] and Option[T] instead of null or exceptions.
       // All arena memory freed when block exits
   }
 
-  // Struct arrays in arenas:
+  // Text in arena:
   arena a {
-      let mut pts = make([]Point, 0, 4)
-      pts = append(pts, Point { x: 1, y: 2 })
+      let label = arena_text(a, "mako")
+      print(label)
   }
 
 ================================================================================
-18. CONCURRENCY
+20. CONCURRENCY
 ================================================================================
 
-18.1 crew Blocks (Structured Concurrency)
+20.1 crew Blocks (Structured Concurrency)
 -----------------------------------------
 
 Jobs cannot outlive their crew block:
@@ -632,22 +916,42 @@ Jobs cannot outlive their crew block:
       if t.cancelled() { break }
   }
 
-18.2 fan (Data-Parallel Map)
+20.2 go Statement
+------------------
+
+  // Kick a function onto the enclosing crew:
+  crew t {
+      go expensive_work()                 // spawns onto t
+      go another_task()
+  }
+
+  // Equivalent to t.kick(f()) but shorter syntax.
+
+20.3 fan (Data-Parallel Map)
 ----------------------------
 
   let xs = [1, 2, 3, 4]
-  let ys = fan(xs, |x| x * x)            // parallel map
+  let ys = fan(xs, fn(x) { x * x })      // parallel map across all cores
+
+  // fan uses hardware concurrency (not a fixed thread count)
+  // Works on []int, []float, []string
+
   for v in ys {
       print_int(v)
   }
 
-18.3 Channels
+20.4 Channels
 -------------
 
   let ch = chan_new(4)                    // buffered channel, capacity 4
   let _ = ch.send(1)                     // send
   let v = ch.recv()                      // receive
   ch.close()                             // close channel
+
+  // Typed channels:
+  let ich = chan_open[int](8)
+  let sch = chan_open[string](4)
+  let bch = chan_open[bool](2)
 
   // Non-blocking send:
   let ok = chan_try_send(ch, 42)         // 0 on success
@@ -661,7 +965,7 @@ Jobs cannot outlive their crew block:
       print_int(v)
   }
 
-18.4 select
+20.5 select
 -----------
 
   select timeout 30 {
@@ -677,7 +981,7 @@ Jobs cannot outlive their crew block:
   let which = chan_select2(ch_a, ch_b, timeout_ms)
   let which = chan_select3(ch_a, ch_b, ch_c, timeout_ms)
 
-18.5 Actors
+20.6 Actors
 -----------
 
   actor Session {
@@ -696,7 +1000,7 @@ Jobs cannot outlive their crew block:
       }
   }
 
-18.6 Concurrent Maps (CMap)
+20.7 Concurrent Maps (CMap)
 ---------------------------
 
 Thread-safe hash map, safe to share across crew tasks:
@@ -709,44 +1013,57 @@ Thread-safe hash map, safe to share across crew tasks:
   let n = cmap_incr(m, "counter", 5)     // atomic increment
   print_int(cmap_del(m, "hello"))        // 1 (existed)
 
+20.8 Sendable Types Across kick
+--------------------------------
+
+Only certain types can cross kick boundaries (thread-safe):
+- Copy types: int, float, bool, byte
+- string (immutable, auto-cloned)
+- chan handles
+- CMap, Mutex, RWMutex, AtomicInt
+- ShareInt (atomic RC)
+
+Arrays/structs with non-sendable fields are rejected at compile time.
+
 ================================================================================
-19. IMPORT SYSTEM
+21. MODULE SYSTEM (pack / pull / export) — DETAILED
 ================================================================================
 
-19.1 Local File Import
-----------------------
+21.1 Package Declaration
+-------------------------
 
-  import "./my_lib.mko"                  // flat merge
-  print_int(lib_add(2, 3))              // call functions from imported file
+  pack mylib                             // this file belongs to pack "mylib"
 
-19.2 Aliased Import
+21.2 Pull (Import)
 -------------------
 
-  import "./my_lib.mko" as lib
-  print_int(lib.add(10, 32))            // namespaced call
+  pull "strings"                         // standard library
+  pull "crypto"
+  pull "./my_lib.mko"                    // local file (flat merge)
+  pull "./my_lib.mko" as lib             // namespaced
 
-19.3 Standard Library Packages
-------------------------------
-
-  import "strings"
-  import "sync"
-  assert(strings.contains("hi", "h"))
-  let m = sync.rwmutex()
-
-19.4 Grouped Import
--------------------
-
-  import (
+  // Grouped:
+  pull (
       "strings"
       "path"
       lib "./my_lib.mko"
   )
 
-  // Brace form also accepted:
-  import { "fmt"; "strings" }
+  // Usage always qualified:
+  strings.contains("hello", "ell")
+  lib.add(1, 2)
 
-19.5 Package Dependencies (mako.toml)
--------------------------------------
+21.3 Export
+-----------
+
+  export fn public_api() -> int { return 1 }
+  export struct Config { port: int }
+  export const VERSION = "1.0.0"
+
+  fn internal_helper() -> int { return 42 }   // pack-private
+
+21.4 Package Dependencies (mako.toml)
+--------------------------------------
 
   # mako.toml
   [package]
@@ -758,17 +1075,30 @@ Thread-safe hash map, safe to share across crew tasks:
   "tool" = { git = "https://example.com/tool.git", tag = "v0.1.0" }
 
   # Commands:
-  mako pkg add helper ../helper          # add path dependency
-  mako pkg fetch                         # clone git deps
-  mako pkg list                          # list dependencies
-  mako pkg lock                          # pin hashes in mako.lock
-  mako pkg audit                         # advisory + license check
+  mako pkg add helper ../helper
+  mako pkg fetch
+  mako pkg list
+  mako pkg lock
+  mako pkg audit
 
   # Usage: symbols namespaced by dependency key
   // In code: helper.add(1, 2)
 
+21.5 Workspace
+--------------
+
+  # mako.toml (workspace root)
+  [workspace]
+  members = ["core", "helper", "app"]
+
+  # Commands from workspace root:
+  mako check .
+  mako build .
+  mako test .
+  mako run -p app
+
 ================================================================================
-20. TESTING
+22. TESTING
 ================================================================================
 
   // Test file: add_test.mko (same directory as code)
@@ -795,29 +1125,16 @@ Thread-safe hash map, safe to share across crew tasks:
       assert_eq(2, 2)
   }
 
-  // Nested subtests:
-  fn TestNested() {
-      t_run("outer")
-      t_run_nested("inner")     // prints TestNested/outer/inner
-
-  }
-
-  // Test categories:
-  fn FuzzXxx() { ... }
-  fn PropertyXxx() { ... }
-
   // Run tests:
   mako test path/
   mako test --run TestAdd path/
-  mako test -v path/                     // verbose
-  mako test --run '/^TestAdd$/' path/    // regex filter
-  mako test --count 5 path/              // repeat
+  mako test -v path/
 
 ================================================================================
-21. JSON AND DERIVE
+23. JSON AND DERIVE
 ================================================================================
 
-21.1 derive(json)
+23.1 derive(json)
 -----------------
 
   #[derive(json)]
@@ -832,41 +1149,35 @@ Thread-safe hash map, safe to share across crew tasks:
       let age = Person_age_from_json(j)
   }
 
-21.2 JSON Functions
+23.2 JSON Functions
 -------------------
 
   // Construction:
-  json_object("key", "value")                           // {"key":"value"}
-  json_ss("k1", "v1", "k2", "v2")                      // {"k1":"v1","k2":"v2"}
-  json_si("name", "Ada", "age", 36)                     // {"name":"Ada","age":36}
-  json_i("count", 42)                                   // {"count":42}
-  json_nest("addr", addr_json)                          // nest under key
-  json_merge(obj1, obj2)                                // merge two objects
-  json_object_from_map_ss(m)                            // map[string]string -> JSON
+  json_object("key", "value")
+  json_ss("k1", "v1", "k2", "v2")
+  json_si("name", "Ada", "age", 36)
+  json_i("count", 42)
+  json_nest("addr", addr_json)
+  json_merge(obj1, obj2)
 
   // Extraction:
-  json_get_string(json, "key")                          // extract string
-  json_get_int(json, "key")                             // extract int
-  json_get_object(json, "key")                          // extract nested object
+  json_get_string(json, "key")
+  json_get_int(json, "key")
+  json_get_object(json, "key")
 
   // Path navigation:
-  json_path_string(json, "addr", "city")                // dot-path string
-  json_path_int(json, "data", "count")                  // dot-path int
+  json_path_string(json, "addr", "city")
+  json_path_int(json, "data", "count")
 
   // Arrays:
-  json_array_ints3(10, 20, 30)                          // [10,20,30]
-  json_array_strings2("a", "b")                         // ["a","b"]
-  json_array_push_int(arr, 40)                          // append int
-  json_array_push_string(arr, "c")                      // append string
-  json_array_len(json)                                  // array length
-  json_array_get_int(json, 0)                           // get int at index
-  json_array_get_string(json, 0)                        // get string at index
-
-  // Checking:
-  json_has(json, "key", "value")                        // check key=value
+  json_array_len(json)
+  json_array_get_int(json, 0)
+  json_array_get_string(json, 0)
+  json_array_push_int(arr, 40)
+  json_array_push_string(arr, "c")
 
 ================================================================================
-22. EXTERN C (FFI)
+24. EXTERN C (FFI)
 ================================================================================
 
   extern "C" fn mako_c_abs(n: int) -> int
@@ -878,7 +1189,7 @@ Thread-safe hash map, safe to share across crew tasks:
   }
 
 ================================================================================
-23. WASM / WASI
+25. WASM / WASI
 ================================================================================
 
   # Build for WASI (requires wasi-sdk, set WASI_SDK_PATH):
@@ -893,17 +1204,14 @@ Thread-safe hash map, safe to share across crew tasks:
   # read_file, write_file (with --dir preopens)
   # Not available in WASI: sockets, TLS, databases
 
-  # Browser/edge deployment:
-  mako deploy wasm dist/ --entry file.mko --wasm app.wasm
-
 ================================================================================
-24. STANDARD LIBRARY REFERENCE
+26. STANDARD LIBRARY REFERENCE
 ================================================================================
 
 Below are the most important built-in functions organized by category.
 
 --------------------------------------------------------------------------------
-24.1 Output
+26.1 Output
 --------------------------------------------------------------------------------
 
   print(s: string) -> void                    Print string to stdout
@@ -924,7 +1232,7 @@ Below are the most important built-in functions organized by category.
   fmt_sprintf_d(fmt: string, arg: int) -> string     Sprintf with int arg
 
 --------------------------------------------------------------------------------
-24.2 Strings
+26.2 Strings
 --------------------------------------------------------------------------------
 
   str_len(s: string) -> int                   Byte length
@@ -950,14 +1258,14 @@ Below are the most important built-in functions organized by category.
   rune_count(s: string) -> int                Unicode code point count
 
   // String builder (growable buffer):
-  str_builder() -> StrBuilder                 Create builder
-  builder_write(sb: StrBuilder, s: string) -> void  Append string
-  builder_write_byte(sb: StrBuilder, b: byte) -> void  Append byte
-  builder_string(sb: StrBuilder) -> string    Finalize to string
-  builder_len(sb: StrBuilder) -> int          Current length
+  str_builder() -> StrBuilder
+  builder_write(sb: StrBuilder, s: string) -> void
+  builder_write_byte(sb: StrBuilder, b: byte) -> void
+  builder_string(sb: StrBuilder) -> string
+  builder_len(sb: StrBuilder) -> int
 
 --------------------------------------------------------------------------------
-24.3 Math
+26.3 Math
 --------------------------------------------------------------------------------
 
   abs(n: int) -> int                          Absolute value (int)
@@ -984,7 +1292,7 @@ Below are the most important built-in functions organized by category.
   safe_add(a: int, b: int) -> int             Overflow-checked addition
 
 --------------------------------------------------------------------------------
-24.4 Parsing & Conversion
+26.4 Parsing & Conversion
 --------------------------------------------------------------------------------
 
   parse_int(s: string) -> Result[int, string]    Parse string as int
@@ -992,7 +1300,7 @@ Below are the most important built-in functions organized by category.
   parse_bool(s: string) -> Result[int, string]   Parse string as bool (1/0)
 
 --------------------------------------------------------------------------------
-24.5 Slices & Arrays
+26.5 Slices & Arrays
 --------------------------------------------------------------------------------
 
   len(arr: []T) -> int                        Length
@@ -1009,7 +1317,7 @@ Below are the most important built-in functions organized by category.
   slices_unique(arr: []int) -> []int          Remove duplicates
 
 --------------------------------------------------------------------------------
-24.6 Maps
+26.6 Maps
 --------------------------------------------------------------------------------
 
   has(m: map[K]V, key: K) -> bool             Key presence check
@@ -1022,7 +1330,7 @@ Below are the most important built-in functions organized by category.
   maps_copy(dst: map[string]int, src: map[string]int) -> void
 
 --------------------------------------------------------------------------------
-24.7 File I/O
+26.7 File I/O
 --------------------------------------------------------------------------------
 
   read_file(path: string) -> string           Read entire file
@@ -1045,27 +1353,27 @@ Below are the most important built-in functions organized by category.
   embed_file(path: string) -> string          Embed file at compile time
 
   // Direct I/O (low-level):
-  file_open(path: string, flags: int, mode: int) -> int  Open fd (0=read,1=write,2=rw)
-  file_close(fd: int) -> int                  Close fd
-  pread(fd: int, count: int, offset: int) -> string  Positional read
-  pwrite(fd: int, data: string, offset: int) -> int  Positional write
-  fsync(fd: int) -> int                       Flush data + metadata
-  fdatasync(fd: int) -> int                   Flush data only
-  fallocate(fd: int, size: int) -> int        Pre-allocate space
-  file_size(fd: int) -> int                   Size of open file
-  file_truncate(fd: int, size: int) -> int    Truncate/extend
+  file_open(path: string, flags: int, mode: int) -> int
+  file_close(fd: int) -> int
+  pread(fd: int, count: int, offset: int) -> string
+  pwrite(fd: int, data: string, offset: int) -> int
+  fsync(fd: int) -> int
+  fdatasync(fd: int) -> int
+  fallocate(fd: int, size: int) -> int
+  file_size(fd: int) -> int
+  file_truncate(fd: int, size: int) -> int
 
   // Memory-mapped files:
-  mmap_open(path: string, size: int) -> MMap     Map existing file
-  mmap_create(path: string, size: int) -> MMap   Create + map new file
+  mmap_open(path: string, size: int) -> MMap
+  mmap_create(path: string, size: int) -> MMap
   mmap_read(m: MMap, offset: int, len: int) -> string
   mmap_write(m: MMap, offset: int, data: string) -> int
-  mmap_sync(m: MMap, flags: int) -> int          Flush to disk
+  mmap_sync(m: MMap, flags: int) -> int
   mmap_size(m: MMap) -> int
   mmap_close(m: MMap) -> int
 
 --------------------------------------------------------------------------------
-24.8 Environment & CLI
+26.8 Environment & CLI
 --------------------------------------------------------------------------------
 
   env_get(key: string) -> string              Get env var
@@ -1080,7 +1388,7 @@ Below are the most important built-in functions organized by category.
   flag_bool(name: string, default: int) -> int Parse bool flag
 
 --------------------------------------------------------------------------------
-24.9 Time
+26.9 Time
 --------------------------------------------------------------------------------
 
   now_ns() -> int                             Nanoseconds since epoch
@@ -1092,7 +1400,7 @@ Below are the most important built-in functions organized by category.
   elapsed_ms(start: int) -> int               Ms elapsed since start
 
 --------------------------------------------------------------------------------
-24.10 HTTP Server
+26.10 HTTP Server
 --------------------------------------------------------------------------------
 
   http_bind(port: int) -> int                 Bind listener on port
@@ -1119,8 +1427,15 @@ Below are the most important built-in functions organized by category.
   http_shutdown_requested() -> int
   http_shutdown_ready() -> int
 
+  // HTTP/2:
+  http2_conn_new() -> Http2Conn
+  http2_use(conn: Http2Conn, fd: int) -> int
+  http2_response(conn: Http2Conn, stream: int, status: int, body: string) -> int
+  http2_free(conn: Http2Conn) -> int
+  http_forward(upstream: string, req: HttpRequest) -> string
+
 --------------------------------------------------------------------------------
-24.11 HTTP Client
+26.11 HTTP Client
 --------------------------------------------------------------------------------
 
   http_get(url: string) -> string             GET request
@@ -1132,7 +1447,7 @@ Below are the most important built-in functions organized by category.
   http_last_header(name: string) -> string    Header from last response
 
 --------------------------------------------------------------------------------
-24.12 JSON (see also section 21)
+26.12 JSON (see also section 23)
 --------------------------------------------------------------------------------
 
   json_object(key: string, value: string) -> string
@@ -1153,28 +1468,26 @@ Below are the most important built-in functions organized by category.
   json_array_get_string(json: string, idx: int) -> string
   json_array_push_string(json: string, val: string) -> string
   json_array_push_int(json: string, val: int) -> string
-  json_array_ints3(a: int, b: int, c: int) -> string
-  json_array_strings2(a: string, b: string) -> string
 
 --------------------------------------------------------------------------------
-24.13 Database
+26.13 Database
 --------------------------------------------------------------------------------
 
   // Unified SQL (SQLite + PostgreSQL):
   sql_open_sqlite(path: string) -> SqlDB
   sql_open_postgres(connstr: string) -> SqlDB
-  sql_ok(db: SqlDB) -> int                   Check connection valid
-  sql_close(db: SqlDB) -> int                Close connection
-  sql_exec(db: SqlDB, sql: string, params: []int) -> int  Execute with int params
-  sql_exec_plain(db: SqlDB, sql: string) -> int  Execute without params
+  sql_ok(db: SqlDB) -> int
+  sql_close(db: SqlDB) -> int
+  sql_exec(db: SqlDB, sql: string, params: []int) -> int
+  sql_exec_plain(db: SqlDB, sql: string) -> int
   sql_exec_str4(db: SqlDB, sql: string, a: string, b: string, c: string, d: string) -> int
   sql_query_int(db: SqlDB, sql: string, params: []int) -> int
   sql_query_str(db: SqlDB, sql: string, param: string) -> string
-  sql_begin(db: SqlDB) -> int                Begin transaction
-  sql_commit(db: SqlDB) -> int               Commit
-  sql_rollback(db: SqlDB) -> int             Rollback
-  sql_prepare(db: SqlDB, sql: string) -> int Prepare statement
-  sql_migrate(db: SqlDB, version: int, sql: string) -> int  Apply migration
+  sql_begin(db: SqlDB) -> int
+  sql_commit(db: SqlDB) -> int
+  sql_rollback(db: SqlDB) -> int
+  sql_prepare(db: SqlDB, sql: string) -> int
+  sql_migrate(db: SqlDB, version: int, sql: string) -> int
 
   // Connection pool:
   sql_pool_open_sqlite(path: string, size: int) -> int
@@ -1182,10 +1495,6 @@ Below are the most important built-in functions organized by category.
   sql_pool_query_int(pool: int, sql: string, params: []int) -> int
   sql_pool_exec(pool: int, sql: string, params: []int) -> int
   sql_pool_close(pool: int) -> int
-
-  // Legacy SQLite:
-  sqlite_query_int(db: string, sql: string) -> int
-  sqlite_query_text(db: string, sql: string) -> string
 
   // PostgreSQL (libpq):
   pg_connect(connstr: string) -> PgConn
@@ -1205,7 +1514,7 @@ Below are the most important built-in functions organized by category.
   redis_close(conn: RedisConn) -> int
 
 --------------------------------------------------------------------------------
-24.14 Crypto & Security
+26.14 Crypto & Security
 --------------------------------------------------------------------------------
 
   sha1(data: string) -> string               SHA-1 hash (raw bytes)
@@ -1222,16 +1531,33 @@ Below are the most important built-in functions organized by category.
   chacha20_poly1305_seal(key: string, nonce: string, pt: string, aad: string) -> string
   chacha20_poly1305_open(key: string, nonce: string, ct: string, aad: string) -> string
 
-  // Hex helpers (use with sha256/hmac_sha256):
-  // sha256_hex, hmac_sha256_hex available via hex_encode(sha256(data))
+  // bcrypt ($2b$ via libxcrypt):
+  crypto.bcrypt(password: string) -> string          Hash password
+  crypto.bcrypt_check(password: string, hash: string) -> int  Verify (1=match)
+
+  // PBKDF2:
+  crypto.pbkdf2(password: string, salt: string, iterations: int, key_len: int) -> string
+
+  // SCRAM-SHA-256 (RFC 7677):
+  crypto.scram_client_first(username: string, nonce: string) -> string
+  crypto.scram_client_final(password: string, salt: string, iterations: int,
+                            server_first: string, client_first: string) -> string
+  crypto.scram_server_verify(stored_key: string, auth_msg: string,
+                             client_proof: string) -> int
+
+  // Hex helpers:
+  hex_encode(sha256(data))                   // sha256_hex equivalent
 
   // JWT:
   jwt_sign(payload: string, secret: string) -> string
   jwt_verify(token: string, secret: string) -> int
   jwt_payload(token: string) -> string
 
+  // XOR utility:
+  xor_bytes(a: string, b: string) -> string  Byte-wise XOR
+
 --------------------------------------------------------------------------------
-24.15 Encoding
+26.15 Encoding
 --------------------------------------------------------------------------------
 
   base64_encode(data: string) -> string
@@ -1244,15 +1570,15 @@ Below are the most important built-in functions organized by category.
   gzip_decompress(data: string) -> string
 
   // Binary encoding:
-  binary_put_u16le(n: int) -> string          Little-endian uint16
-  binary_put_u32le(n: int) -> string          Little-endian uint32
-  binary_put_u64le(n: int) -> string          Little-endian uint64
-  binary_u16le(data: string) -> int           Decode LE uint16
-  binary_u32le(data: string) -> int           Decode LE uint32
-  binary_put_u16be(n: int) -> string          Big-endian uint16
-  binary_put_u32be(n: int) -> string          Big-endian uint32
-  binary_u16be(data: string) -> int           Decode BE uint16
-  binary_u32be(data: string) -> int           Decode BE uint32
+  binary_put_u16le(n: int) -> string
+  binary_put_u32le(n: int) -> string
+  binary_put_u64le(n: int) -> string
+  binary_u16le(data: string) -> int
+  binary_u32le(data: string) -> int
+  binary_put_u16be(n: int) -> string
+  binary_put_u32be(n: int) -> string
+  binary_u16be(data: string) -> int
+  binary_u32be(data: string) -> int
 
   // Serialization:
   yaml_get_string(yaml: string, key: string) -> string
@@ -1264,35 +1590,36 @@ Below are the most important built-in functions organized by category.
   html_escape(s: string) -> string
 
 --------------------------------------------------------------------------------
-24.16 Regular Expressions
+26.16 Regular Expressions
 --------------------------------------------------------------------------------
 
   regex_match(pattern: string, s: string) -> bool      Full match
   regex_find(pattern: string, s: string) -> string      First match
   regex_find_all(pattern: string, s: string, max: int) -> []string
-  regex_replace(pattern: string, s: string, repl: string) -> string  First
+  regex_replace(pattern: string, s: string, repl: string) -> string
   regex_replace_all(pattern: string, s: string, repl: string) -> string
   regex_capture(pattern: string, s: string, group: int) -> string
-  regex_valid(pattern: string) -> int         Check if pattern is valid
-  regex_quote_meta(s: string) -> string       Escape metacharacters
+  regex_valid(pattern: string) -> int
+  regex_quote_meta(s: string) -> string
 
   // Supported: literals, ., X*, X+, X?, |, [abc], [a-z], [^...], (...), ^, $
+  // Unicode: \p{L}, \p{N}, etc.
+  // Backrefs: \1-\9
 
 --------------------------------------------------------------------------------
-24.17 UUID
+26.17 UUID
 --------------------------------------------------------------------------------
 
   uuid_v4() -> Uuid                           Random v4 UUID
   uuid_string(u: Uuid) -> string              To "xxxxxxxx-xxxx-4xxx-..."
-  uuid_parse(s: string) -> Uuid               Parse string (nil on failure)
+  uuid_parse(s: string) -> Uuid               Parse string
   uuid_parse_ok(s: string) -> bool            Validate UUID string
   uuid_eq(a: Uuid, b: Uuid) -> bool           Compare
   uuid_is_nil(u: Uuid) -> bool                Check nil
   uuid_nil() -> Uuid                          Nil UUID
-  uuid_check(s: string) -> Result[int, string]  Parse and validate
 
 --------------------------------------------------------------------------------
-24.18 Cookies, Sessions & Auth
+26.18 Cookies, Sessions & Auth
 --------------------------------------------------------------------------------
 
   // Cookies:
@@ -1300,14 +1627,14 @@ Below are the most important built-in functions organized by category.
   cookie_make(name: string, value: string, max_age: int) -> string
 
   // Sessions:
-  session_id_new() -> string                  32-char random hex session ID
+  session_id_new() -> string
 
   // CSRF:
-  csrf_token() -> string                      Generate CSRF token
-  csrf_check(token: string, expected: string) -> int  Constant-time check
+  csrf_token() -> string
+  csrf_check(token: string, expected: string) -> int
 
   // Bearer auth:
-  auth_bearer(header: string) -> string       Extract bearer token
+  auth_bearer(header: string) -> string
   auth_check_bearer(header: string, expected: string) -> int
 
   // Basic auth:
@@ -1319,33 +1646,32 @@ Below are the most important built-in functions organized by category.
   auth_token_check(token: string, secret: string) -> int
   auth_token_subject(token: string) -> string
 
-  // Session cookie:
-  auth_session_cookie(cookie_hdr: string, name: string, expected: string) -> int
-
   // Role-based access:
   auth_role_has(roles: string, role: string) -> int
   authz_allow_role(user_roles: string, required: string) -> int
 
 --------------------------------------------------------------------------------
-24.19 Channels
+26.19 Channels
 --------------------------------------------------------------------------------
 
   chan_new(capacity: int) -> chan[int]         Create buffered channel
+  chan_open[int](capacity: int) -> chan[int]   Typed channel (int)
+  chan_open[string](capacity: int) -> chan[string]  Typed channel (string)
+  chan_open[bool](capacity: int) -> chan[bool] Typed channel (bool)
   chan_try_send(ch: chan[int], val: int) -> int  Non-blocking send (0=ok)
   chan_len(ch: chan[int]) -> int               Items in channel
   chan_cap(ch: chan[int]) -> int               Channel capacity
   chan_select2(a: chan[int], b: chan[int], timeout_ms: int) -> int
   chan_select3(a: chan[int], b: chan[int], c: chan[int], timeout_ms: int) -> int
-  chan_select4(a: chan[int], b: chan[int], c: chan[int], d: chan[int], timeout_ms: int) -> int
-  chan_select_value() -> int                  Value from last select
+  chan_select_value() -> int
 
   // Channel methods:
-  ch.send(val)                                // send
-  ch.recv()                                   // receive
-  ch.close()                                  // close
+  ch.send(val)
+  ch.recv()
+  ch.close()
 
 --------------------------------------------------------------------------------
-24.20 Concurrency Primitives
+26.20 Concurrency Primitives
 --------------------------------------------------------------------------------
 
   // Mutex:
@@ -1377,6 +1703,7 @@ Below are the most important built-in functions organized by category.
   share_int(val: int) -> ShareInt
   share_clone(s: ShareInt) -> ShareInt
   share_get(s: ShareInt) -> int
+  share_set(s: ShareInt, val: int) -> void
   share_drop(s: ShareInt) -> void
 
   // Concurrent map:
@@ -1389,39 +1716,88 @@ Below are the most important built-in functions organized by category.
   cmap_incr(m: CMap, key: string, delta: int) -> int
 
 --------------------------------------------------------------------------------
-24.21 Event Loop
+26.21 Signal Handling
 --------------------------------------------------------------------------------
 
-  evloop_new() -> EvLoop                      Create event loop
-  evloop_add(el: EvLoop, fd: int, flags: int) -> int  Monitor fd
-  evloop_mod(el: EvLoop, fd: int, flags: int) -> int  Modify interest
-  evloop_del(el: EvLoop, fd: int) -> int      Remove fd
-  evloop_wait(el: EvLoop, timeout_ms: int) -> int  Wait, returns ready count
-  evloop_event_fd(el: EvLoop, idx: int) -> int  Ready fd at index
-  evloop_event_flags(el: EvLoop, idx: int) -> int  Ready flags at index
-  evloop_close(el: EvLoop) -> int             Destroy event loop
+  signal_watch(name: string) -> int           Register signal handler (HUP/TERM/INT/USR1/USR2)
+  signal_fired(name: string) -> int           Check if signal was received (1=yes, resets)
+  signal_ignore(name: string) -> int          Ignore a signal
+
+  // Example: graceful shutdown
+  fn main() {
+      signal_watch("TERM")
+      signal_watch("HUP")
+
+      while true {
+          if signal_fired("TERM") == 1 {
+              print("shutting down")
+              break
+          }
+          if signal_fired("HUP") == 1 {
+              print("reloading config")
+          }
+          sleep_ms(100)
+      }
+  }
+
+--------------------------------------------------------------------------------
+26.22 File-System Watch
+--------------------------------------------------------------------------------
+
+  watch_new() -> Watch                        Create watcher (kqueue on macOS, inotify on Linux)
+  watch_add(w: Watch, path: string) -> int    Watch a file/directory for changes
+  watch_poll(w: Watch, timeout_ms: int) -> string  Poll for event (returns path or "")
+  watch_close(w: Watch) -> int                Close watcher
+
+  // Example: hot reload
+  fn main() {
+      let w = watch_new()
+      watch_add(w, "./config.toml")
+
+      while true {
+          let changed = watch_poll(w, 1000)
+          if str_len(changed) > 0 {
+              print("file changed: " + changed)
+              // reload config
+          }
+      }
+      watch_close(w)
+  }
+
+--------------------------------------------------------------------------------
+26.23 Event Loop
+--------------------------------------------------------------------------------
+
+  evloop_new() -> EvLoop
+  evloop_add(el: EvLoop, fd: int, flags: int) -> int
+  evloop_mod(el: EvLoop, fd: int, flags: int) -> int
+  evloop_del(el: EvLoop, fd: int) -> int
+  evloop_wait(el: EvLoop, timeout_ms: int) -> int
+  evloop_event_fd(el: EvLoop, idx: int) -> int
+  evloop_event_flags(el: EvLoop, idx: int) -> int
+  evloop_close(el: EvLoop) -> int
 
   // Non-blocking I/O:
-  nb_listen(port: int) -> int                 Non-blocking TCP listener
-  nb_accept(fd: int) -> int                   Non-blocking accept
-  nb_read(fd: int) -> string                  Non-blocking read
-  nb_write(fd: int, data: string) -> int      Non-blocking write
-  nb_udp_bind(port: int) -> int               Non-blocking UDP
-  nb_udp_recv(fd: int) -> string              Non-blocking UDP recv
-  nb_close(fd: int) -> int                    Close
+  nb_listen(port: int) -> int
+  nb_accept(fd: int) -> int
+  nb_read(fd: int) -> string
+  nb_write(fd: int, data: string) -> int
+  nb_udp_bind(port: int) -> int
+  nb_udp_recv(fd: int) -> string
+  nb_close(fd: int) -> int
 
 --------------------------------------------------------------------------------
-24.22 Binary Buffer
+26.24 Binary Buffer
 --------------------------------------------------------------------------------
 
-  buf_pack_new(capacity: int) -> Buf          Create write buffer
-  buf_from_string(s: string) -> Buf           Buffer from string
-  buf_to_string(b: Buf) -> string             Extract as string
-  buf_len(b: Buf) -> int                      Total length
-  buf_pos(b: Buf) -> int                      Current position
-  buf_reset(b: Buf) -> void                   Reset to start
-  buf_seek(b: Buf, pos: int) -> void          Seek to position
-  buf_free(b: Buf) -> void                    Free memory
+  buf_pack_new(capacity: int) -> Buf
+  buf_from_string(s: string) -> Buf
+  buf_to_string(b: Buf) -> string
+  buf_len(b: Buf) -> int
+  buf_pos(b: Buf) -> int
+  buf_reset(b: Buf) -> void
+  buf_seek(b: Buf, pos: int) -> void
+  buf_free(b: Buf) -> void
 
   // Write (little-endian unless noted):
   buf_write_u8(b: Buf, val: int) -> void
@@ -1433,8 +1809,8 @@ Below are the most important built-in functions organized by category.
   buf_write_f64(b: Buf, val: float) -> void
   buf_write_bytes(b: Buf, data: string) -> void
   buf_write_str(b: Buf, s: string) -> void
-  buf_write_u16be(b: Buf, val: int) -> void   Big-endian
-  buf_write_u32be(b: Buf, val: int) -> void   Big-endian
+  buf_write_u16be(b: Buf, val: int) -> void
+  buf_write_u32be(b: Buf, val: int) -> void
 
   // Read:
   buf_read_u8(b: Buf) -> int
@@ -1446,28 +1822,80 @@ Below are the most important built-in functions organized by category.
   buf_read_f64(b: Buf) -> float
   buf_read_bytes(b: Buf, n: int) -> string
   buf_read_str(b: Buf) -> string
-  buf_read_u16be(b: Buf) -> int               Big-endian
-  buf_read_u32be(b: Buf) -> int               Big-endian
+  buf_read_u16be(b: Buf) -> int
+  buf_read_u32be(b: Buf) -> int
 
   // Byte buffer pool:
-  buf_get(size: int) -> []byte                Get from pool
-  buf_put(b: []byte) -> void                  Return to pool
+  buf_get(size: int) -> []byte
+  buf_put(b: []byte) -> void
 
 --------------------------------------------------------------------------------
-24.23 Game Networking
+26.25 TCP & UDP Networking
 --------------------------------------------------------------------------------
 
-  game_udp_bind(port: int) -> GameUDP         Bind game UDP socket
-  game_udp_recv(sock: GameUDP) -> string      Receive packet
-  game_udp_sender(sock: GameUDP) -> int       Sender peer ID
+  // TCP:
+  tcp_listen(port: int) -> int
+  tcp_listen_addr(addr: string, port: int) -> int   Bind to specific address
+  tcp_accept(listener: int) -> int
+  tcp_connect(host: string, port: int) -> int
+  tcp_write(conn: int, data: string) -> int
+  tcp_read(conn: int) -> string
+  tcp_nodelay(conn: int) -> int
+  tcp_close(conn: int) -> int
+
+  // UDP:
+  udp_bind(port: int) -> int
+  udp_send_to(fd: int, host: string, port: int, data: string) -> int
+  udp_recv(fd: int, max_bytes: int) -> string
+  udp_close(fd: int) -> int
+
+  // UDP proxy:
+  game_udp_sender_addr(sock: GameUDP) -> string      Sender address
+  game_udp_send_to(sock: GameUDP, addr: string, data: string) -> int
+
+  // Unix sockets:
+  unix_socket_pair() -> int
+  unix_write(fd: int, data: string) -> int
+  unix_read(fd: int, max: int) -> string
+  unix_close(fd: int) -> int
+
+--------------------------------------------------------------------------------
+26.26 TLS
+--------------------------------------------------------------------------------
+
+  // TLS 1.3 server (socket-style):
+  tls_server_new(cert: string, key: string) -> TlsServer
+  tls_accept(srv: TlsServer, fd: int) -> TlsConn
+  tls_read(conn: TlsConn) -> string
+  tls_write(conn: TlsConn, data: string) -> int
+  tls_alpn(conn: TlsConn) -> string         Negotiated ALPN protocol
+
+  // Legacy TLS server:
+  tls_serve(port: int, cert: string, key: string, handler: string) -> int
+  tls_serve_once(port: int, cert: string, key: string, response: string) -> int
+  tls_serve_n(port: int, cert: string, key: string, response: string, n: int) -> int
+
+  // TLS client:
+  tls_get(host: string, port: int, path: string, ca: string) -> string
+  tls_post(host: string, port: int, path: string, ca: string, body: string) -> string
+  tls_get_insecure(host: string, port: int, path: string) -> string
+  tls_handshake_ok(host: string, port: int, ca: string) -> string
+
+--------------------------------------------------------------------------------
+26.27 Game Networking
+--------------------------------------------------------------------------------
+
+  game_udp_bind(port: int) -> GameUDP
+  game_udp_recv(sock: GameUDP) -> string
+  game_udp_sender(sock: GameUDP) -> int
   game_udp_send(sock: GameUDP, peer: int, data: string) -> int
   game_udp_broadcast(sock: GameUDP, data: string) -> int
   game_udp_kick(sock: GameUDP, peer: int) -> void
-  game_udp_peers(sock: GameUDP) -> int        Connected peer count
-  game_udp_fd(sock: GameUDP) -> int           Raw fd for event loop
+  game_udp_peers(sock: GameUDP) -> int
+  game_udp_fd(sock: GameUDP) -> int
   game_udp_close(sock: GameUDP) -> void
-  tick_now_us() -> int                        Microsecond timestamp
-  tick_sleep_us(target: int, period: int) -> int  Sleep to maintain tick rate
+  tick_now_us() -> int
+  tick_sleep_us(target: int, period: int) -> int
 
   // Fixed timestep:
   game_fixed_steps(dt: int, step: int, accum: int) -> int
@@ -1485,7 +1913,7 @@ Below are the most important built-in functions organized by category.
   det_rng_range(state: int, max: int) -> int
 
 --------------------------------------------------------------------------------
-24.24 Cloud / Distributed
+26.28 Cloud / Distributed
 --------------------------------------------------------------------------------
 
   // Consistent hashing:
@@ -1516,53 +1944,16 @@ Below are the most important built-in functions organized by category.
   backoff_ms(attempt: int, base_ms: int, max_ms: int) -> int
 
 --------------------------------------------------------------------------------
-24.25 TCP & UDP Networking
+26.29 Testing
 --------------------------------------------------------------------------------
 
-  // TCP:
-  tcp_listen(port: int) -> int                Listen on port
-  tcp_accept(listener: int) -> int            Accept connection
-  tcp_connect(host: string, port: int) -> int Connect to server
-  tcp_write(conn: int, data: string) -> int   Write data
-  tcp_read(conn: int) -> string               Read data
-  tcp_nodelay(conn: int) -> int               Set TCP_NODELAY
-  tcp_close(conn: int) -> int                 Close connection
-
-  // UDP:
-  udp_bind(port: int) -> int                  Bind UDP socket
-  udp_send_to(fd: int, host: string, port: int, data: string) -> int
-  udp_recv(fd: int, max_bytes: int) -> string
-  udp_close(fd: int) -> int
-
-  // Unix sockets:
-  unix_socket_pair() -> int
-  unix_write(fd: int, data: string) -> int
-  unix_read(fd: int, max: int) -> string
-  unix_close(fd: int) -> int
-
---------------------------------------------------------------------------------
-24.26 TLS
---------------------------------------------------------------------------------
-
-  tls_serve(port: int, cert: string, key: string, handler: string) -> int
-  tls_serve_once(port: int, cert: string, key: string, response: string) -> int
-  tls_serve_n(port: int, cert: string, key: string, response: string, n: int) -> int
-  tls_get(host: string, port: int, path: string, ca: string) -> string
-  tls_post(host: string, port: int, path: string, ca: string, body: string) -> string
-  tls_get_insecure(host: string, port: int, path: string) -> string
-  tls_handshake_ok(host: string, port: int, ca: string) -> string
-
---------------------------------------------------------------------------------
-24.27 Testing
---------------------------------------------------------------------------------
-
-  assert(cond: bool) -> void                  Assert true
-  assert_eq(a: int, b: int) -> void           Assert ints equal
-  assert_eq_str(a: string, b: string) -> void Assert strings equal
-  fail(msg: string) -> void                   Unconditional failure
-  t_run(name: string) -> void                 Named subtest
-  t_run_nested(name: string) -> void           Nested subtest
-  black_box(n: int) -> int                    Prevent optimization (benchmarks)
+  assert(cond: bool) -> void
+  assert_eq(a: int, b: int) -> void
+  assert_eq_str(a: string, b: string) -> void
+  fail(msg: string) -> void
+  t_run(name: string) -> void
+  t_run_nested(name: string) -> void
+  black_box(n: int) -> int
 
   // HTTP test helpers:
   httptest_serve_once(port: int, response: string) -> int
@@ -1571,47 +1962,47 @@ Below are the most important built-in functions organized by category.
   httptest_header(name: string) -> string
 
 --------------------------------------------------------------------------------
-24.28 Runtime
+26.30 Runtime
 --------------------------------------------------------------------------------
 
-  runtime_stats_json() -> string              Runtime stats as JSON
-  exit(code: int) -> void                     Exit process
-  leak_mark() -> int                          Mark allocation state
-  leak_bytes_since(mark: int) -> int          Bytes allocated since mark
-  leak_detected(mark: int) -> int             Check for leaks
-  alloc_track_reset() -> int                  Reset allocation tracker
-  alloc_live_bytes() -> int                   Currently live bytes
-  alloc_high_bytes() -> int                   Peak allocated bytes
+  runtime_stats_json() -> string
+  exit(code: int) -> void
+  leak_mark() -> int
+  leak_bytes_since(mark: int) -> int
+  leak_detected(mark: int) -> int
+  alloc_track_reset() -> int
+  alloc_live_bytes() -> int
+  alloc_high_bytes() -> int
 
 --------------------------------------------------------------------------------
-24.29 Logging
+26.31 Logging
 --------------------------------------------------------------------------------
 
-  log_info(msg: string)                       [timestamp info] msg
-  log_warn(msg: string)                       [timestamp warn] msg
-  log_error(msg: string)                      [timestamp error] msg
+  log_info(msg: string)
+  log_warn(msg: string)
+  log_error(msg: string)
   log_kv(level: string, key: string, val: string)
 
 --------------------------------------------------------------------------------
-24.30 Router & Middleware
+26.32 Router & Middleware
 --------------------------------------------------------------------------------
 
-  router_new() -> int                         Create router
-  router_group(router: int, prefix: string) -> int  Route group
+  router_new() -> int
+  router_group(router: int, prefix: string) -> int
   router_add(router: int, method: string, pattern: string, handler: string) -> int
   router_match(router: int, req: HttpRequest) -> string
   router_param(router: int, req: HttpRequest, name: string) -> string
 
-  reqctx_new() -> int                         Request context
+  reqctx_new() -> int
   reqctx_set(ctx: int, key: string, val: string) -> int
   reqctx_get(ctx: int, key: string) -> string
   middleware_allow_methods(req: HttpRequest, methods: string) -> int
 
 ================================================================================
-25. COMMON PATTERNS
+27. COMMON PATTERNS
 ================================================================================
 
-25.1 HTTP Server
+27.1 HTTP Server
 ----------------
 
   fn main() {
@@ -1622,9 +2013,9 @@ Below are the most important built-in functions organized by category.
           let method = http_method(c)
           let path = http_path(c)
 
-          if str_eq(path, "/health") {
+          if path == "/health" {
               let _ = http_respond_json(c, 200, "{\"ok\":true}\n")
-          } else if str_eq(path, "/api/users") and str_eq(method, "POST") {
+          } else if path == "/api/users" and method == "POST" {
               let body = http_body(c)
               let name = json_get_string(body, "name")
               let resp = json_object("created", name)
@@ -1636,7 +2027,7 @@ Below are the most important built-in functions organized by category.
       }
   }
 
-25.2 Error Handling Chain
+27.2 Error Handling Chain
 -------------------------
 
   fn load_config(path: string) -> Result[string, string] {
@@ -1656,25 +2047,22 @@ Below are the most important built-in functions organized by category.
       return Ok(port)
   }
 
-25.3 Concurrent Workers
+27.3 Concurrent Workers
 ------------------------
 
   fn main() {
       let ch = chan_new(100)
       crew t {
-          // Spawn 4 workers
           let w1 = t.kick(worker(ch, "w1"))
           let w2 = t.kick(worker(ch, "w2"))
           let w3 = t.kick(worker(ch, "w3"))
           let w4 = t.kick(worker(ch, "w4"))
 
-          // Send work
           for i in range 100 {
               let _ = ch.send(i)
           }
           ch.close()
 
-          // Wait for all workers
           let _ = w1.join()
           let _ = w2.join()
           let _ = w3.join()
@@ -1689,7 +2077,7 @@ Below are the most important built-in functions organized by category.
       return 0
   }
 
-25.4 Arena-Scoped Request Processing
+27.4 Arena-Scoped Request Processing
 -------------------------------------
 
   fn handle_request(c: int) {
@@ -1705,83 +2093,11 @@ Below are the most important built-in functions organized by category.
       let _ = http_close(c)
   }
 
-25.5 JSON API with Database
-----------------------------
-
-  fn main() {
-      let db = sql_open_sqlite("/tmp/api.db")
-      let _ = sql_exec_plain(db, "CREATE TABLE IF NOT EXISTS users(id INTEGER PRIMARY KEY, name TEXT, email TEXT)")
-
-      let fd = http_bind(8080)
-      while true {
-          let c = http_accept(fd)
-          if c < 0 { continue }
-          let path = http_path(c)
-          let method = http_method(c)
-
-          if str_eq(method, "POST") and str_eq(path, "/users") {
-              let body = http_body(c)
-              let name = json_get_string(body, "name")
-              let email = json_get_string(body, "email")
-              let _ = sql_exec_str4(db, "INSERT INTO users(name,email,'','') VALUES($1,$2,$3,$4)", name, email, "", "")
-              let _ = http_respond_json(c, 201, json_object("created", name))
-          } else if str_eq(method, "GET") and str_has_prefix(path, "/users/") {
-              let email = path[7:]
-              let name = sql_query_str(db, "SELECT name FROM users WHERE email=$1", email)
-              let _ = http_respond_json(c, 200, json_object("name", name))
-          } else {
-              let _ = http_respond(c, 404, "not found\n")
-          }
-          let _ = http_close(c)
-      }
-      sql_close(db)
-  }
-
-25.6 Session-Based Auth API
----------------------------
-
-  fn main() {
-      let sessions = cmap_new()
-      let secret = "my-secret-key"
-      let fd = http_bind(8080)
-
-      while true {
-          let c = http_accept(fd)
-          if c < 0 { continue }
-          let path = http_path(c)
-
-          if str_eq(path, "/login") {
-              let body = http_body(c)
-              let user = json_get_string(body, "user")
-              let sid = session_id_new()
-              cmap_set(sessions, sid, user)
-              let cookie = cookie_make("sid", sid, 86400)
-              let _ = http_respond_ct(c, 200, "{\"ok\":true}", "application/json")
-          } else if str_eq(path, "/me") {
-              let cookie_hdr = http_header(c, "Cookie")
-              let sid = cookie_get(cookie_hdr, "sid")
-              if cmap_has(sessions, sid) == 1 {
-                  let user = cmap_get(sessions, sid)
-                  let _ = http_respond_json(c, 200, json_object("user", user))
-              } else {
-                  let _ = http_respond_json(c, 401, "{\"error\":\"unauthorized\"}")
-              }
-          } else {
-              let _ = http_respond(c, 404, "not found\n")
-          }
-          let _ = http_close(c)
-      }
-  }
-
-================================================================================
-25.7 Fan with Crew for Parallel Processing
-------------------------------------------
+27.5 Fan with Crew for Parallel Processing
+-------------------------------------------
 
   fn process_batch(items: []int) -> []int {
-      let results = fan(items, |item| {
-          // Each item processed in parallel
-          item * item + 1
-      })
+      let results = fan(items, fn(item) { item * item + 1 })
       return results
   }
 
@@ -1793,8 +2109,173 @@ Below are the most important built-in functions organized by category.
       }
   }
 
-25.8 Rate-Limited HTTP Server
------------------------------
+27.6 Methods and Generics
+---------------------------
+
+  export struct Stack {
+      items: []int
+      size: int
+  }
+
+  on Stack {
+      fn push(self, val: int) -> Stack {
+          return Stack { items: append(self.items, val), size: self.size + 1 }
+      }
+
+      fn pop(self) -> (int, Stack) {
+          let top = self.items[self.size - 1]
+          return (top, Stack { items: self.items[:self.size - 1], size: self.size - 1 })
+      }
+
+      fn peek(self) -> int {
+          return self.items[self.size - 1]
+      }
+  }
+
+  fn id[T](x: T) -> T {
+      return x
+  }
+
+  fn main() {
+      let s = Stack { items: make([]int, 0, 8), size: 0 }
+      let s2 = s.push(10)
+      let s3 = s2.push(20)
+      print_int(s3.peek())           // 20
+
+      let n = id(42)
+      let msg = id("hello")
+      print_int(n)
+      print(msg)
+  }
+
+27.7 Switch and If-Expression
+------------------------------
+
+  fn status_text(code: int) -> string {
+      switch code {
+          case 200:
+              return "OK"
+          case 404:
+              return "Not Found"
+          case 500:
+              return "Internal Server Error"
+          default:
+              return "Unknown"
+      }
+  }
+
+  fn classify(n: int) -> string {
+      let label = if n > 0 { "positive" } else { "non-positive" }
+      return label
+  }
+
+27.8 Module System Example
+----------------------------
+
+  // math_lib.mko
+  pack mathlib
+
+  export fn square(n: int) -> int {
+      return n * n
+  }
+
+  export fn cube(n: int) -> int {
+      return n * n * n
+  }
+
+  fn helper() -> int {       // pack-private
+      return 0
+  }
+
+  // main.mko
+  pull "./math_lib.mko" as math
+
+  fn main() {
+      print_int(math.square(5))    // 25
+      print_int(math.cube(3))      // 27
+  }
+
+27.9 Signal-Based Graceful Shutdown
+------------------------------------
+
+  fn main() {
+      signal_watch("TERM")
+      signal_watch("INT")
+
+      let fd = http_bind(8080)
+      while true {
+          if signal_fired("TERM") == 1 or signal_fired("INT") == 1 {
+              print("shutting down gracefully")
+              http_close_listener(fd)
+              break
+          }
+          let c = http_accept(fd)
+          if c < 0 { continue }
+          let _ = http_respond(c, 200, "ok\n")
+          let _ = http_close(c)
+      }
+  }
+
+27.10 File-System Watch Hot Reload
+-----------------------------------
+
+  fn main() {
+      let w = watch_new()
+      watch_add(w, "./config.toml")
+
+      let mut config = read_file("./config.toml")
+      print("loaded config")
+
+      while true {
+          let changed = watch_poll(w, 2000)
+          if str_len(changed) > 0 {
+              config = read_file("./config.toml")
+              print("config reloaded")
+          }
+      }
+      watch_close(w)
+  }
+
+27.11 TLS 1.3 Server
+---------------------
+
+  fn main() {
+      let srv = tls_server_new("cert.pem", "key.pem")
+      let listener = tcp_listen(8443)
+
+      while true {
+          let fd = tcp_accept(listener)
+          if fd < 0 { continue }
+          let conn = tls_accept(srv, fd)
+          let req = tls_read(conn)
+          tls_write(conn, "HTTP/1.1 200 OK\r\n\r\nhello tls\n")
+      }
+  }
+
+27.12 Parallel Assignment and Compound Ops
+--------------------------------------------
+
+  fn fib_pair(n: int) -> (int, int) {
+      let mut a = 0
+      let mut b = 1
+      for i in range n {
+          a, b = b, a + b             // parallel swap
+      }
+      return (a, b)
+  }
+
+  fn main() {
+      let mut counter = 0
+      counter += 10
+      counter++
+      print_int(counter)              // 11
+
+      let f, g = fib_pair(10)
+      print_int(f)                    // 55
+  }
+
+27.13 Rate-Limited HTTP Server
+-------------------------------
 
   fn main() {
       let rl = ratelimit_new(100, 1000)   // 100 req/sec
@@ -1816,25 +2297,8 @@ Below are the most important built-in functions organized by category.
       ratelimit_free(rl)
   }
 
-25.9 Circuit Breaker for External Calls
-----------------------------------------
-
-  fn call_external(cb: CircuitBreaker, url: string) -> string {
-      if breaker_allow(cb) == 0 {
-          return "{\"error\":\"circuit open\"}"
-      }
-      let resp = http_get_timeout(url, 5000)
-      let status = http_last_status()
-      if status >= 200 and status < 300 {
-          breaker_success(cb)
-          return resp
-      }
-      breaker_failure(cb)
-      return "{\"error\":\"upstream failure\"}"
-  }
-
-25.10 Event Loop Server
------------------------
+27.14 Event Loop Server
+------------------------
 
   fn main() {
       let el = evloop_new()
@@ -1857,13 +2321,13 @@ Below are the most important built-in functions organized by category.
                   let _ = evloop_del(el, fd)
                   let _ = nb_close(fd)
               }
-              i = i + 1
+              i++
           }
       }
       let _ = evloop_close(el)
   }
 
-25.11 Binary Protocol
+27.15 Binary Protocol
 ---------------------
 
   fn encode_message(msg_type: int, payload: string) -> string {
@@ -1885,109 +2349,8 @@ Below are the most important built-in functions organized by category.
       return payload
   }
 
-25.12 Game Server Tick Loop
----------------------------
-
-  fn main() {
-      let u = game_udp_bind(27015)
-      let el = evloop_new()
-      let _ = evloop_add(el, game_udp_fd(u), 1)
-
-      let mut tick = tick_now_us()
-      let period = 16666       // ~60 Hz in microseconds
-
-      while true {
-          let n = evloop_wait(el, 1)
-          if n > 0 {
-              let data = game_udp_recv(u)
-              let peer = game_udp_sender(u)
-              let _ = game_udp_send(u, peer, "ack:" + data)
-          }
-          tick = tick_sleep_us(tick, period)
-      }
-      game_udp_close(u)
-  }
-
-25.13 Consistent Hashing for Distributed Cache
------------------------------------------------
-
-  fn main() {
-      let ring = chash_new(3, 150)     // 3 nodes, 150 vnodes each
-      let node = chash_get(ring, "user:42")
-      print("route user:42 to node " + format_int(node))
-
-      let new_id = chash_add_node(ring)
-      print("added node " + format_int(new_id))
-
-      chash_remove_node(ring, 0)
-      print("nodes remaining: " + format_int(chash_node_count(ring)))
-      chash_free(ring)
-  }
-
-25.14 String Builder Pattern
-----------------------------
-
-  fn build_html(items: []string) -> string {
-      let mut sb = str_builder()
-      builder_write(sb, "<ul>\n")
-      for _, item in range items {
-          builder_write(sb, "  <li>")
-          builder_write(sb, html_escape(item))
-          builder_write(sb, "</li>\n")
-      }
-      builder_write(sb, "</ul>\n")
-      return builder_string(sb)
-  }
-
-25.15 File Processing
----------------------
-
-  fn process_csv(path: string) -> int {
-      let data = read_file(path)
-      let lines = str_split(data, "\n")
-      let mut count = 0
-      for _, line in range lines {
-          if str_len(line) == 0 { continue }
-          let fields = csv_split_line(line)
-          if len(fields) >= 2 {
-              print(fields[0] + ": " + fields[1])
-              count = count + 1
-          }
-      }
-      return count
-  }
-
-25.16 Workspace Layout
-----------------------
-
-  # mako.toml (workspace root)
-  [workspace]
-  members = ["core", "helper", "app"]
-
-  # core/mako.toml
-  [package]
-  name = "core"
-
-  # helper/mako.toml
-  [package]
-  name = "helper"
-  [dependencies]
-  "core" = { path = "../core" }
-
-  # app/mako.toml
-  [package]
-  name = "app"
-  [dependencies]
-  "helper" = { path = "../helper" }
-
-  # Commands from workspace root:
-  mako check .          # typecheck all members
-  mako build .          # build all members with main.mko
-  mako test .           # test all members
-  mako run -p app       # run specific member
-
 ================================================================================
-26. KEYWORDS (COMPLETE LIST)
+28. KEYWORDS (COMPLETE LIST)
 ================================================================================
 
 38 reserved words (always keywords, never identifiers):
@@ -1996,6 +2359,9 @@ Below are the most important built-in functions organized by category.
   false fan fn for hold if import in interface join kick let match mut not or
   range receive return select share struct timeout true while
 
+Contextual keywords (also usable as identifiers):
+  pack pull switch go export case
+
 NOT keywords (ordinary identifiers / builtins):
   Type names: int, int8, int32, int64, uint64, byte, float, float64, string
   Constructors: Ok, Err, Some, None
@@ -2003,20 +2369,23 @@ NOT keywords (ordinary identifiers / builtins):
   All stdlib functions (print, str_len, etc.)
 
 ================================================================================
-27. COMPLETE OPERATOR TABLE
+29. COMPLETE OPERATOR TABLE
 ================================================================================
 
   =                   Assignment (never equality)
   == != < > <= >=     Comparison
   + - * / %           Arithmetic
+  += -= *= /=         Compound assignment
+  ++ --               Increment / Decrement
   && || !             Logical (short-circuit)
   and or not          Logical (keyword form, same as above)
   & | ^ &^ << >>      Bitwise
   ^x                  Unary bitwise complement
   |params| { body }   Lambda (leading | is lambda, infix | is bitwise or)
+  fn(params) { body } Lambda (block form)
 
 ================================================================================
-28. TYPE CONVERSION TABLE
+30. TYPE CONVERSION TABLE
 ================================================================================
 
   int -> int64:       int64(x)
@@ -2031,8 +2400,29 @@ NOT keywords (ordinary identifiers / builtins):
   []byte -> string:   string(b)
 
 ================================================================================
+31. DUAL FORMS (COMPAT SUGAR — NOT PREFERRED)
+================================================================================
+
+These parse correctly but are not the idiomatic Mako surface. mako fmt and docs
+always lead with the preferred (flair) column.
+
+  Dual (compat)                    | Preferred (Mako flair)
+  ---------------------------------|---------------------------
+  func f(a int) int                | fn f(a: int) -> int
+  func (p T) M() int              | on T { fn M(self) -> int }
+  type T struct { x int }         | struct T { x: int }
+  := / var                          | let / let mut
+  package name                      | pack name
+  import "path"                     | pull "path"
+  import "path" as name            | pull "path" as name
+  Capitalized = exported            | export fn / export struct
+
+These exist for migration convenience. The preferred forms are what define
+Mako's identity.
+
+================================================================================
 END OF REFERENCE
 ================================================================================
 
-# For the latest docs, visit https://mako-lang.com
+# Website: https://mako-lang.com
 # Full source: https://github.com/loreste/mako

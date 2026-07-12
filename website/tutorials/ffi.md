@@ -40,10 +40,10 @@ extern "C" fn mako_c_add(a: int, b: int) -> int
 
 fn main() {
     let result = mako_c_abs(0 - 42)
-    print_int(result)  // 42
+    print(result)  // 42
 
     let sum = mako_c_add(20, 22)
-    print_int(sum)  // 42
+    print(sum)  // 42
 }
 ```
 
@@ -122,10 +122,10 @@ extern "C" fn mako_c_starts_with(s: string, prefix: string) -> int
 
 fn main() {
     let n = mako_c_str_len("hello mako")
-    print_int(n)  // 10
+    print(n)  // 10
 
     let ok = mako_c_starts_with("hello mako", "hello")
-    print_int(ok)  // 1
+    print(ok)  // 1
 }
 ```
 
@@ -179,17 +179,17 @@ extern "C" fn mako_c_is_prime(n: int) -> int
 fn main() {
     // Factorial
     print("10! =")
-    print_int(mako_c_factorial(10))  // 3628800
+    print(mako_c_factorial(10))  // 3628800
 
     // Greatest common divisor
     print("gcd(48, 18) =")
-    print_int(mako_c_gcd(48, 18))  // 6
+    print(mako_c_gcd(48, 18))  // 6
 
     // Primality test
     let mut n = 2
     while n < 20 {
         if mako_c_is_prime(n) == 1 {
-            print_int(n)
+            print(n)
         }
         n = n + 1
     }
@@ -234,7 +234,7 @@ extern "C" fn mako_c_compress_bound(src_len: int) -> int
 fn main() {
     let bound = mako_c_compress_bound(1024)
     print("compress bound for 1024 bytes:")
-    print_int(bound)
+    print(bound)
 }
 ```
 

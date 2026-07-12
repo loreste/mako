@@ -1,8 +1,93 @@
 # 10. Packages, Workspaces, and Tooling
 
-Mako uses a file-based package system with a `mako.toml` manifest. Dependencies
-can be local paths or git repositories. The `mako pkg` command manages the full
-lifecycle: initializing, adding, fetching, locking, and auditing packages.
+Mako uses a file-based package system. The preferred module primitives are
+`pack`, `pull`, and `export`:
+
+- **`pack mylib`** — declares the current file's package identity.
+- **`pull "path"`** — imports another pack (local file, relative path, or std).
+- **`export fn` / `export struct`** — marks items as public to consumers.
+
+A `mako.toml` manifest coordinates multi-file projects and external
+dependencies. The `mako pkg` command manages the full lifecycle: initializing,
+adding, fetching, locking, and auditing packages.
+
+---
+
+## pack / pull / export — The Module System
+
+Every `.mko` file may declare its pack name at the top. Files that share the
+same `pack` name belong to the same logical unit:
+
+```mko
+// mathutil.mko
+pack mathutil
+
+export fn add(a: int, b: int) -> int {
+    return a + b
+}
+
+export fn mul(a: int, b: int) -> int {
+    return a * b
+}
+
+// not exported — internal
+fn clamp(n: int, lo: int, hi: int) -> int {
+    if n < lo { return lo }
+    if n > hi { return hi }
+    return n
+}
+```
+
+A consumer pulls the pack and accesses exported symbols through the pack name:
+
+```mko
+// main.mko
+pack main
+
+pull "./mathutil.mko"
+
+fn main() {
+    print_int(mathutil.add(2, 3))   // 5
+    print_int(mathutil.mul(4, 5))   // 20
+    // mathutil.clamp(...)          // compile error — not exported
+}
+```
+
+### Pull forms
+
+```mko
+// Standard library — resolved from std/
+pull "strings"
+
+// Local file (pack name becomes the qualifier)
+pull "./helpers.mko"
+
+// Explicit alias
+pull "./helpers.mko" as h
+
+// Grouped pulls
+pull (
+    "strings"
+    "./db.mko"
+    "./routes.mko" as r
+)
+```
+
+Bare path names like `"strings"` resolve under `std/`.
+`MAKO_STD` overrides the standard library root.
+
+### Visibility rules
+
+- Items without `export` are private to their pack.
+- `export` works on `fn`, `struct`, `enum`, and `const`.
+- Within the same pack (multiple files sharing a `pack` name), all items are
+  visible to each other regardless of `export`.
+- Consumers only see `export`ed items.
+
+### Relationship to import
+
+The older `import` keyword still works and is equivalent to `pull` in most
+contexts. New code should prefer `pack`/`pull`/`export` for clarity.
 
 ---
 
@@ -88,20 +173,21 @@ dependencies automatically.
 
 ## File-Level Imports
 
-For single-file imports within the same package (no `mako.toml` needed):
+For single-file imports within the same package (no `mako.toml` needed), use
+`pull` (or the older `import` keyword):
 
 ```mko
-import "./helpers.mko"
+pull "./helpers.mko"
 
 fn main() {
-    print_int(lib_add(2, 3))
-    print(lib_greet("mako"))
+    print_int(helpers.add(2, 3))
+    print(helpers.greet("mako"))
 }
 ```
 
-The imported file's functions become available in the importing file's scope.
-By convention, helper files prefix their functions with `lib_` or a meaningful
-module prefix to avoid name collisions.
+The pulled file's exported functions become available through the pack name as a
+qualifier. If the file declares `pack helpers`, that name is used; otherwise the
+filename basename is the default qualifier.
 
 When you run `mako run main.mko`, the compiler automatically finds and compiles
 all imported files -- you don't need to list them on the command line.

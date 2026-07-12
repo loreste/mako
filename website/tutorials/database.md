@@ -25,7 +25,7 @@ fn main() {
     // Query a single integer value
     let count = sqlite_query_int(db, "SELECT COUNT(*) FROM users")
     print("user count:")
-    print_int(count)
+    print(count)
 
     // Query a single text value
     let name = sqlite_query_text(db, "SELECT name FROM users WHERE id = 1")
@@ -150,7 +150,7 @@ fn main() {
         "SELECT * FROM events"
     )
     print("event rows:")
-    print_int(rows)
+    print(rows)
 
     // Close connection
     pg_close(handle)
@@ -217,7 +217,7 @@ Wrap database calls with proper error checking using `Result`:
 
 ```mko
 fn safe_insert(db: SqlDB, title: string, body: string) -> Result[int, string] {
-    if str_eq(title, "") {
+    if title == "" {
         return error("title cannot be empty")
     }
     let result = sql_exec_str4(db,
@@ -277,7 +277,7 @@ fn main() {
     let args: []int = []
     let count = sql_query_int(db, "SELECT COUNT(*) FROM notes", args)
     print("total notes:")
-    print_int(count)
+    print(count)
 
     sql_close(db)
 }

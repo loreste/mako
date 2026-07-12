@@ -49,18 +49,18 @@ curl -sS http://127.0.0.1:18300/
 
 ## Adding Routes
 
-Use `http_path` and `http_method` to dispatch requests. Mako uses
-`str_eq` for string comparison in routing logic.
+Use `http_path` and `http_method` to dispatch requests. String `==`
+works for comparison in routing logic.
 
 ```mko
 fn route(c: int) {
     let method = http_method(c)
     let path = http_path(c)
 
-    if str_eq(path, "/health") {
+    if path == "/health" {
         let _ = http_respond_json(c, 200, "{\"ok\":true}\n")
     } else {
-        if str_eq(path, "/") {
+        if path == "/" {
             let _ = http_respond(c, 200, "notes-api v1\n")
         } else {
             let _ = http_respond_json(c, 404, json_object("error", "not found"))
@@ -99,13 +99,25 @@ let count = json_get_int(some_json, "count")
 
 ## Structured JSON with derive
 
-For structured data, use `#[derive(json)]` on a struct:
+For structured data, use `#[derive(json)]` on a struct and attach
+methods with `on`:
 
 ```mko
 #[derive(json)]
 struct Note {
     title: string
     body: string
+}
+
+on Note {
+    fn to_json(self) -> string {
+        return Note_to_json(self.title, self.body)
+    }
+
+    fn display(self) {
+        print(self.title)
+        print(self.body)
+    }
 }
 
 fn main() {
@@ -144,7 +156,7 @@ if cmap_has(store, "my-key") == 1 {
 let _ = cmap_del(store, "my-key")
 
 // Count entries
-print_int(cmap_len(store))
+print(cmap_len(store))
 ```
 
 ---
@@ -195,28 +207,28 @@ fn main() {
             let method = http_method(c)
             let path = http_path(c)
 
-            if str_eq(path, "/health") {
+            if path == "/health" {
                 let _ = http_respond_json(
                     c, 200,
                     "{\"ok\":true,\"service\":\"notes-api\"}\n"
                 )
             } else {
-                if str_eq(path, "/v1/notes") {
-                    if str_eq(method, "GET") {
+                if path == "/v1/notes" {
+                    if method == "GET" {
                         let body = json_object_from_map_ss(notes)
                         let _ = http_respond_json(c, 200, body)
                     } else {
-                        if str_eq(method, "POST") {
+                        if method == "POST" {
                             let raw = http_body(c)
                             let title = json_get_string(raw, "title")
                             let body = json_get_string(raw, "body")
-                            if str_eq(title, "") {
+                            if title == "" {
                                 let _ = http_respond_json(
                                     c, 400,
                                     json_object("error", "title required")
                                 )
                             } else {
-                                if str_eq(body, "") {
+                                if body == "" {
                                     let _ = http_respond_json(
                                         c, 400,
                                         json_object("error", "body required")
@@ -231,9 +243,9 @@ fn main() {
                                 }
                             }
                         } else {
-                            if str_eq(method, "DELETE") {
+                            if method == "DELETE" {
                                 let key = http_header(c, "X-Note-Key")
-                                if str_eq(key, "") {
+                                if key == "" {
                                     let _ = http_respond_json(
                                         c, 400,
                                         json_object("error", "X-Note-Key header required")

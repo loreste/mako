@@ -20,7 +20,7 @@ mako init myws --workspace         # multi-package workspace
 ```
 myapp/
   mako.toml     # package manifest
-  main.mko      # entry point
+  main.mko      # entry point (uses pack/pull/export)
 ```
 
 **Backend scaffold** (`--backend`):
@@ -536,3 +536,24 @@ Cache lives in `.mako/cache/`. Clear with `rm -rf .mako/cache/` or use
 
 Parallel compilation uses `-j` flag or `MAKO_JOBS` environment variable.
 Default is the number of CPU cores.
+
+---
+
+## Current status
+
+The compiler and runtime pass **169 tests** covering:
+
+- `on Type { fn method(self) -> T { ... } }` method blocks
+- `pack` / `pull` / `export` module system
+- User generics with monomorphization (`fn name[T](x: T) -> T`)
+- Tuples `(int, string)` and multi-return `let a, b = f()`
+- `switch` / `case` / `default` alongside `match`
+- `fan(xs, fn(x) { x * x })` data parallelism
+- `go f()` fire-and-forget onto enclosing crew
+- Compound assignments (`+=`, `-=`, `++`, `--`)
+- If-expressions (`let x = if c { a } else { b }`)
+- Polymorphic `print`
+- `==` on strings
+
+Init scaffolds (`mako init`) generate projects using the current `pack`/`pull`/
+`export` conventions by default.

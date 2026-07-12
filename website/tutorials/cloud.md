@@ -28,11 +28,11 @@ fn main() {
     }
 
     print("allowed:")
-    print_int(allowed)
+    print(allowed)
     print("denied:")
-    print_int(denied)
+    print(denied)
     print("remaining tokens:")
-    print_int(ratelimit_remaining(rl))
+    print(ratelimit_remaining(rl))
 
     ratelimit_free(rl)
 }
@@ -51,19 +51,19 @@ States: 0=closed (normal), 1=open (failing fast), 2=half-open (probing).
 ```mko
 fn main() {
     let cb = breaker_new(3, 5000, 2)  // 3 failures, 5s timeout, 2 probes
-    print_int(breaker_state(cb))      // 0 = closed
+    print(breaker_state(cb))      // 0 = closed
 
     breaker_failure(cb)
     breaker_failure(cb)
     breaker_failure(cb)
-    print_int(breaker_state(cb))      // 1 = open
+    print(breaker_state(cb))      // 1 = open
 
     if breaker_allow(cb) == 0 {
         print("circuit open, failing fast")
     }
 
     breaker_reset(cb)
-    print_int(breaker_state(cb))      // 0 = closed
+    print(breaker_state(cb))      // 0 = closed
     breaker_free(cb)
 }
 ```
@@ -90,26 +90,26 @@ fn main() {
     let node_c = chash_get(ring, "session:abc")
 
     print("user:42 -> node:")
-    print_int(node_a)
+    print(node_a)
     print("user:99 -> node:")
-    print_int(node_b)
+    print(node_b)
     print("session:abc -> node:")
-    print_int(node_c)
+    print(node_c)
 
     // Add a new node (returns new node ID)
     let new_id = chash_add_node(ring)
     print("added node:")
-    print_int(new_id)  // 3
+    print(new_id)  // 3
 
     // Some keys may now route to the new node
     let node_a2 = chash_get(ring, "user:42")
     print("user:42 after add -> node:")
-    print_int(node_a2)
+    print(node_a2)
 
     // Remove a node
     chash_remove_node(ring, 0)
     print("nodes after remove:")
-    print_int(chash_node_count(ring))
+    print(chash_node_count(ring))
 
     chash_free(ring)
 }
@@ -132,8 +132,8 @@ fn main() {
     print(token)
 
     // Verify
-    print_int(jwt_verify(token, secret))       // 1
-    print_int(jwt_verify(token, "wrong-key"))   // 0
+    print(jwt_verify(token, secret))       // 1
+    print(jwt_verify(token, "wrong-key"))   // 0
 
     // Extract payload (does NOT verify -- always verify first)
     let data = jwt_payload(token)
@@ -142,7 +142,7 @@ fn main() {
 }
 
 fn authenticate(token: string, secret: string) -> Result[string, string] {
-    if str_eq(token, "") {
+    if token == "" {
         return error("missing token")
     }
     if jwt_verify(token, secret) == 0 {
@@ -150,7 +150,7 @@ fn authenticate(token: string, secret: string) -> Result[string, string] {
     }
     let payload = jwt_payload(token)
     let sub = json_get_string(payload, "sub")
-    if str_eq(sub, "") {
+    if sub == "" {
         return error("missing subject")
     }
     return Ok(sub)
@@ -191,14 +191,14 @@ fn main() {
             let path = http_path(c)
             let method = http_method(c)
 
-            if str_eq(path, "/health") {
+            if path == "/health" {
                 let _ = http_respond_json(c, 200, "{\"ok\":true}\n")
             } else {
                 if ratelimit_allow(rl) == 0 {
                     let _ = http_respond_json(c, 429, json_object("error", "rate limit exceeded"))
                 } else {
-                    if str_eq(path, "/api/token") {
-                        if str_eq(method, "POST") {
+                    if path == "/api/token" {
+                        if method == "POST" {
                             let body = http_body(c)
                             let user = json_get_string(body, "user")
                             let payload = json_object("sub", user)
@@ -208,7 +208,7 @@ fn main() {
                             let _ = http_respond_json(c, 405, json_object("error", "method not allowed"))
                         }
                     } else {
-                        if str_eq(path, "/api/data") {
+                        if path == "/api/data" {
                             let token = http_header(c, "Authorization")
                             match authenticate(token, secret) {
                                 Ok(user) => {
@@ -246,7 +246,7 @@ fn authenticate(token: string, secret: string) -> Result[string, string] {
     }
     let payload = jwt_payload(token)
     let sub = json_get_string(payload, "sub")
-    if str_eq(sub, "") {
+    if sub == "" {
         return error("missing subject")
     }
     return Ok(sub)

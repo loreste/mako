@@ -213,16 +213,33 @@ For simple map-over-a-collection parallelism, use `fan`. It kicks one task per
 element, distributes across available cores, and collects results in order:
 
 ```mko
+fn square(x: int) -> int {
+    return x * x
+}
+
 fn main() {
+    // With a closure
     let xs = [1, 2, 3, 4, 5, 6, 7, 8]
     let ys = fan(xs, |x| x * x)
     for v in ys {
         print_int(v)
     }
+
+    // With a named function
+    let zs = fan(xs, square)
+    for v in zs {
+        print_int(v)
+    }
+
+    // With an inline fn(...) { } form
+    let ws = fan(xs, fn(x) { x * x })
+    for v in ws {
+        print_int(v)
+    }
 }
 ```
 
-Output:
+Output (for any of the three forms):
 ```
 1
 4

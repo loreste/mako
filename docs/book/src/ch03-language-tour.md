@@ -5,8 +5,8 @@ the `.mko` extension. Every program begins with `fn main()`.
 
 ## Program structure
 
-Top-level items in a Mako file: `fn`, `struct`, `enum`, `actor`, `interface`,
-`const`, `import`, and `extern "C"`.
+Top-level items in a Mako file: `pack`, `pull`, `export`, `fn`, `struct`,
+`enum`, `actor`, `interface`, `const`, and `extern "C"`.
 
 ```mko
 fn main() {
@@ -120,7 +120,7 @@ fn main() {
     let t = "ma" + "ko"
     print(t)
 
-    // Comparison (== and != only)
+    // Comparison — == and != work directly on strings
     if t == "mako" {
         print("equal")
     }
@@ -369,8 +369,8 @@ fn main() {
 
 ### Methods on structs
 
-Define a function with `StructName_method(self: StructName)` to enable
-method-call syntax:
+Methods are defined inside an `on` block attached to the struct. The first
+parameter `self` refers to the receiver instance:
 
 ```mko
 struct Rect {
@@ -378,15 +378,26 @@ struct Rect {
     h: int,
 }
 
-fn Rect_area(self: Rect) -> int {
-    return self.w * self.h
+on Rect {
+    fn area(self) -> int {
+        return self.w * self.h
+    }
+
+    fn perimeter(self) -> int {
+        return 2 * (self.w + self.h)
+    }
 }
 
 fn main() {
     let r = Rect { w: 3, h: 4 }
-    print_int(r.area())    // method call syntax
+    print_int(r.area())        // 12
+    print_int(r.perimeter())   // 14
 }
 ```
+
+The older `fn Rect_area(self: Rect)` naming pattern still works but `on` blocks
+are the preferred style -- they group related methods together and read more
+naturally.
 
 ## Enums
 
@@ -420,6 +431,8 @@ fn area(s: Shape) -> int {
 
 ### Enum methods
 
+Enums support `on` blocks just like structs:
+
 ```mko
 enum Shape {
     Circle(int),
@@ -427,11 +440,13 @@ enum Shape {
     Point,
 }
 
-fn Shape_area(self: Shape) -> int {
-    match self {
-        Circle(r) => r * r,
-        Rect(w, h) => w * h,
-        Point => 0,
+on Shape {
+    fn area(self) -> int {
+        match self {
+            Circle(r) => r * r,
+            Rect(w, h) => w * h,
+            Point => 0,
+        }
     }
 }
 
@@ -465,35 +480,98 @@ fn main() {
 }
 ```
 
-### Multiple returns via structs or Result
+### Tuples and multiple return values
 
-Mako does not have tuple returns. Use a struct or Result for multiple values:
+Mako has tuple types for grouping values. A function can return a tuple and the
+caller can destructure it with `let a, b = f()`:
 
 ```mko
-struct DivResult {
-    quotient: int,
-    remainder: int,
-}
-
-fn divmod(a: int, b: int) -> DivResult {
-    return DivResult { quotient: a / b, remainder: a % b }
+fn divmod(a: int, b: int) -> (int, int) {
+    return (a / b, a % b)
 }
 
 fn main() {
-    let r = divmod(17, 5)
-    print_int(r.quotient)    // 3
-    print_int(r.remainder)   // 2
+    let q, r = divmod(17, 5)
+    print_int(q)    // 3
+    print_int(r)    // 2
+}
+```
+
+Tuple types are written `(T, U, ...)`. You can also bind them to a single
+variable and access elements positionally:
+
+```mko
+fn pair() -> (string, int) {
+    return ("hello", 42)
+}
+
+fn main() {
+    let p = pair()       // p is (string, int)
+    print(p.0)           // "hello"
+    print_int(p.1)       // 42
+
+    // Or destructure directly:
+    let name, age = pair()
+    print(name)
+    print_int(age)
+}
+```
+
+For more complex cases you can still use a struct, but tuples cover the common
+multi-return pattern without boilerplate.
+
+## Generics
+
+Functions and structs can be parameterized over types using square-bracket
+syntax. The compiler monomorphizes each instantiation, so there is no runtime
+cost:
+
+```mko
+fn identity[T](x: T) -> T {
+    return x
+}
+
+fn first[T, U](a: T, b: U) -> T {
+    return a
+}
+
+fn main() {
+    print_int(identity(42))       // T = int
+    print(identity("hi"))         // T = string
+    print_int(first(1, "x"))     // T = int, U = string
+}
+```
+
+Generic structs work the same way:
+
+```mko
+struct Pair[A, B] {
+    left: A,
+    right: B,
+}
+
+fn main() {
+    let p = Pair { left: 1, right: "one" }
+    print_int(p.left)
+    print(p.right)
 }
 ```
 
 ## Closures (lambdas)
 
-Closures use the `|args| body` syntax:
+Closures use the `|args| body` syntax or `fn(args) { body }` for multi-line
+bodies:
 
 ```mko
 fn main() {
     let doubled = fan([1, 2, 3], |n| n * 2)
     for _, v in range doubled {
+        print_int(v)
+    }
+
+    // Named-function style closure (useful for longer bodies)
+    let squares = fan([4, 5, 6], fn(x) { x * x })
+    for _, v in range squares {
         print_int(v)
     }
 }
@@ -918,25 +996,26 @@ fn main() {
 
 ## Packs & pulls
 
-Normal pulls are always pack-qualified (`pkg.fn(...)`). Default name comes
-from the pulled `pack` clause (if not `main`), else the path basename.
+Mako's module system uses three keywords: `pack`, `pull`, and `export`.
+
+**`pack`** declares the current file's package identity. Files that share the
+same `pack` name form one logical unit:
 
 ```mko
-// Std — always strings.contains(...)
-pull "strings"
+pack mylib
+```
 
-// Local file (pack lib → lib.add)
-pull "./lib.mko"
+**`pull`** imports another pack. Symbols are accessed through the pack name:
+
+```mko
+// Standard library — resolved from std/
+pull "strings"           // strings.contains(...)
+
+// Local file — qualifier is the file's pack name (or basename)
+pull "./lib.mko"         // lib.add(...)
 
 // Explicit alias
-pull "./other.mko" as helper
-
-// Dual form still works
-import lib "./lib.mko"
-
-// Blank / dot (specialized)
-pull _ "fmt"
-pull . "./helpers.mko"
+pull "./other.mko" as helper   // helper.greet(...)
 
 // Grouped
 pull (
@@ -945,6 +1024,18 @@ pull (
     "./other.mko" as x
 )
 ```
+
+**`export`** marks items as visible to other packs:
+
+```mko
+pack mylib
+
+export fn add(a: int, b: int) -> int { return a + b }
+export struct Point { x: int, y: int }
+```
+
+Items without `export` are private to their pack. See
+[Packages](ch10-packages.md) for the full module system reference.
 
 Bare path names like `"strings"` resolve under `std/`.
 `MAKO_STD` overrides the standard library root.
@@ -1032,11 +1123,66 @@ fn main() {
 }
 ```
 
+## Visibility: `export`
+
+By default, top-level items are private to their pack. Mark an item with
+`export` to make it available to other packs that `pull` this one:
+
+```mko
+pack mathutil
+
+export fn add(a: int, b: int) -> int {
+    return a + b
+}
+
+export struct Vec2 {
+    x: float,
+    y: float,
+}
+
+// not exported — internal helper
+fn clamp(n: int, lo: int, hi: int) -> int {
+    if n < lo { return lo }
+    if n > hi { return hi }
+    return n
+}
+```
+
+Only `export`ed functions and structs are visible to consumers; everything else
+remains an internal implementation detail.
+
+## Data parallelism: `fan`
+
+`fan` applies a function to every element of a slice in parallel, distributing
+work across available cores. It preserves order:
+
+```mko
+fn square(x: int) -> int {
+    return x * x
+}
+
+fn main() {
+    // With a named function
+    let results = fan([1, 2, 3, 4], square)
+    for _, v in range results {
+        print_int(v)
+    }
+
+    // With an inline closure
+    let doubled = fan([10, 20, 30], fn(x) { x * 2 })
+    for _, v in range doubled {
+        print_int(v)
+    }
+}
+```
+
+See [Concurrency](ch06-concurrency.md) for more on `fan` and crew blocks.
+
 ## Summary of built-in functions
 
 | Function | Purpose |
 |----------|---------|
-| `print(s)` | Print string to stdout |
+| `print(x)` | Print any value to stdout (polymorphic -- works on strings, ints, etc.) |
 | `print_int(n)` | Print int to stdout |
 | `print_int64(n)` | Print int64 to stdout |
 | `print_int32(n)` | Print int32 to stdout |
@@ -1049,7 +1195,7 @@ fn main() {
 | `has(m, k)` | Check if map contains key |
 | `delete(m, k)` | Delete key from map |
 | `assert(cond)` | Panic if condition is false |
-| `str_eq(a, b)` | String equality |
+| `str_eq(a, b)` | String equality (note: `==` also works on strings) |
 | `str_contains(s, sub)` | Substring check |
 | `str_len(s)` | String length (same as `len`) |
 | `rune_count(s)` | Number of Unicode code points |
