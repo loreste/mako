@@ -67,7 +67,7 @@ Last inventory: 2026-07-11 (**unique Mako surface** · pack/pull · pain map · 
 |-------|--------|
 | `cargo build --release` | PASS (prior) |
 | Book samples `mako check` / `run` | PASS — `docs/book/examples/book_*.mko` |
-| `mako test examples/testing` | PASS — **161 passed**, 0 failed |
+| `mako test examples/testing` | PASS — **162 passed**, 0 failed |
 | `if init; cond { }` + both-branches-return body | Done — `examples/testing/if_init_test.mko` |
 | Go `switch`/`case`/`default` (value, expr-less, init) | Done — `examples/testing/switch_test.mko` |
 | Positional struct literals `Point{1, 2}` / `Point{}` | Done — `examples/testing/struct_positional_test.mko` |
@@ -81,6 +81,7 @@ Last inventory: 2026-07-11 (**unique Mako surface** · pack/pull · pain map · 
 | Sendable sync handles across kick (CMap/Mutex/RWMutex/AtomicInt) | Done — `examples/testing/kick_sync_test.mko` |
 | PBKDF2-HMAC-SHA256 (`crypto.pbkdf2`, SCRAM primitive) | Done — `examples/testing/pbkdf2_test.mko` |
 | Per-connection HTTP/2 state (`http2_conn_new`/`use`/`free`) | Done — `examples/testing/http2_multiconn_test.mko` |
+| Socket-style TLS server (`tls_server_new`/`tls_accept`/`read`/`write`/`alpn`) | Done — STARTTLS-upgrade verified; `examples/testing/tls_server_test.mko` |
 | Contextual `pack`/`pull`/`switch`/`go` (usable as identifiers) | Fixed — no longer reserved words |
 | C keyword / stdlib-name identifiers (`switch`, `read`, `time`, …) emit valid C | Fixed — codegen mangles reserved & libc names |
 | `mako fmt` doubled `export` on structs | Fixed |

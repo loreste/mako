@@ -5020,6 +5020,48 @@ impl TypeChecker {
                 Box::new(Type::String),
             ),
         );
+        // Socket-style TLS server API (own the accept loop; upgrade a TCP fd to TLS).
+        fns.insert(
+            "tls_server_available".into(),
+            Type::Fn(vec![], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "tls_server_new".into(),
+            Type::Fn(
+                vec![Type::String, Type::String],
+                Box::new(Type::Named("TlsServer".into())),
+            ),
+        );
+        fns.insert(
+            "tls_accept".into(),
+            Type::Fn(
+                vec![Type::Named("TlsServer".into()), Type::Int],
+                Box::new(Type::Named("TlsConn".into())),
+            ),
+        );
+        fns.insert(
+            "tls_read".into(),
+            Type::Fn(vec![Type::Named("TlsConn".into()), Type::Int], Box::new(Type::String)),
+        );
+        fns.insert(
+            "tls_write".into(),
+            Type::Fn(
+                vec![Type::Named("TlsConn".into()), Type::String],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "tls_conn_alpn".into(),
+            Type::Fn(vec![Type::Named("TlsConn".into())], Box::new(Type::String)),
+        );
+        fns.insert(
+            "tls_conn_close".into(),
+            Type::Fn(vec![Type::Named("TlsConn".into())], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "tls_server_free".into(),
+            Type::Fn(vec![Type::Named("TlsServer".into())], Box::new(Type::Int)),
+        );
         fns.insert(
             "tls_get".into(),
             Type::Fn(

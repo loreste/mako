@@ -909,6 +909,7 @@ impl Codegen {
                 "Buf" => "MakoBuf*".into(),
                 "GameUDP" => "MakoGameUDP*".into(),
                 "Http2Conn" => "MakoHttp2Conn*".into(),
+                "TlsServer" | "TlsConn" => "void*".into(),
                 "CHash" => "MakoCHash*".into(),
                 "RateLimiter" => "MakoRateLimiter*".into(),
                 "CircuitBreaker" => "MakoCircuitBreaker*".into(),
@@ -8642,6 +8643,53 @@ impl Codegen {
                                 "MakoString {tmp} = mako_tls_get_insecure({h}, {p}, {path});"
                             ));
                             return ("MakoString".into(), tmp);
+                        }
+                        "tls_server_available" => {
+                            return ("int64_t".into(), "mako_tls_server_available()".into());
+                        }
+                        "tls_server_new" => {
+                            let (_, c) = self.emit_expr(&args[0]);
+                            let (_, k) = self.emit_expr(&args[1]);
+                            let tmp = self.fresh("tsv");
+                            self.line(&format!("void *{tmp} = mako_tls_server_new({c}, {k});"));
+                            return ("void*".into(), tmp);
+                        }
+                        "tls_accept" => {
+                            let (_, ctx) = self.emit_expr(&args[0]);
+                            let (_, fd) = self.emit_expr(&args[1]);
+                            let tmp = self.fresh("tac");
+                            self.line(&format!("void *{tmp} = mako_tls_accept({ctx}, {fd});"));
+                            return ("void*".into(), tmp);
+                        }
+                        "tls_read" => {
+                            let (_, c) = self.emit_expr(&args[0]);
+                            let (_, n) = self.emit_expr(&args[1]);
+                            let tmp = self.fresh("trd");
+                            self.line(&format!("MakoString {tmp} = mako_tls_read({c}, {n});"));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "tls_write" => {
+                            let (_, c) = self.emit_expr(&args[0]);
+                            let (_, d) = self.emit_expr(&args[1]);
+                            let tmp = self.fresh("twr");
+                            self.line(&format!("int64_t {tmp} = mako_tls_write({c}, {d});"));
+                            return ("int64_t".into(), tmp);
+                        }
+                        "tls_conn_alpn" => {
+                            let (_, c) = self.emit_expr(&args[0]);
+                            let tmp = self.fresh("tap");
+                            self.line(&format!("MakoString {tmp} = mako_tls_conn_alpn({c});"));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "tls_conn_close" => {
+                            let (_, c) = self.emit_expr(&args[0]);
+                            self.line(&format!("mako_tls_conn_close({c});"));
+                            return ("int64_t".into(), "0".into());
+                        }
+                        "tls_server_free" => {
+                            let (_, c) = self.emit_expr(&args[0]);
+                            self.line(&format!("mako_tls_server_free({c});"));
+                            return ("int64_t".into(), "0".into());
                         }
                         "tls_get" => {
                             let (_, h) = self.emit_expr(&args[0]);

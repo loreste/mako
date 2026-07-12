@@ -287,6 +287,105 @@ static inline SSL_CTX *mako_tls_make_ctx(const char *cert, const char *key) {
     return ctx;
 }
 
+/* ------------------------------------------------------------------------- */
+/* Socket-style TLS server API.                                                */
+/*                                                                             */
+/* Unlike the fixed-response `tls_serve*` helpers, this lets you own the accept */
+/* loop: bind/accept a plain TCP fd yourself (tcp_listen/tcp_accept), optionally */
+/* read pre-TLS bytes (e.g. a Postgres SSLRequest), then upgrade that same fd to */
+/* TLS and read/write decrypted data. Handles are opaque `void*` so the API      */
+/* still compiles when TLS is not linked (the stubs below just fail).           */
+/* ------------------------------------------------------------------------- */
+
+typedef struct { SSL *ssl; int fd; } MakoTlsConn;
+
+/* ALPN: prefer h2, then http/1.1, else the client's first offer. */
+static inline int mako_tls_alpn_cb(SSL *ssl, const unsigned char **out,
+                                   unsigned char *outlen, const unsigned char *in,
+                                   unsigned int inlen, void *arg) {
+    (void)ssl; (void)arg;
+    static const unsigned char pref[] = "\x02h2\x08http/1.1";
+    if (SSL_select_next_proto((unsigned char **)out, outlen, pref, sizeof(pref) - 1,
+                              in, inlen) == OPENSSL_NPN_NEGOTIATED)
+        return SSL_TLSEXT_ERR_OK;
+    if (inlen >= 1) { *out = in + 1; *outlen = in[0]; return SSL_TLSEXT_ERR_OK; }
+    return SSL_TLSEXT_ERR_NOACK;
+}
+
+/* Create a server TLS context from cert + key PEM paths. NULL on failure. */
+static inline void *mako_tls_server_new(MakoString cert, MakoString key) {
+    char cbuf[1024], kbuf[1024];
+    if (cert.len >= sizeof(cbuf) || key.len >= sizeof(kbuf)) return NULL;
+    memcpy(cbuf, cert.data ? cert.data : "", cert.len); cbuf[cert.len] = 0;
+    memcpy(kbuf, key.data ? key.data : "", key.len); kbuf[key.len] = 0;
+    SSL_CTX *ctx = mako_tls_make_ctx(cbuf, kbuf);
+    if (ctx) SSL_CTX_set_alpn_select_cb(ctx, mako_tls_alpn_cb, NULL);
+    return (void *)ctx;
+}
+
+/* Server TLS handshake on an already-accepted TCP fd (also used for STARTTLS-
+ * style upgrades on the same socket). NULL on failure. */
+static inline void *mako_tls_accept(void *ctx, int64_t fd) {
+    if (!ctx || fd < 0) return NULL;
+    SSL *ssl = SSL_new((SSL_CTX *)ctx);
+    if (!ssl) return NULL;
+    SSL_set_fd(ssl, (int)fd);
+    if (SSL_accept(ssl) <= 0) { SSL_free(ssl); return NULL; }
+    MakoTlsConn *c = (MakoTlsConn *)malloc(sizeof(MakoTlsConn));
+    if (!c) { SSL_free(ssl); return NULL; }
+    c->ssl = ssl; c->fd = (int)fd;
+    return (void *)c;
+}
+
+/* Read up to `max` bytes of decrypted data. Empty on close/error. */
+static inline MakoString mako_tls_read(void *conn, int64_t max) {
+    MakoTlsConn *c = (MakoTlsConn *)conn;
+    if (!c || !c->ssl || max <= 0) return mako_str_from_cstr("");
+    if (max > 65536) max = 65536;
+    char *buf = (char *)malloc((size_t)max + 1);
+    if (!buf) return mako_str_from_cstr("");
+    int n = SSL_read(c->ssl, buf, (int)max);
+    if (n <= 0) { free(buf); return mako_str_from_cstr(""); }
+    buf[n] = 0;
+    return (MakoString){buf, (size_t)n};
+}
+
+/* Write plaintext (encrypted on the wire). Bytes written, or -1. */
+static inline int64_t mako_tls_write(void *conn, MakoString data) {
+    MakoTlsConn *c = (MakoTlsConn *)conn;
+    if (!c || !c->ssl || !data.data) return -1;
+    return (int64_t)SSL_write(c->ssl, data.data, (int)data.len);
+}
+
+/* Negotiated ALPN protocol (e.g. "h2"), or "" if none. */
+static inline MakoString mako_tls_conn_alpn(void *conn) {
+    MakoTlsConn *c = (MakoTlsConn *)conn;
+    if (!c || !c->ssl) return mako_str_from_cstr("");
+    const unsigned char *p = NULL; unsigned int len = 0;
+    SSL_get0_alpn_selected(c->ssl, &p, &len);
+    if (!p || len == 0) return mako_str_from_cstr("");
+    char *d = (char *)malloc(len + 1);
+    if (!d) return mako_str_from_cstr("");
+    memcpy(d, p, len); d[len] = 0;
+    return (MakoString){d, len};
+}
+
+static inline int64_t mako_tls_conn_close(void *conn) {
+    MakoTlsConn *c = (MakoTlsConn *)conn;
+    if (!c) return -1;
+    if (c->ssl) { SSL_shutdown(c->ssl); SSL_free(c->ssl); }
+    if (c->fd >= 0) close(c->fd);
+    free(c);
+    return 0;
+}
+
+static inline int64_t mako_tls_server_free(void *ctx) {
+    if (ctx) SSL_CTX_free((SSL_CTX *)ctx);
+    return 0;
+}
+
+static inline int64_t mako_tls_server_available(void) { return 1; }
+
 static inline SSL_CTX *mako_tls_make_client_ctx(void) {
     SSL_library_init();
     OpenSSL_add_all_algorithms();
@@ -2784,6 +2883,26 @@ static inline MakoString mako_tls_post(
 }
 
 #else /* !MAKO_TLS_REAL */
+
+/* Socket-style TLS server API — unavailable without a linked TLS backend. */
+static inline void *mako_tls_server_new(MakoString cert, MakoString key) {
+    (void)cert; (void)key; return NULL;
+}
+static inline void *mako_tls_accept(void *ctx, int64_t fd) {
+    (void)ctx; (void)fd; return NULL;
+}
+static inline MakoString mako_tls_read(void *conn, int64_t max) {
+    (void)conn; (void)max; return mako_str_from_cstr("");
+}
+static inline int64_t mako_tls_write(void *conn, MakoString data) {
+    (void)conn; (void)data; return -1;
+}
+static inline MakoString mako_tls_conn_alpn(void *conn) {
+    (void)conn; return mako_str_from_cstr("");
+}
+static inline int64_t mako_tls_conn_close(void *conn) { (void)conn; return -1; }
+static inline int64_t mako_tls_server_free(void *ctx) { (void)ctx; return 0; }
+static inline int64_t mako_tls_server_available(void) { return 0; }
 
 static inline MakoString mako_tls_aead_seal(
     MakoString key,

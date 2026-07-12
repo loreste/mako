@@ -1,0 +1,15 @@
+// Socket-style TLS server API surface. A full handshake needs an external
+// client, so this covers availability + that the API is wired and callable.
+// (End-to-end handshake verified separately against a real TLS client.)
+
+func TestTlsServerAvailable() {
+    let ok = tls_server_available()
+    assert(ok == 0 or ok == 1)
+}
+
+func TestTlsServerNewBadCertIsSafe() {
+    // A missing cert/key must fail gracefully (no crash); freeing it is safe.
+    let s = tls_server_new("/no/such/cert.pem", "/no/such/key.pem")
+    let _ = tls_server_free(s)
+    assert(true)
+}

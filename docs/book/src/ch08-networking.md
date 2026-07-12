@@ -361,6 +361,38 @@ fn main() {
 }
 ```
 
+### TLS server — owning the accept loop
+
+The `tls_serve*` helpers answer with a fixed response. When you need to inspect
+each connection and drive it yourself (a proxy, a database wire protocol), use
+the socket-style API: bind and accept a plain TCP socket, then **upgrade that fd
+to TLS**. Because you own the raw fd first, you can exchange bytes before the
+handshake — for example Postgres's `SSLRequest` negotiation.
+
+```mko
+fn main() {
+    let srv = tls_server_new("cert.pem", "key.pem")   // TlsServer (SSL context)
+    let lfd = tcp_listen(5432)
+    while true {
+        let fd = tcp_accept(lfd)
+
+        // Optional pre-TLS phase on the same socket (e.g. Postgres SSLRequest):
+        let hello = tcp_read(fd)
+        let _ = tcp_write(fd, "S")        // "yes, let's do TLS"
+
+        // Upgrade the same fd to TLS, then read/write decrypted data.
+        let conn = tls_accept(srv, fd)    // TlsConn (performs the handshake)
+        let proto = tls_conn_alpn(conn)   // e.g. "h2", or "" if none
+        let req = tls_read(conn, 4096)
+        let _2 = tls_write(conn, "response")
+        tls_conn_close(conn)
+    }
+}
+```
+
+For plain HTTPS (no pre-TLS bytes), just `tcp_accept` then `tls_accept`
+immediately. `tls_server_available()` reports whether a TLS backend is linked.
+
 ---
 
 ## HTTP/2

@@ -35,6 +35,14 @@
   one thread; each keeps independent stream/settings/flow-control state. Leaving
   the handles unused keeps the original single-connection behaviour.
 
+### TLS
+
+- **Socket-style TLS server API** — `tls_server_new(cert, key)`, `tls_accept(fd)`,
+  `tls_read` / `tls_write`, `tls_conn_alpn`, `tls_conn_close`. Own the accept
+  loop and upgrade an accepted TCP fd to TLS — including STARTTLS-style upgrades
+  on the same socket (verified against Postgres-style `SSLRequest` negotiation).
+  ALPN negotiates `h2` / `http/1.1` for proxy use.
+
 ### Networking
 
 - **UDP request/response routing** — `game_udp_sender_addr` (the `host:port` of
