@@ -1,0 +1,43 @@
+// Reading an HTTP/2 request end-to-end from the frame layer: feed a client
+// preface + HEADERS through a per-connection state machine, then HPACK-decode the
+// assembled block to recover :method / :path — the core of an H2 server/proxy
+// accept loop (inspect headers, then route/forward).
+
+fn header_value(name: string) -> string {
+    var i = 0
+    let n = hpack_decoded_count()
+    for i < n {
+        if hpack_decoded_name(i) == name {
+            return hpack_decoded_value(i)
+        }
+        i++
+    }
+    return ""
+}
+
+func TestHttp2ReadRequest() {
+    let c = http2_conn_new()
+    let _ = http2_conn_use(c)
+    let _s = http2_conn_set_server(1)
+
+    // A client's GET /api request, HPACK-encoded.
+    let block = hpack_encode_literal(":method", "GET")
+        + hpack_encode_literal(":scheme", "https")
+        + hpack_encode_literal(":authority", "example.com")
+        + hpack_encode_literal(":path", "/api")
+    // HEADERS on stream 1 with END_HEADERS(0x4) | END_STREAM(0x1).
+    let headers = http2_headers_frame(1, block, 5)
+
+    // Drive the connection: client preface then the request frame.
+    let rc = http2_conn_recv(http2_client_preface() + headers)
+    assert_eq(rc, 0)
+
+    // The stream's header block is complete and decodable.
+    assert_eq(http2_conn_header_stream(), 1)
+    let _d = hpack_decode_block(http2_conn_header_block(1))
+    assert_eq_str(header_value(":method"), "GET")
+    assert_eq_str(header_value(":path"), "/api")
+    assert_eq_str(header_value(":authority"), "example.com")
+
+    http2_conn_free(c)
+}

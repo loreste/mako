@@ -2388,13 +2388,12 @@ static inline int64_t mako_http2_conn_recv(MakoString s) {
             if (mako_h2_max_concurrent > 0 && mako_http2_stream_find(stream) < 0) {
                 if (mako_http2_conn_active_streams() >= mako_h2_max_concurrent) return -1;
             }
-            /* Stream-id parity: client opens odd, server opens even (RFC 7540 §5.1.1). */
+            /* Stream-id parity (RFC 7540 §5.1.1): a *received* HEADERS that opens a
+             * new stream is client-initiated, so its id must be odd. (Server push,
+             * which would use even ids, is not supported.) This holds whether or not
+             * `is_server` was set, so a server reads client requests either way. */
             if (mako_http2_stream_find(stream) < 0) {
-                if (mako_h2_is_server) {
-                    if ((stream & 1) != 0) return -1; /* server must open even */
-                } else {
-                    if ((stream & 1) == 0) return -1; /* client must open odd */
-                }
+                if ((stream & 1) == 0) return -1; /* new stream must be client-odd */
             }
             size_t abs = (size_t)(p - base) + off;
             MakoString frame = mako_str_slice(s, (int64_t)abs, (int64_t)(abs + 9 + (size_t)len));

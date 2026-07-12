@@ -34,6 +34,11 @@
   `http2_conn_free`. A server or proxy can juggle several HTTP/2 connections on
   one thread; each keeps independent stream/settings/flow-control state. Leaving
   the handles unused keeps the original single-connection behaviour.
+- **fix: server can read client requests** — `http2_conn_recv` rejected the
+  client's odd-numbered streams in server mode (inverted stream-id parity), so no
+  request ever assembled. A received HEADERS now correctly opens a client
+  (odd-id) stream, so `header_block` + HPACK decode recover `:method` / `:path` —
+  the basis for an H2 accept loop / reverse proxy.
 
 ### TLS
 

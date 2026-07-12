@@ -471,6 +471,32 @@ HTTP/2 features:
 
 Test with: `curl -sk --http2 https://127.0.0.1:18446/health`
 
+### Building your own H2 server (proxy / dynamic responses)
+
+When the fixed-route helper isn't enough — you need to inspect each request and
+respond dynamically (a reverse proxy) — drive the connection yourself. Each
+connection gets its own state with `http2_conn_new` / `http2_conn_use`; feed it
+bytes with `http2_conn_recv`, and when a stream's header block is complete, decode
+it with HPACK to recover the request:
+
+```mko
+fn read_request(conn: Http2Conn, bytes: string) -> string {
+    let _ = http2_conn_use(conn)
+    let _ = http2_conn_recv(bytes)          // process frames
+    let stream = http2_conn_header_stream() // stream with complete headers, or 0
+    if stream == 0 { return "" }
+
+    let _d = hpack_decode_block(http2_conn_header_block(stream))
+    // walk hpack_decoded_count() / hpack_decoded_name(i) / hpack_decoded_value(i)
+    // to read :method, :path, and forward upstream …
+    return "routed"
+}
+```
+
+Build the response from `hpack_encode_indexed` / `hpack_encode_literal` blocks
+wrapped in `http2_headers_frame` + `http2_data_frame`, and write them back over
+the TLS connection. Pair with `tls_accept` (ALPN `h2`) to terminate TLS.
+
 ---
 
 ## WebSocket

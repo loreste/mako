@@ -196,13 +196,14 @@ fn TestHttp2StreamIdParity() {
     assert_eq(http2_conn_recv(http2_headers_frame(1, hpack_encode_indexed(2), 4)), 0)
     assert_eq(http2_conn_recv(http2_headers_frame(2, hpack_encode_indexed(2), 4)), -1)
     assert_eq(http2_stream_state_of(2), 0)
-    // Server role: even stream ids only.
+    // Server role: reads client-initiated (odd) streams; even ids (server push,
+    // unsupported) are rejected.
     let _ = http2_conn_reset()
     let _ = http2_conn_set_server(1)
     assert_eq(http2_conn_is_server(), 1)
-    assert_eq(http2_conn_recv(http2_headers_frame(2, hpack_encode_indexed(2), 4)), 0)
-    assert_eq(http2_conn_recv(http2_headers_frame(1, hpack_encode_indexed(2), 4)), -1)
-    assert_eq(http2_stream_state_of(1), 0)
+    assert_eq(http2_conn_recv(http2_headers_frame(1, hpack_encode_indexed(2), 4)), 0)
+    assert_eq(http2_conn_recv(http2_headers_frame(2, hpack_encode_indexed(2), 4)), -1)
+    assert_eq(http2_stream_state_of(2), 0)
     let _ = http2_conn_reset()
 }
 
