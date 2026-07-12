@@ -34,16 +34,16 @@ Last roadmap sync: **2026-07-11** (unique surface · pain-driven design · suite
 
 ## Partial / Next (true hard residuals)
 
-**Landed (gap close waves 1–14):** join_timeout flatten · POD+string kick ·
-reflect N + nested POD · Result maps + `[]int`/`[]string`/`[]float` Ok ·
-NLL match/nested/**loop×match** products · more script `\p{…}` · expanded TSan ·
-prior concurrency/Result/SMTP work.
+**Landed (gap close waves 1–15):** join_timeout flatten · POD+string kick ·
+reflect N + nested POD · Result maps + `[]int`/`[]string`/`[]float`/`[]Struct` Ok ·
+NLL match/nested/loop×match + **labeled continue outer** · more script `\p{…}` ·
+expanded TSan · prior concurrency/Result/SMTP work.
 
 **Language pain residuals** (still open — see [PAIN_POINTS.md](PAIN_POINTS.md)):
 
 1. Fuller data-race model beyond expanded TSan  
-2. More Result Ok shapes (generic containers / struct slices)  
-3. Stronger NLL product cases (labeled multi-loop CFG)  
+2. More Result Ok shapes (generic monomorphized containers)  
+3. Stronger NLL product cases (break-join / multi-label CFG)  
 
 **Stdlib / product residuals:**
 

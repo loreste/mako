@@ -1,0 +1,43 @@
+// Wave 15: Result []Struct Ok, more unicode scripts.
+
+struct Point {
+    x: int
+    y: int
+}
+
+fn points_ok() -> Result[[]Point, string] {
+    return Ok([Point { x: 1, y: 2 }, Point { x: 3, y: 4 }])
+}
+
+fn TestResultSliceStructOk() {
+    match points_ok() {
+        Ok(xs) => {
+            assert_eq(len(xs), 2)
+            assert_eq(xs[0].x, 1)
+            assert_eq(xs[1].y, 4)
+        },
+        Err(_) => assert(false),
+    }
+}
+
+fn TestRegexUnicodeGeorgianCherokee() {
+    assert(regex_match("\\p{Georgian}+", "ქართული"))
+    assert(regex_match("\\p{Cherokee}+", "ᎠᎡᎢ"))
+    assert(regex_match("\\p{Ethiopic}+", "አ"))
+}
+
+fn TestLabeledBreakSurface() {
+    // Positive: labeled break still runs (see examples/labeled_break.mko).
+    let mut n = 0
+    outer: while true {
+        let mut j = 0
+        while j < 3 {
+            j = j + 1
+            n = n + 1
+            if n == 2 {
+                break outer
+            }
+        }
+    }
+    assert_eq(n, 2)
+}

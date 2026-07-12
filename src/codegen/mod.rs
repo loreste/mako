@@ -151,6 +151,22 @@ impl Codegen {
                     TypeExpr::Array(inner) => match inner.as_ref() {
                         TypeExpr::Named(n) if n == "string" => "slice_str",
                         TypeExpr::Named(n) if n == "float" || n == "float64" => "slice_float",
+                        TypeExpr::Named(n)
+                            if matches!(
+                                n.as_str(),
+                                "int"
+                                    | "int64"
+                                    | "int32"
+                                    | "int8"
+                                    | "byte"
+                                    | "bool"
+                                    | "uint64"
+                            ) =>
+                        {
+                            "slice"
+                        }
+                        // []NamedStruct → slice_struct (elem name in result_ok_structs)
+                        TypeExpr::Named(_) => "slice_struct",
                         _ => "slice",
                     },
                     TypeExpr::Map(k, v) => match (k.as_ref(), v.as_ref()) {
@@ -244,12 +260,19 @@ impl Codegen {
     fn result_ok_struct_name(&self, ty: &TypeExpr) -> Option<String> {
         match ty {
             TypeExpr::Generic(n, args) if n == "Result" && !args.is_empty() => {
-                if let TypeExpr::Named(t) = &args[0] {
-                    if self.structs.contains_key(t) {
-                        return Some(t.clone());
+                match &args[0] {
+                    TypeExpr::Named(t) if self.structs.contains_key(t) => Some(t.clone()),
+                    // []Struct Ok: store element name for MakoArr_{elem} unbox
+                    TypeExpr::Array(inner) => {
+                        if let TypeExpr::Named(t) = inner.as_ref() {
+                            if self.structs.contains_key(t) {
+                                return Some(t.clone());
+                            }
+                        }
+                        None
                     }
+                    _ => None,
                 }
-                None
             }
             _ => None,
         }
@@ -2401,6 +2424,18 @@ impl Codegen {
                                 let boxn = self.fresh("fabox");
                                 self.line(&format!(
                                     "MakoFloatArray *{boxn} = (MakoFloatArray*)malloc(sizeof(MakoFloatArray));"
+                                ));
+                                self.line(&format!("*{boxn} = {v};"));
+                                return (
+                                    "MakoResultInt".into(),
+                                    format!("mako_ok_ptr((void*){boxn})"),
+                                );
+                            }
+                            // []Struct Ok: box MakoArr_Name
+                            if vty.starts_with("MakoArr_") {
+                                let boxn = self.fresh("stbox");
+                                self.line(&format!(
+                                    "{vty} *{boxn} = ({vty}*)malloc(sizeof({vty}));"
                                 ));
                                 self.line(&format!("*{boxn} = {v};"));
                                 return (
@@ -12572,6 +12607,28 @@ impl Codegen {
                                 "MakoFloatArray *{p} = (MakoFloatArray*)mako_result_ok_ptr({scrut});"
                             ));
                             self.line(&format!("MakoFloatArray {b};"));
+                            self.line(&format!(
+                                "if ({p}) {{ {b} = *{p}; free({p}); }} else {{ {b}.data = NULL; {b}.len = 0; {b}.cap = 0; }}"
+                            ));
+                        } else if ok_kind == "slice_struct" {
+                            let sn = self
+                                .result_ok_structs
+                                .get(scrut)
+                                .cloned()
+                                .unwrap_or_else(|| "int64_t".into());
+                            let cname = self
+                                .structs
+                                .get(&sn)
+                                .map(|s| s.c_name.clone())
+                                .unwrap_or(sn);
+                            let arr = format!("MakoArr_{cname}");
+                            let b = mangle(&bindings[0]);
+                            let p = self.fresh("oks");
+                            self.locals.insert(bindings[0].clone(), arr.clone());
+                            self.line(&format!(
+                                "{arr} *{p} = ({arr}*)mako_result_ok_ptr({scrut});"
+                            ));
+                            self.line(&format!("{arr} {b};"));
                             self.line(&format!(
                                 "if ({p}) {{ {b} = *{p}; free({p}); }} else {{ {b}.data = NULL; {b}.len = 0; {b}.cap = 0; }}"
                             ));
