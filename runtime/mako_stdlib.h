@@ -989,6 +989,129 @@ static inline void mako_wait_group_wait(MakoWaitGroup *wg) {
     pthread_mutex_unlock(&wg->mu);
 }
 
+/* ------------------------------------------------------------------------- */
+/* File-system watch — one abstraction over kqueue (macOS/BSD) and inotify     */
+/* (Linux). Watch files or directories; `watch_poll` blocks up to a timeout    */
+/* and returns the path that changed (or "" on timeout). Pairs with SIGHUP for */
+/* config / servers-file reloads.                                              */
+/* ------------------------------------------------------------------------- */
+
+#define MAKO_MAX_WATCH 128
+#define MAKO_WATCH_PATH 256
+
+#if defined(__APPLE__) || defined(__FreeBSD__) || defined(__NetBSD__) || defined(__OpenBSD__)
+#include <sys/event.h>
+#include <sys/time.h>
+#define MAKO_WATCH_KQUEUE 1
+#elif defined(__linux__)
+#include <sys/inotify.h>
+#include <poll.h>
+#define MAKO_WATCH_INOTIFY 1
+#endif
+
+#if defined(MAKO_WATCH_KQUEUE) || defined(MAKO_WATCH_INOTIFY)
+typedef struct {
+    int fd; /* kqueue or inotify fd */
+    int handles[MAKO_MAX_WATCH]; /* per-path open fd (kqueue) or watch descriptor (inotify) */
+    char paths[MAKO_MAX_WATCH][MAKO_WATCH_PATH];
+    int count;
+} MakoWatcher;
+
+static inline void *mako_watch_new(void) {
+    MakoWatcher *w = (MakoWatcher *)calloc(1, sizeof(MakoWatcher));
+    if (!w) return NULL;
+#if defined(MAKO_WATCH_KQUEUE)
+    w->fd = kqueue();
+#else
+    w->fd = inotify_init1(IN_NONBLOCK);
+#endif
+    if (w->fd < 0) { free(w); return NULL; }
+    return w;
+}
+
+static inline int64_t mako_watch_add(void *wp, MakoString path) {
+    MakoWatcher *w = (MakoWatcher *)wp;
+    if (!w || w->count >= MAKO_MAX_WATCH || path.len == 0 || path.len >= MAKO_WATCH_PATH)
+        return -1;
+    char p[MAKO_WATCH_PATH];
+    memcpy(p, path.data, path.len);
+    p[path.len] = 0;
+#if defined(MAKO_WATCH_KQUEUE)
+#ifdef O_EVTONLY
+    int h = open(p, O_EVTONLY);
+#else
+    int h = open(p, O_RDONLY);
+#endif
+    if (h < 0) return -1;
+    struct kevent ev;
+    EV_SET(&ev, h, EVFILT_VNODE, EV_ADD | EV_CLEAR,
+           NOTE_WRITE | NOTE_DELETE | NOTE_RENAME | NOTE_EXTEND | NOTE_ATTRIB, 0, NULL);
+    if (kevent(w->fd, &ev, 1, NULL, 0, NULL) < 0) { close(h); return -1; }
+#else
+    int h = inotify_add_watch(w->fd, p,
+                              IN_MODIFY | IN_CREATE | IN_DELETE | IN_MOVED_TO |
+                              IN_MOVED_FROM | IN_ATTRIB | IN_MOVE_SELF | IN_DELETE_SELF);
+    if (h < 0) return -1;
+#endif
+    memcpy(w->paths[w->count], p, path.len + 1);
+    w->handles[w->count] = h;
+    w->count++;
+    return 0;
+}
+
+/* Block up to `timeout_ms`; return the changed path, or "" on timeout. */
+static inline MakoString mako_watch_poll(void *wp, int64_t timeout_ms) {
+    MakoWatcher *w = (MakoWatcher *)wp;
+    if (!w) return mako_str_from_cstr("");
+#if defined(MAKO_WATCH_KQUEUE)
+    struct kevent ev;
+    struct timespec ts;
+    ts.tv_sec = timeout_ms / 1000;
+    ts.tv_nsec = (timeout_ms % 1000) * 1000000L;
+    int n = kevent(w->fd, NULL, 0, &ev, 1, &ts);
+    if (n <= 0) return mako_str_from_cstr("");
+    for (int i = 0; i < w->count; i++)
+        if (w->handles[i] == (int)ev.ident) return mako_str_from_cstr(w->paths[i]);
+#else
+    struct pollfd pfd;
+    pfd.fd = w->fd;
+    pfd.events = POLLIN;
+    int pr = poll(&pfd, 1, (int)timeout_ms);
+    if (pr <= 0) return mako_str_from_cstr("");
+    char buf[4096] __attribute__((aligned(__alignof__(struct inotify_event))));
+    ssize_t len = read(w->fd, buf, sizeof(buf));
+    if (len <= 0) return mako_str_from_cstr("");
+    struct inotify_event *e = (struct inotify_event *)buf;
+    for (int i = 0; i < w->count; i++)
+        if (w->handles[i] == e->wd) return mako_str_from_cstr(w->paths[i]);
+#endif
+    return mako_str_from_cstr("");
+}
+
+static inline int64_t mako_watch_close(void *wp) {
+    MakoWatcher *w = (MakoWatcher *)wp;
+    if (!w) return -1;
+#if defined(MAKO_WATCH_KQUEUE)
+    for (int i = 0; i < w->count; i++) close(w->handles[i]);
+#endif
+    close(w->fd);
+    free(w);
+    return 0;
+}
+
+static inline int64_t mako_watch_available(void) { return 1; }
+#else /* no file-watch backend */
+static inline void *mako_watch_new(void) { return NULL; }
+static inline int64_t mako_watch_add(void *wp, MakoString path) {
+    (void)wp; (void)path; return -1;
+}
+static inline MakoString mako_watch_poll(void *wp, int64_t timeout_ms) {
+    (void)wp; (void)timeout_ms; return mako_str_from_cstr("");
+}
+static inline int64_t mako_watch_close(void *wp) { (void)wp; return -1; }
+static inline int64_t mako_watch_available(void) { return 0; }
+#endif
+
 #ifdef __cplusplus
 }
 #endif
