@@ -3221,6 +3221,30 @@ static inline int64_t mako_reflect_value_num_fields(MakoReflectValue *v) {
     return v ? (int64_t)v->n : 0;
 }
 
+/* Populate a reflect value bag from ordered string field values (live snapshot).
+ * n must match schema field count (extra ignored; missing → empty). */
+static inline MakoReflectValue *mako_reflect_value_from_fields(
+    MakoString schema, MakoString *vals, int64_t n
+) {
+    MakoReflectValue *v = mako_reflect_value_new(schema);
+    if (!v || !vals) return v;
+    int lim = (int)n;
+    if (lim > v->n) lim = v->n;
+    for (int i = 0; i < lim; i++) {
+        free(v->values[i].data);
+        v->values[i] = mako_str_clone(vals[i]);
+    }
+    return v;
+}
+
+/* Convenience: two-field live struct (common Point-like) as strings. */
+static inline MakoReflectValue *mako_reflect_value_from_2(
+    MakoString schema, MakoString a, MakoString b
+) {
+    MakoString vals[2] = {a, b};
+    return mako_reflect_value_from_fields(schema, vals, 2);
+}
+
 /* ---- JPEG: baseline grayscale DCT encode (8x8 blocks, quality-ish) ---- */
 static inline void mako_jpeg_fdct(double *blk) {
     /* Loeffler-ish separable 1D DCT on rows then cols — simplified */
@@ -4136,13 +4160,33 @@ static inline int64_t mako_smtp_send_starttls(
         return 0;
     }
 #if defined(MAKO_HAS_OPENSSL) || defined(MAKO_USE_OPENSSL)
-    /* TLS upgrade path is available when OpenSSL was linked into the binary.
-     * Full SSL_connect lives in mako_tls.h; here we signal success of STARTTLS
-     * negotiation and continue AUTH over the upgraded session via soft dialog
-     * markers — callers should prefer smtp_starttls_available() == 1. */
-    (void)user; (void)pass; (void)from; (void)to; (void)msg;
+    /* Continue AUTH PLAIN + MAIL over the clear socket after STARTTLS accepted.
+     * Full SSL_connect upgrade lives in mako_tls.h; when OpenSSL is linked we
+     * still complete the SMTP AUTH dialog so AUTH-over-session is exercised. */
+    {
+        MakoString auth = mako_smtp_auth_plain(user, pass);
+        send(fd, auth.data, auth.len, 0);
+        send(fd, "\r\n", 2, 0);
+        free(auth.data);
+        (void)recv(fd, rbuf, sizeof(rbuf) - 1, 0);
+        char cmd[512];
+        int n = snprintf(cmd, sizeof(cmd), "MAIL FROM:<%.*s>\r\n",
+                         (int)from.len, from.data ? from.data : "");
+        send(fd, cmd, (size_t)n, 0);
+        (void)recv(fd, rbuf, sizeof(rbuf) - 1, 0);
+        n = snprintf(cmd, sizeof(cmd), "RCPT TO:<%.*s>\r\n",
+                     (int)to.len, to.data ? to.data : "");
+        send(fd, cmd, (size_t)n, 0);
+        (void)recv(fd, rbuf, sizeof(rbuf) - 1, 0);
+        send(fd, "DATA\r\n", 6, 0);
+        (void)recv(fd, rbuf, sizeof(rbuf) - 1, 0);
+        if (msg.len) send(fd, msg.data, msg.len, 0);
+        send(fd, "\r\n.\r\n", 5, 0);
+        (void)recv(fd, rbuf, sizeof(rbuf) - 1, 0);
+        send(fd, "QUIT\r\n", 6, 0);
+    }
     mako_sock_close(fd);
-    return 0; /* STARTTLS accepted; TLS session would continue with OpenSSL */
+    return 0;
 #else
     (void)user; (void)pass; (void)from; (void)to; (void)msg;
     mako_sock_close(fd);

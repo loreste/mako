@@ -634,21 +634,24 @@ static inline int64_t mako_to_uint64_from_signed(int64_t v) {
 }
 
 /* ---- Result[T, E] (common backend shape) ----
- * Ok: int family in `value`; string Ok in `ok_s` (value unused).
+ * Ok: int in `value`; string in `ok_s`; float in `ok_f` (others unused).
  * E may be string (err_kind=0) or a user enum (err_kind=1):
  *   err_kind 0: err string is the error payload
- *   err_kind 1: err_tag / err_i0 / err_i1 / err_s0 reconstruct the enum
+ *   err_kind 1: err_tag / err_i0..err_i2 / err_s0..err_s1 reconstruct the enum
  */
 typedef struct {
     bool ok;
     int64_t value;
     MakoString ok_s;  /* Ok string payload for Result[string, E] */
+    double ok_f;      /* Ok float payload for Result[float, E] */
     MakoString err;   /* string Err payload (err_kind==0) */
     int err_kind;     /* 0=string, 1=enum */
     int err_tag;      /* enum .tag when err_kind==1 */
     int64_t err_i0;
     int64_t err_i1;
+    int64_t err_i2;
     MakoString err_s0;
+    MakoString err_s1;
 } MakoResultInt;
 
 static inline MakoResultInt mako_ok_int(int64_t v) {
@@ -664,6 +667,14 @@ static inline MakoResultInt mako_ok_str(MakoString s) {
     memset(&r, 0, sizeof(r));
     r.ok = true;
     r.ok_s = s;
+    return r;
+}
+
+static inline MakoResultInt mako_ok_float_res(double v) {
+    MakoResultInt r;
+    memset(&r, 0, sizeof(r));
+    r.ok = true;
+    r.ok_f = v;
     return r;
 }
 
@@ -688,6 +699,23 @@ static inline MakoResultInt mako_err_enum(int tag, int64_t i0, int64_t i1, MakoS
     r.err_i0 = i0;
     r.err_i1 = i1;
     r.err_s0 = s0;
+    return r;
+}
+
+/* Extended enum Err packing (3 ints + 2 strings). */
+static inline MakoResultInt mako_err_enum_ex(
+    int tag, int64_t i0, int64_t i1, int64_t i2, MakoString s0, MakoString s1
+) {
+    MakoResultInt r;
+    memset(&r, 0, sizeof(r));
+    r.ok = false;
+    r.err_kind = 1;
+    r.err_tag = tag;
+    r.err_i0 = i0;
+    r.err_i1 = i1;
+    r.err_i2 = i2;
+    r.err_s0 = s0;
+    r.err_s1 = s1;
     return r;
 }
 
@@ -1779,6 +1807,74 @@ static inline void mako_chan_str_close(MakoChanStr *c) {
     pthread_mutex_unlock(&c->mu);
 }
 
+/* Nonblocking try-recv for string channels. Returns 1 and owns *out on success. */
+static inline int64_t mako_chan_str_try_recv(MakoChanStr *c, MakoString *out) {
+    if (!c) return 0;
+    pthread_mutex_lock(&c->mu);
+    if (c->count == 0) {
+        pthread_mutex_unlock(&c->mu);
+        return 0;
+    }
+    MakoString v = c->buf[c->head];
+    c->buf[c->head] = (MakoString){NULL, 0};
+    c->head = (c->head + 1) % c->cap;
+    c->count--;
+    pthread_cond_signal(&c->can_send);
+    pthread_mutex_unlock(&c->mu);
+    if (out) *out = v;
+    else free(v.data);
+    return 1;
+}
+
+/* Select among string channels. Returns arm index or -1; value via mako_chan_select_value_str. */
+static MakoString mako_select_last_str = {NULL, 0};
+static int64_t mako_select_rr_str = 0;
+
+static inline MakoString mako_chan_select_value_str(void) {
+    return mako_str_clone(mako_select_last_str);
+}
+
+static inline int64_t mako_chan_str_selectn(
+    MakoChanStr **chs, int64_t n, int64_t timeout_ms
+) {
+    if (n < 1 || n > MAKO_SELECT_MAX || chs == NULL) return -1;
+    struct timeval start, now;
+    mako_gettimeofday(&start, NULL);
+    for (;;) {
+        int64_t start_i = mako_select_rr_str % n;
+        for (int64_t k = 0; k < n; k++) {
+            int64_t i = (start_i + k) % n;
+            if (chs[i] == NULL) continue;
+            MakoString v = {NULL, 0};
+            if (mako_chan_str_try_recv(chs[i], &v)) {
+                free(mako_select_last_str.data);
+                mako_select_last_str = v;
+                mako_select_rr_str = (i + 1) % n;
+                return i;
+            }
+        }
+        if (timeout_ms >= 0) {
+            mako_gettimeofday(&now, NULL);
+            int64_t elapsed =
+                (now.tv_sec - start.tv_sec) * 1000 +
+                (now.tv_usec - start.tv_usec) / 1000;
+            if (elapsed >= timeout_ms) {
+                mako_rt_counter_inc(&mako_rt_channel_select_timeouts);
+                return -1;
+            }
+        }
+        struct timespec ts = {0, 2000000L};
+        nanosleep(&ts, NULL);
+    }
+}
+
+static inline int64_t mako_chan_str_select2(
+    MakoChanStr *a, MakoChanStr *b, int64_t timeout_ms
+) {
+    MakoChanStr *chs[2] = {a, b};
+    return mako_chan_str_selectn(chs, 2, timeout_ms);
+}
+
 /* ---- Pointer channels (opaque / heap-boxed struct handles) ----
  * Send/recv transfer ownership of a void* (caller allocates; receiver frees).
  * Used for chan[Struct] seed: send boxes a copy, recv unboxes.
@@ -1861,6 +1957,7 @@ typedef struct {
     void *result;
     bool joined;
     bool cancelled_start; /* set if cancel before/during — cooperative */
+    volatile int done;    /* 1 when trampoline finished (for timed join) */
 } MakoTask;
 
 /* MakoNursery — structured concurrency scope (Mako `crew` block).
@@ -1892,6 +1989,20 @@ static inline int64_t mako_nursery_cancelled(MakoNursery *n) {
     return n->cancelled ? 1 : 0;
 }
 
+/* Trampoline so timed join can poll `done` without blocking forever. */
+static void *mako_task_trampoline(void *arg) {
+    MakoTask *t = (MakoTask *)arg;
+    void *r = NULL;
+    if (t->fn) r = t->fn(t->arg);
+    t->result = r;
+#if defined(__STDC_NO_ATOMICS__)
+    t->done = 1;
+#else
+    __atomic_store_n(&t->done, 1, __ATOMIC_RELEASE);
+#endif
+    return r;
+}
+
 static inline MakoTask *mako_spawn(MakoNursery *n, MakoTaskFn fn, void *arg) {
     if (n->len == n->cap) {
         size_t nc = n->cap ? n->cap * 2 : 4;
@@ -1904,14 +2015,16 @@ static inline MakoTask *mako_spawn(MakoNursery *n, MakoTaskFn fn, void *arg) {
     t->result = NULL;
     t->joined = false;
     t->cancelled_start = n->cancelled;
+    t->done = 0;
     mako_rt_counter_inc(&mako_rt_tasks_spawned);
     if (n->cancelled) {
         /* do not start new work after cancel */
         t->joined = true;
+        t->done = 1;
         t->result = (void *)(intptr_t)0;
         return t;
     }
-    pthread_create(&t->thread, NULL, fn, arg);
+    pthread_create(&t->thread, NULL, mako_task_trampoline, t);
     return t;
 }
 
@@ -1919,40 +2032,56 @@ static inline void *mako_await(MakoTask *t) {
     if (!t->joined) {
         pthread_join(t->thread, &t->result);
         t->joined = true;
+        t->done = 1;
         mako_rt_counter_inc(&mako_rt_tasks_joined);
     }
     return t->result;
 }
 
-/* Timed join: returns 1 and writes *out on success; 0 on timeout.
- * On timeout the thread is detached (best-effort); prefer cancel + short work.
+/* Timed join: returns 1 and writes *out on success; 0 on timeout (task still running).
+ * Polls task->done then joins; does not block past timeout on unfinished work.
  */
 static inline int64_t mako_await_timeout_ms(MakoTask *t, int64_t ms, int64_t *out) {
     if (t->joined) {
         if (out) *out = (int64_t)(intptr_t)t->result;
         return 1;
     }
-    struct timespec ts;
-    clock_gettime(CLOCK_REALTIME, &ts);
-    ts.tv_sec += ms / 1000;
-    ts.tv_nsec += (ms % 1000) * 1000000L;
-    if (ts.tv_nsec >= 1000000000L) {
-        ts.tv_sec += 1;
-        ts.tv_nsec -= 1000000000L;
-    }
-/* Portable timeout: sleep-poll then join (no pthread_timedjoin_np — musl/mac/win/zig). */
-    (void)ts;
+    if (ms < 0) ms = 0;
     int64_t waited = 0;
     while (waited < ms) {
-        struct timespec step = {0, 5 * 1000000L};
+        int done =
+#if defined(__STDC_NO_ATOMICS__)
+            t->done;
+#else
+            __atomic_load_n(&t->done, __ATOMIC_ACQUIRE);
+#endif
+        if (done) {
+            pthread_join(t->thread, &t->result);
+            t->joined = true;
+            mako_rt_counter_inc(&mako_rt_tasks_joined);
+            if (out) *out = (int64_t)(intptr_t)t->result;
+            return 1;
+        }
+        struct timespec step = {0, 2 * 1000000L}; /* 2ms */
         nanosleep(&step, NULL);
-        waited += 5;
+        waited += 2;
     }
-    pthread_join(t->thread, &t->result);
-    t->joined = true;
-    mako_rt_counter_inc(&mako_rt_tasks_joined);
-    if (out) *out = (int64_t)(intptr_t)t->result;
-    return 1;
+    /* Final check after last sleep */
+    int done =
+#if defined(__STDC_NO_ATOMICS__)
+        t->done;
+#else
+        __atomic_load_n(&t->done, __ATOMIC_ACQUIRE);
+#endif
+    if (done) {
+        pthread_join(t->thread, &t->result);
+        t->joined = true;
+        mako_rt_counter_inc(&mako_rt_tasks_joined);
+        if (out) *out = (int64_t)(intptr_t)t->result;
+        return 1;
+    }
+    if (out) *out = 0;
+    return 0; /* still running — caller may later join or cancel_join */
 }
 
 static inline void mako_nursery_join_all(MakoNursery *n) {
@@ -2711,17 +2840,56 @@ static inline int mako_re_unicode_is_digit(uint32_t cp) {
     return 0;
 }
 
+static inline int mako_re_unicode_is_space(uint32_t cp) {
+    return cp == ' ' || cp == '\t' || cp == '\n' || cp == '\r' || cp == 0x00A0
+        || (cp >= 0x2000 && cp <= 0x200B) || cp == 0x3000;
+}
+static inline int mako_re_unicode_is_punct(uint32_t cp) {
+    if ((cp >= 0x21 && cp <= 0x2F) || (cp >= 0x3A && cp <= 0x40)
+        || (cp >= 0x5B && cp <= 0x60) || (cp >= 0x7B && cp <= 0x7E))
+        return 1;
+    if (cp >= 0x2000 && cp <= 0x206F) return 1; /* general punctuation */
+    if (cp >= 0x3000 && cp <= 0x303F) return 1; /* CJK symbols/punct */
+    return 0;
+}
+static inline int mako_re_unicode_is_symbol(uint32_t cp) {
+    if (cp == '$' || cp == '+' || cp == '<' || cp == '=' || cp == '>' || cp == '^'
+        || cp == '`' || cp == '|' || cp == '~')
+        return 1;
+    if (cp >= 0x20A0 && cp <= 0x20CF) return 1; /* currency */
+    if (cp >= 0x2200 && cp <= 0x22FF) return 1; /* math */
+    return 0;
+}
 static inline int mako_re_unicode_prop_match(const char *name, size_t nlen, uint32_t cp) {
-    if ((nlen == 1 && name[0] == 'L') || (nlen == 6 && memcmp(name, "Letter", 6) == 0))
+    if ((nlen == 1 && name[0] == 'L') || (nlen == 6 && memcmp(name, "Letter", 6) == 0)
+        || (nlen == 2 && memcmp(name, "L&", 2) == 0) || (nlen == 2 && memcmp(name, "Lu", 2) == 0)
+        || (nlen == 2 && memcmp(name, "Ll", 2) == 0) || (nlen == 2 && memcmp(name, "Lt", 2) == 0))
         return mako_re_unicode_is_letter(cp);
-    if ((nlen == 1 && name[0] == 'N') || (nlen == 6 && memcmp(name, "Number", 6) == 0))
+    if ((nlen == 1 && name[0] == 'N') || (nlen == 6 && memcmp(name, "Number", 6) == 0)
+        || (nlen == 2 && memcmp(name, "Nd", 2) == 0)
+        || (nlen == 14 && memcmp(name, "Decimal_Number", 14) == 0))
         return mako_re_unicode_is_digit(cp);
-    if ((nlen == 2 && memcmp(name, "Nd", 2) == 0) || (nlen == 14 && memcmp(name, "Decimal_Number", 14) == 0))
-        return mako_re_unicode_is_digit(cp);
-    if ((nlen == 5 && memcmp(name, "Greek", 5) == 0) || (nlen == 8 && memcmp(name, "Cyrillic", 8) == 0))
-        return (nlen == 5) ? (cp >= 0x0370 && cp <= 0x03FF) : (cp >= 0x0400 && cp <= 0x052F);
+    if ((nlen == 1 && name[0] == 'Z') || (nlen == 9 && memcmp(name, "Separator", 9) == 0)
+        || (nlen == 2 && memcmp(name, "Zs", 2) == 0))
+        return mako_re_unicode_is_space(cp);
+    if ((nlen == 1 && name[0] == 'P') || (nlen == 10 && memcmp(name, "Punctuation", 10) == 0)
+        || (nlen == 2 && (memcmp(name, "Po", 2) == 0 || memcmp(name, "Pd", 2) == 0)))
+        return mako_re_unicode_is_punct(cp);
+    if ((nlen == 1 && name[0] == 'S') || (nlen == 6 && memcmp(name, "Symbol", 6) == 0)
+        || (nlen == 2 && memcmp(name, "Sc", 2) == 0))
+        return mako_re_unicode_is_symbol(cp);
+    if (nlen == 5 && memcmp(name, "Greek", 5) == 0)
+        return (cp >= 0x0370 && cp <= 0x03FF);
+    if (nlen == 8 && memcmp(name, "Cyrillic", 8) == 0)
+        return (cp >= 0x0400 && cp <= 0x052F);
     if (nlen == 5 && memcmp(name, "Latin", 5) == 0)
         return (cp <= 0x02AF && mako_re_unicode_is_letter(cp));
+    if (nlen == 6 && memcmp(name, "Arabic", 6) == 0)
+        return (cp >= 0x0600 && cp <= 0x06FF);
+    if (nlen == 6 && memcmp(name, "Hebrew", 6) == 0)
+        return (cp >= 0x0590 && cp <= 0x05FF);
+    if (nlen == 3 && memcmp(name, "Han", 3) == 0)
+        return (cp >= 0x3400 && cp <= 0x9FFF);
     return 0;
 }
 

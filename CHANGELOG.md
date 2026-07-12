@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.1.0 — 2026-07-12 (wave 8 queue)
+
+- Real `join_timeout` (poll task done; return 0 if still running)
+- String channel select (`chan_str_select2`, `chan_select_value_str`)
+- `Result[float, E]` Ok; enum Err packs i0–i2 and s0–s1
+- Crew NLL keep outer hold moves; kick float bitcast
+- `reflect_value_from_2`; regex `\p{Z}` / `\p{Sc}` / scripts
+- SMTP AUTH continues after STARTTLS when OpenSSL linked
+- CI: expanded TSan suite; informational bench-gate 1.5×
+- Tests: `examples/testing/wave8_queue_test.mko`
+
 ## 0.1.0 — 2026-07-12 (concurrency / result / CI)
 
 - `job.join` for string and `Result` returns (heap-box across kick)

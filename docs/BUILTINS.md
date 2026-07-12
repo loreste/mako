@@ -620,9 +620,11 @@ from the protocol strings yourself. See `examples/testing/scram_test.mko`.
 | `chan_select2` | `chan_select2(a: chan[int], b: chan[int], timeout_ms: int) -> int` | Select from two **int** channels with timeout |
 | `chan_select3` | `chan_select3(a: chan[int], b: chan[int], c: chan[int], timeout_ms: int) -> int` | Select from three int channels with timeout |
 | `chan_select4` | `chan_select4(a: chan[int], b: chan[int], c: chan[int], d: chan[int], timeout_ms: int) -> int` | Select from four int channels with timeout |
-| `chan_select_value` | `chan_select_value() -> int` | Get the value from the last select operation |
+| `chan_select_value` | `chan_select_value() -> int` | Value from last **int** select |
+| `chan_str_select2` | `chan_str_select2(a, b, timeout_ms) -> int` | Select between two string channels |
+| `chan_select_value_str` | `chan_select_value_str() -> string` | Value from last **string** select |
 
-**Methods on `ch`:** `ch.send(v)`, `ch.recv()`, `ch.close()`.
+**Methods on `ch`:** `ch.send(v)`, `ch.recv()`, `ch.close()`, `job.join_timeout(ms)` (returns 0 on timeout).
 
 **`chan_open[T]` element types**
 
@@ -630,11 +632,11 @@ from the protocol strings yourself. See `examples/testing/scram_test.mko`.
 |-----|---------|--------|
 | int family / bool | `MakoChan` | Default int ring |
 | float | `MakoChan` | Bitcast via `mako_f64_to_bits` / `mako_bits_to_f64` |
-| string | `MakoChanStr` | Owned strings |
+| string | `MakoChanStr` | Owned strings; `chan_str_select2` / select syntax |
 | named struct | `MakoChanPtr` | Heap-box on send; free on recv |
 
-`select timeout … { }` and `chan_select*` are **int-channel** multiplex today.
-Tests: `examples/testing/chan_struct_test.mko`, `chan_float_test.mko`, `chan_string_test.mko`.
+`select timeout … { }` uses int or string select when all arms match.
+Tests: `chan_struct_test`, `chan_float_test`, `wave8_queue_test` (string select).
 
 ---
 
@@ -2193,11 +2195,12 @@ Tests: `examples/testing/overflow_shutdown_test.mko`. Multi-error recovery:
 |-------------|----------|
 | int family / bool | `MakoResultInt.value` via `mako_ok_int` |
 | string | `MakoResultInt.ok_s` via `mako_ok_str` |
+| float | `MakoResultInt.ok_f` via `mako_ok_float_res` |
 
 | Err type `E` | Encoding |
 |--------------|----------|
 | string | `err_kind=0`, `err` string (`mako_err_int`) |
-| user `enum` | `err_kind=1`, tag + i0/i1/s0 (`mako_err_enum`); `match Err(e)` reconstructs enum |
+| user `enum` | `err_kind=1`, tag + i0..i2 + s0..s1 (`mako_err_enum_ex`); `match Err(e)` reconstructs |
 
 ```mko
 enum IoError { NotFound, Permission(int), Other(string) }

@@ -143,6 +143,21 @@ jobs:
       - name: Run bench-gate (≤2.0× Rust)
         run: ./scripts/bench-gate.sh
 
+  bench-gate-strict:
+    name: Bench gate strict 1.5× (informational)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Install clang
+        run: sudo apt-get update && sudo apt-get install -y clang
+      - name: Build mako
+        run: cargo build --release
+      - name: Run bench-gate 1.5×
+        run: ./scripts/bench-gate.sh 1.5
+
   tsan:
     name: TSan concurrency smoke
     runs-on: ubuntu-latest
@@ -158,5 +173,9 @@ jobs:
         run: |
           ./target/release/mako test --race examples/testing/crew_fan_test.mko
           ./target/release/mako test --race examples/testing/kick_send_test.mko
+          ./target/release/mako test --race examples/testing/kick_share_test.mko
           ./target/release/mako test --race examples/testing/chan_struct_test.mko
+          ./target/release/mako test --race examples/testing/chan_float_test.mko
           ./target/release/mako test --race examples/testing/crew_drain_test.mko
+          ./target/release/mako test --race examples/testing/job_join_typed_test.mko
+          ./target/release/mako test --race examples/testing/proxy_pool_test.mko
