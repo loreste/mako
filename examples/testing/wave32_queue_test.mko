@@ -1,0 +1,79 @@
+// Wave 32: string nest edges, SOF0/APP7 match + EOI complete shell, scripts.
+
+fn str_ok() -> Option[Result[Option[string], string]] {
+    return Some(Ok(Some("hi")))
+}
+
+fn str_none() -> Option[Result[Option[string], string]] {
+    return Some(Ok(None))
+}
+
+fn str_err() -> Option[Result[Option[string], string]] {
+    return Some(Err("se"))
+}
+
+fn str_outer_none() -> Option[Result[Option[string], string]] {
+    return None
+}
+
+fn TestStrOk() {
+    match str_ok() {
+        Some(r) => match r {
+            Ok(o) => match o {
+                Some(s) => assert_eq_str(s, "hi"),
+                None => assert(false),
+            },
+            Err(_) => assert(false),
+        },
+        None => assert(false),
+    }
+}
+
+fn TestStrNone() {
+    match str_none() {
+        Some(r) => match r {
+            Ok(o) => match o {
+                Some(_) => assert(false),
+                None => assert(true),
+            },
+            Err(_) => assert(false),
+        },
+        None => assert(false),
+    }
+}
+
+fn TestStrErr() {
+    match str_err() {
+        Some(r) => match r {
+            Ok(_) => assert(false),
+            Err(m) => assert_eq_str(m, "se"),
+        },
+        None => assert(false),
+    }
+}
+
+fn TestStrOuterNone() {
+    match str_outer_none() {
+        Some(_) => assert(false),
+        None => assert(true),
+    }
+}
+
+fn TestJpegCompleteShell() {
+    let gray = "ABCDEFGHABCDEFGHABCDEFGHABCDEFGHABCDEFGHABCDEFGHABCDEFGHABCDEFGH"
+    let j = jpeg_encode_gray_jfif(8, 8, gray)
+    assert_eq(jpeg_has_eoi(j), 1)
+    assert_eq(jpeg_sof0_matches_app7(j), 1)
+    assert_eq(jpeg_sof0_width(j), 8)
+    assert_eq(jpeg_width(j), 8)
+    assert_eq(jpeg_sof0_height(j), 8)
+    assert_eq(jpeg_height(j), 8)
+    assert_eq(jpeg_is_mako_complete(j), 1)
+    assert_eq(jpeg_is_mako_jfif(j), 1)
+}
+
+fn TestRegexUnicodeMeeteiPhagsBuhid() {
+    assert(regex_match("\\p{Meetei_Mayek}", "ꯀ"))
+    assert(regex_match("\\p{Phags_Pa}", "ꡀ"))
+    assert(regex_match("\\p{Buhid}", "ᝀ"))
+}
