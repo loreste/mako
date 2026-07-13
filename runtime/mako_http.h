@@ -1255,7 +1255,7 @@ static inline MakoString mako_http2_client_preface(void) {
     memcpy(d, MAKO_HTTP2_PREFACE, pref);
     memcpy(d + pref, settings.data, settings.len);
     d[n] = 0;
-    free(settings.data);
+    mako_str_free(settings);
     return (MakoString){d, n};
 }
 
@@ -1264,8 +1264,8 @@ static inline MakoString mako_http2_server_preface(void) {
     MakoString s = mako_http2_empty_settings();
     MakoString a = mako_http2_settings_ack();
     MakoString out = mako_str_concat(s, a);
-    free(s.data);
-    free(a.data);
+    mako_str_free(s);
+    mako_str_free(a);
     return out;
 }
 
@@ -1809,7 +1809,7 @@ static inline int64_t mako_hpack_decode_block(MakoString block) {
             if (!mako_hpack_read_int(p, n, &off, 7, &idx) || idx < 1) goto fail;
             if (!mako_hpack_index_lookup(idx, &nm, &vv)) goto fail;
             int ok = mako_hpack_decode_push(nm, vv);
-            free(nm.data); free(vv.data);
+            mako_str_free(nm); mako_str_free(vv);
             if (!ok) goto fail;
         } else if ((b & 0xc0) == 0x40) {
             /* Literal Header Field with Incremental Indexing (§6.2.1).
@@ -1821,10 +1821,10 @@ static inline int64_t mako_hpack_decode_block(MakoString block) {
             } else if (!mako_hpack_index_lookup_name(ni, &nm)) {
                 goto fail;
             }
-            if (!mako_hpack_read_str(p, n, &off, &vv)) { free(nm.data); goto fail; }
+            if (!mako_hpack_read_str(p, n, &off, &vv)) { mako_str_free(nm); goto fail; }
             int ok = mako_hpack_decode_push(nm, vv);
             mako_hpack_dyn_insert(nm, vv);
-            free(nm.data); free(vv.data);
+            mako_str_free(nm); mako_str_free(vv);
             if (!ok) goto fail;
         } else if ((b & 0xe0) == 0x20) {
             /* Dynamic Table Size Update — consume and ignore. */
@@ -1840,9 +1840,9 @@ static inline int64_t mako_hpack_decode_block(MakoString block) {
             } else if (!mako_hpack_index_lookup_name(ni, &nm)) {
                 goto fail;
             }
-            if (!mako_hpack_read_str(p, n, &off, &vv)) { free(nm.data); goto fail; }
+            if (!mako_hpack_read_str(p, n, &off, &vv)) { mako_str_free(nm); goto fail; }
             int ok = mako_hpack_decode_push(nm, vv);
-            free(nm.data); free(vv.data);
+            mako_str_free(nm); mako_str_free(vv);
             if (!ok) goto fail;
         }
     }
@@ -1950,8 +1950,8 @@ static inline MakoString mako_http2_response_ex(
             mako_str_from_cstr("content-type"), content_type
         );
         MakoString next = mako_str_concat(block, cth);
-        free(block.data);
-        free(cth.data);
+        mako_str_free(block);
+        mako_str_free(cth);
         block = next;
     }
     char clen[24];
@@ -1960,12 +1960,12 @@ static inline MakoString mako_http2_response_ex(
                                                mako_str_from_cstr(clen));
     {
         MakoString next = mako_str_concat(block, clh);
-        free(block.data);
-        free(clh.data);
+        mako_str_free(block);
+        mako_str_free(clh);
         block = next;
     }
     MakoString hf = mako_http2_headers_frame(stream, block, 0x4); /* END_HEADERS */
-    free(block.data);
+    mako_str_free(block);
 
     size_t blen = body.data ? body.len : 0;
     /* Consume send windows when the stream is live. Offline frame construction
@@ -1979,7 +1979,7 @@ static inline MakoString mako_http2_response_ex(
             }
         }
         if (live && mako_http2_window_consume(stream, (int64_t)blen) < 0) {
-            free(hf.data);
+            mako_str_free(hf);
             return mako_str_from_cstr("");
         }
     }
@@ -1993,18 +1993,18 @@ static inline MakoString mako_http2_response_ex(
     if (blen <= max_frame) {
         MakoString df = mako_http2_data_frame(stream, body, 0x1); /* END_STREAM */
         MakoString out = mako_str_concat(hf, df);
-        free(hf.data);
-        free(df.data);
+        mako_str_free(hf);
+        mako_str_free(df);
         return out;
     }
     size_t total = hf.len;
     size_t nframes = (blen + max_frame - 1) / max_frame;
     total += nframes * 9 + blen;
     char *out = (char *)malloc(total + 1);
-    if (!out) { free(hf.data); return (MakoString){NULL, 0}; }
+    if (!out) { mako_str_free(hf); return (MakoString){NULL, 0}; }
     memcpy(out, hf.data, hf.len);
     size_t pos = hf.len;
-    free(hf.data);
+    mako_str_free(hf);
     size_t off = 0;
     while (off < blen) {
         size_t chunk = blen - off;
@@ -2261,84 +2261,84 @@ static inline bool mako_http2_is_push_promise(MakoString s) {
 static inline int64_t mako_http2_goaway_last_stream(MakoString s) {
     if (!mako_http2_is_goaway(s)) return -1;
     MakoString pl = mako_http2_frame_payload(s);
-    if (!pl.data || pl.len < 8) { free(pl.data); return -1; }
+    if (!pl.data || pl.len < 8) { mako_str_free(pl); return -1; }
     int64_t v = ((int64_t)(unsigned char)pl.data[0] << 24)
               | ((int64_t)(unsigned char)pl.data[1] << 16)
               | ((int64_t)(unsigned char)pl.data[2] << 8)
               | ((int64_t)(unsigned char)pl.data[3]);
-    free(pl.data);
+    mako_str_free(pl);
     return v & 0x7fffffff;
 }
 static inline int64_t mako_http2_goaway_error(MakoString s) {
     if (!mako_http2_is_goaway(s)) return -1;
     MakoString pl = mako_http2_frame_payload(s);
-    if (!pl.data || pl.len < 8) { free(pl.data); return -1; }
+    if (!pl.data || pl.len < 8) { mako_str_free(pl); return -1; }
     int64_t v = ((int64_t)(unsigned char)pl.data[4] << 24)
               | ((int64_t)(unsigned char)pl.data[5] << 16)
               | ((int64_t)(unsigned char)pl.data[6] << 8)
               | ((int64_t)(unsigned char)pl.data[7]);
-    free(pl.data);
+    mako_str_free(pl);
     return v;
 }
 static inline int64_t mako_http2_window_update_increment(MakoString s) {
     if (!mako_http2_is_window_update(s)) return -1;
     MakoString pl = mako_http2_frame_payload(s);
-    if (!pl.data || pl.len < 4) { free(pl.data); return -1; }
+    if (!pl.data || pl.len < 4) { mako_str_free(pl); return -1; }
     int64_t v = ((int64_t)(unsigned char)pl.data[0] << 24)
               | ((int64_t)(unsigned char)pl.data[1] << 16)
               | ((int64_t)(unsigned char)pl.data[2] << 8)
               | ((int64_t)(unsigned char)pl.data[3]);
-    free(pl.data);
+    mako_str_free(pl);
     return v & 0x7fffffff;
 }
 static inline int64_t mako_http2_rst_stream_error(MakoString s) {
     if (!mako_http2_is_rst_stream(s)) return -1;
     MakoString pl = mako_http2_frame_payload(s);
-    if (!pl.data || pl.len < 4) { free(pl.data); return -1; }
+    if (!pl.data || pl.len < 4) { mako_str_free(pl); return -1; }
     int64_t v = ((int64_t)(unsigned char)pl.data[0] << 24)
               | ((int64_t)(unsigned char)pl.data[1] << 16)
               | ((int64_t)(unsigned char)pl.data[2] << 8)
               | ((int64_t)(unsigned char)pl.data[3]);
-    free(pl.data);
+    mako_str_free(pl);
     return v;
 }
 static inline int64_t mako_http2_priority_dep(MakoString s) {
     if (!mako_http2_is_priority(s)) return -1;
     MakoString pl = mako_http2_frame_payload(s);
-    if (!pl.data || pl.len < 5) { free(pl.data); return -1; }
+    if (!pl.data || pl.len < 5) { mako_str_free(pl); return -1; }
     int64_t v = ((int64_t)(unsigned char)pl.data[0] << 24)
               | ((int64_t)(unsigned char)pl.data[1] << 16)
               | ((int64_t)(unsigned char)pl.data[2] << 8)
               | ((int64_t)(unsigned char)pl.data[3]);
-    free(pl.data);
+    mako_str_free(pl);
     return v & 0x7fffffff;
 }
 static inline int64_t mako_http2_priority_weight(MakoString s) {
     if (!mako_http2_is_priority(s)) return -1;
     MakoString pl = mako_http2_frame_payload(s);
-    if (!pl.data || pl.len < 5) { free(pl.data); return -1; }
+    if (!pl.data || pl.len < 5) { mako_str_free(pl); return -1; }
     int64_t w = (int64_t)(unsigned char)pl.data[4] + 1;
-    free(pl.data);
+    mako_str_free(pl);
     return w;
 }
 static inline int64_t mako_http2_priority_exclusive(MakoString s) {
     if (!mako_http2_is_priority(s)) return -1;
     MakoString pl = mako_http2_frame_payload(s);
-    if (!pl.data || pl.len < 5) { free(pl.data); return -1; }
+    if (!pl.data || pl.len < 5) { mako_str_free(pl); return -1; }
     int64_t ex = ((unsigned char)pl.data[0] & 0x80) ? 1 : 0;
-    free(pl.data);
+    mako_str_free(pl);
     return ex;
 }
 
 static inline int64_t mako_http2_push_promise_stream(MakoString s) {
     if (!mako_http2_is_push_promise(s)) return -1;
     MakoString pl = mako_http2_frame_payload(s);
-    if (!pl.data || pl.len < 4) { free(pl.data); return -1; }
+    if (!pl.data || pl.len < 4) { mako_str_free(pl); return -1; }
     int64_t v = ((int64_t)(unsigned char)pl.data[0] << 24)
               | ((int64_t)(unsigned char)pl.data[1] << 16)
               | ((int64_t)(unsigned char)pl.data[2] << 8)
               | ((int64_t)(unsigned char)pl.data[3]);
-    free(pl.data);
+    mako_str_free(pl);
     return v & 0x7fffffff;
 }
 
@@ -2963,7 +2963,7 @@ static inline int64_t mako_http2_conn_recv(MakoString s) {
                 size_t abs = (size_t)(p - base) + off;
                 MakoString frame = mako_str_slice(s, (int64_t)abs, (int64_t)(abs + 9 + (size_t)len));
                 int64_t st = mako_http2_stream_apply(frame);
-                free(frame.data);
+                mako_str_free(frame);
                 mako_http2_hdr_abort();
                 if (st < 0) return -1;
                 off += 9 + (size_t)len;
@@ -3073,7 +3073,7 @@ static inline int64_t mako_http2_conn_recv(MakoString s) {
             size_t abs = (size_t)(p - base) + off;
             MakoString frame = mako_str_slice(s, (int64_t)abs, (int64_t)(abs + 9 + (size_t)len));
             int64_t st = mako_http2_stream_apply(frame);
-            free(frame.data);
+            mako_str_free(frame);
             if (st < 0) return -1;
             /* New streams start with peer's INITIAL_WINDOW_SIZE. */
             {
@@ -3104,7 +3104,7 @@ static inline int64_t mako_http2_conn_recv(MakoString s) {
             size_t abs = (size_t)(p - base) + off;
             MakoString frame = mako_str_slice(s, (int64_t)abs, (int64_t)(abs + 9 + (size_t)len));
             int64_t pr = mako_http2_priority_apply(frame);
-            free(frame.data);
+            mako_str_free(frame);
             if (pr < 0) return -1;
             off += 9 + (size_t)len;
             continue;
@@ -3121,13 +3121,13 @@ static inline int64_t mako_http2_conn_recv(MakoString s) {
                 size_t bl = 0;
                 if (len > 0) {
                     if (mako_http2_payload_content(p + off + 9, (size_t)len, flags, 0, &bd, &bl) < 0) {
-                        free(frame.data);
+                        mako_str_free(frame);
                         return -1;
                     }
                 }
                 if (len > 0) {
                     if (mako_http2_recv_window_consume(stream, len) < 0) {
-                        free(frame.data);
+                        mako_str_free(frame);
                         return -1; /* FLOW_CONTROL_ERROR */
                     }
                     mako_h2_conn_unacked += len;
@@ -3140,7 +3140,7 @@ static inline int64_t mako_http2_conn_recv(MakoString s) {
                         if (bl > room) {
                             mako_h2_stream_body_overflow[si] = 1;
                             mako_h2_stream_body_done[si] = 0;
-                            free(frame.data);
+                            mako_str_free(frame);
                             return -1; /* refuse silent truncate */
                         }
                         memcpy(mako_h2_stream_body[si] + mako_h2_stream_body_len[si], bd, bl);
@@ -3152,7 +3152,7 @@ static inline int64_t mako_http2_conn_recv(MakoString s) {
                 }
             }
             int64_t st = mako_http2_stream_apply(frame);
-            free(frame.data);
+            mako_str_free(frame);
             if (st < 0) return -1;
             /* Keep closed (RST) state visible so HEADERS on closed is rejected;
              * slots are reclaimed lazily in stream_alloc when needed. */
@@ -3284,8 +3284,8 @@ static inline MakoString mako_http2_conn_pump(MakoString buf) {
     if (mako_h2_conn_settings_ack_needed) {
         MakoString ack = mako_http2_conn_auto_settings_ack();
         MakoString next = mako_http2_concat_frames(out, ack);
-        free(out.data);
-        free(ack.data);
+        mako_str_free(out);
+        mako_str_free(ack);
         out = next;
     }
     if (mako_h2_ping_ack_needed) {
@@ -3293,8 +3293,8 @@ static inline MakoString mako_http2_conn_pump(MakoString buf) {
         MakoString ping_ack = mako_http2_ping_frame(opaque, 1);
         mako_h2_ping_ack_needed = 0;
         MakoString next = mako_http2_concat_frames(out, ping_ack);
-        free(out.data);
-        free(ping_ack.data);
+        mako_str_free(out);
+        mako_str_free(ping_ack);
         out = next;
     }
     /* Auto connection-level WINDOW_UPDATE (restores *recv* window only). */
@@ -3304,8 +3304,8 @@ static inline MakoString mako_http2_conn_pump(MakoString buf) {
         mako_h2_conn_unacked = 0;
         (void)mako_http2_recv_window_increment(0, inc);
         MakoString next = mako_http2_concat_frames(out, wu);
-        free(out.data);
-        free(wu.data);
+        mako_str_free(out);
+        mako_str_free(wu);
         out = next;
     }
     /* Auto per-stream WINDOW_UPDATE (recv side). */
@@ -3317,8 +3317,8 @@ static inline MakoString mako_http2_conn_pump(MakoString buf) {
             mako_h2_stream_unacked[i] = 0;
             (void)mako_http2_recv_window_increment(sid, inc);
             MakoString next = mako_http2_concat_frames(out, wu);
-            free(out.data);
-            free(wu.data);
+            mako_str_free(out);
+            mako_str_free(wu);
             out = next;
         }
     }
@@ -3715,12 +3715,12 @@ static inline MakoString mako_quic_crypto_payload(MakoString data, int64_t offse
     if ((int64_t)fr.len >= min_len) return fr;
     size_t pad = (size_t)min_len - fr.len;
     char *d = (char *)malloc(fr.len + pad + 1);
-    if (!d) { free(fr.data); return mako_str_from_cstr(""); }
+    if (!d) { mako_str_free(fr); return mako_str_from_cstr(""); }
     memcpy(d, fr.data, fr.len);
     memset(d + fr.len, 0, pad); /* PADDING frames = 0x00 */
     d[fr.len + pad] = 0;
     size_t n = fr.len + pad;
-    free(fr.data);
+    mako_str_free(fr);
     return (MakoString){d, n};
 }
 

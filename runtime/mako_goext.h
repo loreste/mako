@@ -3297,9 +3297,9 @@ static inline int64_t mako_reflect_value_set(MakoReflectValue *v, MakoString fie
     for (int i = 0; i < v->n; i++) {
         MakoString f = mako_reflect_struct_field_name(v->schema, i);
         int ok = (f.len == field.len && memcmp(f.data, field.data ? field.data : "", f.len) == 0);
-        free(f.data);
+        mako_str_free(f);
         if (ok) {
-            free(v->values[i].data);
+            mako_str_free(v->values[i]);
             v->values[i] = mako_str_clone(val);
             return 0;
         }
@@ -3311,7 +3311,7 @@ static inline MakoString mako_reflect_value_get(MakoReflectValue *v, MakoString 
     for (int i = 0; i < v->n; i++) {
         MakoString f = mako_reflect_struct_field_name(v->schema, i);
         int ok = (f.len == field.len && memcmp(f.data, field.data ? field.data : "", f.len) == 0);
-        free(f.data);
+        mako_str_free(f);
         if (ok) return mako_str_clone(v->values[i]);
     }
     return mako_str_from_cstr("");
@@ -3330,7 +3330,7 @@ static inline MakoReflectValue *mako_reflect_value_from_fields(
     int lim = (int)n;
     if (lim > v->n) lim = v->n;
     for (int i = 0; i < lim; i++) {
-        free(v->values[i].data);
+        mako_str_free(v->values[i]);
         v->values[i] = mako_str_clone(vals[i]);
     }
     return v;
@@ -3709,7 +3709,7 @@ static inline MakoReflectValue *mako_gob_decode_struct(MakoString g) {
         char *vd = (char *)malloc((size_t)vl + 1);
         memcpy(vd, p + off, (size_t)vl); vd[vl] = 0;
         off += (size_t)vl;
-        free(v->values[i].data);
+        mako_str_free(v->values[i]);
         v->values[i] = (MakoString){vd, (size_t)vl};
     }
     return v;
@@ -3726,7 +3726,7 @@ static inline MakoString mako_reflect_value_schema(MakoReflectValue *v) {
 }
 static inline int64_t mako_reflect_value_set_at(MakoReflectValue *v, int64_t idx, MakoString val) {
     if (!v || idx < 0 || idx >= v->n) return -1;
-    free(v->values[(int)idx].data);
+    mako_str_free(v->values[(int)idx]); /* may be empty singleton */
     v->values[(int)idx] = mako_str_clone(val);
     return 0;
 }

@@ -5,11 +5,11 @@
 #ifndef MAKO_LOG_H
 #define MAKO_LOG_H
 
-#include "mako_rt.h"
+#include "mako_rt.h" /* includes platform pthread / CRITICAL_SECTION shims */
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
-#include <pthread.h>
+/* Do not #include <pthread.h> here — Windows builds use mako_platform shims. */
 
 #ifdef __cplusplus
 extern "C" {
@@ -20,7 +20,41 @@ static int mako_slog_min_level = 1; /* default info in strong mode; set "debug" 
 static int mako_slog_json_mode = 0;  /* 0 = logfmt-ish, 1 = JSON object per line */
 static char mako_slog_service[96];
 static FILE *mako_slog_fp = NULL; /* NULL → stderr */
-static pthread_mutex_t mako_slog_mu = PTHREAD_MUTEX_INITIALIZER;
+/* Lazy-init mutex: PTHREAD_MUTEX_INITIALIZER is not portable to CRITICAL_SECTION. */
+static pthread_mutex_t mako_slog_mu;
+static int mako_slog_mu_ready = 0;
+
+static inline void mako_slog_mu_ensure(void) {
+    if (mako_slog_mu_ready) return;
+#if defined(_WIN32) || defined(_WIN64)
+    static LONG once = 0;
+    if (InterlockedCompareExchange(&once, 1, 0) == 0) {
+        pthread_mutex_init(&mako_slog_mu, NULL);
+        mako_slog_mu_ready = 1;
+        InterlockedExchange(&once, 2);
+    } else {
+        while (InterlockedCompareExchange(&once, 2, 2) != 2)
+            Sleep(0);
+    }
+#else
+    static pthread_mutex_t boot = PTHREAD_MUTEX_INITIALIZER;
+    pthread_mutex_lock(&boot);
+    if (!mako_slog_mu_ready) {
+        pthread_mutex_init(&mako_slog_mu, NULL);
+        mako_slog_mu_ready = 1;
+    }
+    pthread_mutex_unlock(&boot);
+#endif
+}
+
+static inline void mako_slog_lock(void) {
+    mako_slog_mu_ensure();
+    pthread_mutex_lock(&mako_slog_mu);
+}
+
+static inline void mako_slog_unlock(void) {
+    pthread_mutex_unlock(&mako_slog_mu);
+}
 
 static inline FILE *mako_slog_out(void) {
     return mako_slog_fp ? mako_slog_fp : stderr;
@@ -70,38 +104,38 @@ static inline MakoString mako_slog_service_name(void) {
 
 /* Open append path for logs; empty path → stderr. Returns 1 ok, 0 fail. */
 static inline int64_t mako_slog_set_output(MakoString path) {
-    pthread_mutex_lock(&mako_slog_mu);
+    mako_slog_lock();
     if (mako_slog_fp && mako_slog_fp != stderr) {
         fclose(mako_slog_fp);
         mako_slog_fp = NULL;
     }
     if (!path.data || path.len == 0) {
         mako_slog_fp = NULL;
-        pthread_mutex_unlock(&mako_slog_mu);
+        mako_slog_unlock();
         return 1;
     }
     char pbuf[1024];
     if (path.len >= sizeof(pbuf)) {
-        pthread_mutex_unlock(&mako_slog_mu);
+        mako_slog_unlock();
         return 0;
     }
     memcpy(pbuf, path.data, path.len);
     pbuf[path.len] = 0;
     FILE *f = fopen(pbuf, "a");
     if (!f) {
-        pthread_mutex_unlock(&mako_slog_mu);
+        mako_slog_unlock();
         return 0;
     }
     mako_slog_fp = f;
-    pthread_mutex_unlock(&mako_slog_mu);
+    mako_slog_unlock();
     return 1;
 }
 
 static inline void mako_slog_flush(void) {
-    pthread_mutex_lock(&mako_slog_mu);
+    mako_slog_lock();
     FILE *fp = mako_slog_out();
     if (fp) fflush(fp);
-    pthread_mutex_unlock(&mako_slog_mu);
+    mako_slog_unlock();
 }
 
 /* ISO-8601 UTC with milliseconds: 2026-07-13T12:34:56.789Z */
@@ -180,7 +214,7 @@ static inline void mako_slog_write_trace(FILE *fp) {
             fprintf(fp, " trace=%.*s", (int)tid.len, tid.data);
         }
     }
-    free(tid.data);
+    mako_str_free(tid); /* may be empty singleton */
 #else
     (void)fp;
 #endif
@@ -204,7 +238,7 @@ static inline void mako_slog_emit(
     if (!mako_slog_enabled(level)) return;
     char ts[40];
     mako_slog_timestamp(ts, sizeof(ts));
-    pthread_mutex_lock(&mako_slog_mu);
+    mako_slog_lock();
     FILE *fp = mako_slog_out();
     if (mako_slog_json_mode) {
         fprintf(fp, "{\"ts\":\"%s\",\"level\":\"%.*s\"",
@@ -318,7 +352,7 @@ static inline void mako_slog_emit(
         }
         fputc('\n', fp);
     }
-    pthread_mutex_unlock(&mako_slog_mu);
+    mako_slog_unlock();
 }
 
 static inline void mako_slog_log(MakoString level, MakoString msg) {
