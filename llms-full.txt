@@ -1,54 +1,37 @@
-# Mako Programming Language — Complete Reference for LLMs
+# Mako language reference (for tools / LLMs)
 #
-# Source: https://mako-lang.com
-# Repository: https://github.com/loreste/mako
-# Version: mako 0.1.1
+# https://mako-lang.com
+# https://github.com/loreste/mako
+# Version: 0.1.1
 #
-# This file contains everything an LLM needs to write correct Mako code.
-# Mako compiles .mko files to C, then to native binaries via clang.
-# No garbage collector. Memory safety via ownership (hold/share) and arenas.
-# 239 tests passing. Mako identity ~92%.
-#
-# 0.1.1 highlights (production):
-# - HTTP/2 DATA frames auto-split at ≤16384 (SETTINGS_MAX_FRAME_SIZE default)
-# - Empty-string singleton free safety (use mako_str_free paths / never raw free "")
-# - UUID v4/v5/v7 + ULID; chan_str_send_take move-send
+# Compile path: .mko -> C -> object (cached) -> native binary (clang).
+# No GC. Memory is hold/share/arena. Prefer the surface below; dual spellings
+# (func, :=, import, package) still parse but are not what docs lead with.
 
 ================================================================================
 1. OVERVIEW
 ================================================================================
 
-Mako is a compiled, statically typed language with its own unique syntax and
-identity. Source files use the .mko extension. The compilation pipeline is:
-.mko -> C -> .o (cached) -> native binary. Debug builds use -O0; release builds
-use -O3 -flto.
+Mako is a compiled, statically typed language. Source files end in .mko.
+Debug builds use -O0; release uses -O3 -flto.
 
-Mako is NOT a clone of any other language. It has its own surface:
-- fn, let, on Type {}, pack/pull/export, hold/share/arena, crew/kick/join/fan
-- Dual spellings (func, :=, import, package) exist as compat sugar, not the brand
+Preferred surface:
+  fn, let, on Type {}, pack / pull / export, hold / share / arena,
+  crew / kick / join / fan, match, switch / case
 
-Key design points:
-- No garbage collector
-- Ownership model: hold (move semantics), share (reference counting)
-- Arena allocators for scoped bulk allocation
-- Structured concurrency via crew blocks (jobs cannot outlive their crew)
-- Data parallelism via fan (across all cores)
-- User generics with monomorphization
-- Tuples and multi-return values
-- Method blocks via on Type { ... }
-- Module system via pack/pull/export
-- switch/case for value matching
-- Result and Option types enforced (no null pointers)
-- Unused Result values are compile errors
-- Compound assignments (+=, -=, *=, /=, ++, --)
-- Parallel assignment (a, b = b, a)
-- If-expressions (let x = if c { a } else { b })
-- Batteries-included standard library
-- WASM/WASI preview1 target support
-- Bench-gate: within 1.5x of native performance on microbenchmarks
+Also:
+  - no GC; hold moves, share is refcounted, arena is bump allocation
+  - crew is structured concurrency (jobs do not outlive the crew)
+  - fan runs a function over a slice across cores
+  - generics monomorphize; tuples and multi-return work
+  - Result / Option; unused Result is a compile error
+  - compound and parallel assignment; if as expression
+  - stdlib is large (net, sql, crypto, http/2, …)
+  - wasm32-wasip1 target exists
+  - scripts/bench-gate.sh: aim is within about 1.5x of a C baseline on micros
 
-Entry point is fn main(). A program is a .mko file with top-level fn, struct,
-enum, actor, interface, const, extern "C", pack, pull, export, and on declarations.
+Entry point: fn main(). Top level may declare fn, struct, enum, actor,
+interface, const, extern "C", pack, pull, export, on.
 
 ================================================================================
 2. INSTALLATION
@@ -1438,17 +1421,15 @@ Below are the most important built-in functions organized by category.
   http_shutdown_requested() -> int
   http_shutdown_ready() -> int
 
-  // HTTP/2 — connection helpers:
+  // HTTP/2
+  // http2_data_frame splits payloads over 16384 bytes into multiple DATA frames
+  // (END_STREAM only on the last). TLS reply helpers do the same. Oversized
+  // single frames make browsers fail with ERR_HTTP2_FRAME_SIZE_ERROR.
   http2_conn_new() -> Http2Conn
   http2_use(conn: Http2Conn, fd: int) -> int
   http2_response(conn: Http2Conn, stream: int, status: int, body: string) -> int
   http2_free(conn: Http2Conn) -> int
   http_forward(upstream: string, req: HttpRequest) -> string
-
-  // HTTP/2 — frame builders (DATA auto-splits when payload > max frame):
-  // Default max frame size = 16384 (RFC SETTINGS_MAX_FRAME_SIZE). Larger bodies
-  // become multiple DATA frames; END_STREAM is set only on the last frame.
-  // TLS H2 replies (mako_tls_h2_reply_*) use the same split path.
   http2_detect(data: string) -> bool
   http2_headers_frame(stream: int, block: string, flags: int) -> string
   http2_data_frame(stream: int, payload: string, flags: int) -> string
@@ -1645,35 +1626,35 @@ Below are the most important built-in functions organized by category.
   // Backrefs: \1-\9
 
 --------------------------------------------------------------------------------
-26.17 UUID & ULID
+26.17 UUID and ULID
 --------------------------------------------------------------------------------
 
-  // UUID (16-byte POD):
-  uuid_v4() -> Uuid                           Random v4 UUID
-  uuid_v5(ns: Uuid, name: string) -> Uuid     Name-based (SHA-1)
-  uuid_v7() -> Uuid                           Time-ordered v7 (unix-ms + random)
-  uuid_nil() -> Uuid                          Nil UUID (all zeros)
+  // Uuid is a 16-byte value type. ULIDs use the same layout.
+
+  uuid_v4() -> Uuid
+  uuid_v5(ns: Uuid, name: string) -> Uuid     // SHA-1 name uuid
+  uuid_v7() -> Uuid                           // time-ordered
+  uuid_nil() -> Uuid
   uuid_ns_dns() / uuid_ns_url() / uuid_ns_oid() / uuid_ns_x500() -> Uuid
-  uuid_string(u: Uuid) -> string              Canonical lowercase 8-4-4-4-12
-  uuid_string_upper(u: Uuid) -> string        Canonical uppercase
-  uuid_urn(u: Uuid) -> string                 urn:uuid:…
-  uuid_bytes(u: Uuid) -> string               Raw 16 bytes
-  uuid_from_bytes(s: string) -> Uuid          From 16 bytes (aborts if len ≠ 16)
-  uuid_parse(s: string) -> Uuid               Parse canonical / 32-hex / braces / URN
-  uuid_parse_ok(s: string) -> bool            Validate UUID string
+  uuid_string(u: Uuid) -> string              // lowercase 8-4-4-4-12
+  uuid_string_upper(u: Uuid) -> string
+  uuid_urn(u: Uuid) -> string
+  uuid_bytes(u: Uuid) -> string               // raw 16 bytes
+  uuid_from_bytes(s: string) -> Uuid          // aborts if len != 16
+  uuid_parse(s: string) -> Uuid
+  uuid_parse_ok(s: string) -> bool
   uuid_check(s: string) -> Result[int, string]
   uuid_eq(a: Uuid, b: Uuid) -> bool
-  uuid_cmp(a: Uuid, b: Uuid) -> int           Ordered compare (−1/0/1)
+  uuid_cmp(a: Uuid, b: Uuid) -> int           // -1, 0, 1
   uuid_is_nil(u: Uuid) -> bool
-  uuid_version(u: Uuid) -> int                RFC version nibble
-  uuid_variant(u: Uuid) -> int                Variant (2 = RFC 4122)
+  uuid_version(u: Uuid) -> int
+  uuid_variant(u: Uuid) -> int
 
-  // ULID (same 16-byte POD as Uuid; time-sortable Crockford Base32):
-  ulid_new() -> Uuid                          New ULID
-  ulid_string(u: Uuid) -> string              26-char Crockford Base32
+  ulid_new() -> Uuid
+  ulid_string(u: Uuid) -> string              // 26-char Crockford base32
   ulid_parse(s: string) -> Uuid
   ulid_parse_ok(s: string) -> bool
-  ulid_timestamp_ms(u: Uuid) -> int           48-bit unix-ms prefix
+  ulid_timestamp_ms(u: Uuid) -> int
 
 --------------------------------------------------------------------------------
 26.18 Cookies, Sessions & Auth
@@ -1723,12 +1704,11 @@ Below are the most important built-in functions organized by category.
   chan_str_select2(a: chan[string], b: chan[string], timeout_ms: int) -> int
   chan_select_value() -> int
 
-  // String channel move-send (no clone; ownership transfer):
-  // Default ch.send(s) still clones (safe). Use take when you own the string.
+  // Move a string into a chan[string] without cloning. ch.send still clones.
+  // try_send_take always consumes v (frees it if the send fails).
   chan_str_send_take(ch: chan[string], v: string) -> int      // 1 ok, 0 closed
-  chan_str_try_send_take(ch: chan[string], v: string) -> int  // 1 queued; 0 full/closed (consumes v)
+  chan_str_try_send_take(ch: chan[string], v: string) -> int  // 1 queued, else 0
 
-  // Channel methods:
   ch.send(val)
   ch.recv()
   ch.close()
@@ -2561,46 +2541,41 @@ NOT keywords (ordinary identifiers / builtins):
 31. DUAL FORMS (COMPAT SUGAR — NOT PREFERRED)
 ================================================================================
 
-These parse correctly but are not the idiomatic Mako surface. mako fmt and docs
-always lead with the preferred (flair) column.
+These still parse. Prefer the right-hand column in new code; mako fmt does too.
 
-  Dual (compat)                    | Preferred (Mako flair)
-  ---------------------------------|---------------------------
-  func f(a int) int                | fn f(a: int) -> int
-  func (p T) M() int              | on T { fn M(self) -> int }
-  type T struct { x int }         | struct T { x: int }
+  Also accepted                     | Prefer
+  ----------------------------------|---------------------------
+  func f(a int) int                 | fn f(a: int) -> int
+  func (p T) M() int                | on T { fn M(self) -> int }
+  type T struct { x int }           | struct T { x: int }
   := / var                          | let / let mut
   package name                      | pack name
   import "path"                     | pull "path"
-  import "path" as name            | pull "path" as name
+  import "path" as name             | pull "path" as name
   Capitalized = exported            | export fn / export struct
 
-These exist for migration convenience. The preferred forms are what define
-Mako's identity.
-
 ================================================================================
-32. PRODUCTION NOTES (0.1.1)
+32. GOTCHAS (runtime)
 ================================================================================
 
-HTTP/2 DATA frame size
-  Never send a single DATA frame larger than the peer's SETTINGS_MAX_FRAME_SIZE
-  (default 16384). http2_data_frame and TLS H2 reply helpers auto-split. Large
-  single frames cause browsers to report net::ERR_HTTP2_FRAME_SIZE_ERROR.
+HTTP/2 DATA size
+  Peers reject DATA frames over their max frame size (default 16384). Use
+  http2_data_frame or the TLS H2 reply helpers; they split for you. A single
+  oversized frame shows up in Chrome as net::ERR_HTTP2_FRAME_SIZE_ERROR.
 
-Empty-string free safety
-  The empty string "" is a runtime singleton. Never free string data with raw
-  free() unless you know it is heap-allocated. Prefer the string free helpers
-  used by the runtime (mako_str_free paths). Affects HTTP/proxy/maps/zip/reflect.
+Empty string and free
+  "" is a singleton. Do not free it with raw free(). The runtime uses
+  mako_str_free for that. This bites HTTP, proxy, maps, zip, and reflect code
+  if you free field data by hand.
 
-Edge TLS / ALPN
-  Production edge (e.g. Leba on mako-lang.com) may prefer ALPN http/1.1 until
-  multi-stream H2 is solid. When enabling h2, rebuild against a runtime that
-  splits DATA ≤16384.
+Edge ALPN
+  Some edges (mako-lang.com / Leba) stay on http/1.1 until multi-stream H2 is
+  solid. If you turn h2 back on, use a build that splits DATA frames.
 
 ================================================================================
-END OF REFERENCE
+END
 ================================================================================
 
-# Website: https://mako-lang.com
-# Full source: https://github.com/loreste/mako
-# Version: 0.1.1
+# https://mako-lang.com
+# https://github.com/loreste/mako
+# 0.1.1
