@@ -1,0 +1,11 @@
+// EXPECT: reflect_value_of expects a POD struct
+// Option fields are non-POD for reflect_value_of.
+struct Wrap {
+    o: Option[int]
+    t: int
+}
+
+fn main() {
+    let w = Wrap { o: Some(1), t: 2 }
+    let _ = reflect_value_of(w)
+}

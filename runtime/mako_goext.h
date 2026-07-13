@@ -4072,7 +4072,7 @@ static inline int64_t mako_jpeg_is_jfif(MakoString jpeg) {
 }
 
 /* Scan markers for SOF0 (baseline DCT) — present in Mako JFIF encode shell. */
-static inline int64_t mako_jpeg_has_sof0(MakoString jpeg) {
+static inline int mako_jpeg_find_sof0(MakoString jpeg, size_t *out_off) {
     if (jpeg.len < 4) return 0;
     const unsigned char *p = (const unsigned char *)jpeg.data;
     if (p[0] != 0xFF || p[1] != 0xD8) return 0;
@@ -4081,7 +4081,10 @@ static inline int64_t mako_jpeg_has_sof0(MakoString jpeg) {
         if (p[i] != 0xFF) { i++; continue; }
         unsigned char m = p[i + 1];
         if (m == 0xD9) break; /* EOI */
-        if (m == 0xC0) return 1; /* SOF0 */
+        if (m == 0xC0) {
+            if (out_off) *out_off = i;
+            return 1; /* SOF0 at i */
+        }
         if (m == 0xD8 || m == 0x01 || (m >= 0xD0 && m <= 0xD7)) {
             i += 2;
             continue;
@@ -4092,6 +4095,27 @@ static inline int64_t mako_jpeg_has_sof0(MakoString jpeg) {
         i += 2 + (size_t)seglen;
     }
     return 0;
+}
+
+static inline int64_t mako_jpeg_has_sof0(MakoString jpeg) {
+    return mako_jpeg_find_sof0(jpeg, NULL) ? 1 : 0;
+}
+
+/* SOF0 layout after marker: len(2) precision(1) height(2) width(2) … */
+static inline int64_t mako_jpeg_sof0_height(MakoString jpeg) {
+    size_t off = 0;
+    if (!mako_jpeg_find_sof0(jpeg, &off)) return 0;
+    if (off + 2 + 2 + 1 + 2 > jpeg.len) return 0;
+    const unsigned char *p = (const unsigned char *)jpeg.data + off + 2 + 2 + 1; /* skip FF C0 len precision */
+    return (int64_t)(((uint16_t)p[0] << 8) | p[1]);
+}
+
+static inline int64_t mako_jpeg_sof0_width(MakoString jpeg) {
+    size_t off = 0;
+    if (!mako_jpeg_find_sof0(jpeg, &off)) return 0;
+    if (off + 2 + 2 + 1 + 4 > jpeg.len) return 0;
+    const unsigned char *p = (const unsigned char *)jpeg.data + off + 2 + 2 + 1 + 2;
+    return (int64_t)(((uint16_t)p[0] << 8) | p[1]);
 }
 
 /* ---- compile-time struct schema registry (filled by codegen) ---- */

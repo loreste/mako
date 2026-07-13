@@ -4716,6 +4716,14 @@ impl TypeChecker {
             Type::Fn(vec![Type::String], Box::new(Type::Int)),
         );
         fns.insert(
+            "jpeg_sof0_width".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "jpeg_sof0_height".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
             "smtp_send_starttls".into(),
             Type::Fn(
                 vec![
@@ -8183,6 +8191,13 @@ impl TypeChecker {
                     return Ok(ty.clone());
                 }
                 if name == "None" {
+                    // Bare `None` (not `None()`): use expected Option[T] from return/context.
+                    if let Some(Type::Option(i)) = &self.current_expected {
+                        return Ok(Type::Option(i.clone()));
+                    }
+                    if let Type::Option(i) = &self.current_ret {
+                        return Ok(Type::Option(i.clone()));
+                    }
                     return Ok(Type::Option(Box::new(Type::Int)));
                 }
                 if let Some(ctor) = self.variants.get(name) {
