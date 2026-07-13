@@ -3044,6 +3044,12 @@ static inline int mako_re_unicode_prop_match(const char *name, size_t nlen, uint
         return (cp >= 0x2C80 && cp <= 0x2CFF) || (cp >= 0x03E2 && cp <= 0x03EF);
     if (nlen == 5 && memcmp(name, "Runic", 5) == 0)
         return (cp >= 0x16A0 && cp <= 0x16FF);
+    if (nlen == 6 && memcmp(name, "Thaana", 6) == 0)
+        return (cp >= 0x0780 && cp <= 0x07BF);
+    if (nlen == 7 && memcmp(name, "Tagalog", 7) == 0)
+        return (cp >= 0x1700 && cp <= 0x171F);
+    if (nlen == 8 && memcmp(name, "Bopomofo", 8) == 0)
+        return (cp >= 0x3100 && cp <= 0x312F);
     return 0;
 }
 

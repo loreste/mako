@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.0 — 2026-07-13 (wave 19 queue)
+
+- `Option` containers (`[]int`, maps) and `Option[Option[T]]` nesting
+- Nested `Result[Option[Option[T]], E]` Ok + match unbox chain
+- `jpeg_has_sof0` marker scan for JFIF/SOF0 shell
+- Regex `\p{Thaana}` / `\p{Tagalog}` / `\p{Bopomofo}` seeds
+- TSan CI: `wave18_queue_test`, `chan_string_test`
+- Tests: `examples/testing/wave19_queue_test.mko`
+
 ## 0.1.0 — 2026-07-13 (wave 18 queue)
 
 - Generic `Option[T]` Some: string/float/ptr payloads (not only int)

@@ -172,23 +172,24 @@ Last inventory: 2026-07-11 (**unique Mako surface** · pack/pull · pain map · 
 | `chan_open[Struct]` via MakoChanPtr heap-box | Done |
 | `error_tag(tag, msg)` enum-like string errors | Done |
 
-**Closed (wave 7–18):** join_timeout **flatten** · POD kick + string fields ·
-`reflect_value_of` N + nested POD · `Result`/`Option` Ok for scalars + containers
-+ **generic Option[T]** + **Result[Option[T]]** nest · NLL labeled continue/break ·
-script `\p{…}` (Syriac/Coptic/Runic) · expanded TSan · prior work.
+**Closed (wave 7–19):** join_timeout **flatten** · POD kick + string fields ·
+`reflect_value_of` N + nested POD · `Result`/`Option` Ok + generic mono +
+**Option containers** + **Option[Option[T]]** / `Result[Option[Option[T]]]` ·
+`jpeg_has_sof0` · NLL labeled continue/break · script `\p{…}` · expanded TSan ·
+prior work.
 
-**Wave 18 tests:** `examples/testing/wave18_queue_test.mko`.
+**Wave 19 tests:** `examples/testing/wave19_queue_test.mko`.
 
 **Pain residuals (language) still open:** see [PAIN_POINTS.md](PAIN_POINTS.md) §4.
 
 1. Fuller data-race model beyond expanded TSan smoke (no full type-level race system)  
-2. More Result/Option shapes (deeper nesting, Option of containers mono polish)  
+2. More Result/Option shapes (triple+ nest, Option of struct mono polish)  
 3. Stronger NLL (rarer multi-label CFG products)  
 
 **Stdlib / product residuals:**
 
 6. Complete Unicode property database / full PCRE (script seed set growing)  
-7. Huffman JPEG bitstream readable by arbitrary viewers (JFIF shell + APP7 today)  
+7. Huffman JPEG bitstream readable by arbitrary viewers (JFIF+SOF0 shell + APP7 today)  
 8. Reflect for non-POD fields (maps/slices); nested POD done  
 9. Symbol-level parity inside Done packages
 

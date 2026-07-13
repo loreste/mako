@@ -1,0 +1,82 @@
+// Wave 19: Option containers, Option[Option[T]] nest, jpeg SOF0, unicode.
+
+fn wrap_some[T](x: T) -> Option[T] {
+    return Some(x)
+}
+
+fn nest2[T](x: T) -> Result[Option[Option[T]], string] {
+    return Ok(Some(Some(x)))
+}
+
+fn double_opt[T](x: T) -> Option[Option[T]] {
+    return Some(Some(x))
+}
+
+fn TestOptionSliceInt() {
+    match wrap_some([1, 2, 3]) {
+        Some(xs) => {
+            assert_eq(len(xs), 3)
+            assert_eq(xs[0], 1)
+            assert_eq(xs[2], 3)
+        },
+        None => assert(false),
+    }
+}
+
+fn TestOptionMapSi() {
+    let mut m = make(map[string]int)
+    m["k"] = 9
+    match wrap_some(m) {
+        Some(mm) => assert_eq(mm["k"], 9),
+        None => assert(false),
+    }
+}
+
+fn TestDoubleOption() {
+    match double_opt(7) {
+        Some(o) => match o {
+            Some(v) => assert_eq(v, 7),
+            None => assert(false),
+        },
+        None => assert(false),
+    }
+}
+
+fn TestNest2ResultOptionOption() {
+    match nest2(5) {
+        Ok(o1) => match o1 {
+            Some(o2) => match o2 {
+                Some(v) => assert_eq(v, 5),
+                None => assert(false),
+            },
+            None => assert(false),
+        },
+        Err(_) => assert(false),
+    }
+}
+
+fn TestNest2ResultOptionOptionStr() {
+    match nest2("z") {
+        Ok(o1) => match o1 {
+            Some(o2) => match o2 {
+                Some(s) => assert_eq_str(s, "z"),
+                None => assert(false),
+            },
+            None => assert(false),
+        },
+        Err(_) => assert(false),
+    }
+}
+
+fn TestJpegHasSof0() {
+    let gray = "ABCDEFGHABCDEFGHABCDEFGHABCDEFGHABCDEFGHABCDEFGHABCDEFGHABCDEFGH"
+    let j = jpeg_encode_gray_jfif(8, 8, gray)
+    assert_eq(jpeg_is_jfif(j), 1)
+    assert_eq(jpeg_has_sof0(j), 1)
+}
+
+fn TestRegexUnicodeThaanaTagalogBopomofo() {
+    assert(regex_match("\\p{Thaana}+", "ދިވެހި"))
+    assert(regex_match("\\p{Tagalog}+", "ᜀᜁ"))
+    assert(regex_match("\\p{Bopomofo}+", "ㄅㄆ"))
+}

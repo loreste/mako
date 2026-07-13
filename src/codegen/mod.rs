@@ -79,18 +79,26 @@ pub struct Codegen {
     fn_result_ok_struct: HashMap<String, String>,
     /// When Result Ok is Option[T], kind of T (for nested match after Ok unbox).
     fn_result_option_inner: HashMap<String, String>,
+    /// When Result Ok is Option[Option[T]], kind of T after two unboxes.
+    fn_result_option_nested: HashMap<String, String>,
     /// Local Result binding → Ok payload kind.
     result_ok_kinds: HashMap<String, String>,
     /// Local Result → struct name for Ok struct payloads.
     result_ok_structs: HashMap<String, String>,
     /// Local Result → Option inner kind when Ok is Option.
     result_option_inners: HashMap<String, String>,
+    /// Local Result → nested Option payload kind (Option[Option[T]]).
+    result_option_nesteds: HashMap<String, String>,
     /// Function name → Option Some payload kind.
     fn_option_some_kind: HashMap<String, String>,
+    /// Function name → next Option layer kind when Some is Option[…].
+    fn_option_nested: HashMap<String, String>,
     /// Function name → struct name when Option[Struct].
     fn_option_some_struct: HashMap<String, String>,
     /// Local Option binding → Some payload kind.
     option_some_kinds: HashMap<String, String>,
+    /// Local Option → next layer kind when Some is Option.
+    option_nesteds: HashMap<String, String>,
     /// Local Option → struct name for Some struct payloads.
     option_some_structs: HashMap<String, String>,
     /// Job local / temp name → C return type of the kicked function.
@@ -139,12 +147,16 @@ impl Codegen {
             fn_result_ok_kind: HashMap::new(),
             fn_result_ok_struct: HashMap::new(),
             fn_result_option_inner: HashMap::new(),
+            fn_result_option_nested: HashMap::new(),
             result_ok_kinds: HashMap::new(),
             result_ok_structs: HashMap::new(),
             result_option_inners: HashMap::new(),
+            result_option_nesteds: HashMap::new(),
             fn_option_some_kind: HashMap::new(),
+            fn_option_nested: HashMap::new(),
             fn_option_some_struct: HashMap::new(),
             option_some_kinds: HashMap::new(),
+            option_nesteds: HashMap::new(),
             option_some_structs: HashMap::new(),
             job_rets: HashMap::new(),
             job_ok_kinds: HashMap::new(),
@@ -233,6 +245,32 @@ impl Codegen {
                 if let TypeExpr::Generic(on, oargs) = &args[0] {
                     if on == "Option" && !oargs.is_empty() {
                         return Some(Self::value_payload_kind(&oargs[0]));
+                    }
+                }
+                None
+            }
+            _ => None,
+        }
+    }
+
+    /// When Option[Option[T]] (or Result[Option[Option[T]]]), kind of T for the
+    /// second Option layer after unboxing one Option.
+    fn option_nested_payload_kind(ty: &TypeExpr) -> Option<&'static str> {
+        // ty is Option[U]; if U is Option[T], return Some-kind of U (kind of T).
+        match ty {
+            TypeExpr::Generic(n, args) if n == "Option" && !args.is_empty() => {
+                if matches!(&args[0], TypeExpr::Generic(on, _) if on == "Option") {
+                    return Some(Self::option_some_kind(&args[0]));
+                }
+                None
+            }
+            TypeExpr::Generic(n, args) if n == "Result" && !args.is_empty() => {
+                // Result[Option[…], E]
+                if let TypeExpr::Generic(on, oargs) = &args[0] {
+                    if on == "Option" && !oargs.is_empty() {
+                        if matches!(&oargs[0], TypeExpr::Generic(oon, _) if oon == "Option") {
+                            return Some(Self::option_some_kind(&oargs[0]));
+                        }
                     }
                 }
                 None
@@ -434,11 +472,27 @@ impl Codegen {
             .cloned()
     }
 
+    fn call_result_option_nested(&self, fname: &str, args: &[Expr]) -> Option<String> {
+        let mono = self.generic_mono_name_for_call(fname, args);
+        self.fn_result_option_nested
+            .get(&mono)
+            .or_else(|| self.fn_result_option_nested.get(fname))
+            .cloned()
+    }
+
     fn call_option_some_kind(&self, fname: &str, args: &[Expr]) -> Option<String> {
         let mono = self.generic_mono_name_for_call(fname, args);
         self.fn_option_some_kind
             .get(&mono)
             .or_else(|| self.fn_option_some_kind.get(fname))
+            .cloned()
+    }
+
+    fn call_option_nested(&self, fname: &str, args: &[Expr]) -> Option<String> {
+        let mono = self.generic_mono_name_for_call(fname, args);
+        self.fn_option_nested
+            .get(&mono)
+            .or_else(|| self.fn_option_nested.get(fname))
             .cloned()
     }
 
@@ -456,6 +510,25 @@ impl Codegen {
             return;
         }
         let b = mangle(&bindings[0]);
+        if kind == "option" {
+            // Nested Option: unbox heap Option and propagate next-layer kind.
+            let p = self.fresh("opnest");
+            self.locals.insert(bindings[0].clone(), "MakoOptionInt".into());
+            self.line(&format!(
+                "MakoOptionInt *{p} = (MakoOptionInt*)mako_option_some_ptr({scrut});"
+            ));
+            self.line(&format!("MakoOptionInt {b};"));
+            self.line(&format!(
+                "if ({p}) {{ {b} = *{p}; free({p}); }} else {{ memset(&{b}, 0, sizeof({b})); }}"
+            ));
+            if let Some(nk) = self.option_nesteds.get(scrut).cloned() {
+                self.option_some_kinds.insert(bindings[0].clone(), nk);
+            } else {
+                self.option_some_kinds
+                    .insert(bindings[0].clone(), "int".into());
+            }
+            return;
+        }
         if kind == "string" {
             self.locals.insert(bindings[0].clone(), "MakoString".into());
             self.line(&format!("MakoString {b} = {scrut}.ok_s;"));
@@ -799,12 +872,19 @@ impl Codegen {
                                 self.fn_result_option_inner
                                     .insert(f.name.clone(), ik.into());
                             }
+                            if let Some(nk) = Self::option_nested_payload_kind(rt) {
+                                self.fn_result_option_nested
+                                    .insert(f.name.clone(), nk.into());
+                            }
                         }
                         if matches!(rt, TypeExpr::Generic(n, _) if n == "Option") {
                             self.fn_option_some_kind
                                 .insert(f.name.clone(), Self::option_some_kind(rt).into());
                             if let Some(sn) = self.option_some_struct_name(rt) {
                                 self.fn_option_some_struct.insert(f.name.clone(), sn);
+                            }
+                            if let Some(nk) = Self::option_nested_payload_kind(rt) {
+                                self.fn_option_nested.insert(f.name.clone(), nk.into());
                             }
                         }
                     }
@@ -2022,6 +2102,9 @@ impl Codegen {
                             if let Some(ik) = self.call_result_option_inner(fname, args) {
                                 self.result_option_inners.insert(name.clone(), ik);
                             }
+                            if let Some(nk) = self.call_result_option_nested(fname, args) {
+                                self.result_option_nesteds.insert(name.clone(), nk);
+                            }
                         }
                     }
                 }
@@ -2030,6 +2113,9 @@ impl Codegen {
                         if let Expr::Ident(fname) = callee.as_ref() {
                             if let Some(ok) = self.call_option_some_kind(fname, args) {
                                 self.option_some_kinds.insert(name.clone(), ok);
+                            }
+                            if let Some(nk) = self.call_option_nested(fname, args) {
+                                self.option_nesteds.insert(name.clone(), nk);
                             }
                             if let Some(sn) = self.call_option_some_struct(fname, args) {
                                 self.option_some_structs.insert(name.clone(), sn);
@@ -2865,6 +2951,18 @@ impl Codegen {
                         }
                         "Some" => {
                             let (vty, v) = self.emit_expr(&args[0]);
+                            // Nested Option: heap-box inner option
+                            if vty == "MakoOptionInt" {
+                                let boxn = self.fresh("opnest");
+                                self.line(&format!(
+                                    "MakoOptionInt *{boxn} = (MakoOptionInt*)malloc(sizeof(MakoOptionInt));"
+                                ));
+                                self.line(&format!("*{boxn} = {v};"));
+                                return (
+                                    "MakoOptionInt".into(),
+                                    format!("mako_some_ptr((void*){boxn})"),
+                                );
+                            }
                             if vty == "MakoString" {
                                 return ("MakoOptionInt".into(), format!("mako_some_str({v})"));
                             }
@@ -9492,6 +9590,10 @@ impl Codegen {
                             let (_, s) = self.emit_expr(&args[0]);
                             return ("int64_t".into(), format!("mako_jpeg_is_jfif({s})"));
                         }
+                        "jpeg_has_sof0" => {
+                            let (_, s) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_jpeg_has_sof0({s})"));
+                        }
                         "smtp_send_starttls" => {
                             let (_, h) = self.emit_expr(&args[0]);
                             let (_, p) = self.emit_expr(&args[1]);
@@ -12788,6 +12890,20 @@ impl Codegen {
             if let Some(ik) = opt_inner {
                 self.result_option_inners.insert(scrut.clone(), ik);
             }
+            let opt_nest = match scrutinee {
+                Expr::Ident(n) => self.result_option_nesteds.get(n).cloned(),
+                Expr::Call { callee, args } => {
+                    if let Expr::Ident(fname) = callee.as_ref() {
+                        self.call_result_option_nested(fname, args)
+                    } else {
+                        None
+                    }
+                }
+                _ => self.result_option_nesteds.get(&sval).cloned(),
+            };
+            if let Some(nk) = opt_nest {
+                self.result_option_nesteds.insert(scrut.clone(), nk);
+            }
         }
         if sty == "MakoOptionInt" {
             let some_c = match scrutinee {
@@ -12803,6 +12919,20 @@ impl Codegen {
             };
             if let Some(ok) = some_c {
                 self.option_some_kinds.insert(scrut.clone(), ok);
+            }
+            let nest_c = match scrutinee {
+                Expr::Ident(n) => self.option_nesteds.get(n).cloned(),
+                Expr::Call { callee, args } => {
+                    if let Expr::Ident(fname) = callee.as_ref() {
+                        self.call_option_nested(fname, args)
+                    } else {
+                        None
+                    }
+                }
+                _ => self.option_nesteds.get(&sval).cloned(),
+            };
+            if let Some(nk) = nest_c {
+                self.option_nesteds.insert(scrut.clone(), nk);
             }
             let some_st = match scrutinee {
                 Expr::Ident(n) => self.option_some_structs.get(n).cloned(),
@@ -13097,6 +13227,9 @@ impl Codegen {
                             // Propagate Option[T] inner kind for nested match on binding.
                             if let Some(ik) = self.result_option_inners.get(scrut).cloned() {
                                 self.option_some_kinds.insert(bindings[0].clone(), ik);
+                            }
+                            if let Some(nk) = self.result_option_nesteds.get(scrut).cloned() {
+                                self.option_nesteds.insert(bindings[0].clone(), nk);
                             }
                         } else {
                             self.locals.insert(bindings[0].clone(), "int64_t".into());
