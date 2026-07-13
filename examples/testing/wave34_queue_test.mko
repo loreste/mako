@@ -1,0 +1,69 @@
+// Wave 34: Result[Result[string]] edges, APP8/APP9 DCT/huff probes, scripts.
+
+fn nest_ok() -> Result[Result[string, string], string] {
+    return Ok(Ok("ok"))
+}
+
+fn nest_inner_err() -> Result[Result[string, string], string] {
+    return Ok(Err("inner"))
+}
+
+fn nest_outer_err() -> Result[Result[string, string], string] {
+    return Err("outer")
+}
+
+fn TestNestOk() {
+    match nest_ok() {
+        Ok(r) => match r {
+            Ok(s) => assert_eq_str(s, "ok"),
+            Err(_) => assert(false),
+        },
+        Err(_) => assert(false),
+    }
+}
+
+fn TestNestInnerErr() {
+    match nest_inner_err() {
+        Ok(r) => match r {
+            Ok(_) => assert(false),
+            Err(m) => assert_eq_str(m, "inner"),
+        },
+        Err(_) => assert(false),
+    }
+}
+
+fn TestNestOuterErr() {
+    match nest_outer_err() {
+        Ok(_) => assert(false),
+        Err(m) => assert_eq_str(m, "outer"),
+    }
+}
+
+fn TestJpegDctHuffMarkers() {
+    let gray = "ABCDEFGHABCDEFGHABCDEFGHABCDEFGHABCDEFGHABCDEFGHABCDEFGHABCDEFGH"
+    let raw = jpeg_encode_gray(8, 8, gray)
+    assert_eq(jpeg_has_app8(raw), 0)
+    assert_eq(jpeg_has_app9(raw), 0)
+    assert_eq(jpeg_is_mako_dct(raw), 0)
+    assert_eq(jpeg_is_mako_huff(raw), 0)
+
+    let dct = jpeg_encode_gray_dct(8, 8, gray)
+    assert_eq(jpeg_has_app8(dct), 1)
+    assert_eq(jpeg_has_app9(dct), 0)
+    assert_eq(jpeg_is_mako_dct(dct), 1)
+    assert_eq(jpeg_is_mako_huff(dct), 0)
+    assert_eq(jpeg_is_mako_raw(dct), 1)
+
+    let huff = jpeg_encode_gray_huff(8, 8, gray)
+    assert_eq(jpeg_has_app8(huff), 1)
+    assert_eq(jpeg_has_app9(huff), 1)
+    assert_eq(jpeg_is_mako_dct(huff), 1)
+    assert_eq(jpeg_is_mako_huff(huff), 1)
+    assert_eq(len(jpeg_huff_block(huff)), 64)
+}
+
+fn TestRegexUnicodeMongolianTaiVietInherited() {
+    assert(regex_match("\\p{Mongolian}", "ᠠ"))
+    assert(regex_match("\\p{Tai_Viet}", "ꪀ"))
+    assert(regex_match("\\p{Inherited}", "̀"))
+}

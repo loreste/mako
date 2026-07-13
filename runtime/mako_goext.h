@@ -4364,6 +4364,66 @@ static inline int64_t mako_jpeg_app7_payload_len(MakoString jpeg) {
     return w * h;
 }
 
+/* APP8 carries DCT DC evidence from jpeg_encode_gray_dct. */
+static inline int64_t mako_jpeg_has_app8(MakoString jpeg) {
+    if (jpeg.len < 10) return 0;
+    const unsigned char *p = (const unsigned char *)jpeg.data;
+    if (p[0] != 0xFF || p[1] != 0xD8) return 0;
+    size_t i = 2;
+    while (i + 3 < jpeg.len) {
+        if (p[i] != 0xFF) { i++; continue; }
+        unsigned char m = p[i + 1];
+        if (m == 0xD9) break;
+        if (m == 0xE8) return 1;
+        if (m == 0xD8 || m == 0x01 || (m >= 0xD0 && m <= 0xD7)) {
+            i += 2;
+            continue;
+        }
+        if (i + 3 >= jpeg.len) break;
+        uint16_t seglen = ((uint16_t)p[i + 2] << 8) | p[i + 3];
+        if (seglen < 2) break;
+        i += 2 + (size_t)seglen;
+    }
+    return 0;
+}
+
+/* APP9 carries zigzag Huffman-ish block from jpeg_encode_gray_huff. */
+static inline int64_t mako_jpeg_has_app9(MakoString jpeg) {
+    if (jpeg.len < 10) return 0;
+    const unsigned char *p = (const unsigned char *)jpeg.data;
+    if (p[0] != 0xFF || p[1] != 0xD8) return 0;
+    size_t i = 2;
+    while (i + 3 < jpeg.len) {
+        if (p[i] != 0xFF) { i++; continue; }
+        unsigned char m = p[i + 1];
+        if (m == 0xD9) break;
+        if (m == 0xE9) return 1;
+        if (m == 0xD8 || m == 0x01 || (m >= 0xD0 && m <= 0xD7)) {
+            i += 2;
+            continue;
+        }
+        if (i + 3 >= jpeg.len) break;
+        uint16_t seglen = ((uint16_t)p[i + 2] << 8) | p[i + 3];
+        if (seglen < 2) break;
+        i += 2 + (size_t)seglen;
+    }
+    return 0;
+}
+
+/* Mako DCT evidence path: raw APP7 shell + APP8 DC marker. */
+static inline int64_t mako_jpeg_is_mako_dct(MakoString jpeg) {
+    if (!mako_jpeg_is_mako_raw(jpeg)) return 0;
+    if (!mako_jpeg_has_app8(jpeg)) return 0;
+    return 1;
+}
+
+/* Mako Huffman-ish evidence path: DCT path + APP9 block. */
+static inline int64_t mako_jpeg_is_mako_huff(MakoString jpeg) {
+    if (!mako_jpeg_is_mako_dct(jpeg)) return 0;
+    if (!mako_jpeg_has_app9(jpeg)) return 0;
+    return 1;
+}
+
 /* ---- compile-time struct schema registry (filled by codegen) ---- */
 #ifndef MAKO_REFLECT_SCHEMA_MAX
 #define MAKO_REFLECT_SCHEMA_MAX 64

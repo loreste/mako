@@ -4808,6 +4808,22 @@ impl TypeChecker {
             Type::Fn(vec![Type::String], Box::new(Type::Int)),
         );
         fns.insert(
+            "jpeg_has_app8".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "jpeg_has_app9".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "jpeg_is_mako_dct".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "jpeg_is_mako_huff".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
             "smtp_send_starttls".into(),
             Type::Fn(
                 vec![

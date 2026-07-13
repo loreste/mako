@@ -172,16 +172,17 @@ Last inventory: 2026-07-11 (**unique Mako surface** · pack/pull · pain map · 
 | `chan_open[Struct]` via MakoChanPtr heap-box | Done |
 | `error_tag(tag, msg)` enum-like string errors | Done |
 
-**Closed (wave 7–33):** join_timeout **flatten** · POD kick + string fields ·
+**Closed (wave 7–34):** join_timeout **flatten** · POD kick + string fields ·
 `reflect_value_of` N + nested POD · `Result`/`Option` deep nests · nested
 None/Err edges · SOF0 header fields · **`jpeg_is_baseline_gray`** · JFIF
-version/density/thumb + SOF0 sampling/Ci/Tqi · `jpeg_has_app7` ·
+version/density/thumb + SOF0 sampling/Ci/Tqi · `jpeg_has_app7`/`app8`/`app9` ·
 **`jpeg_is_mako_jfif`** · **`jpeg_is_mako_complete`** · **`jpeg_is_mako_raw`** ·
-APP0/APP7 length probes · NLL for/if/match · kick Result/Option reject ·
-script `\p{…}` · expanded TSan · prior work.
+**`jpeg_is_mako_dct`** · **`jpeg_is_mako_huff`** · APP0/APP7 length probes ·
+NLL for/if/match · kick Result/Option reject · script `\p{…}` · expanded
+TSan · prior work.
 
-**Wave 33 tests:** `examples/testing/wave33_queue_test.mko` · bads
-`hold_continue_for_outer`, `reflect_nested_option_field`.
+**Wave 34 tests:** `examples/testing/wave34_queue_test.mko` · bads
+`hold_match_if_for_move`, `reflect_nested_result_field`.
 
 **Pain residuals (language) still open:** see [PAIN_POINTS.md](PAIN_POINTS.md) §4.
 
@@ -192,8 +193,8 @@ script `\p{…}` · expanded TSan · prior work.
 **Stdlib / product residuals:**
 
 6. Complete Unicode property database / full PCRE (script seed set growing)  
-7. Huffman JPEG bitstream readable by arbitrary viewers (mako raw/complete shell + APP7)  
-8. Reflect for non-POD fields (maps/slices/chan/Option/Result/nested map·slice·Option rejected; nested POD done)  
+7. Huffman JPEG bitstream readable by arbitrary viewers (mako DCT/huff evidence + APP7; not viewer Huffman)  
+8. Reflect for non-POD fields (maps/slices/chan/Option/Result/nested map·slice·Option·Result rejected; nested POD done)  
 9. Symbol-level parity inside Done packages
 
 ---

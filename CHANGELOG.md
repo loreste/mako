@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.0 — 2026-07-13 (wave 34 queue)
+
+- `Result[Result[string]]` Ok/inner Err/outer Err edges
+- `jpeg_has_app8`/`app9`; **`jpeg_is_mako_dct`** / **`jpeg_is_mako_huff`**
+- match+if+for NLL; nested Result reflect reject; Mongolian/Tai_Viet/Inherited
+- TSan wave33
+- Tests: `examples/testing/wave34_queue_test.mko`
+
 ## 0.1.0 — 2026-07-13 (wave 33 queue)
 
 - Bool deep `Result[Option[Result[Option[bool]]]]` Ok/None/Err edges
