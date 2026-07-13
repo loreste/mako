@@ -553,7 +553,7 @@ fn main() {
     }
 }
 
-/// Clap prints `{name} {version}` → with this string: `mako version mako0.1.0 darwin/arm64`.
+/// Clap prints `{name} {version}` → with this string: `mako version mako0.1.1 darwin/arm64`.
 fn clap_version_string() -> String {
     format!(
         "version mako{} {}/{}",

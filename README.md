@@ -13,7 +13,7 @@ Ownership and arenas manage memory at compile time. Structured crews clean up
 after themselves. The compiler enforces errors. The stdlib is batteries-included
 so you can ship real services without dependency maze.
 
-This is **version 0.1.0**. It works. 158 tests pass. The standard library
+This is **version 0.1.1**. It works. 158 tests pass. The standard library
 covers a lot of ground. But it's still early — things will change, some corners
 are rough, and there's plenty left to build.
 
@@ -65,7 +65,7 @@ Options:
 ```bash
 curl -fsSL …/install-linux.sh | bash -s -- --prefix /opt/mako --yes
 curl -fsSL …/install-linux.sh | bash -s -- --no-deps    # skip clang install
-curl -fsSL …/install-linux.sh | bash -s -- --version v0.1.0
+curl -fsSL …/install-linux.sh | bash -s -- --version v0.1.1
 ```
 
 **You do not need Rust or cargo on the machine that runs Mako.**

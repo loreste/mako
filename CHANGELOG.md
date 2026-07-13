@@ -1,47 +1,43 @@
 # Changelog
 
-## 0.1.0 — 2026-07-13 (H2 frame split + free safety follow-through)
+## 0.1.1 — 2026-07-13 (HTTP/2 production + free safety + CI)
 
-### Fixes
+Patch release for production edge stability and CI green. `mako version` reports
+**mako0.1.1** (`CARGO_PKG_VERSION`).
 
-- **`http2_data_frame` auto-split** — payloads larger than SETTINGS max frame
-  (default 16384) become multiple DATA frames; `END_STREAM` only on the last.
-  Covers raw builders and gRPC helpers that call `http2_data_frame`.
-- **`http2_response*`** — use the same DATA path (no duplicate split logic).
-- **Proxy forward result** — `mako_str_free` for headers/body after empty-string
-  singleton init (avoids `free(): invalid pointer`).
-- **Map/zip free** — `maps_clear_si` and zip close use `mako_str_free`.
-- Tests: `TestHttp2DataFrameSplit`, `TestHttp2ResponseLargeBodySplit`.
-
-## 0.1.0 — 2026-07-13 (HTTP/2 DATA frame size — mako-lang.com)
-
-### Fixes
+### Fixes — HTTP/2 frame size (mako-lang.com)
 
 - **TLS HTTP/2 large responses** — `mako_tls_h2_reply_200` / `404` (and client DATA)
-  now split bodies into ≤16384-byte DATA frames (`SETTINGS_MAX_FRAME_SIZE` default).
+  split bodies into ≤16384-byte DATA frames (`SETTINGS_MAX_FRAME_SIZE` default).
   A single ~19 KiB homepage frame caused browsers to report
   `net::ERR_HTTP2_FRAME_SIZE_ERROR` on https://mako-lang.com/.
-  Redeploy the site binary after pulling this fix.
+- **`http2_data_frame` auto-split** — same rule for raw builders and gRPC helpers;
+  `END_STREAM` only on the last frame. `http2_response*` shares that path.
+- Tests: `TestHttp2DataFrameSplit`, `TestHttp2ResponseLargeBodySplit`.
 
-## 0.1.0 — 2026-07-13 (CI follow-up: free safety + game UDP + SIGPIPE)
+### Fixes — empty-string free safety
 
-### Fixes
+- Empty-string **singleton** must not be raw-`free`d. Broader use of
+  `mako_str_free` in HTTP/2, SIP, WS, reflect, slog, net, cache, proxy forward
+  headers/body, `maps_clear_si`, and zip close (avoids `free(): invalid pointer`
+  / SIGABRT on macOS).
+- Keep raw `free(arr.data)` for int/float/byte arrays (not the string singleton).
 
-- **Empty-string free** — broader `mako_str_free` (cache, reflect clone, std/sip/http/…);
-  keep raw `free(arr.data)` for int/float/byte arrays.
-- **`game_udp_bind`** — bind `0.0.0.0` (IPv4 any); `"*"` dual-stack IPv6 broke IPv4-only game UDP.
-- **Tests** — ignore `SIGPIPE` so proxy races do not abort the process under TSan.
+### Fixes — CI / portability
 
-## 0.1.0 — 2026-07-13 (CI portability + empty-string free safety)
-
-### Fixes
-
-- **Windows / cross** — `mako_tcp_shutdown` uses Winsock `SD_*`; `mako_log.h` no longer
-  includes raw `pthread.h` (uses platform CRITICAL_SECTION shims + lazy mutex init).
-- **Empty-string singleton free** — replace raw `free(s.data)` with `mako_str_free` in
-  HTTP/2, SIP, WS, reflect, slog, and net paths (fixes SIGABRT on macOS CI).
+- **Windows / cross** — `mako_tcp_shutdown` uses Winsock `SD_*`; `mako_log.h`
+  uses platform CRITICAL_SECTION shims + lazy mutex init (no raw `pthread.h`).
+- **`game_udp_bind`** — bind `0.0.0.0` (IPv4 any); `"*"` dual-stack IPv6 broke
+  IPv4-only game UDP tests.
+- **Tests** — ignore `SIGPIPE` so proxy races do not abort under TSan.
 - **`http_request` type** — register builtin so client API typechecks.
 - **`std/fmt`** — lowercase `int` / `bool` / `float` / `hex` / `dec` aliases.
+
+### Ops / docs
+
+- **mako-lang.com edge** — deploy script and docs for Leba TLS `:443` → site
+  `:8090` (HTTP/1.1 ALPN until multi-stream H2 is solid on the edge).
+- README / LANGUAGE_SPEC version lines match **0.1.1**.
 
 ## 0.1.0 — 2026-07-13 (intern + chan take + proxy splice)
 

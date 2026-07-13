@@ -1,7 +1,7 @@
 # Mako Language Specification
 
-**Version:** 0.1.0
-**Date:** 2026-07-11
+**Version:** 0.1.1
+**Date:** 2026-07-13
 **Status:** Draft
 
 This document is the formal specification for the Mako programming language. It
@@ -2498,7 +2498,7 @@ LambdaExpr   = "|" [ ParamList ] "|" ( Expr | Block ) .
 ## Appendix C: Version Information
 
 ```
-mako version mako0.1.0 <os>/<arch>
+mako version mako0.1.1 <os>/<arch>
 ```
 
 The `mako version` command (also `mako --version` or `mako -V`) prints the
