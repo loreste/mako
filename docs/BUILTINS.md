@@ -2218,7 +2218,8 @@ Tests: `examples/testing/overflow_shutdown_test.mko`. Multi-error recovery:
 
 `Option[T]` uses the same payload slots (`value` / `ok_s` / `ok_f` / ptr). Generic
 `Some(x)` / `None` and match `Some(v)` work for int/string/float, boxed containers,
-and one nested Option layer (`Option[Option[T]]`, `Result[Option[Option[T]]]`).
+and multi-layer Option nests (`Option[Option[Option[T]]]`,
+`Result[Option[Option[Option[T]]]]`) via kind chains.
 
 | Err type `E` | Encoding |
 |--------------|----------|
@@ -2261,7 +2262,8 @@ Tests: `result_enum_test.mko`, `job_join_typed_test.mko` (Result across kick/joi
 `wave16_queue_test.mko` (generic `Result[T, string]` Ok mono scalars),
 `wave17_queue_test.mko` (generic mono for `[]int`/`[]string`/`[]Struct`/maps),
 `wave18_queue_test.mko` (generic `Option[T]`, nested `Result[Option[T]]`),
-`wave19_queue_test.mko` (Option containers, `Option[Option[T]]`, `jpeg_has_sof0`).
+`wave19_queue_test.mko` (Option containers, `Option[Option[T]]`, `jpeg_has_sof0`),
+`wave20_queue_test.mko` (triple Option nest string/int, Option struct).
 
 ---
 

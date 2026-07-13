@@ -3050,6 +3050,12 @@ static inline int mako_re_unicode_prop_match(const char *name, size_t nlen, uint
         return (cp >= 0x1700 && cp <= 0x171F);
     if (nlen == 8 && memcmp(name, "Bopomofo", 8) == 0)
         return (cp >= 0x3100 && cp <= 0x312F);
+    if (nlen == 7 && memcmp(name, "Braille", 7) == 0)
+        return (cp >= 0x2800 && cp <= 0x28FF);
+    if (nlen == 5 && memcmp(name, "Ogham", 5) == 0)
+        return (cp >= 0x1680 && cp <= 0x169F);
+    if (nlen == 6 && memcmp(name, "Gothic", 6) == 0)
+        return (cp >= 0x10330 && cp <= 0x1034F);
     return 0;
 }
 

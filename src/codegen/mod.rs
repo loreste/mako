@@ -79,26 +79,26 @@ pub struct Codegen {
     fn_result_ok_struct: HashMap<String, String>,
     /// When Result Ok is Option[T], kind of T (for nested match after Ok unbox).
     fn_result_option_inner: HashMap<String, String>,
-    /// When Result Ok is Option[Option[T]], kind of T after two unboxes.
-    fn_result_option_nested: HashMap<String, String>,
+    /// When Result Ok is Option[…], remaining Some-kinds after the first Option unbox.
+    fn_result_option_chain: HashMap<String, Vec<String>>,
     /// Local Result binding → Ok payload kind.
     result_ok_kinds: HashMap<String, String>,
     /// Local Result → struct name for Ok struct payloads.
     result_ok_structs: HashMap<String, String>,
     /// Local Result → Option inner kind when Ok is Option.
     result_option_inners: HashMap<String, String>,
-    /// Local Result → nested Option payload kind (Option[Option[T]]).
-    result_option_nesteds: HashMap<String, String>,
+    /// Local Result → remaining Option Some-kind chain after Ok unbox.
+    result_option_chains: HashMap<String, Vec<String>>,
     /// Function name → Option Some payload kind.
     fn_option_some_kind: HashMap<String, String>,
-    /// Function name → next Option layer kind when Some is Option[…].
-    fn_option_nested: HashMap<String, String>,
+    /// Function name → remaining Some-kinds for deeper Option layers.
+    fn_option_chain: HashMap<String, Vec<String>>,
     /// Function name → struct name when Option[Struct].
     fn_option_some_struct: HashMap<String, String>,
     /// Local Option binding → Some payload kind.
     option_some_kinds: HashMap<String, String>,
-    /// Local Option → next layer kind when Some is Option.
-    option_nesteds: HashMap<String, String>,
+    /// Local Option → remaining Some-kinds for deeper Option layers.
+    option_chains: HashMap<String, Vec<String>>,
     /// Local Option → struct name for Some struct payloads.
     option_some_structs: HashMap<String, String>,
     /// Job local / temp name → C return type of the kicked function.
@@ -147,16 +147,16 @@ impl Codegen {
             fn_result_ok_kind: HashMap::new(),
             fn_result_ok_struct: HashMap::new(),
             fn_result_option_inner: HashMap::new(),
-            fn_result_option_nested: HashMap::new(),
+            fn_result_option_chain: HashMap::new(),
             result_ok_kinds: HashMap::new(),
             result_ok_structs: HashMap::new(),
             result_option_inners: HashMap::new(),
-            result_option_nesteds: HashMap::new(),
+            result_option_chains: HashMap::new(),
             fn_option_some_kind: HashMap::new(),
-            fn_option_nested: HashMap::new(),
+            fn_option_chain: HashMap::new(),
             fn_option_some_struct: HashMap::new(),
             option_some_kinds: HashMap::new(),
-            option_nesteds: HashMap::new(),
+            option_chains: HashMap::new(),
             option_some_structs: HashMap::new(),
             job_rets: HashMap::new(),
             job_ok_kinds: HashMap::new(),
@@ -253,29 +253,37 @@ impl Codegen {
         }
     }
 
-    /// When Option[Option[T]] (or Result[Option[Option[T]]]), kind of T for the
-    /// second Option layer after unboxing one Option.
-    fn option_nested_payload_kind(ty: &TypeExpr) -> Option<&'static str> {
-        // ty is Option[U]; if U is Option[T], return Some-kind of U (kind of T).
+    /// Remaining Some-kinds after unboxing one Option layer from `payload`.
+    /// Example: payload `Option[Option[string]]` → `["option", "string"]`.
+    fn option_nest_chain_from_payload(payload: &TypeExpr) -> Vec<String> {
+        match payload {
+            TypeExpr::Generic(n, args) if n == "Option" && !args.is_empty() => {
+                let k = Self::value_payload_kind(&args[0]);
+                let mut v = vec![k.to_string()];
+                if k == "option" {
+                    v.extend(Self::option_nest_chain_from_payload(&args[0]));
+                }
+                v
+            }
+            _ => Vec::new(),
+        }
+    }
+
+    /// Nest chain for an Option[…] or Result[Option[…], E] return type.
+    fn option_nest_chain_for_type(ty: &TypeExpr) -> Vec<String> {
         match ty {
             TypeExpr::Generic(n, args) if n == "Option" && !args.is_empty() => {
-                if matches!(&args[0], TypeExpr::Generic(on, _) if on == "Option") {
-                    return Some(Self::option_some_kind(&args[0]));
-                }
-                None
+                Self::option_nest_chain_from_payload(&args[0])
             }
             TypeExpr::Generic(n, args) if n == "Result" && !args.is_empty() => {
-                // Result[Option[…], E]
                 if let TypeExpr::Generic(on, oargs) = &args[0] {
                     if on == "Option" && !oargs.is_empty() {
-                        if matches!(&oargs[0], TypeExpr::Generic(oon, _) if oon == "Option") {
-                            return Some(Self::option_some_kind(&oargs[0]));
-                        }
+                        return Self::option_nest_chain_from_payload(&oargs[0]);
                     }
                 }
-                None
+                Vec::new()
             }
-            _ => None,
+            _ => Vec::new(),
         }
     }
 
@@ -418,6 +426,61 @@ impl Codegen {
         }
     }
 
+    /// Mono tag for an expression; must match `Type::mono_tag` for the same value.
+    fn mono_tag_for_expr(&self, e: &Expr) -> String {
+        match e {
+            Expr::Call { callee, args } => {
+                if let Expr::Ident(name) = callee.as_ref() {
+                    if name == "Some" && args.len() == 1 {
+                        // Type::Option(t) => Option_{t.mono_tag()}_
+                        return format!("Option_{}_", self.mono_tag_for_expr(&args[0]));
+                    }
+                }
+                c_type_mono_tag(&self.peek_expr_c_ty(e))
+            }
+            Expr::Ident(n) => {
+                if self.locals.get(n).map(|t| t.as_str()) == Some("MakoOptionInt") {
+                    if let Some(k) = self.option_some_kinds.get(n) {
+                        let leaf = match k.as_str() {
+                            "string" => "string".into(),
+                            "float" => "float".into(),
+                            "slice" => "arr_int".into(),
+                            "slice_str" => "arr_string".into(),
+                            "slice_float" => "arr_float".into(),
+                            "map_si" | "map" => "map_string_int".into(),
+                            "map_ii" => "map_int_int".into(),
+                            "map_ss" => "map_string_string".into(),
+                            "struct" => self
+                                .option_some_structs
+                                .get(n)
+                                .cloned()
+                                .unwrap_or_else(|| "int".into()),
+                            "option" => {
+                                // Reconstruct nested Option tags from chain (inside-out).
+                                let ch = self.option_chains.get(n).cloned().unwrap_or_default();
+                                let mut cur = ch.last().cloned().unwrap_or_else(|| "int".into());
+                                // chain links are successive some-kinds after each unbox of this value
+                                for link in ch.iter().rev() {
+                                    if link == "option" {
+                                        cur = format!("Option_{cur}_");
+                                    } else {
+                                        cur = link.clone();
+                                    }
+                                }
+                                cur = format!("Option_{cur}_");
+                                return cur;
+                            }
+                            other => other.to_string(),
+                        };
+                        return format!("Option_{leaf}_");
+                    }
+                }
+                c_type_mono_tag(&self.peek_expr_c_ty(e))
+            }
+            _ => c_type_mono_tag(&self.peek_expr_c_ty(e)),
+        }
+    }
+
     /// Resolve `id(args)` → `id__tag` monomorphization name (matches emit_expr).
     fn generic_mono_name_for_call(&self, name: &str, args: &[Expr]) -> String {
         let Some(tmpl) = self.generic_templates.get(name) else {
@@ -429,7 +492,7 @@ impl Codegen {
             for (i, p) in tmpl.params.iter().enumerate() {
                 if matches!(&p.ty, TypeExpr::Named(n) if n == tp) {
                     if let Some(a) = args.get(i) {
-                        found = Some(c_type_mono_tag(&self.peek_expr_c_ty(a)));
+                        found = Some(self.mono_tag_for_expr(a));
                     }
                     break;
                 }
@@ -472,11 +535,11 @@ impl Codegen {
             .cloned()
     }
 
-    fn call_result_option_nested(&self, fname: &str, args: &[Expr]) -> Option<String> {
+    fn call_result_option_chain(&self, fname: &str, args: &[Expr]) -> Option<Vec<String>> {
         let mono = self.generic_mono_name_for_call(fname, args);
-        self.fn_result_option_nested
+        self.fn_result_option_chain
             .get(&mono)
-            .or_else(|| self.fn_result_option_nested.get(fname))
+            .or_else(|| self.fn_result_option_chain.get(fname))
             .cloned()
     }
 
@@ -488,11 +551,11 @@ impl Codegen {
             .cloned()
     }
 
-    fn call_option_nested(&self, fname: &str, args: &[Expr]) -> Option<String> {
+    fn call_option_chain(&self, fname: &str, args: &[Expr]) -> Option<Vec<String>> {
         let mono = self.generic_mono_name_for_call(fname, args);
-        self.fn_option_nested
+        self.fn_option_chain
             .get(&mono)
-            .or_else(|| self.fn_option_nested.get(fname))
+            .or_else(|| self.fn_option_chain.get(fname))
             .cloned()
     }
 
@@ -511,7 +574,7 @@ impl Codegen {
         }
         let b = mangle(&bindings[0]);
         if kind == "option" {
-            // Nested Option: unbox heap Option and propagate next-layer kind.
+            // Nested Option: unbox heap Option and consume one link of the kind chain.
             let p = self.fresh("opnest");
             self.locals.insert(bindings[0].clone(), "MakoOptionInt".into());
             self.line(&format!(
@@ -521,8 +584,22 @@ impl Codegen {
             self.line(&format!(
                 "if ({p}) {{ {b} = *{p}; free({p}); }} else {{ memset(&{b}, 0, sizeof({b})); }}"
             ));
-            if let Some(nk) = self.option_nesteds.get(scrut).cloned() {
-                self.option_some_kinds.insert(bindings[0].clone(), nk);
+            let chain = self
+                .option_chains
+                .get(scrut)
+                .cloned()
+                .unwrap_or_default();
+            if let Some((next, rest)) = chain.split_first() {
+                self.option_some_kinds
+                    .insert(bindings[0].clone(), next.clone());
+                if next == "option" && !rest.is_empty() {
+                    self.option_chains
+                        .insert(bindings[0].clone(), rest.to_vec());
+                } else if next == "option" {
+                    // Deeper option with empty rest — still option; leaf defaults later.
+                    self.option_chains
+                        .insert(bindings[0].clone(), Vec::new());
+                }
             } else {
                 self.option_some_kinds
                     .insert(bindings[0].clone(), "int".into());
@@ -872,9 +949,10 @@ impl Codegen {
                                 self.fn_result_option_inner
                                     .insert(f.name.clone(), ik.into());
                             }
-                            if let Some(nk) = Self::option_nested_payload_kind(rt) {
-                                self.fn_result_option_nested
-                                    .insert(f.name.clone(), nk.into());
+                            let chain = Self::option_nest_chain_for_type(rt);
+                            if !chain.is_empty() {
+                                self.fn_result_option_chain
+                                    .insert(f.name.clone(), chain);
                             }
                         }
                         if matches!(rt, TypeExpr::Generic(n, _) if n == "Option") {
@@ -883,8 +961,9 @@ impl Codegen {
                             if let Some(sn) = self.option_some_struct_name(rt) {
                                 self.fn_option_some_struct.insert(f.name.clone(), sn);
                             }
-                            if let Some(nk) = Self::option_nested_payload_kind(rt) {
-                                self.fn_option_nested.insert(f.name.clone(), nk.into());
+                            let chain = Self::option_nest_chain_for_type(rt);
+                            if !chain.is_empty() {
+                                self.fn_option_chain.insert(f.name.clone(), chain);
                             }
                         }
                     }
@@ -2102,8 +2181,8 @@ impl Codegen {
                             if let Some(ik) = self.call_result_option_inner(fname, args) {
                                 self.result_option_inners.insert(name.clone(), ik);
                             }
-                            if let Some(nk) = self.call_result_option_nested(fname, args) {
-                                self.result_option_nesteds.insert(name.clone(), nk);
+                            if let Some(ch) = self.call_result_option_chain(fname, args) {
+                                self.result_option_chains.insert(name.clone(), ch);
                             }
                         }
                     }
@@ -2114,8 +2193,8 @@ impl Codegen {
                             if let Some(ok) = self.call_option_some_kind(fname, args) {
                                 self.option_some_kinds.insert(name.clone(), ok);
                             }
-                            if let Some(nk) = self.call_option_nested(fname, args) {
-                                self.option_nesteds.insert(name.clone(), nk);
+                            if let Some(ch) = self.call_option_chain(fname, args) {
+                                self.option_chains.insert(name.clone(), ch);
                             }
                             if let Some(sn) = self.call_option_some_struct(fname, args) {
                                 self.option_some_structs.insert(name.clone(), sn);
@@ -11582,8 +11661,8 @@ impl Codegen {
                                     let mut found = None;
                                     for (i, p) in tmpl.params.iter().enumerate() {
                                         if matches!(&p.ty, TypeExpr::Named(n) if n == tp) {
-                                            if let Some(aty) = arg_tys.get(i) {
-                                                found = Some(c_type_mono_tag(aty));
+                                            if let Some(a) = args.get(i) {
+                                                found = Some(self.mono_tag_for_expr(a));
                                             }
                                             break;
                                         }
@@ -12890,19 +12969,19 @@ impl Codegen {
             if let Some(ik) = opt_inner {
                 self.result_option_inners.insert(scrut.clone(), ik);
             }
-            let opt_nest = match scrutinee {
-                Expr::Ident(n) => self.result_option_nesteds.get(n).cloned(),
+            let opt_chain = match scrutinee {
+                Expr::Ident(n) => self.result_option_chains.get(n).cloned(),
                 Expr::Call { callee, args } => {
                     if let Expr::Ident(fname) = callee.as_ref() {
-                        self.call_result_option_nested(fname, args)
+                        self.call_result_option_chain(fname, args)
                     } else {
                         None
                     }
                 }
-                _ => self.result_option_nesteds.get(&sval).cloned(),
+                _ => self.result_option_chains.get(&sval).cloned(),
             };
-            if let Some(nk) = opt_nest {
-                self.result_option_nesteds.insert(scrut.clone(), nk);
+            if let Some(ch) = opt_chain {
+                self.result_option_chains.insert(scrut.clone(), ch);
             }
         }
         if sty == "MakoOptionInt" {
@@ -12920,19 +12999,19 @@ impl Codegen {
             if let Some(ok) = some_c {
                 self.option_some_kinds.insert(scrut.clone(), ok);
             }
-            let nest_c = match scrutinee {
-                Expr::Ident(n) => self.option_nesteds.get(n).cloned(),
+            let chain_c = match scrutinee {
+                Expr::Ident(n) => self.option_chains.get(n).cloned(),
                 Expr::Call { callee, args } => {
                     if let Expr::Ident(fname) = callee.as_ref() {
-                        self.call_option_nested(fname, args)
+                        self.call_option_chain(fname, args)
                     } else {
                         None
                     }
                 }
-                _ => self.option_nesteds.get(&sval).cloned(),
+                _ => self.option_chains.get(&sval).cloned(),
             };
-            if let Some(nk) = nest_c {
-                self.option_nesteds.insert(scrut.clone(), nk);
+            if let Some(ch) = chain_c {
+                self.option_chains.insert(scrut.clone(), ch);
             }
             let some_st = match scrutinee {
                 Expr::Ident(n) => self.option_some_structs.get(n).cloned(),
@@ -13228,8 +13307,8 @@ impl Codegen {
                             if let Some(ik) = self.result_option_inners.get(scrut).cloned() {
                                 self.option_some_kinds.insert(bindings[0].clone(), ik);
                             }
-                            if let Some(nk) = self.result_option_nesteds.get(scrut).cloned() {
-                                self.option_nesteds.insert(bindings[0].clone(), nk);
+                            if let Some(ch) = self.result_option_chains.get(scrut).cloned() {
+                                self.option_chains.insert(bindings[0].clone(), ch);
                             }
                         } else {
                             self.locals.insert(bindings[0].clone(), "int64_t".into());

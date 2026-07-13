@@ -1,0 +1,87 @@
+// Wave 20: triple Option nest (string), Option struct, more unicode.
+
+fn wrap_some[T](x: T) -> Option[T] {
+    return Some(x)
+}
+
+fn triple_opt[T](x: T) -> Option[Option[Option[T]]] {
+    return Some(Some(Some(x)))
+}
+
+fn nest3[T](x: T) -> Result[Option[Option[Option[T]]], string] {
+    return Ok(Some(Some(Some(x))))
+}
+
+struct Pt {
+    x: int
+    y: int
+}
+
+fn TestTripleOptionInt() {
+    match triple_opt(4) {
+        Some(a) => match a {
+            Some(b) => match b {
+                Some(v) => assert_eq(v, 4),
+                None => assert(false),
+            },
+            None => assert(false),
+        },
+        None => assert(false),
+    }
+}
+
+fn TestTripleOptionStr() {
+    match triple_opt("hi") {
+        Some(a) => match a {
+            Some(b) => match b {
+                Some(s) => assert_eq_str(s, "hi"),
+                None => assert(false),
+            },
+            None => assert(false),
+        },
+        None => assert(false),
+    }
+}
+
+fn TestNest3ResultOptionStr() {
+    match nest3("z") {
+        Ok(a) => match a {
+            Some(b) => match b {
+                Some(c) => match c {
+                    Some(s) => assert_eq_str(s, "z"),
+                    None => assert(false),
+                },
+                None => assert(false),
+            },
+            None => assert(false),
+        },
+        Err(_) => assert(false),
+    }
+}
+
+fn TestOptionStruct() {
+    match wrap_some(Pt { x: 1, y: 2 }) {
+        Some(p) => {
+            assert_eq(p.x, 1)
+            assert_eq(p.y, 2)
+        },
+        None => assert(false),
+    }
+}
+
+fn TestDoubleOptionStillWorks() {
+    match wrap_some(Some(11)) {
+        Some(o) => match o {
+            Some(v) => assert_eq(v, 11),
+            None => assert(false),
+        },
+        None => assert(false),
+    }
+}
+
+fn TestRegexUnicodeBrailleOgham() {
+    assert(regex_match("\\p{Braille}+", "⠁⠂"))
+    assert(regex_match("\\p{Ogham}+", "ᚁᚂ"))
+    // Gothic (U+10330+) is astral-plane; seed is registered but regex UTF-8
+    // decode path is BMP-focused — covered by runtime prop match unit range.
+}

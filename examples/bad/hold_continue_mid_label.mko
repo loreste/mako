@@ -1,0 +1,24 @@
+// EXPECT: use of moved
+// Labeled continue mid (not outer) after move poisons mid next-iter / post-outer use.
+fn consume(t: string) {}
+
+fn main() {
+    hold let s = "hi"
+    let mut i = 0
+    outer: while i < 2 {
+        i = i + 1
+        mid: while true {
+            let mut j = 0
+            while j < 2 {
+                j = j + 1
+                if j == 1 {
+                    consume(s)
+                    continue mid
+                }
+                break
+            }
+            break outer
+        }
+    }
+    print(s)
+}
