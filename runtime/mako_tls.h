@@ -1357,6 +1357,34 @@ static inline int mako_tls_h2_read_frame(
     return mako_tls_h2_take_frame(buf, *have, off, otype, oflags, ostream, opay, olen);
 }
 
+/* Write DATA frame(s) for a body, splitting at HTTP/2 default max frame size
+ * (16384). Browsers reject single DATA frames larger than SETTINGS_MAX_FRAME_SIZE
+ * with net::ERR_HTTP2_FRAME_SIZE_ERROR (seen on mako-lang.com homepage ~19 KiB). */
+#ifndef MAKO_TLS_H2_MAX_FRAME
+#define MAKO_TLS_H2_MAX_FRAME 16384
+#endif
+static inline int mako_tls_h2_write_data(
+    SSL *ssl, uint32_t stream, const void *payload, size_t len, int end_stream
+) {
+    if (len == 0) {
+        if (end_stream)
+            return mako_tls_h2_write_frame(ssl, 0x00, 0x01, stream, NULL, 0);
+        return 1;
+    }
+    const unsigned char *p = (const unsigned char *)payload;
+    size_t off = 0;
+    while (off < len) {
+        size_t chunk = len - off;
+        if (chunk > (size_t)MAKO_TLS_H2_MAX_FRAME) chunk = (size_t)MAKO_TLS_H2_MAX_FRAME;
+        unsigned char flags = 0;
+        if (end_stream && off + chunk >= len) flags = 0x01; /* END_STREAM */
+        if (!mako_tls_h2_write_frame(ssl, 0x00, flags, stream, p + off, chunk))
+            return 0;
+        off += chunk;
+    }
+    return 1;
+}
+
 /* Send :status 200 (+ optional DATA body) on stream. */
 static inline void mako_tls_h2_reply_200(SSL *ssl, uint32_t stream, MakoString body) {
     unsigned char hblock[1] = {0x88};
@@ -1364,7 +1392,7 @@ static inline void mako_tls_h2_reply_200(SSL *ssl, uint32_t stream, MakoString b
     if (body.len == 0) hflags |= 0x01;
     mako_tls_h2_write_frame(ssl, 0x01, hflags, stream, hblock, 1);
     if (body.len > 0) {
-        mako_tls_h2_write_frame(ssl, 0x00, 0x01, stream, body.data, body.len);
+        (void)mako_tls_h2_write_data(ssl, stream, body.data, body.len, 1);
     }
 }
 
@@ -1674,7 +1702,7 @@ static inline void mako_tls_h2_reply_404(SSL *ssl, uint32_t stream, MakoString b
     if (body.len == 0) hflags |= 0x01;
     mako_tls_h2_write_frame(ssl, 0x01, hflags, stream, hblock, 1);
     if (body.len > 0) {
-        mako_tls_h2_write_frame(ssl, 0x00, 0x01, stream, body.data, body.len);
+        (void)mako_tls_h2_write_data(ssl, stream, body.data, body.len, 1);
     }
 }
 
@@ -2122,12 +2150,13 @@ static inline MakoString mako_tls_h2_post(
         SSL_CTX_free(ctx);
         return mako_str_from_cstr("");
     }
-    /* END_HEADERS only — body follows as DATA */
+    /* END_HEADERS only — body follows as DATA (split if > max frame size) */
     mako_tls_h2_write_frame(ssl, 0x01, 0x04, 1, hblock, (size_t)hblen);
-    mako_tls_h2_write_frame(
-        ssl, 0x00, 0x01, 1,
+    (void)mako_tls_h2_write_data(
+        ssl, 1,
         req_body.data ? req_body.data : "",
-        req_body.len
+        req_body.len,
+        1
     );
 
     unsigned char buf[8192];
@@ -2801,7 +2830,7 @@ static inline MakoString mako_tls_grpc_unary(
         SSL_CTX_free(ctx);
         return mako_str_from_cstr("");
     }
-    mako_tls_h2_write_frame(ssl, 0x00, 0x01, 1, body.data, body.len); /* DATA END_STREAM */
+    (void)mako_tls_h2_write_data(ssl, 1, body.data, body.len, 1); /* DATA END_STREAM */
     mako_str_free(body);
 
     unsigned char buf[8192];

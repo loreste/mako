@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.0 — 2026-07-13 (HTTP/2 DATA frame size — mako-lang.com)
+
+### Fixes
+
+- **TLS HTTP/2 large responses** — `mako_tls_h2_reply_200` / `404` (and client DATA)
+  now split bodies into ≤16384-byte DATA frames (`SETTINGS_MAX_FRAME_SIZE` default).
+  A single ~19 KiB homepage frame caused browsers to report
+  `net::ERR_HTTP2_FRAME_SIZE_ERROR` on https://mako-lang.com/.
+  Redeploy the site binary after pulling this fix.
+
 ## 0.1.0 — 2026-07-13 (CI follow-up: free safety + game UDP + SIGPIPE)
 
 ### Fixes
