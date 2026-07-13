@@ -689,7 +689,10 @@ static inline int64_t mako_tcp_pool_open(
 
 static inline int64_t mako_tcp_pool_connect_one(MakoTcpPoolSlot *p) {
     MakoString h = {p->host, strlen(p->host)};
-    int64_t fd = mako_tcp_connect(h, p->port);
+    /* Honor pool timeout for the connect itself (not only SO_RCVTIMEO after). */
+    int64_t cto = p->timeout_ms > 0 ? (int64_t)p->timeout_ms : 5000;
+    if (cto < 50) cto = 50;
+    int64_t fd = mako_tcp_connect_timeout(h, p->port, cto);
     if (fd < 0) return -1;
     if (p->timeout_ms > 0) mako_proxy_set_timeout((int)fd, p->timeout_ms);
     /* Prefer low latency on pooled backends. */
