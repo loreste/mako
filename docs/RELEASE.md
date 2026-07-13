@@ -14,43 +14,41 @@ Optional (native only): OpenSSL, libnghttp2, SQLite, libpq, quiche FFI.
 
 ## Build & install (native)
 
-### One-shot prebuilt install (preferred — small download)
+### One-shot prebuilt install (out of the box — no Rust)
 
 **Linux**
 
 ```bash
 curl -fsSL https://github.com/loreste/mako/releases/latest/download/install-linux.sh | bash
+source "$HOME/.local/share/mako/env.sh"
+mako version
 ```
 
-**macOS / Linux (generic)**
+**macOS**
 
 ```bash
 curl -fsSL https://github.com/loreste/mako/releases/latest/download/install-release.sh | bash
-# pin a release / prefix:
-curl -fsSL https://github.com/loreste/mako/releases/latest/download/install-release.sh \
-  | bash -s -- --version v0.1.0 --prefix "$HOME/.local"
+source "$HOME/.local/share/mako/env.sh"
 ```
 
-What this does **not** do: install Rust, clone the monorepo, or fetch cargo
-crates. It downloads **one** platform tarball (stripped binary + runtime
-headers + stdlib), verifies SHA-256 (`sha256sum` on Linux, `shasum` on macOS),
-installs into `PREFIX` (default `~/.local`), and runs `mako doctor`.
+What the installer does:
 
-| You need on the machine | Why |
-|-------------------------|-----|
-| `curl`, `tar` | download + extract |
-| `sha256sum` or `shasum` | verify archive |
-| `clang` (or `cc`) | compile `.mko` programs after install |
+| Step | Detail |
+|------|--------|
+| System deps | Installs **clang** if missing (apt/dnf/pacman/apk/zypper; macOS hints Xcode CLT) |
+| Download | **One** slim platform tarball + `.sha256` (no Rust, no git clone) |
+| Verify | SHA-256 (`sha256sum` / `shasum` / `openssl`) |
+| Install | `PREFIX/bin/mako` + `share/mako/{runtime,std}` (default `~/.local`) |
+| Env | Writes `share/mako/env.sh`; appends source line to `~/.bashrc` / `~/.zshrc` when piped |
+| Check | Runs `mako doctor` |
 
-```bash
-# Debian/Ubuntu
-sudo apt-get install -y clang
-# Fedora
-sudo dnf install -y clang
-```
+| Bootstrap needs | Why |
+|-----------------|-----|
+| `curl`, `tar` | fetch + extract |
+| `sudo` (Linux, if no clang) | install clang package |
 
-Overrides: `--artifact <name>`, `MAKO_RELEASE_BASE_URL=<url>` (also `file:///…`
-for local smoke tests).
+Flags: `--no-deps`, `--no-shell`, `--yes`, `--prefix`, `--version`,
+`--base-url` / `MAKO_RELEASE_BASE_URL` (`file://…` for local smoke).
 
 ### Package a slim release (maintainers)
 

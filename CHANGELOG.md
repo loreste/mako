@@ -1,11 +1,13 @@
 # Changelog
 
-## 0.1.0 — 2026-07-13 (linux one-shot installer)
+## 0.1.0 — 2026-07-13 (out-of-box one-shot install)
 
-- `install-linux.sh` / improved `install-release.sh`: prebuilt one-shot, no Rust
-- Linux `sha256sum` support; direct install from slim tarball layout
-- `package-release.sh` default **slim** (strip binary, skip full docs/editors)
-- README + RELEASE: prefer curl one-liner over source/cargo install
+- Full one-shot: prebuilt mako + runtime + std — **no Rust / no git clone**
+- Auto-install **clang** on Linux (apt/dnf/pacman/apk/zypper) when missing
+- Writes `share/mako/env.sh` and updates shell RC under `curl|bash`
+- `install-linux.sh` is a full standalone script (single curl, no second fetch)
+- Slim packages (strip binary); release workflow publishes both bootstrappers
+- README + RELEASE: out-of-box curl install as the default path
 
 ## 0.1.0 — 2026-07-13 (wave 39 queue)
 

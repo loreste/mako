@@ -23,48 +23,54 @@ are rough, and there's plenty left to build.
 
 ## Install
 
-**Linux (one-shot, prebuilt — no Rust, no git clone)**
+### One-shot (recommended) — no Rust
+
+**Linux**
 
 ```bash
 curl -fsSL https://github.com/loreste/mako/releases/latest/download/install-linux.sh | bash
 ```
 
-Downloads one slim platform tarball (binary + runtime headers + std), verifies
-SHA-256, installs into `~/.local`. Only system need afterward: **clang**.
-
-```bash
-# pin a version / custom prefix
-curl -fsSL https://github.com/loreste/mako/releases/latest/download/install-linux.sh \
-  | bash -s -- --version v0.1.0 --prefix "$HOME/.local"
-export PATH="$HOME/.local/bin:$PATH"
-mako version
-```
-
-**macOS** (same prebuilt path)
+**macOS**
 
 ```bash
 curl -fsSL https://github.com/loreste/mako/releases/latest/download/install-release.sh | bash
 ```
 
-**From source** (needs Rust + pulls crates — much larger download)
+That single command:
+
+1. Installs **clang** if missing (Linux package managers / Xcode CLT hint on macOS)
+2. Downloads **one** prebuilt Mako tarball (compiler + runtime headers + stdlib)
+3. Verifies SHA-256 and installs into `~/.local`
+4. Writes `~/.local/share/mako/env.sh` and updates your shell RC when possible
+
+```bash
+# then in this shell (or open a new terminal):
+source "$HOME/.local/share/mako/env.sh"
+mako version
+mako init hello && cd hello && mako run main.mko
+```
+
+Options:
+
+```bash
+curl -fsSL …/install-linux.sh | bash -s -- --prefix /opt/mako --yes
+curl -fsSL …/install-linux.sh | bash -s -- --no-deps    # skip clang install
+curl -fsSL …/install-linux.sh | bash -s -- --version v0.1.0
+```
+
+**You do not need Rust.** Rust is only for building Mako from source.
+
+### From source (large — installs Rust toolchain + crates)
 
 ```bash
 make install
 mako version
 ```
 
-**Windows**
+### Windows
 
-```powershell
-# Prefer the release .zip from GitHub Releases, or:
-cargo build --release
-.\scripts\install.ps1
-mako version
-```
-
-Needs **clang** on your system to compile programs (`apt install clang` on
-Linux, Xcode on macOS, LLVM on Windows). Optional libraries (OpenSSL, SQLite,
-libpq) unlock extra features but aren't required for install.
+Prefer the `.zip` from [Releases](https://github.com/loreste/mako/releases), or build from source with LLVM clang on PATH.
 
 ---
 

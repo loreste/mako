@@ -1,10 +1,23 @@
 #!/usr/bin/env bash
-# One-shot Mako release installer (prebuilt — no Rust, no source clone).
+# =============================================================================
+# Mako one-shot installer — prebuilt, no Rust, no git clone
+# =============================================================================
 #
-#   curl -fsSL https://github.com/loreste/mako/releases/latest/download/install-release.sh | bash
-#   curl -fsSL …/install-release.sh | bash -s -- --version v0.1.0 --prefix "$HOME/.local"
+#   Linux:
+#     curl -fsSL https://github.com/loreste/mako/releases/latest/download/install-linux.sh | bash
 #
-# Downloads one platform tarball (+ tiny .sha256), verifies, installs into PREFIX.
+#   macOS / Linux:
+#     curl -fsSL https://github.com/loreste/mako/releases/latest/download/install-release.sh | bash
+#
+# What you get in PREFIX (default ~/.local):
+#   bin/mako                  — compiler CLI
+#   share/mako/runtime/       — C runtime headers (required to build .mko)
+#   share/mako/std/           — standard library
+#   share/mako/env.sh         — source this for PATH + MAKO_RUNTIME
+#
+# Downloads: one platform .tar.gz + tiny .sha256 only.
+# On Linux, optionally installs clang via apt/dnf/pacman/apk if missing.
+# =============================================================================
 set -euo pipefail
 
 VERSION="${MAKO_VERSION:-latest}"
@@ -12,58 +25,55 @@ PREFIX="${PREFIX:-$HOME/.local}"
 ARTIFACT="${MAKO_ARTIFACT:-}"
 BASE_URL="${MAKO_RELEASE_BASE_URL:-}"
 RUN_DOCTOR=1
-ADD_PATH_HINT=1
+INSTALL_DEPS=1
+MODIFY_SHELL=1
+YES=0
 
 usage() {
   cat <<'EOF'
 Usage: install-release.sh [options]
 
-One-shot install of a prebuilt Mako release (compiler + runtime headers + std).
-Does NOT download Rust, cargo crates, or a git clone.
+Out-of-the-box Mako install from GitHub Releases prebuilds.
+Does NOT install Rust or clone the repository.
 
 Options:
   --version <tag|latest>  Release tag (default: latest)
   --prefix <path>         Install prefix (default: $HOME/.local)
-  --artifact <name>       Override auto-detected platform artifact
+  --artifact <name>       Override platform artifact name
   --base-url <url>        Asset base URL (https:// or file://)
-  --skip-doctor           Skip `mako doctor` after install
+  --with-deps             Install clang if missing (default on Linux)
+  --no-deps               Never install system packages
+  --no-shell              Do not append PATH lines to ~/.bashrc / ~/.zshrc
+  --yes                   Non-interactive (assume yes for shell PATH append)
+  --skip-doctor           Skip mako doctor after install
   -h, --help              Show this help
 
 Environment:
-  MAKO_VERSION, PREFIX, MAKO_ARTIFACT, MAKO_RELEASE_BASE_URL
+  MAKO_VERSION  PREFIX  MAKO_ARTIFACT  MAKO_RELEASE_BASE_URL
+  MAKO_INSTALL_DEPS=0   same as --no-deps
+  MAKO_YES=1            same as --yes
 
 Examples:
-  curl -fsSL https://github.com/loreste/mako/releases/latest/download/install-release.sh | bash
-  PREFIX=/opt/mako bash install-release.sh --version v0.1.0
+  curl -fsSL https://github.com/loreste/mako/releases/latest/download/install-linux.sh | bash
+  curl -fsSL …/install-release.sh | bash -s -- --prefix /opt/mako --yes
 EOF
 }
 
+if [[ "${MAKO_INSTALL_DEPS:-}" == "0" ]]; then INSTALL_DEPS=0; fi
+if [[ "${MAKO_YES:-}" == "1" ]]; then YES=1; fi
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --version)
-      VERSION="${2:?missing value for --version}"
-      shift 2
-      ;;
-    --prefix)
-      PREFIX="${2:?missing value for --prefix}"
-      shift 2
-      ;;
-    --artifact)
-      ARTIFACT="${2:?missing value for --artifact}"
-      shift 2
-      ;;
-    --base-url)
-      BASE_URL="${2:?missing value for --base-url}"
-      shift 2
-      ;;
-    --skip-doctor)
-      RUN_DOCTOR=0
-      shift
-      ;;
-    -h|--help)
-      usage
-      exit 0
-      ;;
+    --version) VERSION="${2:?}"; shift 2 ;;
+    --prefix) PREFIX="${2:?}"; shift 2 ;;
+    --artifact) ARTIFACT="${2:?}"; shift 2 ;;
+    --base-url) BASE_URL="${2:?}"; shift 2 ;;
+    --with-deps) INSTALL_DEPS=1; shift ;;
+    --no-deps) INSTALL_DEPS=0; shift ;;
+    --no-shell) MODIFY_SHELL=0; shift ;;
+    --yes|-y) YES=1; shift ;;
+    --skip-doctor) RUN_DOCTOR=0; shift ;;
+    -h|--help) usage; exit 0 ;;
     *)
       echo "error: unknown argument: $1" >&2
       usage >&2
@@ -79,7 +89,10 @@ need_cmd() {
   }
 }
 
-# Portable SHA-256 of a file → hex digest only.
+have_cc() {
+  command -v clang >/dev/null 2>&1 || command -v cc >/dev/null 2>&1
+}
+
 sha256_file() {
   local f="$1"
   if command -v sha256sum >/dev/null 2>&1; then
@@ -89,8 +102,89 @@ sha256_file() {
   elif command -v openssl >/dev/null 2>&1; then
     openssl dgst -sha256 "$f" | awk '{ print $NF }'
   else
-    echo "error: need sha256sum, shasum, or openssl to verify the download" >&2
+    echo "error: need sha256sum, shasum, or openssl" >&2
     exit 1
+  fi
+}
+
+human_size() {
+  local n="$1"
+  if command -v numfmt >/dev/null 2>&1; then
+    numfmt --to=iec --suffix=B "$n" 2>/dev/null && return
+  fi
+  awk -v n="$n" 'BEGIN {
+    split("B KB MB GB", u, " ")
+    i = 1
+    while (n >= 1024 && i < 4) { n /= 1024; i++ }
+    if (i == 1) printf "%dB\n", n
+    else printf "%.1f%s\n", n, u[i]
+  }'
+}
+
+run_root() {
+  # Run package manager install with privilege when needed.
+  if [[ "${EUID:-$(id -u)}" -eq 0 ]]; then
+    "$@"
+  elif command -v sudo >/dev/null 2>&1; then
+    sudo "$@"
+  else
+    echo "error: need root or sudo to install system packages: $*" >&2
+    return 1
+  fi
+}
+
+ensure_clang() {
+  if have_cc; then
+    echo "C compiler: $(command -v clang 2>/dev/null || command -v cc)"
+    return 0
+  fi
+  if [[ "$INSTALL_DEPS" -eq 0 ]]; then
+    echo "warning: no clang/cc on PATH (--no-deps). Install a C compiler to build .mko programs." >&2
+    return 0
+  fi
+
+  local os
+  os="$(uname -s)"
+  echo "C compiler not found — installing clang (needed to compile .mko programs)…"
+
+  if [[ "$os" == "Darwin" ]]; then
+    if command -v xcode-select >/dev/null 2>&1; then
+      echo "  macOS: running xcode-select --install (GUI prompt may appear)"
+      xcode-select --install 2>/dev/null || true
+      echo "  If clang is still missing, install Xcode Command Line Tools, then re-run mako."
+    else
+      echo "  Install Xcode Command Line Tools, then re-run."
+    fi
+    return 0
+  fi
+
+  if [[ "$os" != "Linux" ]]; then
+    echo "  Unsupported OS for auto deps; install clang manually." >&2
+    return 0
+  fi
+
+  if command -v apt-get >/dev/null 2>&1; then
+    run_root apt-get update -y
+    run_root env DEBIAN_FRONTEND=noninteractive apt-get install -y clang ca-certificates
+  elif command -v dnf >/dev/null 2>&1; then
+    run_root dnf install -y clang
+  elif command -v yum >/dev/null 2>&1; then
+    run_root yum install -y clang
+  elif command -v pacman >/dev/null 2>&1; then
+    run_root pacman -Sy --noconfirm clang
+  elif command -v apk >/dev/null 2>&1; then
+    run_root apk add --no-cache clang
+  elif command -v zypper >/dev/null 2>&1; then
+    run_root zypper install -y clang
+  else
+    echo "warning: unknown package manager; install clang yourself." >&2
+    return 0
+  fi
+
+  if have_cc; then
+    echo "C compiler: $(command -v clang 2>/dev/null || command -v cc)"
+  else
+    echo "warning: clang install attempted but clang/cc still not on PATH" >&2
   fi
 }
 
@@ -100,17 +194,15 @@ detect_artifact() {
   arch="$(uname -m)"
   case "$os:$arch" in
     Darwin:arm64|Darwin:aarch64) echo "mako-aarch64-apple-darwin" ;;
-    Darwin:x86_64|Darwin:i386|Darwin:amd64) echo "mako-x86_64-apple-darwin" ;;
+    Darwin:x86_64|Darwin:amd64) echo "mako-x86_64-apple-darwin" ;;
     Linux:aarch64|Linux:arm64) echo "mako-aarch64-unknown-linux-gnu" ;;
     Linux:x86_64|Linux:amd64) echo "mako-x86_64-unknown-linux-gnu" ;;
     Linux:*)
       echo "error: unsupported Linux arch '$arch' (need x86_64 or aarch64)" >&2
-      echo "  pass --artifact explicitly if you have a custom build" >&2
       exit 1
       ;;
     *)
-      echo "error: unsupported host $os/$arch" >&2
-      echo "  Linux/macOS prebuilts only. On Windows use the .zip release or install.ps1" >&2
+      echo "error: unsupported host $os/$arch — use prebuilt Linux/macOS or Windows zip" >&2
       exit 1
       ;;
   esac
@@ -121,8 +213,7 @@ download() {
   case "$url" in
     file://*)
       local path="${url#file://}"
-      # file:///abs → /abs ; file://rel stays relative
-      if [[ "$path" == /* || "$path" == ./* || "$path" == ../* ]]; then
+      if [[ "$path" == /* ]]; then
         cp "$path" "$out"
       else
         cp "/$path" "$out" 2>/dev/null || cp "$path" "$out"
@@ -137,20 +228,43 @@ download() {
   esac
 }
 
-human_size() {
-  local n="$1"
-  if command -v numfmt >/dev/null 2>&1; then
-    numfmt --to=iec --suffix=B "$n" 2>/dev/null && return
-  fi
-  # Portable fallback (awk)
-  awk -v n="$n" 'BEGIN {
-    split("B KB MB GB", u, " ")
-    i = 1
-    while (n >= 1024 && i < 4) { n /= 1024; i++ }
-    if (i == 1) printf "%dB\n", n
-    else printf "%.1f%s\n", n, u[i]
-  }'
+write_env_file() {
+  local envf="$1"
+  cat > "$envf" <<EOF
+# Mako environment — generated by install-release.sh
+# Usage:  source $envf
+export PATH="$BIN_DIR:\$PATH"
+export MAKO_RUNTIME="$RUNTIME_DST"
+export MAKO_STD="$STD_DST"
+EOF
 }
+
+append_shell_rc() {
+  local line="# Mako"
+  local src_line="[ -f \"$SHARE_DIR/env.sh\" ] && . \"$SHARE_DIR/env.sh\""
+  local rc
+  for rc in "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.profile"; do
+    if [[ -f "$rc" ]] || [[ "$rc" == "$HOME/.profile" ]]; then
+      if [[ -f "$rc" ]] && grep -qF "share/mako/env.sh" "$rc" 2>/dev/null; then
+        continue
+      fi
+      if [[ "$YES" -eq 1 ]] || [[ ! -t 0 ]]; then
+        # non-interactive (curl|bash): auto-append
+        {
+          echo ""
+          echo "$line"
+          echo "$src_line"
+        } >> "$rc"
+        echo "  updated $rc"
+      else
+        echo "  to enable in new shells, add to $rc:"
+        echo "    $src_line"
+      fi
+    fi
+  done
+}
+
+# --- main ---
 
 if [[ -z "$ARTIFACT" ]]; then
   ARTIFACT="$(detect_artifact)"
@@ -173,9 +287,7 @@ if [[ "$BASE_URL" == http://* || "$BASE_URL" == https://* ]]; then
 fi
 
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/mako-install.XXXXXX")"
-cleanup() {
-  rm -rf "$WORK"
-}
+cleanup() { rm -rf "$WORK"; }
 trap cleanup EXIT
 
 ARCHIVE="$WORK/$ARTIFACT.tar.gz"
@@ -183,20 +295,34 @@ CHECKSUM_FILE="$WORK/$ARTIFACT.sha256"
 ARCHIVE_URL="$BASE_URL/$ARTIFACT.tar.gz"
 CHECKSUM_URL="$BASE_URL/$ARTIFACT.sha256"
 
-echo "mako one-shot install (prebuilt)"
+echo "=========================================="
+echo " Mako one-shot install (prebuilt)"
+echo "=========================================="
 echo "  version:  $VERSION"
 echo "  artifact: $ARTIFACT"
 echo "  prefix:   $PREFIX"
 echo "  source:   $BASE_URL"
-echo "  note:     no Rust / no git clone — single tarball download"
+echo "  rust:     not required"
+echo "  git:      not required"
+echo ""
 
+# 1) system C compiler (so .mko builds work out of the box)
+ensure_clang
+echo ""
+
+# 2) download prebuilt mako
 echo "downloading $ARTIFACT.tar.gz …"
-download "$ARCHIVE_URL" "$ARCHIVE"
+if ! download "$ARCHIVE_URL" "$ARCHIVE"; then
+  echo "error: failed to download $ARCHIVE_URL" >&2
+  echo "  Is a release published with this artifact?" >&2
+  echo "  See: https://github.com/loreste/mako/releases" >&2
+  exit 1
+fi
 echo "downloading $ARTIFACT.sha256 …"
 download "$CHECKSUM_URL" "$CHECKSUM_FILE"
 
 BYTES="$(wc -c < "$ARCHIVE" | tr -d ' ')"
-echo "  size:     $(human_size "$BYTES")"
+echo "  download size: $(human_size "$BYTES")"
 
 EXPECTED="$(
   awk -v f="$ARTIFACT.tar.gz" '
@@ -209,31 +335,30 @@ EXPECTED="$(
     }
   ' "$CHECKSUM_FILE"
 )" || {
-  echo "error: could not parse checksum for $ARTIFACT.tar.gz" >&2
-  echo "---- checksum file ----" >&2
+  echo "error: could not parse checksum file" >&2
   cat "$CHECKSUM_FILE" >&2 || true
   exit 1
 }
 ACTUAL="$(sha256_file "$ARCHIVE")"
 if [[ "$ACTUAL" != "$EXPECTED" ]]; then
-  echo "error: checksum mismatch for $ARTIFACT.tar.gz" >&2
+  echo "error: checksum mismatch" >&2
   echo "  expected: $EXPECTED" >&2
   echo "  actual:   $ACTUAL" >&2
   exit 1
 fi
 echo "checksum: ok"
+echo ""
 
 echo "extracting …"
 tar -xzf "$ARCHIVE" -C "$WORK"
 
 STAGE="$WORK/$ARTIFACT"
 if [[ ! -d "$STAGE" ]]; then
-  # Some packagers flatten; accept a single top-level dir.
   STAGE="$(find "$WORK" -mindepth 1 -maxdepth 1 -type d | head -1)"
 fi
 if [[ ! -x "$STAGE/bin/mako" ]]; then
-  echo "error: archive missing bin/mako (layout: bin/ + share/mako/)" >&2
-  ls -la "$WORK" >&2 || true
+  echo "error: archive missing bin/mako" >&2
+  ls -laR "$WORK" >&2 || true
   exit 1
 fi
 
@@ -247,9 +372,7 @@ echo "installing into $PREFIX …"
 mkdir -p "$BIN_DIR" "$RUNTIME_DST" "$STD_DST"
 install -m 755 "$STAGE/bin/mako" "$BIN_DIR/mako"
 
-# Prefer staged share/ layout; fall back to nested scripts/install if present.
 if [[ -d "$STAGE/share/mako/runtime" ]]; then
-  # Headers only
   shopt -s nullglob
   for h in "$STAGE/share/mako/runtime"/*.h; do
     install -m 644 "$h" "$RUNTIME_DST/"
@@ -268,7 +391,6 @@ if [[ -d "$STAGE/share/mako/runtime" ]]; then
     mkdir -p "$EDITORS_DST"
     cp -R "$STAGE/share/mako/editors/." "$EDITORS_DST/"
   fi
-  # Minimal docs (README only) if present
   if [[ -f "$STAGE/share/mako/docs/README.md" ]]; then
     mkdir -p "$SHARE_DIR/docs"
     install -m 644 "$STAGE/share/mako/docs/README.md" "$SHARE_DIR/docs/README.md"
@@ -277,54 +399,49 @@ if [[ -d "$STAGE/share/mako/runtime" ]]; then
 elif [[ -x "$STAGE/scripts/install.sh" ]]; then
   PREFIX="$PREFIX" "$STAGE/scripts/install.sh" --skip-build
 else
-  echo "error: release archive has no share/mako/runtime or scripts/install.sh" >&2
+  echo "error: bad archive layout" >&2
   exit 1
 fi
 
-# Ensure user can find the binary without a full login shell reload.
+write_env_file "$SHARE_DIR/env.sh"
 export PATH="$BIN_DIR:$PATH"
+export MAKO_RUNTIME="$RUNTIME_DST"
+export MAKO_STD="$STD_DST"
 
-if ! command -v clang >/dev/null 2>&1 && ! command -v cc >/dev/null 2>&1; then
-  echo ""
-  echo "warning: no C compiler on PATH (clang/cc)."
-  echo "  Mako compiles .mko → C → native binary; install a compiler:"
-  echo "    Debian/Ubuntu:  sudo apt-get install -y clang"
-  echo "    Fedora:         sudo dnf install -y clang"
-  echo "    Arch:           sudo pacman -S clang"
-  echo "    Alpine:         sudo apk add clang"
+if [[ "$MODIFY_SHELL" -eq 1 ]]; then
+  echo "shell setup:"
+  append_shell_rc
 fi
 
 if [[ "$RUN_DOCTOR" -eq 1 ]]; then
+  echo ""
   echo "running mako doctor …"
-  if ! MAKO_RUNTIME="$RUNTIME_DST" MAKO_STD="$STD_DST" "$BIN_DIR/mako" doctor; then
-    echo "warning: mako doctor reported issues (install still completed)" >&2
+  if ! "$BIN_DIR/mako" doctor; then
+    echo "warning: doctor reported issues (install still completed)" >&2
   fi
 fi
 
 echo ""
-echo "Installed: $BIN_DIR/mako"
+echo "=========================================="
+echo " Mako installed successfully"
+echo "=========================================="
+echo "  binary:  $BIN_DIR/mako"
 "$BIN_DIR/mako" --version 2>/dev/null || true
-echo "Runtime:   $RUNTIME_DST"
-echo "Stdlib:    $STD_DST"
-if [[ "$ADD_PATH_HINT" -eq 1 ]]; then
-  case ":$PATH:" in
-    *":$BIN_DIR:"*) ;;
-    *)
-      echo ""
-      echo "Add to PATH (this shell):"
-      echo "  export PATH=\"$BIN_DIR:\$PATH\""
-      if [[ -f "$HOME/.bashrc" ]]; then
-        echo "Persist for bash:"
-        echo "  echo 'export PATH=\"$BIN_DIR:\$PATH\"' >> ~/.bashrc"
-      fi
-      if [[ -f "$HOME/.zshrc" ]]; then
-        echo "Persist for zsh:"
-        echo "  echo 'export PATH=\"$BIN_DIR:\$PATH\"' >> ~/.zshrc"
-      fi
-      ;;
-  esac
-fi
+echo "  runtime: $RUNTIME_DST"
+echo "  stdlib:  $STD_DST"
+echo "  env:     source $SHARE_DIR/env.sh"
 echo ""
-echo "Quick check:"
+echo "This shell:"
+echo "  export PATH=\"$BIN_DIR:\$PATH\""
+echo "  source \"$SHARE_DIR/env.sh\""
+echo ""
+echo "Try it:"
 echo "  mako version"
 echo "  mako init hello && cd hello && mako run main.mko"
+echo ""
+if ! have_cc; then
+  echo "NOTE: install a C compiler so mako can compile programs:"
+  echo "  Debian/Ubuntu:  sudo apt-get install -y clang"
+  echo "  Fedora:         sudo dnf install -y clang"
+  echo "  macOS:          xcode-select --install"
+fi

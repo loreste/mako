@@ -86,6 +86,7 @@ jobs:
           path: |
             dist/${{ matrix.artifact }}*
             dist/install-release.sh
+            dist/install-linux.sh
 
       - name: Publish GitHub Release assets
         if: startsWith(github.ref, 'refs/tags/v')
@@ -93,11 +94,13 @@ jobs:
         with:
           files: dist/${{ matrix.artifact }}*
 
-      - name: Publish GitHub Release bootstrapper
+      - name: Publish GitHub Release bootstrappers
         if: startsWith(github.ref, 'refs/tags/v') && runner.os == 'Linux'
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/install-release.sh
+          files: |
+            dist/install-release.sh
+            dist/install-linux.sh
 
   # Optional: also produce linux aarch64 via zig when tagging from ubuntu.
   cross-linux-aarch64:
