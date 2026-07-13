@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.0 — 2026-07-13 (wave 25 queue)
+
+- Bare `None` takes Option[T] from function return / expected type
+- Nested outer/inner Err paths; mono `either` Ok/Err string+float
+- `jpeg_sof0_width` / `jpeg_sof0_height` from SOF0 marker
+- Match-break NLL bad case; reflect Option field reject; Buginese/Cham/Rejang seeds
+- TSan CI: wave24, `crew_fan_test`
+- Tests: `examples/testing/wave25_queue_test.mko`
+
 ## 0.1.0 — 2026-07-13 (wave 24 queue)
 
 - General deep nest chains for alternating Result/Option layers

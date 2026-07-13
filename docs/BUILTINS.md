@@ -1930,6 +1930,8 @@ ready queue so workers can multiplex without one-request-at-a-time stalls.
 | `jpeg_encode_gray_jfif` | `jpeg_encode_gray_jfif(width: int, height: int, pixels: string) -> string` | Encode grayscale with SOI+APP0(JFIF)+SOF0 headers; pixels in APP7 (`MAKOJPG`) for `jpeg_decode_gray` roundtrip. External viewers see a JFIF shell, not a full Huffman bitstream. |
 | `jpeg_is_jfif` | `jpeg_is_jfif(data: string) -> int` | Check if data has JFIF APP0 marker |
 | `jpeg_has_sof0` | `jpeg_has_sof0(data: string) -> int` | Scan markers for SOF0 (baseline DCT header) |
+| `jpeg_sof0_width` | `jpeg_sof0_width(data: string) -> int` | Width from SOF0 (0 if missing) |
+| `jpeg_sof0_height` | `jpeg_sof0_height(data: string) -> int` | Height from SOF0 (0 if missing) |
 
 ---
 
@@ -2271,7 +2273,8 @@ Tests: `result_enum_test.mko`, `job_join_typed_test.mko` (Result across kick/joi
 `wave21_queue_test.mko` (`Result[Result[T]]`, `wrap_ok(Ok(...))`),
 `wave22_queue_test.mko` (`Option[Result[T]]`, `Result[Option[Result[T]]]`),
 `wave23_queue_test.mko` (`Option[Result[Option[T]]]` deep mixed nests),
-`wave24_queue_test.mko` (5-layer alternating Result/Option).
+`wave24_queue_test.mko` (5-layer alternating Result/Option),
+`wave25_queue_test.mko` (bare None, nested Err, mono either, SOF0 dims).
 
 ---
 

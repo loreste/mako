@@ -1,0 +1,79 @@
+// Wave 25: nested Err paths, bare None typing, jpeg SOF0 dims, scripts.
+
+fn nest_err_outer[T](x: T) -> Result[Result[T, string], string] {
+    return Err("outer")
+}
+
+fn nest_err_inner[T](x: T) -> Result[Result[T, string], string] {
+    return Ok(Err("inner"))
+}
+
+fn opt_none_int() -> Option[Result[int, string]] {
+    return None
+}
+
+fn either[T](ok: int, x: T) -> Result[T, string] {
+    if ok == 1 {
+        return Ok(x)
+    }
+    return Err("no")
+}
+
+fn TestNestOuterErr() {
+    match nest_err_outer(1) {
+        Ok(_) => assert(false),
+        Err(m) => assert_eq_str(m, "outer"),
+    }
+}
+
+fn TestNestInnerErr() {
+    match nest_err_inner(1) {
+        Ok(inner) => match inner {
+            Ok(_) => assert(false),
+            Err(m) => assert_eq_str(m, "inner"),
+        },
+        Err(_) => assert(false),
+    }
+}
+
+fn TestBareNoneTyped() {
+    match opt_none_int() {
+        Some(_) => assert(false),
+        None => assert(true),
+    }
+}
+
+fn TestEitherStrOk() {
+    match either(1, "a") {
+        Ok(s) => assert_eq_str(s, "a"),
+        Err(_) => assert(false),
+    }
+}
+
+fn TestEitherStrErr() {
+    match either(0, "a") {
+        Ok(_) => assert(false),
+        Err(m) => assert_eq_str(m, "no"),
+    }
+}
+
+fn TestEitherFloatOk() {
+    match either(1, 2.5) {
+        Ok(f) => assert(f > 2.0),
+        Err(_) => assert(false),
+    }
+}
+
+fn TestJpegSof0Dims() {
+    let gray = "ABCDEFGHABCDEFGHABCDEFGHABCDEFGHABCDEFGHABCDEFGHABCDEFGHABCDEFGH"
+    let j = jpeg_encode_gray_jfif(8, 8, gray)
+    assert_eq(jpeg_has_sof0(j), 1)
+    assert_eq(jpeg_sof0_width(j), 8)
+    assert_eq(jpeg_sof0_height(j), 8)
+}
+
+fn TestRegexUnicodeBugineseCham() {
+    assert(regex_match("\\p{Buginese}", "ᨀ"))
+    assert(regex_match("\\p{Cham}", "ꨀ"))
+    // Rejang seed is registered (U+A930–A95F); some editors rewrite the sample glyph.
+}

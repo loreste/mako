@@ -172,26 +172,26 @@ Last inventory: 2026-07-11 (**unique Mako surface** · pack/pull · pain map · 
 | `chan_open[Struct]` via MakoChanPtr heap-box | Done |
 | `error_tag(tag, msg)` enum-like string errors | Done |
 
-**Closed (wave 7–24):** join_timeout **flatten** · POD kick + string fields ·
-`reflect_value_of` N + nested POD · `Result`/`Option` Ok + generic mono +
-**general deep Result/Option nest chains** (5-layer alternating) ·
-`jpeg_has_sof0` · NLL labeled continue/break · kick Result/Option reject ·
-script `\p{…}` · expanded TSan · prior work.
+**Closed (wave 7–25):** join_timeout **flatten** · POD kick + string fields ·
+`reflect_value_of` N + nested POD · `Result`/`Option` deep nest chains ·
+**bare None typing** · nested Err · mono Ok/Err · `jpeg_sof0_width/height` ·
+NLL match-break · kick Result/Option reject · script `\p{…}` · expanded TSan ·
+prior work.
 
-**Wave 24 tests:** `examples/testing/wave24_queue_test.mko` · bad
-`kick_option_non_send`.
+**Wave 25 tests:** `examples/testing/wave25_queue_test.mko` · bad
+`hold_match_break_outer` · `reflect_option_field`.
 
 **Pain residuals (language) still open:** see [PAIN_POINTS.md](PAIN_POINTS.md) §4.
 
 1. Fuller data-race model beyond expanded TSan smoke (no full type-level race system)  
-2. More Result/Option shapes (edge mono/err nesting polish)  
+2. More Result/Option shapes (remaining edge cases)  
 3. Stronger NLL (rarer multi-label CFG products)  
 
 **Stdlib / product residuals:**
 
 6. Complete Unicode property database / full PCRE (script seed set growing)  
-7. Huffman JPEG bitstream readable by arbitrary viewers (JFIF+SOF0 shell + APP7 today)  
-8. Reflect for non-POD fields (maps/slices); nested POD done  
+7. Huffman JPEG bitstream readable by arbitrary viewers (JFIF+SOF0 dims + APP7 today)  
+8. Reflect for non-POD fields (maps/slices/Option); nested POD done  
 9. Symbol-level parity inside Done packages
 
 ---

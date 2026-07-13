@@ -34,21 +34,21 @@ Last roadmap sync: **2026-07-11** (unique surface · pain-driven design · suite
 
 ## Partial / Next (true hard residuals)
 
-**Landed (gap close waves 1–24):** join_timeout flatten · POD+string kick ·
-reflect N + nested POD · Result/Option + **general deep nest chains**
-(5-layer Result/Option alternating) · `jpeg_has_sof0` · NLL labeled
-continue/break · more script `\p{…}` · expanded TSan · prior work.
+**Landed (gap close waves 1–25):** join_timeout flatten · POD+string kick ·
+reflect N + nested POD · Result/Option deep nests · **bare None typing** ·
+nested Err · mono Ok/Err · `jpeg_sof0_width/height` · NLL match-break ·
+more script `\p{…}` · expanded TSan · prior work.
 
 **Language pain residuals** (still open — see [PAIN_POINTS.md](PAIN_POINTS.md)):
 
 1. Fuller data-race model beyond expanded TSan  
-2. More Result/Option shapes (edge mono/err nesting polish)  
+2. More Result/Option shapes (remaining edge cases)  
 3. Stronger NLL product cases (rarer multi-label CFG)  
 
 **Stdlib / product residuals:**
 
-6. Complete Unicode / PCRE · JPEG viewer parity (JFIF+SOF0+APP7 today)  
-7. Reflect for non-POD field types (maps/slices)  
+6. Complete Unicode / PCRE · JPEG viewer parity (JFIF+SOF0 dims+APP7 today)  
+7. Reflect for non-POD field types (maps/slices/Option)  
 8. Symbol-level parity  
 
 ## Product Focus From General-Purpose Brief
