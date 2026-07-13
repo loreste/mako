@@ -38,9 +38,10 @@ Rejected: arrays, maps, non-POD structs, `Result`, `Option`, `Arena`, nested `Cr
 (`examples/bad/kick_non_pod.mko`, `kick_array_arg.mko`, `kick_result_non_send.mko`,
 `kick_option_non_send.mko`).  
 Race detection: `mako test --race` (CI TSan job: crew/kick/share, chan, proxy pool/edge,
-`kick_sync_test`, `kick_share_test`, `crew_fan_test`, wave11/14–24 queue tests,
-`share_atomic_test`, `chan_*_test`, `fan_string_test`, `kick_string_test`). Prefer
-channels over shared mutable state; full type-level race freedom remains residual.
+`kick_sync_test`, `kick_share_test`, `crew_fan_test`, `job_join_typed_test` (Result
+across kick/join), wave11/14–25 queue tests, `share_atomic_test`, `chan_*_test`,
+`fan_string_test`, `kick_string_test`). Prefer channels over shared mutable state;
+full type-level race freedom remains residual.
 
 SMTP TLS: `smtp_send_starttls` uses `SSL_connect`. Set **`MAKO_SMTP_TLS_VERIFY=1`**
 to enable peer certificate verification (`SSL_VERIFY_PEER`); default is off for

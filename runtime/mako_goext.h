@@ -4102,6 +4102,13 @@ static inline int64_t mako_jpeg_has_sof0(MakoString jpeg) {
 }
 
 /* SOF0 layout after marker: len(2) precision(1) height(2) width(2) … */
+static inline int64_t mako_jpeg_sof0_precision(MakoString jpeg) {
+    size_t off = 0;
+    if (!mako_jpeg_find_sof0(jpeg, &off)) return 0;
+    if (off + 2 + 2 + 1 > jpeg.len) return 0;
+    return (int64_t)(unsigned char)jpeg.data[off + 2 + 2]; /* after FF C0 len */
+}
+
 static inline int64_t mako_jpeg_sof0_height(MakoString jpeg) {
     size_t off = 0;
     if (!mako_jpeg_find_sof0(jpeg, &off)) return 0;

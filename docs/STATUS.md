@@ -172,14 +172,14 @@ Last inventory: 2026-07-11 (**unique Mako surface** · pack/pull · pain map · 
 | `chan_open[Struct]` via MakoChanPtr heap-box | Done |
 | `error_tag(tag, msg)` enum-like string errors | Done |
 
-**Closed (wave 7–25):** join_timeout **flatten** · POD kick + string fields ·
-`reflect_value_of` N + nested POD · `Result`/`Option` deep nest chains ·
-**bare None typing** · nested Err · mono Ok/Err · `jpeg_sof0_width/height` ·
-NLL match-break · kick Result/Option reject · script `\p{…}` · expanded TSan ·
-prior work.
+**Closed (wave 7–26):** join_timeout **flatten** · POD kick + string fields ·
+`reflect_value_of` N + nested POD · `Result`/`Option` deep nests · bare None ·
+nested Err · mono Ok/Err · **None/Err nest edges** · `jpeg_sof0_precision` ·
+NLL match-break/continue · kick Result/Option reject · script `\p{…}` · expanded
+TSan (incl. Result job join) · prior work.
 
-**Wave 25 tests:** `examples/testing/wave25_queue_test.mko` · bad
-`hold_match_break_outer` · `reflect_option_field`.
+**Wave 26 tests:** `examples/testing/wave26_queue_test.mko` · bad
+`hold_match_continue_outer` · `reflect_slice_field`.
 
 **Pain residuals (language) still open:** see [PAIN_POINTS.md](PAIN_POINTS.md) §4.
 
@@ -190,7 +190,7 @@ prior work.
 **Stdlib / product residuals:**
 
 6. Complete Unicode property database / full PCRE (script seed set growing)  
-7. Huffman JPEG bitstream readable by arbitrary viewers (JFIF+SOF0 dims + APP7 today)  
+7. Huffman JPEG bitstream readable by arbitrary viewers (JFIF+SOF0 dims/precision + APP7)  
 8. Reflect for non-POD fields (maps/slices/Option); nested POD done  
 9. Symbol-level parity inside Done packages
 

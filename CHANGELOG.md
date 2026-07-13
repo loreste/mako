@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.0 — 2026-07-13 (wave 26 queue)
+
+- Result/Option None+Err edges; triple-Result deep Err
+- `jpeg_sof0_precision`; match-continue outer NLL; reflect []int field reject
+- Lisu/Nko/Tifinagh scripts; TSan wave25 + `job_join_typed_test`
+- Tests: `examples/testing/wave26_queue_test.mko`
+
 ## 0.1.0 — 2026-07-13 (wave 25 queue)
 
 - Bare `None` takes Option[T] from function return / expected type

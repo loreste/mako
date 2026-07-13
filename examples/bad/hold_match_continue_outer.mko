@@ -1,0 +1,19 @@
+// EXPECT: use of moved
+// Match arm moves hold then continue outer — post-loop / next-iter poisoned.
+fn consume(t: string) {}
+
+fn main() {
+    hold let s = "hi"
+    let mut i = 0
+    outer: while i < 2 {
+        i = i + 1
+        match i {
+            1 => {
+                consume(s)
+                continue outer
+            },
+            _ => { },
+        }
+    }
+    print(s)
+}

@@ -1,0 +1,11 @@
+// EXPECT: reflect_value_of expects a POD struct
+// []int fields are non-POD for reflect_value_of.
+struct Bag {
+    xs: []int
+    n: int
+}
+
+fn main() {
+    let b = Bag { xs: [1, 2], n: 3 }
+    let _ = reflect_value_of(b)
+}

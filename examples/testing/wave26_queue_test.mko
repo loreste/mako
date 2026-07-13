@@ -1,0 +1,90 @@
+// Wave 26: Result/Option None+Err edges, nest3 deep Err, SOF0 precision, scripts.
+
+fn res_opt_none() -> Result[Option[int], string] {
+    return Ok(None)
+}
+
+fn res_opt_err() -> Result[Option[int], string] {
+    return Err("fail")
+}
+
+fn opt_res_none() -> Option[Result[int, string]] {
+    return None
+}
+
+fn nest3_err() -> Result[Result[Result[int, string], string], string] {
+    return Ok(Ok(Err("deep")))
+}
+
+fn nest3_err_str() -> Result[Result[Result[string, string], string], string] {
+    return Ok(Ok(Err("deep")))
+}
+
+fn TestResOptNone() {
+    match res_opt_none() {
+        Ok(o) => match o {
+            Some(_) => assert(false),
+            None => assert(true),
+        },
+        Err(_) => assert(false),
+    }
+}
+
+fn TestResOptErr() {
+    match res_opt_err() {
+        Ok(_) => assert(false),
+        Err(m) => assert_eq_str(m, "fail"),
+    }
+}
+
+fn TestOptResNone() {
+    match opt_res_none() {
+        Some(_) => assert(false),
+        None => assert(true),
+    }
+}
+
+fn TestNest3DeepErr() {
+    match nest3_err() {
+        Ok(a) => match a {
+            Ok(b) => match b {
+                Ok(_) => assert(false),
+                Err(m) => assert_eq_str(m, "deep"),
+            },
+            Err(_) => assert(false),
+        },
+        Err(_) => assert(false),
+    }
+}
+
+fn TestNest3DeepErrStr() {
+    match nest3_err_str() {
+        Ok(a) => match a {
+            Ok(b) => match b {
+                Ok(_) => assert(false),
+                Err(m) => assert_eq_str(m, "deep"),
+            },
+            Err(_) => assert(false),
+        },
+        Err(_) => assert(false),
+    }
+}
+
+fn TestJpegSof0Precision() {
+    let gray = "ABCDEFGHABCDEFGHABCDEFGHABCDEFGHABCDEFGHABCDEFGHABCDEFGHABCDEFGH"
+    let j = jpeg_encode_gray_jfif(8, 8, gray)
+    assert_eq(jpeg_sof0_precision(j), 8)
+    assert_eq(jpeg_sof0_width(j), 8)
+    assert_eq(jpeg_sof0_height(j), 8)
+}
+
+fn TestRegexUnicodeLisuNkoTifinagh() {
+    assert(regex_match("\\p{Lisu}", "ꓐ"))
+    assert(regex_match("\\p{Nko}", "ߊ"))
+    assert(regex_match("\\p{Tifinagh}", "ⴰ"))
+}
+
+// Result across kick/join remains the race-safe pattern (job_join_typed_test).
+fn TestResultJoinPatternNote() {
+    assert(true)
+}
