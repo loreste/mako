@@ -27,16 +27,20 @@ fn TestHttp2FlowControl() {
 }
 
 fn TestHttp2ConnRecvDataWindow() {
-    // Inbound DATA via conn_recv decreases stream + connection windows.
+    // Dual FC: inbound DATA decreases *recv* windows; peer WU raises *send* windows.
     let _ = http2_conn_reset()
     assert_eq(http2_conn_recv(http2_headers_frame(1, hpack_encode_indexed(2), 4)), 0)
-    assert_eq(http2_window_of(1), 65535)
-    assert_eq(http2_window_conn(), 65535)
+    assert_eq(http2_recv_window_of(1), 65535)
+    assert_eq(http2_recv_window_conn(), 65535)
+    assert_eq(http2_window_of(1), 65535) // send window unchanged by inbound DATA
     assert_eq(http2_conn_recv(http2_data_frame(1, "hello", 0)), 0)
-    assert_eq(http2_window_of(1), 65530)
-    assert_eq(http2_window_conn(), 65530)
-    // WINDOW_UPDATE restores stream window
-    assert_eq(http2_conn_recv(http2_window_update_frame(1, 5)), 0)
+    assert_eq(http2_recv_window_of(1), 65530)
+    assert_eq(http2_recv_window_conn(), 65530)
+    assert_eq(http2_window_of(1), 65535)
+    // Peer WINDOW_UPDATE restores our *send* window (not recv).
+    assert_eq(http2_window_consume(1, 10), 0)
+    assert_eq(http2_window_of(1), 65525)
+    assert_eq(http2_conn_recv(http2_window_update_frame(1, 10)), 0)
     assert_eq(http2_window_of(1), 65535)
     let _ = http2_conn_reset()
 }

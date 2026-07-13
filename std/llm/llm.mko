@@ -1,0 +1,52 @@
+// llm — OpenAI-compatible chat / tools / stream helpers (default: xAI)
+
+fn message(role: string, content: string) -> string {
+    return llm_message(role, content)
+}
+fn append(msgs: string, msg: string) -> string {
+    return llm_messages_append(msgs, msg)
+}
+fn chat_body(model: string, messages: string, stream: int) -> string {
+    return llm_chat_body(model, messages, stream)
+}
+fn system_user(model: string, system: string, user: string) -> string {
+    return llm_system_user(model, system, user)
+}
+fn with_tools(body: string, tools: string) -> string {
+    return llm_body_with_tools(body, tools)
+}
+fn content(response: string) -> string {
+    return llm_content(response)
+}
+fn estimate_tokens(text: string) -> int {
+    return llm_estimate_tokens(text)
+}
+fn json_extract(text: string) -> string {
+    return llm_json_extract(text)
+}
+fn ask(system: string, user: string, timeout_ms: int) -> string {
+    return llm_ask(system, user, timeout_ms)
+}
+fn chat(base_url: string, api_key: string, body: string, timeout_ms: int) -> string {
+    return llm_chat(base_url, api_key, body, timeout_ms)
+}
+fn chat_stream(base_url: string, api_key: string, body: string, timeout_ms: int) -> string {
+    return llm_chat_stream(base_url, api_key, body, timeout_ms)
+}
+fn chat_retry(
+    base_url: string, api_key: string, body: string, timeout_ms: int, max_attempts: int
+) -> string {
+    return llm_chat_retry(base_url, api_key, body, timeout_ms, max_attempts)
+}
+fn embed(input: string, timeout_ms: int) -> string {
+    return llm_embed(input, timeout_ms)
+}
+fn is_error(resp: string) -> int {
+    return llm_is_error(resp)
+}
+fn error_message(resp: string) -> string {
+    return llm_error_message(resp)
+}
+fn available() -> int {
+    return llm_https_available()
+}

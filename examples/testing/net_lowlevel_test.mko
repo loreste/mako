@@ -1,0 +1,59 @@
+// Low-level networking: peer/local addr, UDP sender, write_all, shutdown, sock_error.
+
+fn TestTcpPeerLocalAddr() {
+    let lfd = tcp_listen_addr("127.0.0.1", 18765)
+    if lfd < 0 {
+        // port busy — soft skip
+        return
+    }
+    let loc0 = tcp_local_addr(lfd)
+    assert(str_contains(loc0, "127.0.0.1"))
+    let cli = tcp_connect("127.0.0.1", 18765)
+    assert(cli >= 0)
+    let srv = tcp_accept(lfd)
+    assert(srv >= 0)
+    let peer = tcp_peer_addr(srv)
+    assert(str_contains(peer, "127.0.0.1:"))
+    let loc = tcp_local_addr(srv)
+    assert(str_contains(loc, "18765"))
+    assert_eq(sock_error(cli), 0)
+    assert_eq(tcp_write_all(cli, "hello-ll"), 8)
+    assert_eq_str(tcp_read_n(srv, 8), "hello-ll")
+    assert_eq(tcp_shutdown(cli, 1), 0) // SHUT_WR
+    assert_eq(tcp_linger(srv, 0, 0), 0)
+    let _ = tcp_close(cli)
+    let _ = tcp_close(srv)
+    let _ = tcp_close(lfd)
+}
+
+fn TestUdpSenderAndBindAddr() {
+    let srv = udp_bind_addr("127.0.0.1", 0)
+    assert(srv >= 0)
+    let port = udp_local_port(srv)
+    assert(port > 0)
+    let cli = udp_bind_addr("127.0.0.1", 0)
+    assert(cli >= 0)
+    assert_eq(udp_send_to(cli, "127.0.0.1", port, "udp-hi"), 6)
+    let msg = udp_recv_from(srv, 64)
+    assert_eq_str(msg, "udp-hi")
+    assert_eq_str(udp_last_sender_host(), "127.0.0.1")
+    assert(udp_last_sender_port() > 0)
+    assert(str_contains(udp_last_sender(), "127.0.0.1:"))
+    let _ = udp_close(cli)
+    let _ = udp_close(srv)
+}
+
+fn TestIoNonblockAndPoll() {
+    let a = unix_socket_pair()
+    if a < 0 {
+        return
+    }
+    let b = unix_socket_pair_peer()
+    assert_eq(io_set_nonblocking(a, 1), 1)
+    assert_eq(io_set_nonblocking(b, 1), 1)
+    assert_eq(unix_write(a, "x"), 1)
+    assert_eq(io_read_ready(b, 200), 1)
+    assert_eq_str(unix_read(b, 8), "x")
+    let _ = unix_close(a)
+    let _ = unix_close(b)
+}

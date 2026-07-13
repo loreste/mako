@@ -637,7 +637,7 @@ proxy → a plain-HTTP backend → relayed response. Unit coverage:
 
 ### HTTP/2 stream multiplexing
 
-After `http2_conn_recv`, completed HEADERS land in a ready queue (up to 32
+After `http2_conn_recv`, completed HEADERS land in a ready queue (up to 64
 stream slots):
 
 ```mko
@@ -660,11 +660,44 @@ let conn = tls_accept_start(srv, client_fd)
 //   or == 0 want-read / == 2 want-write
 ```
 
-### HTTP/3 surface
+### HTTP/3 production server
 
-`h3_server_new` / `bind` / `poll` / `accept_stream` / `stream_read` / `write`
-provide UDP event-loop wiring. Full crypto depth still uses quiche client helpers
-(`quiche_h3_get`, …) when `MAKO_HAS_QUICHE` is linked.
+When quiche is linked (`MAKO_HAS_QUICHE`), `h3_server_*` is a production UDP
+HTTP/3 accept loop:
+
+```mko
+fn main() {
+    if h3_server_available() == 0 { return }
+    let h = h3_server_new("runtime/certs/dev.crt", "runtime/certs/dev.key")
+    let _ = h3_server_bind(h, "127.0.0.1", 18493)
+    while true {
+        let _ = h3_server_poll(h, 500)
+        let sid = h3_accept_stream(h)
+        if sid < 0 { continue }
+        let path = h3_stream_path(h, sid)
+        if path == "/health" {
+            let _ = h3_response(h, sid, 200, "application/json", "{\"ok\":true}\n")
+        } else {
+            let _ = h3_stream_write(h, sid, "200\nhello from mako h3\n")
+        }
+    }
+}
+```
+
+- **32** concurrent QUIC connections, **64** ready requests, **64 KiB** body buffer
+- POST/PUT/PATCH wait for stream FIN so the full body is available
+- Accessors: `h3_stream_method` / `path` / `body` / `authority`
+- Client helpers: `quiche_h3_get` / `post` / `get_two`
+- Example: `examples/h3_server.mko` · smoke: `./scripts/h3-server-smoke.sh`
+
+### HTTP/2 production notes
+
+- **64** stream slots, **64 KiB** body buffer, **16 KiB** header assembly
+- PADDED / PRIORITY flags stripped on HEADERS and DATA
+- Full peer SETTINGS (table size, push, max concurrent, initial window, max frame)
+- `http2_conn_pump` auto SETTINGS ACK, PING ACK, and WINDOW_UPDATE at 16 KiB
+- `http2_response_ct(stream, status, content_type, body)` for typed responses
+- `http2_conn_goaway(error)` builds a graceful GOAWAY with the last stream id
 
 ---
 

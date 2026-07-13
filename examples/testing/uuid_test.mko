@@ -1,14 +1,17 @@
+// UUID v4/v5/v7 + ULID — POD Copy IDs (hot path, no GC).
+
 fn TestUuidFormat() {
     let id = uuid_v4()
     let s = uuid_string(id)
     assert_eq(len(s), 36)
-    // dashes at 8,13,18,23
     assert_eq(int(s[8]), 45)
     assert_eq(int(s[13]), 45)
     assert_eq(int(s[18]), 45)
     assert_eq(int(s[23]), 45)
     // version nibble '4' at position 14
     assert_eq(int(s[14]), 52)
+    assert_eq(uuid_version(id), 4)
+    assert_eq(uuid_variant(id), 2)
 }
 
 fn TestUuidRoundtrip() {
@@ -17,6 +20,24 @@ fn TestUuidRoundtrip() {
     let id2 = uuid_parse(s)
     assert(uuid_eq(id, id2))
     assert(uuid_parse_ok(s))
+    // bare 32-hex
+    let bare = ""
+    // uppercase form still parses
+    let up = uuid_string_upper(id)
+    assert(uuid_parse_ok(up))
+    assert(uuid_eq(id, uuid_parse(up)))
+    // urn
+    let urn = uuid_urn(id)
+    assert(uuid_parse_ok(urn))
+    assert(uuid_eq(id, uuid_parse(urn)))
+    // braces
+    let braced = "{" + s + "}"
+    assert(uuid_eq(id, uuid_parse(braced)))
+    // bytes roundtrip
+    let raw = uuid_bytes(id)
+    assert_eq(len(raw), 16)
+    assert(uuid_eq(id, uuid_from_bytes(raw)))
+    assert_eq(uuid_cmp(id, id), 0)
 }
 
 fn TestUuidParseReject() {
@@ -32,12 +53,81 @@ fn TestUuidCheck() {
     let s = uuid_string(id)
     let r = uuid_check(s)
     match r {
-        Ok(n) => assert_eq(n, 1)
-        Err(_) => assert_eq(0, 1)
+        Ok(n) => assert_eq(n, 1),
+        Err(_) => assert(false),
     }
     let bad = uuid_check("nope")
     match bad {
-        Ok(_) => assert_eq(0, 1)
-        Err(_) => assert(true)
+        Ok(_) => assert(false),
+        Err(_) => assert(true),
     }
+}
+
+fn TestUuidV7() {
+    let a = uuid_v7()
+    let b = uuid_v7()
+    assert_eq(uuid_version(a), 7)
+    assert_eq(uuid_variant(a), 2)
+    // Time prefix is 48-bit unix ms (bytes 0..5) — non-decreasing across calls.
+    assert(ulid_timestamp_ms(b) >= ulid_timestamp_ms(a))
+    let s = uuid_string(a)
+    assert_eq(len(s), 36)
+    assert(uuid_eq(a, uuid_parse(s)))
+    // version nibble '7' at position 14
+    assert_eq(int(s[14]), 55)
+}
+
+fn TestUuidV5() {
+    // Name-based UUID v5 (SHA-1); stable + version/variant bits.
+    let ns = uuid_ns_dns()
+    let id = uuid_v5(ns, "www.example.com")
+    assert_eq(uuid_version(id), 5)
+    assert_eq(uuid_variant(id), 2)
+    // Cross-checked with Python uuid.uuid5(NAMESPACE_DNS, "www.example.com")
+    let expected = uuid_parse("2ed6657d-e927-568b-95e1-2665a8aea6a2")
+    assert(uuid_eq(id, expected))
+    // python.org vector (widely cited)
+    let py = uuid_v5(ns, "python.org")
+    assert(uuid_eq(py, uuid_parse("886313e1-3b8a-5372-9b90-0c9aee199e5d")))
+    // stable / different name differs
+    assert(uuid_eq(id, uuid_v5(ns, "www.example.com")))
+    assert(not uuid_eq(id, uuid_v5(ns, "other")))
+}
+
+fn TestUuidCopyReread() {
+    // Uuid is Copy — hold re-read is free (memory safety without move).
+    hold let id = uuid_v4()
+    let a = uuid_string(id)
+    let b = uuid_string(id)
+    assert_eq_str(a, b)
+}
+
+fn id_echo(u: Uuid) -> Uuid {
+    return u
+}
+
+fn TestUuidKickSend() {
+    let id = uuid_v4()
+    crew t {
+        let j = t.kick(id_echo(id))
+        let out = j.join()
+        assert(uuid_eq(id, out))
+    }
+}
+
+fn TestUlid() {
+    let u = ulid_new()
+    let s = ulid_string(u)
+    assert_eq(len(s), 26)
+    assert(ulid_parse_ok(s))
+    let u2 = ulid_parse(s)
+    assert(uuid_eq(u, u2))
+    let ts = ulid_timestamp_ms(u)
+    assert(ts > 0)
+    // timestamps non-decreasing; binary order may differ within the same ms
+    let v = ulid_new()
+    assert(ulid_timestamp_ms(v) >= ts)
+    // parse reject
+    assert(not ulid_parse_ok("short"))
+    assert(not ulid_parse_ok("IIIIIIIIIIIIIIIIIIIIIIIIII"))
 }

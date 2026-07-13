@@ -1,0 +1,24 @@
+// Go-style templates in Mako (text + HTML).
+
+fn main() {
+    let d = tmpl_data_new()
+    let _ = tmpl_data_set(d, "Title", "Mako Templates")
+    let _ = tmpl_data_set(d, "User", "Ada")
+    let _ = tmpl_data_set_list(d, "Items", "speed,concurrency,security")
+    let _ = tmpl_data_set(d, "Show", "1")
+
+    let page =
+        "{{define \"item\"}}  <li>{{.}}</li>\n{{end}}" +
+        "<h1>{{.Title}}</h1>\n" +
+        "{{if .Show}}<p>Hello, {{.User}}!</p>\n{{else}}<p>hidden</p>\n{{end}}" +
+        "<ul>\n{{range .Items}}{{template \"item\"}}{{end}}</ul>\n"
+
+    print("--- text ---")
+    print(tmpl_text(page, d))
+
+    print("--- html (escaped) ---")
+    let _ = tmpl_data_set(d, "User", "<script>alert(1)</script>")
+    print(tmpl_html(page, d))
+
+    let _ = tmpl_data_free(d)
+}

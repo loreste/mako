@@ -1,16 +1,13 @@
 // EXPECT: cannot kick
-// Result values are not kick-sendable (use channels for cross-task Results).
-fn use_res(r: Result[int, string]) -> int {
-    match r {
-        Ok(v) => v,
-        Err(_) => 0,
-    }
+// Map remains non-sendable across kick.
+fn use_m(m: map[string]int) -> int {
+    0
 }
 
 fn main() {
-    let r: Result[int, string] = Ok(1)
+    let m: map[string]int = {}
     crew t {
-        let j = t.kick(use_res(r))
+        let j = t.kick(use_m(m))
         let _ = j.join()
     }
 }

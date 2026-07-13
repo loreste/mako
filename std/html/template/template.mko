@@ -1,10 +1,14 @@
+// html/template — Go-style templates with auto HTML escaping.
+
 fn execute(tmpl: string, key: string, val: string) -> string {
     return html_template_execute(tmpl, key, val)
 }
 fn execute2(tmpl: string, k1: string, v1: string, k2: string, v2: string) -> string {
     return html_template_execute2(tmpl, k1, v1, k2, v2)
 }
-fn execute3(tmpl: string, k1: string, v1: string, k2: string, v2: string, k3: string, v3: string) -> string {
+fn execute3(
+    tmpl: string, k1: string, v1: string, k2: string, v2: string, k3: string, v3: string
+) -> string {
     return html_template_execute3(tmpl, k1, v1, k2, v2, k3, v3)
 }
 fn if_block(tmpl: string, key: string, cond: int, val: string) -> string {
@@ -16,6 +20,20 @@ fn range_block(tmpl: string, key: string, csv: string) -> string {
 fn with_block(tmpl: string, key: string, val: string) -> string {
     return html_template_with(tmpl, key, val)
 }
-fn nested(tmpl: string, outer_key: string, outer_cond: int, inner_key: string, inner_val: string) -> string {
+fn nested(
+    tmpl: string, outer_key: string, outer_cond: int, inner_key: string, inner_val: string
+) -> string {
     return html_template_nested(tmpl, outer_key, outer_cond, inner_key, inner_val)
 }
+
+// Engine API (auto-escape)
+fn data_new() -> int { return tmpl_data_new() }
+fn data_free(d: int) -> int { return tmpl_data_free(d) }
+fn data_set(d: int, key: string, val: string) -> int { return tmpl_data_set(d, key, val) }
+fn data_set_list(d: int, key: string, csv: string) -> int {
+    return tmpl_data_set_list(d, key, csv)
+}
+fn parse(source: string) -> int { return tmpl_new(source) }
+fn free(t: int) -> int { return tmpl_free(t) }
+fn exec(t: int, data: int) -> string { return tmpl_html_execute(t, data) }
+fn html(source: string, data: int) -> string { return tmpl_html(source, data) }

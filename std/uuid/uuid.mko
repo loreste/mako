@@ -1,0 +1,48 @@
+// std/uuid — Mako package surface for UUID/ULID (POD, Copy, no GC).
+// Prefer builtins; this pack re-exports names for pull "uuid" style imports.
+
+pack uuid
+
+export fn new_v4() -> Uuid {
+    return uuid_v4()
+}
+
+export fn new_v7() -> Uuid {
+    return uuid_v7()
+}
+
+export fn new_v5(ns: Uuid, name: string) -> Uuid {
+    return uuid_v5(ns, name)
+}
+
+export fn nil() -> Uuid {
+    return uuid_nil()
+}
+
+export fn ns_dns() -> Uuid {
+    return uuid_ns_dns()
+}
+
+export fn ns_url() -> Uuid {
+    return uuid_ns_url()
+}
+
+export fn parse(s: string) -> Uuid {
+    return uuid_parse(s)
+}
+
+export fn string(u: Uuid) -> string {
+    return uuid_string(u)
+}
+
+export fn eq(a: Uuid, b: Uuid) -> bool {
+    return uuid_eq(a, b)
+}
+
+export fn ulid() -> Uuid {
+    return ulid_new()
+}
+
+export fn ulid_str(u: Uuid) -> string {
+    return ulid_string(u)
+}

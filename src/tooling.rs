@@ -308,31 +308,52 @@ pub fn apply_package_safety_flags(tc: &mut TypeChecker, toml: &str) {
     }
 }
 
-/// Release/profile flags for codegen (bounds checks, source maps).
+/// Release/profile flags for codegen (bounds checks, source maps, optional GC).
 #[derive(Clone, Debug, Default)]
 pub struct CodegenProfile {
     pub bounds_checks_always: bool,
+    pub gc_enabled: bool,
     pub source_file: Option<String>,
 }
 
 pub fn codegen_profile_from_toml(toml: &str, source_file: Option<String>) -> CodegenProfile {
     let mut p = CodegenProfile {
         bounds_checks_always: false,
+        gc_enabled: false,
         source_file,
     };
+    let mut in_package = false;
     let mut in_profile_release = false;
+    let mut systems = false;
     for line in toml.lines() {
         let t = line.trim();
         if t.starts_with('#') || t.is_empty() {
             continue;
         }
+        if t == "[package]" {
+            in_package = true;
+            in_profile_release = false;
+            continue;
+        }
         if t == "[profile.release]" {
+            in_package = false;
             in_profile_release = true;
             continue;
         }
         if t.starts_with('[') {
+            in_package = false;
             in_profile_release = false;
             continue;
+        }
+        if in_package {
+            if t.starts_with("systems") && t.contains('=') {
+                let v = t.split('=').nth(1).unwrap_or("").trim();
+                systems = v == "true" || v == "1";
+            }
+            if (t.starts_with("gc") || t.starts_with("optional_gc")) && t.contains('=') {
+                let v = t.split('=').nth(1).unwrap_or("").trim();
+                p.gc_enabled = v == "true" || v == "1";
+            }
         }
         if in_profile_release && t.starts_with("bounds_checks") && t.contains('=') {
             let v = t
@@ -344,6 +365,9 @@ pub fn codegen_profile_from_toml(toml: &str, source_file: Option<String>) -> Cod
                 .trim_matches('\'');
             p.bounds_checks_always = v == "on" || v == "always" || v == "true" || v == "1";
         }
+    }
+    if systems {
+        p.gc_enabled = false;
     }
     p
 }
@@ -3304,6 +3328,12 @@ pub fn load_test_package(test_file: &Path) -> Result<(Program, Vec<String>), Str
         .items
         .retain(|item| !matches!(item, Item::Fn(f) if f.name == "main"));
     let mut tc = TypeChecker::new();
+    if let Some(dir) = find_nearest_manifest_dir(test_file) {
+        let manifest = dir.join("mako.toml");
+        if let Ok(text) = fs::read_to_string(&manifest) {
+            apply_package_safety_flags(&mut tc, &text);
+        }
+    }
     tc.check(&program).map_err(|e| format!("{e}"))?;
     for f in tc.mono_fns {
         if !program

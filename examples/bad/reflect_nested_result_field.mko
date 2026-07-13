@@ -1,16 +1,12 @@
-// EXPECT: reflect_value_of expects a POD struct
-// Nested struct with Result field is non-POD for reflect_value_of.
-struct Inner {
-    r: Result[int, string]
-}
-
-struct Outer {
-    i: Inner
-    n: int
+// EXPECT: reflect_value_of expects
+// Chan fields remain non-reflectable.
+struct Wrap {
+    c: chan[int]
+    t: int
 }
 
 fn main() {
-    let inn = Inner { r: Ok(1) }
-    let o = Outer { i: inn, n: 1 }
-    let _ = reflect_value_of(o)
+    let c = chan_open[int](0)
+    let w = Wrap { c: c, t: 1 }
+    let _ = reflect_value_of(w)
 }

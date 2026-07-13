@@ -1,0 +1,75 @@
+// Production HTTP/3 server — bind UDP, accept streams, respond with content-type.
+// Requires quiche linked (MAKO_HAS_QUICHE). Certs: runtime/certs/dev.{crt,key}
+//
+//   mako build examples/h3_server.mko -o out/h3_server
+//   ./out/h3_server
+//   # client (when quiche tools / curl --http3 available):
+//   #   curl --http3 -sk https://127.0.0.1:18493/health
+//   # or: MAKO_LIVE_QUIC=1 mako test examples/testing/quiche_link_test.mko
+//
+// Routes:
+//   GET /         → "hello from mako h3\n"
+//   GET /health   → {"ok":true}
+//   POST /echo    → echoes request body
+// Serves until max_reqs (default 4) then graceful close.
+
+fn route_body(path: string, method: string, body: string) -> string {
+    if path == "/health" {
+        return "200\n{\"ok\":true}\n"
+    }
+    if path == "/echo" {
+        if method == "POST" {
+            return "200\n" + body
+        }
+        return "405\nmethod not allowed\n"
+    }
+    if path == "/" {
+        return "200\nhello from mako h3\n"
+    }
+    return "404\nnot found\n"
+}
+
+fn main() {
+    if h3_server_available() == 0 {
+        print("h3: quiche not linked (rebuild with libquiche)")
+        return
+    }
+    let h = h3_server_new("runtime/certs/dev.crt", "runtime/certs/dev.key")
+    if h < 0 {
+        print("h3: failed to create server (check cert/key paths)")
+        return
+    }
+    let port = 18493
+    if h3_server_bind(h, "127.0.0.1", port) == 0 {
+        print("h3: bind failed")
+        let _ = h3_server_close(h)
+        return
+    }
+    print("h3 server on https://127.0.0.1:" + int_to_string(port) + " (HTTP/3)")
+    var n = 0
+    let max_reqs = 4
+    while n < max_reqs {
+        let pr = h3_server_poll(h, 500)
+        if pr < 0 {
+            print("h3: poll error")
+            break
+        }
+        let sid = h3_accept_stream(h)
+        if sid < 0 {
+            continue
+        }
+        let method = h3_stream_method(h, sid)
+        let path = h3_stream_path(h, sid)
+        let body = h3_stream_body(h, sid)
+        let reply = route_body(path, method, body)
+        // Prefer structured response when path is /health (JSON).
+        if path == "/health" {
+            let _ = h3_response(h, sid, 200, "application/json", "{\"ok\":true}\n")
+        } else {
+            let _ = h3_stream_write(h, sid, reply)
+        }
+        n = n + 1
+    }
+    let _ = h3_server_close(h)
+    print("h3_server done")
+}

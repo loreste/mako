@@ -1,0 +1,76 @@
+// Program email in Mako: build a MIME message and send it over SMTP.
+//
+// Self-contained demo:
+//   1. Start an in-process mock SMTP listener
+//   2. Compose a multipart message (text + HTML + attachment)
+//   3. Send with the session API (connect → EHLO → MAIL/RCPT/DATA → QUIT)
+//   4. Print what the server captured
+//
+// For a real MTA (Gmail, SES, MailHog, …), skip the mock and point
+// smtp_new / smtp_send_msg at your host:port with smtp_auth + smtp_starttls.
+
+fn serve() -> int {
+    return smtp_mock_serve_once()
+}
+
+fn main() {
+    let port = smtp_mock_start(0)
+    if port < 0 {
+        print("could not start mock SMTP")
+        return
+    }
+    print("mock SMTP on 127.0.0.1:")
+    print_int(port)
+
+    crew t {
+        let j = t.kick(serve())
+        sleep_ms(30)
+
+        // --- compose ---
+        let m = mail_msg_new()
+        let _ = mail_msg_set_from(m, "Mako Bot <bot@mako.dev>")
+        let _ = mail_msg_add_to(m, "Ada <ada@mako.dev>")
+        let _ = mail_msg_add_cc(m, "team@mako.dev")
+        let _ = mail_msg_set_subject(m, "Welcome to Mako mail")
+        let _ = mail_msg_set_text(m, "Hi Ada,\n\nThis email was programmed in Mako.\n")
+        let _ = mail_msg_set_html(
+            m, "<p>Hi Ada,</p><p>This email was <b>programmed in Mako</b>.</p>"
+        )
+        let _ = mail_msg_add_header(m, "X-Mailer", "mako")
+        let _ = mail_msg_attach(m, "readme.txt", "text/plain", "Thanks for trying Mako SMTP.")
+
+        print("--- outgoing MIME ---")
+        print(mail_msg_build(m))
+
+        // --- send (session API) ---
+        let c = smtp_new("127.0.0.1", port)
+        if smtp_connect(c) == 0 {
+            print("connect failed")
+            let _ = mail_msg_free(m)
+            let _ = smtp_close(c)
+            let _ = smtp_mock_stop()
+            return
+        }
+        let _ = smtp_ehlo(c, "mail-program.mako")
+        // Optional for real servers:
+        // let _ = smtp_starttls(c)
+        // let _ = smtp_auth(c, "user", "pass")
+        let ok = smtp_send_built(c, m)
+        let _ = smtp_quit(c)
+        let _ = smtp_close(c)
+        let _ = mail_msg_free(m)
+
+        if ok == 0 {
+            print("send_built failed; last reply:")
+            print(smtp_last_reply(c))
+        }
+        let _ = j.join()
+    }
+
+    print("--- captured by mock SMTP ---")
+    print("from: " + smtp_mock_last_from())
+    print("rcpt: " + smtp_mock_last_rcpt())
+    print(smtp_mock_last_message())
+    let _ = smtp_mock_stop()
+    print("done")
+}

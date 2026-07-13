@@ -58,10 +58,15 @@ static inline int64_t mako_mmap_close(MakoMMap *m) { (void)m; return -1; }
 
 /* Open file with flags. Returns fd or -1.
  * mode: 0=read-only, 1=write-only, 2=read-write
- * flags: bit 0=create, bit 1=truncate, bit 2=append, bit 3=sync, bit 4=direct */
+ * flags: bit 0=create, bit 1=truncate, bit 2=append, bit 3=sync,
+ *        bit 4=direct (O_DIRECT / F_NOCACHE), bit 5=exclusive create (O_EXCL).
+ * Always sets O_CLOEXEC when available (production default). */
 static inline int64_t mako_file_open(MakoString path, int64_t mode, int64_t flags) {
     char pbuf[4096];
-    if (!path.data || path.len >= sizeof(pbuf)) return -1;
+    if (!path.data || path.len == 0 || path.len >= sizeof(pbuf)) return -1;
+    for (size_t i = 0; i < path.len; i++) {
+        if (path.data[i] == '\0') return -1; /* reject embedded NUL */
+    }
     memcpy(pbuf, path.data, path.len);
     pbuf[path.len] = 0;
 
@@ -79,6 +84,12 @@ static inline int64_t mako_file_open(MakoString path, int64_t mode, int64_t flag
 #ifdef O_DIRECT
     if (flags & 16) oflags |= O_DIRECT;
 #endif
+#ifdef O_EXCL
+    if (flags & 32) oflags |= O_EXCL;
+#endif
+#ifdef O_CLOEXEC
+    oflags |= O_CLOEXEC;
+#endif
 #if defined(__APPLE__) && !defined(O_DIRECT)
     /* macOS: use F_NOCACHE after open instead */
 #endif
@@ -90,6 +101,11 @@ static inline int64_t mako_file_open(MakoString path, int64_t mode, int64_t flag
     if (flags & 16) {
         fcntl(fd, F_NOCACHE, 1);   /* macOS equivalent of O_DIRECT */
     }
+#endif
+#if !defined(O_CLOEXEC)
+    /* Best-effort CLOEXEC if open flag unavailable. */
+    int fl = fcntl(fd, F_GETFD);
+    if (fl >= 0) (void)fcntl(fd, F_SETFD, fl | FD_CLOEXEC);
 #endif
 
     return (int64_t)fd;

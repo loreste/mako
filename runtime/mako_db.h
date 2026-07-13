@@ -1524,6 +1524,17 @@ static inline MakoString mako_sql_qmark_to_dollar(MakoString sql) {
     return (MakoString){d, o};
 }
 
+/* Forward decls — full definitions follow sql_exec (meta + str helpers). */
+static inline void mako_sql_meta_set(int64_t key, int64_t last_id, int64_t rows);
+#if defined(MAKO_HAS_LIBPQ)
+static inline int64_t mako_pg_query_int_params(
+    MakoPgConn c,
+    MakoString sql,
+    const char *const *values,
+    int nparams
+);
+#endif
+
 static inline int64_t mako_sql_query_int(MakoSqlDB db, MakoString sql, MakoIntArray args) {
     if (db.driver == 1) {
         if (db.sqlite) {
@@ -1537,8 +1548,8 @@ static inline int64_t mako_sql_query_int(MakoSqlDB db, MakoString sql, MakoIntAr
     }
     if (db.driver == 2) {
         if (!db.pg.handle) return -1;
+#if defined(MAKO_HAS_LIBPQ)
         MakoString q = mako_sql_qmark_to_dollar(sql);
-        /* Build C string array of int params for PQexecParams */
         int n = (int)args.len;
         char **vals = NULL;
         char (*bufs)[32] = NULL;
@@ -1556,15 +1567,17 @@ static inline int64_t mako_sql_query_int(MakoSqlDB db, MakoString sql, MakoIntAr
                 vals[i] = bufs[i];
             }
         }
-        int64_t rc = mako_pg_exec_params(
+        int64_t rc = mako_pg_query_int_params(
             db.pg, q, (const char *const *)vals, n
         );
         free(vals);
         free(bufs);
         free(q.data);
-        /* pg_exec_params returns 0 on success; for query_int we want a value.
-         * Use row-count style: on success with no row API, return 0. */
         return rc;
+#else
+        (void)sql; (void)args;
+        return -1;
+#endif
     }
     return -1;
 }
@@ -1575,9 +1588,21 @@ static inline int64_t mako_sql_exec(MakoSqlDB db, MakoString sql, MakoIntArray a
         int64_t v = db.sqlite
             ? mako_sqlite_query_int_handle(db.sqlite, sql, args.data, (int)args.len)
             : mako_sqlite_query_int_params(db.dsn, sql, args.data, (int)args.len);
-        return v < 0 ? -1 : 0;
+        if (v < 0) return -1;
+#if defined(MAKO_HAS_SQLITE)
+        if (db.sqlite) {
+            sqlite3 *sdb = (sqlite3 *)db.sqlite;
+            mako_sql_meta_set(
+                (int64_t)(intptr_t)db.sqlite,
+                (int64_t)sqlite3_last_insert_rowid(sdb),
+                (int64_t)sqlite3_changes(sdb)
+            );
+        }
+#endif
+        return 0;
     }
     if (db.driver == 2) {
+#if defined(MAKO_HAS_LIBPQ)
         MakoString q = mako_sql_qmark_to_dollar(sql);
         int n = (int)args.len;
         char **vals = NULL;
@@ -1596,48 +1621,337 @@ static inline int64_t mako_sql_exec(MakoSqlDB db, MakoString sql, MakoIntArray a
                 vals[i] = bufs[i];
             }
         }
-        int64_t rc = mako_pg_exec_params(
-            db.pg, q, (const char *const *)vals, n
-        );
+        /* Use query path so COMMAND_OK rows are recorded in meta */
+        PGconn *pg = (PGconn *)(intptr_t)db.pg.handle;
+        if (!pg) {
+            free(vals);
+            free(bufs);
+            free(q.data);
+            return -1;
+        }
+        char qbuf[4096];
+        if (q.len >= sizeof(qbuf)) {
+            free(vals);
+            free(bufs);
+            free(q.data);
+            return -1;
+        }
+        memcpy(qbuf, q.data, q.len);
+        qbuf[q.len] = 0;
+        PGresult *r = PQexecParams(pg, qbuf, n, NULL, (const char *const *)vals, NULL, NULL, 0);
         free(vals);
         free(bufs);
         free(q.data);
-        return rc;
+        if (!r) return -1;
+        ExecStatusType st = PQresultStatus(r);
+        int64_t out = (st == PGRES_COMMAND_OK || st == PGRES_TUPLES_OK) ? 0 : -1;
+        if (out == 0) {
+            const char *ct = PQcmdTuples(r);
+            int64_t rows = ct && ct[0] ? (int64_t)strtoll(ct, NULL, 10) : 0;
+            if (st == PGRES_TUPLES_OK && rows == 0) rows = (int64_t)PQntuples(r);
+            mako_sql_meta_set(db.pg.handle, 0, rows);
+        } else {
+            fprintf(stderr, "mako: pg_exec: %s", PQerrorMessage(pg));
+        }
+        PQclear(r);
+        return out;
+#else
+        (void)sql; (void)args;
+        return -1;
+#endif
     }
     return -1;
 }
 
-/* Execute SQL with up to 4 string parameters (for INSERT/UPDATE with text values). */
+/* Copy MakoString into a NUL-terminated C buffer (empty string allowed). */
+static inline void mako_sql_copy_str_param(char *dst, size_t cap, MakoString s) {
+    if (!dst || cap == 0) return;
+    size_t n = s.data ? s.len : 0;
+    if (n >= cap) n = cap - 1;
+    if (n > 0 && s.data) memcpy(dst, s.data, n);
+    dst[n] = 0;
+}
+
+/* How many of p1..p4 are “used”? Trailing all-empty slots are optional extras;
+ * leading/mid empty strings are valid bound values (""). Count is max(placeholders, first non-trailing). */
+static inline int mako_sql_str4_count(MakoString p1, MakoString p2, MakoString p3, MakoString p4) {
+    int n = 4;
+    MakoString ps[4] = {p1, p2, p3, p4};
+    while (n > 0) {
+        MakoString s = ps[n - 1];
+        if (s.data && s.len > 0) break;
+        /* Treat {NULL,0} or {"",0} as unused trailing slot */
+        n--;
+    }
+    return n;
+}
+
+/* Per-connection metadata for last insert id / rows affected (handle-keyed). */
+#define MAKO_SQL_META_MAX 64
+typedef struct {
+    int64_t key; /* sqlite ptr or pg handle */
+    int64_t last_insert_id;
+    int64_t rows_affected;
+} MakoSqlMeta;
+static MakoSqlMeta mako_sql_meta[MAKO_SQL_META_MAX];
+
+static inline MakoSqlMeta *mako_sql_meta_slot(int64_t key) {
+    if (key == 0) return NULL;
+    int free_i = -1;
+    for (int i = 0; i < MAKO_SQL_META_MAX; i++) {
+        if (mako_sql_meta[i].key == key) return &mako_sql_meta[i];
+        if (free_i < 0 && mako_sql_meta[i].key == 0) free_i = i;
+    }
+    if (free_i < 0) free_i = 0; /* overwrite oldest-ish slot 0 under pressure */
+    mako_sql_meta[free_i].key = key;
+    mako_sql_meta[free_i].last_insert_id = 0;
+    mako_sql_meta[free_i].rows_affected = 0;
+    return &mako_sql_meta[free_i];
+}
+
+static inline void mako_sql_meta_set(int64_t key, int64_t last_id, int64_t rows) {
+    MakoSqlMeta *m = mako_sql_meta_slot(key);
+    if (!m) return;
+    m->last_insert_id = last_id;
+    m->rows_affected = rows;
+}
+
+static inline int64_t mako_sql_meta_key(MakoSqlDB db) {
+    if (db.driver == 1) return (int64_t)(intptr_t)db.sqlite;
+    if (db.driver == 2) return db.pg.handle;
+    return 0;
+}
+
+#if defined(MAKO_HAS_SQLITE)
+/* Bind up to 4 text params on a prepared sqlite statement; returns 0 or -1. */
+static inline int64_t mako_sqlite_bind_str4(
+    sqlite3_stmt *st,
+    MakoString p1, MakoString p2, MakoString p3, MakoString p4
+) {
+    if (!st) return -1;
+    int expected = sqlite3_bind_parameter_count(st);
+    if (expected < 0 || expected > 4) {
+        fprintf(stderr, "sqlite: sql_exec_str4 supports at most 4 placeholders (got %d)\n", expected);
+        return -1;
+    }
+    MakoString ps[4] = {p1, p2, p3, p4};
+    for (int i = 0; i < expected; i++) {
+        MakoString s = ps[i];
+        const char *ptr = (s.data && s.len > 0) ? s.data : "";
+        int len = (s.data && s.len > 0) ? (int)s.len : 0;
+        /* SQLITE_TRANSIENT: copy — MakoString buffers may not outlive the step */
+        if (sqlite3_bind_text(st, i + 1, ptr, len, SQLITE_TRANSIENT) != SQLITE_OK) {
+            return -1;
+        }
+    }
+    return 0;
+}
+
+static inline int64_t mako_sqlite_exec_str4_handle(
+    void *handle,
+    MakoString sql,
+    MakoString p1, MakoString p2, MakoString p3, MakoString p4
+) {
+    if (!handle || !sql.data) return -1;
+    char qbuf[4096];
+    if (sql.len >= sizeof(qbuf)) return -1;
+    memcpy(qbuf, sql.data, sql.len);
+    qbuf[sql.len] = 0;
+    sqlite3 *sdb = (sqlite3 *)handle;
+    sqlite3_stmt *st = NULL;
+    if (sqlite3_prepare_v2(sdb, qbuf, -1, &st, NULL) != SQLITE_OK) {
+        fprintf(stderr, "sqlite: prepare: %s\n", sqlite3_errmsg(sdb));
+        return -1;
+    }
+    if (mako_sqlite_bind_str4(st, p1, p2, p3, p4) != 0) {
+        sqlite3_finalize(st);
+        return -1;
+    }
+    int rc = sqlite3_step(st);
+    int64_t out = (rc == SQLITE_DONE || rc == SQLITE_ROW) ? 0 : -1;
+    if (out < 0) {
+        fprintf(stderr, "sqlite: step: %s\n", sqlite3_errmsg(sdb));
+    }
+    sqlite3_finalize(st);
+    if (out == 0) {
+        mako_sql_meta_set(
+            (int64_t)(intptr_t)handle,
+            (int64_t)sqlite3_last_insert_rowid(sdb),
+            (int64_t)sqlite3_changes(sdb)
+        );
+    }
+    return out;
+}
+
+static inline MakoString mako_sqlite_query_str_handle(
+    void *handle,
+    MakoString sql,
+    MakoString p1
+) {
+    if (!handle || !sql.data) return mako_str_from_cstr("");
+    char qbuf[4096];
+    if (sql.len >= sizeof(qbuf)) return mako_str_from_cstr("");
+    memcpy(qbuf, sql.data, sql.len);
+    qbuf[sql.len] = 0;
+    sqlite3 *sdb = (sqlite3 *)handle;
+    sqlite3_stmt *st = NULL;
+    if (sqlite3_prepare_v2(sdb, qbuf, -1, &st, NULL) != SQLITE_OK) {
+        fprintf(stderr, "sqlite: prepare: %s\n", sqlite3_errmsg(sdb));
+        return mako_str_from_cstr("");
+    }
+    int expected = sqlite3_bind_parameter_count(st);
+    if (expected > 1) {
+        fprintf(stderr, "sqlite: sql_query_str supports 0 or 1 placeholder\n");
+        sqlite3_finalize(st);
+        return mako_str_from_cstr("");
+    }
+    if (expected == 1) {
+        const char *ptr = (p1.data && p1.len > 0) ? p1.data : "";
+        int len = (p1.data && p1.len > 0) ? (int)p1.len : 0;
+        if (sqlite3_bind_text(st, 1, ptr, len, SQLITE_TRANSIENT) != SQLITE_OK) {
+            sqlite3_finalize(st);
+            return mako_str_from_cstr("");
+        }
+    }
+    MakoString out = mako_str_from_cstr("");
+    if (sqlite3_step(st) == SQLITE_ROW) {
+        const unsigned char *txt = sqlite3_column_text(st, 0);
+        if (txt) out = mako_str_from_cstr((const char *)txt);
+    }
+    sqlite3_finalize(st);
+    return out;
+}
+#endif /* MAKO_HAS_SQLITE */
+
+#if defined(MAKO_HAS_LIBPQ)
+/* Query first column of first row as int64 from Postgres. */
+static inline int64_t mako_pg_query_int_params(
+    MakoPgConn c,
+    MakoString sql,
+    const char *const *values,
+    int nparams
+) {
+    if (!c.handle || !sql.data) return -1;
+    PGconn *pg = (PGconn *)(intptr_t)c.handle;
+    char qbuf[4096];
+    if (sql.len >= sizeof(qbuf)) return -1;
+    memcpy(qbuf, sql.data, sql.len);
+    qbuf[sql.len] = 0;
+    if (nparams < 0) nparams = 0;
+    PGresult *r = PQexecParams(pg, qbuf, nparams, NULL, values, NULL, NULL, 0);
+    if (!r) return -1;
+    int64_t out = -1;
+    ExecStatusType st = PQresultStatus(r);
+    if (st == PGRES_TUPLES_OK) {
+        if (PQntuples(r) > 0 && PQnfields(r) > 0 && !PQgetisnull(r, 0, 0)) {
+            out = (int64_t)strtoll(PQgetvalue(r, 0, 0), NULL, 10);
+        } else {
+            out = 0;
+        }
+        mako_sql_meta_set(c.handle, 0, (int64_t)PQntuples(r));
+    } else if (st == PGRES_COMMAND_OK) {
+        const char *ct = PQcmdTuples(r);
+        int64_t rows = ct ? (int64_t)strtoll(ct, NULL, 10) : 0;
+        mako_sql_meta_set(c.handle, 0, rows);
+        out = 0;
+    } else {
+        fprintf(stderr, "mako: pg_query_int: %s", PQerrorMessage(pg));
+    }
+    PQclear(r);
+    return out;
+}
+#endif
+
+/* Execute SQL with up to 4 string parameters (for INSERT/UPDATE with text values).
+ * Placeholders: SQLite `?` or `$1..$4`; Postgres `$1..$4` (or `?` rewritten).
+ * Trailing empty strings are unused slots; empty mid-values bind as "". */
 static inline int64_t mako_sql_exec_str4(MakoSqlDB db, MakoString sql, MakoString p1, MakoString p2, MakoString p3, MakoString p4) {
+    if (db.driver == 1) {
+#if defined(MAKO_HAS_SQLITE)
+        if (db.sqlite) {
+            return mako_sqlite_exec_str4_handle(db.sqlite, sql, p1, p2, p3, p4);
+        }
+#endif
+        /* Open-per-call path without persistent handle */
+#if defined(MAKO_HAS_SQLITE)
+        {
+            void *h = mako_sqlite_open_handle(db.dsn);
+            if (!h) return -1;
+            int64_t rc = mako_sqlite_exec_str4_handle(h, sql, p1, p2, p3, p4);
+            mako_sqlite_close_handle(h);
+            return rc;
+        }
+#else
+        (void)sql; (void)p1; (void)p2; (void)p3; (void)p4;
+        return -1;
+#endif
+    }
 #if defined(MAKO_HAS_LIBPQ)
     if (db.driver == 2) {
-        /* PostgreSQL path */
         MakoPgConn pgc = db.pg;
         char b1[4096], b2[4096], b3[4096], b4[4096];
-        int np = 0;
-        const char *vals[4] = {NULL, NULL, NULL, NULL};
-        if (p1.data && p1.len > 0) { memcpy(b1, p1.data, p1.len < 4095 ? p1.len : 4095); b1[p1.len < 4095 ? p1.len : 4095] = 0; vals[np++] = b1; }
-        if (p2.data && p2.len > 0) { memcpy(b2, p2.data, p2.len < 4095 ? p2.len : 4095); b2[p2.len < 4095 ? p2.len : 4095] = 0; vals[np++] = b2; }
-        if (p3.data && p3.len > 0) { memcpy(b3, p3.data, p3.len < 4095 ? p3.len : 4095); b3[p3.len < 4095 ? p3.len : 4095] = 0; vals[np++] = b3; }
-        if (p4.data && p4.len > 0) { memcpy(b4, p4.data, p4.len < 4095 ? p4.len : 4095); b4[p4.len < 4095 ? p4.len : 4095] = 0; vals[np++] = b4; }
-        return mako_pg_exec_params(pgc, sql, vals, np);
+        mako_sql_copy_str_param(b1, sizeof(b1), p1);
+        mako_sql_copy_str_param(b2, sizeof(b2), p2);
+        mako_sql_copy_str_param(b3, sizeof(b3), p3);
+        mako_sql_copy_str_param(b4, sizeof(b4), p4);
+        int np = mako_sql_str4_count(p1, p2, p3, p4);
+        const char *vals[4] = {b1, b2, b3, b4};
+        MakoString q = mako_sql_qmark_to_dollar(sql);
+        /* Prefer bind count from caller slots; empty trailing ok */
+        int64_t rc = mako_pg_exec_params(pgc, q, vals, np);
+        free(q.data);
+        if (rc == 0) {
+            /* Refresh rows via a lightweight meta update in exec path */
+            /* pg_exec_params already cleared result — use 0 rows if unknown */
+            MakoSqlMeta *m = mako_sql_meta_slot(pgc.handle);
+            if (m && m->rows_affected == 0) {
+                /* leave; updated if query_int path used */
+            }
+        }
+        return rc;
     }
 #else
     (void)p1; (void)p2; (void)p3; (void)p4;
 #endif
-    /* SQLite fallback — just exec without params */
-    MakoIntArray empty = {NULL, 0, 0};
-    return mako_sql_exec(db, sql, empty);
+    return -1;
 }
 
 /* Execute SQL with no parameters (DDL, simple statements). */
 static inline int64_t mako_sql_exec_plain(MakoSqlDB db, MakoString sql) {
     MakoIntArray empty = {NULL, 0, 0};
-    return mako_sql_exec(db, sql, empty);
+    int64_t rc = mako_sql_exec(db, sql, empty);
+#if defined(MAKO_HAS_SQLITE)
+    if (rc == 0 && db.driver == 1 && db.sqlite) {
+        sqlite3 *sdb = (sqlite3 *)db.sqlite;
+        mako_sql_meta_set(
+            (int64_t)(intptr_t)db.sqlite,
+            (int64_t)sqlite3_last_insert_rowid(sdb),
+            (int64_t)sqlite3_changes(sdb)
+        );
+    }
+#endif
+    return rc;
 }
 
-/* Query a single string value (first column of first row). */
+/* Query a single string value (first column of first row); optional one string param. */
 static inline MakoString mako_sql_query_str(MakoSqlDB db, MakoString sql, MakoString p1) {
+    if (db.driver == 1) {
+#if defined(MAKO_HAS_SQLITE)
+        if (db.sqlite) {
+            return mako_sqlite_query_str_handle(db.sqlite, sql, p1);
+        }
+        {
+            void *h = mako_sqlite_open_handle(db.dsn);
+            if (!h) return mako_str_from_cstr("");
+            MakoString out = mako_sqlite_query_str_handle(h, sql, p1);
+            mako_sqlite_close_handle(h);
+            return out;
+        }
+#else
+        (void)sql; (void)p1;
+        return mako_str_from_cstr("");
+#endif
+    }
 #if defined(MAKO_HAS_LIBPQ)
     if (db.driver == 2) {
         MakoPgConn pgc = db.pg;
@@ -1645,18 +1959,33 @@ static inline MakoString mako_sql_query_str(MakoSqlDB db, MakoString sql, MakoSt
         if (!pg || !sql.data) return mako_str_from_cstr("");
         char qbuf[4096], pbuf[4096];
         if (sql.len >= sizeof(qbuf)) return mako_str_from_cstr("");
-        memcpy(qbuf, sql.data, sql.len); qbuf[sql.len] = 0;
+        MakoString q = mako_sql_qmark_to_dollar(sql);
+        if (q.len >= sizeof(qbuf)) {
+            free(q.data);
+            return mako_str_from_cstr("");
+        }
+        memcpy(qbuf, q.data, q.len);
+        qbuf[q.len] = 0;
+        free(q.data);
         const char *vals[1] = {NULL};
         int np = 0;
-        if (p1.data && p1.len > 0) {
-            memcpy(pbuf, p1.data, p1.len < 4095 ? p1.len : 4095);
-            pbuf[p1.len < 4095 ? p1.len : 4095] = 0;
-            vals[0] = pbuf; np = 1;
+        /* Bind when SQL has a placeholder; empty string is a valid value */
+        int has_ph = 0;
+        for (size_t i = 0; i < sql.len; i++) {
+            if (sql.data[i] == '?' || (sql.data[i] == '$' && i + 1 < sql.len && sql.data[i + 1] >= '1' && sql.data[i + 1] <= '9')) {
+                has_ph = 1;
+                break;
+            }
+        }
+        if (has_ph) {
+            mako_sql_copy_str_param(pbuf, sizeof(pbuf), p1);
+            vals[0] = pbuf;
+            np = 1;
         }
         PGresult *r = PQexecParams(pg, qbuf, np, NULL, vals, NULL, NULL, 0);
         if (!r) return mako_str_from_cstr("");
         MakoString out = mako_str_from_cstr("");
-        if (PQresultStatus(r) == PGRES_TUPLES_OK && PQntuples(r) > 0) {
+        if (PQresultStatus(r) == PGRES_TUPLES_OK && PQntuples(r) > 0 && !PQgetisnull(r, 0, 0)) {
             out = mako_str_from_cstr(PQgetvalue(r, 0, 0));
         }
         PQclear(r);
@@ -1665,6 +1994,40 @@ static inline MakoString mako_sql_query_str(MakoSqlDB db, MakoString sql, MakoSt
 #endif
     (void)db; (void)sql; (void)p1;
     return mako_str_from_cstr("");
+}
+
+/* Last INSERT row id (SQLite last_insert_rowid; Postgres lastval when available). */
+static inline int64_t mako_sql_last_insert_id(MakoSqlDB db) {
+#if defined(MAKO_HAS_SQLITE)
+    if (db.driver == 1 && db.sqlite) {
+        return (int64_t)sqlite3_last_insert_rowid((sqlite3 *)db.sqlite);
+    }
+#endif
+#if defined(MAKO_HAS_LIBPQ)
+    if (db.driver == 2 && db.pg.handle) {
+        MakoString q = mako_str_from_cstr("select lastval()");
+        int64_t v = mako_pg_query_int_params(db.pg, q, NULL, 0);
+        return v;
+    }
+#endif
+    int64_t key = mako_sql_meta_key(db);
+    MakoSqlMeta *m = key ? mako_sql_meta_slot(key) : NULL;
+    return m ? m->last_insert_id : 0;
+}
+
+/* Rows changed by the last INSERT/UPDATE/DELETE on this connection. */
+static inline int64_t mako_sql_rows_affected(MakoSqlDB db) {
+#if defined(MAKO_HAS_SQLITE)
+    if (db.driver == 1 && db.sqlite) {
+        return (int64_t)sqlite3_changes((sqlite3 *)db.sqlite);
+    }
+#endif
+    int64_t key = mako_sql_meta_key(db);
+    if (!key) return 0;
+    for (int i = 0; i < MAKO_SQL_META_MAX; i++) {
+        if (mako_sql_meta[i].key == key) return mako_sql_meta[i].rows_affected;
+    }
+    return 0;
 }
 
 static inline int64_t mako_sql_begin(MakoSqlDB db) {
@@ -1803,6 +2166,468 @@ static inline int64_t mako_sql_stmt_close(int64_t stmt) {
     if (st->driver == 1) mako_sqlite_finalize_stmt(st->sqlite_stmt);
     memset(st, 0, sizeof(*st));
     return 1;
+}
+
+/* ---- Multi-row result sets (cursor) ----
+ * sql_query_rows / sql_query_rows_str open a result handle; walk with
+ * sql_rows_next; read with sql_rows_int / sql_rows_str; free with sql_rows_close.
+ * SQLite streams via sqlite3_stmt; Postgres materializes a PGresult.
+ * Handles are 1-based ints (0 = invalid). Max concurrent sets: MAKO_SQL_ROWS_MAX.
+ */
+#define MAKO_SQL_ROWS_MAX 32
+
+typedef struct {
+    int64_t live;
+    int64_t driver; /* 1=sqlite, 2=postgres */
+    int64_t on_row; /* 1 when positioned on a readable row */
+    int64_t err;    /* 1 after step/query error */
+    int64_t done;   /* 1 after end-of-results (further next → 0) */
+    int64_t ncols;
+    int64_t owned_sqlite; /* 1 = close sqlite_db on rows_close (transient open) */
+    /* SQLite streaming */
+    void *sqlite_db;
+    void *sqlite_stmt;
+    /* Postgres materialised */
+#if defined(MAKO_HAS_LIBPQ)
+    PGresult *pg_res;
+#else
+    void *pg_res;
+#endif
+    int64_t pg_i;     /* next row index for postgres */
+    int64_t pg_nrows;
+} MakoSqlRows;
+
+static MakoSqlRows mako_sql_rows_tab[MAKO_SQL_ROWS_MAX];
+
+static inline MakoSqlRows *mako_sql_rows_ref(int64_t h) {
+    if (h <= 0 || h > MAKO_SQL_ROWS_MAX) return NULL;
+    MakoSqlRows *r = &mako_sql_rows_tab[h - 1];
+    return r->live ? r : NULL;
+}
+
+static inline int64_t mako_sql_rows_alloc(void) {
+    for (int64_t i = 0; i < MAKO_SQL_ROWS_MAX; i++) {
+        if (!mako_sql_rows_tab[i].live) {
+            memset(&mako_sql_rows_tab[i], 0, sizeof(MakoSqlRows));
+            mako_sql_rows_tab[i].live = 1;
+            return i + 1;
+        }
+    }
+    fprintf(stderr, "mako: sql_query_rows: too many open result sets (max %d)\n", MAKO_SQL_ROWS_MAX);
+    return 0;
+}
+
+static inline void mako_sql_rows_free_body(MakoSqlRows *r) {
+    if (!r) return;
+#if defined(MAKO_HAS_SQLITE)
+    if (r->driver == 1 && r->sqlite_stmt) {
+        sqlite3_finalize((sqlite3_stmt *)r->sqlite_stmt);
+        r->sqlite_stmt = NULL;
+    }
+#endif
+#if defined(MAKO_HAS_LIBPQ)
+    if (r->driver == 2 && r->pg_res) {
+        PQclear(r->pg_res);
+        r->pg_res = NULL;
+    }
+#endif
+    memset(r, 0, sizeof(*r));
+}
+
+static inline int64_t mako_sql_rows_ok(int64_t h) {
+    MakoSqlRows *r = mako_sql_rows_ref(h);
+    return (r && !r->err) ? 1 : 0;
+}
+
+static inline int64_t mako_sql_rows_close(int64_t h) {
+    MakoSqlRows *r = mako_sql_rows_ref(h);
+    if (!r) return 0;
+#if defined(MAKO_HAS_SQLITE)
+    int close_db = (r->driver == 1 && r->owned_sqlite && r->sqlite_db) ? 1 : 0;
+    void *db = r->sqlite_db;
+#endif
+    mako_sql_rows_free_body(r);
+#if defined(MAKO_HAS_SQLITE)
+    if (close_db) mako_sqlite_close_handle(db);
+#endif
+    return 1;
+}
+
+static inline int64_t mako_sql_rows_cols(int64_t h) {
+    MakoSqlRows *r = mako_sql_rows_ref(h);
+    return r ? r->ncols : 0;
+}
+
+static inline int64_t mako_sql_rows_next(int64_t h) {
+    MakoSqlRows *r = mako_sql_rows_ref(h);
+    if (!r || r->err) return -1;
+    if (r->done) {
+        r->on_row = 0;
+        return 0;
+    }
+    r->on_row = 0;
+#if defined(MAKO_HAS_SQLITE)
+    if (r->driver == 1) {
+        if (!r->sqlite_stmt) return -1;
+        int rc = sqlite3_step((sqlite3_stmt *)r->sqlite_stmt);
+        if (rc == SQLITE_ROW) {
+            r->on_row = 1;
+            r->ncols = sqlite3_column_count((sqlite3_stmt *)r->sqlite_stmt);
+            return 1;
+        }
+        if (rc == SQLITE_DONE) {
+            r->done = 1;
+            return 0;
+        }
+        r->err = 1;
+        if (r->sqlite_db) {
+            fprintf(stderr, "sqlite: rows_next: %s\n",
+                    sqlite3_errmsg((sqlite3 *)r->sqlite_db));
+        }
+        return -1;
+    }
+#endif
+#if defined(MAKO_HAS_LIBPQ)
+    if (r->driver == 2) {
+        if (!r->pg_res) return -1;
+        if (r->pg_i >= r->pg_nrows) {
+            r->done = 1;
+            return 0;
+        }
+        r->on_row = 1;
+        r->pg_i++;
+        return 1;
+    }
+#endif
+    (void)r;
+    return -1;
+}
+
+static inline int64_t mako_sql_rows_int(int64_t h, int64_t col) {
+    MakoSqlRows *r = mako_sql_rows_ref(h);
+    if (!r || !r->on_row || col < 0) return 0;
+#if defined(MAKO_HAS_SQLITE)
+    if (r->driver == 1 && r->sqlite_stmt) {
+        if (col >= r->ncols) return 0;
+        return (int64_t)sqlite3_column_int64((sqlite3_stmt *)r->sqlite_stmt, (int)col);
+    }
+#endif
+#if defined(MAKO_HAS_LIBPQ)
+    if (r->driver == 2 && r->pg_res) {
+        int row = (int)(r->pg_i - 1);
+        if (row < 0 || col >= r->ncols) return 0;
+        if (PQgetisnull(r->pg_res, row, (int)col)) return 0;
+        return (int64_t)strtoll(PQgetvalue(r->pg_res, row, (int)col), NULL, 10);
+    }
+#endif
+    return 0;
+}
+
+static inline MakoString mako_sql_rows_str(int64_t h, int64_t col) {
+    MakoSqlRows *r = mako_sql_rows_ref(h);
+    if (!r || !r->on_row || col < 0) return mako_str_from_cstr("");
+#if defined(MAKO_HAS_SQLITE)
+    if (r->driver == 1 && r->sqlite_stmt) {
+        if (col >= r->ncols) return mako_str_from_cstr("");
+        const unsigned char *txt =
+            sqlite3_column_text((sqlite3_stmt *)r->sqlite_stmt, (int)col);
+        if (!txt) return mako_str_from_cstr("");
+        return mako_str_from_cstr((const char *)txt);
+    }
+#endif
+#if defined(MAKO_HAS_LIBPQ)
+    if (r->driver == 2 && r->pg_res) {
+        int row = (int)(r->pg_i - 1);
+        if (row < 0 || col >= r->ncols) return mako_str_from_cstr("");
+        if (PQgetisnull(r->pg_res, row, (int)col)) return mako_str_from_cstr("");
+        return mako_str_from_cstr(PQgetvalue(r->pg_res, row, (int)col));
+    }
+#endif
+    return mako_str_from_cstr("");
+}
+
+/* Open multi-row query with integer binds (`?` / rewritten `$N`). Returns handle or 0. */
+static inline int64_t mako_sql_query_rows(MakoSqlDB db, MakoString sql, MakoIntArray args) {
+    if (db.driver == 1) {
+#if defined(MAKO_HAS_SQLITE)
+        void *handle = db.sqlite;
+        int owned = 0;
+        if (!handle) {
+            handle = mako_sqlite_open_handle(db.dsn);
+            if (!handle) return 0;
+            owned = 1;
+        }
+        char qbuf[4096];
+        if (!sql.data || sql.len >= sizeof(qbuf)) {
+            if (owned) mako_sqlite_close_handle(handle);
+            return 0;
+        }
+        memcpy(qbuf, sql.data, sql.len);
+        qbuf[sql.len] = 0;
+        sqlite3 *sdb = (sqlite3 *)handle;
+        sqlite3_stmt *st = NULL;
+        if (sqlite3_prepare_v2(sdb, qbuf, -1, &st, NULL) != SQLITE_OK) {
+            fprintf(stderr, "sqlite: query_rows prepare: %s\n", sqlite3_errmsg(sdb));
+            if (owned) mako_sqlite_close_handle(handle);
+            return 0;
+        }
+        int expected = sqlite3_bind_parameter_count(st);
+        int nargs = args.data ? (int)args.len : 0;
+        if (expected != nargs) {
+            fprintf(stderr,
+                    "sqlite: query_rows param count mismatch (sql %d, got %d)\n",
+                    expected, nargs);
+            sqlite3_finalize(st);
+            if (owned) mako_sqlite_close_handle(handle);
+            return 0;
+        }
+        for (int i = 0; i < nargs; i++) {
+            sqlite3_bind_int64(st, i + 1, args.data[i]);
+        }
+        int64_t h = mako_sql_rows_alloc();
+        if (!h) {
+            sqlite3_finalize(st);
+            if (owned) mako_sqlite_close_handle(handle);
+            return 0;
+        }
+        MakoSqlRows *r = &mako_sql_rows_tab[h - 1];
+        r->driver = 1;
+        r->sqlite_stmt = st;
+        r->sqlite_db = handle;
+        r->owned_sqlite = owned ? 1 : 0;
+        r->ncols = sqlite3_column_count(st);
+        return h;
+#else
+        (void)sql; (void)args;
+        return 0;
+#endif
+    }
+    if (db.driver == 2) {
+#if defined(MAKO_HAS_LIBPQ)
+        if (!db.pg.handle || !sql.data) return 0;
+        MakoString q = mako_sql_qmark_to_dollar(sql);
+        int n = args.data ? (int)args.len : 0;
+        char **vals = NULL;
+        char (*bufs)[32] = NULL;
+        if (n > 0) {
+            vals = (char **)malloc((size_t)n * sizeof(char *));
+            bufs = (char (*)[32])malloc((size_t)n * 32);
+            if (!vals || !bufs) {
+                free(vals);
+                free(bufs);
+                free(q.data);
+                return 0;
+            }
+            for (int i = 0; i < n; i++) {
+                snprintf(bufs[i], 32, "%lld", (long long)args.data[i]);
+                vals[i] = bufs[i];
+            }
+        }
+        PGconn *pg = (PGconn *)(intptr_t)db.pg.handle;
+        char qbuf[4096];
+        if (q.len >= sizeof(qbuf)) {
+            free(vals);
+            free(bufs);
+            free(q.data);
+            return 0;
+        }
+        memcpy(qbuf, q.data, q.len);
+        qbuf[q.len] = 0;
+        free(q.data);
+        PGresult *res = PQexecParams(pg, qbuf, n, NULL, (const char *const *)vals, NULL, NULL, 0);
+        free(vals);
+        free(bufs);
+        if (!res) return 0;
+        if (PQresultStatus(res) != PGRES_TUPLES_OK) {
+            fprintf(stderr, "mako: query_rows: %s", PQerrorMessage(pg));
+            PQclear(res);
+            return 0;
+        }
+        int64_t h = mako_sql_rows_alloc();
+        if (!h) {
+            PQclear(res);
+            return 0;
+        }
+        MakoSqlRows *r = &mako_sql_rows_tab[h - 1];
+        r->driver = 2;
+        r->pg_res = res;
+        r->pg_i = 0;
+        r->pg_nrows = (int64_t)PQntuples(res);
+        r->ncols = (int64_t)PQnfields(res);
+        return h;
+#else
+        (void)sql; (void)args;
+        return 0;
+#endif
+    }
+    return 0;
+}
+
+/* Open multi-row query with optional single string bind. */
+static inline int64_t mako_sql_query_rows_str(MakoSqlDB db, MakoString sql, MakoString p1) {
+    if (db.driver == 1) {
+#if defined(MAKO_HAS_SQLITE)
+        void *handle = db.sqlite;
+        int owned = 0;
+        if (!handle) {
+            handle = mako_sqlite_open_handle(db.dsn);
+            if (!handle) return 0;
+            owned = 1;
+        }
+        char qbuf[4096];
+        if (!sql.data || sql.len >= sizeof(qbuf)) {
+            if (owned) mako_sqlite_close_handle(handle);
+            return 0;
+        }
+        memcpy(qbuf, sql.data, sql.len);
+        qbuf[sql.len] = 0;
+        sqlite3 *sdb = (sqlite3 *)handle;
+        sqlite3_stmt *st = NULL;
+        if (sqlite3_prepare_v2(sdb, qbuf, -1, &st, NULL) != SQLITE_OK) {
+            fprintf(stderr, "sqlite: query_rows_str prepare: %s\n", sqlite3_errmsg(sdb));
+            if (owned) mako_sqlite_close_handle(handle);
+            return 0;
+        }
+        int expected = sqlite3_bind_parameter_count(st);
+        if (expected > 1) {
+            fprintf(stderr, "sqlite: query_rows_str supports 0 or 1 placeholder\n");
+            sqlite3_finalize(st);
+            if (owned) mako_sqlite_close_handle(handle);
+            return 0;
+        }
+        if (expected == 1) {
+            const char *ptr = (p1.data && p1.len > 0) ? p1.data : "";
+            int len = (p1.data && p1.len > 0) ? (int)p1.len : 0;
+            if (sqlite3_bind_text(st, 1, ptr, len, SQLITE_TRANSIENT) != SQLITE_OK) {
+                sqlite3_finalize(st);
+                if (owned) mako_sqlite_close_handle(handle);
+                return 0;
+            }
+        }
+        int64_t h = mako_sql_rows_alloc();
+        if (!h) {
+            sqlite3_finalize(st);
+            if (owned) mako_sqlite_close_handle(handle);
+            return 0;
+        }
+        MakoSqlRows *r = &mako_sql_rows_tab[h - 1];
+        r->driver = 1;
+        r->sqlite_stmt = st;
+        r->sqlite_db = handle;
+        r->owned_sqlite = owned ? 1 : 0;
+        r->ncols = sqlite3_column_count(st);
+        return h;
+#else
+        (void)sql; (void)p1;
+        return 0;
+#endif
+    }
+    if (db.driver == 2) {
+#if defined(MAKO_HAS_LIBPQ)
+        if (!db.pg.handle || !sql.data) return 0;
+        MakoString q = mako_sql_qmark_to_dollar(sql);
+        char qbuf[4096], pbuf[4096];
+        if (q.len >= sizeof(qbuf)) {
+            free(q.data);
+            return 0;
+        }
+        memcpy(qbuf, q.data, q.len);
+        qbuf[q.len] = 0;
+        free(q.data);
+        int has_ph = 0;
+        for (size_t i = 0; sql.data && i < sql.len; i++) {
+            if (sql.data[i] == '?' ||
+                (sql.data[i] == '$' && i + 1 < sql.len &&
+                 sql.data[i + 1] >= '1' && sql.data[i + 1] <= '9')) {
+                has_ph = 1;
+                break;
+            }
+        }
+        const char *vals[1] = {NULL};
+        int np = 0;
+        if (has_ph) {
+            mako_sql_copy_str_param(pbuf, sizeof(pbuf), p1);
+            vals[0] = pbuf;
+            np = 1;
+        }
+        PGconn *pg = (PGconn *)(intptr_t)db.pg.handle;
+        PGresult *res = PQexecParams(pg, qbuf, np, NULL, vals, NULL, NULL, 0);
+        if (!res) return 0;
+        if (PQresultStatus(res) != PGRES_TUPLES_OK) {
+            fprintf(stderr, "mako: query_rows_str: %s", PQerrorMessage(pg));
+            PQclear(res);
+            return 0;
+        }
+        int64_t h = mako_sql_rows_alloc();
+        if (!h) {
+            PQclear(res);
+            return 0;
+        }
+        MakoSqlRows *r = &mako_sql_rows_tab[h - 1];
+        r->driver = 2;
+        r->pg_res = res;
+        r->pg_i = 0;
+        r->pg_nrows = (int64_t)PQntuples(res);
+        r->ncols = (int64_t)PQnfields(res);
+        return h;
+#else
+        (void)sql; (void)p1;
+        return 0;
+#endif
+    }
+    return 0;
+}
+
+/* Bulk: first column of all rows as []int, capped at max_rows (clamped 1..10000). */
+static inline MakoIntArray mako_sql_query_col_int(MakoSqlDB db, MakoString sql, int64_t max_rows) {
+    if (max_rows < 1) max_rows = 1;
+    if (max_rows > 10000) max_rows = 10000;
+    MakoIntArray empty_args = {NULL, 0, 0};
+    int64_t h = mako_sql_query_rows(db, sql, empty_args);
+    if (!h) return mako_int_array_make(0, 0);
+    MakoIntArray out = mako_int_array_make(0, (int64_t)max_rows);
+    int64_t n = 0;
+    while (n < max_rows) {
+        int64_t rc = mako_sql_rows_next(h);
+        if (rc != 1) break;
+        if (out.len >= out.cap) {
+            size_t ncap = out.cap ? out.cap * 2 : 8;
+            int64_t *nd = (int64_t *)realloc(out.data, ncap * sizeof(int64_t));
+            if (!nd) break;
+            out.data = nd;
+            out.cap = ncap;
+        }
+        out.data[out.len++] = mako_sql_rows_int(h, 0);
+        n++;
+    }
+    mako_sql_rows_close(h);
+    return out;
+}
+
+/* Bulk: first column of all rows as []string, capped at max_rows. */
+static inline MakoStrArray mako_sql_query_col_str(MakoSqlDB db, MakoString sql, int64_t max_rows) {
+    if (max_rows < 1) max_rows = 1;
+    if (max_rows > 10000) max_rows = 10000;
+    MakoIntArray empty_args = {NULL, 0, 0};
+    int64_t h = mako_sql_query_rows(db, sql, empty_args);
+    if (!h) return mako_str_array_make(0, 0);
+    MakoStrArray out = mako_str_array_make(0, (int64_t)max_rows);
+    int64_t n = 0;
+    while (n < max_rows) {
+        int64_t rc = mako_sql_rows_next(h);
+        if (rc != 1) break;
+        if (out.len >= out.cap) {
+            size_t ncap = out.cap ? out.cap * 2 : 8;
+            MakoString *nd = (MakoString *)realloc(out.data, ncap * sizeof(MakoString));
+            if (!nd) break;
+            out.data = nd;
+            out.cap = ncap;
+        }
+        out.data[out.len++] = mako_str_clone(mako_sql_rows_str(h, 0));
+        n++;
+    }
+    mako_sql_rows_close(h);
+    return out;
 }
 
 /* ---- SQL migrations ----

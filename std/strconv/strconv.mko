@@ -1,4 +1,40 @@
+// strconv — parse and format numbers (decimal, hex, bin, oct, base 2–36).
+
 fn atoi(s: string) -> Result[int, string] { return parse_int(s) }
 fn atof(s: string) -> float { return parse_float(s) }
 fn atob(s: string) -> Result[int, string] { return parse_bool(s) }
 fn itoa(n: int) -> string { return format_int(n) }
+
+// Format
+fn FormatInt(n: int) -> string { return format_int(n) }
+fn FormatIntDec(n: int) -> string { return format_int_dec(n) }
+fn FormatIntHex(n: int) -> string { return format_int_hex(n) }
+fn FormatIntHexUpper(n: int) -> string { return format_int_hex_upper(n) }
+fn FormatIntBin(n: int) -> string { return format_int_bin(n) }
+fn FormatIntOct(n: int) -> string { return format_int_oct(n) }
+fn FormatIntBase(n: int, base: int) -> string { return format_int_base(n, base) }
+fn FormatIntHexPad(n: int, width: int) -> string { return format_int_hex_pad(n, width) }
+fn FormatIntHexPrefix(n: int) -> string { return format_int_hex_prefix(n) }
+fn FormatFloat(v: float, prec: int) -> string { return format_float(v, prec) }
+fn FormatBool(b: bool) -> string { return format_bool(b) }
+fn FormatPad(s: string, width: int, zero: int) -> string {
+    return format_pad(s, width, zero)
+}
+
+// Parse
+fn ParseInt(s: string) -> Result[int, string] { return parse_int(s) }
+fn ParseIntBase(s: string, base: int) -> Result[int, string] {
+    return parse_int_base(s, base)
+}
+fn ParseIntHex(s: string) -> Result[int, string] { return parse_int_hex(s) }
+fn ParseIntBin(s: string) -> Result[int, string] { return parse_int_bin(s) }
+fn ParseIntOct(s: string) -> Result[int, string] { return parse_int_oct(s) }
+fn ParseIntAuto(s: string) -> Result[int, string] { return parse_int_auto(s) }
+fn ParseFloat(s: string) -> float { return parse_float(s) }
+fn ParseBool(s: string) -> Result[int, string] { return parse_bool(s) }
+
+// lowercase aliases
+fn format_hex(n: int) -> string { return format_int_hex(n) }
+fn format_bin(n: int) -> string { return format_int_bin(n) }
+fn format_oct(n: int) -> string { return format_int_oct(n) }
+fn format_dec(n: int) -> string { return format_int_dec(n) }

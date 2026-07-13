@@ -1,4 +1,5 @@
 // Typed string channels — first-class concurrency message path.
+// send_take moves ownership (no clone) on the hot path.
 
 fn produce_str(ch: chan[string]) -> int {
     let _ = ch.send("from-crew")
@@ -22,5 +23,26 @@ fn TestChanStringCrew() {
         let _ = j.join()
     }
     assert_eq_str(ch.recv(), "from-crew")
+    ch.close()
+}
+
+fn TestChanStrSendTake() {
+    let ch = chan_open[string](2)
+    // concat forces a heap-owned temporary; take moves it (no second alloc).
+    let ok = chan_str_send_take(ch, "alpha" + "")
+    assert_eq(ok, 1)
+    let ok2 = chan_str_send_take(ch, "beta" + "")
+    assert_eq(ok2, 1)
+    assert_eq_str(ch.recv(), "alpha")
+    assert_eq_str(ch.recv(), "beta")
+    ch.close()
+}
+
+fn TestChanStrTrySendTake() {
+    let ch = chan_open[string](1)
+    assert_eq(chan_str_try_send_take(ch, "one" + ""), 1)
+    // full: fails and consumes the temporary (no leak)
+    assert_eq(chan_str_try_send_take(ch, "two" + ""), 0)
+    assert_eq_str(ch.recv(), "one")
     ch.close()
 }

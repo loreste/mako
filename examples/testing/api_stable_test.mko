@@ -1,0 +1,11 @@
+// API stability annotations: #[stable] is accepted; #[deprecated] errors at call sites
+// (see examples/bad/deprecated_call.mko).
+
+#[stable]
+fn stable_add(a: int, b: int) -> int {
+    a + b
+}
+
+fn TestStableOk() {
+    assert_eq(stable_add(2, 3), 5)
+}

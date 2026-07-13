@@ -23,7 +23,7 @@ Canonical surface: [IDENTITY.md](IDENTITY.md). Compat duals only: [COMPAT.md](CO
 | Go `if err != nil` noise | `Result[T, E]` + `?` + `match` | **Strong** |
 | Go no real sum types | `enum` + exhaustive `match` | **Strong** |
 | Go goroutine leaks | **First-class** structured `crew` / `kick` / `join` (jobs cannot outlive crew) | **Strong** |
-| Go shared-memory races | Ownership + structured concurrency; full data-race model still residual | **Partial** |
+| Go shared-memory races | Ownership + structured concurrency; deep Send + static race on mut captures until join; TSan opt-in | **Strong** (type-level race model seed; TSan for residual UB) |
 | Slow / second-class parallel work | **First-class** `fan` + multi-kick crews ([SPEED.md](SPEED.md)) | **Strong** (keep optimizing) |
 | Go weak generics / empty `any` | User generics (monomorphized) + interfaces seed | **Partial → Strong** |
 | Go export-by-capital only | Explicit `export` (capital dual only) | **Strong** |
@@ -83,7 +83,7 @@ Everyday code stays simple (`let`). Power tools are **visible** (`hold` / `share
 | Go | Mako |
 |----|------|
 | Race detector optional; ownership is social convention | Ownership keywords + structured concurrency |
-| Data-race freedom not in the type system | **Residual:** fuller Send-like / race model (opt-in track) — see STATUS |
+| Data-race freedom not in the type system | Deep Send (Option/Result/tuple/deep-POD) + static race diagnostics on mut captures before join; `--race` TSan |
 
 ### 1.7 Generics and “just use `any`”
 

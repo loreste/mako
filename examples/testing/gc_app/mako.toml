@@ -1,0 +1,4 @@
+[package]
+name = "gc_app"
+version = "0.1.0"
+gc = true

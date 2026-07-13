@@ -1,0 +1,44 @@
+// LLM chat demo — OpenAI-compatible (default xAI api.x.ai).
+// Requires: OpenSSL linked + export XAI_API_KEY=...
+//
+//   mako run examples/llm_chat.mko
+//
+// Gaps this closes vs typical SDKs:
+//   - no async coloring (sync call + mono deadline timeout)
+//   - structured message/tool/SSE parse in the language runtime
+//   - API key from env, never hardcode; redact for logs
+//   - crew/fan can parallelize tool calls after llm_tool_call_*
+
+fn main() {
+    if llm_https_available() == 0 {
+        print("llm: OpenSSL not linked — rebuild mako with OpenSSL")
+        return
+    }
+    let key = llm_api_key()
+    if str_len(key) == 0 {
+        print("llm: set XAI_API_KEY (or OPENAI_API_KEY) to run live chat")
+        print("offline parse demo:")
+        let fake = "{\"choices\":[{\"message\":{\"content\":\"hello from mako llm\"}}]}"
+        print(llm_content(fake))
+        return
+    }
+    print("using key " + llm_redact_key(key))
+    print("base " + llm_base_url() + " model " + llm_default_model())
+
+    let t0 = mono_ns()
+    // Prefer retry wrapper for flaky networks / 429
+    let body = llm_system_user(llm_default_model(), "Reply in one short sentence.", "What is Mako?")
+    let resp = llm_chat_retry(llm_base_url(), key, body, 30000, 3)
+    let took = elapsed_ns(t0)
+    if llm_is_error(resp) == 1 {
+        print("request failed: " + llm_error_message(resp) + " status=" + int_to_string(llm_last_status()))
+        return
+    }
+    print(llm_content(resp))
+    print("tokens≈prompt " + int_to_string(llm_usage_prompt_tokens(resp))
+        + " completion " + int_to_string(llm_usage_completion_tokens(resp)))
+    print("latency_ns " + int_to_string(took))
+    // Optional: stream path (same content surface via synthetic JSON)
+    // let sbody = llm_body_force_stream(body)
+    // let streamed = llm_chat_stream(llm_base_url(), key, sbody, 30000)
+}

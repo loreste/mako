@@ -1,0 +1,161 @@
+// Low-level SIP / SDP / RTP programming surface.
+
+fn sample_invite() -> string {
+    let branch = "z9hG4bK776asdhds"
+    let via = sip_via_value("UDP", "192.0.2.1", 5060, branch)
+    let mut h = ""
+    h = sip_headers_append(h, "Via", via)
+    h = sip_headers_append(h, "From", sip_from_value("Alice", "sip:alice@atlanta.com", "1928301774"))
+    h = sip_headers_append(h, "To", sip_to_value("Bob", "sip:bob@biloxi.com", ""))
+    h = sip_headers_append(h, "Call-ID", "a84b4c76e66710")
+    h = sip_headers_append(h, "CSeq", sip_cseq_value(314159, "INVITE"))
+    h = sip_headers_append(h, "Contact", sip_contact_value("sip:alice@192.0.2.1:5060"))
+    h = sip_headers_append(h, "Max-Forwards", "70")
+    h = sip_headers_append(h, "Content-Type", "application/sdp")
+    let sdp = sdp_build_audio("-", "call", "192.0.2.1", 49170, "0 8")
+    return sip_request("INVITE", "sip:bob@biloxi.com", h, sdp)
+}
+
+fn TestSipParseRequest() {
+    let msg = sample_invite()
+    assert_eq(sip_ok(msg), 1)
+    assert_eq(sip_is_request(msg), 1)
+    assert_eq(sip_is_response(msg), 0)
+    assert_eq_str(sip_method(msg), "INVITE")
+    assert_eq_str(sip_request_uri(msg), "sip:bob@biloxi.com")
+    assert_eq_str(sip_version(msg), "SIP/2.0")
+    assert_eq(sip_method_is(msg, "INVITE"), 1)
+    assert_eq(sip_method_is(msg, "BYE"), 0)
+
+    assert(str_contains(sip_header(msg, "From"), "alice@atlanta.com"))
+    assert(str_contains(sip_header(msg, "To"), "bob@biloxi.com"))
+    assert_eq_str(sip_header(msg, "Call-ID"), "a84b4c76e66710")
+    assert_eq_str(sip_header(msg, "CSeq"), "314159 INVITE")
+    assert_eq(sip_header_count(msg, "Via"), 1)
+
+    let via = sip_header(msg, "Via")
+    assert_eq_str(sip_via_branch(via), "z9hG4bK776asdhds")
+    let from = sip_header(msg, "From")
+    assert_eq_str(sip_addr_tag(from), "1928301774")
+
+    assert(sip_content_length(msg) > 0)
+    assert_eq(sip_msg_complete(msg), 1)
+    assert_eq(sip_msg_needed(msg), 0)
+
+    let body = sip_body(msg)
+    assert_eq(sdp_ok(body), 1)
+    assert_eq_str(sdp_version(body), "0")
+    assert_eq_str(sdp_connection_addr(body), "192.0.2.1")
+    assert_eq(sdp_media_count(body), 1)
+    assert_eq_str(sdp_media_type(body, 0), "audio")
+    assert_eq(sdp_media_port(body, 0), 49170)
+    assert_eq_str(sdp_media_proto(body, 0), "RTP/AVP")
+    assert_eq_str(sdp_attr(body, "sendrecv"), "1")
+}
+
+fn TestSipReplyAndResponse() {
+    let inv = sample_invite()
+    let resp = sip_reply(inv, 180, "Ringing", "", "")
+    assert_eq(sip_is_response(resp), 1)
+    assert_eq(sip_status_code(resp), 180)
+    assert_eq_str(sip_reason(resp), "Ringing")
+    assert(str_contains(sip_header(resp, "Via"), "192.0.2.1"))
+    assert(str_contains(sip_header(resp, "From"), "alice"))
+    assert_eq_str(sip_header(resp, "Call-ID"), "a84b4c76e66710")
+    assert_eq_str(sip_header(resp, "CSeq"), "314159 INVITE")
+
+    let ok200 = sip_reply(inv, 200, "OK", sip_headers_append("", "Contact", sip_contact_value("sip:bob@192.0.2.4")), "")
+    assert_eq(sip_status_code(ok200), 200)
+    assert(str_contains(sip_header(ok200, "Contact"), "bob@192.0.2.4"))
+}
+
+fn TestSipUriAndIds() {
+    let uri = sip_uri_build("alice", "atlanta.com", 5060)
+    assert_eq_str(uri, "sip:alice@atlanta.com:5060")
+    assert_eq_str(sip_uri_scheme(uri), "sip")
+    assert_eq_str(sip_uri_user(uri), "alice")
+    assert_eq_str(sip_uri_host(uri), "atlanta.com")
+    assert_eq(sip_uri_port(uri), 5060)
+
+    let br = sip_branch()
+    assert(str_contains(br, "z9hG4bK"))
+    assert(len(br) > 10)
+    let tag = sip_tag()
+    assert(len(tag) >= 8)
+    let cid = sip_call_id_new("host.example")
+    assert(str_contains(cid, "@host.example"))
+    assert(sip_cseq_new() >= 1)
+
+    let did = sip_dialog_id("cid1", "ltag", "rtag")
+    assert_eq_str(did, "cid1|ltag|rtag")
+    let tk = sip_txn_key(br, "INVITE")
+    assert(str_contains(tk, "INVITE"))
+}
+
+fn TestSipDigestAuth() {
+    // Digest MD5 (no qop): response = MD5(HA1:nonce:HA2)
+    // username=alice realm=atlanta.com password=secret
+    // method=REGISTER uri=sip:atlanta.com
+    // nonce from RFC 2617 sample style
+    let nonce = "dcd98b7102dd2f0e8b11d0f600bfb0c093"
+    let resp = sip_digest_response(
+        "alice", "atlanta.com", "secret",
+        "REGISTER", "sip:atlanta.com", nonce)
+    assert_eq(len(resp), 32)
+    // Exact response for the fixture credentials (Python hashlib / MD5)
+    assert_eq_str(resp, "10bc49bc9e937a490570b5326e311592")
+    let auth = sip_authorization_digest(
+        "alice", "atlanta.com", nonce, "sip:atlanta.com", resp)
+    assert(str_contains(auth, "Digest"))
+    assert(str_contains(auth, "username=\"alice\""))
+    assert(str_contains(auth, "response=\"10bc49bc9e937a490570b5326e311592\""))
+    let realm = sip_auth_param(auth, "realm")
+    assert_eq_str(realm, "atlanta.com")
+    assert_eq_str(sip_auth_param(auth, "nonce"), nonce)
+    assert_eq_str(sip_auth_param(auth, "response"), resp)
+
+    // Known MD5 of empty string and "a"
+    assert_eq_str(sip_md5_hex(""), "d41d8cd98f00b204e9800998ecf8427e")
+    assert_eq_str(sip_md5_hex("a"), "0cc175b9c0f1b6a831c399e269772661")
+}
+
+fn TestSdpAndRtp() {
+    let sdp = sdp_build_audio("u", "sess", "10.0.0.1", 4000, "0 8 101")
+    assert_eq(sdp_ok(sdp), 1)
+    assert(str_contains(sdp, "m=audio 4000"))
+    let line = sdp_attr_rtpmap(101, "telephone-event", 8000)
+    assert(str_contains(line, "rtpmap:101"))
+    let sdp2 = sdp_append_line(sdp, line)
+    assert(str_contains(sdp2, "telephone-event"))
+    let fmtp = sdp_attr_fmtp(101, "0-16")
+    assert(str_contains(fmtp, "fmtp:101"))
+
+    assert_eq(rtp_header_len(), 12)
+    let ssrc = 305419896   // 0x12345678
+    let pkt = rtp_pack(0, 1000, 160, ssrc, 1, "hello")
+    assert_eq(rtp_parse_ok(pkt), 1)
+    assert_eq(rtp_version(pkt), 2)
+    assert_eq(rtp_payload_type(pkt), 0)
+    assert_eq(rtp_seq(pkt), 1000)
+    assert_eq(rtp_timestamp(pkt), 160)
+    assert_eq(rtp_ssrc(pkt), ssrc)
+    assert_eq(rtp_marker(pkt), 1)
+    assert_eq_str(rtp_payload(pkt), "hello")
+}
+
+fn TestSipUdpRoundtrip() {
+    let fd = sip_udp_bind("127.0.0.1", 0)
+    if fd < 0 {
+        // environment without sockets
+        return
+    }
+    let port = udp_local_port(fd)
+    assert(port > 0)
+    let msg = sample_invite()
+    let n = sip_udp_send(fd, "127.0.0.1", port, msg)
+    assert(n > 0)
+    let got = sip_udp_recv(fd, 65535)
+    assert_eq(sip_ok(got), 1)
+    assert_eq_str(sip_method(got), "INVITE")
+    let _ = udp_close(fd)
+}

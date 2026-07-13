@@ -204,12 +204,105 @@ typedef struct {
     MakoString body;
 } MakoHttpRequest;
 
-static inline int mako_http_find_header(
+/* ---- Interned common HTTP tokens (static views — never free) ----
+ * Use for Content-Type on responses and known header-name compares.
+ */
+static inline MakoString mako_http_h_host(void) {
+    return mako_str_view("Host", 4);
+}
+static inline MakoString mako_http_h_user_agent(void) {
+    return mako_str_view("User-Agent", 10);
+}
+static inline MakoString mako_http_h_content_type(void) {
+    return mako_str_view("Content-Type", 12);
+}
+static inline MakoString mako_http_h_content_length(void) {
+    return mako_str_view("Content-Length", 14);
+}
+static inline MakoString mako_http_h_connection(void) {
+    return mako_str_view("Connection", 10);
+}
+static inline MakoString mako_http_h_transfer_encoding(void) {
+    return mako_str_view("Transfer-Encoding", 17);
+}
+static inline MakoString mako_http_h_accept(void) {
+    return mako_str_view("Accept", 6);
+}
+static inline MakoString mako_http_h_authorization(void) {
+    return mako_str_view("Authorization", 13);
+}
+
+static inline MakoString mako_http_ctype_text(void) {
+    return mako_str_view("text/plain; charset=utf-8", 25);
+}
+static inline MakoString mako_http_ctype_json(void) {
+    return mako_str_view("application/json; charset=utf-8", 31);
+}
+static inline MakoString mako_http_ctype_html(void) {
+    return mako_str_view("text/html; charset=utf-8", 24);
+}
+static inline MakoString mako_http_ctype_octets(void) {
+    return mako_str_view("application/octet-stream", 24);
+}
+static inline MakoString mako_http_ctype_form(void) {
+    return mako_str_view("application/x-www-form-urlencoded", 33);
+}
+
+/* Case-insensitive match of [p,p+n) against lower/canonical cstr. */
+static inline int mako_http_ci_eq_n(const char *p, size_t n, const char *lit, size_t ln) {
+    if (n != ln || !p || !lit) return 0;
+    for (size_t i = 0; i < n; i++) {
+        char a = p[i], b = lit[i];
+        if (a >= 'A' && a <= 'Z') a = (char)(a - 'A' + 'a');
+        if (b >= 'A' && b <= 'Z') b = (char)(b - 'A' + 'a');
+        if (a != b) return 0;
+    }
+    return 1;
+}
+
+/* Intern a header *name* view: common names → static canonical view; else borrow. */
+static inline MakoString mako_http_intern_header_name(const char *p, size_t n) {
+    if (!p || n == 0) return mako_str_empty;
+    if (mako_http_ci_eq_n(p, n, "host", 4)) return mako_http_h_host();
+    if (mako_http_ci_eq_n(p, n, "user-agent", 10)) return mako_http_h_user_agent();
+    if (mako_http_ci_eq_n(p, n, "content-type", 12)) return mako_http_h_content_type();
+    if (mako_http_ci_eq_n(p, n, "content-length", 14)) return mako_http_h_content_length();
+    if (mako_http_ci_eq_n(p, n, "connection", 10)) return mako_http_h_connection();
+    if (mako_http_ci_eq_n(p, n, "transfer-encoding", 17)) return mako_http_h_transfer_encoding();
+    if (mako_http_ci_eq_n(p, n, "accept", 6)) return mako_http_h_accept();
+    if (mako_http_ci_eq_n(p, n, "authorization", 13)) return mako_http_h_authorization();
+    return mako_str_view(p, n);
+}
+
+/* Intern common Content-Type values (static). Unknown → view of input. */
+static inline MakoString mako_http_intern_ctype(const char *p, size_t n) {
+    if (!p || n == 0) return mako_str_empty;
+    if (mako_http_ci_eq_n(p, n, "application/json", 16)
+        || mako_http_ci_eq_n(p, n, "application/json; charset=utf-8", 31))
+        return mako_http_ctype_json();
+    if (mako_http_ci_eq_n(p, n, "text/plain", 10)
+        || mako_http_ci_eq_n(p, n, "text/plain; charset=utf-8", 25))
+        return mako_http_ctype_text();
+    if (mako_http_ci_eq_n(p, n, "text/html", 9)
+        || mako_http_ci_eq_n(p, n, "text/html; charset=utf-8", 24))
+        return mako_http_ctype_html();
+    if (mako_http_ci_eq_n(p, n, "application/octet-stream", 24))
+        return mako_http_ctype_octets();
+    if (mako_http_ci_eq_n(p, n, "application/x-www-form-urlencoded", 33))
+        return mako_http_ctype_form();
+    return mako_str_view(p, n);
+}
+
+/* Locate header value as a view into `req` (no copy). out_p / out_len set on hit. */
+static inline int mako_http_find_header_view(
     const char *req,
     const char *name,
-    char *out,
-    size_t outcap
+    const char **out_p,
+    size_t *out_len
 ) {
+    if (out_p) *out_p = NULL;
+    if (out_len) *out_len = 0;
+    if (!req || !name) return 0;
     size_t nlen = strlen(name);
     const char *p = req;
     while (p && *p) {
@@ -230,81 +323,111 @@ static inline int mako_http_find_header(
             }
             if (match && line[nlen] == ':') {
                 const char *v = line + nlen + 1;
-                while (*v == ' ') v++;
+                while (*v == ' ' || *v == '\t') v++;
                 size_t vlen = (size_t)((line + llen) - v);
-                if (vlen >= outcap) vlen = outcap - 1;
-                memcpy(out, v, vlen);
-                out[vlen] = 0;
+                if (out_p) *out_p = v;
+                if (out_len) *out_len = vlen;
                 return 1;
             }
         }
         if (!nl) break;
         p = nl + 2;
     }
-    out[0] = 0;
     return 0;
 }
 
-static inline MakoHttpRequest mako_http_parse_request(MakoArena *arena, const char *raw, size_t n) {
-    MakoHttpRequest r;
-    r.method = mako_arena_cstr(arena, "GET");
-    r.path = mako_arena_cstr(arena, "/");
-    r.body = mako_arena_text_n(arena, "", 0);
-    if (!raw || n == 0) return r;
-    char line[1024];
-    size_t line_len = n;
-    const char *le = strstr(raw, "\r\n");
-    if (le) line_len = (size_t)(le - raw);
-    if (line_len >= sizeof(line)) line_len = sizeof(line) - 1;
-    memcpy(line, raw, line_len);
-    line[line_len] = 0;
-    char *sp1 = strchr(line, ' ');
-    if (sp1) {
-        *sp1 = 0;
-        r.method = mako_arena_cstr(arena, line);
-        char *sp2 = strchr(sp1 + 1, ' ');
-        if (sp2) *sp2 = 0;
-        r.path = mako_arena_cstr(arena, sp1 + 1);
+static inline int mako_http_find_header(
+    const char *req,
+    const char *name,
+    char *out,
+    size_t outcap
+) {
+    const char *vp = NULL;
+    size_t vlen = 0;
+    if (!mako_http_find_header_view(req, name, &vp, &vlen) || !out || outcap == 0) {
+        if (out && outcap) out[0] = 0;
+        return 0;
     }
-    const char *body = strstr(raw, "\r\n\r\n");
+    if (vlen >= outcap) vlen = outcap - 1;
+    memcpy(out, vp, vlen);
+    out[vlen] = 0;
+    return 1;
+}
+
+/* Parse request into views over `raw` (zero extra copies). Arena unused for fields
+ * but kept for API stability / optional sticky copies later. */
+static inline MakoHttpRequest mako_http_parse_request(MakoArena *arena, const char *raw, size_t n) {
+    (void)arena;
+    MakoHttpRequest r;
+    r.method = mako_str_view("GET", 3);
+    r.path = mako_str_view("/", 1);
+    r.body = mako_str_view("", 0);
+    if (!raw || n == 0) return r;
+    /* Request line: METHOD SP path SP HTTP/x.y */
+    const char *le = (const char *)memchr(raw, '\n', n);
+    size_t line_len = le ? (size_t)(le - raw) : n;
+    if (line_len > 0 && raw[line_len - 1] == '\r') line_len--;
+    const char *sp1 = (const char *)memchr(raw, ' ', line_len);
+    if (sp1) {
+        r.method = mako_str_view(raw, (size_t)(sp1 - raw));
+        const char *path0 = sp1 + 1;
+        size_t rest = line_len - (size_t)(path0 - raw);
+        const char *sp2 = (const char *)memchr(path0, ' ', rest);
+        if (sp2) {
+            r.path = mako_str_view(path0, (size_t)(sp2 - path0));
+        } else {
+            r.path = mako_str_view(path0, rest);
+        }
+    }
+    /* Body after \r\n\r\n */
+    const char *body = NULL;
+    for (size_t i = 0; i + 3 < n; i++) {
+        if (raw[i] == '\r' && raw[i + 1] == '\n' && raw[i + 2] == '\r' && raw[i + 3] == '\n') {
+            body = raw + i + 4;
+            break;
+        }
+    }
     if (body) {
-        body += 4;
         size_t blen = n - (size_t)(body - raw);
-        r.body = mako_arena_text_n(arena, body, blen);
+        r.body = mako_str_view(body, blen);
     }
     return r;
 }
 
+/* Zero-copy fill: one memcpy into c->raw, then views into c->raw for fields. */
 static inline void mako_http_fill_conn(MakoHttpConn *c, const char *req, size_t n) {
     c->raw_len = n;
     if (c->raw_len >= sizeof(c->raw)) c->raw_len = sizeof(c->raw) - 1;
     memcpy(c->raw, req, c->raw_len);
     c->raw[c->raw_len] = 0;
-    MakoHttpRequest hr = mako_http_parse_request(&c->arena, req, n);
+    /* Parse from durable conn buffer (not caller's stack). */
+    MakoHttpRequest hr = mako_http_parse_request(&c->arena, c->raw, c->raw_len);
     c->method = hr.method;
     c->path = hr.path;
     c->body = hr.body;
-    char tmp[512];
-    if (mako_http_find_header(req, "Host", tmp, sizeof(tmp)))
-        c->host = mako_arena_cstr(&c->arena, tmp);
+    const char *vp = NULL;
+    size_t vlen = 0;
+    if (mako_http_find_header_view(c->raw, "Host", &vp, &vlen))
+        c->host = mako_str_view(vp, vlen);
     else
-        c->host = mako_arena_text_n(&c->arena, "", 0);
-    if (mako_http_find_header(req, "User-Agent", tmp, sizeof(tmp)))
-        c->user_agent = mako_arena_cstr(&c->arena, tmp);
+        c->host = mako_str_view("", 0);
+    if (mako_http_find_header_view(c->raw, "User-Agent", &vp, &vlen))
+        c->user_agent = mako_str_view(vp, vlen);
     else
-        c->user_agent = mako_arena_text_n(&c->arena, "", 0);
-    if (mako_http_find_header(req, "Content-Type", tmp, sizeof(tmp)))
-        c->content_type_req = mako_arena_cstr(&c->arena, tmp);
+        c->user_agent = mako_str_view("", 0);
+    if (mako_http_find_header_view(c->raw, "Content-Type", &vp, &vlen))
+        c->content_type_req = mako_http_intern_ctype(vp, vlen);
     else
-        c->content_type_req = mako_arena_text_n(&c->arena, "", 0);
-    /* Keep-alive if Connection: keep-alive, or HTTP/1.1 without Connection: close */
+        c->content_type_req = mako_str_empty;
+    /* Keep-alive: only Connection needs a mutable temp for case fold. */
     c->keep_alive = 0;
-    if (mako_http_find_header(req, "Connection", tmp, sizeof(tmp))) {
+    char tmp[64];
+    if (mako_http_find_header(c->raw, "Connection", tmp, sizeof(tmp))) {
         for (char *p = tmp; *p; p++)
             if (*p >= 'A' && *p <= 'Z') *p = (char)(*p - 'A' + 'a');
         if (strstr(tmp, "keep-alive")) c->keep_alive = 1;
         if (strstr(tmp, "close")) c->keep_alive = 0;
-    } else if (strstr(req, "HTTP/1.1")) {
+    } else if (strstr(c->raw, "HTTP/1.1")) {
         c->keep_alive = 1; /* HTTP/1.1 default */
     }
 }
@@ -416,22 +539,30 @@ static inline int64_t mako_http_keepalive(int64_t conn) {
     return mako_http_conns[conn].keep_alive ? 1 : 0;
 }
 
+/* Accessors return views into conn->raw (valid until next request on this conn).
+ * Do not free .data; clone with mako_str_clone if you need ownership past that. */
 static inline MakoString mako_http_method(int64_t conn) {
     if (conn < 0 || conn >= MAKO_HTTP_CONN_MAX || !mako_http_conns[conn].live)
-        return mako_str_from_cstr("");
+        return mako_str_empty;
     return mako_http_conns[conn].method;
 }
 
 static inline MakoString mako_http_path(int64_t conn) {
     if (conn < 0 || conn >= MAKO_HTTP_CONN_MAX || !mako_http_conns[conn].live)
-        return mako_str_from_cstr("");
+        return mako_str_empty;
     return mako_http_conns[conn].path;
 }
 
 static inline MakoString mako_http_body(int64_t conn) {
     if (conn < 0 || conn >= MAKO_HTTP_CONN_MAX || !mako_http_conns[conn].live)
-        return mako_str_from_cstr("");
+        return mako_str_empty;
     return mako_http_conns[conn].body;
+}
+
+static inline MakoString mako_http_host(int64_t conn) {
+    if (conn < 0 || conn >= MAKO_HTTP_CONN_MAX || !mako_http_conns[conn].live)
+        return mako_str_empty;
+    return mako_http_conns[conn].host;
 }
 
 /* ---- Typed HttpRequest (value type for handlers / TLS docs) ---- */
@@ -445,19 +576,21 @@ static inline MakoHttpRequest mako_http_request_empty(void) {
 }
 
 static inline MakoHttpRequest mako_http_request_parse(MakoString raw) {
-    MakoHttpRequest r = mako_http_request_empty();
+    /* Zero-copy views into `raw` (caller keeps raw alive). */
+    MakoHttpRequest r;
+    r.method = mako_str_view("GET", 3);
+    r.path = mako_str_view("/", 1);
+    r.body = mako_str_view("", 0);
     if (!raw.data || raw.len == 0) return r;
     size_t i = 0;
     while (i < raw.len && raw.data[i] != ' ') i++;
     if (i == 0 || i >= raw.len) return r;
-    free(r.method.data);
-    r.method = mako_str_slice(raw, 0, (int64_t)i);
+    r.method = mako_str_view(raw.data, i);
     size_t p0 = i + 1;
     size_t p1 = p0;
     while (p1 < raw.len && raw.data[p1] != ' ' && raw.data[p1] != '\r' && raw.data[p1] != '\n')
         p1++;
-    free(r.path.data);
-    r.path = mako_str_slice(raw, (int64_t)p0, (int64_t)p1);
+    r.path = mako_str_view(raw.data + p0, p1 - p0);
     const char *sep = NULL;
     for (size_t k = 0; k + 3 < raw.len; k++) {
         if (raw.data[k] == '\r' && raw.data[k + 1] == '\n' && raw.data[k + 2] == '\r' &&
@@ -476,8 +609,7 @@ static inline MakoHttpRequest mako_http_request_parse(MakoString raw) {
     }
     if (sep) {
         size_t off = (size_t)(sep - raw.data);
-        free(r.body.data);
-        r.body = mako_str_slice(raw, (int64_t)off, (int64_t)raw.len);
+        r.body = mako_str_view(raw.data + off, raw.len - off);
     }
     return r;
 }
@@ -881,6 +1013,7 @@ static inline int64_t mako_http_respond(int64_t conn, int64_t status, MakoString
         return 0;
     MakoHttpConn *c = &mako_http_conns[conn];
     int ka = c->keep_alive ? 1 : 0;
+    /* Static interned Content-Type — no heap for the default text reply. */
     mako_http_reply_conn(c->fd, (int)status, "text/plain; charset=utf-8", body, ka);
     if (!ka) {
         mako_sock_close(c->fd);
@@ -899,9 +1032,15 @@ static inline int64_t mako_http_respond_ct(
     if (conn < 0 || conn >= MAKO_HTTP_CONN_MAX || !mako_http_conns[conn].live)
         return 0;
     MakoHttpConn *c = &mako_http_conns[conn];
+    /* Prefer interned common types (static data pointer → stack ctype copy only). */
+    MakoString ct = content_type;
+    if (ct.data && ct.len > 0) {
+        MakoString interned = mako_http_intern_ctype(ct.data, ct.len);
+        if (interned.data != ct.data) ct = interned;
+    }
     char ctype[128];
-    size_t n = content_type.len < sizeof(ctype) - 1 ? content_type.len : sizeof(ctype) - 1;
-    memcpy(ctype, content_type.data, n);
+    size_t n = ct.len < sizeof(ctype) - 1 ? ct.len : sizeof(ctype) - 1;
+    if (ct.data && n) memcpy(ctype, ct.data, n);
     ctype[n] = 0;
     int ka = c->keep_alive ? 1 : 0;
     mako_http_reply_conn(c->fd, (int)status, ctype, body, ka);
@@ -913,11 +1052,9 @@ static inline int64_t mako_http_respond_ct(
     return 1;
 }
 
-/* JSON response helper for API handlers (Content-Type: application/json). */
+/* JSON response helper — interned Content-Type (no malloc for the type string). */
 static inline int64_t mako_http_respond_json(int64_t conn, int64_t status, MakoString body) {
-    return mako_http_respond_ct(
-        conn, status, mako_str_from_cstr("application/json; charset=utf-8"), body
-    );
+    return mako_http_respond_ct(conn, status, mako_http_ctype_json(), body);
 }
 
 static inline MakoString mako_http_health_json(MakoString service, int64_t ready) {
@@ -1214,8 +1351,8 @@ static inline bool mako_http2_is_settings_ack(MakoString s) {
 }
 
 /* Multi-entry dynamic table (RFC 7541 §2.3). Newest @ HPACK index 62.
- * Limits: capacity 4, FIFO eviction of oldest, process-global, no Huffman. */
-#define MAKO_HPACK_DYN_CAP 4
+ * Entry cap 64; byte budget from SETTINGS_HEADER_TABLE_SIZE (default 4096). */
+#define MAKO_HPACK_DYN_CAP 64
 typedef struct {
     char *n;
     size_t nlen;
@@ -1224,6 +1361,8 @@ typedef struct {
 } MakoHpackDynEntry;
 static MakoHpackDynEntry mako_hpack_dyn_tab[MAKO_HPACK_DYN_CAP];
 static int mako_hpack_dyn_count = 0;
+static size_t mako_hpack_dyn_bytes = 0;
+static size_t mako_hpack_dyn_size_limit = 4096;
 
 static inline void mako_hpack_dyn_free_entry(MakoHpackDynEntry *e) {
     free(e->n); e->n = NULL; e->nlen = 0;
@@ -1235,13 +1374,45 @@ static inline void mako_hpack_dyn_clear(void) {
         mako_hpack_dyn_free_entry(&mako_hpack_dyn_tab[i]);
     }
     mako_hpack_dyn_count = 0;
+    mako_hpack_dyn_bytes = 0;
 }
 
-/* Insert at front (newest). Evicts oldest if full. Returns HPACK index 62, or -1. */
+/* Entry size per RFC 7541 §4.1: name_len + value_len + 32. */
+static inline size_t mako_hpack_dyn_entry_size(size_t nl, size_t vl) {
+    return nl + vl + 32;
+}
+
+static inline void mako_hpack_dyn_evict_to_fit(size_t need) {
+    while (mako_hpack_dyn_count > 0
+           && (mako_hpack_dyn_bytes + need > mako_hpack_dyn_size_limit
+               || mako_hpack_dyn_count >= MAKO_HPACK_DYN_CAP)) {
+        int last = mako_hpack_dyn_count - 1;
+        size_t es = mako_hpack_dyn_entry_size(
+            mako_hpack_dyn_tab[last].nlen, mako_hpack_dyn_tab[last].vlen
+        );
+        if (mako_hpack_dyn_bytes >= es) mako_hpack_dyn_bytes -= es;
+        else mako_hpack_dyn_bytes = 0;
+        mako_hpack_dyn_free_entry(&mako_hpack_dyn_tab[last]);
+        mako_hpack_dyn_count--;
+    }
+}
+
+/* Apply SETTINGS_HEADER_TABLE_SIZE (byte budget). Evicts if shrinking. */
+static inline void mako_hpack_dyn_set_size_limit(size_t limit) {
+    mako_hpack_dyn_size_limit = limit;
+    mako_hpack_dyn_evict_to_fit(0);
+}
+
+/* Insert at front (newest). Evicts by byte budget / entry cap. Returns index 62, or -1. */
 static inline int64_t mako_hpack_dyn_insert(MakoString name, MakoString value) {
     size_t nl = name.data ? name.len : 0;
     size_t vl = value.data ? value.len : 0;
-    if (nl == 0 || nl > 127 || vl > 127) return -1;
+    if (nl == 0 || nl > 4096 || vl > 65536) return -1;
+    size_t need = mako_hpack_dyn_entry_size(nl, vl);
+    if (need > mako_hpack_dyn_size_limit) {
+        /* Entry larger than table — do not insert (RFC 7541 §4.4). */
+        return -1;
+    }
     char *nn = (char *)malloc(nl + 1);
     char *vv = (char *)malloc(vl + 1);
     if (!nn || !vv) {
@@ -1253,9 +1424,11 @@ static inline int64_t mako_hpack_dyn_insert(MakoString name, MakoString value) {
     nn[nl] = 0;
     if (vl && value.data) memcpy(vv, value.data, vl);
     vv[vl] = 0;
-    if (mako_hpack_dyn_count == MAKO_HPACK_DYN_CAP) {
-        mako_hpack_dyn_free_entry(&mako_hpack_dyn_tab[MAKO_HPACK_DYN_CAP - 1]);
-        mako_hpack_dyn_count = MAKO_HPACK_DYN_CAP - 1;
+    mako_hpack_dyn_evict_to_fit(need);
+    if (mako_hpack_dyn_count >= MAKO_HPACK_DYN_CAP) {
+        free(nn);
+        free(vv);
+        return -1;
     }
     for (int i = mako_hpack_dyn_count; i > 0; i--) {
         mako_hpack_dyn_tab[i] = mako_hpack_dyn_tab[i - 1];
@@ -1265,6 +1438,7 @@ static inline int64_t mako_hpack_dyn_insert(MakoString name, MakoString value) {
     mako_hpack_dyn_tab[0].v = vv;
     mako_hpack_dyn_tab[0].vlen = vl;
     mako_hpack_dyn_count++;
+    mako_hpack_dyn_bytes += need;
     return 62;
 }
 
@@ -1727,11 +1901,32 @@ static inline MakoString mako_http2_data_frame(int64_t stream, MakoString payloa
     return mako_http2_build_frame(0, stream, flags, payload);
 }
 
+/* Early limits + max-frame so response builders can reference them.
+ * Full stream tables live later with the connection state machine. */
+#ifndef MAKO_H2_STREAM_SLOTS
+#define MAKO_H2_STREAM_SLOTS 64
+#define MAKO_H2_DEFAULT_WINDOW 65535
+#define MAKO_H2_READY_MAX 64
+#define MAKO_H2_STREAM_BODY_MAX (64 * 1024)
+#define MAKO_H2_HDR_MAX (16 * 1024)
+#define MAKO_H2_WU_THRESHOLD 16384
+#endif
+static int64_t mako_h2_max_frame_size = 16384;
+
+/* Forward: send-window consume (defined with flow-control helpers). */
+static inline int64_t mako_http2_window_consume(int64_t stream, int64_t nbytes);
+/* Stream state arrays (defined with connection state machine). */
+static int64_t mako_h2_sids[MAKO_H2_STREAM_SLOTS];
+static int64_t mako_h2_states[MAKO_H2_STREAM_SLOTS];
+
 /* Build a complete HTTP/2 response for `stream`: a HEADERS frame carrying
- * `:status` + `content-length`, followed by DATA frame(s) with the body and
- * END_STREAM on the final frame. Splits large bodies across multiple DATA
- * frames respecting the default SETTINGS_MAX_FRAME_SIZE (16384 bytes). */
-static inline MakoString mako_http2_response(int64_t stream, int64_t status, MakoString body) {
+ * `:status` + optional content-type + `content-length`, followed by DATA
+ * frame(s) with the body and END_STREAM on the final frame. Splits large
+ * bodies using peer SETTINGS_MAX_FRAME_SIZE. Consumes *send* windows for
+ * the body; returns empty if flow-control blocked. */
+static inline MakoString mako_http2_response_ex(
+    int64_t stream, int64_t status, MakoString content_type, MakoString body
+) {
     /* :status — indexed for the common static-table codes, else literal. */
     MakoString sh;
     switch (status) {
@@ -1749,30 +1944,61 @@ static inline MakoString mako_http2_response(int64_t stream, int64_t status, Mak
                                            mako_str_from_cstr(code));
         }
     }
+    MakoString block = sh;
+    if (content_type.data && content_type.len > 0) {
+        MakoString cth = mako_hpack_encode_literal(
+            mako_str_from_cstr("content-type"), content_type
+        );
+        MakoString next = mako_str_concat(block, cth);
+        free(block.data);
+        free(cth.data);
+        block = next;
+    }
     char clen[24];
-    snprintf(clen, sizeof(clen), "%zu", body.len);
+    snprintf(clen, sizeof(clen), "%zu", body.data ? body.len : 0);
     MakoString clh = mako_hpack_encode_literal(mako_str_from_cstr("content-length"),
                                                mako_str_from_cstr(clen));
-    MakoString block = mako_str_concat(sh, clh);
-    free(sh.data);
-    free(clh.data);
+    {
+        MakoString next = mako_str_concat(block, clh);
+        free(block.data);
+        free(clh.data);
+        block = next;
+    }
     MakoString hf = mako_http2_headers_frame(stream, block, 0x4); /* END_HEADERS */
     free(block.data);
 
-    /* Split body into DATA frames of at most 16384 bytes each. */
-    #define MAKO_H2_MAX_FRAME 16384
     size_t blen = body.data ? body.len : 0;
-    if (blen <= MAKO_H2_MAX_FRAME) {
+    /* Consume send windows when the stream is live. Offline frame construction
+     * (no open stream) still builds bytes without FC. */
+    if (blen > 0) {
+        int live = 0;
+        for (int j = 0; j < MAKO_H2_STREAM_SLOTS; j++) {
+            if (mako_h2_states[j] != 0 && mako_h2_sids[j] == stream) {
+                live = 1;
+                break;
+            }
+        }
+        if (live && mako_http2_window_consume(stream, (int64_t)blen) < 0) {
+            free(hf.data);
+            return mako_str_from_cstr("");
+        }
+    }
+    size_t max_frame = 16384;
+    {
+        int64_t mf = mako_h2_max_frame_size;
+        if (mf < 16384) mf = 16384;
+        if (mf > 16777215) mf = 16777215;
+        max_frame = (size_t)mf;
+    }
+    if (blen <= max_frame) {
         MakoString df = mako_http2_data_frame(stream, body, 0x1); /* END_STREAM */
         MakoString out = mako_str_concat(hf, df);
         free(hf.data);
         free(df.data);
         return out;
     }
-    /* Multiple DATA frames needed. */
     size_t total = hf.len;
-    size_t nframes = (blen + MAKO_H2_MAX_FRAME - 1) / MAKO_H2_MAX_FRAME;
-    /* Pre-calculate total output size: header frame + n*(9-byte frame header) + body */
+    size_t nframes = (blen + max_frame - 1) / max_frame;
     total += nframes * 9 + blen;
     char *out = (char *)malloc(total + 1);
     if (!out) { free(hf.data); return (MakoString){NULL, 0}; }
@@ -1782,13 +2008,12 @@ static inline MakoString mako_http2_response(int64_t stream, int64_t status, Mak
     size_t off = 0;
     while (off < blen) {
         size_t chunk = blen - off;
-        if (chunk > MAKO_H2_MAX_FRAME) chunk = MAKO_H2_MAX_FRAME;
-        int64_t flags = (off + chunk >= blen) ? 0x1 : 0x0; /* END_STREAM on last */
-        /* Write 9-byte DATA frame header inline */
+        if (chunk > max_frame) chunk = max_frame;
+        int64_t flags = (off + chunk >= blen) ? 0x1 : 0x0;
         out[pos+0] = (char)((chunk >> 16) & 0xff);
         out[pos+1] = (char)((chunk >> 8) & 0xff);
         out[pos+2] = (char)(chunk & 0xff);
-        out[pos+3] = 0; /* type = DATA */
+        out[pos+3] = 0;
         out[pos+4] = (char)(flags & 0xff);
         unsigned int sid = (unsigned int)(stream & 0x7fffffff);
         out[pos+5] = (char)((sid >> 24) & 0xff);
@@ -1800,8 +2025,19 @@ static inline MakoString mako_http2_response(int64_t stream, int64_t status, Mak
         off += chunk;
     }
     out[pos] = 0;
-    #undef MAKO_H2_MAX_FRAME
     return (MakoString){out, pos};
+}
+
+/* Default response (no content-type). */
+static inline MakoString mako_http2_response(int64_t stream, int64_t status, MakoString body) {
+    return mako_http2_response_ex(stream, status, (MakoString){NULL, 0}, body);
+}
+
+/* Response with content-type (e.g. "application/json"). */
+static inline MakoString mako_http2_response_ct(
+    int64_t stream, int64_t status, MakoString content_type, MakoString body
+) {
+    return mako_http2_response_ex(stream, status, content_type, body);
 }
 
 /* CONTINUATION (type=9) — header-block fragment. END_HEADERS=0x4. */
@@ -2108,26 +2344,30 @@ static inline int64_t mako_http2_push_promise_stream(MakoString s) {
 
 /* HTTP/2 stream state — concurrent stream slots for multiplexing.
  * States: 0 idle, 1 open, 2 half-closed (local and/or remote), 3 closed.
- * Direction flags track END_STREAM: remote=received, local=sent. */
-#define MAKO_H2_STREAM_SLOTS 32
-#define MAKO_H2_DEFAULT_WINDOW 65535
-#define MAKO_H2_READY_MAX 32
-#define MAKO_H2_STREAM_BODY_MAX 16384
-static int64_t mako_h2_sids[MAKO_H2_STREAM_SLOTS];
-static int64_t mako_h2_states[MAKO_H2_STREAM_SLOTS];
+ * Direction flags track END_STREAM: remote=received, local=sent.
+ * Slot limits / max_frame_size / sids / states declared earlier (response path). */
 static int mako_h2_es_remote[MAKO_H2_STREAM_SLOTS];
 static int mako_h2_es_local[MAKO_H2_STREAM_SLOTS];
+/* Send windows: how much DATA we may still send (peer-granted). */
 static int64_t mako_h2_stream_windows[MAKO_H2_STREAM_SLOTS];
+/* Recv windows: how much DATA peer may still send us (we-granted). */
+static int64_t mako_h2_recv_stream_windows[MAKO_H2_STREAM_SLOTS];
 static int64_t mako_h2_pri_dep[MAKO_H2_STREAM_SLOTS];
 static int64_t mako_h2_pri_weight[MAKO_H2_STREAM_SLOTS];
 static int64_t mako_h2_pri_excl[MAKO_H2_STREAM_SLOTS];
 static int64_t mako_h2_last_sid = 0;
 
-/* Connection-level flow-control window (outbound DATA budget seed). */
+/* Connection-level send / recv windows (RFC 7540 dual accounting). */
 static int64_t mako_h2_conn_window = MAKO_H2_DEFAULT_WINDOW;
+static int64_t mako_h2_recv_conn_window = MAKO_H2_DEFAULT_WINDOW;
+/* Inbound bytes received but not yet WINDOW_UPDATE'd (conn-level). */
+static int64_t mako_h2_conn_unacked = 0;
+/* Per-stream unacked inbound DATA for auto WINDOW_UPDATE. */
+static int64_t mako_h2_stream_unacked[MAKO_H2_STREAM_SLOTS];
+/* Body overflow: inbound DATA exceeded MAKO_H2_STREAM_BODY_MAX. */
+static int mako_h2_stream_body_overflow[MAKO_H2_STREAM_SLOTS];
 
-/* CONTINUATION header-block assembly (Partial): buffer until END_HEADERS. */
-#define MAKO_H2_HDR_MAX 4096
+/* CONTINUATION header-block assembly: buffer until END_HEADERS. */
 static int mako_h2_hdr_assembling = 0;
 static int64_t mako_h2_hdr_stream = 0;
 static char mako_h2_hdr_acc[MAKO_H2_HDR_MAX];
@@ -2160,7 +2400,10 @@ static inline void mako_http2_ready_reset(void) {
     for (int i = 0; i < MAKO_H2_STREAM_SLOTS; i++) {
         mako_h2_stream_body_len[i] = 0;
         mako_h2_stream_body_done[i] = 0;
+        mako_h2_stream_unacked[i] = 0;
+        mako_h2_stream_body_overflow[i] = 0;
     }
+    mako_h2_conn_unacked = 0;
 }
 
 static inline void mako_http2_ready_push(int64_t sid, const char *hdr, size_t hlen) {
@@ -2226,14 +2469,19 @@ static inline void mako_http2_stream_reset(void) {
         mako_h2_es_remote[i] = 0;
         mako_h2_es_local[i] = 0;
         mako_h2_stream_windows[i] = MAKO_H2_DEFAULT_WINDOW;
+        mako_h2_recv_stream_windows[i] = MAKO_H2_DEFAULT_WINDOW;
         mako_h2_pri_dep[i] = 0;
         mako_h2_pri_weight[i] = 16; /* RFC default weight */
         mako_h2_pri_excl[i] = 0;
         mako_h2_stream_body_len[i] = 0;
         mako_h2_stream_body_done[i] = 0;
+        mako_h2_stream_unacked[i] = 0;
+        mako_h2_stream_body_overflow[i] = 0;
     }
     mako_h2_last_sid = 0;
     mako_h2_conn_window = MAKO_H2_DEFAULT_WINDOW;
+    mako_h2_recv_conn_window = MAKO_H2_DEFAULT_WINDOW;
+    mako_h2_conn_unacked = 0;
     mako_http2_hdr_assembly_reset();
 }
 
@@ -2249,8 +2497,13 @@ static int mako_h2_conn_closing = 0;
 static int64_t mako_h2_goaway_last = -1;
 /* Set when peer sends non-ACK SETTINGS — ACK response needed. */
 static int mako_h2_conn_settings_ack_needed = 0;
-/* SETTINGS_MAX_CONCURRENT_STREAMS (0x3). 0 = unlimited (default until peer sets). */
+/* SETTINGS (peer → local). 0 = unlimited / default until peer sets. */
 static int64_t mako_h2_max_concurrent = 0;
+static int64_t mako_h2_header_table_size = 4096; /* SETTINGS_HEADER_TABLE_SIZE 0x1 */
+static int64_t mako_h2_enable_push = 1;          /* SETTINGS_ENABLE_PUSH 0x2 */
+static int64_t mako_h2_initial_window = MAKO_H2_DEFAULT_WINDOW; /* 0x4 */
+/* mako_h2_max_frame_size declared with stream slots (above). */
+static int64_t mako_h2_max_header_list = 0;      /* SETTINGS_MAX_HEADER_LIST_SIZE 0x6 */
 /* Pending PING ACK: opaque[8] when peer sent non-ACK PING. */
 static int mako_h2_ping_ack_needed = 0;
 static unsigned char mako_h2_ping_opaque[8];
@@ -2267,11 +2520,17 @@ static inline void mako_http2_conn_reset(void) {
     mako_h2_goaway_last = -1;
     mako_h2_conn_settings_ack_needed = 0;
     mako_h2_max_concurrent = 0;
+    mako_h2_header_table_size = 4096;
+    mako_h2_enable_push = 1;
+    mako_h2_initial_window = MAKO_H2_DEFAULT_WINDOW;
+    mako_h2_max_frame_size = 16384;
+    mako_h2_max_header_list = 0;
     mako_h2_ping_ack_needed = 0;
     memset(mako_h2_ping_opaque, 0, 8);
     mako_h2_is_server = 0;
     /* HPACK dynamic table is connection-scoped per RFC 7541 — reset it with
      * the connection so leftovers cannot poison a later peer's decoder. */
+    mako_hpack_dyn_size_limit = 4096;
     mako_hpack_dyn_clear();
     mako_hpack_decode_clear();
     mako_http2_stream_reset();
@@ -2293,11 +2552,16 @@ typedef struct {
     int es_remote[MAKO_H2_STREAM_SLOTS];
     int es_local[MAKO_H2_STREAM_SLOTS];
     int64_t stream_windows[MAKO_H2_STREAM_SLOTS];
+    int64_t recv_stream_windows[MAKO_H2_STREAM_SLOTS];
     int64_t pri_dep[MAKO_H2_STREAM_SLOTS];
     int64_t pri_weight[MAKO_H2_STREAM_SLOTS];
     int64_t pri_excl[MAKO_H2_STREAM_SLOTS];
     int64_t last_sid;
     int64_t conn_window;
+    int64_t recv_conn_window;
+    int64_t conn_unacked;
+    int64_t stream_unacked[MAKO_H2_STREAM_SLOTS];
+    int stream_body_overflow[MAKO_H2_STREAM_SLOTS];
     int hdr_assembling;
     int64_t hdr_stream;
     char hdr_acc[MAKO_H2_HDR_MAX];
@@ -2310,6 +2574,11 @@ typedef struct {
     int64_t goaway_last;
     int conn_settings_ack_needed;
     int64_t max_concurrent;
+    int64_t header_table_size;
+    int64_t enable_push;
+    int64_t initial_window;
+    int64_t max_frame_size;
+    int64_t max_header_list;
     int ping_ack_needed;
     unsigned char ping_opaque[8];
     int is_server;
@@ -2335,11 +2604,16 @@ static inline void mako_h2_conn_save(MakoHttp2Conn *c) {
     memcpy(c->es_remote, mako_h2_es_remote, sizeof(mako_h2_es_remote));
     memcpy(c->es_local, mako_h2_es_local, sizeof(mako_h2_es_local));
     memcpy(c->stream_windows, mako_h2_stream_windows, sizeof(mako_h2_stream_windows));
+    memcpy(c->recv_stream_windows, mako_h2_recv_stream_windows, sizeof(mako_h2_recv_stream_windows));
     memcpy(c->pri_dep, mako_h2_pri_dep, sizeof(mako_h2_pri_dep));
     memcpy(c->pri_weight, mako_h2_pri_weight, sizeof(mako_h2_pri_weight));
     memcpy(c->pri_excl, mako_h2_pri_excl, sizeof(mako_h2_pri_excl));
     c->last_sid = mako_h2_last_sid;
     c->conn_window = mako_h2_conn_window;
+    c->recv_conn_window = mako_h2_recv_conn_window;
+    c->conn_unacked = mako_h2_conn_unacked;
+    memcpy(c->stream_unacked, mako_h2_stream_unacked, sizeof(mako_h2_stream_unacked));
+    memcpy(c->stream_body_overflow, mako_h2_stream_body_overflow, sizeof(mako_h2_stream_body_overflow));
     c->hdr_assembling = mako_h2_hdr_assembling;
     c->hdr_stream = mako_h2_hdr_stream;
     memcpy(c->hdr_acc, mako_h2_hdr_acc, sizeof(mako_h2_hdr_acc));
@@ -2356,6 +2630,11 @@ static inline void mako_h2_conn_save(MakoHttp2Conn *c) {
     c->goaway_last = mako_h2_goaway_last;
     c->conn_settings_ack_needed = mako_h2_conn_settings_ack_needed;
     c->max_concurrent = mako_h2_max_concurrent;
+    c->header_table_size = mako_h2_header_table_size;
+    c->enable_push = mako_h2_enable_push;
+    c->initial_window = mako_h2_initial_window;
+    c->max_frame_size = mako_h2_max_frame_size;
+    c->max_header_list = mako_h2_max_header_list;
     c->ping_ack_needed = mako_h2_ping_ack_needed;
     memcpy(c->ping_opaque, mako_h2_ping_opaque, sizeof(mako_h2_ping_opaque));
     c->is_server = mako_h2_is_server;
@@ -2376,11 +2655,16 @@ static inline void mako_h2_conn_load(const MakoHttp2Conn *c) {
     memcpy(mako_h2_es_remote, c->es_remote, sizeof(mako_h2_es_remote));
     memcpy(mako_h2_es_local, c->es_local, sizeof(mako_h2_es_local));
     memcpy(mako_h2_stream_windows, c->stream_windows, sizeof(mako_h2_stream_windows));
+    memcpy(mako_h2_recv_stream_windows, c->recv_stream_windows, sizeof(mako_h2_recv_stream_windows));
     memcpy(mako_h2_pri_dep, c->pri_dep, sizeof(mako_h2_pri_dep));
     memcpy(mako_h2_pri_weight, c->pri_weight, sizeof(mako_h2_pri_weight));
     memcpy(mako_h2_pri_excl, c->pri_excl, sizeof(mako_h2_pri_excl));
     mako_h2_last_sid = c->last_sid;
     mako_h2_conn_window = c->conn_window;
+    mako_h2_recv_conn_window = c->recv_conn_window;
+    mako_h2_conn_unacked = c->conn_unacked;
+    memcpy(mako_h2_stream_unacked, c->stream_unacked, sizeof(mako_h2_stream_unacked));
+    memcpy(mako_h2_stream_body_overflow, c->stream_body_overflow, sizeof(mako_h2_stream_body_overflow));
     mako_h2_hdr_assembling = c->hdr_assembling;
     mako_h2_hdr_stream = c->hdr_stream;
     memcpy(mako_h2_hdr_acc, c->hdr_acc, sizeof(mako_h2_hdr_acc));
@@ -2397,6 +2681,11 @@ static inline void mako_h2_conn_load(const MakoHttp2Conn *c) {
     mako_h2_goaway_last = c->goaway_last;
     mako_h2_conn_settings_ack_needed = c->conn_settings_ack_needed;
     mako_h2_max_concurrent = c->max_concurrent;
+    mako_h2_header_table_size = c->header_table_size;
+    mako_h2_enable_push = c->enable_push;
+    mako_h2_initial_window = c->initial_window;
+    mako_h2_max_frame_size = c->max_frame_size;
+    mako_h2_max_header_list = c->max_header_list;
     mako_h2_ping_ack_needed = c->ping_ack_needed;
     memcpy(mako_h2_ping_opaque, c->ping_opaque, sizeof(mako_h2_ping_opaque));
     mako_h2_is_server = c->is_server;
@@ -2476,8 +2765,8 @@ static inline int64_t mako_http2_conn_active_streams(void) {
     return n;
 }
 
-/* Flow-control window seed (Partial). Default 65535.
- * stream=0 → connection window. blocked when window == 0. */
+/* Send-side flow control (RFC 7540): how much DATA we may still send.
+ * stream=0 → connection send window. blocked when window == 0. */
 static inline int64_t mako_http2_window_of(int64_t stream) {
     if (stream == 0) return mako_h2_conn_window;
     for (int i = 0; i < MAKO_H2_STREAM_SLOTS; i++) {
@@ -2494,9 +2783,22 @@ static inline int64_t mako_http2_window_blocked(int64_t stream) {
     if (w < 0) return -1;
     return w == 0 ? 1 : 0;
 }
-/* Consume nbytes from stream + connection windows (outbound DATA). Returns 0 ok, -1 blocked/error. */
+/* Recv-side: how much DATA the peer may still send us. */
+static inline int64_t mako_http2_recv_window_of(int64_t stream) {
+    if (stream == 0) return mako_h2_recv_conn_window;
+    for (int i = 0; i < MAKO_H2_STREAM_SLOTS; i++) {
+        if (mako_h2_states[i] != 0 && mako_h2_sids[i] == stream)
+            return mako_h2_recv_stream_windows[i];
+    }
+    return -1;
+}
+static inline int64_t mako_http2_recv_window_conn(void) {
+    return mako_h2_recv_conn_window;
+}
+/* Consume nbytes from send windows (outbound DATA). Returns 0 ok, -1 blocked. */
 static inline int64_t mako_http2_window_consume(int64_t stream, int64_t nbytes) {
     if (nbytes < 0) return -1;
+    if (nbytes == 0) return 0;
     if (stream == 0) {
         if (mako_h2_conn_window < nbytes) return -1;
         mako_h2_conn_window -= nbytes;
@@ -2512,7 +2814,46 @@ static inline int64_t mako_http2_window_consume(int64_t stream, int64_t nbytes) 
     mako_h2_conn_window -= nbytes;
     return 0;
 }
-/* Apply WINDOW_UPDATE increment (stream 0 = connection). Returns new window or -1. */
+/* Consume inbound DATA from recv windows. Returns 0 ok, -1 FLOW_CONTROL_ERROR. */
+static inline int64_t mako_http2_recv_window_consume(int64_t stream, int64_t nbytes) {
+    if (nbytes < 0) return -1;
+    if (nbytes == 0) return 0;
+    if (stream == 0) {
+        if (mako_h2_recv_conn_window < nbytes) return -1;
+        mako_h2_recv_conn_window -= nbytes;
+        return 0;
+    }
+    int i = -1;
+    for (int j = 0; j < MAKO_H2_STREAM_SLOTS; j++) {
+        if (mako_h2_states[j] != 0 && mako_h2_sids[j] == stream) { i = j; break; }
+    }
+    if (i < 0) return -1;
+    if (mako_h2_recv_stream_windows[i] < nbytes || mako_h2_recv_conn_window < nbytes)
+        return -1;
+    mako_h2_recv_stream_windows[i] -= nbytes;
+    mako_h2_recv_conn_window -= nbytes;
+    return 0;
+}
+/* Restore recv window after we send WINDOW_UPDATE (local credit). */
+static inline int64_t mako_http2_recv_window_increment(int64_t stream, int64_t inc) {
+    if (inc <= 0 || inc > 0x7fffffff) return -1;
+    if (stream == 0) {
+        int64_t n = mako_h2_recv_conn_window + inc;
+        if (n > 0x7fffffff) return -1;
+        mako_h2_recv_conn_window = n;
+        return mako_h2_recv_conn_window;
+    }
+    int i = -1;
+    for (int j = 0; j < MAKO_H2_STREAM_SLOTS; j++) {
+        if (mako_h2_states[j] != 0 && mako_h2_sids[j] == stream) { i = j; break; }
+    }
+    if (i < 0) return -1;
+    int64_t n = mako_h2_recv_stream_windows[i] + inc;
+    if (n > 0x7fffffff) return -1;
+    mako_h2_recv_stream_windows[i] = n;
+    return n;
+}
+/* Apply peer WINDOW_UPDATE to *send* windows (stream 0 = connection). */
 static inline int64_t mako_http2_window_increment(int64_t stream, int64_t inc) {
     if (inc <= 0 || inc > 0x7fffffff) return -1;
     if (stream == 0) {
@@ -2534,6 +2875,7 @@ static inline int64_t mako_http2_window_increment(int64_t stream, int64_t inc) {
                 mako_h2_es_remote[j] = 0;
                 mako_h2_es_local[j] = 0;
                 mako_h2_stream_windows[j] = MAKO_H2_DEFAULT_WINDOW;
+                mako_h2_recv_stream_windows[j] = MAKO_H2_DEFAULT_WINDOW;
                 mako_h2_pri_dep[j] = 0;
                 mako_h2_pri_weight[j] = 16;
                 mako_h2_pri_excl[j] = 0;
@@ -2556,13 +2898,38 @@ static inline int64_t mako_http2_priority_apply(MakoString frame);
 static inline int mako_http2_stream_find(int64_t sid);
 static inline int64_t mako_http2_conn_active_streams(void);
 
+/* Strip PADDED (flag 0x8) and PRIORITY (flag 0x20, HEADERS only) from a
+ * frame payload, writing the header-block / DATA region into *out_data/*out_len.
+ * Returns 0 ok, -1 malformed (pad exceeds length, etc.). */
+static inline int mako_http2_payload_content(
+    const unsigned char *payload, size_t len, int64_t flags, int is_headers,
+    const unsigned char **out_data, size_t *out_len
+) {
+    size_t off = 0;
+    size_t pad = 0;
+    if ((flags & 0x8) != 0) { /* PADDED */
+        if (len < 1) return -1;
+        pad = payload[0];
+        off = 1;
+    }
+    if (is_headers && (flags & 0x20) != 0) { /* PRIORITY on HEADERS */
+        if (len < off + 5) return -1;
+        off += 5;
+    }
+    if (off + pad > len) return -1;
+    *out_data = payload + off;
+    *out_len = len - off - pad;
+    return 0;
+}
+
 /* Feed inbound bytes (client preface and/or frames). Returns 0 ok, -1 error.
  * After GOAWAY: closing=1, last-stream stored. PING/GOAWAY always ok.
  * Frames on stream_id <= last-stream allowed; HEADERS opening stream > last → -1.
  * WINDOW_UPDATE increments the matching window.
  * HEADERS/DATA/RST_STREAM on stream>0 update the stream state machine.
  * HEADERS without END_HEADERS starts CONTINUATION assembly; only CONTINUATION
- * for that stream accepted until END_HEADERS; assembled block queryable. */
+ * for that stream accepted until END_HEADERS; assembled block queryable.
+ * PADDED and PRIORITY flags on HEADERS/DATA are stripped before HPACK/body. */
 static inline int64_t mako_http2_conn_recv(MakoString s) {
     if (!s.data || s.len == 0) return -1;
     const unsigned char *base = (const unsigned char *)s.data;
@@ -2578,6 +2945,8 @@ static inline int64_t mako_http2_conn_recv(MakoString s) {
     while (off + 9 <= n) {
         int64_t len = -1, typ = -1, flags = -1, stream = -1;
         if (!mako_http2_parse_frame(p + off, n - off, &len, &typ, &flags, &stream)) break;
+        /* Reject frames larger than SETTINGS_MAX_FRAME_SIZE (except SETTINGS itself). */
+        if (typ != 4 && len > mako_h2_max_frame_size) return -1;
         if (mako_h2_conn_closing) {
             if (typ == 7 || typ == 6) {
                 /* GOAWAY / PING ok while closing */
@@ -2601,6 +2970,7 @@ static inline int64_t mako_http2_conn_recv(MakoString s) {
                 continue;
             }
             if (typ != 9 || stream != mako_h2_hdr_stream) return -1;
+            /* CONTINUATION (RFC 7540 §6.10): no PADDED/PRIORITY — whole payload is HPACK. */
             if (len > 0 && !mako_http2_hdr_append(p + off + 9, (size_t)len)) return -1;
             if ((flags & 0x4) != 0) mako_http2_hdr_finish();
             off += 9 + (size_t)len;
@@ -2613,7 +2983,7 @@ static inline int64_t mako_http2_conn_recv(MakoString s) {
             } else {
                 mako_h2_conn_settings_rx = 1;
                 mako_h2_conn_settings_ack_needed = 1; /* peer SETTINGS → ACK owed */
-                /* Parse SETTINGS_MAX_CONCURRENT_STREAMS (id=0x3). */
+                /* Parse full SETTINGS payload (RFC 7540 §6.5.2). */
                 size_t so = off + 9;
                 size_t send = so + (size_t)len;
                 while (so + 6 <= send) {
@@ -2621,7 +2991,32 @@ static inline int64_t mako_http2_conn_recv(MakoString s) {
                     int64_t val = ((int64_t)p[so + 2] << 24) | ((int64_t)p[so + 3] << 16)
                                 | ((int64_t)p[so + 4] << 8) | (int64_t)p[so + 5];
                     val &= 0xffffffff;
-                    if (sid == 0x3) mako_h2_max_concurrent = val;
+                    if (sid == 0x1) { /* HEADER_TABLE_SIZE */
+                        mako_h2_header_table_size = val;
+                        mako_hpack_dyn_set_size_limit((size_t)val);
+                    } else if (sid == 0x2) { /* ENABLE_PUSH */
+                        if (val > 1) return -1;
+                        mako_h2_enable_push = val;
+                    } else if (sid == 0x3) { /* MAX_CONCURRENT_STREAMS */
+                        mako_h2_max_concurrent = val;
+                    } else if (sid == 0x4) { /* INITIAL_WINDOW_SIZE */
+                        if (val > 0x7fffffff) return -1;
+                        int64_t delta = val - mako_h2_initial_window;
+                        mako_h2_initial_window = val;
+                        /* Apply delta to all active stream windows (RFC 7540 §6.9.2). */
+                        for (int i = 0; i < MAKO_H2_STREAM_SLOTS; i++) {
+                            if (mako_h2_states[i] == 1 || mako_h2_states[i] == 2) {
+                                int64_t nw = mako_h2_stream_windows[i] + delta;
+                                if (nw < 0 || nw > 0x7fffffff) return -1;
+                                mako_h2_stream_windows[i] = nw;
+                            }
+                        }
+                    } else if (sid == 0x5) { /* MAX_FRAME_SIZE */
+                        if (val < 16384 || val > 16777215) return -1;
+                        mako_h2_max_frame_size = val;
+                    } else if (sid == 0x6) { /* MAX_HEADER_LIST_SIZE */
+                        mako_h2_max_header_list = val;
+                    }
                     so += 6;
                 }
             }
@@ -2680,10 +3075,24 @@ static inline int64_t mako_http2_conn_recv(MakoString s) {
             int64_t st = mako_http2_stream_apply(frame);
             free(frame.data);
             if (st < 0) return -1;
+            /* New streams start with peer's INITIAL_WINDOW_SIZE. */
+            {
+                int ni = mako_http2_stream_find(stream);
+                if (ni >= 0 && mako_h2_stream_windows[ni] == MAKO_H2_DEFAULT_WINDOW
+                    && mako_h2_initial_window != MAKO_H2_DEFAULT_WINDOW) {
+                    mako_h2_stream_windows[ni] = mako_h2_initial_window;
+                }
+            }
             mako_h2_hdr_assembling = 1;
             mako_h2_hdr_stream = stream;
             mako_h2_hdr_acc_len = 0;
-            if (len > 0 && !mako_http2_hdr_append(p + off + 9, (size_t)len)) return -1;
+            if (len > 0) {
+                const unsigned char *cd = NULL;
+                size_t cl = 0;
+                if (mako_http2_payload_content(p + off + 9, (size_t)len, flags, 1, &cd, &cl) < 0)
+                    return -1;
+                if (cl > 0 && !mako_http2_hdr_append(cd, cl)) return -1;
+            }
             if ((flags & 0x4) != 0) mako_http2_hdr_finish();
             off += 9 + (size_t)len;
             continue;
@@ -2706,31 +3115,47 @@ static inline int64_t mako_http2_conn_recv(MakoString s) {
             if (typ == 0 && mako_http2_stream_find(stream) < 0) return -1;
             size_t abs = (size_t)(p - base) + off;
             MakoString frame = mako_str_slice(s, (int64_t)abs, (int64_t)(abs + 9 + (size_t)len));
-            /* Inbound DATA decreases stream + connection windows (flow-control seed). */
-            if (typ == 0 && len > 0) {
-                if (mako_http2_window_consume(stream, len) < 0) {
-                    free(frame.data);
-                    return -1;
-                }
-                /* Accumulate body for concurrent stream reads. */
-                int si = mako_http2_stream_find(stream);
-                if (si >= 0) {
-                    size_t room = MAKO_H2_STREAM_BODY_MAX - mako_h2_stream_body_len[si];
-                    size_t take = (size_t)len < room ? (size_t)len : room;
-                    if (take > 0) {
-                        memcpy(mako_h2_stream_body[si] + mako_h2_stream_body_len[si],
-                               p + off + 9, take);
-                        mako_h2_stream_body_len[si] += take;
+            /* Inbound DATA: consume *recv* windows (full frame payload incl. pad). */
+            if (typ == 0) {
+                const unsigned char *bd = NULL;
+                size_t bl = 0;
+                if (len > 0) {
+                    if (mako_http2_payload_content(p + off + 9, (size_t)len, flags, 0, &bd, &bl) < 0) {
+                        free(frame.data);
+                        return -1;
                     }
                 }
-            }
-            if (typ == 0 && (flags & 0x1) != 0) {
+                if (len > 0) {
+                    if (mako_http2_recv_window_consume(stream, len) < 0) {
+                        free(frame.data);
+                        return -1; /* FLOW_CONTROL_ERROR */
+                    }
+                    mako_h2_conn_unacked += len;
+                }
+                /* Accumulate body (data only, no pad). Overflow is a hard error. */
                 int si = mako_http2_stream_find(stream);
-                if (si >= 0) mako_h2_stream_body_done[si] = 1;
+                if (si >= 0) {
+                    if (bl > 0) {
+                        size_t room = MAKO_H2_STREAM_BODY_MAX - mako_h2_stream_body_len[si];
+                        if (bl > room) {
+                            mako_h2_stream_body_overflow[si] = 1;
+                            mako_h2_stream_body_done[si] = 0;
+                            free(frame.data);
+                            return -1; /* refuse silent truncate */
+                        }
+                        memcpy(mako_h2_stream_body[si] + mako_h2_stream_body_len[si], bd, bl);
+                        mako_h2_stream_body_len[si] += bl;
+                    }
+                    if (len > 0) mako_h2_stream_unacked[si] += len;
+                    if ((flags & 0x1) != 0 && !mako_h2_stream_body_overflow[si])
+                        mako_h2_stream_body_done[si] = 1;
+                }
             }
             int64_t st = mako_http2_stream_apply(frame);
             free(frame.data);
             if (st < 0) return -1;
+            /* Keep closed (RST) state visible so HEADERS on closed is rejected;
+             * slots are reclaimed lazily in stream_alloc when needed. */
         }
         off += 9 + (size_t)len;
     }
@@ -2816,6 +3241,12 @@ static inline int64_t mako_http2_stream_body_len_of(int64_t sid) {
     return (int64_t)mako_h2_stream_body_len[i];
 }
 
+static inline int64_t mako_http2_stream_body_overflow(int64_t sid) {
+    int i = mako_http2_stream_find(sid);
+    if (i < 0) return -1;
+    return mako_h2_stream_body_overflow[i] ? 1 : 0;
+}
+
 static inline int64_t mako_http2_stream_body_done(int64_t sid) {
     int i = mako_http2_stream_find(sid);
     if (i < 0) return -1;
@@ -2844,7 +3275,8 @@ static inline MakoString mako_http2_conn_auto_settings_ack(void) {
     return mako_http2_settings_ack();
 }
 
-/* Pump: conn_recv, then auto-emit SETTINGS ACK and/or PING ACK if owed.
+/* Pump: conn_recv, then auto-emit SETTINGS ACK, PING ACK, and WINDOW_UPDATE
+ * frames when unacked inbound data crosses MAKO_H2_WU_THRESHOLD.
  * Returns concatenated outbound frames (possibly empty), or empty on recv error. */
 static inline MakoString mako_http2_conn_pump(MakoString buf) {
     if (mako_http2_conn_recv(buf) < 0) return mako_str_from_cstr("");
@@ -2865,6 +3297,31 @@ static inline MakoString mako_http2_conn_pump(MakoString buf) {
         free(ping_ack.data);
         out = next;
     }
+    /* Auto connection-level WINDOW_UPDATE (restores *recv* window only). */
+    if (mako_h2_conn_unacked >= MAKO_H2_WU_THRESHOLD) {
+        int64_t inc = mako_h2_conn_unacked;
+        MakoString wu = mako_http2_window_update_frame(0, inc);
+        mako_h2_conn_unacked = 0;
+        (void)mako_http2_recv_window_increment(0, inc);
+        MakoString next = mako_http2_concat_frames(out, wu);
+        free(out.data);
+        free(wu.data);
+        out = next;
+    }
+    /* Auto per-stream WINDOW_UPDATE (recv side). */
+    for (int i = 0; i < MAKO_H2_STREAM_SLOTS; i++) {
+        if (mako_h2_stream_unacked[i] >= MAKO_H2_WU_THRESHOLD && mako_h2_sids[i] > 0) {
+            int64_t sid = mako_h2_sids[i];
+            int64_t inc = mako_h2_stream_unacked[i];
+            MakoString wu = mako_http2_window_update_frame(sid, inc);
+            mako_h2_stream_unacked[i] = 0;
+            (void)mako_http2_recv_window_increment(sid, inc);
+            MakoString next = mako_http2_concat_frames(out, wu);
+            free(out.data);
+            free(wu.data);
+            out = next;
+        }
+    }
     return out;
 }
 
@@ -2872,6 +3329,34 @@ static inline MakoString mako_http2_conn_pump(MakoString buf) {
 static inline int64_t mako_http2_conn_send_goaway(void) {
     mako_h2_conn_closing = 1;
     return 0;
+}
+
+/* Build GOAWAY with last processed stream id (graceful drain). Marks closing. */
+static inline MakoString mako_http2_conn_goaway(int64_t error_code) {
+    int64_t last = mako_h2_last_sid > 0 ? mako_h2_last_sid : 0;
+    mako_h2_conn_closing = 1;
+    mako_h2_goaway_last = last;
+    return mako_http2_goaway_frame(last, error_code);
+}
+
+/* Peer SETTINGS accessors (production diagnostics / policy). */
+static inline int64_t mako_http2_conn_initial_window(void) {
+    return mako_h2_initial_window;
+}
+static inline int64_t mako_http2_conn_max_frame_size(void) {
+    return mako_h2_max_frame_size;
+}
+static inline int64_t mako_http2_conn_header_table_size(void) {
+    return mako_h2_header_table_size;
+}
+static inline int64_t mako_http2_conn_enable_push(void) {
+    return mako_h2_enable_push;
+}
+static inline int64_t mako_http2_conn_max_header_list(void) {
+    return mako_h2_max_header_list;
+}
+static inline int64_t mako_http2_conn_unacked(void) {
+    return mako_h2_conn_unacked;
 }
 
 static inline int mako_http2_stream_find(int64_t sid) {
@@ -2882,16 +3367,26 @@ static inline int mako_http2_stream_find(int64_t sid) {
 }
 
 static inline int mako_http2_stream_alloc(int64_t sid) {
-    for (int i = 0; i < MAKO_H2_STREAM_SLOTS; i++) {
-        if (mako_h2_states[i] == 0) {
+    int64_t send_w = mako_h2_initial_window > 0
+        ? mako_h2_initial_window : MAKO_H2_DEFAULT_WINDOW;
+    for (int pass = 0; pass < 2; pass++) {
+        for (int i = 0; i < MAKO_H2_STREAM_SLOTS; i++) {
+            int free_slot = (pass == 0) ? (mako_h2_states[i] == 0)
+                                        : (mako_h2_states[i] == 3);
+            if (!free_slot) continue;
             mako_h2_sids[i] = sid;
             mako_h2_states[i] = 1; /* open */
             mako_h2_es_remote[i] = 0;
             mako_h2_es_local[i] = 0;
-            mako_h2_stream_windows[i] = MAKO_H2_DEFAULT_WINDOW;
+            mako_h2_stream_windows[i] = send_w;
+            mako_h2_recv_stream_windows[i] = MAKO_H2_DEFAULT_WINDOW;
             mako_h2_pri_dep[i] = 0;
             mako_h2_pri_weight[i] = 16;
             mako_h2_pri_excl[i] = 0;
+            mako_h2_stream_body_len[i] = 0;
+            mako_h2_stream_body_done[i] = 0;
+            mako_h2_stream_unacked[i] = 0;
+            mako_h2_stream_body_overflow[i] = 0;
             return i;
         }
     }

@@ -30,18 +30,15 @@ Guided tour: [The Mako Book §11](book/src/ch11-speed-safety.md) · Speed bar: [
 
 ### Concurrency Send seed (kick)
 
-`crew.kick(f(args…))` only accepts **sendable** argument types: Copy scalars
-(including float), **POD structs** (int/float/bool/**string** fields; heap-boxed,
-strings cloned), `string` (heap-cloned), channels, `ShareInt` / `AtomicInt`
-(RC clone), and locked handles (`CMap` / `Mutex` / `RWMutex`).  
-Rejected: arrays, maps, non-POD structs, `Result`, `Option`, `Arena`, nested `Crew`
-(`examples/bad/kick_non_pod.mko`, `kick_array_arg.mko`, `kick_result_non_send.mko`,
-`kick_option_non_send.mko`).  
-Race detection: `mako test --race` (CI TSan job: crew/kick/share, chan, proxy pool/edge,
-`kick_sync_test`, `kick_share_test`, `crew_fan_test`, `crew_drain_test`,
-`job_join_typed_test`, `select_nll_test`, wave11/14–27 queue tests,
-`share_atomic_test`, `chan_*_test`, `fan_string_test`, `kick_string_test`). Prefer
-channels over shared mutable state; full type-level race freedom remains residual.
+`crew.kick(f(args…))` only accepts **Send** argument types: Copy scalars
+(including float and **Uuid**/ULID POD), **deep-POD structs**, `string` (heap-cloned),
+channels, `ShareInt` / `AtomicInt` (RC clone), locked handles (`CMap` / `Mutex` /
+`RWMutex`), and **Option/Result/tuple of Send** payloads (heap-boxed across spawn).  
+Rejected: arrays, maps, non-POD structs, `Arena`, nested `Crew`
+(`examples/bad/kick_non_pod.mko`, `kick_array_arg.mko`).  
+Static race seed: mut Option/Result/tuple captures must not be written before `join`.  
+Runtime race smoke: `mako test --race` (TSan). Prefer channels over shared mutable
+state. **Uuid is Copy** — free re-read under `hold`, kick without move.
 
 SMTP TLS: `smtp_send_starttls` uses `SSL_connect`. Set **`MAKO_SMTP_TLS_VERIFY=1`**
 to enable peer certificate verification (`SSL_VERIFY_PEER`); default is off for
@@ -147,8 +144,11 @@ in `mako_http_reply_conn`). Injection attempts fail closed.
 
 ### Parameterized DB only (Done)
 
-- SQLite: `sqlite_query_int` / `_params` bind `?` placeholders; arg count must match.
-- Postgres: `pg_exec` / `pg_exec_params` — use `$1..$N`; no concat-SQL happy path.
+- Unified `sql_*`: `sql_exec` / `sql_query_int` (int params), `sql_exec_str4` /
+  `sql_query_str` (string params), `sql_query_rows` / `sql_query_rows_str` (multi-row)
+  bind placeholders — SQLite `?`/`$N`, Postgres `$N` (with `?` rewritten).
+  Arg count must match placeholders.
+- Legacy: `sqlite_query_int` / `_params`; `pg_exec` / `pg_exec_params`.
 - Do not build SQL by string-concatenating user input.
 
 ### Constant-time compare (Done)
@@ -156,7 +156,39 @@ in `mako_http_reply_conn`). Injection attempts fail closed.
 ```mko
 if const_eq(got, want) == 1 { /* ok */ }
 // alias: crypto_eq
+if secret_eq_str(secret_from_str(token), presented) == 1 { /* ok */ }
 ```
+
+### Cryptography & TLS platform (build secure systems in Mako)
+
+Mako does **not** ship a full PKI product or “crypto framework.” It exposes
+**building blocks** so you implement protocols safely in Mako:
+
+| Layer | What exists | You build |
+|-------|-------------|-----------|
+| Digests / MAC | `sha256`/`sha512`/`sha1`, `hmac_sha256`/`hmac_sha1` (+ raw) | Integrity tags, tokens |
+| AEAD / stream | `aes_gcm_*`, `chacha20_poly1305_*`, `aes_ctr` | Sealed messages, SRTP CM |
+| KDF | `pbkdf2_sha256`, `hkdf_sha256` (RFC 5869), Argon2id, bcrypt | Password storage, key schedule |
+| Auth protocols | SCRAM core (`crypto.scram_*`), Digest (SIP) | SASL, REGISTER auth |
+| Random | `random_bytes` / `random_int` (OS CSPRNG) | Nonces, session IDs |
+| Secrets | `secret_from_str` / `secret_len` / `secret_eq_str` / `secret_drop` | Wipe keys after use |
+| TLS server | `tls_server_new` / `tls_accept` / `tls_read`/`write` (+ NB handshake) | HTTPS, STARTTLS terminate |
+| TLS client | `tls_client_new` / `tls_connect` / SNI / VERIFY_PEER | Outbound TLS, SIPS, mTLS apps |
+| TLS inspect | `tls_conn_version`, `tls_peer_cn`, `tls_conn_alpn` | Logging / policy |
+| HTTP helpers | `tls_get` / `tls_post` (+ insecure demo variants) | Simple HTTPS clients |
+
+**Secure defaults:** TLS min 1.2; modern cipher suites; client verify when using
+`tls_client_new(ca)`. Prefer Argon2id for new password storage. Use `const_eq` /
+`secret_eq_str` for tokens — never `==` on secrets in hot auth paths if you care
+about timing (language `==` is not constant-time).
+
+**Honest residuals:** no high-level mTLS cert-picker API yet; no X.509 CSR/CA
+product; no built-in HSM; full WebPKI trust store is “pass CA PEM / system via
+OpenSSL paths.” DTLS/WebRTC security remains app-level.
+
+Tests: `security_test.mko`, `security_crypto_test.mko`, `password_hash_test.mko`,
+`bcrypt_test.mko`, `tls_aead_test.mko`, `tls_server_test.mko`,
+`crypto_srtp_blocks_test.mko`.
 
 ### Session security (Done)
 

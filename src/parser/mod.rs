@@ -192,8 +192,16 @@ impl Parser {
 
     fn parse_item(&mut self) -> Result<Item, ParseError> {
         let mut derives = Vec::new();
+        let mut stability = crate::ast::ApiStability::Unspecified;
         while matches!(self.peek_kind(), TokenKind::Hash) {
-            derives.extend(self.parse_attr_derives()?);
+            let attr = self.parse_attr()?;
+            match attr {
+                ItemAttr::Derive(d) => derives.extend(d),
+                ItemAttr::Stable => stability = crate::ast::ApiStability::Stable,
+                ItemAttr::Deprecated(message) => {
+                    stability = crate::ast::ApiStability::Deprecated { message }
+                }
+            }
         }
         let exported = if matches!(self.peek_kind(), TokenKind::Export) {
             self.bump();
@@ -216,6 +224,7 @@ impl Parser {
                 // Go-style: Capitalized names are exported; `export` forces it.
                 f.exported = exported || is_exported_name(&f.name);
                 f.is_const = is_const_fn;
+                f.stability = stability;
                 Ok(Item::Fn(f))
             }
             TokenKind::On => {
@@ -325,30 +334,59 @@ impl Parser {
         Ok(params)
     }
 
-    fn parse_attr_derives(&mut self) -> Result<Vec<String>, ParseError> {
+    /// Item attributes: `#[derive(...)]`, `#[stable]`, `#[deprecated]` / `#[deprecated("msg")]`.
+    fn parse_attr(&mut self) -> Result<ItemAttr, ParseError> {
         self.expect(TokenKind::Hash)?;
         self.expect(TokenKind::LBracket)?;
         let name = self.expect_ident()?;
-        if name != "derive" {
-            return Err(self.err(format!(
-                "unknown attribute `{name}` (only derive supported)"
-            )));
-        }
-        self.expect(TokenKind::LParen)?;
-        let mut out = Vec::new();
-        if !matches!(self.peek_kind(), TokenKind::RParen) {
-            loop {
-                out.push(self.expect_ident()?);
-                if matches!(self.peek_kind(), TokenKind::Comma) {
-                    self.bump();
-                } else {
-                    break;
+        let attr = match name.as_str() {
+            "derive" => {
+                self.expect(TokenKind::LParen)?;
+                let mut out = Vec::new();
+                if !matches!(self.peek_kind(), TokenKind::RParen) {
+                    loop {
+                        out.push(self.expect_ident()?);
+                        if matches!(self.peek_kind(), TokenKind::Comma) {
+                            self.bump();
+                        } else {
+                            break;
+                        }
+                    }
                 }
+                self.expect(TokenKind::RParen)?;
+                ItemAttr::Derive(out)
             }
-        }
-        self.expect(TokenKind::RParen)?;
+            "stable" => ItemAttr::Stable,
+            "deprecated" => {
+                let message = if matches!(self.peek_kind(), TokenKind::LParen) {
+                    self.bump();
+                    let msg = match self.peek_kind().clone() {
+                        TokenKind::String(s) => {
+                            self.bump();
+                            s
+                        }
+                        _ => {
+                            return Err(self.err(
+                                "#[deprecated] expects a string message: #[deprecated(\"use bar\")]"
+                                    .into(),
+                            ));
+                        }
+                    };
+                    self.expect(TokenKind::RParen)?;
+                    msg
+                } else {
+                    String::new()
+                };
+                ItemAttr::Deprecated(message)
+            }
+            other => {
+                return Err(self.err(format!(
+                    "unknown attribute `{other}` (supported: derive, stable, deprecated)"
+                )));
+            }
+        };
         self.expect(TokenKind::RBracket)?;
-        Ok(out)
+        Ok(attr)
     }
 
     /// Parse one or more pulls (dual keyword `import`):
@@ -835,6 +873,7 @@ impl Parser {
             body,
             exported: false,
         is_const: false,
+            stability: crate::ast::ApiStability::Unspecified,
         })
     }
 
@@ -2426,7 +2465,8 @@ impl Parser {
                     let mut bindings = Vec::new();
                     if !matches!(self.peek_kind(), TokenKind::RParen) {
                         loop {
-                            bindings.push(self.expect_ident()?);
+                            // Nested patterns: Ok(Some(x)), Point(_, y)
+                            bindings.push(self.parse_pattern()?);
                             if matches!(self.peek_kind(), TokenKind::Comma) {
                                 self.bump();
                             } else {
@@ -2436,6 +2476,33 @@ impl Parser {
                     }
                     self.expect(TokenKind::RParen)?;
                     Ok(Pattern::Variant { name, bindings })
+                } else if matches!(self.peek_kind(), TokenKind::LBrace) {
+                    // Struct pattern: Point { x, y } or Point { x: a, y: _ }
+                    self.bump();
+                    let mut fields = Vec::new();
+                    if !matches!(self.peek_kind(), TokenKind::RBrace) {
+                        loop {
+                            let fname = self.expect_ident()?;
+                            let pat = if matches!(self.peek_kind(), TokenKind::Colon) {
+                                self.bump();
+                                self.parse_pattern()?
+                            } else {
+                                // Shorthand: `x` means `x: x`
+                                Pattern::Ident(fname.clone())
+                            };
+                            fields.push((fname, pat));
+                            if matches!(self.peek_kind(), TokenKind::Comma) {
+                                self.bump();
+                                if matches!(self.peek_kind(), TokenKind::RBrace) {
+                                    break;
+                                }
+                            } else {
+                                break;
+                            }
+                        }
+                    }
+                    self.expect(TokenKind::RBrace)?;
+                    Ok(Pattern::Struct { name, fields })
                 } else {
                     Ok(Pattern::Ident(name))
                 }
@@ -2694,6 +2761,13 @@ fn still_ok() { return 2 }
     }
 }
 
+
+/// Parsed item-level attribute (`#[…]`).
+enum ItemAttr {
+    Derive(Vec<String>),
+    Stable,
+    Deprecated(String),
+}
 
 /// Go-style: names starting with an uppercase letter are package-exported.
 fn is_exported_name(name: &str) -> bool {

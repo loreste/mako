@@ -9,22 +9,46 @@ Signatures use the form `function_name(param: type, ...) -> return_type`.
 
 | Function | Signature | Description |
 |----------|-----------|-------------|
-| `print` | `print(s: string) -> void` | Print a string to stdout |
-| `print_int` | `print_int(n: int) -> void` | Print an integer to stdout |
-| `print_int64` | `print_int64(n: int64) -> void` | Print a 64-bit integer to stdout |
-| `print_int32` | `print_int32(n: int32) -> void` | Print a 32-bit integer to stdout |
-| `print_int8` | `print_int8(n: int8) -> void` | Print an 8-bit integer to stdout |
-| `print_uint64` | `print_uint64(n: uint64) -> void` | Print an unsigned 64-bit integer to stdout |
-| `print_float` | `print_float(f: float) -> void` | Print a float to stdout |
-| `print_bool` | `print_bool(b: bool) -> void` | Print a boolean to stdout |
-| `dbg` | `dbg(n: int) -> int` | Debug-print an integer and return it |
-| `dbg_str` | `dbg_str(s: string) -> string` | Debug-print a string and return it |
-| `format_int` | `format_int(n: int) -> string` | Convert an integer to its string representation |
-| `format_float` | `format_float(f: float, prec: int) -> string` | Convert a float to string with given decimal precision |
-| `format_bool` | `format_bool(b: bool) -> string` | Convert a boolean to "true" or "false" |
-| `int_to_string` | `int_to_string(n: int) -> string` | Convert an integer to its string representation |
-| `fmt_sprintf` | `fmt_sprintf(fmt: string, arg: string) -> string` | Sprintf-style formatting with a string argument |
-| `fmt_sprintf_d` | `fmt_sprintf_d(fmt: string, arg: int) -> string` | Sprintf-style formatting with an integer argument |
+| `print` | `print(s: string) -> void` | Print string + newline to stdout |
+| `print_raw` | `print_raw(s: string) -> int` | Print string **without** newline |
+| `print_int` / `print_int64` / `print_int32` / `print_int8` / `print_uint64` | typed int print + newline | |
+| `print_float` / `print_bool` | float / bool + newline | |
+| `eprint` / `eprintln` | `(s) -> int` | stderr without / with newline |
+| `dbg` / `dbg_str` | debug echo | |
+| `format_int` / `format_int_dec` / `int_to_string` | decimal string |
+| `format_int_hex` / `format_int_hex_upper` / `format_int_hex_prefix` | hex (`ff` / `FF` / `0xff`) |
+| `format_int_hex_pad` | `(n, width)` zero-padded hex |
+| `format_int_bin` / `format_int_oct` | binary / octal |
+| `format_int_base` | `(n, base)` base 2–36 |
+| `format_pad` | `(s, width, zero)` left pad |
+| `format_float` / `format_bool` | float / bool |
+| `parse_int` | decimal |
+| `parse_int_hex` / `parse_int_bin` / `parse_int_oct` | base parse (`0x`/`0b`/`0o` ok) |
+| `parse_int_base` | `(s, base)` base 2–36; `base=0` auto prefix |
+| `parse_int_auto` | same as base 0 |
+| `hex_encode` / `hex_decode` | byte string ↔ hex (encoding/hex) |
+
+### `fmt` package (Go-style)
+
+**String args:** `%%` `%s` `%v` `%t` `%q` `%x`/`%X` (byte hex) `%f` `%g`  
+**Int args** (`fmt_sprintf_d` / `fmt_sprintf_dd`): `%d` `%i` `%v` `%b` `%o` `%x` `%X`  
+Flags: `#` (`0x`/`0b`/`0`), `0` zero-pad, `+` sign, width (`%08x`).
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `fmt_sprintf` … `fmt_sprintf4` | `(fmt, a…)` | Format → string (1–4 string args) |
+| `fmt_sprintf_d` | `(fmt, n: int)` | int verbs `%d %x %X %b %o` + flags |
+| `fmt_sprintf_dd` | `(fmt, a, b: int)` | two int verbs |
+| `fmt_sprintf_f` | `(fmt, v: float, prec)` | float into first verb |
+| `fmt_sprint` … `fmt_sprint3` | join with spaces | |
+| `fmt_sprintln` / `fmt_sprintln2` | join + `"\n"` | |
+| `fmt_print` / `fmt_print2` | stdout, no newline | |
+| `fmt_println` / `fmt_println2` | stdout + newline | |
+| `fmt_printf` … `fmt_printf3` | printf to stdout | |
+| `fmt_eprint` / `fmt_eprintln` / `fmt_eprintf` | stderr | |
+| `fmt_errorf` / `fmt_errorf2` | format error string | |
+
+Packs: `std/fmt`, `std/print`. Tests: `fmt_print_test.mko`. Demo: `examples/fmt_demo.mko`.
 
 ---
 
@@ -149,11 +173,26 @@ Signatures use the form `function_name(param: type, ...) -> return_type`.
 | `read_file` | `read_file(path: string) -> string` | Read entire file contents as a string |
 | `write_file` | `write_file(path: string, data: string) -> int` | Write string data to a file (overwrite) |
 | `append_file` | `append_file(path: string, data: string) -> int` | Append string data to a file |
+| `atomic_write_file` | `atomic_write_file(path: string, data: string) -> int` | Crash-safe write (temp + fsync + rename) |
 | `remove_file` | `remove_file(path: string) -> int` | Delete a file |
+| `remove_all` | `remove_all(path: string) -> int` | Recursively delete file or directory tree |
 | `file_exists` | `file_exists(path: string) -> bool` | Check if a file exists |
 | `is_dir` | `is_dir(path: string) -> bool` | Check if a path is a directory |
+| `is_file` | `is_file(path: string) -> int` | `1` if path is a regular file |
+| `path_size` | `path_size(path: string) -> int` | File size by path (`-1` if missing) |
+| `file_mtime` | `file_mtime(path: string) -> int` | mtime as Unix seconds (`-1` if missing) |
+| `chmod` | `chmod(path: string, mode: int) -> int` | Set mode bits (e.g. `420` = 0644) |
 | `read_dir` | `read_dir(path: string) -> []string` | List entries in a directory |
 | `mkdir` | `mkdir(path: string) -> int` | Create a directory |
+| `mkdir_all` | `mkdir_all(path: string) -> int` | Create directory and parents (`mkdir -p`) |
+| `rmdir` | `rmdir(path: string) -> int` | Remove empty directory |
+| `rename` | `rename(old: string, new: string) -> int` | Rename/move within same filesystem |
+| `copy_file` | `copy_file(src: string, dst: string) -> int` | Copy file contents (overwrite dst) |
+| `temp_dir` | `temp_dir() -> string` | System temp directory (`TMPDIR` / `/tmp`) |
+| `temp_file` | `temp_file(prefix: string) -> string` | Create unique empty temp file; return path |
+| `symlink` | `symlink(target: string, link: string) -> int` | Create symbolic link |
+| `readlink` | `readlink(path: string) -> string` | Read symlink target |
+| `realpath` | `realpath(path: string) -> string` | Resolve absolute path |
 | `getcwd` | `getcwd() -> string` | Return the current working directory |
 | `chdir` | `chdir(path: string) -> int` | Change the current working directory |
 | `path_join` | `path_join(a: string, b: string) -> string` | Join two path segments |
@@ -166,13 +205,16 @@ Signatures use the form `function_name(param: type, ...) -> return_type`.
 | `filepath_walk_n` | `filepath_walk_n(root: string, max: int) -> []string` | Recursively list up to max files under root |
 | `embed_file` | `embed_file(path: string) -> string` | Embed file contents at compile time |
 
+Paths reject **embedded NUL** bytes. Prefer `atomic_write_file` for durable
+config/log updates. Tests: `examples/testing/fs_storage_test.mko`.
+
 ---
 
 ## 8. Direct I/O
 
 | Function | Signature | Description |
 |----------|-----------|-------------|
-| `file_open` | `file_open(path: string, flags: int, mode: int) -> int` | Open a file descriptor with flags and mode |
+| `file_open` | `file_open(path: string, mode: int, flags: int) -> int` | Open fd; always `O_CLOEXEC` when available |
 | `file_close` | `file_close(fd: int) -> int` | Close a file descriptor |
 | `pread` | `pread(fd: int, count: int, offset: int) -> string` | Read count bytes at offset without seeking |
 | `pwrite` | `pwrite(fd: int, data: string, offset: int) -> int` | Write data at offset without seeking |
@@ -184,6 +226,10 @@ Signatures use the form `function_name(param: type, ...) -> return_type`.
 | `file_truncate` | `file_truncate(fd: int, size: int) -> int` | Truncate or extend a file to given size |
 | `file_seek` | `file_seek(fd: int, offset: int, whence: int) -> int` | Seek to a position in a file |
 | `file_read_exact` | `file_read_exact(fd: int, count: int) -> string` | Read exactly count bytes from current position |
+
+`file_open` **mode**: `0`=RO, `1`=WO, `2`=RW.  
+**flags** bits: `1`=create, `2`=truncate, `4`=append, `8`=dsync, `16`=direct,
+`32`=exclusive create (`O_EXCL`).
 
 ---
 
@@ -222,13 +268,27 @@ Signatures use the form `function_name(param: type, ...) -> return_type`.
 
 | Function | Signature | Description |
 |----------|-----------|-------------|
-| `now_ns` | `now_ns() -> int` | Current time in nanoseconds since epoch |
-| `now_ms` | `now_ms() -> int` | Current time in milliseconds since epoch |
-| `time_unix` | `time_unix() -> int` | Current time as Unix timestamp (seconds) |
-| `time_format` | `time_format(unix: int) -> string` | Format a Unix timestamp as a human-readable string |
-| `sleep_ms` | `sleep_ms(ms: int) -> void` | Sleep for the given number of milliseconds |
-| `time_sleep_ms` | `time_sleep_ms(ms: int) -> void` | Sleep for the given number of milliseconds |
-| `elapsed_ms` | `elapsed_ms(start: int) -> int` | Milliseconds elapsed since the given start time |
+| `now_ns` | `now_ns() -> int` | **Monotonic** nanoseconds (alias of `mono_ns`; for latency) |
+| `now_ms` | `now_ms() -> int` | **Wall** milliseconds (alias of `wall_ms`; for logs/calendar) |
+| `wall_ns` / `wall_us` / `wall_ms` | `() -> int` | Wall-clock (`CLOCK_REALTIME`); can jump with NTP |
+| `mono_ns` / `mono_us` / `mono_ms` | `() -> int` | Monotonic (`CLOCK_MONOTONIC_RAW` when available); never goes backwards |
+| `mono_res_ns` | `mono_res_ns() -> int` | Monotonic clock resolution in ns |
+| `mono_overhead_ns` | `mono_overhead_ns() -> int` | Cost of two `mono_ns` samples (calibration) |
+| `elapsed_ns` / `elapsed_us` | `(start) -> int` | Elapsed on **mono** domain (pass a mono tick) |
+| `elapsed_mono_ms` | `elapsed_mono_ms(start) -> int` | Monotonic ms elapsed |
+| `elapsed_ms` | `elapsed_ms(start) -> int` | Wall ms elapsed (legacy; prefer `elapsed_mono_ms`) |
+| `deadline_ns` / `deadline_ms` | `(timeout) -> int` | Monotonic deadline = now + timeout |
+| `deadline_remaining_ns` | `(deadline) -> int` | Ns left until deadline (0 if expired) |
+| `deadline_expired` | `(deadline) -> int` | `1` if mono now ≥ deadline |
+| `sleep_ns` / `sleep_us` / `sleep_ms` | `(n) -> void` | High-res sleep (`nanosleep`; short sleeps may oversleep) |
+| `sleep_until_ns` | `(deadline) -> void` | Hybrid sleep + final spin to mono deadline |
+| `spin_until_ns` | `(deadline) -> void` | Busy-wait to mono deadline (lowest latency, burns CPU) |
+| `time_unix` | `time_unix() -> int` | Wall Unix timestamp (seconds) |
+| `time_format` | `time_format(unix_ms: int) -> string` | RFC3339 UTC from wall ms |
+| `time_sleep_ms` | `time_sleep_ms(ms: int) -> void` | Alias of `sleep_ms` |
+
+**Low-latency rule:** measure and budget with **`mono_*` / `elapsed_ns` / `deadline_*`**.  
+Use **`wall_*` / `now_ms`** only for logs and absolute calendar time.
 
 ---
 
@@ -364,7 +424,19 @@ Signatures use the form `function_name(param: type, ...) -> return_type`.
 | `sql_exec_plain` | `sql_exec_plain(db: SqlDB, sql: string) -> int` | Execute SQL without params |
 | `sql_exec_str4` | `sql_exec_str4(db: SqlDB, sql: string, a: string, b: string, c: string, d: string) -> int` | Execute SQL with four string params |
 | `sql_query_int` | `sql_query_int(db: SqlDB, sql: string, params: []int) -> int` | Query a single integer result |
-| `sql_query_str` | `sql_query_str(db: SqlDB, sql: string, param: string) -> string` | Query a single string result |
+| `sql_query_str` | `sql_query_str(db: SqlDB, sql: string, param: string) -> string` | Query a single string result (0–1 string param; SQLite + Postgres) |
+| `sql_last_insert_id` | `sql_last_insert_id(db: SqlDB) -> int` | Last INSERT row id (SQLite `last_insert_rowid`; Postgres `lastval`) |
+| `sql_rows_affected` | `sql_rows_affected(db: SqlDB) -> int` | Rows changed by last INSERT/UPDATE/DELETE on this connection |
+| `sql_query_rows` | `sql_query_rows(db: SqlDB, sql: string, params: []int) -> int` | Open multi-row result set (handle; 0 = fail) |
+| `sql_query_rows_str` | `sql_query_rows_str(db: SqlDB, sql: string, p1: string) -> int` | Multi-row result with 0–1 string param |
+| `sql_rows_ok` | `sql_rows_ok(rows: int) -> int` | 1 if handle is live and not in error |
+| `sql_rows_next` | `sql_rows_next(rows: int) -> int` | Advance cursor: 1 = row, 0 = done, -1 = error |
+| `sql_rows_int` | `sql_rows_int(rows: int, col: int) -> int` | Read column as int (current row) |
+| `sql_rows_str` | `sql_rows_str(rows: int, col: int) -> string` | Read column as string (current row) |
+| `sql_rows_cols` | `sql_rows_cols(rows: int) -> int` | Column count |
+| `sql_rows_close` | `sql_rows_close(rows: int) -> int` | Free result set (1 if closed) |
+| `sql_query_col_int` | `sql_query_col_int(db: SqlDB, sql: string, max: int) -> []int` | Bulk first column as ints (cap `max`, max 10000) |
+| `sql_query_col_str` | `sql_query_col_str(db: SqlDB, sql: string, max: int) -> []string` | Bulk first column as strings (cap `max`, max 10000) |
 | `sql_begin` | `sql_begin(db: SqlDB) -> int` | Begin a transaction |
 | `sql_commit` | `sql_commit(db: SqlDB) -> int` | Commit a transaction |
 | `sql_rollback` | `sql_rollback(db: SqlDB) -> int` | Roll back a transaction |
@@ -425,6 +497,36 @@ Signatures use the form `function_name(param: type, ...) -> return_type`.
 | `redis_mock_once` | `redis_mock_once(port: int) -> int` | Start a single-request Redis mock |
 | `redis_mock_kv` | `redis_mock_kv(port: int, count: int) -> int` | Start a Redis mock with key-value support |
 
+### SIP / SDP / RTP (build telecom stacks in Mako)
+
+Runtime: `runtime/mako_sip.h`. **Platform primitives** to implement full SIP/RTP
+systems in Mako — not a prebuilt softswitch. Parse/build SIP (RFC 3261), SDP
+(RFC 4566), RTP (RFC 3550), Digest MD5. Transactions, dialogs, SIPS, SRTP: your
+code using maps, crews, mono clocks, `tls_*`, `aes_ctr`, `hmac_sha1_raw`.
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `sip_is_request` / `sip_is_response` / `sip_ok` | `(msg) -> int` | Classify message |
+| `sip_method` / `sip_request_uri` / `sip_version` | `(msg) -> string` | Request start-line |
+| `sip_status_code` / `sip_reason` | `(msg) -> int/string` | Response start-line |
+| `sip_header` / `sip_header_n` / `sip_header_count` | `(msg, name[, n])` | Case-insensitive headers (+ fold) |
+| `sip_body` / `sip_content_length` | `(msg)` | Body and CL |
+| `sip_msg_complete` / `sip_msg_needed` | `(buf) -> int` | TCP framing (CL body complete?) |
+| `sip_request` / `sip_response` | build full message (auto Content-Length) | |
+| `sip_headers_append` / `sip_header_line` | header blob builders | |
+| `sip_via_value` / `sip_from_value` / `sip_to_value` / `sip_contact_value` / `sip_cseq_value` | common values | |
+| `sip_via_branch` / `sip_addr_tag` | extract branch= / tag= | |
+| `sip_branch` / `sip_tag` / `sip_call_id_new` / `sip_cseq_new` | ID generation (`z9hG4bK…`) | |
+| `sip_dialog_id` / `sip_txn_key` | opaque map keys for dialogs/txns | |
+| `sip_uri_*` / `sip_uri_build` | SIP URI parse/build | |
+| `sip_udp_bind` / `sip_udp_send` / `sip_udp_recv` / `sip_tcp_send` | transport wrappers | |
+| `sip_md5_hex` / `sip_digest_response` / `sip_authorization_digest` / `sip_auth_param` | Digest auth | |
+| `sip_reply` / `sip_copy_headers_for_response` | copy Via/From/To/Call-ID/CSeq | |
+| `sdp_*` | parse/build SDP media + attrs | |
+| `rtp_pack` / `rtp_parse_ok` / `rtp_seq` / `rtp_timestamp` / `rtp_ssrc` / `rtp_payload` / … | RTP V2 | |
+
+Tests: `examples/testing/sip_test.mko` · demo: `examples/sip_ua.mko` · pack: `std/sip`.
+
 ---
 
 ## 17. Crypto & Security
@@ -471,9 +573,15 @@ from the protocol strings yourself. See `examples/testing/scram_test.mko`.
 | `crypto_eq` | `crypto_eq(a: string, b: string) -> int` | Constant-time byte comparison |
 | `secret_from_str` | `secret_from_str(s: string) -> Secret` | Wrap a string as a secret (zeroized on drop) |
 | `secret_drop` | `secret_drop(s: Secret) -> void` | Securely erase and drop a secret |
+| `secret_len` | `secret_len(s: Secret) -> int` | Length of secret buffer |
+| `secret_eq_str` | `secret_eq_str(s: Secret, other: string) -> int` | Constant-time secret vs string compare |
+| `hkdf_sha256` | `hkdf_sha256(ikm: string, salt: string, info: string, out_len: int) -> string` | HKDF-SHA256 extract+expand (RFC 5869) |
 | `aead_available` | `aead_available() -> int` | Check if AEAD ciphers are available |
 | `aes_gcm_seal` | `aes_gcm_seal(key: string, nonce: string, plaintext: string, aad: string) -> string` | Encrypt with AES-GCM |
 | `aes_gcm_open` | `aes_gcm_open(key: string, nonce: string, ciphertext: string, aad: string) -> string` | Decrypt with AES-GCM |
+| `aes_ctr` | `aes_ctr(key: string, iv: string, data: string) -> string` | AES-128/256-CTR (key 16\|32, iv 16); SRTP AES-CM building block |
+| `hmac_sha1` | `hmac_sha1(key: string, data: string) -> string` | HMAC-SHA1 hex (40 chars) |
+| `hmac_sha1_raw` | `hmac_sha1_raw(key: string, data: string) -> string` | HMAC-SHA1 raw 20 bytes (SRTP auth tag source) |
 | `chacha20_poly1305_seal` | `chacha20_poly1305_seal(key: string, nonce: string, plaintext: string, aad: string) -> string` | Encrypt with ChaCha20-Poly1305 |
 | `chacha20_poly1305_open` | `chacha20_poly1305_open(key: string, nonce: string, ciphertext: string, aad: string) -> string` | Decrypt with ChaCha20-Poly1305 |
 
@@ -568,14 +676,28 @@ from the protocol strings yourself. See `examples/testing/scram_test.mko`.
 
 | Function | Signature | Description |
 |----------|-----------|-------------|
-| `uuid_v4` | `uuid_v4() -> Uuid` | Generate a random v4 UUID |
-| `uuid_nil` | `uuid_nil() -> Uuid` | Return the nil UUID (all zeros) |
-| `uuid_string` | `uuid_string(u: Uuid) -> string` | Convert a UUID to its string representation |
-| `uuid_parse` | `uuid_parse(s: string) -> Uuid` | Parse a string as a UUID |
-| `uuid_parse_ok` | `uuid_parse_ok(s: string) -> bool` | Check if a string is a valid UUID |
-| `uuid_eq` | `uuid_eq(a: Uuid, b: Uuid) -> bool` | Compare two UUIDs for equality |
-| `uuid_is_nil` | `uuid_is_nil(u: Uuid) -> bool` | Check if a UUID is nil |
-| `uuid_check` | `uuid_check(s: string) -> Result[int, string]` | Parse and validate a UUID string |
+| `uuid_v4` | `uuid_v4() -> Uuid` | Random UUID v4 (CSPRNG; 16-byte **Copy** POD) |
+| `uuid_v7` | `uuid_v7() -> Uuid` | Time-ordered UUID v7 (unix-ms + random; index-friendly) |
+| `uuid_v5` | `uuid_v5(ns: Uuid, name: string) -> Uuid` | Name-based UUID v5 (SHA-1 of namespace‖name) |
+| `uuid_nil` | `uuid_nil() -> Uuid` | Nil UUID (all zeros) |
+| `uuid_ns_dns` / `uuid_ns_url` / `uuid_ns_oid` / `uuid_ns_x500` | `() -> Uuid` | RFC 4122 standard namespaces |
+| `uuid_string` | `uuid_string(u: Uuid) -> string` | Canonical lowercase `8-4-4-4-12` |
+| `uuid_string_upper` | `uuid_string_upper(u: Uuid) -> string` | Canonical uppercase |
+| `uuid_urn` | `uuid_urn(u: Uuid) -> string` | `urn:uuid:…` form |
+| `uuid_bytes` | `uuid_bytes(u: Uuid) -> string` | Raw 16 bytes (binary string) |
+| `uuid_from_bytes` | `uuid_from_bytes(s: string) -> Uuid` | From 16 bytes; **aborts** if length ≠ 16 |
+| `uuid_parse` | `uuid_parse(s: string) -> Uuid` | Parse canonical / 32-hex / braces / `urn:uuid:` (nil on fail) |
+| `uuid_parse_ok` | `uuid_parse_ok(s: string) -> bool` | Valid parse? |
+| `uuid_eq` | `uuid_eq(a: Uuid, b: Uuid) -> bool` | Equality |
+| `uuid_cmp` | `uuid_cmp(a: Uuid, b: Uuid) -> int` | Ordered compare (−1/0/1) |
+| `uuid_is_nil` | `uuid_is_nil(u: Uuid) -> bool` | All zeros? |
+| `uuid_version` | `uuid_version(u: Uuid) -> int` | RFC version nibble (4, 5, 7, …) |
+| `uuid_variant` | `uuid_variant(u: Uuid) -> int` | Variant (2 = RFC 4122) |
+| `uuid_check` | `uuid_check(s: string) -> Result[int, string]` | Parse validate → `Ok(1)` or `Err` |
+| `ulid_new` | `ulid_new() -> Uuid` | New ULID (same 16-byte POD as Uuid; time-sortable) |
+| `ulid_string` | `ulid_string(u: Uuid) -> string` | Crockford Base32 (26 chars) |
+| `ulid_parse` / `ulid_parse_ok` | parse / check | ULID string ↔ POD |
+| `ulid_timestamp_ms` | `ulid_timestamp_ms(u: Uuid) -> int` | 48-bit unix-ms prefix |
 
 ---
 
@@ -614,7 +736,9 @@ from the protocol strings yourself. See `examples/testing/scram_test.mko`.
 |----------|-----------|-------------|
 | `chan_new` | `chan_new(capacity: int) -> chan[int]` | Create a new buffered int channel |
 | `chan_open[T]` | `chan_open[T](capacity: int) -> chan[T]` | Typed channel (see element types below) |
-| `chan_try_send` | `chan_try_send(ch: chan[int], val: int) -> int` | Non-blocking send; returns 0 on success |
+| `chan_try_send` | `chan_try_send(ch: chan[int], val: int) -> int` | Non-blocking int send; **1** queued, **0** full/closed |
+| `chan_str_send_take` | `chan_str_send_take(ch: chan[string], v: string) -> int` | Blocking move-send (no clone); **1** ok, **0** closed |
+| `chan_str_try_send_take` | `chan_str_try_send_take(ch: chan[string], v: string) -> int` | Non-blocking move-send; **1** queued, **0** full/closed (consumes `v`) |
 | `chan_len` | `chan_len(ch: chan[int]) -> int` | Return the number of items in the channel |
 | `chan_cap` | `chan_cap(ch: chan[int]) -> int` | Return the capacity of the channel |
 | `chan_select2` | `chan_select2(a: chan[int], b: chan[int], timeout_ms: int) -> int` | Select from two **int** channels with timeout |
@@ -666,7 +790,8 @@ Tests: `chan_struct_test`, `chan_float_test`, `wave8_queue_test`, `wave9_queue_t
 
 Kick **args** that are sendable: Copy scalars, **POD structs** (int/float/bool/**string** fields, heap-boxed; strings cloned), string (cloned), chan handles, ShareInt/sync handles. Arrays/maps/non-POD structs remain rejected (`examples/bad/kick_non_pod.mko`).
 
-`reflect_value_of(s)` snapshots POD struct fields (any field count) into a reflect bag,
+`reflect_value_of(s)` snapshots reflectable struct fields (POD leaves, nested POD,
+Option/Result/array/map of reflectable; not chan/Arena) into a reflect bag,
 flattening nested POD structs leaf-first. Structs with maps/slices remain rejected
 (`examples/bad/reflect_non_pod.mko`).
 `Result[[]int|[]string|[]float|[]Struct, E]` and
@@ -988,7 +1113,37 @@ Tests: `crew_fan_test.mko`, `job_join_typed_test.mko`, `fan_struct_test.mko`, `f
 | `leak_detected` | `leak_detected(mark: int) -> int` | Check if any leak detected since mark |
 | `leak_assert_clear` | `leak_assert_clear(mark: int) -> int` | Assert no leaks since mark |
 | `leak_report_json` | `leak_report_json(mark: int) -> string` | Leak report as JSON |
-| `gc_arena_new` | `gc_arena_new() -> Arena` | Create a new GC arena |
+| `gc_arena_new` | `gc_arena_new() -> Arena` | Create a new GC arena (always available; alias of arena) |
+| `gc_alloc` | `gc_alloc(nbytes: int) -> int` | Optional app GC alloc (handle bits); requires `[package] gc = true` |
+| `gc_collect` | `gc_collect() -> int` | Tracing collect: mark roots+edges, free unmarked; returns freed count |
+| `gc_live` | `gc_live() -> int` | Live GC objects count |
+| `gc_enabled` | `gc_enabled() -> int` | 1 if optional GC runtime is on |
+| `gc_root` | `gc_root(handle: int) -> int` | Register root (kept across collect) |
+| `gc_unroot` | `gc_unroot(handle: int) -> int` | Drop root registration |
+| `gc_link` | `gc_link(parent: int, child: int) -> int` | Trace edge parent→child |
+| `gc_mark` | `gc_mark(handle: int) -> int` | Manual mark (cleared at collect start unless rooted) |
+| `gc_root_count` | `gc_root_count() -> int` | Number of registered roots |
+
+### Map take (no string-key clone)
+
+| Builtin | Signature | Notes |
+|---------|-----------|--------|
+| `map_si_set_take` | `map_si_set_take(m: map[string]int, key: string, val: int)` | Moves `key` into the map |
+| `map_ss_set_take` | `map_ss_set_take(m: map[string]string, key: string, val: string)` | Moves `key` and `val` |
+
+Prefer over `m[k] = v` on bulk-insert hot paths when the key is an owned temporary.
+
+### Channel string take-send (no clone)
+
+| Builtin | Signature | Notes |
+|---------|-----------|--------|
+| `chan_str_send_take` | `chan_str_send_take(ch: chan[string], v: string) -> int` | Move `v` into the channel (blocking if full); 1 ok, 0 if closed |
+| `chan_str_try_send_take` | `chan_str_try_send_take(ch: chan[string], v: string) -> int` | Non-blocking move; 1 queued, 0 full/closed (**consumes** `v` either way) |
+
+Default `ch.send(s)` still clones so the caller may reuse `s`. Prefer take on producer hot paths with owned temporaries.
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
 | `arena_text` | `arena_text(a: Arena, s: string) -> string` | Allocate a string in the arena |
 | `arena_ints` | `arena_ints(a: Arena, n: int) -> []int` | Allocate an int array in the arena |
 | `arena_stamp` | `arena_stamp(a: Arena, n: int) -> int` | Stamp an arena allocation |
@@ -1019,10 +1174,12 @@ Tests: `crew_fan_test.mko`, `job_join_typed_test.mko`, `fan_struct_test.mko`, `f
 | `tcp_listen` | `tcp_listen(port: int) -> int` | Listen on a TCP port (all interfaces) |
 | `tcp_listen_addr` | `tcp_listen_addr(host: string, port: int) -> int` | Listen bound to a specific address (`"127.0.0.1"`, `"*"` for all) |
 | `tcp_listen_backlog` | `tcp_listen_backlog(host: string, port: int, backlog: int) -> int` | Listen with an explicit accept backlog (bounds inbound queue) |
-| `tcp_accept` | `tcp_accept(listener: int) -> int` | Accept a TCP connection |
+| `tcp_accept` | `tcp_accept(listener: int) -> int` | Accept a TCP connection (records peer) |
 | `tcp_accept_nb` | `tcp_accept_nb(listener: int) -> int` | Non-blocking TCP accept |
-| `tcp_connect` | `tcp_connect(host: string, port: int) -> int` | Connect to a TCP server |
-| `tcp_connect_nb` | `tcp_connect_nb(host: string, port: int) -> int` | Nonblocking connect; returns fd while still connecting |
+| `tcp_connect` | `tcp_connect(host: string, port: int) -> int` | Dual-stack connect (IPv4/IPv6/hostname) with **Happy Eyeballs** |
+| `tcp_connect_timeout` | `tcp_connect_timeout(host, port, timeout_ms) -> int` | Same with total timeout (default path uses 30s) |
+| `tcp_set_he_delay_ms` / `tcp_get_he_delay_ms` | stagger between HE attempts (default **250**) | RFC 8305 lite |
+| `tcp_connect_nb` | `tcp_connect_nb(host: string, port: int) -> int` | Nonblocking connect to first resolved addr (v4 or v6) |
 | `tcp_connect_check` | `tcp_connect_check(fd: int) -> int` | `1` connected, `0` pending, `-1` failed |
 | `tcp_connect_wait` | `tcp_connect_wait(fd: int, timeout_ms: int) -> int` | Poll until connect completes (`1`/`0`/`-1`) |
 | `tcp_pool_open` | `tcp_pool_open(host: string, port: int, max: int, timeout_ms: int) -> int` | Upstream connection pool handle |
@@ -1032,9 +1189,16 @@ Tests: `crew_fan_test.mko`, `job_join_typed_test.mko`, `fan_struct_test.mko`, `f
 | `tcp_pool_idle` / `tcp_pool_open_count` | `…(pool) -> int` | Idle / total open connection counts |
 | `tcp_fd_copy` / `tcp_splice` | `tcp_fd_copy(src, dst, max) -> int` | Efficient fd-to-fd copy (`splice` on Linux) |
 | `tcp_proxy_pump` | `tcp_proxy_pump(a, b, timeout_ms, max) -> int` | Bidirectional stream pump |
-| `tcp_write` | `tcp_write(conn: int, data: string) -> int` | Write data to a TCP connection |
-| `tcp_read` | `tcp_read(conn: int) -> string` | Read data from a TCP connection |
+| `tcp_write` | `tcp_write(conn: int, data: string) -> int` | Write data (may be short) |
+| `tcp_write_all` | `tcp_write_all(conn: int, data: string) -> int` | Write all bytes (retries short sends) |
+| `tcp_read` | `tcp_read(conn: int) -> string` | Read up to 64 KiB |
+| `tcp_read_n` | `tcp_read_n(conn: int, n: int) -> string` | Read exactly `n` bytes (or until EOF) |
 | `tcp_read_print` | `tcp_read_print(conn: int) -> int` | Read and print TCP data |
+| `tcp_peer_addr` | `tcp_peer_addr(fd: int) -> string` | Peer `"ip:port"` (`getpeername`; last accept if `fd<0`) |
+| `tcp_local_addr` | `tcp_local_addr(fd: int) -> string` | Local `"ip:port"` (`getsockname`) |
+| `tcp_shutdown` | `tcp_shutdown(fd: int, how: int) -> int` | Half-close: `0`=RD, `1`=WR, `2`=RDWR |
+| `tcp_linger` | `tcp_linger(fd: int, onoff: int, sec: int) -> int` | `SO_LINGER` |
+| `sock_error` | `sock_error(fd: int) -> int` | `SO_ERROR` (0 = ok) after async connect |
 | `tcp_nodelay` | `tcp_nodelay(conn: int) -> int` | Set TCP_NODELAY on a connection |
 | `tcp_set_timeout` | `tcp_set_timeout(conn: int, ms: int) -> int` | Set recv+send timeout in ms (0 = block forever) |
 | `tcp_keepalive` | `tcp_keepalive(conn: int, idle: int, interval: int, count: int) -> int` | Enable TCP keepalive; tune idle/interval (s) and probe count |
@@ -1043,6 +1207,14 @@ Tests: `crew_fan_test.mko`, `job_join_typed_test.mko`, `fan_struct_test.mko`, `f
 | `tcp_listen_reuseport` | `tcp_listen_reuseport(host, port, backlog) -> int` | Listen with reuseport |
 | `tcp_accept4` | `tcp_accept4(listener: int) -> int` | Accept with `NONBLOCK\|CLOEXEC` |
 | `tcp_close` | `tcp_close(conn: int) -> int` | Close a TCP connection |
+
+Sockets created by listen/connect/udp_bind use **CLOEXEC** when available.
+
+**IPv6 / dual-stack:** `tcp_listen` / `tcp_listen_addr("")` or `"*"` prefer `::` with
+`IPV6_V6ONLY=0` when the OS allows (IPv4+IPv6); explicit `0.0.0.0` stays IPv4;
+`::1` / IPv6 literals bind/connect as v6. Peer/local addrs use `[v6]:port` form.
+`udp_bind("*")` stays IPv4 for sendto compatibility; `udp_bind_addr("::1", …)` is v6.
+`tcp_connect` resolves `AF_UNSPEC`, interleaves AAAA/A, and races attempts (Happy Eyeballs).
 | `http_forward` | `http_forward(host, port, method, path, body) -> string` | Forward to HTTP/1.1 backend; returns body only |
 | `http_forward_full` | `http_forward_full(host, port, method, path, headers, body, timeout_ms) -> HttpForwardResult` | Status + body + byte counts (chunked OK) |
 | `http_forward_fd` | `http_forward_fd(fd, method, path, host, headers, body, timeout_ms) -> HttpForwardResult` | Forward on pooled fd (`Connection: keep-alive`) |
@@ -1102,9 +1274,13 @@ Tests: `examples/testing/proxy_pool_test.mko`, `examples/testing/proxy_edge_test
 
 | Function | Signature | Description |
 |----------|-----------|-------------|
-| `udp_bind` | `udp_bind(port: int) -> int` | Bind a UDP socket |
-| `udp_send_to` | `udp_send_to(fd: int, host: string, port: int, data: string) -> int` | Send UDP data to a host:port |
-| `udp_recv` | `udp_recv(fd: int, max_bytes: int) -> string` | Receive UDP data |
+| `udp_bind` | `udp_bind(port: int) -> int` | Bind UDP on all interfaces (`port` 0 = ephemeral) |
+| `udp_bind_addr` | `udp_bind_addr(host: string, port: int) -> int` | Bind UDP to a specific host |
+| `udp_send_to` | `udp_send_to(fd: int, host: string, port: int, data: string) -> int` | Send UDP datagram |
+| `udp_recv` / `udp_recv_from` | `udp_recv(fd: int, max_bytes: int) -> string` | Receive; records last sender |
+| `udp_last_sender_host` | `udp_last_sender_host() -> string` | Host of last UDP peer |
+| `udp_last_sender_port` | `udp_last_sender_port() -> int` | Port of last UDP peer |
+| `udp_last_sender` | `udp_last_sender() -> string` | `"host:port"` of last UDP peer |
 | `udp_local_port` | `udp_local_port(fd: int) -> int` | Get the local port of a UDP socket |
 | `udp_close` | `udp_close(fd: int) -> int` | Close a UDP socket |
 
@@ -1141,8 +1317,8 @@ Tests: `examples/testing/proxy_pool_test.mko`, `examples/testing/proxy_edge_test
 ### Socket-style TLS server
 
 A blocking, socket-style API for terminating TLS on an accepted TCP fd (also
-supports STARTTLS-style upgrades). ALPN advertises `h2`. Requires an OpenSSL
-build; `tls_server_available()` reports 1 when present.
+supports STARTTLS-style upgrades). ALPN prefers `http/1.1` (see runtime notes).
+Requires OpenSSL; `tls_server_available()` reports 1 when present.
 
 | Function | Signature | Description |
 |----------|-----------|-------------|
@@ -1161,8 +1337,29 @@ Use `tls_accept_start` + `tls_handshake_step` (or poll on `tls_conn_fd` with wan
 | `tls_read` | `tls_read(conn: TlsConn, max: int) -> string` | Read decrypted bytes (empty on close) |
 | `tls_write` | `tls_write(conn: TlsConn, data: string) -> int` | Write plaintext (encrypted on the wire); bytes written or -1 |
 | `tls_conn_alpn` | `tls_conn_alpn(conn: TlsConn) -> string` | Negotiated ALPN protocol (e.g. `"h2"`) |
+| `tls_conn_version` | `tls_conn_version(conn: TlsConn) -> string` | Negotiated version (`TLSv1.3`, …) |
+| `tls_peer_cn` | `tls_peer_cn(conn: TlsConn) -> string` | Peer certificate CN (or `""`) |
 | `tls_conn_close` | `tls_conn_close(conn: TlsConn) -> int` | Close a TLS connection |
 | `tls_server_free` | `tls_server_free(srv: TlsServer) -> int` | Free a TLS server context |
+
+### Socket-style TLS client
+
+Mirror of the server API for **outbound** TLS (custom protocols, SIPS, mTLS apps).
+`tcp_connect` first, then `tls_connect(cli, fd, sni_host)`. Same `TlsConn` for
+read/write/close. Prefer `tls_client_new(ca_pem)` (VERIFY_PEER) over
+`tls_client_new_insecure` (demos only).
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `tls_client_available` | `tls_client_available() -> int` | OpenSSL client backend present (1/0) |
+| `tls_client_new` | `tls_client_new(ca_pem: string) -> TlsClient` | Client ctx; verify peer against CA PEM |
+| `tls_client_new_insecure` | `tls_client_new_insecure() -> TlsClient` | Client ctx; **no** cert verify (dev only) |
+| `tls_client_free` | `tls_client_free(cli: TlsClient) -> int` | Free client context |
+| `tls_connect` | `tls_connect(cli: TlsClient, fd: int, host: string) -> TlsConn` | Blocking handshake + SNI |
+| `tls_connect_start` | `tls_connect_start(cli: TlsClient, fd: int, host: string) -> TlsConn` | Nonblocking handshake start |
+
+Drive both sides with `tls_handshake_step` when using `*_start` (blocking
+server accept + client connect on the same thread deadlocks).
 
 ### TLS Crypto Primitives
 
@@ -1317,17 +1514,33 @@ Use `tls_accept_start` + `tls_handshake_step` (or poll on `tls_conn_fd` with wan
 | `http2_conn_header_block` | `http2_conn_header_block(stream: int) -> string` | Get header block for a stream |
 | `http2_conn_header_stream` | `http2_conn_header_stream() -> int` | Get the stream with pending headers |
 | `http2_conn_header_assembling` | `http2_conn_header_assembling() -> int` | Check if headers are being assembled |
-| `http2_conn_send_goaway` | `http2_conn_send_goaway() -> int` | Send GOAWAY frame |
+| `http2_conn_send_goaway` | `http2_conn_send_goaway() -> int` | Mark connection closing (GOAWAY sent by caller) |
+| `http2_conn_goaway` | `http2_conn_goaway(error_code: int) -> string` | Build GOAWAY with last stream id; marks closing |
+| `http2_conn_initial_window` | `http2_conn_initial_window() -> int` | Peer `SETTINGS_INITIAL_WINDOW_SIZE` |
+| `http2_conn_max_frame_size` | `http2_conn_max_frame_size() -> int` | Peer `SETTINGS_MAX_FRAME_SIZE` |
+| `http2_conn_header_table_size` | `http2_conn_header_table_size() -> int` | Peer `SETTINGS_HEADER_TABLE_SIZE` |
+| `http2_conn_enable_push` | `http2_conn_enable_push() -> int` | Peer `SETTINGS_ENABLE_PUSH` |
+| `http2_conn_max_header_list` | `http2_conn_max_header_list() -> int` | Peer `SETTINGS_MAX_HEADER_LIST_SIZE` |
+| `http2_conn_unacked` | `http2_conn_unacked() -> int` | Inbound bytes not yet WINDOW_UPDATE'd |
 
-### Flow Control
+### Flow Control (dual windows)
+
+RFC 7540-style **send** vs **recv** accounting:
 
 | Function | Signature | Description |
 |----------|-----------|-------------|
-| `http2_window_of` | `http2_window_of(stream: int) -> int` | Get window size for a stream |
-| `http2_window_conn` | `http2_window_conn() -> int` | Get connection-level window size |
-| `http2_window_blocked` | `http2_window_blocked(stream: int) -> int` | Check if stream is flow-control blocked |
-| `http2_window_consume` | `http2_window_consume(stream: int, amount: int) -> int` | Consume window for a stream |
-| `http2_window_increment` | `http2_window_increment(stream: int, amount: int) -> int` | Increment window for a stream |
+| `http2_window_of` | `http2_window_of(stream: int) -> int` | **Send** window (how much DATA we may still send) |
+| `http2_window_conn` | `http2_window_conn() -> int` | Connection **send** window |
+| `http2_window_blocked` | `http2_window_blocked(stream: int) -> int` | `1` if send window is 0 |
+| `http2_window_consume` | `http2_window_consume(stream: int, amount: int) -> int` | Spend send window (outbound DATA) |
+| `http2_window_increment` | `http2_window_increment(stream: int, amount: int) -> int` | Peer WINDOW_UPDATE → raise **send** |
+| `http2_recv_window_of` | `http2_recv_window_of(stream: int) -> int` | **Recv** window (how much peer may still send) |
+| `http2_recv_window_conn` | `http2_recv_window_conn() -> int` | Connection **recv** window |
+
+Inbound DATA spends **recv** windows. Peer `WINDOW_UPDATE` raises **send**.  
+`http2_conn_pump` auto-emits SETTINGS ACK, PING ACK, and WINDOW_UPDATE (restoring
+**recv** only) when unacked inbound DATA reaches 16 KiB.  
+`http2_response*` spends send windows for the body when the stream is open.
 
 ### Stream State
 
@@ -1347,9 +1560,14 @@ Use `tls_accept_start` + `tls_handshake_step` (or poll on `tls_conn_fd` with wan
 | `http2_stream_body` | `http2_stream_body(stream: int) -> string` | Accumulated DATA body for stream |
 | `http2_stream_body_len` | `http2_stream_body_len(stream: int) -> int` | Body byte count (`-1` if unknown stream) |
 | `http2_stream_body_done` | `http2_stream_body_done(stream: int) -> int` | `1` if END_STREAM seen on DATA |
+| `http2_response` | `http2_response(stream, status, body) -> string` | HEADERS `:status` + `content-length` + DATA |
+| `http2_response_ct` | `http2_response_ct(stream, status, content_type, body) -> string` | Same + `content-type` |
 
-Up to **32 concurrent stream slots** per connection; completed HEADERS push into a
-ready queue so workers can multiplex without one-request-at-a-time stalls.
+Up to **64 concurrent stream slots** per connection (64 KiB body buffer each,
+16 KiB header-block assembly). PADDED and PRIORITY flags on HEADERS/DATA are
+stripped before HPACK/body accumulation. Closed streams reclaim slots for
+long-lived connections. Full SETTINGS (header table, push, max concurrent,
+initial window, max frame, max header list) are parsed from the peer.
 
 ### Priority
 
@@ -1511,9 +1729,16 @@ ready queue so workers can multiplex without one-request-at-a-time stalls.
 | `h3_server_bind` | `h3_server_bind(handle, host, port) -> int` | Bind UDP for QUIC |
 | `h3_server_fd` | `h3_server_fd(handle) -> int` | UDP fd for event-loop registration |
 | `h3_server_poll` | `h3_server_poll(handle, timeout_ms) -> int` | `1` readable, `0` timeout, `-1` error |
-| `h3_accept_stream` | `h3_accept_stream(handle) -> int` | Next stream id marker (or `-1`) |
-| `h3_stream_read` / `h3_stream_write` | stream I/O | Read last datagram / write (surface; crypto depth via quiche) |
+| `h3_accept_stream` | `h3_accept_stream(handle) -> int` | Next ready stream id (or `-1`); POST/PUT/PATCH wait for FIN |
+| `h3_stream_read` | `h3_stream_read(handle, stream) -> string` | Pseudo-HTTP/1.1 request line + headers + body |
+| `h3_stream_write` | `h3_stream_write(handle, stream, data) -> int` | Response; optional `"STATUS\n"` prefix; default `text/plain` |
+| `h3_stream_method` / `path` / `body` / `authority` | accessors | Request fields for the accepted stream |
+| `h3_response` | `h3_response(handle, stream, status, content_type, body) -> int` | Structured response with content-type |
 | `h3_server_close` | `h3_server_close(handle) -> int` | Close server and UDP fd |
+
+Production H3 server: up to **32** concurrent QUIC connections and **64** ready
+requests; **64 KiB** body buffer per request. Requires `MAKO_HAS_QUICHE`.
+Example: `examples/h3_server.mko` · smoke: `./scripts/h3-server-smoke.sh`.
 | `nghttp2_available` | `nghttp2_available() -> int` | Check if nghttp2 is available |
 | `nghttp2_get` | `nghttp2_get(host: string, port: int, ca: string, path: string) -> string` | HTTP/2 GET via nghttp2 |
 | `nghttp2_post` | `nghttp2_post(host: string, port: int, ca: string, path: string, body: string) -> string` | HTTP/2 POST via nghttp2 |
@@ -1549,29 +1774,41 @@ ready queue so workers can multiplex without one-request-at-a-time stalls.
 
 ---
 
-## 42. WebSocket
+## 42. WebSocket (RFC 6455)
+
+Production frame I/O: masking (client→server), 7/16/64-bit lengths (cap 16 MiB),
+fragment reassembly, auto-pong on ping, close codes. Server APIs send **unmasked**;
+client APIs send **masked**. WSS = compose `tls_*` + these primitives.
 
 | Function | Signature | Description |
 |----------|-----------|-------------|
-| `ws_accept_key` | `ws_accept_key(client_key: string) -> string` | Compute WebSocket accept key |
-| `ws_upgrade_request_ok` | `ws_upgrade_request_ok(request: string) -> int` | Validate a WebSocket upgrade request |
-| `ws_client_request` | `ws_client_request(host: string, path: string, key: string) -> string` | Build a WebSocket upgrade request |
-| `ws_client_accept_ok` | `ws_client_accept_ok(response: string, key: string) -> int` | Validate upgrade response |
-| `ws_accept` | `ws_accept(conn: int) -> int` | Accept a WebSocket connection |
-| `ws_recv` | `ws_recv(conn: int, max_bytes: int) -> string` | Receive a WebSocket message |
-| `ws_last_opcode` | `ws_last_opcode() -> int` | Get the opcode of the last received frame |
-| `ws_send_text` | `ws_send_text(conn: int, data: string) -> int` | Send a text frame |
-| `ws_send_binary` | `ws_send_binary(conn: int, data: string) -> int` | Send a binary frame |
-| `ws_send_ping` | `ws_send_ping(conn: int, data: string) -> int` | Send a ping frame |
-| `ws_send_close` | `ws_send_close(conn: int, code: int, reason: string) -> int` | Send a close frame |
-| `ws_close` | `ws_close(conn: int) -> int` | Close a WebSocket connection |
-| `ws_echo_stub` | `ws_echo_stub(conn: int) -> int` | WebSocket echo stub |
-| `ws_echo_once` | `ws_echo_once(conn: int) -> int` | Echo one WebSocket message |
-| `ws_echo` | `ws_echo(conn: int) -> int` | Echo WebSocket messages in a loop |
-| `ws_client_connect` | `ws_client_connect(host: string, port: int, path: string, key: string) -> int` | Connect to a WebSocket server |
-| `ws_client_send_text` | `ws_client_send_text(conn: int, data: string) -> int` | Client: send text frame |
-| `ws_client_send_binary` | `ws_client_send_binary(conn: int, data: string) -> int` | Client: send binary frame |
-| `ws_client_send_ping` | `ws_client_send_ping(conn: int, data: string) -> int` | Client: send ping frame |
+| `ws_accept_key` | `ws_accept_key(client_key: string) -> string` | Compute `Sec-WebSocket-Accept` (SHA-1 + base64) |
+| `ws_upgrade_request_ok` | `ws_upgrade_request_ok(request: string) -> int` | Validate upgrade (Upgrade/Connection/Key/Version 13) |
+| `ws_client_request` | `ws_client_request(host: string, path: string, key: string) -> string` | Build client HTTP upgrade request |
+| `ws_client_accept_ok` | `ws_client_accept_ok(key: string, response: string) -> int` | Validate 101 Accept header for key |
+| `ws_accept` | `ws_accept(listen_fd: int) -> int` | Accept TCP + perform server upgrade handshake |
+| `ws_recv` | `ws_recv(conn: int, max_bytes: int) -> string` | Server: recv full message (masked); `""` on close/err |
+| `ws_last_opcode` | `ws_last_opcode() -> int` | Opcode of last data message (1 text, 2 binary, 8 close) |
+| `ws_last_fin` | `ws_last_fin() -> int` | 1 if last frame had FIN set |
+| `ws_last_close_code` | `ws_last_close_code() -> int` | Close status code from last close frame (0 if none) |
+| `ws_last_status` | `ws_last_status() -> int` | 0 ok, -1 err, -2 close, -3 ping handled, -4 pong |
+| `ws_send_text` | `ws_send_text(conn: int, data: string) -> int` | Server: unmasked text frame (0 ok, -1 err) |
+| `ws_send_binary` | `ws_send_binary(conn: int, data: string) -> int` | Server: unmasked binary frame |
+| `ws_send_ping` | `ws_send_ping(conn: int, data: string) -> int` | Server: unmasked ping (payload ≤ 125) |
+| `ws_send_pong` | `ws_send_pong(conn: int, data: string) -> int` | Server: unmasked pong (payload ≤ 125) |
+| `ws_send_close` | `ws_send_close(conn: int, code: int, reason: string) -> int` | Server: unmasked close |
+| `ws_close` | `ws_close(conn: int) -> int` | Close underlying socket (1 ok) |
+| `ws_echo_stub` | `ws_echo_stub(port: int) -> int` | Alias of `ws_echo_once` |
+| `ws_echo_once` | `ws_echo_once(port: int) -> int` | Bind port, accept one, echo one message, close |
+| `ws_echo` | `ws_echo(port: int) -> int` | Bind port, forever echo loop (blocks) |
+| `ws_client_connect` | `ws_client_connect(host: string, port: int, path: string, key: string) -> int` | TCP + upgrade; Happy Eyeballs connect |
+| `ws_client_recv` | `ws_client_recv(conn: int, max_bytes: int) -> string` | Client: recv unmasked server message |
+| `ws_client_send_text` | `ws_client_send_text(conn: int, data: string) -> int` | Client: masked text |
+| `ws_client_send_binary` | `ws_client_send_binary(conn: int, data: string) -> int` | Client: masked binary |
+| `ws_client_send_ping` | `ws_client_send_ping(conn: int, data: string) -> int` | Client: masked ping |
+| `ws_client_send_close` | `ws_client_send_close(conn: int, code: int, reason: string) -> int` | Client: masked close |
+
+Tests: `examples/testing/ws_api_test.mko` (handshake + loopback e2e).
 
 ---
 
@@ -1613,20 +1850,53 @@ ready queue so workers can multiplex without one-request-at-a-time stalls.
 
 ---
 
-## 44. SMTP
+## 44. Email & SMTP
+
+Build MIME messages and send them over SMTP (plain / AUTH PLAIN / STARTTLS).
+Packs: `std/net/mail`, `std/net/smtp`. Demo: `examples/send_mail.mko`.
+
+### Message builder (`mail_msg_*`)
 
 | Function | Signature | Description |
 |----------|-----------|-------------|
-| `smtp_format_message` | `smtp_format_message(from: string, to: string, subject: string, body: string) -> string` | Format an email message |
-| `smtp_send_soft` | `smtp_send_soft(host: string, port: int, message: string) -> int` | Send email without auth |
-| `smtp_send_dialog` | `smtp_send_dialog(host: string, port: int, from: string, to: string, message: string) -> int` | Send email with SMTP dialog |
-| `smtp_auth_plain` | `smtp_auth_plain(user: string, pass: string) -> string` | Create PLAIN auth string |
-| `smtp_send_auth` | `smtp_send_auth(host: string, port: int, from: string, to: string, message: string, user: string, pass: string) -> int` | Send email with authentication |
-| `smtp_starttls_available` | `smtp_starttls_available() -> int` | Check if STARTTLS is available |
-| `smtp_send_starttls` | `smtp_send_starttls(host: string, port: int, from: string, to: string, message: string, user: string, pass: string) -> int` | Send email with STARTTLS |
-| `mail_parse_address` | `mail_parse_address(addr: string) -> string` | Parse an email address |
-| `mail_header_get` | `mail_header_get(headers: string, name: string) -> string` | Get a mail header value |
-| `mail_address_ok` | `mail_address_ok(addr: string) -> int` | Validate an email address |
+| `mail_msg_new` / `mail_msg_free` | `() -> int` / `(m) -> int` | Message handle |
+| `mail_msg_set_from` | `(m, from) -> int` | From (display name allowed) |
+| `mail_msg_add_to` / `add_cc` / `add_bcc` | `(m, addr) -> int` | Recipients (Bcc envelope-only) |
+| `mail_msg_set_subject` | `(m, subject) -> int` | Subject |
+| `mail_msg_set_text` / `set_html` | `(m, body) -> int` | Plain and/or HTML body |
+| `mail_msg_add_header` | `(m, name, value) -> int` | Extra header |
+| `mail_msg_attach` | `(m, filename, content_type, data) -> int` | Base64 attachment |
+| `mail_msg_build` | `(m) -> string` | Full RFC822/MIME bytes |
+| `mail_msg_envelope_from` / `rcpt_count` / `rcpt_at` | envelope helpers | |
+| `mail_simple` | `(from, to, subject, body) -> string` | One-shot plain message |
+| `mail_parse_address` | `(addr) -> string` | `Name <a@b>` → `a@b` |
+| `mail_header_get` | `(msg, name) -> string` | Header value |
+| `mail_address_ok` | `(addr) -> int` | Basic validation |
+
+### SMTP session (`smtp_*`)
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `smtp_new` | `(host, port) -> int` | Client handle |
+| `smtp_set_timeout_ms` | `(c, ms) -> int` | I/O timeout |
+| `smtp_connect` / `smtp_ehlo` | session setup | |
+| `smtp_starttls` | `(c) -> int` | STARTTLS (OpenSSL when linked) |
+| `smtp_auth` | `(c, user, pass) -> int` | AUTH PLAIN |
+| `smtp_mail_from` / `smtp_rcpt_to` / `smtp_data` | envelope + body | Dot-stuffing in DATA |
+| `smtp_quit` / `smtp_close` | teardown | |
+| `smtp_last_reply` / `smtp_last_code` | last server reply | |
+| `smtp_send_built` | `(c, msg_handle) -> int` | MAIL/RCPT/DATA for built msg |
+| `smtp_send_msg` | `(host, port, user, pass, msg, use_tls) -> int` | One-shot; tls 0/1/2 |
+| `smtp_format_message` / `smtp_send_*` | legacy soft helpers | Still available |
+| `smtp_auth_plain` | `(user, pass) -> string` | `AUTH PLAIN …` command line |
+| `smtp_starttls_available` | `() -> int` | 1 if OpenSSL linked |
+| `smtp_mock_start` | `(port) -> int` | Bind 127.0.0.1 mock SMTP; port `0` = ephemeral; returns port |
+| `smtp_mock_serve_once` | `() -> int` | Accept one client; capture DATA (block) |
+| `smtp_mock_last_message` / `last_from` / `last_rcpt` | captured mail | |
+| `smtp_mock_stop` | `() -> int` | Close mock listener |
+
+TLS: set `MAKO_SMTP_TLS_VERIFY=1` for peer cert verify.  
+Program end-to-end: `examples/mail_program.mko` · tests: `mail_smtp_test.mko`.
 
 ---
 
@@ -1634,19 +1904,22 @@ ready queue so workers can multiplex without one-request-at-a-time stalls.
 
 | Function | Signature | Description |
 |----------|-----------|-------------|
-| `log_debug` | `log_debug(msg: string) -> void` | Log a debug message |
-| `log_info` | `log_info(msg: string) -> void` | Log an info message |
-| `log_warn` | `log_warn(msg: string) -> void` | Log a warning message |
-| `log_error` | `log_error(msg: string) -> void` | Log an error message |
-| `log_kv` | `log_kv(level: string, key: string, value: string) -> void` | Log a key-value message |
-| `slog_set_level` | `slog_set_level(level: string) -> void` | Set structured log level |
-| `slog_debug` | `slog_debug(msg: string) -> void` | Structured debug log |
-| `slog_info` | `slog_info(msg: string) -> void` | Structured info log |
-| `slog_warn` | `slog_warn(msg: string) -> void` | Structured warning log |
-| `slog_error` | `slog_error(msg: string) -> void` | Structured error log |
-| `slog_with` | `slog_with(level: string, msg: string, key: string, value: string) -> void` | Structured log with key-value |
-| `slog_redact` | `slog_redact(value: string) -> string` | Redact sensitive data for logging |
-| `slog_with_redacted` | `slog_with_redacted(level: string, key: string, value: string) -> void` | Log with auto-redacted value |
+| `log_debug` / `log_info` / `log_warn` / `log_error` | `log_*(msg)` | Stderr logs via strong slog backend (level filter + format) |
+| `log_kv` | `log_kv(level, key, value)` | Level + single field (empty msg) |
+| `slog_set_level` | `slog_set_level(level: string)` | Min level: `debug`/`info`/`warn`/`error` (default **info**) |
+| `slog_get_level` | `slog_get_level() -> int` | 0=debug … 3=error |
+| `slog_set_json` / `slog_is_json` | `slog_set_json(1)` | JSON lines vs logfmt |
+| `slog_set_service` | `slog_set_service(name)` | Global `service=` / `"service"` field |
+| `slog_set_output` | `slog_set_output(path) -> int` | Append file path; `""` → stderr |
+| `slog_flush` | `slog_flush()` | Flush current output |
+| `slog_debug` / `info` / `warn` / `error` | `slog_*(msg)` | Structured message |
+| `slog_with` / `slog_with2` / `slog_with3` | multi string fields | 1–3 key/value pairs |
+| `slog_with_int` | `slog_with_int(level, msg, key, n)` | Numeric field (JSON number) |
+| `slog_redact` | `slog_redact(value) -> string` | Always `"[REDACTED]"` |
+| `slog_with_redacted` | `slog_with_redacted(level, msg, key)` | Field value forced redacted |
+
+Runtime: `runtime/mako_log.h`. ISO-8601 `ts=`, optional `trace=` when active.
+Tests: `examples/testing/strong_log_test.mko`.
 
 ---
 
@@ -1799,6 +2072,107 @@ ready queue so workers can multiplex without one-request-at-a-time stalls.
 
 ---
 
+## 52b. GPU compute seed — AI building blocks (OpenCL + host)
+
+**North star: AI work** (inference / training primitives you compose in Mako),
+not graphics. f32 buffers + kernels: matmul, activations, bias, residual, softmax.
+
+**Backends (prefer first that works):**
+
+| Backend | Where | Vendors |
+|---------|--------|---------|
+| **OpenCL** | Linked when available (`-DMAKO_HAS_OPENCL`) | **NVIDIA, AMD, Intel** ICDs; **Apple** GPU on macOS |
+| **host** | Always | CPU reference (CI / no driver) |
+
+Same `gpu_*` surface on every backend. Prefer GPU devices, then any OpenCL
+device, then host. Opt out of OpenCL with env `MAKO_NO_OPENCL=1`. Force host with
+`gpu_set_prefer_host(1)`. Cap **64 MiB** / buffer; max 4 devices / 64 buffers.
+Layouts are **row-major**. Not a full ML framework (no autograd, no GGUF loader).
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `gpu_available` | `gpu_available() -> int` | 1 if any compute path present (always) |
+| `gpu_backend` | `gpu_backend() -> string` | `"opencl"` or `"host"` (what open prefers) |
+| `gpu_opencl_ok` | `gpu_opencl_ok() -> int` | 1 if OpenCL linked and a device is pickable |
+| `gpu_set_prefer_host` | `gpu_set_prefer_host(on: int) -> int` | Force host path; returns previous |
+| `gpu_device_open` | `gpu_device_open() -> int` | Open default device (`-1` if full) |
+| `gpu_device_close` | `gpu_device_close(dev: int) -> int` | Close device + free its buffers |
+| `gpu_device_backend` | `gpu_device_backend(dev: int) -> string` | `"opencl"` / `"host"` for this handle |
+| `gpu_device_name` | `gpu_device_name(dev: int) -> string` | Device name (e.g. `Apple M4`, `NVIDIA …`) |
+| `gpu_device_vendor` | `gpu_device_vendor(dev: int) -> string` | Vendor string |
+| `gpu_device_is_gpu` | `gpu_device_is_gpu(dev: int) -> int` | 1 if OpenCL GPU device |
+| `gpu_buf_new` | `gpu_buf_new(dev: int, nbytes: int) -> int` | Allocate buffer (`-1` on error) |
+| `gpu_buf_len` / `gpu_buf_cap` | `(buf) -> int` | Logical length / capacity |
+| `gpu_buf_free` | `gpu_buf_free(buf: int) -> int` | Free one buffer |
+| `gpu_buf_write` | `gpu_buf_write(buf: int, data: string) -> int` | Raw bytes write |
+| `gpu_buf_read` | `gpu_buf_read(buf: int, max: int) -> string` | Raw bytes read |
+| `gpu_upload_f32` | `gpu_upload_f32(buf: int, vals: []float) -> int` | Pack LE f32; returns count |
+| `gpu_download_f32` | `gpu_download_f32(buf: int) -> []float` | Unpack LE f32 |
+| `gpu_f32_count` | `gpu_f32_count(buf: int) -> int` | `len/4` |
+| `gpu_fill_f32` | `gpu_fill_f32(buf: int, n: int, v: float) -> int` | Fill `n` floats |
+| `gpu_add_f32` | `gpu_add_f32(out, a, b: int) -> int` | `out[i] = a[i] + b[i]` |
+| `gpu_mul_f32` | `gpu_mul_f32(out, a, b: int) -> int` | `out[i] = a[i] * b[i]` |
+| `gpu_scale_f32` | `gpu_scale_f32(out, a: int, s: float) -> int` | `out[i] = a[i] * s` |
+| `gpu_relu_f32` | `gpu_relu_f32(out, a: int) -> int` | ReLU activation |
+| `gpu_saxpy_f32` | `gpu_saxpy_f32(out, a, b: int, alpha: float) -> int` | `out = α·a + b` (residual) |
+| `gpu_bias_add_f32` | `gpu_bias_add_f32(out, a, bias, rows, cols) -> int` | Broadcast bias over rows |
+| `gpu_matmul_f32` | `gpu_matmul_f32(out, a, b, m, n, k) -> int` | `C[m,n] = A[m,k] @ B[k,n]` |
+| `gpu_softmax_rows_f32` | `gpu_softmax_rows_f32(out, a, rows, cols) -> int` | Softmax over last dim |
+| `gpu_sum_f32` | `gpu_sum_f32(buf: int) -> float` | Reduce-sum (host readback) |
+| `gpu_gelu_f32` / `gpu_silu_f32` | `(out, a) -> int` | GELU (tanh approx) / SiLU |
+| `gpu_transpose_f32` | `(out, a, rows, cols) -> int` | Transpose rows×cols |
+| `gpu_layernorm_f32` | `(out, x, gamma, beta, rows, cols, eps)` | Per-row LN; gamma/beta `-1` = none |
+| `gpu_attention_f32` | `(out, q, k, v, seq, dim) -> int` | Scaled dot-product attention (1 head) |
+| `gpu_mha_f32` | `(out, q, k, v, seq, n_heads, head_dim) -> int` | Multi-head attention; Q/K/V `[seq, H·D]` |
+
+Dense / transformer sketches: `matmul`→`bias`→`gelu`; `mha` + `layernorm`.
+Tests: `gpu_seed_test.mko`, `ai_depth_test.mko`. Runtime: `runtime/mako_gpu.h`.
+
+---
+
+## 52c. Local models (weights + your own nets)
+
+Two ways to “use AI models” in Mako:
+
+| Path | When | Surface |
+|------|------|---------|
+| **Remote / hosted** | Chat, tools, embeddings via API | `llm_*` (OpenAI-compatible HTTPS) |
+| **Local weights** | Run / author nets on GPU | `model_*` + `gpu_*` |
+
+**Existing open weights:**
+
+- `model_load_safetensors` — Hugging Face safetensors (F32/F16→f32)
+- `model_load_gguf` — **GGUF** F32/F16 + **Q4_0/Q8_0 dequant→f32**
+- `model_linear_f32(..., hf=1)` — PyTorch `[out, in]` weight layout
+
+**Your own models:** `model_set_f32` + compose layers; `model_save` / `model_load`
+(`.makomodel`). **Text:** `tok_*` vocab + **BPE** (`tok_load_bpe` / `tok_encode_bpe`).
+
+Not yet: Q4_K/Q5/Q6, native quant matmul, SentencePiece/tiktoken, full LLaMA loop.
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `model_new` | `model_new(dev: int) -> int` | Weight store on a GPU device |
+| `model_free` | `model_free(m: int) -> int` | Free store + tensors |
+| `model_set_f32` | `model_set_f32(m, name, vals, d0,d1,d2,d3) -> int` | Insert/replace named tensor |
+| `model_tensor_*` | count / name / buf / elems / ndim / dim | Introspect |
+| `model_load_safetensors` | `(m, path) -> int` | HF safetensors F32/F16 |
+| `model_load_gguf` | `(m, path) -> int` | GGUF F32/F16/Q4_0/Q8_0→f32 |
+| `model_save` / `model_load` | `(m, path) -> int` | Native `.makomodel` |
+| `model_linear_f32` | `(m, out, x, w, b, batch, in, out, hf) -> int` | Dense + bias; `hf=1` for HF layout |
+| `tok_new` / `tok_free` | tokenizer handle | |
+| `tok_set` / `tok_id` / `tok_token` / `tok_size` | vocab CRUD | |
+| `tok_load_json` / `tok_load_lines` | load vocab file | |
+| `tok_encode` / `tok_decode` | longest-match encode; id→string decode | |
+| `tok_load_merges` / `tok_load_bpe` | BPE merges / vocab+merges | |
+| `tok_encode_bpe` / `tok_merge_count` | BPE encode; merge table size | |
+
+Tests: `model_weights_test.mko`, `ai_depth_test.mko` · demo: `model_mlp.mko` ·
+fixtures: `tiny_linear.safetensors`, `tiny.gguf`, `tiny_quant.gguf`, `tiny_vocab.json`,
+`bpe_vocab.json`, `bpe_merges.txt`.
+
+---
+
 ## 53. Buffered I/O
 
 | Function | Signature | Description |
@@ -1880,14 +2254,27 @@ ready queue so workers can multiplex without one-request-at-a-time stalls.
 
 | Function | Signature | Description |
 |----------|-----------|-------------|
-| `template_execute` | `template_execute(tmpl: string, key: string, val: string) -> string` | Execute a template with one variable |
-| `html_template_execute` | `html_template_execute(tmpl: string, key: string, val: string) -> string` | Execute an HTML template with one variable |
-| `html_template_execute2` | `html_template_execute2(tmpl: string, k1: string, v1: string, k2: string, v2: string) -> string` | Execute an HTML template with two variables |
-| `html_template_execute3` | `html_template_execute3(tmpl: string, k1: string, v1: string, k2: string, v2: string, k3: string, v3: string) -> string` | Execute an HTML template with three variables |
-| `html_template_if` | `html_template_if(tmpl: string, key: string, cond: int, val: string) -> string` | Execute an HTML template with conditional |
-| `html_template_range` | `html_template_range(tmpl: string, key: string, items: string) -> string` | Execute an HTML template with range iteration |
-| `html_template_with` | `html_template_with(tmpl: string, key: string, val: string) -> string` | Execute an HTML template with context |
-| `html_template_nested` | `html_template_nested(outer: string, key: string, cond: int, inner: string, val: string) -> string` | Execute nested HTML templates |
+### Templates (Go-style `text/template` / `html/template`)
+
+Syntax: `{{.key}}`, `{{if}}/{{else}}/{{end}}`, `{{range}}`, `{{with}}`,
+`{{define "n"}}` / `{{template "n"}}`, `{{/* comment */}}`, funcs
+`len` / `upper` / `lower` / `html` / `printf "%s"`.
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `tmpl_data_new` / `tmpl_data_free` | data bag handle | |
+| `tmpl_data_set` | `(d, key, val) -> int` | String field (key may be `.Name`) |
+| `tmpl_data_set_list` | `(d, key, "a,b,c") -> int` | List for `{{range}}` |
+| `tmpl_data_set_int` | `(d, key, n) -> int` | Int as string |
+| `tmpl_new` / `tmpl_free` | parse template source | extracts `{{define}}` |
+| `tmpl_execute` | `(t, data) -> string` | Text (no escape) |
+| `tmpl_html_execute` | `(t, data) -> string` | HTML auto-escape interpolations |
+| `tmpl_text` / `tmpl_html` | `(source, data) -> string` | One-shot parse+exec |
+| `template_execute` | legacy one-key replace | still supported |
+| `html_template_*` | legacy multi-key / if / range seeds | still supported |
+
+Packs: `std/text/template`, `std/html/template`. Tests: `template_test.mko`.
+Demo: `examples/template_demo.mko`.
 
 ---
 
@@ -1925,7 +2312,9 @@ ready queue so workers can multiplex without one-request-at-a-time stalls.
 | `jpeg_height` | `jpeg_height(data: string) -> int` | Get JPEG height |
 | `jpeg_encode_gray_dct` | `jpeg_encode_gray_dct(width: int, height: int, pixels: string) -> string` | Encode JPEG with DCT |
 | `jpeg_dct_dc` | `jpeg_dct_dc(data: string) -> int` | Get DCT DC coefficient |
-| `jpeg_encode_gray_huff` | `jpeg_encode_gray_huff(width: int, height: int, pixels: string) -> string` | Encode JPEG with Huffman |
+| `jpeg_encode_gray_huff` | `jpeg_encode_gray_huff(width: int, height: int, pixels: string) -> string` | Encode JPEG with APP9 Huffman-ish evidence (mako probes) |
+| `jpeg_encode_gray_baseline` | `jpeg_encode_gray_baseline(width: int, height: int, pixels: string) -> string` | Viewer-readable baseline grayscale JPEG (DQT/DHT/SOS entropy) |
+| `jpeg_is_baseline_huff` | `jpeg_is_baseline_huff(data: string) -> int` | 1 if SOI+DQT+SOF0+DHT+SOS present |
 | `jpeg_huff_block` | `jpeg_huff_block(data: string) -> string` | Get Huffman-encoded block |
 | `jpeg_encode_gray_jfif` | `jpeg_encode_gray_jfif(width: int, height: int, pixels: string) -> string` | Encode grayscale with SOI+APP0(JFIF)+SOF0 headers; pixels in APP7 (`MAKOJPG`) for `jpeg_decode_gray` roundtrip. External viewers see a JFIF shell, not a full Huffman bitstream. |
 | `jpeg_is_jfif` | `jpeg_is_jfif(data: string) -> int` | Check if data has JFIF APP0 marker |
@@ -2091,6 +2480,74 @@ ready queue so workers can multiplex without one-request-at-a-time stalls.
 |----------|-----------|-------------|
 | `sse_event` | `sse_event(event: string, data: string) -> string` | Format a Server-Sent Event |
 | `sse_retry` | `sse_retry(ms: int) -> string` | Format an SSE retry directive |
+
+---
+
+## LLM programming (OpenAI-compatible)
+
+First-class **LLM client/runtime** for chat, tools, streaming parse, and structured
+output — without Python SDKs or async coloring. Default provider is **xAI**
+(`https://api.x.ai/v1`, env `XAI_API_KEY`); also works with OpenAI-compatible
+endpoints via `MAKO_LLM_BASE_URL` / `OPENAI_API_KEY`.
+
+### Market gaps closed
+
+| Gap in typical stacks | Mako |
+|----------------------|------|
+| Async-colored clients | Sync `llm_chat` / `llm_ask` + mono timeouts |
+| Stream/tool parsing only in Python/JS | Runtime SSE + tool_call extract |
+| JSON buried in markdown | `llm_json_extract` (fences + balanced `{`/`[`) |
+| API keys in logs | `llm_redact_key`; keys from env only |
+| Rate-limit budgeting | `llm_estimate_tokens`, `llm_retry_delay_ms` |
+| Parallel tools need frameworks | Parse tools then `crew`/`fan` your handlers |
+
+### Build messages & bodies
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `llm_message` | `(role, content) -> string` | One chat message object |
+| `llm_messages_append` | `(arr, msg) -> string` | Append into JSON array |
+| `llm_chat_body` | `(model, messages, stream) -> string` | Full chat/completions body |
+| `llm_system_user` | `(model, system, user) -> string` | Quick two-turn body |
+| `llm_body_with_tools` | `(body, tools_json) -> string` | Inject `"tools":[...]` |
+
+### Parse responses & streams
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `llm_content` | `(response) -> string` | `choices[0].message.content` (+ unescape) |
+| `llm_finish_reason` | `(response) -> string` | `finish_reason` |
+| `llm_usage_*_tokens` | `(response) -> int` | prompt / completion / total |
+| `llm_tool_call_count` | `(response) -> int` | Number of tool calls |
+| `llm_tool_call_name` / `args` | `(response, i) -> string` | i-th function name / arguments |
+| `llm_sse_data` | `(line) -> string` | Payload after `data:` (`[DONE]` → empty) |
+| `llm_sse_delta` | `(chunk) -> string` | `choices[0].delta.content` |
+| `llm_stream_append` | `(acc, delta) -> string` | Concatenate stream text |
+| `llm_json_extract` | `(text) -> string` | JSON from fences or first object/array |
+
+### Config & transport
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `llm_api_key` | `() -> string` | `XAI_API_KEY` / `OPENAI_API_KEY` / `MAKO_LLM_API_KEY` |
+| `llm_base_url` | `() -> string` | Default `https://api.x.ai/v1` |
+| `llm_default_model` | `() -> string` | Default `grok-4.5` (or `MAKO_LLM_MODEL`) |
+| `llm_https_post` | `(url, key, body, timeout_ms, verify) -> string` | HTTPS JSON POST + Bearer |
+| `llm_chat` | `(base, key, body, timeout_ms) -> string` | POST `{base}/chat/completions` |
+| `llm_chat_stream` | `(base, key, body, timeout_ms) -> string` | SSE stream; returns synthetic chat JSON for `llm_content` |
+| `llm_chat_retry` | `(base, key, body, timeout_ms, max_attempts) -> string` | Chat with backoff on 429/5xx/connect |
+| `llm_body_force_stream` | `(body) -> string` | Ensure `"stream":true` |
+| `llm_ask` | `(system, user, timeout_ms) -> string` | One-shot from env config |
+| `llm_embed_body` / `llm_embeddings` / `llm_embed` | embeddings request / POST / one-shot | OpenAI-compatible `/embeddings` |
+| `llm_embedding_dim` / `llm_embedding_json` | parse first vector length / JSON array | |
+| `llm_is_error` / `llm_error_message` / `llm_should_retry` | error detect / message / retryable? | |
+| `llm_last_status` | `() -> int` | Last HTTP status from chat/post/stream |
+| `llm_https_available` | `() -> int` | `1` when OpenSSL linked |
+| `llm_redact_key` | `(key) -> string` | Safe log fragment |
+| `llm_estimate_tokens` | `(text) -> int` | ~chars/4 heuristic |
+| `llm_retry_delay_ms` | `(attempt, base, max) -> int` | Exponential backoff |
+
+Example: `examples/llm_chat.mko` · tests: `examples/testing/llm_test.mko` · pack: `std/llm`.
 | `rpc_frame` | `rpc_frame(method: string, payload: string) -> string` | Build an RPC frame |
 | `rpc_method` | `rpc_method(frame: string) -> string` | Extract method from RPC frame |
 | `rpc_payload` | `rpc_payload(frame: string) -> string` | Extract payload from RPC frame |

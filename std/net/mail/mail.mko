@@ -1,3 +1,28 @@
+// net/mail — addresses, headers, MIME message builder.
+
 fn parse_address(addr: string) -> string { return mail_parse_address(addr) }
 fn header_get(msg: string, name: string) -> string { return mail_header_get(msg, name) }
 fn address_ok(addr: string) -> int { return mail_address_ok(addr) }
+
+fn msg_new() -> int { return mail_msg_new() }
+fn msg_free(m: int) -> int { return mail_msg_free(m) }
+fn msg_set_from(m: int, from: string) -> int { return mail_msg_set_from(m, from) }
+fn msg_add_to(m: int, addr: string) -> int { return mail_msg_add_to(m, addr) }
+fn msg_add_cc(m: int, addr: string) -> int { return mail_msg_add_cc(m, addr) }
+fn msg_add_bcc(m: int, addr: string) -> int { return mail_msg_add_bcc(m, addr) }
+fn msg_set_subject(m: int, subject: string) -> int { return mail_msg_set_subject(m, subject) }
+fn msg_set_text(m: int, body: string) -> int { return mail_msg_set_text(m, body) }
+fn msg_set_html(m: int, html: string) -> int { return mail_msg_set_html(m, html) }
+fn msg_add_header(m: int, name: string, value: string) -> int {
+    return mail_msg_add_header(m, name, value)
+}
+fn msg_attach(m: int, filename: string, content_type: string, data: string) -> int {
+    return mail_msg_attach(m, filename, content_type, data)
+}
+fn msg_build(m: int) -> string { return mail_msg_build(m) }
+fn msg_envelope_from(m: int) -> string { return mail_msg_envelope_from(m) }
+fn msg_rcpt_count(m: int) -> int { return mail_msg_rcpt_count(m) }
+fn msg_rcpt_at(m: int, i: int) -> string { return mail_msg_rcpt_at(m, i) }
+fn simple(from: string, to: string, subject: string, body: string) -> string {
+    return mail_simple(from, to, subject, body)
+}

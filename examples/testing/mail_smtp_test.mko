@@ -1,0 +1,159 @@
+// Email message builder + SMTP soft-fail paths.
+
+fn TestMailAddressHelpers() {
+    assert_eq_str(mail_parse_address("Ada <ada@example.com>"), "ada@example.com")
+    assert_eq_str(mail_parse_address("bob@host.org"), "bob@host.org")
+    assert_eq(mail_address_ok("ada@example.com"), 1)
+    assert_eq(mail_address_ok("not-an-email"), 0)
+}
+
+fn TestMailSimpleAndHeaders() {
+    let raw = mail_simple("a@x.com", "b@y.com", "Hello", "Body line")
+    assert(str_contains(raw, "From: a@x.com"))
+    assert(str_contains(raw, "To: b@y.com"))
+    assert(str_contains(raw, "Subject: Hello"))
+    assert(str_contains(raw, "Body line"))
+    assert_eq_str(mail_header_get(raw, "Subject"), "Hello")
+    assert_eq_str(mail_header_get(raw, "From"), "a@x.com")
+}
+
+fn TestMailMsgBuilderMime() {
+    let m = mail_msg_new()
+    assert(m > 0)
+    assert_eq(mail_msg_set_from(m, "Sender <from@mako.dev>"), 1)
+    assert_eq(mail_msg_add_to(m, "to@mako.dev"), 1)
+    assert_eq(mail_msg_add_cc(m, "cc@mako.dev"), 1)
+    assert_eq(mail_msg_add_bcc(m, "bcc@mako.dev"), 1)
+    assert_eq(mail_msg_set_subject(m, "MIME test"), 1)
+    assert_eq(mail_msg_set_text(m, "plain body"), 1)
+    assert_eq(mail_msg_set_html(m, "<b>html</b>"), 1)
+    assert_eq(mail_msg_add_header(m, "X-Mako", "1"), 1)
+    assert_eq(mail_msg_attach(m, "note.txt", "text/plain", "file-bytes"), 1)
+
+    let raw = mail_msg_build(m)
+    assert(str_contains(raw, "From: Sender <from@mako.dev>"))
+    assert(str_contains(raw, "To: to@mako.dev"))
+    assert(str_contains(raw, "Cc: cc@mako.dev"))
+    assert(str_contains(raw, "Subject: MIME test"))
+    assert(str_contains(raw, "multipart/mixed"))
+    assert(str_contains(raw, "multipart/alternative"))
+    assert(str_contains(raw, "plain body"))
+    assert(str_contains(raw, "<b>html</b>"))
+    assert(str_contains(raw, "note.txt"))
+    assert(str_contains(raw, "X-Mako: 1"))
+    // Bcc not in headers
+    assert(not str_contains(raw, "Bcc:"))
+
+    assert_eq_str(mail_msg_envelope_from(m), "from@mako.dev")
+    assert_eq(mail_msg_rcpt_count(m), 3)
+    assert_eq_str(mail_msg_rcpt_at(m, 0), "to@mako.dev")
+    assert_eq_str(mail_msg_rcpt_at(m, 2), "bcc@mako.dev")
+
+    let _ = mail_msg_free(m)
+}
+
+fn TestSmtpAuthPlainFormat() {
+    let line = smtp_auth_plain("user", "pass")
+    assert(str_contains(line, "AUTH PLAIN "))
+    // base64 of \0user\0pass
+    assert(str_len(line) > 12)
+}
+
+fn TestSmtpSoftConnectFail() {
+    // Nothing on port 1 — connect fails cleanly
+    assert_eq(smtp_send_soft("127.0.0.1", 1, "x"), -1)
+    assert_eq(smtp_send_dialog("127.0.0.1", 1, "a@b.c", "d@e.f", "msg"), -1)
+    assert_eq(smtp_send_auth("127.0.0.1", 1, "u", "p", "a@b.c", "d@e.f", "msg"), -1)
+    let c = smtp_new("127.0.0.1", 1)
+    assert(c > 0)
+    assert_eq(smtp_set_timeout_ms(c, 200), 1)
+    assert_eq(smtp_connect(c), 0)
+    let _ = smtp_close(c)
+}
+
+fn TestSmtpSendMsgConnectFail() {
+    let m = mail_msg_new()
+    let _ = mail_msg_set_from(m, "a@b.c")
+    let _ = mail_msg_add_to(m, "d@e.f")
+    let _ = mail_msg_set_subject(m, "x")
+    let _ = mail_msg_set_text(m, "y")
+    // connect fail → -1
+    assert_eq(smtp_send_msg("127.0.0.1", 1, "", "", m, 0), -1)
+    let _ = mail_msg_free(m)
+}
+
+fn TestSmtpStarttlsAvailable() {
+    let ok = smtp_starttls_available()
+    assert(ok == 0 or ok == 1)
+}
+
+// Loopback mock SMTP: program a full send and verify the captured message.
+fn mock_serve() -> int {
+    return smtp_mock_serve_once()
+}
+
+fn TestSmtpProgrammedSendE2E() {
+    let mut port = smtp_mock_start(18780)
+    if port < 0 {
+        // port busy — try ephemeral
+        port = smtp_mock_start(0)
+        if port < 0 {
+            return
+        }
+    }
+    crew t {
+        let j = t.kick(mock_serve())
+        sleep_ms(40)
+
+        // Program a real message
+        let m = mail_msg_new()
+        let _ = mail_msg_set_from(m, "App <app@mako.dev>")
+        let _ = mail_msg_add_to(m, "user@mako.dev")
+        let _ = mail_msg_set_subject(m, "Programmed email")
+        let _ = mail_msg_set_text(m, "Hello from a Mako program.")
+        let _ = mail_msg_set_html(m, "<p>Hello from <b>Mako</b>.</p>")
+        let _ = mail_msg_attach(m, "note.txt", "text/plain", "attach-me")
+
+        // Session-style send (what you program day-to-day)
+        let c = smtp_new("127.0.0.1", port)
+        assert(c > 0)
+        assert_eq(smtp_connect(c), 1)
+        assert_eq(smtp_ehlo(c, "mako-test"), 1)
+        assert_eq(smtp_send_built(c, m), 1)
+        let _ = smtp_quit(c)
+        let _ = smtp_close(c)
+        let _ = mail_msg_free(m)
+
+        assert_eq(j.join(), 1)
+    }
+
+    let captured = smtp_mock_last_message()
+    assert(str_contains(captured, "Programmed email"))
+    assert(str_contains(captured, "Hello from a Mako program."))
+    assert(str_contains(captured, "Hello from <b>Mako</b>."))
+    assert(str_contains(captured, "note.txt"))
+    assert_eq_str(smtp_mock_last_from(), "app@mako.dev")
+    assert_eq_str(smtp_mock_last_rcpt(), "user@mako.dev")
+    let _ = smtp_mock_stop()
+}
+
+fn TestSmtpOneShotToMock() {
+    let port = smtp_mock_start(18781)
+    if port < 0 {
+        return
+    }
+    crew t {
+        let j = t.kick(mock_serve())
+        sleep_ms(40)
+        let m = mail_msg_new()
+        let _ = mail_msg_set_from(m, "a@b.c")
+        let _ = mail_msg_add_to(m, "d@e.f")
+        let _ = mail_msg_set_subject(m, "oneshot")
+        let _ = mail_msg_set_text(m, "body-oneshot")
+        assert_eq(smtp_send_msg("127.0.0.1", port, "", "", m, 0), 1)
+        let _ = mail_msg_free(m)
+        assert_eq(j.join(), 1)
+    }
+    assert(str_contains(smtp_mock_last_message(), "body-oneshot"))
+    let _ = smtp_mock_stop()
+}

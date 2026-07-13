@@ -1,0 +1,18 @@
+// fmt + print demo (Go-style).
+
+fn main() {
+    let name = "Ada"
+    let n = format_int(42)
+
+    fmt_println(fmt_sprintf2("Hello, %s — answer=%s", name, n))
+    fmt_printf2("items: %s, %s\n", "speed", "security")
+
+    let err = fmt_errorf("open failed: %s", "/tmp/x")
+    fmt_eprintln(err)
+
+    // print package style (no newline vs newline)
+    print_raw("raw:")
+    print_raw(n)
+    print_raw("\n")
+    print("done")
+}

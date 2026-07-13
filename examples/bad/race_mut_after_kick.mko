@@ -1,0 +1,16 @@
+// EXPECT: potential data race
+// Static race seed: mutate a risky mut capture while a kick is outstanding.
+// (Most types are cloned/copied on kick; this uses a path that stays race-flagged.)
+
+fn id_opt(o: Option[string]) -> Option[string] {
+    o
+}
+
+fn main() {
+    let mut o: Option[string] = Some("hi")
+    crew t {
+        let j = t.kick(id_opt(o))
+        o = None
+        let _ = j.join()
+    }
+}

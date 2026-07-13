@@ -731,7 +731,8 @@ fn fmt_pattern(p: &Pattern) -> String {
             if bindings.is_empty() {
                 name.clone()
             } else {
-                format!("{name}({})", bindings.join(", "))
+                let parts: Vec<_> = bindings.iter().map(fmt_pattern).collect();
+                format!("{name}({})", parts.join(", "))
             }
         }
         Pattern::Literal(e) => fmt_expr(e, 0),
@@ -742,6 +743,16 @@ fn fmt_pattern(p: &Pattern) -> String {
         Pattern::Tuple(ps) => {
             let parts: Vec<_> = ps.iter().map(fmt_pattern).collect();
             format!("({})", parts.join(", "))
+        }
+        Pattern::Struct { name, fields } => {
+            let parts: Vec<_> = fields
+                .iter()
+                .map(|(f, pat)| match pat {
+                    Pattern::Ident(id) if id == f => f.clone(),
+                    _ => format!("{f}: {}", fmt_pattern(pat)),
+                })
+                .collect();
+            format!("{name} {{ {} }}", parts.join(", "))
         }
     }
 }

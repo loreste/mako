@@ -312,7 +312,10 @@ working together out of the box.
 |-------|--------|
 | Systems audience (drivers, engines, protocols) | Vision Now |
 | SIMD vector types | Later |
-| `gpu fn` → CUDA/Metal | Later |
+| GPU AI seed (matmul/activations; OpenCL multi-vendor + host) | Seed done — build inference blocks in Mako |
+| Local models (safetensors + author nets + .makomodel) | Seed done |
+| AI depth (attention, layernorm, GGUF/LLM runtime, tokenizer) | Later |
+| `gpu fn` / Metal-native / CUDA / Vulkan | Later (same buffer/dispatch surface) |
 | DB engine primitives (storage/index/tx/cache) | Later |
 | Comptime `const x = scan(...)` | Later |
 

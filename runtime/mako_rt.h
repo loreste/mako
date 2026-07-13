@@ -40,6 +40,15 @@
 extern "C" {
 #endif
 
+/* Branch hints for hot paths (no-ops on unknown compilers). */
+#if defined(__GNUC__) || defined(__clang__)
+#define MAKO_LIKELY(x) __builtin_expect(!!(x), 1)
+#define MAKO_UNLIKELY(x) __builtin_expect(!!(x), 0)
+#else
+#define MAKO_LIKELY(x) (x)
+#define MAKO_UNLIKELY(x) (x)
+#endif
+
 /* ---- Lightweight runtime observability ---- */
 static atomic_llong mako_rt_tasks_spawned = 0;
 static atomic_llong mako_rt_tasks_joined = 0;
@@ -93,9 +102,24 @@ static inline MakoString mako_str_from_cstr(const char *s);
 
 #include "mako_security.h"
 
-/* Create an owned MakoString by copying a C string. NULL is treated as "". */
+/* Process-wide empty string — never free this buffer (see mako_str_free). */
+static char mako_str_empty_byte = 0;
+static const MakoString mako_str_empty = {&mako_str_empty_byte, 0};
+
+static inline int mako_str_is_empty_singleton(MakoString s) {
+    return s.data == &mako_str_empty_byte;
+}
+
+/* Free an owned string; no-op for the empty singleton. */
+static inline void mako_str_free(MakoString s) {
+    if (s.data && s.data != &mako_str_empty_byte) free(s.data);
+}
+
+/* Create an owned MakoString by copying a C string. NULL/empty → shared empty. */
 static inline MakoString mako_str_from_cstr(const char *s) {
-    if (!s) s = "";
+    if (!s || !s[0]) {
+        return mako_str_empty;
+    }
     size_t n = strlen(s);
     char *d = (char *)malloc(n + 1);
     if (!d) {
@@ -141,7 +165,27 @@ static inline MakoString mako_str_view(const char *p, size_t n) {
 }
 
 static inline MakoString mako_str_concat(MakoString a, MakoString b) {
+    /* Empty fast paths without calling mako_str_clone (defined later). */
+    if (MAKO_UNLIKELY(a.len == 0 && b.len == 0)) return mako_str_empty;
+    if (MAKO_UNLIKELY(a.len == 0)) {
+        char *d = (char *)malloc(b.len + 1);
+        if (MAKO_UNLIKELY(!d)) abort();
+        memcpy(d, b.data, b.len);
+        d[b.len] = 0;
+        return (MakoString){d, b.len};
+    }
+    if (MAKO_UNLIKELY(b.len == 0)) {
+        char *d = (char *)malloc(a.len + 1);
+        if (MAKO_UNLIKELY(!d)) abort();
+        memcpy(d, a.data, a.len);
+        d[a.len] = 0;
+        return (MakoString){d, a.len};
+    }
     char *d = (char *)malloc(a.len + b.len + 1);
+    if (MAKO_UNLIKELY(!d)) {
+        fprintf(stderr, "mako: OOM in str_concat\n");
+        abort();
+    }
     memcpy(d, a.data, a.len);
     memcpy(d + a.len, b.data, b.len);
     d[a.len + b.len] = 0;
@@ -1070,8 +1114,15 @@ static inline uint64_t mako_hash_i64(int64_t k) {
 }
 
 static inline MakoString mako_str_clone(MakoString s) {
+    if (MAKO_UNLIKELY(s.len == 0)) {
+        return mako_str_empty;
+    }
     char *d = (char *)malloc(s.len + 1);
-    if (s.len) memcpy(d, s.data, s.len);
+    if (MAKO_UNLIKELY(!d)) {
+        fprintf(stderr, "mako: OOM in str_clone\n");
+        abort();
+    }
+    memcpy(d, s.data, s.len);
     d[s.len] = 0;
     MakoString out = {d, s.len};
     return out;
@@ -1079,7 +1130,7 @@ static inline MakoString mako_str_clone(MakoString s) {
 
 static inline MakoMapSI mako_map_si_new(size_t hint) {
     size_t cap = 8;
-    size_t need = hint ? (hint * 10 / 7 + 1) : 8;
+    size_t need = hint ? (hint * 4 / 3 + 1) : 8;
     while (cap < need) cap *= 2;
     MakoMapSI m;
     m.state = (uint8_t *)calloc(cap, 1);
@@ -1096,31 +1147,41 @@ static inline MakoMapSI mako_map_si_new(size_t hint) {
 
 static inline void mako_map_si_rehash(MakoMapSI *m, size_t ncap);
 
-static inline void mako_map_si_set(MakoMapSI *m, MakoString key, int64_t val) {
-    if ((m->len + 1) * 10 >= m->cap * 7) {
+/* Insert/update with *owned* key move (no clone). Caller must not free/use key after. */
+static inline void mako_map_si_set_take(MakoMapSI *m, MakoString key, int64_t val) {
+    if (MAKO_UNLIKELY((m->len + 1) * 4 >= m->cap * 3)) {
         mako_map_si_rehash(m, m->cap * 2);
     }
     uint64_t h = mako_hash_bytes(key.data, key.len);
-    size_t i = (size_t)(h & (m->cap - 1));
+    size_t mask = m->cap - 1;
+    size_t i = (size_t)(h & mask);
     size_t first_tomb = (size_t)-1;
     for (;;) {
-        if (m->state[i] == MAKO_MAP_EMPTY) {
+        uint8_t st = m->state[i];
+        if (MAKO_LIKELY(st == MAKO_MAP_EMPTY)) {
             size_t slot = (first_tomb != (size_t)-1) ? first_tomb : i;
             m->state[slot] = MAKO_MAP_FULL;
-            m->keys[slot] = mako_str_clone(key);
+            m->keys[slot] = key; /* take ownership */
             m->vals[slot] = val;
             m->len++;
             return;
         }
-        if (m->state[i] == MAKO_MAP_TOMB) {
+        if (st == MAKO_MAP_TOMB) {
             if (first_tomb == (size_t)-1) first_tomb = i;
         } else if (m->keys[i].len == key.len
                    && memcmp(m->keys[i].data, key.data, key.len) == 0) {
+            /* Key already present — drop the taken key, keep stored key. */
+            mako_str_free(key);
             m->vals[i] = val;
             return;
         }
-        i = (i + 1) & (m->cap - 1);
+        i = (i + 1) & mask;
     }
+}
+
+/* Default: clone key (safe; key still usable after). Hot paths use set_take. */
+static inline void mako_map_si_set(MakoMapSI *m, MakoString key, int64_t val) {
+    mako_map_si_set_take(m, mako_str_clone(key), val);
 }
 
 static inline void mako_map_si_rehash(MakoMapSI *m, size_t ncap) {
@@ -1183,7 +1244,7 @@ static inline void mako_map_si_delete(MakoMapSI *m, MakoString key) {
         if (m->state[i] == MAKO_MAP_EMPTY) return;
         if (m->state[i] == MAKO_MAP_FULL && m->keys[i].len == key.len
             && memcmp(m->keys[i].data, key.data, key.len) == 0) {
-            free(m->keys[i].data);
+            mako_str_free(m->keys[i]);
             m->keys[i].data = NULL;
             m->keys[i].len = 0;
             m->state[i] = MAKO_MAP_TOMB;
@@ -1204,8 +1265,8 @@ static inline MakoMapSI *mako_map_si_make(int64_t hint) {
 
 static inline MakoMapII mako_map_ii_new(size_t hint) {
     size_t cap = 8;
-    /* Pre-size so hint entries fit under 70% load without immediate rehash. */
-    size_t need = hint ? (hint * 10 / 7 + 1) : 8;
+    /* Pre-size so hint entries fit under ~75% load without immediate rehash. */
+    size_t need = hint ? (hint * 4 / 3 + 1) : 8;
     while (cap < need) cap *= 2;
     MakoMapII m;
     m.state = (uint8_t *)calloc(cap, 1);
@@ -1223,14 +1284,17 @@ static inline MakoMapII mako_map_ii_new(size_t hint) {
 static inline void mako_map_ii_rehash(MakoMapII *m, size_t ncap);
 
 static inline void mako_map_ii_set(MakoMapII *m, int64_t key, int64_t val) {
-    if ((m->len + 1) * 10 >= m->cap * 7) {
+    /* Grow at ~75% load (was 70%) — fewer rehashes on sequential inserts. */
+    if (MAKO_UNLIKELY((m->len + 1) * 4 >= m->cap * 3)) {
         mako_map_ii_rehash(m, m->cap * 2);
     }
     uint64_t h = mako_hash_i64(key);
-    size_t i = (size_t)(h & (m->cap - 1));
+    size_t mask = m->cap - 1;
+    size_t i = (size_t)(h & mask);
     size_t first_tomb = (size_t)-1;
     for (;;) {
-        if (m->state[i] == MAKO_MAP_EMPTY) {
+        uint8_t st = m->state[i];
+        if (MAKO_LIKELY(st == MAKO_MAP_EMPTY)) {
             size_t slot = (first_tomb != (size_t)-1) ? first_tomb : i;
             m->state[slot] = MAKO_MAP_FULL;
             m->keys[slot] = key;
@@ -1238,13 +1302,13 @@ static inline void mako_map_ii_set(MakoMapII *m, int64_t key, int64_t val) {
             m->len++;
             return;
         }
-        if (m->state[i] == MAKO_MAP_TOMB) {
+        if (st == MAKO_MAP_TOMB) {
             if (first_tomb == (size_t)-1) first_tomb = i;
-        } else if (m->keys[i] == key) {
+        } else if (MAKO_LIKELY(m->keys[i] == key)) {
             m->vals[i] = val;
             return;
         }
-        i = (i + 1) & (m->cap - 1);
+        i = (i + 1) & mask;
     }
 }
 
@@ -1277,11 +1341,16 @@ static inline void mako_map_ii_rehash(MakoMapII *m, size_t ncap) {
 
 static inline int64_t mako_map_ii_get(MakoMapII *m, int64_t key) {
     uint64_t h = mako_hash_i64(key);
-    size_t i = (size_t)(h & (m->cap - 1));
+    size_t mask = m->cap - 1;
+    size_t i = (size_t)(h & mask);
     for (;;) {
-        if (m->state[i] == MAKO_MAP_EMPTY) return 0;
-        if (m->state[i] == MAKO_MAP_FULL && m->keys[i] == key) return m->vals[i];
-        i = (i + 1) & (m->cap - 1);
+        uint8_t st = m->state[i];
+        if (MAKO_LIKELY(st == MAKO_MAP_FULL)) {
+            if (MAKO_LIKELY(m->keys[i] == key)) return m->vals[i];
+        } else if (st == MAKO_MAP_EMPTY) {
+            return 0;
+        }
+        i = (i + 1) & mask;
     }
 }
 
@@ -1328,7 +1397,7 @@ typedef struct {
 
 static inline MakoMapSS mako_map_ss_new(size_t hint) {
     size_t cap = 8;
-    size_t need = hint ? (hint * 10 / 7 + 1) : 8;
+    size_t need = hint ? (hint * 4 / 3 + 1) : 8;
     while (cap < need) cap *= 2;
     MakoMapSS m;
     m.state = (uint8_t *)calloc(cap, 1);
@@ -1341,46 +1410,66 @@ static inline MakoMapSS mako_map_ss_new(size_t hint) {
 
 static inline void mako_map_ss_rehash(MakoMapSS *m, size_t ncap);
 
-static inline void mako_map_ss_set(MakoMapSS *m, MakoString key, MakoString val) {
-    if ((m->len + 1) * 10 >= m->cap * 7) {
+/* Take ownership of key and val (no clone). */
+static inline void mako_map_ss_set_take(MakoMapSS *m, MakoString key, MakoString val) {
+    if (MAKO_UNLIKELY((m->len + 1) * 4 >= m->cap * 3)) {
         mako_map_ss_rehash(m, m->cap * 2);
     }
     uint64_t h = mako_hash_bytes(key.data, key.len);
-    size_t i = (size_t)(h & (m->cap - 1));
+    size_t mask = m->cap - 1;
+    size_t i = (size_t)(h & mask);
     size_t first_tomb = (size_t)-1;
     for (;;) {
-        if (m->state[i] == MAKO_MAP_EMPTY) {
+        uint8_t st = m->state[i];
+        if (MAKO_LIKELY(st == MAKO_MAP_EMPTY)) {
             size_t slot = (first_tomb != (size_t)-1) ? first_tomb : i;
             m->state[slot] = MAKO_MAP_FULL;
-            m->keys[slot] = mako_str_clone(key);
-            m->vals[slot] = mako_str_clone(val);
+            m->keys[slot] = key;
+            m->vals[slot] = val;
             m->len++;
             return;
         }
-        if (m->state[i] == MAKO_MAP_TOMB) {
+        if (st == MAKO_MAP_TOMB) {
             if (first_tomb == (size_t)-1) first_tomb = i;
         } else if (m->keys[i].len == key.len
                    && memcmp(m->keys[i].data, key.data, key.len) == 0) {
-            free(m->vals[i].data);
-            m->vals[i] = mako_str_clone(val);
+            mako_str_free(key);
+            mako_str_free(m->vals[i]);
+            m->vals[i] = val;
             return;
         }
-        i = (i + 1) & (m->cap - 1);
+        i = (i + 1) & mask;
     }
 }
 
+static inline void mako_map_ss_set(MakoMapSS *m, MakoString key, MakoString val) {
+    mako_map_ss_set_take(m, mako_str_clone(key), mako_str_clone(val));
+}
+
 static inline void mako_map_ss_rehash(MakoMapSS *m, size_t ncap) {
+    /* Move owned keys/vals — no clone/free churn. */
+    uint8_t *ostate = m->state;
+    MakoString *okeys = m->keys;
+    MakoString *ovals = m->vals;
+    size_t ocap = m->cap;
     MakoMapSS n = mako_map_ss_new(ncap / 2);
-    for (size_t i = 0; i < m->cap; i++) {
-        if (m->state[i] == MAKO_MAP_FULL) {
-            mako_map_ss_set(&n, m->keys[i], m->vals[i]);
-            free(m->keys[i].data);
-            free(m->vals[i].data);
+    for (size_t i = 0; i < ocap; i++) {
+        if (ostate[i] != MAKO_MAP_FULL) continue;
+        MakoString key = okeys[i];
+        MakoString val = ovals[i];
+        uint64_t h = mako_hash_bytes(key.data, key.len);
+        size_t j = (size_t)(h & (n.cap - 1));
+        while (n.state[j] == MAKO_MAP_FULL) {
+            j = (j + 1) & (n.cap - 1);
         }
+        n.state[j] = MAKO_MAP_FULL;
+        n.keys[j] = key;
+        n.vals[j] = val;
+        n.len++;
     }
-    free(m->state);
-    free(m->keys);
-    free(m->vals);
+    free(ostate);
+    free(okeys);
+    free(ovals);
     *m = n;
 }
 
@@ -1419,8 +1508,8 @@ static inline void mako_map_ss_delete(MakoMapSS *m, MakoString key) {
         if (m->state[i] == MAKO_MAP_EMPTY) return;
         if (m->state[i] == MAKO_MAP_FULL && m->keys[i].len == key.len
             && memcmp(m->keys[i].data, key.data, key.len) == 0) {
-            free(m->keys[i].data);
-            free(m->vals[i].data);
+            mako_str_free(m->keys[i]);
+            mako_str_free(m->vals[i]);
             m->keys[i].data = NULL;
             m->keys[i].len = 0;
             m->vals[i].data = NULL;
@@ -1450,7 +1539,8 @@ static inline void mako_abort(const char *msg) {
 
 /* ---- Bounds checks policy ----
  * Debug builds always check. Release (`-DNDEBUG`) strips checks unless
- * MAKO_BOUNDS_ALWAYS is set (codegen `--bounds always` / `mako build --release`).
+ * MAKO_BOUNDS_ALWAYS is set (`mako build --bounds always` or
+ * `[profile.release] bounds_checks = "on"`). Default release is the speed path.
  */
 #if defined(MAKO_BOUNDS_ALWAYS)
 #define MAKO_BOUNDS_CHECK(cond, msg) \
@@ -1503,14 +1593,14 @@ static inline int64_t mako_array_cap(MakoIntArray a) {
  * copies the slice header, sharing the backing store) can't be left holding a
  * freed pointer. Freeing here would double-free / use-after-free such aliases. */
 static inline MakoIntArray mako_slice_append(MakoIntArray s, int64_t v) {
-    if (s.len < s.cap) {
+    if (MAKO_LIKELY(s.len < s.cap)) {
         s.data[s.len++] = v;
         return s;
     }
     size_t ncap = s.cap ? s.cap * 2 : 1;
     if (ncap < s.len + 1) ncap = s.len + 1;
     int64_t *nd = (int64_t *)malloc(ncap * sizeof(int64_t));
-    if (!nd) mako_abort("append: out of memory");
+    if (MAKO_UNLIKELY(!nd)) mako_abort("append: out of memory");
     if (s.len) memcpy(nd, s.data, s.len * sizeof(int64_t));
     s.data = nd;
     s.cap = ncap;
@@ -1807,21 +1897,58 @@ static inline MakoChanStr *mako_chan_str_new(int64_t capacity) {
     return c;
 }
 
-static inline int64_t mako_chan_str_send(MakoChanStr *c, MakoString v) {
+/* Move ownership of `v` into the channel (no clone). Caller must not free/use `v`. */
+static inline int64_t mako_chan_str_send_take(MakoChanStr *c, MakoString v) {
+    if (!c) {
+        mako_str_free(v);
+        return 0;
+    }
     pthread_mutex_lock(&c->mu);
     while (c->count == c->cap && !c->closed) {
         pthread_cond_wait(&c->can_send, &c->mu);
     }
     if (c->closed) {
         pthread_mutex_unlock(&c->mu);
+        mako_str_free(v);
         return 0;
     }
-    c->buf[c->tail] = mako_str_clone(v);
+    c->buf[c->tail] = v; /* take */
     c->tail = (c->tail + 1) % c->cap;
     c->count++;
     pthread_cond_signal(&c->can_recv);
     pthread_mutex_unlock(&c->mu);
     return 1;
+}
+
+/* Default send: clone so caller retains `v`. Hot paths use send_take. */
+static inline int64_t mako_chan_str_send(MakoChanStr *c, MakoString v) {
+    return mako_chan_str_send_take(c, mako_str_clone(v));
+}
+
+/* Nonblocking try-send: 1 on queued, 0 if full/closed. Takes ownership on success;
+ * on failure (full/closed) frees `v` so the call is always consuming. */
+static inline int64_t mako_chan_str_try_send_take(MakoChanStr *c, MakoString v) {
+    if (!c) {
+        mako_str_free(v);
+        return 0;
+    }
+    pthread_mutex_lock(&c->mu);
+    if (c->closed || c->count == c->cap) {
+        pthread_mutex_unlock(&c->mu);
+        mako_str_free(v);
+        return 0;
+    }
+    c->buf[c->tail] = v;
+    c->tail = (c->tail + 1) % c->cap;
+    c->count++;
+    pthread_cond_signal(&c->can_recv);
+    pthread_mutex_unlock(&c->mu);
+    return 1;
+}
+
+static inline int64_t mako_chan_str_try_send(MakoChanStr *c, MakoString v) {
+    /* Clone first so failure does not consume caller's string. */
+    return mako_chan_str_try_send_take(c, mako_str_clone(v));
 }
 
 static inline MakoString mako_chan_str_recv(MakoChanStr *c) {
@@ -1866,7 +1993,7 @@ static inline int64_t mako_chan_str_try_recv(MakoChanStr *c, MakoString *out) {
     pthread_cond_signal(&c->can_send);
     pthread_mutex_unlock(&c->mu);
     if (out) *out = v;
-    else free(v.data);
+    else mako_str_free(v);
     return 1;
 }
 
@@ -1891,7 +2018,7 @@ static inline int64_t mako_chan_str_selectn(
             if (chs[i] == NULL) continue;
             MakoString v = {NULL, 0};
             if (mako_chan_str_try_recv(chs[i], &v)) {
-                free(mako_select_last_str.data);
+                mako_str_free(mako_select_last_str);
                 mako_select_last_str = v;
                 mako_select_rr_str = (i + 1) % n;
                 return i;
@@ -2612,7 +2739,20 @@ static inline int64_t mako_arena_stamp(MakoArena *a, int64_t v) {
 #include <io.h>
 #else
 #include <unistd.h>
+#include <dirent.h>
+#include <fcntl.h>
 #endif
+
+/* Copy path into C buffer; reject empty, too-long, or embedded NUL. */
+static inline int mako_fs_path_buf(MakoString path, char *buf, size_t cap) {
+    if (!buf || cap < 2 || !path.data || path.len == 0 || path.len >= cap) return -1;
+    for (size_t i = 0; i < path.len; i++) {
+        if (path.data[i] == '\0') return -1;
+    }
+    memcpy(buf, path.data, path.len);
+    buf[path.len] = 0;
+    return 0;
+}
 
 static int mako_argc_g = 0;
 static char **mako_argv_g = NULL;
@@ -2643,20 +2783,22 @@ static inline MakoStrArray mako_args(void) {
 }
 
 static inline int64_t mako_mkdir(MakoString path) {
-    const char *p = path.data ? path.data : "";
+    char pbuf[4096];
+    if (mako_fs_path_buf(path, pbuf, sizeof(pbuf)) < 0) return -1;
 #if defined(_WIN32)
-    if (_mkdir(p) == 0) return 0;
+    if (_mkdir(pbuf) == 0) return 0;
 #else
-    if (mkdir(p, 0755) == 0) return 0;
+    if (mkdir(pbuf, 0755) == 0) return 0;
 #endif
     if (errno == EEXIST) return 0;
     return -1;
 }
 
 static inline bool mako_file_exists(MakoString path) {
-    const char *p = path.data ? path.data : "";
+    char pbuf[4096];
+    if (mako_fs_path_buf(path, pbuf, sizeof(pbuf)) < 0) return false;
     struct stat st;
-    return stat(p, &st) == 0;
+    return stat(pbuf, &st) == 0;
 }
 
 
@@ -2972,9 +3114,19 @@ static inline int mako_re_unicode_is_symbol(uint32_t cp) {
     return 0;
 }
 static inline int mako_re_unicode_prop_match(const char *name, size_t nlen, uint32_t cp) {
+    /* Case-specific letter categories before coarse Letter. */
+    if (nlen == 2 && memcmp(name, "Lu", 2) == 0)
+        return (cp >= 'A' && cp <= 'Z') || (cp >= 0x00C0 && cp <= 0x00D6)
+            || (cp >= 0x00D8 && cp <= 0x00DE);
+    if (nlen == 2 && memcmp(name, "Ll", 2) == 0)
+        return (cp >= 'a' && cp <= 'z') || (cp >= 0x00DF && cp <= 0x00F6)
+            || (cp >= 0x00F8 && cp <= 0x00FF);
+    if (nlen == 2 && memcmp(name, "Lt", 2) == 0)
+        return 0; /* titlecase seed */
+    if (nlen == 2 && memcmp(name, "Lo", 2) == 0)
+        return (cp >= 0x3400 && cp <= 0x9FFF);
     if ((nlen == 1 && name[0] == 'L') || (nlen == 6 && memcmp(name, "Letter", 6) == 0)
-        || (nlen == 2 && memcmp(name, "L&", 2) == 0) || (nlen == 2 && memcmp(name, "Lu", 2) == 0)
-        || (nlen == 2 && memcmp(name, "Ll", 2) == 0) || (nlen == 2 && memcmp(name, "Lt", 2) == 0))
+        || (nlen == 2 && memcmp(name, "L&", 2) == 0))
         return mako_re_unicode_is_letter(cp);
     if ((nlen == 1 && name[0] == 'N') || (nlen == 6 && memcmp(name, "Number", 6) == 0)
         || (nlen == 2 && memcmp(name, "Nd", 2) == 0)
@@ -3156,6 +3308,62 @@ static inline int mako_re_unicode_prop_match(const char *name, size_t nlen, uint
         return cp == '^' || cp == '`' || (cp >= 0x02B0 && cp <= 0x02FF);
     if (nlen == 2 && memcmp(name, "Pc", 2) == 0) /* connector punctuation seed */
         return cp == '_' || (cp >= 0x203F && cp <= 0x2040);
+    /* Extra PCRE/Unicode seeds (full property database still residual). */
+    if ((nlen == 3 && memcmp(name, "Any", 3) == 0) || (nlen == 1 && name[0] == 'C'))
+        return 1; /* \p{Any} / coarse Cn/C seed */
+    if (nlen == 5 && memcmp(name, "ASCII", 5) == 0)
+        return cp <= 0x7F;
+    if (nlen == 8 && memcmp(name, "Assigned", 8) == 0)
+        return cp <= 0x10FFFF && !(cp >= 0xD800 && cp <= 0xDFFF);
+    if (nlen == 2 && memcmp(name, "Lu", 2) == 0) /* uppercase letters seed */
+        return (cp >= 'A' && cp <= 'Z') || (cp >= 0x00C0 && cp <= 0x00D6)
+            || (cp >= 0x00D8 && cp <= 0x00DE);
+    if (nlen == 2 && memcmp(name, "Ll", 2) == 0) /* lowercase letters seed */
+        return (cp >= 'a' && cp <= 'z') || (cp >= 0x00DF && cp <= 0x00F6)
+            || (cp >= 0x00F8 && cp <= 0x00FF);
+    if (nlen == 2 && memcmp(name, "Lt", 2) == 0) /* titlecase seed */
+        return 0;
+    if (nlen == 2 && memcmp(name, "Lo", 2) == 0) /* other letters: Han seed */
+        return (cp >= 0x3400 && cp <= 0x9FFF);
+    if (nlen == 2 && memcmp(name, "Ps", 2) == 0) /* open punctuation */
+        return cp == '(' || cp == '[' || cp == '{' || cp == 0x201C;
+    if (nlen == 2 && memcmp(name, "Pe", 2) == 0) /* close punctuation */
+        return cp == ')' || cp == ']' || cp == '}' || cp == 0x201D;
+    /* Additional scripts / blocks for UCD depth. */
+    if (nlen == 8 && memcmp(name, "Cuneiform", 8) == 0)
+        return (cp >= 0x12000 && cp <= 0x123FF);
+    if (nlen == 8 && memcmp(name, "Egyptian", 8) == 0)
+        return (cp >= 0x13000 && cp <= 0x1342F);
+    if (nlen == 5 && memcmp(name, "Emoji", 5) == 0)
+        return (cp >= 0x1F300 && cp <= 0x1F5FF) || (cp >= 0x1F600 && cp <= 0x1F64F)
+            || (cp >= 0x2600 && cp <= 0x26FF);
+    if (nlen == 5 && memcmp(name, "Math", 5) == 0)
+        return (cp >= 0x2200 && cp <= 0x22FF) || cp == '+' || cp == '=' || cp == 0x00D7;
+    if (nlen == 5 && memcmp(name, "Blank", 5) == 0)
+        return cp == ' ' || cp == '\t';
+    if (nlen == 5 && memcmp(name, "Space", 5) == 0)
+        return mako_re_unicode_is_space(cp);
+    if (nlen == 5 && memcmp(name, "Alnum", 5) == 0)
+        return mako_re_unicode_is_letter(cp) || mako_re_unicode_is_digit(cp);
+    if (nlen == 5 && memcmp(name, "Alpha", 5) == 0)
+        return mako_re_unicode_is_letter(cp);
+    if (nlen == 5 && memcmp(name, "Digit", 5) == 0)
+        return mako_re_unicode_is_digit(cp);
+    if (nlen == 5 && memcmp(name, "XDigit", 5) == 0)
+        return (cp >= '0' && cp <= '9') || (cp >= 'a' && cp <= 'f')
+            || (cp >= 'A' && cp <= 'F');
+    if (nlen == 5 && memcmp(name, "Cntrl", 5) == 0)
+        return cp < 0x20 || cp == 0x7F;
+    if (nlen == 5 && memcmp(name, "Graph", 5) == 0)
+        return cp > 0x20 && cp != 0x7F;
+    if (nlen == 5 && memcmp(name, "Print", 5) == 0)
+        return cp >= 0x20 && cp != 0x7F;
+    if (nlen == 5 && memcmp(name, "Punct", 5) == 0)
+        return mako_re_unicode_is_punct(cp);
+    if (nlen == 4 && memcmp(name, "Word", 4) == 0)
+        return mako_re_unicode_is_letter(cp) || mako_re_unicode_is_digit(cp) || cp == '_';
+    if (nlen == 9 && memcmp(name, "Whitespace", 9) == 0)
+        return mako_re_unicode_is_space(cp);
     return 0;
 }
 
@@ -3315,7 +3523,8 @@ static inline int mako_re_atom_ex(const char *pat, size_t plen, const char *text
             *consumed = *matched ? cl : 0;
             return 1;
         }
-        case 'p': {
+        case 'p': case 'P': {
+            /* \p{Prop} / \P{Prop} (negated) */
             if (plen < 5 || pat[2] != '{') { *alen = 2; ok = 0; break; }
             size_t j = 3;
             while (j < plen && pat[j] != '}') j++;
@@ -3324,7 +3533,37 @@ static inline int mako_re_atom_ex(const char *pat, size_t plen, const char *text
             size_t cp_len = 0;
             uint32_t cp = mako_re_utf8_decode(text, tlen, &cp_len);
             ok = mako_re_unicode_prop_match(pat + 3, j - 3, cp);
+            if (pat[1] == 'P') ok = !ok;
             if (ok) override_consumed = cp_len;
+            break;
+        }
+        case 'X': {
+            /* \X — extended grapheme cluster seed: one UTF-8 code point */
+            size_t cp_len = 0;
+            (void)mako_re_utf8_decode(text, tlen, &cp_len);
+            ok = cp_len > 0;
+            if (ok) override_consumed = cp_len;
+            break;
+        }
+        case 'h': /* horizontal whitespace */
+            ok = (ch == ' ' || ch == '\t');
+            break;
+        case 'H':
+            ok = !(ch == ' ' || ch == '\t');
+            break;
+        case 'R': {
+            /* \R — any unicode newline seed */
+            if (ch == '\n' || ch == '\r' || ch == '\f' || ch == '\v') ok = 1;
+            else if ((unsigned char)ch == 0xC2 && tlen >= 2
+                     && (unsigned char)text[1] == 0x85) {
+                /* U+0085 NEL */
+                ok = 1; override_consumed = 2;
+            } else ok = 0;
+            break;
+        }
+        case 'N': {
+            /* \N — any char except newline (PCRE-ish seed) */
+            ok = (ch != '\n' && ch != '\r');
             break;
         }
         default: ok = (ch == (unsigned char)pat[1]); break;
@@ -3831,17 +4070,21 @@ static inline MakoString mako_regex_capture(MakoString pat, MakoString text, int
 }
 
 static inline int64_t mako_remove_file(MakoString path) {
-    const char *p = path.data ? path.data : "";
+    char pbuf[4096];
+    if (mako_fs_path_buf(path, pbuf, sizeof(pbuf)) < 0) return -1;
 #if defined(_WIN32)
-    return _unlink(p) == 0 ? 0 : -1;
+    return _unlink(pbuf) == 0 ? 0 : -1;
 #else
-    return unlink(p) == 0 ? 0 : -1;
+    return unlink(pbuf) == 0 ? 0 : -1;
 #endif
 }
 
 static inline MakoString mako_read_file(MakoString path) {
-    const char *p = path.data ? path.data : "";
-    FILE *f = fopen(p, "rb");
+    char pbuf[4096];
+    if (mako_fs_path_buf(path, pbuf, sizeof(pbuf)) < 0) {
+        return mako_str_from_cstr("");
+    }
+    FILE *f = fopen(pbuf, "rb");
     if (!f) {
         return mako_str_from_cstr("");
     }
@@ -3868,8 +4111,9 @@ static inline MakoString mako_read_file(MakoString path) {
 }
 
 static inline int64_t mako_write_file(MakoString path, MakoString contents) {
-    const char *p = path.data ? path.data : "";
-    FILE *f = fopen(p, "wb");
+    char pbuf[4096];
+    if (mako_fs_path_buf(path, pbuf, sizeof(pbuf)) < 0) return -1;
+    FILE *f = fopen(pbuf, "wb");
     if (!f) return -1;
     size_t n = contents.len;
     size_t w = n ? fwrite(contents.data, 1, n, f) : 0;
@@ -3879,13 +4123,349 @@ static inline int64_t mako_write_file(MakoString path, MakoString contents) {
 
 /* Append bytes (create if missing). Used by append-only logs / mini engines. */
 static inline int64_t mako_append_file(MakoString path, MakoString contents) {
-    const char *p = path.data ? path.data : "";
-    FILE *f = fopen(p, "ab");
+    char pbuf[4096];
+    if (mako_fs_path_buf(path, pbuf, sizeof(pbuf)) < 0) return -1;
+    FILE *f = fopen(pbuf, "ab");
     if (!f) return -1;
     size_t n = contents.len;
     size_t w = n ? fwrite(contents.data, 1, n, f) : 0;
     fclose(f);
     return (w == n) ? 0 : -1;
+}
+
+/* ---- Production filesystem / storage helpers ---- */
+/* mako_fs_path_buf is defined earlier (with sys/stat includes). */
+
+/* Rename / move within the same filesystem. Returns 0 ok, -1 error. */
+static inline int64_t mako_rename(MakoString old_path, MakoString new_path) {
+    char a[4096], b[4096];
+    if (mako_fs_path_buf(old_path, a, sizeof(a)) < 0) return -1;
+    if (mako_fs_path_buf(new_path, b, sizeof(b)) < 0) return -1;
+#if defined(_WIN32)
+    return MoveFileExA(a, b, MOVEFILE_REPLACE_EXISTING) ? 0 : -1;
+#else
+    return rename(a, b) == 0 ? 0 : -1;
+#endif
+}
+
+/* Create directory and all missing parents (like mkdir -p). Returns 0 ok, -1 error. */
+static inline int64_t mako_mkdir_all(MakoString path) {
+    char pbuf[4096];
+    if (mako_fs_path_buf(path, pbuf, sizeof(pbuf)) < 0) return -1;
+    size_t n = strlen(pbuf);
+    if (n == 0) return -1;
+    /* Walk components; skip leading slash. */
+    for (size_t i = 1; i <= n; i++) {
+        if (pbuf[i] != '/' && pbuf[i] != '\\' && pbuf[i] != 0) continue;
+        char save = pbuf[i];
+        pbuf[i] = 0;
+        if (pbuf[0] != 0) {
+#if defined(_WIN32)
+            if (_mkdir(pbuf) != 0 && errno != EEXIST) {
+                /* drive roots etc. */
+                struct stat st;
+                if (stat(pbuf, &st) != 0 || !(st.st_mode & _S_IFDIR)) {
+                    pbuf[i] = save;
+                    return -1;
+                }
+            }
+#else
+            if (mkdir(pbuf, 0755) != 0 && errno != EEXIST) {
+                struct stat st;
+                if (stat(pbuf, &st) != 0 || !S_ISDIR(st.st_mode)) {
+                    pbuf[i] = save;
+                    return -1;
+                }
+            }
+#endif
+        }
+        pbuf[i] = save;
+    }
+    return 0;
+}
+
+/* Remove empty directory. */
+static inline int64_t mako_rmdir(MakoString path) {
+    char pbuf[4096];
+    if (mako_fs_path_buf(path, pbuf, sizeof(pbuf)) < 0) return -1;
+#if defined(_WIN32)
+    return _rmdir(pbuf) == 0 ? 0 : -1;
+#else
+    return rmdir(pbuf) == 0 ? 0 : -1;
+#endif
+}
+
+/* True if path is a regular file. */
+static inline int64_t mako_is_file(MakoString path) {
+    char pbuf[4096];
+    if (mako_fs_path_buf(path, pbuf, sizeof(pbuf)) < 0) return 0;
+    struct stat st;
+    if (stat(pbuf, &st) != 0) return 0;
+#if defined(_WIN32)
+    return (st.st_mode & _S_IFREG) ? 1 : 0;
+#else
+    return S_ISREG(st.st_mode) ? 1 : 0;
+#endif
+}
+
+/* File size by path (-1 if missing/error). */
+static inline int64_t mako_path_size(MakoString path) {
+    char pbuf[4096];
+    if (mako_fs_path_buf(path, pbuf, sizeof(pbuf)) < 0) return -1;
+    struct stat st;
+    if (stat(pbuf, &st) != 0) return -1;
+    return (int64_t)st.st_size;
+}
+
+/* Modification time as Unix seconds (-1 if missing). */
+static inline int64_t mako_file_mtime(MakoString path) {
+    char pbuf[4096];
+    if (mako_fs_path_buf(path, pbuf, sizeof(pbuf)) < 0) return -1;
+    struct stat st;
+    if (stat(pbuf, &st) != 0) return -1;
+#if defined(_WIN32)
+    return (int64_t)st.st_mtime;
+#else
+    return (int64_t)st.st_mtime;
+#endif
+}
+
+/* chmod mode bits (e.g. 0644). Returns 0 ok. */
+static inline int64_t mako_chmod(MakoString path, int64_t mode) {
+    char pbuf[4096];
+    if (mako_fs_path_buf(path, pbuf, sizeof(pbuf)) < 0) return -1;
+#if defined(_WIN32)
+    return _chmod(pbuf, (int)mode) == 0 ? 0 : -1;
+#else
+    return chmod(pbuf, (mode_t)mode) == 0 ? 0 : -1;
+#endif
+}
+
+/* Copy file contents (src → dst). Overwrites dst. Returns 0 ok. */
+static inline int64_t mako_copy_file(MakoString src, MakoString dst) {
+    char a[4096], b[4096];
+    if (mako_fs_path_buf(src, a, sizeof(a)) < 0) return -1;
+    if (mako_fs_path_buf(dst, b, sizeof(b)) < 0) return -1;
+    FILE *in = fopen(a, "rb");
+    if (!in) return -1;
+    FILE *out = fopen(b, "wb");
+    if (!out) { fclose(in); return -1; }
+    char buf[65536];
+    size_t n;
+    int ok = 1;
+    while ((n = fread(buf, 1, sizeof(buf), in)) > 0) {
+        if (fwrite(buf, 1, n, out) != n) { ok = 0; break; }
+    }
+    if (ferror(in)) ok = 0;
+    fclose(in);
+    if (fclose(out) != 0) ok = 0;
+    return ok ? 0 : -1;
+}
+
+/* Atomic write: temp file in same dir + fsync + rename. Crash-safe for configs/logs. */
+static inline int64_t mako_atomic_write_file(MakoString path, MakoString contents) {
+    char pbuf[4096];
+    if (mako_fs_path_buf(path, pbuf, sizeof(pbuf)) < 0) return -1;
+    /* Build temp path: <path>.tmp.<pid> */
+    char tbuf[4224];
+#if defined(_WIN32)
+    snprintf(tbuf, sizeof(tbuf), "%s.tmp.%u", pbuf, (unsigned)_getpid());
+#else
+    snprintf(tbuf, sizeof(tbuf), "%s.tmp.%ld", pbuf, (long)getpid());
+#endif
+    FILE *f = fopen(tbuf, "wb");
+    if (!f) return -1;
+    size_t n = contents.data ? contents.len : 0;
+    size_t w = n ? fwrite(contents.data, 1, n, f) : 0;
+    if (w != n) { fclose(f); remove(tbuf); return -1; }
+    fflush(f);
+#if !defined(_WIN32)
+    int fd = fileno(f);
+    if (fd >= 0) {
+#if defined(__APPLE__)
+#ifndef F_FULLFSYNC
+#define F_FULLFSYNC 51
+#endif
+        (void)fcntl(fd, F_FULLFSYNC);
+#else
+        (void)fsync(fd);
+#endif
+    }
+#endif
+    if (fclose(f) != 0) { remove(tbuf); return -1; }
+#if defined(_WIN32)
+    if (!MoveFileExA(tbuf, pbuf, MOVEFILE_REPLACE_EXISTING)) {
+        remove(tbuf);
+        return -1;
+    }
+#else
+    if (rename(tbuf, pbuf) != 0) {
+        remove(tbuf);
+        return -1;
+    }
+#endif
+    return 0;
+}
+
+/* System temp directory path (e.g. /tmp or $TMPDIR). */
+static inline MakoString mako_temp_dir(void) {
+#if defined(_WIN32)
+    char buf[MAX_PATH];
+    DWORD n = GetTempPathA((DWORD)sizeof(buf), buf);
+    if (n == 0 || n >= sizeof(buf)) return mako_str_from_cstr(".");
+    /* Strip trailing slash for consistency. */
+    while (n > 1 && (buf[n - 1] == '\\' || buf[n - 1] == '/')) {
+        buf[--n] = 0;
+    }
+    return mako_str_from_cstr(buf);
+#else
+    const char *t = getenv("TMPDIR");
+    if (!t || !t[0]) t = getenv("TMP");
+    if (!t || !t[0]) t = "/tmp";
+    return mako_str_from_cstr(t);
+#endif
+}
+
+/* Create a unique temp file path (empty file created). prefix may be empty. */
+static inline MakoString mako_temp_file(MakoString prefix) {
+    MakoString dir = mako_temp_dir();
+    char pfx[256];
+    size_t pl = prefix.data ? prefix.len : 0;
+    if (pl >= sizeof(pfx)) pl = sizeof(pfx) - 1;
+    if (pl && prefix.data) memcpy(pfx, prefix.data, pl);
+    pfx[pl] = 0;
+    if (pl == 0) { memcpy(pfx, "mako", 4); pfx[4] = 0; }
+
+    char path[4224];
+#if defined(_WIN32)
+    snprintf(path, sizeof(path), "%s\\%s-%u-%u.tmp",
+             dir.data ? dir.data : ".", pfx, (unsigned)_getpid(),
+             (unsigned)(time(NULL) & 0xfffffff));
+    free(dir.data);
+    FILE *f = fopen(path, "wb");
+    if (!f) return mako_str_from_cstr("");
+    fclose(f);
+    return mako_str_from_cstr(path);
+#else
+    snprintf(path, sizeof(path), "%s/%s-XXXXXX", dir.data ? dir.data : "/tmp", pfx);
+    free(dir.data);
+    int fd = mkstemp(path);
+    if (fd < 0) return mako_str_from_cstr("");
+    close(fd);
+    return mako_str_from_cstr(path);
+#endif
+}
+
+/* Symlink: create link_path → target. */
+static inline int64_t mako_symlink(MakoString target, MakoString link_path) {
+#if defined(_WIN32)
+    (void)target; (void)link_path;
+    return -1; /* needs CreateSymbolicLink privileges */
+#else
+    char t[4096], l[4096];
+    if (mako_fs_path_buf(target, t, sizeof(t)) < 0) return -1;
+    if (mako_fs_path_buf(link_path, l, sizeof(l)) < 0) return -1;
+    return symlink(t, l) == 0 ? 0 : -1;
+#endif
+}
+
+/* Read symlink contents (empty on error). */
+static inline MakoString mako_readlink(MakoString path) {
+#if defined(_WIN32)
+    (void)path;
+    return mako_str_from_cstr("");
+#else
+    char pbuf[4096];
+    if (mako_fs_path_buf(path, pbuf, sizeof(pbuf)) < 0) return mako_str_from_cstr("");
+    char out[4096];
+    ssize_t n = readlink(pbuf, out, sizeof(out) - 1);
+    if (n < 0) return mako_str_from_cstr("");
+    out[n] = 0;
+    return mako_str_from_cstr(out);
+#endif
+}
+
+/* Resolve absolute path (realpath). Empty on error. */
+static inline MakoString mako_realpath(MakoString path) {
+    char pbuf[4096];
+    if (mako_fs_path_buf(path, pbuf, sizeof(pbuf)) < 0) return mako_str_from_cstr("");
+#if defined(_WIN32)
+    char out[4096];
+    DWORD n = GetFullPathNameA(pbuf, (DWORD)sizeof(out), out, NULL);
+    if (n == 0 || n >= sizeof(out)) return mako_str_from_cstr("");
+    return mako_str_from_cstr(out);
+#else
+    char *r = realpath(pbuf, NULL);
+    if (!r) return mako_str_from_cstr("");
+    MakoString s = mako_str_from_cstr(r);
+    free(r);
+    return s;
+#endif
+}
+
+/* Recursive remove file or directory tree. Depth-limited. Returns 0 ok. */
+static inline int64_t mako_remove_all_depth(const char *path, int depth) {
+    if (!path || !path[0] || depth > 64) return -1;
+    struct stat st;
+#if defined(_WIN32)
+    if (stat(path, &st) != 0) {
+        return errno == ENOENT ? 0 : -1;
+    }
+    if (!(st.st_mode & _S_IFDIR)) {
+        return _unlink(path) == 0 ? 0 : -1;
+    }
+    char pattern[4224];
+    snprintf(pattern, sizeof(pattern), "%s\\*", path);
+    WIN32_FIND_DATAA fd;
+    HANDLE h = FindFirstFileA(pattern, &fd);
+    if (h != INVALID_HANDLE_VALUE) {
+        do {
+            if (strcmp(fd.cFileName, ".") == 0 || strcmp(fd.cFileName, "..") == 0) continue;
+            char child[4224];
+            snprintf(child, sizeof(child), "%s\\%s", path, fd.cFileName);
+            if (mako_remove_all_depth(child, depth + 1) != 0) {
+                FindClose(h);
+                return -1;
+            }
+        } while (FindNextFileA(h, &fd));
+        FindClose(h);
+    }
+    return _rmdir(path) == 0 ? 0 : -1;
+#else
+    if (lstat(path, &st) != 0) {
+        return errno == ENOENT ? 0 : -1;
+    }
+    if (S_ISLNK(st.st_mode) || S_ISREG(st.st_mode)) {
+        return unlink(path) == 0 ? 0 : -1;
+    }
+    if (!S_ISDIR(st.st_mode)) {
+        return unlink(path) == 0 ? 0 : -1;
+    }
+    DIR *d = opendir(path);
+    if (!d) return -1;
+    struct dirent *ent;
+    while ((ent = readdir(d)) != NULL) {
+        if (strcmp(ent->d_name, ".") == 0 || strcmp(ent->d_name, "..") == 0) continue;
+        char child[4224];
+        snprintf(child, sizeof(child), "%s/%s", path, ent->d_name);
+        if (mako_remove_all_depth(child, depth + 1) != 0) {
+            closedir(d);
+            return -1;
+        }
+    }
+    closedir(d);
+    return rmdir(path) == 0 ? 0 : -1;
+#endif
+}
+
+static inline int64_t mako_remove_all(MakoString path) {
+    char pbuf[4096];
+    if (mako_fs_path_buf(path, pbuf, sizeof(pbuf)) < 0) return -1;
+    /* Refuse obviously dangerous roots. */
+    if (strcmp(pbuf, "/") == 0 || strcmp(pbuf, ".") == 0 || strcmp(pbuf, "..") == 0)
+        return -1;
+    if (strcmp(pbuf, "") == 0) return -1;
+    return mako_remove_all_depth(pbuf, 0);
 }
 
 static inline MakoString mako_env_get(MakoString key) {
@@ -3907,15 +4487,52 @@ static inline int64_t mako_env_set(MakoString key, MakoString val) {
 #endif
 }
 
-static inline int64_t mako_now_ms(void) {
+/* ---- Clocks (low-latency) ----
+ *
+ * Wall (REALTIME): calendar time; can jump with NTP/slew. Use for logs/deadlines
+ *                  that must match wall clocks.
+ * Mono (MONOTONIC[_RAW]): steady; never goes backwards. Use for latency, budgets,
+ *                         timeouts, benchmarks.
+ *
+ * Prefer mono_* for all elapsed-time / low-latency measurements.
+ */
+
+/* Wall-clock nanoseconds (CLOCK_REALTIME). */
+static inline int64_t mako_wall_ns(void) {
+    struct timespec ts;
+#if defined(CLOCK_REALTIME)
+    if (clock_gettime(CLOCK_REALTIME, &ts) == 0) {
+        return (int64_t)ts.tv_sec * 1000000000LL + (int64_t)ts.tv_nsec;
+    }
+#endif
     struct timeval tv;
     mako_gettimeofday(&tv, NULL);
-    return (int64_t)tv.tv_sec * 1000 + (int64_t)tv.tv_usec / 1000;
+    return (int64_t)tv.tv_sec * 1000000000LL + (int64_t)tv.tv_usec * 1000LL;
 }
 
-/* Monotonic nanoseconds for microbenches (CLOCK_MONOTONIC). */
-static inline int64_t mako_now_ns(void) {
+static inline int64_t mako_wall_ms(void) {
+    return mako_wall_ns() / 1000000LL;
+}
+
+static inline int64_t mako_wall_us(void) {
+    return mako_wall_ns() / 1000LL;
+}
+
+/* Monotonic nanoseconds. Prefer CLOCK_MONOTONIC_RAW (no NTP slew) when available. */
+static inline int64_t mako_mono_ns(void) {
+#if defined(_WIN32)
+    LARGE_INTEGER freq, now;
+    QueryPerformanceFrequency(&freq);
+    QueryPerformanceCounter(&now);
+    /* ns = counter * 1e9 / freq */
+    return (int64_t)((now.QuadPart * 1000000000LL) / freq.QuadPart);
+#else
     struct timespec ts;
+#if defined(CLOCK_MONOTONIC_RAW)
+    if (clock_gettime(CLOCK_MONOTONIC_RAW, &ts) == 0) {
+        return (int64_t)ts.tv_sec * 1000000000LL + (int64_t)ts.tv_nsec;
+    }
+#endif
 #if defined(CLOCK_MONOTONIC)
     if (clock_gettime(CLOCK_MONOTONIC, &ts) == 0) {
         return (int64_t)ts.tv_sec * 1000000000LL + (int64_t)ts.tv_nsec;
@@ -3924,6 +4541,160 @@ static inline int64_t mako_now_ns(void) {
     struct timeval tv;
     mako_gettimeofday(&tv, NULL);
     return (int64_t)tv.tv_sec * 1000000000LL + (int64_t)tv.tv_usec * 1000LL;
+#endif
+}
+
+static inline int64_t mako_mono_us(void) {
+    return mako_mono_ns() / 1000LL;
+}
+
+static inline int64_t mako_mono_ms(void) {
+    return mako_mono_ns() / 1000000LL;
+}
+
+/* Clock resolution in ns (best-effort). */
+static inline int64_t mako_mono_res_ns(void) {
+#if defined(_WIN32)
+    LARGE_INTEGER freq;
+    QueryPerformanceFrequency(&freq);
+    if (freq.QuadPart <= 0) return 1000;
+    return 1000000000LL / freq.QuadPart;
+#else
+    struct timespec ts;
+#if defined(CLOCK_MONOTONIC_RAW)
+    if (clock_getres(CLOCK_MONOTONIC_RAW, &ts) == 0) {
+        return (int64_t)ts.tv_sec * 1000000000LL + (int64_t)ts.tv_nsec;
+    }
+#endif
+#if defined(CLOCK_MONOTONIC)
+    if (clock_getres(CLOCK_MONOTONIC, &ts) == 0) {
+        return (int64_t)ts.tv_sec * 1000000000LL + (int64_t)ts.tv_nsec;
+    }
+#endif
+    return 1000; /* 1 µs fallback */
+#endif
+}
+
+/* Compat: now_ms = wall ms (logs, unix conversion). now_ns = mono ns (latency). */
+static inline int64_t mako_now_ms(void) {
+    return mako_wall_ms();
+}
+
+static inline int64_t mako_now_ns(void) {
+    return mako_mono_ns();
+}
+
+/* Elapsed since start tick (mono domain preferred). */
+static inline int64_t mako_elapsed_ns(int64_t start_mono_ns) {
+    int64_t n = mako_mono_ns() - start_mono_ns;
+    return n < 0 ? 0 : n;
+}
+
+static inline int64_t mako_elapsed_us(int64_t start_mono_us) {
+    int64_t n = mako_mono_us() - start_mono_us;
+    return n < 0 ? 0 : n;
+}
+
+/* Wall-based elapsed (legacy elapsed_ms); can jump with NTP. Prefer elapsed_mono_ms. */
+static inline int64_t mako_elapsed_ms(int64_t start_wall_ms) {
+    int64_t n = mako_wall_ms() - start_wall_ms;
+    return n < 0 ? 0 : n;
+}
+
+static inline int64_t mako_elapsed_mono_ms(int64_t start_mono_ms) {
+    int64_t n = mako_mono_ms() - start_mono_ms;
+    return n < 0 ? 0 : n;
+}
+
+/* Deadlines on the monotonic clock. */
+static inline int64_t mako_deadline_ns(int64_t timeout_ns) {
+    if (timeout_ns < 0) timeout_ns = 0;
+    return mako_mono_ns() + timeout_ns;
+}
+
+static inline int64_t mako_deadline_ms(int64_t timeout_ms) {
+    if (timeout_ms < 0) timeout_ms = 0;
+    return mako_mono_ns() + timeout_ms * 1000000LL;
+}
+
+static inline int64_t mako_deadline_remaining_ns(int64_t deadline_mono_ns) {
+    int64_t left = deadline_mono_ns - mako_mono_ns();
+    return left < 0 ? 0 : left;
+}
+
+static inline int64_t mako_deadline_expired(int64_t deadline_mono_ns) {
+    return mako_mono_ns() >= deadline_mono_ns ? 1 : 0;
+}
+
+/* High-resolution sleep (nanosleep loop). For <~50µs, OS may oversleep —
+ * use spin_until_ns for ultra-short waits. */
+static inline void mako_sleep_ns(int64_t ns) {
+    if (ns <= 0) return;
+#if defined(_WIN32)
+    /* Sleep(1) min granularity; for short sleeps, spin. */
+    if (ns < 1000000LL) {
+        int64_t until = mako_mono_ns() + ns;
+        while (mako_mono_ns() < until) {
+            YieldProcessor();
+        }
+        return;
+    }
+    DWORD ms = (DWORD)(ns / 1000000LL);
+    if (ms == 0) ms = 1;
+    Sleep(ms);
+#else
+    struct timespec req, rem;
+    req.tv_sec = (time_t)(ns / 1000000000LL);
+    req.tv_nsec = (long)(ns % 1000000000LL);
+    while (nanosleep(&req, &rem) != 0) {
+        if (errno != EINTR) break;
+        req = rem;
+    }
+#endif
+}
+
+static inline void mako_sleep_us(int64_t us) {
+    if (us <= 0) return;
+    if (us > 1000000000LL) us = 1000000000LL; /* clamp ~1000s */
+    mako_sleep_ns(us * 1000LL);
+}
+
+/* Busy-wait until mono deadline (lowest latency, burns CPU). */
+static inline void mako_spin_until_ns(int64_t deadline_mono_ns) {
+    while (mako_mono_ns() < deadline_mono_ns) {
+#if defined(_WIN32)
+        YieldProcessor();
+#elif defined(__GNUC__) || defined(__clang__)
+        __asm__ __volatile__("" ::: "memory");
+#if defined(__x86_64__) || defined(__i386__)
+        __asm__ __volatile__("pause");
+#elif defined(__aarch64__)
+        __asm__ __volatile__("yield");
+#endif
+#endif
+    }
+}
+
+/* Hybrid wait: sleep until near deadline, then spin for the last few µs. */
+static inline void mako_sleep_until_ns(int64_t deadline_mono_ns) {
+    for (;;) {
+        int64_t left = deadline_mono_ns - mako_mono_ns();
+        if (left <= 0) return;
+        if (left > 100000LL) { /* > 100 µs: sleep most of it */
+            mako_sleep_ns(left - 50000LL);
+            continue;
+        }
+        mako_spin_until_ns(deadline_mono_ns);
+        return;
+    }
+}
+
+/* Measure a no-op for calibration (returns ns of one mono_ns sample pair). */
+static inline int64_t mako_mono_overhead_ns(void) {
+    int64_t a = mako_mono_ns();
+    int64_t b = mako_mono_ns();
+    int64_t d = b - a;
+    return d < 0 ? 0 : d;
 }
 
 /* Prevent LTO/DCE from erasing bench work (Rust black_box equivalent). */

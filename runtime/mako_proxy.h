@@ -11,9 +11,23 @@
 #include <ctype.h>
 #if !defined(_WIN32)
 #include <poll.h>
+#include <sys/stat.h>
 #if defined(__linux__)
 #include <sys/sendfile.h>
 #include <fcntl.h>
+#elif defined(__APPLE__)
+#include <sys/types.h>
+#include <sys/socket.h>
+/* macOS hides sendfile(2) when _POSIX_C_SOURCE is set (mako_rt.h). Declare it. */
+#if defined(_POSIX_C_SOURCE) && !defined(MAKO_SENDFILE_DECL)
+#define MAKO_SENDFILE_DECL
+struct sf_hdtr;
+int sendfile(int fd, int s, off_t offset, off_t *len, struct sf_hdtr *hdtr, int flags);
+#endif
+#elif defined(__FreeBSD__)
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <sys/uio.h>
 #endif
 #endif
 
@@ -1016,7 +1030,7 @@ static inline MakoHttpParsed mako_http_parse(MakoString raw) {
         if (!m) return r;
         memcpy(m, s, i);
         m[i] = 0;
-        free(r.method.data);
+        mako_str_free(r.method); /* may be empty singleton / prior owned */
         r.method = (MakoString){m, i};
     }
     size_t p0 = i + 1;
@@ -1029,7 +1043,7 @@ static inline MakoHttpParsed mako_http_parse(MakoString raw) {
         if (!p) return r;
         memcpy(p, s + p0, plen);
         p[plen] = 0;
-        free(r.path.data);
+        mako_str_free(r.path);
         r.path = (MakoString){p, plen};
     }
 
@@ -1055,7 +1069,7 @@ static inline MakoHttpParsed mako_http_parse(MakoString raw) {
         if (hd) {
             memcpy(hd, s + h0, hlen);
             hd[hlen] = 0;
-            free(r.headers.data);
+            mako_str_free(r.headers);
             r.headers = (MakoString){hd, hlen};
         }
     }
@@ -1065,7 +1079,7 @@ static inline MakoHttpParsed mako_http_parse(MakoString raw) {
         char *h = (char *)malloc(hl + 1);
         if (h) {
             memcpy(h, hostbuf, hl + 1);
-            free(r.host.data);
+            mako_str_free(r.host);
             r.host = (MakoString){h, hl};
         }
     }
@@ -1077,7 +1091,7 @@ static inline MakoHttpParsed mako_http_parse(MakoString raw) {
         char *body_out = NULL;
         size_t body_len = 0;
         if (mako_proxy_decode_chunked(s + bstart, blen, &body_out, &body_len) >= 0) {
-            free(r.body.data);
+            mako_str_free(r.body);
             r.body = (MakoString){body_out, body_len};
         }
         /* incomplete chunked: leave body empty, still ok=1 (headers parsed) */
@@ -1089,7 +1103,7 @@ static inline MakoHttpParsed mako_http_parse(MakoString raw) {
         if (bd) {
             if (blen) memcpy(bd, s + bstart, blen);
             bd[blen] = 0;
-            free(r.body.data);
+            mako_str_free(r.body);
             r.body = (MakoString){bd, blen};
         }
     }
@@ -1139,8 +1153,10 @@ static inline MakoString mako_http_parsed_header(MakoHttpParsed r, MakoString na
 
 /* ---- Nonblocking connect ------------------------------------------------- */
 
+/* Nonblocking connect — first resolved address (IPv4 or IPv6). For full
+ * Happy Eyeballs use tcp_connect / tcp_connect_timeout. */
 static inline int64_t mako_tcp_connect_nb(MakoString host, int64_t port) {
-    char hbuf[256];
+    char hbuf[256], pbuf[16];
     if (!host.data || host.len == 0 || host.len >= sizeof(hbuf)) return -1;
     if (port <= 0 || port > 65535) return -1;
     for (size_t i = 0; i < host.len; i++) {
@@ -1148,32 +1164,46 @@ static inline int64_t mako_tcp_connect_nb(MakoString host, int64_t port) {
     }
     memcpy(hbuf, host.data, host.len);
     hbuf[host.len] = 0;
-    int fd = socket(AF_INET, SOCK_STREAM, 0);
-    if (fd < 0) return -1;
-#if !defined(_WIN32)
-    int flags = fcntl(fd, F_GETFL, 0);
-    if (flags >= 0) fcntl(fd, F_SETFL, flags | O_NONBLOCK);
-#else
-    u_long mode = 1UL;
-    ioctlsocket((mako_sock_t)fd, FIONBIO, &mode);
-#endif
-    struct sockaddr_in addr;
-    memset(&addr, 0, sizeof(addr));
-    addr.sin_family = AF_INET;
-    addr.sin_port = htons((uint16_t)port);
-    if (inet_pton(AF_INET, hbuf, &addr.sin_addr) != 1) {
-        mako_sock_close(fd);
-        return -1;
+    char *hp = hbuf;
+    if (hp[0] == '[') {
+        char *rb = strchr(hp, ']');
+        if (rb) {
+            *rb = 0;
+            hp++;
+        }
     }
-    int rc = connect(fd, (struct sockaddr *)&addr, sizeof(addr));
-    if (rc == 0) return (int64_t)fd;
+    snprintf(pbuf, sizeof(pbuf), "%d", (int)port);
+    struct addrinfo hints, *res = NULL;
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
+    if (getaddrinfo(hp, pbuf, &hints, &res) != 0 || !res) return -1;
+    int fd = -1;
+    for (struct addrinfo *ai = res; ai; ai = ai->ai_next) {
+        fd = (int)mako_sock_create_af(ai->ai_family, SOCK_STREAM);
+        if (fd < 0) continue;
+        mako_sock_set_nonblock((mako_sock_t)fd, 1);
+        int rc = connect(fd, ai->ai_addr, (socklen_t)ai->ai_addrlen);
+        if (rc == 0) {
+            freeaddrinfo(res);
+            return (int64_t)fd;
+        }
 #if defined(_WIN32)
-    int e = WSAGetLastError();
-    if (e == WSAEWOULDBLOCK || e == WSAEINPROGRESS) return (int64_t)fd;
+        int e = WSAGetLastError();
+        if (e == WSAEWOULDBLOCK || e == WSAEINPROGRESS) {
+            freeaddrinfo(res);
+            return (int64_t)fd;
+        }
 #else
-    if (errno == EINPROGRESS || errno == EAGAIN || errno == EWOULDBLOCK) return (int64_t)fd;
+        if (errno == EINPROGRESS || errno == EAGAIN || errno == EWOULDBLOCK) {
+            freeaddrinfo(res);
+            return (int64_t)fd;
+        }
 #endif
-    mako_sock_close(fd);
+        mako_sock_close(fd);
+        fd = -1;
+    }
+    freeaddrinfo(res);
     return -1;
 }
 
@@ -1233,23 +1263,34 @@ static inline int64_t mako_tcp_connect_wait(int64_t fd, int64_t timeout_ms) {
 
 /* ---- Efficient fd-to-fd copy --------------------------------------------- */
 
-/* Copy up to max_bytes from src to dst. Returns bytes copied, or -1. */
+/* Copy up to max_bytes from src to dst. Returns bytes copied, or -1.
+ * Linux: kernel splice (zero-copy socket↔socket) with 256 KiB chunks.
+ * Elsewhere: userspace pump with a 64 KiB stack buffer (portable). */
 static inline int64_t mako_tcp_fd_copy(int64_t src_fd, int64_t dst_fd, int64_t max_bytes) {
     if (src_fd < 0 || dst_fd < 0) return -1;
     if (max_bytes <= 0) max_bytes = 65536;
     int64_t total = 0;
-#if defined(__linux__)
-    /* splice via pipe when both are sockets */
+#if defined(__linux__) && defined(SPLICE_F_MOVE)
+#ifndef MAKO_SPLICE_CHUNK
+#define MAKO_SPLICE_CHUNK (256 * 1024)
+#endif
     int pipefd[2];
     if (pipe(pipefd) == 0) {
+        /* Larger pipe capacity reduces splice wakeups on bulk proxy. */
+#if defined(F_SETPIPE_SZ)
+        (void)fcntl(pipefd[0], F_SETPIPE_SZ, MAKO_SPLICE_CHUNK);
+        (void)fcntl(pipefd[1], F_SETPIPE_SZ, MAKO_SPLICE_CHUNK);
+#endif
         while (total < max_bytes) {
             size_t chunk = (size_t)(max_bytes - total);
-            if (chunk > 65536) chunk = 65536;
-            ssize_t n = splice((int)src_fd, NULL, pipefd[1], NULL, chunk, SPLICE_F_MOVE);
+            if (chunk > (size_t)MAKO_SPLICE_CHUNK) chunk = (size_t)MAKO_SPLICE_CHUNK;
+            int flags = SPLICE_F_MOVE;
+            if (total + (int64_t)chunk < max_bytes) flags |= SPLICE_F_MORE;
+            ssize_t n = splice((int)src_fd, NULL, pipefd[1], NULL, chunk, flags);
             if (n < 0) {
                 if (errno == EAGAIN || errno == EWOULDBLOCK) break;
-                if (errno == EINVAL || errno == ENOSYS) {
-                    /* fall through to userspace */
+                if (errno == EINTR) continue;
+                if (errno == EINVAL || errno == ENOSYS || errno == EOPNOTSUPP) {
                     close(pipefd[0]);
                     close(pipefd[1]);
                     goto userspace;
@@ -1263,10 +1304,12 @@ static inline int64_t mako_tcp_fd_copy(int64_t src_fd, int64_t dst_fd, int64_t m
             while (left > 0) {
                 ssize_t w = splice(pipefd[0], NULL, (int)dst_fd, NULL, (size_t)left, SPLICE_F_MOVE);
                 if (w < 0) {
+                    if (errno == EINTR) continue;
                     close(pipefd[0]);
                     close(pipefd[1]);
                     return total > 0 ? total : -1;
                 }
+                if (w == 0) break;
                 left -= w;
             }
             total += n;
@@ -1276,6 +1319,30 @@ static inline int64_t mako_tcp_fd_copy(int64_t src_fd, int64_t dst_fd, int64_t m
         return total;
     }
 userspace:
+#endif
+#if defined(__APPLE__) || defined(__FreeBSD__)
+    /* sendfile for regular file → socket (zero-copy when kernel supports it). */
+    {
+        struct stat st;
+        if (fstat((int)src_fd, &st) == 0 && S_ISREG(st.st_mode)) {
+            off_t len = (off_t)max_bytes;
+#if defined(__APPLE__)
+            off_t sent = 0;
+            if (sendfile((int)src_fd, (int)dst_fd, 0, &len, NULL, 0) == 0
+                || (errno == EAGAIN && len > 0)) {
+                return (int64_t)len;
+            }
+            (void)sent;
+#elif defined(__FreeBSD__)
+            off_t sbytes = 0;
+            if (sendfile((int)src_fd, (int)dst_fd, 0, (size_t)len, NULL, &sbytes, 0) == 0
+                || sbytes > 0) {
+                return (int64_t)sbytes;
+            }
+#endif
+            /* fall through to userspace on failure */
+        }
+    }
 #endif
     {
         char buf[65536];

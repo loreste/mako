@@ -40,17 +40,19 @@ reflect N + nested POD · Result/Option deep nests · nested None/Err ·
 **jpeg_is_baseline_gray** · mako JFIF/raw/dct/huff/roundtrip probes · APP
 layout · NLL for/if/match · more `\p{…}` · expanded TSan · prior work.
 
-**Language pain residuals** (still open — see [PAIN_POINTS.md](PAIN_POINTS.md)):
+**Language pain residuals** (Wave 40 close — see [PAIN_POINTS.md](PAIN_POINTS.md)):
 
-1. Fuller data-race model beyond expanded TSan  
-2. More Result/Option shapes (remaining edge cases; `?` slice/map done)  
-3. Stronger NLL product cases (rarer multi-label CFG)  
+1. Fuller data-race model — **Done seed** (deep Send + static mut-capture race until join)  
+2. Result/Option edges — nested patterns + generic nests; exotic `?` residual  
+3. Stronger NLL multi-label — const-fold + multi-label tests **Done seed**  
 
 **Stdlib / product residuals:**
 
-6. Complete Unicode / PCRE · JPEG viewer parity (mako APP7 layout + roundtrip; viewer Huffman residual)  
-7. Reflect for non-POD field types (maps/slices/chan/nested map·slice·Option·Result rejected; content residual)  
+6. Complete Unicode / PCRE residual (Lu/Ll/ASCII/Any seeds landed; full UCD open) · JPEG **viewer Huffman** via `jpeg_encode_gray_baseline`  
+7. Reflect non-POD — Option/Result/array/map **Done**; chan/Arena rejected  
 8. Symbol-level parity  
+9. Optional app GC — `gc_alloc`/`gc_collect` with `[package] gc = true` (systems forbids)  
+10. API stability — `#[stable]` / `#[deprecated("msg")]`  
 
 ## Product Focus From General-Purpose Brief
 
@@ -72,7 +74,7 @@ track rather than the language identity.
    diagnostics, scheduler observability, race detection.
 7. Observability/debugging: structured logs, metrics, tracing/OpenTelemetry,
    CPU/memory/allocation profiling, stack traces, debugger/LSP depth.
-8. Domain tracks: telecom/realtime (SIP/RTP/SRTP/WebRTC), storage systems,
+8. Domain tracks: telecom/realtime (**SIP/SDP/RTP + SRTP crypto blocks Done** — build stacks in Mako; full product stacks residual), storage systems,
    AI inference, games/game engines, simulations, edge/WASM, plugin/ABI support.
 9. Deployment: static binary defaults where practical, cross-compile polish,
    minimal containers, serverless/edge targets, WASM progression.
@@ -83,15 +85,15 @@ This is the checklist for reaching **100% of the product intention**, not just
 the current MVP/STATUS bar. Percentages are weighted by product importance and
 should be updated whenever a task is checked off.
 
-**Overall intention completion:** **~81% / 100%**  
+**Overall intention completion:** **~86% / 100%**  
 Weighted from the track table below; STATUS remains the MVP implementation bar.  
 **Mako identity (preferred syntax):** **~86%** — [IDENTITY.md](IDENTITY.md).
 
 | Track | Weight | Current |
 |-------|--------|---------|
-| 1. Language identity and core type system | 10% | 90% |
-| 2. Memory safety and allocation control | 10% | 75% |
-| 3. Concurrency and runtime trust | 10% | 55% |
+| 1. Language identity and core type system | 10% | 96% |
+| 2. Memory safety and allocation control | 10% | 88% |
+| 3. Concurrency and runtime trust | 10% | 74% |
 | 4. Backend app surface | 12% | 100% |
 | 5. API protocols and networking | 10% | 100% |
 | 6. Data, SQL, and serialization | 10% | 100% |
@@ -112,11 +114,11 @@ Weighted from the track table below; STATUS remains the MVP implementation bar.
 - [x] Explicit `export`; opt-in `visibility = "explicit"`.
 - [x] Typed channels: `chan_open[T]` / `make(chan[T], n)`.
 - [x] Pain map: [PAIN_POINTS.md](PAIN_POINTS.md) — design driven by Go/Rust pain, not clones.
-- [ ] Close language pain residuals (races, richer errors, NLL, visibility, identity lint).
-- [ ] `if init; cond { }` Go if-with-init.
-- [ ] `go f()` sugar → kick inside crew.
-- [ ] Compiler-enforced API stability annotations.
-- [ ] Richer pattern matching over structs/errors/messages beyond tuples/enums.
+- [x] Close language pain residuals seed (deep Send/race, NLL multi-label, nested patterns).
+- [x] `if init; cond { }` Go if-with-init.
+- [x] `go f()` sugar → kick inside crew.
+- [x] Compiler-enforced API stability annotations (`#[stable]` / `#[deprecated]`).
+- [x] Richer pattern matching — struct field patterns + nested variant patterns (typecheck).
 
 ### 2. Memory Safety And Allocation Control — 10%
 
@@ -126,7 +128,8 @@ Weighted from the track table below; STATUS remains the MVP implementation bar.
 - [x] Release safety profile: `[profile.release] bounds_checks = "on"` (default unchanged).
 - [x] Memory pools and reusable buffers as first-class stdlib/runtime tools.
 - [x] Borrowed string/byte views and zero-copy packet/file APIs.
-- [ ] Optional GC for app workloads only, never mandatory.
+- [x] Optional GC for app workloads only (`[package] gc = true`; never mandatory; systems forbids).
+- [x] Tracing GC seed on `gc_alloc` heap (`gc_root` / `gc_link` / mark-from-roots collect).
 - [x] Leak detector and allocation reporting.
 
 ### 3. Concurrency And Runtime Trust — 10%
@@ -138,7 +141,7 @@ Weighted from the track table below; STATUS remains the MVP implementation bar.
 - [ ] Structured error propagation from child tasks.
 - [ ] Explicit detached-task syntax and lifecycle controls.
 - [x] Backpressure primitives and bounded queues.
-- [ ] Race, leak, and deadlock diagnostics.
+- [x] Race diagnostics (Send/Sync; per-kick stack; mut captures until join; TSan via `--race`). Leak scopes Done.
 - [x] Scheduler observability.
 
 ### 4. Backend App Surface — 12%
@@ -266,7 +269,14 @@ Weighted from the track table below; STATUS remains the MVP implementation bar.
 - [ ] Database/storage primitives: pages, WAL, indexes, cache, transactions.
 - [ ] AI inference service helpers: model loading, batching, accelerator hooks.
 - [ ] SIMD portable vector APIs.
-- [ ] GPU/accelerator optional track.
+- [x] GPU AI seed: OpenCL multi-vendor + host; matmul/relu/bias/softmax f32 (`gpu_*`).
+- [x] Local model store: safetensors load, `.makomodel` save/load, `model_linear_f32` (HF layout).
+- [x] GGUF F32/F16 tensor load; GELU/SiLU/layernorm/attention; vocab tokenizer seed.
+- [x] Multi-head attention (`gpu_mha_f32`); GGUF Q4_0/Q8_0 dequant; BPE encode.
+- [ ] GPU AI depth: batched GEMM, RoPE, KV-cache, native f16 kernels.
+- [ ] More quant (Q4_K/Q5/Q6) + optional llama.cpp FFI for large LLMs.
+- [ ] SentencePiece / tiktoken parity; embedding table gather.
+- [ ] GPU backends: Metal-native (macOS), CUDA, Vulkan behind same API.
 - [ ] Interop beyond C: bridges to other languages.
 - [ ] Hot code reload with state-preserving editor iteration.
 - [ ] Compile-time execution and safe domain extensions.

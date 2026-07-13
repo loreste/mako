@@ -1,0 +1,79 @@
+// Database programming surface: string params, last_insert_id, rows_affected.
+// Soft-fails when libsqlite is not linked (returns -1 / empty).
+
+fn TestSqlStringParamsAndMeta() {
+    let db = sql_open_sqlite(":memory:")
+    assert_eq(sql_ok(db), 1)
+
+    let rc = sql_exec_plain(db,
+        "CREATE TABLE notes (id INTEGER PRIMARY KEY AUTOINCREMENT, text TEXT, tag TEXT)")
+    if rc != 0 {
+        // No sqlite linked
+        assert_eq(rc, -1)
+        let _ = sql_close(db)
+        return
+    }
+
+    let ins = sql_exec_str4(db,
+        "INSERT INTO notes (text, tag) VALUES (?, ?)",
+        "buy groceries", "todo", "", "")
+    assert_eq(ins, 0)
+
+    let id = sql_last_insert_id(db)
+    assert(id >= 1)
+
+    let rows = sql_rows_affected(db)
+    assert_eq(rows, 1)
+
+    let empty = make([]int, 0)
+    let n = sql_query_int(db, "SELECT COUNT(*) FROM notes", empty)
+    assert_eq(n, 1)
+
+    let text = sql_query_str(db, "SELECT text FROM notes WHERE id = ?", "1")
+    assert_eq_str(text, "buy groceries")
+
+    let by_tag = sql_query_str(db, "SELECT text FROM notes WHERE tag = ?", "todo")
+    assert_eq_str(by_tag, "buy groceries")
+
+    let missing = sql_query_str(db, "SELECT text FROM notes WHERE tag = ?", "nope")
+    assert_eq_str(missing, "")
+
+    let ins2 = sql_exec_str4(db,
+        "INSERT INTO notes (text, tag) VALUES (?, ?)",
+        "walk the dog", "todo", "", "")
+    assert_eq(ins2, 0)
+    assert(sql_last_insert_id(db) > id)
+    assert_eq(sql_rows_affected(db), 1)
+
+    let count2 = sql_query_int(db, "SELECT COUNT(*) FROM notes", empty)
+    assert_eq(count2, 2)
+
+    let _ = sql_close(db)
+}
+
+fn TestSqlExecStr4FourParams() {
+    let db = sql_open_sqlite(":memory:")
+    assert_eq(sql_ok(db), 1)
+
+    let rc = sql_exec_plain(db,
+        "CREATE TABLE contacts (name TEXT, email TEXT, phone TEXT, city TEXT)")
+    if rc != 0 {
+        assert_eq(rc, -1)
+        let _ = sql_close(db)
+        return
+    }
+
+    let ins = sql_exec_str4(db,
+        "INSERT INTO contacts (name, email, phone, city) VALUES (?, ?, ?, ?)",
+        "Ada", "ada@example.com", "+1-555-0100", "London")
+    assert_eq(ins, 0)
+    assert_eq(sql_rows_affected(db), 1)
+
+    let email = sql_query_str(db, "SELECT email FROM contacts WHERE name = ?", "Ada")
+    assert_eq_str(email, "ada@example.com")
+
+    let city = sql_query_str(db, "SELECT city FROM contacts WHERE email = ?", "ada@example.com")
+    assert_eq_str(city, "London")
+
+    let _ = sql_close(db)
+}

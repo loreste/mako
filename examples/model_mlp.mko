@@ -1,0 +1,44 @@
+// Program your own model in Mako: 2-layer MLP on GPU (or host fallback).
+// Existing HF weights: model_load_safetensors + model_linear_f32(..., hf=1).
+// Remote chat models: use llm_* (OpenAI-compatible API) instead.
+
+fn main() {
+    let dev = gpu_device_open()
+    if dev < 0 {
+        print("gpu device open failed")
+        return
+    }
+    print("backend: " + gpu_device_backend(dev) + " / " + gpu_device_name(dev))
+
+    let m = model_new(dev)
+    // in=2 → hidden=4 → out=1
+    let w1: []float = [
+        0.5, 0.0, 0.0, 0.0,
+        0.0, 0.5, 0.0, 0.0
+    ]
+    let b1: []float = [0.0, 0.0, 0.0, 0.0]
+    let w2: []float = [1.0, 1.0, 1.0, 1.0]
+    let b2: []float = [0.1]
+    let _ = model_set_f32(m, "l1.w", w1, 2, 4, 0, 0)
+    let _ = model_set_f32(m, "l1.b", b1, 4, 0, 0, 0)
+    let _ = model_set_f32(m, "l2.w", w2, 4, 1, 0, 0)
+    let _ = model_set_f32(m, "l2.b", b2, 1, 0, 0, 0)
+
+    let x = gpu_buf_new(dev, 8)
+    let h = gpu_buf_new(dev, 16)
+    let y = gpu_buf_new(dev, 4)
+    let _ = gpu_upload_f32(x, [2.0, 4.0])
+    let _ = model_linear_f32(m, h, x, "l1.w", "l1.b", 1, 2, 4, 0)
+    let _ = gpu_relu_f32(h, h)
+    let _ = model_linear_f32(m, y, h, "l2.w", "l2.b", 1, 4, 1, 0)
+    let out = gpu_download_f32(y)
+    // h ≈ [1, 2, 0, 0]; y ≈ 1+2+0.1 = 3.1
+    print("mlp out:")
+    print_float(out[0])
+
+    let _ = model_save(m, "/tmp/mako_mlp.makomodel")
+    print("saved /tmp/mako_mlp.makomodel")
+
+    let _ = model_free(m)
+    let _ = gpu_device_close(dev)
+}

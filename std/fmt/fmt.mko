@@ -1,5 +1,67 @@
-fn sprintf(fmt: string, arg: string) -> string { return fmt_sprintf(fmt, arg) }
-fn sprintf_d(fmt: string, arg: int) -> string { return fmt_sprintf_d(fmt, arg) }
-fn int(n: int) -> string { return format_int(n) }
-fn bool(b: bool) -> string { return format_bool(b) }
-fn float(v: float, prec: int) -> string { return format_float(v, prec) }
+// fmt — Go-style formatting (Sprint / Sprintf / Print / Errorf).
+// Args are strings; convert numbers with format_int / format_float / format_bool.
+
+fn Sprintf(format: string, a: string) -> string { return fmt_sprintf(format, a) }
+fn Sprintf2(format: string, a: string, b: string) -> string {
+    return fmt_sprintf2(format, a, b)
+}
+fn Sprintf3(format: string, a: string, b: string, c: string) -> string {
+    return fmt_sprintf3(format, a, b, c)
+}
+fn Sprintf4(format: string, a: string, b: string, c: string, d: string) -> string {
+    return fmt_sprintf4(format, a, b, c, d)
+}
+fn SprintfD(format: string, n: int) -> string { return fmt_sprintf_d(format, n) }
+fn SprintfDD(format: string, a: int, b: int) -> string {
+    return fmt_sprintf_dd(format, a, b)
+}
+fn SprintfF(format: string, v: float, prec: int) -> string {
+    return fmt_sprintf_f(format, v, prec)
+}
+// Int bases for use with Sprintf: format_int_hex(n) then %s, or SprintfD("%x", n)
+fn Hex(n: int) -> string { return format_int_hex(n) }
+fn HexUpper(n: int) -> string { return format_int_hex_upper(n) }
+fn Bin(n: int) -> string { return format_int_bin(n) }
+fn Oct(n: int) -> string { return format_int_oct(n) }
+fn Dec(n: int) -> string { return format_int_dec(n) }
+fn Base(n: int, base: int) -> string { return format_int_base(n, base) }
+
+fn Sprint(a: string) -> string { return fmt_sprint(a) }
+fn Sprint2(a: string, b: string) -> string { return fmt_sprint2(a, b) }
+fn Sprint3(a: string, b: string, c: string) -> string { return fmt_sprint3(a, b, c) }
+fn Sprintln(a: string) -> string { return fmt_sprintln(a) }
+fn Sprintln2(a: string, b: string) -> string { return fmt_sprintln2(a, b) }
+
+fn Print(a: string) -> int { return fmt_print(a) }
+fn Print2(a: string, b: string) -> int { return fmt_print2(a, b) }
+fn Println(a: string) -> int { return fmt_println(a) }
+fn Println2(a: string, b: string) -> int { return fmt_println2(a, b) }
+fn Printf(format: string, a: string) -> int { return fmt_printf(format, a) }
+fn Printf2(format: string, a: string, b: string) -> int {
+    return fmt_printf2(format, a, b)
+}
+fn Printf3(format: string, a: string, b: string, c: string) -> int {
+    return fmt_printf3(format, a, b, c)
+}
+
+fn Eprint(a: string) -> int { return fmt_eprint(a) }
+fn Eprintln(a: string) -> int { return fmt_eprintln(a) }
+fn Eprintf(format: string, a: string) -> int { return fmt_eprintf(format, a) }
+
+fn Errorf(format: string, a: string) -> string { return fmt_errorf(format, a) }
+fn Errorf2(format: string, a: string, b: string) -> string {
+    return fmt_errorf2(format, a, b)
+}
+
+// Converters (strconv-ish)
+fn Int(n: int) -> string { return format_int(n) }
+fn Bool(b: bool) -> string { return format_bool(b) }
+fn Float(v: float, prec: int) -> string { return format_float(v, prec) }
+
+// Lowercase aliases (Mako-native style)
+fn sprintf(format: string, a: string) -> string { return Sprintf(format, a) }
+fn sprintf_d(format: string, n: int) -> string { return SprintfD(format, n) }
+fn sprint(a: string) -> string { return Sprint(a) }
+fn println(a: string) -> int { return Println(a) }
+fn printf(format: string, a: string) -> int { return Printf(format, a) }
+fn errorf(format: string, a: string) -> string { return Errorf(format, a) }

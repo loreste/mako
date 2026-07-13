@@ -1,0 +1,82 @@
+// Go-style text/html templates.
+
+fn TestTmplInterpolate() {
+    let d = tmpl_data_new()
+    assert(d > 0)
+    assert_eq(tmpl_data_set(d, "Name", "Ada"), 1)
+    assert_eq(tmpl_data_set(d, "Lang", "Mako"), 1)
+    let t = tmpl_new("Hello {{.Name}} from {{.Lang}}!")
+    assert(t > 0)
+    assert_eq_str(tmpl_execute(t, d), "Hello Ada from Mako!")
+    // bare keys without dot also work
+    let t2 = tmpl_new("{{Name}}")
+    assert_eq_str(tmpl_execute(t2, d), "Ada")
+    let _ = tmpl_free(t)
+    let _ = tmpl_free(t2)
+    let _ = tmpl_data_free(d)
+}
+
+fn TestTmplIfElse() {
+    let d = tmpl_data_new()
+    let _ = tmpl_data_set(d, "Ok", "1")
+    let _ = tmpl_data_set(d, "Msg", "yes")
+    let src = "{{if .Ok}}OK: {{.Msg}}{{else}}NO{{end}}"
+    assert_eq_str(tmpl_text(src, d), "OK: yes")
+    let _ = tmpl_data_set(d, "Ok", "0")
+    assert_eq_str(tmpl_text(src, d), "NO")
+    let _ = tmpl_data_free(d)
+}
+
+fn TestTmplRange() {
+    let d = tmpl_data_new()
+    let _ = tmpl_data_set_list(d, "Items", "alpha,beta,gamma")
+    let src = "{{range .Items}}- {{.}};\n{{end}}"
+    let out = tmpl_text(src, d)
+    assert(str_contains(out, "- alpha;"))
+    assert(str_contains(out, "- beta;"))
+    assert(str_contains(out, "- gamma;"))
+    let _ = tmpl_data_free(d)
+}
+
+fn TestTmplWithAndDefine() {
+    let d = tmpl_data_new()
+    let _ = tmpl_data_set(d, "User", "Ada")
+    let src =
+        "{{define \"greet\"}}Hi {{.}}!{{end}}" +
+        "{{with .User}}{{template \"greet\"}}{{end}}"
+    assert_eq_str(tmpl_text(src, d), "Hi Ada!")
+    let _ = tmpl_data_free(d)
+}
+
+fn TestTmplFuncs() {
+    let d = tmpl_data_new()
+    let _ = tmpl_data_set(d, "S", "Mako")
+    assert_eq_str(tmpl_text("{{len .S}}", d), "4")
+    assert_eq_str(tmpl_text("{{upper .S}}", d), "MAKO")
+    assert_eq_str(tmpl_text("{{lower .S}}", d), "mako")
+    assert_eq_str(tmpl_text("{{printf \"%s\" .S}}", d), "Mako")
+    let _ = tmpl_data_free(d)
+}
+
+fn TestTmplHtmlEscape() {
+    let d = tmpl_data_new()
+    let _ = tmpl_data_set(d, "X", "<script>")
+    let t = tmpl_new("<b>{{.X}}</b>")
+    assert_eq_str(tmpl_html_execute(t, d), "<b>&lt;script&gt;</b>")
+    // text mode does not escape
+    assert_eq_str(tmpl_execute(t, d), "<b><script></b>")
+    let _ = tmpl_free(t)
+    let _ = tmpl_data_free(d)
+}
+
+fn TestTmplLegacyStillWorks() {
+    assert_eq_str(template_execute("Hi {{name}}", "name", "Ada"), "Hi Ada")
+    assert_eq_str(html_template_execute("<p>{{n}}</p>", "n", "<x>"), "<p>&lt;x&gt;</p>")
+}
+
+fn TestTmplComment() {
+    let d = tmpl_data_new()
+    let _ = tmpl_data_set(d, "A", "1")
+    assert_eq_str(tmpl_text("x{{/* skip */}}y{{.A}}", d), "xy1")
+    let _ = tmpl_data_free(d)
+}

@@ -1,1 +1,18 @@
-fn execute(tmpl: string, key: string, val: string) -> string { return template_execute(tmpl, key, val) }
+// text/template — Go-style text templates (no HTML escape).
+
+fn execute(tmpl: string, key: string, val: string) -> string {
+    return template_execute(tmpl, key, val)
+}
+
+fn data_new() -> int { return tmpl_data_new() }
+fn data_free(d: int) -> int { return tmpl_data_free(d) }
+fn data_set(d: int, key: string, val: string) -> int { return tmpl_data_set(d, key, val) }
+fn data_set_list(d: int, key: string, csv: string) -> int {
+    return tmpl_data_set_list(d, key, csv)
+}
+fn data_set_int(d: int, key: string, v: int) -> int { return tmpl_data_set_int(d, key, v) }
+
+fn parse(source: string) -> int { return tmpl_new(source) }
+fn free(t: int) -> int { return tmpl_free(t) }
+fn exec(t: int, data: int) -> string { return tmpl_execute(t, data) }
+fn text(source: string, data: int) -> string { return tmpl_text(source, data) }

@@ -1,0 +1,119 @@
+// Production HTTP/2: content-type responses, SETTINGS accessors, auto WINDOW_UPDATE, GOAWAY.
+
+fn TestHttp2ResponseCt() {
+    let resp = http2_response_ct(1, 200, "application/json", "{\"ok\":true}")
+    assert_eq(http2_frame_type(resp), 1)
+    let _d = hpack_decode_block(http2_frame_payload(resp))
+    var i = 0
+    let n = hpack_decoded_count()
+    var saw_ct = 0
+    var saw_status = 0
+    for i < n {
+        if hpack_decoded_name(i) == "content-type" {
+            assert_eq_str(hpack_decoded_value(i), "application/json")
+            saw_ct = 1
+        }
+        if hpack_decoded_name(i) == ":status" {
+            assert_eq_str(hpack_decoded_value(i), "200")
+            saw_status = 1
+        }
+        i++
+    }
+    assert_eq(saw_ct, 1)
+    assert_eq(saw_status, 1)
+    let data = http2_frame_at(resp, 1)
+    assert_eq(http2_frame_type(data), 0)
+    assert_eq_str(http2_frame_payload(data), "{\"ok\":true}")
+}
+
+fn TestHttp2SettingsDefaults() {
+    let _ = http2_conn_reset()
+    assert_eq(http2_conn_initial_window(), 65535)
+    assert_eq(http2_conn_max_frame_size(), 16384)
+    assert_eq(http2_conn_header_table_size(), 4096)
+    assert_eq(http2_conn_enable_push(), 1)
+    assert_eq(http2_conn_unacked(), 0)
+    let _ = http2_conn_reset()
+}
+
+fn TestHttp2SettingsMaxConcurrent() {
+    let _ = http2_conn_reset()
+    let s = http2_settings_max_concurrent(10)
+    assert_eq(http2_conn_recv(s), 0)
+    assert_eq(http2_conn_max_concurrent(), 10)
+    assert_eq(http2_conn_settings_ack_needed(), 1)
+    let _ = http2_conn_reset()
+}
+
+fn TestHttp2PaddedData() {
+    // Real PADDED DATA: flags=0x9 (PADDED|END_STREAM), pad_len=2, body="hi", pad 00 00.
+    // Payload bytes: 02 68 69 00 00 (hex) — Mako has no \x escapes.
+    let _ = http2_conn_reset()
+    assert_eq(http2_conn_recv(http2_headers_frame(1, hpack_encode_indexed(2), 4)), 0)
+    let payload = hex_decode("0268690000")
+    let frame = http2_data_frame(1, payload, 9)
+    assert_eq(http2_frame_flags(frame), 9)
+    assert_eq(http2_conn_recv(frame), 0)
+    assert_eq_str(http2_stream_body(1), "hi")
+    assert_eq(http2_stream_body_done(1), 1)
+    // Recv windows accounted for full payload length (5), not just "hi".
+    assert_eq(http2_recv_window_of(1), 65535 - 5)
+    let _ = http2_conn_reset()
+}
+
+fn TestHttp2DualWindowSendConsume() {
+    let _ = http2_conn_reset()
+    assert_eq(http2_conn_recv(http2_headers_frame(1, hpack_encode_indexed(2), 4)), 0)
+    // Live stream: response_ct consumes send windows for body length.
+    let before = http2_window_of(1)
+    let resp = http2_response(1, 200, "abcdefghij") // 10 bytes
+    assert(len(resp) > 0)
+    assert_eq(http2_window_of(1), before - 10)
+    let _ = http2_conn_reset()
+}
+
+fn TestHttp2AutoWindowUpdate() {
+    let _ = http2_conn_reset()
+    assert_eq(http2_conn_recv(http2_headers_frame(1, hpack_encode_indexed(2), 4)), 0)
+    // Send enough DATA to cross the auto-WU threshold (16 KiB).
+    var i = 0
+    let chunk = "xxxxxxxxxxxxxxxx" // 16 bytes
+    // 1024 * 16 = 16384
+    var bulk = ""
+    for i < 1024 {
+        bulk = bulk + chunk
+        i++
+    }
+    assert_eq(len(bulk), 16384)
+    let out = http2_conn_pump(http2_data_frame(1, bulk, 0))
+    // Pump should emit WINDOW_UPDATE (type 8) for connection and/or stream.
+    assert(len(out) > 0)
+    assert_eq(http2_frame_type(out), 8)
+    let _ = http2_conn_reset()
+}
+
+fn TestHttp2ConnGoawayFrame() {
+    let _ = http2_conn_reset()
+    assert_eq(http2_conn_recv(http2_headers_frame(1, hpack_encode_indexed(2), 4)), 0)
+    let g = http2_conn_goaway(0)
+    assert(http2_is_goaway(g))
+    assert_eq(http2_conn_closing(), 1)
+    assert_eq(http2_goaway_last_stream(g), 1)
+    let _ = http2_conn_reset()
+}
+
+fn TestHttp2LargeBodyCap() {
+    // Body buffer is 64 KiB — fill 1 KiB and confirm accumulation.
+    let _ = http2_conn_reset()
+    assert_eq(http2_conn_recv(http2_headers_frame(1, hpack_encode_indexed(2), 4)), 0)
+    var i = 0
+    var bulk = ""
+    for i < 64 {
+        bulk = bulk + "0123456789abcdef" // 16 * 64 = 1024
+        i++
+    }
+    assert_eq(http2_conn_recv(http2_data_frame(1, bulk, 1)), 0)
+    assert_eq(http2_stream_body_len(1), 1024)
+    assert_eq(http2_stream_body_done(1), 1)
+    let _ = http2_conn_reset()
+}
