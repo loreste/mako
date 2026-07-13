@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.0 — 2026-07-13 (linux one-shot installer)
+
+- `install-linux.sh` / improved `install-release.sh`: prebuilt one-shot, no Rust
+- Linux `sha256sum` support; direct install from slim tarball layout
+- `package-release.sh` default **slim** (strip binary, skip full docs/editors)
+- README + RELEASE: prefer curl one-liner over source/cargo install
+
 ## 0.1.0 — 2026-07-13 (wave 39 queue)
 
 - `?` unwrap for **[]int / []string / []float** and **map** payloads
