@@ -1,21 +1,15 @@
 # Mako
 
-Mako is a compiled programming language. You write `.mko` files, the compiler
-turns them into native binaries, and that's what you ship. No garbage collector,
-no virtual machine, no runtime.
+Mako is a compiled language. You write `.mko` files; the compiler turns them into
+native binaries. No garbage collector, no VM sitting under your process.
 
-**Speed is the name of the game** — native machine code, no GC pauses, with
-**first-class concurrency and parallelism** (`crew` / `kick` / `join` / `fan`,
-channels, actors). Memory safety without a garbage collector. Fast builds. A
-simple everyday surface that stays out of your way.
+Speed matters here: release builds use `-O3 -flto`, and concurrency is built in
+(`crew` / `kick` / `join` / `fan`, channels, actors). Memory is handled with
+ownership and arenas, not a collector. The standard library is large enough for
+real services without pulling half the internet.
 
-Ownership and arenas manage memory at compile time. Structured crews clean up
-after themselves. The compiler enforces errors. The stdlib is batteries-included
-so you can ship real services without dependency maze.
-
-This is **version 0.1.1**. Early but usable — the standard library covers a lot
-of ground, but things will change, some corners are rough, and there's plenty
-left to build.
+This is version **0.1.1**. It runs. The surface is still early — expect change,
+rough edges, and missing pieces.
 
 [mako-lang.com](https://mako-lang.com) · [Status](docs/STATUS.md) · [Roadmap](docs/ROADMAP.md)
 
