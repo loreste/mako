@@ -3099,6 +3099,12 @@ static inline int mako_re_unicode_prop_match(const char *name, size_t nlen, uint
         return (cp >= 0x0840 && cp <= 0x085F);
     if (nlen == 10 && memcmp(name, "Saurashtra", 10) == 0)
         return (cp >= 0xA880 && cp <= 0xA8DF);
+    if (nlen == 6 && memcmp(name, "Tai_Le", 6) == 0)
+        return (cp >= 0x1950 && cp <= 0x197F);
+    if (nlen == 8 && memcmp(name, "Kayah_Li", 8) == 0)
+        return (cp >= 0xA900 && cp <= 0xA92F);
+    if (nlen == 11 && memcmp(name, "New_Tai_Lue", 11) == 0)
+        return (cp >= 0x1980 && cp <= 0x19DF);
     return 0;
 }
 

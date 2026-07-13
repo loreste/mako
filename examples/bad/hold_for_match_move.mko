@@ -1,0 +1,16 @@
+// EXPECT: use of moved
+// for + match product: move on match arm poisons after loop.
+fn consume(t: string) {}
+
+fn main() {
+    hold let s = "hi"
+    for i in range 1 {
+        match i {
+            0 => { },
+            _ => {
+                consume(s)
+            },
+        }
+    }
+    print(s)
+}
