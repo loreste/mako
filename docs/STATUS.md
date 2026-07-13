@@ -172,27 +172,25 @@ Last inventory: 2026-07-11 (**unique Mako surface** · pack/pull · pain map · 
 | `chan_open[Struct]` via MakoChanPtr heap-box | Done |
 | `error_tag(tag, msg)` enum-like string errors | Done |
 
-**Closed (wave 7–36):** join_timeout **flatten** · POD kick + string fields ·
+**Closed (wave 7–37):** join_timeout **flatten** · POD kick + string fields ·
 `reflect_value_of` N + nested POD · `Result`/`Option` deep nests · nested
-None/Err edges · SOF0 header fields · **`jpeg_is_baseline_gray`** · JFIF
-version/density/thumb + SOF0 sampling/Ci/Tqi · `jpeg_has_app7`/`app8`/`app9` ·
-**`jpeg_is_mako_jfif`** · **`jpeg_is_mako_complete`** · **`jpeg_is_mako_raw`** ·
-**`jpeg_is_mako_dct`** · **`jpeg_is_mako_huff`** · **`jpeg_roundtrip_ok`** ·
-**`jpeg_app7_len_matches_payload`** · SOI/APP length probes · NLL for/if/match ·
-kick Result/Option reject · script/category `\p{…}` · expanded TSan · prior work.
+None/Err edges · **`?` on Option + string/float Result/Option unwrap** ·
+SOF0 header fields · **`jpeg_is_baseline_gray`** · JFIF shell probes ·
+**`jpeg_roundtrip_ok`** · APP layout checks · NLL for/if/match · kick
+Result/Option reject · script/category `\p{…}` · expanded TSan · prior work.
 
-**Wave 36 tests:** `examples/testing/wave36_queue_test.mko` · bads
-`hold_while_match_for_move`, `share_while_for_live`.
+**Wave 37 tests:** `examples/testing/wave37_queue_test.mko` · bads
+`option_try_in_result`, `result_try_in_option`.
 
 **Pain residuals (language) still open:** see [PAIN_POINTS.md](PAIN_POINTS.md) §4.
 
 1. Fuller data-race model beyond expanded TSan smoke (no full type-level race system)  
-2. More Result/Option shapes (remaining edge cases)  
+2. More Result/Option shapes (remaining edge cases; `?` int/string/float wired)  
 3. Stronger NLL (rarer multi-label CFG products)  
 
 **Stdlib / product residuals:**
 
-6. Complete Unicode property database / full PCRE (script + Common/Mn/Mc/Sm/Sk/Pc seeds growing)  
+6. Complete Unicode property database / full PCRE (script + category seeds growing)  
 7. Huffman JPEG bitstream readable by arbitrary viewers (mako APP7 layout + roundtrip; not viewer Huffman)  
 8. Reflect for non-POD fields (maps/slices/chan/Option/Result/nested map·slice·Option·Result rejected; nested POD done)  
 9. Symbol-level parity inside Done packages

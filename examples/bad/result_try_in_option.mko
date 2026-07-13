@@ -1,0 +1,10 @@
+// EXPECT: `?` only allowed in functions returning Result
+// Result `?` cannot early-return from an Option-returning function.
+fn get() -> Result[int, string] {
+    return Ok(1)
+}
+
+fn main() -> Option[int] {
+    let x = get()?
+    return Some(x)
+}

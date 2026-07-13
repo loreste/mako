@@ -724,6 +724,16 @@ fn option_or(o: Option[int], fallback: int) -> int {
 }
 ```
 
+`?` early-returns the empty case and unwraps the payload:
+
+| In a function returning… | `expr?` when `expr` is… | On empty | On success |
+|--------------------------|-------------------------|----------|------------|
+| `Result[T, E]` | `Result[T, E]` | `return` that `Err` | `T` (int / string / float) |
+| `Option[T]` | `Option[T]` | `return None` | `T` (int / string / float) |
+
+Mismatched carriers are rejected (`Option` `?` inside a `Result` function, and the reverse).
+Tests: `examples/testing/wave37_queue_test.mko`.
+
 ```mko
 // examples/wrap_err.mko · examples/errors_wrap.mko — wrap / is
 let r = wrap_err(error("boom"), "parse")  // Err("parse: boom")

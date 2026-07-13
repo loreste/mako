@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.0 — 2026-07-13 (wave 37 queue)
+
+- Fix `?` codegen: Option early-return None; string/float Ok/Some unwrap
+- Typecheck: Option `?` only in Option-returning fns; Result `?` only in Result
+- Bads: `option_try_in_result`, `result_try_in_option`
+- TSan wave36
+- Tests: `examples/testing/wave37_queue_test.mko`
+
 ## 0.1.0 — 2026-07-13 (wave 36 queue)
 
 - Bool `Result[Result[bool]]` + string `Option[Option[string]]` nests

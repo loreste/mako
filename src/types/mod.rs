@@ -10056,7 +10056,15 @@ impl TypeChecker {
                         }
                         Ok(*ok)
                     }
-                    Type::Option(inner) => Ok(*inner),
+                    Type::Option(inner) => {
+                        // Function must return Option (early-return None)
+                        if !matches!(self.current_ret, Type::Option(_)) {
+                            return Err(TypeError::new(
+                                "`?` on Option only allowed in functions returning Option",
+                            ));
+                        }
+                        Ok(*inner)
+                    }
                     other => Err(TypeError::new(format!(
                         "`?` needs Result or Option, got {}",
                         other.display()

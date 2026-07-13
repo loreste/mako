@@ -12580,11 +12580,73 @@ impl Codegen {
                 ("MakoIntArray".into(), tmp)
             }
             Expr::Try(inner) => {
-                let (_, v) = self.emit_expr(inner);
+                // `?` early-returns None/Err; unwrap Ok/Some payload by kind.
+                let (ty, v) = self.emit_expr(inner);
                 let tmp = self.fresh("try");
-                self.line(&format!("MakoResultInt {tmp} = {v};"));
-                self.line(&format!("if (!{tmp}.ok) return {tmp};"));
-                ("int64_t".into(), format!("{tmp}.value"))
+                let is_option = ty == "MakoOptionInt"
+                    || matches!(
+                        inner.as_ref(),
+                        Expr::Ident(n)
+                            if self.locals.get(n).map(|t| t.as_str()) == Some("MakoOptionInt")
+                    )
+                    || matches!(
+                        inner.as_ref(),
+                        Expr::Call { callee, args }
+                            if matches!(callee.as_ref(), Expr::Ident(fname)
+                                if self.call_option_some_kind(fname, args).is_some())
+                    );
+                let kind = if is_option {
+                    match inner.as_ref() {
+                        Expr::Ident(n) => self
+                            .option_some_kinds
+                            .get(n)
+                            .cloned()
+                            .unwrap_or_else(|| "int".into()),
+                        Expr::Call { callee, args } => {
+                            if let Expr::Ident(fname) = callee.as_ref() {
+                                self.call_option_some_kind(fname, args)
+                                    .unwrap_or_else(|| "int".into())
+                            } else {
+                                "int".into()
+                            }
+                        }
+                        _ => "int".into(),
+                    }
+                } else {
+                    match inner.as_ref() {
+                        Expr::Ident(n) => self
+                            .result_ok_kinds
+                            .get(n)
+                            .cloned()
+                            .unwrap_or_else(|| "int".into()),
+                        Expr::Call { callee, args } => {
+                            if let Expr::Ident(fname) = callee.as_ref() {
+                                self.call_result_ok_kind(fname, args)
+                                    .unwrap_or_else(|| "int".into())
+                            } else {
+                                "int".into()
+                            }
+                        }
+                        _ => "int".into(),
+                    }
+                };
+                if is_option {
+                    self.line(&format!("MakoOptionInt {tmp} = {v};"));
+                    self.line(&format!("if (!{tmp}.some) return {tmp};"));
+                    match kind.as_str() {
+                        "string" => ("MakoString".into(), format!("{tmp}.ok_s")),
+                        "float" => ("double".into(), format!("{tmp}.ok_f")),
+                        _ => ("int64_t".into(), format!("{tmp}.value")),
+                    }
+                } else {
+                    self.line(&format!("MakoResultInt {tmp} = {v};"));
+                    self.line(&format!("if (!{tmp}.ok) return {tmp};"));
+                    match kind.as_str() {
+                        "string" => ("MakoString".into(), format!("{tmp}.ok_s")),
+                        "float" => ("double".into(), format!("{tmp}.ok_f")),
+                        _ => ("int64_t".into(), format!("{tmp}.value")),
+                    }
+                }
             }
             Expr::Kick { crew, expr } => {
                 let task = self.fresh("job");

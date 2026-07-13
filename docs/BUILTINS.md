@@ -2316,7 +2316,8 @@ Tests: `result_enum_test.mko`, `job_join_typed_test.mko` (Result across kick/joi
 `wave33_queue_test.mko` (bool deep nests, `jpeg_is_mako_raw`, APP0/APP7 lengths),
 `wave34_queue_test.mko` (`Result[Result[string]]`, APP8/APP9, `jpeg_is_mako_dct`/`huff`),
 `wave35_queue_test.mko` (float nests, `jpeg_roundtrip_ok`, APP8/9 lengths, Common/Mn/Mc),
-`wave36_queue_test.mko` (bool/string nests, APP7 length/SOI layout, Sm/Sk/Pc).
+`wave36_queue_test.mko` (bool/string nests, APP7 length/SOI layout, Sm/Sk/Pc),
+`wave37_queue_test.mko` (Option/Result `?` int/string/float unwrap + early return).
 
 ---
 

@@ -1,0 +1,129 @@
+// Wave 37: Option/Result `?` unwrap for int/string/float payloads.
+
+fn res_int() -> Result[int, string] {
+    return Ok(7)
+}
+
+fn res_int_err() -> Result[int, string] {
+    return Err("e")
+}
+
+fn use_res_int() -> Result[int, string] {
+    let x = res_int()?
+    return Ok(x + 1)
+}
+
+fn use_res_int_err() -> Result[int, string] {
+    let x = res_int_err()?
+    return Ok(x + 1)
+}
+
+fn res_str() -> Result[string, string] {
+    return Ok("hi")
+}
+
+fn use_res_str() -> Result[string, string] {
+    let x = res_str()?
+    return Ok(x)
+}
+
+fn res_float() -> Result[float, string] {
+    return Ok(1.5)
+}
+
+fn use_res_float() -> Result[float, string] {
+    let x = res_float()?
+    return Ok(x + 1.0)
+}
+
+fn opt_int() -> Option[int] {
+    return Some(3)
+}
+
+fn opt_none() -> Option[int] {
+    return None
+}
+
+fn use_opt_int() -> Option[int] {
+    let x = opt_int()?
+    return Some(x + 1)
+}
+
+fn use_opt_none() -> Option[int] {
+    let x = opt_none()?
+    return Some(x + 1)
+}
+
+fn opt_str() -> Option[string] {
+    return Some("ok")
+}
+
+fn use_opt_str() -> Option[string] {
+    let x = opt_str()?
+    return Some(x)
+}
+
+fn opt_float() -> Option[float] {
+    return Some(2.25)
+}
+
+fn use_opt_float() -> Option[float] {
+    let x = opt_float()?
+    return Some(x)
+}
+
+fn TestResIntOk() {
+    match use_res_int() {
+        Ok(n) => assert_eq(n, 8),
+        Err(_) => assert(false),
+    }
+}
+
+fn TestResIntErr() {
+    match use_res_int_err() {
+        Ok(_) => assert(false),
+        Err(m) => assert_eq_str(m, "e"),
+    }
+}
+
+fn TestResStr() {
+    match use_res_str() {
+        Ok(s) => assert_eq_str(s, "hi"),
+        Err(_) => assert(false),
+    }
+}
+
+fn TestResFloat() {
+    match use_res_float() {
+        Ok(f) => assert(f > 2.0),
+        Err(_) => assert(false),
+    }
+}
+
+fn TestOptIntOk() {
+    match use_opt_int() {
+        Some(n) => assert_eq(n, 4),
+        None => assert(false),
+    }
+}
+
+fn TestOptIntNone() {
+    match use_opt_none() {
+        Some(_) => assert(false),
+        None => assert(true),
+    }
+}
+
+fn TestOptStr() {
+    match use_opt_str() {
+        Some(s) => assert_eq_str(s, "ok"),
+        None => assert(false),
+    }
+}
+
+fn TestOptFloat() {
+    match use_opt_float() {
+        Some(f) => assert(f > 2.0),
+        None => assert(false),
+    }
+}
