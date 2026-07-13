@@ -41,12 +41,16 @@ runtime/third_party/quiche/target/
 runtime/third_party/quiche/src/
 runtime/third_party/quiche/bin/
 
-# Release build artifacts (keep install-release.sh source in scripts/)
+# Release build artifacts (keep install-*.sh scripts in dist/ and scripts/)
 /dist/mako-test-local/
 /dist/mako-test-local.tar.gz
 /dist/mako-test-local.sha256
 /dist/*.tar.gz
 /dist/*.zip
+/dist/*.sha256
+/dist/mako-*/
+/dist/mako-aarch64-*
+/dist/mako-x86_64-*
 
 # OS files
 .DS_Store
