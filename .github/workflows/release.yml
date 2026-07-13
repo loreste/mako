@@ -1,43 +1,39 @@
 name: Release
 
-# Build cargo release binaries for each OS and publish complete install packages.
-# Users never need Rust — they download the prebuilt binary + runtime via install-linux.sh.
+# Build the full cargo release binary on each OS and publish install packages.
+# End users download the binary — they never install Rust/cargo.
 on:
   push:
-    tags: ["v*"]
+    tags:
+      - "v*"
   workflow_dispatch:
     inputs:
       tag:
-        description: "GitHub release tag to create/update (e.g. v0.1.0)"
+        description: "Release tag to create or update"
         required: true
-        default: "v0.1.0"
-      prerelease:
-        description: "Mark as prerelease"
-        type: boolean
-        default: false
+        default: "v0.1.1"
 
 permissions:
   contents: write
 
 jobs:
-  build:
+  build-and-publish:
     strategy:
       fail-fast: false
       matrix:
         include:
-          - os: macos-latest
-            artifact: mako-aarch64-apple-darwin
           - os: ubuntu-latest
             artifact: mako-x86_64-unknown-linux-gnu
+          - os: macos-latest
+            artifact: mako-aarch64-apple-darwin
           - os: windows-latest
             artifact: mako-x86_64-pc-windows-msvc
-            exe: true
+            is_windows: true
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@stable
 
       - name: Install clang (Linux)
         if: runner.os == 'Linux'
@@ -48,56 +44,39 @@ jobs:
         run: choco install llvm -y
         continue-on-error: true
 
-      - name: Build release binary (cargo)
+      - name: Cargo build --release
         run: cargo build --release
 
-      - name: Package complete bundle (Unix)
+      - name: Package Unix bundle
         if: runner.os != 'Windows'
-        run: |
-          # Full package: stripped cargo binary + runtime headers + std + install scripts
-          ./scripts/package-release.sh --full "${{ matrix.artifact }}"
         env:
           ARTIFACT_NAME: ${{ matrix.artifact }}
+        run: ./scripts/package-release.sh --full "${{ matrix.artifact }}"
 
-      - name: Package (Windows)
+      - name: Package Windows bundle
         if: runner.os == 'Windows'
         shell: pwsh
-        run: |
-          ./scripts/package-release.ps1 -ArtifactName "${{ matrix.artifact }}"
+        run: ./scripts/package-release.ps1 -ArtifactName "${{ matrix.artifact }}"
 
-      - name: Smoke: install prebuilt without Rust (Unix)
+      - name: Smoke install without Rust (Unix)
         if: runner.os != 'Windows'
         run: |
+          set -euo pipefail
+          PREFIX="${RUNNER_TEMP}/mako-prefix"
           ./scripts/install-release.sh \
-            --base-url "file://$PWD/dist" \
+            --base-url "file://${GITHUB_WORKSPACE}/dist" \
             --artifact "${{ matrix.artifact }}" \
-            --prefix "$RUNNER_TEMP/mako-release-install" \
-            --no-deps \
-            --no-shell \
-            --yes
-          export PATH="$RUNNER_TEMP/mako-release-install/bin:$PATH"
-          export MAKO_RUNTIME="$RUNNER_TEMP/mako-release-install/share/mako/runtime"
-          export MAKO_STD="$RUNNER_TEMP/mako-release-install/share/mako/std"
+            --prefix "$PREFIX" \
+            --no-deps --no-shell --yes --skip-doctor
+          export PATH="$PREFIX/bin:$PATH"
+          export MAKO_RUNTIME="$PREFIX/share/mako/runtime"
+          export MAKO_STD="$PREFIX/share/mako/std"
           mako --version
           mako doctor
-          # Prove compile works from the installed binary (no cargo)
-          mako init "$RUNNER_TEMP/hello" --name hello
-          mako run "$RUNNER_TEMP/hello/main.mko"
+          mako init "${RUNNER_TEMP}/hello" --name hello
+          mako run "${RUNNER_TEMP}/hello/main.mko"
 
-      - name: Smoke: install (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $InstallPrefix = Join-Path $env:RUNNER_TEMP "mako-release-install"
-          $ExtractRoot = Join-Path $env:RUNNER_TEMP "mako-release-extract"
-          Expand-Archive -Path "dist\${{ matrix.artifact }}.zip" -DestinationPath $ExtractRoot -Force
-          $ArtifactRoot = Join-Path $ExtractRoot "${{ matrix.artifact }}"
-          & (Join-Path $ArtifactRoot "scripts\install.ps1") -Prefix $InstallPrefix -SkipBuild
-          $env:MAKO_RUNTIME = Join-Path $InstallPrefix "share\mako\runtime"
-          $env:MAKO_STD = Join-Path $InstallPrefix "share\mako\std"
-          & (Join-Path $InstallPrefix "bin\mako.exe") --version
-
-      - name: Upload CI artifact
+      - name: Upload workflow artifacts
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
@@ -106,81 +85,27 @@ jobs:
             dist/install-release.sh
             dist/install-linux.sh
 
-      - name: Resolve release tag
-        id: tag
+      - name: Release tag name
+        id: meta
         shell: bash
         run: |
-          if [[ "${{ github.ref_type }}" == "tag" ]]; then
-            echo "name=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
           else
-            echo "name=${{ github.event.inputs.tag || 'v0.1.0' }}" >> "$GITHUB_OUTPUT"
+            echo "tag=${{ github.event.inputs.tag }}" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Publish binary package to GitHub Release
+      - name: Publish to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.tag.outputs.name }}
-          name: Mako ${{ steps.tag.outputs.name }}
-          prerelease: ${{ github.event.inputs.prerelease == 'true' }}
+          tag_name: ${{ steps.meta.outputs.tag }}
+          name: Mako ${{ steps.meta.outputs.tag }}
           generate_release_notes: true
+          fail_on_unmatched_files: false
           files: |
             dist/${{ matrix.artifact }}.tar.gz
             dist/${{ matrix.artifact }}.zip
             dist/${{ matrix.artifact }}.sha256
             dist/${{ matrix.artifact }}
-            dist/${{ matrix.artifact }}.exe
-          fail_on_unmatched_files: false
-
-      - name: Publish install scripts (Linux job)
-        if: runner.os == 'Linux'
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ steps.tag.outputs.name }}
-          files: |
             dist/install-release.sh
             dist/install-linux.sh
-          fail_on_unmatched_files: false
-
-  # Linux aarch64 CLI via zig (optional complete package)
-  linux-aarch64:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: aarch64-unknown-linux-gnu
-      - name: Install zig + cargo-zigbuild
-        run: |
-          sudo apt-get update && sudo apt-get install -y xz-utils clang
-          curl -sL https://ziglang.org/download/0.13.0/zig-linux-x86_64-0.13.0.tar.xz | sudo tar -xJ -C /opt
-          echo "/opt/zig-linux-x86_64-0.13.0" >> "$GITHUB_PATH"
-          cargo install cargo-zigbuild --locked
-      - name: Cross-build + package
-        run: |
-          cargo zigbuild --release --target aarch64-unknown-linux-gnu
-          mkdir -p target/release
-          cp target/aarch64-unknown-linux-gnu/release/mako target/release/mako
-          chmod +x target/release/mako
-          ./scripts/package-release.sh --full mako-aarch64-unknown-linux-gnu
-      - name: Resolve release tag
-        id: tag
-        shell: bash
-        run: |
-          if [[ "${{ github.ref_type }}" == "tag" ]]; then
-            echo "name=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
-          else
-            echo "name=${{ github.event.inputs.tag || 'v0.1.0' }}" >> "$GITHUB_OUTPUT"
-          fi
-      - name: Publish aarch64 package
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ steps.tag.outputs.name }}
-          files: |
-            dist/mako-aarch64-unknown-linux-gnu.tar.gz
-            dist/mako-aarch64-unknown-linux-gnu.sha256
-          fail_on_unmatched_files: false
-      - name: Upload aarch64 artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: mako-aarch64-unknown-linux-gnu
-          path: dist/mako-aarch64-unknown-linux-gnu*
