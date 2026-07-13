@@ -34,9 +34,9 @@ Last roadmap sync: **2026-07-11** (unique surface · pain-driven design · suite
 
 ## Partial / Next (true hard residuals)
 
-**Landed (gap close waves 1–21):** join_timeout flatten · POD+string kick ·
-reflect N + nested POD · Result/Option + multi-layer Option + **Result[Result[T]]
-nest** · `jpeg_has_sof0` · NLL labeled continue/break · more script `\p{…}` ·
+**Landed (gap close waves 1–22):** join_timeout flatten · POD+string kick ·
+reflect N + nested POD · Result/Option multi-layer + **mixed Result/Option
+nests** · `jpeg_has_sof0` · NLL labeled continue/break · more script `\p{…}` ·
 expanded TSan · prior work.
 
 **Language pain residuals** (still open — see [PAIN_POINTS.md](PAIN_POINTS.md)):

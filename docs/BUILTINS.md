@@ -2221,7 +2221,9 @@ Tests: `examples/testing/overflow_shutdown_test.mko`. Multi-error recovery:
 `Some(x)` / `None` and match `Some(v)` work for int/string/float, boxed containers,
 and multi-layer Option nests via kind chains. Nested `Ok(Ok(x))` /
 `Result[Result[T, E], E2]` is supported (typecheck pushes expected Result for
-inner Ok/Err; codegen boxes the inner Result).
+inner Ok/Err; codegen boxes the inner Result). Mixed nests
+`Option[Result[T]]` and `Result[Option[Result[T]]]` also work via expected-type
+context for nested `Ok`/`Some`.
 
 | Err type `E` | Encoding |
 |--------------|----------|
@@ -2266,7 +2268,8 @@ Tests: `result_enum_test.mko`, `job_join_typed_test.mko` (Result across kick/joi
 `wave18_queue_test.mko` (generic `Option[T]`, nested `Result[Option[T]]`),
 `wave19_queue_test.mko` (Option containers, `Option[Option[T]]`, `jpeg_has_sof0`),
 `wave20_queue_test.mko` (triple Option nest string/int, Option struct),
-`wave21_queue_test.mko` (`Result[Result[T]]`, `wrap_ok(Ok(...))`).
+`wave21_queue_test.mko` (`Result[Result[T]]`, `wrap_ok(Ok(...))`),
+`wave22_queue_test.mko` (`Option[Result[T]]`, `Result[Option[Result[T]]]`).
 
 ---
 

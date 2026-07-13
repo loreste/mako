@@ -3063,6 +3063,12 @@ static inline int mako_re_unicode_prop_match(const char *name, size_t nlen, uint
     /* BMP fallbacks for tests without astral UTF-8 decode */
     if (nlen == 8 && memcmp(name, "Canadian", 8) == 0)
         return (cp >= 0x1400 && cp <= 0x167F);
+    if (nlen == 8 && memcmp(name, "Gujarati", 8) == 0)
+        return (cp >= 0x0A80 && cp <= 0x0AFF);
+    if (nlen == 7 && memcmp(name, "Kannada", 7) == 0)
+        return (cp >= 0x0C80 && cp <= 0x0CFF);
+    if (nlen == 9 && memcmp(name, "Malayalam", 9) == 0)
+        return (cp >= 0x0D00 && cp <= 0x0D7F);
     return 0;
 }
 

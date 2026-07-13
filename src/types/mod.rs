@@ -237,6 +237,8 @@ pub struct TypeChecker {
     variants: HashMap<String, VariantCtor>,
     scopes: Vec<HashMap<String, (Type, bool)>>,
     current_ret: Type,
+    /// Expected type for nested Ok/Err/Some constructors (e.g. Ok(Some(Ok(x)))).
+    current_expected: Option<Type>,
     interfaces: Vec<InterfaceDef>,
     /// Names bound with `hold` that have been moved (use-after-move error).
     moved_holds: HashMap<String, bool>,
@@ -6158,6 +6160,7 @@ impl TypeChecker {
             variants: HashMap::new(),
             scopes: vec![HashMap::new()],
             current_ret: Type::Void,
+            current_expected: None,
             interfaces: Vec::new(),
             moved_holds: HashMap::new(),
             hold_vars: HashMap::new(),
@@ -8432,16 +8435,29 @@ impl TypeChecker {
                     }
                     match name.as_str() {
                         "Ok" if args.len() == 1 => {
-                            // Prefer expected return shape when checking a Result-returning fn.
-                            // Nested Ok(Ok(x)): temporarily set current_ret to the inner Result
-                            // so the argument's Ok/Err constructors typecheck against it.
-                            if let Type::Result(ok, err) = self.current_ret.clone() {
-                                let saved = self.current_ret.clone();
-                                if matches!(ok.as_ref(), Type::Result(_, _)) {
-                                    self.current_ret = (*ok).clone();
+                            // Prefer expected Result shape from current_expected (nested
+                            // constructors) or function return type.
+                            let expected = match &self.current_expected {
+                                Some(Type::Result(ok, err)) => {
+                                    Some((ok.as_ref().clone(), err.as_ref().clone()))
+                                }
+                                _ => match &self.current_ret {
+                                    Type::Result(ok, err) => {
+                                        Some((ok.as_ref().clone(), err.as_ref().clone()))
+                                    }
+                                    _ => None,
+                                },
+                            };
+                            if let Some((ok, err)) = expected {
+                                let saved_ret = self.current_ret.clone();
+                                let saved_exp = self.current_expected.clone();
+                                self.current_expected = Some(ok.clone());
+                                if matches!(&ok, Type::Result(_, _)) {
+                                    self.current_ret = ok.clone();
                                 }
                                 let t = self.check_expr(&args[0])?;
-                                self.current_ret = saved;
+                                self.current_ret = saved_ret;
+                                self.current_expected = saved_exp;
                                 if !self.compatible(&t, &ok) {
                                     return Err(TypeError::new(format!(
                                         "Ok(...) type mismatch: expected {}, got {}",
@@ -8449,13 +8465,24 @@ impl TypeChecker {
                                         t.display()
                                     )));
                                 }
-                                return Ok(Type::Result(ok, err));
+                                return Ok(Type::Result(Box::new(ok), Box::new(err)));
                             }
                             let t = self.check_expr(&args[0])?;
                             return Ok(Type::Result(Box::new(t), Box::new(Type::String)));
                         }
                         "Err" if args.len() == 1 => {
-                            if let Type::Result(ok, err) = self.current_ret.clone() {
+                            let expected = match &self.current_expected {
+                                Some(Type::Result(ok, err)) => {
+                                    Some((ok.as_ref().clone(), err.as_ref().clone()))
+                                }
+                                _ => match &self.current_ret {
+                                    Type::Result(ok, err) => {
+                                        Some((ok.as_ref().clone(), err.as_ref().clone()))
+                                    }
+                                    _ => None,
+                                },
+                            };
+                            if let Some((ok, err)) = expected {
                                 let e = self.check_expr(&args[0])?;
                                 if !self.compatible(&e, &err) {
                                     return Err(TypeError::new(format!(
@@ -8464,7 +8491,7 @@ impl TypeChecker {
                                         e.display()
                                     )));
                                 }
-                                return Ok(Type::Result(ok, err));
+                                return Ok(Type::Result(Box::new(ok), Box::new(err)));
                             }
                             let e = self.check_expr(&args[0])?;
                             return Ok(Type::Result(Box::new(Type::Int), Box::new(e)));
@@ -8655,10 +8682,43 @@ impl TypeChecker {
                             return Ok(Type::Void);
                         }
                         "Some" if args.len() == 1 => {
+                            // Nested Some under Ok(Some(...)) or Option return: use expected inner.
+                            let expected_inner = match &self.current_expected {
+                                Some(Type::Option(i)) => Some(i.as_ref().clone()),
+                                _ => match &self.current_ret {
+                                    Type::Option(i) => Some(i.as_ref().clone()),
+                                    _ => None,
+                                },
+                            };
+                            if let Some(inner) = expected_inner {
+                                let saved_ret = self.current_ret.clone();
+                                let saved_exp = self.current_expected.clone();
+                                self.current_expected = Some(inner.clone());
+                                if matches!(&inner, Type::Result(_, _)) {
+                                    self.current_ret = inner.clone();
+                                }
+                                let t = self.check_expr(&args[0])?;
+                                self.current_ret = saved_ret;
+                                self.current_expected = saved_exp;
+                                if !self.compatible(&t, &inner) {
+                                    return Err(TypeError::new(format!(
+                                        "Some(...) type mismatch: expected {}, got {}",
+                                        inner.display(),
+                                        t.display()
+                                    )));
+                                }
+                                return Ok(Type::Option(Box::new(inner)));
+                            }
                             let t = self.check_expr(&args[0])?;
                             return Ok(Type::Option(Box::new(t)));
                         }
                         "None" if args.is_empty() => {
+                            if let Some(Type::Option(i)) = &self.current_expected {
+                                return Ok(Type::Option(i.clone()));
+                            }
+                            if let Type::Option(i) = &self.current_ret {
+                                return Ok(Type::Option(i.clone()));
+                            }
                             return Ok(Type::Option(Box::new(Type::Int)));
                         }
                         "print" => {

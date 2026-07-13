@@ -1,0 +1,89 @@
+// Wave 22: mixed Result/Option nests, Gujarati/Kannada/Malayalam scripts.
+
+fn res_opt[T](x: T) -> Result[Option[T], string] {
+    return Ok(Some(x))
+}
+
+fn opt_res[T](x: T) -> Option[Result[T, string]] {
+    return Some(Ok(x))
+}
+
+fn res_opt_res[T](x: T) -> Result[Option[Result[T, string]], string] {
+    return Ok(Some(Ok(x)))
+}
+
+fn opt_res_err_int() -> Option[Result[int, string]] {
+    return Some(Err("nope"))
+}
+
+fn TestResOptInt() {
+    match res_opt(3) {
+        Ok(o) => match o {
+            Some(v) => assert_eq(v, 3),
+            None => assert(false),
+        },
+        Err(_) => assert(false),
+    }
+}
+
+fn TestOptResInt() {
+    match opt_res(5) {
+        Some(r) => match r {
+            Ok(v) => assert_eq(v, 5),
+            Err(_) => assert(false),
+        },
+        None => assert(false),
+    }
+}
+
+fn TestOptResStr() {
+    match opt_res("hi") {
+        Some(r) => match r {
+            Ok(s) => assert_eq_str(s, "hi"),
+            Err(_) => assert(false),
+        },
+        None => assert(false),
+    }
+}
+
+fn TestOptResErr() {
+    match opt_res_err_int() {
+        Some(r) => match r {
+            Ok(_) => assert(false),
+            Err(msg) => assert_eq_str(msg, "nope"),
+        },
+        None => assert(false),
+    }
+}
+
+fn TestResOptResInt() {
+    match res_opt_res(7) {
+        Ok(o) => match o {
+            Some(r) => match r {
+                Ok(v) => assert_eq(v, 7),
+                Err(_) => assert(false),
+            },
+            None => assert(false),
+        },
+        Err(_) => assert(false),
+    }
+}
+
+fn TestResOptResStr() {
+    match res_opt_res("z") {
+        Ok(o) => match o {
+            Some(r) => match r {
+                Ok(s) => assert_eq_str(s, "z"),
+                Err(_) => assert(false),
+            },
+            None => assert(false),
+        },
+        Err(_) => assert(false),
+    }
+}
+
+fn TestRegexUnicodeGujaratiKannadaMalayalam() {
+    assert(regex_match("\\p{Gujarati}+", "ગુજ"))
+    assert(regex_match("\\p{Kannada}+", "ಕನ್ನಡ"))
+    assert(regex_match("\\p{Malayalam}+", "മലയാളം"))
+}

@@ -1,0 +1,15 @@
+// EXPECT: use of moved
+// Break mid after move — use on outer body after mid exits is use-after-move.
+fn consume(t: string) {}
+
+fn main() {
+    hold let s = "hi"
+    outer: while true {
+        mid: while true {
+            consume(s)
+            break mid
+        }
+        print(s)
+        break outer
+    }
+}

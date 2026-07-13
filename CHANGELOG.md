@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.0 — 2026-07-13 (wave 22 queue)
+
+- Nested Ok/Some/None expected-type context (`Ok(Some(Ok(x)))`)
+- `Option[Result[T]]` and `Result[Option[Result[T]]]` codegen + match
+- Mid-label break NLL bad case; Gujarati/Kannada/Malayalam scripts
+- TSan CI: `wave21_queue_test`
+- Tests: `examples/testing/wave22_queue_test.mko`
+
 ## 0.1.0 — 2026-07-13 (wave 21 queue)
 
 - Nested `Ok(Ok(x))` typechecks against inner Result expected type
