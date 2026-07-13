@@ -10066,6 +10066,18 @@ impl Codegen {
                             let (_, s) = self.emit_expr(&args[0]);
                             return ("int64_t".into(), format!("mako_jpeg_is_mako_complete({s})"));
                         }
+                        "jpeg_is_mako_raw" => {
+                            let (_, s) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_jpeg_is_mako_raw({s})"));
+                        }
+                        "jpeg_jfif_app0_length" => {
+                            let (_, s) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_jpeg_jfif_app0_length({s})"));
+                        }
+                        "jpeg_app7_payload_len" => {
+                            let (_, s) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_jpeg_app7_payload_len({s})"));
+                        }
                         "smtp_send_starttls" => {
                             let (_, h) = self.emit_expr(&args[0]);
                             let (_, p) = self.emit_expr(&args[1]);

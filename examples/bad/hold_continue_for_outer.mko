@@ -1,0 +1,16 @@
+// EXPECT: use of moved
+// Labeled continue outer from nested for after move poisons post-outer use.
+fn consume(t: string) {}
+
+fn main() {
+    hold let s = "hi"
+    outer: for i in range 2 {
+        for j in range 2 {
+            if j == 0 {
+                consume(s)
+                continue outer
+            }
+        }
+    }
+    print(s)
+}

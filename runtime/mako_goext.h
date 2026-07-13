@@ -4337,6 +4337,33 @@ static inline int64_t mako_jpeg_is_mako_complete(MakoString jpeg) {
     return 1;
 }
 
+/* Raw Mako gray path (jpeg_encode_gray): APP7 MAKOJPG + EOI + positive dims; JFIF optional. */
+static inline int64_t mako_jpeg_is_mako_raw(MakoString jpeg) {
+    if (!mako_jpeg_has_app7(jpeg)) return 0;
+    if (!mako_jpeg_has_eoi(jpeg)) return 0;
+    if (mako_jpeg_width(jpeg) <= 0 || mako_jpeg_height(jpeg) <= 0) return 0;
+    return 1;
+}
+
+/* APP0 segment length field (big-endian after FF E0); Mako JFIF uses 16. */
+static inline int64_t mako_jpeg_jfif_app0_length(MakoString jpeg) {
+    size_t off = 0;
+    if (!mako_jpeg_find_app0_jfif(jpeg, &off)) return 0;
+    if (off + 4 > jpeg.len) return 0;
+    const unsigned char *p = (const unsigned char *)jpeg.data + off + 2;
+    return (int64_t)(((uint16_t)p[0] << 8) | p[1]);
+}
+
+/* APP7 payload byte count = width * height from MAKOJPG dims (0 if missing). */
+static inline int64_t mako_jpeg_app7_payload_len(MakoString jpeg) {
+    int64_t w = mako_jpeg_width(jpeg);
+    int64_t h = mako_jpeg_height(jpeg);
+    if (w <= 0 || h <= 0) return 0;
+    /* Guard overflow on huge dims */
+    if (w > 0x7fffffff / (h > 0 ? h : 1)) return 0;
+    return w * h;
+}
+
 /* ---- compile-time struct schema registry (filled by codegen) ---- */
 #ifndef MAKO_REFLECT_SCHEMA_MAX
 #define MAKO_REFLECT_SCHEMA_MAX 64

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.0 — 2026-07-13 (wave 33 queue)
+
+- Bool deep `Result[Option[Result[Option[bool]]]]` Ok/None/Err edges
+- **`jpeg_is_mako_raw`**; `jpeg_jfif_app0_length`; `jpeg_app7_payload_len`
+- labeled for continue NLL; nested Option reflect reject; Hanunoo/Tagbanwa/Bamum
+- TSan wave32
+- Tests: `examples/testing/wave33_queue_test.mko`
+
 ## 0.1.0 — 2026-07-13 (wave 32 queue)
 
 - String nest `Option[Result[Option[string]]]` Ok/None/Err edges

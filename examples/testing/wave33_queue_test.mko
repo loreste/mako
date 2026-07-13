@@ -1,0 +1,92 @@
+// Wave 33: bool deep nests, mako raw/APP0 length/APP7 payload, scripts.
+
+fn bool_ok() -> Result[Option[Result[Option[bool], string]], string] {
+    return Ok(Some(Ok(Some(true))))
+}
+
+fn bool_none() -> Result[Option[Result[Option[bool], string]], string] {
+    return Ok(Some(Ok(None)))
+}
+
+fn bool_err() -> Result[Option[Result[Option[bool], string]], string] {
+    return Ok(Some(Err("be")))
+}
+
+fn bool_outer_err() -> Result[Option[Result[Option[bool], string]], string] {
+    return Err("out")
+}
+
+fn TestBoolOk() {
+    match bool_ok() {
+        Ok(o1) => match o1 {
+            Some(r) => match r {
+                Ok(o2) => match o2 {
+                    Some(b) => assert(b),
+                    None => assert(false),
+                },
+                Err(_) => assert(false),
+            },
+            None => assert(false),
+        },
+        Err(_) => assert(false),
+    }
+}
+
+fn TestBoolNone() {
+    match bool_none() {
+        Ok(o1) => match o1 {
+            Some(r) => match r {
+                Ok(o2) => match o2 {
+                    Some(_) => assert(false),
+                    None => assert(true),
+                },
+                Err(_) => assert(false),
+            },
+            None => assert(false),
+        },
+        Err(_) => assert(false),
+    }
+}
+
+fn TestBoolErr() {
+    match bool_err() {
+        Ok(o1) => match o1 {
+            Some(r) => match r {
+                Ok(_) => assert(false),
+                Err(m) => assert_eq_str(m, "be"),
+            },
+            None => assert(false),
+        },
+        Err(_) => assert(false),
+    }
+}
+
+fn TestBoolOuterErr() {
+    match bool_outer_err() {
+        Ok(_) => assert(false),
+        Err(m) => assert_eq_str(m, "out"),
+    }
+}
+
+fn TestJpegRawAndAppLengths() {
+    let gray = "ABCDEFGHABCDEFGHABCDEFGHABCDEFGHABCDEFGHABCDEFGHABCDEFGHABCDEFGH"
+    let raw = jpeg_encode_gray(8, 8, gray)
+    assert_eq(jpeg_is_mako_raw(raw), 1)
+    assert_eq(jpeg_is_jfif(raw), 0)
+    assert_eq(jpeg_is_mako_complete(raw), 0)
+    assert_eq(jpeg_app7_payload_len(raw), 64)
+    assert_eq(jpeg_width(raw), 8)
+    assert_eq(jpeg_height(raw), 8)
+
+    let j = jpeg_encode_gray_jfif(8, 8, gray)
+    assert_eq(jpeg_is_mako_raw(j), 1)
+    assert_eq(jpeg_is_mako_complete(j), 1)
+    assert_eq(jpeg_jfif_app0_length(j), 16)
+    assert_eq(jpeg_app7_payload_len(j), 64)
+}
+
+fn TestRegexUnicodeHanunooTagbanwaBamum() {
+    assert(regex_match("\\p{Hanunoo}", "ᜠ"))
+    assert(regex_match("\\p{Tagbanwa}", "ᝠ"))
+    assert(regex_match("\\p{Bamum}", "ꚠ"))
+}

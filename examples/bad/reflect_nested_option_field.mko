@@ -1,0 +1,16 @@
+// EXPECT: reflect_value_of expects a POD struct
+// Nested struct with Option field is non-POD for reflect_value_of.
+struct Inner {
+    o: Option[int]
+}
+
+struct Outer {
+    i: Inner
+    n: int
+}
+
+fn main() {
+    let inn = Inner { o: Some(1) }
+    let o = Outer { i: inn, n: 1 }
+    let _ = reflect_value_of(o)
+}

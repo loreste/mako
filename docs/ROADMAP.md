@@ -34,11 +34,12 @@ Last roadmap sync: **2026-07-11** (unique surface · pain-driven design · suite
 
 ## Partial / Next (true hard residuals)
 
-**Landed (gap close waves 1–32):** join_timeout flatten · POD+string kick ·
+**Landed (gap close waves 1–33):** join_timeout flatten · POD+string kick ·
 reflect N + nested POD · Result/Option deep nests · nested None/Err ·
 **jpeg_is_baseline_gray** · **jpeg_is_mako_jfif** · **jpeg_is_mako_complete** ·
-JFIF density/thumb · SOF0 sampling/Ci/Tqi · APP7 dim match + EOI · NLL
-for/if/match · more script `\p{…}` · expanded TSan · prior work.
+**jpeg_is_mako_raw** · JFIF density/thumb/APP0 len · SOF0 sampling/Ci/Tqi ·
+APP7 dim match + payload len + EOI · NLL for/if/match · more script `\p{…}` ·
+expanded TSan · prior work.
 
 **Language pain residuals** (still open — see [PAIN_POINTS.md](PAIN_POINTS.md)):
 
@@ -48,8 +49,8 @@ for/if/match · more script `\p{…}` · expanded TSan · prior work.
 
 **Stdlib / product residuals:**
 
-6. Complete Unicode / PCRE · JPEG viewer parity (mako complete shell; Huffman residual)  
-7. Reflect for non-POD field types (maps/slices/chan/nested map·slice/Option/Result rejected; content residual)  
+6. Complete Unicode / PCRE · JPEG viewer parity (mako raw/complete shell; Huffman residual)  
+7. Reflect for non-POD field types (maps/slices/chan/nested map·slice·Option/Result rejected; content residual)  
 8. Symbol-level parity  
 
 ## Product Focus From General-Purpose Brief
