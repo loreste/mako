@@ -34,17 +34,21 @@ fn TestHpackDyn() {
     assert(str_eq(hpack_dyn_name_at(62), "b"))
     assert(str_eq(hpack_dyn_name_at(63), "a"))
     assert(str_eq(hpack_dyn_value_at(63), "1"))
-    // fill to capacity 4 then evict oldest
+    // Default: 64 entry slots / 4096-byte SETTINGS budget — five small entries fit.
     assert_eq(hpack_dyn_insert("c", "3"), 62)
     assert_eq(hpack_dyn_insert("d", "4"), 62)
-    assert_eq(hpack_dyn_len(), 4)
     assert_eq(hpack_dyn_insert("e", "5"), 62)
-    assert_eq(hpack_dyn_len(), 4)
+    assert_eq(hpack_dyn_len(), 5)
     assert(str_eq(hpack_dyn_name_at(62), "e"))
-    assert(str_eq(hpack_dyn_name_at(65), "b"))
-    assert_eq(len(hpack_dyn_name_at(66)), 0) // a evicted
-    let b = hpack_encode_indexed(62)
-    assert_eq(hpack_decode_indexed(b), 62)
+    assert(str_eq(hpack_dyn_name_at(66), "a"))
+    // SETTINGS_HEADER_TABLE_SIZE=100 → 100-byte dyn budget applied.
+    let _ = http2_conn_reset()
+    let settings = hex_decode("000006040000000000000100000064")
+    assert_eq(http2_conn_recv(settings), 0)
+    assert_eq(http2_conn_header_table_size(), 100)
+    // Small entries still insert under the new budget.
+    assert_eq(hpack_dyn_insert("a", "1"), 62)
+    assert_eq(hpack_dyn_len(), 1)
     let _ = hpack_dyn_clear()
     assert_eq(hpack_dyn_len(), 0)
 }

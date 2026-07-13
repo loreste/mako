@@ -102,6 +102,17 @@ pub struct ExternCDef {
     pub ret: Option<TypeExpr>,
 }
 
+/// API stability annotation (`#[stable]` / `#[deprecated("msg")]`).
+#[derive(Debug, Clone, PartialEq, Default)]
+pub enum ApiStability {
+    #[default]
+    Unspecified,
+    Stable,
+    Deprecated {
+        message: String,
+    },
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct FnDef {
     pub name: String,
@@ -114,6 +125,8 @@ pub struct FnDef {
     pub exported: bool,
     /// `const fn` — body must be comptime-foldable; calls with const args fold at compile time.
     pub is_const: bool,
+    /// Compiler-checked API stability (`#[stable]` / `#[deprecated(...)]`).
+    pub stability: ApiStability,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -433,15 +446,21 @@ pub struct MatchArm {
 pub enum Pattern {
     Wildcard,
     Ident(String),
+    /// Variant with nested patterns: `Ok(Some(x))`, `Point(x, y)`, `Err(_)`.
     Variant {
         name: String,
-        bindings: Vec<String>,
+        bindings: Vec<Pattern>,
     },
     Literal(Expr),
     /// Fallthrough-free multi-match: `0 | 1 | 2 => ...`
     Or(Vec<Pattern>),
     /// Tuple destructure: `(a, b)`
     Tuple(Vec<Pattern>),
+    /// Struct field pattern: `Point { x, y }` or `Point { x: a, y: _ }`.
+    Struct {
+        name: String,
+        fields: Vec<(String, Pattern)>,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

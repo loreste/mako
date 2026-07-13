@@ -1,0 +1,82 @@
+// Strong structured logging: levels, JSON, multi-field, redaction, file output.
+
+fn TestSlogLevelFilter() {
+    slog_set_level("warn")
+    assert_eq(slog_get_level(), 2)
+    // debug/info suppressed; warn/error emit (smoke: no crash)
+    slog_debug("should-be-filtered")
+    slog_info("should-be-filtered")
+    slog_warn("visible-warn")
+    slog_error("visible-error")
+    slog_set_level("debug")
+    assert_eq(slog_get_level(), 0)
+    slog_debug("now-visible")
+    slog_set_level("info")
+}
+
+fn TestSlogLogfmtAndFields() {
+    slog_set_json(0)
+    assert_eq(slog_is_json(), 0)
+    slog_set_service("mako-test")
+    slog_with("info", "login ok", "user", "alice")
+    slog_with2("info", "request", "method", "GET", "path", "/health")
+    slog_with3("info", "done", "a", "1", "b", "2", "c", "3")
+    slog_with_int("info", "latency", "ms", 42)
+    let r = slog_redact("password-secret")
+    assert_eq_str(r, "[REDACTED]")
+    slog_with_redacted("info", "auth", "token")
+    slog_flush()
+}
+
+fn TestSlogJsonMode() {
+    slog_set_json(1)
+    assert_eq(slog_is_json(), 1)
+    slog_set_service("api")
+    slog_with2("info", "hello \"world\"", "k", "v with spaces", "n", "1")
+    slog_with_int("error", "failed", "code", 500)
+    slog_set_json(0)
+    slog_flush()
+}
+
+fn TestSlogFileOutput() {
+    let path = "/tmp/mako_strong_log_test.log"
+    let _ = remove_file(path)
+    assert_eq(slog_set_output(path), 1)
+    slog_set_json(1)
+    slog_set_service("file-test")
+    slog_info("written-to-file")
+    slog_with("info", "pair", "x", "y")
+    slog_flush()
+    // reset to stderr
+    assert_eq(slog_set_output(""), 1)
+    slog_set_json(0)
+
+    let body = read_file(path)
+    assert(str_contains(body, "written-to-file"))
+    assert(str_contains(body, "\"service\":\"file-test\""))
+    assert(str_contains(body, "\"x\":\"y\""))
+    let _ = remove_file(path)
+}
+
+fn TestLogAliasesUseStrongBackend() {
+    slog_set_level("info")
+    log_info("via-log-info")
+    log_warn("via-log-warn")
+    log_error("via-log-error")
+    // debug filtered at info
+    log_debug("via-log-debug-filtered")
+    slog_set_level("debug")
+    log_debug("via-log-debug")
+    slog_set_level("info")
+    slog_flush()
+}
+
+fn TestSlogTraceField() {
+    let id = trace_id()
+    assert_eq(len(id), 32)
+    slog_set_json(1)
+    slog_with("info", "traced-event", "op", "test")
+    slog_set_json(0)
+    let _ = trace_clear()
+    slog_flush()
+}

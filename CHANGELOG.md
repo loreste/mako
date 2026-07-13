@@ -1,5 +1,409 @@
 # Changelog
 
+## 0.1.0 — 2026-07-13 (intern + chan take + proxy splice)
+
+### Speed / memory
+
+- **HTTP interning** — common header names and Content-Type values are static
+  views; `respond_json` uses interned `application/json; charset=utf-8` (no malloc
+  for the type string). Request fill still zero-copy views into `conn.raw`.
+- **`chan_str_send_take` / `chan_str_try_send_take`** — move ownership of a string
+  into a `chan[string]` without cloning; default `ch.send(s)` still clones (safe).
+  Try-send always consumes the temporary (frees on full/closed).
+- **Proxy `tcp_fd_copy`** — Linux splice uses 256 KiB chunks + `F_SETPIPE_SZ`;
+  Apple/FreeBSD sendfile for regular file→socket before userspace pump (macOS
+  declares `sendfile` when `_POSIX_C_SOURCE` would hide it).
+- **`http_parse` free safety** — replace raw `free` of default empty fields with
+  `mako_str_free` so the empty-string singleton is not freed.
+- Tests: `map_take_http_test.mko`, `chan_string_test.mko`, `proxy_edge_test.mko`
+
+## 0.1.0 — 2026-07-13 (map take + HTTP zero-copy)
+
+### Speed / memory
+
+- **`map_si_set_take` / `map_ss_set_take`** — move string keys (and ss values) into
+  maps without cloning; default `m[k]=v` still clones (safe).
+- **map_ss rehash** — moves owned keys/vals (no clone/free thrash).
+- **HTTP zero-copy** — method/path/body/Host/UA/Content-Type are views into the
+  connection `raw[]` buffer after a single request copy; header locate via
+  `find_header_view` (no intermediate header buffer).
+- Tests: `examples/testing/map_take_http_test.mko`
+
+## 0.1.0 — 2026-07-13 (speed audit: release hot path)
+
+### Performance
+
+- **Release bounds default fixed** — `mako build --release` no longer forces
+  `MAKO_BOUNDS_ALWAYS` (was silently taxing every index). Opt in with
+  `--bounds always` or `[profile.release] bounds_checks = "on"`.
+- **Empty string singleton** — `""` / zero-len clone avoids `malloc`; `mako_str_free`
+  skips the singleton (safe for map key/value free).
+- **Map load ~75%** — fewer rehashes; `MAKO_LIKELY` on map set/get and slice append.
+- Bench gate still **PASS** (≤2× Rust fib/slice/map).
+
+## 0.1.0 — 2026-07-13 (UUID/ULID + speed/safety)
+
+### UUID / ULID (POD Copy IDs — no GC on the value)
+
+- **v4 / v5 / v7** — `uuid_v4`, `uuid_v5(ns, name)` (SHA-1), `uuid_v7` (unix-ms ordered)
+- **Namespaces** — `uuid_ns_dns` / `url` / `oid` / `x500`
+- **Format/parse** — string, upper, URN, braces, 32-hex, raw `uuid_bytes` / `uuid_from_bytes` (hard-fail length)
+- **Inspect** — `uuid_version`, `uuid_variant`, `uuid_cmp`, `uuid_check`
+- **ULID** — `ulid_new` / `ulid_string` / `ulid_parse` / `ulid_timestamp_ms` (same 16-byte POD)
+- **Copy + Send** — `Uuid` is Copy (NLL re-read, crew kick heap-boxed pack)
+- Pack: `std/uuid` · tests: `examples/testing/uuid_test.mko` (9 tests)
+- **Speed gate** — `./scripts/bench-gate.sh` PASS (fib/slice/map ≤2× Rust; local run faster than Rust)
+
+## 0.1.0 — 2026-07-13 (language residuals wave 41)
+
+### Ok(Some) · exotic `?` · race stack · tracing GC · UCD/PCRE depth
+
+- **Non-generic Result[Option[T]]** — param/annotated-let nest metadata; `Ok(Some(v))` codegen
+- **Exotic `?`** — Option? in Result[T,string] → Err("None"); Result? in Option → None on Err
+- **Race model** — Send/Sync helpers; per-kick capture stack (join pops); field/index writes checked
+- **Tracing GC** — `gc_root` / `gc_unroot` / `gc_link` / `gc_mark` / `gc_root_count`; mark-from-roots collect
+- **PCRE/UCD** — `\P{…}`, `\X`, `\h`/`\H`, `\R`, `\N`; Alnum/Word/Space/… properties
+- **Test harness** — `load_test_package` + test codegen honor nearest `mako.toml` (`gc = true`)
+- Tests: `lang_residuals_test.mko`, `examples/testing/gc_app/gc_trace_test.mko`
+
+## 0.1.0 — 2026-07-13 (language residuals wave 40)
+
+### Race / Send / NLL / patterns / stability / GC / reflect / JPEG / Unicode
+
+- **Deep Send** — `kick` accepts Option/Result/tuple of sendables, deep-POD structs,
+  and enums with sendable fields; Option/Result heap-boxed across spawn
+- **Static race seed** — mutate mut Option/Result/tuple captures before `join` → hard error
+- **NLL** — richer const-bool folds (`true == true`); multi-label break tests
+- **Patterns** — nested variant patterns (typecheck); struct field patterns `Point { x, y }`
+- **API stability** — `#[stable]`, `#[deprecated("msg")]` (call sites hard-error)
+- **Optional GC** — `gc_alloc` / `gc_collect` / `gc_live` with `[package] gc = true`
+  (forbidden when `systems = true`)
+- **Reflect** — Option/Result/array/map fields in `reflect_value_of`
+- **JPEG baseline Huffman** — `jpeg_encode_gray_baseline` / `jpeg_is_baseline_huff`
+- **Unicode** — `\p{Lu}` / `\p{Ll}` / `\p{Lo}` / `\p{ASCII}` / `\p{Any}` / `\p{Assigned}`
+- Tests: `lang_residuals_test.mko`, `nll_multi_label_test.mko`, `api_stable_test.mko`,
+  bad: `deprecated_call`, `race_mut_after_kick`
+
+## 0.1.0 — 2026-07-13 (hex / decimal / bases)
+
+### Numeric format & parse (all common bases)
+
+- **Format** — `format_int_dec` / `hex` / `hex_upper` / `hex_prefix` / `hex_pad`,
+  `format_int_bin` / `oct` / `format_int_base(n, 2..36)` / `format_pad`
+- **Parse** — `parse_int_hex` / `bin` / `oct` / `base` / `auto` (`0x` `0b` `0o`)
+- **Sprintf int** — `fmt_sprintf_d("%#08x", n)`, `fmt_sprintf_dd("%d %b", a, b)`
+- Packs: `std/strconv`, `std/fmt` · tests in `fmt_print_test.mko`
+
+## 0.1.0 — 2026-07-13 (fmt / print packages)
+
+### Go-style `fmt` and `print`
+
+- **Sprintf** — `fmt_sprintf`…`4`, verbs `%s %v %d %q %x %X %%`, plus
+  `fmt_sprintf_d` / `fmt_sprintf_f`
+- **Sprint / Sprintln** — space-join; trailing newline variants
+- **Print / Println / Printf** — stdout (print without forced newline)
+- **Eprint / Eprintln / Eprintf** — stderr
+- **Errorf** — format error strings
+- Packs: `std/fmt`, `std/print` · tests: `fmt_print_test.mko` · demo: `fmt_demo.mko`
+
+## 0.1.0 — 2026-07-13 (Go-style templates)
+
+### Template language (`text/template` / `html/template`)
+
+- **Engine** — `tmpl_new` / `tmpl_data_*` / `tmpl_execute` / `tmpl_html_execute`
+- **Actions** — `{{.key}}`, `{{if}}/{{else}}/{{end}}`, `{{range}}`, `{{with}}`,
+  `{{define}}` / `{{template}}`, comments, `len`/`upper`/`lower`/`html`/`printf`
+- **HTML mode** — auto-escapes interpolations (`tmpl_html` / `tmpl_html_execute`)
+- Packs: `std/text/template`, `std/html/template`
+- Tests: `examples/testing/template_test.mko` · demo: `examples/template_demo.mko`
+- Legacy `template_execute` / `html_template_*` still work
+
+## 0.1.0 — 2026-07-13 (Email / SMTP package)
+
+### Code email from Mako
+
+- **Message builder** — `mail_msg_*`: From/To/Cc/Bcc, subject, text+HTML
+  multipart/alternative, attachments (base64), custom headers, Date/Message-ID
+- **SMTP session** — `smtp_new` → connect → EHLO → STARTTLS → AUTH PLAIN →
+  MAIL/RCPT/DATA (dot-stuffing) → QUIT; `smtp_last_reply` / `last_code`
+- **One-shot** — `smtp_send_msg(host, port, user, pass, msg, use_tls)`
+- **Mock SMTP** — `smtp_mock_start` / `serve_once` / `last_message` for e2e
+  programming without an external MTA
+- Packs: `std/net/mail`, `std/net/smtp` · demos `mail_program.mko`, `send_mail.mko`
+- Tests: `examples/testing/mail_smtp_test.mko` (includes full send e2e)
+
+## 0.1.0 — 2026-07-13 (MHA + quant GGUF + BPE)
+
+### Deeper local AI
+
+- **`gpu_mha_f32`** — multi-head attention over `[seq, H·D]` Q/K/V
+- **GGUF quant** — `model_load_gguf` dequantizes **Q4_0** and **Q8_0** → f32
+- **BPE** — `tok_load_bpe` / `tok_load_merges` / `tok_encode_bpe`
+- Tests: `ai_depth_test.mko` (MHA, quant fixture, BPE)
+
+## 0.1.0 — 2026-07-13 (GGUF + transformer kernels + tokenizer)
+
+### Local AI depth for real models
+
+- **GGUF** — `model_load_gguf` loads F32/F16 tensors (quantized types skipped)
+- **Transformer kernels** — `gpu_gelu_f32`, `gpu_silu_f32`, `gpu_layernorm_f32`,
+  `gpu_transpose_f32`, `gpu_attention_f32` (scaled dot-product, 1 head)
+- **Tokenizer seed** — `tok_new` / `tok_load_json` / `tok_load_lines` /
+  longest-match `tok_encode` / `tok_decode`
+- Still not a full LLaMA runtime — compose layers + load weights in Mako
+- Tests: `examples/testing/ai_depth_test.mko` · fixtures `tiny.gguf`,
+  `tiny_vocab.json`
+
+## 0.1.0 — 2026-07-13 (local models: existing weights + your own)
+
+### Work with existing models *or* program your own
+
+| Path | Surface |
+|------|---------|
+| Hosted APIs | `llm_*` (unchanged) |
+| **Local weights** | `model_*` + `gpu_*` |
+
+- **`model_new` / `model_set_f32` / tensor introspect** — named f32 tensors on a device
+- **`model_load_safetensors`** — Hugging Face safetensors (F32 + F16→f32)
+- **`model_save` / `model_load`** — native `.makomodel` for models you author
+- **`model_linear_f32`** — dense + bias; `hf=1` for PyTorch `[out, in]` weights
+- Compose real nets in Mako (MLP demo); not a full transformer/GGUF runtime yet
+- Tests: `model_weights_test.mko` · fixture `tiny_linear.safetensors` ·
+  `examples/model_mlp.mko`
+
+## 0.1.0 — 2026-07-13 (GPU AI building blocks)
+
+### GPU seed oriented for AI (not graphics)
+
+North star: **compose inference/training ops in Mako** on multi-vendor GPUs.
+
+- **OpenCL** — NVIDIA / AMD / Intel ICDs + macOS Apple GPU; **host** fallback
+- **AI kernels (f32, row-major)** — `gpu_matmul_f32`, `gpu_relu_f32`,
+  `gpu_bias_add_f32`, `gpu_saxpy_f32`, `gpu_softmax_rows_f32`, `gpu_sum_f32`
+  plus elementwise add/mul/scale/fill
+- Dense sketch: `matmul → bias_add → relu` (covered in tests)
+- Not a full ML framework (no autograd, no model formats) — primitives only
+- Tests: `examples/testing/gpu_seed_test.mko`
+
+## 0.1.0 — 2026-07-13 (GPU OpenCL multi-vendor)
+
+### GPU / accelerator seed (OpenCL + host)
+
+Portable compute for **NVIDIA, AMD, Intel** (OpenCL ICDs) and **macOS** (Apple
+OpenCL → GPU), with **host** CPU fallback when no driver:
+
+- **Auto-link** — `-DMAKO_HAS_OPENCL` + `-framework OpenCL` (macOS) or
+  `-lOpenCL` (Linux/Windows when headers/ICD found); opt out `MAKO_NO_OPENCL=1`
+- **Device** — `gpu_device_open` prefers GPU; `gpu_device_name` / `vendor` /
+  `is_gpu` / `backend`; `gpu_opencl_ok`; `gpu_set_prefer_host` for CI
+- **Buffers + f32 kernels** — same API on OpenCL or host (`add`/`mul`/`scale`/`fill`)
+- Not graphics / user shaders / Metal-native yet (OpenCL covers macOS GPUs today)
+- Tests: `examples/testing/gpu_seed_test.mko`
+
+## 0.1.0 — 2026-07-13 (GPU compute seed)
+
+### GPU / accelerator seed (host path)
+
+Initial host-only seed (superseded by OpenCL multi-vendor above).
+
+## 0.1.0 — 2026-07-13 (WebSocket RFC 6455 complete)
+
+### WebSocket production surface
+
+- **Frames** — text/binary/ping/pong/close; 7/16/64-bit lengths (cap 16 MiB);
+  FIN + continuation reassembly; RSV rejected
+- **Masking** — client→server always masked; server→client unmasked; auto-pong
+  uses the correct mask direction
+- **Close** — status code + reason; `ws_last_close_code` after close frame
+- **Client** — `ws_client_connect` (Happy Eyeballs TCP + upgrade),
+  `ws_client_recv`, `ws_client_send_{text,binary,ping,close}`
+- **Server** — `ws_accept` / `ws_recv` / `ws_send_*` / `ws_echo` / `ws_echo_once`
+- **Status** — `ws_last_opcode`, `ws_last_fin`, `ws_last_status` (0/-1/-2/-3/-4)
+- Tests: `examples/testing/ws_api_test.mko` (handshake helpers + loopback e2e)
+
+## 0.1.0 — 2026-07-13 (IPv6 + Happy Eyeballs)
+
+### Networking dual-stack
+
+- **`tcp_listen` / `tcp_listen_addr`** — IPv4, IPv6, dual-stack (`*`/`""` → `::` +
+  `IPV6_V6ONLY=0` when supported; fallback IPv4)
+- **`tcp_connect` / `tcp_connect_timeout`** — `getaddrinfo(AF_UNSPEC)`, AAAA/A
+  interleave, **Happy Eyeballs** racing (default 250ms stagger via
+  `tcp_set_he_delay_ms`)
+- **Accept / peer / local** — `sockaddr_storage`; IPv6 shown as `[addr]:port`
+- **UDP** — IPv6 bind/send/recv for explicit v6 hosts; `udp_bind("*")` remains
+  IPv4 for compatibility
+- **`tcp_connect_nb`** — first resolved v4/v6 address (nonblocking)
+- Tests: `examples/testing/net_ipv6_he_test.mko`
+
+## 0.1.0 — 2026-07-13 (LLM stream / embeddings / retry)
+
+### LLM programming depth
+
+- **`llm_chat_stream`** — true HTTPS SSE read loop; accumulates deltas; returns
+  synthetic chat JSON for `llm_content`
+- **`llm_chat_retry`** — exponential backoff on 429 / 5xx / connect / rate_limit
+- **`llm_is_error` / `llm_error_message` / `llm_should_retry` / `llm_last_status`**
+- **Embeddings** — `llm_embed_body`, `llm_embeddings`, `llm_embed`,
+  `llm_embedding_dim`, `llm_embedding_json` (OpenAI-compatible `/embeddings`)
+- **`llm_body_force_stream`** — ensure `"stream":true` on bodies
+- Tests: `examples/testing/llm_test.mko` (12 cases, offline)
+
+## 0.1.0 — 2026-07-13 (strong logging)
+
+### Structured logging (`runtime/mako_log.h`)
+
+Production logging surface:
+
+- **Formats** — logfmt (`ts=… level=… msg=… k=v`) or **JSON lines** (`slog_set_json(1)`)
+- **Levels** — default **info**; `slog_set_level` / `slog_get_level` (debug→error)
+- **Context** — `slog_set_service`, active `trace=` when set
+- **Fields** — `slog_with` / `with2` / `with3` / `with_int`; JSON string escape
+- **Output** — `slog_set_output(path)` append file or `""` for stderr; `slog_flush`
+- **Redaction** — `slog_redact` / `slog_with_redacted`
+- **`log_*` aliases** route through the same backend (filter + format)
+- Tests: `examples/testing/strong_log_test.mko` · pack: `std/log/slog`
+
+## 0.1.0 — 2026-07-13 (security / crypto / TLS client)
+
+### Cryptography & TLS
+
+Platform surface so you **build** secure systems in Mako (not a soft PKI product):
+
+- **TLS client (socket-style)** — `tls_client_new` / `tls_client_new_insecure`,
+  `tls_connect` / `tls_connect_start` (SNI + VERIFY_PEER), same `TlsConn` I/O as
+  server; `tls_conn_version`, `tls_peer_cn`
+- **Secrets** — `secret_len`, `secret_eq_str` (constant-time)
+- **HKDF-SHA256** — `hkdf_sha256(ikm, salt, info, out_len)` RFC 5869 extract+expand
+- Docs: [SECURITY.md](docs/SECURITY.md) capability map; BUILTINS TLS client section
+- Tests: `examples/testing/security_crypto_test.mko` (HKDF A.1 vector, secrets, client surface)
+
+## 0.1.0 — 2026-07-13 (SIP platform: build stacks in Mako)
+
+### Position
+
+Mako ships **primitives** so you can implement transaction engines, dialogs,
+SIPS, SRTP, proxies, and UAs **in Mako** — not a prebuilt softswitch/WebRTC stack.
+
+### SIP / SDP / RTP (`runtime/mako_sip.h`, `std/sip`)
+
+- SIP parse/build, headers, framing, IDs, URI, Digest, SDP, RTP pack/parse
+- Transport wrappers; retransmits/timers = your `crew` + `mono_ns` code
+- Tests: `examples/testing/sip_test.mko` · demo: `examples/sip_ua.mko`
+
+### Crypto building blocks for SRTP-in-Mako
+
+- **`aes_ctr(key, iv, data)`** — AES-128/256-CTR (classic SRTP AES-CM keystream)
+- **`hmac_sha1` / `hmac_sha1_raw`** — SRTP auth tag source (truncate in Mako)
+- Tests: fixed AES-CTR ciphertext vector (OpenSSL-matched) + Digest response hex
+  (`10bc49bc…`) + HMAC-SHA1 RFC 2202
+
+## 0.1.0 — 2026-07-13 (database multi-row)
+
+### Multi-row result sets (`sql_query_rows*`)
+
+- **`sql_query_rows(db, sql, []int)`** / **`sql_query_rows_str(db, sql, p1)`** —
+  open a result handle (SQLite streams; Postgres materializes).
+- **Cursor:** `sql_rows_next` (1/0/-1), `sql_rows_int` / `sql_rows_str` (col),
+  `sql_rows_cols`, `sql_rows_ok`, `sql_rows_close`.
+- **Bulk first column:** `sql_query_col_int` / `sql_query_col_str` (capped, max 10000).
+- Max **32** concurrent result sets per process.
+- Tests: `examples/testing/sql_rows_test.mko`
+
+## 0.1.0 — 2026-07-13 (database programming)
+
+### Unified SQL (`sql_*`)
+
+- **`sql_exec_str4` / `sql_query_str` work on SQLite** (were Postgres-only; docs
+  claimed both). Placeholders `?` or `$1..$4`; trailing `""` = unused slots.
+- **`sql_last_insert_id(db)`** — SQLite `last_insert_rowid`; Postgres `lastval`.
+- **`sql_rows_affected(db)`** — rows changed by last mutating statement.
+- **Postgres `sql_query_int`** returns the first-column integer (not just 0/-1).
+- Parameterized-only for untrusted input — see [docs/SECURITY.md](docs/SECURITY.md).
+- Tests: `examples/testing/sql_programming_test.mko`
+
+## 0.1.0 — 2026-07-13 (LLM programming)
+
+### LLM runtime (`runtime/mako_llm.h`, `std/llm`)
+
+First-class **OpenAI-compatible** LLM client focused on market gaps:
+
+- **Messages / bodies** — `llm_message`, `llm_messages_append`, `llm_chat_body`,
+  `llm_system_user`, `llm_body_with_tools`
+- **Response parse** — `llm_content`, finish reason, usage tokens, tool call
+  name/args/count
+- **Streaming** — `llm_sse_data`, `llm_sse_delta`, `llm_stream_append`
+- **Structured output** — `llm_json_extract` (markdown fences + balanced JSON)
+- **Transport** — `llm_https_post` / `llm_chat` / `llm_ask` (HTTPS + Bearer;
+  default **xAI** `api.x.ai`, env `XAI_API_KEY`)
+- **Ops** — token estimate, retry backoff, key redaction, mono-timeout friendly
+- No async coloring; pair with `crew`/`fan` for parallel tool execution
+- Tests: `examples/testing/llm_test.mko` · demo: `examples/llm_chat.mko`
+
+## 0.1.0 — 2026-07-13 (low-latency time)
+
+### Clocks
+
+- **`mono_ns` / `mono_us` / `mono_ms`** — monotonic (`CLOCK_MONOTONIC_RAW` when available)
+- **`wall_ns` / `wall_us` / `wall_ms`** — wall/REALTIME (logs, calendar)
+- **`now_ns`** = mono ns; **`now_ms`** = wall ms (documented domains)
+- **`elapsed_ns` / `elapsed_us` / `elapsed_mono_ms`** — mono elapsed (no NTP jump)
+- **`deadline_ns` / `deadline_ms` / `deadline_remaining_ns` / `deadline_expired`**
+- **`sleep_ns` / `sleep_us`**, **`sleep_until_ns`** (hybrid), **`spin_until_ns`** (busy-wait)
+- **`mono_res_ns` / `mono_overhead_ns`** — resolution and sample overhead
+- Tests: `examples/testing/time_latency_test.mko`
+
+## 0.1.0 — 2026-07-13 (low-level networking)
+
+### TCP / UDP sockets
+
+- **CLOEXEC** on listen/connect/udp socket create (+ accept)
+- **`tcp_peer_addr` / `tcp_local_addr`** — `"ip:port"` via getpeername/getsockname
+- **`tcp_write_all` / `tcp_read_n`** — full write and exact-length read
+- **`tcp_shutdown` / `tcp_linger` / `sock_error`** — half-close, SO_LINGER, SO_ERROR
+- **`udp_bind_addr`** — bind to a specific host
+- **`udp_recv` records sender** — `udp_last_sender_host` / `_port` / `_sender`
+- **`udp_recv_from`** alias for explicit API
+- Tests: `examples/testing/net_lowlevel_test.mko`
+
+## 0.1.0 — 2026-07-13 (filesystem / storage production)
+
+### Filesystem & storage
+
+- **`atomic_write_file`** — temp + fsync + rename (crash-safe config/log updates)
+- **`mkdir_all` / `rmdir` / `remove_all`** — parents, empty dir, recursive tree delete
+- **`rename` / `copy_file`** — same-FS move and byte copy
+- **`is_file` / `path_size` / `file_mtime` / `chmod`** — path metadata
+- **`temp_dir` / `temp_file`** — system temp path helpers
+- **`symlink` / `readlink` / `realpath`** — links and absolute resolve
+- Paths reject **embedded NUL**; recursive remove refuses `/` `.` `..`
+- **Direct I/O**: `file_open` always `O_CLOEXEC`; flag bit `32` = exclusive create
+- Tests: `examples/testing/fs_storage_test.mko`
+
+## 0.1.0 — 2026-07-13 (HTTP/2 + HTTP/3 hardened path)
+
+### HTTP/2 hardened path (`http2_conn_*`)
+
+- **Dual flow control** — separate send vs recv windows; inbound DATA consumes recv;
+  peer `WINDOW_UPDATE` raises send; auto WU restores recv only
+- **64 stream slots**, **64 KiB** body buffer, **16 KiB** header assembly
+- **PADDED** / **PRIORITY** stripped on HEADERS/DATA; CONTINUATION is pure HPACK
+- Body overflow is a **hard error** (no silent truncate); `http2_stream_body_overflow`
+- **SETTINGS applied**: max frame size used by `http2_response*`; header table size
+  sets HPACK dyn byte budget; initial window delta on open send windows
+- **`http2_conn_pump`** auto SETTINGS ACK, PING ACK, WINDOW_UPDATE at 16 KiB
+- **`http2_response_ct`**, **`http2_conn_goaway`**, SETTINGS accessors
+- `tls_serve_h2_routes` remains a **demo/smoke** helper; production servers use
+  `tls_server_new` + `http2_conn_*` (`examples/h2_dynamic_server.mko`)
+- Tests: `examples/testing/http2_prod_test.mko`
+
+### HTTP/3 hardened path (quiche)
+
+- **64 KiB** body buffer; overflow drops the request (no silent truncate)
+- **32** concurrent QUIC conns, **64** ready requests
+- Accessors + **`h3_response`**; POST/PUT/PATCH wait for FIN
+- Example: `examples/h3_server.mko` · smoke: `./scripts/h3-server-smoke.sh`
+
 ## 0.1.0 — 2026-07-13 (out-of-box one-shot install)
 
 - Full one-shot: **cargo-built binary** + runtime + std — no Rust/cargo on user machine

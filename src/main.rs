@@ -1480,9 +1480,9 @@ fn cmd_build(
         );
         return Err(());
     }
-    // Release defaults to bounds-always for safer production binaries unless
-    // caller already requested always; debug stays default (NDEBUG strips).
-    let bounds_always = bounds_always || release;
+    // Speed bar: release elides bounds checks via `-DNDEBUG` unless the user
+    // opts in with `--bounds always` or `[profile.release] bounds_checks = "on"`.
+    // Forcing bounds on every release silently taxed the hot path (map/slice index).
     let opts = BuildOpts {
         target,
         sanitize,
@@ -1796,9 +1796,19 @@ fn run_test_package(
     test_fns: &[String],
     sanitize: Option<&str>,
 ) -> Result<(), ()> {
-    let c_src = codegen::Codegen::new()
-        .with_tests(test_fns.to_vec())
-        .emit(program);
+    let mut cg = codegen::Codegen::new().with_tests(test_fns.to_vec());
+    if let Some(dir) = tooling::find_nearest_manifest_dir(file) {
+        let manifest = dir.join("mako.toml");
+        if let Ok(text) = fs::read_to_string(&manifest) {
+            let prof = tooling::codegen_profile_from_toml(
+                &text,
+                Some(file.display().to_string()),
+            );
+            cg.bounds_checks_always = prof.bounds_checks_always;
+            cg.gc_enabled = prof.gc_enabled;
+        }
+    }
+    let c_src = cg.emit(program);
     let out_bin = std::env::temp_dir().join(format!(
         "mako_gotest_{}",
         file.file_stem().and_then(|s| s.to_str()).unwrap_or("prog")
@@ -2794,6 +2804,7 @@ fn compile_to_c_timed(file: &Path) -> Result<(String, f64), ()> {
                 Some(file.display().to_string()),
             );
             cg.bounds_checks_always = prof.bounds_checks_always;
+            cg.gc_enabled = prof.gc_enabled;
             if prof.source_file.is_some() {
                 cg.source_file = prof.source_file;
             }
@@ -2902,6 +2913,9 @@ fn compile_cflags(opts: &BuildOpts) -> Vec<String> {
     if find_zlib().is_some() {
         v.push("-DMAKO_HAS_ZLIB".into());
     }
+    if find_opencl().is_some() {
+        v.push("-DMAKO_HAS_OPENCL".into());
+    }
     if cc::classify_target(opts.target.as_deref()) == cc::OsKind::Linux
         && Path::new("/usr/include/crypt.h").exists()
     {
@@ -2924,6 +2938,11 @@ fn compile_cflags(opts: &BuildOpts) -> Vec<String> {
     }
     if let Some((inc, _)) = find_zlib() {
         v.push(format!("-I{}", inc.display()));
+    }
+    if let Some((inc, _)) = find_opencl() {
+        if !inc.as_os_str().is_empty() && inc != Path::new(".") {
+            v.push(format!("-I{}", inc.display()));
+        }
     }
     let _ = opts;
     v
@@ -3005,6 +3024,32 @@ fn link_args_native(opts: &BuildOpts, _runtime_dir: &Path) -> Vec<String> {
     if os == cc::OsKind::Linux && Path::new("/usr/include/crypt.h").exists() {
         args.push("-DMAKO_HAS_CRYPT".into());
         args.push("-lcrypt".into());
+    }
+    // OpenCL: multi-vendor GPU compute (NVIDIA / AMD / Intel ICD + macOS framework).
+    if let Some((inc, lib)) = find_opencl() {
+        args.push("-DMAKO_HAS_OPENCL".into());
+        if !inc.as_os_str().is_empty() && inc != Path::new(".") {
+            args.push(format!("-I{}", inc.display()));
+        }
+        match os {
+            cc::OsKind::Macos => {
+                args.push("-framework".into());
+                args.push("OpenCL".into());
+            }
+            cc::OsKind::Linux | cc::OsKind::Other => {
+                if let Some(l) = lib {
+                    args.push(format!("-L{}", l.display()));
+                }
+                args.push("-lOpenCL".into());
+            }
+            cc::OsKind::Windows => {
+                if let Some(l) = lib {
+                    args.push(format!("-L{}", l.display()));
+                }
+                args.push("-lOpenCL".into());
+            }
+            cc::OsKind::Wasm => {}
+        }
     }
     args
 }
@@ -3198,6 +3243,80 @@ fn find_sqlite() -> Option<(PathBuf, Option<PathBuf>)> {
     {
         if PathBuf::from("/usr/include/sqlite3.h").exists() {
             return Some((PathBuf::from("/usr/include"), None));
+        }
+        None
+    }
+}
+
+/// OpenCL for multi-vendor GPU compute (NVIDIA / AMD / Intel / Apple).
+/// Returns `(include_dir, lib_dir_opt)`. On macOS, lib is None (use `-framework OpenCL`).
+fn find_opencl() -> Option<(PathBuf, Option<PathBuf>)> {
+    // Explicit opt-out (CI / minimal containers).
+    if std::env::var_os("MAKO_NO_OPENCL").is_some() {
+        return None;
+    }
+    // macOS: system OpenCL framework (still ships; maps to Apple GPU).
+    #[cfg(target_os = "macos")]
+    {
+        // Header is provided by the SDK when linking the framework.
+        return Some((PathBuf::from("."), None));
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        // Homebrew / system ICD loaders
+        let candidates = [
+            PathBuf::from("/opt/homebrew/opt/opencl-headers"),
+            PathBuf::from("/usr/local/opt/opencl-headers"),
+            PathBuf::from("/opt/homebrew/opt/opencl-icd-loader"),
+            PathBuf::from("/usr/local/opt/opencl-icd-loader"),
+            PathBuf::from("/usr"),
+            PathBuf::from("/usr/local"),
+            PathBuf::from("/opt/cuda"),
+            PathBuf::from("/usr/local/cuda"),
+        ];
+        for base in candidates {
+            let inc = base.join("include");
+            if inc.join("CL/cl.h").exists() || inc.join("CL/opencl.h").exists() {
+                let lib = base.join("lib");
+                let lib64 = base.join("lib64");
+                let l = if lib64.exists() {
+                    Some(lib64)
+                } else if lib.exists() {
+                    Some(lib)
+                } else {
+                    None
+                };
+                return Some((inc, l));
+            }
+        }
+        if Path::new("/usr/include/CL/cl.h").exists() {
+            return Some((PathBuf::from("/usr/include"), Some(PathBuf::from("/usr/lib"))));
+        }
+        // pkg-config (ocl-icd, OpenCL-Headers)
+        for pkg in ["OpenCL", "OpenCL-Headers", "ocl-icd"] {
+            if let Ok(out) = Command::new("pkg-config")
+                .args(["--variable=includedir", pkg])
+                .output()
+            {
+                if out.status.success() {
+                    let inc = PathBuf::from(String::from_utf8_lossy(&out.stdout).trim());
+                    if inc.join("CL/cl.h").exists() || inc.join("CL/opencl.h").exists() {
+                        let mut lib = None;
+                        if let Ok(lout) = Command::new("pkg-config")
+                            .args(["--variable=libdir", pkg])
+                            .output()
+                        {
+                            if lout.status.success() {
+                                let lp = PathBuf::from(String::from_utf8_lossy(&lout.stdout).trim());
+                                if lp.exists() {
+                                    lib = Some(lp);
+                                }
+                            }
+                        }
+                        return Some((inc, lib));
+                    }
+                }
+            }
         }
         None
     }

@@ -1,0 +1,95 @@
+// Dual-stack IPv6 listen/connect + Happy Eyeballs helpers.
+
+fn TestTcpConnectLocalhostHe() {
+    // Happy Eyeballs path for "localhost" (may resolve A and/or AAAA)
+    let lfd = tcp_listen_addr("127.0.0.1", 18771)
+    if lfd < 0 {
+        return
+    }
+    tcp_set_he_delay_ms(50)
+    assert(tcp_get_he_delay_ms() == 50 || tcp_get_he_delay_ms() == 250)
+    let cli = tcp_connect_timeout("127.0.0.1", 18771, 5000)
+    assert(cli >= 0)
+    let srv = tcp_accept(lfd)
+    assert(srv >= 0)
+    assert_eq(tcp_write_all(cli, "he-ok"), 5)
+    assert_eq_str(tcp_read_n(srv, 5), "he-ok")
+    let _ = tcp_close(cli)
+    let _ = tcp_close(srv)
+    let _ = tcp_close(lfd)
+    tcp_set_he_delay_ms(250)
+}
+
+fn TestTcpListenIpv6Loopback() {
+    // Bind explicit IPv6 loopback when the OS supports it
+    let lfd = tcp_listen_addr("::1", 18772)
+    if lfd < 0 {
+        // IPv6 disabled — soft skip
+        return
+    }
+    let loc = tcp_local_addr(lfd)
+    assert(str_contains(loc, "18772"))
+    // Connect via IPv6 literal
+    let cli = tcp_connect_timeout("::1", 18772, 5000)
+    if cli < 0 {
+        let _ = tcp_close(lfd)
+        return
+    }
+    let srv = tcp_accept(lfd)
+    assert(srv >= 0)
+    let peer = tcp_peer_addr(srv)
+    // peer may be [::1]:port or ::1 style
+    assert(str_contains(peer, "1") || str_contains(peer, ":"))
+    assert_eq(tcp_write_all(cli, "v6"), 2)
+    assert_eq_str(tcp_read_n(srv, 2), "v6")
+    let _ = tcp_close(cli)
+    let _ = tcp_close(srv)
+    let _ = tcp_close(lfd)
+}
+
+fn TestUdpIpv6Loopback() {
+    let srv = udp_bind_addr("::1", 0)
+    if srv < 0 {
+        return
+    }
+    let port = udp_local_port(srv)
+    assert(port > 0)
+    let cli = udp_bind_addr("::1", 0)
+    if cli < 0 {
+        let _ = udp_close(srv)
+        return
+    }
+    let n = udp_send_to(cli, "::1", port, "u6")
+    if n < 0 {
+        let _ = udp_close(cli)
+        let _ = udp_close(srv)
+        return
+    }
+    let msg = udp_recv(srv, 64)
+    assert_eq_str(msg, "u6")
+    // sender host may be ::1
+    let h = udp_last_sender_host()
+    assert(len(h) > 0)
+    let _ = udp_close(cli)
+    let _ = udp_close(srv)
+}
+
+fn TestTcpConnectHostname() {
+    // getaddrinfo path (not dotted literal only)
+    let lfd = tcp_listen_addr("127.0.0.1", 18773)
+    if lfd < 0 {
+        return
+    }
+    let cli = tcp_connect("localhost", 18773)
+    // may fail if localhost is v6-only and we listen v4-only — soft
+    if cli >= 0 {
+        let srv = tcp_accept(lfd)
+        if srv >= 0 {
+            assert_eq(tcp_write_all(cli, "hn"), 2)
+            assert_eq_str(tcp_read_n(srv, 2), "hn")
+            let _ = tcp_close(srv)
+        }
+        let _ = tcp_close(cli)
+    }
+    let _ = tcp_close(lfd)
+}

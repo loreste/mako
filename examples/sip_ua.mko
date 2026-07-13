@@ -1,0 +1,49 @@
+// Minimal SIP user-agent sketch: build INVITE + 200 OK path + RTP pack.
+// Run: mako run examples/sip_ua.mko
+
+fn main() {
+    let local = "127.0.0.1"
+    let branch = sip_branch()
+    let tag = sip_tag()
+    let call_id = sip_call_id_new(local)
+    let cseq = sip_cseq_new()
+
+    let mut h = ""
+    h = sip_headers_append(h, "Via", sip_via_value("UDP", local, 5060, branch))
+    h = sip_headers_append(h, "From", sip_from_value("Alice", "sip:alice@example.com", tag))
+    h = sip_headers_append(h, "To", sip_to_value("Bob", "sip:bob@example.com", ""))
+    h = sip_headers_append(h, "Call-ID", call_id)
+    h = sip_headers_append(h, "CSeq", sip_cseq_value(cseq, "INVITE"))
+    h = sip_headers_append(h, "Contact", sip_contact_value(sip_uri_build("alice", local, 5060)))
+    h = sip_headers_append(h, "Max-Forwards", "70")
+    h = sip_headers_append(h, "Content-Type", "application/sdp")
+
+    let sdp = sdp_build_audio("alice", "mako-call", local, 40000, "0 8")
+    let invite = sip_request("INVITE", "sip:bob@example.com", h, sdp)
+
+    print("=== INVITE ===")
+    print(invite)
+    print("method=")
+    print(sip_method(invite))
+    print("uri=")
+    print(sip_request_uri(invite))
+    print("media port=")
+    print_int(sdp_media_port(sip_body(invite), 0))
+
+    let ringing = sip_reply(invite, 180, "Ringing", "", "")
+    print("=== 180 ===")
+    print_int(sip_status_code(ringing))
+
+    let ok = sip_reply(invite, 200, "OK",
+        sip_headers_append("", "Contact", sip_contact_value("sip:bob@127.0.0.1:5060")),
+        sdp_build_audio("bob", "mako-call", local, 40002, "0 8"))
+    print("=== 200 OK ===")
+    print_int(sip_status_code(ok))
+    print(sdp_connection_addr(sip_body(ok)))
+
+    let pkt = rtp_pack(0, 1, 160, 2882400001, 0, "G711payload")
+    print("RTP seq=")
+    print_int(rtp_seq(pkt))
+    print("RTP ssrc=")
+    print_int(rtp_ssrc(pkt))
+}

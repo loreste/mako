@@ -1957,14 +1957,15 @@ Supported: literals, `.`, `X*`/`X+`/`X?`, `|`, `[abc]`/`[a-z]`/`[^...]`,
 
 | Function            | Description                             |
 |---------------------|-----------------------------------------|
-| `uuid_v4()`         | Generate random UUID v4                 |
-| `uuid_string(u)`    | Format as canonical string (36 chars)   |
-| `uuid_parse(s)`     | Parse string to UUID (nil on failure)   |
-| `uuid_parse_ok(s)`  | Check if string is valid UUID           |
-| `uuid_eq(a, b)`     | Compare two UUIDs                       |
-| `uuid_is_nil(u)`    | Check if UUID is nil                    |
-| `uuid_nil()`        | Return nil UUID                         |
-| `uuid_check(s)`     | Parse with `Result[int, string]`        |
+| `uuid_v4()` / `uuid_v7()` / `uuid_v5(ns, name)` | Random / time-ordered / name-based |
+| `uuid_string` / `uuid_string_upper` / `uuid_urn` | Format |
+| `uuid_parse` / `uuid_parse_ok` / `uuid_check` | Parse (canonical, braces, URN, 32-hex) |
+| `uuid_bytes` / `uuid_from_bytes` | Raw 16 bytes (hard-fail length on from) |
+| `uuid_eq` / `uuid_cmp` / `uuid_version` / `uuid_variant` / `uuid_is_nil` / `uuid_nil` | Inspect |
+| `uuid_ns_dns` / `url` / `oid` / `x500` | Standard namespaces |
+| `ulid_new` / `ulid_string` / `ulid_parse` / `ulid_timestamp_ms` | ULID (same 16-byte POD) |
+
+`Uuid` is **Copy** (free re-read / Send across `kick`).
 
 ### 10.13 Assertions and Testing
 
@@ -2017,8 +2018,10 @@ Supported: literals, `.`, `X*`/`X+`/`X?`, `|`, `[abc]`/`[a-z]`/`[^...]`,
 
 #### WebSocket
 
-RFC 6455 upgrade, text frames, ping/pong, and binary frames are supported
-through built-in functions.
+RFC 6455 client and server: HTTP upgrade, masked client frames, unmasked server
+frames, text/binary/ping/pong/close, extended lengths (cap 16 MiB), fragment
+reassembly, auto-pong, and close codes via `ws_*` builtins (see
+[docs/BUILTINS.md](docs/BUILTINS.md) § WebSocket).
 
 ### 10.15 JSON
 
@@ -2508,7 +2511,8 @@ version string. Use `mako version -v` for an optional commit hash line.
 The following features are planned but not yet part of the specification:
 
 - Colored `async`/`await` (currently not needed; runtime handles I/O)
-- SIMD / GPU intrinsics
+- SIMD vector types / ISA intrinsics
+- GPU backends beyond OpenCL seed (`gpu_*` + OpenCL multi-vendor + host; Metal-native/CUDA/Vulkan later)
 - Full PCRE-compatible regular expressions
 - WASI preview 2 / component model
 - Optional garbage collector (never weakens ownership in systems crates)

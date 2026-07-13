@@ -1,0 +1,120 @@
+// Multi-row result sets: cursor walk + bulk first-column helpers.
+
+fn TestSqlRowsCursor() {
+    let db = sql_open_sqlite(":memory:")
+    assert_eq(sql_ok(db), 1)
+
+    let rc = sql_exec_plain(db,
+        "CREATE TABLE items (id INTEGER PRIMARY KEY, name TEXT, qty INTEGER)")
+    if rc != 0 {
+        assert_eq(rc, -1)
+        let _ = sql_close(db)
+        return
+    }
+
+    let _ = sql_exec_str4(db, "INSERT INTO items (name, qty) VALUES (?, ?)", "apple", "3", "", "")
+    let _ = sql_exec_str4(db, "INSERT INTO items (name, qty) VALUES (?, ?)", "banana", "5", "", "")
+    let _ = sql_exec_str4(db, "INSERT INTO items (name, qty) VALUES (?, ?)", "cherry", "2", "", "")
+
+    let empty = make([]int, 0)
+    let rows = sql_query_rows(db, "SELECT id, name, qty FROM items ORDER BY id", empty)
+    assert(rows > 0)
+    assert_eq(sql_rows_ok(rows), 1)
+    assert(sql_rows_cols(rows) >= 3)
+
+    let mut n = 0
+    let mut sum_qty = 0
+    while sql_rows_next(rows) == 1 {
+        let id = sql_rows_int(rows, 0)
+        let name = sql_rows_str(rows, 1)
+        let qty = sql_rows_int(rows, 2)
+        assert(id >= 1)
+        assert(len(name) > 0)
+        sum_qty = sum_qty + qty
+        n = n + 1
+    }
+    assert_eq(n, 3)
+    assert_eq(sum_qty, 10)
+    assert_eq(sql_rows_next(rows), 0)
+    assert_eq(sql_rows_close(rows), 1)
+    assert_eq(sql_rows_close(rows), 0)
+
+    let _ = sql_close(db)
+}
+
+fn TestSqlRowsStrFilter() {
+    let db = sql_open_sqlite(":memory:")
+    assert_eq(sql_ok(db), 1)
+
+    let rc = sql_exec_plain(db, "CREATE TABLE tags (k TEXT, v TEXT)")
+    if rc != 0 {
+        assert_eq(rc, -1)
+        let _ = sql_close(db)
+        return
+    }
+
+    let _ = sql_exec_str4(db, "INSERT INTO tags (k, v) VALUES (?, ?)", "color", "red", "", "")
+    let _ = sql_exec_str4(db, "INSERT INTO tags (k, v) VALUES (?, ?)", "color", "blue", "", "")
+    let _ = sql_exec_str4(db, "INSERT INTO tags (k, v) VALUES (?, ?)", "size", "L", "", "")
+
+    let rows = sql_query_rows_str(db, "SELECT v FROM tags WHERE k = ? ORDER BY v", "color")
+    assert(rows > 0)
+
+    let mut n = 0
+    while sql_rows_next(rows) == 1 {
+        let v = sql_rows_str(rows, 0)
+        assert(len(v) > 0)
+        n = n + 1
+    }
+    assert_eq(n, 2)
+    assert_eq(sql_rows_close(rows), 1)
+
+    let none = sql_query_rows_str(db, "SELECT v FROM tags WHERE k = ?", "missing")
+    assert(none > 0)
+    assert_eq(sql_rows_next(none), 0)
+    assert_eq(sql_rows_close(none), 1)
+
+    let _ = sql_close(db)
+}
+
+fn TestSqlQueryColBulk() {
+    let db = sql_open_sqlite(":memory:")
+    assert_eq(sql_ok(db), 1)
+
+    let rc = sql_exec_plain(db, "CREATE TABLE nums (n INTEGER)")
+    if rc != 0 {
+        assert_eq(rc, -1)
+        let _ = sql_close(db)
+        return
+    }
+
+    let empty = make([]int, 0)
+    let _ = sql_exec(db, "INSERT INTO nums (n) VALUES (10)", empty)
+    let _ = sql_exec(db, "INSERT INTO nums (n) VALUES (20)", empty)
+    let _ = sql_exec(db, "INSERT INTO nums (n) VALUES (30)", empty)
+
+    let ints = sql_query_col_int(db, "SELECT n FROM nums ORDER BY n", 100)
+    assert_eq(len(ints), 3)
+    assert_eq(ints[0], 10)
+    assert_eq(ints[1], 20)
+    assert_eq(ints[2], 30)
+
+    let _ = sql_exec_str4(db, "INSERT INTO nums (n) VALUES (?)", "0", "", "", "")
+    // string bulk from text column
+    let _ = sql_exec_plain(db, "CREATE TABLE words (w TEXT)")
+    let _ = sql_exec_str4(db, "INSERT INTO words (w) VALUES (?)", "hi", "", "", "")
+    let _ = sql_exec_str4(db, "INSERT INTO words (w) VALUES (?)", "yo", "", "", "")
+    let strs = sql_query_col_str(db, "SELECT w FROM words ORDER BY w", 100)
+    assert_eq(len(strs), 2)
+    assert_eq_str(strs[0], "hi")
+    assert_eq_str(strs[1], "yo")
+
+    // invalid handle
+    assert_eq(sql_rows_ok(0), 0)
+    assert_eq(sql_rows_next(0), -1)
+    assert_eq(sql_rows_int(0, 0), 0)
+    assert_eq_str(sql_rows_str(0, 0), "")
+    assert_eq(sql_rows_cols(0), 0)
+
+    let _ = sql_close(db)
+}

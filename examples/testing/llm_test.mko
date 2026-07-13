@@ -1,0 +1,150 @@
+// LLM programming surface — offline unit tests (no live network required).
+
+fn TestLlmMessageAndBody() {
+    let m = llm_message("user", "hello \"world\"")
+    assert(str_contains(m, "\"role\":\"user\""))
+    assert(str_contains(m, "hello"))
+    let arr = llm_messages_append("[]", m)
+    assert(str_contains(arr, "["))
+    assert(str_contains(arr, "user"))
+    let m2 = llm_message("assistant", "hi")
+    let arr2 = llm_messages_append(arr, m2)
+    assert(str_contains(arr2, "assistant"))
+    let body = llm_chat_body("grok-4.5", arr2, 0)
+    assert(str_contains(body, "\"model\":\"grok-4.5\""))
+    assert(str_contains(body, "\"stream\":false"))
+    let stream_body = llm_chat_body("grok-4.5", arr2, 1)
+    assert(str_contains(stream_body, "\"stream\":true"))
+}
+
+fn TestLlmSystemUserAndTools() {
+    let body = llm_system_user("grok-4.5", "be brief", "say hi")
+    assert(str_contains(body, "system"))
+    assert(str_contains(body, "be brief"))
+    assert(str_contains(body, "say hi"))
+    let tools = "[{\"type\":\"function\",\"function\":{\"name\":\"get_time\"}}]"
+    let with_tools = llm_body_with_tools(body, tools)
+    assert(str_contains(with_tools, "\"tools\":"))
+    assert(str_contains(with_tools, "get_time"))
+}
+
+fn TestLlmContentAndUsage() {
+    let resp = "{\"id\":\"1\",\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"Hello\\nworld\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":3,\"total_tokens\":13}}"
+    assert_eq_str(llm_content(resp), "Hello\nworld")
+    assert_eq_str(llm_finish_reason(resp), "stop")
+    assert_eq(llm_usage_prompt_tokens(resp), 10)
+    assert_eq(llm_usage_completion_tokens(resp), 3)
+    assert_eq(llm_usage_total_tokens(resp), 13)
+}
+
+fn TestLlmToolCalls() {
+    let resp = "{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":null,\"tool_calls\":[{\"id\":\"c1\",\"type\":\"function\",\"function\":{\"name\":\"lookup\",\"arguments\":\"{\\\"q\\\":\\\"x\\\"}\"}},{\"id\":\"c2\",\"type\":\"function\",\"function\":{\"name\":\"save\",\"arguments\":\"{}\"}}]}}]}"
+    assert_eq(llm_tool_call_count(resp), 2)
+    assert_eq_str(llm_tool_call_name(resp, 0), "lookup")
+    assert_eq_str(llm_tool_call_name(resp, 1), "save")
+    assert(str_contains(llm_tool_call_args(resp, 0), "q"))
+}
+
+fn TestLlmSseStream() {
+    let line = "data: {\"choices\":[{\"delta\":{\"content\":\"Hi\"}}]}"
+    let payload = llm_sse_data(line)
+    assert(str_contains(payload, "delta"))
+    assert_eq_str(llm_sse_delta(payload), "Hi")
+    let done = llm_sse_data("data: [DONE]")
+    assert_eq_str(done, "")
+    let acc = llm_stream_append("", "Hel")
+    let acc2 = llm_stream_append(acc, "lo")
+    assert_eq_str(acc2, "Hello")
+}
+
+fn TestLlmJsonExtract() {
+    let fenced = "Sure!\n```json\n{\"ok\":true,\"n\":1}\n```\n"
+    let j = llm_json_extract(fenced)
+    assert(str_contains(j, "\"ok\":true"))
+    let bare = "prefix {\"a\":1} suffix"
+    let j2 = llm_json_extract(bare)
+    assert_eq_str(j2, "{\"a\":1}")
+}
+
+fn TestLlmTokensRetryRedact() {
+    assert_eq(llm_estimate_tokens("abcd"), 1)
+    assert_eq(llm_estimate_tokens("abcdefgh"), 2)
+    assert_eq(llm_retry_delay_ms(0, 100, 1000), 100)
+    assert_eq(llm_retry_delay_ms(1, 100, 1000), 200)
+    assert_eq(llm_retry_delay_ms(10, 100, 1000), 1000)
+    let red = llm_redact_key("sk-abcdefghijklmnop")
+    assert(str_contains(red, "sk-a"))
+    assert(not str_contains(red, "efghijklmnop"))
+}
+
+fn TestLlmConfigHelpers() {
+    // Env-backed; may be empty without keys.
+    let base = llm_base_url()
+    assert(str_len(base) > 0)
+    let model = llm_default_model()
+    assert(str_len(model) > 0)
+    let _ = llm_api_key()
+    let av = llm_https_available()
+    assert(av == 0 || av == 1)
+}
+
+fn TestLlmErrorsAndRetry() {
+    let ok = "{\"choices\":[{\"message\":{\"content\":\"hi\"}}]}"
+    assert_eq(llm_is_error(ok), 0)
+    assert_eq(llm_should_retry(ok), 0)
+
+    let err = "{\"error\":\"missing_api_key\"}"
+    assert_eq(llm_is_error(err), 1)
+    assert_eq_str(llm_error_message(err), "missing_api_key")
+
+    let nested = "{\"error\":{\"message\":\"rate_limit exceeded\",\"type\":\"x\"}}"
+    assert_eq(llm_is_error(nested), 1)
+    assert(str_contains(llm_error_message(nested), "rate_limit"))
+
+    let rl = "{\"error\":\"http_429\"}"
+    assert_eq(llm_should_retry(rl), 1)
+    let conn = "{\"error\":\"connect\"}"
+    assert_eq(llm_should_retry(conn), 1)
+}
+
+fn TestLlmBodyForceStream() {
+    let body = llm_chat_body("m", "[]", 0)
+    assert(str_contains(body, "\"stream\":false"))
+    let s = llm_body_force_stream(body)
+    assert(str_contains(s, "\"stream\":true"))
+    assert(not str_contains(s, "\"stream\":false"))
+    let already = llm_chat_body("m", "[]", 1)
+    let s2 = llm_body_force_stream(already)
+    assert(str_contains(s2, "\"stream\":true"))
+}
+
+fn TestLlmEmbeddingsParse() {
+    let body = llm_embed_body("text-embedding", "hello")
+    assert(str_contains(body, "\"model\":\"text-embedding\""))
+    assert(str_contains(body, "\"input\":\"hello\""))
+
+    let resp = "{\"object\":\"list\",\"data\":[{\"embedding\":[0.1,-0.2,0.3,1e-3],\"index\":0}],\"usage\":{\"prompt_tokens\":1}}"
+    assert_eq(llm_embedding_dim(resp), 4)
+    let arr = llm_embedding_json(resp)
+    assert(str_contains(arr, "0.1"))
+    assert(str_contains(arr, "-0.2"))
+    assert(str_contains(arr, "["))
+    assert(str_contains(arr, "]"))
+
+    let empty = "{}"
+    assert_eq(llm_embedding_dim(empty), 0)
+    assert_eq_str(llm_embedding_json(empty), "[]")
+}
+
+fn TestLlmStreamOfflineAccumulate() {
+    // Stream path offline: parse SSE lines the same way chat_stream does
+    let l1 = "data: {\"choices\":[{\"delta\":{\"content\":\"Hel\"}}]}"
+    let l2 = "data: {\"choices\":[{\"delta\":{\"content\":\"lo\"}}]}"
+    let acc = llm_stream_append("", llm_sse_delta(llm_sse_data(l1)))
+    let acc2 = llm_stream_append(acc, llm_sse_delta(llm_sse_data(l2)))
+    assert_eq_str(acc2, "Hello")
+    // Synthetic response shape from stream
+    let synth = "{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"Hello\"},\"finish_reason\":\"stop\"}]}"
+    assert_eq_str(llm_content(synth), "Hello")
+    assert_eq(llm_is_error(synth), 0)
+}

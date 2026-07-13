@@ -1,0 +1,195 @@
+// Wave 40/41 — language residuals: Send/race, nested patterns, struct patterns,
+// reflect non-POD, baseline JPEG Huffman, unicode, Ok(Some) non-generic, exotic ?.
+
+fn use_opt(o: Option[int]) -> int {
+    match o {
+        Some(v) => v,
+        None => 0,
+    }
+}
+
+fn use_res(r: Result[int, string]) -> int {
+    match r {
+        Ok(v) => v,
+        Err(_) => -1,
+    }
+}
+
+// Non-generic Result[Option[int]] — param metadata enables Ok(Some(v)) codegen.
+fn nested_ok_some_nongeneric(r: Result[Option[int], string]) -> int {
+    match r {
+        Ok(Some(v)) => v,
+        Ok(None) => 0,
+        Err(_) => -1,
+    }
+}
+
+fn make_nested_nongeneric(code: int) -> Result[Option[int], string] {
+    if code == 0 {
+        return Ok(Some(11))
+    }
+    if code == 1 {
+        return Ok(None)
+    }
+    return Err("x")
+}
+
+// Exotic `?`: Option? in Result-returning fn.
+fn opt_src(ok: int) -> Option[int] {
+    if ok != 0 {
+        return Some(ok)
+    }
+    return None
+}
+
+fn peel_opt_to_result(ok: int) -> Result[int, string] {
+    let v = opt_src(ok)?
+    return Ok(v)
+}
+
+// Exotic `?`: Result? in Option-returning fn.
+fn res_src(ok: int) -> Result[int, string] {
+    if ok != 0 {
+        return Ok(ok)
+    }
+    return Err("no")
+}
+
+fn peel_res_to_option(ok: int) -> Option[int] {
+    let v = res_src(ok)?
+    return Some(v)
+}
+
+fn TestKickOptionSendable() {
+    let o: Option[int] = Some(7)
+    crew t {
+        let j = t.kick(use_opt(o))
+        assert_eq(j.join(), 7)
+    }
+}
+
+fn TestKickResultSendable() {
+    let r: Result[int, string] = Ok(9)
+    crew t {
+        let j = t.kick(use_res(r))
+        assert_eq(j.join(), 9)
+    }
+}
+
+// Generic Result[Option[T]] — ok_kind metadata monomorphized (wave18 pattern).
+fn nest_ok[T](x: T) -> Result[Option[T], string] {
+    return Ok(Some(x))
+}
+
+fn TestNestedResultOption() {
+    match nest_ok(9) {
+        Ok(o) => match o {
+            Some(v) => assert_eq(v, 9),
+            None => assert(false),
+        },
+        Err(_) => assert(false),
+    }
+}
+
+fn TestOptionPatternBindings() {
+    match Some(4) {
+        Some(v) => assert_eq(v + 1, 5),
+        None => assert(false),
+    }
+    let n: Option[int] = None
+    match n {
+        Some(_) => assert(false),
+        None => assert(true),
+    }
+}
+
+struct Point {
+    x: int
+    y: int
+}
+
+fn sum_point(p: Point) -> int {
+    match p {
+        Point { x, y } => x + y,
+    }
+}
+
+fn TestStructPattern() {
+    assert_eq(sum_point(Point { x: 2, y: 5 }), 7)
+    assert_eq(sum_point(Point { x: 0, y: 0 }), 0)
+}
+
+struct WrapOpt {
+    o: Option[int]
+    t: int
+}
+
+fn TestReflectOptionField() {
+    let w = WrapOpt { o: Some(1), t: 2 }
+    let rv = reflect_value_of(w)
+    assert(reflect_value_num_fields(rv) >= 1)
+}
+
+fn TestJpegBaselineHuff() {
+    let mut gray = ""
+    let mut i = 0
+    while i < 64 {
+        gray = gray + "A"
+        i = i + 1
+    }
+    let j = jpeg_encode_gray_baseline(8, 8, gray)
+    assert(len(j) > 100)
+    assert_eq(jpeg_is_baseline_huff(j), 1)
+    assert_eq(jpeg_has_sof0(j), 1)
+}
+
+fn TestUnicodeLuLl() {
+    assert(regex_match("\\p{Lu}+", "ABC"))
+    assert(not regex_match("\\p{Lu}+", "abc"))
+    assert(regex_match("\\p{Ll}+", "abc"))
+    assert(not regex_match("\\p{Ll}+", "ABC"))
+    assert(regex_match("\\p{ASCII}+", "Hi!"))
+    assert(regex_match("\\p{Any}+", "x"))
+    assert(regex_match("\\P{Ll}+", "ABC"))
+    assert(not regex_match("\\P{Ll}+", "abc"))
+    assert(regex_match("\\X+", "Hi"))
+    assert(regex_match("\\p{Alnum}+", "A1"))
+    assert(regex_match("\\p{Word}+", "a_1"))
+}
+
+fn TestNongenericOkSome() {
+    assert_eq(nested_ok_some_nongeneric(make_nested_nongeneric(0)), 11)
+    assert_eq(nested_ok_some_nongeneric(make_nested_nongeneric(1)), 0)
+    assert_eq(nested_ok_some_nongeneric(make_nested_nongeneric(2)), -1)
+}
+
+fn TestExoticTryOptionInResult() {
+    match peel_opt_to_result(7) {
+        Ok(v) => assert_eq(v, 7),
+        Err(_) => assert(false),
+    }
+    match peel_opt_to_result(0) {
+        Ok(_) => assert(false),
+        Err(msg) => assert_eq_str(msg, "None"),
+    }
+}
+
+fn TestExoticTryResultInOption() {
+    match peel_res_to_option(5) {
+        Some(v) => assert_eq(v, 5),
+        None => assert(false),
+    }
+    match peel_res_to_option(0) {
+        Some(_) => assert(false),
+        None => assert(true),
+    }
+}
+
+fn TestDeepPodKick() {
+    // POD struct is sendable (deep Send model includes nested POD fields).
+    let p = Point { x: 1, y: 2 }
+    crew t {
+        let j = t.kick(sum_point(p))
+        assert_eq(j.join(), 3)
+    }
+}

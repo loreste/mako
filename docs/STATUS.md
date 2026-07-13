@@ -89,8 +89,42 @@ Last inventory: 2026-07-11 (**unique Mako surface** · pack/pull · pain map · 
 | Nonblocking connect + fd splice/copy | Done — `tcp_connect_nb` / `tcp_fd_copy` / `tcp_splice` |
 | Socket tuning (`reuseport`, buffers, `accept4`) | Done |
 | Async TLS accept (`tls_accept_start` / handshake step) | Done — event-loop friendly surface |
-| HTTP/2 stream multiplexing (ready queue, 32 slots) | Done — `http2_next_ready_stream` / `stream_take` / `stream_body` |
+| HTTP/2 stream multiplexing (ready queue, 64 slots) | Done — `http2_next_ready_stream` / `stream_take` / `stream_body` |
+| HTTP/2 hardened path (dual FC, SETTINGS, auto WU, PADDED, overflow hard-fail) | Done — `http2_conn_*` · `examples/testing/http2_prod_test.mko` |
+| HTTP/2 TLS one-shot (`tls_serve_h2_routes`) | Demo/smoke only — production path is `tls_server_new` + `http2_conn_*` |
 | HTTP/3 server surface (UDP bind/poll/stream) | Done — `h3_server_*` (quiche when linked) |
+| HTTP/3 hardened path (64 KiB bodies, no silent truncate, accessors, `h3_response`) | Done — `examples/h3_server.mko` · `h3_server_test.mko` · smoke |
+| FS / storage production (`atomic_write`, `mkdir_all`, `remove_all`, dio CLOEXEC, mmap) | Done — `examples/testing/fs_storage_test.mko` |
+| Low-level networking (peer/local addr, UDP sender, write_all/read_n, shutdown, CLOEXEC) | Done — `examples/testing/net_lowlevel_test.mko` |
+| IPv6 dual-stack listen/connect + Happy Eyeballs `tcp_connect` | Done — `examples/testing/net_ipv6_he_test.mko` |
+| Low-latency clocks (`mono_*` / deadlines / sleep_ns / spin_until) | Done — `examples/testing/time_latency_test.mko` |
+| LLM programming (chat/tools/SSE/JSON extract, OpenAI-compatible HTTPS) | Done — `examples/testing/llm_test.mko` · `examples/llm_chat.mko` |
+| LLM stream transport + embeddings + error/retry helpers | Done — `llm_chat_stream` / `llm_embed*` / `llm_is_error` / `llm_chat_retry` |
+| SQL string params + last_insert_id / rows_affected (SQLite + Postgres) | Done — `examples/testing/sql_programming_test.mko` |
+| SQL multi-row cursor + bulk first-column (`sql_query_rows*`, `sql_query_col_*`) | Done — `examples/testing/sql_rows_test.mko` |
+| SIP/SDP/RTP platform (parse/build; build stacks in Mako — not a softswitch) | Done — `examples/testing/sip_test.mko` · `examples/sip_ua.mko` · `std/sip` |
+| SRTP crypto building blocks (`aes_ctr`, `hmac_sha1` / `hmac_sha1_raw`) | Done — `examples/testing/crypto_srtp_blocks_test.mko` (HMAC RFC 2202) |
+| TLS client socket API (`tls_client_new` / `tls_connect` + SNI/VERIFY_PEER) | Done — `examples/testing/security_crypto_test.mko` |
+| Secrets helpers (`secret_len` / `secret_eq_str`) + HKDF-SHA256 | Done — RFC 5869 A.1 vector; `security_crypto_test.mko` |
+| Strong structured logging (JSON/logfmt, levels, multi-field, file, redaction) | Done — `examples/testing/strong_log_test.mko` · `runtime/mako_log.h` |
+| WebSocket RFC 6455 (client/server frames, mask, frag, ping/pong, close codes) | Done — `runtime/mako_ws.h` · `examples/testing/ws_api_test.mko` |
+| GPU AI seed (OpenCL multi-vendor + host; matmul/relu/bias/softmax f32) | Done — `runtime/mako_gpu.h` · `gpu_seed_test.mko` (NVIDIA/AMD/Intel/Apple) |
+| Local models (safetensors load, .makomodel, author MLP, linear HF layout) | Done — `runtime/mako_model.h` · `model_weights_test.mko` · `examples/model_mlp.mko` |
+| GGUF F32/F16 load + attention/LN/GELU/SiLU + vocab tokenizer | Done — `model_load_gguf`, `gpu_attention_f32`, `tok_*` · `ai_depth_test.mko` |
+| Multi-head attention + GGUF Q4_0/Q8_0 dequant + BPE tokenizer | Done — `gpu_mha_f32`, quant GGUF, `tok_encode_bpe` · `ai_depth_test.mko` |
+| Email / SMTP (MIME builder, session, STARTTLS, AUTH PLAIN, mock e2e) | Done — `mako_mail.h` · `mail_smtp_test.mko` · `examples/mail_program.mko` |
+| Go-style templates (if/range/with/define, HTML escape) | Done — `mako_template.h` · `template_test.mko` · `examples/template_demo.mko` |
+| fmt / print packages (Sprintf/Print/Errorf, multi-arg) | Done — `mako_fmt.h` · `std/fmt` · `std/print` · `fmt_print_test.mko` |
+| Hex/dec/bin/oct format + parse (bases 2–36, %#x/%08x) | Done — `format_int_*` / `parse_int_*` · `fmt_print_test.mko` |
+| Language residuals wave 40 (deep Send/race, NLL, patterns, stability, GC, reflect, JPEG baseline, Unicode) | Done — `lang_residuals_test.mko` · `nll_multi_label_test.mko` · `api_stable_test.mko` |
+| Language residuals wave 41 (Ok(Some) non-generic, exotic `?`, race stack, tracing GC, UCD/PCRE depth) | Done — `lang_residuals_test.mko` · `gc_app/gc_trace_test.mko` |
+| UUID v4/v5/v7 + ULID (Copy POD, kick/Send, parse polish) | Done — `runtime/mako_uuid.h` · `uuid_test.mko` · `std/uuid` |
+| Speed gate vs Rust (fib/slice/map ≤2×) | PASS — `./scripts/bench-gate.sh` |
+| Speed audit: release no longer forces bounds-always; empty str singleton; map 75% load | Done — see PERFORMANCE.md |
+| Map set_take (no string-key clone) + HTTP zero-copy views into raw | Done — `map_take_http_test.mko` |
+| Header/Content-Type interning + `respond_json` static CT | Done — runtime `mako_http_intern_*` |
+| `chan_str_send_take` / `try_send_take` (no string clone) | Done — `chan_string_test.mko` |
+| Proxy splice polish (256 KiB + sendfile file→socket) | Done — `mako_proxy.h` `tcp_fd_copy` |
 | Proxy edge cases (headers, chunked, 204/304, pool release latency) | Done — `examples/testing/proxy_edge_test.mko`; docs in BUILTINS *Reverse-proxy notes* |
 | Checked integer overflow (`--overflow trap`, `checked_*`, `would_overflow_{add,sub,mul}`) | Done — full wire types+codegen+runtime; `overflow_shutdown_test.mko` |
 | Parser multi-error recovery | Done — `parse_with_errors` keeps following good decls (unit test); `examples/bad/multi_error.mko` |
@@ -182,18 +216,20 @@ Result/Option reject · script/category `\p{…}` · expanded TSan · prior work
 **Wave 39 tests:** `examples/testing/wave39_queue_test.mko` · bad
 `try_slice_in_void`.
 
-**Pain residuals (language) still open:** see [PAIN_POINTS.md](PAIN_POINTS.md) §4.
+**Pain residuals (language) — Wave 40 close:** see [PAIN_POINTS.md](PAIN_POINTS.md).
 
-1. Fuller data-race model beyond expanded TSan smoke (no full type-level race system)  
-2. More Result/Option shapes (remaining edge cases; `?` slice/map wired)  
-3. Stronger NLL (rarer multi-label CFG products)  
+1. **Fuller data-race model** — deep Send + Sync; per-kick race stack; mut Option/Result/tuple/enum/array/map captures until join; field/index writes checked; TSan opt-in (`--race`)  
+2. **Result/Option edge shapes** — non-generic `Ok(Some(v))`; exotic `?` cross (Option→Result Err("None"), Result→Option None); generic nests (wave18+)  
+3. **Stronger NLL multi-label** — const-fold + multi-label break products  
 
-**Stdlib / product residuals:**
+**Stdlib / product (wave 40–41):**
 
-6. Complete Unicode property database / full PCRE (script + category seeds growing)  
-7. Huffman JPEG bitstream readable by arbitrary viewers (mako APP7 layout + roundtrip; not viewer Huffman)  
-8. Reflect for non-POD fields (maps/slices/chan/Option/Result/nested map·slice·Option·Result rejected; nested POD done)  
-9. Symbol-level parity inside Done packages
+6. Unicode **Lu/Ll/Lo/ASCII/Any/Assigned/Alnum/Word/…** + `\P`/`\X`/`\h`/`\R`/`\N` — full UCD still not claimed  
+7. **Viewer Huffman JPEG** — `jpeg_encode_gray_baseline` / `jpeg_is_baseline_huff`  
+8. **Reflect non-POD** — Option/Result/array/map fields (chan still rejected)  
+9. Symbol-level parity inside Done packages  
+
+**Also:** `#[stable]` / `#[deprecated]`; optional **tracing GC** (`gc_root`/`gc_link`/`gc_collect`, `[package] gc = true`).
 
 ---
 

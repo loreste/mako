@@ -26,7 +26,7 @@
 extern "C" {
 #endif
 
-/* ---- Logging (trace id when mako_trace.h is included first) ---- */
+/* ---- Logging (strong path when mako_log.h included; else simple stderr) ---- */
 static inline void mako_log_write_trace_field(void) {
 #if defined(MAKO_TRACE_H)
     MakoString tid = mako_trace_current();
@@ -38,24 +38,36 @@ static inline void mako_log_write_trace_field(void) {
 }
 
 static inline void mako_log_info(MakoString msg) {
+#if defined(MAKO_LOG_H)
+    mako_slog_info(msg);
+#else
     fprintf(stderr, "[%lld info] ", (long long)mako_now_ms());
     mako_log_write_trace_field();
     fwrite(msg.data, 1, msg.len, stderr);
     fputc('\n', stderr);
+#endif
 }
 
 static inline void mako_log_warn(MakoString msg) {
+#if defined(MAKO_LOG_H)
+    mako_slog_warn(msg);
+#else
     fprintf(stderr, "[%lld warn] ", (long long)mako_now_ms());
     mako_log_write_trace_field();
     fwrite(msg.data, 1, msg.len, stderr);
     fputc('\n', stderr);
+#endif
 }
 
 static inline void mako_log_error(MakoString msg) {
+#if defined(MAKO_LOG_H)
+    mako_slog_error(msg);
+#else
     fprintf(stderr, "[%lld error] ", (long long)mako_now_ms());
     mako_log_write_trace_field();
     fwrite(msg.data, 1, msg.len, stderr);
     fputc('\n', stderr);
+#endif
 }
 
 /* ---- Backend validation helpers ---- */
@@ -1342,6 +1354,7 @@ static inline MakoString mako_lb_pick3(MakoString a, MakoString b, MakoString c,
     return (MakoString){d, chosen.len};
 }
 
+#if !defined(MAKO_LOG_H)
 static inline MakoString mako_slog_redact(MakoString value) {
     (void)value;
     return mako_str_from_cstr("[REDACTED]");
@@ -1350,6 +1363,7 @@ static inline MakoString mako_slog_redact(MakoString value) {
 static inline void mako_slog_with_redacted(MakoString level, MakoString msg, MakoString key) {
     mako_slog_with(level, msg, key, mako_str_from_cstr("[REDACTED]"));
 }
+#endif
 
 /* ---- Metrics (process-local counters/gauges/histograms) ---- */
 static int64_t mako_metric_counters[64];
@@ -2364,6 +2378,73 @@ static inline MakoString mako_hmac_sha256_raw(MakoString key, MakoString msg) {
     }
 }
 
+/* HKDF-SHA256 (RFC 5869) extract+expand — protocol keying for Mako apps.
+ * Empty salt uses HashLen zeros. out_len capped at 255*32. */
+static inline MakoString mako_hkdf_sha256(
+    MakoString ikm, MakoString salt, MakoString info, int64_t out_len
+) {
+    if (out_len <= 0) return mako_str_from_cstr("");
+    if (out_len > 255 * 32) out_len = 255 * 32;
+    unsigned char zero_salt[32];
+    memset(zero_salt, 0, sizeof(zero_salt));
+    MakoString salt_s = salt;
+    if (!salt.data || salt.len == 0) {
+        salt_s = (MakoString){(char *)zero_salt, 32};
+    }
+    MakoString prk = mako_hmac_sha256_raw(salt_s, ikm);
+    if (!prk.data || prk.len == 0) {
+        free(prk.data);
+        return mako_str_from_cstr("");
+    }
+    size_t n = (size_t)out_len;
+    size_t nblocks = (n + 31) / 32;
+    char *out = (char *)malloc(n + 1);
+    if (!out) {
+        free(prk.data);
+        return mako_str_from_cstr("");
+    }
+    unsigned char t[32];
+    size_t tlen = 0;
+    size_t filled = 0;
+    for (size_t i = 1; i <= nblocks; i++) {
+        size_t msg_len = tlen + (info.data ? info.len : 0) + 1;
+        unsigned char *msg = (unsigned char *)malloc(msg_len ? msg_len : 1);
+        if (!msg) {
+            free(out);
+            free(prk.data);
+            return mako_str_from_cstr("");
+        }
+        size_t o = 0;
+        if (tlen) {
+            memcpy(msg, t, tlen);
+            o = tlen;
+        }
+        if (info.data && info.len) {
+            memcpy(msg + o, info.data, info.len);
+            o += info.len;
+        }
+        msg[o++] = (unsigned char)i;
+        MakoString block = mako_hmac_sha256_raw(prk, (MakoString){(char *)msg, o});
+        free(msg);
+        if (!block.data || block.len < 32) {
+            free(block.data);
+            free(out);
+            free(prk.data);
+            return mako_str_from_cstr("");
+        }
+        memcpy(t, block.data, 32);
+        tlen = 32;
+        size_t take = 32;
+        if (filled + take > n) take = n - filled;
+        memcpy(out + filled, block.data, take);
+        filled += take;
+        free(block.data);
+    }
+    free(prk.data);
+    out[n] = 0;
+    return (MakoString){out, n};
+}
+
 /* PBKDF2-HMAC-SHA256 → derived key of `dklen` bytes. A SCRAM-SHA-256 / password
  * KDF primitive, backed by the platform crypto library. Empty on failure or when
  * no crypto backend is available. */
@@ -3301,6 +3382,164 @@ static inline MakoString mako_sql_query(MakoString q) { return q; }
 
 /* Optional GC arena flag seed — just an arena alias */
 static inline MakoArena mako_gc_arena_new(void) { return mako_arena_new(); }
+
+/* ---- Optional app GC (never default; systems crates must not enable) ----
+ * Explicit-heap tracing GC for objects from gc_alloc only (not the whole C heap).
+ * Roots + edges: gc_root(handle) / gc_link(parent, child); collect marks from roots.
+ * Hot path should still use scopes / hold / share / arena.
+ */
+#ifndef MAKO_GC_MAX_OBJS
+#define MAKO_GC_MAX_OBJS 4096
+#endif
+#ifndef MAKO_GC_MAX_ROOTS
+#define MAKO_GC_MAX_ROOTS 256
+#endif
+#ifndef MAKO_GC_MAX_EDGES
+#define MAKO_GC_MAX_EDGES 16
+#endif
+
+typedef struct MakoGcObj {
+    struct MakoGcObj *next;
+    size_t size;
+    int marked;
+    int nedges;
+    struct MakoGcObj *edges[MAKO_GC_MAX_EDGES];
+    /* payload follows */
+} MakoGcObj;
+
+static MakoGcObj *mako_gc_head = NULL;
+static int64_t mako_gc_live_count = 0;
+static int mako_gc_on = 0;
+static MakoGcObj *mako_gc_roots[MAKO_GC_MAX_ROOTS];
+static int mako_gc_nroots = 0;
+
+static inline void mako_gc_set_enabled(int on) { mako_gc_on = on ? 1 : 0; }
+
+static inline int64_t mako_gc_enabled(void) { return mako_gc_on ? 1 : 0; }
+
+static inline int64_t mako_gc_live(void) { return mako_gc_live_count; }
+
+static inline MakoGcObj *mako_gc_obj_from_handle(int64_t handle) {
+    if (!handle) return NULL;
+    return ((MakoGcObj *)(intptr_t)handle) - 1;
+}
+
+static inline int64_t mako_gc_handle_from_obj(MakoGcObj *o) {
+    return o ? (int64_t)(intptr_t)(o + 1) : 0;
+}
+
+/* Returns opaque handle (pointer bits as int64). 0 on failure / disabled. */
+static inline int64_t mako_gc_alloc(int64_t nbytes) {
+    if (!mako_gc_on || nbytes < 0) return 0;
+    if (mako_gc_live_count >= MAKO_GC_MAX_OBJS) {
+        /* Emergency sweep of unmarked (callers should gc_collect regularly). */
+        MakoGcObj **pp = &mako_gc_head;
+        while (*pp) {
+            MakoGcObj *o = *pp;
+            if (!o->marked) {
+                *pp = o->next;
+                free(o);
+                mako_gc_live_count--;
+            } else {
+                o->marked = 0;
+                pp = &o->next;
+            }
+        }
+    }
+    size_t n = (size_t)nbytes;
+    MakoGcObj *o = (MakoGcObj *)calloc(1, sizeof(MakoGcObj) + n);
+    if (!o) return 0;
+    o->size = n;
+    o->marked = 0;
+    o->nedges = 0;
+    o->next = mako_gc_head;
+    mako_gc_head = o;
+    mako_gc_live_count++;
+    return mako_gc_handle_from_obj(o);
+}
+
+/* Register a root handle (kept across collect until unroot). */
+static inline int64_t mako_gc_root(int64_t handle) {
+    MakoGcObj *o = mako_gc_obj_from_handle(handle);
+    if (!o || !mako_gc_on) return 0;
+    for (int i = 0; i < mako_gc_nroots; i++) {
+        if (mako_gc_roots[i] == o) return 1;
+    }
+    if (mako_gc_nroots >= MAKO_GC_MAX_ROOTS) return 0;
+    mako_gc_roots[mako_gc_nroots++] = o;
+    return 1;
+}
+
+static inline int64_t mako_gc_unroot(int64_t handle) {
+    MakoGcObj *o = mako_gc_obj_from_handle(handle);
+    if (!o) return 0;
+    for (int i = 0; i < mako_gc_nroots; i++) {
+        if (mako_gc_roots[i] == o) {
+            mako_gc_roots[i] = mako_gc_roots[--mako_gc_nroots];
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/* Record an edge parent → child for tracing (child kept if parent marked). */
+static inline int64_t mako_gc_link(int64_t parent, int64_t child) {
+    MakoGcObj *p = mako_gc_obj_from_handle(parent);
+    MakoGcObj *c = mako_gc_obj_from_handle(child);
+    if (!p || !c) return 0;
+    if (p->nedges >= MAKO_GC_MAX_EDGES) return 0;
+    for (int i = 0; i < p->nedges; i++) {
+        if (p->edges[i] == c) return 1;
+    }
+    p->edges[p->nedges++] = c;
+    return 1;
+}
+
+/* Manual mark (also used as non-root keep for one collect if no roots used). */
+static inline int64_t mako_gc_mark(int64_t handle) {
+    MakoGcObj *o = mako_gc_obj_from_handle(handle);
+    if (!o) return 0;
+    o->marked = 1;
+    return 1;
+}
+
+static inline void mako_gc_mark_obj(MakoGcObj *o) {
+    if (!o || o->marked) return;
+    o->marked = 1;
+    for (int i = 0; i < o->nedges; i++) {
+        mako_gc_mark_obj(o->edges[i]);
+    }
+}
+
+/* Tracing collect: clear marks → mark roots (and their edges) → sweep. */
+static inline int64_t mako_gc_collect(void) {
+    if (!mako_gc_on) return 0;
+    /* Clear all marks first. */
+    for (MakoGcObj *o = mako_gc_head; o; o = o->next) o->marked = 0;
+    /* Mark from roots. */
+    for (int i = 0; i < mako_gc_nroots; i++) {
+        mako_gc_mark_obj(mako_gc_roots[i]);
+    }
+    /* Sweep unmarked. */
+    int64_t freed = 0;
+    MakoGcObj **pp = &mako_gc_head;
+    while (*pp) {
+        MakoGcObj *o = *pp;
+        if (!o->marked) {
+            *pp = o->next;
+            free(o);
+            mako_gc_live_count--;
+            freed++;
+        } else {
+            o->marked = 0;
+            pp = &o->next;
+        }
+    }
+    return freed;
+}
+
+/* Number of registered roots (observability). */
+static inline int64_t mako_gc_root_count(void) { return (int64_t)mako_gc_nroots; }
 
 #ifdef __cplusplus
 }

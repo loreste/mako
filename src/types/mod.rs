@@ -279,12 +279,20 @@ pub struct TypeChecker {
     pub systems_crate: bool,
     /// Optional GC enabled for this compile (never weakens systems crates).
     pub gc_enabled: bool,
+    /// Locals captured by outstanding kicks that must not be mutated until join (race seed).
+    race_outstanding: HashSet<String>,
+    /// Stack of per-kick capture sets (join pops the latest; supports nested kicks).
+    race_stack: Vec<HashSet<String>>,
+    /// Names of `let mut` locals that are Sync-ish (Mutex/CMap/AtomicInt/ShareInt).
+    race_sync_locals: HashSet<String>,
     /// `visibility = "explicit"` — non-exported items stay package-private (seed).
     pub explicit_visibility: bool,
     /// Keep bounds checks even in release (`[profile.release] bounds_checks = "on"`).
     pub bounds_checks_always: bool,
     /// Generic function templates: `fn id[T](x: T) -> T`
     generic_fns: HashMap<String, FnDef>,
+    /// `#[deprecated("msg")]` functions — call sites hard-error with the message.
+    deprecated_fns: HashMap<String, String>,
     /// Active type parameters while checking a generic template body.
     active_type_params: HashSet<String>,
     /// Specialized monomorphizations produced during typecheck (for codegen).
@@ -561,10 +569,35 @@ impl TypeChecker {
             Type::Fn(vec![Type::StrBuilder], Box::new(Type::Int)),
         );
         fns.insert("uuid_v4".into(), Type::Fn(vec![], Box::new(Type::Uuid)));
+        fns.insert("uuid_v7".into(), Type::Fn(vec![], Box::new(Type::Uuid)));
+        fns.insert(
+            "uuid_v5".into(),
+            Type::Fn(vec![Type::Uuid, Type::String], Box::new(Type::Uuid)),
+        );
         fns.insert("uuid_nil".into(), Type::Fn(vec![], Box::new(Type::Uuid)));
+        fns.insert("uuid_ns_dns".into(), Type::Fn(vec![], Box::new(Type::Uuid)));
+        fns.insert("uuid_ns_url".into(), Type::Fn(vec![], Box::new(Type::Uuid)));
+        fns.insert("uuid_ns_oid".into(), Type::Fn(vec![], Box::new(Type::Uuid)));
+        fns.insert("uuid_ns_x500".into(), Type::Fn(vec![], Box::new(Type::Uuid)));
         fns.insert(
             "uuid_string".into(),
             Type::Fn(vec![Type::Uuid], Box::new(Type::String)),
+        );
+        fns.insert(
+            "uuid_string_upper".into(),
+            Type::Fn(vec![Type::Uuid], Box::new(Type::String)),
+        );
+        fns.insert(
+            "uuid_urn".into(),
+            Type::Fn(vec![Type::Uuid], Box::new(Type::String)),
+        );
+        fns.insert(
+            "uuid_bytes".into(),
+            Type::Fn(vec![Type::Uuid], Box::new(Type::String)),
+        );
+        fns.insert(
+            "uuid_from_bytes".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Uuid)),
         );
         fns.insert(
             "uuid_parse".into(),
@@ -579,8 +612,20 @@ impl TypeChecker {
             Type::Fn(vec![Type::Uuid, Type::Uuid], Box::new(Type::Bool)),
         );
         fns.insert(
+            "uuid_cmp".into(),
+            Type::Fn(vec![Type::Uuid, Type::Uuid], Box::new(Type::Int)),
+        );
+        fns.insert(
             "uuid_is_nil".into(),
             Type::Fn(vec![Type::Uuid], Box::new(Type::Bool)),
+        );
+        fns.insert(
+            "uuid_version".into(),
+            Type::Fn(vec![Type::Uuid], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "uuid_variant".into(),
+            Type::Fn(vec![Type::Uuid], Box::new(Type::Int)),
         );
         fns.insert(
             "uuid_check".into(),
@@ -588,6 +633,24 @@ impl TypeChecker {
                 vec![Type::String],
                 Box::new(Type::Result(Box::new(Type::Int), Box::new(Type::String))),
             ),
+        );
+        // ULID — same 16-byte POD, Crockford Base32 string form, time-sortable.
+        fns.insert("ulid_new".into(), Type::Fn(vec![], Box::new(Type::Uuid)));
+        fns.insert(
+            "ulid_string".into(),
+            Type::Fn(vec![Type::Uuid], Box::new(Type::String)),
+        );
+        fns.insert(
+            "ulid_parse".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Uuid)),
+        );
+        fns.insert(
+            "ulid_parse_ok".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Bool)),
+        );
+        fns.insert(
+            "ulid_timestamp_ms".into(),
+            Type::Fn(vec![Type::Uuid], Box::new(Type::Int)),
         );
         fns.insert(
             "int_to_string".into(),
@@ -627,6 +690,21 @@ impl TypeChecker {
                 Box::new(Type::Int),
             ),
         );
+        /* string channel take-send: move ownership (no clone). */
+        fns.insert(
+            "chan_str_send_take".into(),
+            Type::Fn(
+                vec![Type::Chan(Box::new(Type::String)), Type::String],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "chan_str_try_send_take".into(),
+            Type::Fn(
+                vec![Type::Chan(Box::new(Type::String)), Type::String],
+                Box::new(Type::Int),
+            ),
+        );
         fns.insert(
             "chan_len".into(),
             Type::Fn(vec![Type::Chan(Box::new(Type::Int))], Box::new(Type::Int)),
@@ -653,6 +731,59 @@ impl TypeChecker {
         );
         fns.insert("now_ms".into(), Type::Fn(vec![], Box::new(Type::Int)));
         fns.insert("now_ns".into(), Type::Fn(vec![], Box::new(Type::Int)));
+        // Low-latency clocks: wall (REALTIME) vs mono (MONOTONIC[_RAW])
+        fns.insert("wall_ns".into(), Type::Fn(vec![], Box::new(Type::Int)));
+        fns.insert("wall_us".into(), Type::Fn(vec![], Box::new(Type::Int)));
+        fns.insert("wall_ms".into(), Type::Fn(vec![], Box::new(Type::Int)));
+        fns.insert("mono_ns".into(), Type::Fn(vec![], Box::new(Type::Int)));
+        fns.insert("mono_us".into(), Type::Fn(vec![], Box::new(Type::Int)));
+        fns.insert("mono_ms".into(), Type::Fn(vec![], Box::new(Type::Int)));
+        fns.insert("mono_res_ns".into(), Type::Fn(vec![], Box::new(Type::Int)));
+        fns.insert("mono_overhead_ns".into(), Type::Fn(vec![], Box::new(Type::Int)));
+        fns.insert(
+            "elapsed_ns".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "elapsed_us".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "elapsed_mono_ms".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "deadline_ns".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "deadline_ms".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "deadline_remaining_ns".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "deadline_expired".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "sleep_ns".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Void)),
+        );
+        fns.insert(
+            "sleep_us".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Void)),
+        );
+        fns.insert(
+            "spin_until_ns".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Void)),
+        );
+        fns.insert(
+            "sleep_until_ns".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Void)),
+        );
         fns.insert(
             "black_box".into(),
             Type::Fn(vec![Type::Int], Box::new(Type::Int)),
@@ -731,6 +862,214 @@ impl TypeChecker {
         fns.insert(
             "fmt_sprintf_d".into(),
             Type::Fn(vec![Type::String, Type::Int], Box::new(Type::String)),
+        );
+        fns.insert(
+            "fmt_sprintf_dd".into(),
+            Type::Fn(
+                vec![Type::String, Type::Int, Type::Int],
+                Box::new(Type::String),
+            ),
+        );
+        fns.insert(
+            "format_int_hex".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::String)),
+        );
+        fns.insert(
+            "format_int_hex_upper".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::String)),
+        );
+        fns.insert(
+            "format_int_bin".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::String)),
+        );
+        fns.insert(
+            "format_int_oct".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::String)),
+        );
+        fns.insert(
+            "format_int_dec".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::String)),
+        );
+        fns.insert(
+            "format_int_base".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::String)),
+        );
+        fns.insert(
+            "format_int_hex_pad".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::String)),
+        );
+        fns.insert(
+            "format_int_hex_prefix".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::String)),
+        );
+        fns.insert(
+            "format_pad".into(),
+            Type::Fn(
+                vec![Type::String, Type::Int, Type::Int],
+                Box::new(Type::String),
+            ),
+        );
+        fns.insert(
+            "parse_int_base".into(),
+            Type::Fn(
+                vec![Type::String, Type::Int],
+                Box::new(Type::Result(Box::new(Type::Int), Box::new(Type::String))),
+            ),
+        );
+        fns.insert(
+            "parse_int_hex".into(),
+            Type::Fn(
+                vec![Type::String],
+                Box::new(Type::Result(Box::new(Type::Int), Box::new(Type::String))),
+            ),
+        );
+        fns.insert(
+            "parse_int_bin".into(),
+            Type::Fn(
+                vec![Type::String],
+                Box::new(Type::Result(Box::new(Type::Int), Box::new(Type::String))),
+            ),
+        );
+        fns.insert(
+            "parse_int_oct".into(),
+            Type::Fn(
+                vec![Type::String],
+                Box::new(Type::Result(Box::new(Type::Int), Box::new(Type::String))),
+            ),
+        );
+        fns.insert(
+            "parse_int_auto".into(),
+            Type::Fn(
+                vec![Type::String],
+                Box::new(Type::Result(Box::new(Type::Int), Box::new(Type::String))),
+            ),
+        );
+        /* Expanded fmt / print (Go-style) */
+        fns.insert(
+            "fmt_sprintf2".into(),
+            Type::Fn(
+                vec![Type::String, Type::String, Type::String],
+                Box::new(Type::String),
+            ),
+        );
+        fns.insert(
+            "fmt_sprintf3".into(),
+            Type::Fn(
+                vec![Type::String, Type::String, Type::String, Type::String],
+                Box::new(Type::String),
+            ),
+        );
+        fns.insert(
+            "fmt_sprintf4".into(),
+            Type::Fn(
+                vec![
+                    Type::String,
+                    Type::String,
+                    Type::String,
+                    Type::String,
+                    Type::String,
+                ],
+                Box::new(Type::String),
+            ),
+        );
+        fns.insert(
+            "fmt_sprintf_f".into(),
+            Type::Fn(
+                vec![Type::String, Type::Float, Type::Int],
+                Box::new(Type::String),
+            ),
+        );
+        fns.insert(
+            "fmt_sprint".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::String)),
+        );
+        fns.insert(
+            "fmt_sprint2".into(),
+            Type::Fn(vec![Type::String, Type::String], Box::new(Type::String)),
+        );
+        fns.insert(
+            "fmt_sprint3".into(),
+            Type::Fn(
+                vec![Type::String, Type::String, Type::String],
+                Box::new(Type::String),
+            ),
+        );
+        fns.insert(
+            "fmt_sprintln".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::String)),
+        );
+        fns.insert(
+            "fmt_sprintln2".into(),
+            Type::Fn(vec![Type::String, Type::String], Box::new(Type::String)),
+        );
+        fns.insert(
+            "fmt_print".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "fmt_print2".into(),
+            Type::Fn(vec![Type::String, Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "fmt_println".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "fmt_println2".into(),
+            Type::Fn(vec![Type::String, Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "fmt_printf".into(),
+            Type::Fn(vec![Type::String, Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "fmt_printf2".into(),
+            Type::Fn(
+                vec![Type::String, Type::String, Type::String],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "fmt_printf3".into(),
+            Type::Fn(
+                vec![Type::String, Type::String, Type::String, Type::String],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "fmt_eprint".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "fmt_eprintln".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "fmt_eprintf".into(),
+            Type::Fn(vec![Type::String, Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "fmt_errorf".into(),
+            Type::Fn(vec![Type::String, Type::String], Box::new(Type::String)),
+        );
+        fns.insert(
+            "fmt_errorf2".into(),
+            Type::Fn(
+                vec![Type::String, Type::String, Type::String],
+                Box::new(Type::String),
+            ),
+        );
+        fns.insert(
+            "print_raw".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "eprint".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "eprintln".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
         );
         fns.insert(
             "hex_encode".into(),
@@ -855,6 +1194,29 @@ impl TypeChecker {
         fns.insert(
             "cmap_set".into(),
             Type::Fn(vec![Type::CMap, Type::String, Type::String], Box::new(Type::Void)),
+        );
+        /* map set_take: move key (and val for ss) into map — no clone (hot path). */
+        fns.insert(
+            "map_si_set_take".into(),
+            Type::Fn(
+                vec![
+                    Type::Map(Box::new(Type::String), Box::new(Type::Int)),
+                    Type::String,
+                    Type::Int,
+                ],
+                Box::new(Type::Void),
+            ),
+        );
+        fns.insert(
+            "map_ss_set_take".into(),
+            Type::Fn(
+                vec![
+                    Type::Map(Box::new(Type::String), Box::new(Type::String)),
+                    Type::String,
+                    Type::String,
+                ],
+                Box::new(Type::Void),
+            ),
         );
         fns.insert(
             "cmap_get".into(),
@@ -1161,6 +1523,67 @@ impl TypeChecker {
             "remove_file".into(),
             Type::Fn(vec![Type::String], Box::new(Type::Int)),
         );
+        // Production filesystem / storage
+        fns.insert(
+            "rename".into(),
+            Type::Fn(vec![Type::String, Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "mkdir_all".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "rmdir".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "remove_all".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "copy_file".into(),
+            Type::Fn(vec![Type::String, Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "is_file".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "path_size".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "file_mtime".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "chmod".into(),
+            Type::Fn(vec![Type::String, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "atomic_write_file".into(),
+            Type::Fn(vec![Type::String, Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "temp_dir".into(),
+            Type::Fn(vec![], Box::new(Type::String)),
+        );
+        fns.insert(
+            "temp_file".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::String)),
+        );
+        fns.insert(
+            "symlink".into(),
+            Type::Fn(vec![Type::String, Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "readlink".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::String)),
+        );
+        fns.insert(
+            "realpath".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::String)),
+        );
         fns.insert(
             "parse_int".into(),
             Type::Fn(
@@ -1202,10 +1625,441 @@ impl TypeChecker {
             "http_post".into(),
             Type::Fn(vec![Type::String, Type::String], Box::new(Type::String)),
         );
+        // LLM programming (OpenAI-compatible / xAI)
         fns.insert(
-            "http_request".into(),
+            "llm_message".into(),
+            Type::Fn(vec![Type::String, Type::String], Box::new(Type::String)),
+        );
+        fns.insert(
+            "llm_messages_append".into(),
+            Type::Fn(vec![Type::String, Type::String], Box::new(Type::String)),
+        );
+        fns.insert(
+            "llm_chat_body".into(),
+            Type::Fn(vec![Type::String, Type::String, Type::Int], Box::new(Type::String)),
+        );
+        fns.insert(
+            "llm_system_user".into(),
+            Type::Fn(
+                vec![Type::String, Type::String, Type::String],
+                Box::new(Type::String),
+            ),
+        );
+        fns.insert(
+            "llm_body_with_tools".into(),
+            Type::Fn(vec![Type::String, Type::String], Box::new(Type::String)),
+        );
+        fns.insert(
+            "llm_estimate_tokens".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "llm_retry_delay_ms".into(),
+            Type::Fn(vec![Type::Int, Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "llm_redact_key".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::String)),
+        );
+        fns.insert(
+            "llm_content".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::String)),
+        );
+        fns.insert(
+            "llm_finish_reason".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::String)),
+        );
+        fns.insert(
+            "llm_usage_prompt_tokens".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "llm_usage_completion_tokens".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "llm_usage_total_tokens".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "llm_tool_call_count".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "llm_tool_call_name".into(),
+            Type::Fn(vec![Type::String, Type::Int], Box::new(Type::String)),
+        );
+        fns.insert(
+            "llm_tool_call_args".into(),
+            Type::Fn(vec![Type::String, Type::Int], Box::new(Type::String)),
+        );
+        fns.insert(
+            "llm_sse_data".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::String)),
+        );
+        fns.insert(
+            "llm_sse_delta".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::String)),
+        );
+        fns.insert(
+            "llm_stream_append".into(),
+            Type::Fn(vec![Type::String, Type::String], Box::new(Type::String)),
+        );
+        fns.insert(
+            "llm_json_extract".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::String)),
+        );
+        fns.insert(
+            "llm_api_key".into(),
+            Type::Fn(vec![], Box::new(Type::String)),
+        );
+        fns.insert(
+            "llm_base_url".into(),
+            Type::Fn(vec![], Box::new(Type::String)),
+        );
+        fns.insert(
+            "llm_default_model".into(),
+            Type::Fn(vec![], Box::new(Type::String)),
+        );
+        fns.insert(
+            "llm_https_post".into(),
+            Type::Fn(
+                vec![
+                    Type::String,
+                    Type::String,
+                    Type::String,
+                    Type::Int,
+                    Type::Int,
+                ],
+                Box::new(Type::String),
+            ),
+        );
+        fns.insert(
+            "llm_chat".into(),
             Type::Fn(
                 vec![Type::String, Type::String, Type::String, Type::Int],
+                Box::new(Type::String),
+            ),
+        );
+        fns.insert(
+            "llm_ask".into(),
+            Type::Fn(
+                vec![Type::String, Type::String, Type::Int],
+                Box::new(Type::String),
+            ),
+        );
+        fns.insert(
+            "llm_https_available".into(),
+            Type::Fn(vec![], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "llm_last_status".into(),
+            Type::Fn(vec![], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "llm_is_error".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "llm_error_message".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::String)),
+        );
+        fns.insert(
+            "llm_should_retry".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "llm_chat_stream".into(),
+            Type::Fn(
+                vec![Type::String, Type::String, Type::String, Type::Int],
+                Box::new(Type::String),
+            ),
+        );
+        fns.insert(
+            "llm_chat_retry".into(),
+            Type::Fn(
+                vec![Type::String, Type::String, Type::String, Type::Int, Type::Int],
+                Box::new(Type::String),
+            ),
+        );
+        fns.insert(
+            "llm_body_force_stream".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::String)),
+        );
+        fns.insert(
+            "llm_embed_body".into(),
+            Type::Fn(vec![Type::String, Type::String], Box::new(Type::String)),
+        );
+        fns.insert(
+            "llm_embeddings".into(),
+            Type::Fn(
+                vec![Type::String, Type::String, Type::String, Type::Int],
+                Box::new(Type::String),
+            ),
+        );
+        fns.insert(
+            "llm_embed".into(),
+            Type::Fn(vec![Type::String, Type::Int], Box::new(Type::String)),
+        );
+        fns.insert(
+            "llm_embedding_dim".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "llm_embedding_json".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::String)),
+        );
+        // Low-level SIP / SDP / RTP (RFC 3261 / 4566 / 3550)
+        fns.insert("sip_is_request".into(), Type::Fn(vec![Type::String], Box::new(Type::Int)));
+        fns.insert("sip_is_response".into(), Type::Fn(vec![Type::String], Box::new(Type::Int)));
+        fns.insert("sip_ok".into(), Type::Fn(vec![Type::String], Box::new(Type::Int)));
+        fns.insert("sip_method".into(), Type::Fn(vec![Type::String], Box::new(Type::String)));
+        fns.insert("sip_request_uri".into(), Type::Fn(vec![Type::String], Box::new(Type::String)));
+        fns.insert("sip_status_code".into(), Type::Fn(vec![Type::String], Box::new(Type::Int)));
+        fns.insert("sip_reason".into(), Type::Fn(vec![Type::String], Box::new(Type::String)));
+        fns.insert("sip_version".into(), Type::Fn(vec![Type::String], Box::new(Type::String)));
+        fns.insert(
+            "sip_header".into(),
+            Type::Fn(vec![Type::String, Type::String], Box::new(Type::String)),
+        );
+        fns.insert(
+            "sip_header_n".into(),
+            Type::Fn(vec![Type::String, Type::String, Type::Int], Box::new(Type::String)),
+        );
+        fns.insert(
+            "sip_header_count".into(),
+            Type::Fn(vec![Type::String, Type::String], Box::new(Type::Int)),
+        );
+        fns.insert("sip_body".into(), Type::Fn(vec![Type::String], Box::new(Type::String)));
+        fns.insert("sip_content_length".into(), Type::Fn(vec![Type::String], Box::new(Type::Int)));
+        fns.insert("sip_msg_complete".into(), Type::Fn(vec![Type::String], Box::new(Type::Int)));
+        fns.insert("sip_msg_needed".into(), Type::Fn(vec![Type::String], Box::new(Type::Int)));
+        fns.insert(
+            "sip_header_line".into(),
+            Type::Fn(vec![Type::String, Type::String], Box::new(Type::String)),
+        );
+        fns.insert(
+            "sip_headers_append".into(),
+            Type::Fn(
+                vec![Type::String, Type::String, Type::String],
+                Box::new(Type::String),
+            ),
+        );
+        fns.insert(
+            "sip_request".into(),
+            Type::Fn(
+                vec![Type::String, Type::String, Type::String, Type::String],
+                Box::new(Type::String),
+            ),
+        );
+        fns.insert(
+            "sip_response".into(),
+            Type::Fn(
+                vec![Type::Int, Type::String, Type::String, Type::String],
+                Box::new(Type::String),
+            ),
+        );
+        fns.insert(
+            "sip_via_value".into(),
+            Type::Fn(
+                vec![Type::String, Type::String, Type::Int, Type::String],
+                Box::new(Type::String),
+            ),
+        );
+        fns.insert(
+            "sip_from_value".into(),
+            Type::Fn(
+                vec![Type::String, Type::String, Type::String],
+                Box::new(Type::String),
+            ),
+        );
+        fns.insert(
+            "sip_to_value".into(),
+            Type::Fn(
+                vec![Type::String, Type::String, Type::String],
+                Box::new(Type::String),
+            ),
+        );
+        fns.insert(
+            "sip_contact_value".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::String)),
+        );
+        fns.insert(
+            "sip_cseq_value".into(),
+            Type::Fn(vec![Type::Int, Type::String], Box::new(Type::String)),
+        );
+        fns.insert("sip_addr_tag".into(), Type::Fn(vec![Type::String], Box::new(Type::String)));
+        fns.insert("sip_via_branch".into(), Type::Fn(vec![Type::String], Box::new(Type::String)));
+        fns.insert("sip_branch".into(), Type::Fn(vec![], Box::new(Type::String)));
+        fns.insert("sip_tag".into(), Type::Fn(vec![], Box::new(Type::String)));
+        fns.insert("sip_call_id_new".into(), Type::Fn(vec![Type::String], Box::new(Type::String)));
+        fns.insert("sip_cseq_new".into(), Type::Fn(vec![], Box::new(Type::Int)));
+        fns.insert(
+            "sip_dialog_id".into(),
+            Type::Fn(
+                vec![Type::String, Type::String, Type::String],
+                Box::new(Type::String),
+            ),
+        );
+        fns.insert(
+            "sip_txn_key".into(),
+            Type::Fn(vec![Type::String, Type::String], Box::new(Type::String)),
+        );
+        fns.insert("sip_uri_scheme".into(), Type::Fn(vec![Type::String], Box::new(Type::String)));
+        fns.insert("sip_uri_user".into(), Type::Fn(vec![Type::String], Box::new(Type::String)));
+        fns.insert("sip_uri_host".into(), Type::Fn(vec![Type::String], Box::new(Type::String)));
+        fns.insert("sip_uri_port".into(), Type::Fn(vec![Type::String], Box::new(Type::Int)));
+        fns.insert(
+            "sip_uri_build".into(),
+            Type::Fn(vec![Type::String, Type::String, Type::Int], Box::new(Type::String)),
+        );
+        fns.insert(
+            "sip_udp_bind".into(),
+            Type::Fn(vec![Type::String, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "sip_udp_send".into(),
+            Type::Fn(
+                vec![Type::Int, Type::String, Type::Int, Type::String],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "sip_udp_recv".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::String)),
+        );
+        fns.insert(
+            "sip_tcp_send".into(),
+            Type::Fn(vec![Type::Int, Type::String], Box::new(Type::Int)),
+        );
+        fns.insert("sip_md5_hex".into(), Type::Fn(vec![Type::String], Box::new(Type::String)));
+        fns.insert(
+            "sip_digest_response".into(),
+            Type::Fn(
+                vec![
+                    Type::String,
+                    Type::String,
+                    Type::String,
+                    Type::String,
+                    Type::String,
+                    Type::String,
+                ],
+                Box::new(Type::String),
+            ),
+        );
+        fns.insert(
+            "sip_authorization_digest".into(),
+            Type::Fn(
+                vec![
+                    Type::String,
+                    Type::String,
+                    Type::String,
+                    Type::String,
+                    Type::String,
+                ],
+                Box::new(Type::String),
+            ),
+        );
+        fns.insert(
+            "sip_auth_param".into(),
+            Type::Fn(vec![Type::String, Type::String], Box::new(Type::String)),
+        );
+        fns.insert(
+            "sip_copy_headers_for_response".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::String)),
+        );
+        fns.insert(
+            "sip_reply".into(),
+            Type::Fn(
+                vec![
+                    Type::String,
+                    Type::Int,
+                    Type::String,
+                    Type::String,
+                    Type::String,
+                ],
+                Box::new(Type::String),
+            ),
+        );
+        fns.insert(
+            "sip_method_is".into(),
+            Type::Fn(vec![Type::String, Type::String], Box::new(Type::Int)),
+        );
+        fns.insert("sdp_ok".into(), Type::Fn(vec![Type::String], Box::new(Type::Int)));
+        fns.insert("sdp_version".into(), Type::Fn(vec![Type::String], Box::new(Type::String)));
+        fns.insert("sdp_origin".into(), Type::Fn(vec![Type::String], Box::new(Type::String)));
+        fns.insert("sdp_session_name".into(), Type::Fn(vec![Type::String], Box::new(Type::String)));
+        fns.insert("sdp_connection".into(), Type::Fn(vec![Type::String], Box::new(Type::String)));
+        fns.insert(
+            "sdp_connection_addr".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::String)),
+        );
+        fns.insert("sdp_media_count".into(), Type::Fn(vec![Type::String], Box::new(Type::Int)));
+        fns.insert(
+            "sdp_media".into(),
+            Type::Fn(vec![Type::String, Type::Int], Box::new(Type::String)),
+        );
+        fns.insert(
+            "sdp_media_type".into(),
+            Type::Fn(vec![Type::String, Type::Int], Box::new(Type::String)),
+        );
+        fns.insert(
+            "sdp_media_port".into(),
+            Type::Fn(vec![Type::String, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "sdp_media_proto".into(),
+            Type::Fn(vec![Type::String, Type::Int], Box::new(Type::String)),
+        );
+        fns.insert(
+            "sdp_attr".into(),
+            Type::Fn(vec![Type::String, Type::String], Box::new(Type::String)),
+        );
+        fns.insert(
+            "sdp_append_line".into(),
+            Type::Fn(vec![Type::String, Type::String], Box::new(Type::String)),
+        );
+        fns.insert(
+            "sdp_build_audio".into(),
+            Type::Fn(
+                vec![
+                    Type::String,
+                    Type::String,
+                    Type::String,
+                    Type::Int,
+                    Type::String,
+                ],
+                Box::new(Type::String),
+            ),
+        );
+        fns.insert(
+            "sdp_attr_rtpmap".into(),
+            Type::Fn(vec![Type::Int, Type::String, Type::Int], Box::new(Type::String)),
+        );
+        fns.insert(
+            "sdp_attr_fmtp".into(),
+            Type::Fn(vec![Type::Int, Type::String], Box::new(Type::String)),
+        );
+        fns.insert("rtp_header_len".into(), Type::Fn(vec![], Box::new(Type::Int)));
+        fns.insert("rtp_parse_ok".into(), Type::Fn(vec![Type::String], Box::new(Type::Int)));
+        fns.insert("rtp_version".into(), Type::Fn(vec![Type::String], Box::new(Type::Int)));
+        fns.insert("rtp_marker".into(), Type::Fn(vec![Type::String], Box::new(Type::Int)));
+        fns.insert("rtp_payload_type".into(), Type::Fn(vec![Type::String], Box::new(Type::Int)));
+        fns.insert("rtp_seq".into(), Type::Fn(vec![Type::String], Box::new(Type::Int)));
+        fns.insert("rtp_timestamp".into(), Type::Fn(vec![Type::String], Box::new(Type::Int)));
+        fns.insert("rtp_ssrc".into(), Type::Fn(vec![Type::String], Box::new(Type::Int)));
+        fns.insert("rtp_payload".into(), Type::Fn(vec![Type::String], Box::new(Type::String)));
+        fns.insert(
+            "rtp_pack".into(),
+            Type::Fn(
+                vec![
+                    Type::Int,
+                    Type::Int,
+                    Type::Int,
+                    Type::Int,
+                    Type::Int,
+                    Type::String,
+                ],
                 Box::new(Type::String),
             ),
         );
@@ -1233,6 +2087,10 @@ impl TypeChecker {
             Type::Fn(vec![Type::Int], Box::new(Type::Int)),
         );
         fns.insert(
+            "udp_bind_addr".into(),
+            Type::Fn(vec![Type::String, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
             "udp_send_to".into(),
             Type::Fn(
                 vec![Type::Int, Type::String, Type::Int, Type::String],
@@ -1242,6 +2100,22 @@ impl TypeChecker {
         fns.insert(
             "udp_recv".into(),
             Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::String)),
+        );
+        fns.insert(
+            "udp_recv_from".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::String)),
+        );
+        fns.insert(
+            "udp_last_sender_host".into(),
+            Type::Fn(vec![], Box::new(Type::String)),
+        );
+        fns.insert(
+            "udp_last_sender_port".into(),
+            Type::Fn(vec![], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "udp_last_sender".into(),
+            Type::Fn(vec![], Box::new(Type::String)),
         );
         fns.insert(
             "udp_local_port".into(),
@@ -1394,7 +2268,47 @@ impl TypeChecker {
             Type::Fn(vec![], Box::new(Type::Int)),
         );
         fns.insert(
+            "http2_conn_goaway".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::String)),
+        );
+        fns.insert(
+            "http2_conn_initial_window".into(),
+            Type::Fn(vec![], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "http2_conn_max_frame_size".into(),
+            Type::Fn(vec![], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "http2_conn_header_table_size".into(),
+            Type::Fn(vec![], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "http2_conn_enable_push".into(),
+            Type::Fn(vec![], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "http2_conn_max_header_list".into(),
+            Type::Fn(vec![], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "http2_conn_unacked".into(),
+            Type::Fn(vec![], Box::new(Type::Int)),
+        );
+        fns.insert(
             "http2_window_of".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "http2_recv_window_of".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "http2_recv_window_conn".into(),
+            Type::Fn(vec![], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "http2_stream_body_overflow".into(),
             Type::Fn(vec![Type::Int], Box::new(Type::Int)),
         );
         fns.insert(
@@ -1501,6 +2415,13 @@ impl TypeChecker {
             "http2_response".into(),
             Type::Fn(
                 vec![Type::Int, Type::Int, Type::String],
+                Box::new(Type::String),
+            ),
+        );
+        fns.insert(
+            "http2_response_ct".into(),
+            Type::Fn(
+                vec![Type::Int, Type::Int, Type::String, Type::String],
                 Box::new(Type::String),
             ),
         );
@@ -2423,12 +3344,40 @@ impl TypeChecker {
             Type::Fn(vec![Type::Int, Type::String], Box::new(Type::Int)),
         );
         fns.insert(
+            "tcp_write_all".into(),
+            Type::Fn(vec![Type::Int, Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
             "tcp_read_print".into(),
             Type::Fn(vec![Type::Int], Box::new(Type::Int)),
         );
         fns.insert(
             "tcp_read".into(),
             Type::Fn(vec![Type::Int], Box::new(Type::String)),
+        );
+        fns.insert(
+            "tcp_read_n".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::String)),
+        );
+        fns.insert(
+            "tcp_peer_addr".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::String)),
+        );
+        fns.insert(
+            "tcp_local_addr".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::String)),
+        );
+        fns.insert(
+            "tcp_shutdown".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "tcp_linger".into(),
+            Type::Fn(vec![Type::Int, Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "sock_error".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
         );
         fns.insert(
             "tcp_nodelay".into(),
@@ -3027,6 +3976,373 @@ impl TypeChecker {
             "ecs_system_add".into(),
             Type::Fn(vec![Type::Int, Type::Int, Type::Int], Box::new(Type::Int)),
         );
+        /* GPU / accelerator seed (host compute path; see mako_gpu.h). */
+        fns.insert(
+            "gpu_available".into(),
+            Type::Fn(vec![], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "gpu_backend".into(),
+            Type::Fn(vec![], Box::new(Type::String)),
+        );
+        fns.insert(
+            "gpu_device_open".into(),
+            Type::Fn(vec![], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "gpu_device_close".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "gpu_device_backend".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::String)),
+        );
+        fns.insert(
+            "gpu_device_name".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::String)),
+        );
+        fns.insert(
+            "gpu_device_vendor".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::String)),
+        );
+        fns.insert(
+            "gpu_device_is_gpu".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "gpu_opencl_ok".into(),
+            Type::Fn(vec![], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "gpu_set_prefer_host".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "gpu_buf_new".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "gpu_buf_len".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "gpu_buf_cap".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "gpu_buf_free".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "gpu_buf_write".into(),
+            Type::Fn(vec![Type::Int, Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "gpu_buf_read".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::String)),
+        );
+        fns.insert(
+            "gpu_upload_f32".into(),
+            Type::Fn(
+                vec![Type::Int, Type::Array(Box::new(Type::Float))],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "gpu_download_f32".into(),
+            Type::Fn(
+                vec![Type::Int],
+                Box::new(Type::Array(Box::new(Type::Float))),
+            ),
+        );
+        fns.insert(
+            "gpu_f32_count".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "gpu_add_f32".into(),
+            Type::Fn(
+                vec![Type::Int, Type::Int, Type::Int],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "gpu_mul_f32".into(),
+            Type::Fn(
+                vec![Type::Int, Type::Int, Type::Int],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "gpu_scale_f32".into(),
+            Type::Fn(
+                vec![Type::Int, Type::Int, Type::Float],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "gpu_fill_f32".into(),
+            Type::Fn(
+                vec![Type::Int, Type::Int, Type::Float],
+                Box::new(Type::Int),
+            ),
+        );
+        /* AI building blocks (inference/training primitives). */
+        fns.insert(
+            "gpu_relu_f32".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "gpu_saxpy_f32".into(),
+            Type::Fn(
+                vec![Type::Int, Type::Int, Type::Int, Type::Float],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "gpu_bias_add_f32".into(),
+            Type::Fn(
+                vec![Type::Int, Type::Int, Type::Int, Type::Int, Type::Int],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "gpu_matmul_f32".into(),
+            Type::Fn(
+                vec![
+                    Type::Int,
+                    Type::Int,
+                    Type::Int,
+                    Type::Int,
+                    Type::Int,
+                    Type::Int,
+                ],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "gpu_softmax_rows_f32".into(),
+            Type::Fn(
+                vec![Type::Int, Type::Int, Type::Int, Type::Int],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "gpu_sum_f32".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Float)),
+        );
+        fns.insert(
+            "gpu_gelu_f32".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "gpu_silu_f32".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "gpu_transpose_f32".into(),
+            Type::Fn(
+                vec![Type::Int, Type::Int, Type::Int, Type::Int],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "gpu_layernorm_f32".into(),
+            Type::Fn(
+                vec![
+                    Type::Int,
+                    Type::Int,
+                    Type::Int,
+                    Type::Int,
+                    Type::Int,
+                    Type::Int,
+                    Type::Float,
+                ],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "gpu_attention_f32".into(),
+            Type::Fn(
+                vec![
+                    Type::Int,
+                    Type::Int,
+                    Type::Int,
+                    Type::Int,
+                    Type::Int,
+                    Type::Int,
+                ],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "gpu_mha_f32".into(),
+            Type::Fn(
+                vec![
+                    Type::Int,
+                    Type::Int,
+                    Type::Int,
+                    Type::Int,
+                    Type::Int,
+                    Type::Int,
+                    Type::Int,
+                ],
+                Box::new(Type::Int),
+            ),
+        );
+        /* Local model weight store + safetensors / .makomodel I/O */
+        fns.insert(
+            "model_new".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "model_free".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "model_tensor_count".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "model_tensor_name".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::String)),
+        );
+        fns.insert(
+            "model_tensor_buf".into(),
+            Type::Fn(vec![Type::Int, Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "model_tensor_elems".into(),
+            Type::Fn(vec![Type::Int, Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "model_tensor_ndim".into(),
+            Type::Fn(vec![Type::Int, Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "model_tensor_dim".into(),
+            Type::Fn(
+                vec![Type::Int, Type::String, Type::Int],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "model_set_f32".into(),
+            Type::Fn(
+                vec![
+                    Type::Int,
+                    Type::String,
+                    Type::Array(Box::new(Type::Float)),
+                    Type::Int,
+                    Type::Int,
+                    Type::Int,
+                    Type::Int,
+                ],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "model_load_safetensors".into(),
+            Type::Fn(vec![Type::Int, Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "model_load_gguf".into(),
+            Type::Fn(vec![Type::Int, Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "model_save".into(),
+            Type::Fn(vec![Type::Int, Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "model_load".into(),
+            Type::Fn(vec![Type::Int, Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "model_linear_f32".into(),
+            Type::Fn(
+                vec![
+                    Type::Int,
+                    Type::Int,
+                    Type::Int,
+                    Type::String,
+                    Type::String,
+                    Type::Int,
+                    Type::Int,
+                    Type::Int,
+                    Type::Int,
+                ],
+                Box::new(Type::Int),
+            ),
+        );
+        /* Vocab tokenizer seed */
+        fns.insert("tok_new".into(), Type::Fn(vec![], Box::new(Type::Int)));
+        fns.insert(
+            "tok_free".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "tok_set".into(),
+            Type::Fn(
+                vec![Type::Int, Type::String, Type::Int],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "tok_size".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "tok_id".into(),
+            Type::Fn(vec![Type::Int, Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "tok_token".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::String)),
+        );
+        fns.insert(
+            "tok_load_json".into(),
+            Type::Fn(vec![Type::Int, Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "tok_load_lines".into(),
+            Type::Fn(vec![Type::Int, Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "tok_encode".into(),
+            Type::Fn(
+                vec![Type::Int, Type::String],
+                Box::new(Type::Array(Box::new(Type::Int))),
+            ),
+        );
+        fns.insert(
+            "tok_decode".into(),
+            Type::Fn(
+                vec![Type::Int, Type::Array(Box::new(Type::Int))],
+                Box::new(Type::String),
+            ),
+        );
+        fns.insert(
+            "tok_load_merges".into(),
+            Type::Fn(vec![Type::Int, Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "tok_load_bpe".into(),
+            Type::Fn(
+                vec![Type::Int, Type::String, Type::String],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "tok_encode_bpe".into(),
+            Type::Fn(
+                vec![Type::Int, Type::String],
+                Box::new(Type::Array(Box::new(Type::Int))),
+            ),
+        );
+        fns.insert(
+            "tok_merge_count".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
         fns.insert(
             "cookie_get".into(),
             Type::Fn(vec![Type::String, Type::String], Box::new(Type::String)),
@@ -3524,6 +4840,66 @@ impl TypeChecker {
             Type::Fn(vec![Type::SqlDB, Type::String, Type::String], Box::new(Type::String)),
         );
         fns.insert(
+            "sql_last_insert_id".into(),
+            Type::Fn(vec![Type::SqlDB], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "sql_rows_affected".into(),
+            Type::Fn(vec![Type::SqlDB], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "sql_query_rows".into(),
+            Type::Fn(
+                vec![Type::SqlDB, Type::String, Type::Array(Box::new(Type::Int))],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "sql_query_rows_str".into(),
+            Type::Fn(
+                vec![Type::SqlDB, Type::String, Type::String],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "sql_rows_ok".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "sql_rows_next".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "sql_rows_int".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "sql_rows_str".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::String)),
+        );
+        fns.insert(
+            "sql_rows_cols".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "sql_rows_close".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "sql_query_col_int".into(),
+            Type::Fn(
+                vec![Type::SqlDB, Type::String, Type::Int],
+                Box::new(Type::Array(Box::new(Type::Int))),
+            ),
+        );
+        fns.insert(
+            "sql_query_col_str".into(),
+            Type::Fn(
+                vec![Type::SqlDB, Type::String, Type::Int],
+                Box::new(Type::Array(Box::new(Type::String))),
+            ),
+        );
+        fns.insert(
             "sql_begin".into(),
             Type::Fn(vec![Type::SqlDB], Box::new(Type::Int)),
         );
@@ -3782,6 +5158,57 @@ impl TypeChecker {
                 vec![Type::String, Type::String, Type::String],
                 Box::new(Type::String),
             ),
+        );
+        /* Go-style template engine */
+        fns.insert("tmpl_data_new".into(), Type::Fn(vec![], Box::new(Type::Int)));
+        fns.insert(
+            "tmpl_data_free".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "tmpl_data_set".into(),
+            Type::Fn(
+                vec![Type::Int, Type::String, Type::String],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "tmpl_data_set_list".into(),
+            Type::Fn(
+                vec![Type::Int, Type::String, Type::String],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "tmpl_data_set_int".into(),
+            Type::Fn(
+                vec![Type::Int, Type::String, Type::Int],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "tmpl_new".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "tmpl_free".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "tmpl_execute".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::String)),
+        );
+        fns.insert(
+            "tmpl_html_execute".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::String)),
+        );
+        fns.insert(
+            "tmpl_text".into(),
+            Type::Fn(vec![Type::String, Type::Int], Box::new(Type::String)),
+        );
+        fns.insert(
+            "tmpl_html".into(),
+            Type::Fn(vec![Type::String, Type::Int], Box::new(Type::String)),
         );
         fns.insert(
             "base32_encode".into(),
@@ -4138,6 +5565,21 @@ impl TypeChecker {
             ),
         );
         fns.insert(
+            "aes_ctr".into(),
+            Type::Fn(
+                vec![Type::String, Type::String, Type::String],
+                Box::new(Type::String),
+            ),
+        );
+        fns.insert(
+            "hmac_sha1".into(),
+            Type::Fn(vec![Type::String, Type::String], Box::new(Type::String)),
+        );
+        fns.insert(
+            "hmac_sha1_raw".into(),
+            Type::Fn(vec![Type::String, Type::String], Box::new(Type::String)),
+        );
+        fns.insert(
             "chacha20_poly1305_seal".into(),
             Type::Fn(
                 vec![Type::String, Type::String, Type::String, Type::String],
@@ -4343,6 +5785,67 @@ impl TypeChecker {
                 vec![Type::String, Type::String, Type::String, Type::String],
                 Box::new(Type::Void),
             ),
+        );
+        fns.insert(
+            "slog_with2".into(),
+            Type::Fn(
+                vec![
+                    Type::String,
+                    Type::String,
+                    Type::String,
+                    Type::String,
+                    Type::String,
+                    Type::String,
+                ],
+                Box::new(Type::Void),
+            ),
+        );
+        fns.insert(
+            "slog_with3".into(),
+            Type::Fn(
+                vec![
+                    Type::String,
+                    Type::String,
+                    Type::String,
+                    Type::String,
+                    Type::String,
+                    Type::String,
+                    Type::String,
+                    Type::String,
+                ],
+                Box::new(Type::Void),
+            ),
+        );
+        fns.insert(
+            "slog_with_int".into(),
+            Type::Fn(
+                vec![Type::String, Type::String, Type::String, Type::Int],
+                Box::new(Type::Void),
+            ),
+        );
+        fns.insert(
+            "slog_set_json".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Void)),
+        );
+        fns.insert(
+            "slog_is_json".into(),
+            Type::Fn(vec![], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "slog_set_service".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Void)),
+        );
+        fns.insert(
+            "slog_set_output".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "slog_flush".into(),
+            Type::Fn(vec![], Box::new(Type::Void)),
+        );
+        fns.insert(
+            "slog_get_level".into(),
+            Type::Fn(vec![], Box::new(Type::Int)),
         );
         fns.insert(
             "regex_valid".into(),
@@ -4697,6 +6200,17 @@ impl TypeChecker {
             ),
         );
         fns.insert(
+            "jpeg_encode_gray_baseline".into(),
+            Type::Fn(
+                vec![Type::Int, Type::Int, Type::String],
+                Box::new(Type::String),
+            ),
+        );
+        fns.insert(
+            "jpeg_is_baseline_huff".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
             "jpeg_huff_block".into(),
             Type::Fn(vec![Type::String], Box::new(Type::String)),
         );
@@ -4862,6 +6376,178 @@ impl TypeChecker {
                 Box::new(Type::Int),
             ),
         );
+        /* Full mail builder + SMTP session */
+        fns.insert("mail_msg_new".into(), Type::Fn(vec![], Box::new(Type::Int)));
+        fns.insert(
+            "mail_msg_free".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "mail_msg_set_from".into(),
+            Type::Fn(vec![Type::Int, Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "mail_msg_add_to".into(),
+            Type::Fn(vec![Type::Int, Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "mail_msg_add_cc".into(),
+            Type::Fn(vec![Type::Int, Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "mail_msg_add_bcc".into(),
+            Type::Fn(vec![Type::Int, Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "mail_msg_set_subject".into(),
+            Type::Fn(vec![Type::Int, Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "mail_msg_set_text".into(),
+            Type::Fn(vec![Type::Int, Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "mail_msg_set_html".into(),
+            Type::Fn(vec![Type::Int, Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "mail_msg_add_header".into(),
+            Type::Fn(
+                vec![Type::Int, Type::String, Type::String],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "mail_msg_attach".into(),
+            Type::Fn(
+                vec![Type::Int, Type::String, Type::String, Type::String],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "mail_msg_build".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::String)),
+        );
+        fns.insert(
+            "mail_msg_envelope_from".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::String)),
+        );
+        fns.insert(
+            "mail_msg_rcpt_count".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "mail_msg_rcpt_at".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::String)),
+        );
+        fns.insert(
+            "mail_simple".into(),
+            Type::Fn(
+                vec![Type::String, Type::String, Type::String, Type::String],
+                Box::new(Type::String),
+            ),
+        );
+        fns.insert(
+            "smtp_new".into(),
+            Type::Fn(vec![Type::String, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "smtp_set_timeout_ms".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "smtp_connect".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "smtp_ehlo".into(),
+            Type::Fn(vec![Type::Int, Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "smtp_starttls".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "smtp_auth".into(),
+            Type::Fn(
+                vec![Type::Int, Type::String, Type::String],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "smtp_mail_from".into(),
+            Type::Fn(vec![Type::Int, Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "smtp_rcpt_to".into(),
+            Type::Fn(vec![Type::Int, Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "smtp_data".into(),
+            Type::Fn(vec![Type::Int, Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "smtp_quit".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "smtp_close".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "smtp_last_reply".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::String)),
+        );
+        fns.insert(
+            "smtp_last_code".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "smtp_send_built".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "smtp_send_msg".into(),
+            Type::Fn(
+                vec![
+                    Type::String,
+                    Type::Int,
+                    Type::String,
+                    Type::String,
+                    Type::Int,
+                    Type::Int,
+                ],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "smtp_mock_start".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "smtp_mock_port".into(),
+            Type::Fn(vec![], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "smtp_mock_serve_once".into(),
+            Type::Fn(vec![], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "smtp_mock_last_message".into(),
+            Type::Fn(vec![], Box::new(Type::String)),
+        );
+        fns.insert(
+            "smtp_mock_last_from".into(),
+            Type::Fn(vec![], Box::new(Type::String)),
+        );
+        fns.insert(
+            "smtp_mock_last_rcpt".into(),
+            Type::Fn(vec![], Box::new(Type::String)),
+        );
+        fns.insert(
+            "smtp_mock_stop".into(),
+            Type::Fn(vec![], Box::new(Type::Int)),
+        );
         fns.insert(
             "reflect_type_schema".into(),
             Type::Fn(vec![Type::String], Box::new(Type::String)),
@@ -5000,6 +6686,33 @@ impl TypeChecker {
         fns.insert(
             "ws_client_send_ping".into(),
             Type::Fn(vec![Type::Int, Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "ws_client_send_close".into(),
+            Type::Fn(
+                vec![Type::Int, Type::Int, Type::String],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "ws_client_recv".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::String)),
+        );
+        fns.insert(
+            "ws_send_pong".into(),
+            Type::Fn(vec![Type::Int, Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "ws_last_close_code".into(),
+            Type::Fn(vec![], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "ws_last_fin".into(),
+            Type::Fn(vec![], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "ws_last_status".into(),
+            Type::Fn(vec![], Box::new(Type::Int)),
         );
         fns.insert(
             "quic_stub".into(),
@@ -5281,6 +6994,43 @@ impl TypeChecker {
             "gc_arena_new".into(),
             Type::Fn(vec![], Box::new(Type::Arena)),
         );
+        // Optional GC (apps only; forbidden when systems=true / gc=false).
+        fns.insert(
+            "gc_alloc".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "gc_collect".into(),
+            Type::Fn(vec![], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "gc_live".into(),
+            Type::Fn(vec![], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "gc_enabled".into(),
+            Type::Fn(vec![], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "gc_root".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "gc_unroot".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "gc_link".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "gc_mark".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "gc_root_count".into(),
+            Type::Fn(vec![], Box::new(Type::Int)),
+        );
         // HTTP handler surface
         fns.insert(
             "http_bind".into(),
@@ -5398,6 +7148,44 @@ impl TypeChecker {
         fns.insert(
             "tls_server_available".into(),
             Type::Fn(vec![], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "tls_client_available".into(),
+            Type::Fn(vec![], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "tls_client_new".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Named("TlsClient".into()))),
+        );
+        fns.insert(
+            "tls_client_new_insecure".into(),
+            Type::Fn(vec![], Box::new(Type::Named("TlsClient".into()))),
+        );
+        fns.insert(
+            "tls_client_free".into(),
+            Type::Fn(vec![Type::Named("TlsClient".into())], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "tls_connect".into(),
+            Type::Fn(
+                vec![Type::Named("TlsClient".into()), Type::Int, Type::String],
+                Box::new(Type::Named("TlsConn".into())),
+            ),
+        );
+        fns.insert(
+            "tls_connect_start".into(),
+            Type::Fn(
+                vec![Type::Named("TlsClient".into()), Type::Int, Type::String],
+                Box::new(Type::Named("TlsConn".into())),
+            ),
+        );
+        fns.insert(
+            "tls_peer_cn".into(),
+            Type::Fn(vec![Type::Named("TlsConn".into())], Box::new(Type::String)),
+        );
+        fns.insert(
+            "tls_conn_version".into(),
+            Type::Fn(vec![Type::Named("TlsConn".into())], Box::new(Type::String)),
         );
         fns.insert(
             "tls_server_new".into(),
@@ -5699,6 +7487,29 @@ impl TypeChecker {
             ),
         );
         fns.insert(
+            "h3_stream_method".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::String)),
+        );
+        fns.insert(
+            "h3_stream_path".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::String)),
+        );
+        fns.insert(
+            "h3_stream_body".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::String)),
+        );
+        fns.insert(
+            "h3_stream_authority".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::String)),
+        );
+        fns.insert(
+            "h3_response".into(),
+            Type::Fn(
+                vec![Type::Int, Type::Int, Type::Int, Type::String, Type::String],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
             "h3_server_close".into(),
             Type::Fn(vec![Type::Int], Box::new(Type::Int)),
         );
@@ -5848,6 +7659,24 @@ impl TypeChecker {
         fns.insert(
             "secret_drop".into(),
             Type::Fn(vec![Type::Named("Secret".into())], Box::new(Type::Void)),
+        );
+        fns.insert(
+            "secret_len".into(),
+            Type::Fn(vec![Type::Named("Secret".into())], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "secret_eq_str".into(),
+            Type::Fn(
+                vec![Type::Named("Secret".into()), Type::String],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "hkdf_sha256".into(),
+            Type::Fn(
+                vec![Type::String, Type::String, Type::String, Type::Int],
+                Box::new(Type::String),
+            ),
         );
         fns.insert(
             "http_header_ok".into(),
@@ -6025,6 +7854,18 @@ impl TypeChecker {
         fns.insert(
             "tcp_connect".into(),
             Type::Fn(vec![Type::String, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "tcp_connect_timeout".into(),
+            Type::Fn(vec![Type::String, Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "tcp_set_he_delay_ms".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Void)),
+        );
+        fns.insert(
+            "tcp_get_he_delay_ms".into(),
+            Type::Fn(vec![], Box::new(Type::Int)),
         );
         fns.insert(
             "tcp_connect_nb".into(),
@@ -6312,9 +8153,13 @@ impl TypeChecker {
             unsafe_depth: 0,
             systems_crate: false,
             gc_enabled: false,
+            race_outstanding: HashSet::new(),
+            race_stack: Vec::new(),
+            race_sync_locals: HashSet::new(),
             explicit_visibility: false,
             bounds_checks_always: false,
             generic_fns: HashMap::new(),
+            deprecated_fns: HashMap::new(),
             active_type_params: HashSet::new(),
             mono_fns: Vec::new(),
             mono_generated: HashSet::new(),
@@ -6555,6 +8400,10 @@ impl TypeChecker {
                 Item::Fn(f) => {
                     if f.is_const {
                         self.const_fns.insert(f.name.clone(), f.clone());
+                    }
+                    if let crate::ast::ApiStability::Deprecated { message } = &f.stability {
+                        self.deprecated_fns
+                            .insert(f.name.clone(), message.clone());
                     }
                     if !f.type_params.is_empty() {
                         // Generic template — monomorphized on call.
@@ -7446,6 +9295,7 @@ impl TypeChecker {
                         "cannot assign to immutable `{name}` (use `let mut`)"
                     )));
                 }
+                self.assert_no_race_write(name)?;
                 let vt = self.check_expr(value)?;
                 if !self.compatible(&vt, &ty) {
                     return Err(TypeError::new(format!(
@@ -7460,6 +9310,10 @@ impl TypeChecker {
                     self.moved_holds.insert(name.clone(), false);
                     self.hold_moved_fields.insert(name.clone(), HashSet::new());
                 }
+                // Track Sync handles for race model (allowed concurrent mut).
+                if self.is_sync_ty(&ty) {
+                    self.race_sync_locals.insert(name.clone());
+                }
                 Ok(())
             }
             Stmt::IndexAssign { base, index, value } => {
@@ -7470,6 +9324,7 @@ impl TypeChecker {
                         ))
                         .hint("drop the share first"));
                     }
+                    self.assert_no_race_write(name)?;
                 }
                 let bt = self.check_expr(base)?;
                 let it = self.check_expr(index)?;
@@ -7534,6 +9389,7 @@ impl TypeChecker {
                         ))
                         .hint("drop the share first"));
                     }
+                    self.assert_no_race_write(name)?;
                     if self.hold_vars.contains_key(name) {
                         if self.moved_holds.get(name).copied().unwrap_or(false) {
                             return Err(TypeError::new(format!("use of moved value `{name}`")));
@@ -8568,11 +10424,70 @@ impl TypeChecker {
             }
             Expr::Call { callee, args } => {
                 if let Expr::Ident(name) = callee.as_ref() {
+                    // API stability: `#[deprecated]` is a hard error at call sites.
+                    if let Some(msg) = self.deprecated_fns.get(name) {
+                        let detail = if msg.is_empty() {
+                            format!("call to deprecated function `{name}`")
+                        } else {
+                            format!("call to deprecated function `{name}`: {msg}")
+                        };
+                        return Err(TypeError::new(detail).hint(
+                            "remove the call or drop `#[deprecated]` from the definition",
+                        ));
+                    }
                     // User-defined generic: monomorphize on call
                     if self.generic_fns.contains_key(name) {
                         return self.check_generic_call(name, args);
                     }
                     match name.as_str() {
+                        "gc_alloc" | "gc_collect" | "gc_live" | "gc_enabled" | "gc_root"
+                        | "gc_unroot" | "gc_link" | "gc_mark" | "gc_root_count" => {
+                            if !self.gc_enabled {
+                                return Err(TypeError::new(
+                                    "optional GC is disabled (enable with `[package] gc = true` in mako.toml; forbidden when systems = true)",
+                                )
+                                .hint("GC is app-only and never mandatory — prefer hold/share/arena on the hot path"));
+                            }
+                            if name == "gc_enabled"
+                                || name == "gc_collect"
+                                || name == "gc_live"
+                                || name == "gc_root_count"
+                            {
+                                if !args.is_empty() {
+                                    return Err(TypeError::new(format!(
+                                        "{name} takes no arguments"
+                                    )));
+                                }
+                                return Ok(Type::Int);
+                            }
+                            if name == "gc_link" {
+                                if args.len() != 2 {
+                                    return Err(TypeError::new(
+                                        "gc_link expects (parent: int, child: int)",
+                                    ));
+                                }
+                                for a in args {
+                                    let t = self.check_expr(a)?;
+                                    if !is_int_family(&t) {
+                                        return Err(TypeError::new("gc_link expects int handles"));
+                                    }
+                                }
+                                return Ok(Type::Int);
+                            }
+                            // gc_alloc / gc_root / gc_unroot / gc_mark (nbytes or handle)
+                            if args.len() != 1 {
+                                return Err(TypeError::new(format!(
+                                    "{name} expects one int argument"
+                                )));
+                            }
+                            let t = self.check_expr(&args[0])?;
+                            if !is_int_family(&t) {
+                                return Err(TypeError::new(format!(
+                                    "{name} expects int"
+                                )));
+                            }
+                            return Ok(Type::Int);
+                        }
                         "Ok" if args.len() == 1 => {
                             // Prefer expected Result shape from current_expected (nested
                             // constructors) or function return type.
@@ -8776,8 +10691,8 @@ impl TypeChecker {
                                     Ok(Type::Named("ReflectValue".into()))
                                 }
                                 _ => Err(TypeError::new(
-                                    "reflect_value_of expects a POD struct (int/float/bool/string \
-                                     fields, or nested POD structs)",
+                                    "reflect_value_of expects a reflectable struct (POD leaves, \
+                                     nested POD, Option/Result/array/map of reflectable fields)",
                                 )),
                             };
                         }
@@ -10047,24 +11962,81 @@ impl TypeChecker {
             Expr::Try(inner) => {
                 let t = self.check_expr(inner)?;
                 match t {
-                    Type::Result(ok, _) => {
-                        // Function must return Result
-                        if !matches!(self.current_ret, Type::Result(_, _)) {
-                            return Err(TypeError::new(
-                                "`?` only allowed in functions returning Result",
-                            ));
+                    Type::Result(ok, err) => match &self.current_ret {
+                        // Same-family Result: peel Ok, early-return Err (including nested Result).
+                        Type::Result(ret_ok, ret_err) => {
+                            // Err types must be compatible for direct rethrow.
+                            if !self.compatible(&err, ret_err)
+                                && !matches!((err.as_ref(), ret_err.as_ref()), (Type::String, Type::String))
+                            {
+                                // Still allow when both are string-ish or identical after display
+                                if err.display() != ret_err.display() {
+                                    return Err(TypeError::new(format!(
+                                        "`?` Result error type {} is not compatible with function Err {}",
+                                        err.display(),
+                                        ret_err.display()
+                                    )));
+                                }
+                            }
+                            // Ok payload may be nested Result/Option — peel one layer only.
+                            let _ = ret_ok;
+                            Ok(*ok)
                         }
-                        Ok(*ok)
-                    }
-                    Type::Option(inner) => {
-                        // Function must return Option (early-return None)
-                        if !matches!(self.current_ret, Type::Option(_)) {
-                            return Err(TypeError::new(
-                                "`?` on Option only allowed in functions returning Option",
-                            ));
+                        // Exotic: Result? in Option-returning fn → Ok unwrap, Err → None.
+                        Type::Option(ret_inner) => {
+                            if !self.compatible(&ok, ret_inner)
+                                && !matches!(
+                                    (ok.as_ref(), ret_inner.as_ref()),
+                                    (Type::Int, Type::Int)
+                                        | (Type::String, Type::String)
+                                        | (Type::Bool, Type::Bool)
+                                        | (Type::Float, Type::Float)
+                                )
+                            {
+                                // Allow when Ok type matches Option payload loosely.
+                                if ok.display() != ret_inner.display() {
+                                    return Err(TypeError::new(format!(
+                                        "`?` on Result in Option-returning function: Ok {} vs Option[{}]",
+                                        ok.display(),
+                                        ret_inner.display()
+                                    )));
+                                }
+                            }
+                            Ok(*ok)
                         }
-                        Ok(*inner)
-                    }
+                        _ => Err(TypeError::new(
+                            "`?` on Result only allowed in functions returning Result or Option",
+                        )),
+                    },
+                    Type::Option(inner) => match &self.current_ret {
+                        Type::Option(_) => Ok(*inner),
+                        // Exotic: Option? in Result[T, string] (or Result[T, E]) → None becomes Err.
+                        Type::Result(ret_ok, ret_err) => {
+                            if !self.compatible(&inner, ret_ok)
+                                && inner.display() != ret_ok.display()
+                            {
+                                return Err(TypeError::new(format!(
+                                    "`?` on Option in Result-returning function: Some {} vs Ok {}",
+                                    inner.display(),
+                                    ret_ok.display()
+                                )));
+                            }
+                            // Prefer string errors for auto-None conversion.
+                            if !matches!(
+                                ret_err.as_ref(),
+                                Type::String | Type::Named(_)
+                            ) && !matches!(ret_err.as_ref(), Type::Enum { .. })
+                            {
+                                return Err(TypeError::new(
+                                    "`?` on Option in Result-returning function needs string or enum Err type",
+                                ));
+                            }
+                            Ok(*inner)
+                        }
+                        _ => Err(TypeError::new(
+                            "`?` on Option only allowed in functions returning Option or Result",
+                        )),
+                    },
                     other => Err(TypeError::new(format!(
                         "`?` needs Result or Option, got {}",
                         other.display()
@@ -10085,12 +12057,18 @@ impl TypeChecker {
                 let t = self.check_expr(expr)?;
                 // Send-like seed after typecheck (no second check_expr — avoids double hold moves).
                 self.assert_kick_sendable(expr)?;
+                // Static race seed: track mut non-Copy captures until join.
+                self.note_kick_race_captures(expr);
                 Ok(Type::Job(Box::new(t)))
             }
             Expr::Join(inner) => {
                 let t = self.check_expr(inner)?;
                 match t {
-                    Type::Job(inner) => Ok(*inner),
+                    Type::Job(inner) => {
+                        // Pop latest kick race frame (nested kicks supported via stack).
+                        self.race_join_clear();
+                        Ok(*inner)
+                    }
                     other => Err(TypeError::new(format!(
                         "join needs Job, got {}",
                         other.display()
@@ -10513,12 +12491,12 @@ impl TypeChecker {
                         if bindings.len() != 1 {
                             return Err(TypeError::new("Ok(v) needs one binding"));
                         }
-                        self.define(&bindings[0], *ok.clone(), false);
+                        self.bind_pattern(&bindings[0], ok)?;
                     } else if name == "Err" {
                         if bindings.len() != 1 {
                             return Err(TypeError::new("Err(e) needs one binding"));
                         }
-                        self.define(&bindings[0], *err.clone(), false);
+                        self.bind_pattern(&bindings[0], err)?;
                     } else {
                         return Err(TypeError::new(format!("unknown Result variant `{name}`")));
                     }
@@ -10529,7 +12507,7 @@ impl TypeChecker {
                         if bindings.len() != 1 {
                             return Err(TypeError::new("Some(v) needs one binding"));
                         }
-                        self.define(&bindings[0], *inner.clone(), false);
+                        self.bind_pattern(&bindings[0], inner)?;
                     } else if name == "None" {
                         if !bindings.is_empty() {
                             return Err(TypeError::new("None takes no bindings"));
@@ -10551,7 +12529,7 @@ impl TypeChecker {
                         )));
                     }
                     for (b, ft) in bindings.iter().zip(fields) {
-                        self.define(b, ft.clone(), false);
+                        self.bind_pattern(b, ft)?;
                     }
                     Ok(())
                 }
@@ -10560,6 +12538,42 @@ impl TypeChecker {
                     other.display()
                 ))),
             },
+            Pattern::Struct { name, fields } => {
+                let st = match scrut {
+                    Type::Named(n) if n == name => self.types.get(n).cloned(),
+                    Type::Struct { name: sn, .. } if sn == name => Some(scrut.clone()),
+                    Type::Named(n) => self.types.get(n).cloned(),
+                    Type::Struct { .. } => Some(scrut.clone()),
+                    _ => None,
+                };
+                let Some(Type::Struct {
+                    name: sn,
+                    fields: sfields,
+                }) = st
+                else {
+                    return Err(TypeError::new(format!(
+                        "struct pattern `{name}` does not match {}",
+                        scrut.display()
+                    )));
+                };
+                if sn != *name && *name != sn {
+                    // allow if scrut is the named struct
+                    if !matches!(scrut, Type::Named(n) if n == name) {
+                        return Err(TypeError::new(format!(
+                            "struct pattern `{name}` does not match {sn}"
+                        )));
+                    }
+                }
+                for (fname, pat) in fields {
+                    let Some((_, ft)) = sfields.iter().find(|(n, _)| n == fname) else {
+                        return Err(TypeError::new(format!(
+                            "struct `{name}` has no field `{fname}`"
+                        )));
+                    };
+                    self.bind_pattern(pat, ft)?;
+                }
+                Ok(())
+            }
         }
     }
 
@@ -10594,8 +12608,8 @@ impl TypeChecker {
                     Self::cover_pattern(a, scrut, has_wildcard, covered);
                 }
             }
-            Pattern::Tuple(_) => {
-                // Tuple patterns are treated as covering when present with wildcard fields.
+            Pattern::Tuple(_) | Pattern::Struct { .. } => {
+                // Struct/tuple patterns are treated as covering when present with wildcard fields.
                 *has_wildcard = true;
             }
         }
@@ -10647,22 +12661,23 @@ impl TypeChecker {
         Ok(())
     }
 
-    /// Seed Send-like rules for `crew.kick(f(args…))` after the kick expr is typed.
-    /// Allows Copy, string, channels, POD structs (int/float/bool fields), ShareInt.
+    /// Send-like rules for `crew.kick(f(args…))` after the kick expr is typed.
+    /// Fuller model: Copy, string, channels, deep-POD structs, ShareInt/sync handles,
+    /// and Option/Result/tuple of sendable payloads (heap-boxed across spawn).
     fn assert_kick_sendable(&self, expr: &Expr) -> Result<(), TypeError> {
         match expr {
             Expr::Call { args, .. } => {
                 for a in args {
                     let t = self.peek_type(a)?;
-                    if !self.is_kick_sendable_ty(&t) {
+                    if !self.is_send_ty(&t) {
                         return Err(TypeError::new(format!(
-                            "cannot kick value of type {} across a crew task",
+                            "cannot kick value of type {} across a crew task (not Send)",
                             t.display()
                         ))
                         .hint(
-                            "kick allows Copy, string, channels, POD structs (int/float/bool fields), \
-                             ShareInt (auto-cloned), CMap / Mutex / RWMutex / AtomicInt — \
-                             not arrays/maps/non-POD structs/arenas",
+                            "Send: Copy, string, channels, deep-POD structs, \
+                             Option/Result/tuple of sendables, ShareInt (auto-cloned), \
+                             CMap / Mutex / RWMutex / AtomicInt — not arrays/maps/arenas/non-POD",
                         ));
                     }
                 }
@@ -10672,28 +12687,15 @@ impl TypeChecker {
         }
     }
 
-    /// Flat POD only (kick Send): scalars/string fields — no nested structs/maps.
+    /// Deep POD (kick Send): scalars/string fields, or nested POD structs only.
     fn is_pod_struct(&self, name: &str) -> bool {
-        match self.types.get(name) {
-            Some(Type::Struct { fields, .. }) => fields.iter().all(|(_, t)| {
-                matches!(
-                    t,
-                    Type::Int
-                        | Type::Int64
-                        | Type::Int32
-                        | Type::Int8
-                        | Type::Byte
-                        | Type::Bool
-                        | Type::Float
-                        | Type::String
-                )
-            }),
-            _ => false,
-        }
+        self.is_pod_struct_depth(name, 0)
     }
 
-    /// Reflect bag: flat POD fields or nested POD structs (leaf-flattened).
-    fn is_reflectable_struct(&self, name: &str) -> bool {
+    fn is_pod_struct_depth(&self, name: &str, depth: usize) -> bool {
+        if depth > 16 {
+            return false;
+        }
         match self.types.get(name) {
             Some(Type::Struct { fields, .. }) => fields.iter().all(|(_, t)| match t {
                 Type::Int
@@ -10704,10 +12706,47 @@ impl TypeChecker {
                 | Type::Bool
                 | Type::Float
                 | Type::String => true,
-                Type::Named(n) => self.is_reflectable_struct(n),
-                Type::Struct { name: sn, .. } => self.is_reflectable_struct(sn),
+                Type::Named(n) => self.is_pod_struct_depth(n, depth + 1),
+                Type::Struct { name: sn, .. } => self.is_pod_struct_depth(sn, depth + 1),
                 _ => false,
             }),
+            _ => false,
+        }
+    }
+
+    /// Reflect bag: POD leaves, nested POD structs, Option/Result/array/map of reflectable.
+    fn is_reflectable_struct(&self, name: &str) -> bool {
+        match self.types.get(name) {
+            Some(Type::Struct { fields, .. }) => {
+                fields.iter().all(|(_, t)| self.is_reflectable_ty(t))
+            }
+            _ => false,
+        }
+    }
+
+    fn is_reflectable_ty(&self, t: &Type) -> bool {
+        match t {
+            Type::Int
+            | Type::Int64
+            | Type::Int32
+            | Type::Int8
+            | Type::Byte
+            | Type::Bool
+            | Type::Float
+            | Type::String => true,
+            Type::Named(n) => self.is_reflectable_struct(n),
+            Type::Struct { name: sn, .. } => self.is_reflectable_struct(sn),
+            Type::Option(inner) => self.is_reflectable_ty(inner),
+            Type::Result(ok, err) => self.is_reflectable_ty(ok) && self.is_reflectable_ty(err),
+            Type::Array(elem) => self.is_reflectable_ty(elem),
+            Type::Map(k, v) => {
+                // Reflect maps with string or int keys and reflectable values.
+                matches!(
+                    k.as_ref(),
+                    Type::String | Type::Int | Type::Int64 | Type::Int32 | Type::Int8 | Type::Byte
+                ) && self.is_reflectable_ty(v)
+            }
+            Type::Tuple(elems) => elems.iter().all(|e| self.is_reflectable_ty(e)),
             _ => false,
         }
     }
@@ -10719,8 +12758,114 @@ impl TypeChecker {
         match t {
             Type::Named(n) if self.is_pod_struct(n) => true,
             Type::Struct { name, .. } if self.is_pod_struct(name) => true,
+            // Fuller Send: sum types and products of sendable payloads.
+            Type::Option(inner) => self.is_kick_sendable_ty(inner),
+            Type::Result(ok, err) => {
+                self.is_kick_sendable_ty(ok) && self.is_kick_sendable_ty(err)
+            }
+            Type::Tuple(elems) => elems.iter().all(|e| self.is_kick_sendable_ty(e)),
+            Type::Enum { variants, .. } => variants.iter().all(|(_, fields)| {
+                fields.iter().all(|f| self.is_kick_sendable_ty(f))
+            }),
             _ => false,
         }
+    }
+
+    /// Type-level Sync: safe concurrent shared mutation (internal locking/atomics).
+    fn is_sync_ty(&self, t: &Type) -> bool {
+        matches!(
+            t,
+            Type::Chan(_) | Type::CMap | Type::Mutex | Type::RWMutex
+        ) || matches!(
+            t,
+            Type::Named(n) if n == "ShareInt"
+                || n == "AtomicInt"
+                || n == "Mutex"
+                || n == "RWMutex"
+                || n == "CMap"
+                || n == "WaitGroup"
+        )
+    }
+
+    /// Type-level Send: may cross a kick boundary (same as kick sendable rules).
+    fn is_send_ty(&self, t: &Type) -> bool {
+        self.is_kick_sendable_ty(t)
+    }
+
+    /// Static race model: reject concurrent mutation of a `let mut` local whose
+    /// value was passed into a kicked task before join. Copy types are value-copied
+    /// at kick; string/POD are cloned/boxed. Remaining mut captures are race-prone
+    /// unless they are explicit Sync handles.
+    fn note_kick_race_captures(&mut self, expr: &Expr) {
+        let Expr::Call { args, .. } = expr else {
+            return;
+        };
+        let mut frame = HashSet::new();
+        for a in args {
+            if let Expr::Ident(name) = a {
+                if let Some((t, is_mut)) = self.lookup(name).cloned() {
+                    if !is_mut {
+                        continue;
+                    }
+                    if is_copy_type(&t) {
+                        continue;
+                    }
+                    // Explicit Sync handles: intentional shared mutable state.
+                    if self.is_sync_ty(&t) {
+                        self.race_sync_locals.insert(name.clone());
+                        continue;
+                    }
+                    // String and deep-POD structs are cloned/boxed at kick — no shared race.
+                    if matches!(t, Type::String)
+                        || matches!(&t, Type::Named(n) if self.is_pod_struct(n))
+                        || matches!(&t, Type::Struct { name: sn, .. } if self.is_pod_struct(sn))
+                    {
+                        continue;
+                    }
+                    // Option/Result/tuple/enum: heap-boxed at kick, but parent still owns
+                    // the original binding — mutating it before join is a logical data race.
+                    if matches!(
+                        t,
+                        Type::Option(_)
+                            | Type::Result(_, _)
+                            | Type::Tuple(_)
+                            | Type::Enum { .. }
+                            | Type::Array(_)
+                            | Type::Map(_, _)
+                    ) {
+                        frame.insert(name.clone());
+                        continue;
+                    }
+                    frame.insert(name.clone());
+                }
+            }
+        }
+        for n in &frame {
+            self.race_outstanding.insert(n.clone());
+        }
+        self.race_stack.push(frame);
+    }
+
+    fn race_join_clear(&mut self) {
+        // Pop latest kick frame; rebuild outstanding as union of remaining frames.
+        let _ = self.race_stack.pop();
+        self.race_outstanding.clear();
+        for frame in &self.race_stack {
+            self.race_outstanding.extend(frame.iter().cloned());
+        }
+    }
+
+    fn assert_no_race_write(&self, name: &str) -> Result<(), TypeError> {
+        if self.race_outstanding.contains(name) {
+            return Err(TypeError::new(format!(
+                "potential data race: mutating `{name}` while a kicked task may still use it"
+            ))
+            .hint(
+                "join the job before writing, or use Mutex / AtomicInt / ShareInt / channels \
+                 for shared mutable state (Sync handles)",
+            ));
+        }
+        Ok(())
     }
 
     /// Best-effort type of an expression without re-running ownership effects.
@@ -10791,7 +12936,8 @@ fn is_kick_sendable(t: &Type) -> bool {
         // ShareInt: atomic RC + kick auto-clones onto the heap (see codegen).
         Type::Named(n) if n == "ShareInt" || n == "AtomicInt" => true,
         Type::Named(n) if n == "Arena" || n == "Crew" => false,
-        Type::Named(_) => false, // non-POD structs — use channels
+        Type::Named(_) => false, // non-POD / handled in TypeChecker::is_kick_sendable_ty
+        // Option/Result/tuple/enum handled in TypeChecker::is_kick_sendable_ty (fuller Send).
         Type::Array(_) | Type::Map(_, _) | Type::Tuple(_) | Type::Option(_) | Type::Result(_, _) => {
             false
         }
@@ -10819,6 +12965,8 @@ fn is_copy_type(t: &Type) -> bool {
             | Type::Byte
             | Type::Bool
             | Type::Float
+            // Uuid/ULID: 16-byte POD — free to copy, kick, re-read (hot path).
+            | Type::Uuid
     )
 }
 
@@ -11023,7 +13171,8 @@ pub fn specialize_fn(template: &FnDef, mono_name: &str, subst: &HashMap<String, 
             .map(|t| subst_type_expr(t, subst)),
         body: subst_block(&template.body, subst),
         exported: template.exported,
-    is_const: false,
+        is_const: template.is_const,
+        stability: template.stability.clone(),
     }
 }
 

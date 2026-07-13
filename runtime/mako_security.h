@@ -59,6 +59,10 @@ static inline void mako_secret_drop(MakoSecret *s) {
     s->len = 0;
 }
 
+static inline int64_t mako_secret_len(MakoSecret s) {
+    return (int64_t)s.len;
+}
+
 /* Constant-time equality for tokens (length mismatch still scans max). */
 static inline int64_t mako_const_eq_bytes(const void *a, size_t an, const void *b, size_t bn) {
     const unsigned char *x = (const unsigned char *)(a ? a : "");
@@ -82,6 +86,13 @@ static inline int64_t mako_const_eq(MakoString a, MakoString b) {
 /* Alias */
 static inline int64_t mako_crypto_eq(MakoString a, MakoString b) {
     return mako_const_eq(a, b);
+}
+
+/* Constant-time compare secret to a string (token check without early exit). */
+static inline int64_t mako_secret_eq_str(MakoSecret s, MakoString other) {
+    return mako_const_eq_bytes(
+        s.data, s.len, other.data ? other.data : "", other.len
+    );
 }
 
 /* HTTP header name: token chars only (RFC 7230 tchar), no CR/LF/NUL/space/colon. */

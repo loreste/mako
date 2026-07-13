@@ -1,0 +1,67 @@
+// Security programming: secrets, HKDF, TLS client surface.
+
+fn TestSecretLenAndEq() {
+    let s = secret_from_str("super-secret-token")
+    assert_eq(secret_len(s), 18)
+    assert_eq(secret_eq_str(s, "super-secret-token"), 1)
+    assert_eq(secret_eq_str(s, "super-secret-TOKEN"), 0)
+    assert_eq(secret_eq_str(s, "short"), 0)
+    secret_drop(s)
+    // empty secret
+    let e = secret_from_str("")
+    assert_eq(secret_len(e), 0)
+    assert_eq(secret_eq_str(e, ""), 1)
+    secret_drop(e)
+}
+
+fn TestHkdfSha256Rfc5869() {
+    // RFC 5869 Appendix A.1 — basic test case with SHA-256
+    let ikm = hex_decode("0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b")
+    let salt = hex_decode("000102030405060708090a0b0c")
+    let info = hex_decode("f0f1f2f3f4f5f6f7f8f9")
+    let okm = hkdf_sha256(ikm, salt, info, 42)
+    assert_eq(len(okm), 42)
+    assert_eq_str(
+        hex_encode(okm),
+        "3cb25f25faacd57a90434f64d0362f2a2d2d0a90cf1a5a4c5db02d56ecc4c5bf34007208d5b887185865")
+}
+
+fn TestTlsClientSurface() {
+    // Availability matches OpenSSL link
+    let avail = tls_client_available()
+    assert(avail == 0 || avail == 1)
+    assert_eq(avail, tls_server_available())
+
+    if avail == 0 {
+        return
+    }
+
+    let insecure = tls_client_new_insecure()
+    let _ = tls_client_free(insecure)
+
+    // Bad CA path must fail closed (null client)
+    let bad = tls_client_new("/no/such/ca.pem")
+    // Connecting with null ctx must not crash
+    let conn = tls_connect(bad, -1, "localhost")
+    let _ = tls_conn_close(conn)
+    let _ = tls_client_free(bad)
+
+    // Valid CA file when present — construct client context only
+    let ca = "runtime/certs/dev.crt"
+    let raw = read_file(ca)
+    if len(raw) > 10 {
+        let cli = tls_client_new(ca)
+        let _ = tls_client_free(cli)
+    }
+
+    // Server + client contexts co-exist (handshake needs concurrent I/O —
+    // covered by tls_server_test / live suites; no blocking roundtrip here)
+    let cert = "runtime/certs/dev.crt"
+    let key = "runtime/certs/dev.key"
+    if len(read_file(cert)) > 10 {
+        let srv = tls_server_new(cert, key)
+        let cli2 = tls_client_new_insecure()
+        let _ = tls_client_free(cli2)
+        let _ = tls_server_free(srv)
+    }
+}

@@ -1,0 +1,129 @@
+// Production filesystem / storage: atomic write, mkdir_all, rename, dio, mmap.
+
+fn TestMkdirAllAndRemoveAll() {
+    let root = "/tmp/mako_fs_storage_test"
+    let nested = "/tmp/mako_fs_storage_test/a/b/c"
+    let _ = remove_all(root)
+    assert_eq(mkdir_all(nested), 0)
+    assert(is_dir(nested))
+    assert_eq(write_file(path_join(nested, "x.txt"), "hello"), 0)
+    assert_eq(is_file(path_join(nested, "x.txt")), 1)
+    assert_eq(path_size(path_join(nested, "x.txt")), 5)
+    assert(file_mtime(path_join(nested, "x.txt")) > 0)
+    assert_eq(remove_all(root), 0)
+    assert(not file_exists(root))
+}
+
+fn TestAtomicWriteAndRename() {
+    let dir = "/tmp/mako_fs_atomic"
+    let path = "/tmp/mako_fs_atomic/config.json"
+    let _ = remove_all(dir)
+    assert_eq(mkdir_all(dir), 0)
+    assert_eq(atomic_write_file(path, "{\"ok\":true}\n"), 0)
+    assert_eq_str(read_file(path), "{\"ok\":true}\n")
+    // Second atomic write replaces.
+    assert_eq(atomic_write_file(path, "{\"v\":2}\n"), 0)
+    assert_eq_str(read_file(path), "{\"v\":2}\n")
+    let dest = "/tmp/mako_fs_atomic/config2.json"
+    assert_eq(rename(path, dest), 0)
+    assert(not file_exists(path))
+    assert_eq(is_file(dest), 1)
+    assert_eq(remove_all(dir), 0)
+}
+
+fn TestCopyFileAndRmdir() {
+    let dir = "/tmp/mako_fs_copy"
+    let _ = remove_all(dir)
+    assert_eq(mkdir_all(dir), 0)
+    let src = "/tmp/mako_fs_copy/a.bin"
+    let dst = "/tmp/mako_fs_copy/b.bin"
+    assert_eq(write_file(src, "0123456789"), 0)
+    assert_eq(copy_file(src, dst), 0)
+    assert_eq_str(read_file(dst), "0123456789")
+    assert_eq(remove_file(src), 0)
+    assert_eq(remove_file(dst), 0)
+    assert_eq(rmdir(dir), 0)
+}
+
+fn TestTempFileAndRealpath() {
+    let t = temp_file("makofs")
+    assert(str_len(t) > 0)
+    assert(file_exists(t))
+    assert_eq(write_file(t, "tmp"), 0)
+    let abs = realpath(t)
+    assert(str_len(abs) > 0)
+    assert(str_contains(abs, "/tmp") || str_contains(abs, "makofs"))
+    assert_eq(remove_file(t), 0)
+    let td = temp_dir()
+    assert(str_len(td) > 0)
+    assert(is_dir(td))
+}
+
+fn TestSymlink() {
+    let dir = "/tmp/mako_fs_link"
+    let _ = remove_all(dir)
+    assert_eq(mkdir_all(dir), 0)
+    let target = "/tmp/mako_fs_link/target.txt"
+    let link = "/tmp/mako_fs_link/link.txt"
+    assert_eq(write_file(target, "linked"), 0)
+    assert_eq(symlink(target, link), 0)
+    let got = readlink(link)
+    // readlink may return relative or absolute depending on OS; must contain target name.
+    assert(str_contains(got, "target.txt") || str_eq(got, target))
+    assert_eq_str(read_file(link), "linked")
+    assert_eq(remove_all(dir), 0)
+}
+
+fn TestDioPreadPwrite() {
+    let path = "/tmp/mako_fs_dio.bin"
+    let _ = remove_file(path)
+    // mode=2 RDWR, flags=create|truncate (1|2=3)
+    let fd = file_open(path, 2, 3)
+    assert(fd >= 0)
+    assert_eq(pwrite(fd, "ABCDEFGH", 0), 8)
+    assert_eq(file_size(fd), 8)
+    assert_eq_str(pread(fd, 4, 2), "CDEF")
+    assert_eq(fsync(fd), 0)
+    assert_eq(file_truncate(fd, 4), 0)
+    assert_eq(file_size(fd), 4)
+    assert_eq(file_close(fd), 0)
+    assert_eq_str(read_file(path), "ABCD")
+    assert_eq(remove_file(path), 0)
+}
+
+fn TestMmapRoundtrip() {
+    let path = "/tmp/mako_fs_mmap.bin"
+    let _ = remove_file(path)
+    let m = mmap_create(path, 64)
+    assert(mmap_size(m) == 64)
+    assert_eq(mmap_write(m, 0, "mmap-ok"), 7)
+    assert_eq(mmap_sync(m, 1), 0)
+    assert_eq_str(mmap_read(m, 0, 7), "mmap-ok")
+    assert_eq(mmap_close(m), 0)
+    // Re-open read-only
+    let m2 = mmap_open(path, 0)
+    assert_eq_str(mmap_read(m2, 0, 7), "mmap-ok")
+    assert_eq(mmap_close(m2), 0)
+    assert_eq(remove_file(path), 0)
+}
+
+fn TestFileOpenExclusive() {
+    let path = "/tmp/mako_fs_excl.bin"
+    let _ = remove_file(path)
+    // create|exclusive = 1|32 = 33
+    let fd = file_open(path, 2, 33)
+    assert(fd >= 0)
+    assert_eq(file_close(fd), 0)
+    // Second exclusive create must fail
+    let fd2 = file_open(path, 2, 33)
+    assert_eq(fd2, -1)
+    assert_eq(remove_file(path), 0)
+}
+
+fn TestRejectEmbeddedNul() {
+    // Paths with embedded NUL must not be accepted (security).
+    let bad = "a" + hex_decode("00") + "b"
+    assert_eq(write_file(bad, "x"), -1)
+    assert_eq(mkdir_all(bad), -1)
+    assert_eq(file_open(bad, 0, 0), -1)
+}

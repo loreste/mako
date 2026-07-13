@@ -1,15 +1,58 @@
+// net/smtp — send email over SMTP from Mako.
+
 fn format_message(from: string, to: string, subject: string, body: string) -> string {
     return smtp_format_message(from, to, subject, body)
 }
-fn send_soft(host: string, port: int, msg: string) -> int { return smtp_send_soft(host, port, msg) }
+fn send_soft(host: string, port: int, msg: string) -> int {
+    return smtp_send_soft(host, port, msg)
+}
 fn send_dialog(host: string, port: int, from: string, to: string, msg: string) -> int {
     return smtp_send_dialog(host, port, from, to, msg)
 }
-fn auth_plain(user: string, pass: string) -> string { return smtp_auth_plain(user, pass) }
-fn send_auth(host: string, port: int, user: string, pass: string, from: string, to: string, msg: string) -> int {
+fn auth_plain(user: string, pass: string) -> string {
+    return smtp_auth_plain(user, pass)
+}
+fn send_auth(
+    host: string, port: int, user: string, pass: string, from: string, to: string, msg: string
+) -> int {
     return smtp_send_auth(host, port, user, pass, from, to, msg)
 }
-fn starttls_available() -> int { return smtp_starttls_available() }
-fn send_starttls(host: string, port: int, user: string, pass: string, from: string, to: string, msg: string) -> int {
+fn starttls_available() -> int {
+    return smtp_starttls_available()
+}
+fn send_starttls(
+    host: string, port: int, user: string, pass: string, from: string, to: string, msg: string
+) -> int {
     return smtp_send_starttls(host, port, user, pass, from, to, msg)
 }
+
+// Session API
+fn client_new(host: string, port: int) -> int { return smtp_new(host, port) }
+fn client_connect(c: int) -> int { return smtp_connect(c) }
+fn client_ehlo(c: int, hostname: string) -> int { return smtp_ehlo(c, hostname) }
+fn client_starttls(c: int) -> int { return smtp_starttls(c) }
+fn client_auth(c: int, user: string, pass: string) -> int { return smtp_auth(c, user, pass) }
+fn client_mail_from(c: int, from: string) -> int { return smtp_mail_from(c, from) }
+fn client_rcpt_to(c: int, to: string) -> int { return smtp_rcpt_to(c, to) }
+fn client_data(c: int, msg: string) -> int { return smtp_data(c, msg) }
+fn client_quit(c: int) -> int { return smtp_quit(c) }
+fn client_close(c: int) -> int { return smtp_close(c) }
+fn client_last_reply(c: int) -> string { return smtp_last_reply(c) }
+fn client_last_code(c: int) -> int { return smtp_last_code(c) }
+fn client_send_built(c: int, msg: int) -> int { return smtp_send_built(c, msg) }
+
+// One-shot: use_tls 0=plain, 1=try STARTTLS, 2=require STARTTLS
+fn send_msg(
+    host: string, port: int, user: string, pass: string, msg: int, use_tls: int
+) -> int {
+    return smtp_send_msg(host, port, user, pass, msg, use_tls)
+}
+
+// In-process mock SMTP (tests / local programming without an MTA)
+fn mock_start(port: int) -> int { return smtp_mock_start(port) }
+fn mock_port() -> int { return smtp_mock_port() }
+fn mock_serve_once() -> int { return smtp_mock_serve_once() }
+fn mock_last_message() -> string { return smtp_mock_last_message() }
+fn mock_last_from() -> string { return smtp_mock_last_from() }
+fn mock_last_rcpt() -> string { return smtp_mock_last_rcpt() }
+fn mock_stop() -> int { return smtp_mock_stop() }

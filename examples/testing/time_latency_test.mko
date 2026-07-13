@@ -1,0 +1,69 @@
+// Accurate clocks for low-latency programming.
+
+fn TestMonoAdvances() {
+    let a = mono_ns()
+    let b = mono_ns()
+    assert(b >= a)
+    let res = mono_res_ns()
+    assert(res > 0)
+    let oh = mono_overhead_ns()
+    assert(oh >= 0)
+    // overhead of two samples should be small (< 1ms on any sane host)
+    assert(oh < 1000000)
+}
+
+fn TestWallAndUnix() {
+    let w = wall_ms()
+    let u = time_unix()
+    assert(w > 0)
+    assert(u > 0)
+    // wall ms and unix seconds should be in the same ballpark
+    assert(w / 1000 >= u - 2)
+    assert(w / 1000 <= u + 2)
+    assert(now_ms() > 0)
+    assert(now_ns() > 0)
+}
+
+fn TestElapsedMono() {
+    let t0 = mono_us()
+    sleep_us(500)
+    let d = elapsed_us(t0)
+    // Allow OS sleep overshoot; require at least ~100µs of progress
+    assert(d >= 100)
+    let t1 = mono_ms()
+    sleep_ms(1)
+    assert(elapsed_mono_ms(t1) >= 0)
+}
+
+fn TestDeadline() {
+    let dl = deadline_ms(50)
+    assert_eq(deadline_expired(dl), 0)
+    assert(deadline_remaining_ns(dl) > 0)
+    sleep_ms(60)
+    assert_eq(deadline_expired(dl), 1)
+    assert_eq(deadline_remaining_ns(dl), 0)
+}
+
+fn TestSleepUntilAndSpin() {
+    let t0 = mono_ns()
+    let dl = deadline_ns(200000) // 200 µs
+    sleep_until_ns(dl)
+    let took = elapsed_ns(t0)
+    assert(took >= 100000) // at least ~100µs
+    // Spin a very short deadline
+    let d2 = mono_ns() + 50000 // 50µs
+    spin_until_ns(d2)
+    assert(mono_ns() >= d2)
+}
+
+fn TestCompatAliases() {
+    // now_ns is mono; now_ms is wall
+    let m0 = mono_ns()
+    let n0 = now_ns()
+    assert(n0 >= m0 - 10000000) // within 10ms of each other
+    assert(wall_ms() > 0)
+    assert(mono_ms() > 0)
+    assert(mono_us() > 0)
+    assert(wall_us() > 0)
+    assert(wall_ns() > 0)
+}

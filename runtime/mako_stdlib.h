@@ -713,11 +713,16 @@ static inline void mako_rwmutex_unlock(MakoRWMutex *m) {
 /* ---- log (structured-ish key=value) ---- */
 
 static inline void mako_log_debug(MakoString msg) {
+#if defined(MAKO_LOG_H)
+    mako_slog_debug(msg);
+#else
     fprintf(stderr, "[%lld debug] ", (long long)mako_now_ms());
     fwrite(msg.data, 1, msg.len, stderr);
     fputc('\n', stderr);
+#endif
 }
 
+#if !defined(MAKO_LOG_H)
 static inline void mako_log_kv(MakoString level, MakoString key, MakoString val) {
     fprintf(stderr, "[%lld ", (long long)mako_now_ms());
     fwrite(level.data, 1, level.len, stderr);
@@ -728,6 +733,7 @@ static inline void mako_log_kv(MakoString level, MakoString key, MakoString val)
     fwrite(val.data, 1, val.len, stderr);
     fputc('\n', stderr);
 }
+#endif
 
 /* ---- crypto: random bytes (OS CSPRNG) ---- */
 

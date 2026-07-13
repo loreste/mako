@@ -1,0 +1,43 @@
+// Compose and send email from Mako.
+//
+// Env (optional for real send):
+//   MAKO_SMTP_HOST  default 127.0.0.1
+//   MAKO_SMTP_PORT  default 1025 (MailHog / local catcher)
+//   MAKO_SMTP_USER / MAKO_SMTP_PASS
+//   MAKO_SMTP_TLS   0 plain | 1 try STARTTLS | 2 require STARTTLS
+//
+// Example with MailHog: docker run -p 1025:1025 -p 8025:8025 mailhog/mailhog
+
+fn main() {
+    let mut host = env_get("MAKO_SMTP_HOST")
+    if str_len(host) == 0 {
+        host = "127.0.0.1"
+    }
+    let mut port = 1025
+    let mut tls = 0
+    // Defaults: local MailHog-style catcher on 1025, plain SMTP.
+    let user = env_get("MAKO_SMTP_USER")
+    let pass = env_get("MAKO_SMTP_PASS")
+    // Override with: MAKO_SMTP_HOST / PORT / USER / PASS / TLS when sending for real.
+
+    let m = mail_msg_new()
+    let _ = mail_msg_set_from(m, "Mako App <app@example.com>")
+    let _ = mail_msg_add_to(m, "you@example.com")
+    let _ = mail_msg_set_subject(m, "Hello from Mako")
+    let _ = mail_msg_set_text(m, "This is a plain-text body sent from Mako SMTP.")
+    let _ = mail_msg_set_html(m, "<p>This is <b>HTML</b> from Mako.</p>")
+    let _ = mail_msg_attach(m, "hello.txt", "text/plain", "attachment payload")
+
+    print("message preview:")
+    print(mail_msg_build(m))
+
+    let rc = smtp_send_msg(host, port, user, pass, m, tls)
+    if rc == 1 {
+        print("sent ok")
+    } else if rc == -1 {
+        print("connect failed (is SMTP listening on " + host + "?)")
+    } else {
+        print("send failed")
+    }
+    let _ = mail_msg_free(m)
+}

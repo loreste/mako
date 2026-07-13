@@ -35,6 +35,10 @@ Book: [§11 Speed & memory safety](book/src/ch11-speed-safety.md) · Release how
 # GitHub Actions: job "Bench gate vs Rust" on ubuntu-latest
 ```
 
+**IDs on the hot path:** `Uuid` / ULID are **16-byte Copy POD** (stack, no GC).
+Prefer `uuid_v7` / `ulid_new` for time-ordered keys; format to string only at
+API boundaries. `uuid_from_bytes` hard-fails on wrong length (memory safety).
+
 ## Publishing benchmark claims
 
 Do not publish a throughput number by itself. Any req/sec claim must include
@@ -116,19 +120,94 @@ mako profile main.mko --release --json
 | Win | Effect |
 |-----|--------|
 | `now_ns` + `black_box` | Honest ns benches; LTO-safe |
-| Map II/SI/SS pre-size to load factor | Fewer rehashes |
+| Map II/SI/SS pre-size to ~75% load | Fewer rehashes on sequential insert |
 | Map rehash move (not clone) | Less alloc/CPU on grow |
+| Map set/get `MAKO_LIKELY` paths | Better branch prediction on hits |
 | Slice/byte `make`: zero only `len`, not unused `cap` | Less CPU + cleaner pages |
-| Fast-path append when `len < cap` | One branch, no realloc check math |
+| Fast-path append when `len < cap` (+ likely) | One branch, no realloc check math |
 | HTTP: `mako_arena_cstr` / `arena_text_n` | No malloc+arena double copy |
-| Empty string singleton | No malloc for `""` |
-| Bounds checks under `#ifndef NDEBUG` | Release hot loops use unchecked indexing |
+| Empty string singleton + `mako_str_free` | No malloc for `""`; safe free of singleton |
+| `str_clone` / `str_concat` empty fast paths | Less allocator traffic |
+| **Release does not force bounds-always** | Index hot path free unless `--bounds always` |
+| Bounds checks under `#ifndef NDEBUG` | Debug checks; release elided by default |
 
 ### Release bounds checks (safety)
 
-Debug builds abort on OOB. Release (`-DNDEBUG`) elides slice/byte index checks for
-maximum throughput — **OOB is a programmer bug / UB in release**. Prefer debug+ASan
-while developing. See [SECURITY.md](SECURITY.md).
+Debug builds abort on OOB. **Default release** (`-DNDEBUG`) elides generated
+`MAKO_BOUNDS_CHECK` and most runtime `#ifndef NDEBUG` index checks for
+maximum throughput — **OOB is a programmer bug / UB in release**.
+
+To keep checks in production:
+
+```bash
+mako build --release --bounds always main.mko -o svc
+# or in mako.toml:
+# [profile.release]
+# bounds_checks = "on"
+```
+
+Prefer debug + ASan while developing. See [SECURITY.md](SECURITY.md).
+
+### Audit (2026-07-13): what slowed us / what we fixed
+
+| Issue | Impact | Fix |
+|-------|--------|-----|
+| `mako build --release` forced `MAKO_BOUNDS_ALWAYS` | Every index paid a branch+compare in release | Default release no longer forces it |
+| Empty `mako_str_from_cstr("")` always `malloc` | Alloc pressure on empty strings | Process-wide empty singleton |
+| Map grow at 70% load | Extra rehash on dense inserts | Grow at ~75% (`4/3` pre-size) |
+| No branch hints on map/append | Mispredict on hot loops | `MAKO_LIKELY` / `UNLIKELY` |
+| `map[string]…` always cloned keys | Alloc per insert | `map_si_set_take` / `map_ss_set_take` (move) |
+| HTTP parse N× arena copies | Method/path/headers/body each copied | Views into one `conn.raw` buffer |
+| `ch.send(s)` always clones string | Alloc per message | `chan_str_send_take` / `chan_str_try_send_take` |
+| JSON respond malloc'd Content-Type | Alloc per reply | Interned static `application/json; charset=utf-8` |
+| Proxy socket pump small chunks | Extra syscalls | Linux splice 256 KiB + `F_SETPIPE_SZ`; file→socket sendfile |
+
+Still intentional costs (visible when you use them): `share` RC, channel sync,
+default `m[k]=v` still clones string keys (safe), default `ch.send(s)` clones
+(safe), kick heap-box for multi-word types, opt-in GC.
+
+### Map string keys (hot path)
+
+```mko
+// Default: clone key (key still usable)
+m["k"] = 1
+
+// Hot path: move ownership of an owned string into the map (no second alloc)
+map_si_set_take(m, owned_key, 1)   // map[string]int
+map_ss_set_take(m, owned_k, owned_v) // map[string]string
+```
+
+Rehash already **moves** owned keys (no clone/free thrash).
+
+### Channel string take-send (hot path)
+
+```mko
+let ch = chan_open[string](64)
+// Default: clone so caller retains s
+let _ = ch.send(s)
+
+// Hot path: move owned temporary (no second alloc)
+let _ = chan_str_send_take(ch, owned_msg)
+// Non-blocking: 1 queued, 0 full/closed — always consumes the string
+let ok = chan_str_try_send_take(ch, owned_msg)
+```
+
+### HTTP zero-copy + interning
+
+`http_fill_conn` / `http_parse_request` store method, path, body, Host, User-Agent,
+Content-Type as **views** into the connection’s durable `raw[]` buffer (one
+`memcpy` of the request). Common Content-Type values and header **names** are
+interned to static views (`application/json`, `Host`, …) so compares/responses
+need no per-request `malloc`. `respond_json` uses the interned JSON type.
+
+Do not free view strings; clone if you need them after the connection reuses the
+buffer (`http_next`).
+
+### Proxy zero-copy
+
+`tcp_fd_copy` / `tcp_splice`: Linux uses kernel **splice** (256 KiB chunks, enlarged
+pipe via `F_SETPIPE_SZ`) for socket↔socket. Apple/FreeBSD try **sendfile** for
+regular file→socket, then fall back to a 64 KiB userspace pump.
 
 ## Concurrency
 

@@ -58,13 +58,21 @@ pub fn const_bool(expr: &Expr) -> Option<bool> {
                 // `0 == 1` style folds already covered; also fold `x == x` as true
                 // for identical idents (reduces false-positive move joins).
                 (Expr::Ident(a), Expr::Ident(b)) if a == b => Some(true),
-                _ => None,
+                // Multi-label CFG: fold `true == true` style after unary/parens
+                // via recursive const_bool on sides.
+                (l, r) => match (const_bool(l), const_bool(r)) {
+                    (Some(a), Some(b)) => Some(a == b),
+                    _ => None,
+                },
             },
             BinOp::Ne => match (left.as_ref(), right.as_ref()) {
                 (Expr::Bool(a), Expr::Bool(b)) => Some(a != b),
                 (Expr::Int(a), Expr::Int(b)) => Some(a != b),
                 (Expr::Ident(a), Expr::Ident(b)) if a == b => Some(false),
-                _ => None,
+                (l, r) => match (const_bool(l), const_bool(r)) {
+                    (Some(a), Some(b)) => Some(a != b),
+                    _ => None,
+                },
             },
             BinOp::Lt => match (left.as_ref(), right.as_ref()) {
                 (Expr::Int(a), Expr::Int(b)) => Some(a < b),

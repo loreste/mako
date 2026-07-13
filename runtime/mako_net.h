@@ -1,4 +1,4 @@
-/* Mako net — TCP listen/accept (POSIX). See docs/STDLIB.md */
+/* Mako net — TCP/UDP dual-stack (IPv4+IPv6) + Happy Eyeballs connect. */
 #ifndef MAKO_NET_H
 #define MAKO_NET_H
 
@@ -10,54 +10,251 @@
 #include <sys/socket.h>
 #include <sys/time.h>
 #include <sys/un.h>
+#include <netinet/in.h>
 #include <netinet/tcp.h>
+#include <arpa/inet.h>
+#include <netdb.h>
 #endif
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-static inline int mako_bind_ipv4_addr(struct sockaddr_in *addr, MakoString host, int64_t port) {
-    char hbuf[256];
-    memset(addr, 0, sizeof(*addr));
-    addr->sin_family = AF_INET;
-    addr->sin_port = htons((uint16_t)port);
-    if (!host.data || host.len == 0 || (host.len == 1 && host.data[0] == '*')) {
-        addr->sin_addr.s_addr = htonl(INADDR_ANY);
-        return 1;
-    }
-    if (host.len >= sizeof(hbuf)) return 0;
-    memcpy(hbuf, host.data, host.len);
-    hbuf[host.len] = 0;
-    if (strcmp(hbuf, "0.0.0.0") == 0) {
-        addr->sin_addr.s_addr = htonl(INADDR_ANY);
-        return 1;
-    }
-    return inet_pton(AF_INET, hbuf, &addr->sin_addr) == 1;
+/* Happy Eyeballs connection attempt delay (RFC 8305 lite). Default 250ms. */
+static int mako_tcp_he_delay_ms = 250;
+
+static inline void mako_tcp_set_he_delay_ms(int64_t ms) {
+    if (ms < 0) ms = 0;
+    if (ms > 5000) ms = 5000;
+    mako_tcp_he_delay_ms = (int)ms;
 }
 
-/* Bind host:port and listen with an explicit accept backlog. backlog<=0 uses
- * 4096. Backlog bounds the kernel's queue of unaccepted connections, the first
- * lever for limiting inbound load. */
+static inline int64_t mako_tcp_get_he_delay_ms(void) {
+    return (int64_t)mako_tcp_he_delay_ms;
+}
+
+/* Best-effort CLOEXEC on a socket fd (production default). */
+static inline void mako_sock_set_cloexec(mako_sock_t fd) {
+#if !defined(_WIN32)
+    int fl = fcntl((int)fd, F_GETFD);
+    if (fl >= 0) (void)fcntl((int)fd, F_SETFD, fl | FD_CLOEXEC);
+#else
+    (void)fd;
+#endif
+}
+
+static inline void mako_sock_set_nonblock(mako_sock_t fd, int on) {
+#if !defined(_WIN32)
+    int fl = fcntl((int)fd, F_GETFL, 0);
+    if (fl < 0) return;
+    if (on) fcntl((int)fd, F_SETFL, fl | O_NONBLOCK);
+    else fcntl((int)fd, F_SETFL, fl & ~O_NONBLOCK);
+#else
+    u_long mode = on ? 1UL : 0UL;
+    ioctlsocket(fd, FIONBIO, &mode);
+#endif
+}
+
+/* Create socket for family (AF_INET or AF_INET6). */
+static inline mako_sock_t mako_sock_create_af(int family, int type) {
+#if defined(SOCK_CLOEXEC) && !defined(_WIN32)
+    mako_sock_t fd = socket(family, type | SOCK_CLOEXEC, 0);
+#else
+    mako_sock_t fd = socket(family, type, 0);
+#endif
+    if (fd != MAKO_INVALID_SOCK) mako_sock_set_cloexec(fd);
+    return fd;
+}
+
+/* Create IPv4 TCP/UDP socket (compat). */
+static inline mako_sock_t mako_sock_create(int type) {
+    return mako_sock_create_af(AF_INET, type);
+}
+
+/* Format sockaddr as "a.b.c.d:port" or "[v6]:port". */
+static inline MakoString mako_sockaddr_str(const struct sockaddr *sa, socklen_t slen) {
+    char ip[INET6_ADDRSTRLEN];
+    char out[INET6_ADDRSTRLEN + 16];
+    if (!sa) return mako_str_from_cstr("");
+    if (sa->sa_family == AF_INET && slen >= (socklen_t)sizeof(struct sockaddr_in)) {
+        const struct sockaddr_in *a = (const struct sockaddr_in *)sa;
+        if (!inet_ntop(AF_INET, &a->sin_addr, ip, sizeof(ip))) return mako_str_from_cstr("");
+        snprintf(out, sizeof(out), "%s:%u", ip, (unsigned)ntohs(a->sin_port));
+        return mako_str_from_cstr(out);
+    }
+    if (sa->sa_family == AF_INET6 && slen >= (socklen_t)sizeof(struct sockaddr_in6)) {
+        const struct sockaddr_in6 *a = (const struct sockaddr_in6 *)sa;
+        if (!inet_ntop(AF_INET6, &a->sin6_addr, ip, sizeof(ip))) return mako_str_from_cstr("");
+        snprintf(out, sizeof(out), "[%s]:%u", ip, (unsigned)ntohs(a->sin6_port));
+        return mako_str_from_cstr(out);
+    }
+    return mako_str_from_cstr("");
+}
+
+static inline MakoString mako_sockaddr_in_str(const struct sockaddr_in *addr) {
+    return mako_sockaddr_str((const struct sockaddr *)addr, sizeof(*addr));
+}
+
+/* Fill sockaddr for bind. Supports *, 0.0.0.0, ::, IPv4/IPv6 literals.
+ * dual=1 for * / empty: prefer IPv6 :: with V6ONLY=0 (dual-stack) when possible. */
+static inline int mako_bind_addr_any(
+    MakoString host, int64_t port,
+    struct sockaddr_storage *ss, socklen_t *slen, int *family_out, int *dual_out
+) {
+    memset(ss, 0, sizeof(*ss));
+    *dual_out = 0;
+    char hbuf[256];
+    size_t hl = host.data ? host.len : 0;
+    if (hl >= sizeof(hbuf)) return 0;
+    if (hl) memcpy(hbuf, host.data, hl);
+    hbuf[hl] = 0;
+    int any4 = (!hl || (hl == 1 && hbuf[0] == '*') || strcmp(hbuf, "0.0.0.0") == 0);
+    int any6 = (strcmp(hbuf, "::") == 0 || strcmp(hbuf, "[::]") == 0);
+    if (any4 || any6 || !hl) {
+        /* Prefer dual-stack IPv6 wildcard when host is * or empty */
+        if (any6 || any4 || !hl) {
+            struct sockaddr_in6 *a6 = (struct sockaddr_in6 *)ss;
+            a6->sin6_family = AF_INET6;
+            a6->sin6_port = htons((uint16_t)port);
+            a6->sin6_addr = in6addr_any;
+            *slen = sizeof(struct sockaddr_in6);
+            *family_out = AF_INET6;
+            *dual_out = (any4 || !hl) ? 1 : 0; /* V6ONLY=0 for dual */
+            if (any6 && !any4 && hl) *dual_out = 0; /* explicit :: may stay v6-only */
+            if (any4 && hl && strcmp(hbuf, "0.0.0.0") == 0) {
+                /* explicit IPv4 any */
+                struct sockaddr_in *a4 = (struct sockaddr_in *)ss;
+                memset(ss, 0, sizeof(*ss));
+                a4->sin_family = AF_INET;
+                a4->sin_port = htons((uint16_t)port);
+                a4->sin_addr.s_addr = htonl(INADDR_ANY);
+                *slen = sizeof(struct sockaddr_in);
+                *family_out = AF_INET;
+                *dual_out = 0;
+            }
+            return 1;
+        }
+    }
+    /* Strip [brackets] from IPv6 literals */
+    char *hp = hbuf;
+    if (hp[0] == '[') {
+        char *rb = strchr(hp, ']');
+        if (rb) {
+            *rb = 0;
+            hp++;
+        }
+    }
+    struct sockaddr_in6 *a6 = (struct sockaddr_in6 *)ss;
+    if (inet_pton(AF_INET6, hp, &a6->sin6_addr) == 1) {
+        a6->sin6_family = AF_INET6;
+        a6->sin6_port = htons((uint16_t)port);
+        *slen = sizeof(struct sockaddr_in6);
+        *family_out = AF_INET6;
+        *dual_out = 0;
+        return 1;
+    }
+    struct sockaddr_in *a4 = (struct sockaddr_in *)ss;
+    memset(ss, 0, sizeof(*ss));
+    if (inet_pton(AF_INET, hp, &a4->sin_addr) == 1) {
+        a4->sin_family = AF_INET;
+        a4->sin_port = htons((uint16_t)port);
+        *slen = sizeof(struct sockaddr_in);
+        *family_out = AF_INET;
+        *dual_out = 0;
+        return 1;
+    }
+    return 0;
+}
+
+/* Compat IPv4-only bind helper. */
+static inline int mako_bind_ipv4_addr(struct sockaddr_in *addr, MakoString host, int64_t port) {
+    struct sockaddr_storage ss;
+    socklen_t slen = 0;
+    int fam = 0, dual = 0;
+    if (!mako_bind_addr_any(host, port, &ss, &slen, &fam, &dual)) return 0;
+    if (fam != AF_INET) return 0;
+    memcpy(addr, &ss, sizeof(*addr));
+    return 1;
+}
+
+/* Bind host:port and listen. IPv4, IPv6, or dual-stack (* / empty → :: + V6ONLY=0). */
 static inline int64_t mako_tcp_listen_backlog(MakoString host, int64_t port, int64_t backlog) {
     if (!mako_net_init()) return -1;
-    mako_sock_t fd = socket(AF_INET, SOCK_STREAM, 0);
+    struct sockaddr_storage ss;
+    socklen_t slen = 0;
+    int fam = AF_INET, dual = 0;
+    if (!mako_bind_addr_any(host, port, &ss, &slen, &fam, &dual)) {
+        /* Hostname: resolve with AI_PASSIVE */
+        char hbuf[256], pbuf[16];
+        size_t hl = host.data ? host.len : 0;
+        if (hl >= sizeof(hbuf)) return -1;
+        if (hl) memcpy(hbuf, host.data, hl);
+        hbuf[hl] = 0;
+        snprintf(pbuf, sizeof(pbuf), "%d", (int)port);
+        struct addrinfo hints, *res = NULL;
+        memset(&hints, 0, sizeof(hints));
+        hints.ai_family = AF_UNSPEC;
+        hints.ai_socktype = SOCK_STREAM;
+        hints.ai_flags = AI_PASSIVE;
+        if (getaddrinfo(hl ? hbuf : NULL, pbuf, &hints, &res) != 0 || !res) {
+            fprintf(stderr, "error: tcp: invalid bind host\n");
+            return -1;
+        }
+        fam = res->ai_family;
+        slen = (socklen_t)res->ai_addrlen;
+        memcpy(&ss, res->ai_addr, slen);
+        freeaddrinfo(res);
+        dual = 0;
+    }
+    mako_sock_t fd = mako_sock_create_af(fam, SOCK_STREAM);
     if (fd == MAKO_INVALID_SOCK) {
-        fprintf(stderr, "error: tcp: socket() failed\n");
-        return -1;
+        /* Fallback: IPv4 any if dual IPv6 socket unavailable */
+        if (fam == AF_INET6) {
+            fam = AF_INET;
+            struct sockaddr_in *a4 = (struct sockaddr_in *)&ss;
+            memset(&ss, 0, sizeof(ss));
+            a4->sin_family = AF_INET;
+            a4->sin_port = htons((uint16_t)port);
+            a4->sin_addr.s_addr = htonl(INADDR_ANY);
+            slen = sizeof(struct sockaddr_in);
+            dual = 0;
+            fd = mako_sock_create_af(AF_INET, SOCK_STREAM);
+        }
+        if (fd == MAKO_INVALID_SOCK) {
+            fprintf(stderr, "error: tcp: socket() failed\n");
+            return -1;
+        }
     }
     int yes = 1;
     setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, (const char *)&yes, sizeof(yes));
-    struct sockaddr_in addr;
-    if (!mako_bind_ipv4_addr(&addr, host, port)) {
-        fprintf(stderr, "error: tcp: invalid bind host\n");
-        mako_sock_close(fd);
-        return -1;
+#if defined(IPV6_V6ONLY)
+    if (fam == AF_INET6) {
+        int v6only = dual ? 0 : 1;
+        setsockopt(fd, IPPROTO_IPV6, IPV6_V6ONLY, (const char *)&v6only, sizeof(v6only));
     }
-    if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
-        fprintf(stderr, "error: tcp: bind failed\n");
-        mako_sock_close(fd);
-        return -1;
+#endif
+    if (bind(fd, (struct sockaddr *)&ss, slen) < 0) {
+        /* Dual-stack bind failed → try IPv4-only */
+        if (fam == AF_INET6 && dual) {
+            mako_sock_close(fd);
+            struct sockaddr_in a4;
+            memset(&a4, 0, sizeof(a4));
+            a4.sin_family = AF_INET;
+            a4.sin_port = htons((uint16_t)port);
+            a4.sin_addr.s_addr = htonl(INADDR_ANY);
+            fd = mako_sock_create_af(AF_INET, SOCK_STREAM);
+            if (fd == MAKO_INVALID_SOCK) return -1;
+            setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, (const char *)&yes, sizeof(yes));
+            if (bind(fd, (struct sockaddr *)&a4, sizeof(a4)) < 0) {
+                fprintf(stderr, "error: tcp: bind failed\n");
+                mako_sock_close(fd);
+                return -1;
+            }
+        } else {
+            fprintf(stderr, "error: tcp: bind failed\n");
+            mako_sock_close(fd);
+            return -1;
+        }
     }
     int bl = (backlog > 0 && backlog < 65536) ? (int)backlog : 4096;
     if (listen(fd, bl) < 0) {
@@ -76,13 +273,90 @@ static inline int64_t mako_tcp_listen(int64_t port) {
     return mako_tcp_listen_addr(mako_str_from_cstr(""), port);
 }
 
+/* Last accepted peer address (process-global; copy after accept if multi-thread). */
+static char mako_tcp_last_peer[128];
+static char mako_tcp_last_local[128];
+
 static inline int64_t mako_tcp_accept(int64_t listen_fd) {
-    int cfd = accept((int)listen_fd, NULL, NULL);
+    struct sockaddr_storage peer;
+    socklen_t plen = sizeof(peer);
+    memset(&peer, 0, sizeof(peer));
+    int cfd = accept((int)listen_fd, (struct sockaddr *)&peer, &plen);
     if (cfd < 0) {
         fprintf(stderr, "error: tcp: accept failed\n");
         return -1;
     }
+    mako_sock_set_cloexec((mako_sock_t)cfd);
+    MakoString ps = mako_sockaddr_str((struct sockaddr *)&peer, plen);
+    if (ps.data) {
+        size_t n = ps.len < sizeof(mako_tcp_last_peer) - 1 ? ps.len : sizeof(mako_tcp_last_peer) - 1;
+        memcpy(mako_tcp_last_peer, ps.data, n);
+        mako_tcp_last_peer[n] = 0;
+        free(ps.data);
+    } else {
+        mako_tcp_last_peer[0] = 0;
+    }
     return (int64_t)cfd;
+}
+
+/* Peer address of last accept, or of `fd` if valid (getpeername). "ip:port" / "[v6]:port". */
+static inline MakoString mako_tcp_peer_addr(int64_t fd) {
+    if (fd < 0) {
+        return mako_str_from_cstr(mako_tcp_last_peer);
+    }
+    struct sockaddr_storage addr;
+    socklen_t len = sizeof(addr);
+    memset(&addr, 0, sizeof(addr));
+    if (getpeername((int)fd, (struct sockaddr *)&addr, &len) != 0) {
+        return mako_str_from_cstr(mako_tcp_last_peer);
+    }
+    return mako_sockaddr_str((struct sockaddr *)&addr, len);
+}
+
+/* Local address bound to fd (getsockname). */
+static inline MakoString mako_tcp_local_addr(int64_t fd) {
+    if (fd < 0) return mako_str_from_cstr("");
+    struct sockaddr_storage addr;
+    socklen_t len = sizeof(addr);
+    memset(&addr, 0, sizeof(addr));
+    if (getsockname((int)fd, (struct sockaddr *)&addr, &len) != 0) {
+        return mako_str_from_cstr("");
+    }
+    MakoString s = mako_sockaddr_str((struct sockaddr *)&addr, len);
+    if (s.data) {
+        size_t n = s.len < sizeof(mako_tcp_last_local) - 1 ? s.len : sizeof(mako_tcp_last_local) - 1;
+        memcpy(mako_tcp_last_local, s.data, n);
+        mako_tcp_last_local[n] = 0;
+    }
+    return s;
+}
+
+/* Half-close. how: 0=SHUT_RD, 1=SHUT_WR, 2=SHUT_RDWR. Returns 0 ok. */
+static inline int64_t mako_tcp_shutdown(int64_t fd, int64_t how) {
+    if (fd < 0) return -1;
+    int h = SHUT_RDWR;
+    if (how == 0) h = SHUT_RD;
+    else if (how == 1) h = SHUT_WR;
+    return shutdown((int)fd, h) == 0 ? 0 : -1;
+}
+
+/* SO_ERROR after nonblocking connect / async error. 0 = ok, else errno. */
+static inline int64_t mako_sock_error(int64_t fd) {
+    if (fd < 0) return -1;
+    int err = 0;
+    socklen_t elen = sizeof(err);
+    if (getsockopt((int)fd, SOL_SOCKET, SO_ERROR, (char *)&err, &elen) != 0) return -1;
+    return (int64_t)err;
+}
+
+/* SO_LINGER: onoff 0/1, linger_sec. Returns 0 ok. */
+static inline int64_t mako_tcp_linger(int64_t fd, int64_t onoff, int64_t linger_sec) {
+    if (fd < 0) return -1;
+    struct linger lg;
+    lg.l_onoff = onoff ? 1 : 0;
+    lg.l_linger = linger_sec > 0 ? (int)linger_sec : 0;
+    return setsockopt((int)fd, SOL_SOCKET, SO_LINGER, (const char *)&lg, sizeof(lg)) == 0
+        ? 0 : -1;
 }
 
 static inline int64_t mako_tcp_close(int64_t fd) {
@@ -90,33 +364,215 @@ static inline int64_t mako_tcp_close(int64_t fd) {
     return mako_sock_close((int)fd) == 0 ? 1 : 0;
 }
 
-/* Connect to host:port (IPv4 dotted). Returns fd or -1. */
-static inline int64_t mako_tcp_connect(MakoString host, int64_t port) {
-    char hbuf[256];
-    if (host.len >= sizeof(hbuf)) return -1;
+/* Wait until fd is writable (connect complete) or timeout. 1=ready, 0=timeout, -1=err. */
+static inline int mako_tcp_wait_writable(int fd, int timeout_ms) {
+    fd_set wfds, efds;
+    FD_ZERO(&wfds);
+    FD_ZERO(&efds);
+    FD_SET(fd, &wfds);
+    FD_SET(fd, &efds);
+    struct timeval tv, *tvp = NULL;
+    if (timeout_ms >= 0) {
+        tv.tv_sec = timeout_ms / 1000;
+        tv.tv_usec = (timeout_ms % 1000) * 1000;
+        tvp = &tv;
+    }
+    int r = select(fd + 1, NULL, &wfds, &efds, tvp);
+    if (r < 0) return -1;
+    if (r == 0) return 0;
+    return 1;
+}
+
+static inline int mako_tcp_connect_finished_ok(int fd) {
+    int err = 0;
+    socklen_t elen = sizeof(err);
+    if (getsockopt(fd, SOL_SOCKET, SO_ERROR, (char *)&err, &elen) != 0) return 0;
+    return err == 0;
+}
+
+/* Start nonblocking connect to one addrinfo. Returns fd (>=0) or -1. */
+static inline int mako_tcp_start_one(struct addrinfo *ai) {
+    if (!ai) return -1;
+    int fd = (int)mako_sock_create_af(ai->ai_family, SOCK_STREAM);
+    if (fd < 0) return -1;
+    mako_sock_set_nonblock((mako_sock_t)fd, 1);
+    int rc = connect(fd, ai->ai_addr, (socklen_t)ai->ai_addrlen);
+    if (rc == 0) return fd; /* immediate success (e.g. local) */
+    if (errno == EINPROGRESS || errno == EWOULDBLOCK || errno == EAGAIN) return fd;
+    mako_sock_close(fd);
+    return -1;
+}
+
+/* Happy Eyeballs (RFC 8305 lite): resolve AF_UNSPEC, interleave AAAA/A,
+ * race up to a few connects with he_delay_ms between starts. */
+static inline int64_t mako_tcp_connect_timeout(
+    MakoString host, int64_t port, int64_t timeout_ms
+) {
+    if (!mako_net_init()) return -1;
+    char hbuf[256], pbuf[16];
+    if (!host.data || host.len == 0 || host.len >= sizeof(hbuf)) return -1;
+    for (size_t i = 0; i < host.len; i++) if (host.data[i] == 0) return -1;
     memcpy(hbuf, host.data, host.len);
     hbuf[host.len] = 0;
-    int fd = socket(AF_INET, SOCK_STREAM, 0);
-    if (fd < 0) return -1;
-    struct sockaddr_in addr;
-    memset(&addr, 0, sizeof(addr));
-    addr.sin_family = AF_INET;
-    addr.sin_port = htons((uint16_t)port);
-    if (inet_pton(AF_INET, hbuf, &addr.sin_addr) != 1) {
-        mako_sock_close(fd);
+    char *hp = hbuf;
+    if (hp[0] == '[') {
+        char *rb = strchr(hp, ']');
+        if (rb) {
+            *rb = 0;
+            hp++;
+        }
+    }
+    snprintf(pbuf, sizeof(pbuf), "%d", (int)port);
+    if (timeout_ms <= 0) timeout_ms = 30000;
+
+    struct addrinfo hints, *res = NULL;
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
+    hints.ai_protocol = IPPROTO_TCP;
+    if (getaddrinfo(hp, pbuf, &hints, &res) != 0 || !res) return -1;
+
+#define MAKO_HE_MAX 8
+    struct addrinfo *ordered[MAKO_HE_MAX];
+    int naddr = 0;
+    struct addrinfo *v6[MAKO_HE_MAX], *v4[MAKO_HE_MAX];
+    int n6 = 0, n4 = 0;
+    for (struct addrinfo *ai = res; ai && (n6 + n4) < MAKO_HE_MAX; ai = ai->ai_next) {
+        if (ai->ai_family == AF_INET6 && n6 < MAKO_HE_MAX) v6[n6++] = ai;
+        else if (ai->ai_family == AF_INET && n4 < MAKO_HE_MAX) v4[n4++] = ai;
+    }
+    {
+        int i6 = 0, i4 = 0;
+        while (naddr < MAKO_HE_MAX && (i6 < n6 || i4 < n4)) {
+            if (i6 < n6) ordered[naddr++] = v6[i6++];
+            if (naddr < MAKO_HE_MAX && i4 < n4) ordered[naddr++] = v4[i4++];
+        }
+    }
+    if (naddr == 0) {
+        freeaddrinfo(res);
         return -1;
     }
-    if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
-        mako_sock_close(fd);
-        return -1;
+
+    int fds[MAKO_HE_MAX];
+    int live[MAKO_HE_MAX];
+    for (int i = 0; i < MAKO_HE_MAX; i++) {
+        fds[i] = -1;
+        live[i] = 0;
     }
-    return (int64_t)fd;
+
+    int64_t deadline = mako_mono_ms() + timeout_ms;
+    int next = 0;
+    int win = -1;
+
+    /* Kick first attempt immediately */
+    fds[0] = mako_tcp_start_one(ordered[0]);
+    if (fds[0] >= 0) {
+        live[0] = 1;
+        if (mako_tcp_connect_finished_ok(fds[0])) {
+            /* may still be in progress; check via select below */
+        }
+    }
+    next = 1;
+
+    while (win < 0 && mako_mono_ms() < deadline) {
+        int64_t left = deadline - mako_mono_ms();
+        if (left <= 0) break;
+
+        fd_set wfds;
+        FD_ZERO(&wfds);
+        int maxfd = -1, nlive = 0;
+        for (int i = 0; i < next; i++) {
+            if (live[i] && fds[i] >= 0) {
+                FD_SET(fds[i], &wfds);
+                if (fds[i] > maxfd) maxfd = fds[i];
+                nlive++;
+            }
+        }
+
+        if (nlive == 0) {
+            if (next >= naddr) break;
+            fds[next] = mako_tcp_start_one(ordered[next]);
+            if (fds[next] >= 0) live[next] = 1;
+            next++;
+            continue;
+        }
+
+        int slice = (next < naddr) ? mako_tcp_he_delay_ms : (int)left;
+        if (slice > (int)left) slice = (int)left;
+        if (slice < 1) slice = 1;
+
+        struct timeval tv;
+        tv.tv_sec = slice / 1000;
+        tv.tv_usec = (slice % 1000) * 1000;
+        int r = select(maxfd + 1, NULL, &wfds, NULL, &tv);
+
+        if (r > 0) {
+            for (int i = 0; i < next; i++) {
+                if (!live[i] || fds[i] < 0) continue;
+                if (!FD_ISSET(fds[i], &wfds)) continue;
+                if (mako_tcp_connect_finished_ok(fds[i])) {
+                    win = i;
+                    mako_sock_set_nonblock((mako_sock_t)fds[i], 0);
+                    break;
+                }
+                mako_sock_close(fds[i]);
+                fds[i] = -1;
+                live[i] = 0;
+            }
+        }
+        if (win >= 0) break;
+
+        /* HE: after delay (or poll), start next address while others race */
+        if (next < naddr) {
+            fds[next] = mako_tcp_start_one(ordered[next]);
+            if (fds[next] >= 0) live[next] = 1;
+            next++;
+        } else {
+            int any = 0;
+            for (int i = 0; i < next; i++) if (live[i]) any = 1;
+            if (!any) break;
+        }
+    }
+
+    int64_t out = -1;
+    if (win >= 0 && fds[win] >= 0) {
+        out = (int64_t)fds[win];
+        fds[win] = -1;
+    }
+    for (int i = 0; i < MAKO_HE_MAX; i++) {
+        if (fds[i] >= 0) mako_sock_close(fds[i]);
+    }
+    freeaddrinfo(res);
+#undef MAKO_HE_MAX
+    return out;
+}
+
+/* Connect to host:port (IPv4/IPv6/hostname) with Happy Eyeballs. Returns fd or -1. */
+static inline int64_t mako_tcp_connect(MakoString host, int64_t port) {
+    return mako_tcp_connect_timeout(host, port, 30000);
 }
 
 static inline int64_t mako_tcp_write(int64_t fd, MakoString s) {
     if (fd < 0) return -1;
     ssize_t n = send((int)fd, s.data, s.len, 0);
     return (int64_t)n;
+}
+
+/* Write all bytes, retrying short sends. Returns total written or -1. */
+static inline int64_t mako_tcp_write_all(int64_t fd, MakoString s) {
+    if (fd < 0) return -1;
+    if (!s.data || s.len == 0) return 0;
+    size_t off = 0;
+    while (off < s.len) {
+        ssize_t n = send((int)fd, s.data + off, s.len - off, 0);
+        if (n < 0) {
+            if (errno == EINTR) continue;
+            return -1;
+        }
+        if (n == 0) return -1;
+        off += (size_t)n;
+    }
+    return (int64_t)off;
 }
 
 /* Read up to 512 bytes; returns count (also prints to stdout for demos). */
@@ -138,6 +594,27 @@ static inline MakoString mako_tcp_read(int64_t fd) {
     memcpy(d, buf, (size_t)n);
     d[n] = 0;
     return (MakoString){d, (size_t)n};
+}
+
+/* Read exactly n bytes (or until EOF). Empty if nothing read. */
+static inline MakoString mako_tcp_read_n(int64_t fd, int64_t n) {
+    if (fd < 0 || n <= 0) return mako_str_from_cstr("");
+    if (n > 16 * 1024 * 1024) n = 16 * 1024 * 1024;
+    char *buf = (char *)malloc((size_t)n + 1);
+    if (!buf) return mako_str_from_cstr("");
+    size_t total = 0;
+    while (total < (size_t)n) {
+        ssize_t r = recv((int)fd, buf + total, (size_t)n - total, 0);
+        if (r < 0) {
+            if (errno == EINTR) continue;
+            break;
+        }
+        if (r == 0) break;
+        total += (size_t)r;
+    }
+    if (total == 0) { free(buf); return mako_str_from_cstr(""); }
+    buf[total] = 0;
+    return (MakoString){buf, total};
 }
 
 /* Disable Nagle's algorithm for low-latency writes. */
@@ -246,42 +723,109 @@ static inline MakoString mako_http_forward(MakoString host, int64_t port,
     return (MakoString){out, blen};
 }
 
-/* ---- UDP datagram helpers (IPv4 dotted hosts) ---- */
+/* ---- UDP datagram helpers (IPv4 + IPv6) ---- */
 
-static inline int64_t mako_udp_bind(int64_t port) {
+static char mako_udp_last_from_host[INET6_ADDRSTRLEN];
+static int mako_udp_last_from_port = 0;
+
+static inline int64_t mako_udp_bind_addr(MakoString host, int64_t port) {
     if (!mako_net_init()) return -1;
-    mako_sock_t fd = socket(AF_INET, SOCK_DGRAM, 0);
+    struct sockaddr_storage ss;
+    socklen_t slen = 0;
+    int fam = AF_INET, dual = 0;
+    if (!mako_bind_addr_any(host, port, &ss, &slen, &fam, &dual)) {
+        fprintf(stderr, "error: udp: invalid bind host\n");
+        return -1;
+    }
+    /* Dual-stack UDP is awkward for mixed sendto families on some OSes;
+     * for * / empty prefer IPv4 ANY (legacy-compatible). Explicit :: stays v6. */
+    if (dual && fam == AF_INET6) {
+        struct sockaddr_in *a4 = (struct sockaddr_in *)&ss;
+        memset(&ss, 0, sizeof(ss));
+        a4->sin_family = AF_INET;
+        a4->sin_port = htons((uint16_t)port);
+        a4->sin_addr.s_addr = htonl(INADDR_ANY);
+        slen = sizeof(struct sockaddr_in);
+        fam = AF_INET;
+        dual = 0;
+    }
+    mako_sock_t fd = mako_sock_create_af(fam, SOCK_DGRAM);
+    if (fd == MAKO_INVALID_SOCK && fam == AF_INET6) {
+        struct sockaddr_in *a4 = (struct sockaddr_in *)&ss;
+        memset(&ss, 0, sizeof(ss));
+        a4->sin_family = AF_INET;
+        a4->sin_port = htons((uint16_t)port);
+        a4->sin_addr.s_addr = htonl(INADDR_ANY);
+        slen = sizeof(struct sockaddr_in);
+        fam = AF_INET;
+        dual = 0;
+        fd = mako_sock_create_af(AF_INET, SOCK_DGRAM);
+    }
     if (fd == MAKO_INVALID_SOCK) {
         fprintf(stderr, "error: udp: socket() failed: %s\n", strerror(errno));
         return -1;
     }
     int yes = 1;
     setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, (const char *)&yes, sizeof(yes));
-    struct sockaddr_in addr;
-    memset(&addr, 0, sizeof(addr));
-    addr.sin_family = AF_INET;
-    addr.sin_addr.s_addr = htonl(INADDR_ANY);
-    addr.sin_port = htons((uint16_t)port);
-    if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
-        fprintf(stderr, "error: udp: bind(:%lld) failed: %s\n", (long long)port, strerror(errno));
-        mako_sock_close(fd);
-        return -1;
+#if defined(IPV6_V6ONLY)
+    if (fam == AF_INET6) {
+        int v6only = dual ? 0 : 1;
+        setsockopt(fd, IPPROTO_IPV6, IPV6_V6ONLY, (const char *)&v6only, sizeof(v6only));
+    }
+#endif
+    if (bind(fd, (struct sockaddr *)&ss, slen) < 0) {
+        if (fam == AF_INET6 && dual) {
+            mako_sock_close(fd);
+            struct sockaddr_in a4;
+            memset(&a4, 0, sizeof(a4));
+            a4.sin_family = AF_INET;
+            a4.sin_port = htons((uint16_t)port);
+            a4.sin_addr.s_addr = htonl(INADDR_ANY);
+            fd = mako_sock_create_af(AF_INET, SOCK_DGRAM);
+            if (fd == MAKO_INVALID_SOCK) return -1;
+            setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, (const char *)&yes, sizeof(yes));
+            if (bind(fd, (struct sockaddr *)&a4, sizeof(a4)) < 0) {
+                mako_sock_close(fd);
+                return -1;
+            }
+        } else {
+            fprintf(stderr, "error: udp: bind failed: %s\n", strerror(errno));
+            mako_sock_close(fd);
+            return -1;
+        }
     }
     return (int64_t)fd;
 }
 
+static inline int64_t mako_udp_bind(int64_t port) {
+    return mako_udp_bind_addr(mako_str_from_cstr("*"), port);
+}
+
 static inline int64_t mako_udp_send_to(int64_t fd, MakoString host, int64_t port, MakoString data) {
     if (fd < 0) return -1;
-    char hbuf[256];
-    if (host.len >= sizeof(hbuf)) return -1;
+    char hbuf[256], pbuf[16];
+    if (!host.data || host.len == 0 || host.len >= sizeof(hbuf)) return -1;
+    for (size_t i = 0; i < host.len; i++) if (host.data[i] == 0) return -1;
     memcpy(hbuf, host.data, host.len);
     hbuf[host.len] = 0;
-    struct sockaddr_in addr;
-    memset(&addr, 0, sizeof(addr));
-    addr.sin_family = AF_INET;
-    addr.sin_port = htons((uint16_t)port);
-    if (inet_pton(AF_INET, hbuf, &addr.sin_addr) != 1) return -1;
-    ssize_t n = sendto((mako_sock_t)fd, data.data, data.len, 0, (struct sockaddr *)&addr, sizeof(addr));
+    char *hp = hbuf;
+    if (hp[0] == '[') {
+        char *rb = strchr(hp, ']');
+        if (rb) {
+            *rb = 0;
+            hp++;
+        }
+    }
+    snprintf(pbuf, sizeof(pbuf), "%d", (int)port);
+    struct addrinfo hints, *res = NULL;
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_DGRAM;
+    if (getaddrinfo(hp, pbuf, &hints, &res) != 0 || !res) return -1;
+    ssize_t n = sendto(
+        (mako_sock_t)fd, data.data, data.len, 0, res->ai_addr, (socklen_t)res->ai_addrlen
+    );
+    freeaddrinfo(res);
     return (int64_t)n;
 }
 
@@ -290,23 +834,64 @@ static inline MakoString mako_udp_recv(int64_t fd, int64_t max_bytes) {
     if (max_bytes <= 0 || max_bytes > 65535) max_bytes = 65535;
     char *buf = (char *)malloc((size_t)max_bytes + 1);
     if (!buf) mako_abort("udp_recv: out of memory");
-    ssize_t n = recvfrom((mako_sock_t)fd, buf, (size_t)max_bytes, 0, NULL, NULL);
+    struct sockaddr_storage peer;
+    socklen_t plen = sizeof(peer);
+    memset(&peer, 0, sizeof(peer));
+    ssize_t n = recvfrom(
+        (mako_sock_t)fd, buf, (size_t)max_bytes, 0, (struct sockaddr *)&peer, &plen
+    );
     if (n <= 0) {
         free(buf);
         return mako_str_from_cstr("");
     }
     buf[n] = 0;
-    MakoString out = {buf, (size_t)n};
-    return out;
+    mako_udp_last_from_host[0] = 0;
+    mako_udp_last_from_port = 0;
+    if (peer.ss_family == AF_INET) {
+        struct sockaddr_in *a = (struct sockaddr_in *)&peer;
+        inet_ntop(AF_INET, &a->sin_addr, mako_udp_last_from_host, sizeof(mako_udp_last_from_host));
+        mako_udp_last_from_port = (int)ntohs(a->sin_port);
+    } else if (peer.ss_family == AF_INET6) {
+        struct sockaddr_in6 *a = (struct sockaddr_in6 *)&peer;
+        inet_ntop(AF_INET6, &a->sin6_addr, mako_udp_last_from_host, sizeof(mako_udp_last_from_host));
+        mako_udp_last_from_port = (int)ntohs(a->sin6_port);
+    }
+    return (MakoString){buf, (size_t)n};
+}
+
+static inline MakoString mako_udp_recv_from(int64_t fd, int64_t max_bytes) {
+    return mako_udp_recv(fd, max_bytes);
+}
+
+static inline MakoString mako_udp_last_sender_host(void) {
+    return mako_str_from_cstr(mako_udp_last_from_host);
+}
+
+static inline int64_t mako_udp_last_sender_port(void) {
+    return (int64_t)mako_udp_last_from_port;
+}
+
+static inline MakoString mako_udp_last_sender(void) {
+    if (!mako_udp_last_from_host[0]) return mako_str_from_cstr("");
+    char out[INET6_ADDRSTRLEN + 16];
+    if (strchr(mako_udp_last_from_host, ':'))
+        snprintf(out, sizeof(out), "[%s]:%d", mako_udp_last_from_host, mako_udp_last_from_port);
+    else
+        snprintf(out, sizeof(out), "%s:%d", mako_udp_last_from_host, mako_udp_last_from_port);
+    return mako_str_from_cstr(out);
 }
 
 static inline int64_t mako_udp_local_port(int64_t fd) {
     if (fd < 0) return -1;
-    struct sockaddr_in addr;
+    struct sockaddr_storage addr;
     socklen_t len = sizeof(addr);
     memset(&addr, 0, sizeof(addr));
     if (getsockname((mako_sock_t)fd, (struct sockaddr *)&addr, &len) != 0) return -1;
-    return (int64_t)ntohs(addr.sin_port);
+    if (addr.ss_family == AF_INET)
+        return (int64_t)ntohs(((struct sockaddr_in *)&addr)->sin_port);
+    if (addr.ss_family == AF_INET6)
+        return (int64_t)ntohs(((struct sockaddr_in6 *)&addr)->sin6_port);
+    return -1;
 }
 
 static inline int64_t mako_udp_close(int64_t fd) {

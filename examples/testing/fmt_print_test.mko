@@ -1,0 +1,115 @@
+// fmt / print package surface.
+
+fn TestFmtSprintfVerbs() {
+    assert_eq_str(fmt_sprintf("hi %s", "Ada"), "hi Ada")
+    assert_eq_str(fmt_sprintf("v=%v", "x"), "v=x")
+    assert_eq_str(fmt_sprintf_d("n=%d", 42), "n=42")
+    assert_eq_str(fmt_sprintf2("%s-%s", "a", "b"), "a-b")
+    assert_eq_str(fmt_sprintf3("%s %s %s", "1", "2", "3"), "1 2 3")
+    assert_eq_str(fmt_sprintf("100%% done", "x"), "100% done")
+    assert_eq_str(fmt_sprintf("q=%q", "a\"b"), "q=\"a\\\"b\"")
+    assert_eq_str(fmt_sprintf("x=%x", "AB"), "x=4142")
+    assert_eq_str(fmt_sprintf("X=%X", "AB"), "X=4142")
+}
+
+fn TestFmtSprint() {
+    assert_eq_str(fmt_sprint("solo"), "solo")
+    assert_eq_str(fmt_sprint2("a", "b"), "a b")
+    assert_eq_str(fmt_sprint3("a", "b", "c"), "a b c")
+    assert_eq_str(fmt_sprintln("line"), "line\n")
+    assert_eq_str(fmt_sprintln2("a", "b"), "a b\n")
+}
+
+fn TestFmtErrorf() {
+    assert_eq_str(fmt_errorf("bad: %s", "x"), "bad: x")
+    assert_eq_str(fmt_errorf2("%s:%s", "a", "b"), "a:b")
+}
+
+fn TestFmtSprintfF() {
+    let s = fmt_sprintf_f("pi≈%f", 3.14159, 2)
+    assert(str_contains(s, "3.14"))
+}
+
+fn TestFmtPrintNoPanic() {
+    // Smoke: write paths return 0
+    assert_eq(fmt_print(""), 0)
+    assert_eq(fmt_println(""), 0)
+    assert_eq(fmt_printf("%s", ""), 0)
+    assert_eq(fmt_eprint(""), 0)
+    assert_eq(fmt_eprintln(""), 0)
+    assert_eq(print_raw(""), 0)
+    assert_eq(eprint(""), 0)
+    assert_eq(eprintln(""), 0)
+}
+
+fn TestFormatHelpers() {
+    assert_eq_str(format_int(7), "7")
+    assert_eq_str(format_bool(true), "true")
+    assert_eq_str(format_bool(false), "false")
+    let f = format_float(1.5, 1)
+    assert(str_contains(f, "1.5"))
+}
+
+fn TestFormatBases() {
+    assert_eq_str(format_int_dec(255), "255")
+    assert_eq_str(format_int_hex(255), "ff")
+    assert_eq_str(format_int_hex_upper(255), "FF")
+    assert_eq_str(format_int_bin(10), "1010")
+    assert_eq_str(format_int_oct(8), "10")
+    assert_eq_str(format_int_base(255, 16), "ff")
+    assert_eq_str(format_int_base(10, 2), "1010")
+    assert_eq_str(format_int_hex_pad(255, 4), "00ff")
+    assert_eq_str(format_int_hex_prefix(255), "0xff")
+    assert_eq_str(format_pad("7", 3, 1), "007")
+    assert_eq_str(format_pad("7", 3, 0), "  7")
+    assert_eq_str(format_int_dec(-42), "-42")
+}
+
+fn TestParseBases() {
+    match parse_int_hex("ff") {
+        Ok(n) => assert_eq(n, 255)
+        Err(_) => assert(false)
+    }
+    match parse_int_hex("0xFF") {
+        Ok(n) => assert_eq(n, 255)
+        Err(_) => assert(false)
+    }
+    match parse_int_bin("1010") {
+        Ok(n) => assert_eq(n, 10)
+        Err(_) => assert(false)
+    }
+    match parse_int_bin("0b1010") {
+        Ok(n) => assert_eq(n, 10)
+        Err(_) => assert(false)
+    }
+    match parse_int_oct("10") {
+        Ok(n) => assert_eq(n, 8)
+        Err(_) => assert(false)
+    }
+    match parse_int_auto("0x10") {
+        Ok(n) => assert_eq(n, 16)
+        Err(_) => assert(false)
+    }
+    match parse_int_base("zz", 36) {
+        Ok(n) => assert_eq(n, 35 * 36 + 35)
+        Err(_) => assert(false)
+    }
+    match parse_int_hex("nope") {
+        Ok(_) => assert(false)
+        Err(_) => assert(true)
+    }
+}
+
+fn TestFmtSprintfIntBases() {
+    assert_eq_str(fmt_sprintf_d("%d", 42), "42")
+    assert_eq_str(fmt_sprintf_d("%x", 255), "ff")
+    assert_eq_str(fmt_sprintf_d("%X", 255), "FF")
+    assert_eq_str(fmt_sprintf_d("%b", 10), "1010")
+    assert_eq_str(fmt_sprintf_d("%o", 8), "10")
+    assert_eq_str(fmt_sprintf_d("%#x", 255), "0xff")
+    assert_eq_str(fmt_sprintf_d("%08x", 255), "000000ff")
+    assert_eq_str(fmt_sprintf_d("%+d", 7), "+7")
+    assert_eq_str(fmt_sprintf_dd("%d=%x", 255, 255), "255=ff")
+    // mix string + hex via preformat
+    assert_eq_str(fmt_sprintf2("id=%s hex=%s", "n", format_int_hex(16)), "id=n hex=10")
+}

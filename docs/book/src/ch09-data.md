@@ -553,16 +553,18 @@ fn main() {
     // DDL — no parameters needed
     let _ = sql_exec_plain(db, "CREATE TABLE IF NOT EXISTS contacts(id INTEGER PRIMARY KEY, name TEXT, email TEXT, phone TEXT, city TEXT)")
 
-    // INSERT with string parameters (up to 4)
-    let _ = sql_exec_str4(db, "INSERT INTO contacts(name, email, phone, city) VALUES ($1, $2, $3, $4)", "Ada", "ada@example.com", "+1-555-0100", "London")
-    let _ = sql_exec_str4(db, "INSERT INTO contacts(name, email, phone, city) VALUES ($1, $2, $3, $4)", "Grace", "grace@example.com", "+1-555-0200", "New York")
+    // INSERT with string parameters (up to 4). Prefer `?` on SQLite; `$1..$N` also works.
+    let _ = sql_exec_str4(db, "INSERT INTO contacts(name, email, phone, city) VALUES (?, ?, ?, ?)", "Ada", "ada@example.com", "+1-555-0100", "London")
+    let _ = sql_exec_str4(db, "INSERT INTO contacts(name, email, phone, city) VALUES (?, ?, ?, ?)", "Grace", "grace@example.com", "+1-555-0200", "New York")
+    print_int(sql_last_insert_id(db))
+    print_int(sql_rows_affected(db))
 
     // SELECT returning a text value
-    let email = sql_query_str(db, "SELECT email FROM contacts WHERE name = $1", "Ada")
+    let email = sql_query_str(db, "SELECT email FROM contacts WHERE name = ?", "Ada")
     print(email)    // ada@example.com
 
     // Returns "" when no rows match
-    let missing = sql_query_str(db, "SELECT email FROM contacts WHERE name = $1", "Nobody")
+    let missing = sql_query_str(db, "SELECT email FROM contacts WHERE name = ?", "Nobody")
     print(missing)  // (empty string)
 
     sql_close(db)
@@ -570,9 +572,41 @@ fn main() {
 }
 ```
 
-These three functions complement `sql_exec(db, sql, []int)` which only supports
-integer parameters. Use `sql_exec_str4` whenever you need to insert or update
-text columns with user-supplied data safely.
+These complement `sql_exec(db, sql, []int)` (integer params only). Use
+`sql_exec_str4` for text columns with user-supplied data — never string-concat
+SQL. `sql_last_insert_id` / `sql_rows_affected` report connection-local meta
+after mutating statements.
+
+### Multi-row queries
+
+Walk result sets with a short cursor (no ORM ceremony):
+
+```mko
+fn main() {
+    let db = sql_open_sqlite("/tmp/rows_demo.db")
+    defer sql_close(db)
+    let _ = sql_exec_plain(db,
+        "CREATE TABLE items (id INTEGER PRIMARY KEY, name TEXT, qty INTEGER)")
+    let _ = sql_exec_str4(db, "INSERT INTO items (name, qty) VALUES (?, ?)", "apple", "3", "", "")
+    let _ = sql_exec_str4(db, "INSERT INTO items (name, qty) VALUES (?, ?)", "banana", "5", "", "")
+
+    let empty = make([]int, 0)
+    let rows = sql_query_rows(db, "SELECT id, name, qty FROM items ORDER BY id", empty)
+    while sql_rows_next(rows) == 1 {
+        print_int(sql_rows_int(rows, 0))
+        print(sql_rows_str(rows, 1))
+        print_int(sql_rows_int(rows, 2))
+    }
+    sql_rows_close(rows)
+
+    // Or pull one column in bulk:
+    let names = sql_query_col_str(db, "SELECT name FROM items", 100)
+    print_int(len(names))
+    let _ = remove_file("/tmp/rows_demo.db")
+}
+```
+
+Filter with a string param: `sql_query_rows_str(db, "SELECT … WHERE name = ?", "apple")`.
 
 ### Multi-store pattern
 

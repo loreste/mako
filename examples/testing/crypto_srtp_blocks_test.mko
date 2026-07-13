@@ -1,0 +1,56 @@
+// Crypto primitives needed to implement SRTP (and similar) in pure Mako.
+
+fn TestAesCtrRoundtrip() {
+    if aead_available() == 0 {
+        // OpenSSL AEAD path not linked — soft skip
+        return
+    }
+    let key = random_bytes(16)
+    let iv = random_bytes(16)
+    if len(key) != 16 || len(iv) != 16 {
+        return
+    }
+    let plain = "srtp-payload-bytes!!"
+    let ct = aes_ctr(key, iv, plain)
+    assert_eq(len(ct), len(plain))
+    // CTR is involution
+    let back = aes_ctr(key, iv, ct)
+    assert_eq_str(back, plain)
+    // different keystream if IV changes
+    let iv2 = random_bytes(16)
+    if len(iv2) == 16 {
+        let ct2 = aes_ctr(key, iv2, plain)
+        assert(ct2 != ct || plain == "")
+    }
+}
+
+fn TestAesCtrKnownVector() {
+    if aead_available() == 0 {
+        return
+    }
+    // Fixed AES-128-CTR vector (matches OpenSSL enc -aes-128-ctr)
+    // key = 00..ff step 0x11, iv = 00..0f, plain = "hello srtp!!...."
+    let key = hex_decode("00112233445566778899aabbccddeeff")
+    let iv = hex_decode("000102030405060708090a0b0c0d0e0f")
+    assert_eq(len(key), 16)
+    assert_eq(len(iv), 16)
+    let plain = "hello srtp!!...."
+    assert_eq(len(plain), 16)
+    let ct = aes_ctr(key, iv, plain)
+    assert_eq_str(hex_encode(ct), "4ffadb261a52602cfbebafd7ffc0ce2d")
+    let back = aes_ctr(key, iv, ct)
+    assert_eq_str(back, plain)
+}
+
+fn TestHmacSha1() {
+    // RFC 2202 test vector 1
+    let key = "Jefe"
+    let data = "what do ya want for nothing?"
+    let hex = hmac_sha1(key, data)
+    assert_eq_str(hex, "effcdf6ae5eb2fa2d27416d5f184df9c259a7c79")
+    // raw length 20
+    let raw = hmac_sha1_raw(key, data)
+    // may be empty if no CC/OpenSSL — then hex would also fail; hex passed
+    assert_eq(len(raw), 20)
+    assert_eq_str(hex_encode(raw), "effcdf6ae5eb2fa2d27416d5f184df9c259a7c79")
+}

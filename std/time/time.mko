@@ -1,5 +1,17 @@
+// time — clocks, sleep, deadlines (prefer mono_* for latency)
+
 fn now() -> int { return now_ms() }
-fn now_ns() -> int { return now_ns() }
+fn wall() -> int { return wall_ms() }
+fn mono() -> int { return mono_ms() }
+fn mono_nanos() -> int { return mono_ns() }
+fn wall_nanos() -> int { return wall_ns() }
 fn unix() -> int { return time_unix() }
 fn sleep(ms: int) { sleep_ms(ms) }
+fn sleep_micros(us: int) { sleep_us(us) }
+fn sleep_nanos(ns: int) { sleep_ns(ns) }
 fn format(ms: int) -> string { return time_format(ms) }
+fn elapsed(start_ms: int) -> int { return elapsed_ms(start_ms) }
+fn elapsed_mono(start_ms: int) -> int { return elapsed_mono_ms(start_ms) }
+fn deadline(timeout_ms: int) -> int { return deadline_ms(timeout_ms) }
+fn remaining(deadline: int) -> int { return deadline_remaining_ns(deadline) }
+fn expired(deadline: int) -> int { return deadline_expired(deadline) }

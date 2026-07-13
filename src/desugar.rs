@@ -91,6 +91,7 @@ fn expand_json_derive(s: &StructDef) -> Vec<Item> {
         },
         exported: s.exported,
     is_const: false,
+        stability: crate::ast::ApiStability::Unspecified,
     }));
 
     for (fname_field, ty) in &s.fields {
@@ -116,6 +117,7 @@ fn expand_json_derive(s: &StructDef) -> Vec<Item> {
             },
             exported: s.exported,
         is_const: false,
+            stability: crate::ast::ApiStability::Unspecified,
         }));
     }
 
@@ -160,6 +162,7 @@ fn expand_actor(actor: ActorDef) -> Vec<Item> {
             },
             exported: false,
         is_const: false,
+            stability: crate::ast::ApiStability::Unspecified,
         }));
     }
 
@@ -180,6 +183,7 @@ fn expand_actor(actor: ActorDef) -> Vec<Item> {
         },
         exported: false,
     is_const: false,
+        stability: crate::ast::ApiStability::Unspecified,
     }));
 
     // Session_send(mbox, tag) -> bool
@@ -207,6 +211,7 @@ fn expand_actor(actor: ActorDef) -> Vec<Item> {
         },
         exported: false,
     is_const: false,
+        stability: crate::ast::ApiStability::Unspecified,
     }));
 
     // Session_loop(mbox) — message dispatch
@@ -278,6 +283,7 @@ fn expand_actor(actor: ActorDef) -> Vec<Item> {
         body: Block { stmts: loop_stmts },
         exported: false,
     is_const: false,
+        stability: crate::ast::ApiStability::Unspecified,
     }));
 
     items

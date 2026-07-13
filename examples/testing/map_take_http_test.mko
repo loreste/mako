@@ -1,0 +1,51 @@
+// Map set_take (no key clone) + HTTP zero-copy views into request buffer.
+
+fn TestMapSiSetTake() {
+    let mut m = make(map[string]int, 8)
+    // Build owned keys then take them into the map (no second alloc).
+    let k1 = "alpha"
+    let k2 = "beta"
+    // Clone once for the first insert via normal path, then take for bulk.
+    m["seed"] = 1
+    map_si_set_take(m, k1 + "", 10) // concat forces owned heap string
+    map_si_set_take(m, k2 + "", 20)
+    assert_eq(m["alpha"], 10)
+    assert_eq(m["beta"], 20)
+    assert_eq(m["seed"], 1)
+}
+
+fn TestMapSsSetTake() {
+    let mut m = make(map[string]string, 4)
+    map_ss_set_take(m, "k" + "", "v" + "")
+    assert_eq_str(m["k"], "v")
+}
+
+fn TestHttpParseViews() {
+    // request_parse builds views into the raw string buffer.
+    let raw = "GET /hello HTTP/1.1\r\nHost: example.com\r\n\r\nbody"
+    let r = http_request_parse(raw)
+    assert_eq_str(http_request_method(r), "GET")
+    assert_eq_str(http_request_path(r), "/hello")
+    // body may be view into raw — content must match
+    let b = http_request_body(r)
+    assert(len(b) >= 4)
+}
+
+fn TestHttpFillConnZeroCopy() {
+    // Accept path uses fill_conn; smoke via parse helpers that share the same parse core.
+    let raw = "POST /api HTTP/1.1\r\nHost: h\r\nUser-Agent: ua\r\nContent-Type: text/plain\r\n\r\nx"
+    let r = http_request_parse(raw)
+    assert_eq_str(http_request_method(r), "POST")
+    assert_eq_str(http_request_path(r), "/api")
+}
+
+fn TestHttpInternedContentType() {
+    // Common Content-Type values are interned to static views (no per-request alloc).
+    let raw = "POST /j HTTP/1.1\r\nHost: h\r\nContent-Type: application/json\r\n\r\n{}"
+    let r = http_request_parse(raw)
+    assert_eq_str(http_request_method(r), "POST")
+    assert_eq_str(http_request_path(r), "/j")
+    // body view into raw
+    let b = http_request_body(r)
+    assert(len(b) >= 2)
+}

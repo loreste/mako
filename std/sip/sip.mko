@@ -1,0 +1,49 @@
+// Low-level SIP / SDP / RTP — thin package surface over builtins.
+// Prefer builtins directly for hot paths; this pack documents the domain.
+
+pack sip
+
+// Message parse
+export fn is_request(msg: string) -> int { return sip_is_request(msg) }
+export fn is_response(msg: string) -> int { return sip_is_response(msg) }
+export fn ok(msg: string) -> int { return sip_ok(msg) }
+export fn method(msg: string) -> string { return sip_method(msg) }
+export fn request_uri(msg: string) -> string { return sip_request_uri(msg) }
+export fn status_code(msg: string) -> int { return sip_status_code(msg) }
+export fn reason(msg: string) -> string { return sip_reason(msg) }
+export fn header(msg: string, name: string) -> string { return sip_header(msg, name) }
+export fn body(msg: string) -> string { return sip_body(msg) }
+
+// Build
+export fn request(method: string, uri: string, headers: string, body: string) -> string {
+    return sip_request(method, uri, headers, body)
+}
+export fn response(code: int, reason: string, headers: string, body: string) -> string {
+    return sip_response(code, reason, headers, body)
+}
+export fn reply(req: string, code: int, reason: string, extra: string, body: string) -> string {
+    return sip_reply(req, code, reason, extra, body)
+}
+
+// IDs
+export fn branch() -> string { return sip_branch() }
+export fn tag() -> string { return sip_tag() }
+export fn call_id(host: string) -> string { return sip_call_id_new(host) }
+
+// URI
+export fn uri_user(uri: string) -> string { return sip_uri_user(uri) }
+export fn uri_host(uri: string) -> string { return sip_uri_host(uri) }
+export fn uri_port(uri: string) -> int { return sip_uri_port(uri) }
+export fn uri_build(user: string, host: string, port: int) -> string {
+    return sip_uri_build(user, host, port)
+}
+
+// SDP
+export fn sdp_audio(user: string, name: string, ip: string, port: int, codecs: string) -> string {
+    return sdp_build_audio(user, name, ip, port, codecs)
+}
+
+// RTP
+export fn rtp(pt: int, seq: int, ts: int, ssrc: int, marker: int, payload: string) -> string {
+    return rtp_pack(pt, seq, ts, ssrc, marker, payload)
+}

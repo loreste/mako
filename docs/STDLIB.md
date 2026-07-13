@@ -41,16 +41,16 @@ Tests: `examples/testing/stdlib_*`, plus area tests (`base64_test`, `regex_*`,
 | Package | Status | Role |
 |---------|--------|------|
 | `strings` / `bytes` | **Done** | split/join/trim/replace/builder + `bytes.Buffer` |
-| `strconv` / `fmt` | **Done** | parse/format; `fmt_sprintf*` |
+| `strconv` / `fmt` / `print` | **Done** | parse/format; Sprintf/Print/Errorf multi-arg |
 | `io` / `fs` / `path` / `filepath` | **Done** | files + recursive walk |
 | `bufio` | **Done** | buffered reader/writer |
 | `os` / `env` / `args` / `os/exec` / `os/signal` | **Done** | env/args/exec; signal Unix |
 | `flag` | **Done** | CLI flags |
-| `net` / `http` / `net/url` / `net/mail` / `net/smtp` | **Done** | + AUTH PLAIN / STARTTLS probe |
+| `net` / `http` / `net/url` / `net/mail` / `net/smtp` | **Done** | MIME builder + SMTP session / STARTTLS / AUTH |
 | `encoding/*` + `gob` / `binary` | **Done** | LE+BE; gob map/ss/struct/`[]string` |
 | `compress/gzip` · `archive/tar` · `archive/zip` | **Done** | multi-file zip + deflate |
 | `mime` / `multipart` · `context` · `crypto` | **Done** | |
-| `math` / `rand` · `text/template` / `html/template` | **Done** | if/range/with/nested |
+| `math` / `rand` · `text/template` / `html/template` | **Done** | Go-style engine: if/range/with/define + HTML escape |
 | `html` · `utf8` · `sync` / `atomic` · `slices` / `maps` | **Done** | |
 | `errors` / `testing` / `httptest` / `regexp` / `log` / `slog` / `sql` | **Done** | RE2-ish + `\x` `(?:)` `\p{...}` scripts/categories + lookahead |
 | `image/png` / `gif` / `jpeg` | **Done** | LZW dict; DCT + Huffman block; JFIF shell + APP7 Mako payload |
@@ -132,7 +132,8 @@ High-level HTTP server with declarative routing:
 | `context_with_timeout` / `expired` / `remaining` | context |
 | `bytes_buffer*` | bytes |
 | `rand_seed` / `rand_intn` / `rand_float` | math/rand |
-| `template_execute` | text/template |
+| `tmpl_data_*` / `tmpl_new` / `tmpl_execute` / `tmpl_html_*` | text/html templates (Go-style) |
+| `template_execute` | text/template (legacy one-key) |
 | `base32_encode` · `sha1` · `sha512` | encoding/base32 · crypto |
 | `lookup_host` / `parse_ip_ok` / `dns_*` | net / DNS and address helpers |
 | `signal_notify` / `signal_received` | os/signal |
@@ -149,7 +150,7 @@ High-level HTTP server with declarative routing:
 | `aead_available` / `aes_gcm_*` / `chacha20_poly1305_*` | crypto |
 | `multipart_boundary` / `multipart_form_value` / `multipart_file_*` | mime/multipart |
 | `regex_find_all` / `replace*` / `valid` / `quote_meta` | regexp |
-| `html_template_execute` / `execute2` / `execute3` / `if` | html/template |
+| `html_template_*` | html/template (legacy helpers) |
 | `gob_encode_*` / `gob_decode_*` / `gob_*_map_ss` | encoding/gob |
 | `mail_parse_address` / `mail_header_get` / `mail_address_ok` | net/mail |
 | `smtp_format_message` / `smtp_send_soft` | net/smtp |
@@ -157,8 +158,8 @@ High-level HTTP server with declarative routing:
 | `zip_create` / `zip_add` / `zip_write_to` / `zip_list` | archive/zip |
 | `reflect_value_*` | reflect |
 | `jpeg_encode_gray_dct` / `gif_encode_rgb_lzw` | image |
-| `slog_*` | log/slog |
-| `slog_redact` / `slog_with_redacted` | structured logging redaction controls |
+| `slog_*` / `log_*` | strong structured logging (`mako_log.h`: JSON/logfmt, levels, multi-field) |
+| `slog_redact` / `slog_with_redacted` / `slog_set_json` / `slog_set_output` | redaction, format, file sink |
 | `metric_*` / `gauge_*` / `hist_*` / `metrics_export` | process-local observability metrics |
 | `validate_required` / `validate_*_len` / `validate_int_range` / `validate_email` | backend request validation |
 | `game_fixed_steps` / `game_fixed_remainder` / `game_alpha` / `game_frame_budget_ok` | fixed-timestep game-loop helpers |
@@ -291,38 +292,29 @@ import "fmt"
 | `parse_bool` → `Result[int,string]` | true/false/1/0 |
 | `format_int` / `int_to_string` | int → string |
 | `format_float(v, prec)` / `format_bool` | format |
-| `fmt_sprintf` / `fmt_sprintf_d` | first `%s`/`%v` or `%d`/`%i` |
-| `print` / `print_int*` / `print_float` | stdout |
+| `fmt_sprintf`…`4` / `fmt_sprintf_d` / `fmt_sprintf_f` | multi-arg sprintf (`%s%v%d%q%x`) |
+| `fmt_sprint*` / `fmt_print*` / `fmt_printf*` | Sprint / Print / Printf |
+| `fmt_eprint*` / `fmt_errorf*` | stderr + error strings |
+| `print` / `print_raw` / `eprint` / `eprintln` | stdout/stderr |
+| `print_int*` / `print_float` / `print_bool` | typed stdout |
+
+Packs: `std/fmt`, `std/print`.
 
 ### Usage examples
 
 ```mko
 fn main() {
-    // Parse strings to numbers
     match parse_int("42") {
-        Ok(n) => print_int(n)               // 42
+        Ok(n) => print_int(n)
         Err(e) => print(e)
     }
 
-    // parse_int returns Err on bad input
-    match parse_int("not_a_number") {
-        Ok(_) => print("unexpected")
-        Err(e) => print(e)                  // parse error
-    }
+    let msg = fmt_sprintf2("hello, %s — n=%s", "mako", format_int(42))
+    fmt_println(msg)
 
-    // Format numbers to strings
-    let s = int_to_string(100)
-    print(s)                                // 100
-
-    let f = format_float(3.14159, 2)
-    print(f)                                // 3.14
-
-    // Sprintf-style formatting
-    let msg = fmt_sprintf("hello, %s!", "mako")
-    print(msg)                              // hello, mako!
-
-    let report = fmt_sprintf_d("processed %d items", 42)
-    print(report)                           // processed 42 items
+    fmt_printf("done %s\n", "ok")
+    let err = fmt_errorf("open: %s", "/tmp/x")
+    fmt_eprintln(err)
 }
 ```
 
@@ -340,8 +332,11 @@ import "os"
 | Builtin | Role |
 |---------|------|
 | `path_join` / `path_clean` / `path_base` / `path_dir` / `path_ext` / `path_is_abs` | path |
-| `read_file` / `write_file` / `append_file` / `remove_file` | file I/O |
-| `mkdir` / `file_exists` / `is_dir` / `read_dir` | FS |
+| `read_file` / `write_file` / `append_file` / `atomic_write_file` / `remove_file` | file I/O |
+| `mkdir` / `mkdir_all` / `rmdir` / `remove_all` / `rename` / `copy_file` | FS |
+| `is_file` / `path_size` / `file_mtime` / `chmod` / `temp_dir` / `temp_file` | FS metadata |
+| `symlink` / `readlink` / `realpath` | links / resolve |
+| `file_exists` / `is_dir` / `read_dir` | FS |
 | `getcwd` / `chdir` | working directory |
 | `env_get` / `env_set` | environment |
 | `argc` / `args` / `arg_get` | process args |
@@ -442,8 +437,10 @@ fn main() {
 
 ## `net` / `http`
 
-TCP: `tcp_listen` / `tcp_accept` / `tcp_connect` / `tcp_write` / `tcp_close`,
-plus session controls (`tcp_set_timeout`, `tcp_keepalive`, `tcp_nodelay`,
+TCP: `tcp_listen` / `tcp_accept` / `tcp_connect` / `tcp_write` / `tcp_write_all` /
+`tcp_read` / `tcp_read_n` / `tcp_close`, peer/local addr (`tcp_peer_addr` /
+`tcp_local_addr`), half-close (`tcp_shutdown`), `tcp_linger` / `sock_error`,
+session controls (`tcp_set_timeout`, `tcp_keepalive`, `tcp_nodelay`,
 `tcp_listen_backlog` / `tcp_listen_reuseport`, buffer sizing, `tcp_accept4`).
 
 ### Safety / ops (overflow, shutdown, leak, trace)
@@ -496,10 +493,25 @@ Tests: `examples/testing/proxy_pool_test.mko`, `proxy_edge_test.mko`.
 | `http_get_timeout` / `http_post_timeout` | timeouts |
 | `http_last_status` / `http_last_header` | last response |
 
-HTTPS/H2/gRPC/WS: `tls_*`, `nghttp2_*`, `ws_*` (handshake, server/client frames, echo helpers).
+HTTPS/H2/H3/gRPC/WS: `tls_*`, `http2_*` (64-stream mux, dual FC, HPACK, auto WU),
+`h3_server_*` / `quiche_h3_*` (HTTP/3 when quiche linked; 64 KiB body cap),
+`nghttp2_*`, **`ws_*` (RFC 6455)** — client/server frames, mask, fragmentation,
+auto-pong, close codes; loopback tests in `ws_api_test.mko`. WSS = `tls_*` +
+`ws_*` (compose in Mako). Production H2 servers: `tls_server_new` + `http2_conn_*`
+(not the `tls_serve_h2_routes` demo helper).
 
-UDP/Unix sockets: `udp_bind`, `udp_send_to`, `udp_recv`, `udp_local_port`,
-`udp_close`, `unix_socket_pair`, `unix_socket_pair_peer`, `unix_write`,
+GPU AI seed: `gpu_*` device/buffer + f32 **AI kernels** (`matmul`, `relu`,
+`bias_add`, `saxpy`, `softmax_rows`, plus add/mul/scale/fill). Backend
+**OpenCL** (NVIDIA / AMD / Intel / Apple) or **host**.
+
+Local models: `model_*` — **safetensors** + **GGUF** (F32/F16/Q4_0/Q8_0→f32),
+`model_set_f32` / `.makomodel`, `model_linear_f32`. Kernels: MHA, attention,
+layernorm, GELU/SiLU. Text: `tok_*` vocab + **BPE**. Hosted chat: `llm_*`.
+See BUILTINS § GPU / Local models.
+
+UDP/Unix: `udp_bind` / `udp_bind_addr`, `udp_send_to`, `udp_recv` /
+`udp_recv_from` + `udp_last_sender*`, `udp_local_port`, `udp_close`,
+`unix_socket_pair`, `unix_socket_pair_peer`, `unix_write`,
 `unix_read`, `unix_close`.
 
 ### Typed `HttpRequest`
@@ -717,9 +729,46 @@ fn main() {
 
 ---
 
+## `llm` (LLM programming)
+
+OpenAI-compatible chat runtime for **low-latency agent/tool loops** in Mako.
+
+| Area | Symbols |
+|------|---------|
+| Messages | `llm_message`, `llm_messages_append`, `llm_system_user`, `llm_chat_body` |
+| Tools | `llm_body_with_tools`, `llm_tool_call_*` |
+| Stream | `llm_sse_data`, `llm_sse_delta`, `llm_stream_append` |
+| Structured out | `llm_json_extract`, `llm_content` |
+| Transport | `llm_chat`, `llm_ask`, `llm_https_post` (needs OpenSSL) |
+| Ops | `llm_estimate_tokens`, `llm_retry_delay_ms`, `llm_redact_key` |
+
+Env: `XAI_API_KEY` (preferred), `OPENAI_API_KEY`, `MAKO_LLM_BASE_URL`, `MAKO_LLM_MODEL`.
+
+```mko
+fn main() {
+    if llm_https_available() == 0 { return }
+    let t0 = mono_ns()
+    let resp = llm_ask("Be brief.", "Hello", 15000)
+    print(llm_content(resp))
+    print_int(elapsed_ns(t0))
+}
+```
+
+Parallel tool handlers after parse: kick/fan over `llm_tool_call_name` indices
+(no async color). Tests: `examples/testing/llm_test.mko`.
+
+---
+
 ## `time`
 
-Clocks, timestamps, sleeping, and time formatting.
+Clocks, timestamps, sleeping, and deadlines. **Two clock domains:**
+
+| Domain | API | Use for |
+|--------|-----|---------|
+| **Monotonic** | `mono_ns` / `mono_us` / `mono_ms` / `now_ns` | Latency, budgets, timeouts, benchmarks |
+| **Wall** | `wall_ns` / `wall_ms` / `now_ms` / `time_unix` | Logs, calendar, RFC3339 |
+
+Monotonic prefers `CLOCK_MONOTONIC_RAW` (no NTP slew) when the OS provides it.
 
 ```mko
 import "time"
@@ -727,39 +776,53 @@ import "time"
 
 | Builtin | Role |
 |---------|------|
-| `now_ms` / `now_ns` / `time_unix` | clocks |
-| `sleep_ms` / `time_sleep_ms` | sleep |
-| `elapsed_ms` | delta from start ms |
-| `time_format` | RFC3339 UTC from unix ms |
+| `mono_ns` / `mono_us` / `mono_ms` | steady clock |
+| `wall_ns` / `wall_us` / `wall_ms` | calendar clock |
+| `now_ns` / `now_ms` | aliases: mono ns / wall ms |
+| `elapsed_ns` / `elapsed_us` / `elapsed_mono_ms` | mono deltas |
+| `deadline_ns` / `deadline_ms` / `deadline_remaining_ns` / `deadline_expired` | mono deadlines |
+| `sleep_ns` / `sleep_us` / `sleep_ms` / `sleep_until_ns` / `spin_until_ns` | waits |
+| `mono_res_ns` / `mono_overhead_ns` | resolution / calibration |
+| `time_unix` / `time_format` | wall seconds / RFC3339 |
+
+### Low-latency pattern
+
+```mko
+fn handle() {
+    let t0 = mono_ns()
+    // ... hot path work ...
+    let took = elapsed_ns(t0)
+    if took > 1000000 {               // > 1 ms budget
+        // log or shed load
+    }
+
+    let dl = deadline_ms(5)           // 5 ms mono deadline
+    while deadline_expired(dl) == 0 {
+        // poll until deadline
+        sleep_us(50)
+    }
+}
+```
 
 ### Usage examples
 
 ```mko
 fn main() {
-    // Current timestamp
-    let start = now_ms()
-    print_int(start)                    // e.g. 1720612345678
+    // Wall timestamp (logs)
+    let start = wall_ms()
+    print(time_format(start))
 
-    // Unix seconds
-    let unix = time_unix()
-    print_int(unix)                     // e.g. 1720612345
+    // Latency measurement (monotonic)
+    let t0 = mono_ns()
+    sleep_us(200)
+    print_int(elapsed_ns(t0))
 
-    // RFC 3339 formatting
-    let formatted = time_format(start)
-    print(formatted)                    // e.g. 2026-07-10T12:34:05Z
-
-    // Measure elapsed time
-    sleep_ms(100)
-    let elapsed = elapsed_ms(start)
-    print_int(elapsed)                  // ~100
-
-    // High-precision nanosecond clock (for benchmarks)
-    let t0 = now_ns()
-    // ... do work ...
-    let t1 = now_ns()
-    print_int(t1 - t0)                 // nanoseconds elapsed
+    // Precise short wait
+    sleep_until_ns(deadline_ns(500000))  // 500 µs
 }
 ```
+
+Tests: `examples/testing/time_latency_test.mko`.
 
 ---
 
@@ -864,9 +927,28 @@ fn main() {
 | errors | `error` / `errorf` / `wrap_err` / `error_is` / `error_string` / `?` |
 | testing | `mako test`, `assert` / `assert_eq` / `assert_eq_str`, `t_run`, `--race` / `--sanitize` |
 | regexp | `regex_match` / `regex_find` / `regex_capture` |
-| log | `log_info` / `log_warn` / `log_error` / `log_debug` / `log_kv` |
+| log | Strong slog: `slog_set_level` / `set_json` / `set_service` / `set_output` / `with*` / `log_*` aliases |
 | math | `abs` / `min` / `max` / `clamp`, `math_sqrt` / `pow` / `floor` / `ceil` / `sin` / `cos` / `log` / `exp` / `math_abs` |
 | collections | `sort_ints` / `sort_strings`, `ints_contains` / `strings_contains`, `ints_copy` / `ints_index` |
+
+### Strong logging
+
+```mko
+fn main() {
+    slog_set_level("info")          // filter debug
+    slog_set_service("payments")
+    slog_set_json(1)                // JSON lines for collectors
+    slog_with2("info", "charge", "user", "u1", "amount", "9.99")
+    slog_with_int("warn", "retry", "attempt", 3)
+    slog_with_redacted("info", "auth", "password")
+    slog_flush()
+    // log_info / log_warn / log_error use the same backend
+}
+```
+
+Default level is **info**. ISO-8601 `ts`; optional `trace=` when `trace_id` is active.
+`slog_set_output("/var/log/app.log")` appends; `slog_set_output("")` restores stderr.
+Tests: `examples/testing/strong_log_test.mko`.
 
 ### Errors usage examples
 
@@ -1113,8 +1195,13 @@ Same call shape for sqlite and postgres (`?` placeholders; postgres rewritten to
 | `sql_query_int(db, sql, []int)` | parameterized query → int |
 | `sql_exec(db, sql, []int)` | parameterized exec (integer params) |
 | `sql_exec_plain(db, sql)` | exec with no parameters (DDL, simple statements); returns 0 on success |
-| `sql_exec_str4(db, sql, p1, p2, p3, p4)` | exec with up to 4 string parameters ($1..$4); returns 0 on success |
-| `sql_query_str(db, sql, p1)` | query single string value (first col, first row) with one string param; returns "" if empty |
+| `sql_exec_str4(db, sql, p1, p2, p3, p4)` | exec with up to 4 string parameters (`?` / `$1..$4`); SQLite + Postgres; trailing `""` = unused slot |
+| `sql_query_str(db, sql, p1)` | query single string value (first col, first row); 0–1 string param; SQLite + Postgres; `""` if empty |
+| `sql_last_insert_id(db)` | last INSERT id (SQLite `last_insert_rowid`; Postgres `lastval`) |
+| `sql_rows_affected(db)` | rows changed by last mutating statement on this connection |
+| `sql_query_rows` / `sql_query_rows_str` | open multi-row result handle (int params / one string param) |
+| `sql_rows_next` / `sql_rows_int` / `sql_rows_str` / `sql_rows_cols` / `sql_rows_close` | cursor walk + column read |
+| `sql_query_col_int` / `sql_query_col_str` | bulk first-column collect (`[]int` / `[]string`, capped) |
 | `sql_begin` / `sql_commit` / `sql_rollback` | transaction boundaries |
 | `sql_prepare` / `sql_stmt_query_int` / `sql_stmt_exec` / `sql_stmt_close` | prepared statement handles |
 | `sql_migration_applied` / `sql_migrate` | numeric-version migration table and transactional apply |
@@ -1131,8 +1218,8 @@ Legacy drivers still available: `sqlite_query_*`, `pg_connect` / `pg_exec*`.
 Parameterized queries only for untrusted input -- [SECURITY.md](SECURITY.md).
 Tests: `examples/testing/sql_unify_test.mko`, `sql_pool_test.mko`,
 `sql_tx_stmt_test.mko`, `sql_migration_test.mko`, `sql_typed_check_test.mko`,
-`mysql_redis_polish_test.mko`, `multistore_compat_test.mko`,
-`derive_json_codegen_test.mko`.
+`sql_programming_test.mko`, `sql_rows_test.mko`, `mysql_redis_polish_test.mko`,
+`multistore_compat_test.mko`, `derive_json_codegen_test.mko`.
 
 ### SQLite usage example
 
@@ -1149,26 +1236,61 @@ fn main() {
     let _ = sql_exec_plain(db,
         "CREATE TABLE IF NOT EXISTS notes (id INTEGER PRIMARY KEY, text TEXT)")
 
-    // Insert with parameterized query
+    // Insert with parameterized string values (use `?` on SQLite; `$1` also works)
     let _ = sql_exec_str4(db,
-        "INSERT INTO notes (text) VALUES ($1)", "buy groceries", "", "", "")
+        "INSERT INTO notes (text) VALUES (?)", "buy groceries", "", "", "")
+    print_int(sql_last_insert_id(db))   // 1
+    print_int(sql_rows_affected(db))    // 1
 
     // Query
-    let count = sql_query_int(db, "SELECT COUNT(*) FROM notes", [])
+    let empty = make([]int, 0)
+    let count = sql_query_int(db, "SELECT COUNT(*) FROM notes", empty)
     print_int(count)                    // 1
 
-    let text = sql_query_str(db, "SELECT text FROM notes WHERE id = $1", "1")
+    let text = sql_query_str(db, "SELECT text FROM notes WHERE id = ?", "1")
     print(text)                         // buy groceries
 
     // Transactions
     sql_begin(db)
     let _ = sql_exec_str4(db,
-        "INSERT INTO notes (text) VALUES ($1)", "walk the dog", "", "", "")
+        "INSERT INTO notes (text) VALUES (?)", "walk the dog", "", "", "")
     sql_commit(db)
 
     let _ = remove_file("/tmp/app.db")
 }
 ```
+
+### Multi-row result sets
+
+```mko
+fn main() {
+    let db = sql_open_sqlite("/tmp/rows.db")
+    defer sql_close(db)
+
+    let _ = sql_exec_plain(db,
+        "CREATE TABLE items (id INTEGER PRIMARY KEY, name TEXT, qty INTEGER)")
+    let _ = sql_exec_str4(db, "INSERT INTO items (name, qty) VALUES (?, ?)", "apple", "3", "", "")
+    let _ = sql_exec_str4(db, "INSERT INTO items (name, qty) VALUES (?, ?)", "banana", "5", "", "")
+
+    let empty = make([]int, 0)
+    let rows = sql_query_rows(db, "SELECT id, name, qty FROM items ORDER BY id", empty)
+    while sql_rows_next(rows) == 1 {
+        print_int(sql_rows_int(rows, 0))
+        print(sql_rows_str(rows, 1))
+        print_int(sql_rows_int(rows, 2))
+    }
+    sql_rows_close(rows)
+
+    // Bulk first column
+    let names = sql_query_col_str(db, "SELECT name FROM items ORDER BY name", 100)
+    print_int(len(names))   // 2
+
+    let _ = remove_file("/tmp/rows.db")
+}
+```
+
+`sql_rows_next` returns **1** (row), **0** (done), or **-1** (error). Always
+`sql_rows_close` the handle. Max concurrent result sets: 32.
 
 ### Prepared statements
 
@@ -1208,6 +1330,65 @@ fn main() {
 
 ---
 
+## SIP / SDP / RTP -- build telecom in Mako
+
+Mako does **not** ship a full softswitch or WebRTC stack. It **does** give the
+primitives so **you can build** transaction engines, dialog state, SIPS, SRTP,
+proxies, and UAs **in Mako** — with crews, maps, mono clocks, and net/crypto.
+
+### Capability map (what you implement vs what exists)
+
+| You build in Mako | Primitives you use |
+|-------------------|--------------------|
+| INVITE / non-INVITE transaction retransmit | `sip_*` parse/build · `sip_txn_key` · `map` · `mono_ns` / `deadline_*` / `sleep_*` · `crew`/`kick` |
+| Dialog / call state | `sip_dialog_id` · tags · `Call-ID` · maps · optional `share` |
+| Registrar / location service | REGISTER parse · Contact · maps/DB (`sql_*`) |
+| Proxy / B2BUA routing | header rewrite · Via · Record-Route · UDP/TCP send |
+| SIP over TCP framing | `sip_msg_complete` / `sip_msg_needed` · `tcp_read` / `tcp_write_all` |
+| **SIPS** (SIP over TLS) | `tcp_*` + `tls_server_*` / `tls_accept` / `tls_read`/`write` · same SIP parse |
+| Digest REGISTER auth | `sip_digest_response` · `sip_authorization_digest` · `sip_auth_param` |
+| Offer/answer SDP | `sdp_*` · your policy code |
+| RTP media path | `rtp_pack` / `rtp_*` · `udp_*` · `fan` for parallel streams |
+| **SRTP** (in Mako) | `aes_ctr` (AES-CM keystream) · `hmac_sha1_raw` (auth tag) · `xor_bytes` · keying from SDP/SDES or DTLS |
+| Timers T1/T2/Timer A–K | `mono_ns` · `deadline_ns` · `sleep_until_ns` · structured crews (cancel on final response) |
+
+### SIP / SDP / RTP builtins
+
+| Area | Builtins |
+|------|----------|
+| Message | `sip_ok`, `sip_is_request`/`response`, `sip_method`, `sip_request_uri`, `sip_status_code`, `sip_header`, `sip_body` |
+| Build | `sip_request`, `sip_response`, `sip_headers_append`, `sip_via_value`, `sip_from_value`, `sip_to_value`, `sip_reply` |
+| IDs | `sip_branch` (`z9hG4bK…`), `sip_tag`, `sip_call_id_new`, `sip_cseq_new`, `sip_dialog_id`, `sip_txn_key` |
+| URI | `sip_uri_user` / `host` / `port` / `scheme` / `sip_uri_build` |
+| Framing | `sip_msg_complete`, `sip_msg_needed` (TCP Content-Length) |
+| Transport | `sip_udp_bind` / `send` / `recv`, `sip_tcp_send` (+ raw `udp_*`/`tcp_*`) |
+| Auth | `sip_digest_response`, `sip_authorization_digest`, `sip_auth_param`, `sip_md5_hex` |
+| SDP | `sdp_build_audio`, `sdp_media_*`, `sdp_connection_addr`, `sdp_attr`, `sdp_attr_rtpmap` |
+| RTP | `rtp_pack`, `rtp_seq`, `rtp_timestamp`, `rtp_ssrc`, `rtp_payload`, `rtp_payload_type` |
+| SRTP building blocks | `aes_ctr`, `hmac_sha1` / `hmac_sha1_raw`, `aes_gcm_*`, `random_bytes` |
+
+```mko
+// Skeleton: you own the transaction map + timers.
+fn on_datagram(raw: string, peer_host: string, peer_port: int) {
+    if sip_ok(raw) == 0 { return }
+    if sip_is_request(raw) == 1 {
+        let via = sip_header(raw, "Via")
+        let key = sip_txn_key(sip_via_branch(via), sip_method(raw))
+        // store key → state in map[string]…; schedule retransmit with mono_ns
+        let _ = key
+        let _ = sip_udp_send(sock, peer_host, peer_port, sip_reply(raw, 100, "Trying", "", ""))
+    }
+}
+```
+
+Package mirror: `pull "std/sip"` (`std/sip/sip.mko`).  
+Tests: `examples/testing/sip_test.mko` · demo: `examples/sip_ua.mko`.
+
+**Not shipped as product libraries:** a complete softphone, SBCs, DTLS-SRTP
+handshake, or browser WebRTC. Those are **Mako programs** on top of this surface.
+
+---
+
 ## Local packages (`mako.toml` / `mako pkg`)
 
 ```bash
@@ -1233,6 +1414,22 @@ See [howto/04-packages.md](howto/04-packages.md).
 
 ---
 
+## UUID / ULID (`std/uuid`, builtins)
+
+16-byte **Copy** POD — no GC on the value; string form allocates only when asked.
+
+| Surface | API |
+|---------|-----|
+| Random | `uuid_v4()` |
+| Time-ordered | `uuid_v7()`, `ulid_new()` |
+| Name-based | `uuid_v5(ns, name)` · `uuid_ns_dns()` / `url` / `oid` / `x500` |
+| Format | `uuid_string` / `uuid_string_upper` / `uuid_urn` / `ulid_string` |
+| Parse | `uuid_parse` (canonical, braces, URN, 32-hex) · `ulid_parse` |
+| Bytes | `uuid_bytes` / `uuid_from_bytes` (exactly 16; hard fail otherwise) |
+| Inspect | `uuid_version` · `uuid_variant` · `uuid_cmp` · `ulid_timestamp_ms` |
+
+Pull: `pull "uuid"` → `std/uuid/uuid.mko` re-exports. Prefer builtins on the hot path.
+
 ## Known gaps (honest)
 
 | Area | Mako today |
@@ -1240,7 +1437,7 @@ See [howto/04-packages.md](howto/04-packages.md).
 | `strings` package import | Done — `import "strings"` → `std/strings/` (also path, fmt, sync, …) |
 | `bufio.Reader/Writer` | Done |
 | `net/http.Request` typed | Done (`HttpRequest`) |
-| `database/sql` one API | Done (`sql_*`; legacy sqlite_/pg_ remain) |
+| `database/sql` one API | Done (`sql_*`; string params, last_insert/rows, multi-row cursor + bulk col; MySQL query still seed) |
 | Full `regexp` engine | RE2-ish (`\d\w\s`, `{n,m}`, `\b`, find_all/replace); not full RE2/PCRE |
 | `sync.WaitGroup` / RWMutex / atomic | Done |
 | Generics collections | slices + maps helpers Done; `List<T>` Later |

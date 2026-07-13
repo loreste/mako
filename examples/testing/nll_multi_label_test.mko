@@ -1,0 +1,31 @@
+// Stronger NLL multi-label: const-fold nested comparisons prune dead edges.
+
+fn consume(t: string) {}
+
+fn TestNllConstEqFold() {
+    // true == true prunes else; consume in else must not poison post-if.
+    hold let s = "ok"
+    if (true == true) {
+        // no move on live arm
+    } else {
+        consume(s)
+    }
+    // s still live after pruned else
+    consume(s)
+}
+
+fn TestNllMultiLabelBreak() {
+    // Multi-label break/continue product: s never moved.
+    hold let s = "x"
+    let mut i = 0
+    outer: while i < 3 {
+        i = i + 1
+        mid: while true {
+            if i == 2 {
+                break outer
+            }
+            break mid
+        }
+    }
+    consume(s)
+}

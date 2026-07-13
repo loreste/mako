@@ -20,7 +20,8 @@
 
 #define MAKO_QUIC_SCID_LEN 16
 #define MAKO_QUIC_MAX_DATAGRAM 1350
-#define MAKO_H3_BODY_CAP 4096
+/* Production body buffer: 64 KiB per in-flight request (typical API payloads). */
+#define MAKO_H3_BODY_CAP (64 * 1024)
 
 static inline int64_t mako_quiche_available(void) {
     return 1;
@@ -847,10 +848,10 @@ static inline int64_t mako_quiche_stop_server(int64_t pid) {
  * --------------------------------------------------------------------- */
 
 #define MAKO_H3_RT_MAX 8
-#define MAKO_H3_RT_CONNS 16
-#define MAKO_H3_RT_READY 32
+#define MAKO_H3_RT_CONNS 32
+#define MAKO_H3_RT_READY 64
 #define MAKO_H3_CID_LEN 16
-#define MAKO_H3_REQ_CAP 8192
+#define MAKO_H3_REQ_CAP (16 * 1024)
 #define MAKO_H3_TOKEN_MAX (6 + sizeof(struct sockaddr_storage) + QUICHE_MAX_CONN_ID_LEN)
 
 typedef struct {
@@ -1055,10 +1056,17 @@ static inline void mako_h3_poll_h3_events(MakoH3Server *s, int conn_idx) {
                 );
                 if (n <= 0) break;
                 size_t room = MAKO_H3_BODY_CAP - 1 - s->ready[ri].body_len;
-                size_t take = (size_t)n < room ? (size_t)n : room;
-                if (take) {
-                    memcpy(s->ready[ri].body + s->ready[ri].body_len, tmp, take);
-                    s->ready[ri].body_len += take;
+                if ((size_t)n > room) {
+                    /* Refuse silent truncate — drop request slot. */
+                    s->ready[ri].live = 0;
+                    s->ready[ri].taken = 1;
+                    s->ready[ri].finished = 0;
+                    s->ready[ri].headers_done = 0;
+                    break;
+                }
+                if (n > 0) {
+                    memcpy(s->ready[ri].body + s->ready[ri].body_len, tmp, (size_t)n);
+                    s->ready[ri].body_len += (size_t)n;
                     s->ready[ri].body[s->ready[ri].body_len] = 0;
                 }
             }
@@ -1339,7 +1347,9 @@ static inline int64_t mako_h3_server_poll(int64_t handle, int64_t timeout_ms) {
     return s->ready_count > 0 ? 1 : (pr == 0 ? 0 : 1);
 }
 
-/* Next finished request stream id, or -1. */
+/* Next finished request stream id, or -1.
+ * For GET/HEAD, accept as soon as headers complete. For methods that may carry
+ * a body (POST/PUT/PATCH), wait until FINISHED so the full body is available. */
 static inline int64_t mako_h3_accept_stream(int64_t handle) {
     if (handle < 0 || handle >= MAKO_H3_RT_MAX) return -1;
     MakoH3Server *s = &mako_h3_servers[handle];
@@ -1350,7 +1360,14 @@ static inline int64_t mako_h3_accept_stream(int64_t handle) {
         MakoH3ReadyReq *r = &s->ready[idx];
         if (!r->live || r->taken) continue;
         if (r->headers_done == 0) continue;
-        /* Accept once headers are in; body may still be partial for POST. */
+        int needs_body = 0;
+        if (r->method[0]) {
+            if (strcmp(r->method, "POST") == 0 || strcmp(r->method, "PUT") == 0
+                || strcmp(r->method, "PATCH") == 0) {
+                needs_body = 1;
+            }
+        }
+        if (needs_body && !r->finished) continue;
         r->taken = 1;
         s->last_req_idx = idx;
         if (s->ready_count > 0) s->ready_count--;
@@ -1358,6 +1375,61 @@ static inline int64_t mako_h3_accept_stream(int64_t handle) {
         return r->stream_id;
     }
     return -1;
+}
+
+/* Look up a ready request by stream id (prefer last accepted). */
+static inline MakoH3ReadyReq *mako_h3_find_req(MakoH3Server *s, int64_t stream_id) {
+    if (!s) return NULL;
+    int idx = s->last_req_idx;
+    if (idx >= 0 && idx < MAKO_H3_RT_READY
+        && s->ready[idx].live && s->ready[idx].stream_id == stream_id) {
+        return &s->ready[idx];
+    }
+    for (int i = 0; i < MAKO_H3_RT_READY; i++) {
+        if (s->ready[i].live && s->ready[i].stream_id == stream_id)
+            return &s->ready[i];
+    }
+    return NULL;
+}
+
+static inline MakoString mako_h3_stream_method(int64_t handle, int64_t stream_id) {
+    if (handle < 0 || handle >= MAKO_H3_RT_MAX) return mako_str_from_cstr("");
+    MakoH3Server *s = &mako_h3_servers[handle];
+    if (!s->live) return mako_str_from_cstr("");
+    MakoH3ReadyReq *r = mako_h3_find_req(s, stream_id);
+    if (!r || !r->method[0]) return mako_str_from_cstr("GET");
+    return mako_str_from_cstr(r->method);
+}
+
+static inline MakoString mako_h3_stream_path(int64_t handle, int64_t stream_id) {
+    if (handle < 0 || handle >= MAKO_H3_RT_MAX) return mako_str_from_cstr("");
+    MakoH3Server *s = &mako_h3_servers[handle];
+    if (!s->live) return mako_str_from_cstr("");
+    MakoH3ReadyReq *r = mako_h3_find_req(s, stream_id);
+    if (!r || !r->path[0]) return mako_str_from_cstr("/");
+    return mako_str_from_cstr(r->path);
+}
+
+static inline MakoString mako_h3_stream_authority(int64_t handle, int64_t stream_id) {
+    if (handle < 0 || handle >= MAKO_H3_RT_MAX) return mako_str_from_cstr("");
+    MakoH3Server *s = &mako_h3_servers[handle];
+    if (!s->live) return mako_str_from_cstr("");
+    MakoH3ReadyReq *r = mako_h3_find_req(s, stream_id);
+    if (!r || !r->authority[0]) return mako_str_from_cstr("localhost");
+    return mako_str_from_cstr(r->authority);
+}
+
+static inline MakoString mako_h3_stream_body(int64_t handle, int64_t stream_id) {
+    if (handle < 0 || handle >= MAKO_H3_RT_MAX) return mako_str_from_cstr("");
+    MakoH3Server *s = &mako_h3_servers[handle];
+    if (!s->live) return mako_str_from_cstr("");
+    MakoH3ReadyReq *r = mako_h3_find_req(s, stream_id);
+    if (!r || r->body_len == 0) return mako_str_from_cstr("");
+    char *d = (char *)malloc(r->body_len + 1);
+    if (!d) return mako_str_from_cstr("");
+    memcpy(d, r->body, r->body_len);
+    d[r->body_len] = 0;
+    return (MakoString){d, r->body_len};
 }
 
 /* Pseudo-HTTP/1.1 request for the last accepted stream. */
@@ -1421,8 +1493,11 @@ static inline MakoString mako_h3_stream_read(int64_t handle, int64_t stream_id) 
     return (MakoString){d, (size_t)n};
 }
 
-/* Write response: optional "STATUS\n" prefix, then body. */
-static inline int64_t mako_h3_stream_write(int64_t handle, int64_t stream_id, MakoString data) {
+/* Core H3 response send with optional content-type. */
+static inline int64_t mako_h3_response(
+    int64_t handle, int64_t stream_id, int64_t status,
+    MakoString content_type, MakoString body_in
+) {
     if (handle < 0 || handle >= MAKO_H3_RT_MAX) return -1;
     MakoH3Server *s = &mako_h3_servers[handle];
     if (!s->live || s->sock < 0) return -1;
@@ -1440,34 +1515,16 @@ static inline int64_t mako_h3_stream_write(int64_t handle, int64_t stream_id, Ma
     MakoH3Conn *c = &s->conns[conn_idx];
     if (!c->live || !c->conn || !c->h3) return -1;
 
-    int status = 200;
-    const char *body = data.data ? data.data : "";
-    size_t body_len = data.data ? data.len : 0;
-    if (data.data && data.len >= 2) {
-        /* Parse leading "NNN\n" status line. */
-        if (data.data[0] >= '1' && data.data[0] <= '5'
-            && data.data[1] >= '0' && data.data[1] <= '9') {
-            int st = 0;
-            size_t i = 0;
-            while (i < data.len && data.data[i] >= '0' && data.data[i] <= '9') {
-                st = st * 10 + (data.data[i] - '0');
-                i++;
-            }
-            if (i < data.len && (data.data[i] == '\n' || data.data[i] == '\r') && st >= 100 && st <= 599) {
-                status = st;
-                while (i < data.len && (data.data[i] == '\n' || data.data[i] == '\r')) i++;
-                body = data.data + i;
-                body_len = data.len - i;
-            }
-        }
-    }
+    if (status < 100 || status > 599) status = 200;
+    const char *body = body_in.data ? body_in.data : "";
+    size_t body_len = body_in.data ? body_in.len : 0;
 
     char status_buf[8];
-    snprintf(status_buf, sizeof(status_buf), "%d", status);
+    snprintf(status_buf, sizeof(status_buf), "%lld", (long long)status);
     char cl_buf[32];
     snprintf(cl_buf, sizeof(cl_buf), "%zu", body_len);
 
-    quiche_h3_header headers[4];
+    quiche_h3_header headers[5];
     size_t nh = 0;
     headers[nh].name = (const uint8_t *)":status";
     headers[nh].name_len = 7;
@@ -1476,9 +1533,16 @@ static inline int64_t mako_h3_stream_write(int64_t handle, int64_t stream_id, Ma
     nh++;
     headers[nh].name = (const uint8_t *)"server";
     headers[nh].name_len = 6;
-    headers[nh].value = (const uint8_t *)"leba";
+    headers[nh].value = (const uint8_t *)"mako";
     headers[nh].value_len = 4;
     nh++;
+    if (content_type.data && content_type.len > 0) {
+        headers[nh].name = (const uint8_t *)"content-type";
+        headers[nh].name_len = 12;
+        headers[nh].value = (const uint8_t *)content_type.data;
+        headers[nh].value_len = content_type.len;
+        nh++;
+    }
     headers[nh].name = (const uint8_t *)"content-length";
     headers[nh].name_len = 14;
     headers[nh].value = (const uint8_t *)cl_buf;
@@ -1489,18 +1553,77 @@ static inline int64_t mako_h3_stream_write(int64_t handle, int64_t stream_id, Ma
     if (quiche_h3_send_response(c->h3, c->conn, (uint64_t)stream_id, headers, nh, fin) < 0)
         return -1;
     if (body_len > 0) {
-        ssize_t wr = quiche_h3_send_body(
-            c->h3, c->conn, (uint64_t)stream_id,
-            (uint8_t *)body, body_len, true
-        );
-        if (wr < 0) return -1;
+        size_t sent = 0;
+        for (int spin = 0; spin < 4096 && sent < body_len; spin++) {
+            size_t left = body_len - sent;
+            /* Never set fin until the final accepted byte so partial writes stay open. */
+            int is_fin = 0;
+            ssize_t wr = quiche_h3_send_body(
+                c->h3, c->conn, (uint64_t)stream_id,
+                (uint8_t *)(body + sent), left, false
+            );
+            if (wr == QUICHE_H3_ERR_DONE) {
+                mako_h3_flush_conn(s, c);
+                continue;
+            }
+            if (wr < 0) return -1;
+            sent += (size_t)wr;
+            mako_h3_flush_conn(s, c);
+            (void)is_fin;
+        }
+        if (sent < body_len) return -1;
+        /* Empty FIN to close the stream after all body bytes. */
+        for (int spin = 0; spin < 64; spin++) {
+            ssize_t wr = quiche_h3_send_body(
+                c->h3, c->conn, (uint64_t)stream_id, (uint8_t *)"", 0, true
+            );
+            if (wr == QUICHE_H3_ERR_DONE) {
+                mako_h3_flush_conn(s, c);
+                continue;
+            }
+            if (wr < 0) return -1;
+            break;
+        }
     }
     mako_h3_flush_conn(s, c);
     if (req_idx >= 0) {
         s->ready[req_idx].live = 0;
         s->ready[req_idx].taken = 1;
     }
-    return (int64_t)(body_len > 0 ? body_len : 1);
+    return (int64_t)(body_len > 0 ? (int64_t)body_len : 1);
+}
+
+/* Write response: optional "STATUS\n" prefix, then body. Defaults content-type
+ * to text/plain when a body is present. */
+static inline int64_t mako_h3_stream_write(int64_t handle, int64_t stream_id, MakoString data) {
+    int status = 200;
+    const char *body = data.data ? data.data : "";
+    size_t body_len = data.data ? data.len : 0;
+    if (data.data && data.len >= 2) {
+        if (data.data[0] >= '1' && data.data[0] <= '5'
+            && data.data[1] >= '0' && data.data[1] <= '9') {
+            int st = 0;
+            size_t i = 0;
+            while (i < data.len && data.data[i] >= '0' && data.data[i] <= '9') {
+                st = st * 10 + (data.data[i] - '0');
+                i++;
+            }
+            if (i < data.len && (data.data[i] == '\n' || data.data[i] == '\r')
+                && st >= 100 && st <= 599) {
+                status = st;
+                while (i < data.len && (data.data[i] == '\n' || data.data[i] == '\r')) i++;
+                body = data.data + i;
+                body_len = data.len - i;
+            }
+        }
+    }
+    MakoString body_s = {(char *)body, body_len};
+    MakoString ct = body_len > 0
+        ? mako_str_from_cstr("text/plain; charset=utf-8")
+        : (MakoString){NULL, 0};
+    int64_t rc = mako_h3_response(handle, stream_id, status, ct, body_s);
+    free(ct.data);
+    return rc;
 }
 
 static inline int64_t mako_h3_server_close(int64_t handle) {
@@ -1619,6 +1742,23 @@ static inline MakoString mako_h3_stream_read(int64_t h, int64_t sid) {
 }
 static inline int64_t mako_h3_stream_write(int64_t h, int64_t sid, MakoString data) {
     (void)h; (void)sid; (void)data; return -1;
+}
+static inline MakoString mako_h3_stream_method(int64_t h, int64_t sid) {
+    (void)h; (void)sid; return mako_str_from_cstr("");
+}
+static inline MakoString mako_h3_stream_path(int64_t h, int64_t sid) {
+    (void)h; (void)sid; return mako_str_from_cstr("");
+}
+static inline MakoString mako_h3_stream_body(int64_t h, int64_t sid) {
+    (void)h; (void)sid; return mako_str_from_cstr("");
+}
+static inline MakoString mako_h3_stream_authority(int64_t h, int64_t sid) {
+    (void)h; (void)sid; return mako_str_from_cstr("");
+}
+static inline int64_t mako_h3_response(
+    int64_t h, int64_t sid, int64_t st, MakoString ct, MakoString body
+) {
+    (void)h; (void)sid; (void)st; (void)ct; (void)body; return -1;
 }
 static inline int64_t mako_h3_server_close(int64_t h) { (void)h; return 0; }
 static inline int64_t mako_h3_server_available(void) { return 0; }

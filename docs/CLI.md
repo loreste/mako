@@ -491,6 +491,14 @@ systems = true    # hold/share rules never weakened, GC forbidden
 | `name` | Package name |
 | `version` | SemVer version string |
 | `systems` | If `true`, ownership rules are strict, no GC weakening |
+
+### Profile / safety vs speed
+
+| Flag / toml | Effect |
+|-------------|--------|
+| `mako build --release` | `-O3 -flto -DNDEBUG` — **elides** bounds checks on the hot path |
+| `mako build --release --bounds always` | Keep bounds checks even under `NDEBUG` (safer, slower) |
+| `[profile.release] bounds_checks = "on"` | Same as `--bounds always` for that package |
 | `[dependencies]` | Map of dependency name → source |
 | `[workspace]` | Workspace configuration |
 | `members` | List of member directories |

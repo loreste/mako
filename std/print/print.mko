@@ -1,0 +1,17 @@
+// print — thin Go-like print/println helpers (stdout / stderr).
+
+fn Print(a: string) -> int { return fmt_print(a) }
+fn Print2(a: string, b: string) -> int { return fmt_print2(a, b) }
+fn Println(a: string) -> int { return fmt_println(a) }
+fn Println2(a: string, b: string) -> int { return fmt_println2(a, b) }
+fn Printf(format: string, a: string) -> int { return fmt_printf(format, a) }
+
+fn Eprint(a: string) -> int { return eprint(a) }
+fn Eprintln(a: string) -> int { return eprintln(a) }
+
+// Built-in style
+fn str(s: string) { print(s) }
+fn int(n: int) { print_int(n) }
+fn float(v: float) { print_float(v) }
+fn bool(b: bool) { print_bool(b) }
+fn raw(s: string) -> int { return print_raw(s) }

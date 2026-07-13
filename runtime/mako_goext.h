@@ -1725,6 +1725,109 @@ static inline MakoString mako_aes_gcm_open(MakoString key, MakoString nonce, Mak
 #endif
 }
 
+/* AES-CTR (AES-CM building block for SRTP and stream crypto in Mako apps).
+ * key: 16 or 32 bytes; iv: 16 bytes. Encrypt == decrypt (XOR keystream). */
+static inline MakoString mako_aes_ctr(MakoString key, MakoString iv, MakoString data) {
+#if defined(MAKO_AEAD_OPENSSL)
+    if ((key.len != 16 && key.len != 32) || iv.len != 16) return mako_str_from_cstr("");
+    const EVP_CIPHER *cipher =
+        key.len == 16 ? EVP_aes_128_ctr() : EVP_aes_256_ctr();
+    EVP_CIPHER_CTX *ctx = EVP_CIPHER_CTX_new();
+    if (!ctx) return mako_str_from_cstr("");
+    size_t n = data.data ? data.len : 0;
+    char *out = (char *)malloc(n + 1);
+    if (!out) {
+        EVP_CIPHER_CTX_free(ctx);
+        return mako_str_from_cstr("");
+    }
+    int len = 0, outlen = 0;
+    if (EVP_EncryptInit_ex(ctx, cipher, NULL, (const unsigned char *)key.data,
+                           (const unsigned char *)iv.data) != 1) {
+        free(out);
+        EVP_CIPHER_CTX_free(ctx);
+        return mako_str_from_cstr("");
+    }
+    if (n > 0) {
+        if (EVP_EncryptUpdate(
+                ctx, (unsigned char *)out, &len,
+                (const unsigned char *)(data.data ? data.data : ""), (int)n
+            ) != 1) {
+            free(out);
+            EVP_CIPHER_CTX_free(ctx);
+            return mako_str_from_cstr("");
+        }
+        outlen = len;
+    }
+    if (EVP_EncryptFinal_ex(ctx, (unsigned char *)out + outlen, &len) != 1) {
+        free(out);
+        EVP_CIPHER_CTX_free(ctx);
+        return mako_str_from_cstr("");
+    }
+    outlen += len;
+    EVP_CIPHER_CTX_free(ctx);
+    out[outlen] = 0;
+    return (MakoString){out, (size_t)outlen};
+#else
+    (void)key;
+    (void)iv;
+    (void)data;
+    return mako_str_from_cstr("");
+#endif
+}
+
+/* HMAC-SHA1 raw 20 bytes (SRTP auth tag source) and hex. */
+static inline MakoString mako_hmac_sha1_raw(MakoString key, MakoString msg) {
+#if defined(MAKO_HAS_CC)
+    unsigned char dig[CC_SHA1_DIGEST_LENGTH];
+    CCHmac(
+        kCCHmacAlgSHA1, key.data ? key.data : "", key.len, msg.data ? msg.data : "",
+        msg.len, dig
+    );
+    char *o = (char *)malloc(21);
+    if (!o) return mako_str_from_cstr("");
+    memcpy(o, dig, 20);
+    o[20] = 0;
+    return (MakoString){o, 20};
+#elif defined(MAKO_HAS_OPENSSL) || defined(MAKO_USE_OPENSSL)
+    unsigned char dig[EVP_MAX_MD_SIZE];
+    unsigned int dlen = 0;
+    if (!HMAC(
+            EVP_sha1(), key.data ? key.data : "", (int)key.len,
+            (const unsigned char *)(msg.data ? msg.data : ""), msg.len, dig, &dlen
+        )) {
+        return mako_str_from_cstr("");
+    }
+    char *o = (char *)malloc(dlen + 1);
+    if (!o) return mako_str_from_cstr("");
+    memcpy(o, dig, dlen);
+    o[dlen] = 0;
+    return (MakoString){o, dlen};
+#else
+    (void)key;
+    (void)msg;
+    return mako_str_from_cstr("");
+#endif
+}
+
+static inline MakoString mako_hmac_sha1_hex(MakoString key, MakoString msg) {
+    MakoString raw = mako_hmac_sha1_raw(key, msg);
+    if (!raw.data || raw.len == 0) {
+        free(raw.data);
+        return mako_str_from_cstr("");
+    }
+    char *o = (char *)malloc(raw.len * 2 + 1);
+    if (!o) {
+        free(raw.data);
+        return mako_str_from_cstr("");
+    }
+    for (size_t i = 0; i < raw.len; i++) {
+        sprintf(o + i * 2, "%02x", (unsigned char)raw.data[i]);
+    }
+    o[raw.len * 2] = 0;
+    free(raw.data);
+    return (MakoString){o, raw.len * 2};
+}
+
 static inline MakoString mako_chacha20_poly1305_seal(
     MakoString key, MakoString nonce, MakoString plaintext, MakoString aad
 ) {
@@ -2781,8 +2884,10 @@ static inline int64_t mako_mail_address_ok(MakoString addr) {
     return ok;
 }
 
-/* ---- log/slog-style ---- */
-static int mako_slog_min_level = 0; /* 0=debug 1=info 2=warn 3=error */
+/* slog implementations live in mako_log.h (strong structured logging).
+ * When mako_log.h is not included, provide minimal fallbacks. */
+#if !defined(MAKO_LOG_H)
+static int mako_slog_min_level = 1;
 static inline int64_t mako_slog_level_num(MakoString level) {
     if (level.len >= 5 && strncmp(level.data, "debug", 5) == 0) return 0;
     if (level.len >= 4 && strncmp(level.data, "info", 4) == 0) return 1;
@@ -2813,22 +2918,13 @@ static inline void mako_slog_debug(MakoString msg) {
 }
 static inline void mako_slog_with(MakoString level, MakoString msg, MakoString k1, MakoString v1) {
     if ((int)mako_slog_level_num(level) < mako_slog_min_level) return;
-    fprintf(stderr, "level=%.*s ", (int)level.len, level.data ? level.data : "");
-#if defined(MAKO_TRACE_H)
-    {
-        MakoString tid = mako_trace_current();
-        if (tid.data && tid.len > 0) {
-            fprintf(stderr, "trace=%.*s ", (int)tid.len, tid.data);
-        }
-        free(tid.data);
-    }
-#endif
-    fprintf(stderr, "msg=");
+    fprintf(stderr, "level=%.*s msg=", (int)level.len, level.data ? level.data : "");
     fwrite(msg.data, 1, msg.len, stderr);
     fprintf(stderr, " %.*s=", (int)k1.len, k1.data ? k1.data : "");
     fwrite(v1.data, 1, v1.len, stderr);
     fputc('\n', stderr);
 }
+#endif /* !MAKO_LOG_H */
 
 /* ---- regexp: compile check + quote meta ---- */
 static inline int64_t mako_regex_valid(MakoString pat) {
@@ -3967,7 +4063,10 @@ static inline int64_t mako_reflect_value_equal(MakoReflectValue *a, MakoReflectV
     return 1;
 }
 
-/* JPEG: embed zigzag-ordered quantized DC+AC stub as Huffman-ish evidence (APP9). */
+/* Forward: real baseline Huffman JPEG (defined below) for external viewers. */
+static inline MakoString mako_jpeg_encode_gray_baseline(int64_t w, int64_t h, MakoString pixels);
+
+/* APP9 Huffman-ish evidence (mako-internal roundtrip probes). */
 static inline MakoString mako_jpeg_encode_gray_huff(int64_t w, int64_t h, MakoString pixels) {
     MakoString base = mako_jpeg_encode_gray_dct(w, h, pixels);
     if (base.len < 4) return base;
@@ -4018,6 +4117,276 @@ static inline MakoString mako_jpeg_huff_block(MakoString jpeg) {
     }
     return mako_str_from_cstr("");
 }
+
+
+/* ---- Baseline grayscale JPEG with real DHT/SOS (viewer-readable Huffman) ----
+ * Emits standard tables + entropy-coded MCU blocks. Suitable for external viewers
+ * (Preview, browsers, ImageMagick). Still grayscale 8-bit baseline only.
+ */
+static const unsigned char mako_jpeg_std_luma_q[64] = {
+    16,11,10,16,24,40,51,61, 12,12,14,19,26,58,60,55,
+    14,13,16,24,40,57,69,56, 14,17,22,29,51,87,80,62,
+    18,22,37,56,68,109,103,77, 24,35,55,64,81,104,113,92,
+    49,64,78,87,103,121,120,101, 72,92,95,98,112,100,103,99
+};
+/* JPEG Annex K typical DC/AC luminance Huffman bits/values (abbreviated). */
+static const unsigned char mako_jpeg_dc_bits[16] = {
+    0,1,5,1,1,1,1,1,1,0,0,0,0,0,0,0
+};
+static const unsigned char mako_jpeg_dc_val[12] = {
+    0,1,2,3,4,5,6,7,8,9,10,11
+};
+static const unsigned char mako_jpeg_ac_bits[16] = {
+    0,2,1,3,3,2,4,3,5,5,4,4,0,0,1,0x7d
+};
+static const unsigned char mako_jpeg_ac_val[162] = {
+    0x01,0x02,0x03,0x00,0x04,0x11,0x05,0x12,0x21,0x31,0x41,0x06,0x13,0x51,0x61,0x07,
+    0x22,0x71,0x14,0x32,0x81,0x91,0xa1,0x08,0x23,0x42,0xb1,0xc1,0x15,0x52,0xd1,0xf0,
+    0x24,0x33,0x62,0x72,0x82,0x09,0x0a,0x16,0x17,0x18,0x19,0x1a,0x25,0x26,0x27,0x28,
+    0x29,0x2a,0x34,0x35,0x36,0x37,0x38,0x39,0x3a,0x43,0x44,0x45,0x46,0x47,0x48,0x49,
+    0x4a,0x53,0x54,0x55,0x56,0x57,0x58,0x59,0x5a,0x63,0x64,0x65,0x66,0x67,0x68,0x69,
+    0x6a,0x73,0x74,0x75,0x76,0x77,0x78,0x79,0x7a,0x83,0x84,0x85,0x86,0x87,0x88,0x89,
+    0x8a,0x92,0x93,0x94,0x95,0x96,0x97,0x98,0x99,0x9a,0xa2,0xa3,0xa4,0xa5,0xa6,0xa7,
+    0xa8,0xa9,0xaa,0xb2,0xb3,0xb4,0xb5,0xb6,0xb7,0xb8,0xb9,0xba,0xc2,0xc3,0xc4,0xc5,
+    0xc6,0xc7,0xc8,0xc9,0xca,0xd2,0xd3,0xd4,0xd5,0xd6,0xd7,0xd8,0xd9,0xda,0xe1,0xe2,
+    0xe3,0xe4,0xe5,0xe6,0xe7,0xe8,0xe9,0xea,0xf1,0xf2,0xf3,0xf4,0xf5,0xf6,0xf7,0xf8,
+    0xf9,0xfa
+};
+
+typedef struct {
+    unsigned char *buf;
+    size_t len, cap;
+    unsigned int bitbuf;
+    int bitcount;
+} MakoJpegBw;
+
+static inline void mako_jpeg_bw_init(MakoJpegBw *b, size_t cap) {
+    b->buf = (unsigned char *)malloc(cap ? cap : 64);
+    b->len = 0; b->cap = cap ? cap : 64;
+    b->bitbuf = 0; b->bitcount = 0;
+}
+static inline void mako_jpeg_bw_ensure(MakoJpegBw *b, size_t need) {
+    if (b->len + need <= b->cap) return;
+    size_t ncap = b->cap ? b->cap * 2 : 64;
+    while (ncap < b->len + need) ncap *= 2;
+    unsigned char *nb = (unsigned char *)realloc(b->buf, ncap);
+    if (!nb) return;
+    b->buf = nb; b->cap = ncap;
+}
+static inline void mako_jpeg_bw_byte(MakoJpegBw *b, unsigned char c) {
+    mako_jpeg_bw_ensure(b, 2);
+    b->buf[b->len++] = c;
+    if (c == 0xFF) b->buf[b->len++] = 0x00; /* byte stuff */
+}
+static inline void mako_jpeg_bw_bits(MakoJpegBw *b, unsigned int code, int nbits) {
+    if (nbits <= 0) return;
+    b->bitbuf = (b->bitbuf << nbits) | (code & ((1u << nbits) - 1u));
+    b->bitcount += nbits;
+    while (b->bitcount >= 8) {
+        b->bitcount -= 8;
+        unsigned char c = (unsigned char)((b->bitbuf >> b->bitcount) & 0xFF);
+        mako_jpeg_bw_byte(b, c);
+    }
+}
+static inline void mako_jpeg_bw_flush(MakoJpegBw *b) {
+    if (b->bitcount > 0) {
+        unsigned char c = (unsigned char)((b->bitbuf << (8 - b->bitcount)) & 0xFF);
+        mako_jpeg_bw_byte(b, c);
+        b->bitcount = 0; b->bitbuf = 0;
+    }
+}
+
+/* Build canonical Huffman code tables from bits/val (JPEG DHT). */
+static inline void mako_jpeg_build_huff(
+    const unsigned char *bits, const unsigned char *val, int nval,
+    unsigned int *codes, int *sizes
+) {
+    unsigned int code = 0;
+    int k = 0;
+    for (int i = 0; i < 256; i++) { codes[i] = 0; sizes[i] = 0; }
+    for (int i = 1; i <= 16; i++) {
+        for (int j = 0; j < bits[i - 1]; j++) {
+            if (k >= nval) return;
+            int v = val[k++];
+            codes[v] = code;
+            sizes[v] = i;
+            code++;
+        }
+        code <<= 1;
+    }
+}
+
+static inline int mako_jpeg_category(int v) {
+    if (v == 0) return 0;
+    int a = v < 0 ? -v : v;
+    int c = 0;
+    while (a) { c++; a >>= 1; }
+    return c;
+}
+static inline unsigned int mako_jpeg_bits_for(int v, int cat) {
+    if (cat == 0) return 0;
+    if (v < 0) v = v - 1 + (1 << cat);
+    return (unsigned int)(v & ((1 << cat) - 1));
+}
+
+static inline void mako_jpeg_encode_block(
+    MakoJpegBw *bw, const int *zz, int *prev_dc,
+    unsigned int *dc_codes, int *dc_sizes,
+    unsigned int *ac_codes, int *ac_sizes
+) {
+    int dc = zz[0] - *prev_dc;
+    *prev_dc = zz[0];
+    int cat = mako_jpeg_category(dc);
+    mako_jpeg_bw_bits(bw, dc_codes[cat], dc_sizes[cat]);
+    if (cat) mako_jpeg_bw_bits(bw, mako_jpeg_bits_for(dc, cat), cat);
+    int run = 0;
+    for (int i = 1; i < 64; i++) {
+        int ac = zz[i];
+        if (ac == 0) {
+            run++;
+            if (run == 16) {
+                mako_jpeg_bw_bits(bw, ac_codes[0xF0], ac_sizes[0xF0]);
+                run = 0;
+            }
+            continue;
+        }
+        while (run >= 16) {
+            mako_jpeg_bw_bits(bw, ac_codes[0xF0], ac_sizes[0xF0]);
+            run -= 16;
+        }
+        cat = mako_jpeg_category(ac);
+        int rs = (run << 4) | cat;
+        mako_jpeg_bw_bits(bw, ac_codes[rs], ac_sizes[rs]);
+        mako_jpeg_bw_bits(bw, mako_jpeg_bits_for(ac, cat), cat);
+        run = 0;
+    }
+    if (run > 0) {
+        mako_jpeg_bw_bits(bw, ac_codes[0x00], ac_sizes[0x00]); /* EOB */
+    }
+}
+
+static inline MakoString mako_jpeg_encode_gray_baseline(int64_t w, int64_t h, MakoString pixels) {
+    if (w <= 0 || h <= 0 || !pixels.data || (size_t)(w * h) > pixels.len)
+        return mako_str_from_cstr("");
+    unsigned int dc_codes[256], ac_codes[256];
+    int dc_sizes[256], ac_sizes[256];
+    mako_jpeg_build_huff(mako_jpeg_dc_bits, mako_jpeg_dc_val, 12, dc_codes, dc_sizes);
+    mako_jpeg_build_huff(mako_jpeg_ac_bits, mako_jpeg_ac_val, 162, ac_codes, ac_sizes);
+
+    size_t est = (size_t)(w * h) + 1024;
+    unsigned char *out = (unsigned char *)malloc(est);
+    if (!out) return mako_str_from_cstr("");
+    size_t o = 0;
+    out[o++] = 0xFF; out[o++] = 0xD8;
+    /* APP0 JFIF */
+    out[o++] = 0xFF; out[o++] = 0xE0;
+    out[o++] = 0; out[o++] = 16;
+    memcpy(out + o, "JFIF\0", 5); o += 5;
+    out[o++] = 1; out[o++] = 1; out[o++] = 0;
+    out[o++] = 0; out[o++] = 1; out[o++] = 0; out[o++] = 1;
+    out[o++] = 0; out[o++] = 0;
+    /* DQT */
+    out[o++] = 0xFF; out[o++] = 0xDB;
+    out[o++] = 0; out[o++] = 67;
+    out[o++] = 0; /* Pq=0 Tq=0 */
+    for (int i = 0; i < 64; i++) out[o++] = mako_jpeg_std_luma_q[i];
+    /* SOF0 */
+    out[o++] = 0xFF; out[o++] = 0xC0;
+    out[o++] = 0; out[o++] = 11;
+    out[o++] = 8;
+    out[o++] = (unsigned char)((h >> 8) & 0xFF); out[o++] = (unsigned char)(h & 0xFF);
+    out[o++] = (unsigned char)((w >> 8) & 0xFF); out[o++] = (unsigned char)(w & 0xFF);
+    out[o++] = 1;
+    out[o++] = 1; out[o++] = 0x11; out[o++] = 0;
+    /* DHT DC */
+    out[o++] = 0xFF; out[o++] = 0xC4;
+    out[o++] = 0; out[o++] = 31;
+    out[o++] = 0x00;
+    memcpy(out + o, mako_jpeg_dc_bits, 16); o += 16;
+    memcpy(out + o, mako_jpeg_dc_val, 12); o += 12;
+    /* DHT AC */
+    out[o++] = 0xFF; out[o++] = 0xC4;
+    out[o++] = 0; out[o++] = 181;
+    out[o++] = 0x10;
+    memcpy(out + o, mako_jpeg_ac_bits, 16); o += 16;
+    memcpy(out + o, mako_jpeg_ac_val, 162); o += 162;
+    /* SOS */
+    out[o++] = 0xFF; out[o++] = 0xDA;
+    out[o++] = 0; out[o++] = 8;
+    out[o++] = 1;
+    out[o++] = 1; out[o++] = 0x00;
+    out[o++] = 0; out[o++] = 63; out[o++] = 0;
+
+    MakoJpegBw bw;
+    mako_jpeg_bw_init(&bw, (size_t)(w * h) + 256);
+    int prev_dc = 0;
+    int mb_w = (int)((w + 7) / 8);
+    int mb_h = (int)((h + 7) / 8);
+    for (int by = 0; by < mb_h; by++) {
+        for (int bx = 0; bx < mb_w; bx++) {
+            double blk[64];
+            for (int y = 0; y < 8; y++) {
+                for (int x = 0; x < 8; x++) {
+                    int px = bx * 8 + x;
+                    int py = by * 8 + y;
+                    if (px >= w) px = (int)w - 1;
+                    if (py >= h) py = (int)h - 1;
+                    if (px < 0) px = 0;
+                    if (py < 0) py = 0;
+                    unsigned char sample = 0;
+                    size_t idx = (size_t)py * (size_t)w + (size_t)px;
+                    if (idx < pixels.len)
+                        sample = (unsigned char)pixels.data[idx];
+                    blk[y * 8 + x] = (double)sample - 128.0;
+                }
+            }
+            mako_jpeg_fdct(blk);
+            int zz[64];
+            for (int i = 0; i < 64; i++) {
+                int q = mako_jpeg_std_luma_q[i];
+                if (q < 1) q = 1;
+                int v = (int)(blk[mako_jpeg_zigzag[i]] / (double)q);
+                zz[i] = v;
+            }
+            mako_jpeg_encode_block(&bw, zz, &prev_dc, dc_codes, dc_sizes, ac_codes, ac_sizes);
+        }
+    }
+    mako_jpeg_bw_flush(&bw);
+    /* grow out for scan */
+    size_t need = o + bw.len + 2;
+    unsigned char *nout = (unsigned char *)realloc(out, need);
+    if (!nout) { free(out); free(bw.buf); return mako_str_from_cstr(""); }
+    out = nout;
+    memcpy(out + o, bw.buf, bw.len); o += bw.len;
+    free(bw.buf);
+    out[o++] = 0xFF; out[o++] = 0xD9;
+    char *data = (char *)out;
+    return (MakoString){data, o};
+}
+
+static inline int64_t mako_jpeg_is_baseline_huff(MakoString jpeg) {
+    /* SOI + APP0 + DQT + SOF0 + DHT + SOS markers present */
+    if (jpeg.len < 20) return 0;
+    const unsigned char *p = (const unsigned char *)jpeg.data;
+    if (p[0] != 0xFF || p[1] != 0xD8) return 0;
+    int has_dqt = 0, has_sof = 0, has_dht = 0, has_sos = 0;
+    size_t off = 2;
+    while (off + 4 < jpeg.len) {
+        if (p[off] != 0xFF) { off++; continue; }
+        unsigned char m = p[off + 1];
+        if (m == 0xD9) break;
+        if (m == 0xDA) { has_sos = 1; break; }
+        if (m == 0xDB) has_dqt = 1;
+        if (m == 0xC0) has_sof = 1;
+        if (m == 0xC4) has_dht = 1;
+        if (m >= 0xD0 && m <= 0xD9) { off += 2; continue; }
+        uint16_t seglen = (uint16_t)((p[off + 2] << 8) | p[off + 3]);
+        if (seglen < 2) break;
+        off += 2 + seglen;
+    }
+    return (has_dqt && has_sof && has_dht && has_sos) ? 1 : 0;
+}
+
 
 /* ---- Wave 8: JFIF grayscale (SOF0 + raw APP7 payload for roundtrip) ---- */
 static inline MakoString mako_jpeg_encode_gray_jfif(int64_t w, int64_t h, MakoString pixels) {

@@ -530,6 +530,147 @@ static inline SSL_CTX *mako_tls_make_client_ctx(void) {
     return ctx;
 }
 
+/* ------------------------------------------------------------------------- */
+/* Socket-style TLS client — peer of tls_server_*. Use with tcp_connect, then */
+/* tls_connect(ctx, fd, sni). Same TlsConn read/write/close as server.         */
+/* Build SIPS, custom TLS protocols, mutual-TLS apps in Mako.                  */
+/* ------------------------------------------------------------------------- */
+
+static inline int64_t mako_tls_client_available(void) { return 1; }
+
+/* Client context with peer verification against CA PEM file (or directory path).
+ * Empty ca path → still VERIFY_PEER but no locations loaded (will fail handshake
+ * unless system defaults apply). Prefer an explicit PEM for production. */
+static inline void *mako_tls_client_new(MakoString ca_pem_path) {
+    SSL_CTX *ctx = mako_tls_make_client_ctx();
+    if (!ctx) return NULL;
+    SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER, NULL);
+    if (ca_pem_path.data && ca_pem_path.len > 0) {
+        char cabuf[1024];
+        if (ca_pem_path.len >= sizeof(cabuf)) {
+            SSL_CTX_free(ctx);
+            return NULL;
+        }
+        memcpy(cabuf, ca_pem_path.data, ca_pem_path.len);
+        cabuf[ca_pem_path.len] = 0;
+        if (SSL_CTX_load_verify_locations(ctx, cabuf, NULL) != 1) {
+            fprintf(stderr, "tls_client_new: failed to load CA %s\n", cabuf);
+            ERR_print_errors_fp(stderr);
+            SSL_CTX_free(ctx);
+            return NULL;
+        }
+    }
+    return (void *)ctx;
+}
+
+/* Client context with SSL_VERIFY_NONE — demos / self-signed only. */
+static inline void *mako_tls_client_new_insecure(void) {
+    SSL_CTX *ctx = mako_tls_make_client_ctx();
+    if (!ctx) return NULL;
+    SSL_CTX_set_verify(ctx, SSL_VERIFY_NONE, NULL);
+    return (void *)ctx;
+}
+
+static inline int64_t mako_tls_client_free(void *ctx) {
+    if (ctx) SSL_CTX_free((SSL_CTX *)ctx);
+    return 0;
+}
+
+/* Blocking client handshake on a connected TCP fd. Sets SNI from host. */
+static inline void *mako_tls_connect(void *ctx, int64_t fd, MakoString host) {
+    if (!ctx || fd < 0) return NULL;
+    SSL *ssl = SSL_new((SSL_CTX *)ctx);
+    if (!ssl) return NULL;
+    SSL_set_fd(ssl, (int)fd);
+    if (host.data && host.len > 0 && host.len < 256) {
+        char hbuf[256];
+        memcpy(hbuf, host.data, host.len);
+        hbuf[host.len] = 0;
+        SSL_set_tlsext_host_name(ssl, hbuf);
+    }
+    if (SSL_connect(ssl) <= 0) {
+        ERR_print_errors_fp(stderr);
+        SSL_free(ssl);
+        return NULL;
+    }
+    /* Enforce verify result when VERIFY_PEER is set */
+    long vmode = SSL_get_verify_mode(ssl);
+    if ((vmode & SSL_VERIFY_PEER) && SSL_get_verify_result(ssl) != X509_V_OK) {
+        fprintf(stderr, "tls_connect: certificate verify failed: %ld\n",
+                SSL_get_verify_result(ssl));
+        SSL_free(ssl);
+        return NULL;
+    }
+    MakoTlsConn *c = (MakoTlsConn *)malloc(sizeof(MakoTlsConn));
+    if (!c) {
+        SSL_free(ssl);
+        return NULL;
+    }
+    c->ssl = ssl;
+    c->fd = (int)fd;
+    return (void *)c;
+}
+
+/* Nonblocking client handshake start (drive with tls_handshake_step). */
+static inline void *mako_tls_connect_start(void *ctx, int64_t fd, MakoString host) {
+    if (!ctx || fd < 0) return NULL;
+#if !defined(_WIN32)
+    int flags = fcntl((int)fd, F_GETFL, 0);
+    if (flags >= 0) fcntl((int)fd, F_SETFL, flags | O_NONBLOCK);
+#else
+    u_long mode = 1UL;
+    ioctlsocket((mako_sock_t)fd, FIONBIO, &mode);
+#endif
+    SSL *ssl = SSL_new((SSL_CTX *)ctx);
+    if (!ssl) return NULL;
+    SSL_set_fd(ssl, (int)fd);
+    if (host.data && host.len > 0 && host.len < 256) {
+        char hbuf[256];
+        memcpy(hbuf, host.data, host.len);
+        hbuf[host.len] = 0;
+        SSL_set_tlsext_host_name(ssl, hbuf);
+    }
+    SSL_set_connect_state(ssl);
+    int rc = SSL_connect(ssl);
+    if (rc <= 0) {
+        int err = SSL_get_error(ssl, rc);
+        if (err != SSL_ERROR_WANT_READ && err != SSL_ERROR_WANT_WRITE) {
+            SSL_free(ssl);
+            return NULL;
+        }
+    }
+    MakoTlsConn *c = (MakoTlsConn *)malloc(sizeof(MakoTlsConn));
+    if (!c) {
+        SSL_free(ssl);
+        return NULL;
+    }
+    c->ssl = ssl;
+    c->fd = (int)fd;
+    return (void *)c;
+}
+
+/* Peer certificate subject summary (CN=... if present), or "". */
+static inline MakoString mako_tls_peer_cn(void *conn) {
+    MakoTlsConn *c = (MakoTlsConn *)conn;
+    if (!c || !c->ssl) return mako_str_from_cstr("");
+    X509 *cert = SSL_get_peer_certificate(c->ssl);
+    if (!cert) return mako_str_from_cstr("");
+    X509_NAME *name = X509_get_subject_name(cert);
+    char buf[256];
+    int n = X509_NAME_get_text_by_NID(name, NID_commonName, buf, (int)sizeof(buf));
+    X509_free(cert);
+    if (n <= 0) return mako_str_from_cstr("");
+    return mako_str_from_cstr(buf);
+}
+
+/* Negotiated protocol version string e.g. "TLSv1.3". */
+static inline MakoString mako_tls_conn_version(void *conn) {
+    MakoTlsConn *c = (MakoTlsConn *)conn;
+    if (!c || !c->ssl) return mako_str_from_cstr("");
+    const char *v = SSL_get_version(c->ssl);
+    return mako_str_from_cstr(v ? v : "");
+}
+
 /* tls_serve(port, cert_path, key_path, body) — HTTPS fixed-body server (blocks). */
 static inline int64_t mako_tls_serve(
     int64_t port,
@@ -1667,7 +1808,11 @@ static inline SSL *mako_tls_h2_connect(
     return ssl;
 }
 
-/* Serve up to max_reqs with path routing: `/` → root_body, `/health` → health_body. */
+/* Serve up to max_reqs with path routing: `/` → root_body, `/health` → health_body.
+ *
+ * Demo / smoke helper: compact ALPN-h2 accept loop (fixed 8 KiB buffer, limited
+ * stream handling). For production-shaped servers use `tls_server_new` +
+ * `http2_conn_*` / `http2_conn_pump` (see examples/h2_dynamic_server.mko). */
 static inline int64_t mako_tls_serve_h2_routes(
     int64_t port,
     MakoString cert_path,
@@ -3168,6 +3313,36 @@ static inline MakoString mako_tls_conn_alpn(void *conn) {
 static inline int64_t mako_tls_conn_close(void *conn) { (void)conn; return -1; }
 static inline int64_t mako_tls_server_free(void *ctx) { (void)ctx; return 0; }
 static inline int64_t mako_tls_server_available(void) { return 0; }
+static inline int64_t mako_tls_client_available(void) { return 0; }
+static inline void *mako_tls_client_new(MakoString ca_pem_path) {
+    (void)ca_pem_path;
+    return NULL;
+}
+static inline void *mako_tls_client_new_insecure(void) { return NULL; }
+static inline int64_t mako_tls_client_free(void *ctx) {
+    (void)ctx;
+    return 0;
+}
+static inline void *mako_tls_connect(void *ctx, int64_t fd, MakoString host) {
+    (void)ctx;
+    (void)fd;
+    (void)host;
+    return NULL;
+}
+static inline void *mako_tls_connect_start(void *ctx, int64_t fd, MakoString host) {
+    (void)ctx;
+    (void)fd;
+    (void)host;
+    return NULL;
+}
+static inline MakoString mako_tls_peer_cn(void *conn) {
+    (void)conn;
+    return mako_str_from_cstr("");
+}
+static inline MakoString mako_tls_conn_version(void *conn) {
+    (void)conn;
+    return mako_str_from_cstr("");
+}
 
 static inline MakoString mako_tls_aead_seal(
     MakoString key,
