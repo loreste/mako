@@ -4824,6 +4824,18 @@ impl TypeChecker {
             Type::Fn(vec![Type::String], Box::new(Type::Int)),
         );
         fns.insert(
+            "jpeg_app8_length".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "jpeg_app9_length".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "jpeg_roundtrip_ok".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
             "smtp_send_starttls".into(),
             Type::Fn(
                 vec![

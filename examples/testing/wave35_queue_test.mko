@@ -1,0 +1,83 @@
+// Wave 35: float nests, JPEG roundtrip + APP8/9 lengths, Common/Mn/Mc props.
+
+fn float_ok() -> Result[Result[float, string], string] {
+    return Ok(Ok(2.5))
+}
+
+fn float_err() -> Result[Result[float, string], string] {
+    return Ok(Err("fe"))
+}
+
+fn opt_float() -> Option[Option[float]] {
+    return Some(Some(1.25))
+}
+
+fn opt_float_none() -> Option[Option[float]] {
+    return Some(None)
+}
+
+fn TestFloatOk() {
+    match float_ok() {
+        Ok(r) => match r {
+            Ok(x) => assert(x > 2.0),
+            Err(_) => assert(false),
+        },
+        Err(_) => assert(false),
+    }
+}
+
+fn TestFloatErr() {
+    match float_err() {
+        Ok(r) => match r {
+            Ok(_) => assert(false),
+            Err(m) => assert_eq_str(m, "fe"),
+        },
+        Err(_) => assert(false),
+    }
+}
+
+fn TestOptFloat() {
+    match opt_float() {
+        Some(o) => match o {
+            Some(f) => assert(f > 1.0),
+            None => assert(false),
+        },
+        None => assert(false),
+    }
+}
+
+fn TestOptFloatNone() {
+    match opt_float_none() {
+        Some(o) => match o {
+            Some(_) => assert(false),
+            None => assert(true),
+        },
+        None => assert(false),
+    }
+}
+
+fn TestJpegRoundtripAndAppLengths() {
+    let gray = "ABCDEFGHABCDEFGHABCDEFGHABCDEFGHABCDEFGHABCDEFGHABCDEFGHABCDEFGH"
+    let j = jpeg_encode_gray_jfif(8, 8, gray)
+    assert_eq(jpeg_roundtrip_ok(j), 1)
+    assert_eq(jpeg_app8_length(j), 0)
+    assert_eq(jpeg_app9_length(j), 0)
+
+    let dct = jpeg_encode_gray_dct(8, 8, gray)
+    assert_eq(jpeg_roundtrip_ok(dct), 1)
+    assert_eq(jpeg_app8_length(dct), 6)
+    assert_eq(jpeg_app9_length(dct), 0)
+    assert_eq(jpeg_is_mako_dct(dct), 1)
+
+    let huff = jpeg_encode_gray_huff(8, 8, gray)
+    assert_eq(jpeg_roundtrip_ok(huff), 1)
+    assert_eq(jpeg_app8_length(huff), 6)
+    assert_eq(jpeg_app9_length(huff), 66)
+    assert_eq(jpeg_is_mako_huff(huff), 1)
+}
+
+fn TestRegexUnicodeCommonMnMc() {
+    assert(regex_match("\\p{Common}", "5"))
+    assert(regex_match("\\p{Mn}", "̀"))
+    assert(regex_match("\\p{Mc}", "ा"))
+}

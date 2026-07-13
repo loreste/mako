@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.0 — 2026-07-13 (wave 35 queue)
+
+- Float nests: `Result[Result[float]]`, `Option[Option[float]]` Ok/None/Err
+- **`jpeg_roundtrip_ok`**; `jpeg_app8_length` / `jpeg_app9_length`
+- if+for+match NLL; share match+for live; Common/Mn/Mc property seeds
+- TSan wave34
+- Tests: `examples/testing/wave35_queue_test.mko`
+
 ## 0.1.0 — 2026-07-13 (wave 34 queue)
 
 - `Result[Result[string]]` Ok/inner Err/outer Err edges

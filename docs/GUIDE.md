@@ -2314,8 +2314,8 @@ gRPC/H3-client pieces, WASI preview1, operators/imports/`mako version`,
 stdlib Waves 1–9 (~98% major areas).
 
 Still **Target / Later** (VISION): colored `async`/`await`, complete Unicode property database / full PCRE
-(script seeds: Latin/Greek/Cyrillic/Arabic/Hebrew/Han/Hiragana/Katakana/Hangul/Thai/Devanagari/Tamil/Armenian/Ethiopic/Georgian/Cherokee/Bengali/Sinhala/Myanmar/Khmer/Tibetan/Syriac/Coptic/Runic/Thaana/Tagalog/Bopomofo/Braille/Ogham/Gothic/Canadian/Gujarati/Kannada/Malayalam/Telugu/Oriya/Lao/Balinese/Javanese/Sundanese/Buginese/Cham/Rejang/Lisu/Nko/Tifinagh/Samaritan/Mandaic/Saurashtra/Tai_Le/Kayah_Li/New_Tai_Lue/Ol_Chiki/Limbu/Lepcha/Batak/Tai_Tham/Syloti_Nagri/Vai/Yi/Glagolitic/Meetei_Mayek/Phags_Pa/Buhid/Hanunoo/Tagbanwa/Bamum/Mongolian/Tai_Viet/Inherited + categories),
-Huffman JPEG viewer parity (mako DCT/huff evidence + APP7 MAKOJPG today; not full viewer Huffman), reflect for non-POD fields
+(script seeds: Latin/Greek/Cyrillic/Arabic/Hebrew/Han/Hiragana/Katakana/Hangul/Thai/Devanagari/Tamil/Armenian/Ethiopic/Georgian/Cherokee/Bengali/Sinhala/Myanmar/Khmer/Tibetan/Syriac/Coptic/Runic/Thaana/Tagalog/Bopomofo/Braille/Ogham/Gothic/Canadian/Gujarati/Kannada/Malayalam/Telugu/Oriya/Lao/Balinese/Javanese/Sundanese/Buginese/Cham/Rejang/Lisu/Nko/Tifinagh/Samaritan/Mandaic/Saurashtra/Tai_Le/Kayah_Li/New_Tai_Lue/Ol_Chiki/Limbu/Lepcha/Batak/Tai_Tham/Syloti_Nagri/Vai/Yi/Glagolitic/Meetei_Mayek/Phags_Pa/Buhid/Hanunoo/Tagbanwa/Bamum/Mongolian/Tai_Viet/Inherited/Common + categories incl. Mn/Mc),
+Huffman JPEG viewer parity (mako roundtrip + DCT/huff evidence + APP7 MAKOJPG today; not full viewer Huffman), reflect for non-POD fields
 (nested POD flatten done; map/slice/chan/nested map·slice·Option·Result fields rejected), full SMTP AUTH-over-TLS polish, native WASI preview2 / browser DOM,
 optional GC, SIMD/GPU, deep LSP, homebrew-core publish (external). See [VISION.md](VISION.md)
 and [STATUS.md](STATUS.md).

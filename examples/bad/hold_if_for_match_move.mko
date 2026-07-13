@@ -1,0 +1,16 @@
+// EXPECT: use of moved
+// if + for + match product: move on match arm inside nested for poisons after if.
+fn consume(t: string) {}
+
+fn main() {
+    hold let s = "hi"
+    if true {
+        for i in range 1 {
+            match i {
+                0 => consume(s),
+                _ => { },
+            }
+        }
+    }
+    print(s)
+}
