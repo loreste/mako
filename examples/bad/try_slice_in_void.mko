@@ -1,0 +1,10 @@
+// EXPECT: `?` only allowed in functions returning Result
+// Result[[]int] `?` requires a Result-returning function.
+fn get() -> Result[[]int, string] {
+    return Ok([1, 2])
+}
+
+fn main() {
+    let xs = get()?
+    print(len(xs))
+}

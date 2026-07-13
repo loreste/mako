@@ -12752,107 +12752,160 @@ impl Codegen {
                 } else {
                     None
                 };
+                let ptr_get = if is_option {
+                    "mako_option_some_ptr"
+                } else {
+                    "mako_result_ok_ptr"
+                };
                 if is_option {
                     self.line(&format!("MakoOptionInt {tmp} = {v};"));
                     self.line(&format!("if (!{tmp}.some) return {tmp};"));
-                    match kind.as_str() {
-                        "string" => ("MakoString".into(), format!("{tmp}.ok_s")),
-                        "float" => ("double".into(), format!("{tmp}.ok_f")),
-                        "struct" => {
-                            let sn = struct_name.unwrap_or_else(|| "int64_t".into());
-                            let cname = self
-                                .structs
-                                .get(&sn)
-                                .map(|s| s.c_name.clone())
-                                .unwrap_or(sn);
-                            let out = self.fresh("tryv");
-                            let p = self.fresh("tryp");
-                            self.line(&format!(
-                                "{cname} *{p} = ({cname}*)mako_option_some_ptr({tmp});"
-                            ));
-                            self.line(&format!("{cname} {out};"));
-                            self.line(&format!(
-                                "if ({p}) {{ {out} = *{p}; free({p}); }} else {{ memset(&{out}, 0, sizeof({out})); }}"
-                            ));
-                            (cname, out)
-                        }
-                        "option" => {
-                            // Option[Option[T]]: unbox nested Option from pointer slot
-                            let out = self.fresh("tryo");
-                            let p = self.fresh("tryp");
-                            self.line(&format!(
-                                "MakoOptionInt *{p} = (MakoOptionInt*)mako_option_some_ptr({tmp});"
-                            ));
-                            self.line(&format!("MakoOptionInt {out};"));
-                            self.line(&format!(
-                                "if ({p}) {{ {out} = *{p}; free({p}); }} else {{ memset(&{out}, 0, sizeof({out})); }}"
-                            ));
-                            ("MakoOptionInt".into(), out)
-                        }
-                        "result" => {
-                            let out = self.fresh("tryr");
-                            let p = self.fresh("tryp");
-                            self.line(&format!(
-                                "MakoResultInt *{p} = (MakoResultInt*)mako_option_some_ptr({tmp});"
-                            ));
-                            self.line(&format!("MakoResultInt {out};"));
-                            self.line(&format!(
-                                "if ({p}) {{ {out} = *{p}; free({p}); }} else {{ memset(&{out}, 0, sizeof({out})); }}"
-                            ));
-                            ("MakoResultInt".into(), out)
-                        }
-                        _ => ("int64_t".into(), format!("{tmp}.value")),
-                    }
                 } else {
                     self.line(&format!("MakoResultInt {tmp} = {v};"));
                     self.line(&format!("if (!{tmp}.ok) return {tmp};"));
-                    match kind.as_str() {
-                        "string" => ("MakoString".into(), format!("{tmp}.ok_s")),
-                        "float" => ("double".into(), format!("{tmp}.ok_f")),
-                        "struct" => {
-                            let sn = struct_name.unwrap_or_else(|| "int64_t".into());
-                            let cname = self
-                                .structs
-                                .get(&sn)
-                                .map(|s| s.c_name.clone())
-                                .unwrap_or(sn);
-                            let out = self.fresh("tryv");
-                            let p = self.fresh("tryp");
-                            self.line(&format!(
-                                "{cname} *{p} = ({cname}*)mako_result_ok_ptr({tmp});"
-                            ));
-                            self.line(&format!("{cname} {out};"));
-                            self.line(&format!(
-                                "if ({p}) {{ {out} = *{p}; free({p}); }} else {{ memset(&{out}, 0, sizeof({out})); }}"
-                            ));
-                            (cname, out)
-                        }
-                        "option" => {
-                            let out = self.fresh("tryo");
-                            let p = self.fresh("tryp");
-                            self.line(&format!(
-                                "MakoOptionInt *{p} = (MakoOptionInt*)mako_result_ok_ptr({tmp});"
-                            ));
-                            self.line(&format!("MakoOptionInt {out};"));
-                            self.line(&format!(
-                                "if ({p}) {{ {out} = *{p}; free({p}); }} else {{ memset(&{out}, 0, sizeof({out})); }}"
-                            ));
-                            ("MakoOptionInt".into(), out)
-                        }
-                        "result" => {
-                            let out = self.fresh("tryr");
-                            let p = self.fresh("tryp");
-                            self.line(&format!(
-                                "MakoResultInt *{p} = (MakoResultInt*)mako_result_ok_ptr({tmp});"
-                            ));
-                            self.line(&format!("MakoResultInt {out};"));
-                            self.line(&format!(
-                                "if ({p}) {{ {out} = *{p}; free({p}); }} else {{ memset(&{out}, 0, sizeof({out})); }}"
-                            ));
-                            ("MakoResultInt".into(), out)
-                        }
-                        _ => ("int64_t".into(), format!("{tmp}.value")),
+                }
+                match kind.as_str() {
+                    "string" => ("MakoString".into(), format!("{tmp}.ok_s")),
+                    "float" => ("double".into(), format!("{tmp}.ok_f")),
+                    "struct" => {
+                        let sn = struct_name.unwrap_or_else(|| "int64_t".into());
+                        let cname = self
+                            .structs
+                            .get(&sn)
+                            .map(|s| s.c_name.clone())
+                            .unwrap_or(sn);
+                        let out = self.fresh("tryv");
+                        let p = self.fresh("tryp");
+                        self.line(&format!(
+                            "{cname} *{p} = ({cname}*){ptr_get}({tmp});"
+                        ));
+                        self.line(&format!("{cname} {out};"));
+                        self.line(&format!(
+                            "if ({p}) {{ {out} = *{p}; free({p}); }} else {{ memset(&{out}, 0, sizeof({out})); }}"
+                        ));
+                        (cname, out)
                     }
+                    "option" => {
+                        let out = self.fresh("tryo");
+                        let p = self.fresh("tryp");
+                        self.line(&format!(
+                            "MakoOptionInt *{p} = (MakoOptionInt*){ptr_get}({tmp});"
+                        ));
+                        self.line(&format!("MakoOptionInt {out};"));
+                        self.line(&format!(
+                            "if ({p}) {{ {out} = *{p}; free({p}); }} else {{ memset(&{out}, 0, sizeof({out})); }}"
+                        ));
+                        ("MakoOptionInt".into(), out)
+                    }
+                    "result" => {
+                        let out = self.fresh("tryr");
+                        let p = self.fresh("tryp");
+                        self.line(&format!(
+                            "MakoResultInt *{p} = (MakoResultInt*){ptr_get}({tmp});"
+                        ));
+                        self.line(&format!("MakoResultInt {out};"));
+                        self.line(&format!(
+                            "if ({p}) {{ {out} = *{p}; free({p}); }} else {{ memset(&{out}, 0, sizeof({out})); }}"
+                        ));
+                        ("MakoResultInt".into(), out)
+                    }
+                    "slice" => {
+                        let out = self.fresh("trys");
+                        let p = self.fresh("tryp");
+                        self.line(&format!(
+                            "MakoIntArray *{p} = (MakoIntArray*){ptr_get}({tmp});"
+                        ));
+                        self.line(&format!("MakoIntArray {out};"));
+                        self.line(&format!(
+                            "if ({p}) {{ {out} = *{p}; free({p}); }} else {{ {out}.data = NULL; {out}.len = 0; {out}.cap = 0; }}"
+                        ));
+                        ("MakoIntArray".into(), out)
+                    }
+                    "slice_str" => {
+                        let out = self.fresh("trys");
+                        let p = self.fresh("tryp");
+                        self.line(&format!(
+                            "MakoStrArray *{p} = (MakoStrArray*){ptr_get}({tmp});"
+                        ));
+                        self.line(&format!("MakoStrArray {out};"));
+                        self.line(&format!(
+                            "if ({p}) {{ {out} = *{p}; free({p}); }} else {{ {out}.data = NULL; {out}.len = 0; {out}.cap = 0; }}"
+                        ));
+                        ("MakoStrArray".into(), out)
+                    }
+                    "slice_float" => {
+                        let out = self.fresh("trys");
+                        let p = self.fresh("tryp");
+                        self.line(&format!(
+                            "MakoFloatArray *{p} = (MakoFloatArray*){ptr_get}({tmp});"
+                        ));
+                        self.line(&format!("MakoFloatArray {out};"));
+                        self.line(&format!(
+                            "if ({p}) {{ {out} = *{p}; free({p}); }} else {{ {out}.data = NULL; {out}.len = 0; {out}.cap = 0; }}"
+                        ));
+                        ("MakoFloatArray".into(), out)
+                    }
+                    "slice_struct" => {
+                        let sn = struct_name
+                            .or_else(|| match inner.as_ref() {
+                                Expr::Ident(n) => {
+                                    if is_option {
+                                        self.option_some_structs.get(n).cloned()
+                                    } else {
+                                        self.result_ok_structs.get(n).cloned()
+                                    }
+                                }
+                                Expr::Call { callee, args } => {
+                                    if let Expr::Ident(fname) = callee.as_ref() {
+                                        if is_option {
+                                            self.call_option_some_struct(fname, args)
+                                        } else {
+                                            self.call_result_ok_struct(fname, args)
+                                        }
+                                    } else {
+                                        None
+                                    }
+                                }
+                                _ => None,
+                            })
+                            .unwrap_or_else(|| "int64_t".into());
+                        let cname = self
+                            .structs
+                            .get(&sn)
+                            .map(|s| s.c_name.clone())
+                            .unwrap_or(sn);
+                        let arr = format!("MakoArr_{cname}");
+                        let out = self.fresh("trys");
+                        let p = self.fresh("tryp");
+                        self.line(&format!("{arr} *{p} = ({arr}*){ptr_get}({tmp});"));
+                        self.line(&format!("{arr} {out};"));
+                        self.line(&format!(
+                            "if ({p}) {{ {out} = *{p}; free({p}); }} else {{ {out}.data = NULL; {out}.len = 0; {out}.cap = 0; }}"
+                        ));
+                        (arr, out)
+                    }
+                    "map" | "map_si" => {
+                        let out = self.fresh("trym");
+                        self.line(&format!(
+                            "MakoMapSI *{out} = (MakoMapSI*){ptr_get}({tmp});"
+                        ));
+                        ("MakoMapSI*".into(), out)
+                    }
+                    "map_ii" => {
+                        let out = self.fresh("trym");
+                        self.line(&format!(
+                            "MakoMapII *{out} = (MakoMapII*){ptr_get}({tmp});"
+                        ));
+                        ("MakoMapII*".into(), out)
+                    }
+                    "map_ss" => {
+                        let out = self.fresh("trym");
+                        self.line(&format!(
+                            "MakoMapSS *{out} = (MakoMapSS*){ptr_get}({tmp});"
+                        ));
+                        ("MakoMapSS*".into(), out)
+                    }
+                    _ => ("int64_t".into(), format!("{tmp}.value")),
                 }
             }
             Expr::Kick { crew, expr } => {
