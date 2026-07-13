@@ -1,0 +1,11 @@
+// EXPECT: reflect_value_of expects a POD struct
+// Result fields are non-POD for reflect_value_of.
+struct Wrap {
+    r: Result[int, string]
+    n: int
+}
+
+fn main() {
+    let w = Wrap { r: Ok(1), n: 2 }
+    let _ = reflect_value_of(w)
+}

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.0 — 2026-07-13 (wave 27 queue)
+
+- Nested None edges (`Ok(None)`, `Ok(Some(None))`, map Option None)
+- `Option[Result]` Some(Err); `jpeg_sof0_components`
+- if+match NLL bad case; reflect Result field reject
+- Samaritan/Mandaic/Saurashtra scripts; TSan wave26 + crew_drain
+- Tests: `examples/testing/wave27_queue_test.mko`
+
 ## 0.1.0 — 2026-07-13 (wave 26 queue)
 
 - Result/Option None+Err edges; triple-Result deep Err
