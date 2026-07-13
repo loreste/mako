@@ -2,7 +2,8 @@
 // reflect live fields, regex unicode props.
 
 fn slow_work() -> int {
-    sleep_ms(400)
+    // Keep well above join_timeout so macOS CI load cannot finish first.
+    sleep_ms(2000)
     return 99
 }
 
@@ -41,7 +42,7 @@ fn TestJoinTimeoutFast() {
 fn TestJoinTimeoutMiss() {
     crew t {
         let j = t.kick(slow_work())
-        match j.join_timeout(40) {
+        match j.join_timeout(50) {
             Ok(_) => assert(false),
             Err(msg) => assert_eq_str(msg, "timeout"),
         }

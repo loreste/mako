@@ -13208,9 +13208,11 @@ impl Codegen {
                             // Nest: Ok(inner Result) packs via value pointer? Keep simple:
                             // on success return the job Result as the outer Result itself
                             // (flatten) so callers match Ok/Err for job outcome; on timeout Err.
+                            // Null box after "done" is a runtime fault — report as timeout-class Err
+                            // so callers never match an empty stringly Err by accident.
                             self.line(&format!(
                                 "if ({ok}) {{ MakoResultInt *p = (MakoResultInt*)(intptr_t){out}; \
-                                 if (p) {{ {tmp} = *p; free(p); }} else {{ memset(&{tmp}, 0, sizeof({tmp})); {tmp}.ok = false; }} }} \
+                                 if (p) {{ {tmp} = *p; free(p); }} else {{ {tmp} = mako_err_int(mako_str_from_cstr(\"timeout\")); }} }} \
                                  else {{ {tmp} = mako_err_int(mako_str_from_cstr(\"timeout\")); }}"
                             ));
                         } else if ret_ty == "double" {

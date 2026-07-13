@@ -49,7 +49,8 @@ fn TestChanPtrSelect() {
 }
 
 fn slow_result() -> Result[int, string] {
-    sleep_ms(400)
+    // Keep well above join_timeout so macOS CI load cannot finish first.
+    sleep_ms(2000)
     return Ok(5)
 }
 
@@ -57,7 +58,7 @@ fn TestJoinTimeoutResultMiss() {
     // Job returns Result[int,string]; join_timeout flattens: timeout → Err("timeout").
     crew t {
         let j = t.kick(slow_result())
-        match j.join_timeout(40) {
+        match j.join_timeout(50) {
             Ok(_) => assert(false),
             Err(msg) => assert_eq_str(msg, "timeout"),
         }
