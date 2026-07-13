@@ -1,0 +1,73 @@
+// Wave 27: nested None edges, Option[Result] Err, SOF0 components, scripts.
+
+fn res_opt_str_none() -> Result[Option[string], string] {
+    return Ok(None)
+}
+
+fn res_opt_some_none() -> Result[Option[Option[int]], string] {
+    return Ok(Some(None))
+}
+
+fn opt_some_err() -> Option[Result[int, string]] {
+    return Some(Err("x"))
+}
+
+fn res_ok_none_map() -> Result[Option[map[string]int], string] {
+    return Ok(None)
+}
+
+fn TestResOptStrNone() {
+    match res_opt_str_none() {
+        Ok(o) => match o {
+            Some(_) => assert(false),
+            None => assert(true),
+        },
+        Err(_) => assert(false),
+    }
+}
+
+fn TestResOptSomeNone() {
+    match res_opt_some_none() {
+        Ok(o) => match o {
+            Some(inner) => match inner {
+                Some(_) => assert(false),
+                None => assert(true),
+            },
+            None => assert(false),
+        },
+        Err(_) => assert(false),
+    }
+}
+
+fn TestOptSomeErr() {
+    match opt_some_err() {
+        Some(r) => match r {
+            Ok(_) => assert(false),
+            Err(m) => assert_eq_str(m, "x"),
+        },
+        None => assert(false),
+    }
+}
+
+fn TestResOptMapNone() {
+    match res_ok_none_map() {
+        Ok(o) => match o {
+            Some(_) => assert(false),
+            None => assert(true),
+        },
+        Err(_) => assert(false),
+    }
+}
+
+fn TestJpegSof0Components() {
+    let gray = "ABCDEFGHABCDEFGHABCDEFGHABCDEFGHABCDEFGHABCDEFGHABCDEFGHABCDEFGH"
+    let j = jpeg_encode_gray_jfif(8, 8, gray)
+    assert_eq(jpeg_sof0_components(j), 1)
+    assert_eq(jpeg_sof0_precision(j), 8)
+}
+
+fn TestRegexUnicodeSamaritanMandaicSaurashtra() {
+    assert(regex_match("\\p{Samaritan}", "ࠀ"))
+    assert(regex_match("\\p{Mandaic}", "ࡀ"))
+    assert(regex_match("\\p{Saurashtra}", "ꢂ"))
+}

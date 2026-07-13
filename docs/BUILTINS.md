@@ -1933,6 +1933,7 @@ ready queue so workers can multiplex without one-request-at-a-time stalls.
 | `jpeg_sof0_width` | `jpeg_sof0_width(data: string) -> int` | Width from SOF0 (0 if missing) |
 | `jpeg_sof0_height` | `jpeg_sof0_height(data: string) -> int` | Height from SOF0 (0 if missing) |
 | `jpeg_sof0_precision` | `jpeg_sof0_precision(data: string) -> int` | Sample precision from SOF0 (0 if missing; Mako JFIF uses 8) |
+| `jpeg_sof0_components` | `jpeg_sof0_components(data: string) -> int` | Component count Nf from SOF0 (grayscale JFIF uses 1) |
 
 ---
 
@@ -2276,7 +2277,8 @@ Tests: `result_enum_test.mko`, `job_join_typed_test.mko` (Result across kick/joi
 `wave23_queue_test.mko` (`Option[Result[Option[T]]]` deep mixed nests),
 `wave24_queue_test.mko` (5-layer alternating Result/Option),
 `wave25_queue_test.mko` (bare None, nested Err, mono either, SOF0 dims),
-`wave26_queue_test.mko` (None/Err nest edges, nest3 deep Err, SOF0 precision).
+`wave26_queue_test.mko` (None/Err nest edges, nest3 deep Err, SOF0 precision),
+`wave27_queue_test.mko` (nested None edges, SOF0 components).
 
 ---
 

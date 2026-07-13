@@ -1,0 +1,20 @@
+// EXPECT: use of moved
+// if + match product: move on match arm inside then poisons after loop.
+fn consume(t: string) {}
+
+fn main() {
+    hold let s = "hi"
+    let mut i = 0
+    while i < 1 {
+        i = i + 1
+        if i == 1 {
+            match 1 {
+                0 => { },
+                _ => {
+                    consume(s)
+                },
+            }
+        }
+    }
+    print(s)
+}

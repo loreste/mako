@@ -4125,6 +4125,14 @@ static inline int64_t mako_jpeg_sof0_width(MakoString jpeg) {
     return (int64_t)(((uint16_t)p[0] << 8) | p[1]);
 }
 
+/* Number of components Nf in SOF0 (grayscale JFIF uses 1). */
+static inline int64_t mako_jpeg_sof0_components(MakoString jpeg) {
+    size_t off = 0;
+    if (!mako_jpeg_find_sof0(jpeg, &off)) return 0;
+    if (off + 2 + 2 + 1 + 4 + 1 > jpeg.len) return 0;
+    return (int64_t)(unsigned char)jpeg.data[off + 2 + 2 + 1 + 4]; /* after FF C0 len P Y X */
+}
+
 /* ---- compile-time struct schema registry (filled by codegen) ---- */
 #ifndef MAKO_REFLECT_SCHEMA_MAX
 #define MAKO_REFLECT_SCHEMA_MAX 64
