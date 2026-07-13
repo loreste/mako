@@ -3135,6 +3135,12 @@ static inline int mako_re_unicode_prop_match(const char *name, size_t nlen, uint
         return (cp >= 0x1760 && cp <= 0x177F);
     if (nlen == 5 && memcmp(name, "Bamum", 5) == 0)
         return (cp >= 0xA6A0 && cp <= 0xA6FF);
+    if (nlen == 9 && memcmp(name, "Mongolian", 9) == 0)
+        return (cp >= 0x1800 && cp <= 0x18AF);
+    if (nlen == 8 && memcmp(name, "Tai_Viet", 8) == 0)
+        return (cp >= 0xAA80 && cp <= 0xAADF);
+    if (nlen == 9 && memcmp(name, "Inherited", 9) == 0)
+        return (cp >= 0x0300 && cp <= 0x036F); /* combining marks seed */
     return 0;
 }
 

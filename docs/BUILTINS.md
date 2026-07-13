@@ -1953,6 +1953,10 @@ ready queue so workers can multiplex without one-request-at-a-time stalls.
 | `jpeg_is_mako_raw` | `jpeg_is_mako_raw(data: string) -> int` | 1 if APP7 MAKOJPG + EOI + positive dims (JFIF optional; covers `jpeg_encode_gray`) |
 | `jpeg_jfif_app0_length` | `jpeg_jfif_app0_length(data: string) -> int` | APP0 segment length field (0 if missing; Mako JFIF uses 16) |
 | `jpeg_app7_payload_len` | `jpeg_app7_payload_len(data: string) -> int` | APP7 pixel payload byte count (`width * height` from MAKOJPG dims) |
+| `jpeg_has_app8` | `jpeg_has_app8(data: string) -> int` | 1 if APP8 DCT-DC evidence marker present (`jpeg_encode_gray_dct`) |
+| `jpeg_has_app9` | `jpeg_has_app9(data: string) -> int` | 1 if APP9 Huffman-ish block present (`jpeg_encode_gray_huff`) |
+| `jpeg_is_mako_dct` | `jpeg_is_mako_dct(data: string) -> int` | 1 if `jpeg_is_mako_raw` + APP8 |
+| `jpeg_is_mako_huff` | `jpeg_is_mako_huff(data: string) -> int` | 1 if `jpeg_is_mako_dct` + APP9 |
 
 ---
 
@@ -2303,7 +2307,8 @@ Tests: `result_enum_test.mko`, `job_join_typed_test.mko` (Result across kick/joi
 `wave30_queue_test.mko` (5-layer Result nests, JFIF density, APP7, SOF0 Ci),
 `wave31_queue_test.mko` (Option 5-layer, SOF0 Tqi, JFIF thumb, `jpeg_is_mako_jfif`),
 `wave32_queue_test.mko` (string nests, SOF0↔APP7 match, EOI, `jpeg_is_mako_complete`),
-`wave33_queue_test.mko` (bool deep nests, `jpeg_is_mako_raw`, APP0/APP7 lengths).
+`wave33_queue_test.mko` (bool deep nests, `jpeg_is_mako_raw`, APP0/APP7 lengths),
+`wave34_queue_test.mko` (`Result[Result[string]]`, APP8/APP9, `jpeg_is_mako_dct`/`huff`).
 
 ---
 
