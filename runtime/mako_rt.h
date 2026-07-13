@@ -3069,6 +3069,12 @@ static inline int mako_re_unicode_prop_match(const char *name, size_t nlen, uint
         return (cp >= 0x0C80 && cp <= 0x0CFF);
     if (nlen == 9 && memcmp(name, "Malayalam", 9) == 0)
         return (cp >= 0x0D00 && cp <= 0x0D7F);
+    if (nlen == 6 && memcmp(name, "Telugu", 6) == 0)
+        return (cp >= 0x0C00 && cp <= 0x0C7F);
+    if (nlen == 5 && memcmp(name, "Oriya", 5) == 0)
+        return (cp >= 0x0B00 && cp <= 0x0B7F);
+    if (nlen == 3 && memcmp(name, "Lao", 3) == 0)
+        return (cp >= 0x0E80 && cp <= 0x0EFF);
     return 0;
 }
 

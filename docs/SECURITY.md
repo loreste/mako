@@ -34,10 +34,10 @@ Guided tour: [The Mako Book §11](book/src/ch11-speed-safety.md) · Speed bar: [
 (including float), **POD structs** (int/float/bool/**string** fields; heap-boxed,
 strings cloned), `string` (heap-cloned), channels, `ShareInt` / `AtomicInt`
 (RC clone), and locked handles (`CMap` / `Mutex` / `RWMutex`).  
-Rejected: arrays, maps, non-POD structs, `Arena`, nested `Crew`
-(`examples/bad/kick_non_pod.mko`, `kick_array_arg.mko`).  
+Rejected: arrays, maps, non-POD structs, `Result`, `Arena`, nested `Crew`
+(`examples/bad/kick_non_pod.mko`, `kick_array_arg.mko`, `kick_result_non_send.mko`).  
 Race detection: `mako test --race` (CI TSan job: crew/kick/share, chan, proxy pool/edge,
-`kick_sync_test`, wave11/14–21 queue tests, `share_atomic_test`, `chan_*_test`,
+`kick_sync_test`, wave11/14–22 queue tests, `share_atomic_test`, `chan_*_test`,
 `fan_string_test`, `kick_string_test`). Prefer channels over shared mutable state;
 full type-level race freedom remains residual.
 

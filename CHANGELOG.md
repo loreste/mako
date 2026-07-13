@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.0 — 2026-07-13 (wave 23 queue)
+
+- Deeper mixed nests: `Option[Result[Option[T]]]`, `Result[Option[Result[Option[T]]]]`
+- Leaf-kind tracking for Option→Result→Option unbox chains (string payloads)
+- Bad: `kick_result_non_send`; Telugu/Oriya/Lao scripts; TSan wave22 + kick_sync
+- Tests: `examples/testing/wave23_queue_test.mko`
+
 ## 0.1.0 — 2026-07-13 (wave 22 queue)
 
 - Nested Ok/Some/None expected-type context (`Ok(Some(Ok(x)))`)

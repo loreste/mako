@@ -101,6 +101,8 @@ pub struct Codegen {
     fn_option_some_struct: HashMap<String, String>,
     /// When Option[Result[T, E]], Ok kind of the nested Result.
     fn_option_result_inner: HashMap<String, String>,
+    /// When Option[Result[Option[T], E]], leaf kind of T after Result+Option unbox.
+    fn_option_result_option_leaf: HashMap<String, String>,
     /// Local Option binding → Some payload kind.
     option_some_kinds: HashMap<String, String>,
     /// Local Option → remaining Some-kinds for deeper Option layers.
@@ -109,6 +111,8 @@ pub struct Codegen {
     option_some_structs: HashMap<String, String>,
     /// Local Option → nested Result Ok kind when Some is Result.
     option_result_inners: HashMap<String, String>,
+    /// Local Option/Result → leaf kind for Option[Result[Option[T]]] chains.
+    option_result_option_leafs: HashMap<String, String>,
     /// Job local / temp name → C return type of the kicked function.
     job_rets: HashMap<String, String>,
     /// Job local / temp → Result Ok kind when ret is MakoResultInt.
@@ -166,10 +170,12 @@ impl Codegen {
             fn_option_chain: HashMap::new(),
             fn_option_some_struct: HashMap::new(),
             fn_option_result_inner: HashMap::new(),
+            fn_option_result_option_leaf: HashMap::new(),
             option_some_kinds: HashMap::new(),
             option_chains: HashMap::new(),
             option_some_structs: HashMap::new(),
             option_result_inners: HashMap::new(),
+            option_result_option_leafs: HashMap::new(),
             job_rets: HashMap::new(),
             job_ok_kinds: HashMap::new(),
             chan_float: std::collections::HashSet::new(),
@@ -307,6 +313,38 @@ impl Codegen {
             }
             _ => None,
         }
+    }
+
+    /// When Option[Result[Option[T], E]] (or Result[Option[Result[Option[T]]]]), leaf kind of T.
+    fn option_result_option_leaf_kind(ty: &TypeExpr) -> Option<&'static str> {
+        fn peel_opt_res_opt(t: &TypeExpr) -> Option<&TypeExpr> {
+            // Expect Result[Option[U], _] then U, or start from Option[Result[Option[U]]]
+            match t {
+                TypeExpr::Generic(n, args) if n == "Option" && !args.is_empty() => {
+                    if let TypeExpr::Generic(rn, rargs) = &args[0] {
+                        if rn == "Result" && !rargs.is_empty() {
+                            if let TypeExpr::Generic(on, oargs) = &rargs[0] {
+                                if on == "Option" && !oargs.is_empty() {
+                                    return Some(&oargs[0]);
+                                }
+                            }
+                        }
+                    }
+                    None
+                }
+                TypeExpr::Generic(n, args) if n == "Result" && !args.is_empty() => {
+                    // Result[Option[Result[Option[T]]], E]
+                    if let TypeExpr::Generic(on, _) = &args[0] {
+                        if on == "Option" {
+                            return peel_opt_res_opt(&args[0]);
+                        }
+                    }
+                    None
+                }
+                _ => None,
+            }
+        }
+        peel_opt_res_opt(ty).map(Self::value_payload_kind)
     }
 
     /// Remaining Some-kinds after unboxing one Option layer from `payload`.
@@ -648,6 +686,14 @@ impl Codegen {
             .cloned()
     }
 
+    fn call_option_result_option_leaf(&self, fname: &str, args: &[Expr]) -> Option<String> {
+        let mono = self.generic_mono_name_for_call(fname, args);
+        self.fn_option_result_option_leaf
+            .get(&mono)
+            .or_else(|| self.fn_option_result_option_leaf.get(fname))
+            .cloned()
+    }
+
     fn call_option_some_struct(&self, fname: &str, args: &[Expr]) -> Option<String> {
         let mono = self.generic_mono_name_for_call(fname, args);
         self.fn_option_some_struct
@@ -712,6 +758,13 @@ impl Codegen {
                 "if ({p}) {{ {b} = *{p}; free({p}); }} else {{ memset(&{b}, 0, sizeof({b})); }}"
             ));
             if let Some(ik) = self.option_result_inners.get(scrut).cloned() {
+                // Option[Result[Option[T]]]: after Ok, Option needs leaf Some-kind
+                if ik == "option" {
+                    if let Some(leaf) = self.option_result_option_leafs.get(scrut).cloned() {
+                        self.result_option_inners
+                            .insert(bindings[0].clone(), leaf);
+                    }
+                }
                 self.result_ok_kinds.insert(bindings[0].clone(), ik);
             }
             return;
@@ -1083,13 +1136,22 @@ impl Codegen {
                                 self.fn_option_result_inner
                                     .insert(f.name.clone(), rik.into());
                             }
+                            if let Some(leaf) = Self::option_result_option_leaf_kind(rt) {
+                                self.fn_option_result_option_leaf
+                                    .insert(f.name.clone(), leaf.into());
+                            }
                         }
-                        // Result[Option[Result[T]]] also registers option→result inner via Result path
+                        // Result[Option[Result[…]]] also registers option→result metadata
                         if matches!(rt, TypeExpr::Generic(n, _) if n == "Result") {
                             if let Some(rik) = Self::option_result_inner_kind(rt) {
                                 self.fn_option_result_inner
                                     .entry(f.name.clone())
                                     .or_insert_with(|| rik.into());
+                            }
+                            if let Some(leaf) = Self::option_result_option_leaf_kind(rt) {
+                                self.fn_option_result_option_leaf
+                                    .entry(f.name.clone())
+                                    .or_insert_with(|| leaf.into());
                             }
                         }
                     }
@@ -2330,6 +2392,9 @@ impl Codegen {
                             }
                             if let Some(rik) = self.call_option_result_inner(fname, args) {
                                 self.option_result_inners.insert(name.clone(), rik);
+                            }
+                            if let Some(leaf) = self.call_option_result_option_leaf(fname, args) {
+                                self.option_result_option_leafs.insert(name.clone(), leaf);
                             }
                         }
                     }
@@ -13168,6 +13233,20 @@ impl Codegen {
             if let Some(rik) = opt_res_inner {
                 self.option_result_inners.insert(scrut.clone(), rik);
             }
+            let opt_res_leaf = match scrutinee {
+                Expr::Ident(n) => self.option_result_option_leafs.get(n).cloned(),
+                Expr::Call { callee, args } => {
+                    if let Expr::Ident(fname) = callee.as_ref() {
+                        self.call_option_result_option_leaf(fname, args)
+                    } else {
+                        None
+                    }
+                }
+                _ => self.option_result_option_leafs.get(&sval).cloned(),
+            };
+            if let Some(leaf) = opt_res_leaf {
+                self.option_result_option_leafs.insert(scrut.clone(), leaf);
+            }
         }
         if sty == "MakoOptionInt" {
             let some_c = match scrutinee {
@@ -13211,6 +13290,20 @@ impl Codegen {
             };
             if let Some(rik) = opt_res {
                 self.option_result_inners.insert(scrut.clone(), rik);
+            }
+            let opt_res_leaf = match scrutinee {
+                Expr::Ident(n) => self.option_result_option_leafs.get(n).cloned(),
+                Expr::Call { callee, args } => {
+                    if let Expr::Ident(fname) = callee.as_ref() {
+                        self.call_option_result_option_leaf(fname, args)
+                    } else {
+                        None
+                    }
+                }
+                _ => self.option_result_option_leafs.get(&sval).cloned(),
+            };
+            if let Some(leaf) = opt_res_leaf {
+                self.option_result_option_leafs.insert(scrut.clone(), leaf);
             }
             let some_st = match scrutinee {
                 Expr::Ident(n) => self.option_some_structs.get(n).cloned(),
@@ -13509,10 +13602,16 @@ impl Codegen {
                             if let Some(ch) = self.result_option_chains.get(scrut).cloned() {
                                 self.option_chains.insert(bindings[0].clone(), ch);
                             }
-                            // Result[Option[Result[T]]]: propagate nested Result Ok kind onto Option
+                            // Result[Option[Result[…]]]: propagate Result Ok metadata onto Option
                             if let Some(rik) = self.option_result_inners.get(scrut).cloned() {
                                 self.option_result_inners
                                     .insert(bindings[0].clone(), rik);
+                            }
+                            if let Some(leaf) =
+                                self.option_result_option_leafs.get(scrut).cloned()
+                            {
+                                self.option_result_option_leafs
+                                    .insert(bindings[0].clone(), leaf);
                             }
                         } else if ok_kind == "result" {
                             let b = mangle(&bindings[0]);

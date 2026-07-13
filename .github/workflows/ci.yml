@@ -192,7 +192,9 @@ jobs:
           ./target/release/mako test --race examples/testing/wave19_queue_test.mko
           ./target/release/mako test --race examples/testing/wave20_queue_test.mko
           ./target/release/mako test --race examples/testing/wave21_queue_test.mko
+          ./target/release/mako test --race examples/testing/wave22_queue_test.mko
           ./target/release/mako test --race examples/testing/share_atomic_test.mko
+          ./target/release/mako test --race examples/testing/kick_sync_test.mko
           ./target/release/mako test --race examples/testing/chan_string_test.mko
           ./target/release/mako test --race examples/testing/chan_struct_test.mko
           ./target/release/mako test --race examples/testing/chan_float_test.mko

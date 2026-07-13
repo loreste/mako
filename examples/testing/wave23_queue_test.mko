@@ -1,0 +1,78 @@
+// Wave 23: deeper mixed nests Option[Result[Option[T]]], race suite note, scripts.
+
+fn opt_res_opt[T](x: T) -> Option[Result[Option[T], string]] {
+    return Some(Ok(Some(x)))
+}
+
+fn res_opt_res_opt[T](x: T) -> Result[Option[Result[Option[T], string]], string] {
+    return Ok(Some(Ok(Some(x))))
+}
+
+fn TestOptResOptInt() {
+    match opt_res_opt(4) {
+        Some(r) => match r {
+            Ok(o) => match o {
+                Some(v) => assert_eq(v, 4),
+                None => assert(false),
+            },
+            Err(_) => assert(false),
+        },
+        None => assert(false),
+    }
+}
+
+fn TestOptResOptStr() {
+    match opt_res_opt("hi") {
+        Some(r) => match r {
+            Ok(o) => match o {
+                Some(s) => assert_eq_str(s, "hi"),
+                None => assert(false),
+            },
+            Err(_) => assert(false),
+        },
+        None => assert(false),
+    }
+}
+
+fn TestResOptResOptInt() {
+    match res_opt_res_opt(9) {
+        Ok(o1) => match o1 {
+            Some(r) => match r {
+                Ok(o2) => match o2 {
+                    Some(v) => assert_eq(v, 9),
+                    None => assert(false),
+                },
+                Err(_) => assert(false),
+            },
+            None => assert(false),
+        },
+        Err(_) => assert(false),
+    }
+}
+
+fn TestResOptResOptStr() {
+    match res_opt_res_opt("z") {
+        Ok(o1) => match o1 {
+            Some(r) => match r {
+                Ok(o2) => match o2 {
+                    Some(s) => assert_eq_str(s, "z"),
+                    None => assert(false),
+                },
+                Err(_) => assert(false),
+            },
+            None => assert(false),
+        },
+        Err(_) => assert(false),
+    }
+}
+
+fn TestRegexUnicodeTeluguOriyaLao() {
+    assert(regex_match("\\p{Telugu}+", "తెలుగు"))
+    assert(regex_match("\\p{Oriya}+", "ଓଡ଼ିଆ"))
+    assert(regex_match("\\p{Lao}+", "ລາວ"))
+}
+
+// Concurrent AtomicInt/CMap remain race-tested in kick_sync_test (CI TSan).
+fn TestRaceSuiteSurface() {
+    assert(true)
+}
