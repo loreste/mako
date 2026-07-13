@@ -1625,6 +1625,13 @@ impl TypeChecker {
             "http_post".into(),
             Type::Fn(vec![Type::String, Type::String], Box::new(Type::String)),
         );
+        fns.insert(
+            "http_request".into(),
+            Type::Fn(
+                vec![Type::String, Type::String, Type::String, Type::Int],
+                Box::new(Type::String),
+            ),
+        );
         // LLM programming (OpenAI-compatible / xAI)
         fns.insert(
             "llm_message".into(),

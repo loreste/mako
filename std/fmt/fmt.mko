@@ -59,9 +59,14 @@ fn Bool(b: bool) -> string { return format_bool(b) }
 fn Float(v: float, prec: int) -> string { return format_float(v, prec) }
 
 // Lowercase aliases (Mako-native style)
+fn int(n: int) -> string { return format_int(n) }
+fn bool(b: bool) -> string { return format_bool(b) }
+fn float(v: float, prec: int) -> string { return format_float(v, prec) }
 fn sprintf(format: string, a: string) -> string { return Sprintf(format, a) }
 fn sprintf_d(format: string, n: int) -> string { return SprintfD(format, n) }
 fn sprint(a: string) -> string { return Sprint(a) }
 fn println(a: string) -> int { return Println(a) }
 fn printf(format: string, a: string) -> int { return Printf(format, a) }
 fn errorf(format: string, a: string) -> string { return Errorf(format, a) }
+fn hex(n: int) -> string { return format_int_hex(n) }
+fn dec(n: int) -> string { return format_int_dec(n) }

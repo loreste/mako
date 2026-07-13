@@ -528,7 +528,7 @@ static inline int64_t mako_ws_client_accept_ok(MakoString key, MakoString respon
     MakoString expected = mako_ws_accept_key(key);
     int ok = expected.data && expected.len == strlen(accept) &&
              memcmp(expected.data, accept, expected.len) == 0;
-    free(expected.data);
+    mako_str_free(expected);
     return ok ? 1 : 0;
 }
 
@@ -690,11 +690,11 @@ static inline int64_t mako_ws_client_connect(
     int fd = (int)cfd;
     MakoString req = mako_ws_client_request(host, path, key);
     if (mako_ws_write_all(fd, req.data, req.len) < 0) {
-        free(req.data);
+        mako_str_free(req);
         mako_sock_close((mako_sock_t)fd);
         return -1;
     }
-    free(req.data);
+    mako_str_free(req);
     /* Read headers until \r\n\r\n */
     char resp[4096];
     size_t total = 0;

@@ -292,7 +292,7 @@ static inline int64_t mako_tcp_accept(int64_t listen_fd) {
         size_t n = ps.len < sizeof(mako_tcp_last_peer) - 1 ? ps.len : sizeof(mako_tcp_last_peer) - 1;
         memcpy(mako_tcp_last_peer, ps.data, n);
         mako_tcp_last_peer[n] = 0;
-        free(ps.data);
+        mako_str_free(ps);
     } else {
         mako_tcp_last_peer[0] = 0;
     }
@@ -331,13 +331,21 @@ static inline MakoString mako_tcp_local_addr(int64_t fd) {
     return s;
 }
 
-/* Half-close. how: 0=SHUT_RD, 1=SHUT_WR, 2=SHUT_RDWR. Returns 0 ok. */
+/* Half-close. how: 0=read, 1=write, 2=both. Returns 0 ok.
+ * Unix: SHUT_RD/WR/RDWR · Windows Winsock: SD_RECEIVE/SEND/BOTH. */
 static inline int64_t mako_tcp_shutdown(int64_t fd, int64_t how) {
     if (fd < 0) return -1;
+#if defined(_WIN32) || defined(_WIN64)
+    int h = SD_BOTH;
+    if (how == 0) h = SD_RECEIVE;
+    else if (how == 1) h = SD_SEND;
+    return shutdown((SOCKET)fd, h) == 0 ? 0 : -1;
+#else
     int h = SHUT_RDWR;
     if (how == 0) h = SHUT_RD;
     else if (how == 1) h = SHUT_WR;
     return shutdown((int)fd, h) == 0 ? 0 : -1;
+#endif
 }
 
 /* SO_ERROR after nonblocking connect / async error. 0 = ok, else errno. */
@@ -697,13 +705,13 @@ static inline MakoString mako_http_forward(MakoString host, int64_t port,
     size_t total = 0;
     for (;;) {
         MakoString chunk = mako_tcp_read(fd);
-        if (chunk.len == 0) { free(chunk.data); break; }
+        if (chunk.len == 0) { mako_str_free(chunk); break; }
         char *nb = (char *)realloc(buf, total + chunk.len);
-        if (!nb) { free(chunk.data); break; }
+        if (!nb) { mako_str_free(chunk); break; }
         buf = nb;
         memcpy(buf + total, chunk.data, chunk.len);
         total += chunk.len;
-        free(chunk.data);
+        mako_str_free(chunk);
     }
     mako_tcp_close(fd);
     if (!buf) return mako_str_from_cstr("");

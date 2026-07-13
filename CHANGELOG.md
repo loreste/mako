@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.1.0 — 2026-07-13 (CI portability + empty-string free safety)
+
+### Fixes
+
+- **Windows / cross** — `mako_tcp_shutdown` uses Winsock `SD_*`; `mako_log.h` no longer
+  includes raw `pthread.h` (uses platform CRITICAL_SECTION shims + lazy mutex init).
+- **Empty-string singleton free** — replace raw `free(s.data)` with `mako_str_free` in
+  HTTP/2, SIP, WS, reflect, slog, and net paths (fixes SIGABRT on macOS CI).
+- **`http_request` type** — register builtin so client API typechecks.
+- **`std/fmt`** — lowercase `int` / `bool` / `float` / `hex` / `dec` aliases.
+
 ## 0.1.0 — 2026-07-13 (intern + chan take + proxy splice)
 
 ### Speed / memory

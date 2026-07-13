@@ -289,11 +289,11 @@ static inline int64_t mako_sip_content_length(MakoString msg) {
     MakoString cl = mako_sip_header(msg, mako_str_from_cstr("Content-Length"));
     if (!cl.data || cl.len == 0) {
         /* compact l */
-        free(cl.data);
+        mako_str_free(cl);
         cl = mako_sip_header(msg, mako_str_from_cstr("l"));
     }
     if (!cl.data || cl.len == 0) {
-        free(cl.data);
+        mako_str_free(cl);
         return 0;
     }
     int64_t v = 0;
@@ -301,7 +301,7 @@ static inline int64_t mako_sip_content_length(MakoString msg) {
         if (cl.data[i] < '0' || cl.data[i] > '9') break;
         v = v * 10 + (cl.data[i] - '0');
     }
-    free(cl.data);
+    mako_str_free(cl);
     return v;
 }
 
@@ -315,7 +315,7 @@ static inline int64_t mako_sip_msg_complete(MakoString buf) {
     /* Content-Length from headers region only */
     MakoString hdrs = mako_sip_slice_to_str(buf.data, (size_t)(body - buf.data));
     int64_t need = mako_sip_content_length(hdrs);
-    free(hdrs.data);
+    mako_str_free(hdrs);
     return (int64_t)have >= need ? 1 : 0;
 }
 
@@ -328,7 +328,7 @@ static inline int64_t mako_sip_msg_needed(MakoString buf) {
     size_t have = buf.len - (size_t)(body - buf.data);
     MakoString hdrs = mako_sip_slice_to_str(buf.data, (size_t)(body - buf.data));
     int64_t need = mako_sip_content_length(hdrs);
-    free(hdrs.data);
+    mako_str_free(hdrs);
     if ((int64_t)have >= need) return 0;
     return need - (int64_t)have;
 }
@@ -358,7 +358,7 @@ static inline MakoString mako_sip_headers_append(
     size_t n = headers.len + line.len + 1;
     char *d = (char *)malloc(n);
     if (!d) {
-        free(line.data);
+        mako_str_free(line);
         return mako_str_from_cstr("");
     }
     size_t o = 0;
@@ -369,7 +369,7 @@ static inline MakoString mako_sip_headers_append(
     memcpy(d + o, line.data, line.len);
     o += line.len;
     d[o] = 0;
-    free(line.data);
+    mako_str_free(line);
     return (MakoString){d, o};
 }
 
@@ -388,7 +388,7 @@ static inline MakoString mako_sip_request(
     size_t n = method.len + uri.len + h2.len + blen + 32;
     char *d = (char *)malloc(n);
     if (!d) {
-        free(h2.data);
+        mako_str_free(h2);
         return mako_str_from_cstr("");
     }
     int w = snprintf(
@@ -397,7 +397,7 @@ static inline MakoString mako_sip_request(
         (int)uri.len, uri.data ? uri.data : "sip:invalid",
         (int)h2.len, h2.data ? h2.data : ""
     );
-    free(h2.data);
+    mako_str_free(h2);
     if (w < 0) {
         free(d);
         return mako_str_from_cstr("");
@@ -432,7 +432,7 @@ static inline MakoString mako_sip_response(
     size_t n = h2.len + blen + rlen + 48;
     char *d = (char *)malloc(n);
     if (!d) {
-        free(h2.data);
+        mako_str_free(h2);
         return mako_str_from_cstr("");
     }
     int w = snprintf(
@@ -440,7 +440,7 @@ static inline MakoString mako_sip_response(
         (long long)code, (int)rlen, rs,
         (int)h2.len, h2.data ? h2.data : ""
     );
-    free(h2.data);
+    mako_str_free(h2);
     if (w < 0) {
         free(d);
         return mako_str_from_cstr("");
@@ -1069,7 +1069,7 @@ static inline MakoString mako_sip_digest_response(
     size_t n2 = method.len + uri.len + 4;
     char *a2 = (char *)malloc(n2);
     if (!a2) {
-        free(ha1.data);
+        mako_str_free(ha1);
         return mako_str_from_cstr("");
     }
     int w2 = snprintf(
@@ -1082,8 +1082,8 @@ static inline MakoString mako_sip_digest_response(
     size_t n3 = ha1.len + nonce.len + ha2.len + 4;
     char *resp = (char *)malloc(n3);
     if (!resp) {
-        free(ha1.data);
-        free(ha2.data);
+        mako_str_free(ha1);
+        mako_str_free(ha2);
         return mako_str_from_cstr("");
     }
     int w3 = snprintf(
@@ -1092,8 +1092,8 @@ static inline MakoString mako_sip_digest_response(
         (int)nonce.len, nonce.data ? nonce.data : "",
         (int)ha2.len, ha2.data ? ha2.data : ""
     );
-    free(ha1.data);
-    free(ha2.data);
+    mako_str_free(ha1);
+    mako_str_free(ha2);
     MakoString out = mako_sip_md5_hex((MakoString){resp, (size_t)(w3 > 0 ? w3 : 0)});
     free(resp);
     return out;
@@ -1207,7 +1207,7 @@ static inline MakoString mako_sdp_connection(MakoString sdp) {
 static inline MakoString mako_sdp_connection_addr(MakoString sdp) {
     MakoString c = mako_sdp_connection(sdp);
     if (!c.data || c.len == 0) {
-        free(c.data);
+        mako_str_free(c);
         return mako_str_from_cstr("");
     }
     /* IN IP4 1.2.3.4 */
@@ -1219,14 +1219,14 @@ static inline MakoString mako_sdp_connection_addr(MakoString sdp) {
                 if (count == 3) {
                     start = sp;
                     MakoString out = mako_sip_slice_to_str(c.data + start, i - start);
-                    free(c.data);
+                    mako_str_free(c);
                     return out;
                 }
             }
             sp = i + 1;
         }
     }
-    free(c.data);
+    mako_str_free(c);
     return mako_str_from_cstr("");
 }
 
@@ -1244,7 +1244,7 @@ static inline MakoString mako_sdp_media_type(MakoString sdp, int64_t i) {
     size_t j = 0;
     while (j < m.len && m.data[j] != ' ') j++;
     MakoString out = mako_sip_slice_to_str(m.data, j);
-    free(m.data);
+    mako_str_free(m);
     return out;
 }
 
@@ -1254,7 +1254,7 @@ static inline int64_t mako_sdp_media_port(MakoString sdp, int64_t i) {
     size_t j = 0;
     while (j < m.len && m.data[j] != ' ') j++;
     if (j >= m.len) {
-        free(m.data);
+        mako_str_free(m);
         return 0;
     }
     j++;
@@ -1263,7 +1263,7 @@ static inline int64_t mako_sdp_media_port(MakoString sdp, int64_t i) {
         port = port * 10 + (m.data[j] - '0');
         j++;
     }
-    free(m.data);
+    mako_str_free(m);
     return port;
 }
 
@@ -1287,7 +1287,7 @@ static inline MakoString mako_sdp_media_proto(MakoString sdp, int64_t i) {
         }
     }
     MakoString out = mako_sip_slice_to_str(m.data + start, end > start ? end - start : 0);
-    free(m.data);
+    mako_str_free(m);
     return out;
 }
 
@@ -1500,49 +1500,49 @@ static inline MakoString mako_sip_copy_headers_for_response(MakoString req) {
     MakoString via = mako_sip_header(req, mako_str_from_cstr("Via"));
     if (via.len) {
         MakoString nh = mako_sip_headers_append(h, mako_str_from_cstr("Via"), via);
-        free(h.data);
+        mako_str_free(h);
         h = nh;
     }
-    free(via.data);
+    mako_str_free(via);
     /* all Vias */
     int64_t vc = mako_sip_header_count(req, mako_str_from_cstr("Via"));
     for (int64_t i = 1; i < vc; i++) {
         MakoString v = mako_sip_header_n(req, mako_str_from_cstr("Via"), i);
         if (v.len) {
             MakoString nh = mako_sip_headers_append(h, mako_str_from_cstr("Via"), v);
-            free(h.data);
+            mako_str_free(h);
             h = nh;
         }
-        free(v.data);
+        mako_str_free(v);
     }
     MakoString from = mako_sip_header(req, mako_str_from_cstr("From"));
     if (from.len) {
         MakoString nh = mako_sip_headers_append(h, mako_str_from_cstr("From"), from);
-        free(h.data);
+        mako_str_free(h);
         h = nh;
     }
-    free(from.data);
+    mako_str_free(from);
     MakoString to = mako_sip_header(req, mako_str_from_cstr("To"));
     if (to.len) {
         MakoString nh = mako_sip_headers_append(h, mako_str_from_cstr("To"), to);
-        free(h.data);
+        mako_str_free(h);
         h = nh;
     }
-    free(to.data);
+    mako_str_free(to);
     MakoString cid = mako_sip_header(req, mako_str_from_cstr("Call-ID"));
     if (cid.len) {
         MakoString nh = mako_sip_headers_append(h, mako_str_from_cstr("Call-ID"), cid);
-        free(h.data);
+        mako_str_free(h);
         h = nh;
     }
-    free(cid.data);
+    mako_str_free(cid);
     MakoString cseq = mako_sip_header(req, mako_str_from_cstr("CSeq"));
     if (cseq.len) {
         MakoString nh = mako_sip_headers_append(h, mako_str_from_cstr("CSeq"), cseq);
-        free(h.data);
+        mako_str_free(h);
         h = nh;
     }
-    free(cseq.data);
+    mako_str_free(cseq);
     return h;
 }
 
@@ -1558,12 +1558,12 @@ static inline MakoString mako_sip_reply(
             memcpy(d, base.data ? base.data : "", base.len);
             memcpy(d + base.len, extra_headers.data, extra_headers.len);
             d[base.len + extra_headers.len] = 0;
-            free(base.data);
+            mako_str_free(base);
             base = (MakoString){d, base.len + extra_headers.len};
         }
     }
     MakoString out = mako_sip_response(code, reason, base, body);
-    free(base.data);
+    mako_str_free(base);
     return out;
 }
 
@@ -1573,7 +1573,7 @@ static inline int64_t mako_sip_method_is(MakoString msg, MakoString method) {
     int eq = mako_sip_ci_eq(
         m.data ? m.data : "", m.len, method.data ? method.data : "", method.len
     );
-    free(m.data);
+    mako_str_free(m);
     return eq ? 1 : 0;
 }
 
