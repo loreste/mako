@@ -1,16 +1,22 @@
 #!/usr/bin/env bash
-# Package a self-contained Mako release artifact (slim by default).
-# Usage:
-#   ./scripts/package-release.sh [artifact-name]
-#   ./scripts/package-release.sh --full mako-x86_64-unknown-linux-gnu
+# Package a self-contained Mako release from a cargo-built binary.
+# Everything users need without installing Rust/cargo on their machine:
+#   bin/mako (the full release binary cargo produced)
+#   share/mako/runtime/*.h + certs
+#   share/mako/std/
+#   install scripts
 #
-# Slim (default): stripped binary + runtime headers + std + install scripts.
-# Full: also ships editors + docs snapshot (larger download).
+# Usage:
+#   cargo build --release
+#   ./scripts/package-release.sh [artifact-name]
+#   ./scripts/package-release.sh --slim   # smaller: no editors/docs tree
+#   ./scripts/package-release.sh --full   # editors + docs (default)
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
-FULL=0
+# Default full = complete out-of-box bundle from cargo release build.
+FULL=1
 NAME=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -18,6 +24,7 @@ while [[ $# -gt 0 ]]; do
     --slim) FULL=0; shift ;;
     -h|--help)
       echo "Usage: $0 [--slim|--full] [artifact-name]"
+      echo "  Packages target/release/mako (cargo binary) + runtime + std."
       exit 0
       ;;
     *)
@@ -55,11 +62,11 @@ fi
 
 BIN="$ROOT/target/release/mako"
 if [[ ! -x "$BIN" ]]; then
-  echo "Building release…"
-  cargo build --release --quiet
+  echo "Building full release binary with cargo (this machine only — end users never run this)…"
+  cargo build --release
 fi
 if [[ ! -x "$BIN" ]]; then
-  echo "error: missing $BIN" >&2
+  echo "error: missing $BIN — cargo build --release failed" >&2
   exit 1
 fi
 
@@ -68,9 +75,10 @@ STAGE="$DIST/$NAME"
 rm -rf "$STAGE"
 mkdir -p "$STAGE/bin" "$STAGE/share/mako/runtime" "$STAGE/share/mako/std" "$STAGE/scripts"
 
-# Strip debug symbols for a smaller download (best-effort).
+# Ship the exact cargo release binary (all Rust/cargo deps compiled into it).
 cp "$BIN" "$STAGE/bin/mako"
 chmod +x "$STAGE/bin/mako"
+# Strip symbols for smaller download; does not remove linked functionality.
 if command -v strip >/dev/null 2>&1; then
   strip "$STAGE/bin/mako" 2>/dev/null || true
 fi
@@ -148,12 +156,22 @@ tar -C "$DIST" -czf "$DIST/$NAME.tar.gz" "$NAME"
     shasum -a 256 "$NAME.tar.gz" "$NAME/bin/mako" > "$NAME.sha256"
   fi
 )
-# Convenience copies for GitHub Releases
-cp "$STAGE/bin/mako" "$DIST/$NAME"
+
+# Bare binary asset for GitHub Releases (direct download of the cargo-built CLI).
+# Written after tarball so it does not collide with the stage directory name.
+BARE_BIN="$STAGE/bin/mako"
+cp "$BARE_BIN" "$DIST/${NAME}.bin"
+rm -rf "$STAGE"
+mv "$DIST/${NAME}.bin" "$DIST/$NAME"
+chmod +x "$DIST/$NAME"
+
 cp "$ROOT/scripts/install-release.sh" "$DIST/install-release.sh"
 cp "$ROOT/scripts/install-linux.sh" "$DIST/install-linux.sh"
 chmod +x "$DIST/install-release.sh" "$DIST/install-linux.sh"
 
 BYTES="$(wc -c < "$DIST/$NAME.tar.gz" | tr -d ' ')"
-echo "Packed $DIST/$NAME.tar.gz ($BYTES bytes, $MODE_LABEL)"
-echo "Also: $DIST/$NAME, $DIST/$NAME.sha256, install-release.sh, install-linux.sh"
+BIN_BYTES="$(wc -c < "$DIST/$NAME" | tr -d ' ')"
+echo "Packed cargo release binary into $DIST/$NAME.tar.gz ($BYTES bytes, $MODE_LABEL)"
+echo "  binary:  $DIST/$NAME ($BIN_BYTES bytes) — full mako CLI from cargo, no Rust on install host"
+echo "  checksum:$DIST/$NAME.sha256"
+echo "  install: install-release.sh / install-linux.sh"

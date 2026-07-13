@@ -23,32 +23,41 @@ are rough, and there's plenty left to build.
 
 ## Install
 
-### One-shot (recommended) — no Rust
+### One-shot (recommended) — prebuilt binary, no Rust/cargo
+
+Mako is built with cargo **on our CI**. You download the finished binary
+bundle (CLI + runtime + std). You never install Rust or run cargo yourself.
 
 **Linux**
 
 ```bash
 curl -fsSL https://github.com/loreste/mako/releases/latest/download/install-linux.sh | bash
+source "$HOME/.local/share/mako/env.sh"
+mako version
 ```
 
 **macOS**
 
 ```bash
 curl -fsSL https://github.com/loreste/mako/releases/latest/download/install-release.sh | bash
+source "$HOME/.local/share/mako/env.sh"
 ```
 
 That single command:
 
-1. Installs **clang** if missing (Linux package managers / Xcode CLT hint on macOS)
-2. Downloads **one** prebuilt Mako tarball (compiler + runtime headers + stdlib)
-3. Verifies SHA-256 and installs into `~/.local`
-4. Writes `~/.local/share/mako/env.sh` and updates your shell RC when possible
+1. Installs **clang** if missing (so `.mko` files can compile)
+2. Downloads the **cargo-built** `mako` binary package for your CPU
+3. Installs runtime headers + standard library beside it
+4. Verifies SHA-256, writes `env.sh`, updates shell RC when possible
 
 ```bash
-# then in this shell (or open a new terminal):
-source "$HOME/.local/share/mako/env.sh"
-mako version
 mako init hello && cd hello && mako run main.mko
+```
+
+Or grab the raw binary only (still needs headers via the tarball/installer for compiles):
+
+```text
+https://github.com/loreste/mako/releases/latest/download/mako-x86_64-unknown-linux-gnu.tar.gz
 ```
 
 Options:
@@ -59,7 +68,7 @@ curl -fsSL …/install-linux.sh | bash -s -- --no-deps    # skip clang install
 curl -fsSL …/install-linux.sh | bash -s -- --version v0.1.0
 ```
 
-**You do not need Rust.** Rust is only for building Mako from source.
+**You do not need Rust or cargo on the machine that runs Mako.**
 
 ### From source (large — installs Rust toolchain + crates)
 

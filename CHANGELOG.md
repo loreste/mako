@@ -2,12 +2,11 @@
 
 ## 0.1.0 — 2026-07-13 (out-of-box one-shot install)
 
-- Full one-shot: prebuilt mako + runtime + std — **no Rust / no git clone**
-- Auto-install **clang** on Linux (apt/dnf/pacman/apk/zypper) when missing
-- Writes `share/mako/env.sh` and updates shell RC under `curl|bash`
-- `install-linux.sh` is a full standalone script (single curl, no second fetch)
-- Slim packages (strip binary); release workflow publishes both bootstrappers
-- README + RELEASE: out-of-box curl install as the default path
+- Full one-shot: **cargo-built binary** + runtime + std — no Rust/cargo on user machine
+- Auto-install **clang** on Linux when missing; `env.sh` + shell RC hooks
+- `package-release.sh` ships the full `target/release/mako` binary in the tarball
+- Release workflow publishes Linux/macOS/Windows binaries on tag **and** workflow_dispatch
+- README: prebuilt binary install is the default path
 
 ## 0.1.0 — 2026-07-13 (wave 39 queue)
 
