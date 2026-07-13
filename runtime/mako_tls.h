@@ -299,16 +299,25 @@ static inline SSL_CTX *mako_tls_make_ctx(const char *cert, const char *key) {
 
 typedef struct { SSL *ssl; int fd; } MakoTlsConn;
 
-/* ALPN: prefer h2, then http/1.1, else the client's first offer. */
+/* ALPN select for reverse-proxy TLS.
+ *
+ * IMPORTANT: Prefer http/1.1 until HTTP/2 multi-stream is solid. Browsers keep
+ * one H2 connection open and send later navigations (e.g. / → /docs) as new
+ * streams; a bug that reuses stream id 1 for those replies makes every click
+ * after the first page appear to "stay on home". http/1.1 uses one request per
+ * connection and routes correctly.
+ *
+ * When H2 multi-request is fixed, restore: "\x02h2\x08http/1.1"
+ */
 static inline int mako_tls_alpn_cb(SSL *ssl, const unsigned char **out,
                                    unsigned char *outlen, const unsigned char *in,
                                    unsigned int inlen, void *arg) {
     (void)ssl; (void)arg;
-    static const unsigned char pref[] = "\x02h2\x08http/1.1";
+    /* Only http/1.1 — do NOT fall back to the client's first offer (often h2). */
+    static const unsigned char pref[] = "\x08http/1.1";
     if (SSL_select_next_proto((unsigned char **)out, outlen, pref, sizeof(pref) - 1,
                               in, inlen) == OPENSSL_NPN_NEGOTIATED)
         return SSL_TLSEXT_ERR_OK;
-    if (inlen >= 1) { *out = in + 1; *outlen = in[0]; return SSL_TLSEXT_ERR_OK; }
     return SSL_TLSEXT_ERR_NOACK;
 }
 
@@ -1294,29 +1303,152 @@ static inline int mako_tls_h2_headers_hpack_slice(
     return 1;
 }
 
-/* Extract :path from a small HPACK request block (our encoder shape).
- * Supports indexed `/` (0x84) and literal name-index 4 (0x04 / 0x14 / 0x44). */
+/* Extract :path via the full HPACK decoder (RFC 7541).
+ *
+ * Critical: name-indexed literals (e.g. 0x44 / 0x04 / 0x14 with name index 4
+ * for :path) MUST use the literal value from the wire — never the static
+ * table's default value for that index (`/` for index 4, `/index.html` for 5).
+ * A naive byte scan that treats 0x84 (indexed :path /) as a full-block search
+ * also false-positives when 0x84 appears inside other fields.
+ *
+ * Uses mako_hpack_decode_block so Huffman, varints, incremental indexing, and
+ * never-indexed forms all work for real clients (curl, browsers). */
 static inline int mako_tls_h2_extract_path_simple(
     const unsigned char *pay, size_t plen, char *out, size_t cap
 ) {
     if (!out || cap < 2) return 0;
     out[0] = 0;
-    for (size_t i = 0; i < plen; i++) {
-        unsigned char b = pay[i];
-        if (b == 0x84) { /* indexed :path / */
-            if (cap < 2) return 0;
-            out[0] = '/';
-            out[1] = 0;
-            return 1;
+    if (!pay || plen == 0) return 0;
+
+    MakoString block = {(char *)pay, plen};
+    int64_t n = mako_hpack_decode_block(block);
+    if (n < 0) return 0;
+
+    int found = 0;
+    for (int64_t i = 0; i < n; i++) {
+        MakoString nm = mako_hpack_decoded_name(i);
+        if (!nm.data) continue;
+        if (nm.len == 5 && memcmp(nm.data, ":path", 5) == 0) {
+            MakoString vl = mako_hpack_decoded_value(i);
+            size_t copy = vl.data ? vl.len : 0;
+            if (copy + 1 > cap) copy = cap - 1;
+            if (copy && vl.data) memcpy(out, vl.data, copy);
+            out[copy] = 0;
+            free(nm.data);
+            free(vl.data);
+            found = 1;
+            break;
         }
-        /* Literal :path with name index 4: 0x04 (no index), 0x14 (never), 0x44 (incr) */
-        if ((b == 0x04 || b == 0x14 || b == 0x44) && i + 1 < plen) {
-            size_t n = (size_t)(pay[i + 1] & 0x7f);
-            if ((pay[i + 1] & 0x80) != 0) return 0; /* Huffman not supported */
-            if (i + 2 + n > plen || n + 1 > cap) return 0;
-            memcpy(out, pay + i + 2, n);
-            out[n] = 0;
-            return 1;
+        free(nm.data);
+    }
+    /* decoded_name/value allocate; clear table storage too */
+    mako_hpack_decode_clear();
+    return found;
+}
+
+/* Legacy byte-scan fallback (no Huffman). Prefer extract_path_simple above. */
+static inline int mako_tls_h2_extract_path_scan(
+    const unsigned char *pay, size_t plen, char *out, size_t cap
+) {
+    if (!out || cap < 2 || !pay) return 0;
+    out[0] = 0;
+    size_t i = 0;
+    while (i < plen) {
+        unsigned char b = pay[i];
+        /* Fully indexed header — only the field start (not a mid-string byte). */
+        if (b & 0x80) {
+            size_t idx = (size_t)(b & 0x7f);
+            size_t off = i + 1;
+            if (idx == 0x7f) {
+                /* Multi-byte index: skip continuation for scan purposes */
+                while (off < plen && (pay[off] & 0x80)) off++;
+                if (off < plen) off++;
+            }
+            if (idx == 4) { /* :path / */
+                out[0] = '/';
+                out[1] = 0;
+                return 1;
+            }
+            if (idx == 5) { /* :path /index.html */
+                const char *p = "/index.html";
+                size_t n = 11;
+                if (n + 1 > cap) n = cap - 1;
+                memcpy(out, p, n);
+                out[n] = 0;
+                return 1;
+            }
+            i = (idx == 0x7f) ? off : i + 1;
+            continue;
+        }
+        /* Literal with incremental indexing — 6-bit name index */
+        if ((b & 0xc0) == 0x40) {
+            size_t ni = (size_t)(b & 0x3f);
+            size_t off = i + 1;
+            if (ni == 0x3f) {
+                while (off < plen && (pay[off] & 0x80)) off++;
+                if (off < plen) off++;
+            }
+            /* name if ni==0 */
+            if (ni == 0) {
+                if (off >= plen) return 0;
+                if (pay[off] & 0x80) return 0; /* Huffman name — need full decoder */
+                size_t nl = (size_t)(pay[off] & 0x7f);
+                off += 1 + nl;
+            }
+            if (off >= plen) return 0;
+            int huff = (pay[off] & 0x80) != 0;
+            size_t vl = (size_t)(pay[off] & 0x7f);
+            off++;
+            if (huff) return 0; /* need full decoder */
+            if (off + vl > plen) return 0;
+            if (ni == 4 || ni == 5) {
+                size_t n = vl;
+                if (n + 1 > cap) n = cap - 1;
+                if (n) memcpy(out, pay + off, n);
+                out[n] = 0;
+                return 1;
+            }
+            i = off + vl;
+            continue;
+        }
+        /* Dynamic table size update */
+        if ((b & 0xe0) == 0x20) {
+            size_t off = i + 1;
+            if ((b & 0x1f) == 0x1f) {
+                while (off < plen && (pay[off] & 0x80)) off++;
+                if (off < plen) off++;
+            }
+            i = off;
+            continue;
+        }
+        /* Literal without indexing / never indexed — 4-bit name index */
+        {
+            size_t ni = (size_t)(b & 0x0f);
+            size_t off = i + 1;
+            if (ni == 0x0f) {
+                while (off < plen && (pay[off] & 0x80)) off++;
+                if (off < plen) off++;
+            }
+            if (ni == 0) {
+                if (off >= plen) return 0;
+                if (pay[off] & 0x80) return 0;
+                size_t nl = (size_t)(pay[off] & 0x7f);
+                off += 1 + nl;
+            }
+            if (off >= plen) return 0;
+            int huff = (pay[off] & 0x80) != 0;
+            size_t vl = (size_t)(pay[off] & 0x7f);
+            off++;
+            if (huff) return 0;
+            if (off + vl > plen) return 0;
+            if (ni == 4 || ni == 5) {
+                size_t n = vl;
+                if (n + 1 > cap) n = cap - 1;
+                if (n) memcpy(out, pay + off, n);
+                out[n] = 0;
+                return 1;
+            }
+            i = off + vl;
         }
     }
     return 0;
@@ -1635,10 +1767,11 @@ static inline int64_t mako_tls_serve_h2_routes(
                     }
                 } else if (typ == 0x01 && stream != 0 && (stream & 1)) {
                     char path[128];
+                    /* Never invent "/" when decode fails — that maps every
+                     * unknown path to the root handler (the /docs bug). */
                     if (!mako_tls_h2_extract_path_ex(
                             flags, pay, plen, path, sizeof(path), hd_inf)) {
-                        path[0] = '/';
-                        path[1] = 0;
+                        path[0] = 0;
                     }
                     if (flags & 0x01) {
                         mako_tls_h2_reply_routed(

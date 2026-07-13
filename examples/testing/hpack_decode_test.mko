@@ -26,4 +26,86 @@ func TestHpackDecodeRealRequest() {
     assert_eq_str(field(":authority"), "localhost:18500")
     assert_eq_str(field("user-agent"), "curl/8.4.0")
     assert_eq_str(field("accept"), "*/*")
+    let _ = hpack_decode_clear()
+}
+
+// Name-indexed :path literals must use the WIRE value, never static defaults
+// (static index 4 = "/", index 5 = "/index.html").
+func TestHpackPathLiteralWithoutIndexing() {
+    // 0x04 = literal without indexing, name index 4 (:path); value "/docs"
+    var b = str_builder()
+    builder_write_byte(b, byte(4))
+    builder_write_byte(b, byte(5))
+    builder_write(b, "/docs")
+    assert_eq(hpack_decode_block(builder_string(b)), 1)
+    assert_eq_str(field(":path"), "/docs")
+    assert(not str_eq(field(":path"), "/"))
+    let _ = hpack_decode_clear()
+}
+
+func TestHpackPathLiteralIncrementalIndexing() {
+    // 0x44 = 68 = literal with incremental indexing, name index 4
+    var b = str_builder()
+    builder_write_byte(b, byte(68))
+    builder_write_byte(b, byte(5))
+    builder_write(b, "/book")
+    assert_eq(hpack_decode_block(builder_string(b)), 1)
+    assert_eq_str(field(":path"), "/book")
+    let _ = hpack_decode_clear()
+}
+
+func TestHpackPathLiteralNeverIndexed() {
+    // 0x14 = 20 = never indexed, name index 4
+    var b = str_builder()
+    builder_write_byte(b, byte(20))
+    builder_write_byte(b, byte(11))
+    builder_write(b, "/docs/guide")
+    assert_eq(hpack_decode_block(builder_string(b)), 1)
+    assert_eq_str(field(":path"), "/docs/guide")
+    let _ = hpack_decode_clear()
+}
+
+func TestHpackIndexedPathIsSlashOnly() {
+    // Fully indexed :path / (0x84) — the only case static "/" is correct
+    var b = str_builder()
+    builder_write_byte(b, byte(132))
+    assert_eq(hpack_decode_block(builder_string(b)), 1)
+    assert_eq_str(field(":path"), "/")
+    let _ = hpack_decode_clear()
+}
+
+func TestHpackCurlStyleDocsRequest() {
+    // :method GET, :path /docs (name idx 4), :scheme https, :authority localhost
+    var b = str_builder()
+    builder_write_byte(b, byte(130)) // :method GET
+    builder_write_byte(b, byte(4))   // :path name-indexed without indexing
+    builder_write_byte(b, byte(5))
+    builder_write(b, "/docs")
+    builder_write_byte(b, byte(135)) // :scheme https
+    builder_write_byte(b, byte(1))   // :authority name idx 1
+    builder_write_byte(b, byte(9))
+    builder_write(b, "localhost")
+    let n = hpack_decode_block(builder_string(b))
+    assert(n >= 3)
+    assert_eq_str(field(":method"), "GET")
+    assert_eq_str(field(":path"), "/docs")
+    assert_eq_str(field(":scheme"), "https")
+    let _ = hpack_decode_clear()
+}
+
+// Regression: static default for index 4 is "/" — must never replace wire "/docs"
+// even when a fully-indexed 0x84 appears later in the same block (false-positive
+// for naive byte scanners that return on first 0x84).
+func TestHpackPathLiteralNotOverriddenByIndexedSlash() {
+    var b = str_builder()
+    // :path /docs as literal without indexing
+    builder_write_byte(b, byte(4))
+    builder_write_byte(b, byte(5))
+    builder_write(b, "/docs")
+    // trailing fully-indexed :path / (0x84) would poison a byte-scan decoder
+    builder_write_byte(b, byte(132))
+    assert(hpack_decode_block(builder_string(b)) >= 1)
+    // First :path wins for field(); verify it is still the wire literal
+    assert_eq_str(field(":path"), "/docs")
+    let _ = hpack_decode_clear()
 }

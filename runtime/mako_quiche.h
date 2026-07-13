@@ -837,14 +837,47 @@ static inline int64_t mako_quiche_stop_server(int64_t pid) {
     return 1;
 }
 
-/* ---- HTTP/3 / QUIC runtime surface (event-loop friendly handles) --------
- * Lightweight server-side scaffolding: UDP bind, cert config, poll readiness,
- * and stream accept/read/write markers. Full connection crypto is driven by
- * quiche when linked; without quiche these return safe failures.
+/* ---- HTTP/3 / QUIC reverse-proxy server surface -------------------------
+ * Real quiche-backed HTTP/3 ingress: UDP bind, multi-connection accept,
+ * request queue, and response write. Poll-driven (no libev).
+ *
+ * Request body returned by h3_stream_read is a pseudo-HTTP/1.1 request:
+ *   METHOD path HTTP/1.1\r\nHost: authority\r\n...\r\n\r\nbody
+ * h3_stream_write accepts "STATUS\nbody" (status defaults to 200).
  * --------------------------------------------------------------------- */
 
 #define MAKO_H3_RT_MAX 8
-#define MAKO_H3_RT_STREAMS 64
+#define MAKO_H3_RT_CONNS 16
+#define MAKO_H3_RT_READY 32
+#define MAKO_H3_CID_LEN 16
+#define MAKO_H3_REQ_CAP 8192
+#define MAKO_H3_TOKEN_MAX (6 + sizeof(struct sockaddr_storage) + QUICHE_MAX_CONN_ID_LEN)
+
+typedef struct {
+    int live;
+    uint8_t cid[MAKO_H3_CID_LEN];
+    size_t cid_len;
+    quiche_conn *conn;
+    quiche_h3_conn *h3;
+    struct sockaddr_storage peer;
+    socklen_t peer_len;
+} MakoH3Conn;
+
+typedef struct {
+    int live;
+    int taken;
+    int conn_idx;
+    int64_t stream_id;
+    char method[16];
+    char path[1024];
+    char authority[256];
+    char cookie[512];
+    char traceparent[128];
+    char body[MAKO_H3_BODY_CAP];
+    size_t body_len;
+    int headers_done;
+    int finished;
+} MakoH3ReadyReq;
 
 typedef struct {
     int live;
@@ -852,16 +885,329 @@ typedef struct {
     int port;
     char cert[512];
     char key[512];
-    int64_t ready_streams[MAKO_H3_RT_STREAMS];
-    int ready_n;
-    int64_t last_stream;
-    char last_body[MAKO_H3_BODY_CAP];
-    size_t last_body_len;
+    quiche_config *qconfig;
+    quiche_h3_config *h3config;
+    struct sockaddr_storage local_addr;
+    socklen_t local_len;
+    MakoH3Conn conns[MAKO_H3_RT_CONNS];
+    MakoH3ReadyReq ready[MAKO_H3_RT_READY];
+    int ready_head;
+    int ready_tail;
+    int ready_count;
+    int last_req_idx;
 } MakoH3Server;
 
 static MakoH3Server mako_h3_servers[MAKO_H3_RT_MAX];
 
-/* Create H3 server config handle with cert/key paths. Returns handle or -1. */
+static inline void mako_h3_mint_token(
+    const uint8_t *dcid, size_t dcid_len,
+    struct sockaddr_storage *addr, socklen_t addr_len,
+    uint8_t *token, size_t *token_len
+) {
+    size_t n = 0;
+    memcpy(token + n, "quiche", 6); n += 6;
+    memcpy(token + n, addr, addr_len); n += addr_len;
+    memcpy(token + n, dcid, dcid_len); n += dcid_len;
+    *token_len = n;
+}
+
+static inline int mako_h3_validate_token(
+    const uint8_t *token, size_t token_len,
+    struct sockaddr_storage *addr, socklen_t addr_len,
+    uint8_t *odcid, size_t *odcid_len
+) {
+    if (token_len < 6 || memcmp(token, "quiche", 6) != 0) return 0;
+    token += 6; token_len -= 6;
+    if (token_len < addr_len || memcmp(token, addr, addr_len) != 0) return 0;
+    token += addr_len; token_len -= addr_len;
+    if (token_len > *odcid_len) return 0;
+    memcpy(odcid, token, token_len);
+    *odcid_len = token_len;
+    return 1;
+}
+
+static inline int mako_h3_gen_cid(uint8_t *cid, size_t len) {
+    int rng = open("/dev/urandom", O_RDONLY);
+    if (rng < 0) return 0;
+    ssize_t n = read(rng, cid, len);
+    close(rng);
+    return n == (ssize_t)len;
+}
+
+static inline void mako_h3_flush_conn(MakoH3Server *s, MakoH3Conn *c) {
+    if (!s || !c || !c->live || !c->conn || s->sock < 0) return;
+    uint8_t out[MAKO_QUIC_MAX_DATAGRAM];
+    while (1) {
+        quiche_send_info si;
+        memset(&si, 0, sizeof(si));
+        ssize_t written = quiche_conn_send(c->conn, out, sizeof(out), &si);
+        if (written == QUICHE_ERR_DONE) break;
+        if (written < 0) break;
+        (void)sendto(
+            s->sock, out, (size_t)written, 0,
+            (struct sockaddr *)&c->peer, c->peer_len
+        );
+    }
+}
+
+static inline int mako_h3_find_conn(MakoH3Server *s, const uint8_t *dcid, size_t dcid_len) {
+    for (int i = 0; i < MAKO_H3_RT_CONNS; i++) {
+        if (!s->conns[i].live) continue;
+        if (s->conns[i].cid_len == dcid_len
+            && memcmp(s->conns[i].cid, dcid, dcid_len) == 0)
+            return i;
+    }
+    return -1;
+}
+
+static inline int mako_h3_alloc_conn(MakoH3Server *s) {
+    for (int i = 0; i < MAKO_H3_RT_CONNS; i++) {
+        if (!s->conns[i].live) return i;
+    }
+    return -1;
+}
+
+static inline void mako_h3_free_conn(MakoH3Conn *c) {
+    if (!c) return;
+    if (c->h3) quiche_h3_conn_free(c->h3);
+    if (c->conn) quiche_conn_free(c->conn);
+    memset(c, 0, sizeof(*c));
+}
+
+static inline int mako_h3_ready_push(MakoH3Server *s) {
+    if (s->ready_count >= MAKO_H3_RT_READY) return -1;
+    int idx = s->ready_tail;
+    s->ready_tail = (s->ready_tail + 1) % MAKO_H3_RT_READY;
+    s->ready_count++;
+    memset(&s->ready[idx], 0, sizeof(s->ready[idx]));
+    s->ready[idx].live = 1;
+    return idx;
+}
+
+static inline int mako_h3_find_ready_stream(MakoH3Server *s, int conn_idx, int64_t sid) {
+    for (int i = 0; i < MAKO_H3_RT_READY; i++) {
+        if (!s->ready[i].live || s->ready[i].taken) continue;
+        if (s->ready[i].conn_idx == conn_idx && s->ready[i].stream_id == sid)
+            return i;
+    }
+    return -1;
+}
+
+static inline int mako_h3_on_req_header(
+    uint8_t *name, size_t name_len, uint8_t *value, size_t value_len, void *argp
+) {
+    MakoH3ReadyReq *r = (MakoH3ReadyReq *)argp;
+    if (!r || !name || !value) return 0;
+    if (name_len == 7 && memcmp(name, ":method", 7) == 0) {
+        size_t n = value_len < sizeof(r->method) - 1 ? value_len : sizeof(r->method) - 1;
+        memcpy(r->method, value, n);
+        r->method[n] = 0;
+    } else if (name_len == 5 && memcmp(name, ":path", 5) == 0) {
+        size_t n = value_len < sizeof(r->path) - 1 ? value_len : sizeof(r->path) - 1;
+        memcpy(r->path, value, n);
+        r->path[n] = 0;
+    } else if (name_len == 10 && memcmp(name, ":authority", 10) == 0) {
+        size_t n = value_len < sizeof(r->authority) - 1 ? value_len : sizeof(r->authority) - 1;
+        memcpy(r->authority, value, n);
+        r->authority[n] = 0;
+    } else if (name_len == 6 && memcmp(name, "cookie", 6) == 0) {
+        size_t n = value_len < sizeof(r->cookie) - 1 ? value_len : sizeof(r->cookie) - 1;
+        memcpy(r->cookie, value, n);
+        r->cookie[n] = 0;
+    } else if (name_len == 11 && memcmp(name, "traceparent", 11) == 0) {
+        size_t n = value_len < sizeof(r->traceparent) - 1 ? value_len : sizeof(r->traceparent) - 1;
+        memcpy(r->traceparent, value, n);
+        r->traceparent[n] = 0;
+    }
+    return 0;
+}
+
+static inline void mako_h3_poll_h3_events(MakoH3Server *s, int conn_idx) {
+    MakoH3Conn *c = &s->conns[conn_idx];
+    if (!c->live || !c->conn || !c->h3) return;
+    while (1) {
+        quiche_h3_event *ev = NULL;
+        int64_t sid = quiche_h3_conn_poll(c->h3, c->conn, &ev);
+        if (sid < 0) break;
+        switch (quiche_h3_event_type(ev)) {
+        case QUICHE_H3_EVENT_HEADERS: {
+            int ri = mako_h3_find_ready_stream(s, conn_idx, sid);
+            if (ri < 0) {
+                ri = mako_h3_ready_push(s);
+                if (ri < 0) break;
+                s->ready[ri].conn_idx = conn_idx;
+                s->ready[ri].stream_id = sid;
+            }
+            quiche_h3_event_for_each_header(ev, mako_h3_on_req_header, &s->ready[ri]);
+            s->ready[ri].headers_done = 1;
+            if (!quiche_h3_event_headers_has_more_frames(ev)) {
+                s->ready[ri].finished = 1;
+            }
+            break;
+        }
+        case QUICHE_H3_EVENT_DATA: {
+            int ri = mako_h3_find_ready_stream(s, conn_idx, sid);
+            if (ri < 0) break;
+            uint8_t tmp[1024];
+            for (;;) {
+                ssize_t n = quiche_h3_recv_body(
+                    c->h3, c->conn, (uint64_t)sid, tmp, sizeof(tmp)
+                );
+                if (n <= 0) break;
+                size_t room = MAKO_H3_BODY_CAP - 1 - s->ready[ri].body_len;
+                size_t take = (size_t)n < room ? (size_t)n : room;
+                if (take) {
+                    memcpy(s->ready[ri].body + s->ready[ri].body_len, tmp, take);
+                    s->ready[ri].body_len += take;
+                    s->ready[ri].body[s->ready[ri].body_len] = 0;
+                }
+            }
+            break;
+        }
+        case QUICHE_H3_EVENT_FINISHED: {
+            int ri = mako_h3_find_ready_stream(s, conn_idx, sid);
+            if (ri >= 0) s->ready[ri].finished = 1;
+            break;
+        }
+        case QUICHE_H3_EVENT_RESET: {
+            int ri = mako_h3_find_ready_stream(s, conn_idx, sid);
+            if (ri >= 0) {
+                s->ready[ri].finished = 1;
+                s->ready[ri].taken = 1;
+                s->ready[ri].live = 0;
+            }
+            break;
+        }
+        default:
+            break;
+        }
+        quiche_h3_event_free(ev);
+    }
+}
+
+static inline void mako_h3_process_one_packet(
+    MakoH3Server *s, uint8_t *buf, size_t n,
+    struct sockaddr_storage *peer, socklen_t peer_len
+) {
+    uint8_t type = 0;
+    uint32_t version = 0;
+    uint8_t scid[QUICHE_MAX_CONN_ID_LEN];
+    size_t scid_len = sizeof(scid);
+    uint8_t dcid[QUICHE_MAX_CONN_ID_LEN];
+    size_t dcid_len = sizeof(dcid);
+    uint8_t token[MAKO_H3_TOKEN_MAX];
+    size_t token_len = sizeof(token);
+    int rc = quiche_header_info(
+        buf, n, MAKO_H3_CID_LEN, &version, &type,
+        scid, &scid_len, dcid, &dcid_len, token, &token_len
+    );
+    if (rc < 0) return;
+
+    int ci = mako_h3_find_conn(s, dcid, dcid_len);
+    uint8_t out[MAKO_QUIC_MAX_DATAGRAM];
+
+    if (ci < 0) {
+        if (!quiche_version_is_supported(version)) {
+            ssize_t written = quiche_negotiate_version(
+                scid, scid_len, dcid, dcid_len, out, sizeof(out)
+            );
+            if (written > 0) {
+                (void)sendto(
+                    s->sock, out, (size_t)written, 0,
+                    (struct sockaddr *)peer, peer_len
+                );
+            }
+            return;
+        }
+        if (token_len == 0) {
+            uint8_t new_cid[MAKO_H3_CID_LEN];
+            if (!mako_h3_gen_cid(new_cid, MAKO_H3_CID_LEN)) return;
+            size_t tlen = sizeof(token);
+            mako_h3_mint_token(dcid, dcid_len, peer, peer_len, token, &tlen);
+            ssize_t written = quiche_retry(
+                scid, scid_len, dcid, dcid_len,
+                new_cid, MAKO_H3_CID_LEN, token, tlen,
+                version, out, sizeof(out)
+            );
+            if (written > 0) {
+                (void)sendto(
+                    s->sock, out, (size_t)written, 0,
+                    (struct sockaddr *)peer, peer_len
+                );
+            }
+            return;
+        }
+        uint8_t odcid[QUICHE_MAX_CONN_ID_LEN];
+        size_t odcid_len = sizeof(odcid);
+        if (!mako_h3_validate_token(token, token_len, peer, peer_len, odcid, &odcid_len))
+            return;
+        ci = mako_h3_alloc_conn(s);
+        if (ci < 0) return;
+        MakoH3Conn *nc = &s->conns[ci];
+        memset(nc, 0, sizeof(*nc));
+        size_t cid_copy = dcid_len < MAKO_H3_CID_LEN ? dcid_len : MAKO_H3_CID_LEN;
+        memcpy(nc->cid, dcid, cid_copy);
+        nc->cid_len = cid_copy;
+        nc->conn = quiche_accept(
+            nc->cid, nc->cid_len, odcid, odcid_len,
+            (struct sockaddr *)&s->local_addr, s->local_len,
+            (struct sockaddr *)peer, peer_len, s->qconfig
+        );
+        if (!nc->conn) return;
+        memcpy(&nc->peer, peer, peer_len);
+        nc->peer_len = peer_len;
+        nc->live = 1;
+    }
+
+    MakoH3Conn *c = &s->conns[ci];
+    quiche_recv_info ri = {
+        (struct sockaddr *)peer, peer_len,
+        (struct sockaddr *)&s->local_addr, s->local_len,
+    };
+    ssize_t done = quiche_conn_recv(c->conn, buf, n, &ri);
+    if (done < 0) return;
+
+    if (quiche_conn_is_established(c->conn)) {
+        if (!c->h3) {
+            c->h3 = quiche_h3_conn_new_with_transport(c->conn, s->h3config);
+        }
+        if (c->h3) mako_h3_poll_h3_events(s, ci);
+    }
+    mako_h3_flush_conn(s, c);
+
+    if (quiche_conn_is_closed(c->conn)) {
+        mako_h3_free_conn(c);
+    }
+}
+
+/* Drain all pending datagrams and drive connections. */
+static inline void mako_h3_server_drive(int64_t handle) {
+    if (handle < 0 || handle >= MAKO_H3_RT_MAX) return;
+    MakoH3Server *s = &mako_h3_servers[handle];
+    if (!s->live || s->sock < 0 || !s->qconfig) return;
+    uint8_t buf[65535];
+    for (int iter = 0; iter < 64; iter++) {
+        struct sockaddr_storage peer;
+        socklen_t peer_len = sizeof(peer);
+        ssize_t n = recvfrom(
+            s->sock, buf, sizeof(buf), 0,
+            (struct sockaddr *)&peer, &peer_len
+        );
+        if (n < 0) break;
+        if (n == 0) continue;
+        mako_h3_process_one_packet(s, buf, (size_t)n, &peer, peer_len);
+    }
+    for (int i = 0; i < MAKO_H3_RT_CONNS; i++) {
+        if (!s->conns[i].live || !s->conns[i].conn) continue;
+        quiche_conn_on_timeout(s->conns[i].conn);
+        if (s->conns[i].h3) mako_h3_poll_h3_events(s, i);
+        mako_h3_flush_conn(s, &s->conns[i]);
+        if (quiche_conn_is_closed(s->conns[i].conn)) {
+            mako_h3_free_conn(&s->conns[i]);
+        }
+    }
+}
+
 static inline int64_t mako_h3_server_new(MakoString cert, MakoString key) {
     if (!cert.data || !key.data || cert.len >= 512 || key.len >= 512) return -1;
     for (int i = 0; i < MAKO_H3_RT_MAX; i++) {
@@ -873,6 +1219,7 @@ static inline int64_t mako_h3_server_new(MakoString cert, MakoString key) {
             memcpy(s->key, key.data, key.len);
             s->key[key.len] = 0;
             s->sock = -1;
+            s->last_req_idx = -1;
             s->live = 1;
             return (int64_t)i;
         }
@@ -880,13 +1227,48 @@ static inline int64_t mako_h3_server_new(MakoString cert, MakoString key) {
     return -1;
 }
 
-/* Bind UDP socket for QUIC. Returns 1 ok, 0 fail. */
 static inline int64_t mako_h3_server_bind(int64_t handle, MakoString host, int64_t port) {
     if (handle < 0 || handle >= MAKO_H3_RT_MAX) return 0;
     MakoH3Server *s = &mako_h3_servers[handle];
     if (!s->live || port <= 0 || port > 65535) return 0;
+    if (s->sock >= 0) return 1;
+
+    s->qconfig = quiche_config_new(QUICHE_PROTOCOL_VERSION);
+    if (!s->qconfig) return 0;
+    if (quiche_config_load_cert_chain_from_pem_file(s->qconfig, s->cert) < 0) {
+        quiche_config_free(s->qconfig); s->qconfig = NULL; return 0;
+    }
+    if (quiche_config_load_priv_key_from_pem_file(s->qconfig, s->key) < 0) {
+        quiche_config_free(s->qconfig); s->qconfig = NULL; return 0;
+    }
+    quiche_config_set_application_protos(
+        s->qconfig,
+        (uint8_t *)QUICHE_H3_APPLICATION_PROTOCOL,
+        sizeof(QUICHE_H3_APPLICATION_PROTOCOL) - 1
+    );
+    quiche_config_set_max_idle_timeout(s->qconfig, 30000);
+    quiche_config_set_max_recv_udp_payload_size(s->qconfig, MAKO_QUIC_MAX_DATAGRAM);
+    quiche_config_set_max_send_udp_payload_size(s->qconfig, MAKO_QUIC_MAX_DATAGRAM);
+    quiche_config_set_initial_max_data(s->qconfig, 10000000);
+    quiche_config_set_initial_max_stream_data_bidi_local(s->qconfig, 1000000);
+    quiche_config_set_initial_max_stream_data_bidi_remote(s->qconfig, 1000000);
+    quiche_config_set_initial_max_stream_data_uni(s->qconfig, 1000000);
+    quiche_config_set_initial_max_streams_bidi(s->qconfig, 100);
+    quiche_config_set_initial_max_streams_uni(s->qconfig, 100);
+    quiche_config_set_disable_active_migration(s->qconfig, true);
+    quiche_config_verify_peer(s->qconfig, false);
+
+    s->h3config = quiche_h3_config_new();
+    if (!s->h3config) {
+        quiche_config_free(s->qconfig); s->qconfig = NULL; return 0;
+    }
+
     int fd = socket(AF_INET, SOCK_DGRAM, 0);
-    if (fd < 0) return 0;
+    if (fd < 0) {
+        quiche_h3_config_free(s->h3config); s->h3config = NULL;
+        quiche_config_free(s->qconfig); s->qconfig = NULL;
+        return 0;
+    }
     int yes = 1;
     setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes));
 #if defined(SO_REUSEPORT)
@@ -898,31 +1280,47 @@ static inline int64_t mako_h3_server_bind(int64_t handle, MakoString host, int64
     addr.sin_port = htons((uint16_t)port);
     if (host.data && host.len && !(host.len == 1 && host.data[0] == '*')) {
         char hbuf[256];
-        if (host.len >= sizeof(hbuf)) { close(fd); return 0; }
+        if (host.len >= sizeof(hbuf)) {
+            close(fd);
+            quiche_h3_config_free(s->h3config); s->h3config = NULL;
+            quiche_config_free(s->qconfig); s->qconfig = NULL;
+            return 0;
+        }
         memcpy(hbuf, host.data, host.len);
         hbuf[host.len] = 0;
-        if (inet_pton(AF_INET, hbuf, &addr.sin_addr) != 1) { close(fd); return 0; }
+        if (inet_pton(AF_INET, hbuf, &addr.sin_addr) != 1) {
+            close(fd);
+            quiche_h3_config_free(s->h3config); s->h3config = NULL;
+            quiche_config_free(s->qconfig); s->qconfig = NULL;
+            return 0;
+        }
     } else {
         addr.sin_addr.s_addr = htonl(INADDR_ANY);
     }
     if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) != 0) {
         close(fd);
+        quiche_h3_config_free(s->h3config); s->h3config = NULL;
+        quiche_config_free(s->qconfig); s->qconfig = NULL;
         return 0;
     }
     fcntl(fd, F_SETFL, O_NONBLOCK);
     s->sock = fd;
     s->port = (int)port;
+    s->local_len = sizeof(s->local_addr);
+    if (getsockname(fd, (struct sockaddr *)&s->local_addr, &s->local_len) != 0) {
+        memcpy(&s->local_addr, &addr, sizeof(addr));
+        s->local_len = sizeof(addr);
+    }
     return 1;
 }
 
-/* Underlying UDP fd for event-loop registration. */
 static inline int64_t mako_h3_server_fd(int64_t handle) {
     if (handle < 0 || handle >= MAKO_H3_RT_MAX) return -1;
     if (!mako_h3_servers[handle].live) return -1;
     return (int64_t)mako_h3_servers[handle].sock;
 }
 
-/* Poll UDP for readability. Returns 1 if datagram ready, 0 timeout, -1 error. */
+/* Poll + drive. Returns 1 if ready requests exist, 0 idle/timeout, -1 error. */
 static inline int64_t mako_h3_server_poll(int64_t handle, int64_t timeout_ms) {
     if (handle < 0 || handle >= MAKO_H3_RT_MAX) return -1;
     MakoH3Server *s = &mako_h3_servers[handle];
@@ -932,63 +1330,188 @@ static inline int64_t mako_h3_server_poll(int64_t handle, int64_t timeout_ms) {
     pfd.events = POLLIN;
     int pr = poll(&pfd, 1, (int)timeout_ms);
     if (pr < 0) return -1;
-    if (pr == 0) return 0;
-    return (pfd.revents & POLLIN) ? 1 : 0;
+    if (pr > 0 && (pfd.revents & POLLIN)) {
+        mako_h3_server_drive(handle);
+    } else {
+        /* Still run timeouts even on idle poll. */
+        mako_h3_server_drive(handle);
+    }
+    return s->ready_count > 0 ? 1 : (pr == 0 ? 0 : 1);
 }
 
-/* Accept next ready stream id from last poll processing, or -1.
- * (Full QUIC accept is driven by external quiche-server for now; this surface
- * records synthetic stream ids when datagrams arrive for event-loop wiring.) */
+/* Next finished request stream id, or -1. */
 static inline int64_t mako_h3_accept_stream(int64_t handle) {
     if (handle < 0 || handle >= MAKO_H3_RT_MAX) return -1;
     MakoH3Server *s = &mako_h3_servers[handle];
     if (!s->live || s->sock < 0) return -1;
-    if (s->ready_n > 0) {
-        return s->ready_streams[--s->ready_n];
+    mako_h3_server_drive(handle);
+    for (int n = 0; n < MAKO_H3_RT_READY; n++) {
+        int idx = (s->ready_head + n) % MAKO_H3_RT_READY;
+        MakoH3ReadyReq *r = &s->ready[idx];
+        if (!r->live || r->taken) continue;
+        if (r->headers_done == 0) continue;
+        /* Accept once headers are in; body may still be partial for POST. */
+        r->taken = 1;
+        s->last_req_idx = idx;
+        if (s->ready_count > 0) s->ready_count--;
+        s->ready_head = (idx + 1) % MAKO_H3_RT_READY;
+        return r->stream_id;
     }
-    /* Try nonblocking recv — presence of a datagram yields a stream marker. */
-    uint8_t buf[MAKO_QUIC_MAX_DATAGRAM];
-    struct sockaddr_storage peer;
-    socklen_t plen = sizeof(peer);
-    ssize_t n = recvfrom(s->sock, buf, sizeof(buf), 0, (struct sockaddr *)&peer, &plen);
-    if (n <= 0) return -1;
-    s->last_stream += 4; /* client-initiated bidi stream ids are 0,4,8,... */
-    if (s->last_stream < 0) s->last_stream = 0;
-    /* Stash first bytes as opaque body for smoke tests */
-    size_t bl = (size_t)n < MAKO_H3_BODY_CAP ? (size_t)n : MAKO_H3_BODY_CAP - 1;
-    memcpy(s->last_body, buf, bl);
-    s->last_body_len = bl;
-    return s->last_stream;
+    return -1;
 }
 
+/* Pseudo-HTTP/1.1 request for the last accepted stream. */
 static inline MakoString mako_h3_stream_read(int64_t handle, int64_t stream_id) {
     if (handle < 0 || handle >= MAKO_H3_RT_MAX) return mako_str_from_cstr("");
     MakoH3Server *s = &mako_h3_servers[handle];
     if (!s->live) return mako_str_from_cstr("");
-    (void)stream_id;
-    if (s->last_body_len == 0) return mako_str_from_cstr("");
-    char *d = (char *)malloc(s->last_body_len + 1);
+    int idx = s->last_req_idx;
+    if (idx < 0 || idx >= MAKO_H3_RT_READY) return mako_str_from_cstr("");
+    MakoH3ReadyReq *r = &s->ready[idx];
+    if (!r->live || r->stream_id != stream_id) {
+        /* Fall back to search. */
+        idx = -1;
+        for (int i = 0; i < MAKO_H3_RT_READY; i++) {
+            if (s->ready[i].live && s->ready[i].stream_id == stream_id) {
+                idx = i;
+                r = &s->ready[i];
+                break;
+            }
+        }
+        if (idx < 0) return mako_str_from_cstr("");
+    }
+    char buf[MAKO_H3_REQ_CAP];
+    const char *method = r->method[0] ? r->method : "GET";
+    const char *path = r->path[0] ? r->path : "/";
+    const char *auth = r->authority[0] ? r->authority : "localhost";
+    int n = snprintf(
+        buf, sizeof(buf),
+        "%s %s HTTP/1.1\r\nHost: %s\r\n",
+        method, path, auth
+    );
+    if (n < 0 || n >= (int)sizeof(buf)) return mako_str_from_cstr("");
+    if (r->cookie[0]) {
+        int m = snprintf(buf + n, sizeof(buf) - (size_t)n, "Cookie: %s\r\n", r->cookie);
+        if (m > 0) n += m;
+    }
+    if (r->traceparent[0]) {
+        int m = snprintf(
+            buf + n, sizeof(buf) - (size_t)n, "traceparent: %s\r\n", r->traceparent
+        );
+        if (m > 0) n += m;
+    }
+    if (r->body_len > 0) {
+        int m = snprintf(
+            buf + n, sizeof(buf) - (size_t)n,
+            "Content-Length: %zu\r\n\r\n", r->body_len
+        );
+        if (m > 0) n += m;
+        size_t room = sizeof(buf) - 1 - (size_t)n;
+        size_t take = r->body_len < room ? r->body_len : room;
+        memcpy(buf + n, r->body, take);
+        n += (int)take;
+    } else {
+        int m = snprintf(buf + n, sizeof(buf) - (size_t)n, "\r\n");
+        if (m > 0) n += m;
+    }
+    char *d = (char *)malloc((size_t)n + 1);
     if (!d) return mako_str_from_cstr("");
-    memcpy(d, s->last_body, s->last_body_len);
-    d[s->last_body_len] = 0;
-    return (MakoString){d, s->last_body_len};
+    memcpy(d, buf, (size_t)n);
+    d[n] = 0;
+    return (MakoString){d, (size_t)n};
 }
 
+/* Write response: optional "STATUS\n" prefix, then body. */
 static inline int64_t mako_h3_stream_write(int64_t handle, int64_t stream_id, MakoString data) {
     if (handle < 0 || handle >= MAKO_H3_RT_MAX) return -1;
     MakoH3Server *s = &mako_h3_servers[handle];
     if (!s->live || s->sock < 0) return -1;
-    (void)stream_id;
-    if (!data.data || data.len == 0) return 0;
-    /* Best-effort: without full quiche server state we cannot address a peer.
-     * Return data len to signal the API is wired; real crypto path uses quiche_*. */
-    return (int64_t)data.len;
+
+    int conn_idx = -1;
+    int req_idx = -1;
+    for (int i = 0; i < MAKO_H3_RT_READY; i++) {
+        if (s->ready[i].live && s->ready[i].stream_id == stream_id) {
+            conn_idx = s->ready[i].conn_idx;
+            req_idx = i;
+            break;
+        }
+    }
+    if (conn_idx < 0 || conn_idx >= MAKO_H3_RT_CONNS) return -1;
+    MakoH3Conn *c = &s->conns[conn_idx];
+    if (!c->live || !c->conn || !c->h3) return -1;
+
+    int status = 200;
+    const char *body = data.data ? data.data : "";
+    size_t body_len = data.data ? data.len : 0;
+    if (data.data && data.len >= 2) {
+        /* Parse leading "NNN\n" status line. */
+        if (data.data[0] >= '1' && data.data[0] <= '5'
+            && data.data[1] >= '0' && data.data[1] <= '9') {
+            int st = 0;
+            size_t i = 0;
+            while (i < data.len && data.data[i] >= '0' && data.data[i] <= '9') {
+                st = st * 10 + (data.data[i] - '0');
+                i++;
+            }
+            if (i < data.len && (data.data[i] == '\n' || data.data[i] == '\r') && st >= 100 && st <= 599) {
+                status = st;
+                while (i < data.len && (data.data[i] == '\n' || data.data[i] == '\r')) i++;
+                body = data.data + i;
+                body_len = data.len - i;
+            }
+        }
+    }
+
+    char status_buf[8];
+    snprintf(status_buf, sizeof(status_buf), "%d", status);
+    char cl_buf[32];
+    snprintf(cl_buf, sizeof(cl_buf), "%zu", body_len);
+
+    quiche_h3_header headers[4];
+    size_t nh = 0;
+    headers[nh].name = (const uint8_t *)":status";
+    headers[nh].name_len = 7;
+    headers[nh].value = (const uint8_t *)status_buf;
+    headers[nh].value_len = strlen(status_buf);
+    nh++;
+    headers[nh].name = (const uint8_t *)"server";
+    headers[nh].name_len = 6;
+    headers[nh].value = (const uint8_t *)"leba";
+    headers[nh].value_len = 4;
+    nh++;
+    headers[nh].name = (const uint8_t *)"content-length";
+    headers[nh].name_len = 14;
+    headers[nh].value = (const uint8_t *)cl_buf;
+    headers[nh].value_len = strlen(cl_buf);
+    nh++;
+
+    int fin = body_len == 0 ? 1 : 0;
+    if (quiche_h3_send_response(c->h3, c->conn, (uint64_t)stream_id, headers, nh, fin) < 0)
+        return -1;
+    if (body_len > 0) {
+        ssize_t wr = quiche_h3_send_body(
+            c->h3, c->conn, (uint64_t)stream_id,
+            (uint8_t *)body, body_len, true
+        );
+        if (wr < 0) return -1;
+    }
+    mako_h3_flush_conn(s, c);
+    if (req_idx >= 0) {
+        s->ready[req_idx].live = 0;
+        s->ready[req_idx].taken = 1;
+    }
+    return (int64_t)(body_len > 0 ? body_len : 1);
 }
 
 static inline int64_t mako_h3_server_close(int64_t handle) {
     if (handle < 0 || handle >= MAKO_H3_RT_MAX) return 0;
     MakoH3Server *s = &mako_h3_servers[handle];
     if (!s->live) return 0;
+    for (int i = 0; i < MAKO_H3_RT_CONNS; i++) {
+        if (s->conns[i].live) mako_h3_free_conn(&s->conns[i]);
+    }
+    if (s->h3config) quiche_h3_config_free(s->h3config);
+    if (s->qconfig) quiche_config_free(s->qconfig);
     if (s->sock >= 0) close(s->sock);
     memset(s, 0, sizeof(*s));
     s->sock = -1;
@@ -996,7 +1519,7 @@ static inline int64_t mako_h3_server_close(int64_t handle) {
 }
 
 static inline int64_t mako_h3_server_available(void) {
-    return 1; /* UDP surface available; crypto depth depends on MAKO_HAS_QUICHE */
+    return 1;
 }
 
 #else /* !MAKO_HAS_QUICHE */

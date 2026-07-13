@@ -1478,9 +1478,13 @@ static inline MakoString mako_hpack_static_value(int64_t index) {
     return mako_str_from_cstr(v);
 }
 
-/* Decode a full HPACK header block (indexed + literal-new-name only) into a
- * process-global table. For use after http2_header_block merge. Limits: no
- * Huffman, no name-indexed literals, max MAKO_HPACK_DECODE_MAX fields. */
+/* Decode a full HPACK header block into a process-global table.
+ * Handles: fully indexed fields, literal-with-indexed-name (0x4x / 0x0x / 0x1x),
+ * literal-new-name, Huffman strings, varint lengths, and dynamic-table inserts.
+ *
+ * Name-indexed literals (e.g. name index 4 = :path with wire value "/docs") MUST
+ * use the literal value from the wire — never the static table default for that
+ * index ("/" for 4, "/index.html" for 5). max MAKO_HPACK_DECODE_MAX fields. */
 #define MAKO_HPACK_DECODE_MAX 64
 static char *mako_hpack_dec_names[MAKO_HPACK_DECODE_MAX];
 static size_t mako_hpack_dec_nlen[MAKO_HPACK_DECODE_MAX];
@@ -1560,11 +1564,23 @@ static inline int mako_hpack_read_str(const unsigned char *p, size_t n, size_t *
     return 1;
 }
 
-/* Resolve an HPACK index (§2.3.3) to owned name + optional value copies. */
+/* Resolve an HPACK index (§2.3.3) to owned name + optional value copies.
+ *
+ * When `value` is NULL (name-only lookup for literal-with-indexed-name forms),
+ * the static/dynamic VALUE is intentionally NOT filled. Callers MUST then read
+ * the literal value from the wire via mako_hpack_read_str.
+ *
+ * This is the root cause of the classic "/docs → /" bug: if a decoder fills
+ * the static table default for name index 4 (":path" → "/") instead of the
+ * wire literal ("/docs"), every non-root path collapses to "/". */
 static inline int mako_hpack_index_lookup(size_t idx, MakoString *name, MakoString *value) {
     if (idx >= 1 && idx <= 61) {
         *name = mako_hpack_static_name((int64_t)idx);
-        if (value) *value = mako_hpack_static_value((int64_t)idx);
+        if (value) {
+            *value = mako_hpack_static_value((int64_t)idx);
+            /* Static entries without a fixed value yield empty string, not NULL data. */
+            if (!value->data) *value = mako_str_from_cstr("");
+        }
         return name->data != NULL;
     }
     size_t di = (idx >= 62) ? idx - 62 : (size_t)-1;
@@ -1587,9 +1603,22 @@ static inline int mako_hpack_index_lookup(size_t idx, MakoString *name, MakoStri
     return 0;
 }
 
+/* Name-only index lookup for literal-with-indexed-name representations.
+ * Never fills a static/dynamic default value — the wire supplies it. */
+static inline int mako_hpack_index_lookup_name(size_t idx, MakoString *name) {
+    return mako_hpack_index_lookup(idx, name, NULL);
+}
+
 /* Returns field count, or -1 on malformed block. Handles the full literal
  * representations (indexed name, incremental indexing, never-indexed), varint
- * lengths, and Huffman strings — so real clients (curl, browsers) decode. */
+ * lengths, and Huffman strings — so real clients (curl, browsers) decode.
+ *
+ * Literal-with-indexed-name MUST use wire values:
+ *   0x44 05 /docs  →  :path = /docs   (NOT static index 4's "/")
+ *   0x04 05 /book  →  :path = /book
+ * Fully indexed is the only case that uses the static pair:
+ *   0x84           →  :path = /
+ */
 static inline int64_t mako_hpack_decode_block(MakoString block) {
     mako_hpack_decode_clear();
     if (!block.data) return 0;
@@ -1600,7 +1629,8 @@ static inline int64_t mako_hpack_decode_block(MakoString block) {
         unsigned char b = p[off];
         MakoString nm = {NULL, 0}, vv = {NULL, 0};
         if (b & 0x80) {
-            /* Indexed Header Field */
+            /* Indexed Header Field Representation (RFC 7541 §6.1):
+             * name AND value both come from the table. */
             size_t idx = 0;
             if (!mako_hpack_read_int(p, n, &off, 7, &idx) || idx < 1) goto fail;
             if (!mako_hpack_index_lookup(idx, &nm, &vv)) goto fail;
@@ -1608,11 +1638,15 @@ static inline int64_t mako_hpack_decode_block(MakoString block) {
             free(nm.data); free(vv.data);
             if (!ok) goto fail;
         } else if ((b & 0xc0) == 0x40) {
-            /* Literal with Incremental Indexing — 6-bit name index. */
+            /* Literal Header Field with Incremental Indexing (§6.2.1).
+             * Name may be indexed; VALUE is always a string on the wire. */
             size_t ni = 0;
             if (!mako_hpack_read_int(p, n, &off, 6, &ni)) goto fail;
-            if (ni == 0) { if (!mako_hpack_read_str(p, n, &off, &nm)) goto fail; }
-            else if (!mako_hpack_index_lookup(ni, &nm, NULL)) goto fail;
+            if (ni == 0) {
+                if (!mako_hpack_read_str(p, n, &off, &nm)) goto fail;
+            } else if (!mako_hpack_index_lookup_name(ni, &nm)) {
+                goto fail;
+            }
             if (!mako_hpack_read_str(p, n, &off, &vv)) { free(nm.data); goto fail; }
             int ok = mako_hpack_decode_push(nm, vv);
             mako_hpack_dyn_insert(nm, vv);
@@ -1623,11 +1657,15 @@ static inline int64_t mako_hpack_decode_block(MakoString block) {
             size_t sz = 0;
             if (!mako_hpack_read_int(p, n, &off, 5, &sz)) goto fail;
         } else {
-            /* Literal without Indexing (0x0x) or Never Indexed (0x1x): 4-bit name index. */
+            /* Literal without Indexing (§6.2.2) or Never Indexed (§6.2.3).
+             * Same rule: indexed name only; value always from the wire. */
             size_t ni = 0;
             if (!mako_hpack_read_int(p, n, &off, 4, &ni)) goto fail;
-            if (ni == 0) { if (!mako_hpack_read_str(p, n, &off, &nm)) goto fail; }
-            else if (!mako_hpack_index_lookup(ni, &nm, NULL)) goto fail;
+            if (ni == 0) {
+                if (!mako_hpack_read_str(p, n, &off, &nm)) goto fail;
+            } else if (!mako_hpack_index_lookup_name(ni, &nm)) {
+                goto fail;
+            }
             if (!mako_hpack_read_str(p, n, &off, &vv)) { free(nm.data); goto fail; }
             int ok = mako_hpack_decode_push(nm, vv);
             free(nm.data); free(vv.data);
@@ -2232,6 +2270,10 @@ static inline void mako_http2_conn_reset(void) {
     mako_h2_ping_ack_needed = 0;
     memset(mako_h2_ping_opaque, 0, 8);
     mako_h2_is_server = 0;
+    /* HPACK dynamic table is connection-scoped per RFC 7541 — reset it with
+     * the connection so leftovers cannot poison a later peer's decoder. */
+    mako_hpack_dyn_clear();
+    mako_hpack_decode_clear();
     mako_http2_stream_reset();
 }
 
