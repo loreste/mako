@@ -1690,10 +1690,9 @@ static inline MakoString mako_http2_data_frame(int64_t stream, MakoString payloa
 }
 
 /* Build a complete HTTP/2 response for `stream`: a HEADERS frame carrying
- * `:status` + `content-length`, followed by a DATA frame with the body and
- * END_STREAM. Returns the bytes to write to the connection. Encapsulates the
- * HPACK encode + framing so an accept loop is just: read request → build
- * response → write. */
+ * `:status` + `content-length`, followed by DATA frame(s) with the body and
+ * END_STREAM on the final frame. Splits large bodies across multiple DATA
+ * frames respecting the default SETTINGS_MAX_FRAME_SIZE (16384 bytes). */
 static inline MakoString mako_http2_response(int64_t stream, int64_t status, MakoString body) {
     /* :status — indexed for the common static-table codes, else literal. */
     MakoString sh;
@@ -1721,11 +1720,50 @@ static inline MakoString mako_http2_response(int64_t stream, int64_t status, Mak
     free(clh.data);
     MakoString hf = mako_http2_headers_frame(stream, block, 0x4); /* END_HEADERS */
     free(block.data);
-    MakoString df = mako_http2_data_frame(stream, body, 0x1);     /* END_STREAM */
-    MakoString out = mako_str_concat(hf, df);
+
+    /* Split body into DATA frames of at most 16384 bytes each. */
+    #define MAKO_H2_MAX_FRAME 16384
+    size_t blen = body.data ? body.len : 0;
+    if (blen <= MAKO_H2_MAX_FRAME) {
+        MakoString df = mako_http2_data_frame(stream, body, 0x1); /* END_STREAM */
+        MakoString out = mako_str_concat(hf, df);
+        free(hf.data);
+        free(df.data);
+        return out;
+    }
+    /* Multiple DATA frames needed. */
+    size_t total = hf.len;
+    size_t nframes = (blen + MAKO_H2_MAX_FRAME - 1) / MAKO_H2_MAX_FRAME;
+    /* Pre-calculate total output size: header frame + n*(9-byte frame header) + body */
+    total += nframes * 9 + blen;
+    char *out = (char *)malloc(total + 1);
+    if (!out) { free(hf.data); return (MakoString){NULL, 0}; }
+    memcpy(out, hf.data, hf.len);
+    size_t pos = hf.len;
     free(hf.data);
-    free(df.data);
-    return out;
+    size_t off = 0;
+    while (off < blen) {
+        size_t chunk = blen - off;
+        if (chunk > MAKO_H2_MAX_FRAME) chunk = MAKO_H2_MAX_FRAME;
+        int64_t flags = (off + chunk >= blen) ? 0x1 : 0x0; /* END_STREAM on last */
+        /* Write 9-byte DATA frame header inline */
+        out[pos+0] = (char)((chunk >> 16) & 0xff);
+        out[pos+1] = (char)((chunk >> 8) & 0xff);
+        out[pos+2] = (char)(chunk & 0xff);
+        out[pos+3] = 0; /* type = DATA */
+        out[pos+4] = (char)(flags & 0xff);
+        unsigned int sid = (unsigned int)(stream & 0x7fffffff);
+        out[pos+5] = (char)((sid >> 24) & 0xff);
+        out[pos+6] = (char)((sid >> 16) & 0xff);
+        out[pos+7] = (char)((sid >> 8) & 0xff);
+        out[pos+8] = (char)(sid & 0xff);
+        memcpy(out + pos + 9, body.data + off, chunk);
+        pos += 9 + chunk;
+        off += chunk;
+    }
+    out[pos] = 0;
+    #undef MAKO_H2_MAX_FRAME
+    return (MakoString){out, pos};
 }
 
 /* CONTINUATION (type=9) — header-block fragment. END_HEADERS=0x4. */
