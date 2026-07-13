@@ -172,20 +172,20 @@ Last inventory: 2026-07-11 (**unique Mako surface** · pack/pull · pain map · 
 | `chan_open[Struct]` via MakoChanPtr heap-box | Done |
 | `error_tag(tag, msg)` enum-like string errors | Done |
 
-**Closed (wave 7–37):** join_timeout **flatten** · POD kick + string fields ·
+**Closed (wave 7–38):** join_timeout **flatten** · POD kick + string fields ·
 `reflect_value_of` N + nested POD · `Result`/`Option` deep nests · nested
-None/Err edges · **`?` on Option + string/float Result/Option unwrap** ·
+None/Err edges · **`?` int/string/float/bool/struct + nested Option/Result** ·
 SOF0 header fields · **`jpeg_is_baseline_gray`** · JFIF shell probes ·
 **`jpeg_roundtrip_ok`** · APP layout checks · NLL for/if/match · kick
 Result/Option reject · script/category `\p{…}` · expanded TSan · prior work.
 
-**Wave 37 tests:** `examples/testing/wave37_queue_test.mko` · bads
-`option_try_in_result`, `result_try_in_option`.
+**Wave 38 tests:** `examples/testing/wave38_queue_test.mko` · bad
+`try_struct_use_after_err`.
 
 **Pain residuals (language) still open:** see [PAIN_POINTS.md](PAIN_POINTS.md) §4.
 
 1. Fuller data-race model beyond expanded TSan smoke (no full type-level race system)  
-2. More Result/Option shapes (remaining edge cases; `?` int/string/float wired)  
+2. More Result/Option shapes (remaining edge cases; `?` struct/nested wired)  
 3. Stronger NLL (rarer multi-label CFG products)  
 
 **Stdlib / product residuals:**

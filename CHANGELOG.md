@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.0 — 2026-07-13 (wave 38 queue)
+
+- `?` unwrap for **struct**, nested **Option**, nested **Result** payloads
+- Chained `?`, bool Result `?`; let-binding kind propagation after `?`
+- Bad: `try_struct_use_after_err` (Result `?` outside Result fn)
+- TSan wave37
+- Tests: `examples/testing/wave38_queue_test.mko`
+
 ## 0.1.0 — 2026-07-13 (wave 37 queue)
 
 - Fix `?` codegen: Option early-return None; string/float Ok/Some unwrap

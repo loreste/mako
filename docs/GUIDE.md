@@ -728,11 +728,12 @@ fn option_or(o: Option[int], fallback: int) -> int {
 
 | In a function returning… | `expr?` when `expr` is… | On empty | On success |
 |--------------------------|-------------------------|----------|------------|
-| `Result[T, E]` | `Result[T, E]` | `return` that `Err` | `T` (int / string / float) |
-| `Option[T]` | `Option[T]` | `return None` | `T` (int / string / float) |
+| `Result[T, E]` | `Result[T, E]` | `return` that `Err` | `T` (int / bool / string / float / **struct** / nested Option·Result) |
+| `Option[T]` | `Option[T]` | `return None` | `T` (same payload set) |
 
 Mismatched carriers are rejected (`Option` `?` inside a `Result` function, and the reverse).
-Tests: `examples/testing/wave37_queue_test.mko`.
+Chained `?` works (`let a = f()?; let b = g()?`).
+Tests: `examples/testing/wave37_queue_test.mko`, `wave38_queue_test.mko`.
 
 ```mko
 // examples/wrap_err.mko · examples/errors_wrap.mko — wrap / is

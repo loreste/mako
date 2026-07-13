@@ -1,0 +1,15 @@
+// EXPECT: `?` only allowed in functions returning Result
+// Result[Struct] `?` still requires a Result-returning function.
+struct Pt {
+    x: int
+    y: int
+}
+
+fn get() -> Result[Pt, string] {
+    return Ok(Pt { x: 1, y: 2 })
+}
+
+fn main() {
+    let p = get()?
+    print(p.x)
+}

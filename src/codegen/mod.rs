@@ -2466,6 +2466,31 @@ impl Codegen {
                             }
                         }
                     }
+                    // `let r = nested_result_fn()?` — unwrapped inner Result keeps Ok kind
+                    if let Expr::Try(inner) = init {
+                        match inner.as_ref() {
+                            Expr::Call { callee, args } => {
+                                if let Expr::Ident(fname) = callee.as_ref() {
+                                    if let Some(rik) = self.call_result_result_inner(fname, args) {
+                                        self.result_ok_kinds.insert(name.clone(), rik);
+                                    }
+                                    if let Some(ok) = self.call_option_result_inner(fname, args) {
+                                        // Option[Result[T]]? → Result with Ok kind T
+                                        self.result_ok_kinds.insert(name.clone(), ok);
+                                    }
+                                }
+                            }
+                            Expr::Ident(n) => {
+                                if let Some(rik) = self.result_result_inners.get(n).cloned() {
+                                    self.result_ok_kinds.insert(name.clone(), rik);
+                                }
+                                if let Some(ok) = self.option_result_inners.get(n).cloned() {
+                                    self.result_ok_kinds.insert(name.clone(), ok);
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
                 }
                 if ty == "MakoOptionInt" {
                     if let Expr::Call { callee, args } = init {
@@ -2488,6 +2513,59 @@ impl Codegen {
                             if let Some(ch) = self.call_deep_nest_chain(fname, args) {
                                 self.deep_nest_chains.insert(name.clone(), ch);
                             }
+                        }
+                    }
+                    // `let o = result_of_option_fn()?` — unwrapped Option keeps Some kind
+                    if let Expr::Try(inner) = init {
+                        match inner.as_ref() {
+                            Expr::Call { callee, args } => {
+                                if let Expr::Ident(fname) = callee.as_ref() {
+                                    if let Some(ik) = self.call_result_option_inner(fname, args) {
+                                        self.option_some_kinds.insert(name.clone(), ik);
+                                    }
+                                    if let Some(ch) = self.call_result_option_chain(fname, args) {
+                                        self.option_chains.insert(name.clone(), ch);
+                                    }
+                                    // Option[Option[T]]?
+                                    if self.call_option_some_kind(fname, args).as_deref()
+                                        == Some("option")
+                                    {
+                                        if let Some(ch) = self.call_option_chain(fname, args) {
+                                            if let Some((first, rest)) = ch.split_first() {
+                                                self.option_some_kinds
+                                                    .insert(name.clone(), first.clone());
+                                                if !rest.is_empty() {
+                                                    self.option_chains
+                                                        .insert(name.clone(), rest.to_vec());
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            Expr::Ident(n) => {
+                                if let Some(ik) = self.result_option_inners.get(n).cloned() {
+                                    self.option_some_kinds.insert(name.clone(), ik);
+                                }
+                                if let Some(ch) = self.result_option_chains.get(n).cloned() {
+                                    self.option_chains.insert(name.clone(), ch);
+                                }
+                                if self.option_some_kinds.get(n).map(|s| s.as_str())
+                                    == Some("option")
+                                {
+                                    if let Some(ch) = self.option_chains.get(n).cloned() {
+                                        if let Some((first, rest)) = ch.split_first() {
+                                            self.option_some_kinds
+                                                .insert(name.clone(), first.clone());
+                                            if !rest.is_empty() {
+                                                self.option_chains
+                                                    .insert(name.clone(), rest.to_vec());
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            _ => {}
                         }
                     }
                 }
@@ -12580,7 +12658,8 @@ impl Codegen {
                 ("MakoIntArray".into(), tmp)
             }
             Expr::Try(inner) => {
-                // `?` early-returns None/Err; unwrap Ok/Some payload by kind.
+                // `?` early-returns None/Err; unwrap Ok/Some payload by kind
+                // (int/string/float/struct/nested Option/Result).
                 let (ty, v) = self.emit_expr(inner);
                 let tmp = self.fresh("try");
                 let is_option = ty == "MakoOptionInt"
@@ -12593,8 +12672,26 @@ impl Codegen {
                         inner.as_ref(),
                         Expr::Call { callee, args }
                             if matches!(callee.as_ref(), Expr::Ident(fname)
-                                if self.call_option_some_kind(fname, args).is_some())
+                                if self.call_option_some_kind(fname, args).is_some()
+                                    && self.call_result_ok_kind(fname, args).is_none())
                     );
+                // Prefer Result metadata when both could apply (Result fns always set ok kind).
+                let is_option = if matches!(
+                    inner.as_ref(),
+                    Expr::Call { callee, args }
+                        if matches!(callee.as_ref(), Expr::Ident(fname)
+                            if self.call_result_ok_kind(fname, args).is_some())
+                ) {
+                    false
+                } else if matches!(
+                    inner.as_ref(),
+                    Expr::Ident(n)
+                        if self.locals.get(n).map(|t| t.as_str()) == Some("MakoResultInt")
+                ) {
+                    false
+                } else {
+                    is_option
+                };
                 let kind = if is_option {
                     match inner.as_ref() {
                         Expr::Ident(n) => self
@@ -12630,12 +12727,80 @@ impl Codegen {
                         _ => "int".into(),
                     }
                 };
+                let struct_name = if kind == "struct" {
+                    match inner.as_ref() {
+                        Expr::Ident(n) => {
+                            if is_option {
+                                self.option_some_structs.get(n).cloned()
+                            } else {
+                                self.result_ok_structs.get(n).cloned()
+                            }
+                        }
+                        Expr::Call { callee, args } => {
+                            if let Expr::Ident(fname) = callee.as_ref() {
+                                if is_option {
+                                    self.call_option_some_struct(fname, args)
+                                } else {
+                                    self.call_result_ok_struct(fname, args)
+                                }
+                            } else {
+                                None
+                            }
+                        }
+                        _ => None,
+                    }
+                } else {
+                    None
+                };
                 if is_option {
                     self.line(&format!("MakoOptionInt {tmp} = {v};"));
                     self.line(&format!("if (!{tmp}.some) return {tmp};"));
                     match kind.as_str() {
                         "string" => ("MakoString".into(), format!("{tmp}.ok_s")),
                         "float" => ("double".into(), format!("{tmp}.ok_f")),
+                        "struct" => {
+                            let sn = struct_name.unwrap_or_else(|| "int64_t".into());
+                            let cname = self
+                                .structs
+                                .get(&sn)
+                                .map(|s| s.c_name.clone())
+                                .unwrap_or(sn);
+                            let out = self.fresh("tryv");
+                            let p = self.fresh("tryp");
+                            self.line(&format!(
+                                "{cname} *{p} = ({cname}*)mako_option_some_ptr({tmp});"
+                            ));
+                            self.line(&format!("{cname} {out};"));
+                            self.line(&format!(
+                                "if ({p}) {{ {out} = *{p}; free({p}); }} else {{ memset(&{out}, 0, sizeof({out})); }}"
+                            ));
+                            (cname, out)
+                        }
+                        "option" => {
+                            // Option[Option[T]]: unbox nested Option from pointer slot
+                            let out = self.fresh("tryo");
+                            let p = self.fresh("tryp");
+                            self.line(&format!(
+                                "MakoOptionInt *{p} = (MakoOptionInt*)mako_option_some_ptr({tmp});"
+                            ));
+                            self.line(&format!("MakoOptionInt {out};"));
+                            self.line(&format!(
+                                "if ({p}) {{ {out} = *{p}; free({p}); }} else {{ memset(&{out}, 0, sizeof({out})); }}"
+                            ));
+                            ("MakoOptionInt".into(), out)
+                        }
+                        "result" => {
+                            let out = self.fresh("tryr");
+                            let p = self.fresh("tryp");
+                            self.line(&format!(
+                                "MakoResultInt *{p} = (MakoResultInt*)mako_option_some_ptr({tmp});"
+                            ));
+                            self.line(&format!("MakoResultInt {out};"));
+                            self.line(&format!(
+                                "if ({p}) {{ {out} = *{p}; free({p}); }} else {{ memset(&{out}, 0, sizeof({out})); }}"
+                            ));
+                            ("MakoResultInt".into(), out)
+                        }
                         _ => ("int64_t".into(), format!("{tmp}.value")),
                     }
                 } else {
@@ -12644,6 +12809,48 @@ impl Codegen {
                     match kind.as_str() {
                         "string" => ("MakoString".into(), format!("{tmp}.ok_s")),
                         "float" => ("double".into(), format!("{tmp}.ok_f")),
+                        "struct" => {
+                            let sn = struct_name.unwrap_or_else(|| "int64_t".into());
+                            let cname = self
+                                .structs
+                                .get(&sn)
+                                .map(|s| s.c_name.clone())
+                                .unwrap_or(sn);
+                            let out = self.fresh("tryv");
+                            let p = self.fresh("tryp");
+                            self.line(&format!(
+                                "{cname} *{p} = ({cname}*)mako_result_ok_ptr({tmp});"
+                            ));
+                            self.line(&format!("{cname} {out};"));
+                            self.line(&format!(
+                                "if ({p}) {{ {out} = *{p}; free({p}); }} else {{ memset(&{out}, 0, sizeof({out})); }}"
+                            ));
+                            (cname, out)
+                        }
+                        "option" => {
+                            let out = self.fresh("tryo");
+                            let p = self.fresh("tryp");
+                            self.line(&format!(
+                                "MakoOptionInt *{p} = (MakoOptionInt*)mako_result_ok_ptr({tmp});"
+                            ));
+                            self.line(&format!("MakoOptionInt {out};"));
+                            self.line(&format!(
+                                "if ({p}) {{ {out} = *{p}; free({p}); }} else {{ memset(&{out}, 0, sizeof({out})); }}"
+                            ));
+                            ("MakoOptionInt".into(), out)
+                        }
+                        "result" => {
+                            let out = self.fresh("tryr");
+                            let p = self.fresh("tryp");
+                            self.line(&format!(
+                                "MakoResultInt *{p} = (MakoResultInt*)mako_result_ok_ptr({tmp});"
+                            ));
+                            self.line(&format!("MakoResultInt {out};"));
+                            self.line(&format!(
+                                "if ({p}) {{ {out} = *{p}; free({p}); }} else {{ memset(&{out}, 0, sizeof({out})); }}"
+                            ));
+                            ("MakoResultInt".into(), out)
+                        }
                         _ => ("int64_t".into(), format!("{tmp}.value")),
                     }
                 }

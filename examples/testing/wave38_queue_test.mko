@@ -1,0 +1,143 @@
+// Wave 38: `?` on struct, Result[Option], nested Result, bool, chained.
+
+struct Pt {
+    x: int
+    y: int
+}
+
+fn res_pt() -> Result[Pt, string] {
+    return Ok(Pt { x: 1, y: 2 })
+}
+
+fn use_res_pt() -> Result[int, string] {
+    let p = res_pt()?
+    return Ok(p.x + p.y)
+}
+
+fn opt_pt() -> Option[Pt] {
+    return Some(Pt { x: 3, y: 4 })
+}
+
+fn use_opt_pt() -> Option[int] {
+    let p = opt_pt()?
+    return Some(p.x + p.y)
+}
+
+fn res_opt() -> Result[Option[int], string] {
+    return Ok(Some(5))
+}
+
+fn res_opt_none() -> Result[Option[int], string] {
+    return Ok(None)
+}
+
+fn use_res_opt() -> Result[int, string] {
+    let o = res_opt()?
+    match o {
+        Some(n) => {
+            return Ok(n + 1)
+        },
+        None => {
+            return Err("none")
+        },
+    }
+    return Err("fall")
+}
+
+fn use_res_opt_none() -> Result[int, string] {
+    let o = res_opt_none()?
+    match o {
+        Some(n) => {
+            return Ok(n)
+        },
+        None => {
+            return Err("none")
+        },
+    }
+    return Err("fall")
+}
+
+fn res_res() -> Result[Result[int, string], string] {
+    return Ok(Ok(9))
+}
+
+fn use_res_res() -> Result[int, string] {
+    let r = res_res()?
+    match r {
+        Ok(n) => {
+            return Ok(n + 1)
+        },
+        Err(m) => {
+            return Err(m)
+        },
+    }
+    return Err("fall")
+}
+
+fn res_bool() -> Result[bool, string] {
+    return Ok(true)
+}
+
+fn use_res_bool() -> Result[bool, string] {
+    let b = res_bool()?
+    return Ok(b)
+}
+
+fn a() -> Result[int, string] {
+    return Ok(2)
+}
+
+fn chained() -> Result[int, string] {
+    let x = a()?
+    let y = a()?
+    return Ok(x + y)
+}
+
+fn TestResPt() {
+    match use_res_pt() {
+        Ok(n) => assert_eq(n, 3),
+        Err(_) => assert(false),
+    }
+}
+
+fn TestOptPt() {
+    match use_opt_pt() {
+        Some(n) => assert_eq(n, 7),
+        None => assert(false),
+    }
+}
+
+fn TestResOpt() {
+    match use_res_opt() {
+        Ok(n) => assert_eq(n, 6),
+        Err(_) => assert(false),
+    }
+}
+
+fn TestResOptNone() {
+    match use_res_opt_none() {
+        Ok(_) => assert(false),
+        Err(m) => assert_eq_str(m, "none"),
+    }
+}
+
+fn TestResRes() {
+    match use_res_res() {
+        Ok(n) => assert_eq(n, 10),
+        Err(_) => assert(false),
+    }
+}
+
+fn TestResBool() {
+    match use_res_bool() {
+        Ok(b) => assert(b),
+        Err(_) => assert(false),
+    }
+}
+
+fn TestChained() {
+    match chained() {
+        Ok(n) => assert_eq(n, 4),
+        Err(_) => assert(false),
+    }
+}
