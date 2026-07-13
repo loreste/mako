@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.0 — 2026-07-13 (wave 24 queue)
+
+- General deep nest chains for alternating Result/Option layers
+- 5-layer `Result[Option[Result[Option[Result[T]]]]]` string/int match
+- Bad: `kick_option_non_send`; Balinese/Javanese/Sundanese scripts
+- TSan CI: wave23, `kick_share_test`
+- Tests: `examples/testing/wave24_queue_test.mko`
+
 ## 0.1.0 — 2026-07-13 (wave 23 queue)
 
 - Deeper mixed nests: `Option[Result[Option[T]]]`, `Result[Option[Result[Option[T]]]]`

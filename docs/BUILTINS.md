@@ -2221,10 +2221,9 @@ Tests: `examples/testing/overflow_shutdown_test.mko`. Multi-error recovery:
 `Some(x)` / `None` and match `Some(v)` work for int/string/float, boxed containers,
 and multi-layer Option nests via kind chains. Nested `Ok(Ok(x))` /
 `Result[Result[T, E], E2]` is supported (typecheck pushes expected Result for
-inner Ok/Err; codegen boxes the inner Result). Mixed nests
-`Option[Result[T]]`, `Result[Option[Result[T]]]`, and
-`Option[Result[Option[T]]]` / `Result[Option[Result[Option[T]]]]` work via
-expected-type context plus leaf-kind chains for unboxing.
+inner Ok/Err; codegen boxes the inner Result). Mixed nests work via expected-type context plus **general successive nest-kind
+chains** for alternating Result/Option layers (including 5-layer
+`Result[Option[Result[Option[Result[T]]]]]`).
 
 | Err type `E` | Encoding |
 |--------------|----------|
@@ -2271,7 +2270,8 @@ Tests: `result_enum_test.mko`, `job_join_typed_test.mko` (Result across kick/joi
 `wave20_queue_test.mko` (triple Option nest string/int, Option struct),
 `wave21_queue_test.mko` (`Result[Result[T]]`, `wrap_ok(Ok(...))`),
 `wave22_queue_test.mko` (`Option[Result[T]]`, `Result[Option[Result[T]]]`),
-`wave23_queue_test.mko` (`Option[Result[Option[T]]]` deep mixed nests).
+`wave23_queue_test.mko` (`Option[Result[Option[T]]]` deep mixed nests),
+`wave24_queue_test.mko` (5-layer alternating Result/Option).
 
 ---
 

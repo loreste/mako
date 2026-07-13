@@ -34,12 +34,13 @@ Guided tour: [The Mako Book §11](book/src/ch11-speed-safety.md) · Speed bar: [
 (including float), **POD structs** (int/float/bool/**string** fields; heap-boxed,
 strings cloned), `string` (heap-cloned), channels, `ShareInt` / `AtomicInt`
 (RC clone), and locked handles (`CMap` / `Mutex` / `RWMutex`).  
-Rejected: arrays, maps, non-POD structs, `Result`, `Arena`, nested `Crew`
-(`examples/bad/kick_non_pod.mko`, `kick_array_arg.mko`, `kick_result_non_send.mko`).  
+Rejected: arrays, maps, non-POD structs, `Result`, `Option`, `Arena`, nested `Crew`
+(`examples/bad/kick_non_pod.mko`, `kick_array_arg.mko`, `kick_result_non_send.mko`,
+`kick_option_non_send.mko`).  
 Race detection: `mako test --race` (CI TSan job: crew/kick/share, chan, proxy pool/edge,
-`kick_sync_test`, wave11/14–22 queue tests, `share_atomic_test`, `chan_*_test`,
-`fan_string_test`, `kick_string_test`). Prefer channels over shared mutable state;
-full type-level race freedom remains residual.
+`kick_sync_test`, `kick_share_test`, wave11/14–23 queue tests, `share_atomic_test`,
+`chan_*_test`, `fan_string_test`, `kick_string_test`). Prefer channels over shared
+mutable state; full type-level race freedom remains residual.
 
 SMTP TLS: `smtp_send_starttls` uses `SSL_connect`. Set **`MAKO_SMTP_TLS_VERIFY=1`**
 to enable peer certificate verification (`SSL_VERIFY_PEER`); default is off for
