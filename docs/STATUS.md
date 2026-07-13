@@ -123,6 +123,7 @@ Last inventory: 2026-07-11 (**unique Mako surface** · pack/pull · pain map · 
 | Speed audit: release no longer forces bounds-always; empty str singleton; map 75% load | Done — see PERFORMANCE.md |
 | Map set_take (no string-key clone) + HTTP zero-copy views into raw | Done — `map_take_http_test.mko` |
 | Header/Content-Type interning + `respond_json` static CT | Done — runtime `mako_http_intern_*` |
+| HTTP/2 DATA auto-split (≤16384) + proxy/map free safety | Done — `http2_data_frame` split; `http2_prod_test` |
 | `chan_str_send_take` / `try_send_take` (no string clone) | Done — `chan_string_test.mko` |
 | Proxy splice polish (256 KiB + sendfile file→socket) | Done — `mako_proxy.h` `tcp_fd_copy` |
 | Proxy edge cases (headers, chunked, 204/304, pool release latency) | Done — `examples/testing/proxy_edge_test.mko`; docs in BUILTINS *Reverse-proxy notes* |

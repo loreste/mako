@@ -1447,7 +1447,7 @@ server accept + client connect on the same thread deadlocks).
 |----------|-----------|-------------|
 | `http2_detect` | `http2_detect(data: string) -> bool` | Detect HTTP/2 preface |
 | `http2_headers_frame` | `http2_headers_frame(stream: int, block: string, flags: int) -> string` | Build a HEADERS frame |
-| `http2_data_frame` | `http2_data_frame(stream: int, payload: string, flags: int) -> string` | Build a DATA frame |
+| `http2_data_frame` | `http2_data_frame(stream: int, payload: string, flags: int) -> string` | Build DATA frame(s); auto-splits if payload > max frame (default 16384); `END_STREAM` only on last |
 | `http2_continuation_frame` | `http2_continuation_frame(stream: int, block: string, flags: int) -> string` | Build a CONTINUATION frame |
 | `http2_goaway_frame` | `http2_goaway_frame(last_stream: int, error_code: int) -> string` | Build a GOAWAY frame |
 | `http2_ping_frame` | `http2_ping_frame(data: string, ack: int) -> string` | Build a PING frame |
@@ -1560,7 +1560,7 @@ Inbound DATA spends **recv** windows. Peer `WINDOW_UPDATE` raises **send**.
 | `http2_stream_body` | `http2_stream_body(stream: int) -> string` | Accumulated DATA body for stream |
 | `http2_stream_body_len` | `http2_stream_body_len(stream: int) -> int` | Body byte count (`-1` if unknown stream) |
 | `http2_stream_body_done` | `http2_stream_body_done(stream: int) -> int` | `1` if END_STREAM seen on DATA |
-| `http2_response` | `http2_response(stream, status, body) -> string` | HEADERS `:status` + `content-length` + DATA |
+| `http2_response` | `http2_response(stream, status, body) -> string` | HEADERS `:status` + `content-length` + DATA frame(s) (auto-split) |
 | `http2_response_ct` | `http2_response_ct(stream, status, content_type, body) -> string` | Same + `content-type` |
 
 Up to **64 concurrent stream slots** per connection (64 KiB body buffer each,

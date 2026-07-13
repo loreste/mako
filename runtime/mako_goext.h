@@ -1519,7 +1519,7 @@ static inline void mako_maps_clear_si(MakoMapSI *m) {
     if (!m) return;
     for (size_t i = 0; i < m->cap; i++) {
         if (m->state[i] == MAKO_MAP_FULL) {
-            free(m->keys[i].data);
+            mako_str_free(m->keys[i]); /* empty singleton / owned keys */
             m->keys[i].data = NULL;
             m->keys[i].len = 0;
         }
@@ -3061,8 +3061,8 @@ static inline int64_t mako_zip_write_to(MakoZipWriter *z, MakoString zip_path) {
 static inline void mako_zip_close(MakoZipWriter *z) {
     if (!z) return;
     for (int i = 0; i < z->n; i++) {
-        free(z->names[i].data);
-        free(z->datas[i].data);
+        mako_str_free(z->names[i]);
+        mako_str_free(z->datas[i]);
     }
     free(z);
 }

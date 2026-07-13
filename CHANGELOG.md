@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.1.0 — 2026-07-13 (H2 frame split + free safety follow-through)
+
+### Fixes
+
+- **`http2_data_frame` auto-split** — payloads larger than SETTINGS max frame
+  (default 16384) become multiple DATA frames; `END_STREAM` only on the last.
+  Covers raw builders and gRPC helpers that call `http2_data_frame`.
+- **`http2_response*`** — use the same DATA path (no duplicate split logic).
+- **Proxy forward result** — `mako_str_free` for headers/body after empty-string
+  singleton init (avoids `free(): invalid pointer`).
+- **Map/zip free** — `maps_clear_si` and zip close use `mako_str_free`.
+- Tests: `TestHttp2DataFrameSplit`, `TestHttp2ResponseLargeBodySplit`.
+
 ## 0.1.0 — 2026-07-13 (HTTP/2 DATA frame size — mako-lang.com)
 
 ### Fixes

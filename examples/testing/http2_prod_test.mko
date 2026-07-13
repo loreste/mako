@@ -117,3 +117,51 @@ fn TestHttp2LargeBodyCap() {
     assert_eq(http2_stream_body_done(1), 1)
     let _ = http2_conn_reset()
 }
+
+fn TestHttp2DataFrameSplit() {
+    // Bodies larger than SETTINGS_MAX_FRAME_SIZE (16384) must split into multiple
+    // DATA frames — single oversized frames cause ERR_HTTP2_FRAME_SIZE_ERROR.
+    // 16 * 1200 = 19200 bytes (> 16384).
+    var i = 0
+    var bulk = ""
+    for i < 1200 {
+        bulk = bulk + "0123456789abcdef"
+        i++
+    }
+    assert_eq(len(bulk), 19200)
+    let frames = http2_data_frame(7, bulk, 1) // END_STREAM on last only
+    let f0 = http2_frame_at(frames, 0)
+    let f1 = http2_frame_at(frames, 1)
+    assert_eq(http2_frame_type(f0), 0)
+    assert_eq(http2_frame_type(f1), 0)
+    assert_eq(http2_frame_stream(f0), 7)
+    assert_eq(http2_frame_stream(f1), 7)
+    // First chunk full size; END_STREAM only on last.
+    assert_eq(http2_frame_len(f0), 16384)
+    assert_eq(http2_frame_len(f1), 19200 - 16384)
+    assert_eq(http2_frame_flags(f0) & 1, 0)
+    assert_eq(http2_frame_flags(f1) & 1, 1)
+    // Peer can reassemble
+    let _ = http2_conn_reset()
+    assert_eq(http2_conn_recv(http2_headers_frame(7, hpack_encode_indexed(2), 4)), 0)
+    assert_eq(http2_conn_recv(frames), 0)
+    assert_eq(http2_stream_body_len(7), 19200)
+    assert_eq(http2_stream_body_done(7), 1)
+    let _ = http2_conn_reset()
+}
+
+fn TestHttp2ResponseLargeBodySplit() {
+    // http2_response uses data_frame → multi DATA after HEADERS.
+    var i = 0
+    var bulk = ""
+    for i < 1200 {
+        bulk = bulk + "0123456789abcdef"
+        i++
+    }
+    let resp = http2_response_ct(3, 200, "text/html; charset=utf-8", bulk)
+    assert_eq(http2_frame_type(http2_frame_at(resp, 0)), 1) // HEADERS
+    assert_eq(http2_frame_type(http2_frame_at(resp, 1)), 0) // DATA
+    assert_eq(http2_frame_type(http2_frame_at(resp, 2)), 0) // DATA
+    assert_eq(http2_frame_len(http2_frame_at(resp, 1)), 16384)
+    assert_eq(http2_frame_flags(http2_frame_at(resp, 2)) & 1, 1)
+}

@@ -824,12 +824,12 @@ static inline int mako_proxy_fill_forward_result(
         if (hd) {
             memcpy(hd, raw + h0, hlen2);
             hd[hlen2] = 0;
-            free(r->headers.data);
+            mako_str_free(r->headers); /* may be empty singleton from fail() */
             r->headers = (MakoString){hd, hlen2};
         }
     }
     if (mako_proxy_status_no_body(r->status)) {
-        free(r->body.data);
+        mako_str_free(r->body);
         r->body = mako_str_from_cstr("");
         r->body_len = 0;
         return 0;
@@ -839,7 +839,7 @@ static inline int mako_proxy_fill_forward_result(
         size_t body_len = 0;
         if (mako_proxy_decode_chunked(raw + bstart, raw_len - bstart, &body_out, &body_len) < 0)
             return -1;
-        free(r->body.data);
+        mako_str_free(r->body);
         r->body = (MakoString){body_out, body_len};
         r->body_len = (int64_t)body_len;
     } else {
@@ -850,7 +850,7 @@ static inline int mako_proxy_fill_forward_result(
         if (!bd) return -1;
         if (blen) memcpy(bd, raw + bstart, blen);
         bd[blen] = 0;
-        free(r->body.data);
+        mako_str_free(r->body);
         r->body = (MakoString){bd, blen};
         r->body_len = (int64_t)blen;
     }

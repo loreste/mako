@@ -1896,12 +1896,7 @@ static inline MakoString mako_http2_headers_frame(int64_t stream, MakoString blo
     return mako_http2_build_frame(1, stream, flags, block);
 }
 
-/* Build HTTP/2 DATA frame (type=0). Limits: no padding. */
-static inline MakoString mako_http2_data_frame(int64_t stream, MakoString payload, int64_t flags) {
-    return mako_http2_build_frame(0, stream, flags, payload);
-}
-
-/* Early limits + max-frame so response builders can reference them.
+/* Early limits + max-frame so DATA builders can enforce SETTINGS_MAX_FRAME_SIZE.
  * Full stream tables live later with the connection state machine. */
 #ifndef MAKO_H2_STREAM_SLOTS
 #define MAKO_H2_STREAM_SLOTS 64
@@ -1912,6 +1907,58 @@ static inline MakoString mako_http2_data_frame(int64_t stream, MakoString payloa
 #define MAKO_H2_WU_THRESHOLD 16384
 #endif
 static int64_t mako_h2_max_frame_size = 16384;
+
+/* Effective max DATA payload (never below default 16384, never above wire max). */
+static inline size_t mako_http2_data_max_payload(void) {
+    int64_t mf = mako_h2_max_frame_size;
+    if (mf < 16384) mf = 16384;
+    if (mf > 16777215) mf = 16777215;
+    return (size_t)mf;
+}
+
+/* Build HTTP/2 DATA frame(s) (type=0). No padding.
+ * If payload exceeds SETTINGS_MAX_FRAME_SIZE (default 16384), splits into multiple
+ * DATA frames and concatenates them. END_STREAM (0x1) is applied only to the last
+ * frame; other flags apply to the first frame only.
+ * (Browsers abort with ERR_HTTP2_FRAME_SIZE_ERROR on oversized single frames.) */
+static inline MakoString mako_http2_data_frame(int64_t stream, MakoString payload, int64_t flags) {
+    size_t plen = payload.data ? payload.len : 0;
+    size_t max_frame = mako_http2_data_max_payload();
+    if (plen <= max_frame)
+        return mako_http2_build_frame(0, stream, flags, payload);
+    if (!payload.data) return mako_http2_build_frame(0, stream, flags, payload);
+
+    int64_t end_stream = flags & 0x1;
+    int64_t first_flags = flags & ~0x1;
+    size_t nframes = (plen + max_frame - 1) / max_frame;
+    size_t total = nframes * 9 + plen;
+    char *out = (char *)malloc(total + 1);
+    if (!out) return (MakoString){NULL, 0};
+    size_t pos = 0, off = 0;
+    int first = 1;
+    while (off < plen) {
+        size_t chunk = plen - off;
+        if (chunk > max_frame) chunk = max_frame;
+        int64_t fr_flags = first ? first_flags : 0;
+        first = 0;
+        if (end_stream && off + chunk >= plen) fr_flags |= 0x1;
+        out[pos + 0] = (char)((chunk >> 16) & 0xff);
+        out[pos + 1] = (char)((chunk >> 8) & 0xff);
+        out[pos + 2] = (char)(chunk & 0xff);
+        out[pos + 3] = 0; /* DATA */
+        out[pos + 4] = (char)(fr_flags & 0xff);
+        unsigned int sid = (unsigned int)(stream & 0x7fffffff);
+        out[pos + 5] = (char)((sid >> 24) & 0xff);
+        out[pos + 6] = (char)((sid >> 16) & 0xff);
+        out[pos + 7] = (char)((sid >> 8) & 0xff);
+        out[pos + 8] = (char)(sid & 0xff);
+        memcpy(out + pos + 9, payload.data + off, chunk);
+        pos += 9 + chunk;
+        off += chunk;
+    }
+    out[pos] = 0;
+    return (MakoString){out, pos};
+}
 
 /* Forward: send-window consume (defined with flow-control helpers). */
 static inline int64_t mako_http2_window_consume(int64_t stream, int64_t nbytes);
@@ -1983,49 +2030,12 @@ static inline MakoString mako_http2_response_ex(
             return mako_str_from_cstr("");
         }
     }
-    size_t max_frame = 16384;
-    {
-        int64_t mf = mako_h2_max_frame_size;
-        if (mf < 16384) mf = 16384;
-        if (mf > 16777215) mf = 16777215;
-        max_frame = (size_t)mf;
-    }
-    if (blen <= max_frame) {
-        MakoString df = mako_http2_data_frame(stream, body, 0x1); /* END_STREAM */
-        MakoString out = mako_str_concat(hf, df);
-        mako_str_free(hf);
-        mako_str_free(df);
-        return out;
-    }
-    size_t total = hf.len;
-    size_t nframes = (blen + max_frame - 1) / max_frame;
-    total += nframes * 9 + blen;
-    char *out = (char *)malloc(total + 1);
-    if (!out) { mako_str_free(hf); return (MakoString){NULL, 0}; }
-    memcpy(out, hf.data, hf.len);
-    size_t pos = hf.len;
+    /* data_frame auto-splits bodies larger than SETTINGS_MAX_FRAME_SIZE. */
+    MakoString df = mako_http2_data_frame(stream, body, 0x1); /* END_STREAM on last */
+    MakoString out = mako_str_concat(hf, df);
     mako_str_free(hf);
-    size_t off = 0;
-    while (off < blen) {
-        size_t chunk = blen - off;
-        if (chunk > max_frame) chunk = max_frame;
-        int64_t flags = (off + chunk >= blen) ? 0x1 : 0x0;
-        out[pos+0] = (char)((chunk >> 16) & 0xff);
-        out[pos+1] = (char)((chunk >> 8) & 0xff);
-        out[pos+2] = (char)(chunk & 0xff);
-        out[pos+3] = 0;
-        out[pos+4] = (char)(flags & 0xff);
-        unsigned int sid = (unsigned int)(stream & 0x7fffffff);
-        out[pos+5] = (char)((sid >> 24) & 0xff);
-        out[pos+6] = (char)((sid >> 16) & 0xff);
-        out[pos+7] = (char)((sid >> 8) & 0xff);
-        out[pos+8] = (char)(sid & 0xff);
-        memcpy(out + pos + 9, body.data + off, chunk);
-        pos += 9 + chunk;
-        off += chunk;
-    }
-    out[pos] = 0;
-    return (MakoString){out, pos};
+    mako_str_free(df);
+    return out;
 }
 
 /* Default response (no content-type). */
