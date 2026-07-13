@@ -1,0 +1,25 @@
+// EXPECT: use of moved
+// Multi-label: continue outer then break outer after field move — post-outer poisoned.
+struct Pair {
+    a: string
+    b: string
+}
+
+fn main() {
+    hold let p = Pair { a: "x", b: "y" }
+    let mut i = 0
+    outer: while i < 3 {
+        i = i + 1
+        let mut j = 0
+        while j < 2 {
+            j = j + 1
+            if i < 2 {
+                let x = p.a
+                print(x)
+                continue outer
+            }
+            break outer
+        }
+    }
+    print(p.a)
+}

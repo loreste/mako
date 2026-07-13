@@ -279,6 +279,7 @@ impl Codegen {
     }
 
     /// Best-effort C type for an expression (for generic mono tags without re-emit).
+    /// Must agree with `emit_expr` / `Type::mono_tag` for monomorphization names.
     fn peek_expr_c_ty(&self, e: &Expr) -> String {
         match e {
             Expr::Int(_) => "int64_t".into(),
@@ -292,9 +293,34 @@ impl Codegen {
                 .unwrap_or_else(|| "int64_t".into()),
             Expr::Unary { expr, .. } => self.peek_expr_c_ty(expr),
             Expr::Binary { left, .. } => self.peek_expr_c_ty(left),
-            Expr::Call { callee, .. } => {
+            Expr::Array(xs) => {
+                let elem = xs
+                    .first()
+                    .map(|x| self.peek_expr_c_ty(x))
+                    .unwrap_or_else(|| "int64_t".into());
+                match elem.as_str() {
+                    "MakoString" => "MakoStrArray".into(),
+                    "double" => "MakoFloatArray".into(),
+                    "int64_t" | "bool" => "MakoIntArray".into(),
+                    other if self.structs.contains_key(other)
+                        || self.structs.values().any(|s| s.c_name == other) =>
+                    {
+                        format!("MakoArr_{other}")
+                    }
+                    _ => "MakoIntArray".into(),
+                }
+            }
+            Expr::StructLit { name, .. } => {
+                self.structs
+                    .get(name)
+                    .map(|s| s.c_name.clone())
+                    .unwrap_or_else(|| name.clone())
+            }
+            Expr::Make { ty, .. } | Expr::Convert { ty, .. } => self.type_expr_c(ty),
+            Expr::Call { callee, args } => {
                 if let Expr::Ident(fname) = callee.as_ref() {
-                    if let Some(rt) = self.fn_rets.get(fname) {
+                    let mono = self.generic_mono_name_for_call(fname, args);
+                    if let Some(rt) = self.fn_rets.get(&mono).or_else(|| self.fn_rets.get(fname)) {
                         return rt.clone();
                     }
                 }
@@ -13203,6 +13229,7 @@ fn escape_c(s: &str) -> String {
 }
 
 
+/// C type → monomorphization tag. Must match `Type::mono_tag` for the same value.
 fn c_type_mono_tag(c_ty: &str) -> String {
     match c_ty {
         "int64_t" => "int".into(),
@@ -13211,6 +13238,16 @@ fn c_type_mono_tag(c_ty: &str) -> String {
         "MakoString" => "string".into(),
         "MakoChan*" => "chan_int".into(),
         "MakoChanStr*" => "chan_string".into(),
+        "MakoIntArray" => "arr_int".into(),
+        "MakoStrArray" => "arr_string".into(),
+        "MakoFloatArray" => "arr_float".into(),
+        "MakoByteArray" => "arr_byte".into(),
+        "MakoMapSI*" => "map_string_int".into(),
+        "MakoMapII*" => "map_int_int".into(),
+        "MakoMapSS*" => "map_string_string".into(),
+        other if other.starts_with("MakoArr_") => {
+            format!("arr_{}", &other["MakoArr_".len()..])
+        }
         other => other
             .chars()
             .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })

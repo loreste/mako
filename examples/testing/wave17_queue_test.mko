@@ -1,0 +1,58 @@
+// Wave 17: generic Result container mono (arrays/maps), more unicode scripts.
+
+fn wrap_ok[T](x: T) -> Result[T, string] {
+    return Ok(x)
+}
+
+struct Point {
+    x: int
+    y: int
+}
+
+fn TestGenResultSliceInt() {
+    match wrap_ok([1, 2, 3]) {
+        Ok(xs) => {
+            assert_eq(len(xs), 3)
+            assert_eq(xs[0], 1)
+            assert_eq(xs[2], 3)
+        },
+        Err(_) => assert(false),
+    }
+}
+
+fn TestGenResultSliceStr() {
+    match wrap_ok(["a", "b"]) {
+        Ok(xs) => {
+            assert_eq(len(xs), 2)
+            assert_eq_str(xs[0], "a")
+            assert_eq_str(xs[1], "b")
+        },
+        Err(_) => assert(false),
+    }
+}
+
+fn TestGenResultMapSi() {
+    let mut m = make(map[string]int)
+    m["k"] = 7
+    match wrap_ok(m) {
+        Ok(mm) => assert_eq(mm["k"], 7),
+        Err(_) => assert(false),
+    }
+}
+
+fn TestGenResultSliceStruct() {
+    match wrap_ok([Point { x: 1, y: 2 }, Point { x: 3, y: 4 }]) {
+        Ok(xs) => {
+            assert_eq(len(xs), 2)
+            assert_eq(xs[0].x, 1)
+            assert_eq(xs[1].y, 4)
+        },
+        Err(_) => assert(false),
+    }
+}
+
+fn TestRegexUnicodeMyanmarKhmerTibetan() {
+    assert(regex_match("\\p{Myanmar}+", "မြန်မာ"))
+    assert(regex_match("\\p{Khmer}+", "ខ្មែរ"))
+    assert(regex_match("\\p{Tibetan}+", "བོད"))
+}

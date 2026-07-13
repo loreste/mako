@@ -162,6 +162,7 @@ impl Type {
             Type::Void => "void".into(),
             Type::Array(t) => format!("arr_{}", t.mono_tag()),
             Type::Chan(t) => format!("chan_{}", t.mono_tag()),
+            Type::Map(k, v) => format!("map_{}_{}", k.mono_tag(), v.mono_tag()),
             Type::Named(n) => n.clone(),
             Type::Tuple(elems) => {
                 let e: Vec<_> = elems.iter().map(|t| t.mono_tag()).collect();
