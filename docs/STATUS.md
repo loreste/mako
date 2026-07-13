@@ -172,17 +172,17 @@ Last inventory: 2026-07-11 (**unique Mako surface** · pack/pull · pain map · 
 | `chan_open[Struct]` via MakoChanPtr heap-box | Done |
 | `error_tag(tag, msg)` enum-like string errors | Done |
 
-**Closed (wave 7–35):** join_timeout **flatten** · POD kick + string fields ·
+**Closed (wave 7–36):** join_timeout **flatten** · POD kick + string fields ·
 `reflect_value_of` N + nested POD · `Result`/`Option` deep nests · nested
 None/Err edges · SOF0 header fields · **`jpeg_is_baseline_gray`** · JFIF
 version/density/thumb + SOF0 sampling/Ci/Tqi · `jpeg_has_app7`/`app8`/`app9` ·
 **`jpeg_is_mako_jfif`** · **`jpeg_is_mako_complete`** · **`jpeg_is_mako_raw`** ·
 **`jpeg_is_mako_dct`** · **`jpeg_is_mako_huff`** · **`jpeg_roundtrip_ok`** ·
-APP0/7/8/9 length probes · NLL for/if/match · kick Result/Option reject ·
-script/category `\p{…}` · expanded TSan · prior work.
+**`jpeg_app7_len_matches_payload`** · SOI/APP length probes · NLL for/if/match ·
+kick Result/Option reject · script/category `\p{…}` · expanded TSan · prior work.
 
-**Wave 35 tests:** `examples/testing/wave35_queue_test.mko` · bads
-`hold_if_for_match_move`, `share_match_for_live`.
+**Wave 36 tests:** `examples/testing/wave36_queue_test.mko` · bads
+`hold_while_match_for_move`, `share_while_for_live`.
 
 **Pain residuals (language) still open:** see [PAIN_POINTS.md](PAIN_POINTS.md) §4.
 
@@ -192,8 +192,8 @@ script/category `\p{…}` · expanded TSan · prior work.
 
 **Stdlib / product residuals:**
 
-6. Complete Unicode property database / full PCRE (script + Common/Mn/Mc seeds growing)  
-7. Huffman JPEG bitstream readable by arbitrary viewers (mako DCT/huff evidence + roundtrip; not viewer Huffman)  
+6. Complete Unicode property database / full PCRE (script + Common/Mn/Mc/Sm/Sk/Pc seeds growing)  
+7. Huffman JPEG bitstream readable by arbitrary viewers (mako APP7 layout + roundtrip; not viewer Huffman)  
 8. Reflect for non-POD fields (maps/slices/chan/Option/Result/nested map·slice·Option·Result rejected; nested POD done)  
 9. Symbol-level parity inside Done packages
 

@@ -1960,6 +1960,9 @@ ready queue so workers can multiplex without one-request-at-a-time stalls.
 | `jpeg_app8_length` | `jpeg_app8_length(data: string) -> int` | APP8 segment length field (0 if missing; Mako DCT uses 6) |
 | `jpeg_app9_length` | `jpeg_app9_length(data: string) -> int` | APP9 segment length field (0 if missing; Mako huff uses 66) |
 | `jpeg_roundtrip_ok` | `jpeg_roundtrip_ok(data: string) -> int` | 1 if APP7 decode length equals `width*height` payload |
+| `jpeg_app7_length` | `jpeg_app7_length(data: string) -> int` | APP7 MAKOJPG segment length field (0 if missing; 8×8 gray uses 77) |
+| `jpeg_has_soi` | `jpeg_has_soi(data: string) -> int` | 1 if buffer starts with SOI (`FF D8`) |
+| `jpeg_app7_len_matches_payload` | `jpeg_app7_len_matches_payload(data: string) -> int` | 1 if APP7 length field equals `2+7+4+width*height` |
 
 ---
 
@@ -2312,7 +2315,8 @@ Tests: `result_enum_test.mko`, `job_join_typed_test.mko` (Result across kick/joi
 `wave32_queue_test.mko` (string nests, SOF0↔APP7 match, EOI, `jpeg_is_mako_complete`),
 `wave33_queue_test.mko` (bool deep nests, `jpeg_is_mako_raw`, APP0/APP7 lengths),
 `wave34_queue_test.mko` (`Result[Result[string]]`, APP8/APP9, `jpeg_is_mako_dct`/`huff`),
-`wave35_queue_test.mko` (float nests, `jpeg_roundtrip_ok`, APP8/9 lengths, Common/Mn/Mc).
+`wave35_queue_test.mko` (float nests, `jpeg_roundtrip_ok`, APP8/9 lengths, Common/Mn/Mc),
+`wave36_queue_test.mko` (bool/string nests, APP7 length/SOI layout, Sm/Sk/Pc).
 
 ---
 
