@@ -13,9 +13,9 @@ Ownership and arenas manage memory at compile time. Structured crews clean up
 after themselves. The compiler enforces errors. The stdlib is batteries-included
 so you can ship real services without dependency maze.
 
-This is **version 0.1.1**. It works. 158 tests pass. The standard library
-covers a lot of ground. But it's still early — things will change, some corners
-are rough, and there's plenty left to build.
+This is **version 0.1.1**. Early but usable — the standard library covers a lot
+of ground, but things will change, some corners are rough, and there's plenty
+left to build.
 
 [mako-lang.com](https://mako-lang.com) · [Status](docs/STATUS.md) · [Roadmap](docs/ROADMAP.md)
 

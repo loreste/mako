@@ -8,7 +8,7 @@
 
 Mako is a compiled, statically typed programming language with its own unique
 syntax and identity. Source files use the `.mko` extension. Compiles to C then
-native via clang. No garbage collector. 178 tests passing.
+native via clang. No garbage collector. **Version 0.1.1.** 239 tests passing.
 
 **Unique surface:** `fn`, `let`, `on Type {}`, `pack`/`pull`/`export`,
 `hold`/`share`/`arena`, `crew`/`kick`/`join`/`fan`, `match`, `switch`/`case`.
@@ -41,8 +41,10 @@ Key properties:
 - Speed: as close to native as possible (-O3 -flto; bench-gate <=1.5x)
 - Compiles .mko -> C -> native binary (debug -O0, release -O3 -flto)
 - WASM/WASI target support (wasm32-wasip1)
-- Batteries-included stdlib: HTTP/2, TLS 1.3, bcrypt, PBKDF2, SCRAM-SHA-256,
-  signal handling, file-system watch, UDP proxy, JSON, SQL, regex, UUID, etc.
+- Batteries-included stdlib: HTTP/2 (DATA auto-split ≤16384), TLS 1.3, bcrypt,
+  PBKDF2, SCRAM-SHA-256, signal handling, file-system watch, UDP proxy, JSON,
+  SQL, regex, UUID v4/v5/v7, ULID, chan_str_send_take, etc.
+- Production (0.1.1): H2 frame-size safe replies; empty-string free safety.
 
 ## Installation
 
@@ -145,13 +147,14 @@ mako build --target wasm32-wasip1 file.mko -o out.wasm
 
 ## Stdlib Categories
 
-Output, Strings, Math, File I/O, HTTP Server/Client, HTTP/2, TLS 1.3, JSON,
-Database (SQLite/Postgres), Crypto (SHA, HMAC, AES-GCM, ChaCha20, bcrypt,
-PBKDF2, SCRAM-SHA-256), Encoding (base64, hex, gzip), Regex, UUID,
-Cookies/Sessions/Auth, Channels, Concurrency (mutex, atomics, CMap), Event Loop,
-Binary Buffer, Game Networking, Signal Handling, File-System Watch, UDP Proxy,
-Cloud (consistent hashing, rate limiting, circuit breaker), Checked Arithmetic,
-Graceful Shutdown, Distributed Tracing, Leak Detection, Testing.
+Output, Strings, Math, File I/O, HTTP Server/Client, HTTP/2 (frame builders +
+auto DATA split), TLS 1.3, JSON, Database (SQLite/Postgres), Crypto (SHA, HMAC,
+AES-GCM, ChaCha20, bcrypt, PBKDF2, SCRAM-SHA-256), Encoding (base64, hex, gzip),
+Regex, UUID/ULID, Cookies/Sessions/Auth, Channels (incl. string move-send),
+Concurrency (mutex, atomics, CMap), Event Loop, Binary Buffer, Game Networking,
+Signal Handling, File-System Watch, UDP Proxy, Cloud (consistent hashing, rate
+limiting, circuit breaker), Checked Arithmetic, Graceful Shutdown, Distributed
+Tracing, Leak Detection, Testing.
 
 ## Documentation Links
 

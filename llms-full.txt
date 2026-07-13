@@ -2,12 +2,17 @@
 #
 # Source: https://mako-lang.com
 # Repository: https://github.com/loreste/mako
-# Version: mako 0.1.0
+# Version: mako 0.1.1
 #
 # This file contains everything an LLM needs to write correct Mako code.
 # Mako compiles .mko files to C, then to native binaries via clang.
 # No garbage collector. Memory safety via ownership (hold/share) and arenas.
-# 178 tests passing. Mako identity ~92%.
+# 239 tests passing. Mako identity ~92%.
+#
+# 0.1.1 highlights (production):
+# - HTTP/2 DATA frames auto-split at ≤16384 (SETTINGS_MAX_FRAME_SIZE default)
+# - Empty-string singleton free safety (use mako_str_free paths / never raw free "")
+# - UUID v4/v5/v7 + ULID; chan_str_send_take move-send
 
 ================================================================================
 1. OVERVIEW
@@ -56,7 +61,7 @@ curl -fsSL https://github.com/loreste/mako/releases/latest/download/install-rele
 make install    # installs to ~/.local/bin/mako + ~/.local/share/mako/runtime
 
 # Verify:
-mako --version    # prints "mako version mako0.1.0 darwin/arm64"
+mako --version    # prints "mako version mako0.1.1 <os>/<arch>"
 
 ================================================================================
 3. BUILD COMMANDS
@@ -1433,12 +1438,39 @@ Below are the most important built-in functions organized by category.
   http_shutdown_requested() -> int
   http_shutdown_ready() -> int
 
-  // HTTP/2:
+  // HTTP/2 — connection helpers:
   http2_conn_new() -> Http2Conn
   http2_use(conn: Http2Conn, fd: int) -> int
   http2_response(conn: Http2Conn, stream: int, status: int, body: string) -> int
   http2_free(conn: Http2Conn) -> int
   http_forward(upstream: string, req: HttpRequest) -> string
+
+  // HTTP/2 — frame builders (DATA auto-splits when payload > max frame):
+  // Default max frame size = 16384 (RFC SETTINGS_MAX_FRAME_SIZE). Larger bodies
+  // become multiple DATA frames; END_STREAM is set only on the last frame.
+  // TLS H2 replies (mako_tls_h2_reply_*) use the same split path.
+  http2_detect(data: string) -> bool
+  http2_headers_frame(stream: int, block: string, flags: int) -> string
+  http2_data_frame(stream: int, payload: string, flags: int) -> string
+  http2_continuation_frame(stream: int, block: string, flags: int) -> string
+  http2_goaway_frame(last_stream: int, error_code: int) -> string
+  http2_ping_frame(data: string, ack: int) -> string
+  http2_window_update_frame(stream: int, increment: int) -> string
+  http2_rst_stream_frame(stream: int, error_code: int) -> string
+  http2_priority_frame(stream: int, dep: int, weight: int, exclusive: int) -> string
+  http2_push_promise_frame(stream: int, promised: int, block: string, flags: int) -> string
+  http2_client_preface() -> string
+  http2_server_preface() -> string
+  http2_empty_settings() -> string
+  http2_settings_ack() -> string
+  http2_settings_max_concurrent(max: int) -> string
+  http2_frame_type(frame: string) -> int
+  http2_frame_stream(frame: string) -> int
+  http2_frame_len(frame: string) -> int
+  http2_frame_flags(frame: string) -> int
+  http2_frame_payload(frame: string) -> string
+  http2_frame_at(data: string, idx: int) -> string
+  http2_concat_frames(a: string, b: string) -> string
 
 --------------------------------------------------------------------------------
 26.11 HTTP Client
@@ -1613,16 +1645,35 @@ Below are the most important built-in functions organized by category.
   // Backrefs: \1-\9
 
 --------------------------------------------------------------------------------
-26.17 UUID
+26.17 UUID & ULID
 --------------------------------------------------------------------------------
 
+  // UUID (16-byte POD):
   uuid_v4() -> Uuid                           Random v4 UUID
-  uuid_string(u: Uuid) -> string              To "xxxxxxxx-xxxx-4xxx-..."
-  uuid_parse(s: string) -> Uuid               Parse string
+  uuid_v5(ns: Uuid, name: string) -> Uuid     Name-based (SHA-1)
+  uuid_v7() -> Uuid                           Time-ordered v7 (unix-ms + random)
+  uuid_nil() -> Uuid                          Nil UUID (all zeros)
+  uuid_ns_dns() / uuid_ns_url() / uuid_ns_oid() / uuid_ns_x500() -> Uuid
+  uuid_string(u: Uuid) -> string              Canonical lowercase 8-4-4-4-12
+  uuid_string_upper(u: Uuid) -> string        Canonical uppercase
+  uuid_urn(u: Uuid) -> string                 urn:uuid:…
+  uuid_bytes(u: Uuid) -> string               Raw 16 bytes
+  uuid_from_bytes(s: string) -> Uuid          From 16 bytes (aborts if len ≠ 16)
+  uuid_parse(s: string) -> Uuid               Parse canonical / 32-hex / braces / URN
   uuid_parse_ok(s: string) -> bool            Validate UUID string
-  uuid_eq(a: Uuid, b: Uuid) -> bool           Compare
-  uuid_is_nil(u: Uuid) -> bool                Check nil
-  uuid_nil() -> Uuid                          Nil UUID
+  uuid_check(s: string) -> Result[int, string]
+  uuid_eq(a: Uuid, b: Uuid) -> bool
+  uuid_cmp(a: Uuid, b: Uuid) -> int           Ordered compare (−1/0/1)
+  uuid_is_nil(u: Uuid) -> bool
+  uuid_version(u: Uuid) -> int                RFC version nibble
+  uuid_variant(u: Uuid) -> int                Variant (2 = RFC 4122)
+
+  // ULID (same 16-byte POD as Uuid; time-sortable Crockford Base32):
+  ulid_new() -> Uuid                          New ULID
+  ulid_string(u: Uuid) -> string              26-char Crockford Base32
+  ulid_parse(s: string) -> Uuid
+  ulid_parse_ok(s: string) -> bool
+  ulid_timestamp_ms(u: Uuid) -> int           48-bit unix-ms prefix
 
 --------------------------------------------------------------------------------
 26.18 Cookies, Sessions & Auth
@@ -1669,7 +1720,13 @@ Below are the most important built-in functions organized by category.
   chan_cap(ch: chan[int]) -> int               Channel capacity
   chan_select2(a: chan[int], b: chan[int], timeout_ms: int) -> int
   chan_select3(a: chan[int], b: chan[int], c: chan[int], timeout_ms: int) -> int
+  chan_str_select2(a: chan[string], b: chan[string], timeout_ms: int) -> int
   chan_select_value() -> int
+
+  // String channel move-send (no clone; ownership transfer):
+  // Default ch.send(s) still clones (safe). Use take when you own the string.
+  chan_str_send_take(ch: chan[string], v: string) -> int      // 1 ok, 0 closed
+  chan_str_try_send_take(ch: chan[string], v: string) -> int  // 1 queued; 0 full/closed (consumes v)
 
   // Channel methods:
   ch.send(val)
@@ -2522,8 +2579,28 @@ These exist for migration convenience. The preferred forms are what define
 Mako's identity.
 
 ================================================================================
+32. PRODUCTION NOTES (0.1.1)
+================================================================================
+
+HTTP/2 DATA frame size
+  Never send a single DATA frame larger than the peer's SETTINGS_MAX_FRAME_SIZE
+  (default 16384). http2_data_frame and TLS H2 reply helpers auto-split. Large
+  single frames cause browsers to report net::ERR_HTTP2_FRAME_SIZE_ERROR.
+
+Empty-string free safety
+  The empty string "" is a runtime singleton. Never free string data with raw
+  free() unless you know it is heap-allocated. Prefer the string free helpers
+  used by the runtime (mako_str_free paths). Affects HTTP/proxy/maps/zip/reflect.
+
+Edge TLS / ALPN
+  Production edge (e.g. Leba on mako-lang.com) may prefer ALPN http/1.1 until
+  multi-stream H2 is solid. When enabling h2, rebuild against a runtime that
+  splits DATA ≤16384.
+
+================================================================================
 END OF REFERENCE
 ================================================================================
 
 # Website: https://mako-lang.com
 # Full source: https://github.com/loreste/mako
+# Version: 0.1.1
