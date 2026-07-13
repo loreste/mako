@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.0 — 2026-07-13 (wave 28 queue)
+
+- Deep mixed None/Err (`Ok(Some(Ok(None)))`, mid Err); `Option[[]int]` None
+- `jpeg_is_baseline_gray` (JFIF+SOF0 grayscale shell probe)
+- for+match NLL bad case; Tai_Le/Kayah_Li/New_Tai_Lue scripts
+- TSan wave27 + `select_nll_test`
+- Tests: `examples/testing/wave28_queue_test.mko`
+
 ## 0.1.0 — 2026-07-13 (wave 27 queue)
 
 - Nested None edges (`Ok(None)`, `Ok(Some(None))`, map Option None)

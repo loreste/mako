@@ -4133,6 +4133,15 @@ static inline int64_t mako_jpeg_sof0_components(MakoString jpeg) {
     return (int64_t)(unsigned char)jpeg.data[off + 2 + 2 + 1 + 4]; /* after FF C0 len P Y X */
 }
 
+/* Mako JFIF grayscale shell: JFIF APP0 + SOF0 + Nf==1. */
+static inline int64_t mako_jpeg_is_baseline_gray(MakoString jpeg) {
+    if (!mako_jpeg_is_jfif(jpeg)) return 0;
+    if (!mako_jpeg_has_sof0(jpeg)) return 0;
+    if (mako_jpeg_sof0_components(jpeg) != 1) return 0;
+    if (mako_jpeg_sof0_precision(jpeg) != 8) return 0;
+    return 1;
+}
+
 /* ---- compile-time struct schema registry (filled by codegen) ---- */
 #ifndef MAKO_REFLECT_SCHEMA_MAX
 #define MAKO_REFLECT_SCHEMA_MAX 64

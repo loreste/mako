@@ -39,7 +39,7 @@ Rejected: arrays, maps, non-POD structs, `Result`, `Option`, `Arena`, nested `Cr
 `kick_option_non_send.mko`).  
 Race detection: `mako test --race` (CI TSan job: crew/kick/share, chan, proxy pool/edge,
 `kick_sync_test`, `kick_share_test`, `crew_fan_test`, `crew_drain_test`,
-`job_join_typed_test` (Result across kick/join), wave11/14–26 queue tests,
+`job_join_typed_test`, `select_nll_test`, wave11/14–27 queue tests,
 `share_atomic_test`, `chan_*_test`, `fan_string_test`, `kick_string_test`). Prefer
 channels over shared mutable state; full type-level race freedom remains residual.
 

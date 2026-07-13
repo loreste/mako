@@ -1,0 +1,66 @@
+// Wave 28: deep None/Err mixed nests, baseline gray probe, scripts.
+
+fn deep_none() -> Result[Option[Result[Option[int], string]], string] {
+    return Ok(Some(Ok(None)))
+}
+
+fn deep_err() -> Result[Option[Result[Option[int], string]], string] {
+    return Ok(Some(Err("mid")))
+}
+
+fn res_opt_slice_none() -> Result[Option[[]int], string] {
+    return Ok(None)
+}
+
+fn TestDeepNone() {
+    match deep_none() {
+        Ok(o1) => match o1 {
+            Some(r) => match r {
+                Ok(o2) => match o2 {
+                    Some(_) => assert(false),
+                    None => assert(true),
+                },
+                Err(_) => assert(false),
+            },
+            None => assert(false),
+        },
+        Err(_) => assert(false),
+    }
+}
+
+fn TestDeepErr() {
+    match deep_err() {
+        Ok(o1) => match o1 {
+            Some(r) => match r {
+                Ok(_) => assert(false),
+                Err(m) => assert_eq_str(m, "mid"),
+            },
+            None => assert(false),
+        },
+        Err(_) => assert(false),
+    }
+}
+
+fn TestResOptSliceNone() {
+    match res_opt_slice_none() {
+        Ok(o) => match o {
+            Some(_) => assert(false),
+            None => assert(true),
+        },
+        Err(_) => assert(false),
+    }
+}
+
+fn TestJpegBaselineGray() {
+    let gray = "ABCDEFGHABCDEFGHABCDEFGHABCDEFGHABCDEFGHABCDEFGHABCDEFGHABCDEFGH"
+    let j = jpeg_encode_gray_jfif(8, 8, gray)
+    assert_eq(jpeg_is_baseline_gray(j), 1)
+    assert_eq(jpeg_is_jfif(j), 1)
+    assert_eq(jpeg_sof0_components(j), 1)
+}
+
+fn TestRegexUnicodeTaiLeKayahNewTaiLue() {
+    assert(regex_match("\\p{Tai_Le}", "ᥐ"))
+    assert(regex_match("\\p{Kayah_Li}", "ꤊ"))
+    assert(regex_match("\\p{New_Tai_Lue}", "ᦀ"))
+}
