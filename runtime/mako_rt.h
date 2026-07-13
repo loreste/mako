@@ -3149,6 +3149,13 @@ static inline int mako_re_unicode_prop_match(const char *name, size_t nlen, uint
         return (cp >= 0x0300 && cp <= 0x036F);
     if (nlen == 2 && memcmp(name, "Mc", 2) == 0) /* spacing combining marks seed */
         return (cp >= 0x093E && cp <= 0x0940) || cp == 0x0903; /* Devanagari Mc */
+    if (nlen == 2 && memcmp(name, "Sm", 2) == 0) /* math symbols seed */
+        return (cp >= 0x2200 && cp <= 0x22FF) || cp == '+' || cp == '=' || cp == '|'
+            || cp == '~' || cp == '<' || cp == '>';
+    if (nlen == 2 && memcmp(name, "Sk", 2) == 0) /* modifier symbols seed */
+        return cp == '^' || cp == '`' || (cp >= 0x02B0 && cp <= 0x02FF);
+    if (nlen == 2 && memcmp(name, "Pc", 2) == 0) /* connector punctuation seed */
+        return cp == '_' || (cp >= 0x203F && cp <= 0x2040);
     return 0;
 }
 

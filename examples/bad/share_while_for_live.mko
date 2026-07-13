@@ -1,0 +1,15 @@
+// EXPECT: already shared
+// while + for: second share of same local while first share is live.
+fn main() {
+    let x = 1
+    let a = share_int(x)
+    let mut i = 0
+    while i < 1 {
+        for j in range 1 {
+            let b = share_int(x)
+            share_drop(b)
+        }
+        i = i + 1
+    }
+    share_drop(a)
+}

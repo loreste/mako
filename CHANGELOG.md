@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.0 — 2026-07-13 (wave 36 queue)
+
+- Bool `Result[Result[bool]]` + string `Option[Option[string]]` nests
+- `jpeg_app7_length`; `jpeg_has_soi`; **`jpeg_app7_len_matches_payload`**
+- while+match+for NLL; share while+for live; Sm/Sk/Pc property seeds
+- TSan wave35
+- Tests: `examples/testing/wave36_queue_test.mko`
+
 ## 0.1.0 — 2026-07-13 (wave 35 queue)
 
 - Float nests: `Result[Result[float]]`, `Option[Option[float]]` Ok/None/Err

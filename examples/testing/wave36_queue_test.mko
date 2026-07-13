@@ -1,0 +1,76 @@
+// Wave 36: bool/string nests, APP7 length + SOI, Sm/Sk/Pc properties.
+
+fn bool_ok() -> Result[Result[bool, string], string] {
+    return Ok(Ok(false))
+}
+
+fn bool_outer_err() -> Result[Result[bool, string], string] {
+    return Err("bo")
+}
+
+fn str_opt_ok() -> Option[Option[string]] {
+    return Some(Some("hi"))
+}
+
+fn str_opt_none() -> Option[Option[string]] {
+    return Some(None)
+}
+
+fn TestBoolOk() {
+    match bool_ok() {
+        Ok(r) => match r {
+            Ok(v) => assert(!v),
+            Err(_) => assert(false),
+        },
+        Err(_) => assert(false),
+    }
+}
+
+fn TestBoolOuterErr() {
+    match bool_outer_err() {
+        Ok(_) => assert(false),
+        Err(m) => assert_eq_str(m, "bo"),
+    }
+}
+
+fn TestStrOptOk() {
+    match str_opt_ok() {
+        Some(o) => match o {
+            Some(s) => assert_eq_str(s, "hi"),
+            None => assert(false),
+        },
+        None => assert(false),
+    }
+}
+
+fn TestStrOptNone() {
+    match str_opt_none() {
+        Some(o) => match o {
+            Some(_) => assert(false),
+            None => assert(true),
+        },
+        None => assert(false),
+    }
+}
+
+fn TestJpegApp7SoiLayout() {
+    let gray = "ABCDEFGHABCDEFGHABCDEFGHABCDEFGHABCDEFGHABCDEFGHABCDEFGHABCDEFGH"
+    let j = jpeg_encode_gray_jfif(8, 8, gray)
+    assert_eq(jpeg_has_soi(j), 1)
+    assert_eq(jpeg_app7_length(j), 77)
+    assert_eq(jpeg_app7_payload_len(j), 64)
+    assert_eq(jpeg_app7_len_matches_payload(j), 1)
+    assert_eq(jpeg_roundtrip_ok(j), 1)
+    assert_eq(jpeg_has_eoi(j), 1)
+
+    let raw = jpeg_encode_gray(8, 8, gray)
+    assert_eq(jpeg_has_soi(raw), 1)
+    assert_eq(jpeg_app7_length(raw), 77)
+    assert_eq(jpeg_app7_len_matches_payload(raw), 1)
+}
+
+fn TestRegexUnicodeSmSkPc() {
+    assert(regex_match("\\p{Sm}", "+"))
+    assert(regex_match("\\p{Sk}", "^"))
+    assert(regex_match("\\p{Pc}", "_"))
+}

@@ -4485,6 +4485,49 @@ static inline int64_t mako_jpeg_roundtrip_ok(MakoString jpeg) {
     return (got == expect) ? 1 : 0;
 }
 
+/* APP7 segment length field for first MAKOJPG APP7 (0 if missing).
+ * Mako 8×8 gray: 2 + 7 + 4 + 64 = 77. */
+static inline int64_t mako_jpeg_app7_length(MakoString jpeg) {
+    if (jpeg.len < 12) return 0;
+    const unsigned char *p = (const unsigned char *)jpeg.data;
+    if (p[0] != 0xFF || p[1] != 0xD8) return 0;
+    size_t i = 2;
+    while (i + 9 < jpeg.len) {
+        if (p[i] != 0xFF) { i++; continue; }
+        unsigned char m = p[i + 1];
+        if (m == 0xD9) break;
+        if (m == 0xE7) {
+            if (i + 2 + 2 + 7 <= jpeg.len && memcmp(p + i + 4, "MAKOJPG", 7) == 0)
+                return (int64_t)(((uint16_t)p[i + 2] << 8) | p[i + 3]);
+        }
+        if (m == 0xD8 || m == 0x01 || (m >= 0xD0 && m <= 0xD7)) {
+            i += 2;
+            continue;
+        }
+        if (i + 3 >= jpeg.len) break;
+        uint16_t seglen = ((uint16_t)p[i + 2] << 8) | p[i + 3];
+        if (seglen < 2) break;
+        i += 2 + (size_t)seglen;
+    }
+    return 0;
+}
+
+/* 1 if buffer begins with SOI (FF D8). */
+static inline int64_t mako_jpeg_has_soi(MakoString jpeg) {
+    if (jpeg.len < 2) return 0;
+    const unsigned char *p = (const unsigned char *)jpeg.data;
+    return (p[0] == 0xFF && p[1] == 0xD8) ? 1 : 0;
+}
+
+/* APP7 segment length equals 2 + 7 + 4 + width*height (MAKOJPG layout consistency). */
+static inline int64_t mako_jpeg_app7_len_matches_payload(MakoString jpeg) {
+    int64_t seglen = mako_jpeg_app7_length(jpeg);
+    int64_t plen = mako_jpeg_app7_payload_len(jpeg);
+    if (seglen <= 0 || plen <= 0) return 0;
+    /* seglen includes the 2-byte length field itself per JPEG: Lf = 2 + id(7) + wh(4) + pixels */
+    return (seglen == 2 + 7 + 4 + plen) ? 1 : 0;
+}
+
 /* ---- compile-time struct schema registry (filled by codegen) ---- */
 #ifndef MAKO_REFLECT_SCHEMA_MAX
 #define MAKO_REFLECT_SCHEMA_MAX 64
