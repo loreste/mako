@@ -1957,6 +1957,9 @@ ready queue so workers can multiplex without one-request-at-a-time stalls.
 | `jpeg_has_app9` | `jpeg_has_app9(data: string) -> int` | 1 if APP9 Huffman-ish block present (`jpeg_encode_gray_huff`) |
 | `jpeg_is_mako_dct` | `jpeg_is_mako_dct(data: string) -> int` | 1 if `jpeg_is_mako_raw` + APP8 |
 | `jpeg_is_mako_huff` | `jpeg_is_mako_huff(data: string) -> int` | 1 if `jpeg_is_mako_dct` + APP9 |
+| `jpeg_app8_length` | `jpeg_app8_length(data: string) -> int` | APP8 segment length field (0 if missing; Mako DCT uses 6) |
+| `jpeg_app9_length` | `jpeg_app9_length(data: string) -> int` | APP9 segment length field (0 if missing; Mako huff uses 66) |
+| `jpeg_roundtrip_ok` | `jpeg_roundtrip_ok(data: string) -> int` | 1 if APP7 decode length equals `width*height` payload |
 
 ---
 
@@ -2308,7 +2311,8 @@ Tests: `result_enum_test.mko`, `job_join_typed_test.mko` (Result across kick/joi
 `wave31_queue_test.mko` (Option 5-layer, SOF0 Tqi, JFIF thumb, `jpeg_is_mako_jfif`),
 `wave32_queue_test.mko` (string nests, SOF0↔APP7 match, EOI, `jpeg_is_mako_complete`),
 `wave33_queue_test.mko` (bool deep nests, `jpeg_is_mako_raw`, APP0/APP7 lengths),
-`wave34_queue_test.mko` (`Result[Result[string]]`, APP8/APP9, `jpeg_is_mako_dct`/`huff`).
+`wave34_queue_test.mko` (`Result[Result[string]]`, APP8/APP9, `jpeg_is_mako_dct`/`huff`),
+`wave35_queue_test.mko` (float nests, `jpeg_roundtrip_ok`, APP8/9 lengths, Common/Mn/Mc).
 
 ---
 

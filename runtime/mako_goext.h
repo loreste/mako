@@ -4424,6 +4424,67 @@ static inline int64_t mako_jpeg_is_mako_huff(MakoString jpeg) {
     return 1;
 }
 
+/* Segment length field for first APP8 (0 if missing); Mako DCT uses 6. */
+static inline int64_t mako_jpeg_app8_length(MakoString jpeg) {
+    if (jpeg.len < 10) return 0;
+    const unsigned char *p = (const unsigned char *)jpeg.data;
+    if (p[0] != 0xFF || p[1] != 0xD8) return 0;
+    size_t i = 2;
+    while (i + 3 < jpeg.len) {
+        if (p[i] != 0xFF) { i++; continue; }
+        unsigned char m = p[i + 1];
+        if (m == 0xD9) break;
+        if (m == 0xE8) {
+            return (int64_t)(((uint16_t)p[i + 2] << 8) | p[i + 3]);
+        }
+        if (m == 0xD8 || m == 0x01 || (m >= 0xD0 && m <= 0xD7)) {
+            i += 2;
+            continue;
+        }
+        if (i + 3 >= jpeg.len) break;
+        uint16_t seglen = ((uint16_t)p[i + 2] << 8) | p[i + 3];
+        if (seglen < 2) break;
+        i += 2 + (size_t)seglen;
+    }
+    return 0;
+}
+
+/* Segment length field for first APP9 (0 if missing); Mako huff uses 66. */
+static inline int64_t mako_jpeg_app9_length(MakoString jpeg) {
+    if (jpeg.len < 10) return 0;
+    const unsigned char *p = (const unsigned char *)jpeg.data;
+    if (p[0] != 0xFF || p[1] != 0xD8) return 0;
+    size_t i = 2;
+    while (i + 3 < jpeg.len) {
+        if (p[i] != 0xFF) { i++; continue; }
+        unsigned char m = p[i + 1];
+        if (m == 0xD9) break;
+        if (m == 0xE9) {
+            return (int64_t)(((uint16_t)p[i + 2] << 8) | p[i + 3]);
+        }
+        if (m == 0xD8 || m == 0x01 || (m >= 0xD0 && m <= 0xD7)) {
+            i += 2;
+            continue;
+        }
+        if (i + 3 >= jpeg.len) break;
+        uint16_t seglen = ((uint16_t)p[i + 2] << 8) | p[i + 3];
+        if (seglen < 2) break;
+        i += 2 + (size_t)seglen;
+    }
+    return 0;
+}
+
+/* Decode APP7 gray payload and check len == width*height (roundtrip consistency). */
+static inline int64_t mako_jpeg_roundtrip_ok(MakoString jpeg) {
+    if (!mako_jpeg_is_mako_raw(jpeg)) return 0;
+    int64_t expect = mako_jpeg_app7_payload_len(jpeg);
+    if (expect <= 0) return 0;
+    MakoString d = mako_jpeg_decode_gray(jpeg);
+    int64_t got = (int64_t)d.len;
+    if (d.data) free(d.data);
+    return (got == expect) ? 1 : 0;
+}
+
 /* ---- compile-time struct schema registry (filled by codegen) ---- */
 #ifndef MAKO_REFLECT_SCHEMA_MAX
 #define MAKO_REFLECT_SCHEMA_MAX 64

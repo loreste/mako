@@ -3141,6 +3141,14 @@ static inline int mako_re_unicode_prop_match(const char *name, size_t nlen, uint
         return (cp >= 0xAA80 && cp <= 0xAADF);
     if (nlen == 9 && memcmp(name, "Inherited", 9) == 0)
         return (cp >= 0x0300 && cp <= 0x036F); /* combining marks seed */
+    if (nlen == 6 && memcmp(name, "Common", 6) == 0)
+        return mako_re_unicode_is_digit(cp)
+            || mako_re_unicode_is_space(cp)
+            || (cp >= 0x2000 && cp <= 0x206F); /* digits/space/general punct seed */
+    if (nlen == 2 && memcmp(name, "Mn", 2) == 0) /* nonspacing marks */
+        return (cp >= 0x0300 && cp <= 0x036F);
+    if (nlen == 2 && memcmp(name, "Mc", 2) == 0) /* spacing combining marks seed */
+        return (cp >= 0x093E && cp <= 0x0940) || cp == 0x0903; /* Devanagari Mc */
     return 0;
 }
 
