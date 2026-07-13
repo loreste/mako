@@ -78,7 +78,7 @@ static inline MakoString mako_format_int_base(int64_t n, int64_t base) {
             d[0] = '-';
             memcpy(d + 1, body.data, body.len);
             d[nlen] = 0;
-            free(body.data);
+            mako_str_free(body);
             return (MakoString){d, nlen};
         }
         MakoString body = mako_format_uint_base((uint64_t)(-n), b, 0);
@@ -87,7 +87,7 @@ static inline MakoString mako_format_int_base(int64_t n, int64_t base) {
         d[0] = '-';
         memcpy(d + 1, body.data, body.len);
         d[nlen] = 0;
-        free(body.data);
+        mako_str_free(body);
         return (MakoString){d, nlen};
     }
     return mako_format_uint_base((uint64_t)n, b, 0);
@@ -136,7 +136,7 @@ static inline MakoString mako_format_pad(MakoString s, int64_t width, int zero) 
 static inline MakoString mako_format_int_hex_pad(int64_t n, int64_t width) {
     MakoString h = mako_format_int_hex(n);
     MakoString out = mako_format_pad(h, width, 1);
-    free(h.data);
+    mako_str_free(h);
     return out;
 }
 
@@ -148,7 +148,7 @@ static inline MakoString mako_format_int_hex_prefix(int64_t n) {
     d[1] = 'x';
     if (h.len) memcpy(d + 2, h.data, h.len);
     d[nlen] = 0;
-    free(h.data);
+    mako_str_free(h);
     return (MakoString){d, nlen};
 }
 
@@ -255,7 +255,7 @@ static inline MakoString mako_fmt_format_int_verb(
         d[0] = '+';
         if (body.len) memcpy(d + 1, body.data, body.len);
         d[nlen] = 0;
-        free(body.data);
+        mako_str_free(body);
         body = (MakoString){d, nlen};
     }
     /* # prefix */
@@ -271,13 +271,13 @@ static inline MakoString mako_fmt_format_int_verb(
             memcpy(d, pre, pl);
             if (body.len) memcpy(d + pl, body.data, body.len);
             d[nlen] = 0;
-            free(body.data);
+            mako_str_free(body);
             body = (MakoString){d, nlen};
         }
     }
     if (width > 0) {
         MakoString padded = mako_format_pad(body, width, zero);
-        free(body.data);
+        mako_str_free(body);
         return padded;
     }
     return body;
@@ -410,7 +410,7 @@ static inline MakoString mako_fmt_sprintf_args(
                 MakoString tmp = {(char *)arg, alen};
                 MakoString pad = mako_format_pad(tmp, width, zero && !minus);
                 mako_fmt_append(&out, &len, &cap, pad.data, pad.len);
-                free(pad.data);
+                mako_str_free(pad);
             } else {
                 mako_fmt_append(&out, &len, &cap, arg, alen);
             }
@@ -482,7 +482,7 @@ static inline MakoString mako_fmt_sprint2(MakoString a0, MakoString a1) {
 static inline MakoString mako_fmt_sprint3(MakoString a0, MakoString a1, MakoString a2) {
     MakoString ab = mako_fmt_sprint2(a0, a1);
     MakoString out = mako_fmt_sprint2(ab, a2);
-    free(ab.data);
+    mako_str_free(ab);
     return out;
 }
 
@@ -491,7 +491,7 @@ static inline MakoString mako_fmt_sprint4(
 ) {
     MakoString ab = mako_fmt_sprint3(a0, a1, a2);
     MakoString out = mako_fmt_sprint2(ab, a3);
-    free(ab.data);
+    mako_str_free(ab);
     return out;
 }
 
@@ -507,7 +507,7 @@ static inline MakoString mako_fmt_sprintln1(MakoString a0) {
 static inline MakoString mako_fmt_sprintln2(MakoString a0, MakoString a1) {
     MakoString s = mako_fmt_sprint2(a0, a1);
     MakoString out = mako_fmt_sprintln1(s);
-    free(s.data);
+    mako_str_free(s);
     return out;
 }
 
@@ -558,14 +558,14 @@ static inline int64_t mako_fmt_println2(MakoString a0, MakoString a1) {
 static inline int64_t mako_fmt_printf1(MakoString fmt, MakoString a0) {
     MakoString s = mako_fmt_sprintf1(fmt, a0);
     mako_print_raw(s);
-    free(s.data);
+    mako_str_free(s);
     return 0;
 }
 
 static inline int64_t mako_fmt_printf2(MakoString fmt, MakoString a0, MakoString a1) {
     MakoString s = mako_fmt_sprintf2(fmt, a0, a1);
     mako_print_raw(s);
-    free(s.data);
+    mako_str_free(s);
     return 0;
 }
 
@@ -574,7 +574,7 @@ static inline int64_t mako_fmt_printf3(
 ) {
     MakoString s = mako_fmt_sprintf3(fmt, a0, a1, a2);
     mako_print_raw(s);
-    free(s.data);
+    mako_str_free(s);
     return 0;
 }
 
@@ -591,7 +591,7 @@ static inline int64_t mako_fmt_eprintln1(MakoString a0) {
 static inline int64_t mako_fmt_eprintf1(MakoString fmt, MakoString a0) {
     MakoString s = mako_fmt_sprintf1(fmt, a0);
     mako_eprint_raw(s);
-    free(s.data);
+    mako_str_free(s);
     return 0;
 }
 
@@ -642,7 +642,7 @@ static inline MakoString mako_fmt_sprintf_d_full(MakoString fmt, int64_t arg) {
             MakoString body =
                 mako_fmt_format_int_verb(arg, v, sharp, zero && !minus, width, plus);
             mako_fmt_append(&out, &len, &cap, body.data, body.len);
-            free(body.data);
+            mako_str_free(body);
             used = 1;
             i = si + 1;
         } else if (is_int_verb) {
@@ -692,7 +692,7 @@ static inline MakoString mako_fmt_sprintf_dd(MakoString fmt, int64_t a0, int64_t
             MakoString body =
                 mako_fmt_format_int_verb(args[ai++], v, sharp, zero && !minus, width, plus);
             mako_fmt_append(&out, &len, &cap, body.data, body.len);
-            free(body.data);
+            mako_str_free(body);
             i = si + 1;
         } else {
             i = si + 1;
@@ -706,7 +706,7 @@ static inline MakoString mako_fmt_sprintf_dd(MakoString fmt, int64_t a0, int64_t
 static inline MakoString mako_fmt_sprintf_f(MakoString fmt, double arg, int64_t prec) {
     MakoString as = mako_format_float(arg, prec);
     MakoString out = mako_fmt_sprintf1(fmt, as);
-    free(as.data);
+    mako_str_free(as);
     return out;
 }
 

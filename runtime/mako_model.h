@@ -527,7 +527,7 @@ static inline int64_t mako_model_load_safetensors(int64_t h, MakoString path) {
         int64_t d2 = e->ndim > 2 ? e->dims[2] : 0;
         int64_t d3 = e->ndim > 3 ? e->dims[3] : 0;
         if (mako_model_set_f32(h, nm, vals, d0, d1, d2, d3) == 1) loaded++;
-        free(nm.data);
+        mako_str_free(nm);
         free(vals.data);
     }
     fclose(f);
@@ -814,7 +814,7 @@ static inline int64_t mako_model_load_gguf(int64_t h, MakoString path) {
         MakoString nm = mako_str_from_cstr(t->name);
         if (mako_model_set_f32(h, nm, vals, dims4[0], dims4[1], dims4[2], dims4[3]) == 1)
             loaded++;
-        free(nm.data);
+        mako_str_free(nm);
         free(vals.data);
     }
     free(infos);
@@ -917,7 +917,7 @@ static inline int64_t mako_model_load(int64_t h, MakoString path) {
         int64_t d2 = ndim > 2 ? dims[2] : 0;
         int64_t d3 = ndim > 3 ? dims[3] : 0;
         if (mako_model_set_f32(h, nm, vals, d0, d1, d2, d3) == 1) loaded++;
-        free(nm.data);
+        mako_str_free(nm);
         free(vals.data);
     }
     fclose(f);

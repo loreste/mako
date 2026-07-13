@@ -113,7 +113,7 @@ static inline int64_t mako_trace_clear(void) {
 static inline int64_t mako_trace_begin(MakoString name) {
     if (!mako_trace_tls.active) {
         MakoString id = mako_trace_id();
-        free(id.data);
+        mako_str_free(id);
     }
     size_t n = name.len < 63 ? name.len : 63;
     if (name.data && n) memcpy(mako_trace_tls.name, name.data, n);

@@ -242,7 +242,7 @@ static inline MakoString mako_mail_b64_wrap(const char *data, size_t n) {
         o[j++] = '\n';
     }
     o[j] = 0;
-    free(b64.data);
+    mako_str_free(b64);
     return (MakoString){o, j};
 }
 
@@ -384,7 +384,7 @@ static inline MakoString mako_mail_msg_build(int64_t h) {
         mako_mail_appends(&buf, &len, &cap, "\"\r\n\r\n");
         MakoString b64 = mako_mail_b64_wrap(a->data, a->len);
         mako_mail_append(&buf, &len, &cap, b64.data, b64.len);
-        free(b64.data);
+        mako_str_free(b64);
     }
     if (has_att) {
         mako_mail_appends(&buf, &len, &cap, "--");
@@ -402,7 +402,7 @@ static inline MakoString mako_mail_msg_envelope_from(int64_t h) {
     /* extract bare address if "Name <a@b>" */
     MakoString s = mako_str_from_cstr(m->from);
     MakoString bare = mako_mail_parse_address(s);
-    free(s.data);
+    mako_str_free(s);
     return bare;
 }
 
@@ -419,21 +419,21 @@ static inline MakoString mako_mail_msg_rcpt_at(int64_t h, int64_t i) {
     if (idx < m->n_to) {
         MakoString s = mako_str_from_cstr(m->to[idx]);
         MakoString bare = mako_mail_parse_address(s);
-        free(s.data);
+        mako_str_free(s);
         return bare;
     }
     idx -= m->n_to;
     if (idx < m->n_cc) {
         MakoString s = mako_str_from_cstr(m->cc[idx]);
         MakoString bare = mako_mail_parse_address(s);
-        free(s.data);
+        mako_str_free(s);
         return bare;
     }
     idx -= m->n_cc;
     if (idx < m->n_bcc) {
         MakoString s = mako_str_from_cstr(m->bcc[idx]);
         MakoString bare = mako_mail_parse_address(s);
-        free(s.data);
+        mako_str_free(s);
         return bare;
     }
     return mako_str_from_cstr("");
@@ -577,7 +577,7 @@ static inline int64_t mako_smtp_connect(int64_t h) {
     /* Prefer dual-stack tcp_connect */
     MakoString host = mako_str_from_cstr(c->host);
     int64_t fd = mako_tcp_connect(host, c->port);
-    free(host.data);
+    mako_str_free(host);
     if (fd < 0) return 0;
     c->fd = (mako_sock_t)fd;
 #if !defined(_WIN32)
@@ -633,7 +633,7 @@ static inline int64_t mako_smtp_starttls(int64_t h) {
     /* re-EHLO after STARTTLS */
     MakoString hn = mako_str_from_cstr("mako.local");
     int64_t ok = mako_smtp_ehlo(h, hn);
-    free(hn.data);
+    mako_str_free(hn);
     return ok;
 #else
     return 0;
@@ -663,7 +663,7 @@ static inline int64_t mako_smtp_do_auth_plain(int64_t h, MakoString user, MakoSt
     free(raw);
     char cmd[1024];
     snprintf(cmd, sizeof(cmd), "AUTH PLAIN %.*s", (int)b64.len, b64.data ? b64.data : "");
-    free(b64.data);
+    mako_str_free(b64);
     int code = mako_smtp_cmd(c, cmd);
     return code >= 200 && code < 300 ? 1 : 0;
 }
@@ -674,7 +674,7 @@ static inline int64_t mako_smtp_mail_from(int64_t h, MakoString from) {
     MakoString bare = mako_mail_parse_address(from);
     char cmd[320];
     snprintf(cmd, sizeof(cmd), "MAIL FROM:<%.*s>", (int)bare.len, bare.data ? bare.data : "");
-    free(bare.data);
+    mako_str_free(bare);
     int code = mako_smtp_cmd(c, cmd);
     return code >= 200 && code < 300 ? 1 : 0;
 }
@@ -685,7 +685,7 @@ static inline int64_t mako_smtp_rcpt_to(int64_t h, MakoString to) {
     MakoString bare = mako_mail_parse_address(to);
     char cmd[320];
     snprintf(cmd, sizeof(cmd), "RCPT TO:<%.*s>", (int)bare.len, bare.data ? bare.data : "");
-    free(bare.data);
+    mako_str_free(bare);
     int code = mako_smtp_cmd(c, cmd);
     return code >= 200 && code < 300 ? 1 : 0;
 }
@@ -756,21 +756,21 @@ static inline int64_t mako_smtp_send_built(int64_t client, int64_t msg_h) {
     if (!c || !m) return 0;
     MakoString from = mako_mail_msg_envelope_from(msg_h);
     if (!mako_smtp_mail_from(client, from)) {
-        free(from.data);
+        mako_str_free(from);
         return 0;
     }
-    free(from.data);
+    mako_str_free(from);
     int64_t n = mako_mail_msg_rcpt_count(msg_h);
     if (n <= 0) return 0;
     for (int64_t i = 0; i < n; i++) {
         MakoString r = mako_mail_msg_rcpt_at(msg_h, i);
         int ok = mako_smtp_rcpt_to(client, r);
-        free(r.data);
+        mako_str_free(r);
         if (!ok) return 0;
     }
     MakoString body = mako_mail_msg_build(msg_h);
     int ok = mako_smtp_data(client, body);
-    free(body.data);
+    mako_str_free(body);
     return ok ? 1 : 0;
 }
 
@@ -794,11 +794,11 @@ static inline int64_t mako_smtp_send_msg(
     }
     MakoString hn = mako_str_from_cstr("mako.local");
     if (!mako_smtp_ehlo(c, hn)) {
-        free(hn.data);
+        mako_str_free(hn);
         mako_smtp_close(c);
         return 0;
     }
-    free(hn.data);
+    mako_str_free(hn);
     if (use_tls >= 1) {
         int tls_ok = mako_smtp_starttls(c);
         if (!tls_ok && use_tls >= 2) {
@@ -808,7 +808,7 @@ static inline int64_t mako_smtp_send_msg(
         if (tls_ok) {
             MakoString hn2 = mako_str_from_cstr("mako.local");
             (void)mako_smtp_ehlo(c, hn2);
-            free(hn2.data);
+            mako_str_free(hn2);
         }
     }
     if (user.len > 0) {
@@ -881,7 +881,7 @@ static inline int64_t mako_smtp_mock_start(int64_t port) {
 
     MakoString bind_host = mako_str_from_cstr("127.0.0.1");
     int64_t lfd = mako_tcp_listen_addr(bind_host, port);
-    free(bind_host.data);
+    mako_str_free(bind_host);
     if (lfd < 0) return -1;
     mako_smtp_mock_lfd = (int)lfd;
     /* resolve actual port if 0 */

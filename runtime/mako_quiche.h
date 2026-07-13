@@ -1622,7 +1622,7 @@ static inline int64_t mako_h3_stream_write(int64_t handle, int64_t stream_id, Ma
         ? mako_str_from_cstr("text/plain; charset=utf-8")
         : (MakoString){NULL, 0};
     int64_t rc = mako_h3_response(handle, stream_id, status, ct, body_s);
-    free(ct.data);
+    mako_str_free(ct);
     return rc;
 }
 

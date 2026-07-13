@@ -33,7 +33,7 @@ static inline void mako_log_write_trace_field(void) {
     if (tid.data && tid.len > 0) {
         fprintf(stderr, "trace=%.*s ", (int)tid.len, tid.data);
     }
-    free(tid.data);
+    mako_str_free(tid);
 #endif
 }
 
@@ -923,7 +923,7 @@ static inline MakoString mako_session_id_new(void) {
     }
     d[raw.len * 2] = 0;
     MakoString out = {d, raw.len * 2};
-    free(raw.data);
+    mako_str_free(raw);
     return out;
 }
 
@@ -1254,7 +1254,7 @@ static inline MakoString mako_cache_get(MakoString key) {
 static inline int64_t mako_cache_has(MakoString key) {
     MakoString value = mako_cache_get(key);
     int64_t ok = value.len > 0 ? 1 : 0;
-    if (value.data) free(value.data);
+    if (value.data) mako_str_free(value);
     return ok;
 }
 
@@ -2293,16 +2293,16 @@ static inline MakoString mako_sha256_raw(MakoString s) {
 #else
     {
         MakoString h = mako_sha256_hex(s);
-        if (!h.data || h.len < 64) { free(h.data); return mako_str_from_cstr(""); }
+        if (!h.data || h.len < 64) { mako_str_free(h); return mako_str_from_cstr(""); }
         char *d = (char *)malloc(33);
-        if (!d) { free(h.data); return mako_str_from_cstr(""); }
+        if (!d) { mako_str_free(h); return mako_str_from_cstr(""); }
         for (int i = 0; i < 32; i++) {
             unsigned int v = 0;
             sscanf(h.data + i * 2, "%02x", &v);
             d[i] = (char)v;
         }
         d[32] = 0;
-        free(h.data);
+        mako_str_free(h);
         return (MakoString){d, 32};
     }
 #endif
@@ -2356,16 +2356,16 @@ static inline MakoString mako_hmac_sha256_raw(MakoString key, MakoString msg) {
     {
         /* Non-crypto fallback: reuse hex digest bytes (demo only). */
         MakoString h = mako_hmac_sha256_hex(key, msg);
-        if (!h.data || h.len < 64) { free(h.data); return mako_str_from_cstr(""); }
+        if (!h.data || h.len < 64) { mako_str_free(h); return mako_str_from_cstr(""); }
         char *d = (char *)malloc(33);
-        if (!d) { free(h.data); return mako_str_from_cstr(""); }
+        if (!d) { mako_str_free(h); return mako_str_from_cstr(""); }
         for (int i = 0; i < 32; i++) {
             unsigned int v = 0;
             sscanf(h.data + i * 2, "%02x", &v);
             d[i] = (char)v;
         }
         d[32] = 0;
-        free(h.data);
+        mako_str_free(h);
         return (MakoString){d, 32};
     }
 #endif
@@ -2393,14 +2393,14 @@ static inline MakoString mako_hkdf_sha256(
     }
     MakoString prk = mako_hmac_sha256_raw(salt_s, ikm);
     if (!prk.data || prk.len == 0) {
-        free(prk.data);
+        mako_str_free(prk);
         return mako_str_from_cstr("");
     }
     size_t n = (size_t)out_len;
     size_t nblocks = (n + 31) / 32;
     char *out = (char *)malloc(n + 1);
     if (!out) {
-        free(prk.data);
+        mako_str_free(prk);
         return mako_str_from_cstr("");
     }
     unsigned char t[32];
@@ -2411,7 +2411,7 @@ static inline MakoString mako_hkdf_sha256(
         unsigned char *msg = (unsigned char *)malloc(msg_len ? msg_len : 1);
         if (!msg) {
             free(out);
-            free(prk.data);
+            mako_str_free(prk);
             return mako_str_from_cstr("");
         }
         size_t o = 0;
@@ -2427,9 +2427,9 @@ static inline MakoString mako_hkdf_sha256(
         MakoString block = mako_hmac_sha256_raw(prk, (MakoString){(char *)msg, o});
         free(msg);
         if (!block.data || block.len < 32) {
-            free(block.data);
+            mako_str_free(block);
             free(out);
-            free(prk.data);
+            mako_str_free(prk);
             return mako_str_from_cstr("");
         }
         memcpy(t, block.data, 32);
@@ -2438,9 +2438,9 @@ static inline MakoString mako_hkdf_sha256(
         if (filled + take > n) take = n - filled;
         memcpy(out + filled, block.data, take);
         filled += take;
-        free(block.data);
+        mako_str_free(block);
     }
-    free(prk.data);
+    mako_str_free(prk);
     out[n] = 0;
     return (MakoString){out, n};
 }
@@ -2503,12 +2503,12 @@ static inline MakoString mako_quic_hkdf_expand_label(
     free(info1);
     (void)info;
     if (!okm.data || okm.len < (size_t)out_len) {
-        free(okm.data);
+        mako_str_free(okm);
         return mako_str_from_cstr("");
     }
     if (okm.len == (size_t)out_len) return okm;
     MakoString clipped = mako_str_slice(okm, 0, out_len);
-    free(okm.data);
+    mako_str_free(okm);
     return clipped;
 }
 
@@ -2519,12 +2519,12 @@ static inline MakoString mako_quic_hkdf_expand_label_hex(
     MakoString raw = mako_quic_hkdf_expand_label(secret, label, out_len);
     if (!raw.data || raw.len == 0) return mako_str_from_cstr("");
     char *out = (char *)malloc(raw.len * 2 + 1);
-    if (!out) { free(raw.data); return mako_str_from_cstr(""); }
+    if (!out) { mako_str_free(raw); return mako_str_from_cstr(""); }
     for (size_t i = 0; i < raw.len; i++)
         sprintf(out + i * 2, "%02x", (unsigned char)raw.data[i]);
     out[raw.len * 2] = 0;
     size_t n = raw.len * 2;
-    free(raw.data);
+    mako_str_free(raw);
     return (MakoString){out, n};
 }
 
@@ -2555,11 +2555,11 @@ static inline MakoString mako_quic_initial_client_secret(MakoString dcid) {
     if (!dcid.data || dcid.len == 0) return mako_str_from_cstr("");
     MakoString salt = {(char *)MAKO_QUIC_V1_INITIAL_SALT, 20};
     MakoString prk = mako_quic_hkdf_extract(salt, dcid);
-    if (!prk.data || prk.len != 32) { free(prk.data); return mako_str_from_cstr(""); }
+    if (!prk.data || prk.len != 32) { mako_str_free(prk); return mako_str_from_cstr(""); }
     MakoString lab = mako_str_from_cstr("client in");
     MakoString out = mako_quic_hkdf_expand_label(prk, lab, 32);
-    free(prk.data);
-    free(lab.data);
+    mako_str_free(prk);
+    mako_str_free(lab);
     return out;
 }
 
@@ -2567,12 +2567,12 @@ static inline MakoString mako_quic_initial_client_secret_hex(MakoString dcid) {
     MakoString raw = mako_quic_initial_client_secret(dcid);
     if (!raw.data || raw.len == 0) return mako_str_from_cstr("");
     char *out = (char *)malloc(raw.len * 2 + 1);
-    if (!out) { free(raw.data); return mako_str_from_cstr(""); }
+    if (!out) { mako_str_free(raw); return mako_str_from_cstr(""); }
     for (size_t i = 0; i < raw.len; i++)
         sprintf(out + i * 2, "%02x", (unsigned char)raw.data[i]);
     out[raw.len * 2] = 0;
     size_t n = raw.len * 2;
-    free(raw.data);
+    mako_str_free(raw);
     return (MakoString){out, n};
 }
 
@@ -2582,8 +2582,8 @@ static inline MakoString mako_quic_initial_client_key(MakoString dcid) {
     if (!sec.data) return mako_str_from_cstr("");
     MakoString lab = mako_str_from_cstr("quic key");
     MakoString out = mako_quic_hkdf_expand_label(sec, lab, 16);
-    free(sec.data);
-    free(lab.data);
+    mako_str_free(sec);
+    mako_str_free(lab);
     return out;
 }
 
@@ -2592,8 +2592,8 @@ static inline MakoString mako_quic_initial_client_iv(MakoString dcid) {
     if (!sec.data) return mako_str_from_cstr("");
     MakoString lab = mako_str_from_cstr("quic iv");
     MakoString out = mako_quic_hkdf_expand_label(sec, lab, 12);
-    free(sec.data);
-    free(lab.data);
+    mako_str_free(sec);
+    mako_str_free(lab);
     return out;
 }
 
@@ -2603,8 +2603,8 @@ static inline MakoString mako_quic_initial_client_hp(MakoString dcid) {
     if (!sec.data) return mako_str_from_cstr("");
     MakoString lab = mako_str_from_cstr("quic hp");
     MakoString out = mako_quic_hkdf_expand_label(sec, lab, 16);
-    free(sec.data);
-    free(lab.data);
+    mako_str_free(sec);
+    mako_str_free(lab);
     return out;
 }
 
@@ -2612,12 +2612,12 @@ static inline MakoString mako_quic_initial_client_key_hex(MakoString dcid) {
     MakoString raw = mako_quic_initial_client_key(dcid);
     if (!raw.data || raw.len == 0) return mako_str_from_cstr("");
     char *out = (char *)malloc(raw.len * 2 + 1);
-    if (!out) { free(raw.data); return mako_str_from_cstr(""); }
+    if (!out) { mako_str_free(raw); return mako_str_from_cstr(""); }
     for (size_t i = 0; i < raw.len; i++)
         sprintf(out + i * 2, "%02x", (unsigned char)raw.data[i]);
     out[raw.len * 2] = 0;
     size_t n = raw.len * 2;
-    free(raw.data);
+    mako_str_free(raw);
     return (MakoString){out, n};
 }
 
@@ -2625,12 +2625,12 @@ static inline MakoString mako_quic_initial_client_iv_hex(MakoString dcid) {
     MakoString raw = mako_quic_initial_client_iv(dcid);
     if (!raw.data || raw.len == 0) return mako_str_from_cstr("");
     char *out = (char *)malloc(raw.len * 2 + 1);
-    if (!out) { free(raw.data); return mako_str_from_cstr(""); }
+    if (!out) { mako_str_free(raw); return mako_str_from_cstr(""); }
     for (size_t i = 0; i < raw.len; i++)
         sprintf(out + i * 2, "%02x", (unsigned char)raw.data[i]);
     out[raw.len * 2] = 0;
     size_t n = raw.len * 2;
-    free(raw.data);
+    mako_str_free(raw);
     return (MakoString){out, n};
 }
 
@@ -2638,12 +2638,12 @@ static inline MakoString mako_quic_initial_client_hp_hex(MakoString dcid) {
     MakoString raw = mako_quic_initial_client_hp(dcid);
     if (!raw.data || raw.len == 0) return mako_str_from_cstr("");
     char *out = (char *)malloc(raw.len * 2 + 1);
-    if (!out) { free(raw.data); return mako_str_from_cstr(""); }
+    if (!out) { mako_str_free(raw); return mako_str_from_cstr(""); }
     for (size_t i = 0; i < raw.len; i++)
         sprintf(out + i * 2, "%02x", (unsigned char)raw.data[i]);
     out[raw.len * 2] = 0;
     size_t n = raw.len * 2;
-    free(raw.data);
+    mako_str_free(raw);
     return (MakoString){out, n};
 }
 
@@ -2853,7 +2853,7 @@ static inline int64_t mako_pb_decode_sint(MakoString s) {
 static inline MakoString mako_pb_encode_bytes(MakoString payload) {
     MakoString lenv = mako_pb_encode_varint((int64_t)(payload.data ? payload.len : 0));
     MakoString out = mako_str_concat(lenv, payload);
-    free(lenv.data);
+    mako_str_free(lenv);
     return out;
 }
 
@@ -2872,8 +2872,8 @@ static inline MakoString mako_pb_encode_field_varint(int64_t field, int64_t valu
     MakoString key = mako_pb_encode_key(field, 0);
     MakoString val = mako_pb_encode_varint(value);
     MakoString out = mako_str_concat(key, val);
-    free(key.data);
-    free(val.data);
+    mako_str_free(key);
+    mako_str_free(val);
     return out;
 }
 
@@ -2882,12 +2882,12 @@ static inline MakoString mako_pb_encode_simple(MakoString name, int64_t id) {
     MakoString k1 = mako_pb_encode_key(1, 2);
     MakoString v1 = mako_pb_encode_bytes(name);
     MakoString f1 = mako_str_concat(k1, v1);
-    free(k1.data);
-    free(v1.data);
+    mako_str_free(k1);
+    mako_str_free(v1);
     MakoString f2 = mako_pb_encode_field_varint(2, id);
     MakoString out = mako_str_concat(f1, f2);
-    free(f1.data);
-    free(f2.data);
+    mako_str_free(f1);
+    mako_str_free(f2);
     return out;
 }
 
@@ -2973,12 +2973,12 @@ static inline MakoString mako_pb_encode_nested(
     MakoString k3 = mako_pb_encode_key(3, 2);
     MakoString v3 = mako_pb_encode_bytes(inner);
     MakoString f3 = mako_str_concat(k3, v3);
-    free(k3.data);
-    free(v3.data);
-    free(inner.data);
+    mako_str_free(k3);
+    mako_str_free(v3);
+    mako_str_free(inner);
     MakoString out = mako_str_concat(outer, f3);
-    free(outer.data);
-    free(f3.data);
+    mako_str_free(outer);
+    mako_str_free(f3);
     return out;
 }
 
@@ -3004,11 +3004,11 @@ static inline MakoString mako_pb_encode_repeated_varint(int64_t a, int64_t b, in
     MakoString f2 = mako_pb_encode_field_varint(4, b);
     MakoString f3 = mako_pb_encode_field_varint(4, c);
     MakoString t = mako_str_concat(f1, f2);
-    free(f1.data);
-    free(f2.data);
+    mako_str_free(f1);
+    mako_str_free(f2);
     MakoString out = mako_str_concat(t, f3);
-    free(t.data);
-    free(f3.data);
+    mako_str_free(t);
+    mako_str_free(f3);
     return out;
 }
 
@@ -3101,7 +3101,7 @@ static inline MakoString mako_grpc_message_payload(MakoString framed) {
 static inline MakoString mako_grpc_unary_request(MakoString name, int64_t id) {
     MakoString pb = mako_pb_encode_simple(name, id);
     MakoString framed = mako_grpc_encode_message(pb);
-    free(pb.data);
+    mako_str_free(pb);
     return framed;
 }
 
@@ -3110,7 +3110,7 @@ static inline MakoString mako_grpc_unary_name(MakoString framed) {
     MakoString payload = mako_grpc_message_payload(framed);
     if (!payload.data) return (MakoString){NULL, 0};
     MakoString name = mako_pb_simple_name(payload);
-    free(payload.data);
+    mako_str_free(payload);
     return name;
 }
 
@@ -3118,7 +3118,7 @@ static inline int64_t mako_grpc_unary_id(MakoString framed) {
     MakoString payload = mako_grpc_message_payload(framed);
     if (!payload.data) return 0;
     int64_t id = mako_pb_simple_id(payload);
-    free(payload.data);
+    mako_str_free(payload);
     return id;
 }
 
@@ -3175,15 +3175,15 @@ static inline MakoString mako_grpc_http2_unary(
 ) {
     MakoString ct = mako_grpc_content_type();
     MakoString lit = mako_hpack_encode_literal(mako_str_from_cstr("content-type"), ct);
-    free(ct.data);
+    mako_str_free(ct);
     MakoString hdrs = mako_http2_headers_frame(stream, lit, 0x4); /* END_HEADERS */
-    free(lit.data);
+    mako_str_free(lit);
     MakoString body = mako_grpc_unary_request(name, id);
     MakoString data = mako_http2_data_frame(stream, body, 0x1); /* END_STREAM */
-    free(body.data);
+    mako_str_free(body);
     MakoString out = mako_http2_concat_frames(hdrs, data);
-    free(hdrs.data);
-    free(data.data);
+    mako_str_free(hdrs);
+    mako_str_free(data);
     return out;
 }
 
@@ -3199,7 +3199,7 @@ static inline MakoString mako_grpc_http2_unary_payload(MakoString buf) {
         if (typ == 0) {
             MakoString frame = mako_str_slice(buf, (int64_t)off, (int64_t)(off + 9 + (size_t)len));
             MakoString payload = mako_http2_frame_payload(frame);
-            free(frame.data);
+            mako_str_free(frame);
             return payload;
         }
         off += 9 + (size_t)len;
@@ -3214,30 +3214,30 @@ static inline MakoString mako_grpc_http2_unary_response_status(
 ) {
     MakoString ct = mako_grpc_content_type();
     MakoString lit = mako_hpack_encode_literal(mako_str_from_cstr("content-type"), ct);
-    free(ct.data);
+    mako_str_free(ct);
     MakoString hdrs = mako_http2_headers_frame(stream, lit, 0x4); /* END_HEADERS */
-    free(lit.data);
+    mako_str_free(lit);
     MakoString body = mako_grpc_unary_request(name, id); /* same wire as request msg */
     MakoString data = mako_http2_data_frame(stream, body, 0);
-    free(body.data);
+    mako_str_free(body);
     char scode[16];
     int sn = snprintf(scode, sizeof(scode), "%lld", (long long)status);
     if (sn < 0 || sn >= (int)sizeof(scode)) {
-        free(hdrs.data);
-        free(data.data);
+        mako_str_free(hdrs);
+        mako_str_free(data);
         return (MakoString){NULL, 0};
     }
     MakoString tlit = mako_hpack_encode_literal(
         mako_str_from_cstr("grpc-status"), mako_str_from_cstr(scode)
     );
     MakoString th = mako_http2_headers_frame(stream, tlit, 0x5); /* END_HEADERS|END_STREAM */
-    free(tlit.data);
+    mako_str_free(tlit);
     MakoString mid = mako_http2_concat_frames(hdrs, data);
-    free(hdrs.data);
-    free(data.data);
+    mako_str_free(hdrs);
+    mako_str_free(data);
     MakoString out = mako_http2_concat_frames(mid, th);
-    free(mid.data);
-    free(th.data);
+    mako_str_free(mid);
+    mako_str_free(th);
     return out;
 }
 
@@ -3274,7 +3274,7 @@ static inline int64_t mako_grpc_http2_response_status(MakoString buf) {
                 /* Trailer HEADERS after DATA */
                 MakoString frame = mako_str_slice(buf, (int64_t)off, (int64_t)(off + 9 + (size_t)len));
                 MakoString pl = mako_http2_frame_payload(frame);
-                free(frame.data);
+                mako_str_free(frame);
                 if (mako_hpack_decode_block(pl) >= 0) {
                     int64_t cnt = mako_hpack_decoded_count();
                     for (int64_t i = 0; i < cnt; i++) {
@@ -3291,11 +3291,11 @@ static inline int64_t mako_grpc_http2_response_status(MakoString buf) {
                             }
                             if (any) status = v;
                         }
-                        free(nm.data);
-                        free(vl.data);
+                        mako_str_free(nm);
+                        mako_str_free(vl);
                     }
                 }
-                free(pl.data);
+                mako_str_free(pl);
             }
         } else if (typ == 0) {
             saw_data = 1;
@@ -3313,7 +3313,7 @@ static inline MakoString mako_grpc_http2_stream_data(
     MakoString body = mako_grpc_unary_request(name, id);
     int64_t flags = end_stream ? 0x1 : 0;
     MakoString data = mako_http2_data_frame(stream, body, flags);
-    free(body.data);
+    mako_str_free(body);
     return data;
 }
 
@@ -3324,8 +3324,8 @@ static inline MakoString mako_grpc_http2_stream_two(
     MakoString a = mako_grpc_http2_stream_data(stream, name1, id1, 0);
     MakoString b = mako_grpc_http2_stream_data(stream, name2, id2, 1);
     MakoString out = mako_http2_concat_frames(a, b);
-    free(a.data);
-    free(b.data);
+    mako_str_free(a);
+    mako_str_free(b);
     return out;
 }
 
@@ -3363,8 +3363,8 @@ static inline MakoString mako_grpc_http2_client_stream_flow(
     MakoString req = mako_grpc_http2_stream_two(stream, name1, id1, name2, id2);
     MakoString resp = mako_grpc_http2_unary_response_status(stream, reply, rid, status);
     MakoString out = mako_http2_concat_frames(req, resp);
-    free(req.data);
-    free(resp.data);
+    mako_str_free(req);
+    mako_str_free(resp);
     return out;
 }
 

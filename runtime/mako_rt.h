@@ -4341,14 +4341,14 @@ static inline MakoString mako_temp_file(MakoString prefix) {
     snprintf(path, sizeof(path), "%s\\%s-%u-%u.tmp",
              dir.data ? dir.data : ".", pfx, (unsigned)_getpid(),
              (unsigned)(time(NULL) & 0xfffffff));
-    free(dir.data);
+    mako_str_free(dir);
     FILE *f = fopen(path, "wb");
     if (!f) return mako_str_from_cstr("");
     fclose(f);
     return mako_str_from_cstr(path);
 #else
     snprintf(path, sizeof(path), "%s/%s-XXXXXX", dir.data ? dir.data : "/tmp", pfx);
-    free(dir.data);
+    mako_str_free(dir);
     int fd = mkstemp(path);
     if (fd < 0) return mako_str_from_cstr("");
     close(fd);
@@ -4943,6 +4943,8 @@ static inline void mako_test_install_crash_handler(void) {
     signal(SIGABRT, mako_test_crash_handler);
     signal(SIGFPE, mako_test_crash_handler);
 #else
+    /* Closed sockets / proxy races: write must not kill the test process. */
+    signal(SIGPIPE, SIG_IGN);
     /* Run the handler on a dedicated stack (SA_ONSTACK) so even a
      * stack-overflow SIGSEGV — which leaves no room on the normal stack — can
      * still report which test crashed. */
