@@ -81,6 +81,8 @@ pub struct Codegen {
     fn_result_option_inner: HashMap<String, String>,
     /// When Result Ok is Option[…], remaining Some-kinds after the first Option unbox.
     fn_result_option_chain: HashMap<String, Vec<String>>,
+    /// When Result Ok is Result[T, E], kind of T for nested match.
+    fn_result_result_inner: HashMap<String, String>,
     /// Local Result binding → Ok payload kind.
     result_ok_kinds: HashMap<String, String>,
     /// Local Result → struct name for Ok struct payloads.
@@ -89,6 +91,8 @@ pub struct Codegen {
     result_option_inners: HashMap<String, String>,
     /// Local Result → remaining Option Some-kind chain after Ok unbox.
     result_option_chains: HashMap<String, Vec<String>>,
+    /// Local Result → inner Result Ok kind when Ok is Result.
+    result_result_inners: HashMap<String, String>,
     /// Function name → Option Some payload kind.
     fn_option_some_kind: HashMap<String, String>,
     /// Function name → remaining Some-kinds for deeper Option layers.
@@ -148,10 +152,12 @@ impl Codegen {
             fn_result_ok_struct: HashMap::new(),
             fn_result_option_inner: HashMap::new(),
             fn_result_option_chain: HashMap::new(),
+            fn_result_result_inner: HashMap::new(),
             result_ok_kinds: HashMap::new(),
             result_ok_structs: HashMap::new(),
             result_option_inners: HashMap::new(),
             result_option_chains: HashMap::new(),
+            result_result_inners: HashMap::new(),
             fn_option_some_kind: HashMap::new(),
             fn_option_chain: HashMap::new(),
             fn_option_some_struct: HashMap::new(),
@@ -176,6 +182,7 @@ impl Codegen {
             TypeExpr::Named(t) if t == "string" => "string",
             TypeExpr::Named(t) if t == "float" || t == "float64" => "float",
             TypeExpr::Generic(n, _) if n == "Option" => "option",
+            TypeExpr::Generic(n, _) if n == "Result" => "result",
             TypeExpr::Array(inner) => match inner.as_ref() {
                 TypeExpr::Named(n) if n == "string" => "slice_str",
                 TypeExpr::Named(n) if n == "float" || n == "float64" => "slice_float",
@@ -245,6 +252,21 @@ impl Codegen {
                 if let TypeExpr::Generic(on, oargs) = &args[0] {
                     if on == "Option" && !oargs.is_empty() {
                         return Some(Self::value_payload_kind(&oargs[0]));
+                    }
+                }
+                None
+            }
+            _ => None,
+        }
+    }
+
+    /// When Result[Result[T, E], E2], the Ok kind of the inner Result.
+    fn result_result_inner_kind(ty: &TypeExpr) -> Option<&'static str> {
+        match ty {
+            TypeExpr::Generic(n, args) if n == "Result" && !args.is_empty() => {
+                if let TypeExpr::Generic(rn, rargs) = &args[0] {
+                    if rn == "Result" && !rargs.is_empty() {
+                        return Some(Self::value_payload_kind(&rargs[0]));
                     }
                 }
                 None
@@ -435,6 +457,23 @@ impl Codegen {
                         // Type::Option(t) => Option_{t.mono_tag()}_
                         return format!("Option_{}_", self.mono_tag_for_expr(&args[0]));
                     }
+                    if name == "Ok" && args.len() == 1 {
+                        // Type::Result(t, string) default err → Result_{t}_string
+                        return format!("Result_{}_string", self.mono_tag_for_expr(&args[0]));
+                    }
+                }
+                c_type_mono_tag(&self.peek_expr_c_ty(e))
+            }
+            Expr::Ident(n) if self.locals.get(n).map(|t| t.as_str()) == Some("MakoResultInt") => {
+                if let Some(k) = self.result_ok_kinds.get(n) {
+                    let leaf = match k.as_str() {
+                        "string" => "string",
+                        "float" => "float",
+                        "result" => "Result_int_string",
+                        "option" => "Option_int_",
+                        other => other,
+                    };
+                    return format!("Result_{leaf}_string");
                 }
                 c_type_mono_tag(&self.peek_expr_c_ty(e))
             }
@@ -540,6 +579,14 @@ impl Codegen {
         self.fn_result_option_chain
             .get(&mono)
             .or_else(|| self.fn_result_option_chain.get(fname))
+            .cloned()
+    }
+
+    fn call_result_result_inner(&self, fname: &str, args: &[Expr]) -> Option<String> {
+        let mono = self.generic_mono_name_for_call(fname, args);
+        self.fn_result_result_inner
+            .get(&mono)
+            .or_else(|| self.fn_result_result_inner.get(fname))
             .cloned()
     }
 
@@ -953,6 +1000,10 @@ impl Codegen {
                             if !chain.is_empty() {
                                 self.fn_result_option_chain
                                     .insert(f.name.clone(), chain);
+                            }
+                            if let Some(rik) = Self::result_result_inner_kind(rt) {
+                                self.fn_result_result_inner
+                                    .insert(f.name.clone(), rik.into());
                             }
                         }
                         if matches!(rt, TypeExpr::Generic(n, _) if n == "Option") {
@@ -2184,6 +2235,9 @@ impl Codegen {
                             if let Some(ch) = self.call_result_option_chain(fname, args) {
                                 self.result_option_chains.insert(name.clone(), ch);
                             }
+                            if let Some(rik) = self.call_result_result_inner(fname, args) {
+                                self.result_result_inners.insert(name.clone(), rik);
+                            }
                         }
                     }
                 }
@@ -2925,6 +2979,18 @@ impl Codegen {
                                 let boxn = self.fresh("optbox");
                                 self.line(&format!(
                                     "MakoOptionInt *{boxn} = (MakoOptionInt*)malloc(sizeof(MakoOptionInt));"
+                                ));
+                                self.line(&format!("*{boxn} = {v};"));
+                                return (
+                                    "MakoResultInt".into(),
+                                    format!("mako_ok_ptr((void*){boxn})"),
+                                );
+                            }
+                            // Result[T,E] Ok: heap-box nested Result
+                            if vty == "MakoResultInt" {
+                                let boxn = self.fresh("resbox");
+                                self.line(&format!(
+                                    "MakoResultInt *{boxn} = (MakoResultInt*)malloc(sizeof(MakoResultInt));"
                                 ));
                                 self.line(&format!("*{boxn} = {v};"));
                                 return (
@@ -12983,6 +13049,20 @@ impl Codegen {
             if let Some(ch) = opt_chain {
                 self.result_option_chains.insert(scrut.clone(), ch);
             }
+            let res_inner = match scrutinee {
+                Expr::Ident(n) => self.result_result_inners.get(n).cloned(),
+                Expr::Call { callee, args } => {
+                    if let Expr::Ident(fname) = callee.as_ref() {
+                        self.call_result_result_inner(fname, args)
+                    } else {
+                        None
+                    }
+                }
+                _ => self.result_result_inners.get(&sval).cloned(),
+            };
+            if let Some(ik) = res_inner {
+                self.result_result_inners.insert(scrut.clone(), ik);
+            }
         }
         if sty == "MakoOptionInt" {
             let some_c = match scrutinee {
@@ -13309,6 +13389,20 @@ impl Codegen {
                             }
                             if let Some(ch) = self.result_option_chains.get(scrut).cloned() {
                                 self.option_chains.insert(bindings[0].clone(), ch);
+                            }
+                        } else if ok_kind == "result" {
+                            let b = mangle(&bindings[0]);
+                            let p = self.fresh("okres");
+                            self.locals.insert(bindings[0].clone(), "MakoResultInt".into());
+                            self.line(&format!(
+                                "MakoResultInt *{p} = (MakoResultInt*)mako_result_ok_ptr({scrut});"
+                            ));
+                            self.line(&format!("MakoResultInt {b};"));
+                            self.line(&format!(
+                                "if ({p}) {{ {b} = *{p}; free({p}); }} else {{ memset(&{b}, 0, sizeof({b})); }}"
+                            ));
+                            if let Some(ik) = self.result_result_inners.get(scrut).cloned() {
+                                self.result_ok_kinds.insert(bindings[0].clone(), ik);
                             }
                         } else {
                             self.locals.insert(bindings[0].clone(), "int64_t".into());

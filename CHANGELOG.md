@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.0 — 2026-07-13 (wave 21 queue)
+
+- Nested `Ok(Ok(x))` typechecks against inner Result expected type
+- `Result[Result[T, E], E2]` Ok box/unbox + match; `wrap_ok(Ok(...))` mono
+- Regex `\p{Canadian}` / Deseret / Phoenician seeds
+- TSan CI: `wave20_queue_test`, `chan_float_test`
+- Tests: `examples/testing/wave21_queue_test.mko`
+
 ## 0.1.0 — 2026-07-13 (wave 20 queue)
 
 - Multi-layer Option nest chains (triple+ string/int; `Result[Option³[T]]`)

@@ -1,0 +1,67 @@
+// Wave 21: Result[Result[T]] nest, wrap_ok(Ok(...)), Canadian script.
+
+fn wrap_ok[T](x: T) -> Result[T, string] {
+    return Ok(x)
+}
+
+fn nest_res[T](x: T) -> Result[Result[T, string], string] {
+    return Ok(Ok(x))
+}
+
+fn nest_res_err[T](x: T) -> Result[Result[T, string], string] {
+    return Ok(Err("inner"))
+}
+
+fn TestNestResInt() {
+    match nest_res(3) {
+        Ok(inner) => match inner {
+            Ok(v) => assert_eq(v, 3),
+            Err(_) => assert(false),
+        },
+        Err(_) => assert(false),
+    }
+}
+
+fn TestNestResStr() {
+    match nest_res("hi") {
+        Ok(inner) => match inner {
+            Ok(s) => assert_eq_str(s, "hi"),
+            Err(_) => assert(false),
+        },
+        Err(_) => assert(false),
+    }
+}
+
+fn TestNestResInnerErr() {
+    match nest_res_err(1) {
+        Ok(inner) => match inner {
+            Ok(_) => assert(false),
+            Err(msg) => assert_eq_str(msg, "inner"),
+        },
+        Err(_) => assert(false),
+    }
+}
+
+fn TestWrapOkNestedResult() {
+    match wrap_ok(Ok(9)) {
+        Ok(inner) => match inner {
+            Ok(v) => assert_eq(v, 9),
+            Err(_) => assert(false),
+        },
+        Err(_) => assert(false),
+    }
+}
+
+fn TestWrapOkNestedResultStr() {
+    match wrap_ok(Ok("z")) {
+        Ok(inner) => match inner {
+            Ok(s) => assert_eq_str(s, "z"),
+            Err(_) => assert(false),
+        },
+        Err(_) => assert(false),
+    }
+}
+
+fn TestRegexUnicodeCanadian() {
+    assert(regex_match("\\p{Canadian}+", "ᐁᐂ"))
+}

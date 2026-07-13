@@ -3056,6 +3056,13 @@ static inline int mako_re_unicode_prop_match(const char *name, size_t nlen, uint
         return (cp >= 0x1680 && cp <= 0x169F);
     if (nlen == 6 && memcmp(name, "Gothic", 6) == 0)
         return (cp >= 0x10330 && cp <= 0x1034F);
+    if (nlen == 7 && memcmp(name, "Deseret", 7) == 0)
+        return (cp >= 0x10400 && cp <= 0x1044F);
+    if (nlen == 10 && memcmp(name, "Phoenician", 10) == 0)
+        return (cp >= 0x10900 && cp <= 0x1091F);
+    /* BMP fallbacks for tests without astral UTF-8 decode */
+    if (nlen == 8 && memcmp(name, "Canadian", 8) == 0)
+        return (cp >= 0x1400 && cp <= 0x167F);
     return 0;
 }
 

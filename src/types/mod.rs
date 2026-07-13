@@ -8432,32 +8432,41 @@ impl TypeChecker {
                     }
                     match name.as_str() {
                         "Ok" if args.len() == 1 => {
-                            let t = self.check_expr(&args[0])?;
-                            // Prefer expected return shape when checking a Result-returning fn
-                            if let Type::Result(ok, err) = &self.current_ret {
-                                if !self.compatible(&t, ok) {
+                            // Prefer expected return shape when checking a Result-returning fn.
+                            // Nested Ok(Ok(x)): temporarily set current_ret to the inner Result
+                            // so the argument's Ok/Err constructors typecheck against it.
+                            if let Type::Result(ok, err) = self.current_ret.clone() {
+                                let saved = self.current_ret.clone();
+                                if matches!(ok.as_ref(), Type::Result(_, _)) {
+                                    self.current_ret = (*ok).clone();
+                                }
+                                let t = self.check_expr(&args[0])?;
+                                self.current_ret = saved;
+                                if !self.compatible(&t, &ok) {
                                     return Err(TypeError::new(format!(
                                         "Ok(...) type mismatch: expected {}, got {}",
                                         ok.display(),
                                         t.display()
                                     )));
                                 }
-                                return Ok(Type::Result(ok.clone(), err.clone()));
+                                return Ok(Type::Result(ok, err));
                             }
+                            let t = self.check_expr(&args[0])?;
                             return Ok(Type::Result(Box::new(t), Box::new(Type::String)));
                         }
                         "Err" if args.len() == 1 => {
-                            let e = self.check_expr(&args[0])?;
-                            if let Type::Result(ok, err) = &self.current_ret {
-                                if !self.compatible(&e, err) {
+                            if let Type::Result(ok, err) = self.current_ret.clone() {
+                                let e = self.check_expr(&args[0])?;
+                                if !self.compatible(&e, &err) {
                                     return Err(TypeError::new(format!(
                                         "Err(...) type mismatch: expected {}, got {}",
                                         err.display(),
                                         e.display()
                                     )));
                                 }
-                                return Ok(Type::Result(ok.clone(), err.clone()));
+                                return Ok(Type::Result(ok, err));
                             }
+                            let e = self.check_expr(&args[0])?;
                             return Ok(Type::Result(Box::new(Type::Int), Box::new(e)));
                         }
                         "error" if args.len() == 1 => {

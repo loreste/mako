@@ -2215,11 +2215,13 @@ Tests: `examples/testing/overflow_shutdown_test.mko`. Multi-error recovery:
 | `map[int]int` | map pointer via `mako_ok_ptr` (`map_ii`) |
 | `map[string]string` | map pointer via `mako_ok_ptr` (`map_ss`) |
 | `Option[U]` | heap-boxed `MakoOptionInt` via `mako_ok_ptr` (`option`) |
+| `Result[U, E]` | heap-boxed nested `MakoResultInt` via `mako_ok_ptr` (`result`) |
 
 `Option[T]` uses the same payload slots (`value` / `ok_s` / `ok_f` / ptr). Generic
 `Some(x)` / `None` and match `Some(v)` work for int/string/float, boxed containers,
-and multi-layer Option nests (`Option[Option[Option[T]]]`,
-`Result[Option[Option[Option[T]]]]`) via kind chains.
+and multi-layer Option nests via kind chains. Nested `Ok(Ok(x))` /
+`Result[Result[T, E], E2]` is supported (typecheck pushes expected Result for
+inner Ok/Err; codegen boxes the inner Result).
 
 | Err type `E` | Encoding |
 |--------------|----------|
@@ -2263,7 +2265,8 @@ Tests: `result_enum_test.mko`, `job_join_typed_test.mko` (Result across kick/joi
 `wave17_queue_test.mko` (generic mono for `[]int`/`[]string`/`[]Struct`/maps),
 `wave18_queue_test.mko` (generic `Option[T]`, nested `Result[Option[T]]`),
 `wave19_queue_test.mko` (Option containers, `Option[Option[T]]`, `jpeg_has_sof0`),
-`wave20_queue_test.mko` (triple Option nest string/int, Option struct).
+`wave20_queue_test.mko` (triple Option nest string/int, Option struct),
+`wave21_queue_test.mko` (`Result[Result[T]]`, `wrap_ok(Ok(...))`).
 
 ---
 
