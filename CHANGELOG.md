@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.0 — 2026-07-13 (wave 20 queue)
+
+- Multi-layer Option nest chains (triple+ string/int; `Result[Option³[T]]`)
+- Stable `Type::mono_tag` for Option/Result; `Some(...)` mono tag alignment
+- Mid-label continue NLL bad case; Braille/Ogham/Gothic script seeds
+- TSan CI: `wave19_queue_test`, `chan_struct_test`
+- Tests: `examples/testing/wave20_queue_test.mko`
+
 ## 0.1.0 — 2026-07-13 (wave 19 queue)
 
 - `Option` containers (`[]int`, maps) and `Option[Option[T]]` nesting
