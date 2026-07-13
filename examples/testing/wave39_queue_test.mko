@@ -1,0 +1,151 @@
+// Wave 39: `?` unwrap for slices and maps (Result and Option).
+
+fn res_ints() -> Result[[]int, string] {
+    return Ok([1, 2, 3])
+}
+
+fn use_res_ints() -> Result[int, string] {
+    let xs = res_ints()?
+    return Ok(len(xs) + xs[0])
+}
+
+fn res_ints_err() -> Result[[]int, string] {
+    return Err("no")
+}
+
+fn use_res_ints_err() -> Result[int, string] {
+    let xs = res_ints_err()?
+    return Ok(len(xs))
+}
+
+fn res_strs() -> Result[[]string, string] {
+    return Ok(["a", "b"])
+}
+
+fn use_res_strs() -> Result[int, string] {
+    let xs = res_strs()?
+    return Ok(len(xs))
+}
+
+fn res_floats() -> Result[[]float, string] {
+    return Ok([1.5, 2.5])
+}
+
+fn use_res_floats() -> Result[int, string] {
+    let xs = res_floats()?
+    return Ok(len(xs))
+}
+
+fn opt_ints() -> Option[[]int] {
+    return Some([10, 20])
+}
+
+fn use_opt_ints() -> Option[int] {
+    let xs = opt_ints()?
+    return Some(xs[1])
+}
+
+fn opt_none_ints() -> Option[[]int] {
+    return None
+}
+
+fn use_opt_none() -> Option[int] {
+    let xs = opt_none_ints()?
+    return Some(len(xs))
+}
+
+fn res_map() -> Result[map[string]int, string] {
+    let mut m = make(map[string]int)
+    m["k"] = 7
+    return Ok(m)
+}
+
+fn use_res_map() -> Result[int, string] {
+    let m = res_map()?
+    return Ok(m["k"])
+}
+
+fn res_map_ii() -> Result[map[int]int, string] {
+    let mut m = make(map[int]int)
+    m[1] = 42
+    return Ok(m)
+}
+
+fn use_res_map_ii() -> Result[int, string] {
+    let m = res_map_ii()?
+    return Ok(m[1])
+}
+
+fn opt_map() -> Option[map[string]int] {
+    let mut m = make(map[string]int)
+    m["z"] = 9
+    return Some(m)
+}
+
+fn use_opt_map() -> Option[int] {
+    let m = opt_map()?
+    return Some(m["z"])
+}
+
+fn TestResInts() {
+    match use_res_ints() {
+        Ok(n) => assert_eq(n, 4),
+        Err(_) => assert(false),
+    }
+}
+
+fn TestResIntsErr() {
+    match use_res_ints_err() {
+        Ok(_) => assert(false),
+        Err(m) => assert_eq_str(m, "no"),
+    }
+}
+
+fn TestResStrs() {
+    match use_res_strs() {
+        Ok(n) => assert_eq(n, 2),
+        Err(_) => assert(false),
+    }
+}
+
+fn TestResFloats() {
+    match use_res_floats() {
+        Ok(n) => assert_eq(n, 2),
+        Err(_) => assert(false),
+    }
+}
+
+fn TestOptInts() {
+    match use_opt_ints() {
+        Some(n) => assert_eq(n, 20),
+        None => assert(false),
+    }
+}
+
+fn TestOptNone() {
+    match use_opt_none() {
+        Some(_) => assert(false),
+        None => assert(true),
+    }
+}
+
+fn TestResMap() {
+    match use_res_map() {
+        Ok(n) => assert_eq(n, 7),
+        Err(_) => assert(false),
+    }
+}
+
+fn TestResMapIi() {
+    match use_res_map_ii() {
+        Ok(n) => assert_eq(n, 42),
+        Err(_) => assert(false),
+    }
+}
+
+fn TestOptMap() {
+    match use_opt_map() {
+        Some(n) => assert_eq(n, 9),
+        None => assert(false),
+    }
+}

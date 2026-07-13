@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.0 — 2026-07-13 (wave 39 queue)
+
+- `?` unwrap for **[]int / []string / []float** and **map** payloads
+- Result and Option carriers; Err/None early-return preserved
+- Bad: `try_slice_in_void`; TSan wave38
+- Tests: `examples/testing/wave39_queue_test.mko`
+
 ## 0.1.0 — 2026-07-13 (wave 38 queue)
 
 - `?` unwrap for **struct**, nested **Option**, nested **Result** payloads
