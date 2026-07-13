@@ -1,0 +1,99 @@
+// Wave 29: 4-layer Option/Result edges, JFIF version + SOF0 sampling, scripts.
+
+fn four_ok() -> Option[Result[Option[Result[int, string]], string]] {
+    return Some(Ok(Some(Ok(42))))
+}
+
+fn four_outer_none() -> Option[Result[Option[Result[int, string]], string]] {
+    return None
+}
+
+fn four_mid_none() -> Option[Result[Option[Result[int, string]], string]] {
+    return Some(Ok(None))
+}
+
+fn four_mid_err() -> Option[Result[Option[Result[int, string]], string]] {
+    return Some(Err("mid"))
+}
+
+fn four_inner_err() -> Option[Result[Option[Result[int, string]], string]] {
+    return Some(Ok(Some(Err("in"))))
+}
+
+fn TestFourOk() {
+    match four_ok() {
+        Some(r) => match r {
+            Ok(o) => match o {
+                Some(r2) => match r2 {
+                    Ok(n) => assert_eq(n, 42),
+                    Err(_) => assert(false),
+                },
+                None => assert(false),
+            },
+            Err(_) => assert(false),
+        },
+        None => assert(false),
+    }
+}
+
+fn TestFourOuterNone() {
+    match four_outer_none() {
+        Some(_) => assert(false),
+        None => assert(true),
+    }
+}
+
+fn TestFourMidNone() {
+    match four_mid_none() {
+        Some(r) => match r {
+            Ok(o) => match o {
+                Some(_) => assert(false),
+                None => assert(true),
+            },
+            Err(_) => assert(false),
+        },
+        None => assert(false),
+    }
+}
+
+fn TestFourMidErr() {
+    match four_mid_err() {
+        Some(r) => match r {
+            Ok(_) => assert(false),
+            Err(m) => assert_eq_str(m, "mid"),
+        },
+        None => assert(false),
+    }
+}
+
+fn TestFourInnerErr() {
+    match four_inner_err() {
+        Some(r) => match r {
+            Ok(o) => match o {
+                Some(r2) => match r2 {
+                    Ok(_) => assert(false),
+                    Err(m) => assert_eq_str(m, "in"),
+                },
+                None => assert(false),
+            },
+            Err(_) => assert(false),
+        },
+        None => assert(false),
+    }
+}
+
+fn TestJpegJfifVersionAndSampling() {
+    let gray = "ABCDEFGHABCDEFGHABCDEFGHABCDEFGHABCDEFGHABCDEFGHABCDEFGHABCDEFGH"
+    let j = jpeg_encode_gray_jfif(8, 8, gray)
+    assert_eq(jpeg_jfif_major(j), 1)
+    assert_eq(jpeg_jfif_minor(j), 1)
+    assert_eq(jpeg_sof0_sampling(j), 17)
+    assert_eq(jpeg_is_baseline_gray(j), 1)
+    assert_eq(jpeg_is_jfif(j), 1)
+}
+
+fn TestRegexUnicodeOlChikiLimbuLepcha() {
+    assert(regex_match("\\p{Ol_Chiki}", "ᱚ"))
+    assert(regex_match("\\p{Limbu}", "ᤀ"))
+    assert(regex_match("\\p{Lepcha}", "ᰀ"))
+}

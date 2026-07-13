@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.0 — 2026-07-13 (wave 29 queue)
+
+- 4-layer `Option[Result[Option[Result[T]]]]` Ok/None/Err edges
+- `jpeg_jfif_major` / `jpeg_jfif_minor`; `jpeg_sof0_sampling` (Hi/Vi)
+- match+for NLL bad; reflect map field reject; Ol_Chiki/Limbu/Lepcha scripts
+- TSan wave28
+- Tests: `examples/testing/wave29_queue_test.mko`
+
 ## 0.1.0 — 2026-07-13 (wave 28 queue)
 
 - Deep mixed None/Err (`Ok(Some(Ok(None)))`, mid Err); `Option[[]int]` None

@@ -4142,6 +4142,65 @@ static inline int64_t mako_jpeg_is_baseline_gray(MakoString jpeg) {
     return 1;
 }
 
+/* Locate leading APP0 JFIF segment; out_off is start of FF E0. */
+static inline int mako_jpeg_find_app0_jfif(MakoString jpeg, size_t *out_off) {
+    if (jpeg.len < 11) return 0;
+    const unsigned char *p = (const unsigned char *)jpeg.data;
+    if (p[0] != 0xFF || p[1] != 0xD8) return 0;
+    /* Prefer immediate APP0 after SOI (Mako JFIF shell). */
+    if (p[2] == 0xFF && p[3] == 0xE0 && jpeg.len >= 11 && memcmp(p + 6, "JFIF", 4) == 0) {
+        if (out_off) *out_off = 2;
+        return 1;
+    }
+    /* Scan markers for APP0 + JFIF identifier. */
+    size_t i = 2;
+    while (i + 9 < jpeg.len) {
+        if (p[i] != 0xFF) { i++; continue; }
+        unsigned char m = p[i + 1];
+        if (m == 0xD9) break;
+        if (m == 0xE0) {
+            if (i + 9 < jpeg.len && memcmp(p + i + 4, "JFIF", 4) == 0) {
+                if (out_off) *out_off = i;
+                return 1;
+            }
+        }
+        if (m == 0xD8 || m == 0x01 || (m >= 0xD0 && m <= 0xD7)) {
+            i += 2;
+            continue;
+        }
+        if (i + 3 >= jpeg.len) break;
+        uint16_t seglen = ((uint16_t)p[i + 2] << 8) | p[i + 3];
+        if (seglen < 2) break;
+        i += 2 + (size_t)seglen;
+    }
+    return 0;
+}
+
+/* APP0 JFIF: after FF E0 len(2) "JFIF\\0"(5) major(1) minor(1) … */
+static inline int64_t mako_jpeg_jfif_major(MakoString jpeg) {
+    size_t off = 0;
+    if (!mako_jpeg_find_app0_jfif(jpeg, &off)) return 0;
+    if (off + 2 + 2 + 5 + 1 > jpeg.len) return 0;
+    return (int64_t)(unsigned char)jpeg.data[off + 2 + 2 + 5];
+}
+
+static inline int64_t mako_jpeg_jfif_minor(MakoString jpeg) {
+    size_t off = 0;
+    if (!mako_jpeg_find_app0_jfif(jpeg, &off)) return 0;
+    if (off + 2 + 2 + 5 + 2 > jpeg.len) return 0;
+    return (int64_t)(unsigned char)jpeg.data[off + 2 + 2 + 5 + 1];
+}
+
+/* First component Hi/Vi packed byte in SOF0 (grayscale Mako shell uses 0x11). */
+static inline int64_t mako_jpeg_sof0_sampling(MakoString jpeg) {
+    size_t off = 0;
+    if (!mako_jpeg_find_sof0(jpeg, &off)) return 0;
+    /* FF C0 | len(2) | P(1) | Y(2) | X(2) | Nf(1) | Ci(1) | HiVi(1) | Tqi(1) */
+    if (off + 2 + 2 + 1 + 4 + 1 + 1 + 1 > jpeg.len) return 0;
+    size_t hivi = off + 2 + 2 + 1 + 4 + 1 + 1; /* after Nf and Ci */
+    return (int64_t)(unsigned char)jpeg.data[hivi];
+}
+
 /* ---- compile-time struct schema registry (filled by codegen) ---- */
 #ifndef MAKO_REFLECT_SCHEMA_MAX
 #define MAKO_REFLECT_SCHEMA_MAX 64

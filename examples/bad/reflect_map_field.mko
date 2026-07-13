@@ -1,0 +1,11 @@
+// EXPECT: reflect_value_of expects a POD struct
+// map fields are non-POD for reflect_value_of.
+struct Bag {
+    m: map[string]int
+    t: int
+}
+
+fn main() {
+    let b = Bag { m: make(map[string]int), t: 1 }
+    let _ = reflect_value_of(b)
+}
