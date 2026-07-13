@@ -5203,9 +5203,10 @@ impl Codegen {
                         "game_udp_bind" => {
                             let (_, p) = self.emit_expr(&args[0]);
                             let tmp = self.fresh("gub");
-                            // Bind all interfaces: wildcard host through the addr helper.
+                            // IPv4 any: "*" resolves to dual-stack IPv6 in net helpers,
+                            // but game UDP bind is IPv4-only (mako_bind_ipv4_addr).
                             self.line(&format!(
-                                "MakoGameUDP *{tmp} = mako_game_udp_bind_addr(mako_str_from_cstr(\"*\"), {p});"
+                                "MakoGameUDP *{tmp} = mako_game_udp_bind_addr(mako_str_from_cstr(\"0.0.0.0\"), {p});"
                             ));
                             return ("MakoGameUDP*".into(), tmp);
                         }

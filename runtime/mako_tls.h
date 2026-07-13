@@ -166,19 +166,19 @@ static inline MakoString mako_tls_record_appdata_seal(
     MakoString aad = {(char *)hdr, 5};
     MakoString sealed = mako_tls_aead_seal(key, nonce, plaintext, aad);
     if (!sealed.data || sealed.len != clen) {
-        free(sealed.data);
+        mako_str_free(sealed);
         return mako_str_from_cstr("");
     }
     char *out = (char *)malloc(5 + sealed.len + 1);
     if (!out) {
-        free(sealed.data);
+        mako_str_free(sealed);
         return mako_str_from_cstr("");
     }
     memcpy(out, hdr, 5);
     memcpy(out + 5, sealed.data, sealed.len);
     out[5 + sealed.len] = 0;
     size_t n = 5 + sealed.len;
-    free(sealed.data);
+    mako_str_free(sealed);
     return (MakoString){out, n};
 }
 
@@ -193,8 +193,8 @@ static inline MakoString mako_tls_record_appdata_open(
     MakoString aad = mako_str_slice(record, 0, 5);
     MakoString sealed = mako_str_slice(record, 5, 5 + rlen);
     MakoString pt = mako_tls_aead_open(key, nonce, sealed, aad);
-    free(aad.data);
-    free(sealed.data);
+    mako_str_free(aad);
+    mako_str_free(sealed);
     return pt;
 }
 
@@ -233,11 +233,11 @@ static inline MakoString mako_tls_record_appdata_seal_seq(
 ) {
     MakoString nonce = mako_tls_record_nonce_from_seq(iv, (int64_t)mako_tls_rec_write_seq);
     if (!nonce.data || nonce.len != 12) {
-        free(nonce.data);
+        mako_str_free(nonce);
         return mako_str_from_cstr("");
     }
     MakoString rec = mako_tls_record_appdata_seal(key, nonce, plaintext);
-    free(nonce.data);
+    mako_str_free(nonce);
     if (rec.data && rec.len > 0) mako_tls_rec_write_seq++;
     return rec;
 }
@@ -247,11 +247,11 @@ static inline MakoString mako_tls_record_appdata_open_seq(
 ) {
     MakoString nonce = mako_tls_record_nonce_from_seq(iv, (int64_t)mako_tls_rec_read_seq);
     if (!nonce.data || nonce.len != 12) {
-        free(nonce.data);
+        mako_str_free(nonce);
         return mako_str_from_cstr("");
     }
     MakoString pt = mako_tls_record_appdata_open(key, nonce, record);
-    free(nonce.data);
+    mako_str_free(nonce);
     if (pt.data && pt.len > 0) mako_tls_rec_read_seq++;
     return pt;
 }
@@ -1475,12 +1475,12 @@ static inline int mako_tls_h2_extract_path_simple(
             if (copy + 1 > cap) copy = cap - 1;
             if (copy && vl.data) memcpy(out, vl.data, copy);
             out[copy] = 0;
-            free(nm.data);
-            free(vl.data);
+            mako_str_free(nm);
+            mako_str_free(vl);
             found = 1;
             break;
         }
-        free(nm.data);
+        mako_str_free(nm);
     }
     /* decoded_name/value allocate; clear table storage too */
     mako_hpack_decode_clear();
@@ -2737,12 +2737,12 @@ static inline int64_t mako_tls_serve_grpc_once(
         MakoString resp = mako_grpc_http2_unary_response_status(
             (int64_t)stream_id, reply_name, reply_id, 0
         );
-        free(reply_name.data);
-        free(rname.data);
+        mako_str_free(reply_name);
+        mako_str_free(rname);
         if (resp.data && resp.len) {
             mako_tls_h2_write_buf(ssl, resp.data, resp.len);
         }
-        free(resp.data);
+        mako_str_free(resp);
     }
 
 done:
@@ -2802,7 +2802,7 @@ static inline MakoString mako_tls_grpc_unary(
         return mako_str_from_cstr("");
     }
     mako_tls_h2_write_frame(ssl, 0x00, 0x01, 1, body.data, body.len); /* DATA END_STREAM */
-    free(body.data);
+    mako_str_free(body);
 
     unsigned char buf[8192];
     int have = 0, off = 0;
@@ -2823,7 +2823,7 @@ static inline MakoString mako_tls_grpc_unary(
     MakoString payload = mako_grpc_http2_response_payload(wire);
     MakoString rname = mako_grpc_unary_name(payload);
     int64_t rid = mako_grpc_unary_id(payload);
-    free(payload.data);
+    mako_str_free(payload);
 
     char out[512];
     int wn = snprintf(
@@ -2833,7 +2833,7 @@ static inline MakoString mako_tls_grpc_unary(
         (long long)rid,
         (long long)st
     );
-    free(rname.data);
+    mako_str_free(rname);
     if (wn <= 0 || st < 0) return mako_str_from_cstr("");
     return mako_str_from_cstr(out);
 }
@@ -2914,7 +2914,7 @@ static inline int mako_tls_grpc_data_msg_at(
                 if (n >= name_cap) n = name_cap - 1;
                 if (n && nm.data) memcpy(name_out, nm.data, n);
                 name_out[n] = 0;
-                free(nm.data);
+                mako_str_free(nm);
                 return 1;
             }
             seen++;
@@ -2933,33 +2933,33 @@ static inline MakoString mako_tls_grpc_stream_response(
 ) {
     MakoString ct = mako_grpc_content_type();
     MakoString lit = mako_hpack_encode_literal(mako_str_from_cstr("content-type"), ct);
-    free(ct.data);
+    mako_str_free(ct);
     MakoString hdrs = mako_http2_headers_frame(stream, lit, 0x4);
-    free(lit.data);
+    mako_str_free(lit);
     MakoString d1 = mako_grpc_http2_stream_data(stream, name1, id1, 0);
     MakoString d2 = mako_grpc_http2_stream_data(stream, name2, id2, 0);
     char scode[16];
     int sn = snprintf(scode, sizeof(scode), "%lld", (long long)status);
     if (sn < 0 || sn >= (int)sizeof(scode)) {
-        free(hdrs.data);
-        free(d1.data);
-        free(d2.data);
+        mako_str_free(hdrs);
+        mako_str_free(d1);
+        mako_str_free(d2);
         return (MakoString){NULL, 0};
     }
     MakoString tlit = mako_hpack_encode_literal(
         mako_str_from_cstr("grpc-status"), mako_str_from_cstr(scode)
     );
     MakoString th = mako_http2_headers_frame(stream, tlit, 0x5);
-    free(tlit.data);
+    mako_str_free(tlit);
     MakoString a = mako_http2_concat_frames(hdrs, d1);
-    free(hdrs.data);
-    free(d1.data);
+    mako_str_free(hdrs);
+    mako_str_free(d1);
     MakoString b = mako_http2_concat_frames(a, d2);
-    free(a.data);
-    free(d2.data);
+    mako_str_free(a);
+    mako_str_free(d2);
     MakoString out = mako_http2_concat_frames(b, th);
-    free(b.data);
-    free(th.data);
+    mako_str_free(b);
+    mako_str_free(th);
     return out;
 }
 
@@ -3082,12 +3082,12 @@ static inline int64_t mako_tls_serve_grpc_stream(
             MakoString resp = mako_tls_grpc_stream_response(
                 (int64_t)stream_id, n1, i1, n2, i2, 0
             );
-            free(n1.data);
-            free(n2.data);
+            mako_str_free(n1);
+            mako_str_free(n2);
             if (resp.data && resp.len) {
                 mako_tls_h2_write_buf(ssl, resp.data, resp.len);
             }
-            free(resp.data);
+            mako_str_free(resp);
         }
     }
 
@@ -3156,7 +3156,7 @@ static inline MakoString mako_tls_grpc_stream(
         return mako_str_from_cstr("");
     }
     mako_tls_h2_write_buf(ssl, two.data, two.len);
-    free(two.data);
+    mako_str_free(two);
 
     unsigned char buf[8192];
     int have = 0, off = 0;
@@ -3923,9 +3923,9 @@ static inline int64_t mako_tls_hs_is_app(void) {
 static inline MakoString mako_tls_finished_verify_data(MakoString base_key, MakoString transcript) {
     if (!base_key.data || base_key.len == 0) return mako_str_from_cstr("");
     MakoString th = mako_sha256_raw(transcript);
-    if (!th.data || th.len != 32) { free(th.data); return mako_str_from_cstr(""); }
+    if (!th.data || th.len != 32) { mako_str_free(th); return mako_str_from_cstr(""); }
     MakoString vd = mako_hmac_sha256_raw(base_key, th);
-    free(th.data);
+    mako_str_free(th);
     return vd;
 }
 
@@ -3933,12 +3933,12 @@ static inline MakoString mako_tls_finished_verify_data_hex(MakoString base_key, 
     MakoString vd = mako_tls_finished_verify_data(base_key, transcript);
     if (!vd.data || vd.len == 0) return mako_str_from_cstr("");
     char *out = (char *)malloc(vd.len * 2 + 1);
-    if (!out) { free(vd.data); return mako_str_from_cstr(""); }
+    if (!out) { mako_str_free(vd); return mako_str_from_cstr(""); }
     for (size_t i = 0; i < vd.len; i++)
         sprintf(out + i * 2, "%02x", (unsigned char)vd.data[i]);
     out[vd.len * 2] = 0;
     size_t n = vd.len * 2;
-    free(vd.data);
+    mako_str_free(vd);
     return (MakoString){out, n};
 }
 
@@ -3977,7 +3977,7 @@ static inline MakoString mako_tls_transcript_bytes(void) {
 static inline MakoString mako_tls_transcript_finished_hex(MakoString base_key) {
     MakoString tx = mako_tls_transcript_bytes();
     MakoString out = mako_tls_finished_verify_data_hex(base_key, tx);
-    free(tx.data);
+    mako_str_free(tx);
     return out;
 }
 
@@ -4002,7 +4002,7 @@ static inline int64_t mako_tls_hs_session_client_hello(MakoString random32) {
     MakoString ch = mako_tls_client_hello(random32);
     if (!ch.data || ch.len == 0) return -1;
     int64_t st = mako_tls_hs_session_feed(ch);
-    free(ch.data);
+    mako_str_free(ch);
     return st;
 }
 
@@ -4011,7 +4011,7 @@ static inline int64_t mako_tls_hs_session_server_hello(MakoString random32) {
     MakoString sh = mako_tls_server_hello(random32);
     if (!sh.data || sh.len == 0) return -1;
     int64_t st = mako_tls_hs_session_feed(sh);
-    free(sh.data);
+    mako_str_free(sh);
     return st;
 }
 
@@ -4025,7 +4025,7 @@ static inline int64_t mako_tls_hs_session_encrypted_extensions(void) {
     MakoString ee = mako_tls_encrypted_extensions();
     if (!ee.data || ee.len == 0) return -1;
     int64_t st = mako_tls_hs_session_feed(ee);
-    free(ee.data);
+    mako_str_free(ee);
     return st;
 }
 
@@ -4033,7 +4033,7 @@ static inline int64_t mako_tls_hs_session_certificate(MakoString der) {
     MakoString cert = mako_tls_certificate(der);
     if (!cert.data || cert.len == 0) return -1;
     int64_t st = mako_tls_hs_session_feed(cert);
-    free(cert.data);
+    mako_str_free(cert);
     return st;
 }
 
@@ -4041,7 +4041,7 @@ static inline int64_t mako_tls_hs_session_certificate_verify(int64_t scheme, Mak
     MakoString cv = mako_tls_certificate_verify(scheme, sig);
     if (!cv.data || cv.len == 0) return -1;
     int64_t st = mako_tls_hs_session_feed(cv);
-    free(cv.data);
+    mako_str_free(cv);
     return st;
 }
 
@@ -4052,17 +4052,17 @@ static inline int64_t mako_tls_hs_session_finished(MakoString base_key, MakoStri
     if (!verify_data.data || verify_data.len == 0) {
         MakoString tx = mako_tls_transcript_bytes();
         vd = mako_tls_finished_verify_data(base_key, tx);
-        free(tx.data);
+        mako_str_free(tx);
         owned = 1;
         if (!vd.data || vd.len == 0) return -1;
     } else {
         vd = verify_data;
     }
     MakoString fin = mako_tls_finished(vd);
-    if (owned) free(vd.data);
+    if (owned) mako_str_free(vd);
     if (!fin.data || fin.len == 0) return -1;
     int64_t st = mako_tls_hs_session_feed(fin);
-    free(fin.data);
+    mako_str_free(fin);
     return st;
 }
 
@@ -4075,20 +4075,20 @@ static inline MakoString mako_quic_initial_protect(
     MakoString key = mako_quic_initial_client_key(dcid);
     MakoString iv = mako_quic_initial_client_iv(dcid);
     if (!key.data || key.len != 16 || !iv.data || iv.len != 12) {
-        free(key.data);
-        free(iv.data);
+        mako_str_free(key);
+        mako_str_free(iv);
         return mako_str_from_cstr("");
     }
     MakoString nonce = mako_quic_aead_nonce(iv, packet_number);
-    free(iv.data);
+    mako_str_free(iv);
     if (!nonce.data || nonce.len != 12) {
-        free(key.data);
-        free(nonce.data);
+        mako_str_free(key);
+        mako_str_free(nonce);
         return mako_str_from_cstr("");
     }
     MakoString sealed = mako_tls_aead_seal(key, nonce, plaintext, aad);
-    free(key.data);
-    free(nonce.data);
+    mako_str_free(key);
+    mako_str_free(nonce);
     return sealed;
 }
 
@@ -4098,20 +4098,20 @@ static inline MakoString mako_quic_initial_unprotect(
     MakoString key = mako_quic_initial_client_key(dcid);
     MakoString iv = mako_quic_initial_client_iv(dcid);
     if (!key.data || key.len != 16 || !iv.data || iv.len != 12) {
-        free(key.data);
-        free(iv.data);
+        mako_str_free(key);
+        mako_str_free(iv);
         return mako_str_from_cstr("");
     }
     MakoString nonce = mako_quic_aead_nonce(iv, packet_number);
-    free(iv.data);
+    mako_str_free(iv);
     if (!nonce.data || nonce.len != 12) {
-        free(key.data);
-        free(nonce.data);
+        mako_str_free(key);
+        mako_str_free(nonce);
         return mako_str_from_cstr("");
     }
     MakoString pt = mako_tls_aead_open(key, nonce, sealed, aad);
-    free(key.data);
-    free(nonce.data);
+    mako_str_free(key);
+    mako_str_free(nonce);
     return pt;
 }
 
@@ -4155,12 +4155,12 @@ static inline MakoString mako_quic_header_protection_mask_hex(MakoString hp_key,
     MakoString m = mako_quic_header_protection_mask(hp_key, sample);
     if (!m.data || m.len == 0) return mako_str_from_cstr("");
     char *out = (char *)malloc(m.len * 2 + 1);
-    if (!out) { free(m.data); return mako_str_from_cstr(""); }
+    if (!out) { mako_str_free(m); return mako_str_from_cstr(""); }
     for (size_t i = 0; i < m.len; i++)
         sprintf(out + i * 2, "%02x", (unsigned char)m.data[i]);
     out[m.len * 2] = 0;
     size_t n = m.len * 2;
-    free(m.data);
+    mako_str_free(m);
     return (MakoString){out, n};
 }
 
@@ -4168,7 +4168,7 @@ static inline MakoString mako_quic_header_protection_mask_hex(MakoString hp_key,
 static inline MakoString mako_quic_initial_hp_mask(MakoString dcid, MakoString sample) {
     MakoString hp = mako_quic_initial_client_hp(dcid);
     MakoString mask = mako_quic_header_protection_mask(hp, sample);
-    free(hp.data);
+    mako_str_free(hp);
     return mask;
 }
 
@@ -4176,12 +4176,12 @@ static inline MakoString mako_quic_initial_hp_mask_hex(MakoString dcid, MakoStri
     MakoString m = mako_quic_initial_hp_mask(dcid, sample);
     if (!m.data || m.len == 0) return mako_str_from_cstr("");
     char *out = (char *)malloc(m.len * 2 + 1);
-    if (!out) { free(m.data); return mako_str_from_cstr(""); }
+    if (!out) { mako_str_free(m); return mako_str_from_cstr(""); }
     for (size_t i = 0; i < m.len; i++)
         sprintf(out + i * 2, "%02x", (unsigned char)m.data[i]);
     out[m.len * 2] = 0;
     size_t n = m.len * 2;
-    free(m.data);
+    mako_str_free(m);
     return (MakoString){out, n};
 }
 
@@ -4254,38 +4254,38 @@ static inline MakoString mako_quic_initial_packet_protect(
         dcid, packet_number, unprotected_header, plaintext
     );
     if (!sealed.data || sealed.len < 16) {
-        free(sealed.data);
+        mako_str_free(sealed);
         return mako_str_from_cstr("");
     }
     MakoString sample = mako_str_slice(sealed, 0, 16);
     MakoString mask = mako_quic_initial_hp_mask(dcid, sample);
-    free(sample.data);
+    mako_str_free(sample);
     if (!mask.data || mask.len < 5) {
-        free(sealed.data);
-        free(mask.data);
+        mako_str_free(sealed);
+        mako_str_free(mask);
         return mako_str_from_cstr("");
     }
     MakoString prot_hdr = mako_quic_header_protect_apply(
         unprotected_header, pn_offset, mask
     );
-    free(mask.data);
+    mako_str_free(mask);
     if (!prot_hdr.data || prot_hdr.len == 0) {
-        free(sealed.data);
-        free(prot_hdr.data);
+        mako_str_free(sealed);
+        mako_str_free(prot_hdr);
         return mako_str_from_cstr("");
     }
     size_t total = prot_hdr.len + sealed.len;
     char *out = (char *)malloc(total + 1);
     if (!out) {
-        free(prot_hdr.data);
-        free(sealed.data);
+        mako_str_free(prot_hdr);
+        mako_str_free(sealed);
         return mako_str_from_cstr("");
     }
     memcpy(out, prot_hdr.data, prot_hdr.len);
     memcpy(out + prot_hdr.len, sealed.data, sealed.len);
     out[total] = 0;
-    free(prot_hdr.data);
-    free(sealed.data);
+    mako_str_free(prot_hdr);
+    mako_str_free(sealed);
     return (MakoString){out, total};
 }
 
@@ -4302,24 +4302,24 @@ static inline MakoString mako_quic_initial_packet_unprotect(
     if (ct_len < 16) return mako_str_from_cstr("");
     MakoString sample = mako_str_slice(packet, header_len, header_len + 16);
     MakoString mask = mako_quic_initial_hp_mask(dcid, sample);
-    free(sample.data);
+    mako_str_free(sample);
     if (!mask.data || mask.len < 5) {
-        free(mask.data);
+        mako_str_free(mask);
         return mako_str_from_cstr("");
     }
     MakoString prot_hdr = mako_str_slice(packet, 0, header_len);
     MakoString unprot_hdr = mako_quic_header_protect_remove(prot_hdr, pn_offset, mask);
-    free(prot_hdr.data);
-    free(mask.data);
+    mako_str_free(prot_hdr);
+    mako_str_free(mask);
     if (!unprot_hdr.data || unprot_hdr.len == 0) {
-        free(unprot_hdr.data);
+        mako_str_free(unprot_hdr);
         return mako_str_from_cstr("");
     }
     /* Recover packet number from unprotected header (big-endian, pn_len bytes). */
     unsigned char *h = (unsigned char *)unprot_hdr.data;
     int pn_len = (h[0] & 0x03) + 1;
     if ((size_t)pn_offset + (size_t)pn_len > unprot_hdr.len) {
-        free(unprot_hdr.data);
+        mako_str_free(unprot_hdr);
         return mako_str_from_cstr("");
     }
     int64_t pn = 0;
@@ -4327,8 +4327,8 @@ static inline MakoString mako_quic_initial_packet_unprotect(
         pn = (pn << 8) | (int64_t)h[pn_offset + i];
     MakoString sealed = mako_str_slice(packet, header_len, (int64_t)packet.len);
     MakoString pt = mako_quic_initial_unprotect(dcid, pn, unprot_hdr, sealed);
-    free(unprot_hdr.data);
-    free(sealed.data);
+    mako_str_free(unprot_hdr);
+    mako_str_free(sealed);
     return pt;
 }
 
@@ -4362,12 +4362,12 @@ static inline MakoString mako_tls_hkdf_expand_label(
     MakoString okm = mako_hmac_sha256_raw(secret, msg);
     free(info1);
     if (!okm.data || okm.len < (size_t)out_len) {
-        free(okm.data);
+        mako_str_free(okm);
         return mako_str_from_cstr("");
     }
     if (okm.len == (size_t)out_len) return okm;
     MakoString clipped = mako_str_slice(okm, 0, out_len);
-    free(okm.data);
+    mako_str_free(okm);
     return clipped;
 }
 
@@ -4377,9 +4377,9 @@ static inline MakoString mako_tls_derive_secret(
     MakoString secret, MakoString label, MakoString transcript
 ) {
     MakoString th = mako_sha256_raw(transcript);
-    if (!th.data || th.len != 32) { free(th.data); return mako_str_from_cstr(""); }
+    if (!th.data || th.len != 32) { mako_str_free(th); return mako_str_from_cstr(""); }
     MakoString out = mako_tls_hkdf_expand_label(secret, label, th, 32);
-    free(th.data);
+    mako_str_free(th);
     return out;
 }
 
@@ -4389,12 +4389,12 @@ static inline MakoString mako_tls_derive_secret_hex(
     MakoString raw = mako_tls_derive_secret(secret, label, transcript);
     if (!raw.data || raw.len == 0) return mako_str_from_cstr("");
     char *out = (char *)malloc(raw.len * 2 + 1);
-    if (!out) { free(raw.data); return mako_str_from_cstr(""); }
+    if (!out) { mako_str_free(raw); return mako_str_from_cstr(""); }
     for (size_t i = 0; i < raw.len; i++)
         sprintf(out + i * 2, "%02x", (unsigned char)raw.data[i]);
     out[raw.len * 2] = 0;
     size_t n = raw.len * 2;
-    free(raw.data);
+    mako_str_free(raw);
     return (MakoString){out, n};
 }
 
@@ -4404,7 +4404,7 @@ static inline MakoString mako_tls_client_handshake_traffic_secret(
 ) {
     MakoString lab = mako_str_from_cstr("c hs traffic");
     MakoString out = mako_tls_derive_secret(handshake_secret, lab, transcript);
-    free(lab.data);
+    mako_str_free(lab);
     return out;
 }
 
@@ -4413,7 +4413,7 @@ static inline MakoString mako_tls_server_handshake_traffic_secret(
 ) {
     MakoString lab = mako_str_from_cstr("s hs traffic");
     MakoString out = mako_tls_derive_secret(handshake_secret, lab, transcript);
-    free(lab.data);
+    mako_str_free(lab);
     return out;
 }
 
@@ -4423,12 +4423,12 @@ static inline MakoString mako_tls_client_handshake_traffic_secret_hex(
     MakoString raw = mako_tls_client_handshake_traffic_secret(handshake_secret, transcript);
     if (!raw.data || raw.len == 0) return mako_str_from_cstr("");
     char *out = (char *)malloc(raw.len * 2 + 1);
-    if (!out) { free(raw.data); return mako_str_from_cstr(""); }
+    if (!out) { mako_str_free(raw); return mako_str_from_cstr(""); }
     for (size_t i = 0; i < raw.len; i++)
         sprintf(out + i * 2, "%02x", (unsigned char)raw.data[i]);
     out[raw.len * 2] = 0;
     size_t n = raw.len * 2;
-    free(raw.data);
+    mako_str_free(raw);
     return (MakoString){out, n};
 }
 
@@ -4438,12 +4438,12 @@ static inline MakoString mako_tls_server_handshake_traffic_secret_hex(
     MakoString raw = mako_tls_server_handshake_traffic_secret(handshake_secret, transcript);
     if (!raw.data || raw.len == 0) return mako_str_from_cstr("");
     char *out = (char *)malloc(raw.len * 2 + 1);
-    if (!out) { free(raw.data); return mako_str_from_cstr(""); }
+    if (!out) { mako_str_free(raw); return mako_str_from_cstr(""); }
     for (size_t i = 0; i < raw.len; i++)
         sprintf(out + i * 2, "%02x", (unsigned char)raw.data[i]);
     out[raw.len * 2] = 0;
     size_t n = raw.len * 2;
-    free(raw.data);
+    mako_str_free(raw);
     return (MakoString){out, n};
 }
 
@@ -4454,7 +4454,7 @@ static inline MakoString mako_tls_client_application_traffic_secret(
 ) {
     MakoString lab = mako_str_from_cstr("c ap traffic");
     MakoString out = mako_tls_derive_secret(master_secret, lab, transcript);
-    free(lab.data);
+    mako_str_free(lab);
     return out;
 }
 
@@ -4463,7 +4463,7 @@ static inline MakoString mako_tls_server_application_traffic_secret(
 ) {
     MakoString lab = mako_str_from_cstr("s ap traffic");
     MakoString out = mako_tls_derive_secret(master_secret, lab, transcript);
-    free(lab.data);
+    mako_str_free(lab);
     return out;
 }
 
@@ -4473,12 +4473,12 @@ static inline MakoString mako_tls_client_application_traffic_secret_hex(
     MakoString raw = mako_tls_client_application_traffic_secret(master_secret, transcript);
     if (!raw.data || raw.len == 0) return mako_str_from_cstr("");
     char *out = (char *)malloc(raw.len * 2 + 1);
-    if (!out) { free(raw.data); return mako_str_from_cstr(""); }
+    if (!out) { mako_str_free(raw); return mako_str_from_cstr(""); }
     for (size_t i = 0; i < raw.len; i++)
         sprintf(out + i * 2, "%02x", (unsigned char)raw.data[i]);
     out[raw.len * 2] = 0;
     size_t n = raw.len * 2;
-    free(raw.data);
+    mako_str_free(raw);
     return (MakoString){out, n};
 }
 
@@ -4488,12 +4488,12 @@ static inline MakoString mako_tls_server_application_traffic_secret_hex(
     MakoString raw = mako_tls_server_application_traffic_secret(master_secret, transcript);
     if (!raw.data || raw.len == 0) return mako_str_from_cstr("");
     char *out = (char *)malloc(raw.len * 2 + 1);
-    if (!out) { free(raw.data); return mako_str_from_cstr(""); }
+    if (!out) { mako_str_free(raw); return mako_str_from_cstr(""); }
     for (size_t i = 0; i < raw.len; i++)
         sprintf(out + i * 2, "%02x", (unsigned char)raw.data[i]);
     out[raw.len * 2] = 0;
     size_t n = raw.len * 2;
-    free(raw.data);
+    mako_str_free(raw);
     return (MakoString){out, n};
 }
 

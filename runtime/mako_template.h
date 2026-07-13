@@ -178,7 +178,7 @@ static inline int64_t mako_tmpl_data_set_int(int64_t h, MakoString key, int64_t 
     snprintf(buf, sizeof(buf), "%lld", (long long)v);
     MakoString vs = mako_str_from_cstr(buf);
     int64_t rc = mako_tmpl_data_set(h, key, vs);
-    free(vs.data);
+    mako_str_free(vs);
     return rc;
 }
 
@@ -354,7 +354,7 @@ static inline void mako_tmpl_out_appends(MakoTmplCtx *c, const char *s) {
 static inline MakoString mako_tmpl_html_escape_cstr(const char *s) {
     MakoString in = mako_str_from_cstr(s ? s : "");
     MakoString out = mako_html_escape(in);
-    free(in.data);
+    mako_str_free(in);
     return out;
 }
 
@@ -379,7 +379,7 @@ static inline void mako_tmpl_emit_value(MakoTmplCtx *c, const char *v) {
     if (c->html_escape) {
         MakoString esc = mako_tmpl_html_escape_cstr(v);
         mako_tmpl_out_append(c, esc.data, esc.len);
-        free(esc.data);
+        mako_str_free(esc);
     } else {
         mako_tmpl_out_appends(c, v);
     }
@@ -535,7 +535,7 @@ static inline int mako_tmpl_exec_action(MakoTmplCtx *c, const char *act, size_t 
         const char *v = mako_tmpl_lookup(c, buf + 5);
         MakoString esc = mako_tmpl_html_escape_cstr(v);
         mako_tmpl_out_append(c, esc.data, esc.len);
-        free(esc.data);
+        mako_str_free(esc);
         return 1;
     }
     if (strncmp(buf, "printf ", 7) == 0) {

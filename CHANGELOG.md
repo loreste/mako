@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.0 — 2026-07-13 (CI follow-up: free safety + game UDP + SIGPIPE)
+
+### Fixes
+
+- **Empty-string free** — broader `mako_str_free` (cache, reflect clone, std/sip/http/…);
+  keep raw `free(arr.data)` for int/float/byte arrays.
+- **`game_udp_bind`** — bind `0.0.0.0` (IPv4 any); `"*"` dual-stack IPv6 broke IPv4-only game UDP.
+- **Tests** — ignore `SIGPIPE` so proxy races do not abort the process under TSan.
+
 ## 0.1.0 — 2026-07-13 (CI portability + empty-string free safety)
 
 ### Fixes

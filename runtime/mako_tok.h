@@ -217,7 +217,7 @@ static inline int64_t mako_tok_load_json(int64_t h, MakoString path) {
         if (neg) id = -id;
         MakoString ts = mako_str_from_cstr(tok);
         if (mako_tok_set(h, ts, id)) loaded++;
-        free(ts.data);
+        mako_str_free(ts);
     }
     free(buf);
     return loaded > 0 ? 1 : 0;
@@ -242,7 +242,7 @@ static inline int64_t mako_tok_load_lines(int64_t h, MakoString path) {
         if (n == 0) continue;
         MakoString ts = mako_str_from_cstr(line);
         if (mako_tok_set(h, ts, id)) loaded++;
-        free(ts.data);
+        mako_str_free(ts);
         id++;
     }
     fclose(f);

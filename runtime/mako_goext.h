@@ -1365,7 +1365,7 @@ static inline MakoString mako_png_encode_gray(int64_t w, int64_t h, MakoString p
     memcpy(out + 8 + c_ihdr.len, c_idat.data, c_idat.len);
     memcpy(out + 8 + c_ihdr.len + c_idat.len, c_iend.data, c_iend.len);
     out[out_len] = 0;
-    free(c_ihdr.data); free(c_idat.data); free(c_iend.data);
+    mako_str_free(c_ihdr); mako_str_free(c_idat); mako_str_free(c_iend);
     return (MakoString){out, out_len};
 }
 
@@ -1410,7 +1410,7 @@ static inline MakoString mako_png_encode_rgb(int64_t w, int64_t h, MakoString pi
     memcpy(out + 8 + c_ihdr.len, c_idat.data, c_idat.len);
     memcpy(out + 8 + c_ihdr.len + c_idat.len, c_iend.data, c_iend.len);
     out[out_len] = 0;
-    free(c_ihdr.data); free(c_idat.data); free(c_iend.data);
+    mako_str_free(c_ihdr); mako_str_free(c_idat); mako_str_free(c_iend);
     return (MakoString){out, out_len};
 }
 
@@ -1812,19 +1812,19 @@ static inline MakoString mako_hmac_sha1_raw(MakoString key, MakoString msg) {
 static inline MakoString mako_hmac_sha1_hex(MakoString key, MakoString msg) {
     MakoString raw = mako_hmac_sha1_raw(key, msg);
     if (!raw.data || raw.len == 0) {
-        free(raw.data);
+        mako_str_free(raw);
         return mako_str_from_cstr("");
     }
     char *o = (char *)malloc(raw.len * 2 + 1);
     if (!o) {
-        free(raw.data);
+        mako_str_free(raw);
         return mako_str_from_cstr("");
     }
     for (size_t i = 0; i < raw.len; i++) {
         sprintf(o + i * 2, "%02x", (unsigned char)raw.data[i]);
     }
     o[raw.len * 2] = 0;
-    free(raw.data);
+    mako_str_free(raw);
     return (MakoString){o, raw.len * 2};
 }
 
@@ -2420,10 +2420,10 @@ static inline MakoString mako_regex_replace_all(MakoString pat, MakoString text,
     for (int i = 0; i < 64; i++) {
         MakoString next = mako_regex_replace(pat, cur, repl);
         if (next.len == cur.len && (next.len == 0 || memcmp(next.data, cur.data, next.len) == 0)) {
-            free(next.data);
+            mako_str_free(next);
             return cur;
         }
-        free(cur.data);
+        mako_str_free(cur);
         cur = next;
     }
     return cur;
@@ -2726,7 +2726,7 @@ static inline int64_t mako_reflect_struct_has_field(MakoString schema, MakoStrin
     for (int64_t i = 0; i < n; i++) {
         MakoString f = mako_reflect_struct_field_name(schema, i);
         int ok = (f.len == name.len && memcmp(f.data, name.data ? name.data : "", f.len) == 0);
-        free(f.data);
+        mako_str_free(f);
         if (ok) return 1;
     }
     return 0;
@@ -2736,7 +2736,7 @@ static inline int64_t mako_reflect_struct_has_field(MakoString schema, MakoStrin
 static inline MakoString mako_html_template_execute(MakoString tmpl, MakoString key, MakoString val) {
     MakoString esc = mako_html_escape(val);
     MakoString out = mako_template_execute(tmpl, key, esc);
-    free(esc.data);
+    mako_str_free(esc);
     return out;
 }
 
@@ -2880,7 +2880,7 @@ static inline int64_t mako_mail_address_ok(MakoString addr) {
     const char *p = a.data ? a.data : "";
     const char *at = strchr(p, '@');
     if (at && at > p && at[1] && strchr(at + 1, '.') && !strchr(p, ' ')) ok = 1;
-    free(a.data);
+    mako_str_free(a);
     return ok;
 }
 
@@ -3093,7 +3093,7 @@ static inline MakoString mako_html_template_execute2(
 ) {
     MakoString t1 = mako_html_template_execute(tmpl, k1, v1);
     MakoString t2 = mako_html_template_execute(t1, k2, v2);
-    free(t1.data);
+    mako_str_free(t1);
     return t2;
 }
 static inline MakoString mako_html_template_execute3(
@@ -3104,7 +3104,7 @@ static inline MakoString mako_html_template_execute3(
 ) {
     MakoString t = mako_html_template_execute2(tmpl, k1, v1, k2, v2);
     MakoString out = mako_html_template_execute(t, k3, v3);
-    free(t.data);
+    mako_str_free(t);
     return out;
 }
 static inline MakoString mako_html_template_if(
@@ -3136,7 +3136,7 @@ static inline MakoString mako_html_template_if(
     d[nlen] = 0;
     MakoString rebuilt = {d, nlen};
     MakoString out = mako_html_template_execute(rebuilt, key, val);
-    free(rebuilt.data);
+    mako_str_free(rebuilt);
     return out;
 }
 
@@ -3351,8 +3351,8 @@ static inline MakoReflectValue *mako_reflect_value_from_2_int(
     MakoString sa = mako_int_to_string(a);
     MakoString sb = mako_int_to_string(b);
     MakoReflectValue *v = mako_reflect_value_from_2(schema, sa, sb);
-    free(sa.data);
-    free(sb.data);
+    mako_str_free(sa);
+    mako_str_free(sb);
     return v;
 }
 
@@ -3423,7 +3423,7 @@ static inline MakoString mako_jpeg_encode_gray_dct(int64_t w, int64_t h, MakoStr
     out[o++] = (char)(dc & 0xFF);
     out[o++] = (char)0xFF; out[o++] = (char)0xD9;
     out[o] = 0;
-    free(base.data);
+    mako_str_free(base);
     return (MakoString){out, o};
 }
 static inline int64_t mako_jpeg_dct_dc(MakoString jpeg) {
@@ -3607,7 +3607,7 @@ static inline MakoString mako_html_template_range(
                 }
                 memcpy(out + o, esc.data, esc.len);
                 o += esc.len;
-                free(esc.data);
+                mako_str_free(esc);
                 bi += 5;
             } else {
                 if (o + 2 >= cap) { cap = o + body_len + 64; out = (char *)realloc(out, cap); }
@@ -3653,7 +3653,7 @@ static inline MakoString mako_html_template_with(
     d[nlen] = 0;
     MakoString rebuilt = {d, nlen};
     MakoString out = mako_html_template_execute(rebuilt, key, val);
-    free(rebuilt.data);
+    mako_str_free(rebuilt);
     return out;
 }
 
@@ -3917,7 +3917,7 @@ static inline MakoString mako_html_template_nested(
     /* Innermost first: {{with}} then {{if}} so {{end}} matching stays simple. */
     MakoString step = mako_html_template_with(tmpl, inner_key, inner_val);
     MakoString out = mako_html_template_if(step, outer_key, outer_cond, mako_str_from_cstr(""));
-    free(step.data);
+    mako_str_free(step);
     return out;
 }
 
@@ -3970,7 +3970,7 @@ static inline MakoString mako_smtp_auth_plain(MakoString user, MakoString pass) 
     size_t n = b64.len + 16;
     char *d = (char *)malloc(n);
     int m = snprintf(d, n, "AUTH PLAIN %.*s", (int)b64.len, b64.data ? b64.data : "");
-    free(b64.data);
+    mako_str_free(b64);
     if (m < 0) m = 0;
     return (MakoString){d, (size_t)m};
 }
@@ -4012,7 +4012,7 @@ static inline int64_t mako_smtp_send_auth(
     MakoString auth = mako_smtp_auth_plain(user, pass);
     send(fd, auth.data, auth.len, 0);
     send(fd, "\r\n", 2, 0);
-    free(auth.data);
+    mako_str_free(auth);
     (void)recv(fd, rbuf, sizeof(rbuf) - 1, 0);
     char cmd[512];
     int n = snprintf(cmd, sizeof(cmd), "MAIL FROM:<%.*s>\r\n", (int)from.len, from.data ? from.data : "");
@@ -4044,7 +4044,7 @@ static inline MakoReflectValue *mako_reflect_value_clone(MakoReflectValue *v) {
     if (!v) return mako_reflect_value_new(mako_str_from_cstr(""));
     MakoReflectValue *c = mako_reflect_value_new(v->schema);
     for (int i = 0; i < v->n && i < c->n; i++) {
-        free(c->values[i].data);
+        mako_str_free(c->values[i]);
         c->values[i] = mako_str_clone(v->values[i]);
     }
     return c;
@@ -4094,7 +4094,7 @@ static inline MakoString mako_jpeg_encode_gray_huff(int64_t w, int64_t h, MakoSt
     memcpy(out + o, zz, 64); o += 64;
     out[o++] = (char)0xFF; out[o++] = (char)0xD9;
     out[o] = 0;
-    free(base.data);
+    mako_str_free(base);
     return (MakoString){out, o};
 }
 static inline MakoString mako_jpeg_huff_block(MakoString jpeg) {
@@ -4850,7 +4850,7 @@ static inline int64_t mako_jpeg_roundtrip_ok(MakoString jpeg) {
     if (expect <= 0) return 0;
     MakoString d = mako_jpeg_decode_gray(jpeg);
     int64_t got = (int64_t)d.len;
-    if (d.data) free(d.data);
+    if (d.data) mako_str_free(d);
     return (got == expect) ? 1 : 0;
 }
 
@@ -4929,7 +4929,7 @@ static inline MakoString mako_reflect_type_schema(MakoString name) {
 static inline MakoReflectValue *mako_reflect_value_of_type(MakoString name) {
     MakoString sch = mako_reflect_type_schema(name);
     MakoReflectValue *v = mako_reflect_value_new(sch);
-    free(sch.data);
+    mako_str_free(sch);
     return v;
 }
 static inline int64_t mako_reflect_type_count(void) { return (int64_t)mako_reflect_type_n; }
@@ -4982,7 +4982,7 @@ static inline int64_t mako_smtp_send_starttls(
         MakoString auth = mako_smtp_auth_plain(user, pass);
         send(fd, auth.data, auth.len, 0);
         send(fd, "\r\n", 2, 0);
-        free(auth.data);
+        mako_str_free(auth);
         (void)recv(fd, rbuf, sizeof(rbuf) - 1, 0);
         char cmd[512];
         int n = snprintf(cmd, sizeof(cmd), "MAIL FROM:<%.*s>\r\n", (int)from.len, from.data ? from.data : "");
@@ -5042,7 +5042,7 @@ static inline int64_t mako_smtp_send_starttls(
         MakoString auth = mako_smtp_auth_plain(user, pass);
         SSL_write(ssl, auth.data, (int)auth.len);
         SSL_write(ssl, "\r\n", 2);
-        free(auth.data);
+        mako_str_free(auth);
         (void)SSL_read(ssl, rbuf, (int)sizeof(rbuf) - 1);
         char cmd[512];
         int n = snprintf(cmd, sizeof(cmd), "MAIL FROM:<%.*s>\r\n",

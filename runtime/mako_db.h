@@ -1559,7 +1559,7 @@ static inline int64_t mako_sql_query_int(MakoSqlDB db, MakoString sql, MakoIntAr
             if (!vals || !bufs) {
                 free(vals);
                 free(bufs);
-                free(q.data);
+                mako_str_free(q);
                 return -1;
             }
             for (int i = 0; i < n; i++) {
@@ -1572,7 +1572,7 @@ static inline int64_t mako_sql_query_int(MakoSqlDB db, MakoString sql, MakoIntAr
         );
         free(vals);
         free(bufs);
-        free(q.data);
+        mako_str_free(q);
         return rc;
 #else
         (void)sql; (void)args;
@@ -1613,7 +1613,7 @@ static inline int64_t mako_sql_exec(MakoSqlDB db, MakoString sql, MakoIntArray a
             if (!vals || !bufs) {
                 free(vals);
                 free(bufs);
-                free(q.data);
+                mako_str_free(q);
                 return -1;
             }
             for (int i = 0; i < n; i++) {
@@ -1626,14 +1626,14 @@ static inline int64_t mako_sql_exec(MakoSqlDB db, MakoString sql, MakoIntArray a
         if (!pg) {
             free(vals);
             free(bufs);
-            free(q.data);
+            mako_str_free(q);
             return -1;
         }
         char qbuf[4096];
         if (q.len >= sizeof(qbuf)) {
             free(vals);
             free(bufs);
-            free(q.data);
+            mako_str_free(q);
             return -1;
         }
         memcpy(qbuf, q.data, q.len);
@@ -1641,7 +1641,7 @@ static inline int64_t mako_sql_exec(MakoSqlDB db, MakoString sql, MakoIntArray a
         PGresult *r = PQexecParams(pg, qbuf, n, NULL, (const char *const *)vals, NULL, NULL, 0);
         free(vals);
         free(bufs);
-        free(q.data);
+        mako_str_free(q);
         if (!r) return -1;
         ExecStatusType st = PQresultStatus(r);
         int64_t out = (st == PGRES_COMMAND_OK || st == PGRES_TUPLES_OK) ? 0 : -1;
@@ -1899,7 +1899,7 @@ static inline int64_t mako_sql_exec_str4(MakoSqlDB db, MakoString sql, MakoStrin
         MakoString q = mako_sql_qmark_to_dollar(sql);
         /* Prefer bind count from caller slots; empty trailing ok */
         int64_t rc = mako_pg_exec_params(pgc, q, vals, np);
-        free(q.data);
+        mako_str_free(q);
         if (rc == 0) {
             /* Refresh rows via a lightweight meta update in exec path */
             /* pg_exec_params already cleared result — use 0 rows if unknown */
@@ -1961,12 +1961,12 @@ static inline MakoString mako_sql_query_str(MakoSqlDB db, MakoString sql, MakoSt
         if (sql.len >= sizeof(qbuf)) return mako_str_from_cstr("");
         MakoString q = mako_sql_qmark_to_dollar(sql);
         if (q.len >= sizeof(qbuf)) {
-            free(q.data);
+            mako_str_free(q);
             return mako_str_from_cstr("");
         }
         memcpy(qbuf, q.data, q.len);
         qbuf[q.len] = 0;
-        free(q.data);
+        mako_str_free(q);
         const char *vals[1] = {NULL};
         int np = 0;
         /* Bind when SQL has a placeholder; empty string is a valid value */
@@ -2123,11 +2123,11 @@ static inline int64_t mako_sql_prepare(MakoSqlDB db, MakoString sql) {
                 snprintf(st->pg_name, sizeof(st->pg_name), "mako_stmt_%lld", (long long)(i + 1));
                 MakoString q = mako_sql_qmark_to_dollar(sql);
                 if (mako_pg_prepare_name(db.pg, st->pg_name, q) != 0) {
-                    free(q.data);
+                    mako_str_free(q);
                     memset(st, 0, sizeof(*st));
                     return 0;
                 }
-                free(q.data);
+                mako_str_free(q);
             }
             return i + 1;
         }
@@ -2415,7 +2415,7 @@ static inline int64_t mako_sql_query_rows(MakoSqlDB db, MakoString sql, MakoIntA
             if (!vals || !bufs) {
                 free(vals);
                 free(bufs);
-                free(q.data);
+                mako_str_free(q);
                 return 0;
             }
             for (int i = 0; i < n; i++) {
@@ -2428,12 +2428,12 @@ static inline int64_t mako_sql_query_rows(MakoSqlDB db, MakoString sql, MakoIntA
         if (q.len >= sizeof(qbuf)) {
             free(vals);
             free(bufs);
-            free(q.data);
+            mako_str_free(q);
             return 0;
         }
         memcpy(qbuf, q.data, q.len);
         qbuf[q.len] = 0;
-        free(q.data);
+        mako_str_free(q);
         PGresult *res = PQexecParams(pg, qbuf, n, NULL, (const char *const *)vals, NULL, NULL, 0);
         free(vals);
         free(bufs);
@@ -2528,12 +2528,12 @@ static inline int64_t mako_sql_query_rows_str(MakoSqlDB db, MakoString sql, Mako
         MakoString q = mako_sql_qmark_to_dollar(sql);
         char qbuf[4096], pbuf[4096];
         if (q.len >= sizeof(qbuf)) {
-            free(q.data);
+            mako_str_free(q);
             return 0;
         }
         memcpy(qbuf, q.data, q.len);
         qbuf[q.len] = 0;
-        free(q.data);
+        mako_str_free(q);
         int has_ph = 0;
         for (size_t i = 0; sql.data && i < sql.len; i++) {
             if (sql.data[i] == '?' ||

@@ -40,16 +40,16 @@ static inline MakoString mako_llm_message(MakoString role, MakoString content) {
     size_t n = er.len + ec.len + 48;
     char *d = (char *)malloc(n);
     if (!d) {
-        free(er.data);
-        free(ec.data);
+        mako_str_free(er);
+        mako_str_free(ec);
         return mako_str_from_cstr("");
     }
     int w = snprintf(
         d, n, "{\"role\":\"%s\",\"content\":\"%s\"}",
         er.data ? er.data : "", ec.data ? ec.data : ""
     );
-    free(er.data);
-    free(ec.data);
+    mako_str_free(er);
+    mako_str_free(ec);
     if (w < 0) {
         free(d);
         return mako_str_from_cstr("");
@@ -103,7 +103,7 @@ static inline MakoString mako_llm_chat_body(
     size_t n = em.len + ml + 80;
     char *d = (char *)malloc(n);
     if (!d) {
-        free(em.data);
+        mako_str_free(em);
         return mako_str_from_cstr("");
     }
     int w = snprintf(
@@ -113,7 +113,7 @@ static inline MakoString mako_llm_chat_body(
         (int)ml, msgs,
         stream ? "true" : "false"
     );
-    free(em.data);
+    mako_str_free(em);
     if (w < 0) {
         free(d);
         return mako_str_from_cstr("");
@@ -129,13 +129,13 @@ static inline MakoString mako_llm_system_user(
     MakoString u = mako_llm_message(mako_str_from_cstr("user"), user);
     MakoString arr = mako_str_from_cstr("[]");
     MakoString a1 = mako_llm_messages_append(arr, s);
-    free(arr.data);
-    free(s.data);
+    mako_str_free(arr);
+    mako_str_free(s);
     MakoString a2 = mako_llm_messages_append(a1, u);
-    free(a1.data);
-    free(u.data);
+    mako_str_free(a1);
+    mako_str_free(u);
     MakoString body = mako_llm_chat_body(model, a2, 0);
-    free(a2.data);
+    mako_str_free(a2);
     return body;
 }
 
@@ -751,10 +751,10 @@ static inline MakoString mako_llm_ask(
     MakoString model = mako_llm_default_model();
     MakoString body = mako_llm_system_user(model, system, user);
     MakoString resp = mako_llm_chat(base, key, body, timeout_ms);
-    free(key.data);
-    free(base.data);
-    free(model.data);
-    free(body.data);
+    mako_str_free(key);
+    mako_str_free(base);
+    mako_str_free(model);
+    mako_str_free(body);
     return resp;
 }
 
@@ -817,7 +817,7 @@ static inline MakoString mako_llm_chat_stream(
     while (bl > 0 && b[bl - 1] == '/') bl--;
     char url[1024];
     if (bl + 20 >= sizeof(url)) {
-        free(sbody.data);
+        mako_str_free(sbody);
         return mako_str_from_cstr("{\"error\":\"url\"}");
     }
     memcpy(url, b, bl);
@@ -828,11 +828,11 @@ static inline MakoString mako_llm_chat_stream(
     if (!mako_llm_parse_https_url(
             mako_str_from_cstr(url), host, sizeof(host), &port, path, sizeof(path)
         )) {
-        free(sbody.data);
+        mako_str_free(sbody);
         return mako_str_from_cstr("{\"error\":\"invalid_https_url\"}");
     }
     if (!api_key.data || api_key.len == 0) {
-        free(sbody.data);
+        mako_str_free(sbody);
         return mako_str_from_cstr("{\"error\":\"missing_api_key\"}");
     }
 
@@ -841,7 +841,7 @@ static inline MakoString mako_llm_chat_stream(
     OpenSSL_add_all_algorithms();
     SSL_CTX *ctx = SSL_CTX_new(TLS_client_method());
     if (!ctx) {
-        free(sbody.data);
+        mako_str_free(sbody);
         return mako_str_from_cstr("{\"error\":\"ssl_ctx\"}");
     }
     SSL_CTX_set_default_verify_paths(ctx);
@@ -855,7 +855,7 @@ static inline MakoString mako_llm_chat_stream(
     snprintf(portbuf, sizeof(portbuf), "%d", port);
     if (getaddrinfo(host, portbuf, &hints, &res) != 0 || !res) {
         SSL_CTX_free(ctx);
-        free(sbody.data);
+        mako_str_free(sbody);
         return mako_str_from_cstr("{\"error\":\"dns\"}");
     }
     int fd = -1;
@@ -876,7 +876,7 @@ static inline MakoString mako_llm_chat_stream(
     freeaddrinfo(res);
     if (fd < 0) {
         SSL_CTX_free(ctx);
-        free(sbody.data);
+        mako_str_free(sbody);
         return mako_str_from_cstr("{\"error\":\"connect\"}");
     }
     SSL *ssl = SSL_new(ctx);
@@ -886,7 +886,7 @@ static inline MakoString mako_llm_chat_stream(
         SSL_free(ssl);
         close(fd);
         SSL_CTX_free(ctx);
-        free(sbody.data);
+        mako_str_free(sbody);
         return mako_str_from_cstr("{\"error\":\"tls\"}");
     }
 
@@ -895,7 +895,7 @@ static inline MakoString mako_llm_chat_stream(
         SSL_free(ssl);
         close(fd);
         SSL_CTX_free(ctx);
-        free(sbody.data);
+        mako_str_free(sbody);
         return mako_str_from_cstr("{\"error\":\"key_too_long\"}");
     }
     memcpy(keybuf, api_key.data, api_key.len);
@@ -918,7 +918,7 @@ static inline MakoString mako_llm_chat_stream(
         SSL_free(ssl);
         close(fd);
         SSL_CTX_free(ctx);
-        free(sbody.data);
+        mako_str_free(sbody);
         return mako_str_from_cstr("{\"error\":\"write_header\"}");
     }
     if (blen && sbody.data) {
@@ -929,7 +929,7 @@ static inline MakoString mako_llm_chat_stream(
             off += (size_t)w;
         }
     }
-    free(sbody.data);
+    mako_str_free(sbody);
 
     /* Read loop: line buffer → SSE data → accumulate deltas */
     char line[8192];
@@ -970,12 +970,12 @@ static inline MakoString mako_llm_chat_stream(
                     MakoString delta = mako_llm_sse_delta(data);
                     if (delta.data && delta.len) {
                         MakoString nacc = mako_llm_stream_append(acc, delta);
-                        free(acc.data);
+                        mako_str_free(acc);
                         acc = nacc;
                     }
-                    free(delta.data);
+                    mako_str_free(delta);
                 }
-                free(data.data);
+                mako_str_free(data);
                 lpos = 0;
             } else if (c != '\r') {
                 if (lpos + 1 < sizeof(line)) line[lpos++] = c;
@@ -988,7 +988,7 @@ static inline MakoString mako_llm_chat_stream(
     SSL_CTX_free(ctx);
 
     if (mako_llm_tls_last_status >= 400) {
-        free(acc.data);
+        mako_str_free(acc);
         char err[96];
         snprintf(err, sizeof(err), "{\"error\":\"http_%lld\"}",
                  (long long)mako_llm_tls_last_status);
@@ -996,11 +996,11 @@ static inline MakoString mako_llm_chat_stream(
     }
     /* Build synthetic response for llm_content */
     MakoString esc = mako_json_escape(acc);
-    free(acc.data);
+    mako_str_free(acc);
     size_t n = esc.len + 80;
     char *out = (char *)malloc(n);
     if (!out) {
-        free(esc.data);
+        mako_str_free(esc);
         return mako_str_from_cstr("{\"error\":\"oom\"}");
     }
     int w = snprintf(
@@ -1009,7 +1009,7 @@ static inline MakoString mako_llm_chat_stream(
         "\"finish_reason\":\"stop\"}]}",
         esc.data ? esc.data : ""
     );
-    free(esc.data);
+    mako_str_free(esc);
     if (w < 0) {
         free(out);
         return mako_str_from_cstr("{\"error\":\"format\"}");
@@ -1024,16 +1024,16 @@ static inline MakoString mako_llm_embed_body(MakoString model, MakoString input)
     size_t n = em.len + ei.len + 48;
     char *d = (char *)malloc(n);
     if (!d) {
-        free(em.data);
-        free(ei.data);
+        mako_str_free(em);
+        mako_str_free(ei);
         return mako_str_from_cstr("");
     }
     int w = snprintf(
         d, n, "{\"model\":\"%s\",\"input\":\"%s\"}",
         em.data ? em.data : "", ei.data ? ei.data : ""
     );
-    free(em.data);
-    free(ei.data);
+    mako_str_free(em);
+    mako_str_free(ei);
     if (w < 0) {
         free(d);
         return mako_str_from_cstr("");
@@ -1071,11 +1071,11 @@ static inline MakoString mako_llm_embed(MakoString input, int64_t timeout_ms) {
         : model;
     MakoString body = mako_llm_embed_body(m, input);
     MakoString resp = mako_llm_embeddings(base, key, body, timeout_ms);
-    free(key.data);
-    free(base.data);
-    free(model.data);
-    if (em && em[0]) free(m.data);
-    free(body.data);
+    mako_str_free(key);
+    mako_str_free(base);
+    mako_str_free(model);
+    if (em && em[0]) mako_str_free(m);
+    mako_str_free(body);
     return resp;
 }
 
@@ -1139,16 +1139,16 @@ static inline MakoString mako_llm_embed_body(MakoString model, MakoString input)
     size_t n = em.len + ei.len + 48;
     char *d = (char *)malloc(n);
     if (!d) {
-        free(em.data);
-        free(ei.data);
+        mako_str_free(em);
+        mako_str_free(ei);
         return mako_str_from_cstr("");
     }
     int w = snprintf(
         d, n, "{\"model\":\"%s\",\"input\":\"%s\"}",
         em.data ? em.data : "", ei.data ? ei.data : ""
     );
-    free(em.data);
-    free(ei.data);
+    mako_str_free(em);
+    mako_str_free(ei);
     if (w < 0) {
         free(d);
         return mako_str_from_cstr("");
@@ -1229,7 +1229,7 @@ static inline MakoString mako_llm_error_message(MakoString resp) {
             mako_str_from_cstr("message")
         );
         if (msg.data && msg.len) return msg;
-        free(msg.data);
+        mako_str_free(msg);
     }
     return mako_str_from_cstr("error");
 }
@@ -1262,7 +1262,7 @@ static inline MakoString mako_llm_chat_retry(
     if (max_attempts > 8) max_attempts = 8;
     MakoString last = mako_str_from_cstr("");
     for (int64_t attempt = 0; attempt < max_attempts; attempt++) {
-        free(last.data);
+        mako_str_free(last);
         last = mako_llm_chat(base_url, api_key, body, timeout_ms);
         if (!mako_llm_is_error(last) && !mako_llm_should_retry(last)) return last;
         if (attempt + 1 >= max_attempts) break;
