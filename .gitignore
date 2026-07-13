@@ -32,6 +32,9 @@
 .grok/
 .idea/
 *.local.md
+AGENTS.md
+Agents.md
+agents.md
 AGENTS.local.md
 CLAUDE.local.md
 
