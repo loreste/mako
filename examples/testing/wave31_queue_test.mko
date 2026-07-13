@@ -1,0 +1,89 @@
+// Wave 31: Option 5-layer edges, SOF0 Tqi + JFIF thumb + mako shell, scripts.
+
+fn five_opt_ok() -> Option[Result[Option[Result[Option[int], string]], string]] {
+    return Some(Ok(Some(Ok(Some(9)))))
+}
+
+fn five_opt_leaf_none() -> Option[Result[Option[Result[Option[int], string]], string]] {
+    return Some(Ok(Some(Ok(None))))
+}
+
+fn five_opt_mid_err() -> Option[Result[Option[Result[Option[int], string]], string]] {
+    return Some(Err("mid"))
+}
+
+fn five_opt_outer_none() -> Option[Result[Option[Result[Option[int], string]], string]] {
+    return None
+}
+
+fn TestFiveOptOk() {
+    match five_opt_ok() {
+        Some(r1) => match r1 {
+            Ok(o1) => match o1 {
+                Some(r2) => match r2 {
+                    Ok(o2) => match o2 {
+                        Some(n) => assert_eq(n, 9),
+                        None => assert(false),
+                    },
+                    Err(_) => assert(false),
+                },
+                None => assert(false),
+            },
+            Err(_) => assert(false),
+        },
+        None => assert(false),
+    }
+}
+
+fn TestFiveOptLeafNone() {
+    match five_opt_leaf_none() {
+        Some(r1) => match r1 {
+            Ok(o1) => match o1 {
+                Some(r2) => match r2 {
+                    Ok(o2) => match o2 {
+                        Some(_) => assert(false),
+                        None => assert(true),
+                    },
+                    Err(_) => assert(false),
+                },
+                None => assert(false),
+            },
+            Err(_) => assert(false),
+        },
+        None => assert(false),
+    }
+}
+
+fn TestFiveOptMidErr() {
+    match five_opt_mid_err() {
+        Some(r1) => match r1 {
+            Ok(_) => assert(false),
+            Err(m) => assert_eq_str(m, "mid"),
+        },
+        None => assert(false),
+    }
+}
+
+fn TestFiveOptOuterNone() {
+    match five_opt_outer_none() {
+        Some(_) => assert(false),
+        None => assert(true),
+    }
+}
+
+fn TestJpegTqiThumbMakoShell() {
+    let gray = "ABCDEFGHABCDEFGHABCDEFGHABCDEFGHABCDEFGHABCDEFGHABCDEFGHABCDEFGH"
+    let j = jpeg_encode_gray_jfif(8, 8, gray)
+    assert_eq(jpeg_sof0_quant_table(j), 0)
+    assert_eq(jpeg_jfif_thumb_width(j), 0)
+    assert_eq(jpeg_jfif_thumb_height(j), 0)
+    assert_eq(jpeg_is_mako_jfif(j), 1)
+    assert_eq(jpeg_is_baseline_gray(j), 1)
+    assert_eq(jpeg_has_app7(j), 1)
+}
+
+fn TestRegexUnicodeVaiYiGlagolitic() {
+    assert(regex_match("\\p{Vai}", "ꔀ"))
+    assert(regex_match("\\p{Yi}", "ꀀ"))
+    assert(regex_match("\\p{Glagolitic}", "Ⰰ"))
+}

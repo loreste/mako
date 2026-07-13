@@ -4262,6 +4262,39 @@ static inline int64_t mako_jpeg_has_app7(MakoString jpeg) {
     return 0;
 }
 
+/* First component quant table selector Tqi in SOF0 (Mako gray shell uses 0). */
+static inline int64_t mako_jpeg_sof0_quant_table(MakoString jpeg) {
+    size_t off = 0;
+    if (!mako_jpeg_find_sof0(jpeg, &off)) return -1;
+    /* FF C0 | len | P | Y | X | Nf | Ci | HiVi | Tqi */
+    if (off + 2 + 2 + 1 + 4 + 1 + 1 + 1 + 1 > jpeg.len) return -1;
+    size_t tqi = off + 2 + 2 + 1 + 4 + 1 + 1 + 1;
+    return (int64_t)(unsigned char)jpeg.data[tqi];
+}
+
+/* APP0 JFIF thumbnail width/height (bytes after Y density; Mako shell has none → 0). */
+static inline int64_t mako_jpeg_jfif_thumb_width(MakoString jpeg) {
+    size_t off = 0;
+    if (!mako_jpeg_find_app0_jfif(jpeg, &off)) return -1;
+    /* units(1) X(2) Y(2) TX(1) */
+    if (off + 2 + 2 + 5 + 2 + 1 + 4 + 1 > jpeg.len) return -1;
+    return (int64_t)(unsigned char)jpeg.data[off + 2 + 2 + 5 + 2 + 1 + 4];
+}
+
+static inline int64_t mako_jpeg_jfif_thumb_height(MakoString jpeg) {
+    size_t off = 0;
+    if (!mako_jpeg_find_app0_jfif(jpeg, &off)) return -1;
+    if (off + 2 + 2 + 5 + 2 + 1 + 4 + 2 > jpeg.len) return -1;
+    return (int64_t)(unsigned char)jpeg.data[off + 2 + 2 + 5 + 2 + 1 + 4 + 1];
+}
+
+/* Mako JFIF grayscale encode shell: baseline gray + MAKOJPG APP7 payload. */
+static inline int64_t mako_jpeg_is_mako_jfif(MakoString jpeg) {
+    if (!mako_jpeg_is_baseline_gray(jpeg)) return 0;
+    if (!mako_jpeg_has_app7(jpeg)) return 0;
+    return 1;
+}
+
 /* ---- compile-time struct schema registry (filled by codegen) ---- */
 #ifndef MAKO_REFLECT_SCHEMA_MAX
 #define MAKO_REFLECT_SCHEMA_MAX 64

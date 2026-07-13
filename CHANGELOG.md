@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.0 — 2026-07-13 (wave 31 queue)
+
+- Option-start 5-layer `Option[Result[Option[Result[Option[T]]]]]` Ok/None/Err
+- `jpeg_sof0_quant_table`; JFIF thumb W/H; `jpeg_is_mako_jfif` (gray+APP7)
+- for+while NLL bad; nested slice reflect reject; Vai/Yi/Glagolitic scripts
+- TSan wave30
+- Tests: `examples/testing/wave31_queue_test.mko`
+
 ## 0.1.0 — 2026-07-13 (wave 30 queue)
 
 - 5-layer `Result[Option[Result[Option[Result[T]]]]]` Ok/Err/None edges

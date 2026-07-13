@@ -1943,6 +1943,10 @@ ready queue so workers can multiplex without one-request-at-a-time stalls.
 | `jpeg_jfif_x_density` | `jpeg_jfif_x_density(data: string) -> int` | JFIF X density from APP0 (0 if missing; Mako shell uses 1) |
 | `jpeg_jfif_y_density` | `jpeg_jfif_y_density(data: string) -> int` | JFIF Y density from APP0 (0 if missing; Mako shell uses 1) |
 | `jpeg_has_app7` | `jpeg_has_app7(data: string) -> int` | 1 if APP7 carries `MAKOJPG` roundtrip payload |
+| `jpeg_sof0_quant_table` | `jpeg_sof0_quant_table(data: string) -> int` | First component quant table selector Tqi (`-1` if missing; Mako gray uses 0) |
+| `jpeg_jfif_thumb_width` | `jpeg_jfif_thumb_width(data: string) -> int` | JFIF embedded thumbnail width (`-1` if no APP0; Mako shell uses 0) |
+| `jpeg_jfif_thumb_height` | `jpeg_jfif_thumb_height(data: string) -> int` | JFIF embedded thumbnail height (`-1` if no APP0; Mako shell uses 0) |
+| `jpeg_is_mako_jfif` | `jpeg_is_mako_jfif(data: string) -> int` | 1 if baseline-gray JFIF shell **and** MAKOJPG APP7 payload |
 
 ---
 
@@ -2290,7 +2294,8 @@ Tests: `result_enum_test.mko`, `job_join_typed_test.mko` (Result across kick/joi
 `wave27_queue_test.mko` (nested None edges, SOF0 components),
 `wave28_queue_test.mko` (deep None/Err, baseline gray, Tai scripts),
 `wave29_queue_test.mko` (4-layer Option/Result, JFIF version, SOF0 sampling),
-`wave30_queue_test.mko` (5-layer Result nests, JFIF density, APP7, SOF0 Ci).
+`wave30_queue_test.mko` (5-layer Result nests, JFIF density, APP7, SOF0 Ci),
+`wave31_queue_test.mko` (Option 5-layer, SOF0 Tqi, JFIF thumb, `jpeg_is_mako_jfif`).
 
 ---
 
