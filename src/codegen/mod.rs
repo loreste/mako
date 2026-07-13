@@ -10018,6 +10018,26 @@ impl Codegen {
                             let (_, s) = self.emit_expr(&args[0]);
                             return ("int64_t".into(), format!("mako_jpeg_sof0_sampling({s})"));
                         }
+                        "jpeg_sof0_component_id" => {
+                            let (_, s) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_jpeg_sof0_component_id({s})"));
+                        }
+                        "jpeg_jfif_density_units" => {
+                            let (_, s) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_jpeg_jfif_density_units({s})"));
+                        }
+                        "jpeg_jfif_x_density" => {
+                            let (_, s) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_jpeg_jfif_x_density({s})"));
+                        }
+                        "jpeg_jfif_y_density" => {
+                            let (_, s) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_jpeg_jfif_y_density({s})"));
+                        }
+                        "jpeg_has_app7" => {
+                            let (_, s) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_jpeg_has_app7({s})"));
+                        }
                         "smtp_send_starttls" => {
                             let (_, h) = self.emit_expr(&args[0]);
                             let (_, p) = self.emit_expr(&args[1]);

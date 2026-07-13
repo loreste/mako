@@ -1,0 +1,96 @@
+// Wave 30: 5-layer Result nests, JFIF density + APP7, SOF0 Ci, scripts.
+
+fn five_ok() -> Result[Option[Result[Option[Result[int, string]], string]], string] {
+    return Ok(Some(Ok(Some(Ok(7)))))
+}
+
+fn five_outer_err() -> Result[Option[Result[Option[Result[int, string]], string]], string] {
+    return Err("out")
+}
+
+fn five_leaf_err() -> Result[Option[Result[Option[Result[int, string]], string]], string] {
+    return Ok(Some(Ok(Some(Err("leaf")))))
+}
+
+fn five_mid_none() -> Result[Option[Result[Option[Result[int, string]], string]], string] {
+    return Ok(Some(Ok(None)))
+}
+
+fn TestFiveOk() {
+    match five_ok() {
+        Ok(o1) => match o1 {
+            Some(r1) => match r1 {
+                Ok(o2) => match o2 {
+                    Some(r2) => match r2 {
+                        Ok(n) => assert_eq(n, 7),
+                        Err(_) => assert(false),
+                    },
+                    None => assert(false),
+                },
+                Err(_) => assert(false),
+            },
+            None => assert(false),
+        },
+        Err(_) => assert(false),
+    }
+}
+
+fn TestFiveOuterErr() {
+    match five_outer_err() {
+        Ok(_) => assert(false),
+        Err(m) => assert_eq_str(m, "out"),
+    }
+}
+
+fn TestFiveLeafErr() {
+    match five_leaf_err() {
+        Ok(o1) => match o1 {
+            Some(r1) => match r1 {
+                Ok(o2) => match o2 {
+                    Some(r2) => match r2 {
+                        Ok(_) => assert(false),
+                        Err(m) => assert_eq_str(m, "leaf"),
+                    },
+                    None => assert(false),
+                },
+                Err(_) => assert(false),
+            },
+            None => assert(false),
+        },
+        Err(_) => assert(false),
+    }
+}
+
+fn TestFiveMidNone() {
+    match five_mid_none() {
+        Ok(o1) => match o1 {
+            Some(r1) => match r1 {
+                Ok(o2) => match o2 {
+                    Some(_) => assert(false),
+                    None => assert(true),
+                },
+                Err(_) => assert(false),
+            },
+            None => assert(false),
+        },
+        Err(_) => assert(false),
+    }
+}
+
+fn TestJpegDensityApp7Component() {
+    let gray = "ABCDEFGHABCDEFGHABCDEFGHABCDEFGHABCDEFGHABCDEFGHABCDEFGHABCDEFGH"
+    let j = jpeg_encode_gray_jfif(8, 8, gray)
+    assert_eq(jpeg_jfif_density_units(j), 0)
+    assert_eq(jpeg_jfif_x_density(j), 1)
+    assert_eq(jpeg_jfif_y_density(j), 1)
+    assert_eq(jpeg_sof0_component_id(j), 1)
+    assert_eq(jpeg_has_app7(j), 1)
+    assert_eq(jpeg_is_baseline_gray(j), 1)
+    assert_eq(jpeg_jfif_major(j), 1)
+}
+
+fn TestRegexUnicodeBatakTaiThamSyloti() {
+    assert(regex_match("\\p{Batak}", "ᯀ"))
+    assert(regex_match("\\p{Tai_Tham}", "ᨠ"))
+    assert(regex_match("\\p{Syloti_Nagri}", "ꠀ"))
+}

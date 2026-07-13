@@ -3111,6 +3111,12 @@ static inline int mako_re_unicode_prop_match(const char *name, size_t nlen, uint
         return (cp >= 0x1900 && cp <= 0x194F);
     if (nlen == 6 && memcmp(name, "Lepcha", 6) == 0)
         return (cp >= 0x1C00 && cp <= 0x1C4F);
+    if (nlen == 5 && memcmp(name, "Batak", 5) == 0)
+        return (cp >= 0x1BC0 && cp <= 0x1BFF);
+    if (nlen == 8 && memcmp(name, "Tai_Tham", 8) == 0)
+        return (cp >= 0x1A20 && cp <= 0x1AAF);
+    if (nlen == 12 && memcmp(name, "Syloti_Nagri", 12) == 0)
+        return (cp >= 0xA800 && cp <= 0xA82F);
     return 0;
 }
 

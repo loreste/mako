@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.0 — 2026-07-13 (wave 30 queue)
+
+- 5-layer `Result[Option[Result[Option[Result[T]]]]]` Ok/Err/None edges
+- JFIF density units/X/Y; `jpeg_sof0_component_id`; `jpeg_has_app7` (MAKOJPG)
+- while+for NLL bad; reflect chan field reject; Batak/Tai_Tham/Syloti_Nagri
+- TSan wave29
+- Tests: `examples/testing/wave30_queue_test.mko`
+
 ## 0.1.0 — 2026-07-13 (wave 29 queue)
 
 - 4-layer `Option[Result[Option[Result[T]]]]` Ok/None/Err edges

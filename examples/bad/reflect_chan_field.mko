@@ -1,0 +1,12 @@
+// EXPECT: reflect_value_of expects a POD struct
+// chan fields are non-POD for reflect_value_of.
+struct Wrap {
+    c: chan[int]
+    t: int
+}
+
+fn main() {
+    let c = make(chan[int], 1)
+    let w = Wrap { c: c, t: 1 }
+    let _ = reflect_value_of(w)
+}

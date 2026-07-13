@@ -1,0 +1,15 @@
+// EXPECT: use of moved
+// while + for product: move inside nested for poisons after outer while.
+fn consume(t: string) {}
+
+fn main() {
+    hold let s = "hi"
+    let mut i = 0
+    while i < 1 {
+        for j in range 1 {
+            consume(s)
+        }
+        i = i + 1
+    }
+    print(s)
+}
