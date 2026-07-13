@@ -1,0 +1,66 @@
+// Wave 24: deep alternating Result/Option nest chains, scripts, kick Option reject.
+
+fn deep5[T](x: T) -> Result[Option[Result[Option[Result[T, string]], string]], string] {
+    return Ok(Some(Ok(Some(Ok(x)))))
+}
+
+fn TestDeep5Int() {
+    match deep5(2) {
+        Ok(a) => match a {
+            Some(b) => match b {
+                Ok(c) => match c {
+                    Some(d) => match d {
+                        Ok(v) => assert_eq(v, 2),
+                        Err(_) => assert(false),
+                    },
+                    None => assert(false),
+                },
+                Err(_) => assert(false),
+            },
+            None => assert(false),
+        },
+        Err(_) => assert(false),
+    }
+}
+
+fn TestDeep5Str() {
+    match deep5("ok") {
+        Ok(a) => match a {
+            Some(b) => match b {
+                Ok(c) => match c {
+                    Some(d) => match d {
+                        Ok(s) => assert_eq_str(s, "ok"),
+                        Err(_) => assert(false),
+                    },
+                    None => assert(false),
+                },
+                Err(_) => assert(false),
+            },
+            None => assert(false),
+        },
+        Err(_) => assert(false),
+    }
+}
+
+fn opt_res_opt[T](x: T) -> Option[Result[Option[T], string]] {
+    return Some(Ok(Some(x)))
+}
+
+fn TestOptResOptRegression() {
+    match opt_res_opt("x") {
+        Some(r) => match r {
+            Ok(o) => match o {
+                Some(s) => assert_eq_str(s, "x"),
+                None => assert(false),
+            },
+            Err(_) => assert(false),
+        },
+        None => assert(false),
+    }
+}
+
+fn TestRegexUnicodeBalineseJavaneseSundanese() {
+    assert(regex_match("\\p{Balinese}+", "ᬆ"))
+    assert(regex_match("\\p{Javanese}+", "ꦄꦴ"))
+    assert(regex_match("\\p{Sundanese}+", "ᮃᮙ"))
+}

@@ -113,6 +113,10 @@ pub struct Codegen {
     option_result_inners: HashMap<String, String>,
     /// Local Option/Result → leaf kind for Option[Result[Option[T]]] chains.
     option_result_option_leafs: HashMap<String, String>,
+    /// Function → successive nested Result/Option payload kinds after first unbox.
+    fn_deep_nest_chain: HashMap<String, Vec<String>>,
+    /// Local Result/Option → remaining successive nest kinds.
+    deep_nest_chains: HashMap<String, Vec<String>>,
     /// Job local / temp name → C return type of the kicked function.
     job_rets: HashMap<String, String>,
     /// Job local / temp → Result Ok kind when ret is MakoResultInt.
@@ -176,6 +180,8 @@ impl Codegen {
             option_some_structs: HashMap::new(),
             option_result_inners: HashMap::new(),
             option_result_option_leafs: HashMap::new(),
+            fn_deep_nest_chain: HashMap::new(),
+            deep_nest_chains: HashMap::new(),
             job_rets: HashMap::new(),
             job_ok_kinds: HashMap::new(),
             chan_float: std::collections::HashSet::new(),
@@ -345,6 +351,55 @@ impl Codegen {
             }
         }
         peel_opt_res_opt(ty).map(Self::value_payload_kind)
+    }
+
+    /// Successive payload kinds through nested Result/Option layers of `payload`.
+    /// Example: `Option[Result[Option[string]]]` → `["result", "option", "string"]`.
+    fn successive_nest_kinds(payload: &TypeExpr) -> Vec<String> {
+        match payload {
+            TypeExpr::Generic(n, args)
+                if (n == "Option" || n == "Result") && !args.is_empty() =>
+            {
+                let child = &args[0];
+                let k = Self::value_payload_kind(child);
+                let mut v = vec![k.to_string()];
+                if k == "option" || k == "result" {
+                    v.extend(Self::successive_nest_kinds(child));
+                }
+                v
+            }
+            _ => Vec::new(),
+        }
+    }
+
+    /// Apply one step of a deep nest chain onto a newly bound Option/Result local.
+    fn apply_deep_nest_chain(&mut self, binding: &str, container: &str, chain: &[String]) {
+        if let Some((next, rest)) = chain.split_first() {
+            if container == "option" {
+                self.option_some_kinds
+                    .insert(binding.to_string(), next.clone());
+            } else if container == "result" {
+                self.result_ok_kinds
+                    .insert(binding.to_string(), next.clone());
+            }
+            if next == "option" || next == "result" {
+                self.deep_nest_chains
+                    .insert(binding.to_string(), rest.to_vec());
+                // Keep specialized maps in sync for mixed unbox paths.
+                if container == "result" && next == "option" {
+                    if let Some(n2) = rest.first() {
+                        self.result_option_inners
+                            .insert(binding.to_string(), n2.clone());
+                    }
+                }
+                if container == "option" && next == "result" {
+                    if let Some(n2) = rest.first() {
+                        self.option_result_inners
+                            .insert(binding.to_string(), n2.clone());
+                    }
+                }
+            }
+        }
     }
 
     /// Remaining Some-kinds after unboxing one Option layer from `payload`.
@@ -694,6 +749,14 @@ impl Codegen {
             .cloned()
     }
 
+    fn call_deep_nest_chain(&self, fname: &str, args: &[Expr]) -> Option<Vec<String>> {
+        let mono = self.generic_mono_name_for_call(fname, args);
+        self.fn_deep_nest_chain
+            .get(&mono)
+            .or_else(|| self.fn_deep_nest_chain.get(fname))
+            .cloned()
+    }
+
     fn call_option_some_struct(&self, fname: &str, args: &[Expr]) -> Option<String> {
         let mono = self.generic_mono_name_for_call(fname, args);
         self.fn_option_some_struct
@@ -719,30 +782,33 @@ impl Codegen {
             self.line(&format!(
                 "if ({p}) {{ {b} = *{p}; free({p}); }} else {{ memset(&{b}, 0, sizeof({b})); }}"
             ));
-            let chain = self
-                .option_chains
-                .get(scrut)
-                .cloned()
-                .unwrap_or_default();
-            if let Some((next, rest)) = chain.split_first() {
-                self.option_some_kinds
-                    .insert(bindings[0].clone(), next.clone());
-                if next == "option" && !rest.is_empty() {
-                    self.option_chains
-                        .insert(bindings[0].clone(), rest.to_vec());
-                } else if next == "option" {
-                    // Deeper option with empty rest — still option; leaf defaults later.
-                    self.option_chains
-                        .insert(bindings[0].clone(), Vec::new());
-                }
-                if next == "result" {
-                    if let Some(rik) = self.option_result_inners.get(scrut).cloned() {
-                        self.result_ok_kinds.insert(bindings[0].clone(), rik);
-                    }
-                }
+            if let Some(chain) = self.deep_nest_chains.get(scrut).cloned() {
+                self.apply_deep_nest_chain(&bindings[0], "option", &chain);
             } else {
-                self.option_some_kinds
-                    .insert(bindings[0].clone(), "int".into());
+                let chain = self
+                    .option_chains
+                    .get(scrut)
+                    .cloned()
+                    .unwrap_or_default();
+                if let Some((next, rest)) = chain.split_first() {
+                    self.option_some_kinds
+                        .insert(bindings[0].clone(), next.clone());
+                    if next == "option" && !rest.is_empty() {
+                        self.option_chains
+                            .insert(bindings[0].clone(), rest.to_vec());
+                    } else if next == "option" {
+                        self.option_chains
+                            .insert(bindings[0].clone(), Vec::new());
+                    }
+                    if next == "result" {
+                        if let Some(rik) = self.option_result_inners.get(scrut).cloned() {
+                            self.result_ok_kinds.insert(bindings[0].clone(), rik);
+                        }
+                    }
+                } else {
+                    self.option_some_kinds
+                        .insert(bindings[0].clone(), "int".into());
+                }
             }
             return;
         }
@@ -757,7 +823,9 @@ impl Codegen {
             self.line(&format!(
                 "if ({p}) {{ {b} = *{p}; free({p}); }} else {{ memset(&{b}, 0, sizeof({b})); }}"
             ));
-            if let Some(ik) = self.option_result_inners.get(scrut).cloned() {
+            if let Some(chain) = self.deep_nest_chains.get(scrut).cloned() {
+                self.apply_deep_nest_chain(&bindings[0], "result", &chain);
+            } else if let Some(ik) = self.option_result_inners.get(scrut).cloned() {
                 // Option[Result[Option[T]]]: after Ok, Option needs leaf Some-kind
                 if ik == "option" {
                     if let Some(leaf) = self.option_result_option_leafs.get(scrut).cloned() {
@@ -1121,6 +1189,15 @@ impl Codegen {
                                 self.fn_result_result_inner
                                     .insert(f.name.clone(), rik.into());
                             }
+                            if let TypeExpr::Generic(n, args) = rt {
+                                if n == "Result" && !args.is_empty() {
+                                    let deep = Self::successive_nest_kinds(&args[0]);
+                                    if !deep.is_empty() {
+                                        self.fn_deep_nest_chain
+                                            .insert(f.name.clone(), deep);
+                                    }
+                                }
+                            }
                         }
                         if matches!(rt, TypeExpr::Generic(n, _) if n == "Option") {
                             self.fn_option_some_kind
@@ -1139,6 +1216,15 @@ impl Codegen {
                             if let Some(leaf) = Self::option_result_option_leaf_kind(rt) {
                                 self.fn_option_result_option_leaf
                                     .insert(f.name.clone(), leaf.into());
+                            }
+                            if let TypeExpr::Generic(n, args) = rt {
+                                if n == "Option" && !args.is_empty() {
+                                    let deep = Self::successive_nest_kinds(&args[0]);
+                                    if !deep.is_empty() {
+                                        self.fn_deep_nest_chain
+                                            .insert(f.name.clone(), deep);
+                                    }
+                                }
                             }
                         }
                         // Result[Option[Result[…]]] also registers option→result metadata
@@ -2375,6 +2461,9 @@ impl Codegen {
                             if let Some(rik) = self.call_result_result_inner(fname, args) {
                                 self.result_result_inners.insert(name.clone(), rik);
                             }
+                            if let Some(ch) = self.call_deep_nest_chain(fname, args) {
+                                self.deep_nest_chains.insert(name.clone(), ch);
+                            }
                         }
                     }
                 }
@@ -2395,6 +2484,9 @@ impl Codegen {
                             }
                             if let Some(leaf) = self.call_option_result_option_leaf(fname, args) {
                                 self.option_result_option_leafs.insert(name.clone(), leaf);
+                            }
+                            if let Some(ch) = self.call_deep_nest_chain(fname, args) {
+                                self.deep_nest_chains.insert(name.clone(), ch);
                             }
                         }
                     }
@@ -13247,6 +13339,20 @@ impl Codegen {
             if let Some(leaf) = opt_res_leaf {
                 self.option_result_option_leafs.insert(scrut.clone(), leaf);
             }
+            let deep = match scrutinee {
+                Expr::Ident(n) => self.deep_nest_chains.get(n).cloned(),
+                Expr::Call { callee, args } => {
+                    if let Expr::Ident(fname) = callee.as_ref() {
+                        self.call_deep_nest_chain(fname, args)
+                    } else {
+                        None
+                    }
+                }
+                _ => self.deep_nest_chains.get(&sval).cloned(),
+            };
+            if let Some(ch) = deep {
+                self.deep_nest_chains.insert(scrut.clone(), ch);
+            }
         }
         if sty == "MakoOptionInt" {
             let some_c = match scrutinee {
@@ -13304,6 +13410,20 @@ impl Codegen {
             };
             if let Some(leaf) = opt_res_leaf {
                 self.option_result_option_leafs.insert(scrut.clone(), leaf);
+            }
+            let deep = match scrutinee {
+                Expr::Ident(n) => self.deep_nest_chains.get(n).cloned(),
+                Expr::Call { callee, args } => {
+                    if let Expr::Ident(fname) = callee.as_ref() {
+                        self.call_deep_nest_chain(fname, args)
+                    } else {
+                        None
+                    }
+                }
+                _ => self.deep_nest_chains.get(&sval).cloned(),
+            };
+            if let Some(ch) = deep {
+                self.deep_nest_chains.insert(scrut.clone(), ch);
             }
             let some_st = match scrutinee {
                 Expr::Ident(n) => self.option_some_structs.get(n).cloned(),
@@ -13595,23 +13715,27 @@ impl Codegen {
                             self.line(&format!(
                                 "if ({p}) {{ {b} = *{p}; free({p}); }} else {{ memset(&{b}, 0, sizeof({b})); }}"
                             ));
-                            // Propagate Option[T] inner kind for nested match on binding.
-                            if let Some(ik) = self.result_option_inners.get(scrut).cloned() {
-                                self.option_some_kinds.insert(bindings[0].clone(), ik);
-                            }
-                            if let Some(ch) = self.result_option_chains.get(scrut).cloned() {
-                                self.option_chains.insert(bindings[0].clone(), ch);
-                            }
-                            // Result[Option[Result[…]]]: propagate Result Ok metadata onto Option
-                            if let Some(rik) = self.option_result_inners.get(scrut).cloned() {
-                                self.option_result_inners
-                                    .insert(bindings[0].clone(), rik);
-                            }
-                            if let Some(leaf) =
-                                self.option_result_option_leafs.get(scrut).cloned()
-                            {
-                                self.option_result_option_leafs
-                                    .insert(bindings[0].clone(), leaf);
+                            if let Some(chain) = self.deep_nest_chains.get(scrut).cloned() {
+                                self.apply_deep_nest_chain(&bindings[0], "option", &chain);
+                            } else {
+                                // Propagate Option[T] inner kind for nested match on binding.
+                                if let Some(ik) = self.result_option_inners.get(scrut).cloned() {
+                                    self.option_some_kinds.insert(bindings[0].clone(), ik);
+                                }
+                                if let Some(ch) = self.result_option_chains.get(scrut).cloned() {
+                                    self.option_chains.insert(bindings[0].clone(), ch);
+                                }
+                                // Result[Option[Result[…]]]: propagate Result Ok metadata onto Option
+                                if let Some(rik) = self.option_result_inners.get(scrut).cloned() {
+                                    self.option_result_inners
+                                        .insert(bindings[0].clone(), rik);
+                                }
+                                if let Some(leaf) =
+                                    self.option_result_option_leafs.get(scrut).cloned()
+                                {
+                                    self.option_result_option_leafs
+                                        .insert(bindings[0].clone(), leaf);
+                                }
                             }
                         } else if ok_kind == "result" {
                             let b = mangle(&bindings[0]);
@@ -13624,7 +13748,11 @@ impl Codegen {
                             self.line(&format!(
                                 "if ({p}) {{ {b} = *{p}; free({p}); }} else {{ memset(&{b}, 0, sizeof({b})); }}"
                             ));
-                            if let Some(ik) = self.result_result_inners.get(scrut).cloned() {
+                            if let Some(chain) = self.deep_nest_chains.get(scrut).cloned() {
+                                self.apply_deep_nest_chain(&bindings[0], "result", &chain);
+                            } else if let Some(ik) =
+                                self.result_result_inners.get(scrut).cloned()
+                            {
                                 self.result_ok_kinds.insert(bindings[0].clone(), ik);
                             }
                         } else {

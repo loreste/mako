@@ -1,0 +1,16 @@
+// EXPECT: cannot kick
+// Option values are not kick-sendable (use channels).
+fn use_o(o: Option[int]) -> int {
+    match o {
+        Some(v) => v,
+        None => 0,
+    }
+}
+
+fn main() {
+    let o: Option[int] = Some(1)
+    crew t {
+        let j = t.kick(use_o(o))
+        let _ = j.join()
+    }
+}

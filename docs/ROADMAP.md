@@ -34,15 +34,15 @@ Last roadmap sync: **2026-07-11** (unique surface · pain-driven design · suite
 
 ## Partial / Next (true hard residuals)
 
-**Landed (gap close waves 1–23):** join_timeout flatten · POD+string kick ·
-reflect N + nested POD · Result/Option multi-layer + **deep mixed
-Option[Result[Option[T]]] chains** · `jpeg_has_sof0` · NLL labeled
+**Landed (gap close waves 1–24):** join_timeout flatten · POD+string kick ·
+reflect N + nested POD · Result/Option + **general deep nest chains**
+(5-layer Result/Option alternating) · `jpeg_has_sof0` · NLL labeled
 continue/break · more script `\p{…}` · expanded TSan · prior work.
 
 **Language pain residuals** (still open — see [PAIN_POINTS.md](PAIN_POINTS.md)):
 
 1. Fuller data-race model beyond expanded TSan  
-2. More Result/Option shapes (arbitrary-depth mixed nests)  
+2. More Result/Option shapes (edge mono/err nesting polish)  
 3. Stronger NLL product cases (rarer multi-label CFG)  
 
 **Stdlib / product residuals:**
