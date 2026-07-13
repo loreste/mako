@@ -14,20 +14,54 @@ Optional (native only): OpenSSL, libnghttp2, SQLite, libpq, quiche FFI.
 
 ## Build & install (native)
 
-### One-command release install
+### One-shot prebuilt install (preferred — small download)
+
+**Linux**
+
+```bash
+curl -fsSL https://github.com/loreste/mako/releases/latest/download/install-linux.sh | bash
+```
+
+**macOS / Linux (generic)**
 
 ```bash
 curl -fsSL https://github.com/loreste/mako/releases/latest/download/install-release.sh | bash
-# or pin a release:
-curl -fsSL https://github.com/loreste/mako/releases/latest/download/install-release.sh | bash -s -- --version v0.1.0 --prefix "$HOME/.local"
+# pin a release / prefix:
+curl -fsSL https://github.com/loreste/mako/releases/latest/download/install-release.sh \
+  | bash -s -- --version v0.1.0 --prefix "$HOME/.local"
 ```
 
-The release bootstrapper detects the host artifact, downloads the matching
-`.tar.gz` and `.sha256`, verifies the tarball, installs into `PREFIX`, and runs
-`mako doctor`. Use `--artifact <name>` or `MAKO_RELEASE_BASE_URL=<url>` for
-custom release mirrors and local smoke tests.
+What this does **not** do: install Rust, clone the monorepo, or fetch cargo
+crates. It downloads **one** platform tarball (stripped binary + runtime
+headers + stdlib), verifies SHA-256 (`sha256sum` on Linux, `shasum` on macOS),
+installs into `PREFIX` (default `~/.local`), and runs `mako doctor`.
 
-### macOS / Linux
+| You need on the machine | Why |
+|-------------------------|-----|
+| `curl`, `tar` | download + extract |
+| `sha256sum` or `shasum` | verify archive |
+| `clang` (or `cc`) | compile `.mko` programs after install |
+
+```bash
+# Debian/Ubuntu
+sudo apt-get install -y clang
+# Fedora
+sudo dnf install -y clang
+```
+
+Overrides: `--artifact <name>`, `MAKO_RELEASE_BASE_URL=<url>` (also `file:///…`
+for local smoke tests).
+
+### Package a slim release (maintainers)
+
+```bash
+cargo build --release
+./scripts/package-release.sh                  # slim (default): strip + no full docs/editors
+./scripts/package-release.sh --full           # include docs + VS Code scaffold
+# → dist/mako-<triple>.tar.gz + .sha256 + install-linux.sh + install-release.sh
+```
+
+### From source (large — Rust toolchain + crates)
 
 ```bash
 cargo build --release

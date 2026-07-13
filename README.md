@@ -23,13 +23,30 @@ are rough, and there's plenty left to build.
 
 ## Install
 
-**macOS / Linux**
+**Linux (one-shot, prebuilt — no Rust, no git clone)**
+
+```bash
+curl -fsSL https://github.com/loreste/mako/releases/latest/download/install-linux.sh | bash
+```
+
+Downloads one slim platform tarball (binary + runtime headers + std), verifies
+SHA-256, installs into `~/.local`. Only system need afterward: **clang**.
+
+```bash
+# pin a version / custom prefix
+curl -fsSL https://github.com/loreste/mako/releases/latest/download/install-linux.sh \
+  | bash -s -- --version v0.1.0 --prefix "$HOME/.local"
+export PATH="$HOME/.local/bin:$PATH"
+mako version
+```
+
+**macOS** (same prebuilt path)
 
 ```bash
 curl -fsSL https://github.com/loreste/mako/releases/latest/download/install-release.sh | bash
 ```
 
-From source:
+**From source** (needs Rust + pulls crates — much larger download)
 
 ```bash
 make install
@@ -39,14 +56,15 @@ mako version
 **Windows**
 
 ```powershell
+# Prefer the release .zip from GitHub Releases, or:
 cargo build --release
 .\scripts\install.ps1
 mako version
 ```
 
-Needs **clang** on your system. On macOS that's Xcode, on Linux `apt install clang`,
-on Windows install LLVM. Optional libraries (OpenSSL, SQLite, libpq) unlock
-extra features but aren't required.
+Needs **clang** on your system to compile programs (`apt install clang` on
+Linux, Xcode on macOS, LLVM on Windows). Optional libraries (OpenSSL, SQLite,
+libpq) unlock extra features but aren't required for install.
 
 ---
 
