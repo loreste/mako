@@ -3001,6 +3001,12 @@ static inline int mako_re_unicode_prop_match(const char *name, size_t nlen, uint
         return (cp >= 0x0980 && cp <= 0x09FF);
     if (nlen == 7 && memcmp(name, "Sinhala", 7) == 0)
         return (cp >= 0x0D80 && cp <= 0x0DFF);
+    if (nlen == 7 && memcmp(name, "Myanmar", 7) == 0)
+        return (cp >= 0x1000 && cp <= 0x109F);
+    if (nlen == 5 && memcmp(name, "Khmer", 5) == 0)
+        return (cp >= 0x1780 && cp <= 0x17FF);
+    if (nlen == 7 && memcmp(name, "Tibetan", 7) == 0)
+        return (cp >= 0x0F00 && cp <= 0x0FFF);
     return 0;
 }
 

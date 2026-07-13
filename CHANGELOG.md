@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.0 — 2026-07-13 (wave 17 queue)
+
+- Generic `Result[T]` mono tags aligned for arrays/maps (`arr_*` / `map_*`)
+- Peek C types for array/map/struct lits so match Ok unboxes correctly
+- Multi-label NLL bad case: continue+break outer field product
+- Regex `\p{Myanmar}` / `\p{Khmer}` / `\p{Tibetan}` seeds
+- TSan CI: `wave16_queue_test`, `share_atomic_test`
+- Tests: `examples/testing/wave17_queue_test.mko`
+
 ## 0.1.0 — 2026-07-12 (wave 16 queue)
 
 - Break-path NLL: move+break poisons post-loop (partial if + labeled outer)
