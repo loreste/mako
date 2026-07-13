@@ -1947,6 +1947,9 @@ ready queue so workers can multiplex without one-request-at-a-time stalls.
 | `jpeg_jfif_thumb_width` | `jpeg_jfif_thumb_width(data: string) -> int` | JFIF embedded thumbnail width (`-1` if no APP0; Mako shell uses 0) |
 | `jpeg_jfif_thumb_height` | `jpeg_jfif_thumb_height(data: string) -> int` | JFIF embedded thumbnail height (`-1` if no APP0; Mako shell uses 0) |
 | `jpeg_is_mako_jfif` | `jpeg_is_mako_jfif(data: string) -> int` | 1 if baseline-gray JFIF shell **and** MAKOJPG APP7 payload |
+| `jpeg_has_eoi` | `jpeg_has_eoi(data: string) -> int` | 1 if JPEG has EOI (`FF D9`) after SOI |
+| `jpeg_sof0_matches_app7` | `jpeg_sof0_matches_app7(data: string) -> int` | 1 if SOF0 width/height match MAKOJPG APP7 payload dims |
+| `jpeg_is_mako_complete` | `jpeg_is_mako_complete(data: string) -> int` | 1 if `jpeg_is_mako_jfif` + dim match + EOI |
 
 ---
 
@@ -2295,7 +2298,8 @@ Tests: `result_enum_test.mko`, `job_join_typed_test.mko` (Result across kick/joi
 `wave28_queue_test.mko` (deep None/Err, baseline gray, Tai scripts),
 `wave29_queue_test.mko` (4-layer Option/Result, JFIF version, SOF0 sampling),
 `wave30_queue_test.mko` (5-layer Result nests, JFIF density, APP7, SOF0 Ci),
-`wave31_queue_test.mko` (Option 5-layer, SOF0 Tqi, JFIF thumb, `jpeg_is_mako_jfif`).
+`wave31_queue_test.mko` (Option 5-layer, SOF0 Tqi, JFIF thumb, `jpeg_is_mako_jfif`),
+`wave32_queue_test.mko` (string nests, SOF0↔APP7 match, EOI, `jpeg_is_mako_complete`).
 
 ---
 

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.0 — 2026-07-13 (wave 32 queue)
+
+- String nest `Option[Result[Option[string]]]` Ok/None/Err edges
+- `jpeg_has_eoi`; `jpeg_sof0_matches_app7`; **`jpeg_is_mako_complete`**
+- labeled for break NLL; nested map reflect reject; Meetei/Phags_Pa/Buhid
+- TSan wave31
+- Tests: `examples/testing/wave32_queue_test.mko`
+
 ## 0.1.0 — 2026-07-13 (wave 31 queue)
 
 - Option-start 5-layer `Option[Result[Option[Result[Option[T]]]]]` Ok/None/Err

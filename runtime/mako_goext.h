@@ -4295,6 +4295,48 @@ static inline int64_t mako_jpeg_is_mako_jfif(MakoString jpeg) {
     return 1;
 }
 
+/* 1 if file ends with EOI (FF D9), or a marker scan finds EOI after SOI. */
+static inline int64_t mako_jpeg_has_eoi(MakoString jpeg) {
+    if (jpeg.len < 4) return 0;
+    const unsigned char *p = (const unsigned char *)jpeg.data;
+    if (p[0] != 0xFF || p[1] != 0xD8) return 0;
+    if (p[jpeg.len - 2] == 0xFF && p[jpeg.len - 1] == 0xD9) return 1;
+    size_t i = 2;
+    while (i + 1 < jpeg.len) {
+        if (p[i] != 0xFF) { i++; continue; }
+        unsigned char m = p[i + 1];
+        if (m == 0xD9) return 1;
+        if (m == 0xD8 || m == 0x01 || (m >= 0xD0 && m <= 0xD7)) {
+            i += 2;
+            continue;
+        }
+        if (i + 3 >= jpeg.len) break;
+        uint16_t seglen = ((uint16_t)p[i + 2] << 8) | p[i + 3];
+        if (seglen < 2) break;
+        i += 2 + (size_t)seglen;
+    }
+    return 0;
+}
+
+/* SOF0 width/height agree with MAKOJPG APP7 payload dims (shell consistency). */
+static inline int64_t mako_jpeg_sof0_matches_app7(MakoString jpeg) {
+    if (!mako_jpeg_has_sof0(jpeg) || !mako_jpeg_has_app7(jpeg)) return 0;
+    int64_t sw = mako_jpeg_sof0_width(jpeg);
+    int64_t sh = mako_jpeg_sof0_height(jpeg);
+    int64_t aw = mako_jpeg_width(jpeg);
+    int64_t ah = mako_jpeg_height(jpeg);
+    if (sw <= 0 || sh <= 0 || aw <= 0 || ah <= 0) return 0;
+    return (sw == aw && sh == ah) ? 1 : 0;
+}
+
+/* Full Mako JFIF shell: mako_jfif + dim match + EOI. */
+static inline int64_t mako_jpeg_is_mako_complete(MakoString jpeg) {
+    if (!mako_jpeg_is_mako_jfif(jpeg)) return 0;
+    if (!mako_jpeg_sof0_matches_app7(jpeg)) return 0;
+    if (!mako_jpeg_has_eoi(jpeg)) return 0;
+    return 1;
+}
+
 /* ---- compile-time struct schema registry (filled by codegen) ---- */
 #ifndef MAKO_REFLECT_SCHEMA_MAX
 #define MAKO_REFLECT_SCHEMA_MAX 64
