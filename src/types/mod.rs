@@ -4708,6 +4708,10 @@ impl TypeChecker {
             Type::Fn(vec![Type::String], Box::new(Type::Int)),
         );
         fns.insert(
+            "jpeg_has_sof0".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
             "smtp_send_starttls".into(),
             Type::Fn(
                 vec![

@@ -1929,6 +1929,7 @@ ready queue so workers can multiplex without one-request-at-a-time stalls.
 | `jpeg_huff_block` | `jpeg_huff_block(data: string) -> string` | Get Huffman-encoded block |
 | `jpeg_encode_gray_jfif` | `jpeg_encode_gray_jfif(width: int, height: int, pixels: string) -> string` | Encode grayscale with SOI+APP0(JFIF)+SOF0 headers; pixels in APP7 (`MAKOJPG`) for `jpeg_decode_gray` roundtrip. External viewers see a JFIF shell, not a full Huffman bitstream. |
 | `jpeg_is_jfif` | `jpeg_is_jfif(data: string) -> int` | Check if data has JFIF APP0 marker |
+| `jpeg_has_sof0` | `jpeg_has_sof0(data: string) -> int` | Scan markers for SOF0 (baseline DCT header) |
 
 ---
 
@@ -2216,7 +2217,8 @@ Tests: `examples/testing/overflow_shutdown_test.mko`. Multi-error recovery:
 | `Option[U]` | heap-boxed `MakoOptionInt` via `mako_ok_ptr` (`option`) |
 
 `Option[T]` uses the same payload slots (`value` / `ok_s` / `ok_f` / ptr). Generic
-`Some(x)` / `None` and match `Some(v)` work for int/string/float and boxed containers.
+`Some(x)` / `None` and match `Some(v)` work for int/string/float, boxed containers,
+and one nested Option layer (`Option[Option[T]]`, `Result[Option[Option[T]]]`).
 
 | Err type `E` | Encoding |
 |--------------|----------|
@@ -2258,7 +2260,8 @@ Tests: `result_enum_test.mko`, `job_join_typed_test.mko` (Result across kick/joi
 `wave15_queue_test.mko` (`[]Struct` Ok),
 `wave16_queue_test.mko` (generic `Result[T, string]` Ok mono scalars),
 `wave17_queue_test.mko` (generic mono for `[]int`/`[]string`/`[]Struct`/maps),
-`wave18_queue_test.mko` (generic `Option[T]`, nested `Result[Option[T]]`).
+`wave18_queue_test.mko` (generic `Option[T]`, nested `Result[Option[T]]`),
+`wave19_queue_test.mko` (Option containers, `Option[Option[T]]`, `jpeg_has_sof0`).
 
 ---
 

@@ -4071,6 +4071,29 @@ static inline int64_t mako_jpeg_is_jfif(MakoString jpeg) {
     return 0;
 }
 
+/* Scan markers for SOF0 (baseline DCT) — present in Mako JFIF encode shell. */
+static inline int64_t mako_jpeg_has_sof0(MakoString jpeg) {
+    if (jpeg.len < 4) return 0;
+    const unsigned char *p = (const unsigned char *)jpeg.data;
+    if (p[0] != 0xFF || p[1] != 0xD8) return 0;
+    size_t i = 2;
+    while (i + 3 < jpeg.len) {
+        if (p[i] != 0xFF) { i++; continue; }
+        unsigned char m = p[i + 1];
+        if (m == 0xD9) break; /* EOI */
+        if (m == 0xC0) return 1; /* SOF0 */
+        if (m == 0xD8 || m == 0x01 || (m >= 0xD0 && m <= 0xD7)) {
+            i += 2;
+            continue;
+        }
+        if (i + 3 >= jpeg.len) break;
+        uint16_t seglen = ((uint16_t)p[i + 2] << 8) | p[i + 3];
+        if (seglen < 2) break;
+        i += 2 + (size_t)seglen;
+    }
+    return 0;
+}
+
 /* ---- compile-time struct schema registry (filled by codegen) ---- */
 #ifndef MAKO_REFLECT_SCHEMA_MAX
 #define MAKO_REFLECT_SCHEMA_MAX 64
