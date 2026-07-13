@@ -817,23 +817,54 @@ static inline MakoString mako_error_string(MakoResultInt r) {
     return r.err;
 }
 
-/* ---- Option[int] ---- */
+/* ---- Option[T] (same payload slots as Result Ok: int / string / float / ptr) ---- */
 typedef struct {
     bool some;
-    int64_t value;
+    int64_t value;   /* int family, or pointer bits for boxed / map payloads */
+    MakoString ok_s; /* Option[string] */
+    double ok_f;     /* Option[float] */
 } MakoOptionInt;
 
 static inline MakoOptionInt mako_some_int(int64_t v) {
     MakoOptionInt o;
+    memset(&o, 0, sizeof(o));
     o.some = true;
     o.value = v;
     return o;
 }
 
+static inline MakoOptionInt mako_some_str(MakoString s) {
+    MakoOptionInt o;
+    memset(&o, 0, sizeof(o));
+    o.some = true;
+    o.ok_s = s;
+    return o;
+}
+
+static inline MakoOptionInt mako_some_float_opt(double v) {
+    MakoOptionInt o;
+    memset(&o, 0, sizeof(o));
+    o.some = true;
+    o.ok_f = v;
+    return o;
+}
+
+static inline MakoOptionInt mako_some_ptr(void *p) {
+    MakoOptionInt o;
+    memset(&o, 0, sizeof(o));
+    o.some = true;
+    o.value = (int64_t)(intptr_t)p;
+    return o;
+}
+
+static inline void *mako_option_some_ptr(MakoOptionInt o) {
+    return o.some ? (void *)(intptr_t)o.value : NULL;
+}
+
 static inline MakoOptionInt mako_none_int(void) {
     MakoOptionInt o;
+    memset(&o, 0, sizeof(o));
     o.some = false;
-    o.value = 0;
     return o;
 }
 
@@ -3007,6 +3038,12 @@ static inline int mako_re_unicode_prop_match(const char *name, size_t nlen, uint
         return (cp >= 0x1780 && cp <= 0x17FF);
     if (nlen == 7 && memcmp(name, "Tibetan", 7) == 0)
         return (cp >= 0x0F00 && cp <= 0x0FFF);
+    if (nlen == 6 && memcmp(name, "Syriac", 6) == 0)
+        return (cp >= 0x0700 && cp <= 0x074F);
+    if (nlen == 6 && memcmp(name, "Coptic", 6) == 0)
+        return (cp >= 0x2C80 && cp <= 0x2CFF) || (cp >= 0x03E2 && cp <= 0x03EF);
+    if (nlen == 5 && memcmp(name, "Runic", 5) == 0)
+        return (cp >= 0x16A0 && cp <= 0x16FF);
     return 0;
 }
 

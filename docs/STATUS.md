@@ -172,19 +172,17 @@ Last inventory: 2026-07-11 (**unique Mako surface** · pack/pull · pain map · 
 | `chan_open[Struct]` via MakoChanPtr heap-box | Done |
 | `error_tag(tag, msg)` enum-like string errors | Done |
 
-**Closed (wave 7–17):** join_timeout **flatten** · POD kick + string fields ·
-`reflect_value_of` N + nested POD · `Result` Ok for slices/maps + **generic
-`Result[T]` mono for scalars and containers** · NLL if/else/match/nested/
-loop×match + labeled continue/break + multi-label product · script `\p{…}`
-(Myanmar/Khmer/Tibetan) · expanded TSan · prior work.
+**Closed (wave 7–18):** join_timeout **flatten** · POD kick + string fields ·
+`reflect_value_of` N + nested POD · `Result`/`Option` Ok for scalars + containers
++ **generic Option[T]** + **Result[Option[T]]** nest · NLL labeled continue/break ·
+script `\p{…}` (Syriac/Coptic/Runic) · expanded TSan · prior work.
 
-**Wave 17 tests:** `examples/testing/wave17_queue_test.mko` · bad
-`hold_break_continue_outer`.
+**Wave 18 tests:** `examples/testing/wave18_queue_test.mko`.
 
 **Pain residuals (language) still open:** see [PAIN_POINTS.md](PAIN_POINTS.md) §4.
 
 1. Fuller data-race model beyond expanded TSan smoke (no full type-level race system)  
-2. More Result Ok shapes (nested generic containers / Option)  
+2. More Result/Option shapes (deeper nesting, Option of containers mono polish)  
 3. Stronger NLL (rarer multi-label CFG products)  
 
 **Stdlib / product residuals:**

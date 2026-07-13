@@ -187,4 +187,5 @@ jobs:
           ./target/release/mako test --race examples/testing/wave14_queue_test.mko
           ./target/release/mako test --race examples/testing/wave15_queue_test.mko
           ./target/release/mako test --race examples/testing/wave16_queue_test.mko
+          ./target/release/mako test --race examples/testing/wave17_queue_test.mko
           ./target/release/mako test --race examples/testing/share_atomic_test.mko

@@ -1,0 +1,64 @@
+// Wave 18: generic Option[T], nested Result[Option[T]], more unicode.
+
+fn wrap_some[T](x: T) -> Option[T] {
+    return Some(x)
+}
+
+fn nest_ok[T](x: T) -> Result[Option[T], string] {
+    return Ok(Some(x))
+}
+
+fn TestOptionInt() {
+    match wrap_some(3) {
+        Some(v) => assert_eq(v, 3),
+        None => assert(false),
+    }
+}
+
+fn TestOptionStr() {
+    match wrap_some("hi") {
+        Some(s) => assert_eq_str(s, "hi"),
+        None => assert(false),
+    }
+}
+
+fn TestOptionFloat() {
+    match wrap_some(2.5) {
+        Some(f) => assert(f > 2.0),
+        None => assert(false),
+    }
+}
+
+fn TestOptionNone() {
+    let o: Option[int] = None
+    match o {
+        Some(_) => assert(false),
+        None => assert(true),
+    }
+}
+
+fn TestNestResultOptionInt() {
+    match nest_ok(9) {
+        Ok(o) => match o {
+            Some(v) => assert_eq(v, 9),
+            None => assert(false),
+        },
+        Err(_) => assert(false),
+    }
+}
+
+fn TestNestResultOptionStr() {
+    match nest_ok("ok") {
+        Ok(o) => match o {
+            Some(s) => assert_eq_str(s, "ok"),
+            None => assert(false),
+        },
+        Err(_) => assert(false),
+    }
+}
+
+fn TestRegexUnicodeSyriacCopticRunic() {
+    assert(regex_match("\\p{Syriac}+", "ܐܒ"))
+    assert(regex_match("\\p{Coptic}+", "Ⲁⲁ"))
+    assert(regex_match("\\p{Runic}+", "ᚠᚢ"))
+}

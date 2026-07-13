@@ -77,10 +77,22 @@ pub struct Codegen {
     fn_result_ok_kind: HashMap<String, String>,
     /// Function name → struct C name when Ok is a named struct.
     fn_result_ok_struct: HashMap<String, String>,
+    /// When Result Ok is Option[T], kind of T (for nested match after Ok unbox).
+    fn_result_option_inner: HashMap<String, String>,
     /// Local Result binding → Ok payload kind.
     result_ok_kinds: HashMap<String, String>,
     /// Local Result → struct name for Ok struct payloads.
     result_ok_structs: HashMap<String, String>,
+    /// Local Result → Option inner kind when Ok is Option.
+    result_option_inners: HashMap<String, String>,
+    /// Function name → Option Some payload kind.
+    fn_option_some_kind: HashMap<String, String>,
+    /// Function name → struct name when Option[Struct].
+    fn_option_some_struct: HashMap<String, String>,
+    /// Local Option binding → Some payload kind.
+    option_some_kinds: HashMap<String, String>,
+    /// Local Option → struct name for Some struct payloads.
+    option_some_structs: HashMap<String, String>,
     /// Job local / temp name → C return type of the kicked function.
     job_rets: HashMap<String, String>,
     /// Job local / temp → Result Ok kind when ret is MakoResultInt.
@@ -126,8 +138,14 @@ impl Codegen {
             fn_result_err_enum: HashMap::new(),
             fn_result_ok_kind: HashMap::new(),
             fn_result_ok_struct: HashMap::new(),
+            fn_result_option_inner: HashMap::new(),
             result_ok_kinds: HashMap::new(),
             result_ok_structs: HashMap::new(),
+            result_option_inners: HashMap::new(),
+            fn_option_some_kind: HashMap::new(),
+            fn_option_some_struct: HashMap::new(),
+            option_some_kinds: HashMap::new(),
+            option_some_structs: HashMap::new(),
             job_rets: HashMap::new(),
             job_ok_kinds: HashMap::new(),
             chan_float: std::collections::HashSet::new(),
@@ -140,66 +158,86 @@ impl Codegen {
         crate::errors::result_err_enum_c(ty, |en| self.enums.contains_key(en))
     }
 
-    /// Ok payload kind for Result[T, _]: "string", "float", "struct", "slice",
-    /// "map"/"map_si", "map_ii", "map_ss", or "int".
+    /// Payload kind for a value type (shared by Result Ok and Option Some).
+    fn value_payload_kind(ty: &TypeExpr) -> &'static str {
+        match ty {
+            TypeExpr::Named(t) if t == "string" => "string",
+            TypeExpr::Named(t) if t == "float" || t == "float64" => "float",
+            TypeExpr::Generic(n, _) if n == "Option" => "option",
+            TypeExpr::Array(inner) => match inner.as_ref() {
+                TypeExpr::Named(n) if n == "string" => "slice_str",
+                TypeExpr::Named(n) if n == "float" || n == "float64" => "slice_float",
+                TypeExpr::Named(n)
+                    if matches!(
+                        n.as_str(),
+                        "int" | "int64" | "int32" | "int8" | "byte" | "bool" | "uint64"
+                    ) =>
+                {
+                    "slice"
+                }
+                TypeExpr::Named(_) => "slice_struct",
+                _ => "slice",
+            },
+            TypeExpr::Map(k, v) => match (k.as_ref(), v.as_ref()) {
+                (TypeExpr::Named(kk), TypeExpr::Named(vv))
+                    if kk == "int" && (vv == "int" || vv == "int64") =>
+                {
+                    "map_ii"
+                }
+                (TypeExpr::Named(kk), TypeExpr::Named(vv)) if kk == "string" && vv == "string" => {
+                    "map_ss"
+                }
+                _ => "map_si",
+            },
+            TypeExpr::Named(t)
+                if t != "int"
+                    && t != "int64"
+                    && t != "int32"
+                    && t != "int8"
+                    && t != "byte"
+                    && t != "bool"
+                    && t != "string"
+                    && t != "float"
+                    && t != "float64" =>
+            {
+                "struct"
+            }
+            _ => "int",
+        }
+    }
+
+    /// Ok payload kind for Result[T, _].
     fn result_ok_kind(ty: &TypeExpr) -> &'static str {
         match ty {
             TypeExpr::Generic(n, args) if n == "Result" && !args.is_empty() => {
-                match &args[0] {
-                    TypeExpr::Named(t) if t == "string" => "string",
-                    TypeExpr::Named(t) if t == "float" || t == "float64" => "float",
-                    TypeExpr::Array(inner) => match inner.as_ref() {
-                        TypeExpr::Named(n) if n == "string" => "slice_str",
-                        TypeExpr::Named(n) if n == "float" || n == "float64" => "slice_float",
-                        TypeExpr::Named(n)
-                            if matches!(
-                                n.as_str(),
-                                "int"
-                                    | "int64"
-                                    | "int32"
-                                    | "int8"
-                                    | "byte"
-                                    | "bool"
-                                    | "uint64"
-                            ) =>
-                        {
-                            "slice"
-                        }
-                        // []NamedStruct → slice_struct (elem name in result_ok_structs)
-                        TypeExpr::Named(_) => "slice_struct",
-                        _ => "slice",
-                    },
-                    TypeExpr::Map(k, v) => match (k.as_ref(), v.as_ref()) {
-                        (TypeExpr::Named(kk), TypeExpr::Named(vv))
-                            if kk == "int" && (vv == "int" || vv == "int64") =>
-                        {
-                            "map_ii"
-                        }
-                        (TypeExpr::Named(kk), TypeExpr::Named(vv))
-                            if kk == "string" && vv == "string" =>
-                        {
-                            "map_ss"
-                        }
-                        // map[string]int (and unknown → SI)
-                        _ => "map_si",
-                    },
-                    TypeExpr::Named(t)
-                        if t != "int"
-                            && t != "int64"
-                            && t != "int32"
-                            && t != "int8"
-                            && t != "byte"
-                            && t != "bool"
-                            && t != "string"
-                            && t != "float"
-                            && t != "float64" =>
-                    {
-                        "struct"
-                    }
-                    _ => "int",
-                }
+                Self::value_payload_kind(&args[0])
             }
             _ => "int",
+        }
+    }
+
+    /// Some payload kind for Option[T].
+    fn option_some_kind(ty: &TypeExpr) -> &'static str {
+        match ty {
+            TypeExpr::Generic(n, args) if n == "Option" && !args.is_empty() => {
+                Self::value_payload_kind(&args[0])
+            }
+            _ => "int",
+        }
+    }
+
+    /// When Result[Option[T], E], the kind of T.
+    fn result_option_inner_kind(ty: &TypeExpr) -> Option<&'static str> {
+        match ty {
+            TypeExpr::Generic(n, args) if n == "Result" && !args.is_empty() => {
+                if let TypeExpr::Generic(on, oargs) = &args[0] {
+                    if on == "Option" && !oargs.is_empty() {
+                        return Some(Self::value_payload_kind(&oargs[0]));
+                    }
+                }
+                None
+            }
+            _ => None,
         }
     }
 
@@ -257,22 +295,34 @@ impl Codegen {
         }
     }
 
+    fn payload_struct_name(&self, ty: &TypeExpr) -> Option<String> {
+        match ty {
+            TypeExpr::Named(t) if self.structs.contains_key(t) => Some(t.clone()),
+            TypeExpr::Array(inner) => {
+                if let TypeExpr::Named(t) = inner.as_ref() {
+                    if self.structs.contains_key(t) {
+                        return Some(t.clone());
+                    }
+                }
+                None
+            }
+            _ => None,
+        }
+    }
+
     fn result_ok_struct_name(&self, ty: &TypeExpr) -> Option<String> {
         match ty {
             TypeExpr::Generic(n, args) if n == "Result" && !args.is_empty() => {
-                match &args[0] {
-                    TypeExpr::Named(t) if self.structs.contains_key(t) => Some(t.clone()),
-                    // []Struct Ok: store element name for MakoArr_{elem} unbox
-                    TypeExpr::Array(inner) => {
-                        if let TypeExpr::Named(t) = inner.as_ref() {
-                            if self.structs.contains_key(t) {
-                                return Some(t.clone());
-                            }
-                        }
-                        None
-                    }
-                    _ => None,
-                }
+                self.payload_struct_name(&args[0])
+            }
+            _ => None,
+        }
+    }
+
+    fn option_some_struct_name(&self, ty: &TypeExpr) -> Option<String> {
+        match ty {
+            TypeExpr::Generic(n, args) if n == "Option" && !args.is_empty() => {
+                self.payload_struct_name(&args[0])
             }
             _ => None,
         }
@@ -374,6 +424,134 @@ impl Codegen {
             .get(&mono)
             .or_else(|| self.fn_result_err_enum.get(fname))
             .cloned()
+    }
+
+    fn call_result_option_inner(&self, fname: &str, args: &[Expr]) -> Option<String> {
+        let mono = self.generic_mono_name_for_call(fname, args);
+        self.fn_result_option_inner
+            .get(&mono)
+            .or_else(|| self.fn_result_option_inner.get(fname))
+            .cloned()
+    }
+
+    fn call_option_some_kind(&self, fname: &str, args: &[Expr]) -> Option<String> {
+        let mono = self.generic_mono_name_for_call(fname, args);
+        self.fn_option_some_kind
+            .get(&mono)
+            .or_else(|| self.fn_option_some_kind.get(fname))
+            .cloned()
+    }
+
+    fn call_option_some_struct(&self, fname: &str, args: &[Expr]) -> Option<String> {
+        let mono = self.generic_mono_name_for_call(fname, args);
+        self.fn_option_some_struct
+            .get(&mono)
+            .or_else(|| self.fn_option_some_struct.get(fname))
+            .cloned()
+    }
+
+    /// Bind Option Some payload into `bindings[0]` according to kind.
+    fn emit_option_some_bind(&mut self, scrut: &str, bindings: &[String], kind: &str) {
+        if bindings.len() != 1 {
+            return;
+        }
+        let b = mangle(&bindings[0]);
+        if kind == "string" {
+            self.locals.insert(bindings[0].clone(), "MakoString".into());
+            self.line(&format!("MakoString {b} = {scrut}.ok_s;"));
+        } else if kind == "float" {
+            self.locals.insert(bindings[0].clone(), "double".into());
+            self.line(&format!("double {b} = {scrut}.ok_f;"));
+        } else if kind == "struct" {
+            let sn = self
+                .option_some_structs
+                .get(scrut)
+                .cloned()
+                .unwrap_or_else(|| "int64_t".into());
+            let cname = self
+                .structs
+                .get(&sn)
+                .map(|s| s.c_name.clone())
+                .unwrap_or(sn);
+            let p = self.fresh("opp");
+            self.locals.insert(bindings[0].clone(), cname.clone());
+            self.line(&format!(
+                "{cname} *{p} = ({cname}*)mako_option_some_ptr({scrut});"
+            ));
+            self.line(&format!("{cname} {b};"));
+            self.line(&format!(
+                "if ({p}) {{ {b} = *{p}; free({p}); }} else {{ memset(&{b}, 0, sizeof({b})); }}"
+            ));
+        } else if kind == "slice" {
+            let p = self.fresh("ops");
+            self.locals.insert(bindings[0].clone(), "MakoIntArray".into());
+            self.line(&format!(
+                "MakoIntArray *{p} = (MakoIntArray*)mako_option_some_ptr({scrut});"
+            ));
+            self.line(&format!("MakoIntArray {b};"));
+            self.line(&format!(
+                "if ({p}) {{ {b} = *{p}; free({p}); }} else {{ {b}.data = NULL; {b}.len = 0; {b}.cap = 0; }}"
+            ));
+        } else if kind == "slice_str" {
+            let p = self.fresh("ops");
+            self.locals.insert(bindings[0].clone(), "MakoStrArray".into());
+            self.line(&format!(
+                "MakoStrArray *{p} = (MakoStrArray*)mako_option_some_ptr({scrut});"
+            ));
+            self.line(&format!("MakoStrArray {b};"));
+            self.line(&format!(
+                "if ({p}) {{ {b} = *{p}; free({p}); }} else {{ {b}.data = NULL; {b}.len = 0; {b}.cap = 0; }}"
+            ));
+        } else if kind == "slice_float" {
+            let p = self.fresh("ops");
+            self.locals.insert(bindings[0].clone(), "MakoFloatArray".into());
+            self.line(&format!(
+                "MakoFloatArray *{p} = (MakoFloatArray*)mako_option_some_ptr({scrut});"
+            ));
+            self.line(&format!("MakoFloatArray {b};"));
+            self.line(&format!(
+                "if ({p}) {{ {b} = *{p}; free({p}); }} else {{ {b}.data = NULL; {b}.len = 0; {b}.cap = 0; }}"
+            ));
+        } else if kind == "slice_struct" {
+            let sn = self
+                .option_some_structs
+                .get(scrut)
+                .cloned()
+                .unwrap_or_else(|| "int64_t".into());
+            let cname = self
+                .structs
+                .get(&sn)
+                .map(|s| s.c_name.clone())
+                .unwrap_or(sn);
+            let arr = format!("MakoArr_{cname}");
+            let p = self.fresh("ops");
+            self.locals.insert(bindings[0].clone(), arr.clone());
+            self.line(&format!(
+                "{arr} *{p} = ({arr}*)mako_option_some_ptr({scrut});"
+            ));
+            self.line(&format!("{arr} {b};"));
+            self.line(&format!(
+                "if ({p}) {{ {b} = *{p}; free({p}); }} else {{ {b}.data = NULL; {b}.len = 0; {b}.cap = 0; }}"
+            ));
+        } else if kind == "map" || kind == "map_si" {
+            self.locals.insert(bindings[0].clone(), "MakoMapSI*".into());
+            self.line(&format!(
+                "MakoMapSI *{b} = (MakoMapSI*)mako_option_some_ptr({scrut});"
+            ));
+        } else if kind == "map_ii" {
+            self.locals.insert(bindings[0].clone(), "MakoMapII*".into());
+            self.line(&format!(
+                "MakoMapII *{b} = (MakoMapII*)mako_option_some_ptr({scrut});"
+            ));
+        } else if kind == "map_ss" {
+            self.locals.insert(bindings[0].clone(), "MakoMapSS*".into());
+            self.line(&format!(
+                "MakoMapSS *{b} = (MakoMapSS*)mako_option_some_ptr({scrut});"
+            ));
+        } else {
+            self.locals.insert(bindings[0].clone(), "int64_t".into());
+            self.line(&format!("int64_t {b} = {scrut}.value;"));
+        }
     }
 
     fn push_share_scope(&mut self) {
@@ -616,6 +794,17 @@ impl Codegen {
                                 .insert(f.name.clone(), Self::result_ok_kind(rt).into());
                             if let Some(sn) = self.result_ok_struct_name(rt) {
                                 self.fn_result_ok_struct.insert(f.name.clone(), sn);
+                            }
+                            if let Some(ik) = Self::result_option_inner_kind(rt) {
+                                self.fn_result_option_inner
+                                    .insert(f.name.clone(), ik.into());
+                            }
+                        }
+                        if matches!(rt, TypeExpr::Generic(n, _) if n == "Option") {
+                            self.fn_option_some_kind
+                                .insert(f.name.clone(), Self::option_some_kind(rt).into());
+                            if let Some(sn) = self.option_some_struct_name(rt) {
+                                self.fn_option_some_struct.insert(f.name.clone(), sn);
                             }
                         }
                     }
@@ -1830,6 +2019,21 @@ impl Codegen {
                             if let Some(sn) = self.call_result_ok_struct(fname, args) {
                                 self.result_ok_structs.insert(name.clone(), sn);
                             }
+                            if let Some(ik) = self.call_result_option_inner(fname, args) {
+                                self.result_option_inners.insert(name.clone(), ik);
+                            }
+                        }
+                    }
+                }
+                if ty == "MakoOptionInt" {
+                    if let Expr::Call { callee, args } = init {
+                        if let Expr::Ident(fname) = callee.as_ref() {
+                            if let Some(ok) = self.call_option_some_kind(fname, args) {
+                                self.option_some_kinds.insert(name.clone(), ok);
+                            }
+                            if let Some(sn) = self.call_option_some_struct(fname, args) {
+                                self.option_some_structs.insert(name.clone(), sn);
+                            }
                         }
                     }
                 }
@@ -2551,6 +2755,18 @@ impl Codegen {
                                     format!("mako_ok_ptr((void*){v})"),
                                 );
                             }
+                            // Option[T] Ok: heap-box the option payload
+                            if vty == "MakoOptionInt" {
+                                let boxn = self.fresh("optbox");
+                                self.line(&format!(
+                                    "MakoOptionInt *{boxn} = (MakoOptionInt*)malloc(sizeof(MakoOptionInt));"
+                                ));
+                                self.line(&format!("*{boxn} = {v};"));
+                                return (
+                                    "MakoResultInt".into(),
+                                    format!("mako_ok_ptr((void*){boxn})"),
+                                );
+                            }
                             return (
                                 "MakoResultInt".into(),
                                 format!("mako_ok_int((int64_t)({v}))"),
@@ -2648,8 +2864,83 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "Some" => {
-                            let (_, v) = self.emit_expr(&args[0]);
-                            return ("MakoOptionInt".into(), format!("mako_some_int({v})"));
+                            let (vty, v) = self.emit_expr(&args[0]);
+                            if vty == "MakoString" {
+                                return ("MakoOptionInt".into(), format!("mako_some_str({v})"));
+                            }
+                            if vty == "double" {
+                                return (
+                                    "MakoOptionInt".into(),
+                                    format!("mako_some_float_opt({v})"),
+                                );
+                            }
+                            if self.structs.contains_key(&vty)
+                                || self.structs.values().any(|s| s.c_name == vty)
+                            {
+                                let boxn = self.fresh("opbox");
+                                self.line(&format!(
+                                    "{vty} *{boxn} = ({vty}*)malloc(sizeof({vty}));"
+                                ));
+                                self.line(&format!("*{boxn} = {v};"));
+                                return (
+                                    "MakoOptionInt".into(),
+                                    format!("mako_some_ptr((void*){boxn})"),
+                                );
+                            }
+                            if vty == "MakoIntArray" {
+                                let boxn = self.fresh("opbox");
+                                self.line(&format!(
+                                    "MakoIntArray *{boxn} = (MakoIntArray*)malloc(sizeof(MakoIntArray));"
+                                ));
+                                self.line(&format!("*{boxn} = {v};"));
+                                return (
+                                    "MakoOptionInt".into(),
+                                    format!("mako_some_ptr((void*){boxn})"),
+                                );
+                            }
+                            if vty == "MakoStrArray" {
+                                let boxn = self.fresh("opbox");
+                                self.line(&format!(
+                                    "MakoStrArray *{boxn} = (MakoStrArray*)malloc(sizeof(MakoStrArray));"
+                                ));
+                                self.line(&format!("*{boxn} = {v};"));
+                                return (
+                                    "MakoOptionInt".into(),
+                                    format!("mako_some_ptr((void*){boxn})"),
+                                );
+                            }
+                            if vty == "MakoFloatArray" {
+                                let boxn = self.fresh("opbox");
+                                self.line(&format!(
+                                    "MakoFloatArray *{boxn} = (MakoFloatArray*)malloc(sizeof(MakoFloatArray));"
+                                ));
+                                self.line(&format!("*{boxn} = {v};"));
+                                return (
+                                    "MakoOptionInt".into(),
+                                    format!("mako_some_ptr((void*){boxn})"),
+                                );
+                            }
+                            if vty.starts_with("MakoArr_") {
+                                let boxn = self.fresh("opbox");
+                                self.line(&format!(
+                                    "{vty} *{boxn} = ({vty}*)malloc(sizeof({vty}));"
+                                ));
+                                self.line(&format!("*{boxn} = {v};"));
+                                return (
+                                    "MakoOptionInt".into(),
+                                    format!("mako_some_ptr((void*){boxn})"),
+                                );
+                            }
+                            if matches!(
+                                vty.as_str(),
+                                "MakoMapSI*" | "MakoMapII*" | "MakoMapSS*"
+                            ) {
+                                return (
+                                    "MakoOptionInt".into(),
+                                    format!("mako_some_ptr((void*){v})"),
+                                );
+                            }
+                            return ("MakoOptionInt".into(), format!("mako_some_int((int64_t)({v}))"));
                         }
                         "None" => {
                             return ("MakoOptionInt".into(), "mako_none_int()".into());
@@ -12483,6 +12774,50 @@ impl Codegen {
             if let Some(sn) = ok_st {
                 self.result_ok_structs.insert(scrut.clone(), sn);
             }
+            let opt_inner = match scrutinee {
+                Expr::Ident(n) => self.result_option_inners.get(n).cloned(),
+                Expr::Call { callee, args } => {
+                    if let Expr::Ident(fname) = callee.as_ref() {
+                        self.call_result_option_inner(fname, args)
+                    } else {
+                        None
+                    }
+                }
+                _ => self.result_option_inners.get(&sval).cloned(),
+            };
+            if let Some(ik) = opt_inner {
+                self.result_option_inners.insert(scrut.clone(), ik);
+            }
+        }
+        if sty == "MakoOptionInt" {
+            let some_c = match scrutinee {
+                Expr::Ident(n) => self.option_some_kinds.get(n).cloned(),
+                Expr::Call { callee, args } => {
+                    if let Expr::Ident(fname) = callee.as_ref() {
+                        self.call_option_some_kind(fname, args)
+                    } else {
+                        None
+                    }
+                }
+                _ => self.option_some_kinds.get(&sval).cloned(),
+            };
+            if let Some(ok) = some_c {
+                self.option_some_kinds.insert(scrut.clone(), ok);
+            }
+            let some_st = match scrutinee {
+                Expr::Ident(n) => self.option_some_structs.get(n).cloned(),
+                Expr::Call { callee, args } => {
+                    if let Expr::Ident(fname) = callee.as_ref() {
+                        self.call_option_some_struct(fname, args)
+                    } else {
+                        None
+                    }
+                }
+                _ => self.option_some_structs.get(&sval).cloned(),
+            };
+            if let Some(sn) = some_st {
+                self.option_some_structs.insert(scrut.clone(), sn);
+            }
         }
 
         let marker = format!("/*__MATCH_DECL_{result}__*/");
@@ -12748,6 +13083,21 @@ impl Codegen {
                             self.line(&format!(
                                 "MakoMapSS *{b} = (MakoMapSS*)mako_result_ok_ptr({scrut});"
                             ));
+                        } else if ok_kind == "option" {
+                            let b = mangle(&bindings[0]);
+                            let p = self.fresh("okopt");
+                            self.locals.insert(bindings[0].clone(), "MakoOptionInt".into());
+                            self.line(&format!(
+                                "MakoOptionInt *{p} = (MakoOptionInt*)mako_result_ok_ptr({scrut});"
+                            ));
+                            self.line(&format!("MakoOptionInt {b};"));
+                            self.line(&format!(
+                                "if ({p}) {{ {b} = *{p}; free({p}); }} else {{ memset(&{b}, 0, sizeof({b})); }}"
+                            ));
+                            // Propagate Option[T] inner kind for nested match on binding.
+                            if let Some(ik) = self.result_option_inners.get(scrut).cloned() {
+                                self.option_some_kinds.insert(bindings[0].clone(), ik);
+                            }
                         } else {
                             self.locals.insert(bindings[0].clone(), "int64_t".into());
                             self.line(&format!(
@@ -12776,8 +13126,12 @@ impl Codegen {
                     }
                 } else if sty == "MakoOptionInt" {
                     if name == "Some" && bindings.len() == 1 {
-                        self.locals.insert(bindings[0].clone(), "int64_t".into());
-                        self.line(&format!("int64_t {} = {scrut}.value;", mangle(&bindings[0])));
+                        let kind = self
+                            .option_some_kinds
+                            .get(scrut)
+                            .cloned()
+                            .unwrap_or_else(|| "int".into());
+                        self.emit_option_some_bind(scrut, bindings, &kind);
                     }
                 } else if let Some(enum_name) = self.variant_to_enum.get(name).cloned() {
                     let fields = self.enums[&enum_name].variants[name].1.clone();

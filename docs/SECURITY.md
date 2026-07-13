@@ -37,7 +37,7 @@ strings cloned), `string` (heap-cloned), channels, `ShareInt` / `AtomicInt`
 Rejected: arrays, maps, non-POD structs, `Arena`, nested `Crew`
 (`examples/bad/kick_non_pod.mko`, `kick_array_arg.mko`).  
 Race detection: `mako test --race` (CI TSan job: crew/kick/share, chan, proxy pool/edge,
-`kick_sync_test`, wave11/14/15/16 queue tests, `share_atomic_test`, `fan_string_test`,
+`kick_sync_test`, wave11/14–17 queue tests, `share_atomic_test`, `fan_string_test`,
 `kick_string_test`). Prefer channels over shared mutable state; full type-level race
 freedom remains residual.
 

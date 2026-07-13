@@ -2213,6 +2213,10 @@ Tests: `examples/testing/overflow_shutdown_test.mko`. Multi-error recovery:
 | `map[string]int` | map pointer via `mako_ok_ptr` (`map_si`) |
 | `map[int]int` | map pointer via `mako_ok_ptr` (`map_ii`) |
 | `map[string]string` | map pointer via `mako_ok_ptr` (`map_ss`) |
+| `Option[U]` | heap-boxed `MakoOptionInt` via `mako_ok_ptr` (`option`) |
+
+`Option[T]` uses the same payload slots (`value` / `ok_s` / `ok_f` / ptr). Generic
+`Some(x)` / `None` and match `Some(v)` work for int/string/float and boxed containers.
 
 | Err type `E` | Encoding |
 |--------------|----------|
@@ -2253,7 +2257,8 @@ Tests: `result_enum_test.mko`, `job_join_typed_test.mko` (Result across kick/joi
 `wave14_queue_test.mko` (`[]string` / `[]float` Ok),
 `wave15_queue_test.mko` (`[]Struct` Ok),
 `wave16_queue_test.mko` (generic `Result[T, string]` Ok mono scalars),
-`wave17_queue_test.mko` (generic mono for `[]int`/`[]string`/`[]Struct`/maps).
+`wave17_queue_test.mko` (generic mono for `[]int`/`[]string`/`[]Struct`/maps),
+`wave18_queue_test.mko` (generic `Option[T]`, nested `Result[Option[T]]`).
 
 ---
 

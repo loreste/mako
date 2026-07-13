@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.0 — 2026-07-13 (wave 18 queue)
+
+- Generic `Option[T]` Some: string/float/ptr payloads (not only int)
+- Nested `Result[Option[T], E]` Ok (boxed option + match unbox)
+- Regex `\p{Syriac}` / `\p{Coptic}` / `\p{Runic}` seeds
+- TSan CI: `wave17_queue_test`
+- Tests: `examples/testing/wave18_queue_test.mko`
+
 ## 0.1.0 — 2026-07-13 (wave 17 queue)
 
 - Generic `Result[T]` mono tags aligned for arrays/maps (`arr_*` / `map_*`)
