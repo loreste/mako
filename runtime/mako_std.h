@@ -927,6 +927,215 @@ static inline MakoString mako_session_id_new(void) {
     return out;
 }
 
+/* ---- Configurable memory / time / connection limits ---- */
+typedef struct {
+    int64_t mem_budget;     /* max bytes (0 = unlimited) */
+    int64_t mem_used;
+    int64_t time_budget_ms; /* wall clock from start_ms (0 = unlimited) */
+    int64_t start_ms;
+    int64_t max_conns;      /* max concurrent connections (0 = unlimited) */
+    int64_t open_conns;
+} MakoLimits;
+
+static inline MakoLimits *mako_limits_new(int64_t mem_budget, int64_t time_budget_ms,
+                                          int64_t max_conns) {
+    MakoLimits *L = (MakoLimits *)calloc(1, sizeof(MakoLimits));
+    if (!L) mako_abort("limits_new: out of memory");
+    L->mem_budget = mem_budget < 0 ? 0 : mem_budget;
+    L->time_budget_ms = time_budget_ms < 0 ? 0 : time_budget_ms;
+    L->max_conns = max_conns < 0 ? 0 : max_conns;
+    L->start_ms = mako_now_ms();
+    return L;
+}
+
+static inline int64_t mako_limits_free(MakoLimits *L) {
+    free(L);
+    return 0;
+}
+
+static inline int64_t mako_limits_mem_used(MakoLimits *L) {
+    return L ? L->mem_used : 0;
+}
+
+static inline int64_t mako_limits_open_conns(MakoLimits *L) {
+    return L ? L->open_conns : 0;
+}
+
+/* Try to charge `n` bytes against the budget. Returns 1 if allowed, 0 if denied. */
+static inline int64_t mako_limits_try_mem(MakoLimits *L, int64_t n) {
+    if (!L || n < 0) return 0;
+    if (L->mem_budget > 0 && L->mem_used + n > L->mem_budget) return 0;
+    L->mem_used += n;
+    return 1;
+}
+
+static inline int64_t mako_limits_release_mem(MakoLimits *L, int64_t n) {
+    if (!L || n < 0) return 0;
+    if (n > L->mem_used) L->mem_used = 0;
+    else L->mem_used -= n;
+    return 1;
+}
+
+/* 1 if still within time budget (or unlimited), else 0. */
+static inline int64_t mako_limits_check_time(MakoLimits *L) {
+    if (!L) return 0;
+    if (L->time_budget_ms <= 0) return 1;
+    return (mako_now_ms() - L->start_ms) <= L->time_budget_ms ? 1 : 0;
+}
+
+/* Try to open one connection slot. Returns 1 if allowed, 0 if at cap. */
+static inline int64_t mako_limits_try_conn(MakoLimits *L) {
+    if (!L) return 0;
+    if (L->max_conns > 0 && L->open_conns >= L->max_conns) return 0;
+    L->open_conns++;
+    return 1;
+}
+
+static inline int64_t mako_limits_release_conn(MakoLimits *L) {
+    if (!L) return 0;
+    if (L->open_conns > 0) L->open_conns--;
+    return 1;
+}
+
+/* ---- Remote session cancellation (process-local registry; share token over the wire) ---- */
+#define MAKO_SESS_CANCEL_CAP 256
+typedef struct {
+    char token[40]; /* 32 hex + NUL */
+    int cancelled;
+    int used;
+} MakoSessCancelSlot;
+
+static MakoSessCancelSlot mako_sess_cancel_tab[MAKO_SESS_CANCEL_CAP];
+static pthread_mutex_t mako_sess_cancel_mu = PTHREAD_MUTEX_INITIALIZER;
+
+static inline int mako_sess_cancel_find(const char *tok, size_t n) {
+    for (int i = 0; i < MAKO_SESS_CANCEL_CAP; i++) {
+        if (!mako_sess_cancel_tab[i].used) continue;
+        if (strlen(mako_sess_cancel_tab[i].token) == n
+            && memcmp(mako_sess_cancel_tab[i].token, tok, n) == 0)
+            return i;
+    }
+    return -1;
+}
+
+/* Mint a cancel token (hex session id) and register it as active (not cancelled). */
+static inline MakoString mako_session_cancel_token(void) {
+    MakoString t = mako_session_id_new();
+    if (t.len == 0 || t.len >= 40) return t;
+    pthread_mutex_lock(&mako_sess_cancel_mu);
+    int slot = -1;
+    for (int i = 0; i < MAKO_SESS_CANCEL_CAP; i++) {
+        if (!mako_sess_cancel_tab[i].used) {
+            slot = i;
+            break;
+        }
+    }
+    if (slot >= 0) {
+        memcpy(mako_sess_cancel_tab[slot].token, t.data, t.len);
+        mako_sess_cancel_tab[slot].token[t.len] = 0;
+        mako_sess_cancel_tab[slot].cancelled = 0;
+        mako_sess_cancel_tab[slot].used = 1;
+    }
+    pthread_mutex_unlock(&mako_sess_cancel_mu);
+    return t;
+}
+
+/* Mark token cancelled (remote peer or local). Returns 1 if found. */
+static inline int64_t mako_session_cancel(MakoString token) {
+    if (!token.data || token.len == 0 || token.len >= 40) return 0;
+    pthread_mutex_lock(&mako_sess_cancel_mu);
+    int i = mako_sess_cancel_find(token.data, token.len);
+    if (i < 0) {
+        /* Register then cancel so remote cancel-before-register still works after mint. */
+        for (int j = 0; j < MAKO_SESS_CANCEL_CAP; j++) {
+            if (!mako_sess_cancel_tab[j].used) {
+                memcpy(mako_sess_cancel_tab[j].token, token.data, token.len);
+                mako_sess_cancel_tab[j].token[token.len] = 0;
+                mako_sess_cancel_tab[j].cancelled = 1;
+                mako_sess_cancel_tab[j].used = 1;
+                pthread_mutex_unlock(&mako_sess_cancel_mu);
+                return 1;
+            }
+        }
+        pthread_mutex_unlock(&mako_sess_cancel_mu);
+        return 0;
+    }
+    mako_sess_cancel_tab[i].cancelled = 1;
+    pthread_mutex_unlock(&mako_sess_cancel_mu);
+    return 1;
+}
+
+/* 1 if token is marked cancelled, else 0. */
+static inline int64_t mako_session_cancelled(MakoString token) {
+    if (!token.data || token.len == 0) return 0;
+    pthread_mutex_lock(&mako_sess_cancel_mu);
+    int i = mako_sess_cancel_find(token.data, token.len);
+    int64_t r = (i >= 0 && mako_sess_cancel_tab[i].cancelled) ? 1 : 0;
+    pthread_mutex_unlock(&mako_sess_cancel_mu);
+    return r;
+}
+
+static inline int64_t mako_session_cancel_clear(MakoString token) {
+    if (!token.data || token.len == 0) return 0;
+    pthread_mutex_lock(&mako_sess_cancel_mu);
+    int i = mako_sess_cancel_find(token.data, token.len);
+    if (i >= 0) {
+        mako_sess_cancel_tab[i].used = 0;
+        mako_sess_cancel_tab[i].cancelled = 0;
+        mako_sess_cancel_tab[i].token[0] = 0;
+    }
+    pthread_mutex_unlock(&mako_sess_cancel_mu);
+    return i >= 0 ? 1 : 0;
+}
+
+/* ---- SCRAM channel binding helpers (RFC 5802 / 7677 gs2-header + cbind) ---- */
+/* cbind_name empty or "n" → no binding ("n,,"). Otherwise "p=<name>,," (e.g. tls-unique). */
+static inline MakoString mako_scram_gs2_header(MakoString cbind_name) {
+    if (!cbind_name.data || cbind_name.len == 0
+        || (cbind_name.len == 1 && cbind_name.data[0] == 'n')) {
+        return mako_str_from_cstr("n,,");
+    }
+    size_t n = 3 + cbind_name.len + 2; /* p= + name + ,, */
+    char *d = (char *)malloc(n + 1);
+    if (!d) mako_abort("scram_gs2_header: OOM");
+    d[0] = 'p';
+    d[1] = '=';
+    memcpy(d + 2, cbind_name.data, cbind_name.len);
+    d[2 + cbind_name.len] = ',';
+    d[3 + cbind_name.len] = ',';
+    d[4 + cbind_name.len] = 0;
+    return (MakoString){d, 4 + cbind_name.len};
+}
+
+/* c= attribute value: base64(gs2-header || cbind-data). cbind_data may be empty (y/n flags). */
+static inline MakoString mako_scram_cbind_b64(MakoString gs2_header, MakoString cbind_data) {
+    size_t n = gs2_header.len + (cbind_data.data ? cbind_data.len : 0);
+    char *buf = (char *)malloc(n + 1);
+    if (!buf) mako_abort("scram_cbind_b64: OOM");
+    if (gs2_header.len && gs2_header.data)
+        memcpy(buf, gs2_header.data, gs2_header.len);
+    if (cbind_data.data && cbind_data.len)
+        memcpy(buf + gs2_header.len, cbind_data.data, cbind_data.len);
+    buf[n] = 0;
+    MakoString raw = {buf, n};
+    MakoString b64 = mako_base64_encode(raw);
+    free(buf);
+    return b64;
+}
+
+/* client-final-without-proof: "c=<cbind_b64>,r=<nonce>" */
+static inline MakoString mako_scram_client_final_without_proof(MakoString cbind_b64,
+                                                              MakoString nonce) {
+    size_t n = 2 + cbind_b64.len + 3 + nonce.len;
+    char *d = (char *)malloc(n + 1);
+    if (!d) mako_abort("scram_client_final_wo_proof: OOM");
+    int written = snprintf(d, n + 1, "c=%.*s,r=%.*s", (int)cbind_b64.len,
+                           cbind_b64.data ? cbind_b64.data : "", (int)nonce.len,
+                           nonce.data ? nonce.data : "");
+    if (written < 0) written = 0;
+    return (MakoString){d, (size_t)written};
+}
+
 static inline MakoString mako_csrf_token(void) {
     return mako_session_id_new();
 }

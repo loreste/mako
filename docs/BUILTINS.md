@@ -610,6 +610,22 @@ application code. See `examples/testing/scram_test.mko` (RFC 7677 §3 vector),
 | `crypto.scram_server_signature` | `(server_key, auth) -> string` | `HMAC(server_key, auth)` |
 | `crypto.scram_client_proof` | `(client_key, client_sig) -> string` | `client_key XOR client_sig` |
 | `crypto.scram_verify_proof` | `(stored_key, auth, proof) -> int` | Server-side proof check (1/0); uses `const_eq` on recovered StoredKey |
+| `scram_gs2_header` | `(cbind_name: string) -> string` | `n,,` or `p=<name>,,` for SCRAM-SHA-256-PLUS |
+| `scram_cbind_b64` | `(gs2_header, cbind_data) -> string` | base64(gs2-header \|\| cbind-data) for `c=` |
+| `scram_client_final_without_proof` | `(cbind_b64, nonce) -> string` | `c=…,r=…` bare final message |
+| `seal_at_rest` | `(key, plaintext, aad) -> string` | AES-128-GCM at-rest seal (`nonce\|\|ct\|\|tag`) |
+| `open_at_rest` | `(key, sealed, aad) -> string` | Open at-rest blob (empty on fail) |
+| `seal_file_at_rest` | `(path, key, plaintext, aad) -> int` | Seal + write file |
+| `open_file_at_rest` | `(path, key, aad) -> string` | Read + open file |
+| `limits_new` | `(mem, time_ms, max_conns) -> Limits` | Resource budget (`0` = unlimited) |
+| `limits_try_mem` / `limits_release_mem` | `(Limits, n) -> int` | Charge / release memory |
+| `limits_check_time` | `(Limits) -> int` | Within time budget? |
+| `limits_try_conn` / `limits_release_conn` | `(Limits) -> int` | Connection slots |
+| `session_cancel_token` | `() -> string` | Mint cancel token |
+| `session_cancel` / `session_cancelled` / `session_cancel_clear` | `(token) -> int` | Remote session cancel registry |
+| `tls_server_new_mtls` | `(cert, key, client_ca) -> TlsServer` | mTLS server (require client cert) |
+| `tls_client_new_mtls` | `(ca, client_cert, client_key) -> TlsClient` | mTLS client (present cert) |
+| `tls_unique` | `(conn: TlsConn) -> string` | Finished bytes for tls-unique binding |
 | `const_eq` | `const_eq(a: string, b: string) -> int` | Constant-time string comparison |
 | `crypto_eq` | `crypto_eq(a: string, b: string) -> int` | Constant-time byte comparison |
 | `secret_from_str` | `secret_from_str(s: string) -> Secret` | Wrap a string as a secret (zeroized on drop) |

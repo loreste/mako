@@ -4365,6 +4365,82 @@ impl TypeChecker {
             "session_id_new".into(),
             Type::Fn(vec![], Box::new(Type::String)),
         );
+        // Configurable resource limits
+        fns.insert(
+            "limits_new".into(),
+            Type::Fn(
+                vec![Type::Int, Type::Int, Type::Int],
+                Box::new(Type::Named("Limits".into())),
+            ),
+        );
+        fns.insert(
+            "limits_free".into(),
+            Type::Fn(vec![Type::Named("Limits".into())], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "limits_try_mem".into(),
+            Type::Fn(
+                vec![Type::Named("Limits".into()), Type::Int],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "limits_release_mem".into(),
+            Type::Fn(
+                vec![Type::Named("Limits".into()), Type::Int],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "limits_check_time".into(),
+            Type::Fn(vec![Type::Named("Limits".into())], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "limits_try_conn".into(),
+            Type::Fn(vec![Type::Named("Limits".into())], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "limits_release_conn".into(),
+            Type::Fn(vec![Type::Named("Limits".into())], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "limits_mem_used".into(),
+            Type::Fn(vec![Type::Named("Limits".into())], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "limits_open_conns".into(),
+            Type::Fn(vec![Type::Named("Limits".into())], Box::new(Type::Int)),
+        );
+        // Remote session cancellation
+        fns.insert(
+            "session_cancel_token".into(),
+            Type::Fn(vec![], Box::new(Type::String)),
+        );
+        fns.insert(
+            "session_cancel".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "session_cancelled".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "session_cancel_clear".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
+        // SCRAM channel binding
+        fns.insert(
+            "scram_gs2_header".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::String)),
+        );
+        fns.insert(
+            "scram_cbind_b64".into(),
+            Type::Fn(vec![Type::String, Type::String], Box::new(Type::String)),
+        );
+        fns.insert(
+            "scram_client_final_without_proof".into(),
+            Type::Fn(vec![Type::String, Type::String], Box::new(Type::String)),
+        );
         fns.insert(
             "csrf_token".into(),
             Type::Fn(vec![], Box::new(Type::String)),
@@ -5568,6 +5644,35 @@ impl TypeChecker {
             "aes_gcm_open".into(),
             Type::Fn(
                 vec![Type::String, Type::String, Type::String, Type::String],
+                Box::new(Type::String),
+            ),
+        );
+        // Encryption at rest (AES-GCM + random nonce prefix)
+        fns.insert(
+            "seal_at_rest".into(),
+            Type::Fn(
+                vec![Type::String, Type::String, Type::String],
+                Box::new(Type::String),
+            ),
+        );
+        fns.insert(
+            "open_at_rest".into(),
+            Type::Fn(
+                vec![Type::String, Type::String, Type::String],
+                Box::new(Type::String),
+            ),
+        );
+        fns.insert(
+            "seal_file_at_rest".into(),
+            Type::Fn(
+                vec![Type::String, Type::String, Type::String, Type::String],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "open_file_at_rest".into(),
+            Type::Fn(
+                vec![Type::String, Type::String, Type::String],
                 Box::new(Type::String),
             ),
         );
@@ -7207,6 +7312,24 @@ impl TypeChecker {
                 vec![Type::String, Type::String],
                 Box::new(Type::Named("TlsServer".into())),
             ),
+        );
+        fns.insert(
+            "tls_server_new_mtls".into(),
+            Type::Fn(
+                vec![Type::String, Type::String, Type::String],
+                Box::new(Type::Named("TlsServer".into())),
+            ),
+        );
+        fns.insert(
+            "tls_client_new_mtls".into(),
+            Type::Fn(
+                vec![Type::String, Type::String, Type::String],
+                Box::new(Type::Named("TlsClient".into())),
+            ),
+        );
+        fns.insert(
+            "tls_unique".into(),
+            Type::Fn(vec![Type::Named("TlsConn".into())], Box::new(Type::String)),
         );
         fns.insert(
             "tls_accept".into(),

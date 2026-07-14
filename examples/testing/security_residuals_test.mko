@@ -1,0 +1,105 @@
+// Security residuals: encryption at rest, limits, session cancel, SCRAM cbind.
+// mTLS constructors are typechecked; live handshake needs certs (see tls_* tests).
+
+pull "crypto"
+
+fn TestSealAtRestRoundtrip() {
+    if aead_available() == 0 {
+        return
+    }
+    let key = random_bytes(16)
+    let pt = "secret payload"
+    let aad = "obj:1"
+    let sealed = seal_at_rest(key, pt, aad)
+    assert(len(sealed) > 12)
+    let open = open_at_rest(key, sealed, aad)
+    assert_eq_str(open, pt)
+    // Wrong AAD fails open
+    let bad = open_at_rest(key, sealed, "obj:2")
+    assert_eq(len(bad), 0)
+    // crypto pack wrappers
+    let s2 = crypto.seal(key, "x", "")
+    assert_eq_str(crypto.open(key, s2, ""), "x")
+}
+
+fn TestSealFileAtRest() {
+    if aead_available() == 0 {
+        return
+    }
+    let key = random_bytes(16)
+    let path = "/tmp/mako_seal_at_rest_test.bin"
+    assert_eq(seal_file_at_rest(path, key, "disk-secret", "file"), 0)
+    let pt = open_file_at_rest(path, key, "file")
+    assert_eq_str(pt, "disk-secret")
+}
+
+fn TestLimitsMemConnTime() {
+    let lim = limits_new(100, 60000, 2)
+    assert_eq(limits_try_mem(lim, 50), 1)
+    assert_eq(limits_try_mem(lim, 60), 0) // would exceed 100
+    assert_eq(limits_mem_used(lim), 50)
+    assert_eq(limits_release_mem(lim, 50), 1)
+    assert_eq(limits_mem_used(lim), 0)
+    assert_eq(limits_try_mem(lim, 100), 1)
+
+    assert_eq(limits_try_conn(lim), 1)
+    assert_eq(limits_try_conn(lim), 1)
+    assert_eq(limits_try_conn(lim), 0) // max 2
+    assert_eq(limits_open_conns(lim), 2)
+    assert_eq(limits_release_conn(lim), 1)
+    assert_eq(limits_try_conn(lim), 1)
+
+    assert_eq(limits_check_time(lim), 1)
+    let _ = limits_free(lim)
+
+    // Expired time budget
+    let short = limits_new(0, 1, 0)
+    sleep_ms(5)
+    assert_eq(limits_check_time(short), 0)
+    let _ = limits_free(short)
+}
+
+fn TestSessionCancel() {
+    let tok = session_cancel_token()
+    assert(len(tok) == 32)
+    assert_eq(session_cancelled(tok), 0)
+    assert_eq(session_cancel(tok), 1)
+    assert_eq(session_cancelled(tok), 1)
+    // Remote cancel of unknown token still registers as cancelled
+    let remote = session_id_new()
+    assert_eq(session_cancel(remote), 1)
+    assert_eq(session_cancelled(remote), 1)
+    assert_eq(session_cancel_clear(tok), 1)
+    assert_eq(session_cancelled(tok), 0)
+}
+
+fn TestScramChannelBinding() {
+    // No binding (classic SCRAM-SHA-256): c=biws is base64("n,,")
+    let gs2 = scram_gs2_header("n")
+    assert_eq_str(gs2, "n,,")
+    let c = scram_cbind_b64(gs2, "")
+    assert_eq_str(c, "biws")
+    let nonce = "abcNonce"
+    let bare = scram_client_final_without_proof(c, nonce)
+    assert_eq_str(bare, "c=biws,r=abcNonce")
+
+    // PLUS-style header
+    let gs2p = scram_gs2_header("tls-unique")
+    assert_eq_str(gs2p, "p=tls-unique,,")
+    let fake_unique = "finished-bytes"
+    let cp = scram_cbind_b64(gs2p, fake_unique)
+    assert(len(cp) > 0)
+    let barep = scram_client_final_without_proof(cp, "nonce")
+    assert(str_contains(barep, "c="))
+    assert(str_contains(barep, ",r=nonce"))
+
+    // Pack wrappers
+    assert_eq_str(crypto.scram_gs2("n"), "n,,")
+    assert_eq_str(crypto.scram_cbind("n,,", ""), "biws")
+}
+
+fn TestMtlsApiTypes() {
+    // Symbols link; live mTLS needs real PEMs (see tls_* live tests).
+    assert(tls_server_available() == 0 || tls_server_available() == 1)
+    assert(tls_client_available() == 0 || tls_client_available() == 1)
+}

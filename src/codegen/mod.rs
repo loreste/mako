@@ -14424,6 +14424,122 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             self.line(&format!("MakoString {tmp} = mako_session_id_new();"));
                             return ("MakoString".into(), tmp);
                         }
+                        "limits_new" => {
+                            let (_, m) = self.emit_expr(&args[0]);
+                            let (_, t) = self.emit_expr(&args[1]);
+                            let (_, c) = self.emit_expr(&args[2]);
+                            let tmp = self.fresh("lim");
+                            self.line(&format!(
+                                "MakoLimits *{tmp} = mako_limits_new({m}, {t}, {c});"
+                            ));
+                            return ("MakoLimits*".into(), tmp);
+                        }
+                        "limits_free" => {
+                            let (_, l) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_limits_free({l})"));
+                        }
+                        "limits_try_mem" => {
+                            let (_, l) = self.emit_expr(&args[0]);
+                            let (_, n) = self.emit_expr(&args[1]);
+                            return (
+                                "int64_t".into(),
+                                format!("mako_limits_try_mem({l}, {n})"),
+                            );
+                        }
+                        "limits_release_mem" => {
+                            let (_, l) = self.emit_expr(&args[0]);
+                            let (_, n) = self.emit_expr(&args[1]);
+                            return (
+                                "int64_t".into(),
+                                format!("mako_limits_release_mem({l}, {n})"),
+                            );
+                        }
+                        "limits_check_time" => {
+                            let (_, l) = self.emit_expr(&args[0]);
+                            return (
+                                "int64_t".into(),
+                                format!("mako_limits_check_time({l})"),
+                            );
+                        }
+                        "limits_try_conn" => {
+                            let (_, l) = self.emit_expr(&args[0]);
+                            return (
+                                "int64_t".into(),
+                                format!("mako_limits_try_conn({l})"),
+                            );
+                        }
+                        "limits_release_conn" => {
+                            let (_, l) = self.emit_expr(&args[0]);
+                            return (
+                                "int64_t".into(),
+                                format!("mako_limits_release_conn({l})"),
+                            );
+                        }
+                        "limits_mem_used" => {
+                            let (_, l) = self.emit_expr(&args[0]);
+                            return (
+                                "int64_t".into(),
+                                format!("mako_limits_mem_used({l})"),
+                            );
+                        }
+                        "limits_open_conns" => {
+                            let (_, l) = self.emit_expr(&args[0]);
+                            return (
+                                "int64_t".into(),
+                                format!("mako_limits_open_conns({l})"),
+                            );
+                        }
+                        "session_cancel_token" => {
+                            let tmp = self.fresh("sct");
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_session_cancel_token();"
+                            ));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "session_cancel" => {
+                            let (_, t) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_session_cancel({t})"));
+                        }
+                        "session_cancelled" => {
+                            let (_, t) = self.emit_expr(&args[0]);
+                            return (
+                                "int64_t".into(),
+                                format!("mako_session_cancelled({t})"),
+                            );
+                        }
+                        "session_cancel_clear" => {
+                            let (_, t) = self.emit_expr(&args[0]);
+                            return (
+                                "int64_t".into(),
+                                format!("mako_session_cancel_clear({t})"),
+                            );
+                        }
+                        "scram_gs2_header" => {
+                            let (_, n) = self.emit_expr(&args[0]);
+                            let tmp = self.fresh("sg2");
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_scram_gs2_header({n});"
+                            ));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "scram_cbind_b64" => {
+                            let (_, g) = self.emit_expr(&args[0]);
+                            let (_, c) = self.emit_expr(&args[1]);
+                            let tmp = self.fresh("scb");
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_scram_cbind_b64({g}, {c});"
+                            ));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "scram_client_final_without_proof" => {
+                            let (_, c) = self.emit_expr(&args[0]);
+                            let (_, r) = self.emit_expr(&args[1]);
+                            let tmp = self.fresh("scfp");
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_scram_client_final_without_proof({c}, {r});"
+                            ));
+                            return ("MakoString".into(), tmp);
+                        }
                         "csrf_token" => {
                             let tmp = self.fresh("csrf");
                             self.line(&format!("MakoString {tmp} = mako_csrf_token();"));
@@ -16801,6 +16917,46 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             ));
                             return ("MakoString".into(), tmp);
                         }
+                        "seal_at_rest" => {
+                            let (_, k) = self.emit_expr(&args[0]);
+                            let (_, p) = self.emit_expr(&args[1]);
+                            let (_, a) = self.emit_expr(&args[2]);
+                            let tmp = self.fresh("sar");
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_seal_at_rest({k}, {p}, {a});"
+                            ));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "open_at_rest" => {
+                            let (_, k) = self.emit_expr(&args[0]);
+                            let (_, s) = self.emit_expr(&args[1]);
+                            let (_, a) = self.emit_expr(&args[2]);
+                            let tmp = self.fresh("oar");
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_open_at_rest({k}, {s}, {a});"
+                            ));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "seal_file_at_rest" => {
+                            let (_, path) = self.emit_expr(&args[0]);
+                            let (_, k) = self.emit_expr(&args[1]);
+                            let (_, p) = self.emit_expr(&args[2]);
+                            let (_, a) = self.emit_expr(&args[3]);
+                            return (
+                                "int64_t".into(),
+                                format!("mako_seal_file_at_rest({path}, {k}, {p}, {a})"),
+                            );
+                        }
+                        "open_file_at_rest" => {
+                            let (_, path) = self.emit_expr(&args[0]);
+                            let (_, k) = self.emit_expr(&args[1]);
+                            let (_, a) = self.emit_expr(&args[2]);
+                            let tmp = self.fresh("ofar");
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_open_file_at_rest({path}, {k}, {a});"
+                            ));
+                            return ("MakoString".into(), tmp);
+                        }
                         "aes_ctr" => {
                             let (_, k) = self.emit_expr(&args[0]);
                             let (_, iv) = self.emit_expr(&args[1]);
@@ -18877,6 +19033,34 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                                 "void *{tmp} = mako_tls_server_new_tls13({c}, {k});"
                             ));
                             return ("void*".into(), tmp);
+                        }
+                        "tls_server_new_mtls" => {
+                            let (_, c) = self.emit_expr(&args[0]);
+                            let (_, k) = self.emit_expr(&args[1]);
+                            let (_, ca) = self.emit_expr(&args[2]);
+                            let tmp = self.fresh("tsvm");
+                            self.line(&format!(
+                                "void *{tmp} = mako_tls_server_new_mtls({c}, {k}, {ca});"
+                            ));
+                            return ("void*".into(), tmp);
+                        }
+                        "tls_client_new_mtls" => {
+                            let (_, ca) = self.emit_expr(&args[0]);
+                            let (_, c) = self.emit_expr(&args[1]);
+                            let (_, k) = self.emit_expr(&args[2]);
+                            let tmp = self.fresh("tclm");
+                            self.line(&format!(
+                                "void *{tmp} = mako_tls_client_new_mtls({ca}, {c}, {k});"
+                            ));
+                            return ("void*".into(), tmp);
+                        }
+                        "tls_unique" => {
+                            let (_, c) = self.emit_expr(&args[0]);
+                            let tmp = self.fresh("tuniq");
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_tls_unique({c});"
+                            ));
+                            return ("MakoString".into(), tmp);
                         }
                         "tls_accept" => {
                             let (_, ctx) = self.emit_expr(&args[0]);

@@ -9,6 +9,21 @@
   `llms-full.txt` aligned to the real `crypto.scram_*` core API (no fictional
   `scram_client_first` / SASL framing helpers).
 
+### Security — at-rest, limits, cancel, mTLS, SCRAM cbind
+
+- **Encryption at rest** — `seal_at_rest` / `open_at_rest` (AES-128-GCM,
+  `nonce||ct||tag`) and `seal_file_at_rest` / `open_file_at_rest`.
+- **Configurable limits** — `limits_new(mem, time_ms, max_conns)` with try/release
+  mem & conn slots, `limits_check_time`, inspect helpers.
+- **Remote session cancellation** — `session_cancel_token` / `session_cancel` /
+  `session_cancelled` / `session_cancel_clear` (process-local registry; share
+  token over the wire).
+- **Node mTLS** — `tls_server_new_mtls(cert, key, client_ca)`,
+  `tls_client_new_mtls(ca, client_cert, client_key)`, `tls_unique(conn)`.
+- **SCRAM channel binding** — `scram_gs2_header`, `scram_cbind_b64`,
+  `scram_client_final_without_proof` (classic `c=biws` + PLUS-style headers).
+- Tests: `security_residuals_test`. Docs: SECURITY.md.
+
 ### Language — `[]Option[T]` / `[]Result[T,E]`
 
 - **Bag element slices** — `make([]Option[int], 0, n)`, `append`, index get/set,

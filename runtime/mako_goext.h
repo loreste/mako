@@ -2466,6 +2466,73 @@ static inline MakoString mako_aes_gcm_open(MakoString key, MakoString nonce, Mak
 #endif
 }
 
+/* Encryption at rest — AES-128-GCM with a random 12-byte nonce prepended.
+ * Wire format: nonce(12) || ciphertext || tag(16). Empty string on failure.
+ * `aad` binds optional associated data (e.g. object id / path). */
+static inline MakoString mako_seal_at_rest(MakoString key, MakoString plaintext, MakoString aad) {
+#if defined(MAKO_AEAD_OPENSSL)
+    if (key.len != 16) return mako_str_from_cstr("");
+    MakoString nonce = mako_random_bytes(12);
+    if (nonce.len != 12) {
+        mako_str_free(nonce);
+        return mako_str_from_cstr("");
+    }
+    MakoString sealed = mako_aes_gcm_seal(key, nonce, plaintext, aad);
+    if (sealed.len == 0) {
+        mako_str_free(nonce);
+        return mako_str_from_cstr("");
+    }
+    char *out = (char *)malloc(12 + sealed.len + 1);
+    if (!out) {
+        mako_str_free(nonce);
+        mako_str_free(sealed);
+        return mako_str_from_cstr("");
+    }
+    memcpy(out, nonce.data, 12);
+    memcpy(out + 12, sealed.data, sealed.len);
+    out[12 + sealed.len] = 0;
+    MakoString res = {out, 12 + sealed.len};
+    mako_str_free(nonce);
+    mako_str_free(sealed);
+    return res;
+#else
+    (void)key; (void)plaintext; (void)aad;
+    return mako_str_from_cstr("");
+#endif
+}
+
+static inline MakoString mako_open_at_rest(MakoString key, MakoString sealed, MakoString aad) {
+#if defined(MAKO_AEAD_OPENSSL)
+    if (key.len != 16 || sealed.len < 12 + 16 || !sealed.data) return mako_str_from_cstr("");
+    MakoString nonce = {(char *)sealed.data, 12};
+    MakoString body = {(char *)(sealed.data + 12), sealed.len - 12};
+    return mako_aes_gcm_open(key, nonce, body, aad);
+#else
+    (void)key; (void)sealed; (void)aad;
+    return mako_str_from_cstr("");
+#endif
+}
+
+/* Seal plaintext and write the blob to `path` (atomic-friendly via write_file).
+ * Returns 0 on success, -1 on failure. */
+static inline int64_t mako_seal_file_at_rest(MakoString path, MakoString key, MakoString plaintext,
+                                             MakoString aad) {
+    MakoString blob = mako_seal_at_rest(key, plaintext, aad);
+    if (blob.len == 0) return -1;
+    int64_t rc = mako_write_file(path, blob);
+    mako_str_free(blob);
+    return rc;
+}
+
+/* Read sealed blob from `path` and open it. Empty string on failure. */
+static inline MakoString mako_open_file_at_rest(MakoString path, MakoString key, MakoString aad) {
+    MakoString blob = mako_read_file(path);
+    if (blob.len == 0) return blob;
+    MakoString pt = mako_open_at_rest(key, blob, aad);
+    mako_str_free(blob);
+    return pt;
+}
+
 /* AES-CTR (AES-CM building block for SRTP and stream crypto in Mako apps).
  * key: 16 or 32 bytes; iv: 16 bytes. Encrypt == decrypt (XOR keystream). */
 static inline MakoString mako_aes_ctr(MakoString key, MakoString iv, MakoString data) {

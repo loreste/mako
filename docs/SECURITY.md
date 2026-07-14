@@ -206,19 +206,61 @@ if crypto.scram_verify_proof(stored, auth, client_proof) == 1 {
 | AuthMessage | `client-first-bare,server-first,client-final-without-proof` |
 | Proof check | `scram_verify_proof` recovers ClientKey and compares StoredKey with `const_eq` |
 | Storage | Persist `StoredKey` + `ServerKey` + salt + iters — not the plaintext password |
-| Channel binding | Not implemented (`SCRAM-SHA-256-PLUS` / gs2 `p=…` is app residual) |
+| Channel binding | `scram_gs2_header` / `scram_cbind_b64` / `scram_client_final_without_proof` + `tls_unique` for tls-unique data |
 
 API table: [BUILTINS.md](BUILTINS.md) § SCRAM-SHA-256. Std recipe:
 [STDLIB.md](STDLIB.md#crypto). Vector test: `examples/testing/scram_test.mko`.
+Channel-binding helpers: `examples/testing/security_residuals_test.mko`.
 
-**Honest residuals:** no high-level mTLS cert-picker API yet; no X.509 CSR/CA
-product; no built-in HSM; full WebPKI trust store is “pass CA PEM / system via
-OpenSSL paths.” DTLS/WebRTC security remains app-level. No SCRAM channel
-binding helpers.
+### Encryption at rest (Done)
+
+AES-128-GCM with a random 12-byte nonce prepended (`nonce || ct || tag`):
+
+| API | Role |
+|-----|------|
+| `seal_at_rest(key, plaintext, aad)` | Seal blob (key = 16 bytes) |
+| `open_at_rest(key, sealed, aad)` | Open blob (empty on auth fail) |
+| `seal_file_at_rest(path, key, pt, aad)` | Seal + write file |
+| `open_file_at_rest(path, key, aad)` | Read + open file |
+
+Pack wrappers: `crypto.seal` / `crypto.open`. Test: `security_residuals_test`.
+
+### Configurable limits (Done)
+
+| API | Role |
+|-----|------|
+| `limits_new(mem_bytes, time_ms, max_conns)` | Budget handle (`0` = unlimited) |
+| `limits_try_mem` / `limits_release_mem` | Charge / release memory |
+| `limits_check_time` | Within wall-clock budget? |
+| `limits_try_conn` / `limits_release_conn` | Connection slots |
+| `limits_mem_used` / `limits_open_conns` | Inspect |
+| `limits_free` | Free handle |
+
+### Remote session cancellation (Done)
+
+Process-local registry; pass the token over the wire for multi-node cancel:
+
+| API | Role |
+|-----|------|
+| `session_cancel_token()` | Mint + register active token |
+| `session_cancel(token)` | Mark cancelled (registers if unknown) |
+| `session_cancelled(token)` | Poll (1/0) |
+| `session_cancel_clear(token)` | Drop registry entry |
+
+### Node mTLS (Done)
+
+| API | Role |
+|-----|------|
+| `tls_server_new_mtls(cert, key, client_ca)` | Require + verify client certs |
+| `tls_client_new_mtls(ca, client_cert, client_key)` | Present client cert |
+| `tls_unique(conn)` | Finished bytes for SCRAM tls-unique binding |
+
+**Still out of scope (product):** X.509 CSR/CA product, HSM, full WebPKI store
+beyond CA PEM paths, DTLS/WebRTC as first-class products.
 
 Tests: `security_test.mko`, `security_crypto_test.mko`, `password_hash_test.mko`,
 `bcrypt_test.mko`, `scram_test.mko`, `tls_aead_test.mko`, `tls_server_test.mko`,
-`crypto_srtp_blocks_test.mko`.
+`crypto_srtp_blocks_test.mko`, `security_residuals_test.mko`.
 
 ### Session security (Done)
 
