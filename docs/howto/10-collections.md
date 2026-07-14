@@ -106,6 +106,9 @@ fn main() {
 | Option of Result | `map[string]Option[Result[int,string]]`, `Option[Result[chan[int],string]]` |
 | Result of nested optional | `map[string]Result[Option[Option[int]],string]` |
 | Nested Result | `map[string]Result[Result[int,string],string]` |
+| Slice of nested bags | `map[string][]Option[Option[int]]`, `[]Option[Result[int,string]]` |
+| Optional bag slice | `map[string]Option[[]Option[int]]`, `Result[[]Result[int,string],string]` |
+| Bag-field tuples | `map[string](Option[int], int)`, `(Result[string,string], int)`, `(Option[chan[int]], int)` |
 
 ```mko
 struct Point { x: int, y: int }
@@ -352,6 +355,8 @@ Pre-size with a hint: `make(map[string]int, 1024)`.
 | `examples/testing/map_tuple_chan3_test.mko` | 3-tuples with a channel field |
 | `examples/testing/map_nested_option_chan_test.mko` | `Option[Option[…]]` / struct-chan 3-tuples |
 | `examples/testing/map_option_result_nested_test.mko` | `Option[Result]` / triple Option / nested Result maps |
+| `examples/testing/map_nested_bag_slice_test.mko` | nested bag slices / optional bag slices |
+| `examples/testing/map_tuple_bag_test.mko` | Option/Result fields in map tuples |
 | `examples/testing/nested_slice_test.mko` | `[][]T` |
 
 ```bash

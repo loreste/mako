@@ -139,6 +139,10 @@ pub struct Codegen {
     const_fns: HashMap<String, FnDef>,
     /// Tags already emitted by `emit_nested_arr_helpers` (avoid redefinition).
     emitted_arr_tags: std::collections::HashSet<String>,
+    /// Demand-driven map monomorphs: (`key_id`, `val_tag`).
+    /// `key_id` is `i`|`s`|`f`|`b` for scalars or `k:{Name}` for named keys.
+    /// `val_tag` matches emit suffixes (`opt_int`, `Point`, `vWalRecord`, `arr_int`, …).
+    used_maps: std::collections::HashSet<(String, String)>,
 }
 
 pub use crate::overflow::OverflowMode;
@@ -206,6 +210,481 @@ impl Codegen {
             chan_float: std::collections::HashSet::new(),
             const_fns: HashMap::new(),
             emitted_arr_tags: std::collections::HashSet::new(),
+            used_maps: std::collections::HashSet::new(),
+        }
+    }
+
+    /// True when this monomorph map appears in the compilation unit.
+    fn want_map(&self, key_id: &str, val_tag: &str) -> bool {
+        self.used_maps
+            .contains(&(key_id.to_string(), val_tag.to_string()))
+    }
+
+    /// True when any scalar-key map of this value monomorph is used.
+    fn want_scalar_val(&self, val_tag: &str) -> bool {
+        self.want_map("i", val_tag)
+            || self.want_map("s", val_tag)
+            || self.want_map("f", val_tag)
+            || self.want_map("b", val_tag)
+    }
+
+    /// True when any map with this named key is used.
+    fn want_named_key(&self, key_name: &str) -> bool {
+        let pref = format!("k:{key_name}");
+        self.used_maps.iter().any(|(k, _)| k == &pref)
+    }
+
+    /// True when map[named_key]val_tag is used.
+    fn want_named_map(&self, key_name: &str, val_tag: &str) -> bool {
+        self.want_map(&format!("k:{key_name}"), val_tag)
+    }
+
+    /// True when `MakoArr_{tag}` helpers are needed (as map value, bag payload, or slice).
+    fn want_arr_elem(&self, tag: &str) -> bool {
+        let arr = format!("arr_{tag}");
+        self.want_scalar_val(tag)
+            || self.want_scalar_val(&arr)
+            || self.used_maps.iter().any(|(k, v)| {
+                (k.starts_with("k:") && (v == tag || v == &arr))
+                    // Option[[]T] / Result[[]T] → opt_arr_opt_int contains arr_opt_int
+                    || v.contains(&arr)
+            })
+    }
+
+    fn note_used_map(&mut self, key_id: &str, val_tag: &str) {
+        if val_tag.is_empty() {
+            return;
+        }
+        self.used_maps
+            .insert((key_id.to_string(), val_tag.to_string()));
+    }
+
+    /// Collect every `map[K]V` monomorph actually mentioned in the program.
+    /// Must run after structs/enums are registered so val tags resolve.
+    fn collect_used_maps(&mut self, program: &Program) {
+        self.used_maps.clear();
+        for item in &program.items {
+            match item {
+                Item::Struct(s) => {
+                    for (_, t) in &s.fields {
+                        self.collect_maps_in_type(t);
+                    }
+                }
+                Item::Enum(e) => {
+                    for v in &e.variants {
+                        for t in &v.fields {
+                            self.collect_maps_in_type(t);
+                        }
+                    }
+                }
+                Item::Fn(f) => self.collect_maps_in_fn(f),
+                Item::On(o) => {
+                    for m in &o.methods {
+                        self.collect_maps_in_fn(m);
+                    }
+                }
+                Item::Actor(a) => {
+                    for arm in &a.receives {
+                        self.collect_maps_in_block(&arm.body);
+                    }
+                }
+                Item::Interface(i) => {
+                    for (_name, params, ret) in &i.methods {
+                        for p in params {
+                            self.collect_maps_in_type(p);
+                        }
+                        self.collect_maps_in_type(ret);
+                    }
+                }
+                Item::Const(c) => self.collect_maps_in_expr(&c.value),
+                Item::ExternC(e) => {
+                    for p in &e.params {
+                        self.collect_maps_in_type(&p.ty);
+                    }
+                    if let Some(r) = &e.ret {
+                        self.collect_maps_in_type(r);
+                    }
+                }
+                Item::Package { .. } | Item::Import { .. } => {}
+            }
+        }
+    }
+
+    fn collect_maps_in_fn(&mut self, f: &FnDef) {
+        for p in &f.params {
+            self.collect_maps_in_type(&p.ty);
+        }
+        if let Some(r) = &f.ret {
+            self.collect_maps_in_type(r);
+        }
+        self.collect_maps_in_block(&f.body);
+    }
+
+    fn collect_maps_in_block(&mut self, b: &Block) {
+        for s in &b.stmts {
+            self.collect_maps_in_stmt(s);
+        }
+    }
+
+    fn collect_maps_in_stmt(&mut self, s: &Stmt) {
+        match s {
+            Stmt::Let { ty, init, .. } => {
+                if let Some(t) = ty {
+                    self.collect_maps_in_type(t);
+                }
+                self.collect_maps_in_expr(init);
+            }
+            Stmt::LetMulti { init, .. } => self.collect_maps_in_expr(init),
+            Stmt::LetCommaOk { base, index, .. } => {
+                self.collect_maps_in_expr(base);
+                self.collect_maps_in_expr(index);
+            }
+            Stmt::Assign { value, .. } => self.collect_maps_in_expr(value),
+            Stmt::IndexAssign { base, index, value } => {
+                self.collect_maps_in_expr(base);
+                self.collect_maps_in_expr(index);
+                self.collect_maps_in_expr(value);
+            }
+            Stmt::FieldAssign { base, value, .. } => {
+                self.collect_maps_in_expr(base);
+                self.collect_maps_in_expr(value);
+            }
+            Stmt::Return(Some(e)) | Stmt::Expr(e) => self.collect_maps_in_expr(e),
+            Stmt::Return(None) => {}
+            Stmt::If {
+                init,
+                cond,
+                then_block,
+                else_block,
+            } => {
+                if let Some(i) = init {
+                    self.collect_maps_in_stmt(i);
+                }
+                self.collect_maps_in_expr(cond);
+                self.collect_maps_in_block(then_block);
+                if let Some(eb) = else_block {
+                    self.collect_maps_in_block(eb);
+                }
+            }
+            Stmt::While { cond, body, .. } => {
+                self.collect_maps_in_expr(cond);
+                self.collect_maps_in_block(body);
+            }
+            Stmt::For { iter, body, .. } => {
+                self.collect_maps_in_expr(iter);
+                self.collect_maps_in_block(body);
+            }
+            Stmt::CFor {
+                init,
+                cond,
+                post,
+                body,
+                ..
+            } => {
+                self.collect_maps_in_stmt(init);
+                self.collect_maps_in_expr(cond);
+                self.collect_maps_in_stmt(post);
+                self.collect_maps_in_block(body);
+            }
+            Stmt::Defer { body }
+            | Stmt::Unsafe { body }
+            | Stmt::Crew { body, .. }
+            | Stmt::Arena { body, .. } => self.collect_maps_in_block(body),
+            Stmt::Select {
+                timeout_ms,
+                arms,
+                default_arm,
+            } => {
+                self.collect_maps_in_expr(timeout_ms);
+                for (_, b) in arms {
+                    self.collect_maps_in_block(b);
+                }
+                if let Some(d) = default_arm {
+                    self.collect_maps_in_block(d);
+                }
+            }
+            Stmt::Break(_) | Stmt::Continue(_) => {}
+        }
+    }
+
+    fn collect_maps_in_expr(&mut self, e: &Expr) {
+        match e {
+            Expr::Call { callee, args } => {
+                self.collect_maps_in_expr(callee);
+                for a in args {
+                    self.collect_maps_in_expr(a);
+                }
+            }
+            Expr::Method {
+                receiver, args, ..
+            } => {
+                self.collect_maps_in_expr(receiver);
+                for a in args {
+                    self.collect_maps_in_expr(a);
+                }
+            }
+            Expr::Field { base, .. } => self.collect_maps_in_expr(base),
+            Expr::Index { base, index } => {
+                self.collect_maps_in_expr(base);
+                self.collect_maps_in_expr(index);
+            }
+            Expr::Slice {
+                base,
+                low,
+                high,
+                max,
+            } => {
+                self.collect_maps_in_expr(base);
+                if let Some(l) = low {
+                    self.collect_maps_in_expr(l);
+                }
+                if let Some(h) = high {
+                    self.collect_maps_in_expr(h);
+                }
+                if let Some(m) = max {
+                    self.collect_maps_in_expr(m);
+                }
+            }
+            Expr::Binary { left, right, .. } => {
+                self.collect_maps_in_expr(left);
+                self.collect_maps_in_expr(right);
+            }
+            Expr::Unary { expr, .. } => self.collect_maps_in_expr(expr),
+            Expr::Convert { ty, args } => {
+                self.collect_maps_in_type(ty);
+                for a in args {
+                    self.collect_maps_in_expr(a);
+                }
+            }
+            Expr::StructLit { fields, .. } => {
+                for (_, v) in fields {
+                    self.collect_maps_in_expr(v);
+                }
+            }
+            Expr::StructLitPos { values, .. } => {
+                for v in values {
+                    self.collect_maps_in_expr(v);
+                }
+            }
+            Expr::Array(elems) | Expr::Tuple(elems) => {
+                for el in elems {
+                    self.collect_maps_in_expr(el);
+                }
+            }
+            Expr::Block(b) => self.collect_maps_in_block(b),
+            Expr::Make { ty, len, cap } => {
+                self.collect_maps_in_type(ty);
+                if let Some(l) = len {
+                    self.collect_maps_in_expr(l);
+                }
+                if let Some(c) = cap {
+                    self.collect_maps_in_expr(c);
+                }
+            }
+            Expr::ChanOpen { elem, cap } => {
+                self.collect_maps_in_type(elem);
+                self.collect_maps_in_expr(cap);
+            }
+            Expr::Lambda { body, .. } => self.collect_maps_in_expr(body),
+            Expr::Match { scrutinee, arms } => {
+                self.collect_maps_in_expr(scrutinee);
+                for arm in arms {
+                    self.collect_maps_in_expr(&arm.body);
+                }
+            }
+            Expr::IfExpr {
+                cond,
+                then_block,
+                else_block,
+            } => {
+                self.collect_maps_in_expr(cond);
+                self.collect_maps_in_block(then_block);
+                self.collect_maps_in_block(else_block);
+            }
+            Expr::Try(inner) => self.collect_maps_in_expr(inner),
+            Expr::Kick { expr, .. } => self.collect_maps_in_expr(expr),
+            Expr::Join(inner) => self.collect_maps_in_expr(inner),
+            Expr::Fan {
+                collection,
+                mapper,
+            } => {
+                self.collect_maps_in_expr(collection);
+                self.collect_maps_in_expr(mapper);
+            }
+            Expr::Int(_)
+            | Expr::Float(_)
+            | Expr::Bool(_)
+            | Expr::String(_)
+            | Expr::Ident(_) => {}
+        }
+    }
+
+    fn collect_maps_in_type(&mut self, t: &TypeExpr) {
+        match t {
+            TypeExpr::Map(k, v) => {
+                self.register_map_type(k, v);
+                self.collect_maps_in_type(k);
+                self.collect_maps_in_type(v);
+            }
+            TypeExpr::Array(inner) => self.collect_maps_in_type(inner),
+            TypeExpr::Tuple(elems) => {
+                for e in elems {
+                    self.collect_maps_in_type(e);
+                }
+            }
+            TypeExpr::Generic(n, args) if n == "map" && args.len() == 2 => {
+                self.register_map_type(&args[0], &args[1]);
+                for a in args {
+                    self.collect_maps_in_type(a);
+                }
+            }
+            TypeExpr::Generic(_, args) => {
+                for a in args {
+                    self.collect_maps_in_type(a);
+                }
+            }
+            TypeExpr::Fn(params, ret) => {
+                for p in params {
+                    self.collect_maps_in_type(p);
+                }
+                self.collect_maps_in_type(ret);
+            }
+            TypeExpr::Named(_) => {}
+        }
+    }
+
+    /// Record one map[K]V monomorph for emission filtering.
+    fn register_map_type(&mut self, k: &TypeExpr, v: &TypeExpr) {
+        let key_id = match k {
+            TypeExpr::Named(n) if matches!(n.as_str(), "int" | "int64" | "int32" | "int8" | "byte" | "uint64") => {
+                "i".to_string()
+            }
+            TypeExpr::Named(n) if n == "string" => "s".to_string(),
+            TypeExpr::Named(n) if n == "float" || n == "float64" => "f".to_string(),
+            TypeExpr::Named(n) if n == "bool" => "b".to_string(),
+            TypeExpr::Named(n)
+                if self.structs.contains_key(n) || self.enums.contains_key(n) =>
+            {
+                format!("k:{n}")
+            }
+            _ => return,
+        };
+        let named_key = key_id.starts_with("k:");
+        let val_tag = self.map_val_mono_tag(v, named_key);
+        self.note_used_map(&key_id, &val_tag);
+    }
+
+    /// Value monomorph tag for map emission (matches existing emit_* helpers).
+    fn map_val_mono_tag(&self, v: &TypeExpr, named_key: bool) -> String {
+        match v {
+            TypeExpr::Named(n)
+                if matches!(
+                    n.as_str(),
+                    "int" | "int64" | "int32" | "int8" | "byte" | "uint64"
+                ) =>
+            {
+                if named_key {
+                    "i".into()
+                } else {
+                    // Built-in SI/II/… maps — no monomorph id needed for scalar×scalar.
+                    "int".into()
+                }
+            }
+            TypeExpr::Named(n) if n == "string" => {
+                if named_key {
+                    "s".into()
+                } else {
+                    "string".into()
+                }
+            }
+            TypeExpr::Named(n) if n == "float" || n == "float64" => {
+                if named_key {
+                    "f".into()
+                } else {
+                    "float".into()
+                }
+            }
+            TypeExpr::Named(n) if n == "bool" => {
+                if named_key {
+                    "b".into()
+                } else {
+                    "bool".into()
+                }
+            }
+            TypeExpr::Named(n) if self.structs.contains_key(n) || self.enums.contains_key(n) => {
+                if named_key {
+                    format!("v{n}")
+                } else {
+                    // Scalar-key map[int]Struct uses bare name / c_name.
+                    self.structs
+                        .get(n)
+                        .map(|s| s.c_name.clone())
+                        .unwrap_or_else(|| n.clone())
+                }
+            }
+            TypeExpr::Array(inner) => {
+                // map[K][]T → arr_*
+                let elem_tag = match inner.as_ref() {
+                    TypeExpr::Named(n)
+                        if matches!(
+                            n.as_str(),
+                            "int" | "int64" | "int32" | "int8" | "byte" | "uint64"
+                        ) =>
+                    {
+                        "int".into()
+                    }
+                    TypeExpr::Named(n) if n == "string" => "string".into(),
+                    TypeExpr::Named(n) if n == "float" || n == "float64" => "float".into(),
+                    TypeExpr::Named(n) if n == "bool" => "bool".into(),
+                    TypeExpr::Named(n)
+                        if self.structs.contains_key(n) || self.enums.contains_key(n) =>
+                    {
+                        n.clone()
+                    }
+                    TypeExpr::Array(_) => {
+                        // [][]T
+                        let inner_c = self.type_expr_c(inner);
+                        let tag = c_type_mono_tag(&inner_c);
+                        return format!("arr_{tag}");
+                    }
+                    TypeExpr::Map(k2, v2) => {
+                        return format!("arr_{}", leaf_map_mono_tag(k2, v2, &self.structs, &self.enums));
+                    }
+                    TypeExpr::Generic(n, args)
+                        if (n == "Option" || n == "Result") && !args.is_empty() =>
+                    {
+                        return format!(
+                            "arr_{}",
+                            bag_map_val_tag(n == "Option", &args[0], &self.structs, &self.enums)
+                        );
+                    }
+                    TypeExpr::Generic(n, args) if n == "chan" && !args.is_empty() => {
+                        return format!("arr_{}", chan_map_val_tag(&args[0], &self.structs));
+                    }
+                    _ => "int".into(),
+                };
+                format!("arr_{elem_tag}")
+            }
+            TypeExpr::Map(k2, v2) => {
+                // Nested map as value: match type_expr_c / map_ptr_mono_tag
+                // so depth-2 is map_string_int and depth-3 is map_string_map_string_int.
+                let inner_c = self.type_expr_c(&TypeExpr::Map(k2.clone(), v2.clone()));
+                map_ptr_mono_tag(&inner_c).unwrap_or_else(|| {
+                    leaf_map_mono_tag(k2, v2, &self.structs, &self.enums)
+                })
+            }
+            TypeExpr::Tuple(elems) => {
+                map_tuple_val_tag(elems, &self.structs, &self.enums)
+            }
+            TypeExpr::Generic(n, args) if n == "chan" && !args.is_empty() => {
+                chan_map_val_tag(&args[0], &self.structs)
+            }
+            TypeExpr::Generic(n, args)
+                if (n == "Option" || n == "Result") && !args.is_empty() =>
+            {
+                bag_map_val_tag(n == "Option", &args[0], &self.structs, &self.enums)
+            }
+            _ => "int".into(),
         }
     }
 
@@ -1446,6 +1925,74 @@ impl Codegen {
         }
     }
 
+    /// C type of values stored in a monomorphized map pointer type.
+    fn map_value_c_ty(&self, map_c_ty: &str) -> Option<String> {
+        if let Some((_, tag)) = parse_map_slice_val(map_c_ty) {
+            return Some(if tag.starts_with("tup_") {
+                format!("MakoTup_{}", &tag["tup_".len()..])
+            } else {
+                map_slice_val_c_ty(&tag)
+            });
+        }
+        if let Some((_, tag)) = parse_map_k_slice_val(map_c_ty) {
+            return Some(if tag.starts_with("tup_") {
+                format!("MakoTup_{}", &tag["tup_".len()..])
+            } else {
+                map_slice_val_c_ty(&tag)
+            });
+        }
+        // MakoMapS_tup_int_opt_string* etc. not caught above when tag starts with tup_
+        // — parse_map_slice_val already handles tup_.
+        None
+    }
+
+    /// True when two tuple C types have the same field C types (layout-compatible).
+    fn tuple_fields_layout_eq(&self, a: &str, b: &str) -> bool {
+        match (self.tuple_fields.get(a), self.tuple_fields.get(b)) {
+            (Some(fa), Some(fb)) => fa == fb,
+            _ => false,
+        }
+    }
+
+    /// Mono tag fragment for an Option/Result value inside a tuple lit
+    /// (`opt_int`, `res_string`, `opt_chan_Point`, …).
+    fn tuple_bag_mono_tag(&self, temp: &str, is_option: bool) -> String {
+        let pref = if is_option { "opt" } else { "res" };
+        let kind = if is_option {
+            self.option_some_kinds.get(temp).map(|s| s.as_str())
+        } else {
+            self.result_ok_kinds.get(temp).map(|s| s.as_str())
+        };
+        match kind.unwrap_or("int") {
+            "int" | "bool" => format!("{pref}_int"),
+            "string" => format!("{pref}_string"),
+            "float" => format!("{pref}_float"),
+            "chan_int" | "chan_bool" => format!("{pref}_chan_int"),
+            "chan_string" => format!("{pref}_chan_string"),
+            "chan_float" => format!("{pref}_chan_float"),
+            "chan_struct" => {
+                let sn = if is_option {
+                    self.option_some_structs.get(temp)
+                } else {
+                    self.result_ok_structs.get(temp)
+                };
+                sn.map(|s| format!("{pref}_chan_{s}"))
+                    .unwrap_or_else(|| format!("{pref}_chan_int"))
+            }
+            "struct" => {
+                let sn = if is_option {
+                    self.option_some_structs.get(temp)
+                } else {
+                    self.result_ok_structs.get(temp)
+                };
+                sn.map(|s| format!("{pref}_{s}"))
+                    .unwrap_or_else(|| format!("{pref}_int"))
+            }
+            other if other.starts_with("chan_") => format!("{pref}_{other}"),
+            _ => format!("{pref}_int"),
+        }
+    }
+
     /// Register metadata for a nested Result payload tag (`res_int`, `res_chan_Point`,
     /// `res_opt_int`, …) onto a temp that is either Option[Result[…]] or Result[Result[…]].
     fn register_nested_result_payload(&mut self, temp: &str, res_tag: &str) {
@@ -1742,24 +2289,26 @@ impl Codegen {
             }
         }
 
-        // Collect enums and emit C tagged unions
+        // Register enums + structs first so demand collection can resolve names.
         for item in &program.items {
             if let Item::Enum(e) = item {
                 self.register_enum(e);
             }
         }
         for item in &program.items {
-            if let Item::Enum(e) = item {
-                self.emit_enum_typedef(e);
-            }
-        }
-
-        // Collect structs and emit C structs + []T helpers
-        for item in &program.items {
             if let Item::Struct(s) = item {
                 self.register_struct(s);
             }
         }
+        // Demand-driven monomorphs: only emit map helpers used in this unit.
+        self.collect_used_maps(program);
+        // Emit C tagged unions + map monomorphs (gated by used_maps).
+        for item in &program.items {
+            if let Item::Enum(e) = item {
+                self.emit_enum_typedef(e);
+            }
+        }
+        // Emit C structs + []T helpers + gated scalar-key maps.
         for item in &program.items {
             if let Item::Struct(s) = item {
                 self.emit_struct_typedef(s);
@@ -2220,6 +2769,9 @@ impl Codegen {
     fn emit_named_value_map_helpers(&mut self, short: &str, c_ty: &str) {
         // Only emit for enums here (structs already emit via emit_struct_map_helpers).
         // Int-key map — copy of map[int]T with parameterized names.
+        if !self.want_scalar_val(short) {
+            return;
+        }
         let specs: &[(&str, &str, &str)] = &[
             ("I", "int64_t", "i"),
             ("S", "MakoString", "s"),
@@ -2227,6 +2779,9 @@ impl Codegen {
             ("B", "bool", "b"),
         ];
         for (pref, key_c, key_suf) in specs {
+            if !self.want_map(key_suf, short) {
+                continue;
+            }
             let mt = format!("MakoMap{pref}_{short}");
             let fnp = format!("mako_map_{key_suf}_{short}");
             let hash = if *key_suf == "i" {
@@ -3173,6 +3728,8 @@ impl Codegen {
             vals.push((format!("arr_arr_{n}"), format!("MakoArr_arr_{n}")));
         }
         // map[K][]Option[T] / map[K][]Result[T,E] — bag element slices (zero-cost monomorphs).
+        // Also nested bag elements: []Option[Option[T]], []Option[Result[T]], []Result[Option[T]],
+        // []Result[Result[T]] (scalar / struct / chan leaves).
         let mut bag_tags: Vec<(String, String)> = vec![
             ("opt_int".into(), "MakoOptionInt".into()),
             ("opt_string".into(), "MakoOptionInt".into()),
@@ -3183,18 +3740,37 @@ impl Codegen {
             ("res_float".into(), "MakoResultInt".into()),
             ("res_bool".into(), "MakoResultInt".into()),
         ];
+        for leaf in ["int", "string", "float", "bool"] {
+            bag_tags.push((format!("opt_opt_{leaf}"), "MakoOptionInt".into()));
+            bag_tags.push((format!("opt_res_{leaf}"), "MakoOptionInt".into()));
+            bag_tags.push((format!("res_opt_{leaf}"), "MakoResultInt".into()));
+            bag_tags.push((format!("res_res_{leaf}"), "MakoResultInt".into()));
+        }
         for n in &names {
             bag_tags.push((format!("opt_{n}"), "MakoOptionInt".into()));
             bag_tags.push((format!("res_{n}"), "MakoResultInt".into()));
+            bag_tags.push((format!("opt_opt_{n}"), "MakoOptionInt".into()));
+            bag_tags.push((format!("opt_res_{n}"), "MakoOptionInt".into()));
+            bag_tags.push((format!("res_opt_{n}"), "MakoResultInt".into()));
+            bag_tags.push((format!("res_res_{n}"), "MakoResultInt".into()));
         }
         // map[K][]Option[chan[T]] / map[K][]Result[chan[T],E]
+        // + nested: []Option[Option[chan]] / []Option[Result[chan]] / …
         for (ctag, _) in self.leaf_chan_value_specs() {
             bag_tags.push((format!("opt_{ctag}"), "MakoOptionInt".into()));
             bag_tags.push((format!("res_{ctag}"), "MakoResultInt".into()));
+            bag_tags.push((format!("opt_opt_{ctag}"), "MakoOptionInt".into()));
+            bag_tags.push((format!("opt_res_{ctag}"), "MakoOptionInt".into()));
+            bag_tags.push((format!("res_opt_{ctag}"), "MakoResultInt".into()));
+            bag_tags.push((format!("res_res_{ctag}"), "MakoResultInt".into()));
         }
         for (tag, elem_c) in &bag_tags {
-            self.emit_nested_arr_helpers(tag, elem_c); // MakoArr_opt_int
-            vals.push((format!("arr_{tag}"), format!("MakoArr_{tag}")));
+            let arr_tag = format!("arr_{tag}");
+            // Only emit []Option / []Result helpers when used as map values or slices.
+            if self.want_arr_elem(tag) {
+                self.emit_nested_arr_helpers(tag, elem_c); // MakoArr_opt_int
+                vals.push((arr_tag, format!("MakoArr_{tag}")));
+            }
         }
         // map[K][]map[…] — first ensure []map helpers (MakoArr_map_string_int), then
         // monomorphize maps that store those slices.
@@ -3216,9 +3792,18 @@ impl Codegen {
             "map_bool_bool",
         ];
         for mt in map_arr_tags {
-            let map_c = map_map_val_c_ty(mt);
-            self.emit_nested_arr_helpers(mt, &map_c); // MakoArr_map_string_int
-            vals.push((format!("arr_{mt}"), format!("MakoArr_{mt}")));
+            let arr_tag = format!("arr_{mt}");
+            if self.want_scalar_val(mt)
+                || self.want_scalar_val(&arr_tag)
+                || self
+                    .used_maps
+                    .iter()
+                    .any(|(k, v)| k.starts_with("k:") && (v == mt || v == &arr_tag))
+            {
+                let map_c = map_map_val_c_ty(mt);
+                self.emit_nested_arr_helpers(mt, &map_c); // MakoArr_map_string_int
+                vals.push((arr_tag, format!("MakoArr_{mt}")));
+            }
         }
         // map[K][]chan[T] — slice of channel pointers (MakoArr_chan_int, …).
         // map[K][][]chan[T] — nested channel slices (MakoArr_arr_chan_int, …).
@@ -3249,6 +3834,9 @@ impl Codegen {
         }
         for (ks, kc) in keys {
             for (vt, vc) in &vals {
+                if !self.want_map(ks, vt) {
+                    continue;
+                }
                 self.emit_map_slice_value_helpers(ks, kc, vt, vc);
             }
         }
@@ -3263,7 +3851,13 @@ impl Codegen {
         }
         named_keys.sort_by(|a, b| a.0.cmp(&b.0));
         for (kname, kc) in &named_keys {
+            if !self.want_named_key(kname) {
+                continue;
+            }
             for (vt, vc) in &vals {
+                if !self.want_named_map(kname, vt) {
+                    continue;
+                }
                 self.emit_map_named_key_slice_helpers(kname, kc, vt, vc);
             }
         }
@@ -3468,6 +4062,183 @@ impl Codegen {
             );
             tags.push((tag, cty, zero, eq));
         }
+        // 2-tuples with Option/Result bag fields × scalars (and same-leaf bag pairs).
+        // Tags: tup_opt_int_int, tup_int_res_string, tup_opt_int_opt_int, …
+        let bag_leaves: &[(&str, &str)] = &[
+            ("opt_int", "MakoOptionInt"),
+            ("opt_string", "MakoOptionInt"),
+            ("opt_float", "MakoOptionInt"),
+            ("opt_bool", "MakoOptionInt"),
+            ("res_int", "MakoResultInt"),
+            ("res_string", "MakoResultInt"),
+            ("res_float", "MakoResultInt"),
+            ("res_bool", "MakoResultInt"),
+        ];
+        for (btag, bcty) in bag_leaves {
+            for (s, sc) in bases {
+                // (bag, scalar)
+                let tag = format!("tup_{btag}_{s}");
+                let cty = format!("MakoTup_{btag}_{s}");
+                if self.note_tuple_typedef(&cty, vec![(*bcty).into(), (*sc).into()]) {
+                    let _ = writeln!(
+                        self.out,
+                        "typedef struct {{\n    {bcty} _0;\n    {sc} _1;\n}} {cty};"
+                    );
+                }
+                let zero = format!("(({cty}){{0}})");
+                let eq = format!(
+                    "({} && {})",
+                    tuple_field_eq(bcty, "av._0", "bv._0"),
+                    tuple_field_eq(sc, "av._1", "bv._1"),
+                );
+                tags.push((tag, cty, zero, eq));
+                // (scalar, bag)
+                let tag = format!("tup_{s}_{btag}");
+                let cty = format!("MakoTup_{s}_{btag}");
+                if self.note_tuple_typedef(&cty, vec![(*sc).into(), (*bcty).into()]) {
+                    let _ = writeln!(
+                        self.out,
+                        "typedef struct {{\n    {sc} _0;\n    {bcty} _1;\n}} {cty};"
+                    );
+                }
+                let zero = format!("(({cty}){{0}})");
+                let eq = format!(
+                    "({} && {})",
+                    tuple_field_eq(sc, "av._0", "bv._0"),
+                    tuple_field_eq(bcty, "av._1", "bv._1"),
+                );
+                tags.push((tag, cty, zero, eq));
+            }
+            // (bag, bag) same mono only — (Option[int], Option[int]) etc.
+            let tag = format!("tup_{btag}_{btag}");
+            let cty = format!("MakoTup_{btag}_{btag}");
+            if self.note_tuple_typedef(&cty, vec![(*bcty).into(), (*bcty).into()]) {
+                let _ = writeln!(
+                    self.out,
+                    "typedef struct {{\n    {bcty} _0;\n    {bcty} _1;\n}} {cty};"
+                );
+            }
+            let zero = format!("(({cty}){{0}})");
+            let eq = format!(
+                "({} && {})",
+                tuple_field_eq(bcty, "av._0", "bv._0"),
+                tuple_field_eq(bcty, "av._1", "bv._1"),
+            );
+            tags.push((tag, cty, zero, eq));
+        }
+        // Option[chan[T]] / Result[chan[T]] × scalar int (bounded grid)
+        for (ctag, _) in &chan_parts {
+            for (pref, bcty) in [("opt", "MakoOptionInt"), ("res", "MakoResultInt")] {
+                let btag = format!("{pref}_{ctag}");
+                // (bag_chan, int) and reverse
+                for (s, sc) in [("int", "int64_t"), ("string", "MakoString")] {
+                    let tag = format!("tup_{btag}_{s}");
+                    let cty = format!("MakoTup_{btag}_{s}");
+                    if self.note_tuple_typedef(&cty, vec![bcty.into(), sc.into()]) {
+                        let _ = writeln!(
+                            self.out,
+                            "typedef struct {{\n    {bcty} _0;\n    {sc} _1;\n}} {cty};"
+                        );
+                    }
+                    let zero = format!("(({cty}){{0}})");
+                    let eq = format!(
+                        "({} && {})",
+                        tuple_field_eq(bcty, "av._0", "bv._0"),
+                        tuple_field_eq(sc, "av._1", "bv._1"),
+                    );
+                    tags.push((tag, cty, zero, eq));
+                    let tag = format!("tup_{s}_{btag}");
+                    let cty = format!("MakoTup_{s}_{btag}");
+                    if self.note_tuple_typedef(&cty, vec![sc.into(), bcty.into()]) {
+                        let _ = writeln!(
+                            self.out,
+                            "typedef struct {{\n    {sc} _0;\n    {bcty} _1;\n}} {cty};"
+                        );
+                    }
+                    let zero = format!("(({cty}){{0}})");
+                    let eq = format!(
+                        "({} && {})",
+                        tuple_field_eq(sc, "av._0", "bv._0"),
+                        tuple_field_eq(bcty, "av._1", "bv._1"),
+                    );
+                    tags.push((tag, cty, zero, eq));
+                }
+            }
+            // (chan, Option[int]) and reverse — common “handle + maybe” shape
+            let otag = "opt_int";
+            let octy = "MakoOptionInt";
+            let ccty = chan_map_val_c_ty(ctag);
+            {
+                let tag = format!("tup_{ctag}_{otag}");
+                let cty = format!("MakoTup_{ctag}_{otag}");
+                if self.note_tuple_typedef(&cty, vec![ccty.clone(), octy.into()]) {
+                    let _ = writeln!(
+                        self.out,
+                        "typedef struct {{\n    {ccty} _0;\n    {octy} _1;\n}} {cty};"
+                    );
+                }
+                let zero = format!("(({cty}){{0}})");
+                let eq = format!(
+                    "({} && {})",
+                    tuple_field_eq(&ccty, "av._0", "bv._0"),
+                    tuple_field_eq(octy, "av._1", "bv._1"),
+                );
+                tags.push((tag, cty, zero, eq));
+            }
+            {
+                let tag = format!("tup_{otag}_{ctag}");
+                let cty = format!("MakoTup_{otag}_{ctag}");
+                if self.note_tuple_typedef(&cty, vec![octy.into(), ccty.clone()]) {
+                    let _ = writeln!(
+                        self.out,
+                        "typedef struct {{\n    {octy} _0;\n    {ccty} _1;\n}} {cty};"
+                    );
+                }
+                let zero = format!("(({cty}){{0}})");
+                let eq = format!(
+                    "({} && {})",
+                    tuple_field_eq(octy, "av._0", "bv._0"),
+                    tuple_field_eq(&ccty, "av._1", "bv._1"),
+                );
+                tags.push((tag, cty, zero, eq));
+            }
+        }
+        // Named struct Option/Result × int (and reverse)
+        for (tn, _nc) in &named {
+            for (pref, bcty) in [("opt", "MakoOptionInt"), ("res", "MakoResultInt")] {
+                let btag = format!("{pref}_{tn}");
+                let tag = format!("tup_{btag}_int");
+                let cty = format!("MakoTup_{btag}_int");
+                if self.note_tuple_typedef(&cty, vec![bcty.into(), "int64_t".into()]) {
+                    let _ = writeln!(
+                        self.out,
+                        "typedef struct {{\n    {bcty} _0;\n    int64_t _1;\n}} {cty};"
+                    );
+                }
+                let zero = format!("(({cty}){{0}})");
+                let eq = format!(
+                    "({} && {})",
+                    tuple_field_eq(bcty, "av._0", "bv._0"),
+                    tuple_field_eq("int64_t", "av._1", "bv._1"),
+                );
+                tags.push((tag, cty, zero, eq));
+                let tag = format!("tup_int_{btag}");
+                let cty = format!("MakoTup_int_{btag}");
+                if self.note_tuple_typedef(&cty, vec!["int64_t".into(), bcty.into()]) {
+                    let _ = writeln!(
+                        self.out,
+                        "typedef struct {{\n    int64_t _0;\n    {bcty} _1;\n}} {cty};"
+                    );
+                }
+                let zero = format!("(({cty}){{0}})");
+                let eq = format!(
+                    "({} && {})",
+                    tuple_field_eq("int64_t", "av._0", "bv._0"),
+                    tuple_field_eq(bcty, "av._1", "bv._1"),
+                );
+                tags.push((tag, cty, zero, eq));
+            }
+        }
         // 3-tuples with exactly one channel + two scalar slots (all positions).
         // Core scalar chans + named-struct chans (struct chans only pair with int/int to bound grid).
         let mut core_chans: Vec<(String, String)> = vec![
@@ -3579,6 +4350,9 @@ impl Codegen {
         ];
         for (ks, kc) in keys {
             for (tag, vc, zero, eqf) in &tags {
+                if !self.want_map(ks, tag) {
+                    continue;
+                }
                 self.emit_map_bag_value_helpers(ks, kc, tag, vc, zero, eqf);
             }
         }
@@ -3592,7 +4366,13 @@ impl Codegen {
         }
         named_keys.sort_by(|a, b| a.0.cmp(&b.0));
         for (kname, kc) in &named_keys {
+            if !self.want_named_key(kname) {
+                continue;
+            }
             for (tag, vc, zero, eqf) in &tags {
+                if !self.want_named_map(kname, tag) {
+                    continue;
+                }
                 self.emit_map_named_key_bag_helpers(kname, kc, tag, vc, zero, eqf);
             }
         }
@@ -3699,6 +4479,103 @@ impl Codegen {
                 "mako_err_int(mako_str_from_cstr(\"\"))".into(),
                 "mako_eq_result_int(av, bv)".into(),
             ),
+            // Option[[]Option[T]] / Result[[]Option[T]] / Option[[]Result[T]] / Result[[]Result[T]]
+            (
+                "opt_arr_opt_int".into(),
+                "MakoOptionInt".into(),
+                "mako_none_int()".into(),
+                "mako_eq_option_int(av, bv)".into(),
+            ),
+            (
+                "opt_arr_opt_string".into(),
+                "MakoOptionInt".into(),
+                "mako_none_int()".into(),
+                "mako_eq_option_int(av, bv)".into(),
+            ),
+            (
+                "opt_arr_opt_float".into(),
+                "MakoOptionInt".into(),
+                "mako_none_int()".into(),
+                "mako_eq_option_int(av, bv)".into(),
+            ),
+            (
+                "opt_arr_opt_bool".into(),
+                "MakoOptionInt".into(),
+                "mako_none_int()".into(),
+                "mako_eq_option_int(av, bv)".into(),
+            ),
+            (
+                "opt_arr_res_int".into(),
+                "MakoOptionInt".into(),
+                "mako_none_int()".into(),
+                "mako_eq_option_int(av, bv)".into(),
+            ),
+            (
+                "opt_arr_res_string".into(),
+                "MakoOptionInt".into(),
+                "mako_none_int()".into(),
+                "mako_eq_option_int(av, bv)".into(),
+            ),
+            (
+                "opt_arr_res_float".into(),
+                "MakoOptionInt".into(),
+                "mako_none_int()".into(),
+                "mako_eq_option_int(av, bv)".into(),
+            ),
+            (
+                "opt_arr_res_bool".into(),
+                "MakoOptionInt".into(),
+                "mako_none_int()".into(),
+                "mako_eq_option_int(av, bv)".into(),
+            ),
+            (
+                "res_arr_opt_int".into(),
+                "MakoResultInt".into(),
+                "mako_err_int(mako_str_from_cstr(\"\"))".into(),
+                "mako_eq_result_int(av, bv)".into(),
+            ),
+            (
+                "res_arr_opt_string".into(),
+                "MakoResultInt".into(),
+                "mako_err_int(mako_str_from_cstr(\"\"))".into(),
+                "mako_eq_result_int(av, bv)".into(),
+            ),
+            (
+                "res_arr_opt_float".into(),
+                "MakoResultInt".into(),
+                "mako_err_int(mako_str_from_cstr(\"\"))".into(),
+                "mako_eq_result_int(av, bv)".into(),
+            ),
+            (
+                "res_arr_opt_bool".into(),
+                "MakoResultInt".into(),
+                "mako_err_int(mako_str_from_cstr(\"\"))".into(),
+                "mako_eq_result_int(av, bv)".into(),
+            ),
+            (
+                "res_arr_res_int".into(),
+                "MakoResultInt".into(),
+                "mako_err_int(mako_str_from_cstr(\"\"))".into(),
+                "mako_eq_result_int(av, bv)".into(),
+            ),
+            (
+                "res_arr_res_string".into(),
+                "MakoResultInt".into(),
+                "mako_err_int(mako_str_from_cstr(\"\"))".into(),
+                "mako_eq_result_int(av, bv)".into(),
+            ),
+            (
+                "res_arr_res_float".into(),
+                "MakoResultInt".into(),
+                "mako_err_int(mako_str_from_cstr(\"\"))".into(),
+                "mako_eq_result_int(av, bv)".into(),
+            ),
+            (
+                "res_arr_res_bool".into(),
+                "MakoResultInt".into(),
+                "mako_err_int(mako_str_from_cstr(\"\"))".into(),
+                "mako_eq_result_int(av, bv)".into(),
+            ),
         ];
         // Option[map[…]] / Result[map[…]] — map pointer in bag value slot
         let map_payloads: &[&str] = &[
@@ -3757,6 +4634,30 @@ impl Codegen {
             ));
             bags.push((
                 format!("res_arr_{ctag}"),
+                "MakoResultInt".into(),
+                "mako_err_int(mako_str_from_cstr(\"\"))".into(),
+                "mako_eq_result_int(av, bv)".into(),
+            ));
+            bags.push((
+                format!("opt_arr_opt_{ctag}"),
+                "MakoOptionInt".into(),
+                "mako_none_int()".into(),
+                "mako_eq_option_int(av, bv)".into(),
+            ));
+            bags.push((
+                format!("opt_arr_res_{ctag}"),
+                "MakoOptionInt".into(),
+                "mako_none_int()".into(),
+                "mako_eq_option_int(av, bv)".into(),
+            ));
+            bags.push((
+                format!("res_arr_opt_{ctag}"),
+                "MakoResultInt".into(),
+                "mako_err_int(mako_str_from_cstr(\"\"))".into(),
+                "mako_eq_result_int(av, bv)".into(),
+            ));
+            bags.push((
+                format!("res_arr_res_{ctag}"),
                 "MakoResultInt".into(),
                 "mako_err_int(mako_str_from_cstr(\"\"))".into(),
                 "mako_eq_result_int(av, bv)".into(),
@@ -3879,6 +4780,30 @@ impl Codegen {
                 "mako_eq_result_int(av, bv)".into(),
             ));
             bags.push((
+                format!("opt_arr_opt_{n}"),
+                "MakoOptionInt".into(),
+                "mako_none_int()".into(),
+                "mako_eq_option_int(av, bv)".into(),
+            ));
+            bags.push((
+                format!("opt_arr_res_{n}"),
+                "MakoOptionInt".into(),
+                "mako_none_int()".into(),
+                "mako_eq_option_int(av, bv)".into(),
+            ));
+            bags.push((
+                format!("res_arr_opt_{n}"),
+                "MakoResultInt".into(),
+                "mako_err_int(mako_str_from_cstr(\"\"))".into(),
+                "mako_eq_result_int(av, bv)".into(),
+            ));
+            bags.push((
+                format!("res_arr_res_{n}"),
+                "MakoResultInt".into(),
+                "mako_err_int(mako_str_from_cstr(\"\"))".into(),
+                "mako_eq_result_int(av, bv)".into(),
+            ));
+            bags.push((
                 format!("opt_map_int_{n}"),
                 "MakoOptionInt".into(),
                 "mako_none_int()".into(),
@@ -3946,9 +4871,11 @@ impl Codegen {
                 "mako_eq_option_int(av, bv)".into(),
             ));
         }
-        // []Option / []Result for maps_values
+        // []Option / []Result for maps_values (only tags used as map values or slices)
         for (tag, vc, _, _) in &bags {
-            self.emit_nested_arr_helpers(tag, vc);
+            if self.want_arr_elem(tag) {
+                self.emit_nested_arr_helpers(tag, vc);
+            }
         }
         let keys: &[(&str, &str)] = &[
             ("i", "int64_t"),
@@ -3958,6 +4885,9 @@ impl Codegen {
         ];
         for (ks, kc) in keys {
             for (tag, vc, zero, eqf) in &bags {
+                if !self.want_map(ks, tag) {
+                    continue;
+                }
                 self.emit_map_bag_value_helpers(ks, kc, tag, vc, zero, eqf);
             }
         }
@@ -3971,7 +4901,13 @@ impl Codegen {
         }
         named_keys.sort_by(|a, b| a.0.cmp(&b.0));
         for (kname, kc) in &named_keys {
+            if !self.want_named_key(kname) {
+                continue;
+            }
             for (tag, vc, zero, eqf) in &bags {
+                if !self.want_named_map(kname, tag) {
+                    continue;
+                }
                 self.emit_map_named_key_bag_helpers(kname, kc, tag, vc, zero, eqf);
             }
         }
@@ -4915,7 +5851,11 @@ impl Codegen {
         let leaf = self.leaf_map_value_specs();
         // []map[…] for maps_values
         for (tag, vc) in &leaf {
-            self.emit_nested_arr_helpers(tag, vc);
+            if self.want_scalar_val(tag)
+                || self.used_maps.iter().any(|(k, v)| k.starts_with("k:") && v == tag)
+            {
+                self.emit_nested_arr_helpers(tag, vc);
+            }
         }
         let keys: &[(&str, &str)] = &[
             ("i", "int64_t"),
@@ -4925,6 +5865,9 @@ impl Codegen {
         ];
         for (ks, kc) in keys {
             for (tag, vc) in &leaf {
+                if !self.want_map(ks, tag) {
+                    continue;
+                }
                 self.emit_map_map_value_helpers(ks, kc, tag, vc);
             }
         }
@@ -4938,7 +5881,13 @@ impl Codegen {
         }
         named_keys.sort_by(|a, b| a.0.cmp(&b.0));
         for (kname, kc) in &named_keys {
+            if !self.want_named_key(kname) {
+                continue;
+            }
             for (tag, vc) in &leaf {
+                if !self.want_named_map(kname, tag) {
+                    continue;
+                }
                 self.emit_map_named_key_map_helpers(kname, kc, tag, vc);
             }
         }
@@ -4979,15 +5928,28 @@ impl Codegen {
             }
         }
         for (tag, vc) in &mid {
-            self.emit_nested_arr_helpers(tag, vc);
+            if self.want_scalar_val(tag)
+                || self.used_maps.iter().any(|(k, v)| k.starts_with("k:") && v == tag)
+            {
+                self.emit_nested_arr_helpers(tag, vc);
+            }
         }
         for (ks, kc, _, _) in key_triples {
             for (tag, vc) in &mid {
+                if !self.want_map(ks, tag) {
+                    continue;
+                }
                 self.emit_map_map_value_helpers(ks, kc, tag, vc);
             }
         }
         for (kname, kc) in &named_keys {
+            if !self.want_named_key(kname) {
+                continue;
+            }
             for (tag, vc) in &mid {
+                if !self.want_named_map(kname, tag) {
+                    continue;
+                }
                 self.emit_map_named_key_map_helpers(kname, kc, tag, vc);
             }
         }
@@ -5015,7 +5977,14 @@ impl Codegen {
         let leaf = self.leaf_chan_value_specs();
         // []chan for maps_values
         for (tag, vc) in &leaf {
-            self.emit_nested_arr_helpers(tag, vc);
+            if self.want_scalar_val(tag)
+                || self.want_scalar_val(&format!("arr_{tag}"))
+                || self.used_maps.iter().any(|(k, v)| {
+                    k.starts_with("k:") && (v == tag || v == &format!("arr_{tag}"))
+                })
+            {
+                self.emit_nested_arr_helpers(tag, vc);
+            }
         }
         let keys: &[(&str, &str)] = &[
             ("i", "int64_t"),
@@ -5026,6 +5995,9 @@ impl Codegen {
         // Reuse pointer-value map helpers (zero = NULL, pointer identity eq).
         for (ks, kc) in keys {
             for (tag, vc) in &leaf {
+                if !self.want_map(ks, tag) {
+                    continue;
+                }
                 self.emit_map_map_value_helpers(ks, kc, tag, vc);
             }
         }
@@ -5039,7 +6011,13 @@ impl Codegen {
         }
         named_keys.sort_by(|a, b| a.0.cmp(&b.0));
         for (kname, kc) in &named_keys {
+            if !self.want_named_key(kname) {
+                continue;
+            }
             for (tag, vc) in &leaf {
+                if !self.want_named_map(kname, tag) {
+                    continue;
+                }
                 self.emit_map_named_key_map_helpers(kname, kc, tag, vc);
             }
         }
@@ -5430,7 +6408,20 @@ impl Codegen {
 
     /// `map[int]T` / `map[string]T` open-addressing tables storing `T` by value.
     fn emit_struct_map_helpers(&mut self, c_name: &str) {
-        // --- map[int]T ---
+        // Demand-driven: skip if this type is never a scalar-key map value
+        // and never a named map key (map[Struct]scalar is emitted at the end).
+        let need_as_val = self.want_scalar_val(c_name);
+        let need_as_key = self.want_named_key(c_name);
+        if !need_as_val && !need_as_key {
+            return;
+        }
+        // --- map[int]T --- (only when used as scalar-key map value)
+        if !need_as_val {
+            // Still need map[Struct]scalar when used as key only.
+            let arr = format!("MakoArr_{c_name}");
+            self.emit_key_map_helpers(c_name, c_name, &arr, /*struct_vals=*/ false);
+            return;
+        }
         let mi = format!("MakoMapI_{c_name}");
         let _ = writeln!(self.out, "typedef struct {{");
         let _ = writeln!(self.out, "    uint8_t *state;");
@@ -6557,6 +7548,9 @@ impl Codegen {
             .map(|s| (s.c_name.clone(), format!("MakoArr_{}", s.c_name)))
             .collect();
         for (key, key_arr) in &struct_keys {
+            if !self.want_named_key(key) {
+                continue;
+            }
             self.emit_key_map_helpers(key, key, key_arr, /*struct_vals=*/ true);
         }
         // map[Enum]Struct|Enum (scalar values already emitted with each enum).
@@ -6566,6 +7560,9 @@ impl Codegen {
             .map(|(n, info)| (n.clone(), info.c_name.clone()))
             .collect();
         for (short, c_ty) in &enums {
+            if !self.want_named_key(short) {
+                continue;
+            }
             let key_arr = format!("MakoArr_{short}");
             self.emit_key_map_helpers(short, c_ty, &key_arr, /*struct_vals=*/ true);
         }
@@ -6610,7 +7607,54 @@ impl Codegen {
         }
     }
 
-    /// Tag for `[]Option` / `[]Result` array lits (`opt_int`, `res_string`, …).
+    /// Leaf mono fragment for a bag payload expr (int / string / chan_int / Point / …).
+    fn bag_payload_leaf_tag(&self, e: &Expr) -> String {
+        match e {
+            Expr::Int(_) => "int".into(),
+            Expr::String(_) => "string".into(),
+            Expr::Float(_) => "float".into(),
+            Expr::Bool(_) => "bool".into(),
+            Expr::StructLit { name, .. } | Expr::StructLitPos { name, .. } => name.clone(),
+            Expr::Ident(n) if self.structs.contains_key(n) || self.enums.contains_key(n) => {
+                n.clone()
+            }
+            other => {
+                let cty = self.peek_expr_c_ty(other);
+                match cty.as_str() {
+                    "MakoString" => "string".into(),
+                    "double" => "float".into(),
+                    "bool" => "bool".into(),
+                    "MakoChanStr*" => "chan_string".into(),
+                    "MakoChanPtr*" => {
+                        if let Expr::Ident(n) = other {
+                            self.chan_ptr_elems
+                                .get(n)
+                                .map(|s| format!("chan_{s}"))
+                                .unwrap_or_else(|| "chan_ptr".into())
+                        } else {
+                            "chan_ptr".into()
+                        }
+                    }
+                    "MakoChan*" => {
+                        if let Expr::Ident(n) = other {
+                            if self.chan_float.contains(n) {
+                                "chan_float".into()
+                            } else {
+                                "chan_int".into()
+                            }
+                        } else {
+                            "chan_int".into()
+                        }
+                    }
+                    s if self.structs.values().any(|si| si.c_name == s) => s.to_string(),
+                    s if s.starts_with("MakoEnum_") => s["MakoEnum_".len()..].to_string(),
+                    _ => "int".into(),
+                }
+            }
+        }
+    }
+
+    /// Tag for `[]Option` / `[]Result` array lits (`opt_int`, `res_string`, `opt_opt_int`, …).
     fn bag_arr_tag_from_elems(&self, is_option: bool, elems: &[Expr]) -> String {
         let pref = if is_option { "opt" } else { "res" };
         for e in elems {
@@ -6623,58 +7667,36 @@ impl Codegen {
                     };
                     if is_ctor {
                         if let Some(a0) = args.first() {
-                            let leaf = match a0 {
-                                Expr::Int(_) => "int".into(),
-                                Expr::String(_) => "string".into(),
-                                Expr::Float(_) => "float".into(),
-                                Expr::Bool(_) => "bool".into(),
-                                Expr::StructLit { name, .. }
-                                | Expr::StructLitPos { name, .. } => name.clone(),
-                                Expr::Ident(n)
-                                    if self.structs.contains_key(n)
-                                        || self.enums.contains_key(n) =>
-                                {
-                                    n.clone()
-                                }
-                                other => {
-                                    // Channel handles: Some(ch) / Ok(ch) → opt_chan_int / …
-                                    let cty = self.peek_expr_c_ty(other);
-                                    match cty.as_str() {
-                                        "MakoString" => "string".into(),
-                                        "double" => "float".into(),
-                                        "bool" => "bool".into(),
-                                        "MakoChanStr*" => "chan_string".into(),
-                                        "MakoChanPtr*" => {
-                                            if let Expr::Ident(n) = other {
-                                                self.chan_ptr_elems
-                                                    .get(n)
-                                                    .map(|s| format!("chan_{s}"))
-                                                    .unwrap_or_else(|| "chan_ptr".into())
-                                            } else {
-                                                "chan_ptr".into()
-                                            }
+                            // Nested bags: Some(Some(v)) / Some(Ok(v)) / Ok(Some(v)) / Ok(Ok(v))
+                            if let Expr::Call {
+                                callee: inner_c,
+                                args: inner_args,
+                            } = a0
+                            {
+                                if let Expr::Ident(icn) = inner_c.as_ref() {
+                                    if *icn == "Some" {
+                                        if let Some(payload) = inner_args.first() {
+                                            let leaf = self.bag_payload_leaf_tag(payload);
+                                            return format!("{pref}_opt_{leaf}");
                                         }
-                                        "MakoChan*" => {
-                                            if let Expr::Ident(n) = other {
-                                                if self.chan_float.contains(n) {
-                                                    "chan_float".into()
-                                                } else {
-                                                    "chan_int".into()
-                                                }
-                                            } else {
-                                                "chan_int".into()
-                                            }
+                                        return format!("{pref}_opt_int");
+                                    }
+                                    if *icn == "Ok" {
+                                        if let Some(payload) = inner_args.first() {
+                                            let leaf = self.bag_payload_leaf_tag(payload);
+                                            return format!("{pref}_res_{leaf}");
                                         }
-                                        s if self.structs.values().any(|si| si.c_name == s) => {
-                                            s.to_string()
-                                        }
-                                        s if s.starts_with("MakoEnum_") => {
-                                            s["MakoEnum_".len()..].to_string()
-                                        }
-                                        _ => "int".into(),
+                                        return format!("{pref}_res_int");
+                                    }
+                                    if *icn == "None" {
+                                        return format!("{pref}_opt_int");
+                                    }
+                                    if *icn == "Err" {
+                                        return format!("{pref}_res_int");
                                     }
                                 }
-                            };
+                            }
+                            let leaf = self.bag_payload_leaf_tag(a0);
                             return format!("{pref}_{leaf}");
                         }
                     }
@@ -6722,19 +7744,29 @@ impl Codegen {
             enum_only.sort_by(|a, b| a.1.cmp(&b.1));
             names.extend(enum_only);
             for (vty, vsuf) in names {
+                if !self.want_named_map(key, &vsuf) {
+                    continue;
+                }
                 vals.push((vty, vsuf, String::new(), false, true));
             }
         } else {
-            vals.push(("int64_t".into(), "i".into(), "0".into(), false, false));
-            vals.push((
-                "MakoString".into(),
-                "s".into(),
-                "mako_str_from_cstr(\"\")".into(),
-                true,
-                false,
-            ));
-            vals.push(("double".into(), "f".into(), "0.0".into(), false, false));
-            vals.push(("bool".into(), "b".into(), "false".into(), false, false));
+            for (vty, vsuf, zero, free_str) in [
+                ("int64_t", "i", "0", false),
+                ("MakoString", "s", "mako_str_from_cstr(\"\")", true),
+                ("double", "f", "0.0", false),
+                ("bool", "b", "false", false),
+            ] {
+                if !self.want_named_map(key, vsuf) {
+                    continue;
+                }
+                vals.push((
+                    vty.into(),
+                    vsuf.into(),
+                    zero.into(),
+                    free_str,
+                    false,
+                ));
+            }
         }
         for (vty, vsuf, zero, free_str, is_struct_val) in vals {
             let mt = format!("MakoMapK_{key}_{vsuf}");
@@ -8506,35 +9538,46 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         self.locals.insert(n.clone(), cty.clone());
                         self.line(&format!("{cty} {} = {tmp}._{i};", mangle(n)));
                     }
-                    // Channel fields in tuples: propagate float/struct-chan metadata
-                    // from mono tags embedded in MakoTup_chan_float_* / MakoTup_*_chan_Point.
-                    if cty == "MakoChan*" || cty == "MakoChanStr*" || cty == "MakoChanPtr*" {
-                        if let Some(rest) = ty.strip_prefix("MakoTup_") {
-                            // Find the i-th mono part; channel tags are "chan_X".
-                            let parts: Vec<&str> = rest.split('_').collect();
-                            // Reconstruct tags that may contain underscores (chan_Point).
-                            // Prefer scanning for "chan" token groups.
-                            let mut tags: Vec<String> = Vec::new();
-                            let mut j = 0;
-                            while j < parts.len() {
+                    // Channel / bag fields in tuples: propagate metadata from mono tags
+                    // embedded in MakoTup_chan_float_* / MakoTup_opt_int_* / …
+                    if let Some(rest) = ty.strip_prefix("MakoTup_") {
+                        let parts: Vec<&str> = rest.split('_').collect();
+                        // Reconstruct multi-token tags: opt_*, res_*, chan_*.
+                        let mut tags: Vec<String> = Vec::new();
+                        let mut j = 0;
+                        while j < parts.len() {
+                            if (parts[j] == "opt" || parts[j] == "res") && j + 1 < parts.len()
+                            {
+                                let pref = parts[j];
+                                j += 1;
                                 if parts[j] == "chan" && j + 1 < parts.len() {
-                                    tags.push(format!("chan_{}", parts[j + 1]));
+                                    tags.push(format!("{pref}_chan_{}", parts[j + 1]));
                                     j += 2;
-                                } else if matches!(
-                                    parts[j],
-                                    "int" | "string" | "float" | "bool"
-                                ) || parts[j].starts_with("MakoEnum")
-                                {
-                                    tags.push(parts[j].to_string());
-                                    j += 1;
                                 } else {
-                                    // struct C name (Point, …)
-                                    tags.push(parts[j].to_string());
+                                    tags.push(format!("{pref}_{}", parts[j]));
                                     j += 1;
                                 }
+                            } else if parts[j] == "chan" && j + 1 < parts.len() {
+                                tags.push(format!("chan_{}", parts[j + 1]));
+                                j += 2;
+                            } else if matches!(
+                                parts[j],
+                                "int" | "string" | "float" | "bool"
+                            ) || parts[j].starts_with("MakoEnum")
+                            {
+                                tags.push(parts[j].to_string());
+                                j += 1;
+                            } else {
+                                // struct C name (Point, …)
+                                tags.push(parts[j].to_string());
+                                j += 1;
                             }
-                            if let Some(tag) = tags.get(i) {
+                        }
+                        if let Some(tag) = tags.get(i) {
+                            if tag.starts_with("chan_") {
                                 self.register_chan_payload_on_temp(n, tag);
+                            } else if tag.starts_with("opt_") || tag.starts_with("res_") {
+                                self.register_bag_payload_on_temp(n, tag);
                             }
                         }
                     }
@@ -8697,7 +9740,20 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
             Stmt::IndexAssign { base, index, value } => {
                 let (bty, b) = self.emit_expr(base);
                 let (_, i) = self.emit_expr(index);
-                let (_, v) = self.emit_expr(value);
+                let (vty, mut v) = self.emit_expr(value);
+                // Layout-compatible tuple retag: (int, Option[string]) map vs lit that
+                // monomorphized as MakoTup_int_opt_int (None leaves no string metadata).
+                if let Some(exp_vty) = self.map_value_c_ty(&bty) {
+                    if exp_vty != vty
+                        && exp_vty.starts_with("MakoTup_")
+                        && vty.starts_with("MakoTup_")
+                        && self.tuple_fields_layout_eq(&vty, &exp_vty)
+                    {
+                        let tmp = self.fresh("tcast");
+                        self.line(&format!("{exp_vty} {tmp}; memcpy(&{tmp}, &{v}, sizeof({tmp}));"));
+                        v = tmp;
+                    }
+                }
                 if bty == "MakoMapSI*" {
                     self.line(&format!("mako_map_si_set({b}, {i}, {v});"));
                 } else if bty == "MakoMapII*" {
@@ -22463,10 +23519,49 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                 let mut vals = Vec::new();
                 for e in elems {
                     let (t, v) = self.emit_expr(e);
-                    tys.push(t);
-                    vals.push(v);
+                    // Materialize bag ctors so Some/Ok payload kinds attach to a local
+                    // (expr strings like mako_some_str(…) are not metadata keys).
+                    if (t == "MakoOptionInt" || t == "MakoResultInt")
+                        && matches!(
+                            e,
+                            Expr::Call { callee, .. }
+                                if matches!(callee.as_ref(), Expr::Ident(n)
+                                    if n == "Some" || n == "None" || n == "Ok" || n == "Err")
+                        )
+                    {
+                        let tmp = self.fresh("tbag");
+                        self.line(&format!("{t} {tmp} = {v};"));
+                        self.locals.insert(tmp.clone(), t.clone());
+                        if let Expr::Call { callee, args } = e {
+                            if let Expr::Ident(cn) = callee.as_ref() {
+                                if *cn == "Some" || *cn == "None" {
+                                    if let Some(ok) = self.call_option_some_kind(cn, args) {
+                                        self.option_some_kinds.insert(tmp.clone(), ok);
+                                    }
+                                    if let Some(sn) = self.call_option_some_struct(cn, args) {
+                                        self.option_some_structs.insert(tmp.clone(), sn);
+                                    }
+                                    if let Some(rik) = self.call_option_result_inner(cn, args) {
+                                        self.option_result_inners.insert(tmp.clone(), rik);
+                                    }
+                                } else if *cn == "Ok" || *cn == "Err" {
+                                    if let Some(ok) = self.call_result_ok_kind(cn, args) {
+                                        self.result_ok_kinds.insert(tmp.clone(), ok);
+                                    }
+                                    if let Some(sn) = self.call_result_ok_struct(cn, args) {
+                                        self.result_ok_structs.insert(tmp.clone(), sn);
+                                    }
+                                }
+                            }
+                        }
+                        tys.push(t);
+                        vals.push(tmp);
+                    } else {
+                        tys.push(t);
+                        vals.push(v);
+                    }
                 }
-                // Channel mono tags need local metadata (float bitcast / struct ptr).
+                // Channel / bag mono tags need local metadata (float bitcast / Some-kind).
                 let tag = tys
                     .iter()
                     .zip(vals.iter())
@@ -22484,6 +23579,10 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             } else {
                                 "chan_int".to_string()
                             }
+                        } else if t == "MakoOptionInt" {
+                            self.tuple_bag_mono_tag(v, true)
+                        } else if t == "MakoResultInt" {
+                            self.tuple_bag_mono_tag(v, false)
                         } else {
                             c_type_mono_tag(t)
                         }
@@ -26012,6 +27111,8 @@ fn c_type_mono_tag(c_ty: &str) -> String {
         "MakoChan*" => "chan_int".into(),
         "MakoChanStr*" => "chan_string".into(),
         "MakoChanPtr*" => "chan_ptr".into(),
+        "MakoOptionInt" => "opt_int".into(),
+        "MakoResultInt" => "res_int".into(),
         "MakoIntArray" => "arr_int".into(),
         "MakoStrArray" => "arr_string".into(),
         "MakoFloatArray" => "arr_float".into(),
@@ -26464,6 +27565,12 @@ fn map_tuple_val_tag(
             TypeExpr::Generic(n, args) if n == "chan" && !args.is_empty() => {
                 chan_map_val_tag(&args[0], structs)
             }
+            // Option[T] / Result[T,E] → opt_int / res_chan_string / …
+            TypeExpr::Generic(n, args)
+                if (n == "Option" || n == "Result") && !args.is_empty() =>
+            {
+                bag_map_val_tag(n == "Option", &args[0], structs, enums)
+            }
             _ => "int".into(),
         })
         .collect();
@@ -26478,6 +27585,10 @@ fn tuple_field_eq(c_ty: &str, a: &str, b: &str) -> String {
         format!("mako_f64_key_eq({a}, {b})")
     } else if c_ty == "int64_t" || c_ty == "bool" {
         format!("({a} == {b})")
+    } else if c_ty == "MakoOptionInt" {
+        format!("mako_eq_option_int({a}, {b})")
+    } else if c_ty == "MakoResultInt" {
+        format!("mako_eq_result_int({a}, {b})")
     } else if c_ty == "MakoChan*"
         || c_ty == "MakoChanStr*"
         || c_ty == "MakoChanPtr*"
@@ -26537,6 +27648,14 @@ fn bag_map_val_tag(
             TypeExpr::Generic(n, args) if n == "chan" && !args.is_empty() => {
                 let ct = chan_map_val_tag(&args[0], structs);
                 format!("{pref}_arr_{ct}")
+            }
+            // Option[[]Option[T]] / Result[[]Option[T],E] → opt_arr_opt_int / …
+            // Option[[]Result[T,E]] → opt_arr_res_int / …
+            TypeExpr::Generic(n, args)
+                if (n == "Option" || n == "Result") && !args.is_empty() =>
+            {
+                let etag = bag_map_val_tag(n == "Option", &args[0], structs, enums);
+                format!("{pref}_arr_{etag}")
             }
             _ => format!("{pref}_arr_int"),
         },
@@ -26820,6 +27939,9 @@ fn c_type_from_mono_tag(tag: &str) -> String {
         "map_int_int" => "MakoMapII*".into(),
         "map_string_string" => "MakoMapSS*".into(),
         other if other.starts_with("arr_") => format!("MakoArr_{}", &other["arr_".len()..]),
+        other if other.starts_with("opt_") => "MakoOptionInt".into(),
+        other if other.starts_with("res_") => "MakoResultInt".into(),
+        other if other.starts_with("chan_") => chan_map_val_c_ty(other),
         // Named structs / pack-prefixed types: mono tag is the C type name.
         other => other.to_string(),
     }

@@ -2,6 +2,40 @@
 
 ## Unreleased
 
+### Codegen — demand-driven map monomorphs
+
+- **Used-only emission** for map/bag/slice/tuple/chan monomorph helpers.
+  Collects `map[K]V` types from the program AST, then emits only those
+  `(key, val)` pairs — not the full N² named-key × bag grid.
+- Fixes FayDB-scale blowup (hundreds of MB–GB of unused `MakoMapK_*` /
+  `opt_*` / `arr_*` helpers) so large packs stay roughly O(used maps).
+- Nested-map value tags (depth-2/3) and `[]T` bag-array deps still resolve
+  correctly when those shapes are actually used.
+
+### Language — Option/Result fields in map tuples
+
+- **`map[K](Option[T], U)`** / **`(U, Option[T])`** / **`(Result[T,E], U)`** and
+  same-leaf bag pairs; **`Option[chan[T]]`** × scalar; **`(chan[T], Option[int])`**;
+  named-struct bag × int.
+- Tuple lits materialize bag ctors for mono tags; map set layout-casts
+  compatible `MakoTup_*` (e.g. `None` → `opt_int` retagged to map’s bag leaf).
+- Type checker propagates expected tuple element types so `None` / `Ok("…")`
+  refine under map assignment.
+- Tests: `map_tuple_bag_test`.
+
+### Language — nested bag slices as map values
+
+- **`map[K][]Option[Option[T]]`** / **`[]Option[Result[T,E]]`** /
+  **`[]Result[Option[T],E]`** / **`[]Result[Result[T,E],E]`** (scalar, struct,
+  channel leaves) — tags `arr_opt_opt_*` / `arr_opt_res_*` / `arr_res_opt_*` /
+  `arr_res_res_*`.
+- **`map[K]Option[[]Option[T]]`** / **`Result[[]Option[T],E]`** /
+  **`Option[[]Result[T,E]]`** / **`Result[[]Result[T,E],E]`** — tags
+  `opt_arr_opt_*` / `res_arr_opt_*` / `opt_arr_res_*` / `res_arr_res_*`.
+- Array-lit tag inference peels nested `Some`/`Ok` for channel and struct
+  payloads.
+- Tests: `map_nested_bag_slice_test`.
+
 ### Language — mixed bag nests as map values
 
 - **`map[K]Option[Result[T,E]]`** / **`Option[Result[chan[T],E]]`** /
