@@ -190,6 +190,8 @@ Supported map kinds — **keys:** `int` \| `string` \| `float` \| `bool` \| name
 | `map[string][]chan[int]` / `map[Point][]chan[string]` | Slices of channels |
 | `map[string]Option[chan[int]]` / `Option[chan[int]]` | Optional channels |
 | `map[int]Result[chan[string],string]` | Fallible channel handles |
+| `map[string][]Option[chan[int]]` | Slice of optional channels |
+| `map[string]Option[[]chan[int]]` | Optional slice of channels |
 
 Float keys: `+0`/`-0` unify; all NaNs share one key. Struct keys: field-wise eq
 + stable field hash (strings by content). Enum keys: tag + payload.

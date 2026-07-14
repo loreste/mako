@@ -8765,6 +8765,22 @@ impl TypeChecker {
                             | Type::Bool
                             | Type::Struct { .. }
                             | Type::Enum { .. }
+                    ) || matches!(
+                        // map[K][]Option[chan[T]]
+                        payload.as_ref(),
+                        Type::Chan(ch)
+                            if matches!(
+                                ch.as_ref(),
+                                Type::Int
+                                    | Type::Int64
+                                    | Type::Int32
+                                    | Type::Int8
+                                    | Type::Byte
+                                    | Type::Bool
+                                    | Type::Float
+                                    | Type::String
+                                    | Type::Struct { .. }
+                            )
                     )
             ) || matches!(
                 inner.as_ref(),
@@ -8781,6 +8797,22 @@ impl TypeChecker {
                             | Type::Bool
                             | Type::Struct { .. }
                             | Type::Enum { .. }
+                    ) || matches!(
+                        // map[K][]Result[chan[T],E]
+                        payload.as_ref(),
+                        Type::Chan(ch)
+                            if matches!(
+                                ch.as_ref(),
+                                Type::Int
+                                    | Type::Int64
+                                    | Type::Int32
+                                    | Type::Int8
+                                    | Type::Byte
+                                    | Type::Bool
+                                    | Type::Float
+                                    | Type::String
+                                    | Type::Struct { .. }
+                            )
                     )
             ) || matches!(
                 // map[K][]chan[T] — same channel element set as chan_open / map[K]chan[T]
@@ -8870,6 +8902,26 @@ impl TypeChecker {
                             | Type::String
                             | Type::Struct { .. }
                     )
+            ) || matches!(
+                // Option[[]chan[T]]
+                inner.as_ref(),
+                Type::Array(elem)
+                    if matches!(
+                        elem.as_ref(),
+                        Type::Chan(ch)
+                            if matches!(
+                                ch.as_ref(),
+                                Type::Int
+                                    | Type::Int64
+                                    | Type::Int32
+                                    | Type::Int8
+                                    | Type::Byte
+                                    | Type::Bool
+                                    | Type::Float
+                                    | Type::String
+                                    | Type::Struct { .. }
+                            )
+                    )
             ) =>
             {
                 Ok(())
@@ -8903,6 +8955,21 @@ impl TypeChecker {
                         | Type::Bool
                         | Type::Struct { .. }
                         | Type::Enum { .. }
+                ) || matches!(
+                    elem.as_ref(),
+                    Type::Chan(ch)
+                        if matches!(
+                            ch.as_ref(),
+                            Type::Int
+                                | Type::Int64
+                                | Type::Int32
+                                | Type::Int8
+                                | Type::Byte
+                                | Type::Bool
+                                | Type::Float
+                                | Type::String
+                                | Type::Struct { .. }
+                        )
                 )
             ) || matches!(
                 inner.as_ref(),
@@ -8970,7 +9037,7 @@ impl TypeChecker {
             }
             _ => Err(TypeError::new(format!(
                 "unsupported map[{}]{} — keys: int|string|float|bool|Struct|Enum; \
-                 values: int|string|float|bool|Struct|Enum|[]T|[][]T|[]Option|[]Result|[]chan|[]map|map[K2]V|map[K2]map[K3]V|Option[T]|Option[[]T]|Option[map]|Option[chan]|Result[T,E]|Result[[]T,E]|Result[map]|Result[chan]|(T,U)|chan[T]",
+                 values: int|string|float|bool|Struct|Enum|[]T|[][]T|[]Option|[]Result|[]Option[chan]|[]Result[chan]|[]chan|[]map|map[K2]V|map[K2]map[K3]V|Option[T]|Option[[]T]|Option[[]chan]|Option[map]|Option[chan]|Result[T,E]|Result[[]T,E]|Result[[]chan]|Result[map]|Result[chan]|(T,U)|chan[T]",
                 k.display(),
                 v.display()
             ))),
