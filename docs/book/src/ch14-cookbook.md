@@ -1587,6 +1587,8 @@ fn call_downstream(url: string) -> string {
 
 Practical map and slice patterns. Full grid: [howto/10-collections](../../howto/10-collections.md)
 · language tour [ch03](ch03-language-tour.md).
+Map monomorph helpers are **demand-driven** (only shapes used in the unit are
+emitted) — large packages stay O(used maps).
 
 ### Set membership
 

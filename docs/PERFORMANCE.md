@@ -110,6 +110,8 @@ mako profile main.mko --release --json
 
 1. **`--release`** for anything you measure or ship.
 2. **Pre-size** slices/maps: `make([]int, 0, n)`, `make(map[int]int, n)`.
+   Map monomorph C helpers are **demand-driven** (only used `map[K]V` shapes
+   are emitted) — still prefer fewer distinct map shapes on hot modules.
 3. **Arenas** for request-scoped strings/buffers — one free, no per-object churn.
 4. Prefer **`hold`** over **`share`** when unique ownership works (no RC traffic).
 5. Avoid hidden clones: map rehash **moves** keys; HTTP parse copies once into the arena.

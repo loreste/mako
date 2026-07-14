@@ -114,10 +114,11 @@ No implicit mixing: int + int64 is a type error. Convert explicitly.
   []T                 Slice (dynamic array): []int, []string, []byte, []float, []Point,
                       []Option[T], []Result[T,E], [][]T, []map[…]
   map[K]V             Hash map. Keys: int|string|float|bool|Struct|Enum.
-                      Values: same, []T (map[string][]int, …), nested
-                      map[K2]V (depth 2; map[string]map[string]int, …),
-                      Option[T] / Result[T,E] (map[string]Option[int], …).
-                      Struct/enum keys hash field-wise / tag+payload.
+                      Values: same, []T/[][]T, nested maps depth ≤3,
+                      bags Option/Result (nests, channels), tuples
+                      (incl. bag/chan fields), chan[T]. Struct/enum keys
+                      hash field-wise / tag+payload. Monomorph C helpers
+                      are demand-driven (only used map shapes are emitted).
   []bool / []Enum     Bool and enum slices (make/append/index)
   [][]T               Nested slices (headers of inner slices; monomorphized)
   chan[T]             Typed channel: int family, bool, float, string, named struct
@@ -777,15 +778,19 @@ Mako uses Result[T, E] and Option[T] instead of null or exceptions.
   let mut fi = make(map[float]int)
   let mut ff = make(map[float]float)
   // Keys: int|string|float|bool|Struct|Enum (pack types too)
-  // Values: same | []T | map[K2]V (depth 2) | Option[T] | Result[T,E]
+  // Values: same | []T | map[K2]V (depth ≤3) | Option/Result bags | tuples | chan[T]
   // struct values: map[int]Point, map[string]Point, map[float]Point, map[*]eng.Table
   // struct keys:   map[Point]int|string|float|bool|Struct, map[eng.Table]int|Point
   // bool / set:    map[string]bool, map[bool]int
   // enum:          map[Color]int, map[int]Color, map[Color]Point
   // slice values:  map[string][]int, map[Point][]string
-  // nested maps:   map[string]map[string]int, map[Point]map[int]int
+  // nested maps:   map[string]map[string]int, map[string]map[string]map[string]int
   // bag values:    map[string]Option[int], map[int]Result[string,string]
+  // mixed nests:   map[string]Option[Result[int,string]], []Option[Option[int]]
+  // bag tuples:    map[string](Option[int], int)
+  // channels:      map[string]chan[int], map[string]Option[chan[int]]
   // nested slices: [][]int, [][]Point (make/append/index/range)
+  // monomorphs:    demand-driven — only used map[K]V shapes emit C helpers
 
   m["a"] = 1                           // insert
   print_int(m["a"])                    // get (missing -> zero value)

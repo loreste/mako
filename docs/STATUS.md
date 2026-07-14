@@ -1,6 +1,6 @@
 # Mako status (adversarial / verified)
 
-Last inventory: 2026-07-14 (**unique Mako surface** · pack/pull types · full map/slice/bag monomorph grid · suite **130+** · **The Mako Book**).
+Last inventory: 2026-07-14 (**unique Mako surface** · pack/pull types · full map/slice/bag *language* surface with **demand-driven monomorphs** · suite **130+** · **The Mako Book**).
 
 **Book:** [The Mako Book](book/) · **Guide:** [GUIDE.md](GUIDE.md) · **Identity:** [IDENTITY.md](IDENTITY.md) · **Pain points:** [PAIN_POINTS.md](PAIN_POINTS.md) · **Build:** [BUILD.md](BUILD.md) · **Stdlib:** [STDLIB.md](STDLIB.md) · **Roadmap:** [ROADMAP.md](ROADMAP.md) · **Changelog:** [../CHANGELOG.md](../CHANGELOG.md).
 
@@ -25,7 +25,7 @@ Last inventory: 2026-07-14 (**unique Mako surface** · pack/pull types · full m
 |-------|--------|
 | **The Mako Book** (`docs/book/` · mdBook `book.toml` + chapters) | Done |
 | Accuracy pass: README / GUIDE / STATUS / ROADMAP / howto index | Done |
-| Collections surface docs (ERGONOMICS · LANGUAGE · BUILTINS · book ch03/ch14/ch15 · howto/10 · llms*) | Done — full map/slice/bag grid |
+| Collections surface docs (ERGONOMICS · LANGUAGE · BUILTINS · book ch03/ch14/ch15 · howto/10 · llms*) | Done — full map/slice/bag surface + demand-driven monomorphs |
 
 ## Tooling — **Done**
 
@@ -190,7 +190,8 @@ Last inventory: 2026-07-14 (**unique Mako surface** · pack/pull types · full m
 | Mixed bag nests `Option[Result]` / triple Option / `Result[Result]` maps | Done — `map_option_result_nested_test` |
 | Nested bag slices `[]Option[Option]` / `Option[[]Option]` maps | Done — `map_nested_bag_slice_test` |
 | Bag fields in map tuples `(Option[T], U)` / `(Result[T,E], U)` | Done — `map_tuple_bag_test` |
-| Demand-driven map monomorph emission (O(used), not N² grid) | Done — AST collection + gated helpers |
+| Demand-driven map monomorph emission (O(used), not N² grid) | Done — AST collection + gated helpers (`1dd3ddf`) |
+| Nested bag slices / bag-field map tuples | Done — `map_nested_bag_slice_test` · `map_tuple_bag_test` |
 | `len` nil-safe on SI/II/SS maps (and monomorphized maps) | Done — runtime + nested tests |
 | Low-ceremony collections ergonomics | Done — [ERGONOMICS.md](ERGONOMICS.md) |
 

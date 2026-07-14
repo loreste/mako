@@ -216,10 +216,15 @@ Float keys: `+0`/`-0` unify; all NaNs share one key. Struct keys: field-wise eq
 Missing key → zero value (`None` / `Err("")` for bags; **nil channel** for
 `chan[T]` values); `len` on a nil map is `0`.
 
+**Monomorphs:** C helpers for monomorphized maps are emitted **only for map
+shapes used in the unit** (demand-driven). The language surface remains the
+full grid above; unused pairs do not inflate object size.
+
 Tests: `map_test`, `map_struct_test`, `map_float_test`, `map_struct_key_test`,
 `map_bool_test`, `map_enum_test`, `map_slice_test`, `map_nested_test`,
-`map_nested_slice_test`, `map_map_slice_test`, `slice_map_test`,
-`map_option_result_test`, `map_tuple_test`, `map_chan_test`, `nested_slice_test`.  
+`map_depth3_test`, `map_nested_slice_test`, `map_map_slice_test`, `slice_map_test`,
+`map_option_result_test`, `map_option_result_nested_test`, `map_nested_bag_slice_test`,
+`map_tuple_test`, `map_tuple_bag_test`, `map_chan_test`, `nested_slice_test`.  
 Also **`[]Option[T]`** / **`[]Result[T,E]`** (make/append/index/range/lits).  
 Hands-on: [howto/10-collections.md](howto/10-collections.md).
 

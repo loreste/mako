@@ -89,12 +89,14 @@ enums (tag + payload).
 
 ## Collections (maps & slices)
 
-One monomorphized surface — no special collection package for everyday work:
+One monomorphized surface — no special collection package for everyday work.
+Codegen emits **only the map monomorphs used in the unit** (demand-driven), so
+large packs stay O(used shapes), not O(types²).
 
 | Form | Notes |
 |------|--------|
-| `[]T` | int/string/float/bool/byte/Struct/Enum; nested `[][]T` |
-| `map[K]V` | **K:** int\|string\|float\|bool\|Struct\|Enum · **V:** same, `[]T`, `map[K2]V` (depth ≤3), `Option[T]`, `Result[T,E]`, `(T,U)`, `chan[T]` |
+| `[]T` | int/string/float/bool/byte/Struct/Enum; nested `[][]T`; bag slices `[]Option` / `[]Result` |
+| `map[K]V` | **K:** int\|string\|float\|bool\|Struct\|Enum · **V:** same, `[]T`/`[][]T`, nested maps (depth ≤3), bags `Option`/`Result` (incl. nests), tuples `(T,U[,…])` (incl. bag/chan fields), `chan[T]` |
 | Ops | `m[k]`, `m[k]=v`, `has`, `delete`, `len`, comma-ok, `range`, `maps_*` |
 
 Short patterns (sets, groups, nested maps, bag values): [ERGONOMICS.md](ERGONOMICS.md).  
