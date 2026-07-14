@@ -41,6 +41,19 @@ fn main() {
     // Bool / string / float / struct / enum elements all work
     let flags: []bool = [true, false]
     let names: []string = ["a", "b"]
+
+    // Option / Result elements (bag slices)
+    let mut maybe = make([]Option[int], 0, 4)
+    maybe = append(maybe, Some(1))
+    maybe = append(maybe, None)
+    match maybe[0] {
+        Some(v) => print(v),
+        None => print("none"),
+    }
+    let xs: []Option[int] = [Some(10), None]
+    let mut tried = make([]Result[string, string], 0, 2)
+    tried = append(tried, Ok("yes"))
+    tried = append(tried, Err("no"))
 }
 ```
 
@@ -50,7 +63,7 @@ fn main() {
 | `s[i]` / `s[i] = v` | bounds-checked (unless `unsafe`) |
 | `append(s, v)` | may reallocate; reassign result |
 | `s[low:high]` | sub-slice |
-| `make([]T, len[, cap])` | allocate |
+| `make([]T, len[, cap])` | allocate (`[]Option[T]` / `[]Result[T,E]` supported) |
 
 ---
 
@@ -297,6 +310,7 @@ Pre-size with a hint: `make(map[string]int, 1024)`.
 | `examples/testing/slice_map_test.mko` | `[]map` / `map[K][]map` |
 | `examples/testing/option_map_test.mko` | `Option[map]` / `Result[map]` |
 | `examples/testing/map_option_result_test.mko` | bag values |
+| `examples/testing/option_result_slice_test.mko` | `[]Option[T]` / `[]Result[T,E]` |
 | `examples/testing/nested_slice_test.mko` | `[][]T` |
 
 ```bash

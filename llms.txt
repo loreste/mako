@@ -20,7 +20,8 @@ Short facts:
   `eng.Point { x: 1 }`, `eng.Red` / `eng.Color.Green(n)`
 - Maps: keys `int|string|float|bool|Struct|Enum`; values same, `[]T`, `[][]T`,
   nested `map[K2]V` (depth 2), or bags `Option[T]` / `Result[T,E]`
-  (e.g. `map[string]Option[int]`); nested `[][]T`; `maps_*`
+  (e.g. `map[string]Option[int]`); nested `[][]T`; `[]Option[T]` / `[]Result[T,E]`;
+  `maps_*`
 - Struct/enum `==` `!=` structural (strings by content)
 - Channels: `make(chan[T], n)` / `chan_open[T](n)` for int/bool/float/string/struct
 - Parallel work: `fan(xs, fn(x) { x * x })`

@@ -5506,8 +5506,62 @@ impl Codegen {
             }
             // []map[K]V tags: map_string_int → MakoMapSI*
             other if other.starts_with("map_") => map_map_val_c_ty(other),
+            // []Option / []Result bag tags
+            other if other.starts_with("opt_") => "MakoOptionInt".into(),
+            other if other.starts_with("res_") => "MakoResultInt".into(),
             other => self.product_c_ty(other),
         }
+    }
+
+    /// Tag for `[]Option` / `[]Result` array lits (`opt_int`, `res_string`, …).
+    fn bag_arr_tag_from_elems(&self, is_option: bool, elems: &[Expr]) -> String {
+        let pref = if is_option { "opt" } else { "res" };
+        for e in elems {
+            if let Expr::Call { callee, args } = e {
+                if let Expr::Ident(cn) = callee.as_ref() {
+                    let is_ctor = if is_option {
+                        cn == "Some"
+                    } else {
+                        cn == "Ok"
+                    };
+                    if is_ctor {
+                        if let Some(a0) = args.first() {
+                            let leaf = match a0 {
+                                Expr::Int(_) => "int".into(),
+                                Expr::String(_) => "string".into(),
+                                Expr::Float(_) => "float".into(),
+                                Expr::Bool(_) => "bool".into(),
+                                Expr::StructLit { name, .. }
+                                | Expr::StructLitPos { name, .. } => name.clone(),
+                                Expr::Ident(n)
+                                    if self.structs.contains_key(n)
+                                        || self.enums.contains_key(n) =>
+                                {
+                                    n.clone()
+                                }
+                                other => {
+                                    let cty = self.peek_expr_c_ty(other);
+                                    match cty.as_str() {
+                                        "MakoString" => "string".into(),
+                                        "double" => "float".into(),
+                                        "bool" => "bool".into(),
+                                        s if self.structs.values().any(|si| si.c_name == s) => {
+                                            s.to_string()
+                                        }
+                                        s if s.starts_with("MakoEnum_") => {
+                                            s["MakoEnum_".len()..].to_string()
+                                        }
+                                        _ => "int".into(),
+                                    }
+                                }
+                            };
+                            return format!("{pref}_{leaf}");
+                        }
+                    }
+                }
+            }
+        }
+        format!("{pref}_int")
     }
 
     /// Maps with this struct/enum as key.
@@ -6129,6 +6183,20 @@ impl Codegen {
             TypeExpr::Array(inner) if matches!(inner.as_ref(), TypeExpr::Map(_, _)) => {
                 let map_c = self.type_expr_c(inner);
                 let tag = map_ptr_mono_tag(&map_c).unwrap_or_else(|| c_type_mono_tag(&map_c));
+                format!("MakoArr_{tag}")
+            }
+            // []Option[T] / []Result[T,E] → MakoArr_opt_int / MakoArr_res_string / …
+            TypeExpr::Array(inner)
+                if matches!(
+                    inner.as_ref(),
+                    TypeExpr::Generic(n, args) if (n == "Option" || n == "Result") && !args.is_empty()
+                ) =>
+            {
+                let (is_opt, payload) = match inner.as_ref() {
+                    TypeExpr::Generic(n, args) => (n == "Option", &args[0]),
+                    _ => unreachable!(),
+                };
+                let tag = bag_map_val_tag(is_opt, payload, &self.structs, &self.enums);
                 format!("MakoArr_{tag}")
             }
             TypeExpr::Array(_) => "MakoIntArray".into(),
@@ -21066,6 +21134,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                     return (outer, tmp);
                 }
                 // []map lit: [m0, m1, …] where elements are map pointers
+                // []Option / []Result lit: bag values by value
                 if !elems.is_empty() {
                     let (ty0, v0) = self.emit_expr(&elems[0]);
                     if ty0.starts_with("MakoMap") && ty0.ends_with('*') {
@@ -21079,6 +21148,24 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         let outer = format!("MakoArr_{tag}");
                         let tmp = self.fresh("marr");
                         let lit = self.fresh("mlit");
+                        self.line(&format!("{ty0} {lit}[] = {{ {} }};", vals.join(", ")));
+                        self.line(&format!(
+                            "{outer} {tmp} = mako_arr_{tag}_of({lit}, {});",
+                            elems.len()
+                        ));
+                        return (outer, tmp);
+                    }
+                    if ty0 == "MakoOptionInt" || ty0 == "MakoResultInt" {
+                        let mut vals = vec![v0];
+                        for e in elems.iter().skip(1) {
+                            let (_, v) = self.emit_expr(e);
+                            vals.push(v);
+                        }
+                        let is_opt = ty0 == "MakoOptionInt";
+                        let tag = self.bag_arr_tag_from_elems(is_opt, elems);
+                        let outer = format!("MakoArr_{tag}");
+                        let tmp = self.fresh("barr");
+                        let lit = self.fresh("blit");
                         self.line(&format!("{ty0} {lit}[] = {{ {} }};", vals.join(", ")));
                         self.line(&format!(
                             "{outer} {tmp} = mako_arr_{tag}_of({lit}, {});",
@@ -21480,6 +21567,22 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                     }
                     _ => None,
                 };
+                let bag_elem_tag = match ty {
+                    TypeExpr::Array(inner) => match inner.as_ref() {
+                        TypeExpr::Generic(n, args)
+                            if (n == "Option" || n == "Result") && !args.is_empty() =>
+                        {
+                            Some(bag_map_val_tag(
+                                n == "Option",
+                                &args[0],
+                                &self.structs,
+                                &self.enums,
+                            ))
+                        }
+                        _ => None,
+                    },
+                    _ => None,
+                };
                 let l = if let Some(len_e) = len {
                     let (_, v) = self.emit_expr(len_e);
                     v
@@ -21552,6 +21655,12 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                     (outer, tmp)
                 } else if let Some(map_c) = map_elem_c {
                     let tag = map_ptr_mono_tag(&map_c).unwrap_or_else(|| c_type_mono_tag(&map_c));
+                    let outer = format!("MakoArr_{tag}");
+                    self.line(&format!(
+                        "{outer} {tmp} = mako_arr_{tag}_make({l}, {c});"
+                    ));
+                    (outer, tmp)
+                } else if let Some(tag) = bag_elem_tag {
                     let outer = format!("MakoArr_{tag}");
                     self.line(&format!(
                         "{outer} {tmp} = mako_arr_{tag}_make({l}, {c});"
@@ -21730,6 +21839,8 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                     let out = self.fresh("sg");
                     let vty = self.arr_elem_c_ty(sn);
                     self.line(&format!("{vty} {out} = mako_arr_{sn}_get({b}, {tmp});"));
+                    // Match arms on []Option / []Result elements need payload kinds.
+                    self.register_bag_payload_on_temp(&out, sn);
                     return (vty, out);
                 }
                 if bty == "MakoString" {

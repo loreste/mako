@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+### Security — SCRAM proof compare
+
+- **`crypto.scram_verify_proof`** — uses `const_eq` when comparing the recovered
+  StoredKey (was language `==`). Docs: STDLIB / SECURITY / BUILTINS / book ch07 /
+  `llms-full.txt` aligned to the real `crypto.scram_*` core API (no fictional
+  `scram_client_first` / SASL framing helpers).
+
+### Language — `[]Option[T]` / `[]Result[T,E]`
+
+- **Bag element slices** — `make([]Option[int], 0, n)`, `append`, index get/set,
+  range, and annotated literals `[Some(1), None]`. Same for `Result[T,E]` and
+  string/float/bool/Struct payloads. Reuses monomorphized `MakoArr_opt_*` /
+  `MakoArr_res_*` (also used by `maps_values` on bag maps). Match on `xs[i]`
+  registers Some/Ok kinds; append/index-assign push expected types for bare
+  `None` / `Err`.
+- Tests: `option_result_slice_test`.
+
 ### Docs — howto & book collections surface
 
 - **[howto/10-collections.md](docs/howto/10-collections.md)** — full hands-on guide

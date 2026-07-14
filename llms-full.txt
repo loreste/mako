@@ -111,7 +111,8 @@ No implicit mixing: int + int64 is a type error. Convert explicitly.
 4.2 Composite Types
 -------------------
 
-  []T                 Slice (dynamic array): []int, []string, []byte, []float, []Point
+  []T                 Slice (dynamic array): []int, []string, []byte, []float, []Point,
+                      []Option[T], []Result[T,E], [][]T, []map[…]
   map[K]V             Hash map. Keys: int|string|float|bool|Struct|Enum.
                       Values: same, []T (map[string][]int, …), nested
                       map[K2]V (depth 2; map[string]map[string]int, …),
@@ -1604,19 +1605,24 @@ Below are the most important built-in functions organized by category.
   chacha20_poly1305_seal(key: string, nonce: string, pt: string, aad: string) -> string
   chacha20_poly1305_open(key: string, nonce: string, ct: string, aad: string) -> string
 
-  // bcrypt ($2b$ via libxcrypt):
-  crypto.bcrypt(password: string) -> string          Hash password
-  crypto.bcrypt_check(password: string, hash: string) -> int  Verify (1=match)
+  // pull "crypto"  — package wrappers over the builtins above
+  crypto.password_hash(password) -> string           Argon2id PHC (prefer for storage)
+  crypto.password_verify(phc, password) -> int       1/0 constant-time verify
+  crypto.bcrypt(password, cost) -> string            $2b$ (libxcrypt; crypto.bcrypt_ok)
+  crypto.bcrypt_check(hash, password) -> int
+  crypto.pbkdf2(password, salt, iterations, dklen) -> string  PBKDF2-HMAC-SHA256 raw
 
-  // PBKDF2:
-  crypto.pbkdf2(password: string, salt: string, iterations: int, key_len: int) -> string
-
-  // SCRAM-SHA-256 (RFC 7677):
-  crypto.scram_client_first(username: string, nonce: string) -> string
-  crypto.scram_client_final(password: string, salt: string, iterations: int,
-                            server_first: string, client_first: string) -> string
-  crypto.scram_server_verify(stored_key: string, auth_msg: string,
-                             client_proof: string) -> int
+  // SCRAM-SHA-256 core (RFC 5802 / 7677) — compose AuthMessage yourself:
+  //   auth = client_first_bare + "," + server_first + "," + client_final_no_proof
+  // salt is raw bytes (base64-decode wire values first). See scram_test.mko.
+  crypto.scram_salted_password(password, salt, iterations) -> string  // PBKDF2, 32 B
+  crypto.scram_client_key(salted) -> string           // HMAC(salted, "Client Key")
+  crypto.scram_server_key(salted) -> string           // HMAC(salted, "Server Key")
+  crypto.scram_stored_key(client_key) -> string       // SHA256(client_key)
+  crypto.scram_client_signature(stored_key, auth) -> string
+  crypto.scram_server_signature(server_key, auth) -> string
+  crypto.scram_client_proof(client_key, client_sig) -> string  // XOR
+  crypto.scram_verify_proof(stored_key, auth, proof) -> int    // 1/0 (const_eq)
 
   // Hex helpers:
   hex_encode(sha256(data))                   // sha256_hex equivalent

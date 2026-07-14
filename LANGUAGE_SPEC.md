@@ -320,6 +320,10 @@ Slice operations:
 
 Out-of-bounds access aborts at runtime.
 
+Element types include scalars, named structs/enums, nested `[][]T`, maps
+(`[]map[K]V`), and bags **`[]Option[T]`** / **`[]Result[T,E]`** (make, append,
+index, range, annotated literals).
+
 #### Maps: `map[K]V`
 
 Hash maps with open addressing. Supported key types: `string`, `int`,

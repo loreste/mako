@@ -173,6 +173,7 @@ the result is already determined by the left.
 | `[]string`        | String slice                             |
 | `[]float`         | Float slice                              |
 | `[]bool` / `[]Enum` | Bool and enum slices                   |
+| `[]Option[T]` / `[]Result[T,E]` | Bag element slices (make/append/index/range/lits) |
 | `[][]T`           | Nested slices (outer headers of inners)  |
 | `map[K]V`         | Hash map — keys: int\|string\|float\|bool\|Struct\|Enum; values: same, `[]T`, nested `map[K2]V` (depth 2), `Option[T]`, `Result[T,E]` |
 | `chan[T]`          | Typed channel                            |

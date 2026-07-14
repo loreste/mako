@@ -9487,6 +9487,8 @@ impl TypeChecker {
                         if it != Type::Int {
                             return Err(TypeError::new("slice index must be int"));
                         }
+                        let saved_expected = self.current_expected.clone();
+                        self.current_expected = Some(inner.as_ref().clone());
                         let vt = if matches!(value, Expr::Int(_))
                             && is_literal_int_kind(inner.as_ref())
                         {
@@ -9494,6 +9496,7 @@ impl TypeChecker {
                         } else {
                             self.check_expr(value)?
                         };
+                        self.current_expected = saved_expected;
                         if !self.compatible(&vt, &inner) {
                             return Err(TypeError::new(format!(
                                 "cannot assign {} into []{}",
@@ -11320,6 +11323,9 @@ impl TypeChecker {
                             let st = self.check_expr(&args[0])?;
                             match st {
                                 Type::Array(inner) => {
+                                    // Push element type so None/Some/Ok/Err match []Option / []Result.
+                                    let saved_expected = self.current_expected.clone();
+                                    self.current_expected = Some(inner.as_ref().clone());
                                     let vt = if matches!(args[1], Expr::Int(_))
                                         && is_literal_int_kind(inner.as_ref())
                                     {
@@ -11327,6 +11333,7 @@ impl TypeChecker {
                                     } else {
                                         self.check_expr(&args[1])?
                                     };
+                                    self.current_expected = saved_expected;
                                     if !self.compatible(&vt, &inner) {
                                         return Err(TypeError::new(format!(
                                             "append element type mismatch: expected {}, got {}",
@@ -11971,15 +11978,39 @@ impl TypeChecker {
                 })
             }
             Expr::Array(elems) => {
+                // Prefer element type from expected `[]T` (Option/Result bags, annotated lits).
+                let expected_elem = match &self.current_expected {
+                    Some(Type::Array(inner)) => Some(inner.as_ref().clone()),
+                    _ => None,
+                };
                 if elems.is_empty() {
+                    if let Some(elem) = expected_elem {
+                        return Ok(Type::Array(Box::new(elem)));
+                    }
                     return Ok(Type::Array(Box::new(Type::Int)));
+                }
+                let saved_expected = self.current_expected.clone();
+                if let Some(ref elem) = expected_elem {
+                    self.current_expected = Some(elem.clone());
                 }
                 let first = self.check_expr(&elems[0])?;
                 for e in elems.iter().skip(1) {
                     let t = self.check_expr(e)?;
                     if !self.compatible(&t, &first) {
+                        self.current_expected = saved_expected;
                         return Err(TypeError::new("array element type mismatch"));
                     }
+                }
+                self.current_expected = saved_expected;
+                if let Some(elem) = expected_elem {
+                    if !self.compatible(&first, &elem) {
+                        return Err(TypeError::new(format!(
+                            "array element type mismatch: expected {}, got {}",
+                            elem.display(),
+                            first.display()
+                        )));
+                    }
+                    return Ok(Type::Array(Box::new(elem)));
                 }
                 Ok(Type::Array(Box::new(first)))
             }
@@ -12113,7 +12144,9 @@ impl TypeChecker {
                             | Type::Struct { .. }
                             | Type::Enum { .. }
                             | Type::Array(_)
-                            | Type::Map(_, _) => Ok(Type::Array(inner)),
+                            | Type::Map(_, _)
+                            | Type::Option(_)
+                            | Type::Result(_, _) => Ok(Type::Array(inner)),
                             other => Err(TypeError::new(format!(
                                 "make([]{}) not supported yet",
                                 other.display()

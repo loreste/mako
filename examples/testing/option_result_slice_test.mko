@@ -1,0 +1,172 @@
+// []Option[T] / []Result[T,E] — bag element slices
+
+struct Point {
+    x: int
+    y: int
+}
+
+fn TestOptionIntSlice() {
+    let mut xs = make([]Option[int], 0, 4)
+    xs = append(xs, Some(1))
+    xs = append(xs, None)
+    xs = append(xs, Some(99))
+    assert_eq(len(xs), 3)
+    match xs[0] {
+        Some(v) => assert_eq(v, 1),
+        None => assert(false),
+    }
+    match xs[1] {
+        Some(_) => assert(false),
+        None => assert(true),
+    }
+    match xs[2] {
+        Some(v) => assert_eq(v, 99),
+        None => assert(false),
+    }
+    // index assign
+    xs[1] = Some(7)
+    match xs[1] {
+        Some(v) => assert_eq(v, 7),
+        None => assert(false),
+    }
+}
+
+fn TestOptionStringSlice() {
+    let mut xs = make([]Option[string], 0, 2)
+    xs = append(xs, Some("hi"))
+    xs = append(xs, None)
+    match xs[0] {
+        Some(s) => assert_eq_str(s, "hi"),
+        None => assert(false),
+    }
+    match xs[1] {
+        Some(_) => assert(false),
+        None => assert(true),
+    }
+}
+
+fn TestOptionStructSlice() {
+    let mut xs = make([]Option[Point], 0, 2)
+    xs = append(xs, Some(Point { x: 1, y: 2 }))
+    xs = append(xs, None)
+    match xs[0] {
+        Some(p) => {
+            assert_eq(p.x, 1)
+            assert_eq(p.y, 2)
+        },
+        None => assert(false),
+    }
+}
+
+fn TestOptionSliceLiteral() {
+    let xs: []Option[int] = [Some(10), None, Some(20)]
+    assert_eq(len(xs), 3)
+    match xs[0] {
+        Some(v) => assert_eq(v, 10),
+        None => assert(false),
+    }
+    match xs[1] {
+        Some(_) => assert(false),
+        None => assert(true),
+    }
+    match xs[2] {
+        Some(v) => assert_eq(v, 20),
+        None => assert(false),
+    }
+}
+
+fn TestResultIntSlice() {
+    let mut xs = make([]Result[int, string], 0, 4)
+    xs = append(xs, Ok(3))
+    xs = append(xs, Err("nope"))
+    match xs[0] {
+        Ok(v) => assert_eq(v, 3),
+        Err(_) => assert(false),
+    }
+    match xs[1] {
+        Ok(_) => assert(false),
+        Err(e) => assert_eq_str(e, "nope"),
+    }
+    xs[0] = Err("x")
+    match xs[0] {
+        Ok(_) => assert(false),
+        Err(e) => assert_eq_str(e, "x"),
+    }
+}
+
+fn TestResultStringSlice() {
+    let mut xs = make([]Result[string, string], 0, 2)
+    xs = append(xs, Ok("yes"))
+    xs = append(xs, Err("no"))
+    match xs[0] {
+        Ok(s) => assert_eq_str(s, "yes"),
+        Err(_) => assert(false),
+    }
+}
+
+fn TestResultStructSlice() {
+    let mut xs = make([]Result[Point, string], 0, 2)
+    xs = append(xs, Ok(Point { x: 4, y: 5 }))
+    xs = append(xs, Err("fail"))
+    match xs[0] {
+        Ok(p) => {
+            assert_eq(p.x, 4)
+            assert_eq(p.y, 5)
+        },
+        Err(_) => assert(false),
+    }
+    match xs[1] {
+        Ok(_) => assert(false),
+        Err(e) => assert_eq_str(e, "fail"),
+    }
+}
+
+fn TestResultSliceLiteral() {
+    let xs: []Result[int, string] = [Ok(1), Err("e"), Ok(2)]
+    assert_eq(len(xs), 3)
+    match xs[0] {
+        Ok(v) => assert_eq(v, 1),
+        Err(_) => assert(false),
+    }
+    match xs[1] {
+        Ok(_) => assert(false),
+        Err(e) => assert_eq_str(e, "e"),
+    }
+}
+
+fn TestOptionSliceRange() {
+    let mut xs = make([]Option[int], 0, 3)
+    xs = append(xs, Some(1))
+    xs = append(xs, None)
+    xs = append(xs, Some(2))
+    let mut sum = 0
+    for _, o in range xs {
+        match o {
+            Some(v) => {
+                sum = sum + v
+            },
+            None => {
+                sum = sum
+            },
+        }
+    }
+    assert_eq(sum, 3)
+}
+
+fn TestOptionFloatBool() {
+    let mut fo = make([]Option[float], 0, 1)
+    fo = append(fo, Some(1.5))
+    match fo[0] {
+        Some(f) => {
+            assert(f > 1.4)
+            assert(f < 1.6)
+        },
+        None => assert(false),
+    }
+    let mut bo = make([]Option[bool], 0, 1)
+    bo = append(bo, Some(true))
+    match bo[0] {
+        Some(b) => assert(b),
+        None => assert(false),
+    }
+}

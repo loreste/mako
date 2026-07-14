@@ -228,11 +228,25 @@ fn main() {
     let flags: []bool = [true, false]
     enum Color { Red, Green }
     let palette: []Color = [Red, Green]
+
+    // Option / Result element slices
+    let mut maybe = make([]Option[int], 0, 4)
+    maybe = append(maybe, Some(1))
+    maybe = append(maybe, None)
+    match maybe[0] {
+        Some(v) => print_int(v),
+        None => print("none"),
+    }
+    let opts: []Option[int] = [Some(10), None]
+    let mut tried = make([]Result[int, string], 0, 2)
+    tried = append(tried, Ok(1))
+    tried = append(tried, Err("no"))
 }
 ```
 
 Element types include `int`, `string`, `float`, `bool`, `byte`, named structs,
-and named enums. Nested `[][]T` stores outer headers of inner slices.
+named enums, **`Option[T]`**, and **`Result[T,E]`**. Nested `[][]T` stores outer
+headers of inner slices.
 
 ### Iterating over slices
 

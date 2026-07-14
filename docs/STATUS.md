@@ -172,6 +172,7 @@ Last inventory: 2026-07-14 (**unique Mako surface** · pack/pull types · full m
 | `Option[map[K]V]` / `Result[map[K]V]` (all map kinds, match unbox) | Done — `option_map_test` |
 | `[]map[K]V` and `map[K][]map[…]` | Done — `slice_map_test` |
 | `map[K]Option[T]` / `map[K]Result[T,E]` (bag values) | Done — `map_option_result_test` |
+| `[]Option[T]` / `[]Result[T,E]` (bag element slices) | Done — `option_result_slice_test` |
 | `len` nil-safe on SI/II/SS maps (and monomorphized maps) | Done — runtime + nested tests |
 | Low-ceremony collections ergonomics | Done — [ERGONOMICS.md](ERGONOMICS.md) |
 

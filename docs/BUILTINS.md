@@ -193,6 +193,7 @@ Tests: `map_test`, `map_struct_test`, `map_float_test`, `map_struct_key_test`,
 `map_bool_test`, `map_enum_test`, `map_slice_test`, `map_nested_test`,
 `map_nested_slice_test`, `map_map_slice_test`, `slice_map_test`,
 `map_option_result_test`, `nested_slice_test`.  
+Also **`[]Option[T]`** / **`[]Result[T,E]`** (make/append/index/range/lits).  
 Hands-on: [howto/10-collections.md](howto/10-collections.md).
 
 ---
@@ -588,7 +589,16 @@ Tests: `examples/testing/sip_test.mko` · demo: `examples/sip_ua.mko` · pack: `
 
 Crypto core for SCRAM-SHA-256 (RFC 5802 / RFC 7677) challenge-response auth,
 exposed via the `crypto` package (`crypto.scram_*`). Compose the `AuthMessage`
-from the protocol strings yourself. See `examples/testing/scram_test.mko`.
+from the protocol strings yourself:
+
+```
+auth = client_first_bare + "," + server_first + "," + client_final_without_proof
+```
+
+Salt arguments are **raw bytes** (base64-decode wire values first). There is no
+`scram_client_first` / SASL framing helper — nonces and message assembly are
+application code. See `examples/testing/scram_test.mko` (RFC 7677 §3 vector),
+[STDLIB.md](STDLIB.md#crypto), and [SECURITY.md](SECURITY.md).
 
 | Function | Signature | Description |
 |----------|-----------|-------------|
@@ -599,7 +609,7 @@ from the protocol strings yourself. See `examples/testing/scram_test.mko`.
 | `crypto.scram_client_signature` | `(stored_key, auth) -> string` | `HMAC(stored_key, auth)` |
 | `crypto.scram_server_signature` | `(server_key, auth) -> string` | `HMAC(server_key, auth)` |
 | `crypto.scram_client_proof` | `(client_key, client_sig) -> string` | `client_key XOR client_sig` |
-| `crypto.scram_verify_proof` | `(stored_key, auth, proof) -> int` | Server-side: validate a client proof (1/0) |
+| `crypto.scram_verify_proof` | `(stored_key, auth, proof) -> int` | Server-side proof check (1/0); uses `const_eq` on recovered StoredKey |
 | `const_eq` | `const_eq(a: string, b: string) -> int` | Constant-time string comparison |
 | `crypto_eq` | `crypto_eq(a: string, b: string) -> int` | Constant-time byte comparison |
 | `secret_from_str` | `secret_from_str(s: string) -> Secret` | Wrap a string as a secret (zeroized on drop) |
