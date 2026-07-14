@@ -3284,6 +3284,86 @@ impl Codegen {
             );
             tags.push((tag, cty, zero, eq));
         }
+        // 3-tuples with exactly one channel + two scalar slots (all positions).
+        // Finite grid: 3 positions × 4 channel kinds (core) × 4×4 scalars — keep core chans only.
+        let core_chans: &[(&str, &str)] = &[
+            ("chan_int", "MakoChan*"),
+            ("chan_string", "MakoChanStr*"),
+            ("chan_float", "MakoChan*"),
+            ("chan_bool", "MakoChan*"),
+        ];
+        for (ctag, ccty) in core_chans {
+            for (a, ac) in bases {
+                for (b, bc) in bases {
+                    // (chan, s, s)
+                    {
+                        let tag = format!("tup_{ctag}_{a}_{b}");
+                        let cty = format!("MakoTup_{ctag}_{a}_{b}");
+                        if self.note_tuple_typedef(
+                            &cty,
+                            vec![(*ccty).into(), (*ac).into(), (*bc).into()],
+                        ) {
+                            let _ = writeln!(
+                                self.out,
+                                "typedef struct {{\n    {ccty} _0;\n    {ac} _1;\n    {bc} _2;\n}} {cty};"
+                            );
+                        }
+                        let zero = format!("(({cty}){{0}})");
+                        let eq = format!(
+                            "({} && {} && {})",
+                            tuple_field_eq(ccty, "av._0", "bv._0"),
+                            tuple_field_eq(ac, "av._1", "bv._1"),
+                            tuple_field_eq(bc, "av._2", "bv._2"),
+                        );
+                        tags.push((tag, cty, zero, eq));
+                    }
+                    // (s, chan, s)
+                    {
+                        let tag = format!("tup_{a}_{ctag}_{b}");
+                        let cty = format!("MakoTup_{a}_{ctag}_{b}");
+                        if self.note_tuple_typedef(
+                            &cty,
+                            vec![(*ac).into(), (*ccty).into(), (*bc).into()],
+                        ) {
+                            let _ = writeln!(
+                                self.out,
+                                "typedef struct {{\n    {ac} _0;\n    {ccty} _1;\n    {bc} _2;\n}} {cty};"
+                            );
+                        }
+                        let zero = format!("(({cty}){{0}})");
+                        let eq = format!(
+                            "({} && {} && {})",
+                            tuple_field_eq(ac, "av._0", "bv._0"),
+                            tuple_field_eq(ccty, "av._1", "bv._1"),
+                            tuple_field_eq(bc, "av._2", "bv._2"),
+                        );
+                        tags.push((tag, cty, zero, eq));
+                    }
+                    // (s, s, chan)
+                    {
+                        let tag = format!("tup_{a}_{b}_{ctag}");
+                        let cty = format!("MakoTup_{a}_{b}_{ctag}");
+                        if self.note_tuple_typedef(
+                            &cty,
+                            vec![(*ac).into(), (*bc).into(), (*ccty).into()],
+                        ) {
+                            let _ = writeln!(
+                                self.out,
+                                "typedef struct {{\n    {ac} _0;\n    {bc} _1;\n    {ccty} _2;\n}} {cty};"
+                            );
+                        }
+                        let zero = format!("(({cty}){{0}})");
+                        let eq = format!(
+                            "({} && {} && {})",
+                            tuple_field_eq(ac, "av._0", "bv._0"),
+                            tuple_field_eq(bc, "av._1", "bv._1"),
+                            tuple_field_eq(ccty, "av._2", "bv._2"),
+                        );
+                        tags.push((tag, cty, zero, eq));
+                    }
+                }
+            }
+        }
         // []tup for maps_values
         for (tag, vc, _, _) in &tags {
             self.emit_nested_arr_helpers(tag, vc);

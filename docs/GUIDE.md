@@ -682,6 +682,7 @@ Tests: `map_test`, `map_struct_test`, `map_float_test`, `map_struct_key_test`,
 `map_option_chan_test` (`Option[chan]` / `map[K]Option[chan]` / `Result[chan]`),
 `map_option_chan_nested_test` (`[]Option[chan]` / `Option[[]chan]` maps),
 `map_chan_nested_slice_tuple_test` (`[][]chan` / `(chan, scalar)` maps),
+`map_tuple_chan3_test` (3-tuples with channel field),
 `nested_slice_test`, `struct_slice_fields_test`, `lang_residuals_test`.
 `Option[map[K]V]` / `Result[map[K]V, E]` work with `None` / `Some` / `Ok` and match
 unboxing for SI/II/SS, float/bool key maps, and monomorphized map pointers.

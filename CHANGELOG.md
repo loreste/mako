@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Language — 3-tuples with channel fields as map values
+
+- **`map[K](chan[T], U, V)`** and channel in the other two slots —
+  `(U, chan[T], V)`, `(U, V, chan[T])` over core channel kinds × scalar pairs.
+  Unpack `let c, a, b = t` propagates channel metadata.
+- Tests: `map_tuple_chan3_test`.
+
 ### Language — `[][]chan[T]` and `(chan[T], scalar)` map values
 
 - **`map[K][][]chan[T]`** — nested channel-slice values (`arr_arr_chan_*`).
