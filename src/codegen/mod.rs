@@ -1085,8 +1085,30 @@ impl Codegen {
                         self.result_option_inners
                             .insert(bindings[0].clone(), leaf);
                     }
+                    // Propagate deeper Option chains if any
+                    if let Some(ch) = self.result_option_chains.get(scrut).cloned() {
+                        self.result_option_chains
+                            .insert(bindings[0].clone(), ch);
+                    }
                 }
                 self.result_ok_kinds.insert(bindings[0].clone(), ik);
+            }
+            // Propagate struct / chan_struct names onto the nested Result binding
+            if let Some(sn) = self
+                .result_ok_structs
+                .get(scrut)
+                .cloned()
+                .or_else(|| self.option_some_structs.get(scrut).cloned())
+            {
+                self.result_ok_structs
+                    .insert(bindings[0].clone(), sn.clone());
+                self.option_some_structs
+                    .insert(bindings[0].clone(), sn);
+            }
+            // Channel float / nested Result metadata
+            if let Some(rik) = self.result_result_inners.get(scrut).cloned() {
+                self.result_result_inners
+                    .insert(bindings[0].clone(), rik);
             }
             return;
         }
@@ -1280,7 +1302,7 @@ impl Codegen {
                     other.to_string()
                 }
                 other if other.starts_with("opt_") => {
-                    // Nested Option: opt_opt_int / opt_opt_chan_int / opt_chan_int as payload.
+                    // Nested Option: opt_opt_int / opt_opt_chan_int / opt_opt_opt_int as payload.
                     // Outer kind is "option"; chain lists remaining Some-kinds after each unbox.
                     let chain = bag_opt_tag_to_chain(other);
                     if !chain.is_empty() {
@@ -1313,6 +1335,11 @@ impl Codegen {
                         }
                     }
                     "option".into()
+                }
+                other if other.starts_with("res_") => {
+                    // Option[Result[…]]: opt_res_int / opt_res_chan_int / opt_res_opt_int
+                    self.register_nested_result_payload(temp, other);
+                    "result".into()
                 }
                 other if other.starts_with("chan_") => {
                     // opt_chan_int / opt_chan_Point → match kind chan_int / chan_struct
@@ -1361,15 +1388,37 @@ impl Codegen {
                 }
                 other if other.starts_with("opt_") => {
                     // Result[Option[…],E]: Ok kind is nested option
+                    // first chain element = immediate Some-kind; rest = deeper nest.
                     let chain = bag_opt_tag_to_chain(other);
-                    if !chain.is_empty() {
-                        self.result_option_chains.insert(temp.to_string(), chain.clone());
-                        if let Some(leaf) = chain.last() {
-                            self.result_option_inners
-                                .insert(temp.to_string(), leaf.clone());
+                    if let Some((first, rest)) = chain.split_first() {
+                        self.result_option_inners
+                            .insert(temp.to_string(), first.clone());
+                        if !rest.is_empty() {
+                            self.result_option_chains
+                                .insert(temp.to_string(), rest.to_vec());
+                        }
+                    }
+                    // Struct / chan_struct leaf names for nested match
+                    if other.contains("chan_")
+                        && !other.ends_with("chan_int")
+                        && !other.ends_with("chan_string")
+                        && !other.ends_with("chan_float")
+                        && !other.ends_with("chan_bool")
+                    {
+                        if let Some(idx) = other.rfind("chan_") {
+                            let sn = &other[idx + 5..];
+                            if !sn.is_empty() {
+                                self.option_some_structs
+                                    .insert(temp.to_string(), sn.to_string());
+                            }
                         }
                     }
                     "option".into()
+                }
+                other if other.starts_with("res_") => {
+                    // Result[Result[…]]: res_res_int / res_res_chan_int
+                    self.register_nested_result_payload(temp, other);
+                    "result".into()
                 }
                 other if other.starts_with("chan_") => {
                     if other == "chan_float" {
@@ -1395,6 +1444,80 @@ impl Codegen {
             self.locals
                 .insert(temp.to_string(), "MakoResultInt".into());
         }
+    }
+
+    /// Register metadata for a nested Result payload tag (`res_int`, `res_chan_Point`,
+    /// `res_opt_int`, …) onto a temp that is either Option[Result[…]] or Result[Result[…]].
+    fn register_nested_result_payload(&mut self, temp: &str, res_tag: &str) {
+        // res_tag is the full `res_…` mono tag of the nested Result.
+        let rest = res_tag.strip_prefix("res_").unwrap_or(res_tag);
+        let ok_kind: String = match rest {
+            "int" | "bool" => "int".into(),
+            "string" => "string".into(),
+            "float" => "float".into(),
+            other if other.starts_with("opt_") => {
+                // Result[Option[…]] nested inside outer bag: res_opt_int / res_opt_chan_int
+                let chain = bag_opt_tag_to_chain(other);
+                if let Some((first, restc)) = chain.split_first() {
+                    // After Ok of nested Result, Option Some-kind is first.
+                    // Stash for option_result_option_leafs / result_option when unboxing.
+                    self.option_result_option_leafs
+                        .insert(temp.to_string(), first.clone());
+                    if first.as_str() == "option" && !restc.is_empty() {
+                        // deeper Option nest after the first
+                        if let Some(leaf) = restc.last() {
+                            // keep leaf for Option[Result[Option[Option[T]]]] if needed
+                            let _ = leaf;
+                        }
+                    }
+                    // Also set result_option_inners shape used when Option unboxes to Result
+                    // with Ok kind "option".
+                    self.result_option_inners
+                        .insert(temp.to_string(), first.clone());
+                    if !restc.is_empty() {
+                        self.result_option_chains
+                            .insert(temp.to_string(), restc.to_vec());
+                    }
+                }
+                "option".into()
+            }
+            other if other.starts_with("chan_") => {
+                if other == "chan_float" {
+                    "chan_float".into()
+                } else if other == "chan_string" {
+                    "chan_string".into()
+                } else if other == "chan_bool" || other == "chan_int" {
+                    other.to_string()
+                } else {
+                    let sn = &other["chan_".len()..];
+                    self.result_ok_structs
+                        .insert(temp.to_string(), sn.to_string());
+                    self.option_some_structs
+                        .insert(temp.to_string(), sn.to_string());
+                    "chan_struct".into()
+                }
+            }
+            other if other.starts_with("res_") => {
+                // Result[Result[Result[…]]] — rare; treat as nested result
+                self.result_result_inners
+                    .insert(temp.to_string(), "result".into());
+                "result".into()
+            }
+            other => {
+                // named struct / enum leaf
+                self.result_ok_structs
+                    .insert(temp.to_string(), other.to_string());
+                self.option_some_structs
+                    .insert(temp.to_string(), other.to_string());
+                "struct".into()
+            }
+        };
+        // Outer bag is Option → option_result_inners; outer is Result → result_result_inners.
+        // Both maps are consulted by the matching paths.
+        self.option_result_inners
+            .insert(temp.to_string(), ok_kind.clone());
+        self.result_result_inners
+            .insert(temp.to_string(), ok_kind);
     }
 
     fn push_share_scope(&mut self) {
@@ -3650,8 +3773,39 @@ impl Codegen {
                 "mako_err_int(mako_str_from_cstr(\"\"))".into(),
                 "mako_eq_result_int(av, bv)".into(),
             ));
+            bags.push((
+                format!("opt_opt_opt_{ctag}"),
+                "MakoOptionInt".into(),
+                "mako_none_int()".into(),
+                "mako_eq_option_int(av, bv)".into(),
+            ));
+            bags.push((
+                format!("res_opt_opt_{ctag}"),
+                "MakoResultInt".into(),
+                "mako_err_int(mako_str_from_cstr(\"\"))".into(),
+                "mako_eq_result_int(av, bv)".into(),
+            ));
+            bags.push((
+                format!("opt_res_{ctag}"),
+                "MakoOptionInt".into(),
+                "mako_none_int()".into(),
+                "mako_eq_option_int(av, bv)".into(),
+            ));
+            bags.push((
+                format!("res_res_{ctag}"),
+                "MakoResultInt".into(),
+                "mako_err_int(mako_str_from_cstr(\"\"))".into(),
+                "mako_eq_result_int(av, bv)".into(),
+            ));
+            bags.push((
+                format!("opt_res_opt_{ctag}"),
+                "MakoOptionInt".into(),
+                "mako_none_int()".into(),
+                "mako_eq_option_int(av, bv)".into(),
+            ));
         }
         // Option[Option[scalar]] / Result[Option[scalar]] for nested optional map values
+        // plus triple Option, Option[Result], Result[Option[Option]], Result[Result]
         for leaf in ["int", "string", "float", "bool"] {
             bags.push((
                 format!("opt_opt_{leaf}"),
@@ -3664,6 +3818,36 @@ impl Codegen {
                 "MakoResultInt".into(),
                 "mako_err_int(mako_str_from_cstr(\"\"))".into(),
                 "mako_eq_result_int(av, bv)".into(),
+            ));
+            bags.push((
+                format!("opt_opt_opt_{leaf}"),
+                "MakoOptionInt".into(),
+                "mako_none_int()".into(),
+                "mako_eq_option_int(av, bv)".into(),
+            ));
+            bags.push((
+                format!("res_opt_opt_{leaf}"),
+                "MakoResultInt".into(),
+                "mako_err_int(mako_str_from_cstr(\"\"))".into(),
+                "mako_eq_result_int(av, bv)".into(),
+            ));
+            bags.push((
+                format!("opt_res_{leaf}"),
+                "MakoOptionInt".into(),
+                "mako_none_int()".into(),
+                "mako_eq_option_int(av, bv)".into(),
+            ));
+            bags.push((
+                format!("res_res_{leaf}"),
+                "MakoResultInt".into(),
+                "mako_err_int(mako_str_from_cstr(\"\"))".into(),
+                "mako_eq_result_int(av, bv)".into(),
+            ));
+            bags.push((
+                format!("opt_res_opt_{leaf}"),
+                "MakoOptionInt".into(),
+                "mako_none_int()".into(),
+                "mako_eq_option_int(av, bv)".into(),
             ));
         }
         let mut names: Vec<String> = self.structs.keys().cloned().collect();
@@ -3717,6 +3901,49 @@ impl Codegen {
                 "MakoResultInt".into(),
                 "mako_err_int(mako_str_from_cstr(\"\"))".into(),
                 "mako_eq_result_int(av, bv)".into(),
+            ));
+            // Nested bag monomorphs for named struct/enum leaves
+            bags.push((
+                format!("opt_opt_{n}"),
+                "MakoOptionInt".into(),
+                "mako_none_int()".into(),
+                "mako_eq_option_int(av, bv)".into(),
+            ));
+            bags.push((
+                format!("res_opt_{n}"),
+                "MakoResultInt".into(),
+                "mako_err_int(mako_str_from_cstr(\"\"))".into(),
+                "mako_eq_result_int(av, bv)".into(),
+            ));
+            bags.push((
+                format!("opt_opt_opt_{n}"),
+                "MakoOptionInt".into(),
+                "mako_none_int()".into(),
+                "mako_eq_option_int(av, bv)".into(),
+            ));
+            bags.push((
+                format!("res_opt_opt_{n}"),
+                "MakoResultInt".into(),
+                "mako_err_int(mako_str_from_cstr(\"\"))".into(),
+                "mako_eq_result_int(av, bv)".into(),
+            ));
+            bags.push((
+                format!("opt_res_{n}"),
+                "MakoOptionInt".into(),
+                "mako_none_int()".into(),
+                "mako_eq_option_int(av, bv)".into(),
+            ));
+            bags.push((
+                format!("res_res_{n}"),
+                "MakoResultInt".into(),
+                "mako_err_int(mako_str_from_cstr(\"\"))".into(),
+                "mako_eq_result_int(av, bv)".into(),
+            ));
+            bags.push((
+                format!("opt_res_opt_{n}"),
+                "MakoOptionInt".into(),
+                "mako_none_int()".into(),
+                "mako_eq_option_int(av, bv)".into(),
             ));
         }
         // []Option / []Result for maps_values
@@ -25136,6 +25363,11 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             {
                                 self.result_ok_kinds.insert(bindings[0].clone(), ik);
                             }
+                            // Struct / chan_struct names for nested Result Ok unbox
+                            if let Some(sn) = self.result_ok_structs.get(scrut).cloned() {
+                                self.result_ok_structs
+                                    .insert(bindings[0].clone(), sn);
+                            }
                         } else {
                             self.locals.insert(bindings[0].clone(), "int64_t".into());
                             self.line(&format!(
@@ -26120,7 +26352,8 @@ fn map_slice_val_c_ty(tag: &str) -> String {
 /// Convert an Option bag mono tag (without outer `opt_` already stripped once)
 /// into a nest chain of Some-kinds for match unboxing.
 /// Examples: `opt_int` → `["int"]`; `opt_chan_int` → `["chan_int"]`;
-/// `opt_opt_int` → `["option", "int"]`; `opt_opt_chan_float` → `["option", "chan_float"]`.
+/// `opt_opt_int` → `["option", "int"]`; `opt_opt_chan_float` → `["option", "chan_float"]`;
+/// `opt_opt_opt_int` → `["option", "option", "int"]`.
 fn bag_opt_tag_to_chain(tag: &str) -> Vec<String> {
     let mut chain = Vec::new();
     let mut s = tag;
@@ -26129,6 +26362,12 @@ fn bag_opt_tag_to_chain(tag: &str) -> Vec<String> {
             chain.push("option".into());
             s = rest;
             continue;
+        }
+        // Nested Result as Option payload (opt_res_* after outer peel → res_*)
+        if rest.starts_with("res_") {
+            chain.push("result".into());
+            // Do not peel further here — Result Ok kinds live on option_result_inners.
+            break;
         }
         // Leaf payload tag
         if rest.starts_with("chan_") {
@@ -26311,9 +26550,14 @@ fn bag_map_val_tag(
             let ct = chan_map_val_tag(&args[0], structs);
             format!("{pref}_{ct}")
         }
-        // Nested Option[…] payload → opt_opt_int / res_opt_chan_int / …
+        // Nested Option[…] payload → opt_opt_int / res_opt_chan_int / opt_opt_opt_int / …
         TypeExpr::Generic(n, args) if n == "Option" && !args.is_empty() => {
             let inner = bag_map_val_tag(true, &args[0], structs, enums);
+            format!("{pref}_{inner}")
+        }
+        // Nested Result[…] payload → opt_res_int / res_res_chan_int / opt_res_opt_int / …
+        TypeExpr::Generic(n, args) if n == "Result" && !args.is_empty() => {
+            let inner = bag_map_val_tag(false, &args[0], structs, enums);
             format!("{pref}_{inner}")
         }
         _ => format!("{pref}_int"),

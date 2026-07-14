@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+### Language — mixed bag nests as map values
+
+- **`map[K]Option[Result[T,E]]`** / **`Option[Result[chan[T],E]]`** /
+  **`Option[Result[Option[T],E]]`** — tags `opt_res_*` / `opt_res_opt_*`.
+- **`map[K]Option[Option[Option[T]]]`** (triple Option, incl. channels) —
+  `opt_opt_opt_*`.
+- **`map[K]Result[Option[Option[T]],E]`** / **`Result[Result[T,E],E]`**
+  (incl. channels) — `res_opt_opt_*` / `res_res_*`.
+- Bag monomorphs for scalar / chan / named struct leaves; match unbox propagates
+  Result Ok metadata (struct names, nested Option chains) from map temps.
+- Tests: `map_option_result_nested_test`.
+
 ### Language — nested `Option[Option[…]]` map values + struct-chan 3-tuples
 
 - **`map[K]Option[Option[T]]` / `Option[Option[chan[T]]]`** and

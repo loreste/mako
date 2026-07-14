@@ -198,6 +198,11 @@ Supported map kinds — **keys:** `int` \| `string` \| `float` \| `bool` \| name
 | `map[string]Option[Option[int]]` | Nested optional map values |
 | `map[string]Option[Option[chan[int]]]` | Nested optional channels |
 | `map[int]Result[Option[chan[string]],string]` | Result of optional channel |
+| `map[string]Option[Result[int,string]]` | Optional fallible map values |
+| `map[string]Option[Result[chan[int],string]]` | Optional fallible channels |
+| `map[string]Option[Option[Option[int]]]` | Triple nested optional |
+| `map[string]Result[Option[Option[int]],string]` | Result of double optional |
+| `map[string]Result[Result[int,string],string]` | Nested Result map values |
 
 Float keys: `+0`/`-0` unify; all NaNs share one key. Struct keys: field-wise eq
 + stable field hash (strings by content). Enum keys: tag + payload.

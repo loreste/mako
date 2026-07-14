@@ -1,0 +1,349 @@
+// Mixed bag nests as map values:
+//   Option[Result[T,E]] / Option[Result[chan[T],E]] / Option[Result[Option[T],E]]
+//   Option[Option[Option[T]]]
+//   Result[Option[Option[T]],E] / Result[Result[T,E],E]
+
+struct Point {
+    x: int
+    y: int
+}
+
+fn TestMapOptionResultInt() {
+    let mut m = make(map[string]Option[Result[int, string]])
+    m["a"] = Some(Ok(42))
+    m["b"] = Some(Err("no"))
+    m["c"] = None
+    match m["a"] {
+        Some(r) => match r {
+            Ok(v) => assert_eq(v, 42),
+            Err(_) => assert(false),
+        },
+        None => assert(false),
+    }
+    match m["b"] {
+        Some(r) => match r {
+            Ok(_) => assert(false),
+            Err(e) => assert_eq_str(e, "no"),
+        },
+        None => assert(false),
+    }
+    match m["c"] {
+        Some(_) => assert(false),
+        None => assert(true),
+    }
+    // missing key → None
+    match m["z"] {
+        Some(_) => assert(false),
+        None => assert(true),
+    }
+}
+
+fn TestMapOptionResultChan() {
+    let mut m = make(map[string]Option[Result[chan[int], string]])
+    let ch = chan_open[int](1)
+    let _ = ch.send(7)
+    m["a"] = Some(Ok(ch))
+    m["b"] = Some(Err("closed"))
+    m["c"] = None
+    match m["a"] {
+        Some(r) => match r {
+            Ok(c) => assert_eq(c.recv(), 7),
+            Err(_) => assert(false),
+        },
+        None => assert(false),
+    }
+    match m["b"] {
+        Some(r) => match r {
+            Ok(_) => assert(false),
+            Err(e) => assert_eq_str(e, "closed"),
+        },
+        None => assert(false),
+    }
+    match m["c"] {
+        Some(_) => assert(false),
+        None => assert(true),
+    }
+    ch.close()
+}
+
+fn TestMapOptionResultString() {
+    let mut m = make(map[int]Option[Result[string, string]])
+    m[1] = Some(Ok("yes"))
+    m[2] = Some(Err("no"))
+    match m[1] {
+        Some(r) => match r {
+            Ok(s) => assert_eq_str(s, "yes"),
+            Err(_) => assert(false),
+        },
+        None => assert(false),
+    }
+    match m[2] {
+        Some(r) => match r {
+            Ok(_) => assert(false),
+            Err(e) => assert_eq_str(e, "no"),
+        },
+        None => assert(false),
+    }
+}
+
+fn TestMapOptionResultOptionInt() {
+    let mut m = make(map[string]Option[Result[Option[int], string]])
+    m["a"] = Some(Ok(Some(3)))
+    m["b"] = Some(Ok(None))
+    m["c"] = Some(Err("e"))
+    m["d"] = None
+    match m["a"] {
+        Some(r) => match r {
+            Ok(inner) => match inner {
+                Some(v) => assert_eq(v, 3),
+                None => assert(false),
+            },
+            Err(_) => assert(false),
+        },
+        None => assert(false),
+    }
+    match m["b"] {
+        Some(r) => match r {
+            Ok(inner) => match inner {
+                Some(_) => assert(false),
+                None => assert(true),
+            },
+            Err(_) => assert(false),
+        },
+        None => assert(false),
+    }
+    match m["c"] {
+        Some(r) => match r {
+            Ok(_) => assert(false),
+            Err(e) => assert_eq_str(e, "e"),
+        },
+        None => assert(false),
+    }
+    match m["d"] {
+        Some(_) => assert(false),
+        None => assert(true),
+    }
+}
+
+fn TestMapTripleOptionInt() {
+    let mut m = make(map[string]Option[Option[Option[int]]])
+    m["a"] = Some(Some(Some(9)))
+    m["b"] = Some(Some(None))
+    m["c"] = Some(None)
+    m["d"] = None
+    match m["a"] {
+        Some(a) => match a {
+            Some(b) => match b {
+                Some(v) => assert_eq(v, 9),
+                None => assert(false),
+            },
+            None => assert(false),
+        },
+        None => assert(false),
+    }
+    match m["b"] {
+        Some(a) => match a {
+            Some(b) => match b {
+                Some(_) => assert(false),
+                None => assert(true),
+            },
+            None => assert(false),
+        },
+        None => assert(false),
+    }
+    match m["c"] {
+        Some(a) => match a {
+            Some(_) => assert(false),
+            None => assert(true),
+        },
+        None => assert(false),
+    }
+    match m["d"] {
+        Some(_) => assert(false),
+        None => assert(true),
+    }
+}
+
+fn TestMapTripleOptionChan() {
+    let mut m = make(map[string]Option[Option[Option[chan[int]]]])
+    let ch = chan_open[int](1)
+    let _ = ch.send(11)
+    m["a"] = Some(Some(Some(ch)))
+    m["b"] = Some(Some(None))
+    match m["a"] {
+        Some(a) => match a {
+            Some(b) => match b {
+                Some(c) => assert_eq(c.recv(), 11),
+                None => assert(false),
+            },
+            None => assert(false),
+        },
+        None => assert(false),
+    }
+    match m["b"] {
+        Some(a) => match a {
+            Some(b) => match b {
+                Some(_) => assert(false),
+                None => assert(true),
+            },
+            None => assert(false),
+        },
+        None => assert(false),
+    }
+    ch.close()
+}
+
+fn TestMapResultOptionOptionInt() {
+    let mut m = make(map[string]Result[Option[Option[int]], string])
+    m["a"] = Ok(Some(Some(5)))
+    m["b"] = Ok(Some(None))
+    m["c"] = Ok(None)
+    m["d"] = Err("fail")
+    match m["a"] {
+        Ok(a) => match a {
+            Some(b) => match b {
+                Some(v) => assert_eq(v, 5),
+                None => assert(false),
+            },
+            None => assert(false),
+        },
+        Err(_) => assert(false),
+    }
+    match m["b"] {
+        Ok(a) => match a {
+            Some(b) => match b {
+                Some(_) => assert(false),
+                None => assert(true),
+            },
+            None => assert(false),
+        },
+        Err(_) => assert(false),
+    }
+    match m["c"] {
+        Ok(a) => match a {
+            Some(_) => assert(false),
+            None => assert(true),
+        },
+        Err(_) => assert(false),
+    }
+    match m["d"] {
+        Ok(_) => assert(false),
+        Err(e) => assert_eq_str(e, "fail"),
+    }
+}
+
+fn TestMapResultResultInt() {
+    let mut m = make(map[string]Result[Result[int, string], string])
+    m["a"] = Ok(Ok(4))
+    m["b"] = Ok(Err("inner"))
+    m["c"] = Err("outer")
+    match m["a"] {
+        Ok(inner) => match inner {
+            Ok(v) => assert_eq(v, 4),
+            Err(_) => assert(false),
+        },
+        Err(_) => assert(false),
+    }
+    match m["b"] {
+        Ok(inner) => match inner {
+            Ok(_) => assert(false),
+            Err(e) => assert_eq_str(e, "inner"),
+        },
+        Err(_) => assert(false),
+    }
+    match m["c"] {
+        Ok(_) => assert(false),
+        Err(e) => assert_eq_str(e, "outer"),
+    }
+}
+
+fn TestMapResultResultChan() {
+    let mut m = make(map[int]Result[Result[chan[string], string], string])
+    let ch = chan_open[string](1)
+    let _ = ch.send("hi")
+    m[1] = Ok(Ok(ch))
+    m[2] = Ok(Err("nochan"))
+    m[3] = Err("outer")
+    match m[1] {
+        Ok(inner) => match inner {
+            Ok(c) => assert_eq_str(c.recv(), "hi"),
+            Err(_) => assert(false),
+        },
+        Err(_) => assert(false),
+    }
+    match m[2] {
+        Ok(inner) => match inner {
+            Ok(_) => assert(false),
+            Err(e) => assert_eq_str(e, "nochan"),
+        },
+        Err(_) => assert(false),
+    }
+    match m[3] {
+        Ok(_) => assert(false),
+        Err(e) => assert_eq_str(e, "outer"),
+    }
+    ch.close()
+}
+
+fn TestMapOptionResultStruct() {
+    let mut m = make(map[string]Option[Result[Point, string]])
+    m["a"] = Some(Ok(Point { x: 1, y: 2 }))
+    m["b"] = Some(Err("bad"))
+    match m["a"] {
+        Some(r) => match r {
+            Ok(p) => {
+                assert_eq(p.x, 1)
+                assert_eq(p.y, 2)
+            },
+            Err(_) => assert(false),
+        },
+        None => assert(false),
+    }
+    match m["b"] {
+        Some(r) => match r {
+            Ok(_) => assert(false),
+            Err(e) => assert_eq_str(e, "bad"),
+        },
+        None => assert(false),
+    }
+}
+
+fn TestMapMixedBagHelpers() {
+    let mut m = make(map[string]Option[Result[int, string]])
+    m["a"] = Some(Ok(1))
+    m["b"] = Some(Ok(2))
+    m["c"] = None
+    let ks = maps_keys(m)
+    assert_eq(len(ks), 3)
+    let c = maps_clone(m)
+    assert_eq(maps_equal(m, c), 1)
+    match c["a"] {
+        Some(r) => match r {
+            Ok(v) => assert_eq(v, 1),
+            Err(_) => assert(false),
+        },
+        None => assert(false),
+    }
+    maps_clear(c)
+    assert_eq(len(c), 0)
+    assert_eq(len(m), 3)
+}
+
+fn TestMapOptionResultCommaOk() {
+    let mut m = make(map[string]Option[Result[chan[int], string]])
+    let ch = chan_open[int](1)
+    let _ = ch.send(5)
+    m["x"] = Some(Ok(ch))
+    let bag, ok = m["x"]
+    assert(ok)
+    match bag {
+        Some(r) => match r {
+            Ok(c) => assert_eq(c.recv(), 5),
+            Err(_) => assert(false),
+        },
+        None => assert(false),
+    }
+    let _, ok2 = m["missing"]
+    assert(not ok2)
+    ch.close()
+}
