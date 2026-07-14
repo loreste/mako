@@ -25,7 +25,7 @@
 - **Used-only emission** for map/bag/slice/tuple/chan monomorph helpers.
   Collects `map[K]V` types from the program AST, then emits only those
   `(key, val)` pairs — not the full N² named-key × bag grid.
-- Fixes FayDB-scale blowup (hundreds of MB–GB of unused `MakoMapK_*` /
+- Fixes large-pack monomorph blowup (hundreds of MB–GB of unused `MakoMapK_*` /
   `opt_*` / `arr_*` helpers) so large packs stay roughly O(used maps).
 - Nested-map value tags (depth-2/3) and `[]T` bag-array deps still resolve
   correctly when those shapes are actually used.
@@ -263,7 +263,7 @@
   (`MakoIntArray`, `MakoArr_*`, …) or map/channel pointers no longer use
   `==` or `(int64_t)` casts (invalid C). Eq/hash use buffer identity
   (`.data` + `.len`) or pointer identity. Unblocks real engine packs
-  (e.g. FayDB `Table` with `[]int` + `map[int]int`) after `pull`.
+  (e.g. a `Table` with `[]int` + `map[int]int`) after `pull`.
 - **`Option` / `Result` / enum struct fields** — same helpers no longer
   emit aggregate `==` or int casts. Runtime `mako_eq_option_int` /
   `mako_hash_option_int` / `mako_eq_result_int` / `mako_hash_result_int`

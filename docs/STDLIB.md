@@ -776,7 +776,7 @@ if crypto.scram_verify_proof(stored_key, auth, client_proof) == 1 {
 
 RFC 7677 vector: `examples/testing/scram_test.mko`. Full Postgres wire
 (SASLInitialResponse / SASLContinue / SASLFinal) is **intentionally application
-code** (e.g. FayDB) — Mako is **crypto core only**, not a SASL state machine.
+code** — Mako is **crypto core only**, not a SASL state machine.
 
 ### PEM + cert lab (`pull "crypto"` → `crypto.x509` / `crypto.tls`)
 
