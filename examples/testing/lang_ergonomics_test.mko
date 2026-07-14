@@ -1,4 +1,4 @@
-// LEBA-shaped language gaps: first-class fns, f-strings, field defaults, tuple chans.
+// Language ergonomics: first-class fns, f-strings, field defaults, tuple chans.
 
 // ---- First-class functions ----
 

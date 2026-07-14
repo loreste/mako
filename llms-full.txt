@@ -2643,7 +2643,7 @@ Empty string and free
   if you free field data by hand.
 
 Edge ALPN
-  Some edges (mako-lang.com / Leba) stay on http/1.1 until multi-stream H2 is
+  Some edges (e.g. mako-lang.com) stay on http/1.1 until multi-stream H2 is
   solid. If you turn h2 back on, use a build that splits DATA frames.
 
 ================================================================================

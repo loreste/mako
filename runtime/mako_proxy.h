@@ -1,6 +1,6 @@
 /* Mako proxy / upstream hot path — TCP pool, HTTP forward/proxy, parse, splice.
  *
- * Designed for reverse proxies (Leba-class): reuse backend connections, expose
+ * Designed for reverse proxies: reuse backend connections, expose
  * status+body, raw byte-pump proxying, chunked responses, nonblocking connect,
  * and efficient fd-to-fd copy. All APIs are ordinary sync Mako builtins.
  */

@@ -458,7 +458,7 @@ fn apply(f: fn(int) -> int, x: int) -> int {
 }
 fn double(n: int) -> int { return n * 2 }
 
-// Shared respond hook (LEBA-style pipeline)
+// Shared respond hook (pipeline / reverse-proxy style)
 fn pipeline(respond: fn(int, string) -> int) -> int {
     return respond(200, "ok")
 }
@@ -477,7 +477,7 @@ fn main() {
 Also works with `string` params (`fn(string) -> int`, multi-arg `fn(int, string) -> int`).
 **Non-capturing only** — lambdas must not close over outer locals (residual).
 
-Tests: `first_class_fn_test.mko`, `leba_ergonomics_test.mko`.
+Tests: `first_class_fn_test.mko`, `lang_ergonomics_test.mko`.
 
 ### `f"…"` string interpolation
 
@@ -508,7 +508,7 @@ let _ = ch.send((7, "hi"))
 let a, b = ch.recv()
 ```
 
-Tests: `leba_ergonomics_test.mko`.
+Tests: `lang_ergonomics_test.mko`.
 
 ---
 

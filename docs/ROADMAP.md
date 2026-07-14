@@ -106,10 +106,10 @@ Metrics/prom + span-lite JSON are in; depth is open.
 | Multi-field worker I/O | `chan[Struct]` + deep-POD kick args | `chan_struct_test` · [SPEED.md](SPEED.md) |
 | Struct update (spread) | `S { field: v, ..base }` / `S { ...base, field: v }` | `struct_update_test` |
 | Enum on kick-POD / channels | POD enum fields; `chan[Enum]` | `struct_update_test` |
-| First-class fn values (non-capturing) | `fn apply(f: fn(int)->int, …)` · named + lambda | `leba_ergonomics_test` |
-| `f"…{x}"` interpolation | desugars to concat / `mako_int_to_string` | `leba_ergonomics_test` |
-| Struct field defaults | `field: int = 0` on `struct` | `leba_ergonomics_test` |
-| Tuple channels | `chan[(int, string)]` | `leba_ergonomics_test` |
+| First-class fn values (non-capturing) | `fn apply(f: fn(int)->int, …)` · named + lambda | `lang_ergonomics_test` · `first_class_fn_test` |
+| `f"…{x}"` interpolation | single-buffer `StrBuilder` finish | `lang_ergonomics_test` |
+| Struct field defaults | `field: int = 0` on `struct` | `lang_ergonomics_test` |
+| Tuple channels | `chan[(int, string)]` | `lang_ergonomics_test` |
 
 **Still open (true residuals):**
 

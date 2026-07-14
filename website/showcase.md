@@ -4,18 +4,16 @@ Real-world projects demonstrating what Mako can do in production.
 
 ---
 
-## Leba — Load Balancer
+## Load balancer / reverse proxy
 
-A full-featured Linux load balancer written entirely in Mako. Leba is both
-a production-ready tool and a showcase of the language's systems programming
+A full-featured Linux load balancer written entirely in Mako — both a
+production-ready tool and a showcase of the language’s systems programming
 capabilities.
-
-**Repository:** [github.com/loreste/leba](https://github.com/loreste/leba)
 
 ### What It Does
 
-Leba handles HTTP/1.1, HTTP/2, TCP, and SIP traffic across multiple backends
-with automatic health checks, TLS termination, and live metrics.
+Handles HTTP/1.1, HTTP/2, TCP, and SIP traffic across multiple backends with
+automatic health checks, TLS termination, and live metrics.
 
 ### Key Features
 
@@ -37,27 +35,29 @@ with automatic health checks, TLS termination, and live metrics.
 
 ### Why It Matters
 
-Leba demonstrates that Mako is ready for latency-sensitive, concurrent network
-infrastructure. The project exercises channels, fan-out, shared state, graceful
+This class of service shows Mako is ready for latency-sensitive, concurrent
+network infrastructure. It exercises channels, fan-out, shared state, graceful
 shutdown, and the full networking standard library — all in clear, readable
 code.
 
 ### Quick Look
 
 ```mko
-// Leba uses Mako's concurrency primitives to fan requests across backends
-fn forward_loop(front: i32, backends: []Backend, ch: chan<Conn>) {
+// Concurrency primitives fan requests across backends
+fn forward_loop(front: i32, backends: []Backend, ch: chan[Conn]) {
     while 1 == 1 {
         let conn = http_accept(front)
         if conn < 0 {
             break
         }
         let target = pick_backend(backends)
-        push(ch, Conn{ fd: conn, backend: target })
+        // kick worker / channel handoff …
     }
 }
 ```
 
 ---
 
-*Building something with Mako? Open a PR to add your project here.*
+## More projects
+
+As more production Mako services ship, they will be listed here.
