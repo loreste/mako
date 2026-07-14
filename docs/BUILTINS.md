@@ -164,8 +164,10 @@ Packs: `std/fmt`, `std/print`. Tests: `fmt_print_test.mko`. Demo: `examples/fmt_
 | `maps_equal` | `maps_equal(a: map[K]V, b: map[K]V) -> int` | Same keys/values (structs: structural / string content) |
 | `maps_copy` | `maps_copy(dst: map[K]V, src: map[K]V) -> void` | Copy entries into `dst` |
 
-Supported map kinds: `map[int|string|float|Struct] × int|string|float|Struct`
-(any combination, including `map[Struct]Struct`)
+Supported map kinds:
+`map[int|string|float|bool|Struct|Enum] × int|string|float|bool|Struct|Enum|[]T`
+(any combination, including slice values like `map[string][]int` / `map[Point][]int`
+and nested maps like `map[string]map[string]int` — depth 2)
 (named/pack structs). Float keys: `+0`/`-0` unify; all NaNs share one key.
 Tests: `map_test`, `map_struct_test`, `map_float_test`.
 

@@ -1,0 +1,220 @@
+// map[K][]T — maps with slice values
+
+struct Point {
+    x: int
+    y: int
+}
+
+enum Color {
+    Red
+    Green
+    Blue
+}
+
+fn TestMapStringIntSlice() {
+    let mut m = make(map[string][]int)
+    m["a"] = [1, 2, 3]
+    m["b"] = [10]
+    assert_eq(len(m), 2)
+    assert_eq(len(m["a"]), 3)
+    assert_eq(m["a"][0], 1)
+    assert_eq(m["a"][2], 3)
+    assert_eq(m["b"][0], 10)
+    assert(has(m, "a"))
+    assert(not has(m, "z"))
+    // update
+    m["a"] = [9, 8]
+    assert_eq(len(m["a"]), 2)
+    assert_eq(m["a"][0], 9)
+    delete(m, "b")
+    assert(not has(m, "b"))
+    // missing → empty slice
+    assert_eq(len(m["missing"]), 0)
+}
+
+fn TestMapIntStringSlice() {
+    let mut m = make(map[int][]string)
+    m[1] = ["x", "y"]
+    m[2] = ["z"]
+    assert_eq_str(m[1][0], "x")
+    assert_eq_str(m[1][1], "y")
+    assert_eq_str(m[2][0], "z")
+    let s, ok = m[1]
+    assert(ok)
+    assert_eq(len(s), 2)
+}
+
+fn TestMapBoolFloatSlice() {
+    let mut m = make(map[bool][]float)
+    m[true] = [1.5, 2.5]
+    assert(m[true][0] > 1.4)
+    assert(m[true][0] < 1.6)
+    assert_eq(len(m[true]), 2)
+}
+
+fn TestMapFloatIntSlice() {
+    let mut m = make(map[float][]int)
+    m[1.5] = [1, 2]
+    assert_eq(m[1.5][1], 2)
+    assert(has(m, 1.5))
+}
+
+fn TestMapSliceHelpers() {
+    let mut m = make(map[string][]int)
+    m["a"] = [1, 2]
+    m["b"] = [3]
+    let ks = maps_keys(m)
+    assert_eq(len(ks), 2)
+    let vs = maps_values(m)
+    assert_eq(len(vs), 2)
+    let mut sum = 0
+    for _, row in range vs {
+        for _, v in range row {
+            sum = sum + v
+        }
+    }
+    assert_eq(sum, 6)
+    let c = maps_clone(m)
+    assert_eq(maps_equal(m, c), 1)
+    maps_clear(c)
+    assert_eq(len(c), 0)
+    maps_copy(c, m)
+    assert_eq(len(c), 2)
+    assert_eq(c["a"][1], 2)
+}
+
+fn TestMapSliceRange() {
+    let mut m = make(map[int][]int)
+    m[1] = [1, 2]
+    m[2] = [3]
+    let mut sum = 0
+    for _, row in range m {
+        for _, v in range row {
+            sum = sum + v
+        }
+    }
+    assert_eq(sum, 6)
+}
+
+fn TestMapSliceStructElems() {
+    let mut m = make(map[string][]Point)
+    m["pts"] = [Point { x: 1, y: 2 }, Point { x: 3, y: 4 }]
+    assert_eq(len(m["pts"]), 2)
+    assert_eq(m["pts"][0].x, 1)
+    assert_eq(m["pts"][1].y, 4)
+}
+
+fn TestMapSliceCommaOk() {
+    let mut m = make(map[string][]int)
+    m["a"] = [7]
+    let v, ok = m["a"]
+    assert(ok)
+    assert_eq(v[0], 7)
+    let _, miss = m["nope"]
+    assert(not miss)
+}
+
+// --- map[Struct|Enum][]T ---
+
+fn TestMapStructKeyIntSlice() {
+    let mut m = make(map[Point][]int)
+    let p = Point { x: 1, y: 2 }
+    let q = Point { x: 3, y: 4 }
+    m[p] = [10, 20, 30]
+    m[q] = [1]
+    assert_eq(len(m), 2)
+    assert_eq(len(m[p]), 3)
+    assert_eq(m[p][0], 10)
+    assert_eq(m[p][2], 30)
+    assert_eq(m[q][0], 1)
+    assert(has(m, p))
+    assert(not has(m, Point { x: 0, y: 0 }))
+    m[p] = [9]
+    assert_eq(len(m[p]), 1)
+    assert_eq(m[p][0], 9)
+    delete(m, q)
+    assert(not has(m, q))
+    assert_eq(len(m[q]), 0)
+}
+
+fn TestMapStructKeyStringSlice() {
+    let mut m = make(map[Point][]string)
+    let p = Point { x: 1, y: 1 }
+    m[p] = ["a", "b"]
+    assert_eq_str(m[p][0], "a")
+    assert_eq_str(m[p][1], "b")
+    let s, ok = m[p]
+    assert(ok)
+    assert_eq(len(s), 2)
+}
+
+fn TestMapEnumKeyIntSlice() {
+    let mut m = make(map[Color][]int)
+    m[Red] = [1, 2]
+    m[Blue] = [3]
+    assert_eq(len(m), 2)
+    assert_eq(m[Red][1], 2)
+    assert_eq(m[Blue][0], 3)
+    assert(has(m, Red))
+    assert(not has(m, Green))
+    delete(m, Red)
+    assert(not has(m, Red))
+}
+
+fn TestMapNamedKeySliceHelpers() {
+    let mut m = make(map[Point][]int)
+    let p = Point { x: 1, y: 0 }
+    let q = Point { x: 2, y: 0 }
+    m[p] = [1, 2]
+    m[q] = [3]
+    let ks = maps_keys(m)
+    assert_eq(len(ks), 2)
+    let vs = maps_values(m)
+    assert_eq(len(vs), 2)
+    let mut sum = 0
+    for _, row in range vs {
+        for _, v in range row {
+            sum = sum + v
+        }
+    }
+    assert_eq(sum, 6)
+    let c = maps_clone(m)
+    assert_eq(maps_equal(m, c), 1)
+    maps_clear(c)
+    assert_eq(len(c), 0)
+    maps_copy(c, m)
+    assert_eq(len(c), 2)
+    assert_eq(c[p][1], 2)
+}
+
+fn TestMapNamedKeySliceRange() {
+    let mut m = make(map[Point][]int)
+    m[Point { x: 1, y: 0 }] = [1, 2]
+    m[Point { x: 2, y: 0 }] = [3]
+    let mut sum = 0
+    for _, row in range m {
+        for _, v in range row {
+            sum = sum + v
+        }
+    }
+    assert_eq(sum, 6)
+}
+
+fn TestMapStructKeyStructSlice() {
+    let mut m = make(map[Point][]Point)
+    let origin = Point { x: 0, y: 0 }
+    m[origin] = [Point { x: 1, y: 2 }, Point { x: 3, y: 4 }]
+    assert_eq(len(m[origin]), 2)
+    assert_eq(m[origin][0].x, 1)
+    assert_eq(m[origin][1].y, 4)
+}
+
+fn TestMapEnumKeyStringSliceCommaOk() {
+    let mut m = make(map[Color][]string)
+    m[Green] = ["ok"]
+    let v, ok = m[Green]
+    assert(ok)
+    assert_eq_str(v[0], "ok")
+    let _, miss = m[Red]
+    assert(not miss)
+}

@@ -1,0 +1,153 @@
+// map[K]map[K2]V — nested maps (depth 2)
+
+struct Point {
+    x: int
+    y: int
+}
+
+enum Color {
+    Red
+    Green
+    Blue
+}
+
+fn TestMapStringMapStringInt() {
+    let mut outer = make(map[string]map[string]int)
+    let mut a = make(map[string]int)
+    a["x"] = 1
+    a["y"] = 2
+    let mut b = make(map[string]int)
+    b["z"] = 3
+    outer["a"] = a
+    outer["b"] = b
+    assert_eq(len(outer), 2)
+    assert_eq(outer["a"]["x"], 1)
+    assert_eq(outer["a"]["y"], 2)
+    assert_eq(outer["b"]["z"], 3)
+    assert(has(outer, "a"))
+    assert(not has(outer, "nope"))
+    // mutate through retrieved pointer
+    let inner = outer["a"]
+    inner["x"] = 9
+    assert_eq(outer["a"]["x"], 9)
+    delete(outer, "b")
+    assert(not has(outer, "b"))
+    // missing outer key → nil map
+    let miss, ok = outer["missing"]
+    assert(not ok)
+    assert_eq(len(miss), 0)
+}
+
+fn TestMapIntMapIntInt() {
+    let mut outer = make(map[int]map[int]int)
+    let mut row = make(map[int]int)
+    row[1] = 10
+    row[2] = 20
+    outer[0] = row
+    assert_eq(outer[0][1], 10)
+    assert_eq(outer[0][2], 20)
+    assert_eq(len(outer), 1)
+}
+
+fn TestMapBoolMapStringInt() {
+    let mut outer = make(map[bool]map[string]int)
+    let mut t = make(map[string]int)
+    t["ok"] = 1
+    outer[true] = t
+    assert_eq(outer[true]["ok"], 1)
+    assert(has(outer, true))
+    assert(not has(outer, false))
+}
+
+fn TestMapFloatMapIntFloat() {
+    let mut outer = make(map[float]map[int]float)
+    let mut row = make(map[int]float)
+    row[1] = 1.5
+    outer[2.5] = row
+    assert(outer[2.5][1] > 1.4)
+    assert(outer[2.5][1] < 1.6)
+}
+
+fn TestMapNestedHelpers() {
+    let mut outer = make(map[string]map[string]int)
+    let mut a = make(map[string]int)
+    a["x"] = 1
+    a["y"] = 2
+    let mut b = make(map[string]int)
+    b["z"] = 3
+    outer["a"] = a
+    outer["b"] = b
+    let ks = maps_keys(outer)
+    assert_eq(len(ks), 2)
+    let vs = maps_values(outer)
+    assert_eq(len(vs), 2)
+    let c = maps_clone(outer)
+    assert_eq(maps_equal(outer, c), 1)
+    // shallow: same inner pointers after clone
+    assert_eq(c["a"]["x"], 1)
+    maps_clear(c)
+    assert_eq(len(c), 0)
+    maps_copy(c, outer)
+    assert_eq(len(c), 2)
+    assert_eq(c["b"]["z"], 3)
+}
+
+fn TestMapNestedRange() {
+    let mut outer = make(map[string]map[string]int)
+    let mut a = make(map[string]int)
+    a["x"] = 1
+    a["y"] = 2
+    let mut b = make(map[string]int)
+    b["z"] = 3
+    outer["a"] = a
+    outer["b"] = b
+    let mut sum = 0
+    for _, row in range outer {
+        for _, v in range row {
+            sum = sum + v
+        }
+    }
+    assert_eq(sum, 6)
+}
+
+fn TestMapStructKeyNested() {
+    let mut outer = make(map[Point]map[string]int)
+    let p = Point { x: 1, y: 2 }
+    let mut row = make(map[string]int)
+    row["n"] = 42
+    outer[p] = row
+    assert_eq(outer[p]["n"], 42)
+    assert(has(outer, p))
+    assert(not has(outer, Point { x: 0, y: 0 }))
+}
+
+fn TestMapEnumKeyNested() {
+    let mut outer = make(map[Color]map[int]int)
+    let mut row = make(map[int]int)
+    row[1] = 7
+    outer[Red] = row
+    assert_eq(outer[Red][1], 7)
+    assert(has(outer, Red))
+    assert(not has(outer, Blue))
+}
+
+fn TestMapNestedStructVal() {
+    let mut outer = make(map[string]map[int]Point)
+    let mut row = make(map[int]Point)
+    row[0] = Point { x: 3, y: 4 }
+    outer["pts"] = row
+    assert_eq(outer["pts"][0].x, 3)
+    assert_eq(outer["pts"][0].y, 4)
+}
+
+fn TestMapNestedCommaOk() {
+    let mut outer = make(map[string]map[string]int)
+    let mut a = make(map[string]int)
+    a["k"] = 5
+    outer["a"] = a
+    let v, ok = outer["a"]
+    assert(ok)
+    assert_eq(v["k"], 5)
+    let _, miss = outer["nope"]
+    assert(not miss)
+}

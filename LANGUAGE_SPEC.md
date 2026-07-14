@@ -279,7 +279,9 @@ a length, and a capacity.
 []byte         // slice of bytes
 []string       // slice of strings
 []float        // slice of floats
+[]bool         // slice of bools
 []Point        // slice of struct Point
+[][]int        // nested slices (any supported element type)
 ```
 
 Slice literals use bracket syntax:
@@ -289,6 +291,8 @@ let s = [1, 2, 3]                // []int
 let a: []int64 = [10, 20, 30]    // []int64
 let b: []byte = [72, 105]        // []byte
 let names: []string = ["a", "b"] // []string
+let flags = [true, false]        // []bool
+let grid: [][]int = [[1, 2], [3]] // nested
 ```
 
 Pre-sized allocation uses `make`:
@@ -296,6 +300,8 @@ Pre-sized allocation uses `make`:
 ```mko
 let s = make([]int, 3, 8)    // len=3, cap=8
 let z = make([]byte, 2)      // len=2, cap=2
+let f = make([]bool, 0, 8)   // empty bool slice with capacity
+let rows = make([][]int, 0, 4) // nested outer slice
 ```
 
 Slice operations:
@@ -317,9 +323,14 @@ Out-of-bounds access aborts at runtime.
 #### Maps: `map[K]V`
 
 Hash maps with open addressing. Supported key types: `string`, `int`,
-**`float`**, and **named structs** (including pack-qualified types such as
-`eng.Table`). Supported value types: `int`, `string`, `float`, and **named
-structs** — any key×value combination, including **`map[Struct]Struct`**.
+**`float`**, **`bool`**, **named structs**, and **named enums** (including
+pack-qualified types). Supported value types: the same set **plus slices**
+`[]T` (e.g. `map[string][]int`, `map[Point][]int`) **or nested maps**
+`map[K2]V` (depth 2 only) — any key×value combination of those (including
+`map[Struct]Struct`, `map[Enum]V`, `map[K]Enum`, `map[Struct|Enum][]T`,
+`map[string]map[string]int`, set-style `map[K]bool`, and `map[bool]V`).
+Nested-map values are pointers: a missing outer key yields a nil map
+(`len` is 0); `maps_clone` / `maps_equal` are shallow.
 
 Float keys: `+0.0` and `-0.0` are the same key; all NaN values share one key.
 Struct keys use field-wise equality and a stable hash over fields (string
@@ -340,6 +351,14 @@ let mut by_pt = make(map[Point]int)    // struct keys
 let mut by_pt_s = make(map[Point]string)
 let mut by_pt_f = make(map[Point]float)
 let mut by_ss = make(map[Point]Label)  // struct key + struct value
+let mut seen = make(map[string]bool)   // set-style
+let mut by_b = make(map[bool]int)      // bool keys
+let mut by_e = make(map[Color]int)     // enum keys
+let mut statuses = make(map[int]Color) // enum values
+let mut groups = make(map[string][]int) // slice values
+let mut by_pt_rows = make(map[Point][]int) // named key + slice value
+let mut by_e_rows = make(map[Color][]string)
+let mut nested = make(map[string]map[string]int) // nested maps (depth 2)
 let mut pack_m = make(map[int]eng.Table) // after pull
 let mut pack_f = make(map[float]eng.Table)
 let mut pack_k = make(map[eng.Table]int) // pack type as key
@@ -2573,7 +2592,7 @@ The following features are planned but not yet part of the specification:
 - Full PCRE-compatible regular expressions
 - WASI preview 2 / component model
 - Optional garbage collector (never weakens ownership in systems crates)
-- Generic `[]T` for arbitrary struct types (full monomorphization)
+- Deeper nesting beyond `[][]T` / more composite monomorphization as needed
 
 ---
 

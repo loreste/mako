@@ -112,10 +112,12 @@ No implicit mixing: int + int64 is a type error. Convert explicitly.
 -------------------
 
   []T                 Slice (dynamic array): []int, []string, []byte, []float, []Point
-  map[K]V             Hash map. Keys: int|string|float|Struct. Values: int|string|float|Struct
-                      (any combo incl. map[Struct]Struct). Pack: map[int]eng.Table,
-                      map[eng.Table]int, map[eng.Table]Point. Float keys: +0/-0 unify;
-                      all NaNs share one key. Struct keys: field-wise eq + stable field hash.
+  map[K]V             Hash map. Keys: int|string|float|bool|Struct|Enum.
+                      Values: same, []T (map[string][]int, …), or nested
+                      map[K2]V (depth 2; map[string]map[string]int, …).
+                      Struct/enum keys hash field-wise / tag+payload.
+  []bool / []Enum     Bool and enum slices (make/append/index)
+  [][]T               Nested slices (headers of inner slices; monomorphized)
   chan[T]             Typed channel: int family, bool, float, string, named struct
                       make(chan[T], n) and chan_open[T](n) accept the same T set
   Option[T]           Some(value) or None

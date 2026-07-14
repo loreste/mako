@@ -28,6 +28,29 @@
   field-wise `mako_eq_T` / `mako_hash_T`.
 - **`map[Struct]Struct`** — monomorphized `MakoMapK_Key_vVal*` (second pass after
   all `[]T` helpers); pack types work as key and/or value.
+- **`map[K]bool` + `[]bool`** — set-style maps (`MakoMapIB*` / `SB*` / `FB*` /
+  `MakoMapK_T_b*`) and bool slices (`MakoBoolArray`): make, append, index, slice,
+  range, `maps_*`.
+- **`map[bool]V`** — bool keys for int/string/float/bool/Struct values
+  (`MakoMapBI*` / `BS*` / `BF*` / `BB*` / `MakoMapB_T*`).
+- **Enum maps + `[]Enum`** — `map[K]Enum`, `map[Enum]V`, `map[Enum]Enum`,
+  `map[Struct]Enum`, `map[Enum]Struct`, and `[]Enum` with make/append/index.
+  Enum keys use `mako_hash_MakoEnum_*` / field-wise eq; unit variants fully
+  zero payload slots.
+- **Nested slices `[][]T`** — monomorphized outer arrays of slice headers
+  (`MakoArr_arr_int` / `arr_string` / … / `arr_Struct`): literals, make,
+  append, index, range, sub-slice.
+- **`map[K][]T`** — maps with slice values (`MakoMapI_arr_int*`, …) for scalar
+  keys × int/string/float/bool/byte/Struct/Enum slices; full get/set/`maps_*`.
+- **`map[Struct|Enum][]T`** — named keys with slice values (`MakoMapK_Point_arr_int*`,
+  …): same surface as scalar-key slice maps (get/set/len/has/delete, comma-ok,
+  range, `maps_*`). Values may be `[]int|[]string|[]float|[]bool|[]byte|[]Struct|[]Enum`.
+- **Nested maps `map[K]map[K2]V`** — depth-2 only (inner value must not be a map).
+  Outer keys: int|string|float|bool|Struct|Enum; inner maps any previously supported
+  leaf map. Values are map pointers (missing → nil); `maps_clone` / `maps_equal` are
+  shallow (pointer identity). Tests: `map_nested_test`.
+- **`len` on nil SI/II/SS maps** — `mako_map_{si,ii,ss}_len` treat NULL as 0 (matches
+  other map kinds and nested-map zero values).
 - **`make(chan[T], n)`** — same element set as `chan_open[T](n)`: int family,
   string, float, bool, **named structs** (incl. pack types).
 - **`maps_*` overloads** — `maps_keys` / `values` / `clear` / `clone` / `equal` /

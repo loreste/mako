@@ -1,0 +1,86 @@
+// Nested slices: [][]T for int/string/float/bool and named types.
+
+struct Point {
+    x: int
+    y: int
+}
+
+fn TestNestedIntLit() {
+    let s: [][]int = [[1, 2], [3]]
+    assert_eq(len(s), 2)
+    assert_eq(len(s[0]), 2)
+    assert_eq(s[0][0], 1)
+    assert_eq(s[0][1], 2)
+    assert_eq(s[1][0], 3)
+}
+
+fn TestNestedIntMakeAppend() {
+    let mut rows = make([][]int, 0, 4)
+    rows = append(rows, [10, 20, 30])
+    rows = append(rows, [1, 2])
+    assert_eq(len(rows), 2)
+    assert_eq(len(rows[0]), 3)
+    assert_eq(rows[0][1], 20)
+    assert_eq(rows[1][0], 1)
+    // update inner element
+    let mut row0 = rows[0]
+    row0[0] = 99
+    rows[0] = row0
+    assert_eq(rows[0][0], 99)
+}
+
+fn TestNestedIntRange() {
+    let s: [][]int = [[1, 2], [3, 4]]
+    let mut sum = 0
+    for _, row in range s {
+        for _, v in range row {
+            sum = sum + v
+        }
+    }
+    assert_eq(sum, 10)
+}
+
+fn TestNestedString() {
+    let s: [][]string = [["a", "b"], ["c"]]
+    assert_eq(len(s), 2)
+    assert_eq_str(s[0][1], "b")
+    assert_eq_str(s[1][0], "c")
+    let mut m = make([][]string, 0, 2)
+    m = append(m, ["x", "y"])
+    assert_eq_str(m[0][0], "x")
+}
+
+fn TestNestedFloat() {
+    let s: [][]float = [[1.5, 2.5], [3.0]]
+    assert_eq(len(s), 2)
+    assert(s[0][0] > 1.4)
+    assert(s[0][0] < 1.6)
+}
+
+fn TestNestedBool() {
+    let s: [][]bool = [[true, false], [true]]
+    assert(s[0][0])
+    assert(not s[0][1])
+    assert(s[1][0])
+}
+
+fn TestNestedStruct() {
+    let s: [][]Point = [
+        [Point { x: 1, y: 2 }, Point { x: 3, y: 4 }],
+        [Point { x: 5, y: 6 }]
+    ]
+    assert_eq(len(s), 2)
+    assert_eq(s[0][0].x, 1)
+    assert_eq(s[0][1].y, 4)
+    assert_eq(s[1][0].x, 5)
+    let mut m = make([][]Point, 0, 2)
+    m = append(m, [Point { x: 7, y: 8 }])
+    assert_eq(m[0][0].y, 8)
+}
+
+fn TestNestedSubslice() {
+    let s: [][]int = [[1, 2, 3], [4, 5], [6]]
+    let t = s[0:2]
+    assert_eq(len(t), 2)
+    assert_eq(t[1][0], 4)
+}

@@ -407,6 +407,9 @@ let names = make([]string, 0, 4)
 names = append(names, "mako")
 let fs = make([]float, 2)          // examples/float_slice.mko
 // also: let xs: []string = ["a", "b"]  · examples/str_slice.mko
+let grid: [][]int = [[1, 2], [3]]  // nested
+let rows = make([][]int, 0, 4)
+rows = append(rows, [10, 20])
 ```
 
 | Syntax | Meaning |
@@ -414,17 +417,16 @@ let fs = make([]float, 2)          // examples/float_slice.mko
 | `[…]` / `let b: []byte = […]` | Slice literal (`[]int` / `[]byte`) |
 | `let xs: []string = ["a", "b"]` or `["a","b"]` | String slice |
 | `let xs: []float = [1.0, 2.0]` / `make([]float, n[, cap])` | Float slice |
+| `let g: [][]T = [[…], …]` / `make([][]T, …)` | Nested slices |
 | `[]byte(s)` or `bytes(s)` / `string(b)` | String ↔ bytes conversion |
-| `make([]int\|[]byte\|[]string\|[]float, …)` | Pre-sized allocation |
+| `make([]int\|[]byte\|[]string\|[]float\|[][]T, …)` | Pre-sized allocation |
 | `s[i:j]`, `len`/`cap`/`append`/`copy` | Slice operations |
 
 Compile-time: `int8(200)` / `byte(300)` rejected at `mako check` when the arg is a constant
 (`examples/bad/int8_literal_oor.mko`, `byte_literal_oor.mko`). Runtime still aborts for non-const OOR.
 
 `append` / `copy` are type-safe. Tests: `slice_test`, `slice64_test`, `bytes_test`,
-`make_bytes_test`, `str_slice_test`, `float_slice_test`.
-
-**Target / later:** generic `[]T` for structs; fuller monomorphization.
+`make_bytes_test`, `str_slice_test`, `float_slice_test`, `nested_slice_test`.
 
 ---
 
@@ -559,10 +561,12 @@ print_int(builder_len(b))
 
 ## 4c. Maps
 
-Hash maps (open addressing). **Keys:** `int`, `string`, `float`, or **named
-structs**. **Values:** `int`, `string`, `float`, or **named structs** — any
-combo, including `map[Point]Label`. Pack types work as keys or values:
-`map[int]eng.Table`, `map[eng.Table]int`, `map[eng.Table]Point`.
+Hash maps (open addressing). **Keys:** `int`, `string`, `float`, **`bool`**,
+**structs**, or **enums**. **Values:** same set **or slices** `[]T` — any combo,
+including `map[Point]Label`, `map[Color]int`, `map[string][]int`,
+`map[Point][]int` / `map[Color][]string`, nested `map[string]map[string]int`
+(depth 2), set-style `map[string]bool`, and `map[bool]int`. Pack types work as
+keys or values.
 
 Float keys: `+0.0` / `-0.0` are the same key; all NaNs share one key.
 Struct keys: field-wise equality + stable field hash (strings by content).
@@ -608,6 +612,26 @@ let mut by_pt = make(map[Point]int)
 by_pt[Point { x: 1, y: 2 }] = 10
 let mut by_ss = make(map[Point]Label)
 by_ss[Point { x: 0, y: 0 }] = Label { text: "origin", id: 0 }
+let mut seen = make(map[string]bool)
+seen["a"] = true
+let mut by_b = make(map[bool]int)
+by_b[true] = 1
+enum Color { Red, Green }
+let mut by_e = make(map[Color]int)
+by_e[Red] = 1
+let mut statuses = make(map[int]Color)
+statuses[1] = Green
+let mut groups = make(map[string][]int)
+groups["a"] = [1, 2, 3]
+let mut by_pt_rows = make(map[Point][]int)
+by_pt_rows[Point { x: 1, y: 2 }] = [10, 20]
+let mut by_e_rows = make(map[Color][]string)
+by_e_rows[Red] = ["hot"]
+let mut nested = make(map[string]map[string]int)
+let mut row = make(map[string]int)
+row["x"] = 1
+nested["a"] = row
+print_int(nested["a"]["x"]) // 1
 
 // Helpers (all map kinds):
 let ks = maps_keys(m)
@@ -631,7 +655,9 @@ maps_clear(c)
 | `maps_clone` / `maps_equal` / `maps_copy` / `maps_clear` | bulk helpers |
 
 Wrong key/value combo rejected at check (`examples/bad/map_key_type.mko`).
-Tests: `map_test`, `map_struct_test`, `map_float_test`, `map_struct_key_test`.
+Tests: `map_test`, `map_struct_test`, `map_float_test`, `map_struct_key_test`,
+`map_bool_test`, `map_enum_test`, `map_slice_test` (`map[K][]T` incl. named keys),
+`map_nested_test` (`map[K]map[K2]V`).
 
 ---
 

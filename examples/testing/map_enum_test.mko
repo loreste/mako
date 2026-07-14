@@ -1,0 +1,200 @@
+// map[K]Enum and map[Enum]V (+ []Enum)
+
+enum Color {
+    Red
+    Green
+    Blue(int)
+}
+
+struct Point {
+    x: int
+    y: int
+}
+
+fn TestMapIntEnum() {
+    let mut m = make(map[int]Color)
+    m[1] = Red
+    m[2] = Green
+    m[3] = Blue(7)
+    match m[1] {
+        Red => assert(true),
+        _ => assert(false),
+    }
+    match m[3] {
+        Blue(n) => assert_eq(n, 7),
+        _ => assert(false),
+    }
+    assert(has(m, 1))
+    assert(not has(m, 99))
+    assert_eq(len(m), 3)
+    let c, ok = m[2]
+    assert(ok)
+    match c {
+        Green => assert(true),
+        _ => assert(false),
+    }
+    delete(m, 1)
+    assert(not has(m, 1))
+}
+
+fn TestMapStringEnum() {
+    let mut m = make(map[string]Color)
+    m["r"] = Red
+    m["b"] = Blue(3)
+    match m["r"] {
+        Red => assert(true),
+        _ => assert(false),
+    }
+    assert(has(m, "b"))
+}
+
+fn TestMapBoolEnum() {
+    let mut m = make(map[bool]Color)
+    m[true] = Green
+    m[false] = Red
+    match m[true] {
+        Green => assert(true),
+        _ => assert(false),
+    }
+}
+
+fn TestMapEnumKeyInt() {
+    let mut m = make(map[Color]int)
+    m[Red] = 1
+    m[Green] = 2
+    m[Blue(1)] = 10
+    m[Blue(2)] = 20
+    assert_eq(m[Red], 1)
+    assert_eq(m[Green], 2)
+    assert_eq(m[Blue(1)], 10)
+    assert_eq(m[Blue(2)], 20)
+    assert(has(m, Red))
+    assert(not has(m, Blue(99)))
+    assert_eq(len(m), 4)
+    // update
+    m[Red] = 5
+    assert_eq(m[Red], 5)
+    assert_eq(len(m), 4)
+    delete(m, Green)
+    assert(not has(m, Green))
+}
+
+fn TestMapEnumKeyString() {
+    let mut m = make(map[Color]string)
+    m[Red] = "r"
+    m[Blue(0)] = "b0"
+    assert_eq_str(m[Red], "r")
+    assert_eq_str(m[Blue(0)], "b0")
+}
+
+fn TestMapEnumKeyBool() {
+    let mut m = make(map[Color]bool)
+    m[Red] = true
+    m[Green] = false
+    assert(m[Red])
+    assert(not m[Green])
+}
+
+fn TestMapEnumEnum() {
+    let mut m = make(map[Color]Color)
+    m[Red] = Green
+    m[Blue(1)] = Blue(2)
+    match m[Red] {
+        Green => assert(true),
+        _ => assert(false),
+    }
+    match m[Blue(1)] {
+        Blue(n) => assert_eq(n, 2),
+        _ => assert(false),
+    }
+}
+
+fn TestMapEnumStruct() {
+    let mut m = make(map[Color]Point)
+    m[Red] = Point { x: 1, y: 2 }
+    assert_eq(m[Red].x, 1)
+    assert_eq(m[Red].y, 2)
+}
+
+fn TestMapStructEnum() {
+    let mut m = make(map[Point]Color)
+    m[Point { x: 0, y: 0 }] = Red
+    m[Point { x: 1, y: 1 }] = Blue(5)
+    match m[Point { x: 0, y: 0 }] {
+        Red => assert(true),
+        _ => assert(false),
+    }
+    match m[Point { x: 1, y: 1 }] {
+        Blue(n) => assert_eq(n, 5),
+        _ => assert(false),
+    }
+}
+
+fn TestMapEnumHelpers() {
+    let mut m = make(map[int]Color)
+    m[1] = Red
+    m[2] = Green
+    let ks = maps_keys(m)
+    assert_eq(len(ks), 2)
+    let vs = maps_values(m)
+    assert_eq(len(vs), 2)
+    let c = maps_clone(m)
+    assert_eq(maps_equal(m, c), 1)
+    maps_clear(c)
+    assert_eq(len(c), 0)
+    maps_copy(c, m)
+    assert_eq(len(c), 2)
+}
+
+fn TestMapEnumKeyHelpers() {
+    let mut m = make(map[Color]int)
+    m[Red] = 1
+    m[Green] = 2
+    let ks = maps_keys(m)
+    assert_eq(len(ks), 2)
+    let vs = maps_values(m)
+    assert_eq(len(vs), 2)
+    let mut sum = 0
+    for _, v in range vs {
+        sum = sum + v
+    }
+    assert_eq(sum, 3)
+    let c = maps_clone(m)
+    assert_eq(maps_equal(m, c), 1)
+}
+
+fn TestMapEnumRange() {
+    let mut m = make(map[Color]int)
+    m[Red] = 1
+    m[Green] = 2
+    let mut sum = 0
+    for k, v in range m {
+        match k {
+            Red => {
+                sum = sum + v * 10
+            }
+            Green => {
+                sum = sum + v
+            }
+            Blue(_) => {
+                sum = sum + 0
+            }
+        }
+    }
+    assert_eq(sum, 12)
+}
+
+fn TestEnumSlice() {
+    let mut s = make([]Color, 0, 4)
+    s = append(s, Red)
+    s = append(s, Blue(3))
+    assert_eq(len(s), 2)
+    match s[0] {
+        Red => assert(true),
+        _ => assert(false),
+    }
+    match s[1] {
+        Blue(n) => assert_eq(n, 3),
+        _ => assert(false),
+    }
+}

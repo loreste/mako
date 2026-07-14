@@ -666,6 +666,436 @@ static inline int64_t mako_float_array_copy(MakoFloatArray dst, MakoFloatArray s
     return (int64_t)n;
 }
 
+
+/* ---- Go-like []bool ---- */
+typedef struct {
+    bool *data;
+    size_t len;
+    size_t cap;
+} MakoBoolArray;
+
+static inline MakoBoolArray mako_bool_array_new(size_t n) {
+    MakoBoolArray a;
+    a.data = (bool *)calloc(n ? n : 1, sizeof(bool));
+    a.len = n;
+    a.cap = n ? n : 1;
+    return a;
+}
+
+static inline MakoBoolArray mako_bool_array_of(const bool *vals, size_t n) {
+    MakoBoolArray a = mako_bool_array_new(n);
+    if (n) memcpy(a.data, vals, n * sizeof(bool));
+    return a;
+}
+
+static inline MakoBoolArray mako_bool_array_make(int64_t len, int64_t cap) {
+    if (len < 0) len = 0;
+    if (cap < len) cap = len;
+    MakoBoolArray a;
+    a.data = (bool *)calloc((size_t)(cap ? cap : 1), sizeof(bool));
+    a.len = (size_t)len;
+    a.cap = (size_t)(cap ? cap : 1);
+    return a;
+}
+
+static inline int64_t mako_bool_array_len(MakoBoolArray a) { return (int64_t)a.len; }
+static inline int64_t mako_bool_array_cap(MakoBoolArray a) { return (int64_t)a.cap; }
+
+static inline bool mako_bool_array_get(MakoBoolArray a, int64_t i) {
+    if (i < 0 || (size_t)i >= a.len) mako_abort("bool slice index out of bounds");
+    return a.data[i];
+}
+
+static inline void mako_bool_array_set(MakoBoolArray a, int64_t i, bool v) {
+    if (i < 0 || (size_t)i >= a.len) mako_abort("bool slice index out of bounds");
+    a.data[i] = v;
+}
+
+static inline MakoBoolArray mako_bool_array_append(MakoBoolArray s, bool v) {
+    if (s.len + 1 > s.cap) {
+        size_t ncap = s.cap ? s.cap * 2 : 1;
+        if (ncap < s.len + 1) ncap = s.len + 1;
+        bool *nd = (bool *)malloc(ncap * sizeof(bool));
+        if (!nd) mako_abort("append: out of memory");
+        if (s.len) memcpy(nd, s.data, s.len * sizeof(bool));
+        s.data = nd;
+        s.cap = ncap;
+    }
+    s.data[s.len++] = v;
+    return s;
+}
+
+static inline MakoBoolArray mako_bool_array_slice_expr(
+    MakoBoolArray s, int64_t low, int64_t high, int64_t max, int has_max
+) {
+    int64_t len = (int64_t)s.len;
+    int64_t cap = (int64_t)s.cap;
+    if (low < 0) low = 0;
+    if (high < 0) high = 0;
+    if (low > len) low = len;
+    if (high > len) high = len;
+    if (high < low) high = low;
+    MakoBoolArray out;
+    out.data = s.data + (size_t)low;
+    out.len = (size_t)(high - low);
+    if (has_max) {
+        if (max < high) max = high;
+        if (max > cap) max = cap;
+        if (max < low) max = low;
+        out.cap = (size_t)(max - low);
+    } else {
+        out.cap = (size_t)(cap - low);
+    }
+    return out;
+}
+
+static inline int64_t mako_bool_array_copy(MakoBoolArray dst, MakoBoolArray src) {
+    size_t n = dst.len < src.len ? dst.len : src.len;
+    if (n) memmove(dst.data, src.data, n * sizeof(bool));
+    return (int64_t)n;
+}
+
+/* [](MakoIntArray) — nested slice */
+typedef struct {
+    MakoIntArray *data;
+    size_t len;
+    size_t cap;
+} MakoArr_arr_int;
+static inline MakoArr_arr_int mako_arr_arr_int_make(int64_t len, int64_t cap) {
+    if (len < 0) len = 0;
+    if (cap < len) cap = len;
+    MakoArr_arr_int a;
+    a.data = (MakoIntArray *)calloc((size_t)(cap ? cap : 1), sizeof(MakoIntArray));
+    a.len = (size_t)len;
+    a.cap = (size_t)(cap ? cap : 1);
+    return a;
+}
+static inline int64_t mako_arr_arr_int_len(MakoArr_arr_int a) { return (int64_t)a.len; }
+static inline int64_t mako_arr_arr_int_cap(MakoArr_arr_int a) { return (int64_t)a.cap; }
+static inline MakoIntArray mako_arr_arr_int_get(MakoArr_arr_int a, int64_t i) {
+    if (i < 0 || (size_t)i >= a.len) mako_abort("nested slice index out of bounds");
+    return a.data[i];
+}
+static inline void mako_arr_arr_int_set(MakoArr_arr_int a, int64_t i, MakoIntArray v) {
+    if (i < 0 || (size_t)i >= a.len) mako_abort("nested slice index out of bounds");
+    a.data[i] = v;
+}
+static inline MakoArr_arr_int mako_arr_arr_int_append(MakoArr_arr_int s, MakoIntArray v) {
+    if (s.len + 1 > s.cap) {
+        size_t ncap = s.cap ? s.cap * 2 : 1;
+        if (ncap < s.len + 1) ncap = s.len + 1;
+        MakoIntArray *nd = (MakoIntArray *)realloc(s.data, ncap * sizeof(MakoIntArray));
+        if (!nd) mako_abort("append: out of memory");
+        s.data = nd; s.cap = ncap;
+    }
+    s.data[s.len++] = v;
+    return s;
+}
+static inline MakoArr_arr_int mako_arr_arr_int_of(const MakoIntArray *vals, size_t n) {
+    MakoArr_arr_int a = mako_arr_arr_int_make((int64_t)n, (int64_t)n);
+    if (n) memcpy(a.data, vals, n * sizeof(MakoIntArray));
+    return a;
+}
+static inline MakoArr_arr_int mako_arr_arr_int_slice_expr(MakoArr_arr_int s, int64_t low, int64_t high, int64_t max, int has_max) {
+    int64_t len = (int64_t)s.len;
+    int64_t cap = (int64_t)s.cap;
+    if (low < 0) low = 0;
+    if (high < 0) high = 0;
+    if (low > len) low = len;
+    if (high > len) high = len;
+    if (high < low) high = low;
+    MakoArr_arr_int out;
+    out.data = s.data + (size_t)low;
+    out.len = (size_t)(high - low);
+    if (has_max) {
+        if (max < high) max = high;
+        if (max > cap) max = cap;
+        if (max < low) max = low;
+        out.cap = (size_t)(max - low);
+    } else {
+        out.cap = (size_t)(cap - low);
+    }
+    return out;
+}
+static inline int64_t mako_arr_arr_int_copy(MakoArr_arr_int dst, MakoArr_arr_int src) {
+    size_t n = dst.len < src.len ? dst.len : src.len;
+    if (n) memmove(dst.data, src.data, n * sizeof(MakoIntArray));
+    return (int64_t)n;
+}
+
+/* [](MakoStrArray) — nested slice */
+typedef struct {
+    MakoStrArray *data;
+    size_t len;
+    size_t cap;
+} MakoArr_arr_string;
+static inline MakoArr_arr_string mako_arr_arr_string_make(int64_t len, int64_t cap) {
+    if (len < 0) len = 0;
+    if (cap < len) cap = len;
+    MakoArr_arr_string a;
+    a.data = (MakoStrArray *)calloc((size_t)(cap ? cap : 1), sizeof(MakoStrArray));
+    a.len = (size_t)len;
+    a.cap = (size_t)(cap ? cap : 1);
+    return a;
+}
+static inline int64_t mako_arr_arr_string_len(MakoArr_arr_string a) { return (int64_t)a.len; }
+static inline int64_t mako_arr_arr_string_cap(MakoArr_arr_string a) { return (int64_t)a.cap; }
+static inline MakoStrArray mako_arr_arr_string_get(MakoArr_arr_string a, int64_t i) {
+    if (i < 0 || (size_t)i >= a.len) mako_abort("nested slice index out of bounds");
+    return a.data[i];
+}
+static inline void mako_arr_arr_string_set(MakoArr_arr_string a, int64_t i, MakoStrArray v) {
+    if (i < 0 || (size_t)i >= a.len) mako_abort("nested slice index out of bounds");
+    a.data[i] = v;
+}
+static inline MakoArr_arr_string mako_arr_arr_string_append(MakoArr_arr_string s, MakoStrArray v) {
+    if (s.len + 1 > s.cap) {
+        size_t ncap = s.cap ? s.cap * 2 : 1;
+        if (ncap < s.len + 1) ncap = s.len + 1;
+        MakoStrArray *nd = (MakoStrArray *)realloc(s.data, ncap * sizeof(MakoStrArray));
+        if (!nd) mako_abort("append: out of memory");
+        s.data = nd; s.cap = ncap;
+    }
+    s.data[s.len++] = v;
+    return s;
+}
+static inline MakoArr_arr_string mako_arr_arr_string_of(const MakoStrArray *vals, size_t n) {
+    MakoArr_arr_string a = mako_arr_arr_string_make((int64_t)n, (int64_t)n);
+    if (n) memcpy(a.data, vals, n * sizeof(MakoStrArray));
+    return a;
+}
+static inline MakoArr_arr_string mako_arr_arr_string_slice_expr(MakoArr_arr_string s, int64_t low, int64_t high, int64_t max, int has_max) {
+    int64_t len = (int64_t)s.len;
+    int64_t cap = (int64_t)s.cap;
+    if (low < 0) low = 0;
+    if (high < 0) high = 0;
+    if (low > len) low = len;
+    if (high > len) high = len;
+    if (high < low) high = low;
+    MakoArr_arr_string out;
+    out.data = s.data + (size_t)low;
+    out.len = (size_t)(high - low);
+    if (has_max) {
+        if (max < high) max = high;
+        if (max > cap) max = cap;
+        if (max < low) max = low;
+        out.cap = (size_t)(max - low);
+    } else {
+        out.cap = (size_t)(cap - low);
+    }
+    return out;
+}
+static inline int64_t mako_arr_arr_string_copy(MakoArr_arr_string dst, MakoArr_arr_string src) {
+    size_t n = dst.len < src.len ? dst.len : src.len;
+    if (n) memmove(dst.data, src.data, n * sizeof(MakoStrArray));
+    return (int64_t)n;
+}
+
+/* [](MakoFloatArray) — nested slice */
+typedef struct {
+    MakoFloatArray *data;
+    size_t len;
+    size_t cap;
+} MakoArr_arr_float;
+static inline MakoArr_arr_float mako_arr_arr_float_make(int64_t len, int64_t cap) {
+    if (len < 0) len = 0;
+    if (cap < len) cap = len;
+    MakoArr_arr_float a;
+    a.data = (MakoFloatArray *)calloc((size_t)(cap ? cap : 1), sizeof(MakoFloatArray));
+    a.len = (size_t)len;
+    a.cap = (size_t)(cap ? cap : 1);
+    return a;
+}
+static inline int64_t mako_arr_arr_float_len(MakoArr_arr_float a) { return (int64_t)a.len; }
+static inline int64_t mako_arr_arr_float_cap(MakoArr_arr_float a) { return (int64_t)a.cap; }
+static inline MakoFloatArray mako_arr_arr_float_get(MakoArr_arr_float a, int64_t i) {
+    if (i < 0 || (size_t)i >= a.len) mako_abort("nested slice index out of bounds");
+    return a.data[i];
+}
+static inline void mako_arr_arr_float_set(MakoArr_arr_float a, int64_t i, MakoFloatArray v) {
+    if (i < 0 || (size_t)i >= a.len) mako_abort("nested slice index out of bounds");
+    a.data[i] = v;
+}
+static inline MakoArr_arr_float mako_arr_arr_float_append(MakoArr_arr_float s, MakoFloatArray v) {
+    if (s.len + 1 > s.cap) {
+        size_t ncap = s.cap ? s.cap * 2 : 1;
+        if (ncap < s.len + 1) ncap = s.len + 1;
+        MakoFloatArray *nd = (MakoFloatArray *)realloc(s.data, ncap * sizeof(MakoFloatArray));
+        if (!nd) mako_abort("append: out of memory");
+        s.data = nd; s.cap = ncap;
+    }
+    s.data[s.len++] = v;
+    return s;
+}
+static inline MakoArr_arr_float mako_arr_arr_float_of(const MakoFloatArray *vals, size_t n) {
+    MakoArr_arr_float a = mako_arr_arr_float_make((int64_t)n, (int64_t)n);
+    if (n) memcpy(a.data, vals, n * sizeof(MakoFloatArray));
+    return a;
+}
+static inline MakoArr_arr_float mako_arr_arr_float_slice_expr(MakoArr_arr_float s, int64_t low, int64_t high, int64_t max, int has_max) {
+    int64_t len = (int64_t)s.len;
+    int64_t cap = (int64_t)s.cap;
+    if (low < 0) low = 0;
+    if (high < 0) high = 0;
+    if (low > len) low = len;
+    if (high > len) high = len;
+    if (high < low) high = low;
+    MakoArr_arr_float out;
+    out.data = s.data + (size_t)low;
+    out.len = (size_t)(high - low);
+    if (has_max) {
+        if (max < high) max = high;
+        if (max > cap) max = cap;
+        if (max < low) max = low;
+        out.cap = (size_t)(max - low);
+    } else {
+        out.cap = (size_t)(cap - low);
+    }
+    return out;
+}
+static inline int64_t mako_arr_arr_float_copy(MakoArr_arr_float dst, MakoArr_arr_float src) {
+    size_t n = dst.len < src.len ? dst.len : src.len;
+    if (n) memmove(dst.data, src.data, n * sizeof(MakoFloatArray));
+    return (int64_t)n;
+}
+
+/* [](MakoBoolArray) — nested slice */
+typedef struct {
+    MakoBoolArray *data;
+    size_t len;
+    size_t cap;
+} MakoArr_arr_bool;
+static inline MakoArr_arr_bool mako_arr_arr_bool_make(int64_t len, int64_t cap) {
+    if (len < 0) len = 0;
+    if (cap < len) cap = len;
+    MakoArr_arr_bool a;
+    a.data = (MakoBoolArray *)calloc((size_t)(cap ? cap : 1), sizeof(MakoBoolArray));
+    a.len = (size_t)len;
+    a.cap = (size_t)(cap ? cap : 1);
+    return a;
+}
+static inline int64_t mako_arr_arr_bool_len(MakoArr_arr_bool a) { return (int64_t)a.len; }
+static inline int64_t mako_arr_arr_bool_cap(MakoArr_arr_bool a) { return (int64_t)a.cap; }
+static inline MakoBoolArray mako_arr_arr_bool_get(MakoArr_arr_bool a, int64_t i) {
+    if (i < 0 || (size_t)i >= a.len) mako_abort("nested slice index out of bounds");
+    return a.data[i];
+}
+static inline void mako_arr_arr_bool_set(MakoArr_arr_bool a, int64_t i, MakoBoolArray v) {
+    if (i < 0 || (size_t)i >= a.len) mako_abort("nested slice index out of bounds");
+    a.data[i] = v;
+}
+static inline MakoArr_arr_bool mako_arr_arr_bool_append(MakoArr_arr_bool s, MakoBoolArray v) {
+    if (s.len + 1 > s.cap) {
+        size_t ncap = s.cap ? s.cap * 2 : 1;
+        if (ncap < s.len + 1) ncap = s.len + 1;
+        MakoBoolArray *nd = (MakoBoolArray *)realloc(s.data, ncap * sizeof(MakoBoolArray));
+        if (!nd) mako_abort("append: out of memory");
+        s.data = nd; s.cap = ncap;
+    }
+    s.data[s.len++] = v;
+    return s;
+}
+static inline MakoArr_arr_bool mako_arr_arr_bool_of(const MakoBoolArray *vals, size_t n) {
+    MakoArr_arr_bool a = mako_arr_arr_bool_make((int64_t)n, (int64_t)n);
+    if (n) memcpy(a.data, vals, n * sizeof(MakoBoolArray));
+    return a;
+}
+static inline MakoArr_arr_bool mako_arr_arr_bool_slice_expr(MakoArr_arr_bool s, int64_t low, int64_t high, int64_t max, int has_max) {
+    int64_t len = (int64_t)s.len;
+    int64_t cap = (int64_t)s.cap;
+    if (low < 0) low = 0;
+    if (high < 0) high = 0;
+    if (low > len) low = len;
+    if (high > len) high = len;
+    if (high < low) high = low;
+    MakoArr_arr_bool out;
+    out.data = s.data + (size_t)low;
+    out.len = (size_t)(high - low);
+    if (has_max) {
+        if (max < high) max = high;
+        if (max > cap) max = cap;
+        if (max < low) max = low;
+        out.cap = (size_t)(max - low);
+    } else {
+        out.cap = (size_t)(cap - low);
+    }
+    return out;
+}
+static inline int64_t mako_arr_arr_bool_copy(MakoArr_arr_bool dst, MakoArr_arr_bool src) {
+    size_t n = dst.len < src.len ? dst.len : src.len;
+    if (n) memmove(dst.data, src.data, n * sizeof(MakoBoolArray));
+    return (int64_t)n;
+}
+
+/* [](MakoByteArray) — nested slice */
+typedef struct {
+    MakoByteArray *data;
+    size_t len;
+    size_t cap;
+} MakoArr_arr_byte;
+static inline MakoArr_arr_byte mako_arr_arr_byte_make(int64_t len, int64_t cap) {
+    if (len < 0) len = 0;
+    if (cap < len) cap = len;
+    MakoArr_arr_byte a;
+    a.data = (MakoByteArray *)calloc((size_t)(cap ? cap : 1), sizeof(MakoByteArray));
+    a.len = (size_t)len;
+    a.cap = (size_t)(cap ? cap : 1);
+    return a;
+}
+static inline int64_t mako_arr_arr_byte_len(MakoArr_arr_byte a) { return (int64_t)a.len; }
+static inline int64_t mako_arr_arr_byte_cap(MakoArr_arr_byte a) { return (int64_t)a.cap; }
+static inline MakoByteArray mako_arr_arr_byte_get(MakoArr_arr_byte a, int64_t i) {
+    if (i < 0 || (size_t)i >= a.len) mako_abort("nested slice index out of bounds");
+    return a.data[i];
+}
+static inline void mako_arr_arr_byte_set(MakoArr_arr_byte a, int64_t i, MakoByteArray v) {
+    if (i < 0 || (size_t)i >= a.len) mako_abort("nested slice index out of bounds");
+    a.data[i] = v;
+}
+static inline MakoArr_arr_byte mako_arr_arr_byte_append(MakoArr_arr_byte s, MakoByteArray v) {
+    if (s.len + 1 > s.cap) {
+        size_t ncap = s.cap ? s.cap * 2 : 1;
+        if (ncap < s.len + 1) ncap = s.len + 1;
+        MakoByteArray *nd = (MakoByteArray *)realloc(s.data, ncap * sizeof(MakoByteArray));
+        if (!nd) mako_abort("append: out of memory");
+        s.data = nd; s.cap = ncap;
+    }
+    s.data[s.len++] = v;
+    return s;
+}
+static inline MakoArr_arr_byte mako_arr_arr_byte_of(const MakoByteArray *vals, size_t n) {
+    MakoArr_arr_byte a = mako_arr_arr_byte_make((int64_t)n, (int64_t)n);
+    if (n) memcpy(a.data, vals, n * sizeof(MakoByteArray));
+    return a;
+}
+static inline MakoArr_arr_byte mako_arr_arr_byte_slice_expr(MakoArr_arr_byte s, int64_t low, int64_t high, int64_t max, int has_max) {
+    int64_t len = (int64_t)s.len;
+    int64_t cap = (int64_t)s.cap;
+    if (low < 0) low = 0;
+    if (high < 0) high = 0;
+    if (low > len) low = len;
+    if (high > len) high = len;
+    if (high < low) high = low;
+    MakoArr_arr_byte out;
+    out.data = s.data + (size_t)low;
+    out.len = (size_t)(high - low);
+    if (has_max) {
+        if (max < high) max = high;
+        if (max > cap) max = cap;
+        if (max < low) max = low;
+        out.cap = (size_t)(max - low);
+    } else {
+        out.cap = (size_t)(cap - low);
+    }
+    return out;
+}
+static inline int64_t mako_arr_arr_byte_copy(MakoArr_arr_byte dst, MakoArr_arr_byte src) {
+    size_t n = dst.len < src.len ? dst.len : src.len;
+    if (n) memmove(dst.data, src.data, n * sizeof(MakoByteArray));
+    return (int64_t)n;
+}
+
+
 static inline int64_t mako_to_int8(int64_t v) {
     if (v < -128 || v > 127) mako_abort("int8 conversion out of range -128..127");
     return (int64_t)(int8_t)v;
@@ -1096,6 +1526,7 @@ typedef struct {
 
 static inline uint64_t mako_hash_bytes(const char *p, size_t n) {
     uint64_t h = 14695981039346656037ULL;
+    if (!p || n == 0) return h;
     for (size_t i = 0; i < n; i++) {
         h ^= (unsigned char)p[i];
         h *= 1099511628211ULL;
@@ -1279,7 +1710,7 @@ static inline void mako_map_si_delete(MakoMapSI *m, MakoString key) {
     }
 }
 
-static inline int64_t mako_map_si_len(MakoMapSI *m) { return (int64_t)m->len; }
+static inline int64_t mako_map_si_len(MakoMapSI *m) { return m ? (int64_t)m->len : 0; }
 
 static inline MakoMapSI *mako_map_si_make(int64_t hint) {
     MakoMapSI *m = (MakoMapSI *)malloc(sizeof(MakoMapSI));
@@ -1392,7 +1823,7 @@ static inline void mako_map_ii_delete(MakoMapII *m, int64_t key) {
     }
 }
 
-static inline int64_t mako_map_ii_len(MakoMapII *m) { return (int64_t)m->len; }
+static inline int64_t mako_map_ii_len(MakoMapII *m) { return m ? (int64_t)m->len : 0; }
 
 static inline bool mako_map_ii_has(MakoMapII *m, int64_t key) {
     uint64_t h = mako_hash_i64(key);
@@ -2045,6 +2476,825 @@ static inline MakoMapFF *mako_map_ff_make(int64_t hint) {
     return m;
 }
 
+/* map[int]bool */
+typedef struct {
+    uint8_t *state;
+    int64_t *keys;
+    bool *vals;
+    size_t cap;
+    size_t len;
+} MakoMapIB;
+
+static inline MakoMapIB mako_map_ib_new(size_t hint) {
+    size_t cap = 8;
+    size_t need = hint ? (hint * 4 / 3 + 1) : 8;
+    while (cap < need) cap *= 2;
+    MakoMapIB m;
+    m.state = (uint8_t *)calloc(cap, 1);
+    m.keys = (int64_t *)malloc(cap * sizeof(int64_t));
+    m.vals = (bool *)malloc(cap * sizeof(bool));
+    if (!m.keys || !m.vals) {
+        fprintf(stderr, "mako: OOM in map_ib_new\n");
+        abort();
+    }
+    m.cap = cap;
+    m.len = 0;
+    return m;
+}
+
+static inline void mako_map_ib_rehash(MakoMapIB *m, size_t ncap);
+
+static inline void mako_map_ib_set(MakoMapIB *m, int64_t key, bool val) {
+    if (MAKO_UNLIKELY((m->len + 1) * 4 >= m->cap * 3)) {
+        mako_map_ib_rehash(m, m->cap * 2);
+    }
+    uint64_t h = mako_hash_i64(key);
+    size_t mask = m->cap - 1;
+    size_t i = (size_t)(h & mask);
+    size_t first_tomb = (size_t)-1;
+    for (;;) {
+        uint8_t st = m->state[i];
+        if (MAKO_LIKELY(st == MAKO_MAP_EMPTY)) {
+            size_t slot = (first_tomb != (size_t)-1) ? first_tomb : i;
+            m->state[slot] = MAKO_MAP_FULL;
+            m->keys[slot] = key;
+            m->vals[slot] = val;
+            m->len++;
+            return;
+        }
+        if (st == MAKO_MAP_TOMB) {
+            if (first_tomb == (size_t)-1) first_tomb = i;
+        } else if (MAKO_LIKELY(m->keys[i] == key)) {
+            m->vals[i] = val;
+            return;
+        }
+        i = (i + 1) & mask;
+    }
+}
+
+static inline void mako_map_ib_rehash(MakoMapIB *m, size_t ncap) {
+    uint8_t *ostate = m->state;
+    int64_t *okeys = m->keys;
+    bool *ovals = m->vals;
+    size_t ocap = m->cap;
+    MakoMapIB n = mako_map_ib_new(ncap / 2);
+    for (size_t i = 0; i < ocap; i++) {
+        if (ostate[i] != MAKO_MAP_FULL) continue;
+        int64_t key = okeys[i];
+        bool val = ovals[i];
+        uint64_t h = mako_hash_i64(key);
+        size_t j = (size_t)(h & (n.cap - 1));
+        while (n.state[j] == MAKO_MAP_FULL) {
+            j = (j + 1) & (n.cap - 1);
+        }
+        n.state[j] = MAKO_MAP_FULL;
+        n.keys[j] = key;
+        n.vals[j] = val;
+        n.len++;
+    }
+    free(ostate);
+    free(okeys);
+    free(ovals);
+    *m = n;
+}
+
+static inline bool mako_map_ib_get(MakoMapIB *m, int64_t key) {
+    if (!m) return false;
+    uint64_t h = mako_hash_i64(key);
+    size_t i = (size_t)(h & (m->cap - 1));
+    for (;;) {
+        if (m->state[i] == MAKO_MAP_EMPTY) return false;
+        if (m->state[i] == MAKO_MAP_FULL && m->keys[i] == key) return m->vals[i];
+        i = (i + 1) & (m->cap - 1);
+    }
+}
+
+static inline bool mako_map_ib_has(MakoMapIB *m, int64_t key) {
+    if (!m) return false;
+    uint64_t h = mako_hash_i64(key);
+    size_t i = (size_t)(h & (m->cap - 1));
+    for (;;) {
+        if (m->state[i] == MAKO_MAP_EMPTY) return false;
+        if (m->state[i] == MAKO_MAP_FULL && m->keys[i] == key) return true;
+        i = (i + 1) & (m->cap - 1);
+    }
+}
+
+static inline void mako_map_ib_delete(MakoMapIB *m, int64_t key) {
+    if (!m) return;
+    uint64_t h = mako_hash_i64(key);
+    size_t i = (size_t)(h & (m->cap - 1));
+    for (;;) {
+        if (m->state[i] == MAKO_MAP_EMPTY) return;
+        if (m->state[i] == MAKO_MAP_FULL && m->keys[i] == key) {
+            m->state[i] = MAKO_MAP_TOMB;
+            m->len--;
+            return;
+        }
+        i = (i + 1) & (m->cap - 1);
+    }
+}
+
+static inline int64_t mako_map_ib_len(MakoMapIB *m) { return m ? (int64_t)m->len : 0; }
+
+static inline MakoMapIB *mako_map_ib_make(int64_t hint) {
+    MakoMapIB *m = (MakoMapIB *)malloc(sizeof(MakoMapIB));
+    *m = mako_map_ib_new(hint > 0 ? (size_t)hint : 0);
+    return m;
+}
+
+/* map[string]bool */
+typedef struct {
+    uint8_t *state;
+    MakoString *keys;
+    bool *vals;
+    size_t cap;
+    size_t len;
+} MakoMapSB;
+
+static inline MakoMapSB mako_map_sb_new(size_t hint) {
+    size_t cap = 8;
+    size_t need = hint ? (hint * 4 / 3 + 1) : 8;
+    while (cap < need) cap *= 2;
+    MakoMapSB m;
+    m.state = (uint8_t *)calloc(cap, 1);
+    m.keys = (MakoString *)calloc(cap, sizeof(MakoString));
+    m.vals = (bool *)malloc(cap * sizeof(bool));
+    if (!m.keys || !m.vals) {
+        fprintf(stderr, "mako: OOM in map_sb_new\n");
+        abort();
+    }
+    m.cap = cap;
+    m.len = 0;
+    return m;
+}
+
+static inline void mako_map_sb_rehash(MakoMapSB *m, size_t ncap);
+
+static inline void mako_map_sb_set(MakoMapSB *m, MakoString key, bool val) {
+    if (MAKO_UNLIKELY((m->len + 1) * 4 >= m->cap * 3)) {
+        mako_map_sb_rehash(m, m->cap * 2);
+    }
+    uint64_t h = mako_hash_bytes(key.data, key.len);
+    size_t mask = m->cap - 1;
+    size_t i = (size_t)(h & mask);
+    size_t first_tomb = (size_t)-1;
+    for (;;) {
+        uint8_t st = m->state[i];
+        if (MAKO_LIKELY(st == MAKO_MAP_EMPTY)) {
+            size_t slot = (first_tomb != (size_t)-1) ? first_tomb : i;
+            m->state[slot] = MAKO_MAP_FULL;
+            m->keys[slot] = mako_str_clone(key);
+            m->vals[slot] = val;
+            m->len++;
+            return;
+        }
+        if (st == MAKO_MAP_TOMB) {
+            if (first_tomb == (size_t)-1) first_tomb = i;
+        } else if (MAKO_LIKELY(mako_str_eq(m->keys[i], key))) {
+            m->vals[i] = val;
+            return;
+        }
+        i = (i + 1) & mask;
+    }
+}
+
+static inline void mako_map_sb_rehash(MakoMapSB *m, size_t ncap) {
+    uint8_t *ostate = m->state;
+    MakoString *okeys = m->keys;
+    bool *ovals = m->vals;
+    size_t ocap = m->cap;
+    MakoMapSB n = mako_map_sb_new(ncap / 2);
+    for (size_t i = 0; i < ocap; i++) {
+        if (ostate[i] != MAKO_MAP_FULL) continue;
+        MakoString key = okeys[i];
+        bool val = ovals[i];
+        uint64_t h = mako_hash_bytes(key.data, key.len);
+        size_t j = (size_t)(h & (n.cap - 1));
+        while (n.state[j] == MAKO_MAP_FULL) {
+            j = (j + 1) & (n.cap - 1);
+        }
+        n.state[j] = MAKO_MAP_FULL;
+        n.keys[j] = key;
+        n.vals[j] = val;
+        n.len++;
+    }
+    free(ostate);
+    free(okeys);
+    free(ovals);
+    *m = n;
+}
+
+static inline bool mako_map_sb_get(MakoMapSB *m, MakoString key) {
+    if (!m) return false;
+    uint64_t h = mako_hash_bytes(key.data, key.len);
+    size_t i = (size_t)(h & (m->cap - 1));
+    for (;;) {
+        if (m->state[i] == MAKO_MAP_EMPTY) return false;
+        if (m->state[i] == MAKO_MAP_FULL && mako_str_eq(m->keys[i], key)) return m->vals[i];
+        i = (i + 1) & (m->cap - 1);
+    }
+}
+
+static inline bool mako_map_sb_has(MakoMapSB *m, MakoString key) {
+    if (!m) return false;
+    uint64_t h = mako_hash_bytes(key.data, key.len);
+    size_t i = (size_t)(h & (m->cap - 1));
+    for (;;) {
+        if (m->state[i] == MAKO_MAP_EMPTY) return false;
+        if (m->state[i] == MAKO_MAP_FULL && mako_str_eq(m->keys[i], key)) return true;
+        i = (i + 1) & (m->cap - 1);
+    }
+}
+
+static inline void mako_map_sb_delete(MakoMapSB *m, MakoString key) {
+    if (!m) return;
+    uint64_t h = mako_hash_bytes(key.data, key.len);
+    size_t i = (size_t)(h & (m->cap - 1));
+    for (;;) {
+        if (m->state[i] == MAKO_MAP_EMPTY) return;
+        if (m->state[i] == MAKO_MAP_FULL && mako_str_eq(m->keys[i], key)) {
+            mako_str_free(m->keys[i]);
+            m->keys[i].data = NULL; m->keys[i].len = 0;
+            m->state[i] = MAKO_MAP_TOMB;
+            m->len--;
+            return;
+        }
+        i = (i + 1) & (m->cap - 1);
+    }
+}
+
+static inline int64_t mako_map_sb_len(MakoMapSB *m) { return m ? (int64_t)m->len : 0; }
+
+static inline MakoMapSB *mako_map_sb_make(int64_t hint) {
+    MakoMapSB *m = (MakoMapSB *)malloc(sizeof(MakoMapSB));
+    *m = mako_map_sb_new(hint > 0 ? (size_t)hint : 0);
+    return m;
+}
+
+/* map[float]bool */
+typedef struct {
+    uint8_t *state;
+    double *keys;
+    bool *vals;
+    size_t cap;
+    size_t len;
+} MakoMapFB;
+
+static inline MakoMapFB mako_map_fb_new(size_t hint) {
+    size_t cap = 8;
+    size_t need = hint ? (hint * 4 / 3 + 1) : 8;
+    while (cap < need) cap *= 2;
+    MakoMapFB m;
+    m.state = (uint8_t *)calloc(cap, 1);
+    m.keys = (double *)malloc(cap * sizeof(double));
+    m.vals = (bool *)malloc(cap * sizeof(bool));
+    if (!m.keys || !m.vals) {
+        fprintf(stderr, "mako: OOM in map_fb_new\n");
+        abort();
+    }
+    m.cap = cap;
+    m.len = 0;
+    return m;
+}
+
+static inline void mako_map_fb_rehash(MakoMapFB *m, size_t ncap);
+
+static inline void mako_map_fb_set(MakoMapFB *m, double key, bool val) {
+    if (MAKO_UNLIKELY((m->len + 1) * 4 >= m->cap * 3)) {
+        mako_map_fb_rehash(m, m->cap * 2);
+    }
+    uint64_t h = mako_hash_f64(key);
+    size_t mask = m->cap - 1;
+    size_t i = (size_t)(h & mask);
+    size_t first_tomb = (size_t)-1;
+    for (;;) {
+        uint8_t st = m->state[i];
+        if (MAKO_LIKELY(st == MAKO_MAP_EMPTY)) {
+            size_t slot = (first_tomb != (size_t)-1) ? first_tomb : i;
+            m->state[slot] = MAKO_MAP_FULL;
+            m->keys[slot] = key;
+            m->vals[slot] = val;
+            m->len++;
+            return;
+        }
+        if (st == MAKO_MAP_TOMB) {
+            if (first_tomb == (size_t)-1) first_tomb = i;
+        } else if (MAKO_LIKELY(mako_f64_key_eq(m->keys[i], key))) {
+            m->vals[i] = val;
+            return;
+        }
+        i = (i + 1) & mask;
+    }
+}
+
+static inline void mako_map_fb_rehash(MakoMapFB *m, size_t ncap) {
+    uint8_t *ostate = m->state;
+    double *okeys = m->keys;
+    bool *ovals = m->vals;
+    size_t ocap = m->cap;
+    MakoMapFB n = mako_map_fb_new(ncap / 2);
+    for (size_t i = 0; i < ocap; i++) {
+        if (ostate[i] != MAKO_MAP_FULL) continue;
+        double key = okeys[i];
+        bool val = ovals[i];
+        uint64_t h = mako_hash_f64(key);
+        size_t j = (size_t)(h & (n.cap - 1));
+        while (n.state[j] == MAKO_MAP_FULL) {
+            j = (j + 1) & (n.cap - 1);
+        }
+        n.state[j] = MAKO_MAP_FULL;
+        n.keys[j] = key;
+        n.vals[j] = val;
+        n.len++;
+    }
+    free(ostate);
+    free(okeys);
+    free(ovals);
+    *m = n;
+}
+
+static inline bool mako_map_fb_get(MakoMapFB *m, double key) {
+    if (!m) return false;
+    uint64_t h = mako_hash_f64(key);
+    size_t i = (size_t)(h & (m->cap - 1));
+    for (;;) {
+        if (m->state[i] == MAKO_MAP_EMPTY) return false;
+        if (m->state[i] == MAKO_MAP_FULL && mako_f64_key_eq(m->keys[i], key)) return m->vals[i];
+        i = (i + 1) & (m->cap - 1);
+    }
+}
+
+static inline bool mako_map_fb_has(MakoMapFB *m, double key) {
+    if (!m) return false;
+    uint64_t h = mako_hash_f64(key);
+    size_t i = (size_t)(h & (m->cap - 1));
+    for (;;) {
+        if (m->state[i] == MAKO_MAP_EMPTY) return false;
+        if (m->state[i] == MAKO_MAP_FULL && mako_f64_key_eq(m->keys[i], key)) return true;
+        i = (i + 1) & (m->cap - 1);
+    }
+}
+
+static inline void mako_map_fb_delete(MakoMapFB *m, double key) {
+    if (!m) return;
+    uint64_t h = mako_hash_f64(key);
+    size_t i = (size_t)(h & (m->cap - 1));
+    for (;;) {
+        if (m->state[i] == MAKO_MAP_EMPTY) return;
+        if (m->state[i] == MAKO_MAP_FULL && mako_f64_key_eq(m->keys[i], key)) {
+            m->state[i] = MAKO_MAP_TOMB;
+            m->len--;
+            return;
+        }
+        i = (i + 1) & (m->cap - 1);
+    }
+}
+
+static inline int64_t mako_map_fb_len(MakoMapFB *m) { return m ? (int64_t)m->len : 0; }
+
+static inline MakoMapFB *mako_map_fb_make(int64_t hint) {
+    MakoMapFB *m = (MakoMapFB *)malloc(sizeof(MakoMapFB));
+    *m = mako_map_fb_new(hint > 0 ? (size_t)hint : 0);
+    return m;
+}
+
+/* map[bool]int */
+typedef struct {
+    uint8_t *state;
+    bool *keys;
+    int64_t *vals;
+    size_t cap;
+    size_t len;
+} MakoMapBI;
+
+static inline MakoMapBI mako_map_bi_new(size_t hint) {
+    size_t cap = 8;
+    size_t need = hint ? (hint * 4 / 3 + 1) : 8;
+    while (cap < need) cap *= 2;
+    MakoMapBI m;
+    m.state = (uint8_t *)calloc(cap, 1);
+    m.keys = (bool *)malloc(cap * sizeof(bool));
+    m.vals = (int64_t *)malloc(cap * sizeof(int64_t));
+    if (!m.keys || !m.vals) {
+        fprintf(stderr, "mako: OOM in map_bi_new\n");
+        abort();
+    }
+    m.cap = cap; m.len = 0; return m;
+}
+
+static inline void mako_map_bi_rehash(MakoMapBI *m, size_t ncap);
+
+static inline void mako_map_bi_set(MakoMapBI *m, bool key, int64_t val) {
+    if (MAKO_UNLIKELY((m->len + 1) * 4 >= m->cap * 3)) mako_map_bi_rehash(m, m->cap * 2);
+    uint64_t h = mako_hash_i64(key ? 1 : 0);
+    size_t mask = m->cap - 1;
+    size_t i = (size_t)(h & mask);
+    size_t first_tomb = (size_t)-1;
+    for (;;) {
+        uint8_t st = m->state[i];
+        if (MAKO_LIKELY(st == MAKO_MAP_EMPTY)) {
+            size_t slot = (first_tomb != (size_t)-1) ? first_tomb : i;
+            m->state[slot] = MAKO_MAP_FULL;
+            m->keys[slot] = key;
+            m->vals[slot] = val;
+            m->len++; return;
+        }
+        if (st == MAKO_MAP_TOMB) { if (first_tomb == (size_t)-1) first_tomb = i; }
+        else if (m->keys[i] == key) { m->vals[i] = val; return; }
+        i = (i + 1) & mask;
+    }
+}
+
+static inline void mako_map_bi_rehash(MakoMapBI *m, size_t ncap) {
+    uint8_t *ostate = m->state;
+    bool *okeys = m->keys;
+    int64_t *ovals = m->vals;
+    size_t ocap = m->cap;
+    MakoMapBI n = mako_map_bi_new(ncap / 2);
+    for (size_t i = 0; i < ocap; i++) {
+        if (ostate[i] != MAKO_MAP_FULL) continue;
+        bool key = okeys[i];
+        int64_t val = ovals[i];
+        uint64_t h = mako_hash_i64(key ? 1 : 0);
+        size_t j = (size_t)(h & (n.cap - 1));
+        while (n.state[j] == MAKO_MAP_FULL) j = (j + 1) & (n.cap - 1);
+        n.state[j] = MAKO_MAP_FULL;
+        n.keys[j] = key; n.vals[j] = val; n.len++;
+    }
+    free(ostate); free(okeys); free(ovals); *m = n;
+}
+
+static inline int64_t mako_map_bi_get(MakoMapBI *m, bool key) {
+    if (!m) return 0;
+    uint64_t h = mako_hash_i64(key ? 1 : 0);
+    size_t i = (size_t)(h & (m->cap - 1));
+    for (;;) {
+        if (m->state[i] == MAKO_MAP_EMPTY) return 0;
+        if (m->state[i] == MAKO_MAP_FULL && m->keys[i] == key) return m->vals[i];
+        i = (i + 1) & (m->cap - 1);
+    }
+}
+
+static inline bool mako_map_bi_has(MakoMapBI *m, bool key) {
+    if (!m) return false;
+    uint64_t h = mako_hash_i64(key ? 1 : 0);
+    size_t i = (size_t)(h & (m->cap - 1));
+    for (;;) {
+        if (m->state[i] == MAKO_MAP_EMPTY) return false;
+        if (m->state[i] == MAKO_MAP_FULL && m->keys[i] == key) return true;
+        i = (i + 1) & (m->cap - 1);
+    }
+}
+
+static inline void mako_map_bi_delete(MakoMapBI *m, bool key) {
+    if (!m) return;
+    uint64_t h = mako_hash_i64(key ? 1 : 0);
+    size_t i = (size_t)(h & (m->cap - 1));
+    for (;;) {
+        if (m->state[i] == MAKO_MAP_EMPTY) return;
+        if (m->state[i] == MAKO_MAP_FULL && m->keys[i] == key) {
+            m->state[i] = MAKO_MAP_TOMB; m->len--; return;
+        }
+        i = (i + 1) & (m->cap - 1);
+    }
+}
+
+static inline int64_t mako_map_bi_len(MakoMapBI *m) { return m ? (int64_t)m->len : 0; }
+
+static inline MakoMapBI *mako_map_bi_make(int64_t hint) {
+    MakoMapBI *m = (MakoMapBI *)malloc(sizeof(MakoMapBI));
+    *m = mako_map_bi_new(hint > 0 ? (size_t)hint : 0); return m;
+}
+
+/* map[bool]string */
+typedef struct {
+    uint8_t *state;
+    bool *keys;
+    MakoString *vals;
+    size_t cap;
+    size_t len;
+} MakoMapBS;
+
+static inline MakoMapBS mako_map_bs_new(size_t hint) {
+    size_t cap = 8;
+    size_t need = hint ? (hint * 4 / 3 + 1) : 8;
+    while (cap < need) cap *= 2;
+    MakoMapBS m;
+    m.state = (uint8_t *)calloc(cap, 1);
+    m.keys = (bool *)malloc(cap * sizeof(bool));
+    m.vals = (MakoString *)calloc(cap, sizeof(MakoString));
+    if (!m.keys || !m.vals) {
+        fprintf(stderr, "mako: OOM in map_bs_new\n");
+        abort();
+    }
+    m.cap = cap; m.len = 0; return m;
+}
+
+static inline void mako_map_bs_rehash(MakoMapBS *m, size_t ncap);
+
+static inline void mako_map_bs_set(MakoMapBS *m, bool key, MakoString val) {
+    if (MAKO_UNLIKELY((m->len + 1) * 4 >= m->cap * 3)) mako_map_bs_rehash(m, m->cap * 2);
+    uint64_t h = mako_hash_i64(key ? 1 : 0);
+    size_t mask = m->cap - 1;
+    size_t i = (size_t)(h & mask);
+    size_t first_tomb = (size_t)-1;
+    for (;;) {
+        uint8_t st = m->state[i];
+        if (MAKO_LIKELY(st == MAKO_MAP_EMPTY)) {
+            size_t slot = (first_tomb != (size_t)-1) ? first_tomb : i;
+            m->state[slot] = MAKO_MAP_FULL;
+            m->keys[slot] = key;
+            m->vals[slot] = mako_str_clone(val);
+            m->len++; return;
+        }
+        if (st == MAKO_MAP_TOMB) { if (first_tomb == (size_t)-1) first_tomb = i; }
+        else if (m->keys[i] == key) {
+            mako_str_free(m->vals[i]); m->vals[i] = mako_str_clone(val); return;
+        }
+        i = (i + 1) & mask;
+    }
+}
+
+static inline void mako_map_bs_rehash(MakoMapBS *m, size_t ncap) {
+    uint8_t *ostate = m->state;
+    bool *okeys = m->keys;
+    MakoString *ovals = m->vals;
+    size_t ocap = m->cap;
+    MakoMapBS n = mako_map_bs_new(ncap / 2);
+    for (size_t i = 0; i < ocap; i++) {
+        if (ostate[i] != MAKO_MAP_FULL) continue;
+        bool key = okeys[i];
+        MakoString val = ovals[i];
+        uint64_t h = mako_hash_i64(key ? 1 : 0);
+        size_t j = (size_t)(h & (n.cap - 1));
+        while (n.state[j] == MAKO_MAP_FULL) j = (j + 1) & (n.cap - 1);
+        n.state[j] = MAKO_MAP_FULL;
+        n.keys[j] = key; n.vals[j] = val; n.len++;
+    }
+    free(ostate); free(okeys); free(ovals); *m = n;
+}
+
+static inline MakoString mako_map_bs_get(MakoMapBS *m, bool key) {
+    if (!m) return mako_str_from_cstr("");
+    uint64_t h = mako_hash_i64(key ? 1 : 0);
+    size_t i = (size_t)(h & (m->cap - 1));
+    for (;;) {
+        if (m->state[i] == MAKO_MAP_EMPTY) return mako_str_from_cstr("");
+        if (m->state[i] == MAKO_MAP_FULL && m->keys[i] == key) return mako_str_clone(m->vals[i]);
+        i = (i + 1) & (m->cap - 1);
+    }
+}
+
+static inline bool mako_map_bs_has(MakoMapBS *m, bool key) {
+    if (!m) return false;
+    uint64_t h = mako_hash_i64(key ? 1 : 0);
+    size_t i = (size_t)(h & (m->cap - 1));
+    for (;;) {
+        if (m->state[i] == MAKO_MAP_EMPTY) return false;
+        if (m->state[i] == MAKO_MAP_FULL && m->keys[i] == key) return true;
+        i = (i + 1) & (m->cap - 1);
+    }
+}
+
+static inline void mako_map_bs_delete(MakoMapBS *m, bool key) {
+    if (!m) return;
+    uint64_t h = mako_hash_i64(key ? 1 : 0);
+    size_t i = (size_t)(h & (m->cap - 1));
+    for (;;) {
+        if (m->state[i] == MAKO_MAP_EMPTY) return;
+        if (m->state[i] == MAKO_MAP_FULL && m->keys[i] == key) {
+            mako_str_free(m->vals[i]); m->vals[i].data = NULL; m->vals[i].len = 0;
+            m->state[i] = MAKO_MAP_TOMB; m->len--; return;
+        }
+        i = (i + 1) & (m->cap - 1);
+    }
+}
+
+static inline int64_t mako_map_bs_len(MakoMapBS *m) { return m ? (int64_t)m->len : 0; }
+
+static inline MakoMapBS *mako_map_bs_make(int64_t hint) {
+    MakoMapBS *m = (MakoMapBS *)malloc(sizeof(MakoMapBS));
+    *m = mako_map_bs_new(hint > 0 ? (size_t)hint : 0); return m;
+}
+
+/* map[bool]float */
+typedef struct {
+    uint8_t *state;
+    bool *keys;
+    double *vals;
+    size_t cap;
+    size_t len;
+} MakoMapBF;
+
+static inline MakoMapBF mako_map_bf_new(size_t hint) {
+    size_t cap = 8;
+    size_t need = hint ? (hint * 4 / 3 + 1) : 8;
+    while (cap < need) cap *= 2;
+    MakoMapBF m;
+    m.state = (uint8_t *)calloc(cap, 1);
+    m.keys = (bool *)malloc(cap * sizeof(bool));
+    m.vals = (double *)malloc(cap * sizeof(double));
+    if (!m.keys || !m.vals) {
+        fprintf(stderr, "mako: OOM in map_bf_new\n");
+        abort();
+    }
+    m.cap = cap; m.len = 0; return m;
+}
+
+static inline void mako_map_bf_rehash(MakoMapBF *m, size_t ncap);
+
+static inline void mako_map_bf_set(MakoMapBF *m, bool key, double val) {
+    if (MAKO_UNLIKELY((m->len + 1) * 4 >= m->cap * 3)) mako_map_bf_rehash(m, m->cap * 2);
+    uint64_t h = mako_hash_i64(key ? 1 : 0);
+    size_t mask = m->cap - 1;
+    size_t i = (size_t)(h & mask);
+    size_t first_tomb = (size_t)-1;
+    for (;;) {
+        uint8_t st = m->state[i];
+        if (MAKO_LIKELY(st == MAKO_MAP_EMPTY)) {
+            size_t slot = (first_tomb != (size_t)-1) ? first_tomb : i;
+            m->state[slot] = MAKO_MAP_FULL;
+            m->keys[slot] = key;
+            m->vals[slot] = val;
+            m->len++; return;
+        }
+        if (st == MAKO_MAP_TOMB) { if (first_tomb == (size_t)-1) first_tomb = i; }
+        else if (m->keys[i] == key) { m->vals[i] = val; return; }
+        i = (i + 1) & mask;
+    }
+}
+
+static inline void mako_map_bf_rehash(MakoMapBF *m, size_t ncap) {
+    uint8_t *ostate = m->state;
+    bool *okeys = m->keys;
+    double *ovals = m->vals;
+    size_t ocap = m->cap;
+    MakoMapBF n = mako_map_bf_new(ncap / 2);
+    for (size_t i = 0; i < ocap; i++) {
+        if (ostate[i] != MAKO_MAP_FULL) continue;
+        bool key = okeys[i];
+        double val = ovals[i];
+        uint64_t h = mako_hash_i64(key ? 1 : 0);
+        size_t j = (size_t)(h & (n.cap - 1));
+        while (n.state[j] == MAKO_MAP_FULL) j = (j + 1) & (n.cap - 1);
+        n.state[j] = MAKO_MAP_FULL;
+        n.keys[j] = key; n.vals[j] = val; n.len++;
+    }
+    free(ostate); free(okeys); free(ovals); *m = n;
+}
+
+static inline double mako_map_bf_get(MakoMapBF *m, bool key) {
+    if (!m) return 0.0;
+    uint64_t h = mako_hash_i64(key ? 1 : 0);
+    size_t i = (size_t)(h & (m->cap - 1));
+    for (;;) {
+        if (m->state[i] == MAKO_MAP_EMPTY) return 0.0;
+        if (m->state[i] == MAKO_MAP_FULL && m->keys[i] == key) return m->vals[i];
+        i = (i + 1) & (m->cap - 1);
+    }
+}
+
+static inline bool mako_map_bf_has(MakoMapBF *m, bool key) {
+    if (!m) return false;
+    uint64_t h = mako_hash_i64(key ? 1 : 0);
+    size_t i = (size_t)(h & (m->cap - 1));
+    for (;;) {
+        if (m->state[i] == MAKO_MAP_EMPTY) return false;
+        if (m->state[i] == MAKO_MAP_FULL && m->keys[i] == key) return true;
+        i = (i + 1) & (m->cap - 1);
+    }
+}
+
+static inline void mako_map_bf_delete(MakoMapBF *m, bool key) {
+    if (!m) return;
+    uint64_t h = mako_hash_i64(key ? 1 : 0);
+    size_t i = (size_t)(h & (m->cap - 1));
+    for (;;) {
+        if (m->state[i] == MAKO_MAP_EMPTY) return;
+        if (m->state[i] == MAKO_MAP_FULL && m->keys[i] == key) {
+            m->state[i] = MAKO_MAP_TOMB; m->len--; return;
+        }
+        i = (i + 1) & (m->cap - 1);
+    }
+}
+
+static inline int64_t mako_map_bf_len(MakoMapBF *m) { return m ? (int64_t)m->len : 0; }
+
+static inline MakoMapBF *mako_map_bf_make(int64_t hint) {
+    MakoMapBF *m = (MakoMapBF *)malloc(sizeof(MakoMapBF));
+    *m = mako_map_bf_new(hint > 0 ? (size_t)hint : 0); return m;
+}
+
+/* map[bool]bool */
+typedef struct {
+    uint8_t *state;
+    bool *keys;
+    bool *vals;
+    size_t cap;
+    size_t len;
+} MakoMapBB;
+
+static inline MakoMapBB mako_map_bb_new(size_t hint) {
+    size_t cap = 8;
+    size_t need = hint ? (hint * 4 / 3 + 1) : 8;
+    while (cap < need) cap *= 2;
+    MakoMapBB m;
+    m.state = (uint8_t *)calloc(cap, 1);
+    m.keys = (bool *)malloc(cap * sizeof(bool));
+    m.vals = (bool *)malloc(cap * sizeof(bool));
+    if (!m.keys || !m.vals) {
+        fprintf(stderr, "mako: OOM in map_bb_new\n");
+        abort();
+    }
+    m.cap = cap; m.len = 0; return m;
+}
+
+static inline void mako_map_bb_rehash(MakoMapBB *m, size_t ncap);
+
+static inline void mako_map_bb_set(MakoMapBB *m, bool key, bool val) {
+    if (MAKO_UNLIKELY((m->len + 1) * 4 >= m->cap * 3)) mako_map_bb_rehash(m, m->cap * 2);
+    uint64_t h = mako_hash_i64(key ? 1 : 0);
+    size_t mask = m->cap - 1;
+    size_t i = (size_t)(h & mask);
+    size_t first_tomb = (size_t)-1;
+    for (;;) {
+        uint8_t st = m->state[i];
+        if (MAKO_LIKELY(st == MAKO_MAP_EMPTY)) {
+            size_t slot = (first_tomb != (size_t)-1) ? first_tomb : i;
+            m->state[slot] = MAKO_MAP_FULL;
+            m->keys[slot] = key;
+            m->vals[slot] = val;
+            m->len++; return;
+        }
+        if (st == MAKO_MAP_TOMB) { if (first_tomb == (size_t)-1) first_tomb = i; }
+        else if (m->keys[i] == key) { m->vals[i] = val; return; }
+        i = (i + 1) & mask;
+    }
+}
+
+static inline void mako_map_bb_rehash(MakoMapBB *m, size_t ncap) {
+    uint8_t *ostate = m->state;
+    bool *okeys = m->keys;
+    bool *ovals = m->vals;
+    size_t ocap = m->cap;
+    MakoMapBB n = mako_map_bb_new(ncap / 2);
+    for (size_t i = 0; i < ocap; i++) {
+        if (ostate[i] != MAKO_MAP_FULL) continue;
+        bool key = okeys[i];
+        bool val = ovals[i];
+        uint64_t h = mako_hash_i64(key ? 1 : 0);
+        size_t j = (size_t)(h & (n.cap - 1));
+        while (n.state[j] == MAKO_MAP_FULL) j = (j + 1) & (n.cap - 1);
+        n.state[j] = MAKO_MAP_FULL;
+        n.keys[j] = key; n.vals[j] = val; n.len++;
+    }
+    free(ostate); free(okeys); free(ovals); *m = n;
+}
+
+static inline bool mako_map_bb_get(MakoMapBB *m, bool key) {
+    if (!m) return false;
+    uint64_t h = mako_hash_i64(key ? 1 : 0);
+    size_t i = (size_t)(h & (m->cap - 1));
+    for (;;) {
+        if (m->state[i] == MAKO_MAP_EMPTY) return false;
+        if (m->state[i] == MAKO_MAP_FULL && m->keys[i] == key) return m->vals[i];
+        i = (i + 1) & (m->cap - 1);
+    }
+}
+
+static inline bool mako_map_bb_has(MakoMapBB *m, bool key) {
+    if (!m) return false;
+    uint64_t h = mako_hash_i64(key ? 1 : 0);
+    size_t i = (size_t)(h & (m->cap - 1));
+    for (;;) {
+        if (m->state[i] == MAKO_MAP_EMPTY) return false;
+        if (m->state[i] == MAKO_MAP_FULL && m->keys[i] == key) return true;
+        i = (i + 1) & (m->cap - 1);
+    }
+}
+
+static inline void mako_map_bb_delete(MakoMapBB *m, bool key) {
+    if (!m) return;
+    uint64_t h = mako_hash_i64(key ? 1 : 0);
+    size_t i = (size_t)(h & (m->cap - 1));
+    for (;;) {
+        if (m->state[i] == MAKO_MAP_EMPTY) return;
+        if (m->state[i] == MAKO_MAP_FULL && m->keys[i] == key) {
+            m->state[i] = MAKO_MAP_TOMB; m->len--; return;
+        }
+        i = (i + 1) & (m->cap - 1);
+    }
+}
+
+static inline int64_t mako_map_bb_len(MakoMapBB *m) { return m ? (int64_t)m->len : 0; }
+
+static inline MakoMapBB *mako_map_bb_make(int64_t hint) {
+    MakoMapBB *m = (MakoMapBB *)malloc(sizeof(MakoMapBB));
+    *m = mako_map_bb_new(hint > 0 ? (size_t)hint : 0); return m;
+}
+
+
 /* map[string]string */
 typedef struct {
     uint8_t *state;
@@ -2181,7 +3431,7 @@ static inline void mako_map_ss_delete(MakoMapSS *m, MakoString key) {
     }
 }
 
-static inline int64_t mako_map_ss_len(MakoMapSS *m) { return (int64_t)m->len; }
+static inline int64_t mako_map_ss_len(MakoMapSS *m) { return m ? (int64_t)m->len : 0; }
 
 static inline MakoMapSS *mako_map_ss_make(int64_t hint) {
     MakoMapSS *m = (MakoMapSS *)malloc(sizeof(MakoMapSS));
