@@ -25441,18 +25441,23 @@ fn parse_map_slice_val(bty: &str) -> Option<(String, String)> {
 /// (those go through [`parse_map_k_map_val`]).
 fn parse_map_k_slice_val(bty: &str) -> Option<(String, String)> {
     let rest = bty.strip_prefix("MakoMapK_")?.strip_suffix('*')?;
-    // Nested map values (`Point_map_string_int`) have no arr/opt/res/tup/chan sep and
-    // fall through to parse_map_k_map_val. Do **not** reject tags that embed
-    // `_map_` as a payload suffix (`Point_opt_map_string_int`).
     // Leftmost separator after the key name. That distinguishes:
     //   Point_arr_opt_int  → arr_opt_int  (map[Point][]Option[int])
     //   Point_opt_arr_int  → opt_arr_int  (map[Point]Option[[]int])
     //   Point_tup_int_int  → tup_int_int  (map[Point](int,int))
     //   Point_chan_int     → chan_int     (map[Point]chan[int])
+    // Nested map values (`Point_map_string_int`, `Point_map_string_arr_int`)
+    // must defer to parse_map_k_map_val — if `_map_` is leftmost, return None.
+    // Payload suffixes like `Point_opt_map_string_int` keep `_opt_` first.
     let mut best: Option<usize> = None;
     for sep in ["_arr_", "_opt_", "_res_", "_tup_", "_chan_"] {
         if let Some(idx) = rest.find(sep) {
             best = Some(best.map_or(idx, |b| b.min(idx)));
+        }
+    }
+    if let Some(map_idx) = rest.find("_map_") {
+        if best.map_or(true, |b| map_idx < b) {
+            return None;
         }
     }
     if let Some(idx) = best {

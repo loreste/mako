@@ -12238,7 +12238,12 @@ impl TypeChecker {
                 }
                 self.current_expected = saved_expected;
                 if let Some(elem) = expected_elem {
-                    if !self.compatible(&first, &elem) {
+                    // Untyped int literals may inhabit []byte / []int64 / []int32 / []int8
+                    // (same Go-like rule as annotated let bindings).
+                    let lit_ok = matches!(first, Type::Int)
+                        && is_literal_int_kind(&elem)
+                        && elems.iter().all(|e| matches!(e, Expr::Int(_)));
+                    if !self.compatible(&first, &elem) && !lit_ok {
                         return Err(TypeError::new(format!(
                             "array element type mismatch: expected {}, got {}",
                             elem.display(),

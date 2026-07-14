@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Fix — CI: Windows mutex, nested named-key maps, int-lit array types
+
+- **`session_cancel` mutex** — lazy-init instead of `PTHREAD_MUTEX_INITIALIZER`
+  so Windows CRITICAL_SECTION shims compile (was failing every Windows test).
+- **`parse_map_k_slice_val`** — if `_map_` is the leftmost separator, defer to
+  nested-map parse (`map[Point]map[string][]int` no longer misread as slice).
+- **Array lits** — untyped int literals inhabit `[]byte` / `[]int64` / `[]int32` /
+  `[]int8` when the element type is expected (annotated lets / casts).
+
 ### Language — `map[K]chan[T]` channel values
 
 - **Channel pointers as map values** — e.g. `map[string]chan[int]`,

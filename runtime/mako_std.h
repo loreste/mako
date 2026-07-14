@@ -1006,7 +1006,32 @@ typedef struct {
 } MakoSessCancelSlot;
 
 static MakoSessCancelSlot mako_sess_cancel_tab[MAKO_SESS_CANCEL_CAP];
-static pthread_mutex_t mako_sess_cancel_mu = PTHREAD_MUTEX_INITIALIZER;
+/* Lazy-init: PTHREAD_MUTEX_INITIALIZER is not portable to CRITICAL_SECTION (Windows). */
+static pthread_mutex_t mako_sess_cancel_mu;
+static int mako_sess_cancel_mu_ready = 0;
+
+static inline void mako_sess_cancel_mu_ensure(void) {
+    if (mako_sess_cancel_mu_ready) return;
+#if defined(_WIN32) || defined(_WIN64)
+    static LONG once = 0;
+    if (InterlockedCompareExchange(&once, 1, 0) == 0) {
+        pthread_mutex_init(&mako_sess_cancel_mu, NULL);
+        mako_sess_cancel_mu_ready = 1;
+        InterlockedExchange(&once, 2);
+    } else {
+        while (InterlockedCompareExchange(&once, 2, 2) != 2)
+            Sleep(0);
+    }
+#else
+    static pthread_mutex_t boot = PTHREAD_MUTEX_INITIALIZER;
+    pthread_mutex_lock(&boot);
+    if (!mako_sess_cancel_mu_ready) {
+        pthread_mutex_init(&mako_sess_cancel_mu, NULL);
+        mako_sess_cancel_mu_ready = 1;
+    }
+    pthread_mutex_unlock(&boot);
+#endif
+}
 
 static inline int mako_sess_cancel_find(const char *tok, size_t n) {
     for (int i = 0; i < MAKO_SESS_CANCEL_CAP; i++) {
@@ -1022,6 +1047,7 @@ static inline int mako_sess_cancel_find(const char *tok, size_t n) {
 static inline MakoString mako_session_cancel_token(void) {
     MakoString t = mako_session_id_new();
     if (t.len == 0 || t.len >= 40) return t;
+    mako_sess_cancel_mu_ensure();
     pthread_mutex_lock(&mako_sess_cancel_mu);
     int slot = -1;
     for (int i = 0; i < MAKO_SESS_CANCEL_CAP; i++) {
@@ -1043,6 +1069,7 @@ static inline MakoString mako_session_cancel_token(void) {
 /* Mark token cancelled (remote peer or local). Returns 1 if found. */
 static inline int64_t mako_session_cancel(MakoString token) {
     if (!token.data || token.len == 0 || token.len >= 40) return 0;
+    mako_sess_cancel_mu_ensure();
     pthread_mutex_lock(&mako_sess_cancel_mu);
     int i = mako_sess_cancel_find(token.data, token.len);
     if (i < 0) {
@@ -1068,6 +1095,7 @@ static inline int64_t mako_session_cancel(MakoString token) {
 /* 1 if token is marked cancelled, else 0. */
 static inline int64_t mako_session_cancelled(MakoString token) {
     if (!token.data || token.len == 0) return 0;
+    mako_sess_cancel_mu_ensure();
     pthread_mutex_lock(&mako_sess_cancel_mu);
     int i = mako_sess_cancel_find(token.data, token.len);
     int64_t r = (i >= 0 && mako_sess_cancel_tab[i].cancelled) ? 1 : 0;
@@ -1077,6 +1105,7 @@ static inline int64_t mako_session_cancelled(MakoString token) {
 
 static inline int64_t mako_session_cancel_clear(MakoString token) {
     if (!token.data || token.len == 0) return 0;
+    mako_sess_cancel_mu_ensure();
     pthread_mutex_lock(&mako_sess_cancel_mu);
     int i = mako_sess_cancel_find(token.data, token.len);
     if (i >= 0) {
