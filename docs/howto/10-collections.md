@@ -101,7 +101,11 @@ fn main() {
 | Channel + scalar tuple | `map[string](chan[int], int)`, `map[int](int, chan[string])` |
 | Channel 3-tuple | `map[string](chan[int], int, int)`, `(int, chan[T], int)` |
 | Nested optional | `map[string]Option[Option[int]]`, `Option[Option[chan[int]]]` |
+| Triple optional | `map[string]Option[Option[Option[int]]]` |
 | Result of optional channel | `map[int]Result[Option[chan[string]],string]` |
+| Option of Result | `map[string]Option[Result[int,string]]`, `Option[Result[chan[int],string]]` |
+| Result of nested optional | `map[string]Result[Option[Option[int]],string]` |
+| Nested Result | `map[string]Result[Result[int,string],string]` |
 
 ```mko
 struct Point { x: int, y: int }
@@ -347,6 +351,7 @@ Pre-size with a hint: `make(map[string]int, 1024)`.
 | `examples/testing/map_chan_nested_slice_tuple_test.mko` | `[][]chan` / `(chan, scalar)` maps |
 | `examples/testing/map_tuple_chan3_test.mko` | 3-tuples with a channel field |
 | `examples/testing/map_nested_option_chan_test.mko` | `Option[Option[…]]` / struct-chan 3-tuples |
+| `examples/testing/map_option_result_nested_test.mko` | `Option[Result]` / triple Option / nested Result maps |
 | `examples/testing/nested_slice_test.mko` | `[][]T` |
 
 ```bash

@@ -8939,7 +8939,7 @@ impl TypeChecker {
                             )
                     )
             ) || matches!(
-                // Option[Option[T]] / Option[Option[chan[T]]] — one extra nest layer
+                // Option[Option[T]] / Option[Option[chan[T]]] / Option[Option[Option[…]]]
                 inner.as_ref(),
                 Type::Option(inner2)
                     if matches!(
@@ -8968,6 +8968,102 @@ impl TypeChecker {
                                     | Type::Float
                                     | Type::String
                                     | Type::Struct { .. }
+                            )
+                    ) || matches!(
+                        // Option[Option[Option[T]]] / Option[Option[Option[chan[T]]]]
+                        inner2.as_ref(),
+                        Type::Option(inner3)
+                            if matches!(
+                                inner3.as_ref(),
+                                Type::Int
+                                    | Type::Int64
+                                    | Type::Int32
+                                    | Type::Int8
+                                    | Type::Byte
+                                    | Type::String
+                                    | Type::Float
+                                    | Type::Bool
+                                    | Type::Struct { .. }
+                                    | Type::Enum { .. }
+                            ) || matches!(
+                                inner3.as_ref(),
+                                Type::Chan(ch)
+                                    if matches!(
+                                        ch.as_ref(),
+                                        Type::Int
+                                            | Type::Int64
+                                            | Type::Int32
+                                            | Type::Int8
+                                            | Type::Byte
+                                            | Type::Bool
+                                            | Type::Float
+                                            | Type::String
+                                            | Type::Struct { .. }
+                                    )
+                            )
+                    )
+            ) || matches!(
+                // Option[Result[T,E]] / Option[Result[chan[T],E]] /
+                // Option[Result[Option[T],E]]
+                inner.as_ref(),
+                Type::Result(inner2, _)
+                    if matches!(
+                        inner2.as_ref(),
+                        Type::Int
+                            | Type::Int64
+                            | Type::Int32
+                            | Type::Int8
+                            | Type::Byte
+                            | Type::String
+                            | Type::Float
+                            | Type::Bool
+                            | Type::Struct { .. }
+                            | Type::Enum { .. }
+                    ) || matches!(
+                        inner2.as_ref(),
+                        Type::Chan(ch)
+                            if matches!(
+                                ch.as_ref(),
+                                Type::Int
+                                    | Type::Int64
+                                    | Type::Int32
+                                    | Type::Int8
+                                    | Type::Byte
+                                    | Type::Bool
+                                    | Type::Float
+                                    | Type::String
+                                    | Type::Struct { .. }
+                            )
+                    ) || matches!(
+                        inner2.as_ref(),
+                        Type::Option(inner3)
+                            if matches!(
+                                inner3.as_ref(),
+                                Type::Int
+                                    | Type::Int64
+                                    | Type::Int32
+                                    | Type::Int8
+                                    | Type::Byte
+                                    | Type::String
+                                    | Type::Float
+                                    | Type::Bool
+                                    | Type::Struct { .. }
+                                    | Type::Enum { .. }
+                            ) || matches!(
+                                inner3.as_ref(),
+                                Type::Chan(ch)
+                                    if matches!(
+                                        ch.as_ref(),
+                                        Type::Int
+                                            | Type::Int64
+                                            | Type::Int32
+                                            | Type::Int8
+                                            | Type::Byte
+                                            | Type::Bool
+                                            | Type::Float
+                                            | Type::String
+                                            | Type::Struct { .. }
+                                    )
                             )
                     )
             ) =>
@@ -9038,7 +9134,40 @@ impl TypeChecker {
                             | Type::Struct { .. }
                     )
             ) || matches!(
-                // Result[Option[T],E] / Result[Option[chan[T]],E]
+                // Result[Result[T,E2],E] / Result[Result[chan[T],E2],E]
+                inner.as_ref(),
+                Type::Result(inner2, _)
+                    if matches!(
+                        inner2.as_ref(),
+                        Type::Int
+                            | Type::Int64
+                            | Type::Int32
+                            | Type::Int8
+                            | Type::Byte
+                            | Type::String
+                            | Type::Float
+                            | Type::Bool
+                            | Type::Struct { .. }
+                            | Type::Enum { .. }
+                    ) || matches!(
+                        inner2.as_ref(),
+                        Type::Chan(ch)
+                            if matches!(
+                                ch.as_ref(),
+                                Type::Int
+                                    | Type::Int64
+                                    | Type::Int32
+                                    | Type::Int8
+                                    | Type::Byte
+                                    | Type::Bool
+                                    | Type::Float
+                                    | Type::String
+                                    | Type::Struct { .. }
+                            )
+                    )
+            ) || matches!(
+                // Result[Option[T],E] / Result[Option[chan[T]],E] /
+                // Result[Option[Option[T]],E]
                 inner.as_ref(),
                 Type::Option(inner2)
                     if matches!(
@@ -9053,6 +9182,37 @@ impl TypeChecker {
                             | Type::Bool
                             | Type::Struct { .. }
                             | Type::Enum { .. }
+                    ) || matches!(
+                        inner2.as_ref(),
+                        Type::Option(inner3)
+                            if matches!(
+                                inner3.as_ref(),
+                                Type::Int
+                                    | Type::Int64
+                                    | Type::Int32
+                                    | Type::Int8
+                                    | Type::Byte
+                                    | Type::String
+                                    | Type::Float
+                                    | Type::Bool
+                                    | Type::Struct { .. }
+                                    | Type::Enum { .. }
+                            ) || matches!(
+                                inner3.as_ref(),
+                                Type::Chan(ch)
+                                    if matches!(
+                                        ch.as_ref(),
+                                        Type::Int
+                                            | Type::Int64
+                                            | Type::Int32
+                                            | Type::Int8
+                                            | Type::Byte
+                                            | Type::Bool
+                                            | Type::Float
+                                            | Type::String
+                                            | Type::Struct { .. }
+                                    )
+                            )
                     ) || matches!(
                         inner2.as_ref(),
                         Type::Chan(ch)
@@ -9133,7 +9293,7 @@ impl TypeChecker {
             }
             _ => Err(TypeError::new(format!(
                 "unsupported map[{}]{} — keys: int|string|float|bool|Struct|Enum; \
-                 values: int|string|float|bool|Struct|Enum|[]T|[][]T|[]Option|[]Result|[]Option[chan]|[]Result[chan]|[]chan|[][]chan|[]map|map[K2]V|map[K2]map[K3]V|Option[T]|Option[[]T]|Option[[]chan]|Option[map]|Option[chan]|Result[T,E]|Result[[]T,E]|Result[[]chan]|Result[map]|Result[chan]|(T,U)|chan[T]",
+                 values: int|string|float|bool|Struct|Enum|[]T|[][]T|[]Option|[]Result|[]Option[chan]|[]Result[chan]|[]chan|[][]chan|[]map|map[K2]V|map[K2]map[K3]V|Option[T]|Option[[]T]|Option[[]chan]|Option[map]|Option[chan]|Option[Option[…]]|Option[Result[…]]|Result[T,E]|Result[[]T,E]|Result[[]chan]|Result[map]|Result[chan]|Result[Option[…]]|Result[Result[…]]|(T,U)|chan[T]",
                 k.display(),
                 v.display()
             ))),
