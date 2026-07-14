@@ -12,7 +12,7 @@
   `chan[Struct|Enum|tuple]` send boxes — reuses POD heap slots under load.
 - Docs: [SPEED.md](docs/SPEED.md) hot-path efficiency table.
 
-### Language — LEBA ergonomics wave 2
+### Language — ergonomics wave 2
 
 - **First-class functions (non-capturing):** `fn` values as params/locals;
   named fns + `|x|` / `fn(x){…}` lambdas; call-through via `void*` + cast.
@@ -21,9 +21,9 @@
 - **`f"…{expr}"` interpolation** with `{{`/`}}` escapes.
 - **Struct field defaults:** `struct S { x: int = 0 }` fills omitted fields.
 - **`chan[(T,U,…)]` / `make(chan[(…)], n)`** via the ptr ring.
-- Tests: `leba_ergonomics_test.mko`.
+- Tests: `lang_ergonomics_test.mko`.
 
-### Language — struct update + POD enum Send (LEBA ergonomics)
+### Language — struct update + POD enum Send
 
 - **Struct update:** `S { field: v, ..base }` and `S { ...base, field: v }` —
   copy base then override listed fields (at most one base).
@@ -420,7 +420,7 @@ Patch release for production edge stability and CI green. `mako version` reports
 
 ### Ops / docs
 
-- **mako-lang.com edge** — deploy script and docs for Leba TLS `:443` → site
+- **mako-lang.com edge** — deploy script and docs for edge TLS `:443` → site
   `:8090` (HTTP/1.1 ALPN until multi-stream H2 is solid on the edge).
 - README / LANGUAGE_SPEC version lines match **0.1.1**.
 

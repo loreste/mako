@@ -56,7 +56,7 @@ fn TestBindAndCall() {
     assert_eq(g("mako"), 4)
 }
 
-// LEBA-style respond hook
+// Shared respond hook (pipeline / reverse-proxy style)
 fn pipeline(respond: fn(int, string) -> int) -> int {
     return respond(200, "ok")
 }

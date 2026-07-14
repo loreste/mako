@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# Redeploy mako-lang.com edge (Leba TLS proxy) + optional site backend.
+# Redeploy mako-lang.com edge TLS proxy + optional site backend.
 #
 # Architecture:
-#   Internet → Leba :443 (TLS terminate, reverse proxy)
+#   Internet → edge TLS proxy :443 (TLS terminate, reverse proxy)
 #            → site :8090 (Mako static/dynamic pages, HTTP/1.1)
 #
 # Host layout (production Contabo VPS):
 #   /opt/mako          language tree (git)
-#   /opt/leba          Leba load balancer (git)
+#   /opt/leba          edge load balancer checkout (git)
 #   /opt/mako-sip/site site binary + site.mko
 #   /etc/systemd/system/leba.service
 #   /etc/systemd/system/mako-site.service
@@ -19,16 +19,16 @@
 # What this does:
 #   1. git pull /opt/mako (runtime fixes, e.g. H2 frame split)
 #   2. cargo build --release for mako (if needed)
-#   3. Rebuild Leba with that mako
-#   4. systemctl restart leba (atomic binary swap)
+#   3. Rebuild the edge proxy with that mako
+#   4. systemctl restart the edge unit (atomic binary swap)
 #   5. curl smoke: ALPN, Content-Type, body size
 #
 # HTTP/2 note:
-#   Prefer ALPN http/1.1 at the edge until Leba H2 multi-stream is solid
+#   Prefer ALPN http/1.1 at the edge until multi-stream H2 is solid
 #   (see runtime/mako_tls.h mako_tls_alpn_cb comment). Browsers then use
 #   HTTP/1.1 and avoid ERR_HTTP2_FRAME_SIZE_ERROR from oversized DATA frames.
 #   When re-enabling h2 in mako-lang.conf (`protocols http/1.1,h2`), rebuild
-#   Leba against a Mako that splits DATA frames ≤16384 (eacbdf6+).
+#   the edge against a Mako that splits DATA frames ≤16384 (eacbdf6+).
 
 set -euo pipefail
 
@@ -59,7 +59,7 @@ if [ ! -x "\$MAKO" ]; then
 fi
 "\$MAKO" --version
 
-echo "==> build leba"
+echo "==> build edge proxy"
 cd "$REMOTE_LEBA"
 export MAKO_RUNTIME="$REMOTE_MAKO/runtime"
 # Point Makefile at host mako if present
@@ -71,7 +71,7 @@ else
 fi
 test -x leba-build
 
-echo "==> install + restart leba"
+echo "==> install + restart edge"
 systemctl stop leba
 cp -a /usr/local/bin/leba "/usr/local/bin/leba.bak.\$(date +%Y%m%d%H%M%S)" || true
 cp -a leba-build /usr/local/bin/leba
@@ -88,9 +88,3 @@ wc -c /tmp/site-smoke.html
 grep -qi 'content-type: text/html' <(curl -sS -I --http1.1 -k https://127.0.0.1/ -H "Host: mako-lang.com") \
   && echo "Content-Type: text/html OK" || echo "WARN: Content-Type not text/html"
 REMOTE
-
-echo "==> public check"
-curl -sS -o /dev/null -w "public %{http_code} size=%{size_download} ct=%{content_type} proto=%{http_version}\n" \
-  --max-time 10 https://mako-lang.com/ || true
-
-echo "done"
