@@ -86,6 +86,14 @@ fn scram_cbind(gs2_header: string, cbind_data: string) -> string {
 fn scram_client_final_bare(cbind_b64: string, nonce: string) -> string {
     return scram_client_final_without_proof(cbind_b64, nonce)
 }
+// SCRAM-SHA-256-PLUS: bind to a live TLS connection's Finished bytes.
+// Crypto core only — apps still run the SCRAM dialogue; this fills c=.
+fn scram_tls_unique_c(conn: TlsConn) -> string {
+    return scram_tls_unique_cbind(conn)
+}
+fn scram_plus_final_bare(conn: TlsConn, nonce: string) -> string {
+    return scram_plus_client_final_bare(conn, nonce)
+}
 fn chacha_encrypt(key: string, nonce: string, pt: string, aad: string) -> string {
     return chacha20_poly1305_seal(key, nonce, pt, aad)
 }

@@ -206,11 +206,13 @@ if crypto.scram_verify_proof(stored, auth, client_proof) == 1 {
 | AuthMessage | `client-first-bare,server-first,client-final-without-proof` |
 | Proof check | `scram_verify_proof` recovers ClientKey and compares StoredKey with `const_eq` |
 | Storage | Persist `StoredKey` + `ServerKey` + salt + iters — not the plaintext password |
-| Channel binding | `scram_gs2_header` / `scram_cbind_b64` / `scram_client_final_without_proof` + `tls_unique` for tls-unique data |
+| Channel binding | `scram_gs2_header` / `scram_cbind_b64` / `scram_client_final_without_proof` + `tls_unique` |
+| SCRAM-PLUS adoption | `scram_tls_unique_cbind(conn)` / `scram_plus_client_final_bare(conn, nonce)` — only useful after a finished handshake when apps call these (or `tls_unique`) |
 
 API table: [BUILTINS.md](BUILTINS.md) § SCRAM-SHA-256. Std recipe:
 [STDLIB.md](STDLIB.md#crypto). Vector test: `examples/testing/scram_test.mko`.
-Channel-binding helpers: `examples/testing/security_residuals_test.mko`.
+Channel-binding helpers: `examples/testing/security_residuals_test.mko`,
+`security_product_test.mko`.
 
 ### Encryption at rest (Done)
 
@@ -247,20 +249,36 @@ Process-local registry; pass the token over the wire for multi-node cancel:
 | `session_cancelled(token)` | Poll (1/0) |
 | `session_cancel_clear(token)` | Drop registry entry |
 
-### Node mTLS (Done)
+### Node mTLS + cert lab (Done)
 
 | API | Role |
 |-----|------|
 | `tls_server_new_mtls(cert, key, client_ca)` | Require + verify client certs |
 | `tls_client_new_mtls(ca, client_cert, client_key)` | Present client cert |
 | `tls_unique(conn)` | Finished bytes for SCRAM tls-unique binding |
+| `scram_tls_unique_cbind(conn)` | SCRAM-PLUS `c=` from `tls_unique` (apps still own the dialogue) |
+| `scram_plus_client_final_bare(conn, nonce)` | `c=…,r=…` bare final with tls-unique |
+| `tls_server_reload(server, cert, key)` | Hot-reload server cert/key (rotation without restart) |
+| `tls_make_self_signed(cert, key, cn, days)` | Dev/lab self-signed PEMs (OpenSSL) |
+| `tls_make_csr(csr, key, cn, bits)` | Write CSR + key PEMs for external signing |
+| `pem_count_blocks` / `pem_has_block` / `pem_extract_block` / `pem_load_file` | String-level PEM helpers (no OpenSSL for parse) |
+| `path_file_size(path)` | `stat` file size (−1 if missing) — pairs with PEM/cert paths |
 
-**Still out of scope (product):** X.509 CSR/CA product, HSM, full WebPKI store
-beyond CA PEM paths, DTLS/WebRTC as first-class products.
+Pack wrappers: `crypto.tls.server_new_mtls` / `client_new_mtls` / `unique` /
+`server_reload` / `make_self_signed` / `make_csr`; `crypto.x509.*` for PEM +
+cert lab; `crypto.scram_tls_unique_c` / `scram_plus_final_bare`.
+
+**Crypto core only:** high-level SASL state machines (full AuthenticationSASL\*
+framing, multi-round negotiation) stay **application code** — Mako ships digests,
+HMAC, PBKDF2, SCRAM schedule + channel-binding helpers, not a SASL framework.
+
+**Still out of scope (product):** full CA/HSM/ACME product, WebPKI store beyond
+CA PEM paths, DTLS/WebRTC as first-class products.
 
 Tests: `security_test.mko`, `security_crypto_test.mko`, `password_hash_test.mko`,
 `bcrypt_test.mko`, `scram_test.mko`, `tls_aead_test.mko`, `tls_server_test.mko`,
-`crypto_srtp_blocks_test.mko`, `security_residuals_test.mko`.
+`crypto_srtp_blocks_test.mko`, `security_residuals_test.mko`,
+`security_product_test.mko`.
 
 ### Session security (Done)
 

@@ -11932,6 +11932,12 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             self.line(&format!("int64_t {tmp} = mako_file_size({f});"));
                             return ("int64_t".into(), tmp);
                         }
+                        "path_file_size" => {
+                            let (_, p) = self.emit_expr(&args[0]);
+                            let tmp = self.fresh("pfsz");
+                            self.line(&format!("int64_t {tmp} = mako_path_file_size({p});"));
+                            return ("int64_t".into(), tmp);
+                        }
                         "file_truncate" => {
                             let (_, f) = self.emit_expr(&args[0]);
                             let (_, s) = self.emit_expr(&args[1]);
@@ -16581,6 +16587,11 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             self.line(&format!("MakoString {tmp} = mako_trace_id();"));
                             return ("MakoString".into(), tmp);
                         }
+                        "trace_export_json" => {
+                            let tmp = self.fresh("tej");
+                            self.line(&format!("MakoString {tmp} = mako_trace_export_json();"));
+                            return ("MakoString".into(), tmp);
+                        }
                         "trace_current" => {
                             let tmp = self.fresh("tcur");
                             self.line(&format!("MakoString {tmp} = mako_trace_current();"));
@@ -17119,6 +17130,9 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         }
                         "metrics_export" => {
                             return ("MakoString".into(), "mako_metrics_export()".into());
+                        }
+                        "metrics_export_prom" => {
+                            return ("MakoString".into(), "mako_metrics_export_prom()".into());
                         }
                         "share_int" => {
                             let (_, v) = self.emit_expr(&args[0]);
@@ -21368,6 +21382,79 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             self.line(&format!(
                                 "MakoString {tmp} = mako_tls_unique({c});"
                             ));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "scram_tls_unique_cbind" => {
+                            let (_, c) = self.emit_expr(&args[0]);
+                            let tmp = self.fresh("scbind");
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_scram_tls_unique_cbind({c});"
+                            ));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "scram_plus_client_final_bare" => {
+                            let (_, c) = self.emit_expr(&args[0]);
+                            let (_, n) = self.emit_expr(&args[1]);
+                            let tmp = self.fresh("scbare");
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_scram_plus_client_final_bare({c}, {n});"
+                            ));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "tls_server_reload" => {
+                            let (_, s) = self.emit_expr(&args[0]);
+                            let (_, c) = self.emit_expr(&args[1]);
+                            let (_, k) = self.emit_expr(&args[2]);
+                            let tmp = self.fresh("treload");
+                            self.line(&format!(
+                                "int64_t {tmp} = mako_tls_server_reload({s}, {c}, {k});"
+                            ));
+                            return ("int64_t".into(), tmp);
+                        }
+                        "tls_make_self_signed" => {
+                            let (_, c) = self.emit_expr(&args[0]);
+                            let (_, k) = self.emit_expr(&args[1]);
+                            let (_, cn) = self.emit_expr(&args[2]);
+                            let (_, d) = self.emit_expr(&args[3]);
+                            let tmp = self.fresh("tss");
+                            self.line(&format!(
+                                "int64_t {tmp} = mako_tls_make_self_signed({c}, {k}, {cn}, {d});"
+                            ));
+                            return ("int64_t".into(), tmp);
+                        }
+                        "tls_make_csr" => {
+                            let (_, c) = self.emit_expr(&args[0]);
+                            let (_, k) = self.emit_expr(&args[1]);
+                            let (_, cn) = self.emit_expr(&args[2]);
+                            let (_, b) = self.emit_expr(&args[3]);
+                            let tmp = self.fresh("tcsr");
+                            self.line(&format!(
+                                "int64_t {tmp} = mako_tls_make_csr({c}, {k}, {cn}, {b});"
+                            ));
+                            return ("int64_t".into(), tmp);
+                        }
+                        "pem_count_blocks" => {
+                            let (_, p) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_pem_count_blocks({p})"));
+                        }
+                        "pem_has_block" => {
+                            let (_, p) = self.emit_expr(&args[0]);
+                            let (_, l) = self.emit_expr(&args[1]);
+                            return ("int64_t".into(), format!("mako_pem_has_block({p}, {l})"));
+                        }
+                        "pem_extract_block" => {
+                            let (_, p) = self.emit_expr(&args[0]);
+                            let (_, l) = self.emit_expr(&args[1]);
+                            let tmp = self.fresh("pemx");
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_pem_extract_block({p}, {l});"
+                            ));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "pem_load_file" => {
+                            let (_, p) = self.emit_expr(&args[0]);
+                            let tmp = self.fresh("peml");
+                            self.line(&format!("MakoString {tmp} = mako_pem_load_file({p});"));
                             return ("MakoString".into(), tmp);
                         }
                         "tls_accept" => {

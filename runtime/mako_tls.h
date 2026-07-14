@@ -19,6 +19,9 @@ extern "C" {
 #ifdef MAKO_TLS_REAL
 
 #include <openssl/evp.h>
+#include <openssl/pem.h>
+#include <openssl/x509.h>
+#include <openssl/rsa.h>
 
 /* Buffer AEAD (AES-128-GCM) — not TLS record AEAD / handshake.
  * seal: key=16B, nonce=12B → ciphertext||tag(16)
@@ -631,6 +634,173 @@ static inline MakoString mako_tls_unique(void *conn) {
     memcpy(d, buf, n);
     d[n] = 0;
     return (MakoString){d, n};
+}
+
+/* SCRAM-SHA-256-PLUS c= attribute: base64(gs2 "p=tls-unique,," || Finished). */
+static inline MakoString mako_scram_tls_unique_cbind(void *conn) {
+    MakoString gs2 = mako_scram_gs2_header(mako_str_from_cstr("tls-unique"));
+    MakoString fin = mako_tls_unique(conn);
+    MakoString c = mako_scram_cbind_b64(gs2, fin);
+    free(gs2.data);
+    free(fin.data);
+    return c;
+}
+
+/* client-final-without-proof using tls-unique binding from a live conn. */
+static inline MakoString mako_scram_plus_client_final_bare(void *conn, MakoString nonce) {
+    MakoString c = mako_scram_tls_unique_cbind(conn);
+    MakoString bare = mako_scram_client_final_without_proof(c, nonce);
+    free(c.data);
+    return bare;
+}
+
+/* Hot-reload server cert+key on an existing SSL_CTX (cert rotation). */
+static inline int64_t mako_tls_server_reload(void *server, MakoString cert, MakoString key) {
+    if (!server) return -1;
+    SSL_CTX *ctx = (SSL_CTX *)server;
+    char cbuf[512], kbuf[512];
+    if (!cert.data || cert.len == 0 || cert.len >= sizeof(cbuf)
+        || !key.data || key.len == 0 || key.len >= sizeof(kbuf))
+        return -1;
+    memcpy(cbuf, cert.data, cert.len);
+    cbuf[cert.len] = 0;
+    memcpy(kbuf, key.data, key.len);
+    kbuf[key.len] = 0;
+    if (SSL_CTX_use_certificate_file(ctx, cbuf, SSL_FILETYPE_PEM) != 1) return -1;
+    if (SSL_CTX_use_PrivateKey_file(ctx, kbuf, SSL_FILETYPE_PEM) != 1) return -1;
+    if (SSL_CTX_check_private_key(ctx) != 1) return -1;
+    return 0;
+}
+
+/* Write a self-signed cert+key PEM pair for dev/mTLS lab (RSA 2048). */
+static inline int64_t mako_tls_make_self_signed(MakoString cert_path, MakoString key_path,
+                                               MakoString cn, int64_t days) {
+    if (!cert_path.data || !key_path.data || cert_path.len >= 512 || key_path.len >= 512)
+        return -1;
+    if (days <= 0) days = 365;
+    char cpath[512], kpath[512], cnbuf[256];
+    memcpy(cpath, cert_path.data, cert_path.len);
+    cpath[cert_path.len] = 0;
+    memcpy(kpath, key_path.data, key_path.len);
+    kpath[key_path.len] = 0;
+    size_t cnl = cn.data && cn.len ? cn.len : 9;
+    if (cnl >= sizeof(cnbuf)) cnl = sizeof(cnbuf) - 1;
+    if (cn.data && cn.len)
+        memcpy(cnbuf, cn.data, cnl);
+    else
+        memcpy(cnbuf, "localhost", 9);
+    cnbuf[cnl] = 0;
+
+    EVP_PKEY *pkey = NULL;
+    EVP_PKEY_CTX *pctx = EVP_PKEY_CTX_new_id(EVP_PKEY_RSA, NULL);
+    if (!pctx) return -1;
+    if (EVP_PKEY_keygen_init(pctx) <= 0
+        || EVP_PKEY_CTX_set_rsa_keygen_bits(pctx, 2048) <= 0
+        || EVP_PKEY_keygen(pctx, &pkey) <= 0) {
+        EVP_PKEY_CTX_free(pctx);
+        return -1;
+    }
+    EVP_PKEY_CTX_free(pctx);
+
+    X509 *x = X509_new();
+    if (!x) {
+        EVP_PKEY_free(pkey);
+        return -1;
+    }
+    ASN1_INTEGER_set(X509_get_serialNumber(x), 1);
+    X509_gmtime_adj(X509_get_notBefore(x), 0);
+    X509_gmtime_adj(X509_get_notAfter(x), (long)(days * 24 * 3600));
+    X509_set_pubkey(x, pkey);
+    X509_NAME *name = X509_get_subject_name(x);
+    X509_NAME_add_entry_by_txt(name, "CN", MBSTRING_ASC,
+                               (const unsigned char *)cnbuf, -1, -1, 0);
+    X509_set_issuer_name(x, name);
+    if (!X509_sign(x, pkey, EVP_sha256())) {
+        X509_free(x);
+        EVP_PKEY_free(pkey);
+        return -1;
+    }
+
+    FILE *kf = fopen(kpath, "wb");
+    FILE *cf = fopen(cpath, "wb");
+    if (!kf || !cf) {
+        if (kf) fclose(kf);
+        if (cf) fclose(cf);
+        X509_free(x);
+        EVP_PKEY_free(pkey);
+        return -1;
+    }
+    int ok = PEM_write_PrivateKey(kf, pkey, NULL, NULL, 0, NULL, NULL) == 1
+             && PEM_write_X509(cf, x) == 1;
+    fclose(kf);
+    fclose(cf);
+    X509_free(x);
+    EVP_PKEY_free(pkey);
+    return ok ? 0 : -1;
+}
+
+/* Write RSA key + CSR PEM for cert rotation workflows. */
+static inline int64_t mako_tls_make_csr(MakoString csr_path, MakoString key_path,
+                                       MakoString cn, int64_t bits) {
+    if (!csr_path.data || !key_path.data || csr_path.len >= 512 || key_path.len >= 512)
+        return -1;
+    if (bits < 2048) bits = 2048;
+    if (bits > 4096) bits = 4096;
+    char cpath[512], kpath[512], cnbuf[256];
+    memcpy(cpath, csr_path.data, csr_path.len);
+    cpath[csr_path.len] = 0;
+    memcpy(kpath, key_path.data, key_path.len);
+    kpath[key_path.len] = 0;
+    size_t cnl = cn.data && cn.len ? cn.len : 9;
+    if (cnl >= sizeof(cnbuf)) cnl = sizeof(cnbuf) - 1;
+    if (cn.data && cn.len)
+        memcpy(cnbuf, cn.data, cnl);
+    else
+        memcpy(cnbuf, "localhost", 9);
+    cnbuf[cnl] = 0;
+
+    EVP_PKEY *pkey = NULL;
+    EVP_PKEY_CTX *pctx = EVP_PKEY_CTX_new_id(EVP_PKEY_RSA, NULL);
+    if (!pctx) return -1;
+    if (EVP_PKEY_keygen_init(pctx) <= 0
+        || EVP_PKEY_CTX_set_rsa_keygen_bits(pctx, (int)bits) <= 0
+        || EVP_PKEY_keygen(pctx, &pkey) <= 0) {
+        EVP_PKEY_CTX_free(pctx);
+        return -1;
+    }
+    EVP_PKEY_CTX_free(pctx);
+
+    X509_REQ *req = X509_REQ_new();
+    if (!req) {
+        EVP_PKEY_free(pkey);
+        return -1;
+    }
+    X509_REQ_set_pubkey(req, pkey);
+    X509_NAME *name = X509_REQ_get_subject_name(req);
+    X509_NAME_add_entry_by_txt(name, "CN", MBSTRING_ASC,
+                               (const unsigned char *)cnbuf, -1, -1, 0);
+    if (!X509_REQ_sign(req, pkey, EVP_sha256())) {
+        X509_REQ_free(req);
+        EVP_PKEY_free(pkey);
+        return -1;
+    }
+
+    FILE *kf = fopen(kpath, "wb");
+    FILE *cf = fopen(cpath, "wb");
+    if (!kf || !cf) {
+        if (kf) fclose(kf);
+        if (cf) fclose(cf);
+        X509_REQ_free(req);
+        EVP_PKEY_free(pkey);
+        return -1;
+    }
+    int ok = PEM_write_PrivateKey(kf, pkey, NULL, NULL, 0, NULL, NULL) == 1
+             && PEM_write_X509_REQ(cf, req) == 1;
+    fclose(kf);
+    fclose(cf);
+    X509_REQ_free(req);
+    EVP_PKEY_free(pkey);
+    return ok ? 0 : -1;
 }
 
 /* Client context with SSL_VERIFY_NONE — demos / self-signed only. */
@@ -3391,6 +3561,22 @@ static inline void *mako_tls_client_new_mtls(MakoString ca, MakoString cert, Mak
 }
 static inline MakoString mako_tls_unique(void *conn) {
     (void)conn; return mako_str_from_cstr("");
+}
+static inline MakoString mako_scram_tls_unique_cbind(void *conn) {
+    (void)conn; return mako_str_from_cstr("");
+}
+static inline MakoString mako_scram_plus_client_final_bare(void *conn, MakoString nonce) {
+    (void)conn; (void)nonce; return mako_str_from_cstr("");
+}
+static inline int64_t mako_tls_server_reload(void *server, MakoString cert, MakoString key) {
+    (void)server; (void)cert; (void)key; return -1;
+}
+static inline int64_t mako_tls_make_self_signed(MakoString c, MakoString k, MakoString cn,
+                                               int64_t days) {
+    (void)c; (void)k; (void)cn; (void)days; return -1;
+}
+static inline int64_t mako_tls_make_csr(MakoString c, MakoString k, MakoString cn, int64_t bits) {
+    (void)c; (void)k; (void)cn; (void)bits; return -1;
 }
 static inline void *mako_tls_accept(void *ctx, int64_t fd) {
     (void)ctx; (void)fd; return NULL;

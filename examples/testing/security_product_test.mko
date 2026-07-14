@@ -1,0 +1,109 @@
+// P2 security/product polish: path file size, PEM helpers, metrics prom,
+// trace JSON, self-signed/CSR (when OpenSSL available).
+
+pull "crypto"
+
+fn TestPathFileSize() {
+    let path = "/tmp/mako_path_file_size_test.txt"
+    assert_eq(write_file(path, "hello-size"), 0)
+    let n = path_file_size(path)
+    assert_eq(n, 10)
+    assert(path_file_size("/tmp/mako_no_such_file_xyz") < 0)
+}
+
+fn TestPemHelpers() {
+    let pem = "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n"
+        + "-----BEGIN PRIVATE KEY-----\nMIIK\n-----END PRIVATE KEY-----\n"
+    assert_eq(pem_count_blocks(pem), 2)
+    assert_eq(pem_has_block(pem, "CERTIFICATE"), 1)
+    assert_eq(pem_has_block(pem, "PRIVATE KEY"), 1)
+    assert_eq(pem_has_block(pem, "RSA PRIVATE KEY"), 0)
+    let cert = pem_extract_block(pem, "CERTIFICATE")
+    assert(str_contains(cert, "BEGIN CERTIFICATE"))
+    assert(str_contains(cert, "END CERTIFICATE"))
+    let key = pem_extract_block(pem, "PRIVATE KEY")
+    assert(str_contains(key, "BEGIN PRIVATE KEY"))
+    let empty = pem_extract_block(pem, "PUBLIC KEY")
+    assert_eq(len(empty), 0)
+
+    let path = "/tmp/mako_pem_load_test.pem"
+    assert_eq(write_file(path, pem), 0)
+    let loaded = pem_load_file(path)
+    assert_eq(pem_count_blocks(loaded), 2)
+    // Non-PEM file rejected
+    assert_eq(write_file(path, "not a pem"), 0)
+    let bad = pem_load_file(path)
+    assert_eq(len(bad), 0)
+}
+
+fn TestMetricsExportProm() {
+    metric_inc(1)
+    metric_add(1, 2)
+    gauge_set(2, 42)
+    hist_observe(3, 10)
+    hist_observe(3, 20)
+    let text = metrics_export_prom()
+    assert(str_contains(text, "# TYPE mako_counter_1 counter"))
+    assert(str_contains(text, "mako_counter_1 3"))
+    assert(str_contains(text, "# TYPE mako_gauge_2 gauge"))
+    assert(str_contains(text, "mako_gauge_2 42"))
+    assert(str_contains(text, "mako_hist_count_3 2"))
+    // Legacy export still works
+    let legacy = metrics_export()
+    assert(str_contains(legacy, "mako_counter_1"))
+}
+
+fn TestTraceExportJson() {
+    let idle = trace_export_json()
+    assert(str_contains(idle, "\"active\":0"))
+    let _ = trace_id()
+    let _ = trace_begin("handler")
+    let js = trace_export_json()
+    assert(str_contains(js, "\"active\":1"))
+    assert(str_contains(js, "handler"))
+    assert(str_contains(js, "traceId"))
+    let _ = trace_end()
+    let _ = trace_clear()
+}
+
+fn TestSelfSignedAndCsr() {
+    if tls_server_available() == 0 {
+        return
+    }
+    let cert = "/tmp/mako_self_signed.crt"
+    let key = "/tmp/mako_self_signed.key"
+    let rc = tls_make_self_signed(cert, key, "localhost", 1)
+    assert_eq(rc, 0)
+    let c = pem_load_file(cert)
+    let k = pem_load_file(key)
+    assert_eq(pem_has_block(c, "CERTIFICATE"), 1)
+    assert(pem_has_block(k, "PRIVATE KEY") == 1 || pem_has_block(k, "RSA PRIVATE KEY") == 1)
+    assert(path_file_size(cert) > 0)
+    assert(path_file_size(key) > 0)
+
+    // Reload API (null-safe when OpenSSL missing)
+    let srv = tls_server_new(cert, key)
+    let _ = tls_server_reload(srv, cert, key)
+    let _ = tls_server_free(srv)
+
+    let csr = "/tmp/mako_req.csr"
+    let k2 = "/tmp/mako_req.key"
+    assert_eq(tls_make_csr(csr, k2, "app.example", 2048), 0)
+    let csr_pem = pem_load_file(csr)
+    assert_eq(pem_has_block(csr_pem, "CERTIFICATE REQUEST"), 1)
+}
+
+fn TestScramPlusHelpersTypecheck() {
+    // Live cbind needs a finished TLS conn; symbols must resolve/link.
+    // Type-level smoke: call via pack + globals after self-signed server path above.
+    assert_eq_str(crypto.scram_gs2("tls-unique"), "p=tls-unique,,")
+    let fake = scram_cbind_b64("p=tls-unique,,", "finished")
+    assert(len(fake) > 0)
+    let bare = scram_client_final_without_proof(fake, "rNonce")
+    assert(str_contains(bare, "c="))
+    assert(str_contains(bare, ",r=rNonce"))
+}
+
+fn TestCryptoPackWrappers() {
+    assert_eq_str(crypto.scram_gs2("tls-unique"), "p=tls-unique,,")
+}

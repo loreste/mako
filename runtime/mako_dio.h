@@ -18,6 +18,7 @@ static inline int64_t mako_fsync(int64_t f) { (void)f; return -1; }
 static inline int64_t mako_fdatasync(int64_t f) { (void)f; return -1; }
 static inline int64_t mako_fallocate(int64_t f, int64_t s) { (void)f;(void)s; return -1; }
 static inline int64_t mako_file_size(int64_t f) { (void)f; return -1; }
+static inline int64_t mako_path_file_size(MakoString p) { (void)p; return -1; }
 static inline int64_t mako_file_truncate(int64_t f, int64_t s) { (void)f;(void)s; return -1; }
 static inline int64_t mako_file_seek(int64_t f, int64_t o, int64_t w) { (void)f;(void)o;(void)w; return -1; }
 static inline MakoString mako_file_read_exact(int64_t f, int64_t n) { (void)f;(void)n; return mako_str_from_cstr(""); }
@@ -320,6 +321,17 @@ static inline int64_t mako_file_size(int64_t fd) {
     if (fd < 0) return -1;
     struct stat st;
     if (fstat((int)fd, &st) < 0) return -1;
+    return (int64_t)st.st_size;
+}
+
+/* Get file size by path (stat). -1 on error / missing. */
+static inline int64_t mako_path_file_size(MakoString path) {
+    if (!path.data || path.len == 0 || path.len >= 4096) return -1;
+    char buf[4096];
+    memcpy(buf, path.data, path.len);
+    buf[path.len] = 0;
+    struct stat st;
+    if (stat(buf, &st) < 0) return -1;
     return (int64_t)st.st_size;
 }
 

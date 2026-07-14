@@ -396,13 +396,16 @@ if crypto.scram_verify_proof(stored_key, auth_message, client_proof) == 1 {
 
 Helpers: `scram_salted_password`, `scram_client_key`, `scram_server_key`,
 `scram_stored_key`, `scram_client_signature`, `scram_server_signature`,
-`scram_client_proof`, `scram_verify_proof`. There is no
-`scram_client_first` / full SASL state machine in std — applications own the
-pgwire AuthenticationSASL\* messages (see FayDB columnar server for a full
-wire path).
+`scram_client_proof`, `scram_verify_proof`. Channel binding / SCRAM-PLUS seeds:
+`scram_gs2` / `scram_cbind` / `scram_client_final_bare`, plus
+`scram_tls_unique_c(conn)` / `scram_plus_final_bare(conn, nonce)` after a finished
+TLS handshake (`tls_unique`). There is no full SASL state machine in std —
+applications own the pgwire AuthenticationSASL\* messages (see FayDB for a
+full wire path). **Crypto core only.**
 
 The implementation is checked byte-for-byte against the RFC 7677 test vector
-(`examples/testing/scram_test.mko`).
+(`examples/testing/scram_test.mko`); product polish in
+`security_product_test.mko`.
 
 ---
 

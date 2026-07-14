@@ -160,7 +160,8 @@ High-level HTTP server with declarative routing:
 | `jpeg_encode_gray_dct` / `gif_encode_rgb_lzw` | image |
 | `slog_*` / `log_*` | strong structured logging (`mako_log.h`: JSON/logfmt, levels, multi-field) |
 | `slog_redact` / `slog_with_redacted` / `slog_set_json` / `slog_set_output` | redaction, format, file sink |
-| `metric_*` / `gauge_*` / `hist_*` / `metrics_export` | process-local observability metrics |
+| `metric_*` / `gauge_*` / `hist_*` / `metrics_export` / `metrics_export_prom` | process-local metrics + Prometheus text |
+| `trace_id` / `begin` / `end` / `trace_export_json` | span-lite tracing + OTel-ish JSON seed |
 | `validate_required` / `validate_*_len` / `validate_int_range` / `validate_email` | backend request validation |
 | `game_fixed_steps` / `game_fixed_remainder` / `game_alpha` / `game_frame_budget_ok` | fixed-timestep game-loop helpers |
 | `fx_*` / `det_rng_*` / `replay_*` | deterministic simulation math, RNG, and replay streams |
@@ -190,7 +191,8 @@ Low-level unbuffered file operations and memory-mapped files (`runtime/mako_dio.
 | `file_append` | append to fd |
 | `fsync` / `fdatasync` | flush to disk (data+meta / data-only) |
 | `fallocate` / `file_truncate` | pre-allocate / truncate |
-| `file_size` / `file_seek` / `file_read_exact` | size, seek, exact read |
+| `file_size` / `file_seek` / `file_read_exact` | fd size, seek, exact read |
+| `path_file_size` | `stat` path size (−1 if missing; no open required) |
 | `mmap_open` / `mmap_create` | map existing or new file |
 | `mmap_read` / `mmap_write` / `mmap_sync` | read/write/flush mapping |
 | `mmap_size` / `mmap_close` | size / unmap |
@@ -450,7 +452,8 @@ session controls (`tcp_set_timeout`, `tcp_keepalive`, `tcp_nodelay`,
 | Overflow | `checked_add` / `sub` / `mul` (abort), `would_overflow_*`, `--overflow trap` |
 | Shutdown | `signal_on_term`, `server_drain`, `register_listener`, `shutdown_requested` |
 | Leak | `leak_scope_enter` / `exit`, `leak_check` (+ `leak_mark` / `bytes_since`) |
-| Trace | `trace_id` / `set` / `current` / `begin` / `end` / `log` |
+| Trace | `trace_id` / `set` / `current` / `begin` / `end` / `log` / `trace_export_json` |
+| Metrics | `metric_*` / `gauge_*` / `hist_*` / `metrics_export` / `metrics_export_prom` |
 | Logs + trace | `log_*` and `slog_with` print `trace=<hex>` when a trace is active |
 
 See [BUILTINS.md](BUILTINS.md) §§71–75 and [CLI.md](CLI.md) (`mako dev`, `--race`).
@@ -768,10 +771,27 @@ if crypto.scram_verify_proof(stored_key, auth, client_proof) == 1 {
 | `scram_stored_key` | `SHA256(client_key)` — what you may persist |
 | `scram_client_proof` / `scram_verify_proof` | XOR proof + server check (1/0) |
 | `scram_client_signature` / `scram_server_signature` | `HMAC(key, AuthMessage)` |
+| `scram_gs2` / `scram_cbind` / `scram_client_final_bare` | Channel-binding message fragments |
+| `scram_tls_unique_c` / `scram_plus_final_bare` | SCRAM-PLUS from live `TlsConn` (`tls_unique`) |
 
 RFC 7677 vector: `examples/testing/scram_test.mko`. Full Postgres wire
-(SASLInitialResponse / SASLContinue / SASLFinal) is application code (e.g.
-FayDB columnar server).
+(SASLInitialResponse / SASLContinue / SASLFinal) is **intentionally application
+code** (e.g. FayDB) — Mako is **crypto core only**, not a SASL state machine.
+
+### PEM + cert lab (`pull "crypto"` → `crypto.x509` / `crypto.tls`)
+
+String-level PEM helpers (no OpenSSL required for parse) plus thin OpenSSL
+writers for self-signed / CSR / reload:
+
+| Helper | Role |
+|--------|------|
+| `crypto.x509.count_blocks` / `has_block` / `extract_block` / `load_file` | PEM inspect + load |
+| `crypto.x509.make_self_signed` / `make_csr` | Write PEMs for lab / rotation workflows |
+| `crypto.tls.server_reload` | Hot-reload cert+key on an existing server ctx |
+| `crypto.tls.server_new_mtls` / `client_new_mtls` / `unique` | mTLS + tls-unique |
+
+Not a CA product: no HSM, ACME, or full WebPKI store. Tests:
+`security_product_test.mko`, `security_residuals_test.mko`.
 
 ### Key derivation
 

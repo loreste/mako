@@ -2,7 +2,19 @@
 
 ## Unreleased
 
-(none yet)
+### Stdlib / security product polish (P2)
+
+- **`path_file_size(path)`** — size via `stat` (−1 if missing).
+- **PEM helpers** — `pem_count_blocks` / `pem_has_block` / `pem_extract_block` /
+  `pem_load_file` (string-level, no OpenSSL required for parse).
+- **TLS cert lab** — `tls_make_self_signed`, `tls_make_csr`, `tls_server_reload`
+  (OpenSSL when linked); pack wrappers under `crypto.tls` / `crypto.x509`.
+- **SCRAM-PLUS adoption** — `scram_tls_unique_cbind` /
+  `scram_plus_client_final_bare` (use after handshake with `tls_unique`).
+- **Observability** — `metrics_export_prom` (Prometheus text),
+  `trace_export_json` (OTel-ish span JSON).
+- **Docs:** SECURITY “crypto core only” (no high-level SASL SM); BUILTINS tables.
+- Tests: `security_product_test`.
 
 ## 0.1.2 — 2026-07-14
 
