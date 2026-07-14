@@ -173,7 +173,22 @@ pub enum TypeExpr {
 impl fmt::Display for TypeExpr {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            TypeExpr::Named(n) => write!(f, "{n}"),
+            // Import rewrite stores pack types as `alias__Name`; surface form is `alias.Name`.
+            TypeExpr::Named(n) => {
+                if let Some((pkg, ty)) = n.split_once("__") {
+                    if !pkg.is_empty()
+                        && !ty.is_empty()
+                        && !ty.contains("__")
+                        && pkg
+                            .chars()
+                            .all(|c| c.is_ascii_alphanumeric() || c == '_')
+                        && ty.chars().next().is_some_and(|c| c.is_ascii_uppercase())
+                    {
+                        return write!(f, "{pkg}.{ty}");
+                    }
+                }
+                write!(f, "{n}")
+            }
             TypeExpr::Generic(n, args) => {
                 write!(f, "{n}[")?;
                 for (i, a) in args.iter().enumerate() {

@@ -8569,11 +8569,20 @@ impl TypeChecker {
 
     fn check_map_kv(k: &Type, v: &Type) -> Result<(), TypeError> {
         match (k, v) {
-            (Type::String, Type::Int) | (Type::Int, Type::Int) | (Type::String, Type::String) => {
-                Ok(())
-            }
+            (Type::String, Type::Int)
+            | (Type::Int, Type::Int)
+            | (Type::String, Type::String)
+            | (Type::Int, Type::Float)
+            | (Type::String, Type::Float)
+            | (Type::Float, Type::Int)
+            | (Type::Float, Type::String)
+            | (Type::Float, Type::Float) => Ok(()),
+            // Named user structs as values (any scalar key) or as keys (scalar values).
+            (Type::Int | Type::String | Type::Float, Type::Struct { .. }) => Ok(()),
+            (Type::Struct { .. }, Type::Int | Type::String | Type::Float) => Ok(()),
             _ => Err(TypeError::new(format!(
-                "unsupported map[{}]{} — supported: map[string]int, map[int]int, map[string]string",
+                "unsupported map[{}]{} — keys: int|string|float|Struct; values: int|string|float|Struct \
+                 (map[Struct]Struct not yet; use scalar values with struct keys)",
                 k.display(),
                 v.display()
             ))),
@@ -8777,6 +8786,35 @@ impl TypeChecker {
             }
         }
         None
+    }
+
+    /// Pack-qualified enum variant: after `pull`, enum types are `eng__Color` and
+    /// variants stay bare (`Red`, `Green`). `eng.Green` / `eng.Color.Red` only
+    /// apply when `eng` is not a value binding and the variant belongs to an
+    /// enum whose mangled name starts with `eng__`.
+    fn pack_variant_ctor(&self, alias: &str, variant: &str) -> Option<&VariantCtor> {
+        if self.lookup(alias).is_some() {
+            return None;
+        }
+        let ctor = self.variants.get(variant)?;
+        let prefix = format!("{alias}__");
+        if ctor.enum_name.starts_with(&prefix) {
+            Some(ctor)
+        } else {
+            None
+        }
+    }
+
+    /// `eng.Color` type path → mangled enum name when `eng` is a pack alias.
+    fn pack_enum_type_name(&self, alias: &str, ty_name: &str) -> Option<String> {
+        if self.lookup(alias).is_some() {
+            return None;
+        }
+        let mangled = format!("{alias}__{ty_name}");
+        match self.types.get(&mangled) {
+            Some(Type::Enum { .. }) => Some(mangled),
+            _ => None,
+        }
     }
 
     fn check_fn(&mut self, f: &FnDef) -> Result<(), TypeError> {
@@ -11045,6 +11083,89 @@ impl TypeChecker {
                                 ))),
                             };
                         }
+                        "maps_keys" if args.len() == 1 => {
+                            let t = self.check_expr(&args[0])?;
+                            return match t {
+                                Type::Map(k, _) if matches!(k.as_ref(), Type::String) => {
+                                    Ok(Type::Array(Box::new(Type::String)))
+                                }
+                                Type::Map(k, _) if matches!(k.as_ref(), Type::Int) => {
+                                    Ok(Type::Array(Box::new(Type::Int)))
+                                }
+                                Type::Map(k, _) if matches!(k.as_ref(), Type::Float) => {
+                                    Ok(Type::Array(Box::new(Type::Float)))
+                                }
+                                Type::Map(k, _) if matches!(k.as_ref(), Type::Struct { .. }) => {
+                                    Ok(Type::Array(k))
+                                }
+                                other => Err(TypeError::new(format!(
+                                    "maps_keys needs a map, got {}",
+                                    other.display()
+                                ))),
+                            };
+                        }
+                        "maps_values" if args.len() == 1 => {
+                            let t = self.check_expr(&args[0])?;
+                            return match t {
+                                Type::Map(_, v) => Ok(Type::Array(v)),
+                                other => Err(TypeError::new(format!(
+                                    "maps_values needs a map, got {}",
+                                    other.display()
+                                ))),
+                            };
+                        }
+                        "maps_clear" if args.len() == 1 => {
+                            let t = self.check_expr(&args[0])?;
+                            return match t {
+                                Type::Map(_, _) => Ok(Type::Void),
+                                other => Err(TypeError::new(format!(
+                                    "maps_clear needs a map, got {}",
+                                    other.display()
+                                ))),
+                            };
+                        }
+                        "maps_clone" if args.len() == 1 => {
+                            let t = self.check_expr(&args[0])?;
+                            return match t {
+                                Type::Map(_, _) => Ok(t),
+                                other => Err(TypeError::new(format!(
+                                    "maps_clone needs a map, got {}",
+                                    other.display()
+                                ))),
+                            };
+                        }
+                        "maps_equal" if args.len() == 2 => {
+                            let a = self.check_expr(&args[0])?;
+                            let b = self.check_expr(&args[1])?;
+                            return match (&a, &b) {
+                                (Type::Map(k1, v1), Type::Map(k2, v2))
+                                    if self.compatible(k1, k2) && self.compatible(v1, v2) =>
+                                {
+                                    Ok(Type::Int)
+                                }
+                                _ => Err(TypeError::new(format!(
+                                    "maps_equal needs two maps of the same type, got {} and {}",
+                                    a.display(),
+                                    b.display()
+                                ))),
+                            };
+                        }
+                        "maps_copy" if args.len() == 2 => {
+                            let a = self.check_expr(&args[0])?;
+                            let b = self.check_expr(&args[1])?;
+                            return match (&a, &b) {
+                                (Type::Map(k1, v1), Type::Map(k2, v2))
+                                    if self.compatible(k1, k2) && self.compatible(v1, v2) =>
+                                {
+                                    Ok(Type::Void)
+                                }
+                                _ => Err(TypeError::new(format!(
+                                    "maps_copy needs two maps of the same type, got {} and {}",
+                                    a.display(),
+                                    b.display()
+                                ))),
+                            };
+                        }
                         "has" if args.len() == 2 => {
                             let mt = self.check_expr(&args[0])?;
                             let kt = self.check_expr(&args[1])?;
@@ -11190,6 +11311,32 @@ impl TypeChecker {
                             callee: Box::new(Expr::Ident(mangled)),
                             args: args.clone(),
                         });
+                    }
+                    // Pack-qualified variant: `eng.Green(7)` → same as bare `Green(7)`.
+                    if self.pack_variant_ctor(alias, method).is_some() {
+                        return self.check_expr(&Expr::Call {
+                            callee: Box::new(Expr::Ident(method.clone())),
+                            args: args.clone(),
+                        });
+                    }
+                }
+                // Type-qualified pack path: `eng.Color.Green(7)`.
+                if let Expr::Field {
+                    base,
+                    field: enum_short,
+                } = receiver.as_ref()
+                {
+                    if let Expr::Ident(alias) = base.as_ref() {
+                        if let Some(enum_name) = self.pack_enum_type_name(alias, enum_short) {
+                            if let Some(ctor) = self.variants.get(method) {
+                                if ctor.enum_name == enum_name {
+                                    return self.check_expr(&Expr::Call {
+                                        callee: Box::new(Expr::Ident(method.clone())),
+                                        args: args.clone(),
+                                    });
+                                }
+                            }
+                        }
                     }
                 }
                 let rt = self.check_expr(receiver)?;
@@ -11500,6 +11647,43 @@ impl TypeChecker {
                 }
             }
             Expr::Field { base, field } => {
+                // Pack-qualified unit variant: `eng.Red` (alias is not a value).
+                if let Expr::Ident(alias) = base.as_ref() {
+                    if let Some(ctor) = self.pack_variant_ctor(alias, field) {
+                        if ctor.fields.is_empty() {
+                            return self.check_expr(&Expr::Ident(field.clone()));
+                        }
+                        return Err(TypeError::new(format!(
+                            "variant `{alias}.{field}` needs {} field(s) — use `{alias}.{field}(...)`",
+                            ctor.fields.len()
+                        )));
+                    }
+                }
+                // Type path unit variant: `eng.Color.Red`.
+                if let Expr::Field {
+                    base: inner,
+                    field: enum_short,
+                } = base.as_ref()
+                {
+                    if let Expr::Ident(alias) = inner.as_ref() {
+                        if let Some(enum_name) = self.pack_enum_type_name(alias, enum_short) {
+                            if let Some(ctor) = self.variants.get(field) {
+                                if ctor.enum_name == enum_name {
+                                    if ctor.fields.is_empty() {
+                                        return self.check_expr(&Expr::Ident(field.clone()));
+                                    }
+                                    return Err(TypeError::new(format!(
+                                        "variant `{alias}.{enum_short}.{field}` needs {} field(s)",
+                                        ctor.fields.len()
+                                    )));
+                                }
+                            }
+                            return Err(TypeError::new(format!(
+                                "no variant `{field}` on `{alias}.{enum_short}`"
+                            )));
+                        }
+                    }
+                }
                 // Nested partial moves: `p.inner.a` moves path "inner.a" only.
                 if let Some((name, path_fields)) = Self::hold_field_path(base, field) {
                     if self.hold_vars.contains_key(&name) {
@@ -11728,12 +11912,31 @@ impl TypeChecker {
                                 "make(chan[T], n) takes one capacity argument",
                             ));
                         }
+                        // Same element set as `chan_open[T]` (int family, string, float,
+                        // bool, named structs / pack types).
                         match elem.as_ref() {
-                            Type::Int | Type::String => Ok(Type::Chan(elem)),
+                            Type::Int
+                            | Type::Int64
+                            | Type::Int32
+                            | Type::Int8
+                            | Type::Byte
+                            | Type::Bool
+                            | Type::Float
+                            | Type::String => Ok(Type::Chan(elem)),
+                            Type::Named(n)
+                                if n != "ShareInt"
+                                    && n != "Arena"
+                                    && n != "Crew"
+                                    && self.structs_named(n) =>
+                            {
+                                Ok(Type::Chan(elem))
+                            }
+                            Type::Struct { .. } => Ok(Type::Chan(elem)),
                             other => Err(TypeError::new(format!(
-                                "make(chan[T]) supports int and string, got {}",
+                                "make(chan[T]) supports int family, bool, float, string, and named structs, got {}",
                                 other.display()
-                            ))),
+                            ))
+                            .hint("use make(chan[T], n) or chan_open[T](n)")),
                         }
                     }
                     Type::Map(k, v) => {

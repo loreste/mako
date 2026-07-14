@@ -240,6 +240,99 @@ mako run main.mko
 Default qualifier: the pulled file’s `pack` name (if not `main`), else the
 path basename (`utils` from `utils.mko`).
 
+### Pack-qualified types
+
+Exported structs (and other named types) use the same qualifier as functions:
+
+```mko
+// eng.mko
+pack eng
+
+export struct Table {
+    n: int
+}
+
+export fn table_new() -> Table {
+    return Table { n: 0 }
+}
+
+export fn table_grow_pair(t: Table, by: int) -> (Table, int) {
+    let mut tt = t
+    tt.n = tt.n + by
+    return (tt, by)
+}
+```
+
+```mko
+// main.mko
+pull "./eng.mko"
+
+fn use(t: eng.Table) -> int {
+    return t.n
+}
+
+fn main() {
+    let t: eng.Table = eng.Table { n: 0 }   // pack-qualified struct lit
+    let t2, n = eng.table_grow_pair(t, 5)
+    match t2 {
+        eng.Table { n: rows } => print_int(rows),
+    }
+    print_int(use(t2))
+    print_int(n)
+}
+```
+
+`eng.Table` in annotations, return types, struct literals, and struct patterns
+is the pack form of the rewritten name `eng__Table`. Multi-return of pack
+structs works the same as local structs: `let a, b = eng.f()` and
+`match eng.f() { (a, b) => … }`.
+
+### Maps of pack structs
+
+```mko
+pull "./eng.mko"
+
+fn main() {
+    let mut m = make(map[int]eng.Table)
+    m[1] = eng.Table { n: 10 }
+    print_int(m[1].n)
+}
+```
+
+Also `map[string]eng.Table` and `map[float]eng.Table`. Same ops as other maps:
+`len` / `has` / `delete`, comma-ok, `range`, and `maps_keys` / `maps_values` /
+`maps_clone` / `maps_equal` / `maps_copy` / `maps_clear`.
+
+### Pack-qualified enums
+
+Exported enums use the same qualifier. Variants stay short names after pull;
+you may qualify them with the pack (and optionally the type):
+
+```mko
+// eng.mko
+pack eng
+export enum Color { Red, Green(int) }
+```
+
+```mko
+pull "./eng.mko"
+
+fn score(c: eng.Color) -> int {
+    match c {
+        eng.Red => 1,
+        eng.Green(n) => n,
+        // or: eng.Color.Red / eng.Color.Green(n)
+    }
+}
+
+fn main() {
+    let a = eng.Red
+    let b = eng.Green(7)
+    let c = eng.Color.Green(3)
+    print_int(score(a) + score(b) + score(c))
+}
+```
+
 ### Explicit aliases
 
 ```mko

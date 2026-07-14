@@ -253,7 +253,13 @@ fn main() {
 
 ## Maps
 
-Maps (`map[K]V`) are hash tables with string or integer keys.
+Maps (`map[K]V`) are hash tables. **Keys:** `int`, `string`, `float`, or named
+structs. **Values:** `int`, `string`, `float`, or named structs.
+`map[Struct]Struct` is not supported yet. Pack types work as keys or values
+(`map[int]eng.Table`, `map[eng.Table]int`, `map[float]eng.Table`).
+
+Float keys treat `+0.0` / `-0.0` as one key; all NaNs share one key.
+Struct keys use field-wise equality and a stable field hash.
 
 ```mko
 fn main() {
@@ -293,6 +299,26 @@ fn main() {
     ms["greeting"] = "hello"
     print(ms["greeting"])
 
+    // Float values / float keys
+    let mut mf = make(map[int]float)
+    mf[1] = 2.5
+    let mut fi = make(map[float]int)
+    fi[1.5] = 3
+
+    // Struct values / struct keys
+    struct Point { x: int, y: int }
+    let mut pts = make(map[int]Point)
+    pts[1] = Point { x: 1, y: 2 }
+    let mut pf = make(map[float]Point)
+    pf[1.5] = Point { x: 3, y: 4 }
+    let mut by_pt = make(map[Point]int)
+    by_pt[Point { x: 1, y: 2 }] = 10
+
+    // Helpers (all map kinds)
+    let ks = maps_keys(m)
+    let c = maps_clone(m)
+    maps_clear(c)
+
     // Pre-sized (hint for initial capacity)
     let mut big = make(map[string]int, 1024)
     big["x"] = 1
@@ -301,7 +327,8 @@ fn main() {
 
 ## Structs
 
-Structs are named collections of fields.
+Structs are named collections of fields. `==` / `!=` compare field-wise
+(strings by content). Enums also support structural `==` / `!=` (tag + payload).
 
 ```mko
 struct Point {
@@ -333,6 +360,14 @@ fn main() {
     person.age = 31
     print(person.name)
     print_int(person.age)
+
+    // Structural equality (strings by content)
+    let a = Point { x: 1, y: 2 }
+    let b = Point { x: 1, y: 2 }
+    if a == b {
+        print("equal")
+    }
+    assert(Person { name: "Ada", age: 36 } == Person { name: "Ada", age: 36 })
 }
 ```
 
@@ -516,6 +551,9 @@ fn main() {
     print_int(age)
 }
 ```
+
+Tuples may hold named structs as well as primitives — including pack-qualified
+structs after a `pull` (`let t, n = eng.grow_pair(t0, 1)`).
 
 For more complex cases you can still use a struct, but tuples cover the common
 multi-return pattern without boilerplate.
@@ -1032,6 +1070,30 @@ pack mylib
 
 export fn add(a: int, b: int) -> int { return a + b }
 export struct Point { x: int, y: int }
+```
+
+Exported types are pack-qualified in annotations, return types, struct
+literals, and struct patterns — same alias as function calls. Exported enums
+accept pack (and pack+type) variant paths:
+
+```mko
+pull "./mylib.mko"
+
+fn use(p: mylib.Point) -> int {
+    return p.x + p.y
+}
+
+fn main() {
+    let p: mylib.Point = mylib.Point { x: 0, y: 0 }
+    match p {
+        mylib.Point { x, y } => print_int(use(mylib.Point { x: x, y: y })),
+    }
+    let c = mylib.Color.Green(3)   // or mylib.Green(3) / mylib.Red
+    match c {
+        mylib.Red => {},
+        mylib.Green(n) => print_int(n),
+    }
+}
 ```
 
 Items without `export` are private to their pack. See

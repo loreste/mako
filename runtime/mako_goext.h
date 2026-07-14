@@ -1556,6 +1556,396 @@ static inline void mako_maps_delete_func_si(MakoMapSI *m, MakoString key) {
     if (m) mako_map_si_delete(m, key);
 }
 
+/* ---- maps helpers for map[int]int ---- */
+static inline MakoIntArray mako_maps_keys_ii(MakoMapII *m) {
+    MakoIntArray out = mako_int_array_make(0, m ? (int64_t)m->len : 0);
+    if (!m) return out;
+    for (size_t i = 0; i < m->cap; i++) {
+        if (m->state[i] == MAKO_MAP_FULL) {
+            if (out.len >= out.cap) {
+                size_t ncap = out.cap ? out.cap * 2 : 8;
+                out.data = (int64_t *)realloc(out.data, ncap * sizeof(int64_t));
+                out.cap = ncap;
+            }
+            out.data[out.len++] = m->keys[i];
+        }
+    }
+    return out;
+}
+static inline MakoIntArray mako_maps_values_ii(MakoMapII *m) {
+    MakoIntArray out = mako_int_array_make(0, m ? (int64_t)m->len : 0);
+    if (!m) return out;
+    for (size_t i = 0; i < m->cap; i++) {
+        if (m->state[i] == MAKO_MAP_FULL) {
+            if (out.len >= out.cap) {
+                size_t ncap = out.cap ? out.cap * 2 : 8;
+                out.data = (int64_t *)realloc(out.data, ncap * sizeof(int64_t));
+                out.cap = ncap;
+            }
+            out.data[out.len++] = m->vals[i];
+        }
+    }
+    return out;
+}
+static inline void mako_maps_clear_ii(MakoMapII *m) {
+    if (!m) return;
+    memset(m->state, 0, m->cap);
+    m->len = 0;
+}
+static inline MakoMapII *mako_maps_clone_ii(MakoMapII *m) {
+    MakoMapII *n = mako_map_ii_make(m ? (int64_t)m->len : 0);
+    if (!m) return n;
+    for (size_t i = 0; i < m->cap; i++) {
+        if (m->state[i] == MAKO_MAP_FULL) mako_map_ii_set(n, m->keys[i], m->vals[i]);
+    }
+    return n;
+}
+static inline int64_t mako_maps_equal_ii(MakoMapII *a, MakoMapII *b) {
+    if (!a && !b) return 1;
+    if (!a || !b) return 0;
+    if (a->len != b->len) return 0;
+    for (size_t i = 0; i < a->cap; i++) {
+        if (a->state[i] != MAKO_MAP_FULL) continue;
+        if (!mako_map_ii_has(b, a->keys[i])) return 0;
+        if (mako_map_ii_get(b, a->keys[i]) != a->vals[i]) return 0;
+    }
+    return 1;
+}
+static inline void mako_maps_copy_ii(MakoMapII *dst, MakoMapII *src) {
+    if (!dst || !src) return;
+    for (size_t i = 0; i < src->cap; i++) {
+        if (src->state[i] == MAKO_MAP_FULL) mako_map_ii_set(dst, src->keys[i], src->vals[i]);
+    }
+}
+
+/* ---- maps helpers for map[string]string ---- */
+static inline MakoStrArray mako_maps_keys_ss(MakoMapSS *m) {
+    MakoStrArray out = mako_str_array_make(0, m ? (int64_t)m->len : 0);
+    if (!m) return out;
+    for (size_t i = 0; i < m->cap; i++) {
+        if (m->state[i] == MAKO_MAP_FULL) out = mako_str_array_append(out, m->keys[i]);
+    }
+    return out;
+}
+static inline MakoStrArray mako_maps_values_ss(MakoMapSS *m) {
+    MakoStrArray out = mako_str_array_make(0, m ? (int64_t)m->len : 0);
+    if (!m) return out;
+    for (size_t i = 0; i < m->cap; i++) {
+        if (m->state[i] == MAKO_MAP_FULL) out = mako_str_array_append(out, m->vals[i]);
+    }
+    return out;
+}
+static inline void mako_maps_clear_ss(MakoMapSS *m) {
+    if (!m) return;
+    for (size_t i = 0; i < m->cap; i++) {
+        if (m->state[i] == MAKO_MAP_FULL) {
+            mako_str_free(m->keys[i]);
+            mako_str_free(m->vals[i]);
+            m->keys[i].data = NULL;
+            m->keys[i].len = 0;
+            m->vals[i].data = NULL;
+            m->vals[i].len = 0;
+        }
+        m->state[i] = MAKO_MAP_EMPTY;
+    }
+    m->len = 0;
+}
+static inline MakoMapSS *mako_maps_clone_ss(MakoMapSS *m) {
+    MakoMapSS *n = mako_map_ss_make(m ? (int64_t)m->len : 0);
+    if (!m) return n;
+    for (size_t i = 0; i < m->cap; i++) {
+        if (m->state[i] == MAKO_MAP_FULL) mako_map_ss_set(n, m->keys[i], m->vals[i]);
+    }
+    return n;
+}
+static inline int64_t mako_maps_equal_ss(MakoMapSS *a, MakoMapSS *b) {
+    if (!a && !b) return 1;
+    if (!a || !b) return 0;
+    if (a->len != b->len) return 0;
+    for (size_t i = 0; i < a->cap; i++) {
+        if (a->state[i] != MAKO_MAP_FULL) continue;
+        if (!mako_map_ss_has(b, a->keys[i])) return 0;
+        if (!mako_str_eq(mako_map_ss_get(b, a->keys[i]), a->vals[i])) return 0;
+    }
+    return 1;
+}
+static inline void mako_maps_copy_ss(MakoMapSS *dst, MakoMapSS *src) {
+    if (!dst || !src) return;
+    for (size_t i = 0; i < src->cap; i++) {
+        if (src->state[i] == MAKO_MAP_FULL) mako_map_ss_set(dst, src->keys[i], src->vals[i]);
+    }
+}
+
+/* ---- maps helpers for map[int]float ---- */
+static inline MakoIntArray mako_maps_keys_if(MakoMapIF *m) {
+    MakoIntArray out = mako_int_array_make(0, m ? (int64_t)m->len : 0);
+    if (!m) return out;
+    for (size_t i = 0; i < m->cap; i++) {
+        if (m->state[i] == MAKO_MAP_FULL) {
+            if (out.len >= out.cap) {
+                size_t ncap = out.cap ? out.cap * 2 : 8;
+                out.data = (int64_t *)realloc(out.data, ncap * sizeof(int64_t));
+                out.cap = ncap;
+            }
+            out.data[out.len++] = m->keys[i];
+        }
+    }
+    return out;
+}
+static inline MakoFloatArray mako_maps_values_if(MakoMapIF *m) {
+    MakoFloatArray out = mako_float_array_make(0, m ? (int64_t)m->len : 0);
+    if (!m) return out;
+    for (size_t i = 0; i < m->cap; i++) {
+        if (m->state[i] == MAKO_MAP_FULL) {
+            out = mako_float_array_append(out, m->vals[i]);
+        }
+    }
+    return out;
+}
+static inline void mako_maps_clear_if(MakoMapIF *m) {
+    if (!m) return;
+    memset(m->state, 0, m->cap);
+    m->len = 0;
+}
+static inline MakoMapIF *mako_maps_clone_if(MakoMapIF *m) {
+    MakoMapIF *n = mako_map_if_make(m ? (int64_t)m->len : 0);
+    if (!m) return n;
+    for (size_t i = 0; i < m->cap; i++) {
+        if (m->state[i] == MAKO_MAP_FULL) mako_map_if_set(n, m->keys[i], m->vals[i]);
+    }
+    return n;
+}
+static inline int64_t mako_maps_equal_if(MakoMapIF *a, MakoMapIF *b) {
+    if (!a && !b) return 1;
+    if (!a || !b) return 0;
+    if (a->len != b->len) return 0;
+    for (size_t i = 0; i < a->cap; i++) {
+        if (a->state[i] != MAKO_MAP_FULL) continue;
+        if (!mako_map_if_has(b, a->keys[i])) return 0;
+        if (mako_map_if_get(b, a->keys[i]) != a->vals[i]) return 0;
+    }
+    return 1;
+}
+static inline void mako_maps_copy_if(MakoMapIF *dst, MakoMapIF *src) {
+    if (!dst || !src) return;
+    for (size_t i = 0; i < src->cap; i++) {
+        if (src->state[i] == MAKO_MAP_FULL) mako_map_if_set(dst, src->keys[i], src->vals[i]);
+    }
+}
+
+/* ---- maps helpers for map[string]float ---- */
+static inline MakoStrArray mako_maps_keys_sf(MakoMapSF *m) {
+    MakoStrArray out = mako_str_array_make(0, m ? (int64_t)m->len : 0);
+    if (!m) return out;
+    for (size_t i = 0; i < m->cap; i++) {
+        if (m->state[i] == MAKO_MAP_FULL) out = mako_str_array_append(out, m->keys[i]);
+    }
+    return out;
+}
+static inline MakoFloatArray mako_maps_values_sf(MakoMapSF *m) {
+    MakoFloatArray out = mako_float_array_make(0, m ? (int64_t)m->len : 0);
+    if (!m) return out;
+    for (size_t i = 0; i < m->cap; i++) {
+        if (m->state[i] == MAKO_MAP_FULL) {
+            out = mako_float_array_append(out, m->vals[i]);
+        }
+    }
+    return out;
+}
+static inline void mako_maps_clear_sf(MakoMapSF *m) {
+    if (!m) return;
+    for (size_t i = 0; i < m->cap; i++) {
+        if (m->state[i] == MAKO_MAP_FULL) {
+            mako_str_free(m->keys[i]);
+            m->keys[i].data = NULL;
+            m->keys[i].len = 0;
+        }
+        m->state[i] = MAKO_MAP_EMPTY;
+    }
+    m->len = 0;
+}
+static inline MakoMapSF *mako_maps_clone_sf(MakoMapSF *m) {
+    MakoMapSF *n = mako_map_sf_make(m ? (int64_t)m->len : 0);
+    if (!m) return n;
+    for (size_t i = 0; i < m->cap; i++) {
+        if (m->state[i] == MAKO_MAP_FULL) mako_map_sf_set(n, m->keys[i], m->vals[i]);
+    }
+    return n;
+}
+static inline int64_t mako_maps_equal_sf(MakoMapSF *a, MakoMapSF *b) {
+    if (!a && !b) return 1;
+    if (!a || !b) return 0;
+    if (a->len != b->len) return 0;
+    for (size_t i = 0; i < a->cap; i++) {
+        if (a->state[i] != MAKO_MAP_FULL) continue;
+        if (!mako_map_sf_has(b, a->keys[i])) return 0;
+        if (mako_map_sf_get(b, a->keys[i]) != a->vals[i]) return 0;
+    }
+    return 1;
+}
+static inline void mako_maps_copy_sf(MakoMapSF *dst, MakoMapSF *src) {
+    if (!dst || !src) return;
+    for (size_t i = 0; i < src->cap; i++) {
+        if (src->state[i] == MAKO_MAP_FULL) mako_map_sf_set(dst, src->keys[i], src->vals[i]);
+    }
+}
+
+/* ---- maps helpers for float-key maps ---- */
+static inline MakoFloatArray mako_maps_keys_fi(MakoMapFI *m) {
+    MakoFloatArray out = mako_float_array_make(0, m ? (int64_t)m->len : 0);
+    if (!m) return out;
+    for (size_t i = 0; i < m->cap; i++) {
+        if (m->state[i] == MAKO_MAP_FULL) out = mako_float_array_append(out, m->keys[i]);
+    }
+    return out;
+}
+static inline MakoIntArray mako_maps_values_fi(MakoMapFI *m) {
+    MakoIntArray out = mako_int_array_make(0, m ? (int64_t)m->len : 0);
+    if (!m) return out;
+    for (size_t i = 0; i < m->cap; i++) {
+        if (m->state[i] == MAKO_MAP_FULL) {
+            if (out.len >= out.cap) {
+                size_t ncap = out.cap ? out.cap * 2 : 8;
+                out.data = (int64_t *)realloc(out.data, ncap * sizeof(int64_t));
+                out.cap = ncap;
+            }
+            out.data[out.len++] = m->vals[i];
+        }
+    }
+    return out;
+}
+static inline void mako_maps_clear_fi(MakoMapFI *m) {
+    if (!m) return;
+    memset(m->state, 0, m->cap);
+    m->len = 0;
+}
+static inline MakoMapFI *mako_maps_clone_fi(MakoMapFI *m) {
+    MakoMapFI *n = mako_map_fi_make(m ? (int64_t)m->len : 0);
+    if (!m) return n;
+    for (size_t i = 0; i < m->cap; i++) {
+        if (m->state[i] == MAKO_MAP_FULL) mako_map_fi_set(n, m->keys[i], m->vals[i]);
+    }
+    return n;
+}
+static inline int64_t mako_maps_equal_fi(MakoMapFI *a, MakoMapFI *b) {
+    if (!a && !b) return 1;
+    if (!a || !b) return 0;
+    if (a->len != b->len) return 0;
+    for (size_t i = 0; i < a->cap; i++) {
+        if (a->state[i] != MAKO_MAP_FULL) continue;
+        if (!mako_map_fi_has(b, a->keys[i])) return 0;
+        if (mako_map_fi_get(b, a->keys[i]) != a->vals[i]) return 0;
+    }
+    return 1;
+}
+static inline void mako_maps_copy_fi(MakoMapFI *dst, MakoMapFI *src) {
+    if (!dst || !src) return;
+    for (size_t i = 0; i < src->cap; i++) {
+        if (src->state[i] == MAKO_MAP_FULL) mako_map_fi_set(dst, src->keys[i], src->vals[i]);
+    }
+}
+
+static inline MakoFloatArray mako_maps_keys_fs(MakoMapFS *m) {
+    MakoFloatArray out = mako_float_array_make(0, m ? (int64_t)m->len : 0);
+    if (!m) return out;
+    for (size_t i = 0; i < m->cap; i++) {
+        if (m->state[i] == MAKO_MAP_FULL) out = mako_float_array_append(out, m->keys[i]);
+    }
+    return out;
+}
+static inline MakoStrArray mako_maps_values_fs(MakoMapFS *m) {
+    MakoStrArray out = mako_str_array_make(0, m ? (int64_t)m->len : 0);
+    if (!m) return out;
+    for (size_t i = 0; i < m->cap; i++) {
+        if (m->state[i] == MAKO_MAP_FULL) out = mako_str_array_append(out, m->vals[i]);
+    }
+    return out;
+}
+static inline void mako_maps_clear_fs(MakoMapFS *m) {
+    if (!m) return;
+    for (size_t i = 0; i < m->cap; i++) {
+        if (m->state[i] == MAKO_MAP_FULL) {
+            mako_str_free(m->vals[i]);
+            m->vals[i].data = NULL;
+            m->vals[i].len = 0;
+        }
+        m->state[i] = MAKO_MAP_EMPTY;
+    }
+    m->len = 0;
+}
+static inline MakoMapFS *mako_maps_clone_fs(MakoMapFS *m) {
+    MakoMapFS *n = mako_map_fs_make(m ? (int64_t)m->len : 0);
+    if (!m) return n;
+    for (size_t i = 0; i < m->cap; i++) {
+        if (m->state[i] == MAKO_MAP_FULL) mako_map_fs_set(n, m->keys[i], m->vals[i]);
+    }
+    return n;
+}
+static inline int64_t mako_maps_equal_fs(MakoMapFS *a, MakoMapFS *b) {
+    if (!a && !b) return 1;
+    if (!a || !b) return 0;
+    if (a->len != b->len) return 0;
+    for (size_t i = 0; i < a->cap; i++) {
+        if (a->state[i] != MAKO_MAP_FULL) continue;
+        if (!mako_map_fs_has(b, a->keys[i])) return 0;
+        if (!mako_str_eq(mako_map_fs_get(b, a->keys[i]), a->vals[i])) return 0;
+    }
+    return 1;
+}
+static inline void mako_maps_copy_fs(MakoMapFS *dst, MakoMapFS *src) {
+    if (!dst || !src) return;
+    for (size_t i = 0; i < src->cap; i++) {
+        if (src->state[i] == MAKO_MAP_FULL) mako_map_fs_set(dst, src->keys[i], src->vals[i]);
+    }
+}
+
+static inline MakoFloatArray mako_maps_keys_ff(MakoMapFF *m) {
+    MakoFloatArray out = mako_float_array_make(0, m ? (int64_t)m->len : 0);
+    if (!m) return out;
+    for (size_t i = 0; i < m->cap; i++) {
+        if (m->state[i] == MAKO_MAP_FULL) out = mako_float_array_append(out, m->keys[i]);
+    }
+    return out;
+}
+static inline MakoFloatArray mako_maps_values_ff(MakoMapFF *m) {
+    MakoFloatArray out = mako_float_array_make(0, m ? (int64_t)m->len : 0);
+    if (!m) return out;
+    for (size_t i = 0; i < m->cap; i++) {
+        if (m->state[i] == MAKO_MAP_FULL) out = mako_float_array_append(out, m->vals[i]);
+    }
+    return out;
+}
+static inline void mako_maps_clear_ff(MakoMapFF *m) {
+    if (!m) return;
+    memset(m->state, 0, m->cap);
+    m->len = 0;
+}
+static inline MakoMapFF *mako_maps_clone_ff(MakoMapFF *m) {
+    MakoMapFF *n = mako_map_ff_make(m ? (int64_t)m->len : 0);
+    if (!m) return n;
+    for (size_t i = 0; i < m->cap; i++) {
+        if (m->state[i] == MAKO_MAP_FULL) mako_map_ff_set(n, m->keys[i], m->vals[i]);
+    }
+    return n;
+}
+static inline int64_t mako_maps_equal_ff(MakoMapFF *a, MakoMapFF *b) {
+    if (!a && !b) return 1;
+    if (!a || !b) return 0;
+    if (a->len != b->len) return 0;
+    for (size_t i = 0; i < a->cap; i++) {
+        if (a->state[i] != MAKO_MAP_FULL) continue;
+        if (!mako_map_ff_has(b, a->keys[i])) return 0;
+        if (mako_map_ff_get(b, a->keys[i]) != a->vals[i]) return 0;
+    }
+    return 1;
+}
+static inline void mako_maps_copy_ff(MakoMapFF *dst, MakoMapFF *src) {
+    if (!dst || !src) return;
+    for (size_t i = 0; i < src->cap; i++) {
+        if (src->state[i] == MAKO_MAP_FULL) mako_map_ff_set(dst, src->keys[i], src->vals[i]);
+    }
+}
+
 /* ---- reflect (minimal: kind / type name / value string for scalars) ---- */
 static inline MakoString mako_reflect_type_of_int(int64_t v) {
     (void)v;

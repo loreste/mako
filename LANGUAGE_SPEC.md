@@ -316,12 +316,33 @@ Out-of-bounds access aborts at runtime.
 
 #### Maps: `map[K]V`
 
-Hash maps with open addressing. Supported key types: `string`, `int`.
+Hash maps with open addressing. Supported key types: `string`, `int`,
+**`float`**, and **named structs** (including pack-qualified types such as
+`eng.Table`). Supported value types: `int`, `string`, `float`, and **named
+structs**. **`map[Struct]Struct` is not supported yet** — use a scalar value
+type with a struct key, or a scalar key with a struct value.
+
+Float keys: `+0.0` and `-0.0` are the same key; all NaN values share one key.
+Struct keys use field-wise equality and a stable hash over fields (string
+fields by content).
 
 ```mko
 let mut m = make(map[string]int)
 let mut mi = make(map[int]int)
 let mut ms = make(map[string]string)
+let mut mf = make(map[int]float)
+let mut msf = make(map[string]float)
+let mut fi = make(map[float]int)
+let mut ff = make(map[float]float)
+let mut pts = make(map[int]Point)       // struct values
+let mut by_name = make(map[string]Point)
+let mut by_f = make(map[float]Point)   // float key + struct value
+let mut by_pt = make(map[Point]int)    // struct keys
+let mut by_pt_s = make(map[Point]string)
+let mut by_pt_f = make(map[Point]float)
+let mut pack_m = make(map[int]eng.Table) // after pull
+let mut pack_f = make(map[float]eng.Table)
+let mut pack_k = make(map[eng.Table]int) // pack type as key
 ```
 
 Map operations:
@@ -337,16 +358,31 @@ Map operations:
 | `delete(m, k)`         | —         | Remove entry                      |
 | `len(m)`               | `int`     | Entry count                       |
 | `for k, v in range m`  | —         | Iteration (order unspecified)     |
+| `maps_keys(m)`         | `[]K`     | All keys (incl. struct / float)   |
+| `maps_values(m)`       | `[]V`     | All values                        |
+| `maps_clear(m)`        | —         | Remove all entries                |
+| `maps_clone(m)`        | `map[K]V` | Shallow clone                     |
+| `maps_equal(a, b)`     | `int`     | 1 if same keys/values             |
+| `maps_copy(dst, src)`  | —         | Copy entries into `dst`           |
 
-Wrong key type is rejected at compile time.
+Wrong key/value combo is rejected at compile time. `maps_*` works for all
+supported map kinds (including float keys/values and struct keys/values).
+Struct map equality (keys or values) is **structural** (field-wise; strings by
+content).
 
 #### Channels: `chan[T]`
 
 Typed, buffered channels for inter-task communication.
 
 ```mko
-let ch = chan_new(4)    // chan[int] with buffer size 4
+let ch = chan_new(4)           // chan[int] with buffer size 4
+let cs = make(chan[string], 2)
+let cp = make(chan[Point], 1)  // structs (same as chan_open[Point](1))
+let ce = chan_open[eng.Point](1)
 ```
+
+`make(chan[T], n)` and `chan_open[T](n)` accept int family, `bool`, `float`,
+`string`, and **named structs** (including pack-qualified types).
 
 Channel operations are described in Section 7.
 
@@ -885,7 +921,10 @@ String concatenation with `+` produces a new `string`.
 | `>=`     | Greater than or equal    |
 
 Comparison always produces `bool`. Strings support only `==` and `!=` (no
-ordering operators on strings). Assignment is `=` only; `=` is never equality.
+ordering operators on strings; content equality). **Named structs** support
+`==` / `!=` field-wise (strings by content; nested structs recursive).
+**Enums** support `==` / `!=` on tag plus payload. Assignment is `=` only;
+`=` is never equality.
 
 ### 4.4 Logical Operators
 
@@ -1677,6 +1716,16 @@ name at the call site. The default qualifier is the pulled file’s optional
 stripped). Call sites use `pkg.name(...)`; the compiler mangles definitions to
 `pkg__name` internally and rewrites references inside the pulled unit.
 
+**Types are pack-qualified the same way:** `eng.Table` in annotations, return
+types, struct literals (`eng.Table { n: 0 }` / `eng.Table { 0 }`), and struct
+patterns (`eng.Table { n }`) is the surface form of the mangled name
+`eng__Table`. Multi-return and tuple match of pack structs work
+(`let t, n = eng.f()`, `match eng.f() { (t, n) => … }`).
+
+**Enums:** after pull, construct and match with pack (or pack+type) paths —
+`eng.Red`, `eng.Green(n)`, `eng.Color.Red`, `eng.Color.Green(n)` — as well as
+bare variant names (`Red`, `Green(n)`) when unambiguous.
+
 Preferred spellings: `pack` / `pull`. Dual: `package` / `import`. See
 [docs/IDENTITY.md](docs/IDENTITY.md).
 
@@ -1692,6 +1741,13 @@ fn main() {
 ```
 
 Without an explicit alias, symbols are **not** merged bare into the importer.
+
+```mko
+// Pack-qualified type annotations (export the type in the pack)
+fn use(t: eng.Table) -> eng.Table { return t }
+let t: eng.Table = eng.table_new()
+let t2, n = eng.table_grow_pair(t, 1)
+```
 
 ### 9.2 Aliased pulls
 

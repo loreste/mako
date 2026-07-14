@@ -1,0 +1,55 @@
+// Structural == / != for named structs and enums.
+
+struct Point {
+    x: int
+    y: int
+}
+
+struct Person {
+    name: string
+    age: int
+}
+
+enum Color {
+    Red,
+    Green(int),
+    Blue(string)
+}
+
+fn TestStructEqPod() {
+    let a = Point { x: 1, y: 2 }
+    let b = Point { x: 1, y: 2 }
+    let c = Point { x: 0, y: 2 }
+    assert(a == b)
+    assert(not (a != b))
+    assert(a != c)
+    assert(not (a == c))
+}
+
+fn TestStructEqStrings() {
+    // Same content, different allocations.
+    let a = Person { name: "Ada", age: 36 }
+    let b = Person { name: "Ada", age: 36 }
+    let c = Person { name: "Bob", age: 36 }
+    assert(a == b)
+    assert(a != c)
+}
+
+fn TestEnumEq() {
+    assert(Red == Red)
+    assert(Green(3) == Green(3))
+    assert(Green(3) != Green(4))
+    assert(Blue("x") == Blue("x"))
+    assert(Blue("x") != Blue("y"))
+    assert(Red != Green(0))
+}
+
+fn TestStructEqInCond() {
+    let a = Point { x: 9, y: 9 }
+    let b = Point { x: 9, y: 9 }
+    let mut n = 0
+    if a == b {
+        n = 1
+    }
+    assert_eq(n, 1)
+}

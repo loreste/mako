@@ -112,13 +112,17 @@ No implicit mixing: int + int64 is a type error. Convert explicitly.
 -------------------
 
   []T                 Slice (dynamic array): []int, []string, []byte, []float, []Point
-  map[K]V             Hash map: map[string]int, map[int]int, map[string]string
-  chan[T]              Typed channel: chan[int], chan[string], chan[bool]
+  map[K]V             Hash map. Keys: int|string|float|Struct. Values: int|string|float|Struct
+                      (not map[Struct]Struct yet). Pack: map[int]eng.Table, map[eng.Table]int,
+                      map[float]eng.Table. Float keys: +0/-0 unify; all NaNs share one key.
+                      Struct keys: field-wise eq + stable field hash.
+  chan[T]             Typed channel: int family, bool, float, string, named struct
+                      make(chan[T], n) and chan_open[T](n) accept the same T set
   Option[T]           Some(value) or None
   Result[T, E]        Ok(value) or Err(error)
-  (T, U)              Tuple: (int, int), (int, string), etc.
-  Named structs       User-defined product types
-  Named enums         User-defined sum types
+  (T, U)              Tuple: (int, int), (int, string), (Point, int), etc.
+  Named structs       User-defined product types; ==/!= field-wise (strings by content)
+  Named enums         User-defined sum types; ==/!= tag + payload
 
 4.3 Tuples
 ----------
@@ -763,6 +767,13 @@ Mako uses Result[T, E] and Option[T] instead of null or exceptions.
 
   let mut m = make(map[string]int)
   let mut m2 = make(map[string]int, 64)   // with size hint
+  let mut mi = make(map[int]int)
+  let mut ms = make(map[string]string)
+  let mut mf = make(map[int]float)
+  let mut fi = make(map[float]int)
+  let mut ff = make(map[float]float)
+  // struct values: map[int]Point, map[string]Point, map[float]Point, map[*]eng.Table
+  // struct keys:   map[Point]int|string|float, map[eng.Table]int
 
   m["a"] = 1                           // insert
   print_int(m["a"])                    // get (missing -> zero value)
@@ -783,6 +794,16 @@ Mako uses Result[T, E] and Option[T] instead of null or exceptions.
       print(k)
       print_int(v)
   }
+
+  // Helpers (all map kinds):
+  let ks = maps_keys(m)                // []K
+  let vs = maps_values(m)              // []V
+  let c = maps_clone(m)
+  maps_equal(m, c)                     // 1 if equal (structs: structural)
+  maps_copy(c, m)
+  maps_clear(c)
+
+  // Float keys: +0 and -0 are the same; all NaNs share one key.
 
 ================================================================================
 18. STRINGS
@@ -1316,12 +1337,12 @@ Below are the most important built-in functions organized by category.
 
   has(m: map[K]V, key: K) -> bool             Key presence check
   delete(m: map[K]V, key: K)                  Remove entry
-  maps_keys(m: map[string]int) -> []string    All keys
-  maps_values(m: map[string]int) -> []int     All values
-  maps_clear(m: map[string]int) -> void       Remove all
-  maps_clone(m: map[string]int) -> map[string]int  Shallow copy
-  maps_equal(a: map[string]int, b: map[string]int) -> int
-  maps_copy(dst: map[string]int, src: map[string]int) -> void
+  maps_keys(m: map[K]V) -> []K                All keys (K = string|int|float)
+  maps_values(m: map[K]V) -> []V              All values (int|string|float|Struct)
+  maps_clear(m: map[K]V) -> void              Remove all
+  maps_clone(m: map[K]V) -> map[K]V           Shallow copy
+  maps_equal(a: map[K]V, b: map[K]V) -> int   Same keys/values (structs structural)
+  maps_copy(dst: map[K]V, src: map[K]V) -> void  Copy entries into dst
 
 --------------------------------------------------------------------------------
 26.7 File I/O

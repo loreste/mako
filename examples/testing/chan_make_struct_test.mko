@@ -1,0 +1,33 @@
+// make(chan[T], n) for structs — same surface as chan_open[T](n).
+pull "../pack_types_lib.mko"
+
+struct Point {
+    x: int
+    y: int
+}
+
+fn TestMakeChanStruct() {
+    let ch = make(chan[Point], 2)
+    let _ = ch.send(Point { x: 3, y: 4 })
+    let q = ch.recv()
+    assert_eq(q.x, 3)
+    assert_eq(q.y, 4)
+    ch.close()
+}
+
+fn TestMakeChanPackStruct() {
+    let ch = make(chan[eng.Table], 1)
+    let _ = ch.send(eng.Table { n: 9 })
+    assert_eq(ch.recv().n, 9)
+    ch.close()
+}
+
+fn TestMakeChanOpenParity() {
+    let a = make(chan[Point], 1)
+    let b = chan_open[Point](1)
+    let _ = a.send(Point { x: 1, y: 0 })
+    let _ = b.send(Point { x: 2, y: 0 })
+    assert_eq(a.recv().x + b.recv().x, 3)
+    a.close()
+    b.close()
+}

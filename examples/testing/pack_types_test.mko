@@ -1,0 +1,96 @@
+// Pack-qualified types + multi-return of pack structs.
+// Repro for: eng.Table annotations and let t, n = eng.f() codegen.
+pull "../pack_types_lib.mko"
+
+fn use_table(t: eng.Table) -> int {
+    return t.n
+}
+
+fn make_table() -> eng.Table {
+    return eng.table_new()
+}
+
+fn TestPackQualifiedAnnot() {
+    let t: eng.Table = eng.table_new()
+    assert_eq(use_table(t), 0)
+    let t2 = make_table()
+    assert_eq(t2.n, 0)
+}
+
+fn TestPackStructReturn() {
+    let mut t = eng.table_new()
+    t = eng.table_grow(t, 3)
+    assert_eq(t.n, 3)
+}
+
+fn TestPackMultiReturn() {
+    let t = eng.table_new()
+    let t2, n = eng.table_grow_pair(t, 5)
+    assert_eq(t2.n, 5)
+    assert_eq(n, 5)
+    assert_eq(use_table(t2), 5)
+}
+
+fn TestPackMultiReturnMatch() {
+    let t = eng.table_new()
+    match eng.table_grow_pair(t, 2) {
+        (t2, n) => {
+            assert_eq(t2.n, 2)
+            assert_eq(n, 2)
+        }
+    }
+}
+
+fn TestPackStructLit() {
+    let t = eng.Table { n: 7 }
+    assert_eq(t.n, 7)
+    let t2 = eng.Table { 11 }
+    assert_eq(t2.n, 11)
+    assert_eq(use_table(eng.Table { n: 3 }), 3)
+}
+
+fn TestPackStructPattern() {
+    let t = eng.Table { n: 42 }
+    match t {
+        eng.Table { n } => assert_eq(n, 42),
+    }
+}
+
+fn color_score(c: eng.Color) -> int {
+    match c {
+        eng.Red => 1,
+        eng.Green(n) => n,
+        eng.Blue(_) => 0,
+    }
+}
+
+fn TestPackEnumConstruct() {
+    assert_eq(color_score(eng.Red), 1)
+    assert_eq(color_score(eng.Green(7)), 7)
+    assert_eq(color_score(eng.Blue("x")), 0)
+    assert_eq(color_score(eng.Color.Red), 1)
+    assert_eq(color_score(eng.Color.Green(4)), 4)
+}
+
+fn TestPackEnumMatchPaths() {
+    let c = eng.color_sample()
+    match c {
+        eng.Color.Red => assert(false),
+        eng.Color.Green(n) => assert_eq(n, 3),
+        eng.Color.Blue(_) => assert(false),
+    }
+    match eng.Red {
+        eng.Red => assert(true),
+        eng.Green(_) => assert(false),
+        eng.Blue(_) => assert(false),
+    }
+}
+
+fn TestPackEnumMultiReturn() {
+    let c, n = (eng.Green(2), 5)
+    match c {
+        eng.Green(v) => assert_eq(v + n, 7),
+        eng.Red => assert(false),
+        eng.Blue(_) => assert(false),
+    }
+}

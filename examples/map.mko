@@ -1,4 +1,5 @@
-// Go-like maps — open-addressing hash tables in the runtime.
+// Maps — open-addressing hash tables in the runtime.
+// Keys: int | string | float. Values: int | string | float | named structs.
 
 fn main() {
     let mut m = make(map[string]int)
@@ -33,4 +34,15 @@ fn main() {
     if has(ms, "x") {
         print("has_x")
     }
+
+    let mut mf = make(map[int]float)
+    mf[1] = 2.5
+    print(mf[1])
+
+    let mut fi = make(map[float]int)
+    fi[1.5] = 3
+    print_int(fi[1.5])
+
+    let ks = maps_keys(mi)
+    print_int(len(ks))
 }
