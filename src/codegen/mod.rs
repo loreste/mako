@@ -2840,6 +2840,25 @@ impl Codegen {
             // map[K][][]Named — outer of MakoArr_N (from emit_nested on struct/enum)
             vals.push((format!("arr_arr_{n}"), format!("MakoArr_arr_{n}")));
         }
+        // map[K][]Option[T] / map[K][]Result[T,E] — bag element slices (zero-cost monomorphs).
+        let mut bag_tags: Vec<(String, String)> = vec![
+            ("opt_int".into(), "MakoOptionInt".into()),
+            ("opt_string".into(), "MakoOptionInt".into()),
+            ("opt_float".into(), "MakoOptionInt".into()),
+            ("opt_bool".into(), "MakoOptionInt".into()),
+            ("res_int".into(), "MakoResultInt".into()),
+            ("res_string".into(), "MakoResultInt".into()),
+            ("res_float".into(), "MakoResultInt".into()),
+            ("res_bool".into(), "MakoResultInt".into()),
+        ];
+        for n in &names {
+            bag_tags.push((format!("opt_{n}"), "MakoOptionInt".into()));
+            bag_tags.push((format!("res_{n}"), "MakoResultInt".into()));
+        }
+        for (tag, elem_c) in &bag_tags {
+            self.emit_nested_arr_helpers(tag, elem_c); // MakoArr_opt_int
+            vals.push((format!("arr_{tag}"), format!("MakoArr_{tag}")));
+        }
         // map[K][]map[…] — first ensure []map helpers (MakoArr_map_string_int), then
         // monomorphize maps that store those slices.
         let map_arr_tags: &[&str] = &[
@@ -2864,9 +2883,13 @@ impl Codegen {
             self.emit_nested_arr_helpers(mt, &map_c); // MakoArr_map_string_int
             vals.push((format!("arr_{mt}"), format!("MakoArr_{mt}")));
         }
-        // Outer arrays for maps_values (MakoArr_arr_arr_int / MakoArr_arr_map_…, …)
+        // Outer arrays for maps_values (MakoArr_arr_arr_int / MakoArr_arr_opt_… / …)
         for (vt, vc) in &vals {
-            if vt.starts_with("arr_arr_") || vt.starts_with("arr_map_") {
+            if vt.starts_with("arr_arr_")
+                || vt.starts_with("arr_map_")
+                || vt.starts_with("arr_opt_")
+                || vt.starts_with("arr_res_")
+            {
                 self.emit_nested_arr_helpers(vt, vc);
             }
         }
@@ -3435,6 +3458,10 @@ impl Codegen {
             } else if sn.starts_with("map_") {
                 // Slice-of-map elements: pointer identity
                 "av.data[j] != bv.data[j]".to_string()
+            } else if sn.starts_with("opt_") {
+                "!mako_eq_option_int(av.data[j], bv.data[j])".to_string()
+            } else if sn.starts_with("res_") {
+                "!mako_eq_result_int(av.data[j], bv.data[j])".to_string()
             } else if self.enums.contains_key(sn) {
                 format!("!mako_eq_MakoEnum_{sn}(av.data[j], bv.data[j])")
             } else if self.structs.contains_key(sn) {
@@ -3689,10 +3716,16 @@ impl Codegen {
                     .to_string()
             } else if sn.starts_with("map_") {
                 "av.data[j] != bv.data[j]".to_string()
+            } else if sn.starts_with("opt_") {
+                "!mako_eq_option_int(av.data[j], bv.data[j])".to_string()
+            } else if sn.starts_with("res_") {
+                "!mako_eq_result_int(av.data[j], bv.data[j])".to_string()
             } else if self.enums.contains_key(sn) {
                 format!("!mako_eq_MakoEnum_{sn}(av.data[j], bv.data[j])")
-            } else {
+            } else if self.structs.contains_key(sn) {
                 format!("!mako_eq_{sn}(av.data[j], bv.data[j])")
+            } else {
+                "av.data[j] != bv.data[j]".to_string()
             }
         } else {
             "av.data[j] != bv.data[j]".to_string()

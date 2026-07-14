@@ -9,6 +9,14 @@
   `llms-full.txt` aligned to the real `crypto.scram_*` core API (no fictional
   `scram_client_first` / SASL framing helpers).
 
+### Language — `map[K][]Option[T]` / `map[K][]Result[T,E]`
+
+- **Bag-element slices as map values** — monomorphized `MakoMapS_arr_opt_int*`,
+  etc. Full get/set/`maps_*`/range; match on `m[k][i]`. Zero-cost: reuses
+  `MakoArr_opt_*` / `MakoArr_res_*` already used by `[]Option` / bag-map
+  `maps_values`. Equality uses `mako_eq_option_int` / `mako_eq_result_int`.
+- Tests: `map_option_slice_test`.
+
 ### Security — at-rest, limits, cancel, mTLS, SCRAM cbind
 
 - **Encryption at rest** — `seal_at_rest` / `open_at_rest` (AES-128-GCM,

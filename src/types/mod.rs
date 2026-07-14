@@ -8718,7 +8718,8 @@ impl TypeChecker {
             (Type::Struct { .. }, Type::Enum { .. }) => Ok(()),
             (Type::Enum { .. }, Type::Struct { .. }) => Ok(()),
             (Type::Enum { .. }, Type::Enum { .. }) => Ok(()),
-            // Slice values: map[K][]T and map[K][][]T for supported element types.
+            // Slice values: map[K][]T and map[K][][]T for supported element types;
+            // also map[K][]Option[T] / map[K][]Result[T,E] (bag element slices).
             (
                 Type::Int | Type::String | Type::Float | Type::Bool | Type::Struct { .. } | Type::Enum { .. },
                 Type::Array(inner),
@@ -8749,6 +8750,38 @@ impl TypeChecker {
                         | Type::Struct { .. }
                         | Type::Enum { .. }
                 )
+            ) || matches!(
+                inner.as_ref(),
+                Type::Option(payload)
+                    if matches!(
+                        payload.as_ref(),
+                        Type::Int
+                            | Type::Int64
+                            | Type::Int32
+                            | Type::Int8
+                            | Type::Byte
+                            | Type::String
+                            | Type::Float
+                            | Type::Bool
+                            | Type::Struct { .. }
+                            | Type::Enum { .. }
+                    )
+            ) || matches!(
+                inner.as_ref(),
+                Type::Result(payload, _)
+                    if matches!(
+                        payload.as_ref(),
+                        Type::Int
+                            | Type::Int64
+                            | Type::Int32
+                            | Type::Int8
+                            | Type::Byte
+                            | Type::String
+                            | Type::Float
+                            | Type::Bool
+                            | Type::Struct { .. }
+                            | Type::Enum { .. }
+                    )
             ) =>
             {
                 Ok(())
@@ -8804,7 +8837,7 @@ impl TypeChecker {
             }
             _ => Err(TypeError::new(format!(
                 "unsupported map[{}]{} — keys: int|string|float|bool|Struct|Enum; \
-                 values: int|string|float|bool|Struct|Enum|[]T|[][]T|[]map|map[K2]V|Option[T]|Result[T,E]",
+                 values: int|string|float|bool|Struct|Enum|[]T|[][]T|[]Option|[]Result|[]map|map[K2]V|Option[T]|Result[T,E]",
                 k.display(),
                 v.display()
             ))),
