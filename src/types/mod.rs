@@ -8796,7 +8796,7 @@ impl TypeChecker {
                 Type::Int | Type::String | Type::Float | Type::Bool | Type::Struct { .. } | Type::Enum { .. },
                 Type::Array(inner),
             ) if matches!(inner.as_ref(), Type::Map(_, _)) => Ok(()),
-            // map[K]Option[T] / map[K]Result[T, E] for scalar / struct / enum payloads
+            // map[K]Option[T] / map[K]Result[T, E] for scalar / struct / enum / []T payloads
             (
                 Type::Int | Type::String | Type::Float | Type::Bool | Type::Struct { .. } | Type::Enum { .. },
                 Type::Option(inner),
@@ -8812,6 +8812,21 @@ impl TypeChecker {
                     | Type::Bool
                     | Type::Struct { .. }
                     | Type::Enum { .. }
+            ) || matches!(
+                inner.as_ref(),
+                Type::Array(elem) if matches!(
+                    elem.as_ref(),
+                    Type::Int
+                        | Type::Int64
+                        | Type::Int32
+                        | Type::Int8
+                        | Type::Byte
+                        | Type::String
+                        | Type::Float
+                        | Type::Bool
+                        | Type::Struct { .. }
+                        | Type::Enum { .. }
+                )
             ) =>
             {
                 Ok(())
@@ -8831,13 +8846,28 @@ impl TypeChecker {
                     | Type::Bool
                     | Type::Struct { .. }
                     | Type::Enum { .. }
+            ) || matches!(
+                inner.as_ref(),
+                Type::Array(elem) if matches!(
+                    elem.as_ref(),
+                    Type::Int
+                        | Type::Int64
+                        | Type::Int32
+                        | Type::Int8
+                        | Type::Byte
+                        | Type::String
+                        | Type::Float
+                        | Type::Bool
+                        | Type::Struct { .. }
+                        | Type::Enum { .. }
+                )
             ) =>
             {
                 Ok(())
             }
             _ => Err(TypeError::new(format!(
                 "unsupported map[{}]{} — keys: int|string|float|bool|Struct|Enum; \
-                 values: int|string|float|bool|Struct|Enum|[]T|[][]T|[]Option|[]Result|[]map|map[K2]V|Option[T]|Result[T,E]",
+                 values: int|string|float|bool|Struct|Enum|[]T|[][]T|[]Option|[]Result|[]map|map[K2]V|Option[T]|Option[[]T]|Result[T,E]|Result[[]T,E]",
                 k.display(),
                 v.display()
             ))),

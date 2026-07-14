@@ -1160,31 +1160,48 @@ impl Codegen {
     fn register_bag_payload_on_temp(&mut self, temp: &str, tag: &str) {
         if let Some(rest) = tag.strip_prefix("opt_") {
             let kind = match rest {
-                "int" | "bool" => "int",
-                "string" => "string",
-                "float" => "float",
+                "int" | "bool" => "int".into(),
+                "string" => "string".into(),
+                "float" => "float".into(),
+                "arr_int" | "arr_bool" | "arr_byte" => "slice".into(),
+                "arr_string" => "slice_str".into(),
+                "arr_float" => "slice_float".into(),
+                other if other.starts_with("arr_") => {
+                    let name = &other["arr_".len()..];
+                    self.option_some_structs
+                        .insert(temp.to_string(), name.to_string());
+                    "slice_struct".into()
+                }
                 other => {
                     self.option_some_structs
                         .insert(temp.to_string(), other.to_string());
-                    "struct"
+                    "struct".into()
                 }
             };
-            self.option_some_kinds
-                .insert(temp.to_string(), kind.into());
+            self.option_some_kinds.insert(temp.to_string(), kind);
             self.locals
                 .insert(temp.to_string(), "MakoOptionInt".into());
         } else if let Some(rest) = tag.strip_prefix("res_") {
             let kind = match rest {
-                "int" | "bool" => "int",
-                "string" => "string",
-                "float" => "float",
+                "int" | "bool" => "int".into(),
+                "string" => "string".into(),
+                "float" => "float".into(),
+                "arr_int" | "arr_bool" | "arr_byte" => "slice".into(),
+                "arr_string" => "slice_str".into(),
+                "arr_float" => "slice_float".into(),
+                other if other.starts_with("arr_") => {
+                    let name = &other["arr_".len()..];
+                    self.result_ok_structs
+                        .insert(temp.to_string(), name.to_string());
+                    "slice_struct".into()
+                }
                 other => {
                     self.result_ok_structs
                         .insert(temp.to_string(), other.to_string());
-                    "struct"
+                    "struct".into()
                 }
             };
-            self.result_ok_kinds.insert(temp.to_string(), kind.into());
+            self.result_ok_kinds.insert(temp.to_string(), kind);
             self.locals
                 .insert(temp.to_string(), "MakoResultInt".into());
         }
@@ -2967,6 +2984,55 @@ impl Codegen {
                 "mako_err_int(mako_str_from_cstr(\"\"))".into(),
                 "mako_eq_result_int(av, bv)".into(),
             ),
+            // Option[[]T] / Result[[]T,E] — bag of slice header (heap-boxed via Some/Ok)
+            (
+                "opt_arr_int".into(),
+                "MakoOptionInt".into(),
+                "mako_none_int()".into(),
+                "mako_eq_option_int(av, bv)".into(),
+            ),
+            (
+                "opt_arr_string".into(),
+                "MakoOptionInt".into(),
+                "mako_none_int()".into(),
+                "mako_eq_option_int(av, bv)".into(),
+            ),
+            (
+                "opt_arr_float".into(),
+                "MakoOptionInt".into(),
+                "mako_none_int()".into(),
+                "mako_eq_option_int(av, bv)".into(),
+            ),
+            (
+                "opt_arr_bool".into(),
+                "MakoOptionInt".into(),
+                "mako_none_int()".into(),
+                "mako_eq_option_int(av, bv)".into(),
+            ),
+            (
+                "res_arr_int".into(),
+                "MakoResultInt".into(),
+                "mako_err_int(mako_str_from_cstr(\"\"))".into(),
+                "mako_eq_result_int(av, bv)".into(),
+            ),
+            (
+                "res_arr_string".into(),
+                "MakoResultInt".into(),
+                "mako_err_int(mako_str_from_cstr(\"\"))".into(),
+                "mako_eq_result_int(av, bv)".into(),
+            ),
+            (
+                "res_arr_float".into(),
+                "MakoResultInt".into(),
+                "mako_err_int(mako_str_from_cstr(\"\"))".into(),
+                "mako_eq_result_int(av, bv)".into(),
+            ),
+            (
+                "res_arr_bool".into(),
+                "MakoResultInt".into(),
+                "mako_err_int(mako_str_from_cstr(\"\"))".into(),
+                "mako_eq_result_int(av, bv)".into(),
+            ),
         ];
         let mut names: Vec<String> = self.structs.keys().cloned().collect();
         names.extend(self.enums.keys().cloned());
@@ -2981,6 +3047,18 @@ impl Codegen {
             ));
             bags.push((
                 format!("res_{n}"),
+                "MakoResultInt".into(),
+                "mako_err_int(mako_str_from_cstr(\"\"))".into(),
+                "mako_eq_result_int(av, bv)".into(),
+            ));
+            bags.push((
+                format!("opt_arr_{n}"),
+                "MakoOptionInt".into(),
+                "mako_none_int()".into(),
+                "mako_eq_option_int(av, bv)".into(),
+            ));
+            bags.push((
+                format!("res_arr_{n}"),
                 "MakoResultInt".into(),
                 "mako_err_int(mako_str_from_cstr(\"\"))".into(),
                 "mako_eq_result_int(av, bv)".into(),
@@ -24944,16 +25022,22 @@ fn parse_map_k_slice_val(bty: &str) -> Option<(String, String)> {
     if rest.contains("_map_") {
         return None;
     }
-    // First `_arr_` / `_opt_` / `_res_` separates key from value tag.
+    // Leftmost separator after the key name. That distinguishes:
+    //   Point_arr_opt_int  → arr_opt_int  (map[Point][]Option[int])
+    //   Point_opt_arr_int  → opt_arr_int  (map[Point]Option[[]int])
+    let mut best: Option<usize> = None;
     for sep in ["_arr_", "_opt_", "_res_"] {
         if let Some(idx) = rest.find(sep) {
-            let k = &rest[..idx];
-            let tag = &rest[idx + 1..]; // e.g. "arr_int" / "opt_int" / "res_string"
-            if !k.is_empty()
-                && (tag.starts_with("arr_") || tag.starts_with("opt_") || tag.starts_with("res_"))
-            {
-                return Some((k.to_string(), tag.to_string()));
-            }
+            best = Some(best.map_or(idx, |b| b.min(idx)));
+        }
+    }
+    if let Some(idx) = best {
+        let k = &rest[..idx];
+        let tag = &rest[idx + 1..]; // skip leading '_'
+        if !k.is_empty()
+            && (tag.starts_with("arr_") || tag.starts_with("opt_") || tag.starts_with("res_"))
+        {
+            return Some((k.to_string(), tag.to_string()));
         }
     }
     None
@@ -24973,7 +25057,8 @@ fn map_slice_val_c_ty(tag: &str) -> String {
     }
 }
 
-/// Tag for map[K]Option[T] / map[K]Result[T,E] monomorphization (`opt_int`, `res_Point`, …).
+/// Tag for map[K]Option[T] / map[K]Result[T,E] monomorphization
+/// (`opt_int`, `res_Point`, `opt_arr_int`, …).
 fn bag_map_val_tag(
     is_option: bool,
     payload: &TypeExpr,
@@ -24996,6 +25081,26 @@ fn bag_map_val_tag(
         TypeExpr::Named(n) if structs.contains_key(n) || enums.contains_key(n) => {
             format!("{pref}_{n}")
         }
+        // Option[[]T] / Result[[]T,E] → opt_arr_int / res_arr_string / …
+        TypeExpr::Array(inner) => match inner.as_ref() {
+            TypeExpr::Named(n)
+                if matches!(
+                    n.as_str(),
+                    "int" | "int64" | "int32" | "int8" | "byte" | "uint64"
+                ) =>
+            {
+                format!("{pref}_arr_int")
+            }
+            TypeExpr::Named(n) if n == "string" => format!("{pref}_arr_string"),
+            TypeExpr::Named(n) if n == "float" || n == "float64" => {
+                format!("{pref}_arr_float")
+            }
+            TypeExpr::Named(n) if n == "bool" => format!("{pref}_arr_bool"),
+            TypeExpr::Named(n) if structs.contains_key(n) || enums.contains_key(n) => {
+                format!("{pref}_arr_{n}")
+            }
+            _ => format!("{pref}_arr_int"),
+        },
         _ => format!("{pref}_int"),
     }
 }

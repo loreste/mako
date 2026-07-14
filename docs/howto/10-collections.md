@@ -87,6 +87,7 @@ fn main() {
 | Option bag | `map[string]Option[int]` |
 | Result bag | `map[int]Result[string, string]` |
 | Slice of bags | `map[string][]Option[int]`, `map[int][]Result[string,string]` |
+| Bag of slices | `map[string]Option[[]int]`, `map[int]Result[[]int,string]` |
 
 ```mko
 struct Point { x: int, y: int }
@@ -313,6 +314,7 @@ Pre-size with a hint: `make(map[string]int, 1024)`.
 | `examples/testing/map_option_result_test.mko` | bag values |
 | `examples/testing/option_result_slice_test.mko` | `[]Option[T]` / `[]Result[T,E]` |
 | `examples/testing/map_option_slice_test.mko` | `map[K][]Option[T]` / `map[K][]Result[T,E]` |
+| `examples/testing/map_option_of_slice_test.mko` | `map[K]Option[[]T]` / `map[K]Result[[]T,E]` |
 | `examples/testing/nested_slice_test.mko` | `[][]T` |
 
 ```bash

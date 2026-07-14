@@ -9,6 +9,16 @@
   `llms-full.txt` aligned to the real `crypto.scram_*` core API (no fictional
   `scram_client_first` / SASL framing helpers).
 
+### Language — `map[K]Option[[]T]` / `map[K]Result[[]T,E]`
+
+- **Bags of slices as map values** — `map[string]Option[[]int]`,
+  `map[int]Result[[]string,string]`, named keys/payloads. Tags `opt_arr_*` /
+  `res_arr_*`; Some/Ok heap-box slice headers (existing path). Match on `m[k]`
+  registers slice kinds. Fixed named-key parse so `opt_arr_int` is not split on
+  inner `_arr_`. Zero-cost monomorphs; bag eq is pointer identity for boxed
+  slices (same as Option[map]).
+- Tests: `map_option_of_slice_test`.
+
 ### Language — `map[K][]Option[T]` / `map[K][]Result[T,E]`
 
 - **Bag-element slices as map values** — monomorphized `MakoMapS_arr_opt_int*`,
