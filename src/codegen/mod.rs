@@ -251,6 +251,8 @@ impl Codegen {
                     "slice"
                 }
                 TypeExpr::Named(_) => "slice_struct",
+                // []chan[T] — unbox via MakoArr_chan_* (slice_struct + mono tag name)
+                TypeExpr::Generic(n, _) if n == "chan" => "slice_struct",
                 _ => "slice",
             },
             TypeExpr::Map(k, v) => match (k.as_ref(), v.as_ref()) {
@@ -655,6 +657,12 @@ impl Codegen {
                 if let TypeExpr::Named(t) = inner.as_ref() {
                     if self.structs.contains_key(t) {
                         return Some(t.clone());
+                    }
+                }
+                // []chan[T] → mono tag (chan_int / chan_Point) for MakoArr_{tag}
+                if let TypeExpr::Generic(n, args) = inner.as_ref() {
+                    if n == "chan" && !args.is_empty() {
+                        return Some(chan_map_val_tag(&args[0], &self.structs));
                     }
                 }
                 None
@@ -2995,6 +3003,11 @@ impl Codegen {
             bag_tags.push((format!("opt_{n}"), "MakoOptionInt".into()));
             bag_tags.push((format!("res_{n}"), "MakoResultInt".into()));
         }
+        // map[K][]Option[chan[T]] / map[K][]Result[chan[T],E]
+        for (ctag, _) in self.leaf_chan_value_specs() {
+            bag_tags.push((format!("opt_{ctag}"), "MakoOptionInt".into()));
+            bag_tags.push((format!("res_{ctag}"), "MakoResultInt".into()));
+        }
         for (tag, elem_c) in &bag_tags {
             self.emit_nested_arr_helpers(tag, elem_c); // MakoArr_opt_int
             vals.push((format!("arr_{tag}"), format!("MakoArr_{tag}")));
@@ -3369,6 +3382,7 @@ impl Codegen {
             ));
         }
         // Option[chan[T]] / Result[chan[T],E]
+        // and Option[[]chan[T]] / Result[[]chan[T],E] (opt_arr_chan_* / res_arr_chan_*)
         for (ctag, _) in self.leaf_chan_value_specs() {
             bags.push((
                 format!("opt_{ctag}"),
@@ -3378,6 +3392,18 @@ impl Codegen {
             ));
             bags.push((
                 format!("res_{ctag}"),
+                "MakoResultInt".into(),
+                "mako_err_int(mako_str_from_cstr(\"\"))".into(),
+                "mako_eq_result_int(av, bv)".into(),
+            ));
+            bags.push((
+                format!("opt_arr_{ctag}"),
+                "MakoOptionInt".into(),
+                "mako_none_int()".into(),
+                "mako_eq_option_int(av, bv)".into(),
+            ));
+            bags.push((
+                format!("res_arr_{ctag}"),
                 "MakoResultInt".into(),
                 "mako_err_int(mako_str_from_cstr(\"\"))".into(),
                 "mako_eq_result_int(av, bv)".into(),
@@ -6127,11 +6153,34 @@ impl Codegen {
                                     n.clone()
                                 }
                                 other => {
+                                    // Channel handles: Some(ch) / Ok(ch) → opt_chan_int / …
                                     let cty = self.peek_expr_c_ty(other);
                                     match cty.as_str() {
                                         "MakoString" => "string".into(),
                                         "double" => "float".into(),
                                         "bool" => "bool".into(),
+                                        "MakoChanStr*" => "chan_string".into(),
+                                        "MakoChanPtr*" => {
+                                            if let Expr::Ident(n) = other {
+                                                self.chan_ptr_elems
+                                                    .get(n)
+                                                    .map(|s| format!("chan_{s}"))
+                                                    .unwrap_or_else(|| "chan_ptr".into())
+                                            } else {
+                                                "chan_ptr".into()
+                                            }
+                                        }
+                                        "MakoChan*" => {
+                                            if let Expr::Ident(n) = other {
+                                                if self.chan_float.contains(n) {
+                                                    "chan_float".into()
+                                                } else {
+                                                    "chan_int".into()
+                                                }
+                                            } else {
+                                                "chan_int".into()
+                                            }
+                                        }
                                         s if self.structs.values().any(|si| si.c_name == s) => {
                                             s.to_string()
                                         }
@@ -25853,6 +25902,7 @@ fn bag_map_val_tag(
             format!("{pref}_{n}")
         }
         // Option[[]T] / Result[[]T,E] → opt_arr_int / res_arr_string / …
+        // Also Option[[]chan[T]] → opt_arr_chan_int / …
         TypeExpr::Array(inner) => match inner.as_ref() {
             TypeExpr::Named(n)
                 if matches!(
@@ -25869,6 +25919,10 @@ fn bag_map_val_tag(
             TypeExpr::Named(n) if n == "bool" => format!("{pref}_arr_bool"),
             TypeExpr::Named(n) if structs.contains_key(n) || enums.contains_key(n) => {
                 format!("{pref}_arr_{n}")
+            }
+            TypeExpr::Generic(n, args) if n == "chan" && !args.is_empty() => {
+                let ct = chan_map_val_tag(&args[0], structs);
+                format!("{pref}_arr_{ct}")
             }
             _ => format!("{pref}_arr_int"),
         },

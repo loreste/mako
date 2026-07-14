@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Language — nested channel bags (`[]Option[chan]` / `Option[[]chan]`)
+
+- **`map[K][]Option[chan[T]]` / `map[K][]Result[chan[T],E]`** — bag-element
+  slices of channels (`arr_opt_chan_*` / `arr_res_chan_*`).
+- **`map[K]Option[[]chan[T]]` / `map[K]Result[[]chan[T],E]`** — optional /
+  fallible channel-slice values (`opt_arr_chan_*` / `res_arr_chan_*`).
+- Some/Ok array-lit tagging refined for channel payloads.
+- Tests: `map_option_chan_nested_test`.
+
 ### Language — `Option[chan[T]]` / `map[K]Option[chan]` / `Result[chan]`
 
 - **Channel bags** — `Option[chan[T]]`, `Result[chan[T],E]`, and as map values

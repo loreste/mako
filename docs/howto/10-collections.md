@@ -95,6 +95,8 @@ fn main() {
 | Slice of channels | `map[string][]chan[int]`, `map[Point][]chan[string]` |
 | Optional channel | `map[string]Option[chan[int]]`, `Option[chan[int]]` |
 | Result channel | `map[int]Result[chan[string],string]` |
+| Slice of optional channels | `map[string][]Option[chan[int]]` |
+| Optional channel slice | `map[string]Option[[]chan[int]]` |
 
 ```mko
 struct Point { x: int, y: int }
@@ -336,6 +338,7 @@ Pre-size with a hint: `make(map[string]int, 1024)`.
 | `examples/testing/map_chan_test.mko` | `map[K]chan[T]` channel values |
 | `examples/testing/map_slice_chan_test.mko` | `map[K][]chan[T]` |
 | `examples/testing/map_option_chan_test.mko` | `Option[chan]` / `map[K]Option[chan]` / `Result[chan]` |
+| `examples/testing/map_option_chan_nested_test.mko` | `[]Option[chan]` / `Option[[]chan]` maps |
 | `examples/testing/nested_slice_test.mko` | `[][]T` |
 
 ```bash
