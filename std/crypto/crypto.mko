@@ -52,7 +52,8 @@ fn scram_client_proof(client_key: string, client_signature: string) -> string {
 fn scram_verify_proof(stored_key: string, auth: string, client_proof: string) -> int {
     let sig = hmac_sha256_raw(stored_key, auth)
     let ck = xor_bytes(client_proof, sig)
-    if sha256_raw(ck) == stored_key {
+    // Constant-time compare of derived StoredKey vs expected.
+    if const_eq(sha256_raw(ck), stored_key) == 1 {
         return 1
     }
     return 0
