@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Language — `[][]chan[T]` and `(chan[T], scalar)` map values
+
+- **`map[K][][]chan[T]`** — nested channel-slice values (`arr_arr_chan_*`).
+- **`map[K](chan[T], U)` / `(U, chan[T])` / `(chan, chan)`** — 2-tuples with
+  channel handles (int/bool/float/string/struct × scalars). Tuple lits refine
+  float/struct channel mono tags from local metadata; unpack propagates
+  send/recv kinds.
+- Tests: `map_chan_nested_slice_tuple_test`.
+
 ### Language — nested channel bags (`[]Option[chan]` / `Option[[]chan]`)
 
 - **`map[K][]Option[chan[T]]` / `map[K][]Result[chan[T],E]`** — bag-element

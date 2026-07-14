@@ -1,0 +1,154 @@
+// map[K][][]chan[T] and map[K](chan[T], scalar) / (scalar, chan[T])
+
+struct Point {
+    x: int
+    y: int
+}
+
+fn TestMapNestedSliceChanInt() {
+    let mut m = make(map[string][][]chan[int])
+    let a = chan_open[int](1)
+    let b = chan_open[int](1)
+    let _ = a.send(1)
+    let _ = b.send(2)
+    // row of rows of channels
+    m["g"] = [[a], [b]]
+    assert_eq(len(m["g"]), 2)
+    assert_eq(len(m["g"][0]), 1)
+    assert_eq(m["g"][0][0].recv(), 1)
+    assert_eq(m["g"][1][0].recv(), 2)
+    assert_eq(len(m["missing"]), 0)
+    a.close()
+    b.close()
+}
+
+fn TestMapNestedSliceChanMake() {
+    let mut m = make(map[int][][]chan[string])
+    let ch = chan_open[string](1)
+    let _ = ch.send("hi")
+    let mut outer = make([][]chan[string], 0, 1)
+    let mut inner = make([]chan[string], 0, 1)
+    inner = append(inner, ch)
+    outer = append(outer, inner)
+    m[0] = outer
+    assert_eq_str(m[0][0][0].recv(), "hi")
+    ch.close()
+}
+
+fn TestMapTupleChanInt() {
+    let mut m = make(map[string](chan[int], int))
+    let ch = chan_open[int](1)
+    let _ = ch.send(42)
+    m["w"] = (ch, 7)
+    let t = m["w"]
+    let c, id = t
+    assert_eq(id, 7)
+    assert_eq(c.recv(), 42)
+    // comma-ok
+    let u, ok = m["w"]
+    assert(ok)
+    let c2, id2 = u
+    assert_eq(id2, 7)
+    // already drained
+    c2.close()
+}
+
+fn TestMapTupleIntChan() {
+    let mut m = make(map[int](int, chan[string]))
+    let ch = chan_open[string](1)
+    let _ = ch.send("x")
+    m[1] = (9, ch)
+    let t = m[1]
+    let n, c = t
+    assert_eq(n, 9)
+    assert_eq_str(c.recv(), "x")
+    c.close()
+}
+
+fn TestMapTupleTwoChans() {
+    let mut m = make(map[string](chan[int], chan[int]))
+    let a = chan_open[int](1)
+    let b = chan_open[int](1)
+    let _ = a.send(1)
+    let _ = b.send(2)
+    m["pair"] = (a, b)
+    let t = m["pair"]
+    let c0, c1 = t
+    assert_eq(c0.recv(), 1)
+    assert_eq(c1.recv(), 2)
+    c0.close()
+    c1.close()
+}
+
+fn TestMapTupleChanFloat() {
+    let mut m = make(map[bool](chan[float], float))
+    let ch = chan_open[float](1)
+    let _ = ch.send(1.5)
+    m[true] = (ch, 2.5)
+    let t = m[true]
+    let c, f = t
+    let v = c.recv()
+    assert(v > 1.4 && v < 1.6)
+    assert(f > 2.4 && f < 2.6)
+    c.close()
+}
+
+fn TestMapTupleChanStruct() {
+    let mut m = make(map[string](chan[Point], int))
+    let ch = chan_open[Point](1)
+    let _ = ch.send(Point { x: 3, y: 4 })
+    m["p"] = (ch, 1)
+    let t = m["p"]
+    let c, n = t
+    assert_eq(n, 1)
+    let q = c.recv()
+    assert_eq(q.x, 3)
+    assert_eq(q.y, 4)
+    c.close()
+}
+
+fn TestMapStructKeyTupleChan() {
+    let mut m = make(map[Point](chan[int], int))
+    let p = Point { x: 1, y: 2 }
+    let ch = chan_open[int](1)
+    let _ = ch.send(99)
+    m[p] = (ch, 5)
+    let t = m[p]
+    let c, n = t
+    assert_eq(n, 5)
+    assert_eq(c.recv(), 99)
+    c.close()
+}
+
+fn TestMapTupleChanHelpers() {
+    let mut m = make(map[string](chan[int], int))
+    let a = chan_open[int](1)
+    let b = chan_open[int](1)
+    let _ = a.send(1)
+    let _ = b.send(2)
+    m["a"] = (a, 10)
+    m["b"] = (b, 20)
+    let ks = maps_keys(m)
+    assert_eq(len(ks), 2)
+    let vs = maps_values(m)
+    assert_eq(len(vs), 2)
+    let c = maps_clone(m)
+    assert_eq(maps_equal(m, c), 1)
+    let t = c["a"]
+    let ch, id = t
+    assert_eq(id, 10)
+    assert_eq(ch.recv(), 1)
+    a.close()
+    b.close()
+}
+
+fn TestMapNestedSliceChanStruct() {
+    let mut m = make(map[string][][]chan[Point])
+    let ch = chan_open[Point](1)
+    let _ = ch.send(Point { x: 1, y: 2 })
+    m["g"] = [[ch]]
+    let q = m["g"][0][0].recv()
+    assert_eq(q.x, 1)
+    assert_eq(q.y, 2)
+    m["g"][0][0].close()
+}

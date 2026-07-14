@@ -8749,6 +8749,22 @@ impl TypeChecker {
                         | Type::Bool
                         | Type::Struct { .. }
                         | Type::Enum { .. }
+                ) || matches!(
+                    // map[K][][]chan[T]
+                    elem.as_ref(),
+                    Type::Chan(ch)
+                        if matches!(
+                            ch.as_ref(),
+                            Type::Int
+                                | Type::Int64
+                                | Type::Int32
+                                | Type::Int8
+                                | Type::Byte
+                                | Type::Bool
+                                | Type::Float
+                                | Type::String
+                                | Type::Struct { .. }
+                        )
                 )
             ) || matches!(
                 inner.as_ref(),
@@ -8993,7 +9009,8 @@ impl TypeChecker {
             {
                 Ok(())
             }
-            // map[K](T, U[, …]) — tuple values (arity 2–4), leaf elements only.
+            // map[K](T, U[, …]) — tuple values (arity 2–4).
+            // Leaf elements: scalar / struct / enum, or channel handles.
             (
                 Type::Int | Type::String | Type::Float | Type::Bool | Type::Struct { .. } | Type::Enum { .. },
                 Type::Tuple(elems),
@@ -9011,6 +9028,21 @@ impl TypeChecker {
                             | Type::Bool
                             | Type::Struct { .. }
                             | Type::Enum { .. }
+                    ) || matches!(
+                        e,
+                        Type::Chan(ch)
+                            if matches!(
+                                ch.as_ref(),
+                                Type::Int
+                                    | Type::Int64
+                                    | Type::Int32
+                                    | Type::Int8
+                                    | Type::Byte
+                                    | Type::Bool
+                                    | Type::Float
+                                    | Type::String
+                                    | Type::Struct { .. }
+                            )
                     )
                 }) =>
             {
@@ -9037,7 +9069,7 @@ impl TypeChecker {
             }
             _ => Err(TypeError::new(format!(
                 "unsupported map[{}]{} — keys: int|string|float|bool|Struct|Enum; \
-                 values: int|string|float|bool|Struct|Enum|[]T|[][]T|[]Option|[]Result|[]Option[chan]|[]Result[chan]|[]chan|[]map|map[K2]V|map[K2]map[K3]V|Option[T]|Option[[]T]|Option[[]chan]|Option[map]|Option[chan]|Result[T,E]|Result[[]T,E]|Result[[]chan]|Result[map]|Result[chan]|(T,U)|chan[T]",
+                 values: int|string|float|bool|Struct|Enum|[]T|[][]T|[]Option|[]Result|[]Option[chan]|[]Result[chan]|[]chan|[][]chan|[]map|map[K2]V|map[K2]map[K3]V|Option[T]|Option[[]T]|Option[[]chan]|Option[map]|Option[chan]|Result[T,E]|Result[[]T,E]|Result[[]chan]|Result[map]|Result[chan]|(T,U)|chan[T]",
                 k.display(),
                 v.display()
             ))),
