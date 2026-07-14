@@ -1116,8 +1116,15 @@ crew t {
 }
 ```
 
+**Send-like kick args:** Copy scalars, `string`, deep-POD named structs
+(scalar/string/nested POD fields), `Option`/`Result`/tuples of sendables,
+channel handles. **Not** maps, arrays, arenas, or non-POD structs.
+
+**Multi-field results:** prefer `chan[Struct]` (heap-box send) over packing
+several ints into one integer. See [ERGONOMICS.md](ERGONOMICS.md) · [SPEED.md](SPEED.md).
+
 Tests: `examples/testing/crew_fan_test.mko`, `job_join_typed_test.mko`,
-`fan_struct_test.mko`.
+`fan_struct_test.mko`, `kick_send_test.mko`, `chan_struct_test.mko`.
 
 ---
 

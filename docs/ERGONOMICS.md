@@ -124,6 +124,141 @@ crew t {
 }
 ```
 
+### Iterate with `for … in range` (not hand-rolled `while`)
+
+Prefer range forms over index soup. Two binders need the `range` keyword; maps
+always require `range`.
+
+```mko
+// slices / arrays
+for i, item in range arr {
+    // index + value
+}
+for _, item in range arr {
+    // values only
+}
+for i in range arr {
+    // indices only
+}
+
+// maps
+for k, v in range m {
+    // …
+}
+
+// integer span 0..n-1
+for i in range n {
+    // …
+}
+
+// C-style when you need a custom step
+for i := 0; i < n; i++ {
+    // …
+}
+```
+
+Tests: `for_forms_test.mko`, `range_test.mko`, map `*_test.mko` range cases.
+
+### Format strings with `fmt_sprintf*` (not a builder wall)
+
+For logs, JSON fragments, and config dumps, use the fmt package surface instead
+of ten `builder_write` calls. Full `f"…{x}"` interpolation is **not** in yet;
+`fmt_*` is the production path.
+
+```mko
+log_info_event(
+    "listener_bound",
+    fmt_sprintf3(
+        "frontend=%s bind=%s:%s",
+        fe.name,
+        fe.bind_host,
+        int_to_string(fe.bind_port)
+    )
+)
+
+let line = fmt_sprintf_d("retries=%d", n)
+let pair = fmt_sprintf2("%s=%s", key, val)
+```
+
+| Helper | Role |
+|--------|------|
+| `fmt_sprintf` … `fmt_sprintf4` | string args into `%s` / `%v` / `%q` / … |
+| `fmt_sprintf_d` / `fmt_sprintf_dd` | int verbs (`%d` `%x` …) |
+| `fmt_sprintf_f` | float + precision |
+| `fmt_sprint` / `fmt_errorf` | join / error strings |
+
+Tests: `fmt_print_test.mko`. Details: [BUILTINS.md](BUILTINS.md) · [STDLIB.md](STDLIB.md).
+
+### Dispatch on string / int with `match` or `switch`
+
+Deep nested `if str_eq(key, …) { else { if … } }` is avoidable:
+
+```mko
+// config keys, routes, status tokens
+match key {
+    "timeout_client" => { out.timeout_client_ms = parse_duration_ms(val) },
+    "timeout_server" => { out.timeout_server_ms = parse_duration_ms(val) },
+    "maxconn" => { out.maxconn = to_int(val) },
+    _ => {},
+}
+
+// ints
+switch status {
+case 200:
+    // ok
+case 404, 410:
+    // gone-ish
+default:
+    // other
+}
+```
+
+Tests: `ergonomics_test.mko` (string `match`), `switch_test.mko`, `match_or_test.mko`.
+
+### Multi-field worker results — POD struct channels (no int bit-packing)
+
+Workers should not pack five fields into one `int` with multiply/modulo.
+Send a **named POD struct** on a channel (or as a kick arg):
+
+```mko
+struct ProxyDone {
+    err: int
+    status: int
+    server_idx: int
+    bytes: int
+    retries: int
+}
+
+fn worker(out: chan[ProxyDone], …) -> int {
+    let _ = out.send(ProxyDone {
+        err: 0,
+        status: 200,
+        server_idx: si,
+        bytes: n,
+        retries: r,
+    })
+    return 0
+}
+
+fn main() {
+    let ch = chan_open[ProxyDone](64)
+    crew t {
+        let j = t.kick(worker(ch, …))
+        let d = ch.recv()
+        let _ = j.join()
+        // use d.err, d.status, d.bytes, …
+    }
+}
+```
+
+**Send rules (kick args):** Copy scalars, `string`, deep-POD structs (scalar/string
+fields only), `Option`/`Result`/tuples of sendables, channel handles.
+**Not sendable as kick args:** maps, arrays, arenas, non-POD structs.
+Enum fields on structs are not deep-POD yet — use int flags or send enums on
+their own when allowed; prefer `chan[Struct]` for rich results.
+
+Tests: `chan_struct_test.mko`, `kick_send_test.mko`, POD kick waves · [SPEED.md](SPEED.md).
+
 ### Units without path soup
 
 ```mko
@@ -261,7 +396,10 @@ Everyday `let` stays simple. That is intentional.
 |-------|--------|
 | `print_int(x)` when `print(x)` works | `print(x)` |
 | `str_eq(a, b)` for plain strings | `a == b` |
-| Nested `if` pyramids for routes | `match path { … }` |
+| Nested `if` pyramids for routes / config keys | `match path { … }` / `match key { … }` |
+| `while i < len(arr) { … i = i + 1 }` | `for i, v in range arr` / `for _, v in range arr` |
+| Ten `builder_write` calls for one log line | `fmt_sprintf*` / `fmt_sprint*` |
+| Packing `(err, status, idx, bytes, retries)` into one `int` | `chan[ProxyDone]` POD struct (or kick POD arg) |
 | Annotating every local | Infer locals; annotate boundaries |
 | Dual spellings in new code (`func`, `:=`, `import`) | Mako flair (`fn`, `let`, `pull`) |
 | Ignoring `Result` | `?`, `match`, or `let _ =` when discard is deliberate |
@@ -269,6 +407,19 @@ Everyday `let` stays simple. That is intentional.
 | Re-implementing nested maps by hand | `map[K]map[K2]V` (depth ≤3) |
 | Parallel nullable / fallible lookups | `map[K]Option[T]` / `map[K]Result[T,E]` |
 | Hand-wiring per-key channels | `map[K]chan[T]` |
+
+### Still open (real language residuals)
+
+These still force extra typing in large backends — tracked in
+[PAIN_POINTS.md](PAIN_POINTS.md) / [ROADMAP.md](ROADMAP.md):
+
+| Residual | Workaround today |
+|----------|------------------|
+| Struct spread `{ ...base, err: 1 }` | Full struct literal (or `T{}` zero then assign fields) |
+| Field defaults on `struct` def | Explicit zeros in every literal |
+| General first-class fn parameters | Duplicate small pipelines or `fan` lambdas |
+| `f"…{x}"` interpolation | `fmt_sprintf*` |
+| Enum fields inside kick-POD structs | int flags, or channel the enum/struct separately |
 
 ---
 
@@ -319,10 +470,13 @@ If (1) is “longer” without a safety win, reject it.
 | Doc | Role |
 |-----|------|
 | [IDENTITY.md](IDENTITY.md) | Unique surface |
-| [PAIN_POINTS.md](PAIN_POINTS.md) | Why we exist |
+| [PAIN_POINTS.md](PAIN_POINTS.md) | Why we exist · residuals R8–R11 (spread, HOF, interpol, enum kick) |
 | [VISION.md](VISION.md) | Product north star |
-| [GUIDE.md](GUIDE.md) | Full syntax (maps §4c, slices §4b) |
+| [GUIDE.md](GUIDE.md) | Full syntax (maps §4c, control flow §4, concurrency §8–9) |
+| [SPEED.md](SPEED.md) | Send-like kick · fan · channels |
+| [ROADMAP.md](ROADMAP.md) | What’s done vs open for language ergonomics |
 | [LANGUAGE.md](LANGUAGE.md) | Surface summary |
-| [BUILTINS.md](BUILTINS.md) | `maps_*` and collection builtins |
+| [BUILTINS.md](BUILTINS.md) | `maps_*`, `fmt_*`, collection builtins |
+| [howto/05-concurrency.md](howto/05-concurrency.md) | Crew / channels / struct results |
 | [examples/mako_style.mko](../examples/mako_style.mko) | Canonical short sample |
-| `examples/testing/map_*.mko` · `nested_slice_test.mko` | Collection surface tests |
+| `examples/testing/map_*.mko` · `for_forms_test` · `fmt_print_test` · `chan_struct_test` | Surface tests |

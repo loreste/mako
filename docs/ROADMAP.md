@@ -94,6 +94,25 @@ Metrics/prom + span-lite JSON are in; depth is open.
 5. GPU AI depth: batched GEMM, RoPE, KV-cache, native f16; more quant; Metal/CUDA/Vulkan  
 6. Interop beyond C · hot reload · safe comptime domain extensions  
 
+### Language ergonomics — production backends
+
+**Already on tip (do not re-open as “missing language features”):**
+
+| Feature | Surface | Tests / docs |
+|---------|---------|--------------|
+| Loops | `for i, v in range s` · `for k, v in range m` · C-style `for` | `for_forms_test` · [ERGONOMICS.md](ERGONOMICS.md) |
+| Formatting | `fmt_sprintf*` / `fmt_sprint*` / `fmt_errorf` | `fmt_print_test` |
+| String/int dispatch | `match "…" { … }` · `switch` / `case` | `ergonomics_test` · `switch_test` |
+| Multi-field worker I/O | `chan[Struct]` + deep-POD kick args | `chan_struct_test` · [SPEED.md](SPEED.md) |
+
+**Still open (true residuals):**
+
+1. Struct spread `{ ...base, field: val }` and field defaults on `struct`  
+2. General first-class functions / closures as ordinary parameters (beyond `fan`)  
+3. Optional string interpolation sugar over `fmt_sprintf*`  
+4. Enum fields on kick-POD + `chan[Enum]` polish  
+5. `chan[(int, int, …)]` tuples (named structs already cover the multi-field case)  
+
 ### Language / stdlib residuals (lower priority)
 
 - Exotic `Result` / `Option` / `?` edges beyond current suite  

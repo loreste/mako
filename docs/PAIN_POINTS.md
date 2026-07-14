@@ -37,6 +37,11 @@ Canonical surface: [IDENTITY.md](IDENTITY.md). Compat duals only: [COMPAT.md](CO
 | Both: stdlib / dep sprawl for backends | Batteries-included std (HTTP, SQL, crypto, …) | **Strong** |
 | Both: too much typing / ceremony for everyday work | Local inference, one `print`, `==` on strings, `?`, `match`, opt-in power, full map/slice grid without packages | **Strong** — [ERGONOMICS.md](ERGONOMICS.md) |
 | Go map key limits (only comparable builtins; no struct keys without workarounds) | `map[Struct\|Enum\|float\|bool]…`, `map[K][]T`, nested `map[K]map[…]` (depth 2), bag values `map[K]Option[T]` / `map[K]Result[T,E]` | **Strong** |
+| Index soup (`while i < len`) across large backends | `for i, v in range s` / `for k, v in range m` / C-style `for` | **Strong** — [ERGONOMICS.md](ERGONOMICS.md) |
+| Manual `str_builder` for every log/JSON fragment | `fmt_sprintf` / `fmt_sprintf2`… / `fmt_sprintf_d` (no full `f"…"` interpol yet) | **Strong** (fmt) / **Partial** (interpol residual) |
+| Nested `if str_eq(key, …)` config trees | `match key { "…" => …, _ => {} }` · `switch` on ints | **Strong** |
+| Bit-packing multi-field worker results into one `int` | POD `struct` on `chan[Struct]` or as kick arg | **Strong** for POD · **Partial** for enum fields on kick |
+| Duplicated pipelines for want of callbacks | `fan` lambdas seed; general first-class fn params residual | **Partial** |
 
 **Product rule:** every major language change should close a row above, or be
 rejected. “Looks like Go/Rust” is never a sufficient reason.
@@ -177,13 +182,17 @@ Tracked also in [STATUS.md](STATUS.md) / [ROADMAP.md](ROADMAP.md). Closing these
 
 | # | Pain still open | Direction (Mako-shaped) |
 |---|-----------------|-------------------------|
-| R1 | Data races across `crew` | **Seed done:** kick Send-like (Copy/string/chan). Still open: share atomics, fuller race model |
+| R1 | Data races / runtime trust across `crew` | **Send seed done** (Copy/string/chan/deep-POD/Option·Result·tuple). Still open: portable timeouts, child error prop, detached lifecycle, fuller race model |
 | R2 | Richer errors than stringly `Err` | Typed error enums + context, still `?`-friendly |
 | R3 | NLL / ownership edge cases | Stronger checker without new surface ceremony |
 | R4 | Package visibility beyond seed | `export` + `visibility = "explicit"` finished |
-| R5 | Observability / diagnostics depth | Traces, profiles, leak/deadlock reports in Mako terms |
+| R5 | Observability / diagnostics depth | Prom + span JSON seed done; OTLP, profiles, source stacks residual |
 | R6 | Identity lint | `mako lint --identity` flags dual forms as style |
-| R7 | Compile-time discipline at scale | Keep frontend linear; avoid trait-solver cliffs |
+| R7 | Compile-time discipline at scale | Keep frontend linear; demand-driven monomorphs done; avoid trait-solver cliffs |
+| R8 | Struct spread / field defaults | `{ ...base, err: 1 }` and `struct` field defaults — cut early-return boilerplate |
+| R9 | General first-class functions | Named/lambda `fn` values as ordinary params (beyond `fan`) for shared pipelines |
+| R10 | True string interpolation | Optional `f"…{x}"` sugar over existing `fmt_sprintf*` |
+| R11 | Enum fields on kick-POD + `chan[Enum]` | Health/state enums everywhere Send already allows plain enums/maps |
 
 ---
 
@@ -210,7 +219,10 @@ Mako:     unique syntax
           hold / share / arena     → safety without lifetime essays
           crew / kick / join       → concurrency without leaks or coloring
           Result / Option / ?      → errors you cannot ignore
-          enum / match             → real variants
+          enum / match / switch    → real variants + string/int dispatch
+          for … in range           → slices, maps, channels
+          fmt_sprintf*             → logs/JSON without builder walls
+          chan[Struct] / POD kick  → multi-field worker results (no bit-pack)
           pack / pull / export     → clear units
           no mandatory GC          → predictable performance
 ```

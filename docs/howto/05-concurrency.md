@@ -28,7 +28,8 @@ Jobs cannot escape their crew. When the block ends, all kicked work has joined.
 
 ## Channels
 
-Communicate between jobs using typed channels:
+Communicate between jobs using typed channels. Element types: int family, bool,
+float, string, and **named structs** (`chan_open[Point](n)` / `make(chan[Point], n)`).
 
 ```mko
 fn producer(ch: chan[int], count: int) -> int {
@@ -58,11 +59,42 @@ fn main() {
 }
 ```
 
+### Struct results (no int bit-packing)
+
+Prefer a POD struct on a channel when a worker returns several fields:
+
+```mko
+struct Done {
+    err: int
+    status: int
+    bytes: int
+}
+
+fn worker(out: chan[Done]) -> int {
+    let _ = out.send(Done { err: 0, status: 200, bytes: 42 })
+    return 0
+}
+
+fn main() {
+    let ch = chan_open[Done](4)
+    crew t {
+        let j = t.kick(worker(ch))
+        let d = ch.recv()
+        let _ = j.join()
+        print_int(d.status)
+    }
+}
+```
+
+Deep-POD structs (scalar/string fields only) may also cross **`kick` as args**.
+Maps, arrays, and non-POD structs cannot — use channels. Details:
+[SPEED.md](../SPEED.md) · [ERGONOMICS.md](../ERGONOMICS.md).
+
 Channel operations:
 
 | Operation | Meaning |
 |-----------|---------|
-| `chan_new(cap)` | Create buffered channel |
+| `chan_new(cap)` / `chan_open[T](cap)` / `make(chan[T], cap)` | Create buffered channel |
 | `ch.send(val)` | Send a value (blocks if full) |
 | `ch.recv()` | Receive a value (blocks if empty) |
 | `ch.close()` | Signal no more sends |

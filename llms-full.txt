@@ -1064,14 +1064,23 @@ Thread-safe hash map, safe to share across crew tasks:
 20.8 Sendable Types Across kick
 --------------------------------
 
-Only certain types can cross kick boundaries (thread-safe):
+Only certain types can cross kick boundaries (Send-like seed):
 - Copy types: int, float, bool, byte
 - string (immutable, auto-cloned)
+- deep-POD named structs (scalar/string/nested POD fields only)
+- Option / Result / tuples of sendable payloads
+- enums with sendable payloads (no map/array fields)
 - chan handles
-- CMap, Mutex, RWMutex, AtomicInt
+- CMap, Mutex, RWMutex, AtomicInt (sync handles)
 - ShareInt (atomic RC)
 
-Arrays/structs with non-sendable fields are rejected at compile time.
+Rejected: arrays, maps, arenas, non-POD structs (map/slice fields).
+Prefer chan[Struct] for multi-field worker results (do not bit-pack into one int).
+
+Loops: for i, v in range s / for k, v in range m / C-style for.
+Format: fmt_sprintf* / fmt_sprint* (no full f"…" interpol yet).
+Dispatch: match on strings/ints/enums; switch/case on values.
+See docs/ERGONOMICS.md and docs/SPEED.md.
 
 ================================================================================
 21. MODULE SYSTEM (pack / pull / export) — DETAILED

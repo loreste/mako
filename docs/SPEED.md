@@ -92,17 +92,33 @@ Runnable: `examples/concurrency.mko`, `examples/parallel.mko` · tests:
 |----|-----|
 | Copy (int/bool/float/…) | packed as `intptr_t` |
 | `string` | heap-cloned for the task |
+| Deep-**POD** named structs (scalar/string/nested POD fields) | heap-boxed for the task |
+| `Option` / `Result` / tuples of sendables | boxed payloads |
+| Enums with sendable payloads | boxed (no map/array fields) |
 | `ShareInt` | atomic RC + **auto-clone** onto the heap |
 | `chan[T]` | handle shared (channel is the sync point) |
-| `chan[Struct]` | heap-box send / unbox recv (`MakoChanPtr`) |
 
-**Not OK as kick args:** arrays, maps, bare structs, arenas — send structs on **channels**.
+**Not OK as kick args:** arrays, maps, arenas, non-POD structs (e.g. map/slice fields),
+struct fields that are enums today (not deep-POD). Prefer channels for large or
+mutating results:
 
 ```mko
+struct Point { x: int, y: int }
+
+// POD struct as kick arg
+crew t {
+    let j = t.kick(work(Point { x: 1, y: 2 }))
+    let _ = j.join()
+}
+
+// Result fan-in: named struct on a channel (no int bit-packing)
 let ch = chan_open[Point](2)
 let _ = ch.send(Point { x: 1, y: 2 })
 let p = ch.recv()
 ```
+
+Tests: `kick_send_test`, `wave10_queue_test` / `wave11_queue_test` (POD kick),
+`chan_struct_test`, `lang_residuals_test` (deep POD).
 
 ### Parallel map
 

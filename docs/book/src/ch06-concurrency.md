@@ -110,6 +110,51 @@ fn main() {
 Each kicked task runs on its own OS thread. The runtime tracks spawned and joined
 counts for observability (accessible via `runtime_stats_json()`).
 
+### What may cross a kick (Send-like seed)
+
+Kick arguments must be **sendable**:
+
+| Allowed | Notes |
+|---------|-------|
+| Copy scalars (`int`, `bool`, `float`, …) | packed into the task |
+| `string` | heap-cloned for the task |
+| Deep-POD named structs | scalar/string/nested POD fields only |
+| `Option` / `Result` / tuples of sendables | boxed payloads |
+| `chan[T]` handles | shared; the channel is the sync point |
+
+| Rejected | Prefer instead |
+|----------|----------------|
+| Arrays, maps, arenas | pass data on a channel or rebuild inside the task |
+| Non-POD structs (map/slice fields) | `chan[Struct]` for results; redesign fields |
+
+```mko
+struct Point { x: int, y: int }
+
+fn work(p: Point) -> int {
+    return p.x + p.y
+}
+
+fn main() {
+    crew t {
+        let j = t.kick(work(Point { x: 3, y: 4 }))
+        print_int(j.join())   // 7
+    }
+}
+```
+
+For multi-field **results** from workers, send a named struct on a channel
+instead of packing fields into one `int`:
+
+```mko
+struct Done { err: int, status: int, bytes: int }
+
+let ch = chan_open[Done](4)
+// worker: ch.send(Done { err: 0, status: 200, bytes: n })
+// parent: let d = ch.recv()
+```
+
+See [SPEED.md](../../SPEED.md) and [ERGONOMICS.md](../../ERGONOMICS.md).
+
 ---
 
 ## t.join()

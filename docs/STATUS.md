@@ -70,6 +70,7 @@ Last inventory: 2026-07-14 (**unique Mako surface** · pack/pull types · full m
 | `map[K]Option[T]` / `map[K]Result[T,E]` | PASS — `map_option_result_test` (11 tests) |
 | Security residuals (at-rest, limits, cancel, mTLS, SCRAM cbind) | PASS — `security_residuals_test` |
 | Security product polish (path size, PEM, CSR/self-signed, prom/trace, SCRAM-PLUS helpers) | PASS — `security_product_test` |
+| Backend ergonomics already on tip (`for…in range`, `fmt_sprintf*`, `match`/`switch`, `chan[Struct]`, POD kick) | Documented — [ERGONOMICS.md](ERGONOMICS.md) · [SPEED.md](SPEED.md) |
 | Book samples `mako check` / `run` | PASS — `docs/book/examples/book_*.mko` |
 | `mako test examples/testing` | PASS — **165 passed**, 0 failed |
 | `if init; cond { }` + both-branches-return body | Done — `examples/testing/if_init_test.mko` |
@@ -233,7 +234,7 @@ Last inventory: 2026-07-14 (**unique Mako surface** · pack/pull types · full m
 
 | Piece | Status |
 |-------|--------|
-| Send-like kick rules (Copy / string / chan only) | Done — tests `kick_send_test`, bad `kick_array_arg` |
+| Send-like kick rules (Copy / string / chan / deep-POD struct / Option·Result·tuple of sendables) | Done — `kick_send_test`, POD kick waves, bad `kick_array_arg` / `kick_non_pod` |
 | `visibility = "explicit"` filters pulled symbols | Done — `examples/export_vis/` |
 | `Ok`/`Err` respect enclosing `Result[T, E]` | Done — `errors_typed_test` |
 | `chan_open` int family + bool | Done |

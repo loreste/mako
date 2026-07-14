@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Docs — production backend ergonomics
+
+- Document what is **already on tip** for large services: `for … in range`,
+  `fmt_sprintf*`, `match`/`switch` on string/int, `chan[Struct]`, deep-POD kick.
+- Correct Send-like kick tables (POD structs **are** kick args; multi-field
+  results prefer struct channels over int bit-packing).
+- Track remaining residuals: struct spread, general first-class fns, interpol,
+  enum-in-kick-POD — [ERGONOMICS.md](docs/ERGONOMICS.md) · [PAIN_POINTS.md](docs/PAIN_POINTS.md) ·
+  [ROADMAP.md](docs/ROADMAP.md) · [SPEED.md](docs/SPEED.md).
+
 ### Stdlib / security product polish (P2)
 
 - **`path_file_size(path)`** — size via `stat` (−1 if missing).

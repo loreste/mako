@@ -24,6 +24,11 @@ Short facts:
   `maps_*`. Map monomorph C helpers are demand-driven (only used shapes).
 - Struct/enum `==` `!=` structural (strings by content)
 - Channels: `make(chan[T], n)` / `chan_open[T](n)` for int/bool/float/string/struct
+- Kick Send: Copy, string, deep-POD structs, Option/Result/tuple of sendables, chan handles
+  (not maps/arrays/non-POD). Prefer `chan[Struct]` for multi-field worker results.
+- Loops: `for i, v in range s` / `for k, v in range m` / C-style `for`
+- Format: `fmt_sprintf*` / `fmt_sprint*` (no full `f"…"` interpol yet)
+- Dispatch: `match` on strings/ints/enums; `switch`/`case` on values
 - Parallel work: `fan(xs, fn(x) { x * x })`
 - Concurrency: `crew` / `kick` / `join`, channels, `select`, `actor`
 - `+= -= *= /= ++ --`, `a, b = b, a`, `let x = if c { a } else { b }`
