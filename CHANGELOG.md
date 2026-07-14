@@ -2,12 +2,11 @@
 
 ## Unreleased
 
-### Docs — collections surface + demand-driven monomorphs
+(none yet)
 
-- Full pass: STATUS, GUIDE, LANGUAGE, BUILTINS, ERGONOMICS, PERFORMANCE,
-  PAIN_POINTS, ROADMAP, howto/10 + packages + index, book ch03/ch14/ch15,
-  `llms.txt` / `llms-full.txt` — map value grid, bag nests/tuples, and
-  **demand-driven monomorph** compile-cost notes.
+## 0.0.1.2 — 2026-07-14
+
+**mako0.0.1.2** (product version; Cargo package semver `0.0.1`).
 
 ### Codegen — demand-driven map monomorphs
 

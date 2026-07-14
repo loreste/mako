@@ -553,11 +553,14 @@ fn main() {
     }
 }
 
-/// Clap prints `{name} {version}` → with this string: `mako version mako0.1.1 darwin/arm64`.
+/// Product version (four-part release id). Cargo.toml stays X.Y.Z semver (`0.0.1`).
+const MAKO_VERSION: &str = "0.0.1.2";
+
+/// Clap prints `{name} {version}` → with this string: `mako version mako0.0.1.2 darwin/arm64`.
 fn clap_version_string() -> String {
     format!(
         "version mako{} {}/{}",
-        env!("CARGO_PKG_VERSION"),
+        MAKO_VERSION,
         mako_goos(),
         mako_goarch()
     )
@@ -566,7 +569,7 @@ fn clap_version_string() -> String {
 fn version_line() -> String {
     format!(
         "mako version mako{} {}/{}",
-        env!("CARGO_PKG_VERSION"),
+        MAKO_VERSION,
         mako_goos(),
         mako_goarch()
     )

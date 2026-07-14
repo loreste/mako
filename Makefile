@@ -14,8 +14,11 @@ MAKO_BIN := $(TARGET_DIR)/release/mako
 
 all: release
 
+# Product version is MAKO_VERSION in src/main.rs (e.g. 0.0.1.2); bake git hash when available.
+MAKO_GIT_HASH ?= $(shell git rev-parse --short HEAD 2>/dev/null)
+
 release:
-	$(CARGO) build --release
+	MAKO_GIT_HASH="$(MAKO_GIT_HASH)" $(CARGO) build --release
 
 build: release
 
@@ -29,7 +32,7 @@ install: release
 	fi
 	@echo "Installed $(BIN_DIR)/mako"
 	@echo "Installed $(RUNTIME_DST)"
-	@"$(BIN_DIR)/mako" --version
+	@"$(BIN_DIR)/mako" version -v
 	@echo "Optional: export MAKO_RUNTIME=$(RUNTIME_DST)"
 
 uninstall:
