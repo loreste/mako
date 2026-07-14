@@ -28,6 +28,8 @@ pub struct Codegen {
     fn_rets: HashMap<String, String>,
     /// Function name → C param types
     fn_params: HashMap<String, Vec<String>>,
+    /// Function name → original Mako param TypeExprs (for typed lambda args).
+    fn_param_typeexprs: HashMap<String, Vec<TypeExpr>>,
     /// Local variable → C type
     locals: HashMap<String, String>,
     /// Local fn-value → C cast type for call-through, e.g. `int64_t (*)(int64_t)`.
@@ -159,6 +161,7 @@ impl Codegen {
             indent: 0,
             fn_rets: HashMap::new(),
             fn_params: HashMap::new(),
+            fn_param_typeexprs: HashMap::new(),
             locals: HashMap::new(),
             fn_ptr_casts: HashMap::new(),
             chan_ptr_elems: HashMap::new(),
@@ -2432,6 +2435,10 @@ impl Codegen {
                     let param_tys: Vec<String> =
                         f.params.iter().map(|p| self.type_expr_c(&p.ty)).collect();
                     self.fn_params.insert(f.name.clone(), param_tys);
+                    self.fn_param_typeexprs.insert(
+                        f.name.clone(),
+                        f.params.iter().map(|p| p.ty.clone()).collect(),
+                    );
                     if let Some(ec) = f.ret.as_ref().and_then(|t| self.result_err_enum_c(t)) {
                         self.fn_result_err_enum.insert(f.name.clone(), ec);
                     }
@@ -8631,6 +8638,208 @@ impl Codegen {
         } else {
             let ps: Vec<_> = params.iter().map(|p| self.type_expr_c(p)).collect();
             format!("{r} (*)({})", ps.join(", "))
+        }
+    }
+
+    /// Emit a non-capturing lambda as a static C function, returned as `void*`.
+    /// When `param_tys` / `ret_ty` are set (from expected `fn(T)->R`), use those C types.
+    fn emit_lambda_value(
+        &mut self,
+        params: &[String],
+        body: &Expr,
+        param_tys: Option<&[TypeExpr]>,
+        ret_ty: Option<&TypeExpr>,
+    ) -> (String, String) {
+        let helper = self.fresh("lam");
+        let pnames: Vec<String> = params
+            .iter()
+            .enumerate()
+            .map(|(i, p)| {
+                if p == "_" {
+                    format!("_p{i}")
+                } else {
+                    mangle(p)
+                }
+            })
+            .collect();
+        let pctys: Vec<String> = if let Some(pts) = param_tys {
+            pts.iter()
+                .enumerate()
+                .map(|(i, t)| {
+                    if i < pts.len() {
+                        self.type_expr_c(t)
+                    } else {
+                        "int64_t".into()
+                    }
+                })
+                .collect()
+        } else {
+            pnames.iter().map(|_| "int64_t".to_string()).collect()
+        };
+        // Pad/truncate to param count
+        let mut pctys = pctys;
+        while pctys.len() < pnames.len() {
+            pctys.push("int64_t".into());
+        }
+        pctys.truncate(pnames.len());
+        let ret_c = ret_ty
+            .map(|t| self.type_expr_c(t))
+            .unwrap_or_else(|| "int64_t".into());
+
+        // Prefer pure_c for simple single-param bodies; for multi-param or string
+        // params, emit a statement body via a temporary function-scope simulation.
+        let use_pure = pnames.len() <= 1
+            && pctys.first().map(|t| t.as_str()) != Some("MakoString")
+            && !matches!(body, Expr::Block(_));
+
+        let helper_src = if use_pure {
+            let body_c = if pnames.is_empty() {
+                self.expr_as_pure_c(body, "_")
+            } else {
+                self.expr_as_pure_c(body, &pnames[0])
+            };
+            let param_cs = if pnames.is_empty() {
+                "void".into()
+            } else {
+                format!("{} {}", pctys[0], pnames[0])
+            };
+            format!("static {ret_c} {helper}({param_cs}) {{ return ({body_c}); }}\n")
+        } else {
+            // Statement-form helper: re-enter emit with isolated locals for params.
+            let param_cs = if pnames.is_empty() {
+                "void".into()
+            } else {
+                pnames
+                    .iter()
+                    .zip(pctys.iter())
+                    .map(|(n, t)| format!("{t} {n}"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            };
+            // Snapshot and install lambda locals
+            let saved_locals = self.locals.clone();
+            let saved_casts = self.fn_ptr_casts.clone();
+            let saved_indent = self.indent;
+            let saved_out_len = self.out.len();
+            self.locals.clear();
+            for (n, t) in pnames.iter().zip(pctys.iter()) {
+                // Unmangle: param source names may differ from mangled C names.
+                // We only have mangled names in pnames; use them as locals keys.
+                self.locals.insert(n.clone(), t.clone());
+            }
+            // Also map original param names for Ident emission
+            for (orig, mangled) in params.iter().zip(pnames.iter()) {
+                if orig != "_" {
+                    let ty = self.locals.get(mangled).cloned().unwrap_or_else(|| "int64_t".into());
+                    self.locals.insert(orig.clone(), ty);
+                    // Ident uses mangle(name) so store under mangled key as well
+                    self.locals.insert(mangle(orig), self.locals.get(mangled).cloned().unwrap_or_else(|| "int64_t".into()));
+                }
+            }
+            self.indent = 1;
+            // Emit into a string buffer via temporary out swap is hard; use pure_c
+            // multi-param with mangled names, expanding Call to builtins.
+            let body_c = match body {
+                Expr::Block(b) => {
+                    // last expr/return
+                    let mut last = "0".to_string();
+                    for s in &b.stmts {
+                        match s {
+                            Stmt::Return(Some(e)) | Stmt::Expr(e) => {
+                                last = self.expr_as_pure_c(e, pnames.first().map(|s| s.as_str()).unwrap_or("_"));
+                            }
+                            _ => {}
+                        }
+                    }
+                    last
+                }
+                other => self.expr_as_pure_c_multi(other, &pnames),
+            };
+            self.locals = saved_locals;
+            self.fn_ptr_casts = saved_casts;
+            self.indent = saved_indent;
+            let _ = saved_out_len;
+            format!("static {ret_c} {helper}({param_cs}) {{ return ({body_c}); }}\n")
+        };
+        self.insert_helper(&helper_src);
+        ("void*".into(), format!("(void*){helper}"))
+    }
+
+    /// Like `expr_as_pure_c` but rewrites all lambda param idents (multi-arg).
+    fn expr_as_pure_c_multi(&self, e: &Expr, pnames: &[String]) -> String {
+        // Start with first-param pure_c then leave idents as-is for other params
+        // (params are already C-mangled names matching source when simple).
+        match e {
+            Expr::Ident(n) => {
+                if pnames.iter().any(|p| p == n || p == &mangle(n)) {
+                    mangle(n)
+                } else if let Some(v) = self.const_ints.get(n) {
+                    v.to_string()
+                } else {
+                    mangle(n)
+                }
+            }
+            Expr::Call { callee, args } => {
+                if let Expr::Ident(fname) = callee.as_ref() {
+                    let as_: Vec<_> = args
+                        .iter()
+                        .map(|a| self.expr_as_pure_c_multi(a, pnames))
+                        .collect();
+                    // Builtin: len(s)
+                    if fname == "len" && as_.len() == 1 {
+                        return format!("mako_str_len({})", as_[0]);
+                    }
+                    if fname == "str_len" && as_.len() == 1 {
+                        return format!("mako_str_len({})", as_[0]);
+                    }
+                    return format!("{}({})", mangle(fname), as_.join(", "));
+                }
+                "0".into()
+            }
+            Expr::Binary { op, left, right } => {
+                let l = self.expr_as_pure_c_multi(left, pnames);
+                let r = self.expr_as_pure_c_multi(right, pnames);
+                let o = match op {
+                    BinOp::Add => "+",
+                    BinOp::Sub => "-",
+                    BinOp::Mul => "*",
+                    BinOp::Div => "/",
+                    BinOp::Mod => "%",
+                    BinOp::Eq => "==",
+                    BinOp::Ne => "!=",
+                    BinOp::Lt => "<",
+                    BinOp::Le => "<=",
+                    BinOp::Gt => ">",
+                    BinOp::Ge => ">=",
+                    BinOp::And => "&&",
+                    BinOp::Or => "||",
+                    _ => "+",
+                };
+                format!("({l} {o} {r})")
+            }
+            Expr::Unary { op, expr } => {
+                let e = self.expr_as_pure_c_multi(expr, pnames);
+                match op {
+                    UnaryOp::Neg => format!("(-{e})"),
+                    UnaryOp::Not => format!("(!{e})"),
+                    UnaryOp::BitNot => format!("(~{e})"),
+                }
+            }
+            Expr::Int(n) => n.to_string(),
+            Expr::Bool(b) => if *b { "true" } else { "false" }.into(),
+            Expr::String(s) => format!("mako_str_from_cstr(\"{}\")", escape_c(s)),
+            Expr::Block(b) => {
+                for s in b.stmts.iter().rev() {
+                    match s {
+                        Stmt::Return(Some(e)) | Stmt::Expr(e) => {
+                            return self.expr_as_pure_c_multi(e, pnames);
+                        }
+                        _ => {}
+                    }
+                }
+                "0".into()
+            }
+            other => self.expr_as_pure_c(other, pnames.first().map(|s| s.as_str()).unwrap_or("_")),
         }
     }
 
@@ -23572,10 +23781,27 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                                 return self.emit_enum_construct(&enum_name, name, args);
                             }
                             // Emit args first (needed for generic mono tag inference).
+                            // Lambdas use expected `fn(T)->R` from the callee's param TypeExpr.
                             let mut arg_tys = Vec::new();
                             let mut arg_raw = Vec::new();
-                            for a in args {
-                                let (aty, v) = self.emit_expr(a);
+                            let expected_params = self.fn_param_typeexprs.get(name).cloned();
+                            for (i, a) in args.iter().enumerate() {
+                                let (aty, v) = if let Expr::Lambda { params, body } = a {
+                                    if let Some(TypeExpr::Fn(ps, ret)) =
+                                        expected_params.as_ref().and_then(|v| v.get(i))
+                                    {
+                                        self.emit_lambda_value(
+                                            params,
+                                            body,
+                                            Some(ps.as_slice()),
+                                            Some(ret.as_ref()),
+                                        )
+                                    } else {
+                                        self.emit_expr(a)
+                                    }
+                                } else {
+                                    self.emit_expr(a)
+                                };
                                 arg_tys.push(aty);
                                 arg_raw.push(v);
                             }
@@ -25818,38 +26044,8 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                 ("void".into(), "/*void*/".into())
             }
             Expr::Lambda { params, body } => {
-                // Non-capturing lambda → static C helper, return as void* fn value.
-                let helper = self.fresh("lam");
-                let pnames: Vec<String> = params
-                    .iter()
-                    .enumerate()
-                    .map(|(i, p)| {
-                        if p == "_" {
-                            format!("_p{i}")
-                        } else {
-                            mangle(p)
-                        }
-                    })
-                    .collect();
-                let body_c = if pnames.is_empty() {
-                    self.expr_as_pure_c(body, "_")
-                } else {
-                    self.expr_as_pure_c(body, &pnames[0])
-                };
-                let ret_c = "int64_t";
-                let param_cs = if pnames.is_empty() {
-                    "void".into()
-                } else {
-                    pnames
-                        .iter()
-                        .map(|p| format!("int64_t {p}"))
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                };
-                let helper_src =
-                    format!("static {ret_c} {helper}({param_cs}) {{ return ({body_c}); }}\n");
-                self.insert_helper(&helper_src);
-                ("void*".into(), format!("(void*){helper}"))
+                // Untyped context: default int params (fan-style / bare lambda).
+                self.emit_lambda_value(params, body, None, None)
             }
             Expr::Match { scrutinee, arms } => self.emit_match(scrutinee, arms),
             Expr::IfExpr {

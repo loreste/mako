@@ -1,0 +1,71 @@
+// First-class functions: named values, typed params, string/multi-arg lambdas.
+
+fn double(n: int) -> int {
+    return n * 2
+}
+
+fn apply(f: fn(int) -> int, x: int) -> int {
+    return f(x)
+}
+
+fn apply_s(f: fn(string) -> int, s: string) -> int {
+    return f(s)
+}
+
+fn strlen(s: string) -> int {
+    return len(s)
+}
+
+fn map2(f: fn(int, string) -> int, a: int, b: string) -> int {
+    return f(a, b)
+}
+
+fn both(n: int, s: string) -> int {
+    return n + len(s)
+}
+
+fn TestNamedFnValue() {
+    assert_eq(apply(double, 21), 42)
+}
+
+fn TestLambdaInt() {
+    assert_eq(apply(|x| x * 3, 7), 21)
+    assert_eq(apply(fn(x) { return x + 1 }, 9), 10)
+}
+
+fn TestNamedStringFn() {
+    assert_eq(apply_s(strlen, "hi"), 2)
+}
+
+fn TestLambdaString() {
+    assert_eq(apply_s(|s| len(s), "abc"), 3)
+}
+
+fn TestMultiArgNamed() {
+    assert_eq(map2(both, 1, "xy"), 3)
+}
+
+fn TestMultiArgLambda() {
+    assert_eq(map2(|n, s| n + len(s), 2, "z"), 3)
+}
+
+fn TestBindAndCall() {
+    let f: fn(int) -> int = double
+    assert_eq(f(5), 10)
+    let g: fn(string) -> int = strlen
+    assert_eq(g("mako"), 4)
+}
+
+// LEBA-style respond hook
+fn pipeline(respond: fn(int, string) -> int) -> int {
+    return respond(200, "ok")
+}
+
+fn http_respond_fake(code: int, body: string) -> int {
+    return code + len(body)
+}
+
+fn TestRespondHook() {
+    assert_eq(pipeline(http_respond_fake), 202)
+    assert_eq(pipeline(|code, body| code + len(body)), 202)
+}

@@ -6,6 +6,8 @@
 
 - **First-class functions (non-capturing):** `fn` values as params/locals;
   named fns + `|x|` / `fn(x){…}` lambdas; call-through via `void*` + cast.
+  Typed lambdas honor expected `fn(string)->…` / multi-arg signatures
+  (`len`, etc.) — see `first_class_fn_test.mko`.
 - **`f"…{expr}"` interpolation** with `{{`/`}}` escapes.
 - **Struct field defaults:** `struct S { x: int = 0 }` fills omitted fields.
 - **`chan[(T,U,…)]` / `make(chan[(…)], n)`** via the ptr ring.
