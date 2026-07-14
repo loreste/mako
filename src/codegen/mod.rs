@@ -1172,6 +1172,12 @@ impl Codegen {
                         .insert(temp.to_string(), name.to_string());
                     "slice_struct".into()
                 }
+                other if other.starts_with("map_") => {
+                    let cty = map_map_val_c_ty(other);
+                    self.option_map_ctys
+                        .insert(temp.to_string(), cty);
+                    other.to_string()
+                }
                 other => {
                     self.option_some_structs
                         .insert(temp.to_string(), other.to_string());
@@ -1194,6 +1200,12 @@ impl Codegen {
                     self.result_ok_structs
                         .insert(temp.to_string(), name.to_string());
                     "slice_struct".into()
+                }
+                other if other.starts_with("map_") => {
+                    let cty = map_map_val_c_ty(other);
+                    self.result_ok_map_ctys
+                        .insert(temp.to_string(), cty);
+                    other.to_string()
                 }
                 other => {
                     self.result_ok_structs
@@ -3119,10 +3131,42 @@ impl Codegen {
                 "mako_eq_result_int(av, bv)".into(),
             ),
         ];
+        // Option[map[…]] / Result[map[…]] — map pointer in bag value slot
+        let map_payloads: &[&str] = &[
+            "map_string_int",
+            "map_int_int",
+            "map_string_string",
+            "map_int_float",
+            "map_string_float",
+            "map_float_int",
+            "map_float_string",
+            "map_float_float",
+            "map_int_bool",
+            "map_string_bool",
+            "map_float_bool",
+            "map_bool_int",
+            "map_bool_string",
+            "map_bool_float",
+            "map_bool_bool",
+        ];
+        let mut bags = bags;
+        for mt in map_payloads {
+            bags.push((
+                format!("opt_{mt}"),
+                "MakoOptionInt".into(),
+                "mako_none_int()".into(),
+                "mako_eq_option_int(av, bv)".into(),
+            ));
+            bags.push((
+                format!("res_{mt}"),
+                "MakoResultInt".into(),
+                "mako_err_int(mako_str_from_cstr(\"\"))".into(),
+                "mako_eq_result_int(av, bv)".into(),
+            ));
+        }
         let mut names: Vec<String> = self.structs.keys().cloned().collect();
         names.extend(self.enums.keys().cloned());
         names.sort();
-        let mut bags = bags;
         for n in &names {
             bags.push((
                 format!("opt_{n}"),
@@ -3144,6 +3188,30 @@ impl Codegen {
             ));
             bags.push((
                 format!("res_arr_{n}"),
+                "MakoResultInt".into(),
+                "mako_err_int(mako_str_from_cstr(\"\"))".into(),
+                "mako_eq_result_int(av, bv)".into(),
+            ));
+            bags.push((
+                format!("opt_map_int_{n}"),
+                "MakoOptionInt".into(),
+                "mako_none_int()".into(),
+                "mako_eq_option_int(av, bv)".into(),
+            ));
+            bags.push((
+                format!("opt_map_string_{n}"),
+                "MakoOptionInt".into(),
+                "mako_none_int()".into(),
+                "mako_eq_option_int(av, bv)".into(),
+            ));
+            bags.push((
+                format!("res_map_int_{n}"),
+                "MakoResultInt".into(),
+                "mako_err_int(mako_str_from_cstr(\"\"))".into(),
+                "mako_eq_result_int(av, bv)".into(),
+            ));
+            bags.push((
+                format!("res_map_string_{n}"),
                 "MakoResultInt".into(),
                 "mako_err_int(mako_str_from_cstr(\"\"))".into(),
                 "mako_eq_result_int(av, bv)".into(),
@@ -25146,10 +25214,9 @@ fn parse_map_slice_val(bty: &str) -> Option<(String, String)> {
 /// (those go through [`parse_map_k_map_val`]).
 fn parse_map_k_slice_val(bty: &str) -> Option<(String, String)> {
     let rest = bty.strip_prefix("MakoMapK_")?.strip_suffix('*')?;
-    // Nested map as value embeds `_map_` before any arr tag — leave for map parser.
-    if rest.contains("_map_") {
-        return None;
-    }
+    // Nested map values (`Point_map_string_int`) have no arr/opt/res/tup sep and
+    // fall through to parse_map_k_map_val. Do **not** reject tags that embed
+    // `_map_` as a payload suffix (`Point_opt_map_string_int`).
     // Leftmost separator after the key name. That distinguishes:
     //   Point_arr_opt_int  → arr_opt_int  (map[Point][]Option[int])
     //   Point_opt_arr_int  → opt_arr_int  (map[Point]Option[[]int])
@@ -25268,7 +25335,72 @@ fn bag_map_val_tag(
             }
             _ => format!("{pref}_arr_int"),
         },
+        // Option[map[K]V] / Result[map[K]V,E] → opt_map_string_int / …
+        TypeExpr::Map(k, v) => {
+            let mt = leaf_map_mono_tag(k, v, structs, enums);
+            format!("{pref}_{mt}")
+        }
         _ => format!("{pref}_int"),
+    }
+}
+
+/// Mono tag for a depth-1 map type used as Option/Result payload (`map_string_int`, …).
+fn leaf_map_mono_tag(
+    k: &TypeExpr,
+    v: &TypeExpr,
+    structs: &HashMap<String, StructInfo>,
+    enums: &HashMap<String, EnumInfo>,
+) -> String {
+    match (k, v) {
+        (TypeExpr::Named(kk), TypeExpr::Named(vv)) => match (kk.as_str(), vv.as_str()) {
+            ("string", "int" | "int64") => "map_string_int".into(),
+            ("int" | "int64", "int" | "int64") => "map_int_int".into(),
+            ("string", "string") => "map_string_string".into(),
+            ("int" | "int64", "float" | "float64") => "map_int_float".into(),
+            ("string", "float" | "float64") => "map_string_float".into(),
+            ("float" | "float64", "int" | "int64") => "map_float_int".into(),
+            ("float" | "float64", "string") => "map_float_string".into(),
+            ("float" | "float64", "float" | "float64") => "map_float_float".into(),
+            ("int" | "int64", "bool") => "map_int_bool".into(),
+            ("string", "bool") => "map_string_bool".into(),
+            ("float" | "float64", "bool") => "map_float_bool".into(),
+            ("bool", "int" | "int64") => "map_bool_int".into(),
+            ("bool", "string") => "map_bool_string".into(),
+            ("bool", "float" | "float64") => "map_bool_float".into(),
+            ("bool", "bool") => "map_bool_bool".into(),
+            ("int" | "int64", n) if structs.contains_key(n) || enums.contains_key(n) => {
+                format!("map_int_{n}")
+            }
+            ("string", n) if structs.contains_key(n) || enums.contains_key(n) => {
+                format!("map_string_{n}")
+            }
+            ("float" | "float64", n) if structs.contains_key(n) || enums.contains_key(n) => {
+                format!("map_float_{n}")
+            }
+            ("bool", n) if structs.contains_key(n) || enums.contains_key(n) => {
+                format!("map_bool_{n}")
+            }
+            (n, "int" | "int64") if structs.contains_key(n) || enums.contains_key(n) => {
+                format!("map_{n}_i")
+            }
+            (n, "string") if structs.contains_key(n) || enums.contains_key(n) => {
+                format!("map_{n}_s")
+            }
+            (n, "float" | "float64") if structs.contains_key(n) || enums.contains_key(n) => {
+                format!("map_{n}_f")
+            }
+            (n, "bool") if structs.contains_key(n) || enums.contains_key(n) => {
+                format!("map_{n}_b")
+            }
+            (n, m)
+                if (structs.contains_key(n) || enums.contains_key(n))
+                    && (structs.contains_key(m) || enums.contains_key(m)) =>
+            {
+                format!("map_{n}_v{m}")
+            }
+            _ => "map_string_int".into(),
+        },
+        _ => "map_string_int".into(),
     }
 }
 
