@@ -113,9 +113,9 @@ No implicit mixing: int + int64 is a type error. Convert explicitly.
 
   []T                 Slice (dynamic array): []int, []string, []byte, []float, []Point
   map[K]V             Hash map. Keys: int|string|float|Struct. Values: int|string|float|Struct
-                      (not map[Struct]Struct yet). Pack: map[int]eng.Table, map[eng.Table]int,
-                      map[float]eng.Table. Float keys: +0/-0 unify; all NaNs share one key.
-                      Struct keys: field-wise eq + stable field hash.
+                      (any combo incl. map[Struct]Struct). Pack: map[int]eng.Table,
+                      map[eng.Table]int, map[eng.Table]Point. Float keys: +0/-0 unify;
+                      all NaNs share one key. Struct keys: field-wise eq + stable field hash.
   chan[T]             Typed channel: int family, bool, float, string, named struct
                       make(chan[T], n) and chan_open[T](n) accept the same T set
   Option[T]           Some(value) or None
@@ -773,7 +773,7 @@ Mako uses Result[T, E] and Option[T] instead of null or exceptions.
   let mut fi = make(map[float]int)
   let mut ff = make(map[float]float)
   // struct values: map[int]Point, map[string]Point, map[float]Point, map[*]eng.Table
-  // struct keys:   map[Point]int|string|float, map[eng.Table]int
+  // struct keys:   map[Point]int|string|float|Struct, map[eng.Table]int|Point
 
   m["a"] = 1                           // insert
   print_int(m["a"])                    // get (missing -> zero value)

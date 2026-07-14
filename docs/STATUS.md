@@ -150,6 +150,7 @@ Last inventory: 2026-07-14 (**unique Mako surface** · pack/pull types · maps f
 | `mako fmt` doubled `export` on structs | Fixed |
 | The Mako Book + docs accuracy | Done |
 | Pack-qualified types (`eng.Table` annot / lit / pattern) + multi-return of structs | Done — `pack_types_test` · `tuple_struct_test` |
+| Struct eq/hash with slice/map fields (engine tables as packs) | Done — `struct_slice_fields_test` |
 | Pack-qualified enums (`eng.Red` / `eng.Color.Green(n)` construct + match) | Done — `pack_types_test` |
 | Maps of structs (`map[int]T` / `map[string]T`, pack types) | Done — `map_struct_test` |
 | `make(chan[Struct])` + `maps_*` on II/SS/struct maps | Done — `chan_make_struct_test` · `map_struct_test` |

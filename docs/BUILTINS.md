@@ -165,7 +165,7 @@ Packs: `std/fmt`, `std/print`. Tests: `fmt_print_test.mko`. Demo: `examples/fmt_
 | `maps_copy` | `maps_copy(dst: map[K]V, src: map[K]V) -> void` | Copy entries into `dst` |
 
 Supported map kinds: `map[int|string|float|Struct] × int|string|float|Struct`
-except **`map[Struct]Struct`** (not yet; use scalar values with struct keys)
+(any combination, including `map[Struct]Struct`)
 (named/pack structs). Float keys: `+0`/`-0` unify; all NaNs share one key.
 Tests: `map_test`, `map_struct_test`, `map_float_test`.
 

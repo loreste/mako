@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Fixes — struct eq/hash with slice and map fields
+
+- **`mako_eq_*` / `mako_hash_*` for structs** — fields that are slices
+  (`MakoIntArray`, `MakoArr_*`, …) or map/channel pointers no longer use
+  `==` or `(int64_t)` casts (invalid C). Eq/hash use buffer identity
+  (`.data` + `.len`) or pointer identity. Unblocks real engine packs
+  (e.g. FayDB `Table` with `[]int` + `map[int]int`) after `pull`.
+- Test: `examples/testing/struct_slice_fields_test.mko`.
+
 ### Language — pack-qualified types & multi-return of structs
 
 - **Pack-qualified types** — annotations and return types accept `eng.Table`
@@ -16,7 +25,9 @@
   Codegen monomorphizes like `[]Struct` (`MakoMapI_*` / `MakoMapS_*`).
 - **Struct map keys** — `map[Point]int` / `map[Point]string` / `map[Point]float`
   (and pack keys e.g. `map[eng.Table]int`): monomorphized `MakoMapK_T_i|s|f*`,
-  field-wise `mako_eq_T` / `mako_hash_T`. `map[Struct]Struct` not yet.
+  field-wise `mako_eq_T` / `mako_hash_T`.
+- **`map[Struct]Struct`** — monomorphized `MakoMapK_Key_vVal*` (second pass after
+  all `[]T` helpers); pack types work as key and/or value.
 - **`make(chan[T], n)`** — same element set as `chan_open[T](n)`: int family,
   string, float, bool, **named structs** (incl. pack types).
 - **`maps_*` overloads** — `maps_keys` / `values` / `clear` / `clone` / `equal` /

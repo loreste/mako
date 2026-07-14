@@ -1232,6 +1232,8 @@ impl Codegen {
                 self.emit_struct_typedef(s);
             }
         }
+        // map[StructA]StructB after all []T / mako_eq / scalar-key helpers exist.
+        self.emit_all_struct_key_struct_val_maps();
         // Register Mako struct schemas for reflect_type_schema / reflect_value_of_type.
         for item in &program.items {
             if let Item::Struct(s) = item {
@@ -1805,6 +1807,7 @@ impl Codegen {
         }
         let _ = writeln!(self.out, "}} {c_name};");
         // Structural equality (content for strings; field-wise for nested structs).
+        // Slice/map/array fields use identity (data pointer + len) — not deep content.
         let _ = writeln!(
             self.out,
             "static inline bool mako_eq_{c_name}({c_name} a, {c_name} b) {{"
@@ -1814,19 +1817,15 @@ impl Codegen {
         } else {
             let mut parts = Vec::new();
             for (fname, fty) in &info.fields {
-                let cmp = if fty == "MakoString" {
-                    format!("mako_str_eq(a.{fname}, b.{fname})")
-                } else if self.structs.values().any(|s| s.c_name == *fty) {
-                    format!("mako_eq_{fty}(a.{fname}, b.{fname})")
-                } else {
-                    format!("(a.{fname} == b.{fname})")
-                };
+                let cmp = struct_field_eq_expr("a", "b", fname, fty, &self.structs);
                 parts.push(cmp);
             }
             let _ = writeln!(self.out, "    return {};", parts.join(" && "));
         }
         let _ = writeln!(self.out, "}}");
         // Structural hash for use as map keys (FNV-1a over field hashes).
+        // Composite fields (slices/maps) hash identity only so large engine
+        // structs with []T / map fields still compile (map[HeavyStruct] is rare).
         let _ = writeln!(
             self.out,
             "static inline uint64_t mako_hash_{c_name}({c_name} k) {{"
@@ -1839,20 +1838,7 @@ impl Codegen {
             let _ = writeln!(self.out, "    (void)k;");
         } else {
             for (fname, fty) in &info.fields {
-                let step = if fty == "MakoString" {
-                    format!(
-                        "h ^= mako_hash_bytes(k.{fname}.data, k.{fname}.len); h *= 1099511628211ULL;"
-                    )
-                } else if fty == "double" {
-                    format!("h ^= mako_hash_f64(k.{fname}); h *= 1099511628211ULL;")
-                } else if fty == "bool" {
-                    format!("h ^= (uint64_t)(k.{fname} ? 1 : 0); h *= 1099511628211ULL;")
-                } else if self.structs.values().any(|s| s.c_name == *fty) {
-                    format!("h ^= mako_hash_{fty}(k.{fname}); h *= 1099511628211ULL;")
-                } else {
-                    // int64_t and other integer-like C types
-                    format!("h ^= mako_hash_i64((int64_t)k.{fname}); h *= 1099511628211ULL;")
-                };
+                let step = struct_field_hash_step("k", fname, fty, &self.structs);
                 let _ = writeln!(self.out, "    {step}");
             }
         }
@@ -2835,25 +2821,47 @@ impl Codegen {
         let _ = writeln!(self.out, "    }}");
         let _ = writeln!(self.out, "}}");
 
-        // Struct as map key: map[K]int, map[K]string, map[K]float.
-        // (map[Struct]Struct needs a second pass so value helpers exist; not yet.)
-        self.emit_struct_as_key_maps(c_name, &arr);
+        // Struct as map key: map[K]int|string|float (scalar values).
+        // map[K]Struct is a second pass after all []T helpers exist.
+        self.emit_struct_as_key_maps(c_name, &arr, /*struct_vals=*/ false);
     }
 
-    /// Maps with this struct as key (`map[Point]int`, …).
-    fn emit_struct_as_key_maps(&mut self, key: &str, key_arr: &str) {
-        // value kind: (val_c_ty, type_suffix, zero_expr, free_string_vals)
-        let vals: Vec<(String, String, String, bool)> = vec![
-            ("int64_t".into(), "i".into(), "0".into(), false),
-            (
+    /// After every struct's arr/map helpers exist, emit `map[StructA]StructB` for all pairs.
+    fn emit_all_struct_key_struct_val_maps(&mut self) {
+        let keys: Vec<(String, String)> = self
+            .structs
+            .values()
+            .map(|s| (s.c_name.clone(), format!("MakoArr_{}", s.c_name)))
+            .collect();
+        for (key, key_arr) in keys {
+            self.emit_struct_as_key_maps(&key, &key_arr, /*struct_vals=*/ true);
+        }
+    }
+
+    /// Maps with this struct as key.
+    /// `struct_vals == false` → map[K]int|string|float; `true` → map[K]Struct for every known struct.
+    fn emit_struct_as_key_maps(&mut self, key: &str, key_arr: &str, struct_vals: bool) {
+        // value kind: (val_c_ty, type_suffix, zero_expr, free_string_vals, is_struct_val)
+        let mut vals: Vec<(String, String, String, bool, bool)> = Vec::new();
+        if struct_vals {
+            // Suffix `v{Name}` so parse_struct_key_map can split key/value unambiguously.
+            let mut names: Vec<String> = self.structs.values().map(|s| s.c_name.clone()).collect();
+            names.sort();
+            for vty in names {
+                vals.push((vty.clone(), format!("v{vty}"), String::new(), false, true));
+            }
+        } else {
+            vals.push(("int64_t".into(), "i".into(), "0".into(), false, false));
+            vals.push((
                 "MakoString".into(),
                 "s".into(),
                 "mako_str_from_cstr(\"\")".into(),
                 true,
-            ),
-            ("double".into(), "f".into(), "0.0".into(), false),
-        ];
-        for (vty, vsuf, zero, free_str) in vals {
+                false,
+            ));
+            vals.push(("double".into(), "f".into(), "0.0".into(), false, false));
+        }
+        for (vty, vsuf, zero, free_str, is_struct_val) in vals {
             let mt = format!("MakoMapK_{key}_{vsuf}");
             let pref = format!("mako_map_k_{key}_{vsuf}");
             let _ = writeln!(self.out, "typedef struct {{");
@@ -2998,19 +3006,13 @@ impl Codegen {
                 self.out,
                 "static inline {vty} {pref}_get({mt} *m, {key} key) {{"
             );
-            if free_str {
-                let _ = writeln!(
-                    self.out,
-                    "    if (!m) return {zero};"
-                );
-            } else if vsuf.chars().next().map(|c| c.is_ascii_uppercase()).unwrap_or(false)
-                && vsuf != "MakoString"
-            {
-                // struct value
+            if is_struct_val {
                 let _ = writeln!(
                     self.out,
                     "    {vty} z; memset(&z, 0, sizeof(z)); if (!m) return z;"
                 );
+            } else if free_str {
+                let _ = writeln!(self.out, "    if (!m) return {zero};");
             } else {
                 let _ = writeln!(self.out, "    if (!m) return {zero};");
             }
@@ -3026,9 +3028,7 @@ impl Codegen {
                     self.out,
                     "        if (m->state[i] == MAKO_MAP_FULL && mako_eq_{key}(m->keys[i], key)) return mako_str_clone(m->vals[i]);"
                 );
-            } else if vsuf.chars().next().map(|c| c.is_ascii_uppercase()).unwrap_or(false)
-                && vsuf != "MakoString"
-            {
+            } else if is_struct_val {
                 let _ = writeln!(
                     self.out,
                     "        if (m->state[i] == MAKO_MAP_EMPTY) return z;"
@@ -3194,21 +3194,22 @@ impl Codegen {
                 );
                 let _ = writeln!(self.out, "    }} return out;");
                 let _ = writeln!(self.out, "}}");
-            } else {
-                // struct values
+            } else if is_struct_val {
+                // vsuf is `v{Name}`; C array helpers use the bare struct name.
+                let sn = &vty;
                 let _ = writeln!(
                     self.out,
-                    "static inline MakoArr_{vsuf} mako_maps_values_k_{key}_{vsuf}({mt} *m) {{"
+                    "static inline MakoArr_{sn} mako_maps_values_k_{key}_{vsuf}({mt} *m) {{"
                 );
                 let _ = writeln!(
                     self.out,
-                    "    MakoArr_{vsuf} out = mako_arr_{vsuf}_make(0, m ? (int64_t)m->len : 0);"
+                    "    MakoArr_{sn} out = mako_arr_{sn}_make(0, m ? (int64_t)m->len : 0);"
                 );
                 let _ = writeln!(self.out, "    if (!m) return out;");
                 let _ = writeln!(self.out, "    for (size_t i = 0; i < m->cap; i++) {{");
                 let _ = writeln!(
                     self.out,
-                    "        if (m->state[i] == MAKO_MAP_FULL) out = mako_arr_{vsuf}_append(out, m->vals[i]);"
+                    "        if (m->state[i] == MAKO_MAP_FULL) out = mako_arr_{sn}_append(out, m->vals[i]);"
                 );
                 let _ = writeln!(self.out, "    }} return out;");
                 let _ = writeln!(self.out, "}}");
@@ -3254,10 +3255,8 @@ impl Codegen {
             let _ = writeln!(self.out, "}}");
             let val_eq = if free_str {
                 format!("mako_str_eq(a->vals[i], {pref}_get(b, a->keys[i]))")
-            } else if vsuf.chars().next().map(|c| c.is_ascii_uppercase()).unwrap_or(false)
-                && vsuf != "MakoString"
-            {
-                format!("mako_eq_{vsuf}(a->vals[i], {pref}_get(b, a->keys[i]))")
+            } else if is_struct_val {
+                format!("mako_eq_{vty}(a->vals[i], {pref}_get(b, a->keys[i]))")
             } else {
                 format!("(a->vals[i] == {pref}_get(b, a->keys[i]))")
             };
@@ -3449,7 +3448,7 @@ impl Codegen {
                 {
                     format!("MakoMapF_{vv}*")
                 }
-                // map[Struct]int|string|float
+                // map[Struct]int|string|float|Struct
                 (TypeExpr::Named(kk), TypeExpr::Named(vv))
                     if self.structs.contains_key(kk) && vv == "int" =>
                 {
@@ -3464,6 +3463,11 @@ impl Codegen {
                     if self.structs.contains_key(kk) && (vv == "float" || vv == "float64") =>
                 {
                     format!("MakoMapK_{kk}_f*")
+                }
+                (TypeExpr::Named(kk), TypeExpr::Named(vv))
+                    if self.structs.contains_key(kk) && self.structs.contains_key(vv) =>
+                {
+                    format!("MakoMapK_{kk}_v{vv}*")
                 }
                 _ => "MakoMapSI*".into(),
             },
@@ -3873,29 +3877,9 @@ impl Codegen {
                             self.line(&format!("{sn} {} = {val}->vals[{i}];", mangle(b)));
                             self.locals.insert(b.clone(), sn.clone());
                         } else if let Some((_, vs)) = &struct_key {
-                            match vs.as_str() {
-                                "s" => {
-                                    self.line(&format!(
-                                        "MakoString {} = {val}->vals[{i}];",
-                                        mangle(b)
-                                    ));
-                                    self.locals.insert(b.clone(), "MakoString".into());
-                                }
-                                "f" => {
-                                    self.line(&format!(
-                                        "double {} = {val}->vals[{i}];",
-                                        mangle(b)
-                                    ));
-                                    self.locals.insert(b.clone(), "double".into());
-                                }
-                                _ => {
-                                    self.line(&format!(
-                                        "int64_t {} = {val}->vals[{i}];",
-                                        mangle(b)
-                                    ));
-                                    self.locals.insert(b.clone(), "int64_t".into());
-                                }
-                            }
+                            let vty = struct_key_map_val_c_ty(vs);
+                            self.line(&format!("{vty} {} = {val}->vals[{i}];", mangle(b)));
+                            self.locals.insert(b.clone(), vty);
                         } else if ty == "MakoMapSS*" || ty == "MakoMapFS*" {
                             self.line(&format!("MakoString {} = {val}->vals[{i}];", mangle(b)));
                             self.locals.insert(b.clone(), "MakoString".into());
@@ -4364,11 +4348,7 @@ impl Codegen {
                     }
                     other if other.starts_with("MakoMapK_") && other.ends_with('*') => {
                         let (kn, vs) = parse_struct_key_map(other).unwrap();
-                        let vty = match vs.as_str() {
-                            "s" => "MakoString".to_string(),
-                            "f" => "double".to_string(),
-                            _ => "int64_t".to_string(),
-                        };
+                        let vty = struct_key_map_val_c_ty(&vs);
                         (
                             vty,
                             format!("mako_map_k_{kn}_{vs}_get"),
@@ -12955,6 +12935,19 @@ impl Codegen {
                                         ));
                                         return ("MakoFloatArray".into(), tmp);
                                     }
+                                    "i" => {
+                                        self.line(&format!(
+                                            "MakoIntArray {tmp} = mako_maps_values_k_{kn}_{vs}({m});"
+                                        ));
+                                        return ("MakoIntArray".into(), tmp);
+                                    }
+                                    other if other.starts_with('v') && other.len() > 1 => {
+                                        let sn = &other[1..];
+                                        self.line(&format!(
+                                            "MakoArr_{sn} {tmp} = mako_maps_values_k_{kn}_{vs}({m});"
+                                        ));
+                                        return (format!("MakoArr_{sn}"), tmp);
+                                    }
                                     _ => {
                                         self.line(&format!(
                                             "MakoIntArray {tmp} = mako_maps_values_k_{kn}_{vs}({m});"
@@ -17687,6 +17680,14 @@ impl Codegen {
                             ));
                             format!("MakoMapK_{kk}_f*")
                         }
+                        (TypeExpr::Named(kk), TypeExpr::Named(vv))
+                            if self.structs.contains_key(kk) && self.structs.contains_key(vv) =>
+                        {
+                            self.line(&format!(
+                                "MakoMapK_{kk}_v{vv} *{tmp} = mako_map_k_{kk}_v{vv}_make({hint});"
+                            ));
+                            format!("MakoMapK_{kk}_v{vv}*")
+                        }
                         _ => {
                             self.line(&format!("MakoMapSI *{tmp} = mako_map_si_make({hint});"));
                             "MakoMapSI*".into()
@@ -17842,27 +17843,15 @@ impl Codegen {
                     return (sn.to_string(), out);
                 }
                 if let Some((kn, vs)) = parse_struct_key_map(&bty) {
-                    let out = self.fresh("mg");
-                    match vs.as_str() {
-                        "s" => {
-                            self.line(&format!(
-                                "MakoString {out} = mako_map_k_{kn}_{vs}_get({b}, {i});"
-                            ));
-                            return ("MakoString".into(), out);
-                        }
-                        "f" => {
-                            return (
-                                "double".into(),
-                                format!("mako_map_k_{kn}_{vs}_get({b}, {i})"),
-                            );
-                        }
-                        _ => {
-                            return (
-                                "int64_t".into(),
-                                format!("mako_map_k_{kn}_{vs}_get({b}, {i})"),
-                            );
-                        }
+                    let vty = struct_key_map_val_c_ty(&vs);
+                    if vs == "s" || (vs.starts_with('v') && vs.len() > 1) {
+                        let out = self.fresh("mg");
+                        self.line(&format!(
+                            "{vty} {out} = mako_map_k_{kn}_{vs}_get({b}, {i});"
+                        ));
+                        return (vty, out);
                     }
+                    return (vty, format!("mako_map_k_{kn}_{vs}_get({b}, {i})"));
                 }
                 let tmp = self.fresh("idx");
                 self.line(&format!("int64_t {tmp} = {i};"));
@@ -20173,6 +20162,82 @@ fn struct_lit_name(e: &Expr) -> Option<&str> {
     }
 }
 
+/// Built-in slice/array C types (and monomorphized `MakoArr_*`).
+fn is_c_slice_or_array_ty(fty: &str) -> bool {
+    matches!(
+        fty,
+        "MakoIntArray"
+            | "MakoFloatArray"
+            | "MakoByteArray"
+            | "MakoStrArray"
+            | "MakoStringArray"
+            | "MakoBoolArray"
+    ) || fty.starts_with("MakoArr_")
+}
+
+/// Heap maps / channels / other pointer-like C handles.
+fn is_c_map_or_ptr_ty(fty: &str) -> bool {
+    fty.ends_with('*')
+        || fty.starts_with("MakoMap")
+        || fty.starts_with("MakoChan")
+        || fty.starts_with("MakoShare")
+}
+
+/// C equality expression for one struct field (`a.f` vs `b.f`).
+fn struct_field_eq_expr(
+    a: &str,
+    b: &str,
+    fname: &str,
+    fty: &str,
+    structs: &HashMap<String, StructInfo>,
+) -> String {
+    if fty == "MakoString" {
+        format!("mako_str_eq({a}.{fname}, {b}.{fname})")
+    } else if is_c_slice_or_array_ty(fty) {
+        // Identity only — deep content eq is not used for map keys of engine tables.
+        format!(
+            "(({a}.{fname}.data == {b}.{fname}.data) && ({a}.{fname}.len == {b}.{fname}.len))"
+        )
+    } else if is_c_map_or_ptr_ty(fty) {
+        format!("({a}.{fname} == {b}.{fname})")
+    } else if structs.values().any(|s| s.c_name == *fty) {
+        format!("mako_eq_{fty}({a}.{fname}, {b}.{fname})")
+    } else {
+        format!("({a}.{fname} == {b}.{fname})")
+    }
+}
+
+/// One FNV-1a mix step for hashing field `k.fname` of C type `fty`.
+fn struct_field_hash_step(
+    k: &str,
+    fname: &str,
+    fty: &str,
+    structs: &HashMap<String, StructInfo>,
+) -> String {
+    if fty == "MakoString" {
+        format!(
+            "h ^= mako_hash_bytes({k}.{fname}.data, {k}.{fname}.len); h *= 1099511628211ULL;"
+        )
+    } else if fty == "double" {
+        format!("h ^= mako_hash_f64({k}.{fname}); h *= 1099511628211ULL;")
+    } else if fty == "bool" {
+        format!("h ^= (uint64_t)({k}.{fname} ? 1 : 0); h *= 1099511628211ULL;")
+    } else if is_c_slice_or_array_ty(fty) {
+        format!(
+            "h ^= (uint64_t)(uintptr_t){k}.{fname}.data; h *= 1099511628211ULL; h ^= (uint64_t){k}.{fname}.len; h *= 1099511628211ULL;"
+        )
+    } else if is_c_map_or_ptr_ty(fty) {
+        format!(
+            "h ^= (uint64_t)(uintptr_t){k}.{fname}; h *= 1099511628211ULL;"
+        )
+    } else if structs.values().any(|s| s.c_name == *fty) {
+        format!("h ^= mako_hash_{fty}({k}.{fname}); h *= 1099511628211ULL;")
+    } else {
+        // int64_t and other integer-like C types
+        format!("h ^= mako_hash_i64((int64_t){k}.{fname}); h *= 1099511628211ULL;")
+    }
+}
+
 fn mangle(name: &str) -> String {
     if name == "main" {
         return "mako_main".into();
@@ -20571,7 +20636,8 @@ impl Codegen {
 
 /// Inverse of [`c_type_mono_tag`] for well-known tags; unknown tags are C type names.
 
-/// Parse `MakoMapK_Point_i*` → (`Point`, `i`) for struct-key maps.
+/// Parse `MakoMapK_Point_i*` → (`Point`, `i`);
+/// `MakoMapK_Point_vPerson*` → (`Point`, `vPerson`) for struct-key maps.
 fn parse_struct_key_map(bty: &str) -> Option<(String, String)> {
     let rest = bty.strip_prefix("MakoMapK_")?.strip_suffix('*')?;
     for suf in ["_i", "_s", "_f"] {
@@ -20581,7 +20647,24 @@ fn parse_struct_key_map(bty: &str) -> Option<(String, String)> {
             }
         }
     }
+    // Struct value: …_v{Val} (last `_v` separates key from value type name).
+    if let Some((k, v)) = rest.rsplit_once("_v") {
+        if !k.is_empty() && !v.is_empty() {
+            return Some((k.to_string(), format!("v{v}")));
+        }
+    }
     None
+}
+
+/// Value C type for a struct-key map suffix (`i`/`s`/`f`/`vName`).
+fn struct_key_map_val_c_ty(vs: &str) -> String {
+    match vs {
+        "s" => "MakoString".into(),
+        "f" => "double".into(),
+        "i" => "int64_t".into(),
+        other if other.starts_with('v') && other.len() > 1 => other[1..].to_string(),
+        _ => "int64_t".into(),
+    }
 }
 
 fn c_type_from_mono_tag(tag: &str) -> String {

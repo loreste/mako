@@ -560,9 +560,9 @@ print_int(builder_len(b))
 ## 4c. Maps
 
 Hash maps (open addressing). **Keys:** `int`, `string`, `float`, or **named
-structs**. **Values:** `int`, `string`, `float`, or **named structs**.
-`map[Struct]Struct` is not supported yet. Pack types work as keys or values:
-`map[int]eng.Table`, `map[eng.Table]int`, `map[float]eng.Table`.
+structs**. **Values:** `int`, `string`, `float`, or **named structs** — any
+combo, including `map[Point]Label`. Pack types work as keys or values:
+`map[int]eng.Table`, `map[eng.Table]int`, `map[eng.Table]Point`.
 
 Float keys: `+0.0` / `-0.0` are the same key; all NaNs share one key.
 Struct keys: field-wise equality + stable field hash (strings by content).
@@ -599,12 +599,15 @@ let mut fi = make(map[float]int)
 fi[1.5] = 3
 
 struct Point { x: int, y: int }
+struct Label { text: string, id: int }
 let mut pts = make(map[int]Point)
 pts[1] = Point { x: 1, y: 2 }
 let mut pf = make(map[float]Point)
 pf[1.5] = Point { x: 3, y: 4 }
 let mut by_pt = make(map[Point]int)
 by_pt[Point { x: 1, y: 2 }] = 10
+let mut by_ss = make(map[Point]Label)
+by_ss[Point { x: 0, y: 0 }] = Label { text: "origin", id: 0 }
 
 // Helpers (all map kinds):
 let ks = maps_keys(m)

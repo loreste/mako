@@ -115,3 +115,77 @@ fn TestMapPackStructKey() {
     let c = maps_clone(m)
     assert_eq(maps_equal(m, c), 1)
 }
+
+fn TestMapStructStruct() {
+    let mut m = make(map[Point]Label)
+    m[Point { x: 1, y: 2 }] = Label { text: "a", id: 1 }
+    m[Point { x: 3, y: 4 }] = Label { text: "b", id: 2 }
+    assert_eq_str(m[Point { x: 1, y: 2 }].text, "a")
+    assert_eq(m[Point { x: 1, y: 2 }].id, 1)
+    assert_eq_str(m[Point { x: 3, y: 4 }].text, "b")
+    assert(has(m, Point { x: 1, y: 2 }))
+    assert(not has(m, Point { x: 0, y: 0 }))
+    assert_eq(len(m), 2)
+    // update
+    m[Point { x: 1, y: 2 }] = Label { text: "aa", id: 11 }
+    assert_eq_str(m[Point { x: 1, y: 2 }].text, "aa")
+    assert_eq(len(m), 2)
+    let lab, ok = m[Point { x: 3, y: 4 }]
+    assert(ok)
+    assert_eq(lab.id, 2)
+    let _, miss = m[Point { x: 9, y: 9 }]
+    assert(not miss)
+    // missing → zero value
+    assert_eq(m[Point { x: 0, y: 0 }].id, 0)
+    delete(m, Point { x: 1, y: 2 })
+    assert(not has(m, Point { x: 1, y: 2 }))
+    assert_eq(len(m), 1)
+}
+
+fn TestMapStructStructSame() {
+    let mut m = make(map[Point]Point)
+    m[Point { x: 0, y: 0 }] = Point { x: 1, y: 1 }
+    m[Point { x: 1, y: 0 }] = Point { x: 2, y: 2 }
+    assert_eq(m[Point { x: 0, y: 0 }].x, 1)
+    assert_eq(m[Point { x: 1, y: 0 }].y, 2)
+    let mut sum = 0
+    for k, v in range m {
+        sum = sum + k.x + v.x + v.y
+    }
+    // (0+1+1) + (1+2+2) = 7
+    assert_eq(sum, 7)
+}
+
+fn TestMapStructStructHelpers() {
+    let mut m = make(map[Point]Label)
+    m[Point { x: 1, y: 1 }] = Label { text: "p", id: 7 }
+    m[Point { x: 2, y: 2 }] = Label { text: "q", id: 8 }
+    let ks = maps_keys(m)
+    assert_eq(len(ks), 2)
+    let vs = maps_values(m)
+    assert_eq(len(vs), 2)
+    let mut idsum = 0
+    for _, lab in range vs {
+        idsum = idsum + lab.id
+    }
+    assert_eq(idsum, 15)
+    let c = maps_clone(m)
+    assert_eq(maps_equal(m, c), 1)
+    maps_clear(c)
+    assert_eq(len(c), 0)
+    maps_copy(c, m)
+    assert_eq(len(c), 2)
+    assert_eq_str(c[Point { x: 1, y: 1 }].text, "p")
+}
+
+fn TestMapPackStructStruct() {
+    let mut m = make(map[eng.Table]Point)
+    m[eng.Table { n: 1 }] = Point { x: 10, y: 20 }
+    assert_eq(m[eng.Table { n: 1 }].x, 10)
+    assert(has(m, eng.Table { n: 1 }))
+    let p, ok = m[eng.Table { n: 1 }]
+    assert(ok)
+    assert_eq(p.y, 20)
+    let c = maps_clone(m)
+    assert_eq(maps_equal(m, c), 1)
+}

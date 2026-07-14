@@ -8577,12 +8577,12 @@ impl TypeChecker {
             | (Type::Float, Type::Int)
             | (Type::Float, Type::String)
             | (Type::Float, Type::Float) => Ok(()),
-            // Named user structs as values (any scalar key) or as keys (scalar values).
+            // Named user structs as values and/or keys (any combo of scalar|struct).
             (Type::Int | Type::String | Type::Float, Type::Struct { .. }) => Ok(()),
             (Type::Struct { .. }, Type::Int | Type::String | Type::Float) => Ok(()),
+            (Type::Struct { .. }, Type::Struct { .. }) => Ok(()),
             _ => Err(TypeError::new(format!(
-                "unsupported map[{}]{} — keys: int|string|float|Struct; values: int|string|float|Struct \
-                 (map[Struct]Struct not yet; use scalar values with struct keys)",
+                "unsupported map[{}]{} — keys: int|string|float|Struct; values: int|string|float|Struct",
                 k.display(),
                 v.display()
             ))),
