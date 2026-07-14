@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Language — `Option[chan[T]]` / `map[K]Option[chan]` / `Result[chan]`
+
+- **Channel bags** — `Option[chan[T]]`, `Result[chan[T],E]`, and as map values
+  (`map[string]Option[chan[int]]`, `map[int]Result[chan[string],string]`, named
+  keys, float/struct channels). Some/Ok store channel handles via `mako_some_ptr`
+  / `mako_ok_ptr`; match unboxes with send/recv metadata.
+- Tags `opt_chan_*` / `res_chan_*`. Tests: `map_option_chan_test`.
+
 ### Language — `map[K][]chan[T]`
 
 - **Slices of channels as map values** — e.g. `map[string][]chan[int]`,

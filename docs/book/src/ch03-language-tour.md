@@ -428,6 +428,7 @@ fn main() {
 | Rows of maps | `[]map[K]V` |
 | Channel per key | `map[K]chan[T]` (int/bool/float/string/struct) |
 | Channels per key | `map[K][]chan[T]` |
+| Optional / fallible channel | `Option[chan[T]]`, `map[K]Option[chan[T]]`, `Result[chan[T],E]` |
 
 Missing key → zero value (`0` / `""` / `false` / empty slice / nil inner map /
 `None` / `Err("")` / nil channel). Nested-map and channel-map `maps_clone` /

@@ -221,6 +221,24 @@ impl Codegen {
             TypeExpr::Named(t) if t == "float" || t == "float64" => "float",
             TypeExpr::Generic(n, _) if n == "Option" => "option",
             TypeExpr::Generic(n, _) if n == "Result" => "result",
+            TypeExpr::Generic(n, args) if n == "chan" && !args.is_empty() => {
+                match &args[0] {
+                    TypeExpr::Named(t) if t == "string" => "chan_string",
+                    TypeExpr::Named(t) if t == "float" || t == "float64" => "chan_float",
+                    TypeExpr::Named(t) if t == "bool" => "chan_bool",
+                    TypeExpr::Named(t)
+                        if matches!(
+                            t.as_str(),
+                            "int" | "int64" | "int32" | "int8" | "byte" | "uint64"
+                        ) =>
+                    {
+                        "chan_int"
+                    }
+                    // Named struct element channels (MakoChanPtr*).
+                    TypeExpr::Named(_) => "chan_struct",
+                    _ => "chan_int",
+                }
+            }
             TypeExpr::Array(inner) => match inner.as_ref() {
                 TypeExpr::Named(n) if n == "string" => "slice_str",
                 TypeExpr::Named(n) if n == "float" || n == "float64" => "slice_float",
@@ -641,6 +659,15 @@ impl Codegen {
                 }
                 None
             }
+            // chan[Point] → Point (for Option[chan[Point]] / Result[chan[Point],E] match)
+            TypeExpr::Generic(n, args) if n == "chan" && !args.is_empty() => {
+                if let TypeExpr::Named(t) = &args[0] {
+                    if self.structs.contains_key(t) {
+                        return Some(t.clone());
+                    }
+                }
+                None
+            }
             _ => None,
         }
     }
@@ -811,7 +838,15 @@ impl Codegen {
     /// Result Ok kind for a call, resolving generic monomorphizations.
     fn call_result_ok_kind(&self, fname: &str, args: &[Expr]) -> Option<String> {
         if fname == "Ok" && args.len() == 1 {
-            return Some(Self::payload_kind_from_c_ty(&self.peek_expr_c_ty(&args[0])));
+            let cty = self.peek_expr_c_ty(&args[0]);
+            if cty == "MakoChan*" {
+                if let Expr::Ident(n) = &args[0] {
+                    if self.chan_float.contains(n) {
+                        return Some("chan_float".into());
+                    }
+                }
+            }
+            return Some(Self::payload_kind_from_c_ty(&cty));
         }
         let mono = self.generic_mono_name_for_call(fname, args);
         self.fn_result_ok_kind
@@ -863,7 +898,16 @@ impl Codegen {
     fn call_option_some_kind(&self, fname: &str, args: &[Expr]) -> Option<String> {
         // Builtin Some(x): derive payload kind from the argument expression.
         if fname == "Some" && args.len() == 1 {
-            return Some(Self::payload_kind_from_c_ty(&self.peek_expr_c_ty(&args[0])));
+            let cty = self.peek_expr_c_ty(&args[0]);
+            // Refine MakoChan* float channels via chan_float metadata.
+            if cty == "MakoChan*" {
+                if let Expr::Ident(n) = &args[0] {
+                    if self.chan_float.contains(n) {
+                        return Some("chan_float".into());
+                    }
+                }
+            }
+            return Some(Self::payload_kind_from_c_ty(&cty));
         }
         let mono = self.generic_mono_name_for_call(fname, args);
         self.fn_option_some_kind
@@ -898,6 +942,9 @@ impl Codegen {
             "MakoMapBB*" => "map_bb".into(),
             "MakoOptionInt" => "option".into(),
             "MakoResultInt" | "MakoResultFloat" => "result".into(),
+            "MakoChanStr*" => "chan_string".into(),
+            "MakoChanPtr*" => "chan_struct".into(),
+            "MakoChan*" => "chan_int".into(), // float/bool refined via chan_float on binding
             other if other.starts_with("MakoArr_") => "slice_struct".into(),
             other if other.starts_with("MakoMap") && other.ends_with('*') => "map_ptr".into(),
             other if other.ends_with('*') => "map_ptr".into(),
@@ -1129,6 +1176,25 @@ impl Codegen {
             self.line(&format!(
                 "{cty} {b} = ({cty})mako_option_some_ptr({scrut});"
             ));
+        } else if kind.starts_with("chan_") {
+            // Option[chan[T]]: pointer in value slot (not heap-boxed header).
+            let cty = match kind {
+                "chan_string" => "MakoChanStr*".to_string(),
+                "chan_struct" => "MakoChanPtr*".to_string(),
+                _ => "MakoChan*".to_string(), // int / bool / float
+            };
+            self.locals.insert(bindings[0].clone(), cty.clone());
+            self.line(&format!(
+                "{cty} {b} = ({cty})mako_option_some_ptr({scrut});"
+            ));
+            // Float / struct-channel metadata for .send / .recv.
+            if kind == "chan_float" {
+                self.chan_float.insert(bindings[0].clone());
+            } else if kind == "chan_struct" {
+                if let Some(sn) = self.option_some_structs.get(scrut).cloned() {
+                    self.chan_ptr_elems.insert(bindings[0].clone(), sn);
+                }
+            }
         } else {
             self.locals.insert(bindings[0].clone(), "int64_t".into());
             self.line(&format!("int64_t {b} = {scrut}.value;"));
@@ -1191,6 +1257,22 @@ impl Codegen {
                         .insert(temp.to_string(), cty);
                     other.to_string()
                 }
+                other if other.starts_with("chan_") => {
+                    // opt_chan_int / opt_chan_Point → match kind chan_int / chan_struct
+                    if other == "chan_float" {
+                        "chan_float".into()
+                    } else if other == "chan_string" {
+                        "chan_string".into()
+                    } else if other == "chan_bool" || other == "chan_int" {
+                        other.to_string()
+                    } else {
+                        // chan_Point → chan_struct + struct name
+                        let sn = &other["chan_".len()..];
+                        self.option_some_structs
+                            .insert(temp.to_string(), sn.to_string());
+                        "chan_struct".into()
+                    }
+                }
                 other => {
                     self.option_some_structs
                         .insert(temp.to_string(), other.to_string());
@@ -1219,6 +1301,20 @@ impl Codegen {
                     self.result_ok_map_ctys
                         .insert(temp.to_string(), cty);
                     other.to_string()
+                }
+                other if other.starts_with("chan_") => {
+                    if other == "chan_float" {
+                        "chan_float".into()
+                    } else if other == "chan_string" {
+                        "chan_string".into()
+                    } else if other == "chan_bool" || other == "chan_int" {
+                        other.to_string()
+                    } else {
+                        let sn = &other["chan_".len()..];
+                        self.result_ok_structs
+                            .insert(temp.to_string(), sn.to_string());
+                        "chan_struct".into()
+                    }
                 }
                 other => {
                     self.result_ok_structs
@@ -3267,6 +3363,21 @@ impl Codegen {
             ));
             bags.push((
                 format!("res_{mt}"),
+                "MakoResultInt".into(),
+                "mako_err_int(mako_str_from_cstr(\"\"))".into(),
+                "mako_eq_result_int(av, bv)".into(),
+            ));
+        }
+        // Option[chan[T]] / Result[chan[T],E]
+        for (ctag, _) in self.leaf_chan_value_specs() {
+            bags.push((
+                format!("opt_{ctag}"),
+                "MakoOptionInt".into(),
+                "mako_none_int()".into(),
+                "mako_eq_option_int(av, bv)".into(),
+            ));
+            bags.push((
+                format!("res_{ctag}"),
                 "MakoResultInt".into(),
                 "mako_err_int(mako_str_from_cstr(\"\"))".into(),
                 "mako_eq_result_int(av, bv)".into(),
@@ -8714,6 +8825,16 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                                     format!("mako_ok_ptr((void*){v})"),
                                 );
                             }
+                            // Channel handles Ok
+                            if vty == "MakoChan*"
+                                || vty == "MakoChanStr*"
+                                || vty == "MakoChanPtr*"
+                            {
+                                return (
+                                    "MakoResultInt".into(),
+                                    format!("mako_ok_ptr((void*){v})"),
+                                );
+                            }
                             // Option[T] Ok: heap-box the option payload
                             if vty == "MakoOptionInt" {
                                 let boxn = self.fresh("optbox");
@@ -8928,6 +9049,16 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             }
                             // Any map pointer (SI/II/SS and monomorphized MakoMap*)
                             if vty.starts_with("MakoMap") && vty.ends_with('*') {
+                                return (
+                                    "MakoOptionInt".into(),
+                                    format!("mako_some_ptr((void*){v})"),
+                                );
+                            }
+                            // Channel handles (int/bool/float ring, string, struct-ptr)
+                            if vty == "MakoChan*"
+                                || vty == "MakoChanStr*"
+                                || vty == "MakoChanPtr*"
+                            {
                                 return (
                                     "MakoOptionInt".into(),
                                     format!("mako_some_ptr((void*){v})"),
@@ -24570,6 +24701,24 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             self.line(&format!(
                                 "{cty} {b} = ({cty})mako_result_ok_ptr({scrut});"
                             ));
+                        } else if ok_kind.starts_with("chan_") {
+                            let b = mangle(&bindings[0]);
+                            let cty = match ok_kind.as_str() {
+                                "chan_string" => "MakoChanStr*".to_string(),
+                                "chan_struct" => "MakoChanPtr*".to_string(),
+                                _ => "MakoChan*".to_string(),
+                            };
+                            self.locals.insert(bindings[0].clone(), cty.clone());
+                            self.line(&format!(
+                                "{cty} {b} = ({cty})mako_result_ok_ptr({scrut});"
+                            ));
+                            if ok_kind == "chan_float" {
+                                self.chan_float.insert(bindings[0].clone());
+                            } else if ok_kind == "chan_struct" {
+                                if let Some(sn) = self.result_ok_structs.get(scrut).cloned() {
+                                    self.chan_ptr_elems.insert(bindings[0].clone(), sn);
+                                }
+                            }
                         } else if ok_kind == "option" {
                             let b = mangle(&bindings[0]);
                             let p = self.fresh("okopt");
@@ -25727,6 +25876,11 @@ fn bag_map_val_tag(
         TypeExpr::Map(k, v) => {
             let mt = leaf_map_mono_tag(k, v, structs, enums);
             format!("{pref}_{mt}")
+        }
+        // Option[chan[T]] / Result[chan[T],E] → opt_chan_int / res_chan_string / …
+        TypeExpr::Generic(n, args) if n == "chan" && !args.is_empty() => {
+            let ct = chan_map_val_tag(&args[0], structs);
+            format!("{pref}_{ct}")
         }
         _ => format!("{pref}_int"),
     }

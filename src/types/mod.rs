@@ -8854,6 +8854,22 @@ impl TypeChecker {
                 // Option[map[K2]V] — depth-2 maps only (not map-of-map)
                 inner.as_ref(),
                 Type::Map(_, v) if !matches!(v.as_ref(), Type::Map(_, _))
+            ) || matches!(
+                // Option[chan[T]] — same element set as chan_open
+                inner.as_ref(),
+                Type::Chan(payload)
+                    if matches!(
+                        payload.as_ref(),
+                        Type::Int
+                            | Type::Int64
+                            | Type::Int32
+                            | Type::Int8
+                            | Type::Byte
+                            | Type::Bool
+                            | Type::Float
+                            | Type::String
+                            | Type::Struct { .. }
+                    )
             ) =>
             {
                 Ok(())
@@ -8891,6 +8907,21 @@ impl TypeChecker {
             ) || matches!(
                 inner.as_ref(),
                 Type::Map(_, v) if !matches!(v.as_ref(), Type::Map(_, _))
+            ) || matches!(
+                inner.as_ref(),
+                Type::Chan(payload)
+                    if matches!(
+                        payload.as_ref(),
+                        Type::Int
+                            | Type::Int64
+                            | Type::Int32
+                            | Type::Int8
+                            | Type::Byte
+                            | Type::Bool
+                            | Type::Float
+                            | Type::String
+                            | Type::Struct { .. }
+                    )
             ) =>
             {
                 Ok(())
@@ -8939,7 +8970,7 @@ impl TypeChecker {
             }
             _ => Err(TypeError::new(format!(
                 "unsupported map[{}]{} — keys: int|string|float|bool|Struct|Enum; \
-                 values: int|string|float|bool|Struct|Enum|[]T|[][]T|[]Option|[]Result|[]chan|[]map|map[K2]V|map[K2]map[K3]V|Option[T]|Option[[]T]|Option[map]|Result[T,E]|Result[[]T,E]|Result[map]|(T,U)|chan[T]",
+                 values: int|string|float|bool|Struct|Enum|[]T|[][]T|[]Option|[]Result|[]chan|[]map|map[K2]V|map[K2]map[K3]V|Option[T]|Option[[]T]|Option[map]|Option[chan]|Result[T,E]|Result[[]T,E]|Result[map]|Result[chan]|(T,U)|chan[T]",
                 k.display(),
                 v.display()
             ))),
