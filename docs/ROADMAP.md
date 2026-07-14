@@ -1,139 +1,180 @@
 # Mako roadmap (ordered)
 
-Short engineering queue. Product map: [VISION.md](VISION.md). Updated backend/game
-vision source: internal design document (not tracked in repo).
-**Verified:** [STATUS.md](STATUS.md) · **Stdlib:** [STDLIB.md](STDLIB.md) · **Release:** [RELEASE.md](RELEASE.md).  
-**Book:** [The Mako Book](book/).
+Short engineering queue. Product map: [VISION.md](VISION.md).  
+**Verified:** [STATUS.md](STATUS.md) · **Stdlib:** [STDLIB.md](STDLIB.md) · **Security:** [SECURITY.md](SECURITY.md) · **Release:** [RELEASE.md](RELEASE.md).  
+**Book:** [The Mako Book](book/) · **Identity:** [IDENTITY.md](IDENTITY.md) · **Pain map:** [PAIN_POINTS.md](PAIN_POINTS.md).
 
 STATUS north-star / MVP: **100%**. Prefer STATUS over this list when claiming Done.  
-**Mako identity:** [IDENTITY.md](IDENTITY.md) (**~90%**).  
-**Pain map (Go/Rust → Mako):** [PAIN_POINTS.md](PAIN_POINTS.md).  
-Dual sugar only: [GO_SYNTAX_CHECKLIST.md](GO_SYNTAX_CHECKLIST.md).  
-Last roadmap sync: **2026-07-11** (unique surface · pain-driven design · suite **130+**).
+**Mako identity:** [IDENTITY.md](IDENTITY.md) (**~90%** preferred surface).  
+**Dual sugar only:** [GO_SYNTAX_CHECKLIST.md](GO_SYNTAX_CHECKLIST.md).  
+**Product version:** **0.1.2** · Last roadmap sync: **2026-07-14**.
 
-## Landed
+---
 
-- Compiler → C → native; `.mko`; crew / actors / arenas / Result  
-- Mako operators + grouped `import (` · `mako version` · `mako test`  
-- Core stdlib + Waves 1–9 standard library  
-- Suite **130**  
-- **The Mako Book** (`docs/book/`)
+## Product intention (at a glance)
 
-## Done this pass (docs book + Wave 9 + CLI)
+| Scope | Approx. |
+|-------|---------|
+| MVP / STATUS north-star | **100%** |
+| General-purpose intention (weighted tracks below) | **~87%** |
+| Mako identity (preferred syntax) | **~90%** |
+| Standard library (target areas) | **~98%** |
+
+Tracks 4–7 (backend, protocols, data, toolchain) are effectively **Done**.  
+Remaining weight sits in **concurrency trust**, **observability depth**, **install/portability polish**, and **domain/advanced systems**.
+
+---
+
+## Just closed (2026-07-14)
 
 | Area | Status |
 |------|--------|
-| The Mako Book — 15 chapters + checkable samples + `book.toml` | Done |
-| Docs accuracy pass (README / GUIDE / STATUS / howto) | Done |
-| RE2 backrefs + `\p{L/N}` ASCII + POSIX class polish | Done |
-| UTF-8 regexp `\p{...}` common scripts/categories + lookahead | Done |
-| JFIF grayscale encode / detect | Done |
-| Codegen `mako_reflect_register_type` for Mako structs | Done |
-| SMTP STARTTLS soft + `str_cut`/`str_count` | Done |
-| `main.rs` help: flag docs, `version` ordering, after_help | Done |
+| Demand-driven map/bag monomorphs (O(used), not N² grid) | **Done** — large packs stay usable |
+| Nested bag / Option / Result / tuple map values | **Done** — suite coverage |
+| **P2 — Stdlib / security product polish** | **Done** |
+| → `path_file_size` | Done |
+| → PEM helpers (`pem_*` + `crypto.x509`) | Done |
+| → mTLS + cert lab (`tls_make_self_signed` / `tls_make_csr` / `tls_server_reload`) | Done |
+| → SCRAM-PLUS adoption (`scram_tls_unique_cbind` / `scram_plus_client_final_bare`) | Done |
+| → Docs: **crypto core only** (no high-level SASL state machine) | Done |
+| → Observability: `metrics_export_prom`, `trace_export_json` | Done (seed depth) |
+| Tests | `security_product_test` · `security_residuals_test` |
 
-## Partial / Next (true hard residuals)
+---
 
-**Landed (gap close waves 1–39):** join_timeout flatten · POD+string kick ·
-reflect N + nested POD · Result/Option deep nests · nested None/Err ·
-**`?` int/string/float/bool/struct/slice/map + nested Option/Result** ·
-**jpeg_is_baseline_gray** · mako JFIF/raw/dct/huff/roundtrip probes · APP
-layout · NLL for/if/match · more `\p{…}` · expanded TSan · prior work.
+## Landed (foundation — do not re-open)
 
-**Language pain residuals** (Wave 40 close — see [PAIN_POINTS.md](PAIN_POINTS.md)):
+- Compiler → C → native; `.mko`; crew / actors / arenas / `Result` / `Option`
+- Mako operators · packs/pulls · `mako version` / `test` / `check` / `build` / `run`
+- Core stdlib + Waves 1–9 · suite **165+**
+- **The Mako Book** (`docs/book/`)
+- Full map/slice/bag *language* surface with demand-driven monomorph emission
+- Backend app surface, API protocols, SQL/data, toolchain/IDE tracks at intention **100%**
+- TLS/HTTP/2/H3/QUIC seeds · crypto digests/AEAD/KDF/SCRAM core · session/auth helpers
 
-1. Fuller data-race model — **Done seed** (deep Send + static mut-capture race until join)  
-2. Result/Option edges — nested patterns + generic nests; exotic `?` residual  
-3. Stronger NLL multi-label — const-fold + multi-label tests **Done seed**  
+---
 
-**Stdlib / product residuals:**
+## Next (ordered queue)
 
-6. Complete Unicode / PCRE residual (Lu/Ll/ASCII/Any seeds landed; full UCD open) · JPEG **viewer Huffman** via `jpeg_encode_gray_baseline`  
-7. Reflect non-POD — Option/Result/array/map **Done**; chan/Arena rejected  
-8. Symbol-level parity  
-9. Optional app GC — `gc_alloc`/`gc_collect` with `[package] gc = true` (systems forbids)  
-10. API stability — `#[stable]` / `#[deprecated("msg")]`  
+Work below is **not** MVP. Order is product leverage, not strict dependency.
 
-## Product Focus From General-Purpose Brief
+### P1 — Runtime trust (concurrency)
 
-The next language/runtime bets should reinforce the new product contract:
-general-purpose backend and infrastructure first, with telecom as one domain
-track rather than the language identity.
+Highest remaining risk for production backends.
 
-1. Backend app surface: routing, middleware, validation, auth/session helpers,
-   graceful shutdown, health checks, background jobs.
-2. API protocols: REST/OpenAPI, GraphQL, gRPC, WebSockets, SSE, streaming RPC,
-   API clients, schema validation.
-3. Data layer: PostgreSQL/MySQL/SQLite/Redis first, pooling, transactions,
-   migrations, prepared statements, typed SQL checks.
-4. CLI/devtools: subcommands, config files, env/secrets, shell completion,
-   terminal formatting, cross-platform file/process APIs.
-5. Cloud/infrastructure: agents, sidecars, service discovery, container tooling,
-   Kubernetes operator/controller patterns.
-6. Runtime trust: structured concurrency, cancellation, timeouts, leak/deadlock
-   diagnostics, scheduler observability, race detection.
-7. Observability/debugging: structured logs, metrics, tracing/OpenTelemetry,
-   CPU/memory/allocation profiling, stack traces, debugger/LSP depth.
-8. Domain tracks: telecom/realtime (**SIP/SDP/RTP + SRTP crypto blocks Done** — build stacks in Mako; full product stacks residual), storage systems,
-   AI inference, games/game engines, simulations, edge/WASM, plugin/ABI support.
-9. Deployment: static binary defaults where practical, cross-compile polish,
-   minimal containers, serverless/edge targets, WASM progression.
+1. Portable timeouts and deadlines across task / channel / network APIs  
+2. Structured error propagation from child tasks (`kick` / crew)  
+3. Explicit detached-task syntax and lifecycle controls  
+4. First-class `actor` / `receive` syntax with owned state (beyond runtime seed)
 
-## General-Purpose Intention Tracker
+### P2 — Observability depth
 
-This is the checklist for reaching **100% of the product intention**, not just
-the current MVP/STATUS bar. Percentages are weighted by product importance and
-should be updated whenever a task is checked off.
+Metrics/prom + span-lite JSON are in; depth is open.
+
+1. Full OpenTelemetry export (OTLP wire, not only `trace_export_json`)  
+2. CPU / memory / allocation / scheduler / lock-contention profiling  
+3. Stack traces with source locations  
+4. Debugger depth: locals, breakpoints, async task inspection  
+5. Crash reports / core dumps · PGO/LTO workflow polish  
+
+### P3 — Install, distribution, portability
+
+1. Complete installer UX (macOS / Linux / Windows)  
+2. Windows MSI / winget · macOS pkg or notarized install · Linux deb/rpm + repo  
+3. Homebrew formula publish automation  
+4. Reliable multi-OS matrix (Linux / macOS / Windows / FreeBSD)  
+5. ARM / x86-64 / RISC-V target validation  
+
+### P4 — Domain & advanced systems
+
+1. Telecom/realtime product stacks (SIP/RTP/SRTP seeds exist; SIPREC/Diameter/WebRTC residual)  
+2. Database/storage primitives: pages, WAL, indexes, cache, transactions  
+3. Graphics/windowing · shader · asset · audio · physics seeds (games track)  
+4. Multiplayer game networking (reliable UDP, snapshots, prediction/rollback)  
+5. GPU AI depth: batched GEMM, RoPE, KV-cache, native f16; more quant; Metal/CUDA/Vulkan  
+6. Interop beyond C · hot reload · safe comptime domain extensions  
+
+### Language / stdlib residuals (lower priority)
+
+- Exotic `Result` / `Option` / `?` edges beyond current suite  
+- Full Unicode / PCRE / UCD depth (common `\p{…}` seeds landed)  
+- Symbol-level stdlib parity with every Go package name (not a goal line-for-line)  
+- JPEG viewer Huffman residual if still needed beyond baseline encode  
+
+---
+
+## Product focus (contract)
+
+General-purpose **backend and infrastructure first**; telecom is one domain track,
+not the language identity.
+
+| # | Focus | State |
+|---|--------|--------|
+| 1 | Backend app surface | **Done** |
+| 2 | API protocols & networking | **Done** |
+| 3 | Data / SQL / serialization | **Done** |
+| 4 | CLI / devtools | **Done** (depth residual in install) |
+| 5 | Cloud / K8s / sidecars | Partial — helpers + containers; operator patterns open |
+| 6 | Runtime trust | **Partial** — see P1 |
+| 7 | Observability / debugging | **Partial (~55%)** — see P2 |
+| 8 | Domain tracks | **Partial (~70%)** — security polish Done; stacks open |
+| 9 | Deployment / WASM | Strong seeds; matrix polish open |
+
+---
+
+## General-purpose intention tracker
+
+Checklist for **100% of the product intention**, not the MVP/STATUS bar.  
+Percentages are weighted; update when a task flips.
 
 **Overall intention completion:** **~87% / 100%**  
-Weighted from the track table below; STATUS remains the MVP implementation bar.  
-**Mako identity (preferred syntax):** **~86%** — [IDENTITY.md](IDENTITY.md).
+**Mako identity (preferred syntax):** **~90%** — [IDENTITY.md](IDENTITY.md).
 
 | Track | Weight | Current |
 |-------|--------|---------|
 | 1. Language identity and core type system | 10% | 96% |
 | 2. Memory safety and allocation control | 10% | 88% |
 | 3. Concurrency and runtime trust | 10% | 74% |
-| 4. Backend app surface | 12% | 100% |
-| 5. API protocols and networking | 10% | 100% |
-| 6. Data, SQL, and serialization | 10% | 100% |
-| 7. Toolchain, packages, and IDE | 10% | 100% |
-| 8. Observability and debugging | 8% | 55% |
+| 4. Backend app surface | 12% | **100%** |
+| 5. API protocols and networking | 10% | **100%** |
+| 6. Data, SQL, and serialization | 10% | **100%** |
+| 7. Toolchain, packages, and IDE | 10% | **100%** |
+| 8. Observability and debugging | 8% | **55%** |
 | 9. Installer, distribution, and portability | 10% | 77% |
-| 10. Domain tracks and advanced systems | 10% | 70% |
+| 10. Domain tracks and advanced systems | 10% | **70%** |
 
-### 1. Language Identity And Core Type System — 10%
+### 1. Language identity and core type system — 10%
 
-- [x] Define Mako-owned syntax identity; has its own identity.
+- [x] Mako-owned syntax identity (preferred surface).
 - [x] Static types, local inference, `Result`, `Option`, enums, `match`.
 - [x] Interfaces seed and dynamic interface dispatch.
 - [x] User generics with monomorphization (`fn id[T](x: T) -> T`; dual `[]`/`<>` for built-ins).
 - [x] Demand-driven map/bag monomorph emission (AST-collected used shapes only; O(used) not N²).
-- [x] Unique Mako surface preferred; dual sugar only (`func`, `:=`, …) — [IDENTITY.md](IDENTITY.md).
+- [x] Nested bag values: Option/Result/tuple/slice nests as map values (suite-backed).
+- [x] Unique Mako surface preferred; dual sugar only — [IDENTITY.md](IDENTITY.md).
 - [x] Packs/pulls: `pack` / `pull` (dual `package` / `import`).
 - [x] Tuples + multi-return: `(int, int)` + `let a, b = f()`.
 - [x] Explicit `export`; opt-in `visibility = "explicit"`.
 - [x] Typed channels: `chan_open[T]` / `make(chan[T], n)`.
-- [x] Pain map: [PAIN_POINTS.md](PAIN_POINTS.md) — design driven by Go/Rust pain, not clones.
-- [x] Close language pain residuals seed (deep Send/race, NLL multi-label, nested patterns).
-- [x] `if init; cond { }` Go if-with-init.
-- [x] `go f()` sugar → kick inside crew.
+- [x] Pain map: [PAIN_POINTS.md](PAIN_POINTS.md).
+- [x] Language pain residuals seed (deep Send/race, NLL multi-label, nested patterns).
+- [x] `if init; cond { }` · `go f()` → kick · compound assign · Go `for`/`switch` forms.
 - [x] Compiler-enforced API stability annotations (`#[stable]` / `#[deprecated]`).
 - [x] Richer pattern matching — struct field patterns + nested variant patterns (typecheck).
 
-### 2. Memory Safety And Allocation Control — 10%
+### 2. Memory safety and allocation control — 10%
 
 - [x] No null by default; explicit `Option`.
 - [x] Scope ownership, `arena`, `hold`, `share` seed, CFG/NLL checks.
 - [x] Debug bounds checks and explicit `unsafe` blocks.
-- [x] Release safety profile: `[profile.release] bounds_checks = "on"` (default unchanged).
-- [x] Memory pools and reusable buffers as first-class stdlib/runtime tools.
+- [x] Release safety profile: `[profile.release] bounds_checks = "on"`.
+- [x] Memory pools and reusable buffers.
 - [x] Borrowed string/byte views and zero-copy packet/file APIs.
-- [x] Optional GC for app workloads only (`[package] gc = true`; never mandatory; systems forbids).
-- [x] Tracing GC seed on `gc_alloc` heap (`gc_root` / `gc_link` / mark-from-roots collect).
+- [x] Optional GC for app workloads only (`[package] gc = true`; systems forbids).
+- [x] Tracing GC seed on `gc_alloc` heap.
 - [x] Leak detector and allocation reporting.
 
-### 3. Concurrency And Runtime Trust — 10%
+### 3. Concurrency and runtime trust — 10%
 
 - [x] `crew`, `kick`, `join`, channels, cancel seed, `fan`.
 - [x] Actor runtime seed.
@@ -142,154 +183,105 @@ Weighted from the track table below; STATUS remains the MVP implementation bar.
 - [ ] Structured error propagation from child tasks.
 - [ ] Explicit detached-task syntax and lifecycle controls.
 - [x] Backpressure primitives and bounded queues.
-- [x] Race diagnostics (Send/Sync; per-kick stack; mut captures until join; TSan via `--race`). Leak scopes Done.
+- [x] Race diagnostics (Send/Sync; mut captures until join; TSan via `--race`). Leak scopes Done.
 - [x] Scheduler observability.
 
-### 4. Backend App Surface — 12%
+### 4. Backend app surface — 12%
 
 - [x] Typed `HttpRequest` parse/accessors.
-- [x] Route pattern helpers: `http_route_match`, `http_route_param`.
-- [x] Router package with grouped routes and handlers.
-- [x] Middleware pattern and request context.
-- [x] Request validation helpers.
-- [x] Authentication and authorization helpers.
-- [x] Sessions, cookies, CSRF-safe defaults.
-- [x] Multipart/file upload polish.
-- [x] Rate limiting, compression, caching.
-- [x] Health checks, readiness/liveness helpers.
-- [x] Graceful shutdown.
-- [x] Background jobs and scheduling.
+- [x] Route helpers / router package / middleware / request context.
+- [x] Validation · authn/authz · sessions · cookies · CSRF-safe defaults.
+- [x] Multipart/upload · rate limit · compression · cache.
+- [x] Health checks · graceful shutdown · background jobs.
 
-### 5. API Protocols And Networking — 10%
+### 5. API protocols and networking — 10%
 
-- [x] TCP, HTTP/1.1, HTTP/2, gRPC-ish unary/stream seeds, H3 client pieces.
-- [x] TLS/QUIC/WebSocket seeds.
-- [x] UDP and Unix sockets.
-- [x] DNS package polish.
-- [x] Production-grade WebSocket server/client APIs.
-- [x] OpenAPI metadata/generation.
-- [x] GraphQL server/client seed.
-- [x] Server-sent events and streaming RPC helpers.
-- [x] Connection pooling and load-balancing primitives.
-- [x] Backpressure-aware network I/O.
+- [x] TCP, HTTP/1.1, HTTP/2, gRPC-ish unary/stream seeds, H3 client/server pieces.
+- [x] TLS/QUIC/WebSocket seeds; UDP and Unix sockets; DNS polish.
+- [x] Production-grade WebSocket APIs; OpenAPI; GraphQL seed; SSE / streaming RPC.
+- [x] Connection pooling, load-balancing, backpressure-aware network I/O.
 
-### 6. Data, SQL, And Serialization — 10%
+### 6. Data, SQL, and serialization — 10%
 
-- [x] JSON, CSV/XML seeds, binary/protobuf/gob helpers, SQLite/Postgres seeds.
-- [x] Local embedded KV example.
-- [x] SQL connection pooling.
-- [x] Transactions and prepared statements across drivers.
-- [x] Migrations.
-- [x] Typed SQL checker for table/column/param/nullability/return types.
-- [x] MySQL/MariaDB and Redis polish.
-- [x] MongoDB/Cassandra/ClickHouse/Elasticsearch-compatible packages.
-- [x] YAML, TOML, MessagePack, CBOR, Avro.
-- [x] Compile-time serialization/codegen without runtime reflection tax.
+- [x] JSON, CSV/XML seeds, binary/protobuf/gob, SQLite/Postgres seeds, local KV.
+- [x] Pooling, transactions, prepared statements, migrations, typed SQL checker.
+- [x] MySQL/MariaDB and Redis polish; wider store packages.
+- [x] YAML, TOML, MessagePack, CBOR, Avro; compile-time serialization seeds.
 
-### 7. Toolchain, Packages, And IDE — 10%
+### 7. Toolchain, packages, and IDE — 10%
 
-- [x] `check`, `build`, `run`, `fmt`, `test`, package manifest/lock seed.
-- [x] Incremental/object cache and parallel build jobs.
-- [x] Minimal LSP seed.
-- [x] VS Code extension scaffold/package manifest.
-- [x] VS Code syntax highlighting / TextMate grammar for `.mko`.
-- [x] VS Code language configuration: comments, brackets, auto-close pairs.
-- [x] VS Code tasks/commands for `mako check`, `mako build`, `mako run`, `mako test`.
-- [x] VS Code problem matcher for Mako diagnostics.
-- [x] VS Code debug adapter story: launch/run binary, attach native debugger where supported.
-- [x] VS Code extension command palette actions: format, test file/package, initialize project.
-- [x] Full VS Code LSP client integration and install/discovery wiring.
-- [x] Package registry protocol, private registries, offline builds.
-- [x] Dependency audit with vulnerability and license checks.
-- [x] Coverage, fuzzing, property tests, snapshots, mocks, fixtures.
-- [x] Benchmark runner with stable reporting.
-- [x] Documentation generator with runnable examples and search.
-- [x] LSP autocomplete, go-to-definition, references, rename, code actions.
-- [x] Compiler JSON diagnostics, symbol graph, AST/type metadata for AI tools.
-- [x] API breaking-change detector.
+- [x] `check` / `build` / `run` / `fmt` / `test` · package manifest/lock seed.
+- [x] Incremental/object cache · parallel jobs · minimal LSP seed.
+- [x] VS Code extension: grammar, tasks, problem matcher, debug launch, LSP client.
+- [x] Package registry protocol · audit · coverage/fuzz/property/snapshot · bench · `mako doc`.
+- [x] LSP autocomplete / go-to-def / references / rename / code actions.
+- [x] Compiler JSON diagnostics · symbol graph · API breaking-change detector.
 
-### 8. Observability And Debugging — 8%
+### 8. Observability and debugging — 8%
 
-- [x] Basic logs/slog helpers and clear runtime abort messages.
-- [x] Structured logging package with redaction controls.
-- [x] Metrics counters/gauges/histograms.
+- [x] Logs / slog + redaction; clear runtime abort messages.
+- [x] Metrics counters / gauges / histograms.
 - [x] Prometheus text exposition (`metrics_export_prom`).
-- [x] Wall-clock compile/run profile reports with stable JSON output.
+- [x] Wall-clock compile/run profile reports with stable JSON.
 - [x] Trace span-lite JSON seed (`trace_export_json` — not full OTel wire).
+- [x] Runtime introspection endpoint/hooks.
 - [ ] Distributed tracing and full OpenTelemetry export (OTLP).
 - [ ] CPU, memory, allocation, scheduler, and lock-contention profiling.
 - [ ] Stack traces with source locations.
 - [ ] Debugger integration: locals, breakpoints, async task inspection.
 - [ ] Crash reports and core dump support.
 - [ ] Profile-guided optimization and link-time optimization workflow.
-- [x] Runtime introspection endpoint/hooks.
 
-### 9. Installer, Distribution, And Portability — 10%
+### 9. Installer, distribution, and portability — 10%
 
-- [x] Native single binary via C/clang, install scripts, release docs.
-- [x] Cross-target flag and WASI preview1 seed.
-- [ ] Complete installer UX for macOS, Linux, and Windows.
-- [x] One-command install script with version selection and checksum verification.
-- [ ] Windows MSI / winget package.
-- [ ] macOS pkg or signed/notarized installer.
-- [ ] Linux deb/rpm packages and apt/yum repository metadata.
-- [ ] Homebrew formula publish and update automation.
-- [x] Installer installs compiler, runtime headers, stdlib, and VS Code extension scaffold.
-- [x] `mako doctor` to validate binary, clang/zig, runtime, stdlib, and VS Code scaffold.
-- [x] Uninstall scripts for Unix and Windows.
-- [x] `mako update --from <checkout> --prefix <prefix>` refresh flow.
-- [x] Release archives include runtime, stdlib, docs, VS Code scaffold, install/uninstall scripts, and checksums.
-- [x] Release archives include the full internal docs tree, book, howtos, and top-level release notes.
-- [x] Release archive install smoke: install from unpacked artifact and pass `mako doctor`.
-- [x] Release workflow smoke-tests packaged Unix/Windows installers before upload/publish.
-- [x] Static binary defaults where practical.
-- [x] CI target smoke for Windows GNU cross-build and static Linux musl output.
-- [ ] Reliable Linux/macOS/Windows/FreeBSD matrix.
-- [ ] ARM, x86-64, RISC-V target validation.
-- [ ] Console/platform-specific toolchain path where licensing permits.
-- [x] Minimal container generation.
-- [x] Serverless and edge deployment helpers.
-- [x] WASI preview2 and browser/edge WASM story.
+- [x] Native single binary · install scripts · release docs · `mako doctor` · update/uninstall.
+- [x] One-command install with version selection and checksum verification.
+- [x] Installer ships compiler, runtime headers, stdlib, VS Code scaffold.
+- [x] Release archives + checksums + install smoke + CI installer smoke.
+- [x] Cross-target flag · WASI preview1/2 seeds · static defaults · container/serverless helpers.
 - [x] Stable ABI, dynamic libraries, native plugins, WASM plugins.
+- [ ] Complete installer UX for macOS, Linux, and Windows.
+- [ ] Windows MSI / winget · macOS pkg/notarized · Linux deb/rpm + repo · Homebrew publish automation.
+- [ ] Reliable Linux/macOS/Windows/FreeBSD matrix · ARM/x86-64/RISC-V validation.
+- [ ] Console/platform-specific toolchain path where licensing permits.
 
-### 10. Domain Tracks And Advanced Systems — 10%
+### 10. Domain tracks and advanced systems — 10%
 
-- [x] Storage engine example, HTTP/H2/H3/gRPC/QUIC seeds.
-- [x] Security product polish: mTLS, CSR/self-signed/reload, PEM helpers, SCRAM-PLUS cbind, `path_file_size` (crypto core only — no SASL SM).
-- [ ] Telecom/realtime: SIP, RTP, SRTP, SIPREC, Diameter, WebRTC.
-- [x] Game-loop and fixed-timestep simulation primitives.
-- [x] Frame allocators, object pools, and allocation tracking for games.
-- [x] ECS seed: entities, components, systems, archetype/query basics.
-- [ ] Graphics/windowing seed: windows, input, render-command abstraction.
-- [ ] Graphics backend roadmap: Vulkan, Metal, Direct3D, OpenGL, WebGPU.
-- [ ] Shader pipeline: modules, typed uniforms, SPIR-V/HLSL/GLSL/WGSL/Metal validation.
-- [ ] Asset pipeline seed: asset packing, dependency tracking, incremental builds, hot reload.
-- [ ] Audio seed: no-allocation callback helpers, mixing graph primitives.
-- [ ] Physics/simulation seed: collision, rigid-body hooks, deterministic multithreaded stepping.
-- [ ] Multiplayer game networking: reliable UDP, snapshot replication, prediction/rollback.
-- [x] Deterministic simulation: fixed-point math, deterministic RNG, replay streams.
-- [x] Finite-state-machine helpers for session systems.
-- [x] Ring buffers, lock-free queues, scatter/gather I/O.
+- [x] Storage engine example · HTTP/H2/H3/gRPC/QUIC seeds.
+- [x] **Security product polish** — mTLS, CSR/self-signed/reload, PEM helpers, SCRAM-PLUS cbind, `path_file_size`.
+- [x] Crypto **core only** documented: digests, AEAD, KDF, SCRAM schedule + channel binding; **no** high-level SASL state machine.
+- [x] Game-loop / fixed-timestep · frame allocators · object pools · ECS seed.
+- [x] Deterministic simulation · FSM helpers · rings / SPSC / scatter-gather.
+- [x] GPU AI seed (OpenCL path) · local model store · GGUF F32/F16 · MHA · Q4_0/Q8_0 · BPE seed.
+- [ ] Telecom/realtime full product stacks (SIP/RTP/SRTP **crypto blocks Done**; SIPREC/Diameter/WebRTC residual).
+- [ ] Graphics/windowing · backends · shaders · assets · audio · physics.
+- [ ] Multiplayer game networking.
 - [ ] Database/storage primitives: pages, WAL, indexes, cache, transactions.
-- [ ] AI inference service helpers: model loading, batching, accelerator hooks.
+- [ ] AI inference service helpers; GPU AI depth (batched GEMM, RoPE, KV-cache, f16 kernels).
+- [ ] More quant formats · optional large-LLM FFI · tokenizer parity · embedding gather.
+- [ ] GPU backends: Metal-native, CUDA, Vulkan behind same API.
 - [ ] SIMD portable vector APIs.
-- [x] GPU AI seed: OpenCL multi-vendor + host; matmul/relu/bias/softmax f32 (`gpu_*`).
-- [x] Local model store: safetensors load, `.makomodel` save/load, `model_linear_f32` (HF layout).
-- [x] GGUF F32/F16 tensor load; GELU/SiLU/layernorm/attention; vocab tokenizer seed.
-- [x] Multi-head attention (`gpu_mha_f32`); GGUF Q4_0/Q8_0 dequant; BPE encode.
-- [ ] GPU AI depth: batched GEMM, RoPE, KV-cache, native f16 kernels.
-- [ ] More quant (Q4_K/Q5/Q6) + optional llama.cpp FFI for large LLMs.
-- [ ] SentencePiece / tiktoken parity; embedding table gather.
-- [ ] GPU backends: Metal-native (macOS), CUDA, Vulkan behind same API.
-- [ ] Interop beyond C: bridges to other languages.
-- [ ] Hot code reload with state-preserving editor iteration.
-- [ ] Compile-time execution and safe domain extensions.
+- [ ] Interop beyond C · hot code reload · compile-time execution / safe domain extensions.
 
-## Later (VISION)
+---
 
-- Optional GC · SIMD/GPU · deep comptime · browser DOM  
-- In-process H3 server · WASI sockets/preview2 · LSP depth  
+## Later (VISION — not scheduled)
 
-## External (user)
+- Deep comptime and browser DOM  
+- In-process H3 server productization beyond current seeds  
+- WASI sockets depth · full LSP “IDE product” polish beyond seed  
 
-1. Publish Homebrew / **homebrew-core**
+## External (user / ecosystem)
+
+1. Publish Homebrew / **homebrew-core**  
+2. Community package registry population  
+3. Production case studies (backend, infra, domain stacks built *in* Mako)  
+
+---
+
+## How to use this file
+
+1. **STATUS.md** is the adversarial Done bar for MVP claims.  
+2. **This file** orders *product intention* residuals after MVP.  
+3. When a checkbox flips, update the track % and overall ~% in the same edit.  
+4. Prefer small, suite-backed landings over roadmap thrash.
