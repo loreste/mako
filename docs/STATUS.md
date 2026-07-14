@@ -68,6 +68,7 @@ Last inventory: 2026-07-14 (**unique Mako surface** · pack/pull types · full m
 |-------|--------|
 | `cargo build --release` | PASS |
 | `map[K]Option[T]` / `map[K]Result[T,E]` | PASS — `map_option_result_test` (11 tests) |
+| Security residuals (at-rest, limits, cancel, mTLS, SCRAM cbind) | PASS — `security_residuals_test` |
 | Book samples `mako check` / `run` | PASS — `docs/book/examples/book_*.mko` |
 | `mako test examples/testing` | PASS — **165 passed**, 0 failed |
 | `if init; cond { }` + both-branches-return body | Done — `examples/testing/if_init_test.mko` |

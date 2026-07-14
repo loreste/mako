@@ -64,6 +64,28 @@ fn aes_gcm_encrypt(key: string, nonce: string, pt: string, aad: string) -> strin
 fn aes_gcm_decrypt(key: string, nonce: string, sealed: string, aad: string) -> string {
     return aes_gcm_open(key, nonce, sealed, aad)
 }
+
+// Encryption at rest — random-nonce AES-GCM (nonce||ct||tag). Key is 16 bytes.
+// Globals: seal_at_rest / open_at_rest / seal_file_at_rest / open_file_at_rest.
+fn seal(key: string, plaintext: string, aad: string) -> string {
+    return seal_at_rest(key, plaintext, aad)
+}
+fn open(key: string, sealed: string, aad: string) -> string {
+    return open_at_rest(key, sealed, aad)
+}
+
+// SCRAM channel binding (RFC 5802 gs2-header + c= attribute).
+// cbind_name "" or "n" → no binding; "tls-unique" → SCRAM-SHA-256-PLUS style.
+// Globals: scram_gs2_header / scram_cbind_b64 / scram_client_final_without_proof.
+fn scram_gs2(cbind_name: string) -> string {
+    return scram_gs2_header(cbind_name)
+}
+fn scram_cbind(gs2_header: string, cbind_data: string) -> string {
+    return scram_cbind_b64(gs2_header, cbind_data)
+}
+fn scram_client_final_bare(cbind_b64: string, nonce: string) -> string {
+    return scram_client_final_without_proof(cbind_b64, nonce)
+}
 fn chacha_encrypt(key: string, nonce: string, pt: string, aad: string) -> string {
     return chacha20_poly1305_seal(key, nonce, pt, aad)
 }

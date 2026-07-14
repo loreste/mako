@@ -340,6 +340,31 @@ static inline void *mako_tls_server_new_tls13(MakoString cert, MakoString key) {
     return (void *)ctx;
 }
 
+/* mTLS server: server cert+key plus client CA. Requires and verifies peer certs. */
+static inline void *mako_tls_server_new_mtls(MakoString cert, MakoString key, MakoString client_ca) {
+    SSL_CTX *ctx = (SSL_CTX *)mako_tls_server_new(cert, key);
+    if (!ctx) return NULL;
+    if (!client_ca.data || client_ca.len == 0) {
+        SSL_CTX_free(ctx);
+        return NULL;
+    }
+    char cabuf[1024];
+    if (client_ca.len >= sizeof(cabuf)) {
+        SSL_CTX_free(ctx);
+        return NULL;
+    }
+    memcpy(cabuf, client_ca.data, client_ca.len);
+    cabuf[client_ca.len] = 0;
+    if (SSL_CTX_load_verify_locations(ctx, cabuf, NULL) != 1) {
+        fprintf(stderr, "tls_server_new_mtls: failed to load client CA %s\n", cabuf);
+        ERR_print_errors_fp(stderr);
+        SSL_CTX_free(ctx);
+        return NULL;
+    }
+    SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER | SSL_VERIFY_FAIL_IF_NO_PEER_CERT, NULL);
+    return (void *)ctx;
+}
+
 /* Server TLS handshake on an already-accepted TCP fd (also used for STARTTLS-
  * style upgrades on the same socket). NULL on failure. */
 static inline void *mako_tls_accept(void *ctx, int64_t fd) {
@@ -561,6 +586,51 @@ static inline void *mako_tls_client_new(MakoString ca_pem_path) {
         }
     }
     return (void *)ctx;
+}
+
+/* mTLS client: verify peer with CA PEM and present client cert+key. */
+static inline void *mako_tls_client_new_mtls(MakoString ca_pem, MakoString client_cert,
+                                            MakoString client_key) {
+    SSL_CTX *ctx = (SSL_CTX *)mako_tls_client_new(ca_pem);
+    if (!ctx) return NULL;
+    if (!client_cert.data || client_cert.len == 0 || !client_key.data || client_key.len == 0) {
+        SSL_CTX_free(ctx);
+        return NULL;
+    }
+    char cbuf[1024], kbuf[1024];
+    if (client_cert.len >= sizeof(cbuf) || client_key.len >= sizeof(kbuf)) {
+        SSL_CTX_free(ctx);
+        return NULL;
+    }
+    memcpy(cbuf, client_cert.data, client_cert.len);
+    cbuf[client_cert.len] = 0;
+    memcpy(kbuf, client_key.data, client_key.len);
+    kbuf[client_key.len] = 0;
+    if (SSL_CTX_use_certificate_file(ctx, cbuf, SSL_FILETYPE_PEM) != 1
+        || SSL_CTX_use_PrivateKey_file(ctx, kbuf, SSL_FILETYPE_PEM) != 1
+        || !SSL_CTX_check_private_key(ctx)) {
+        fprintf(stderr, "tls_client_new_mtls: client cert/key failed\n");
+        ERR_print_errors_fp(stderr);
+        SSL_CTX_free(ctx);
+        return NULL;
+    }
+    return (void *)ctx;
+}
+
+/* tls-unique channel binding data: SSL_get_finished (or peer finished). */
+static inline MakoString mako_tls_unique(void *conn) {
+    if (!conn) return mako_str_from_cstr("");
+    MakoTlsConn *c = (MakoTlsConn *)conn;
+    if (!c->ssl) return mako_str_from_cstr("");
+    unsigned char buf[64];
+    size_t n = SSL_get_finished(c->ssl, buf, sizeof(buf));
+    if (n == 0) n = SSL_get_peer_finished(c->ssl, buf, sizeof(buf));
+    if (n == 0) return mako_str_from_cstr("");
+    char *d = (char *)malloc(n + 1);
+    if (!d) return mako_str_from_cstr("");
+    memcpy(d, buf, n);
+    d[n] = 0;
+    return (MakoString){d, n};
 }
 
 /* Client context with SSL_VERIFY_NONE — demos / self-signed only. */
@@ -3312,6 +3382,15 @@ static inline void *mako_tls_server_new(MakoString cert, MakoString key) {
 }
 static inline void *mako_tls_server_new_tls13(MakoString cert, MakoString key) {
     (void)cert; (void)key; return NULL;
+}
+static inline void *mako_tls_server_new_mtls(MakoString cert, MakoString key, MakoString client_ca) {
+    (void)cert; (void)key; (void)client_ca; return NULL;
+}
+static inline void *mako_tls_client_new_mtls(MakoString ca, MakoString cert, MakoString key) {
+    (void)ca; (void)cert; (void)key; return NULL;
+}
+static inline MakoString mako_tls_unique(void *conn) {
+    (void)conn; return mako_str_from_cstr("");
 }
 static inline void *mako_tls_accept(void *ctx, int64_t fd) {
     (void)ctx; (void)fd; return NULL;
