@@ -739,6 +739,13 @@ impl Codegen {
             Expr::Make { ty, .. } | Expr::Convert { ty, .. } => self.type_expr_c(ty),
             Expr::Call { callee, args } => {
                 if let Expr::Ident(fname) = callee.as_ref() {
+                    // Built-in bag constructors always produce bag C types.
+                    if fname == "Some" || fname == "None" {
+                        return "MakoOptionInt".into();
+                    }
+                    if fname == "Ok" || fname == "Err" {
+                        return "MakoResultInt".into();
+                    }
                     let mono = self.generic_mono_name_for_call(fname, args);
                     if let Some(rt) = self.fn_rets.get(&mono).or_else(|| self.fn_rets.get(fname)) {
                         return rt.clone();
@@ -1044,6 +1051,13 @@ impl Codegen {
                             self.result_ok_kinds.insert(bindings[0].clone(), rik);
                         }
                     }
+                    // Propagate struct / struct-chan names for deeper match arms.
+                    if next == "struct" || next == "chan_struct" || next == "slice_struct" {
+                        if let Some(sn) = self.option_some_structs.get(scrut).cloned() {
+                            self.option_some_structs
+                                .insert(bindings[0].clone(), sn);
+                        }
+                    }
                 } else {
                     self.option_some_kinds
                         .insert(bindings[0].clone(), "int".into());
@@ -1265,6 +1279,41 @@ impl Codegen {
                         .insert(temp.to_string(), cty);
                     other.to_string()
                 }
+                other if other.starts_with("opt_") => {
+                    // Nested Option: opt_opt_int / opt_opt_chan_int / opt_chan_int as payload.
+                    // Outer kind is "option"; chain lists remaining Some-kinds after each unbox.
+                    let chain = bag_opt_tag_to_chain(other);
+                    if !chain.is_empty() {
+                        self.option_chains.insert(temp.to_string(), chain);
+                    }
+                    // Struct leaf after nest: opt_opt_Point → last is Point
+                    if let Some(leaf) = other.rsplit('_').next() {
+                        if leaf != "int"
+                            && leaf != "string"
+                            && leaf != "float"
+                            && leaf != "bool"
+                            && !other.contains("chan_")
+                        {
+                            self.option_some_structs
+                                .insert(temp.to_string(), leaf.to_string());
+                        }
+                    }
+                    if other.contains("chan_") && !other.ends_with("chan_int")
+                        && !other.ends_with("chan_string")
+                        && !other.ends_with("chan_float")
+                        && !other.ends_with("chan_bool")
+                    {
+                        // opt_opt_chan_Point → Point
+                        if let Some(idx) = other.rfind("chan_") {
+                            let sn = &other[idx + 5..];
+                            if !sn.is_empty() {
+                                self.option_some_structs
+                                    .insert(temp.to_string(), sn.to_string());
+                            }
+                        }
+                    }
+                    "option".into()
+                }
                 other if other.starts_with("chan_") => {
                     // opt_chan_int / opt_chan_Point → match kind chan_int / chan_struct
                     if other == "chan_float" {
@@ -1309,6 +1358,18 @@ impl Codegen {
                     self.result_ok_map_ctys
                         .insert(temp.to_string(), cty);
                     other.to_string()
+                }
+                other if other.starts_with("opt_") => {
+                    // Result[Option[…],E]: Ok kind is nested option
+                    let chain = bag_opt_tag_to_chain(other);
+                    if !chain.is_empty() {
+                        self.result_option_chains.insert(temp.to_string(), chain.clone());
+                        if let Some(leaf) = chain.last() {
+                            self.result_option_inners
+                                .insert(temp.to_string(), leaf.clone());
+                        }
+                    }
+                    "option".into()
                 }
                 other if other.starts_with("chan_") => {
                     if other == "chan_float" {
@@ -3285,23 +3346,42 @@ impl Codegen {
             tags.push((tag, cty, zero, eq));
         }
         // 3-tuples with exactly one channel + two scalar slots (all positions).
-        // Finite grid: 3 positions × 4 channel kinds (core) × 4×4 scalars — keep core chans only.
-        let core_chans: &[(&str, &str)] = &[
-            ("chan_int", "MakoChan*"),
-            ("chan_string", "MakoChanStr*"),
-            ("chan_float", "MakoChan*"),
-            ("chan_bool", "MakoChan*"),
+        // Core scalar chans + named-struct chans (struct chans only pair with int/int to bound grid).
+        let mut core_chans: Vec<(String, String)> = vec![
+            ("chan_int".into(), "MakoChan*".into()),
+            ("chan_string".into(), "MakoChanStr*".into()),
+            ("chan_float".into(), "MakoChan*".into()),
+            ("chan_bool".into(), "MakoChan*".into()),
         ];
-        for (ctag, ccty) in core_chans {
-            for (a, ac) in bases {
-                for (b, bc) in bases {
+        for (ctag, ccty) in self.leaf_chan_value_specs() {
+            if ctag.starts_with("chan_")
+                && ctag != "chan_int"
+                && ctag != "chan_string"
+                && ctag != "chan_float"
+                && ctag != "chan_bool"
+            {
+                core_chans.push((ctag, ccty));
+            }
+        }
+        for (ctag, ccty) in &core_chans {
+            let is_struct_chan = !matches!(
+                ctag.as_str(),
+                "chan_int" | "chan_string" | "chan_float" | "chan_bool"
+            );
+            let scalar_pairs: Vec<(&str, &str)> = if is_struct_chan {
+                vec![("int", "int64_t")]
+            } else {
+                bases.iter().map(|(a, ac)| (*a, *ac)).collect()
+            };
+            for (a, ac) in &scalar_pairs {
+                for (b, bc) in &scalar_pairs {
                     // (chan, s, s)
                     {
                         let tag = format!("tup_{ctag}_{a}_{b}");
                         let cty = format!("MakoTup_{ctag}_{a}_{b}");
                         if self.note_tuple_typedef(
                             &cty,
-                            vec![(*ccty).into(), (*ac).into(), (*bc).into()],
+                            vec![ccty.clone(), (*ac).into(), (*bc).into()],
                         ) {
                             let _ = writeln!(
                                 self.out,
@@ -3323,7 +3403,7 @@ impl Codegen {
                         let cty = format!("MakoTup_{a}_{ctag}_{b}");
                         if self.note_tuple_typedef(
                             &cty,
-                            vec![(*ac).into(), (*ccty).into(), (*bc).into()],
+                            vec![(*ac).into(), ccty.clone(), (*bc).into()],
                         ) {
                             let _ = writeln!(
                                 self.out,
@@ -3345,7 +3425,7 @@ impl Codegen {
                         let cty = format!("MakoTup_{a}_{b}_{ctag}");
                         if self.note_tuple_typedef(
                             &cty,
-                            vec![(*ac).into(), (*bc).into(), (*ccty).into()],
+                            vec![(*ac).into(), (*bc).into(), ccty.clone()],
                         ) {
                             let _ = writeln!(
                                 self.out,
@@ -3532,6 +3612,7 @@ impl Codegen {
         }
         // Option[chan[T]] / Result[chan[T],E]
         // and Option[[]chan[T]] / Result[[]chan[T],E] (opt_arr_chan_* / res_arr_chan_*)
+        // and Option[Option[chan]] / Result[Option[chan]] (opt_opt_chan_* / res_opt_chan_*)
         for (ctag, _) in self.leaf_chan_value_specs() {
             bags.push((
                 format!("opt_{ctag}"),
@@ -3553,6 +3634,33 @@ impl Codegen {
             ));
             bags.push((
                 format!("res_arr_{ctag}"),
+                "MakoResultInt".into(),
+                "mako_err_int(mako_str_from_cstr(\"\"))".into(),
+                "mako_eq_result_int(av, bv)".into(),
+            ));
+            bags.push((
+                format!("opt_opt_{ctag}"),
+                "MakoOptionInt".into(),
+                "mako_none_int()".into(),
+                "mako_eq_option_int(av, bv)".into(),
+            ));
+            bags.push((
+                format!("res_opt_{ctag}"),
+                "MakoResultInt".into(),
+                "mako_err_int(mako_str_from_cstr(\"\"))".into(),
+                "mako_eq_result_int(av, bv)".into(),
+            ));
+        }
+        // Option[Option[scalar]] / Result[Option[scalar]] for nested optional map values
+        for leaf in ["int", "string", "float", "bool"] {
+            bags.push((
+                format!("opt_opt_{leaf}"),
+                "MakoOptionInt".into(),
+                "mako_none_int()".into(),
+                "mako_eq_option_int(av, bv)".into(),
+            ));
+            bags.push((
+                format!("res_opt_{leaf}"),
                 "MakoResultInt".into(),
                 "mako_err_int(mako_str_from_cstr(\"\"))".into(),
                 "mako_eq_result_int(av, bv)".into(),
@@ -8060,7 +8168,13 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                     if let Expr::Call { callee, args } = init {
                         if let Expr::Ident(fname) = callee.as_ref() {
                             if let Some(ok) = self.call_option_some_kind(fname, args) {
-                                self.option_some_kinds.insert(name.clone(), ok);
+                                // Prefer annotated nest kind when deeper than call inference.
+                                let keep_ann = self.option_some_kinds.get(name).map(|s| s.as_str())
+                                    == Some("option")
+                                    && ok != "option";
+                                if !keep_ann {
+                                    self.option_some_kinds.insert(name.clone(), ok);
+                                }
                             }
                             if fname == "Some" && args.len() == 1 {
                                 let arg_cty = self.peek_expr_c_ty(&args[0]);
@@ -8069,7 +8183,10 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                                 }
                             }
                             if let Some(ch) = self.call_option_chain(fname, args) {
-                                self.option_chains.insert(name.clone(), ch);
+                                // Keep annotation chains when call yields empty.
+                                if !ch.is_empty() || !self.option_chains.contains_key(name) {
+                                    self.option_chains.insert(name.clone(), ch);
+                                }
                             }
                             if let Some(sn) = self.call_option_some_struct(fname, args) {
                                 self.option_some_structs.insert(name.clone(), sn);
@@ -26000,6 +26117,53 @@ fn map_slice_val_c_ty(tag: &str) -> String {
     }
 }
 
+/// Convert an Option bag mono tag (without outer `opt_` already stripped once)
+/// into a nest chain of Some-kinds for match unboxing.
+/// Examples: `opt_int` → `["int"]`; `opt_chan_int` → `["chan_int"]`;
+/// `opt_opt_int` → `["option", "int"]`; `opt_opt_chan_float` → `["option", "chan_float"]`.
+fn bag_opt_tag_to_chain(tag: &str) -> Vec<String> {
+    let mut chain = Vec::new();
+    let mut s = tag;
+    while let Some(rest) = s.strip_prefix("opt_") {
+        if rest.starts_with("opt_") {
+            chain.push("option".into());
+            s = rest;
+            continue;
+        }
+        // Leaf payload tag
+        if rest.starts_with("chan_") {
+            if rest == "chan_float" {
+                chain.push("chan_float".into());
+            } else if rest == "chan_string" {
+                chain.push("chan_string".into());
+            } else if rest == "chan_int" || rest == "chan_bool" {
+                chain.push(rest.to_string());
+            } else {
+                // chan_Point → chan_struct (struct name stored separately)
+                chain.push("chan_struct".into());
+            }
+        } else if rest.starts_with("arr_") || rest.starts_with("map_") {
+            // Option[[]T] / Option[map] — treat as slice/map kinds
+            if rest.starts_with("arr_chan_") {
+                chain.push("slice_struct".into());
+            } else if rest.starts_with("arr_") {
+                chain.push("slice".into());
+            } else {
+                chain.push(rest.to_string()); // map_*
+            }
+        } else {
+            match rest {
+                "int" | "bool" => chain.push("int".into()),
+                "string" => chain.push("string".into()),
+                "float" => chain.push("float".into()),
+                _ => chain.push("struct".into()), // named struct leaf
+            }
+        }
+        break;
+    }
+    chain
+}
+
 /// Map value tag for `chan[T]`: `chan_int`, `chan_string`, `chan_float`, `chan_Point`, …
 fn chan_map_val_tag(elem: &TypeExpr, structs: &HashMap<String, StructInfo>) -> String {
     match elem {
@@ -26146,6 +26310,11 @@ fn bag_map_val_tag(
         TypeExpr::Generic(n, args) if n == "chan" && !args.is_empty() => {
             let ct = chan_map_val_tag(&args[0], structs);
             format!("{pref}_{ct}")
+        }
+        // Nested Option[…] payload → opt_opt_int / res_opt_chan_int / …
+        TypeExpr::Generic(n, args) if n == "Option" && !args.is_empty() => {
+            let inner = bag_map_val_tag(true, &args[0], structs, enums);
+            format!("{pref}_{inner}")
         }
         _ => format!("{pref}_int"),
     }

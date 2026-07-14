@@ -8938,6 +8938,38 @@ impl TypeChecker {
                                     | Type::Struct { .. }
                             )
                     )
+            ) || matches!(
+                // Option[Option[T]] / Option[Option[chan[T]]] — one extra nest layer
+                inner.as_ref(),
+                Type::Option(inner2)
+                    if matches!(
+                        inner2.as_ref(),
+                        Type::Int
+                            | Type::Int64
+                            | Type::Int32
+                            | Type::Int8
+                            | Type::Byte
+                            | Type::String
+                            | Type::Float
+                            | Type::Bool
+                            | Type::Struct { .. }
+                            | Type::Enum { .. }
+                    ) || matches!(
+                        inner2.as_ref(),
+                        Type::Chan(ch)
+                            if matches!(
+                                ch.as_ref(),
+                                Type::Int
+                                    | Type::Int64
+                                    | Type::Int32
+                                    | Type::Int8
+                                    | Type::Byte
+                                    | Type::Bool
+                                    | Type::Float
+                                    | Type::String
+                                    | Type::Struct { .. }
+                            )
+                    )
             ) =>
             {
                 Ok(())
@@ -9004,6 +9036,38 @@ impl TypeChecker {
                             | Type::Float
                             | Type::String
                             | Type::Struct { .. }
+                    )
+            ) || matches!(
+                // Result[Option[T],E] / Result[Option[chan[T]],E]
+                inner.as_ref(),
+                Type::Option(inner2)
+                    if matches!(
+                        inner2.as_ref(),
+                        Type::Int
+                            | Type::Int64
+                            | Type::Int32
+                            | Type::Int8
+                            | Type::Byte
+                            | Type::String
+                            | Type::Float
+                            | Type::Bool
+                            | Type::Struct { .. }
+                            | Type::Enum { .. }
+                    ) || matches!(
+                        inner2.as_ref(),
+                        Type::Chan(ch)
+                            if matches!(
+                                ch.as_ref(),
+                                Type::Int
+                                    | Type::Int64
+                                    | Type::Int32
+                                    | Type::Int8
+                                    | Type::Byte
+                                    | Type::Bool
+                                    | Type::Float
+                                    | Type::String
+                                    | Type::Struct { .. }
+                            )
                     )
             ) =>
             {

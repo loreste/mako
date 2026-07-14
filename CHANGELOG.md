@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Language — nested `Option[Option[…]]` map values + struct-chan 3-tuples
+
+- **`map[K]Option[Option[T]]` / `Option[Option[chan[T]]]`** and
+  **`map[K]Result[Option[chan[T]],E]`** — tags `opt_opt_*` / `res_opt_*`.
+- **Fix:** `peek_expr_c_ty` treats `Some`/`None`/`Ok`/`Err` as bag C types so
+  nested Option metadata is not clobbered (bare `Option[Option[int]]` match).
+- **Struct-channel 3-tuples** — `map[K](chan[Point], int, int)` (and mid/last).
+- Tests: `map_nested_option_chan_test`.
+
 ### Language — 3-tuples with channel fields as map values
 
 - **`map[K](chan[T], U, V)`** and channel in the other two slots —
