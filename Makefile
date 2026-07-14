@@ -14,7 +14,7 @@ MAKO_BIN := $(TARGET_DIR)/release/mako
 
 all: release
 
-# Product version is MAKO_VERSION in src/main.rs (e.g. 0.0.1.2); bake git hash when available.
+# Product version is Cargo.toml (CARGO_PKG_VERSION); bake git hash when available.
 MAKO_GIT_HASH ?= $(shell git rev-parse --short HEAD 2>/dev/null)
 
 release:

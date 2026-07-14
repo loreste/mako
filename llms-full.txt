@@ -2,7 +2,7 @@
 #
 # https://mako-lang.com
 # https://github.com/loreste/mako
-# Version: 0.0.1.2
+# Version: 0.1.2
 #
 # Compile path: .mko -> C -> object (cached) -> native binary (clang).
 # No GC. Memory is hold/share/arena. Prefer the surface below; dual spellings
@@ -44,7 +44,7 @@ curl -fsSL https://github.com/loreste/mako/releases/latest/download/install-rele
 make install    # installs to ~/.local/bin/mako + ~/.local/share/mako/runtime
 
 # Verify:
-mako --version    # prints "mako version mako0.0.1.2 <os>/<arch>"
+mako --version    # prints "mako version mako0.1.2 <os>/<arch>"
 
 ================================================================================
 3. BUILD COMMANDS

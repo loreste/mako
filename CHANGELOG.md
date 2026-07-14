@@ -4,9 +4,9 @@
 
 (none yet)
 
-## 0.0.1.2 — 2026-07-14
+## 0.1.2 — 2026-07-14
 
-**mako0.0.1.2** (product version; Cargo package semver `0.0.1`).
+**mako0.1.2** (`CARGO_PKG_VERSION`).
 
 ### Codegen — demand-driven map monomorphs
 

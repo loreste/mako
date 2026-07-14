@@ -1,7 +1,6 @@
 [package]
 name = "mako"
-# Cargo requires X.Y.Z semver. Product/release string is 0.0.1.2 (see MAKO_VERSION in main.rs).
-version = "0.0.1"
+version = "0.1.2"
 edition = "2021"
 description = "Mako — systems/backend language compiler (Python-clear, Go-fast, type-safe)"
 license = "MIT"
