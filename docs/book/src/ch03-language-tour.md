@@ -254,9 +254,9 @@ fn main() {
 ## Maps
 
 Maps (`map[K]V`) are hash tables. **Keys:** `int`, `string`, `float`, or named
-structs. **Values:** `int`, `string`, `float`, or named structs.
-`map[Struct]Struct` is not supported yet. Pack types work as keys or values
-(`map[int]eng.Table`, `map[eng.Table]int`, `map[float]eng.Table`).
+structs. **Values:** `int`, `string`, `float`, or named structs — any
+combination, including `map[Point]Label`. Pack types work as keys or values
+(`map[int]eng.Table`, `map[eng.Table]int`, `map[eng.Table]Point`).
 
 Float keys treat `+0.0` / `-0.0` as one key; all NaNs share one key.
 Struct keys use field-wise equality and a stable field hash.
@@ -307,12 +307,15 @@ fn main() {
 
     // Struct values / struct keys
     struct Point { x: int, y: int }
+    struct Label { text: string, id: int }
     let mut pts = make(map[int]Point)
     pts[1] = Point { x: 1, y: 2 }
     let mut pf = make(map[float]Point)
     pf[1.5] = Point { x: 3, y: 4 }
     let mut by_pt = make(map[Point]int)
     by_pt[Point { x: 1, y: 2 }] = 10
+    let mut by_ss = make(map[Point]Label)
+    by_ss[Point { x: 0, y: 0 }] = Label { text: "o", id: 0 }
 
     // Helpers (all map kinds)
     let ks = maps_keys(m)

@@ -319,8 +319,7 @@ Out-of-bounds access aborts at runtime.
 Hash maps with open addressing. Supported key types: `string`, `int`,
 **`float`**, and **named structs** (including pack-qualified types such as
 `eng.Table`). Supported value types: `int`, `string`, `float`, and **named
-structs**. **`map[Struct]Struct` is not supported yet** — use a scalar value
-type with a struct key, or a scalar key with a struct value.
+structs** — any key×value combination, including **`map[Struct]Struct`**.
 
 Float keys: `+0.0` and `-0.0` are the same key; all NaN values share one key.
 Struct keys use field-wise equality and a stable hash over fields (string
@@ -340,9 +339,11 @@ let mut by_f = make(map[float]Point)   // float key + struct value
 let mut by_pt = make(map[Point]int)    // struct keys
 let mut by_pt_s = make(map[Point]string)
 let mut by_pt_f = make(map[Point]float)
+let mut by_ss = make(map[Point]Label)  // struct key + struct value
 let mut pack_m = make(map[int]eng.Table) // after pull
 let mut pack_f = make(map[float]eng.Table)
 let mut pack_k = make(map[eng.Table]int) // pack type as key
+let mut pack_ss = make(map[eng.Table]Point)
 ```
 
 Map operations:

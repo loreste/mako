@@ -19,7 +19,7 @@ Short facts:
 - Modules: `pack name`, `pull "path"`, always qualify: `pkg.fn`, `eng.Table`,
   `eng.Point { x: 1 }`, `eng.Red` / `eng.Color.Green(n)`
 - Maps: keys `int|string|float|Struct`; values `int|string|float|Struct`
-  (not `map[Struct]Struct` yet); `maps_*` on all kinds incl. struct keys
+  (any combo incl. `map[Struct]Struct`); `maps_*` on all kinds
 - Struct/enum `==` `!=` structural (strings by content)
 - Channels: `make(chan[T], n)` / `chan_open[T](n)` for int/bool/float/string/struct
 - Parallel work: `fan(xs, fn(x) { x * x })`

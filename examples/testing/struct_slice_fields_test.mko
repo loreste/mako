@@ -1,0 +1,35 @@
+// Structs with slice/map fields must still emit compiling eq/hash helpers.
+// (map[Heavy] is rare; identity hash is enough — must not cast arrays to int64.)
+
+struct Heavy {
+    n: int
+    xs: []int
+    m: map[int]int
+}
+
+fn TestHeavySliceFieldsCompile() {
+    let mut xs = make([]int, 0, 4)
+    xs = append(xs, 9)
+    let mut m = make(map[int]int)
+    m[1] = 2
+    let h = Heavy { n: 1, xs: xs, m: m }
+    assert_eq(h.n, 1)
+    assert_eq(len(h.xs), 1)
+    assert_eq(h.xs[0], 9)
+    assert_eq(h.m[1], 2)
+}
+
+fn TestHeavyMultiReturn() {
+    let h, n = make_pair()
+    assert_eq(n, 3)
+    assert_eq(h.n, 3)
+    assert_eq(len(h.xs), 1)
+}
+
+fn make_pair() -> (Heavy, int) {
+    let mut xs = make([]int, 0, 2)
+    xs = append(xs, 1)
+    let m = make(map[int]int)
+    let h = Heavy { n: 3, xs: xs, m: m }
+    return (h, h.n)
+}
