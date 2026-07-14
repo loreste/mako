@@ -34,8 +34,8 @@ set -euo pipefail
 
 HOST="${HOST:-root@13.140.147.175}"
 REMOTE_MAKO="${REMOTE_MAKO:-/opt/mako}"
-REMOTE_LEBA="${REMOTE_LEBA:-/opt/leba}"
-CONF="${CONF:-/opt/leba/mako-lang.conf}"
+REMOTE_EDGE="${REMOTE_EDGE:-/opt/leba}"
+CONF="${CONF:-${REMOTE_EDGE}/mako-lang.conf}"
 
 echo "==> deploy via $HOST"
 
@@ -60,7 +60,7 @@ fi
 "\$MAKO" --version
 
 echo "==> build edge proxy"
-cd "$REMOTE_LEBA"
+cd "$REMOTE_EDGE"
 export MAKO_RUNTIME="$REMOTE_MAKO/runtime"
 # Point Makefile at host mako if present
 if [ -x "\$MAKO" ]; then
