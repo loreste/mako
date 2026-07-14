@@ -162,8 +162,8 @@ Tests: `for_forms_test.mko`, `range_test.mko`, map `*_test.mko` range cases.
 ### Format strings with `fmt_sprintf*` (not a builder wall)
 
 For logs, JSON fragments, and config dumps, use the fmt package surface instead
-of ten `builder_write` calls. Full `f"…{x}"` interpolation is **not** in yet;
-`fmt_*` is the production path.
+of ten `builder_write` calls. Prefer `f"…{x}"` for simple assembly, or
+`fmt_sprintf*` when you need format verbs (`%x`, precision).
 
 ```mko
 log_info_event(
