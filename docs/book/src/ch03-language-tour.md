@@ -253,10 +253,13 @@ fn main() {
 
 ## Maps
 
-Maps (`map[K]V`) are hash tables. **Keys:** `int`, `string`, `float`, or named
-structs. **Values:** `int`, `string`, `float`, or named structs — any
-combination, including `map[Point]Label`. Pack types work as keys or values
-(`map[int]eng.Table`, `map[eng.Table]int`, `map[eng.Table]Point`).
+Maps (`map[K]V`) are hash tables. **Keys:** `int`, `string`, `float`, **`bool`**,
+named **structs**, or named **enums**. **Values:** the same set, **slices**
+`[]T`, or **nested maps** `map[K2]V` (depth 2) — any combination, including
+`map[Point]Label`, `map[Color]int`, `map[string][]int`, `map[Point][]int`,
+`map[string]map[string]int`, set-style `map[string]bool`, and `map[bool]int`.
+Pack types work as keys or values. `[]bool`, `[]Enum`, and nested `[][]T`
+slices are supported (make/append/index).
 
 Float keys treat `+0.0` / `-0.0` as one key; all NaNs share one key.
 Struct keys use field-wise equality and a stable field hash.

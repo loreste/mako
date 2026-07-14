@@ -8576,13 +8576,53 @@ impl TypeChecker {
             | (Type::String, Type::Float)
             | (Type::Float, Type::Int)
             | (Type::Float, Type::String)
-            | (Type::Float, Type::Float) => Ok(()),
-            // Named user structs as values and/or keys (any combo of scalar|struct).
-            (Type::Int | Type::String | Type::Float, Type::Struct { .. }) => Ok(()),
-            (Type::Struct { .. }, Type::Int | Type::String | Type::Float) => Ok(()),
+            | (Type::Float, Type::Float)
+            // bool values: map[int|string|float|bool|Struct]bool
+            | (Type::Int, Type::Bool)
+            | (Type::String, Type::Bool)
+            | (Type::Float, Type::Bool)
+            | (Type::Bool, Type::Bool)
+            // bool keys: map[bool]int|string|float|bool|Struct
+            | (Type::Bool, Type::Int)
+            | (Type::Bool, Type::String)
+            | (Type::Bool, Type::Float) => Ok(()),
+            // Named user structs / enums as values and/or keys (scalar or each other).
+            (Type::Int | Type::String | Type::Float | Type::Bool, Type::Struct { .. }) => Ok(()),
+            (Type::Int | Type::String | Type::Float | Type::Bool, Type::Enum { .. }) => Ok(()),
+            (Type::Struct { .. }, Type::Int | Type::String | Type::Float | Type::Bool) => Ok(()),
+            (Type::Enum { .. }, Type::Int | Type::String | Type::Float | Type::Bool) => Ok(()),
             (Type::Struct { .. }, Type::Struct { .. }) => Ok(()),
+            (Type::Struct { .. }, Type::Enum { .. }) => Ok(()),
+            (Type::Enum { .. }, Type::Struct { .. }) => Ok(()),
+            (Type::Enum { .. }, Type::Enum { .. }) => Ok(()),
+            // Slice values: map[K][]T for supported keys and element types.
+            (
+                Type::Int | Type::String | Type::Float | Type::Bool | Type::Struct { .. } | Type::Enum { .. },
+                Type::Array(inner),
+            ) if matches!(
+                inner.as_ref(),
+                Type::Int
+                    | Type::Int64
+                    | Type::Int32
+                    | Type::Int8
+                    | Type::Byte
+                    | Type::String
+                    | Type::Float
+                    | Type::Bool
+                    | Type::Struct { .. }
+                    | Type::Enum { .. }
+            ) =>
+            {
+                Ok(())
+            }
+            // Nested maps: map[K]map[K2]V (depth 2 only — inner value must not be a map).
+            (
+                Type::Int | Type::String | Type::Float | Type::Bool | Type::Struct { .. } | Type::Enum { .. },
+                Type::Map(_, inner_v),
+            ) if !matches!(inner_v.as_ref(), Type::Map(_, _)) => Ok(()),
             _ => Err(TypeError::new(format!(
-                "unsupported map[{}]{} — keys: int|string|float|Struct; values: int|string|float|Struct",
+                "unsupported map[{}]{} — keys: int|string|float|bool|Struct|Enum; \
+                 values: int|string|float|bool|Struct|Enum|[]T|map[K2]V (depth ≤ 2)",
                 k.display(),
                 v.display()
             ))),
@@ -11095,7 +11135,13 @@ impl TypeChecker {
                                 Type::Map(k, _) if matches!(k.as_ref(), Type::Float) => {
                                     Ok(Type::Array(Box::new(Type::Float)))
                                 }
+                                Type::Map(k, _) if matches!(k.as_ref(), Type::Bool) => {
+                                    Ok(Type::Array(Box::new(Type::Bool)))
+                                }
                                 Type::Map(k, _) if matches!(k.as_ref(), Type::Struct { .. }) => {
+                                    Ok(Type::Array(k))
+                                }
+                                Type::Map(k, _) if matches!(k.as_ref(), Type::Enum { .. }) => {
                                     Ok(Type::Array(k))
                                 }
                                 other => Err(TypeError::new(format!(
@@ -11989,7 +12035,10 @@ impl TypeChecker {
                             | Type::Byte
                             | Type::String
                             | Type::Float
-                            | Type::Struct { .. } => Ok(Type::Array(inner)),
+                            | Type::Bool
+                            | Type::Struct { .. }
+                            | Type::Enum { .. }
+                            | Type::Array(_) => Ok(Type::Array(inner)),
                             other => Err(TypeError::new(format!(
                                 "make([]{}) not supported yet",
                                 other.display()
