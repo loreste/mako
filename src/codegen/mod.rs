@@ -23937,46 +23937,44 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                 (cty, tmp)
             }
             Expr::StringInterp(parts) => {
-                // Lower to successive mako_str_concat / format helpers.
-                let mut acc: Option<String> = None;
+                // Single growable buffer: O(n) writes, one owned string via finish.
+                // Avoids N-1 temporary concatenations (each a full malloc+copy).
+                let b = self.fresh("sb");
+                let out = self.fresh("is");
+                self.line(&format!("MakoStrBuilder *{b} = mako_str_builder_new();"));
                 for p in parts {
-                    let piece = match p {
+                    match p {
                         crate::ast::InterpPart::Lit(s) => {
                             let escaped = escape_c(s);
-                            format!("mako_str_from_cstr(\"{escaped}\")")
+                            self.line(&format!(
+                                "mako_str_builder_write_cstr({b}, \"{escaped}\");"
+                            ));
                         }
                         crate::ast::InterpPart::Expr(e) => {
                             let (ty, v) = self.emit_expr(e);
                             if ty == "MakoString" {
-                                v
+                                self.line(&format!("mako_str_builder_write({b}, {v});"));
                             } else if ty == "int64_t" || ty == "bool" {
-                                format!("mako_int_to_string((int64_t)({v}))")
+                                self.line(&format!(
+                                    "mako_str_builder_write_i64({b}, (int64_t)({v}));"
+                                ));
                             } else if ty == "double" {
                                 let tmp = self.fresh("fs");
                                 self.line(&format!(
                                     "MakoString {tmp} = mako_format_float({v}, 6);"
                                 ));
-                                tmp
+                                self.line(&format!("mako_str_builder_write({b}, {tmp});"));
+                                self.line(&format!("mako_str_free({tmp});"));
                             } else {
-                                format!("mako_int_to_string((int64_t)({v}))")
+                                self.line(&format!(
+                                    "mako_str_builder_write_i64({b}, (int64_t)({v}));"
+                                ));
                             }
                         }
-                    };
-                    acc = Some(match acc {
-                        None => piece,
-                        Some(prev) => {
-                            let tmp = self.fresh("ic");
-                            self.line(&format!(
-                                "MakoString {tmp} = mako_str_concat({prev}, {piece});"
-                            ));
-                            tmp
-                        }
-                    });
+                    }
                 }
-                (
-                    "MakoString".into(),
-                    acc.unwrap_or_else(|| "mako_str_from_cstr(\"\")".into()),
-                )
+                self.line(&format!("MakoString {out} = mako_str_builder_finish({b});"));
+                ("MakoString".into(), out)
             }
             Expr::StructLitPos { name, values } => {
                 // Resolve positional values to declared field names (in order).
@@ -25602,8 +25600,9 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                                     }
                                 });
                             let boxn = self.fresh("sbox");
+                            // Freelist-backed box for POD ≤512B (reused across send/recv).
                             self.line(&format!(
-                                "{cname} *{boxn} = ({cname}*)malloc(sizeof({cname}));"
+                                "{cname} *{boxn} = ({cname}*)mako_box_alloc(sizeof({cname}));"
                             ));
                             self.line(&format!("*{boxn} = {v};"));
                             self.line(&format!(
@@ -25662,7 +25661,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             // Zero-init fallback if closed empty
                             self.line(&format!("{cname} {tmp};"));
                             self.line(&format!(
-                                "if ({ptr}) {{ {tmp} = *{ptr}; free({ptr}); }} else {{ memset(&{tmp}, 0, sizeof({tmp})); }}"
+                                "if ({ptr}) {{ {tmp} = *{ptr}; mako_box_free({ptr}, sizeof({cname})); }} else {{ memset(&{tmp}, 0, sizeof({tmp})); }}"
                             ));
                             (cname, tmp)
                         } else {

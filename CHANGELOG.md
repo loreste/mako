@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Runtime / codegen — speed & memory
+
+- **`f"…"`** builds with a single `MakoStrBuilder` (`write_cstr` / `write_i64` /
+  `finish` steals buffer) instead of N× `str_concat` temps.
+- **`mako_str_builder_finish` / `write_cstr` / `write_i64` / `free`** for tight
+  string assembly; builder default cap 64.
+- **`mako_box_alloc` / `mako_box_free` freelist** (16…512B bins) for
+  `chan[Struct|Enum|tuple]` send boxes — reuses POD heap slots under load.
+- Docs: [SPEED.md](docs/SPEED.md) hot-path efficiency table.
+
 ### Language — LEBA ergonomics wave 2
 
 - **First-class functions (non-capturing):** `fn` values as params/locals;

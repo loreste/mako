@@ -32,6 +32,18 @@ Security tools that cost (bounds-always, overflow trap, sanitizers) stay **opt-i
 or debug-default so release hot paths stay Rust-competitive. Safe-by-construction
 features (NLL, structured crews, parameterized DB) are free at steady state.
 
+### Hot-path efficiency (current practice)
+
+| Surface | Cost model |
+|---------|------------|
+| Non-capturing `fn` values / lambdas | Static C helpers; `void*` + cast — **no env heap** |
+| `f"…{x}"` | **One** `MakoStrBuilder` + `write_cstr` / `write_i64` + `finish` (steal buffer) — not N concat temps |
+| `fmt_sprintf*` | Prefer when you need format verbs; fewer pieces than a long f-string |
+| `chan[Struct]` / `chan[tuple]` / `chan[Enum]` | Ptr ring; payload boxes via **size freelist** (≤512B) to cut malloc churn |
+| Demand-driven map monomorphs | Emit only used `(K,V)` shapes — O(used), not N² |
+
+Capturing closures (env boxes) stay residual until they can pay for themselves.
+
 ---
 
 ## Concurrency (first-class)

@@ -1462,16 +1462,18 @@ typedef struct {
 
 static inline MakoStrBuilder *mako_str_builder_new(void) {
     MakoStrBuilder *b = (MakoStrBuilder *)malloc(sizeof(MakoStrBuilder));
-    b->data = (char *)malloc(16);
+    if (MAKO_UNLIKELY(!b)) mako_abort("str_builder: out of memory");
+    b->data = (char *)malloc(64); /* start larger — f-strings / logs rarely tiny */
+    if (MAKO_UNLIKELY(!b->data)) mako_abort("str_builder: out of memory");
     b->data[0] = 0;
     b->len = 0;
-    b->cap = 16;
+    b->cap = 64;
     return b;
 }
 
 static inline void mako_str_builder_grow(MakoStrBuilder *b, size_t need) {
     if (need <= b->cap) return;
-    size_t ncap = b->cap ? b->cap * 2 : 16;
+    size_t ncap = b->cap ? b->cap * 2 : 64;
     while (ncap < need) ncap *= 2;
     char *nd = (char *)realloc(b->data, ncap);
     if (!nd) mako_abort("str_builder: out of memory");
@@ -1486,6 +1488,27 @@ static inline void mako_str_builder_write(MakoStrBuilder *b, MakoString s) {
     b->data[b->len] = 0;
 }
 
+/* Zero-copy write of a C string literal / buffer (no intermediate MakoString). */
+static inline void mako_str_builder_write_cstr(MakoStrBuilder *b, const char *s) {
+    if (!s) return;
+    size_t n = strlen(s);
+    mako_str_builder_grow(b, b->len + n + 1);
+    if (n) memcpy(b->data + b->len, s, n);
+    b->len += n;
+    b->data[b->len] = 0;
+}
+
+/* Format int into the builder without a temporary heap string. */
+static inline void mako_str_builder_write_i64(MakoStrBuilder *b, int64_t n) {
+    char buf[32];
+    int written = snprintf(buf, sizeof(buf), "%lld", (long long)n);
+    if (written < 0) written = 0;
+    mako_str_builder_grow(b, b->len + (size_t)written + 1);
+    memcpy(b->data + b->len, buf, (size_t)written);
+    b->len += (size_t)written;
+    b->data[b->len] = 0;
+}
+
 static inline void mako_str_builder_write_byte(MakoStrBuilder *b, int64_t v) {
     if (v < 0 || v > 255) mako_abort("str_builder write_byte: out of range 0..255");
     mako_str_builder_grow(b, b->len + 2);
@@ -1493,16 +1516,84 @@ static inline void mako_str_builder_write_byte(MakoStrBuilder *b, int64_t v) {
     b->data[b->len] = 0;
 }
 
+/* Copy-out (legacy): keeps builder reusable. Prefer finish on hot paths. */
 static inline MakoString mako_str_builder_string(MakoStrBuilder *b) {
     char *d = (char *)malloc(b->len + 1);
+    if (MAKO_UNLIKELY(!d)) mako_abort("str_builder: out of memory");
     if (b->len) memcpy(d, b->data, b->len);
     d[b->len] = 0;
     MakoString out = {d, b->len};
     return out;
 }
 
+/* Steal buffer as MakoString and free the builder shell — one heap string, no copy. */
+static inline MakoString mako_str_builder_finish(MakoStrBuilder *b) {
+    if (MAKO_UNLIKELY(!b)) return mako_str_empty;
+    /* Ensure NUL-terminated owned buffer. */
+    mako_str_builder_grow(b, b->len + 1);
+    b->data[b->len] = 0;
+    MakoString out = {b->data, b->len};
+    free(b);
+    return out;
+}
+
+static inline void mako_str_builder_free(MakoStrBuilder *b) {
+    if (!b) return;
+    free(b->data);
+    free(b);
+}
+
 static inline int64_t mako_str_builder_len(MakoStrBuilder *b) {
     return (int64_t)b->len;
+}
+
+/* ---- Small-block freelist for chan[Struct]/tuple] heap boxes (speed/memory) ---- */
+enum { MAKO_BOX_BINS = 6 };
+/* bin i covers size up to 16 << i  (16, 32, 64, 128, 256, 512) */
+static void *mako_box_freelist[MAKO_BOX_BINS];
+static pthread_mutex_t mako_box_mu = PTHREAD_MUTEX_INITIALIZER;
+
+static inline int mako_box_bin(size_t sz) {
+    size_t lim = 16;
+    for (int i = 0; i < MAKO_BOX_BINS; i++) {
+        if (sz <= lim) return i;
+        lim <<= 1;
+    }
+    return -1;
+}
+
+static inline size_t mako_box_bin_size(int bin) {
+    return (size_t)16 << bin;
+}
+
+/* Allocate a heap box for POD channel payloads; freelist when size ≤ 512. */
+static inline void *mako_box_alloc(size_t sz) {
+    int bin = mako_box_bin(sz);
+    if (bin >= 0) {
+        pthread_mutex_lock(&mako_box_mu);
+        void *p = mako_box_freelist[bin];
+        if (p) {
+            mako_box_freelist[bin] = *(void **)p;
+            pthread_mutex_unlock(&mako_box_mu);
+            return p;
+        }
+        pthread_mutex_unlock(&mako_box_mu);
+        return malloc(mako_box_bin_size(bin));
+    }
+    return malloc(sz);
+}
+
+static inline void mako_box_free(void *p, size_t sz) {
+    if (!p) return;
+    int bin = mako_box_bin(sz);
+    if (bin >= 0) {
+        pthread_mutex_lock(&mako_box_mu);
+        *(void **)p = mako_box_freelist[bin];
+        mako_box_freelist[bin] = p;
+        pthread_mutex_unlock(&mako_box_mu);
+        return;
+    }
+    free(p);
 }
 
 /* ---- Maps: open-addressing hash tables (map[string]int / map[int]int) ---- */
