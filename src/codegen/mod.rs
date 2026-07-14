@@ -2998,6 +2998,93 @@ impl Codegen {
                 }
             }
         }
+        // Homogeneous 4-tuples (int,int,int,int) etc. — finite grid, no full 4^4 blowup.
+        for (a, ac) in bases {
+            let tag = format!("tup_{a}_{a}_{a}_{a}");
+            let cty = format!("MakoTup_{a}_{a}_{a}_{a}");
+            if self.note_tuple_typedef(
+                &cty,
+                vec![(*ac).into(), (*ac).into(), (*ac).into(), (*ac).into()],
+            ) {
+                let _ = writeln!(
+                    self.out,
+                    "typedef struct {{\n    {ac} _0;\n    {ac} _1;\n    {ac} _2;\n    {ac} _3;\n}} {cty};"
+                );
+            }
+            let zero = format!("(({cty}){{0}})");
+            let eq = format!(
+                "({} && {} && {} && {})",
+                tuple_field_eq(ac, "av._0", "bv._0"),
+                tuple_field_eq(ac, "av._1", "bv._1"),
+                tuple_field_eq(ac, "av._2", "bv._2"),
+                tuple_field_eq(ac, "av._3", "bv._3"),
+            );
+            tags.push((tag, cty, zero, eq));
+        }
+        // Named struct/enum × scalar 2-tuples (and reverse).
+        let mut named: Vec<(String, String)> = self
+            .structs
+            .iter()
+            .map(|(n, s)| (n.clone(), s.c_name.clone()))
+            .collect();
+        for (n, info) in &self.enums {
+            named.push((n.clone(), info.c_name.clone()));
+        }
+        named.sort_by(|a, b| a.0.cmp(&b.0));
+        for (_n, nc) in &named {
+            // Tag fragment = C mono name (Point / MakoEnum_Color) to match Expr::Tuple.
+            let tn = nc.as_str();
+            for (b, bc) in bases {
+                // (Named, scalar)
+                let tag = format!("tup_{tn}_{b}");
+                let cty = format!("MakoTup_{tn}_{b}");
+                if self.note_tuple_typedef(&cty, vec![nc.clone(), (*bc).into()]) {
+                    let _ = writeln!(
+                        self.out,
+                        "typedef struct {{\n    {nc} _0;\n    {bc} _1;\n}} {cty};"
+                    );
+                }
+                let zero = format!("(({cty}){{0}})");
+                let eq = format!(
+                    "({} && {})",
+                    tuple_field_eq(nc, "av._0", "bv._0"),
+                    tuple_field_eq(bc, "av._1", "bv._1"),
+                );
+                tags.push((tag, cty, zero, eq));
+                // (scalar, Named)
+                let tag = format!("tup_{b}_{tn}");
+                let cty = format!("MakoTup_{b}_{tn}");
+                if self.note_tuple_typedef(&cty, vec![(*bc).into(), nc.clone()]) {
+                    let _ = writeln!(
+                        self.out,
+                        "typedef struct {{\n    {bc} _0;\n    {nc} _1;\n}} {cty};"
+                    );
+                }
+                let zero = format!("(({cty}){{0}})");
+                let eq = format!(
+                    "({} && {})",
+                    tuple_field_eq(bc, "av._0", "bv._0"),
+                    tuple_field_eq(nc, "av._1", "bv._1"),
+                );
+                tags.push((tag, cty, zero, eq));
+            }
+            // (Named, Named) same type only — common pair shape without N² blowup
+            let tag = format!("tup_{tn}_{tn}");
+            let cty = format!("MakoTup_{tn}_{tn}");
+            if self.note_tuple_typedef(&cty, vec![nc.clone(), nc.clone()]) {
+                let _ = writeln!(
+                    self.out,
+                    "typedef struct {{\n    {nc} _0;\n    {nc} _1;\n}} {cty};"
+                );
+            }
+            let zero = format!("(({cty}){{0}})");
+            let eq = format!(
+                "({} && {})",
+                tuple_field_eq(nc, "av._0", "bv._0"),
+                tuple_field_eq(nc, "av._1", "bv._1"),
+            );
+            tags.push((tag, cty, zero, eq));
+        }
         // []tup for maps_values
         for (tag, vc, _, _) in &tags {
             self.emit_nested_arr_helpers(tag, vc);
@@ -6628,7 +6715,7 @@ impl Codegen {
                 }
                 // map[K](T, U[, …]) tuple values
                 (TypeExpr::Named(kk), TypeExpr::Tuple(elems)) if (2..=4).contains(&elems.len()) => {
-                    let tag = map_tuple_val_tag(elems);
+                    let tag = map_tuple_val_tag(elems, &self.structs, &self.enums);
                     match kk.as_str() {
                         "int" => format!("MakoMapI_{tag}*"),
                         "string" => format!("MakoMapS_{tag}*"),
@@ -21982,7 +22069,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         (TypeExpr::Named(kk), TypeExpr::Tuple(elems))
                             if (2..=4).contains(&elems.len()) =>
                         {
-                            let tag = map_tuple_val_tag(elems);
+                            let tag = map_tuple_val_tag(elems, &self.structs, &self.enums);
                             let (mt, fnp) = match kk.as_str() {
                                 "int" => (format!("MakoMapI_{tag}"), format!("mako_map_i_{tag}")),
                                 "string" => (format!("MakoMapS_{tag}"), format!("mako_map_s_{tag}")),
@@ -25258,7 +25345,12 @@ fn map_slice_val_c_ty(tag: &str) -> String {
 }
 
 /// Map value tag for a tuple type expr: `(int, string)` → `tup_int_string`.
-fn map_tuple_val_tag(elems: &[TypeExpr]) -> String {
+/// Enums use `MakoEnum_X` so the tag matches `c_type_mono_tag` of the C type.
+fn map_tuple_val_tag(
+    elems: &[TypeExpr],
+    structs: &HashMap<String, StructInfo>,
+    enums: &HashMap<String, EnumInfo>,
+) -> String {
     let parts: Vec<String> = elems
         .iter()
         .map(|e| match e {
@@ -25273,6 +25365,11 @@ fn map_tuple_val_tag(elems: &[TypeExpr]) -> String {
             TypeExpr::Named(n) if n == "string" => "string".into(),
             TypeExpr::Named(n) if n == "float" || n == "float64" => "float".into(),
             TypeExpr::Named(n) if n == "bool" => "bool".into(),
+            TypeExpr::Named(n) if enums.contains_key(n) => format!("MakoEnum_{n}"),
+            TypeExpr::Named(n) if structs.contains_key(n) => structs
+                .get(n)
+                .map(|s| s.c_name.clone())
+                .unwrap_or_else(|| n.clone()),
             TypeExpr::Named(n) => n.clone(),
             _ => "int".into(),
         })
@@ -25286,8 +25383,11 @@ fn tuple_field_eq(c_ty: &str, a: &str, b: &str) -> String {
         format!("mako_str_eq({a}, {b})")
     } else if c_ty == "double" {
         format!("mako_f64_key_eq({a}, {b})")
-    } else {
+    } else if c_ty == "int64_t" || c_ty == "bool" {
         format!("({a} == {b})")
+    } else {
+        // Struct / enum monomorphs: mako_eq_Point / mako_eq_MakoEnum_Color
+        format!("mako_eq_{c_ty}({a}, {b})")
     }
 }
 

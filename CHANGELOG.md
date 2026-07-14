@@ -9,6 +9,14 @@
   `llms-full.txt` aligned to the real `crypto.scram_*` core API (no fictional
   `scram_client_first` / SASL framing helpers).
 
+### Language — map tuples with Struct/Enum + homogeneous 4-tuples
+
+- **`(Struct|Enum, scalar)` / reverse / `(T,T)`** map values; tags use C mono
+  names (`MakoEnum_Color`) so they match `Expr::Tuple` emission.
+- **Homogeneous 4-tuples** — `map[K](int,int,int,int)` (and string/float/bool);
+  no full 4^4 monomorph grid.
+- Tests: `map_tuple_struct_test`.
+
 ### Language — `map[K]Option[map[…]]` / `map[K]Result[map[…],E]`
 
 - **Bags of maps as map values** — e.g. `map[string]Option[map[string]int]`,

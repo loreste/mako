@@ -88,7 +88,7 @@ fn main() {
 | Result bag | `map[int]Result[string, string]` |
 | Slice of bags | `map[string][]Option[int]`, `map[int][]Result[string,string]` |
 | Bag of slices | `map[string]Option[[]int]`, `map[int]Result[[]int,string]` |
-| Tuple values | `map[string](int, int)`, `map[int](string, float)` |
+| Tuple values | `map[string](int, int)`, `map[string](Point, int)`, `map[K](int,int,int,int)` |
 | Bag of maps | `map[string]Option[map[string]int]`, `map[int]Result[map[string]int,string]` |
 
 ```mko
@@ -317,7 +317,8 @@ Pre-size with a hint: `make(map[string]int, 1024)`.
 | `examples/testing/option_result_slice_test.mko` | `[]Option[T]` / `[]Result[T,E]` |
 | `examples/testing/map_option_slice_test.mko` | `map[K][]Option[T]` / `map[K][]Result[T,E]` |
 | `examples/testing/map_option_of_slice_test.mko` | `map[K]Option[[]T]` / `map[K]Result[[]T,E]` |
-| `examples/testing/map_tuple_test.mko` | `map[K](T,U)` tuple values |
+| `examples/testing/map_tuple_test.mko` | `map[K](T,U)` scalar tuples |
+| `examples/testing/map_tuple_struct_test.mko` | Struct/Enum tuples + 4-tuples |
 | `examples/testing/map_option_of_map_test.mko` | `map[K]Option[map]` / `map[K]Result[map]` |
 | `examples/testing/nested_slice_test.mko` | `[][]T` |
 
