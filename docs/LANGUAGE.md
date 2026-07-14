@@ -82,7 +82,9 @@ Optional dual-form inventory: [GO_SYNTAX_CHECKLIST.md](GO_SYNTAX_CHECKLIST.md).
 
 `=` is assignment only. Comparisons: `==` `!=` `<` `>` `<=` `>=`.  
 Logical: `&&` `||` `!` (and `and` / `or` / `not`).  
-Bitwise: `&` `|` `^` `&^` `<<` `>>`, unary `^`.
+Bitwise: `&` `|` `^` `&^` `<<` `>>`, unary `^`.  
+`==` / `!=` work on strings (by content), named structs (field-wise), and
+enums (tag + payload).
 
 ## Packs & pulls
 
@@ -100,6 +102,14 @@ pull (
     "fmt"
 )
 // dual: import / package still parse
+
+// Types are pack-qualified too (same surface as calls):
+//   fn use(t: eng.Table) -> eng.Table
+//   let t = eng.Table { n: 0 }
+//   match t { eng.Table { n } => … }
+// Enums: eng.Red / eng.Green(n) / eng.Color.Red / eng.Color.Green(n)
+// Multi-return of pack structs: let t, n = eng.grow_pair(t0, 1)
+// Maps: map[int|string|float] × int|string|float|Struct (any combo)
 ```
 
 ## Concurrency & parallelism (first-class)

@@ -579,9 +579,12 @@ Default is the number of CPU cores.
 The compiler and runtime pass **178 tests** covering:
 
 - `on Type { fn method(self) -> T { ... } }` method blocks
-- `pack` / `pull` / `export` module system
+- `pack` / `pull` / `export` module system (pack-qualified types, lits, enums)
 - User generics with monomorphization (`fn name[T](x: T) -> T`)
-- Tuples `(int, string)` and multi-return `let a, b = f()`
+- Tuples `(int, string)` and multi-return `let a, b = f()` (incl. structs)
+- Maps: keys `int|string|float`, values `int|string|float|Struct`; `maps_*`
+- `make(chan[T], n)` / `chan_open[T]` for int/bool/float/string/struct
+- Structural `==` / `!=` on structs and enums
 - `switch` / `case` / `default` alongside `match`
 - `fan(xs, fn(x) { x * x })` data parallelism
 - `go f()` fire-and-forget onto enclosing crew

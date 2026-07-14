@@ -1,5 +1,46 @@
 # Changelog
 
+## Unreleased
+
+### Language — pack-qualified types & multi-return of structs
+
+- **Pack-qualified types** — annotations and return types accept `eng.Table`
+  (parsed as the import-mangled name `eng__Table`). Same surface as
+  `eng.table_new()` calls.
+- **Pack-qualified struct lits & patterns** — `eng.Point { x: 1, y: 2 }`,
+  positional `eng.Point { 1, 2 }`, and `match p { eng.Point { x, y } => … }`.
+- **Pack-qualified enums** — construct/match `eng.Red`, `eng.Green(n)`,
+  `eng.Color.Red`, `eng.Color.Green(n)` (pack alias must not be a value binding).
+- **Maps of structs** — `map[int]Point` / `map[string]Point` (and pack types
+  e.g. `map[int]eng.Table`): get/set, `len`/`has`/`delete`, comma-ok, `range`.
+  Codegen monomorphizes like `[]Struct` (`MakoMapI_*` / `MakoMapS_*`).
+- **Struct map keys** — `map[Point]int` / `map[Point]string` / `map[Point]float`
+  (and pack keys e.g. `map[eng.Table]int`): monomorphized `MakoMapK_T_i|s|f*`,
+  field-wise `mako_eq_T` / `mako_hash_T`. `map[Struct]Struct` not yet.
+- **`make(chan[T], n)`** — same element set as `chan_open[T](n)`: int family,
+  string, float, bool, **named structs** (incl. pack types).
+- **`maps_*` overloads** — `maps_keys` / `values` / `clear` / `clone` / `equal` /
+  `copy` work for SI/II/SS, **float-value maps**, struct-value maps, and
+  **struct-key** maps.
+- **`map[int]float` / `map[string]float`** — full get/set/len/has/delete,
+  comma-ok, range, `maps_*` (`MakoMapIF*` / `MakoMapSF*`).
+- **Float map keys** — `map[float]int`, `map[float]string`, `map[float]float`
+  (`MakoMapFI*` / `FS*` / `FF*`). `+0`/`-0` unify; all NaNs share one key.
+- **`map[float]Struct`** — monomorphized `MakoMapF_T*` (incl. pack types).
+- **Structural struct equality** for `maps_equal` on struct maps (string
+  fields compare by content, not pointer identity).
+- **`==` / `!=` on structs and enums** — uses generated `mako_eq_Type` /
+  `mako_eq_MakoEnum_*` (field-wise; string content; enum tag + payload).
+- **Multi-return of structs** — `let a, b = f()` and tuple match no longer
+  force non-primitive tuple elements to `int64_t`. Element C types are taken
+  from the registered `MakoTup_*` field list, so local structs and pack-
+  prefixed structs (`eng__Table`) unpack correctly.
+- Tests: `pack_types_test`, `tuple_struct_test`, `map_struct_test`,
+  `map_struct_key_test`, `map_float_test` (float values + float keys),
+  `chan_make_struct_test`, `struct_eq_test`; lib `examples/pack_types_lib.mko`.
+- Docs: LANGUAGE_SPEC, GUIDE §4c maps / §9 channels, BUILTINS `maps_*` +
+  `chan_open`, howto packages, book ch03/ch10, llms.txt / llms-full.txt.
+
 ## 0.1.1 — 2026-07-13 (HTTP/2 production + free safety + CI)
 
 Patch release for production edge stability and CI green. `mako version` reports

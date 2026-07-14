@@ -1,0 +1,32 @@
+// Pack used by pack_types_test — exported struct, enum, multi-return.
+pack eng
+
+export struct Table {
+    n: int
+}
+
+export enum Color {
+    Red,
+    Green(int),
+    Blue(string)
+}
+
+export fn table_new() -> Table {
+    return Table { n: 0 }
+}
+
+export fn table_grow(t: Table, by: int) -> Table {
+    let mut tt = t
+    tt.n = tt.n + by
+    return tt
+}
+
+export fn table_grow_pair(t: Table, by: int) -> (Table, int) {
+    let mut tt = t
+    tt.n = tt.n + by
+    return (tt, by)
+}
+
+export fn color_sample() -> Color {
+    return Green(3)
+}

@@ -559,11 +559,16 @@ print_int(builder_len(b))
 
 ## 4c. Maps
 
-Hash maps (open addressing in the runtime). Supported today:
-`map[string]int`, `map[int]int`, `map[string]string`.
+Hash maps (open addressing). **Keys:** `int`, `string`, `float`, or **named
+structs**. **Values:** `int`, `string`, `float`, or **named structs**.
+`map[Struct]Struct` is not supported yet. Pack types work as keys or values:
+`map[int]eng.Table`, `map[eng.Table]int`, `map[float]eng.Table`.
+
+Float keys: `+0.0` / `-0.0` are the same key; all NaNs share one key.
+Struct keys: field-wise equality + stable field hash (strings by content).
 
 ```mko
-// examples/map.mko
+// map.mko · map_struct_test.mko · map_float_test.mko · map_struct_key_test.mko
 let mut m = make(map[string]int)
 m["a"] = 1
 print_int(m["a"])          // 1
@@ -586,6 +591,28 @@ mi[10] = 100
 
 let mut ms = make(map[string]string)
 ms["x"] = "hello"
+
+let mut mf = make(map[int]float)
+mf[1] = 2.5
+
+let mut fi = make(map[float]int)
+fi[1.5] = 3
+
+struct Point { x: int, y: int }
+let mut pts = make(map[int]Point)
+pts[1] = Point { x: 1, y: 2 }
+let mut pf = make(map[float]Point)
+pf[1.5] = Point { x: 3, y: 4 }
+let mut by_pt = make(map[Point]int)
+by_pt[Point { x: 1, y: 2 }] = 10
+
+// Helpers (all map kinds):
+let ks = maps_keys(m)
+let vs = maps_values(m)
+let c = maps_clone(m)
+assert_eq(maps_equal(m, c), 1)
+maps_copy(c, m)
+maps_clear(c)
 ```
 
 | Op | Notes |
@@ -597,8 +624,11 @@ ms["x"] = "hello"
 | `delete(m, k)` | remove |
 | `len(m)` | entry count |
 | `for k, v in range m` | iteration; order unspecified |
+| `maps_keys` / `maps_values` | `[]K` / `[]V` |
+| `maps_clone` / `maps_equal` / `maps_copy` / `maps_clear` | bulk helpers |
 
-Wrong key type rejected at check (`examples/bad/map_key_type.mko`). Tests: `map_test`.
+Wrong key/value combo rejected at check (`examples/bad/map_key_type.mko`).
+Tests: `map_test`, `map_struct_test`, `map_float_test`, `map_struct_key_test`.
 
 ---
 
@@ -997,7 +1027,7 @@ crew t {
 | `job.join_timeout(ms)` | Timed join → `Result[R, string]`: `Ok(value)` or `Err("timeout")` |
 | `crew.drain(ms)` | Cancel + join with timeout |
 | `fan(collection, mapper)` | Data-parallel map: `[]int` / `[]float` / `[]string` / `[]Struct` |
-| channels + `select` | Message-passing (`chan_open[T]` for int/bool/float/string/struct) |
+| channels + `select` | Message-passing: `make(chan[T], n)` / `chan_open[T](n)` for int/bool/float/string/**struct** (incl. pack types) |
 | `actor` / `receive` | Long-lived concurrent entities |
 
 ```mko
@@ -1023,14 +1053,21 @@ Tests: `examples/testing/crew_fan_test.mko`, `job_join_typed_test.mko`,
 
 ## 9. Channels and `select`
 
+`make(chan[T], n)` and `chan_open[T](n)` accept the same element types: int
+family, bool, float, string, and **named structs** (including pack types).
+
 ```mko
 let ch = chan_new(4)              // int
+let cs = make(chan[string], 2)
 let fs = chan_open[float](2)      // float (bitcast ring)
-let ps = chan_open[Point](2)      // struct (heap box)
+let ps = make(chan[Point], 2)     // same as chan_open[Point](2)
+// let pe = make(chan[eng.Table], 1)  // pack type after pull
 let _ = ch.send(1)
 let v = ch.recv()
 ch.close()
 ```
+
+Tests: `chan_struct_test`, `chan_make_struct_test`, `chan_float_test`.
 
 ```mko
 // examples/select_default.mko — timeout + default + up to 16 arms

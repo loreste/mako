@@ -157,12 +157,17 @@ Packs: `std/fmt`, `std/print`. Tests: `fmt_print_test.mko`. Demo: `examples/fmt_
 
 | Function | Signature | Description |
 |----------|-----------|-------------|
-| `maps_keys` | `maps_keys(m: map[string]int) -> []string` | Return all keys from a map |
-| `maps_values` | `maps_values(m: map[string]int) -> []int` | Return all values from a map |
-| `maps_clear` | `maps_clear(m: map[string]int) -> void` | Remove all entries from a map |
-| `maps_clone` | `maps_clone(m: map[string]int) -> map[string]int` | Create a shallow copy of a map |
-| `maps_equal` | `maps_equal(a: map[string]int, b: map[string]int) -> int` | Check if two maps have identical entries |
-| `maps_copy` | `maps_copy(dst: map[string]int, src: map[string]int) -> void` | Copy all entries from src into dst |
+| `maps_keys` | `maps_keys(m: map[K]V) -> []K` | Keys (`K` is `string`, `int`, `float`, or named struct) |
+| `maps_values` | `maps_values(m: map[K]V) -> []V` | Values (`int`, `string`, `float`, or struct) |
+| `maps_clear` | `maps_clear(m: map[K]V) -> void` | Remove all entries |
+| `maps_clone` | `maps_clone(m: map[K]V) -> map[K]V` | Shallow copy |
+| `maps_equal` | `maps_equal(a: map[K]V, b: map[K]V) -> int` | Same keys/values (structs: structural / string content) |
+| `maps_copy` | `maps_copy(dst: map[K]V, src: map[K]V) -> void` | Copy entries into `dst` |
+
+Supported map kinds: `map[int|string|float|Struct] × int|string|float|Struct`
+except **`map[Struct]Struct`** (not yet; use scalar values with struct keys)
+(named/pack structs). Float keys: `+0`/`-0` unify; all NaNs share one key.
+Tests: `map_test`, `map_struct_test`, `map_float_test`.
 
 ---
 
@@ -757,11 +762,14 @@ from the protocol strings yourself. See `examples/testing/scram_test.mko`.
 | int family / bool | `MakoChan` | Default int ring |
 | float | `MakoChan` | Bitcast via `mako_f64_to_bits` / `mako_bits_to_f64` |
 | string | `MakoChanStr` | Owned strings; `chan_str_select2` / select syntax |
-| named struct | `MakoChanPtr` | Heap-box on send; free on recv; **select takes the message** (do not `recv` again in the arm) |
+| named struct (incl. pack types) | `MakoChanPtr` | Heap-box on send; free on recv; **select takes the message** (do not `recv` again in the arm) |
+
+`make(chan[T], n)` accepts the same `T` set as `chan_open[T](n)`.
 
 `select timeout … { }` uses int, string, or **struct/ptr** select when all arms match.
 Helpers: `chan_select_value` / `chan_select_value_str` / `mako_chan_select_value_ptr`.
-Tests: `chan_struct_test`, `chan_float_test`, `wave8_queue_test`, `wave9_queue_test`.
+Tests: `chan_struct_test`, `chan_make_struct_test`, `chan_float_test`,
+`wave8_queue_test`, `wave9_queue_test`.
 
 ---
 

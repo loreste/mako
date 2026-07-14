@@ -1,6 +1,6 @@
 # Mako status (adversarial / verified)
 
-Last inventory: 2026-07-11 (**unique Mako surface** · pack/pull · pain map · suite **130+** · **The Mako Book**).
+Last inventory: 2026-07-14 (**unique Mako surface** · pack/pull types · maps float/struct · suite **130+** · **The Mako Book**).
 
 **Book:** [The Mako Book](book/) · **Guide:** [GUIDE.md](GUIDE.md) · **Identity:** [IDENTITY.md](IDENTITY.md) · **Pain points:** [PAIN_POINTS.md](PAIN_POINTS.md) · **Build:** [BUILD.md](BUILD.md) · **Stdlib:** [STDLIB.md](STDLIB.md) · **Roadmap:** [ROADMAP.md](ROADMAP.md) · **Changelog:** [../CHANGELOG.md](../CHANGELOG.md).
 
@@ -149,6 +149,13 @@ Last inventory: 2026-07-11 (**unique Mako surface** · pack/pull · pain map · 
 | C keyword / stdlib-name identifiers (`switch`, `read`, `time`, …) emit valid C | Fixed — codegen mangles reserved & libc names |
 | `mako fmt` doubled `export` on structs | Fixed |
 | The Mako Book + docs accuracy | Done |
+| Pack-qualified types (`eng.Table` annot / lit / pattern) + multi-return of structs | Done — `pack_types_test` · `tuple_struct_test` |
+| Pack-qualified enums (`eng.Red` / `eng.Color.Green(n)` construct + match) | Done — `pack_types_test` |
+| Maps of structs (`map[int]T` / `map[string]T`, pack types) | Done — `map_struct_test` |
+| `make(chan[Struct])` + `maps_*` on II/SS/struct maps | Done — `chan_make_struct_test` · `map_struct_test` |
+| `map[int]float` / `map[string]float` + structural maps_equal | Done — `map_float_test` · `map_struct_test` |
+| Struct/enum `==` `!=` (structural) | Done — `struct_eq_test` |
+| Float map keys (`map[float]int|string|float|Struct`) | Done — `map_float_test` · `map_struct_test` |
 
 ---
 

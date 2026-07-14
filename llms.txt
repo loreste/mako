@@ -14,9 +14,14 @@ parse; do not prefer them. See docs/IDENTITY.md if you care about the style bar.
 Short facts:
 
 - Generics: `fn id[T](x: T) -> T` (monomorphized)
-- Tuples / multi-return: `let a, b = f()`
+- Tuples / multi-return: `let a, b = f()` (incl. struct elements)
 - Methods: `on Type { fn m(self) -> T { ... } }`
-- Modules: `pack name`, `pull "path"`, `pull "path" as name`, `export`
+- Modules: `pack name`, `pull "path"`, always qualify: `pkg.fn`, `eng.Table`,
+  `eng.Point { x: 1 }`, `eng.Red` / `eng.Color.Green(n)`
+- Maps: keys `int|string|float|Struct`; values `int|string|float|Struct`
+  (not `map[Struct]Struct` yet); `maps_*` on all kinds incl. struct keys
+- Struct/enum `==` `!=` structural (strings by content)
+- Channels: `make(chan[T], n)` / `chan_open[T](n)` for int/bool/float/string/struct
 - Parallel work: `fan(xs, fn(x) { x * x })`
 - Concurrency: `crew` / `kick` / `join`, channels, `select`, `actor`
 - `+= -= *= /= ++ --`, `a, b = b, a`, `let x = if c { a } else { b }`
@@ -103,13 +108,14 @@ fn main() {
 ## Core
 
 - Types: int, int8, int32, int64, uint64, float, bool, string, byte, void
-- Composite: []T, map[K]V, chan[T], Option[T], Result[T, E], (T, U)
+- Composite: []T, map[K]V (see maps above), chan[T], Option[T], Result[T, E], (T, U)
 - Decl: fn, struct, enum, actor, interface, const, export
 - Control: if/else, if-expr, if-init, while, for/in/range, switch, match, defer
 - Ownership: hold, share, arena
 - Concurrency: crew, kick, join, go, fan, channels, select
 - Errors: Result, Ok/Err, Option, ?, match
-- Units: pack, pull, export (always qualify: pkg.fn)
+- Units: pack, pull, export (always qualify: pkg.fn / pkg.Type)
+- Equality: `==`/`!=` on strings, structs, enums (structural)
 - Tests: `fn TestFoo() { assert_eq(1, 1) }` in `*_test.mko`
 
 ## Commands

@@ -1,0 +1,117 @@
+// map[Struct]int|string|float — named structs (and pack types) as keys.
+
+pull "../pack_types_lib.mko"
+
+struct Point {
+    x: int
+    y: int
+}
+
+struct Label {
+    text: string
+    id: int
+}
+
+fn TestMapStructKeyInt() {
+    let mut m = make(map[Point]int)
+    m[Point { x: 1, y: 2 }] = 10
+    m[Point { x: 3, y: 4 }] = 20
+    assert_eq(m[Point { x: 1, y: 2 }], 10)
+    assert_eq(m[Point { x: 3, y: 4 }], 20)
+    assert_eq(len(m), 2)
+    assert(has(m, Point { x: 1, y: 2 }))
+    assert(not has(m, Point { x: 9, y: 9 }))
+    // update existing key
+    m[Point { x: 1, y: 2 }] = 11
+    assert_eq(m[Point { x: 1, y: 2 }], 11)
+    assert_eq(len(m), 2)
+    delete(m, Point { x: 1, y: 2 })
+    assert(not has(m, Point { x: 1, y: 2 }))
+    assert_eq(len(m), 1)
+    // missing → zero
+    assert_eq(m[Point { x: 0, y: 0 }], 0)
+}
+
+fn TestMapStructKeyString() {
+    let mut m = make(map[Point]string)
+    m[Point { x: 1, y: 0 }] = "origin-ish"
+    m[Point { x: 2, y: 2 }] = "diag"
+    assert_eq_str(m[Point { x: 1, y: 0 }], "origin-ish")
+    assert_eq_str(m[Point { x: 2, y: 2 }], "diag")
+    assert(has(m, Point { x: 1, y: 0 }))
+    let s, ok = m[Point { x: 2, y: 2 }]
+    assert(ok)
+    assert_eq_str(s, "diag")
+    let _, miss = m[Point { x: 0, y: 0 }]
+    assert(not miss)
+}
+
+fn TestMapStructKeyFloat() {
+    let mut m = make(map[Point]float)
+    m[Point { x: 1, y: 1 }] = 1.5
+    m[Point { x: 2, y: 2 }] = 2.5
+    assert(m[Point { x: 1, y: 1 }] > 1.4)
+    assert(m[Point { x: 1, y: 1 }] < 1.6)
+    assert(has(m, Point { x: 2, y: 2 }))
+    assert_eq(len(m), 2)
+}
+
+fn TestMapStructKeyRange() {
+    let mut m = make(map[Point]int)
+    m[Point { x: 1, y: 0 }] = 1
+    m[Point { x: 0, y: 1 }] = 2
+    let mut sum = 0
+    let mut ksum = 0
+    for k, v in range m {
+        sum = sum + v
+        ksum = ksum + k.x + k.y
+    }
+    assert_eq(sum, 3)
+    assert_eq(ksum, 2)
+}
+
+fn TestMapStructKeyHelpers() {
+    let mut m = make(map[Point]int)
+    m[Point { x: 1, y: 2 }] = 10
+    m[Point { x: 3, y: 4 }] = 20
+    let ks = maps_keys(m)
+    assert_eq(len(ks), 2)
+    let vs = maps_values(m)
+    assert_eq(len(vs), 2)
+    let mut vsum = 0
+    for _, v in range vs {
+        vsum = vsum + v
+    }
+    assert_eq(vsum, 30)
+    let c = maps_clone(m)
+    assert_eq(c[Point { x: 1, y: 2 }], 10)
+    assert_eq(maps_equal(m, c), 1)
+    maps_clear(c)
+    assert_eq(len(c), 0)
+    maps_copy(c, m)
+    assert_eq(len(c), 2)
+    assert_eq(c[Point { x: 3, y: 4 }], 20)
+}
+
+fn TestMapStructKeyWithStringField() {
+    // Struct keys with string fields: equality by content, hash by bytes.
+    let mut m = make(map[Label]int)
+    m[Label { text: "a", id: 1 }] = 100
+    m[Label { text: "b", id: 2 }] = 200
+    assert_eq(m[Label { text: "a", id: 1 }], 100)
+    assert(has(m, Label { text: "a", id: 1 }))
+    assert(not has(m, Label { text: "a", id: 99 }))
+    assert_eq(maps_equal(m, maps_clone(m)), 1)
+}
+
+fn TestMapPackStructKey() {
+    let mut m = make(map[eng.Table]int)
+    m[eng.Table { n: 7 }] = 42
+    assert_eq(m[eng.Table { n: 7 }], 42)
+    assert(has(m, eng.Table { n: 7 }))
+    assert(not has(m, eng.Table { n: 0 }))
+    m[eng.Table { n: 8 }] = 99
+    assert_eq(len(m), 2)
+    let c = maps_clone(m)
+    assert_eq(maps_equal(m, c), 1)
+}

@@ -1113,6 +1113,30 @@ static inline uint64_t mako_hash_i64(int64_t k) {
     return x;
 }
 
+/* Float map keys: +0/-0 same key; all NaNs share one key. */
+static inline double mako_f64_key_norm(double x) {
+    if (x == 0.0) return 0.0; /* +0 and -0 */
+    return x;
+}
+static inline uint64_t mako_f64_bits(double x) {
+    uint64_t u;
+    memcpy(&u, &x, sizeof u);
+    return u;
+}
+static inline uint64_t mako_hash_f64(double x) {
+    x = mako_f64_key_norm(x);
+    if (x != x) {
+        /* Canonical quiet NaN bits as key */
+        return mako_hash_i64((int64_t)0x7ff8000000000000ULL);
+    }
+    return mako_hash_i64((int64_t)mako_f64_bits(x));
+}
+static inline bool mako_f64_key_eq(double a, double b) {
+    if (a == 0.0 && b == 0.0) return true;
+    if (a != a && b != b) return true; /* both NaN */
+    return a == b;
+}
+
 static inline MakoString mako_str_clone(MakoString s) {
     if (MAKO_UNLIKELY(s.len == 0)) {
         return mako_str_empty;
@@ -1383,6 +1407,641 @@ static inline bool mako_map_ii_has(MakoMapII *m, int64_t key) {
 static inline MakoMapII *mako_map_ii_make(int64_t hint) {
     MakoMapII *m = (MakoMapII *)malloc(sizeof(MakoMapII));
     *m = mako_map_ii_new(hint > 0 ? (size_t)hint : 0);
+    return m;
+}
+
+/* map[int]float */
+typedef struct {
+    uint8_t *state;
+    int64_t *keys;
+    double *vals;
+    size_t cap;
+    size_t len;
+} MakoMapIF;
+
+static inline MakoMapIF mako_map_if_new(size_t hint) {
+    size_t cap = 8;
+    size_t need = hint ? (hint * 4 / 3 + 1) : 8;
+    while (cap < need) cap *= 2;
+    MakoMapIF m;
+    m.state = (uint8_t *)calloc(cap, 1);
+    m.keys = (int64_t *)malloc(cap * sizeof(int64_t));
+    m.vals = (double *)malloc(cap * sizeof(double));
+    if (!m.keys || !m.vals) {
+        fprintf(stderr, "mako: OOM in map_if_new\n");
+        abort();
+    }
+    m.cap = cap;
+    m.len = 0;
+    return m;
+}
+
+static inline void mako_map_if_rehash(MakoMapIF *m, size_t ncap);
+
+static inline void mako_map_if_set(MakoMapIF *m, int64_t key, double val) {
+    if (MAKO_UNLIKELY((m->len + 1) * 4 >= m->cap * 3)) {
+        mako_map_if_rehash(m, m->cap * 2);
+    }
+    uint64_t h = mako_hash_i64(key);
+    size_t mask = m->cap - 1;
+    size_t i = (size_t)(h & mask);
+    size_t first_tomb = (size_t)-1;
+    for (;;) {
+        uint8_t st = m->state[i];
+        if (MAKO_LIKELY(st == MAKO_MAP_EMPTY)) {
+            size_t slot = (first_tomb != (size_t)-1) ? first_tomb : i;
+            m->state[slot] = MAKO_MAP_FULL;
+            m->keys[slot] = key;
+            m->vals[slot] = val;
+            m->len++;
+            return;
+        }
+        if (st == MAKO_MAP_TOMB) {
+            if (first_tomb == (size_t)-1) first_tomb = i;
+        } else if (MAKO_LIKELY(m->keys[i] == key)) {
+            m->vals[i] = val;
+            return;
+        }
+        i = (i + 1) & mask;
+    }
+}
+
+static inline void mako_map_if_rehash(MakoMapIF *m, size_t ncap) {
+    uint8_t *ostate = m->state;
+    int64_t *okeys = m->keys;
+    double *ovals = m->vals;
+    size_t ocap = m->cap;
+    MakoMapIF n = mako_map_if_new(ncap / 2);
+    for (size_t i = 0; i < ocap; i++) {
+        if (ostate[i] != MAKO_MAP_FULL) continue;
+        int64_t key = okeys[i];
+        double val = ovals[i];
+        uint64_t h = mako_hash_i64(key);
+        size_t j = (size_t)(h & (n.cap - 1));
+        while (n.state[j] == MAKO_MAP_FULL) {
+            j = (j + 1) & (n.cap - 1);
+        }
+        n.state[j] = MAKO_MAP_FULL;
+        n.keys[j] = key;
+        n.vals[j] = val;
+        n.len++;
+    }
+    free(ostate);
+    free(okeys);
+    free(ovals);
+    *m = n;
+}
+
+static inline double mako_map_if_get(MakoMapIF *m, int64_t key) {
+    if (!m) return 0.0;
+    uint64_t h = mako_hash_i64(key);
+    size_t i = (size_t)(h & (m->cap - 1));
+    for (;;) {
+        if (m->state[i] == MAKO_MAP_EMPTY) return 0.0;
+        if (m->state[i] == MAKO_MAP_FULL && m->keys[i] == key) return m->vals[i];
+        i = (i + 1) & (m->cap - 1);
+    }
+}
+
+static inline bool mako_map_if_has(MakoMapIF *m, int64_t key) {
+    if (!m) return false;
+    uint64_t h = mako_hash_i64(key);
+    size_t i = (size_t)(h & (m->cap - 1));
+    for (;;) {
+        if (m->state[i] == MAKO_MAP_EMPTY) return false;
+        if (m->state[i] == MAKO_MAP_FULL && m->keys[i] == key) return true;
+        i = (i + 1) & (m->cap - 1);
+    }
+}
+
+static inline void mako_map_if_delete(MakoMapIF *m, int64_t key) {
+    if (!m) return;
+    uint64_t h = mako_hash_i64(key);
+    size_t i = (size_t)(h & (m->cap - 1));
+    for (;;) {
+        if (m->state[i] == MAKO_MAP_EMPTY) return;
+        if (m->state[i] == MAKO_MAP_FULL && m->keys[i] == key) {
+            m->state[i] = MAKO_MAP_TOMB;
+            m->len--;
+            return;
+        }
+        i = (i + 1) & (m->cap - 1);
+    }
+}
+
+static inline int64_t mako_map_if_len(MakoMapIF *m) { return m ? (int64_t)m->len : 0; }
+
+static inline MakoMapIF *mako_map_if_make(int64_t hint) {
+    MakoMapIF *m = (MakoMapIF *)malloc(sizeof(MakoMapIF));
+    *m = mako_map_if_new(hint > 0 ? (size_t)hint : 0);
+    return m;
+}
+
+/* map[string]float */
+typedef struct {
+    uint8_t *state;
+    MakoString *keys;
+    double *vals;
+    size_t cap;
+    size_t len;
+} MakoMapSF;
+
+static inline MakoMapSF mako_map_sf_new(size_t hint) {
+    size_t cap = 8;
+    size_t need = hint ? (hint * 4 / 3 + 1) : 8;
+    while (cap < need) cap *= 2;
+    MakoMapSF m;
+    m.state = (uint8_t *)calloc(cap, 1);
+    m.keys = (MakoString *)calloc(cap, sizeof(MakoString));
+    m.vals = (double *)malloc(cap * sizeof(double));
+    if (!m.keys || !m.vals) {
+        fprintf(stderr, "mako: OOM in map_sf_new\n");
+        abort();
+    }
+    m.cap = cap;
+    m.len = 0;
+    return m;
+}
+
+static inline void mako_map_sf_rehash(MakoMapSF *m, size_t ncap);
+
+static inline void mako_map_sf_set_take(MakoMapSF *m, MakoString key, double val) {
+    if (MAKO_UNLIKELY((m->len + 1) * 4 >= m->cap * 3)) {
+        mako_map_sf_rehash(m, m->cap * 2);
+    }
+    uint64_t h = mako_hash_bytes(key.data, key.len);
+    size_t mask = m->cap - 1;
+    size_t i = (size_t)(h & mask);
+    size_t first_tomb = (size_t)-1;
+    for (;;) {
+        uint8_t st = m->state[i];
+        if (MAKO_LIKELY(st == MAKO_MAP_EMPTY)) {
+            size_t slot = (first_tomb != (size_t)-1) ? first_tomb : i;
+            m->state[slot] = MAKO_MAP_FULL;
+            m->keys[slot] = key;
+            m->vals[slot] = val;
+            m->len++;
+            return;
+        }
+        if (st == MAKO_MAP_TOMB) {
+            if (first_tomb == (size_t)-1) first_tomb = i;
+        } else if (m->keys[i].len == key.len
+                   && memcmp(m->keys[i].data, key.data, key.len) == 0) {
+            mako_str_free(key);
+            m->vals[i] = val;
+            return;
+        }
+        i = (i + 1) & mask;
+    }
+}
+
+static inline void mako_map_sf_set(MakoMapSF *m, MakoString key, double val) {
+    mako_map_sf_set_take(m, mako_str_clone(key), val);
+}
+
+static inline void mako_map_sf_rehash(MakoMapSF *m, size_t ncap) {
+    uint8_t *ostate = m->state;
+    MakoString *okeys = m->keys;
+    double *ovals = m->vals;
+    size_t ocap = m->cap;
+    MakoMapSF n = mako_map_sf_new(ncap / 2);
+    for (size_t i = 0; i < ocap; i++) {
+        if (ostate[i] != MAKO_MAP_FULL) continue;
+        MakoString key = okeys[i];
+        double val = ovals[i];
+        uint64_t h = mako_hash_bytes(key.data, key.len);
+        size_t j = (size_t)(h & (n.cap - 1));
+        while (n.state[j] == MAKO_MAP_FULL) {
+            j = (j + 1) & (n.cap - 1);
+        }
+        n.state[j] = MAKO_MAP_FULL;
+        n.keys[j] = key;
+        n.vals[j] = val;
+        n.len++;
+    }
+    free(ostate);
+    free(okeys);
+    free(ovals);
+    *m = n;
+}
+
+static inline double mako_map_sf_get(MakoMapSF *m, MakoString key) {
+    if (!m) return 0.0;
+    uint64_t h = mako_hash_bytes(key.data, key.len);
+    size_t i = (size_t)(h & (m->cap - 1));
+    for (;;) {
+        if (m->state[i] == MAKO_MAP_EMPTY) return 0.0;
+        if (m->state[i] == MAKO_MAP_FULL && m->keys[i].len == key.len
+            && memcmp(m->keys[i].data, key.data, key.len) == 0) {
+            return m->vals[i];
+        }
+        i = (i + 1) & (m->cap - 1);
+    }
+}
+
+static inline bool mako_map_sf_has(MakoMapSF *m, MakoString key) {
+    if (!m) return false;
+    uint64_t h = mako_hash_bytes(key.data, key.len);
+    size_t i = (size_t)(h & (m->cap - 1));
+    for (;;) {
+        if (m->state[i] == MAKO_MAP_EMPTY) return false;
+        if (m->state[i] == MAKO_MAP_FULL && m->keys[i].len == key.len
+            && memcmp(m->keys[i].data, key.data, key.len) == 0) {
+            return true;
+        }
+        i = (i + 1) & (m->cap - 1);
+    }
+}
+
+static inline void mako_map_sf_delete(MakoMapSF *m, MakoString key) {
+    if (!m) return;
+    uint64_t h = mako_hash_bytes(key.data, key.len);
+    size_t i = (size_t)(h & (m->cap - 1));
+    for (;;) {
+        if (m->state[i] == MAKO_MAP_EMPTY) return;
+        if (m->state[i] == MAKO_MAP_FULL && m->keys[i].len == key.len
+            && memcmp(m->keys[i].data, key.data, key.len) == 0) {
+            mako_str_free(m->keys[i]);
+            m->keys[i].data = NULL;
+            m->keys[i].len = 0;
+            m->state[i] = MAKO_MAP_TOMB;
+            m->len--;
+            return;
+        }
+        i = (i + 1) & (m->cap - 1);
+    }
+}
+
+static inline int64_t mako_map_sf_len(MakoMapSF *m) { return m ? (int64_t)m->len : 0; }
+
+static inline MakoMapSF *mako_map_sf_make(int64_t hint) {
+    MakoMapSF *m = (MakoMapSF *)malloc(sizeof(MakoMapSF));
+    *m = mako_map_sf_new(hint > 0 ? (size_t)hint : 0);
+    return m;
+}
+
+/* map[float]int */
+typedef struct {
+    uint8_t *state;
+    double *keys;
+    int64_t *vals;
+    size_t cap;
+    size_t len;
+} MakoMapFI;
+
+static inline MakoMapFI mako_map_fi_new(size_t hint) {
+    size_t cap = 8;
+    size_t need = hint ? (hint * 4 / 3 + 1) : 8;
+    while (cap < need) cap *= 2;
+    MakoMapFI m;
+    m.state = (uint8_t *)calloc(cap, 1);
+    m.keys = (double *)malloc(cap * sizeof(double));
+    m.vals = (int64_t *)malloc(cap * sizeof(int64_t));
+    if (!m.keys || !m.vals) {
+        fprintf(stderr, "mako: OOM in map_fi_new\n");
+        abort();
+    }
+    m.cap = cap;
+    m.len = 0;
+    return m;
+}
+static inline void mako_map_fi_rehash(MakoMapFI *m, size_t ncap);
+static inline void mako_map_fi_set(MakoMapFI *m, double key, int64_t val) {
+    key = mako_f64_key_norm(key);
+    if (MAKO_UNLIKELY((m->len + 1) * 4 >= m->cap * 3)) mako_map_fi_rehash(m, m->cap * 2);
+    uint64_t h = mako_hash_f64(key);
+    size_t mask = m->cap - 1;
+    size_t i = (size_t)(h & mask);
+    size_t first_tomb = (size_t)-1;
+    for (;;) {
+        uint8_t st = m->state[i];
+        if (st == MAKO_MAP_EMPTY) {
+            size_t slot = (first_tomb != (size_t)-1) ? first_tomb : i;
+            m->state[slot] = MAKO_MAP_FULL;
+            m->keys[slot] = key;
+            m->vals[slot] = val;
+            m->len++;
+            return;
+        }
+        if (st == MAKO_MAP_TOMB) {
+            if (first_tomb == (size_t)-1) first_tomb = i;
+        } else if (mako_f64_key_eq(m->keys[i], key)) {
+            m->vals[i] = val;
+            return;
+        }
+        i = (i + 1) & mask;
+    }
+}
+static inline void mako_map_fi_rehash(MakoMapFI *m, size_t ncap) {
+    uint8_t *ostate = m->state;
+    double *okeys = m->keys;
+    int64_t *ovals = m->vals;
+    size_t ocap = m->cap;
+    MakoMapFI n = mako_map_fi_new(ncap / 2);
+    for (size_t i = 0; i < ocap; i++) {
+        if (ostate[i] != MAKO_MAP_FULL) continue;
+        double key = okeys[i];
+        int64_t val = ovals[i];
+        uint64_t h = mako_hash_f64(key);
+        size_t j = (size_t)(h & (n.cap - 1));
+        while (n.state[j] == MAKO_MAP_FULL) j = (j + 1) & (n.cap - 1);
+        n.state[j] = MAKO_MAP_FULL;
+        n.keys[j] = key;
+        n.vals[j] = val;
+        n.len++;
+    }
+    free(ostate);
+    free(okeys);
+    free(ovals);
+    *m = n;
+}
+static inline int64_t mako_map_fi_get(MakoMapFI *m, double key) {
+    if (!m) return 0;
+    key = mako_f64_key_norm(key);
+    uint64_t h = mako_hash_f64(key);
+    size_t i = (size_t)(h & (m->cap - 1));
+    for (;;) {
+        if (m->state[i] == MAKO_MAP_EMPTY) return 0;
+        if (m->state[i] == MAKO_MAP_FULL && mako_f64_key_eq(m->keys[i], key)) return m->vals[i];
+        i = (i + 1) & (m->cap - 1);
+    }
+}
+static inline bool mako_map_fi_has(MakoMapFI *m, double key) {
+    if (!m) return false;
+    key = mako_f64_key_norm(key);
+    uint64_t h = mako_hash_f64(key);
+    size_t i = (size_t)(h & (m->cap - 1));
+    for (;;) {
+        if (m->state[i] == MAKO_MAP_EMPTY) return false;
+        if (m->state[i] == MAKO_MAP_FULL && mako_f64_key_eq(m->keys[i], key)) return true;
+        i = (i + 1) & (m->cap - 1);
+    }
+}
+static inline void mako_map_fi_delete(MakoMapFI *m, double key) {
+    if (!m) return;
+    key = mako_f64_key_norm(key);
+    uint64_t h = mako_hash_f64(key);
+    size_t i = (size_t)(h & (m->cap - 1));
+    for (;;) {
+        if (m->state[i] == MAKO_MAP_EMPTY) return;
+        if (m->state[i] == MAKO_MAP_FULL && mako_f64_key_eq(m->keys[i], key)) {
+            m->state[i] = MAKO_MAP_TOMB;
+            m->len--;
+            return;
+        }
+        i = (i + 1) & (m->cap - 1);
+    }
+}
+static inline int64_t mako_map_fi_len(MakoMapFI *m) { return m ? (int64_t)m->len : 0; }
+static inline MakoMapFI *mako_map_fi_make(int64_t hint) {
+    MakoMapFI *m = (MakoMapFI *)malloc(sizeof(MakoMapFI));
+    *m = mako_map_fi_new(hint > 0 ? (size_t)hint : 0);
+    return m;
+}
+
+/* map[float]string */
+typedef struct {
+    uint8_t *state;
+    double *keys;
+    MakoString *vals;
+    size_t cap;
+    size_t len;
+} MakoMapFS;
+
+static inline MakoMapFS mako_map_fs_new(size_t hint) {
+    size_t cap = 8;
+    size_t need = hint ? (hint * 4 / 3 + 1) : 8;
+    while (cap < need) cap *= 2;
+    MakoMapFS m;
+    m.state = (uint8_t *)calloc(cap, 1);
+    m.keys = (double *)malloc(cap * sizeof(double));
+    m.vals = (MakoString *)calloc(cap, sizeof(MakoString));
+    if (!m.keys || !m.vals) {
+        fprintf(stderr, "mako: OOM in map_fs_new\n");
+        abort();
+    }
+    m.cap = cap;
+    m.len = 0;
+    return m;
+}
+static inline void mako_map_fs_rehash(MakoMapFS *m, size_t ncap);
+static inline void mako_map_fs_set_take(MakoMapFS *m, double key, MakoString val) {
+    key = mako_f64_key_norm(key);
+    if (MAKO_UNLIKELY((m->len + 1) * 4 >= m->cap * 3)) mako_map_fs_rehash(m, m->cap * 2);
+    uint64_t h = mako_hash_f64(key);
+    size_t mask = m->cap - 1;
+    size_t i = (size_t)(h & mask);
+    size_t first_tomb = (size_t)-1;
+    for (;;) {
+        uint8_t st = m->state[i];
+        if (st == MAKO_MAP_EMPTY) {
+            size_t slot = (first_tomb != (size_t)-1) ? first_tomb : i;
+            m->state[slot] = MAKO_MAP_FULL;
+            m->keys[slot] = key;
+            m->vals[slot] = val;
+            m->len++;
+            return;
+        }
+        if (st == MAKO_MAP_TOMB) {
+            if (first_tomb == (size_t)-1) first_tomb = i;
+        } else if (mako_f64_key_eq(m->keys[i], key)) {
+            mako_str_free(m->vals[i]);
+            m->vals[i] = val;
+            return;
+        }
+        i = (i + 1) & mask;
+    }
+}
+static inline void mako_map_fs_set(MakoMapFS *m, double key, MakoString val) {
+    mako_map_fs_set_take(m, key, mako_str_clone(val));
+}
+static inline void mako_map_fs_rehash(MakoMapFS *m, size_t ncap) {
+    uint8_t *ostate = m->state;
+    double *okeys = m->keys;
+    MakoString *ovals = m->vals;
+    size_t ocap = m->cap;
+    MakoMapFS n = mako_map_fs_new(ncap / 2);
+    for (size_t i = 0; i < ocap; i++) {
+        if (ostate[i] != MAKO_MAP_FULL) continue;
+        double key = okeys[i];
+        MakoString val = ovals[i];
+        uint64_t h = mako_hash_f64(key);
+        size_t j = (size_t)(h & (n.cap - 1));
+        while (n.state[j] == MAKO_MAP_FULL) j = (j + 1) & (n.cap - 1);
+        n.state[j] = MAKO_MAP_FULL;
+        n.keys[j] = key;
+        n.vals[j] = val;
+        n.len++;
+    }
+    free(ostate);
+    free(okeys);
+    free(ovals);
+    *m = n;
+}
+static inline MakoString mako_map_fs_get(MakoMapFS *m, double key) {
+    if (!m) return mako_str_from_cstr("");
+    key = mako_f64_key_norm(key);
+    uint64_t h = mako_hash_f64(key);
+    size_t i = (size_t)(h & (m->cap - 1));
+    for (;;) {
+        if (m->state[i] == MAKO_MAP_EMPTY) return mako_str_from_cstr("");
+        if (m->state[i] == MAKO_MAP_FULL && mako_f64_key_eq(m->keys[i], key))
+            return mako_str_clone(m->vals[i]);
+        i = (i + 1) & (m->cap - 1);
+    }
+}
+static inline bool mako_map_fs_has(MakoMapFS *m, double key) {
+    if (!m) return false;
+    key = mako_f64_key_norm(key);
+    uint64_t h = mako_hash_f64(key);
+    size_t i = (size_t)(h & (m->cap - 1));
+    for (;;) {
+        if (m->state[i] == MAKO_MAP_EMPTY) return false;
+        if (m->state[i] == MAKO_MAP_FULL && mako_f64_key_eq(m->keys[i], key)) return true;
+        i = (i + 1) & (m->cap - 1);
+    }
+}
+static inline void mako_map_fs_delete(MakoMapFS *m, double key) {
+    if (!m) return;
+    key = mako_f64_key_norm(key);
+    uint64_t h = mako_hash_f64(key);
+    size_t i = (size_t)(h & (m->cap - 1));
+    for (;;) {
+        if (m->state[i] == MAKO_MAP_EMPTY) return;
+        if (m->state[i] == MAKO_MAP_FULL && mako_f64_key_eq(m->keys[i], key)) {
+            mako_str_free(m->vals[i]);
+            m->vals[i].data = NULL;
+            m->vals[i].len = 0;
+            m->state[i] = MAKO_MAP_TOMB;
+            m->len--;
+            return;
+        }
+        i = (i + 1) & (m->cap - 1);
+    }
+}
+static inline int64_t mako_map_fs_len(MakoMapFS *m) { return m ? (int64_t)m->len : 0; }
+static inline MakoMapFS *mako_map_fs_make(int64_t hint) {
+    MakoMapFS *m = (MakoMapFS *)malloc(sizeof(MakoMapFS));
+    *m = mako_map_fs_new(hint > 0 ? (size_t)hint : 0);
+    return m;
+}
+
+/* map[float]float */
+typedef struct {
+    uint8_t *state;
+    double *keys;
+    double *vals;
+    size_t cap;
+    size_t len;
+} MakoMapFF;
+
+static inline MakoMapFF mako_map_ff_new(size_t hint) {
+    size_t cap = 8;
+    size_t need = hint ? (hint * 4 / 3 + 1) : 8;
+    while (cap < need) cap *= 2;
+    MakoMapFF m;
+    m.state = (uint8_t *)calloc(cap, 1);
+    m.keys = (double *)malloc(cap * sizeof(double));
+    m.vals = (double *)malloc(cap * sizeof(double));
+    if (!m.keys || !m.vals) {
+        fprintf(stderr, "mako: OOM in map_ff_new\n");
+        abort();
+    }
+    m.cap = cap;
+    m.len = 0;
+    return m;
+}
+static inline void mako_map_ff_rehash(MakoMapFF *m, size_t ncap);
+static inline void mako_map_ff_set(MakoMapFF *m, double key, double val) {
+    key = mako_f64_key_norm(key);
+    if (MAKO_UNLIKELY((m->len + 1) * 4 >= m->cap * 3)) mako_map_ff_rehash(m, m->cap * 2);
+    uint64_t h = mako_hash_f64(key);
+    size_t mask = m->cap - 1;
+    size_t i = (size_t)(h & mask);
+    size_t first_tomb = (size_t)-1;
+    for (;;) {
+        uint8_t st = m->state[i];
+        if (st == MAKO_MAP_EMPTY) {
+            size_t slot = (first_tomb != (size_t)-1) ? first_tomb : i;
+            m->state[slot] = MAKO_MAP_FULL;
+            m->keys[slot] = key;
+            m->vals[slot] = val;
+            m->len++;
+            return;
+        }
+        if (st == MAKO_MAP_TOMB) {
+            if (first_tomb == (size_t)-1) first_tomb = i;
+        } else if (mako_f64_key_eq(m->keys[i], key)) {
+            m->vals[i] = val;
+            return;
+        }
+        i = (i + 1) & mask;
+    }
+}
+static inline void mako_map_ff_rehash(MakoMapFF *m, size_t ncap) {
+    uint8_t *ostate = m->state;
+    double *okeys = m->keys;
+    double *ovals = m->vals;
+    size_t ocap = m->cap;
+    MakoMapFF n = mako_map_ff_new(ncap / 2);
+    for (size_t i = 0; i < ocap; i++) {
+        if (ostate[i] != MAKO_MAP_FULL) continue;
+        double key = okeys[i];
+        double val = ovals[i];
+        uint64_t h = mako_hash_f64(key);
+        size_t j = (size_t)(h & (n.cap - 1));
+        while (n.state[j] == MAKO_MAP_FULL) j = (j + 1) & (n.cap - 1);
+        n.state[j] = MAKO_MAP_FULL;
+        n.keys[j] = key;
+        n.vals[j] = val;
+        n.len++;
+    }
+    free(ostate);
+    free(okeys);
+    free(ovals);
+    *m = n;
+}
+static inline double mako_map_ff_get(MakoMapFF *m, double key) {
+    if (!m) return 0.0;
+    key = mako_f64_key_norm(key);
+    uint64_t h = mako_hash_f64(key);
+    size_t i = (size_t)(h & (m->cap - 1));
+    for (;;) {
+        if (m->state[i] == MAKO_MAP_EMPTY) return 0.0;
+        if (m->state[i] == MAKO_MAP_FULL && mako_f64_key_eq(m->keys[i], key)) return m->vals[i];
+        i = (i + 1) & (m->cap - 1);
+    }
+}
+static inline bool mako_map_ff_has(MakoMapFF *m, double key) {
+    if (!m) return false;
+    key = mako_f64_key_norm(key);
+    uint64_t h = mako_hash_f64(key);
+    size_t i = (size_t)(h & (m->cap - 1));
+    for (;;) {
+        if (m->state[i] == MAKO_MAP_EMPTY) return false;
+        if (m->state[i] == MAKO_MAP_FULL && mako_f64_key_eq(m->keys[i], key)) return true;
+        i = (i + 1) & (m->cap - 1);
+    }
+}
+static inline void mako_map_ff_delete(MakoMapFF *m, double key) {
+    if (!m) return;
+    key = mako_f64_key_norm(key);
+    uint64_t h = mako_hash_f64(key);
+    size_t i = (size_t)(h & (m->cap - 1));
+    for (;;) {
+        if (m->state[i] == MAKO_MAP_EMPTY) return;
+        if (m->state[i] == MAKO_MAP_FULL && mako_f64_key_eq(m->keys[i], key)) {
+            m->state[i] = MAKO_MAP_TOMB;
+            m->len--;
+            return;
+        }
+        i = (i + 1) & (m->cap - 1);
+    }
+}
+static inline int64_t mako_map_ff_len(MakoMapFF *m) { return m ? (int64_t)m->len : 0; }
+static inline MakoMapFF *mako_map_ff_make(int64_t hint) {
+    MakoMapFF *m = (MakoMapFF *)malloc(sizeof(MakoMapFF));
+    *m = mako_map_ff_new(hint > 0 ? (size_t)hint : 0);
     return m;
 }
 

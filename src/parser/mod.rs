@@ -1026,6 +1026,16 @@ impl Parser {
             return Ok(TypeExpr::Fn(params, Box::new(ret)));
         }
         let name = self.expect_ident()?;
+        // Pack-qualified type: `eng.Table` → `eng__Table` (matches import prefix rewrite).
+        // Call sites already use `eng.table_new()`; type annotations use the same surface.
+        let name = if matches!(self.peek_kind(), TokenKind::Dot) {
+            self.bump();
+            let ty_name = self.expect_ident()?;
+            // Multi-segment rare; keep one pack level (alias.Type) like pull rewrite.
+            format!("{name}__{ty_name}")
+        } else {
+            name
+        };
         // Go-like `map[K]V` (key in brackets, value follows)
         if name == "map" && matches!(self.peek_kind(), TokenKind::LBracket) {
             self.bump();
@@ -1844,6 +1854,24 @@ impl Parser {
                             method: field,
                             args,
                         };
+                    } else if matches!(self.peek_kind(), TokenKind::LBrace) && !self.no_struct_lit {
+                        // Pack-qualified struct literal: `eng.Point { x: 1, y: 2 }`
+                        // or positional `eng.Point { 1, 2 }`. Only when receiver is
+                        // a bare pack alias (`Ident`), matching type annotations.
+                        if let Expr::Ident(pkg) = &expr {
+                            let name = format!("{pkg}__{field}");
+                            let save = self.pos;
+                            self.bump(); // {
+                            if let Some(lit) = self.try_parse_struct_lit_tail(name)? {
+                                expr = lit;
+                                continue;
+                            }
+                            self.pos = save;
+                        }
+                        expr = Expr::Field {
+                            base: Box::new(expr),
+                            field,
+                        };
                     } else {
                         expr = Expr::Field {
                             base: Box::new(expr),
@@ -1929,6 +1957,58 @@ impl Parser {
         Ok(expr)
     }
 
+    /// After `{` has been consumed: parse a struct literal body for `name`.
+    /// Returns `None` (and leaves the cursor after `{`) when the braces are not
+    /// a clear named/positional literal — caller restores position.
+    fn try_parse_struct_lit_tail(&mut self, name: String) -> Result<Option<Expr>, ParseError> {
+        let is_named = matches!(self.peek_kind(), TokenKind::Ident(_)) && {
+            let after_ident = self.pos + 1;
+            after_ident < self.tokens.len()
+                && matches!(self.tokens[after_ident].kind, TokenKind::Colon)
+        };
+        if is_named {
+            let mut fields = Vec::new();
+            while !matches!(self.peek_kind(), TokenKind::RBrace | TokenKind::Eof) {
+                let fname = self.expect_ident()?;
+                self.expect(TokenKind::Colon)?;
+                let fval = self.parse_expr()?;
+                fields.push((fname, fval));
+                if matches!(self.peek_kind(), TokenKind::Comma) {
+                    self.bump();
+                } else {
+                    break;
+                }
+            }
+            self.expect(TokenKind::RBrace)?;
+            return Ok(Some(Expr::StructLit { name, fields }));
+        }
+        // Positional: `Point{}` / `Point{a, b, …}` / `eng.Point{1, 2}`.
+        if matches!(self.peek_kind(), TokenKind::RBrace) {
+            self.bump();
+            return Ok(Some(Expr::StructLitPos {
+                name,
+                values: vec![],
+            }));
+        }
+        if self.peek_starts_expr() {
+            let mut values = Vec::new();
+            loop {
+                values.push(self.parse_expr()?);
+                if matches!(self.peek_kind(), TokenKind::Comma) {
+                    self.bump();
+                    if matches!(self.peek_kind(), TokenKind::RBrace) {
+                        break; // trailing comma
+                    }
+                } else {
+                    break;
+                }
+            }
+            self.expect(TokenKind::RBrace)?;
+            return Ok(Some(Expr::StructLitPos { name, values }));
+        }
+        Ok(None)
+    }
+
     fn parse_primary(&mut self) -> Result<Expr, ParseError> {
         match self.peek_kind().clone() {
             TokenKind::Int(n) => {
@@ -2000,49 +2080,8 @@ impl Parser {
                 if matches!(self.peek_kind(), TokenKind::LBrace) && !self.no_struct_lit {
                     let save = self.pos;
                     self.bump(); // {
-                    let is_named = matches!(self.peek_kind(), TokenKind::Ident(_)) && {
-                        let after_ident = self.pos + 1;
-                        after_ident < self.tokens.len()
-                            && matches!(self.tokens[after_ident].kind, TokenKind::Colon)
-                    };
-                    if is_named {
-                        let mut fields = Vec::new();
-                        while !matches!(self.peek_kind(), TokenKind::RBrace | TokenKind::Eof) {
-                            let fname = self.expect_ident()?;
-                            self.expect(TokenKind::Colon)?;
-                            let fval = self.parse_expr()?;
-                            fields.push((fname, fval));
-                            if matches!(self.peek_kind(), TokenKind::Comma) {
-                                self.bump();
-                            } else {
-                                break;
-                            }
-                        }
-                        self.expect(TokenKind::RBrace)?;
-                        return Ok(Expr::StructLit { name, fields });
-                    }
-                    // Positional: `Point{}` (empty) or `Point{a, b, …}`. Only when
-                    // the brace clearly holds expressions, so a stray `Ident {` that
-                    // is not a literal falls back to a plain identifier.
-                    if matches!(self.peek_kind(), TokenKind::RBrace) {
-                        self.bump();
-                        return Ok(Expr::StructLitPos { name, values: vec![] });
-                    }
-                    if self.peek_starts_expr() {
-                        let mut values = Vec::new();
-                        loop {
-                            values.push(self.parse_expr()?);
-                            if matches!(self.peek_kind(), TokenKind::Comma) {
-                                self.bump();
-                                if matches!(self.peek_kind(), TokenKind::RBrace) {
-                                    break; // trailing comma
-                                }
-                            } else {
-                                break;
-                            }
-                        }
-                        self.expect(TokenKind::RBrace)?;
-                        return Ok(Expr::StructLitPos { name, values });
+                    if let Some(lit) = self.try_parse_struct_lit_tail(name.clone())? {
+                        return Ok(lit);
                     }
                     self.pos = save;
                 }
@@ -2460,49 +2499,31 @@ impl Parser {
             }
             TokenKind::Ident(name) => {
                 self.bump();
+                // Pack-qualified paths (same rewrite as type annotations / lits):
+                //   eng.Point { x }           → struct pattern eng__Point
+                //   eng.Red / eng.Green(n)    → unit / payload variant (bare name)
+                //   eng.Color.Red / .Green(n) → type-qualified variant
+                if matches!(self.peek_kind(), TokenKind::Dot) {
+                    self.bump(); // .
+                    let part2 = self.expect_ident()?;
+                    if matches!(self.peek_kind(), TokenKind::Dot) {
+                        // eng.Color.Red or eng.Color.Green(...)
+                        self.bump();
+                        let variant = self.expect_ident()?;
+                        return self.finish_variant_pattern(variant);
+                    }
+                    if matches!(self.peek_kind(), TokenKind::LBrace) {
+                        // eng.Point { ... }
+                        let name = format!("{name}__{part2}");
+                        return self.finish_struct_pattern(name);
+                    }
+                    // eng.Red or eng.Green(...)
+                    return self.finish_variant_pattern(part2);
+                }
                 if matches!(self.peek_kind(), TokenKind::LParen) {
-                    self.bump();
-                    let mut bindings = Vec::new();
-                    if !matches!(self.peek_kind(), TokenKind::RParen) {
-                        loop {
-                            // Nested patterns: Ok(Some(x)), Point(_, y)
-                            bindings.push(self.parse_pattern()?);
-                            if matches!(self.peek_kind(), TokenKind::Comma) {
-                                self.bump();
-                            } else {
-                                break;
-                            }
-                        }
-                    }
-                    self.expect(TokenKind::RParen)?;
-                    Ok(Pattern::Variant { name, bindings })
+                    self.finish_variant_pattern(name)
                 } else if matches!(self.peek_kind(), TokenKind::LBrace) {
-                    // Struct pattern: Point { x, y } or Point { x: a, y: _ }
-                    self.bump();
-                    let mut fields = Vec::new();
-                    if !matches!(self.peek_kind(), TokenKind::RBrace) {
-                        loop {
-                            let fname = self.expect_ident()?;
-                            let pat = if matches!(self.peek_kind(), TokenKind::Colon) {
-                                self.bump();
-                                self.parse_pattern()?
-                            } else {
-                                // Shorthand: `x` means `x: x`
-                                Pattern::Ident(fname.clone())
-                            };
-                            fields.push((fname, pat));
-                            if matches!(self.peek_kind(), TokenKind::Comma) {
-                                self.bump();
-                                if matches!(self.peek_kind(), TokenKind::RBrace) {
-                                    break;
-                                }
-                            } else {
-                                break;
-                            }
-                        }
-                    }
-                    self.expect(TokenKind::RBrace)?;
-                    Ok(Pattern::Struct { name, fields })
+                    self.finish_struct_pattern(name)
                 } else {
                     Ok(Pattern::Ident(name))
                 }
@@ -2537,6 +2558,59 @@ impl Parser {
             }
             _ => Err(self.err("expected pattern".into())),
         }
+    }
+
+    /// `Name(...)` payload variant, or bare `Name` unit variant pattern.
+    fn finish_variant_pattern(&mut self, name: String) -> Result<Pattern, ParseError> {
+        if matches!(self.peek_kind(), TokenKind::LParen) {
+            self.bump();
+            let mut bindings = Vec::new();
+            if !matches!(self.peek_kind(), TokenKind::RParen) {
+                loop {
+                    bindings.push(self.parse_pattern()?);
+                    if matches!(self.peek_kind(), TokenKind::Comma) {
+                        self.bump();
+                    } else {
+                        break;
+                    }
+                }
+            }
+            self.expect(TokenKind::RParen)?;
+            Ok(Pattern::Variant { name, bindings })
+        } else {
+            // Unit variant patterns share `Ident` with irrefutable binds; typecheck
+            // decides via the scrutinee enum.
+            Ok(Pattern::Ident(name))
+        }
+    }
+
+    /// Struct pattern body after the type name (leading `{` still to consume).
+    fn finish_struct_pattern(&mut self, name: String) -> Result<Pattern, ParseError> {
+        self.expect(TokenKind::LBrace)?;
+        let mut fields = Vec::new();
+        if !matches!(self.peek_kind(), TokenKind::RBrace) {
+            loop {
+                let fname = self.expect_ident()?;
+                let pat = if matches!(self.peek_kind(), TokenKind::Colon) {
+                    self.bump();
+                    self.parse_pattern()?
+                } else {
+                    // Shorthand: `x` means `x: x`
+                    Pattern::Ident(fname.clone())
+                };
+                fields.push((fname, pat));
+                if matches!(self.peek_kind(), TokenKind::Comma) {
+                    self.bump();
+                    if matches!(self.peek_kind(), TokenKind::RBrace) {
+                        break;
+                    }
+                } else {
+                    break;
+                }
+            }
+        }
+        self.expect(TokenKind::RBrace)?;
+        Ok(Pattern::Struct { name, fields })
     }
 
     fn expect_ident(&mut self) -> Result<String, ParseError> {

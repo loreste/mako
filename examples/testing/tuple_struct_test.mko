@@ -1,0 +1,36 @@
+// Multi-return / tuple match of named structs (not only primitives).
+
+struct Table {
+    n: int
+}
+
+fn grow_pair(t: Table, by: int) -> (Table, int) {
+    let mut tt = t
+    tt.n = tt.n + by
+    return (tt, by)
+}
+
+fn TestStructMultiReturn() {
+    let t = Table { n: 0 }
+    let t2, n = grow_pair(t, 5)
+    assert_eq(t2.n, 5)
+    assert_eq(n, 5)
+}
+
+fn TestStructMultiAssign() {
+    let mut t = Table { n: 1 }
+    let mut n = 0
+    t, n = grow_pair(t, 4)
+    assert_eq(t.n, 5)
+    assert_eq(n, 4)
+}
+
+fn TestStructTupleMatch() {
+    let t = Table { n: 10 }
+    match grow_pair(t, 1) {
+        (t2, m) => {
+            assert_eq(t2.n, 11)
+            assert_eq(m, 1)
+        }
+    }
+}

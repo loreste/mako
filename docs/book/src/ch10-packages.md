@@ -83,6 +83,11 @@ Bare path names like `"strings"` resolve under `std/`.
 - Within the same pack (multiple files sharing a `pack` name), all items are
   visible to each other regardless of `export`.
 - Consumers only see `export`ed items.
+- **Types are pack-qualified** at the consumer: `eng.Table` in annotations,
+  return types, struct literals, and struct patterns (same alias as
+  `eng.table_new()`). Multi-return of pack structs works: `let t, n = eng.f()`.
+- **Enums** may use pack paths: `eng.Red`, `eng.Green(n)`, or
+  `eng.Color.Red` / `eng.Color.Green(n)`.
 
 ### Relationship to import
 
