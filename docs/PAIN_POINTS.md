@@ -35,7 +35,8 @@ Canonical surface: [IDENTITY.md](IDENTITY.md). Compat duals only: [COMPAT.md](CO
 | Rust error boilerplate | Same `Result`/`?` idea, lighter surface | **Strong** |
 | Both: hard to ship “just a binary” | Single native binary; no VM; release `-O3 -flto` | **Strong** |
 | Both: stdlib / dep sprawl for backends | Batteries-included std (HTTP, SQL, crypto, …) | **Strong** |
-| Both: too much typing / ceremony for everyday work | Local inference, one `print`, `==` on strings, `?`, `match`, opt-in power | **Strong** — [ERGONOMICS.md](ERGONOMICS.md) |
+| Both: too much typing / ceremony for everyday work | Local inference, one `print`, `==` on strings, `?`, `match`, opt-in power, full map/slice grid without packages | **Strong** — [ERGONOMICS.md](ERGONOMICS.md) |
+| Go map key limits (only comparable builtins; no struct keys without workarounds) | `map[Struct\|Enum\|float\|bool]…`, `map[K][]T`, nested `map[K]map[…]` (depth 2), bag values `map[K]Option[T]` / `map[K]Result[T,E]` | **Strong** |
 
 **Product rule:** every major language change should close a row above, or be
 rejected. “Looks like Go/Rust” is never a sufficient reason.

@@ -101,6 +101,7 @@ fn main() {
 ```
 
 Runnable: [`examples/mako_style.mko`](../examples/mako_style.mko) · [ERGONOMICS.md](ERGONOMICS.md)
+(includes maps/slices short path: sets, groups, nested maps, bag values)
 
 ---
 

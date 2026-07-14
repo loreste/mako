@@ -113,8 +113,9 @@ No implicit mixing: int + int64 is a type error. Convert explicitly.
 
   []T                 Slice (dynamic array): []int, []string, []byte, []float, []Point
   map[K]V             Hash map. Keys: int|string|float|bool|Struct|Enum.
-                      Values: same, []T (map[string][]int, …), or nested
-                      map[K2]V (depth 2; map[string]map[string]int, …).
+                      Values: same, []T (map[string][]int, …), nested
+                      map[K2]V (depth 2; map[string]map[string]int, …),
+                      Option[T] / Result[T,E] (map[string]Option[int], …).
                       Struct/enum keys hash field-wise / tag+payload.
   []bool / []Enum     Bool and enum slices (make/append/index)
   [][]T               Nested slices (headers of inner slices; monomorphized)
@@ -774,8 +775,16 @@ Mako uses Result[T, E] and Option[T] instead of null or exceptions.
   let mut mf = make(map[int]float)
   let mut fi = make(map[float]int)
   let mut ff = make(map[float]float)
+  // Keys: int|string|float|bool|Struct|Enum (pack types too)
+  // Values: same | []T | map[K2]V (depth 2) | Option[T] | Result[T,E]
   // struct values: map[int]Point, map[string]Point, map[float]Point, map[*]eng.Table
-  // struct keys:   map[Point]int|string|float|Struct, map[eng.Table]int|Point
+  // struct keys:   map[Point]int|string|float|bool|Struct, map[eng.Table]int|Point
+  // bool / set:    map[string]bool, map[bool]int
+  // enum:          map[Color]int, map[int]Color, map[Color]Point
+  // slice values:  map[string][]int, map[Point][]string
+  // nested maps:   map[string]map[string]int, map[Point]map[int]int
+  // bag values:    map[string]Option[int], map[int]Result[string,string]
+  // nested slices: [][]int, [][]Point (make/append/index/range)
 
   m["a"] = 1                           // insert
   print_int(m["a"])                    // get (missing -> zero value)
@@ -789,7 +798,7 @@ Mako uses Result[T, E] and Option[T] instead of null or exceptions.
   }
 
   delete(m, "a")                       // remove
-  print_int(len(m))                    // entry count
+  print_int(len(m))                    // entry count (nil map -> 0)
 
   // Iteration (order unspecified):
   for k, v in range m {
@@ -797,15 +806,37 @@ Mako uses Result[T, E] and Option[T] instead of null or exceptions.
       print_int(v)
   }
 
+  // Slice values / nested maps:
+  let mut groups = make(map[string][]int)
+  groups["a"] = [1, 2, 3]
+  let mut nested = make(map[string]map[string]int)
+  let mut row = make(map[string]int)
+  row["x"] = 1
+  nested["a"] = row
+  print_int(nested["a"]["x"])          // 1
+
+  // Bag values (Option / Result per key):
+  let mut maybe = make(map[string]Option[int])
+  maybe["a"] = Some(42)
+  maybe["b"] = None
+  match maybe["a"] {
+      Some(v) => print_int(v),
+      None => {},
+  }
+  let mut tried = make(map[int]Result[string, string])
+  tried[1] = Ok("yes")
+  tried[2] = Err("no")
+
   // Helpers (all map kinds):
   let ks = maps_keys(m)                // []K
   let vs = maps_values(m)              // []V
-  let c = maps_clone(m)
+  let c = maps_clone(m)                // shallow (nested: inner pointers)
   maps_equal(m, c)                     // 1 if equal (structs: structural)
   maps_copy(c, m)
   maps_clear(c)
 
   // Float keys: +0 and -0 are the same; all NaNs share one key.
+  // Struct keys: field-wise eq + stable field hash. Enum keys: tag + payload.
 
 ================================================================================
 18. STRINGS

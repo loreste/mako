@@ -5,6 +5,7 @@ fast at runtime, and designed so **builds stay fast**.
 
 **Guided tour:** [The Mako Book](book/).  
 **Full syntax guide:** [GUIDE.md](GUIDE.md).  
+**Low ceremony:** [ERGONOMICS.md](ERGONOMICS.md).  
 **Identity (our syntax):** [IDENTITY.md](IDENTITY.md).  
 **Keywords:** [KEYWORDS.md](KEYWORDS.md).  
 **Product north star:** [VISION.md](VISION.md).  
@@ -86,6 +87,19 @@ Bitwise: `&` `|` `^` `&^` `<<` `>>`, unary `^`.
 `==` / `!=` work on strings (by content), named structs (field-wise), and
 enums (tag + payload).
 
+## Collections (maps & slices)
+
+One monomorphized surface — no special collection package for everyday work:
+
+| Form | Notes |
+|------|--------|
+| `[]T` | int/string/float/bool/byte/Struct/Enum; nested `[][]T` |
+| `map[K]V` | **K:** int\|string\|float\|bool\|Struct\|Enum · **V:** same, `[]T`, `map[K2]V` (depth 2), `Option[T]`, `Result[T,E]` |
+| Ops | `m[k]`, `m[k]=v`, `has`, `delete`, `len`, comma-ok, `range`, `maps_*` |
+
+Short patterns (sets, groups, nested maps, bag values): [ERGONOMICS.md](ERGONOMICS.md).  
+Full guide: [GUIDE.md](GUIDE.md) §4b–4c · builtins: [BUILTINS.md](BUILTINS.md).
+
 ## Packs & pulls
 
 Always pack-qualified (clear call sites). Default name from optional
@@ -109,7 +123,11 @@ pull (
 //   match t { eng.Table { n } => … }
 // Enums: eng.Red / eng.Green(n) / eng.Color.Red / eng.Color.Green(n)
 // Multi-return of pack structs: let t, n = eng.grow_pair(t0, 1)
-// Maps: map[int|string|float] × int|string|float|Struct (any combo)
+// Maps: keys int|string|float|bool|Struct|Enum
+//   values: same | []T | map[K2]V (depth 2) — any combo
+//   e.g. map[string][]int, map[Point]int, map[Color][]string,
+//        map[string]map[string]int, map[string]bool
+// Nested slices: [][]T (make / append / index / range)
 ```
 
 ## Concurrency & parallelism (first-class)

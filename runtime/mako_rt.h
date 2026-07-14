@@ -1568,6 +1568,96 @@ static inline bool mako_f64_key_eq(double a, double b) {
     return a == b;
 }
 
+/* Structural eq/hash for Option/Result bags (struct fields, map keys). */
+static inline bool mako_eq_option_int(MakoOptionInt a, MakoOptionInt b) {
+    if (a.some != b.some) return false;
+    if (!a.some) return true;
+    return a.value == b.value && mako_str_eq(a.ok_s, b.ok_s) && a.ok_f == b.ok_f;
+}
+
+static inline uint64_t mako_hash_option_int(MakoOptionInt k) {
+    uint64_t h = 14695981039346656037ULL;
+    h ^= (uint64_t)(k.some ? 1 : 0);
+    h *= 1099511628211ULL;
+    if (!k.some) return h;
+    h ^= mako_hash_i64(k.value);
+    h *= 1099511628211ULL;
+    h ^= mako_hash_bytes(k.ok_s.data ? k.ok_s.data : "", k.ok_s.data ? k.ok_s.len : 0);
+    h *= 1099511628211ULL;
+    h ^= mako_hash_f64(k.ok_f);
+    h *= 1099511628211ULL;
+    return h;
+}
+
+static inline bool mako_eq_result_int(MakoResultInt a, MakoResultInt b) {
+    if (a.ok != b.ok) return false;
+    if (a.ok) {
+        return a.value == b.value && mako_str_eq(a.ok_s, b.ok_s) && a.ok_f == b.ok_f;
+    }
+    if (a.err_kind != b.err_kind) return false;
+    if (a.err_kind == 0) {
+        return mako_str_eq(a.err, b.err);
+    }
+    return a.err_tag == b.err_tag && a.err_i0 == b.err_i0 && a.err_i1 == b.err_i1
+        && a.err_i2 == b.err_i2 && mako_str_eq(a.err_s0, b.err_s0)
+        && mako_str_eq(a.err_s1, b.err_s1);
+}
+
+static inline uint64_t mako_hash_result_int(MakoResultInt k) {
+    uint64_t h = 14695981039346656037ULL;
+    h ^= (uint64_t)(k.ok ? 1 : 0);
+    h *= 1099511628211ULL;
+    if (k.ok) {
+        h ^= mako_hash_i64(k.value);
+        h *= 1099511628211ULL;
+        h ^= mako_hash_bytes(k.ok_s.data ? k.ok_s.data : "", k.ok_s.data ? k.ok_s.len : 0);
+        h *= 1099511628211ULL;
+        h ^= mako_hash_f64(k.ok_f);
+        h *= 1099511628211ULL;
+        return h;
+    }
+    h ^= (uint64_t)(uint32_t)k.err_kind;
+    h *= 1099511628211ULL;
+    if (k.err_kind == 0) {
+        h ^= mako_hash_bytes(k.err.data ? k.err.data : "", k.err.data ? k.err.len : 0);
+        h *= 1099511628211ULL;
+        return h;
+    }
+    h ^= (uint64_t)(uint32_t)k.err_tag;
+    h *= 1099511628211ULL;
+    h ^= mako_hash_i64(k.err_i0);
+    h *= 1099511628211ULL;
+    h ^= mako_hash_i64(k.err_i1);
+    h *= 1099511628211ULL;
+    h ^= mako_hash_i64(k.err_i2);
+    h *= 1099511628211ULL;
+    h ^= mako_hash_bytes(k.err_s0.data ? k.err_s0.data : "", k.err_s0.data ? k.err_s0.len : 0);
+    h *= 1099511628211ULL;
+    h ^= mako_hash_bytes(k.err_s1.data ? k.err_s1.data : "", k.err_s1.data ? k.err_s1.len : 0);
+    h *= 1099511628211ULL;
+    return h;
+}
+
+static inline bool mako_eq_result_float(MakoResultFloat a, MakoResultFloat b) {
+    if (a.ok != b.ok) return false;
+    if (a.ok) return a.value == b.value;
+    return mako_str_eq(a.err, b.err);
+}
+
+static inline uint64_t mako_hash_result_float(MakoResultFloat k) {
+    uint64_t h = 14695981039346656037ULL;
+    h ^= (uint64_t)(k.ok ? 1 : 0);
+    h *= 1099511628211ULL;
+    if (k.ok) {
+        h ^= mako_hash_f64(k.value);
+        h *= 1099511628211ULL;
+        return h;
+    }
+    h ^= mako_hash_bytes(k.err.data ? k.err.data : "", k.err.data ? k.err.len : 0);
+    h *= 1099511628211ULL;
+    return h;
+}
+
 static inline MakoString mako_str_clone(MakoString s) {
     if (MAKO_UNLIKELY(s.len == 0)) {
         return mako_str_empty;

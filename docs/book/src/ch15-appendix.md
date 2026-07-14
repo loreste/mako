@@ -172,7 +172,9 @@ the result is already determined by the left.
 | `[]byte`          | Byte slice                               |
 | `[]string`        | String slice                             |
 | `[]float`         | Float slice                              |
-| `map[K]V`         | Hash map (K: string or int, V: any)      |
+| `[]bool` / `[]Enum` | Bool and enum slices                   |
+| `[][]T`           | Nested slices (outer headers of inners)  |
+| `map[K]V`         | Hash map — keys: int\|string\|float\|bool\|Struct\|Enum; values: same, `[]T`, nested `map[K2]V` (depth 2), `Option[T]`, `Result[T,E]` |
 | `chan[T]`          | Typed channel                            |
 | `Option[T]`       | Some(T) or None                          |
 | `Result[T, E]`    | Ok(T) or Err(E)                          |
@@ -230,7 +232,13 @@ the result is already determined by the left.
 | `make`            | `(map[K]V[, hint]) -> map[K]V`  | Allocate map         |
 | `has`             | `(map[K]V, K) -> bool`          | Key presence check   |
 | `delete`          | `(map[K]V, K)`                  | Remove key           |
-| `len`             | `(map[K]V) -> int`              | Entry count          |
+| `len`             | `(map[K]V) -> int`              | Entry count (nil map → 0) |
+| `maps_keys`       | `(map[K]V) -> []K`              | Keys as slice        |
+| `maps_values`     | `(map[K]V) -> []V`              | Values as slice      |
+| `maps_clone`      | `(map[K]V) -> map[K]V`          | Shallow clone        |
+| `maps_equal`      | `(map[K]V, map[K]V) -> int`     | Equality (1 / 0)     |
+| `maps_copy`       | `(dst, src: map[K]V)`           | Copy entries into dst |
+| `maps_clear`      | `(map[K]V)`                     | Remove all entries   |
 
 ### String Operations
 

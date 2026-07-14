@@ -18,9 +18,9 @@ Short facts:
 - Methods: `on Type { fn m(self) -> T { ... } }`
 - Modules: `pack name`, `pull "path"`, always qualify: `pkg.fn`, `eng.Table`,
   `eng.Point { x: 1 }`, `eng.Red` / `eng.Color.Green(n)`
-- Maps: keys `int|string|float|bool|Struct|Enum`; values same, `[]T`, or
-  nested `map[K2]V` (depth 2; e.g. `map[string]map[string]int`); nested `[][]T`;
-  `maps_*`
+- Maps: keys `int|string|float|bool|Struct|Enum`; values same, `[]T`, `[][]T`,
+  nested `map[K2]V` (depth 2), or bags `Option[T]` / `Result[T,E]`
+  (e.g. `map[string]Option[int]`); nested `[][]T`; `maps_*`
 - Struct/enum `==` `!=` structural (strings by content)
 - Channels: `make(chan[T], n)` / `chan_open[T](n)` for int/bool/float/string/struct
 - Parallel work: `fan(xs, fn(x) { x * x })`

@@ -419,14 +419,16 @@ rows = append(rows, [10, 20])
 | `let xs: []float = [1.0, 2.0]` / `make([]float, n[, cap])` | Float slice |
 | `let g: [][]T = [[…], …]` / `make([][]T, …)` | Nested slices |
 | `[]byte(s)` or `bytes(s)` / `string(b)` | String ↔ bytes conversion |
-| `make([]int\|[]byte\|[]string\|[]float\|[][]T, …)` | Pre-sized allocation |
+| `make([]int\|[]byte\|[]string\|[]float\|[]bool\|[][]T, …)` | Pre-sized allocation |
+| `[]bool` / `[]Enum` | Bool and enum element slices |
 | `s[i:j]`, `len`/`cap`/`append`/`copy` | Slice operations |
 
 Compile-time: `int8(200)` / `byte(300)` rejected at `mako check` when the arg is a constant
 (`examples/bad/int8_literal_oor.mko`, `byte_literal_oor.mko`). Runtime still aborts for non-const OOR.
 
 `append` / `copy` are type-safe. Tests: `slice_test`, `slice64_test`, `bytes_test`,
-`make_bytes_test`, `str_slice_test`, `float_slice_test`, `nested_slice_test`.
+`make_bytes_test`, `str_slice_test`, `float_slice_test`, `nested_slice_test`,
+`map_bool_test` (`[]bool`), `map_enum_test` (`[]Enum`).
 
 ---
 
@@ -564,9 +566,9 @@ print_int(builder_len(b))
 Hash maps (open addressing). **Keys:** `int`, `string`, `float`, **`bool`**,
 **structs**, or **enums**. **Values:** same set **or slices** `[]T` — any combo,
 including `map[Point]Label`, `map[Color]int`, `map[string][]int`,
-`map[Point][]int` / `map[Color][]string`, nested `map[string]map[string]int`
-(depth 2), set-style `map[string]bool`, and `map[bool]int`. Pack types work as
-keys or values.
+`map[string][][]int`, `map[Point][]int` / `map[Color][]string`, nested
+`map[string]map[string]int` (depth 2), set-style `map[string]bool`, and
+`map[bool]int`. Pack types work as keys or values.
 
 Float keys: `+0.0` / `-0.0` are the same key; all NaNs share one key.
 Struct keys: field-wise equality + stable field hash (strings by content).
@@ -652,12 +654,26 @@ maps_clear(c)
 | `len(m)` | entry count |
 | `for k, v in range m` | iteration; order unspecified |
 | `maps_keys` / `maps_values` | `[]K` / `[]V` |
-| `maps_clone` / `maps_equal` / `maps_copy` / `maps_clear` | bulk helpers |
+| `maps_clone` / `maps_equal` / `maps_copy` / `maps_clear` | bulk helpers (shallow for nested maps) |
+
+Missing key → zero value (`0` / `""` / `false` / empty slice / **nil** inner
+map with `len` 0 / **None** / **Err("")** for bag values). Nested maps are
+depth **2** only; `maps_clone` / `maps_equal` compare/copy outer entries by
+**inner-map pointer** identity. Bag-value maps (`map[K]Option[T]`,
+`map[K]Result[T,E]`) store bags by value; match on `m[k]` works for Some/Ok arms.
 
 Wrong key/value combo rejected at check (`examples/bad/map_key_type.mko`).
+Struct keys may hold slice/map/Option/Result/enum fields — eq/hash use
+identity or structural bag helpers (not invalid C aggregate `==`).
 Tests: `map_test`, `map_struct_test`, `map_float_test`, `map_struct_key_test`,
 `map_bool_test`, `map_enum_test`, `map_slice_test` (`map[K][]T` incl. named keys),
-`map_nested_test` (`map[K]map[K2]V`).
+`map_nested_test` (`map[K]map[K2]V`), `map_map_slice_test` (`map[K]map[…][]T`),
+`map_nested_slice_test` (`map[K][][]T`), `slice_map_test` (`[]map` / `map[K][]map`),
+`map_option_result_test` (`map[K]Option[T]` / `map[K]Result[T,E]`),
+`nested_slice_test`, `struct_slice_fields_test`, `lang_residuals_test`.
+`Option[map[K]V]` / `Result[map[K]V, E]` work with `None` / `Some` / `Ok` and match
+unboxing for SI/II/SS, float/bool key maps, and monomorphized map pointers.
+Low-ceremony patterns: [ERGONOMICS.md](ERGONOMICS.md).
 
 ---
 

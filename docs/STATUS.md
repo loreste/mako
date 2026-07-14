@@ -1,6 +1,6 @@
 # Mako status (adversarial / verified)
 
-Last inventory: 2026-07-14 (**unique Mako surface** · pack/pull types · maps float/struct · suite **130+** · **The Mako Book**).
+Last inventory: 2026-07-14 (**unique Mako surface** · pack/pull types · full map/slice/bag monomorph grid · suite **130+** · **The Mako Book**).
 
 **Book:** [The Mako Book](book/) · **Guide:** [GUIDE.md](GUIDE.md) · **Identity:** [IDENTITY.md](IDENTITY.md) · **Pain points:** [PAIN_POINTS.md](PAIN_POINTS.md) · **Build:** [BUILD.md](BUILD.md) · **Stdlib:** [STDLIB.md](STDLIB.md) · **Roadmap:** [ROADMAP.md](ROADMAP.md) · **Changelog:** [../CHANGELOG.md](../CHANGELOG.md).
 
@@ -25,6 +25,7 @@ Last inventory: 2026-07-14 (**unique Mako surface** · pack/pull types · maps f
 |-------|--------|
 | **The Mako Book** (`docs/book/` · mdBook `book.toml` + chapters) | Done |
 | Accuracy pass: README / GUIDE / STATUS / ROADMAP / howto index | Done |
+| Collections surface docs (ERGONOMICS · LANGUAGE · BUILTINS · book ch03/ch15 · llms*) | Done — full map/slice/bag grid |
 
 ## Tooling — **Done**
 
@@ -33,7 +34,7 @@ Last inventory: 2026-07-14 (**unique Mako surface** · pack/pull types · maps f
 | `mako version` / `--version` with OS/arch | Done |
 | Grouped `import (` / `{` + fmt | Done |
 | Packs & pulls (`pack`/`pull` flair, always qualify, `import`/`package` dual, internal rewrite) | Done |
-| Low-ceremony ergonomics doc + tests (`print` poly, `==` strings, match routes) | Done |
+| Low-ceremony ergonomics doc + tests (`print` poly, `==` strings, match routes, maps/slices) | Done — [ERGONOMICS.md](ERGONOMICS.md) |
 | Path-style import blocks (nested std, vendor/, module=, aliases, blank-line groups) | Done |
 | Speed / concurrency / parallelism north star ([SPEED.md](SPEED.md)) | Done (product bar) |
 | `fan` + Mako `fn` lambdas (block body codegen + types) · crew/fan tests | Done |
@@ -65,7 +66,8 @@ Last inventory: 2026-07-14 (**unique Mako surface** · pack/pull types · maps f
 
 | Check | Result |
 |-------|--------|
-| `cargo build --release` | PASS (prior) |
+| `cargo build --release` | PASS |
+| `map[K]Option[T]` / `map[K]Result[T,E]` | PASS — `map_option_result_test` (11 tests) |
 | Book samples `mako check` / `run` | PASS — `docs/book/examples/book_*.mko` |
 | `mako test examples/testing` | PASS — **165 passed**, 0 failed |
 | `if init; cond { }` + both-branches-return body | Done — `examples/testing/if_init_test.mko` |
@@ -151,12 +153,27 @@ Last inventory: 2026-07-14 (**unique Mako surface** · pack/pull types · maps f
 | The Mako Book + docs accuracy | Done |
 | Pack-qualified types (`eng.Table` annot / lit / pattern) + multi-return of structs | Done — `pack_types_test` · `tuple_struct_test` |
 | Struct eq/hash with slice/map fields (engine tables as packs) | Done — `struct_slice_fields_test` |
+| Struct eq/hash with Option/Result/enum fields | Done — `struct_slice_fields_test` · `lang_residuals_test` |
 | Pack-qualified enums (`eng.Red` / `eng.Color.Green(n)` construct + match) | Done — `pack_types_test` |
 | Maps of structs (`map[int]T` / `map[string]T`, pack types) | Done — `map_struct_test` |
 | `make(chan[Struct])` + `maps_*` on II/SS/struct maps | Done — `chan_make_struct_test` · `map_struct_test` |
 | `map[int]float` / `map[string]float` + structural maps_equal | Done — `map_float_test` · `map_struct_test` |
 | Struct/enum `==` `!=` (structural) | Done — `struct_eq_test` |
 | Float map keys (`map[float]int|string|float|Struct`) | Done — `map_float_test` · `map_struct_test` |
+| Struct map keys (`map[Point]int|string|float|bool|Struct`) | Done — `map_struct_key_test` |
+| `map[Struct]Struct` (named key + named value) | Done — `map_struct_key_test` |
+| `map[K]bool` + `[]bool` + `map[bool]V` | Done — `map_bool_test` |
+| Enum maps + `[]Enum` (`map[K]Enum`, `map[Enum]V`, …) | Done — `map_enum_test` |
+| Nested slices `[][]T` | Done — `nested_slice_test` |
+| `map[K][]T` (scalar + named keys × slice values) | Done — `map_slice_test` |
+| Nested maps `map[K]map[K2]V` (depth 2) | Done — `map_nested_test` |
+| `map[K][][]T` (nested-slice values) | Done — `map_nested_slice_test` |
+| Nested maps with slice values `map[K]map[…][]T` | Done — `map_map_slice_test` |
+| `Option[map[K]V]` / `Result[map[K]V]` (all map kinds, match unbox) | Done — `option_map_test` |
+| `[]map[K]V` and `map[K][]map[…]` | Done — `slice_map_test` |
+| `map[K]Option[T]` / `map[K]Result[T,E]` (bag values) | Done — `map_option_result_test` |
+| `len` nil-safe on SI/II/SS maps (and monomorphized maps) | Done — runtime + nested tests |
+| Low-ceremony collections ergonomics | Done — [ERGONOMICS.md](ERGONOMICS.md) |
 
 ---
 

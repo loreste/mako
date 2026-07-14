@@ -1,0 +1,74 @@
+// []map[K]V and map[K][]map[K2]V
+
+fn TestSliceOfMapsLit() {
+    let mut row = make(map[string]int)
+    row["a"] = 1
+    row["b"] = 2
+    let xs: []map[string]int = [row]
+    assert_eq(len(xs), 1)
+    assert_eq(xs[0]["a"], 1)
+    assert_eq(xs[0]["b"], 2)
+}
+
+fn TestSliceOfMapsMakeAppend() {
+    let mut xs = make([]map[string]int, 0, 4)
+    let mut r1 = make(map[string]int)
+    r1["x"] = 10
+    let mut r2 = make(map[string]int)
+    r2["y"] = 20
+    xs = append(xs, r1)
+    xs = append(xs, r2)
+    assert_eq(len(xs), 2)
+    assert_eq(xs[0]["x"], 10)
+    assert_eq(xs[1]["y"], 20)
+}
+
+fn TestSliceOfMapsII() {
+    let mut row = make(map[int]int)
+    row[1] = 9
+    let xs: []map[int]int = [row]
+    assert_eq(xs[0][1], 9)
+}
+
+fn TestMapOfSliceOfMaps() {
+    let mut m = make(map[string][]map[string]int)
+    let mut row = make(map[string]int)
+    row["a"] = 1
+    m["k"] = [row]
+    assert_eq(m["k"][0]["a"], 1)
+    assert(has(m, "k"))
+    let rows, ok = m["k"]
+    assert(ok)
+    assert_eq(rows[0]["a"], 1)
+}
+
+fn TestMapOfSliceOfMapsHelpers() {
+    let mut m = make(map[string][]map[string]int)
+    let mut r1 = make(map[string]int)
+    r1["n"] = 1
+    let mut r2 = make(map[string]int)
+    r2["n"] = 2
+    m["a"] = [r1]
+    m["b"] = [r2]
+    let ks = maps_keys(m)
+    assert_eq(len(ks), 2)
+    let c = maps_clone(m)
+    assert_eq(maps_equal(m, c), 1)
+    assert_eq(c["a"][0]["n"], 1)
+}
+
+fn TestMapOfSliceOfMapsRange() {
+    let mut m = make(map[string][]map[string]int)
+    let mut r = make(map[string]int)
+    r["v"] = 5
+    m["k"] = [r]
+    let mut sum = 0
+    for _, rows in range m {
+        for _, row in range rows {
+            for _, v in range maps_values(row) {
+                sum = sum + v
+            }
+        }
+    }
+    assert_eq(sum, 5)
+}

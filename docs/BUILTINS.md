@@ -157,19 +157,42 @@ Packs: `std/fmt`, `std/print`. Tests: `fmt_print_test.mko`. Demo: `examples/fmt_
 
 | Function | Signature | Description |
 |----------|-----------|-------------|
-| `maps_keys` | `maps_keys(m: map[K]V) -> []K` | Keys (`K` is `string`, `int`, `float`, or named struct) |
-| `maps_values` | `maps_values(m: map[K]V) -> []V` | Values (`int`, `string`, `float`, or struct) |
+| `maps_keys` | `maps_keys(m: map[K]V) -> []K` | Keys as a slice (`[]int` / `[]string` / `[]float` / `[]bool` / `[]Struct` / `[]Enum`) |
+| `maps_values` | `maps_values(m: map[K]V) -> []V` | Values as a slice (incl. `[][]T` for slice-valued maps, `[]map[…]` for nested maps) |
 | `maps_clear` | `maps_clear(m: map[K]V) -> void` | Remove all entries |
-| `maps_clone` | `maps_clone(m: map[K]V) -> map[K]V` | Shallow copy |
-| `maps_equal` | `maps_equal(a: map[K]V, b: map[K]V) -> int` | Same keys/values (structs: structural / string content) |
+| `maps_clone` | `maps_clone(m: map[K]V) -> map[K]V` | Shallow copy (nested maps: copy outer entries / inner pointers) |
+| `maps_equal` | `maps_equal(a: map[K]V, b: map[K]V) -> int` | Same keys/values (structs/enums structural; nested maps: pointer identity on inners) |
 | `maps_copy` | `maps_copy(dst: map[K]V, src: map[K]V) -> void` | Copy entries into `dst` |
 
-Supported map kinds:
-`map[int|string|float|bool|Struct|Enum] × int|string|float|bool|Struct|Enum|[]T`
-(any combination, including slice values like `map[string][]int` / `map[Point][]int`
-and nested maps like `map[string]map[string]int` — depth 2)
-(named/pack structs). Float keys: `+0`/`-0` unify; all NaNs share one key.
-Tests: `map_test`, `map_struct_test`, `map_float_test`.
+Supported map kinds — **keys:** `int` \| `string` \| `float` \| `bool` \| named
+**Struct** \| **Enum** (incl. pack-qualified types). **Values:** the same set,
+**slices** `[]T` / `[][]T` (int/string/float/bool/byte/Struct/Enum),
+**nested maps** `map[K2]V` (depth 2 only), or **bags** `Option[T]` /
+`Result[T,E]` (int/string/float/bool/Struct/Enum payload). Any combination, e.g.:
+
+| Example | Role |
+|---------|------|
+| `map[string]int` / `map[int]int` / `map[string]string` | Core SI / II / SS |
+| `map[int]float` / `map[float]int` / `map[float]float` | Float values / keys |
+| `map[string]bool` / `map[bool]int` | Set-style / bool keys |
+| `map[int]Point` / `map[Point]int` / `map[Point]Label` | Struct values / keys |
+| `map[Color]int` / `map[int]Color` / `map[Color]Point` | Enum values / keys |
+| `map[string][]int` / `map[Point][]string` | Slice values |
+| `map[string][][]int` / `map[Point][][]int` | Nested-slice values |
+| `map[string]map[string]int` / `map[Point]map[int]int` | Nested maps (depth 2) |
+| `map[string]map[string][]int` / `map[Point]map[string][]int` | Nested maps + slice values |
+| `[]map[string]int` / `map[string][]map[string]int` | Slice of maps / map of those |
+| `map[string]Option[int]` / `map[Point]Option[int]` | Option bag values |
+| `map[int]Result[string,string]` / `map[string]Result[Point,string]` | Result bag values |
+
+Float keys: `+0`/`-0` unify; all NaNs share one key. Struct keys: field-wise eq
++ stable field hash (strings by content). Enum keys: tag + payload.
+Missing key → zero value (`None` / `Err("")` for bags); `len` on a nil map is `0`.
+
+Tests: `map_test`, `map_struct_test`, `map_float_test`, `map_struct_key_test`,
+`map_bool_test`, `map_enum_test`, `map_slice_test`, `map_nested_test`,
+`map_nested_slice_test`, `map_map_slice_test`, `slice_map_test`,
+`map_option_result_test`, `nested_slice_test`.
 
 ---
 

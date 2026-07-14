@@ -217,6 +217,12 @@ fn main() {
     // String slices
     let names: []string = ["alice", "bob", "carol"]
     print(names[1])       // "bob"
+
+    // Nested slices
+    let grid: [][]int = [[1, 2], [3, 4]]
+    print_int(grid[0][1]) // 2
+    let mut rows = make([][]int, 0, 4)
+    rows = append(rows, [10, 20])
 }
 ```
 
@@ -255,11 +261,12 @@ fn main() {
 
 Maps (`map[K]V`) are hash tables. **Keys:** `int`, `string`, `float`, **`bool`**,
 named **structs**, or named **enums**. **Values:** the same set, **slices**
-`[]T`, or **nested maps** `map[K2]V` (depth 2) — any combination, including
-`map[Point]Label`, `map[Color]int`, `map[string][]int`, `map[Point][]int`,
-`map[string]map[string]int`, set-style `map[string]bool`, and `map[bool]int`.
-Pack types work as keys or values. `[]bool`, `[]Enum`, and nested `[][]T`
-slices are supported (make/append/index).
+`[]T`, **nested maps** `map[K2]V` (depth 2), or **bags** `Option[T]` /
+`Result[T,E]` — any combination, including `map[Point]Label`, `map[Color]int`,
+`map[string][]int`, `map[Point][]int`, `map[string]map[string]int`, set-style
+`map[string]bool`, `map[bool]int`, `map[string]Option[int]`, and
+`map[int]Result[string,string]`. Pack types work as keys or values. `[]bool`,
+`[]Enum`, and nested `[][]T` slices are supported (make/append/index).
 
 Float keys treat `+0.0` / `-0.0` as one key; all NaNs share one key.
 Struct keys use field-wise equality and a stable field hash.
@@ -320,9 +327,56 @@ fn main() {
     let mut by_ss = make(map[Point]Label)
     by_ss[Point { x: 0, y: 0 }] = Label { text: "o", id: 0 }
 
+    // Bool keys / set-style values
+    let mut seen = make(map[string]bool)
+    seen["a"] = true
+    let mut by_b = make(map[bool]int)
+    by_b[true] = 1
+
+    // Enum keys / values
+    enum Color { Red, Green }
+    let mut by_e = make(map[Color]int)
+    by_e[Red] = 1
+    let mut statuses = make(map[int]Color)
+    statuses[1] = Green
+
+    // Slice values (groups) and named-key slice maps
+    let mut groups = make(map[string][]int)
+    groups["a"] = [1, 2, 3]
+    let mut by_pt_rows = make(map[Point][]int)
+    by_pt_rows[Point { x: 0, y: 0 }] = [10, 20]
+
+    // Nested maps (depth 2): store an inner map pointer
+    let mut nested = make(map[string]map[string]int)
+    let mut row = make(map[string]int)
+    row["x"] = 1
+    nested["a"] = row
+    print_int(nested["a"]["x"])  // 1
+
+    // Bag values: Option / Result per key
+    let mut maybe = make(map[string]Option[int])
+    maybe["a"] = Some(42)
+    maybe["b"] = None
+    match maybe["a"] {
+        Some(v) => print_int(v),
+        None => {},
+    }
+    let mut tried = make(map[int]Result[string, string])
+    tried[1] = Ok("yes")
+    tried[2] = Err("no")
+
+    // Comma-ok (missing → zero value / ok false)
+    let v, ok = m["a"]
+    if ok {
+        print_int(v)
+    }
+
     // Helpers (all map kinds)
     let ks = maps_keys(m)
+    let vs = maps_values(m)
     let c = maps_clone(m)
+    assert_eq(maps_equal(m, c), 1)
+    maps_copy(c, m)
     maps_clear(c)
 
     // Pre-sized (hint for initial capacity)

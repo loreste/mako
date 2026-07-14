@@ -299,9 +299,12 @@ fn main() {
 }
 ```
 
-Also `map[string]eng.Table` and `map[float]eng.Table`. Same ops as other maps:
-`len` / `has` / `delete`, comma-ok, `range`, and `maps_keys` / `maps_values` /
-`maps_clone` / `maps_equal` / `maps_copy` / `maps_clear`.
+Also `map[string]eng.Table`, `map[float]eng.Table`, and pack types as **keys**
+(`map[eng.Table]int`, `map[eng.Table]Point`). Same ops as other maps: `len` /
+`has` / `delete`, comma-ok, `range`, and `maps_keys` / `maps_values` /
+`maps_clone` / `maps_equal` / `maps_copy` / `maps_clear`. Full map value grid
+(incl. `map[K][]T`, nested `map[K]map[…]`, and bag values `map[K]Option[T]` /
+`map[K]Result[T,E]`) is in [GUIDE.md](../GUIDE.md) §4c.
 
 ### Pack-qualified enums
 

@@ -1,0 +1,181 @@
+// map[K]Option[T] / map[K]Result[T,E] — bag values stored by value
+
+struct Point {
+    x: int
+    y: int
+}
+
+fn TestMapStringOptionInt() {
+    let mut m = make(map[string]Option[int])
+    m["a"] = Some(42)
+    m["b"] = None
+    assert_eq(len(m), 2)
+    assert(has(m, "a"))
+    assert(has(m, "b"))
+    assert(not has(m, "z"))
+    match m["a"] {
+        Some(v) => assert_eq(v, 42),
+        None => assert(false),
+    }
+    match m["b"] {
+        Some(_) => assert(false),
+        None => assert(true),
+    }
+    // missing key → None (zero bag)
+    match m["missing"] {
+        Some(_) => assert(false),
+        None => assert(true),
+    }
+    // update
+    m["a"] = Some(99)
+    match m["a"] {
+        Some(v) => assert_eq(v, 99),
+        None => assert(false),
+    }
+    delete(m, "b")
+    assert(not has(m, "b"))
+    assert_eq(len(m), 1)
+}
+
+fn TestMapIntOptionString() {
+    let mut m = make(map[int]Option[string])
+    m[1] = Some("hi")
+    m[2] = None
+    match m[1] {
+        Some(s) => assert_eq_str(s, "hi"),
+        None => assert(false),
+    }
+    match m[2] {
+        Some(_) => assert(false),
+        None => assert(true),
+    }
+}
+
+fn TestMapBoolOptionFloat() {
+    let mut m = make(map[bool]Option[float])
+    m[true] = Some(1.5)
+    match m[true] {
+        Some(f) => {
+            assert(f > 1.4)
+            assert(f < 1.6)
+        },
+        None => assert(false),
+    }
+}
+
+fn TestMapFloatOptionBool() {
+    let mut m = make(map[float]Option[bool])
+    m[2.5] = Some(true)
+    match m[2.5] {
+        Some(b) => assert(b),
+        None => assert(false),
+    }
+}
+
+fn TestMapStringResultInt() {
+    let mut m = make(map[string]Result[int, string])
+    m["ok"] = Ok(7)
+    m["err"] = Err("boom")
+    match m["ok"] {
+        Ok(v) => assert_eq(v, 7),
+        Err(_) => assert(false),
+    }
+    match m["err"] {
+        Ok(_) => assert(false),
+        Err(e) => assert_eq_str(e, "boom"),
+    }
+    // missing → zero Result (Err with empty string)
+    match m["missing"] {
+        Ok(_) => assert(false),
+        Err(_) => assert(true),
+    }
+    delete(m, "err")
+    assert(not has(m, "err"))
+}
+
+fn TestMapIntResultString() {
+    let mut m = make(map[int]Result[string, string])
+    m[1] = Ok("yes")
+    m[2] = Err("no")
+    match m[1] {
+        Ok(s) => assert_eq_str(s, "yes"),
+        Err(_) => assert(false),
+    }
+    match m[2] {
+        Ok(_) => assert(false),
+        Err(e) => assert_eq_str(e, "no"),
+    }
+}
+
+fn TestMapOptionStruct() {
+    let mut m = make(map[string]Option[Point])
+    m["p"] = Some(Point { x: 3, y: 4 })
+    m["n"] = None
+    match m["p"] {
+        Some(pt) => {
+            assert_eq(pt.x, 3)
+            assert_eq(pt.y, 4)
+        },
+        None => assert(false),
+    }
+    match m["n"] {
+        Some(_) => assert(false),
+        None => assert(true),
+    }
+}
+
+fn TestMapResultStruct() {
+    let mut m = make(map[int]Result[Point, string])
+    m[1] = Ok(Point { x: 1, y: 2 })
+    m[2] = Err("fail")
+    match m[1] {
+        Ok(pt) => {
+            assert_eq(pt.x, 1)
+            assert_eq(pt.y, 2)
+        },
+        Err(_) => assert(false),
+    }
+    match m[2] {
+        Ok(_) => assert(false),
+        Err(e) => assert_eq_str(e, "fail"),
+    }
+}
+
+fn TestMapOptionHelpers() {
+    let mut m = make(map[string]Option[int])
+    m["a"] = Some(1)
+    m["b"] = Some(2)
+    m["c"] = None
+    let ks = maps_keys(m)
+    assert_eq(len(ks), 3)
+    let vs = maps_values(m)
+    assert_eq(len(vs), 3)
+    let c = maps_clone(m)
+    assert_eq(maps_equal(m, c), 1)
+    maps_clear(c)
+    assert_eq(len(c), 0)
+    assert_eq(len(m), 3)
+}
+
+fn TestMapResultHelpers() {
+    let mut m = make(map[int]Result[int, string])
+    m[1] = Ok(10)
+    m[2] = Err("x")
+    let c = maps_clone(m)
+    assert_eq(maps_equal(m, c), 1)
+    c[1] = Ok(99)
+    assert_eq(maps_equal(m, c), 0)
+    maps_clear(m)
+    assert_eq(len(m), 0)
+}
+
+fn TestMapStructKeyOption() {
+    let mut m = make(map[Point]Option[int])
+    let p = Point { x: 1, y: 2 }
+    m[p] = Some(5)
+    match m[p] {
+        Some(v) => assert_eq(v, 5),
+        None => assert(false),
+    }
+    assert(has(m, p))
+}

@@ -1,0 +1,99 @@
+// Option[map[K]V] / Result[map[K]V] for SI, II, SS, float, bool maps
+
+fn TestOptionMapNone() {
+    let o: Option[map[string]int] = None
+    match o {
+        Some(_) => assert(false),
+        None => assert(true),
+    }
+}
+
+fn TestOptionMapSomeAnnotated() {
+    let mut m = make(map[string]int)
+    m["a"] = 2
+    let s: Option[map[string]int] = Some(m)
+    match s {
+        Some(x) => assert_eq(x["a"], 2),
+        None => assert(false),
+    }
+}
+
+fn TestOptionMapSomeInferred() {
+    let mut m = make(map[string]int)
+    m["b"] = 3
+    let s = Some(m)
+    match s {
+        Some(x) => assert_eq(x["b"], 3),
+        None => assert(false),
+    }
+}
+
+fn TestOptionMapII() {
+    let mut m = make(map[int]int)
+    m[1] = 9
+    let s: Option[map[int]int] = Some(m)
+    match s {
+        Some(x) => assert_eq(x[1], 9),
+        None => assert(false),
+    }
+}
+
+fn TestOptionMapSS() {
+    let mut m = make(map[string]string)
+    m["k"] = "v"
+    let s = Some(m)
+    match s {
+        Some(x) => assert_eq_str(x["k"], "v"),
+        None => assert(false),
+    }
+}
+
+fn TestOptionMapFloatKey() {
+    let mut m = make(map[float]int)
+    m[1.5] = 7
+    let s: Option[map[float]int] = Some(m)
+    match s {
+        Some(x) => assert_eq(x[1.5], 7),
+        None => assert(false),
+    }
+}
+
+fn TestOptionMapBoolKey() {
+    let mut m = make(map[bool]int)
+    m[true] = 1
+    let s: Option[map[bool]int] = Some(m)
+    match s {
+        Some(x) => assert_eq(x[true], 1),
+        None => assert(false),
+    }
+}
+
+fn TestResultMapSi() {
+    let mut m = make(map[string]int)
+    m["a"] = 3
+    let r: Result[map[string]int, string] = Ok(m)
+    match r {
+        Ok(x) => assert_eq(x["a"], 3),
+        Err(_) => assert(false),
+    }
+}
+
+fn TestResultMapFloatKey() {
+    let mut m = make(map[float]int)
+    m[2.5] = 8
+    let r: Result[map[float]int, string] = Ok(m)
+    match r {
+        Ok(x) => assert_eq(x[2.5], 8),
+        Err(_) => assert(false),
+    }
+}
+
+fn TestResultMapBoolKey() {
+    let mut m = make(map[bool]string)
+    m[false] = "no"
+    let r = Ok(m)
+    match r {
+        Ok(x) => assert_eq_str(x[false], "no"),
+        Err(_) => assert(false),
+    }
+}

@@ -2,14 +2,47 @@
 
 ## Unreleased
 
-### Fixes — struct eq/hash with slice and map fields
+### Language — `map[K]Option[T]` / `map[K]Result[T,E]`
+
+- **Bag values on maps** — `map[string]Option[int]`, `map[int]Result[string,string]`,
+  `map[Point]Option[int]`, etc. Values are stored by value (`MakoOptionInt` /
+  `MakoResultInt` monomorphs `MakoMapS_opt_int*`, `MakoMapI_res_string*`, …).
+  Full surface: get/set/`len`/`has`/`delete`, comma-ok, range, `maps_*`.
+  Missing key → zero bag (`None` / `Err("")`). Match on `m[k]` registers
+  Some/Ok payload kinds for nested arms.
+- **Index-assign expected type** — `m[k] = None` / `Some(x)` / `Ok(x)` / `Err(e)`
+  push the map value type as `current_expected` so bare `None` is not
+  `Option[int]` when the map holds `Option[string]`.
+- Payloads: int/string/float/bool/Struct/Enum. Keys: int|string|float|bool|Struct|Enum.
+- Tests: `map_option_result_test`.
+
+### Fixes — `Option[map[K]V]` and annotated `None`/`Some`
+
+- **`let o: Option[map[…]] = None`** — annotation is pushed as `current_expected`
+  before checking the init, so bare `None` no longer defaults to `Option[int]`.
+- **`Some(map)` / `Ok(map)` codegen** — any `MakoMap*` uses `mako_some_ptr` /
+  `mako_ok_ptr`. Match unbox tracks concrete map C types (`MakoMapFI*`,
+  `MakoMapBI*`, monomorphized maps, …) not only SI/II/SS. Inferred
+  `Some(m)` / `Ok(m)` derive kind + C type from the argument.
+- Tests: `option_map_test` (float/bool keys, SI/II/SS, Result map).
+- **`[]map[K]V` and `map[K][]map[K2]V`** — slices of map pointers (`MakoArr_map_string_int`,
+  …) with make/append/index/range; maps whose values are those slices. Deduped
+  nested-arr emission. Tests: `slice_map_test`.
+
+### Fixes — struct eq/hash with composite fields
 
 - **`mako_eq_*` / `mako_hash_*` for structs** — fields that are slices
   (`MakoIntArray`, `MakoArr_*`, …) or map/channel pointers no longer use
   `==` or `(int64_t)` casts (invalid C). Eq/hash use buffer identity
   (`.data` + `.len`) or pointer identity. Unblocks real engine packs
   (e.g. FayDB `Table` with `[]int` + `map[int]int`) after `pull`.
-- Test: `examples/testing/struct_slice_fields_test.mko`.
+- **`Option` / `Result` / enum struct fields** — same helpers no longer
+  emit aggregate `==` or int casts. Runtime `mako_eq_option_int` /
+  `mako_hash_option_int` / `mako_eq_result_int` / `mako_hash_result_int`
+  (and float-result variants) plus `mako_eq_MakoEnum_*` for enum fields.
+  Unblocks `lang_residuals_test` (`WrapOpt` with `Option[int]`) and
+  `map[WrapOpt]` / `map[WrapRes]` keys.
+- Tests: `struct_slice_fields_test`, `lang_residuals_test`.
 
 ### Language — pack-qualified types & multi-return of structs
 
@@ -49,6 +82,14 @@
   Outer keys: int|string|float|bool|Struct|Enum; inner maps any previously supported
   leaf map. Values are map pointers (missing → nil); `maps_clone` / `maps_equal` are
   shallow (pointer identity). Tests: `map_nested_test`.
+- **`map[K][][]T`** — maps with nested-slice values (`MakoMapS_arr_arr_int*`, …)
+  for scalar and named keys × `[][]int|[][]string|[][]float|[][]bool|[][]Struct|[][]Enum`.
+  Full get/set/range/`maps_*`. Tests: `map_nested_slice_test`.
+- **`map[K]map[K2][]T` / `[][]T`** — nested maps whose values are slice maps
+  (e.g. `map[string]map[string][]int`, `map[Point]map[string][]int`,
+  `map[string]map[int][][]int`). Leaf specs include slice-value monomorphs;
+  parse disambiguates `…_map_…_arr_…` from plain slice values.
+  Tests: `map_map_slice_test`.
 - **`len` on nil SI/II/SS maps** — `mako_map_{si,ii,ss}_len` treat NULL as 0 (matches
   other map kinds and nested-map zero values).
 - **`make(chan[T], n)`** — same element set as `chan_open[T](n)`: int family,
@@ -72,8 +113,9 @@
 - Tests: `pack_types_test`, `tuple_struct_test`, `map_struct_test`,
   `map_struct_key_test`, `map_float_test` (float values + float keys),
   `chan_make_struct_test`, `struct_eq_test`; lib `examples/pack_types_lib.mko`.
-- Docs: LANGUAGE_SPEC, GUIDE §4c maps / §9 channels, BUILTINS `maps_*` +
-  `chan_open`, howto packages, book ch03/ch10, llms.txt / llms-full.txt.
+- Docs: LANGUAGE_SPEC, GUIDE §4b/§4c slices+maps, BUILTINS `maps_*` +
+  `chan_open`, ERGONOMICS (maps/slices short path), LANGUAGE, STATUS,
+  GO_SYNTAX_CHECKLIST, book ch03/ch15, llms.txt / llms-full.txt.
 
 ## 0.1.1 — 2026-07-13 (HTTP/2 production + free safety + CI)
 

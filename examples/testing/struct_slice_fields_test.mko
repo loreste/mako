@@ -33,3 +33,39 @@ fn make_pair() -> (Heavy, int) {
     let h = Heavy { n: 3, xs: xs, m: m }
     return (h, h.n)
 }
+
+// Option/Result fields must emit compiling structural eq/hash (not == / cast).
+struct WrapOpt {
+    o: Option[int]
+    t: int
+}
+
+struct WrapRes {
+    r: Result[int, string]
+    n: int
+}
+
+fn TestOptionFieldEqHash() {
+    let a = WrapOpt { o: Some(1), t: 2 }
+    let b = WrapOpt { o: Some(1), t: 2 }
+    let c = WrapOpt { o: None, t: 2 }
+    assert(a == b)
+    assert(a != c)
+    // map key with Option field compiles and looks up by structural bag eq
+    let mut m = make(map[WrapOpt]int)
+    m[a] = 9
+    assert_eq(m[b], 9)
+    assert(has(m, a))
+    assert(not has(m, c))
+}
+
+fn TestResultFieldEqHash() {
+    let a = WrapRes { r: Ok(3), n: 1 }
+    let b = WrapRes { r: Ok(3), n: 1 }
+    let c = WrapRes { r: Err("x"), n: 1 }
+    assert(a == b)
+    assert(a != c)
+    let mut m = make(map[WrapRes]int)
+    m[a] = 4
+    assert_eq(m[b], 4)
+}

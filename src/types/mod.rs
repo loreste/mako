@@ -8595,10 +8595,55 @@ impl TypeChecker {
             (Type::Struct { .. }, Type::Enum { .. }) => Ok(()),
             (Type::Enum { .. }, Type::Struct { .. }) => Ok(()),
             (Type::Enum { .. }, Type::Enum { .. }) => Ok(()),
-            // Slice values: map[K][]T for supported keys and element types.
+            // Slice values: map[K][]T and map[K][][]T for supported element types.
             (
                 Type::Int | Type::String | Type::Float | Type::Bool | Type::Struct { .. } | Type::Enum { .. },
                 Type::Array(inner),
+            ) if matches!(
+                inner.as_ref(),
+                Type::Int
+                    | Type::Int64
+                    | Type::Int32
+                    | Type::Int8
+                    | Type::Byte
+                    | Type::String
+                    | Type::Float
+                    | Type::Bool
+                    | Type::Struct { .. }
+                    | Type::Enum { .. }
+            ) || matches!(
+                inner.as_ref(),
+                Type::Array(elem) if matches!(
+                    elem.as_ref(),
+                    Type::Int
+                        | Type::Int64
+                        | Type::Int32
+                        | Type::Int8
+                        | Type::Byte
+                        | Type::String
+                        | Type::Float
+                        | Type::Bool
+                        | Type::Struct { .. }
+                        | Type::Enum { .. }
+                )
+            ) =>
+            {
+                Ok(())
+            }
+            // Nested maps: map[K]map[K2]V (depth 2 only — inner value must not be a map).
+            (
+                Type::Int | Type::String | Type::Float | Type::Bool | Type::Struct { .. } | Type::Enum { .. },
+                Type::Map(_, inner_v),
+            ) if !matches!(inner_v.as_ref(), Type::Map(_, _)) => Ok(()),
+            // Slice of maps: map[K][]map[K2]V
+            (
+                Type::Int | Type::String | Type::Float | Type::Bool | Type::Struct { .. } | Type::Enum { .. },
+                Type::Array(inner),
+            ) if matches!(inner.as_ref(), Type::Map(_, _)) => Ok(()),
+            // map[K]Option[T] / map[K]Result[T, E] for scalar / struct / enum payloads
+            (
+                Type::Int | Type::String | Type::Float | Type::Bool | Type::Struct { .. } | Type::Enum { .. },
+                Type::Option(inner),
             ) if matches!(
                 inner.as_ref(),
                 Type::Int
@@ -8615,14 +8660,28 @@ impl TypeChecker {
             {
                 Ok(())
             }
-            // Nested maps: map[K]map[K2]V (depth 2 only — inner value must not be a map).
             (
                 Type::Int | Type::String | Type::Float | Type::Bool | Type::Struct { .. } | Type::Enum { .. },
-                Type::Map(_, inner_v),
-            ) if !matches!(inner_v.as_ref(), Type::Map(_, _)) => Ok(()),
+                Type::Result(inner, _),
+            ) if matches!(
+                inner.as_ref(),
+                Type::Int
+                    | Type::Int64
+                    | Type::Int32
+                    | Type::Int8
+                    | Type::Byte
+                    | Type::String
+                    | Type::Float
+                    | Type::Bool
+                    | Type::Struct { .. }
+                    | Type::Enum { .. }
+            ) =>
+            {
+                Ok(())
+            }
             _ => Err(TypeError::new(format!(
                 "unsupported map[{}]{} — keys: int|string|float|bool|Struct|Enum; \
-                 values: int|string|float|bool|Struct|Enum|[]T|map[K2]V (depth ≤ 2)",
+                 values: int|string|float|bool|Struct|Enum|[]T|[][]T|[]map|map[K2]V|Option[T]|Result[T,E]",
                 k.display(),
                 v.display()
             ))),
@@ -9208,6 +9267,16 @@ impl TypeChecker {
                 } else {
                     None
                 };
+                // Push annotation as expected type so `None` / `Some` / `Ok` / `Err` and
+                // untyped literals inhabit `Option[map[…]]`, `Result[map[…], E]`, etc.
+                let saved_expected = self.current_expected.clone();
+                let ann_ty = if let Some(ann) = ty {
+                    let t = self.resolve_type(ann)?;
+                    self.current_expected = Some(t.clone());
+                    Some(t)
+                } else {
+                    None
+                };
                 let inferred = if let Some(ref src) = moving_from {
                     // Type of moved-from binding without treating this read as use-after-move
                     self.lookup(src)
@@ -9216,14 +9285,14 @@ impl TypeChecker {
                 } else {
                     self.check_expr(init)?
                 };
+                self.current_expected = saved_expected;
                 if let Some(src) = moving_from {
                     self.moved_holds.insert(src, true);
                 }
                 if name == "_" {
                     return Ok(());
                 }
-                let final_ty = if let Some(ann) = ty {
-                    let expected = self.resolve_type(ann)?;
+                let final_ty = if let Some(expected) = ann_ty {
                     // Go-like untyped integer literals may inhabit int / int64 / int32 annotations.
                     // Empty or all-literal arrays may inhabit []int / []int64 / []int32.
                     let inferred = match (&expected, init) {
@@ -9442,6 +9511,10 @@ impl TypeChecker {
                                 it.display()
                             )));
                         }
+                        // Push map value type so None/Some/Ok/Err and untyped literals
+                        // inhabit Option/Result (and other) map values correctly.
+                        let saved_expected = self.current_expected.clone();
+                        self.current_expected = Some(v.as_ref().clone());
                         let vt = if matches!(value, Expr::Int(_)) && is_literal_int_kind(v.as_ref())
                         {
                             (*v).clone()
@@ -9450,6 +9523,7 @@ impl TypeChecker {
                         } else {
                             self.check_expr(value)?
                         };
+                        self.current_expected = saved_expected;
                         if !self.compatible(&vt, &v) {
                             return Err(TypeError::new(format!(
                                 "map value type mismatch: expected {}, got {}",
@@ -12038,7 +12112,8 @@ impl TypeChecker {
                             | Type::Bool
                             | Type::Struct { .. }
                             | Type::Enum { .. }
-                            | Type::Array(_) => Ok(Type::Array(inner)),
+                            | Type::Array(_)
+                            | Type::Map(_, _) => Ok(Type::Array(inner)),
                             other => Err(TypeError::new(format!(
                                 "make([]{}) not supported yet",
                                 other.display()

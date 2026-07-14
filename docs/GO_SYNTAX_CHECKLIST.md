@@ -65,7 +65,7 @@ Overall ≈ Σ (weight × track%).
 | [x] | Struct fields `x int` (no colon) | Done | Also `x: int` |
 | [x] | Bare return type `func f() int` | Done | Also `-> int` |
 | [x] | Multi-return type `(int, int)` | Done | Tuple under the hood |
-| [x] | `[]T` / `map[K]V` | Done | Go-like |
+| [x] | `[]T` / `map[K]V` | Done | Go-like; keys int\|string\|float\|bool\|Struct\|Enum; values same, `[]T`, nested `map[K2]V` (depth 2), `Option[T]`/`Result[T,E]`; nested `[][]T` |
 | [x] | Positional struct literals `Point{1, 2}` | Done | Named `Point { x: 1, y: 2 }` and positional `Point{1, 2}` / zero-value `Point{}`; composite-literal-in-condition ambiguity resolved |
 | [ ] | Pointer syntax `*T` / `&x` as Go | Not yet | Ownership via `hold`/`share` instead |
 

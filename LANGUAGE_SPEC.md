@@ -325,12 +325,17 @@ Out-of-bounds access aborts at runtime.
 Hash maps with open addressing. Supported key types: `string`, `int`,
 **`float`**, **`bool`**, **named structs**, and **named enums** (including
 pack-qualified types). Supported value types: the same set **plus slices**
-`[]T` (e.g. `map[string][]int`, `map[Point][]int`) **or nested maps**
-`map[K2]V` (depth 2 only) — any key×value combination of those (including
-`map[Struct]Struct`, `map[Enum]V`, `map[K]Enum`, `map[Struct|Enum][]T`,
-`map[string]map[string]int`, set-style `map[K]bool`, and `map[bool]V`).
+`[]T` / `[][]T` (e.g. `map[string][]int`, `map[string][][]int`,
+`map[Point][]int`), **nested maps** `map[K2]V` (depth 2 only), or
+**bags** `Option[T]` / `Result[T,E]` (scalar/struct/enum payload) — any
+key×value combination of those (including `map[Struct]Struct`, `map[Enum]V`,
+`map[K]Enum`, `map[Struct|Enum][]T`, `map[K][][]T`,
+`map[string]map[string]int`, `map[string]map[string][]int`, `[]map[K]V`,
+`map[K][]map[K2]V`, set-style `map[K]bool`, `map[bool]V`,
+`map[string]Option[int]`, and `map[int]Result[string,string]`).
 Nested-map values are pointers: a missing outer key yields a nil map
-(`len` is 0); `maps_clone` / `maps_equal` are shallow.
+(`len` is 0); `maps_clone` / `maps_equal` are shallow. Missing bag value →
+zero bag (`None` / `Err("")`).
 
 Float keys: `+0.0` and `-0.0` are the same key; all NaN values share one key.
 Struct keys use field-wise equality and a stable hash over fields (string
@@ -359,6 +364,8 @@ let mut groups = make(map[string][]int) // slice values
 let mut by_pt_rows = make(map[Point][]int) // named key + slice value
 let mut by_e_rows = make(map[Color][]string)
 let mut nested = make(map[string]map[string]int) // nested maps (depth 2)
+let mut maybe = make(map[string]Option[int]) // bag values
+let mut tried = make(map[int]Result[string, string])
 let mut pack_m = make(map[int]eng.Table) // after pull
 let mut pack_f = make(map[float]eng.Table)
 let mut pack_k = make(map[eng.Table]int) // pack type as key
@@ -2592,7 +2599,8 @@ The following features are planned but not yet part of the specification:
 - Full PCRE-compatible regular expressions
 - WASI preview 2 / component model
 - Optional garbage collector (never weakens ownership in systems crates)
-- Deeper nesting beyond `[][]T` / more composite monomorphization as needed
+- Deeper nesting beyond `[][]T` / `map[K]map[K2]V` (depth 3+ maps, `map` of
+  slice-maps, deeper composite monomorphization) as needed
 
 ---
 

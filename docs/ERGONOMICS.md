@@ -134,6 +134,82 @@ pull "./lib.mko"
 print(lib.add(2, 3))
 ```
 
+### Maps and slices — one surface, no special APIs
+
+Everyday collections use the same operators as scalars. No separate “hashmap”
+package, no iterator ceremony, no key-type APIs:
+
+```mko
+// Set-style membership
+let mut seen = make(map[string]bool)
+seen["a"] = true
+if has(seen, "a") { }
+
+// Group rows by key
+let mut groups = make(map[string][]int)
+groups["a"] = [1, 2, 3]
+print(len(groups["a"]))        // 3
+print(groups["a"][0])          // 1
+
+// Nested maps (depth 2) — build the inner map, store the pointer
+let mut outer = make(map[string]map[string]int)
+let mut row = make(map[string]int)
+row["x"] = 1
+outer["a"] = row
+print(outer["a"]["x"])         // 1
+
+// Struct / enum keys — field-wise / tag equality, no hand-rolled hash
+struct Point { x: int, y: int }
+enum Color { Red, Green }
+let mut by_pt = make(map[Point]int)
+by_pt[Point { x: 1, y: 2 }] = 10
+let mut by_e = make(map[Color][]string)
+by_e[Red] = ["hot"]
+
+// Nested slices
+let grid: [][]int = [[1, 2], [3]]
+print(grid[0][1])              // 2
+
+// Map of nested slices (e.g. sparse grids by name)
+let mut grids = make(map[string][][]int)
+grids["board"] = [[1, 0], [0, 1]]
+
+// Optional / fallible values per key (bag values)
+let mut maybe = make(map[string]Option[int])
+maybe["a"] = Some(42)
+maybe["b"] = None
+match maybe["a"] {
+    Some(v) => print(v),
+    None => {},
+}
+let mut tried = make(map[int]Result[string, string])
+tried[1] = Ok("yes")
+tried[2] = Err("no")
+
+// Bulk helpers when you need them
+let ks = maps_keys(groups)
+let c = maps_clone(groups)
+maps_clear(c)
+```
+
+| Prefer | Avoid (extra ceremony) |
+|--------|------------------------|
+| `m[k] = v` / `m[k]` / `has(m, k)` | Hand-rolled hash tables |
+| `let v, ok = m[k]` | Sentinel values for “missing” |
+| `map[string]bool` as a set | Parallel `[]string` + linear search |
+| `map[string][]T` for groups | Nested manual lists keyed by string |
+| `map[K]Option[T]` / `map[K]Result[T,E]` | Parallel maps + sentinel ints |
+| `for k, v in range m` | Custom iterator types |
+| Annotate `map[K]V` on API boundaries | Spelling out C monomorph names |
+
+Missing keys yield the **zero value** (empty slice, `0`/`""`/`false`, nil
+inner map with `len` 0, **None** / **Err("")** for bag values) — use comma-ok
+when presence matters. Nested-map `maps_clone` / `maps_equal` are shallow
+(pointer identity on inners).
+
+Full grid: [GUIDE.md §4c](GUIDE.md) · tests under `examples/testing/map_*.mko`,
+`nested_slice_test.mko`, `map_option_result_test.mko`.
+
 ### Big import blocks (real services)
 
 Grouped lists with blank lines, nested std paths, aliases, and module paths are
@@ -181,6 +257,9 @@ Everyday `let` stays simple. That is intentional.
 | Annotating every local | Infer locals; annotate boundaries |
 | Dual spellings in new code (`func`, `:=`, `import`) | Mako flair (`fn`, `let`, `pull`) |
 | Ignoring `Result` | `?`, `match`, or `let _ =` when discard is deliberate |
+| Building ad-hoc set/`groupby` helpers | `map[K]bool` / `map[K][]T` |
+| Re-implementing nested maps by hand | `map[K]map[K2]V` (depth 2) |
+| Parallel nullable / fallible lookups | `map[K]Option[T]` / `map[K]Result[T,E]` |
 
 ---
 
@@ -233,5 +312,8 @@ If (1) is “longer” without a safety win, reject it.
 | [IDENTITY.md](IDENTITY.md) | Unique surface |
 | [PAIN_POINTS.md](PAIN_POINTS.md) | Why we exist |
 | [VISION.md](VISION.md) | Product north star |
-| [GUIDE.md](GUIDE.md) | Full syntax |
+| [GUIDE.md](GUIDE.md) | Full syntax (maps §4c, slices §4b) |
+| [LANGUAGE.md](LANGUAGE.md) | Surface summary |
+| [BUILTINS.md](BUILTINS.md) | `maps_*` and collection builtins |
 | [examples/mako_style.mko](../examples/mako_style.mko) | Canonical short sample |
+| `examples/testing/map_*.mko` · `nested_slice_test.mko` | Collection surface tests |
