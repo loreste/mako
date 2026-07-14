@@ -88,6 +88,7 @@ fn main() {
 | Result bag | `map[int]Result[string, string]` |
 | Slice of bags | `map[string][]Option[int]`, `map[int][]Result[string,string]` |
 | Bag of slices | `map[string]Option[[]int]`, `map[int]Result[[]int,string]` |
+| Tuple values | `map[string](int, int)`, `map[int](string, float)` |
 
 ```mko
 struct Point { x: int, y: int }
@@ -315,6 +316,7 @@ Pre-size with a hint: `make(map[string]int, 1024)`.
 | `examples/testing/option_result_slice_test.mko` | `[]Option[T]` / `[]Result[T,E]` |
 | `examples/testing/map_option_slice_test.mko` | `map[K][]Option[T]` / `map[K][]Result[T,E]` |
 | `examples/testing/map_option_of_slice_test.mko` | `map[K]Option[[]T]` / `map[K]Result[[]T,E]` |
+| `examples/testing/map_tuple_test.mko` | `map[K](T,U)` tuple values |
 | `examples/testing/nested_slice_test.mko` | `[][]T` |
 
 ```bash

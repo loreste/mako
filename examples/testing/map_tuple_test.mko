@@ -1,0 +1,106 @@
+// map[K](T, U) — tuple values by value (scalar monomorph grid).
+// Note: `let x, y = m[k]` is comma-ok (value + present), not tuple unpack.
+// Unpack with `let t = m[k]; let x, y = t` (or `let t, ok = m[k]`).
+
+struct Point {
+    x: int
+    y: int
+}
+
+fn TestMapStringIntInt() {
+    let mut m = make(map[string](int, int))
+    m["a"] = (1, 2)
+    m["b"] = (3, 4)
+    assert_eq(len(m), 2)
+    let t = m["a"]
+    let x, y = t
+    assert_eq(x, 1)
+    assert_eq(y, 2)
+    let u, v = m["b"]
+    // u, v = comma-ok: u is (int,int), v is bool
+    assert(v)
+    let a, b = u
+    assert_eq(a, 3)
+    assert_eq(b, 4)
+    // missing → zero tuple, ok false
+    let z, ok = m["missing"]
+    assert(not ok)
+    let zx, zy = z
+    assert_eq(zx, 0)
+    assert_eq(zy, 0)
+    assert(has(m, "a"))
+    delete(m, "b")
+    assert(not has(m, "b"))
+}
+
+fn TestMapIntStringInt() {
+    let mut m = make(map[int](string, int))
+    m[1] = ("hi", 9)
+    let t = m[1]
+    let s, n = t
+    assert_eq_str(s, "hi")
+    assert_eq(n, 9)
+}
+
+fn TestMapStringStringString() {
+    let mut m = make(map[string](string, string))
+    m["k"] = ("a", "b")
+    let t = m["k"]
+    let a, b = t
+    assert_eq_str(a, "a")
+    assert_eq_str(b, "b")
+}
+
+fn TestMapBoolIntFloat() {
+    let mut m = make(map[bool](int, float))
+    m[true] = (1, 1.5)
+    let t = m[true]
+    let n, f = t
+    assert_eq(n, 1)
+    assert(f > 1.4)
+    assert(f < 1.6)
+}
+
+fn TestMapFloatIntInt() {
+    let mut m = make(map[float](int, int))
+    m[2.5] = (5, 6)
+    let t = m[2.5]
+    let a, b = t
+    assert_eq(a, 5)
+    assert_eq(b, 6)
+}
+
+fn TestMapStructKeyTuple() {
+    let mut m = make(map[Point](int, int))
+    let p = Point { x: 1, y: 2 }
+    m[p] = (10, 20)
+    let t = m[p]
+    let a, b = t
+    assert_eq(a, 10)
+    assert_eq(b, 20)
+}
+
+fn TestMapTupleTriple() {
+    let mut m = make(map[string](int, int, int))
+    m["t"] = (1, 2, 3)
+    let t = m["t"]
+    let a, b, c = t
+    assert_eq(a, 1)
+    assert_eq(b, 2)
+    assert_eq(c, 3)
+}
+
+fn TestMapTupleHelpers() {
+    let mut m = make(map[string](int, int))
+    m["a"] = (1, 2)
+    m["b"] = (3, 4)
+    let c = maps_clone(m)
+    assert_eq(maps_equal(m, c), 1)
+    c["a"] = (9, 9)
+    assert_eq(maps_equal(m, c), 0)
+    maps_clear(c)
+    assert_eq(len(c), 0)
+    assert_eq(len(m), 2)
+    let ks = maps_keys(m)
+    assert_eq(len(ks), 2)
+}

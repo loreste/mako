@@ -1457,6 +1457,7 @@ impl Codegen {
         self.emit_all_map_slice_value_helpers();
         self.emit_all_map_map_value_helpers();
         self.emit_all_map_option_result_helpers();
+        self.emit_all_map_tuple_value_helpers();
         // Register Mako struct schemas for reflect_type_schema / reflect_value_of_type.
         for item in &program.items {
             if let Item::Struct(s) = item {
@@ -2928,6 +2929,90 @@ impl Codegen {
         for (kname, kc) in &named_keys {
             for (vt, vc) in &vals {
                 self.emit_map_named_key_slice_helpers(kname, kc, vt, vc);
+            }
+        }
+    }
+
+    /// Emit `map[K](T,U[,…])` monomorphs — tuple values by value (scalar 2–3-tuples).
+    fn emit_all_map_tuple_value_helpers(&mut self) {
+        let bases: &[(&str, &str)] = &[
+            ("int", "int64_t"),
+            ("string", "MakoString"),
+            ("float", "double"),
+            ("bool", "bool"),
+        ];
+        // 2-tuples and 3-tuples over scalar bases (zero-cost monomorph grid).
+        let mut tags: Vec<(String, String, String, String)> = Vec::new();
+        for (a, ac) in bases {
+            for (b, bc) in bases {
+                let tag = format!("tup_{a}_{b}");
+                let cty = format!("MakoTup_{a}_{b}");
+                // Ensure typedef exists.
+                if self.note_tuple_typedef(&cty, vec![(*ac).into(), (*bc).into()]) {
+                    let _ = writeln!(
+                        self.out,
+                        "typedef struct {{\n    {ac} _0;\n    {bc} _1;\n}} {cty};"
+                    );
+                }
+                let zero = format!("(({cty}){{0}})");
+                let eq0 = tuple_field_eq(ac, "av._0", "bv._0");
+                let eq1 = tuple_field_eq(bc, "av._1", "bv._1");
+                let eq = format!("({eq0} && {eq1})");
+                tags.push((tag, cty, zero, eq));
+            }
+        }
+        for (a, ac) in bases {
+            for (b, bc) in bases {
+                for (c, cc) in bases {
+                    let tag = format!("tup_{a}_{b}_{c}");
+                    let cty = format!("MakoTup_{a}_{b}_{c}");
+                    if self.note_tuple_typedef(
+                        &cty,
+                        vec![(*ac).into(), (*bc).into(), (*cc).into()],
+                    ) {
+                        let _ = writeln!(
+                            self.out,
+                            "typedef struct {{\n    {ac} _0;\n    {bc} _1;\n    {cc} _2;\n}} {cty};"
+                        );
+                    }
+                    let zero = format!("(({cty}){{0}})");
+                    let eq = format!(
+                        "({} && {} && {})",
+                        tuple_field_eq(ac, "av._0", "bv._0"),
+                        tuple_field_eq(bc, "av._1", "bv._1"),
+                        tuple_field_eq(cc, "av._2", "bv._2"),
+                    );
+                    tags.push((tag, cty, zero, eq));
+                }
+            }
+        }
+        // []tup for maps_values
+        for (tag, vc, _, _) in &tags {
+            self.emit_nested_arr_helpers(tag, vc);
+        }
+        let keys: &[(&str, &str)] = &[
+            ("i", "int64_t"),
+            ("s", "MakoString"),
+            ("f", "double"),
+            ("b", "bool"),
+        ];
+        for (ks, kc) in keys {
+            for (tag, vc, zero, eqf) in &tags {
+                self.emit_map_bag_value_helpers(ks, kc, tag, vc, zero, eqf);
+            }
+        }
+        let mut named_keys: Vec<(String, String)> = self
+            .structs
+            .iter()
+            .map(|(n, s)| (n.clone(), s.c_name.clone()))
+            .collect();
+        for (n, info) in &self.enums {
+            named_keys.push((n.clone(), info.c_name.clone()));
+        }
+        named_keys.sort_by(|a, b| a.0.cmp(&b.0));
+        for (kname, kc) in &named_keys {
+            for (tag, vc, zero, eqf) in &tags {
+                self.emit_map_named_key_bag_helpers(kname, kc, tag, vc, zero, eqf);
             }
         }
     }
@@ -6462,6 +6547,20 @@ impl Codegen {
                     if (n == "Option" || n == "Result") && !args.is_empty() =>
                 {
                     let tag = bag_map_val_tag(n == "Option", &args[0], &self.structs, &self.enums);
+                    match kk.as_str() {
+                        "int" => format!("MakoMapI_{tag}*"),
+                        "string" => format!("MakoMapS_{tag}*"),
+                        "float" | "float64" => format!("MakoMapF_{tag}*"),
+                        "bool" => format!("MakoMapB_{tag}*"),
+                        other if self.structs.contains_key(other) || self.enums.contains_key(other) => {
+                            format!("MakoMapK_{other}_{tag}*")
+                        }
+                        _ => "MakoMapSI*".into(),
+                    }
+                }
+                // map[K](T, U[, …]) tuple values
+                (TypeExpr::Named(kk), TypeExpr::Tuple(elems)) if (2..=4).contains(&elems.len()) => {
+                    let tag = map_tuple_val_tag(elems);
                     match kk.as_str() {
                         "int" => format!("MakoMapI_{tag}*"),
                         "string" => format!("MakoMapS_{tag}*"),
@@ -21812,6 +21911,31 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             self.line(&format!("{mt} *{tmp} = {fnp}_make({hint});"));
                             format!("{mt}*")
                         }
+                        (TypeExpr::Named(kk), TypeExpr::Tuple(elems))
+                            if (2..=4).contains(&elems.len()) =>
+                        {
+                            let tag = map_tuple_val_tag(elems);
+                            let (mt, fnp) = match kk.as_str() {
+                                "int" => (format!("MakoMapI_{tag}"), format!("mako_map_i_{tag}")),
+                                "string" => (format!("MakoMapS_{tag}"), format!("mako_map_s_{tag}")),
+                                "float" | "float64" => {
+                                    (format!("MakoMapF_{tag}"), format!("mako_map_f_{tag}"))
+                                }
+                                "bool" => (format!("MakoMapB_{tag}"), format!("mako_map_b_{tag}")),
+                                other
+                                    if self.structs.contains_key(other)
+                                        || self.enums.contains_key(other) =>
+                                {
+                                    (
+                                        format!("MakoMapK_{other}_{tag}"),
+                                        format!("mako_map_k_{other}_{tag}"),
+                                    )
+                                }
+                                _ => ("MakoMapSI".into(), "mako_map_si".into()),
+                            };
+                            self.line(&format!("{mt} *{tmp} = {fnp}_make({hint});"));
+                            format!("{mt}*")
+                        }
                         _ => {
                             self.line(&format!("MakoMapSI *{tmp} = mako_map_si_make({hint});"));
                             "MakoMapSI*".into()
@@ -25004,7 +25128,11 @@ fn parse_map_slice_val(bty: &str) -> Option<(String, String)> {
     let rest = bty.strip_suffix('*')?;
     for (pref, ks) in [("MakoMapI_", "i"), ("MakoMapS_", "s"), ("MakoMapF_", "f"), ("MakoMapB_", "b")] {
         if let Some(tag) = rest.strip_prefix(pref) {
-            if tag.starts_with("arr_") || tag.starts_with("opt_") || tag.starts_with("res_") {
+            if tag.starts_with("arr_")
+                || tag.starts_with("opt_")
+                || tag.starts_with("res_")
+                || tag.starts_with("tup_")
+            {
                 return Some((ks.to_string(), tag.to_string()));
             }
         }
@@ -25025,8 +25153,9 @@ fn parse_map_k_slice_val(bty: &str) -> Option<(String, String)> {
     // Leftmost separator after the key name. That distinguishes:
     //   Point_arr_opt_int  → arr_opt_int  (map[Point][]Option[int])
     //   Point_opt_arr_int  → opt_arr_int  (map[Point]Option[[]int])
+    //   Point_tup_int_int  → tup_int_int  (map[Point](int,int))
     let mut best: Option<usize> = None;
-    for sep in ["_arr_", "_opt_", "_res_"] {
+    for sep in ["_arr_", "_opt_", "_res_", "_tup_"] {
         if let Some(idx) = rest.find(sep) {
             best = Some(best.map_or(idx, |b| b.min(idx)));
         }
@@ -25035,7 +25164,10 @@ fn parse_map_k_slice_val(bty: &str) -> Option<(String, String)> {
         let k = &rest[..idx];
         let tag = &rest[idx + 1..]; // skip leading '_'
         if !k.is_empty()
-            && (tag.starts_with("arr_") || tag.starts_with("opt_") || tag.starts_with("res_"))
+            && (tag.starts_with("arr_")
+                || tag.starts_with("opt_")
+                || tag.starts_with("res_")
+                || tag.starts_with("tup_"))
         {
             return Some((k.to_string(), tag.to_string()));
         }
@@ -25053,7 +25185,42 @@ fn map_slice_val_c_ty(tag: &str) -> String {
         other if other.starts_with("arr_") => format!("MakoArr_{}", &other["arr_".len()..]),
         other if other.starts_with("opt_") => "MakoOptionInt".into(),
         other if other.starts_with("res_") => "MakoResultInt".into(),
+        other if other.starts_with("tup_") => format!("MakoTup_{}", &other["tup_".len()..]),
         _ => "MakoIntArray".into(),
+    }
+}
+
+/// Map value tag for a tuple type expr: `(int, string)` → `tup_int_string`.
+fn map_tuple_val_tag(elems: &[TypeExpr]) -> String {
+    let parts: Vec<String> = elems
+        .iter()
+        .map(|e| match e {
+            TypeExpr::Named(n)
+                if matches!(
+                    n.as_str(),
+                    "int" | "int64" | "int32" | "int8" | "byte" | "uint64"
+                ) =>
+            {
+                "int".into()
+            }
+            TypeExpr::Named(n) if n == "string" => "string".into(),
+            TypeExpr::Named(n) if n == "float" || n == "float64" => "float".into(),
+            TypeExpr::Named(n) if n == "bool" => "bool".into(),
+            TypeExpr::Named(n) => n.clone(),
+            _ => "int".into(),
+        })
+        .collect();
+    format!("tup_{}", parts.join("_"))
+}
+
+/// C equality predicate for one tuple field (used in maps_equal).
+fn tuple_field_eq(c_ty: &str, a: &str, b: &str) -> String {
+    if c_ty == "MakoString" {
+        format!("mako_str_eq({a}, {b})")
+    } else if c_ty == "double" {
+        format!("mako_f64_key_eq({a}, {b})")
+    } else {
+        format!("({a} == {b})")
     }
 }
 

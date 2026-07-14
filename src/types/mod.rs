@@ -8865,9 +8865,32 @@ impl TypeChecker {
             {
                 Ok(())
             }
+            // map[K](T, U[, …]) — tuple values (arity 2–4), leaf elements only.
+            (
+                Type::Int | Type::String | Type::Float | Type::Bool | Type::Struct { .. } | Type::Enum { .. },
+                Type::Tuple(elems),
+            ) if (2..=4).contains(&elems.len())
+                && elems.iter().all(|e| {
+                    matches!(
+                        e,
+                        Type::Int
+                            | Type::Int64
+                            | Type::Int32
+                            | Type::Int8
+                            | Type::Byte
+                            | Type::String
+                            | Type::Float
+                            | Type::Bool
+                            | Type::Struct { .. }
+                            | Type::Enum { .. }
+                    )
+                }) =>
+            {
+                Ok(())
+            }
             _ => Err(TypeError::new(format!(
                 "unsupported map[{}]{} — keys: int|string|float|bool|Struct|Enum; \
-                 values: int|string|float|bool|Struct|Enum|[]T|[][]T|[]Option|[]Result|[]map|map[K2]V|Option[T]|Option[[]T]|Result[T,E]|Result[[]T,E]",
+                 values: int|string|float|bool|Struct|Enum|[]T|[][]T|[]Option|[]Result|[]map|map[K2]V|Option[T]|Option[[]T]|Result[T,E]|Result[[]T,E]|(T,U)",
                 k.display(),
                 v.display()
             ))),

@@ -9,6 +9,15 @@
   `llms-full.txt` aligned to the real `crypto.scram_*` core API (no fictional
   `scram_client_first` / SASL framing helpers).
 
+### Language — `map[K](T, U[, V])` tuple values
+
+- **Tuple map values** — monomorphized `MakoMapS_tup_int_int*`, etc. for
+  scalar 2- and 3-tuples over int/string/float/bool keys × same bases. Named
+  keys supported. Values stored by value; get/set/`maps_*`/comma-ok.
+  Unpack: `let t = m[k]; let a, b = t` (`let a, b = m[k]` is comma-ok, not
+  tuple unpack — same as Go).
+- Tests: `map_tuple_test`.
+
 ### Language — `map[K]Option[[]T]` / `map[K]Result[[]T,E]`
 
 - **Bags of slices as map values** — `map[string]Option[[]int]`,

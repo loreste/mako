@@ -672,6 +672,7 @@ Tests: `map_test`, `map_struct_test`, `map_float_test`, `map_struct_key_test`,
 `map_option_result_test` (`map[K]Option[T]` / `map[K]Result[T,E]`),
 `map_option_slice_test` (`map[K][]Option[T]` / `map[K][]Result[T,E]`),
 `map_option_of_slice_test` (`map[K]Option[[]T]` / `map[K]Result[[]T,E]`),
+`map_tuple_test` (`map[K](T,U)`),
 `nested_slice_test`, `struct_slice_fields_test`, `lang_residuals_test`.
 `Option[map[K]V]` / `Result[map[K]V, E]` work with `None` / `Some` / `Ok` and match
 unboxing for SI/II/SS, float/bool key maps, and monomorphized map pointers.

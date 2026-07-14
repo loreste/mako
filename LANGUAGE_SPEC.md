@@ -338,7 +338,8 @@ key×value combination of those (including `map[Struct]Struct`, `map[Enum]V`,
 `map[K][]map[K2]V`, set-style `map[K]bool`, `map[bool]V`,
 `map[string]Option[int]`, `map[int]Result[string,string]`,
 `map[string][]Option[int]`, `map[int][]Result[string,string]`,
-`map[string]Option[[]int]`, and `map[int]Result[[]int,string]`).
+`map[string]Option[[]int]`, `map[int]Result[[]int,string]`, and
+`map[string](int, int)` / `map[int](string, float)` scalar tuples).
 Nested-map values are pointers: a missing outer key yields a nil map
 (`len` is 0); `maps_clone` / `maps_equal` are shallow. Missing bag value →
 zero bag (`None` / `Err("")`).
