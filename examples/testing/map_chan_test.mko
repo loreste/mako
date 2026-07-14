@@ -1,0 +1,163 @@
+// map[K]chan[T] — channel pointers as map values
+
+struct Point {
+    x: int
+    y: int
+}
+
+enum Color {
+    Red
+    Green
+    Blue
+}
+
+fn TestMapStringChanInt() {
+    let mut m = make(map[string]chan[int])
+    let ch = chan_open[int](2)
+    let _ = ch.send(42)
+    m["a"] = ch
+    assert_eq(len(m), 1)
+    assert(has(m, "a"))
+    let got = m["a"]
+    assert_eq(got.recv(), 42)
+    let miss, ok = m["nope"]
+    assert(not ok)
+    assert_eq(len(m), 1)
+    delete(m, "a")
+    assert(not has(m, "a"))
+    ch.close()
+}
+
+fn TestMapIntChanString() {
+    let mut m = make(map[int]chan[string])
+    let ch = chan_open[string](1)
+    let _ = ch.send("hi")
+    m[7] = ch
+    assert_eq_str(m[7].recv(), "hi")
+    assert(has(m, 7))
+    assert(not has(m, 8))
+    ch.close()
+}
+
+fn TestMapBoolChanFloat() {
+    let mut m = make(map[bool]chan[float])
+    let ch = chan_open[float](1)
+    let _ = ch.send(2.5)
+    m[true] = ch
+    let v = m[true].recv()
+    assert(v > 2.4 && v < 2.6)
+    assert(has(m, true))
+    assert(not has(m, false))
+    ch.close()
+}
+
+fn TestMapFloatChanBool() {
+    let mut m = make(map[float]chan[bool])
+    let ch = chan_open[bool](1)
+    let _ = ch.send(true)
+    m[1.5] = ch
+    assert(m[1.5].recv())
+    ch.close()
+}
+
+fn TestMapStringChanStruct() {
+    let mut m = make(map[string]chan[Point])
+    let ch = chan_open[Point](1)
+    let _ = ch.send(Point { x: 3, y: 4 })
+    m["p"] = ch
+    let q = m["p"].recv()
+    assert_eq(q.x, 3)
+    assert_eq(q.y, 4)
+    ch.close()
+}
+
+fn TestMapStructKeyChanInt() {
+    let mut m = make(map[Point]chan[int])
+    let ch = chan_open[int](1)
+    let _ = ch.send(99)
+    let p = Point { x: 1, y: 2 }
+    m[p] = ch
+    assert_eq(m[p].recv(), 99)
+    assert(has(m, p))
+    assert(not has(m, Point { x: 0, y: 0 }))
+    ch.close()
+}
+
+fn TestMapEnumKeyChanInt() {
+    let mut m = make(map[Color]chan[int])
+    let ch = chan_open[int](1)
+    let _ = ch.send(5)
+    m[Red] = ch
+    assert_eq(m[Red].recv(), 5)
+    assert(has(m, Red))
+    assert(not has(m, Blue))
+    ch.close()
+}
+
+fn TestMapChanHelpers() {
+    let mut m = make(map[string]chan[int])
+    let a = chan_open[int](1)
+    let b = chan_open[int](1)
+    let _ = a.send(1)
+    let _ = b.send(2)
+    m["a"] = a
+    m["b"] = b
+    let ks = maps_keys(m)
+    assert_eq(len(ks), 2)
+    let vs = maps_values(m)
+    assert_eq(len(vs), 2)
+    let c = maps_clone(m)
+    assert_eq(maps_equal(m, c), 1)
+    // shallow: same channel pointers after clone
+    assert_eq(c["a"].recv(), 1)
+    maps_clear(c)
+    assert_eq(len(c), 0)
+    maps_copy(c, m)
+    assert_eq(len(c), 2)
+    assert_eq(c["b"].recv(), 2)
+    a.close()
+    b.close()
+}
+
+fn TestMapChanRange() {
+    let mut m = make(map[string]chan[int])
+    let a = chan_open[int](1)
+    let b = chan_open[int](1)
+    let _ = a.send(10)
+    let _ = b.send(20)
+    m["a"] = a
+    m["b"] = b
+    let mut sum = 0
+    for _, ch in range m {
+        sum = sum + ch.recv()
+    }
+    assert_eq(sum, 30)
+    a.close()
+    b.close()
+}
+
+fn TestMapChanCommaOk() {
+    let mut m = make(map[string]chan[int])
+    let ch = chan_open[int](1)
+    let _ = ch.send(7)
+    m["x"] = ch
+    let v, ok = m["x"]
+    assert(ok)
+    assert_eq(v.recv(), 7)
+    let _, miss = m["nope"]
+    assert(not miss)
+    ch.close()
+}
+
+fn TestMapChanOverwrite() {
+    let mut m = make(map[string]chan[int])
+    let a = chan_open[int](1)
+    let b = chan_open[int](1)
+    let _ = a.send(1)
+    let _ = b.send(2)
+    m["k"] = a
+    m["k"] = b
+    assert_eq(m["k"].recv(), 2)
+    a.close()
+    b.close()
+}

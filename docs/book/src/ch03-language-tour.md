@@ -426,9 +426,11 @@ fn main() {
 | Optional / fallible per key | `map[K]Option[T]`, `map[K]Result[T,E]` |
 | Optional whole map | `Option[map[K]V]`, `Result[map[K]V, E]` |
 | Rows of maps | `[]map[K]V` |
+| Channel per key | `map[K]chan[T]` (int/bool/float/string/struct) |
 
 Missing key → zero value (`0` / `""` / `false` / empty slice / nil inner map /
-`None` / `Err("")`). Nested-map `maps_clone` / `maps_equal` are shallow.
+`None` / `Err("")` / nil channel). Nested-map and channel-map `maps_clone` /
+`maps_equal` are shallow (pointer identity for inner maps and channels).
 
 Hands-on guide: [howto/10-collections.md](../../howto/10-collections.md) ·
 low-ceremony patterns: [ERGONOMICS.md](../../ERGONOMICS.md).

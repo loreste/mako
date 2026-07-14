@@ -160,15 +160,16 @@ Packs: `std/fmt`, `std/print`. Tests: `fmt_print_test.mko`. Demo: `examples/fmt_
 | `maps_keys` | `maps_keys(m: map[K]V) -> []K` | Keys as a slice (`[]int` / `[]string` / `[]float` / `[]bool` / `[]Struct` / `[]Enum`) |
 | `maps_values` | `maps_values(m: map[K]V) -> []V` | Values as a slice (incl. `[][]T` for slice-valued maps, `[]map[…]` for nested maps) |
 | `maps_clear` | `maps_clear(m: map[K]V) -> void` | Remove all entries |
-| `maps_clone` | `maps_clone(m: map[K]V) -> map[K]V` | Shallow copy (nested maps: copy outer entries / inner pointers) |
-| `maps_equal` | `maps_equal(a: map[K]V, b: map[K]V) -> int` | Same keys/values (structs/enums structural; nested maps: pointer identity on inners) |
+| `maps_clone` | `maps_clone(m: map[K]V) -> map[K]V` | Shallow copy (nested maps / channel maps: outer entries, inner pointers) |
+| `maps_equal` | `maps_equal(a: map[K]V, b: map[K]V) -> int` | Same keys/values (structs/enums structural; nested maps & channel maps: pointer identity on inners) |
 | `maps_copy` | `maps_copy(dst: map[K]V, src: map[K]V) -> void` | Copy entries into `dst` |
 
 Supported map kinds — **keys:** `int` \| `string` \| `float` \| `bool` \| named
 **Struct** \| **Enum** (incl. pack-qualified types). **Values:** the same set,
 **slices** `[]T` / `[][]T` (int/string/float/bool/byte/Struct/Enum),
-**nested maps** `map[K2]V` (depth 2 only), or **bags** `Option[T]` /
-`Result[T,E]` (int/string/float/bool/Struct/Enum payload). Any combination, e.g.:
+**nested maps** `map[K2]V` (depth 2 only), **bags** `Option[T]` /
+`Result[T,E]`, **tuples** `(T,U[,…])`, or **channels** `chan[T]`
+(int/bool/float/string/struct elements, same as `chan_open`). Any combination, e.g.:
 
 | Example | Role |
 |---------|------|
@@ -184,15 +185,18 @@ Supported map kinds — **keys:** `int` \| `string` \| `float` \| `bool` \| name
 | `[]map[string]int` / `map[string][]map[string]int` | Slice of maps / map of those |
 | `map[string]Option[int]` / `map[Point]Option[int]` | Option bag values |
 | `map[int]Result[string,string]` / `map[string]Result[Point,string]` | Result bag values |
+| `map[string](int,int)` / `map[Point](string,int)` | Tuple values |
+| `map[string]chan[int]` / `map[Point]chan[string]` / `map[string]chan[Point]` | Channel values |
 
 Float keys: `+0`/`-0` unify; all NaNs share one key. Struct keys: field-wise eq
 + stable field hash (strings by content). Enum keys: tag + payload.
-Missing key → zero value (`None` / `Err("")` for bags); `len` on a nil map is `0`.
+Missing key → zero value (`None` / `Err("")` for bags; **nil channel** for
+`chan[T]` values); `len` on a nil map is `0`.
 
 Tests: `map_test`, `map_struct_test`, `map_float_test`, `map_struct_key_test`,
 `map_bool_test`, `map_enum_test`, `map_slice_test`, `map_nested_test`,
 `map_nested_slice_test`, `map_map_slice_test`, `slice_map_test`,
-`map_option_result_test`, `nested_slice_test`.  
+`map_option_result_test`, `map_tuple_test`, `map_chan_test`, `nested_slice_test`.  
 Also **`[]Option[T]`** / **`[]Result[T,E]`** (make/append/index/range/lits).  
 Hands-on: [howto/10-collections.md](howto/10-collections.md).
 

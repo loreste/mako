@@ -199,17 +199,19 @@ maps_clear(c)
 | `map[string]bool` as a set | Parallel `[]string` + linear search |
 | `map[string][]T` for groups | Nested manual lists keyed by string |
 | `map[K]Option[T]` / `map[K]Result[T,E]` | Parallel maps + sentinel ints |
+| `map[K]chan[T]` for named mailboxes | Parallel channel vars + string switch |
 | `for k, v in range m` | Custom iterator types |
 | Annotate `map[K]V` on API boundaries | Spelling out C monomorph names |
 
 Missing keys yield the **zero value** (empty slice, `0`/`""`/`false`, nil
-inner map with `len` 0, **None** / **Err("")** for bag values) — use comma-ok
-when presence matters. Nested-map `maps_clone` / `maps_equal` are shallow
-(pointer identity on inners).
+inner map with `len` 0, **None** / **Err("")** for bag values, **nil channel**
+for `chan[T]` values) — use comma-ok when presence matters. Nested-map and
+channel-map `maps_clone` / `maps_equal` are shallow (pointer identity on inners).
 
 Full grid: [GUIDE.md §4c](GUIDE.md) · hands-on [howto/10-collections.md](howto/10-collections.md) ·
 book [ch03](book/src/ch03-language-tour.md) / [cookbook](book/src/ch14-cookbook.md#collections-recipes) ·
-tests under `examples/testing/map_*.mko`, `nested_slice_test.mko`, `map_option_result_test.mko`.
+tests under `examples/testing/map_*.mko`, `nested_slice_test.mko`, `map_option_result_test.mko`,
+`map_chan_test.mko`.
 
 ### Big import blocks (real services)
 
@@ -261,6 +263,7 @@ Everyday `let` stays simple. That is intentional.
 | Building ad-hoc set/`groupby` helpers | `map[K]bool` / `map[K][]T` |
 | Re-implementing nested maps by hand | `map[K]map[K2]V` (depth 2) |
 | Parallel nullable / fallible lookups | `map[K]Option[T]` / `map[K]Result[T,E]` |
+| Hand-wiring per-key channels | `map[K]chan[T]` |
 
 ---
 

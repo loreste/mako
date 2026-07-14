@@ -8895,9 +8895,28 @@ impl TypeChecker {
             {
                 Ok(())
             }
+            // map[K]chan[T] — channel pointers as values (same element set as chan_open).
+            (
+                Type::Int | Type::String | Type::Float | Type::Bool | Type::Struct { .. } | Type::Enum { .. },
+                Type::Chan(inner),
+            ) if matches!(
+                inner.as_ref(),
+                Type::Int
+                    | Type::Int64
+                    | Type::Int32
+                    | Type::Int8
+                    | Type::Byte
+                    | Type::Bool
+                    | Type::Float
+                    | Type::String
+                    | Type::Struct { .. }
+            ) =>
+            {
+                Ok(())
+            }
             _ => Err(TypeError::new(format!(
                 "unsupported map[{}]{} — keys: int|string|float|bool|Struct|Enum; \
-                 values: int|string|float|bool|Struct|Enum|[]T|[][]T|[]Option|[]Result|[]map|map[K2]V|Option[T]|Option[[]T]|Option[map]|Result[T,E]|Result[[]T,E]|Result[map]|(T,U)",
+                 values: int|string|float|bool|Struct|Enum|[]T|[][]T|[]Option|[]Result|[]map|map[K2]V|Option[T]|Option[[]T]|Option[map]|Result[T,E]|Result[[]T,E]|Result[map]|(T,U)|chan[T]",
                 k.display(),
                 v.display()
             ))),

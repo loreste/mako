@@ -90,6 +90,7 @@ fn main() {
 | Bag of slices | `map[string]Option[[]int]`, `map[int]Result[[]int,string]` |
 | Tuple values | `map[string](int, int)`, `map[string](Point, int)`, `map[K](int,int,int,int)` |
 | Bag of maps | `map[string]Option[map[string]int]`, `map[int]Result[map[string]int,string]` |
+| Channel values | `map[string]chan[int]`, `map[Point]chan[string]`, `map[string]chan[Point]` |
 
 ```mko
 struct Point { x: int, y: int }
@@ -114,11 +115,18 @@ fn demo_maps() {
     by_pt[Point { x: 1, y: 2 }] = 10
     let mut by_e = make(map[Color][]string)
     by_e[Red] = ["hot"]
+
+    // Named mailboxes: map of channels (pointer values; missing → nil)
+    let mut inbox = make(map[string]chan[int])
+    let ch = chan_open[int](4)
+    inbox["worker"] = ch
+    let _ = inbox["worker"].send(1)
 }
 ```
 
 Float keys: `+0.0` and `-0.0` are the same key; all NaNs share one key.
-Missing key → zero value. `len` on a nil map is `0`.
+Missing key → zero value (nil channel for `map[K]chan[T]`). `len` on a nil map is `0`.
+`maps_clone` / `maps_equal` on channel maps are shallow (same channel handles).
 
 ---
 
@@ -320,6 +328,7 @@ Pre-size with a hint: `make(map[string]int, 1024)`.
 | `examples/testing/map_tuple_test.mko` | `map[K](T,U)` scalar tuples |
 | `examples/testing/map_tuple_struct_test.mko` | Struct/Enum tuples + 4-tuples |
 | `examples/testing/map_option_of_map_test.mko` | `map[K]Option[map]` / `map[K]Result[map]` |
+| `examples/testing/map_chan_test.mko` | `map[K]chan[T]` channel values |
 | `examples/testing/nested_slice_test.mko` | `[][]T` |
 
 ```bash

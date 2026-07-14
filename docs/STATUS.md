@@ -179,6 +179,7 @@ Last inventory: 2026-07-14 (**unique Mako surface** · pack/pull types · full m
 | `map[K](T,U)` tuple values (scalar 2–3-tuples) | Done — `map_tuple_test` |
 | Map tuples with Struct/Enum + homogeneous 4-tuples | Done — `map_tuple_struct_test` |
 | `map[K]Option[map]` / `map[K]Result[map]` | Done — `map_option_of_map_test` |
+| `map[K]chan[T]` channel values | Done — `map_chan_test` |
 | `len` nil-safe on SI/II/SS maps (and monomorphized maps) | Done — runtime + nested tests |
 | Low-ceremony collections ergonomics | Done — [ERGONOMICS.md](ERGONOMICS.md) |
 

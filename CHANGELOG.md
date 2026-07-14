@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+### Language — `map[K]chan[T]` channel values
+
+- **Channel pointers as map values** — e.g. `map[string]chan[int]`,
+  `map[int]chan[string]`, `map[bool]chan[float]`, `map[string]chan[Point]`,
+  named struct/enum keys. Tags `chan_int` / `chan_string` / `chan_float` /
+  `chan_bool` / `chan_Struct`; values are channel pointers (missing key → nil).
+  Full get/set/`maps_*`/range/comma-ok; float and struct-channel metadata
+  propagates on lookup so `.send`/`.recv` still type-correct.
+- **Fix:** clear `chan_float` / `chan_ptr_elems` per function so float/struct
+  channel metadata does not leak across functions that reuse local names.
+- Tests: `map_chan_test`.
+
 ### Security — SCRAM proof compare
 
 - **`crypto.scram_verify_proof`** — uses `const_eq` when comparing the recovered

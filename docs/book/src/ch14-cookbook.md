@@ -1632,6 +1632,19 @@ fn main() {
 }
 ```
 
+### Named mailboxes (`map[K]chan[T]`)
+
+```mko
+fn main() {
+    let mut inbox = make(map[string]chan[int])
+    let ch = chan_open[int](4)
+    inbox["worker"] = ch
+    let _ = inbox["worker"].send(42)
+    print_int(inbox["worker"].recv())
+    ch.close()
+}
+```
+
 ### Optional and fallible values per key
 
 ```mko

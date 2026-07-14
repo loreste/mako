@@ -94,7 +94,7 @@ One monomorphized surface — no special collection package for everyday work:
 | Form | Notes |
 |------|--------|
 | `[]T` | int/string/float/bool/byte/Struct/Enum; nested `[][]T` |
-| `map[K]V` | **K:** int\|string\|float\|bool\|Struct\|Enum · **V:** same, `[]T`, `map[K2]V` (depth 2), `Option[T]`, `Result[T,E]` |
+| `map[K]V` | **K:** int\|string\|float\|bool\|Struct\|Enum · **V:** same, `[]T`, `map[K2]V` (depth 2), `Option[T]`, `Result[T,E]`, `(T,U)`, `chan[T]` |
 | Ops | `m[k]`, `m[k]=v`, `has`, `delete`, `len`, comma-ok, `range`, `maps_*` |
 
 Short patterns (sets, groups, nested maps, bag values): [ERGONOMICS.md](ERGONOMICS.md).  
