@@ -8782,6 +8782,22 @@ impl TypeChecker {
                             | Type::Struct { .. }
                             | Type::Enum { .. }
                     )
+            ) || matches!(
+                // map[K][]chan[T] — same channel element set as chan_open / map[K]chan[T]
+                inner.as_ref(),
+                Type::Chan(payload)
+                    if matches!(
+                        payload.as_ref(),
+                        Type::Int
+                            | Type::Int64
+                            | Type::Int32
+                            | Type::Int8
+                            | Type::Byte
+                            | Type::Bool
+                            | Type::Float
+                            | Type::String
+                            | Type::Struct { .. }
+                    )
             ) =>
             {
                 Ok(())
@@ -8923,7 +8939,7 @@ impl TypeChecker {
             }
             _ => Err(TypeError::new(format!(
                 "unsupported map[{}]{} — keys: int|string|float|bool|Struct|Enum; \
-                 values: int|string|float|bool|Struct|Enum|[]T|[][]T|[]Option|[]Result|[]map|map[K2]V|map[K2]map[K3]V|Option[T]|Option[[]T]|Option[map]|Result[T,E]|Result[[]T,E]|Result[map]|(T,U)|chan[T]",
+                 values: int|string|float|bool|Struct|Enum|[]T|[][]T|[]Option|[]Result|[]chan|[]map|map[K2]V|map[K2]map[K3]V|Option[T]|Option[[]T]|Option[map]|Result[T,E]|Result[[]T,E]|Result[map]|(T,U)|chan[T]",
                 k.display(),
                 v.display()
             ))),
@@ -12393,7 +12409,8 @@ impl TypeChecker {
                             | Type::Array(_)
                             | Type::Map(_, _)
                             | Type::Option(_)
-                            | Type::Result(_, _) => Ok(Type::Array(inner)),
+                            | Type::Result(_, _)
+                            | Type::Chan(_) => Ok(Type::Array(inner)),
                             other => Err(TypeError::new(format!(
                                 "make([]{}) not supported yet",
                                 other.display()

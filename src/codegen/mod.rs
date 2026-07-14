@@ -2927,12 +2927,19 @@ impl Codegen {
             self.emit_nested_arr_helpers(mt, &map_c); // MakoArr_map_string_int
             vals.push((format!("arr_{mt}"), format!("MakoArr_{mt}")));
         }
+        // map[K][]chan[T] — slice of channel pointers (MakoArr_chan_int, …).
+        let chan_leaf = self.leaf_chan_value_specs();
+        for (ctag, cc) in &chan_leaf {
+            self.emit_nested_arr_helpers(ctag, cc); // MakoArr_chan_int
+            vals.push((format!("arr_{ctag}"), format!("MakoArr_{ctag}")));
+        }
         // Outer arrays for maps_values (MakoArr_arr_arr_int / MakoArr_arr_opt_… / …)
         for (vt, vc) in &vals {
             if vt.starts_with("arr_arr_")
                 || vt.starts_with("arr_map_")
                 || vt.starts_with("arr_opt_")
                 || vt.starts_with("arr_res_")
+                || vt.starts_with("arr_chan_")
             {
                 self.emit_nested_arr_helpers(vt, vc);
             }
@@ -5973,6 +5980,8 @@ impl Codegen {
             }
             // []map[K]V tags: map_string_int → MakoMapSI*
             other if other.starts_with("map_") => map_map_val_c_ty(other),
+            // []chan[T] tags
+            other if other.starts_with("chan_") => chan_map_val_c_ty(other),
             // []Option / []Result bag tags
             other if other.starts_with("opt_") => "MakoOptionInt".into(),
             other if other.starts_with("res_") => "MakoResultInt".into(),
@@ -6664,6 +6673,20 @@ impl Codegen {
                     _ => unreachable!(),
                 };
                 let tag = bag_map_val_tag(is_opt, payload, &self.structs, &self.enums);
+                format!("MakoArr_{tag}")
+            }
+            // []chan[T] → MakoArr_chan_int / MakoArr_chan_string / …
+            TypeExpr::Array(inner)
+                if matches!(
+                    inner.as_ref(),
+                    TypeExpr::Generic(n, args) if n == "chan" && !args.is_empty()
+                ) =>
+            {
+                let elem = match inner.as_ref() {
+                    TypeExpr::Generic(_, args) => &args[0],
+                    _ => unreachable!(),
+                };
+                let tag = chan_map_val_tag(elem, &self.structs);
                 format!("MakoArr_{tag}")
             }
             TypeExpr::Array(_) => "MakoIntArray".into(),
@@ -21881,6 +21904,38 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         ));
                         return (outer, tmp);
                     }
+                    // []chan[T] lit: [ch0, ch1, …]
+                    if ty0 == "MakoChan*"
+                        || ty0 == "MakoChanStr*"
+                        || ty0 == "MakoChanPtr*"
+                    {
+                        let mut vals = vec![v0.clone()];
+                        for e in elems.iter().skip(1) {
+                            let (_, v) = self.emit_expr(e);
+                            vals.push(v);
+                        }
+                        let tag = if ty0 == "MakoChanStr*" {
+                            "chan_string".to_string()
+                        } else if ty0 == "MakoChanPtr*" {
+                            self.chan_ptr_elems
+                                .get(&v0)
+                                .map(|s| format!("chan_{s}"))
+                                .unwrap_or_else(|| "chan_ptr".into())
+                        } else if self.chan_float.contains(&v0) {
+                            "chan_float".to_string()
+                        } else {
+                            "chan_int".to_string()
+                        };
+                        let outer = format!("MakoArr_{tag}");
+                        let tmp = self.fresh("carr");
+                        let lit = self.fresh("clit");
+                        self.line(&format!("{ty0} {lit}[] = {{ {} }};", vals.join(", ")));
+                        self.line(&format!(
+                            "{outer} {tmp} = mako_arr_{tag}_of({lit}, {});",
+                            elems.len()
+                        ));
+                        return (outer, tmp);
+                    }
                     // Non-map first element: int-family array (legacy path).
                     let mut vals = vec![v0];
                     for e in elems.iter().skip(1) {
@@ -22337,6 +22392,9 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                                 &self.enums,
                             ))
                         }
+                        TypeExpr::Generic(n, args) if n == "chan" && !args.is_empty() => {
+                            Some(chan_map_val_tag(&args[0], &self.structs))
+                        }
                         _ => None,
                     },
                     _ => None,
@@ -22601,6 +22659,8 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                     self.line(&format!("{vty} {out} = mako_arr_{sn}_get({b}, {tmp});"));
                     // Match arms on []Option / []Result elements need payload kinds.
                     self.register_bag_payload_on_temp(&out, sn);
+                    // []chan[float] / []chan[Struct] need send/recv metadata.
+                    self.register_chan_payload_on_temp(&out, sn);
                     return (vty, out);
                 }
                 if bty == "MakoString" {

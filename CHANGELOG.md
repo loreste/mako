@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Language — `map[K][]chan[T]`
+
+- **Slices of channels as map values** — e.g. `map[string][]chan[int]`,
+  `map[int][]chan[string]`, `map[string][]chan[Point]`, named keys.
+  Tags `arr_chan_*`; also enables standalone `make([]chan[T], n)` / `append`
+  / array lits of channel handles. Float/struct channel metadata propagates
+  on slice index.
+- Tests: `map_slice_chan_test`.
+
 ### Language — nested maps depth 3
 
 - **`map[K]map[K2]map[K3]V`** — three-level nested maps (scalar mid/leaf cores;

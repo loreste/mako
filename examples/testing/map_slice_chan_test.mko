@@ -1,0 +1,142 @@
+// map[K][]chan[T] — slices of channel pointers as map values
+
+struct Point {
+    x: int
+    y: int
+}
+
+fn TestMapStringSliceChanInt() {
+    let mut m = make(map[string][]chan[int])
+    let a = chan_open[int](1)
+    let b = chan_open[int](1)
+    let _ = a.send(1)
+    let _ = b.send(2)
+    m["w"] = [a, b]
+    assert_eq(len(m), 1)
+    assert_eq(len(m["w"]), 2)
+    assert_eq(m["w"][0].recv(), 1)
+    assert_eq(m["w"][1].recv(), 2)
+    assert(has(m, "w"))
+    assert(not has(m, "z"))
+    // missing key → empty slice
+    assert_eq(len(m["missing"]), 0)
+    delete(m, "w")
+    assert(not has(m, "w"))
+    a.close()
+    b.close()
+}
+
+fn TestMapIntSliceChanString() {
+    let mut m = make(map[int][]chan[string])
+    let ch = chan_open[string](1)
+    let _ = ch.send("hi")
+    m[7] = [ch]
+    assert_eq_str(m[7][0].recv(), "hi")
+    ch.close()
+}
+
+fn TestMapBoolSliceChanFloat() {
+    let mut m = make(map[bool][]chan[float])
+    let ch = chan_open[float](1)
+    let _ = ch.send(2.5)
+    m[true] = [ch]
+    let v = m[true][0].recv()
+    assert(v > 2.4 && v < 2.6)
+    ch.close()
+}
+
+fn TestMapStringSliceChanStruct() {
+    let mut m = make(map[string][]chan[Point])
+    let ch = chan_open[Point](1)
+    let _ = ch.send(Point { x: 3, y: 4 })
+    m["p"] = [ch]
+    let q = m["p"][0].recv()
+    assert_eq(q.x, 3)
+    assert_eq(q.y, 4)
+    ch.close()
+}
+
+fn TestMapSliceChanMakeAppend() {
+    let mut m = make(map[string][]chan[int])
+    let mut row = make([]chan[int], 0, 2)
+    let a = chan_open[int](1)
+    let b = chan_open[int](1)
+    let _ = a.send(10)
+    let _ = b.send(20)
+    row = append(row, a)
+    row = append(row, b)
+    m["r"] = row
+    assert_eq(len(m["r"]), 2)
+    assert_eq(m["r"][0].recv(), 10)
+    assert_eq(m["r"][1].recv(), 20)
+    a.close()
+    b.close()
+}
+
+fn TestMapStructKeySliceChan() {
+    let mut m = make(map[Point][]chan[int])
+    let p = Point { x: 1, y: 2 }
+    let ch = chan_open[int](1)
+    let _ = ch.send(99)
+    m[p] = [ch]
+    assert_eq(m[p][0].recv(), 99)
+    assert(has(m, p))
+    ch.close()
+}
+
+fn TestMapSliceChanHelpers() {
+    let mut m = make(map[string][]chan[int])
+    let a = chan_open[int](1)
+    let b = chan_open[int](1)
+    let _ = a.send(1)
+    let _ = b.send(2)
+    m["a"] = [a]
+    m["b"] = [b]
+    let ks = maps_keys(m)
+    assert_eq(len(ks), 2)
+    let vs = maps_values(m)
+    assert_eq(len(vs), 2)
+    let c = maps_clone(m)
+    assert_eq(maps_equal(m, c), 1)
+    assert_eq(c["a"][0].recv(), 1)
+    maps_clear(c)
+    assert_eq(len(c), 0)
+    maps_copy(c, m)
+    assert_eq(len(c), 2)
+    assert_eq(c["b"][0].recv(), 2)
+    a.close()
+    b.close()
+}
+
+fn TestMapSliceChanRange() {
+    let mut m = make(map[string][]chan[int])
+    let a = chan_open[int](1)
+    let b = chan_open[int](1)
+    let _ = a.send(3)
+    let _ = b.send(4)
+    m["a"] = [a]
+    m["b"] = [b]
+    let mut sum = 0
+    for _, row in range m {
+        for _, ch in range row {
+            sum = sum + ch.recv()
+        }
+    }
+    assert_eq(sum, 7)
+    a.close()
+    b.close()
+}
+
+fn TestMapSliceChanCommaOk() {
+    let mut m = make(map[string][]chan[int])
+    let ch = chan_open[int](1)
+    let _ = ch.send(5)
+    m["x"] = [ch]
+    let row, ok = m["x"]
+    assert(ok)
+    assert_eq(len(row), 1)
+    assert_eq(row[0].recv(), 5)
+    let _, miss = m["nope"]
+    assert(not miss)
+    ch.close()
+}

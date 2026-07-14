@@ -92,6 +92,7 @@ fn main() {
 | Tuple values | `map[string](int, int)`, `map[string](Point, int)`, `map[K](int,int,int,int)` |
 | Bag of maps | `map[string]Option[map[string]int]`, `map[int]Result[map[string]int,string]` |
 | Channel values | `map[string]chan[int]`, `map[Point]chan[string]`, `map[string]chan[Point]` |
+| Slice of channels | `map[string][]chan[int]`, `map[Point][]chan[string]` |
 
 ```mko
 struct Point { x: int, y: int }
@@ -331,6 +332,7 @@ Pre-size with a hint: `make(map[string]int, 1024)`.
 | `examples/testing/map_tuple_struct_test.mko` | Struct/Enum tuples + 4-tuples |
 | `examples/testing/map_option_of_map_test.mko` | `map[K]Option[map]` / `map[K]Result[map]` |
 | `examples/testing/map_chan_test.mko` | `map[K]chan[T]` channel values |
+| `examples/testing/map_slice_chan_test.mko` | `map[K][]chan[T]` |
 | `examples/testing/nested_slice_test.mko` | `[][]T` |
 
 ```bash

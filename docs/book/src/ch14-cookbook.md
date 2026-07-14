@@ -1659,6 +1659,21 @@ fn main() {
 }
 ```
 
+### Worker pools (`map[K][]chan[T]`)
+
+```mko
+fn main() {
+    let mut pools = make(map[string][]chan[int])
+    let a = chan_open[int](1)
+    let b = chan_open[int](1)
+    pools["team"] = [a, b]
+    let _ = pools["team"][0].send(1)
+    print_int(pools["team"][0].recv())
+    a.close()
+    b.close()
+}
+```
+
 ### Optional and fallible values per key
 
 ```mko

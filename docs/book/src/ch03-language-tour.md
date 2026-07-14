@@ -427,6 +427,7 @@ fn main() {
 | Optional whole map | `Option[map[K]V]`, `Result[map[K]V, E]` |
 | Rows of maps | `[]map[K]V` |
 | Channel per key | `map[K]chan[T]` (int/bool/float/string/struct) |
+| Channels per key | `map[K][]chan[T]` |
 
 Missing key → zero value (`0` / `""` / `false` / empty slice / nil inner map /
 `None` / `Err("")` / nil channel). Nested-map and channel-map `maps_clone` /

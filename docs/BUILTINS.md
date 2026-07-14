@@ -187,6 +187,7 @@ Supported map kinds — **keys:** `int` \| `string` \| `float` \| `bool` \| name
 | `map[int]Result[string,string]` / `map[string]Result[Point,string]` | Result bag values |
 | `map[string](int,int)` / `map[Point](string,int)` | Tuple values |
 | `map[string]chan[int]` / `map[Point]chan[string]` / `map[string]chan[Point]` | Channel values |
+| `map[string][]chan[int]` / `map[Point][]chan[string]` | Slices of channels |
 
 Float keys: `+0`/`-0` unify; all NaNs share one key. Struct keys: field-wise eq
 + stable field hash (strings by content). Enum keys: tag + payload.
