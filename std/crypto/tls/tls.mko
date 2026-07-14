@@ -1,7 +1,29 @@
-// std/crypto/tls — seed surface (OpenSSL-backed when linked)
+// std/crypto/tls — OpenSSL-backed when linked (see docs/SECURITY.md).
 fn serve(port: int, cert: string, key: string, body: string) -> int {
     return tls_serve(port, cert, key, body)
 }
 fn serve_once(port: int, cert: string, key: string, body: string) -> int {
     return tls_serve_once(port, cert, key, body)
+}
+fn server_new(cert: string, key: string) -> TlsServer {
+    return tls_server_new(cert, key)
+}
+fn server_new_mtls(cert: string, key: string, client_ca: string) -> TlsServer {
+    return tls_server_new_mtls(cert, key, client_ca)
+}
+fn client_new_mtls(ca: string, cert: string, key: string) -> TlsClient {
+    return tls_client_new_mtls(ca, cert, key)
+}
+fn unique(conn: TlsConn) -> string {
+    return tls_unique(conn)
+}
+// Hot-reload server cert/key (rotation without process restart).
+fn server_reload(server: TlsServer, cert: string, key: string) -> int {
+    return tls_server_reload(server, cert, key)
+}
+fn make_self_signed(cert: string, key: string, cn: string, days: int) -> int {
+    return tls_make_self_signed(cert, key, cn, days)
+}
+fn make_csr(csr: string, key: string, cn: string, bits: int) -> int {
+    return tls_make_csr(csr, key, cn, bits)
 }

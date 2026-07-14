@@ -139,6 +139,24 @@ static inline int64_t mako_trace_end(void) {
 }
 
 /* Structured log line with current trace context. */
+/* OTel-ish JSON for the current trace context (span-lite). */
+static inline MakoString mako_trace_export_json(void) {
+    char buf[512];
+    if (!mako_trace_tls.active) {
+        return mako_str_from_cstr("{\"traceId\":\"\",\"name\":\"\",\"active\":0}");
+    }
+    mako_trace_format_id(mako_trace_tls.hi, mako_trace_tls.lo, mako_trace_id_hex);
+    int n = snprintf(
+        buf, sizeof(buf),
+        "{\"traceId\":\"%s\",\"name\":\"%s\",\"startMs\":%" PRId64 ",\"active\":1}",
+        mako_trace_id_hex,
+        mako_trace_tls.name[0] ? mako_trace_tls.name : "",
+        mako_trace_tls.start_ms
+    );
+    if (n < 0) return mako_str_from_cstr("{}");
+    return mako_str_from_cstr(buf);
+}
+
 static inline int64_t mako_trace_log(MakoString msg) {
     mako_trace_format_id(
         mako_trace_tls.active ? mako_trace_tls.hi : 0,

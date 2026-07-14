@@ -287,6 +287,7 @@ config/log updates. Tests: `examples/testing/fs_storage_test.mko`.
 | `fdatasync` | `fdatasync(fd: int) -> int` | Flush file data (not metadata) to disk |
 | `fallocate` | `fallocate(fd: int, size: int) -> int` | Pre-allocate disk space for a file |
 | `file_size` | `file_size(fd: int) -> int` | Return the size of an open file |
+| `path_file_size` | `path_file_size(path: string) -> int` | `stat` path size (−1 if missing) |
 | `file_truncate` | `file_truncate(fd: int, size: int) -> int` | Truncate or extend a file to given size |
 | `file_seek` | `file_seek(fd: int, offset: int, whence: int) -> int` | Seek to a position in a file |
 | `file_read_exact` | `file_read_exact(fd: int, count: int) -> string` | Read exactly count bytes from current position |
@@ -658,6 +659,15 @@ application code. See `examples/testing/scram_test.mko` (RFC 7677 §3 vector),
 | `tls_server_new_mtls` | `(cert, key, client_ca) -> TlsServer` | mTLS server (require client cert) |
 | `tls_client_new_mtls` | `(ca, client_cert, client_key) -> TlsClient` | mTLS client (present cert) |
 | `tls_unique` | `(conn: TlsConn) -> string` | Finished bytes for tls-unique binding |
+| `scram_tls_unique_cbind` | `(conn: TlsConn) -> string` | SCRAM-PLUS `c=` from `tls_unique` |
+| `scram_plus_client_final_bare` | `(conn, nonce) -> string` | `c=…,r=…` with tls-unique |
+| `tls_server_reload` | `(server, cert, key) -> int` | Hot-reload server cert/key (0=ok) |
+| `tls_make_self_signed` | `(cert_path, key_path, cn, days) -> int` | Write self-signed PEMs (OpenSSL) |
+| `tls_make_csr` | `(csr_path, key_path, cn, bits) -> int` | Write CSR + key PEMs (OpenSSL) |
+| `pem_count_blocks` | `(pem: string) -> int` | Count `-----BEGIN` blocks |
+| `pem_has_block` | `(pem, label) -> int` | 1 if `BEGIN label` present |
+| `pem_extract_block` | `(pem, label) -> string` | First full PEM block or empty |
+| `pem_load_file` | `(path: string) -> string` | Read file; empty if not PEM |
 | `const_eq` | `const_eq(a: string, b: string) -> int` | Constant-time string comparison |
 | `crypto_eq` | `crypto_eq(a: string, b: string) -> int` | Constant-time byte comparison |
 | `secret_from_str` | `secret_from_str(s: string) -> Secret` | Wrap a string as a secret (zeroized on drop) |
@@ -2030,6 +2040,8 @@ Tests: `examples/testing/strong_log_test.mko`.
 | `hist_sum` | `hist_sum(id: int) -> int` | Get histogram sum |
 | `hist_avg` | `hist_avg(id: int) -> int` | Get histogram average |
 | `metrics_export` | `metrics_export() -> string` | Export all metrics as text |
+| `metrics_export_prom` | `metrics_export_prom() -> string` | Prometheus text exposition |
+| `trace_export_json` | `trace_export_json() -> string` | Current trace as OTel-ish JSON |
 
 ---
 

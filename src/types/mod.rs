@@ -1276,6 +1276,10 @@ impl TypeChecker {
             Type::Fn(vec![Type::Int], Box::new(Type::Int)),
         );
         fns.insert(
+            "path_file_size".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
             "file_truncate".into(),
             Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int)),
         );
@@ -3908,6 +3912,10 @@ impl TypeChecker {
         // Tracing.
         fns.insert("trace_id".into(), Type::Fn(vec![], Box::new(Type::String)));
         fns.insert(
+            "trace_export_json".into(),
+            Type::Fn(vec![], Box::new(Type::String)),
+        );
+        fns.insert(
             "trace_current".into(),
             Type::Fn(vec![], Box::new(Type::String)),
         );
@@ -4623,6 +4631,10 @@ impl TypeChecker {
         );
         fns.insert(
             "metrics_export".into(),
+            Type::Fn(vec![], Box::new(Type::String)),
+        );
+        fns.insert(
+            "metrics_export_prom".into(),
             Type::Fn(vec![], Box::new(Type::String)),
         );
         fns.insert(
@@ -7330,6 +7342,58 @@ impl TypeChecker {
         fns.insert(
             "tls_unique".into(),
             Type::Fn(vec![Type::Named("TlsConn".into())], Box::new(Type::String)),
+        );
+        fns.insert(
+            "scram_tls_unique_cbind".into(),
+            Type::Fn(vec![Type::Named("TlsConn".into())], Box::new(Type::String)),
+        );
+        fns.insert(
+            "scram_plus_client_final_bare".into(),
+            Type::Fn(
+                vec![Type::Named("TlsConn".into()), Type::String],
+                Box::new(Type::String),
+            ),
+        );
+        fns.insert(
+            "tls_server_reload".into(),
+            Type::Fn(
+                vec![
+                    Type::Named("TlsServer".into()),
+                    Type::String,
+                    Type::String,
+                ],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "tls_make_self_signed".into(),
+            Type::Fn(
+                vec![Type::String, Type::String, Type::String, Type::Int],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "tls_make_csr".into(),
+            Type::Fn(
+                vec![Type::String, Type::String, Type::String, Type::Int],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "pem_count_blocks".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "pem_has_block".into(),
+            Type::Fn(vec![Type::String, Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "pem_extract_block".into(),
+            Type::Fn(vec![Type::String, Type::String], Box::new(Type::String)),
+        );
+        fns.insert(
+            "pem_load_file".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::String)),
         );
         fns.insert(
             "tls_accept".into(),

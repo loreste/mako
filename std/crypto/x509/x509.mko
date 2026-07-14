@@ -1,4 +1,30 @@
-// std/crypto/x509 — seed (cert helpers when OpenSSL linked)
+// std/crypto/x509 — PEM + thin OpenSSL helpers for cert lab / rotation.
+// Not a full CA product: no HSM, no WebPKI store, no ACME.
+
 fn available() -> bool {
     return true
+}
+
+// PEM string helpers (no OpenSSL required)
+fn count_blocks(pem: string) -> int {
+    return pem_count_blocks(pem)
+}
+fn has_block(pem: string, label: string) -> int {
+    return pem_has_block(pem, label)
+}
+fn extract_block(pem: string, label: string) -> string {
+    return pem_extract_block(pem, label)
+}
+fn load_file(path: string) -> string {
+    return pem_load_file(path)
+}
+
+// Write self-signed cert+key PEMs (needs OpenSSL at link time).
+fn make_self_signed(cert_path: string, key_path: string, cn: string, days: int) -> int {
+    return tls_make_self_signed(cert_path, key_path, cn, days)
+}
+
+// Write CSR + private key PEMs for external signing / rotation workflows.
+fn make_csr(csr_path: string, key_path: string, cn: string, bits: int) -> int {
+    return tls_make_csr(csr_path, key_path, cn, bits)
 }

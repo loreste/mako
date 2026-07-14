@@ -1165,6 +1165,86 @@ static inline MakoString mako_scram_client_final_without_proof(MakoString cbind_
     return (MakoString){d, (size_t)written};
 }
 
+/* ---- PEM helpers (string-level; no OpenSSL required) ---- */
+/* Count -----BEGIN …----- blocks in a PEM blob. */
+static inline int64_t mako_pem_count_blocks(MakoString pem) {
+    if (!pem.data || pem.len < 11) return 0;
+    int64_t n = 0;
+    const char *p = pem.data;
+    const char *end = pem.data + pem.len;
+    while (p + 11 <= end) {
+        if (memcmp(p, "-----BEGIN ", 11) == 0) n++;
+        p++;
+    }
+    return n;
+}
+
+/* 1 if a block labeled `label` exists (e.g. "CERTIFICATE", "PRIVATE KEY"). */
+static inline int64_t mako_pem_has_block(MakoString pem, MakoString label) {
+    if (!pem.data || !label.data || label.len == 0) return 0;
+    size_t need = 11 + label.len + 5; /* -----BEGIN + label + -----\n */
+    if (pem.len < need) return 0;
+    char needle[256];
+    if (label.len + 20 >= sizeof(needle)) return 0;
+    int n = snprintf(needle, sizeof(needle), "-----BEGIN %.*s-----",
+                     (int)label.len, label.data);
+    if (n <= 0) return 0;
+    for (size_t i = 0; i + (size_t)n <= pem.len; i++) {
+        if (memcmp(pem.data + i, needle, (size_t)n) == 0) return 1;
+    }
+    return 0;
+}
+
+/* Extract first full PEM block for `label` (BEGIN…END inclusive). Empty if missing. */
+static inline MakoString mako_pem_extract_block(MakoString pem, MakoString label) {
+    if (!pem.data || !label.data || label.len == 0) return mako_str_from_cstr("");
+    char begin[256], endm[256];
+    if (label.len + 24 >= sizeof(begin)) return mako_str_from_cstr("");
+    int nb = snprintf(begin, sizeof(begin), "-----BEGIN %.*s-----",
+                      (int)label.len, label.data);
+    int ne = snprintf(endm, sizeof(endm), "-----END %.*s-----",
+                      (int)label.len, label.data);
+    if (nb <= 0 || ne <= 0) return mako_str_from_cstr("");
+    const char *p = pem.data;
+    const char *pend = pem.data + pem.len;
+    const char *b = NULL;
+    for (const char *q = p; q + nb <= pend; q++) {
+        if (memcmp(q, begin, (size_t)nb) == 0) {
+            b = q;
+            break;
+        }
+    }
+    if (!b) return mako_str_from_cstr("");
+    const char *e = NULL;
+    for (const char *q = b + nb; q + ne <= pend; q++) {
+        if (memcmp(q, endm, (size_t)ne) == 0) {
+            e = q + ne;
+            /* include trailing newline if present */
+            if (e < pend && (*e == '\n' || *e == '\r')) e++;
+            if (e < pend && e[-1] == '\r' && *e == '\n') e++;
+            break;
+        }
+    }
+    if (!e || e <= b) return mako_str_from_cstr("");
+    size_t n = (size_t)(e - b);
+    char *d = (char *)malloc(n + 1);
+    if (!d) return mako_str_from_cstr("");
+    memcpy(d, b, n);
+    d[n] = 0;
+    return (MakoString){d, n};
+}
+
+/* Load a PEM file (read + require at least one BEGIN block). Empty on fail. */
+static inline MakoString mako_pem_load_file(MakoString path) {
+    MakoString raw = mako_read_file(path);
+    if (!raw.data || raw.len == 0) return mako_str_from_cstr("");
+    if (mako_pem_count_blocks(raw) == 0) {
+        free(raw.data);
+        return mako_str_from_cstr("");
+    }
+    return raw;
+}
+
 static inline MakoString mako_csrf_token(void) {
     return mako_session_id_new();
 }
@@ -1697,6 +1777,57 @@ static inline MakoString mako_metrics_export(void) {
     buf[len] = 0;
     MakoString out = {buf, len};
     return out;
+}
+
+/* Prometheus text exposition (0.0.4-ish) for the same 64 slots. */
+static inline MakoString mako_metrics_export_prom(void) {
+    size_t cap = 8192;
+    char *buf = (char *)malloc(cap);
+    if (!buf) {
+        fprintf(stderr, "mako: OOM in metrics_export_prom\n");
+        abort();
+    }
+    size_t len = 0;
+    for (int i = 0; i < 64; i++) {
+        if (mako_metric_counters[i] == 0 && mako_metric_gauges[i] == 0
+            && mako_metric_hist_count[i] == 0) {
+            continue;
+        }
+        int n = snprintf(
+            buf + len,
+            cap > len ? cap - len : 0,
+            "# HELP mako_counter_%d Mako process counter slot %d\n"
+            "# TYPE mako_counter_%d counter\n"
+            "mako_counter_%d %" PRId64 "\n"
+            "# HELP mako_gauge_%d Mako process gauge slot %d\n"
+            "# TYPE mako_gauge_%d gauge\n"
+            "mako_gauge_%d %" PRId64 "\n"
+            "# HELP mako_hist_sum_%d Mako histogram sum slot %d\n"
+            "# TYPE mako_hist_sum_%d counter\n"
+            "mako_hist_sum_%d %" PRId64 "\n"
+            "# HELP mako_hist_count_%d Mako histogram count slot %d\n"
+            "# TYPE mako_hist_count_%d counter\n"
+            "mako_hist_count_%d %" PRId64 "\n",
+            i, i, i, i, mako_metric_counters[i],
+            i, i, i, i, mako_metric_gauges[i],
+            i, i, i, i, mako_metric_hist_sum[i],
+            i, i, i, i, mako_metric_hist_count[i]
+        );
+        if (n < 0) break;
+        len += (size_t)n;
+        if (len + 512 >= cap) {
+            cap *= 2;
+            char *next = (char *)realloc(buf, cap);
+            if (!next) {
+                free(buf);
+                fprintf(stderr, "mako: OOM in metrics_export_prom grow\n");
+                abort();
+            }
+            buf = next;
+        }
+    }
+    buf[len] = 0;
+    return (MakoString){buf, len};
 }
 
 /* ---- JSON seed (escape + wrap object with one string field) ---- */

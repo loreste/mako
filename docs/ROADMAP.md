@@ -85,7 +85,7 @@ This is the checklist for reaching **100% of the product intention**, not just
 the current MVP/STATUS bar. Percentages are weighted by product importance and
 should be updated whenever a task is checked off.
 
-**Overall intention completion:** **~86% / 100%**  
+**Overall intention completion:** **~87% / 100%**  
 Weighted from the track table below; STATUS remains the MVP implementation bar.  
 **Mako identity (preferred syntax):** **~86%** — [IDENTITY.md](IDENTITY.md).
 
@@ -98,9 +98,9 @@ Weighted from the track table below; STATUS remains the MVP implementation bar.
 | 5. API protocols and networking | 10% | 100% |
 | 6. Data, SQL, and serialization | 10% | 100% |
 | 7. Toolchain, packages, and IDE | 10% | 100% |
-| 8. Observability and debugging | 8% | 48% |
+| 8. Observability and debugging | 8% | 55% |
 | 9. Installer, distribution, and portability | 10% | 77% |
-| 10. Domain tracks and advanced systems | 10% | 66% |
+| 10. Domain tracks and advanced systems | 10% | 70% |
 
 ### 1. Language Identity And Core Type System — 10%
 
@@ -213,8 +213,10 @@ Weighted from the track table below; STATUS remains the MVP implementation bar.
 - [x] Basic logs/slog helpers and clear runtime abort messages.
 - [x] Structured logging package with redaction controls.
 - [x] Metrics counters/gauges/histograms.
+- [x] Prometheus text exposition (`metrics_export_prom`).
 - [x] Wall-clock compile/run profile reports with stable JSON output.
-- [ ] Distributed tracing and OpenTelemetry export.
+- [x] Trace span-lite JSON seed (`trace_export_json` — not full OTel wire).
+- [ ] Distributed tracing and full OpenTelemetry export (OTLP).
 - [ ] CPU, memory, allocation, scheduler, and lock-contention profiling.
 - [ ] Stack traces with source locations.
 - [ ] Debugger integration: locals, breakpoints, async task inspection.
@@ -253,6 +255,7 @@ Weighted from the track table below; STATUS remains the MVP implementation bar.
 ### 10. Domain Tracks And Advanced Systems — 10%
 
 - [x] Storage engine example, HTTP/H2/H3/gRPC/QUIC seeds.
+- [x] Security product polish: mTLS, CSR/self-signed/reload, PEM helpers, SCRAM-PLUS cbind, `path_file_size` (crypto core only — no SASL SM).
 - [ ] Telecom/realtime: SIP, RTP, SRTP, SIPREC, Diameter, WebRTC.
 - [x] Game-loop and fixed-timestep simulation primitives.
 - [x] Frame allocators, object pools, and allocation tracking for games.
