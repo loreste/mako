@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Language — LEBA ergonomics wave 2
+
+- **First-class functions (non-capturing):** `fn` values as params/locals;
+  named fns + `|x|` / `fn(x){…}` lambdas; call-through via `void*` + cast.
+- **`f"…{expr}"` interpolation** with `{{`/`}}` escapes.
+- **Struct field defaults:** `struct S { x: int = 0 }` fills omitted fields.
+- **`chan[(T,U,…)]` / `make(chan[(…)], n)`** via the ptr ring.
+- Tests: `leba_ergonomics_test.mko`.
+
 ### Language — struct update + POD enum Send (LEBA ergonomics)
 
 - **Struct update:** `S { field: v, ..base }` and `S { ...base, field: v }` —

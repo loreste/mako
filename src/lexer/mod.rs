@@ -121,6 +121,10 @@ pub enum TokenKind {
     Bang,
     Hash,
 
+    /// Interpolated string token payload is the raw interior (no quotes), with
+    /// `{…}` holes left intact for the parser to split.
+    FString(String),
+
     Eof,
 }
 
@@ -440,13 +444,22 @@ impl<'a> Lexer<'a> {
             b'"' => TokenKind::String(self.lex_string()?),
             b'0'..=b'9' => self.lex_number()?,
             b'a'..=b'z' | b'A'..=b'Z' | b'_' => {
-                let kind = self.lex_ident();
-                if let TokenKind::Ident(ref s) = kind {
-                    if s == "async" || s == "await" {
-                        return Err(LexError::ColoredAsync(line, col));
+                // f"…" / F"…" string interpolation (no space between f and ").
+                if (self.peek() == Some(b'f') || self.peek() == Some(b'F'))
+                    && self.src.get(self.pos + 1) == Some(&b'"')
+                {
+                    self.bump(); // f
+                    let raw = self.lex_string()?;
+                    TokenKind::FString(raw)
+                } else {
+                    let kind = self.lex_ident();
+                    if let TokenKind::Ident(ref s) = kind {
+                        if s == "async" || s == "await" {
+                            return Err(LexError::ColoredAsync(line, col));
+                        }
                     }
+                    kind
                 }
-                kind
             }
             other => {
                 return Err(LexError::UnexpectedChar(other as char, line, col));

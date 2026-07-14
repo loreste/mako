@@ -299,6 +299,8 @@ pub struct TypeChecker {
     pub mono_fns: Vec<FnDef>,
     /// mono name already generated
     mono_generated: HashSet<String>,
+    /// Struct field defaults: struct name → field → default expr.
+    struct_field_defaults: HashMap<String, HashMap<String, Expr>>,
 }
 
 impl TypeChecker {
@@ -8357,6 +8359,7 @@ impl TypeChecker {
             active_type_params: HashSet::new(),
             mono_fns: Vec::new(),
             mono_generated: HashSet::new(),
+            struct_field_defaults: HashMap::new(),
         }
     }
 
@@ -8557,9 +8560,18 @@ impl TypeChecker {
                     let fields: Result<Vec<_>, _> = s
                         .fields
                         .iter()
-                        .map(|(n, t)| Ok((n.clone(), self.resolve_type(t)?)))
+                        .map(|(n, t, _)| Ok((n.clone(), self.resolve_type(t)?)))
                         .collect();
                     let fields = fields?;
+                    // Register field defaults for struct-lit fill.
+                    for (n, _, def) in &s.fields {
+                        if let Some(d) = def {
+                            self.struct_field_defaults
+                                .entry(s.name.clone())
+                                .or_default()
+                                .insert(n.clone(), d.clone());
+                        }
+                    }
                     self.types.insert(
                         s.name.clone(),
                         Type::Struct {
@@ -10195,6 +10207,10 @@ impl TypeChecker {
                         .map(|e| Self::expr_mentions(e, name))
                         .unwrap_or(false)
             }
+            Expr::StringInterp(parts) => parts.iter().any(|p| match p {
+                InterpPart::Expr(e) => Self::expr_mentions(e, name),
+                InterpPart::Lit(_) => false,
+            }),
             Expr::StructLitPos { values, .. } => {
                 values.iter().any(|e| Self::expr_mentions(e, name))
             }
@@ -11589,8 +11605,13 @@ impl TypeChecker {
                     }
                     Type::Struct { .. } => Ok(Type::Chan(Box::new(et))),
                     Type::Enum { .. } => Ok(Type::Chan(Box::new(et))),
+                    Type::Tuple(elems)
+                        if elems.iter().all(|e| self.is_chan_element_ty(e)) =>
+                    {
+                        Ok(Type::Chan(Box::new(et)))
+                    }
                     other => Err(TypeError::new(format!(
-                        "chan_open supports int family, bool, float, string, named structs, and enums, got {}",
+                        "chan_open supports int family, bool, float, string, named structs, enums, and tuples of those, got {}",
                         other.display()
                     ))
                     .hint("chan_new(n) remains the int channel API (backward compatible)")),
@@ -12421,7 +12442,12 @@ impl TypeChecker {
                             let at = if matches!(a, Expr::Int(_)) && is_literal_int_kind(p) {
                                 p.clone()
                             } else {
-                                self.check_expr(a)?
+                                // Push expected type so lambdas / constructors refine.
+                                let saved = self.current_expected.clone();
+                                self.current_expected = Some(p.clone());
+                                let t = self.check_expr(a)?;
+                                self.current_expected = saved;
+                                t
                             };
                             if !self.compatible(&at, p) {
                                 return Err(TypeError::new(format!(
@@ -12906,6 +12932,7 @@ impl TypeChecker {
                     return Err(TypeError::new(format!("unknown struct `{name}`")));
                 };
                 // Functional update `S { field: v, ..base }` fills missing fields from base.
+                // Field defaults fill omitted fields when present on the struct def.
                 if let Some(base) = update {
                     let bt = self.check_expr(base)?;
                     let same = match &bt {
@@ -12919,12 +12946,6 @@ impl TypeChecker {
                             bt.display()
                         )));
                     }
-                } else if fields.len() != decl.len() {
-                    return Err(TypeError::new(format!(
-                        "struct `{sname}` expects {} fields, got {}",
-                        decl.len(),
-                        fields.len()
-                    )));
                 }
                 let mut seen = std::collections::HashSet::new();
                 for (fname, fexpr) in fields {
@@ -12957,20 +12978,33 @@ impl TypeChecker {
                         )));
                     }
                 }
-                // Without update, require all declared fields present.
+                // Without update, require all declared fields present (or a default).
                 if update.is_none() {
+                    let defaults = self.struct_field_defaults.get(&sname);
                     for (dn, _) in &decl {
-                        if !fields.iter().any(|(n, _)| n == dn) {
-                            return Err(TypeError::new(format!(
-                                "struct `{sname}` missing field `{dn}`"
-                            )));
+                        if fields.iter().any(|(n, _)| n == dn) {
+                            continue;
                         }
+                        if defaults.map(|d| d.contains_key(dn)).unwrap_or(false) {
+                            continue;
+                        }
+                        return Err(TypeError::new(format!(
+                            "struct `{sname}` missing field `{dn}`"
+                        )));
                     }
                 }
                 Ok(Type::Struct {
                     name: sname,
                     fields: decl,
                 })
+            }
+            Expr::StringInterp(parts) => {
+                for p in parts {
+                    if let InterpPart::Expr(e) = p {
+                        let _ = self.check_expr(e)?;
+                    }
+                }
+                Ok(Type::String)
             }
             Expr::StructLitPos { name, values } => {
                 let Some(Type::Struct {
@@ -13127,8 +13161,13 @@ impl TypeChecker {
                             }
                             Type::Struct { .. } => Ok(Type::Chan(elem)),
                             Type::Enum { .. } => Ok(Type::Chan(elem)),
+                            Type::Tuple(elems)
+                                if elems.iter().all(|e| self.is_chan_element_ty(e)) =>
+                            {
+                                Ok(Type::Chan(elem))
+                            }
                             other => Err(TypeError::new(format!(
-                                "make(chan[T]) supports int family, bool, float, string, named structs, and enums, got {}",
+                                "make(chan[T]) supports int family, bool, float, string, named structs, enums, and tuples of those, got {}",
                                 other.display()
                             ))
                             .hint("use make(chan[T], n) or chan_open[T](n)")),
@@ -13205,11 +13244,29 @@ impl TypeChecker {
                 }
             }
             Expr::Lambda { params, body } => {
-                // Closure capture move seed: check body in current hold-move state
-                // (captures may move outer holds); keep moves after lambda creation.
+                // Prefer expected `fn(T, …) -> R` for param/return types (first-class seed).
+                // Fall back to all-int params (fan / untyped) when no expectation.
+                let (param_tys, expected_ret): (Vec<Type>, Option<Type>) =
+                    match &self.current_expected {
+                        Some(Type::Fn(ps, r)) if ps.len() == params.len() => {
+                            (ps.clone(), Some(r.as_ref().clone()))
+                        }
+                        Some(Type::Fn(ps, _)) if ps.len() != params.len() => {
+                            return Err(TypeError::new(format!(
+                                "lambda has {} params, expected fn type has {}",
+                                params.len(),
+                                ps.len()
+                            )));
+                        }
+                        _ => (params.iter().map(|_| Type::Int).collect(), None),
+                    };
                 self.push_scope();
-                for p in params {
-                    self.define(p, Type::Int, false); // inferred as int for v0.1
+                for (p, ty) in params.iter().zip(param_tys.iter()) {
+                    self.define(p, ty.clone(), false);
+                }
+                let saved_exp = self.current_expected.clone();
+                if let Some(ref er) = expected_ret {
+                    self.current_expected = Some(er.clone());
                 }
                 // `fn(x) { x * 2 }` / `fn(x) { return x * 2 }` — block last value is ret type
                 let ret = match body.as_ref() {
@@ -13227,11 +13284,20 @@ impl TypeChecker {
                     }
                     other => self.check_expr(other)?,
                 };
+                self.current_expected = saved_exp;
                 self.pop_scope();
-                Ok(Type::Fn(
-                    params.iter().map(|_| Type::Int).collect(),
-                    Box::new(ret),
-                ))
+                if let Some(ref er) = expected_ret {
+                    if ret != Type::Void && !self.compatible(&ret, er) {
+                        return Err(TypeError::new(format!(
+                            "lambda return type: expected {}, got {}",
+                            er.display(),
+                            ret.display()
+                        )));
+                    }
+                    Ok(Type::Fn(param_tys, Box::new(er.clone())))
+                } else {
+                    Ok(Type::Fn(param_tys, Box::new(ret)))
+                }
             }
             Expr::IfExpr {
                 cond,
@@ -13601,6 +13667,12 @@ impl TypeChecker {
                 .iter()
                 .zip(b.iter())
                 .all(|(x, y)| self.compatible(x, y)),
+            (Type::Fn(pa, ra), Type::Fn(pb, rb)) if pa.len() == pb.len() => {
+                pa.iter()
+                    .zip(pb.iter())
+                    .all(|(a, b)| self.compatible(a, b))
+                    && self.compatible(ra, rb)
+            }
             (Type::Enum { name: a, .. }, Type::Enum { name: b, .. }) if a == b => true,
             (Type::Interface { name: a }, Type::Interface { name: b }) if a == b => true,
             (got, Type::Interface { name: iname }) => self.implements_iface(got, iname),
@@ -14157,6 +14229,28 @@ impl TypeChecker {
             .get(n)
             .map(|t| matches!(t, Type::Enum { .. }))
             .unwrap_or(false)
+    }
+
+    /// Element types allowed in `chan[T]` / `make(chan[T], n)`.
+    fn is_chan_element_ty(&self, t: &Type) -> bool {
+        match t {
+            Type::Int
+            | Type::Int64
+            | Type::Int32
+            | Type::Int8
+            | Type::Byte
+            | Type::Bool
+            | Type::Float
+            | Type::String => true,
+            Type::Named(n)
+                if n != "ShareInt" && n != "Arena" && n != "Crew" && (self.structs_named(n) || self.enums_named(n)) =>
+            {
+                true
+            }
+            Type::Struct { .. } | Type::Enum { .. } => true,
+            Type::Tuple(elems) => elems.iter().all(|e| self.is_chan_element_ty(e)),
+            _ => false,
+        }
     }
 
     /// Reflect bag: POD leaves, nested POD structs, Option/Result/array/map of reflectable.

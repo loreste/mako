@@ -139,7 +139,8 @@ pub struct Param {
 #[derive(Debug, Clone, PartialEq)]
 pub struct StructDef {
     pub name: String,
-    pub fields: Vec<(String, TypeExpr)>,
+    /// `(name, type, optional default expr)` — defaults are const-ish literals in v1.
+    pub fields: Vec<(String, TypeExpr, Option<Expr>)>,
     /// e.g. ["json"] from `#[derive(json)]`
     pub derives: Vec<String>,
     pub exported: bool,
@@ -348,6 +349,13 @@ pub enum Ownership {
     Share,
 }
 
+/// Piece of an `f"…"` string: literal text or `{expr}`.
+#[derive(Debug, Clone, PartialEq)]
+pub enum InterpPart {
+    Lit(String),
+    Expr(Expr),
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
     Int(i64),
@@ -396,6 +404,8 @@ pub enum Expr {
         /// Optional base for functional update (`..base` / `...base`).
         update: Option<Box<Expr>>,
     },
+    /// Interpolated string: `f"hello {name}"` — parts alternate lit/expr.
+    StringInterp(Vec<InterpPart>),
     /// Go-style positional literal `Point{1, 2}` — values in declaration order.
     /// Field names are resolved against the struct definition during type-check
     /// and codegen.

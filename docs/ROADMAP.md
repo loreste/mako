@@ -106,13 +106,16 @@ Metrics/prom + span-lite JSON are in; depth is open.
 | Multi-field worker I/O | `chan[Struct]` + deep-POD kick args | `chan_struct_test` · [SPEED.md](SPEED.md) |
 | Struct update (spread) | `S { field: v, ..base }` / `S { ...base, field: v }` | `struct_update_test` |
 | Enum on kick-POD / channels | POD enum fields; `chan[Enum]` | `struct_update_test` |
+| First-class fn values (non-capturing) | `fn apply(f: fn(int)->int, …)` · named + lambda | `leba_ergonomics_test` |
+| `f"…{x}"` interpolation | desugars to concat / `mako_int_to_string` | `leba_ergonomics_test` |
+| Struct field defaults | `field: int = 0` on `struct` | `leba_ergonomics_test` |
+| Tuple channels | `chan[(int, string)]` | `leba_ergonomics_test` |
 
 **Still open (true residuals):**
 
-1. Field defaults on `struct` def (update/`T{}` covers many cases)  
-2. General first-class functions / closures as ordinary parameters (beyond `fan`)  
-3. Optional string interpolation sugar over `fmt_sprintf*`  
-4. `chan[(int, int, …)]` tuples (named structs already cover the multi-field case)  
+1. Capturing closures / env-bound first-class fns  
+2. Format specs inside `f"…"` (`{x:02}`) — use `fmt_sprintf*`  
+3. Kicking `Type::Fn` across crew (Send rejects)  
 
 ### Language / stdlib residuals (lower priority)
 

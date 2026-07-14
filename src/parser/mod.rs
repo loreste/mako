@@ -889,6 +889,7 @@ impl Parser {
         let mut fields = Vec::new();
         while !matches!(self.peek_kind(), TokenKind::RBrace) {
             // Go: `x int` or Mako: `x: int` (optional trailing comma)
+            // Optional default: `x: int = 0` / `name: string = ""`
             let fname = self.expect_ident()?;
             let ty = if matches!(self.peek_kind(), TokenKind::Colon) {
                 self.bump();
@@ -900,7 +901,13 @@ impl Parser {
                     "field `{fname}` needs a type (Go: `{fname} int` or Mako: `{fname}: int`)"
                 )));
             };
-            fields.push((fname, ty));
+            let default = if matches!(self.peek_kind(), TokenKind::Assign) {
+                self.bump();
+                Some(self.parse_expr()?)
+            } else {
+                None
+            };
+            fields.push((fname, ty, default));
             if matches!(self.peek_kind(), TokenKind::Comma) {
                 self.bump();
             }
@@ -2025,6 +2032,81 @@ impl Parser {
         Ok(None)
     }
 
+    /// Split `f"…"` interior into lit / `{expr}` parts. Simple `{ident}` and
+    /// `{a.b}` / `{a[i]}` via re-lexing the hole as a full expression.
+    fn parse_fstring(&mut self, raw: &str) -> Result<Expr, ParseError> {
+        let mut parts: Vec<InterpPart> = Vec::new();
+        let bytes = raw.as_bytes();
+        let mut i = 0;
+        let mut lit = String::new();
+        while i < bytes.len() {
+            if bytes[i] == b'{' {
+                if i + 1 < bytes.len() && bytes[i + 1] == b'{' {
+                    lit.push('{');
+                    i += 2;
+                    continue;
+                }
+                if !lit.is_empty() {
+                    parts.push(InterpPart::Lit(std::mem::take(&mut lit)));
+                }
+                i += 1; // {
+                let start = i;
+                let mut depth = 1;
+                while i < bytes.len() && depth > 0 {
+                    if bytes[i] == b'{' {
+                        depth += 1;
+                    } else if bytes[i] == b'}' {
+                        depth -= 1;
+                    }
+                    if depth > 0 {
+                        i += 1;
+                    }
+                }
+                if depth != 0 {
+                    return Err(self.err("unterminated `{` in f-string".into()));
+                }
+                let hole = &raw[start..i];
+                i += 1; // }
+                // Re-lex and parse the hole as an expression.
+                let tokens = crate::lexer::Lexer::new(hole)
+                    .tokenize()
+                    .map_err(|e| self.err(format!("f-string hole: {e}")))?;
+                let mut sub = Parser::new(tokens);
+                let expr = sub.parse_expr()?;
+                parts.push(InterpPart::Expr(expr));
+            } else if bytes[i] == b'}' {
+                if i + 1 < bytes.len() && bytes[i + 1] == b'}' {
+                    lit.push('}');
+                    i += 2;
+                    continue;
+                }
+                return Err(self.err("stray `}` in f-string (use `}}` to escape)".into()));
+            } else {
+                // UTF-8 safe: push one char
+                let ch = raw[i..].chars().next().unwrap();
+                lit.push(ch);
+                i += ch.len_utf8();
+            }
+        }
+        if !lit.is_empty() {
+            parts.push(InterpPart::Lit(lit));
+        }
+        if parts.is_empty() {
+            parts.push(InterpPart::Lit(String::new()));
+        }
+        // No holes → plain string
+        if parts.iter().all(|p| matches!(p, InterpPart::Lit(_))) {
+            let mut s = String::new();
+            for p in parts {
+                if let InterpPart::Lit(t) = p {
+                    s.push_str(&t);
+                }
+            }
+            return Ok(Expr::String(s));
+        }
+        Ok(Expr::StringInterp(parts))
+    }
+
     fn parse_primary(&mut self) -> Result<Expr, ParseError> {
         match self.peek_kind().clone() {
             TokenKind::Int(n) => {
@@ -2046,6 +2128,10 @@ impl Parser {
             TokenKind::String(s) => {
                 self.bump();
                 Ok(Expr::String(s))
+            }
+            TokenKind::FString(raw) => {
+                self.bump();
+                self.parse_fstring(&raw)
             }
             TokenKind::Ident(name) => {
                 self.bump();

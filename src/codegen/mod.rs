@@ -16,6 +16,8 @@ struct StructInfo {
     c_name: String,
     /// field name → C type
     fields: Vec<(String, String)>,
+    /// field name → default expression (from struct def)
+    defaults: HashMap<String, Expr>,
 }
 
 pub struct Codegen {
@@ -28,6 +30,8 @@ pub struct Codegen {
     fn_params: HashMap<String, Vec<String>>,
     /// Local variable → C type
     locals: HashMap<String, String>,
+    /// Local fn-value → C cast type for call-through, e.g. `int64_t (*)(int64_t)`.
+    fn_ptr_casts: HashMap<String, String>,
     /// Local `MakoChanPtr*` → Mako struct type name (for send/recv boxing)
     chan_ptr_elems: HashMap<String, String>,
     /// Enum type name → info
@@ -156,6 +160,7 @@ impl Codegen {
             fn_rets: HashMap::new(),
             fn_params: HashMap::new(),
             locals: HashMap::new(),
+            fn_ptr_casts: HashMap::new(),
             chan_ptr_elems: HashMap::new(),
             enums: HashMap::new(),
             structs: HashMap::new(),
@@ -266,7 +271,7 @@ impl Codegen {
         for item in &program.items {
             match item {
                 Item::Struct(s) => {
-                    for (_, t) in &s.fields {
+                    for (_, t, _) in &s.fields {
                         self.collect_maps_in_type(t);
                     }
                 }
@@ -462,6 +467,13 @@ impl Codegen {
                 }
                 if let Some(u) = update {
                     self.collect_maps_in_expr(u);
+                }
+            }
+            Expr::StringInterp(parts) => {
+                for p in parts {
+                    if let crate::ast::InterpPart::Expr(e) = p {
+                        self.collect_maps_in_expr(e);
+                    }
                 }
             }
             Expr::StructLitPos { values, .. } => {
@@ -3174,10 +3186,22 @@ impl Codegen {
         let fields: Vec<(String, String)> = s
             .fields
             .iter()
-            .map(|(n, t)| (n.clone(), self.type_expr_c(t)))
+            .map(|(n, t, _)| (n.clone(), self.type_expr_c(t)))
             .collect();
-        self.structs
-            .insert(s.name.clone(), StructInfo { c_name, fields });
+        let mut defaults = HashMap::new();
+        for (n, _, d) in &s.fields {
+            if let Some(e) = d {
+                defaults.insert(n.clone(), e.clone());
+            }
+        }
+        self.structs.insert(
+            s.name.clone(),
+            StructInfo {
+                c_name,
+                fields,
+                defaults,
+            },
+        );
     }
 
     fn emit_iface_typedefs(&mut self) {
@@ -8224,7 +8248,7 @@ impl Codegen {
         let schema = s
             .fields
             .iter()
-            .map(|(n, t)| format!("{n}:{}", type_expr_schema(t)))
+            .map(|(n, t, _)| format!("{n}:{}", type_expr_schema(t)))
             .collect::<Vec<_>>()
             .join(",");
         let name_esc = escape_c(&s.name);
@@ -8569,7 +8593,7 @@ impl Codegen {
                 match args.first() {
                     Some(TypeExpr::Named(t)) if t == "string" => "MakoChanStr*".into(),
                     Some(TypeExpr::Named(t))
-                        if self.structs.contains_key(t)
+                        if (self.structs.contains_key(t) || self.enums.contains_key(t))
                             && t != "int"
                             && t != "int64"
                             && t != "bool"
@@ -8579,6 +8603,7 @@ impl Codegen {
                     {
                         "MakoChanPtr*".into()
                     }
+                    Some(TypeExpr::Tuple(_)) => "MakoChanPtr*".into(),
                     _ => "MakoChan*".into(),
                 }
             }
@@ -8591,8 +8616,21 @@ impl Codegen {
                     .join("_");
                 format!("MakoTup_{tag}")
             }
+            // Function values are stored as void* and cast at the call site
+            // (C declarator syntax for fn-pointer params is awkward otherwise).
             TypeExpr::Fn(_, _) => "void*".into(),
             _ => "int64_t".into(),
+        }
+    }
+
+    /// C cast type for calling a void* fn value, e.g. `int64_t (*)(int64_t)`.
+    fn fn_ptr_cast_ty(&self, params: &[TypeExpr], ret: &TypeExpr) -> String {
+        let r = self.type_expr_c(ret);
+        if params.is_empty() {
+            format!("{r} (*)(void)")
+        } else {
+            let ps: Vec<_> = params.iter().map(|p| self.type_expr_c(p)).collect();
+            format!("{r} (*)({})", ps.join(", "))
         }
     }
 
@@ -8673,6 +8711,7 @@ impl Codegen {
 
     fn emit_fn(&mut self, f: &FnDef) {
         self.locals.clear();
+        self.fn_ptr_casts.clear();
         self.defer_stack.clear();
         self.share_scopes.clear();
         self.share_live.clear();
@@ -8702,6 +8741,10 @@ impl Codegen {
         for p in &f.params {
             self.locals.insert(p.name.clone(), self.type_expr_c(&p.ty));
             self.register_local_type_metadata(&p.name, &p.ty);
+            if let TypeExpr::Fn(ps, ret) = &p.ty {
+                self.fn_ptr_casts
+                    .insert(p.name.clone(), self.fn_ptr_cast_ty(ps, ret));
+            }
         }
         let ret = self.c_ret_type_resolved(f);
         let params = self.c_params_resolved(f);
@@ -9366,6 +9409,10 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                 // Annotated lets: Result/Option nest metadata from the type.
                 if let Some(ann_ty) = ann {
                     self.register_local_type_metadata(name, ann_ty);
+                    if let TypeExpr::Fn(ps, ret) = ann_ty {
+                        self.fn_ptr_casts
+                            .insert(name.clone(), self.fn_ptr_cast_ty(ps, ret));
+                    }
                 }
                 // Propagate Result Err enum type from call
                 if ty == "MakoResultInt" {
@@ -10130,12 +10177,20 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         }
                     }
                 }
-                let ty = self
-                    .locals
-                    .get(n)
-                    .cloned()
-                    .unwrap_or_else(|| "int64_t".into());
-                (ty, mangle(n))
+                // Local binding first (may be a function pointer).
+                if let Some(ty) = self.locals.get(n).cloned() {
+                    return (ty, mangle(n));
+                }
+                // Named function as a first-class value → void* of the C symbol.
+                if self.fn_params.contains_key(n) || self.fn_rets.contains_key(n) {
+                    let fname = if self.extern_fns.contains(n) {
+                        n.clone()
+                    } else {
+                        mangle(n)
+                    };
+                    return ("void*".into(), format!("(void*){fname}"));
+                }
+                ("int64_t".into(), mangle(n))
             }
             Expr::Binary { op, left, right } => {
                 if matches!(op, BinOp::And | BinOp::Or) {
@@ -23481,6 +23536,37 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             return ("int64_t".into(), format!("mako_slice_copy({d}, {s})"));
                         }
                         _ => {
+                            // Call through a local function pointer: `f(x)` where f is fn-typed.
+                            if self.locals.contains_key(name) {
+                                let cast = self
+                                    .fn_ptr_casts
+                                    .get(name)
+                                    .cloned()
+                                    .unwrap_or_else(|| "int64_t (*)()".into());
+                                let mut arg_vals = Vec::new();
+                                for a in args {
+                                    let (_, v) = self.emit_expr(a);
+                                    arg_vals.push(v);
+                                }
+                                let call = format!(
+                                    "(({cast}){})({})",
+                                    mangle(name),
+                                    arg_vals.join(", ")
+                                );
+                                let ret = cast
+                                    .split("(*)")
+                                    .next()
+                                    .map(|s| s.trim().to_string())
+                                    .filter(|s| !s.is_empty())
+                                    .unwrap_or_else(|| "int64_t".into());
+                                if ret == "void" {
+                                    self.line(&format!("{call};"));
+                                    return ("void".into(), "/*void*/".into());
+                                }
+                                let tmp = self.fresh("r");
+                                self.line(&format!("{ret} {tmp} = {call};"));
+                                return (ret, tmp);
+                            }
                             // User enum variant constructor?
                             if let Some(enum_name) = self.variant_to_enum.get(name).cloned() {
                                 return self.emit_enum_construct(&enum_name, name, args);
@@ -23566,16 +23652,38 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         }
                     }
                 }
-                ("int64_t".into(), "0".into())
+                // Indirect call: (expr)(args…) where expr is a function pointer.
+                {
+                    let (cty, cv) = self.emit_expr(callee);
+                    let mut arg_vals = Vec::new();
+                    for a in args {
+                        let (_, v) = self.emit_expr(a);
+                        arg_vals.push(v);
+                    }
+                    let call = format!("{cv}({})", arg_vals.join(", "));
+                    let ret = cty
+                        .split("(*)")
+                        .next()
+                        .map(|s| s.trim().to_string())
+                        .filter(|s| !s.is_empty())
+                        .unwrap_or_else(|| "int64_t".into());
+                    if ret == "void" {
+                        self.line(&format!("{call};"));
+                        return ("void".into(), "/*void*/".into());
+                    }
+                    let tmp = self.fresh("r");
+                    self.line(&format!("{ret} {tmp} = {call};"));
+                    return (ret, tmp);
+                }
             }
             Expr::StructLit {
                 name,
                 fields,
                 update,
             } => {
-                let cty = self
-                    .structs
-                    .get(name)
+                let info = self.structs.get(name).cloned();
+                let cty = info
+                    .as_ref()
                     .map(|s| s.c_name.clone())
                     .unwrap_or_else(|| name.clone());
                 let tmp = self.fresh("st");
@@ -23586,12 +23694,63 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                     self.line(&format!("{tmp} = {bv};"));
                 } else {
                     self.line(&format!("memset(&{tmp}, 0, sizeof({tmp}));"));
+                    // Apply field defaults for omitted fields.
+                    if let Some(ref inf) = info {
+                        for (fname, def) in &inf.defaults {
+                            if !fields.iter().any(|(n, _)| n == fname) {
+                                let (_, v) = self.emit_expr(def);
+                                self.line(&format!("{tmp}.{fname} = {v};"));
+                            }
+                        }
+                    }
                 }
                 for (fname, fexpr) in fields {
                     let (_, v) = self.emit_expr(fexpr);
                     self.line(&format!("{tmp}.{fname} = {v};"));
                 }
                 (cty, tmp)
+            }
+            Expr::StringInterp(parts) => {
+                // Lower to successive mako_str_concat / format helpers.
+                let mut acc: Option<String> = None;
+                for p in parts {
+                    let piece = match p {
+                        crate::ast::InterpPart::Lit(s) => {
+                            let escaped = escape_c(s);
+                            format!("mako_str_from_cstr(\"{escaped}\")")
+                        }
+                        crate::ast::InterpPart::Expr(e) => {
+                            let (ty, v) = self.emit_expr(e);
+                            if ty == "MakoString" {
+                                v
+                            } else if ty == "int64_t" || ty == "bool" {
+                                format!("mako_int_to_string((int64_t)({v}))")
+                            } else if ty == "double" {
+                                let tmp = self.fresh("fs");
+                                self.line(&format!(
+                                    "MakoString {tmp} = mako_format_float({v}, 6);"
+                                ));
+                                tmp
+                            } else {
+                                format!("mako_int_to_string((int64_t)({v}))")
+                            }
+                        }
+                    };
+                    acc = Some(match acc {
+                        None => piece,
+                        Some(prev) => {
+                            let tmp = self.fresh("ic");
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_str_concat({prev}, {piece});"
+                            ));
+                            tmp
+                        }
+                    });
+                }
+                (
+                    "MakoString".into(),
+                    acc.unwrap_or_else(|| "mako_str_from_cstr(\"\")".into()),
+                )
             }
             Expr::StructLitPos { name, values } => {
                 // Resolve positional values to declared field names (in order).
@@ -23741,6 +23900,22 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         ));
                         // Remember element type for this temporary / binding
                         self.chan_ptr_elems.insert(tmp.clone(), n.clone());
+                        ("MakoChanPtr*".into(), tmp)
+                    }
+                    TypeExpr::Tuple(elems) => {
+                        self.line(&format!(
+                            "MakoChanPtr *{tmp} = mako_chan_ptr_new({c});"
+                        ));
+                        let field_tys: Vec<String> =
+                            elems.iter().map(|e| self.type_expr_c(e)).collect();
+                        let tag = field_tys
+                            .iter()
+                            .map(|t| c_type_mono_tag(t))
+                            .collect::<Vec<_>>()
+                            .join("_");
+                        let cname = format!("MakoTup_{tag}");
+                        self.note_tuple_typedef(&cname, field_tys);
+                        self.chan_ptr_elems.insert(tmp.clone(), cname);
                         ("MakoChanPtr*".into(), tmp)
                     }
                     _ => {
@@ -23940,6 +24115,22 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                                     "MakoChanPtr *{tmp} = mako_chan_ptr_new({c});"
                                 ));
                                 self.chan_ptr_elems.insert(tmp.clone(), en.clone());
+                                return ("MakoChanPtr*".into(), tmp);
+                            }
+                            TypeExpr::Tuple(elems) => {
+                                self.line(&format!(
+                                    "MakoChanPtr *{tmp} = mako_chan_ptr_new({c});"
+                                ));
+                                let field_tys: Vec<String> =
+                                    elems.iter().map(|e| self.type_expr_c(e)).collect();
+                                let tag = field_tys
+                                    .iter()
+                                    .map(|t| c_type_mono_tag(t))
+                                    .collect::<Vec<_>>()
+                                    .join("_");
+                                let cname = format!("MakoTup_{tag}");
+                                self.note_tuple_typedef(&cname, field_tys);
+                                self.chan_ptr_elems.insert(tmp.clone(), cname);
                                 return ("MakoChanPtr*".into(), tmp);
                             }
                             _ => {
@@ -25176,7 +25367,14 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                                 .get(&st)
                                 .map(|s| s.c_name.clone())
                                 .or_else(|| self.enums.get(&st).map(|e| e.c_name.clone()))
-                                .unwrap_or(st);
+                                .unwrap_or_else(|| {
+                                    // Tuple channels store C type name (MakoTup_…) directly.
+                                    if st.starts_with("MakoTup_") {
+                                        st.clone()
+                                    } else {
+                                        st
+                                    }
+                                });
                             let boxn = self.fresh("sbox");
                             self.line(&format!(
                                 "{cname} *{boxn} = ({cname}*)malloc(sizeof({cname}));"
@@ -25224,7 +25422,13 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                                 .get(&st)
                                 .map(|s| s.c_name.clone())
                                 .or_else(|| self.enums.get(&st).map(|e| e.c_name.clone()))
-                                .unwrap_or(st.clone());
+                                .unwrap_or_else(|| {
+                                    if st.starts_with("MakoTup_") {
+                                        st.clone()
+                                    } else {
+                                        st.clone()
+                                    }
+                                });
                             let ptr = self.fresh("pp");
                             self.line(&format!(
                                 "{cname} *{ptr} = ({cname}*)mako_chan_ptr_recv({rv});"
@@ -25613,7 +25817,40 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                 self.line("}");
                 ("void".into(), "/*void*/".into())
             }
-            Expr::Lambda { .. } => ("/*fn*/".into(), "NULL".into()),
+            Expr::Lambda { params, body } => {
+                // Non-capturing lambda → static C helper, return as void* fn value.
+                let helper = self.fresh("lam");
+                let pnames: Vec<String> = params
+                    .iter()
+                    .enumerate()
+                    .map(|(i, p)| {
+                        if p == "_" {
+                            format!("_p{i}")
+                        } else {
+                            mangle(p)
+                        }
+                    })
+                    .collect();
+                let body_c = if pnames.is_empty() {
+                    self.expr_as_pure_c(body, "_")
+                } else {
+                    self.expr_as_pure_c(body, &pnames[0])
+                };
+                let ret_c = "int64_t";
+                let param_cs = if pnames.is_empty() {
+                    "void".into()
+                } else {
+                    pnames
+                        .iter()
+                        .map(|p| format!("int64_t {p}"))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                };
+                let helper_src =
+                    format!("static {ret_c} {helper}({param_cs}) {{ return ({body_c}); }}\n");
+                self.insert_helper(&helper_src);
+                ("void*".into(), format!("(void*){helper}"))
+            }
             Expr::Match { scrutinee, arms } => self.emit_match(scrutinee, arms),
             Expr::IfExpr {
                 cond,

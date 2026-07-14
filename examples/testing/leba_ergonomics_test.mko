@@ -1,0 +1,115 @@
+// LEBA-shaped language gaps: first-class fns, f-strings, field defaults, tuple chans.
+
+// ---- First-class functions ----
+
+fn double(n: int) -> int {
+    return n * 2
+}
+
+fn apply(f: fn(int) -> int, x: int) -> int {
+    return f(x)
+}
+
+fn add1(n: int) -> int {
+    return n + 1
+}
+
+fn pipeline_step(respond: fn(int, string) -> int, code: int, body: string) -> int {
+    return respond(code, body)
+}
+
+fn fake_respond(code: int, body: string) -> int {
+    return code + len(body)
+}
+
+fn TestFirstClassNamedFn() {
+    assert_eq(apply(double, 21), 42)
+    assert_eq(apply(add1, 41), 42)
+}
+
+fn TestFirstClassLambda() {
+    assert_eq(apply(|x| x * 3, 7), 21)
+    assert_eq(apply(fn(x) { x + 10 }, 5), 15)
+}
+
+fn TestFirstClassMultiArg() {
+    assert_eq(pipeline_step(fake_respond, 200, "ok"), 202)
+}
+
+fn TestFnValueBinding() {
+    let f: fn(int) -> int = double
+    assert_eq(f(11), 22)
+    let g: fn(int) -> int = |x| x - 1
+    assert_eq(g(10), 9)
+}
+
+// ---- f-string interpolation ----
+
+fn TestFStringBasic() {
+    let name = "mako"
+    let s = f"hello {name}"
+    assert_eq_str(s, "hello mako")
+}
+
+fn TestFStringInt() {
+    let n = 42
+    let s = f"n={n}"
+    assert_eq_str(s, "n=42")
+}
+
+fn TestFStringMixed() {
+    let fe = "web"
+    let port = 8080
+    let s = f"frontend={fe} bind=0.0.0.0:{port}"
+    assert_eq_str(s, "frontend=web bind=0.0.0.0:8080")
+}
+
+fn TestFStringEscape() {
+    let s = f"brace {{ok}}"
+    assert_eq_str(s, "brace {ok}")
+}
+
+// ---- Struct field defaults ----
+
+struct ProxyOut {
+    err: int = 0
+    status: int = 200
+    bytes: int = 0
+    retries: int = 0
+}
+
+fn TestFieldDefaultsPartial() {
+    let a = ProxyOut { err: 1 }
+    assert_eq(a.err, 1)
+    assert_eq(a.status, 200)
+    assert_eq(a.bytes, 0)
+    assert_eq(a.retries, 0)
+}
+
+fn TestFieldDefaultsOverride() {
+    let a = ProxyOut { status: 503, bytes: 99 }
+    assert_eq(a.err, 0)
+    assert_eq(a.status, 503)
+    assert_eq(a.bytes, 99)
+}
+
+// ---- Tuple channels ----
+
+fn TestChanTupleRoundtrip() {
+    let ch = chan_open[(int, string)](2)
+    let _ = ch.send((7, "hi"))
+    let a, b = ch.recv()
+    assert_eq(a, 7)
+    assert_eq_str(b, "hi")
+    ch.close()
+}
+
+fn TestChanTupleTwoInts() {
+    let ch = make(chan[(int, int)], 2)
+    let _ = ch.send((1, 2))
+    let _ = ch.send((3, 4))
+    let x, y = ch.recv()
+    let u, v = ch.recv()
+    assert_eq(x + y + u + v, 10)
+    ch.close()
+}

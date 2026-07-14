@@ -189,10 +189,11 @@ Tracked also in [STATUS.md](STATUS.md) / [ROADMAP.md](ROADMAP.md). Closing these
 | R5 | Observability / diagnostics depth | Prom + span JSON seed done; OTLP, profiles, source stacks residual |
 | R6 | Identity lint | `mako lint --identity` flags dual forms as style |
 | R7 | Compile-time discipline at scale | Keep frontend linear; demand-driven monomorphs done; avoid trait-solver cliffs |
-| R8 | Field defaults on `struct` def | **Update done** (`S { ..base, err: 1 }`); explicit field defaults still open |
-| R9 | General first-class functions | Named/lambda `fn` values as ordinary params (beyond `fan`) for shared pipelines |
-| R10 | True string interpolation | Optional `f"…{x}"` sugar over existing `fmt_sprintf*` |
+| R8 | Field defaults on `struct` def | **Done** — `field: int = 0` + update `..base` |
+| R9 | General first-class functions | **Done seed** (non-capturing named + lambda); capturing residual |
+| R10 | True string interpolation | **Done** — `f"…{x}"` (no format specs yet) |
 | R11 | Enum fields on kick-POD + `chan[Enum]` | **Done** for POD enums — `struct_update_test` |
+| R12 | Tuple channels | **Done** — `chan[(int, string)]` |
 
 ---
 

@@ -72,6 +72,7 @@ Last inventory: 2026-07-14 (**unique Mako surface** · pack/pull types · full m
 | Security product polish (path size, PEM, CSR/self-signed, prom/trace, SCRAM-PLUS helpers) | PASS — `security_product_test` |
 | Backend ergonomics already on tip (`for…in range`, `fmt_sprintf*`, `match`/`switch`, `chan[Struct]`, POD kick) | Documented — [ERGONOMICS.md](ERGONOMICS.md) · [SPEED.md](SPEED.md) |
 | Struct update `S { ..base, field: v }` + POD enum kick / `chan[Enum]` | Done — `struct_update_test` |
+| First-class fns · `f"…"` · field defaults · `chan[tuple]` | Done — `leba_ergonomics_test` |
 | Book samples `mako check` / `run` | PASS — `docs/book/examples/book_*.mko` |
 | `mako test examples/testing` | PASS — **165 passed**, 0 failed |
 | `if init; cond { }` + both-branches-return body | Done — `examples/testing/if_init_test.mko` |

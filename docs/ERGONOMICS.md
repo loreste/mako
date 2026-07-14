@@ -447,13 +447,55 @@ let ch = chan_open[ServerState](4)
 let _ = ch.send(Draining)
 ```
 
-### Still open (real language residuals)
+### First-class functions (non-capturing)
 
-| Residual | Workaround today |
-|----------|------------------|
-| Field defaults on `struct` def | Explicit zeros / `T{}` / `..base` update |
-| General first-class fn parameters | Duplicate small pipelines or `fan` lambdas |
-| `f"…{x}"` interpolation | `fmt_sprintf*` |
+```mko
+fn apply(f: fn(int) -> int, x: int) -> int {
+    return f(x)
+}
+fn double(n: int) -> int { return n * 2 }
+
+fn main() {
+    print(apply(double, 21))           // named fn value
+    print(apply(|x| x + 1, 41))        // lambda
+    let g: fn(int) -> int = double
+    print(g(3))
+}
+```
+
+Multi-arg: `fn(int, string) -> int` works the same (e.g. shared respond hooks).
+Capturing closures are still a residual (non-capturing only).
+
+### `f"…"` string interpolation
+
+```mko
+let s = f"frontend={fe.name} bind={host}:{port}"
+// escapes: {{ and }} → literal braces
+```
+
+Holes accept expressions; ints/bools stringify; strings concat. Prefer
+`fmt_sprintf*` when you need format verbs (`%x`, precision).
+
+### Struct field defaults
+
+```mko
+struct ProxyOut {
+    err: int = 0
+    status: int = 200
+    bytes: int = 0
+}
+let r = ProxyOut { err: 1 }   // status=200, bytes=0 filled in
+```
+
+### Tuple channels
+
+```mko
+let ch = chan_open[(int, string)](4)
+let _ = ch.send((7, "hi"))
+let a, b = ch.recv()
+```
+
+Tests: `leba_ergonomics_test.mko`.
 
 ---
 

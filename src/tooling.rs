@@ -647,7 +647,7 @@ pub fn run_doc(path: &Path, out_dir: &Path) -> Result<(), ()> {
                     md.push_str("```mako\nstruct ");
                     md.push_str(&s.name);
                     md.push_str(" {\n");
-                    for (n, ty) in &s.fields {
+                    for (n, ty, _) in &s.fields {
                         md.push_str("    ");
                         md.push_str(n);
                         md.push_str(": ");
@@ -955,7 +955,7 @@ fn api_struct_signature(s: &StructDef) -> String {
     let fields = s
         .fields
         .iter()
-        .map(|(name, ty)| format!("{name}: {}", fmt_type(ty)))
+        .map(|(name, ty, _)| format!("{name}: {}", fmt_type(ty)))
         .collect::<Vec<_>>()
         .join(", ");
     format!("struct {} {{{fields}}}", s.name)
@@ -1089,7 +1089,7 @@ fn struct_symbol_json(file: &str, s: &StructDef) -> String {
     let fields = s
         .fields
         .iter()
-        .map(|(name, ty)| {
+        .map(|(name, ty, _)| {
             format!(
                 r#"{{"name":"{}","type":"{}"}}"#,
                 json_escape(name),
@@ -1297,6 +1297,13 @@ fn collect_calls_expr(expr: &Expr, out: &mut Vec<String>) {
             }
             if let Some(u) = update {
                 collect_calls_expr(u, out);
+            }
+        }
+        Expr::StringInterp(parts) => {
+            for p in parts {
+                if let crate::ast::InterpPart::Expr(e) = p {
+                    collect_calls_expr(e, out);
+                }
             }
         }
         Expr::Array(items) | Expr::Tuple(items) => {
@@ -2036,8 +2043,11 @@ fn rewrite_item_refs(item: &mut Item, alias: &str, names: &ImportNameSets) {
         }
         Item::Const(c) => rewrite_expr(&mut c.value, alias, names),
         Item::Struct(s) => {
-            for (_, ty) in &mut s.fields {
+            for (_, ty, def) in &mut s.fields {
                 rewrite_type_expr(ty, alias, names);
+                if let Some(d) = def {
+                    rewrite_expr(d, alias, names);
+                }
             }
         }
         Item::Enum(e) => {
@@ -2325,6 +2335,13 @@ fn rewrite_expr(e: &mut Expr, alias: &str, names: &ImportNameSets) {
             rewrite_expr(mapper, alias, names);
         }
         Expr::Int(_) | Expr::Float(_) | Expr::Bool(_) | Expr::String(_) => {}
+        Expr::StringInterp(parts) => {
+            for p in parts {
+                if let crate::ast::InterpPart::Expr(e) = p {
+                    rewrite_expr(e, alias, names);
+                }
+            }
+        }
     }
 }
 

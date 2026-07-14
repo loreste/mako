@@ -219,11 +219,15 @@ fn fmt_item(item: &Item) -> String {
             o.push_str("struct ");
             o.push_str(&s.name);
             o.push_str(" {\n");
-            for (n, t) in &s.fields {
+            for (n, t, d) in &s.fields {
                 o.push_str(INDENT);
                 o.push_str(n);
                 o.push_str(": ");
                 o.push_str(&fmt_type(t));
+                if let Some(def) = d {
+                    o.push_str(" = ");
+                    o.push_str(&fmt_expr(def, 0));
+                }
                 o.push('\n');
             }
             o.push('}');
@@ -680,6 +684,23 @@ fn fmt_expr(e: &Expr, parent_prec: u8) -> String {
             } else {
                 format!("{name} {{ {} }}", parts.join(", "))
             }
+        }
+        Expr::StringInterp(parts) => {
+            let mut s = String::from("f\"");
+            for p in parts {
+                match p {
+                    crate::ast::InterpPart::Lit(t) => {
+                        s.push_str(&t.replace('\\', "\\\\").replace('"', "\\\""));
+                    }
+                    crate::ast::InterpPart::Expr(e) => {
+                        s.push('{');
+                        s.push_str(&fmt_expr(e, 0));
+                        s.push('}');
+                    }
+                }
+            }
+            s.push('"');
+            s
         }
         Expr::StructLitPos { name, values } => {
             let parts: Vec<_> = values.iter().map(|e| fmt_expr(e, 0)).collect();

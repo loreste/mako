@@ -65,7 +65,7 @@ fn expand_json_derive(s: &StructDef) -> Vec<Item> {
     let params: Vec<Param> = s
         .fields
         .iter()
-        .map(|(n, ty)| Param {
+        .map(|(n, ty, _)| Param {
             name: n.clone(),
             ty: ty.clone(),
             mutable: false,
@@ -75,7 +75,7 @@ fn expand_json_derive(s: &StructDef) -> Vec<Item> {
     let mut pieces = s
         .fields
         .iter()
-        .filter_map(|(field, ty)| json_field_expr(field, ty));
+        .filter_map(|(field, ty, _)| json_field_expr(field, ty));
     let json_expr = pieces
         .next()
         .map(|first| pieces.fold(first, |acc, next| call("json_merge", vec![acc, next])))
@@ -94,7 +94,7 @@ fn expand_json_derive(s: &StructDef) -> Vec<Item> {
         stability: crate::ast::ApiStability::Unspecified,
     }));
 
-    for (fname_field, ty) in &s.fields {
+    for (fname_field, ty, _) in &s.fields {
         let (callee, ret_ty) = match ty {
             TypeExpr::Named(n) if n == "string" => ("json_get_string", "string"),
             TypeExpr::Named(n) if n == "int" => ("json_get_int", "int"),
