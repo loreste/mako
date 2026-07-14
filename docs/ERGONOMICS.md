@@ -261,7 +261,7 @@ Everyday `let` stays simple. That is intentional.
 | Dual spellings in new code (`func`, `:=`, `import`) | Mako flair (`fn`, `let`, `pull`) |
 | Ignoring `Result` | `?`, `match`, or `let _ =` when discard is deliberate |
 | Building ad-hoc set/`groupby` helpers | `map[K]bool` / `map[K][]T` |
-| Re-implementing nested maps by hand | `map[K]map[K2]V` (depth 2) |
+| Re-implementing nested maps by hand | `map[K]map[K2]V` (depth ≤3) |
 | Parallel nullable / fallible lookups | `map[K]Option[T]` / `map[K]Result[T,E]` |
 | Hand-wiring per-key channels | `map[K]chan[T]` |
 

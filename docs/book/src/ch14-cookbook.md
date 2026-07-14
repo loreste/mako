@@ -1632,6 +1632,20 @@ fn main() {
 }
 ```
 
+### Nested table depth 3
+
+```mko
+fn main() {
+    let mut grid = make(map[string]map[string]map[string]int)
+    let mut mid = make(map[string]map[string]int)
+    let mut leaf = make(map[string]int)
+    leaf["n"] = 1
+    mid["row"] = leaf
+    grid["a"] = mid
+    print_int(grid["a"]["row"]["n"])
+}
+```
+
 ### Named mailboxes (`map[K]chan[T]`)
 
 ```mko

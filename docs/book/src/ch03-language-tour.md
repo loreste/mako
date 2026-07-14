@@ -421,7 +421,7 @@ fn main() {
 |------|------|
 | Scalar / set | `map[string]int`, `map[string]bool` |
 | Groups | `map[K][]T` (e.g. `map[string][]int`) |
-| Nested table | `map[K]map[K2]V` (depth 2 only) |
+| Nested table | `map[K]map[K2]V` (depth 2) · `map[K]map[K2]map[K3]V` (depth 3) |
 | Sparse grid | `map[string][][]int` |
 | Optional / fallible per key | `map[K]Option[T]`, `map[K]Result[T,E]` |
 | Optional whole map | `Option[map[K]V]`, `Result[map[K]V, E]` |

@@ -168,6 +168,7 @@ Last inventory: 2026-07-14 (**unique Mako surface** · pack/pull types · full m
 | Nested slices `[][]T` | Done — `nested_slice_test` |
 | `map[K][]T` (scalar + named keys × slice values) | Done — `map_slice_test` |
 | Nested maps `map[K]map[K2]V` (depth 2) | Done — `map_nested_test` |
+| Nested maps depth 3 `map[K]map[K2]map[K3]V` | Done — `map_depth3_test` |
 | `map[K][][]T` (nested-slice values) | Done — `map_nested_slice_test` |
 | Nested maps with slice values `map[K]map[…][]T` | Done — `map_map_slice_test` |
 | `Option[map[K]V]` / `Result[map[K]V]` (all map kinds, match unbox) | Done — `option_map_test` |

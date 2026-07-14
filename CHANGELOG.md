@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Language — nested maps depth 3
+
+- **`map[K]map[K2]map[K3]V`** — three-level nested maps (scalar mid/leaf cores;
+  named keys allowed on the outer map). Shallow `maps_*` (pointer identity on
+  mid maps). Depth 4+ still rejected.
+- Tests: `map_depth3_test`.
+
 ### Fix — CI: Windows mutex, nested named-key maps, int-lit array types
 
 - **`session_cancel` mutex** — lazy-init instead of `PTHREAD_MUTEX_INITIALIZER`

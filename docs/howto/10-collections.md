@@ -81,6 +81,7 @@ fn main() {
 | Slice | `map[string][]int`, `map[Point][]string` |
 | Nested slice | `map[string][][]int` |
 | Nested map (depth 2) | `map[string]map[string]int` |
+| Nested map (depth 3) | `map[string]map[string]map[string]int` |
 | Nested map + slices | `map[string]map[string][]int` |
 | Slice of maps | `[]map[string]int` |
 | Map of slice-of-maps | `map[string][]map[string]int` |
@@ -317,6 +318,7 @@ Pre-size with a hint: `make(map[string]int, 1024)`.
 | `examples/testing/map_enum_test.mko` | enum keys/values |
 | `examples/testing/map_slice_test.mko` | `map[K][]T` |
 | `examples/testing/map_nested_test.mko` | `map[K]map[K2]V` |
+| `examples/testing/map_depth3_test.mko` | `map[K]map[K2]map[K3]V` |
 | `examples/testing/map_nested_slice_test.mko` | `map[K][][]T` |
 | `examples/testing/map_map_slice_test.mko` | nested maps + slice values |
 | `examples/testing/slice_map_test.mko` | `[]map` / `map[K][]map` |

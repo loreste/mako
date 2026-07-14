@@ -1,0 +1,148 @@
+// map[K]map[K2]map[K3]V — nested maps depth 3
+
+struct Point {
+    x: int
+    y: int
+}
+
+fn TestMapStringDepth3Int() {
+    let mut outer = make(map[string]map[string]map[string]int)
+    let mut mid = make(map[string]map[string]int)
+    let mut leaf = make(map[string]int)
+    leaf["n"] = 42
+    mid["row"] = leaf
+    outer["a"] = mid
+    assert_eq(len(outer), 1)
+    assert_eq(outer["a"]["row"]["n"], 42)
+    assert(has(outer, "a"))
+    assert(not has(outer, "z"))
+    // mutate through retrieved mid / leaf pointers
+    let m = outer["a"]
+    let row = m["row"]
+    row["n"] = 7
+    assert_eq(outer["a"]["row"]["n"], 7)
+    delete(outer, "a")
+    assert(not has(outer, "a"))
+}
+
+fn TestMapIntDepth3Int() {
+    let mut outer = make(map[int]map[int]map[int]int)
+    let mut mid = make(map[int]map[int]int)
+    let mut leaf = make(map[int]int)
+    leaf[1] = 10
+    mid[2] = leaf
+    outer[0] = mid
+    assert_eq(outer[0][2][1], 10)
+    assert_eq(len(outer), 1)
+}
+
+fn TestMapBoolDepth3String() {
+    let mut outer = make(map[bool]map[string]map[string]string)
+    let mut mid = make(map[string]map[string]string)
+    let mut leaf = make(map[string]string)
+    leaf["k"] = "v"
+    mid["m"] = leaf
+    outer[true] = mid
+    assert_eq_str(outer[true]["m"]["k"], "v")
+    assert(has(outer, true))
+    assert(not has(outer, false))
+}
+
+fn TestMapFloatDepth3Float() {
+    let mut outer = make(map[float]map[int]map[float]float)
+    let mut mid = make(map[int]map[float]float)
+    let mut leaf = make(map[float]float)
+    leaf[1.5] = 2.5
+    mid[1] = leaf
+    outer[0.5] = mid
+    let v = outer[0.5][1][1.5]
+    assert(v > 2.4 && v < 2.6)
+}
+
+fn TestMapDepth3CommaOk() {
+    let mut outer = make(map[string]map[string]map[string]int)
+    let mut mid = make(map[string]map[string]int)
+    let mut leaf = make(map[string]int)
+    leaf["x"] = 9
+    mid["y"] = leaf
+    outer["z"] = mid
+    let v, ok = outer["z"]
+    assert(ok)
+    assert_eq(v["y"]["x"], 9)
+    let _, miss = outer["nope"]
+    assert(not miss)
+}
+
+fn TestMapDepth3Helpers() {
+    let mut outer = make(map[string]map[string]map[string]int)
+    let mut m1 = make(map[string]map[string]int)
+    let mut l1 = make(map[string]int)
+    l1["n"] = 1
+    m1["r"] = l1
+    let mut m2 = make(map[string]map[string]int)
+    let mut l2 = make(map[string]int)
+    l2["n"] = 2
+    m2["r"] = l2
+    outer["a"] = m1
+    outer["b"] = m2
+    let ks = maps_keys(outer)
+    assert_eq(len(ks), 2)
+    let vs = maps_values(outer)
+    assert_eq(len(vs), 2)
+    let c = maps_clone(outer)
+    assert_eq(maps_equal(outer, c), 1)
+    // shallow: same mid pointers
+    assert_eq(c["a"]["r"]["n"], 1)
+    maps_clear(c)
+    assert_eq(len(c), 0)
+    maps_copy(c, outer)
+    assert_eq(len(c), 2)
+    assert_eq(c["b"]["r"]["n"], 2)
+}
+
+fn TestMapDepth3Range() {
+    let mut outer = make(map[string]map[string]map[string]int)
+    let mut m1 = make(map[string]map[string]int)
+    let mut l1 = make(map[string]int)
+    l1["n"] = 3
+    m1["r"] = l1
+    let mut m2 = make(map[string]map[string]int)
+    let mut l2 = make(map[string]int)
+    l2["n"] = 4
+    m2["r"] = l2
+    outer["a"] = m1
+    outer["b"] = m2
+    let mut sum = 0
+    for _, mid in range outer {
+        for _, leaf in range mid {
+            for _, v in range leaf {
+                sum = sum + v
+            }
+        }
+    }
+    assert_eq(sum, 7)
+}
+
+fn TestMapStructKeyDepth3() {
+    let mut outer = make(map[Point]map[string]map[string]int)
+    let p = Point { x: 1, y: 2 }
+    let mut mid = make(map[string]map[string]int)
+    let mut leaf = make(map[string]int)
+    leaf["n"] = 5
+    mid["r"] = leaf
+    outer[p] = mid
+    assert_eq(outer[p]["r"]["n"], 5)
+    assert(has(outer, p))
+    assert(not has(outer, Point { x: 0, y: 0 }))
+}
+
+fn TestMapDepth3MixedKeys() {
+    // map[string]map[int]map[string]int
+    let mut outer = make(map[string]map[int]map[string]int)
+    let mut mid = make(map[int]map[string]int)
+    let mut leaf = make(map[string]int)
+    leaf["v"] = 11
+    mid[3] = leaf
+    outer["row"] = mid
+    assert_eq(outer["row"][3]["v"], 11)
+}

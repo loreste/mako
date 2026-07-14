@@ -8786,11 +8786,18 @@ impl TypeChecker {
             {
                 Ok(())
             }
-            // Nested maps: map[K]map[K2]V (depth 2 only — inner value must not be a map).
+            // Nested maps: map[K]map[K2]V (depth 2) or map[K]map[K2]map[K3]V (depth 3).
+            // Depth 4+ rejected (leaf of the mid map must not itself be a map).
             (
                 Type::Int | Type::String | Type::Float | Type::Bool | Type::Struct { .. } | Type::Enum { .. },
-                Type::Map(_, inner_v),
-            ) if !matches!(inner_v.as_ref(), Type::Map(_, _)) => Ok(()),
+                Type::Map(_, mid),
+            ) if match mid.as_ref() {
+                Type::Map(_, leaf) => !matches!(leaf.as_ref(), Type::Map(_, _)),
+                _ => true,
+            } =>
+            {
+                Ok(())
+            }
             // Slice of maps: map[K][]map[K2]V
             (
                 Type::Int | Type::String | Type::Float | Type::Bool | Type::Struct { .. } | Type::Enum { .. },
@@ -8916,7 +8923,7 @@ impl TypeChecker {
             }
             _ => Err(TypeError::new(format!(
                 "unsupported map[{}]{} — keys: int|string|float|bool|Struct|Enum; \
-                 values: int|string|float|bool|Struct|Enum|[]T|[][]T|[]Option|[]Result|[]map|map[K2]V|Option[T]|Option[[]T]|Option[map]|Result[T,E]|Result[[]T,E]|Result[map]|(T,U)|chan[T]",
+                 values: int|string|float|bool|Struct|Enum|[]T|[][]T|[]Option|[]Result|[]map|map[K2]V|map[K2]map[K3]V|Option[T]|Option[[]T]|Option[map]|Result[T,E]|Result[[]T,E]|Result[map]|(T,U)|chan[T]",
                 k.display(),
                 v.display()
             ))),

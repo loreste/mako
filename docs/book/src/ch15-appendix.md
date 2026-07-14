@@ -175,7 +175,7 @@ the result is already determined by the left.
 | `[]bool` / `[]Enum` | Bool and enum slices                   |
 | `[]Option[T]` / `[]Result[T,E]` | Bag element slices (make/append/index/range/lits) |
 | `[][]T`           | Nested slices (outer headers of inners)  |
-| `map[K]V`         | Hash map — keys: int\|string\|float\|bool\|Struct\|Enum; values: same, `[]T`, nested `map[K2]V` (depth 2), `Option[T]`, `Result[T,E]`, `(T,U)`, `chan[T]` |
+| `map[K]V`         | Hash map — keys: int\|string\|float\|bool\|Struct\|Enum; values: same, `[]T`, nested `map` (depth ≤3), `Option[T]`, `Result[T,E]`, `(T,U)`, `chan[T]` |
 | `chan[T]`          | Typed channel                            |
 | `Option[T]`       | Some(T) or None                          |
 | `Result[T, E]`    | Ok(T) or Err(E)                          |

@@ -658,18 +658,20 @@ maps_clear(c)
 
 Missing key → zero value (`0` / `""` / `false` / empty slice / **nil** inner
 map with `len` 0 / **None** / **Err("")** for bag values / **nil channel** for
-`map[K]chan[T]`). Nested maps are depth **2** only; `maps_clone` /
-`maps_equal` compare/copy outer entries by **inner-map pointer** identity
-(channel maps likewise use channel-pointer identity). Bag-value maps
-(`map[K]Option[T]`, `map[K]Result[T,E]`) store bags by value; match on `m[k]`
-works for Some/Ok arms. Channel-value maps store channel handles.
+`map[K]chan[T]`). Nested maps support depth **2–3** (`map[K]map[K2]V` and
+`map[K]map[K2]map[K3]V`); depth 4+ is rejected. `maps_clone` / `maps_equal`
+compare/copy outer entries by **inner-map pointer** identity (channel maps
+likewise use channel-pointer identity). Bag-value maps (`map[K]Option[T]`,
+`map[K]Result[T,E]`) store bags by value; match on `m[k]` works for Some/Ok
+arms. Channel-value maps store channel handles.
 
 Wrong key/value combo rejected at check (`examples/bad/map_key_type.mko`).
 Struct keys may hold slice/map/Option/Result/enum fields — eq/hash use
 identity or structural bag helpers (not invalid C aggregate `==`).
 Tests: `map_test`, `map_struct_test`, `map_float_test`, `map_struct_key_test`,
 `map_bool_test`, `map_enum_test`, `map_slice_test` (`map[K][]T` incl. named keys),
-`map_nested_test` (`map[K]map[K2]V`), `map_map_slice_test` (`map[K]map[…][]T`),
+`map_nested_test` (`map[K]map[K2]V`), `map_depth3_test` (`map[K]map[K2]map[K3]V`),
+`map_map_slice_test` (`map[K]map[…][]T`),
 `map_nested_slice_test` (`map[K][][]T`), `slice_map_test` (`[]map` / `map[K][]map`),
 `map_option_result_test` (`map[K]Option[T]` / `map[K]Result[T,E]`),
 `map_option_slice_test` (`map[K][]Option[T]` / `map[K][]Result[T,E]`),

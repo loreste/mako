@@ -4281,7 +4281,8 @@ impl Codegen {
         out
     }
 
-    /// Emit all `map[scalar|Named]map[…]` helpers (depth-2 nested maps).
+    /// Emit all `map[scalar|Named]map[…]` helpers (depth-2 nested maps),
+    /// plus depth-3 `map[K]map[K2]map[K3]V` for core scalar leaf maps.
     fn emit_all_map_map_value_helpers(&mut self) {
         let leaf = self.leaf_map_value_specs();
         // []map[…] for maps_values
@@ -4310,6 +4311,55 @@ impl Codegen {
         named_keys.sort_by(|a, b| a.0.cmp(&b.0));
         for (kname, kc) in &named_keys {
             for (tag, vc) in &leaf {
+                self.emit_map_named_key_map_helpers(kname, kc, tag, vc);
+            }
+        }
+
+        // Depth-3: outer map stores depth-2 nested-map pointers.
+        // Core scalar leaf maps only — keeps monomorph grid bounded.
+        let core_leaves: &[&str] = &[
+            "map_string_int",
+            "map_int_int",
+            "map_string_string",
+            "map_int_float",
+            "map_string_float",
+            "map_float_int",
+            "map_float_string",
+            "map_float_float",
+            "map_int_bool",
+            "map_string_bool",
+            "map_float_bool",
+            "map_bool_int",
+            "map_bool_string",
+            "map_bool_float",
+            "map_bool_bool",
+        ];
+        // (ks, kc, C pref, mono key name)
+        let key_triples: &[(&str, &str, &str, &str)] = &[
+            ("i", "int64_t", "I", "int"),
+            ("s", "MakoString", "S", "string"),
+            ("f", "double", "F", "float"),
+            ("b", "bool", "B", "bool"),
+        ];
+        let mut mid: Vec<(String, String)> = Vec::new();
+        for (_, _, pref, name) in key_triples {
+            for leaf_tag in core_leaves {
+                // Depth-2 map[mid_key]leaf as a value type of the outer map.
+                let mid_tag = format!("map_{name}_{leaf_tag}");
+                let mid_c = format!("MakoMap{pref}_{leaf_tag}*");
+                mid.push((mid_tag, mid_c));
+            }
+        }
+        for (tag, vc) in &mid {
+            self.emit_nested_arr_helpers(tag, vc);
+        }
+        for (ks, kc, _, _) in key_triples {
+            for (tag, vc) in &mid {
+                self.emit_map_map_value_helpers(ks, kc, tag, vc);
+            }
+        }
+        for (kname, kc) in &named_keys {
+            for (tag, vc) in &mid {
                 self.emit_map_named_key_map_helpers(kname, kc, tag, vc);
             }
         }

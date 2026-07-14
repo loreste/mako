@@ -167,7 +167,7 @@ Packs: `std/fmt`, `std/print`. Tests: `fmt_print_test.mko`. Demo: `examples/fmt_
 Supported map kinds — **keys:** `int` \| `string` \| `float` \| `bool` \| named
 **Struct** \| **Enum** (incl. pack-qualified types). **Values:** the same set,
 **slices** `[]T` / `[][]T` (int/string/float/bool/byte/Struct/Enum),
-**nested maps** `map[K2]V` (depth 2 only), **bags** `Option[T]` /
+**nested maps** `map[K2]V` / `map[K2]map[K3]V` (depth ≤3), **bags** `Option[T]` /
 `Result[T,E]`, **tuples** `(T,U[,…])`, or **channels** `chan[T]`
 (int/bool/float/string/struct elements, same as `chan_open`). Any combination, e.g.:
 
