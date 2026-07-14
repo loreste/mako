@@ -372,10 +372,11 @@ fn main() {
 ### SCRAM-SHA-256
 
 For Postgres-style challenge-response auth, the `crypto.scram_*` functions
-provide the SCRAM-SHA-256 core (RFC 5802 / RFC 7677). They work on **raw
-bytes** (`sha256_raw`, `hmac_sha256_raw`, `xor_bytes` back them); you assemble
-the `AuthMessage` from the protocol strings. A server verifies a client without
-ever storing the password:
+provide the SCRAM-SHA-256 **crypto core** (RFC 5802 / RFC 7677) — not SASL
+framing. They work on **raw bytes** (`sha256_raw`, `hmac_sha256_raw`,
+`xor_bytes` back them); you assemble the `AuthMessage`, nonces, and base64 wire
+encoding. A server verifies a client without re-deriving from a stored
+plaintext password if it keeps `StoredKey` + `ServerKey` + salt + iterations:
 
 ```mko
 pull "crypto"
@@ -387,11 +388,18 @@ let stored_key = crypto.scram_stored_key(crypto.scram_client_key(salted))
 // AuthMessage = client-first-bare + "," + server-first + "," + client-final-no-proof
 // On auth, check the client's proof against the stored key:
 if crypto.scram_verify_proof(stored_key, auth_message, client_proof) == 1 {
-    // authenticated — reply with the server signature
+    // authenticated — reply with the server signature (const_eq inside verify)
     let server_key = crypto.scram_server_key(salted)
     let sig = crypto.scram_server_signature(server_key, auth_message)
 }
 ```
+
+Helpers: `scram_salted_password`, `scram_client_key`, `scram_server_key`,
+`scram_stored_key`, `scram_client_signature`, `scram_server_signature`,
+`scram_client_proof`, `scram_verify_proof`. There is no
+`scram_client_first` / full SASL state machine in std — applications own the
+pgwire AuthenticationSASL\* messages (see FayDB columnar server for a full
+wire path).
 
 The implementation is checked byte-for-byte against the RFC 7677 test vector
 (`examples/testing/scram_test.mko`).

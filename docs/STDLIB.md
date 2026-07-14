@@ -686,44 +686,101 @@ fn main() {
 
 ## `crypto`
 
-Cryptographic hashing, random number generation, and secure comparison.
+Cryptographic hashing, KDFs, password storage, AEAD, and SCRAM-SHA-256 core.
+Prefer `pull "crypto"` and the package wrappers; raw builtins (`sha256_raw`,
+`pbkdf2_sha256`, …) remain available. Full symbol table: [BUILTINS.md](BUILTINS.md)
+§ Crypto. Narrative + password/SCRAM recipes: book
+[ch07-stdlib](book/src/ch07-stdlib.md#crypto). Threat model notes:
+[SECURITY.md](SECURITY.md).
 
 ```mko
-import "crypto"
+pull "crypto"
 ```
 
-| Builtin | Role |
-|---------|------|
-| `sha256` / `hmac_sha256` | digests (hex) |
-| `random_bytes` / `random_int` | CSPRNG |
-| `const_eq` / `crypto_eq` | timing-safe compare |
-| `secret_from_str` / `secret_drop` | zero-on-drop |
+| Area | API |
+|------|-----|
+| Digests / MAC | `sha256` / `hmac_sha256` (+ `_raw`), package `crypto.digest_sha256` / `crypto.hmac` |
+| CSPRNG | `random_bytes` / `random_int`, package `crypto.rand_bytes` |
+| Timing-safe compare | `const_eq` / `crypto_eq`, package `crypto.eq` |
+| Secrets | `secret_from_str` / `secret_drop` / `secret_eq_str` |
+| Password storage | `crypto.password_hash` / `password_verify` (Argon2id PHC); `crypto.bcrypt` / `bcrypt_check` |
+| KDF | `crypto.pbkdf2` / `pbkdf2_sha256`; `hkdf_sha256` |
+| SCRAM-SHA-256 | `crypto.scram_*` (salted password, keys, proof, verify — RFC 5802/7677) |
+| AEAD | `crypto.aes_gcm_*` / `chacha_*` when OpenSSL linked (`crypto.aead_ok`) |
 
-### Usage examples
+### Digests, random, secrets
 
 ```mko
+pull "crypto"
+
 fn main() {
-    // SHA-256 hash (returns hex string)
-    let hash = sha256("hello mako")
-    print(hash)                         // 64-char hex digest
-
-    // HMAC-SHA256 for message authentication
-    let mac = hmac_sha256("secret-key", "message data")
-    print(mac)
-
-    // Cryptographically secure random bytes
-    let token = random_bytes(16)
-    print(hex_encode(token))            // 32-char random hex
-
-    // Timing-safe comparison (prevents timing attacks)
-    let a = sha256("password1")
-    let b = sha256("password1")
-    print_int(crypto_eq(a, b))          // 1
-
-    // Secure secret handling
+    let hash = crypto.digest_sha256("hello mako")   // hex
+    let mac = crypto.hmac("secret-key", "message")
+    let token = crypto.rand_bytes(16)
+    print(hex_encode(token))
+    print_int(crypto.eq(hash, crypto.digest_sha256("hello mako")))  // 1
     let s = secret_from_str("my-api-key")
-    // ... use s ...
-    secret_drop(s)                      // zeroes memory
+    secret_drop(s)
+}
+```
+
+### Password hashing (prefer Argon2id)
+
+```mko
+pull "crypto"
+
+fn main() {
+    let stored = crypto.password_hash("correct horse battery staple")
+    // $argon2id$v=19$m=…$…  — salt and params travel with the hash
+    if crypto.password_verify(stored, "correct horse battery staple") == 1 {
+        print("welcome")
+    }
+}
+```
+
+Never store plain or single-pass digests of passwords. Use
+`crypto.password_hashing_ok()` / `crypto.bcrypt_ok()` when probing the build.
+
+### SCRAM-SHA-256 (Postgres-style wire auth)
+
+Core only — you assemble the wire/SASL `AuthMessage` and nonces. Salt is **raw
+bytes** (base64-decode values from the wire). Server-side proof check uses
+constant-time compare (`const_eq` inside `scram_verify_proof`).
+
+```mko
+pull "crypto"
+
+// auth = client_first_bare + "," + server_first + "," + client_final_no_proof
+let salted = crypto.scram_salted_password(password, salt, iterations)
+let client_key = crypto.scram_client_key(salted)
+let stored_key = crypto.scram_stored_key(client_key)
+if crypto.scram_verify_proof(stored_key, auth, client_proof) == 1 {
+    let server_key = crypto.scram_server_key(salted)
+    let sig = crypto.scram_server_signature(server_key, auth)
+    // send v=base64(sig) as AuthenticationSASLFinal
+}
+```
+
+| Helper | Role |
+|--------|------|
+| `scram_salted_password` | PBKDF2-HMAC-SHA256, 32-byte salted password |
+| `scram_client_key` / `scram_server_key` | `HMAC(salted, "Client Key"\|"Server Key")` |
+| `scram_stored_key` | `SHA256(client_key)` — what you may persist |
+| `scram_client_proof` / `scram_verify_proof` | XOR proof + server check (1/0) |
+| `scram_client_signature` / `scram_server_signature` | `HMAC(key, AuthMessage)` |
+
+RFC 7677 vector: `examples/testing/scram_test.mko`. Full Postgres wire
+(SASLInitialResponse / SASLContinue / SASLFinal) is application code (e.g.
+FayDB columnar server).
+
+### Key derivation
+
+```mko
+pull "crypto"
+
+fn main() {
+    let key = crypto.pbkdf2("password", "salt", 4096, 32)
+    print_int(len(key))   // 32
 }
 ```
 

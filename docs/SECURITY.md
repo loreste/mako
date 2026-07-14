@@ -182,12 +182,42 @@ Mako does **not** ship a full PKI product or “crypto framework.” It exposes
 `secret_eq_str` for tokens — never `==` on secrets in hot auth paths if you care
 about timing (language `==` is not constant-time).
 
+#### SCRAM-SHA-256 core (`pull "crypto"`)
+
+Mako ships the **RFC 5802 / 7677 crypto schedule**, not a full SASL state
+machine. Applications (e.g. Postgres wire servers) own nonces, base64, and
+message framing.
+
+```mko
+pull "crypto"
+
+// salt = base64_decode(wire_s); auth = bare + "," + server_first + "," + final_wo_proof
+let salted = crypto.scram_salted_password(password, salt, iterations)
+let stored = crypto.scram_stored_key(crypto.scram_client_key(salted))
+if crypto.scram_verify_proof(stored, auth, client_proof) == 1 {
+    let v = crypto.scram_server_signature(crypto.scram_server_key(salted), auth)
+    // AuthenticationSASLFinal: "v=" + base64_encode(v)
+}
+```
+
+| Rule | Detail |
+|------|--------|
+| Salt | Raw bytes in API; decode wire base64 first |
+| AuthMessage | `client-first-bare,server-first,client-final-without-proof` |
+| Proof check | `scram_verify_proof` recovers ClientKey and compares StoredKey with `const_eq` |
+| Storage | Persist `StoredKey` + `ServerKey` + salt + iters — not the plaintext password |
+| Channel binding | Not implemented (`SCRAM-SHA-256-PLUS` / gs2 `p=…` is app residual) |
+
+API table: [BUILTINS.md](BUILTINS.md) § SCRAM-SHA-256. Std recipe:
+[STDLIB.md](STDLIB.md#crypto). Vector test: `examples/testing/scram_test.mko`.
+
 **Honest residuals:** no high-level mTLS cert-picker API yet; no X.509 CSR/CA
 product; no built-in HSM; full WebPKI trust store is “pass CA PEM / system via
-OpenSSL paths.” DTLS/WebRTC security remains app-level.
+OpenSSL paths.” DTLS/WebRTC security remains app-level. No SCRAM channel
+binding helpers.
 
 Tests: `security_test.mko`, `security_crypto_test.mko`, `password_hash_test.mko`,
-`bcrypt_test.mko`, `tls_aead_test.mko`, `tls_server_test.mko`,
+`bcrypt_test.mko`, `scram_test.mko`, `tls_aead_test.mko`, `tls_server_test.mko`,
 `crypto_srtp_blocks_test.mko`.
 
 ### Session security (Done)
