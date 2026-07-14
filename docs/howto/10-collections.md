@@ -8,12 +8,33 @@ This guide covers:
 - Slices `[]T` and nested `[][]T`
 - Maps `map[K]V` across the full key/value grid
 - Sets, groups, nested maps
-- Bag values `map[K]Option[T]` / `map[K]Result[T,E]`
+- Bag values `map[K]Option[T]` / `map[K]Result[T,E]` (incl. nested bags)
+- Channel values, bag-field tuples, nested bag slices
 - Wrapping maps in `Option` / `Result`
 - Bulk helpers (`maps_*`)
+- **Compile cost:** demand-driven monomorphs (only used map shapes)
 
 Identity and low-ceremony patterns: [ERGONOMICS.md](../ERGONOMICS.md).  
 Full syntax: [GUIDE.md](../GUIDE.md) §4b–4c · book tour: [ch03](../book/src/ch03-language-tour.md).
+
+---
+
+## Compile cost (demand-driven monomorphs)
+
+The language supports a large map/slice/bag **surface**, but codegen only
+emits C helpers for `map[K]V` shapes that appear in the compilation unit
+(AST walk). Large programs with many structs no longer pay N² unused
+`map[StructA]StructB` / bag monomorphs.
+
+| Principle | Practice |
+|-----------|----------|
+| Use what you need | `make(map[A]B)` emits helpers for that pair only |
+| Annotate API maps | Helps collection and call sites stay clear |
+| Prefer shallow nests | Depth ≤3 nested maps; deep bag nests only where useful |
+| Measure big packs | `mako build --emit-c path.mko` then check `.c` size |
+
+This is what keeps multi-hundred-type packs (e.g. large libraries) compile-time
+friendly while still offering rich bag and channel map values.
 
 ---
 
@@ -318,8 +339,11 @@ Pre-size with a hint: `make(map[string]int, 1024)`.
 | Sparse grid / matrix | `map[string][][]int` or nested maps |
 | Optional value per key | `map[K]Option[T]` |
 | Fallible value per key | `map[K]Result[T,E]` |
+| Optional + fallible nest | `map[K]Option[Result[T,E]]` |
+| Named mailbox | `map[K]chan[T]` |
+| Optional + scalar pair | `map[K](Option[T], int)` |
 | Optional whole table | `Option[map[K]V]` |
-| Config tree (2 levels) | `map[K]map[K2]V` |
+| Config tree (2–3 levels) | `map[K]map[K2]V` / `map[K]map[K2]map[K3]V` |
 
 ---
 

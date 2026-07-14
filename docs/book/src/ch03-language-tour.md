@@ -442,6 +442,10 @@ Missing key → zero value (`0` / `""` / `false` / empty slice / nil inner map /
 `None` / `Err("")` / nil channel). Nested-map and channel-map `maps_clone` /
 `maps_equal` are shallow (pointer identity for inner maps and channels).
 
+Codegen monomorphizes only the map shapes your unit actually uses
+(demand-driven), so a large package with many named types does not emit every
+possible `map[StructA]StructB` helper.
+
 Hands-on guide: [howto/10-collections.md](../../howto/10-collections.md) ·
 low-ceremony patterns: [ERGONOMICS.md](../../ERGONOMICS.md).
 

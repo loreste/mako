@@ -199,6 +199,8 @@ maps_clear(c)
 | `map[string]bool` as a set | Parallel `[]string` + linear search |
 | `map[string][]T` for groups | Nested manual lists keyed by string |
 | `map[K]Option[T]` / `map[K]Result[T,E]` | Parallel maps + sentinel ints |
+| `map[K]Option[Result[T,E]]` for optional fallible | Nested ad-hoc status ints |
+| `map[K](Option[T], U)` for value + flag | Parallel maps for related fields |
 | `map[K]chan[T]` for named mailboxes | Parallel channel vars + string switch |
 | `for k, v in range m` | Custom iterator types |
 | Annotate `map[K]V` on API boundaries | Spelling out C monomorph names |
@@ -208,10 +210,13 @@ inner map with `len` 0, **None** / **Err("")** for bag values, **nil channel**
 for `chan[T]` values) — use comma-ok when presence matters. Nested-map and
 channel-map `maps_clone` / `maps_equal` are shallow (pointer identity on inners).
 
+**Compile cost:** monomorph helpers are emitted only for map shapes you use
+(demand-driven) — large packs do not pay for unused bag/struct grids.
+
 Full grid: [GUIDE.md §4c](GUIDE.md) · hands-on [howto/10-collections.md](howto/10-collections.md) ·
 book [ch03](book/src/ch03-language-tour.md) / [cookbook](book/src/ch14-cookbook.md#collections-recipes) ·
 tests under `examples/testing/map_*.mko`, `nested_slice_test.mko`, `map_option_result_test.mko`,
-`map_chan_test.mko`.
+`map_option_result_nested_test.mko`, `map_tuple_bag_test.mko`, `map_chan_test.mko`.
 
 ### Big import blocks (real services)
 

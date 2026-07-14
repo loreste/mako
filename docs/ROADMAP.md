@@ -108,6 +108,7 @@ Weighted from the track table below; STATUS remains the MVP implementation bar.
 - [x] Static types, local inference, `Result`, `Option`, enums, `match`.
 - [x] Interfaces seed and dynamic interface dispatch.
 - [x] User generics with monomorphization (`fn id[T](x: T) -> T`; dual `[]`/`<>` for built-ins).
+- [x] Demand-driven map/bag monomorph emission (AST-collected used shapes only; O(used) not N²).
 - [x] Unique Mako surface preferred; dual sugar only (`func`, `:=`, …) — [IDENTITY.md](IDENTITY.md).
 - [x] Packs/pulls: `pack` / `pull` (dual `package` / `import`).
 - [x] Tuples + multi-return: `(int, int)` + `let a, b = f()`.

@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Docs — collections surface + demand-driven monomorphs
+
+- Full pass: STATUS, GUIDE, LANGUAGE, BUILTINS, ERGONOMICS, PERFORMANCE,
+  PAIN_POINTS, ROADMAP, howto/10 + packages + index, book ch03/ch14/ch15,
+  `llms.txt` / `llms-full.txt` — map value grid, bag nests/tuples, and
+  **demand-driven monomorph** compile-cost notes.
+
 ### Codegen — demand-driven map monomorphs
 
 - **Used-only emission** for map/bag/slice/tuple/chan monomorph helpers.

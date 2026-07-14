@@ -668,6 +668,12 @@ arms. Channel-value maps store channel handles.
 Wrong key/value combo rejected at check (`examples/bad/map_key_type.mko`).
 Struct keys may hold slice/map/Option/Result/enum fields — eq/hash use
 identity or structural bag helpers (not invalid C aggregate `==`).
+
+**Compile cost:** map/bag/slice monomorph helpers are **demand-driven** — only
+shapes that appear in the compilation unit are emitted (not a full N² grid
+over every named type). Large libraries stay roughly O(used maps). See
+[howto/10-collections.md § Compile cost](howto/10-collections.md#compile-cost-demand-driven-monomorphs).
+
 Tests: `map_test`, `map_struct_test`, `map_float_test`, `map_struct_key_test`,
 `map_bool_test`, `map_enum_test`, `map_slice_test` (`map[K][]T` incl. named keys),
 `map_nested_test` (`map[K]map[K2]V`), `map_depth3_test` (`map[K]map[K2]map[K3]V`),

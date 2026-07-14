@@ -133,7 +133,7 @@ Goal: **Rust-class safety where it counts**, without making the common path acad
 
 | Rust | Mako |
 |------|------|
-| Heavy monomorphization + trait solving can crush iteration | Frontend kept simple; debug builds cheap; monomorphization is opt-in generics, not the whole language |
+| Heavy monomorphization + trait solving can crush iteration | Frontend kept simple; debug builds cheap; user generics are opt-in; **map/bag monomorphs are demand-driven** (only shapes used in the unit) so large packs stay O(used maps) |
 | Dense syntax | Prefer readable Mako flair (`crew`, `hold`, `pull`) over symbol soup |
 
 ### 2.5 “Safe but I need `unsafe` constantly”
