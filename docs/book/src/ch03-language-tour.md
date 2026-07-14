@@ -433,6 +433,7 @@ fn main() {
 | Nested channel slices | `map[K][][]chan[T]` |
 | Channel + scalar pair | `map[K](chan[T], int)` / `(int, chan[T])` |
 | Channel 3-tuple | `map[K](chan[T], int, int)` / mid / trailing channel |
+| Nested optional | `Option[Option[T]]`, `map[K]Option[Option[chan[T]]]` |
 
 Missing key → zero value (`0` / `""` / `false` / empty slice / nil inner map /
 `None` / `Err("")` / nil channel). Nested-map and channel-map `maps_clone` /

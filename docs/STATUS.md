@@ -186,6 +186,7 @@ Last inventory: 2026-07-14 (**unique Mako surface** · pack/pull types · full m
 | Nested channel bags `[]Option[chan]` / `Option[[]chan]` | Done — `map_option_chan_nested_test` |
 | `[][]chan[T]` / `(chan, scalar)` map values | Done — `map_chan_nested_slice_tuple_test` |
 | 3-tuples with channel field as map values | Done — `map_tuple_chan3_test` |
+| Nested `Option[Option[…]]` / `Result[Option[chan]]` maps | Done — `map_nested_option_chan_test` |
 | `len` nil-safe on SI/II/SS maps (and monomorphized maps) | Done — runtime + nested tests |
 | Low-ceremony collections ergonomics | Done — [ERGONOMICS.md](ERGONOMICS.md) |
 
