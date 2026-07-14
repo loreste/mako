@@ -1,0 +1,166 @@
+// map[K]Option[chan[T]] / map[K]Result[chan[T],E] + bare Option/Result of channels
+
+struct Point {
+    x: int
+    y: int
+}
+
+fn TestOptionChanInt() {
+    let ch = chan_open[int](1)
+    let o: Option[chan[int]] = Some(ch)
+    match o {
+        Some(c) => {
+            let _ = c.send(42)
+            assert_eq(c.recv(), 42)
+            c.close()
+        },
+        None => assert(false),
+    }
+    let n: Option[chan[int]] = None
+    match n {
+        Some(_) => assert(false),
+        None => assert(true),
+    }
+}
+
+fn TestResultChanString() {
+    let ch = chan_open[string](1)
+    let r: Result[chan[string], string] = Ok(ch)
+    match r {
+        Ok(c) => {
+            let _ = c.send("hi")
+            assert_eq_str(c.recv(), "hi")
+            c.close()
+        },
+        Err(_) => assert(false),
+    }
+    let e: Result[chan[string], string] = Err("nope")
+    match e {
+        Ok(_) => assert(false),
+        Err(s) => assert_eq_str(s, "nope"),
+    }
+}
+
+fn TestMapStringOptionChanInt() {
+    let mut m = make(map[string]Option[chan[int]])
+    let ch = chan_open[int](1)
+    let _ = ch.send(7)
+    m["a"] = Some(ch)
+    m["b"] = None
+    assert_eq(len(m), 2)
+    assert(has(m, "a"))
+    match m["a"] {
+        Some(c) => assert_eq(c.recv(), 7),
+        None => assert(false),
+    }
+    match m["b"] {
+        Some(_) => assert(false),
+        None => assert(true),
+    }
+    match m["missing"] {
+        Some(_) => assert(false),
+        None => assert(true),
+    }
+    ch.close()
+}
+
+fn TestMapIntResultChanString() {
+    let mut m = make(map[int]Result[chan[string], string])
+    let ch = chan_open[string](1)
+    let _ = ch.send("ok")
+    m[1] = Ok(ch)
+    m[2] = Err("fail")
+    match m[1] {
+        Ok(c) => assert_eq_str(c.recv(), "ok"),
+        Err(_) => assert(false),
+    }
+    match m[2] {
+        Ok(_) => assert(false),
+        Err(s) => assert_eq_str(s, "fail"),
+    }
+    ch.close()
+}
+
+fn TestMapStringOptionChanFloat() {
+    let mut m = make(map[string]Option[chan[float]])
+    let ch = chan_open[float](1)
+    let _ = ch.send(1.5)
+    m["f"] = Some(ch)
+    match m["f"] {
+        Some(c) => {
+            let v = c.recv()
+            assert(v > 1.4 && v < 1.6)
+            c.close()
+        },
+        None => assert(false),
+    }
+}
+
+fn TestMapStringOptionChanStruct() {
+    let mut m = make(map[string]Option[chan[Point]])
+    let ch = chan_open[Point](1)
+    let _ = ch.send(Point { x: 3, y: 4 })
+    m["p"] = Some(ch)
+    match m["p"] {
+        Some(c) => {
+            let q = c.recv()
+            assert_eq(q.x, 3)
+            assert_eq(q.y, 4)
+            c.close()
+        },
+        None => assert(false),
+    }
+}
+
+fn TestMapStructKeyOptionChan() {
+    let mut m = make(map[Point]Option[chan[int]])
+    let p = Point { x: 1, y: 2 }
+    let ch = chan_open[int](1)
+    let _ = ch.send(99)
+    m[p] = Some(ch)
+    match m[p] {
+        Some(c) => assert_eq(c.recv(), 99),
+        None => assert(false),
+    }
+    ch.close()
+}
+
+fn TestMapOptionChanHelpers() {
+    let mut m = make(map[string]Option[chan[int]])
+    let a = chan_open[int](1)
+    let b = chan_open[int](1)
+    let _ = a.send(1)
+    let _ = b.send(2)
+    m["a"] = Some(a)
+    m["b"] = Some(b)
+    let ks = maps_keys(m)
+    assert_eq(len(ks), 2)
+    let vs = maps_values(m)
+    assert_eq(len(vs), 2)
+    let c = maps_clone(m)
+    assert_eq(maps_equal(m, c), 1)
+    match c["a"] {
+        Some(ch) => assert_eq(ch.recv(), 1),
+        None => assert(false),
+    }
+    maps_clear(c)
+    assert_eq(len(c), 0)
+    a.close()
+    b.close()
+}
+
+fn TestMapOptionChanCommaOk() {
+    let mut m = make(map[string]Option[chan[int]])
+    let ch = chan_open[int](1)
+    let _ = ch.send(5)
+    m["x"] = Some(ch)
+    let bag, ok = m["x"]
+    assert(ok)
+    match bag {
+        Some(c) => assert_eq(c.recv(), 5),
+        None => assert(false),
+    }
+    let _, miss = m["nope"]
+    assert(not miss)
+    ch.close()
+}
