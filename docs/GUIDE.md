@@ -673,7 +673,9 @@ Tests: `map_test`, `map_struct_test`, `map_float_test`, `map_struct_key_test`,
 `nested_slice_test`, `struct_slice_fields_test`, `lang_residuals_test`.
 `Option[map[K]V]` / `Result[map[K]V, E]` work with `None` / `Some` / `Ok` and match
 unboxing for SI/II/SS, float/bool key maps, and monomorphized map pointers.
-Low-ceremony patterns: [ERGONOMICS.md](ERGONOMICS.md).
+Low-ceremony patterns: [ERGONOMICS.md](ERGONOMICS.md).  
+Hands-on: [howto/10-collections.md](howto/10-collections.md) · book tour
+[ch03](book/src/ch03-language-tour.md) · [cookbook](book/src/ch14-cookbook.md#collections-recipes).
 
 ---
 

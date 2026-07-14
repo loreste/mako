@@ -16,6 +16,7 @@ working code you can run immediately.
 | 07 | [WASI](07-wasi.md) | Compile to WebAssembly, run with wasmtime, pass args and access files |
 | 08 | [Testing](08-testing.md) | Write tests, run them, filter by name, measure coverage, use subtests |
 | 09 | [Release Builds](09-release-builds.md) | Optimize binaries, cross-compile, static link, package for deployment |
+| 10 | [Collections](10-collections.md) | Maps, slices, nested maps, bag values (`Option`/`Result` per key), `maps_*` |
 
 ## Prerequisites
 
@@ -26,6 +27,7 @@ Guide 01 covers installation from scratch.
 
 - [The Mako Book](../book/) -- guided language tour
 - [GUIDE.md](../GUIDE.md) -- syntax reference (Mako-native)
+- [ERGONOMICS.md](../ERGONOMICS.md) -- low-ceremony maps/slices patterns
 - [IDENTITY.md](../IDENTITY.md) -- our syntax identity + **%**
 - [COMPAT.md](../COMPAT.md) -- dual forms / compatibility
 - [STDLIB.md](../STDLIB.md) -- standard library surface

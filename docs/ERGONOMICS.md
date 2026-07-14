@@ -207,8 +207,9 @@ inner map with `len` 0, **None** / **Err("")** for bag values) — use comma-ok
 when presence matters. Nested-map `maps_clone` / `maps_equal` are shallow
 (pointer identity on inners).
 
-Full grid: [GUIDE.md §4c](GUIDE.md) · tests under `examples/testing/map_*.mko`,
-`nested_slice_test.mko`, `map_option_result_test.mko`.
+Full grid: [GUIDE.md §4c](GUIDE.md) · hands-on [howto/10-collections.md](howto/10-collections.md) ·
+book [ch03](book/src/ch03-language-tour.md) / [cookbook](book/src/ch14-cookbook.md#collections-recipes) ·
+tests under `examples/testing/map_*.mko`, `nested_slice_test.mko`, `map_option_result_test.mko`.
 
 ### Big import blocks (real services)
 

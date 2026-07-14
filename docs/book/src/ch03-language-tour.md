@@ -223,8 +223,16 @@ fn main() {
     print_int(grid[0][1]) // 2
     let mut rows = make([][]int, 0, 4)
     rows = append(rows, [10, 20])
+
+    // Bool and enum slices
+    let flags: []bool = [true, false]
+    enum Color { Red, Green }
+    let palette: []Color = [Red, Green]
 }
 ```
+
+Element types include `int`, `string`, `float`, `bool`, `byte`, named structs,
+and named enums. Nested `[][]T` stores outer headers of inner slices.
 
 ### Iterating over slices
 
@@ -382,8 +390,34 @@ fn main() {
     // Pre-sized (hint for initial capacity)
     let mut big = make(map[string]int, 1024)
     big["x"] = 1
+
+    // Nested-slice values and slice of maps
+    let mut grids = make(map[string][][]int)
+    grids["board"] = [[1, 0], [0, 1]]
+    let mut table = make([]map[string]int, 0, 2)
+    let mut row0 = make(map[string]int)
+    row0["n"] = 1
+    table = append(table, row0)
 }
 ```
+
+### Map kinds at a glance
+
+| Need | Form |
+|------|------|
+| Scalar / set | `map[string]int`, `map[string]bool` |
+| Groups | `map[K][]T` (e.g. `map[string][]int`) |
+| Nested table | `map[K]map[K2]V` (depth 2 only) |
+| Sparse grid | `map[string][][]int` |
+| Optional / fallible per key | `map[K]Option[T]`, `map[K]Result[T,E]` |
+| Optional whole map | `Option[map[K]V]`, `Result[map[K]V, E]` |
+| Rows of maps | `[]map[K]V` |
+
+Missing key → zero value (`0` / `""` / `false` / empty slice / nil inner map /
+`None` / `Err("")`). Nested-map `maps_clone` / `maps_equal` are shallow.
+
+Hands-on guide: [howto/10-collections.md](../../howto/10-collections.md) ·
+low-ceremony patterns: [ERGONOMICS.md](../../ERGONOMICS.md).
 
 ## Structs
 

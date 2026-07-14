@@ -98,6 +98,7 @@ One monomorphized surface — no special collection package for everyday work:
 | Ops | `m[k]`, `m[k]=v`, `has`, `delete`, `len`, comma-ok, `range`, `maps_*` |
 
 Short patterns (sets, groups, nested maps, bag values): [ERGONOMICS.md](ERGONOMICS.md).  
+Hands-on: [howto/10-collections.md](howto/10-collections.md) · book [ch03](book/src/ch03-language-tour.md).  
 Full guide: [GUIDE.md](GUIDE.md) §4b–4c · builtins: [BUILTINS.md](BUILTINS.md).
 
 ## Packs & pulls

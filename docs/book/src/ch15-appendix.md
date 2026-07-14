@@ -240,6 +240,23 @@ the result is already determined by the left.
 | `maps_copy`       | `(dst, src: map[K]V)`           | Copy entries into dst |
 | `maps_clear`      | `(map[K]V)`                     | Remove all entries   |
 
+**Keys:** `int` \| `string` \| `float` \| `bool` \| Struct \| Enum.  
+**Values:** same, `[]T` / `[][]T`, nested `map[K2]V` (depth 2), `Option[T]`,
+`Result[T,E]`, `[]map[…]`. Pack-qualified types work as key or value.
+
+| Example | Role |
+|---------|------|
+| `map[string]bool` | Set-style membership |
+| `map[string][]int` | Groups |
+| `map[string]map[string]int` | Nested maps (depth 2) |
+| `map[string]Option[int]` | Optional value per key |
+| `map[int]Result[string,string]` | Fallible value per key |
+| `Option[map[string]int]` | Optional whole map |
+| `[]map[string]int` | Slice of maps |
+
+See [howto/10-collections.md](../../howto/10-collections.md) and language tour
+[ch03](ch03-language-tour.md).
+
 ### String Operations
 
 | Function          | Signature                        | Purpose              |

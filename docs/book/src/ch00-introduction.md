@@ -17,7 +17,10 @@ across cores, channels, actors — no free-fire leaks, no async coloring.
 
 Mako is currently at version **0.1.1**. This book teaches idiomatic Mako as it
 ships today. Identity checklist: [IDENTITY.md](../../IDENTITY.md).
-Collections (maps/slices/bag values): language tour ch. 3 · [ERGONOMICS.md](../../ERGONOMICS.md).
+Collections (maps/slices/bag values): [language tour ch. 3](ch03-language-tour.md) ·
+[cookbook recipes](ch14-cookbook.md#collections-recipes) ·
+[howto/10-collections](../../howto/10-collections.md) ·
+[ERGONOMICS.md](../../ERGONOMICS.md).
 
 ## Who is this book for?
 
@@ -150,8 +153,8 @@ and error handling -- the foundation you need for everything else.
 | [11. Speed & Safety](ch11-speed-safety.md) | Release builds, security model |
 | [12. Cross-platform](ch12-cross-platform.md) | Build targets, WASI |
 | [13. Tooling](ch13-tooling.md) | LSP, formatter, debugger |
-| [14. Cookbook](ch14-cookbook.md) | Practical recipes and patterns |
-| [15. Appendix](ch15-appendix.md) | Keywords, roadmap, status |
+| [14. Cookbook](ch14-cookbook.md) | Practical recipes (HTTP, collections, …) |
+| [15. Appendix](ch15-appendix.md) | Keywords, types, map grid, flags |
 
 ## How to read this book
 

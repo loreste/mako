@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Docs — howto & book collections surface
+
+- **[howto/10-collections.md](docs/howto/10-collections.md)** — full hands-on guide
+  (slices, map key/value grid, sets/groups, nested maps, bag values,
+  `Option[map]` / `Result[map]`, `[]map`, `maps_*`, test index).
+- **Book** — ch03 map grid + nested/bag examples; ch05 Option/Result×maps;
+  ch14 cookbook collections recipes; ch15 appendix map kinds table; ch00/ch10
+  cross-links. How-to index, ERGONOMICS, GUIDE, LANGUAGE point at the new guide.
+
 ### Language — `map[K]Option[T]` / `map[K]Result[T,E]`
 
 - **Bag values on maps** — `map[string]Option[int]`, `map[int]Result[string,string]`,

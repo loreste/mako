@@ -292,6 +292,44 @@ fn main() {
 }
 ```
 
+### Option / Result with maps
+
+Maps compose with bags in two directions:
+
+1. **Whole map optional or fallible** — `Option[map[K]V]`, `Result[map[K]V, E]`
+2. **Value per key** — `map[K]Option[T]`, `map[K]Result[T,E]`
+
+```mko
+fn load_table() -> Option[map[string]int] {
+    let mut m = make(map[string]int)
+    m["a"] = 1
+    return Some(m)
+}
+
+fn main() {
+    match load_table() {
+        Some(m) => print_int(m["a"]),
+        None => print("no table"),
+    }
+
+    // Nullable entry per key (missing key also yields None)
+    let mut maybe = make(map[string]Option[int])
+    maybe["a"] = Some(42)
+    maybe["b"] = None
+    match maybe["a"] {
+        Some(v) => print_int(v),
+        None => {},
+    }
+
+    let mut tried = make(map[int]Result[string, string])
+    tried[1] = Ok("ok")
+    tried[2] = Err("fail")
+}
+```
+
+See [howto/10-collections](../../howto/10-collections.md) and cookbook
+[collections recipes](ch14-cookbook.md#collections-recipes).
+
 ## Patterns for real-world error handling
 
 ### Pattern: Wrap at boundaries

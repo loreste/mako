@@ -616,6 +616,14 @@ fn TestMapOperations() {
     m["x"] = 42
     assert_eq(m["x"], 42)
     assert_eq(len(m), 1)
+
+    // Bag values and groups — see howto/10-collections
+    let mut maybe = make(map[string]Option[int])
+    maybe["a"] = Some(1)
+    match maybe["a"] {
+        Some(v) => assert_eq(v, 1),
+        None => assert(false),
+    }
 }
 ```
 

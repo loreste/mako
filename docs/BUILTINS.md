@@ -192,7 +192,8 @@ Missing key → zero value (`None` / `Err("")` for bags); `len` on a nil map is 
 Tests: `map_test`, `map_struct_test`, `map_float_test`, `map_struct_key_test`,
 `map_bool_test`, `map_enum_test`, `map_slice_test`, `map_nested_test`,
 `map_nested_slice_test`, `map_map_slice_test`, `slice_map_test`,
-`map_option_result_test`, `nested_slice_test`.
+`map_option_result_test`, `nested_slice_test`.  
+Hands-on: [howto/10-collections.md](howto/10-collections.md).
 
 ---
 

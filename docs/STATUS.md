@@ -25,7 +25,7 @@ Last inventory: 2026-07-14 (**unique Mako surface** · pack/pull types · full m
 |-------|--------|
 | **The Mako Book** (`docs/book/` · mdBook `book.toml` + chapters) | Done |
 | Accuracy pass: README / GUIDE / STATUS / ROADMAP / howto index | Done |
-| Collections surface docs (ERGONOMICS · LANGUAGE · BUILTINS · book ch03/ch15 · llms*) | Done — full map/slice/bag grid |
+| Collections surface docs (ERGONOMICS · LANGUAGE · BUILTINS · book ch03/ch14/ch15 · howto/10 · llms*) | Done — full map/slice/bag grid |
 
 ## Tooling — **Done**
 

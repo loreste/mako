@@ -1583,4 +1583,123 @@ fn call_downstream(url: string) -> string {
 
 ---
 
+## Collections recipes
+
+Practical map and slice patterns. Full grid: [howto/10-collections](../../howto/10-collections.md)
+· language tour [ch03](ch03-language-tour.md).
+
+### Set membership
+
+```mko
+fn is_known(seen: map[string]bool, name: string) -> bool {
+    return has(seen, name)
+}
+
+fn main() {
+    let mut seen = make(map[string]bool)
+    seen["alice"] = true
+    seen["bob"] = true
+    if is_known(seen, "alice") {
+        print("known")
+    }
+}
+```
+
+### Group by key
+
+```mko
+fn main() {
+    let mut groups = make(map[string][]int)
+    groups["even"] = [2, 4, 6]
+    groups["odd"] = [1, 3, 5]
+    for k, row in range groups {
+        print(k)
+        print_int(len(row))
+    }
+}
+```
+
+### Nested config table (depth 2)
+
+```mko
+fn main() {
+    let mut cfg = make(map[string]map[string]int)
+    let mut db = make(map[string]int)
+    db["port"] = 5432
+    db["pool"] = 16
+    cfg["database"] = db
+    print_int(cfg["database"]["port"])
+}
+```
+
+### Optional and fallible values per key
+
+```mko
+fn main() {
+    let mut cache = make(map[string]Option[int])
+    cache["hits"] = Some(10)
+    cache["misses"] = None
+    match cache["hits"] {
+        Some(n) => print_int(n),
+        None => print("empty"),
+    }
+
+    let mut jobs = make(map[int]Result[string, string])
+    jobs[1] = Ok("done")
+    jobs[2] = Err("timeout")
+    match jobs[2] {
+        Ok(s) => print(s),
+        Err(e) => print(e),
+    }
+}
+```
+
+### Optional whole map
+
+```mko
+fn load_scores() -> Option[map[string]int] {
+    let mut m = make(map[string]int)
+    m["a"] = 100
+    return Some(m)
+}
+
+fn main() {
+    match load_scores() {
+        Some(m) => print_int(m["a"]),
+        None => print("no scores"),
+    }
+}
+```
+
+### Struct keys without hand-rolled hash
+
+```mko
+struct Point { x: int, y: int }
+
+fn main() {
+    let mut cells = make(map[Point]string)
+    cells[Point { x: 0, y: 0 }] = "origin"
+    cells[Point { x: 1, y: 2 }] = "cell"
+    print(cells[Point { x: 0, y: 0 }])
+}
+```
+
+### Bulk helpers
+
+```mko
+fn main() {
+    let mut m = make(map[string]int)
+    m["a"] = 1
+    m["b"] = 2
+    let ks = maps_keys(m)
+    let vs = maps_values(m)
+    let c = maps_clone(m)
+    assert_eq(maps_equal(m, c), 1)
+    maps_clear(c)
+    print_int(len(c))   // 0
+}
+```
+
+---
+
 Next: [Appendix](ch15-appendix.md).
