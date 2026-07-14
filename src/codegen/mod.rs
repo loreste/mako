@@ -3037,10 +3037,20 @@ impl Codegen {
             vals.push((format!("arr_{mt}"), format!("MakoArr_{mt}")));
         }
         // map[K][]chan[T] — slice of channel pointers (MakoArr_chan_int, …).
+        // map[K][][]chan[T] — nested channel slices (MakoArr_arr_chan_int, …).
         let chan_leaf = self.leaf_chan_value_specs();
         for (ctag, cc) in &chan_leaf {
             self.emit_nested_arr_helpers(ctag, cc); // MakoArr_chan_int
             vals.push((format!("arr_{ctag}"), format!("MakoArr_{ctag}")));
+            // Outer of []chan for [][]chan
+            self.emit_nested_arr_helpers(
+                &format!("arr_{ctag}"),
+                &format!("MakoArr_{ctag}"),
+            );
+            vals.push((
+                format!("arr_arr_{ctag}"),
+                format!("MakoArr_arr_{ctag}"),
+            ));
         }
         // Outer arrays for maps_values (MakoArr_arr_arr_int / MakoArr_arr_opt_… / …)
         for (vt, vc) in &vals {
@@ -3212,6 +3222,65 @@ impl Codegen {
                 "({} && {})",
                 tuple_field_eq(nc, "av._0", "bv._0"),
                 tuple_field_eq(nc, "av._1", "bv._1"),
+            );
+            tags.push((tag, cty, zero, eq));
+        }
+        // 2-tuples with one channel handle: (chan[T], scalar) and reverse.
+        // Tags match c_type_mono_tag / map_tuple_val_tag (chan_int, chan_string, …).
+        let chan_parts: Vec<(String, String)> = self
+            .leaf_chan_value_specs()
+            .into_iter()
+            .map(|(tag, cty)| (tag, cty))
+            .collect();
+        for (ctag, ccty) in &chan_parts {
+            for (b, bc) in bases {
+                // (chan, scalar)
+                let tag = format!("tup_{ctag}_{b}");
+                let cty = format!("MakoTup_{ctag}_{b}");
+                if self.note_tuple_typedef(&cty, vec![ccty.clone(), (*bc).into()]) {
+                    let _ = writeln!(
+                        self.out,
+                        "typedef struct {{\n    {ccty} _0;\n    {bc} _1;\n}} {cty};"
+                    );
+                }
+                let zero = format!("(({cty}){{0}})");
+                let eq = format!(
+                    "({} && {})",
+                    tuple_field_eq(ccty, "av._0", "bv._0"),
+                    tuple_field_eq(bc, "av._1", "bv._1"),
+                );
+                tags.push((tag, cty, zero, eq));
+                // (scalar, chan)
+                let tag = format!("tup_{b}_{ctag}");
+                let cty = format!("MakoTup_{b}_{ctag}");
+                if self.note_tuple_typedef(&cty, vec![(*bc).into(), ccty.clone()]) {
+                    let _ = writeln!(
+                        self.out,
+                        "typedef struct {{\n    {bc} _0;\n    {ccty} _1;\n}} {cty};"
+                    );
+                }
+                let zero = format!("(({cty}){{0}})");
+                let eq = format!(
+                    "({} && {})",
+                    tuple_field_eq(bc, "av._0", "bv._0"),
+                    tuple_field_eq(ccty, "av._1", "bv._1"),
+                );
+                tags.push((tag, cty, zero, eq));
+            }
+            // (chan, chan) same mono only — e.g. (chan[int], chan[int])
+            let tag = format!("tup_{ctag}_{ctag}");
+            let cty = format!("MakoTup_{ctag}_{ctag}");
+            if self.note_tuple_typedef(&cty, vec![ccty.clone(), ccty.clone()]) {
+                let _ = writeln!(
+                    self.out,
+                    "typedef struct {{\n    {ccty} _0;\n    {ccty} _1;\n}} {cty};"
+                );
+            }
+            let zero = format!("(({cty}){{0}})");
+            let eq = format!(
+                "({} && {})",
+                tuple_field_eq(ccty, "av._0", "bv._0"),
+                tuple_field_eq(ccty, "av._1", "bv._1"),
             );
             tags.push((tag, cty, zero, eq));
         }
@@ -8012,6 +8081,38 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                     } else {
                         self.locals.insert(n.clone(), cty.clone());
                         self.line(&format!("{cty} {} = {tmp}._{i};", mangle(n)));
+                    }
+                    // Channel fields in tuples: propagate float/struct-chan metadata
+                    // from mono tags embedded in MakoTup_chan_float_* / MakoTup_*_chan_Point.
+                    if cty == "MakoChan*" || cty == "MakoChanStr*" || cty == "MakoChanPtr*" {
+                        if let Some(rest) = ty.strip_prefix("MakoTup_") {
+                            // Find the i-th mono part; channel tags are "chan_X".
+                            let parts: Vec<&str> = rest.split('_').collect();
+                            // Reconstruct tags that may contain underscores (chan_Point).
+                            // Prefer scanning for "chan" token groups.
+                            let mut tags: Vec<String> = Vec::new();
+                            let mut j = 0;
+                            while j < parts.len() {
+                                if parts[j] == "chan" && j + 1 < parts.len() {
+                                    tags.push(format!("chan_{}", parts[j + 1]));
+                                    j += 2;
+                                } else if matches!(
+                                    parts[j],
+                                    "int" | "string" | "float" | "bool"
+                                ) || parts[j].starts_with("MakoEnum")
+                                {
+                                    tags.push(parts[j].to_string());
+                                    j += 1;
+                                } else {
+                                    // struct C name (Point, …)
+                                    tags.push(parts[j].to_string());
+                                    j += 1;
+                                }
+                            }
+                            if let Some(tag) = tags.get(i) {
+                                self.register_chan_payload_on_temp(n, tag);
+                            }
+                        }
                     }
                 }
             }
@@ -21941,9 +22042,28 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                     tys.push(t);
                     vals.push(v);
                 }
+                // Channel mono tags need local metadata (float bitcast / struct ptr).
                 let tag = tys
                     .iter()
-                    .map(|t| c_type_mono_tag(t))
+                    .zip(vals.iter())
+                    .map(|(t, v)| {
+                        if t == "MakoChanStr*" {
+                            "chan_string".to_string()
+                        } else if t == "MakoChanPtr*" {
+                            self.chan_ptr_elems
+                                .get(v)
+                                .map(|s| format!("chan_{s}"))
+                                .unwrap_or_else(|| "chan_ptr".into())
+                        } else if t == "MakoChan*" {
+                            if self.chan_float.contains(v) {
+                                "chan_float".to_string()
+                            } else {
+                                "chan_int".to_string()
+                            }
+                        } else {
+                            c_type_mono_tag(t)
+                        }
+                    })
                     .collect::<Vec<_>>()
                     .join("_");
                 let cname = format!("MakoTup_{tag}");
@@ -25857,6 +25977,10 @@ fn map_tuple_val_tag(
                 .map(|s| s.c_name.clone())
                 .unwrap_or_else(|| n.clone()),
             TypeExpr::Named(n) => n.clone(),
+            // chan[T] → chan_int / chan_string / chan_Point (matches c_type_mono_tag)
+            TypeExpr::Generic(n, args) if n == "chan" && !args.is_empty() => {
+                chan_map_val_tag(&args[0], structs)
+            }
             _ => "int".into(),
         })
         .collect();
@@ -25870,6 +25994,13 @@ fn tuple_field_eq(c_ty: &str, a: &str, b: &str) -> String {
     } else if c_ty == "double" {
         format!("mako_f64_key_eq({a}, {b})")
     } else if c_ty == "int64_t" || c_ty == "bool" {
+        format!("({a} == {b})")
+    } else if c_ty == "MakoChan*"
+        || c_ty == "MakoChanStr*"
+        || c_ty == "MakoChanPtr*"
+        || c_ty.ends_with('*')
+    {
+        // Channel / map / pointer handles: identity
         format!("({a} == {b})")
     } else {
         // Struct / enum monomorphs: mako_eq_Point / mako_eq_MakoEnum_Color
