@@ -194,6 +194,7 @@ Supported map kinds — **keys:** `int` \| `string` \| `float` \| `bool` \| name
 | `map[string]Option[[]chan[int]]` | Optional slice of channels |
 | `map[string][][]chan[int]` | Nested channel slices |
 | `map[string](chan[int], int)` | Channel + scalar tuple values |
+| `map[string](chan[int], int, int)` | Channel + two scalars (any slot) |
 
 Float keys: `+0`/`-0` unify; all NaNs share one key. Struct keys: field-wise eq
 + stable field hash (strings by content). Enum keys: tag + payload.
