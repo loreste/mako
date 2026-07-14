@@ -104,14 +104,15 @@ Metrics/prom + span-lite JSON are in; depth is open.
 | Formatting | `fmt_sprintf*` / `fmt_sprint*` / `fmt_errorf` | `fmt_print_test` |
 | String/int dispatch | `match "…" { … }` · `switch` / `case` | `ergonomics_test` · `switch_test` |
 | Multi-field worker I/O | `chan[Struct]` + deep-POD kick args | `chan_struct_test` · [SPEED.md](SPEED.md) |
+| Struct update (spread) | `S { field: v, ..base }` / `S { ...base, field: v }` | `struct_update_test` |
+| Enum on kick-POD / channels | POD enum fields; `chan[Enum]` | `struct_update_test` |
 
 **Still open (true residuals):**
 
-1. Struct spread `{ ...base, field: val }` and field defaults on `struct`  
+1. Field defaults on `struct` def (update/`T{}` covers many cases)  
 2. General first-class functions / closures as ordinary parameters (beyond `fan`)  
 3. Optional string interpolation sugar over `fmt_sprintf*`  
-4. Enum fields on kick-POD + `chan[Enum]` polish  
-5. `chan[(int, int, …)]` tuples (named structs already cover the multi-field case)  
+4. `chan[(int, int, …)]` tuples (named structs already cover the multi-field case)  
 
 ### Language / stdlib residuals (lower priority)
 

@@ -1291,9 +1291,12 @@ fn collect_calls_expr(expr: &Expr, out: &mut Vec<String>) {
                 collect_calls_expr(value, out);
             }
         }
-        Expr::StructLit { fields, .. } => {
+        Expr::StructLit { fields, update, .. } => {
             for (_, value) in fields {
                 collect_calls_expr(value, out);
+            }
+            if let Some(u) = update {
+                collect_calls_expr(u, out);
             }
         }
         Expr::Array(items) | Expr::Tuple(items) => {
@@ -2253,12 +2256,19 @@ fn rewrite_expr(e: &mut Expr, alias: &str, names: &ImportNameSets) {
                 rewrite_expr(x, alias, names);
             }
         }
-        Expr::StructLit { name, fields } => {
+        Expr::StructLit {
+            name,
+            fields,
+            update,
+        } => {
             if names.types.contains(name) {
                 *name = format!("{alias}__{name}");
             }
             for (_, v) in fields {
                 rewrite_expr(v, alias, names);
+            }
+            if let Some(u) = update {
+                rewrite_expr(u, alias, names);
             }
         }
         Expr::StructLitPos { name, values } => {

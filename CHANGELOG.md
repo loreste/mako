@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Language — struct update + POD enum Send (LEBA ergonomics)
+
+- **Struct update:** `S { field: v, ..base }` and `S { ...base, field: v }` —
+  copy base then override listed fields (at most one base).
+- **Deep-POD kick:** enum fields with unit/POD payloads are Send.
+- **`chan[Enum]`** / `make(chan[Enum], n)` via the struct ptr ring.
+- Tests: `examples/testing/struct_update_test.mko`.
+- Docs: ERGONOMICS · SPEED · ROADMAP · PAIN_POINTS.
+
 ### Docs — production backend ergonomics
 
 - Document what is **already on tip** for large services: `for … in range`,

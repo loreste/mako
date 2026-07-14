@@ -83,6 +83,8 @@ pub enum TokenKind {
     ColonAssign,
     Semicolon,
     Dot,
+    /// Struct update base: `S { field: v, ..base }` (also accepts `...base`).
+    DotDot,
     Arrow,
     FatArrow,
     Assign,
@@ -317,7 +319,16 @@ impl<'a> Lexer<'a> {
             }
             b'.' => {
                 self.bump();
-                TokenKind::Dot
+                if self.peek() == Some(b'.') {
+                    self.bump();
+                    // `...` is accepted as the same token as `..` (struct update).
+                    if self.peek() == Some(b'.') {
+                        self.bump();
+                    }
+                    TokenKind::DotDot
+                } else {
+                    TokenKind::Dot
+                }
             }
             b':' => {
                 self.bump();

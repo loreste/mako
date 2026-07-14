@@ -663,14 +663,21 @@ fn fmt_expr(e: &Expr, parent_prec: u8) -> String {
             }
         }
         Expr::Field { base, field } => format!("{}.{}", fmt_expr(base, 0), field),
-        Expr::StructLit { name, fields } => {
-            if fields.is_empty() {
+        Expr::StructLit {
+            name,
+            fields,
+            update,
+        } => {
+            let mut parts: Vec<_> = fields
+                .iter()
+                .map(|(n, e)| format!("{n}: {}", fmt_expr(e, 0)))
+                .collect();
+            if let Some(base) = update {
+                parts.push(format!("..{}", fmt_expr(base, 0)));
+            }
+            if parts.is_empty() {
                 format!("{name} {{}}")
             } else {
-                let parts: Vec<_> = fields
-                    .iter()
-                    .map(|(n, e)| format!("{n}: {}", fmt_expr(e, 0)))
-                    .collect();
                 format!("{name} {{ {} }}", parts.join(", "))
             }
         }

@@ -1961,18 +1961,30 @@ impl Parser {
     /// Returns `None` (and leaves the cursor after `{`) when the braces are not
     /// a clear named/positional literal — caller restores position.
     fn try_parse_struct_lit_tail(&mut self, name: String) -> Result<Option<Expr>, ParseError> {
-        let is_named = matches!(self.peek_kind(), TokenKind::Ident(_)) && {
-            let after_ident = self.pos + 1;
-            after_ident < self.tokens.len()
-                && matches!(self.tokens[after_ident].kind, TokenKind::Colon)
-        };
+        let is_named = matches!(self.peek_kind(), TokenKind::DotDot)
+            || (matches!(self.peek_kind(), TokenKind::Ident(_)) && {
+                let after_ident = self.pos + 1;
+                after_ident < self.tokens.len()
+                    && matches!(self.tokens[after_ident].kind, TokenKind::Colon)
+            });
         if is_named {
             let mut fields = Vec::new();
+            let mut update: Option<Box<Expr>> = None;
             while !matches!(self.peek_kind(), TokenKind::RBrace | TokenKind::Eof) {
-                let fname = self.expect_ident()?;
-                self.expect(TokenKind::Colon)?;
-                let fval = self.parse_expr()?;
-                fields.push((fname, fval));
+                if matches!(self.peek_kind(), TokenKind::DotDot) {
+                    self.bump();
+                    if update.is_some() {
+                        return Err(self.err(
+                            "struct literal allows at most one `..base` update".into(),
+                        ));
+                    }
+                    update = Some(Box::new(self.parse_expr()?));
+                } else {
+                    let fname = self.expect_ident()?;
+                    self.expect(TokenKind::Colon)?;
+                    let fval = self.parse_expr()?;
+                    fields.push((fname, fval));
+                }
                 if matches!(self.peek_kind(), TokenKind::Comma) {
                     self.bump();
                 } else {
@@ -1980,7 +1992,11 @@ impl Parser {
                 }
             }
             self.expect(TokenKind::RBrace)?;
-            return Ok(Some(Expr::StructLit { name, fields }));
+            return Ok(Some(Expr::StructLit {
+                name,
+                fields,
+                update,
+            }));
         }
         // Positional: `Point{}` / `Point{a, b, …}` / `eng.Point{1, 2}`.
         if matches!(self.peek_kind(), TokenKind::RBrace) {

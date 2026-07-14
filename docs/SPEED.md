@@ -92,15 +92,14 @@ Runnable: `examples/concurrency.mko`, `examples/parallel.mko` · tests:
 |----|-----|
 | Copy (int/bool/float/…) | packed as `intptr_t` |
 | `string` | heap-cloned for the task |
-| Deep-**POD** named structs (scalar/string/nested POD fields) | heap-boxed for the task |
+| Deep-**POD** named structs (scalar/string/nested POD/enum fields) | heap-boxed for the task |
 | `Option` / `Result` / tuples of sendables | boxed payloads |
-| Enums with sendable payloads | boxed (no map/array fields) |
+| POD enums (unit or POD payloads); `chan[Enum]` | boxed / ptr ring |
 | `ShareInt` | atomic RC + **auto-clone** onto the heap |
 | `chan[T]` | handle shared (channel is the sync point) |
 
-**Not OK as kick args:** arrays, maps, arenas, non-POD structs (e.g. map/slice fields),
-struct fields that are enums today (not deep-POD). Prefer channels for large or
-mutating results:
+**Not OK as kick args:** arrays, maps, arenas, non-POD structs (e.g. map/slice fields).
+Prefer channels for large or mutating results:
 
 ```mko
 struct Point { x: int, y: int }

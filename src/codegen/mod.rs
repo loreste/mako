@@ -456,9 +456,12 @@ impl Codegen {
                     self.collect_maps_in_expr(a);
                 }
             }
-            Expr::StructLit { fields, .. } => {
+            Expr::StructLit { fields, update, .. } => {
                 for (_, v) in fields {
                     self.collect_maps_in_expr(v);
+                }
+                if let Some(u) = update {
+                    self.collect_maps_in_expr(u);
                 }
             }
             Expr::StructLitPos { values, .. } => {
@@ -23565,7 +23568,11 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                 }
                 ("int64_t".into(), "0".into())
             }
-            Expr::StructLit { name, fields } => {
+            Expr::StructLit {
+                name,
+                fields,
+                update,
+            } => {
                 let cty = self
                     .structs
                     .get(name)
@@ -23573,7 +23580,13 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                     .unwrap_or_else(|| name.clone());
                 let tmp = self.fresh("st");
                 self.line(&format!("{cty} {tmp};"));
-                self.line(&format!("memset(&{tmp}, 0, sizeof({tmp}));"));
+                if let Some(base) = update {
+                    let (_, bv) = self.emit_expr(base);
+                    // Functional update: copy base then override listed fields.
+                    self.line(&format!("{tmp} = {bv};"));
+                } else {
+                    self.line(&format!("memset(&{tmp}, 0, sizeof({tmp}));"));
+                }
                 for (fname, fexpr) in fields {
                     let (_, v) = self.emit_expr(fexpr);
                     self.line(&format!("{tmp}.{fname} = {v};"));
@@ -23721,7 +23734,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             && n != "float"
                             && n != "float64"
                             && n != "string"
-                            && self.structs.contains_key(n) =>
+                            && (self.structs.contains_key(n) || self.enums.contains_key(n)) =>
                     {
                         self.line(&format!(
                             "MakoChanPtr *{tmp} = mako_chan_ptr_new({c});"
@@ -23920,7 +23933,8 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                                     && en != "float"
                                     && en != "float64"
                                     && en != "string"
-                                    && self.structs.contains_key(en) =>
+                                    && (self.structs.contains_key(en)
+                                        || self.enums.contains_key(en)) =>
                             {
                                 self.line(&format!(
                                     "MakoChanPtr *{tmp} = mako_chan_ptr_new({c});"
@@ -25161,6 +25175,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                                 .structs
                                 .get(&st)
                                 .map(|s| s.c_name.clone())
+                                .or_else(|| self.enums.get(&st).map(|e| e.c_name.clone()))
                                 .unwrap_or(st);
                             let boxn = self.fresh("sbox");
                             self.line(&format!(
@@ -25208,6 +25223,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                                 .structs
                                 .get(&st)
                                 .map(|s| s.c_name.clone())
+                                .or_else(|| self.enums.get(&st).map(|e| e.c_name.clone()))
                                 .unwrap_or(st.clone());
                             let ptr = self.fresh("pp");
                             self.line(&format!(
@@ -26899,16 +26915,34 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                 let b = self.expr_as_pure_c(base, param);
                 format!("{b}.{}", mangle(field))
             }
-            Expr::StructLit { name, fields } => {
-                let mut parts = Vec::new();
-                for (fname, fexpr) in fields {
-                    parts.push(format!(
-                        ".{} = {}",
-                        mangle(fname),
-                        self.expr_as_pure_c(fexpr, param)
-                    ));
+            Expr::StructLit {
+                name,
+                fields,
+                update,
+            } => {
+                if let Some(base) = update {
+                    // GNU statement-expr: copy base then override (clang).
+                    let b = self.expr_as_pure_c(base, param);
+                    let mut assigns = String::new();
+                    for (fname, fexpr) in fields {
+                        assigns.push_str(&format!(
+                            " t.{} = {};",
+                            mangle(fname),
+                            self.expr_as_pure_c(fexpr, param)
+                        ));
+                    }
+                    format!("({{ {name} t = {b};{assigns} t; }})")
+                } else {
+                    let mut parts = Vec::new();
+                    for (fname, fexpr) in fields {
+                        parts.push(format!(
+                            ".{} = {}",
+                            mangle(fname),
+                            self.expr_as_pure_c(fexpr, param)
+                        ));
+                    }
+                    format!("({name}){{ {} }}", parts.join(", "))
                 }
-                format!("({name}){{ {} }}", parts.join(", "))
             }
             Expr::StructLitPos { name, values } => {
                 // Positional: rely on declaration order field names from structs map.

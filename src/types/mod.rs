@@ -10188,8 +10188,12 @@ impl TypeChecker {
             Expr::Array(elems) => elems.iter().any(|e| Self::expr_mentions(e, name)),
             Expr::Tuple(elems) => elems.iter().any(|e| Self::expr_mentions(e, name)),
             Expr::ChanOpen { cap, .. } => Self::expr_mentions(cap, name),
-            Expr::StructLit { fields, .. } => {
+            Expr::StructLit { fields, update, .. } => {
                 fields.iter().any(|(_, e)| Self::expr_mentions(e, name))
+                    || update
+                        .as_ref()
+                        .map(|e| Self::expr_mentions(e, name))
+                        .unwrap_or(false)
             }
             Expr::StructLitPos { values, .. } => {
                 values.iter().any(|e| Self::expr_mentions(e, name))
@@ -11579,13 +11583,14 @@ impl TypeChecker {
                         if n != "ShareInt"
                             && n != "Arena"
                             && n != "Crew"
-                            && self.structs_named(n) =>
+                            && (self.structs_named(n) || self.enums_named(n)) =>
                     {
                         Ok(Type::Chan(Box::new(et)))
                     }
                     Type::Struct { .. } => Ok(Type::Chan(Box::new(et))),
+                    Type::Enum { .. } => Ok(Type::Chan(Box::new(et))),
                     other => Err(TypeError::new(format!(
-                        "chan_open supports int family, bool, float, string, and named structs, got {}",
+                        "chan_open supports int family, bool, float, string, named structs, and enums, got {}",
                         other.display()
                     ))
                     .hint("chan_new(n) remains the int channel API (backward compatible)")),
@@ -12888,7 +12893,11 @@ impl TypeChecker {
                     ))),
                 }
             }
-            Expr::StructLit { name, fields } => {
+            Expr::StructLit {
+                name,
+                fields,
+                update,
+            } => {
                 let Some(Type::Struct {
                     name: sname,
                     fields: decl,
@@ -12896,14 +12905,34 @@ impl TypeChecker {
                 else {
                     return Err(TypeError::new(format!("unknown struct `{name}`")));
                 };
-                if fields.len() != decl.len() {
+                // Functional update `S { field: v, ..base }` fills missing fields from base.
+                if let Some(base) = update {
+                    let bt = self.check_expr(base)?;
+                    let same = match &bt {
+                        Type::Struct { name: bn, .. } => bn == &sname,
+                        Type::Named(n) => n == &sname,
+                        _ => false,
+                    };
+                    if !same {
+                        return Err(TypeError::new(format!(
+                            "struct update base must be `{sname}`, got {}",
+                            bt.display()
+                        )));
+                    }
+                } else if fields.len() != decl.len() {
                     return Err(TypeError::new(format!(
                         "struct `{sname}` expects {} fields, got {}",
                         decl.len(),
                         fields.len()
                     )));
                 }
+                let mut seen = std::collections::HashSet::new();
                 for (fname, fexpr) in fields {
+                    if !seen.insert(fname.clone()) {
+                        return Err(TypeError::new(format!(
+                            "struct `{sname}` duplicate field `{fname}`"
+                        )));
+                    }
                     let Some((_, expected)) = decl.iter().find(|(n, _)| n == fname) else {
                         return Err(TypeError::new(format!(
                             "struct `{sname}` has no field `{fname}`"
@@ -12928,12 +12957,14 @@ impl TypeChecker {
                         )));
                     }
                 }
-                // Require all declared fields present
-                for (dn, _) in &decl {
-                    if !fields.iter().any(|(n, _)| n == dn) {
-                        return Err(TypeError::new(format!(
-                            "struct `{sname}` missing field `{dn}`"
-                        )));
+                // Without update, require all declared fields present.
+                if update.is_none() {
+                    for (dn, _) in &decl {
+                        if !fields.iter().any(|(n, _)| n == dn) {
+                            return Err(TypeError::new(format!(
+                                "struct `{sname}` missing field `{dn}`"
+                            )));
+                        }
                     }
                 }
                 Ok(Type::Struct {
@@ -13076,7 +13107,7 @@ impl TypeChecker {
                             ));
                         }
                         // Same element set as `chan_open[T]` (int family, string, float,
-                        // bool, named structs / pack types).
+                        // bool, named structs / enums / pack types).
                         match elem.as_ref() {
                             Type::Int
                             | Type::Int64
@@ -13090,13 +13121,14 @@ impl TypeChecker {
                                 if n != "ShareInt"
                                     && n != "Arena"
                                     && n != "Crew"
-                                    && self.structs_named(n) =>
+                                    && (self.structs_named(n) || self.enums_named(n)) =>
                             {
                                 Ok(Type::Chan(elem))
                             }
                             Type::Struct { .. } => Ok(Type::Chan(elem)),
+                            Type::Enum { .. } => Ok(Type::Chan(elem)),
                             other => Err(TypeError::new(format!(
-                                "make(chan[T]) supports int family, bool, float, string, and named structs, got {}",
+                                "make(chan[T]) supports int family, bool, float, string, named structs, and enums, got {}",
                                 other.display()
                             ))
                             .hint("use make(chan[T], n) or chan_open[T](n)")),
@@ -14067,9 +14099,45 @@ impl TypeChecker {
         }
     }
 
-    /// Deep POD (kick Send): scalars/string fields, or nested POD structs only.
+    /// Deep POD (kick Send): scalars/string fields, nested POD structs, or POD enums.
     fn is_pod_struct(&self, name: &str) -> bool {
         self.is_pod_struct_depth(name, 0)
+    }
+
+    fn is_pod_leaf_ty(&self, t: &Type, depth: usize) -> bool {
+        if depth > 16 {
+            return false;
+        }
+        match t {
+            Type::Int
+            | Type::Int64
+            | Type::Int32
+            | Type::Int8
+            | Type::Byte
+            | Type::Bool
+            | Type::Float
+            | Type::String => true,
+            Type::Named(n) => {
+                self.is_pod_struct_depth(n, depth + 1) || self.is_pod_enum_depth(n, depth + 1)
+            }
+            Type::Struct { name: sn, .. } => self.is_pod_struct_depth(sn, depth + 1),
+            Type::Enum { variants, .. } => variants
+                .iter()
+                .all(|(_, fields)| fields.iter().all(|f| self.is_pod_leaf_ty(f, depth + 1))),
+            _ => false,
+        }
+    }
+
+    fn is_pod_enum_depth(&self, name: &str, depth: usize) -> bool {
+        if depth > 16 {
+            return false;
+        }
+        match self.types.get(name) {
+            Some(Type::Enum { variants, .. }) => variants
+                .iter()
+                .all(|(_, fields)| fields.iter().all(|f| self.is_pod_leaf_ty(f, depth + 1))),
+            _ => false,
+        }
     }
 
     fn is_pod_struct_depth(&self, name: &str, depth: usize) -> bool {
@@ -14077,21 +14145,18 @@ impl TypeChecker {
             return false;
         }
         match self.types.get(name) {
-            Some(Type::Struct { fields, .. }) => fields.iter().all(|(_, t)| match t {
-                Type::Int
-                | Type::Int64
-                | Type::Int32
-                | Type::Int8
-                | Type::Byte
-                | Type::Bool
-                | Type::Float
-                | Type::String => true,
-                Type::Named(n) => self.is_pod_struct_depth(n, depth + 1),
-                Type::Struct { name: sn, .. } => self.is_pod_struct_depth(sn, depth + 1),
-                _ => false,
-            }),
+            Some(Type::Struct { fields, .. }) => {
+                fields.iter().all(|(_, t)| self.is_pod_leaf_ty(t, depth + 1))
+            }
             _ => false,
         }
+    }
+
+    fn enums_named(&self, n: &str) -> bool {
+        self.types
+            .get(n)
+            .map(|t| matches!(t, Type::Enum { .. }))
+            .unwrap_or(false)
     }
 
     /// Reflect bag: POD leaves, nested POD structs, Option/Result/array/map of reflectable.
@@ -14136,7 +14201,7 @@ impl TypeChecker {
             return true;
         }
         match t {
-            Type::Named(n) if self.is_pod_struct(n) => true,
+            Type::Named(n) if self.is_pod_struct(n) || self.is_pod_enum_depth(n, 0) => true,
             Type::Struct { name, .. } if self.is_pod_struct(name) => true,
             // Fuller Send: sum types and products of sendable payloads.
             Type::Option(inner) => self.is_kick_sendable_ty(inner),
@@ -14144,9 +14209,15 @@ impl TypeChecker {
                 self.is_kick_sendable_ty(ok) && self.is_kick_sendable_ty(err)
             }
             Type::Tuple(elems) => elems.iter().all(|e| self.is_kick_sendable_ty(e)),
-            Type::Enum { variants, .. } => variants.iter().all(|(_, fields)| {
-                fields.iter().all(|f| self.is_kick_sendable_ty(f))
-            }),
+            Type::Enum { name, variants, .. } => {
+                // Named enum: prefer depth helper (covers unit + POD payloads).
+                if !name.is_empty() && self.is_pod_enum_depth(name, 0) {
+                    return true;
+                }
+                variants
+                    .iter()
+                    .all(|(_, fields)| fields.iter().all(|f| self.is_kick_sendable_ty(f)))
+            }
             _ => false,
         }
     }

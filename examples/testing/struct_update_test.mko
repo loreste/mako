@@ -1,0 +1,121 @@
+// Struct functional update: `S { field: v, ..base }` / `S { ...base, field: v }`.
+// Also: POD enum fields on kick; chan[Enum].
+
+struct ProxyResult {
+    err: int
+    status: int
+    server_idx: int
+    bytes: int
+    retries: int
+}
+
+enum ServerState {
+    Up
+    Down
+    Draining
+}
+
+struct Server {
+    id: int
+    state: ServerState
+}
+
+fn zero_result() -> ProxyResult {
+    return ProxyResult {
+        err: 0,
+        status: 0,
+        server_idx: -1,
+        bytes: 0,
+        retries: 0,
+    }
+}
+
+fn TestStructUpdateOverride() {
+    let base = zero_result()
+    let r = ProxyResult { err: 1, status: 503, ..base }
+    assert_eq(r.err, 1)
+    assert_eq(r.status, 503)
+    assert_eq(r.server_idx, -1)
+    assert_eq(r.bytes, 0)
+    assert_eq(r.retries, 0)
+}
+
+fn TestStructUpdateEllipsis() {
+    // `...base` is accepted as the same as `..base`
+    let base = zero_result()
+    let r = ProxyResult { ...base, bytes: 42, retries: 3 }
+    assert_eq(r.err, 0)
+    assert_eq(r.bytes, 42)
+    assert_eq(r.retries, 3)
+    assert_eq(r.server_idx, -1)
+}
+
+fn TestStructUpdateOnlyBase() {
+    let base = ProxyResult {
+        err: 0,
+        status: 200,
+        server_idx: 2,
+        bytes: 99,
+        retries: 1,
+    }
+    let r = ProxyResult { ..base }
+    assert_eq(r.status, 200)
+    assert_eq(r.server_idx, 2)
+    assert_eq(r.bytes, 99)
+}
+
+fn TestStructUpdateChain() {
+    let a = zero_result()
+    let b = ProxyResult { status: 200, ..a }
+    let c = ProxyResult { bytes: 10, retries: 1, ..b }
+    assert_eq(c.status, 200)
+    assert_eq(c.bytes, 10)
+    assert_eq(c.retries, 1)
+    assert_eq(c.err, 0)
+}
+
+fn kick_server(s: Server) -> int {
+    match s.state {
+        Up => s.id,
+        Down => 0 - s.id,
+        Draining => s.id * 10,
+    }
+}
+
+fn TestKickPodWithEnumField() {
+    crew t {
+        let a = t.kick(kick_server(Server { id: 3, state: Up }))
+        let b = t.kick(kick_server(Server { id: 4, state: Down }))
+        let c = t.kick(kick_server(Server { id: 5, state: Draining }))
+        assert_eq(a.join(), 3)
+        assert_eq(b.join(), -4)
+        assert_eq(c.join(), 50)
+    }
+}
+
+fn TestChanEnumRoundtrip() {
+    let ch = chan_open[ServerState](2)
+    let _ = ch.send(Up)
+    let _ = ch.send(Draining)
+    match ch.recv() {
+        Up => assert(true),
+        _ => assert(false),
+    }
+    match ch.recv() {
+        Draining => assert(true),
+        _ => assert(false),
+    }
+    ch.close()
+}
+
+fn TestChanStructWithEnumField() {
+    let ch = chan_open[Server](2)
+    let _ = ch.send(Server { id: 7, state: Down })
+    let s = ch.recv()
+    assert_eq(s.id, 7)
+    match s.state {
+        Down => assert(true),
+        _ => assert(false),
+    }
+    ch.close()
+}

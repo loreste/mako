@@ -400,6 +400,7 @@ Everyday `let` stays simple. That is intentional.
 | `while i < len(arr) { … i = i + 1 }` | `for i, v in range arr` / `for _, v in range arr` |
 | Ten `builder_write` calls for one log line | `fmt_sprintf*` / `fmt_sprint*` |
 | Packing `(err, status, idx, bytes, retries)` into one `int` | `chan[ProxyDone]` POD struct (or kick POD arg) |
+| Rewriting all 10 fields on every early return | `ProxyResult { err: 1, ..base }` |
 | Annotating every local | Infer locals; annotate boundaries |
 | Dual spellings in new code (`func`, `:=`, `import`) | Mako flair (`fn`, `let`, `pull`) |
 | Ignoring `Result` | `?`, `match`, or `let _ =` when discard is deliberate |
@@ -408,18 +409,51 @@ Everyday `let` stays simple. That is intentional.
 | Parallel nullable / fallible lookups | `map[K]Option[T]` / `map[K]Result[T,E]` |
 | Hand-wiring per-key channels | `map[K]chan[T]` |
 
-### Still open (real language residuals)
+### Struct update (spread) — early returns without rewriting every field
 
-These still force extra typing in large backends — tracked in
-[PAIN_POINTS.md](PAIN_POINTS.md) / [ROADMAP.md](ROADMAP.md):
+```mko
+struct ProxyResult {
+    err: int
+    status: int
+    server_idx: int
+    bytes: int
+    retries: int
+}
+
+fn fail(base: ProxyResult) -> ProxyResult {
+    // Override only what changed; the rest comes from base.
+    return ProxyResult { err: 1, status: 503, ..base }
+    // also accepted: ProxyResult { ...base, err: 1 }
+}
+```
+
+`S { field: v, ..base }` / `S { ...base, field: v }` — at most one `..base`.
+Base must be the same struct type. Tests: `struct_update_test.mko`.
+
+### Enum fields on POD kick / `chan[Enum]`
+
+Unit and POD-payload enums may appear on deep-POD structs that cross `kick`,
+and as channel elements:
+
+```mko
+enum ServerState { Up, Down, Draining }
+struct Server { id: int, state: ServerState }
+
+crew t {
+    let j = t.kick(check(Server { id: 1, state: Up }))
+    let _ = j.join()
+}
+let ch = chan_open[ServerState](4)
+let _ = ch.send(Draining)
+```
+
+### Still open (real language residuals)
 
 | Residual | Workaround today |
 |----------|------------------|
-| Struct spread `{ ...base, err: 1 }` | Full struct literal (or `T{}` zero then assign fields) |
-| Field defaults on `struct` def | Explicit zeros in every literal |
+| Field defaults on `struct` def | Explicit zeros / `T{}` / `..base` update |
 | General first-class fn parameters | Duplicate small pipelines or `fan` lambdas |
 | `f"…{x}"` interpolation | `fmt_sprintf*` |
-| Enum fields inside kick-POD structs | int flags, or channel the enum/struct separately |
 
 ---
 

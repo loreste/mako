@@ -389,9 +389,12 @@ pub enum Expr {
         field: String,
     },
     /// `Person { name: "Ada", age: 36 }`
+    /// With update: `Person { err: 1, ..base }` or `Person { ...base, err: 1 }`.
     StructLit {
         name: String,
         fields: Vec<(String, Expr)>,
+        /// Optional base for functional update (`..base` / `...base`).
+        update: Option<Box<Expr>>,
     },
     /// Go-style positional literal `Point{1, 2}` — values in declaration order.
     /// Field names are resolved against the struct definition during type-check
