@@ -1,0 +1,209 @@
+// map[K](Option[T], U) / (Result[T,E], U) and mixed channel bag tuples
+
+struct Point {
+    x: int
+    y: int
+}
+
+fn TestMapTupleOptionIntInt() {
+    let mut m = make(map[string](Option[int], int))
+    m["a"] = (Some(1), 2)
+    m["b"] = (None, 3)
+    let t = m["a"]
+    let o, n = t
+    assert_eq(n, 2)
+    match o {
+        Some(v) => assert_eq(v, 1),
+        None => assert(false),
+    }
+    let t2 = m["b"]
+    let o2, n2 = t2
+    assert_eq(n2, 3)
+    match o2 {
+        Some(_) => assert(false),
+        None => assert(true),
+    }
+    // missing → zero tuple (None, 0)
+    let z = m["missing"]
+    let zo, zn = z
+    assert_eq(zn, 0)
+    match zo {
+        Some(_) => assert(false),
+        None => assert(true),
+    }
+}
+
+fn TestMapTupleIntOptionString() {
+    let mut m = make(map[int](int, Option[string]))
+    m[1] = (7, Some("hi"))
+    m[2] = (8, None)
+    let t = m[1]
+    let n, o = t
+    assert_eq(n, 7)
+    match o {
+        Some(s) => assert_eq_str(s, "hi"),
+        None => assert(false),
+    }
+    let t2 = m[2]
+    let _, o2 = t2
+    match o2 {
+        Some(_) => assert(false),
+        None => assert(true),
+    }
+}
+
+fn TestMapTupleResultIntInt() {
+    let mut m = make(map[string](Result[int, string], int))
+    m["ok"] = (Ok(5), 1)
+    m["err"] = (Err("no"), 2)
+    let t = m["ok"]
+    let r, n = t
+    assert_eq(n, 1)
+    match r {
+        Ok(v) => assert_eq(v, 5),
+        Err(_) => assert(false),
+    }
+    let t2 = m["err"]
+    let r2, n2 = t2
+    assert_eq(n2, 2)
+    match r2 {
+        Ok(_) => assert(false),
+        Err(e) => assert_eq_str(e, "no"),
+    }
+}
+
+fn TestMapTupleOptionOptionInt() {
+    let mut m = make(map[string](Option[int], Option[int]))
+    m["a"] = (Some(1), Some(2))
+    m["b"] = (None, Some(3))
+    let t = m["a"]
+    let a, b = t
+    match a {
+        Some(v) => assert_eq(v, 1),
+        None => assert(false),
+    }
+    match b {
+        Some(v) => assert_eq(v, 2),
+        None => assert(false),
+    }
+    let t2 = m["b"]
+    let a2, b2 = t2
+    match a2 {
+        Some(_) => assert(false),
+        None => assert(true),
+    }
+    match b2 {
+        Some(v) => assert_eq(v, 3),
+        None => assert(false),
+    }
+}
+
+fn TestMapTupleOptionChanInt() {
+    let mut m = make(map[string](Option[chan[int]], int))
+    let ch = chan_open[int](1)
+    let _ = ch.send(9)
+    m["a"] = (Some(ch), 1)
+    m["b"] = (None, 2)
+    let t = m["a"]
+    let o, n = t
+    assert_eq(n, 1)
+    match o {
+        Some(c) => assert_eq(c.recv(), 9),
+        None => assert(false),
+    }
+    let t2 = m["b"]
+    let o2, _ = t2
+    match o2 {
+        Some(_) => assert(false),
+        None => assert(true),
+    }
+    ch.close()
+}
+
+fn TestMapTupleChanOptionInt() {
+    let mut m = make(map[string](chan[int], Option[int]))
+    let ch = chan_open[int](1)
+    let _ = ch.send(4)
+    m["a"] = (ch, Some(6))
+    let t = m["a"]
+    let c, o = t
+    assert_eq(c.recv(), 4)
+    match o {
+        Some(v) => assert_eq(v, 6),
+        None => assert(false),
+    }
+    ch.close()
+}
+
+fn TestMapTupleOptionStructInt() {
+    let mut m = make(map[string](Option[Point], int))
+    m["a"] = (Some(Point { x: 1, y: 2 }), 3)
+    m["b"] = (None, 0)
+    let t = m["a"]
+    let o, n = t
+    assert_eq(n, 3)
+    match o {
+        Some(p) => {
+            assert_eq(p.x, 1)
+            assert_eq(p.y, 2)
+        },
+        None => assert(false),
+    }
+    let t2 = m["b"]
+    let o2, _ = t2
+    match o2 {
+        Some(_) => assert(false),
+        None => assert(true),
+    }
+}
+
+fn TestMapTupleResultStringInt() {
+    let mut m = make(map[int](int, Result[string, string]))
+    m[1] = (1, Ok("yes"))
+    m[2] = (2, Err("no"))
+    let t = m[1]
+    let n, r = t
+    assert_eq(n, 1)
+    match r {
+        Ok(s) => assert_eq_str(s, "yes"),
+        Err(_) => assert(false),
+    }
+    let t2 = m[2]
+    let _, r2 = t2
+    match r2 {
+        Ok(_) => assert(false),
+        Err(e) => assert_eq_str(e, "no"),
+    }
+}
+
+fn TestMapTupleBagHelpers() {
+    let mut m = make(map[string](Option[int], int))
+    m["a"] = (Some(1), 2)
+    m["b"] = (Some(3), 4)
+    let ks = maps_keys(m)
+    assert_eq(len(ks), 2)
+    let c = maps_clone(m)
+    assert_eq(maps_equal(m, c), 1)
+    let t = c["a"]
+    let o, n = t
+    assert_eq(n, 2)
+    match o {
+        Some(v) => assert_eq(v, 1),
+        None => assert(false),
+    }
+}
+
+fn TestMapTupleBagCommaOk() {
+    let mut m = make(map[string](Option[int], int))
+    m["x"] = (Some(10), 20)
+    let t, ok = m["x"]
+    assert(ok)
+    let o, n = t
+    assert_eq(n, 20)
+    match o {
+        Some(v) => assert_eq(v, 10),
+        None => assert(false),
+    }
+    let _, ok2 = m["missing"]
+    assert(not ok2)
+}

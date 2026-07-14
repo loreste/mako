@@ -188,6 +188,9 @@ Last inventory: 2026-07-14 (**unique Mako surface** · pack/pull types · full m
 | 3-tuples with channel field as map values | Done — `map_tuple_chan3_test` |
 | Nested `Option[Option[…]]` / `Result[Option[chan]]` maps | Done — `map_nested_option_chan_test` |
 | Mixed bag nests `Option[Result]` / triple Option / `Result[Result]` maps | Done — `map_option_result_nested_test` |
+| Nested bag slices `[]Option[Option]` / `Option[[]Option]` maps | Done — `map_nested_bag_slice_test` |
+| Bag fields in map tuples `(Option[T], U)` / `(Result[T,E], U)` | Done — `map_tuple_bag_test` |
+| Demand-driven map monomorph emission (O(used), not N² grid) | Done — AST collection + gated helpers |
 | `len` nil-safe on SI/II/SS maps (and monomorphized maps) | Done — runtime + nested tests |
 | Low-ceremony collections ergonomics | Done — [ERGONOMICS.md](ERGONOMICS.md) |
 

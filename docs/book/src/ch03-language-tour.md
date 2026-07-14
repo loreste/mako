@@ -435,6 +435,8 @@ fn main() {
 | Channel 3-tuple | `map[K](chan[T], int, int)` / mid / trailing channel |
 | Nested optional | `Option[Option[T]]`, `map[K]Option[Option[chan[T]]]` |
 | Mixed bag nests | `map[K]Option[Result[T,E]]`, `Option[Option[Option[T]]]`, `Result[Result[T,E],E]` |
+| Nested bag slices | `map[K][]Option[Option[T]]`, `map[K]Option[[]Option[T]]`, `[]Result[Result[T,E],E]` |
+| Bag-field tuples | `map[K](Option[T], U)`, `(Result[T,E], U)`, `(Option[chan[T]], int)` |
 
 Missing key → zero value (`0` / `""` / `false` / empty slice / nil inner map /
 `None` / `Err("")` / nil channel). Nested-map and channel-map `maps_clone` /

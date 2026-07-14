@@ -8797,6 +8797,70 @@ impl TypeChecker {
                                     | Type::String
                                     | Type::Struct { .. }
                             )
+                    ) || matches!(
+                        // map[K][]Option[Option[T]] / []Option[Option[chan]]
+                        payload.as_ref(),
+                        Type::Option(inner2)
+                            if matches!(
+                                inner2.as_ref(),
+                                Type::Int
+                                    | Type::Int64
+                                    | Type::Int32
+                                    | Type::Int8
+                                    | Type::Byte
+                                    | Type::String
+                                    | Type::Float
+                                    | Type::Bool
+                                    | Type::Struct { .. }
+                                    | Type::Enum { .. }
+                            ) || matches!(
+                                inner2.as_ref(),
+                                Type::Chan(ch)
+                                    if matches!(
+                                        ch.as_ref(),
+                                        Type::Int
+                                            | Type::Int64
+                                            | Type::Int32
+                                            | Type::Int8
+                                            | Type::Byte
+                                            | Type::Bool
+                                            | Type::Float
+                                            | Type::String
+                                            | Type::Struct { .. }
+                                    )
+                            )
+                    ) || matches!(
+                        // map[K][]Option[Result[T,E]] / []Option[Result[chan]]
+                        payload.as_ref(),
+                        Type::Result(inner2, _)
+                            if matches!(
+                                inner2.as_ref(),
+                                Type::Int
+                                    | Type::Int64
+                                    | Type::Int32
+                                    | Type::Int8
+                                    | Type::Byte
+                                    | Type::String
+                                    | Type::Float
+                                    | Type::Bool
+                                    | Type::Struct { .. }
+                                    | Type::Enum { .. }
+                            ) || matches!(
+                                inner2.as_ref(),
+                                Type::Chan(ch)
+                                    if matches!(
+                                        ch.as_ref(),
+                                        Type::Int
+                                            | Type::Int64
+                                            | Type::Int32
+                                            | Type::Int8
+                                            | Type::Byte
+                                            | Type::Bool
+                                            | Type::Float
+                                            | Type::String
+                                            | Type::Struct { .. }
+                                    )
+                            )
                     )
             ) || matches!(
                 inner.as_ref(),
@@ -8828,6 +8892,70 @@ impl TypeChecker {
                                     | Type::Float
                                     | Type::String
                                     | Type::Struct { .. }
+                            )
+                    ) || matches!(
+                        // map[K][]Result[Option[T],E] / []Result[Option[chan]]
+                        payload.as_ref(),
+                        Type::Option(inner2)
+                            if matches!(
+                                inner2.as_ref(),
+                                Type::Int
+                                    | Type::Int64
+                                    | Type::Int32
+                                    | Type::Int8
+                                    | Type::Byte
+                                    | Type::String
+                                    | Type::Float
+                                    | Type::Bool
+                                    | Type::Struct { .. }
+                                    | Type::Enum { .. }
+                            ) || matches!(
+                                inner2.as_ref(),
+                                Type::Chan(ch)
+                                    if matches!(
+                                        ch.as_ref(),
+                                        Type::Int
+                                            | Type::Int64
+                                            | Type::Int32
+                                            | Type::Int8
+                                            | Type::Byte
+                                            | Type::Bool
+                                            | Type::Float
+                                            | Type::String
+                                            | Type::Struct { .. }
+                                    )
+                            )
+                    ) || matches!(
+                        // map[K][]Result[Result[T,E2],E]
+                        payload.as_ref(),
+                        Type::Result(inner2, _)
+                            if matches!(
+                                inner2.as_ref(),
+                                Type::Int
+                                    | Type::Int64
+                                    | Type::Int32
+                                    | Type::Int8
+                                    | Type::Byte
+                                    | Type::String
+                                    | Type::Float
+                                    | Type::Bool
+                                    | Type::Struct { .. }
+                                    | Type::Enum { .. }
+                            ) || matches!(
+                                inner2.as_ref(),
+                                Type::Chan(ch)
+                                    if matches!(
+                                        ch.as_ref(),
+                                        Type::Int
+                                            | Type::Int64
+                                            | Type::Int32
+                                            | Type::Int8
+                                            | Type::Byte
+                                            | Type::Bool
+                                            | Type::Float
+                                            | Type::String
+                                            | Type::Struct { .. }
+                                    )
                             )
                     )
             ) || matches!(
@@ -8897,6 +9025,69 @@ impl TypeChecker {
                         | Type::Bool
                         | Type::Struct { .. }
                         | Type::Enum { .. }
+                ) || matches!(
+                    // Option[[]Option[T]] / Option[[]Result[T,E]]
+                    elem.as_ref(),
+                    Type::Option(p)
+                        if matches!(
+                            p.as_ref(),
+                            Type::Int
+                                | Type::Int64
+                                | Type::Int32
+                                | Type::Int8
+                                | Type::Byte
+                                | Type::String
+                                | Type::Float
+                                | Type::Bool
+                                | Type::Struct { .. }
+                                | Type::Enum { .. }
+                        ) || matches!(
+                            p.as_ref(),
+                            Type::Chan(ch)
+                                if matches!(
+                                    ch.as_ref(),
+                                    Type::Int
+                                        | Type::Int64
+                                        | Type::Int32
+                                        | Type::Int8
+                                        | Type::Byte
+                                        | Type::Bool
+                                        | Type::Float
+                                        | Type::String
+                                        | Type::Struct { .. }
+                                )
+                        )
+                ) || matches!(
+                    elem.as_ref(),
+                    Type::Result(p, _)
+                        if matches!(
+                            p.as_ref(),
+                            Type::Int
+                                | Type::Int64
+                                | Type::Int32
+                                | Type::Int8
+                                | Type::Byte
+                                | Type::String
+                                | Type::Float
+                                | Type::Bool
+                                | Type::Struct { .. }
+                                | Type::Enum { .. }
+                        ) || matches!(
+                            p.as_ref(),
+                            Type::Chan(ch)
+                                if matches!(
+                                    ch.as_ref(),
+                                    Type::Int
+                                        | Type::Int64
+                                        | Type::Int32
+                                        | Type::Int8
+                                        | Type::Byte
+                                        | Type::Bool
+                                        | Type::Float
+                                        | Type::String
+                                        | Type::Struct { .. }
+                                )
+                        )
                 )
             ) || matches!(
                 // Option[map[K2]V] — depth-2 maps only (not map-of-map)
@@ -9114,6 +9305,69 @@ impl TypeChecker {
                                 | Type::String
                                 | Type::Struct { .. }
                         )
+                ) || matches!(
+                    // Result[[]Option[T],E] / Result[[]Result[T,E2],E]
+                    elem.as_ref(),
+                    Type::Option(p)
+                        if matches!(
+                            p.as_ref(),
+                            Type::Int
+                                | Type::Int64
+                                | Type::Int32
+                                | Type::Int8
+                                | Type::Byte
+                                | Type::String
+                                | Type::Float
+                                | Type::Bool
+                                | Type::Struct { .. }
+                                | Type::Enum { .. }
+                        ) || matches!(
+                            p.as_ref(),
+                            Type::Chan(ch)
+                                if matches!(
+                                    ch.as_ref(),
+                                    Type::Int
+                                        | Type::Int64
+                                        | Type::Int32
+                                        | Type::Int8
+                                        | Type::Byte
+                                        | Type::Bool
+                                        | Type::Float
+                                        | Type::String
+                                        | Type::Struct { .. }
+                                )
+                        )
+                ) || matches!(
+                    elem.as_ref(),
+                    Type::Result(p, _)
+                        if matches!(
+                            p.as_ref(),
+                            Type::Int
+                                | Type::Int64
+                                | Type::Int32
+                                | Type::Int8
+                                | Type::Byte
+                                | Type::String
+                                | Type::Float
+                                | Type::Bool
+                                | Type::Struct { .. }
+                                | Type::Enum { .. }
+                        ) || matches!(
+                            p.as_ref(),
+                            Type::Chan(ch)
+                                if matches!(
+                                    ch.as_ref(),
+                                    Type::Int
+                                        | Type::Int64
+                                        | Type::Int32
+                                        | Type::Int8
+                                        | Type::Byte
+                                        | Type::Bool
+                                        | Type::Float
+                                        | Type::String
+                                        | Type::Struct { .. }
+                                )
+                        )
                 )
             ) || matches!(
                 inner.as_ref(),
@@ -9234,7 +9488,8 @@ impl TypeChecker {
                 Ok(())
             }
             // map[K](T, U[, …]) — tuple values (arity 2–4).
-            // Leaf elements: scalar / struct / enum, or channel handles.
+            // Leaf elements: scalar / struct / enum, channel handles, or bag
+            // Option[T] / Result[T,E] (scalar / struct / enum / chan payloads).
             (
                 Type::Int | Type::String | Type::Float | Type::Bool | Type::Struct { .. } | Type::Enum { .. },
                 Type::Tuple(elems),
@@ -9267,6 +9522,68 @@ impl TypeChecker {
                                     | Type::String
                                     | Type::Struct { .. }
                             )
+                    ) || matches!(
+                        e,
+                        Type::Option(payload)
+                            if matches!(
+                                payload.as_ref(),
+                                Type::Int
+                                    | Type::Int64
+                                    | Type::Int32
+                                    | Type::Int8
+                                    | Type::Byte
+                                    | Type::String
+                                    | Type::Float
+                                    | Type::Bool
+                                    | Type::Struct { .. }
+                                    | Type::Enum { .. }
+                            ) || matches!(
+                                payload.as_ref(),
+                                Type::Chan(ch)
+                                    if matches!(
+                                        ch.as_ref(),
+                                        Type::Int
+                                            | Type::Int64
+                                            | Type::Int32
+                                            | Type::Int8
+                                            | Type::Byte
+                                            | Type::Bool
+                                            | Type::Float
+                                            | Type::String
+                                            | Type::Struct { .. }
+                                    )
+                            )
+                    ) || matches!(
+                        e,
+                        Type::Result(payload, _)
+                            if matches!(
+                                payload.as_ref(),
+                                Type::Int
+                                    | Type::Int64
+                                    | Type::Int32
+                                    | Type::Int8
+                                    | Type::Byte
+                                    | Type::String
+                                    | Type::Float
+                                    | Type::Bool
+                                    | Type::Struct { .. }
+                                    | Type::Enum { .. }
+                            ) || matches!(
+                                payload.as_ref(),
+                                Type::Chan(ch)
+                                    if matches!(
+                                        ch.as_ref(),
+                                        Type::Int
+                                            | Type::Int64
+                                            | Type::Int32
+                                            | Type::Int8
+                                            | Type::Byte
+                                            | Type::Bool
+                                            | Type::Float
+                                            | Type::String
+                                            | Type::Struct { .. }
+                                    )
+                            )
                     )
                 }) =>
             {
@@ -9293,7 +9610,7 @@ impl TypeChecker {
             }
             _ => Err(TypeError::new(format!(
                 "unsupported map[{}]{} — keys: int|string|float|bool|Struct|Enum; \
-                 values: int|string|float|bool|Struct|Enum|[]T|[][]T|[]Option|[]Result|[]Option[chan]|[]Result[chan]|[]chan|[][]chan|[]map|map[K2]V|map[K2]map[K3]V|Option[T]|Option[[]T]|Option[[]chan]|Option[map]|Option[chan]|Option[Option[…]]|Option[Result[…]]|Result[T,E]|Result[[]T,E]|Result[[]chan]|Result[map]|Result[chan]|Result[Option[…]]|Result[Result[…]]|(T,U)|chan[T]",
+                 values: int|string|float|bool|Struct|Enum|[]T|[][]T|[]Option|[]Result|[]Option[Option]|[]Option[Result]|[]Result[Option]|[]Result[Result]|[]Option[chan]|[]Result[chan]|[]chan|[][]chan|[]map|map[K2]V|map[K2]map[K3]V|Option[T]|Option[[]T]|Option[[]Option]|Option[[]Result]|Option[[]chan]|Option[map]|Option[chan]|Option[Option[…]]|Option[Result[…]]|Result[T,E]|Result[[]T,E]|Result[[]Option]|Result[[]Result]|Result[[]chan]|Result[map]|Result[chan]|Result[Option[…]]|Result[Result[…]]|(T,U)| (Option|Result|chan fields)|chan[T]",
                 k.display(),
                 v.display()
             ))),
@@ -11156,9 +11473,23 @@ impl TypeChecker {
                 if elems.len() < 2 {
                     return Err(TypeError::new("tuple needs at least 2 elements"));
                 }
+                // Propagate expected element types so None / Ok / Some refine correctly
+                // inside map[K](Option[T], U) and similar bag-field tuples.
+                let expected_elems: Option<Vec<Type>> = match &self.current_expected {
+                    Some(Type::Tuple(ts)) if ts.len() == elems.len() => Some(ts.clone()),
+                    _ => None,
+                };
                 let mut tys = Vec::new();
-                for e in elems {
-                    tys.push(self.check_expr(e)?);
+                for (i, e) in elems.iter().enumerate() {
+                    if let Some(ref exp) = expected_elems {
+                        let saved = self.current_expected.clone();
+                        self.current_expected = Some(exp[i].clone());
+                        let t = self.check_expr(e)?;
+                        self.current_expected = saved;
+                        tys.push(t);
+                    } else {
+                        tys.push(self.check_expr(e)?);
+                    }
                 }
                 Ok(Type::Tuple(tys))
             }
