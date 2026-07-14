@@ -449,22 +449,35 @@ let _ = ch.send(Draining)
 
 ### First-class functions (non-capturing)
 
+Pass **named functions** or **lambdas** as values. Parameter type is
+`fn(T, U, …) -> R`.
+
 ```mko
 fn apply(f: fn(int) -> int, x: int) -> int {
     return f(x)
 }
 fn double(n: int) -> int { return n * 2 }
 
+// Shared respond hook (LEBA-style pipeline)
+fn pipeline(respond: fn(int, string) -> int) -> int {
+    return respond(200, "ok")
+}
+fn send(code: int, body: string) -> int { return code + len(body) }
+
 fn main() {
-    print(apply(double, 21))           // named fn value
-    print(apply(|x| x + 1, 41))        // lambda
+    print(apply(double, 21))                 // named fn value
+    print(apply(|x| x + 1, 41))              // lambda
+    print(pipeline(send))
+    print(pipeline(|code, body| code + len(body)))
     let g: fn(int) -> int = double
     print(g(3))
 }
 ```
 
-Multi-arg: `fn(int, string) -> int` works the same (e.g. shared respond hooks).
-Capturing closures are still a residual (non-capturing only).
+Also works with `string` params (`fn(string) -> int`, multi-arg `fn(int, string) -> int`).
+**Non-capturing only** — lambdas must not close over outer locals (residual).
+
+Tests: `first_class_fn_test.mko`, `leba_ergonomics_test.mko`.
 
 ### `f"…"` string interpolation
 
