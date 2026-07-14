@@ -9,6 +9,15 @@
   `llms-full.txt` aligned to the real `crypto.scram_*` core API (no fictional
   `scram_client_first` / SASL framing helpers).
 
+### Language — `map[K]Option[map[…]]` / `map[K]Result[map[…],E]`
+
+- **Bags of maps as map values** — e.g. `map[string]Option[map[string]int]`,
+  `map[int]Result[map[string]int,string]`, struct-valued inner maps, named
+  outer keys. Tags `opt_map_*` / `res_map_*`; Some/Ok store map pointers;
+  match unbox registers map C types. Fixed named-key parse so `opt_map_…`
+  is not misread as a nested-map value.
+- Tests: `map_option_of_map_test`.
+
 ### Language — `map[K](T, U[, V])` tuple values
 
 - **Tuple map values** — monomorphized `MakoMapS_tup_int_int*`, etc. for

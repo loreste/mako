@@ -1,0 +1,98 @@
+// map[K]Option[map[…]] / map[K]Result[map[…],E] — bags of map pointers
+
+struct Point {
+    x: int
+    y: int
+}
+
+fn TestMapOptionMapSi() {
+    let mut m = make(map[string]Option[map[string]int])
+    let mut row = make(map[string]int)
+    row["x"] = 1
+    row["y"] = 2
+    m["a"] = Some(row)
+    m["b"] = None
+    assert_eq(len(m), 2)
+    match m["a"] {
+        Some(inner) => {
+            assert_eq(inner["x"], 1)
+            assert_eq(inner["y"], 2)
+        },
+        None => assert(false),
+    }
+    match m["b"] {
+        Some(_) => assert(false),
+        None => assert(true),
+    }
+    match m["missing"] {
+        Some(_) => assert(false),
+        None => assert(true),
+    }
+    delete(m, "b")
+    assert(not has(m, "b"))
+}
+
+fn TestMapOptionMapIi() {
+    let mut m = make(map[int]Option[map[int]int])
+    let mut row = make(map[int]int)
+    row[1] = 10
+    m[0] = Some(row)
+    match m[0] {
+        Some(inner) => assert_eq(inner[1], 10),
+        None => assert(false),
+    }
+}
+
+fn TestMapResultMapSi() {
+    let mut m = make(map[string]Result[map[string]int, string])
+    let mut row = make(map[string]int)
+    row["n"] = 7
+    m["ok"] = Ok(row)
+    m["err"] = Err("nope")
+    match m["ok"] {
+        Ok(inner) => assert_eq(inner["n"], 7),
+        Err(_) => assert(false),
+    }
+    match m["err"] {
+        Ok(_) => assert(false),
+        Err(e) => assert_eq_str(e, "nope"),
+    }
+}
+
+fn TestMapOptionMapStructVal() {
+    let mut m = make(map[string]Option[map[int]Point])
+    let mut row = make(map[int]Point)
+    row[1] = Point { x: 3, y: 4 }
+    m["p"] = Some(row)
+    match m["p"] {
+        Some(inner) => {
+            assert_eq(inner[1].x, 3)
+            assert_eq(inner[1].y, 4)
+        },
+        None => assert(false),
+    }
+}
+
+fn TestMapStructKeyOptionMap() {
+    let mut m = make(map[Point]Option[map[string]int])
+    let k = Point { x: 0, y: 0 }
+    let mut row = make(map[string]int)
+    row["z"] = 9
+    m[k] = Some(row)
+    match m[k] {
+        Some(inner) => assert_eq(inner["z"], 9),
+        None => assert(false),
+    }
+}
+
+fn TestMapOptionMapHelpers() {
+    let mut m = make(map[string]Option[map[string]int])
+    let mut r1 = make(map[string]int)
+    r1["a"] = 1
+    m["x"] = Some(r1)
+    let c = maps_clone(m)
+    assert_eq(maps_equal(m, c), 1)
+    maps_clear(c)
+    assert_eq(len(c), 0)
+    assert_eq(len(m), 1)
+}
