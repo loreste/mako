@@ -2,7 +2,7 @@
 // slice header still points at. Structs are passed by value, so a slice field
 // is shallow-copied (shared backing); appending through one copy used to
 // realloc-and-free the shared buffer, dangling the other copy — a double-free
-// on the next append (found in faydb's xid_status handling).
+// on the next append (regression from real xid_status-style handling).
 
 struct Box {
     xs: []int

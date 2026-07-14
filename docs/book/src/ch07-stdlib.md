@@ -400,8 +400,7 @@ Helpers: `scram_salted_password`, `scram_client_key`, `scram_server_key`,
 `scram_gs2` / `scram_cbind` / `scram_client_final_bare`, plus
 `scram_tls_unique_c(conn)` / `scram_plus_final_bare(conn, nonce)` after a finished
 TLS handshake (`tls_unique`). There is no full SASL state machine in std —
-applications own the pgwire AuthenticationSASL\* messages (see FayDB for a
-full wire path). **Crypto core only.**
+applications own the pgwire AuthenticationSASL\* messages. **Crypto core only.**
 
 The implementation is checked byte-for-byte against the RFC 7677 test vector
 (`examples/testing/scram_test.mko`); product polish in
