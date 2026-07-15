@@ -7,6 +7,9 @@
 - **`fn_drop(f)` / `fn_has_env(f)`** — free capture env via generated `drop_env`
   (string fields freed); bare fns are no-ops.
 - **`MakoFn.drop_env`** third field on the fat pointer.
+- **Auto drop on scope exit** for MakoFn locals (like share).
+- **Kick moves env** into the task box; worker drops after call (no UAF /
+  double-free with auto drop).
 - **Task inspect:** `task_done` / `task_joined` / `task_id` ·
   `tasks_inspect_json()` (registry of active tasks).
 - **Soft breakpoints:** `debug_break(label)` · `debug_break_hits` /

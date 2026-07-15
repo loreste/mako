@@ -483,7 +483,8 @@ fn main() {
 Also works with `string` params (`fn(string) -> int`, multi-arg `fn(int, string) -> int`).
 **Captures:** local `int` / `bool` / `float` by value; `string` by owned clone;
 **structs** by value (string fields cloned). Kick `fn` values across crew
-(`MakoFn` is Send). Residual: mut borrows, env free-on-drop.
+(`MakoFn` is Send). Env is **auto-dropped** on scope exit; kick **moves** the
+env into the task. Explicit `fn_drop(f)` still available. Residual: mut borrows.
 
 ```mko
 let p = Pt { x: 3, y: 4 }

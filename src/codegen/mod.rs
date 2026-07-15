@@ -60,6 +60,9 @@ pub struct Codegen {
     share_scopes: Vec<Vec<String>>,
     /// Shares still live (not yet dropped); avoids double-drop after explicit `share_drop`.
     share_live: std::collections::HashSet<String>,
+    /// MakoFn locals that may own a capture env — auto `fn_drop` on scope exit.
+    fn_env_scopes: Vec<Vec<String>>,
+    fn_env_live: std::collections::HashSet<String>,
     /// Nesting of `unsafe { }` — skip debug bounds checks when > 0.
     unsafe_depth: usize,
     /// Generic templates (not emitted; specialized as `name__tag`).
@@ -179,6 +182,8 @@ impl Codegen {
             defer_stack: Vec::new(),
             share_scopes: Vec::new(),
             share_live: std::collections::HashSet::new(),
+            fn_env_scopes: Vec::new(),
+            fn_env_live: std::collections::HashSet::new(),
             unsafe_depth: 0,
             generic_templates: HashMap::new(),
             bounds_checks_always: false,
@@ -2090,6 +2095,7 @@ impl Codegen {
 
     fn push_share_scope(&mut self) {
         self.share_scopes.push(Vec::new());
+        self.fn_env_scopes.push(Vec::new());
     }
 
     /// Emit a bounds check unless inside `unsafe { }`.
@@ -2102,6 +2108,14 @@ impl Codegen {
     }
 
     fn pop_share_scope(&mut self) {
+        // Drop MakoFn capture envs before share drops.
+        if let Some(names) = self.fn_env_scopes.pop() {
+            for name in names.into_iter().rev() {
+                if self.fn_env_live.remove(&name) {
+                    self.line(&format!("mako_fn_drop(&{name});"));
+                }
+            }
+        }
         if let Some(names) = self.share_scopes.pop() {
             for name in names.into_iter().rev() {
                 if self.share_live.remove(&name) {
@@ -2121,6 +2135,17 @@ impl Codegen {
     fn note_share_dropped(&mut self, name: &str) {
         self.share_live.remove(name);
         // Keep name in share_scopes so pop is a no-op for already-dropped.
+    }
+
+    fn register_fn_env_local(&mut self, name: &str) {
+        self.fn_env_live.insert(name.to_string());
+        if let Some(scope) = self.fn_env_scopes.last_mut() {
+            scope.push(name.to_string());
+        }
+    }
+
+    fn note_fn_env_dropped(&mut self, name: &str) {
+        self.fn_env_live.remove(name);
     }
 
     /// Emit a Go-like test harness that runs each `TestXxx` via `mako_test_run`.
@@ -9214,6 +9239,8 @@ impl Codegen {
         self.defer_stack.clear();
         self.share_scopes.clear();
         self.share_live.clear();
+        self.fn_env_scopes.clear();
+        self.fn_env_live.clear();
         self.result_err_enums.clear();
         self.result_ok_kinds.clear();
         self.result_ok_structs.clear();
@@ -10072,6 +10099,12 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                 self.line(&format!("{ty} {name} = {val};"));
                 if *ownership == Ownership::Share {
                     self.register_share_local(name);
+                }
+                // Auto-drop capture env when this MakoFn leaves scope.
+                if ty == "MakoFn" {
+                    self.register_fn_env_local(name);
+                    // Also register under original unmangled key for Ident lookups.
+                    // `name` is already mangled at this point.
                 }
             }
             Stmt::LetMulti { names, init, .. } => {
@@ -17244,7 +17277,10 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             // Need address of MakoFn local; if expression is a temp, drop by copy.
                             // Prefer &local when args[0] is Ident.
                             if let Expr::Ident(n) = &args[0] {
-                                self.line(&format!("mako_fn_drop(&{});", mangle(n)));
+                                let mn = mangle(n);
+                                self.line(&format!("mako_fn_drop(&{mn});"));
+                                self.note_fn_env_dropped(&mn);
+                                self.note_fn_env_dropped(n);
                             } else {
                                 let tmp = self.fresh("fnd");
                                 self.line(&format!("MakoFn {tmp} = {f};"));
@@ -25918,12 +25954,32 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                                             "{arg_name}[{i}] = (intptr_t){boxn};"
                                         ));
                                     } else if aty == "MakoFn" || pty == "MakoFn" {
-                                        // Fat pointer: heap-box the MakoFn (shares env with creator).
+                                        // Move ownership of capture env into the task box.
                                         let boxn = self.fresh("fnbox");
                                         self.line(&format!(
                                             "MakoFn *{boxn} = (MakoFn*)malloc(sizeof(MakoFn));"
                                         ));
                                         self.line(&format!("*{boxn} = {v};"));
+                                        // Detach env from a MakoFn *local* (not a bare named function).
+                                        if let Expr::Ident(n) = a {
+                                            let is_fn_local = self
+                                                .locals
+                                                .get(n)
+                                                .map(|s| s.as_str() == "MakoFn")
+                                                .unwrap_or(false)
+                                                || self
+                                                    .locals
+                                                    .get(&mangle(n))
+                                                    .map(|s| s.as_str() == "MakoFn")
+                                                    .unwrap_or(false);
+                                            if is_fn_local {
+                                                let mn = mangle(n);
+                                                self.line(&format!("{mn}.env = NULL;"));
+                                                self.line(&format!("{mn}.drop_env = NULL;"));
+                                                self.note_fn_env_dropped(&mn);
+                                                self.note_fn_env_dropped(n);
+                                            }
+                                        }
                                         self.line(&format!(
                                             "{arg_name}[{i}] = (intptr_t){boxn};"
                                         ));
@@ -27748,6 +27804,8 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                 unpack.push_str(&format!(
                     "MakoFn {local} = *(MakoFn*)a[{i}]; free((void*)a[{i}]);\n"
                 ));
+                // Worker owns the env for the call duration — free after.
+                cleanup.push_str(&format!("mako_fn_drop(&{local});\n"));
                 call_args.push(local);
             } else if ty == "double" {
                 unpack.push_str(&format!(
@@ -27803,7 +27861,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
             format!("{unpack}void *__r = (void*){call};\n{cleanup}return __r;\n")
         } else if ret_ty == "double" {
             format!(
-                "{unpack}double __r = {call};\n\
+                "{unpack}double __r = {call};\n{cleanup}\
                  return (void*)(intptr_t)mako_f64_to_bits(__r);\n"
             )
         } else {
