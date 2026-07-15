@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Const fn string params / returns
+
+- `const fn f(s: string) -> string` and mixed int/string params.
+- Int-returning const fns may bind string locals (`len_greet`).
+- Typecheck validation uses dummy `""` / `0` for params by type.
+- Tests: `TestConstFnString` in `const_fn_test`.
+
 ### Const string seed
 
 - `const S = "…"` string constants; `+` / `str_concat` at const time.

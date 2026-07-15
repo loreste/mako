@@ -271,3 +271,43 @@ fn TestConstString() {
     assert_eq_str(GREET, "hi")
     assert_eq_str(FULL, "hi!")
 }
+
+// --- Const fn string params / returns ---
+
+const fn shout(s: string) -> string {
+    return s + "!"
+}
+
+const fn greet(name: string) -> string {
+    let prefix = "hi "
+    return prefix + name
+}
+
+const fn pick(n: int) -> string {
+    if n > 0 {
+        return "yes"
+    }
+    return "no"
+}
+
+const fn len_greet(name: string) -> int {
+    let g = "hi " + name
+    return str_len(g)
+}
+
+const C_SHOUT = shout("hey")
+const C_GREET = greet("mako")
+const C_PICK = pick(1)
+const C_PICK0 = pick(0)
+const C_LG = len_greet("ab")
+
+fn TestConstFnString() {
+    assert_eq_str(C_SHOUT, "hey!")
+    assert_eq_str(C_GREET, "hi mako")
+    assert_eq_str(C_PICK, "yes")
+    assert_eq_str(C_PICK0, "no")
+    assert_eq(C_LG, 5)
+    assert_eq_str(shout("x"), "x!")
+    assert_eq(len_greet("z"), 4)
+    assert_eq_str(greet("you"), "hi you")
+}

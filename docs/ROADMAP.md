@@ -27,6 +27,14 @@ Remaining weight is **product** residual: install/portability polish, full debug
 
 ---
 
+## Just closed (2026-07-15) — const fn strings
+
+| Area | Status |
+|------|--------|
+| `const fn f(s: string) -> string` | **Done seed** — shout/greet/pick |
+| Int const fn with string locals | **Done seed** — `len_greet` |
+| Full CTFE (heap, mutate, index, loops on strings) | Still product residual |
+
 ## Just closed (2026-07-15) — const string seed
 
 | Area | Status |
@@ -408,7 +416,8 @@ Percentages are weighted; update when a task flips.
 - [x] Const-fn for seed (`for i in n` / `range n` / C-style; max 100k).
 - [x] Const-fn break/continue seed (bare; C-for continue runs post).
 - [x] Const string seed (literals, `+`, `str_len`, equality → int).
-- [ ] Domain CTFE product beyond int/string seed (heap, mutate, full interpreter).
+- [x] Const fn string params/returns seed (`shout` / `greet` / mixed int).
+- [ ] Domain CTFE product beyond seed (heap, mutate, string loops, full interpreter).
 
 ---
 

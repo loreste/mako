@@ -116,8 +116,9 @@ const N = clamp(50, 0, 10)  // 10
 Supported in const: `+ - * / %` bitwise, comparisons, `&&` `||` `!`, `let` /
 `assign`, `return`, `if`/`else`, `if`-expressions, **`match` on ints** (`|`, `_`,
 bind), **bounded `while` / `for`**, **C-style `for`**, bare **`break` /
-`continue`**, and **string seeds** (`const S = "…"`, `+` concat, `str_len` /
-`len`, `==` / `!=` / `str_eq` → int). Not a full CTFE interpreter.
+`continue`**, **string seeds** (`const S = "…"`, `+`, `str_len` / `==`), and
+**`const fn` string params/returns** (plus int fns that use string locals).
+Not a full CTFE interpreter.
 
 ## Actors
 

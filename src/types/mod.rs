@@ -9742,12 +9742,29 @@ impl TypeChecker {
                 if f.type_params.is_empty() {
                     self.check_fn(f)?;
                     if f.is_const {
-                        // Ensure body is const-evaluable with zero params or dummy zeros
+                        // Ensure body is const-evaluable with dummy zeros / empty strings.
                         let mut env = self.const_ints.clone();
+                        let mut str_env = self.const_strs.clone();
                         for p in &f.params {
-                            env.insert(p.name.clone(), 0);
+                            let pty = self.resolve_type(&p.ty)?;
+                            if pty == Type::String {
+                                str_env.insert(p.name.clone(), String::new());
+                            } else {
+                                env.insert(p.name.clone(), 0);
+                            }
                         }
-                        if let Err(e) = eval_const_fn_body(&f.body, &env, &self.const_strs, &self.const_fns) {
+                        let ret_is_str = f
+                            .ret
+                            .as_ref()
+                            .map(|t| self.resolve_type(t).ok() == Some(Type::String))
+                            .unwrap_or(false);
+                        let fold_err = if ret_is_str {
+                            eval_const_fn_body_str(&f.body, &env, &str_env, &self.const_fns)
+                                .err()
+                        } else {
+                            eval_const_fn_body(&f.body, &env, &str_env, &self.const_fns).err()
+                        };
+                        if let Some(e) = fold_err {
                             return Err(TypeError::new(format!(
                                 "const fn `{}` body is not compile-time foldable: {}",
                                 f.name,
@@ -16007,13 +16024,10 @@ fn fold_const_expr_with(
                     f.params.len()
                 )));
             }
-            let mut locals = consts.clone();
-            for (p, a) in f.params.iter().zip(args.iter()) {
-                let v = fold_const_expr_with(a, consts, const_strs, const_fns)?;
-                locals.insert(p.name.clone(), v);
-            }
-            // Body must be a single return of a foldable expr (or block ending in return).
-            eval_const_fn_body(&f.body, &locals, const_strs, const_fns)
+            let (locals_i, locals_s) =
+                bind_const_fn_args(f, args, consts, const_strs, const_fns)?;
+            // Int-returning const fn (string-returning goes through fold_const_str_with).
+            eval_const_fn_body(&f.body, &locals_i, &locals_s, const_fns)
         }
         _ => Err(TypeError::new(
             "const initializer must be a comptime-foldable integer expression",
@@ -16021,15 +16035,36 @@ fn fold_const_expr_with(
     }
 }
 
-/// Fold a compile-time string expression (literals, const names, `+` concat).
+/// Bind const-fn arguments into int/string local maps.
+fn bind_const_fn_args(
+    f: &FnDef,
+    args: &[Expr],
+    consts: &HashMap<String, i64>,
+    const_strs: &HashMap<String, String>,
+    const_fns: &HashMap<String, FnDef>,
+) -> Result<(HashMap<String, i64>, HashMap<String, String>), TypeError> {
+    let mut locals_i = consts.clone();
+    let mut locals_s = const_strs.clone();
+    for (p, a) in f.params.iter().zip(args.iter()) {
+        let is_str = matches!(&p.ty, TypeExpr::Named(n) if n == "string");
+        if is_str {
+            let s = fold_const_str_with(a, consts, const_strs, const_fns)?;
+            locals_s.insert(p.name.clone(), s);
+        } else {
+            let v = fold_const_expr_with(a, consts, const_strs, const_fns)?;
+            locals_i.insert(p.name.clone(), v);
+        }
+    }
+    Ok((locals_i, locals_s))
+}
+
+/// Fold a compile-time string expression (literals, const names, `+` concat, const fn).
 fn fold_const_str_with(
     expr: &Expr,
     consts: &HashMap<String, i64>,
     const_strs: &HashMap<String, String>,
     const_fns: &HashMap<String, FnDef>,
 ) -> Result<String, TypeError> {
-    let _ = consts;
-    let _ = const_fns;
     match expr {
         Expr::String(s) => Ok(s.clone()),
         Expr::Ident(n) => const_strs
@@ -16045,22 +16080,44 @@ fn fold_const_str_with(
             let r = fold_const_str_with(right, consts, const_strs, const_fns)?;
             Ok(l + &r)
         }
+        Expr::IfExpr {
+            cond,
+            then_block,
+            else_block,
+        } => {
+            let c = fold_const_expr_with(cond, consts, const_strs, const_fns)?;
+            if c != 0 {
+                eval_const_fn_body_str(then_block, consts, const_strs, const_fns)
+            } else {
+                eval_const_fn_body_str(else_block, consts, const_strs, const_fns)
+            }
+        }
         Expr::Call { callee, args } => {
             let Expr::Ident(fname) = callee.as_ref() else {
                 return Err(TypeError::new("const string call must name a helper"));
             };
-            // Optional: str_concat(a, b) if present as user const path — seed uses `+`.
             if fname == "str_concat" && args.len() == 2 {
                 let a = fold_const_str_with(&args[0], consts, const_strs, const_fns)?;
                 let b = fold_const_str_with(&args[1], consts, const_strs, const_fns)?;
                 return Ok(a + &b);
             }
-            Err(TypeError::new(format!(
-                "const string expression cannot call `{fname}`"
-            )))
+            let Some(f) = const_fns.get(fname) else {
+                return Err(TypeError::new(format!(
+                    "const string expression cannot call `{fname}`"
+                )));
+            };
+            if f.params.len() != args.len() {
+                return Err(TypeError::new(format!(
+                    "const fn `{fname}` expects {} args",
+                    f.params.len()
+                )));
+            }
+            let (locals_i, locals_s) =
+                bind_const_fn_args(f, args, consts, const_strs, const_fns)?;
+            eval_const_fn_body_str(&f.body, &locals_i, &locals_s, const_fns)
         }
         _ => Err(TypeError::new(
-            "const string must be a literal, const name, or `+` / str_concat of strings",
+            "const string must be a literal, const name, `+`/concat, if-expr, or string const fn",
         )),
     }
 }
@@ -16113,27 +16170,39 @@ fn eval_const_fn_body(
 ) -> Result<i64, TypeError> {
     // Support: let/assign/return, trailing expr, if, match (via expr), while (bounded).
     let mut env = locals.clone();
+    let mut str_env = const_strs.clone();
     let mut i = 0;
     while i < body.stmts.len() {
         let stmt = &body.stmts[i];
         let is_last = i + 1 == body.stmts.len();
         match stmt {
-            Stmt::Return(Some(e)) => return fold_const_expr_with(e, &env, const_strs, const_fns),
+            Stmt::Return(Some(e)) => return fold_const_expr_with(e, &env, &str_env, const_fns),
             Stmt::Return(None) => {
                 return Err(TypeError::new("const fn cannot return void"));
             }
             Stmt::Let { name, init, .. } => {
-                let v = fold_const_expr_with(init, &env, const_strs, const_fns)?;
-                env.insert(name.clone(), v);
+                if let Ok(v) = fold_const_expr_with(init, &env, &str_env, const_fns) {
+                    env.insert(name.clone(), v);
+                } else if let Ok(s) = fold_const_str_with(init, &env, &str_env, const_fns) {
+                    str_env.insert(name.clone(), s);
+                } else {
+                    return Err(TypeError::new(format!(
+                        "const let `{name}` init is not a const int or string"
+                    )));
+                }
             }
             Stmt::Assign { name, value } => {
-                if !env.contains_key(name) {
+                if env.contains_key(name) {
+                    let v = fold_const_expr_with(value, &env, &str_env, const_fns)?;
+                    env.insert(name.clone(), v);
+                } else if str_env.contains_key(name) {
+                    let s = fold_const_str_with(value, &env, &str_env, const_fns)?;
+                    str_env.insert(name.clone(), s);
+                } else {
                     return Err(TypeError::new(format!(
                         "const assign to unknown `{name}` (declare with let first)"
                     )));
                 }
-                let v = fold_const_expr_with(value, &env, const_strs, const_fns)?;
-                env.insert(name.clone(), v);
             }
             Stmt::If {
                 init,
@@ -16144,8 +16213,17 @@ fn eval_const_fn_body(
                 if let Some(init_stmt) = init {
                     match init_stmt.as_ref() {
                         Stmt::Let { name, init, .. } => {
-                            let v = fold_const_expr_with(init, &env, const_strs, const_fns)?;
-                            env.insert(name.clone(), v);
+                            if let Ok(v) = fold_const_expr_with(init, &env, &str_env, const_fns) {
+                                env.insert(name.clone(), v);
+                            } else if let Ok(s) =
+                                fold_const_str_with(init, &env, &str_env, const_fns)
+                            {
+                                str_env.insert(name.clone(), s);
+                            } else {
+                                return Err(TypeError::new(
+                                    "const if init may only be a let of a const expression",
+                                ));
+                            }
                         }
                         _ => {
                             return Err(TypeError::new(
@@ -16154,18 +16232,15 @@ fn eval_const_fn_body(
                         }
                     }
                 }
-                let c = fold_const_expr_with(cond, &env, const_strs, const_fns)?;
+                let c = fold_const_expr_with(cond, &env, &str_env, const_fns)?;
                 if c != 0 {
-                    // Prefer nested return; if then-block yields without return, merge env is N/A
-                    // for seed — require then/else to return when used as control in const fn.
-                    return eval_const_fn_body(then_block, &env, const_strs, const_fns);
+                    return eval_const_fn_body(then_block, &env, &str_env, const_fns);
                 } else if let Some(eb) = else_block {
-                    return eval_const_fn_body(eb, &env, const_strs, const_fns);
+                    return eval_const_fn_body(eb, &env, &str_env, const_fns);
                 }
-                // `if` without else that did not return: fall through
             }
             Stmt::While { cond, body: wbody, .. } => {
-                match run_const_while(cond, wbody, &mut env, const_strs, const_fns)? {
+                match run_const_while(cond, wbody, &mut env, &str_env, const_fns)? {
                     Some(ret) => return Ok(ret),
                     None => {}
                 }
@@ -16176,7 +16251,7 @@ fn eval_const_fn_body(
                 body: fbody,
                 ..
             } => {
-                match run_const_for_count(binders, iter, fbody, &mut env, const_strs, const_fns)? {
+                match run_const_for_count(binders, iter, fbody, &mut env, &str_env, const_fns)? {
                     Some(ret) => return Ok(ret),
                     None => {}
                 }
@@ -16188,25 +16263,22 @@ fn eval_const_fn_body(
                 body: fbody,
                 ..
             } => {
-                match run_const_cfor(init, cond, post, fbody, &mut env, const_strs, const_fns)? {
+                match run_const_cfor(init, cond, post, fbody, &mut env, &str_env, const_fns)? {
                     Some(ret) => return Ok(ret),
                     None => {}
                 }
             }
             Stmt::Expr(e) if is_last => {
-                return fold_const_expr_with(e, &env, const_strs, const_fns);
+                return fold_const_expr_with(e, &env, &str_env, const_fns);
             }
             Stmt::Expr(_) => {
-                // Side-effect-free const expr as statement: evaluate and discard.
-                let _ = fold_const_expr_with(
-                    match stmt {
-                        Stmt::Expr(e) => e,
-                        _ => unreachable!(),
-                    },
-                    &env,
-                    const_strs,
-                    const_fns,
-                )?;
+                let e = match stmt {
+                    Stmt::Expr(e) => e,
+                    _ => unreachable!(),
+                };
+                if fold_const_expr_with(e, &env, &str_env, const_fns).is_err() {
+                    let _ = fold_const_str_with(e, &env, &str_env, const_fns)?;
+                }
             }
             _ => {
                 return Err(TypeError::new(
@@ -16217,6 +16289,91 @@ fn eval_const_fn_body(
         i += 1;
     }
     Err(TypeError::new("const fn body has no return value"))
+}
+
+/// Evaluate a string-returning const fn / block (if arms, let, return).
+fn eval_const_fn_body_str(
+    body: &Block,
+    locals: &HashMap<String, i64>,
+    const_strs: &HashMap<String, String>,
+    const_fns: &HashMap<String, FnDef>,
+) -> Result<String, TypeError> {
+    let mut env = locals.clone();
+    let mut str_env = const_strs.clone();
+    let mut i = 0;
+    while i < body.stmts.len() {
+        let stmt = &body.stmts[i];
+        let is_last = i + 1 == body.stmts.len();
+        match stmt {
+            Stmt::Return(Some(e)) => {
+                return fold_const_str_with(e, &env, &str_env, const_fns);
+            }
+            Stmt::Return(None) => {
+                return Err(TypeError::new("const fn cannot return void"));
+            }
+            Stmt::Let { name, init, .. } => {
+                if let Ok(v) = fold_const_expr_with(init, &env, &str_env, const_fns) {
+                    env.insert(name.clone(), v);
+                } else if let Ok(s) = fold_const_str_with(init, &env, &str_env, const_fns) {
+                    str_env.insert(name.clone(), s);
+                } else {
+                    return Err(TypeError::new(format!(
+                        "const let `{name}` init is not a const int or string"
+                    )));
+                }
+            }
+            Stmt::Assign { name, value } => {
+                if env.contains_key(name) {
+                    let v = fold_const_expr_with(value, &env, &str_env, const_fns)?;
+                    env.insert(name.clone(), v);
+                } else if str_env.contains_key(name) {
+                    let s = fold_const_str_with(value, &env, &str_env, const_fns)?;
+                    str_env.insert(name.clone(), s);
+                } else {
+                    return Err(TypeError::new(format!(
+                        "const assign to unknown `{name}`"
+                    )));
+                }
+            }
+            Stmt::If {
+                init,
+                cond,
+                then_block,
+                else_block,
+            } => {
+                if let Some(init_stmt) = init {
+                    if let Stmt::Let { name, init, .. } = init_stmt.as_ref() {
+                        if let Ok(v) = fold_const_expr_with(init, &env, &str_env, const_fns) {
+                            env.insert(name.clone(), v);
+                        } else if let Ok(s) = fold_const_str_with(init, &env, &str_env, const_fns) {
+                            str_env.insert(name.clone(), s);
+                        }
+                    }
+                }
+                let c = fold_const_expr_with(cond, &env, &str_env, const_fns)?;
+                if c != 0 {
+                    return eval_const_fn_body_str(then_block, &env, &str_env, const_fns);
+                } else if let Some(eb) = else_block {
+                    return eval_const_fn_body_str(eb, &env, &str_env, const_fns);
+                }
+            }
+            Stmt::Expr(e) if is_last => {
+                return fold_const_str_with(e, &env, &str_env, const_fns);
+            }
+            Stmt::Expr(e) => {
+                if fold_const_expr_with(e, &env, &str_env, const_fns).is_err() {
+                    let _ = fold_const_str_with(e, &env, &str_env, const_fns)?;
+                }
+            }
+            _ => {
+                return Err(TypeError::new(
+                    "string const fn body may only use let/assign/return/if (no loops yet)",
+                ));
+            }
+        }
+        i += 1;
+    }
+    Err(TypeError::new("const string fn body has no return value"))
 }
 
 /// Control flow from a const loop body iteration.
