@@ -107,6 +107,29 @@ static inline void mako_runtime_stats_reset(void) {
     atomic_store_explicit(&mako_rt_lock_wait_ns, 0, memory_order_relaxed);
 }
 
+/* ---- First-class function values (fat pointer: code + optional env) ----
+ * Non-capturing: env == NULL, fn is ret (*)(args...).
+ * Capturing: env is heap env struct, fn is ret (*)(void *env, args...).
+ */
+typedef struct {
+    void *fn;
+    void *env;
+} MakoFn;
+
+static inline MakoFn mako_fn_bare(void *fn) {
+    MakoFn f;
+    f.fn = fn;
+    f.env = NULL;
+    return f;
+}
+
+static inline MakoFn mako_fn_closure(void *fn, void *env) {
+    MakoFn f;
+    f.fn = fn;
+    f.env = env;
+    return f;
+}
+
 /* ---- Strings (owned, null-terminated) ----
  * MakoString is the primary string type. Strings own their buffer (heap-allocated,
  * NUL-terminated). `data` is never NULL for owned strings. `len` does not count

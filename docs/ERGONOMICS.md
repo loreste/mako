@@ -447,10 +447,10 @@ let ch = chan_open[ServerState](4)
 let _ = ch.send(Draining)
 ```
 
-### First-class functions (non-capturing)
+### First-class functions + capturing closures (seed)
 
 Pass **named functions** or **lambdas** as values. Parameter type is
-`fn(T, U, …) -> R`.
+`fn(T, U, …) -> R`. Values are fat pointers (`MakoFn`: code + optional env).
 
 ```mko
 fn apply(f: fn(int) -> int, x: int) -> int {
@@ -471,13 +471,20 @@ fn main() {
     print(pipeline(|code, body| code + len(body)))
     let g: fn(int) -> int = double
     print(g(3))
+
+    // POD capture seed (int/bool/float by value into env)
+    let n = 10
+    print(apply(|x| x + n, 5))               // 15
+    let f: fn(int) -> int = |x| x * n
+    print(f(2))
 }
 ```
 
 Also works with `string` params (`fn(string) -> int`, multi-arg `fn(int, string) -> int`).
-**Non-capturing only** — lambdas must not close over outer locals (residual).
+**Captures:** local `int` / `bool` / `float` by value. Residual: string/struct
+envs, mut borrows, kicking `fn` across crew.
 
-Tests: `first_class_fn_test.mko`, `lang_ergonomics_test.mko`.
+Tests: `first_class_fn_test.mko`, `lang_ergonomics_test.mko`, `capturing_closure_test.mko`.
 
 ### `f"…"` string interpolation
 
