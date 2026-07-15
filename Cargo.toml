@@ -1,6 +1,6 @@
 [package]
 name = "mako"
-version = "0.1.4"
+version = "0.1.5"
 edition = "2021"
 description = "Mako — systems/backend language compiler (Python-clear, Go-fast, type-safe)"
 license = "MIT"

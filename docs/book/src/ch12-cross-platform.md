@@ -38,8 +38,8 @@ The target triple follows the `<arch>-<vendor>-<os>[-<abi>]` convention.
 The host target is detected automatically. `mako version` prints it:
 
 ```text
-mako version mako0.1.0 darwin/arm64
-mako version mako0.1.0 linux/amd64
+mako version mako0.1.5 darwin/arm64
+mako version mako0.1.5 linux/amd64
 ```
 
 ---
@@ -292,20 +292,20 @@ The `version` command reports the Mako version, OS, and architecture:
 
 ```bash
 mako version
-# mako version mako0.1.0 darwin/arm64
+# mako version mako0.1.5 darwin/arm64
 
 mako --version
-# mako version mako0.1.0 darwin/arm64
+# mako version mako0.1.5 darwin/arm64
 
 mako -V
-# mako version mako0.1.0 darwin/arm64
+# mako version mako0.1.5 darwin/arm64
 ```
 
 For verbose output including the git commit:
 
 ```bash
 mako version -v
-# mako version mako0.1.0 darwin/arm64
+# mako version mako0.1.5 darwin/arm64
 # commit: a1b2c3d (when built from git with MAKO_GIT_HASH)
 ```
 

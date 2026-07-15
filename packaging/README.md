@@ -2,7 +2,9 @@
 
 Assets for distributing **Mako** outside a source checkout.
 
-## GitHub Releases (done for v0.1.4)
+## GitHub Releases
+
+**Product tip:** **v0.1.5** (after tag + CI). **v0.1.4** was the previous multi-OS release.
 
 Built by `.github/workflows/release.yml` on tag `v*`:
 
@@ -15,8 +17,8 @@ Built by `.github/workflows/release.yml` on tag `v*`:
 Installers: `install-release.sh`, `install-linux.sh` (LF only).
 
 ```bash
-curl -fsSL https://github.com/loreste/mako/releases/download/v0.1.4/install-release.sh \
-  | bash -s -- --version v0.1.4 --yes
+curl -fsSL https://github.com/loreste/mako/releases/download/v0.1.5/install-release.sh \
+  | bash -s -- --version v0.1.5 --yes
 ```
 
 ## Fill packaging from a release
@@ -24,7 +26,7 @@ curl -fsSL https://github.com/loreste/mako/releases/download/v0.1.4/install-rele
 After tagging and CI finishes:
 
 ```bash
-./scripts/fill-release-packaging.sh v0.1.4
+./scripts/fill-release-packaging.sh v0.1.5
 ```
 
 Updates:
@@ -37,7 +39,8 @@ Updates:
 
 Manifest: `packaging/winget/mako.locale.en-US.yaml` (singleton, ManifestVersion 1.6.0).
 
-**v0.1.4 PR:** https://github.com/microsoft/winget-pkgs/pull/402823
+**v0.1.4 PR:** https://github.com/microsoft/winget-pkgs/pull/402823  
+**v0.1.5:** re-run fill after tag; path `manifests/l/loreste/mako/0.1.5/`.
 
 Portable nested path (must match zip layout from `package-release.ps1`):
 
@@ -47,7 +50,7 @@ mako-x86_64-pc-windows-msvc\bin\mako.exe
 
 1. Ensure SHA is filled (`fill-release-packaging.sh`).
 2. Fork [microsoft/winget-pkgs](https://github.com/microsoft/winget-pkgs).
-3. Copy the YAML to `manifests/l/loreste/mako/0.1.4/loreste.mako.yaml`.
+3. Copy the YAML to `manifests/l/loreste/mako/0.1.5/loreste.mako.yaml`.
 4. Open a PR. If bots ask for CLA, comment:  
    `@microsoft-github-policy-service agree`
 
@@ -57,7 +60,7 @@ mako-x86_64-pc-windows-msvc\bin\mako.exe
 
 ## Homebrew (local tap / homebrew-core)
 
-Formula: `Formula/mako.rb` (stable `url` + `sha256` for `v0.1.4` source).
+Formula: `Formula/mako.rb` (stable `url` + `sha256` for source tag — fill after release).
 
 Local tap (already usable on this machine):
 
@@ -83,4 +86,5 @@ Signed MSI / notarized pkg need certificates in CI — not automated without sec
 
 ## Checksums
 
-See `packaging/RELEASE-CHECKSUMS-0.1.4.md` after running `fill-release-packaging.sh`.
+See `packaging/RELEASE-CHECKSUMS-0.1.5.md` after running `fill-release-packaging.sh`
+(or `RELEASE-CHECKSUMS-0.1.4.md` for the previous release).

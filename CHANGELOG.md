@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## 0.1.5 — 2026-07-15
+
+**mako0.1.5** (`CARGO_PKG_VERSION`).
+
+Patch after 0.1.4: package-per-directory, unbuffered rendezvous channels,
+Go-style implicit interfaces, actor int payloads, const-fn depth (match /
+while / for / break·continue / strings / string `const fn`), error chain peel,
+and `fallthrough`.
+
 ### Const fn string params / returns
 
 - `const fn f(s: string) -> string` and mixed int/string params.
@@ -72,15 +81,8 @@
 - **`std/errors`:** `unwrap` / `root` / `as_tag` / `has_tag` aliases.
 - **`fallthrough`:** Go dual keyword; last statement of a `switch` `case` merges
   the next arm body (`fallthrough_test`).
-- **IDENTITY** errors track → 100%; dual-form checklist ~90%.
+- **IDENTITY** errors track → 100%; dual-form checklist ~94%.
 - Tests: `error_chain_test.mko` · `fallthrough_test.mko`.
-
-### Packaging fill for v0.1.4
-
-- Winget singleton manifest: real Windows zip `InstallerSha256`.
-- Homebrew formula: stable `url` + `sha256` for `v0.1.4` source tarball.
-- `scripts/fill-release-packaging.sh` regenerates SHA/manifest from a tag.
-- `packaging/RELEASE-CHECKSUMS-0.1.4.md` + `packaging/README.md`.
 
 ## 0.1.4 — 2026-07-15
 

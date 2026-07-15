@@ -18,7 +18,7 @@ Verify the installation:
 
 ```bash
 mako version
-# mako version mako0.1.0 darwin/arm64
+# mako version mako0.1.5 darwin/arm64
 
 mako version -v
 # includes the git commit hash

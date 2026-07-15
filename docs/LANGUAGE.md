@@ -3,13 +3,16 @@
 Mako is a systems and backend language: clear to write, strict at compile time,
 fast at runtime, and designed so **builds stay fast**.
 
+**Product version:** **0.1.5** (`mako version` → `mako0.1.5`).
+
 **Guided tour:** [The Mako Book](book/).  
 **Full syntax guide:** [GUIDE.md](GUIDE.md).  
 **Low ceremony:** [ERGONOMICS.md](ERGONOMICS.md).  
 **Identity (our syntax):** [IDENTITY.md](IDENTITY.md).  
 **Keywords:** [KEYWORDS.md](KEYWORDS.md).  
 **Product north star:** [VISION.md](VISION.md).  
-**Honest matrix:** [STATUS.md](STATUS.md).
+**Honest matrix:** [STATUS.md](STATUS.md).  
+**Changelog:** [../CHANGELOG.md](../CHANGELOG.md).
 
 ---
 

@@ -1,8 +1,11 @@
 # Mako status (adversarial / verified)
 
-Last inventory: 2026-07-14 (**unique Mako surface** · pack/pull types · full map/slice/bag *language* surface with **demand-driven monomorphs** · suite **130+** · **The Mako Book**).
+Last inventory: **2026-07-15** · product **mako0.1.5** (`CARGO_PKG_VERSION`).
 
-**Book:** [The Mako Book](book/) · **Guide:** [GUIDE.md](GUIDE.md) · **Identity:** [IDENTITY.md](IDENTITY.md) · **Pain points:** [PAIN_POINTS.md](PAIN_POINTS.md) · **Build:** [BUILD.md](BUILD.md) · **Stdlib:** [STDLIB.md](STDLIB.md) · **Roadmap:** [ROADMAP.md](ROADMAP.md) · **Changelog:** [../CHANGELOG.md](../CHANGELOG.md).
+Unique Mako surface · pack/pull · map/slice/bag monomorphs · package-per-directory ·
+const-fn depth (match/while/for/strings) · suite **165+** · [The Mako Book](book/).
+
+**Book:** [The Mako Book](book/) · **Guide:** [GUIDE.md](GUIDE.md) · **Identity:** [IDENTITY.md](IDENTITY.md) · **Pain points:** [PAIN_POINTS.md](PAIN_POINTS.md) · **Build:** [BUILD.md](BUILD.md) · **Stdlib:** [STDLIB.md](STDLIB.md) · **Roadmap:** [ROADMAP.md](ROADMAP.md) · **Changelog:** [../CHANGELOG.md](../CHANGELOG.md) · **Release:** [RELEASE.md](RELEASE.md).
 
 ---
 
@@ -10,6 +13,7 @@ Last inventory: 2026-07-14 (**unique Mako surface** · pack/pull types · full m
 
 | Scope | Approx. |
 |-------|---------|
+| **Product version** | **0.1.5** |
 | **MVP / usable language** | **100%** |
 | **STATUS north-star** | **100%** |
 | **Mako identity (preferred syntax)** | **~100%** — [IDENTITY.md](IDENTITY.md) |
