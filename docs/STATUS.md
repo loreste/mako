@@ -86,6 +86,7 @@ Last inventory: 2026-07-14 (**unique Mako surface** · pack/pull types · full m
 | Storage depth (btree disk, SST, pcache, mvcc_gc, simd) | Done seed — `storage_depth_test` |
 | LSM compact · store WAL recover · hot-reload mtime | Done seed — `domain_tracks_test` (`lsm_compact`, `store_recover_wal`, `hot_reload_*`) |
 | Multi-level LSM (L1–L3) · page-backed btree | Done seed — `domain_tracks_test` (`lsm_compact_down`, `pbtree_*`) |
+| Storage polish (bloom · range · disk page manager) | Done seed — `domain_tracks_test` (`bloom_*`, `btree_range`/`sst_range`, `pman_*`) |
 | SQL str4 empty-bind arity + multi-arg `sql_query_str2/3/4` | Done — `sql_str4_empty_bind_test` · `sql_query_str_multi_test` |
 | Zero-copy string regions (language) | Done — `str_slice_eq` / `str_slice_index` / `str_at_eq` / `str_byte_at` · `str_slice_zc_test` |
 | SIP library (platform builtins + `std/sip`) | Done — RFC 3261/3581 Via/RR/NAT, Digest HA1, framing, SDP rewrite |

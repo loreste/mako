@@ -1594,6 +1594,71 @@ impl TypeChecker {
         fns.insert("pbtree_len".into(), Type::Fn(vec![Type::Named("PageBTree".into())], Box::new(Type::Int)));
         fns.insert("pbtree_pages".into(), Type::Fn(vec![Type::Named("PageBTree".into())], Box::new(Type::Int)));
         fns.insert("pbtree_free".into(), Type::Fn(vec![Type::Named("PageBTree".into())], Box::new(Type::Int)));
+        // Storage polish seeds: bloom · ordered range · disk page manager
+        fns.insert("bloom_new".into(), Type::Fn(vec![], Box::new(Type::Named("Bloom".into()))));
+        fns.insert("bloom_add".into(), Type::Fn(vec![Type::Named("Bloom".into()), Type::Int], Box::new(Type::Int)));
+        fns.insert("bloom_maybe".into(), Type::Fn(vec![Type::Named("Bloom".into()), Type::Int], Box::new(Type::Int)));
+        fns.insert("bloom_len".into(), Type::Fn(vec![Type::Named("Bloom".into())], Box::new(Type::Int)));
+        fns.insert("bloom_free".into(), Type::Fn(vec![Type::Named("Bloom".into())], Box::new(Type::Int)));
+        fns.insert(
+            "btree_range".into(),
+            Type::Fn(
+                vec![Type::Named("BTree".into()), Type::Int, Type::Int],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "sst_range".into(),
+            Type::Fn(
+                vec![Type::Named("Sst".into()), Type::Int, Type::Int],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert("range_len".into(), Type::Fn(vec![], Box::new(Type::Int)));
+        fns.insert("range_key_at".into(), Type::Fn(vec![Type::Int], Box::new(Type::Int)));
+        fns.insert("range_val_at".into(), Type::Fn(vec![Type::Int], Box::new(Type::Int)));
+        fns.insert(
+            "pman_open".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Named("PageMan".into()))),
+        );
+        fns.insert(
+            "pman_alloc".into(),
+            Type::Fn(vec![Type::Named("PageMan".into())], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "pman_set".into(),
+            Type::Fn(
+                vec![Type::Named("PageMan".into()), Type::Int, Type::Int, Type::Int],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "pman_get".into(),
+            Type::Fn(
+                vec![Type::Named("PageMan".into()), Type::Int, Type::Int],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "pman_sync".into(),
+            Type::Fn(vec![Type::Named("PageMan".into())], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "pman_pages".into(),
+            Type::Fn(vec![Type::Named("PageMan".into())], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "pman_reads".into(),
+            Type::Fn(vec![Type::Named("PageMan".into())], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "pman_writes".into(),
+            Type::Fn(vec![Type::Named("PageMan".into())], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "pman_close".into(),
+            Type::Fn(vec![Type::Named("PageMan".into())], Box::new(Type::Int)),
+        );
         fns.insert(
             "store_recover_wal".into(),
             Type::Fn(

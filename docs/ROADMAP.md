@@ -306,7 +306,7 @@ Percentages are weighted; update when a task flips.
 - [x] LSM L0→L1 compact seed (`lsm_compact`) · `store_recover_wal` crash replay · `hot_reload_*` mtime watch.
 - [x] Multi-level LSM (L1–L3 via `lsm_compact_down` / `lsm_sst_levels` / `lsm_level_len`).
 - [x] Page-backed btree seed (`pbtree_*` — nodes in `MakoPage`).
-- [ ] Storage product polish: disk page manager · bloom filters · range scans productization.
+- [x] Storage polish seeds: `bloom_*` · `btree_range` / `sst_range` + `range_*` · `pman_*` disk page manager.
 - [ ] Real windowing backends / GPU shaders / asset pipelines.
 - [ ] Full multiplayer netcode product.
 - [ ] More quant formats · Metal-native / CUDA / Vulkan backends.
