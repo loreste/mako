@@ -18568,6 +18568,82 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             self.line(&format!("MakoString {tmp} = mako_avro_long_hex({v});"));
                             return ("MakoString".into(), tmp);
                         }
+                        "bytes_to_hex" | "hex_to_bytes" | "msgpack_encode_string"
+                        | "msgpack_decode_string" | "cbor_encode_string" | "cbor_decode_string" => {
+                            let (_, s) = self.emit_expr(&args[0]);
+                            let fname = format!("mako_{name}");
+                            let tmp = self.fresh("bin");
+                            self.line(&format!("MakoString {tmp} = {fname}({s});"));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "msgpack_encode_int" | "msgpack_encode_bool" | "cbor_encode_int"
+                        | "cbor_encode_bool" => {
+                            let (_, v) = self.emit_expr(&args[0]);
+                            let fname = format!("mako_{name}");
+                            let tmp = self.fresh("enc");
+                            self.line(&format!("MakoString {tmp} = {fname}({v});"));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "msgpack_encode_nil" => {
+                            let tmp = self.fresh("mpn");
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_msgpack_encode_nil();"
+                            ));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "cbor_encode_null" => {
+                            let tmp = self.fresh("cbn");
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_cbor_encode_null();"
+                            ));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "msgpack_encode_array_int" | "cbor_encode_array_int" => {
+                            let (_, a) = self.emit_expr(&args[0]);
+                            let fname = format!("mako_{name}");
+                            let tmp = self.fresh("enca");
+                            self.line(&format!("MakoString {tmp} = {fname}({a});"));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "msgpack_decode_int" | "msgpack_decode_bool" | "msgpack_is_nil"
+                        | "cbor_type" | "cbor_decode_int" | "cbor_decode_bool" | "cbor_is_null" => {
+                            let (_, s) = self.emit_expr(&args[0]);
+                            let fname = format!("mako_{name}");
+                            return ("int64_t".into(), format!("{fname}({s})"));
+                        }
+                        "msgpack_decode_array_int" | "cbor_decode_array_int" => {
+                            let (_, s) = self.emit_expr(&args[0]);
+                            let fname = format!("mako_{name}");
+                            let tmp = self.fresh("deca");
+                            self.line(&format!("MakoIntArray {tmp} = {fname}({s});"));
+                            return ("MakoIntArray".into(), tmp);
+                        }
+                        "list_take_int" | "list_drop_int" | "list_take_while_lt_int"
+                        | "list_map_add_int" | "list_map_mul_int" | "list_filter_lt_int"
+                        | "list_filter_gt_int" => {
+                            let (_, a) = self.emit_expr(&args[0]);
+                            let (_, n) = self.emit_expr(&args[1]);
+                            let fname = format!("mako_{name}");
+                            let tmp = self.fresh("lcmb");
+                            self.line(&format!("MakoIntArray {tmp} = {fname}({a}, {n});"));
+                            return ("MakoIntArray".into(), tmp);
+                        }
+                        "list_zip_int" => {
+                            let (_, a) = self.emit_expr(&args[0]);
+                            let (_, b) = self.emit_expr(&args[1]);
+                            let tmp = self.fresh("lzip");
+                            self.line(&format!(
+                                "MakoIntArray {tmp} = mako_list_zip_int({a}, {b});"
+                            ));
+                            return ("MakoIntArray".into(), tmp);
+                        }
+                        "list_find_int" | "list_count_int" | "list_any_eq_int"
+                        | "list_all_eq_int" | "list_fold_add_int" | "list_fold_mul_int" => {
+                            let (_, a) = self.emit_expr(&args[0]);
+                            let (_, v) = self.emit_expr(&args[1]);
+                            let fname = format!("mako_{name}");
+                            return ("int64_t".into(), format!("{fname}({a}, {v})"));
+                        }
                         "sha256" => {
                             let (_, s) = self.emit_expr(&args[0]);
                             let tmp = self.fresh("sh");

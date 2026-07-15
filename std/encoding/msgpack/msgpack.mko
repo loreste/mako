@@ -1,0 +1,14 @@
+// std/encoding/msgpack — MessagePack subset (int/bool/nil/string/array[int])
+fn encode_int(v: int) -> string { return msgpack_encode_int(v) }
+fn encode_bool(v: int) -> string { return msgpack_encode_bool(v) }
+fn encode_nil() -> string { return msgpack_encode_nil() }
+fn encode_string(s: string) -> string { return msgpack_encode_string(s) }
+fn encode_array_int(a: []int) -> string { return msgpack_encode_array_int(a) }
+fn decode_int(bin: string) -> int { return msgpack_decode_int(bin) }
+fn decode_bool(bin: string) -> int { return msgpack_decode_bool(bin) }
+fn is_nil(bin: string) -> int { return msgpack_is_nil(bin) }
+fn decode_string(bin: string) -> string { return msgpack_decode_string(bin) }
+fn decode_array_int(bin: string) -> []int { return msgpack_decode_array_int(bin) }
+fn int_hex(v: int) -> string { return msgpack_int_hex(v) }
+fn to_hex(bin: string) -> string { return bytes_to_hex(bin) }
+fn from_hex(hex: string) -> string { return hex_to_bytes(hex) }

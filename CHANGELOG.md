@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### CBOR + MessagePack + list combinators
+
+- MessagePack encode/decode: int/bool/nil/string/`[]int` (binary + hex helpers).
+- CBOR encode/decode: int/bool/null/text/array[int] + `cbor_type`.
+- List combinators: take/drop/zip/find/count/any/all, map_add/mul, filter_lt/gt,
+  fold_add/mul, take_while_lt (int mono-style).
+- Packages: `std/encoding/msgpack`, `std/encoding/cbor`; collections wrappers.
+- Tests: `cbor_msgpack_test`.
+
 ## 0.1.6 — 2026-07-15
 
 **mako0.1.6** (`CARGO_PKG_VERSION`).

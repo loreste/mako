@@ -3480,23 +3480,519 @@ static inline MakoStrArray mako_toml_keys(MakoString doc) {
     return out;
 }
 
-static inline MakoString mako_msgpack_int_hex(int64_t v) {
-    char *d = (char *)malloc(19);
-    if (!d) mako_abort("msgpack_int_hex: out of memory");
-    snprintf(d, 19, "d3%016llx", (unsigned long long)v);
-    return (MakoString){d, 18};
+/* ---- binary hex helpers (debug / tests) ---- */
+static inline MakoString mako_bytes_to_hex(MakoString bin) {
+    char *d = (char *)malloc(bin.len * 2 + 1);
+    if (!d) mako_abort("bytes_to_hex OOM");
+    for (size_t i = 0; i < bin.len; i++)
+        sprintf(d + i * 2, "%02x", (unsigned char)bin.data[i]);
+    d[bin.len * 2] = 0;
+    return (MakoString){d, bin.len * 2};
+}
+static inline int mako_hex_nibble(char c) {
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    return -1;
+}
+static inline MakoString mako_hex_to_bytes(MakoString hex) {
+    size_t n = hex.len / 2;
+    char *d = (char *)malloc(n + 1);
+    if (!d) mako_abort("hex_to_bytes OOM");
+    for (size_t i = 0; i < n; i++) {
+        int hi = mako_hex_nibble(hex.data[i * 2]);
+        int lo = mako_hex_nibble(hex.data[i * 2 + 1]);
+        if (hi < 0 || lo < 0) {
+            free(d);
+            return mako_str_from_cstr("");
+        }
+        d[i] = (char)((hi << 4) | lo);
+    }
+    d[n] = 0;
+    return (MakoString){d, n};
 }
 
-static inline MakoString mako_cbor_int_hex(int64_t v) {
-    char *d = (char *)malloc(19);
-    if (!d) mako_abort("cbor_int_hex: out of memory");
-    if (v >= 0) {
-        snprintf(d, 19, "1b%016llx", (unsigned long long)v);
+/* ---- MessagePack (subset: nil/bool/int/str/array[int]) ---- */
+static inline void mako_mp_ensure(unsigned char **buf, size_t *cap, size_t need) {
+    if (need <= *cap) return;
+    size_t nc = *cap ? *cap * 2 : 64;
+    while (nc < need) nc *= 2;
+    unsigned char *nb = (unsigned char *)realloc(*buf, nc);
+    if (!nb) mako_abort("msgpack OOM");
+    *buf = nb;
+    *cap = nc;
+}
+static inline void mako_mp_put(unsigned char **buf, size_t *cap, size_t *n, unsigned char b) {
+    mako_mp_ensure(buf, cap, *n + 1);
+    (*buf)[(*n)++] = b;
+}
+static inline void mako_mp_put_u16(unsigned char **buf, size_t *cap, size_t *n, uint16_t v) {
+    mako_mp_put(buf, cap, n, (unsigned char)(v >> 8));
+    mako_mp_put(buf, cap, n, (unsigned char)(v & 0xff));
+}
+static inline void mako_mp_put_u32(unsigned char **buf, size_t *cap, size_t *n, uint32_t v) {
+    mako_mp_put(buf, cap, n, (unsigned char)(v >> 24));
+    mako_mp_put(buf, cap, n, (unsigned char)((v >> 16) & 0xff));
+    mako_mp_put(buf, cap, n, (unsigned char)((v >> 8) & 0xff));
+    mako_mp_put(buf, cap, n, (unsigned char)(v & 0xff));
+}
+static inline void mako_mp_put_u64(unsigned char **buf, size_t *cap, size_t *n, uint64_t v) {
+    for (int i = 7; i >= 0; i--) mako_mp_put(buf, cap, n, (unsigned char)((v >> (i * 8)) & 0xff));
+}
+static inline void mako_mp_encode_int_into(unsigned char **buf, size_t *cap, size_t *n, int64_t v) {
+    if (v >= 0 && v <= 127) {
+        mako_mp_put(buf, cap, n, (unsigned char)v);
+    } else if (v >= -32 && v < 0) {
+        mako_mp_put(buf, cap, n, (unsigned char)(0xe0 | (v & 0x1f)));
+    } else if (v >= 0 && v <= 0xff) {
+        mako_mp_put(buf, cap, n, 0xcc);
+        mako_mp_put(buf, cap, n, (unsigned char)v);
+    } else if (v >= 0 && v <= 0xffff) {
+        mako_mp_put(buf, cap, n, 0xcd);
+        mako_mp_put_u16(buf, cap, n, (uint16_t)v);
+    } else if (v >= 0 && v <= 0xffffffffLL) {
+        mako_mp_put(buf, cap, n, 0xce);
+        mako_mp_put_u32(buf, cap, n, (uint32_t)v);
+    } else if (v >= 0) {
+        mako_mp_put(buf, cap, n, 0xcf);
+        mako_mp_put_u64(buf, cap, n, (uint64_t)v);
+    } else if (v >= -128) {
+        mako_mp_put(buf, cap, n, 0xd0);
+        mako_mp_put(buf, cap, n, (unsigned char)(int8_t)v);
+    } else if (v >= -32768) {
+        mako_mp_put(buf, cap, n, 0xd1);
+        mako_mp_put_u16(buf, cap, n, (uint16_t)(int16_t)v);
+    } else if (v >= (int64_t)INT32_MIN) {
+        mako_mp_put(buf, cap, n, 0xd2);
+        mako_mp_put_u32(buf, cap, n, (uint32_t)(int32_t)v);
     } else {
-        uint64_t n = (uint64_t)(-1 - v);
-        snprintf(d, 19, "3b%016llx", (unsigned long long)n);
+        mako_mp_put(buf, cap, n, 0xd3);
+        mako_mp_put_u64(buf, cap, n, (uint64_t)v);
     }
-    return (MakoString){d, 18};
+}
+static inline MakoString mako_msgpack_encode_int(int64_t v) {
+    unsigned char *buf = NULL;
+    size_t cap = 0, n = 0;
+    mako_mp_encode_int_into(&buf, &cap, &n, v);
+    return (MakoString){(char *)buf, n};
+}
+static inline MakoString mako_msgpack_encode_bool(int64_t v) {
+    char *d = (char *)malloc(1);
+    if (!d) mako_abort("mp bool OOM");
+    d[0] = v ? (char)0xc3 : (char)0xc2;
+    return (MakoString){d, 1};
+}
+static inline MakoString mako_msgpack_encode_nil(void) {
+    char *d = (char *)malloc(1);
+    if (!d) mako_abort("mp nil OOM");
+    d[0] = (char)0xc0;
+    return (MakoString){d, 1};
+}
+static inline MakoString mako_msgpack_encode_string(MakoString s) {
+    unsigned char *buf = NULL;
+    size_t cap = 0, n = 0;
+    if (s.len <= 31) {
+        mako_mp_put(&buf, &cap, &n, (unsigned char)(0xa0 | s.len));
+    } else if (s.len <= 0xff) {
+        mako_mp_put(&buf, &cap, &n, 0xd9);
+        mako_mp_put(&buf, &cap, &n, (unsigned char)s.len);
+    } else if (s.len <= 0xffff) {
+        mako_mp_put(&buf, &cap, &n, 0xda);
+        mako_mp_put_u16(&buf, &cap, &n, (uint16_t)s.len);
+    } else {
+        mako_mp_put(&buf, &cap, &n, 0xdb);
+        mako_mp_put_u32(&buf, &cap, &n, (uint32_t)s.len);
+    }
+    mako_mp_ensure(&buf, &cap, n + s.len);
+    if (s.len) memcpy(buf + n, s.data, s.len);
+    n += s.len;
+    return (MakoString){(char *)buf, n};
+}
+static inline MakoString mako_msgpack_encode_array_int(MakoIntArray a) {
+    unsigned char *buf = NULL;
+    size_t cap = 0, n = 0;
+    if (a.len <= 15) {
+        mako_mp_put(&buf, &cap, &n, (unsigned char)(0x90 | a.len));
+    } else if (a.len <= 0xffff) {
+        mako_mp_put(&buf, &cap, &n, 0xdc);
+        mako_mp_put_u16(&buf, &cap, &n, (uint16_t)a.len);
+    } else {
+        mako_mp_put(&buf, &cap, &n, 0xdd);
+        mako_mp_put_u32(&buf, &cap, &n, (uint32_t)a.len);
+    }
+    for (size_t i = 0; i < a.len; i++) mako_mp_encode_int_into(&buf, &cap, &n, a.data[i]);
+    return (MakoString){(char *)buf, n};
+}
+/* Legacy hex form of int64 (big-endian int64 header d3). */
+static inline MakoString mako_msgpack_int_hex(int64_t v) {
+    MakoString raw = mako_msgpack_encode_int(v);
+    MakoString h = mako_bytes_to_hex(raw);
+    mako_str_free(raw);
+    return h;
+}
+static inline int64_t mako_msgpack_decode_int(MakoString bin) {
+    if (!bin.data || bin.len == 0) return 0;
+    const unsigned char *p = (const unsigned char *)bin.data;
+    size_t n = bin.len;
+    unsigned char b = p[0];
+    if (b <= 0x7f) return (int64_t)b;
+    if ((b & 0xe0) == 0xe0) return (int64_t)(int8_t)b;
+    if (b == 0xcc && n >= 2) return p[1];
+    if (b == 0xcd && n >= 3) return ((int64_t)p[1] << 8) | p[2];
+    if (b == 0xce && n >= 5)
+        return ((int64_t)p[1] << 24) | ((int64_t)p[2] << 16) | ((int64_t)p[3] << 8) | p[4];
+    if (b == 0xcf && n >= 9) {
+        uint64_t u = 0;
+        for (int i = 0; i < 8; i++) u = (u << 8) | p[1 + i];
+        return (int64_t)u;
+    }
+    if (b == 0xd0 && n >= 2) return (int64_t)(int8_t)p[1];
+    if (b == 0xd1 && n >= 3) return (int64_t)(int16_t)(((uint16_t)p[1] << 8) | p[2]);
+    if (b == 0xd2 && n >= 5) {
+        uint32_t u = ((uint32_t)p[1] << 24) | ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 8) | p[4];
+        return (int64_t)(int32_t)u;
+    }
+    if (b == 0xd3 && n >= 9) {
+        uint64_t u = 0;
+        for (int i = 0; i < 8; i++) u = (u << 8) | p[1 + i];
+        return (int64_t)u;
+    }
+    return 0;
+}
+static inline int64_t mako_msgpack_is_nil(MakoString bin) {
+    return (bin.len >= 1 && (unsigned char)bin.data[0] == 0xc0) ? 1 : 0;
+}
+static inline int64_t mako_msgpack_decode_bool(MakoString bin) {
+    if (bin.len < 1) return 0;
+    unsigned char b = (unsigned char)bin.data[0];
+    if (b == 0xc3) return 1;
+    return 0;
+}
+static inline MakoString mako_msgpack_decode_string(MakoString bin) {
+    if (!bin.data || bin.len == 0) return mako_str_from_cstr("");
+    const unsigned char *p = (const unsigned char *)bin.data;
+    size_t n = bin.len, off = 0, len = 0;
+    unsigned char b = p[0];
+    if ((b & 0xe0) == 0xa0) {
+        len = b & 0x1f;
+        off = 1;
+    } else if (b == 0xd9 && n >= 2) {
+        len = p[1];
+        off = 2;
+    } else if (b == 0xda && n >= 3) {
+        len = ((size_t)p[1] << 8) | p[2];
+        off = 3;
+    } else if (b == 0xdb && n >= 5) {
+        len = ((size_t)p[1] << 24) | ((size_t)p[2] << 16) | ((size_t)p[3] << 8) | p[4];
+        off = 5;
+    } else
+        return mako_str_from_cstr("");
+    if (off + len > n) return mako_str_from_cstr("");
+    char *d = (char *)malloc(len + 1);
+    if (!d) mako_abort("mp dec str OOM");
+    if (len) memcpy(d, p + off, len);
+    d[len] = 0;
+    return (MakoString){d, len};
+}
+/* Decode array of ints; non-int elements skipped (best-effort). */
+static inline MakoIntArray mako_msgpack_decode_array_int(MakoString bin) {
+    MakoIntArray out = mako_int_array_make(0, 8);
+    if (!bin.data || bin.len == 0) return out;
+    const unsigned char *p = (const unsigned char *)bin.data;
+    size_t n = bin.len, off = 0, alen = 0;
+    unsigned char b = p[0];
+    if ((b & 0xf0) == 0x90) {
+        alen = b & 0x0f;
+        off = 1;
+    } else if (b == 0xdc && n >= 3) {
+        alen = ((size_t)p[1] << 8) | p[2];
+        off = 3;
+    } else if (b == 0xdd && n >= 5) {
+        alen = ((size_t)p[1] << 24) | ((size_t)p[2] << 16) | ((size_t)p[3] << 8) | p[4];
+        off = 5;
+    } else
+        return out;
+    for (size_t i = 0; i < alen && off < n; i++) {
+        MakoString piece = {(char *)(uintptr_t)(p + off), n - off};
+        /* size of one int encoding: re-encode and compare length via probe */
+        int64_t v = mako_msgpack_decode_int(piece);
+        MakoString enc = mako_msgpack_encode_int(v);
+        /* verify prefix match; if not, break */
+        if (enc.len > n - off || memcmp(enc.data, p + off, enc.len) != 0) {
+            /* try fixint/negative only single byte */
+            if (off < n) {
+                unsigned char bb = p[off];
+                if (bb <= 0x7f || (bb & 0xe0) == 0xe0) {
+                    out = mako_slice_append(out, mako_msgpack_decode_int(
+                        (MakoString){(char *)(uintptr_t)(p + off), 1}));
+                    off += 1;
+                    mako_str_free(enc);
+                    continue;
+                }
+            }
+            mako_str_free(enc);
+            break;
+        }
+        out = mako_slice_append(out, v);
+        off += enc.len;
+        mako_str_free(enc);
+    }
+    return out;
+}
+
+/* ---- CBOR (subset: int/bool/null/text/array[int]) ---- */
+static inline void mako_cbor_put_head(unsigned char **buf, size_t *cap, size_t *n, int major,
+                                      uint64_t val) {
+    unsigned char mt = (unsigned char)((major & 7) << 5);
+    if (val < 24) {
+        mako_mp_put(buf, cap, n, (unsigned char)(mt | val));
+    } else if (val <= 0xff) {
+        mako_mp_put(buf, cap, n, (unsigned char)(mt | 24));
+        mako_mp_put(buf, cap, n, (unsigned char)val);
+    } else if (val <= 0xffff) {
+        mako_mp_put(buf, cap, n, (unsigned char)(mt | 25));
+        mako_mp_put_u16(buf, cap, n, (uint16_t)val);
+    } else if (val <= 0xffffffffULL) {
+        mako_mp_put(buf, cap, n, (unsigned char)(mt | 26));
+        mako_mp_put_u32(buf, cap, n, (uint32_t)val);
+    } else {
+        mako_mp_put(buf, cap, n, (unsigned char)(mt | 27));
+        mako_mp_put_u64(buf, cap, n, val);
+    }
+}
+static inline void mako_cbor_encode_int_into(unsigned char **buf, size_t *cap, size_t *n, int64_t v) {
+    if (v >= 0)
+        mako_cbor_put_head(buf, cap, n, 0, (uint64_t)v);
+    else
+        mako_cbor_put_head(buf, cap, n, 1, (uint64_t)(-1 - v));
+}
+static inline MakoString mako_cbor_encode_int(int64_t v) {
+    unsigned char *buf = NULL;
+    size_t cap = 0, n = 0;
+    mako_cbor_encode_int_into(&buf, &cap, &n, v);
+    return (MakoString){(char *)buf, n};
+}
+static inline MakoString mako_cbor_encode_bool(int64_t v) {
+    char *d = (char *)malloc(1);
+    if (!d) mako_abort("cbor bool OOM");
+    d[0] = v ? (char)0xf5 : (char)0xf4;
+    return (MakoString){d, 1};
+}
+static inline MakoString mako_cbor_encode_null(void) {
+    char *d = (char *)malloc(1);
+    if (!d) mako_abort("cbor null OOM");
+    d[0] = (char)0xf6;
+    return (MakoString){d, 1};
+}
+static inline MakoString mako_cbor_encode_string(MakoString s) {
+    unsigned char *buf = NULL;
+    size_t cap = 0, n = 0;
+    mako_cbor_put_head(&buf, &cap, &n, 3, (uint64_t)s.len);
+    mako_mp_ensure(&buf, &cap, n + s.len);
+    if (s.len) memcpy(buf + n, s.data, s.len);
+    n += s.len;
+    return (MakoString){(char *)buf, n};
+}
+static inline MakoString mako_cbor_encode_array_int(MakoIntArray a) {
+    unsigned char *buf = NULL;
+    size_t cap = 0, n = 0;
+    mako_cbor_put_head(&buf, &cap, &n, 4, (uint64_t)a.len);
+    for (size_t i = 0; i < a.len; i++) mako_cbor_encode_int_into(&buf, &cap, &n, a.data[i]);
+    return (MakoString){(char *)buf, n};
+}
+static inline MakoString mako_cbor_int_hex(int64_t v) {
+    MakoString raw = mako_cbor_encode_int(v);
+    MakoString h = mako_bytes_to_hex(raw);
+    mako_str_free(raw);
+    return h;
+}
+/* Read CBOR additional info at *off; advances *off past head; returns value. */
+static inline int mako_cbor_read_head(const unsigned char *p, size_t n, size_t *off, int *major,
+                                      uint64_t *val) {
+    if (*off >= n) return -1;
+    unsigned char b = p[(*off)++];
+    *major = (b >> 5) & 7;
+    unsigned char ai = b & 0x1f;
+    if (ai < 24) {
+        *val = ai;
+        return 0;
+    }
+    if (ai == 24) {
+        if (*off + 1 > n) return -1;
+        *val = p[(*off)++];
+        return 0;
+    }
+    if (ai == 25) {
+        if (*off + 2 > n) return -1;
+        *val = ((uint64_t)p[*off] << 8) | p[*off + 1];
+        *off += 2;
+        return 0;
+    }
+    if (ai == 26) {
+        if (*off + 4 > n) return -1;
+        *val = ((uint64_t)p[*off] << 24) | ((uint64_t)p[*off + 1] << 16) | ((uint64_t)p[*off + 2] << 8)
+            | p[*off + 3];
+        *off += 4;
+        return 0;
+    }
+    if (ai == 27) {
+        if (*off + 8 > n) return -1;
+        *val = 0;
+        for (int i = 0; i < 8; i++) *val = (*val << 8) | p[(*off)++];
+        return 0;
+    }
+    if (ai == 20 || ai == 21 || ai == 22 || ai == 23) {
+        *val = ai;
+        return 0;
+    }
+    return -1;
+}
+static inline int64_t mako_cbor_type(MakoString bin) {
+    if (!bin.data || bin.len == 0) return -1;
+    return ((unsigned char)bin.data[0] >> 5) & 7;
+}
+static inline int64_t mako_cbor_decode_int(MakoString bin) {
+    size_t off = 0;
+    int major = 0;
+    uint64_t val = 0;
+    if (mako_cbor_read_head((const unsigned char *)bin.data, bin.len, &off, &major, &val) != 0)
+        return 0;
+    if (major == 0) return (int64_t)val;
+    if (major == 1) return (int64_t)(-1 - (int64_t)val);
+    return 0;
+}
+static inline int64_t mako_cbor_decode_bool(MakoString bin) {
+    if (bin.len < 1) return 0;
+    unsigned char b = (unsigned char)bin.data[0];
+    if (b == 0xf5) return 1;
+    return 0;
+}
+static inline int64_t mako_cbor_is_null(MakoString bin) {
+    return (bin.len >= 1 && (unsigned char)bin.data[0] == 0xf6) ? 1 : 0;
+}
+static inline MakoString mako_cbor_decode_string(MakoString bin) {
+    size_t off = 0;
+    int major = 0;
+    uint64_t val = 0;
+    if (mako_cbor_read_head((const unsigned char *)bin.data, bin.len, &off, &major, &val) != 0
+        || major != 3)
+        return mako_str_from_cstr("");
+    if (off + val > bin.len) return mako_str_from_cstr("");
+    char *d = (char *)malloc((size_t)val + 1);
+    if (!d) mako_abort("cbor str OOM");
+    if (val) memcpy(d, bin.data + off, (size_t)val);
+    d[val] = 0;
+    return (MakoString){d, (size_t)val};
+}
+static inline MakoIntArray mako_cbor_decode_array_int(MakoString bin) {
+    MakoIntArray out = mako_int_array_make(0, 8);
+    size_t off = 0;
+    int major = 0;
+    uint64_t alen = 0;
+    if (mako_cbor_read_head((const unsigned char *)bin.data, bin.len, &off, &major, &alen) != 0
+        || major != 4)
+        return out;
+    for (uint64_t i = 0; i < alen && off < bin.len; i++) {
+        size_t start = off;
+        int m = 0;
+        uint64_t v = 0;
+        if (mako_cbor_read_head((const unsigned char *)bin.data, bin.len, &off, &m, &v) != 0) break;
+        if (m == 0)
+            out = mako_slice_append(out, (int64_t)v);
+        else if (m == 1)
+            out = mako_slice_append(out, (int64_t)(-1 - (int64_t)v));
+        else {
+            (void)start;
+            break;
+        }
+    }
+    return out;
+}
+
+/* ---- list combinators (int) ---- */
+static inline MakoIntArray mako_list_take_int(MakoIntArray a, int64_t n) {
+    if (n < 0) n = 0;
+    if ((size_t)n > a.len) n = (int64_t)a.len;
+    MakoIntArray out = mako_int_array_make(n, n);
+    for (int64_t i = 0; i < n; i++) out.data[i] = a.data[i];
+    out.len = (size_t)n;
+    return out;
+}
+static inline MakoIntArray mako_list_drop_int(MakoIntArray a, int64_t n) {
+    if (n < 0) n = 0;
+    if ((size_t)n >= a.len) return mako_int_array_make(0, 0);
+    size_t m = a.len - (size_t)n;
+    MakoIntArray out = mako_int_array_make((int64_t)m, (int64_t)m);
+    for (size_t i = 0; i < m; i++) out.data[i] = a.data[(size_t)n + i];
+    out.len = m;
+    return out;
+}
+static inline MakoIntArray mako_list_zip_int(MakoIntArray a, MakoIntArray b) {
+    size_t m = a.len < b.len ? a.len : b.len;
+    MakoIntArray out = mako_int_array_make((int64_t)(m * 2), (int64_t)(m * 2));
+    for (size_t i = 0; i < m; i++) {
+        out.data[i * 2] = a.data[i];
+        out.data[i * 2 + 1] = b.data[i];
+    }
+    out.len = m * 2;
+    return out;
+}
+static inline int64_t mako_list_find_int(MakoIntArray a, int64_t v) {
+    return mako_ints_index(a, v);
+}
+static inline int64_t mako_list_count_int(MakoIntArray a, int64_t v) {
+    int64_t c = 0;
+    for (size_t i = 0; i < a.len; i++)
+        if (a.data[i] == v) c++;
+    return c;
+}
+static inline int64_t mako_list_any_eq_int(MakoIntArray a, int64_t v) {
+    return mako_ints_contains(a, v) ? 1 : 0;
+}
+static inline int64_t mako_list_all_eq_int(MakoIntArray a, int64_t v) {
+    if (a.len == 0) return 1;
+    for (size_t i = 0; i < a.len; i++)
+        if (a.data[i] != v) return 0;
+    return 1;
+}
+static inline MakoIntArray mako_list_take_while_lt_int(MakoIntArray a, int64_t thr) {
+    size_t n = 0;
+    while (n < a.len && a.data[n] < thr) n++;
+    return mako_list_take_int(a, (int64_t)n);
+}
+static inline MakoIntArray mako_list_map_add_int(MakoIntArray a, int64_t delta) {
+    MakoIntArray out = mako_int_array_make((int64_t)a.len, (int64_t)a.len);
+    for (size_t i = 0; i < a.len; i++) out.data[i] = a.data[i] + delta;
+    out.len = a.len;
+    return out;
+}
+static inline MakoIntArray mako_list_map_mul_int(MakoIntArray a, int64_t k) {
+    MakoIntArray out = mako_int_array_make((int64_t)a.len, (int64_t)a.len);
+    for (size_t i = 0; i < a.len; i++) out.data[i] = a.data[i] * k;
+    out.len = a.len;
+    return out;
+}
+static inline MakoIntArray mako_list_filter_lt_int(MakoIntArray a, int64_t thr) {
+    MakoIntArray out = mako_int_array_make(0, (int64_t)a.len);
+    for (size_t i = 0; i < a.len; i++)
+        if (a.data[i] < thr) out = mako_slice_append(out, a.data[i]);
+    return out;
+}
+static inline MakoIntArray mako_list_filter_gt_int(MakoIntArray a, int64_t thr) {
+    MakoIntArray out = mako_int_array_make(0, (int64_t)a.len);
+    for (size_t i = 0; i < a.len; i++)
+        if (a.data[i] > thr) out = mako_slice_append(out, a.data[i]);
+    return out;
+}
+static inline int64_t mako_list_fold_add_int(MakoIntArray a, int64_t init) {
+    int64_t s = init;
+    for (size_t i = 0; i < a.len; i++) s += a.data[i];
+    return s;
+}
+static inline int64_t mako_list_fold_mul_int(MakoIntArray a, int64_t init) {
+    int64_t s = init;
+    for (size_t i = 0; i < a.len; i++) s *= a.data[i];
+    return s;
 }
 
 static inline MakoString mako_avro_long_hex(int64_t v) {

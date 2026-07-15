@@ -4604,6 +4604,215 @@ impl TypeChecker {
             "avro_long_hex".into(),
             Type::Fn(vec![Type::Int], Box::new(Type::String)),
         );
+        // Binary hex helpers
+        fns.insert(
+            "bytes_to_hex".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::String)),
+        );
+        fns.insert(
+            "hex_to_bytes".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::String)),
+        );
+        // MessagePack binary
+        fns.insert(
+            "msgpack_encode_int".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::String)),
+        );
+        fns.insert(
+            "msgpack_encode_bool".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::String)),
+        );
+        fns.insert(
+            "msgpack_encode_nil".into(),
+            Type::Fn(vec![], Box::new(Type::String)),
+        );
+        fns.insert(
+            "msgpack_encode_string".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::String)),
+        );
+        fns.insert(
+            "msgpack_encode_array_int".into(),
+            Type::Fn(
+                vec![Type::Array(Box::new(Type::Int))],
+                Box::new(Type::String),
+            ),
+        );
+        fns.insert(
+            "msgpack_decode_int".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "msgpack_decode_bool".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "msgpack_is_nil".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "msgpack_decode_string".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::String)),
+        );
+        fns.insert(
+            "msgpack_decode_array_int".into(),
+            Type::Fn(
+                vec![Type::String],
+                Box::new(Type::Array(Box::new(Type::Int))),
+            ),
+        );
+        // CBOR binary
+        fns.insert(
+            "cbor_encode_int".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::String)),
+        );
+        fns.insert(
+            "cbor_encode_bool".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::String)),
+        );
+        fns.insert(
+            "cbor_encode_null".into(),
+            Type::Fn(vec![], Box::new(Type::String)),
+        );
+        fns.insert(
+            "cbor_encode_string".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::String)),
+        );
+        fns.insert(
+            "cbor_encode_array_int".into(),
+            Type::Fn(
+                vec![Type::Array(Box::new(Type::Int))],
+                Box::new(Type::String),
+            ),
+        );
+        fns.insert(
+            "cbor_type".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "cbor_decode_int".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "cbor_decode_bool".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "cbor_is_null".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "cbor_decode_string".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::String)),
+        );
+        fns.insert(
+            "cbor_decode_array_int".into(),
+            Type::Fn(
+                vec![Type::String],
+                Box::new(Type::Array(Box::new(Type::Int))),
+            ),
+        );
+        // List combinators / mono-style helpers
+        fns.insert(
+            "list_take_int".into(),
+            Type::Fn(
+                vec![Type::Array(Box::new(Type::Int)), Type::Int],
+                Box::new(Type::Array(Box::new(Type::Int))),
+            ),
+        );
+        fns.insert(
+            "list_drop_int".into(),
+            Type::Fn(
+                vec![Type::Array(Box::new(Type::Int)), Type::Int],
+                Box::new(Type::Array(Box::new(Type::Int))),
+            ),
+        );
+        fns.insert(
+            "list_zip_int".into(),
+            Type::Fn(
+                vec![
+                    Type::Array(Box::new(Type::Int)),
+                    Type::Array(Box::new(Type::Int)),
+                ],
+                Box::new(Type::Array(Box::new(Type::Int))),
+            ),
+        );
+        fns.insert(
+            "list_find_int".into(),
+            Type::Fn(
+                vec![Type::Array(Box::new(Type::Int)), Type::Int],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "list_count_int".into(),
+            Type::Fn(
+                vec![Type::Array(Box::new(Type::Int)), Type::Int],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "list_any_eq_int".into(),
+            Type::Fn(
+                vec![Type::Array(Box::new(Type::Int)), Type::Int],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "list_all_eq_int".into(),
+            Type::Fn(
+                vec![Type::Array(Box::new(Type::Int)), Type::Int],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "list_take_while_lt_int".into(),
+            Type::Fn(
+                vec![Type::Array(Box::new(Type::Int)), Type::Int],
+                Box::new(Type::Array(Box::new(Type::Int))),
+            ),
+        );
+        fns.insert(
+            "list_map_add_int".into(),
+            Type::Fn(
+                vec![Type::Array(Box::new(Type::Int)), Type::Int],
+                Box::new(Type::Array(Box::new(Type::Int))),
+            ),
+        );
+        fns.insert(
+            "list_map_mul_int".into(),
+            Type::Fn(
+                vec![Type::Array(Box::new(Type::Int)), Type::Int],
+                Box::new(Type::Array(Box::new(Type::Int))),
+            ),
+        );
+        fns.insert(
+            "list_filter_lt_int".into(),
+            Type::Fn(
+                vec![Type::Array(Box::new(Type::Int)), Type::Int],
+                Box::new(Type::Array(Box::new(Type::Int))),
+            ),
+        );
+        fns.insert(
+            "list_filter_gt_int".into(),
+            Type::Fn(
+                vec![Type::Array(Box::new(Type::Int)), Type::Int],
+                Box::new(Type::Array(Box::new(Type::Int))),
+            ),
+        );
+        fns.insert(
+            "list_fold_add_int".into(),
+            Type::Fn(
+                vec![Type::Array(Box::new(Type::Int)), Type::Int],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "list_fold_mul_int".into(),
+            Type::Fn(
+                vec![Type::Array(Box::new(Type::Int)), Type::Int],
+                Box::new(Type::Int),
+            ),
+        );
         fns.insert(
             "sha256".into(),
             Type::Fn(vec![Type::String], Box::new(Type::String)),
