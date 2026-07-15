@@ -1,0 +1,47 @@
+// Sampling CPU profiler seed (cooperative + optional SIGPROF).
+
+fn busy_work(n: int) -> int {
+    let mut s = 0
+    let mut i = 0
+    while i < n {
+        s = s + i
+        i = i + 1
+    }
+    return s
+}
+
+fn TestProfileSampleCooperative() {
+    assert_eq(profile_sample_clear(), 1)
+    assert_eq(profile_sample_count(), 0)
+    assert_eq(profile_sample_once("hot"), 1)
+    assert_eq(profile_sample_once("hot"), 1)
+    assert_eq(profile_sample_count(), 2)
+    assert(profile_sample_len() >= 1)
+    let js = profile_samples_json()
+    assert(str_contains(js, "mako.profile_samples.v1"))
+    assert(str_contains(js, "hot"))
+    assert(str_contains(js, "samples"))
+    assert(str_contains(js, "cpu_user_us"))
+}
+
+fn TestProfileSampleStartStop() {
+    assert_eq(profile_sample_clear(), 1)
+    assert_eq(profile_sample_start(10), 1)
+    // Burn some CPU so SIGPROF (when available) or cooperative ticks matter.
+    let mut total = 0
+    let mut k = 0
+    while k < 8 {
+        total = total + busy_work(50000)
+        let _ = profile_sample_once("tick")
+        k = k + 1
+    }
+    let n = profile_sample_stop()
+    assert(n >= 8)
+    assert(profile_sample_wall_ns() > 0)
+    // cpu_user_us may be 0 on coarse clocks; non-negative is required.
+    assert(profile_sample_cpu_us() >= 0)
+    let js = profile_samples_json()
+    assert(str_contains(js, "mako.profile_samples.v1"))
+    assert(str_contains(js, "tick") || str_contains(js, "sigprof") || str_contains(js, "stack"))
+    assert(total > 0)
+}

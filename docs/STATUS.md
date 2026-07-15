@@ -91,6 +91,7 @@ Last inventory: 2026-07-14 (**unique Mako surface** · pack/pull types · full m
 | Zero-copy string regions (language) | Done — `str_slice_eq` / `str_slice_index` / `str_at_eq` / `str_byte_at` · `str_slice_zc_test` |
 | Debugger depth (line BP · frames · async parent · snapshot) | Done seed — `fn_drop_debug_test` |
 | OTLP protobuf + HTTP exporter client | Done seed — `trace_export_otlp_pb` · `otlp_export_traces_*` · `observability_depth_test` |
+| Sampling CPU profiler | Done seed — `profile_sample_*` · `profile_sample_test` |
 | Installer UX (manifest + doctor + Windows) | Done seed — `install-manifest.json` · doctor fields · `install.ps1` |
 | Actor spawn_cap + interface `on T : I` sugar | Done seed — `actor_test` · `iface_on_iface_test` |
 | SIP library (platform builtins + `std/sip`) | Done — RFC 3261/3581 Via/RR/NAT, Digest HA1, framing, SDP rewrite |

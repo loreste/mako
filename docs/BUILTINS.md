@@ -2140,7 +2140,13 @@ Tests: `examples/testing/strong_log_test.mko`.
 | `process_rss_bytes` | `process_rss_bytes() -> int` | Process RSS in bytes (−1 if N/A) |
 | `process_cpu_user_us` | `process_cpu_user_us() -> int` | User CPU µs |
 | `process_cpu_sys_us` | `process_cpu_sys_us() -> int` | System CPU µs |
-| `profile_snapshot_json` | `profile_snapshot_json() -> string` | Combined profile sample JSON |
+| `profile_snapshot_json` | `profile_snapshot_json() -> string` | Combined process snapshot JSON |
+| `profile_sample_clear` | `() -> int` | Clear sampling ring |
+| `profile_sample_once` | `(label: string) -> int` | Cooperative stack sample |
+| `profile_sample_start` / `stop` | `(interval_ms) / ()` | SIGPROF sampling when available |
+| `profile_sample_count` / `len` | `() -> int` | Total recorded · slots filled |
+| `profile_sample_cpu_us` / `wall_ns` | `() -> int` | CPU / wall while active |
+| `profile_samples_json` | `() -> string` | Export `mako.profile_samples.v1` |
 
 ---
 

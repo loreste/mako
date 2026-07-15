@@ -4773,6 +4773,42 @@ impl TypeChecker {
             Type::Fn(vec![], Box::new(Type::String)),
         );
         fns.insert(
+            "profile_sample_clear".into(),
+            Type::Fn(vec![], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "profile_sample_once".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "profile_sample_count".into(),
+            Type::Fn(vec![], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "profile_sample_len".into(),
+            Type::Fn(vec![], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "profile_sample_start".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "profile_sample_stop".into(),
+            Type::Fn(vec![], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "profile_sample_cpu_us".into(),
+            Type::Fn(vec![], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "profile_sample_wall_ns".into(),
+            Type::Fn(vec![], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "profile_samples_json".into(),
+            Type::Fn(vec![], Box::new(Type::String)),
+        );
+        fns.insert(
             "ecs_world_new".into(),
             Type::Fn(vec![Type::Int], Box::new(Type::Int)),
         );

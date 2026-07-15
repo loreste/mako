@@ -1909,6 +1909,232 @@ static inline MakoString mako_profile_snapshot_json(void) {
     return (MakoString){d, (size_t)n};
 }
 
+/* ---- Sampling CPU profiler seed (cooperative + optional SIGPROF) ----
+ * Not a continuous pprof product. Ring of stack snapshots + CPU us deltas.
+ */
+#define MAKO_PROF_SAMPLE_MAX 64
+#define MAKO_PROF_STACK_CAP 384
+#define MAKO_PROF_LABEL_CAP 48
+
+typedef struct {
+    int64_t ts_ns;
+    int64_t cpu_user_us;
+    char label[MAKO_PROF_LABEL_CAP];
+    char stack[MAKO_PROF_STACK_CAP];
+    int used;
+} MakoProfSample;
+
+static MakoProfSample mako_prof_samples[MAKO_PROF_SAMPLE_MAX];
+static int mako_prof_sample_head = 0;
+static int mako_prof_sample_count = 0; /* total recorded (may exceed MAX) */
+static int64_t mako_prof_start_cpu_us = 0;
+static int64_t mako_prof_start_ns = 0;
+static volatile int mako_prof_active = 0;
+#if !defined(_WIN32) && !defined(MAKO_WASI)
+static struct sigaction mako_prof_old_sa;
+static int mako_prof_sa_saved = 0;
+#endif
+
+static inline void mako_prof_store_sample(const char *label, const char *stack) {
+    int i = mako_prof_sample_head % MAKO_PROF_SAMPLE_MAX;
+    mako_prof_sample_head++;
+    mako_prof_sample_count++;
+    MakoProfSample *s = &mako_prof_samples[i];
+    s->used = 1;
+    s->ts_ns = mako_now_ns();
+    s->cpu_user_us = mako_process_cpu_user_us();
+    s->label[0] = 0;
+    s->stack[0] = 0;
+    if (label && label[0]) {
+        size_t n = strlen(label);
+        if (n >= MAKO_PROF_LABEL_CAP) n = MAKO_PROF_LABEL_CAP - 1;
+        memcpy(s->label, label, n);
+        s->label[n] = 0;
+    }
+    if (stack && stack[0]) {
+        size_t n = strlen(stack);
+        if (n >= MAKO_PROF_STACK_CAP) n = MAKO_PROF_STACK_CAP - 1;
+        memcpy(s->stack, stack, n);
+        s->stack[n] = 0;
+        /* Collapse newlines for single-line JSON field. */
+        for (size_t k = 0; k < n; k++) {
+            if (s->stack[k] == '\n' || s->stack[k] == '\r' || s->stack[k] == '"')
+                s->stack[k] = ' ';
+        }
+    }
+}
+
+static inline int64_t mako_profile_sample_clear(void) {
+    memset(mako_prof_samples, 0, sizeof(mako_prof_samples));
+    mako_prof_sample_head = 0;
+    mako_prof_sample_count = 0;
+    return 1;
+}
+
+/* Capture one stack sample now (cooperative; always available). */
+static inline int64_t mako_profile_sample_once(MakoString label) {
+    MakoString st = mako_stack_trace();
+    char lab[MAKO_PROF_LABEL_CAP];
+    lab[0] = 0;
+    if (label.data && label.len > 0) {
+        size_t n = label.len < MAKO_PROF_LABEL_CAP - 1 ? label.len : MAKO_PROF_LABEL_CAP - 1;
+        memcpy(lab, label.data, n);
+        lab[n] = 0;
+    }
+    mako_prof_store_sample(lab, st.data ? st.data : "");
+    mako_str_free(st);
+    return 1;
+}
+
+static inline int64_t mako_profile_sample_count(void) {
+    return mako_prof_sample_count;
+}
+
+static inline int64_t mako_profile_sample_len(void) {
+    int n = 0;
+    for (int i = 0; i < MAKO_PROF_SAMPLE_MAX; i++)
+        if (mako_prof_samples[i].used) n++;
+    return n;
+}
+
+#if !defined(_WIN32) && !defined(MAKO_WASI) && (defined(__GLIBC__) || defined(__APPLE__))
+static void mako_prof_sigprof_handler(int sig) {
+    (void)sig;
+    if (!mako_prof_active) return;
+    void *frames[16];
+    int n = backtrace(frames, 16);
+    char **syms = backtrace_symbols(frames, n);
+    char buf[MAKO_PROF_STACK_CAP];
+    size_t len = 0;
+    buf[0] = 0;
+    if (syms) {
+        for (int i = 0; i < n && len + 2 < sizeof(buf); i++) {
+            size_t sl = strlen(syms[i]);
+            if (len + sl + 2 >= sizeof(buf)) break;
+            if (len) buf[len++] = ' ';
+            memcpy(buf + len, syms[i], sl);
+            len += sl;
+            buf[len] = 0;
+        }
+        free(syms);
+    }
+    mako_prof_store_sample("sigprof", buf);
+}
+#endif
+
+/* Start interval sampling. interval_ms: 1..1000 (POSIX SIGPROF); elsewhere no-op active flag. */
+static inline int64_t mako_profile_sample_start(int64_t interval_ms) {
+    if (interval_ms < 1) interval_ms = 10;
+    if (interval_ms > 1000) interval_ms = 1000;
+    mako_prof_active = 1;
+    mako_prof_start_cpu_us = mako_process_cpu_user_us();
+    mako_prof_start_ns = mako_now_ns();
+#if !defined(_WIN32) && !defined(MAKO_WASI) && (defined(__GLIBC__) || defined(__APPLE__))
+    struct sigaction sa;
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_handler = mako_prof_sigprof_handler;
+    sigemptyset(&sa.sa_mask);
+    if (sigaction(SIGPROF, &sa, &mako_prof_old_sa) == 0) mako_prof_sa_saved = 1;
+    struct itimerval it;
+    memset(&it, 0, sizeof(it));
+    it.it_interval.tv_sec = (time_t)(interval_ms / 1000);
+    it.it_interval.tv_usec = (suseconds_t)((interval_ms % 1000) * 1000);
+    it.it_value = it.it_interval;
+    if (setitimer(ITIMER_PROF, &it, NULL) != 0) {
+        /* Fall back: still allow cooperative samples. */
+    }
+    return 1;
+#else
+    (void)interval_ms;
+    return 1;
+#endif
+}
+
+/* Stop sampling; return number of samples recorded since start (or total). */
+static inline int64_t mako_profile_sample_stop(void) {
+    mako_prof_active = 0;
+#if !defined(_WIN32) && !defined(MAKO_WASI) && (defined(__GLIBC__) || defined(__APPLE__))
+    struct itimerval it;
+    memset(&it, 0, sizeof(it));
+    setitimer(ITIMER_PROF, &it, NULL);
+    if (mako_prof_sa_saved) {
+        sigaction(SIGPROF, &mako_prof_old_sa, NULL);
+        mako_prof_sa_saved = 0;
+    }
+#endif
+    return mako_prof_sample_count;
+}
+
+/* CPU user us spent while sampling was active (approx). */
+static inline int64_t mako_profile_sample_cpu_us(void) {
+    int64_t now = mako_process_cpu_user_us();
+    if (mako_prof_start_cpu_us <= 0) return 0;
+    int64_t d = now - mako_prof_start_cpu_us;
+    return d > 0 ? d : 0;
+}
+
+static inline int64_t mako_profile_sample_wall_ns(void) {
+    if (mako_prof_start_ns <= 0) return 0;
+    int64_t d = mako_now_ns() - mako_prof_start_ns;
+    return d > 0 ? d : 0;
+}
+
+static inline MakoString mako_profile_samples_json(void) {
+    size_t cap = 4096;
+    char *buf = (char *)malloc(cap);
+    if (!buf) abort();
+    size_t len = 0;
+    int n = snprintf(
+        buf, cap,
+        "{\"schema\":\"mako.profile_samples.v1\",\"count\":%d,\"len\":%" PRId64
+        ",\"cpu_user_us\":%" PRId64 ",\"wall_ns\":%" PRId64 ",\"active\":%d,\"samples\":[",
+        mako_prof_sample_count,
+        mako_profile_sample_len(),
+        mako_profile_sample_cpu_us(),
+        mako_profile_sample_wall_ns(),
+        mako_prof_active
+    );
+    if (n > 0) len = (size_t)n;
+    int first = 1;
+    for (int i = 0; i < MAKO_PROF_SAMPLE_MAX; i++) {
+        if (!mako_prof_samples[i].used) continue;
+        MakoProfSample *s = &mako_prof_samples[i];
+        if (len + MAKO_PROF_STACK_CAP + 128 >= cap) {
+            cap *= 2;
+            char *nb = (char *)realloc(buf, cap);
+            if (!nb) {
+                free(buf);
+                abort();
+            }
+            buf = nb;
+        }
+        n = snprintf(
+            buf + len, cap - len,
+            "%s{\"ts_ns\":%" PRId64 ",\"cpu_user_us\":%" PRId64
+            ",\"label\":\"%s\",\"stack\":\"%s\"}",
+            first ? "" : ",",
+            s->ts_ns,
+            s->cpu_user_us,
+            s->label,
+            s->stack
+        );
+        if (n > 0) len += (size_t)n;
+        first = 0;
+    }
+    if (len + 4 >= cap) {
+        char *nb = (char *)realloc(buf, len + 8);
+        if (!nb) {
+            free(buf);
+            abort();
+        }
+        buf = nb;
+    }
+    buf[len++] = ']';
+    buf[len++] = '}';
+    buf[len] = 0;
+    return (MakoString){buf, len};
+}
+
 /* Prometheus text exposition (0.0.4-ish) for the same 64 slots. */
 static inline MakoString mako_metrics_export_prom(void) {
     size_t cap = 8192;

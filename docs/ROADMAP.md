@@ -271,8 +271,9 @@ Percentages are weighted; update when a task flips.
 - [x] Debug source frame seed (`debug_set_loc` / `debug_file` / `debug_line` / `debug_frame_json`).
 - [x] Debugger depth seed: line BPs · frame stack · async parent · trap flag · `debug_snapshot_json`.
 - [x] OTLP protobuf export seed (`trace_export_otlp_pb`) + HTTP exporter (`otlp_http_export` / `otlp_export_traces_*`).
+- [x] Sampling CPU profiler seed (`profile_sample_*` · SIGPROF + cooperative · `profile_samples_json`).
 - [ ] Full DWARF / DAP product debugger (lldb on generated C remains the external path).
-- [ ] Sampling CPU profiler / continuous profilers.
+- [ ] Continuous / multi-thread pprof product profilers.
 
 ### 9. Installer, distribution, and portability — 10%
 

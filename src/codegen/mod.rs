@@ -18742,6 +18742,45 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             ));
                             return ("MakoString".into(), tmp);
                         }
+                        "profile_sample_clear" => {
+                            return ("int64_t".into(), "mako_profile_sample_clear()".into());
+                        }
+                        "profile_sample_once" => {
+                            let (_, lab) = self.emit_expr(&args[0]);
+                            return (
+                                "int64_t".into(),
+                                format!("mako_profile_sample_once({lab})"),
+                            );
+                        }
+                        "profile_sample_count" => {
+                            return ("int64_t".into(), "mako_profile_sample_count()".into());
+                        }
+                        "profile_sample_len" => {
+                            return ("int64_t".into(), "mako_profile_sample_len()".into());
+                        }
+                        "profile_sample_start" => {
+                            let (_, ms) = self.emit_expr(&args[0]);
+                            return (
+                                "int64_t".into(),
+                                format!("mako_profile_sample_start({ms})"),
+                            );
+                        }
+                        "profile_sample_stop" => {
+                            return ("int64_t".into(), "mako_profile_sample_stop()".into());
+                        }
+                        "profile_sample_cpu_us" => {
+                            return ("int64_t".into(), "mako_profile_sample_cpu_us()".into());
+                        }
+                        "profile_sample_wall_ns" => {
+                            return ("int64_t".into(), "mako_profile_sample_wall_ns()".into());
+                        }
+                        "profile_samples_json" => {
+                            let tmp = self.fresh("psj");
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_profile_samples_json();"
+                            ));
+                            return ("MakoString".into(), tmp);
+                        }
                         "ecs_world_new" => {
                             let (_, cap) = self.emit_expr(&args[0]);
                             return ("int64_t".into(), format!("mako_ecs_world_new({cap})"));

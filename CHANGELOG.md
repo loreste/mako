@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Sampling CPU profiler seed
+
+- `profile_sample_clear` / `once` / `start` / `stop` / `count` / `len`
+- `profile_sample_cpu_us` / `profile_sample_wall_ns` / `profile_samples_json`
+- Cooperative stack capture always; POSIX `SIGPROF` + `setitimer(ITIMER_PROF)` when available
+- Tests: `examples/testing/profile_sample_test.mko`
+
 ### Debugger · OTLP · installer · actor/interface seeds
 
 - **Debugger depth:** source-line soft BPs (`debug_line_bp_*`), frame stack
