@@ -79,6 +79,7 @@ Last inventory: 2026-07-14 (**unique Mako surface** · pack/pull types · full m
 | Capturing closures (POD + string + struct env via `MakoFn`) | Done seed — `capturing_closure_test` · `struct_capture_test` |
 | Kick first-class `fn` values across crew (Send) | Done seed — `kick_fn_test` |
 | f-string format specs (`{n:02}`, hex, float prec, string width) | Done seed — `fstring_fmt_test` |
+| `fn_drop` / env free + debugger/task inspect seeds | Done seed — `fn_drop_debug_test` |
 | Book samples `mako check` / `run` | PASS — `docs/book/examples/book_*.mko` |
 | `mako test examples/testing` | PASS — **165 passed**, 0 failed |
 | `if init; cond { }` + both-branches-return body | Done — `examples/testing/if_init_test.mko` |

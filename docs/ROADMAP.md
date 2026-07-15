@@ -80,7 +80,7 @@ Metrics/prom + span-lite JSON are in; **depth seeds landed** (2026-07-14).
 1. ~~Full OpenTelemetry export (OTLP wire)~~ **Done seed** — `trace_export_otlp_json` / `metrics_export_otlp_json` (OTLP/HTTP JSON; not protobuf)  
 2. ~~CPU / memory / allocation / scheduler / lock-contention profiling~~ **Done seed** — `profile_snapshot_json`, `process_rss_bytes`, lock_wait counters  
 3. ~~Stack traces with source locations~~ **Done seed** — `stack_trace()` (symbolized via `backtrace_symbols`)  
-4. Debugger depth: locals, breakpoints, async task inspection — **open**  
+4. ~~Debugger depth~~ **Done seed** — `debug_break` / `tasks_inspect_json` / `task_done` / `task_id` (locals/breakpoints residual)  
 5. ~~Crash reports~~ **Done seed** — `crash_report_install` · ~~PGO/LTO workflow~~ **Done seed** — `MAKO_PGO_*` / `MAKO_NO_LTO` / howto  
 
 ### P3 — Install, distribution, portability
@@ -121,8 +121,9 @@ Metrics/prom + span-lite JSON are in; **depth seeds landed** (2026-07-14).
 
 **Still open (true residuals):**
 
-1. Mut-ref captures · move/lifetime depth · env free on drop  
+1. Mut-ref captures · move/lifetime depth · auto env drop on scope exit  
 2. Full printf verb parity in f-strings (use `fmt_sprintf*` for exotic cases)  
+3. Full debugger: source locals, real breakpoints, async frame walk  
 
 ### Language / stdlib residuals (lower priority)
 
@@ -260,7 +261,9 @@ Percentages are weighted; update when a task flips.
 - [x] Stack traces with symbols (`stack_trace`).
 - [x] Crash report install seed (`crash_report_install`).
 - [x] PGO/LTO workflow (`MAKO_PGO_GEN` / `MAKO_PGO_USE` / `MAKO_NO_LTO` · howto).
-- [ ] Debugger integration: locals, breakpoints, async task inspection.
+- [x] Debugger seed: `debug_break` / hits · `tasks_inspect_json` · `task_done` / `task_id` / `task_joined`.
+- [x] Closure env free: `fn_drop` / `fn_has_env` (+ generated drop_env for string fields).
+- [ ] Full debugger: source-level locals, real breakpoints, async frame walk.
 - [ ] Full OTLP protobuf + exporter HTTP client productization.
 - [ ] Sampling CPU profiler / continuous profilers.
 

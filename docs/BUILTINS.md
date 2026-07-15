@@ -2057,6 +2057,15 @@ Tests: `examples/testing/strong_log_test.mko`.
 | `trace_export_otlp_json` | `trace_export_otlp_json() -> string` | OTLP/HTTP JSON spans (seed) |
 | `trace_span_id` | `trace_span_id() -> string` | Current span id (16 hex chars) |
 | `stack_trace` | `stack_trace() -> string` | Symbolized backtrace |
+| `fn_drop` | `fn_drop(f: fn(…)) -> void` | Free capture env (if any) |
+| `fn_has_env` | `fn_has_env(f: fn(…)) -> int` | 1 if closure has env |
+| `task_done` | `task_done(j: Job) -> int` | 1 if task finished |
+| `task_joined` | `task_joined(j: Job) -> int` | 1 if joined |
+| `task_id` | `task_id(j: Job) -> int` | Registry id for inspect |
+| `tasks_inspect_json` | `tasks_inspect_json() -> string` | Active task snapshot JSON |
+| `debug_break` | `debug_break(label: string) -> int` | Soft breakpoint (log + count) |
+| `debug_break_hits` | `debug_break_hits() -> int` | Soft breakpoint hit count |
+| `debug_break_reset` | `debug_break_reset() -> int` | Reset hit counter |
 | `crash_report_install` | `crash_report_install(path: string) -> int` | Install crash signal handlers |
 | `crash_report_installed` | `crash_report_installed() -> int` | 1 if crash report installed |
 | `process_rss_bytes` | `process_rss_bytes() -> int` | Process RSS in bytes (−1 if N/A) |

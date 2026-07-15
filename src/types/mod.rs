@@ -3974,6 +3974,48 @@ impl TypeChecker {
             "crash_report_installed".into(),
             Type::Fn(vec![], Box::new(Type::Int)),
         );
+        // Closure env free + debugger / task inspect seeds.
+        fns.insert(
+            "fn_drop".into(),
+            Type::Fn(vec![Type::Fn(vec![], Box::new(Type::Int))], Box::new(Type::Void)),
+        );
+        // Overload: accept any fn value — use a loose type via special-case below if needed.
+        // Real typing: fn_drop is checked specially; register as taking a generic-ish.
+        fns.insert(
+            "fn_has_env".into(),
+            Type::Fn(
+                vec![Type::Fn(vec![], Box::new(Type::Int))],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "task_done".into(),
+            Type::Fn(vec![Type::Job(Box::new(Type::Int))], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "task_joined".into(),
+            Type::Fn(vec![Type::Job(Box::new(Type::Int))], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "task_id".into(),
+            Type::Fn(vec![Type::Job(Box::new(Type::Int))], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "tasks_inspect_json".into(),
+            Type::Fn(vec![], Box::new(Type::String)),
+        );
+        fns.insert(
+            "debug_break".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "debug_break_hits".into(),
+            Type::Fn(vec![], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "debug_break_reset".into(),
+            Type::Fn(vec![], Box::new(Type::Int)),
+        );
         fns.insert(
             "process_rss_bytes".into(),
             Type::Fn(vec![], Box::new(Type::Int)),
@@ -11682,6 +11724,47 @@ impl TypeChecker {
             }
             Expr::Call { callee, args } => {
                 if let Expr::Ident(name) = callee.as_ref() {
+                    // fn_drop / fn_has_env accept any fn value (arity-independent).
+                    if name == "fn_drop" {
+                        if args.len() != 1 {
+                            return Err(TypeError::new("fn_drop expects 1 argument"));
+                        }
+                        let t = self.check_expr(&args[0])?;
+                        if !matches!(t, Type::Fn(_, _)) {
+                            return Err(TypeError::new(format!(
+                                "fn_drop expects a function value, got {}",
+                                t.display()
+                            )));
+                        }
+                        return Ok(Type::Void);
+                    }
+                    if name == "fn_has_env" {
+                        if args.len() != 1 {
+                            return Err(TypeError::new("fn_has_env expects 1 argument"));
+                        }
+                        let t = self.check_expr(&args[0])?;
+                        if !matches!(t, Type::Fn(_, _)) {
+                            return Err(TypeError::new(format!(
+                                "fn_has_env expects a function value, got {}",
+                                t.display()
+                            )));
+                        }
+                        return Ok(Type::Int);
+                    }
+                    // task_* accept any Job[T]
+                    if name == "task_done" || name == "task_joined" || name == "task_id" {
+                        if args.len() != 1 {
+                            return Err(TypeError::new(format!("{name} expects 1 argument")));
+                        }
+                        let t = self.check_expr(&args[0])?;
+                        if !matches!(t, Type::Job(_)) {
+                            return Err(TypeError::new(format!(
+                                "{name} expects a Job, got {}",
+                                t.display()
+                            )));
+                        }
+                        return Ok(Type::Int);
+                    }
                     // API stability: `#[deprecated]` is a hard error at call sites.
                     if let Some(msg) = self.deprecated_fns.get(name) {
                         let detail = if msg.is_empty() {

@@ -8865,10 +8865,34 @@ impl Codegen {
             for (n, t) in pnames.iter().zip(pctys.iter()) {
                 params_cs.push(format!("{t} {n}"));
             }
-            // Single insert: insert_helper prepends, so typedef must ship with the body.
+            let drop_helper = format!("{helper}_drop");
+            let mut drop_frees = String::new();
+            for (src_name, cty) in &captures {
+                let field = mangle(src_name);
+                if cty == "MakoString" {
+                    drop_frees.push_str(&format!("    mako_str_free(e->{field});\n"));
+                } else if self.structs.contains_key(cty)
+                    || self.structs.values().any(|s| s.c_name == *cty)
+                {
+                    let sfields = self
+                        .structs
+                        .get(cty)
+                        .or_else(|| self.structs.values().find(|s| s.c_name == *cty))
+                        .map(|s| s.fields.clone())
+                        .unwrap_or_default();
+                    for (fname, ft) in &sfields {
+                        if ft == "MakoString" {
+                            drop_frees
+                                .push_str(&format!("    mako_str_free(e->{field}.{fname});\n"));
+                        }
+                    }
+                }
+            }
+            // Single insert: typedef + call helper + drop_env (insert_helper prepends).
             let helper_src = format!(
                 "typedef struct {{\n{fields}\n}} {env_ty};\n\
-                 static {ret_c} {helper}({}) {{\n    {env_ty} *e = ({env_ty}*)env;\n    return ({body_c});\n}}\n",
+                 static {ret_c} {helper}({}) {{\n    {env_ty} *e = ({env_ty}*)env;\n    return ({body_c});\n}}\n\
+                 static void {drop_helper}(void *env) {{\n    {env_ty} *e = ({env_ty}*)env;\n    if (!e) return;\n{drop_frees}    free(e);\n}}\n",
                 params_cs.join(", ")
             );
             self.insert_helper(&helper_src);
@@ -8884,22 +8908,20 @@ impl Codegen {
                 let field = mangle(src_name);
                 let val = mangle(src_name);
                 if cty == "MakoString" {
-                    // Capture by owned clone so the closure outlives the local.
                     self.line(&format!(
                         "{env_tmp}->{field} = mako_str_clone({val});"
                     ));
                 } else if self.structs.contains_key(cty)
                     || self.structs.values().any(|s| s.c_name == *cty)
                 {
-                    // Struct by value; clone string fields for ownership.
                     self.line(&format!("{env_tmp}->{field} = {val};"));
-                    let fields = self
+                    let sfields = self
                         .structs
                         .get(cty)
                         .or_else(|| self.structs.values().find(|s| s.c_name == *cty))
                         .map(|s| s.fields.clone())
                         .unwrap_or_default();
-                    for (fname, ft) in &fields {
+                    for (fname, ft) in &sfields {
                         if ft == "MakoString" {
                             self.line(&format!(
                                 "{env_tmp}->{field}.{fname} = mako_str_clone({val}.{fname});"
@@ -8912,7 +8934,7 @@ impl Codegen {
             }
             let tmp = self.fresh("fnv");
             self.line(&format!(
-                "MakoFn {tmp} = mako_fn_closure((void*){helper}, {env_tmp});"
+                "MakoFn {tmp} = mako_fn_closure((void*){helper}, {env_tmp}, {drop_helper});"
             ));
             ("MakoFn".into(), tmp)
         }
@@ -17216,6 +17238,52 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             let tmp = self.fresh("stk");
                             self.line(&format!("MakoString {tmp} = mako_stack_trace();"));
                             return ("MakoString".into(), tmp);
+                        }
+                        "fn_drop" => {
+                            let (_, f) = self.emit_expr(&args[0]);
+                            // Need address of MakoFn local; if expression is a temp, drop by copy.
+                            // Prefer &local when args[0] is Ident.
+                            if let Expr::Ident(n) = &args[0] {
+                                self.line(&format!("mako_fn_drop(&{});", mangle(n)));
+                            } else {
+                                let tmp = self.fresh("fnd");
+                                self.line(&format!("MakoFn {tmp} = {f};"));
+                                self.line(&format!("mako_fn_drop(&{tmp});"));
+                            }
+                            return ("void".into(), "/*void*/".into());
+                        }
+                        "fn_has_env" => {
+                            let (_, f) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_fn_has_env({f})"));
+                        }
+                        "task_done" => {
+                            let (_, t) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_task_done({t})"));
+                        }
+                        "task_joined" => {
+                            let (_, t) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_task_joined({t})"));
+                        }
+                        "task_id" => {
+                            let (_, t) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_task_id({t})"));
+                        }
+                        "tasks_inspect_json" => {
+                            let tmp = self.fresh("tij");
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_tasks_inspect_json();"
+                            ));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "debug_break" => {
+                            let (_, lab) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_debug_break({lab})"));
+                        }
+                        "debug_break_hits" => {
+                            return ("int64_t".into(), "mako_debug_break_hits()".into());
+                        }
+                        "debug_break_reset" => {
+                            return ("int64_t".into(), "mako_debug_break_reset()".into());
                         }
                         "crash_report_install" => {
                             let (_, p) = self.emit_expr(&args[0]);

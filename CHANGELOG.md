@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Language / runtime — fn_drop + debugger/task inspect
+
+- **`fn_drop(f)` / `fn_has_env(f)`** — free capture env via generated `drop_env`
+  (string fields freed); bare fns are no-ops.
+- **`MakoFn.drop_env`** third field on the fat pointer.
+- **Task inspect:** `task_done` / `task_joined` / `task_id` ·
+  `tasks_inspect_json()` (registry of active tasks).
+- **Soft breakpoints:** `debug_break(label)` · `debug_break_hits` /
+  `debug_break_reset` (log + counter, no trap).
+- Tests: `fn_drop_debug_test`.
+
 ### Language — struct captures + kick fn values
 
 - **Struct captures:** closures may close over local structs by value; string

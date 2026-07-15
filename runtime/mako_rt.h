@@ -110,24 +110,47 @@ static inline void mako_runtime_stats_reset(void) {
 /* ---- First-class function values (fat pointer: code + optional env) ----
  * Non-capturing: env == NULL, fn is ret (*)(args...).
  * Capturing: env is heap env struct, fn is ret (*)(void *env, args...).
+ * drop_env frees the env (and nested string clones) when present.
  */
 typedef struct {
     void *fn;
     void *env;
+    void (*drop_env)(void *);
 } MakoFn;
 
 static inline MakoFn mako_fn_bare(void *fn) {
     MakoFn f;
     f.fn = fn;
     f.env = NULL;
+    f.drop_env = NULL;
     return f;
 }
 
-static inline MakoFn mako_fn_closure(void *fn, void *env) {
+static inline MakoFn mako_fn_closure(void *fn, void *env, void (*drop_env)(void *)) {
     MakoFn f;
     f.fn = fn;
     f.env = env;
+    f.drop_env = drop_env;
     return f;
+}
+
+/* Free capture env (if any). Safe on bare fns. After drop, f is bare. */
+static inline void mako_fn_drop(MakoFn *f) {
+    if (!f) return;
+    if (f->env) {
+        if (f->drop_env) {
+            f->drop_env(f->env);
+        } else {
+            free(f->env);
+        }
+        f->env = NULL;
+    }
+    f->drop_env = NULL;
+    /* keep f->fn so a dropped-but-bare call path still works if env was null */
+}
+
+static inline int64_t mako_fn_has_env(MakoFn f) {
+    return f.env != NULL ? 1 : 0;
 }
 
 /* ---- Strings (owned, null-terminated) ----
@@ -4561,7 +4584,142 @@ typedef struct {
     bool joined;
     bool cancelled_start; /* set if cancel before/during — cooperative */
     volatile int done;    /* 1 when trampoline finished (for timed join) */
+    int64_t debug_id;    /* registry id for task inspect (0 = unregistered) */
 } MakoTask;
+
+/* ---- Task inspect / debugger seed ---- */
+#define MAKO_TASK_REG_MAX 64
+typedef struct {
+    MakoTask *task;
+    int64_t id;
+    int active;
+} MakoTaskRegSlot;
+static MakoTaskRegSlot mako_task_reg[MAKO_TASK_REG_MAX];
+static atomic_llong mako_task_id_seq = 1;
+static atomic_llong mako_debug_break_count = 0;
+
+static inline void mako_task_reg_add(MakoTask *t) {
+    if (!t) return;
+    int64_t id = (int64_t)atomic_fetch_add_explicit(&mako_task_id_seq, 1, memory_order_relaxed);
+    t->debug_id = id;
+    for (int i = 0; i < MAKO_TASK_REG_MAX; i++) {
+        if (!mako_task_reg[i].active) {
+            mako_task_reg[i].task = t;
+            mako_task_reg[i].id = id;
+            mako_task_reg[i].active = 1;
+            return;
+        }
+    }
+}
+
+static inline void mako_task_reg_remove(MakoTask *t) {
+    if (!t || t->debug_id == 0) return;
+    for (int i = 0; i < MAKO_TASK_REG_MAX; i++) {
+        if (mako_task_reg[i].active && mako_task_reg[i].id == t->debug_id) {
+            mako_task_reg[i].active = 0;
+            mako_task_reg[i].task = NULL;
+            return;
+        }
+    }
+}
+
+static inline int64_t mako_task_done(MakoTask *t) {
+    if (!t) return 1;
+#if defined(__STDC_NO_ATOMICS__)
+    return t->done ? 1 : 0;
+#else
+    return __atomic_load_n(&t->done, __ATOMIC_ACQUIRE) ? 1 : 0;
+#endif
+}
+
+static inline int64_t mako_task_joined(MakoTask *t) {
+    return (t && t->joined) ? 1 : 0;
+}
+
+static inline int64_t mako_task_id(MakoTask *t) {
+    return t ? t->debug_id : 0;
+}
+
+/* JSON snapshot of registered (recently active) tasks. */
+static inline MakoString mako_tasks_inspect_json(void) {
+    size_t cap = 2048;
+    char *buf = (char *)malloc(cap);
+    if (!buf) {
+        fprintf(stderr, "mako: OOM in tasks_inspect_json\n");
+        abort();
+    }
+    size_t len = 0;
+    int n = snprintf(
+        buf, cap,
+        "{\"schema\":\"mako.tasks_inspect.v1\",\"tasks_spawned\":%lld,"
+        "\"tasks_joined\":%lld,\"tasks\":[",
+        atomic_load_explicit(&mako_rt_tasks_spawned, memory_order_relaxed),
+        atomic_load_explicit(&mako_rt_tasks_joined, memory_order_relaxed)
+    );
+    if (n < 0) n = 0;
+    len = (size_t)n;
+    int first = 1;
+    for (int i = 0; i < MAKO_TASK_REG_MAX; i++) {
+        if (!mako_task_reg[i].active || !mako_task_reg[i].task) continue;
+        MakoTask *t = mako_task_reg[i].task;
+        if (len + 160 >= cap) {
+            cap *= 2;
+            char *next = (char *)realloc(buf, cap);
+            if (!next) {
+                free(buf);
+                fprintf(stderr, "mako: OOM in tasks_inspect_json grow\n");
+                abort();
+            }
+            buf = next;
+        }
+        n = snprintf(
+            buf + len,
+            cap > len ? cap - len : 0,
+            "%s{\"id\":%" PRId64 ",\"done\":%d,\"joined\":%d}",
+            first ? "" : ",",
+            t->debug_id,
+            mako_task_done(t) ? 1 : 0,
+            t->joined ? 1 : 0
+        );
+        if (n > 0) len += (size_t)n;
+        first = 0;
+    }
+    if (len + 4 >= cap) {
+        cap = len + 8;
+        char *next = (char *)realloc(buf, cap);
+        if (!next) {
+            free(buf);
+            abort();
+        }
+        buf = next;
+    }
+    buf[len++] = ']';
+    buf[len++] = '}';
+    buf[len] = 0;
+    return (MakoString){buf, len};
+}
+
+/* Soft breakpoint seed: records a hit and logs to stderr (no trap). */
+static inline int64_t mako_debug_break(MakoString label) {
+    atomic_fetch_add_explicit(&mako_debug_break_count, 1, memory_order_relaxed);
+    fprintf(
+        stderr,
+        "mako debug_break: %.*s\n",
+        (int)(label.len > 200 ? 200 : label.len),
+        label.data ? label.data : ""
+    );
+    fflush(stderr);
+    return 1;
+}
+
+static inline int64_t mako_debug_break_hits(void) {
+    return atomic_load_explicit(&mako_debug_break_count, memory_order_relaxed);
+}
+
+static inline int64_t mako_debug_break_reset(void) {
+    atomic_store_explicit(&mako_debug_break_count, 0, memory_order_relaxed);
+    return 1;
+}
 
 /* MakoNursery — structured concurrency scope (Mako `crew` block).
  * Owns a set of spawned tasks. On scope exit, cancel_join cancels all tasks
@@ -4663,6 +4821,7 @@ static inline MakoTask *mako_spawn(MakoNursery *n, MakoTaskFn fn, void *arg) {
     t->joined = false;
     t->cancelled_start = n->cancelled;
     t->done = 0;
+    t->debug_id = 0;
     mako_rt_counter_inc(&mako_rt_tasks_spawned);
     if (n->cancelled) {
         /* do not start new work after cancel */
@@ -4672,6 +4831,7 @@ static inline MakoTask *mako_spawn(MakoNursery *n, MakoTaskFn fn, void *arg) {
         return t;
     }
     pthread_create(&t->thread, NULL, mako_task_trampoline, t);
+    mako_task_reg_add(t);
     return t;
 }
 
@@ -4681,6 +4841,7 @@ static inline void *mako_await(MakoTask *t) {
         t->joined = true;
         t->done = 1;
         mako_rt_counter_inc(&mako_rt_tasks_joined);
+        mako_task_reg_remove(t);
     }
     return t->result;
 }
@@ -4706,6 +4867,7 @@ static inline int64_t mako_await_timeout_ms(MakoTask *t, int64_t ms, int64_t *ou
             pthread_join(t->thread, &t->result);
             t->joined = true;
             mako_rt_counter_inc(&mako_rt_tasks_joined);
+            mako_task_reg_remove(t);
             if (out) *out = (int64_t)(intptr_t)t->result;
             return 1;
         }
@@ -4724,6 +4886,7 @@ static inline int64_t mako_await_timeout_ms(MakoTask *t, int64_t ms, int64_t *ou
         pthread_join(t->thread, &t->result);
         t->joined = true;
         mako_rt_counter_inc(&mako_rt_tasks_joined);
+        mako_task_reg_remove(t);
         if (out) *out = (int64_t)(intptr_t)t->result;
         return 1;
     }

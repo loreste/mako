@@ -1,0 +1,61 @@
+// fn_drop (env free) + debugger/task inspect seeds.
+
+fn apply(f: fn(int) -> int, x: int) -> int {
+    return f(x)
+}
+
+fn work(n: int) -> int {
+    return n * 2
+}
+
+fn TestFnDropBare() {
+    let f: fn(int) -> int = |x| x + 1
+    assert_eq(fn_has_env(f), 0)
+    fn_drop(f)
+    assert_eq(fn_has_env(f), 0)
+}
+
+fn TestFnDropCapturing() {
+    let n = 10
+    let f: fn(int) -> int = |x| x + n
+    assert_eq(fn_has_env(f), 1)
+    assert_eq(apply(f, 5), 15)
+    fn_drop(f)
+    assert_eq(fn_has_env(f), 0)
+}
+
+fn TestFnDropStringCapture() {
+    let tag = "mako"
+    let f: fn(int) -> int = |x| x + len(tag)
+    assert_eq(fn_has_env(f), 1)
+    assert_eq(f(1), 5)
+    fn_drop(f)
+    assert_eq(fn_has_env(f), 0)
+}
+
+fn TestDebugBreak() {
+    let _ = debug_break_reset()
+    assert_eq(debug_break_hits(), 0)
+    let _ = debug_break("checkpoint-a")
+    let _ = debug_break("checkpoint-b")
+    assert_eq(debug_break_hits(), 2)
+    let _ = debug_break_reset()
+    assert_eq(debug_break_hits(), 0)
+}
+
+fn TestTaskInspect() {
+    runtime_stats_reset()
+    crew c {
+        let j = c.kick(work(21))
+        // While running/registered, id is non-zero.
+        assert(task_id(j) > 0)
+        let snap = tasks_inspect_json()
+        assert(str_contains(snap, "mako.tasks_inspect.v1"))
+        assert(str_contains(snap, "tasks"))
+        assert_eq(j.join(), 42)
+        assert_eq(task_joined(j), 1)
+        assert_eq(task_done(j), 1)
+    }
+    let after = tasks_inspect_json()
+    assert(str_contains(after, "tasks_spawned"))
+}
