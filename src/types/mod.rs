@@ -6725,6 +6725,10 @@ impl TypeChecker {
         );
 
         fns.insert(
+            "detached_join_all".into(),
+            Type::Fn(vec![], Box::new(Type::Void)),
+        );
+        fns.insert(
             "await_timeout".into(),
             Type::Fn(
                 vec![Type::Job(Box::new(Type::Int)), Type::Int],
@@ -12587,6 +12591,28 @@ impl TypeChecker {
                         }
                         Ok(Type::Bool)
                     }
+                    (Type::Crew, "err_count") => {
+                        if !args.is_empty() {
+                            return Err(TypeError::new("crew.err_count takes no arguments"));
+                        }
+                        Ok(Type::Int)
+                    }
+                    (Type::Crew, "first_err") => {
+                        if !args.is_empty() {
+                            return Err(TypeError::new("crew.first_err takes no arguments"));
+                        }
+                        Ok(Type::String)
+                    }
+                    (Type::Crew, "wait") => {
+                        if !args.is_empty() {
+                            return Err(TypeError::new("crew.wait takes no arguments"));
+                        }
+                        // Ok(err_count) or Err(first child error message)
+                        Ok(Type::Result(
+                            Box::new(Type::Int),
+                            Box::new(Type::String),
+                        ))
+                    }
                     (Type::Job(inner), "join") => {
                         if !args.is_empty() {
                             return Err(TypeError::new("job.join takes no arguments")
@@ -13623,11 +13649,14 @@ impl TypeChecker {
                 Ok(Type::Void)
             }
             Expr::Kick { crew, expr } => {
-                let Some((cty, _)) = self.lookup(crew).cloned() else {
-                    return Err(TypeError::new(format!("unknown crew `{crew}`")));
-                };
-                if cty != Type::Crew {
-                    return Err(TypeError::new(format!("`{crew}` is not a crew")));
+                // Process-scoped detach uses a sentinel crew name (no local nursery).
+                if crew != "__detached__" {
+                    let Some((cty, _)) = self.lookup(crew).cloned() else {
+                        return Err(TypeError::new(format!("unknown crew `{crew}`")));
+                    };
+                    if cty != Type::Crew {
+                        return Err(TypeError::new(format!("`{crew}` is not a crew")));
+                    }
                 }
                 let t = self.check_expr(expr)?;
                 // Send-like seed after typecheck (no second check_expr — avoids double hold moves).

@@ -1,0 +1,22 @@
+// Detached tasks: process-scoped nursery joined via detached_join_all.
+
+fn work() -> int {
+    return 1
+}
+
+fn TestDetachAndJoin() {
+    detach work()
+    detach work()
+    // Join process-scoped detached tasks (no leak at process end of test).
+    detached_join_all()
+}
+
+fn TestDetachInsideCrew() {
+    crew t {
+        // Detached work is NOT joined by crew exit — only detached_join_all.
+        detach work()
+        let j = t.kick(work())
+        assert_eq(j.join(), 1)
+    }
+    detached_join_all()
+}

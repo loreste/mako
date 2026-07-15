@@ -80,6 +80,8 @@ pub struct ConstDef {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ActorDef {
     pub name: String,
+    /// Optional owned state fields (`n: int = 0`); accessed as `self.n` in receives.
+    pub fields: Vec<(String, TypeExpr, Option<Expr>)>,
     pub receives: Vec<ReceiveArm>,
 }
 

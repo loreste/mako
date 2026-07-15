@@ -26,6 +26,34 @@ fn main() {
 
 Jobs cannot escape their crew. When the block ends, all kicked work has joined.
 
+### Child errors
+
+When a kicked function returns `Result[T, string]` and you `join` it, any `Err`
+is also recorded on the crew:
+
+```mko
+crew t {
+    let j = t.kick(maybe_fail())
+    let _ = j.join()
+    match t.wait() {
+        Ok(_) => { /* no child errors */ },
+        Err(msg) => print(msg),  // first Err message
+    }
+    // t.err_count() / t.first_err() also available after joins
+}
+```
+
+### Detach (process-scoped)
+
+`detach f()` runs outside the enclosing crew join (still tracked). Always
+`detached_join_all()` before process exit (or in tests) so work is not leaked:
+
+```mko
+detach background_work()
+// …
+detached_join_all()
+```
+
 ## Channels
 
 Communicate between jobs using typed channels. Element types: int family, bool,

@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Runtime trust — P1 crew errors, detach, actors
+
+- **Child errors:** joining a kicked `Result[_, string]` records `Err` on the
+  crew; `crew.err_count` / `first_err` / `wait()` → `Result[int, string]`.
+- **`detach f()`** + **`detached_join_all()`** — process-scoped nursery (not
+  joined by enclosing crew exit).
+- **Actors:** optional state fields + `self.x` in `receive` bodies; loop returns
+  `n`/`count`/`value` when present. Tests: `crew_error_prop_test`, `detach_test`,
+  `actor_test`.
+
 ### Runtime trust — portable timeouts (P1 seed)
 
 - **`ch.send_timeout(v, ms)` / `ch.try_send(v)`** — timed / non-blocking int send.

@@ -537,15 +537,48 @@ impl Parser {
         self.expect(TokenKind::Actor)?;
         let name = self.expect_ident()?;
         self.expect(TokenKind::LBrace)?;
+        let mut fields = Vec::new();
         let mut receives = Vec::new();
         while !matches!(self.peek_kind(), TokenKind::RBrace) {
-            self.expect(TokenKind::Receive)?;
-            let message = self.expect_ident()?;
-            let body = self.parse_block()?;
-            receives.push(ReceiveArm { message, body });
+            if matches!(self.peek_kind(), TokenKind::Receive) {
+                self.bump();
+                let message = self.expect_ident()?;
+                let body = self.parse_block()?;
+                receives.push(ReceiveArm { message, body });
+                continue;
+            }
+            // State field: `n: int` / `n: int = 0` / optional leading `mut`
+            if matches!(self.peek_kind(), TokenKind::Mut) {
+                self.bump();
+            }
+            let fname = self.expect_ident()?;
+            let ty = if matches!(self.peek_kind(), TokenKind::Colon) {
+                self.bump();
+                self.parse_type()?
+            } else if self.peek_is_type_start() {
+                self.parse_type()?
+            } else {
+                return Err(self.err(format!(
+                    "actor field `{fname}` needs a type (or use `receive Msg {{ … }}`)"
+                )));
+            };
+            let default = if matches!(self.peek_kind(), TokenKind::Assign) {
+                self.bump();
+                Some(self.parse_expr()?)
+            } else {
+                None
+            };
+            fields.push((fname, ty, default));
+            if matches!(self.peek_kind(), TokenKind::Comma) {
+                self.bump();
+            }
         }
         self.expect(TokenKind::RBrace)?;
-        Ok(ActorDef { name, receives })
+        Ok(ActorDef {
+            name,
+            fields,
+            receives,
+        })
     }
 
     fn parse_interface(&mut self) -> Result<InterfaceDef, ParseError> {
@@ -1097,6 +1130,9 @@ impl Parser {
         // Contextual `go f()` — schedule a call onto the enclosing crew.
         if self.at_go_kw() {
             return self.parse_go();
+        }
+        if self.at_detach_kw() {
+            return self.parse_detach();
         }
         match self.peek_kind() {
             TokenKind::Hold | TokenKind::Share | TokenKind::Let | TokenKind::Var => self.parse_let(),
@@ -2435,6 +2471,35 @@ impl Parser {
             crew,
             expr: Box::new(call),
         }))
+    }
+
+    /// `detach f()` — spawn on the process-scoped detached nursery (not joined by
+    /// the enclosing crew). Join later with `detached_join_all()`.
+    fn parse_detach(&mut self) -> Result<Stmt, ParseError> {
+        self.bump(); // `detach`
+        let call = self.parse_expr()?;
+        if !matches!(call, Expr::Call { .. } | Expr::Method { .. }) {
+            return Err(self.err(
+                "`detach` requires a function call, e.g. `detach worker()`".into(),
+            ));
+        }
+        if matches!(self.peek_kind(), TokenKind::Semicolon) {
+            self.bump();
+        }
+        Ok(Stmt::Expr(Expr::Kick {
+            crew: "__detached__".into(),
+            expr: Box::new(call),
+        }))
+    }
+
+    fn at_detach_kw(&self) -> bool {
+        if !matches!(self.peek_kind(), TokenKind::Ident(s) if s == "detach") {
+            return false;
+        }
+        matches!(
+            self.tokens.get(self.pos + 1).map(|t| &t.kind),
+            Some(TokenKind::Ident(_))
+        )
     }
 
     /// Go-style `switch`, desugared to an if/else-if chain — more faithful to Go

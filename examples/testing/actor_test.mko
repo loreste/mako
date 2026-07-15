@@ -1,0 +1,47 @@
+// Actor / receive seed with optional owned state (self.fields).
+
+actor Session {
+    receive Invite {
+        let _ = 1
+    }
+    receive Timer {
+        let _ = 2
+    }
+    receive Bye {
+        let _ = 0
+    }
+}
+
+actor Counter {
+    n: int = 0
+    receive Inc {
+        self.n = self.n + 1
+    }
+    receive Bye {
+        let _ = 0
+    }
+}
+
+fn TestActorMailboxLoop() {
+    let session = Session_spawn()
+    crew t {
+        let loopj = t.kick(Session_loop(session))
+        assert(Session_send(session, Session_Invite()))
+        assert(Session_send(session, Session_Timer()))
+        assert(Session_send(session, Session_Bye()))
+        assert_eq(loopj.join(), 0)
+    }
+}
+
+fn TestActorOwnedState() {
+    let c = Counter_spawn()
+    crew t {
+        let loopj = t.kick(Counter_loop(c))
+        assert(Counter_send(c, Counter_Inc()))
+        assert(Counter_send(c, Counter_Inc()))
+        assert(Counter_send(c, Counter_Inc()))
+        assert(Counter_send(c, Counter_Bye()))
+        // loop returns self.n when field is named n
+        assert_eq(loopj.join(), 3)
+    }
+}

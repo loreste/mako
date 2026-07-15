@@ -50,6 +50,8 @@ pub struct Codegen {
     test_fns: Option<Vec<String>>,
     /// When inside `arena name { }`, C name of the arena local (for arena-backed make).
     current_arena: Option<String>,
+    /// Nested `crew` names (innermost last) for child-error note_err.
+    crew_stack: Vec<String>,
     /// Interface name → method names (for `recv.method(...)` → `Iface_method(...)`).
     interfaces: Vec<(String, Vec<String>)>,
     /// Pending `defer` bodies for the current function (LIFO on exit/return).
@@ -172,6 +174,7 @@ impl Codegen {
             const_ints: HashMap::new(),
             test_fns: None,
             current_arena: None,
+            crew_stack: Vec::new(),
             interfaces: Vec::new(),
             defer_stack: Vec::new(),
             share_scopes: Vec::new(),
@@ -10247,9 +10250,11 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
             Stmt::Crew { name, body } => {
                 self.locals.insert(name.clone(), "MakoNursery".into());
                 self.line(&format!("MakoNursery {name} = mako_nursery_new();"));
+                self.crew_stack.push(name.clone());
                 for s in &body.stmts {
                     self.emit_stmt(s);
                 }
+                self.crew_stack.pop();
                 self.line(&format!("mako_nursery_cancel_join(&{name});"));
             }
             Stmt::Arena { name, body } => {
@@ -15947,6 +15952,10 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                                 "MakoString {tmp} = mako_json_object_from_map_ss({m});"
                             ));
                             return ("MakoString".into(), tmp);
+                        }
+                        "detached_join_all" => {
+                            self.line("mako_detached_join_all();");
+                            return ("void".into(), "/*void*/".into());
                         }
                         "actor_spawn" => {
                             let (_, cap) = self.emit_expr(&args[0]);
@@ -25519,9 +25528,15 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             let helper = format!("__kick_{}_{}", mangle(fname), self.tmp);
                             self.tmp += 1;
                             self.emit_spawn_helper_typed(&helper, fname, &param_tys);
-                            self.line(&format!(
-                                "MakoTask *{task} = mako_spawn(&{crew}, {helper}, {arg_name});"
-                            ));
+                            if crew == "__detached__" {
+                                self.line(&format!(
+                                    "MakoTask *{task} = mako_detach_spawn({helper}, {arg_name});"
+                                ));
+                            } else {
+                                self.line(&format!(
+                                    "MakoTask *{task} = mako_spawn(&{crew}, {helper}, {arg_name});"
+                                ));
+                            }
                             let ret = self
                                 .fn_rets
                                 .get(fname)
@@ -25805,6 +25820,31 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         "bool".into(),
                         format!("(mako_nursery_cancelled(&{rv}) != 0)"),
                     ),
+                    "err_count" => {
+                        let tmp = self.fresh("nec");
+                        self.line(&format!(
+                            "int64_t {tmp} = mako_nursery_err_count(&{rv});"
+                        ));
+                        ("int64_t".into(), tmp)
+                    }
+                    "first_err" => {
+                        let tmp = self.fresh("nfe");
+                        self.line(&format!(
+                            "MakoString {tmp} = mako_nursery_first_err(&{rv});"
+                        ));
+                        ("MakoString".into(), tmp)
+                    }
+                    "wait" => {
+                        // Join pending tasks; Ok(err_count) or Err(first_err).
+                        let tmp = self.fresh("nwt");
+                        self.line(&format!("mako_nursery_join_pending(&{rv});"));
+                        self.line(&format!("MakoResultInt {tmp};"));
+                        self.line(&format!(
+                            "if (mako_nursery_ok(&{rv})) {{ {tmp} = mako_ok_int(mako_nursery_err_count(&{rv})); }} \
+                             else {{ {tmp} = mako_err_int(mako_nursery_first_err(&{rv})); }}"
+                        ));
+                        ("MakoResultInt".into(), tmp)
+                    }
                     "join" => {
                         let ret_ty = match receiver.as_ref() {
                             Expr::Ident(n) => self.job_rets.get(n).cloned(),
@@ -27341,6 +27381,12 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
             self.line(&format!(
                 "if ({p}) {{ {tmp} = *{p}; free({p}); }} else {{ memset(&{tmp}, 0, sizeof({tmp})); {tmp}.ok = false; }}"
             ));
+            // Structured child error: record first Err into enclosing crew nursery.
+            if let Some(crew) = self.crew_stack.last() {
+                self.line(&format!(
+                    "if (!{tmp}.ok) {{ mako_nursery_note_err(&{crew}, {tmp}.err); }}"
+                ));
+            }
             if let Some(ok) = self.job_ok_kinds.get(task).cloned() {
                 self.result_ok_kinds.insert(tmp.clone(), ok);
             }
