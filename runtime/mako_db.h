@@ -1673,13 +1673,30 @@ static inline void mako_sql_copy_str_param(char *dst, size_t cap, MakoString s) 
 }
 
 /* Max placeholder index from SQL: max $N, or count of `?` (capped at 4 for str4).
- * Empty string "" is a VALID bind value — do not infer arity from trailing empties. */
+ * Empty string "" is a VALID bind value — do not infer arity from trailing empties.
+ * Ignores $ and ? inside single-quoted string literals ('' escape). */
 static inline int mako_sql_placeholder_arity(MakoString sql) {
     if (!sql.data || sql.len == 0) return 0;
     int max_d = 0;
     int qmarks = 0;
+    int in_str = 0;
     for (size_t i = 0; i < sql.len; i++) {
         char c = sql.data[i];
+        if (in_str) {
+            if (c == '\'') {
+                /* SQL escape: '' inside string */
+                if (i + 1 < sql.len && sql.data[i + 1] == '\'') {
+                    i++;
+                    continue;
+                }
+                in_str = 0;
+            }
+            continue;
+        }
+        if (c == '\'') {
+            in_str = 1;
+            continue;
+        }
         if (c == '?') {
             qmarks++;
             continue;

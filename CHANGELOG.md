@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Adversarial hardening (SIP NAT + SDP + SQL)
+
+- **Preserve `;maddr`** in `via_fix_source` (only strip received/rport) — RFC 3261 §18.2.2.
+- **SDP rewrite:** `sdp_replace_connection_addr` upgrades `IP4`↔`IP6` with the new address.
+- **SQL arity:** ignore `$`/`?` inside single-quoted string literals.
+- Extra adversarial coverage in `sip_test` (maddr+fix_source, v4→v6 rewrite).
+
 ### SDP (RFC 4566) proxy surface
 
 - Media-level parse: `sdp_media_formats`, `sdp_media_connection`/`_addr` (inheritance),

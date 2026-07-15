@@ -182,6 +182,12 @@ fn TestSdpProxyRewrite() {
     let cand = sdp_attr_candidate(1, 1, "UDP", 2130706431, "192.0.2.1", 4000, "host")
     assert(str_contains(cand, "a=candidate:"))
     assert(str_contains(cand, "typ host"))
+    // v4 -> v6 rewrite upgrades addrtype
+    let v4 = sdp_build_audio("-", "s", "192.0.2.1", 4000, "0")
+    let v6 = sdp_replace_connection_addr(v4, "2001:db8::9")
+    assert(str_contains(sdp_connection(v6), "IP6"))
+    assert_eq_str(sdp_connection_addr(v6), "2001:db8::9")
+    assert_eq(sdp_connection_is_ip6(v6), 1)
 }
 
 fn TestSipUdpRoundtrip() {
@@ -311,6 +317,12 @@ fn TestSipViaMaddrAndDefaultPort() {
     let tls = "SIP/2.0/TLS proxy.example;branch=z9hG4bKt"
     assert_eq_str(sip_via_transport(tls), "TLS")
     assert_eq(sip_via_response_port(tls), 5061)
+    // maddr must survive via_fix_source rewrite (do not strip)
+    let with_rport = "SIP/2.0/UDP 192.0.2.1:5060;branch=z9hG4bKm;maddr=224.0.1.75;rport"
+    let fixed = sip_via_fix_source(with_rport, "10.0.0.1", 5000)
+    assert_eq_str(sip_via_maddr(fixed), "224.0.1.75")
+    assert_eq_str(sip_via_response_host(fixed), "224.0.1.75")
+    assert_eq(sip_via_rport(fixed), 5000)
 }
 
 fn TestSipViaIpv6() {

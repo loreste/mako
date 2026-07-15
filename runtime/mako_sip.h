@@ -635,7 +635,8 @@ static inline MakoString mako_sip_via_value(
 
 /* ---- Via NAT (RFC 3261 §18.2 + RFC 3581 symmetric response routing) ---- */
 
-/* Strip existing ;received=… and ;rport[=…] (and ;maddr=…) for clean rewrite. */
+/* Strip only ;received=… and ;rport[=…] for rewrite.
+ * Preserve ;maddr= (RFC 3261 §18.2.2 response routing) and other params. */
 static inline size_t mako_sip_via_strip_nat_params(const char *in, size_t inlen, char *out, size_t cap) {
     if (!in || !out || cap == 0) return 0;
     size_t o = 0;
@@ -649,8 +650,7 @@ static inline size_t mako_sip_via_strip_nat_params(const char *in, size_t inlen,
             int is_recv = plen >= 9 && mako_sip_ci_eq(p, 9, "received=", 9);
             int is_rport = (plen == 5 && mako_sip_ci_eq(p, 5, "rport", 5))
                 || (plen > 6 && mako_sip_ci_eq(p, 6, "rport=", 6));
-            int is_maddr = plen >= 6 && mako_sip_ci_eq(p, 6, "maddr=", 6);
-            if (is_recv || is_rport || is_maddr) {
+            if (is_recv || is_rport) {
                 i = j;
                 continue;
             }
@@ -2327,17 +2327,17 @@ static inline MakoString mako_sdp_append_line(MakoString sdp, MakoString line) {
     return (MakoString){d, o};
 }
 
-/* Replace address token on every c=IN IP4|IP6 … and o= … addr (NAT/proxy rewrite). */
+/* Replace address on every c= and o= line; set addrtype to IP4/IP6 to match new_addr. */
 static inline MakoString mako_sdp_replace_connection_addr(MakoString sdp, MakoString new_addr) {
     if (!sdp.data || !new_addr.data || new_addr.len == 0)
         return sdp.data ? mako_sip_slice_to_str(sdp.data, sdp.len) : mako_str_from_cstr("");
-    /* Detect IP6 if new_addr has ':' */
     int ip6 = 0;
     for (size_t k = 0; k < new_addr.len; k++)
         if (new_addr.data[k] == ':') {
             ip6 = 1;
             break;
         }
+    const char *atype = ip6 ? "IP6" : "IP4";
     size_t cap = sdp.len + new_addr.len * 8 + 64;
     char *d = (char *)malloc(cap);
     if (!d) return mako_str_from_cstr("");
@@ -2357,64 +2357,59 @@ static inline MakoString mako_sdp_replace_connection_addr(MakoString sdp, MakoSt
         if (content_end > ls + 2) {
             char t = sdp.data[ls];
             if ((t == 'c' || t == 'o') && sdp.data[ls + 1] == '=') {
-                /* rebuild line with new address */
-                MakoString line = {(char *)(sdp.data + ls + 2), content_end - ls - 2};
-                /* find last whitespace-separated field as address (or 3rd for c=, 6th for o=) */
-                int want = (t == 'c') ? 3 : 6;
-                size_t sp = 0, count = 0, as = 0, ae = 0;
-                for (size_t j = 0; j <= line.len; j++) {
-                    if (j == line.len || line.data[j] == ' ') {
+                /* Tokenize value; c=: net addrtype addr; o=: user id ver net addrtype addr */
+                const char *val = sdp.data + ls + 2;
+                size_t vlen = content_end - ls - 2;
+                size_t tok_s[8], tok_e[8];
+                int nt = 0;
+                size_t sp = 0;
+                for (size_t j = 0; j <= vlen && nt < 8; j++) {
+                    if (j == vlen || val[j] == ' ') {
                         if (j > sp) {
-                            count++;
-                            if (count == want) {
-                                as = sp;
-                                ae = j;
-                                /* if c= has /ttl, only replace before / */
-                                if (t == 'c') {
-                                    for (size_t x = as; x < ae; x++) {
-                                        if (line.data[x] == '/') {
-                                            ae = x;
-                                            break;
-                                        }
-                                    }
-                                }
-                            }
+                            tok_s[nt] = sp;
+                            tok_e[nt] = j;
+                            nt++;
                         }
                         sp = j + 1;
                     }
                 }
-                if (count >= want && o + line.len + new_addr.len + 16 < cap) {
+                int addr_i = (t == 'c') ? 2 : 5;
+                int type_i = (t == 'c') ? 1 : 4;
+                if (nt > addr_i && o + vlen + new_addr.len + 16 < cap) {
                     d[o++] = t;
                     d[o++] = '=';
-                    if (as > 0) {
-                        memcpy(d + o, line.data, as);
-                        o += as;
-                    }
-                    /* optional IP4/IP6 type fix on c=/o= */
-                    if (t == 'c' || t == 'o') {
-                        /* leave nettype/addrtype as in original prefix */
-                    }
-                    memcpy(d + o, new_addr.data, new_addr.len);
-                    o += new_addr.len;
-                    /* suffix after old address (e.g. /ttl) */
-                    size_t old_ae = as;
-                    sp = 0;
-                    count = 0;
-                    for (size_t j = 0; j <= line.len; j++) {
-                        if (j == line.len || line.data[j] == ' ') {
-                            if (j > sp) {
-                                count++;
-                                if (count == want) {
-                                    old_ae = j;
-                                    break;
+                    for (int ti = 0; ti < nt; ti++) {
+                        if (ti > 0) d[o++] = ' ';
+                        if (ti == type_i) {
+                            /* Force IP4/IP6 only when original looked like IP* */
+                            size_t tl = tok_e[ti] - tok_s[ti];
+                            if (tl >= 3 && (val[tok_s[ti]] == 'I' || val[tok_s[ti]] == 'i') &&
+                                (val[tok_s[ti] + 1] == 'P' || val[tok_s[ti] + 1] == 'p')) {
+                                memcpy(d + o, atype, 3);
+                                o += 3;
+                            } else {
+                                memcpy(d + o, val + tok_s[ti], tl);
+                                o += tl;
+                            }
+                        } else if (ti == addr_i) {
+                            /* drop /ttl from old; append new addr only */
+                            memcpy(d + o, new_addr.data, new_addr.len);
+                            o += new_addr.len;
+                            /* preserve /ttl if present on c= */
+                            if (t == 'c') {
+                                size_t old = tok_s[ti];
+                                while (old < tok_e[ti] && val[old] != '/') old++;
+                                if (old < tok_e[ti]) {
+                                    size_t sl = tok_e[ti] - old;
+                                    memcpy(d + o, val + old, sl);
+                                    o += sl;
                                 }
                             }
-                            sp = j + 1;
+                        } else {
+                            size_t tl = tok_e[ti] - tok_s[ti];
+                            memcpy(d + o, val + tok_s[ti], tl);
+                            o += tl;
                         }
-                    }
-                    if (old_ae < line.len) {
-                        memcpy(d + o, line.data + old_ae, line.len - old_ae);
-                        o += line.len - old_ae;
                     }
                     if (is_crlf) {
                         d[o++] = '\r';
@@ -2423,7 +2418,6 @@ static inline MakoString mako_sdp_replace_connection_addr(MakoString sdp, MakoSt
                         d[o++] = '\n';
                     }
                     rewritten = 1;
-                    (void)ip6;
                 }
             }
         }
