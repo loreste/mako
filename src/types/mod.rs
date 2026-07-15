@@ -2189,7 +2189,21 @@ impl TypeChecker {
             ),
         );
         fns.insert(
+            "sip_via_value_rport".into(),
+            Type::Fn(
+                vec![Type::String, Type::String, Type::Int, Type::String],
+                Box::new(Type::String),
+            ),
+        );
+        fns.insert(
             "sip_via_add_received".into(),
+            Type::Fn(
+                vec![Type::String, Type::String, Type::Int],
+                Box::new(Type::String),
+            ),
+        );
+        fns.insert(
+            "sip_via_fix_source".into(),
             Type::Fn(
                 vec![Type::String, Type::String, Type::Int],
                 Box::new(Type::String),
@@ -2197,6 +2211,44 @@ impl TypeChecker {
         );
         fns.insert("sip_via_host".into(), Type::Fn(vec![Type::String], Box::new(Type::String)));
         fns.insert("sip_via_port".into(), Type::Fn(vec![Type::String], Box::new(Type::Int)));
+        fns.insert("sip_via_has_rport".into(), Type::Fn(vec![Type::String], Box::new(Type::Int)));
+        fns.insert("sip_via_rport".into(), Type::Fn(vec![Type::String], Box::new(Type::Int)));
+        fns.insert(
+            "sip_via_received".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::String)),
+        );
+        fns.insert("sip_via_maddr".into(), Type::Fn(vec![Type::String], Box::new(Type::String)));
+        fns.insert(
+            "sip_via_transport".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::String)),
+        );
+        fns.insert(
+            "sip_via_response_host".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::String)),
+        );
+        fns.insert(
+            "sip_via_response_port".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "sip_via_response_addr".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::String)),
+        );
+        fns.insert(
+            "sip_msg_fix_top_via".into(),
+            Type::Fn(
+                vec![Type::String, Type::String, Type::Int],
+                Box::new(Type::String),
+            ),
+        );
+        fns.insert(
+            "sip_msg_response_host".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::String)),
+        );
+        fns.insert(
+            "sip_msg_response_port".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
         fns.insert(
             "sip_record_route".into(),
             Type::Fn(

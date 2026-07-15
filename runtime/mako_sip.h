@@ -633,7 +633,9 @@ static inline MakoString mako_sip_via_value(
     return (MakoString){d, (size_t)w};
 }
 
-/* Strip existing ;received=… and ;rport[=…] params (RFC 3581 rewrite). */
+/* ---- Via NAT (RFC 3261 §18.2 + RFC 3581 symmetric response routing) ---- */
+
+/* Strip existing ;received=… and ;rport[=…] (and ;maddr=…) for clean rewrite. */
 static inline size_t mako_sip_via_strip_nat_params(const char *in, size_t inlen, char *out, size_t cap) {
     if (!in || !out || cap == 0) return 0;
     size_t o = 0;
@@ -647,7 +649,8 @@ static inline size_t mako_sip_via_strip_nat_params(const char *in, size_t inlen,
             int is_recv = plen >= 9 && mako_sip_ci_eq(p, 9, "received=", 9);
             int is_rport = (plen == 5 && mako_sip_ci_eq(p, 5, "rport", 5))
                 || (plen > 6 && mako_sip_ci_eq(p, 6, "rport=", 6));
-            if (is_recv || is_rport) {
+            int is_maddr = plen >= 6 && mako_sip_ci_eq(p, 6, "maddr=", 6);
+            if (is_recv || is_rport || is_maddr) {
                 i = j;
                 continue;
             }
@@ -658,84 +661,104 @@ static inline size_t mako_sip_via_strip_nat_params(const char *in, size_t inlen,
     return o;
 }
 
-/* Via value with RFC 3581 NAT params: ;rport[=N] and optional ;received=IP.
- * rport < 0 → omit; rport == 0 → bare ;rport (UAC request); rport > 0 → ;rport=N (response).
- * Param order after branch: ;received=… then ;rport… (common 3581 practice). */
-static inline MakoString mako_sip_via_value_nat(
-    MakoString transport,
-    MakoString host,
-    int64_t port,
-    MakoString branch,
-    MakoString received,
-    int64_t rport
+/* Find Via parameter; returns 1 if present.
+ * val_start/val_len: value after '=', or (NULL,0) for flag params (bare ;rport).
+ * param_start/param_end: full ";name[=value]" span in via for rewrites. */
+static inline int mako_sip_via_find_param(
+    MakoString via,
+    const char *pname,
+    size_t pnlen,
+    const char **val_start,
+    size_t *val_len,
+    size_t *param_start,
+    size_t *param_end
 ) {
-    MakoString base = mako_sip_via_value(transport, host, port, branch);
-    size_t extra = (received.data ? received.len : 0) + 48;
-    size_t n = base.len + extra + 1;
-    char *d = (char *)malloc(n);
-    if (!d) {
-        mako_str_free(base);
+    if (val_start) *val_start = NULL;
+    if (val_len) *val_len = 0;
+    if (param_start) *param_start = 0;
+    if (param_end) *param_end = 0;
+    if (!via.data || !pname || pnlen == 0) return 0;
+    for (size_t i = 0; i < via.len; i++) {
+        if (via.data[i] != ';') continue;
+        size_t ns = i + 1;
+        size_t ne = ns;
+        while (ne < via.len && via.data[ne] != '=' && via.data[ne] != ';' && via.data[ne] != ' ' &&
+               via.data[ne] != '\t' && via.data[ne] != ',')
+            ne++;
+        if (ne - ns != pnlen) continue;
+        if (!mako_sip_ci_eq(via.data + ns, pnlen, pname, pnlen)) continue;
+        size_t pe = ne;
+        const char *vs = NULL;
+        size_t vl = 0;
+        if (ne < via.len && via.data[ne] == '=') {
+            vs = via.data + ne + 1;
+            pe = ne + 1;
+            while (pe < via.len && via.data[pe] != ';' && via.data[pe] != ' ' && via.data[pe] != '\t' &&
+                   via.data[pe] != ',')
+                pe++;
+            vl = pe - (ne + 1);
+        }
+        if (val_start) *val_start = vs;
+        if (val_len) *val_len = vl;
+        if (param_start) *param_start = i;
+        if (param_end) *param_end = pe;
+        return 1;
+    }
+    return 0;
+}
+
+/* 1 if Via has rport parameter (bare or valued) — UAC requested RFC 3581. */
+static inline int64_t mako_sip_via_has_rport(MakoString via) {
+    return mako_sip_via_find_param(via, "rport", 5, NULL, NULL, NULL, NULL) ? 1 : 0;
+}
+
+/* rport value: -1 absent, 0 present but bare (;rport), >0 ;rport=N. */
+static inline int64_t mako_sip_via_rport(MakoString via) {
+    const char *vs = NULL;
+    size_t vl = 0;
+    if (!mako_sip_via_find_param(via, "rport", 5, &vs, &vl, NULL, NULL)) return -1;
+    if (!vs || vl == 0) return 0;
+    int64_t p = 0;
+    for (size_t i = 0; i < vl; i++) {
+        if (vs[i] < '0' || vs[i] > '9') break;
+        p = p * 10 + (vs[i] - '0');
+    }
+    return p > 0 ? p : 0;
+}
+
+/* ;received= value, or empty if absent. Owned string. */
+static inline MakoString mako_sip_via_received(MakoString via) {
+    const char *vs = NULL;
+    size_t vl = 0;
+    if (!mako_sip_via_find_param(via, "received", 8, &vs, &vl, NULL, NULL) || !vs || vl == 0)
         return mako_str_from_cstr("");
-    }
-    size_t o = 0;
-    if (base.data && base.len) {
-        memcpy(d, base.data, base.len);
-        o = base.len;
-    }
-    mako_str_free(base);
-    /* RFC 3581: server adds received then rport value on responses */
-    if (received.data && received.len > 0) {
-        int w = snprintf(
-            d + o, n - o, ";received=%.*s",
-            (int)received.len, received.data
-        );
-        if (w > 0) o += (size_t)w;
-    }
-    if (rport == 0) {
-        if (o + 6 < n) {
-            memcpy(d + o, ";rport", 6);
-            o += 6;
-        }
-    } else if (rport > 0) {
-        int w = snprintf(d + o, n - o, ";rport=%lld", (long long)rport);
-        if (w > 0) o += (size_t)w;
-    }
-    d[o] = 0;
-    return (MakoString){d, o};
+    return mako_sip_slice_to_str(vs, vl);
 }
 
-/* RFC 3581: rewrite Via for response — set/replace ;received= and ;rport=src_port.
- * host = source IP; rport > 0 → ;rport=N; rport == 0 → bare ;rport; rport < 0 → leave rport out. */
-static inline MakoString mako_sip_via_add_received(MakoString via, MakoString host, int64_t rport) {
-    if (!via.data) return mako_str_from_cstr("");
-    char stripped[1024];
-    size_t sl = mako_sip_via_strip_nat_params(via.data, via.len, stripped, sizeof(stripped));
-    size_t n = sl + (host.data ? host.len : 0) + 48;
-    char *d = (char *)malloc(n);
-    if (!d) return mako_str_from_cstr("");
-    size_t o = 0;
-    if (sl) {
-        memcpy(d, stripped, sl);
-        o = sl;
-    }
-    if (host.data && host.len) {
-        int w = snprintf(d + o, n - o, ";received=%.*s", (int)host.len, host.data);
-        if (w > 0) o += (size_t)w;
-    }
-    if (rport > 0) {
-        int w = snprintf(d + o, n - o, ";rport=%lld", (long long)rport);
-        if (w > 0) o += (size_t)w;
-    } else if (rport == 0) {
-        if (o + 6 < n) {
-            memcpy(d + o, ";rport", 6);
-            o += 6;
-        }
-    }
-    d[o] = 0;
-    return (MakoString){d, o};
+/* ;maddr= value if present (RFC 3261 multicast / response override). Owned. */
+static inline MakoString mako_sip_via_maddr(MakoString via) {
+    const char *vs = NULL;
+    size_t vl = 0;
+    if (!mako_sip_via_find_param(via, "maddr", 5, &vs, &vl, NULL, NULL) || !vs || vl == 0)
+        return mako_str_from_cstr("");
+    return mako_sip_slice_to_str(vs, vl);
 }
 
-/* Top Via sent-by host (after transport). Supports IPv6 [addr]. */
+/* Case-insensitive host compare; strips IPv6 brackets for equality. */
+static inline int mako_sip_host_eq(const char *a, size_t al, const char *b, size_t bl) {
+    if (!a || !b) return 0;
+    if (al >= 2 && a[0] == '[' && a[al - 1] == ']') {
+        a++;
+        al -= 2;
+    }
+    if (bl >= 2 && b[0] == '[' && b[bl - 1] == ']') {
+        b++;
+        bl -= 2;
+    }
+    return mako_sip_ci_eq(a, al, b, bl);
+}
+
+/* Top Via sent-by host (after transport). Supports IPv6 [addr]. Owned. */
 static inline MakoString mako_sip_via_host(MakoString via) {
     if (!via.data || via.len < 8) return mako_str_from_cstr("");
     size_t i = 0;
@@ -758,7 +781,7 @@ static inline MakoString mako_sip_via_host(MakoString via) {
     return mako_sip_slice_to_str(via.data + start, i - start);
 }
 
-/* Top Via sent-by port, or 0 if absent (caller may default 5060 per RFC 3261). */
+/* Top Via sent-by port, or 0 if absent (default 5060 applied by response_port). */
 static inline int64_t mako_sip_via_port(MakoString via) {
     if (!via.data || via.len < 8) return 0;
     size_t i = 0;
@@ -768,7 +791,7 @@ static inline int64_t mako_sip_via_port(MakoString via) {
     while (i < via.len && (via.data[i] == ' ' || via.data[i] == '\t')) i++;
     if (i < via.len && via.data[i] == '[') {
         while (i < via.len && via.data[i] != ']') i++;
-        if (i < via.len) i++; /* skip ] */
+        if (i < via.len) i++;
     } else {
         while (i < via.len && via.data[i] != ':' && via.data[i] != ';' && via.data[i] != ' ') i++;
     }
@@ -779,6 +802,317 @@ static inline int64_t mako_sip_via_port(MakoString via) {
         p = p * 10 + (via.data[i] - '0');
         i++;
     }
+    return p;
+}
+
+/* Via protocol transport (UDP/TCP/TLS/…), uppercase. Owned. */
+static inline MakoString mako_sip_via_transport(MakoString via) {
+    if (!via.data || via.len < 8) return mako_str_from_cstr("UDP");
+    /* SIP/2.0/TRANSPORT */
+    size_t i = 0;
+    int slashes = 0;
+    while (i < via.len && slashes < 2) {
+        if (via.data[i] == '/') slashes++;
+        i++;
+    }
+    size_t start = i;
+    while (i < via.len && via.data[i] != ' ' && via.data[i] != '\t') i++;
+    if (i <= start) return mako_str_from_cstr("UDP");
+    char buf[16];
+    size_t n = i - start;
+    if (n >= sizeof(buf)) n = sizeof(buf) - 1;
+    for (size_t k = 0; k < n; k++) {
+        char c = via.data[start + k];
+        if (c >= 'a' && c <= 'z') c = (char)(c - 'a' + 'A');
+        buf[k] = c;
+    }
+    buf[n] = 0;
+    return mako_str_from_cstr(buf);
+}
+
+/* Default SIP port for transport (5061 for TLS/DTLS/WSS, else 5060). */
+static inline int64_t mako_sip_default_port(MakoString transport) {
+    if (transport.data && transport.len >= 3) {
+        if (mako_sip_ci_eq(transport.data, transport.len, "TLS", 3)) return 5061;
+        if (mako_sip_ci_eq(transport.data, transport.len, "DTLS", 4)) return 5061;
+        if (mako_sip_ci_eq(transport.data, transport.len, "WSS", 3)) return 5061;
+    }
+    return 5060;
+}
+
+/* Via with explicit NAT params (builders / tests).
+ * rport < 0 omit; ==0 bare ;rport; >0 ;rport=N. received optional. */
+static inline MakoString mako_sip_via_value_nat(
+    MakoString transport,
+    MakoString host,
+    int64_t port,
+    MakoString branch,
+    MakoString received,
+    int64_t rport
+) {
+    MakoString base = mako_sip_via_value(transport, host, port, branch);
+    size_t extra = (received.data ? received.len : 0) + 48;
+    size_t n = base.len + extra + 1;
+    char *d = (char *)malloc(n);
+    if (!d) {
+        mako_str_free(base);
+        return mako_str_from_cstr("");
+    }
+    size_t o = 0;
+    if (base.data && base.len) {
+        memcpy(d, base.data, base.len);
+        o = base.len;
+    }
+    mako_str_free(base);
+    if (received.data && received.len > 0) {
+        int w = snprintf(
+            d + o, n - o, ";received=%.*s",
+            (int)received.len, received.data
+        );
+        if (w > 0) o += (size_t)w;
+    }
+    if (rport == 0) {
+        if (o + 6 < n) {
+            memcpy(d + o, ";rport", 6);
+            o += 6;
+        }
+    } else if (rport > 0) {
+        int w = snprintf(d + o, n - o, ";rport=%lld", (long long)rport);
+        if (w > 0) o += (size_t)w;
+    }
+    d[o] = 0;
+    return (MakoString){d, o};
+}
+
+/* UAC Via with bare ;rport for NAT (RFC 3581 client). */
+static inline MakoString mako_sip_via_value_rport(
+    MakoString transport, MakoString host, int64_t port, MakoString branch
+) {
+    return mako_sip_via_value_nat(transport, host, port, branch, mako_str_empty, 0);
+}
+
+/* RFC 3261 §18.2.1 + RFC 3581 §4: fix top Via from observed packet source.
+ *
+ * Rules:
+ *  - If Via has rport (any form): MUST set received=src_host and rport=src_port.
+ *  - Else if sent-by host != src_host: MUST set received=src_host (3261).
+ *  - Else: leave Via unchanged (copy).
+ * src_port must be the actual source port of the datagram/connection. */
+static inline MakoString mako_sip_via_fix_source(
+    MakoString via, MakoString src_host, int64_t src_port
+) {
+    if (!via.data || via.len == 0) return mako_str_from_cstr("");
+    if (!src_host.data || src_host.len == 0) return mako_sip_slice_to_str(via.data, via.len);
+
+    int has_rport = mako_sip_via_has_rport(via) ? 1 : 0;
+    MakoString sent = mako_sip_via_host(via);
+    int host_mismatch = !mako_sip_host_eq(
+        sent.data ? sent.data : "", sent.len, src_host.data, src_host.len
+    );
+    mako_str_free(sent);
+
+    if (!has_rport && !host_mismatch) {
+        return mako_sip_slice_to_str(via.data, via.len);
+    }
+
+    char stripped[2048];
+    size_t sl = mako_sip_via_strip_nat_params(via.data, via.len, stripped, sizeof(stripped));
+    /* Keep non-NAT params; re-append received/rport only as required */
+    size_t n = sl + src_host.len + 64;
+    char *d = (char *)malloc(n);
+    if (!d) return mako_str_from_cstr("");
+    size_t o = 0;
+    if (sl) {
+        memcpy(d, stripped, sl);
+        o = sl;
+    }
+
+    /* received: required when rport present OR host mismatch */
+    int w = snprintf(d + o, n - o, ";received=%.*s", (int)src_host.len, src_host.data);
+    if (w > 0) o += (size_t)w;
+
+    if (has_rport) {
+        /* RFC 3581: MUST store source port even if UAC sent bare ;rport */
+        int64_t sp = src_port > 0 ? src_port : 0;
+        if (sp > 0) {
+            w = snprintf(d + o, n - o, ";rport=%lld", (long long)sp);
+            if (w > 0) o += (size_t)w;
+        } else {
+            if (o + 6 < n) {
+                memcpy(d + o, ";rport", 6);
+                o += 6;
+            }
+        }
+    }
+    d[o] = 0;
+    return (MakoString){d, o};
+}
+
+/* Alias: set/replace received (+ rport value). Prefer via_fix_source for full rules. */
+static inline MakoString mako_sip_via_add_received(MakoString via, MakoString host, int64_t rport) {
+    if (!via.data) return mako_str_from_cstr("");
+    /* If caller passes rport>=0, treat as force-fill (proxy saw this source port). */
+    if (rport >= 0) {
+        /* Ensure rport param exists so fix_source fills the port */
+        int had = mako_sip_via_has_rport(via) ? 1 : 0;
+        if (!had && rport > 0) {
+            /* Force 3581-style fill even without client rport when proxy wants NAT bind */
+            char stripped[2048];
+            size_t sl = mako_sip_via_strip_nat_params(via.data, via.len, stripped, sizeof(stripped));
+            size_t n = sl + (host.data ? host.len : 0) + 48;
+            char *d = (char *)malloc(n);
+            if (!d) return mako_str_from_cstr("");
+            size_t o = 0;
+            if (sl) {
+                memcpy(d, stripped, sl);
+                o = sl;
+            }
+            if (host.data && host.len) {
+                int w = snprintf(d + o, n - o, ";received=%.*s", (int)host.len, host.data);
+                if (w > 0) o += (size_t)w;
+            }
+            int w = snprintf(d + o, n - o, ";rport=%lld", (long long)rport);
+            if (w > 0) o += (size_t)w;
+            d[o] = 0;
+            return (MakoString){d, o};
+        }
+        return mako_sip_via_fix_source(via, host, rport);
+    }
+    return mako_sip_via_fix_source(via, host, 0);
+}
+
+/* RFC 3261 §18.2.2 + RFC 3581: host to send the response to.
+ * Preference: maddr > received > sent-by. Owned. */
+static inline MakoString mako_sip_via_response_host(MakoString via) {
+    MakoString m = mako_sip_via_maddr(via);
+    if (m.len > 0) return m;
+    mako_str_free(m);
+    MakoString r = mako_sip_via_received(via);
+    if (r.len > 0) return r;
+    mako_str_free(r);
+    return mako_sip_via_host(via);
+}
+
+/* Port to send the response to.
+ * Preference: rport value (3581) > sent-by port > default for transport (5060/5061). */
+static inline int64_t mako_sip_via_response_port(MakoString via) {
+    int64_t rp = mako_sip_via_rport(via);
+    if (rp > 0) return rp;
+    int64_t sp = mako_sip_via_port(via);
+    if (sp > 0) return sp;
+    MakoString tr = mako_sip_via_transport(via);
+    int64_t def = mako_sip_default_port(tr);
+    mako_str_free(tr);
+    return def;
+}
+
+/* "host:port" (IPv6 bracketed) for response next-hop. Owned. */
+static inline MakoString mako_sip_via_response_addr(MakoString via) {
+    MakoString h = mako_sip_via_response_host(via);
+    int64_t p = mako_sip_via_response_port(via);
+    int br = mako_sip_host_needs_brackets(h.data ? h.data : "", h.len);
+    size_t n = h.len + 32;
+    char *d = (char *)malloc(n);
+    if (!d) {
+        mako_str_free(h);
+        return mako_str_from_cstr("");
+    }
+    int w;
+    if (br) {
+        w = snprintf(d, n, "[%.*s]:%lld", (int)h.len, h.data ? h.data : "", (long long)p);
+    } else {
+        w = snprintf(d, n, "%.*s:%lld", (int)h.len, h.data ? h.data : "", (long long)p);
+    }
+    mako_str_free(h);
+    if (w < 0) {
+        free(d);
+        return mako_str_from_cstr("");
+    }
+    return (MakoString){d, (size_t)w};
+}
+
+/* Rewrite top Via of a full message with via_fix_source (proxy ingress). Owned msg. */
+static inline MakoString mako_sip_msg_fix_top_via(
+    MakoString msg, MakoString src_host, int64_t src_port
+) {
+    if (!msg.data || msg.len == 0) return mako_str_from_cstr("");
+    MakoString top = mako_sip_header(msg, MAKO_SIP_LIT("Via"));
+    if (top.len == 0) {
+        mako_str_free(top);
+        return mako_sip_slice_to_str(msg.data, msg.len);
+    }
+    MakoString fixed = mako_sip_via_fix_source(top, src_host, src_port);
+    mako_str_free(top);
+    /* Replace first Via header line in message */
+    size_t he = 0;
+    if (!mako_sip_body_start(msg.data, msg.len, &he)) {
+        mako_str_free(fixed);
+        return mako_sip_slice_to_str(msg.data, msg.len);
+    }
+    const char *hend = msg.data + he;
+    const char *crlf = mako_sip_find_crlf(msg.data, hend);
+    if (!crlf) {
+        mako_str_free(fixed);
+        return mako_sip_slice_to_str(msg.data, msg.len);
+    }
+    const char *p = crlf + 2;
+    const char *rep_s = NULL, *rep_e = NULL;
+    while (p < hend) {
+        if (p[0] == '\r' && p + 1 < hend && p[1] == '\n') break;
+        const char *le = mako_sip_find_crlf(p, hend);
+        if (!le) break;
+        size_t llen = (size_t)(le - p);
+        if (llen > 0 && (p[0] == ' ' || p[0] == '\t')) {
+            p = le + 2;
+            continue;
+        }
+        if (mako_sip_header_line_is(p, llen, "Via", 3)) {
+            rep_s = p;
+            rep_e = le + 2;
+            while (rep_e < hend && (*rep_e == ' ' || *rep_e == '\t')) {
+                const char *nle = mako_sip_find_crlf(rep_e, hend);
+                if (!nle) break;
+                rep_e = nle + 2;
+            }
+            break;
+        }
+        p = le + 2;
+    }
+    if (!rep_s) {
+        mako_str_free(fixed);
+        return mako_sip_slice_to_str(msg.data, msg.len);
+    }
+    MakoString line = mako_sip_header_line(MAKO_SIP_LIT("Via"), fixed);
+    mako_str_free(fixed);
+    size_t keep1 = (size_t)(rep_s - msg.data);
+    size_t keep2 = msg.len - (size_t)(rep_e - msg.data);
+    size_t nn = keep1 + line.len + keep2 + 1;
+    char *d = (char *)malloc(nn);
+    if (!d) {
+        mako_str_free(line);
+        return mako_str_from_cstr("");
+    }
+    memcpy(d, msg.data, keep1);
+    memcpy(d + keep1, line.data ? line.data : "", line.len);
+    memcpy(d + keep1 + line.len, rep_e, keep2);
+    size_t total = keep1 + line.len + keep2;
+    d[total] = 0;
+    mako_str_free(line);
+    return (MakoString){d, total};
+}
+
+/* Response next-hop from message top Via after fixup. */
+static inline MakoString mako_sip_msg_response_host(MakoString msg) {
+    MakoString v = mako_sip_header(msg, MAKO_SIP_LIT("Via"));
+    MakoString h = mako_sip_via_response_host(v);
+    mako_str_free(v);
+    return h;
+}
+
+static inline int64_t mako_sip_msg_response_port(MakoString msg) {
+    MakoString v = mako_sip_header(msg, MAKO_SIP_LIT("Via"));
+    int64_t p = mako_sip_via_response_port(v);
+    mako_str_free(v);
     return p;
 }
 

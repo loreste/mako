@@ -609,8 +609,12 @@ dialogs, routing, media (rtpengine). **Out of scope:** SIPREC, WebRTC, full B2BU
 | `sip_first_message_len` / `sip_msg_complete` / `sip_msg_needed` | `(buf) -> int` | TCP/TLS framing (first complete msg length / complete? / bytes needed) |
 | `sip_request` / `sip_response` | build full message (auto Content-Length) | |
 | `sip_headers_append` / `sip_header_line` / `sip_prepend_header` | header blob builders | |
-| `sip_via_value` / `sip_via_value_nat` / `sip_via_add_received` | Via (RFC 3261); `;received`/`;rport` (RFC 3581 rewrite, no dup params); branch magic cookie `z9hG4bK` | |
-| `sip_via_host` / `sip_via_port` / `sip_via_branch` | top Via sent-by (IPv6 brackets) / branch | |
+| `sip_via_value` / `sip_via_value_rport` / `sip_via_value_nat` | Build Via; UAC bare `;rport`; full NAT params | |
+| `sip_via_fix_source` / `sip_via_add_received` | Ingress fix (RFC 3261 received + RFC 3581 rport=src) | |
+| `sip_via_has_rport` / `sip_via_rport` / `sip_via_received` / `sip_via_maddr` | Inspect NAT params (`rport`: -1 absent, 0 bare, >0 valued) | |
+| `sip_via_response_host` / `sip_via_response_port` / `sip_via_response_addr` | Where to send response (maddr > received > sent-by; rport > sent-by port > 5060/5061) | |
+| `sip_msg_fix_top_via` / `sip_msg_response_host` / `sip_msg_response_port` | Full-message top-Via fix + response next-hop | |
+| `sip_via_host` / `sip_via_port` / `sip_via_transport` / `sip_via_branch` | sent-by / transport / branch | |
 | `sip_insert_via` / `sip_strip_via` / `sip_record_route` | topmost Via insert/strip (§16.6/§16.7); RR with `;lr` (§20.30) | |
 | `sip_from_value` / `sip_to_value` / `sip_contact_value` / `sip_cseq_value` | common values | |
 | `sip_addr_tag` | extract tag= | |

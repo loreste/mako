@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### SIP NAT full support (RFC 3261 §18.2 + RFC 3581)
+
+- **UAC:** `sip_via_value_rport` — bare `;rport` for symmetric response routing.
+- **Ingress:** `sip_via_fix_source` / `sip_msg_fix_top_via` — if `rport` present,
+  set `received=src` and `rport=src_port`; else if sent-by ≠ source, set `received` only.
+- **Response next-hop:** `sip_via_response_host` (maddr > received > sent-by),
+  `sip_via_response_port` (rport value > sent-by port > 5060/5061),
+  `sip_via_response_addr`, `sip_msg_response_*`.
+- Inspect: `sip_via_has_rport` / `sip_via_rport` / `sip_via_received` / `sip_via_maddr` /
+  `sip_via_transport`.
+- Tests: `TestSipRfc3581ViaRewrite`, `TestSipRfc3261ReceivedOnly`, `TestSipRfc3581UacAndMsg`,
+  `TestSipViaMaddrAndDefaultPort`, IPv6 response addr.
+
 ### SIP proxy library positioning
 
 - Documented as the **platform built-in SIP library for proxies** (not a demo seed).
