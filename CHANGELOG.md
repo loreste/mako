@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.1.3 — 2026-07-14
+
+**mako0.1.3** (`CARGO_PKG_VERSION`).
+
+Runtime trust, observability, language ergonomics (closures, f-strings),
+storage/domain seeds (no SIPREC/WebRTC), packaging polish, and docs.
+
 ### Storage product depth
 
 - **`btree_save` / `btree_load`** — persist ordered KV snapshot to disk.
@@ -26,172 +33,25 @@
 
 ### P4 storage depth · game snapshot seeds
 
-- **Hash index:** `hindex_new` / `put` / `get` / `del` / `len` / `free` (open
-  addressing, grow on load).
-- **Transactional store:** `store_new` / `put` / `get` / `del` /
-  `begin` / `commit` / `rollback` · optional `store_attach_wal` logs commits.
-- **Snapshots:** `snap_encode2` / `snap_encode4` / `snap_get` / `snap_count` ·
-  `snap_predict` / `snap_reconcile` (multiplayer seed).
+- **Hash index:** `hindex_new` / `put` / `get` / `del` / `len` / `free`.
+- **Transactional store:** `store_*` with begin/commit/rollback + optional WAL.
+- **Snapshots:** `snap_encode*` / `snap_predict` / `snap_reconcile`.
 - Tests: `store_index_test`.
 
-### P3 packaging · P4 storage · ShareInt capture · debug locals
+### P3 packaging · ShareInt capture · debug locals
 
-- **Storage seed:** `page_alloc` / `page_read` / `page_write` / `page_free` ·
-  `wal_open` / `wal_append` / `wal_sync` / `wal_read_at` / `wal_next_off` /
-  `wal_close` (`storage_wal_test`).
-- **ShareInt capture:** closures capture RC handles for shared mutation
-  (`share_capture_test`).
-- **Debug locals:** `debug_set_int` / `debug_get_int` / `debug_locals_json` ·
-  soft BP ids `debug_bp_enable` / `debug_bp` / `debug_bp_disable`.
-- **Packaging seeds:** `scripts/package-deb.sh` · `package-rpm.sh` ·
-  `validate-matrix.sh` · `packaging/winget/` · Homebrew formula homepage.
-- Lambda block bodies chain side effects via C comma operator.
+- Page/WAL storage seeds · ShareInt closure capture · debug locals/BP registry.
+- Packaging: deb/rpm scripts, winget seed, Homebrew formula, validate-matrix.
+- Docs: STDLIB / BUILTINS domain tables.
 
-### Language — f-string format flag parity
+### Language · observability · runtime trust (since 0.1.2)
 
-- Int flags: `+` / ` ` (sign), `#` (0x/0X/0/0b), `-` left-align, `0` zero-pad.
-- Types: `d` `x` `X` `o` `b`; float `f`/`e`/`g` with flags + width + precision.
-- String: `-` / `<` left-align; `>` right-align.
-- Parser keeps leading space in format specs (sign flag).
-- Tests: `fstring_fmt_test` (12 cases).
-
-### Language / runtime — fn_drop + debugger/task inspect
-
-- **`fn_drop(f)` / `fn_has_env(f)`** — free capture env via generated `drop_env`
-  (string fields freed); bare fns are no-ops.
-- **`MakoFn.drop_env`** third field on the fat pointer.
-- **Auto drop on scope exit** for MakoFn locals (like share).
-- **Kick moves env** into the task box; worker drops after call (no UAF /
-  double-free with auto drop).
-- **Task inspect:** `task_done` / `task_joined` / `task_id` ·
-  `tasks_inspect_json()` (registry of active tasks).
-- **Soft breakpoints:** `debug_break(label)` · `debug_break_hits` /
-  `debug_break_reset` (log + counter, no trap).
-- Tests: `fn_drop_debug_test`.
-
-### Language — struct captures + kick fn values
-
-- **Struct captures:** closures may close over local structs by value; string
-  fields are cloned into the env. Field access `p.x` rewrites to `e->p.x`.
-- **Kick `fn`:** `Type::Fn` is Send; `MakoFn` args are heap-boxed across spawn.
-  Named, bare lambda, and capturing closures work as kick args.
-- Tests: `struct_capture_test`, `kick_fn_test`.
-
-### Language — f-string format specs + string captures
-
-- **Format specs in `f"…"`:** `{n:02}` / `{n:04d}` zero-pad, `{n:x}`/`{n:X}`
-  hex, `{n:o}` octal, `{n:b}` binary, `{x:.2f}` float precision, `{s:4}` /
-  `{s:<4}` string width. Runtime helpers on `StrBuilder`.
-- **String captures:** closures clone `string` locals into the env (owned).
-- Annotated `let f: fn(string)->int = |s| …` passes param types to lambda emit.
-- Tests: `fstring_fmt_test`, extended `capturing_closure_test`.
-
-### Language — capturing closures (seed)
-
-- **`MakoFn` fat pointer** (`fn` + optional `env`) for all first-class function
-  values; bare named fns use `mako_fn_bare`.
-- **POD captures:** lambdas may close over local `int` / `bool` / `float` by
-  value into a heap env; call sites dispatch env-first vs bare.
-- Works as args (`apply(|x| x + n, …)`), bound locals, multi-arg, and
-  `if` expressions in the body.
-- Not yet: struct capture, mut borrows, kicking `fn` values across crew.
-- Tests: `capturing_closure_test`.
-
-### Observability depth — P2 seeds
-
-- **OTLP/HTTP JSON:** `trace_export_otlp_json()` (span ring + in-flight),
-  `metrics_export_otlp_json()` (counters/gauges/histograms).
-- **Span ids:** `trace_span_id()`; nested begin/end records parentSpanId.
-- **Profile snapshot:** `profile_snapshot_json()` — schema
-  `mako.profile_snapshot.v1` (RSS, CPU µs, alloc live/high, sched counters,
-  lock waits).
-- **Process sample:** `process_rss_bytes` / `process_cpu_user_us` /
-  `process_cpu_sys_us`.
-- **Stack traces:** `stack_trace()` (symbolized via `backtrace_symbols`).
-- **Crash reports:** `crash_report_install(path)` / `crash_report_installed()`.
-- **Lock contention:** channel cond-wait timing → `lock_waits` /
-  `lock_wait_ns` in `runtime_stats_json`.
-- **PGO/LTO workflow:** `MAKO_PGO_GEN`, `MAKO_PGO_USE`, `MAKO_NO_LTO`,
-  `MAKO_CFLAGS`; docs in [howto/09-release-builds.md](docs/howto/09-release-builds.md).
-- **Install polish:** `install-manifest.json` (`mako.install.v1`) from
-  `make install` / `scripts/install.sh`; `mako doctor` checks `mako_trace.h` /
-  host OS·arch / manifest.
-- Tests: `observability_depth_test`.
-
-### Runtime trust — P1 crew errors, detach, actors
-
-- **Child errors:** joining a kicked `Result[_, string]` records `Err` on the
-  crew; `crew.err_count` / `first_err` / `wait()` → `Result[int, string]`.
-- **`detach f()`** + **`detached_join_all()`** — process-scoped nursery (not
-  joined by enclosing crew exit).
-- **Actors:** optional state fields + `self.x` in `receive` bodies; loop returns
-  `n`/`count`/`value` when present. Tests: `crew_error_prop_test`, `detach_test`,
-  `actor_test`.
-
-### Runtime trust — portable timeouts (P1 seed)
-
-- **`ch.send_timeout(v, ms)` / `ch.try_send(v)`** — timed / non-blocking int send.
-- **`ch.recv_timeout(ms)` / `ch.try_recv()`** → `Result[int, string]`
-  (`timeout` / `closed` / `empty`).
-- **`job.join_deadline(dl)`** — join against absolute mono deadline from
-  `deadline_ms` / `deadline_ns`.
-- **`deadline_remaining_ms`**, free `chan_send_timeout` / `chan_recv_timeout`.
-- Timed waits use short sleep slices (no busy-spin).
-- Tests: `timeout_portable_test`.
-
-### Runtime / codegen — speed & memory
-
-- **`f"…"`** builds with a single `MakoStrBuilder` (`write_cstr` / `write_i64` /
-  `finish` steals buffer) instead of N× `str_concat` temps.
-- **`mako_str_builder_finish` / `write_cstr` / `write_i64` / `free`** for tight
-  string assembly; builder default cap 64.
-- **`mako_box_alloc` / `mako_box_free` freelist** (16…512B bins) for
-  `chan[Struct|Enum|tuple]` send boxes — reuses POD heap slots under load.
-- Docs: [SPEED.md](docs/SPEED.md) hot-path efficiency table.
-
-### Language — ergonomics wave 2
-
-- **First-class functions (non-capturing):** `fn` values as params/locals;
-  named fns + `|x|` / `fn(x){…}` lambdas; call-through via `void*` + cast.
-  Typed lambdas honor expected `fn(string)->…` / multi-arg signatures
-  (`len`, etc.) — see `first_class_fn_test.mko`.
-- **`f"…{expr}"` interpolation** with `{{`/`}}` escapes.
-- **Struct field defaults:** `struct S { x: int = 0 }` fills omitted fields.
-- **`chan[(T,U,…)]` / `make(chan[(…)], n)`** via the ptr ring.
-- Tests: `lang_ergonomics_test.mko`.
-
-### Language — struct update + POD enum Send
-
-- **Struct update:** `S { field: v, ..base }` and `S { ...base, field: v }` —
-  copy base then override listed fields (at most one base).
-- **Deep-POD kick:** enum fields with unit/POD payloads are Send.
-- **`chan[Enum]`** / `make(chan[Enum], n)` via the struct ptr ring.
-- Tests: `examples/testing/struct_update_test.mko`.
-- Docs: ERGONOMICS · SPEED · ROADMAP · PAIN_POINTS.
-
-### Docs — production backend ergonomics
-
-- Document what is **already on tip** for large services: `for … in range`,
-  `fmt_sprintf*`, `match`/`switch` on string/int, `chan[Struct]`, deep-POD kick.
-- Correct Send-like kick tables (POD structs **are** kick args; multi-field
-  results prefer struct channels over int bit-packing).
-- Track remaining residuals: struct spread, general first-class fns, interpol,
-  enum-in-kick-POD — [ERGONOMICS.md](docs/ERGONOMICS.md) · [PAIN_POINTS.md](docs/PAIN_POINTS.md) ·
-  [ROADMAP.md](docs/ROADMAP.md) · [SPEED.md](docs/SPEED.md).
-
-### Stdlib / security product polish (P2)
-
-- **`path_file_size(path)`** — size via `stat` (−1 if missing).
-- **PEM helpers** — `pem_count_blocks` / `pem_has_block` / `pem_extract_block` /
-  `pem_load_file` (string-level, no OpenSSL required for parse).
-- **TLS cert lab** — `tls_make_self_signed`, `tls_make_csr`, `tls_server_reload`
-  (OpenSSL when linked); pack wrappers under `crypto.tls` / `crypto.x509`.
-- **SCRAM-PLUS adoption** — `scram_tls_unique_cbind` /
-  `scram_plus_client_final_bare` (use after handshake with `tls_unique`).
-- **Observability** — `metrics_export_prom` (Prometheus text),
-  `trace_export_json` (OTel-ish span JSON).
-- **Docs:** SECURITY “crypto core only” (no high-level SASL SM); BUILTINS tables.
-- Tests: `security_product_test`.
+- Capturing closures (`MakoFn` + env) · string/struct/ShareInt captures · kick Send.
+- Auto `fn_drop` on scope exit; kick moves capture env.
+- f-string format flags (`+` `#` `-` `0`, hex/oct/bin, float e/f/g).
+- OTLP/HTTP JSON export · profile snapshot · stack_trace · crash_report · PGO/LTO.
+- P1: portable timeouts · crew first_err · detach · actor state.
+- First-class fns · field defaults · tuple chans · struct update (earlier unreleased).
 
 ## 0.1.2 — 2026-07-14
 
