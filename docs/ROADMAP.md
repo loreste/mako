@@ -6,7 +6,7 @@ Short engineering queue. Product map: [VISION.md](VISION.md).
 
 STATUS north-star / MVP: **100%**. Prefer STATUS over this list when claiming Done.  
 **Mako identity:** [IDENTITY.md](IDENTITY.md) (**~100%** preferred surface).  
-**Dual sugar only:** [GO_SYNTAX_CHECKLIST.md](GO_SYNTAX_CHECKLIST.md) (**~92%**).  
+**Dual sugar only:** [GO_SYNTAX_CHECKLIST.md](GO_SYNTAX_CHECKLIST.md) (**~94%**).  
 **Product version:** **0.1.4** · Last roadmap sync: **2026-07-15**.
 
 ---
@@ -18,7 +18,7 @@ STATUS north-star / MVP: **100%**. Prefer STATUS over this list when claiming Do
 | MVP / STATUS north-star | **100%** |
 | General-purpose intention (weighted tracks below) | **~96%** |
 | Mako identity (preferred syntax) | **~100%** |
-| Dual-form sugar (optional) | **~92%** |
+| Dual-form sugar (optional) | **~94%** |
 | Standard library (target areas) | **~98%** |
 
 Tracks 4–7 (backend, protocols, data, toolchain) are effectively **Done**.  
@@ -27,13 +27,19 @@ Remaining weight is **product** residual: install/portability polish, full debug
 
 ---
 
+## Just closed (2026-07-15) — implicit interfaces
+
+| Area | Status |
+|------|--------|
+| Go-like method sets | **Done** — `on T` / `T_m` implements I without `on T : I` · `iface_implicit_test` |
+| Dual-form checklist | **~94%** — remaining open item is intentional `*T`/`&x` (won't) |
+
 ## Just closed (2026-07-15) — package-per-dir · rendezvous
 
 | Area | Status |
 |------|--------|
 | Package-per-directory model | **Done** — multi-file merge · pack name check · path dep + pull |
 | Unbuffered rendezvous channels | **Done** — `chan_new(0)` handoff · `chan_rendezvous_test` |
-| Dual-form checklist | **~92%** — remaining: `*T` (won't) · interface method-set polish |
 
 ## Just closed (2026-07-15) — seeds & syntax
 

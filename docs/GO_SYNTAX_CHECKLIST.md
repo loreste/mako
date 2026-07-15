@@ -13,8 +13,8 @@ Living inventory of dual forms the compiler accepts.
 
 | Metric | Value |
 |--------|-------|
-| **Dual-form coverage** | **~92%** (optional sugar) |
-| **Raw checklist items** | **49 / 52 done (94%)** |
+| **Dual-form coverage** | **~94%** (optional sugar) |
+| **Raw checklist items** | **50 / 52 done (96%)** |
 | **Mako identity (preferred)** | see [IDENTITY.md](IDENTITY.md) **~100%** |
 
 ---
@@ -25,13 +25,13 @@ Living inventory of dual forms the compiler accepts.
 |-------|--------|------|-------|--------|
 | 1. Declarations & packages | 15% | 8/8 | **100%** | Done |
 | 2. Types & annotations | 20% | 7/9 | **78%** | Strong |
-| 3. Functions & methods | 20% | 7/8 | **88%** | Strong |
+| 3. Functions & methods | 20% | 8/8 | **100%** | Done |
 | 4. Locals & control flow | 15% | 10/10 | **100%** | Done |
 | 5. Concurrency surface | 10% | 5/6 | **83%** | Strong |
 | 6. Errors & multi-return | 10% | 6/6 | **100%** | Done |
 | 7. Docs & examples | 10% | 6/6 | **100%** | Done |
-| **Weighted overall** | **100%** | — | **~92%** | — |
-| **Raw items** | — | **49/52** | **94%** | — |
+| **Weighted overall** | **100%** | — | **~94%** | — |
+| **Raw items** | — | **50/52** | **96%** | — |
 
 Formula per track: `done / total × 100`.  
 Overall ≈ Σ (weight × track%).
@@ -67,13 +67,13 @@ Overall ≈ Σ (weight × track%).
 | [x] | Multi-return type `(int, int)` | Done | Tuple under the hood |
 | [x] | `[]T` / `map[K]V` | Done | Go-like; keys int\|string\|float\|bool\|Struct\|Enum; values same, `[]T`, nested `map[K2]V` (depth 2), `Option[T]`/`Result[T,E]`; nested `[][]T` |
 | [x] | Positional struct literals `Point{1, 2}` | Done | Named `Point { x: 1, y: 2 }` and positional `Point{1, 2}` / zero-value `Point{}`; composite-literal-in-condition ambiguity resolved |
-| [ ] | Pointer syntax `*T` / `&x` as Go | Not yet | Ownership via `hold`/`share` instead |
+| [ ] | Pointer syntax `*T` / `&x` as Go | Won't | Ownership via `hold`/`share` instead (intentional) |
 
 **Examples:** `examples/go_style.mko`, `examples/testing/go_style_test.mko`
 
 ---
 
-## 3. Functions & methods — 88% (7/8)
+## 3. Functions & methods — 100% (8/8)
 
 | | Item | Status | Notes |
 |---|------|--------|-------|
@@ -84,7 +84,7 @@ Overall ≈ Σ (weight × track%).
 | [x] | `on T { func M(self) … }` | Done | Mako alternative |
 | [x] | Free function `T_M(self T, …)` | Done | Lowest-level form |
 | [x] | User generics `func id[T](x T) T` | Done | Monomorphized |
-| [ ] | Interface method sets exactly like Go (implicit only) | Partial | Interfaces work; satisfaction rules still seed |
+| [x] | Interface method sets exactly like Go (implicit only) | Done | `on T { fn m… }` / `T_m` implements I without `on T : I` (`iface_implicit_test`) |
 
 **Examples:** `examples/go_style.mko`, `examples/on_methods.mko`, `examples/iface_*.mko`
 
@@ -178,9 +178,8 @@ Priority order for the next pass:
 6. [x] `error` chain helpers + `std/errors` — **done seed** (`error_chain_test` · `errors.Is`/`unwrap`/`as_tag` style)  
 7. [x] Stronger package-per-directory model — **done** (`pkg_per_dir_test` · path deps merge all units)  
 8. [x] True unbuffered rendezvous channels — **done** (`chan_new(0)` · `chan_rendezvous_test`)  
-9. [ ] `*T` / `&x` as Go — **won't** (use `hold` / `share`)  
-10. [ ] Interface method sets exactly like Go (implicit only) — partial seed  
-11. [ ] Idiomatic docs polish only
+9. [x] Interface method sets exactly like Go (implicit only) — **done** (`iface_implicit_test`)  
+10. [ ] `*T` / `&x` as Go — **won't** (use `hold` / `share`)
 
 When each lands: tick the box, bump track %, recompute overall.
 
@@ -202,10 +201,12 @@ overall =
 Current:
 
 ```
-0.15*100 + 0.20*78 + 0.20*88 + 0.15*100 + 0.10*83 + 0.10*100 + 0.10*100
-= 15.0 + 15.6 + 17.6 + 15.0 + 8.3 + 10.0 + 10.0
-= 91.5 ≈ 92%
+0.15*100 + 0.20*78 + 0.20*100 + 0.15*100 + 0.10*83 + 0.10*100 + 0.10*100
+= 15.0 + 15.6 + 20.0 + 15.0 + 8.3 + 10.0 + 10.0
+= 93.9 ≈ 94%
 ```
+
+Remaining open dual item is intentional: `*T`/`&x` (ownership via `hold`/`share`).
 
 ---
 
