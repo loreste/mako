@@ -1794,7 +1794,7 @@ static inline MakoString mako_metrics_export_otlp_json(void) {
         buf, cap,
         "{\"resourceMetrics\":[{\"resource\":{\"attributes\":["
         "{\"key\":\"service.name\",\"value\":{\"stringValue\":\"mako\"}}"
-        "]},\"scopeMetrics\":[{\"scope\":{\"name\":\"mako.metrics\",\"version\":\"0.1.3\"},"
+        "]},\"scopeMetrics\":[{\"scope\":{\"name\":\"mako.metrics\",\"version\":\"0.1.4\"},"
         "\"metrics\":["
     );
     if (n < 0) n = 0;

@@ -255,7 +255,7 @@ static inline MakoString mako_trace_export_otlp_json(void) {
         buf, cap,
         "{\"resourceSpans\":[{\"resource\":{\"attributes\":["
         "{\"key\":\"service.name\",\"value\":{\"stringValue\":\"mako\"}}"
-        "]},\"scopeSpans\":[{\"scope\":{\"name\":\"mako.trace\",\"version\":\"0.1.3\"},"
+        "]},\"scopeSpans\":[{\"scope\":{\"name\":\"mako.trace\",\"version\":\"0.1.4\"},"
         "\"spans\":["
     );
     if (n < 0) n = 0;

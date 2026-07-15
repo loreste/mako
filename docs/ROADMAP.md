@@ -7,7 +7,7 @@ Short engineering queue. Product map: [VISION.md](VISION.md).
 STATUS north-star / MVP: **100%**. Prefer STATUS over this list when claiming Done.  
 **Mako identity:** [IDENTITY.md](IDENTITY.md) (**~90%** preferred surface).  
 **Dual sugar only:** [GO_SYNTAX_CHECKLIST.md](GO_SYNTAX_CHECKLIST.md).  
-**Product version:** **0.1.3** · Last roadmap sync: **2026-07-14**.
+**Product version:** **0.1.4** · Last roadmap sync: **2026-07-15**.
 
 ---
 

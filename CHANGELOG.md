@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.1.4 — 2026-07-15
+
+**mako0.1.4** (`CARGO_PKG_VERSION`).
+
+Patch release after 0.1.3: language zero-copy string regions, storage polish,
+observability/debugger seeds, packaging dry-runs, comptime `if` fold, and
+product-path seeds (DAP stdio, profile-serve, live plugin reload).
+
 ### Product-path seeds (DAP stdio · profile-serve · live plugin reload · soft FB)
 
 - **DAP:** `mako dap --stdio` Content-Length loop; more commands (scopes/variables/step/breakpoints).
