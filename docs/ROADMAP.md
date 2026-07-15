@@ -113,15 +113,15 @@ Metrics/prom + span-lite JSON are in; **depth seeds landed** (2026-07-14).
 | Struct update (spread) | `S { field: v, ..base }` / `S { ...base, field: v }` | `struct_update_test` |
 | Enum on kick-POD / channels | POD enum fields; `chan[Enum]` | `struct_update_test` |
 | First-class fn values | `fn apply(f: fn(int)->int, …)` · named + lambda | `lang_ergonomics_test` · `first_class_fn_test` |
-| Capturing closures (POD env seed) | `|x| x + n` captures int/bool/float by value | `capturing_closure_test` |
-| `f"…{x}"` interpolation | single-buffer `StrBuilder` finish | `lang_ergonomics_test` |
+| Capturing closures (POD + string env seed) | `|x| x + n` · string by clone | `capturing_closure_test` |
+| `f"…{x}"` + format specs | `{n:02}` `{n:x}` `{f:.2f}` `{s:4}` | `lang_ergonomics_test` · `fstring_fmt_test` |
 | Struct field defaults | `field: int = 0` on `struct` | `lang_ergonomics_test` |
 | Tuple channels | `chan[(int, string)]` | `lang_ergonomics_test` |
 
 **Still open (true residuals):**
 
-1. Capturing **string / struct / mut ref** envs · lifetime / move semantics depth  
-2. Format specs inside `f"…"` (`{x:02}`) — use `fmt_sprintf*`  
+1. Capturing **struct / mut ref** envs · lifetime / move semantics depth  
+2. Full printf verb parity in f-strings (use `fmt_sprintf*` for exotic cases)  
 3. Kicking `Type::Fn` across crew (Send rejects)  
 
 ### Language / stdlib residuals (lower priority)

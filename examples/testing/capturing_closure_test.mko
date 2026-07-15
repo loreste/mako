@@ -52,3 +52,26 @@ fn TestNoCaptureStillWorks() {
     let g: fn(int) -> int = |x| x - 1
     assert_eq(g(10), 9)
 }
+
+// ---- String captures (by owned clone) ----
+
+fn apply_s(f: fn(string) -> int, s: string) -> int {
+    return f(s)
+}
+
+fn TestCaptureStringLen() {
+    let prefix = "mako"
+    assert_eq(apply_s(|s| len(s) + len(prefix), "!!"), 6)
+}
+
+fn TestCaptureStringBind() {
+    let tag = "ok"
+    let f: fn(string) -> int = |s| len(s) + len(tag)
+    assert_eq(f("xy"), 4)
+}
+
+fn TestCaptureStringAndInt() {
+    let base = 100
+    let name = "web"
+    assert_eq(apply(|n| n + base + len(name), 5), 108)
+}

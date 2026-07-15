@@ -2070,6 +2070,7 @@ impl Parser {
 
     /// Split `f"…"` interior into lit / `{expr}` parts. Simple `{ident}` and
     /// `{a.b}` / `{a[i]}` via re-lexing the hole as a full expression.
+    /// Supports format specs: `{n:02}`, `{n:x}`, `{f:.2f}`.
     fn parse_fstring(&mut self, raw: &str) -> Result<Expr, ParseError> {
         let mut parts: Vec<InterpPart> = Vec::new();
         let bytes = raw.as_bytes();
@@ -2103,13 +2104,16 @@ impl Parser {
                 }
                 let hole = &raw[start..i];
                 i += 1; // }
+                // Split optional format spec: `{expr:spec}` at top-level `:`.
+                // (Nested `{}` / colons inside the expr are rare; use fmt_sprintf* for complex.)
+                let (expr_src, fmt_opt) = split_fstring_hole(hole);
                 // Re-lex and parse the hole as an expression.
-                let tokens = crate::lexer::Lexer::new(hole)
+                let tokens = crate::lexer::Lexer::new(expr_src)
                     .tokenize()
                     .map_err(|e| self.err(format!("f-string hole: {e}")))?;
                 let mut sub = Parser::new(tokens);
                 let expr = sub.parse_expr()?;
-                parts.push(InterpPart::Expr(expr));
+                parts.push(InterpPart::Expr(expr, fmt_opt));
             } else if bytes[i] == b'}' {
                 if i + 1 < bytes.len() && bytes[i + 1] == b'}' {
                     lit.push('}');
@@ -3016,6 +3020,32 @@ fn is_exported_name(name: &str) -> bool {
 }
 
 /// Maps a compound-assignment token (`+=`, `-=`, `*=`, `/=`, `%=`) to its binary
+/// Split an f-string hole into expression source and optional format spec.
+/// `{n:02}` → (`n`, Some("02")); `{name}` → (`name`, None).
+/// Uses the first top-level `:` (not inside nested `{}`).
+fn split_fstring_hole(hole: &str) -> (&str, Option<String>) {
+    let bytes = hole.as_bytes();
+    let mut depth = 0i32;
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'{' => depth += 1,
+            b'}' => depth -= 1,
+            b':' if depth == 0 => {
+                let expr = hole[..i].trim();
+                let spec = hole[i + 1..].trim();
+                if !spec.is_empty() {
+                    return (expr, Some(spec.to_string()));
+                }
+                return (expr, None);
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    (hole.trim(), None)
+}
+
 /// operator, so `x += e` desugars to `x = x <op> e`.
 fn compound_binop(kind: &TokenKind) -> Option<BinOp> {
     match kind {

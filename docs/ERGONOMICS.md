@@ -481,20 +481,31 @@ fn main() {
 ```
 
 Also works with `string` params (`fn(string) -> int`, multi-arg `fn(int, string) -> int`).
-**Captures:** local `int` / `bool` / `float` by value. Residual: string/struct
-envs, mut borrows, kicking `fn` across crew.
+**Captures:** local `int` / `bool` / `float` by value; `string` by owned clone.
+Residual: struct envs, mut borrows, kicking `fn` across crew.
 
-Tests: `first_class_fn_test.mko`, `lang_ergonomics_test.mko`, `capturing_closure_test.mko`.
+Tests: `first_class_fn_test.mko`, `lang_ergonomics_test.mko`, `capturing_closure_test.mko`,
+`fstring_fmt_test.mko`.
 
 ### `f"…"` string interpolation
 
 ```mko
 let s = f"frontend={fe.name} bind={host}:{port}"
 // escapes: {{ and }} → literal braces
+
+// Format specs (seed)
+f"{n:02}"      // zero-pad: 07
+f"{n:04x}"     // hex with width
+f"{n:X}"       // uppercase hex
+f"{n:b}"       // binary
+f"{x:.2f}"     // float precision
+f"{s:4}"       // right-align width
+f"{s:<4}"      // left-align width
 ```
 
-Holes accept expressions; ints/bools stringify; strings concat. Prefer
-`fmt_sprintf*` when you need format verbs (`%x`, precision).
+Holes accept expressions; ints/bools stringify; strings concat.
+Specs cover pad/hex/oct/bin/float precision/string width. Prefer
+`fmt_sprintf*` for full printf verbs or complex expressions with colons.
 
 ### Struct field defaults
 

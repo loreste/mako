@@ -477,7 +477,7 @@ impl Codegen {
             }
             Expr::StringInterp(parts) => {
                 for p in parts {
-                    if let crate::ast::InterpPart::Expr(e) = p {
+                    if let crate::ast::InterpPart::Expr(e, _) = p {
                         self.collect_maps_in_expr(e);
                     }
                 }
@@ -8670,7 +8670,14 @@ impl Codegen {
             let Some(ty) = ty else { continue };
             let ok = matches!(
                 ty.as_str(),
-                "int64_t" | "int32_t" | "int8_t" | "int" | "bool" | "double" | "_Bool"
+                "int64_t"
+                    | "int32_t"
+                    | "int8_t"
+                    | "int"
+                    | "bool"
+                    | "double"
+                    | "_Bool"
+                    | "MakoString"
             );
             if !ok {
                 continue;
@@ -8871,10 +8878,17 @@ impl Codegen {
             self.line(&format!(
                 "if (!{env_tmp}) {{ fprintf(stderr, \"mako: OOM in closure env\\n\"); abort(); }}"
             ));
-            for (src_name, _) in &captures {
+            for (src_name, cty) in &captures {
                 let field = mangle(src_name);
                 let val = mangle(src_name);
-                self.line(&format!("{env_tmp}->{field} = {val};"));
+                if cty == "MakoString" {
+                    // Capture by owned clone so the closure outlives the local.
+                    self.line(&format!(
+                        "{env_tmp}->{field} = mako_str_clone({val});"
+                    ));
+                } else {
+                    self.line(&format!("{env_tmp}->{field} = {val};"));
+                }
             }
             let tmp = self.fresh("fnv");
             self.line(&format!(
@@ -9746,7 +9760,12 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                     },
                     _ => None,
                 };
-                let (ty, val) = if as_bytes {
+                let (ty, val) = if let (Some(TypeExpr::Fn(ps, ret)), Expr::Lambda { params, body }) =
+                    (ann.as_ref(), init)
+                {
+                    // `let f: fn(string)->int = |s| …` — pass expected param/ret types.
+                    self.emit_lambda_value(params, body, Some(ps.as_slice()), Some(ret.as_ref()))
+                } else if as_bytes {
                     if let Expr::Array(elems) = init {
                         self.emit_byte_array_lit(elems)
                     } else {
@@ -24306,9 +24325,25 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                                 "mako_str_builder_write_cstr({b}, \"{escaped}\");"
                             ));
                         }
-                        crate::ast::InterpPart::Expr(e) => {
+                        crate::ast::InterpPart::Expr(e, fmt) => {
                             let (ty, v) = self.emit_expr(e);
-                            if ty == "MakoString" {
+                            if let Some(spec) = fmt {
+                                let esc = escape_c(spec);
+                                if ty == "MakoString" {
+                                    self.line(&format!(
+                                        "mako_str_builder_write_str_spec({b}, {v}, \"{esc}\");"
+                                    ));
+                                } else if ty == "double" {
+                                    self.line(&format!(
+                                        "mako_str_builder_write_f64_spec({b}, {v}, \"{esc}\");"
+                                    ));
+                                } else {
+                                    // int/bool and other scalar → int64 path
+                                    self.line(&format!(
+                                        "mako_str_builder_write_i64_spec({b}, (int64_t)({v}), \"{esc}\");"
+                                    ));
+                                }
+                            } else if ty == "MakoString" {
                                 self.line(&format!("mako_str_builder_write({b}, {v});"));
                             } else if ty == "int64_t" || ty == "bool" {
                                 self.line(&format!(
