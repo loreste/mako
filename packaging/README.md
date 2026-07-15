@@ -37,25 +37,34 @@ Updates:
 
 Manifest: `packaging/winget/mako.locale.en-US.yaml` (singleton, ManifestVersion 1.6.0).
 
+**v0.1.4 PR:** https://github.com/microsoft/winget-pkgs/pull/402823
+
+Portable nested path (must match zip layout from `package-release.ps1`):
+
+```text
+mako-x86_64-pc-windows-msvc\bin\mako.exe
+```
+
 1. Ensure SHA is filled (`fill-release-packaging.sh`).
 2. Fork [microsoft/winget-pkgs](https://github.com/microsoft/winget-pkgs).
-3. Copy the YAML to `manifests/l/loreste/mako/0.1.4/loreste.mako.yaml` (or multi-file layout).
-4. Open a PR. Validation bots will download the installer URL.
-
-Helper:
+3. Copy the YAML to `manifests/l/loreste/mako/0.1.4/loreste.mako.yaml`.
+4. Open a PR. If bots ask for CLA, comment:  
+   `@microsoft-github-policy-service agree`
 
 ```bash
 ./scripts/publish-winget-seed.sh
-# optional: wingetcreate submit ... (if wingetcreate is installed)
 ```
 
 ## Homebrew (local tap / homebrew-core)
 
 Formula: `Formula/mako.rb` (stable `url` + `sha256` for `v0.1.4` source).
 
+Local tap (already usable on this machine):
+
 ```bash
-brew install --build-from-source Formula/mako.rb
-brew audit --strict --online Formula/mako.rb   # before homebrew-core PR
+brew tap loreste/mako-local   # if not already
+brew install --build-from-source loreste/mako-local/mako
+/opt/homebrew/opt/mako/bin/mako version
 ```
 
 **homebrew-core** requires a public formula PR and maintainer review (external).
