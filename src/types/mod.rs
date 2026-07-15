@@ -258,6 +258,8 @@ pub struct TypeChecker {
     fn_mut_params: HashMap<String, Vec<bool>>,
     /// Comptime-folded `const` integers.
     const_ints: HashMap<String, i64>,
+    /// Comptime-folded `const` strings (seed: literals, concat, used by str_len).
+    const_strs: HashMap<String, String>,
     /// `const fn` definitions for compile-time evaluation.
     const_fns: HashMap<String, FnDef>,
     /// Nesting depth of `for` / `while` (for `break` / `continue`).
@@ -9389,6 +9391,7 @@ impl TypeChecker {
             share_scope_depth: HashMap::new(),
             fn_mut_params: HashMap::new(),
             const_ints: HashMap::new(),
+            const_strs: HashMap::new(),
             const_fns: HashMap::new(),
             loop_depth: 0,
             loop_labels: Vec::new(),
@@ -9710,9 +9713,25 @@ impl TypeChecker {
                 }
                 Item::Import { .. } => {}
                 Item::Const(c) => {
-                    let v = fold_const_expr_with(&c.value, &self.const_ints, &self.const_fns)?;
-                    self.const_ints.insert(c.name.clone(), v);
-                    self.define(&c.name, Type::Int, false);
+                    if let Ok(v) =
+                        fold_const_expr_with(&c.value, &self.const_ints, &self.const_strs, &self.const_fns)
+                    {
+                        self.const_ints.insert(c.name.clone(), v);
+                        self.define(&c.name, Type::Int, false);
+                    } else if let Ok(s) =
+                        fold_const_str_with(&c.value, &self.const_ints, &self.const_strs, &self.const_fns)
+                    {
+                        self.const_strs.insert(c.name.clone(), s);
+                        self.define(&c.name, Type::String, false);
+                    } else {
+                        return Err(TypeError::new(format!(
+                            "const `{}` initializer is not a compile-time int or string",
+                            c.name
+                        ))
+                        .hint(
+                            "use integer ops / const fn, or string literals / `+` concat / const string names",
+                        ));
+                    }
                 }
             }
         }
@@ -9728,7 +9747,7 @@ impl TypeChecker {
                         for p in &f.params {
                             env.insert(p.name.clone(), 0);
                         }
-                        if let Err(e) = eval_const_fn_body(&f.body, &env, &self.const_fns) {
+                        if let Err(e) = eval_const_fn_body(&f.body, &env, &self.const_strs, &self.const_fns) {
                             return Err(TypeError::new(format!(
                                 "const fn `{}` body is not compile-time foldable: {}",
                                 f.name,
@@ -15830,13 +15849,14 @@ fn try_fold_const(expr: &Expr) -> Result<i64, ()> {
 }
 
 fn fold_const_expr(expr: &Expr) -> Result<i64, TypeError> {
-    fold_const_expr_with(expr, &HashMap::new(), &HashMap::new())
+    fold_const_expr_with(expr, &HashMap::new(), &HashMap::new(), &HashMap::new())
 }
 
 /// Fold with const bindings and const-fn table (for `const fn` evaluation).
 fn fold_const_expr_with(
     expr: &Expr,
     consts: &HashMap<String, i64>,
+    const_strs: &HashMap<String, String>,
     const_fns: &HashMap<String, FnDef>,
 ) -> Result<i64, TypeError> {
     match expr {
@@ -15848,27 +15868,52 @@ fn fold_const_expr_with(
         Expr::Binary { op, left, right } => {
             // Short-circuit logical ops (0 = false, nonzero = true).
             if matches!(op, BinOp::And | BinOp::Or) {
-                let l = fold_const_expr_with(left, consts, const_fns)?;
+                let l = fold_const_expr_with(left, consts, const_strs, const_fns)?;
                 match op {
                     BinOp::And => {
                         if l == 0 {
                             return Ok(0);
                         }
-                        let r = fold_const_expr_with(right, consts, const_fns)?;
+                        let r = fold_const_expr_with(right, consts, const_strs, const_fns)?;
                         return Ok(if r != 0 { 1 } else { 0 });
                     }
                     BinOp::Or => {
                         if l != 0 {
                             return Ok(1);
                         }
-                        let r = fold_const_expr_with(right, consts, const_fns)?;
+                        let r = fold_const_expr_with(right, consts, const_strs, const_fns)?;
                         return Ok(if r != 0 { 1 } else { 0 });
                     }
                     _ => unreachable!(),
                 }
             }
-            let l = fold_const_expr_with(left, consts, const_fns)?;
-            let r = fold_const_expr_with(right, consts, const_fns)?;
+            // String equality seed before int path (idents may be const strings).
+            if matches!(op, BinOp::Eq | BinOp::Ne) {
+                if let (Ok(ls), Ok(rs)) = (
+                    fold_const_str_with(left, consts, const_strs, const_fns),
+                    fold_const_str_with(right, consts, const_strs, const_fns),
+                ) {
+                    return Ok(match op {
+                        BinOp::Eq => {
+                            if ls == rs {
+                                1
+                            } else {
+                                0
+                            }
+                        }
+                        BinOp::Ne => {
+                            if ls != rs {
+                                1
+                            } else {
+                                0
+                            }
+                        }
+                        _ => unreachable!(),
+                    });
+                }
+            }
+            let l = fold_const_expr_with(left, consts, const_strs, const_fns)?;
+            let r = fold_const_expr_with(right, consts, const_strs, const_fns)?;
             match op {
                 BinOp::Add => Ok(l.wrapping_add(r)),
                 BinOp::Sub => Ok(l.wrapping_sub(r)),
@@ -15903,7 +15948,7 @@ fn fold_const_expr_with(
             }
         }
         Expr::Unary { op, expr } => {
-            let v = fold_const_expr_with(expr, consts, const_fns)?;
+            let v = fold_const_expr_with(expr, consts, const_strs, const_fns)?;
             match op {
                 UnaryOp::Neg => Ok(v.wrapping_neg()),
                 UnaryOp::BitNot => Ok(!v),
@@ -15915,22 +15960,22 @@ fn fold_const_expr_with(
             then_block,
             else_block,
         } => {
-            let c = fold_const_expr_with(cond, consts, const_fns)?;
+            let c = fold_const_expr_with(cond, consts, const_strs, const_fns)?;
             if c != 0 {
-                eval_const_fn_body(then_block, consts, const_fns)
+                eval_const_fn_body(then_block, consts, const_strs, const_fns)
             } else {
-                eval_const_fn_body(else_block, consts, const_fns)
+                eval_const_fn_body(else_block, consts, const_strs, const_fns)
             }
         }
         Expr::Match { scrutinee, arms } => {
-            let scrut = fold_const_expr_with(scrutinee, consts, const_fns)?;
+            let scrut = fold_const_expr_with(scrutinee, consts, const_strs, const_fns)?;
             for arm in arms {
-                if let Some(binds) = match_const_pattern(&arm.pattern, scrut, consts, const_fns)? {
+                if let Some(binds) = match_const_pattern(&arm.pattern, scrut, consts, const_strs, const_fns)? {
                     let mut env = consts.clone();
                     for (k, v) in binds {
                         env.insert(k, v);
                     }
-                    return fold_const_expr_with(&arm.body, &env, const_fns);
+                    return fold_const_expr_with(&arm.body, &env, const_strs, const_fns);
                 }
             }
             Err(TypeError::new(
@@ -15941,6 +15986,16 @@ fn fold_const_expr_with(
             let Expr::Ident(fname) = callee.as_ref() else {
                 return Err(TypeError::new("const call must name a const fn"));
             };
+            // String builtins foldable to int.
+            if (fname == "str_len" || fname == "len") && args.len() == 1 {
+                let s = fold_const_str_with(&args[0], consts, const_strs, const_fns)?;
+                return Ok(s.len() as i64);
+            }
+            if fname == "str_eq" && args.len() == 2 {
+                let a = fold_const_str_with(&args[0], consts, const_strs, const_fns)?;
+                let b = fold_const_str_with(&args[1], consts, const_strs, const_fns)?;
+                return Ok(if a == b { 1 } else { 0 });
+            }
             let Some(f) = const_fns.get(fname) else {
                 return Err(TypeError::new(format!(
                     "`{fname}` is not a const fn (mark with `const fn`)"
@@ -15954,14 +16009,58 @@ fn fold_const_expr_with(
             }
             let mut locals = consts.clone();
             for (p, a) in f.params.iter().zip(args.iter()) {
-                let v = fold_const_expr_with(a, consts, const_fns)?;
+                let v = fold_const_expr_with(a, consts, const_strs, const_fns)?;
                 locals.insert(p.name.clone(), v);
             }
             // Body must be a single return of a foldable expr (or block ending in return).
-            eval_const_fn_body(&f.body, &locals, const_fns)
+            eval_const_fn_body(&f.body, &locals, const_strs, const_fns)
         }
         _ => Err(TypeError::new(
             "const initializer must be a comptime-foldable integer expression",
+        )),
+    }
+}
+
+/// Fold a compile-time string expression (literals, const names, `+` concat).
+fn fold_const_str_with(
+    expr: &Expr,
+    consts: &HashMap<String, i64>,
+    const_strs: &HashMap<String, String>,
+    const_fns: &HashMap<String, FnDef>,
+) -> Result<String, TypeError> {
+    let _ = consts;
+    let _ = const_fns;
+    match expr {
+        Expr::String(s) => Ok(s.clone()),
+        Expr::Ident(n) => const_strs
+            .get(n)
+            .cloned()
+            .ok_or_else(|| TypeError::new(format!("`{n}` is not a const string"))),
+        Expr::Binary {
+            op: BinOp::Add,
+            left,
+            right,
+        } => {
+            let l = fold_const_str_with(left, consts, const_strs, const_fns)?;
+            let r = fold_const_str_with(right, consts, const_strs, const_fns)?;
+            Ok(l + &r)
+        }
+        Expr::Call { callee, args } => {
+            let Expr::Ident(fname) = callee.as_ref() else {
+                return Err(TypeError::new("const string call must name a helper"));
+            };
+            // Optional: str_concat(a, b) if present as user const path — seed uses `+`.
+            if fname == "str_concat" && args.len() == 2 {
+                let a = fold_const_str_with(&args[0], consts, const_strs, const_fns)?;
+                let b = fold_const_str_with(&args[1], consts, const_strs, const_fns)?;
+                return Ok(a + &b);
+            }
+            Err(TypeError::new(format!(
+                "const string expression cannot call `{fname}`"
+            )))
+        }
+        _ => Err(TypeError::new(
+            "const string must be a literal, const name, or `+` / str_concat of strings",
         )),
     }
 }
@@ -15972,6 +16071,7 @@ fn match_const_pattern(
     pat: &Pattern,
     scrut: i64,
     consts: &HashMap<String, i64>,
+    const_strs: &HashMap<String, String>,
     const_fns: &HashMap<String, FnDef>,
 ) -> Result<Option<HashMap<String, i64>>, TypeError> {
     match pat {
@@ -15984,7 +16084,7 @@ fn match_const_pattern(
             Ok(Some(m))
         }
         Pattern::Literal(e) => {
-            let v = fold_const_expr_with(e, consts, const_fns)?;
+            let v = fold_const_expr_with(e, consts, const_strs, const_fns)?;
             Ok(if v == scrut {
                 Some(HashMap::new())
             } else {
@@ -15993,7 +16093,7 @@ fn match_const_pattern(
         }
         Pattern::Or(alts) => {
             for a in alts {
-                if let Some(b) = match_const_pattern(a, scrut, consts, const_fns)? {
+                if let Some(b) = match_const_pattern(a, scrut, consts, const_strs, const_fns)? {
                     return Ok(Some(b));
                 }
             }
@@ -16008,6 +16108,7 @@ fn match_const_pattern(
 fn eval_const_fn_body(
     body: &Block,
     locals: &HashMap<String, i64>,
+    const_strs: &HashMap<String, String>,
     const_fns: &HashMap<String, FnDef>,
 ) -> Result<i64, TypeError> {
     // Support: let/assign/return, trailing expr, if, match (via expr), while (bounded).
@@ -16017,12 +16118,12 @@ fn eval_const_fn_body(
         let stmt = &body.stmts[i];
         let is_last = i + 1 == body.stmts.len();
         match stmt {
-            Stmt::Return(Some(e)) => return fold_const_expr_with(e, &env, const_fns),
+            Stmt::Return(Some(e)) => return fold_const_expr_with(e, &env, const_strs, const_fns),
             Stmt::Return(None) => {
                 return Err(TypeError::new("const fn cannot return void"));
             }
             Stmt::Let { name, init, .. } => {
-                let v = fold_const_expr_with(init, &env, const_fns)?;
+                let v = fold_const_expr_with(init, &env, const_strs, const_fns)?;
                 env.insert(name.clone(), v);
             }
             Stmt::Assign { name, value } => {
@@ -16031,7 +16132,7 @@ fn eval_const_fn_body(
                         "const assign to unknown `{name}` (declare with let first)"
                     )));
                 }
-                let v = fold_const_expr_with(value, &env, const_fns)?;
+                let v = fold_const_expr_with(value, &env, const_strs, const_fns)?;
                 env.insert(name.clone(), v);
             }
             Stmt::If {
@@ -16043,7 +16144,7 @@ fn eval_const_fn_body(
                 if let Some(init_stmt) = init {
                     match init_stmt.as_ref() {
                         Stmt::Let { name, init, .. } => {
-                            let v = fold_const_expr_with(init, &env, const_fns)?;
+                            let v = fold_const_expr_with(init, &env, const_strs, const_fns)?;
                             env.insert(name.clone(), v);
                         }
                         _ => {
@@ -16053,18 +16154,18 @@ fn eval_const_fn_body(
                         }
                     }
                 }
-                let c = fold_const_expr_with(cond, &env, const_fns)?;
+                let c = fold_const_expr_with(cond, &env, const_strs, const_fns)?;
                 if c != 0 {
                     // Prefer nested return; if then-block yields without return, merge env is N/A
                     // for seed — require then/else to return when used as control in const fn.
-                    return eval_const_fn_body(then_block, &env, const_fns);
+                    return eval_const_fn_body(then_block, &env, const_strs, const_fns);
                 } else if let Some(eb) = else_block {
-                    return eval_const_fn_body(eb, &env, const_fns);
+                    return eval_const_fn_body(eb, &env, const_strs, const_fns);
                 }
                 // `if` without else that did not return: fall through
             }
             Stmt::While { cond, body: wbody, .. } => {
-                match run_const_while(cond, wbody, &mut env, const_fns)? {
+                match run_const_while(cond, wbody, &mut env, const_strs, const_fns)? {
                     Some(ret) => return Ok(ret),
                     None => {}
                 }
@@ -16075,7 +16176,7 @@ fn eval_const_fn_body(
                 body: fbody,
                 ..
             } => {
-                match run_const_for_count(binders, iter, fbody, &mut env, const_fns)? {
+                match run_const_for_count(binders, iter, fbody, &mut env, const_strs, const_fns)? {
                     Some(ret) => return Ok(ret),
                     None => {}
                 }
@@ -16087,13 +16188,13 @@ fn eval_const_fn_body(
                 body: fbody,
                 ..
             } => {
-                match run_const_cfor(init, cond, post, fbody, &mut env, const_fns)? {
+                match run_const_cfor(init, cond, post, fbody, &mut env, const_strs, const_fns)? {
                     Some(ret) => return Ok(ret),
                     None => {}
                 }
             }
             Stmt::Expr(e) if is_last => {
-                return fold_const_expr_with(e, &env, const_fns);
+                return fold_const_expr_with(e, &env, const_strs, const_fns);
             }
             Stmt::Expr(_) => {
                 // Side-effect-free const expr as statement: evaluate and discard.
@@ -16103,6 +16204,7 @@ fn eval_const_fn_body(
                         _ => unreachable!(),
                     },
                     &env,
+                    const_strs,
                     const_fns,
                 )?;
             }
@@ -16133,18 +16235,19 @@ fn run_const_while(
     cond: &Expr,
     body: &Block,
     env: &mut HashMap<String, i64>,
+    const_strs: &HashMap<String, String>,
     const_fns: &HashMap<String, FnDef>,
 ) -> Result<Option<i64>, TypeError> {
     const MAX_ITERS: i64 = 100_000;
     let mut iters = 0i64;
-    while fold_const_expr_with(cond, env, const_fns)? != 0 {
+    while fold_const_expr_with(cond, env, const_strs, const_fns)? != 0 {
         iters += 1;
         if iters > MAX_ITERS {
             return Err(TypeError::new(
                 "const while exceeded 100000 iterations (runaway loop?)",
             ));
         }
-        match eval_const_loop_body(body, env, const_fns)? {
+        match eval_const_loop_body(body, env, const_strs, const_fns)? {
             ConstLoopCtl::Return(v) => return Ok(Some(v)),
             ConstLoopCtl::Break => break,
             ConstLoopCtl::Continue | ConstLoopCtl::Fallthrough => {}
@@ -16158,9 +16261,10 @@ fn run_const_for_count(
     iter: &Expr,
     body: &Block,
     env: &mut HashMap<String, i64>,
+    const_strs: &HashMap<String, String>,
     const_fns: &HashMap<String, FnDef>,
 ) -> Result<Option<i64>, TypeError> {
-    let n = fold_const_expr_with(iter, env, const_fns)?;
+    let n = fold_const_expr_with(iter, env, const_strs, const_fns)?;
     if n < 0 {
         return Err(TypeError::new("const for count must be non-negative"));
     }
@@ -16174,7 +16278,7 @@ fn run_const_for_count(
         if let Some(ref b) = binder {
             env.insert(b.clone(), idx);
         }
-        match eval_const_loop_body(body, env, const_fns)? {
+        match eval_const_loop_body(body, env, const_strs, const_fns)? {
             ConstLoopCtl::Return(v) => return Ok(Some(v)),
             ConstLoopCtl::Break => break,
             ConstLoopCtl::Continue | ConstLoopCtl::Fallthrough => {}
@@ -16189,15 +16293,16 @@ fn run_const_cfor(
     post: &Stmt,
     body: &Block,
     env: &mut HashMap<String, i64>,
+    const_strs: &HashMap<String, String>,
     const_fns: &HashMap<String, FnDef>,
 ) -> Result<Option<i64>, TypeError> {
     match init {
         Stmt::Let { name, init: iv, .. } => {
-            let v = fold_const_expr_with(iv, env, const_fns)?;
+            let v = fold_const_expr_with(iv, env, const_strs, const_fns)?;
             env.insert(name.clone(), v);
         }
         Stmt::Assign { name, value } => {
-            let v = fold_const_expr_with(value, env, const_fns)?;
+            let v = fold_const_expr_with(value, env, const_strs, const_fns)?;
             env.insert(name.clone(), v);
         }
         _ => {
@@ -16208,14 +16313,14 @@ fn run_const_cfor(
     }
     const MAX_ITERS: i64 = 100_000;
     let mut iters = 0i64;
-    while fold_const_expr_with(cond, env, const_fns)? != 0 {
+    while fold_const_expr_with(cond, env, const_strs, const_fns)? != 0 {
         iters += 1;
         if iters > MAX_ITERS {
             return Err(TypeError::new(
                 "const C-style for exceeded 100000 iterations (runaway loop?)",
             ));
         }
-        let ctl = eval_const_loop_body(body, env, const_fns)?;
+        let ctl = eval_const_loop_body(body, env, const_strs, const_fns)?;
         match ctl {
             ConstLoopCtl::Return(v) => return Ok(Some(v)),
             ConstLoopCtl::Break => break, // do not run post
@@ -16223,15 +16328,15 @@ fn run_const_cfor(
                 // `continue` still runs the post clause (Go/C semantics).
                 match post {
                     Stmt::Let { name, init: iv, .. } => {
-                        let v = fold_const_expr_with(iv, env, const_fns)?;
+                        let v = fold_const_expr_with(iv, env, const_strs, const_fns)?;
                         env.insert(name.clone(), v);
                     }
                     Stmt::Assign { name, value } => {
-                        let v = fold_const_expr_with(value, env, const_fns)?;
+                        let v = fold_const_expr_with(value, env, const_strs, const_fns)?;
                         env.insert(name.clone(), v);
                     }
                     Stmt::Expr(e) => {
-                        let _ = fold_const_expr_with(e, env, const_fns)?;
+                        let _ = fold_const_expr_with(e, env, const_strs, const_fns)?;
                     }
                     _ => {
                         return Err(TypeError::new(
@@ -16249,13 +16354,14 @@ fn run_const_cfor(
 fn eval_const_loop_body(
     body: &Block,
     env: &mut HashMap<String, i64>,
+    const_strs: &HashMap<String, String>,
     const_fns: &HashMap<String, FnDef>,
 ) -> Result<ConstLoopCtl, TypeError> {
     for stmt in &body.stmts {
         match stmt {
             Stmt::Return(Some(e)) => {
                 return Ok(ConstLoopCtl::Return(fold_const_expr_with(
-                    e, env, const_fns,
+                    e, env, const_strs, const_fns,
                 )?));
             }
             Stmt::Return(None) => {
@@ -16274,7 +16380,7 @@ fn eval_const_loop_body(
                 ));
             }
             Stmt::Let { name, init, .. } => {
-                let v = fold_const_expr_with(init, env, const_fns)?;
+                let v = fold_const_expr_with(init, env, const_strs, const_fns)?;
                 env.insert(name.clone(), v);
             }
             Stmt::Assign { name, value } => {
@@ -16283,7 +16389,7 @@ fn eval_const_loop_body(
                         "const assign to unknown `{name}` (declare with let first)"
                     )));
                 }
-                let v = fold_const_expr_with(value, env, const_fns)?;
+                let v = fold_const_expr_with(value, env, const_strs, const_fns)?;
                 env.insert(name.clone(), v);
             }
             Stmt::If {
@@ -16294,28 +16400,28 @@ fn eval_const_loop_body(
             } => {
                 if let Some(init_stmt) = init {
                     if let Stmt::Let { name, init, .. } = init_stmt.as_ref() {
-                        let v = fold_const_expr_with(init, env, const_fns)?;
+                        let v = fold_const_expr_with(init, env, const_strs, const_fns)?;
                         env.insert(name.clone(), v);
                     }
                 }
-                let c = fold_const_expr_with(cond, env, const_fns)?;
+                let c = fold_const_expr_with(cond, env, const_strs, const_fns)?;
                 let branch = if c != 0 {
                     Some(then_block)
                 } else {
                     else_block.as_ref()
                 };
                 if let Some(b) = branch {
-                    match eval_const_loop_body(b, env, const_fns)? {
+                    match eval_const_loop_body(b, env, const_strs, const_fns)? {
                         ConstLoopCtl::Fallthrough => {}
                         other => return Ok(other),
                     }
                 }
             }
             Stmt::Expr(e) => {
-                let _ = fold_const_expr_with(e, env, const_fns)?;
+                let _ = fold_const_expr_with(e, env, const_strs, const_fns)?;
             }
             Stmt::While { cond, body: wbody, .. } => {
-                if let Some(v) = run_const_while(cond, wbody, env, const_fns)? {
+                if let Some(v) = run_const_while(cond, wbody, env, const_strs, const_fns)? {
                     return Ok(ConstLoopCtl::Return(v));
                 }
             }
@@ -16325,7 +16431,7 @@ fn eval_const_loop_body(
                 body: fbody,
                 ..
             } => {
-                if let Some(v) = run_const_for_count(binders, iter, fbody, env, const_fns)? {
+                if let Some(v) = run_const_for_count(binders, iter, fbody, env, const_strs, const_fns)? {
                     return Ok(ConstLoopCtl::Return(v));
                 }
             }
@@ -16336,7 +16442,7 @@ fn eval_const_loop_body(
                 body: fbody,
                 ..
             } => {
-                if let Some(v) = run_const_cfor(init, cond, post, fbody, env, const_fns)? {
+                if let Some(v) = run_const_cfor(init, cond, post, fbody, env, const_strs, const_fns)? {
                     return Ok(ConstLoopCtl::Return(v));
                 }
             }
