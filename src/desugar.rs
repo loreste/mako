@@ -30,6 +30,7 @@ pub fn desugar(mut program: Program) -> Program {
 }
 
 /// `on Point { fn distance(self) -> int { … } }` → `fn Point_distance(self: Point, …)`
+/// `on Counter : Adder { fn add… }` → `fn Adder_Counter_add(self: Counter, …)`
 fn expand_on(on: OnDef) -> Vec<Item> {
     let mut items = Vec::new();
     for mut method in on.methods {
@@ -49,7 +50,11 @@ fn expand_on(on: OnDef) -> Vec<Item> {
                 }
             }
         }
-        method.name = format!("{}_{}", on.ty, method.name);
+        method.name = if let Some(ref iface) = on.iface {
+            format!("{iface}_{}_{}", on.ty, method.name)
+        } else {
+            format!("{}_{}", on.ty, method.name)
+        };
         method.exported = on.exported;
         // Methods from `on` are concrete (no free type params unless user wrote them).
         items.push(Item::Fn(method));
@@ -283,7 +288,7 @@ fn expand_actor(actor: ActorDef) -> Vec<Item> {
         }));
     }
 
-    // Session_spawn() -> chan[int]
+    // Session_spawn() -> chan[int] (default mailbox 16)
     items.push(Item::Fn(FnDef {
         name: format!("{name}_spawn"),
         type_params: Vec::new(),
@@ -296,6 +301,30 @@ fn expand_actor(actor: ActorDef) -> Vec<Item> {
             stmts: vec![Stmt::Return(Some(Expr::Call {
                 callee: Box::new(Expr::Ident("actor_spawn".into())),
                 args: vec![Expr::Int(16)],
+            }))],
+        },
+        exported: false,
+        is_const: false,
+        stability: crate::ast::ApiStability::Unspecified,
+    }));
+
+    // Session_spawn_cap(cap) -> chan[int]
+    items.push(Item::Fn(FnDef {
+        name: format!("{name}_spawn_cap"),
+        type_params: Vec::new(),
+        params: vec![Param {
+            name: "__cap".into(),
+            ty: TypeExpr::Named("int".into()),
+            mutable: false,
+        }],
+        ret: Some(TypeExpr::Generic(
+            "chan".into(),
+            vec![TypeExpr::Named("int".into())],
+        )),
+        body: Block {
+            stmts: vec![Stmt::Return(Some(Expr::Call {
+                callee: Box::new(Expr::Ident("actor_spawn".into())),
+                args: vec![Expr::Ident("__cap".into())],
             }))],
         },
         exported: false,

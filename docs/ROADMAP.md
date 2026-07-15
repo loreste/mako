@@ -85,7 +85,8 @@ Metrics/prom + span-lite JSON are in; **depth seeds landed** (2026-07-14).
 
 ### P3 — Install, distribution, portability
 
-1. Installer UX polish — **partial seed**: `install-manifest.json` + doctor host/header checks  
+1. ~~Installer UX polish~~ **Done seed** — manifest (Unix+Windows) · doctor schema/fields · `DOCTOR_STRICT` matrix  
+
 2. ~~Windows winget / Linux deb·rpm seeds~~ **Done seed** — `packaging/winget/` · `scripts/package-deb.sh` · `package-rpm.sh` (MSI/notarize residual)  
 3. ~~Homebrew formula~~ **Done seed** — `Formula/mako.rb` (core publish is external)  
 4. ~~Multi-OS matrix validation seed~~ **Done seed** — `scripts/validate-matrix.sh`  
@@ -268,8 +269,9 @@ Percentages are weighted; update when a task flips.
 - [x] Auto `fn_drop` on scope exit; kick **moves** env into the task (no double-free).
 - [x] Debug locals registry + soft BP ids (`debug_set_int` / `debug_locals_json` / `debug_bp`).
 - [x] Debug source frame seed (`debug_set_loc` / `debug_file` / `debug_line` / `debug_frame_json`).
-- [ ] Full debugger: DWARF source-level locals, real process breakpoints, async frame walk.
-- [ ] Full OTLP protobuf + exporter HTTP client productization.
+- [x] Debugger depth seed: line BPs · frame stack · async parent · trap flag · `debug_snapshot_json`.
+- [x] OTLP protobuf export seed (`trace_export_otlp_pb`) + HTTP exporter (`otlp_http_export` / `otlp_export_traces_*`).
+- [ ] Full DWARF / DAP product debugger (lldb on generated C remains the external path).
 - [ ] Sampling CPU profiler / continuous profilers.
 
 ### 9. Installer, distribution, and portability — 10%
@@ -280,7 +282,8 @@ Percentages are weighted; update when a task flips.
 - [x] Release archives + checksums + install smoke + CI installer smoke.
 - [x] Cross-target flag · WASI preview1/2 seeds · static defaults · container/serverless helpers.
 - [x] Stable ABI, dynamic libraries, native plugins, WASM plugins.
-- [x] Installer manifest + doctor host/header checks (`install-manifest.json` seed).
+- [x] Installer manifest + doctor schema/field validation (`install-manifest.json` seed).
+- [x] Windows `install.ps1` writes the same manifest schema.
 - [x] Packaging seeds: `package-deb.sh` · `package-rpm.sh` · `packaging/winget/` · `Formula/mako.rb` · `validate-matrix.sh`.
 - [x] MSI / macOS notarize **workflow notes** (`scripts/package-msi-notes.md` · `package-macos-notarize-notes.md`).
 - [ ] Complete installer UX for macOS, Linux, and Windows (signed MSI / notarized pkg in CI).

@@ -4118,12 +4118,14 @@ static inline void mako_http_client_set_timeout(int fd, int64_t timeout_ms) {
 #endif
 }
 
-/* method: "GET"/"POST"/…; body may be empty; timeout_ms <=0 means no socket timeout. */
-static inline MakoString mako_http_request(
+/* method: "GET"/"POST"/…; body may be empty; timeout_ms <=0 means no socket timeout.
+ * content_type may be empty (defaults to application/octet-stream when body present). */
+static inline MakoString mako_http_request_ct(
     MakoString method,
     MakoString url,
     MakoString body,
-    int64_t timeout_ms
+    int64_t timeout_ms,
+    MakoString content_type
 ) {
     mako_http_client_last_status = 0;
     mako_http_client_last_raw_len = 0;
@@ -4180,6 +4182,14 @@ static inline MakoString mako_http_request(
         meth = methbuf;
     }
 
+    char ctbuf[128];
+    const char *ct = "application/octet-stream";
+    if (content_type.data && content_type.len > 0 && content_type.len < sizeof(ctbuf)) {
+        memcpy(ctbuf, content_type.data, content_type.len);
+        ctbuf[content_type.len] = 0;
+        ct = ctbuf;
+    }
+
     size_t blen = body.data ? body.len : 0;
     char req[4096];
     int n;
@@ -4188,11 +4198,12 @@ static inline MakoString mako_http_request(
             req,
             sizeof(req),
             "%s %s HTTP/1.0\r\nHost: %s\r\nContent-Length: %zu\r\n"
-            "Content-Type: application/octet-stream\r\nConnection: close\r\n\r\n",
+            "Content-Type: %s\r\nConnection: close\r\n\r\n",
             meth,
             path,
             host,
-            blen
+            blen,
+            ct
         );
     } else {
         n = snprintf(
@@ -4264,6 +4275,13 @@ static inline MakoString mako_http_request(
     return (MakoString){buf, len};
 }
 
+static inline MakoString mako_http_request(
+    MakoString method, MakoString url, MakoString body, int64_t timeout_ms
+) {
+    MakoString empty_ct = {(char *)(uintptr_t)"", 0};
+    return mako_http_request_ct(method, url, body, timeout_ms, empty_ct);
+}
+
 static inline MakoString mako_http_get(MakoString url) {
     MakoString meth = {(char *)(uintptr_t)"GET", 3};
     MakoString empty = {(char *)(uintptr_t)"", 0};
@@ -4288,6 +4306,17 @@ static inline MakoString mako_http_post_timeout(
 ) {
     MakoString meth = {(char *)(uintptr_t)"POST", 4};
     return mako_http_request(meth, url, body, timeout_ms);
+}
+
+/* OTLP/HTTP exporter seed: POST body with Content-Type; returns last status or -1. */
+static inline int64_t mako_otlp_http_export(
+    MakoString url, MakoString body, MakoString content_type, int64_t timeout_ms
+) {
+    MakoString meth = {(char *)(uintptr_t)"POST", 4};
+    MakoString resp = mako_http_request_ct(meth, url, body, timeout_ms, content_type);
+    mako_str_free(resp);
+    int64_t st = mako_http_client_last_status;
+    return st > 0 ? st : -1;
 }
 
 #ifdef __cplusplus

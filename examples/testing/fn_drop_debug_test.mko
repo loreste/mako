@@ -100,3 +100,46 @@ fn TestDebugBp() {
     assert_eq(debug_bp(1), 0)
     assert(debug_break_hits() >= 1)
 }
+
+fn TestDebugLineBpAndFrames() {
+    let _ = debug_break_reset()
+    assert_eq(debug_trap_enabled(), 0)
+    assert_eq(debug_trap_enable(0), 0) // keep trap off in tests
+    let id = debug_line_bp_set("main.mko", 42)
+    assert(id >= 0)
+    assert_eq(debug_set_loc("main.mko", 42), 1)
+    assert(debug_line_bp_hits(id) >= 1)
+    assert(debug_break_hits() >= 1)
+    assert_eq(debug_line_bp_clear(id), 1)
+
+    assert_eq(debug_frame_depth(), 0)
+    assert(debug_push_frame("a.mko", 1, "root") >= 1)
+    assert(debug_push_frame("b.mko", 2, "child") >= 2)
+    assert_eq(debug_frame_depth(), 2)
+    let fj = debug_frames_json()
+    assert(str_contains(fj, "mako.debug_frames.v1"))
+    assert(str_contains(fj, "child"))
+    assert_eq(debug_pop_frame(), 1)
+    assert_eq(debug_frame_depth(), 1)
+    let _ = debug_pop_frame()
+
+    let snap = debug_snapshot_json()
+    assert(str_contains(snap, "mako.debug_snapshot.v1"))
+    assert(str_contains(snap, "tasks"))
+    assert(str_contains(snap, "locals"))
+    assert(str_contains(snap, "frames"))
+}
+
+fn TestDebugAsyncParent() {
+    // Parent link seed: set current task id, spawn children, inspect parent field.
+    let _ = debug_set_current_task(9001)
+    assert_eq(debug_current_task(), 9001)
+    crew c {
+        let j = c.kick(work(2))
+        let snap = tasks_inspect_json()
+        assert(str_contains(snap, "parent"))
+        assert(str_contains(snap, "cancelled"))
+        assert_eq(j.join(), 4)
+    }
+    let _ = debug_set_current_task(0)
+}

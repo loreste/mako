@@ -22,6 +22,20 @@ fn TestTraceExportOtlp() {
     assert(str_contains(otlp, "startTimeUnixNano"))
     assert(str_contains(otlp, "endTimeUnixNano"))
     assert(str_contains(otlp, "service.name"))
+
+    // Protobuf OTLP seed: non-empty wire payload with nested length tags.
+    let pblen = trace_export_otlp_pb_len()
+    assert(pblen > 20)
+    let pb = trace_export_otlp_pb()
+    assert(len(pb) == pblen)
+    // First field key for ExportTraceServiceRequest.resource_spans = (1<<3)|2 = 0x0a
+    assert_eq(str_byte_at(pb, 0), 10)
+
+    // Exporter client seed: unreachable collector → -1 (no hang with short timeout).
+    let st = otlp_export_traces_json("http://127.0.0.1:1/v1/traces", 50)
+    assert_eq(st, -1)
+    let st2 = otlp_export_traces_pb("http://127.0.0.1:1/v1/traces", 50)
+    assert_eq(st2, -1)
     let _ = trace_clear()
 }
 

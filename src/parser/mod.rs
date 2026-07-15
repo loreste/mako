@@ -289,9 +289,16 @@ impl Parser {
     }
 
     /// `on Point { fn distance(self) -> int { … } }`
+    /// `on Counter : Adder { fn add(self, delta: int) -> int { … } }`
     fn parse_on(&mut self) -> Result<OnDef, ParseError> {
         self.expect(TokenKind::On)?;
         let ty = self.expect_ident()?;
+        let iface = if matches!(self.peek_kind(), TokenKind::Colon) {
+            self.bump();
+            Some(self.expect_ident()?)
+        } else {
+            None
+        };
         self.expect(TokenKind::LBrace)?;
         let mut methods = Vec::new();
         while !matches!(self.peek_kind(), TokenKind::RBrace | TokenKind::Eof) {
@@ -302,6 +309,7 @@ impl Parser {
         self.expect(TokenKind::RBrace)?;
         Ok(OnDef {
             ty,
+            iface,
             methods,
             exported: false,
         })

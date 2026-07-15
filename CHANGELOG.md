@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+### Debugger · OTLP · installer · actor/interface seeds
+
+- **Debugger depth:** source-line soft BPs (`debug_line_bp_*`), frame stack
+  (`debug_push/pop_frame` / `debug_frames_json`), async parent ids on tasks,
+  optional SIGTRAP (`debug_trap_enable`), combined `debug_snapshot_json`.
+- **OTLP:** `trace_export_otlp_pb` (minimal protobuf wire) · `otlp_http_export` /
+  `otlp_export_traces_json|pb` · `http_request_ct` (Content-Type).
+- **Installer:** doctor validates manifest schema/version/prefix; Windows
+  `install.ps1` writes `mako.install.v1`; matrix `DOCTOR_STRICT=1` option.
+- **Actors:** `Name_spawn_cap(n)` · **Interfaces:** `on Concrete : Iface { … }`
+  desugars to `Iface_Concrete_method`.
+- Tests: `fn_drop_debug_test`, `observability_depth_test`, `actor_test`,
+  `iface_on_iface_test`.
+
 ### Storage polish seeds (bloom · range · page manager)
 
 - **Bloom filter:** `bloom_new` / `add` / `maybe` / `len` / `free` — int64 keys,

@@ -4570,6 +4570,42 @@ impl TypeChecker {
             Type::Fn(vec![], Box::new(Type::String)),
         );
         fns.insert(
+            "trace_export_otlp_pb".into(),
+            Type::Fn(vec![], Box::new(Type::String)),
+        );
+        fns.insert(
+            "trace_export_otlp_pb_len".into(),
+            Type::Fn(vec![], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "otlp_http_export".into(),
+            Type::Fn(
+                vec![Type::String, Type::String, Type::String, Type::Int],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "otlp_export_traces_json".into(),
+            Type::Fn(vec![Type::String, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "otlp_export_traces_pb".into(),
+            Type::Fn(vec![Type::String, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "http_request_ct".into(),
+            Type::Fn(
+                vec![
+                    Type::String,
+                    Type::String,
+                    Type::String,
+                    Type::Int,
+                    Type::String,
+                ],
+                Box::new(Type::String),
+            ),
+        );
+        fns.insert(
             "trace_span_id".into(),
             Type::Fn(vec![], Box::new(Type::String)),
         );
@@ -4668,6 +4704,57 @@ impl TypeChecker {
         fns.insert(
             "debug_bp".into(),
             Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "debug_trap_enable".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "debug_trap_enabled".into(),
+            Type::Fn(vec![], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "debug_line_bp_set".into(),
+            Type::Fn(vec![Type::String, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "debug_line_bp_clear".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "debug_line_bp_hits".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "debug_push_frame".into(),
+            Type::Fn(
+                vec![Type::String, Type::Int, Type::String],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "debug_pop_frame".into(),
+            Type::Fn(vec![], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "debug_frame_depth".into(),
+            Type::Fn(vec![], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "debug_frames_json".into(),
+            Type::Fn(vec![], Box::new(Type::String)),
+        );
+        fns.insert(
+            "debug_snapshot_json".into(),
+            Type::Fn(vec![], Box::new(Type::String)),
+        );
+        fns.insert(
+            "debug_set_current_task".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "debug_current_task".into(),
+            Type::Fn(vec![], Box::new(Type::Int)),
         );
         fns.insert(
             "process_rss_bytes".into(),

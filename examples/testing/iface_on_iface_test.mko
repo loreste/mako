@@ -1,0 +1,24 @@
+// Interface impl sugar: on Concrete : Iface { methods… }
+
+struct Counter {
+    n: int
+}
+
+interface Adder {
+    fn add(int) -> int
+}
+
+on Counter : Adder {
+    fn add(self, delta: int) -> int {
+        return self.n + delta
+    }
+}
+
+fn use_adder(a: Adder, d: int) -> int {
+    return a.add(d)
+}
+
+fn TestOnIfaceSugar() {
+    let c = Counter { n: 10 }
+    assert_eq(use_adder(c, 5), 15)
+}

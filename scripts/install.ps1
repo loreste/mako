@@ -79,12 +79,31 @@ if (Test-Path $VsSrc) {
     Copy-Item $VsSrc $VsDst -Recurse -Force
 }
 
+$ShareDir = Join-Path $Prefix "share\mako"
+$VerLine = & (Join-Path $BinDir "mako.exe") version 2>$null
+if (-not $VerLine) { $VerLine = "unknown" }
+$HostId = "$([System.Environment]::OSVersion.Platform)-$([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture)"
+$Ts = [DateTime]::UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ")
+$Manifest = @{
+    schema = "mako.install.v1"
+    version = "$VerLine"
+    prefix = "$Prefix"
+    host = "$HostId"
+    installedAt = "$Ts"
+    runtime = "$RuntimeDst"
+    std = "$StdDst"
+} | ConvertTo-Json
+$ManifestPath = Join-Path $ShareDir "install-manifest.json"
+New-Item -ItemType Directory -Force -Path $ShareDir | Out-Null
+Set-Content -Path $ManifestPath -Value $Manifest -Encoding UTF8
+
 Write-Host "Installed $(Join-Path $BinDir 'mako.exe')"
 Write-Host "Installed runtime → $RuntimeDst"
 Write-Host "Installed stdlib  → $StdDst"
 if (Test-Path (Join-Path $EditorsDst "vscode")) {
     Write-Host "Installed VS Code scaffold → $(Join-Path $EditorsDst 'vscode')"
 }
+Write-Host "Manifest: $ManifestPath"
 Write-Host "Add to PATH: $BinDir"
 Write-Host "Optional: `$env:MAKO_RUNTIME = '$RuntimeDst'"
 Write-Host "Requires clang (LLVM) on PATH to compile .mko programs."

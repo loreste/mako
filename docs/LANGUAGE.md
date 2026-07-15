@@ -100,6 +100,32 @@ search a span — no substring allocation:
 
 See [BUILTINS.md](BUILTINS.md) § Strings and `examples/testing/str_slice_zc_test.mko`.
 
+## Actors
+
+```mko
+actor Counter {
+    n: int = 0
+    receive Inc { self.n = self.n + 1 }
+    receive Bye { let _ = 0 }
+}
+// Counter_spawn() · Counter_spawn_cap(32) · Counter_send(m, Counter_Inc()) · Counter_loop(m)
+```
+
+Desugars to mailbox helpers; `Bye`/`Stop` stops the loop. Tests: `actor_test.mko`.
+
+## Interfaces
+
+```mko
+interface Adder { fn add(int) -> int }
+on Counter : Adder {
+    fn add(self, delta: int) -> int { return self.n + delta }
+}
+fn use(a: Adder, d: int) -> int { return a.add(d) }
+```
+
+Dyn values use a fat pointer + vtable. Also free-fn form `Adder_Counter_add`.
+Tests: `iface_*_test.mko`, `iface_on_iface_test.mko`.
+
 ## Collections (maps & slices)
 
 One monomorphized surface — no special collection package for everyday work.

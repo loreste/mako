@@ -630,11 +630,46 @@ fn cmd_doctor() -> Result<(), ()> {
                     println!("    {header}: FAIL missing");
                 }
             }
-            // Optional install manifest next to share/mako.
+            // Install manifest next to share/mako (validate schema + host seed).
             if let Some(share) = rt.parent() {
                 let man = share.join("install-manifest.json");
                 if man.exists() {
-                    println!("  install: ok (manifest {})", man.display());
+                    match std::fs::read_to_string(&man) {
+                        Ok(body) => {
+                            let schema_ok = body.contains("mako.install.v1");
+                            let has_ver = body.contains("\"version\"");
+                            let has_prefix = body.contains("\"prefix\"");
+                            let host_line = body
+                                .lines()
+                                .find(|l| l.contains("\"host\""))
+                                .unwrap_or("")
+                                .trim()
+                                .to_string();
+                            let cur_host = format!(
+                                "{}-{}",
+                                std::env::consts::OS,
+                                std::env::consts::ARCH
+                            );
+                            // uname-style host in manifest is Darwin-arm64; consts is macos/aarch64.
+                            let host_ok = !host_line.is_empty();
+                            if schema_ok && has_ver && has_prefix {
+                                println!(
+                                    "  install: ok (manifest {} · {})",
+                                    man.display(),
+                                    if host_ok { host_line.as_str() } else { "host?" }
+                                );
+                                println!("  install host now: {} / {}", std::env::consts::OS, std::env::consts::ARCH);
+                                let _ = cur_host;
+                            } else {
+                                ok = false;
+                                println!("  install: FAIL manifest missing schema/version/prefix");
+                            }
+                        }
+                        Err(e) => {
+                            ok = false;
+                            println!("  install: FAIL read manifest ({e})");
+                        }
+                    }
                 } else {
                     println!("  install: warn no install-manifest.json (source checkout ok)");
                 }

@@ -173,19 +173,19 @@ keeps lifetimes honest.
 
 ## Actors (first-class)
 
-**Target**
+**Now (seed):**
 
 ```mko
-actor Session {
-    state Call
-    receive Invite { ... }
-    receive Bye { ... }
-    receive Timer { ... }
+actor Counter {
+    n: int = 0
+    receive Inc { self.n = self.n + 1 }
+    receive Bye { let _ = 0 }
 }
+// Counter_spawn() / Counter_spawn_cap(n) · Counter_send · Counter_loop
 ```
 
-**Now:** runtime mailbox API + example (`actor_spawn` / `actor_send` /
-`actor_recv`) modeling Invite/Bye/Timer. Full `actor`/`receive` syntax is Next.
+Owned state + `self.field` in receives; int-tag mailboxes; `Bye`/`Stop` ends the
+loop. Typed message payloads and supervision remain Later.
 
 ---
 
@@ -225,8 +225,10 @@ Elasticsearch-compatible systems through stdlib or official packages.
 
 ## Interfaces / contracts
 
-Light **interfaces/protocols** — compile-time guarantees, clear contracts, easy
-mocks. Not a trait maze. **Next** for language surface.
+Light **interfaces** — compile-time method sets, dyn dispatch, easy mocks.
+**Now (seed):** `interface Adder { fn add(int) -> int }` +
+`on Counter : Adder { fn add(self, …) }` (or free `Adder_Counter_add`).
+No trait maze; embedding/generic bounds remain Later.
 
 ---
 

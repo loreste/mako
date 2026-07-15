@@ -45,3 +45,14 @@ fn TestActorOwnedState() {
         assert_eq(loopj.join(), 3)
     }
 }
+
+fn TestActorSpawnCap() {
+    // Custom mailbox capacity (still int-tag mailbox seed).
+    let c = Counter_spawn_cap(32)
+    crew t {
+        let loopj = t.kick(Counter_loop(c))
+        assert(Counter_send(c, Counter_Inc()))
+        assert(Counter_send(c, Counter_Bye()))
+        assert_eq(loopj.join(), 1)
+    }
+}

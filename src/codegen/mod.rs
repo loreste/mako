@@ -18481,6 +18481,57 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             ));
                             return ("MakoString".into(), tmp);
                         }
+                        "trace_export_otlp_pb" => {
+                            let tmp = self.fresh("teotlppb");
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_trace_export_otlp_pb();"
+                            ));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "trace_export_otlp_pb_len" => {
+                            return (
+                                "int64_t".into(),
+                                "mako_trace_export_otlp_pb_len()".into(),
+                            );
+                        }
+                        "otlp_http_export" => {
+                            let (_, u) = self.emit_expr(&args[0]);
+                            let (_, b) = self.emit_expr(&args[1]);
+                            let (_, ct) = self.emit_expr(&args[2]);
+                            let (_, t) = self.emit_expr(&args[3]);
+                            return (
+                                "int64_t".into(),
+                                format!("mako_otlp_http_export({u}, {b}, {ct}, {t})"),
+                            );
+                        }
+                        "otlp_export_traces_json" => {
+                            let (_, u) = self.emit_expr(&args[0]);
+                            let (_, t) = self.emit_expr(&args[1]);
+                            return (
+                                "int64_t".into(),
+                                format!("mako_otlp_export_traces_json({u}, {t})"),
+                            );
+                        }
+                        "otlp_export_traces_pb" => {
+                            let (_, u) = self.emit_expr(&args[0]);
+                            let (_, t) = self.emit_expr(&args[1]);
+                            return (
+                                "int64_t".into(),
+                                format!("mako_otlp_export_traces_pb({u}, {t})"),
+                            );
+                        }
+                        "http_request_ct" => {
+                            let (_, m) = self.emit_expr(&args[0]);
+                            let (_, u) = self.emit_expr(&args[1]);
+                            let (_, b) = self.emit_expr(&args[2]);
+                            let (_, t) = self.emit_expr(&args[3]);
+                            let (_, ct) = self.emit_expr(&args[4]);
+                            let tmp = self.fresh("hrct");
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_http_request_ct({m}, {u}, {b}, {t}, {ct});"
+                            ));
+                            return ("MakoString".into(), tmp);
+                        }
                         "trace_span_id" => {
                             let tmp = self.fresh("tsid");
                             self.line(&format!("MakoString {tmp} = mako_trace_span_id();"));
@@ -18593,6 +18644,74 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         "debug_bp" => {
                             let (_, id) = self.emit_expr(&args[0]);
                             return ("int64_t".into(), format!("mako_debug_bp({id})"));
+                        }
+                        "debug_trap_enable" => {
+                            let (_, on) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_debug_trap_enable({on})"));
+                        }
+                        "debug_trap_enabled" => {
+                            return ("int64_t".into(), "mako_debug_trap_enabled_p()".into());
+                        }
+                        "debug_line_bp_set" => {
+                            let (_, f) = self.emit_expr(&args[0]);
+                            let (_, ln) = self.emit_expr(&args[1]);
+                            return (
+                                "int64_t".into(),
+                                format!("mako_debug_line_bp_set({f}, {ln})"),
+                            );
+                        }
+                        "debug_line_bp_clear" => {
+                            let (_, id) = self.emit_expr(&args[0]);
+                            return (
+                                "int64_t".into(),
+                                format!("mako_debug_line_bp_clear({id})"),
+                            );
+                        }
+                        "debug_line_bp_hits" => {
+                            let (_, id) = self.emit_expr(&args[0]);
+                            return (
+                                "int64_t".into(),
+                                format!("mako_debug_line_bp_hits({id})"),
+                            );
+                        }
+                        "debug_push_frame" => {
+                            let (_, f) = self.emit_expr(&args[0]);
+                            let (_, ln) = self.emit_expr(&args[1]);
+                            let (_, n) = self.emit_expr(&args[2]);
+                            return (
+                                "int64_t".into(),
+                                format!("mako_debug_push_frame({f}, {ln}, {n})"),
+                            );
+                        }
+                        "debug_pop_frame" => {
+                            return ("int64_t".into(), "mako_debug_pop_frame()".into());
+                        }
+                        "debug_frame_depth" => {
+                            return ("int64_t".into(), "mako_debug_frame_depth()".into());
+                        }
+                        "debug_frames_json" => {
+                            let tmp = self.fresh("dfj");
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_debug_frames_json();"
+                            ));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "debug_snapshot_json" => {
+                            let tmp = self.fresh("dsj");
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_debug_snapshot_json();"
+                            ));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "debug_set_current_task" => {
+                            let (_, id) = self.emit_expr(&args[0]);
+                            return (
+                                "int64_t".into(),
+                                format!("mako_debug_set_current_task({id})"),
+                            );
+                        }
+                        "debug_current_task" => {
+                            return ("int64_t".into(), "mako_debug_current_task()".into());
                         }
                         "crash_report_install" => {
                             let (_, p) = self.emit_expr(&args[0]);

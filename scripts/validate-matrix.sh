@@ -19,7 +19,12 @@ uname -a || true
 echo "=== mako version ==="
 "$MAKO" version -v || "$MAKO" --version
 echo "=== doctor ==="
-"$MAKO" doctor || true
+if [[ "${DOCTOR_STRICT:-0}" == "1" ]]; then
+  "$MAKO" doctor
+else
+  # Soft by default for source checkouts without install-manifest.
+  "$MAKO" doctor || echo "doctor: non-zero (set DOCTOR_STRICT=1 to fail)"
+fi
 
 SMOKE="$(mktemp /tmp/mako_matrix_XXXX.mko)"
 cat > "$SMOKE" <<'EOF'

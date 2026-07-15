@@ -194,6 +194,10 @@ fn fmt_item(item: &Item) -> String {
             }
             o.push_str("on ");
             o.push_str(&on.ty);
+            if let Some(ref iface) = on.iface {
+                o.push_str(" : ");
+                o.push_str(iface);
+            }
             o.push_str(" {\n");
             for m in &on.methods {
                 // Format methods with short name (before desugar Type_ prefix)

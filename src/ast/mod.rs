@@ -64,9 +64,12 @@ pub enum ImportMode {
 }
 
 /// `on TypeName { fn method… }` — Mako method surface (not Rust `impl`, not Go methods).
+/// Optional `iface`: `on Counter : Adder { … }` → methods named `Adder_Counter_*`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct OnDef {
     pub ty: String,
+    /// When set, method names become `{iface}_{ty}_{method}` for interface dispatch.
+    pub iface: Option<String>,
     pub methods: Vec<FnDef>,
     pub exported: bool,
 }

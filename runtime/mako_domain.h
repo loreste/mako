@@ -1559,6 +1559,8 @@ static inline int64_t mako_debug_set_loc(MakoString file, int64_t line) {
     if (file.data && n) memcpy(mako_debug_file, file.data, n);
     mako_debug_file[n] = 0;
     mako_debug_line = line;
+    /* Soft source-line BPs registered via debug_line_bp_set */
+    (void)mako_debug_check_line_bps(mako_debug_file, line);
     return 1;
 }
 
@@ -1580,6 +1582,25 @@ static inline MakoString mako_debug_frame_json(void) {
     );
     if (n < 0) return mako_str_from_cstr("{}");
     return mako_str_from_cstr(buf);
+}
+
+/* OTLP convenience export (domain after http+trace includes). */
+static inline int64_t mako_otlp_export_traces_json(MakoString url, int64_t timeout_ms) {
+    MakoString body = mako_trace_export_otlp_json();
+    MakoString ct = mako_str_from_cstr("application/json");
+    int64_t st = mako_otlp_http_export(url, body, ct, timeout_ms);
+    mako_str_free(body);
+    mako_str_free(ct);
+    return st;
+}
+
+static inline int64_t mako_otlp_export_traces_pb(MakoString url, int64_t timeout_ms) {
+    MakoString body = mako_trace_export_otlp_pb();
+    MakoString ct = mako_str_from_cstr("application/x-protobuf");
+    int64_t st = mako_otlp_http_export(url, body, ct, timeout_ms);
+    mako_str_free(body);
+    mako_str_free(ct);
+    return st;
 }
 
 #ifdef __cplusplus

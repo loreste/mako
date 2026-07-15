@@ -4779,7 +4779,11 @@ typedef struct {
     bool cancelled_start; /* set if cancel before/during — cooperative */
     volatile int done;    /* 1 when trampoline finished (for timed join) */
     int64_t debug_id;    /* registry id for task inspect (0 = unregistered) */
+    int64_t parent_id;   /* async parent task id (0 = root / unknown) */
 } MakoTask;
+
+/* TLS: current task id for parent-link seed when spawning children. */
+static __thread int64_t mako_debug_current_task_id = 0;
 
 /* ---- Task inspect / debugger seed ---- */
 #define MAKO_TASK_REG_MAX 64
@@ -4791,11 +4795,13 @@ typedef struct {
 static MakoTaskRegSlot mako_task_reg[MAKO_TASK_REG_MAX];
 static atomic_llong mako_task_id_seq = 1;
 static atomic_llong mako_debug_break_count = 0;
+static int mako_debug_trap_enabled = 0;
 
 static inline void mako_task_reg_add(MakoTask *t) {
     if (!t) return;
     int64_t id = (int64_t)atomic_fetch_add_explicit(&mako_task_id_seq, 1, memory_order_relaxed);
     t->debug_id = id;
+    t->parent_id = mako_debug_current_task_id;
     for (int i = 0; i < MAKO_TASK_REG_MAX; i++) {
         if (!mako_task_reg[i].active) {
             mako_task_reg[i].task = t;
@@ -4804,6 +4810,15 @@ static inline void mako_task_reg_add(MakoTask *t) {
             return;
         }
     }
+}
+
+static inline int64_t mako_debug_set_current_task(int64_t id) {
+    mako_debug_current_task_id = id;
+    return id;
+}
+
+static inline int64_t mako_debug_current_task(void) {
+    return mako_debug_current_task_id;
 }
 
 static inline void mako_task_reg_remove(MakoTask *t) {
@@ -4869,11 +4884,13 @@ static inline MakoString mako_tasks_inspect_json(void) {
         n = snprintf(
             buf + len,
             cap > len ? cap - len : 0,
-            "%s{\"id\":%" PRId64 ",\"done\":%d,\"joined\":%d}",
+            "%s{\"id\":%" PRId64 ",\"parent\":%" PRId64 ",\"done\":%d,\"joined\":%d,\"cancelled\":%d}",
             first ? "" : ",",
             t->debug_id,
+            t->parent_id,
             mako_task_done(t) ? 1 : 0,
-            t->joined ? 1 : 0
+            t->joined ? 1 : 0,
+            t->cancelled_start ? 1 : 0
         );
         if (n > 0) len += (size_t)n;
         first = 0;
@@ -4893,7 +4910,8 @@ static inline MakoString mako_tasks_inspect_json(void) {
     return (MakoString){buf, len};
 }
 
-/* Soft breakpoint seed: records a hit and logs to stderr (no trap). */
+/* Soft breakpoint seed: records a hit and logs to stderr.
+ * When debug_trap_enable(1), also raises SIGTRAP (real process BP seed). */
 static inline int64_t mako_debug_break(MakoString label) {
     atomic_fetch_add_explicit(&mako_debug_break_count, 1, memory_order_relaxed);
     fprintf(
@@ -4903,6 +4921,11 @@ static inline int64_t mako_debug_break(MakoString label) {
         label.data ? label.data : ""
     );
     fflush(stderr);
+#if !defined(_WIN32)
+    if (mako_debug_trap_enabled) {
+        raise(SIGTRAP);
+    }
+#endif
     return 1;
 }
 
@@ -5023,6 +5046,185 @@ static inline int64_t mako_debug_bp(int64_t id) {
     return mako_debug_break(mako_str_from_cstr(lab));
 }
 
+/* Soft trap mode: when enabled, debug_break may raise SIGTRAP (off by default). */
+static inline int64_t mako_debug_trap_enable(int64_t on) {
+    mako_debug_trap_enabled = on ? 1 : 0;
+    return mako_debug_trap_enabled;
+}
+static inline int64_t mako_debug_trap_enabled_p(void) {
+    return mako_debug_trap_enabled ? 1 : 0;
+}
+
+/* Source-line soft breakpoints: hit when debug_set_loc matches file+line. */
+#define MAKO_DEBUG_LINE_BP_MAX 16
+typedef struct {
+    char file[128];
+    int64_t line;
+    int used;
+    int hits;
+} MakoDebugLineBp;
+static MakoDebugLineBp mako_debug_line_bps[MAKO_DEBUG_LINE_BP_MAX];
+
+static inline int64_t mako_debug_line_bp_set(MakoString file, int64_t line) {
+    if (!file.data || file.len == 0 || file.len >= 128 || line < 1) return -1;
+    for (int i = 0; i < MAKO_DEBUG_LINE_BP_MAX; i++) {
+        if (mako_debug_line_bps[i].used
+            && mako_debug_line_bps[i].line == line
+            && strncmp(mako_debug_line_bps[i].file, file.data, file.len) == 0
+            && mako_debug_line_bps[i].file[file.len] == 0) {
+            return i;
+        }
+    }
+    for (int i = 0; i < MAKO_DEBUG_LINE_BP_MAX; i++) {
+        if (!mako_debug_line_bps[i].used) {
+            memcpy(mako_debug_line_bps[i].file, file.data, file.len);
+            mako_debug_line_bps[i].file[file.len] = 0;
+            mako_debug_line_bps[i].line = line;
+            mako_debug_line_bps[i].used = 1;
+            mako_debug_line_bps[i].hits = 0;
+            return i;
+        }
+    }
+    return -1;
+}
+
+static inline int64_t mako_debug_line_bp_clear(int64_t id) {
+    if (id < 0 || id >= MAKO_DEBUG_LINE_BP_MAX) return 0;
+    mako_debug_line_bps[id].used = 0;
+    mako_debug_line_bps[id].hits = 0;
+    return 1;
+}
+
+static inline int64_t mako_debug_line_bp_hits(int64_t id) {
+    if (id < 0 || id >= MAKO_DEBUG_LINE_BP_MAX || !mako_debug_line_bps[id].used) return 0;
+    return mako_debug_line_bps[id].hits;
+}
+
+/* Called from debug_set_loc after updating TLS frame. */
+static inline int64_t mako_debug_check_line_bps(const char *file, int64_t line) {
+    if (!file) return 0;
+    int hit = 0;
+    for (int i = 0; i < MAKO_DEBUG_LINE_BP_MAX; i++) {
+        if (!mako_debug_line_bps[i].used) continue;
+        if (mako_debug_line_bps[i].line == line
+            && strcmp(mako_debug_line_bps[i].file, file) == 0) {
+            mako_debug_line_bps[i].hits++;
+            hit = 1;
+            char lab[160];
+            snprintf(lab, sizeof(lab), "line-bp:%s:%lld", file, (long long)line);
+            (void)mako_debug_break(mako_str_from_cstr(lab));
+        }
+    }
+    return hit ? 1 : 0;
+}
+
+/* Logical frame stack (async walk seed) — push/pop source frames. */
+#define MAKO_DEBUG_FRAME_STACK 32
+typedef struct {
+    char file[128];
+    int64_t line;
+    char name[64];
+} MakoDebugFrame;
+static __thread MakoDebugFrame mako_debug_frames[MAKO_DEBUG_FRAME_STACK];
+static __thread int mako_debug_frame_sp = 0;
+
+static inline int64_t mako_debug_push_frame(MakoString file, int64_t line, MakoString name) {
+    if (mako_debug_frame_sp >= MAKO_DEBUG_FRAME_STACK) return -1;
+    MakoDebugFrame *f = &mako_debug_frames[mako_debug_frame_sp++];
+    size_t n = file.data && file.len < 127 ? file.len : (file.data ? 127 : 0);
+    if (file.data && n) memcpy(f->file, file.data, n);
+    f->file[n] = 0;
+    f->line = line;
+    n = name.data && name.len < 63 ? name.len : (name.data ? 63 : 0);
+    if (name.data && n) memcpy(f->name, name.data, n);
+    f->name[n] = 0;
+    return mako_debug_frame_sp;
+}
+
+static inline int64_t mako_debug_pop_frame(void) {
+    if (mako_debug_frame_sp <= 0) return 0;
+    mako_debug_frame_sp--;
+    return mako_debug_frame_sp;
+}
+
+static inline int64_t mako_debug_frame_depth(void) {
+    return mako_debug_frame_sp;
+}
+
+static inline MakoString mako_debug_frames_json(void) {
+    size_t cap = 1024;
+    char *buf = (char *)malloc(cap);
+    if (!buf) abort();
+    size_t len = 0;
+    int n = snprintf(buf, cap, "{\"schema\":\"mako.debug_frames.v1\",\"depth\":%d,\"frames\":[",
+                     mako_debug_frame_sp);
+    if (n > 0) len = (size_t)n;
+    for (int i = 0; i < mako_debug_frame_sp; i++) {
+        if (len + 200 >= cap) {
+            cap *= 2;
+            char *next = (char *)realloc(buf, cap);
+            if (!next) {
+                free(buf);
+                abort();
+            }
+            buf = next;
+        }
+        n = snprintf(
+            buf + len, cap - len,
+            "%s{\"i\":%d,\"file\":\"%s\",\"line\":%" PRId64 ",\"name\":\"%s\"}",
+            i ? "," : "", i, mako_debug_frames[i].file, mako_debug_frames[i].line,
+            mako_debug_frames[i].name
+        );
+        if (n > 0) len += (size_t)n;
+    }
+    if (len + 4 >= cap) {
+        char *next = (char *)realloc(buf, len + 8);
+        if (!next) {
+            free(buf);
+            abort();
+        }
+        buf = next;
+    }
+    buf[len++] = ']';
+    buf[len++] = '}';
+    buf[len] = 0;
+    return (MakoString){buf, len};
+}
+
+/* Combined debugger snapshot for tools / exporters. */
+static inline MakoString mako_debug_snapshot_json(void) {
+    MakoString tasks = mako_tasks_inspect_json();
+    MakoString locals = mako_debug_locals_json();
+    MakoString frames = mako_debug_frames_json();
+    size_t cap = tasks.len + locals.len + frames.len + 256;
+    char *buf = (char *)malloc(cap);
+    if (!buf) {
+        mako_str_free(tasks);
+        mako_str_free(locals);
+        mako_str_free(frames);
+        abort();
+    }
+    int n = snprintf(
+        buf, cap,
+        "{\"schema\":\"mako.debug_snapshot.v1\",\"current_task\":%" PRId64
+        ",\"break_hits\":%" PRId64 ",\"trap\":%d,\"tasks\":%.*s,\"locals\":%.*s,\"frames\":%.*s}",
+        mako_debug_current_task_id,
+        atomic_load_explicit(&mako_debug_break_count, memory_order_relaxed),
+        mako_debug_trap_enabled,
+        (int)tasks.len, tasks.data ? tasks.data : "{}",
+        (int)locals.len, locals.data ? locals.data : "{}",
+        (int)frames.len, frames.data ? frames.data : "{}"
+    );
+    mako_str_free(tasks);
+    mako_str_free(locals);
+    mako_str_free(frames);
+    if (n < 0) {
+        free(buf);
+        return mako_str_from_cstr("{}");
+    }
+    return (MakoString){buf, (size_t)n};
+}
+
 /* MakoNursery — structured concurrency scope (Mako `crew` block).
  * Owns a set of spawned tasks. On scope exit, cancel_join cancels all tasks
  * then joins them — no orphaned threads. Tasks observe cancellation via
@@ -5124,6 +5326,7 @@ static inline MakoTask *mako_spawn(MakoNursery *n, MakoTaskFn fn, void *arg) {
     t->cancelled_start = n->cancelled;
     t->done = 0;
     t->debug_id = 0;
+    t->parent_id = 0;
     mako_rt_counter_inc(&mako_rt_tasks_spawned);
     if (n->cancelled) {
         /* do not start new work after cancel */

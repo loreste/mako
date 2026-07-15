@@ -387,6 +387,186 @@ static inline int64_t mako_trace_log(MakoString msg) {
     return 1;
 }
 
+/* ---- OTLP protobuf seed (minimal ExportTraceServiceRequest wire) ----
+ * Self-contained varint/len encoding (trace.h is included before mako_std).
+ * Field numbers match opentelemetry-proto traces.v1.
+ */
+
+static inline void mako_otlp_pb_append(char **buf, size_t *len, size_t *cap, const char *p, size_t n) {
+    if (!p || n == 0) return;
+    if (*len + n + 1 >= *cap) {
+        size_t nc = (*cap + n + 1) * 2;
+        if (nc < 64) nc = 64;
+        char *nb = (char *)realloc(*buf, nc);
+        if (!nb) {
+            free(*buf);
+            fprintf(stderr, "mako: OOM in otlp pb append\n");
+            abort();
+        }
+        *buf = nb;
+        *cap = nc;
+    }
+    memcpy(*buf + *len, p, n);
+    *len += n;
+    (*buf)[*len] = 0;
+}
+
+static inline void mako_otlp_pb_varint(char **buf, size_t *len, size_t *cap, uint64_t x) {
+    char tmp[10];
+    size_t n = 0;
+    while (x >= 0x80) {
+        tmp[n++] = (char)((x & 0x7f) | 0x80);
+        x >>= 7;
+    }
+    tmp[n++] = (char)x;
+    mako_otlp_pb_append(buf, len, cap, tmp, n);
+}
+
+static inline void mako_otlp_pb_key(char **buf, size_t *len, size_t *cap, int64_t field, int wire) {
+    mako_otlp_pb_varint(buf, len, cap, (uint64_t)((field << 3) | (wire & 7)));
+}
+
+static inline void mako_otlp_pb_tag_bytes(
+    char **buf, size_t *len, size_t *cap, int64_t field, const char *data, size_t dlen
+) {
+    mako_otlp_pb_key(buf, len, cap, field, 2);
+    mako_otlp_pb_varint(buf, len, cap, (uint64_t)dlen);
+    if (data && dlen) mako_otlp_pb_append(buf, len, cap, data, dlen);
+}
+
+static inline void mako_otlp_pb_tag_varint(
+    char **buf, size_t *len, size_t *cap, int64_t field, int64_t val
+) {
+    mako_otlp_pb_key(buf, len, cap, field, 0);
+    mako_otlp_pb_varint(buf, len, cap, (uint64_t)val);
+}
+
+static inline void mako_otlp_pb_tag_fixed64(
+    char **buf, size_t *len, size_t *cap, int64_t field, uint64_t val
+) {
+    mako_otlp_pb_key(buf, len, cap, field, 1);
+    char le[8];
+    for (int i = 0; i < 8; i++) le[i] = (char)((val >> (8 * i)) & 0xff);
+    mako_otlp_pb_append(buf, len, cap, le, 8);
+}
+
+static inline size_t mako_otlp_hex_to_bytes(const char *hex, size_t hexlen, char *out, size_t outcap) {
+    size_t n = hexlen / 2;
+    if (n > outcap) n = outcap;
+    for (size_t i = 0; i < n; i++) {
+        unsigned int v = 0;
+        char pair[3] = {hex[i * 2], hex[i * 2 + 1], 0};
+        sscanf(pair, "%2x", &v);
+        out[i] = (char)v;
+    }
+    return n;
+}
+
+static inline MakoString mako_trace_export_otlp_pb(void) {
+    char *av = NULL;
+    size_t av_len = 0, av_cap = 64;
+    av = (char *)calloc(1, av_cap);
+    if (!av) abort();
+    mako_otlp_pb_tag_bytes(&av, &av_len, &av_cap, 1, "mako", 4);
+
+    char *kv = NULL;
+    size_t kv_len = 0, kv_cap = 128;
+    kv = (char *)calloc(1, kv_cap);
+    if (!kv) {
+        free(av);
+        abort();
+    }
+    mako_otlp_pb_tag_bytes(&kv, &kv_len, &kv_cap, 1, "service.name", 12);
+    mako_otlp_pb_tag_bytes(&kv, &kv_len, &kv_cap, 2, av, av_len);
+    free(av);
+
+    char *res = NULL;
+    size_t res_len = 0, res_cap = 256;
+    res = (char *)calloc(1, res_cap);
+    if (!res) {
+        free(kv);
+        abort();
+    }
+    mako_otlp_pb_tag_bytes(&res, &res_len, &res_cap, 1, kv, kv_len);
+    free(kv);
+
+    char *scope = NULL;
+    size_t scope_len = 0, scope_cap = 64;
+    scope = (char *)calloc(1, scope_cap);
+    if (!scope) {
+        free(res);
+        abort();
+    }
+    mako_otlp_pb_tag_bytes(&scope, &scope_len, &scope_cap, 1, "mako.trace", 10);
+
+    char *ss = NULL;
+    size_t ss_len = 0, ss_cap = 512;
+    ss = (char *)calloc(1, ss_cap);
+    if (!ss) {
+        free(res);
+        free(scope);
+        abort();
+    }
+    mako_otlp_pb_tag_bytes(&ss, &ss_len, &ss_cap, 1, scope, scope_len);
+    free(scope);
+
+    for (int i = 0; i < MAKO_TRACE_SPAN_RING; i++) {
+        MakoTraceSpanRec *r = &mako_trace_span_ring[i];
+        if (!r->used) continue;
+        char tid_hex[33], sid_hex[17];
+        mako_trace_format_id(r->hi, r->lo, tid_hex);
+        mako_trace_format_span(r->span_id, sid_hex);
+        char tid[16], sid[8];
+        size_t tlen = mako_otlp_hex_to_bytes(tid_hex, 32, tid, 16);
+        size_t slen = mako_otlp_hex_to_bytes(sid_hex, 16, sid, 8);
+
+        char *sp = NULL;
+        size_t sp_len = 0, sp_cap = 256;
+        sp = (char *)calloc(1, sp_cap);
+        if (!sp) continue;
+        mako_otlp_pb_tag_bytes(&sp, &sp_len, &sp_cap, 1, tid, tlen);
+        mako_otlp_pb_tag_bytes(&sp, &sp_len, &sp_cap, 2, sid, slen);
+        mako_otlp_pb_tag_bytes(&sp, &sp_len, &sp_cap, 5, r->name, strlen(r->name));
+        mako_otlp_pb_tag_varint(&sp, &sp_len, &sp_cap, 6, 1);
+        mako_otlp_pb_tag_fixed64(&sp, &sp_len, &sp_cap, 7, (uint64_t)r->start_ns);
+        mako_otlp_pb_tag_fixed64(&sp, &sp_len, &sp_cap, 8, (uint64_t)r->end_ns);
+        mako_otlp_pb_tag_bytes(&ss, &ss_len, &ss_cap, 2, sp, sp_len);
+        free(sp);
+    }
+
+    char *rs = NULL;
+    size_t rs_len = 0, rs_cap = res_len + ss_len + 64;
+    rs = (char *)calloc(1, rs_cap);
+    if (!rs) {
+        free(res);
+        free(ss);
+        abort();
+    }
+    mako_otlp_pb_tag_bytes(&rs, &rs_len, &rs_cap, 1, res, res_len);
+    mako_otlp_pb_tag_bytes(&rs, &rs_len, &rs_cap, 2, ss, ss_len);
+    free(res);
+    free(ss);
+
+    char *out = NULL;
+    size_t out_len = 0, out_cap = rs_len + 32;
+    out = (char *)calloc(1, out_cap);
+    if (!out) {
+        free(rs);
+        abort();
+    }
+    mako_otlp_pb_tag_bytes(&out, &out_len, &out_cap, 1, rs, rs_len);
+    free(rs);
+    return (MakoString){out, out_len};
+}
+
+/* Len of protobuf export (for tests without a collector). */
+static inline int64_t mako_trace_export_otlp_pb_len(void) {
+    MakoString s = mako_trace_export_otlp_pb();
+    int64_t n = (int64_t)s.len;
+    mako_str_free(s);
+    return n;
+}
+
 #ifdef __cplusplus
 }
 #endif
