@@ -328,8 +328,14 @@ config/log updates. Tests: `examples/testing/fs_storage_test.mko`.
 | `store_new` / `store_put` / `store_get` / `store_begin` / `store_commit` / `store_rollback` | … | Txn KV; optional `store_attach_wal` |
 | `store_recover_wal` | `store_recover_wal(s, w) -> int` | Replay WAL `P`/`D` records into store (crash recovery seed) |
 | `btree_new` / `btree_put` / `btree_get` / `btree_save` / `btree_load` / `btree_free` | … | In-memory B-tree + disk snapshot |
+| `btree_range` | `btree_range(t, lo, hi) -> int` | Inclusive ordered range → TLS buffer; count |
 | `pbtree_new` / `pbtree_put` / `pbtree_get` / `pbtree_len` / `pbtree_pages` / `pbtree_free` | … | Page-backed B-tree (nodes in `MakoPage`) |
 | `sst_build4` / `sst_get` / `sst_len` / `sst_free` | … | Sorted run + binary search |
+| `sst_range` | `sst_range(s, lo, hi) -> int` | Inclusive SST range → TLS buffer |
+| `range_len` / `range_key_at` / `range_val_at` | … | Read last range result (cap 128) |
+| `bloom_new` / `bloom_add` / `bloom_maybe` / `bloom_len` / `bloom_free` | … | Bloom filter (int64 keys; no false negatives) |
+| `pman_open` / `pman_alloc` / `pman_set` / `pman_get` / `pman_sync` / `pman_close` | … | Disk page manager (4 KiB file-backed) |
+| `pman_pages` / `pman_reads` / `pman_writes` | … | Page count + I/O counters |
 | `pcache_new` / `pcache_get` / `pcache_hits` / `pcache_misses` / `pcache_free` | … | 16-slot LRU page cache |
 | `mvcc_new` / `mvcc_begin` / `mvcc_put` / `mvcc_get` / `mvcc_gc` / `mvcc_live` / `mvcc_free` | … | Multi-version KV + GC |
 | `lsm_new` / `lsm_put` / `lsm_get` / `lsm_flush` / `lsm_attach_run` / `lsm_free` | … | Memtable + L0 run WAL |

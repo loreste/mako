@@ -118,6 +118,77 @@ fn TestPageBTree() {
     assert_eq(pbtree_free(t), 0)
 }
 
+fn TestBloomFilter() {
+    let b = bloom_new()
+    assert_eq(bloom_add(b, 10), 0)
+    assert_eq(bloom_add(b, 20), 0)
+    assert_eq(bloom_add(b, 30), 0)
+    assert_eq(bloom_len(b), 3)
+    assert_eq(bloom_maybe(b, 10), 1)
+    assert_eq(bloom_maybe(b, 20), 1)
+    assert_eq(bloom_maybe(b, 30), 1)
+    // Definitely absent keys return 0 (no false negatives)
+    assert_eq(bloom_maybe(b, 999001), 0)
+    assert_eq(bloom_maybe(b, 999002), 0)
+    assert_eq(bloom_free(b), 0)
+}
+
+fn TestBtreeAndSstRange() {
+    let t = btree_new()
+    assert_eq(btree_put(t, 1, 10), 0)
+    assert_eq(btree_put(t, 5, 50), 0)
+    assert_eq(btree_put(t, 3, 30), 0)
+    assert_eq(btree_put(t, 7, 70), 0)
+    assert_eq(btree_put(t, 9, 90), 0)
+    let n = btree_range(t, 3, 7)
+    assert_eq(n, 3)
+    assert_eq(range_len(), 3)
+    assert_eq(range_key_at(0), 3)
+    assert_eq(range_val_at(0), 30)
+    assert_eq(range_key_at(1), 5)
+    assert_eq(range_val_at(1), 50)
+    assert_eq(range_key_at(2), 7)
+    assert_eq(range_val_at(2), 70)
+    assert_eq(range_key_at(3), -1)
+    assert_eq(btree_free(t), 0)
+
+    let path = "/tmp/mako_sst_range.sst"
+    let s = sst_build4(path, 2, 20, 4, 40, 6, 60, 8, 80)
+    assert_eq(sst_range(s, 4, 6), 2)
+    assert_eq(range_key_at(0), 4)
+    assert_eq(range_val_at(0), 40)
+    assert_eq(range_key_at(1), 6)
+    assert_eq(range_val_at(1), 60)
+    assert_eq(sst_free(s), 0)
+}
+
+fn TestDiskPageManager() {
+    let path = "/tmp/mako_pman_seed.dat"
+    assert_eq(write_file(path, ""), 0)
+    let pm = pman_open(path)
+    assert_eq(pman_pages(pm), 1) // superblock only
+    let p1 = pman_alloc(pm)
+    assert(p1 >= 1)
+    let p2 = pman_alloc(pm)
+    assert(p2 > p1)
+    assert_eq(pman_set(pm, p1, 0, 42), 0)
+    assert_eq(pman_set(pm, p1, 1, 99), 0)
+    assert_eq(pman_set(pm, p2, 0, 7), 0)
+    assert_eq(pman_get(pm, p1, 0), 42)
+    assert_eq(pman_get(pm, p1, 1), 99)
+    assert_eq(pman_get(pm, p2, 0), 7)
+    assert_eq(pman_sync(pm), 0)
+    assert(pman_pages(pm) >= 3)
+    assert(pman_writes(pm) > 0)
+    assert(pman_reads(pm) > 0)
+    assert_eq(pman_close(pm), 0)
+    // reopen persists
+    let pm2 = pman_open(path)
+    assert_eq(pman_get(pm2, p1, 0), 42)
+    assert_eq(pman_get(pm2, p2, 0), 7)
+    assert_eq(pman_close(pm2), 0)
+}
+
 fn TestStoreRecoverWal() {
     let path = "/tmp/mako_store_recover.log"
     assert_eq(write_file(path, ""), 0)

@@ -13134,6 +13134,107 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             let (_, t) = self.emit_expr(&args[0]);
                             return ("int64_t".into(), format!("mako_pbtree_free({t})"));
                         }
+                        "bloom_new" => {
+                            let tmp = self.fresh("blm");
+                            self.line(&format!("MakoBloom *{tmp} = mako_bloom_new();"));
+                            return ("MakoBloom*".into(), tmp);
+                        }
+                        "bloom_add" => {
+                            let (_, b) = self.emit_expr(&args[0]);
+                            let (_, k) = self.emit_expr(&args[1]);
+                            return ("int64_t".into(), format!("mako_bloom_add({b}, {k})"));
+                        }
+                        "bloom_maybe" => {
+                            let (_, b) = self.emit_expr(&args[0]);
+                            let (_, k) = self.emit_expr(&args[1]);
+                            return ("int64_t".into(), format!("mako_bloom_maybe({b}, {k})"));
+                        }
+                        "bloom_len" => {
+                            let (_, b) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_bloom_len({b})"));
+                        }
+                        "bloom_free" => {
+                            let (_, b) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_bloom_free({b})"));
+                        }
+                        "btree_range" => {
+                            let (_, t) = self.emit_expr(&args[0]);
+                            let (_, lo) = self.emit_expr(&args[1]);
+                            let (_, hi) = self.emit_expr(&args[2]);
+                            return (
+                                "int64_t".into(),
+                                format!("mako_btree_range({t}, {lo}, {hi})"),
+                            );
+                        }
+                        "sst_range" => {
+                            let (_, s) = self.emit_expr(&args[0]);
+                            let (_, lo) = self.emit_expr(&args[1]);
+                            let (_, hi) = self.emit_expr(&args[2]);
+                            return (
+                                "int64_t".into(),
+                                format!("mako_sst_range({s}, {lo}, {hi})"),
+                            );
+                        }
+                        "range_len" => {
+                            return ("int64_t".into(), "mako_range_len()".into());
+                        }
+                        "range_key_at" => {
+                            let (_, i) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_range_key_at({i})"));
+                        }
+                        "range_val_at" => {
+                            let (_, i) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_range_val_at({i})"));
+                        }
+                        "pman_open" => {
+                            let (_, p) = self.emit_expr(&args[0]);
+                            let tmp = self.fresh("pm");
+                            self.line(&format!("MakoPageMan *{tmp} = mako_pman_open({p});"));
+                            return ("MakoPageMan*".into(), tmp);
+                        }
+                        "pman_alloc" => {
+                            let (_, pm) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_pman_alloc({pm})"));
+                        }
+                        "pman_set" => {
+                            let (_, pm) = self.emit_expr(&args[0]);
+                            let (_, id) = self.emit_expr(&args[1]);
+                            let (_, sl) = self.emit_expr(&args[2]);
+                            let (_, v) = self.emit_expr(&args[3]);
+                            return (
+                                "int64_t".into(),
+                                format!("mako_pman_set({pm}, {id}, {sl}, {v})"),
+                            );
+                        }
+                        "pman_get" => {
+                            let (_, pm) = self.emit_expr(&args[0]);
+                            let (_, id) = self.emit_expr(&args[1]);
+                            let (_, sl) = self.emit_expr(&args[2]);
+                            return (
+                                "int64_t".into(),
+                                format!("mako_pman_get({pm}, {id}, {sl})"),
+                            );
+                        }
+                        "pman_sync" => {
+                            let (_, pm) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_pman_sync({pm})"));
+                        }
+                        "pman_pages" => {
+                            let (_, pm) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_pman_pages({pm})"));
+                        }
+                        "pman_reads" => {
+                            let (_, pm) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_pman_reads({pm})"));
+                        }
+                        "pman_writes" => {
+                            let (_, pm) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_pman_writes({pm})"));
+                        }
+                        "pman_close" => {
+                            let (_, pm) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_pman_close({pm})"));
+                        }
                         "store_recover_wal" => {
                             let (_, s) = self.emit_expr(&args[0]);
                             let (_, w) = self.emit_expr(&args[1]);

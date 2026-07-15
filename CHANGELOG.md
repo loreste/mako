@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Storage polish seeds (bloom · range · page manager)
+
+- **Bloom filter:** `bloom_new` / `add` / `maybe` / `len` / `free` — int64 keys,
+  fixed bitset, no false negatives.
+- **Ordered range scans:** `btree_range` / `sst_range` (inclusive lo..hi) fill a
+  TLS buffer; read with `range_len` / `range_key_at` / `range_val_at` (cap 128).
+- **Disk page manager:** `pman_open` / `alloc` / `set` / `get` / `sync` / `pages` /
+  `reads` / `writes` / `close` — 4 KiB file-backed pages (superblock + user pages).
+- Tests: `TestBloomFilter`, `TestBtreeAndSstRange`, `TestDiskPageManager`.
+
 ### Core string region ops (no substring alloc)
 
 - Builtins: `str_slice_eq` / `str_slice_ci_eq` / `str_slice_contains` /

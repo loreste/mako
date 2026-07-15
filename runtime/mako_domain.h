@@ -1017,6 +1017,298 @@ static inline int64_t mako_pbtree_free(MakoPageBTree *t) {
     return 0;
 }
 
+/* ---- Bloom filter seed (int64 keys, fixed bitset) ---- */
+#define MAKO_BLOOM_BITS 2048
+#define MAKO_BLOOM_WORDS (MAKO_BLOOM_BITS / 64)
+#define MAKO_BLOOM_HASHES 4
+
+typedef struct {
+    uint64_t bits[MAKO_BLOOM_WORDS];
+    int64_t n;
+} MakoBloom;
+
+static inline uint64_t mako_bloom_mix(uint64_t x, uint64_t seed) {
+    x ^= seed;
+    x ^= x >> 33;
+    x *= 0xff51afd7ed558ccdULL;
+    x ^= x >> 33;
+    x *= 0xc4ceb9fe1a85ec53ULL;
+    x ^= x >> 33;
+    return x;
+}
+
+static inline MakoBloom *mako_bloom_new(void) {
+    return (MakoBloom *)calloc(1, sizeof(MakoBloom));
+}
+
+static inline int64_t mako_bloom_add(MakoBloom *b, int64_t key) {
+    if (!b) return -1;
+    for (int h = 0; h < MAKO_BLOOM_HASHES; h++) {
+        uint64_t x = mako_bloom_mix((uint64_t)key, (uint64_t)(h + 1) * 0x9e3779b97f4a7c15ULL);
+        size_t bit = (size_t)(x % (uint64_t)MAKO_BLOOM_BITS);
+        b->bits[bit / 64] |= (uint64_t)1 << (bit % 64);
+    }
+    b->n++;
+    return 0;
+}
+
+/* 1 = maybe present, 0 = definitely absent. */
+static inline int64_t mako_bloom_maybe(MakoBloom *b, int64_t key) {
+    if (!b) return 0;
+    for (int h = 0; h < MAKO_BLOOM_HASHES; h++) {
+        uint64_t x = mako_bloom_mix((uint64_t)key, (uint64_t)(h + 1) * 0x9e3779b97f4a7c15ULL);
+        size_t bit = (size_t)(x % (uint64_t)MAKO_BLOOM_BITS);
+        if ((b->bits[bit / 64] & ((uint64_t)1 << (bit % 64))) == 0) return 0;
+    }
+    return 1;
+}
+
+static inline int64_t mako_bloom_len(MakoBloom *b) {
+    return b ? b->n : 0;
+}
+
+static inline int64_t mako_bloom_free(MakoBloom *b) {
+    free(b);
+    return 0;
+}
+
+/* ---- Ordered range scan seed (fills TLS buffer; inclusive lo..hi) ---- */
+#define MAKO_RANGE_MAX 128
+static __thread int64_t mako_range_keys[MAKO_RANGE_MAX];
+static __thread int64_t mako_range_vals[MAKO_RANGE_MAX];
+static __thread int64_t mako_range_n;
+
+static inline void mako_range_clear(void) {
+    mako_range_n = 0;
+}
+
+static inline void mako_range_push(int64_t k, int64_t v) {
+    if (mako_range_n >= MAKO_RANGE_MAX) return;
+    mako_range_keys[mako_range_n] = k;
+    mako_range_vals[mako_range_n] = v;
+    mako_range_n++;
+}
+
+static inline void mako_btree_range_node(MakoBNode *n, int64_t lo, int64_t hi) {
+    if (!n || mako_range_n >= MAKO_RANGE_MAX) return;
+    if (n->leaf) {
+        for (int i = 0; i < n->n; i++) {
+            if (n->keys[i] < lo) continue;
+            if (n->keys[i] > hi) break;
+            mako_range_push(n->keys[i], n->vals[i]);
+        }
+        return;
+    }
+    for (int i = 0; i < n->n; i++) {
+        mako_btree_range_node(n->kids[i], lo, hi);
+        if (mako_range_n >= MAKO_RANGE_MAX) return;
+        if (n->keys[i] >= lo && n->keys[i] <= hi) mako_range_push(n->keys[i], n->vals[i]);
+        if (n->keys[i] > hi) return;
+    }
+    mako_btree_range_node(n->kids[n->n], lo, hi);
+}
+
+/* Populate TLS range; return count of matches (capped at MAKO_RANGE_MAX). */
+static inline int64_t mako_btree_range(MakoBTree *t, int64_t lo, int64_t hi) {
+    mako_range_clear();
+    if (!t || !t->root || lo > hi) return 0;
+    mako_btree_range_node(t->root, lo, hi);
+    return mako_range_n;
+}
+
+static inline int64_t mako_sst_range(MakoSst *s, int64_t lo, int64_t hi) {
+    mako_range_clear();
+    if (!s || !s->keys || s->n <= 0 || lo > hi) return 0;
+    /* lower_bound on lo */
+    int64_t i = 0, j = s->n;
+    while (i < j) {
+        int64_t m = i + (j - i) / 2;
+        if (s->keys[m] < lo) i = m + 1;
+        else j = m;
+    }
+    for (; i < s->n && s->keys[i] <= hi; i++) {
+        mako_range_push(s->keys[i], s->vals[i]);
+        if (mako_range_n >= MAKO_RANGE_MAX) break;
+    }
+    return mako_range_n;
+}
+
+static inline int64_t mako_range_len(void) {
+    return mako_range_n;
+}
+
+static inline int64_t mako_range_key_at(int64_t i) {
+    if (i < 0 || i >= mako_range_n) return -1;
+    return mako_range_keys[i];
+}
+
+static inline int64_t mako_range_val_at(int64_t i) {
+    if (i < 0 || i >= mako_range_n) return -1;
+    return mako_range_vals[i];
+}
+
+/* ---- Disk page manager seed (fixed 4 KiB pages, file-backed) ---- */
+#define MAKO_PMAN_PAGE 4096
+#define MAKO_PMAN_MAGIC 0x4D4B504DLL /* "MKPM" */
+#define MAKO_PMAN_SLOTS (MAKO_PMAN_PAGE / 8)
+
+typedef struct {
+    char path[512];
+    int fd;
+    int64_t npages; /* includes superblock page 0 */
+    int64_t reads;
+    int64_t writes;
+} MakoPageMan;
+
+static inline int64_t mako_pman_write_super(MakoPageMan *pm) {
+    if (!pm || pm->fd < 0) return -1;
+#if defined(_WIN32)
+    return -1;
+#else
+    int64_t hdr[MAKO_PMAN_SLOTS];
+    memset(hdr, 0, sizeof(hdr));
+    hdr[0] = MAKO_PMAN_MAGIC;
+    hdr[1] = MAKO_PMAN_PAGE;
+    hdr[2] = pm->npages;
+    if (lseek(pm->fd, 0, SEEK_SET) < 0) return -1;
+    ssize_t w = write(pm->fd, hdr, MAKO_PMAN_PAGE);
+    return (w == MAKO_PMAN_PAGE) ? 0 : -1;
+#endif
+}
+
+static inline MakoPageMan *mako_pman_open(MakoString path) {
+#if defined(_WIN32)
+    (void)path;
+    return NULL;
+#else
+    if (!path.data || path.len == 0 || path.len >= 511) return NULL;
+    MakoPageMan *pm = (MakoPageMan *)calloc(1, sizeof(MakoPageMan));
+    if (!pm) return NULL;
+    memcpy(pm->path, path.data, path.len);
+    pm->path[path.len] = 0;
+    pm->fd = open(pm->path, O_RDWR | O_CREAT, 0644);
+    if (pm->fd < 0) {
+        free(pm);
+        return NULL;
+    }
+    off_t sz = lseek(pm->fd, 0, SEEK_END);
+    if (sz < (off_t)MAKO_PMAN_PAGE) {
+        pm->npages = 1;
+        if (mako_pman_write_super(pm) != 0) {
+            close(pm->fd);
+            free(pm);
+            return NULL;
+        }
+    } else {
+        int64_t hdr[MAKO_PMAN_SLOTS];
+        memset(hdr, 0, sizeof(hdr));
+        if (lseek(pm->fd, 0, SEEK_SET) < 0 || read(pm->fd, hdr, MAKO_PMAN_PAGE) != MAKO_PMAN_PAGE
+            || hdr[0] != MAKO_PMAN_MAGIC) {
+            close(pm->fd);
+            free(pm);
+            return NULL;
+        }
+        pm->npages = hdr[2] > 0 ? hdr[2] : (int64_t)(sz / MAKO_PMAN_PAGE);
+        if (pm->npages < 1) pm->npages = 1;
+    }
+    return pm;
+#endif
+}
+
+/* Allocate a new page; returns page id (>= 1). Page 0 is superblock. */
+static inline int64_t mako_pman_alloc(MakoPageMan *pm) {
+#if defined(_WIN32)
+    (void)pm;
+    return -1;
+#else
+    if (!pm || pm->fd < 0) return -1;
+    int64_t id = pm->npages;
+    char zero[MAKO_PMAN_PAGE];
+    memset(zero, 0, sizeof(zero));
+    if (lseek(pm->fd, (off_t)id * MAKO_PMAN_PAGE, SEEK_SET) < 0) return -1;
+    if (write(pm->fd, zero, MAKO_PMAN_PAGE) != MAKO_PMAN_PAGE) return -1;
+    pm->npages = id + 1;
+    pm->writes++;
+    (void)mako_pman_write_super(pm);
+    return id;
+#endif
+}
+
+/* Read/write int64 slots within a page (0 .. slots-1). */
+static inline int64_t mako_pman_set(MakoPageMan *pm, int64_t page_id, int64_t slot, int64_t val) {
+#if defined(_WIN32)
+    (void)pm;
+    (void)page_id;
+    (void)slot;
+    (void)val;
+    return -1;
+#else
+    if (!pm || pm->fd < 0 || page_id < 1 || page_id >= pm->npages) return -1;
+    if (slot < 0 || slot >= MAKO_PMAN_SLOTS) return -1;
+    off_t off = (off_t)page_id * MAKO_PMAN_PAGE + (off_t)slot * 8;
+    if (lseek(pm->fd, off, SEEK_SET) < 0) return -1;
+    if (write(pm->fd, &val, sizeof(val)) != (ssize_t)sizeof(val)) return -1;
+    pm->writes++;
+    return 0;
+#endif
+}
+
+static inline int64_t mako_pman_get(MakoPageMan *pm, int64_t page_id, int64_t slot) {
+#if defined(_WIN32)
+    (void)pm;
+    (void)page_id;
+    (void)slot;
+    return -1;
+#else
+    if (!pm || pm->fd < 0 || page_id < 1 || page_id >= pm->npages) return -1;
+    if (slot < 0 || slot >= MAKO_PMAN_SLOTS) return -1;
+    int64_t val = 0;
+    off_t off = (off_t)page_id * MAKO_PMAN_PAGE + (off_t)slot * 8;
+    if (lseek(pm->fd, off, SEEK_SET) < 0) return -1;
+    if (read(pm->fd, &val, sizeof(val)) != (ssize_t)sizeof(val)) return -1;
+    pm->reads++;
+    return val;
+#endif
+}
+
+static inline int64_t mako_pman_sync(MakoPageMan *pm) {
+#if defined(_WIN32)
+    (void)pm;
+    return -1;
+#else
+    if (!pm || pm->fd < 0) return -1;
+    if (mako_pman_write_super(pm) != 0) return -1;
+    return fsync(pm->fd) == 0 ? 0 : -1;
+#endif
+}
+
+static inline int64_t mako_pman_pages(MakoPageMan *pm) {
+    return pm ? pm->npages : 0;
+}
+
+static inline int64_t mako_pman_reads(MakoPageMan *pm) {
+    return pm ? pm->reads : 0;
+}
+
+static inline int64_t mako_pman_writes(MakoPageMan *pm) {
+    return pm ? pm->writes : 0;
+}
+
+static inline int64_t mako_pman_close(MakoPageMan *pm) {
+#if defined(_WIN32)
+    free(pm);
+    return 0;
+#else
+    if (!pm) return 0;
+    if (pm->fd >= 0) {
+        (void)mako_pman_write_super(pm);
+        close(pm->fd);
+    }
+    free(pm);
+    return 0;
+#endif
+}
+
 /* ---- Portable SIMD-ish seed: scalar loop (autovec-friendly) ---- */
 static inline int64_t mako_simd_dot_i64_4(
     int64_t a0, int64_t a1, int64_t a2, int64_t a3,
