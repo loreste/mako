@@ -2175,6 +2175,52 @@ impl TypeChecker {
             ),
         );
         fns.insert(
+            "sip_via_value_nat".into(),
+            Type::Fn(
+                vec![
+                    Type::String,
+                    Type::String,
+                    Type::Int,
+                    Type::String,
+                    Type::String,
+                    Type::Int,
+                ],
+                Box::new(Type::String),
+            ),
+        );
+        fns.insert(
+            "sip_via_add_received".into(),
+            Type::Fn(
+                vec![Type::String, Type::String, Type::Int],
+                Box::new(Type::String),
+            ),
+        );
+        fns.insert("sip_via_host".into(), Type::Fn(vec![Type::String], Box::new(Type::String)));
+        fns.insert("sip_via_port".into(), Type::Fn(vec![Type::String], Box::new(Type::Int)));
+        fns.insert(
+            "sip_record_route".into(),
+            Type::Fn(
+                vec![Type::String, Type::Int, Type::String],
+                Box::new(Type::String),
+            ),
+        );
+        fns.insert(
+            "sip_prepend_header".into(),
+            Type::Fn(
+                vec![Type::String, Type::String, Type::String],
+                Box::new(Type::String),
+            ),
+        );
+        fns.insert(
+            "sip_insert_via".into(),
+            Type::Fn(vec![Type::String, Type::String], Box::new(Type::String)),
+        );
+        fns.insert("sip_strip_via".into(), Type::Fn(vec![Type::String], Box::new(Type::String)));
+        fns.insert(
+            "sip_first_message_len".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
             "sip_from_value".into(),
             Type::Fn(
                 vec![Type::String, Type::String, Type::String],
@@ -2256,6 +2302,21 @@ impl TypeChecker {
             ),
         );
         fns.insert(
+            "sip_digest_response_ha1".into(),
+            Type::Fn(
+                vec![Type::String, Type::String, Type::String, Type::String],
+                Box::new(Type::String),
+            ),
+        );
+        fns.insert(
+            "sip_www_authenticate".into(),
+            Type::Fn(vec![Type::String, Type::String], Box::new(Type::String)),
+        );
+        fns.insert(
+            "sip_proxy_authenticate".into(),
+            Type::Fn(vec![Type::String, Type::String], Box::new(Type::String)),
+        );
+        fns.insert(
             "sip_authorization_digest".into(),
             Type::Fn(
                 vec![
@@ -2282,6 +2343,24 @@ impl TypeChecker {
                 vec![
                     Type::String,
                     Type::Int,
+                    Type::String,
+                    Type::String,
+                    Type::String,
+                ],
+                Box::new(Type::String),
+            ),
+        );
+        fns.insert(
+            "sip_ensure_to_tag".into(),
+            Type::Fn(vec![Type::String, Type::String], Box::new(Type::String)),
+        );
+        fns.insert(
+            "sip_reply_with_to_tag".into(),
+            Type::Fn(
+                vec![
+                    Type::String,
+                    Type::Int,
+                    Type::String,
                     Type::String,
                     Type::String,
                     Type::String,
@@ -5336,6 +5415,40 @@ impl TypeChecker {
         fns.insert(
             "sql_query_str".into(),
             Type::Fn(vec![Type::SqlDB, Type::String, Type::String], Box::new(Type::String)),
+        );
+        fns.insert(
+            "sql_query_str2".into(),
+            Type::Fn(
+                vec![Type::SqlDB, Type::String, Type::String, Type::String],
+                Box::new(Type::String),
+            ),
+        );
+        fns.insert(
+            "sql_query_str3".into(),
+            Type::Fn(
+                vec![
+                    Type::SqlDB,
+                    Type::String,
+                    Type::String,
+                    Type::String,
+                    Type::String,
+                ],
+                Box::new(Type::String),
+            ),
+        );
+        fns.insert(
+            "sql_query_str4".into(),
+            Type::Fn(
+                vec![
+                    Type::SqlDB,
+                    Type::String,
+                    Type::String,
+                    Type::String,
+                    Type::String,
+                    Type::String,
+                ],
+                Box::new(Type::String),
+            ),
         );
         fns.insert(
             "sql_last_insert_id".into(),

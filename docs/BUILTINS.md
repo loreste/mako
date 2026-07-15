@@ -516,9 +516,10 @@ Use **`wall_*` / `now_ms`** only for logs and absolute calendar time.
 | `sql_close` | `sql_close(db: SqlDB) -> int` | Close a database connection |
 | `sql_exec` | `sql_exec(db: SqlDB, sql: string, params: []int) -> int` | Execute SQL with integer params |
 | `sql_exec_plain` | `sql_exec_plain(db: SqlDB, sql: string) -> int` | Execute SQL without params |
-| `sql_exec_str4` | `sql_exec_str4(db: SqlDB, sql: string, a: string, b: string, c: string, d: string) -> int` | Execute SQL with four string params |
+| `sql_exec_str4` | `sql_exec_str4(db, sql, a, b, c, d) -> int` | Up to 4 string binds; **arity from SQL `$N`/`?`**; `""` is a real value (not “skip”) |
 | `sql_query_int` | `sql_query_int(db: SqlDB, sql: string, params: []int) -> int` | Query a single integer result |
-| `sql_query_str` | `sql_query_str(db: SqlDB, sql: string, param: string) -> string` | Query a single string result (0–1 string param; SQLite + Postgres) |
+| `sql_query_str` | `sql_query_str(db, sql, p1) -> string` | First column of first row; 0–1 string bind |
+| `sql_query_str2` / `str3` / `str4` | multi-arg variants | Same bind-arity rules as `sql_exec_str4` |
 | `sql_last_insert_id` | `sql_last_insert_id(db: SqlDB) -> int` | Last INSERT row id (SQLite `last_insert_rowid`; Postgres `lastval`) |
 | `sql_rows_affected` | `sql_rows_affected(db: SqlDB) -> int` | Rows changed by last INSERT/UPDATE/DELETE on this connection |
 | `sql_query_rows` | `sql_query_rows(db: SqlDB, sql: string, params: []int) -> int` | Open multi-row result set (handle; 0 = fail) |
@@ -603,23 +604,29 @@ code using maps, crews, mono clocks, `tls_*`, `aes_ctr`, `hmac_sha1_raw`.
 | `sip_is_request` / `sip_is_response` / `sip_ok` | `(msg) -> int` | Classify message |
 | `sip_method` / `sip_request_uri` / `sip_version` | `(msg) -> string` | Request start-line |
 | `sip_status_code` / `sip_reason` | `(msg) -> int/string` | Response start-line |
-| `sip_header` / `sip_header_n` / `sip_header_count` | `(msg, name[, n])` | Case-insensitive headers (+ fold) |
+| `sip_header` / `sip_header_n` / `sip_header_count` | `(msg, name[, n])` | Case-insensitive + compact forms (`Call-ID`↔`i`, `Via`↔`v`, …); owned result |
 | `sip_body` / `sip_content_length` | `(msg)` | Body and CL |
-| `sip_msg_complete` / `sip_msg_needed` | `(buf) -> int` | TCP framing (CL body complete?) |
+| `sip_first_message_len` / `sip_msg_complete` / `sip_msg_needed` | `(buf) -> int` | TCP/TLS framing (first complete msg length / complete? / bytes needed) |
 | `sip_request` / `sip_response` | build full message (auto Content-Length) | |
-| `sip_headers_append` / `sip_header_line` | header blob builders | |
-| `sip_via_value` / `sip_from_value` / `sip_to_value` / `sip_contact_value` / `sip_cseq_value` | common values | |
-| `sip_via_branch` / `sip_addr_tag` | extract branch= / tag= | |
+| `sip_headers_append` / `sip_header_line` / `sip_prepend_header` | header blob builders | |
+| `sip_via_value` / `sip_via_value_nat` / `sip_via_add_received` | Via (+ `;rport` / `;received=`) | |
+| `sip_via_host` / `sip_via_port` / `sip_via_branch` | top Via sent-by / branch | |
+| `sip_insert_via` / `sip_strip_via` / `sip_record_route` | proxy hop insert / strip / RR value | |
+| `sip_from_value` / `sip_to_value` / `sip_contact_value` / `sip_cseq_value` | common values | |
+| `sip_addr_tag` | extract tag= | |
 | `sip_branch` / `sip_tag` / `sip_call_id_new` / `sip_cseq_new` | ID generation (`z9hG4bK…`) | |
 | `sip_dialog_id` / `sip_txn_key` | opaque map keys for dialogs/txns | |
 | `sip_uri_*` / `sip_uri_build` | SIP URI parse/build | |
 | `sip_udp_bind` / `sip_udp_send` / `sip_udp_recv` / `sip_tcp_send` | transport wrappers | |
-| `sip_md5_hex` / `sip_digest_response` / `sip_authorization_digest` / `sip_auth_param` | Digest auth | |
-| `sip_reply` / `sip_copy_headers_for_response` | copy Via/From/To/Call-ID/CSeq | |
+| `sip_md5_hex` / `sip_digest_response` / `sip_digest_response_ha1` | Digest MD5 (password or stored HA1) | |
+| `sip_www_authenticate` / `sip_proxy_authenticate` / `sip_authorization_digest` | challenge / Authorization values | |
+| `sip_reply` / `sip_reply_with_to_tag` / `sip_ensure_to_tag` | response build + To-tag | |
 | `sdp_*` | parse/build SDP media + attrs | |
 | `rtp_pack` / `rtp_parse_ok` / `rtp_seq` / `rtp_timestamp` / `rtp_ssrc` / `rtp_payload` / … | RTP V2 | |
 
-Tests: `examples/testing/sip_test.mko` · demo: `examples/sip_ua.mko` · pack: `std/sip`.
+**App `fn sip_*` shadows platform builtins** of the same name. Prefer `std/sip` for higher-level helpers.
+
+Tests: `sip_test.mko`, `sip_digest_ha1_test.mko` · pack: `std/sip`.
 
 ---
 
@@ -1094,6 +1101,11 @@ Tests: `crew_fan_test.mko`, `job_join_typed_test.mko`, `fan_struct_test.mko`, `f
 | `game_udp_peers` | `game_udp_peers(sock: GameUDP) -> int` | Return the number of connected peers |
 | `game_udp_fd` | `game_udp_fd(sock: GameUDP) -> int` | Get the underlying file descriptor |
 | `game_udp_close` | `game_udp_close(sock: GameUDP) -> void` | Close the game UDP socket |
+
+**Multi-worker pattern:** `GameUDP` is **not Send** across crew tasks. Bind once on the
+receiver task; fan-out `host:port\n` + body to workers that hold their own SQL/state.
+Replies from workers use `udp_send_to` / `sip_udp_send` on a listen fd (`game_udp_fd`)
+or a dedicated reply socket — do not share one `GameUDP` handle across workers.
 | `tick_now_us` | `tick_now_us() -> int` | Current time in microseconds (monotonic) |
 | `tick_sleep_us` | `tick_sleep_us(target: int, period: int) -> int` | Sleep until next tick period |
 

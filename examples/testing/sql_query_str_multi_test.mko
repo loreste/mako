@@ -1,0 +1,41 @@
+// sql_query_str2/3/4 multi-arg binds; empty string is a valid value.
+
+fn db_open_test() -> SqlDB {
+    let url = env_get_or("MAKO_TEST_PG", "")
+    if len(url) > 0 {
+        return sql_open_postgres(url)
+    }
+    return sql_open_sqlite(":memory:")
+}
+
+fn TestQueryStr2() {
+    let db = db_open_test()
+    let _ = sql_exec_plain(db, "CREATE TABLE IF NOT EXISTS t_q2 (a TEXT, b TEXT, v TEXT)")
+    let _ = sql_exec_str4(db, "DELETE FROM t_q2 WHERE a = $1", "x", "", "", "")
+    let _ = sql_exec_str4(
+        db,
+        "INSERT INTO t_q2 (a, b, v) VALUES ($1, $2, $3)",
+        "x",
+        "in",
+        "hit",
+        ""
+    )
+    let v = sql_query_str2(db, "SELECT v FROM t_q2 WHERE a = $1 AND b = $2", "x", "in")
+    assert_eq_str(v, "hit")
+}
+
+fn TestQueryStrEmptySecond() {
+    let db = db_open_test()
+    let _ = sql_exec_plain(db, "CREATE TABLE IF NOT EXISTS t_qe (k TEXT, ua TEXT)")
+    let _ = sql_exec_str4(db, "DELETE FROM t_qe WHERE k = $1", "k1", "", "", "")
+    let _ = sql_exec_str4(
+        db,
+        "INSERT INTO t_qe (k, ua) VALUES ($1, $2)",
+        "k1",
+        "",
+        "",
+        ""
+    )
+    let ua = sql_query_str2(db, "SELECT ua FROM t_qe WHERE k = $1 AND ua = $2", "k1", "")
+    assert_eq_str(ua, "")
+}

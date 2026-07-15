@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+### Madis / SIP proxy production fixes (P0–P1)
+
+- **SQL bind arity:** `sql_exec_str4` uses `mako_sql_placeholder_arity` (max `$N` / `?`
+  count). Empty `""` is a real bind value — no more stripping trailing empties
+  (fixes Postgres “supplies 1 parameters, requires 2”).
+- **`sql_query_str2` / `str3` / `str4`:** multi-arg string queries (same arity rules).
+- **SIP ownership:** hot paths use non-owned name literals (`MAKO_SIP_LIT`); framing
+  without extra header-buffer copies; compact header aliases; stress test.
+- **Proxy helpers:** `sip_insert_via` / `sip_strip_via` / `sip_via_value_nat` /
+  `sip_via_add_received` / `sip_via_host` / `sip_via_port` / `sip_record_route` /
+  `sip_prepend_header`.
+- **Digest HA1:** `sip_digest_response_ha1`, `sip_www_authenticate`,
+  `sip_proxy_authenticate`.
+- **Framing / To-tag:** `sip_first_message_len`, `sip_ensure_to_tag`,
+  `sip_reply_with_to_tag`.
+- Docs: GameUDP multi-worker pattern; sip_* shadowing note.
+- Tests: `sql_str4_empty_bind_test`, `sql_query_str_multi_test`, `sip_test`,
+  `sip_digest_ha1_test`.
+
 ### Multi-level LSM · page-backed btree
 
 - **LSM levels:** `levels[3]` L1–L3 SSTs; `lsm_compact_down` promotes/merges L1→L2→L3;

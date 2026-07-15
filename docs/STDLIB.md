@@ -1310,8 +1310,8 @@ Same call shape for sqlite and postgres (`?` placeholders; postgres rewritten to
 | `sql_query_int(db, sql, []int)` | parameterized query → int |
 | `sql_exec(db, sql, []int)` | parameterized exec (integer params) |
 | `sql_exec_plain(db, sql)` | exec with no parameters (DDL, simple statements); returns 0 on success |
-| `sql_exec_str4(db, sql, p1, p2, p3, p4)` | exec with up to 4 string parameters (`?` / `$1..$4`); SQLite + Postgres; trailing `""` = unused slot |
-| `sql_query_str(db, sql, p1)` | query single string value (first col, first row); 0–1 string param; SQLite + Postgres; `""` if empty |
+| `sql_exec_str4(db, sql, p1, p2, p3, p4)` | exec with up to 4 string params (`?` / `$1..$4`); **bind count = SQL placeholder arity**; empty `""` is a real value |
+| `sql_query_str` / `sql_query_str2` / `str3` / `str4` | first col of first row; multi-arg string binds (same arity rules) |
 | `sql_last_insert_id(db)` | last INSERT id (SQLite `last_insert_rowid`; Postgres `lastval`) |
 | `sql_rows_affected(db)` | rows changed by last mutating statement on this connection |
 | `sql_query_rows` / `sql_query_rows_str` | open multi-row result handle (int params / one string param) |
@@ -1459,9 +1459,10 @@ proxies, and UAs **in Mako** — with crews, maps, mono clocks, and net/crypto.
 | Dialog / call state | `sip_dialog_id` · tags · `Call-ID` · maps · optional `share` |
 | Registrar / location service | REGISTER parse · Contact · maps/DB (`sql_*`) |
 | Proxy / B2BUA routing | header rewrite · Via · Record-Route · UDP/TCP send |
-| SIP over TCP framing | `sip_msg_complete` / `sip_msg_needed` · `tcp_read` / `tcp_write_all` |
-| **SIPS** (SIP over TLS) | `tcp_*` + `tls_server_*` / `tls_accept` / `tls_read`/`write` · same SIP parse |
-| Digest REGISTER auth | `sip_digest_response` · `sip_authorization_digest` · `sip_auth_param` |
+| SIP over TCP framing | `sip_first_message_len` / `sip_msg_complete` / `sip_msg_needed` · `tcp_read` |
+| **SIPS** (SIP over TLS) | same framing loop on `tls_read` buffers |
+| Digest auth (server HA1) | `sip_digest_response_ha1` · `sip_www_authenticate` / `sip_proxy_authenticate` |
+| Proxy hop / NAT | `sip_insert_via` / `sip_strip_via` / `sip_via_value_nat` / `sip_record_route` / `sip_via_host`/`port` |
 | Offer/answer SDP | `sdp_*` · your policy code |
 | RTP media path | `rtp_pack` / `rtp_*` · `udp_*` · `fan` for parallel streams |
 | **SRTP** (in Mako) | `aes_ctr` (AES-CM keystream) · `hmac_sha1_raw` (auth tag) · `xor_bytes` · keying from SDP/SDES or DTLS |
@@ -1471,13 +1472,16 @@ proxies, and UAs **in Mako** — with crews, maps, mono clocks, and net/crypto.
 
 | Area | Builtins |
 |------|----------|
-| Message | `sip_ok`, `sip_is_request`/`response`, `sip_method`, `sip_request_uri`, `sip_status_code`, `sip_header`, `sip_body` |
-| Build | `sip_request`, `sip_response`, `sip_headers_append`, `sip_via_value`, `sip_from_value`, `sip_to_value`, `sip_reply` |
-| IDs | `sip_branch` (`z9hG4bK…`), `sip_tag`, `sip_call_id_new`, `sip_cseq_new`, `sip_dialog_id`, `sip_txn_key` |
-| URI | `sip_uri_user` / `host` / `port` / `scheme` / `sip_uri_build` |
-| Framing | `sip_msg_complete`, `sip_msg_needed` (TCP Content-Length) |
-| Transport | `sip_udp_bind` / `send` / `recv`, `sip_tcp_send` (+ raw `udp_*`/`tcp_*`) |
-| Auth | `sip_digest_response`, `sip_authorization_digest`, `sip_auth_param`, `sip_md5_hex` |
+| Message | `sip_ok`, `sip_method`, `sip_header` (compact forms: Call-ID/`i`, Via/`v`, …), `sip_body` |
+| Build | `sip_request` / `sip_response` / `sip_reply` / `sip_reply_with_to_tag` / `sip_ensure_to_tag` |
+| Proxy | `sip_insert_via`, `sip_strip_via`, `sip_prepend_header`, `sip_via_value_nat`, `sip_record_route` |
+| IDs | `sip_branch`, `sip_tag`, `sip_call_id_new`, `sip_dialog_id`, `sip_txn_key` |
+| Framing | `sip_first_message_len`, `sip_msg_complete`, `sip_msg_needed` |
+| Auth | `sip_digest_response`, `sip_digest_response_ha1`, `sip_www_authenticate`, `sip_authorization_digest` |
+
+**Ownership:** `sip_header` / builders return **owned** strings (malloc). Prefer short-lived locals; avoid wrapping every header read in hot loops without need. Parse is length-bounded (msg need not be NUL-terminated).
+
+**Name shadowing:** app-defined `fn sip_*` shadows platform builtins of the same name — prefer `std/sip` packs for higher-level APIs.
 | SDP | `sdp_build_audio`, `sdp_media_*`, `sdp_connection_addr`, `sdp_attr`, `sdp_attr_rtpmap` |
 | RTP | `rtp_pack`, `rtp_seq`, `rtp_timestamp`, `rtp_ssrc`, `rtp_payload`, `rtp_payload_type` |
 | SRTP building blocks | `aes_ctr`, `hmac_sha1` / `hmac_sha1_raw`, `aes_gcm_*`, `random_bytes` |

@@ -159,3 +159,57 @@ fn TestSipUdpRoundtrip() {
     assert_eq_str(sip_method(got), "INVITE")
     let _ = udp_close(fd)
 }
+
+fn TestSipCompactHeaders() {
+    let msg = "INVITE sip:b@x SIP/2.0\r\n"
+        + "v: SIP/2.0/UDP 1.2.3.4:5060;branch=z9hG4bK1\r\n"
+        + "f: <sip:a@x>;tag=t1\r\n"
+        + "t: <sip:b@x>\r\n"
+        + "i: call-1\r\n"
+        + "c: application/sdp\r\n"
+        + "l: 0\r\n"
+        + "\r\n"
+    assert_eq_str(sip_header(msg, "Call-ID"), "call-1")
+    assert_eq_str(sip_header(msg, "i"), "call-1")
+    assert(str_contains(sip_header(msg, "Via"), "1.2.3.4"))
+    assert(str_contains(sip_header(msg, "v"), "1.2.3.4"))
+    assert_eq(sip_content_length(msg), 0)
+    assert_eq(sip_first_message_len(msg), len(msg))
+}
+
+fn TestSipProxyViaRr() {
+    let inv = sample_invite()
+    let hop = sip_via_value_nat("UDP", "203.0.113.1", 5060, "z9hG4bKproxy", "198.51.100.9", 5080)
+    assert(str_contains(hop, "rport=5080"))
+    assert(str_contains(hop, "received=198.51.100.9"))
+    let with_via = sip_insert_via(inv, hop)
+    assert_eq(sip_header_count(with_via, "Via"), 2)
+    let top = sip_header(with_via, "Via")
+    assert_eq_str(sip_via_host(top), "203.0.113.1")
+    assert_eq(sip_via_port(top), 5060)
+    let stripped = sip_strip_via(with_via)
+    assert_eq(sip_header_count(stripped, "Via"), 1)
+    assert(str_contains(sip_header(stripped, "Via"), "192.0.2.1"))
+    let rr = sip_record_route("proxy.example", 5060, "udp")
+    assert(str_contains(rr, "lr"))
+    assert(str_contains(rr, "proxy.example"))
+    let tagged = sip_reply_with_to_tag(inv, 200, "OK", "", "", "server-tag")
+    assert_eq(sip_status_code(tagged), 200)
+    let to = sip_header(tagged, "To")
+    assert_eq_str(sip_addr_tag(to), "server-tag")
+}
+
+fn TestSipHeaderHotLoop() {
+    // Stress: many allocations must not crash (ownership / empty singleton free).
+    let msg = sample_invite()
+    let mut i = 0
+    while i < 5000 {
+        let _ = sip_header(msg, "From")
+        let _ = sip_header(msg, "To")
+        let _ = sip_header(msg, "Call-ID")
+        let _ = sip_header(msg, "Via")
+        let _ = sip_content_length(msg)
+        i = i + 1
+    }
+    assert_eq(sip_ok(msg), 1)
+}

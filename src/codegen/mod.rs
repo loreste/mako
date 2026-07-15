@@ -14513,6 +14513,79 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             ));
                             return ("MakoString".into(), tmp);
                         }
+                        "sip_via_value_nat" => {
+                            let (_, t) = self.emit_expr(&args[0]);
+                            let (_, h) = self.emit_expr(&args[1]);
+                            let (_, p) = self.emit_expr(&args[2]);
+                            let (_, b) = self.emit_expr(&args[3]);
+                            let (_, r) = self.emit_expr(&args[4]);
+                            let (_, rp) = self.emit_expr(&args[5]);
+                            let tmp = self.fresh("svvn");
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_sip_via_value_nat({t}, {h}, {p}, {b}, {r}, {rp});"
+                            ));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "sip_via_add_received" => {
+                            let (_, v) = self.emit_expr(&args[0]);
+                            let (_, h) = self.emit_expr(&args[1]);
+                            let (_, rp) = self.emit_expr(&args[2]);
+                            let tmp = self.fresh("svar");
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_sip_via_add_received({v}, {h}, {rp});"
+                            ));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "sip_via_host" => {
+                            let (_, v) = self.emit_expr(&args[0]);
+                            let tmp = self.fresh("svh");
+                            self.line(&format!("MakoString {tmp} = mako_sip_via_host({v});"));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "sip_via_port" => {
+                            let (_, v) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_sip_via_port({v})"));
+                        }
+                        "sip_record_route" => {
+                            let (_, h) = self.emit_expr(&args[0]);
+                            let (_, p) = self.emit_expr(&args[1]);
+                            let (_, t) = self.emit_expr(&args[2]);
+                            let tmp = self.fresh("srr");
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_sip_record_route({h}, {p}, {t});"
+                            ));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "sip_prepend_header" => {
+                            let (_, m) = self.emit_expr(&args[0]);
+                            let (_, n) = self.emit_expr(&args[1]);
+                            let (_, v) = self.emit_expr(&args[2]);
+                            let tmp = self.fresh("sph");
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_sip_prepend_header({m}, {n}, {v});"
+                            ));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "sip_insert_via" => {
+                            let (_, m) = self.emit_expr(&args[0]);
+                            let (_, v) = self.emit_expr(&args[1]);
+                            let tmp = self.fresh("siv");
+                            self.line(&format!("MakoString {tmp} = mako_sip_insert_via({m}, {v});"));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "sip_strip_via" => {
+                            let (_, m) = self.emit_expr(&args[0]);
+                            let tmp = self.fresh("ssv");
+                            self.line(&format!("MakoString {tmp} = mako_sip_strip_via({m});"));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "sip_first_message_len" => {
+                            let (_, m) = self.emit_expr(&args[0]);
+                            return (
+                                "int64_t".into(),
+                                format!("mako_sip_first_message_len({m})"),
+                            );
+                        }
                         "sip_from_value" => {
                             let (_, d) = self.emit_expr(&args[0]);
                             let (_, u) = self.emit_expr(&args[1]);
@@ -14682,6 +14755,35 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             ));
                             return ("MakoString".into(), tmp);
                         }
+                        "sip_digest_response_ha1" => {
+                            let (_, ha1) = self.emit_expr(&args[0]);
+                            let (_, m) = self.emit_expr(&args[1]);
+                            let (_, uri) = self.emit_expr(&args[2]);
+                            let (_, n) = self.emit_expr(&args[3]);
+                            let tmp = self.fresh("sdrh");
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_sip_digest_response_ha1({ha1}, {m}, {uri}, {n});"
+                            ));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "sip_www_authenticate" => {
+                            let (_, r) = self.emit_expr(&args[0]);
+                            let (_, n) = self.emit_expr(&args[1]);
+                            let tmp = self.fresh("swa");
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_sip_www_authenticate({r}, {n});"
+                            ));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "sip_proxy_authenticate" => {
+                            let (_, r) = self.emit_expr(&args[0]);
+                            let (_, n) = self.emit_expr(&args[1]);
+                            let tmp = self.fresh("spa");
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_sip_proxy_authenticate({r}, {n});"
+                            ));
+                            return ("MakoString".into(), tmp);
+                        }
                         "sip_authorization_digest" => {
                             let (_, u) = self.emit_expr(&args[0]);
                             let (_, r) = self.emit_expr(&args[1]);
@@ -14720,6 +14822,28 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             let tmp = self.fresh("srep");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_sip_reply({m}, {c}, {r}, {e}, {b});"
+                            ));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "sip_ensure_to_tag" => {
+                            let (_, m) = self.emit_expr(&args[0]);
+                            let (_, t) = self.emit_expr(&args[1]);
+                            let tmp = self.fresh("sett");
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_sip_ensure_to_tag({m}, {t});"
+                            ));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "sip_reply_with_to_tag" => {
+                            let (_, m) = self.emit_expr(&args[0]);
+                            let (_, c) = self.emit_expr(&args[1]);
+                            let (_, r) = self.emit_expr(&args[2]);
+                            let (_, e) = self.emit_expr(&args[3]);
+                            let (_, b) = self.emit_expr(&args[4]);
+                            let (_, t) = self.emit_expr(&args[5]);
+                            let tmp = self.fresh("srtt");
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_sip_reply_with_to_tag({m}, {c}, {r}, {e}, {b}, {t});"
                             ));
                             return ("MakoString".into(), tmp);
                         }
@@ -18980,6 +19104,42 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             let (_, p1) = self.emit_expr(&args[2]);
                             let tmp = self.fresh("sqs");
                             self.line(&format!("MakoString {tmp} = mako_sql_query_str({d}, {q}, {p1});"));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "sql_query_str2" => {
+                            let (_, d) = self.emit_expr(&args[0]);
+                            let (_, q) = self.emit_expr(&args[1]);
+                            let (_, p1) = self.emit_expr(&args[2]);
+                            let (_, p2) = self.emit_expr(&args[3]);
+                            let tmp = self.fresh("sqs2");
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_sql_query_str2({d}, {q}, {p1}, {p2});"
+                            ));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "sql_query_str3" => {
+                            let (_, d) = self.emit_expr(&args[0]);
+                            let (_, q) = self.emit_expr(&args[1]);
+                            let (_, p1) = self.emit_expr(&args[2]);
+                            let (_, p2) = self.emit_expr(&args[3]);
+                            let (_, p3) = self.emit_expr(&args[4]);
+                            let tmp = self.fresh("sqs3");
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_sql_query_str3({d}, {q}, {p1}, {p2}, {p3});"
+                            ));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "sql_query_str4" => {
+                            let (_, d) = self.emit_expr(&args[0]);
+                            let (_, q) = self.emit_expr(&args[1]);
+                            let (_, p1) = self.emit_expr(&args[2]);
+                            let (_, p2) = self.emit_expr(&args[3]);
+                            let (_, p3) = self.emit_expr(&args[4]);
+                            let (_, p4) = self.emit_expr(&args[5]);
+                            let tmp = self.fresh("sqs4");
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_sql_query_str4({d}, {q}, {p1}, {p2}, {p3}, {p4});"
+                            ));
                             return ("MakoString".into(), tmp);
                         }
                         "sql_last_insert_id" => {
