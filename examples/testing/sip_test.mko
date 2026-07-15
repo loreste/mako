@@ -123,6 +123,11 @@ fn TestSdpAndRtp() {
     let sdp = sdp_build_audio("u", "sess", "10.0.0.1", 4000, "0 8 101")
     assert_eq(sdp_ok(sdp), 1)
     assert(str_contains(sdp, "m=audio 4000"))
+    assert_eq_str(sdp_media_formats(sdp, 0), "0 8 101")
+    assert_eq_str(sdp_media_direction(sdp, 0), "sendrecv")
+    assert_eq_str(sdp_origin_addr(sdp), "10.0.0.1")
+    assert_eq_str(sdp_timing(sdp), "0 0")
+    assert_eq(sdp_connection_is_ip6(sdp), 0)
     let line = sdp_attr_rtpmap(101, "telephone-event", 8000)
     assert(str_contains(line, "rtpmap:101"))
     let sdp2 = sdp_append_line(sdp, line)
@@ -141,6 +146,42 @@ fn TestSdpAndRtp() {
     assert_eq(rtp_ssrc(pkt), ssrc)
     assert_eq(rtp_marker(pkt), 1)
     assert_eq_str(rtp_payload(pkt), "hello")
+}
+
+fn TestSdpProxyRewrite() {
+    // Media-level c= inherits / override (RFC 4566)
+    let sdp = "v=0\r\n"
+        + "o=- 1 1 IN IP4 192.0.2.1\r\n"
+        + "s=x\r\n"
+        + "c=IN IP4 192.0.2.1\r\n"
+        + "t=0 0\r\n"
+        + "m=audio 10000 RTP/AVP 0\r\n"
+        + "c=IN IP4 198.51.100.1\r\n"
+        + "a=sendonly\r\n"
+        + "m=video 20000 RTP/AVP 96\r\n"
+        + "a=sendrecv\r\n"
+    assert_eq(sdp_media_count(sdp), 2)
+    assert_eq_str(sdp_media_connection_addr(sdp, 0), "198.51.100.1")
+    assert_eq_str(sdp_media_connection_addr(sdp, 1), "192.0.2.1") // inherit session
+    assert_eq_str(sdp_media_direction(sdp, 0), "sendonly")
+    assert_eq_str(sdp_media_direction(sdp, 1), "sendrecv")
+    // NAT rewrite advertised addresses
+    let rew = sdp_replace_connection_addr(sdp, "203.0.113.50")
+    assert_eq_str(sdp_connection_addr(rew), "203.0.113.50")
+    assert_eq_str(sdp_origin_addr(rew), "203.0.113.50")
+    let rew2 = sdp_replace_media_port(rew, 0, 30000)
+    assert_eq(sdp_media_port(rew2, 0), 30000)
+    assert_eq(sdp_media_port(rew2, 1), 20000)
+    let sdp_hold = sdp_set_media_direction(rew2, 0, "inactive")
+    assert_eq_str(sdp_media_direction(sdp_hold, 0), "inactive")
+    // AV builder + IPv6
+    let av = sdp_build_av("-", "av", "2001:db8::1", 4000, "0 8", 5000, "96")
+    assert_eq(sdp_media_count(av), 2)
+    assert_eq(sdp_connection_is_ip6(av), 1)
+    assert_eq_str(sdp_media_type(av, 1), "video")
+    let cand = sdp_attr_candidate(1, 1, "UDP", 2130706431, "192.0.2.1", 4000, "host")
+    assert(str_contains(cand, "a=candidate:"))
+    assert(str_contains(cand, "typ host"))
 }
 
 fn TestSipUdpRoundtrip() {

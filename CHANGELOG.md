@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### SDP (RFC 4566) proxy surface
+
+- Media-level parse: `sdp_media_formats`, `sdp_media_connection`/`_addr` (inheritance),
+  `sdp_media_attr`, `sdp_media_direction` (default sendrecv).
+- Session: `sdp_origin_addr`, `sdp_timing`, `sdp_connection_is_ip6`.
+- Proxy rewrite: `sdp_replace_connection_addr`, `sdp_replace_media_port`,
+  `sdp_set_media_direction`.
+- Build: `sdp_build_audio` (IP6), `sdp_build_av`, `sdp_attr_candidate`.
+- Tests: `TestSdpProxyRewrite`.
+
 ### SIP NAT full support (RFC 3261 §18.2 + RFC 3581)
 
 - **UAC:** `sip_via_value_rport` — bare `;rport` for symmetric response routing.

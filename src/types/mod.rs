@@ -2427,11 +2427,17 @@ impl TypeChecker {
         fns.insert("sdp_ok".into(), Type::Fn(vec![Type::String], Box::new(Type::Int)));
         fns.insert("sdp_version".into(), Type::Fn(vec![Type::String], Box::new(Type::String)));
         fns.insert("sdp_origin".into(), Type::Fn(vec![Type::String], Box::new(Type::String)));
+        fns.insert("sdp_origin_addr".into(), Type::Fn(vec![Type::String], Box::new(Type::String)));
         fns.insert("sdp_session_name".into(), Type::Fn(vec![Type::String], Box::new(Type::String)));
+        fns.insert("sdp_timing".into(), Type::Fn(vec![Type::String], Box::new(Type::String)));
         fns.insert("sdp_connection".into(), Type::Fn(vec![Type::String], Box::new(Type::String)));
         fns.insert(
             "sdp_connection_addr".into(),
             Type::Fn(vec![Type::String], Box::new(Type::String)),
+        );
+        fns.insert(
+            "sdp_connection_is_ip6".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
         );
         fns.insert("sdp_media_count".into(), Type::Fn(vec![Type::String], Box::new(Type::Int)));
         fns.insert(
@@ -2451,8 +2457,47 @@ impl TypeChecker {
             Type::Fn(vec![Type::String, Type::Int], Box::new(Type::String)),
         );
         fns.insert(
+            "sdp_media_formats".into(),
+            Type::Fn(vec![Type::String, Type::Int], Box::new(Type::String)),
+        );
+        fns.insert(
+            "sdp_media_connection".into(),
+            Type::Fn(vec![Type::String, Type::Int], Box::new(Type::String)),
+        );
+        fns.insert(
+            "sdp_media_connection_addr".into(),
+            Type::Fn(vec![Type::String, Type::Int], Box::new(Type::String)),
+        );
+        fns.insert(
             "sdp_attr".into(),
             Type::Fn(vec![Type::String, Type::String], Box::new(Type::String)),
+        );
+        fns.insert(
+            "sdp_media_attr".into(),
+            Type::Fn(
+                vec![Type::String, Type::Int, Type::String],
+                Box::new(Type::String),
+            ),
+        );
+        fns.insert("sdp_direction".into(), Type::Fn(vec![Type::String], Box::new(Type::String)));
+        fns.insert(
+            "sdp_media_direction".into(),
+            Type::Fn(vec![Type::String, Type::Int], Box::new(Type::String)),
+        );
+        fns.insert(
+            "sdp_set_media_direction".into(),
+            Type::Fn(
+                vec![Type::String, Type::Int, Type::String],
+                Box::new(Type::String),
+            ),
+        );
+        fns.insert(
+            "sdp_replace_connection_addr".into(),
+            Type::Fn(vec![Type::String, Type::String], Box::new(Type::String)),
+        );
+        fns.insert(
+            "sdp_replace_media_port".into(),
+            Type::Fn(vec![Type::String, Type::Int, Type::Int], Box::new(Type::String)),
         );
         fns.insert(
             "sdp_append_line".into(),
@@ -2472,12 +2517,42 @@ impl TypeChecker {
             ),
         );
         fns.insert(
+            "sdp_build_av".into(),
+            Type::Fn(
+                vec![
+                    Type::String,
+                    Type::String,
+                    Type::String,
+                    Type::Int,
+                    Type::String,
+                    Type::Int,
+                    Type::String,
+                ],
+                Box::new(Type::String),
+            ),
+        );
+        fns.insert(
             "sdp_attr_rtpmap".into(),
             Type::Fn(vec![Type::Int, Type::String, Type::Int], Box::new(Type::String)),
         );
         fns.insert(
             "sdp_attr_fmtp".into(),
             Type::Fn(vec![Type::Int, Type::String], Box::new(Type::String)),
+        );
+        fns.insert(
+            "sdp_attr_candidate".into(),
+            Type::Fn(
+                vec![
+                    Type::Int,
+                    Type::Int,
+                    Type::String,
+                    Type::Int,
+                    Type::String,
+                    Type::Int,
+                    Type::String,
+                ],
+                Box::new(Type::String),
+            ),
         );
         fns.insert("rtp_header_len".into(), Type::Fn(vec![], Box::new(Type::Int)));
         fns.insert("rtp_parse_ok".into(), Type::Fn(vec![Type::String], Box::new(Type::Int)));

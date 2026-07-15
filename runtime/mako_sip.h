@@ -1922,13 +1922,7 @@ static inline MakoString mako_sip_auth_param(MakoString hdr, MakoString key) {
     return mako_str_from_cstr("");
 }
 
-/* ---- SDP (RFC 4566) ---- */
-
-static inline int64_t mako_sdp_ok(MakoString sdp) {
-    if (!sdp.data || sdp.len < 3) return 0;
-    /* must start with v= */
-    return (sdp.data[0] == 'v' && sdp.data[1] == '=') ? 1 : 0;
-}
+/* ---- SDP (RFC 4566) — proxy-oriented parse/build/rewrite ---- */
 
 static inline MakoString mako_sdp_line(MakoString sdp, char type, int64_t nth) {
     if (!sdp.data || nth < 0) return mako_str_from_cstr("");
@@ -1965,6 +1959,48 @@ static inline int64_t mako_sdp_line_count(MakoString sdp, char type) {
     return n;
 }
 
+/* Fix sdp_ok now that line_count is defined */
+static inline int64_t mako_sdp_ok(MakoString sdp) {
+    if (!sdp.data || sdp.len < 3) return 0;
+    return (sdp.data[0] == 'v' && sdp.data[1] == '=') ? 1 : 0;
+}
+
+/* Byte range of media description i: from m= line through line before next m= or EOF.
+ * Returns 1 and sets start_out/end_out byte offsets into sdp.data. */
+static inline int mako_sdp_media_range(
+    MakoString sdp, int64_t mi, size_t *start_out, size_t *end_out
+) {
+    if (!sdp.data || mi < 0) return 0;
+    int64_t seen = 0;
+    size_t i = 0;
+    size_t mstart = 0;
+    int found = 0;
+    while (i < sdp.len) {
+        size_t ls = i;
+        while (i < sdp.len && sdp.data[i] != '\n') i++;
+        size_t le = i;
+        if (le > ls && sdp.data[le - 1] == '\r') le--;
+        if (le > ls + 1 && sdp.data[ls] == 'm' && sdp.data[ls + 1] == '=') {
+            if (found) {
+                if (end_out) *end_out = ls;
+                return 1;
+            }
+            if (seen == mi) {
+                mstart = ls;
+                found = 1;
+                if (start_out) *start_out = mstart;
+            }
+            seen++;
+        }
+        if (i < sdp.len && sdp.data[i] == '\n') i++;
+    }
+    if (found) {
+        if (end_out) *end_out = sdp.len;
+        return 1;
+    }
+    return 0;
+}
+
 static inline MakoString mako_sdp_version(MakoString sdp) {
     return mako_sdp_line(sdp, 'v', 0);
 }
@@ -1974,34 +2010,87 @@ static inline MakoString mako_sdp_origin(MakoString sdp) {
 static inline MakoString mako_sdp_session_name(MakoString sdp) {
     return mako_sdp_line(sdp, 's', 0);
 }
+static inline MakoString mako_sdp_timing(MakoString sdp) {
+    return mako_sdp_line(sdp, 't', 0);
+}
 static inline MakoString mako_sdp_connection(MakoString sdp) {
     return mako_sdp_line(sdp, 'c', 0);
 }
 
-static inline MakoString mako_sdp_connection_addr(MakoString sdp) {
-    MakoString c = mako_sdp_connection(sdp);
-    if (!c.data || c.len == 0) {
-        mako_str_free(c);
-        return mako_str_from_cstr("");
-    }
-    /* IN IP4 1.2.3.4 */
-    size_t sp = 0, count = 0, start = 0;
+/* Third token of c=IN IP4|IP6 addr[/ttl] — strips /ttl. Owned. */
+static inline MakoString mako_sdp_parse_c_addr(MakoString c) {
+    if (!c.data || c.len == 0) return mako_str_from_cstr("");
+    size_t sp = 0, count = 0;
     for (size_t i = 0; i <= c.len; i++) {
         if (i == c.len || c.data[i] == ' ') {
             if (i > sp) {
                 count++;
                 if (count == 3) {
-                    start = sp;
-                    MakoString out = mako_sip_slice_to_str(c.data + start, i - start);
-                    mako_str_free(c);
+                    size_t al = i - sp;
+                    /* strip /ttl or /ttl/num_addr */
+                    for (size_t k = 0; k < al; k++) {
+                        if (c.data[sp + k] == '/') {
+                            al = k;
+                            break;
+                        }
+                    }
+                    return mako_sip_slice_to_str(c.data + sp, al);
+                }
+            }
+            sp = i + 1;
+        }
+    }
+    return mako_str_from_cstr("");
+}
+
+/* Session-level c= address (empty if only media-level c=). */
+static inline MakoString mako_sdp_connection_addr(MakoString sdp) {
+    MakoString c = mako_sdp_connection(sdp);
+    MakoString out = mako_sdp_parse_c_addr(c);
+    mako_str_free(c);
+    return out;
+}
+
+/* o= username sess-id sess-ver nettype addrtype unicast-address — 6th field. */
+static inline MakoString mako_sdp_origin_addr(MakoString sdp) {
+    MakoString o = mako_sdp_origin(sdp);
+    if (!o.data || o.len == 0) {
+        mako_str_free(o);
+        return mako_str_from_cstr("");
+    }
+    size_t sp = 0, count = 0;
+    for (size_t i = 0; i <= o.len; i++) {
+        if (i == o.len || o.data[i] == ' ') {
+            if (i > sp) {
+                count++;
+                if (count == 6) {
+                    MakoString out = mako_sip_slice_to_str(o.data + sp, i - sp);
+                    mako_str_free(o);
                     return out;
                 }
             }
             sp = i + 1;
         }
     }
-    mako_str_free(c);
+    mako_str_free(o);
     return mako_str_from_cstr("");
+}
+
+/* 1 if c= uses IP6. */
+static inline int64_t mako_sdp_connection_is_ip6(MakoString sdp) {
+    MakoString c = mako_sdp_connection(sdp);
+    int ip6 = 0;
+    if (c.data && c.len >= 6) {
+        for (size_t i = 0; i + 3 < c.len; i++) {
+            if ((c.data[i] == 'I' || c.data[i] == 'i') &&
+                (c.data[i + 1] == 'P' || c.data[i + 1] == 'p') && c.data[i + 2] == '6') {
+                ip6 = 1;
+                break;
+            }
+        }
+    }
+    mako_str_free(c);
+    return ip6;
 }
 
 static inline int64_t mako_sdp_media_count(MakoString sdp) {
@@ -2032,6 +2121,7 @@ static inline int64_t mako_sdp_media_port(MakoString sdp, int64_t i) {
         return 0;
     }
     j++;
+    /* port or port/nports */
     int64_t port = 0;
     while (j < m.len && m.data[j] >= '0' && m.data[j] <= '9') {
         port = port * 10 + (m.data[j] - '0');
@@ -2044,7 +2134,6 @@ static inline int64_t mako_sdp_media_port(MakoString sdp, int64_t i) {
 static inline MakoString mako_sdp_media_proto(MakoString sdp, int64_t i) {
     MakoString m = mako_sdp_media(sdp, i);
     if (!m.data) return mako_str_from_cstr("");
-    /* type port proto formats... */
     int field = 0;
     size_t sp = 0, start = 0, end = 0;
     for (size_t j = 0; j <= m.len; j++) {
@@ -2065,30 +2154,152 @@ static inline MakoString mako_sdp_media_proto(MakoString sdp, int64_t i) {
     return out;
 }
 
-/* Session-level attribute a=name or a=name:value — return value or "1" if flag. */
-static inline MakoString mako_sdp_attr(MakoString sdp, MakoString name) {
-    if (!sdp.data || !name.data) return mako_str_from_cstr("");
-    size_t i = 0;
-    while (i < sdp.len) {
+/* Payload type list after proto on m= line (e.g. "0 8 101"). Owned. */
+static inline MakoString mako_sdp_media_formats(MakoString sdp, int64_t i) {
+    MakoString m = mako_sdp_media(sdp, i);
+    if (!m.data) return mako_str_from_cstr("");
+    int field = 0;
+    size_t sp = 0, start = 0;
+    for (size_t j = 0; j <= m.len; j++) {
+        if (j == m.len || m.data[j] == ' ') {
+            if (j > sp) {
+                field++;
+                if (field == 4) {
+                    start = sp;
+                    MakoString out = mako_sip_slice_to_str(m.data + start, m.len - start);
+                    mako_str_free(m);
+                    return out;
+                }
+            }
+            sp = j + 1;
+        }
+    }
+    mako_str_free(m);
+    return mako_str_from_cstr("");
+}
+
+/* Media-level c= line value for section i, else empty. */
+static inline MakoString mako_sdp_media_connection(MakoString sdp, int64_t mi) {
+    size_t ms = 0, me = 0;
+    if (!mako_sdp_media_range(sdp, mi, &ms, &me)) return mako_str_from_cstr("");
+    size_t i = ms;
+    /* skip m= line */
+    while (i < me && sdp.data[i] != '\n') i++;
+    if (i < me && sdp.data[i] == '\n') i++;
+    while (i < me) {
+        size_t ls = i;
+        while (i < me && sdp.data[i] != '\n') i++;
+        size_t le = i;
+        if (le > ls && sdp.data[le - 1] == '\r') le--;
+        if (le > ls + 1 && sdp.data[ls] == 'c' && sdp.data[ls + 1] == '=') {
+            return mako_sip_slice_to_str(sdp.data + ls + 2, le - ls - 2);
+        }
+        if (i < me && sdp.data[i] == '\n') i++;
+    }
+    return mako_str_from_cstr("");
+}
+
+/* Effective media address: media c= then session c= (RFC 4566 inheritance). */
+static inline MakoString mako_sdp_media_connection_addr(MakoString sdp, int64_t mi) {
+    MakoString c = mako_sdp_media_connection(sdp, mi);
+    if (c.len > 0) {
+        MakoString a = mako_sdp_parse_c_addr(c);
+        mako_str_free(c);
+        return a;
+    }
+    mako_str_free(c);
+    return mako_sdp_connection_addr(sdp);
+}
+
+/* Attribute in a byte range [rs,re). */
+static inline MakoString mako_sdp_attr_in_range(
+    MakoString sdp, size_t rs, size_t re, MakoString name
+) {
+    if (!sdp.data || !name.data || rs >= re) return mako_str_from_cstr("");
+    size_t i = rs;
+    while (i < re) {
         size_t start = i;
-        while (i < sdp.len && sdp.data[i] != '\n') i++;
+        while (i < re && sdp.data[i] != '\n') i++;
         size_t end = i;
         if (end > start && sdp.data[end - 1] == '\r') end--;
         if (end > start + 2 && sdp.data[start] == 'a' && sdp.data[start + 1] == '=') {
             const char *v = sdp.data + start + 2;
             size_t vl = end - start - 2;
             if (vl >= name.len && mako_sip_ci_eq(v, name.len, name.data, name.len)) {
-                if (vl == name.len) {
-                    return mako_str_from_cstr("1");
-                }
-                if (v[name.len] == ':') {
+                if (vl == name.len) return mako_str_from_cstr("1");
+                if (v[name.len] == ':')
                     return mako_sip_slice_to_str(v + name.len + 1, vl - name.len - 1);
-                }
             }
+        }
+        if (i < re && sdp.data[i] == '\n') i++;
+    }
+    return mako_str_from_cstr("");
+}
+
+/* Session-level a= first; if missing, any media-level (proxy convenience for
+ * single-m-line bodies where direction/rtpmap live under m=). */
+static inline MakoString mako_sdp_attr(MakoString sdp, MakoString name) {
+    size_t re = sdp.len;
+    size_t i = 0;
+    while (i < sdp.len) {
+        size_t ls = i;
+        while (i < sdp.len && sdp.data[i] != '\n') i++;
+        size_t le = i;
+        if (le > ls && sdp.data[le - 1] == '\r') le--;
+        if (le > ls + 1 && sdp.data[ls] == 'm' && sdp.data[ls + 1] == '=') {
+            re = ls;
+            break;
         }
         if (i < sdp.len && sdp.data[i] == '\n') i++;
     }
-    return mako_str_from_cstr("");
+    MakoString a = mako_sdp_attr_in_range(sdp, 0, re, name);
+    if (a.len > 0) return a;
+    mako_str_free(a);
+    return mako_sdp_attr_in_range(sdp, 0, sdp.len, name);
+}
+
+/* Media-level attribute for section mi; falls back to session-level only
+ * (lines before first m=), never other media sections (RFC 4566). */
+static inline MakoString mako_sdp_media_attr(MakoString sdp, int64_t mi, MakoString name) {
+    size_t ms = 0, me = 0;
+    if (mako_sdp_media_range(sdp, mi, &ms, &me)) {
+        MakoString a = mako_sdp_attr_in_range(sdp, ms, me, name);
+        if (a.len > 0) return a;
+        mako_str_free(a);
+    }
+    size_t sess_end = sdp.len;
+    size_t i = 0;
+    while (i < sdp.len) {
+        size_t ls = i;
+        while (i < sdp.len && sdp.data[i] != '\n') i++;
+        size_t le = i;
+        if (le > ls && sdp.data[le - 1] == '\r') le--;
+        if (le > ls + 1 && sdp.data[ls] == 'm' && sdp.data[ls + 1] == '=') {
+            sess_end = ls;
+            break;
+        }
+        if (i < sdp.len && sdp.data[i] == '\n') i++;
+    }
+    return mako_sdp_attr_in_range(sdp, 0, sess_end, name);
+}
+
+/* Direction: sendrecv|sendonly|recvonly|inactive (media then session). Owned. */
+static inline MakoString mako_sdp_media_direction(MakoString sdp, int64_t mi) {
+    static const char *dirs[] = {"sendrecv", "sendonly", "recvonly", "inactive", NULL};
+    for (int d = 0; dirs[d]; d++) {
+        MakoString n = {(char *)dirs[d], strlen(dirs[d])};
+        MakoString v = mako_sdp_media_attr(sdp, mi, n);
+        if (v.len > 0) {
+            mako_str_free(v);
+            return mako_str_from_cstr(dirs[d]);
+        }
+        mako_str_free(v);
+    }
+    return mako_str_from_cstr("sendrecv"); /* RFC default when absent */
+}
+
+static inline MakoString mako_sdp_direction(MakoString sdp) {
+    return mako_sdp_media_direction(sdp, 0);
 }
 
 static inline MakoString mako_sdp_append_line(MakoString sdp, MakoString line) {
@@ -2116,7 +2327,219 @@ static inline MakoString mako_sdp_append_line(MakoString sdp, MakoString line) {
     return (MakoString){d, o};
 }
 
-/* Minimal audio SDP (one m=audio). codecs = space-separated payload types e.g. "0 8 101". */
+/* Replace address token on every c=IN IP4|IP6 … and o= … addr (NAT/proxy rewrite). */
+static inline MakoString mako_sdp_replace_connection_addr(MakoString sdp, MakoString new_addr) {
+    if (!sdp.data || !new_addr.data || new_addr.len == 0)
+        return sdp.data ? mako_sip_slice_to_str(sdp.data, sdp.len) : mako_str_from_cstr("");
+    /* Detect IP6 if new_addr has ':' */
+    int ip6 = 0;
+    for (size_t k = 0; k < new_addr.len; k++)
+        if (new_addr.data[k] == ':') {
+            ip6 = 1;
+            break;
+        }
+    size_t cap = sdp.len + new_addr.len * 8 + 64;
+    char *d = (char *)malloc(cap);
+    if (!d) return mako_str_from_cstr("");
+    size_t o = 0;
+    size_t i = 0;
+    while (i < sdp.len) {
+        size_t ls = i;
+        while (i < sdp.len && sdp.data[i] != '\n') i++;
+        size_t le = i;
+        int is_crlf = 0;
+        size_t content_end = le;
+        if (content_end > ls && sdp.data[content_end - 1] == '\r') {
+            content_end--;
+            is_crlf = 1;
+        }
+        int rewritten = 0;
+        if (content_end > ls + 2) {
+            char t = sdp.data[ls];
+            if ((t == 'c' || t == 'o') && sdp.data[ls + 1] == '=') {
+                /* rebuild line with new address */
+                MakoString line = {(char *)(sdp.data + ls + 2), content_end - ls - 2};
+                /* find last whitespace-separated field as address (or 3rd for c=, 6th for o=) */
+                int want = (t == 'c') ? 3 : 6;
+                size_t sp = 0, count = 0, as = 0, ae = 0;
+                for (size_t j = 0; j <= line.len; j++) {
+                    if (j == line.len || line.data[j] == ' ') {
+                        if (j > sp) {
+                            count++;
+                            if (count == want) {
+                                as = sp;
+                                ae = j;
+                                /* if c= has /ttl, only replace before / */
+                                if (t == 'c') {
+                                    for (size_t x = as; x < ae; x++) {
+                                        if (line.data[x] == '/') {
+                                            ae = x;
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        sp = j + 1;
+                    }
+                }
+                if (count >= want && o + line.len + new_addr.len + 16 < cap) {
+                    d[o++] = t;
+                    d[o++] = '=';
+                    if (as > 0) {
+                        memcpy(d + o, line.data, as);
+                        o += as;
+                    }
+                    /* optional IP4/IP6 type fix on c=/o= */
+                    if (t == 'c' || t == 'o') {
+                        /* leave nettype/addrtype as in original prefix */
+                    }
+                    memcpy(d + o, new_addr.data, new_addr.len);
+                    o += new_addr.len;
+                    /* suffix after old address (e.g. /ttl) */
+                    size_t old_ae = as;
+                    sp = 0;
+                    count = 0;
+                    for (size_t j = 0; j <= line.len; j++) {
+                        if (j == line.len || line.data[j] == ' ') {
+                            if (j > sp) {
+                                count++;
+                                if (count == want) {
+                                    old_ae = j;
+                                    break;
+                                }
+                            }
+                            sp = j + 1;
+                        }
+                    }
+                    if (old_ae < line.len) {
+                        memcpy(d + o, line.data + old_ae, line.len - old_ae);
+                        o += line.len - old_ae;
+                    }
+                    if (is_crlf) {
+                        d[o++] = '\r';
+                        d[o++] = '\n';
+                    } else if (le < sdp.len && sdp.data[le] == '\n') {
+                        d[o++] = '\n';
+                    }
+                    rewritten = 1;
+                    (void)ip6;
+                }
+            }
+        }
+        if (!rewritten) {
+            size_t ncopy = (i < sdp.len && sdp.data[i] == '\n') ? (i - ls + 1) : (i - ls);
+            if (o + ncopy < cap) {
+                memcpy(d + o, sdp.data + ls, ncopy);
+                o += ncopy;
+            }
+        }
+        if (i < sdp.len && sdp.data[i] == '\n') i++;
+    }
+    d[o] = 0;
+    return (MakoString){d, o};
+}
+
+/* Replace port on m= line index mi (keeps /nports if present after digits). Owned. */
+static inline MakoString mako_sdp_replace_media_port(MakoString sdp, int64_t mi, int64_t new_port) {
+    if (!sdp.data || mi < 0 || new_port < 0)
+        return sdp.data ? mako_sip_slice_to_str(sdp.data, sdp.len) : mako_str_from_cstr("");
+    size_t ms = 0, me = 0;
+    if (!mako_sdp_media_range(sdp, mi, &ms, &me))
+        return mako_sip_slice_to_str(sdp.data, sdp.len);
+    /* m= line only at ms */
+    size_t i = ms;
+    while (i < me && sdp.data[i] != '\n') i++;
+    size_t mline_end = i;
+    size_t content_end = mline_end;
+    int is_crlf = 0;
+    if (content_end > ms && sdp.data[content_end - 1] == '\r') {
+        content_end--;
+        is_crlf = 1;
+    }
+    /* find port field start after first space */
+    size_t p0 = ms + 2; /* after m= */
+    while (p0 < content_end && sdp.data[p0] != ' ') p0++;
+    if (p0 >= content_end) return mako_sip_slice_to_str(sdp.data, sdp.len);
+    p0++;
+    size_t p1 = p0;
+    while (p1 < content_end && sdp.data[p1] >= '0' && sdp.data[p1] <= '9') p1++;
+    char pbuf[32];
+    int pn = snprintf(pbuf, sizeof(pbuf), "%lld", (long long)new_port);
+    if (pn < 0) return mako_sip_slice_to_str(sdp.data, sdp.len);
+    size_t n = sdp.len + (size_t)pn + 8;
+    char *d = (char *)malloc(n);
+    if (!d) return mako_str_from_cstr("");
+    size_t o = 0;
+    memcpy(d + o, sdp.data, p0);
+    o += p0;
+    memcpy(d + o, pbuf, (size_t)pn);
+    o += (size_t)pn;
+    /* rest of message from p1 (may include /nports) */
+    memcpy(d + o, sdp.data + p1, sdp.len - p1);
+    o += sdp.len - p1;
+    d[o] = 0;
+    (void)is_crlf;
+    return (MakoString){d, o};
+}
+
+/* Set media direction attribute for section mi (replaces existing direction a=). */
+static inline MakoString mako_sdp_set_media_direction(
+    MakoString sdp, int64_t mi, MakoString dir
+) {
+    const char *dv = dir.data && dir.len ? dir.data : "sendrecv";
+    size_t dlen = dir.data && dir.len ? dir.len : 8;
+    size_t ms = 0, me = 0;
+    if (!mako_sdp_media_range(sdp, mi, &ms, &me))
+        return sdp.data ? mako_sip_slice_to_str(sdp.data, sdp.len) : mako_str_from_cstr("");
+    /* remove existing direction attrs in media range; append new before end of section */
+    size_t cap = sdp.len + dlen + 32;
+    char *out = (char *)malloc(cap);
+    if (!out) return mako_str_from_cstr("");
+    size_t o = 0;
+    /* copy before media */
+    memcpy(out + o, sdp.data, ms);
+    o += ms;
+    size_t i = ms;
+    int inserted = 0;
+    while (i < me) {
+        size_t ls = i;
+        while (i < me && sdp.data[i] != '\n') i++;
+        size_t le = i;
+        size_t ce = le;
+        if (ce > ls && sdp.data[ce - 1] == '\r') ce--;
+        int skip = 0;
+        if (ce > ls + 2 && sdp.data[ls] == 'a' && sdp.data[ls + 1] == '=') {
+            const char *v = sdp.data + ls + 2;
+            size_t vl = ce - ls - 2;
+            if ((vl == 8 && mako_sip_ci_eq(v, 8, "sendrecv", 8)) ||
+                (vl == 8 && mako_sip_ci_eq(v, 8, "sendonly", 8)) ||
+                (vl == 8 && mako_sip_ci_eq(v, 8, "recvonly", 8)) ||
+                (vl == 8 && mako_sip_ci_eq(v, 8, "inactive", 8)))
+                skip = 1;
+        }
+        if (!skip) {
+            size_t ncopy = (i < me && sdp.data[i] == '\n') ? (i - ls + 1) : (i - ls);
+            memcpy(out + o, sdp.data + ls, ncopy);
+            o += ncopy;
+        }
+        if (i < me && sdp.data[i] == '\n') i++;
+    }
+    /* insert direction before rest of SDP (after media section) */
+    int w = snprintf(out + o, cap - o, "a=%.*s\r\n", (int)dlen, dv);
+    if (w > 0) o += (size_t)w;
+    inserted = 1;
+    (void)inserted;
+    if (me < sdp.len) {
+        memcpy(out + o, sdp.data + me, sdp.len - me);
+        o += sdp.len - me;
+    }
+    out[o] = 0;
+    return (MakoString){out, o};
+}
+
+/* Build audio SDP (RFC 4566). codecs = space-separated PTs e.g. "0 8 101".
+ * IPv6 if addr contains ':'. */
 static inline MakoString mako_sdp_build_audio(
     MakoString origin_user,
     MakoString session_name,
@@ -2127,26 +2550,61 @@ static inline MakoString mako_sdp_build_audio(
     const char *ou = origin_user.data && origin_user.len ? origin_user.data : "-";
     const char *sn = session_name.data && session_name.len ? session_name.data : "mako";
     const char *addr = ip.data && ip.len ? ip.data : "127.0.0.1";
+    size_t alen = ip.data && ip.len ? ip.len : 9;
     const char *cs = codecs.data && codecs.len ? codecs.data : "0 8";
+    int ip6 = 0;
+    for (size_t k = 0; k < alen; k++)
+        if (addr[k] == ':') {
+            ip6 = 1;
+            break;
+        }
+    const char *ipt = ip6 ? "IP6" : "IP4";
     uint64_t sid = mako_sip_rng_mix() & 0xffffffffULL;
     uint64_t ver = mako_sip_rng_mix() & 0xffffffffULL;
     char buf[1024];
     int w = snprintf(
         buf, sizeof(buf),
         "v=0\r\n"
-        "o=%s %llu %llu IN IP4 %s\r\n"
+        "o=%s %llu %llu IN %s %s\r\n"
         "s=%s\r\n"
-        "c=IN IP4 %s\r\n"
+        "c=IN %s %s\r\n"
         "t=0 0\r\n"
         "m=audio %lld RTP/AVP %s\r\n"
         "a=rtpmap:0 PCMU/8000\r\n"
         "a=rtpmap:8 PCMA/8000\r\n"
         "a=sendrecv\r\n",
-        ou, (unsigned long long)sid, (unsigned long long)ver, addr, sn, addr,
+        ou, (unsigned long long)sid, (unsigned long long)ver, ipt, addr, sn, ipt, addr,
         (long long)audio_port, cs
     );
     if (w < 0 || (size_t)w >= sizeof(buf)) return mako_str_from_cstr("");
     return mako_str_from_cstr(buf);
+}
+
+/* Build video m-line only body fragment helpers use full session + video. */
+static inline MakoString mako_sdp_build_av(
+    MakoString origin_user,
+    MakoString session_name,
+    MakoString ip,
+    int64_t audio_port,
+    MakoString audio_codecs,
+    int64_t video_port,
+    MakoString video_codecs
+) {
+    MakoString base = mako_sdp_build_audio(origin_user, session_name, ip, audio_port, audio_codecs);
+    const char *vc = video_codecs.data && video_codecs.len ? video_codecs.data : "96";
+    char line[128];
+    int w = snprintf(
+        line, sizeof(line), "m=video %lld RTP/AVP %s\r\na=sendrecv\r\n",
+        (long long)video_port, vc
+    );
+    if (w < 0) {
+        mako_str_free(base);
+        return mako_str_from_cstr("");
+    }
+    MakoString l = {(char *)line, (size_t)w};
+    MakoString out = mako_sdp_append_line(base, l);
+    mako_str_free(base);
+    return out;
 }
 
 static inline MakoString mako_sdp_attr_rtpmap(int64_t pt, MakoString name, int64_t rate) {
@@ -2178,6 +2636,29 @@ static inline MakoString mako_sdp_attr_fmtp(int64_t pt, MakoString params) {
         return mako_str_from_cstr("");
     }
     return (MakoString){d, (size_t)w};
+}
+
+static inline MakoString mako_sdp_attr_candidate(
+    int64_t foundation,
+    int64_t component,
+    MakoString transport,
+    int64_t priority,
+    MakoString addr,
+    int64_t port,
+    MakoString typ
+) {
+    const char *tr = transport.data && transport.len ? transport.data : "UDP";
+    const char *a = addr.data && addr.len ? addr.data : "0.0.0.0";
+    const char *ty = typ.data && typ.len ? typ.data : "host";
+    char buf[256];
+    int w = snprintf(
+        buf, sizeof(buf),
+        "a=candidate:%lld %lld %s %lld %s %lld typ %s",
+        (long long)foundation, (long long)component, tr, (long long)priority, a,
+        (long long)port, ty
+    );
+    if (w < 0) return mako_str_from_cstr("");
+    return mako_str_from_cstr(buf);
 }
 
 /* ---- RTP (RFC 3550) fixed 12-byte header, no CSRC/extension in pack ---- */

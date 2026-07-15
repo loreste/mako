@@ -14966,12 +14966,24 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             self.line(&format!("MakoString {tmp} = mako_sdp_origin({s});"));
                             return ("MakoString".into(), tmp);
                         }
+                        "sdp_origin_addr" => {
+                            let (_, s) = self.emit_expr(&args[0]);
+                            let tmp = self.fresh("sdoa");
+                            self.line(&format!("MakoString {tmp} = mako_sdp_origin_addr({s});"));
+                            return ("MakoString".into(), tmp);
+                        }
                         "sdp_session_name" => {
                             let (_, s) = self.emit_expr(&args[0]);
                             let tmp = self.fresh("sdsn");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_sdp_session_name({s});"
                             ));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "sdp_timing" => {
+                            let (_, s) = self.emit_expr(&args[0]);
+                            let tmp = self.fresh("sdt");
+                            self.line(&format!("MakoString {tmp} = mako_sdp_timing({s});"));
                             return ("MakoString".into(), tmp);
                         }
                         "sdp_connection" => {
@@ -14989,6 +15001,13 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                                 "MakoString {tmp} = mako_sdp_connection_addr({s});"
                             ));
                             return ("MakoString".into(), tmp);
+                        }
+                        "sdp_connection_is_ip6" => {
+                            let (_, s) = self.emit_expr(&args[0]);
+                            return (
+                                "int64_t".into(),
+                                format!("mako_sdp_connection_is_ip6({s})"),
+                            );
                         }
                         "sdp_media_count" => {
                             let (_, s) = self.emit_expr(&args[0]);
@@ -15029,12 +15048,93 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             ));
                             return ("MakoString".into(), tmp);
                         }
+                        "sdp_media_formats" => {
+                            let (_, s) = self.emit_expr(&args[0]);
+                            let (_, i) = self.emit_expr(&args[1]);
+                            let tmp = self.fresh("sdmf");
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_sdp_media_formats({s}, {i});"
+                            ));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "sdp_media_connection" => {
+                            let (_, s) = self.emit_expr(&args[0]);
+                            let (_, i) = self.emit_expr(&args[1]);
+                            let tmp = self.fresh("sdmc");
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_sdp_media_connection({s}, {i});"
+                            ));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "sdp_media_connection_addr" => {
+                            let (_, s) = self.emit_expr(&args[0]);
+                            let (_, i) = self.emit_expr(&args[1]);
+                            let tmp = self.fresh("sdmca");
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_sdp_media_connection_addr({s}, {i});"
+                            ));
+                            return ("MakoString".into(), tmp);
+                        }
                         "sdp_attr" => {
                             let (_, s) = self.emit_expr(&args[0]);
                             let (_, n) = self.emit_expr(&args[1]);
                             let tmp = self.fresh("sda");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_sdp_attr({s}, {n});"
+                            ));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "sdp_media_attr" => {
+                            let (_, s) = self.emit_expr(&args[0]);
+                            let (_, i) = self.emit_expr(&args[1]);
+                            let (_, n) = self.emit_expr(&args[2]);
+                            let tmp = self.fresh("sdma");
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_sdp_media_attr({s}, {i}, {n});"
+                            ));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "sdp_direction" => {
+                            let (_, s) = self.emit_expr(&args[0]);
+                            let tmp = self.fresh("sdd");
+                            self.line(&format!("MakoString {tmp} = mako_sdp_direction({s});"));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "sdp_media_direction" => {
+                            let (_, s) = self.emit_expr(&args[0]);
+                            let (_, i) = self.emit_expr(&args[1]);
+                            let tmp = self.fresh("sdmd");
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_sdp_media_direction({s}, {i});"
+                            ));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "sdp_set_media_direction" => {
+                            let (_, s) = self.emit_expr(&args[0]);
+                            let (_, i) = self.emit_expr(&args[1]);
+                            let (_, d) = self.emit_expr(&args[2]);
+                            let tmp = self.fresh("sdsd");
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_sdp_set_media_direction({s}, {i}, {d});"
+                            ));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "sdp_replace_connection_addr" => {
+                            let (_, s) = self.emit_expr(&args[0]);
+                            let (_, a) = self.emit_expr(&args[1]);
+                            let tmp = self.fresh("sdrca");
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_sdp_replace_connection_addr({s}, {a});"
+                            ));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "sdp_replace_media_port" => {
+                            let (_, s) = self.emit_expr(&args[0]);
+                            let (_, i) = self.emit_expr(&args[1]);
+                            let (_, p) = self.emit_expr(&args[2]);
+                            let tmp = self.fresh("sdrmp");
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_sdp_replace_media_port({s}, {i}, {p});"
                             ));
                             return ("MakoString".into(), tmp);
                         }
@@ -15059,6 +15159,20 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             ));
                             return ("MakoString".into(), tmp);
                         }
+                        "sdp_build_av" => {
+                            let (_, o) = self.emit_expr(&args[0]);
+                            let (_, sn) = self.emit_expr(&args[1]);
+                            let (_, ip) = self.emit_expr(&args[2]);
+                            let (_, ap) = self.emit_expr(&args[3]);
+                            let (_, ac) = self.emit_expr(&args[4]);
+                            let (_, vp) = self.emit_expr(&args[5]);
+                            let (_, vc) = self.emit_expr(&args[6]);
+                            let tmp = self.fresh("sdbav");
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_sdp_build_av({o}, {sn}, {ip}, {ap}, {ac}, {vp}, {vc});"
+                            ));
+                            return ("MakoString".into(), tmp);
+                        }
                         "sdp_attr_rtpmap" => {
                             let (_, pt) = self.emit_expr(&args[0]);
                             let (_, n) = self.emit_expr(&args[1]);
@@ -15075,6 +15189,20 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             let tmp = self.fresh("sdaf");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_sdp_attr_fmtp({pt}, {p});"
+                            ));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "sdp_attr_candidate" => {
+                            let (_, f) = self.emit_expr(&args[0]);
+                            let (_, c) = self.emit_expr(&args[1]);
+                            let (_, t) = self.emit_expr(&args[2]);
+                            let (_, pr) = self.emit_expr(&args[3]);
+                            let (_, a) = self.emit_expr(&args[4]);
+                            let (_, p) = self.emit_expr(&args[5]);
+                            let (_, ty) = self.emit_expr(&args[6]);
+                            let tmp = self.fresh("sdac");
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_sdp_attr_candidate({f}, {c}, {t}, {pr}, {a}, {p}, {ty});"
                             ));
                             return ("MakoString".into(), tmp);
                         }
