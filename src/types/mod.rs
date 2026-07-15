@@ -1630,6 +1630,13 @@ impl TypeChecker {
             "pman_alloc".into(),
             Type::Fn(vec![Type::Named("PageMan".into())], Box::new(Type::Int)),
         );
+        fns.insert("predict_new".into(), Type::Fn(vec![Type::Int], Box::new(Type::Named("Predict".into()))));
+        fns.insert("predict_tick".into(), Type::Fn(vec![Type::Named("Predict".into())], Box::new(Type::Int)));
+        fns.insert("predict_state".into(), Type::Fn(vec![Type::Named("Predict".into())], Box::new(Type::Int)));
+        fns.insert("predict_input".into(), Type::Fn(vec![Type::Named("Predict".into()), Type::Int], Box::new(Type::Int)));
+        fns.insert("predict_reconcile".into(), Type::Fn(vec![Type::Named("Predict".into()), Type::Int], Box::new(Type::Int)));
+        fns.insert("predict_free".into(), Type::Fn(vec![Type::Named("Predict".into())], Box::new(Type::Int)));
+
         fns.insert(
             "pman_set".into(),
             Type::Fn(
@@ -1691,6 +1698,11 @@ impl TypeChecker {
             "hot_reload_watch_count".into(),
             Type::Fn(vec![], Box::new(Type::Int)),
         );
+        fns.insert("hot_reload_note_swap".into(), Type::Fn(vec![], Box::new(Type::Int)));
+        fns.insert("hot_reload_swap_count".into(), Type::Fn(vec![], Box::new(Type::Int)));
+        fns.insert("hot_reload_stamp".into(), Type::Fn(vec![], Box::new(Type::Int)));
+        fns.insert("hot_reload_status_json".into(), Type::Fn(vec![], Box::new(Type::String)));
+
         fns.insert("mvcc_new".into(), Type::Fn(vec![], Box::new(Type::Named("Mvcc".into()))));
         fns.insert("mvcc_begin".into(), Type::Fn(vec![Type::Named("Mvcc".into())], Box::new(Type::Int)));
         fns.insert("mvcc_put".into(), Type::Fn(vec![Type::Named("Mvcc".into()), Type::Int, Type::Int], Box::new(Type::Int)));
@@ -15669,6 +15681,27 @@ fn fold_const_expr_with(
             .copied()
             .ok_or_else(|| TypeError::new(format!("`{n}` is not a const integer"))),
         Expr::Binary { op, left, right } => {
+            // Short-circuit logical ops (0 = false, nonzero = true).
+            if matches!(op, BinOp::And | BinOp::Or) {
+                let l = fold_const_expr_with(left, consts, const_fns)?;
+                match op {
+                    BinOp::And => {
+                        if l == 0 {
+                            return Ok(0);
+                        }
+                        let r = fold_const_expr_with(right, consts, const_fns)?;
+                        return Ok(if r != 0 { 1 } else { 0 });
+                    }
+                    BinOp::Or => {
+                        if l != 0 {
+                            return Ok(1);
+                        }
+                        let r = fold_const_expr_with(right, consts, const_fns)?;
+                        return Ok(if r != 0 { 1 } else { 0 });
+                    }
+                    _ => unreachable!(),
+                }
+            }
             let l = fold_const_expr_with(left, consts, const_fns)?;
             let r = fold_const_expr_with(right, consts, const_fns)?;
             match op {
@@ -15695,9 +15728,13 @@ fn fold_const_expr_with(
                 BinOp::BitClear => Ok(l & !r),
                 BinOp::Shl => Ok(l.wrapping_shl((r as u32) & 63)),
                 BinOp::Shr => Ok(l.wrapping_shr((r as u32) & 63)),
-                _ => Err(TypeError::new(
-                    "const only supports + - * / % & | ^ &^ << >> on integers",
-                )),
+                BinOp::Eq => Ok(if l == r { 1 } else { 0 }),
+                BinOp::Ne => Ok(if l != r { 1 } else { 0 }),
+                BinOp::Lt => Ok(if l < r { 1 } else { 0 }),
+                BinOp::Le => Ok(if l <= r { 1 } else { 0 }),
+                BinOp::Gt => Ok(if l > r { 1 } else { 0 }),
+                BinOp::Ge => Ok(if l >= r { 1 } else { 0 }),
+                BinOp::And | BinOp::Or => unreachable!(),
             }
         }
         Expr::Unary { op, expr } => {
@@ -15705,7 +15742,19 @@ fn fold_const_expr_with(
             match op {
                 UnaryOp::Neg => Ok(v.wrapping_neg()),
                 UnaryOp::BitNot => Ok(!v),
-                UnaryOp::Not => Err(TypeError::new("const does not support not")),
+                UnaryOp::Not => Ok(if v == 0 { 1 } else { 0 }),
+            }
+        }
+        Expr::IfExpr {
+            cond,
+            then_block,
+            else_block,
+        } => {
+            let c = fold_const_expr_with(cond, consts, const_fns)?;
+            if c != 0 {
+                eval_const_fn_body(then_block, consts, const_fns)
+            } else {
+                eval_const_fn_body(else_block, consts, const_fns)
             }
         }
         Expr::Call { callee, args } => {
@@ -15742,7 +15791,7 @@ fn eval_const_fn_body(
     locals: &HashMap<String, i64>,
     const_fns: &HashMap<String, FnDef>,
 ) -> Result<i64, TypeError> {
-    // Support: `{ return expr }` or `{ expr }` trailing, and nested const lets.
+    // Support: let/return, trailing expr, and const `if` / `if/else` (both arms return).
     let mut env = locals.clone();
     for (i, stmt) in body.stmts.iter().enumerate() {
         match stmt {
@@ -15754,12 +15803,39 @@ fn eval_const_fn_body(
                 let v = fold_const_expr_with(init, &env, const_fns)?;
                 env.insert(name.clone(), v);
             }
+            Stmt::If {
+                init,
+                cond,
+                then_block,
+                else_block,
+            } => {
+                if let Some(init_stmt) = init {
+                    match init_stmt.as_ref() {
+                        Stmt::Let { name, init, .. } => {
+                            let v = fold_const_expr_with(init, &env, const_fns)?;
+                            env.insert(name.clone(), v);
+                        }
+                        _ => {
+                            return Err(TypeError::new(
+                                "const if init may only be a let of a const expression",
+                            ));
+                        }
+                    }
+                }
+                let c = fold_const_expr_with(cond, &env, const_fns)?;
+                if c != 0 {
+                    return eval_const_fn_body(then_block, &env, const_fns);
+                } else if let Some(eb) = else_block {
+                    return eval_const_fn_body(eb, &env, const_fns);
+                }
+                // `if` without else that did not return: fall through
+            }
             Stmt::Expr(e) if i + 1 == body.stmts.len() => {
                 return fold_const_expr_with(e, &env, const_fns);
             }
             _ => {
                 return Err(TypeError::new(
-                    "const fn body may only use let/return of const expressions",
+                    "const fn body may only use let/return/if of const expressions",
                 ));
             }
         }

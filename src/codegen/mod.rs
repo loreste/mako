@@ -12963,6 +12963,35 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                                 format!("mako_netcode_interp({a}, {b}, {c})"),
                             );
                         }
+                        "predict_new" => {
+                            let (_, i) = self.emit_expr(&args[0]);
+                            let tmp = self.fresh("prd");
+                            self.line(&format!("MakoPredict *{tmp} = mako_predict_new({i});"));
+                            return ("MakoPredict*".into(), tmp);
+                        }
+                        "predict_tick" => {
+                            let (_, p) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_predict_tick({p})"));
+                        }
+                        "predict_state" => {
+                            let (_, p) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_predict_state({p})"));
+                        }
+                        "predict_input" => {
+                            let (_, p) = self.emit_expr(&args[0]);
+                            let (_, d) = self.emit_expr(&args[1]);
+                            return ("int64_t".into(), format!("mako_predict_input({p}, {d})"));
+                        }
+                        "predict_reconcile" => {
+                            let (_, p) = self.emit_expr(&args[0]);
+                            let (_, a) = self.emit_expr(&args[1]);
+                            return ("int64_t".into(), format!("mako_predict_reconcile({p}, {a})"));
+                        }
+                        "predict_free" => {
+                            let (_, p) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_predict_free({p})"));
+                        }
+
 
                         "btree_new" => {
                             let tmp = self.fresh("bt");
@@ -13299,6 +13328,20 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         }
                         "hot_reload_watch_count" => {
                             return ("int64_t".into(), "mako_hot_reload_watch_count()".into());
+                        }
+                        "hot_reload_note_swap" => {
+                            return ("int64_t".into(), "mako_hot_reload_note_swap()".into());
+                        }
+                        "hot_reload_swap_count" => {
+                            return ("int64_t".into(), "mako_hot_reload_swap_count()".into());
+                        }
+                        "hot_reload_stamp" => {
+                            return ("int64_t".into(), "mako_hot_reload_stamp()".into());
+                        }
+                        "hot_reload_status_json" => {
+                            let tmp = self.fresh("hrs");
+                            self.line(&format!("MakoString {tmp} = mako_hot_reload_status_json();"));
+                            return ("MakoString".into(), tmp);
                         }
                         "mvcc_new" => {
                             let tmp = self.fresh("mv");
@@ -30770,21 +30813,61 @@ fn fold_const_c_env(
         Expr::Int(n) => Some(*n),
         Expr::Ident(n) => consts.get(n).copied(),
         Expr::Binary { op, left, right } => {
+            if matches!(op, BinOp::And | BinOp::Or) {
+                let l = fold_const_c_env(left, consts, const_fns)?;
+                return match op {
+                    BinOp::And => {
+                        if l == 0 {
+                            Some(0)
+                        } else {
+                            let r = fold_const_c_env(right, consts, const_fns)?;
+                            Some(if r != 0 { 1 } else { 0 })
+                        }
+                    }
+                    BinOp::Or => {
+                        if l != 0 {
+                            Some(1)
+                        } else {
+                            let r = fold_const_c_env(right, consts, const_fns)?;
+                            Some(if r != 0 { 1 } else { 0 })
+                        }
+                    }
+                    _ => None,
+                };
+            }
             let l = fold_const_c_env(left, consts, const_fns)?;
             let r = fold_const_c_env(right, consts, const_fns)?;
             match op {
                 BinOp::Add => Some(l.wrapping_add(r)),
                 BinOp::Sub => Some(l.wrapping_sub(r)),
                 BinOp::Mul => Some(l.wrapping_mul(r)),
-                BinOp::Div if r != 0 => Some(l / r),
-                BinOp::Mod if r != 0 => Some(l % r),
+                BinOp::Div => {
+                    if r != 0 {
+                        Some(l / r)
+                    } else {
+                        None
+                    }
+                }
+                BinOp::Mod => {
+                    if r != 0 {
+                        Some(l % r)
+                    } else {
+                        None
+                    }
+                }
                 BinOp::BitAnd => Some(l & r),
                 BinOp::BitOr => Some(l | r),
                 BinOp::BitXor => Some(l ^ r),
                 BinOp::BitClear => Some(l & !r),
                 BinOp::Shl => Some(l.wrapping_shl((r as u32) & 63)),
                 BinOp::Shr => Some(l.wrapping_shr((r as u32) & 63)),
-                _ => None,
+                BinOp::Eq => Some(if l == r { 1 } else { 0 }),
+                BinOp::Ne => Some(if l != r { 1 } else { 0 }),
+                BinOp::Lt => Some(if l < r { 1 } else { 0 }),
+                BinOp::Le => Some(if l <= r { 1 } else { 0 }),
+                BinOp::Gt => Some(if l > r { 1 } else { 0 }),
+                BinOp::Ge => Some(if l >= r { 1 } else { 0 }),
+                BinOp::And | BinOp::Or => None,
             }
         }
         Expr::Unary { op, expr } => {
@@ -30792,7 +30875,19 @@ fn fold_const_c_env(
             match op {
                 UnaryOp::Neg => Some(v.wrapping_neg()),
                 UnaryOp::BitNot => Some(!v),
-                UnaryOp::Not => None,
+                UnaryOp::Not => Some(if v == 0 { 1 } else { 0 }),
+            }
+        }
+        Expr::IfExpr {
+            cond,
+            then_block,
+            else_block,
+        } => {
+            let c = fold_const_c_env(cond, consts, const_fns)?;
+            if c != 0 {
+                fold_const_c_block(then_block, consts, const_fns)
+            } else {
+                fold_const_c_block(else_block, consts, const_fns)
             }
         }
         Expr::Call { callee, args } => {
@@ -30808,23 +30903,51 @@ fn fold_const_c_env(
                 let v = fold_const_c_env(a, consts, const_fns)?;
                 env.insert(p.name.clone(), v);
             }
-            // Evaluate body
-            let mut locals = env;
-            for (i, stmt) in f.body.stmts.iter().enumerate() {
-                match stmt {
-                    Stmt::Return(Some(e)) => return fold_const_c_env(e, &locals, const_fns),
-                    Stmt::Let { name, init, .. } => {
-                        let v = fold_const_c_env(init, &locals, const_fns)?;
-                        locals.insert(name.clone(), v);
-                    }
-                    Stmt::Expr(e) if i + 1 == f.body.stmts.len() => {
-                        return fold_const_c_env(e, &locals, const_fns);
-                    }
-                    _ => return None,
-                }
-            }
-            None
+            fold_const_c_block(&f.body, &env, const_fns)
         }
         _ => None,
     }
+}
+
+fn fold_const_c_block(
+    body: &Block,
+    consts: &HashMap<String, i64>,
+    const_fns: &HashMap<String, FnDef>,
+) -> Option<i64> {
+    let mut locals = consts.clone();
+    for (i, stmt) in body.stmts.iter().enumerate() {
+        match stmt {
+            Stmt::Return(Some(e)) => return fold_const_c_env(e, &locals, const_fns),
+            Stmt::Let { name, init, .. } => {
+                let v = fold_const_c_env(init, &locals, const_fns)?;
+                locals.insert(name.clone(), v);
+            }
+            Stmt::If {
+                init,
+                cond,
+                then_block,
+                else_block,
+            } => {
+                if let Some(init_stmt) = init {
+                    if let Stmt::Let { name, init, .. } = init_stmt.as_ref() {
+                        let v = fold_const_c_env(init, &locals, const_fns)?;
+                        locals.insert(name.clone(), v);
+                    } else {
+                        return None;
+                    }
+                }
+                let c = fold_const_c_env(cond, &locals, const_fns)?;
+                if c != 0 {
+                    return fold_const_c_block(then_block, &locals, const_fns);
+                } else if let Some(eb) = else_block {
+                    return fold_const_c_block(eb, &locals, const_fns);
+                }
+            }
+            Stmt::Expr(e) if i + 1 == body.stmts.len() => {
+                return fold_const_c_env(e, &locals, const_fns);
+            }
+            _ => return None,
+        }
+    }
+    None
 }

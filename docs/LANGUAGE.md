@@ -100,6 +100,22 @@ search a span — no substring allocation:
 
 See [BUILTINS.md](BUILTINS.md) § Strings and `examples/testing/str_slice_zc_test.mko`.
 
+## Comptime (`const` / `const fn`)
+
+Integer `const` bindings and `const fn` bodies fold at compile time:
+
+```mko
+const fn clamp(x: int, lo: int, hi: int) -> int {
+    if x < lo { return lo } else {
+        if x > hi { return hi } else { return x }
+    }
+}
+const N = clamp(50, 0, 10)  // 10
+```
+
+Supported in const: `+ - * / %` bitwise, comparisons, `&&` `||` `!`, `let`,
+`return`, `if`/`else`, and `if`-expressions. Not a full CTFE interpreter.
+
 ## Actors
 
 ```mko

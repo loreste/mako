@@ -77,3 +77,29 @@ fn TestPluginOpenMissingAndFfi() {
     let abi = ffi_abi_name()
     assert(str_contains(abi, "c-"))
 }
+
+fn TestHotReloadSwapAndStamp() {
+    let path = "/tmp/mako_hot_stamp_seed.txt"
+    assert_eq(write_file(path, "a"), 0)
+    let _ = hot_reload_watch(path)
+    let s0 = hot_reload_stamp()
+    assert_eq(hot_reload_note_swap(), hot_reload_swap_count())
+    assert(hot_reload_swap_count() >= 1)
+    let js = hot_reload_status_json()
+    assert(str_contains(js, "mako.hot_reload.v1"))
+    assert(str_contains(js, "swaps"))
+    assert(str_contains(js, "stamp"))
+    let _ = s0
+    assert_eq(hot_reload_unwatch(path), 1)
+}
+
+fn TestPredictService() {
+    let p = predict_new(100)
+    assert_eq(predict_state(p), 100)
+    assert_eq(predict_input(p, 5), 105)
+    assert_eq(predict_tick(p), 1)
+    assert_eq(predict_input(p, 3), 108)
+    // Server says auth was 100 at earlier time; re-apply last pending (3)
+    assert_eq(predict_reconcile(p, 100), 103)
+    assert_eq(predict_free(p), 0)
+}

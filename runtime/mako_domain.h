@@ -496,6 +496,95 @@ static inline int64_t mako_hot_reload_watch_count(void) {
     return n;
 }
 
+/* Soft "code swap" counter — product hot-reload would bump on dylib replace. */
+static int64_t mako_hot_reload_swaps = 0;
+
+static inline int64_t mako_hot_reload_note_swap(void) {
+    mako_hot_reload_swaps++;
+    return mako_hot_reload_swaps;
+}
+
+static inline int64_t mako_hot_reload_swap_count(void) {
+    return mako_hot_reload_swaps;
+}
+
+/* Combined stamp of all watched mtimes (xor of ns) for change detection. */
+static inline int64_t mako_hot_reload_stamp(void) {
+    int64_t h = 0;
+    for (int i = 0; i < MAKO_HOT_WATCH_MAX; i++) {
+        if (!mako_hot_watches[i].used) continue;
+        h ^= mako_hot_watches[i].mtime_ns;
+        h = (h << 7) | ((h >> 57) & 0x7f);
+    }
+    return h;
+}
+
+static inline MakoString mako_hot_reload_status_json(void) {
+    char buf[384];
+    int n = snprintf(
+        buf, sizeof(buf),
+        "{\"schema\":\"mako.hot_reload.v1\",\"watches\":%" PRId64
+        ",\"swaps\":%" PRId64 ",\"stamp\":%" PRId64 "}",
+        mako_hot_reload_watch_count(),
+        mako_hot_reload_swaps,
+        mako_hot_reload_stamp()
+    );
+    if (n < 0) return mako_str_from_cstr("{}");
+    return mako_str_from_cstr(buf);
+}
+
+/* ---- Client prediction service seed (multiplayer netcode depth) ---- */
+typedef struct {
+    int64_t tick;
+    int64_t state;
+    int64_t last_auth;
+    int64_t pending_input;
+    int live;
+} MakoPredict;
+
+static inline MakoPredict *mako_predict_new(int64_t initial) {
+    MakoPredict *p = (MakoPredict *)calloc(1, sizeof(MakoPredict));
+    if (!p) return NULL;
+    p->state = initial;
+    p->last_auth = initial;
+    p->live = 1;
+    return p;
+}
+
+static inline int64_t mako_predict_tick(MakoPredict *p) {
+    return p ? p->tick : -1;
+}
+
+static inline int64_t mako_predict_state(MakoPredict *p) {
+    return p ? p->state : 0;
+}
+
+/* Apply local input for next tick (client prediction). */
+static inline int64_t mako_predict_input(MakoPredict *p, int64_t delta) {
+    if (!p || !p->live) return -1;
+    p->pending_input = delta;
+    p->state = mako_snap_predict(p->state, delta);
+    p->tick++;
+    return p->state;
+}
+
+/* Server auth arrives for some past/current tick; snap to auth + re-apply pending. */
+static inline int64_t mako_predict_reconcile(MakoPredict *p, int64_t auth_state) {
+    if (!p || !p->live) return -1;
+    p->last_auth = auth_state;
+    p->state = mako_snap_reconcile(p->state, auth_state);
+    /* Optionally re-apply last pending input after reconcile. */
+    if (p->pending_input != 0) {
+        p->state = mako_snap_predict(p->state, p->pending_input);
+    }
+    return p->state;
+}
+
+static inline int64_t mako_predict_free(MakoPredict *p) {
+    free(p);
+    return 0;
+}
+
 /* ---- MVCC seed: multi-version map (key, ts) -> val ---- */
 #define MAKO_MVCC_MAX 512
 typedef struct {

@@ -95,6 +95,8 @@ Last inventory: 2026-07-14 (**unique Mako surface** · pack/pull types · full m
 | DAP JSON + pprof-text + tid samples | Done seed — `residual_seeds_test` · `profile_sample_test` |
 | DAP handle + `mako dap` CLI · profile HTTP routes | Done seed — `dap_handle_request` · `/debug/pprof/*` |
 | Cross-target FreeBSD/RISC-V dry-run | Done seed — `scripts/cross-target-seed.sh` · CI workflow |
+| Comptime const if / comparisons | Done seed — `const_fn_test` (`abs_const` / `clamp_const`) |
+| Hot-reload swap/stamp · predict service | Done seed — `residual_seeds_test` |
 | MSI/notarize/brew/winget publish seeds | Done seed — scripts + `package-seed.yml` · WiX skeleton |
 | gfx_poll · GPU backend stubs · netcode deltas | Done seed — `residual_seeds_test` |
 | plugin_open/call/close · hot_reload_unwatch | Done seed — `residual_seeds_test` · `domain_tracks_test` |

@@ -326,11 +326,14 @@ Percentages are weighted; update when a task flips.
 - [x] Plugin host loader seed (`plugin_open` / `call` / `close`) · `ffi_abi_name`.
 - [x] Hot-reload unwatch + count (`hot_reload_unwatch` / `hot_reload_watch_count`).
 - [ ] Real windowing backends / GPU shaders / asset pipelines product.
-- [ ] Full multiplayer netcode product (prediction service).
+- [x] Client prediction service seed (`predict_new` / `input` / `reconcile` / `state` / `tick`).
+- [ ] Full multiplayer netcode product (dedicated prediction service / interest mgmt).
 - [ ] Real Metal-native / CUDA / Vulkan compute backends.
 - [x] SIMD portable seed (`simd_dot_i64_4` / `simd_sum_i64_4` — autovec-friendly).
 - [x] Hot-reload mtime watch seed (`file_mtime_ns` / `hot_reload_watch` / `hot_reload_changed`).
-- [ ] Full hot code reload product · deep comptime / domain CTFE.
+- [x] Hot-reload depth seed (`note_swap` / `swap_count` / `stamp` / `status_json`).
+- [x] Comptime depth seed: const `if` / comparisons / `if`-expr fold (`const_fn_test`).
+- [ ] Full hot code reload product (live dylib swap) · domain CTFE product.
 
 ---
 

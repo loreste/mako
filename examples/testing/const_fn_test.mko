@@ -25,3 +25,45 @@ fn TestConstFnAsArraySize() {
     let n = MAX_BUF + TILE
     assert_eq(n, 1280)
 }
+
+const fn abs_const(x: int) -> int {
+    if x < 0 {
+        return 0 - x
+    } else {
+        return x
+    }
+}
+
+const fn max_const(a: int, b: int) -> int {
+    if a >= b {
+        return a
+    }
+    return b
+}
+
+const fn clamp_const(x: int, lo: int, hi: int) -> int {
+    if x < lo {
+        return lo
+    } else {
+        if x > hi {
+            return hi
+        } else {
+            return x
+        }
+    }
+}
+
+const A_ABS = abs_const(0 - 7)
+const A_MAX = max_const(3, 9)
+const A_CL = clamp_const(50, 0, 10)
+
+fn TestConstFnIf() {
+    assert_eq(A_ABS, 7)
+    assert_eq(A_MAX, 9)
+    assert_eq(A_CL, 10)
+    assert_eq(abs_const(4), 4)
+    assert_eq(max_const(1, 2), 2)
+    assert_eq(clamp_const(0 - 1, 0, 5), 0)
+    // if-expression form
+    assert_eq(if 1 < 2 { 10 } else { 20 }, 10)
+}

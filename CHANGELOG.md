@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Comptime depth · hot-reload depth · prediction seed
+
+- **const fn:** comparisons (`== < <= > >=`), `&&`/`||`/`!`, statement `if`/`else`,
+  and `if`-expressions fold at compile time (`const_fn_test`).
+- **Hot reload:** `hot_reload_note_swap` / `swap_count` / `stamp` / `status_json`.
+- **Netcode:** `predict_*` client prediction service seed (input + reconcile).
+
 ### DAP dispatch · profile HTTP · cross-target dry-run
 
 - **`dap_handle_request` / `dap_request_seq`** — one-shot DAP request dispatch.
