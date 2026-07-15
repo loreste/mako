@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Packaging fill for v0.1.4
+
+- Winget singleton manifest: real Windows zip `InstallerSha256`.
+- Homebrew formula: stable `url` + `sha256` for `v0.1.4` source tarball.
+- `scripts/fill-release-packaging.sh` regenerates SHA/manifest from a tag.
+- `packaging/RELEASE-CHECKSUMS-0.1.4.md` + `packaging/README.md`.
+
 ## 0.1.4 — 2026-07-15
 
 **mako0.1.4** (`CARGO_PKG_VERSION`).

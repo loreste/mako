@@ -1,15 +1,21 @@
-# Homebrew formula sketch for Mako (local tap — homebrew-core is EXTERNAL).
+# Homebrew formula for Mako (private tap or local).
 #
+# Stable builds from the GitHub source tag (needs Rust at build time).
+# Prebuilt binary install is also available via install-release.sh.
+#
+#   brew install --build-from-source Formula/mako.rb
+#   # or private tap:
 #   brew tap-new yours/mako
 #   cp Formula/mako.rb "$(brew --repo yours/mako)/Formula/"
 #   brew install --build-from-source yours/mako/mako
 #
-# homebrew-core: needs your GitHub org + tagged tarball + core PR (see docs/RELEASE.md).
-# mako discovers headers at ../share/mako/runtime relative to the binary,
-# or via MAKO_RUNTIME.
+# homebrew-core: open a PR after `brew audit --strict --online mako`
+# (external; requires maintainer review).
 class Mako < Formula
   desc "Mako — systems/backend language (.mko → native via C)"
   homepage "https://github.com/loreste/mako"
+  url "https://github.com/loreste/mako/archive/refs/tags/v0.1.4.tar.gz"
+  sha256 "1c9669e636206bf0492b78cd430f45f26821bfb32ce4803fc904a9d723541652"
   license "MIT"
   head "https://github.com/loreste/mako.git", branch: "main"
 
@@ -26,20 +32,27 @@ class Mako < Formula
     Dir["runtime/*.h"].each { |h| rt.install h }
     rt.install "runtime/certs" if File.directory?("runtime/certs")
     (rt/"third_party").mkpath
-    rt.install "runtime/third_party/README.md" => "third_party/README.md" if File.file?("runtime/third_party/README.md")
+    if File.file?("runtime/third_party/README.md")
+      rt.install "runtime/third_party/README.md" => "third_party/README.md"
+    end
+    if File.directory?("std")
+      (share/"mako/std").mkpath
+      (share/"mako/std").install Dir["std/*"]
+    end
   end
 
   def caveats
     <<~EOS
-      Runtime headers installed to:
-        #{share}/mako/runtime
-      Found automatically next to the binary, or:
+      Runtime headers: #{share}/mako/runtime
+      Stdlib:          #{share}/mako/std
+      Auto-discovered next to the binary, or:
         export MAKO_RUNTIME=#{share}/mako/runtime
+        export MAKO_STD=#{share}/mako/std
     EOS
   end
 
   test do
-    assert_match "mako", shell_output("#{bin}/mako --version")
+    assert_match "mako0.1.4", shell_output("#{bin}/mako --version")
     (testpath/"hello.mko").write <<~EOS
       fn main() {
           print("ok")
