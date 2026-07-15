@@ -1,0 +1,98 @@
+// Domain-track seeds (no SIPREC/WebRTC): btree, lsm, mvcc, rollback, gfx, AI.
+
+fn TestBTreeOrdered() {
+    let t = btree_new()
+    assert_eq(btree_put(t, 30, 3), 0)
+    assert_eq(btree_put(t, 10, 1), 0)
+    assert_eq(btree_put(t, 20, 2), 0)
+    assert_eq(btree_get(t, 10), 1)
+    assert_eq(btree_get(t, 20), 2)
+    assert_eq(btree_get(t, 30), 3)
+    assert_eq(btree_get(t, 99), -1)
+    assert_eq(btree_free(t), 0)
+}
+
+fn TestLsmFlushGet() {
+    let path = "/tmp/mako_lsm_run.log"
+    assert_eq(write_file(path, ""), 0)
+    let w = wal_open(path)
+    let l = lsm_new(32)
+    assert_eq(lsm_attach_run(l, w), 0)
+    assert_eq(lsm_put(l, 5, 50), 0)
+    assert_eq(lsm_get(l, 5), 50)
+    assert_eq(lsm_flush(l), 0)
+    assert_eq(lsm_flushes(l), 1)
+    // After flush mem empty; value still readable from run
+    assert_eq(lsm_get(l, 5), 50)
+    assert_eq(lsm_free(l), 0)
+    assert_eq(wal_close(w), 0)
+}
+
+fn TestMvccSnapshotRead() {
+    let m = mvcc_new()
+    let _ = mvcc_put(m, 7, 1)
+    let r1 = mvcc_begin(m)
+    let _ = mvcc_put(m, 7, 2)
+    assert_eq(mvcc_get(m, r1, 7), 1)
+    let r2 = mvcc_begin(m)
+    assert_eq(mvcc_get(m, r2, 7), 2)
+    assert(mvcc_versions(m) >= 2)
+    assert_eq(mvcc_free(m), 0)
+}
+
+fn TestRollbackRing() {
+    let r = rollback_new(4)
+    let s0 = snap_encode4(1, 2, 3, 4)
+    let s1 = snap_encode4(10, 20, 30, 40)
+    assert_eq(rollback_push(r, 100, s0), 0)
+    assert_eq(rollback_push(r, 101, s1), 0)
+    assert_eq(rollback_len(r), 2)
+    assert_eq(rollback_get(r, 100, 0), 1)
+    assert_eq(rollback_restore_slot0(r, 101), 10)
+    assert_eq(rollback_free(r), 0)
+}
+
+fn TestGfxAudioPhysics() {
+    let w = gfx_window_open(800, 600, "mako")
+    assert_eq(gfx_window_width(w), 800)
+    assert_eq(gfx_window_height(w), 600)
+    assert_eq(gfx_window_close(w), 0)
+    let sid = gfx_shader_compile("void main(){}")
+    assert(sid > 0)
+    assert_eq(audio_mix(100, 200), 300)
+    assert_eq(audio_mix(30000, 30000), 32767)
+    assert_eq(physics_step_x(0, 1000, 1000), 1000)
+    assert_eq(physics_step_v(0, 1000, 1000), 1000)
+}
+
+fn TestAiRopeKvGemm() {
+    let c = ai_rope_cos(0)
+    assert_eq(c, 1000) // cos(0)*1000
+    let x = ai_rope_apply_x(1000, 0, 0)
+    assert_eq(x, 1000)
+    let kv = kv_cache_new(16)
+    assert_eq(kv_cache_append(kv, 11, 22), 1)
+    assert_eq(kv_cache_append(kv, 33, 44), 2)
+    assert_eq(kv_cache_get_k(kv, 0), 11)
+    assert_eq(kv_cache_get_v(kv, 1), 44)
+    assert_eq(kv_cache_len(kv), 2)
+    assert_eq(kv_cache_free(kv), 0)
+    // Identity-ish 2x2: [[1,0],[0,1]] * [[2,3],[4,5]] = [[2,3],[4,5]]
+    let c00 = gemm2x2(1, 0, 0, 1, 2, 3, 4, 5)
+    assert_eq(c00, 2)
+    assert_eq(gemm_c01(), 3)
+    assert_eq(gemm_c10(), 4)
+    assert_eq(gemm_c11(), 5)
+    // 1.0f as bits = 1065353216
+    let h = f32_to_f16_bits(1065353216)
+    assert(h > 0)
+}
+
+fn TestDebugFrame() {
+    assert_eq(debug_set_loc("main.mko", 42), 1)
+    assert_eq(debug_line(), 42)
+    assert(str_contains(debug_file(), "main.mko"))
+    let js = debug_frame_json()
+    assert(str_contains(js, "mako.debug_frame.v1"))
+    assert(str_contains(js, "42"))
+}

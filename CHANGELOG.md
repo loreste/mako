@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### Domain tracks batch (no SIPREC/WebRTC)
+
+- **B-tree** `btree_new` / `put` / `get` / `len` / `free` (fanout 8).
+- **LSM** memtable + run WAL: `lsm_new` / `put` / `get` / `flush` / `attach_run`.
+- **MVCC** multi-version get by read ts: `mvcc_*`.
+- **Rollback ring** for multiplayer: `rollback_push` / `get` / `restore_slot0`.
+- **Graphics soft:** `gfx_window_*`, `gfx_shader_compile`, `gfx_asset_size`,
+  `audio_mix`, `physics_step_*`.
+- **AI depth host:** RoPE helpers, `kv_cache_*`, `gemm2x2`, `f32_to_f16_bits`.
+- **Debug frame:** `debug_set_loc` / `debug_file` / `debug_line` / `debug_frame_json`.
+- **Packaging notes:** `package-msi-notes.md`, `package-macos-notarize-notes.md`.
+- Runtime: `mako_domain.h`. Tests: `domain_tracks_test`.
+
 ### P4 storage depth · game snapshot seeds
 
 - **Hash index:** `hindex_new` / `put` / `get` / `del` / `len` / `free` (open

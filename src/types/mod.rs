@@ -1516,6 +1516,60 @@ impl TypeChecker {
             "snap_reconcile".into(),
             Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int)),
         );
+
+        fns.insert("btree_new".into(), Type::Fn(vec![], Box::new(Type::Named("BTree".into()))));
+        fns.insert("btree_put".into(), Type::Fn(vec![Type::Named("BTree".into()), Type::Int, Type::Int], Box::new(Type::Int)));
+        fns.insert("btree_get".into(), Type::Fn(vec![Type::Named("BTree".into()), Type::Int], Box::new(Type::Int)));
+        fns.insert("btree_len".into(), Type::Fn(vec![Type::Named("BTree".into())], Box::new(Type::Int)));
+        fns.insert("btree_free".into(), Type::Fn(vec![Type::Named("BTree".into())], Box::new(Type::Int)));
+        fns.insert("lsm_new".into(), Type::Fn(vec![Type::Int], Box::new(Type::Named("Lsm".into()))));
+        fns.insert("lsm_attach_run".into(), Type::Fn(vec![Type::Named("Lsm".into()), Type::Named("Wal".into())], Box::new(Type::Int)));
+        fns.insert("lsm_put".into(), Type::Fn(vec![Type::Named("Lsm".into()), Type::Int, Type::Int], Box::new(Type::Int)));
+        fns.insert("lsm_get".into(), Type::Fn(vec![Type::Named("Lsm".into()), Type::Int], Box::new(Type::Int)));
+        fns.insert("lsm_flush".into(), Type::Fn(vec![Type::Named("Lsm".into())], Box::new(Type::Int)));
+        fns.insert("lsm_flushes".into(), Type::Fn(vec![Type::Named("Lsm".into())], Box::new(Type::Int)));
+        fns.insert("lsm_free".into(), Type::Fn(vec![Type::Named("Lsm".into())], Box::new(Type::Int)));
+        fns.insert("mvcc_new".into(), Type::Fn(vec![], Box::new(Type::Named("Mvcc".into()))));
+        fns.insert("mvcc_begin".into(), Type::Fn(vec![Type::Named("Mvcc".into())], Box::new(Type::Int)));
+        fns.insert("mvcc_put".into(), Type::Fn(vec![Type::Named("Mvcc".into()), Type::Int, Type::Int], Box::new(Type::Int)));
+        fns.insert("mvcc_get".into(), Type::Fn(vec![Type::Named("Mvcc".into()), Type::Int, Type::Int], Box::new(Type::Int)));
+        fns.insert("mvcc_versions".into(), Type::Fn(vec![Type::Named("Mvcc".into())], Box::new(Type::Int)));
+        fns.insert("mvcc_free".into(), Type::Fn(vec![Type::Named("Mvcc".into())], Box::new(Type::Int)));
+        fns.insert("rollback_new".into(), Type::Fn(vec![Type::Int], Box::new(Type::Named("Rollback".into()))));
+        fns.insert("rollback_push".into(), Type::Fn(vec![Type::Named("Rollback".into()), Type::Int, Type::String], Box::new(Type::Int)));
+        fns.insert("rollback_get".into(), Type::Fn(vec![Type::Named("Rollback".into()), Type::Int, Type::Int], Box::new(Type::Int)));
+        fns.insert("rollback_restore_slot0".into(), Type::Fn(vec![Type::Named("Rollback".into()), Type::Int], Box::new(Type::Int)));
+        fns.insert("rollback_len".into(), Type::Fn(vec![Type::Named("Rollback".into())], Box::new(Type::Int)));
+        fns.insert("rollback_free".into(), Type::Fn(vec![Type::Named("Rollback".into())], Box::new(Type::Int)));
+        fns.insert("gfx_window_open".into(), Type::Fn(vec![Type::Int, Type::Int, Type::String], Box::new(Type::Named("GfxWindow".into()))));
+        fns.insert("gfx_window_width".into(), Type::Fn(vec![Type::Named("GfxWindow".into())], Box::new(Type::Int)));
+        fns.insert("gfx_window_height".into(), Type::Fn(vec![Type::Named("GfxWindow".into())], Box::new(Type::Int)));
+        fns.insert("gfx_window_close".into(), Type::Fn(vec![Type::Named("GfxWindow".into())], Box::new(Type::Int)));
+        fns.insert("gfx_shader_compile".into(), Type::Fn(vec![Type::String], Box::new(Type::Int)));
+        fns.insert("gfx_asset_size".into(), Type::Fn(vec![Type::String], Box::new(Type::Int)));
+        fns.insert("audio_mix".into(), Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int)));
+        fns.insert("physics_step_x".into(), Type::Fn(vec![Type::Int, Type::Int, Type::Int], Box::new(Type::Int)));
+        fns.insert("physics_step_v".into(), Type::Fn(vec![Type::Int, Type::Int, Type::Int], Box::new(Type::Int)));
+        fns.insert("ai_rope_cos".into(), Type::Fn(vec![Type::Int], Box::new(Type::Int)));
+        fns.insert("ai_rope_sin".into(), Type::Fn(vec![Type::Int], Box::new(Type::Int)));
+        fns.insert("ai_rope_apply_x".into(), Type::Fn(vec![Type::Int, Type::Int, Type::Int], Box::new(Type::Int)));
+        fns.insert("ai_rope_apply_y".into(), Type::Fn(vec![Type::Int, Type::Int, Type::Int], Box::new(Type::Int)));
+        fns.insert("kv_cache_new".into(), Type::Fn(vec![Type::Int], Box::new(Type::Named("KvCache".into()))));
+        fns.insert("kv_cache_append".into(), Type::Fn(vec![Type::Named("KvCache".into()), Type::Int, Type::Int], Box::new(Type::Int)));
+        fns.insert("kv_cache_get_k".into(), Type::Fn(vec![Type::Named("KvCache".into()), Type::Int], Box::new(Type::Int)));
+        fns.insert("kv_cache_get_v".into(), Type::Fn(vec![Type::Named("KvCache".into()), Type::Int], Box::new(Type::Int)));
+        fns.insert("kv_cache_len".into(), Type::Fn(vec![Type::Named("KvCache".into())], Box::new(Type::Int)));
+        fns.insert("kv_cache_free".into(), Type::Fn(vec![Type::Named("KvCache".into())], Box::new(Type::Int)));
+        fns.insert("gemm2x2".into(), Type::Fn(vec![Type::Int, Type::Int, Type::Int, Type::Int, Type::Int, Type::Int, Type::Int, Type::Int], Box::new(Type::Int)));
+        fns.insert("gemm_c01".into(), Type::Fn(vec![], Box::new(Type::Int)));
+        fns.insert("gemm_c10".into(), Type::Fn(vec![], Box::new(Type::Int)));
+        fns.insert("gemm_c11".into(), Type::Fn(vec![], Box::new(Type::Int)));
+        fns.insert("f32_to_f16_bits".into(), Type::Fn(vec![Type::Int], Box::new(Type::Int)));
+        fns.insert("debug_set_loc".into(), Type::Fn(vec![Type::String, Type::Int], Box::new(Type::Int)));
+        fns.insert("debug_file".into(), Type::Fn(vec![], Box::new(Type::String)));
+        fns.insert("debug_line".into(), Type::Fn(vec![], Box::new(Type::Int)));
+        fns.insert("debug_frame_json".into(), Type::Fn(vec![], Box::new(Type::String)));
+
         // Event loop
         fns.insert(
             "evloop_new".into(),

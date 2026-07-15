@@ -16,7 +16,7 @@ STATUS north-star / MVP: **100%**. Prefer STATUS over this list when claiming Do
 | Scope | Approx. |
 |-------|---------|
 | MVP / STATUS north-star | **100%** |
-| General-purpose intention (weighted tracks below) | **~93%** |
+| General-purpose intention (weighted tracks below) | **~95%** |
 | Mako identity (preferred syntax) | **~90%** |
 | Standard library (target areas) | **~98%** |
 
@@ -93,12 +93,12 @@ Metrics/prom + span-lite JSON are in; **depth seeds landed** (2026-07-14).
 
 ### P4 — Domain & advanced systems
 
-1. Telecom/realtime product stacks (SIP/RTP/SRTP seeds exist; SIPREC/Diameter/WebRTC residual)  
-2. ~~Database/storage primitives: pages, WAL, hash index, txn store~~ **Done seed** — `page_*` / `wal_*` / `hindex_*` / `store_*`  
-3. Graphics/windowing · shader · asset · audio · physics seeds (game track)  
-4. ~~Multiplayer snapshot/predict seed~~ **Done seed** — `snap_encode*` / `snap_predict` / `snap_reconcile` (+ existing game UDP)  
-5. GPU AI depth: batched GEMM, RoPE, KV-cache, native f16; more quant; Metal/CUDA/Vulkan  
-6. Interop beyond C · hot reload · safe comptime domain extensions  
+1. Telecom/realtime — SIP/RTP/SRTP seeds exist; **SIPREC/WebRTC out of scope** (user)  
+2. ~~Storage: pages, WAL, hindex, store, btree, LSM, MVCC~~ **Done seed** — `domain_tracks_test` · `store_index_test`  
+3. ~~Graphics/audio/physics soft seeds~~ **Done seed** — `gfx_*` / `audio_mix` / `physics_step_*`  
+4. ~~Multiplayer snapshot + rollback ring~~ **Done seed** — `snap_*` / `rollback_*`  
+5. ~~GPU AI depth seeds~~ **Done seed** — `gemm2x2` / RoPE / `kv_cache_*` / f16 bits (host); Metal/CUDA residual  
+6. Interop beyond C · hot reload · safe comptime domain extensions — **open**  
 
 ### Language ergonomics — production backends
 
@@ -158,7 +158,7 @@ not the language identity.
 Checklist for **100% of the product intention**, not the MVP/STATUS bar.  
 Percentages are weighted; update when a task flips.
 
-**Overall intention completion:** **~93% / 100%**  
+**Overall intention completion:** **~95% / 100%**  
 **Mako identity (preferred syntax):** **~90%** — [IDENTITY.md](IDENTITY.md).
 
 | Track | Weight | Current |
@@ -170,9 +170,9 @@ Percentages are weighted; update when a task flips.
 | 5. API protocols and networking | 10% | **100%** |
 | 6. Data, SQL, and serialization | 10% | **100%** |
 | 7. Toolchain, packages, and IDE | 10% | **100%** |
-| 8. Observability and debugging | 8% | **82%** |
-| 9. Installer, distribution, and portability | 10% | **85%** |
-| 10. Domain tracks and advanced systems | 10% | **84%** |
+| 8. Observability and debugging | 8% | **86%** |
+| 9. Installer, distribution, and portability | 10% | **88%** |
+| 10. Domain tracks and advanced systems | 10% | **92%** |
 
 ### 1. Language identity and core type system — 10%
 
@@ -265,6 +265,7 @@ Percentages are weighted; update when a task flips.
 - [x] Closure env free: `fn_drop` / `fn_has_env` (+ generated drop_env for string fields).
 - [x] Auto `fn_drop` on scope exit; kick **moves** env into the task (no double-free).
 - [x] Debug locals registry + soft BP ids (`debug_set_int` / `debug_locals_json` / `debug_bp`).
+- [x] Debug source frame seed (`debug_set_loc` / `debug_file` / `debug_line` / `debug_frame_json`).
 - [ ] Full debugger: DWARF source-level locals, real process breakpoints, async frame walk.
 - [ ] Full OTLP protobuf + exporter HTTP client productization.
 - [ ] Sampling CPU profiler / continuous profilers.
@@ -279,7 +280,8 @@ Percentages are weighted; update when a task flips.
 - [x] Stable ABI, dynamic libraries, native plugins, WASM plugins.
 - [x] Installer manifest + doctor host/header checks (`install-manifest.json` seed).
 - [x] Packaging seeds: `package-deb.sh` · `package-rpm.sh` · `packaging/winget/` · `Formula/mako.rb` · `validate-matrix.sh`.
-- [ ] Complete installer UX for macOS, Linux, and Windows (MSI / notarized pkg polish).
+- [x] MSI / macOS notarize **workflow notes** (`scripts/package-msi-notes.md` · `package-macos-notarize-notes.md`).
+- [ ] Complete installer UX for macOS, Linux, and Windows (signed MSI / notarized pkg in CI).
 - [ ] homebrew-core / winget-pkgs publish automation (external).
 - [ ] CI multi-OS matrix green on FreeBSD / RISC-V hosts.
 - [ ] Console/platform-specific toolchain path where licensing permits.
