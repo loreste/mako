@@ -310,6 +310,28 @@ config/log updates. Tests: `examples/testing/fs_storage_test.mko`.
 | `mmap_size` | `mmap_size(m: MMap) -> int` | Return the size of the mapped region |
 | `mmap_close` | `mmap_close(m: MMap) -> int` | Unmap and close the memory-mapped file |
 
+### Storage seeds (`mako_dio.h` + `mako_domain.h`)
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `page_alloc` | `page_alloc(size: int) -> Page` | Zeroed page (default 4096) |
+| `page_read` / `page_write` / `page_free` | … | Page I/O |
+| `wal_open` | `wal_open(path: string) -> Wal` | File-backed WAL |
+| `wal_append` / `wal_sync` / `wal_read_at` / `wal_next_off` / `wal_close` | … | Length-prefixed records |
+| `hindex_new` / `hindex_put` / `hindex_get` / `hindex_del` / `hindex_free` | … | Int→int open-addressing index |
+| `store_new` / `store_put` / `store_get` / `store_begin` / `store_commit` / `store_rollback` | … | Txn KV; optional `store_attach_wal` |
+| `btree_new` / `btree_put` / `btree_get` / `btree_save` / `btree_load` / `btree_free` | … | In-memory B-tree + disk snapshot |
+| `sst_build4` / `sst_get` / `sst_len` / `sst_free` | … | Sorted run + binary search |
+| `pcache_new` / `pcache_get` / `pcache_hits` / `pcache_misses` / `pcache_free` | … | 16-slot LRU page cache |
+| `mvcc_new` / `mvcc_begin` / `mvcc_put` / `mvcc_get` / `mvcc_gc` / `mvcc_live` / `mvcc_free` | … | Multi-version KV + GC |
+| `lsm_new` / `lsm_put` / `lsm_get` / `lsm_flush` / `lsm_attach_run` / `lsm_free` | … | Memtable + run WAL |
+| `snap_encode2` / `snap_encode4` / `snap_get` / `snap_count` / `snap_predict` / `snap_reconcile` | … | Multiplayer snapshot seed |
+| `rollback_new` / `rollback_push` / `rollback_get` / `rollback_restore_slot0` / `rollback_free` | … | Frame rollback ring |
+| `simd_dot_i64_4` / `simd_sum_i64_4` | … | Portable 4-wide seed |
+
+Tests: `storage_wal_test`, `store_index_test`, `storage_depth_test`, `domain_tracks_test`.  
+**Not in scope:** SIPREC / WebRTC.
+
 ---
 
 ## 10. Environment
@@ -2066,6 +2088,10 @@ Tests: `examples/testing/strong_log_test.mko`.
 | `debug_break` | `debug_break(label: string) -> int` | Soft breakpoint (log + count) |
 | `debug_break_hits` | `debug_break_hits() -> int` | Soft breakpoint hit count |
 | `debug_break_reset` | `debug_break_reset() -> int` | Reset hit counter |
+| `debug_set_int` / `debug_get_int` | named int slots | Debug locals registry |
+| `debug_locals_json` | `() -> string` | Locals snapshot |
+| `debug_bp_enable` / `debug_bp` / `debug_bp_disable` | soft BP ids 0..15 | |
+| `debug_set_loc` / `debug_file` / `debug_line` / `debug_frame_json` | source frame seed | |
 | `crash_report_install` | `crash_report_install(path: string) -> int` | Install crash signal handlers |
 | `crash_report_installed` | `crash_report_installed() -> int` | 1 if crash report installed |
 | `process_rss_bytes` | `process_rss_bytes() -> int` | Process RSS in bytes (−1 if N/A) |

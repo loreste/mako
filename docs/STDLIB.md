@@ -197,8 +197,37 @@ Low-level unbuffered file operations and memory-mapped files (`runtime/mako_dio.
 | `mmap_open` / `mmap_create` | map existing or new file |
 | `mmap_read` / `mmap_write` / `mmap_sync` | read/write/flush mapping |
 | `mmap_size` / `mmap_close` | size / unmap |
+| `page_alloc` / `page_read` / `page_write` / `page_free` | fixed-size memory pages |
+| `wal_open` / `wal_append` / `wal_sync` / `wal_read_at` / `wal_next_off` / `wal_close` | length-prefixed WAL |
+| `hindex_*` | open-addressing int→int hash index |
+| `store_*` | transactional KV (`begin` / `commit` / `rollback`; optional WAL) |
 
-Tests: `examples/testing/dio_test.mko`. Header: `runtime/mako_dio.h`.
+Tests: `dio_test.mko`, `storage_wal_test.mko`, `store_index_test.mko`.  
+Header: `runtime/mako_dio.h`.
+
+---
+
+## Domain seeds (`mako_domain.h`)
+
+Storage depth, multiplayer helpers, soft graphics, host AI, debug frame.
+**SIPREC/WebRTC are out of scope.**
+
+| Area | Surface | Tests |
+|------|---------|-------|
+| B-tree | `btree_new` / `put` / `get` / `save` / `load` / `free` | `domain_tracks_test` · `storage_depth_test` |
+| LSM | `lsm_new` / `put` / `get` / `flush` / `attach_run` | `domain_tracks_test` |
+| SST | `sst_build4` / `sst_get` / `sst_len` / `sst_free` | `storage_depth_test` |
+| Page cache | `pcache_new` / `pcache_get` / hits·misses | `storage_depth_test` |
+| MVCC | `mvcc_new` / `begin` / `put` / `get` / `gc` / `live` | both |
+| Snapshots | `snap_encode2` / `encode4` / `get` / `predict` / `reconcile` | `store_index_test` |
+| Rollback | `rollback_new` / `push` / `get` / `restore_slot0` | `domain_tracks_test` |
+| Graphics soft | `gfx_window_*`, `gfx_shader_compile`, `gfx_asset_size` | `domain_tracks_test` |
+| Audio / physics | `audio_mix`, `physics_step_x` / `_v` | `domain_tracks_test` |
+| AI host | RoPE, `kv_cache_*`, `gemm2x2`, `f32_to_f16_bits` | `domain_tracks_test` |
+| SIMD seed | `simd_dot_i64_4` / `simd_sum_i64_4` | `storage_depth_test` |
+| Debug frame | `debug_set_loc` / `debug_file` / `debug_line` / `debug_frame_json` | `domain_tracks_test` |
+
+Header: `runtime/mako_domain.h` (included by codegen after `mako_dio.h`).
 
 ---
 
@@ -456,6 +485,9 @@ session controls (`tcp_set_timeout`, `tcp_keepalive`, `tcp_nodelay`,
 | Trace | `trace_id` / `set` / `current` / `begin` / `end` / `log` / `trace_export_json` / `trace_export_otlp_json` / `trace_span_id` |
 | Metrics | `metric_*` / `gauge_*` / `hist_*` / `metrics_export` / `metrics_export_prom` / `metrics_export_otlp_json` |
 | Profile | `profile_snapshot_json` / `stack_trace` / `crash_report_install` / `process_rss_bytes` / `process_cpu_*` |
+| Debug | `debug_break` / `debug_bp_*` / `debug_set_int` / `debug_locals_json` / `debug_set_loc` / `debug_frame_json` |
+| Task inspect | `task_done` / `task_joined` / `task_id` / `tasks_inspect_json` |
+| Closures | `fn_drop` / `fn_has_env` (auto drop on scope; kick moves env) |
 | Logs + trace | `log_*` and `slog_with` print `trace=<hex>` when a trace is active |
 
 See [BUILTINS.md](BUILTINS.md) §§71–75 and [CLI.md](CLI.md) (`mako dev`, `--race`).
