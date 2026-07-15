@@ -1,0 +1,19 @@
+// std/encoding/toml — flat + [section] keys (TOML subset seed)
+fn get_string(doc: string, key: string) -> string { return toml_get_string(doc, key) }
+fn get_int(doc: string, key: string) -> int { return toml_get_int(doc, key) }
+fn get_bool(doc: string, key: string) -> int { return toml_get_bool(doc, key) }
+fn get_float(doc: string, key: string) -> float { return toml_get_float(doc, key) }
+fn has(doc: string, key: string) -> int { return toml_has(doc, key) }
+fn get_in(doc: string, section: string, key: string) -> string {
+    return toml_get_in(doc, section, key)
+}
+fn get_int_in(doc: string, section: string, key: string) -> int {
+    return toml_get_int_in(doc, section, key)
+}
+fn escape(s: string) -> string { return toml_escape(s) }
+fn pair(key: string, val: string) -> string { return toml_pair(key, val) }
+fn pair_int(key: string, val: int) -> string { return toml_pair_int(key, val) }
+fn pair_bool(key: string, val: int) -> string { return toml_pair_bool(key, val) }
+fn section(name: string) -> string { return toml_section(name) }
+fn merge(a: string, b: string) -> string { return toml_merge(a, b) }
+fn keys(doc: string) -> []string { return toml_keys(doc) }

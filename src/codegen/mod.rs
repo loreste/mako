@@ -18436,6 +18436,49 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             ));
                             return ("MakoString".into(), tmp);
                         }
+                        "yaml_get_int" | "yaml_get_bool" | "yaml_has" => {
+                            let (_, doc) = self.emit_expr(&args[0]);
+                            let (_, key) = self.emit_expr(&args[1]);
+                            let fname = format!("mako_{name}");
+                            return ("int64_t".into(), format!("{fname}({doc}, {key})"));
+                        }
+                        "yaml_escape" => {
+                            let (_, s) = self.emit_expr(&args[0]);
+                            let tmp = self.fresh("ye");
+                            self.line(&format!("MakoString {tmp} = mako_yaml_escape({s});"));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "yaml_pair" | "yaml_merge" => {
+                            let (_, a) = self.emit_expr(&args[0]);
+                            let (_, b) = self.emit_expr(&args[1]);
+                            let fname = format!("mako_{name}");
+                            let tmp = self.fresh("yp");
+                            self.line(&format!("MakoString {tmp} = {fname}({a}, {b});"));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "yaml_pair_int" | "yaml_pair_bool" => {
+                            let (_, k) = self.emit_expr(&args[0]);
+                            let (_, v) = self.emit_expr(&args[1]);
+                            let fname = format!("mako_{name}");
+                            let tmp = self.fresh("ypi");
+                            self.line(&format!("MakoString {tmp} = {fname}({k}, {v});"));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "yaml_get_list" => {
+                            let (_, doc) = self.emit_expr(&args[0]);
+                            let (_, key) = self.emit_expr(&args[1]);
+                            let tmp = self.fresh("ygl");
+                            self.line(&format!(
+                                "MakoStrArray {tmp} = mako_yaml_get_list({doc}, {key});"
+                            ));
+                            return ("MakoStrArray".into(), tmp);
+                        }
+                        "yaml_keys" => {
+                            let (_, doc) = self.emit_expr(&args[0]);
+                            let tmp = self.fresh("yk");
+                            self.line(&format!("MakoStrArray {tmp} = mako_yaml_keys({doc});"));
+                            return ("MakoStrArray".into(), tmp);
+                        }
                         "toml_get_string" => {
                             let (_, doc) = self.emit_expr(&args[0]);
                             let (_, key) = self.emit_expr(&args[1]);
@@ -18445,10 +18488,67 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             ));
                             return ("MakoString".into(), tmp);
                         }
-                        "toml_get_int" => {
+                        "toml_get_int" | "toml_get_bool" | "toml_has" => {
                             let (_, doc) = self.emit_expr(&args[0]);
                             let (_, key) = self.emit_expr(&args[1]);
-                            return ("int64_t".into(), format!("mako_toml_get_int({doc}, {key})"));
+                            let fname = format!("mako_{name}");
+                            return ("int64_t".into(), format!("{fname}({doc}, {key})"));
+                        }
+                        "toml_get_float" => {
+                            let (_, doc) = self.emit_expr(&args[0]);
+                            let (_, key) = self.emit_expr(&args[1]);
+                            return (
+                                "double".into(),
+                                format!("mako_toml_get_float({doc}, {key})"),
+                            );
+                        }
+                        "toml_get_in" => {
+                            let (_, doc) = self.emit_expr(&args[0]);
+                            let (_, sec) = self.emit_expr(&args[1]);
+                            let (_, key) = self.emit_expr(&args[2]);
+                            let tmp = self.fresh("tgi");
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_toml_get_in({doc}, {sec}, {key});"
+                            ));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "toml_get_int_in" => {
+                            let (_, doc) = self.emit_expr(&args[0]);
+                            let (_, sec) = self.emit_expr(&args[1]);
+                            let (_, key) = self.emit_expr(&args[2]);
+                            return (
+                                "int64_t".into(),
+                                format!("mako_toml_get_int_in({doc}, {sec}, {key})"),
+                            );
+                        }
+                        "toml_escape" | "toml_section" => {
+                            let (_, s) = self.emit_expr(&args[0]);
+                            let fname = format!("mako_{name}");
+                            let tmp = self.fresh("te");
+                            self.line(&format!("MakoString {tmp} = {fname}({s});"));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "toml_pair" | "toml_merge" => {
+                            let (_, a) = self.emit_expr(&args[0]);
+                            let (_, b) = self.emit_expr(&args[1]);
+                            let fname = format!("mako_{name}");
+                            let tmp = self.fresh("tp");
+                            self.line(&format!("MakoString {tmp} = {fname}({a}, {b});"));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "toml_pair_int" | "toml_pair_bool" => {
+                            let (_, k) = self.emit_expr(&args[0]);
+                            let (_, v) = self.emit_expr(&args[1]);
+                            let fname = format!("mako_{name}");
+                            let tmp = self.fresh("tpi");
+                            self.line(&format!("MakoString {tmp} = {fname}({k}, {v});"));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "toml_keys" => {
+                            let (_, doc) = self.emit_expr(&args[0]);
+                            let tmp = self.fresh("tk");
+                            self.line(&format!("MakoStrArray {tmp} = mako_toml_keys({doc});"));
+                            return ("MakoStrArray".into(), tmp);
                         }
                         "msgpack_int_hex" => {
                             let (_, v) = self.emit_expr(&args[0]);

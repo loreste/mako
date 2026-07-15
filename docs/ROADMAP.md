@@ -7,7 +7,7 @@ Short engineering queue. Product map: [VISION.md](VISION.md).
 STATUS north-star / MVP: **100%**. Prefer STATUS over this list when claiming Done.  
 **Mako identity:** [IDENTITY.md](IDENTITY.md) (**~100%** preferred surface).  
 **Dual sugar only:** [GO_SYNTAX_CHECKLIST.md](GO_SYNTAX_CHECKLIST.md) (**~94%**).  
-**Product version:** **0.1.5** · Last roadmap sync: **2026-07-15**.
+**Product version:** **0.1.6** · Last roadmap sync: **2026-07-15**.
 
 ---
 
@@ -408,6 +408,8 @@ Percentages are weighted; update when a task flips.
 - [x] List[T] + richer collections (list/set/heap/ring/stack/queue · `collections_*_test`).
 - [x] Full time package (calendar/parse/format/duration · `time_full_test`).
 - [x] Full syscall package (portable OS primitives · `syscall_full_test`).
+- [x] YAML + TOML encoding packages (`yaml_toml_test`).
+- [x] Product version **0.1.6**.
 - [x] Hot-reload unwatch + count (`hot_reload_unwatch` / `hot_reload_watch_count`).
 - [x] Client prediction service seed (`predict_new` / `input` / `reconcile` / `state` / `tick`).
 - [x] Live dylib hot-reload seed (`hot_reload_plugin_watch` / `poll` / `call` / `close`).
