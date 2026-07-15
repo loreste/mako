@@ -245,3 +245,29 @@ fn TestConstFnBreakContinue() {
     assert_eq(C_FGE, 7)
     assert_eq(first_ge(3, 10), 3)
 }
+
+// --- Const string seed: literals, +, str_len, == ---
+
+const GREET = "hi"
+const BANG = "!"
+const FULL = "hi" + "!"
+const GREET2 = GREET + BANG
+const GLEN = str_len(GREET)
+const FLEN = str_len(FULL)
+const SAME = GREET == "hi"
+const DIFF = FULL != "hi"
+
+fn TestConstString() {
+    assert_eq(GLEN, 2)
+    assert_eq(FLEN, 3)
+    assert_eq(str_len(GREET2), 3)
+    // Equality folds to int 0/1 at const time
+    assert_eq(SAME, 1)
+    assert_eq(DIFF, 1)
+    assert(GREET == "hi")
+    assert(FULL == "hi!")
+    assert(GREET2 == FULL)
+    // Runtime use of const string value
+    assert_eq_str(GREET, "hi")
+    assert_eq_str(FULL, "hi!")
+}

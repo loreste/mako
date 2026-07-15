@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Const string seed
+
+- `const S = "…"` string constants; `+` / `str_concat` at const time.
+- `str_len` / `len` and `==` / `!=` / `str_eq` fold to ints.
+- Runtime uses of string consts emit `mako_str_from_cstr("…")`.
+- Tests: `TestConstString` in `const_fn_test`.
+
 ### Const-fn break / continue
 
 - Bare `break` / `continue` fold in const `while` / `for` / C-style `for`.
