@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### P4 storage depth · game snapshot seeds
+
+- **Hash index:** `hindex_new` / `put` / `get` / `del` / `len` / `free` (open
+  addressing, grow on load).
+- **Transactional store:** `store_new` / `put` / `get` / `del` /
+  `begin` / `commit` / `rollback` · optional `store_attach_wal` logs commits.
+- **Snapshots:** `snap_encode2` / `snap_encode4` / `snap_get` / `snap_count` ·
+  `snap_predict` / `snap_reconcile` (multiplayer seed).
+- Tests: `store_index_test`.
+
 ### P3 packaging · P4 storage · ShareInt capture · debug locals
 
 - **Storage seed:** `page_alloc` / `page_read` / `page_write` / `page_free` ·

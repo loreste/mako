@@ -16,7 +16,7 @@ STATUS north-star / MVP: **100%**. Prefer STATUS over this list when claiming Do
 | Scope | Approx. |
 |-------|---------|
 | MVP / STATUS north-star | **100%** |
-| General-purpose intention (weighted tracks below) | **~92%** |
+| General-purpose intention (weighted tracks below) | **~93%** |
 | Mako identity (preferred syntax) | **~90%** |
 | Standard library (target areas) | **~98%** |
 
@@ -94,9 +94,9 @@ Metrics/prom + span-lite JSON are in; **depth seeds landed** (2026-07-14).
 ### P4 — Domain & advanced systems
 
 1. Telecom/realtime product stacks (SIP/RTP/SRTP seeds exist; SIPREC/Diameter/WebRTC residual)  
-2. ~~Database/storage primitives: pages, WAL~~ **Done seed** — `page_*` / `wal_*` (`storage_wal_test`); indexes/tx residual  
+2. ~~Database/storage primitives: pages, WAL, hash index, txn store~~ **Done seed** — `page_*` / `wal_*` / `hindex_*` / `store_*`  
 3. Graphics/windowing · shader · asset · audio · physics seeds (game track)  
-4. Multiplayer game networking (reliable UDP, snapshots, prediction/rollback)  
+4. ~~Multiplayer snapshot/predict seed~~ **Done seed** — `snap_encode*` / `snap_predict` / `snap_reconcile` (+ existing game UDP)  
 5. GPU AI depth: batched GEMM, RoPE, KV-cache, native f16; more quant; Metal/CUDA/Vulkan  
 6. Interop beyond C · hot reload · safe comptime domain extensions  
 
@@ -158,7 +158,7 @@ not the language identity.
 Checklist for **100% of the product intention**, not the MVP/STATUS bar.  
 Percentages are weighted; update when a task flips.
 
-**Overall intention completion:** **~92% / 100%**  
+**Overall intention completion:** **~93% / 100%**  
 **Mako identity (preferred syntax):** **~90%** — [IDENTITY.md](IDENTITY.md).
 
 | Track | Weight | Current |
@@ -172,7 +172,7 @@ Percentages are weighted; update when a task flips.
 | 7. Toolchain, packages, and IDE | 10% | **100%** |
 | 8. Observability and debugging | 8% | **82%** |
 | 9. Installer, distribution, and portability | 10% | **85%** |
-| 10. Domain tracks and advanced systems | 10% | **78%** |
+| 10. Domain tracks and advanced systems | 10% | **84%** |
 
 ### 1. Language identity and core type system — 10%
 
@@ -296,7 +296,9 @@ Percentages are weighted; update when a task flips.
 - [ ] Graphics/windowing · backends · shaders · assets · audio · physics.
 - [ ] Multiplayer game networking.
 - [x] Storage page + WAL append log seeds (`page_*` / `wal_*`).
-- [ ] Storage depth: indexes, cache, transactions, LSM/B-tree product.
+- [x] Hash index + transactional store (`hindex_*` / `store_begin`/`commit`/`rollback`).
+- [x] Game snapshot encode + predict/reconcile seed (`snap_*`).
+- [ ] Storage depth: B-tree/LSM, page cache product, MVCC.
 - [ ] AI inference service helpers; GPU AI depth (batched GEMM, RoPE, KV-cache, f16 kernels).
 - [ ] More quant formats · optional large-LLM FFI · tokenizer parity · embedding gather.
 - [ ] GPU backends: Metal-native, CUDA, Vulkan behind same API.

@@ -1402,6 +1402,120 @@ impl TypeChecker {
             "wal_close".into(),
             Type::Fn(vec![Type::Named("Wal".into())], Box::new(Type::Int)),
         );
+        // Hash index + transactional store
+        fns.insert(
+            "hindex_new".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Named("HIndex".into()))),
+        );
+        fns.insert(
+            "hindex_put".into(),
+            Type::Fn(
+                vec![Type::Named("HIndex".into()), Type::Int, Type::Int],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "hindex_get".into(),
+            Type::Fn(
+                vec![Type::Named("HIndex".into()), Type::Int],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "hindex_del".into(),
+            Type::Fn(
+                vec![Type::Named("HIndex".into()), Type::Int],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "hindex_len".into(),
+            Type::Fn(vec![Type::Named("HIndex".into())], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "hindex_free".into(),
+            Type::Fn(vec![Type::Named("HIndex".into())], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "store_new".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Named("Store".into()))),
+        );
+        fns.insert(
+            "store_attach_wal".into(),
+            Type::Fn(
+                vec![Type::Named("Store".into()), Type::Named("Wal".into())],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "store_get".into(),
+            Type::Fn(
+                vec![Type::Named("Store".into()), Type::Int],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "store_put".into(),
+            Type::Fn(
+                vec![Type::Named("Store".into()), Type::Int, Type::Int],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "store_del".into(),
+            Type::Fn(
+                vec![Type::Named("Store".into()), Type::Int],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "store_begin".into(),
+            Type::Fn(vec![Type::Named("Store".into())], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "store_commit".into(),
+            Type::Fn(vec![Type::Named("Store".into())], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "store_rollback".into(),
+            Type::Fn(vec![Type::Named("Store".into())], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "store_len".into(),
+            Type::Fn(vec![Type::Named("Store".into())], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "store_free".into(),
+            Type::Fn(vec![Type::Named("Store".into())], Box::new(Type::Int)),
+        );
+        // Game multiplayer snapshot seed
+        fns.insert(
+            "snap_encode2".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::String)),
+        );
+        fns.insert(
+            "snap_encode4".into(),
+            Type::Fn(
+                vec![Type::Int, Type::Int, Type::Int, Type::Int],
+                Box::new(Type::String),
+            ),
+        );
+        fns.insert(
+            "snap_count".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "snap_get".into(),
+            Type::Fn(vec![Type::String, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "snap_predict".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "snap_reconcile".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int)),
+        );
         // Event loop
         fns.insert(
             "evloop_new".into(),

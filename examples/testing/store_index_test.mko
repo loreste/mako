@@ -1,0 +1,68 @@
+// Hash index + transactional store + snapshot seeds.
+
+fn TestHIndexBasic() {
+    let h = hindex_new(16)
+    assert_eq(hindex_put(h, 1, 100), 0)
+    assert_eq(hindex_put(h, 2, 200), 0)
+    assert_eq(hindex_get(h, 1), 100)
+    assert_eq(hindex_get(h, 2), 200)
+    assert_eq(hindex_get(h, 99), -1)
+    assert_eq(hindex_len(h), 2)
+    assert_eq(hindex_del(h, 1), 0)
+    assert_eq(hindex_get(h, 1), -1)
+    assert_eq(hindex_len(h), 1)
+    assert_eq(hindex_free(h), 0)
+}
+
+fn TestStoreTxnRollback() {
+    let s = store_new(32)
+    assert_eq(store_put(s, 10, 1), 0)
+    assert_eq(store_begin(s), 0)
+    assert_eq(store_put(s, 10, 999), 0)
+    assert_eq(store_put(s, 20, 2), 0)
+    assert_eq(store_get(s, 10), 999)
+    assert_eq(store_rollback(s), 0)
+    assert_eq(store_get(s, 10), 1)
+    assert_eq(store_get(s, 20), -1)
+    assert_eq(store_free(s), 0)
+}
+
+fn TestStoreTxnCommit() {
+    let s = store_new(32)
+    assert_eq(store_begin(s), 0)
+    assert_eq(store_put(s, 1, 42), 0)
+    assert_eq(store_put(s, 2, 43), 0)
+    assert_eq(store_commit(s), 0)
+    assert_eq(store_get(s, 1), 42)
+    assert_eq(store_get(s, 2), 43)
+    assert_eq(store_len(s), 2)
+    assert_eq(store_free(s), 0)
+}
+
+fn TestStoreWithWal() {
+    let path = "/tmp/mako_store_wal_test.log"
+    assert_eq(write_file(path, ""), 0)
+    let w = wal_open(path)
+    let s = store_new(16)
+    assert_eq(store_attach_wal(s, w), 0)
+    assert_eq(store_begin(s), 0)
+    assert_eq(store_put(s, 7, 70), 0)
+    assert_eq(store_commit(s), 0)
+    assert(wal_size(w) > 0)
+    let rec = wal_read_at(w, 0)
+    assert(str_contains(rec, "P,7,70") || str_contains(rec, "7"))
+    assert_eq(store_free(s), 0)
+    assert_eq(wal_close(w), 0)
+}
+
+fn TestSnapEncodePredict() {
+    let sn = snap_encode4(10, 20, 30, 40)
+    assert_eq(snap_count(sn), 4)
+    assert_eq(snap_get(sn, 0), 10)
+    assert_eq(snap_get(sn, 3), 40)
+    let pred = snap_predict(100, 5)
+    assert_eq(pred, 105)
+    assert_eq(snap_reconcile(pred, 99), 99)
+    let sn2 = snap_encode2(1, 2)
+    assert_eq(snap_get(sn2, 1), 2)
+}

@@ -30,6 +30,43 @@ static inline int64_t mako_mmap_write(MakoMMap *m, int64_t o, MakoString d) { (v
 static inline int64_t mako_mmap_sync(MakoMMap *m, int64_t f) { (void)m;(void)f; return -1; }
 static inline int64_t mako_mmap_size(MakoMMap *m) { (void)m; return -1; }
 static inline int64_t mako_mmap_close(MakoMMap *m) { (void)m; return -1; }
+typedef struct { int fd; char path[512]; } MakoWal;
+typedef struct { char *data; size_t size; } MakoPage;
+static inline MakoPage *mako_page_alloc(int64_t s) {
+    size_t n = s > 0 ? (size_t)s : 4096;
+    MakoPage *p = (MakoPage *)calloc(1, sizeof(MakoPage));
+    if (!p) return NULL;
+    p->data = (char *)calloc(1, n);
+    if (!p->data) { free(p); return NULL; }
+    p->size = n;
+    return p;
+}
+static inline int64_t mako_page_size(MakoPage *p) { return p ? (int64_t)p->size : -1; }
+static inline int64_t mako_page_write(MakoPage *p, int64_t o, MakoString d) {
+    if (!p || !p->data || o < 0 || (size_t)o + d.len > p->size) return -1;
+    if (d.len && d.data) memcpy(p->data + (size_t)o, d.data, d.len);
+    return (int64_t)d.len;
+}
+static inline MakoString mako_page_read(MakoPage *p, int64_t o, int64_t c) {
+    if (!p || !p->data || o < 0 || c < 0 || (size_t)o >= p->size) return mako_str_from_cstr("");
+    size_t n = (size_t)c;
+    if ((size_t)o + n > p->size) n = p->size - (size_t)o;
+    char *b = (char *)malloc(n + 1);
+    if (!b) return mako_str_from_cstr("");
+    if (n) memcpy(b, p->data + (size_t)o, n);
+    b[n] = 0;
+    return (MakoString){b, n};
+}
+static inline int64_t mako_page_free(MakoPage *p) {
+    if (!p) return 0; free(p->data); free(p); return 0;
+}
+static inline MakoWal *mako_wal_open(MakoString p) { (void)p; return NULL; }
+static inline int64_t mako_wal_append(MakoWal *w, MakoString r) { (void)w;(void)r; return -1; }
+static inline int64_t mako_wal_sync(MakoWal *w) { (void)w; return -1; }
+static inline int64_t mako_wal_size(MakoWal *w) { (void)w; return -1; }
+static inline MakoString mako_wal_read_at(MakoWal *w, int64_t o) { (void)w;(void)o; return mako_str_from_cstr(""); }
+static inline int64_t mako_wal_next_off(void) { return -1; }
+static inline int64_t mako_wal_close(MakoWal *w) { free(w); return 0; }
 #else /* POSIX */
 
 /* macOS fcntl constants — use raw values to avoid _DARWIN_C_SOURCE ordering issues */
@@ -557,5 +594,334 @@ static inline int64_t mako_wal_close(MakoWal *w) {
 }
 
 #endif /* !_WIN32 (POSIX) */
+
+/* ---- Hash index + transactional store seed (portable) ---- */
+
+#define MAKO_HINDEX_EMPTY  ((int64_t)0x7fffffffffffffffLL)
+#define MAKO_HINDEX_TOMB   ((int64_t)0x7ffffffffffffffeLL)
+#define MAKO_STORE_UNDO_MAX 256
+
+typedef struct {
+    int64_t *keys;
+    int64_t *vals;
+    size_t cap;
+    size_t len; /* live entries */
+} MakoHIndex;
+
+static inline uint64_t mako_hindex_hash(int64_t k) {
+    uint64_t x = (uint64_t)k;
+    x ^= x >> 33;
+    x *= 0xff51afd7ed558ccdULL;
+    x ^= x >> 33;
+    x *= 0xc4ceb9fe1a85ec53ULL;
+    x ^= x >> 33;
+    return x;
+}
+
+static inline MakoHIndex *mako_hindex_new(int64_t cap) {
+    size_t c = cap > 8 ? (size_t)cap : 16;
+    /* power of two */
+    size_t p = 16;
+    while (p < c) p *= 2;
+    MakoHIndex *h = (MakoHIndex *)calloc(1, sizeof(MakoHIndex));
+    if (!h) return NULL;
+    h->keys = (int64_t *)malloc(p * sizeof(int64_t));
+    h->vals = (int64_t *)malloc(p * sizeof(int64_t));
+    if (!h->keys || !h->vals) {
+        free(h->keys);
+        free(h->vals);
+        free(h);
+        return NULL;
+    }
+    for (size_t i = 0; i < p; i++) h->keys[i] = MAKO_HINDEX_EMPTY;
+    h->cap = p;
+    h->len = 0;
+    return h;
+}
+
+static inline int64_t mako_hindex_len(MakoHIndex *h) {
+    return h ? (int64_t)h->len : 0;
+}
+
+static inline int64_t mako_hindex_get(MakoHIndex *h, int64_t key) {
+    if (!h || !h->keys) return -1;
+    size_t mask = h->cap - 1;
+    size_t i = (size_t)mako_hindex_hash(key) & mask;
+    for (size_t n = 0; n < h->cap; n++) {
+        int64_t k = h->keys[i];
+        if (k == MAKO_HINDEX_EMPTY) return -1;
+        if (k == key) return h->vals[i];
+        i = (i + 1) & mask;
+    }
+    return -1;
+}
+
+static inline int mako_hindex_put_raw(MakoHIndex *h, int64_t key, int64_t val) {
+    if (!h || key == MAKO_HINDEX_EMPTY || key == MAKO_HINDEX_TOMB) return -1;
+    if (h->len * 10 >= h->cap * 7) {
+        /* grow */
+        size_t ncap = h->cap * 2;
+        int64_t *nk = (int64_t *)malloc(ncap * sizeof(int64_t));
+        int64_t *nv = (int64_t *)malloc(ncap * sizeof(int64_t));
+        if (!nk || !nv) {
+            free(nk);
+            free(nv);
+            return -1;
+        }
+        for (size_t i = 0; i < ncap; i++) nk[i] = MAKO_HINDEX_EMPTY;
+        size_t oldc = h->cap;
+        int64_t *ok = h->keys;
+        int64_t *ov = h->vals;
+        h->keys = nk;
+        h->vals = nv;
+        h->cap = ncap;
+        h->len = 0;
+        for (size_t i = 0; i < oldc; i++) {
+            if (ok[i] != MAKO_HINDEX_EMPTY && ok[i] != MAKO_HINDEX_TOMB) {
+                (void)mako_hindex_put_raw(h, ok[i], ov[i]);
+            }
+        }
+        free(ok);
+        free(ov);
+    }
+    size_t mask = h->cap - 1;
+    size_t i = (size_t)mako_hindex_hash(key) & mask;
+    size_t tomb = (size_t)-1;
+    for (size_t n = 0; n < h->cap; n++) {
+        int64_t k = h->keys[i];
+        if (k == key) {
+            h->vals[i] = val;
+            return 0;
+        }
+        if (k == MAKO_HINDEX_TOMB && tomb == (size_t)-1) tomb = i;
+        if (k == MAKO_HINDEX_EMPTY) {
+            size_t slot = (tomb != (size_t)-1) ? tomb : i;
+            if (h->keys[slot] == MAKO_HINDEX_EMPTY) h->len++;
+            else if (h->keys[slot] == MAKO_HINDEX_TOMB) h->len++;
+            h->keys[slot] = key;
+            h->vals[slot] = val;
+            return 0;
+        }
+        i = (i + 1) & mask;
+    }
+    return -1;
+}
+
+static inline int64_t mako_hindex_put(MakoHIndex *h, int64_t key, int64_t val) {
+    return mako_hindex_put_raw(h, key, val) == 0 ? 0 : -1;
+}
+
+static inline int64_t mako_hindex_del(MakoHIndex *h, int64_t key) {
+    if (!h) return -1;
+    size_t mask = h->cap - 1;
+    size_t i = (size_t)mako_hindex_hash(key) & mask;
+    for (size_t n = 0; n < h->cap; n++) {
+        int64_t k = h->keys[i];
+        if (k == MAKO_HINDEX_EMPTY) return -1;
+        if (k == key) {
+            h->keys[i] = MAKO_HINDEX_TOMB;
+            if (h->len > 0) h->len--;
+            return 0;
+        }
+        i = (i + 1) & mask;
+    }
+    return -1;
+}
+
+static inline int64_t mako_hindex_free(MakoHIndex *h) {
+    if (!h) return 0;
+    free(h->keys);
+    free(h->vals);
+    free(h);
+    return 0;
+}
+
+/* In-memory store with optional undo (txn) and optional WAL logging of commits. */
+typedef struct {
+    int64_t key;
+    int64_t old_val;
+    int had; /* 1 if key existed before put/del */
+    int is_del;
+} MakoStoreUndo;
+
+typedef struct {
+    MakoHIndex *idx;
+    MakoWal *wal; /* optional, not owned */
+    int in_txn;
+    MakoStoreUndo undo[MAKO_STORE_UNDO_MAX];
+    int undo_len;
+} MakoStore;
+
+static inline MakoStore *mako_store_new(int64_t cap) {
+    MakoStore *s = (MakoStore *)calloc(1, sizeof(MakoStore));
+    if (!s) return NULL;
+    s->idx = mako_hindex_new(cap);
+    if (!s->idx) {
+        free(s);
+        return NULL;
+    }
+    return s;
+}
+
+static inline int64_t mako_store_attach_wal(MakoStore *s, MakoWal *w) {
+    if (!s) return -1;
+    s->wal = w;
+    return 0;
+}
+
+static inline int64_t mako_store_get(MakoStore *s, int64_t key) {
+    return s ? mako_hindex_get(s->idx, key) : -1;
+}
+
+static inline int64_t mako_store_begin(MakoStore *s) {
+    if (!s || s->in_txn) return -1;
+    s->in_txn = 1;
+    s->undo_len = 0;
+    return 0;
+}
+
+static inline void mako_store_note_undo(MakoStore *s, int64_t key, int is_del) {
+    if (!s || !s->in_txn || s->undo_len >= MAKO_STORE_UNDO_MAX) return;
+    int64_t old = mako_hindex_get(s->idx, key);
+    MakoStoreUndo *u = &s->undo[s->undo_len++];
+    u->key = key;
+    u->old_val = old;
+    u->had = (old != -1) ? 1 : 0;
+    u->is_del = is_del;
+}
+
+static inline int64_t mako_store_put(MakoStore *s, int64_t key, int64_t val) {
+    if (!s) return -1;
+    if (s->in_txn) mako_store_note_undo(s, key, 0);
+    return mako_hindex_put(s->idx, key, val);
+}
+
+static inline int64_t mako_store_del(MakoStore *s, int64_t key) {
+    if (!s) return -1;
+    if (s->in_txn) mako_store_note_undo(s, key, 1);
+    return mako_hindex_del(s->idx, key);
+}
+
+static inline int64_t mako_store_rollback(MakoStore *s) {
+    if (!s || !s->in_txn) return -1;
+    for (int i = s->undo_len - 1; i >= 0; i--) {
+        MakoStoreUndo *u = &s->undo[i];
+        if (u->had) {
+            (void)mako_hindex_put(s->idx, u->key, u->old_val);
+        } else {
+            (void)mako_hindex_del(s->idx, u->key);
+        }
+    }
+    s->undo_len = 0;
+    s->in_txn = 0;
+    return 0;
+}
+
+static inline int64_t mako_store_commit(MakoStore *s) {
+    if (!s || !s->in_txn) return -1;
+#if !defined(_WIN32)
+    if (s->wal) {
+        /* Log one record per undo entry as "P,key,val" or "D,key" */
+        for (int i = 0; i < s->undo_len; i++) {
+            char buf[64];
+            MakoStoreUndo *u = &s->undo[i];
+            int64_t cur = mako_hindex_get(s->idx, u->key);
+            int n;
+            if (u->is_del && cur < 0) {
+                n = snprintf(buf, sizeof(buf), "D,%lld", (long long)u->key);
+            } else {
+                n = snprintf(
+                    buf, sizeof(buf), "P,%lld,%lld", (long long)u->key, (long long)cur
+                );
+            }
+            if (n > 0) {
+                MakoString rec = {(char *)buf, (size_t)n};
+                if (mako_wal_append(s->wal, rec) != 0) return -1;
+            }
+        }
+        if (mako_wal_sync(s->wal) != 0) return -1;
+    }
+#else
+    (void)s;
+#endif
+    s->undo_len = 0;
+    s->in_txn = 0;
+    return 0;
+}
+
+static inline int64_t mako_store_len(MakoStore *s) {
+    return s ? mako_hindex_len(s->idx) : 0;
+}
+
+static inline int64_t mako_store_free(MakoStore *s) {
+    if (!s) return 0;
+    mako_hindex_free(s->idx);
+    free(s);
+    return 0;
+}
+
+/* ---- Game snapshot seed: pack/unpack int64 entity slots ---- */
+
+/* Encode n int64 values as little-endian bytes (owned string buffer). */
+static inline MakoString mako_snap_encode(const int64_t *vals, int64_t n) {
+    if (!vals || n <= 0) return mako_str_from_cstr("");
+    size_t bytes = (size_t)n * 8;
+    char *d = (char *)malloc(bytes + 1);
+    if (!d) return mako_str_from_cstr("");
+    for (int64_t i = 0; i < n; i++) {
+        uint64_t v = (uint64_t)vals[i];
+        size_t o = (size_t)i * 8;
+        d[o + 0] = (char)(v & 0xff);
+        d[o + 1] = (char)((v >> 8) & 0xff);
+        d[o + 2] = (char)((v >> 16) & 0xff);
+        d[o + 3] = (char)((v >> 24) & 0xff);
+        d[o + 4] = (char)((v >> 32) & 0xff);
+        d[o + 5] = (char)((v >> 40) & 0xff);
+        d[o + 6] = (char)((v >> 48) & 0xff);
+        d[o + 7] = (char)((v >> 56) & 0xff);
+    }
+    d[bytes] = 0;
+    return (MakoString){d, bytes};
+}
+
+/* Encode up to 8 int64 args (convenience for Mako without int arrays). */
+static inline MakoString mako_snap_encode2(int64_t a, int64_t b) {
+    int64_t v[2] = {a, b};
+    return mako_snap_encode(v, 2);
+}
+
+static inline MakoString mako_snap_encode4(int64_t a, int64_t b, int64_t c, int64_t d) {
+    int64_t v[4] = {a, b, c, d};
+    return mako_snap_encode(v, 4);
+}
+
+static inline int64_t mako_snap_count(MakoString s) {
+    return (int64_t)(s.len / 8);
+}
+
+static inline int64_t mako_snap_get(MakoString s, int64_t i) {
+    if (i < 0 || (size_t)(i + 1) * 8 > s.len || !s.data) return 0;
+    size_t o = (size_t)i * 8;
+    uint64_t v = 0;
+    v |= (uint64_t)(unsigned char)s.data[o + 0];
+    v |= (uint64_t)(unsigned char)s.data[o + 1] << 8;
+    v |= (uint64_t)(unsigned char)s.data[o + 2] << 16;
+    v |= (uint64_t)(unsigned char)s.data[o + 3] << 24;
+    v |= (uint64_t)(unsigned char)s.data[o + 4] << 32;
+    v |= (uint64_t)(unsigned char)s.data[o + 5] << 40;
+    v |= (uint64_t)(unsigned char)s.data[o + 6] << 48;
+    v |= (uint64_t)(unsigned char)s.data[o + 7] << 56;
+    return (int64_t)v;
+}
+
+/* Client prediction seed: apply input delta to a local state slot. */
+static inline int64_t mako_snap_predict(int64_t state, int64_t input_delta) {
+    return state + input_delta;
+}
+
+/* Server reconciliation seed: if predicted != authoritative, snap to auth. */
+static inline int64_t mako_snap_reconcile(int64_t predicted, int64_t auth) {
+    return auth;
+}
 
 #endif /* MAKO_DIO_H */

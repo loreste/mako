@@ -8336,6 +8336,8 @@ impl Codegen {
                 "MMap" => "MakoMMap*".into(),
                 "Page" => "MakoPage*".into(),
                 "Wal" => "MakoWal*".into(),
+                "HIndex" => "MakoHIndex*".into(),
+                "Store" => "MakoStore*".into(),
                 "EvLoop" => "MakoEvLoop*".into(),
                 "Buf" => "MakoBuf*".into(),
                 "GameUDP" => "MakoGameUDP*".into(),
@@ -12733,6 +12735,137 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         "wal_close" => {
                             let (_, w) = self.emit_expr(&args[0]);
                             return ("int64_t".into(), format!("mako_wal_close({w})"));
+                        }
+                        "hindex_new" => {
+                            let (_, c) = self.emit_expr(&args[0]);
+                            let tmp = self.fresh("hi");
+                            self.line(&format!("MakoHIndex *{tmp} = mako_hindex_new({c});"));
+                            return ("MakoHIndex*".into(), tmp);
+                        }
+                        "hindex_put" => {
+                            let (_, h) = self.emit_expr(&args[0]);
+                            let (_, k) = self.emit_expr(&args[1]);
+                            let (_, v) = self.emit_expr(&args[2]);
+                            return (
+                                "int64_t".into(),
+                                format!("mako_hindex_put({h}, {k}, {v})"),
+                            );
+                        }
+                        "hindex_get" => {
+                            let (_, h) = self.emit_expr(&args[0]);
+                            let (_, k) = self.emit_expr(&args[1]);
+                            return ("int64_t".into(), format!("mako_hindex_get({h}, {k})"));
+                        }
+                        "hindex_del" => {
+                            let (_, h) = self.emit_expr(&args[0]);
+                            let (_, k) = self.emit_expr(&args[1]);
+                            return ("int64_t".into(), format!("mako_hindex_del({h}, {k})"));
+                        }
+                        "hindex_len" => {
+                            let (_, h) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_hindex_len({h})"));
+                        }
+                        "hindex_free" => {
+                            let (_, h) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_hindex_free({h})"));
+                        }
+                        "store_new" => {
+                            let (_, c) = self.emit_expr(&args[0]);
+                            let tmp = self.fresh("st");
+                            self.line(&format!("MakoStore *{tmp} = mako_store_new({c});"));
+                            return ("MakoStore*".into(), tmp);
+                        }
+                        "store_attach_wal" => {
+                            let (_, s) = self.emit_expr(&args[0]);
+                            let (_, w) = self.emit_expr(&args[1]);
+                            return (
+                                "int64_t".into(),
+                                format!("mako_store_attach_wal({s}, {w})"),
+                            );
+                        }
+                        "store_get" => {
+                            let (_, s) = self.emit_expr(&args[0]);
+                            let (_, k) = self.emit_expr(&args[1]);
+                            return ("int64_t".into(), format!("mako_store_get({s}, {k})"));
+                        }
+                        "store_put" => {
+                            let (_, s) = self.emit_expr(&args[0]);
+                            let (_, k) = self.emit_expr(&args[1]);
+                            let (_, v) = self.emit_expr(&args[2]);
+                            return (
+                                "int64_t".into(),
+                                format!("mako_store_put({s}, {k}, {v})"),
+                            );
+                        }
+                        "store_del" => {
+                            let (_, s) = self.emit_expr(&args[0]);
+                            let (_, k) = self.emit_expr(&args[1]);
+                            return ("int64_t".into(), format!("mako_store_del({s}, {k})"));
+                        }
+                        "store_begin" => {
+                            let (_, s) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_store_begin({s})"));
+                        }
+                        "store_commit" => {
+                            let (_, s) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_store_commit({s})"));
+                        }
+                        "store_rollback" => {
+                            let (_, s) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_store_rollback({s})"));
+                        }
+                        "store_len" => {
+                            let (_, s) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_store_len({s})"));
+                        }
+                        "store_free" => {
+                            let (_, s) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_store_free({s})"));
+                        }
+                        "snap_encode2" => {
+                            let (_, a) = self.emit_expr(&args[0]);
+                            let (_, b) = self.emit_expr(&args[1]);
+                            let tmp = self.fresh("sn");
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_snap_encode2({a}, {b});"
+                            ));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "snap_encode4" => {
+                            let (_, a) = self.emit_expr(&args[0]);
+                            let (_, b) = self.emit_expr(&args[1]);
+                            let (_, c) = self.emit_expr(&args[2]);
+                            let (_, d) = self.emit_expr(&args[3]);
+                            let tmp = self.fresh("sn");
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_snap_encode4({a}, {b}, {c}, {d});"
+                            ));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "snap_count" => {
+                            let (_, s) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_snap_count({s})"));
+                        }
+                        "snap_get" => {
+                            let (_, s) = self.emit_expr(&args[0]);
+                            let (_, i) = self.emit_expr(&args[1]);
+                            return ("int64_t".into(), format!("mako_snap_get({s}, {i})"));
+                        }
+                        "snap_predict" => {
+                            let (_, st) = self.emit_expr(&args[0]);
+                            let (_, d) = self.emit_expr(&args[1]);
+                            return (
+                                "int64_t".into(),
+                                format!("mako_snap_predict({st}, {d})"),
+                            );
+                        }
+                        "snap_reconcile" => {
+                            let (_, p) = self.emit_expr(&args[0]);
+                            let (_, a) = self.emit_expr(&args[1]);
+                            return (
+                                "int64_t".into(),
+                                format!("mako_snap_reconcile({p}, {a})"),
+                            );
                         }
                         "mmap_close" => {
                             let (_, m) = self.emit_expr(&args[0]);
