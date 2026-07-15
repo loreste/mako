@@ -592,12 +592,12 @@ Use **`wall_*` / `now_ms`** only for logs and absolute calendar time.
 | `redis_mock_once` | `redis_mock_once(port: int) -> int` | Start a single-request Redis mock |
 | `redis_mock_kv` | `redis_mock_kv(port: int, count: int) -> int` | Start a Redis mock with key-value support |
 
-### SIP / SDP / RTP (build telecom stacks in Mako)
+### SIP proxy library (built-in)
 
-Runtime: `runtime/mako_sip.h`. **Platform primitives** to implement full SIP/RTP
-systems in Mako — not a prebuilt softswitch. Parse/build SIP (RFC 3261), SDP
-(RFC 4566), RTP (RFC 3550), Digest MD5. Transactions, dialogs, SIPS, SRTP: your
-code using maps, crews, mono clocks, `tls_*`, `aes_ctr`, `hmac_sha1_raw`.
+**Platform SIP library for proxies** (UAs/registrars too). Runtime
+`runtime/mako_sip.h`; pack **`std/sip`**. Not a softswitch — the first-class
+data-path API (Madis and similar). RFCs 3261, 3581, Digest MD5. You own timers,
+dialogs, routing, media (rtpengine). **Out of scope:** SIPREC, WebRTC, full B2BUA.
 
 | Function | Signature | Description |
 |----------|-----------|-------------|
@@ -624,7 +624,8 @@ code using maps, crews, mono clocks, `tls_*`, `aes_ctr`, `hmac_sha1_raw`.
 | `sdp_*` | parse/build SDP media + attrs | |
 | `rtp_pack` / `rtp_parse_ok` / `rtp_seq` / `rtp_timestamp` / `rtp_ssrc` / `rtp_payload` / … | RTP V2 | |
 
-**App `fn sip_*` shadows platform builtins** of the same name. Prefer `std/sip` for higher-level helpers.
+**Prefer `std/sip`** (`sip.insert_via`, `sip.header`, …) so app code does not shadow
+free `sip_*` builtins. Hot path may call builtins directly.
 
 Tests: `sip_test.mko`, `sip_digest_ha1_test.mko` · pack: `std/sip`.
 

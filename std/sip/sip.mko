@@ -1,9 +1,12 @@
-// Low-level SIP / SDP / RTP — thin package surface over builtins.
-// Prefer builtins directly for hot paths; this pack documents the domain.
+// Built-in SIP proxy library surface (pack wrapper over platform sip_* builtins).
+// RFC 3261 / 3581 oriented: parse, build, Via/RR hop, framing, Digest.
+// Prefer this pack in app code to avoid shadowing free `sip_*` names with local fns.
+// Hot path: builtins are zero-cost; pack is thin re-exports.
+// Out of scope: SIPREC, WebRTC, full B2BUA timer machine, RTP termination.
 
 pack sip
 
-// Message parse
+// ---- Message classify / parse ----
 export fn is_request(msg: string) -> int { return sip_is_request(msg) }
 export fn is_response(msg: string) -> int { return sip_is_response(msg) }
 export fn ok(msg: string) -> int { return sip_ok(msg) }
@@ -11,10 +14,24 @@ export fn method(msg: string) -> string { return sip_method(msg) }
 export fn request_uri(msg: string) -> string { return sip_request_uri(msg) }
 export fn status_code(msg: string) -> int { return sip_status_code(msg) }
 export fn reason(msg: string) -> string { return sip_reason(msg) }
+export fn version(msg: string) -> string { return sip_version(msg) }
 export fn header(msg: string, name: string) -> string { return sip_header(msg, name) }
+export fn header_n(msg: string, name: string, n: int) -> string { return sip_header_n(msg, name, n) }
+export fn header_count(msg: string, name: string) -> int { return sip_header_count(msg, name) }
 export fn body(msg: string) -> string { return sip_body(msg) }
+export fn content_length(msg: string) -> int { return sip_content_length(msg) }
+export fn method_is(msg: string, m: string) -> int { return sip_method_is(msg, m) }
 
-// Build
+// ---- TCP/TLS framing ----
+export fn first_message_len(buf: string) -> int { return sip_first_message_len(buf) }
+export fn msg_complete(buf: string) -> int { return sip_msg_complete(buf) }
+export fn msg_needed(buf: string) -> int { return sip_msg_needed(buf) }
+
+// ---- Build ----
+export fn header_line(name: string, value: string) -> string { return sip_header_line(name, value) }
+export fn headers_append(headers: string, name: string, value: string) -> string {
+    return sip_headers_append(headers, name, value)
+}
 export fn request(method: string, uri: string, headers: string, body: string) -> string {
     return sip_request(method, uri, headers, body)
 }
@@ -24,13 +41,57 @@ export fn response(code: int, reason: string, headers: string, body: string) -> 
 export fn reply(req: string, code: int, reason: string, extra: string, body: string) -> string {
     return sip_reply(req, code, reason, extra, body)
 }
+export fn reply_with_to_tag(req: string, code: int, reason: string, extra: string, body: string, tag: string) -> string {
+    return sip_reply_with_to_tag(req, code, reason, extra, body, tag)
+}
+export fn ensure_to_tag(msg: string, tag: string) -> string { return sip_ensure_to_tag(msg, tag) }
+export fn copy_headers_for_response(req: string) -> string { return sip_copy_headers_for_response(req) }
 
-// IDs
+// ---- Proxy hop (RFC 3261 §16 / RFC 3581) ----
+export fn via_value(transport: string, host: string, port: int, branch: string) -> string {
+    return sip_via_value(transport, host, port, branch)
+}
+export fn via_value_nat(transport: string, host: string, port: int, branch: string, received: string, rport: int) -> string {
+    return sip_via_value_nat(transport, host, port, branch, received, rport)
+}
+export fn via_add_received(via: string, host: string, rport: int) -> string {
+    return sip_via_add_received(via, host, rport)
+}
+export fn via_host(via: string) -> string { return sip_via_host(via) }
+export fn via_port(via: string) -> int { return sip_via_port(via) }
+export fn via_branch(via: string) -> string { return sip_via_branch(via) }
+export fn insert_via(msg: string, via_value: string) -> string { return sip_insert_via(msg, via_value) }
+export fn strip_via(msg: string) -> string { return sip_strip_via(msg) }
+export fn prepend_header(msg: string, name: string, value: string) -> string {
+    return sip_prepend_header(msg, name, value)
+}
+export fn record_route(host: string, port: int, transport: string) -> string {
+    return sip_record_route(host, port, transport)
+}
+
+// ---- From / To / Contact / CSeq ----
+export fn from_value(display: string, uri: string, tag: string) -> string {
+    return sip_from_value(display, uri, tag)
+}
+export fn to_value(display: string, uri: string, tag: string) -> string {
+    return sip_to_value(display, uri, tag)
+}
+export fn contact_value(uri: string) -> string { return sip_contact_value(uri) }
+export fn cseq_value(seq: int, method: string) -> string { return sip_cseq_value(seq, method) }
+export fn addr_tag(addr: string) -> string { return sip_addr_tag(addr) }
+
+// ---- IDs / dialog / txn ----
 export fn branch() -> string { return sip_branch() }
 export fn tag() -> string { return sip_tag() }
 export fn call_id(host: string) -> string { return sip_call_id_new(host) }
+export fn cseq_new() -> int { return sip_cseq_new() }
+export fn dialog_id(call_id: string, local_tag: string, remote_tag: string) -> string {
+    return sip_dialog_id(call_id, local_tag, remote_tag)
+}
+export fn txn_key(branch: string, method: string) -> string { return sip_txn_key(branch, method) }
 
-// URI
+// ---- URI ----
+export fn uri_scheme(uri: string) -> string { return sip_uri_scheme(uri) }
 export fn uri_user(uri: string) -> string { return sip_uri_user(uri) }
 export fn uri_host(uri: string) -> string { return sip_uri_host(uri) }
 export fn uri_port(uri: string) -> int { return sip_uri_port(uri) }
@@ -38,12 +99,37 @@ export fn uri_build(user: string, host: string, port: int) -> string {
     return sip_uri_build(user, host, port)
 }
 
-// SDP
+// ---- Transport helpers ----
+export fn udp_bind(host: string, port: int) -> int { return sip_udp_bind(host, port) }
+export fn udp_send(fd: int, host: string, port: int, msg: string) -> int {
+    return sip_udp_send(fd, host, port, msg)
+}
+export fn udp_recv(fd: int, max: int) -> string { return sip_udp_recv(fd, max) }
+export fn tcp_send(fd: int, msg: string) -> int { return sip_tcp_send(fd, msg) }
+
+// ---- Digest (RFC 2617 / 3261) ----
+export fn md5_hex(s: string) -> string { return sip_md5_hex(s) }
+export fn digest_response(user: string, realm: string, password: string, method: string, uri: string, nonce: string) -> string {
+    return sip_digest_response(user, realm, password, method, uri, nonce)
+}
+export fn digest_response_ha1(ha1: string, method: string, uri: string, nonce: string) -> string {
+    return sip_digest_response_ha1(ha1, method, uri, nonce)
+}
+export fn www_authenticate(realm: string, nonce: string) -> string {
+    return sip_www_authenticate(realm, nonce)
+}
+export fn proxy_authenticate(realm: string, nonce: string) -> string {
+    return sip_proxy_authenticate(realm, nonce)
+}
+export fn authorization_digest(user: string, realm: string, nonce: string, uri: string, response: string) -> string {
+    return sip_authorization_digest(user, realm, nonce, uri, response)
+}
+export fn auth_param(header: string, key: string) -> string { return sip_auth_param(header, key) }
+
+// ---- SDP / RTP (media helpers; rtpengine owns termination in proxy products) ----
 export fn sdp_audio(user: string, name: string, ip: string, port: int, codecs: string) -> string {
     return sdp_build_audio(user, name, ip, port, codecs)
 }
-
-// RTP
 export fn rtp(pt: int, seq: int, ts: int, ssrc: int, marker: int, payload: string) -> string {
     return rtp_pack(pt, seq, ts, ssrc, marker, payload)
 }

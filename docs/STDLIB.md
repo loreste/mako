@@ -1445,43 +1445,48 @@ fn main() {
 
 ---
 
-## SIP / SDP / RTP -- build telecom in Mako
+## SIP proxy library (built-in)
 
-Mako does **not** ship a full softswitch or WebRTC stack. It **does** give the
-primitives so **you can build** transaction engines, dialog state, SIPS, SRTP,
-proxies, and UAs **in Mako** — with crews, maps, mono clocks, and net/crypto.
+**This is the platform SIP library for proxies** (also usable for UAs/registrars).
+Runtime: `runtime/mako_sip.h`. Pack: **`std/sip`** (`import sip` / pack exports).
 
-### Capability map (what you implement vs what exists)
+Not a full softswitch. **Is** the first-class data-path API for products like
+Madis: message parse/build, Via/RR hop, Digest challenges, TCP/TLS framing.
+You own timers, dialog maps, routing, and media (e.g. rtpengine).
+**Out of scope:** SIPREC, WebRTC, full B2BUA engine.
 
-| You build in Mako | Primitives you use |
-|-------------------|--------------------|
-| INVITE / non-INVITE transaction retransmit | `sip_*` parse/build · `sip_txn_key` · `map` · `mono_ns` / `deadline_*` / `sleep_*` · `crew`/`kick` |
-| Dialog / call state | `sip_dialog_id` · tags · `Call-ID` · maps · optional `share` |
-| Registrar / location service | REGISTER parse · Contact · maps/DB (`sql_*`) |
-| Proxy / B2BUA routing | header rewrite · Via · Record-Route · UDP/TCP send |
-| SIP over TCP framing | `sip_first_message_len` / `sip_msg_complete` / `sip_msg_needed` · `tcp_read` |
-| **SIPS** (SIP over TLS) | same framing loop on `tls_read` buffers |
-| Digest auth (server HA1) | `sip_digest_response_ha1` · `sip_www_authenticate` / `sip_proxy_authenticate` |
-| Proxy hop / NAT | `sip_insert_via` / `sip_strip_via` / `sip_via_value_nat` / `sip_record_route` / `sip_via_host`/`port` |
-| Offer/answer SDP | `sdp_*` · your policy code |
-| RTP media path | `rtp_pack` / `rtp_*` · `udp_*` · `fan` for parallel streams |
-| **SRTP** (in Mako) | `aes_ctr` (AES-CM keystream) · `hmac_sha1_raw` (auth tag) · `xor_bytes` · keying from SDP/SDES or DTLS |
-| Timers T1/T2/Timer A–K | `mono_ns` · `deadline_ns` · `sleep_until_ns` · structured crews (cancel on final response) |
+### Capability map
 
-### SIP / SDP / RTP builtins
+| Product concern | Built-in library |
+|-----------------|------------------|
+| Parse / build messages | `sip_header` (compact forms), `sip_request` / `sip_reply`, `sip_body` |
+| Proxy hop (RFC 3261 §16) | `sip_insert_via` / `sip_strip_via` / `sip_record_route` / `sip_prepend_header` |
+| NAT (RFC 3581) | `sip_via_value_nat` / `sip_via_add_received` / `sip_via_host` / `sip_via_port` |
+| Response To-tag | `sip_ensure_to_tag` / `sip_reply_with_to_tag` |
+| TCP/TLS framing | `sip_first_message_len` / `sip_msg_complete` / `sip_msg_needed` |
+| Digest (server HA1) | `sip_digest_response_ha1` · `sip_www_authenticate` / `sip_proxy_authenticate` |
+| Txn / dialog keys | `sip_txn_key` · `sip_dialog_id` · `sip_branch` (magic cookie) |
+| REGISTER location | parse + `sql_*` / maps (your store) |
+| Timers T1…K | `mono_ns` / `deadline_*` / crews (you drive) |
+| SDP / RTP helpers | `sdp_*` / `rtp_*` (media termination elsewhere) |
 
-| Area | Builtins |
-|------|----------|
-| Message | `sip_ok`, `sip_method`, `sip_header` (compact forms: Call-ID/`i`, Via/`v`, …), `sip_body` |
-| Build | `sip_request` / `sip_response` / `sip_reply` / `sip_reply_with_to_tag` / `sip_ensure_to_tag` |
-| Proxy | `sip_insert_via`, `sip_strip_via`, `sip_prepend_header`, `sip_via_value_nat`, `sip_record_route` |
-| IDs | `sip_branch`, `sip_tag`, `sip_call_id_new`, `sip_dialog_id`, `sip_txn_key` |
+### Builtins (also as `sip.*` via pack)
+
+| Area | Surface |
+|------|---------|
+| Message | `sip_ok`, `sip_method`, `sip_header` (+ compact `i`/`v`/`f`/`t`/…), `sip_body` |
+| Build | `sip_request` / `sip_response` / `sip_reply` / `sip_reply_with_to_tag` |
+| Proxy | `sip_insert_via`, `sip_strip_via`, `sip_via_value_nat`, `sip_record_route` |
 | Framing | `sip_first_message_len`, `sip_msg_complete`, `sip_msg_needed` |
-| Auth | `sip_digest_response`, `sip_digest_response_ha1`, `sip_www_authenticate`, `sip_authorization_digest` |
+| Auth | `sip_digest_response`, `sip_digest_response_ha1`, `sip_www_authenticate` |
 
-**Ownership:** `sip_header` / builders return **owned** strings (malloc). Prefer short-lived locals; avoid wrapping every header read in hot loops without need. Parse is length-bounded (msg need not be NUL-terminated).
+**Ownership:** `sip_header` and builders return **owned** strings. Parse is
+length-bounded (buffer need not be NUL-terminated). On hot paths, prefer
+targeted reads over scanning every header.
 
-**Name shadowing:** app-defined `fn sip_*` shadows platform builtins of the same name — prefer `std/sip` packs for higher-level APIs.
+**Name shadowing:** app `fn sip_*` shadows platform builtins — use **`std/sip`**
+(`sip.insert_via`, `sip.header`, …) in application code; call free builtins only
+when you intentionally want the platform names.
 | SDP | `sdp_build_audio`, `sdp_media_*`, `sdp_connection_addr`, `sdp_attr`, `sdp_attr_rtpmap` |
 | RTP | `rtp_pack`, `rtp_seq`, `rtp_timestamp`, `rtp_ssrc`, `rtp_payload`, `rtp_payload_type` |
 | SRTP building blocks | `aes_ctr`, `hmac_sha1` / `hmac_sha1_raw`, `aes_gcm_*`, `random_bytes` |

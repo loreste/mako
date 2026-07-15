@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### SIP proxy library positioning
+
+- Documented as the **platform built-in SIP library for proxies** (not a demo seed).
+- **`std/sip`** expanded: full proxy surface re-exports (`insert_via`, `strip_via`,
+  `via_value_nat`, `digest_response_ha1`, framing, auth challenges, …).
+- Prefer pack names in apps to avoid shadowing free `sip_*` builtins.
+
 ### SIP RFC compliance polish (3261 / 3581)
 
 - **Via:** force `z9hG4bK` magic cookie; uppercase transport; IPv6 `[addr]:port`

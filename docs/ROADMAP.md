@@ -93,7 +93,8 @@ Metrics/prom + span-lite JSON are in; **depth seeds landed** (2026-07-14).
 
 ### P4 — Domain & advanced systems
 
-1. Telecom/realtime — SIP/RTP/SRTP seeds exist; **SIPREC/WebRTC out of scope** (user)  
+1. Telecom/realtime — **SIP proxy library built-in** (`mako_sip.h` / `std/sip`); RTP/SRTP helpers; **SIPREC/WebRTC out of scope**  
+
 2. ~~Storage product seeds~~ **Done seed** — page/WAL/hindex/store + btree save/load + SST + pcache + MVCC GC (`storage_depth_test`)  
 3. ~~Graphics/audio/physics soft seeds~~ **Done seed** — `gfx_*` / `audio_mix` / `physics_step_*`  
 4. ~~Multiplayer snapshot + rollback ring~~ **Done seed** — `snap_*` / `rollback_*`  
@@ -294,7 +295,7 @@ Percentages are weighted; update when a task flips.
 - [x] Game-loop / fixed-timestep · frame allocators · object pools · ECS seed.
 - [x] Deterministic simulation · FSM helpers · rings / SPSC / scatter-gather.
 - [x] GPU AI seed (OpenCL path) · local model store · GGUF F32/F16 · MHA · Q4_0/Q8_0 · BPE seed.
-- [x] Telecom SIP/RTP/SRTP seeds; **SIPREC/WebRTC out of scope**.
+- [x] **SIP proxy library** (builtins + `std/sip`): parse/build, Via/RR/rport, Digest HA1, framing; RTP/SRTP helpers; **SIPREC/WebRTC out of scope**.
 - [x] Graphics/audio/physics soft seeds (`gfx_*`, `audio_mix`, `physics_step_*`).
 - [x] Multiplayer snapshot + rollback ring seeds (`snap_*`, `rollback_*`).
 - [x] Storage page/WAL/hindex/store + btree/LSM/MVCC seeds.

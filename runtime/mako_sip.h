@@ -1,8 +1,16 @@
-/* Mako low-level SIP programming (RFC 3261 messages, URI, SDP, RTP, Digest).
- * Designed for: proxies, B2BUA cores, registrars, softphone stacks, test tools.
- * Transport uses existing udp_ and tcp_ builtins; this layer is parse/build + framing.
- * Not a full stateful stack (no automatic retransmit timer loop) by design:
- * you drive transactions with crews/mono clocks for low-latency control. */
+/* Mako built-in SIP library for proxies (and UAs / registrars).
+ *
+ * This is the platform SIP surface -- not an optional demo. Products like Madis
+ * use these builtins on the data path: parse, Via/RR hop, Digest, TCP framing.
+ *
+ * RFCs: 3261 (core / proxy), 3581 (rport/received), 2617 Digest (no-qop MD5),
+ * compact forms section 7.3.3. Transport: net udp/tcp/tls plus sip_udp and sip_tcp helpers.
+ *
+ * You own: transaction timers, dialog state, routing policy, rtpengine media.
+ * Out of scope: SIPREC, WebRTC, full B2BUA engine.
+ *
+ * Pack: std/sip (thin re-exports; prefer pack names to avoid app sip_ name shadowing).
+ * Hot path: call builtins directly; strings from sip_header are owned (malloc). */
 #ifndef MAKO_SIP_H
 #define MAKO_SIP_H
 
