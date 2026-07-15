@@ -5,8 +5,8 @@ Short engineering queue. Product map: [VISION.md](VISION.md).
 **Book:** [The Mako Book](book/) · **Identity:** [IDENTITY.md](IDENTITY.md) · **Pain map:** [PAIN_POINTS.md](PAIN_POINTS.md).
 
 STATUS north-star / MVP: **100%**. Prefer STATUS over this list when claiming Done.  
-**Mako identity:** [IDENTITY.md](IDENTITY.md) (**~90%** preferred surface).  
-**Dual sugar only:** [GO_SYNTAX_CHECKLIST.md](GO_SYNTAX_CHECKLIST.md).  
+**Mako identity:** [IDENTITY.md](IDENTITY.md) (**~100%** preferred surface).  
+**Dual sugar only:** [GO_SYNTAX_CHECKLIST.md](GO_SYNTAX_CHECKLIST.md) (**~90%**).  
 **Product version:** **0.1.4** · Last roadmap sync: **2026-07-15**.
 
 ---
@@ -17,13 +17,24 @@ STATUS north-star / MVP: **100%**. Prefer STATUS over this list when claiming Do
 |-------|---------|
 | MVP / STATUS north-star | **100%** |
 | General-purpose intention (weighted tracks below) | **~96%** |
-| Mako identity (preferred syntax) | **~90%** |
+| Mako identity (preferred syntax) | **~100%** |
+| Dual-form sugar (optional) | **~90%** |
 | Standard library (target areas) | **~98%** |
 
 Tracks 4–7 (backend, protocols, data, toolchain) are effectively **Done**.  
-Remaining weight sits in **install/portability polish**, **debugger depth**, and **domain/advanced systems**.
+**Seedable language residuals are closed** (error chain · fallthrough · domain seeds).  
+Remaining weight is **product** residual: install/portability polish, full debugger UI, real OS GPU/window hosts, domain CTFE product.
 
 ---
+
+## Just closed (2026-07-15) — seeds & syntax
+
+| Area | Status |
+|------|--------|
+| Error chain peel + tag helpers | **Done seed** — `error_unwrap` / `root` / `as_tag` / `has_tag` · `error_chain_test` · `std/errors` |
+| `fallthrough` switch dual | **Done seed** — `fallthrough_test` |
+| IDENTITY errors track | **100%** — richer than stringly defaults |
+| Dual-form checklist | **~90%** — remaining: package-per-dir · true unbuffered · `*T` (won't) |
 
 ## Just closed (2026-07-14)
 
@@ -161,11 +172,11 @@ Checklist for **100% of the product intention**, not the MVP/STATUS bar.
 Percentages are weighted; update when a task flips.
 
 **Overall intention completion:** **~96% / 100%**  
-**Mako identity (preferred syntax):** **~90%** — [IDENTITY.md](IDENTITY.md).
+**Mako identity (preferred syntax):** **~100%** — [IDENTITY.md](IDENTITY.md).
 
 | Track | Weight | Current |
 |-------|--------|---------|
-| 1. Language identity and core type system | 10% | **98%** |
+| 1. Language identity and core type system | 10% | **100%** |
 | 2. Memory safety and allocation control | 10% | 88% |
 | 3. Concurrency and runtime trust | 10% | **88%** |
 | 4. Backend app surface | 12% | **100%** |
@@ -192,6 +203,8 @@ Percentages are weighted; update when a task flips.
 - [x] Pain map: [PAIN_POINTS.md](PAIN_POINTS.md).
 - [x] Language pain residuals seed (deep Send/race, NLL multi-label, nested patterns).
 - [x] `if init; cond { }` · `go f()` → kick · compound assign · Go `for`/`switch` forms.
+- [x] `fallthrough` switch dual seed (`fallthrough_test`).
+- [x] Richer error chain seed — `error_unwrap` / `root` / `as_tag` / `has_tag` · `std/errors` · `Result[T, Enum]`.
 - [x] Compiler-enforced API stability annotations (`#[stable]` / `#[deprecated]`).
 - [x] Richer pattern matching — struct field patterns + nested variant patterns (typecheck).
 

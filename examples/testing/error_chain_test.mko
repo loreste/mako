@@ -1,0 +1,46 @@
+// Richer error chain seed: unwrap / root / as_tag / has_tag (Go errors.Is/As style).
+
+fn TestErrorUnwrapOne() {
+    let r = error("ENOENT")
+    let w = wrap_err(r, "open")
+    assert(error_is(w, "ENOENT"))
+    let u = error_unwrap(w)
+    assert(error_is(u, "ENOENT"))
+    let msg = error_string(u)
+    assert_eq_str(msg, "ENOENT")
+}
+
+fn TestErrorRootDeep() {
+    let r = error("disk full")
+    let w1 = wrap_err(r, "write")
+    let w2 = wrap_err(w1, "save")
+    let root = error_root(w2)
+    assert_eq_str(error_string(root), "disk full")
+    assert(error_is(w2, "save"))
+    assert(error_is(w2, "write"))
+}
+
+fn TestErrorAsTagAndHasTag() {
+    let r = error_tag("NotFound", "user 7")
+    assert(error_has_tag(r, "NotFound"))
+    assert(!error_has_tag(r, "Denied"))
+    assert_eq_str(error_as_tag(r), "NotFound")
+    // Substring Is still works for the payload half.
+    assert(error_is(r, "user 7"))
+}
+
+fn TestErrorUnwrapOk() {
+    let ok: Result[int, string] = Ok(1)
+    let u = error_unwrap(ok)
+    match u {
+        Ok(v) => assert_eq(v, 1),
+        Err(_) => assert(false),
+    }
+}
+
+fn TestErrorChainNoColon() {
+    let r = error("plain")
+    let u = error_unwrap(r)
+    assert_eq_str(error_string(u), "plain")
+    assert_eq_str(error_as_tag(r), "")
+}

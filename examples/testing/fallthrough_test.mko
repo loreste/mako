@@ -1,0 +1,53 @@
+// Go dual: switch fallthrough merges case bodies (seed).
+
+fn classify(n: int) -> int {
+    let mut score = 0
+    switch n {
+    case 1:
+        score = score + 1
+        fallthrough
+    case 2:
+        score = score + 10
+        fallthrough
+    case 3:
+        score = score + 100
+    default:
+        score = score + 0
+    }
+    return score
+}
+
+fn TestFallthroughChain() {
+    // 1 → all three arms: 1+10+100
+    assert_eq(classify(1), 111)
+    // 2 → two arms: 10+100
+    assert_eq(classify(2), 110)
+    // 3 → last arm only
+    assert_eq(classify(3), 100)
+    // default only
+    assert_eq(classify(9), 0)
+}
+
+fn TestFallthroughIntoDefault() {
+    let mut hit = 0
+    switch 1 {
+    case 1:
+        hit = hit + 1
+        fallthrough
+    default:
+        hit = hit + 10
+    }
+    assert_eq(hit, 11)
+}
+
+fn TestFallthroughCommaCase() {
+    let mut n = 0
+    switch 2 {
+    case 1, 2:
+        n = n + 1
+        fallthrough
+    case 3:
+        n = n + 2
+    }
+    assert_eq(n, 3)
+}

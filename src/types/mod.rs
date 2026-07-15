@@ -457,6 +457,38 @@ impl TypeChecker {
                 Box::new(Type::String),
             ),
         );
+        // Richer error chain seed (Go errors.Unwrap / errors.As style on string wraps).
+        fns.insert(
+            "error_unwrap".into(),
+            Type::Fn(
+                vec![Type::Result(Box::new(Type::Int), Box::new(Type::String))],
+                Box::new(Type::Result(Box::new(Type::Int), Box::new(Type::String))),
+            ),
+        );
+        fns.insert(
+            "error_root".into(),
+            Type::Fn(
+                vec![Type::Result(Box::new(Type::Int), Box::new(Type::String))],
+                Box::new(Type::Result(Box::new(Type::Int), Box::new(Type::String))),
+            ),
+        );
+        fns.insert(
+            "error_as_tag".into(),
+            Type::Fn(
+                vec![Type::Result(Box::new(Type::Int), Box::new(Type::String))],
+                Box::new(Type::String),
+            ),
+        );
+        fns.insert(
+            "error_has_tag".into(),
+            Type::Fn(
+                vec![
+                    Type::Result(Box::new(Type::Int), Box::new(Type::String)),
+                    Type::String,
+                ],
+                Box::new(Type::Bool),
+            ),
+        );
         fns.insert("dbg".into(), Type::Fn(vec![Type::Int], Box::new(Type::Int)));
         fns.insert(
             "dbg_str".into(),
@@ -12892,6 +12924,54 @@ impl TypeChecker {
                                 other => {
                                     return Err(TypeError::new(format!(
                                         "error_string expects Result[_, string], got {}",
+                                        other.display()
+                                    )));
+                                }
+                            }
+                        }
+                        "error_unwrap" | "error_root" if args.len() == 1 => {
+                            let r = self.check_expr(&args[0])?;
+                            match &r {
+                                Type::Result(_, e) if **e == Type::String => {
+                                    return Ok(r);
+                                }
+                                other => {
+                                    return Err(TypeError::new(format!(
+                                        "error_unwrap/error_root expects Result[_, string], got {}",
+                                        other.display()
+                                    )));
+                                }
+                            }
+                        }
+                        "error_as_tag" if args.len() == 1 => {
+                            let r = self.check_expr(&args[0])?;
+                            match &r {
+                                Type::Result(_, e) if **e == Type::String => {
+                                    return Ok(Type::String);
+                                }
+                                other => {
+                                    return Err(TypeError::new(format!(
+                                        "error_as_tag expects Result[_, string], got {}",
+                                        other.display()
+                                    )));
+                                }
+                            }
+                        }
+                        "error_has_tag" if args.len() == 2 => {
+                            let r = self.check_expr(&args[0])?;
+                            let tag = self.check_expr(&args[1])?;
+                            match &r {
+                                Type::Result(_, e) if **e == Type::String => {
+                                    if tag != Type::String {
+                                        return Err(TypeError::new(
+                                            "error_has_tag tag must be string",
+                                        ));
+                                    }
+                                    return Ok(Type::Bool);
+                                }
+                                other => {
+                                    return Err(TypeError::new(format!(
+                                        "error_has_tag expects Result[_, string], got {}",
                                         other.display()
                                     )));
                                 }

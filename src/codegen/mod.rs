@@ -11201,6 +11201,34 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             self.line(&format!("MakoString {tmp} = mako_error_string({r});"));
                             return ("MakoString".into(), tmp);
                         }
+                        "error_unwrap" => {
+                            let (_, r) = self.emit_expr(&args[0]);
+                            let tmp = self.fresh("eu");
+                            self.line(&format!(
+                                "MakoResultInt {tmp} = mako_error_unwrap({r});"
+                            ));
+                            return ("MakoResultInt".into(), tmp);
+                        }
+                        "error_root" => {
+                            let (_, r) = self.emit_expr(&args[0]);
+                            let tmp = self.fresh("er");
+                            self.line(&format!("MakoResultInt {tmp} = mako_error_root({r});"));
+                            return ("MakoResultInt".into(), tmp);
+                        }
+                        "error_as_tag" => {
+                            let (_, r) = self.emit_expr(&args[0]);
+                            let tmp = self.fresh("eat");
+                            self.line(&format!("MakoString {tmp} = mako_error_as_tag({r});"));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "error_has_tag" => {
+                            let (_, r) = self.emit_expr(&args[0]);
+                            let (_, t) = self.emit_expr(&args[1]);
+                            return (
+                                "bool".into(),
+                                format!("(mako_error_has_tag({r}, {t}) != 0)"),
+                            );
+                        }
                         "dbg" => {
                             let (_, v) = self.emit_expr(&args[0]);
                             let expr_lit = match &args[0] {

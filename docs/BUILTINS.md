@@ -2662,9 +2662,16 @@ Demo: `examples/template_demo.mko`.
 |----------|-----------|-------------|
 | `result_unwrap_or` | `result_unwrap_or(r: Result[int, string], default: int) -> int` | Unwrap Result or return default |
 | `wrap_err` | `wrap_err(r: Result[int, string], msg: string) -> Result[int, string]` | Wrap an error with additional context |
+| `error_context` | alias of `wrap_err` | Same RT |
 | `errorf` | `errorf(fmt: string, arg: string) -> Result[int, string]` | Create a formatted error Result |
-| `error_is` | `error_is(r: Result[int, string], target: string) -> bool` | Check if error matches a target string |
+| `error_tag` | `error_tag(tag: string, msg: string) -> Result[int, string]` | Tagged Err `"tag: msg"` |
+| `error_join` | `error_join(a, b: Result[int, string]) -> Result[int, string]` | Prefer first Err; join messages |
+| `error_is` | `error_is(r: Result[int, string], target: string) -> bool` | Substring match on wrap chain (Go `errors.Is` style) |
 | `error_string` | `error_string(r: Result[int, string]) -> string` | Extract error message from a Result |
+| `error_unwrap` | `error_unwrap(r) -> Result[int, string]` | Peel one `"prefix: "` wrap layer |
+| `error_root` | `error_root(r) -> Result[int, string]` | Peel all wrap layers to innermost |
+| `error_as_tag` | `error_as_tag(r) -> string` | Tag half of `error_tag` form (else `""`) |
+| `error_has_tag` | `error_has_tag(r, tag: string) -> bool` | Exact prefix `"tag: "` match |
 
 ---
 

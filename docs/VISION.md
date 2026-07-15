@@ -161,9 +161,9 @@ views, borrowed buffers, and pools continue under Next/Later.
 | Channels | Now |
 | `crew.cancel` | Now |
 | Actors (mailbox + owned state) | Now (seed) |
-| Timeouts (portable) | Next |
-| Async I/O without colored functions | Next |
-| Auto cancellation on scope exit | Next (partial via crew) |
+| Timeouts (portable) | Now (seed) — `timeout_portable_test` |
+| Async I/O without colored functions | Now (seed) — native IO / poll / wait |
+| Auto cancellation on scope exit | Now (partial via crew) — full product residual |
 | Deterministic scheduling | Later |
 
 Async goal: **normal-looking code**, runtime does I/O; structured concurrency
@@ -198,7 +198,7 @@ Target builtins: `tcp` / `udp` / `tls` / `dns` / `quic` / `http` / `websocket` /
 |-------|--------|
 | `tcp_listen` / `tcp_accept` / `tcp_close` / write helpers | Now |
 | `http_serve` / `http_echo` | Now |
-| TLS / QUIC / WebSocket / DNS / gRPC | Next / Later |
+| TLS / QUIC / WebSocket / DNS / gRPC | Now (seeds) — depth/product residual |
 
 Backend APIs also need routing, middleware, auth, validation, cookies/sessions,
 file uploads, rate limiting, compression, caching, graceful shutdown, health

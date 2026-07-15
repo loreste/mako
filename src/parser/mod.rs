@@ -1143,6 +1143,9 @@ impl Parser {
             return self.parse_detach();
         }
         match self.peek_kind() {
+            TokenKind::Fallthrough => Err(self.err(
+                "`fallthrough` is only valid as the last statement of a switch `case` arm".into(),
+            )),
             TokenKind::Hold | TokenKind::Share | TokenKind::Let | TokenKind::Var => self.parse_let(),
             TokenKind::Unsafe => {
                 self.bump();
@@ -2517,6 +2520,8 @@ impl Parser {
     /// Go-style `switch`, desugared to an if/else-if chain — more faithful to Go
     /// than `match`: `case` takes arbitrary expressions, the tag is evaluated once,
     /// `default` is optional, and there is no exhaustiveness requirement.
+    /// Optional `fallthrough` as the last statement of a `case` merges that arm's
+    /// body with the next arm (Go dual seed).
     ///
     ///   switch x { case 1: … case 2, 3: … default: … }   // value switch
     ///   switch { case cond: … default: … }               // expression-less
@@ -2537,7 +2542,8 @@ impl Parser {
         };
         self.expect(TokenKind::LBrace)?;
 
-        let mut cases: Vec<(Vec<Expr>, Block)> = Vec::new();
+        // (case values, body, falls through to next arm)
+        let mut cases: Vec<(Vec<Expr>, Block, bool)> = Vec::new();
         let mut default_block: Option<Block> = None;
         while !matches!(self.peek_kind(), TokenKind::RBrace | TokenKind::Eof) {
             if matches!(self.peek_kind(), TokenKind::Default) {
@@ -2546,7 +2552,13 @@ impl Parser {
                 if default_block.is_some() {
                     return Err(self.err("switch has more than one `default`".into()));
                 }
-                default_block = Some(self.parse_switch_case_body()?);
+                let (body, falls) = self.parse_switch_case_body()?;
+                if falls {
+                    return Err(self.err(
+                        "`fallthrough` cannot be the last statement of `default`".into(),
+                    ));
+                }
+                default_block = Some(body);
             } else if matches!(self.peek_kind(), TokenKind::Ident(s) if s == "case") {
                 self.bump();
                 let mut vals = vec![self.parse_expr()?];
@@ -2555,12 +2567,46 @@ impl Parser {
                     vals.push(self.parse_expr()?);
                 }
                 self.expect(TokenKind::Colon)?;
-                cases.push((vals, self.parse_switch_case_body()?));
+                let (body, falls) = self.parse_switch_case_body()?;
+                cases.push((vals, body, falls));
             } else {
                 return Err(self.err("expected `case` or `default` in switch body".into()));
             }
         }
         self.expect(TokenKind::RBrace)?;
+
+        // Expand fallthrough: each falling case appends subsequent arm bodies.
+        if cases.iter().any(|(_, _, f)| *f) {
+            let n = cases.len();
+            for i in 0..n {
+                if !cases[i].2 {
+                    continue;
+                }
+                let mut extra: Vec<Stmt> = Vec::new();
+                let mut j = i + 1;
+                loop {
+                    if j < n {
+                        extra.extend(cases[j].1.stmts.iter().cloned());
+                        if cases[j].2 {
+                            j += 1;
+                            continue;
+                        }
+                        break;
+                    }
+                    // Fall into default if present.
+                    if let Some(ref d) = default_block {
+                        extra.extend(d.stmts.iter().cloned());
+                        break;
+                    }
+                    return Err(self.err(
+                        "`fallthrough` cannot be the last case without a following case or default"
+                            .into(),
+                    ));
+                }
+                cases[i].1.stmts.extend(extra);
+                cases[i].2 = false;
+            }
+        }
 
         // Evaluate the tag once. A bare identifier is already re-read cheaply and
         // side-effect free, so only a compound scrutinee needs a temp binding.
@@ -2585,7 +2631,7 @@ impl Parser {
 
         // Fold cases into an if/else-if chain, innermost `default` first.
         let mut else_block: Option<Block> = default_block;
-        for (vals, body) in cases.into_iter().rev() {
+        for (vals, body, _) in cases.into_iter().rev() {
             let cond = Self::switch_case_cond(vals, &scrut_ref);
             let if_stmt = Stmt::If {
                 init: None,
@@ -2645,16 +2691,36 @@ impl Parser {
     }
 
     /// Statements of one `case`/`default` arm, up to the next `case`/`default`/`}`.
-    fn parse_switch_case_body(&mut self) -> Result<Block, ParseError> {
+    /// Returns `(body, falls_through)` — `fallthrough` must be the last statement.
+    fn parse_switch_case_body(&mut self) -> Result<(Block, bool), ParseError> {
         let mut stmts = Vec::new();
         while !matches!(
             self.peek_kind(),
-            TokenKind::RBrace | TokenKind::Default | TokenKind::Eof
+            TokenKind::RBrace | TokenKind::Default | TokenKind::Eof | TokenKind::Fallthrough
         ) && !matches!(self.peek_kind(), TokenKind::Ident(s) if s == "case")
         {
             stmts.push(self.parse_stmt()?);
         }
-        Ok(Block { stmts })
+        let falls = if matches!(self.peek_kind(), TokenKind::Fallthrough) {
+            self.bump();
+            if matches!(self.peek_kind(), TokenKind::Semicolon) {
+                self.bump();
+            }
+            // Must be last: next token is case/default/} only.
+            if !matches!(
+                self.peek_kind(),
+                TokenKind::RBrace | TokenKind::Default | TokenKind::Eof
+            ) && !matches!(self.peek_kind(), TokenKind::Ident(s) if s == "case")
+            {
+                return Err(self.err(
+                    "`fallthrough` must be the last statement in a case arm".into(),
+                ));
+            }
+            true
+        } else {
+            false
+        };
+        Ok((Block { stmts }, falls))
     }
 
     fn parse_pattern(&mut self) -> Result<Pattern, ParseError> {

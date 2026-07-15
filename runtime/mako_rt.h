@@ -1596,6 +1596,64 @@ static inline int64_t mako_error_is(MakoResultInt r, MakoString needle) {
     return mako_str_contains(r.err, needle) ? 1 : 0;
 }
 
+/* Peel one wrap layer: Err("ctx: rest") → Err("rest"); no ": " → same Err; Ok → Ok. */
+static inline MakoResultInt mako_error_unwrap(MakoResultInt r) {
+    if (r.ok) return r;
+    MakoString e = r.err;
+    if (!e.data || e.len < 3) return r;
+    for (size_t i = 0; i + 1 < e.len; i++) {
+        if (e.data[i] == ':' && e.data[i + 1] == ' ') {
+            MakoString rest = {e.data + i + 2, e.len - i - 2};
+            return mako_err_int(mako_str_clone(rest));
+        }
+    }
+    return r;
+}
+
+/* Peel all wrap layers to the innermost message (Go errors.Unwrap loop seed). */
+static inline MakoResultInt mako_error_root(MakoResultInt r) {
+    if (r.ok) return r;
+    for (int guard = 0; guard < 64; guard++) {
+        MakoString e = r.err;
+        int found = 0;
+        size_t pos = 0;
+        if (e.data) {
+            for (size_t i = 0; i + 1 < e.len; i++) {
+                if (e.data[i] == ':' && e.data[i + 1] == ' ') {
+                    found = 1;
+                    pos = i;
+                    break;
+                }
+            }
+        }
+        if (!found) return r;
+        MakoString rest = {e.data + pos + 2, e.len - pos - 2};
+        r = mako_err_int(mako_str_clone(rest));
+    }
+    return r;
+}
+
+/* Tag from error_tag form: Err("NotFound: user") → "NotFound"; else "". */
+static inline MakoString mako_error_as_tag(MakoResultInt r) {
+    if (r.ok || !r.err.data || r.err.len == 0) return mako_str_from_cstr("");
+    for (size_t i = 0; i + 1 < r.err.len; i++) {
+        if (r.err.data[i] == ':' && r.err.data[i + 1] == ' ') {
+            MakoString tag = {r.err.data, i};
+            return mako_str_clone(tag);
+        }
+    }
+    return mako_str_from_cstr("");
+}
+
+/* True if Err starts with "tag: " (exact prefix; stronger than substring error_is). */
+static inline int64_t mako_error_has_tag(MakoResultInt r, MakoString tag) {
+    if (r.ok || !tag.data) return 0;
+    size_t tl = tag.len;
+    if (r.err.len < tl + 2 || !r.err.data) return 0;
+    if (memcmp(r.err.data, tag.data, tl) != 0) return 0;
+    return (r.err.data[tl] == ':' && r.err.data[tl + 1] == ' ') ? 1 : 0;
+}
+
 static inline MakoString mako_int_to_string(int64_t n) {
     char buf[32];
     int written = snprintf(buf, sizeof(buf), "%lld", (long long)n);

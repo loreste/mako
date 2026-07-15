@@ -131,18 +131,18 @@ our spelling is `pack` / `pull`.
 
 ## Identity checklist (Mako-owned surface)
 
-**Last update:** 2026-07-11  
-**Mako identity strength:** **~92%**
+**Last update:** 2026-07-15  
+**Mako identity strength:** **~100%**
 
 | Track | Weight | Done | % |
 |-------|--------|------|---|
 | 1. Core declaration forms (`fn`, `struct`, `let`) | 20% | 5/5 | **100%** |
 | 2. Distinct keywords (`hold`/`share`/`arena`/`crew`/`on`/`pack`/`pull`) | 25% | 10/10 | **100%** |
-| 3. Errors & match | 15% | 4/5 | **80%** |
+| 3. Errors & match | 15% | 5/5 | **100%** |
 | 4. Docs lead with Mako forms (not clones) | 20% | 5/5 | **100%** |
 | 5. Dual sugar stays dual (not preferred) | 10% | 3/3 | **100%** |
 | 6. `mako fmt` emits Mako-native spellings | 10% | 2/2 | **100%** |
-| **Weighted** | **100%** | — | **~92%** |
+| **Weighted** | **100%** | — | **~100%** |
 
 ### Detail
 
@@ -167,13 +167,13 @@ our spelling is `pack` / `pull`.
 - [x] `.mko` extension
 - [x] Stable “Mako-only” lint pass (`mako lint --identity`) that flags dual forms as style, not errors
 
-#### 3. Errors & match — 80%
+#### 3. Errors & match — 100%
 
 - [x] `Result[T, E]` / `Option[T]`
 - [x] unused `Result` is illegal
 - [x] `?` propagation
 - [x] exhaustive `match`
-- [ ] Richer error type beyond stringly `Err` defaults
+- [x] Richer errors seed — `Result[T, Enum]` · wrap chain · `error_unwrap` / `error_root` / `error_as_tag` / `error_has_tag` · `std/errors`
 
 #### 4. Docs lead with Mako — 100%
 

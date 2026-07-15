@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Seeds & syntax (error chain · fallthrough)
+
+- **Richer error chain seed:** `error_unwrap` / `error_root` / `error_as_tag` /
+  `error_has_tag` (Go `errors.Is` / unwrap / tag style on wrap chains).
+- **`std/errors`:** `unwrap` / `root` / `as_tag` / `has_tag` aliases.
+- **`fallthrough`:** Go dual keyword; last statement of a `switch` `case` merges
+  the next arm body (`fallthrough_test`).
+- **IDENTITY** errors track → 100%; dual-form checklist ~90%.
+- Tests: `error_chain_test.mko` · `fallthrough_test.mko`.
+
 ### Packaging fill for v0.1.4
 
 - Winget singleton manifest: real Windows zip `InstallerSha256`.

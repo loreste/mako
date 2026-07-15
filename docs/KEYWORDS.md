@@ -1,6 +1,6 @@
 # Mako keywords
 
-Source of truth: `src/lexer/mod.rs` → `lex_ident` (**46** reserved words, including duals).  
+Source of truth: `src/lexer/mod.rs` → `lex_ident` (**46** reserved words, including duals; `pack`/`pull`/`go`/`switch` are contextual).  
 Every identifier that matches one of these strings is always a keyword token — never
 an `Ident`. There are **no contextual keywords** today: you cannot name a variable `crew` or `default`.
 
@@ -47,6 +47,7 @@ Guided tour: [The Mako Book](book/) · Full syntax: [GUIDE.md](GUIDE.md) · Desi
 | `while` | Loop while condition holds |
 | `for` / `in` / `range` | Iteration (`for i, v in range s`, `for i in n`, …) |
 | `break` / `continue` | Exit / next iteration of innermost `for`/`while` |
+| `fallthrough` | Go dual: last statement of a `switch` `case` arm only |
 | `return` | Return from function |
 | `defer` | Run on function exit (LIFO), including before `return` |
 | `match` | Pattern match on enums / Option / Result / ints |
@@ -94,8 +95,8 @@ Guided tour: [The Mako Book](book/) · Full syntax: [GUIDE.md](GUIDE.md) · Desi
 
 ```
 actor and arena as break const continue crew default defer else enum extern false
-fan fn for hold if import in interface join kick let match mut not or range receive
-return select share struct timeout true while
+fallthrough fan fn for hold if import in interface join kick let match mut not or
+range receive return select share struct timeout true while
 ```
 
-(38 words — must match `lex_ident` exactly.)
+(Count must match `lex_ident` keywords; duals `func`/`var`/`package`/`type`/`pull`/`pack` also reserved.)

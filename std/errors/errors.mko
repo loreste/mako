@@ -1,4 +1,5 @@
 // std/errors — pull "errors" → errors.*
+// Go-like helpers over stringly Result Err chains + tagged messages.
 fn format(fmt: string, arg: string) -> Result[int, string] {
     return errorf(fmt, arg)
 }
@@ -10,4 +11,20 @@ fn is(r: Result[int, string], needle: string) -> bool {
 }
 fn as_string(r: Result[int, string]) -> string {
     return error_string(r)
+}
+// Peel one wrap layer: Err("ctx: rest") → Err("rest").
+fn unwrap(r: Result[int, string]) -> Result[int, string] {
+    return error_unwrap(r)
+}
+// Peel all wrap layers to the innermost message.
+fn root(r: Result[int, string]) -> Result[int, string] {
+    return error_root(r)
+}
+// Tag from error_tag form: Err("NotFound: user") → "NotFound".
+fn as_tag(r: Result[int, string]) -> string {
+    return error_as_tag(r)
+}
+// True if Err starts with "tag: " (exact prefix).
+fn has_tag(r: Result[int, string], tag: string) -> bool {
+    return error_has_tag(r, tag)
 }

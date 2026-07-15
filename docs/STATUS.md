@@ -12,9 +12,9 @@ Last inventory: 2026-07-14 (**unique Mako surface** · pack/pull types · full m
 |-------|---------|
 | **MVP / usable language** | **100%** |
 | **STATUS north-star** | **100%** |
-| **Mako identity (preferred syntax)** | **~90%** — [IDENTITY.md](IDENTITY.md) |
+| **Mako identity (preferred syntax)** | **~100%** — [IDENTITY.md](IDENTITY.md) |
 | **Go/Rust pain coverage** | **~80%** strong rows — [PAIN_POINTS.md](PAIN_POINTS.md) |
-| **Dual-form coverage (optional sugar)** | **~78%** — [GO_SYNTAX_CHECKLIST.md](GO_SYNTAX_CHECKLIST.md) |
+| **Dual-form coverage (optional sugar)** | **~90%** — [GO_SYNTAX_CHECKLIST.md](GO_SYNTAX_CHECKLIST.md) |
 | **Standard library** | **~98%** of target areas Done (Wave 9; not every symbol) |
 
 ---
@@ -103,6 +103,9 @@ Last inventory: 2026-07-14 (**unique Mako surface** · pack/pull types · full m
 | plugin_open/call/close · hot_reload_unwatch | Done seed — `residual_seeds_test` · `domain_tracks_test` |
 | Installer UX (manifest + doctor + Windows) | Done seed — `install-manifest.json` · doctor fields · `install.ps1` |
 | Actor spawn_cap + interface `on T : I` sugar | Done seed — `actor_test` · `iface_on_iface_test` |
+| Error chain peel + tag helpers | Done seed — `error_unwrap` / `root` / `as_tag` / `has_tag` · `error_chain_test` |
+| `fallthrough` switch dual | Done seed — `fallthrough_test` |
+| Richer errors beyond stringly defaults | Done seed — `Result[T, Enum]` · wrap chain · `std/errors` |
 | SIP library (platform builtins + `std/sip`) | Done — RFC 3261/3581 Via/RR/NAT, Digest HA1, framing, SDP rewrite |
 | SIP zero-copy header/method views | Done — `sip_header_view` / `sip_method_eq` / `sip_header_eq` |
 | ShareInt capture (shared mut via RC handle) | Done seed — `share_capture_test` |
@@ -111,6 +114,7 @@ Last inventory: 2026-07-14 (**unique Mako surface** · pack/pull types · full m
 | `mako test examples/testing` | PASS — **165 passed**, 0 failed |
 | `if init; cond { }` + both-branches-return body | Done — `examples/testing/if_init_test.mko` |
 | Go `switch`/`case`/`default` (value, expr-less, init) | Done — `examples/testing/switch_test.mko` |
+| Go `fallthrough` (case body merge) | Done seed — `examples/testing/fallthrough_test.mko` |
 | Positional struct literals `Point{1, 2}` / `Point{}` | Done — `examples/testing/struct_positional_test.mko` |
 | `go f()` → kick onto enclosing crew | Done — `examples/testing/go_stmt_test.mko` |
 | Compound assign `+= … ++ --` (ident/field/index) | Done — `examples/testing/compound_assign_test.mko` |

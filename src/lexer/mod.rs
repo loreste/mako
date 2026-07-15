@@ -29,6 +29,8 @@ pub enum TokenKind {
     Range,
     Break,
     Continue,
+    /// Go dual: only legal as the last statement of a `switch` `case` arm.
+    Fallthrough,
     Return,
     Defer,
     True,
@@ -590,6 +592,7 @@ impl<'a> Lexer<'a> {
             "range" => TokenKind::Range,
             "break" => TokenKind::Break,
             "continue" => TokenKind::Continue,
+            "fallthrough" => TokenKind::Fallthrough,
             "return" => TokenKind::Return,
             "defer" => TokenKind::Defer,
             "true" => TokenKind::True,
