@@ -386,6 +386,176 @@ static inline MakoString mako_file_read_exact(int64_t fd, int64_t count) {
     return (MakoString){buf, total};
 }
 
+/* ---- Storage primitives seed: fixed pages + WAL append log ---- */
+
+#ifndef MAKO_PAGE_SIZE_DEFAULT
+#define MAKO_PAGE_SIZE_DEFAULT 4096
+#endif
+
+typedef struct {
+    char *data;
+    size_t size;
+} MakoPage;
+
+/* Allocate a zeroed page (size bytes, default 4096 if size<=0). */
+static inline MakoPage *mako_page_alloc(int64_t size) {
+    size_t n = size > 0 ? (size_t)size : (size_t)MAKO_PAGE_SIZE_DEFAULT;
+    MakoPage *p = (MakoPage *)calloc(1, sizeof(MakoPage));
+    if (!p) return NULL;
+    p->data = (char *)calloc(1, n);
+    if (!p->data) {
+        free(p);
+        return NULL;
+    }
+    p->size = n;
+    return p;
+}
+
+static inline int64_t mako_page_size(MakoPage *p) {
+    return p ? (int64_t)p->size : -1;
+}
+
+static inline int64_t mako_page_write(MakoPage *p, int64_t off, MakoString data) {
+    if (!p || !p->data || off < 0) return -1;
+    if ((size_t)off + data.len > p->size) return -1;
+    if (data.len && data.data) memcpy(p->data + (size_t)off, data.data, data.len);
+    return (int64_t)data.len;
+}
+
+static inline MakoString mako_page_read(MakoPage *p, int64_t off, int64_t count) {
+    if (!p || !p->data || off < 0 || count < 0) return mako_str_from_cstr("");
+    if ((size_t)off >= p->size) return mako_str_from_cstr("");
+    size_t n = (size_t)count;
+    if ((size_t)off + n > p->size) n = p->size - (size_t)off;
+    char *d = (char *)malloc(n + 1);
+    if (!d) return mako_str_from_cstr("");
+    if (n) memcpy(d, p->data + (size_t)off, n);
+    d[n] = 0;
+    return (MakoString){d, n};
+}
+
+static inline int64_t mako_page_free(MakoPage *p) {
+    if (!p) return 0;
+    free(p->data);
+    free(p);
+    return 0;
+}
+
+/* Simple file-backed write-ahead log: length-prefixed records. */
+typedef struct {
+    int fd;
+    char path[512];
+} MakoWal;
+
+static inline MakoWal *mako_wal_open(MakoString path) {
+    if (!path.data || path.len == 0 || path.len >= 500) return NULL;
+#if defined(_WIN32)
+    return NULL;
+#else
+    MakoWal *w = (MakoWal *)calloc(1, sizeof(MakoWal));
+    if (!w) return NULL;
+    memcpy(w->path, path.data, path.len);
+    w->path[path.len] = 0;
+    w->fd = open(w->path, O_RDWR | O_CREAT, 0644);
+    if (w->fd < 0) {
+        free(w);
+        return NULL;
+    }
+    return w;
+#endif
+}
+
+/* Append one record: [u32 le len][bytes]. Returns 0 ok, -1 fail. */
+static inline int64_t mako_wal_append(MakoWal *w, MakoString rec) {
+    if (!w || w->fd < 0) return -1;
+#if defined(_WIN32)
+    return -1;
+#else
+    uint32_t len = (uint32_t)rec.len;
+    unsigned char hdr[4] = {
+        (unsigned char)(len & 0xff),
+        (unsigned char)((len >> 8) & 0xff),
+        (unsigned char)((len >> 16) & 0xff),
+        (unsigned char)((len >> 24) & 0xff),
+    };
+    if (write(w->fd, hdr, 4) != 4) return -1;
+    if (len > 0) {
+        if (!rec.data) return -1;
+        if (write(w->fd, rec.data, len) != (ssize_t)len) return -1;
+    }
+    return 0;
+#endif
+}
+
+static inline int64_t mako_wal_sync(MakoWal *w) {
+    if (!w || w->fd < 0) return -1;
+#if defined(_WIN32)
+    return -1;
+#else
+    return fsync(w->fd) == 0 ? 0 : -1;
+#endif
+}
+
+/* Byte length of WAL file. */
+static inline int64_t mako_wal_size(MakoWal *w) {
+    if (!w || w->fd < 0) return -1;
+#if defined(_WIN32)
+    return -1;
+#else
+    off_t cur = lseek(w->fd, 0, SEEK_CUR);
+    off_t end = lseek(w->fd, 0, SEEK_END);
+    if (cur >= 0) lseek(w->fd, cur, SEEK_SET);
+    return (int64_t)end;
+#endif
+}
+
+/* Last next-offset after wal_read_at (thread-local). */
+static __thread int64_t mako_wal_last_next_off = -1;
+
+static inline int64_t mako_wal_next_off(void) {
+    return mako_wal_last_next_off;
+}
+
+/* Read record at byte offset; returns payload (empty on fail).
+ * Updates wal_next_off() to the following record offset, or -1. */
+static inline MakoString mako_wal_read_at(MakoWal *w, int64_t off) {
+    mako_wal_last_next_off = -1;
+    if (!w || w->fd < 0 || off < 0) return mako_str_from_cstr("");
+#if defined(_WIN32)
+    return mako_str_from_cstr("");
+#else
+    if (lseek(w->fd, (off_t)off, SEEK_SET) < 0) return mako_str_from_cstr("");
+    unsigned char hdr[4];
+    if (read(w->fd, hdr, 4) != 4) return mako_str_from_cstr("");
+    uint32_t len = (uint32_t)hdr[0] | ((uint32_t)hdr[1] << 8) | ((uint32_t)hdr[2] << 16)
+                   | ((uint32_t)hdr[3] << 24);
+    if (len > 64 * 1024 * 1024) return mako_str_from_cstr(""); /* sanity */
+    char *buf = (char *)malloc((size_t)len + 1);
+    if (!buf) return mako_str_from_cstr("");
+    size_t got = 0;
+    while (got < len) {
+        ssize_t n = read(w->fd, buf + got, len - got);
+        if (n <= 0) {
+            free(buf);
+            return mako_str_from_cstr("");
+        }
+        got += (size_t)n;
+    }
+    buf[len] = 0;
+    mako_wal_last_next_off = off + 4 + (int64_t)len;
+    return (MakoString){buf, len};
+#endif
+}
+
+static inline int64_t mako_wal_close(MakoWal *w) {
+    if (!w) return 0;
+#if !defined(_WIN32)
+    if (w->fd >= 0) close(w->fd);
+#endif
+    free(w);
+    return 0;
+}
+
 #endif /* !_WIN32 (POSIX) */
 
 #endif /* MAKO_DIO_H */

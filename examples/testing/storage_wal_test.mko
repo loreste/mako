@@ -1,0 +1,29 @@
+// Storage primitives seed: fixed pages + file-backed WAL.
+
+fn TestPageRoundtrip() {
+    let p = page_alloc(4096)
+    assert(page_size(p) == 4096)
+    assert_eq(page_write(p, 0, "hello"), 5)
+    let s = page_read(p, 0, 5)
+    assert_eq_str(s, "hello")
+    assert_eq(page_free(p), 0)
+}
+
+fn TestWalAppendRead() {
+    let path = "/tmp/mako_wal_seed_test.log"
+    // Truncate by open/write empty via write_file
+    assert_eq(write_file(path, ""), 0)
+    let w = wal_open(path)
+    assert_eq(wal_append(w, "rec-a"), 0)
+    assert_eq(wal_append(w, "rec-b"), 0)
+    assert_eq(wal_sync(w), 0)
+    assert(wal_size(w) > 0)
+
+    let a = wal_read_at(w, 0)
+    assert_eq_str(a, "rec-a")
+    let next = wal_next_off()
+    assert(next > 0)
+    let b = wal_read_at(w, next)
+    assert_eq_str(b, "rec-b")
+    assert_eq(wal_close(w), 0)
+}

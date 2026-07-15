@@ -1341,6 +1341,67 @@ impl TypeChecker {
             "mmap_close".into(),
             Type::Fn(vec![Type::MMap], Box::new(Type::Int)),
         );
+        // Storage primitives seed (page + WAL).
+        fns.insert(
+            "page_alloc".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Named("Page".into()))),
+        );
+        fns.insert(
+            "page_size".into(),
+            Type::Fn(vec![Type::Named("Page".into())], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "page_write".into(),
+            Type::Fn(
+                vec![Type::Named("Page".into()), Type::Int, Type::String],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "page_read".into(),
+            Type::Fn(
+                vec![Type::Named("Page".into()), Type::Int, Type::Int],
+                Box::new(Type::String),
+            ),
+        );
+        fns.insert(
+            "page_free".into(),
+            Type::Fn(vec![Type::Named("Page".into())], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "wal_open".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Named("Wal".into()))),
+        );
+        fns.insert(
+            "wal_append".into(),
+            Type::Fn(
+                vec![Type::Named("Wal".into()), Type::String],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "wal_sync".into(),
+            Type::Fn(vec![Type::Named("Wal".into())], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "wal_size".into(),
+            Type::Fn(vec![Type::Named("Wal".into())], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "wal_read_at".into(),
+            Type::Fn(
+                vec![Type::Named("Wal".into()), Type::Int],
+                Box::new(Type::String),
+            ),
+        );
+        fns.insert(
+            "wal_next_off".into(),
+            Type::Fn(vec![], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "wal_close".into(),
+            Type::Fn(vec![Type::Named("Wal".into())], Box::new(Type::Int)),
+        );
         // Event loop
         fns.insert(
             "evloop_new".into(),
@@ -4015,6 +4076,30 @@ impl TypeChecker {
         fns.insert(
             "debug_break_reset".into(),
             Type::Fn(vec![], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "debug_set_int".into(),
+            Type::Fn(vec![Type::String, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "debug_get_int".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "debug_locals_json".into(),
+            Type::Fn(vec![], Box::new(Type::String)),
+        );
+        fns.insert(
+            "debug_bp_enable".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "debug_bp_disable".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "debug_bp".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
         );
         fns.insert(
             "process_rss_bytes".into(),

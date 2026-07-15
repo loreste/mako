@@ -4834,6 +4834,114 @@ static inline int64_t mako_debug_break_reset(void) {
     return 1;
 }
 
+/* ---- Debug locals registry (seed: named int slots for async inspect) ---- */
+#define MAKO_DEBUG_LOCAL_MAX 32
+typedef struct {
+    char name[48];
+    int64_t value;
+    int used;
+} MakoDebugLocal;
+static MakoDebugLocal mako_debug_locals[MAKO_DEBUG_LOCAL_MAX];
+static int mako_debug_bp_enabled[16];
+
+static inline int64_t mako_debug_set_int(MakoString name, int64_t value) {
+    if (!name.data || name.len == 0 || name.len >= 48) return 0;
+    for (int i = 0; i < MAKO_DEBUG_LOCAL_MAX; i++) {
+        if (mako_debug_locals[i].used
+            && strncmp(mako_debug_locals[i].name, name.data, name.len) == 0
+            && mako_debug_locals[i].name[name.len] == 0) {
+            mako_debug_locals[i].value = value;
+            return 1;
+        }
+    }
+    for (int i = 0; i < MAKO_DEBUG_LOCAL_MAX; i++) {
+        if (!mako_debug_locals[i].used) {
+            memcpy(mako_debug_locals[i].name, name.data, name.len);
+            mako_debug_locals[i].name[name.len] = 0;
+            mako_debug_locals[i].value = value;
+            mako_debug_locals[i].used = 1;
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static inline int64_t mako_debug_get_int(MakoString name) {
+    if (!name.data || name.len == 0) return 0;
+    for (int i = 0; i < MAKO_DEBUG_LOCAL_MAX; i++) {
+        if (mako_debug_locals[i].used
+            && strncmp(mako_debug_locals[i].name, name.data, name.len) == 0
+            && mako_debug_locals[i].name[name.len] == 0) {
+            return mako_debug_locals[i].value;
+        }
+    }
+    return 0;
+}
+
+static inline MakoString mako_debug_locals_json(void) {
+    size_t cap = 1024;
+    char *buf = (char *)malloc(cap);
+    if (!buf) abort();
+    size_t len = 0;
+    int n = snprintf(buf, cap, "{\"schema\":\"mako.debug_locals.v1\",\"locals\":[");
+    if (n > 0) len = (size_t)n;
+    int first = 1;
+    for (int i = 0; i < MAKO_DEBUG_LOCAL_MAX; i++) {
+        if (!mako_debug_locals[i].used) continue;
+        if (len + 96 >= cap) {
+            cap *= 2;
+            char *next = (char *)realloc(buf, cap);
+            if (!next) {
+                free(buf);
+                abort();
+            }
+            buf = next;
+        }
+        n = snprintf(
+            buf + len,
+            cap - len,
+            "%s{\"name\":\"%s\",\"value\":%" PRId64 "}",
+            first ? "" : ",",
+            mako_debug_locals[i].name,
+            mako_debug_locals[i].value
+        );
+        if (n > 0) len += (size_t)n;
+        first = 0;
+    }
+    if (len + 4 >= cap) {
+        char *next = (char *)realloc(buf, len + 8);
+        if (!next) {
+            free(buf);
+            abort();
+        }
+        buf = next;
+    }
+    buf[len++] = ']';
+    buf[len++] = '}';
+    buf[len] = 0;
+    return (MakoString){buf, len};
+}
+
+/* Soft breakpoints 0..15: enable/disable; debug_bp(id) hits only if enabled. */
+static inline int64_t mako_debug_bp_enable(int64_t id) {
+    if (id < 0 || id >= 16) return 0;
+    mako_debug_bp_enabled[id] = 1;
+    return 1;
+}
+
+static inline int64_t mako_debug_bp_disable(int64_t id) {
+    if (id < 0 || id >= 16) return 0;
+    mako_debug_bp_enabled[id] = 0;
+    return 1;
+}
+
+static inline int64_t mako_debug_bp(int64_t id) {
+    if (id < 0 || id >= 16 || !mako_debug_bp_enabled[id]) return 0;
+    char lab[32];
+    snprintf(lab, sizeof(lab), "bp-%lld", (long long)id);
+    return mako_debug_break(mako_str_from_cstr(lab));
+}
+
 /* MakoNursery — structured concurrency scope (Mako `crew` block).
  * Owns a set of spawned tasks. On scope exit, cancel_join cancels all tasks
  * then joins them — no orphaned threads. Tasks observe cancellation via

@@ -80,3 +80,23 @@ fn TestKickMovesFnEnv() {
         assert_eq(j.join(), 15)
     }
 }
+
+fn TestDebugLocals() {
+    assert_eq(debug_set_int("x", 42), 1)
+    assert_eq(debug_get_int("x"), 42)
+    assert_eq(debug_set_int("y", 7), 1)
+    let js = debug_locals_json()
+    assert(str_contains(js, "mako.debug_locals.v1"))
+    assert(str_contains(js, "\"x\""))
+    assert(str_contains(js, "42"))
+}
+
+fn TestDebugBp() {
+    let _ = debug_break_reset()
+    assert_eq(debug_bp_enable(1), 1)
+    assert_eq(debug_bp(1), 1) // enabled → hits
+    assert_eq(debug_bp(2), 0) // disabled
+    assert_eq(debug_bp_disable(1), 1)
+    assert_eq(debug_bp(1), 0)
+    assert(debug_break_hits() >= 1)
+}

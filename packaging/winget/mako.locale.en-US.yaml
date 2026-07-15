@@ -1,0 +1,22 @@
+# Winget manifest seed (P3) — fill PackageVersion / InstallerUrl for each release.
+# Docs: https://github.com/microsoft/winget-pkgs
+PackageIdentifier: loreste.mako
+PackageVersion: 0.1.2
+PackageLocale: en-US
+Publisher: loreste
+PublisherUrl: https://github.com/loreste/mako
+PackageName: Mako
+License: MIT
+ShortDescription: Mako systems/backend language (.mko → native via C)
+Tags:
+  - compiler
+  - systems
+  - backend
+Installers:
+  - Architecture: x64
+    InstallerType: zip
+    InstallerUrl: https://github.com/loreste/mako/releases/download/v0.1.2/mako-x86_64-pc-windows-msvc.zip
+    InstallerSha256: REPLACE_WITH_RELEASE_SHA256
+    NestedInstallerType: portable
+ManifestType: singleton
+ManifestVersion: 1.6.0

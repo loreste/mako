@@ -1,0 +1,26 @@
+// Shared mut pattern: capture ShareInt (RC handle) in a closure.
+
+fn apply(f: fn(int) -> int, x: int) -> int {
+    return f(x)
+}
+
+fn TestShareCaptureAdd() {
+    let s = share_int(10)
+    let f: fn(int) -> int = |x| x + share_get(s)
+    assert_eq(apply(f, 5), 15)
+    share_set(s, 100)
+    assert_eq(apply(f, 1), 101)
+    share_drop(s)
+}
+
+fn TestShareCaptureMutate() {
+    let s = share_int(0)
+    let f: fn(int) -> int = |x| {
+        share_set(s, share_get(s) + x)
+        return share_get(s)
+    }
+    assert_eq(f(3), 3)
+    assert_eq(f(4), 7)
+    assert_eq(share_get(s), 7)
+    share_drop(s)
+}

@@ -80,6 +80,9 @@ Last inventory: 2026-07-14 (**unique Mako surface** · pack/pull types · full m
 | Kick first-class `fn` values across crew (Send) | Done seed — `kick_fn_test` |
 | f-string format specs (flags `+ # - 0`, hex/oct/bin, float e/f/g) | Done seed — `fstring_fmt_test` |
 | `fn_drop` / env free + debugger/task inspect seeds | Done seed — `fn_drop_debug_test` |
+| Storage page + WAL seeds | Done seed — `storage_wal_test` |
+| ShareInt capture (shared mut via RC handle) | Done seed — `share_capture_test` |
+| Packaging seeds (deb/rpm/winget/matrix/homebrew) | Done seed — scripts + packaging/ |
 | Book samples `mako check` / `run` | PASS — `docs/book/examples/book_*.mko` |
 | `mako test examples/testing` | PASS — **165 passed**, 0 failed |
 | `if init; cond { }` + both-branches-return body | Done — `examples/testing/if_init_test.mko` |

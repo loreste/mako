@@ -8334,6 +8334,8 @@ impl Codegen {
                 "RWMutex" => "MakoRWMutex*".into(),
                 "CMap" => "MakoCMap*".into(),
                 "MMap" => "MakoMMap*".into(),
+                "Page" => "MakoPage*".into(),
+                "Wal" => "MakoWal*".into(),
                 "EvLoop" => "MakoEvLoop*".into(),
                 "Buf" => "MakoBuf*".into(),
                 "GameUDP" => "MakoGameUDP*".into(),
@@ -8705,6 +8707,7 @@ impl Codegen {
                     | "double"
                     | "_Bool"
                     | "MakoString"
+                    | "MakoShareInt"
             ) || is_struct;
             if !ok {
                 continue;
@@ -8846,16 +8849,24 @@ impl Codegen {
 
         let body_c = match body {
             Expr::Block(b) => {
-                let mut last = "0".to_string();
+                // Chain side-effecting exprs with the comma operator so
+                // `share_set(...); return share_get(...)` both run.
+                let mut parts: Vec<String> = Vec::new();
                 for s in &b.stmts {
                     match s {
                         Stmt::Return(Some(e)) | Stmt::Expr(e) => {
-                            last = self.expr_as_pure_c_multi_caps(e, &pnames, &cap_map);
+                            parts.push(self.expr_as_pure_c_multi_caps(e, &pnames, &cap_map));
                         }
                         _ => {}
                     }
                 }
-                last
+                if parts.is_empty() {
+                    "0".to_string()
+                } else if parts.len() == 1 {
+                    parts.into_iter().next().unwrap()
+                } else {
+                    format!("({})", parts.join(", "))
+                }
             }
             other => self.expr_as_pure_c_multi_caps(other, &pnames, &cap_map),
         };
@@ -8896,6 +8907,8 @@ impl Codegen {
                 let field = mangle(src_name);
                 if cty == "MakoString" {
                     drop_frees.push_str(&format!("    mako_str_free(e->{field});\n"));
+                } else if cty == "MakoShareInt" {
+                    drop_frees.push_str(&format!("    mako_share_drop(e->{field});\n"));
                 } else if self.structs.contains_key(cty)
                     || self.structs.values().any(|s| s.c_name == *cty)
                 {
@@ -8935,6 +8948,11 @@ impl Codegen {
                 if cty == "MakoString" {
                     self.line(&format!(
                         "{env_tmp}->{field} = mako_str_clone({val});"
+                    ));
+                } else if cty == "MakoShareInt" {
+                    // Shared handle: clone RC into env (shared mutation pattern).
+                    self.line(&format!(
+                        "{env_tmp}->{field} = mako_share_clone({val});"
                     ));
                 } else if self.structs.contains_key(cty)
                     || self.structs.values().any(|s| s.c_name == *cty)
@@ -8997,6 +9015,15 @@ impl Codegen {
                     }
                     if fname == "str_len" && as_.len() == 1 {
                         return format!("mako_str_len({})", as_[0]);
+                    }
+                    if fname == "share_get" && as_.len() == 1 {
+                        return format!("mako_share_get({})", as_[0]);
+                    }
+                    if fname == "share_set" && as_.len() == 2 {
+                        return format!(
+                            "(mako_share_set({}, {}), (int64_t)0)",
+                            as_[0], as_[1]
+                        );
                     }
                     return format!("{}({})", mangle(fname), as_.join(", "));
                 }
@@ -12638,6 +12665,74 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             let tmp = self.fresh("msz");
                             self.line(&format!("int64_t {tmp} = mako_mmap_size({m});"));
                             return ("int64_t".into(), tmp);
+                        }
+                        "page_alloc" => {
+                            let (_, s) = self.emit_expr(&args[0]);
+                            let tmp = self.fresh("pg");
+                            self.line(&format!("MakoPage *{tmp} = mako_page_alloc({s});"));
+                            return ("MakoPage*".into(), tmp);
+                        }
+                        "page_size" => {
+                            let (_, p) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_page_size({p})"));
+                        }
+                        "page_write" => {
+                            let (_, p) = self.emit_expr(&args[0]);
+                            let (_, o) = self.emit_expr(&args[1]);
+                            let (_, d) = self.emit_expr(&args[2]);
+                            return (
+                                "int64_t".into(),
+                                format!("mako_page_write({p}, {o}, {d})"),
+                            );
+                        }
+                        "page_read" => {
+                            let (_, p) = self.emit_expr(&args[0]);
+                            let (_, o) = self.emit_expr(&args[1]);
+                            let (_, c) = self.emit_expr(&args[2]);
+                            let tmp = self.fresh("pgr");
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_page_read({p}, {o}, {c});"
+                            ));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "page_free" => {
+                            let (_, p) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_page_free({p})"));
+                        }
+                        "wal_open" => {
+                            let (_, p) = self.emit_expr(&args[0]);
+                            let tmp = self.fresh("wal");
+                            self.line(&format!("MakoWal *{tmp} = mako_wal_open({p});"));
+                            return ("MakoWal*".into(), tmp);
+                        }
+                        "wal_append" => {
+                            let (_, w) = self.emit_expr(&args[0]);
+                            let (_, r) = self.emit_expr(&args[1]);
+                            return ("int64_t".into(), format!("mako_wal_append({w}, {r})"));
+                        }
+                        "wal_sync" => {
+                            let (_, w) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_wal_sync({w})"));
+                        }
+                        "wal_size" => {
+                            let (_, w) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_wal_size({w})"));
+                        }
+                        "wal_read_at" => {
+                            let (_, w) = self.emit_expr(&args[0]);
+                            let (_, o) = self.emit_expr(&args[1]);
+                            let tmp = self.fresh("wrec");
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_wal_read_at({w}, {o});"
+                            ));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "wal_next_off" => {
+                            return ("int64_t".into(), "mako_wal_next_off()".into());
+                        }
+                        "wal_close" => {
+                            let (_, w) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_wal_close({w})"));
                         }
                         "mmap_close" => {
                             let (_, m) = self.emit_expr(&args[0]);
@@ -17320,6 +17415,37 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         }
                         "debug_break_reset" => {
                             return ("int64_t".into(), "mako_debug_break_reset()".into());
+                        }
+                        "debug_set_int" => {
+                            let (_, n) = self.emit_expr(&args[0]);
+                            let (_, v) = self.emit_expr(&args[1]);
+                            return (
+                                "int64_t".into(),
+                                format!("mako_debug_set_int({n}, {v})"),
+                            );
+                        }
+                        "debug_get_int" => {
+                            let (_, n) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_debug_get_int({n})"));
+                        }
+                        "debug_locals_json" => {
+                            let tmp = self.fresh("dlj");
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_debug_locals_json();"
+                            ));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "debug_bp_enable" => {
+                            let (_, id) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_debug_bp_enable({id})"));
+                        }
+                        "debug_bp_disable" => {
+                            let (_, id) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_debug_bp_disable({id})"));
+                        }
+                        "debug_bp" => {
+                            let (_, id) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_debug_bp({id})"));
                         }
                         "crash_report_install" => {
                             let (_, p) = self.emit_expr(&args[0]);

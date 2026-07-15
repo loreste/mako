@@ -9,9 +9,9 @@
 # or via MAKO_RUNTIME.
 class Mako < Formula
   desc "Mako — systems/backend language (.mko → native via C)"
-  homepage "https://github.com/example/mako"
+  homepage "https://github.com/loreste/mako"
   license "MIT"
-  head "https://github.com/example/mako.git", branch: "main"
+  head "https://github.com/loreste/mako.git", branch: "main"
 
   depends_on "rust" => :build
   depends_on "openssl@3" => :optional

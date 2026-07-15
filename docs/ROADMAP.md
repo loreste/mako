@@ -86,16 +86,16 @@ Metrics/prom + span-lite JSON are in; **depth seeds landed** (2026-07-14).
 ### P3 — Install, distribution, portability
 
 1. Installer UX polish — **partial seed**: `install-manifest.json` + doctor host/header checks  
-2. Windows MSI / winget · macOS pkg or notarized install · Linux deb/rpm + repo  
-3. Homebrew formula publish automation  
-4. Reliable multi-OS matrix (Linux / macOS / Windows / FreeBSD)  
-5. ARM / x86-64 / RISC-V target validation  
+2. ~~Windows winget / Linux deb·rpm seeds~~ **Done seed** — `packaging/winget/` · `scripts/package-deb.sh` · `package-rpm.sh` (MSI/notarize residual)  
+3. ~~Homebrew formula~~ **Done seed** — `Formula/mako.rb` (core publish is external)  
+4. ~~Multi-OS matrix validation seed~~ **Done seed** — `scripts/validate-matrix.sh`  
+5. ARM / x86-64 / RISC-V target validation — listed in matrix script; CI residual  
 
 ### P4 — Domain & advanced systems
 
 1. Telecom/realtime product stacks (SIP/RTP/SRTP seeds exist; SIPREC/Diameter/WebRTC residual)  
-2. Database/storage primitives: pages, WAL, indexes, cache, transactions  
-3. Graphics/windowing · shader · asset · audio · physics seeds (games track)  
+2. ~~Database/storage primitives: pages, WAL~~ **Done seed** — `page_*` / `wal_*` (`storage_wal_test`); indexes/tx residual  
+3. Graphics/windowing · shader · asset · audio · physics seeds (game track)  
 4. Multiplayer game networking (reliable UDP, snapshots, prediction/rollback)  
 5. GPU AI depth: batched GEMM, RoPE, KV-cache, native f16; more quant; Metal/CUDA/Vulkan  
 6. Interop beyond C · hot reload · safe comptime domain extensions  
@@ -113,7 +113,7 @@ Metrics/prom + span-lite JSON are in; **depth seeds landed** (2026-07-14).
 | Struct update (spread) | `S { field: v, ..base }` / `S { ...base, field: v }` | `struct_update_test` |
 | Enum on kick-POD / channels | POD enum fields; `chan[Enum]` | `struct_update_test` |
 | First-class fn values | `fn apply(f: fn(int)->int, …)` · named + lambda | `lang_ergonomics_test` · `first_class_fn_test` |
-| Capturing closures (POD + string + struct env) | int/bool/float · string clone · struct copy | `capturing_closure_test` · `struct_capture_test` |
+| Capturing closures (POD + string + struct + ShareInt) | value / clone / shared mut handle | `capturing_closure_test` · `struct_capture_test` · `share_capture_test` |
 | Kick `fn` values across crew | `kick(apply(f, x))` with bare/capturing `MakoFn` | `kick_fn_test` |
 | `f"…{x}"` + format specs | `+` ` ` `#` `-` `0` · `xXob` · float `fe` · width | `fstring_fmt_test` |
 | Struct field defaults | `field: int = 0` on `struct` | `lang_ergonomics_test` |
@@ -121,9 +121,9 @@ Metrics/prom + span-lite JSON are in; **depth seeds landed** (2026-07-14).
 
 **Still open (true residuals):**
 
-1. Mut-ref captures · deeper move/lifetime analysis  
-2. Remaining printf exotics in f-strings (`%n`, dynamic `*`, locale) — use `fmt_sprintf*`  
-3. Full debugger: source locals, real breakpoints, async frame walk  
+1. Stack mut-ref captures (use `ShareInt` / share handles for shared mut) · deeper NLL  
+2. Remaining printf exotics (`%n`, dynamic `*`, locale) — use `fmt_sprintf*`  
+3. Full debugger DWARF/locals UI (seed: `debug_set_int` / `debug_locals_json` / `debug_bp`)  
 
 ### Language / stdlib residuals (lower priority)
 
@@ -264,7 +264,8 @@ Percentages are weighted; update when a task flips.
 - [x] Debugger seed: `debug_break` / hits · `tasks_inspect_json` · `task_done` / `task_id` / `task_joined`.
 - [x] Closure env free: `fn_drop` / `fn_has_env` (+ generated drop_env for string fields).
 - [x] Auto `fn_drop` on scope exit; kick **moves** env into the task (no double-free).
-- [ ] Full debugger: source-level locals, real breakpoints, async frame walk.
+- [x] Debug locals registry + soft BP ids (`debug_set_int` / `debug_locals_json` / `debug_bp`).
+- [ ] Full debugger: DWARF source-level locals, real process breakpoints, async frame walk.
 - [ ] Full OTLP protobuf + exporter HTTP client productization.
 - [ ] Sampling CPU profiler / continuous profilers.
 
