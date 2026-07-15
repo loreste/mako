@@ -1,0 +1,14 @@
+// std/encoding/avro — binary Avro subset (long/bool/null/string/array[long])
+fn encode_long(v: int) -> string { return avro_encode_long(v) }
+fn decode_long(bin: string) -> int { return avro_decode_long(bin) }
+fn long_len(bin: string) -> int { return avro_long_len(bin) }
+fn encode_bool(v: int) -> string { return avro_encode_bool(v) }
+fn decode_bool(bin: string) -> int { return avro_decode_bool(bin) }
+fn encode_null() -> string { return avro_encode_null() }
+fn encode_string(s: string) -> string { return avro_encode_string(s) }
+fn decode_string(bin: string) -> string { return avro_decode_string(bin) }
+fn encode_array_long(a: []int) -> string { return avro_encode_array_long(a) }
+fn decode_array_long(bin: string) -> []int { return avro_decode_array_long(bin) }
+fn long_hex(v: int) -> string { return avro_long_hex(v) }
+fn to_hex(bin: string) -> string { return bytes_to_hex(bin) }
+fn from_hex(hex: string) -> string { return hex_to_bytes(hex) }

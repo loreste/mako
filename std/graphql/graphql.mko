@@ -1,0 +1,16 @@
+// std/graphql — request/response helpers + query parse seeds
+fn is_mutation(query: string) -> int { return graphql_is_mutation(query) }
+fn is_query(query: string) -> int { return graphql_is_query(query) }
+fn field(query: string) -> string { return graphql_field(query) }
+fn arg(query: string, name: string) -> string { return graphql_arg(query, name) }
+fn has_field(query: string, name: string) -> int { return graphql_has_field(query, name) }
+fn operation_name(query: string) -> string { return graphql_operation_name(query) }
+fn data(field: string, json: string) -> string { return graphql_data(field, json) }
+fn data2(f1: string, j1: string, f2: string, j2: string) -> string {
+    return graphql_data2(f1, j1, f2, j2)
+}
+fn error(message: string) -> string { return graphql_error(message) }
+fn request(query: string) -> string { return graphql_request(query) }
+fn request_vars(query: string, vars_json: string) -> string {
+    return graphql_request_vars(query, vars_json)
+}

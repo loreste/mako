@@ -114,6 +114,8 @@ const-fn depth (match/while/for/strings) · suite **165+** · [The Mako Book](bo
 | Product version 0.1.6 | Done — tree-wide version sync |
 | CBOR + MessagePack binary | Done — encode/decode subset · `std/encoding/{cbor,msgpack}` · `cbor_msgpack_test` |
 | List combinators (map/filter/fold style) | Done — int mono helpers · `cbor_msgpack_test` |
+| Avro binary + GraphQL/protobuf packages | Done — `std/encoding/{avro,protobuf}` · `std/graphql` · `avro_graphql_tz_test` |
+| Named timezone offsets | Done seed — fixed zones · `time_offset_named` / `format_offset` |
 | Installer UX (manifest + doctor + Windows) | Done seed — `install-manifest.json` · doctor fields · `install.ps1` |
 | Actor spawn_cap + interface `on T : I` sugar | Done seed — `actor_test` · `iface_on_iface_test` |
 | Error chain peel + tag helpers | Done seed — `error_unwrap` / `root` / `as_tag` / `has_tag` · `error_chain_test` |

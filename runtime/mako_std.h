@@ -2954,6 +2954,78 @@ static inline MakoString mako_graphql_request(MakoString query) {
     return (MakoString){d, (size_t)wrote};
 }
 
+static inline int64_t mako_graphql_is_query(MakoString query) {
+    size_t i = mako_gql_skip_ws(query, 0);
+    if (i >= query.len || !query.data) return 0;
+    /* bare `{` selection set counts as query */
+    if (query.data[i] == '{') return 1;
+    if (!mako_gql_is_ident_start(query.data[i])) return 0;
+    size_t end = mako_gql_skip_ident(query, i);
+    return mako_gql_ident_eq(query, i, end, mako_str_from_cstr("query")) ? 1 : 0;
+}
+
+static inline MakoString mako_graphql_operation_name(MakoString query) {
+    size_t i = mako_gql_skip_ws(query, 0);
+    if (i >= query.len || !query.data) return mako_str_from_cstr("");
+    if (!mako_gql_is_ident_start(query.data[i])) return mako_str_from_cstr("");
+    size_t end = mako_gql_skip_ident(query, i);
+    int is_op = mako_gql_ident_eq(query, i, end, mako_str_from_cstr("query"))
+        || mako_gql_ident_eq(query, i, end, mako_str_from_cstr("mutation"))
+        || mako_gql_ident_eq(query, i, end, mako_str_from_cstr("subscription"));
+    if (!is_op) return mako_str_from_cstr("");
+    i = mako_gql_skip_ws(query, end);
+    if (i >= query.len || !mako_gql_is_ident_start(query.data[i])) return mako_str_from_cstr("");
+    end = mako_gql_skip_ident(query, i);
+    return mako_str_slice(query, (int64_t)i, (int64_t)end);
+}
+
+static inline MakoString mako_graphql_request_vars(MakoString query, MakoString vars_json) {
+    MakoString eq = mako_json_escape(query);
+    const char *vj = (vars_json.data && vars_json.len) ? vars_json.data : "{}";
+    size_t vlen = (vars_json.data && vars_json.len) ? vars_json.len : 2;
+    size_t n = eq.len + vlen + 32;
+    char *d = (char *)malloc(n);
+    if (!d) mako_abort("graphql_request_vars OOM");
+    int wrote = snprintf(d, n, "{\"query\":\"%s\",\"variables\":%.*s}", eq.data, (int)vlen, vj);
+    if (wrote < 0) wrote = 0;
+    return (MakoString){d, (size_t)wrote};
+}
+
+static inline int64_t mako_graphql_has_field(MakoString query, MakoString name) {
+    if (!name.data || name.len == 0) return 0;
+    MakoString f = mako_graphql_field(query);
+    int64_t ok = (f.len == name.len && f.data && memcmp(f.data, name.data, name.len) == 0) ? 1 : 0;
+    /* also scan for name as identifier after `{` */
+    if (!ok && query.data) {
+        for (size_t i = 0; i + name.len <= query.len; i++) {
+            if (memcmp(query.data + i, name.data, name.len) != 0) continue;
+            int left_ok = (i == 0) || !mako_gql_is_ident_start(query.data[i - 1]);
+            size_t after = i + name.len;
+            int right_ok = (after >= query.len) || !mako_gql_is_ident_start(query.data[after]);
+            if (left_ok && right_ok) {
+                ok = 1;
+                break;
+            }
+        }
+    }
+    return ok;
+}
+
+static inline MakoString mako_graphql_data2(MakoString f1, MakoString j1, MakoString f2, MakoString j2) {
+    MakoString e1 = mako_json_escape(f1);
+    MakoString e2 = mako_json_escape(f2);
+    const char *p1 = j1.data && j1.len ? j1.data : "null";
+    const char *p2 = j2.data && j2.len ? j2.data : "null";
+    size_t n = e1.len + e2.len + j1.len + j2.len + 48;
+    char *d = (char *)malloc(n);
+    if (!d) mako_abort("graphql_data2 OOM");
+    int wrote = snprintf(d, n, "{\"data\":{\"%s\":%.*s,\"%s\":%.*s}}", e1.data,
+                         (int)(j1.data && j1.len ? j1.len : 4), p1, e2.data,
+                         (int)(j2.data && j2.len ? j2.len : 4), p2);
+    if (wrote < 0) wrote = 0;
+    return (MakoString){d, (size_t)wrote};
+}
+
 static inline MakoString mako_sse_event(MakoString event, MakoString data) {
     size_t newline_count = 0;
     for (size_t i = 0; i < data.len; i++) {
@@ -3995,22 +4067,122 @@ static inline int64_t mako_list_fold_mul_int(MakoIntArray a, int64_t init) {
     return s;
 }
 
-static inline MakoString mako_avro_long_hex(int64_t v) {
+/* ---- Avro binary (subset: null/bool/long/string/array[long]; zigzag long) ---- */
+static inline MakoString mako_avro_encode_long(int64_t v) {
     uint64_t zz = ((uint64_t)v << 1) ^ (uint64_t)(v >> 63);
-    char tmp[20];
+    char tmp[10];
     size_t n = 0;
-    do {
-        uint8_t b = (uint8_t)(zz & 0x7f);
+    while (zz >= 0x80) {
+        tmp[n++] = (char)((zz & 0x7f) | 0x80);
         zz >>= 7;
-        if (zz) b |= 0x80;
-        snprintf(tmp + n * 2, sizeof(tmp) - n * 2, "%02x", b);
-        n++;
-    } while (zz && n < 10);
-    char *d = (char *)malloc(n * 2 + 1);
-    if (!d) mako_abort("avro_long_hex: out of memory");
-    memcpy(d, tmp, n * 2);
-    d[n * 2] = 0;
-    return (MakoString){d, n * 2};
+    }
+    tmp[n++] = (char)zz;
+    char *d = (char *)malloc(n + 1);
+    if (!d) mako_abort("avro_encode_long OOM");
+    memcpy(d, tmp, n);
+    d[n] = 0;
+    return (MakoString){d, n};
+}
+static inline int64_t mako_avro_decode_long(MakoString s) {
+    if (!s.data || s.len == 0) return 0;
+    uint64_t result = 0;
+    int shift = 0;
+    for (size_t i = 0; i < s.len && i < 10; i++) {
+        unsigned char b = (unsigned char)s.data[i];
+        result |= (uint64_t)(b & 0x7f) << shift;
+        if ((b & 0x80) == 0) {
+            /* zigzag decode */
+            return (int64_t)((result >> 1) ^ (-(int64_t)(result & 1)));
+        }
+        shift += 7;
+    }
+    return 0;
+}
+static inline int64_t mako_avro_long_len(MakoString s) {
+    if (!s.data || s.len == 0) return -1;
+    for (size_t i = 0; i < s.len && i < 10; i++) {
+        if (((unsigned char)s.data[i] & 0x80) == 0) return (int64_t)(i + 1);
+    }
+    return -1;
+}
+static inline MakoString mako_avro_encode_bool(int64_t v) {
+    char *d = (char *)malloc(1);
+    if (!d) mako_abort("avro bool OOM");
+    d[0] = v ? 1 : 0;
+    return (MakoString){d, 1};
+}
+static inline int64_t mako_avro_decode_bool(MakoString s) {
+    if (!s.data || s.len == 0) return 0;
+    return s.data[0] ? 1 : 0;
+}
+static inline MakoString mako_avro_encode_null(void) {
+    /* Avro null is empty (union index often separate); seed = single 0 byte marker */
+    char *d = (char *)malloc(1);
+    if (!d) mako_abort("avro null OOM");
+    d[0] = 0;
+    return (MakoString){d, 1};
+}
+static inline MakoString mako_avro_encode_string(MakoString s) {
+    MakoString lenv = mako_avro_encode_long((int64_t)s.len);
+    MakoString out = mako_str_concat(lenv, s);
+    mako_str_free(lenv);
+    return out;
+}
+static inline MakoString mako_avro_decode_string(MakoString s) {
+    int64_t ll = mako_avro_long_len(s);
+    if (ll < 0) return mako_str_from_cstr("");
+    int64_t n = mako_avro_decode_long(s);
+    if (n < 0 || (int64_t)s.len < ll + n) return mako_str_from_cstr("");
+    char *d = (char *)malloc((size_t)n + 1);
+    if (!d) mako_abort("avro str OOM");
+    if (n) memcpy(d, s.data + ll, (size_t)n);
+    d[n] = 0;
+    return (MakoString){d, (size_t)n};
+}
+/* Array of long: block count (zigzag long) then items, then 0. */
+static inline MakoString mako_avro_encode_array_long(MakoIntArray a) {
+    MakoString cnt = mako_avro_encode_long((int64_t)a.len);
+    MakoString body = mako_str_from_cstr("");
+    for (size_t i = 0; i < a.len; i++) {
+        MakoString e = mako_avro_encode_long(a.data[i]);
+        MakoString n = mako_str_concat(body, e);
+        mako_str_free(body);
+        mako_str_free(e);
+        body = n;
+    }
+    MakoString zero = mako_avro_encode_long(0);
+    MakoString mid = mako_str_concat(cnt, body);
+    mako_str_free(cnt);
+    mako_str_free(body);
+    MakoString out = mako_str_concat(mid, zero);
+    mako_str_free(mid);
+    mako_str_free(zero);
+    return out;
+}
+static inline MakoIntArray mako_avro_decode_array_long(MakoString s) {
+    MakoIntArray out = mako_int_array_make(0, 8);
+    if (!s.data || s.len == 0) return out;
+    size_t off = 0;
+    MakoString rest = {(char *)(s.data + off), s.len - off};
+    int64_t ll = mako_avro_long_len(rest);
+    if (ll < 0) return out;
+    int64_t count = mako_avro_decode_long(rest);
+    off += (size_t)ll;
+    if (count < 0) count = -count; /* ignore block size form */
+    for (int64_t i = 0; i < count && off < s.len; i++) {
+        rest = (MakoString){(char *)(s.data + off), s.len - off};
+        ll = mako_avro_long_len(rest);
+        if (ll < 0) break;
+        out = mako_slice_append(out, mako_avro_decode_long(rest));
+        off += (size_t)ll;
+    }
+    return out;
+}
+static inline MakoString mako_avro_long_hex(int64_t v) {
+    MakoString raw = mako_avro_encode_long(v);
+    MakoString h = mako_bytes_to_hex(raw);
+    mako_str_free(raw);
+    return h;
 }
 
 /* ---- SHA-256 / HMAC ---- */

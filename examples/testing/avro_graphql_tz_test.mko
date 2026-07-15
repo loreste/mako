@@ -1,0 +1,65 @@
+// Avro binary, GraphQL extras, named timezone offsets.
+
+fn TestAvroLongRoundtrip() {
+    let cases = [0, 1, -1, 64, -64, 127, -128, 1000, -1000, 100000]
+    let mut i = 0
+    while i < len(cases) {
+        let v = cases[i]
+        let bin = avro_encode_long(v)
+        assert_eq(avro_decode_long(bin), v)
+        assert(avro_long_len(bin) > 0)
+        i = i + 1
+    }
+    assert_eq(avro_decode_bool(avro_encode_bool(1)), 1)
+    assert_eq(avro_decode_bool(avro_encode_bool(0)), 0)
+    let s = avro_encode_string("hello")
+    assert_eq_str(avro_decode_string(s), "hello")
+    let a = avro_encode_array_long([1, 2, -3])
+    let d = avro_decode_array_long(a)
+    assert_eq(len(d), 3)
+    assert_eq(d[0], 1)
+    assert_eq(d[2], -3)
+    assert(len(avro_long_hex(42)) >= 2)
+}
+
+fn TestGraphqlExtras() {
+    assert_eq(graphql_is_query("{ user { id } }"), 1)
+    assert_eq(graphql_is_query("query GetUser { user { id } }"), 1)
+    assert_eq(graphql_is_mutation("mutation Save { save }"), 1)
+    assert_eq(graphql_is_query("mutation Save { save }"), 0)
+    assert_eq_str(graphql_operation_name("query GetUser { user { id } }"), "GetUser")
+    assert_eq_str(graphql_operation_name("mutation SaveUser { save }"), "SaveUser")
+    assert_eq(graphql_has_field("{ health }", "health"), 1)
+    assert_eq(graphql_has_field("{ health }", "nope"), 0)
+    let req = graphql_request_vars("{ u }", "{\"id\":1}")
+    assert(str_contains(req, "variables"))
+    assert(str_contains(req, "id"))
+    let d2 = graphql_data2("a", "1", "b", "2")
+    assert(str_contains(d2, "\"a\":1"))
+    assert(str_contains(d2, "\"b\":2"))
+}
+
+fn TestTimezoneOffsets() {
+    assert_eq(time_offset_named("UTC"), 0)
+    assert_eq(time_offset_named("utc"), 0)
+    assert_eq(time_offset_named("EST"), -5 * 3600)
+    assert_eq(time_offset_named("PST"), -8 * 3600)
+    assert_eq(time_offset_named("JST"), 9 * 3600)
+    assert_eq(time_offset_named("IST"), 5 * 3600 + 30 * 60)
+    assert_eq(time_offset_named("NOPE"), -999999999)
+    let t = time_date(2020, 1, 2, 12, 0, 0, 0)
+    let est = time_offset_named("EST")
+    let fmt = time_format_offset(t, est)
+    assert(str_contains(fmt, "-05:00") || str_contains(fmt, "-5"))
+    let shifted = time_in_offset(t, est)
+    assert_eq(time_hour(shifted), 7) // 12 UTC → 7 EST
+}
+
+fn TestProtobufPackageSurface() {
+    let msg = pb_encode_simple("mako", 9)
+    assert_eq_str(pb_simple_name(msg), "mako")
+    assert_eq(pb_simple_id(msg), 9)
+    assert_eq(pb_zigzag_decode(pb_zigzag_encode(-5)), -5)
+    let e = pb_encode_varint(150)
+    assert_eq(pb_decode_varint(e), 150)
+}

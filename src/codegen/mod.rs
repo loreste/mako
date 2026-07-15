@@ -18568,6 +18568,115 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             self.line(&format!("MakoString {tmp} = mako_avro_long_hex({v});"));
                             return ("MakoString".into(), tmp);
                         }
+                        "avro_encode_long" | "avro_encode_bool" => {
+                            let (_, v) = self.emit_expr(&args[0]);
+                            let fname = format!("mako_{name}");
+                            let tmp = self.fresh("ave");
+                            self.line(&format!("MakoString {tmp} = {fname}({v});"));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "avro_encode_null" => {
+                            let tmp = self.fresh("avn");
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_avro_encode_null();"
+                            ));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "avro_encode_string" | "avro_decode_string" => {
+                            let (_, s) = self.emit_expr(&args[0]);
+                            let fname = format!("mako_{name}");
+                            let tmp = self.fresh("avs");
+                            self.line(&format!("MakoString {tmp} = {fname}({s});"));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "avro_decode_long" | "avro_long_len" | "avro_decode_bool" => {
+                            let (_, s) = self.emit_expr(&args[0]);
+                            let fname = format!("mako_{name}");
+                            return ("int64_t".into(), format!("{fname}({s})"));
+                        }
+                        "avro_encode_array_long" => {
+                            let (_, a) = self.emit_expr(&args[0]);
+                            let tmp = self.fresh("ava");
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_avro_encode_array_long({a});"
+                            ));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "avro_decode_array_long" => {
+                            let (_, s) = self.emit_expr(&args[0]);
+                            let tmp = self.fresh("avd");
+                            self.line(&format!(
+                                "MakoIntArray {tmp} = mako_avro_decode_array_long({s});"
+                            ));
+                            return ("MakoIntArray".into(), tmp);
+                        }
+                        "graphql_is_query" => {
+                            let (_, q) = self.emit_expr(&args[0]);
+                            return (
+                                "int64_t".into(),
+                                format!("mako_graphql_is_query({q})"),
+                            );
+                        }
+                        "graphql_operation_name" => {
+                            let (_, q) = self.emit_expr(&args[0]);
+                            let tmp = self.fresh("gon");
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_graphql_operation_name({q});"
+                            ));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "graphql_request_vars" => {
+                            let (_, q) = self.emit_expr(&args[0]);
+                            let (_, v) = self.emit_expr(&args[1]);
+                            let tmp = self.fresh("grv");
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_graphql_request_vars({q}, {v});"
+                            ));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "graphql_has_field" => {
+                            let (_, q) = self.emit_expr(&args[0]);
+                            let (_, n) = self.emit_expr(&args[1]);
+                            return (
+                                "int64_t".into(),
+                                format!("mako_graphql_has_field({q}, {n})"),
+                            );
+                        }
+                        "graphql_data2" => {
+                            let (_, a) = self.emit_expr(&args[0]);
+                            let (_, b) = self.emit_expr(&args[1]);
+                            let (_, c) = self.emit_expr(&args[2]);
+                            let (_, d) = self.emit_expr(&args[3]);
+                            let tmp = self.fresh("gd2");
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_graphql_data2({a}, {b}, {c}, {d});"
+                            ));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "time_offset_named" => {
+                            let (_, n) = self.emit_expr(&args[0]);
+                            return (
+                                "int64_t".into(),
+                                format!("mako_time_offset_named({n})"),
+                            );
+                        }
+                        "time_format_offset" => {
+                            let (_, t) = self.emit_expr(&args[0]);
+                            let (_, o) = self.emit_expr(&args[1]);
+                            let tmp = self.fresh("tfo");
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_time_format_offset({t}, {o});"
+                            ));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "time_in_offset" => {
+                            let (_, t) = self.emit_expr(&args[0]);
+                            let (_, o) = self.emit_expr(&args[1]);
+                            return (
+                                "int64_t".into(),
+                                format!("mako_time_in_offset({t}, {o})"),
+                            );
+                        }
                         "bytes_to_hex" | "hex_to_bytes" | "msgpack_encode_string"
                         | "msgpack_decode_string" | "cbor_encode_string" | "cbor_decode_string" => {
                             let (_, s) = self.emit_expr(&args[0]);

@@ -411,6 +411,7 @@ Percentages are weighted; update when a task flips.
 - [x] YAML + TOML encoding packages (`yaml_toml_test`).
 - [x] Product version **0.1.6**.
 - [x] CBOR + MessagePack binary subset · list combinators (`cbor_msgpack_test`).
+- [x] Avro binary · GraphQL/protobuf packages · named TZ offsets (`avro_graphql_tz_test`).
 - [x] Hot-reload unwatch + count (`hot_reload_unwatch` / `hot_reload_watch_count`).
 - [x] Client prediction service seed (`predict_new` / `input` / `reconcile` / `state` / `tick`).
 - [x] Live dylib hot-reload seed (`hot_reload_plugin_watch` / `poll` / `call` / `close`).

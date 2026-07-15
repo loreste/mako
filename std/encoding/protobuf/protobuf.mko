@@ -1,0 +1,32 @@
+// std/encoding/protobuf — wire codec helpers (varint/key/bytes/simple message)
+fn encode_varint(v: int) -> string { return pb_encode_varint(v) }
+fn decode_varint(s: string) -> int { return pb_decode_varint(s) }
+fn varint_len(s: string) -> int { return pb_varint_len(s) }
+fn encode_key(field: int, wire: int) -> string { return pb_encode_key(field, wire) }
+fn key_field(s: string) -> int { return pb_key_field(s) }
+fn key_wire(s: string) -> int { return pb_key_wire(s) }
+fn zigzag_encode(n: int) -> int { return pb_zigzag_encode(n) }
+fn zigzag_decode(n: int) -> int { return pb_zigzag_decode(n) }
+fn encode_sint(n: int) -> string { return pb_encode_sint(n) }
+fn decode_sint(s: string) -> int { return pb_decode_sint(s) }
+fn encode_bytes(payload: string) -> string { return pb_encode_bytes(payload) }
+fn bytes_len(s: string) -> int { return pb_bytes_len(s) }
+fn encode_field_varint(field: int, value: int) -> string {
+    return pb_encode_field_varint(field, value)
+}
+fn encode_simple(name: string, id: int) -> string { return pb_encode_simple(name, id) }
+fn simple_name(msg: string) -> string { return pb_simple_name(msg) }
+fn simple_id(msg: string) -> int { return pb_simple_id(msg) }
+fn encode_nested(name: string, id: int, inner_name: string, inner_id: int) -> string {
+    return pb_encode_nested(name, id, inner_name, inner_id)
+}
+fn nested_inner(msg: string) -> string { return pb_nested_inner(msg) }
+fn encode_repeated_varint(a: int, b: int, c: int) -> string {
+    return pb_encode_repeated_varint(a, b, c)
+}
+fn repeated_count(msg: string, field: int) -> int { return pb_repeated_count(msg, field) }
+fn repeated_at(msg: string, field: int, idx: int) -> int {
+    return pb_repeated_at(msg, field, idx)
+}
+fn to_hex(bin: string) -> string { return bytes_to_hex(bin) }
+fn from_hex(hex: string) -> string { return hex_to_bytes(hex) }

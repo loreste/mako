@@ -1222,6 +1222,62 @@ static inline int64_t mako_duration_days(int64_t n) { return n * 86400 * 1000; }
 static inline int64_t mako_duration_to_seconds(int64_t ms) { return ms / 1000; }
 static inline int64_t mako_duration_to_minutes(int64_t ms) { return ms / 60000; }
 static inline int64_t mako_duration_to_hours(int64_t ms) { return ms / 3600000; }
+/* Named fixed offsets (not full IANA TZDB). Returns seconds east of UTC, or
+ * INT64_MIN-ish sentinel: unknown → -999999999. */
+static inline int64_t mako_time_offset_named(MakoString name) {
+    if (!name.data || name.len == 0) return -999999999;
+    /* normalize uppercase compare */
+    char buf[16];
+    size_t n = name.len < 15 ? name.len : 15;
+    for (size_t i = 0; i < n; i++) {
+        char c = name.data[i];
+        if (c >= 'a' && c <= 'z') c = (char)(c - 'a' + 'A');
+        buf[i] = c;
+    }
+    buf[n] = 0;
+    if (strcmp(buf, "UTC") == 0 || strcmp(buf, "GMT") == 0 || strcmp(buf, "Z") == 0) return 0;
+    if (strcmp(buf, "EST") == 0) return -5 * 3600;
+    if (strcmp(buf, "EDT") == 0) return -4 * 3600;
+    if (strcmp(buf, "CST") == 0) return -6 * 3600;
+    if (strcmp(buf, "CDT") == 0) return -5 * 3600;
+    if (strcmp(buf, "MST") == 0) return -7 * 3600;
+    if (strcmp(buf, "MDT") == 0) return -6 * 3600;
+    if (strcmp(buf, "PST") == 0) return -8 * 3600;
+    if (strcmp(buf, "PDT") == 0) return -7 * 3600;
+    if (strcmp(buf, "CET") == 0) return 1 * 3600;
+    if (strcmp(buf, "CEST") == 0) return 2 * 3600;
+    if (strcmp(buf, "JST") == 0) return 9 * 3600;
+    if (strcmp(buf, "KST") == 0) return 9 * 3600;
+    if (strcmp(buf, "IST") == 0) return 5 * 3600 + 30 * 60; /* India */
+    if (strcmp(buf, "AEST") == 0) return 10 * 3600;
+    if (strcmp(buf, "AEDT") == 0) return 11 * 3600;
+    return -999999999;
+}
+/* Format RFC3339-like with numeric offset: 2020-01-02T03:04:05.000+05:30 */
+static inline MakoString mako_time_format_offset(int64_t unix_ms, int64_t offset_sec) {
+    int64_t local_ms = unix_ms + offset_sec * 1000;
+    struct tm tm;
+    int ms = 0;
+    mako_time_gm(local_ms, &tm, &ms);
+    int off = (int)offset_sec;
+    char sign = '+';
+    if (off < 0) {
+        sign = '-';
+        off = -off;
+    }
+    int oh = off / 3600;
+    int om = (off % 3600) / 60;
+    char buf[64];
+    int n = snprintf(buf, sizeof(buf), "%04d-%02d-%02dT%02d:%02d:%02d.%03d%c%02d:%02d",
+                     tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec,
+                     ms, sign, oh, om);
+    if (n < 0) n = 0;
+    return mako_str_from_cstr(buf);
+}
+static inline int64_t mako_time_in_offset(int64_t unix_ms, int64_t offset_sec) {
+    return unix_ms + offset_sec * 1000;
+}
+
 static inline MakoString mako_duration_string(int64_t ms) {
     int64_t sign = ms < 0 ? -1 : 1;
     int64_t v = ms < 0 ? -ms : ms;

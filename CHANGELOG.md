@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Avro · GraphQL package · protobuf package · TZ offsets
+
+- Avro binary: long/bool/null/string/array[long] encode·decode (`std/encoding/avro`).
+- GraphQL: is_query, operation_name, request_vars, has_field, data2 (`std/graphql`).
+- Protobuf package wrappers over wire helpers (`std/encoding/protobuf`).
+- Named fixed offsets (`time_offset_named` UTC/EST/PST/JST/…) + `time_format_offset`.
+- Tests: `avro_graphql_tz_test`.
+
 ### CBOR + MessagePack + list combinators
 
 - MessagePack encode/decode: int/bool/nil/string/`[]int` (binary + hex helpers).

@@ -4604,6 +4604,87 @@ impl TypeChecker {
             "avro_long_hex".into(),
             Type::Fn(vec![Type::Int], Box::new(Type::String)),
         );
+        fns.insert(
+            "avro_encode_long".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::String)),
+        );
+        fns.insert(
+            "avro_decode_long".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "avro_long_len".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "avro_encode_bool".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::String)),
+        );
+        fns.insert(
+            "avro_decode_bool".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "avro_encode_null".into(),
+            Type::Fn(vec![], Box::new(Type::String)),
+        );
+        fns.insert(
+            "avro_encode_string".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::String)),
+        );
+        fns.insert(
+            "avro_decode_string".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::String)),
+        );
+        fns.insert(
+            "avro_encode_array_long".into(),
+            Type::Fn(
+                vec![Type::Array(Box::new(Type::Int))],
+                Box::new(Type::String),
+            ),
+        );
+        fns.insert(
+            "avro_decode_array_long".into(),
+            Type::Fn(
+                vec![Type::String],
+                Box::new(Type::Array(Box::new(Type::Int))),
+            ),
+        );
+        fns.insert(
+            "graphql_is_query".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "graphql_operation_name".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::String)),
+        );
+        fns.insert(
+            "graphql_request_vars".into(),
+            Type::Fn(vec![Type::String, Type::String], Box::new(Type::String)),
+        );
+        fns.insert(
+            "graphql_has_field".into(),
+            Type::Fn(vec![Type::String, Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "graphql_data2".into(),
+            Type::Fn(
+                vec![Type::String, Type::String, Type::String, Type::String],
+                Box::new(Type::String),
+            ),
+        );
+        fns.insert(
+            "time_offset_named".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "time_format_offset".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::String)),
+        );
+        fns.insert(
+            "time_in_offset".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int)),
+        );
         // Binary hex helpers
         fns.insert(
             "bytes_to_hex".into(),

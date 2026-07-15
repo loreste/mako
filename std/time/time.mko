@@ -42,6 +42,11 @@ fn until(t: int) -> int { return time_until_ms(t) }
 fn trunc_day(ms: int) -> int { return time_trunc_day(ms) }
 fn trunc_hour(ms: int) -> int { return time_trunc_hour(ms) }
 fn local_offset_sec() -> int { return time_local_offset_sec() }
+fn offset_named(name: string) -> int { return time_offset_named(name) }
+fn format_offset(ms: int, offset_sec: int) -> string {
+    return time_format_offset(ms, offset_sec)
+}
+fn in_offset(ms: int, offset_sec: int) -> int { return time_in_offset(ms, offset_sec) }
 fn parse_rfc3339(s: string) -> int { return time_parse_rfc3339(s) }
 fn parse_date(s: string) -> int { return time_parse_date(s) }
 
