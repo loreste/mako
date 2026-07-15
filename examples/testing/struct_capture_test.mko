@@ -1,0 +1,43 @@
+// Struct captures in closures (by value; string fields cloned).
+
+struct Pt {
+    x: int
+    y: int
+}
+
+struct Named {
+    name: string
+    score: int
+}
+
+fn apply(f: fn(int) -> int, n: int) -> int {
+    return f(n)
+}
+
+fn apply_s(f: fn(string) -> int, s: string) -> int {
+    return f(s)
+}
+
+fn TestStructCaptureFields() {
+    let p = Pt { x: 3, y: 4 }
+    assert_eq(apply(|n| n + p.x + p.y, 1), 8)
+}
+
+fn TestStructCaptureBind() {
+    let p = Pt { x: 10, y: 20 }
+    let f: fn(int) -> int = |n| n + p.x
+    assert_eq(f(5), 15)
+    assert_eq(apply(f, 1), 11)
+}
+
+fn TestStructCaptureWithString() {
+    let item = Named { name: "web", score: 7 }
+    assert_eq(apply(|n| n + item.score + len(item.name), 1), 11)
+    assert_eq(apply_s(|s| len(s) + len(item.name) + item.score, "!!"), 12)
+}
+
+fn TestStructCaptureMulti() {
+    let a = Pt { x: 1, y: 2 }
+    let b = Pt { x: 3, y: 4 }
+    assert_eq(apply(|n| n + a.x + b.y, 0), 5)
+}

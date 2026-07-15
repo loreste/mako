@@ -14652,7 +14652,9 @@ fn is_kick_sendable(t: &Type) -> bool {
         Type::Array(_) | Type::Map(_, _) | Type::Tuple(_) | Type::Option(_) | Type::Result(_, _) => {
             false
         }
-        Type::Fn(_, _) | Type::Interface { .. } | Type::Enum { .. } => false,
+        // First-class fn values (MakoFn fat pointer) may cross kick — env is heap.
+        Type::Fn(_, _) => true,
+        Type::Interface { .. } | Type::Enum { .. } => false,
         _ => false,
     }
 }

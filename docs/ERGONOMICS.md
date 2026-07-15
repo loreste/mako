@@ -481,11 +481,21 @@ fn main() {
 ```
 
 Also works with `string` params (`fn(string) -> int`, multi-arg `fn(int, string) -> int`).
-**Captures:** local `int` / `bool` / `float` by value; `string` by owned clone.
-Residual: struct envs, mut borrows, kicking `fn` across crew.
+**Captures:** local `int` / `bool` / `float` by value; `string` by owned clone;
+**structs** by value (string fields cloned). Kick `fn` values across crew
+(`MakoFn` is Send). Residual: mut borrows, env free-on-drop.
 
-Tests: `first_class_fn_test.mko`, `lang_ergonomics_test.mko`, `capturing_closure_test.mko`,
-`fstring_fmt_test.mko`.
+```mko
+let p = Pt { x: 3, y: 4 }
+crew c {
+    let f: fn(int) -> int = |n| n + p.x + p.y
+    let j = c.kick(apply_on_worker(f, 1))
+    print(j.join())  // 8
+}
+```
+
+Tests: `first_class_fn_test`, `capturing_closure_test`, `struct_capture_test`,
+`kick_fn_test`, `fstring_fmt_test`, `lang_ergonomics_test`.
 
 ### `f"…"` string interpolation
 

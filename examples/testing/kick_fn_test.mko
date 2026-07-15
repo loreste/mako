@@ -1,0 +1,46 @@
+// Kick first-class fn values (MakoFn) across crew tasks.
+
+struct Pt {
+    x: int
+    y: int
+}
+
+fn apply_on_worker(f: fn(int) -> int, x: int) -> int {
+    return f(x)
+}
+
+fn double(n: int) -> int {
+    return n * 2
+}
+
+fn TestKickNamedFn() {
+    crew c {
+        let j = c.kick(apply_on_worker(double, 21))
+        assert_eq(j.join(), 42)
+    }
+}
+
+fn TestKickBareLambda() {
+    crew c {
+        let j = c.kick(apply_on_worker(|x| x + 1, 41))
+        assert_eq(j.join(), 42)
+    }
+}
+
+fn TestKickCapturingFn() {
+    let n = 10
+    let f: fn(int) -> int = |x| x + n
+    crew c {
+        let j = c.kick(apply_on_worker(f, 5))
+        assert_eq(j.join(), 15)
+    }
+}
+
+fn TestKickCapturingStruct() {
+    let p = Pt { x: 3, y: 4 }
+    let f: fn(int) -> int = |n| n + p.x + p.y
+    crew c {
+        let j = c.kick(apply_on_worker(f, 1))
+        assert_eq(j.join(), 8)
+    }
+}

@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Language — struct captures + kick fn values
+
+- **Struct captures:** closures may close over local structs by value; string
+  fields are cloned into the env. Field access `p.x` rewrites to `e->p.x`.
+- **Kick `fn`:** `Type::Fn` is Send; `MakoFn` args are heap-boxed across spawn.
+  Named, bare lambda, and capturing closures work as kick args.
+- Tests: `struct_capture_test`, `kick_fn_test`.
+
 ### Language — f-string format specs + string captures
 
 - **Format specs in `f"…"`:** `{n:02}` / `{n:04d}` zero-pad, `{n:x}`/`{n:X}`

@@ -41,7 +41,7 @@ Canonical surface: [IDENTITY.md](IDENTITY.md). Compat duals only: [COMPAT.md](CO
 | Manual `str_builder` for every log/JSON fragment | `f"…{x}"` (single-buffer) + `fmt_sprintf*` for format verbs | **Strong** |
 | Nested `if str_eq(key, …)` config trees | `match key { "…" => …, _ => {} }` · `switch` on ints | **Strong** |
 | Bit-packing multi-field worker results into one `int` | POD `struct` on `chan[Struct]` or as kick arg | **Strong** for POD · **Partial** for enum fields on kick |
-| Duplicated pipelines for want of callbacks | first-class fns + POD capturing closures seed | **Strong** (string/struct capture residual) |
+| Duplicated pipelines for want of callbacks | first-class fns + capturing closures + kick | **Strong** |
 
 **Product rule:** every major language change should close a row above, or be
 rejected. “Looks like Go/Rust” is never a sufficient reason.
@@ -190,7 +190,7 @@ Tracked also in [STATUS.md](STATUS.md) / [ROADMAP.md](ROADMAP.md). Closing these
 | R6 | Identity lint | `mako lint --identity` flags dual forms as style |
 | R7 | Compile-time discipline at scale | Keep frontend linear; demand-driven monomorphs done; avoid trait-solver cliffs |
 | R8 | Field defaults on `struct` def | **Done** — `field: int = 0` + update `..base` |
-| R9 | General first-class functions | **Done seed** (named + lambda + POD/string captures); struct env residual |
+| R9 | General first-class functions | **Done seed** (named + lambda + POD/string/struct captures; kick Send) |
 | R10 | True string interpolation | **Done** — `f"…{x}"` (no format specs yet) |
 | R11 | Enum fields on kick-POD + `chan[Enum]` | **Done** for POD enums — `struct_update_test` |
 | R12 | Tuple channels | **Done** — `chan[(int, string)]` |

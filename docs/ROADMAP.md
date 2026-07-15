@@ -113,16 +113,16 @@ Metrics/prom + span-lite JSON are in; **depth seeds landed** (2026-07-14).
 | Struct update (spread) | `S { field: v, ..base }` / `S { ...base, field: v }` | `struct_update_test` |
 | Enum on kick-POD / channels | POD enum fields; `chan[Enum]` | `struct_update_test` |
 | First-class fn values | `fn apply(f: fn(int)->int, …)` · named + lambda | `lang_ergonomics_test` · `first_class_fn_test` |
-| Capturing closures (POD + string env seed) | `|x| x + n` · string by clone | `capturing_closure_test` |
+| Capturing closures (POD + string + struct env) | int/bool/float · string clone · struct copy | `capturing_closure_test` · `struct_capture_test` |
+| Kick `fn` values across crew | `kick(apply(f, x))` with bare/capturing `MakoFn` | `kick_fn_test` |
 | `f"…{x}"` + format specs | `{n:02}` `{n:x}` `{f:.2f}` `{s:4}` | `lang_ergonomics_test` · `fstring_fmt_test` |
 | Struct field defaults | `field: int = 0` on `struct` | `lang_ergonomics_test` |
 | Tuple channels | `chan[(int, string)]` | `lang_ergonomics_test` |
 
 **Still open (true residuals):**
 
-1. Capturing **struct / mut ref** envs · lifetime / move semantics depth  
+1. Mut-ref captures · move/lifetime depth · env free on drop  
 2. Full printf verb parity in f-strings (use `fmt_sprintf*` for exotic cases)  
-3. Kicking `Type::Fn` across crew (Send rejects)  
 
 ### Language / stdlib residuals (lower priority)
 

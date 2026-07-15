@@ -8668,6 +8668,8 @@ impl Codegen {
                 .or_else(|| self.locals.get(&mangle(&n)))
                 .cloned();
             let Some(ty) = ty else { continue };
+            let is_struct = self.structs.contains_key(&ty)
+                || self.structs.values().any(|s| s.c_name == ty);
             let ok = matches!(
                 ty.as_str(),
                 "int64_t"
@@ -8678,7 +8680,7 @@ impl Codegen {
                     | "double"
                     | "_Bool"
                     | "MakoString"
-            );
+            ) || is_struct;
             if !ok {
                 continue;
             }
@@ -8886,6 +8888,24 @@ impl Codegen {
                     self.line(&format!(
                         "{env_tmp}->{field} = mako_str_clone({val});"
                     ));
+                } else if self.structs.contains_key(cty)
+                    || self.structs.values().any(|s| s.c_name == *cty)
+                {
+                    // Struct by value; clone string fields for ownership.
+                    self.line(&format!("{env_tmp}->{field} = {val};"));
+                    let fields = self
+                        .structs
+                        .get(cty)
+                        .or_else(|| self.structs.values().find(|s| s.c_name == *cty))
+                        .map(|s| s.fields.clone())
+                        .unwrap_or_default();
+                    for (fname, ft) in &fields {
+                        if ft == "MakoString" {
+                            self.line(&format!(
+                                "{env_tmp}->{field}.{fname} = mako_str_clone({val}.{fname});"
+                            ));
+                        }
+                    }
                 } else {
                     self.line(&format!("{env_tmp}->{field} = {val};"));
                 }
@@ -8963,6 +8983,10 @@ impl Codegen {
                     UnaryOp::Not => format!("(!{e})"),
                     UnaryOp::BitNot => format!("(~{e})"),
                 }
+            }
+            Expr::Field { base, field } => {
+                let b = self.expr_as_pure_c_multi_caps(base, pnames, caps);
+                format!("{b}.{field}")
             }
             Expr::Int(n) => n.to_string(),
             Expr::Bool(b) => if *b { "true" } else { "false" }.into(),
@@ -25825,6 +25849,16 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                                         self.line(&format!(
                                             "{arg_name}[{i}] = (intptr_t){boxn};"
                                         ));
+                                    } else if aty == "MakoFn" || pty == "MakoFn" {
+                                        // Fat pointer: heap-box the MakoFn (shares env with creator).
+                                        let boxn = self.fresh("fnbox");
+                                        self.line(&format!(
+                                            "MakoFn *{boxn} = (MakoFn*)malloc(sizeof(MakoFn));"
+                                        ));
+                                        self.line(&format!("*{boxn} = {v};"));
+                                        self.line(&format!(
+                                            "{arg_name}[{i}] = (intptr_t){boxn};"
+                                        ));
                                     } else if aty == "double" || pty == "double" {
                                         self.line(&format!(
                                             "{arg_name}[{i}] = (intptr_t)mako_f64_to_bits({v});"
@@ -27641,6 +27675,11 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                     "MakoString {local} = *(MakoString*)a[{i}]; free((void*)a[{i}]);\n"
                 ));
                 // callee owns the clone for the call duration; free buffer after if needed
+                call_args.push(local);
+            } else if ty == "MakoFn" {
+                unpack.push_str(&format!(
+                    "MakoFn {local} = *(MakoFn*)a[{i}]; free((void*)a[{i}]);\n"
+                ));
                 call_args.push(local);
             } else if ty == "double" {
                 unpack.push_str(&format!(
