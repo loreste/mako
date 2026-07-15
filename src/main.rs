@@ -246,11 +246,26 @@ enum Commands {
         #[arg(long, default_value_t = false)]
         json: bool,
     },
-    /// DAP adapter seed: handle one JSON request from --request or stdin, print response
+    /// DAP adapter seed: one-shot JSON or Content-Length stdio loop
     Dap {
-        /// Single DAP request JSON (if omitted, read one line from stdin)
+        /// Single DAP request JSON (if omitted without --stdio, read one line from stdin)
         #[arg(long)]
         request: Option<String>,
+        /// Multi-message DAP over stdin/stdout (Content-Length framing; exit on disconnect)
+        #[arg(long, default_value_t = false)]
+        stdio: bool,
+        /// Max messages in --stdio mode (0 = unlimited until disconnect)
+        #[arg(long, default_value_t = 0)]
+        max_messages: u64,
+    },
+    /// Serve profile endpoints until max requests (continuous pprof seed)
+    ProfileServe {
+        /// TCP port (binds 127.0.0.1)
+        #[arg(long, default_value_t = 9470)]
+        port: u16,
+        /// Exit after this many HTTP requests (0 = run until error; tests use small N)
+        #[arg(long, default_value_t = 0)]
+        max_requests: u64,
     },
     /// Build and run one program with compile/run timing and optional JSON profile
     Profile {
@@ -604,7 +619,73 @@ fn print_version(verbose: bool) {
     }
 }
 
-/// Thin DAP seed: one request → one response JSON on stdout (not a full debug adapter).
+fn dap_extract_command(req: &str) -> String {
+    if let Some(i) = req.find("\"command\"") {
+        let rest = &req[i + 9..];
+        if let Some(q1) = rest.find('"') {
+            let rest = &rest[q1 + 1..];
+            if let Some(q2) = rest.find('"') {
+                return rest[..q2].to_string();
+            }
+        }
+    }
+    String::new()
+}
+
+fn dap_extract_seq(req: &str) -> i64 {
+    if let Some(i) = req.find("\"seq\"") {
+        let rest = &req[i + 5..];
+        return rest
+            .chars()
+            .skip_while(|c| !c.is_ascii_digit())
+            .take_while(|c| c.is_ascii_digit())
+            .collect::<String>()
+            .parse::<i64>()
+            .unwrap_or(0);
+    }
+    0
+}
+
+fn dap_respond_json(req: &str) -> (String, bool) {
+    let cmd = dap_extract_command(req);
+    let seq = dap_extract_seq(req);
+    let disconnect = cmd == "disconnect";
+    let out = match cmd.as_str() {
+        "initialize" => format!(
+            r#"{{"seq":1,"type":"response","request_seq":{seq},"success":true,"command":"initialize","body":{{"supportsConfigurationDoneRequest":true,"supportsEvaluateForHovers":true,"makoSeed":true,"schema":"mako.dap.v1"}}}}"#
+        ),
+        "threads" => format!(
+            r#"{{"seq":3,"type":"response","request_seq":{seq},"success":true,"command":"threads","body":{{"threads":[{{"id":1,"name":"main"}}]}}}}"#
+        ),
+        "disconnect" | "configurationDone" => format!(
+            r#"{{"seq":9,"type":"response","request_seq":{seq},"success":true,"command":"{cmd}"}}"#
+        ),
+        "stackTrace" => format!(
+            r#"{{"seq":11,"type":"response","request_seq":{seq},"success":true,"command":"stackTrace","body":{{"stackFrames":[{{"id":1,"name":"main","line":1,"column":1,"source":{{"name":"main.mko"}}}}],"totalFrames":1}}}}"#
+        ),
+        "scopes" => format!(
+            r#"{{"seq":12,"type":"response","request_seq":{seq},"success":true,"command":"scopes","body":{{"scopes":[{{"name":"Locals","variablesReference":1,"expensive":false}}]}}}}"#
+        ),
+        "variables" => format!(
+            r#"{{"seq":13,"type":"response","request_seq":{seq},"success":true,"command":"variables","body":{{"variables":[]}}}}"#
+        ),
+        "continue" => format!(
+            r#"{{"seq":14,"type":"response","request_seq":{seq},"success":true,"command":"continue","body":{{"allThreadsContinued":true}}}}"#
+        ),
+        "next" | "stepIn" | "stepOut" => format!(
+            r#"{{"seq":15,"type":"response","request_seq":{seq},"success":true,"command":"{cmd}"}}"#
+        ),
+        "setBreakpoints" => format!(
+            r#"{{"seq":16,"type":"response","request_seq":{seq},"success":true,"command":"setBreakpoints","body":{{"breakpoints":[]}}}}"#
+        ),
+        other => format!(
+            r#"{{"seq":99,"type":"response","request_seq":{seq},"success":false,"command":"{other}","message":"unsupported (mako dap seed)"}}"#
+        ),
+    };
+    (out, disconnect)
+}
+
+/// Thin DAP seed: one request → one response JSON on stdout.
 fn cmd_dap_seed(request: Option<&str>) -> Result<(), ()> {
     let req = if let Some(r) = request {
         r.to_string()
@@ -620,55 +701,124 @@ fn cmd_dap_seed(request: Option<&str>) -> Result<(), ()> {
         emit_plain_error("dap: empty request (pass --request or pipe JSON on stdin)");
         return Err(());
     }
-    // Seed responses mirror runtime mako_dap_handle_request (stdlib not linked here).
-    let cmd = {
-        if let Some(i) = req.find("\"command\"") {
-            let rest = &req[i + 9..];
-            if let Some(q1) = rest.find('"') {
-                let rest = &rest[q1 + 1..];
-                if let Some(q2) = rest.find('"') {
-                    rest[..q2].to_string()
-                } else {
-                    String::new()
-                }
-            } else {
-                String::new()
-            }
-        } else {
-            String::new()
-        }
-    };
-    let seq = {
-        if let Some(i) = req.find("\"seq\"") {
-            let rest = &req[i + 5..];
-            rest.chars()
-                .skip_while(|c| !c.is_ascii_digit())
-                .take_while(|c| c.is_ascii_digit())
-                .collect::<String>()
-                .parse::<i64>()
-                .unwrap_or(0)
-        } else {
-            0
-        }
-    };
-    let out = match cmd.as_str() {
-        "initialize" => format!(
-            r#"{{"seq":1,"type":"response","request_seq":{seq},"success":true,"command":"initialize","body":{{"supportsConfigurationDoneRequest":true,"makoSeed":true,"schema":"mako.dap.v1"}}}}"#
-        ),
-        "threads" => format!(
-            r#"{{"seq":3,"type":"response","request_seq":{seq},"success":true,"command":"threads","body":{{"threads":[{{"id":1,"name":"main"}}]}}}}"#
-        ),
-        "disconnect" | "configurationDone" => format!(
-            r#"{{"seq":9,"type":"response","request_seq":{seq},"success":true,"command":"{cmd}"}}"#
-        ),
-        "stackTrace" => format!(
-            r#"{{"seq":11,"type":"response","request_seq":{seq},"success":true,"command":"stackTrace","body":{{"stackFrames":[],"totalFrames":0}}}}"#
-        ),
-        other => format!(
-            r#"{{"seq":99,"type":"response","request_seq":{seq},"success":false,"command":"{other}","message":"unsupported (mako dap seed)"}}"#
-        ),
-    };
+    let (out, _) = dap_respond_json(&req);
     println!("{out}");
+    Ok(())
+}
+
+/// Multi-message DAP over stdio with Content-Length framing (VS Code-style).
+fn cmd_dap_stdio(max_messages: u64) -> Result<(), ()> {
+    use std::io::{BufRead, BufReader, Read, Write};
+    let stdin = std::io::stdin();
+    let mut reader = BufReader::new(stdin.lock());
+    let mut stdout = std::io::stdout();
+    let mut n: u64 = 0;
+    loop {
+        if max_messages > 0 && n >= max_messages {
+            break;
+        }
+        // Headers until blank line
+        let mut content_len: Option<usize> = None;
+        loop {
+            let mut line = String::new();
+            let r = reader
+                .read_line(&mut line)
+                .map_err(|e| emit_plain_error(&format!("dap stdio: {e}")))?;
+            if r == 0 {
+                return Ok(()); // EOF
+            }
+            let t = line.trim_end_matches(['\r', '\n']);
+            if t.is_empty() {
+                break;
+            }
+            if let Some(rest) = t
+                .strip_prefix("Content-Length:")
+                .or_else(|| t.strip_prefix("content-length:"))
+            {
+                content_len = rest.trim().parse().ok();
+            }
+        }
+        let len = content_len.unwrap_or(0);
+        if len == 0 {
+            continue;
+        }
+        let mut body = vec![0u8; len];
+        reader
+            .read_exact(&mut body)
+            .map_err(|e| emit_plain_error(&format!("dap stdio body: {e}")))?;
+        let req = String::from_utf8_lossy(&body);
+        let (resp, disconnect) = dap_respond_json(req.trim());
+        let header = format!("Content-Length: {}\r\n\r\n", resp.len());
+        stdout
+            .write_all(header.as_bytes())
+            .and_then(|_| stdout.write_all(resp.as_bytes()))
+            .and_then(|_| stdout.flush())
+            .map_err(|e| emit_plain_error(&format!("dap stdio write: {e}")))?;
+        n += 1;
+        if disconnect {
+            break;
+        }
+    }
+    Ok(())
+}
+
+/// Continuous-ish profile HTTP seed on 127.0.0.1:port (exits after max_requests if > 0).
+fn cmd_profile_serve(port: u16, max_requests: u64) -> Result<(), ()> {
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    let addr = format!("127.0.0.1:{port}");
+    let listener = TcpListener::bind(&addr).map_err(|e| {
+        emit_plain_error(&format!("profile-serve: bind {addr}: {e}"));
+    })?;
+    eprintln!("mako profile-serve: http://{addr}/debug/pprof/text (and /json, /debug/profile)");
+    let mut served: u64 = 0;
+    for stream in listener.incoming() {
+        let mut stream = match stream {
+            Ok(s) => s,
+            Err(_) => continue,
+        };
+        let mut buf = [0u8; 4096];
+        let n = stream.read(&mut buf).unwrap_or(0);
+        let req = String::from_utf8_lossy(&buf[..n]);
+        let path = req
+            .lines()
+            .next()
+            .and_then(|l| l.split_whitespace().nth(1))
+            .unwrap_or("/");
+        let body: String = if path.starts_with("/debug/pprof/text") {
+            format!(
+                "# mako.profile_pprof_text.v1 samples=0\n(no in-process samples — CLI seed)\n"
+            )
+        } else if path.starts_with("/debug/pprof/json") {
+            r#"{"schema":"mako.profile_samples.v1","count":0,"samples":[],"note":"cli seed"}"#
+                .into()
+        } else if path.starts_with("/debug/profile") {
+            r#"{"schema":"mako.profile_snapshot.v1","note":"cli seed"}"#.into()
+        } else if path == "/" || path == "/health" {
+            "ok\n".into()
+        } else {
+            "paths: /debug/pprof/text /debug/pprof/json /debug/profile /health\n".into()
+        };
+        let status = if path.starts_with("/debug/") || path == "/" || path == "/health" {
+            "200 OK"
+        } else {
+            "404 Not Found"
+        };
+        let ctype = if path.contains("json") || path == "/debug/profile" {
+            "application/json"
+        } else {
+            "text/plain; charset=utf-8"
+        };
+        let resp = format!(
+            "HTTP/1.0 {status}\r\nContent-Type: {ctype}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        );
+        let _ = stream.write_all(resp.as_bytes());
+        served += 1;
+        if max_requests > 0 && served >= max_requests {
+            break;
+        }
+    }
     Ok(())
 }
 
@@ -1095,7 +1245,20 @@ fn run(cli: Cli) -> Result<(), ()> {
         Commands::Lsp => lsp::run_stdio().map_err(|e| {
             emit_plain_error(&format!("lsp: {e}"));
         }),
-        Commands::Dap { request } => cmd_dap_seed(request.as_deref()),
+        Commands::Dap {
+            request,
+            stdio,
+            max_messages,
+        } => {
+            if stdio {
+                cmd_dap_stdio(max_messages)
+            } else {
+                cmd_dap_seed(request.as_deref())
+            }
+        }
+        Commands::ProfileServe { port, max_requests } => {
+            cmd_profile_serve(port, max_requests)
+        }
         Commands::Pkg { cmd } => run_pkg(cmd),
         Commands::Api { cmd } => match cmd {
             ApiCmd::Diff { old, new } => tooling::run_api_diff(&old, &new),

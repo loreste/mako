@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Product-path seeds (DAP stdio · profile-serve · live plugin reload · soft FB)
+
+- **DAP:** `mako dap --stdio` Content-Length loop; more commands (scopes/variables/step/breakpoints).
+- **Profile service:** `mako profile-serve --port N --max-requests K` continuous HTTP seed.
+- **Live dylib reload:** `hot_reload_plugin_watch` / `poll` / `call` / `close` / `swaps`.
+- **Soft window FB:** `gfx_window_fill` / `set_pixel` / `get_pixel` / `pixels`.
+- **CI:** `.github/workflows/product-seeds.yml` packaging + cross-compile dry-run.
+
 ### Comptime depth · hot-reload depth · prediction seed
 
 - **const fn:** comparisons (`== < <= > >=`), `&&`/`||`/`!`, statement `if`/`else`,

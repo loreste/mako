@@ -103,3 +103,21 @@ fn TestPredictService() {
     assert_eq(predict_reconcile(p, 100), 103)
     assert_eq(predict_free(p), 0)
 }
+
+fn TestGfxSoftFramebuffer() {
+    let w = gfx_window_open(4, 3, "fb")
+    assert_eq(gfx_window_pixels(w), 12)
+    assert_eq(gfx_window_fill(w, 255), 0) // 0x000000FF
+    assert_eq(gfx_window_get_pixel(w, 0, 0), 255)
+    assert_eq(gfx_window_set_pixel(w, 1, 2, 65535), 0)
+    assert_eq(gfx_window_get_pixel(w, 1, 2), 65535)
+    assert_eq(gfx_window_close(w), 0)
+}
+
+fn TestHotReloadPluginMissing() {
+    // Missing dylib: open fails; poll/close still safe.
+    assert_eq(hot_reload_plugin_watch("/tmp/mako_missing_hot.so"), -1)
+    assert_eq(hot_reload_plugin_handle(), -1)
+    let _ = hot_reload_plugin_poll() // -1 or 0 depending on path existence
+    assert_eq(hot_reload_plugin_close(), 1)
+}

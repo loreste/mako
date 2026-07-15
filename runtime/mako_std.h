@@ -7,6 +7,7 @@
 #include "mako_plugin.h"
 #if !defined(_WIN32)
 #include <dlfcn.h>
+#include <sys/stat.h>
 #endif
 
 #if defined(__APPLE__)
@@ -3713,6 +3714,82 @@ static inline MakoString mako_ffi_abi_name(void) {
 #else
     return mako_str_from_cstr("c-sysv");
 #endif
+}
+
+/* Live dylib hot-reload seed: re-open plugin when path mtime changes.
+ * Uses plugin_open/close; soft swap counter lives in domain (optional call). */
+static int64_t mako_hot_plugin_handle = -1;
+static char mako_hot_plugin_path[512];
+static int64_t mako_hot_plugin_mtime = -1;
+static int64_t mako_hot_plugin_swaps = 0;
+
+static inline int64_t mako_hot_reload_plugin_watch(MakoString path) {
+    if (!path.data || path.len == 0 || path.len >= 511) return -1;
+    memcpy(mako_hot_plugin_path, path.data, path.len);
+    mako_hot_plugin_path[path.len] = 0;
+#if !defined(_WIN32) && !defined(MAKO_WASI)
+    {
+        struct stat st;
+        char pbuf[512];
+        memcpy(pbuf, path.data, path.len);
+        pbuf[path.len] = 0;
+        mako_hot_plugin_mtime = (stat(pbuf, &st) == 0) ? (int64_t)st.st_mtime : -1;
+    }
+#else
+    mako_hot_plugin_mtime = -1;
+#endif
+    if (mako_hot_plugin_handle >= 0) {
+        (void)mako_plugin_close(mako_hot_plugin_handle);
+        mako_hot_plugin_handle = -1;
+    }
+    mako_hot_plugin_handle = mako_plugin_open(path);
+    return mako_hot_plugin_handle;
+}
+
+/* 1 if reloaded, 0 if unchanged, -1 on error/missing path. */
+static inline int64_t mako_hot_reload_plugin_poll(void) {
+    if (!mako_hot_plugin_path[0]) return -1;
+#if defined(_WIN32) || defined(MAKO_WASI)
+    return 0;
+#else
+    struct stat st;
+    if (stat(mako_hot_plugin_path, &st) != 0) return -1;
+    int64_t mt = (int64_t)st.st_mtime;
+    if (mt == mako_hot_plugin_mtime) return 0;
+    mako_hot_plugin_mtime = mt;
+    if (mako_hot_plugin_handle >= 0) {
+        (void)mako_plugin_close(mako_hot_plugin_handle);
+        mako_hot_plugin_handle = -1;
+    }
+    MakoString p = mako_str_from_cstr(mako_hot_plugin_path);
+    mako_hot_plugin_handle = mako_plugin_open(p);
+    mako_str_free(p);
+    mako_hot_plugin_swaps++;
+    return mako_hot_plugin_handle >= 0 ? 1 : -1;
+#endif
+}
+
+static inline MakoString mako_hot_reload_plugin_call(MakoString op, MakoString payload) {
+    if (mako_hot_plugin_handle < 0) return mako_str_from_cstr("");
+    return mako_plugin_call(mako_hot_plugin_handle, op, payload);
+}
+
+static inline int64_t mako_hot_reload_plugin_handle_id(void) {
+    return mako_hot_plugin_handle;
+}
+
+static inline int64_t mako_hot_reload_plugin_swaps(void) {
+    return mako_hot_plugin_swaps;
+}
+
+static inline int64_t mako_hot_reload_plugin_close(void) {
+    if (mako_hot_plugin_handle >= 0) {
+        (void)mako_plugin_close(mako_hot_plugin_handle);
+        mako_hot_plugin_handle = -1;
+    }
+    mako_hot_plugin_path[0] = 0;
+    mako_hot_plugin_mtime = -1;
+    return 1;
 }
 
 /* ---- Plugin / dlopen ---- */

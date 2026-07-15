@@ -274,10 +274,12 @@ Percentages are weighted; update when a task flips.
 - [x] Sampling CPU profiler seed (`profile_sample_*` · SIGPROF + cooperative · `profile_samples_json`).
 - [x] DAP JSON seed (`dap_initialize_response` / `dap_stopped_event` / `dap_request_command`) · lldb still primary for DWARF.
 - [x] DAP dispatch + CLI seed (`dap_handle_request` · `mako dap --request …`).
+- [x] DAP stdio Content-Length loop (`mako dap --stdio` · scopes/variables/step seeds).
 - [x] pprof-text + multi-thread tid seed (`profile_samples_pprof_text` / `profile_sample_thread_count`).
 - [x] Profile HTTP export seed (`profile_http_route` / `profile_pprof_http_body` for `/debug/pprof/*`).
-- [ ] Full DAP server + DWARF-local product debugger (optional; lldb path remains).
-- [ ] Continuous multi-process pprof service product.
+- [x] Continuous profile HTTP CLI (`mako profile-serve --port N --max-requests K`).
+- [ ] Full DWARF-local product debugger (lldb/DAP UI product; stdio seed is not a full IDE).
+- [ ] Multi-process fleet pprof aggregator product.
 
 ### 9. Installer, distribution, and portability — 10%
 
@@ -296,7 +298,8 @@ Percentages are weighted; update when a task flips.
 - [x] homebrew / winget publish **seed scripts** (`publish-homebrew-tap-seed.sh` · `publish-winget-seed.sh`).
 - [x] CI package-seed workflow (validate packaging scripts).
 - [x] Cross-target dry-run seed (`scripts/cross-target-seed.sh` · FreeBSD/RISC-V triples · CI workflow).
-- [ ] Signed MSI / notarized pkg with secrets in production release CI.
+- [x] Product-seeds CI workflow (packaging dry-run + cross-compile seed + optional sign notes).
+- [ ] Signed MSI / notarized pkg with secrets in production release CI (secrets-gated residual).
 - [ ] homebrew-core / winget-pkgs merge (external maintainers).
 - [ ] CI multi-OS matrix green on FreeBSD / RISC-V **hosts** (real runners).
 - [ ] Console/platform-specific toolchain path where licensing permits.
@@ -321,19 +324,21 @@ Percentages are weighted; update when a task flips.
 - [x] Page-backed btree seed (`pbtree_*` — nodes in `MakoPage`).
 - [x] Storage polish seeds: `bloom_*` · `btree_range` / `sst_range` + `range_*` · `pman_*` disk page manager.
 - [x] Window soft poll + backend name (`gfx_poll` / `gfx_backend_name`).
+- [x] Soft framebuffer (`gfx_window_fill` / `set_pixel` / `get_pixel` / `pixels`).
 - [x] GPU Metal/CUDA/Vulkan **availability stubs** (`gpu_metal_ok` / `cuda_ok` / `vulkan_ok`).
 - [x] Netcode seeds: `snap_diff` / `snap_apply_delta` · `netcode_lag_comp_tick` / `netcode_interp`.
 - [x] Plugin host loader seed (`plugin_open` / `call` / `close`) · `ffi_abi_name`.
 - [x] Hot-reload unwatch + count (`hot_reload_unwatch` / `hot_reload_watch_count`).
-- [ ] Real windowing backends / GPU shaders / asset pipelines product.
 - [x] Client prediction service seed (`predict_new` / `input` / `reconcile` / `state` / `tick`).
-- [ ] Full multiplayer netcode product (dedicated prediction service / interest mgmt).
-- [ ] Real Metal-native / CUDA / Vulkan compute backends.
+- [x] Live dylib hot-reload seed (`hot_reload_plugin_watch` / `poll` / `call` / `close`).
+- [ ] Real OS windowing / GPU shaders / asset pipelines product.
+- [ ] Full multiplayer netcode product (interest mgmt / session service).
+- [ ] Real Metal-native / CUDA / Vulkan compute backends (drivers).
 - [x] SIMD portable seed (`simd_dot_i64_4` / `simd_sum_i64_4` — autovec-friendly).
 - [x] Hot-reload mtime watch seed (`file_mtime_ns` / `hot_reload_watch` / `hot_reload_changed`).
 - [x] Hot-reload depth seed (`note_swap` / `swap_count` / `stamp` / `status_json`).
 - [x] Comptime depth seed: const `if` / comparisons / `if`-expr fold (`const_fn_test`).
-- [ ] Full hot code reload product (live dylib swap) · domain CTFE product.
+- [ ] Domain CTFE product beyond int const-fn fold.
 
 ---
 

@@ -1801,6 +1801,18 @@ impl TypeChecker {
             "nb_read".into(),
             Type::Fn(vec![Type::Int], Box::new(Type::String)),
         );
+        fns.insert("gfx_window_pixels".into(), Type::Fn(vec![Type::Named("GfxWindow".into())], Box::new(Type::Int)));
+        fns.insert("gfx_window_fill".into(), Type::Fn(vec![Type::Named("GfxWindow".into()), Type::Int], Box::new(Type::Int)));
+        fns.insert("gfx_window_set_pixel".into(), Type::Fn(vec![Type::Named("GfxWindow".into()), Type::Int, Type::Int, Type::Int], Box::new(Type::Int)));
+        fns.insert("gfx_window_get_pixel".into(), Type::Fn(vec![Type::Named("GfxWindow".into()), Type::Int, Type::Int], Box::new(Type::Int)));
+
+        fns.insert("hot_reload_plugin_watch".into(), Type::Fn(vec![Type::String], Box::new(Type::Int)));
+        fns.insert("hot_reload_plugin_poll".into(), Type::Fn(vec![], Box::new(Type::Int)));
+        fns.insert("hot_reload_plugin_call".into(), Type::Fn(vec![Type::String, Type::String], Box::new(Type::String)));
+        fns.insert("hot_reload_plugin_handle".into(), Type::Fn(vec![], Box::new(Type::Int)));
+        fns.insert("hot_reload_plugin_swaps".into(), Type::Fn(vec![], Box::new(Type::Int)));
+        fns.insert("hot_reload_plugin_close".into(), Type::Fn(vec![], Box::new(Type::Int)));
+
         fns.insert(
             "nb_write".into(),
             Type::Fn(vec![Type::Int, Type::String], Box::new(Type::Int)),

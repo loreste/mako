@@ -36,10 +36,21 @@ let resp = dap_handle_request(req_json)  // one-shot dispatch
 let snap = debug_snapshot_json()         // tasks + locals + frames
 ```
 
-CLI seed (not a full DAP server):
+CLI seed (not a full IDE debugger):
 
 ```bash
+# One-shot
 mako dap --request '{"seq":1,"type":"request","command":"initialize"}'
+
+# Content-Length multi-message loop (exit on disconnect; cap with --max-messages)
+mako dap --stdio --max-messages 4
+```
+
+Profile continuous seed:
+
+```bash
+mako profile-serve --port 9470 --max-requests 3
+# GET /debug/pprof/text | /debug/pprof/json | /debug/profile | /health
 ```
 
 Also: `debug_line_bp_*`, `debug_push_frame` / `debug_frames_json`, soft

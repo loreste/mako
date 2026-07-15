@@ -13343,6 +13343,29 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             self.line(&format!("MakoString {tmp} = mako_hot_reload_status_json();"));
                             return ("MakoString".into(), tmp);
                         }
+                        "hot_reload_plugin_watch" => {
+                            let (_, p) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_hot_reload_plugin_watch({p})"));
+                        }
+                        "hot_reload_plugin_poll" => {
+                            return ("int64_t".into(), "mako_hot_reload_plugin_poll()".into());
+                        }
+                        "hot_reload_plugin_call" => {
+                            let (_, o) = self.emit_expr(&args[0]);
+                            let (_, p) = self.emit_expr(&args[1]);
+                            let tmp = self.fresh("hrpc");
+                            self.line(&format!("MakoString {tmp} = mako_hot_reload_plugin_call({o}, {p});"));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "hot_reload_plugin_handle" => {
+                            return ("int64_t".into(), "mako_hot_reload_plugin_handle_id()".into());
+                        }
+                        "hot_reload_plugin_swaps" => {
+                            return ("int64_t".into(), "mako_hot_reload_plugin_swaps()".into());
+                        }
+                        "hot_reload_plugin_close" => {
+                            return ("int64_t".into(), "mako_hot_reload_plugin_close()".into());
+                        }
                         "mvcc_new" => {
                             let tmp = self.fresh("mv");
                             self.line(&format!("MakoMvcc *{tmp} = mako_mvcc_new();"));
@@ -13431,6 +13454,34 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             let tmp = self.fresh("gbn");
                             self.line(&format!("MakoString {tmp} = mako_gfx_backend_name();"));
                             return ("MakoString".into(), tmp);
+                        }
+                        "gfx_window_pixels" => {
+                            let (_, w) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_gfx_window_pixels({w})"));
+                        }
+                        "gfx_window_fill" => {
+                            let (_, w) = self.emit_expr(&args[0]);
+                            let (_, c) = self.emit_expr(&args[1]);
+                            return ("int64_t".into(), format!("mako_gfx_window_fill({w}, {c})"));
+                        }
+                        "gfx_window_set_pixel" => {
+                            let (_, w) = self.emit_expr(&args[0]);
+                            let (_, x) = self.emit_expr(&args[1]);
+                            let (_, y) = self.emit_expr(&args[2]);
+                            let (_, c) = self.emit_expr(&args[3]);
+                            return (
+                                "int64_t".into(),
+                                format!("mako_gfx_window_set_pixel({w}, {x}, {y}, {c})"),
+                            );
+                        }
+                        "gfx_window_get_pixel" => {
+                            let (_, w) = self.emit_expr(&args[0]);
+                            let (_, x) = self.emit_expr(&args[1]);
+                            let (_, y) = self.emit_expr(&args[2]);
+                            return (
+                                "int64_t".into(),
+                                format!("mako_gfx_window_get_pixel({w}, {x}, {y})"),
+                            );
                         }
                         "gfx_shader_compile" => {
                             let (_, s) = self.emit_expr(&args[0]);

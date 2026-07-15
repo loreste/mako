@@ -1495,6 +1495,8 @@ typedef struct {
     int64_t w, h;
     int open;
     char title[64];
+    uint32_t *pixels; /* soft framebuffer ARGB seed (host only) */
+    int64_t npix;
 } MakoGfxWindow;
 
 static inline MakoGfxWindow *mako_gfx_window_open(int64_t w, int64_t h, MakoString title) {
@@ -1506,6 +1508,10 @@ static inline MakoGfxWindow *mako_gfx_window_open(int64_t w, int64_t h, MakoStri
     size_t n = title.len < 63 ? title.len : 63;
     if (title.data && n) memcpy(win->title, title.data, n);
     win->title[n] = 0;
+    win->npix = win->w * win->h;
+    if (win->npix > 0 && win->npix <= 4096 * 4096) {
+        win->pixels = (uint32_t *)calloc((size_t)win->npix, sizeof(uint32_t));
+    }
     return win;
 }
 
@@ -1520,6 +1526,7 @@ static inline int64_t mako_gfx_window_height(MakoGfxWindow *w) {
 static inline int64_t mako_gfx_window_close(MakoGfxWindow *w) {
     if (!w) return 0;
     w->open = 0;
+    free(w->pixels);
     free(w);
     return 0;
 }
@@ -1533,6 +1540,29 @@ static inline int64_t mako_gfx_poll(MakoGfxWindow *w) {
 /* Backend name for soft window seed. */
 static inline MakoString mako_gfx_backend_name(void) {
     return mako_str_from_cstr("soft");
+}
+
+static inline int64_t mako_gfx_window_pixels(MakoGfxWindow *w) {
+    return w ? w->npix : 0;
+}
+
+/* Fill soft framebuffer with ARGB color (0xAARRGGBB). */
+static inline int64_t mako_gfx_window_fill(MakoGfxWindow *w, int64_t argb) {
+    if (!w || !w->pixels) return -1;
+    uint32_t c = (uint32_t)argb;
+    for (int64_t i = 0; i < w->npix; i++) w->pixels[i] = c;
+    return 0;
+}
+
+static inline int64_t mako_gfx_window_set_pixel(MakoGfxWindow *w, int64_t x, int64_t y, int64_t argb) {
+    if (!w || !w->pixels || x < 0 || y < 0 || x >= w->w || y >= w->h) return -1;
+    w->pixels[y * w->w + x] = (uint32_t)argb;
+    return 0;
+}
+
+static inline int64_t mako_gfx_window_get_pixel(MakoGfxWindow *w, int64_t x, int64_t y) {
+    if (!w || !w->pixels || x < 0 || y < 0 || x >= w->w || y >= w->h) return -1;
+    return (int64_t)w->pixels[y * w->w + x];
 }
 
 /* Shader "compile" seed: hash source length as id */
