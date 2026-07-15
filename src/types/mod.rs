@@ -16064,21 +16064,9 @@ fn eval_const_fn_body(
                 // `if` without else that did not return: fall through
             }
             Stmt::While { cond, body: wbody, .. } => {
-                // Bounded const loop seed (avoids hang on non-terminating cond).
-                const MAX_ITERS: i64 = 100_000;
-                let mut iters = 0i64;
-                while fold_const_expr_with(cond, &env, const_fns)? != 0 {
-                    iters += 1;
-                    if iters > MAX_ITERS {
-                        return Err(TypeError::new(
-                            "const while exceeded 100000 iterations (runaway loop?)",
-                        ));
-                    }
-                    // Execute body statements with assign/let/if/return support.
-                    match eval_const_loop_body(wbody, &mut env, const_fns)? {
-                        Some(ret) => return Ok(ret),
-                        None => {}
-                    }
+                match run_const_while(cond, wbody, &mut env, const_fns)? {
+                    Some(ret) => return Ok(ret),
+                    None => {}
                 }
             }
             Stmt::For {
@@ -16087,25 +16075,9 @@ fn eval_const_fn_body(
                 body: fbody,
                 ..
             } => {
-                // Count form only: `for i in n` / `for i in range n` → i = 0..n-1
-                let n = fold_const_expr_with(iter, &env, const_fns)?;
-                if n < 0 {
-                    return Err(TypeError::new("const for count must be non-negative"));
-                }
-                if n > 100_000 {
-                    return Err(TypeError::new(
-                        "const for count exceeds 100000 (runaway loop?)",
-                    ));
-                }
-                let binder = binders.iter().find(|b| b.as_str() != "_").cloned();
-                for idx in 0..n {
-                    if let Some(ref b) = binder {
-                        env.insert(b.clone(), idx);
-                    }
-                    match eval_const_loop_body(fbody, &mut env, const_fns)? {
-                        Some(ret) => return Ok(ret),
-                        None => {}
-                    }
+                match run_const_for_count(binders, iter, fbody, &mut env, const_fns)? {
+                    Some(ret) => return Ok(ret),
+                    None => {}
                 }
             }
             Stmt::CFor {
@@ -16115,54 +16087,9 @@ fn eval_const_fn_body(
                 body: fbody,
                 ..
             } => {
-                // Run init once (let / assign only).
-                match init.as_ref() {
-                    Stmt::Let { name, init: iv, .. } => {
-                        let v = fold_const_expr_with(iv, &env, const_fns)?;
-                        env.insert(name.clone(), v);
-                    }
-                    Stmt::Assign { name, value } => {
-                        let v = fold_const_expr_with(value, &env, const_fns)?;
-                        env.insert(name.clone(), v);
-                    }
-                    _ => {
-                        return Err(TypeError::new(
-                            "const C-style for init may only be let or assign",
-                        ));
-                    }
-                }
-                const MAX_ITERS: i64 = 100_000;
-                let mut iters = 0i64;
-                while fold_const_expr_with(cond, &env, const_fns)? != 0 {
-                    iters += 1;
-                    if iters > MAX_ITERS {
-                        return Err(TypeError::new(
-                            "const C-style for exceeded 100000 iterations (runaway loop?)",
-                        ));
-                    }
-                    match eval_const_loop_body(fbody, &mut env, const_fns)? {
-                        Some(ret) => return Ok(ret),
-                        None => {}
-                    }
-                    // Post clause
-                    match post.as_ref() {
-                        Stmt::Let { name, init: iv, .. } => {
-                            let v = fold_const_expr_with(iv, &env, const_fns)?;
-                            env.insert(name.clone(), v);
-                        }
-                        Stmt::Assign { name, value } => {
-                            let v = fold_const_expr_with(value, &env, const_fns)?;
-                            env.insert(name.clone(), v);
-                        }
-                        Stmt::Expr(e) => {
-                            let _ = fold_const_expr_with(e, &env, const_fns)?;
-                        }
-                        _ => {
-                            return Err(TypeError::new(
-                                "const C-style for post may only be let/assign/expr",
-                            ));
-                        }
-                    }
+                match run_const_cfor(init, cond, post, fbody, &mut env, const_fns)? {
+                    Some(ret) => return Ok(ret),
+                    None => {}
                 }
             }
             Stmt::Expr(e) if is_last => {
@@ -16190,19 +16117,161 @@ fn eval_const_fn_body(
     Err(TypeError::new("const fn body has no return value"))
 }
 
-/// Run one iteration of a const while body. Returns `Some(v)` on early return.
-fn eval_const_loop_body(
+/// Control flow from a const loop body iteration.
+enum ConstLoopCtl {
+    /// `return expr` — exit the whole const fn.
+    Return(i64),
+    /// `break` — leave the innermost loop.
+    Break,
+    /// `continue` — next iteration (still run C-for post).
+    Continue,
+    /// Finished the body statements normally.
+    Fallthrough,
+}
+
+fn run_const_while(
+    cond: &Expr,
     body: &Block,
     env: &mut HashMap<String, i64>,
     const_fns: &HashMap<String, FnDef>,
 ) -> Result<Option<i64>, TypeError> {
+    const MAX_ITERS: i64 = 100_000;
+    let mut iters = 0i64;
+    while fold_const_expr_with(cond, env, const_fns)? != 0 {
+        iters += 1;
+        if iters > MAX_ITERS {
+            return Err(TypeError::new(
+                "const while exceeded 100000 iterations (runaway loop?)",
+            ));
+        }
+        match eval_const_loop_body(body, env, const_fns)? {
+            ConstLoopCtl::Return(v) => return Ok(Some(v)),
+            ConstLoopCtl::Break => break,
+            ConstLoopCtl::Continue | ConstLoopCtl::Fallthrough => {}
+        }
+    }
+    Ok(None)
+}
+
+fn run_const_for_count(
+    binders: &[String],
+    iter: &Expr,
+    body: &Block,
+    env: &mut HashMap<String, i64>,
+    const_fns: &HashMap<String, FnDef>,
+) -> Result<Option<i64>, TypeError> {
+    let n = fold_const_expr_with(iter, env, const_fns)?;
+    if n < 0 {
+        return Err(TypeError::new("const for count must be non-negative"));
+    }
+    if n > 100_000 {
+        return Err(TypeError::new(
+            "const for count exceeds 100000 (runaway loop?)",
+        ));
+    }
+    let binder = binders.iter().find(|b| b.as_str() != "_").cloned();
+    for idx in 0..n {
+        if let Some(ref b) = binder {
+            env.insert(b.clone(), idx);
+        }
+        match eval_const_loop_body(body, env, const_fns)? {
+            ConstLoopCtl::Return(v) => return Ok(Some(v)),
+            ConstLoopCtl::Break => break,
+            ConstLoopCtl::Continue | ConstLoopCtl::Fallthrough => {}
+        }
+    }
+    Ok(None)
+}
+
+fn run_const_cfor(
+    init: &Stmt,
+    cond: &Expr,
+    post: &Stmt,
+    body: &Block,
+    env: &mut HashMap<String, i64>,
+    const_fns: &HashMap<String, FnDef>,
+) -> Result<Option<i64>, TypeError> {
+    match init {
+        Stmt::Let { name, init: iv, .. } => {
+            let v = fold_const_expr_with(iv, env, const_fns)?;
+            env.insert(name.clone(), v);
+        }
+        Stmt::Assign { name, value } => {
+            let v = fold_const_expr_with(value, env, const_fns)?;
+            env.insert(name.clone(), v);
+        }
+        _ => {
+            return Err(TypeError::new(
+                "const C-style for init may only be let or assign",
+            ));
+        }
+    }
+    const MAX_ITERS: i64 = 100_000;
+    let mut iters = 0i64;
+    while fold_const_expr_with(cond, env, const_fns)? != 0 {
+        iters += 1;
+        if iters > MAX_ITERS {
+            return Err(TypeError::new(
+                "const C-style for exceeded 100000 iterations (runaway loop?)",
+            ));
+        }
+        let ctl = eval_const_loop_body(body, env, const_fns)?;
+        match ctl {
+            ConstLoopCtl::Return(v) => return Ok(Some(v)),
+            ConstLoopCtl::Break => break, // do not run post
+            ConstLoopCtl::Continue | ConstLoopCtl::Fallthrough => {
+                // `continue` still runs the post clause (Go/C semantics).
+                match post {
+                    Stmt::Let { name, init: iv, .. } => {
+                        let v = fold_const_expr_with(iv, env, const_fns)?;
+                        env.insert(name.clone(), v);
+                    }
+                    Stmt::Assign { name, value } => {
+                        let v = fold_const_expr_with(value, env, const_fns)?;
+                        env.insert(name.clone(), v);
+                    }
+                    Stmt::Expr(e) => {
+                        let _ = fold_const_expr_with(e, env, const_fns)?;
+                    }
+                    _ => {
+                        return Err(TypeError::new(
+                            "const C-style for post may only be let/assign/expr",
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    Ok(None)
+}
+
+/// Run one iteration of a const loop body.
+fn eval_const_loop_body(
+    body: &Block,
+    env: &mut HashMap<String, i64>,
+    const_fns: &HashMap<String, FnDef>,
+) -> Result<ConstLoopCtl, TypeError> {
     for stmt in &body.stmts {
         match stmt {
             Stmt::Return(Some(e)) => {
-                return Ok(Some(fold_const_expr_with(e, env, const_fns)?));
+                return Ok(ConstLoopCtl::Return(fold_const_expr_with(
+                    e, env, const_fns,
+                )?));
             }
             Stmt::Return(None) => {
                 return Err(TypeError::new("const fn cannot return void"));
+            }
+            Stmt::Break(None) => return Ok(ConstLoopCtl::Break),
+            Stmt::Break(Some(_)) => {
+                return Err(TypeError::new(
+                    "const break labels are not supported yet (use bare `break`)",
+                ));
+            }
+            Stmt::Continue(None) => return Ok(ConstLoopCtl::Continue),
+            Stmt::Continue(Some(_)) => {
+                return Err(TypeError::new(
+                    "const continue labels are not supported yet (use bare `continue`)",
+                ));
             }
             Stmt::Let { name, init, .. } => {
                 let v = fold_const_expr_with(init, env, const_fns)?;
@@ -16236,8 +16305,9 @@ fn eval_const_loop_body(
                     else_block.as_ref()
                 };
                 if let Some(b) = branch {
-                    if let Some(ret) = eval_const_loop_body(b, env, const_fns)? {
-                        return Ok(Some(ret));
+                    match eval_const_loop_body(b, env, const_fns)? {
+                        ConstLoopCtl::Fallthrough => {}
+                        other => return Ok(other),
                     }
                 }
             }
@@ -16245,18 +16315,8 @@ fn eval_const_loop_body(
                 let _ = fold_const_expr_with(e, env, const_fns)?;
             }
             Stmt::While { cond, body: wbody, .. } => {
-                const MAX_ITERS: i64 = 100_000;
-                let mut iters = 0i64;
-                while fold_const_expr_with(cond, env, const_fns)? != 0 {
-                    iters += 1;
-                    if iters > MAX_ITERS {
-                        return Err(TypeError::new(
-                            "const while exceeded 100000 iterations (runaway loop?)",
-                        ));
-                    }
-                    if let Some(ret) = eval_const_loop_body(wbody, env, const_fns)? {
-                        return Ok(Some(ret));
-                    }
+                if let Some(v) = run_const_while(cond, wbody, env, const_fns)? {
+                    return Ok(ConstLoopCtl::Return(v));
                 }
             }
             Stmt::For {
@@ -16265,28 +16325,29 @@ fn eval_const_loop_body(
                 body: fbody,
                 ..
             } => {
-                let n = fold_const_expr_with(iter, env, const_fns)?;
-                if n < 0 || n > 100_000 {
-                    return Err(TypeError::new("const for count out of range (0..100000)"));
+                if let Some(v) = run_const_for_count(binders, iter, fbody, env, const_fns)? {
+                    return Ok(ConstLoopCtl::Return(v));
                 }
-                let binder = binders.iter().find(|b| b.as_str() != "_").cloned();
-                for idx in 0..n {
-                    if let Some(ref b) = binder {
-                        env.insert(b.clone(), idx);
-                    }
-                    if let Some(ret) = eval_const_loop_body(fbody, env, const_fns)? {
-                        return Ok(Some(ret));
-                    }
+            }
+            Stmt::CFor {
+                init,
+                cond,
+                post,
+                body: fbody,
+                ..
+            } => {
+                if let Some(v) = run_const_cfor(init, cond, post, fbody, env, const_fns)? {
+                    return Ok(ConstLoopCtl::Return(v));
                 }
             }
             _ => {
                 return Err(TypeError::new(
-                    "const loop body may only use let/assign/return/if/while/for of const expressions",
+                    "const loop body may only use let/assign/return/break/continue/if/while/for",
                 ));
             }
         }
     }
-    Ok(None)
+    Ok(ConstLoopCtl::Fallthrough)
 }
 
 /// Substitute concrete types for type parameters in a type expression.

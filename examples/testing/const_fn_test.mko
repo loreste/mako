@@ -182,3 +182,66 @@ fn TestConstFnFor() {
     assert_eq(C_FACT, 120)
     assert_eq(fact_for(0), 1)
 }
+
+// --- Depth seed: break / continue in const loops ---
+
+const fn sum_until(n: int, stop: int) -> int {
+    let mut s = 0
+    for i in n {
+        if i == stop {
+            break
+        }
+        s = s + i
+    }
+    return s
+}
+
+const fn sum_odds(n: int) -> int {
+    let mut s = 0
+    for i in n {
+        if i % 2 == 0 {
+            continue
+        }
+        s = s + i
+    }
+    return s
+}
+
+const fn sum_odds_cfor(n: int) -> int {
+    let mut s = 0
+    for i := 0; i < n; i = i + 1 {
+        if i % 2 == 0 {
+            continue
+        }
+        s = s + i
+    }
+    return s
+}
+
+const fn first_ge(n: int, thr: int) -> int {
+    let mut i = 0
+    while i < n {
+        if i >= thr {
+            break
+        }
+        i = i + 1
+    }
+    return i
+}
+
+const C_BRK = sum_until(10, 5)
+const C_ODD = sum_odds(6)
+const C_ODDC = sum_odds_cfor(6)
+const C_FGE = first_ge(20, 7)
+
+fn TestConstFnBreakContinue() {
+    // 0+1+2+3+4
+    assert_eq(C_BRK, 10)
+    assert_eq(sum_until(10, 0), 0)
+    // 1+3+5
+    assert_eq(C_ODD, 9)
+    assert_eq(C_ODDC, 9)
+    assert_eq(sum_odds(1), 0)
+    assert_eq(C_FGE, 7)
+    assert_eq(first_ge(3, 10), 3)
+}

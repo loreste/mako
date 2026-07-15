@@ -27,6 +27,14 @@ Remaining weight is **product** residual: install/portability polish, full debug
 
 ---
 
+## Just closed (2026-07-15) — const-fn break/continue
+
+| Area | Status |
+|------|--------|
+| Const bare `break` / `continue` | **Done seed** — while / for / C-for · `TestConstFnBreakContinue` |
+| C-for `continue` runs post | **Done** (Go/C semantics) |
+| Labeled break/continue in const | Not yet (runtime labels still work) |
+
 ## Just closed (2026-07-15) — const-fn for
 
 | Area | Status |
@@ -390,6 +398,7 @@ Percentages are weighted; update when a task flips.
 - [x] Comptime depth seed: const `if` / comparisons / `if`-expr fold (`const_fn_test`).
 - [x] Const-fn match + bounded while seed (int patterns, assign loops; max 100k iters).
 - [x] Const-fn for seed (`for i in n` / `range n` / C-style; max 100k).
+- [x] Const-fn break/continue seed (bare; C-for continue runs post).
 - [ ] Domain CTFE product beyond int const-fn fold (full interpreter / strings / heap).
 
 ---

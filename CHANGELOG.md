@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Const-fn break / continue
+
+- Bare `break` / `continue` fold in const `while` / `for` / C-style `for`.
+- C-for `continue` still runs the post clause (Go/C semantics).
+- Labeled break/continue not folded in const (error with hint).
+- Tests: `TestConstFnBreakContinue` in `const_fn_test`.
+
 ### Const-fn for loops
 
 - Const `for i in n` / `for i in range n` (count 0..n-1).

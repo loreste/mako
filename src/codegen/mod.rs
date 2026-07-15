@@ -31194,91 +31194,32 @@ fn fold_const_c_block(
             }
             Stmt::While {
                 cond, body: wbody, ..
-            } => {
-                const MAX_ITERS: i64 = 100_000;
-                let mut iters = 0i64;
-                while fold_const_c_env(cond, &locals, const_fns)? != 0 {
-                    iters += 1;
-                    if iters > MAX_ITERS {
-                        return None;
-                    }
-                    // Some(None) = body done, continue while; Some(Some(v)) = return;
-                    // None = fold failed.
-                    match fold_const_c_loop_body(wbody, &mut locals, const_fns) {
-                        None => return None,
-                        Some(Some(ret)) => return Some(ret),
-                        Some(None) => {}
-                    }
-                }
-            }
+            } => match run_const_c_while(cond, wbody, &mut locals, const_fns) {
+                None => return None,
+                Some(Some(ret)) => return Some(ret),
+                Some(None) => {}
+            },
             Stmt::For {
                 binders,
                 iter,
                 body: fbody,
                 ..
-            } => {
-                let n = fold_const_c_env(iter, &locals, const_fns)?;
-                if n < 0 || n > 100_000 {
-                    return None;
-                }
-                let binder = binders.iter().find(|b| b.as_str() != "_").cloned();
-                for idx in 0..n {
-                    if let Some(ref b) = binder {
-                        locals.insert(b.clone(), idx);
-                    }
-                    match fold_const_c_loop_body(fbody, &mut locals, const_fns) {
-                        None => return None,
-                        Some(Some(ret)) => return Some(ret),
-                        Some(None) => {}
-                    }
-                }
-            }
+            } => match run_const_c_for_count(binders, iter, fbody, &mut locals, const_fns) {
+                None => return None,
+                Some(Some(ret)) => return Some(ret),
+                Some(None) => {}
+            },
             Stmt::CFor {
                 init,
                 cond,
                 post,
                 body: fbody,
                 ..
-            } => {
-                match init.as_ref() {
-                    Stmt::Let { name, init: iv, .. } => {
-                        let v = fold_const_c_env(iv, &locals, const_fns)?;
-                        locals.insert(name.clone(), v);
-                    }
-                    Stmt::Assign { name, value } => {
-                        let v = fold_const_c_env(value, &locals, const_fns)?;
-                        locals.insert(name.clone(), v);
-                    }
-                    _ => return None,
-                }
-                const MAX_ITERS: i64 = 100_000;
-                let mut iters = 0i64;
-                while fold_const_c_env(cond, &locals, const_fns)? != 0 {
-                    iters += 1;
-                    if iters > MAX_ITERS {
-                        return None;
-                    }
-                    match fold_const_c_loop_body(fbody, &mut locals, const_fns) {
-                        None => return None,
-                        Some(Some(ret)) => return Some(ret),
-                        Some(None) => {}
-                    }
-                    match post.as_ref() {
-                        Stmt::Let { name, init: iv, .. } => {
-                            let v = fold_const_c_env(iv, &locals, const_fns)?;
-                            locals.insert(name.clone(), v);
-                        }
-                        Stmt::Assign { name, value } => {
-                            let v = fold_const_c_env(value, &locals, const_fns)?;
-                            locals.insert(name.clone(), v);
-                        }
-                        Stmt::Expr(e) => {
-                            let _ = fold_const_c_env(e, &locals, const_fns)?;
-                        }
-                        _ => return None,
-                    }
-                }
-            }
+            } => match run_const_c_cfor(init, cond, post, fbody, &mut locals, const_fns) {
+                None => return None,
+                Some(Some(ret)) => return Some(ret),
+                Some(None) => {}
+            },
             Stmt::Expr(e) if is_last => {
                 return fold_const_c_env(e, &locals, const_fns);
             }
@@ -31292,17 +31233,128 @@ fn fold_const_c_block(
     None
 }
 
-/// `None` = fold failed; `Some(None)` = finished body (continue while); `Some(Some(v))` = return.
-fn fold_const_c_loop_body(
+/// Const loop body control: Fail / Return / Break / Continue / Fallthrough.
+enum ConstCLoopCtl {
+    Ret(i64),
+    Break,
+    Continue,
+    Fall,
+}
+
+/// `None` = fold failed; `Some(None)` = loop finished; `Some(Some(v))` = return from fn.
+fn run_const_c_while(
+    cond: &Expr,
     body: &Block,
     locals: &mut HashMap<String, i64>,
     const_fns: &HashMap<String, FnDef>,
 ) -> Option<Option<i64>> {
+    const MAX_ITERS: i64 = 100_000;
+    let mut iters = 0i64;
+    while fold_const_c_env(cond, locals, const_fns)? != 0 {
+        iters += 1;
+        if iters > MAX_ITERS {
+            return None;
+        }
+        match fold_const_c_loop_body(body, locals, const_fns)? {
+            ConstCLoopCtl::Ret(v) => return Some(Some(v)),
+            ConstCLoopCtl::Break => break,
+            ConstCLoopCtl::Continue | ConstCLoopCtl::Fall => {}
+        }
+    }
+    Some(None)
+}
+
+fn run_const_c_for_count(
+    binders: &[String],
+    iter: &Expr,
+    body: &Block,
+    locals: &mut HashMap<String, i64>,
+    const_fns: &HashMap<String, FnDef>,
+) -> Option<Option<i64>> {
+    let n = fold_const_c_env(iter, locals, const_fns)?;
+    if n < 0 || n > 100_000 {
+        return None;
+    }
+    let binder = binders.iter().find(|b| b.as_str() != "_").cloned();
+    for idx in 0..n {
+        if let Some(ref b) = binder {
+            locals.insert(b.clone(), idx);
+        }
+        match fold_const_c_loop_body(body, locals, const_fns)? {
+            ConstCLoopCtl::Ret(v) => return Some(Some(v)),
+            ConstCLoopCtl::Break => break,
+            ConstCLoopCtl::Continue | ConstCLoopCtl::Fall => {}
+        }
+    }
+    Some(None)
+}
+
+fn run_const_c_cfor(
+    init: &Stmt,
+    cond: &Expr,
+    post: &Stmt,
+    body: &Block,
+    locals: &mut HashMap<String, i64>,
+    const_fns: &HashMap<String, FnDef>,
+) -> Option<Option<i64>> {
+    match init {
+        Stmt::Let { name, init: iv, .. } => {
+            let v = fold_const_c_env(iv, locals, const_fns)?;
+            locals.insert(name.clone(), v);
+        }
+        Stmt::Assign { name, value } => {
+            let v = fold_const_c_env(value, locals, const_fns)?;
+            locals.insert(name.clone(), v);
+        }
+        _ => return None,
+    }
+    const MAX_ITERS: i64 = 100_000;
+    let mut iters = 0i64;
+    while fold_const_c_env(cond, locals, const_fns)? != 0 {
+        iters += 1;
+        if iters > MAX_ITERS {
+            return None;
+        }
+        let ctl = fold_const_c_loop_body(body, locals, const_fns)?;
+        match ctl {
+            ConstCLoopCtl::Ret(v) => return Some(Some(v)),
+            ConstCLoopCtl::Break => break,
+            ConstCLoopCtl::Continue | ConstCLoopCtl::Fall => {
+                match post {
+                    Stmt::Let { name, init: iv, .. } => {
+                        let v = fold_const_c_env(iv, locals, const_fns)?;
+                        locals.insert(name.clone(), v);
+                    }
+                    Stmt::Assign { name, value } => {
+                        let v = fold_const_c_env(value, locals, const_fns)?;
+                        locals.insert(name.clone(), v);
+                    }
+                    Stmt::Expr(e) => {
+                        let _ = fold_const_c_env(e, locals, const_fns)?;
+                    }
+                    _ => return None,
+                }
+            }
+        }
+    }
+    Some(None)
+}
+
+/// `None` = fold failed.
+fn fold_const_c_loop_body(
+    body: &Block,
+    locals: &mut HashMap<String, i64>,
+    const_fns: &HashMap<String, FnDef>,
+) -> Option<ConstCLoopCtl> {
     for stmt in &body.stmts {
         match stmt {
             Stmt::Return(Some(e)) => {
-                return Some(Some(fold_const_c_env(e, locals, const_fns)?));
+                return Some(ConstCLoopCtl::Ret(fold_const_c_env(e, locals, const_fns)?));
             }
+            Stmt::Break(None) => return Some(ConstCLoopCtl::Break),
+            Stmt::Break(Some(_)) => return None,
+            Stmt::Continue(None) => return Some(ConstCLoopCtl::Continue),
+            Stmt::Continue(Some(_)) => return None,
             Stmt::Let { name, init, .. } => {
                 let v = fold_const_c_env(init, locals, const_fns)?;
                 locals.insert(name.clone(), v);
@@ -31330,10 +31382,9 @@ fn fold_const_c_loop_body(
                     else_block.as_ref()
                 };
                 if let Some(b) = branch {
-                    match fold_const_c_loop_body(b, locals, const_fns) {
-                        None => return None,
-                        Some(Some(ret)) => return Some(Some(ret)),
-                        Some(None) => {}
+                    match fold_const_c_loop_body(b, locals, const_fns)? {
+                        ConstCLoopCtl::Fall => {}
+                        other => return Some(other),
                     }
                 }
             }
@@ -31342,45 +31393,31 @@ fn fold_const_c_loop_body(
             }
             Stmt::While {
                 cond, body: wbody, ..
-            } => {
-                const MAX_ITERS: i64 = 100_000;
-                let mut iters = 0i64;
-                while fold_const_c_env(cond, locals, const_fns)? != 0 {
-                    iters += 1;
-                    if iters > MAX_ITERS {
-                        return None;
-                    }
-                    match fold_const_c_loop_body(wbody, locals, const_fns) {
-                        None => return None,
-                        Some(Some(ret)) => return Some(Some(ret)),
-                        Some(None) => {}
-                    }
-                }
-            }
+            } => match run_const_c_while(cond, wbody, locals, const_fns)? {
+                Some(v) => return Some(ConstCLoopCtl::Ret(v)),
+                None => {}
+            },
             Stmt::For {
                 binders,
                 iter,
                 body: fbody,
                 ..
-            } => {
-                let n = fold_const_c_env(iter, locals, const_fns)?;
-                if n < 0 || n > 100_000 {
-                    return None;
-                }
-                let binder = binders.iter().find(|b| b.as_str() != "_").cloned();
-                for idx in 0..n {
-                    if let Some(ref b) = binder {
-                        locals.insert(b.clone(), idx);
-                    }
-                    match fold_const_c_loop_body(fbody, locals, const_fns) {
-                        None => return None,
-                        Some(Some(ret)) => return Some(Some(ret)),
-                        Some(None) => {}
-                    }
-                }
-            }
+            } => match run_const_c_for_count(binders, iter, fbody, locals, const_fns)? {
+                Some(v) => return Some(ConstCLoopCtl::Ret(v)),
+                None => {}
+            },
+            Stmt::CFor {
+                init,
+                cond,
+                post,
+                body: fbody,
+                ..
+            } => match run_const_c_cfor(init, cond, post, fbody, locals, const_fns)? {
+                Some(v) => return Some(ConstCLoopCtl::Ret(v)),
+                None => {}
+            },
             _ => return None,
         }
     }
-    Some(None)
+    Some(ConstCLoopCtl::Fall)
 }

@@ -112,6 +112,7 @@ Last inventory: 2026-07-14 (**unique Mako surface** · pack/pull types · full m
 | Actor int message payload | Done seed — `receive Inc(delta)` / `actor_pack` · `actor_test` |
 | Const-fn match + while depth | Done seed — int `match` / bounded `while` · `const_fn_test` |
 | Const-fn for (count + C-style) | Done seed — `for i in n` / `for i in range n` / C-for · `const_fn_test` |
+| Const-fn break/continue | Done seed — bare break/continue in const loops · `const_fn_test` |
 | SIP library (platform builtins + `std/sip`) | Done — RFC 3261/3581 Via/RR/NAT, Digest HA1, framing, SDP rewrite |
 | SIP zero-copy header/method views | Done — `sip_header_view` / `sip_method_eq` / `sip_header_eq` |
 | ShareInt capture (shared mut via RC handle) | Done seed — `share_capture_test` |
