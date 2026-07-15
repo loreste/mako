@@ -163,14 +163,42 @@ static inline int64_t mako_sst_get(MakoSst *s, int64_t key);
 static inline int64_t mako_sst_free(MakoSst *s);
 static inline MakoSst *mako_sst_build(MakoString path, int64_t *keys, int64_t *vals, int64_t n);
 
-/* ---- LSM seed: memtable (hash) + L0 run + L1 SST ---- */
+/* ---- LSM seed: memtable + L0 run + multi-level SST (L1..L3) ---- */
+#define MAKO_LSM_SST_LEVELS 3
+#define MAKO_LSM_COMPACT_MAX 4096
+
 typedef struct {
     MakoHIndex *mem;
     MakoWal *run; /* L0: append-only flush log */
-    MakoSst *sst; /* L1: compacted sorted run (owned) */
+    MakoSst *levels[MAKO_LSM_SST_LEVELS]; /* [0]=L1 (newest SST) … [2]=L3 */
     int64_t flushes;
     int64_t compactions;
 } MakoLsm;
+
+static inline void mako_lsm_kv_put(
+    int64_t *keys, int64_t *vals, int *n, int maxn, int64_t k, int64_t v
+) {
+    for (int i = 0; i < *n; i++) {
+        if (keys[i] == k) {
+            vals[i] = v;
+            return;
+        }
+    }
+    if (*n < maxn) {
+        keys[*n] = k;
+        vals[*n] = v;
+        (*n)++;
+    }
+}
+
+static inline void mako_lsm_seed_from_sst(
+    MakoSst *s, int64_t *keys, int64_t *vals, int *n, int maxn
+) {
+    if (!s || !s->keys) return;
+    for (int64_t i = 0; i < s->n && *n < maxn; i++) {
+        mako_lsm_kv_put(keys, vals, n, maxn, s->keys[i], s->vals[i]);
+    }
+}
 
 static inline MakoLsm *mako_lsm_new(int64_t mem_cap) {
     MakoLsm *l = (MakoLsm *)calloc(1, sizeof(MakoLsm));
@@ -216,8 +244,13 @@ static inline int64_t mako_lsm_get(MakoLsm *l, int64_t key) {
         }
         if (found != -1) return found;
     }
-    /* L1 SST */
-    if (l->sst) return mako_sst_get(l->sst, key);
+    /* SST levels: lower index is newer */
+    for (int i = 0; i < MAKO_LSM_SST_LEVELS; i++) {
+        if (l->levels[i]) {
+            int64_t g = mako_sst_get(l->levels[i], key);
+            if (g != -1) return g;
+        }
+    }
     return -1;
 }
 
@@ -242,22 +275,13 @@ static inline int64_t mako_lsm_flush(MakoLsm *l) {
     return 0;
 }
 
-/* Compact L0 run (+ optional old SST) into a new L1 SST; truncate run. */
+/* Compact L0 run (+ optional L1 SST) into a new L1 SST; truncate run. */
 static inline int64_t mako_lsm_compact(MakoLsm *l, MakoString sst_path) {
     if (!l || !l->run || !sst_path.data) return -1;
-#define MAKO_LSM_COMPACT_MAX 4096
     int64_t keys[MAKO_LSM_COMPACT_MAX];
     int64_t vals[MAKO_LSM_COMPACT_MAX];
     int n = 0;
-    /* Seed from existing SST */
-    if (l->sst && l->sst->keys) {
-        for (int64_t i = 0; i < l->sst->n && n < MAKO_LSM_COMPACT_MAX; i++) {
-            keys[n] = l->sst->keys[i];
-            vals[n] = l->sst->vals[i];
-            n++;
-        }
-    }
-    /* Overlay L0 run (later wins) */
+    mako_lsm_seed_from_sst(l->levels[0], keys, vals, &n, MAKO_LSM_COMPACT_MAX);
     int64_t off = 0;
     for (;;) {
         MakoString rec = mako_wal_read_at(l->run, off);
@@ -265,19 +289,7 @@ static inline int64_t mako_lsm_compact(MakoLsm *l, MakoString sst_path) {
         if (rec.data && rec.len > 2 && rec.data[0] == 'P') {
             long long k = 0, val = 0;
             if (sscanf(rec.data, "P,%lld,%lld", &k, &val) == 2) {
-                int found = 0;
-                for (int i = 0; i < n; i++) {
-                    if (keys[i] == (int64_t)k) {
-                        vals[i] = (int64_t)val;
-                        found = 1;
-                        break;
-                    }
-                }
-                if (!found && n < MAKO_LSM_COMPACT_MAX) {
-                    keys[n] = (int64_t)k;
-                    vals[n] = (int64_t)val;
-                    n++;
-                }
+                mako_lsm_kv_put(keys, vals, &n, MAKO_LSM_COMPACT_MAX, (int64_t)k, (int64_t)val);
             }
         }
         off = mako_wal_next_off();
@@ -286,9 +298,8 @@ static inline int64_t mako_lsm_compact(MakoLsm *l, MakoString sst_path) {
     }
     MakoSst *ns = mako_sst_build(sst_path, keys, vals, n);
     if (!ns) return -1;
-    if (l->sst) mako_sst_free(l->sst);
-    l->sst = ns;
-    /* Truncate L0 run */
+    if (l->levels[0]) mako_sst_free(l->levels[0]);
+    l->levels[0] = ns;
 #if !defined(_WIN32)
     if (l->run && l->run->fd >= 0) {
         if (ftruncate(l->run->fd, 0) != 0) return -1;
@@ -297,7 +308,50 @@ static inline int64_t mako_lsm_compact(MakoLsm *l, MakoString sst_path) {
 #endif
     l->compactions++;
     return n;
-#undef MAKO_LSM_COMPACT_MAX
+}
+
+/* Promote / merge newest SST level into the next deeper level (L1→L2→L3). */
+static inline int64_t mako_lsm_compact_down(MakoLsm *l, MakoString sst_path) {
+    if (!l || !sst_path.data) return -1;
+    int src = -1;
+    for (int i = 0; i < MAKO_LSM_SST_LEVELS - 1; i++) {
+        if (l->levels[i]) {
+            src = i;
+            break;
+        }
+    }
+    if (src < 0) return -1;
+    int dst = src + 1;
+    int64_t keys[MAKO_LSM_COMPACT_MAX];
+    int64_t vals[MAKO_LSM_COMPACT_MAX];
+    int n = 0;
+    /* Deeper level first (older), then overlay newer src. */
+    mako_lsm_seed_from_sst(l->levels[dst], keys, vals, &n, MAKO_LSM_COMPACT_MAX);
+    mako_lsm_seed_from_sst(l->levels[src], keys, vals, &n, MAKO_LSM_COMPACT_MAX);
+    MakoSst *ns = mako_sst_build(sst_path, keys, vals, n);
+    if (!ns) return -1;
+    if (l->levels[dst]) mako_sst_free(l->levels[dst]);
+    if (l->levels[src]) mako_sst_free(l->levels[src]);
+    l->levels[src] = NULL;
+    l->levels[dst] = ns;
+    l->compactions++;
+    return n;
+}
+
+/* Number of non-empty SST levels (0..3). */
+static inline int64_t mako_lsm_sst_levels(MakoLsm *l) {
+    if (!l) return 0;
+    int64_t c = 0;
+    for (int i = 0; i < MAKO_LSM_SST_LEVELS; i++)
+        if (l->levels[i]) c++;
+    return c;
+}
+
+/* Key count at SST level (1=L1 … 3=L3); 0 if empty/invalid. */
+static inline int64_t mako_lsm_level_len(MakoLsm *l, int64_t level) {
+    if (!l || level < 1 || level > MAKO_LSM_SST_LEVELS) return 0;
+    MakoSst *s = l->levels[(int)level - 1];
+    return s ? s->n : 0;
 }
 
 static inline int64_t mako_lsm_flushes(MakoLsm *l) {
@@ -311,7 +365,9 @@ static inline int64_t mako_lsm_compactions(MakoLsm *l) {
 static inline int64_t mako_lsm_free(MakoLsm *l) {
     if (!l) return 0;
     mako_hindex_free(l->mem);
-    if (l->sst) mako_sst_free(l->sst);
+    for (int i = 0; i < MAKO_LSM_SST_LEVELS; i++) {
+        if (l->levels[i]) mako_sst_free(l->levels[i]);
+    }
     free(l);
     return 0;
 }
@@ -778,6 +834,186 @@ static inline int64_t mako_pcache_free(MakoPageCache *c) {
         if (c->slots[i].used && c->slots[i].page) mako_page_free(c->slots[i].page);
     }
     free(c);
+    return 0;
+}
+
+/* ---- Page-backed B-tree seed: nodes live in MakoPage slots ---- */
+#define MAKO_PBT_MAX_KEYS 7
+#define MAKO_PBT_MAX_PAGES 64
+#define MAKO_PBT_PAGE_BYTES 4096
+/* Layout in page data as int64_t[]:
+ * [0] leaf (1/0), [1] n,
+ * [2 .. 2+MAX) keys, [2+MAX .. 2+2*MAX) vals,
+ * [2+2*MAX .. 2+2*MAX+MAX+1) child page ids (-1 empty).
+ */
+#define MAKO_PBT_OFF_LEAF 0
+#define MAKO_PBT_OFF_N 1
+#define MAKO_PBT_OFF_KEYS 2
+#define MAKO_PBT_OFF_VALS (2 + MAKO_PBT_MAX_KEYS)
+#define MAKO_PBT_OFF_KIDS (2 + 2 * MAKO_PBT_MAX_KEYS)
+
+typedef struct {
+    MakoPage *pages[MAKO_PBT_MAX_PAGES];
+    int64_t root; /* page id */
+    int64_t npages;
+    int64_t count;
+} MakoPageBTree;
+
+static inline int64_t *mako_pbt_raw(MakoPage *p) {
+    return p && p->data ? (int64_t *)(void *)p->data : NULL;
+}
+
+static inline int64_t mako_pbt_alloc_page(MakoPageBTree *t) {
+    if (!t || t->npages >= MAKO_PBT_MAX_PAGES) return -1;
+    int64_t id = t->npages;
+    MakoPage *p = mako_page_alloc(MAKO_PBT_PAGE_BYTES);
+    if (!p) return -1;
+    t->pages[id] = p;
+    t->npages++;
+    int64_t *r = mako_pbt_raw(p);
+    if (!r) return -1;
+    r[MAKO_PBT_OFF_LEAF] = 1;
+    r[MAKO_PBT_OFF_N] = 0;
+    for (int i = 0; i <= MAKO_PBT_MAX_KEYS; i++) r[MAKO_PBT_OFF_KIDS + i] = -1;
+    return id;
+}
+
+static inline MakoPageBTree *mako_pbtree_new(void) {
+    MakoPageBTree *t = (MakoPageBTree *)calloc(1, sizeof(MakoPageBTree));
+    if (!t) return NULL;
+    int64_t root = mako_pbt_alloc_page(t);
+    if (root < 0) {
+        free(t);
+        return NULL;
+    }
+    t->root = root;
+    return t;
+}
+
+static inline int64_t mako_pbtree_get_node(MakoPageBTree *t, int64_t pid, int64_t key) {
+    if (!t || pid < 0 || pid >= t->npages) return -1;
+    int64_t *r = mako_pbt_raw(t->pages[pid]);
+    if (!r) return -1;
+    int n = (int)r[MAKO_PBT_OFF_N];
+    int i = 0;
+    while (i < n && key > r[MAKO_PBT_OFF_KEYS + i]) i++;
+    if (i < n && key == r[MAKO_PBT_OFF_KEYS + i]) return r[MAKO_PBT_OFF_VALS + i];
+    if (r[MAKO_PBT_OFF_LEAF]) return -1;
+    return mako_pbtree_get_node(t, r[MAKO_PBT_OFF_KIDS + i], key);
+}
+
+static inline int64_t mako_pbtree_get(MakoPageBTree *t, int64_t key) {
+    return t ? mako_pbtree_get_node(t, t->root, key) : -1;
+}
+
+static inline void mako_pbt_split_child(MakoPageBTree *t, int64_t pid, int i) {
+    int64_t *parent = mako_pbt_raw(t->pages[pid]);
+    int64_t yid = parent[MAKO_PBT_OFF_KIDS + i];
+    int64_t *y = mako_pbt_raw(t->pages[yid]);
+    int64_t zid = mako_pbt_alloc_page(t);
+    if (zid < 0) return;
+    int64_t *z = mako_pbt_raw(t->pages[zid]);
+    int mid = MAKO_PBT_MAX_KEYS / 2;
+    z[MAKO_PBT_OFF_LEAF] = y[MAKO_PBT_OFF_LEAF];
+    z[MAKO_PBT_OFF_N] = MAKO_PBT_MAX_KEYS - mid - 1;
+    for (int j = 0; j < (int)z[MAKO_PBT_OFF_N]; j++) {
+        z[MAKO_PBT_OFF_KEYS + j] = y[MAKO_PBT_OFF_KEYS + j + mid + 1];
+        z[MAKO_PBT_OFF_VALS + j] = y[MAKO_PBT_OFF_VALS + j + mid + 1];
+    }
+    if (!y[MAKO_PBT_OFF_LEAF]) {
+        for (int j = 0; j <= (int)z[MAKO_PBT_OFF_N]; j++)
+            z[MAKO_PBT_OFF_KIDS + j] = y[MAKO_PBT_OFF_KIDS + j + mid + 1];
+    }
+    y[MAKO_PBT_OFF_N] = mid;
+    int pn = (int)parent[MAKO_PBT_OFF_N];
+    for (int j = pn; j >= i + 1; j--)
+        parent[MAKO_PBT_OFF_KIDS + j + 1] = parent[MAKO_PBT_OFF_KIDS + j];
+    parent[MAKO_PBT_OFF_KIDS + i + 1] = zid;
+    for (int j = pn - 1; j >= i; j--) {
+        parent[MAKO_PBT_OFF_KEYS + j + 1] = parent[MAKO_PBT_OFF_KEYS + j];
+        parent[MAKO_PBT_OFF_VALS + j + 1] = parent[MAKO_PBT_OFF_VALS + j];
+    }
+    parent[MAKO_PBT_OFF_KEYS + i] = y[MAKO_PBT_OFF_KEYS + mid];
+    parent[MAKO_PBT_OFF_VALS + i] = y[MAKO_PBT_OFF_VALS + mid];
+    parent[MAKO_PBT_OFF_N] = pn + 1;
+}
+
+static inline void mako_pbt_insert_nonfull(MakoPageBTree *t, int64_t pid, int64_t key, int64_t val) {
+    int64_t *r = mako_pbt_raw(t->pages[pid]);
+    int i = (int)r[MAKO_PBT_OFF_N] - 1;
+    if (r[MAKO_PBT_OFF_LEAF]) {
+        while (i >= 0 && key < r[MAKO_PBT_OFF_KEYS + i]) {
+            r[MAKO_PBT_OFF_KEYS + i + 1] = r[MAKO_PBT_OFF_KEYS + i];
+            r[MAKO_PBT_OFF_VALS + i + 1] = r[MAKO_PBT_OFF_VALS + i];
+            i--;
+        }
+        if (i >= 0 && r[MAKO_PBT_OFF_KEYS + i] == key) {
+            r[MAKO_PBT_OFF_VALS + i] = val;
+            return;
+        }
+        r[MAKO_PBT_OFF_KEYS + i + 1] = key;
+        r[MAKO_PBT_OFF_VALS + i + 1] = val;
+        r[MAKO_PBT_OFF_N]++;
+    } else {
+        while (i >= 0 && key < r[MAKO_PBT_OFF_KEYS + i]) i--;
+        i++;
+        if (i < (int)r[MAKO_PBT_OFF_N] && r[MAKO_PBT_OFF_KEYS + i] == key) {
+            r[MAKO_PBT_OFF_VALS + i] = val;
+            return;
+        }
+        int64_t cid = r[MAKO_PBT_OFF_KIDS + i];
+        int64_t *ch = mako_pbt_raw(t->pages[cid]);
+        if (ch && ch[MAKO_PBT_OFF_N] == MAKO_PBT_MAX_KEYS) {
+            mako_pbt_split_child(t, pid, i);
+            r = mako_pbt_raw(t->pages[pid]);
+            if (key > r[MAKO_PBT_OFF_KEYS + i]) i++;
+            else if (key == r[MAKO_PBT_OFF_KEYS + i]) {
+                r[MAKO_PBT_OFF_VALS + i] = val;
+                return;
+            }
+        }
+        mako_pbt_insert_nonfull(t, r[MAKO_PBT_OFF_KIDS + i], key, val);
+    }
+}
+
+static inline int64_t mako_pbtree_put(MakoPageBTree *t, int64_t key, int64_t val) {
+    if (!t) return -1;
+    int64_t *root = mako_pbt_raw(t->pages[t->root]);
+    if (!root) return -1;
+    /* Count only new keys; in-place updates keep len stable. */
+    int is_new = (mako_pbtree_get(t, key) == -1) ? 1 : 0;
+    if (root[MAKO_PBT_OFF_N] == MAKO_PBT_MAX_KEYS) {
+        int64_t old = t->root;
+        int64_t sid = mako_pbt_alloc_page(t);
+        if (sid < 0) return -1;
+        int64_t *s = mako_pbt_raw(t->pages[sid]);
+        s[MAKO_PBT_OFF_LEAF] = 0;
+        s[MAKO_PBT_OFF_N] = 0;
+        s[MAKO_PBT_OFF_KIDS + 0] = old;
+        t->root = sid;
+        mako_pbt_split_child(t, sid, 0);
+        mako_pbt_insert_nonfull(t, sid, key, val);
+    } else {
+        mako_pbt_insert_nonfull(t, t->root, key, val);
+    }
+    if (is_new) t->count++;
+    return 0;
+}
+
+static inline int64_t mako_pbtree_len(MakoPageBTree *t) {
+    return t ? t->count : 0;
+}
+
+static inline int64_t mako_pbtree_pages(MakoPageBTree *t) {
+    return t ? t->npages : 0;
+}
+
+static inline int64_t mako_pbtree_free(MakoPageBTree *t) {
+    if (!t) return 0;
+    for (int64_t i = 0; i < t->npages; i++) {
+        if (t->pages[i]) mako_page_free(t->pages[i]);
+    }
+    free(t);
     return 0;
 }
 

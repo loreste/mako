@@ -215,7 +215,9 @@ Storage depth, multiplayer helpers, soft graphics, host AI, debug frame.
 | Area | Surface | Tests |
 |------|---------|-------|
 | B-tree | `btree_new` / `put` / `get` / `save` / `load` / `free` | `domain_tracks_test` · `storage_depth_test` |
-| LSM | `lsm_new` / `put` / `get` / `flush` / `compact` / `attach_run` | `domain_tracks_test` |
+| Page B-tree | `pbtree_new` / `put` / `get` / `pages` / `free` (nodes in `MakoPage`) | `domain_tracks_test` |
+| LSM | `lsm_new` / `put` / `get` / `flush` / `compact` / `compact_down` / `attach_run` | `domain_tracks_test` |
+| LSM levels | `lsm_sst_levels` / `lsm_level_len` (L1–L3 SST) | `domain_tracks_test` |
 | SST | `sst_build4` / `sst_get` / `sst_len` / `sst_free` | `storage_depth_test` |
 | Crash recovery | `store_recover_wal` | `domain_tracks_test` |
 | Hot reload | `file_mtime_ns` / `hot_reload_watch` / `hot_reload_changed` | `domain_tracks_test` |

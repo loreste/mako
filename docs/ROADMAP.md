@@ -301,7 +301,9 @@ Percentages are weighted; update when a task flips.
 - [x] On-disk btree save/load · sorted SST · page cache LRU · MVCC GC · SIMD dot/sum seed.
 - [x] GPU AI depth host seeds (RoPE, KV-cache, gemm2x2, f16 bits) + OpenCL matmul.
 - [x] LSM L0→L1 compact seed (`lsm_compact`) · `store_recover_wal` crash replay · `hot_reload_*` mtime watch.
-- [ ] Storage product polish: multi-level LSM beyond L0/L1 · page-backed btree productization.
+- [x] Multi-level LSM (L1–L3 via `lsm_compact_down` / `lsm_sst_levels` / `lsm_level_len`).
+- [x] Page-backed btree seed (`pbtree_*` — nodes in `MakoPage`).
+- [ ] Storage product polish: disk page manager · bloom filters · range scans productization.
 - [ ] Real windowing backends / GPU shaders / asset pipelines.
 - [ ] Full multiplayer netcode product.
 - [ ] More quant formats · Metal-native / CUDA / Vulkan backends.

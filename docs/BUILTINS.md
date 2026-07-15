@@ -322,11 +322,13 @@ config/log updates. Tests: `examples/testing/fs_storage_test.mko`.
 | `store_new` / `store_put` / `store_get` / `store_begin` / `store_commit` / `store_rollback` | … | Txn KV; optional `store_attach_wal` |
 | `store_recover_wal` | `store_recover_wal(s, w) -> int` | Replay WAL `P`/`D` records into store (crash recovery seed) |
 | `btree_new` / `btree_put` / `btree_get` / `btree_save` / `btree_load` / `btree_free` | … | In-memory B-tree + disk snapshot |
+| `pbtree_new` / `pbtree_put` / `pbtree_get` / `pbtree_len` / `pbtree_pages` / `pbtree_free` | … | Page-backed B-tree (nodes in `MakoPage`) |
 | `sst_build4` / `sst_get` / `sst_len` / `sst_free` | … | Sorted run + binary search |
 | `pcache_new` / `pcache_get` / `pcache_hits` / `pcache_misses` / `pcache_free` | … | 16-slot LRU page cache |
 | `mvcc_new` / `mvcc_begin` / `mvcc_put` / `mvcc_get` / `mvcc_gc` / `mvcc_live` / `mvcc_free` | … | Multi-version KV + GC |
 | `lsm_new` / `lsm_put` / `lsm_get` / `lsm_flush` / `lsm_attach_run` / `lsm_free` | … | Memtable + L0 run WAL |
-| `lsm_compact` / `lsm_compactions` / `lsm_flushes` | `lsm_compact(l, path) -> int` | Merge L0 (+ old L1) → SST; truncate run |
+| `lsm_compact` / `lsm_compact_down` / `lsm_compactions` / `lsm_flushes` | … | L0→L1 compact; promote/merge L1→L2→L3 |
+| `lsm_sst_levels` / `lsm_level_len` | `lsm_level_len(l, level) -> int` | Non-empty SST count; key count at level 1–3 |
 | `file_mtime_ns` | `file_mtime_ns(path) -> int` | Nanosecond mtime (`-1` if missing) |
 | `hot_reload_watch` / `hot_reload_changed` | `hot_reload_watch(path) -> int` | Mtime watch slots; `changed` returns 1 when updated |
 | `snap_encode2` / `snap_encode4` / `snap_get` / `snap_count` / `snap_predict` / `snap_reconcile` | … | Multiplayer snapshot seed |

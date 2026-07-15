@@ -8347,6 +8347,7 @@ impl Codegen {
                 "KvCache" => "MakoKvCache*".into(),
                 "Sst" => "MakoSst*".into(),
                 "PageCache" => "MakoPageCache*".into(),
+                "PageBTree" => "MakoPageBTree*".into(),
                 "EvLoop" => "MakoEvLoop*".into(),
                 "Buf" => "MakoBuf*".into(),
                 "GameUDP" => "MakoGameUDP*".into(),
@@ -13029,6 +13030,20 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             let (_, p) = self.emit_expr(&args[1]);
                             return ("int64_t".into(), format!("mako_lsm_compact({l}, {p})"));
                         }
+                        "lsm_compact_down" => {
+                            let (_, l) = self.emit_expr(&args[0]);
+                            let (_, p) = self.emit_expr(&args[1]);
+                            return ("int64_t".into(), format!("mako_lsm_compact_down({l}, {p})"));
+                        }
+                        "lsm_sst_levels" => {
+                            let (_, l) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_lsm_sst_levels({l})"));
+                        }
+                        "lsm_level_len" => {
+                            let (_, l) = self.emit_expr(&args[0]);
+                            let (_, lv) = self.emit_expr(&args[1]);
+                            return ("int64_t".into(), format!("mako_lsm_level_len({l}, {lv})"));
+                        }
                         "lsm_compactions" => {
                             let (_, l) = self.emit_expr(&args[0]);
                             return ("int64_t".into(), format!("mako_lsm_compactions({l})"));
@@ -13036,6 +13051,34 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         "lsm_free" => {
                             let (_, l) = self.emit_expr(&args[0]);
                             return ("int64_t".into(), format!("mako_lsm_free({l})"));
+                        }
+                        "pbtree_new" => {
+                            let tmp = self.fresh("pbt");
+                            self.line(&format!("MakoPageBTree *{tmp} = mako_pbtree_new();"));
+                            return ("MakoPageBTree*".into(), tmp);
+                        }
+                        "pbtree_put" => {
+                            let (_, t) = self.emit_expr(&args[0]);
+                            let (_, k) = self.emit_expr(&args[1]);
+                            let (_, v) = self.emit_expr(&args[2]);
+                            return ("int64_t".into(), format!("mako_pbtree_put({t}, {k}, {v})"));
+                        }
+                        "pbtree_get" => {
+                            let (_, t) = self.emit_expr(&args[0]);
+                            let (_, k) = self.emit_expr(&args[1]);
+                            return ("int64_t".into(), format!("mako_pbtree_get({t}, {k})"));
+                        }
+                        "pbtree_len" => {
+                            let (_, t) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_pbtree_len({t})"));
+                        }
+                        "pbtree_pages" => {
+                            let (_, t) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_pbtree_pages({t})"));
+                        }
+                        "pbtree_free" => {
+                            let (_, t) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_pbtree_free({t})"));
                         }
                         "store_recover_wal" => {
                             let (_, s) = self.emit_expr(&args[0]);

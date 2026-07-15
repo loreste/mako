@@ -1546,8 +1546,17 @@ impl TypeChecker {
         fns.insert("lsm_flush".into(), Type::Fn(vec![Type::Named("Lsm".into())], Box::new(Type::Int)));
         fns.insert("lsm_flushes".into(), Type::Fn(vec![Type::Named("Lsm".into())], Box::new(Type::Int)));
         fns.insert("lsm_compact".into(), Type::Fn(vec![Type::Named("Lsm".into()), Type::String], Box::new(Type::Int)));
+        fns.insert("lsm_compact_down".into(), Type::Fn(vec![Type::Named("Lsm".into()), Type::String], Box::new(Type::Int)));
+        fns.insert("lsm_sst_levels".into(), Type::Fn(vec![Type::Named("Lsm".into())], Box::new(Type::Int)));
+        fns.insert("lsm_level_len".into(), Type::Fn(vec![Type::Named("Lsm".into()), Type::Int], Box::new(Type::Int)));
         fns.insert("lsm_compactions".into(), Type::Fn(vec![Type::Named("Lsm".into())], Box::new(Type::Int)));
         fns.insert("lsm_free".into(), Type::Fn(vec![Type::Named("Lsm".into())], Box::new(Type::Int)));
+        fns.insert("pbtree_new".into(), Type::Fn(vec![], Box::new(Type::Named("PageBTree".into()))));
+        fns.insert("pbtree_put".into(), Type::Fn(vec![Type::Named("PageBTree".into()), Type::Int, Type::Int], Box::new(Type::Int)));
+        fns.insert("pbtree_get".into(), Type::Fn(vec![Type::Named("PageBTree".into()), Type::Int], Box::new(Type::Int)));
+        fns.insert("pbtree_len".into(), Type::Fn(vec![Type::Named("PageBTree".into())], Box::new(Type::Int)));
+        fns.insert("pbtree_pages".into(), Type::Fn(vec![Type::Named("PageBTree".into())], Box::new(Type::Int)));
+        fns.insert("pbtree_free".into(), Type::Fn(vec![Type::Named("PageBTree".into())], Box::new(Type::Int)));
         fns.insert(
             "store_recover_wal".into(),
             Type::Fn(

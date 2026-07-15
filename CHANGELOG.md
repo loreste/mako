@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Multi-level LSM · page-backed btree
+
+- **LSM levels:** `levels[3]` L1–L3 SSTs; `lsm_compact_down` promotes/merges L1→L2→L3;
+  `lsm_sst_levels` / `lsm_level_len(level)`.
+- **Page B-tree:** `pbtree_new` / `put` / `get` / `len` / `pages` / `free` — nodes stored
+  in `MakoPage` slots (split/grow).
+- Tests: `TestLsmMultiLevel`, `TestPageBTree`.
+
 ### Storage polish · hot reload seeds
 
 - **LSM compact:** `lsm_compact(l, path)` merges L0 run (+ prior L1 SST) into a new
