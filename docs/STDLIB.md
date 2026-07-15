@@ -267,6 +267,8 @@ import "strings"
 | `str_len` / `str_eq` / `str_contains` | length, equality, substring |
 | `str_has_prefix` / `str_has_suffix` | prefix/suffix |
 | `str_index` / `str_last_index` | find (−1 if missing) |
+| `str_slice_eq` / `str_slice_ci_eq` / `str_slice_contains` / `str_slice_index` | zero-copy region ops (no substring alloc) |
+| `str_at_eq` / `str_byte_at` | prefix-at-offset compare · byte load |
 | `str_trim` / `str_trim_space` / `str_trim_left` / `str_trim_right` | trim |
 | `str_to_lower` / `str_to_upper` / `str_repeat` | case / repeat |
 | `str_replace` | replace all |
@@ -290,6 +292,12 @@ fn main() {
     print_int(str_contains("hello mako", "mako"))    // 1
     print_int(str_has_prefix("/api/users", "/api"))   // 1
     print_int(str_index("abcdef", "cd"))              // 2
+
+    // Zero-copy region ops (no substring allocation)
+    let line = "METHOD /path HTTP/1.1"
+    print_int(str_slice_eq(line, 0, 6, "METHOD"))    // 1
+    print_int(str_slice_index(line, 0, len(line), " /")) // 6
+    print_int(str_byte_at(line, 0))                  // 77 ('M')
 
     // Trim and case
     let trimmed = str_trim_space("  hello  ")
@@ -1450,8 +1458,8 @@ fn main() {
 **This is the platform SIP library for proxies** (also usable for UAs/registrars).
 Runtime: `runtime/mako_sip.h`. Pack: **`std/sip`** (`import sip` / pack exports).
 
-Not a full softswitch. **Is** the first-class data-path API for products like
-Madis: message parse/build, Via/RR hop, Digest challenges, TCP/TLS framing.
+Not a full softswitch. **Is** the first-class proxy data-path API:
+message parse/build, Via/RR hop, Digest challenges, TCP/TLS framing.
 You own timers, dialog maps, routing, and media (e.g. rtpengine).
 **Out of scope:** SIPREC, WebRTC, full B2BUA engine.
 

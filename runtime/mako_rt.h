@@ -1509,6 +1509,86 @@ static inline bool mako_str_contains(MakoString hay, MakoString needle) {
     return false;
 }
 
+/* ---- Zero-copy string regions (language hot path; no malloc) ----
+ * Compare/search within s[off .. off+len) without allocating a substring.
+ * Bounds-safe: out-of-range returns false / -1.
+ */
+
+static inline int mako_str_ci_eq_bytes(const char *a, size_t al, const char *b, size_t bl) {
+    if (al != bl) return 0;
+    for (size_t i = 0; i < al; i++) {
+        char ca = a[i], cb = b[i];
+        if (ca >= 'A' && ca <= 'Z') ca = (char)(ca - 'A' + 'a');
+        if (cb >= 'A' && cb <= 'Z') cb = (char)(cb - 'A' + 'a');
+        if (ca != cb) return 0;
+    }
+    return 1;
+}
+
+/* Case-sensitive equality of s[off:off+len] vs other. */
+static inline int64_t mako_str_slice_eq(MakoString s, int64_t off, int64_t len, MakoString other) {
+    if (!s.data || off < 0 || len < 0) return 0;
+    if ((size_t)off + (size_t)len > s.len) return 0;
+    size_t ol = other.data ? other.len : 0;
+    if ((size_t)len != ol) return 0;
+    if (len == 0) return 1;
+    if (!other.data) return 0;
+    return memcmp(s.data + (size_t)off, other.data, (size_t)len) == 0 ? 1 : 0;
+}
+
+static inline int64_t mako_str_slice_ci_eq(MakoString s, int64_t off, int64_t len, MakoString other) {
+    if (!s.data || off < 0 || len < 0) return 0;
+    if ((size_t)off + (size_t)len > s.len) return 0;
+    size_t ol = other.data ? other.len : 0;
+    return mako_str_ci_eq_bytes(
+               s.data + (size_t)off, (size_t)len, other.data ? other.data : "", ol
+           )
+               ? 1
+               : 0;
+}
+
+/* True if needle occurs inside s[off:off+len]. */
+static inline int64_t mako_str_slice_contains(
+    MakoString s, int64_t off, int64_t len, MakoString needle
+) {
+    if (!s.data || off < 0 || len < 0) return 0;
+    if ((size_t)off + (size_t)len > s.len) return 0;
+    if (!needle.data || needle.len == 0) return 1;
+    if (needle.len > (size_t)len) return 0;
+    const char *hay = s.data + (size_t)off;
+    size_t lim = (size_t)len - needle.len;
+    for (size_t i = 0; i <= lim; i++) {
+        if (memcmp(hay + i, needle.data, needle.len) == 0) return 1;
+    }
+    return 0;
+}
+
+/* First index of needle in s[off:off+len], or -1. Relative to start of s (absolute offset). */
+static inline int64_t mako_str_slice_index(MakoString s, int64_t off, int64_t len, MakoString needle) {
+    if (!s.data || off < 0 || len < 0) return -1;
+    if ((size_t)off + (size_t)len > s.len) return -1;
+    if (!needle.data || needle.len == 0) return off;
+    if (needle.len > (size_t)len) return -1;
+    const char *hay = s.data + (size_t)off;
+    size_t lim = (size_t)len - needle.len;
+    for (size_t i = 0; i <= lim; i++) {
+        if (memcmp(hay + i, needle.data, needle.len) == 0) return off + (int64_t)i;
+    }
+    return -1;
+}
+
+/* Byte at index, or -1 if OOB. */
+static inline int64_t mako_str_byte_at(MakoString s, int64_t i) {
+    if (!s.data || i < 0 || (size_t)i >= s.len) return -1;
+    return (int64_t)(unsigned char)s.data[i];
+}
+
+/* Compare s[off..] prefix of length other.len with other (no alloc). */
+static inline int64_t mako_str_at_eq(MakoString s, int64_t off, MakoString other) {
+    size_t ol = other.data ? other.len : 0;
+    return mako_str_slice_eq(s, off, (int64_t)ol, other);
+}
+
 /* True if Err message contains needle (Go errors.Is-style substring match on wrap chain). */
 static inline int64_t mako_error_is(MakoResultInt r, MakoString needle) {
     if (r.ok) return 0;

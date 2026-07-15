@@ -63,6 +63,12 @@ Packs: `std/fmt`, `std/print`. Tests: `fmt_print_test.mko`. Demo: `examples/fmt_
 | `str_has_suffix` | `str_has_suffix(s: string, suffix: string) -> bool` | Check if string ends with suffix |
 | `str_index` | `str_index(s: string, substr: string) -> int` | Return index of first occurrence of substr, or -1 |
 | `str_last_index` | `str_last_index(s: string, substr: string) -> int` | Return index of last occurrence of substr, or -1 |
+| `str_slice_eq` | `str_slice_eq(s: string, off: int, len: int, other: string) -> int` | Zero-copy: compare `s[off:off+len]` to `other` (1/0; OOB → 0) |
+| `str_slice_ci_eq` | `str_slice_ci_eq(s, off, len, other) -> int` | Zero-copy case-insensitive region equality |
+| `str_slice_contains` | `str_slice_contains(s, off, len, needle) -> int` | Zero-copy: needle inside `s[off:off+len]` |
+| `str_slice_index` | `str_slice_index(s, off, len, needle) -> int` | First absolute index of needle in region, or −1 |
+| `str_at_eq` | `str_at_eq(s: string, off: int, other: string) -> int` | Zero-copy: `s[off..]` prefix equals `other` |
+| `str_byte_at` | `str_byte_at(s: string, i: int) -> int` | Byte at index (0–255), or −1 if OOB |
 | `str_trim` | `str_trim(s: string, cutset: string) -> string` | Trim characters in cutset from both ends |
 | `str_trim_space` | `str_trim_space(s: string) -> string` | Trim whitespace from both ends |
 | `str_trim_left` | `str_trim_left(s: string, cutset: string) -> string` | Trim characters in cutset from the left |
@@ -596,7 +602,7 @@ Use **`wall_*` / `now_ms`** only for logs and absolute calendar time.
 
 **Platform SIP library for proxies** (UAs/registrars too). Runtime
 `runtime/mako_sip.h`; pack **`std/sip`**. Not a softswitch — the first-class
-data-path API (Madis and similar). RFCs 3261, 3581, Digest MD5. You own timers,
+proxy data-path API. RFCs 3261, 3581, Digest MD5. You own timers,
 dialogs, routing, media (rtpengine). **Out of scope:** SIPREC, WebRTC, full B2BUA.
 
 | Function | Signature | Description |

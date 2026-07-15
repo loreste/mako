@@ -1,0 +1,42 @@
+// Language zero-copy string region ops (no substring allocation).
+
+fn TestStrSliceEq() {
+    let s = "Hello, World"
+    assert_eq(str_slice_eq(s, 0, 5, "Hello"), 1)
+    assert_eq(str_slice_eq(s, 7, 5, "World"), 1)
+    assert_eq(str_slice_eq(s, 0, 5, "hello"), 0)
+    assert_eq(str_slice_ci_eq(s, 0, 5, "HELLO"), 1)
+    assert_eq(str_slice_eq(s, 0, 0, ""), 1)
+    // OOB
+    assert_eq(str_slice_eq(s, 10, 5, "x"), 0)
+    assert_eq(str_slice_eq(s, -1, 1, "H"), 0)
+}
+
+fn TestStrSliceContainsIndex() {
+    let s = "INVITE sip:user@host SIP/2.0"
+    assert_eq(str_slice_contains(s, 0, len(s), "sip:"), 1)
+    assert_eq(str_slice_contains(s, 0, 6, "sip:"), 0) // only "INVITE"
+    assert_eq(str_slice_index(s, 0, len(s), "sip:"), 7)
+    assert_eq(str_slice_index(s, 0, 6, "sip:"), -1)
+    assert_eq(str_at_eq(s, 0, "INVITE"), 1)
+    assert_eq(str_at_eq(s, 7, "sip:"), 1)
+    assert_eq(str_at_eq(s, 7, "SIP:"), 0)
+}
+
+fn TestStrByteAt() {
+    let s = "ABC"
+    assert_eq(str_byte_at(s, 0), 65)
+    assert_eq(str_byte_at(s, 2), 67)
+    assert_eq(str_byte_at(s, 3), -1)
+    assert_eq(str_byte_at(s, -1), -1)
+}
+
+fn TestStrSliceProtocolScan() {
+    // Typical line-oriented protocol: find CRLF without substr alloc
+    let msg = "METHOD /path\r\nHost: x\r\n\r\n"
+    let crlf = str_slice_index(msg, 0, len(msg), "\r\n")
+    assert(crlf > 0)
+    assert_eq(str_slice_eq(msg, 0, crlf, "METHOD /path"), 1)
+    let host_key = str_slice_index(msg, crlf + 2, len(msg) - (crlf + 2), "Host:")
+    assert(host_key >= 0)
+}

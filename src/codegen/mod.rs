@@ -11579,6 +11579,60 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                                 format!("(bool)mako_str_has_suffix({a}, {b})"),
                             );
                         }
+                        "str_slice_eq" => {
+                            let (_, s) = self.emit_expr(&args[0]);
+                            let (_, o) = self.emit_expr(&args[1]);
+                            let (_, l) = self.emit_expr(&args[2]);
+                            let (_, t) = self.emit_expr(&args[3]);
+                            return (
+                                "int64_t".into(),
+                                format!("mako_str_slice_eq({s}, {o}, {l}, {t})"),
+                            );
+                        }
+                        "str_slice_ci_eq" => {
+                            let (_, s) = self.emit_expr(&args[0]);
+                            let (_, o) = self.emit_expr(&args[1]);
+                            let (_, l) = self.emit_expr(&args[2]);
+                            let (_, t) = self.emit_expr(&args[3]);
+                            return (
+                                "int64_t".into(),
+                                format!("mako_str_slice_ci_eq({s}, {o}, {l}, {t})"),
+                            );
+                        }
+                        "str_slice_contains" => {
+                            let (_, s) = self.emit_expr(&args[0]);
+                            let (_, o) = self.emit_expr(&args[1]);
+                            let (_, l) = self.emit_expr(&args[2]);
+                            let (_, t) = self.emit_expr(&args[3]);
+                            return (
+                                "int64_t".into(),
+                                format!("mako_str_slice_contains({s}, {o}, {l}, {t})"),
+                            );
+                        }
+                        "str_slice_index" => {
+                            let (_, s) = self.emit_expr(&args[0]);
+                            let (_, o) = self.emit_expr(&args[1]);
+                            let (_, l) = self.emit_expr(&args[2]);
+                            let (_, t) = self.emit_expr(&args[3]);
+                            return (
+                                "int64_t".into(),
+                                format!("mako_str_slice_index({s}, {o}, {l}, {t})"),
+                            );
+                        }
+                        "str_at_eq" => {
+                            let (_, s) = self.emit_expr(&args[0]);
+                            let (_, o) = self.emit_expr(&args[1]);
+                            let (_, t) = self.emit_expr(&args[2]);
+                            return (
+                                "int64_t".into(),
+                                format!("mako_str_at_eq({s}, {o}, {t})"),
+                            );
+                        }
+                        "str_byte_at" => {
+                            let (_, s) = self.emit_expr(&args[0]);
+                            let (_, i) = self.emit_expr(&args[1]);
+                            return ("int64_t".into(), format!("mako_str_byte_at({s}, {i})"));
+                        }
                         "str_index" => {
                             let (_, a) = self.emit_expr(&args[0]);
                             let (_, b) = self.emit_expr(&args[1]);

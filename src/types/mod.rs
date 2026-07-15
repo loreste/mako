@@ -482,6 +482,43 @@ impl TypeChecker {
             "str_has_suffix".into(),
             Type::Fn(vec![Type::String, Type::String], Box::new(Type::Bool)),
         );
+        // Zero-copy region ops (no substring alloc)
+        fns.insert(
+            "str_slice_eq".into(),
+            Type::Fn(
+                vec![Type::String, Type::Int, Type::Int, Type::String],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "str_slice_ci_eq".into(),
+            Type::Fn(
+                vec![Type::String, Type::Int, Type::Int, Type::String],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "str_slice_contains".into(),
+            Type::Fn(
+                vec![Type::String, Type::Int, Type::Int, Type::String],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "str_slice_index".into(),
+            Type::Fn(
+                vec![Type::String, Type::Int, Type::Int, Type::String],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "str_at_eq".into(),
+            Type::Fn(vec![Type::String, Type::Int, Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "str_byte_at".into(),
+            Type::Fn(vec![Type::String, Type::Int], Box::new(Type::Int)),
+        );
         fns.insert(
             "str_index".into(),
             Type::Fn(vec![Type::String, Type::String], Box::new(Type::Int)),
