@@ -31085,6 +31085,19 @@ fn fold_const_c_env(
                 fold_const_c_block(else_block, consts, const_fns)
             }
         }
+        Expr::Match { scrutinee, arms } => {
+            let scrut = fold_const_c_env(scrutinee, consts, const_fns)?;
+            for arm in arms {
+                if let Some(binds) = match_const_c_pattern(&arm.pattern, scrut, consts, const_fns) {
+                    let mut env = consts.clone();
+                    for (k, v) in binds {
+                        env.insert(k, v);
+                    }
+                    return fold_const_c_env(&arm.body, &env, const_fns);
+                }
+            }
+            None
+        }
         Expr::Call { callee, args } => {
             let Expr::Ident(fname) = callee.as_ref() else {
                 return None;
@@ -31104,17 +31117,58 @@ fn fold_const_c_env(
     }
 }
 
+fn match_const_c_pattern(
+    pat: &Pattern,
+    scrut: i64,
+    consts: &HashMap<String, i64>,
+    const_fns: &HashMap<String, FnDef>,
+) -> Option<HashMap<String, i64>> {
+    match pat {
+        Pattern::Wildcard => Some(HashMap::new()),
+        Pattern::Ident(n) if n == "_" => Some(HashMap::new()),
+        Pattern::Ident(n) => {
+            let mut m = HashMap::new();
+            m.insert(n.clone(), scrut);
+            Some(m)
+        }
+        Pattern::Literal(e) => {
+            let v = fold_const_c_env(e, consts, const_fns)?;
+            if v == scrut {
+                Some(HashMap::new())
+            } else {
+                None
+            }
+        }
+        Pattern::Or(alts) => {
+            for a in alts {
+                if let Some(b) = match_const_c_pattern(a, scrut, consts, const_fns) {
+                    return Some(b);
+                }
+            }
+            None
+        }
+        _ => None,
+    }
+}
+
 fn fold_const_c_block(
     body: &Block,
     consts: &HashMap<String, i64>,
     const_fns: &HashMap<String, FnDef>,
 ) -> Option<i64> {
     let mut locals = consts.clone();
-    for (i, stmt) in body.stmts.iter().enumerate() {
+    let mut i = 0;
+    while i < body.stmts.len() {
+        let stmt = &body.stmts[i];
+        let is_last = i + 1 == body.stmts.len();
         match stmt {
             Stmt::Return(Some(e)) => return fold_const_c_env(e, &locals, const_fns),
             Stmt::Let { name, init, .. } => {
                 let v = fold_const_c_env(init, &locals, const_fns)?;
+                locals.insert(name.clone(), v);
+            }
+            Stmt::Assign { name, value } => {
+                let v = fold_const_c_env(value, &locals, const_fns)?;
                 locals.insert(name.clone(), v);
             }
             Stmt::If {
@@ -31138,11 +31192,88 @@ fn fold_const_c_block(
                     return fold_const_c_block(eb, &locals, const_fns);
                 }
             }
-            Stmt::Expr(e) if i + 1 == body.stmts.len() => {
+            Stmt::While {
+                cond, body: wbody, ..
+            } => {
+                const MAX_ITERS: i64 = 100_000;
+                let mut iters = 0i64;
+                while fold_const_c_env(cond, &locals, const_fns)? != 0 {
+                    iters += 1;
+                    if iters > MAX_ITERS {
+                        return None;
+                    }
+                    // Some(None) = body done, continue while; Some(Some(v)) = return;
+                    // None = fold failed.
+                    match fold_const_c_loop_body(wbody, &mut locals, const_fns) {
+                        None => return None,
+                        Some(Some(ret)) => return Some(ret),
+                        Some(None) => {}
+                    }
+                }
+            }
+            Stmt::Expr(e) if is_last => {
                 return fold_const_c_env(e, &locals, const_fns);
+            }
+            Stmt::Expr(e) => {
+                let _ = fold_const_c_env(e, &locals, const_fns)?;
+            }
+            _ => return None,
+        }
+        i += 1;
+    }
+    None
+}
+
+/// `None` = fold failed; `Some(None)` = finished body (continue while); `Some(Some(v))` = return.
+fn fold_const_c_loop_body(
+    body: &Block,
+    locals: &mut HashMap<String, i64>,
+    const_fns: &HashMap<String, FnDef>,
+) -> Option<Option<i64>> {
+    for stmt in &body.stmts {
+        match stmt {
+            Stmt::Return(Some(e)) => {
+                return Some(Some(fold_const_c_env(e, locals, const_fns)?));
+            }
+            Stmt::Let { name, init, .. } => {
+                let v = fold_const_c_env(init, locals, const_fns)?;
+                locals.insert(name.clone(), v);
+            }
+            Stmt::Assign { name, value } => {
+                let v = fold_const_c_env(value, locals, const_fns)?;
+                locals.insert(name.clone(), v);
+            }
+            Stmt::If {
+                init,
+                cond,
+                then_block,
+                else_block,
+            } => {
+                if let Some(init_stmt) = init {
+                    if let Stmt::Let { name, init, .. } = init_stmt.as_ref() {
+                        let v = fold_const_c_env(init, locals, const_fns)?;
+                        locals.insert(name.clone(), v);
+                    }
+                }
+                let c = fold_const_c_env(cond, locals, const_fns)?;
+                let branch = if c != 0 {
+                    Some(then_block)
+                } else {
+                    else_block.as_ref()
+                };
+                if let Some(b) = branch {
+                    match fold_const_c_loop_body(b, locals, const_fns) {
+                        None => return None,
+                        Some(Some(ret)) => return Some(Some(ret)),
+                        Some(None) => {}
+                    }
+                }
+            }
+            Stmt::Expr(e) => {
+                let _ = fold_const_c_env(e, locals, const_fns)?;
             }
             _ => return None,
         }
     }
-    None
+    Some(None)
 }

@@ -113,8 +113,9 @@ const fn clamp(x: int, lo: int, hi: int) -> int {
 const N = clamp(50, 0, 10)  // 10
 ```
 
-Supported in const: `+ - * / %` bitwise, comparisons, `&&` `||` `!`, `let`,
-`return`, `if`/`else`, and `if`-expressions. Not a full CTFE interpreter.
+Supported in const: `+ - * / %` bitwise, comparisons, `&&` `||` `!`, `let` /
+`assign`, `return`, `if`/`else`, `if`-expressions, **`match` on ints** (`|`, `_`,
+bind), and **bounded `while`** (max 100k iterations). Not a full CTFE interpreter.
 
 ## Actors
 

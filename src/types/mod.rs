@@ -15922,6 +15922,21 @@ fn fold_const_expr_with(
                 eval_const_fn_body(else_block, consts, const_fns)
             }
         }
+        Expr::Match { scrutinee, arms } => {
+            let scrut = fold_const_expr_with(scrutinee, consts, const_fns)?;
+            for arm in arms {
+                if let Some(binds) = match_const_pattern(&arm.pattern, scrut, consts, const_fns)? {
+                    let mut env = consts.clone();
+                    for (k, v) in binds {
+                        env.insert(k, v);
+                    }
+                    return fold_const_expr_with(&arm.body, &env, const_fns);
+                }
+            }
+            Err(TypeError::new(
+                "const match is non-exhaustive for this value (no arm matched)",
+            ))
+        }
         Expr::Call { callee, args } => {
             let Expr::Ident(fname) = callee.as_ref() else {
                 return Err(TypeError::new("const call must name a const fn"));
@@ -15951,14 +15966,56 @@ fn fold_const_expr_with(
     }
 }
 
+/// Match an int scrutinee against a pattern. Returns `Some(bindings)` on match,
+/// `None` if this arm does not match (try next). Errors on non-int patterns.
+fn match_const_pattern(
+    pat: &Pattern,
+    scrut: i64,
+    consts: &HashMap<String, i64>,
+    const_fns: &HashMap<String, FnDef>,
+) -> Result<Option<HashMap<String, i64>>, TypeError> {
+    match pat {
+        Pattern::Wildcard => Ok(Some(HashMap::new())),
+        Pattern::Ident(n) if n == "_" => Ok(Some(HashMap::new())),
+        Pattern::Ident(n) => {
+            // Bare ident binds (or matches unit variant names — treat as bind for int seed).
+            let mut m = HashMap::new();
+            m.insert(n.clone(), scrut);
+            Ok(Some(m))
+        }
+        Pattern::Literal(e) => {
+            let v = fold_const_expr_with(e, consts, const_fns)?;
+            Ok(if v == scrut {
+                Some(HashMap::new())
+            } else {
+                None
+            })
+        }
+        Pattern::Or(alts) => {
+            for a in alts {
+                if let Some(b) = match_const_pattern(a, scrut, consts, const_fns)? {
+                    return Ok(Some(b));
+                }
+            }
+            Ok(None)
+        }
+        Pattern::Variant { .. } | Pattern::Tuple(_) | Pattern::Struct { .. } => Err(
+            TypeError::new("const match seed supports int / `_` / or-patterns only"),
+        ),
+    }
+}
+
 fn eval_const_fn_body(
     body: &Block,
     locals: &HashMap<String, i64>,
     const_fns: &HashMap<String, FnDef>,
 ) -> Result<i64, TypeError> {
-    // Support: let/return, trailing expr, and const `if` / `if/else` (both arms return).
+    // Support: let/assign/return, trailing expr, if, match (via expr), while (bounded).
     let mut env = locals.clone();
-    for (i, stmt) in body.stmts.iter().enumerate() {
+    let mut i = 0;
+    while i < body.stmts.len() {
+        let stmt = &body.stmts[i];
+        let is_last = i + 1 == body.stmts.len();
         match stmt {
             Stmt::Return(Some(e)) => return fold_const_expr_with(e, &env, const_fns),
             Stmt::Return(None) => {
@@ -15966,6 +16023,15 @@ fn eval_const_fn_body(
             }
             Stmt::Let { name, init, .. } => {
                 let v = fold_const_expr_with(init, &env, const_fns)?;
+                env.insert(name.clone(), v);
+            }
+            Stmt::Assign { name, value } => {
+                if !env.contains_key(name) {
+                    return Err(TypeError::new(format!(
+                        "const assign to unknown `{name}` (declare with let first)"
+                    )));
+                }
+                let v = fold_const_expr_with(value, &env, const_fns)?;
                 env.insert(name.clone(), v);
             }
             Stmt::If {
@@ -15989,23 +16055,119 @@ fn eval_const_fn_body(
                 }
                 let c = fold_const_expr_with(cond, &env, const_fns)?;
                 if c != 0 {
+                    // Prefer nested return; if then-block yields without return, merge env is N/A
+                    // for seed — require then/else to return when used as control in const fn.
                     return eval_const_fn_body(then_block, &env, const_fns);
                 } else if let Some(eb) = else_block {
                     return eval_const_fn_body(eb, &env, const_fns);
                 }
                 // `if` without else that did not return: fall through
             }
-            Stmt::Expr(e) if i + 1 == body.stmts.len() => {
+            Stmt::While { cond, body: wbody, .. } => {
+                // Bounded const loop seed (avoids hang on non-terminating cond).
+                const MAX_ITERS: i64 = 100_000;
+                let mut iters = 0i64;
+                while fold_const_expr_with(cond, &env, const_fns)? != 0 {
+                    iters += 1;
+                    if iters > MAX_ITERS {
+                        return Err(TypeError::new(
+                            "const while exceeded 100000 iterations (runaway loop?)",
+                        ));
+                    }
+                    // Execute body statements with assign/let/if/return support.
+                    match eval_const_loop_body(wbody, &mut env, const_fns)? {
+                        Some(ret) => return Ok(ret),
+                        None => {}
+                    }
+                }
+            }
+            Stmt::Expr(e) if is_last => {
                 return fold_const_expr_with(e, &env, const_fns);
+            }
+            Stmt::Expr(_) => {
+                // Side-effect-free const expr as statement: evaluate and discard.
+                let _ = fold_const_expr_with(
+                    match stmt {
+                        Stmt::Expr(e) => e,
+                        _ => unreachable!(),
+                    },
+                    &env,
+                    const_fns,
+                )?;
             }
             _ => {
                 return Err(TypeError::new(
-                    "const fn body may only use let/return/if of const expressions",
+                    "const fn body may only use let/assign/return/if/while of const expressions",
+                ));
+            }
+        }
+        i += 1;
+    }
+    Err(TypeError::new("const fn body has no return value"))
+}
+
+/// Run one iteration of a const while body. Returns `Some(v)` on early return.
+fn eval_const_loop_body(
+    body: &Block,
+    env: &mut HashMap<String, i64>,
+    const_fns: &HashMap<String, FnDef>,
+) -> Result<Option<i64>, TypeError> {
+    for stmt in &body.stmts {
+        match stmt {
+            Stmt::Return(Some(e)) => {
+                return Ok(Some(fold_const_expr_with(e, env, const_fns)?));
+            }
+            Stmt::Return(None) => {
+                return Err(TypeError::new("const fn cannot return void"));
+            }
+            Stmt::Let { name, init, .. } => {
+                let v = fold_const_expr_with(init, env, const_fns)?;
+                env.insert(name.clone(), v);
+            }
+            Stmt::Assign { name, value } => {
+                if !env.contains_key(name) {
+                    return Err(TypeError::new(format!(
+                        "const assign to unknown `{name}` (declare with let first)"
+                    )));
+                }
+                let v = fold_const_expr_with(value, env, const_fns)?;
+                env.insert(name.clone(), v);
+            }
+            Stmt::If {
+                init,
+                cond,
+                then_block,
+                else_block,
+            } => {
+                if let Some(init_stmt) = init {
+                    if let Stmt::Let { name, init, .. } = init_stmt.as_ref() {
+                        let v = fold_const_expr_with(init, env, const_fns)?;
+                        env.insert(name.clone(), v);
+                    }
+                }
+                let c = fold_const_expr_with(cond, env, const_fns)?;
+                let branch = if c != 0 {
+                    Some(then_block)
+                } else {
+                    else_block.as_ref()
+                };
+                if let Some(b) = branch {
+                    if let Some(ret) = eval_const_loop_body(b, env, const_fns)? {
+                        return Ok(Some(ret));
+                    }
+                }
+            }
+            Stmt::Expr(e) => {
+                let _ = fold_const_expr_with(e, env, const_fns)?;
+            }
+            _ => {
+                return Err(TypeError::new(
+                    "const while body may only use let/assign/return/if of const expressions",
                 ));
             }
         }
     }
-    Err(TypeError::new("const fn body has no return value"))
+    Ok(None)
 }
 
 /// Substitute concrete types for type parameters in a type expression.

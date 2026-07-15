@@ -27,6 +27,14 @@ Remaining weight is **product** residual: install/portability polish, full debug
 
 ---
 
+## Just closed (2026-07-15) — const-fn depth
+
+| Area | Status |
+|------|--------|
+| Const `match` (int / `\|` / `_` / bind) | **Done seed** — `const_fn_test` |
+| Const `while` + assign (≤100k iters) | **Done seed** — `sum_to` / `pow2` fold |
+| Domain CTFE product | Still open (strings, heap, unlimited loops) |
+
 ## Just closed (2026-07-15) — actor int payload
 
 | Area | Status |
@@ -372,7 +380,8 @@ Percentages are weighted; update when a task flips.
 - [x] Hot-reload mtime watch seed (`file_mtime_ns` / `hot_reload_watch` / `hot_reload_changed`).
 - [x] Hot-reload depth seed (`note_swap` / `swap_count` / `stamp` / `status_json`).
 - [x] Comptime depth seed: const `if` / comparisons / `if`-expr fold (`const_fn_test`).
-- [ ] Domain CTFE product beyond int const-fn fold.
+- [x] Const-fn match + bounded while seed (int patterns, assign loops; max 100k iters).
+- [ ] Domain CTFE product beyond int const-fn fold (full interpreter / strings / heap).
 
 ---
 

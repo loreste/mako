@@ -67,3 +67,67 @@ fn TestConstFnIf() {
     // if-expression form
     assert_eq(if 1 < 2 { 10 } else { 20 }, 10)
 }
+
+// --- Depth seed: match + while (bounded) ---
+
+const fn classify(n: int) -> int {
+    return match n {
+        0 => 100,
+        1 | 2 => 200,
+        _ => -1,
+    }
+}
+
+const fn sign_const(n: int) -> int {
+    return match n {
+        0 => 0,
+        x => if x > 0 { 1 } else { 0 - 1 },
+    }
+}
+
+const fn sum_to(n: int) -> int {
+    let mut i = 0
+    let mut s = 0
+    while i < n {
+        s = s + i
+        i = i + 1
+    }
+    return s
+}
+
+const fn pow2(n: int) -> int {
+    let mut i = 0
+    let mut p = 1
+    while i < n {
+        p = p * 2
+        i = i + 1
+    }
+    return p
+}
+
+const C_CLASS0 = classify(0)
+const C_CLASS1 = classify(1)
+const C_CLASS9 = classify(9)
+const C_SIGN = sign_const(0 - 5)
+const C_SUM = sum_to(5)
+const C_POW = pow2(10)
+
+fn TestConstFnMatch() {
+    assert_eq(C_CLASS0, 100)
+    assert_eq(C_CLASS1, 200)
+    assert_eq(classify(2), 200)
+    assert_eq(C_CLASS9, -1)
+    assert_eq(C_SIGN, 0 - 1)
+    assert_eq(sign_const(3), 1)
+    assert_eq(sign_const(0), 0)
+}
+
+fn TestConstFnWhile() {
+    // 0+1+2+3+4 = 10
+    assert_eq(C_SUM, 10)
+    assert_eq(sum_to(1), 0)
+    assert_eq(sum_to(0), 0)
+    assert_eq(C_POW, 1024)
+    assert_eq(pow2(0), 1)
+    assert_eq(pow2(3), 8)
+}

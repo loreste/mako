@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Const-fn depth (match · while)
+
+- Const `match` on ints: literals, `a \| b`, `_`, binding patterns.
+- Const `while` with `let`/`assign` (capped at 100k iterations).
+- Mirrored in typecheck fold and codegen const env.
+- Tests: `TestConstFnMatch` · `TestConstFnWhile` in `const_fn_test`.
+
 ### Actor int message payload seed
 
 - `receive Inc(delta)` / `receive Set(v: int)` — one int payload per message.
