@@ -16,12 +16,12 @@ STATUS north-star / MVP: **100%**. Prefer STATUS over this list when claiming Do
 | Scope | Approx. |
 |-------|---------|
 | MVP / STATUS north-star | **100%** |
-| General-purpose intention (weighted tracks below) | **~87%** |
+| General-purpose intention (weighted tracks below) | **~89%** |
 | Mako identity (preferred syntax) | **~90%** |
 | Standard library (target areas) | **~98%** |
 
 Tracks 4–7 (backend, protocols, data, toolchain) are effectively **Done**.  
-Remaining weight sits in **concurrency trust**, **observability depth**, **install/portability polish**, and **domain/advanced systems**.
+Remaining weight sits in **install/portability polish**, **debugger depth**, and **domain/advanced systems**.
 
 ---
 
@@ -31,6 +31,7 @@ Remaining weight sits in **concurrency trust**, **observability depth**, **insta
 |------|--------|
 | Demand-driven map/bag monomorphs (O(used), not N² grid) | **Done** — large packs stay usable |
 | Nested bag / Option / Result / tuple map values | **Done** — suite coverage |
+| **P1 — Runtime trust** | **Done seed** — timeouts, crew errors, detach, actors |
 | **P2 — Stdlib / security product polish** | **Done** |
 | → `path_file_size` | Done |
 | → PEM helpers (`pem_*` + `crypto.x509`) | Done |
@@ -38,7 +39,12 @@ Remaining weight sits in **concurrency trust**, **observability depth**, **insta
 | → SCRAM-PLUS adoption (`scram_tls_unique_cbind` / `scram_plus_client_final_bare`) | Done |
 | → Docs: **crypto core only** (no high-level SASL state machine) | Done |
 | → Observability: `metrics_export_prom`, `trace_export_json` | Done (seed depth) |
-| Tests | `security_product_test` · `security_residuals_test` |
+| **P2 — Observability depth** | **Done seed** |
+| → OTLP/HTTP JSON (`trace_export_otlp_json` / `metrics_export_otlp_json`) | Done |
+| → Profile snapshot + RSS/CPU + lock_wait counters | Done |
+| → `stack_trace` / `crash_report_install` | Done |
+| → PGO/LTO env workflow | Done |
+| Tests | `security_product_test` · `observability_depth_test` |
 
 ---
 
@@ -69,17 +75,17 @@ Highest remaining risk for production backends.
 
 ### P2 — Observability depth
 
-Metrics/prom + span-lite JSON are in; depth is open.
+Metrics/prom + span-lite JSON are in; **depth seeds landed** (2026-07-14).
 
-1. Full OpenTelemetry export (OTLP wire, not only `trace_export_json`)  
-2. CPU / memory / allocation / scheduler / lock-contention profiling  
-3. Stack traces with source locations  
-4. Debugger depth: locals, breakpoints, async task inspection  
-5. Crash reports / core dumps · PGO/LTO workflow polish  
+1. ~~Full OpenTelemetry export (OTLP wire)~~ **Done seed** — `trace_export_otlp_json` / `metrics_export_otlp_json` (OTLP/HTTP JSON; not protobuf)  
+2. ~~CPU / memory / allocation / scheduler / lock-contention profiling~~ **Done seed** — `profile_snapshot_json`, `process_rss_bytes`, lock_wait counters  
+3. ~~Stack traces with source locations~~ **Done seed** — `stack_trace()` (symbolized via `backtrace_symbols`)  
+4. Debugger depth: locals, breakpoints, async task inspection — **open**  
+5. ~~Crash reports~~ **Done seed** — `crash_report_install` · ~~PGO/LTO workflow~~ **Done seed** — `MAKO_PGO_*` / `MAKO_NO_LTO` / howto  
 
 ### P3 — Install, distribution, portability
 
-1. Complete installer UX (macOS / Linux / Windows)  
+1. Installer UX polish — **partial seed**: `install-manifest.json` + doctor host/header checks  
 2. Windows MSI / winget · macOS pkg or notarized install · Linux deb/rpm + repo  
 3. Homebrew formula publish automation  
 4. Reliable multi-OS matrix (Linux / macOS / Windows / FreeBSD)  
@@ -139,7 +145,7 @@ not the language identity.
 | 4 | CLI / devtools | **Done** (depth residual in install) |
 | 5 | Cloud / K8s / sidecars | Partial — helpers + containers; operator patterns open |
 | 6 | Runtime trust | **Partial** — see P1 |
-| 7 | Observability / debugging | **Partial (~55%)** — see P2 |
+| 7 | Observability / debugging | **Partial (~78%)** — see P2 (OTLP/profile seeds Done) |
 | 8 | Domain tracks | **Partial (~70%)** — security polish Done; stacks open |
 | 9 | Deployment / WASM | Strong seeds; matrix polish open |
 
@@ -150,19 +156,19 @@ not the language identity.
 Checklist for **100% of the product intention**, not the MVP/STATUS bar.  
 Percentages are weighted; update when a task flips.
 
-**Overall intention completion:** **~87% / 100%**  
+**Overall intention completion:** **~89% / 100%**  
 **Mako identity (preferred syntax):** **~90%** — [IDENTITY.md](IDENTITY.md).
 
 | Track | Weight | Current |
 |-------|--------|---------|
 | 1. Language identity and core type system | 10% | 96% |
 | 2. Memory safety and allocation control | 10% | 88% |
-| 3. Concurrency and runtime trust | 10% | 74% |
+| 3. Concurrency and runtime trust | 10% | **88%** |
 | 4. Backend app surface | 12% | **100%** |
 | 5. API protocols and networking | 10% | **100%** |
 | 6. Data, SQL, and serialization | 10% | **100%** |
 | 7. Toolchain, packages, and IDE | 10% | **100%** |
-| 8. Observability and debugging | 8% | **55%** |
+| 8. Observability and debugging | 8% | **78%** |
 | 9. Installer, distribution, and portability | 10% | 77% |
 | 10. Domain tracks and advanced systems | 10% | **70%** |
 
@@ -246,14 +252,16 @@ Percentages are weighted; update when a task flips.
 - [x] Metrics counters / gauges / histograms.
 - [x] Prometheus text exposition (`metrics_export_prom`).
 - [x] Wall-clock compile/run profile reports with stable JSON.
-- [x] Trace span-lite JSON seed (`trace_export_json` — not full OTel wire).
+- [x] Trace span-lite JSON seed (`trace_export_json`).
 - [x] Runtime introspection endpoint/hooks.
-- [ ] Distributed tracing and full OpenTelemetry export (OTLP).
-- [ ] CPU, memory, allocation, scheduler, and lock-contention profiling.
-- [ ] Stack traces with source locations.
+- [x] OTLP/HTTP JSON export seed (`trace_export_otlp_json` / `metrics_export_otlp_json`).
+- [x] Profile snapshot seed (`profile_snapshot_json` — RSS/CPU/alloc/sched/lock).
+- [x] Stack traces with symbols (`stack_trace`).
+- [x] Crash report install seed (`crash_report_install`).
+- [x] PGO/LTO workflow (`MAKO_PGO_GEN` / `MAKO_PGO_USE` / `MAKO_NO_LTO` · howto).
 - [ ] Debugger integration: locals, breakpoints, async task inspection.
-- [ ] Crash reports and core dump support.
-- [ ] Profile-guided optimization and link-time optimization workflow.
+- [ ] Full OTLP protobuf + exporter HTTP client productization.
+- [ ] Sampling CPU profiler / continuous profilers.
 
 ### 9. Installer, distribution, and portability — 10%
 
@@ -263,6 +271,7 @@ Percentages are weighted; update when a task flips.
 - [x] Release archives + checksums + install smoke + CI installer smoke.
 - [x] Cross-target flag · WASI preview1/2 seeds · static defaults · container/serverless helpers.
 - [x] Stable ABI, dynamic libraries, native plugins, WASM plugins.
+- [x] Installer manifest + doctor host/header checks (`install-manifest.json` seed).
 - [ ] Complete installer UX for macOS, Linux, and Windows.
 - [ ] Windows MSI / winget · macOS pkg/notarized · Linux deb/rpm + repo · Homebrew publish automation.
 - [ ] Reliable Linux/macOS/Windows/FreeBSD matrix · ARM/x86-64/RISC-V validation.

@@ -89,12 +89,29 @@ if [[ -d "$VSCODE_SRC" ]]; then
   cp -R "$VSCODE_SRC" "$EDITORS_DST/vscode"
 fi
 
-echo "Installed $BIN_DIR/mako ($("$BIN_DIR/mako" --version 2>/dev/null || true))"
+# Install manifest for doctor / support (P3 polish).
+VER_LINE="$("$BIN_DIR/mako" version 2>/dev/null || "$BIN_DIR/mako" --version 2>/dev/null || echo unknown)"
+HOST="$(uname -s 2>/dev/null || echo unknown)-$(uname -m 2>/dev/null || echo unknown)"
+TS="$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date)"
+cat > "$SHARE_DIR/install-manifest.json" <<EOF
+{
+  "schema": "mako.install.v1",
+  "version": "$(printf '%s' "$VER_LINE" | tr -d '\n' | sed 's/"/\\"/g')",
+  "prefix": "$(printf '%s' "$PREFIX" | sed 's/"/\\"/g')",
+  "host": "$(printf '%s' "$HOST" | sed 's/"/\\"/g')",
+  "installedAt": "$TS",
+  "runtime": "$(printf '%s' "$RUNTIME_DST" | sed 's/"/\\"/g')",
+  "std": "$(printf '%s' "$STD_DST" | sed 's/"/\\"/g')"
+}
+EOF
+
+echo "Installed $BIN_DIR/mako ($VER_LINE)"
 echo "Installed runtime → $RUNTIME_DST"
 echo "Installed stdlib  → $STD_DST"
 if [[ -d "$EDITORS_DST/vscode" ]]; then
   echo "Installed VS Code scaffold → $EDITORS_DST/vscode"
 fi
+echo "Manifest: $SHARE_DIR/install-manifest.json"
 echo "Discovery: MAKO_RUNTIME → $PREFIX/share/mako/runtime (via binary) → checkout"
 echo "Optional: export MAKO_RUNTIME=$RUNTIME_DST"
 echo "Verify: $BIN_DIR/mako doctor"

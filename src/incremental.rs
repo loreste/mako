@@ -499,9 +499,30 @@ fn compile_one_unit(job: CompileJob) -> JobResult {
         cmd.arg("cc");
     }
     if job.release {
-        cmd.arg("-O3").arg("-flto").arg("-DNDEBUG");
+        if std::env::var_os("MAKO_NO_LTO").is_some() {
+            cmd.arg("-O3").arg("-DNDEBUG");
+        } else {
+            cmd.arg("-O3").arg("-flto").arg("-DNDEBUG");
+        }
     } else {
         cmd.arg("-O0").arg("-g");
+    }
+    if let Ok(extra) = std::env::var("MAKO_CFLAGS") {
+        for a in extra.split_whitespace() {
+            if !a.is_empty() {
+                cmd.arg(a);
+            }
+        }
+    }
+    if std::env::var_os("MAKO_PGO_GEN").is_some() {
+        cmd.arg("-fprofile-generate");
+    }
+    if let Ok(dir) = std::env::var("MAKO_PGO_USE") {
+        if dir.is_empty() || dir == "1" {
+            cmd.arg("-fprofile-use");
+        } else {
+            cmd.arg(format!("-fprofile-use={dir}"));
+        }
     }
     cmd.arg("-std=c11")
         .arg("-c")
@@ -676,9 +697,30 @@ pub fn link_objects(
         cmd.arg("cc");
     }
     if opts.release {
-        cmd.arg("-O3").arg("-flto").arg("-DNDEBUG");
+        if std::env::var_os("MAKO_NO_LTO").is_some() {
+            cmd.arg("-O3").arg("-DNDEBUG");
+        } else {
+            cmd.arg("-O3").arg("-flto").arg("-DNDEBUG");
+        }
     } else {
         cmd.arg("-O0").arg("-g");
+    }
+    if let Ok(extra) = std::env::var("MAKO_CFLAGS") {
+        for a in extra.split_whitespace() {
+            if !a.is_empty() {
+                cmd.arg(a);
+            }
+        }
+    }
+    if std::env::var_os("MAKO_PGO_GEN").is_some() {
+        cmd.arg("-fprofile-generate");
+    }
+    if let Ok(dir) = std::env::var("MAKO_PGO_USE") {
+        if dir.is_empty() || dir == "1" {
+            cmd.arg("-fprofile-use");
+        } else {
+            cmd.arg(format!("-fprofile-use={dir}"));
+        }
     }
     for o in objs {
         cmd.arg(o);

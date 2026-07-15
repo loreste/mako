@@ -23,15 +23,32 @@ release:
 build: release
 
 install: release
-	mkdir -p "$(BIN_DIR)" "$(RUNTIME_DST)/certs" "$(RUNTIME_DST)/third_party"
+	mkdir -p "$(BIN_DIR)" "$(RUNTIME_DST)/certs" "$(RUNTIME_DST)/third_party" "$(SHARE_DIR)"
 	install -m 755 "$(MAKO_BIN)" "$(BIN_DIR)/mako"
 	install -m 644 runtime/*.h "$(RUNTIME_DST)/"
 	@if [ -d runtime/certs ]; then cp -R runtime/certs/. "$(RUNTIME_DST)/certs/"; fi
 	@if [ -f runtime/third_party/README.md ]; then \
 	  install -m 644 runtime/third_party/README.md "$(RUNTIME_DST)/third_party/"; \
 	fi
+	@if [ -d std ]; then \
+	  rm -rf "$(SHARE_DIR)/std"; mkdir -p "$(SHARE_DIR)/std"; cp -R std/. "$(SHARE_DIR)/std/"; \
+	fi
+	@VER=$$("$(BIN_DIR)/mako" version 2>/dev/null || true); \
+	HOST=$$(uname -s 2>/dev/null)-$$(uname -m 2>/dev/null); \
+	TS=$$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date); \
+	printf '%s\n' \
+	  '{' \
+	  '  "schema": "mako.install.v1",' \
+	  "  \"version\": \"$$VER\"," \
+	  "  \"prefix\": \"$(PREFIX)\"," \
+	  "  \"host\": \"$$HOST\"," \
+	  "  \"installedAt\": \"$$TS\"," \
+	  "  \"runtime\": \"$(RUNTIME_DST)\"," \
+	  "  \"std\": \"$(SHARE_DIR)/std\"" \
+	  '}' > "$(SHARE_DIR)/install-manifest.json"
 	@echo "Installed $(BIN_DIR)/mako"
 	@echo "Installed $(RUNTIME_DST)"
+	@echo "Manifest $(SHARE_DIR)/install-manifest.json"
 	@"$(BIN_DIR)/mako" version -v
 	@echo "Optional: export MAKO_RUNTIME=$(RUNTIME_DST)"
 

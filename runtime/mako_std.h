@@ -1779,6 +1779,136 @@ static inline MakoString mako_metrics_export(void) {
     return out;
 }
 
+/* OTLP/HTTP JSON metrics export (seed) for non-zero counter/gauge/hist slots. */
+static inline MakoString mako_metrics_export_otlp_json(void) {
+    size_t cap = 8192;
+    char *buf = (char *)malloc(cap);
+    if (!buf) {
+        fprintf(stderr, "mako: OOM in metrics_export_otlp_json\n");
+        abort();
+    }
+    size_t len = 0;
+    int n = snprintf(
+        buf, cap,
+        "{\"resourceMetrics\":[{\"resource\":{\"attributes\":["
+        "{\"key\":\"service.name\",\"value\":{\"stringValue\":\"mako\"}}"
+        "]},\"scopeMetrics\":[{\"scope\":{\"name\":\"mako.metrics\",\"version\":\"0.1.2\"},"
+        "\"metrics\":["
+    );
+    if (n < 0) n = 0;
+    len = (size_t)n;
+    int first = 1;
+    for (int i = 0; i < 64; i++) {
+        if (mako_metric_counters[i] == 0 && mako_metric_gauges[i] == 0
+            && mako_metric_hist_count[i] == 0) {
+            continue;
+        }
+        if (len + 700 >= cap) {
+            cap *= 2;
+            char *next = (char *)realloc(buf, cap);
+            if (!next) {
+                free(buf);
+                fprintf(stderr, "mako: OOM in metrics_export_otlp_json grow\n");
+                abort();
+            }
+            buf = next;
+        }
+        if (mako_metric_counters[i] != 0) {
+            n = snprintf(
+                buf + len, cap > len ? cap - len : 0,
+                "%s{\"name\":\"mako_counter_%d\",\"sum\":{\"dataPoints\":[{"
+                "\"asInt\":\"%" PRId64 "\"}],\"aggregationTemporality\":2,"
+                "\"isMonotonic\":true}}",
+                first ? "" : ",", i, mako_metric_counters[i]
+            );
+            if (n > 0) {
+                len += (size_t)n;
+                first = 0;
+            }
+        }
+        if (mako_metric_gauges[i] != 0) {
+            n = snprintf(
+                buf + len, cap > len ? cap - len : 0,
+                "%s{\"name\":\"mako_gauge_%d\",\"gauge\":{\"dataPoints\":[{"
+                "\"asInt\":\"%" PRId64 "\"}]}}",
+                first ? "" : ",", i, mako_metric_gauges[i]
+            );
+            if (n > 0) {
+                len += (size_t)n;
+                first = 0;
+            }
+        }
+        if (mako_metric_hist_count[i] != 0) {
+            n = snprintf(
+                buf + len, cap > len ? cap - len : 0,
+                "%s{\"name\":\"mako_hist_%d\",\"histogram\":{\"dataPoints\":[{"
+                "\"count\":\"%" PRId64 "\",\"sum\":%f}],"
+                "\"aggregationTemporality\":2}}",
+                first ? "" : ",", i, mako_metric_hist_count[i],
+                (double)mako_metric_hist_sum[i]
+            );
+            if (n > 0) {
+                len += (size_t)n;
+                first = 0;
+            }
+        }
+    }
+    const char *tail = "]}]}}";
+    size_t tlen = strlen(tail);
+    if (len + tlen + 1 >= cap) {
+        cap = len + tlen + 8;
+        char *next = (char *)realloc(buf, cap);
+        if (!next) {
+            free(buf);
+            fprintf(stderr, "mako: OOM in metrics_export_otlp_json tail\n");
+            abort();
+        }
+        buf = next;
+    }
+    memcpy(buf + len, tail, tlen + 1);
+    len += tlen;
+    return (MakoString){buf, len};
+}
+
+/* Combined profile snapshot: process RSS/CPU + alloc track + scheduler counters. */
+static inline MakoString mako_profile_snapshot_json(void) {
+    char *d = (char *)malloc(768);
+    if (!d) {
+        fprintf(stderr, "mako: OOM in profile_snapshot_json\n");
+        abort();
+    }
+    int n = snprintf(
+        d,
+        768,
+        "{\"schema\":\"mako.profile_snapshot.v1\","
+        "\"now_ms\":%" PRId64 ",\"now_ns\":%" PRId64 ","
+        "\"rss_bytes\":%" PRId64 ","
+        "\"cpu_user_us\":%" PRId64 ",\"cpu_sys_us\":%" PRId64 ","
+        "\"alloc_live\":%" PRId64 ",\"alloc_high\":%" PRId64 ","
+        "\"tasks_spawned\":%lld,\"tasks_joined\":%lld,"
+        "\"channels_created\":%lld,\"channel_sends\":%lld,"
+        "\"channel_recvs\":%lld,\"channel_peak_depth\":%lld,"
+        "\"lock_waits\":%lld,\"lock_wait_ns\":%lld}",
+        mako_now_ms(),
+        mako_now_ns(),
+        mako_process_rss_bytes(),
+        mako_process_cpu_user_us(),
+        mako_process_cpu_sys_us(),
+        mako_alloc_track_live_bytes(),
+        mako_alloc_track_high_bytes(),
+        atomic_load_explicit(&mako_rt_tasks_spawned, memory_order_relaxed),
+        atomic_load_explicit(&mako_rt_tasks_joined, memory_order_relaxed),
+        atomic_load_explicit(&mako_rt_channels_created, memory_order_relaxed),
+        atomic_load_explicit(&mako_rt_channel_sends, memory_order_relaxed),
+        atomic_load_explicit(&mako_rt_channel_recvs, memory_order_relaxed),
+        atomic_load_explicit(&mako_rt_channel_peak_depth, memory_order_relaxed),
+        atomic_load_explicit(&mako_rt_lock_waits, memory_order_relaxed),
+        atomic_load_explicit(&mako_rt_lock_wait_ns, memory_order_relaxed)
+    );
+    if (n < 0) n = 0;
+    return (MakoString){d, (size_t)n};
+}
+
 /* Prometheus text exposition (0.0.4-ish) for the same 64 slots. */
 static inline MakoString mako_metrics_export_prom(void) {
     size_t cap = 8192;

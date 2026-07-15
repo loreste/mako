@@ -16903,6 +16903,18 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             self.line(&format!("MakoString {tmp} = mako_trace_export_json();"));
                             return ("MakoString".into(), tmp);
                         }
+                        "trace_export_otlp_json" => {
+                            let tmp = self.fresh("teotlp");
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_trace_export_otlp_json();"
+                            ));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "trace_span_id" => {
+                            let tmp = self.fresh("tsid");
+                            self.line(&format!("MakoString {tmp} = mako_trace_span_id();"));
+                            return ("MakoString".into(), tmp);
+                        }
                         "trace_current" => {
                             let tmp = self.fresh("tcur");
                             self.line(&format!("MakoString {tmp} = mako_trace_current();"));
@@ -16925,6 +16937,40 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         "trace_log" => {
                             let (_, m) = self.emit_expr(&args[0]);
                             return ("int64_t".into(), format!("mako_trace_log({m})"));
+                        }
+                        "stack_trace" => {
+                            let tmp = self.fresh("stk");
+                            self.line(&format!("MakoString {tmp} = mako_stack_trace();"));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "crash_report_install" => {
+                            let (_, p) = self.emit_expr(&args[0]);
+                            return (
+                                "int64_t".into(),
+                                format!("mako_crash_report_install({p})"),
+                            );
+                        }
+                        "crash_report_installed" => {
+                            return (
+                                "int64_t".into(),
+                                "mako_crash_report_installed_p()".into(),
+                            );
+                        }
+                        "process_rss_bytes" => {
+                            return ("int64_t".into(), "mako_process_rss_bytes()".into());
+                        }
+                        "process_cpu_user_us" => {
+                            return ("int64_t".into(), "mako_process_cpu_user_us()".into());
+                        }
+                        "process_cpu_sys_us" => {
+                            return ("int64_t".into(), "mako_process_cpu_sys_us()".into());
+                        }
+                        "profile_snapshot_json" => {
+                            let tmp = self.fresh("psnap");
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_profile_snapshot_json();"
+                            ));
+                            return ("MakoString".into(), tmp);
                         }
                         "ecs_world_new" => {
                             let (_, cap) = self.emit_expr(&args[0]);
@@ -17444,6 +17490,12 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         }
                         "metrics_export_prom" => {
                             return ("MakoString".into(), "mako_metrics_export_prom()".into());
+                        }
+                        "metrics_export_otlp_json" => {
+                            return (
+                                "MakoString".into(),
+                                "mako_metrics_export_otlp_json()".into(),
+                            );
                         }
                         "share_int" => {
                             let (_, v) = self.emit_expr(&args[0]);

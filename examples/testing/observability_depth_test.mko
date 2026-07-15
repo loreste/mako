@@ -1,0 +1,94 @@
+// P2 observability depth: OTLP JSON export, profile snapshot, stack traces,
+// crash report install, lock contention counters.
+
+fn TestTraceExportOtlp() {
+    let _ = trace_clear()
+    let empty = trace_export_otlp_json()
+    assert(str_contains(empty, "resourceSpans"))
+    assert(str_contains(empty, "scopeSpans"))
+    assert(str_contains(empty, "\"spans\":["))
+
+    let _ = trace_id()
+    let _ = trace_begin("handler")
+    let sid = trace_span_id()
+    assert(len(sid) == 16)
+    let _ = trace_end()
+
+    let otlp = trace_export_otlp_json()
+    assert(str_contains(otlp, "resourceSpans"))
+    assert(str_contains(otlp, "handler"))
+    assert(str_contains(otlp, "traceId"))
+    assert(str_contains(otlp, "spanId"))
+    assert(str_contains(otlp, "startTimeUnixNano"))
+    assert(str_contains(otlp, "endTimeUnixNano"))
+    assert(str_contains(otlp, "service.name"))
+    let _ = trace_clear()
+}
+
+fn TestMetricsExportOtlp() {
+    metric_inc(10)
+    metric_add(10, 4)
+    gauge_set(11, 99)
+    hist_observe(12, 7)
+    hist_observe(12, 3)
+    let otlp = metrics_export_otlp_json()
+    assert(str_contains(otlp, "resourceMetrics"))
+    assert(str_contains(otlp, "mako_counter_10"))
+    assert(str_contains(otlp, "\"asInt\":\"5\""))
+    assert(str_contains(otlp, "mako_gauge_11"))
+    assert(str_contains(otlp, "mako_hist_12"))
+    assert(str_contains(otlp, "aggregationTemporality"))
+}
+
+fn TestProfileSnapshot() {
+    runtime_stats_reset()
+    let ch = chan_new(1)
+    assert_eq(chan_try_send(ch, 1), 1)
+    assert_eq(ch.recv(), 1)
+
+    let snap = profile_snapshot_json()
+    assert(str_contains(snap, "mako.profile_snapshot.v1"))
+    assert(str_contains(snap, "now_ms"))
+    assert(str_contains(snap, "now_ns"))
+    assert(str_contains(snap, "rss_bytes"))
+    assert(str_contains(snap, "cpu_user_us"))
+    assert(str_contains(snap, "alloc_live"))
+    assert(str_contains(snap, "lock_waits"))
+    assert(str_contains(snap, "tasks_spawned"))
+    assert(json_get_int(snap, "channels_created") >= 1)
+    assert(json_get_int(snap, "channel_sends") >= 1)
+
+    let rss = process_rss_bytes()
+    // Available on macOS/Linux; -1 only on unsupported hosts.
+    assert(rss != 0)
+    let cu = process_cpu_user_us()
+    assert(cu >= 0)
+}
+
+fn TestStackTrace() {
+    let st = stack_trace()
+    assert(len(st) > 0)
+    // Symbolized frames usually include the binary name or a frame address.
+    assert(str_contains(st, "\n") || str_contains(st, "0x") || str_contains(st, "mako")
+        || str_contains(st, "stack_trace"))
+}
+
+fn TestCrashReportInstall() {
+    let path = "/tmp/mako_crash_report_test.txt"
+    assert_eq(crash_report_install(path), 1)
+    assert_eq(crash_report_installed(), 1)
+    // Do not raise a real signal in the suite — install is the seed under test.
+}
+
+fn TestLockWaitCounters() {
+    runtime_stats_reset()
+    // Non-blocking path: no lock waits expected.
+    let ch = chan_new(2)
+    assert_eq(chan_try_send(ch, 1), 1)
+    assert_eq(chan_try_send(ch, 2), 1)
+    assert_eq(ch.recv(), 1)
+    assert_eq(ch.recv(), 2)
+    let stats = runtime_stats_json()
+    assert(json_get_int(stats, "lock_waits") >= 0)
+    assert(str_contains(stats, "lock_wait_ns"))
+}

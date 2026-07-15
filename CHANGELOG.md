@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+### Observability depth — P2 seeds
+
+- **OTLP/HTTP JSON:** `trace_export_otlp_json()` (span ring + in-flight),
+  `metrics_export_otlp_json()` (counters/gauges/histograms).
+- **Span ids:** `trace_span_id()`; nested begin/end records parentSpanId.
+- **Profile snapshot:** `profile_snapshot_json()` — schema
+  `mako.profile_snapshot.v1` (RSS, CPU µs, alloc live/high, sched counters,
+  lock waits).
+- **Process sample:** `process_rss_bytes` / `process_cpu_user_us` /
+  `process_cpu_sys_us`.
+- **Stack traces:** `stack_trace()` (symbolized via `backtrace_symbols`).
+- **Crash reports:** `crash_report_install(path)` / `crash_report_installed()`.
+- **Lock contention:** channel cond-wait timing → `lock_waits` /
+  `lock_wait_ns` in `runtime_stats_json`.
+- **PGO/LTO workflow:** `MAKO_PGO_GEN`, `MAKO_PGO_USE`, `MAKO_NO_LTO`,
+  `MAKO_CFLAGS`; docs in [howto/09-release-builds.md](docs/howto/09-release-builds.md).
+- **Install polish:** `install-manifest.json` (`mako.install.v1`) from
+  `make install` / `scripts/install.sh`; `mako doctor` checks `mako_trace.h` /
+  host OS·arch / manifest.
+- Tests: `observability_depth_test`.
+
 ### Runtime trust — P1 crew errors, detach, actors
 
 - **Child errors:** joining a kicked `Result[_, string]` records `Err` on the

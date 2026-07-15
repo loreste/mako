@@ -33,7 +33,11 @@
 #include "mako_platform.h"
 #if !defined(_WIN32)
 #include <sys/time.h>
+#include <sys/resource.h>
 #include <unistd.h>
+#endif
+#if defined(__APPLE__)
+#include <mach/mach.h>
 #endif
 
 #ifdef __cplusplus
@@ -58,9 +62,22 @@ static atomic_llong mako_rt_channel_try_send_drops = 0;
 static atomic_llong mako_rt_channel_recvs = 0;
 static atomic_llong mako_rt_channel_select_timeouts = 0;
 static atomic_llong mako_rt_channel_peak_depth = 0;
+/* Lock / cond wait contention (channel mutex waits). */
+static atomic_llong mako_rt_lock_waits = 0;
+static atomic_llong mako_rt_lock_wait_ns = 0;
+
+/* Time helpers defined later — needed by channel wait instrumentation. */
+static inline int64_t mako_now_ms(void);
+static inline int64_t mako_now_ns(void);
 
 static inline void mako_rt_counter_inc(atomic_llong *counter) {
     atomic_fetch_add_explicit(counter, 1, memory_order_relaxed);
+}
+
+static inline void mako_rt_note_lock_wait(int64_t wait_ns) {
+    if (wait_ns < 0) wait_ns = 0;
+    atomic_fetch_add_explicit(&mako_rt_lock_waits, 1, memory_order_relaxed);
+    atomic_fetch_add_explicit(&mako_rt_lock_wait_ns, wait_ns, memory_order_relaxed);
 }
 
 static inline void mako_rt_observe_channel_depth(size_t depth) {
@@ -86,6 +103,8 @@ static inline void mako_runtime_stats_reset(void) {
     atomic_store_explicit(&mako_rt_channel_recvs, 0, memory_order_relaxed);
     atomic_store_explicit(&mako_rt_channel_select_timeouts, 0, memory_order_relaxed);
     atomic_store_explicit(&mako_rt_channel_peak_depth, 0, memory_order_relaxed);
+    atomic_store_explicit(&mako_rt_lock_waits, 0, memory_order_relaxed);
+    atomic_store_explicit(&mako_rt_lock_wait_ns, 0, memory_order_relaxed);
 }
 
 /* ---- Strings (owned, null-terminated) ----
@@ -132,17 +151,18 @@ static inline MakoString mako_str_from_cstr(const char *s) {
 }
 
 static inline MakoString mako_runtime_stats_json(void) {
-    char *d = (char *)malloc(384);
+    char *d = (char *)malloc(512);
     if (!d) {
         fprintf(stderr, "mako: OOM in runtime_stats_json\n");
         abort();
     }
     int n = snprintf(
         d,
-        384,
+        512,
         "{\"tasks_spawned\":%lld,\"tasks_joined\":%lld,\"channels_created\":%lld,"
         "\"channel_sends\":%lld,\"channel_try_send_drops\":%lld,\"channel_recvs\":%lld,"
-        "\"channel_select_timeouts\":%lld,\"channel_peak_depth\":%lld}",
+        "\"channel_select_timeouts\":%lld,\"channel_peak_depth\":%lld,"
+        "\"lock_waits\":%lld,\"lock_wait_ns\":%lld}",
         atomic_load_explicit(&mako_rt_tasks_spawned, memory_order_relaxed),
         atomic_load_explicit(&mako_rt_tasks_joined, memory_order_relaxed),
         atomic_load_explicit(&mako_rt_channels_created, memory_order_relaxed),
@@ -150,7 +170,9 @@ static inline MakoString mako_runtime_stats_json(void) {
         atomic_load_explicit(&mako_rt_channel_try_send_drops, memory_order_relaxed),
         atomic_load_explicit(&mako_rt_channel_recvs, memory_order_relaxed),
         atomic_load_explicit(&mako_rt_channel_select_timeouts, memory_order_relaxed),
-        atomic_load_explicit(&mako_rt_channel_peak_depth, memory_order_relaxed)
+        atomic_load_explicit(&mako_rt_channel_peak_depth, memory_order_relaxed),
+        atomic_load_explicit(&mako_rt_lock_waits, memory_order_relaxed),
+        atomic_load_explicit(&mako_rt_lock_wait_ns, memory_order_relaxed)
     );
     if (n < 0) n = 0;
     return (MakoString){d, (size_t)n};
@@ -3769,7 +3791,9 @@ static inline MakoChan *mako_chan_new(int64_t capacity) {
 static inline int64_t mako_chan_send(MakoChan *c, int64_t v) {
     pthread_mutex_lock(&c->mu);
     while (c->count == c->cap && !c->closed) {
+        int64_t t0 = mako_now_ns();
         pthread_cond_wait(&c->can_send, &c->mu);
+        mako_rt_note_lock_wait(mako_now_ns() - t0);
     }
     if (c->closed) {
         pthread_mutex_unlock(&c->mu);
@@ -3819,7 +3843,9 @@ static inline int64_t mako_chan_cap(MakoChan *c) {
 static inline int64_t mako_chan_recv(MakoChan *c) {
     pthread_mutex_lock(&c->mu);
     while (c->count == 0 && !c->closed) {
+        int64_t t0 = mako_now_ns();
         pthread_cond_wait(&c->can_recv, &c->mu);
+        mako_rt_note_lock_wait(mako_now_ns() - t0);
     }
     if (c->count == 0 && c->closed) {
         pthread_mutex_unlock(&c->mu);
@@ -4565,9 +4591,6 @@ static inline void mako_nursery_cancel_join(MakoNursery *n) {
     mako_nursery_cancel(n);
     mako_nursery_join_all(n);
 }
-
-/* Forward — defined later in this header (time helpers). */
-static inline int64_t mako_now_ms(void);
 
 /* Drain crew with timeout: cancel, then join each task (sleep-poll).
  * Returns number of tasks joined; always best-effort completes joins. */
@@ -6811,6 +6834,193 @@ static inline int64_t mako_now_ms(void) {
 
 static inline int64_t mako_now_ns(void) {
     return mako_mono_ns();
+}
+
+/* ---- Stack traces (symbolized when execinfo available) ---- */
+static inline MakoString mako_stack_trace(void) {
+#if defined(__GLIBC__) || defined(__APPLE__)
+    void *frames[48];
+    int n = backtrace(frames, 48);
+    if (n <= 0) return mako_str_from_cstr("");
+    char **syms = backtrace_symbols(frames, n);
+    if (!syms) return mako_str_from_cstr("");
+    size_t cap = 2048;
+    char *buf = (char *)malloc(cap);
+    if (!buf) {
+        free(syms);
+        fprintf(stderr, "mako: OOM in stack_trace\n");
+        abort();
+    }
+    size_t len = 0;
+    for (int i = 0; i < n; i++) {
+        const char *s = syms[i] ? syms[i] : "?";
+        size_t sl = strlen(s);
+        if (len + sl + 2 >= cap) {
+            cap *= 2;
+            char *next = (char *)realloc(buf, cap);
+            if (!next) {
+                free(buf);
+                free(syms);
+                fprintf(stderr, "mako: OOM in stack_trace grow\n");
+                abort();
+            }
+            buf = next;
+        }
+        memcpy(buf + len, s, sl);
+        len += sl;
+        buf[len++] = '\n';
+    }
+    buf[len] = 0;
+    free(syms);
+    return (MakoString){buf, len};
+#else
+    return mako_str_from_cstr("(stack_trace unavailable on this platform)\n");
+#endif
+}
+
+/* ---- Crash report seed: write signal + stack to a path ---- */
+static char mako_crash_report_path[512];
+static int mako_crash_report_installed = 0;
+
+static void mako_crash_report_handler(int sig) {
+    const char *sn =
+        sig == SIGSEGV ? "SIGSEGV" :
+        sig == SIGABRT ? "SIGABRT" :
+        sig == SIGFPE  ? "SIGFPE"  :
+#if defined(SIGBUS)
+        sig == SIGBUS  ? "SIGBUS"  :
+#endif
+        "signal";
+    FILE *f = NULL;
+    if (mako_crash_report_path[0]) {
+        f = fopen(mako_crash_report_path, "w");
+    }
+    if (!f) f = stderr;
+    fprintf(f, "mako crash report\n");
+    fprintf(f, "signal: %s (%d)\n", sn, sig);
+    fprintf(f, "time_ms: %" PRId64 "\n", mako_now_ms());
+    fprintf(f, "stack:\n");
+#if defined(__GLIBC__) || defined(__APPLE__)
+    void *frames[48];
+    int n = backtrace(frames, 48);
+    if (f == stderr) {
+        backtrace_symbols_fd(frames, n, 2);
+    } else {
+        char **syms = backtrace_symbols(frames, n);
+        if (syms) {
+            for (int i = 0; i < n; i++) {
+                fprintf(f, "%s\n", syms[i] ? syms[i] : "?");
+            }
+            free(syms);
+        }
+    }
+#else
+    fprintf(f, "(no backtrace)\n");
+#endif
+    if (f != stderr) {
+        fflush(f);
+        fclose(f);
+    } else {
+        fflush(stderr);
+    }
+    signal(sig, SIG_DFL);
+    raise(sig);
+}
+
+/* Install process crash reporter. path empty → stderr only. Returns 1. */
+static inline int64_t mako_crash_report_install(MakoString path) {
+    if (path.data && path.len > 0 && path.len < (int)sizeof(mako_crash_report_path)) {
+        size_t n = path.len < sizeof(mako_crash_report_path) - 1
+                       ? path.len
+                       : sizeof(mako_crash_report_path) - 1;
+        memcpy(mako_crash_report_path, path.data, n);
+        mako_crash_report_path[n] = 0;
+    } else {
+        mako_crash_report_path[0] = 0;
+    }
+#if defined(_WIN32)
+    signal(SIGSEGV, mako_crash_report_handler);
+    signal(SIGABRT, mako_crash_report_handler);
+    signal(SIGFPE, mako_crash_report_handler);
+#else
+    struct sigaction sa;
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_handler = mako_crash_report_handler;
+    sa.sa_flags = SA_RESETHAND;
+    sigemptyset(&sa.sa_mask);
+    sigaction(SIGSEGV, &sa, NULL);
+    sigaction(SIGABRT, &sa, NULL);
+#if defined(SIGBUS)
+    sigaction(SIGBUS, &sa, NULL);
+#endif
+    sigaction(SIGFPE, &sa, NULL);
+#endif
+    mako_crash_report_installed = 1;
+    return 1;
+}
+
+static inline int64_t mako_crash_report_installed_p(void) {
+    return mako_crash_report_installed ? 1 : 0;
+}
+
+/* RSS / CPU sample helpers for profile snapshots. */
+static inline int64_t mako_process_rss_bytes(void) {
+#if defined(_WIN32)
+    return -1;
+#elif defined(__APPLE__)
+    /* Prefer mach task_info; ru_maxrss is hidden under strict POSIX macros. */
+    struct mach_task_basic_info info;
+    mach_msg_type_number_t count = MACH_TASK_BASIC_INFO_COUNT;
+    if (task_info(mach_task_self(), MACH_TASK_BASIC_INFO, (task_info_t)&info, &count)
+        == KERN_SUCCESS) {
+        return (int64_t)info.resident_size;
+    }
+    return -1;
+#else
+    /* Linux: prefer /proc; ru_maxrss is kilobytes. */
+    FILE *f = fopen("/proc/self/statm", "r");
+    if (f) {
+        unsigned long pages = 0, rss_pages = 0;
+        if (fscanf(f, "%lu %lu", &pages, &rss_pages) >= 2) {
+            fclose(f);
+            long psz = sysconf(_SC_PAGESIZE);
+            if (psz < 1) psz = 4096;
+            return (int64_t)rss_pages * (int64_t)psz;
+        }
+        fclose(f);
+    }
+#if defined(RUSAGE_SELF)
+    struct rusage ru;
+    if (getrusage(RUSAGE_SELF, &ru) == 0) {
+        return (int64_t)ru.ru_maxrss * 1024;
+    }
+#endif
+    return -1;
+#endif
+}
+
+static inline int64_t mako_process_cpu_user_us(void) {
+#if defined(_WIN32)
+    return -1;
+#elif defined(RUSAGE_SELF)
+    struct rusage ru;
+    if (getrusage(RUSAGE_SELF, &ru) != 0) return -1;
+    return (int64_t)ru.ru_utime.tv_sec * 1000000LL + (int64_t)ru.ru_utime.tv_usec;
+#else
+    return -1;
+#endif
+}
+
+static inline int64_t mako_process_cpu_sys_us(void) {
+#if defined(_WIN32)
+    return -1;
+#elif defined(RUSAGE_SELF)
+    struct rusage ru;
+    if (getrusage(RUSAGE_SELF, &ru) != 0) return -1;
+    return (int64_t)ru.ru_stime.tv_sec * 1000000LL + (int64_t)ru.ru_stime.tv_usec;
+#else
+    return -1;
+#endif
 }
 
 /* Elapsed since start tick (mono domain preferred). */

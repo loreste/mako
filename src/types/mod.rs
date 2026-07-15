@@ -3937,6 +3937,14 @@ impl TypeChecker {
             Type::Fn(vec![], Box::new(Type::String)),
         );
         fns.insert(
+            "trace_export_otlp_json".into(),
+            Type::Fn(vec![], Box::new(Type::String)),
+        );
+        fns.insert(
+            "trace_span_id".into(),
+            Type::Fn(vec![], Box::new(Type::String)),
+        );
+        fns.insert(
             "trace_current".into(),
             Type::Fn(vec![], Box::new(Type::String)),
         );
@@ -3953,6 +3961,34 @@ impl TypeChecker {
         fns.insert(
             "trace_log".into(),
             Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "stack_trace".into(),
+            Type::Fn(vec![], Box::new(Type::String)),
+        );
+        fns.insert(
+            "crash_report_install".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "crash_report_installed".into(),
+            Type::Fn(vec![], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "process_rss_bytes".into(),
+            Type::Fn(vec![], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "process_cpu_user_us".into(),
+            Type::Fn(vec![], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "process_cpu_sys_us".into(),
+            Type::Fn(vec![], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "profile_snapshot_json".into(),
+            Type::Fn(vec![], Box::new(Type::String)),
         );
         fns.insert(
             "ecs_world_new".into(),
@@ -4656,6 +4692,10 @@ impl TypeChecker {
         );
         fns.insert(
             "metrics_export_prom".into(),
+            Type::Fn(vec![], Box::new(Type::String)),
+        );
+        fns.insert(
+            "metrics_export_otlp_json".into(),
             Type::Fn(vec![], Box::new(Type::String)),
         );
         fns.insert(

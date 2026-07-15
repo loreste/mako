@@ -160,8 +160,9 @@ High-level HTTP server with declarative routing:
 | `jpeg_encode_gray_dct` / `gif_encode_rgb_lzw` | image |
 | `slog_*` / `log_*` | strong structured logging (`mako_log.h`: JSON/logfmt, levels, multi-field) |
 | `slog_redact` / `slog_with_redacted` / `slog_set_json` / `slog_set_output` | redaction, format, file sink |
-| `metric_*` / `gauge_*` / `hist_*` / `metrics_export` / `metrics_export_prom` | process-local metrics + Prometheus text |
-| `trace_id` / `begin` / `end` / `trace_export_json` | span-lite tracing + OTel-ish JSON seed |
+| `metric_*` / `gauge_*` / `hist_*` / `metrics_export` / `metrics_export_prom` / `metrics_export_otlp_json` | process-local metrics + Prometheus + OTLP JSON |
+| `trace_id` / `begin` / `end` / `trace_export_json` / `trace_export_otlp_json` / `trace_span_id` | span-lite + OTLP/HTTP JSON seed |
+| `profile_snapshot_json` / `stack_trace` / `crash_report_install` / `process_rss_bytes` | observability depth seeds |
 | `validate_required` / `validate_*_len` / `validate_int_range` / `validate_email` | backend request validation |
 | `game_fixed_steps` / `game_fixed_remainder` / `game_alpha` / `game_frame_budget_ok` | fixed-timestep game-loop helpers |
 | `fx_*` / `det_rng_*` / `replay_*` | deterministic simulation math, RNG, and replay streams |
@@ -452,8 +453,9 @@ session controls (`tcp_set_timeout`, `tcp_keepalive`, `tcp_nodelay`,
 | Overflow | `checked_add` / `sub` / `mul` (abort), `would_overflow_*`, `--overflow trap` |
 | Shutdown | `signal_on_term`, `server_drain`, `register_listener`, `shutdown_requested` |
 | Leak | `leak_scope_enter` / `exit`, `leak_check` (+ `leak_mark` / `bytes_since`) |
-| Trace | `trace_id` / `set` / `current` / `begin` / `end` / `log` / `trace_export_json` |
-| Metrics | `metric_*` / `gauge_*` / `hist_*` / `metrics_export` / `metrics_export_prom` |
+| Trace | `trace_id` / `set` / `current` / `begin` / `end` / `log` / `trace_export_json` / `trace_export_otlp_json` / `trace_span_id` |
+| Metrics | `metric_*` / `gauge_*` / `hist_*` / `metrics_export` / `metrics_export_prom` / `metrics_export_otlp_json` |
+| Profile | `profile_snapshot_json` / `stack_trace` / `crash_report_install` / `process_rss_bytes` / `process_cpu_*` |
 | Logs + trace | `log_*` and `slog_with` print `trace=<hex>` when a trace is active |
 
 See [BUILTINS.md](BUILTINS.md) §§71–75 and [CLI.md](CLI.md) (`mako dev`, `--race`).

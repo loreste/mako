@@ -75,6 +75,7 @@ Last inventory: 2026-07-14 (**unique Mako surface** · pack/pull types · full m
 | First-class fns · `f"…"` · field defaults · `chan[tuple]` | Done — `lang_ergonomics_test` |
 | Portable timeouts (`send/recv_timeout`, `join_deadline`, `deadline_remaining_ms`) | Done — `timeout_portable_test` |
 | Crew child error prop (`first_err` / `wait`) · `detach` · actor state | Done — `crew_error_prop_test` · `detach_test` · `actor_test` |
+| Observability depth (OTLP JSON, profile snapshot, stack_trace, crash_report, PGO/LTO) | Done seed — `observability_depth_test` |
 | Book samples `mako check` / `run` | PASS — `docs/book/examples/book_*.mko` |
 | `mako test examples/testing` | PASS — **165 passed**, 0 failed |
 | `if init; cond { }` + both-branches-return body | Done — `examples/testing/if_init_test.mko` |

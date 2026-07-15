@@ -620,12 +620,23 @@ fn cmd_doctor() -> Result<(), ()> {
                 "mako_db.h",
                 "mako_security.h",
                 "mako_plugin.h",
+                "mako_trace.h",
+                "mako_std.h",
             ] {
                 if rt.join(header).exists() {
                     println!("    {header}: ok");
                 } else {
                     ok = false;
                     println!("    {header}: FAIL missing");
+                }
+            }
+            // Optional install manifest next to share/mako.
+            if let Some(share) = rt.parent() {
+                let man = share.join("install-manifest.json");
+                if man.exists() {
+                    println!("  install: ok (manifest {})", man.display());
+                } else {
+                    println!("  install: warn no install-manifest.json (source checkout ok)");
                 }
             }
         }
@@ -641,6 +652,12 @@ fn cmd_doctor() -> Result<(), ()> {
         ok = false;
         println!("  stdlib:  FAIL (could not find std/strings/strings.mko)");
     }
+
+    println!(
+        "  host:    {} / {}",
+        std::env::consts::OS,
+        std::env::consts::ARCH
+    );
 
     if command_on_path("clang") {
         println!("  clang:   ok");
@@ -3100,11 +3117,37 @@ fn build_c(
         OptLevel::Release => {
             // Match incremental path: -O3 + LTO for Go-competitive native speed.
             // Skip LTO for zig cross — can be slow / flaky across targets.
+            // MAKO_NO_LTO=1 disables -flto (faster links / some toolchains).
             if zig && cc::is_cross(opts.target.as_deref()) {
                 cmd.arg("-O2").arg("-DNDEBUG");
+            } else if std::env::var_os("MAKO_NO_LTO").is_some() {
+                cmd.arg("-O3").arg("-DNDEBUG");
             } else {
                 cmd.arg("-O3").arg("-flto").arg("-DNDEBUG");
             }
+        }
+    }
+
+    // Optional extra C flags (space-separated), e.g. MAKO_CFLAGS="-march=native".
+    if let Ok(extra) = std::env::var("MAKO_CFLAGS") {
+        for a in extra.split_whitespace() {
+            if !a.is_empty() {
+                cmd.arg(a);
+            }
+        }
+    }
+    // Profile-guided optimization (clang/gcc): generate then use.
+    //   MAKO_PGO_GEN=1 mako build --release …
+    //   ./bin …  # train
+    //   MAKO_PGO_USE=. mako build --release …
+    if std::env::var_os("MAKO_PGO_GEN").is_some() {
+        cmd.arg("-fprofile-generate");
+    }
+    if let Ok(dir) = std::env::var("MAKO_PGO_USE") {
+        if dir.is_empty() || dir == "1" {
+            cmd.arg("-fprofile-use");
+        } else {
+            cmd.arg(format!("-fprofile-use={dir}"));
         }
     }
 

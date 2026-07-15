@@ -61,6 +61,38 @@ To force a clean build:
 mako build --release --no-incremental main.mko -o server
 ```
 
+## Link-time optimization (LTO)
+
+Release builds pass **`-O3 -flto`** by default (native clang/gcc path). This is
+the product speed path.
+
+Disable LTO when link time matters more than peak speed (or a toolchain is flaky):
+
+```bash
+MAKO_NO_LTO=1 mako build --release main.mko -o server
+```
+
+## Profile-guided optimization (PGO)
+
+Two-pass PGO with the system C compiler:
+
+```bash
+# 1) Instrument
+MAKO_PGO_GEN=1 mako build --release main.mko -o server
+# 2) Train on representative load
+./server …   # writes default.profraw / .gcda next to the binary (compiler-dependent)
+# 3) Rebuild using profiles (clang: llvm-profdata merge may be needed first)
+MAKO_PGO_USE=1 mako build --release main.mko -o server
+# Or point at a profile directory / .profdata path:
+MAKO_PGO_USE=/path/to/default.profdata mako build --release main.mko -o server
+```
+
+Extra C flags for both compile and link:
+
+```bash
+MAKO_CFLAGS="-march=native" mako build --release main.mko -o server
+```
+
 ## Static linking
 
 On supported targets, produce a fully static binary with no runtime
