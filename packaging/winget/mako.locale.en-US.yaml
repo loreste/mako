@@ -3,7 +3,7 @@
 # Docs: https://github.com/microsoft/winget-pkgs
 # After tag: ./scripts/fill-release-packaging.sh v0.1.5
 PackageIdentifier: loreste.mako
-PackageVersion: 0.1.5
+PackageVersion: 0.1.7
 PackageLocale: en-US
 Publisher: loreste
 PublisherUrl: https://github.com/loreste/mako
@@ -28,8 +28,8 @@ ReleaseNotesUrl: https://github.com/loreste/mako/releases/tag/v0.1.5
 Installers:
   - Architecture: x64
     InstallerType: zip
-    InstallerUrl: https://github.com/loreste/mako/releases/download/v0.1.5/mako-x86_64-pc-windows-msvc.zip
-    InstallerSha256: 0000000000000000000000000000000000000000000000000000000000000000
+    InstallerUrl: https://github.com/loreste/mako/releases/download/v0.1.7/mako-x86_64-pc-windows-msvc.zip
+    InstallerSha256: 085073DD4935934FEE8E91C6084932BA113BB011FA5DF5D7AD1F582B9AA34864
     NestedInstallerType: portable
     NestedInstallerFiles:
       # Zip root folder matches Compress-Archive of the stage directory.
