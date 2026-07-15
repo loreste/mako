@@ -47,7 +47,7 @@ Tests: `examples/testing/stdlib_*`, plus area tests (`base64_test`, `regex_*`,
 | `os` / `env` / `args` / `os/exec` / `os/signal` | **Done** | env/args/exec; signal Unix |
 | `flag` | **Done** | CLI flags |
 | `net` / `http` / `net/url` / `net/mail` / `net/smtp` | **Done** | MIME builder + SMTP session / STARTTLS / AUTH |
-| `encoding/*` + `gob` / `binary` | **Done** | LE+BE; gob map/ss/struct/`[]string` |
+| `encoding/*` + `gob` / `binary` / `yaml` / `toml` | **Done** | LE+BE; gob; YAML/TOML config subset |
 | `compress/gzip` · `archive/tar` · `archive/zip` | **Done** | multi-file zip + deflate |
 | `mime` / `multipart` · `context` · `crypto` | **Done** | |
 | `math` / `rand` · `text/template` / `html/template` | **Done** | Go-style engine: if/range/with/define + HTML escape |
@@ -667,7 +667,7 @@ import "encoding/base64"
 |---------|------|
 | `json_*` (object/array/path/merge/…) | encode/decode into arenas |
 | `#[derive(json)]` | compile-time struct marshal/unmarshal codegen for scalar fields |
-| `yaml_get_string` / `toml_get_*` | config extraction seeds |
+| `yaml_*` / `toml_*` get+encode | `encoding/yaml` · `encoding/toml` (flat + section) |
 | `msgpack_int_hex` / `cbor_int_hex` / `avro_long_hex` | binary format integer encoding seeds |
 | `base64_encode` / `base64_decode` | base64 |
 | `hex_encode` / `hex_decode` | hex |

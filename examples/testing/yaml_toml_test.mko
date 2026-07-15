@@ -1,0 +1,57 @@
+// YAML + TOML encoding packages (flat config subset).
+
+fn TestYamlGetEncode() {
+    let doc = "name: mako\nport: 8080\nenabled: true\n# comment\nempty:\n"
+    assert_eq_str(yaml_get_string(doc, "name"), "mako")
+    assert_eq(yaml_get_int(doc, "port"), 8080)
+    assert_eq(yaml_get_bool(doc, "enabled"), 1)
+    assert_eq(yaml_has(doc, "name"), 1)
+    assert_eq(yaml_has(doc, "missing"), 0)
+    let line = yaml_pair("host", "localhost")
+    assert(str_contains(line, "host:"))
+    assert(str_contains(line, "localhost"))
+    let n = yaml_pair_int("n", 42)
+    assert(str_contains(n, "42"))
+    let b = yaml_pair_bool("ok", 1)
+    assert(str_contains(b, "true"))
+    let merged = yaml_merge(yaml_pair("a", "1"), yaml_pair("b", "2"))
+    assert_eq_str(yaml_get_string(merged, "a"), "1")
+    assert_eq_str(yaml_get_string(merged, "b"), "2")
+    let ks = yaml_keys(merged)
+    assert(len(ks) >= 2)
+}
+
+fn TestYamlList() {
+    let doc = "items:\n  - apple\n  - banana\n  - cherry\nother: x\n"
+    let xs = yaml_get_list(doc, "items")
+    assert_eq(len(xs), 3)
+    assert_eq_str(xs[0], "apple")
+    assert_eq_str(xs[2], "cherry")
+}
+
+fn TestTomlFlatAndSection() {
+    let doc = "name = \"mako\"\nport = 9090\nenabled = true\nratio = 1.5\n\n[server]\nhost = \"127.0.0.1\"\nworkers = 4\n"
+    assert_eq_str(toml_get_string(doc, "name"), "mako")
+    assert_eq(toml_get_int(doc, "port"), 9090)
+    assert_eq(toml_get_bool(doc, "enabled"), 1)
+    assert(toml_get_float(doc, "ratio") > 1.4 && toml_get_float(doc, "ratio") < 1.6)
+    assert_eq(toml_has(doc, "port"), 1)
+    assert_eq(toml_has(doc, "nope"), 0)
+    assert_eq_str(toml_get_in(doc, "server", "host"), "127.0.0.1")
+    assert_eq(toml_get_int_in(doc, "server", "workers"), 4)
+    let ks = toml_keys(doc)
+    assert(len(ks) >= 3)
+}
+
+fn TestTomlEncode() {
+    let body = toml_merge(
+        toml_pair("name", "demo"),
+        toml_merge(toml_pair_int("n", 7), toml_pair_bool("on", 1))
+    )
+    assert_eq_str(toml_get_string(body, "name"), "demo")
+    assert_eq(toml_get_int(body, "n"), 7)
+    assert_eq(toml_get_bool(body, "on"), 1)
+    let sec = toml_merge(toml_section("db"), toml_pair("url", "sqlite://x"))
+    let full = toml_merge(body, sec)
+    assert_eq_str(toml_get_in(full, "db", "url"), "sqlite://x")
+}

@@ -1,6 +1,6 @@
 # Mako status (adversarial / verified)
 
-Last inventory: **2026-07-15** · product **mako0.1.5** (`CARGO_PKG_VERSION`).
+Last inventory: **2026-07-15** · product **mako0.1.6** (`CARGO_PKG_VERSION`).
 
 Unique Mako surface · pack/pull · map/slice/bag monomorphs · package-per-directory ·
 const-fn depth (match/while/for/strings) · suite **165+** · [The Mako Book](book/).
@@ -13,7 +13,7 @@ const-fn depth (match/while/for/strings) · suite **165+** · [The Mako Book](bo
 
 | Scope | Approx. |
 |-------|---------|
-| **Product version** | **0.1.5** |
+| **Product version** | **0.1.6** |
 | **MVP / usable language** | **100%** |
 | **STATUS north-star** | **100%** |
 | **Mako identity (preferred syntax)** | **~100%** — [IDENTITY.md](IDENTITY.md) |
@@ -110,6 +110,8 @@ const-fn depth (match/while/for/strings) · suite **165+** · [The Mako Book](bo
 | Plugin product package | Done — live dylib load/call/reload/manifest · `std/plugin` · `plugin_product_test` |
 | Full time package | Done — calendar/parse/format/duration · `std/time` · `time_full_test` |
 | Full syscall package | Done — portable OS primitives · `std/syscall` · `syscall_full_test` |
+| YAML + TOML encoding packages | Done — flat/section config · `std/encoding/{yaml,toml}` · `yaml_toml_test` |
+| Product version 0.1.6 | Done — tree-wide version sync |
 | Installer UX (manifest + doctor + Windows) | Done seed — `install-manifest.json` · doctor fields · `install.ps1` |
 | Actor spawn_cap + interface `on T : I` sugar | Done seed — `actor_test` · `iface_on_iface_test` |
 | Error chain peel + tag helpers | Done seed — `error_unwrap` / `root` / `as_tag` / `has_tag` · `error_chain_test` |

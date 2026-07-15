@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+## 0.1.6 — 2026-07-15
+
+**mako0.1.6** (`CARGO_PKG_VERSION`).
+
+Patch after 0.1.5: YAML/TOML encoding packages, plugin product, rich collections,
+full time + syscall, unicode/utf8 depth.
+
+### YAML + TOML encoding
+
+- YAML: get string/int/bool, has, keys, list items, pair/merge encode.
+- TOML: flat + `[section]` get, int/bool/float, encode pairs/sections.
+- Packages: `std/encoding/yaml`, `std/encoding/toml`.
+- Tests: `yaml_toml_test`.
+
 ### Plugin product · rich collections · full time · full syscall
 
 - **Plugin product:** live dylib load/call (ping/echo/version), host log callback,

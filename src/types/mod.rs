@@ -4482,12 +4482,115 @@ impl TypeChecker {
             Type::Fn(vec![Type::String, Type::String], Box::new(Type::String)),
         );
         fns.insert(
+            "yaml_get_int".into(),
+            Type::Fn(vec![Type::String, Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "yaml_get_bool".into(),
+            Type::Fn(vec![Type::String, Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "yaml_has".into(),
+            Type::Fn(vec![Type::String, Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "yaml_escape".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::String)),
+        );
+        fns.insert(
+            "yaml_pair".into(),
+            Type::Fn(vec![Type::String, Type::String], Box::new(Type::String)),
+        );
+        fns.insert(
+            "yaml_pair_int".into(),
+            Type::Fn(vec![Type::String, Type::Int], Box::new(Type::String)),
+        );
+        fns.insert(
+            "yaml_pair_bool".into(),
+            Type::Fn(vec![Type::String, Type::Int], Box::new(Type::String)),
+        );
+        fns.insert(
+            "yaml_merge".into(),
+            Type::Fn(vec![Type::String, Type::String], Box::new(Type::String)),
+        );
+        fns.insert(
+            "yaml_get_list".into(),
+            Type::Fn(
+                vec![Type::String, Type::String],
+                Box::new(Type::Array(Box::new(Type::String))),
+            ),
+        );
+        fns.insert(
+            "yaml_keys".into(),
+            Type::Fn(
+                vec![Type::String],
+                Box::new(Type::Array(Box::new(Type::String))),
+            ),
+        );
+        fns.insert(
             "toml_get_string".into(),
             Type::Fn(vec![Type::String, Type::String], Box::new(Type::String)),
         );
         fns.insert(
             "toml_get_int".into(),
             Type::Fn(vec![Type::String, Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "toml_get_bool".into(),
+            Type::Fn(vec![Type::String, Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "toml_get_float".into(),
+            Type::Fn(vec![Type::String, Type::String], Box::new(Type::Float)),
+        );
+        fns.insert(
+            "toml_has".into(),
+            Type::Fn(vec![Type::String, Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "toml_get_in".into(),
+            Type::Fn(
+                vec![Type::String, Type::String, Type::String],
+                Box::new(Type::String),
+            ),
+        );
+        fns.insert(
+            "toml_get_int_in".into(),
+            Type::Fn(
+                vec![Type::String, Type::String, Type::String],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "toml_escape".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::String)),
+        );
+        fns.insert(
+            "toml_pair".into(),
+            Type::Fn(vec![Type::String, Type::String], Box::new(Type::String)),
+        );
+        fns.insert(
+            "toml_pair_int".into(),
+            Type::Fn(vec![Type::String, Type::Int], Box::new(Type::String)),
+        );
+        fns.insert(
+            "toml_pair_bool".into(),
+            Type::Fn(vec![Type::String, Type::Int], Box::new(Type::String)),
+        );
+        fns.insert(
+            "toml_section".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::String)),
+        );
+        fns.insert(
+            "toml_merge".into(),
+            Type::Fn(vec![Type::String, Type::String], Box::new(Type::String)),
+        );
+        fns.insert(
+            "toml_keys".into(),
+            Type::Fn(
+                vec![Type::String],
+                Box::new(Type::Array(Box::new(Type::String))),
+            ),
         );
         fns.insert(
             "msgpack_int_hex".into(),

@@ -3046,6 +3046,7 @@ static inline MakoString mako_trim_config_value(const char *p, size_t n) {
     return (MakoString){d, n};
 }
 
+/* ---- YAML (flat key: value seed + list/bool/encode; not full YAML 1.2) ---- */
 static inline MakoString mako_yaml_get_string(MakoString doc, MakoString key) {
     const char *p = doc.data ? doc.data : "";
     size_t pos = 0;
@@ -3056,6 +3057,7 @@ static inline MakoString mako_yaml_get_string(MakoString doc, MakoString key) {
         if (pos < doc.len && p[pos] == '\n') pos++;
         size_t i = line_start;
         while (i < line_end && (p[i] == ' ' || p[i] == '\t')) i++;
+        if (i < line_end && p[i] == '#') continue; /* comment */
         if (i + key.len < line_end && memcmp(p + i, key.data, key.len) == 0 && p[i + key.len] == ':') {
             return mako_trim_config_value(p + i + key.len + 1, line_end - (i + key.len + 1));
         }
@@ -3063,6 +3065,191 @@ static inline MakoString mako_yaml_get_string(MakoString doc, MakoString key) {
     return mako_str_from_cstr("");
 }
 
+static inline int64_t mako_yaml_has(MakoString doc, MakoString key) {
+    MakoString v = mako_yaml_get_string(doc, key);
+    int64_t ok = (v.data && v.len > 0) ? 1 : 0;
+    /* empty value is still "present" if key: exists — re-scan */
+    if (ok) {
+        mako_str_free(v);
+        return 1;
+    }
+    mako_str_free(v);
+    const char *p = doc.data ? doc.data : "";
+    size_t pos = 0;
+    while (pos < doc.len) {
+        size_t line_start = pos;
+        while (pos < doc.len && p[pos] != '\n') pos++;
+        size_t line_end = pos;
+        if (pos < doc.len && p[pos] == '\n') pos++;
+        size_t i = line_start;
+        while (i < line_end && (p[i] == ' ' || p[i] == '\t')) i++;
+        if (i + key.len <= line_end && memcmp(p + i, key.data, key.len) == 0
+            && (i + key.len == line_end || p[i + key.len] == ':' || p[i + key.len] == ' ')) {
+            if (i + key.len < line_end && p[i + key.len] == ':') return 1;
+        }
+    }
+    return 0;
+}
+
+static inline int64_t mako_yaml_get_int(MakoString doc, MakoString key) {
+    MakoString s = mako_yaml_get_string(doc, key);
+    if (!s.data || s.len == 0) {
+        mako_str_free(s);
+        return 0;
+    }
+    char buf[64];
+    size_t n = s.len < sizeof(buf) - 1 ? s.len : sizeof(buf) - 1;
+    memcpy(buf, s.data, n);
+    buf[n] = 0;
+    mako_str_free(s);
+    return (int64_t)strtoll(buf, NULL, 10);
+}
+
+static inline int64_t mako_yaml_get_bool(MakoString doc, MakoString key) {
+    MakoString s = mako_yaml_get_string(doc, key);
+    if (!s.data || s.len == 0) {
+        mako_str_free(s);
+        return 0;
+    }
+    int64_t r = 0;
+    if ((s.len == 4 && (memcmp(s.data, "true", 4) == 0 || memcmp(s.data, "True", 4) == 0
+                        || memcmp(s.data, "TRUE", 4) == 0))
+        || (s.len == 3 && (memcmp(s.data, "yes", 3) == 0 || memcmp(s.data, "Yes", 3) == 0))
+        || (s.len == 1 && (s.data[0] == '1' || s.data[0] == 'y' || s.data[0] == 'Y')))
+        r = 1;
+    mako_str_free(s);
+    return r;
+}
+
+/* Encode one key: value line (quotes if needed). */
+static inline MakoString mako_yaml_escape(MakoString s) {
+    int need = 0;
+    for (size_t i = 0; i < s.len; i++) {
+        char c = s.data[i];
+        if (c == ':' || c == '#' || c == '"' || c == '\'' || c == '\n' || c == '\r'
+            || (i == 0 && (c == ' ' || c == '\t'))) {
+            need = 1;
+            break;
+        }
+    }
+    if (!need && s.len > 0) return mako_str_clone(s);
+    /* quote + escape " and \ */
+    size_t cap = s.len * 2 + 3;
+    char *d = (char *)malloc(cap);
+    if (!d) mako_abort("yaml_escape OOM");
+    size_t j = 0;
+    d[j++] = '"';
+    for (size_t i = 0; i < s.len; i++) {
+        char c = s.data[i];
+        if (c == '"' || c == '\\') d[j++] = '\\';
+        if (c == '\n') {
+            d[j++] = '\\';
+            d[j++] = 'n';
+            continue;
+        }
+        d[j++] = c;
+    }
+    d[j++] = '"';
+    d[j] = 0;
+    return (MakoString){d, j};
+}
+
+static inline MakoString mako_yaml_pair(MakoString key, MakoString val) {
+    MakoString ev = mako_yaml_escape(val);
+    size_t el = ev.len;
+    size_t n = key.len + 2 + el + 1;
+    char *d = (char *)malloc(n + 1);
+    if (!d) mako_abort("yaml_pair OOM");
+    memcpy(d, key.data, key.len);
+    d[key.len] = ':';
+    d[key.len + 1] = ' ';
+    memcpy(d + key.len + 2, ev.data, el);
+    d[key.len + 2 + el] = '\n';
+    d[key.len + 2 + el + 1] = 0;
+    mako_str_free(ev);
+    return (MakoString){d, key.len + 2 + el + 1};
+}
+
+static inline MakoString mako_yaml_pair_int(MakoString key, int64_t val) {
+    char buf[32];
+    snprintf(buf, sizeof(buf), "%lld", (long long)val);
+    return mako_yaml_pair(key, mako_str_from_cstr(buf));
+}
+
+static inline MakoString mako_yaml_pair_bool(MakoString key, int64_t val) {
+    return mako_yaml_pair(key, mako_str_from_cstr(val ? "true" : "false"));
+}
+
+static inline MakoString mako_yaml_merge(MakoString a, MakoString b) {
+    return mako_str_concat(a, b);
+}
+
+/* Sequence under key: lines "- item" after "key:" */
+static inline MakoStrArray mako_yaml_get_list(MakoString doc, MakoString key) {
+    MakoStrArray out = mako_str_array_make(0, 8);
+    const char *p = doc.data ? doc.data : "";
+    size_t pos = 0;
+    int in = 0;
+    while (pos < doc.len) {
+        size_t line_start = pos;
+        while (pos < doc.len && p[pos] != '\n') pos++;
+        size_t line_end = pos;
+        if (pos < doc.len && p[pos] == '\n') pos++;
+        size_t i = line_start;
+        while (i < line_end && (p[i] == ' ' || p[i] == '\t')) i++;
+        if (!in) {
+            if (i + key.len < line_end && memcmp(p + i, key.data, key.len) == 0
+                && p[i + key.len] == ':') {
+                in = 1;
+                /* inline list: key: [a, b] not supported; multi-line only */
+            }
+            continue;
+        }
+        /* stop at next top-level key (no indent dash) */
+        if (i < line_end && p[i] != '-' && p[i] != ' ' && p[i] != '\t' && p[i] != '#') {
+            /* another key at same level */
+            if (p[i] != '\n') break;
+        }
+        size_t j = i;
+        while (j < line_end && (p[j] == ' ' || p[j] == '\t')) j++;
+        if (j < line_end && p[j] == '-') {
+            j++;
+            while (j < line_end && (p[j] == ' ' || p[j] == '\t')) j++;
+            MakoString item = mako_trim_config_value(p + j, line_end - j);
+            out = mako_str_array_append(out, item);
+        } else if (j < line_end && p[j] != '#') {
+            break;
+        }
+    }
+    return out;
+}
+
+static inline MakoStrArray mako_yaml_keys(MakoString doc) {
+    MakoStrArray out = mako_str_array_make(0, 16);
+    const char *p = doc.data ? doc.data : "";
+    size_t pos = 0;
+    while (pos < doc.len) {
+        size_t line_start = pos;
+        while (pos < doc.len && p[pos] != '\n') pos++;
+        size_t line_end = pos;
+        if (pos < doc.len && p[pos] == '\n') pos++;
+        size_t i = line_start;
+        while (i < line_end && (p[i] == ' ' || p[i] == '\t')) i++;
+        if (i >= line_end || p[i] == '#' || p[i] == '-') continue;
+        size_t k0 = i;
+        while (i < line_end && p[i] != ':' && p[i] != ' ' && p[i] != '\t') i++;
+        if (i < line_end && p[i] == ':' && i > k0) {
+            char *d = (char *)malloc(i - k0 + 1);
+            if (!d) continue;
+            memcpy(d, p + k0, i - k0);
+            d[i - k0] = 0;
+            out = mako_str_array_append(out, (MakoString){d, i - k0});
+        }
+    }
+    return out;
+}
+
+/* ---- TOML (flat + [section] keys; not full TOML 1.0) ---- */
 static inline MakoString mako_toml_get_string(MakoString doc, MakoString key) {
     const char *p = doc.data ? doc.data : "";
     size_t pos = 0;
@@ -3073,7 +3260,9 @@ static inline MakoString mako_toml_get_string(MakoString doc, MakoString key) {
         if (pos < doc.len && p[pos] == '\n') pos++;
         size_t i = line_start;
         while (i < line_end && (p[i] == ' ' || p[i] == '\t')) i++;
-        if (i + key.len < line_end && memcmp(p + i, key.data, key.len) == 0) {
+        if (i < line_end && p[i] == '#') continue;
+        if (i < line_end && p[i] == '[') continue; /* skip section headers in flat get */
+        if (i + key.len <= line_end && memcmp(p + i, key.data, key.len) == 0) {
             size_t j = i + key.len;
             while (j < line_end && (p[j] == ' ' || p[j] == '\t')) j++;
             if (j < line_end && p[j] == '=') return mako_trim_config_value(p + j + 1, line_end - j - 1);
@@ -3084,12 +3273,211 @@ static inline MakoString mako_toml_get_string(MakoString doc, MakoString key) {
 
 static inline int64_t mako_toml_get_int(MakoString doc, MakoString key) {
     MakoString s = mako_toml_get_string(doc, key);
-    if (!s.data || s.len == 0) return 0;
+    if (!s.data || s.len == 0) {
+        mako_str_free(s);
+        return 0;
+    }
     char buf[64];
     size_t n = s.len < sizeof(buf) - 1 ? s.len : sizeof(buf) - 1;
     memcpy(buf, s.data, n);
     buf[n] = 0;
+    mako_str_free(s);
     return (int64_t)strtoll(buf, NULL, 10);
+}
+
+static inline int64_t mako_toml_has(MakoString doc, MakoString key) {
+    MakoString s = mako_toml_get_string(doc, key);
+    /* present if key= found even for empty — re-scan */
+    const char *p = doc.data ? doc.data : "";
+    size_t pos = 0;
+    int found = 0;
+    while (pos < doc.len) {
+        size_t line_start = pos;
+        while (pos < doc.len && p[pos] != '\n') pos++;
+        size_t line_end = pos;
+        if (pos < doc.len && p[pos] == '\n') pos++;
+        size_t i = line_start;
+        while (i < line_end && (p[i] == ' ' || p[i] == '\t')) i++;
+        if (i + key.len <= line_end && memcmp(p + i, key.data, key.len) == 0) {
+            size_t j = i + key.len;
+            while (j < line_end && (p[j] == ' ' || p[j] == '\t')) j++;
+            if (j < line_end && p[j] == '=') {
+                found = 1;
+                break;
+            }
+        }
+    }
+    mako_str_free(s);
+    return found;
+}
+
+static inline int64_t mako_toml_get_bool(MakoString doc, MakoString key) {
+    MakoString s = mako_toml_get_string(doc, key);
+    if (!s.data || s.len == 0) {
+        mako_str_free(s);
+        return 0;
+    }
+    int64_t r = 0;
+    if (s.len == 4 && memcmp(s.data, "true", 4) == 0) r = 1;
+    mako_str_free(s);
+    return r;
+}
+
+static inline double mako_toml_get_float(MakoString doc, MakoString key) {
+    MakoString s = mako_toml_get_string(doc, key);
+    if (!s.data || s.len == 0) {
+        mako_str_free(s);
+        return 0.0;
+    }
+    char buf[64];
+    size_t n = s.len < sizeof(buf) - 1 ? s.len : sizeof(buf) - 1;
+    memcpy(buf, s.data, n);
+    buf[n] = 0;
+    mako_str_free(s);
+    return strtod(buf, NULL);
+}
+
+/* Get key inside [section] ... until next [ */
+static inline MakoString mako_toml_get_in(MakoString doc, MakoString section, MakoString key) {
+    const char *p = doc.data ? doc.data : "";
+    size_t pos = 0;
+    int in_sec = 0;
+    while (pos < doc.len) {
+        size_t line_start = pos;
+        while (pos < doc.len && p[pos] != '\n') pos++;
+        size_t line_end = pos;
+        if (pos < doc.len && p[pos] == '\n') pos++;
+        size_t i = line_start;
+        while (i < line_end && (p[i] == ' ' || p[i] == '\t')) i++;
+        if (i < line_end && p[i] == '[') {
+            size_t j = i + 1;
+            while (j < line_end && p[j] != ']') j++;
+            size_t slen = j > i + 1 ? j - (i + 1) : 0;
+            in_sec = (slen == section.len && memcmp(p + i + 1, section.data, slen) == 0) ? 1 : 0;
+            continue;
+        }
+        if (!in_sec) continue;
+        if (i < line_end && p[i] == '#') continue;
+        if (i + key.len <= line_end && memcmp(p + i, key.data, key.len) == 0) {
+            size_t j = i + key.len;
+            while (j < line_end && (p[j] == ' ' || p[j] == '\t')) j++;
+            if (j < line_end && p[j] == '=')
+                return mako_trim_config_value(p + j + 1, line_end - j - 1);
+        }
+    }
+    return mako_str_from_cstr("");
+}
+
+static inline int64_t mako_toml_get_int_in(MakoString doc, MakoString section, MakoString key) {
+    MakoString s = mako_toml_get_in(doc, section, key);
+    if (!s.data || s.len == 0) {
+        mako_str_free(s);
+        return 0;
+    }
+    char buf[64];
+    size_t n = s.len < sizeof(buf) - 1 ? s.len : sizeof(buf) - 1;
+    memcpy(buf, s.data, n);
+    buf[n] = 0;
+    mako_str_free(s);
+    return (int64_t)strtoll(buf, NULL, 10);
+}
+
+static inline MakoString mako_toml_escape(MakoString s) {
+    /* basic "..." string */
+    size_t cap = s.len * 2 + 3;
+    char *d = (char *)malloc(cap);
+    if (!d) mako_abort("toml_escape OOM");
+    size_t j = 0;
+    d[j++] = '"';
+    for (size_t i = 0; i < s.len; i++) {
+        char c = s.data[i];
+        if (c == '"' || c == '\\') d[j++] = '\\';
+        if (c == '\n') {
+            d[j++] = '\\';
+            d[j++] = 'n';
+            continue;
+        }
+        d[j++] = c;
+    }
+    d[j++] = '"';
+    d[j] = 0;
+    return (MakoString){d, j};
+}
+
+static inline MakoString mako_toml_pair(MakoString key, MakoString val) {
+    MakoString ev = mako_toml_escape(val);
+    size_t el = ev.len;
+    size_t n = key.len + 3 + el + 1;
+    char *d = (char *)malloc(n + 1);
+    if (!d) mako_abort("toml_pair OOM");
+    memcpy(d, key.data, key.len);
+    d[key.len] = ' ';
+    d[key.len + 1] = '=';
+    d[key.len + 2] = ' ';
+    memcpy(d + key.len + 3, ev.data, el);
+    d[key.len + 3 + el] = '\n';
+    d[key.len + 3 + el + 1] = 0;
+    mako_str_free(ev);
+    return (MakoString){d, key.len + 3 + el + 1};
+}
+
+static inline MakoString mako_toml_pair_int(MakoString key, int64_t val) {
+    char buf[48];
+    int n = snprintf(buf, sizeof(buf), "%.*s = %lld\n", (int)key.len, key.data ? key.data : "",
+                     (long long)val);
+    if (n < 0) n = 0;
+    return mako_str_from_cstr(buf);
+}
+
+static inline MakoString mako_toml_pair_bool(MakoString key, int64_t val) {
+    char buf[96];
+    int n = snprintf(buf, sizeof(buf), "%.*s = %s\n", (int)key.len, key.data ? key.data : "",
+                     val ? "true" : "false");
+    if (n < 0) n = 0;
+    return mako_str_from_cstr(buf);
+}
+
+static inline MakoString mako_toml_section(MakoString name) {
+    size_t n = name.len + 3;
+    char *d = (char *)malloc(n + 1);
+    if (!d) mako_abort("toml_section OOM");
+    d[0] = '[';
+    memcpy(d + 1, name.data, name.len);
+    d[1 + name.len] = ']';
+    d[2 + name.len] = '\n';
+    d[3 + name.len] = 0;
+    return (MakoString){d, 3 + name.len};
+}
+
+static inline MakoString mako_toml_merge(MakoString a, MakoString b) {
+    return mako_str_concat(a, b);
+}
+
+static inline MakoStrArray mako_toml_keys(MakoString doc) {
+    MakoStrArray out = mako_str_array_make(0, 16);
+    const char *p = doc.data ? doc.data : "";
+    size_t pos = 0;
+    while (pos < doc.len) {
+        size_t line_start = pos;
+        while (pos < doc.len && p[pos] != '\n') pos++;
+        size_t line_end = pos;
+        if (pos < doc.len && p[pos] == '\n') pos++;
+        size_t i = line_start;
+        while (i < line_end && (p[i] == ' ' || p[i] == '\t')) i++;
+        if (i >= line_end || p[i] == '#' || p[i] == '[') continue;
+        size_t k0 = i;
+        while (i < line_end && p[i] != '=' && p[i] != ' ' && p[i] != '\t') i++;
+        size_t k1 = i;
+        while (i < line_end && (p[i] == ' ' || p[i] == '\t')) i++;
+        if (i < line_end && p[i] == '=' && k1 > k0) {
+            char *d = (char *)malloc(k1 - k0 + 1);
+            if (!d) continue;
+            memcpy(d, p + k0, k1 - k0);
+            d[k1 - k0] = 0;
+            out = mako_str_array_append(out, (MakoString){d, k1 - k0});
+        }
+    }
+    return out;
 }
 
 static inline MakoString mako_msgpack_int_hex(int64_t v) {
