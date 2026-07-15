@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Language — f-string format specs + string captures
+
+- **Format specs in `f"…"`:** `{n:02}` / `{n:04d}` zero-pad, `{n:x}`/`{n:X}`
+  hex, `{n:o}` octal, `{n:b}` binary, `{x:.2f}` float precision, `{s:4}` /
+  `{s:<4}` string width. Runtime helpers on `StrBuilder`.
+- **String captures:** closures clone `string` locals into the env (owned).
+- Annotated `let f: fn(string)->int = |s| …` passes param types to lambda emit.
+- Tests: `fstring_fmt_test`, extended `capturing_closure_test`.
+
 ### Language — capturing closures (seed)
 
 - **`MakoFn` fat pointer** (`fn` + optional `env`) for all first-class function
@@ -10,7 +19,7 @@
   value into a heap env; call sites dispatch env-first vs bare.
 - Works as args (`apply(|x| x + n, …)`), bound locals, multi-arg, and
   `if` expressions in the body.
-- Not yet: string/struct capture, mut borrows, kicking `fn` values across crew.
+- Not yet: struct capture, mut borrows, kicking `fn` values across crew.
 - Tests: `capturing_closure_test`.
 
 ### Observability depth — P2 seeds

@@ -1554,6 +1554,180 @@ static inline void mako_str_builder_write_i64(MakoStrBuilder *b, int64_t n) {
     b->data[b->len] = 0;
 }
 
+/* f-string format specs for ints: "02", "04d", "x", "X", "b", "o", "d", width. */
+static inline void mako_str_builder_write_i64_spec(
+    MakoStrBuilder *b, int64_t n, const char *spec
+) {
+    if (!spec || !spec[0]) {
+        mako_str_builder_write_i64(b, n);
+        return;
+    }
+    char buf[128];
+    int written = 0;
+    /* Hex / oct / bin / decimal type letter (optional width prefix). */
+    const char *p = spec;
+    int zero_pad = 0;
+    int width = 0;
+    if (*p == '0' && p[1] >= '0' && p[1] <= '9') {
+        zero_pad = 1;
+        p++;
+    }
+    while (*p >= '0' && *p <= '9') {
+        width = width * 10 + (*p - '0');
+        p++;
+    }
+    char type = *p ? *p : 'd';
+    if (type == 'x') {
+        if (zero_pad && width > 0)
+            written = snprintf(buf, sizeof(buf), "%0*llx", width, (unsigned long long)n);
+        else if (width > 0)
+            written = snprintf(buf, sizeof(buf), "%*llx", width, (unsigned long long)n);
+        else
+            written = snprintf(buf, sizeof(buf), "%llx", (unsigned long long)n);
+    } else if (type == 'X') {
+        if (zero_pad && width > 0)
+            written = snprintf(buf, sizeof(buf), "%0*llX", width, (unsigned long long)n);
+        else if (width > 0)
+            written = snprintf(buf, sizeof(buf), "%*llX", width, (unsigned long long)n);
+        else
+            written = snprintf(buf, sizeof(buf), "%llX", (unsigned long long)n);
+    } else if (type == 'o') {
+        if (zero_pad && width > 0)
+            written = snprintf(buf, sizeof(buf), "%0*llo", width, (unsigned long long)n);
+        else if (width > 0)
+            written = snprintf(buf, sizeof(buf), "%*llo", width, (unsigned long long)n);
+        else
+            written = snprintf(buf, sizeof(buf), "%llo", (unsigned long long)n);
+    } else if (type == 'b') {
+        /* Binary: manual. */
+        char bits[80];
+        int bi = 0;
+        uint64_t u = (uint64_t)n;
+        if (u == 0) {
+            bits[bi++] = '0';
+        } else {
+            char rev[66];
+            int ri = 0;
+            while (u) {
+                rev[ri++] = (char)('0' + (u & 1u));
+                u >>= 1;
+            }
+            while (ri > 0) bits[bi++] = rev[--ri];
+        }
+        bits[bi] = 0;
+        if (width > bi) {
+            char pad = zero_pad ? '0' : ' ';
+            int padn = width - bi;
+            if (padn > (int)sizeof(buf) - 1) padn = (int)sizeof(buf) - 1;
+            memset(buf, pad, (size_t)padn);
+            memcpy(buf + padn, bits, (size_t)bi + 1);
+            written = padn + bi;
+        } else {
+            written = snprintf(buf, sizeof(buf), "%s", bits);
+        }
+    } else {
+        /* d or bare width digits (e.g. "02" already consumed as zero+width, type d). */
+        if (type != 'd' && type != 0 && !(type >= '0' && type <= '9')) {
+            /* unknown letter → decimal */
+        }
+        if (zero_pad && width > 0)
+            written = snprintf(buf, sizeof(buf), "%0*lld", width, (long long)n);
+        else if (width > 0)
+            written = snprintf(buf, sizeof(buf), "%*lld", width, (long long)n);
+        else
+            written = snprintf(buf, sizeof(buf), "%lld", (long long)n);
+    }
+    if (written < 0) written = 0;
+    if ((size_t)written >= sizeof(buf)) written = (int)sizeof(buf) - 1;
+    mako_str_builder_grow(b, b->len + (size_t)written + 1);
+    memcpy(b->data + b->len, buf, (size_t)written);
+    b->len += (size_t)written;
+    b->data[b->len] = 0;
+}
+
+/* Float specs: ".2", ".2f", "f", or empty (6 decimals default via format_float path). */
+static inline void mako_str_builder_write_f64_spec(
+    MakoStrBuilder *b, double n, const char *spec
+) {
+    int prec = 6;
+    if (spec && spec[0]) {
+        const char *p = spec;
+        if (*p == '.') {
+            p++;
+            prec = 0;
+            while (*p >= '0' && *p <= '9') {
+                prec = prec * 10 + (*p - '0');
+                p++;
+            }
+        } else if (*p == 'f' || *p == 'F') {
+            prec = 6;
+        } else {
+            /* bare digits? treat as precision */
+            int v = 0;
+            int any = 0;
+            while (*p >= '0' && *p <= '9') {
+                v = v * 10 + (*p - '0');
+                p++;
+                any = 1;
+            }
+            if (any) prec = v;
+        }
+        if (prec < 0) prec = 0;
+        if (prec > 17) prec = 17;
+    }
+    char buf[128];
+    int written = snprintf(buf, sizeof(buf), "%.*f", prec, n);
+    if (written < 0) written = 0;
+    if ((size_t)written >= sizeof(buf)) written = (int)sizeof(buf) - 1;
+    mako_str_builder_grow(b, b->len + (size_t)written + 1);
+    memcpy(b->data + b->len, buf, (size_t)written);
+    b->len += (size_t)written;
+    b->data[b->len] = 0;
+}
+
+/* String width pad: "10" left-pad spaces, "<10" left-align (pad right), ">10" right-align. */
+static inline void mako_str_builder_write_str_spec(
+    MakoStrBuilder *b, MakoString s, const char *spec
+) {
+    if (!spec || !spec[0]) {
+        mako_str_builder_write(b, s);
+        return;
+    }
+    int left_align = 0;
+    const char *p = spec;
+    if (*p == '<') {
+        left_align = 1;
+        p++;
+    } else if (*p == '>') {
+        left_align = 0;
+        p++;
+    }
+    int width = 0;
+    while (*p >= '0' && *p <= '9') {
+        width = width * 10 + (*p - '0');
+        p++;
+    }
+    size_t slen = s.len;
+    if (width <= 0 || (size_t)width <= slen) {
+        mako_str_builder_write(b, s);
+        return;
+    }
+    size_t pad = (size_t)width - slen;
+    mako_str_builder_grow(b, b->len + (size_t)width + 1);
+    if (left_align) {
+        if (slen && s.data) memcpy(b->data + b->len, s.data, slen);
+        b->len += slen;
+        memset(b->data + b->len, ' ', pad);
+        b->len += pad;
+    } else {
+        memset(b->data + b->len, ' ', pad);
+        b->len += pad;
+        if (slen && s.data) memcpy(b->data + b->len, s.data, slen);
+        b->len += slen;
+    }
+    b->data[b->len] = 0;
+}
+
 static inline void mako_str_builder_write_byte(MakoStrBuilder *b, int64_t v) {
     if (v < 0 || v > 255) mako_abort("str_builder write_byte: out of range 0..255");
     mako_str_builder_grow(b, b->len + 2);

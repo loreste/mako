@@ -703,9 +703,13 @@ fn fmt_expr(e: &Expr, parent_prec: u8) -> String {
                     crate::ast::InterpPart::Lit(t) => {
                         s.push_str(&t.replace('\\', "\\\\").replace('"', "\\\""));
                     }
-                    crate::ast::InterpPart::Expr(e) => {
+                    crate::ast::InterpPart::Expr(e, fmt) => {
                         s.push('{');
                         s.push_str(&fmt_expr(e, 0));
+                        if let Some(spec) = fmt {
+                            s.push(':');
+                            s.push_str(spec);
+                        }
                         s.push('}');
                     }
                 }

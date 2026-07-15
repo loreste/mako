@@ -1,0 +1,51 @@
+// f-string format specs: {n:02}, {n:x}, {f:.2f}, string width.
+
+fn TestFStringZeroPad() {
+    let n = 7
+    assert_eq_str(f"{n:02}", "07")
+    assert_eq_str(f"{n:04}", "0007")
+    let m = 42
+    assert_eq_str(f"id={m:04d}", "id=0042")
+}
+
+fn TestFStringHex() {
+    let n = 255
+    assert_eq_str(f"{n:x}", "ff")
+    assert_eq_str(f"{n:X}", "FF")
+    assert_eq_str(f"{n:02x}", "ff")
+    let k = 10
+    assert_eq_str(f"{k:02x}", "0a")
+}
+
+fn TestFStringOctBin() {
+    let n = 8
+    assert_eq_str(f"{n:o}", "10")
+    assert_eq_str(f"{n:b}", "1000")
+}
+
+fn TestFStringFloatPrec() {
+    let x = 3.14159
+    assert_eq_str(f"{x:.2f}", "3.14")
+    assert_eq_str(f"{x:.0f}", "3")
+    assert_eq_str(f"{x:.4}", "3.1416")
+}
+
+fn TestFStringWidth() {
+    let n = 9
+    assert_eq_str(f"{n:3}", "  9")
+    let s = "hi"
+    assert_eq_str(f"{s:4}", "  hi")
+    assert_eq_str(f"{s:<4}", "hi  ")
+}
+
+fn TestFStringMixedSpec() {
+    let port = 80
+    let name = "api"
+    assert_eq_str(f"{name}:{port:04}", "api:0080")
+}
+
+fn TestFStringStillPlain() {
+    let n = 42
+    assert_eq_str(f"n={n}", "n=42")
+    assert_eq_str(f"brace {{ok}}", "brace {ok}")
+}

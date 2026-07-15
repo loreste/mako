@@ -351,11 +351,12 @@ pub enum Ownership {
     Share,
 }
 
-/// Piece of an `f"…"` string: literal text or `{expr}`.
+/// Piece of an `f"…"` string: literal text or `{expr}` / `{expr:spec}`.
 #[derive(Debug, Clone, PartialEq)]
 pub enum InterpPart {
     Lit(String),
-    Expr(Expr),
+    /// Expression hole. `fmt` is the optional format after `:`, e.g. `"02"` from `{n:02}`.
+    Expr(Expr, Option<String>),
 }
 
 #[derive(Debug, Clone, PartialEq)]

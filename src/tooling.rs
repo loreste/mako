@@ -1301,7 +1301,7 @@ fn collect_calls_expr(expr: &Expr, out: &mut Vec<String>) {
         }
         Expr::StringInterp(parts) => {
             for p in parts {
-                if let crate::ast::InterpPart::Expr(e) = p {
+                if let crate::ast::InterpPart::Expr(e, _) = p {
                     collect_calls_expr(e, out);
                 }
             }
@@ -2337,7 +2337,7 @@ fn rewrite_expr(e: &mut Expr, alias: &str, names: &ImportNameSets) {
         Expr::Int(_) | Expr::Float(_) | Expr::Bool(_) | Expr::String(_) => {}
         Expr::StringInterp(parts) => {
             for p in parts {
-                if let crate::ast::InterpPart::Expr(e) = p {
+                if let crate::ast::InterpPart::Expr(e, _) = p {
                     rewrite_expr(e, alias, names);
                 }
             }
