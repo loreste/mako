@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.1.7 — 2026-07-15
+
+**mako0.1.7** (`CARGO_PKG_VERSION`).
+
+Patch after 0.1.6: binary codecs (CBOR/MessagePack/Avro), list combinators,
+GraphQL/protobuf packages, named timezone offsets.
+
 ### Avro · GraphQL package · protobuf package · TZ offsets
 
 - Avro binary: long/bool/null/string/array[long] encode·decode (`std/encoding/avro`).

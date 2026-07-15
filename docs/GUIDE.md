@@ -111,7 +111,7 @@ mako check .
 mako run -p app
 ```
 
-`mako version` (also `mako --version` / `-V`) prints `mako version mako0.1.6 darwin/arm64`. Use `mako version -v` for an optional commit line.
+`mako version` (also `mako --version` / `-V`) prints `mako version mako0.1.7 darwin/arm64`. Use `mako version -v` for an optional commit line.
 Override headers if needed: `export MAKO_RUNTIME=/path/to/runtime`.
 
 Incremental builds are **on by default** (`-j` / `MAKO_JOBS`, `--no-incremental` to disable) — see [BUILD.md](BUILD.md). Release: `mako build --release` → `-O3 -flto` ([PERFORMANCE.md](PERFORMANCE.md): optimized on microbenches).

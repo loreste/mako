@@ -8,7 +8,7 @@ Speed matters here: release builds use `-O3 -flto`, and concurrency is built in
 ownership and arenas, not a collector. The standard library is large enough for
 real services without pulling half the internet.
 
-This is version **0.1.6**. It runs. The surface is still early — expect change,
+This is version **0.1.7**. It runs. The surface is still early — expect change,
 rough edges, and missing pieces.
 
 [mako-lang.com](https://mako-lang.com) · [Status](docs/STATUS.md) · [Roadmap](docs/ROADMAP.md)
@@ -59,7 +59,7 @@ Options:
 ```bash
 curl -fsSL …/install-linux.sh | bash -s -- --prefix /opt/mako --yes
 curl -fsSL …/install-linux.sh | bash -s -- --no-deps    # skip clang install
-curl -fsSL …/install-linux.sh | bash -s -- --version v0.1.6
+curl -fsSL …/install-linux.sh | bash -s -- --version v0.1.7
 ```
 
 **You do not need Rust or cargo on the machine that runs Mako.**

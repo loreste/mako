@@ -3,7 +3,7 @@
 Mako is a systems and backend language: clear to write, strict at compile time,
 fast at runtime, and designed so **builds stay fast**.
 
-**Product version:** **0.1.6** (`mako version` → `mako0.1.6`).
+**Product version:** **0.1.7** (`mako version` → `mako0.1.7`).
 
 **Guided tour:** [The Mako Book](book/).  
 **Full syntax guide:** [GUIDE.md](GUIDE.md).  

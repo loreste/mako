@@ -12,13 +12,13 @@ Prints the installed version, operating system, and architecture.
 
 ```bash
 mako version
-# mako version mako0.1.6 darwin/arm64
+# mako version mako0.1.7 darwin/arm64
 
 mako --version        # same output
 mako -V               # same output
 
 mako version -v       # verbose: includes git commit hash if available
-# mako version mako0.1.6 darwin/arm64
+# mako version mako0.1.7 darwin/arm64
 # commit: a1b2c3d
 ```
 
@@ -459,7 +459,7 @@ Checks your development environment and reports the status of required tools:
 
 ```bash
 mako doctor
-# mako: 0.1.6 (darwin/arm64)
+# mako: 0.1.7 (darwin/arm64)
 # clang: Apple clang version 15.0.0
 # zig: 0.11.0 (optional, for cross-compilation)
 # wasi-sdk: /opt/wasi-sdk (optional, for WASM)

@@ -13,7 +13,7 @@ make install
 1. Build universal or arm64/x86_64 binaries (`mako build --target …` / lipo).
 2. Package:
    ```bash
-   pkgbuild --root stage --identifier dev.mako.cli --version 0.1.6 mako.pkg
+   pkgbuild --root stage --identifier dev.mako.cli --version 0.1.7 mako.pkg
    ```
 3. Sign with Developer ID Installer certificate.
 4. Notarize:

@@ -7,7 +7,7 @@ Short engineering queue. Product map: [VISION.md](VISION.md).
 STATUS north-star / MVP: **100%**. Prefer STATUS over this list when claiming Done.  
 **Mako identity:** [IDENTITY.md](IDENTITY.md) (**~100%** preferred surface).  
 **Dual sugar only:** [GO_SYNTAX_CHECKLIST.md](GO_SYNTAX_CHECKLIST.md) (**~94%**).  
-**Product version:** **0.1.6** · Last roadmap sync: **2026-07-15**.
+**Product version:** **0.1.7** · Last roadmap sync: **2026-07-15**.
 
 ---
 
@@ -409,7 +409,7 @@ Percentages are weighted; update when a task flips.
 - [x] Full time package (calendar/parse/format/duration · `time_full_test`).
 - [x] Full syscall package (portable OS primitives · `syscall_full_test`).
 - [x] YAML + TOML encoding packages (`yaml_toml_test`).
-- [x] Product version **0.1.6**.
+- [x] Product version **0.1.7**.
 - [x] CBOR + MessagePack binary subset · list combinators (`cbor_msgpack_test`).
 - [x] Avro binary · GraphQL/protobuf packages · named TZ offsets (`avro_graphql_tz_test`).
 - [x] Hot-reload unwatch + count (`hot_reload_unwatch` / `hot_reload_watch_count`).
