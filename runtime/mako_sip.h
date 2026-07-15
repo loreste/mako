@@ -187,7 +187,7 @@ static inline int mako_sip_header_name_match(
     return i < line_len && line[i] == ':';
 }
 
-/* Compact form aliases (RFC 3261 §7.3.3 / §20). Bidirectional. */
+/* Compact form aliases (RFC 3261 §7.3.3 + §20; Refer-To RFC 3515). Bidirectional. */
 static inline int mako_sip_header_alias_pair(
     const char *name, size_t nlen, const char **a, size_t *alen, const char **b, size_t *blen
 ) {
@@ -203,6 +203,7 @@ static inline int mako_sip_header_alias_pair(
         {"Contact", "m"},
         {"Content-Length", "l"},
         {"Content-Type", "c"},
+        {"Content-Encoding", "e"},
         {"Subject", "s"},
         {"Supported", "k"},
         {"Refer-To", "r"},
@@ -535,28 +536,87 @@ static inline MakoString mako_sip_response(
     return (MakoString){d, (size_t)w};
 }
 
-/* Common header value builders (value only, without name:). */
+/* RFC 3261 §8.1.1.7 / §16.6: branch must start with magic cookie "z9hG4bK". */
+static inline int mako_sip_branch_has_cookie(const char *b, size_t n) {
+    return n >= 7 && mako_sip_ci_eq(b, 7, "z9hG4bK", 7);
+}
+
+/* Uppercase protocol transport token for Via (UDP/TCP/TLS/SCTP). */
+static inline void mako_sip_transport_upper(char *dst, size_t cap, MakoString tr) {
+    if (!dst || cap == 0) return;
+    const char *src = (tr.data && tr.len) ? tr.data : "UDP";
+    size_t n = (tr.data && tr.len) ? tr.len : 3;
+    if (n >= cap) n = cap - 1;
+    for (size_t i = 0; i < n; i++) {
+        char c = src[i];
+        if (c >= 'a' && c <= 'z') c = (char)(c - 'a' + 'A');
+        dst[i] = c;
+    }
+    dst[n] = 0;
+}
+
+/* Format sent-by host: IPv6 literals need brackets (RFC 3261 §25 / §20.42). */
+static inline int mako_sip_host_needs_brackets(const char *h, size_t n) {
+    if (!h || n == 0) return 0;
+    if (h[0] == '[') return 0; /* already bracketed */
+    for (size_t i = 0; i < n; i++)
+        if (h[i] == ':') return 1;
+    return 0;
+}
+
+/* Common header value builders (value only, without name:).
+ * Via: SIP/2.0/TRANSPORT sent-by;branch=z9hG4bK…  (RFC 3261 §20.42). */
 static inline MakoString mako_sip_via_value(
     MakoString transport, MakoString host, int64_t port, MakoString branch
 ) {
-    const char *tr = transport.data && transport.len ? transport.data : "UDP";
-    size_t n = host.len + branch.len + 64;
+    char tr[16];
+    mako_sip_transport_upper(tr, sizeof(tr), transport);
+    const char *h = host.data && host.len ? host.data : "127.0.0.1";
+    size_t hlen = host.data && host.len ? host.len : 9;
+    int br_h = mako_sip_host_needs_brackets(h, hlen);
+    /* Ensure magic cookie on branch */
+    char brbuf[80];
+    const char *br;
+    size_t brlen;
+    if (branch.data && branch.len > 0 && mako_sip_branch_has_cookie(branch.data, branch.len)) {
+        br = branch.data;
+        brlen = branch.len;
+    } else if (branch.data && branch.len > 0) {
+        snprintf(brbuf, sizeof(brbuf), "z9hG4bK%.*s", (int)branch.len, branch.data);
+        br = brbuf;
+        brlen = strlen(brbuf);
+    } else {
+        br = "z9hG4bKmako";
+        brlen = 11;
+    }
+    size_t n = hlen + brlen + 80;
     char *d = (char *)malloc(n);
     if (!d) return mako_str_from_cstr("");
     int w;
     if (port > 0) {
-        w = snprintf(
-            d, n, "SIP/2.0/%s %.*s:%lld;branch=%.*s",
-            tr, (int)host.len, host.data ? host.data : "127.0.0.1",
-            (long long)port,
-            (int)branch.len, branch.data ? branch.data : "z9hG4bK"
-        );
+        if (br_h) {
+            w = snprintf(
+                d, n, "SIP/2.0/%s [%.*s]:%lld;branch=%.*s",
+                tr, (int)hlen, h, (long long)port, (int)brlen, br
+            );
+        } else {
+            w = snprintf(
+                d, n, "SIP/2.0/%s %.*s:%lld;branch=%.*s",
+                tr, (int)hlen, h, (long long)port, (int)brlen, br
+            );
+        }
     } else {
-        w = snprintf(
-            d, n, "SIP/2.0/%s %.*s;branch=%.*s",
-            tr, (int)host.len, host.data ? host.data : "127.0.0.1",
-            (int)branch.len, branch.data ? branch.data : "z9hG4bK"
-        );
+        if (br_h) {
+            w = snprintf(
+                d, n, "SIP/2.0/%s [%.*s];branch=%.*s",
+                tr, (int)hlen, h, (int)brlen, br
+            );
+        } else {
+            w = snprintf(
+                d, n, "SIP/2.0/%s %.*s;branch=%.*s",
+                tr, (int)hlen, h, (int)brlen, br
+            );
+        }
     }
     if (w < 0) {
         free(d);
@@ -565,8 +625,34 @@ static inline MakoString mako_sip_via_value(
     return (MakoString){d, (size_t)w};
 }
 
+/* Strip existing ;received=… and ;rport[=…] params (RFC 3581 rewrite). */
+static inline size_t mako_sip_via_strip_nat_params(const char *in, size_t inlen, char *out, size_t cap) {
+    if (!in || !out || cap == 0) return 0;
+    size_t o = 0;
+    size_t i = 0;
+    while (i < inlen && o + 1 < cap) {
+        if (in[i] == ';') {
+            size_t j = i + 1;
+            while (j < inlen && in[j] != ';' && in[j] != ' ' && in[j] != '\t' && in[j] != ',') j++;
+            size_t plen = j - (i + 1);
+            const char *p = in + i + 1;
+            int is_recv = plen >= 9 && mako_sip_ci_eq(p, 9, "received=", 9);
+            int is_rport = (plen == 5 && mako_sip_ci_eq(p, 5, "rport", 5))
+                || (plen > 6 && mako_sip_ci_eq(p, 6, "rport=", 6));
+            if (is_recv || is_rport) {
+                i = j;
+                continue;
+            }
+        }
+        out[o++] = in[i++];
+    }
+    out[o] = 0;
+    return o;
+}
+
 /* Via value with RFC 3581 NAT params: ;rport[=N] and optional ;received=IP.
- * rport < 0 → omit; rport == 0 → bare ;rport; rport > 0 → ;rport=N. */
+ * rport < 0 → omit; rport == 0 → bare ;rport (UAC request); rport > 0 → ;rport=N (response).
+ * Param order after branch: ;received=… then ;rport… (common 3581 practice). */
 static inline MakoString mako_sip_via_value_nat(
     MakoString transport,
     MakoString host,
@@ -589,13 +675,7 @@ static inline MakoString mako_sip_via_value_nat(
         o = base.len;
     }
     mako_str_free(base);
-    if (rport == 0) {
-        memcpy(d + o, ";rport", 6);
-        o += 6;
-    } else if (rport > 0) {
-        int w = snprintf(d + o, n - o, ";rport=%lld", (long long)rport);
-        if (w > 0) o += (size_t)w;
-    }
+    /* RFC 3581: server adds received then rport value on responses */
     if (received.data && received.len > 0) {
         int w = snprintf(
             d + o, n - o, ";received=%.*s",
@@ -603,19 +683,32 @@ static inline MakoString mako_sip_via_value_nat(
         );
         if (w > 0) o += (size_t)w;
     }
+    if (rport == 0) {
+        if (o + 6 < n) {
+            memcpy(d + o, ";rport", 6);
+            o += 6;
+        }
+    } else if (rport > 0) {
+        int w = snprintf(d + o, n - o, ";rport=%lld", (long long)rport);
+        if (w > 0) o += (size_t)w;
+    }
     d[o] = 0;
     return (MakoString){d, o};
 }
 
-/* Append ;received= and/or ;rport= to an existing Via value. */
+/* RFC 3581: rewrite Via for response — set/replace ;received= and ;rport=src_port.
+ * host = source IP; rport > 0 → ;rport=N; rport == 0 → bare ;rport; rport < 0 → leave rport out. */
 static inline MakoString mako_sip_via_add_received(MakoString via, MakoString host, int64_t rport) {
-    size_t n = via.len + (host.data ? host.len : 0) + 48;
+    if (!via.data) return mako_str_from_cstr("");
+    char stripped[1024];
+    size_t sl = mako_sip_via_strip_nat_params(via.data, via.len, stripped, sizeof(stripped));
+    size_t n = sl + (host.data ? host.len : 0) + 48;
     char *d = (char *)malloc(n);
     if (!d) return mako_str_from_cstr("");
     size_t o = 0;
-    if (via.data && via.len) {
-        memcpy(d, via.data, via.len);
-        o = via.len;
+    if (sl) {
+        memcpy(d, stripped, sl);
+        o = sl;
     }
     if (host.data && host.len) {
         int w = snprintf(d + o, n - o, ";received=%.*s", (int)host.len, host.data);
@@ -625,23 +718,31 @@ static inline MakoString mako_sip_via_add_received(MakoString via, MakoString ho
         int w = snprintf(d + o, n - o, ";rport=%lld", (long long)rport);
         if (w > 0) o += (size_t)w;
     } else if (rport == 0) {
-        memcpy(d + o, ";rport", 6);
-        o += 6;
-        d[o] = 0;
+        if (o + 6 < n) {
+            memcpy(d + o, ";rport", 6);
+            o += 6;
+        }
     }
     d[o] = 0;
     return (MakoString){d, o};
 }
 
-/* Top Via sent-by host (after transport, before :port or ;params). */
+/* Top Via sent-by host (after transport). Supports IPv6 [addr]. */
 static inline MakoString mako_sip_via_host(MakoString via) {
     if (!via.data || via.len < 8) return mako_str_from_cstr("");
-    /* find space after SIP/2.0/PROTO */
     size_t i = 0;
     while (i < via.len && via.data[i] != ' ') i++;
     if (i >= via.len) return mako_str_from_cstr("");
     i++;
     while (i < via.len && (via.data[i] == ' ' || via.data[i] == '\t')) i++;
+    if (i >= via.len) return mako_str_from_cstr("");
+    if (via.data[i] == '[') {
+        size_t start = i + 1;
+        size_t j = start;
+        while (j < via.len && via.data[j] != ']') j++;
+        if (j >= via.len) return mako_str_from_cstr("");
+        return mako_sip_slice_to_str(via.data + start, j - start);
+    }
     size_t start = i;
     while (i < via.len && via.data[i] != ':' && via.data[i] != ';' && via.data[i] != ' ' &&
            via.data[i] != '\t')
@@ -649,7 +750,7 @@ static inline MakoString mako_sip_via_host(MakoString via) {
     return mako_sip_slice_to_str(via.data + start, i - start);
 }
 
-/* Top Via sent-by port, or 0 if absent (default 5060 not applied). */
+/* Top Via sent-by port, or 0 if absent (caller may default 5060 per RFC 3261). */
 static inline int64_t mako_sip_via_port(MakoString via) {
     if (!via.data || via.len < 8) return 0;
     size_t i = 0;
@@ -657,7 +758,12 @@ static inline int64_t mako_sip_via_port(MakoString via) {
     if (i >= via.len) return 0;
     i++;
     while (i < via.len && (via.data[i] == ' ' || via.data[i] == '\t')) i++;
-    while (i < via.len && via.data[i] != ':' && via.data[i] != ';' && via.data[i] != ' ') i++;
+    if (i < via.len && via.data[i] == '[') {
+        while (i < via.len && via.data[i] != ']') i++;
+        if (i < via.len) i++; /* skip ] */
+    } else {
+        while (i < via.len && via.data[i] != ':' && via.data[i] != ';' && via.data[i] != ' ') i++;
+    }
     if (i >= via.len || via.data[i] != ':') return 0;
     i++;
     int64_t p = 0;
@@ -668,26 +774,48 @@ static inline int64_t mako_sip_via_port(MakoString via) {
     return p;
 }
 
-/* Record-Route value: <sip:host:port;lr;transport=udp> (loose routing). */
+/* Record-Route value (RFC 3261 §16.6 / §20.30): name-addr with ;lr for loose routing.
+ * <sip:host[:port][;transport=x];lr> — IPv6 host bracketed. */
 static inline MakoString mako_sip_record_route(
     MakoString host, int64_t port, MakoString transport
 ) {
-    const char *tr = transport.data && transport.len ? transport.data : "udp";
-    size_t n = host.len + 64;
+    const char *h = host.data && host.len ? host.data : "127.0.0.1";
+    size_t hlen = host.data && host.len ? host.len : 9;
+    int br = mako_sip_host_needs_brackets(h, hlen);
+    /* Lowercase transport for URI param (RFC 3261 transport = "udp"/"tcp"/…) */
+    char tr[16];
+    size_t tlen = 0;
+    if (transport.data && transport.len > 0) {
+        tlen = transport.len < 15 ? transport.len : 15;
+        for (size_t i = 0; i < tlen; i++) {
+            char c = transport.data[i];
+            if (c >= 'A' && c <= 'Z') c = (char)(c - 'A' + 'a');
+            tr[i] = c;
+        }
+        tr[tlen] = 0;
+    }
+    size_t n = hlen + 80;
     char *d = (char *)malloc(n);
     if (!d) return mako_str_from_cstr("");
     int w;
-    if (port > 0) {
-        w = snprintf(
-            d, n, "<sip:%.*s:%lld;lr;transport=%s>",
-            (int)host.len, host.data ? host.data : "127.0.0.1",
-            (long long)port, tr
-        );
+    if (tlen > 0 && port > 0) {
+        w = br ? snprintf(
+                     d, n, "<sip:[%.*s]:%lld;transport=%s;lr>",
+                     (int)hlen, h, (long long)port, tr
+                 )
+               : snprintf(
+                     d, n, "<sip:%.*s:%lld;transport=%s;lr>",
+                     (int)hlen, h, (long long)port, tr
+                 );
+    } else if (tlen > 0) {
+        w = br ? snprintf(d, n, "<sip:[%.*s];transport=%s;lr>", (int)hlen, h, tr)
+               : snprintf(d, n, "<sip:%.*s;transport=%s;lr>", (int)hlen, h, tr);
+    } else if (port > 0) {
+        w = br ? snprintf(d, n, "<sip:[%.*s]:%lld;lr>", (int)hlen, h, (long long)port)
+               : snprintf(d, n, "<sip:%.*s:%lld;lr>", (int)hlen, h, (long long)port);
     } else {
-        w = snprintf(
-            d, n, "<sip:%.*s;lr;transport=%s>",
-            (int)host.len, host.data ? host.data : "127.0.0.1", tr
-        );
+        w = br ? snprintf(d, n, "<sip:[%.*s];lr>", (int)hlen, h)
+               : snprintf(d, n, "<sip:%.*s;lr>", (int)hlen, h);
     }
     if (w < 0) {
         free(d);

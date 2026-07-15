@@ -179,9 +179,20 @@ fn TestSipCompactHeaders() {
 
 fn TestSipProxyViaRr() {
     let inv = sample_invite()
+    // RFC 3581: response Via has ;received= then ;rport=N
     let hop = sip_via_value_nat("UDP", "203.0.113.1", 5060, "z9hG4bKproxy", "198.51.100.9", 5080)
     assert(str_contains(hop, "rport=5080"))
     assert(str_contains(hop, "received=198.51.100.9"))
+    assert(str_contains(hop, "SIP/2.0/UDP"))
+    // received appears before rport value
+    let ri = str_index(hop, "received=")
+    let rpi = str_index(hop, "rport=")
+    assert(ri >= 0)
+    assert(rpi > ri)
+    // RFC 3261 branch magic cookie enforced even if caller omits it
+    let hop2 = sip_via_value("udp", "10.0.0.1", 5060, "abc")
+    assert(str_contains(hop2, "branch=z9hG4bKabc"))
+    assert(str_contains(hop2, "SIP/2.0/UDP"))
     let with_via = sip_insert_via(inv, hop)
     assert_eq(sip_header_count(with_via, "Via"), 2)
     let top = sip_header(with_via, "Via")
@@ -190,13 +201,35 @@ fn TestSipProxyViaRr() {
     let stripped = sip_strip_via(with_via)
     assert_eq(sip_header_count(stripped, "Via"), 1)
     assert(str_contains(sip_header(stripped, "Via"), "192.0.2.1"))
+    // RFC 3261 §20.30 loose routing
     let rr = sip_record_route("proxy.example", 5060, "udp")
-    assert(str_contains(rr, "lr"))
+    assert(str_contains(rr, ";lr>"))
     assert(str_contains(rr, "proxy.example"))
+    assert(str_contains(rr, "transport=udp"))
     let tagged = sip_reply_with_to_tag(inv, 200, "OK", "", "", "server-tag")
     assert_eq(sip_status_code(tagged), 200)
     let to = sip_header(tagged, "To")
     assert_eq_str(sip_addr_tag(to), "server-tag")
+}
+
+fn TestSipRfc3581ViaRewrite() {
+    // UAC sent bare ;rport — UAS rewrites with received + rport=src (RFC 3581)
+    let via = "SIP/2.0/UDP 192.0.2.1:5060;branch=z9hG4bK9;rport"
+    let fixed = sip_via_add_received(via, "198.51.100.1", 49152)
+    assert(str_contains(fixed, "received=198.51.100.1"))
+    assert(str_contains(fixed, "rport=49152"))
+    // no duplicate bare ;rport
+    assert(str_eq(fixed, "SIP/2.0/UDP 192.0.2.1:5060;branch=z9hG4bK9;received=198.51.100.1;rport=49152"))
+}
+
+fn TestSipViaIpv6() {
+    let v = sip_via_value("UDP", "2001:db8::1", 5060, "z9hG4bK6")
+    assert(str_contains(v, "[2001:db8::1]:5060"))
+    assert_eq_str(sip_via_host(v), "2001:db8::1")
+    assert_eq(sip_via_port(v), 5060)
+    let rr = sip_record_route("2001:db8::2", 5060, "tcp")
+    assert(str_contains(rr, "[2001:db8::2]"))
+    assert(str_contains(rr, ";lr>"))
 }
 
 fn TestSipHeaderHotLoop() {

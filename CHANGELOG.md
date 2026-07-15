@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### SIP RFC compliance polish (3261 / 3581)
+
+- **Via:** force `z9hG4bK` magic cookie; uppercase transport; IPv6 `[addr]:port`
+  sent-by; `via_host`/`via_port` parse brackets.
+- **RFC 3581:** `via_add_received` strips prior `;rport`/`;received` then rewrites
+  (no duplicate bare `;rport`); `via_value_nat` orders `;received` then `;rport`.
+- **Record-Route:** `<sip:…;transport=…;lr>`; IPv6 host brackets; lowercase transport.
+- **Compact:** `Content-Encoding` ↔ `e`.
+- Tests: `TestSipRfc3581ViaRewrite`, `TestSipViaIpv6`.
+
 ### Madis / SIP proxy production fixes (P0–P1)
 
 - **SQL bind arity:** `sql_exec_str4` uses `mako_sql_placeholder_arity` (max `$N` / `?`
