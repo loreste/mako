@@ -15628,6 +15628,9 @@ fn is_kick_sendable(t: &Type) -> bool {
         Type::CMap | Type::Mutex | Type::RWMutex => true,
         // ShareInt: atomic RC + kick auto-clones onto the heap (see codegen).
         Type::Named(n) if n == "ShareInt" || n == "AtomicInt" => true,
+        // TlsConn: exclusive SSL* handle (void*). Send moves ownership to the worker —
+        // caller must not use the conn after kick (same model as raw TCP fds).
+        Type::Named(n) if n == "TlsConn" => true,
         Type::Named(n) if n == "Arena" || n == "Crew" => false,
         Type::Named(_) => false, // non-POD / handled in TypeChecker::is_kick_sendable_ty
         // Option/Result/tuple/enum handled in TypeChecker::is_kick_sendable_ty (fuller Send).
