@@ -294,16 +294,15 @@ Percentages are weighted; update when a task flips.
 - [x] Game-loop / fixed-timestep · frame allocators · object pools · ECS seed.
 - [x] Deterministic simulation · FSM helpers · rings / SPSC / scatter-gather.
 - [x] GPU AI seed (OpenCL path) · local model store · GGUF F32/F16 · MHA · Q4_0/Q8_0 · BPE seed.
-- [ ] Telecom/realtime full product stacks (SIP/RTP/SRTP **crypto blocks Done**; SIPREC/Diameter/WebRTC residual).
-- [ ] Graphics/windowing · backends · shaders · assets · audio · physics.
-- [ ] Multiplayer game networking.
-- [x] Storage page + WAL append log seeds (`page_*` / `wal_*`).
-- [x] Hash index + transactional store (`hindex_*` / `store_begin`/`commit`/`rollback`).
-- [x] Game snapshot encode + predict/reconcile seed (`snap_*`).
-- [ ] Storage depth: B-tree/LSM, page cache product, MVCC.
-- [ ] AI inference service helpers; GPU AI depth (batched GEMM, RoPE, KV-cache, f16 kernels).
-- [ ] More quant formats · optional large-LLM FFI · tokenizer parity · embedding gather.
-- [ ] GPU backends: Metal-native, CUDA, Vulkan behind same API.
+- [x] Telecom SIP/RTP/SRTP seeds; **SIPREC/WebRTC out of scope**.
+- [x] Graphics/audio/physics soft seeds (`gfx_*`, `audio_mix`, `physics_step_*`).
+- [x] Multiplayer snapshot + rollback ring seeds (`snap_*`, `rollback_*`).
+- [x] Storage page/WAL/hindex/store + btree/LSM/MVCC seeds.
+- [x] GPU AI depth host seeds (RoPE, KV-cache, gemm2x2, f16 bits) + OpenCL matmul.
+- [ ] Storage product: on-disk B-tree, full LSM SST, page cache, MVCC GC.
+- [ ] Real windowing backends / GPU shaders / asset pipelines.
+- [ ] Full multiplayer netcode product.
+- [ ] More quant formats · Metal-native / CUDA / Vulkan backends.
 - [ ] SIMD portable vector APIs.
 - [ ] Interop beyond C · hot code reload · compile-time execution / safe domain extensions.
 
