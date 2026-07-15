@@ -145,9 +145,126 @@ fn json_field_expr(field: &str, ty: &TypeExpr) -> Option<Expr> {
     }
 }
 
+fn rewrite_self_fields(expr: &mut Expr, state_name: &str) {
+    match expr {
+        Expr::Field { base, field: _ } => {
+            if matches!(base.as_ref(), Expr::Ident(s) if s == "self") {
+                *base = Box::new(Expr::Ident(state_name.into()));
+            } else {
+                rewrite_self_fields(base, state_name);
+            }
+        }
+        Expr::Binary { left, right, .. } => {
+            rewrite_self_fields(left, state_name);
+            rewrite_self_fields(right, state_name);
+        }
+        Expr::Unary { expr: e, .. } | Expr::Try(e) | Expr::Join(e) => {
+            rewrite_self_fields(e, state_name);
+        }
+        Expr::Call { callee, args } => {
+            rewrite_self_fields(callee, state_name);
+            for a in args {
+                rewrite_self_fields(a, state_name);
+            }
+        }
+        Expr::Method {
+            receiver, args, ..
+        } => {
+            rewrite_self_fields(receiver, state_name);
+            for a in args {
+                rewrite_self_fields(a, state_name);
+            }
+        }
+        Expr::Index { base, index } => {
+            rewrite_self_fields(base, state_name);
+            rewrite_self_fields(index, state_name);
+        }
+        Expr::Array(xs) | Expr::Tuple(xs) => {
+            for x in xs {
+                rewrite_self_fields(x, state_name);
+            }
+        }
+        Expr::StructLit { fields, update, .. } => {
+            for (_, e) in fields {
+                rewrite_self_fields(e, state_name);
+            }
+            if let Some(u) = update {
+                rewrite_self_fields(u, state_name);
+            }
+        }
+        Expr::Match { scrutinee, arms } => {
+            rewrite_self_fields(scrutinee, state_name);
+            for a in arms {
+                rewrite_self_fields(&mut a.body, state_name);
+            }
+        }
+        Expr::Block(b) => rewrite_self_block(b, state_name),
+        Expr::IfExpr {
+            cond,
+            then_block,
+            else_block,
+        } => {
+            rewrite_self_fields(cond, state_name);
+            rewrite_self_block(then_block, state_name);
+            rewrite_self_block(else_block, state_name);
+        }
+        Expr::Lambda { body, .. } => rewrite_self_fields(body, state_name),
+        _ => {}
+    }
+}
+
+fn rewrite_self_block(b: &mut Block, state_name: &str) {
+    for s in &mut b.stmts {
+        match s {
+            Stmt::Let { init, .. } | Stmt::Assign { value: init, .. } => {
+                rewrite_self_fields(init, state_name);
+            }
+            Stmt::Expr(e) | Stmt::Return(Some(e)) => rewrite_self_fields(e, state_name),
+            Stmt::If {
+                cond,
+                then_block,
+                else_block,
+                ..
+            } => {
+                rewrite_self_fields(cond, state_name);
+                rewrite_self_block(then_block, state_name);
+                if let Some(eb) = else_block {
+                    rewrite_self_block(eb, state_name);
+                }
+            }
+            Stmt::While { cond, body, .. } => {
+                rewrite_self_fields(cond, state_name);
+                rewrite_self_block(body, state_name);
+            }
+            Stmt::FieldAssign { base, value, .. } => {
+                // `self.n = …` → FieldAssign { base: Ident("self"), field: "n" }
+                if matches!(base, Expr::Ident(s) if s == "self") {
+                    *base = Expr::Ident(state_name.into());
+                } else {
+                    rewrite_self_fields(base, state_name);
+                }
+                rewrite_self_fields(value, state_name);
+            }
+            _ => {}
+        }
+    }
+}
+
 fn expand_actor(actor: ActorDef) -> Vec<Item> {
     let name = &actor.name;
     let mut items = Vec::new();
+    let state_ty = format!("{name}_State");
+    let has_state = !actor.fields.is_empty();
+
+    // Owned state struct (if any fields).
+    if has_state {
+        items.push(Item::Struct(StructDef {
+            name: state_ty.clone(),
+            fields: actor.fields.clone(),
+            derives: Vec::new(),
+            exported: false,
+        }));
+    }
 
     // Tag helpers: Session_Invite() -> 1, etc.
     for (i, arm) in actor.receives.iter().enumerate() {
@@ -161,7 +278,7 @@ fn expand_actor(actor: ActorDef) -> Vec<Item> {
                 stmts: vec![Stmt::Return(Some(Expr::Int(tag)))],
             },
             exported: false,
-        is_const: false,
+            is_const: false,
             stability: crate::ast::ApiStability::Unspecified,
         }));
     }
@@ -182,7 +299,7 @@ fn expand_actor(actor: ActorDef) -> Vec<Item> {
             }))],
         },
         exported: false,
-    is_const: false,
+        is_const: false,
         stability: crate::ast::ApiStability::Unspecified,
     }));
 
@@ -210,11 +327,11 @@ fn expand_actor(actor: ActorDef) -> Vec<Item> {
             }))],
         },
         exported: false,
-    is_const: false,
+        is_const: false,
         stability: crate::ast::ApiStability::Unspecified,
     }));
 
-    // Session_loop(mbox) — message dispatch
+    // Session_loop(mbox) — message dispatch (+ optional state)
     let mut loop_stmts: Vec<Stmt> = vec![Stmt::Let {
         name: "__run".into(),
         mutable: true,
@@ -222,6 +339,35 @@ fn expand_actor(actor: ActorDef) -> Vec<Item> {
         ty: None,
         init: Expr::Int(1),
     }];
+
+    if has_state {
+        // Zero/defaults via partial lit + field defaults, or empty positional.
+        let mut lit_fields = Vec::new();
+        for (fname, _, def) in &actor.fields {
+            if let Some(d) = def {
+                lit_fields.push((fname.clone(), d.clone()));
+            }
+        }
+        let init = if lit_fields.is_empty() {
+            Expr::StructLitPos {
+                name: state_ty.clone(),
+                values: vec![],
+            }
+        } else {
+            Expr::StructLit {
+                name: state_ty.clone(),
+                fields: lit_fields,
+                update: None,
+            }
+        };
+        loop_stmts.push(Stmt::Let {
+            name: "__st".into(),
+            mutable: true,
+            ownership: Ownership::None,
+            ty: Some(TypeExpr::Named(state_ty.clone())),
+            init,
+        });
+    }
 
     let mut while_body: Vec<Stmt> = vec![Stmt::Let {
         name: "__m".into(),
@@ -236,7 +382,11 @@ fn expand_actor(actor: ActorDef) -> Vec<Item> {
 
     for (i, arm) in actor.receives.iter().enumerate() {
         let tag = (i + 1) as i64;
-        let mut arm_stmts = arm.body.stmts.clone();
+        let mut arm_block = arm.body.clone();
+        if has_state {
+            rewrite_self_block(&mut arm_block, "__st");
+        }
+        let mut arm_stmts = arm_block.stmts;
         // Convention: message named Bye / Stop ends the loop
         if arm.message == "Bye" || arm.message == "Stop" {
             arm_stmts.push(Stmt::Assign {
@@ -256,6 +406,24 @@ fn expand_actor(actor: ActorDef) -> Vec<Item> {
         });
     }
 
+    // If state has a field `n` or `count`, return it on exit; else 0.
+    let ret_expr = if has_state {
+        if let Some((fname, _, _)) = actor
+            .fields
+            .iter()
+            .find(|(n, _, _)| n == "n" || n == "count" || n == "value")
+        {
+            Expr::Field {
+                base: Box::new(Expr::Ident("__st".into())),
+                field: fname.clone(),
+            }
+        } else {
+            Expr::Int(0)
+        }
+    } else {
+        Expr::Int(0)
+    };
+
     loop_stmts.push(Stmt::While {
         label: None,
         cond: Expr::Binary {
@@ -269,7 +437,7 @@ fn expand_actor(actor: ActorDef) -> Vec<Item> {
         callee: Box::new(Expr::Ident("actor_stop".into())),
         args: vec![Expr::Ident("__mbox".into())],
     }));
-    loop_stmts.push(Stmt::Return(Some(Expr::Int(0))));
+    loop_stmts.push(Stmt::Return(Some(ret_expr)));
 
     items.push(Item::Fn(FnDef {
         name: format!("{name}_loop"),
@@ -282,7 +450,7 @@ fn expand_actor(actor: ActorDef) -> Vec<Item> {
         ret: Some(TypeExpr::Named("int".into())),
         body: Block { stmts: loop_stmts },
         exported: false,
-    is_const: false,
+        is_const: false,
         stability: crate::ast::ApiStability::Unspecified,
     }));
 

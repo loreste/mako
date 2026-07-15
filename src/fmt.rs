@@ -259,6 +259,17 @@ fn fmt_item(item: &Item) -> String {
         }
         Item::Actor(a) => {
             let mut o = format!("actor {} {{\n", a.name);
+            for (n, t, d) in &a.fields {
+                o.push_str(INDENT);
+                o.push_str(n);
+                o.push_str(": ");
+                o.push_str(&fmt_type(t));
+                if let Some(def) = d {
+                    o.push_str(" = ");
+                    o.push_str(&fmt_expr(def, 0));
+                }
+                o.push('\n');
+            }
             for arm in &a.receives {
                 o.push_str(INDENT);
                 o.push_str("receive ");

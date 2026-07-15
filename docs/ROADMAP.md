@@ -62,10 +62,10 @@ Work below is **not** MVP. Order is product leverage, not strict dependency.
 
 Highest remaining risk for production backends.
 
-1. ~~Portable timeouts and deadlines across task / channel / network APIs~~ **Done seed** — `ch.send_timeout` / `recv_timeout` / `try_recv`, `job.join_deadline`, `deadline_remaining_ms` (`timeout_portable_test`)  
-2. Structured error propagation from child tasks (`kick` / crew)  
-3. Explicit detached-task syntax and lifecycle controls  
-4. First-class `actor` / `receive` syntax with owned state (beyond runtime seed)
+1. ~~Portable timeouts and deadlines~~ **Done seed** — `timeout_portable_test`  
+2. ~~Structured child error propagation~~ **Done seed** — `crew.first_err` / `err_count` / `wait` (`crew_error_prop_test`)  
+3. ~~Detached-task lifecycle~~ **Done seed** — `detach f()` + `detached_join_all()` (`detach_test`)  
+4. ~~Actor / receive + owned state~~ **Done seed** — fields + `self.x` (`actor_test`)
 
 ### P2 — Observability depth
 
@@ -201,10 +201,10 @@ Percentages are weighted; update when a task flips.
 
 - [x] `crew`, `kick`, `join`, channels, cancel seed, `fan`.
 - [x] Actor runtime seed.
-- [ ] Full first-class `actor` / `receive` syntax with owned state.
-- [ ] Portable timeouts and deadlines across task/channel/network APIs.
-- [ ] Structured error propagation from child tasks.
-- [ ] Explicit detached-task syntax and lifecycle controls.
+- [x] Full first-class `actor` / `receive` syntax with owned state (seed: fields + self).
+- [x] Portable timeouts and deadlines across task/channel (seed; network has per-API timeouts).
+- [x] Structured error propagation from child tasks (nursery first_err / wait).
+- [x] Explicit detached-task syntax and lifecycle (`detach` + `detached_join_all`).
 - [x] Backpressure primitives and bounded queues.
 - [x] Race diagnostics (Send/Sync; mut captures until join; TSan via `--race`). Leak scopes Done.
 - [x] Scheduler observability.

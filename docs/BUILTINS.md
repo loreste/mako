@@ -885,6 +885,11 @@ Tests: `chan_struct_test`, `chan_make_struct_test`, `chan_float_test`,
 | `ch.recv_timeout(ms)` / `ch.try_recv()` | Timed / non-blocking recv → **`Result[int, string]`** (`timeout` / `closed` / `empty`) |
 | `t.drain(ms)` / `crew_drain` | Cancel + join with timeout budget |
 | `t.cancel()` / `t.cancelled()` | Cooperative cancel flag |
+| `t.err_count()` / `t.first_err()` | Child `Result` Errs recorded on join (count / first message) |
+| `t.wait()` | Join pending tasks → `Result[int, string]` (`Ok(0)` or first Err) |
+| `detach f()` | Spawn on process-scoped nursery (not joined by enclosing crew) |
+| `detached_join_all()` | Join all detached tasks (tests / shutdown) |
+| `actor` / `receive` | Mailbox loop desugar; optional state fields via `self.field` |
 | `fan(xs, \|x\| …)` | Parallel map over array |
 
 **Job return types (`join`)**

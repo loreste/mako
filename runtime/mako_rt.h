@@ -4350,6 +4350,10 @@ typedef struct {
     size_t len;
     size_t cap;
     volatile bool cancelled;
+    /* Structured child errors: first Err message from joined Result jobs. */
+    char *first_err;   /* heap C string, or NULL */
+    size_t first_err_len;
+    int64_t err_count;
 } MakoNursery;
 
 static inline MakoNursery mako_nursery_new(void) {
@@ -4358,6 +4362,9 @@ static inline MakoNursery mako_nursery_new(void) {
     n.len = 0;
     n.cap = 0;
     n.cancelled = false;
+    n.first_err = NULL;
+    n.first_err_len = 0;
+    n.err_count = 0;
     return n;
 }
 
@@ -4367,6 +4374,43 @@ static inline void mako_nursery_cancel(MakoNursery *n) {
 
 static inline int64_t mako_nursery_cancelled(MakoNursery *n) {
     return n->cancelled ? 1 : 0;
+}
+
+/* Record a child task error (clones msg). Keeps only the first message. */
+static inline void mako_nursery_note_err(MakoNursery *n, MakoString msg) {
+    if (!n) return;
+    n->err_count++;
+    if (n->first_err) return;
+    size_t len = msg.len;
+    char *d = (char *)malloc(len + 1);
+    if (!d) return;
+    if (len && msg.data) memcpy(d, msg.data, len);
+    d[len] = 0;
+    n->first_err = d;
+    n->first_err_len = len;
+}
+
+static inline int64_t mako_nursery_err_count(MakoNursery *n) {
+    return n ? n->err_count : 0;
+}
+
+static inline MakoString mako_nursery_first_err(MakoNursery *n) {
+    if (!n || !n->first_err) return mako_str_from_cstr("");
+    return mako_str_from_cstr(n->first_err);
+}
+
+/* After joins: 1 if no child errors, 0 if any (caller reads first_err). */
+static inline int64_t mako_nursery_ok(MakoNursery *n) {
+    return (n && n->err_count == 0) ? 1 : 0;
+}
+
+/* Free first_err buffer (tasks free is separate). */
+static inline void mako_nursery_clear_errs(MakoNursery *n) {
+    if (!n) return;
+    free(n->first_err);
+    n->first_err = NULL;
+    n->first_err_len = 0;
+    n->err_count = 0;
 }
 
 /* Trampoline so timed join can poll `done` without blocking forever. */
@@ -4464,13 +4508,56 @@ static inline int64_t mako_await_timeout_ms(MakoTask *t, int64_t ms, int64_t *ou
     return 0; /* still running — caller may later join or cancel_join */
 }
 
+static inline void mako_nursery_join_pending(MakoNursery *n) {
+    if (!n) return;
+    for (size_t i = 0; i < n->len; i++) {
+        if (!n->tasks[i].joined) {
+            mako_await(&n->tasks[i]);
+        }
+    }
+}
+
 static inline void mako_nursery_join_all(MakoNursery *n) {
     for (size_t i = 0; i < n->len; i++) {
         mako_await(&n->tasks[i]);
     }
+    free(n->first_err);
+    n->first_err = NULL;
+    n->first_err_len = 0;
     free(n->tasks);
     n->tasks = NULL;
     n->len = n->cap = 0;
+}
+
+/* ---- Detached tasks: process-scoped nursery joined on demand ---- */
+static MakoNursery mako_detached_root;
+static int mako_detached_inited = 0;
+static pthread_mutex_t mako_detached_mu = PTHREAD_MUTEX_INITIALIZER;
+
+static inline void mako_detached_init(void) {
+    if (mako_detached_inited) return;
+    mako_detached_root = mako_nursery_new();
+    mako_detached_inited = 1;
+}
+
+static inline MakoTask *mako_detach_spawn(MakoTaskFn fn, void *arg) {
+    pthread_mutex_lock(&mako_detached_mu);
+    mako_detached_init();
+    MakoTask *t = mako_spawn(&mako_detached_root, fn, arg);
+    pthread_mutex_unlock(&mako_detached_mu);
+    return t;
+}
+
+static inline void mako_detached_join_all(void) {
+    pthread_mutex_lock(&mako_detached_mu);
+    if (mako_detached_inited) {
+        mako_nursery_join_pending(&mako_detached_root);
+        mako_nursery_clear_errs(&mako_detached_root);
+        free(mako_detached_root.tasks);
+        mako_detached_root.tasks = NULL;
+        mako_detached_root.len = mako_detached_root.cap = 0;
+    }
+    pthread_mutex_unlock(&mako_detached_mu);
 }
 
 /* Cancel then join — tasks cannot outlive cancel policy (structured concurrency). */
