@@ -12645,6 +12645,180 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             self.line(&format!("int64_t {tmp} = mako_time_unix();"));
                             return ("int64_t".into(), tmp);
                         }
+                        "time_year" | "time_month" | "time_day" | "time_hour" | "time_minute"
+                        | "time_second" | "time_millisecond" | "time_weekday" | "time_yearday"
+                        | "time_trunc_day" | "time_trunc_hour" | "time_since_ms" | "time_until_ms" => {
+                            let (_, t) = self.emit_expr(&args[0]);
+                            let fname = match name.as_str() {
+                                "time_year" => "mako_time_year",
+                                "time_month" => "mako_time_month",
+                                "time_day" => "mako_time_day",
+                                "time_hour" => "mako_time_hour",
+                                "time_minute" => "mako_time_minute",
+                                "time_second" => "mako_time_second",
+                                "time_millisecond" => "mako_time_millisecond",
+                                "time_weekday" => "mako_time_weekday",
+                                "time_yearday" => "mako_time_yearday",
+                                "time_trunc_day" => "mako_time_trunc_day",
+                                "time_trunc_hour" => "mako_time_trunc_hour",
+                                "time_since_ms" => "mako_time_since_ms",
+                                _ => "mako_time_until_ms",
+                            };
+                            return ("int64_t".into(), format!("{fname}({t})"));
+                        }
+                        "time_date" => {
+                            let (_, y) = self.emit_expr(&args[0]);
+                            let (_, mo) = self.emit_expr(&args[1]);
+                            let (_, d) = self.emit_expr(&args[2]);
+                            let (_, h) = self.emit_expr(&args[3]);
+                            let (_, mi) = self.emit_expr(&args[4]);
+                            let (_, s) = self.emit_expr(&args[5]);
+                            let (_, ms) = self.emit_expr(&args[6]);
+                            return (
+                                "int64_t".into(),
+                                format!("mako_time_date({y}, {mo}, {d}, {h}, {mi}, {s}, {ms})"),
+                            );
+                        }
+                        "time_add_ms" | "time_sub_ms" | "time_after" | "time_before"
+                        | "time_equal" => {
+                            let (_, a) = self.emit_expr(&args[0]);
+                            let (_, b) = self.emit_expr(&args[1]);
+                            let fname = match name.as_str() {
+                                "time_add_ms" => "mako_time_add_ms",
+                                "time_sub_ms" => "mako_time_sub_ms",
+                                "time_after" => "mako_time_after",
+                                "time_before" => "mako_time_before",
+                                _ => "mako_time_equal",
+                            };
+                            return ("int64_t".into(), format!("{fname}({a}, {b})"));
+                        }
+                        "time_local_offset_sec" => {
+                            return ("int64_t".into(), "mako_time_local_offset_sec()".into());
+                        }
+                        "time_format_local" | "time_format_date" | "time_format_clock" => {
+                            let (_, t) = self.emit_expr(&args[0]);
+                            let fname = match name.as_str() {
+                                "time_format_local" => "mako_time_format_local",
+                                "time_format_date" => "mako_time_format_date",
+                                _ => "mako_time_format_clock",
+                            };
+                            let tmp = self.fresh("tfmt");
+                            self.line(&format!("MakoString {tmp} = {fname}({t});"));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "time_parse_rfc3339" | "time_parse_date" => {
+                            let (_, s) = self.emit_expr(&args[0]);
+                            let fname = if name == "time_parse_rfc3339" {
+                                "mako_time_parse_rfc3339"
+                            } else {
+                                "mako_time_parse_date"
+                            };
+                            return ("int64_t".into(), format!("{fname}({s})"));
+                        }
+                        "duration_ms" | "duration_us_as_ms" | "duration_seconds"
+                        | "duration_minutes" | "duration_hours" | "duration_days"
+                        | "duration_to_seconds" | "duration_to_minutes" | "duration_to_hours" => {
+                            let (_, n) = self.emit_expr(&args[0]);
+                            let fname = match name.as_str() {
+                                "duration_ms" => "mako_duration_ms",
+                                "duration_us_as_ms" => "mako_duration_us_as_ms",
+                                "duration_seconds" => "mako_duration_seconds",
+                                "duration_minutes" => "mako_duration_minutes",
+                                "duration_hours" => "mako_duration_hours",
+                                "duration_days" => "mako_duration_days",
+                                "duration_to_seconds" => "mako_duration_to_seconds",
+                                "duration_to_minutes" => "mako_duration_to_minutes",
+                                _ => "mako_duration_to_hours",
+                            };
+                            return ("int64_t".into(), format!("{fname}({n})"));
+                        }
+                        "duration_string" => {
+                            let (_, n) = self.emit_expr(&args[0]);
+                            let tmp = self.fresh("durs");
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_duration_string({n});"
+                            ));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "syscall_available" => {
+                            return ("int64_t".into(), "mako_syscall_available()".into());
+                        }
+                        "syscall_getpid" | "syscall_getppid" | "syscall_getuid"
+                        | "syscall_geteuid" | "syscall_getgid" | "syscall_getegid"
+                        | "syscall_errno" | "syscall_pagesize" | "syscall_ncpu"
+                        | "syscall_getrlimit_nofile" | "syscall_pipe"
+                        | "syscall_pipe_read_fd" | "syscall_pipe_write_fd" => {
+                            let fname = format!("mako_{name}");
+                            return ("int64_t".into(), format!("{fname}()"));
+                        }
+                        "syscall_hostname" | "syscall_uname_sysname" | "syscall_uname_release"
+                        | "syscall_uname_machine" | "syscall_uname_json" | "syscall_errno_str" => {
+                            let fname = format!("mako_{name}");
+                            let tmp = self.fresh("syss");
+                            self.line(&format!("MakoString {tmp} = {fname}();"));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "syscall_kill" => {
+                            let (_, p) = self.emit_expr(&args[0]);
+                            let (_, s) = self.emit_expr(&args[1]);
+                            return (
+                                "int64_t".into(),
+                                format!("mako_syscall_kill({p}, {s})"),
+                            );
+                        }
+                        "syscall_umask" | "syscall_isatty" | "syscall_close" | "syscall_dup"
+                        | "syscall_setrlimit_nofile" => {
+                            let (_, a) = self.emit_expr(&args[0]);
+                            let fname = format!("mako_{name}");
+                            return ("int64_t".into(), format!("{fname}({a})"));
+                        }
+                        "syscall_dup2" => {
+                            let (_, a) = self.emit_expr(&args[0]);
+                            let (_, b) = self.emit_expr(&args[1]);
+                            return (
+                                "int64_t".into(),
+                                format!("mako_syscall_dup2({a}, {b})"),
+                            );
+                        }
+                        "syscall_write" => {
+                            let (_, fd) = self.emit_expr(&args[0]);
+                            let (_, d) = self.emit_expr(&args[1]);
+                            return (
+                                "int64_t".into(),
+                                format!("mako_syscall_write({fd}, {d})"),
+                            );
+                        }
+                        "syscall_read" => {
+                            let (_, fd) = self.emit_expr(&args[0]);
+                            let (_, n) = self.emit_expr(&args[1]);
+                            let tmp = self.fresh("sysr");
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_syscall_read({fd}, {n});"
+                            ));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "syscall_access" | "syscall_chmod" => {
+                            let (_, p) = self.emit_expr(&args[0]);
+                            let (_, m) = self.emit_expr(&args[1]);
+                            let fname = format!("mako_{name}");
+                            return ("int64_t".into(), format!("{fname}({p}, {m})"));
+                        }
+                        "syscall_symlink" => {
+                            let (_, t) = self.emit_expr(&args[0]);
+                            let (_, l) = self.emit_expr(&args[1]);
+                            return (
+                                "int64_t".into(),
+                                format!("mako_syscall_symlink({t}, {l})"),
+                            );
+                        }
+                        "syscall_readlink" => {
+                            let (_, p) = self.emit_expr(&args[0]);
+                            let tmp = self.fresh("sysrl");
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_syscall_readlink({p});"
+                            ));
+                            return ("MakoString".into(), tmp);
+                        }
                         "mutex_new" => {
                             let tmp = self.fresh("mx");
                             self.line(&format!("MakoMutex *{tmp} = mako_mutex_new();"));
@@ -21132,6 +21306,83 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             ));
                             return ("MakoString".into(), tmp);
                         }
+                        "list_sum_int" | "list_min_int" | "list_max_int" | "heap_peek_int" => {
+                            let (_, a) = self.emit_expr(&args[0]);
+                            let fname = format!("mako_{name}");
+                            return ("int64_t".into(), format!("{fname}({a})"));
+                        }
+                        "list_concat_int" => {
+                            let (_, a) = self.emit_expr(&args[0]);
+                            let (_, b) = self.emit_expr(&args[1]);
+                            let tmp = self.fresh("lcat");
+                            self.line(&format!(
+                                "MakoIntArray {tmp} = mako_list_concat_int({a}, {b});"
+                            ));
+                            return ("MakoIntArray".into(), tmp);
+                        }
+                        "list_concat_str" => {
+                            let (_, a) = self.emit_expr(&args[0]);
+                            let (_, b) = self.emit_expr(&args[1]);
+                            let tmp = self.fresh("lcats");
+                            self.line(&format!(
+                                "MakoStrArray {tmp} = mako_list_concat_str({a}, {b});"
+                            ));
+                            return ("MakoStrArray".into(), tmp);
+                        }
+                        "list_binary_search_int" | "set_has_int" => {
+                            let (_, a) = self.emit_expr(&args[0]);
+                            let (_, v) = self.emit_expr(&args[1]);
+                            let fname = format!("mako_{name}");
+                            return ("int64_t".into(), format!("{fname}({a}, {v})"));
+                        }
+                        "set_union_int" | "set_intersect_int" | "set_diff_int" => {
+                            let (_, a) = self.emit_expr(&args[0]);
+                            let (_, b) = self.emit_expr(&args[1]);
+                            let fname = format!("mako_{name}");
+                            let tmp = self.fresh("seto");
+                            self.line(&format!(
+                                "MakoIntArray {tmp} = {fname}({a}, {b});"
+                            ));
+                            return ("MakoIntArray".into(), tmp);
+                        }
+                        "heap_push_int" => {
+                            let (_, a) = self.emit_expr(&args[0]);
+                            let (_, v) = self.emit_expr(&args[1]);
+                            let tmp = self.fresh("hpush");
+                            self.line(&format!(
+                                "MakoIntArray {tmp} = mako_heap_push_int({a}, {v});"
+                            ));
+                            return ("MakoIntArray".into(), tmp);
+                        }
+                        "heap_pop_int" => {
+                            let (_, a) = self.emit_expr(&args[0]);
+                            let tmp = self.fresh("hpop");
+                            self.line(&format!(
+                                "MakoIntArray {tmp} = mako_heap_pop_int({a});"
+                            ));
+                            return ("MakoIntArray".into(), tmp);
+                        }
+                        "heap_popped_int" => {
+                            return ("int64_t".into(), "mako_heap_popped_int()".into());
+                        }
+                        "list_eq_int" => {
+                            let (_, a) = self.emit_expr(&args[0]);
+                            let (_, b) = self.emit_expr(&args[1]);
+                            return (
+                                "int64_t".into(),
+                                format!("mako_list_eq_int({a}, {b})"),
+                            );
+                        }
+                        "list_fill_int" | "list_range_int" => {
+                            let (_, a) = self.emit_expr(&args[0]);
+                            let (_, b) = self.emit_expr(&args[1]);
+                            let fname = format!("mako_{name}");
+                            let tmp = self.fresh("lfill");
+                            self.line(&format!(
+                                "MakoIntArray {tmp} = {fname}({a}, {b});"
+                            ));
+                            return ("MakoIntArray".into(), tmp);
+                        }
                         "embed_file" => {
                             let (_, p) = self.emit_expr(&args[0]);
                             let tmp = self.fresh("ef");
@@ -23547,6 +23798,58 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         "plugin_call_ok" => {
                             let (_, h) = self.emit_expr(&args[0]);
                             return ("int64_t".into(), format!("mako_plugin_call_ok({h})"));
+                        }
+                        "plugin_last_log" => {
+                            let tmp = self.fresh("plog");
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_plugin_last_log();"
+                            ));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "plugin_last_log_level" => {
+                            return ("int64_t".into(), "mako_plugin_last_log_level()".into());
+                        }
+                        "plugin_log_count" => {
+                            return ("int64_t".into(), "mako_plugin_log_count()".into());
+                        }
+                        "plugin_reload" => {
+                            let (_, h) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_plugin_reload({h})"));
+                        }
+                        "plugin_find" => {
+                            let (_, n) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_plugin_find({n})"));
+                        }
+                        "plugin_manifest_artifact" | "plugin_manifest_lib_path" => {
+                            let (_, p) = self.emit_expr(&args[0]);
+                            let fname = format!("mako_{name}");
+                            let tmp = self.fresh("pman");
+                            self.line(&format!("MakoString {tmp} = {fname}({p});"));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "plugin_open_manifest" => {
+                            let (_, p) = self.emit_expr(&args[0]);
+                            return (
+                                "int64_t".into(),
+                                format!("mako_plugin_open_manifest({p})"),
+                            );
+                        }
+                        "plugin_call1" => {
+                            let (_, h) = self.emit_expr(&args[0]);
+                            let (_, o) = self.emit_expr(&args[1]);
+                            let tmp = self.fresh("plc1");
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_plugin_call1({h}, {o});"
+                            ));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "plugin_info_json" => {
+                            let (_, h) = self.emit_expr(&args[0]);
+                            let tmp = self.fresh("pij");
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_plugin_info_json({h});"
+                            ));
+                            return ("MakoString".into(), tmp);
                         }
                         "ffi_abi_name" => {
                             let tmp = self.fresh("ffiabi");

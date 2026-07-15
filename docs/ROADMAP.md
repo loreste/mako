@@ -403,8 +403,11 @@ Percentages are weighted; update when a task flips.
 - [x] Netcode seeds: `snap_diff` / `snap_apply_delta` · `netcode_lag_comp_tick` / `netcode_interp`.
 - [x] Plugin host loader seed (`plugin_open` / `call` / `close`) · `ffi_abi_name`.
 - [x] Rich plugin package (`std/plugin` + info/error/slots/close_all · `plugin_package_test`).
+- [x] Plugin product (live dylib load/call/reload/manifest · `plugin_product_test`).
 - [x] Full unicode/utf8 package (UCD seed + encode/decode · `std/unicode` · `unicode_full_test`).
-- [x] List[T] + richer collections (list/stack/queue · `std/collections` · `collections_list_test`).
+- [x] List[T] + richer collections (list/set/heap/ring/stack/queue · `collections_*_test`).
+- [x] Full time package (calendar/parse/format/duration · `time_full_test`).
+- [x] Full syscall package (portable OS primitives · `syscall_full_test`).
 - [x] Hot-reload unwatch + count (`hot_reload_unwatch` / `hot_reload_watch_count`).
 - [x] Client prediction service seed (`predict_new` / `input` / `reconcile` / `state` / `tick`).
 - [x] Live dylib hot-reload seed (`hot_reload_plugin_watch` / `poll` / `call` / `close`).

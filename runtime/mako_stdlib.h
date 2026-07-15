@@ -8,14 +8,22 @@
 #include <ctype.h>
 #include <math.h>
 #include <limits.h>
+#include <stdio.h>
+#include <string.h>
+#include <errno.h>
+#include <time.h>
 
 #include <sys/stat.h>
 #include <fcntl.h>
 #if defined(_WIN32)
 #include <direct.h>
+#include <io.h>
+#include <process.h>
 #else
 #include <unistd.h>
 #include <dirent.h>
+#include <sys/utsname.h>
+#include <sys/resource.h>
 #endif
 
 #ifdef __cplusplus
@@ -778,6 +786,169 @@ static inline MakoStrArray mako_strings_copy(MakoStrArray a) {
     return out;
 }
 
+/* ---- richer collections: set / heap / stats / concat / binary search / ring ---- */
+static inline int64_t mako_list_sum_int(MakoIntArray a) {
+    int64_t s = 0;
+    for (size_t i = 0; i < a.len; i++) s += a.data[i];
+    return s;
+}
+static inline int64_t mako_list_min_int(MakoIntArray a) {
+    if (a.len == 0) return 0;
+    int64_t m = a.data[0];
+    for (size_t i = 1; i < a.len; i++) if (a.data[i] < m) m = a.data[i];
+    return m;
+}
+static inline int64_t mako_list_max_int(MakoIntArray a) {
+    if (a.len == 0) return 0;
+    int64_t m = a.data[0];
+    for (size_t i = 1; i < a.len; i++) if (a.data[i] > m) m = a.data[i];
+    return m;
+}
+static inline MakoIntArray mako_list_concat_int(MakoIntArray a, MakoIntArray b) {
+    MakoIntArray out = mako_int_array_make((int64_t)(a.len + b.len), (int64_t)(a.len + b.len));
+    for (size_t i = 0; i < a.len; i++) out.data[i] = a.data[i];
+    for (size_t i = 0; i < b.len; i++) out.data[a.len + i] = b.data[i];
+    out.len = a.len + b.len;
+    return out;
+}
+static inline MakoStrArray mako_list_concat_str(MakoStrArray a, MakoStrArray b) {
+    MakoStrArray out = mako_str_array_make((int64_t)(a.len + b.len), (int64_t)(a.len + b.len));
+    for (size_t i = 0; i < a.len; i++) out.data[i] = a.data[i];
+    for (size_t i = 0; i < b.len; i++) out.data[a.len + i] = b.data[i];
+    out.len = a.len + b.len;
+    return out;
+}
+/* Binary search on sorted asc []int; returns index or -1. */
+static inline int64_t mako_list_binary_search_int(MakoIntArray a, int64_t v) {
+    int64_t lo = 0, hi = (int64_t)a.len - 1;
+    while (lo <= hi) {
+        int64_t mid = lo + (hi - lo) / 2;
+        if (a.data[mid] == v) return mid;
+        if (a.data[mid] < v) lo = mid + 1;
+        else hi = mid - 1;
+    }
+    return -1;
+}
+/* Set ops on sorted unique int arrays (call slices_unique first if needed). */
+static inline MakoIntArray mako_set_union_int(MakoIntArray a, MakoIntArray b) {
+    MakoIntArray out = mako_int_array_make(0, (int64_t)(a.len + b.len));
+    size_t i = 0, j = 0;
+    while (i < a.len && j < b.len) {
+        if (a.data[i] < b.data[j]) {
+            out = mako_slice_append(out, a.data[i++]);
+        } else if (b.data[j] < a.data[i]) {
+            out = mako_slice_append(out, b.data[j++]);
+        } else {
+            out = mako_slice_append(out, a.data[i]);
+            i++;
+            j++;
+        }
+    }
+    while (i < a.len) out = mako_slice_append(out, a.data[i++]);
+    while (j < b.len) out = mako_slice_append(out, b.data[j++]);
+    return out;
+}
+static inline MakoIntArray mako_set_intersect_int(MakoIntArray a, MakoIntArray b) {
+    MakoIntArray out = mako_int_array_make(0, (int64_t)(a.len < b.len ? a.len : b.len));
+    size_t i = 0, j = 0;
+    while (i < a.len && j < b.len) {
+        if (a.data[i] < b.data[j]) i++;
+        else if (b.data[j] < a.data[i]) j++;
+        else {
+            out = mako_slice_append(out, a.data[i]);
+            i++;
+            j++;
+        }
+    }
+    return out;
+}
+static inline MakoIntArray mako_set_diff_int(MakoIntArray a, MakoIntArray b) {
+    MakoIntArray out = mako_int_array_make(0, (int64_t)a.len);
+    size_t i = 0, j = 0;
+    while (i < a.len && j < b.len) {
+        if (a.data[i] < b.data[j]) out = mako_slice_append(out, a.data[i++]);
+        else if (b.data[j] < a.data[i]) j++;
+        else {
+            i++;
+            j++;
+        }
+    }
+    while (i < a.len) out = mako_slice_append(out, a.data[i++]);
+    return out;
+}
+static inline int64_t mako_set_has_int(MakoIntArray a, int64_t v) {
+    return mako_list_binary_search_int(a, v) >= 0 ? 1 : 0;
+}
+/* Min-heap over []int (array heap layout). */
+static inline void mako_heap_sift_up(MakoIntArray *h, size_t i) {
+    while (i > 0) {
+        size_t p = (i - 1) / 2;
+        if (h->data[p] <= h->data[i]) break;
+        int64_t t = h->data[p];
+        h->data[p] = h->data[i];
+        h->data[i] = t;
+        i = p;
+    }
+}
+static inline void mako_heap_sift_down(MakoIntArray *h, size_t i) {
+    for (;;) {
+        size_t l = 2 * i + 1, r = 2 * i + 2, smallest = i;
+        if (l < h->len && h->data[l] < h->data[smallest]) smallest = l;
+        if (r < h->len && h->data[r] < h->data[smallest]) smallest = r;
+        if (smallest == i) break;
+        int64_t t = h->data[i];
+        h->data[i] = h->data[smallest];
+        h->data[smallest] = t;
+        i = smallest;
+    }
+}
+static inline MakoIntArray mako_heap_push_int(MakoIntArray h, int64_t v) {
+    h = mako_slice_append(h, v);
+    mako_heap_sift_up(&h, h.len - 1);
+    return h;
+}
+static int64_t mako_heap_popped_tls = 0;
+static inline MakoIntArray mako_heap_pop_int(MakoIntArray h) {
+    if (h.len == 0) {
+        mako_heap_popped_tls = 0;
+        return h;
+    }
+    mako_heap_popped_tls = h.data[0];
+    h.data[0] = h.data[h.len - 1];
+    h.len--;
+    if (h.len > 0) mako_heap_sift_down(&h, 0);
+    return h;
+}
+static inline int64_t mako_heap_popped_int(void) { return mako_heap_popped_tls; }
+static inline int64_t mako_heap_peek_int(MakoIntArray h) {
+    return h.len ? h.data[0] : 0;
+}
+/* Ring buffer: use mako_ring_* in mako_std.h (product lock-free ring). */
+/* list equality */
+static inline int64_t mako_list_eq_int(MakoIntArray a, MakoIntArray b) {
+    if (a.len != b.len) return 0;
+    for (size_t i = 0; i < a.len; i++) if (a.data[i] != b.data[i]) return 0;
+    return 1;
+}
+static inline MakoIntArray mako_list_fill_int(int64_t n, int64_t v) {
+    if (n < 0) n = 0;
+    if (n > 1 << 20) n = 1 << 20;
+    MakoIntArray out = mako_int_array_make(n, n);
+    for (int64_t i = 0; i < n; i++) out.data[i] = v;
+    out.len = (size_t)n;
+    return out;
+}
+static inline MakoIntArray mako_list_range_int(int64_t start, int64_t end) {
+    /* half-open [start, end) */
+    if (end < start) end = start;
+    int64_t n = end - start;
+    if (n > 1 << 20) n = 1 << 20;
+    MakoIntArray out = mako_int_array_make(n, n);
+    for (int64_t i = 0; i < n; i++) out.data[i] = start + i;
+    out.len = (size_t)n;
+    return out;
+}
+
 /* ---- time ---- */
 
 static inline MakoString mako_time_format_rfc3339(int64_t unix_ms) {
@@ -809,6 +980,622 @@ static inline MakoString mako_time_format_rfc3339(int64_t unix_ms) {
 
 static inline int64_t mako_time_unix(void) {
     return mako_now_ms() / 1000;
+}
+
+/* ---- full time package (calendar + duration + parse) ---- */
+static inline void mako_time_gm(int64_t unix_ms, struct tm *out, int *out_ms) {
+    time_t sec = (time_t)(unix_ms / 1000);
+    int ms = (int)(unix_ms % 1000);
+    if (ms < 0) {
+        ms += 1000;
+        sec -= 1;
+    }
+    if (out_ms) *out_ms = ms;
+#if defined(_WIN32)
+    gmtime_s(out, &sec);
+#else
+    gmtime_r(&sec, out);
+#endif
+}
+static inline void mako_time_local(int64_t unix_ms, struct tm *out, int *out_ms) {
+    time_t sec = (time_t)(unix_ms / 1000);
+    int ms = (int)(unix_ms % 1000);
+    if (ms < 0) {
+        ms += 1000;
+        sec -= 1;
+    }
+    if (out_ms) *out_ms = ms;
+#if defined(_WIN32)
+    localtime_s(out, &sec);
+#else
+    localtime_r(&sec, out);
+#endif
+}
+static inline int64_t mako_time_year(int64_t unix_ms) {
+    struct tm tm;
+    mako_time_gm(unix_ms, &tm, NULL);
+    return tm.tm_year + 1900;
+}
+static inline int64_t mako_time_month(int64_t unix_ms) {
+    struct tm tm;
+    mako_time_gm(unix_ms, &tm, NULL);
+    return tm.tm_mon + 1;
+}
+static inline int64_t mako_time_day(int64_t unix_ms) {
+    struct tm tm;
+    mako_time_gm(unix_ms, &tm, NULL);
+    return tm.tm_mday;
+}
+static inline int64_t mako_time_hour(int64_t unix_ms) {
+    struct tm tm;
+    mako_time_gm(unix_ms, &tm, NULL);
+    return tm.tm_hour;
+}
+static inline int64_t mako_time_minute(int64_t unix_ms) {
+    struct tm tm;
+    mako_time_gm(unix_ms, &tm, NULL);
+    return tm.tm_min;
+}
+static inline int64_t mako_time_second(int64_t unix_ms) {
+    struct tm tm;
+    mako_time_gm(unix_ms, &tm, NULL);
+    return tm.tm_sec;
+}
+static inline int64_t mako_time_millisecond(int64_t unix_ms) {
+    int ms = 0;
+    struct tm tm;
+    mako_time_gm(unix_ms, &tm, &ms);
+    return ms;
+}
+static inline int64_t mako_time_weekday(int64_t unix_ms) {
+    struct tm tm;
+    mako_time_gm(unix_ms, &tm, NULL);
+    return tm.tm_wday; /* 0=Sun … 6=Sat */
+}
+static inline int64_t mako_time_yearday(int64_t unix_ms) {
+    struct tm tm;
+    mako_time_gm(unix_ms, &tm, NULL);
+    return tm.tm_yday + 1; /* 1..366 */
+}
+/* Portable UTC mktime (avoids glibc timegm feature macros / macOS C99 issues). */
+static inline time_t mako_timegm_tm(struct tm *tm) {
+#if defined(_WIN32)
+    return _mkgmtime(tm);
+#else
+    /* Algorithm: days since 1970-01-01 from Y-M-D, then h/m/s. */
+    int y = tm->tm_year + 1900;
+    int m = tm->tm_mon + 1;
+    int d = tm->tm_mday;
+    if (m <= 2) {
+        y -= 1;
+        m += 12;
+    }
+    int64_t era = (y >= 0 ? y : y - 399) / 400;
+    int yoe = (int)(y - era * 400);
+    int doy = (153 * (m - 3) + 2) / 5 + d - 1;
+    int doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    int64_t days = era * 146097 + (int64_t)doe - 719468;
+    return (time_t)(days * 86400 + tm->tm_hour * 3600 + tm->tm_min * 60 + tm->tm_sec);
+#endif
+}
+/* Build UTC instant from calendar fields. Returns unix ms. */
+static inline int64_t mako_time_date(int64_t year, int64_t month, int64_t day,
+                                     int64_t hour, int64_t min, int64_t sec, int64_t ms) {
+    if (month < 1 || month > 12 || day < 1 || day > 31) return -1;
+    if (hour < 0 || hour > 23 || min < 0 || min > 59 || sec < 0 || sec > 60) return -1;
+    if (ms < 0 || ms > 999) return -1;
+    struct tm tm;
+    memset(&tm, 0, sizeof(tm));
+    tm.tm_year = (int)year - 1900;
+    tm.tm_mon = (int)month - 1;
+    tm.tm_mday = (int)day;
+    tm.tm_hour = (int)hour;
+    tm.tm_min = (int)min;
+    tm.tm_sec = (int)sec;
+    tm.tm_isdst = 0;
+    time_t t = mako_timegm_tm(&tm);
+    if (t == (time_t)-1) return -1;
+    return (int64_t)t * 1000 + ms;
+}
+static inline int64_t mako_time_add_ms(int64_t t, int64_t delta_ms) { return t + delta_ms; }
+static inline int64_t mako_time_sub_ms(int64_t a, int64_t b) { return a - b; }
+static inline int64_t mako_time_after(int64_t a, int64_t b) { return a > b ? 1 : 0; }
+static inline int64_t mako_time_before(int64_t a, int64_t b) { return a < b ? 1 : 0; }
+static inline int64_t mako_time_equal(int64_t a, int64_t b) { return a == b ? 1 : 0; }
+static inline int64_t mako_time_since_ms(int64_t t) { return mako_now_ms() - t; }
+static inline int64_t mako_time_until_ms(int64_t t) { return t - mako_now_ms(); }
+static inline int64_t mako_time_trunc_day(int64_t unix_ms) {
+    struct tm tm;
+    mako_time_gm(unix_ms, &tm, NULL);
+    return mako_time_date(tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, 0, 0, 0, 0);
+}
+static inline int64_t mako_time_trunc_hour(int64_t unix_ms) {
+    struct tm tm;
+    mako_time_gm(unix_ms, &tm, NULL);
+    return mako_time_date(tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, 0, 0, 0);
+}
+/* Local UTC offset in seconds east of UTC (best-effort). */
+static inline int64_t mako_time_local_offset_sec(void) {
+    time_t now = time(NULL);
+    struct tm local_tm, gm_tm;
+#if defined(_WIN32)
+    localtime_s(&local_tm, &now);
+    gmtime_s(&gm_tm, &now);
+#else
+    localtime_r(&now, &local_tm);
+    gmtime_r(&now, &gm_tm);
+#endif
+    time_t lt = mako_timegm_tm(&local_tm);
+    time_t gt = mako_timegm_tm(&gm_tm);
+    return (int64_t)(lt - gt);
+}
+static inline MakoString mako_time_format_local(int64_t unix_ms) {
+    struct tm tm;
+    int ms = 0;
+    mako_time_local(unix_ms, &tm, &ms);
+    char buf[64];
+    int n = snprintf(buf, sizeof(buf), "%04d-%02d-%02dT%02d:%02d:%02d.%03d",
+                     tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
+                     tm.tm_hour, tm.tm_min, tm.tm_sec, ms);
+    if (n < 0) n = 0;
+    return mako_str_from_cstr(buf);
+}
+static inline MakoString mako_time_format_date(int64_t unix_ms) {
+    struct tm tm;
+    mako_time_gm(unix_ms, &tm, NULL);
+    char buf[32];
+    int n = snprintf(buf, sizeof(buf), "%04d-%02d-%02d",
+                     tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday);
+    if (n < 0) n = 0;
+    return mako_str_from_cstr(buf);
+}
+static inline MakoString mako_time_format_clock(int64_t unix_ms) {
+    struct tm tm;
+    mako_time_gm(unix_ms, &tm, NULL);
+    char buf[16];
+    int n = snprintf(buf, sizeof(buf), "%02d:%02d:%02d", tm.tm_hour, tm.tm_min, tm.tm_sec);
+    if (n < 0) n = 0;
+    return mako_str_from_cstr(buf);
+}
+/* Parse RFC3339 / RFC3339Nano-ish: YYYY-MM-DDTHH:MM:SS[.mmm][Z|±HH:MM] → unix ms. -1 fail. */
+static inline int64_t mako_time_parse_rfc3339(MakoString s) {
+    if (!s.data || s.len < 19) return -1;
+    int Y = 0, Mo = 0, D = 0, h = 0, mi = 0, se = 0, ms = 0;
+    char buf[64];
+    size_t n = s.len < 63 ? s.len : 63;
+    memcpy(buf, s.data, n);
+    buf[n] = 0;
+    char *p = buf;
+    if (sscanf(p, "%d-%d-%d", &Y, &Mo, &D) != 3) return -1;
+    while (*p && *p != 'T' && *p != 't' && *p != ' ') p++;
+    if (!*p) return -1;
+    p++;
+    if (sscanf(p, "%d:%d:%d", &h, &mi, &se) != 3) return -1;
+    while (*p && *p != '.' && *p != 'Z' && *p != 'z' && *p != '+' && *p != '-') p++;
+    if (*p == '.') {
+        p++;
+        int frac = 0, digits = 0;
+        while (*p >= '0' && *p <= '9' && digits < 3) {
+            frac = frac * 10 + (*p - '0');
+            p++;
+            digits++;
+        }
+        while (digits < 3) {
+            frac *= 10;
+            digits++;
+        }
+        ms = frac;
+        while (*p >= '0' && *p <= '9') p++; /* skip extra frac digits */
+    }
+    int off_sec = 0;
+    if (*p == 'Z' || *p == 'z') {
+        off_sec = 0;
+    } else if (*p == '+' || *p == '-') {
+        int sign = (*p == '-') ? -1 : 1;
+        p++;
+        int oh = 0, om = 0;
+        if (sscanf(p, "%d:%d", &oh, &om) < 1) return -1;
+        off_sec = sign * (oh * 3600 + om * 60);
+    }
+    int64_t utc = mako_time_date(Y, Mo, D, h, mi, se, ms);
+    if (utc < 0) return -1;
+    return utc - (int64_t)off_sec * 1000;
+}
+/* Parse YYYY-MM-DD as UTC midnight. */
+static inline int64_t mako_time_parse_date(MakoString s) {
+    if (!s.data || s.len < 10) return -1;
+    int Y = 0, Mo = 0, D = 0;
+    char buf[16];
+    size_t n = s.len < 15 ? s.len : 15;
+    memcpy(buf, s.data, n);
+    buf[n] = 0;
+    if (sscanf(buf, "%d-%d-%d", &Y, &Mo, &D) != 3) return -1;
+    return mako_time_date(Y, Mo, D, 0, 0, 0, 0);
+}
+/* Duration helpers (all in milliseconds unless named). */
+static inline int64_t mako_duration_ms(int64_t n) { return n; }
+static inline int64_t mako_duration_us_as_ms(int64_t us) { return us / 1000; }
+static inline int64_t mako_duration_seconds(int64_t n) { return n * 1000; }
+static inline int64_t mako_duration_minutes(int64_t n) { return n * 60 * 1000; }
+static inline int64_t mako_duration_hours(int64_t n) { return n * 3600 * 1000; }
+static inline int64_t mako_duration_days(int64_t n) { return n * 86400 * 1000; }
+static inline int64_t mako_duration_to_seconds(int64_t ms) { return ms / 1000; }
+static inline int64_t mako_duration_to_minutes(int64_t ms) { return ms / 60000; }
+static inline int64_t mako_duration_to_hours(int64_t ms) { return ms / 3600000; }
+static inline MakoString mako_duration_string(int64_t ms) {
+    int64_t sign = ms < 0 ? -1 : 1;
+    int64_t v = ms < 0 ? -ms : ms;
+    int64_t h = v / 3600000;
+    int64_t m = (v % 3600000) / 60000;
+    int64_t s = (v % 60000) / 1000;
+    int64_t milli = v % 1000;
+    char buf[64];
+    int n;
+    if (h > 0)
+        n = snprintf(buf, sizeof(buf), "%s%lldh%lldm%llds", sign < 0 ? "-" : "",
+                     (long long)h, (long long)m, (long long)s);
+    else if (m > 0)
+        n = snprintf(buf, sizeof(buf), "%s%lldm%llds", sign < 0 ? "-" : "",
+                     (long long)m, (long long)s);
+    else if (s > 0 && milli == 0)
+        n = snprintf(buf, sizeof(buf), "%s%llds", sign < 0 ? "-" : "", (long long)s);
+    else if (s > 0)
+        n = snprintf(buf, sizeof(buf), "%s%lld.%03llds", sign < 0 ? "-" : "",
+                     (long long)s, (long long)milli);
+    else
+        n = snprintf(buf, sizeof(buf), "%s%lldms", sign < 0 ? "-" : "", (long long)v);
+    if (n < 0) n = 0;
+    return mako_str_from_cstr(buf);
+}
+
+/* ---- full syscall package (portable OS primitives) ---- */
+static inline int64_t mako_syscall_available(void) {
+#if defined(MAKO_WASI)
+    return 0;
+#else
+    return 1;
+#endif
+}
+static inline int64_t mako_syscall_getpid(void) {
+#if defined(_WIN32)
+    return (int64_t)GetCurrentProcessId();
+#elif defined(MAKO_WASI)
+    return 1;
+#else
+    return (int64_t)getpid();
+#endif
+}
+static inline int64_t mako_syscall_getppid(void) {
+#if defined(_WIN32) || defined(MAKO_WASI)
+    return 0;
+#else
+    return (int64_t)getppid();
+#endif
+}
+static inline int64_t mako_syscall_getuid(void) {
+#if defined(_WIN32) || defined(MAKO_WASI)
+    return 0;
+#else
+    return (int64_t)getuid();
+#endif
+}
+static inline int64_t mako_syscall_geteuid(void) {
+#if defined(_WIN32) || defined(MAKO_WASI)
+    return 0;
+#else
+    return (int64_t)geteuid();
+#endif
+}
+static inline int64_t mako_syscall_getgid(void) {
+#if defined(_WIN32) || defined(MAKO_WASI)
+    return 0;
+#else
+    return (int64_t)getgid();
+#endif
+}
+static inline int64_t mako_syscall_getegid(void) {
+#if defined(_WIN32) || defined(MAKO_WASI)
+    return 0;
+#else
+    return (int64_t)getegid();
+#endif
+}
+static inline MakoString mako_syscall_hostname(void) {
+    char buf[256];
+#if defined(_WIN32)
+    DWORD n = (DWORD)sizeof(buf);
+    if (!GetComputerNameA(buf, &n)) return mako_str_from_cstr("localhost");
+    return mako_str_from_cstr(buf);
+#elif defined(MAKO_WASI)
+    return mako_str_from_cstr("wasi");
+#else
+    if (gethostname(buf, sizeof(buf)) != 0) return mako_str_from_cstr("localhost");
+    buf[sizeof(buf) - 1] = 0;
+    return mako_str_from_cstr(buf);
+#endif
+}
+static inline MakoString mako_syscall_uname_sysname(void) {
+#if defined(_WIN32)
+    return mako_str_from_cstr("Windows");
+#elif defined(MAKO_WASI)
+    return mako_str_from_cstr("WASI");
+#else
+    struct utsname u;
+    if (uname(&u) != 0) return mako_str_from_cstr("unknown");
+    return mako_str_from_cstr(u.sysname);
+#endif
+}
+static inline MakoString mako_syscall_uname_release(void) {
+#if defined(_WIN32) || defined(MAKO_WASI)
+    return mako_str_from_cstr("");
+#else
+    struct utsname u;
+    if (uname(&u) != 0) return mako_str_from_cstr("");
+    return mako_str_from_cstr(u.release);
+#endif
+}
+static inline MakoString mako_syscall_uname_machine(void) {
+#if defined(_WIN32)
+#if defined(_M_X64) || defined(__x86_64__)
+    return mako_str_from_cstr("x86_64");
+#elif defined(_M_ARM64) || defined(__aarch64__)
+    return mako_str_from_cstr("arm64");
+#else
+    return mako_str_from_cstr("unknown");
+#endif
+#elif defined(MAKO_WASI)
+    return mako_str_from_cstr("wasm32");
+#else
+    struct utsname u;
+    if (uname(&u) != 0) return mako_str_from_cstr("");
+    return mako_str_from_cstr(u.machine);
+#endif
+}
+static inline MakoString mako_syscall_uname_json(void) {
+    MakoString sys = mako_syscall_uname_sysname();
+    MakoString rel = mako_syscall_uname_release();
+    MakoString mach = mako_syscall_uname_machine();
+    char buf[512];
+    int n = snprintf(buf, sizeof(buf),
+                     "{\"sysname\":\"%.*s\",\"release\":\"%.*s\",\"machine\":\"%.*s\"}",
+                     (int)sys.len, sys.data ? sys.data : "",
+                     (int)rel.len, rel.data ? rel.data : "",
+                     (int)mach.len, mach.data ? mach.data : "");
+    mako_str_free(sys);
+    mako_str_free(rel);
+    mako_str_free(mach);
+    if (n < 0) n = 0;
+    return mako_str_from_cstr(buf);
+}
+static inline int64_t mako_syscall_errno(void) {
+#if defined(MAKO_WASI)
+    return 0;
+#else
+    return (int64_t)errno;
+#endif
+}
+static inline MakoString mako_syscall_errno_str(void) {
+#if defined(MAKO_WASI)
+    return mako_str_from_cstr("ok");
+#else
+    return mako_str_from_cstr(strerror(errno));
+#endif
+}
+static inline int64_t mako_syscall_kill(int64_t pid, int64_t sig) {
+#if defined(_WIN32) || defined(MAKO_WASI)
+    (void)pid;
+    (void)sig;
+    return -1;
+#else
+    return kill((pid_t)pid, (int)sig) == 0 ? 0 : -1;
+#endif
+}
+static inline int64_t mako_syscall_umask(int64_t mask) {
+#if defined(_WIN32) || defined(MAKO_WASI)
+    (void)mask;
+    return 0;
+#else
+    mode_t old = umask((mode_t)mask);
+    return (int64_t)old;
+#endif
+}
+static inline int64_t mako_syscall_pagesize(void) {
+#if defined(_WIN32)
+    SYSTEM_INFO si;
+    GetSystemInfo(&si);
+    return (int64_t)si.dwPageSize;
+#elif defined(MAKO_WASI)
+    return 65536;
+#else
+    long p = sysconf(_SC_PAGESIZE);
+    return p > 0 ? (int64_t)p : 4096;
+#endif
+}
+static inline int64_t mako_syscall_ncpu(void) {
+#if defined(_WIN32)
+    SYSTEM_INFO si;
+    GetSystemInfo(&si);
+    return (int64_t)si.dwNumberOfProcessors;
+#elif defined(MAKO_WASI)
+    return 1;
+#else
+#if defined(_SC_NPROCESSORS_ONLN)
+    long n = sysconf(_SC_NPROCESSORS_ONLN);
+    if (n > 0) return (int64_t)n;
+#endif
+    /* Fallback when the constant is masked by strict C99 feature macros. */
+    return 1;
+#endif
+}
+static inline int64_t mako_syscall_isatty(int64_t fd) {
+#if defined(_WIN32)
+    return _isatty((int)fd) ? 1 : 0;
+#elif defined(MAKO_WASI)
+    (void)fd;
+    return 0;
+#else
+    return isatty((int)fd) ? 1 : 0;
+#endif
+}
+static int64_t mako_syscall_pipe_r = -1;
+static int64_t mako_syscall_pipe_w = -1;
+static inline int64_t mako_syscall_pipe(void) {
+#if defined(_WIN32) || defined(MAKO_WASI)
+    mako_syscall_pipe_r = -1;
+    mako_syscall_pipe_w = -1;
+    return -1;
+#else
+    int fds[2];
+    if (pipe(fds) != 0) {
+        mako_syscall_pipe_r = -1;
+        mako_syscall_pipe_w = -1;
+        return -1;
+    }
+    mako_syscall_pipe_r = fds[0];
+    mako_syscall_pipe_w = fds[1];
+    return 0;
+#endif
+}
+static inline int64_t mako_syscall_pipe_read_fd(void) { return mako_syscall_pipe_r; }
+static inline int64_t mako_syscall_pipe_write_fd(void) { return mako_syscall_pipe_w; }
+static inline int64_t mako_syscall_close(int64_t fd) {
+    if (fd < 0) return -1;
+#if defined(_WIN32)
+    return _close((int)fd) == 0 ? 0 : -1;
+#elif defined(MAKO_WASI)
+    (void)fd;
+    return -1;
+#else
+    return close((int)fd) == 0 ? 0 : -1;
+#endif
+}
+static inline int64_t mako_syscall_dup(int64_t fd) {
+#if defined(_WIN32)
+    return (int64_t)_dup((int)fd);
+#elif defined(MAKO_WASI)
+    (void)fd;
+    return -1;
+#else
+    return (int64_t)dup((int)fd);
+#endif
+}
+static inline int64_t mako_syscall_dup2(int64_t oldfd, int64_t newfd) {
+#if defined(_WIN32)
+    return _dup2((int)oldfd, (int)newfd) == 0 ? newfd : -1;
+#elif defined(MAKO_WASI)
+    (void)oldfd;
+    (void)newfd;
+    return -1;
+#else
+    return dup2((int)oldfd, (int)newfd) >= 0 ? newfd : -1;
+#endif
+}
+static inline int64_t mako_syscall_write(int64_t fd, MakoString data) {
+    if (fd < 0 || !data.data) return -1;
+#if defined(_WIN32)
+    int n = _write((int)fd, data.data, (unsigned)data.len);
+    return n >= 0 ? (int64_t)n : -1;
+#elif defined(MAKO_WASI)
+    (void)fd;
+    (void)data;
+    return -1;
+#else
+    ssize_t n = write((int)fd, data.data, data.len);
+    return n >= 0 ? (int64_t)n : -1;
+#endif
+}
+static inline MakoString mako_syscall_read(int64_t fd, int64_t maxn) {
+    if (fd < 0 || maxn <= 0) return mako_str_from_cstr("");
+    if (maxn > 1 << 20) maxn = 1 << 20;
+    char *buf = (char *)malloc((size_t)maxn + 1);
+    if (!buf) return mako_str_from_cstr("");
+#if defined(_WIN32)
+    int n = _read((int)fd, buf, (unsigned)maxn);
+#elif defined(MAKO_WASI)
+    int n = -1;
+    (void)fd;
+#else
+    ssize_t n = read((int)fd, buf, (size_t)maxn);
+#endif
+    if (n <= 0) {
+        free(buf);
+        return mako_str_from_cstr("");
+    }
+    buf[n] = 0;
+    MakoString out = {buf, (size_t)n};
+    return out;
+}
+static inline int64_t mako_syscall_access(MakoString path, int64_t mode) {
+    /* mode: 0=F_OK, 1=X_OK, 2=W_OK, 4=R_OK (unix values) */
+    if (!path.data) return -1;
+#if defined(_WIN32)
+    int m = 0;
+    if (mode & 4) m |= 04;
+    if (mode & 2) m |= 02;
+    return _access(path.data, m) == 0 ? 0 : -1;
+#elif defined(MAKO_WASI)
+    (void)path;
+    (void)mode;
+    return -1;
+#else
+    return access(path.data, (int)mode) == 0 ? 0 : -1;
+#endif
+}
+static inline int64_t mako_syscall_chmod(MakoString path, int64_t mode) {
+    if (!path.data) return -1;
+#if defined(_WIN32)
+    return _chmod(path.data, (int)mode) == 0 ? 0 : -1;
+#elif defined(MAKO_WASI)
+    (void)path;
+    (void)mode;
+    return -1;
+#else
+    return chmod(path.data, (mode_t)mode) == 0 ? 0 : -1;
+#endif
+}
+static inline int64_t mako_syscall_symlink(MakoString target, MakoString linkpath) {
+#if defined(_WIN32) || defined(MAKO_WASI)
+    (void)target;
+    (void)linkpath;
+    return -1;
+#else
+    if (!target.data || !linkpath.data) return -1;
+    return symlink(target.data, linkpath.data) == 0 ? 0 : -1;
+#endif
+}
+static inline MakoString mako_syscall_readlink(MakoString path) {
+#if defined(_WIN32) || defined(MAKO_WASI)
+    (void)path;
+    return mako_str_from_cstr("");
+#else
+    if (!path.data) return mako_str_from_cstr("");
+    char buf[4096];
+    ssize_t n = readlink(path.data, buf, sizeof(buf) - 1);
+    if (n < 0) return mako_str_from_cstr("");
+    buf[n] = 0;
+    return mako_str_from_cstr(buf);
+#endif
+}
+static inline int64_t mako_syscall_getrlimit_nofile(void) {
+#if defined(_WIN32) || defined(MAKO_WASI)
+    return -1;
+#else
+    struct rlimit rl;
+    if (getrlimit(RLIMIT_NOFILE, &rl) != 0) return -1;
+    return (int64_t)rl.rlim_cur;
+#endif
+}
+static inline int64_t mako_syscall_setrlimit_nofile(int64_t n) {
+#if defined(_WIN32) || defined(MAKO_WASI)
+    (void)n;
+    return -1;
+#else
+    struct rlimit rl;
+    if (getrlimit(RLIMIT_NOFILE, &rl) != 0) return -1;
+    rl.rlim_cur = (rlim_t)n;
+    if (rl.rlim_cur > rl.rlim_max) rl.rlim_cur = rl.rlim_max;
+    return setrlimit(RLIMIT_NOFILE, &rl) == 0 ? 0 : -1;
+#endif
 }
 
 /* ---- sync (mutex) ---- */

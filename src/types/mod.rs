@@ -1249,6 +1249,204 @@ impl TypeChecker {
             Type::Fn(vec![Type::Int], Box::new(Type::String)),
         );
         fns.insert("time_unix".into(), Type::Fn(vec![], Box::new(Type::Int)));
+        // Full time: calendar, parse, duration
+        for name in [
+            "time_year",
+            "time_month",
+            "time_day",
+            "time_hour",
+            "time_minute",
+            "time_second",
+            "time_millisecond",
+            "time_weekday",
+            "time_yearday",
+            "time_trunc_day",
+            "time_trunc_hour",
+            "time_since_ms",
+            "time_until_ms",
+        ] {
+            fns.insert(
+                name.into(),
+                Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+            );
+        }
+        fns.insert(
+            "time_date".into(),
+            Type::Fn(
+                vec![
+                    Type::Int,
+                    Type::Int,
+                    Type::Int,
+                    Type::Int,
+                    Type::Int,
+                    Type::Int,
+                    Type::Int,
+                ],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "time_add_ms".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "time_sub_ms".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "time_after".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "time_before".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "time_equal".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "time_local_offset_sec".into(),
+            Type::Fn(vec![], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "time_format_local".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::String)),
+        );
+        fns.insert(
+            "time_format_date".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::String)),
+        );
+        fns.insert(
+            "time_format_clock".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::String)),
+        );
+        fns.insert(
+            "time_parse_rfc3339".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "time_parse_date".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
+        for name in [
+            "duration_ms",
+            "duration_us_as_ms",
+            "duration_seconds",
+            "duration_minutes",
+            "duration_hours",
+            "duration_days",
+            "duration_to_seconds",
+            "duration_to_minutes",
+            "duration_to_hours",
+        ] {
+            fns.insert(
+                name.into(),
+                Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+            );
+        }
+        fns.insert(
+            "duration_string".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::String)),
+        );
+        // Full syscall
+        fns.insert(
+            "syscall_available".into(),
+            Type::Fn(vec![], Box::new(Type::Int)),
+        );
+        for name in [
+            "syscall_getpid",
+            "syscall_getppid",
+            "syscall_getuid",
+            "syscall_geteuid",
+            "syscall_getgid",
+            "syscall_getegid",
+            "syscall_errno",
+            "syscall_pagesize",
+            "syscall_ncpu",
+            "syscall_getrlimit_nofile",
+            "syscall_pipe",
+            "syscall_pipe_read_fd",
+            "syscall_pipe_write_fd",
+        ] {
+            fns.insert(name.into(), Type::Fn(vec![], Box::new(Type::Int)));
+        }
+        fns.insert(
+            "syscall_hostname".into(),
+            Type::Fn(vec![], Box::new(Type::String)),
+        );
+        fns.insert(
+            "syscall_uname_sysname".into(),
+            Type::Fn(vec![], Box::new(Type::String)),
+        );
+        fns.insert(
+            "syscall_uname_release".into(),
+            Type::Fn(vec![], Box::new(Type::String)),
+        );
+        fns.insert(
+            "syscall_uname_machine".into(),
+            Type::Fn(vec![], Box::new(Type::String)),
+        );
+        fns.insert(
+            "syscall_uname_json".into(),
+            Type::Fn(vec![], Box::new(Type::String)),
+        );
+        fns.insert(
+            "syscall_errno_str".into(),
+            Type::Fn(vec![], Box::new(Type::String)),
+        );
+        fns.insert(
+            "syscall_kill".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "syscall_umask".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "syscall_isatty".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "syscall_close".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "syscall_dup".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "syscall_dup2".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "syscall_write".into(),
+            Type::Fn(vec![Type::Int, Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "syscall_read".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::String)),
+        );
+        fns.insert(
+            "syscall_access".into(),
+            Type::Fn(vec![Type::String, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "syscall_chmod".into(),
+            Type::Fn(vec![Type::String, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "syscall_symlink".into(),
+            Type::Fn(vec![Type::String, Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "syscall_readlink".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::String)),
+        );
+        fns.insert(
+            "syscall_setrlimit_nofile".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
         fns.insert("mutex_new".into(), Type::Fn(vec![], Box::new(Type::Mutex)));
         fns.insert(
             "mutex_lock".into(),
@@ -6765,6 +6963,129 @@ impl TypeChecker {
             "queue_popped_str".into(),
             Type::Fn(vec![], Box::new(Type::String)),
         );
+        // Richer collections: set / heap / ring / stats
+        fns.insert(
+            "list_sum_int".into(),
+            Type::Fn(vec![Type::Array(Box::new(Type::Int))], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "list_min_int".into(),
+            Type::Fn(vec![Type::Array(Box::new(Type::Int))], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "list_max_int".into(),
+            Type::Fn(vec![Type::Array(Box::new(Type::Int))], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "list_concat_int".into(),
+            Type::Fn(
+                vec![
+                    Type::Array(Box::new(Type::Int)),
+                    Type::Array(Box::new(Type::Int)),
+                ],
+                Box::new(Type::Array(Box::new(Type::Int))),
+            ),
+        );
+        fns.insert(
+            "list_concat_str".into(),
+            Type::Fn(
+                vec![
+                    Type::Array(Box::new(Type::String)),
+                    Type::Array(Box::new(Type::String)),
+                ],
+                Box::new(Type::Array(Box::new(Type::String))),
+            ),
+        );
+        fns.insert(
+            "list_binary_search_int".into(),
+            Type::Fn(
+                vec![Type::Array(Box::new(Type::Int)), Type::Int],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "set_union_int".into(),
+            Type::Fn(
+                vec![
+                    Type::Array(Box::new(Type::Int)),
+                    Type::Array(Box::new(Type::Int)),
+                ],
+                Box::new(Type::Array(Box::new(Type::Int))),
+            ),
+        );
+        fns.insert(
+            "set_intersect_int".into(),
+            Type::Fn(
+                vec![
+                    Type::Array(Box::new(Type::Int)),
+                    Type::Array(Box::new(Type::Int)),
+                ],
+                Box::new(Type::Array(Box::new(Type::Int))),
+            ),
+        );
+        fns.insert(
+            "set_diff_int".into(),
+            Type::Fn(
+                vec![
+                    Type::Array(Box::new(Type::Int)),
+                    Type::Array(Box::new(Type::Int)),
+                ],
+                Box::new(Type::Array(Box::new(Type::Int))),
+            ),
+        );
+        fns.insert(
+            "set_has_int".into(),
+            Type::Fn(
+                vec![Type::Array(Box::new(Type::Int)), Type::Int],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "heap_push_int".into(),
+            Type::Fn(
+                vec![Type::Array(Box::new(Type::Int)), Type::Int],
+                Box::new(Type::Array(Box::new(Type::Int))),
+            ),
+        );
+        fns.insert(
+            "heap_pop_int".into(),
+            Type::Fn(
+                vec![Type::Array(Box::new(Type::Int))],
+                Box::new(Type::Array(Box::new(Type::Int))),
+            ),
+        );
+        fns.insert(
+            "heap_popped_int".into(),
+            Type::Fn(vec![], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "heap_peek_int".into(),
+            Type::Fn(vec![Type::Array(Box::new(Type::Int))], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "list_eq_int".into(),
+            Type::Fn(
+                vec![
+                    Type::Array(Box::new(Type::Int)),
+                    Type::Array(Box::new(Type::Int)),
+                ],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "list_fill_int".into(),
+            Type::Fn(
+                vec![Type::Int, Type::Int],
+                Box::new(Type::Array(Box::new(Type::Int))),
+            ),
+        );
+        fns.insert(
+            "list_range_int".into(),
+            Type::Fn(
+                vec![Type::Int, Type::Int],
+                Box::new(Type::Array(Box::new(Type::Int))),
+            ),
+        );
         fns.insert(
             "embed_file".into(),
             Type::Fn(vec![Type::String], Box::new(Type::String)),
@@ -8035,6 +8356,16 @@ impl TypeChecker {
         fns.insert("plugin_last_error".into(), Type::Fn(vec![], Box::new(Type::Int)));
         fns.insert("plugin_last_error_str".into(), Type::Fn(vec![], Box::new(Type::String)));
         fns.insert("plugin_call_ok".into(), Type::Fn(vec![Type::Int], Box::new(Type::Int)));
+        fns.insert("plugin_last_log".into(), Type::Fn(vec![], Box::new(Type::String)));
+        fns.insert("plugin_last_log_level".into(), Type::Fn(vec![], Box::new(Type::Int)));
+        fns.insert("plugin_log_count".into(), Type::Fn(vec![], Box::new(Type::Int)));
+        fns.insert("plugin_reload".into(), Type::Fn(vec![Type::Int], Box::new(Type::Int)));
+        fns.insert("plugin_find".into(), Type::Fn(vec![Type::String], Box::new(Type::Int)));
+        fns.insert("plugin_manifest_artifact".into(), Type::Fn(vec![Type::String], Box::new(Type::String)));
+        fns.insert("plugin_manifest_lib_path".into(), Type::Fn(vec![Type::String], Box::new(Type::String)));
+        fns.insert("plugin_open_manifest".into(), Type::Fn(vec![Type::String], Box::new(Type::Int)));
+        fns.insert("plugin_call1".into(), Type::Fn(vec![Type::Int, Type::String], Box::new(Type::String)));
+        fns.insert("plugin_info_json".into(), Type::Fn(vec![Type::Int], Box::new(Type::String)));
         fns.insert("ffi_abi_name".into(), Type::Fn(vec![], Box::new(Type::String)));
 
         fns.insert(

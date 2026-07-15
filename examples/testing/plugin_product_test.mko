@@ -1,0 +1,86 @@
+// Plugin product: build native dylib, load, call ops, meta, reload.
+
+fn write_plugin_src(path: string) -> int {
+    let body = "#include \"mako_plugin.h\"\n#include <stdlib.h>\n#include <string.h>\n"
+        + "static const MakoPluginHost *HOST = NULL;\n"
+        + "static int32_t plugin_init(const MakoPluginHost *host) {\n"
+        + "  HOST = host;\n"
+        + "  if (HOST && HOST->log) HOST->log(1, mako_str_view(\"demo: init\", 10));\n"
+        + "  return 0;\n}\n"
+        + "static void plugin_shutdown(void) { HOST = NULL; }\n"
+        + "static MakoString plugin_call(MakoString op, MakoString payload) {\n"
+        + "  if (op.len == 4 && memcmp(op.data, \"ping\", 4) == 0) return mako_str_from_cstr(\"pong\");\n"
+        + "  if (op.len == 7 && memcmp(op.data, \"version\", 7) == 0) return mako_str_from_cstr(\"1.0.0\");\n"
+        + "  if (op.len == 4 && memcmp(op.data, \"echo\", 4) == 0) {\n"
+        + "    char *d = (char*)malloc(payload.len + 1); if (!d) return mako_str_from_cstr(\"\");\n"
+        + "    memcpy(d, payload.data, payload.len); d[payload.len] = 0;\n"
+        + "    MakoString o = {d, payload.len}; return o;\n"
+        + "  }\n"
+        + "  return mako_str_from_cstr(\"demo: ok\");\n}\n"
+        + "static void plugin_free_string(MakoString v) { free(v.data); }\n"
+        + "static const MakoPluginVTable VTABLE = {\n"
+        + "  MAKO_PLUGIN_ABI_VERSION,\n"
+        + "  { MAKO_PLUGIN_ABI_VERSION, MAKO_PLUGIN_API_VERSION, \"demo\", \"1.0.0\", \"native\" },\n"
+        + "  plugin_init, plugin_shutdown, plugin_call, plugin_free_string\n};\n"
+        + "MAKO_PLUGIN_EXPORT const MakoPluginVTable *mako_plugin_entry(void) { return &VTABLE; }\n"
+    return write_file(path, body)
+}
+
+fn TestPluginProductLive() {
+    let dir = "/tmp/mako_plugin_product_test"
+    let _ = mkdir(dir)
+    let src = dir + "/plugin.c"
+    let so = dir + "/libdemo.dylib"
+    // On Linux use .so — try both via path after build
+    let so_linux = dir + "/libdemo.so"
+    assert_eq(write_plugin_src(src), 0)
+    // Locate runtime headers
+    let mut rt = env_get("MAKO_RUNTIME")
+    if len(rt) == 0 {
+        rt = "runtime"
+    }
+    let cmd = "cc -std=c11 -fPIC -shared -I" + rt + " " + src + " -o " + so + " 2>/dev/null || "
+        + "cc -std=c11 -fPIC -shared -I" + rt + " " + src + " -o " + so_linux
+    let out = exec_output(cmd)
+    let mut lib = so
+    if !file_exists(so) {
+        lib = so_linux
+    }
+    if !file_exists(lib) {
+        // Soft skip if compiler unavailable
+        assert(true)
+        return
+    }
+    let h = plugin_open(lib)
+    assert(h >= 0)
+    assert_eq(plugin_alive(h), 1)
+    assert_eq_str(plugin_name(h), "demo")
+    assert_eq_str(plugin_version(h), "1.0.0")
+    assert_eq_str(plugin_kind(h), "native")
+    assert_eq(plugin_plugin_abi(h), 1)
+    assert(str_contains(plugin_path(h), "libdemo"))
+    assert(plugin_log_count() >= 1)
+    assert(str_contains(plugin_last_log(), "init"))
+    assert_eq_str(plugin_call1(h, "ping"), "pong")
+    assert_eq_str(plugin_call(h, "echo", "xyz"), "xyz")
+    assert_eq_str(plugin_call1(h, "version"), "1.0.0")
+    let info = plugin_info_json(h)
+    assert(str_contains(info, "demo"))
+    assert_eq(plugin_find("demo"), h)
+    assert_eq(plugin_find("nope"), -1)
+    // reload
+    let h2 = plugin_reload(h)
+    assert(h2 >= 0)
+    assert_eq_str(plugin_call1(h2, "ping"), "pong")
+    assert_eq(plugin_close(h2), 1)
+    assert_eq(plugin_close_all(), 0)
+}
+
+fn TestPluginManifestParse() {
+    let path = "/tmp/mako_plugin_manifest_test.toml"
+    let body = "name = \"demo\"\nkind = \"native\"\nartifact = \"target/libdemo.so\"\n"
+    assert_eq(write_file(path, body), 0)
+    assert_eq_str(plugin_manifest_artifact(path), "target/libdemo.so")
+    let full = plugin_manifest_lib_path(path)
+    assert(str_contains(full, "libdemo.so"))
+}

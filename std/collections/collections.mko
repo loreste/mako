@@ -1,7 +1,5 @@
-// std/collections — List[T] helpers + richer slice/set/stack/queue surface.
-// List[T] is a language alias for []T; int/string specializations below.
+// std/collections — List[T], set, heap, ring, stack/queue, stats
 
-// Sort / membership (existing)
 fn sort_i(a: []int) -> []int { return sort_ints(a) }
 fn sort_s(a: []string) -> []string { return sort_strings(a) }
 fn has_int(a: []int, v: int) -> bool { return ints_contains(a, v) }
@@ -10,8 +8,6 @@ fn copy_ints(a: []int) -> []int { return ints_copy(a) }
 fn copy_strs(a: []string) -> []string { return strings_copy(a) }
 fn index_of(a: []int, v: int) -> int { return ints_index(a, v) }
 fn index_of_str(a: []string, v: string) -> int { return strings_index(a, v) }
-
-// Reverse / unique
 fn reverse_i(a: []int) -> []int { return slices_reverse(a) }
 fn reverse_s(a: []string) -> []string { return slices_reverse_strs(a) }
 fn unique_i(a: []int) -> []int { return slices_unique(a) }
@@ -27,6 +23,14 @@ fn list_len(a: []int) -> int { return list_len_int(a) }
 fn list_clear(a: []int) -> []int { return list_clear_int(a) }
 fn list_insert(a: []int, i: int, v: int) -> []int { return list_insert_int(a, i, v) }
 fn list_remove(a: []int, i: int) -> []int { return list_remove_int(a, i) }
+fn list_sum(a: []int) -> int { return list_sum_int(a) }
+fn list_min(a: []int) -> int { return list_min_int(a) }
+fn list_max(a: []int) -> int { return list_max_int(a) }
+fn list_concat(a: []int, b: []int) -> []int { return list_concat_int(a, b) }
+fn list_eq(a: []int, b: []int) -> int { return list_eq_int(a, b) }
+fn list_fill(n: int, v: int) -> []int { return list_fill_int(n, v) }
+fn list_range(start: int, end: int) -> []int { return list_range_int(start, end) }
+fn list_bsearch(a: []int, v: int) -> int { return list_binary_search_int(a, v) }
 
 // List[string]
 fn list_new_s() -> []string { return list_new_str() }
@@ -38,13 +42,32 @@ fn list_len_s(a: []string) -> int { return list_len_str(a) }
 fn list_clear_s(a: []string) -> []string { return list_clear_str(a) }
 fn list_insert_s(a: []string, i: int, v: string) -> []string { return list_insert_str(a, i, v) }
 fn list_remove_s(a: []string, i: int) -> []string { return list_remove_str(a, i) }
+fn list_concat_s(a: []string, b: []string) -> []string { return list_concat_str(a, b) }
 
-// Stack (LIFO) — push via list_push, pop via list_pop + list_popped
+// Stack / queue
 fn stack_peek(a: []int) -> int { return stack_peek_int(a) }
 fn stack_peek_s(a: []string) -> string { return stack_peek_str(a) }
-
-// Queue (FIFO) — enqueue via list_push, dequeue via queue_pop + queue_popped
 fn queue_pop(a: []int) -> []int { return queue_pop_int(a) }
 fn queue_popped() -> int { return queue_popped_int() }
 fn queue_pop_s(a: []string) -> []string { return queue_pop_str(a) }
 fn queue_popped_s() -> string { return queue_popped_str() }
+
+// Set (sorted unique []int)
+fn set_union(a: []int, b: []int) -> []int { return set_union_int(a, b) }
+fn set_intersect(a: []int, b: []int) -> []int { return set_intersect_int(a, b) }
+fn set_diff(a: []int, b: []int) -> []int { return set_diff_int(a, b) }
+fn set_has(a: []int, v: int) -> int { return set_has_int(a, v) }
+
+// Min-heap
+fn heap_push(a: []int, v: int) -> []int { return heap_push_int(a, v) }
+fn heap_pop(a: []int) -> []int { return heap_pop_int(a) }
+fn heap_popped() -> int { return heap_popped_int() }
+fn heap_peek(a: []int) -> int { return heap_peek_int(a) }
+
+// Ring buffer (product lock-free ring in runtime)
+fn new_ring(cap: int) -> int { return ring_new(cap) }
+fn push_ring(id: int, v: int) -> int { return ring_push(id, v) }
+fn pop_ring(id: int) -> int { return ring_pop(id) }
+fn peek_ring(id: int) -> int { return ring_peek(id) }
+fn len_ring(id: int) -> int { return ring_len(id) }
+fn cap_ring(id: int) -> int { return ring_cap(id) }

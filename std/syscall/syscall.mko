@@ -1,4 +1,40 @@
-// std/syscall — seed (raw host escape; prefer higher-level packs)
-fn available() -> bool {
-    return true
-}
+// std/syscall — full portable OS primitives (not arbitrary raw syscall numbers)
+
+fn available() -> int { return syscall_available() }
+fn getpid() -> int { return syscall_getpid() }
+fn getppid() -> int { return syscall_getppid() }
+fn getuid() -> int { return syscall_getuid() }
+fn geteuid() -> int { return syscall_geteuid() }
+fn getgid() -> int { return syscall_getgid() }
+fn getegid() -> int { return syscall_getegid() }
+fn hostname() -> string { return syscall_hostname() }
+fn uname_sysname() -> string { return syscall_uname_sysname() }
+fn uname_release() -> string { return syscall_uname_release() }
+fn uname_machine() -> string { return syscall_uname_machine() }
+fn uname_json() -> string { return syscall_uname_json() }
+fn errno() -> int { return syscall_errno() }
+fn errno_str() -> string { return syscall_errno_str() }
+fn kill(pid: int, sig: int) -> int { return syscall_kill(pid, sig) }
+fn umask(mask: int) -> int { return syscall_umask(mask) }
+fn pagesize() -> int { return syscall_pagesize() }
+fn ncpu() -> int { return syscall_ncpu() }
+fn isatty(fd: int) -> int { return syscall_isatty(fd) }
+fn pipe() -> int { return syscall_pipe() }
+fn pipe_read_fd() -> int { return syscall_pipe_read_fd() }
+fn pipe_write_fd() -> int { return syscall_pipe_write_fd() }
+fn close(fd: int) -> int { return syscall_close(fd) }
+fn dup(fd: int) -> int { return syscall_dup(fd) }
+fn dup2(oldfd: int, newfd: int) -> int { return syscall_dup2(oldfd, newfd) }
+fn write(fd: int, data: string) -> int { return syscall_write(fd, data) }
+fn read(fd: int, maxn: int) -> string { return syscall_read(fd, maxn) }
+fn access(path: string, mode: int) -> int { return syscall_access(path, mode) }
+fn chmod(path: string, mode: int) -> int { return syscall_chmod(path, mode) }
+fn symlink(target: string, linkpath: string) -> int { return syscall_symlink(target, linkpath) }
+fn readlink(path: string) -> string { return syscall_readlink(path) }
+fn getrlimit_nofile() -> int { return syscall_getrlimit_nofile() }
+fn setrlimit_nofile(n: int) -> int { return syscall_setrlimit_nofile(n) }
+// cwd/chdir/env (builtins are getcwd/chdir/env_get/env_set)
+fn cwd() -> string { return getcwd() }
+fn chdir_to(path: string) -> int { return chdir(path) }
+fn getenv(k: string) -> string { return env_get(k) }
+fn setenv(k: string, v: string) -> int { return env_set(k, v) }
