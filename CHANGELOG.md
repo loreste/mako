@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### P3 packaging · P4 storage · ShareInt capture · debug locals
+
+- **Storage seed:** `page_alloc` / `page_read` / `page_write` / `page_free` ·
+  `wal_open` / `wal_append` / `wal_sync` / `wal_read_at` / `wal_next_off` /
+  `wal_close` (`storage_wal_test`).
+- **ShareInt capture:** closures capture RC handles for shared mutation
+  (`share_capture_test`).
+- **Debug locals:** `debug_set_int` / `debug_get_int` / `debug_locals_json` ·
+  soft BP ids `debug_bp_enable` / `debug_bp` / `debug_bp_disable`.
+- **Packaging seeds:** `scripts/package-deb.sh` · `package-rpm.sh` ·
+  `validate-matrix.sh` · `packaging/winget/` · Homebrew formula homepage.
+- Lambda block bodies chain side effects via C comma operator.
+
 ### Language — f-string format flag parity
 
 - Int flags: `+` / ` ` (sign), `#` (0x/0X/0/0b), `-` left-align, `0` zero-pad.

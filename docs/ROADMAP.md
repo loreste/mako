@@ -16,7 +16,7 @@ STATUS north-star / MVP: **100%**. Prefer STATUS over this list when claiming Do
 | Scope | Approx. |
 |-------|---------|
 | MVP / STATUS north-star | **100%** |
-| General-purpose intention (weighted tracks below) | **~90%** |
+| General-purpose intention (weighted tracks below) | **~92%** |
 | Mako identity (preferred syntax) | **~90%** |
 | Standard library (target areas) | **~98%** |
 
@@ -158,7 +158,7 @@ not the language identity.
 Checklist for **100% of the product intention**, not the MVP/STATUS bar.  
 Percentages are weighted; update when a task flips.
 
-**Overall intention completion:** **~90% / 100%**  
+**Overall intention completion:** **~92% / 100%**  
 **Mako identity (preferred syntax):** **~90%** — [IDENTITY.md](IDENTITY.md).
 
 | Track | Weight | Current |
@@ -170,9 +170,9 @@ Percentages are weighted; update when a task flips.
 | 5. API protocols and networking | 10% | **100%** |
 | 6. Data, SQL, and serialization | 10% | **100%** |
 | 7. Toolchain, packages, and IDE | 10% | **100%** |
-| 8. Observability and debugging | 8% | **78%** |
-| 9. Installer, distribution, and portability | 10% | 77% |
-| 10. Domain tracks and advanced systems | 10% | **70%** |
+| 8. Observability and debugging | 8% | **82%** |
+| 9. Installer, distribution, and portability | 10% | **85%** |
+| 10. Domain tracks and advanced systems | 10% | **78%** |
 
 ### 1. Language identity and core type system — 10%
 
@@ -278,9 +278,10 @@ Percentages are weighted; update when a task flips.
 - [x] Cross-target flag · WASI preview1/2 seeds · static defaults · container/serverless helpers.
 - [x] Stable ABI, dynamic libraries, native plugins, WASM plugins.
 - [x] Installer manifest + doctor host/header checks (`install-manifest.json` seed).
-- [ ] Complete installer UX for macOS, Linux, and Windows.
-- [ ] Windows MSI / winget · macOS pkg/notarized · Linux deb/rpm + repo · Homebrew publish automation.
-- [ ] Reliable Linux/macOS/Windows/FreeBSD matrix · ARM/x86-64/RISC-V validation.
+- [x] Packaging seeds: `package-deb.sh` · `package-rpm.sh` · `packaging/winget/` · `Formula/mako.rb` · `validate-matrix.sh`.
+- [ ] Complete installer UX for macOS, Linux, and Windows (MSI / notarized pkg polish).
+- [ ] homebrew-core / winget-pkgs publish automation (external).
+- [ ] CI multi-OS matrix green on FreeBSD / RISC-V hosts.
 - [ ] Console/platform-specific toolchain path where licensing permits.
 
 ### 10. Domain tracks and advanced systems — 10%
@@ -294,7 +295,8 @@ Percentages are weighted; update when a task flips.
 - [ ] Telecom/realtime full product stacks (SIP/RTP/SRTP **crypto blocks Done**; SIPREC/Diameter/WebRTC residual).
 - [ ] Graphics/windowing · backends · shaders · assets · audio · physics.
 - [ ] Multiplayer game networking.
-- [ ] Database/storage primitives: pages, WAL, indexes, cache, transactions.
+- [x] Storage page + WAL append log seeds (`page_*` / `wal_*`).
+- [ ] Storage depth: indexes, cache, transactions, LSM/B-tree product.
 - [ ] AI inference service helpers; GPU AI depth (batched GEMM, RoPE, KV-cache, f16 kernels).
 - [ ] More quant formats · optional large-LLM FFI · tokenizer parity · embedding gather.
 - [ ] GPU backends: Metal-native, CUDA, Vulkan behind same API.
