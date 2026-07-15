@@ -62,7 +62,7 @@ Work below is **not** MVP. Order is product leverage, not strict dependency.
 
 Highest remaining risk for production backends.
 
-1. Portable timeouts and deadlines across task / channel / network APIs  
+1. ~~Portable timeouts and deadlines across task / channel / network APIs~~ **Done seed** — `ch.send_timeout` / `recv_timeout` / `try_recv`, `job.join_deadline`, `deadline_remaining_ms` (`timeout_portable_test`)  
 2. Structured error propagation from child tasks (`kick` / crew)  
 3. Explicit detached-task syntax and lifecycle controls  
 4. First-class `actor` / `receive` syntax with owned state (beyond runtime seed)

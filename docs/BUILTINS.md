@@ -344,6 +344,7 @@ config/log updates. Tests: `examples/testing/fs_storage_test.mko`.
 | `elapsed_ms` | `elapsed_ms(start) -> int` | Wall ms elapsed (legacy; prefer `elapsed_mono_ms`) |
 | `deadline_ns` / `deadline_ms` | `(timeout) -> int` | Monotonic deadline = now + timeout |
 | `deadline_remaining_ns` | `(deadline) -> int` | Ns left until deadline (0 if expired) |
+| `deadline_remaining_ms` | `(deadline) -> int` | Ms left until deadline (0 if expired) |
 | `deadline_expired` | `(deadline) -> int` | `1` if mono now ≥ deadline |
 | `sleep_ns` / `sleep_us` / `sleep_ms` | `(n) -> void` | High-res sleep (`nanosleep`; short sleeps may oversleep) |
 | `sleep_until_ns` | `(deadline) -> void` | Hybrid sleep + final spin to mono deadline |
@@ -836,6 +837,8 @@ application code. See `examples/testing/scram_test.mko` (RFC 7677 §3 vector),
 | `chan_new` | `chan_new(capacity: int) -> chan[int]` | Create a new buffered int channel |
 | `chan_open[T]` | `chan_open[T](capacity: int) -> chan[T]` | Typed channel (see element types below) |
 | `chan_try_send` | `chan_try_send(ch: chan[int], val: int) -> int` | Non-blocking int send; **1** queued, **0** full/closed |
+| `chan_send_timeout` | `chan_send_timeout(ch, val, ms) -> int` | Timed send; **1** ok, **0** timeout, **-1** closed |
+| `chan_recv_timeout` | `chan_recv_timeout(ch, ms) -> Result[int, string]` | Timed recv; `Ok(v)` / `Err("timeout"\|"closed")` |
 | `chan_str_send_take` | `chan_str_send_take(ch: chan[string], v: string) -> int` | Blocking move-send (no clone); **1** ok, **0** closed |
 | `chan_str_try_send_take` | `chan_str_try_send_take(ch: chan[string], v: string) -> int` | Non-blocking move-send; **1** queued, **0** full/closed (consumes `v`) |
 | `chan_len` | `chan_len(ch: chan[int]) -> int` | Return the number of items in the channel |
@@ -877,6 +880,9 @@ Tests: `chan_struct_test`, `chan_make_struct_test`, `chan_float_test`,
 | `t.kick(f(args…))` | Spawn on crew; returns `Job[R]` |
 | `job.join()` / `join(job)` | Wait for result of type `R` |
 | `job.join_timeout(ms)` | Timed join → **`Result[R, string]`** (`Ok`/`Err("timeout")`). If `R` is already `Result[T, string]`, **flattens** (no nest). |
+| `job.join_deadline(dl)` | Same as `join_timeout`, but `dl` is absolute mono deadline from `deadline_ms`/`deadline_ns` |
+| `ch.send_timeout(v, ms)` / `ch.try_send(v)` | Timed / non-blocking send (`int` channels); **1**/**0**/**-1** |
+| `ch.recv_timeout(ms)` / `ch.try_recv()` | Timed / non-blocking recv → **`Result[int, string]`** (`timeout` / `closed` / `empty`) |
 | `t.drain(ms)` / `crew_drain` | Cancel + join with timeout budget |
 | `t.cancel()` / `t.cancelled()` | Cooperative cancel flag |
 | `fan(xs, \|x\| …)` | Parallel map over array |

@@ -1,0 +1,94 @@
+// Portable timeouts: channel send/recv timeout, join_deadline, deadline_remaining_ms.
+
+fn slow() -> int {
+    sleep_ms(500)
+    return 1
+}
+
+fn quick() -> int {
+    return 42
+}
+
+fn TestChanRecvTimeoutHit() {
+    let ch = chan_open[int](1)
+    let _ = ch.send(7)
+    match ch.recv_timeout(100) {
+        Ok(v) => assert_eq(v, 7),
+        Err(_) => assert(false),
+    }
+    ch.close()
+}
+
+fn TestChanRecvTimeoutMiss() {
+    let ch = chan_open[int](1)
+    match ch.recv_timeout(30) {
+        Ok(_) => assert(false),
+        Err(msg) => assert_eq_str(msg, "timeout"),
+    }
+    ch.close()
+}
+
+fn TestChanSendTimeoutFull() {
+    let ch = chan_open[int](1)
+    assert(ch.send(1))
+    // channel full — timed send should fail with timeout
+    let rc = ch.send_timeout(2, 40)
+    assert_eq(rc, 0)
+    ch.close()
+}
+
+fn TestChanTryRecvEmpty() {
+    let ch = chan_open[int](1)
+    match ch.try_recv() {
+        Ok(_) => assert(false),
+        Err(msg) => assert_eq_str(msg, "empty"),
+    }
+    let _ = ch.send(9)
+    match ch.try_recv() {
+        Ok(v) => assert_eq(v, 9),
+        Err(_) => assert(false),
+    }
+    ch.close()
+}
+
+fn TestChanSendTimeoutFreeFn() {
+    let ch = chan_open[int](2)
+    assert_eq(chan_send_timeout(ch, 3, 50), 1)
+    match chan_recv_timeout(ch, 50) {
+        Ok(v) => assert_eq(v, 3),
+        Err(_) => assert(false),
+    }
+    ch.close()
+}
+
+fn TestJoinDeadlineOk() {
+    crew t {
+        let j = t.kick(quick())
+        let dl = deadline_ms(500)
+        match j.join_deadline(dl) {
+            Ok(v) => assert_eq(v, 42),
+            Err(_) => assert(false),
+        }
+    }
+}
+
+fn TestJoinDeadlineMiss() {
+    crew t {
+        let j = t.kick(slow())
+        let dl = deadline_ms(40)
+        match j.join_deadline(dl) {
+            Ok(_) => assert(false),
+            Err(msg) => assert_eq_str(msg, "timeout"),
+        }
+    }
+}
+
+fn TestDeadlineRemainingMs() {
+    let dl = deadline_ms(200)
+    let left = deadline_remaining_ms(dl)
+    assert(left > 0)
+    assert(left <= 200)
+    sleep_ms(220)
+    assert_eq(deadline_remaining_ms(dl), 0)
+    assert_eq(deadline_expired(dl), 1)
+}

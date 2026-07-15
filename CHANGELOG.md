@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Runtime trust — portable timeouts (P1 seed)
+
+- **`ch.send_timeout(v, ms)` / `ch.try_send(v)`** — timed / non-blocking int send.
+- **`ch.recv_timeout(ms)` / `ch.try_recv()`** → `Result[int, string]`
+  (`timeout` / `closed` / `empty`).
+- **`job.join_deadline(dl)`** — join against absolute mono deadline from
+  `deadline_ms` / `deadline_ns`.
+- **`deadline_remaining_ms`**, free `chan_send_timeout` / `chan_recv_timeout`.
+- Timed waits use short sleep slices (no busy-spin).
+- Tests: `timeout_portable_test`.
+
 ### Runtime / codegen — speed & memory
 
 - **`f"…"`** builds with a single `MakoStrBuilder` (`write_cstr` / `write_i64` /

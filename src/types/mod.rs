@@ -767,8 +767,27 @@ impl TypeChecker {
             Type::Fn(vec![Type::Int], Box::new(Type::Int)),
         );
         fns.insert(
+            "deadline_remaining_ms".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
             "deadline_expired".into(),
             Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        // Timed channel ops (int ring): 1 ok, 0 timeout, -1 closed
+        fns.insert(
+            "chan_send_timeout".into(),
+            Type::Fn(
+                vec![Type::Chan(Box::new(Type::Int)), Type::Int, Type::Int],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "chan_recv_timeout".into(),
+            Type::Fn(
+                vec![Type::Chan(Box::new(Type::Int)), Type::Int],
+                Box::new(Type::Result(Box::new(Type::Int), Box::new(Type::String))),
+            ),
         );
         fns.insert(
             "sleep_ns".into(),
@@ -12594,6 +12613,84 @@ impl TypeChecker {
                                 Box::new(Type::String),
                             )),
                         }
+                    }
+                    (Type::Job(inner), "join_deadline") => {
+                        if args.len() != 1 {
+                            return Err(TypeError::new(
+                                "job.join_deadline takes a mono deadline (from deadline_ms/ns)",
+                            ));
+                        }
+                        let _ = self.check_expr(&args[0])?;
+                        match inner.as_ref() {
+                            Type::Result(ok, err)
+                                if matches!(err.as_ref(), Type::String) =>
+                            {
+                                Ok(Type::Result(ok.clone(), err.clone()))
+                            }
+                            other => Ok(Type::Result(
+                                Box::new(other.clone()),
+                                Box::new(Type::String),
+                            )),
+                        }
+                    }
+                    (Type::Chan(elem), "send_timeout") => {
+                        if args.len() != 2 {
+                            return Err(TypeError::new(
+                                "ch.send_timeout(val, timeout_ms) takes value and ms",
+                            ));
+                        }
+                        let vt = self.check_expr(&args[0])?;
+                        let mt = self.check_expr(&args[1])?;
+                        if !self.compatible(&vt, elem) {
+                            return Err(TypeError::new(format!(
+                                "send_timeout value: expected {}, got {}",
+                                elem.display(),
+                                vt.display()
+                            )));
+                        }
+                        if !matches!(mt, Type::Int | Type::Int64 | Type::Int32) {
+                            return Err(TypeError::new("send_timeout ms must be int"));
+                        }
+                        Ok(Type::Int)
+                    }
+                    (Type::Chan(elem), "recv_timeout") => {
+                        if args.len() != 1 {
+                            return Err(TypeError::new(
+                                "ch.recv_timeout(timeout_ms) takes milliseconds",
+                            ));
+                        }
+                        let mt = self.check_expr(&args[0])?;
+                        if !matches!(mt, Type::Int | Type::Int64 | Type::Int32) {
+                            return Err(TypeError::new("recv_timeout ms must be int"));
+                        }
+                        // Ok(value) / Err("timeout"|"closed")
+                        Ok(Type::Result(
+                            Box::new(elem.as_ref().clone()),
+                            Box::new(Type::String),
+                        ))
+                    }
+                    (Type::Chan(elem), "try_send") => {
+                        if args.len() != 1 {
+                            return Err(TypeError::new("ch.try_send(val) takes one value"));
+                        }
+                        let vt = self.check_expr(&args[0])?;
+                        if !self.compatible(&vt, elem) {
+                            return Err(TypeError::new(format!(
+                                "try_send value: expected {}, got {}",
+                                elem.display(),
+                                vt.display()
+                            )));
+                        }
+                        Ok(Type::Int)
+                    }
+                    (Type::Chan(elem), "try_recv") => {
+                        if !args.is_empty() {
+                            return Err(TypeError::new("ch.try_recv() takes no arguments"));
+                        }
+                        Ok(Type::Result(
+                            Box::new(elem.as_ref().clone()),
+                            Box::new(Type::String),
+                        ))
                     }
                     (Type::Interface { name: iname }, m) => {
                         let Some(iface) = self.interfaces.iter().find(|i| i.name == *iname) else {

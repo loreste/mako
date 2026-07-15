@@ -41,8 +41,33 @@ features (NLL, structured crews, parameterized DB) are free at steady state.
 | `fmt_sprintf*` | Prefer when you need format verbs; fewer pieces than a long f-string |
 | `chan[Struct]` / `chan[tuple]` / `chan[Enum]` | Ptr ring; payload boxes via **size freelist** (≤512B) to cut malloc churn |
 | Demand-driven map monomorphs | Emit only used `(K,V)` shapes — O(used), not N² |
+| Timed chan / join | `send_timeout` / `recv_timeout` / `join_timeout` / `join_deadline` — **2ms sleep slices**, no busy-spin |
 
 Capturing closures (env boxes) stay residual until they can pay for themselves.
+
+### Portable timeouts (runtime trust seed)
+
+```mko
+// Relative
+match ch.recv_timeout(50) {
+    Ok(v) => { /* … */ },
+    Err(msg) => { /* "timeout" or "closed" */ },
+}
+match job.join_timeout(100) {
+    Ok(v) => { /* … */ },
+    Err(_) => { /* "timeout" */ },
+}
+
+// Absolute mono deadline (compose with mono_* budgets)
+let dl = deadline_ms(200)
+match job.join_deadline(dl) {
+    Ok(v) => { /* … */ },
+    Err(_) => { /* deadline hit */ },
+}
+assert(deadline_remaining_ms(dl) >= 0)
+```
+
+Tests: `timeout_portable_test.mko`. Prefer **mono** `deadline_*` for budgets; wall `now_ms` only for logs.
 
 ---
 

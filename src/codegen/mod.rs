@@ -11708,6 +11708,33 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                                 format!("mako_chan_try_send({ch}, {value})"),
                             );
                         }
+                        "chan_send_timeout" => {
+                            let (_, ch) = self.emit_expr(&args[0]);
+                            let (_, value) = self.emit_expr(&args[1]);
+                            let (_, ms) = self.emit_expr(&args[2]);
+                            return (
+                                "int64_t".into(),
+                                format!("mako_chan_send_timeout({ch}, {value}, {ms})"),
+                            );
+                        }
+                        "chan_recv_timeout" => {
+                            let (_, ch) = self.emit_expr(&args[0]);
+                            let (_, ms) = self.emit_expr(&args[1]);
+                            let outv = self.fresh("crto");
+                            let rc = self.fresh("crrc");
+                            let tmp = self.fresh("crtr");
+                            self.line(&format!("int64_t {outv} = 0;"));
+                            self.line(&format!(
+                                "int64_t {rc} = mako_chan_recv_timeout({ch}, &{outv}, {ms});"
+                            ));
+                            self.line(&format!("MakoResultInt {tmp};"));
+                            self.line(&format!(
+                                "if ({rc} == 1) {{ {tmp} = mako_ok_int({outv}); }} \
+                                 else if ({rc} == 0) {{ {tmp} = mako_err_int(mako_str_from_cstr(\"timeout\")); }} \
+                                 else {{ {tmp} = mako_err_int(mako_str_from_cstr(\"closed\")); }}"
+                            ));
+                            return ("MakoResultInt".into(), tmp);
+                        }
                         "chan_str_send_take" => {
                             let (_, ch) = self.emit_expr(&args[0]);
                             let (_, value) = self.emit_expr(&args[1]);
@@ -11806,6 +11833,14 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             let tmp = self.fresh("dlr");
                             self.line(&format!(
                                 "int64_t {tmp} = mako_deadline_remaining_ns({d});"
+                            ));
+                            return ("int64_t".into(), tmp);
+                        }
+                        "deadline_remaining_ms" => {
+                            let (_, d) = self.emit_expr(&args[0]);
+                            let tmp = self.fresh("dlrm");
+                            self.line(&format!(
+                                "int64_t {tmp} = mako_deadline_remaining_ms({d});"
                             ));
                             return ("int64_t".into(), tmp);
                         }
@@ -25624,6 +25659,37 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         }
                         ("bool".into(), tmp)
                     }
+                    "send_timeout" | "try_send" => {
+                        let (vty, v) = self.emit_expr(&args[0]);
+                        let ms = if method == "try_send" {
+                            "0".into()
+                        } else {
+                            let (_, m) = self.emit_expr(&args[1]);
+                            m
+                        };
+                        let tmp = self.fresh("sto");
+                        let is_f64 = vty == "double"
+                            || matches!(receiver.as_ref(), Expr::Ident(n) if self.chan_float.contains(n))
+                            || self.chan_float.contains(&rv);
+                        if rty == "MakoChan*" || rty.starts_with("MakoChan") {
+                            if is_f64 {
+                                self.line(&format!(
+                                    "int64_t {tmp} = mako_chan_send_timeout({rv}, mako_f64_to_bits({v}), {ms});"
+                                ));
+                            } else if method == "try_send" {
+                                self.line(&format!(
+                                    "int64_t {tmp} = mako_chan_try_send({rv}, {v});"
+                                ));
+                            } else {
+                                self.line(&format!(
+                                    "int64_t {tmp} = mako_chan_send_timeout({rv}, {v}, {ms});"
+                                ));
+                            }
+                        } else {
+                            self.line(&format!("int64_t {tmp} = 0; /* send_timeout: unsupported chan */"));
+                        }
+                        ("int64_t".into(), tmp)
+                    }
                     "recv" => {
                         let tmp = self.fresh("rv");
                         if rty == "MakoChanStr*" {
@@ -25678,6 +25744,41 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             }
                         }
                     }
+                    "recv_timeout" | "try_recv" => {
+                        // Result[int, string]: Ok(v) / Err("timeout"|"closed"|"empty")
+                        let ms = if method == "try_recv" {
+                            "0".into()
+                        } else {
+                            let (_, m) = self.emit_expr(&args[0]);
+                            m
+                        };
+                        let outv = self.fresh("rto");
+                        let rc = self.fresh("rrc");
+                        let tmp = self.fresh("rtr");
+                        self.line(&format!("int64_t {outv} = 0;"));
+                        if method == "try_recv" {
+                            self.line(&format!(
+                                "int64_t {rc} = mako_chan_try_recv({rv}, &{outv});"
+                            ));
+                            // try_recv: 0 empty → Err("empty"); 1 → Ok
+                            self.line(&format!("MakoResultInt {tmp};"));
+                            self.line(&format!(
+                                "if ({rc}) {{ {tmp} = mako_ok_int({outv}); }} \
+                                 else {{ {tmp} = mako_err_int(mako_str_from_cstr(\"empty\")); }}"
+                            ));
+                        } else {
+                            self.line(&format!(
+                                "int64_t {rc} = mako_chan_recv_timeout({rv}, &{outv}, {ms});"
+                            ));
+                            self.line(&format!("MakoResultInt {tmp};"));
+                            self.line(&format!(
+                                "if ({rc} == 1) {{ {tmp} = mako_ok_int({outv}); }} \
+                                 else if ({rc} == 0) {{ {tmp} = mako_err_int(mako_str_from_cstr(\"timeout\")); }} \
+                                 else {{ {tmp} = mako_err_int(mako_str_from_cstr(\"closed\")); }}"
+                            ));
+                        }
+                        ("MakoResultInt".into(), tmp)
+                    }
                     "close" => {
                         if rty == "MakoChanStr*" {
                             self.line(&format!("mako_chan_str_close({rv});"));
@@ -25712,8 +25813,8 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         .unwrap_or_else(|| "int64_t".into());
                         self.emit_job_join(&rv, &ret_ty)
                     }
-                    "join_timeout" => {
-                        let (_, ms) = self.emit_expr(&args[0]);
+                    "join_timeout" | "join_deadline" => {
+                        let (_, ms_or_dl) = self.emit_expr(&args[0]);
                         let ret_ty = match receiver.as_ref() {
                             Expr::Ident(n) => self.job_rets.get(n).cloned(),
                             _ => self.job_rets.get(&rv).cloned(),
@@ -25724,9 +25825,15 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         let ok = self.fresh("jok");
                         let tmp = self.fresh("jtr");
                         self.line(&format!("int64_t {out} = 0;"));
-                        self.line(&format!(
-                            "int64_t {ok} = mako_await_timeout_ms({rv}, {ms}, &{out});"
-                        ));
+                        if method == "join_deadline" {
+                            self.line(&format!(
+                                "int64_t {ok} = mako_await_deadline_ns({rv}, {ms_or_dl}, &{out});"
+                            ));
+                        } else {
+                            self.line(&format!(
+                                "int64_t {ok} = mako_await_timeout_ms({rv}, {ms_or_dl}, &{out});"
+                            ));
+                        }
                         self.line(&format!("MakoResultInt {tmp};"));
                         if ret_ty == "MakoString" {
                             self.line(&format!(
@@ -25735,11 +25842,6 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                                  else {{ {tmp} = mako_err_int(mako_str_from_cstr(\"timeout\")); }}"
                             ));
                         } else if ret_ty == "MakoResultInt" {
-                            // Nest: Ok(inner Result) packs via value pointer? Keep simple:
-                            // on success return the job Result as the outer Result itself
-                            // (flatten) so callers match Ok/Err for job outcome; on timeout Err.
-                            // Null box after "done" is a runtime fault — report as timeout-class Err
-                            // so callers never match an empty stringly Err by accident.
                             self.line(&format!(
                                 "if ({ok}) {{ MakoResultInt *p = (MakoResultInt*)(intptr_t){out}; \
                                  if (p) {{ {tmp} = *p; free(p); }} else {{ {tmp} = mako_err_int(mako_str_from_cstr(\"timeout\")); }} }} \

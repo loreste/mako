@@ -3879,6 +3879,58 @@ static inline int64_t mako_chan_try_recv(MakoChan *c, int64_t *out) {
     return 1;
 }
 
+/* Timed send/recv (portable; short nanosleep slices — no busy-spin).
+ * Returns: 1 success, 0 timeout, -1 closed (or closed empty on recv). */
+static inline int64_t mako_chan_send_timeout(MakoChan *c, int64_t v, int64_t timeout_ms) {
+    if (!c) return -1;
+    struct timeval start, now;
+    mako_gettimeofday(&start, NULL);
+    for (;;) {
+        if (mako_chan_try_send(c, v)) return 1;
+        pthread_mutex_lock(&c->mu);
+        int closed = c->closed ? 1 : 0;
+        pthread_mutex_unlock(&c->mu);
+        if (closed) return -1;
+        if (timeout_ms >= 0) {
+            mako_gettimeofday(&now, NULL);
+            int64_t elapsed =
+                (now.tv_sec - start.tv_sec) * 1000 +
+                (now.tv_usec - start.tv_usec) / 1000;
+            if (elapsed >= timeout_ms) {
+                mako_rt_counter_inc(&mako_rt_channel_select_timeouts);
+                return 0;
+            }
+        }
+        struct timespec ts = {0, 2000000L}; /* 2ms */
+        nanosleep(&ts, NULL);
+    }
+}
+
+static inline int64_t mako_chan_recv_timeout(MakoChan *c, int64_t *out, int64_t timeout_ms) {
+    if (!c) return -1;
+    struct timeval start, now;
+    mako_gettimeofday(&start, NULL);
+    for (;;) {
+        if (mako_chan_try_recv(c, out)) return 1;
+        pthread_mutex_lock(&c->mu);
+        int closed_empty = (c->count == 0 && c->closed) ? 1 : 0;
+        pthread_mutex_unlock(&c->mu);
+        if (closed_empty) return -1;
+        if (timeout_ms >= 0) {
+            mako_gettimeofday(&now, NULL);
+            int64_t elapsed =
+                (now.tv_sec - start.tv_sec) * 1000 +
+                (now.tv_usec - start.tv_usec) / 1000;
+            if (elapsed >= timeout_ms) {
+                mako_rt_counter_inc(&mako_rt_channel_select_timeouts);
+                return 0;
+            }
+        }
+        struct timespec ts = {0, 2000000L};
+        nanosleep(&ts, NULL);
+    }
+}
+
 /* Select between two channels with timeout_ms.
  * Returns 0 if a ready, 1 if b ready, -1 on timeout.
  * Value available via mako_chan_select_value(). */
@@ -6712,8 +6764,18 @@ static inline int64_t mako_deadline_remaining_ns(int64_t deadline_mono_ns) {
     return left < 0 ? 0 : left;
 }
 
+static inline int64_t mako_deadline_remaining_ms(int64_t deadline_mono_ns) {
+    return mako_deadline_remaining_ns(deadline_mono_ns) / 1000000LL;
+}
+
 static inline int64_t mako_deadline_expired(int64_t deadline_mono_ns) {
     return mako_mono_ns() >= deadline_mono_ns ? 1 : 0;
+}
+
+/* Join until absolute mono-ns deadline (from deadline_ms / deadline_ns). */
+static inline int64_t mako_await_deadline_ns(MakoTask *t, int64_t deadline_mono_ns, int64_t *out) {
+    int64_t left_ms = mako_deadline_remaining_ms(deadline_mono_ns);
+    return mako_await_timeout_ms(t, left_ms, out);
 }
 
 /* High-resolution sleep (nanosleep loop). For <~50µs, OS may oversleep —
