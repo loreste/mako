@@ -16,7 +16,7 @@ STATUS north-star / MVP: **100%**. Prefer STATUS over this list when claiming Do
 | Scope | Approx. |
 |-------|---------|
 | MVP / STATUS north-star | **100%** |
-| General-purpose intention (weighted tracks below) | **~95%** |
+| General-purpose intention (weighted tracks below) | **~96%** |
 | Mako identity (preferred syntax) | **~90%** |
 | Standard library (target areas) | **~98%** |
 
@@ -94,7 +94,7 @@ Metrics/prom + span-lite JSON are in; **depth seeds landed** (2026-07-14).
 ### P4 — Domain & advanced systems
 
 1. Telecom/realtime — SIP/RTP/SRTP seeds exist; **SIPREC/WebRTC out of scope** (user)  
-2. ~~Storage: pages, WAL, hindex, store, btree, LSM, MVCC~~ **Done seed** — `domain_tracks_test` · `store_index_test`  
+2. ~~Storage product seeds~~ **Done seed** — page/WAL/hindex/store + btree save/load + SST + pcache + MVCC GC (`storage_depth_test`)  
 3. ~~Graphics/audio/physics soft seeds~~ **Done seed** — `gfx_*` / `audio_mix` / `physics_step_*`  
 4. ~~Multiplayer snapshot + rollback ring~~ **Done seed** — `snap_*` / `rollback_*`  
 5. ~~GPU AI depth seeds~~ **Done seed** — `gemm2x2` / RoPE / `kv_cache_*` / f16 bits (host); Metal/CUDA residual  
@@ -158,7 +158,7 @@ not the language identity.
 Checklist for **100% of the product intention**, not the MVP/STATUS bar.  
 Percentages are weighted; update when a task flips.
 
-**Overall intention completion:** **~95% / 100%**  
+**Overall intention completion:** **~96% / 100%**  
 **Mako identity (preferred syntax):** **~90%** — [IDENTITY.md](IDENTITY.md).
 
 | Track | Weight | Current |
@@ -172,7 +172,7 @@ Percentages are weighted; update when a task flips.
 | 7. Toolchain, packages, and IDE | 10% | **100%** |
 | 8. Observability and debugging | 8% | **86%** |
 | 9. Installer, distribution, and portability | 10% | **88%** |
-| 10. Domain tracks and advanced systems | 10% | **92%** |
+| 10. Domain tracks and advanced systems | 10% | **95%** |
 
 ### 1. Language identity and core type system — 10%
 
@@ -298,12 +298,13 @@ Percentages are weighted; update when a task flips.
 - [x] Graphics/audio/physics soft seeds (`gfx_*`, `audio_mix`, `physics_step_*`).
 - [x] Multiplayer snapshot + rollback ring seeds (`snap_*`, `rollback_*`).
 - [x] Storage page/WAL/hindex/store + btree/LSM/MVCC seeds.
+- [x] On-disk btree save/load · sorted SST · page cache LRU · MVCC GC · SIMD dot/sum seed.
 - [x] GPU AI depth host seeds (RoPE, KV-cache, gemm2x2, f16 bits) + OpenCL matmul.
-- [ ] Storage product: on-disk B-tree, full LSM SST, page cache, MVCC GC.
+- [ ] Storage product polish: multi-level LSM compaction, crash recovery, page-backed btree.
 - [ ] Real windowing backends / GPU shaders / asset pipelines.
 - [ ] Full multiplayer netcode product.
 - [ ] More quant formats · Metal-native / CUDA / Vulkan backends.
-- [ ] SIMD portable vector APIs.
+- [x] SIMD portable seed (`simd_dot_i64_4` / `simd_sum_i64_4` — autovec-friendly).
 - [ ] Interop beyond C · hot code reload · compile-time execution / safe domain extensions.
 
 ---

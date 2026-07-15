@@ -1522,6 +1522,23 @@ impl TypeChecker {
         fns.insert("btree_get".into(), Type::Fn(vec![Type::Named("BTree".into()), Type::Int], Box::new(Type::Int)));
         fns.insert("btree_len".into(), Type::Fn(vec![Type::Named("BTree".into())], Box::new(Type::Int)));
         fns.insert("btree_free".into(), Type::Fn(vec![Type::Named("BTree".into())], Box::new(Type::Int)));
+
+        fns.insert("btree_save".into(), Type::Fn(vec![Type::Named("BTree".into()), Type::String], Box::new(Type::Int)));
+        fns.insert("btree_load".into(), Type::Fn(vec![Type::String], Box::new(Type::Named("BTree".into()))));
+        fns.insert("sst_build4".into(), Type::Fn(vec![Type::String, Type::Int, Type::Int, Type::Int, Type::Int, Type::Int, Type::Int, Type::Int, Type::Int], Box::new(Type::Named("Sst".into()))));
+        fns.insert("sst_get".into(), Type::Fn(vec![Type::Named("Sst".into()), Type::Int], Box::new(Type::Int)));
+        fns.insert("sst_len".into(), Type::Fn(vec![Type::Named("Sst".into())], Box::new(Type::Int)));
+        fns.insert("sst_free".into(), Type::Fn(vec![Type::Named("Sst".into())], Box::new(Type::Int)));
+        fns.insert("pcache_new".into(), Type::Fn(vec![], Box::new(Type::Named("PageCache".into()))));
+        fns.insert("pcache_get".into(), Type::Fn(vec![Type::Named("PageCache".into()), Type::Int], Box::new(Type::Named("Page".into()))));
+        fns.insert("pcache_hits".into(), Type::Fn(vec![Type::Named("PageCache".into())], Box::new(Type::Int)));
+        fns.insert("pcache_misses".into(), Type::Fn(vec![Type::Named("PageCache".into())], Box::new(Type::Int)));
+        fns.insert("pcache_free".into(), Type::Fn(vec![Type::Named("PageCache".into())], Box::new(Type::Int)));
+        fns.insert("mvcc_gc".into(), Type::Fn(vec![Type::Named("Mvcc".into()), Type::Int], Box::new(Type::Int)));
+        fns.insert("mvcc_live".into(), Type::Fn(vec![Type::Named("Mvcc".into())], Box::new(Type::Int)));
+        fns.insert("simd_dot_i64_4".into(), Type::Fn(vec![Type::Int, Type::Int, Type::Int, Type::Int, Type::Int, Type::Int, Type::Int, Type::Int], Box::new(Type::Int)));
+        fns.insert("simd_sum_i64_4".into(), Type::Fn(vec![Type::Int, Type::Int, Type::Int, Type::Int], Box::new(Type::Int)));
+
         fns.insert("lsm_new".into(), Type::Fn(vec![Type::Int], Box::new(Type::Named("Lsm".into()))));
         fns.insert("lsm_attach_run".into(), Type::Fn(vec![Type::Named("Lsm".into()), Type::Named("Wal".into())], Box::new(Type::Int)));
         fns.insert("lsm_put".into(), Type::Fn(vec![Type::Named("Lsm".into()), Type::Int, Type::Int], Box::new(Type::Int)));

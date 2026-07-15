@@ -83,6 +83,7 @@ Last inventory: 2026-07-14 (**unique Mako surface** · pack/pull types · full m
 | Storage page + WAL seeds | Done seed — `storage_wal_test` |
 | Hash index + store txn + snap predict seeds | Done seed — `store_index_test` |
 | Domain tracks (btree/LSM/MVCC/rollback/gfx/AI/debug frame) | Done seed — `domain_tracks_test` (no SIPREC/WebRTC) |
+| Storage depth (btree disk, SST, pcache, mvcc_gc, simd) | Done seed — `storage_depth_test` |
 | ShareInt capture (shared mut via RC handle) | Done seed — `share_capture_test` |
 | Packaging seeds (deb/rpm/winget/matrix/homebrew) | Done seed — scripts + packaging/ |
 | Book samples `mako check` / `run` | PASS — `docs/book/examples/book_*.mko` |

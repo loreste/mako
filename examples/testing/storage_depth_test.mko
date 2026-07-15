@@ -1,0 +1,64 @@
+// Storage product depth: on-disk btree, SST, page cache, MVCC GC, SIMD seed.
+
+fn TestBTreeSaveLoad() {
+    let path = "/tmp/mako_btree_save.bin"
+    let t = btree_new()
+    assert_eq(btree_put(t, 30, 3), 0)
+    assert_eq(btree_put(t, 10, 1), 0)
+    assert_eq(btree_put(t, 20, 2), 0)
+    let n = btree_save(t, path)
+    assert(n >= 3)
+    assert_eq(btree_free(t), 0)
+    let t2 = btree_load(path)
+    assert_eq(btree_get(t2, 10), 1)
+    assert_eq(btree_get(t2, 20), 2)
+    assert_eq(btree_get(t2, 30), 3)
+    assert_eq(btree_free(t2), 0)
+}
+
+fn TestSstSortedGet() {
+    let path = "/tmp/mako_sst.bin"
+    // Unsorted insert order — SST sorts
+    let s = sst_build4(path, 40, 4, 10, 1, 30, 3, 20, 2)
+    assert_eq(sst_len(s), 4)
+    assert_eq(sst_get(s, 10), 1)
+    assert_eq(sst_get(s, 20), 2)
+    assert_eq(sst_get(s, 30), 3)
+    assert_eq(sst_get(s, 40), 4)
+    assert_eq(sst_get(s, 99), -1)
+    assert_eq(sst_free(s), 0)
+}
+
+fn TestPageCacheLru() {
+    let c = pcache_new()
+    let p0 = pcache_get(c, 0)
+    assert_eq(page_write(p0, 0, "a"), 1)
+    let p0b = pcache_get(c, 0)
+    assert_eq_str(page_read(p0b, 0, 1), "a")
+    assert(pcache_hits(c) >= 1)
+    assert(pcache_misses(c) >= 1)
+    let _ = pcache_get(c, 1)
+    assert(pcache_misses(c) >= 2)
+    assert_eq(pcache_free(c), 0)
+}
+
+fn TestMvccGc() {
+    let m = mvcc_new()
+    let _ = mvcc_put(m, 1, 10)
+    let _ = mvcc_put(m, 1, 20)
+    let _ = mvcc_put(m, 1, 30)
+    assert(mvcc_versions(m) >= 3)
+    let live_before = mvcc_live(m)
+    let dropped = mvcc_gc(m, 3) // drop superseded below ts 3
+    assert(dropped >= 1)
+    assert(mvcc_live(m) < live_before)
+    // Latest still readable at high ts
+    let r = mvcc_begin(m)
+    assert_eq(mvcc_get(m, r, 1), 30)
+    assert_eq(mvcc_free(m), 0)
+}
+
+fn TestSimdDotSum() {
+    assert_eq(simd_dot_i64_4(1, 2, 3, 4, 5, 6, 7, 8), 1*5+2*6+3*7+4*8)
+    assert_eq(simd_sum_i64_4(1, 2, 3, 4), 10)
+}

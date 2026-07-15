@@ -299,6 +299,326 @@ static inline int64_t mako_mvcc_free(MakoMvcc *m) {
     return 0;
 }
 
+/* Drop versions with ts < min_ts that are superseded (not the latest for key). */
+static inline int64_t mako_mvcc_gc(MakoMvcc *m, int64_t min_ts) {
+    if (!m || min_ts <= 0) return 0;
+    int dropped = 0;
+    for (int i = 0; i < m->n; i++) {
+        if (!m->vers[i].live || m->vers[i].ts >= min_ts) continue;
+        int64_t key = m->vers[i].key;
+        int64_t ts = m->vers[i].ts;
+        int has_newer = 0;
+        for (int j = 0; j < m->n; j++) {
+            if (m->vers[j].live && m->vers[j].key == key && m->vers[j].ts > ts) {
+                has_newer = 1;
+                break;
+            }
+        }
+        if (has_newer) {
+            m->vers[i].live = 0;
+            dropped++;
+        }
+    }
+    return dropped;
+}
+
+/* Collect live versions count. */
+static inline int64_t mako_mvcc_live(MakoMvcc *m) {
+    if (!m) return 0;
+    int64_t n = 0;
+    for (int i = 0; i < m->n; i++)
+        if (m->vers[i].live) n++;
+    return n;
+}
+
+/* ---- On-disk B-tree snapshot (sorted KV file) ---- */
+#define MAKO_BTREE_SAVE_MAX 4096
+
+static inline void mako_btree_collect(MakoBNode *n, int64_t *keys, int64_t *vals, int *out_n, int maxn) {
+    if (!n || *out_n >= maxn) return;
+    if (n->leaf) {
+        for (int i = 0; i < n->n && *out_n < maxn; i++) {
+            keys[*out_n] = n->keys[i];
+            vals[*out_n] = n->vals[i];
+            (*out_n)++;
+        }
+        return;
+    }
+    for (int i = 0; i < n->n; i++) {
+        mako_btree_collect(n->kids[i], keys, vals, out_n, maxn);
+        if (*out_n < maxn) {
+            keys[*out_n] = n->keys[i];
+            vals[*out_n] = n->vals[i];
+            (*out_n)++;
+        }
+    }
+    mako_btree_collect(n->kids[n->n], keys, vals, out_n, maxn);
+}
+
+/* Save as: [i64 count][count * (key,val)] little-endian-ish host layout. */
+static inline int64_t mako_btree_save(MakoBTree *t, MakoString path) {
+    if (!t || !path.data || path.len == 0 || path.len >= 500) return -1;
+#if defined(_WIN32)
+    return -1;
+#else
+    int64_t keys[MAKO_BTREE_SAVE_MAX];
+    int64_t vals[MAKO_BTREE_SAVE_MAX];
+    int n = 0;
+    mako_btree_collect(t->root, keys, vals, &n, MAKO_BTREE_SAVE_MAX);
+    char pbuf[512];
+    memcpy(pbuf, path.data, path.len);
+    pbuf[path.len] = 0;
+    int fd = open(pbuf, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (fd < 0) return -1;
+    int64_t count = n;
+    if (write(fd, &count, sizeof(count)) != (ssize_t)sizeof(count)) {
+        close(fd);
+        return -1;
+    }
+    for (int i = 0; i < n; i++) {
+        if (write(fd, &keys[i], sizeof(int64_t)) != (ssize_t)sizeof(int64_t)
+            || write(fd, &vals[i], sizeof(int64_t)) != (ssize_t)sizeof(int64_t)) {
+            close(fd);
+            return -1;
+        }
+    }
+    close(fd);
+    return count;
+#endif
+}
+
+static inline MakoBTree *mako_btree_load(MakoString path) {
+    if (!path.data || path.len == 0 || path.len >= 500) return NULL;
+#if defined(_WIN32)
+    return NULL;
+#else
+    char pbuf[512];
+    memcpy(pbuf, path.data, path.len);
+    pbuf[path.len] = 0;
+    int fd = open(pbuf, O_RDONLY);
+    if (fd < 0) return NULL;
+    int64_t count = 0;
+    if (read(fd, &count, sizeof(count)) != (ssize_t)sizeof(count) || count < 0
+        || count > MAKO_BTREE_SAVE_MAX) {
+        close(fd);
+        return NULL;
+    }
+    MakoBTree *t = mako_btree_new();
+    if (!t) {
+        close(fd);
+        return NULL;
+    }
+    for (int64_t i = 0; i < count; i++) {
+        int64_t k = 0, v = 0;
+        if (read(fd, &k, sizeof(k)) != (ssize_t)sizeof(k)
+            || read(fd, &v, sizeof(v)) != (ssize_t)sizeof(v)) {
+            mako_btree_free(t);
+            close(fd);
+            return NULL;
+        }
+        (void)mako_btree_put(t, k, v);
+    }
+    close(fd);
+    /* reset inflated count from puts */
+    t->count = count;
+    return t;
+#endif
+}
+
+/* ---- SST: sorted immutable run (binary file for binary search) ---- */
+typedef struct {
+    int64_t *keys;
+    int64_t *vals;
+    int64_t n;
+    char path[512];
+} MakoSst;
+
+/* Build SST from in-memory pairs (caller provides sorted or we sort). */
+static inline int mako_sst_cmp_i64(const void *a, const void *b) {
+    int64_t x = *(const int64_t *)a;
+    int64_t y = *(const int64_t *)b;
+    return (x > y) - (x < y);
+}
+
+typedef struct {
+    int64_t k, v;
+} MakoSstPair;
+
+static inline int mako_sst_cmp_pair(const void *a, const void *b) {
+    int64_t x = ((const MakoSstPair *)a)->k;
+    int64_t y = ((const MakoSstPair *)b)->k;
+    return (x > y) - (x < y);
+}
+
+static inline MakoSst *mako_sst_build(MakoString path, int64_t *keys, int64_t *vals, int64_t n) {
+    if (!path.data || path.len == 0 || path.len >= 500 || n < 0) return NULL;
+    MakoSst *s = (MakoSst *)calloc(1, sizeof(MakoSst));
+    if (!s) return NULL;
+    memcpy(s->path, path.data, path.len);
+    s->path[path.len] = 0;
+    s->n = n;
+    if (n == 0) {
+        s->keys = NULL;
+        s->vals = NULL;
+        return s;
+    }
+    MakoSstPair *pairs = (MakoSstPair *)malloc((size_t)n * sizeof(MakoSstPair));
+    if (!pairs) {
+        free(s);
+        return NULL;
+    }
+    for (int64_t i = 0; i < n; i++) {
+        pairs[i].k = keys[i];
+        pairs[i].v = vals[i];
+    }
+    qsort(pairs, (size_t)n, sizeof(MakoSstPair), mako_sst_cmp_pair);
+    s->keys = (int64_t *)malloc((size_t)n * sizeof(int64_t));
+    s->vals = (int64_t *)malloc((size_t)n * sizeof(int64_t));
+    if (!s->keys || !s->vals) {
+        free(pairs);
+        free(s->keys);
+        free(s->vals);
+        free(s);
+        return NULL;
+    }
+    for (int64_t i = 0; i < n; i++) {
+        s->keys[i] = pairs[i].k;
+        s->vals[i] = pairs[i].v;
+    }
+    free(pairs);
+#if !defined(_WIN32)
+    int fd = open(s->path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (fd >= 0) {
+        write(fd, &n, sizeof(n));
+        write(fd, s->keys, (size_t)n * sizeof(int64_t));
+        write(fd, s->vals, (size_t)n * sizeof(int64_t));
+        close(fd);
+    }
+#endif
+    return s;
+}
+
+/* Convenience: 4 fixed pairs for Mako without arrays. */
+static inline MakoSst *mako_sst_build4(
+    MakoString path,
+    int64_t k0, int64_t v0, int64_t k1, int64_t v1,
+    int64_t k2, int64_t v2, int64_t k3, int64_t v3
+) {
+    int64_t keys[4] = {k0, k1, k2, k3};
+    int64_t vals[4] = {v0, v1, v2, v3};
+    return mako_sst_build(path, keys, vals, 4);
+}
+
+static inline int64_t mako_sst_get(MakoSst *s, int64_t key) {
+    if (!s || !s->keys || s->n <= 0) return -1;
+    int64_t lo = 0, hi = s->n - 1;
+    while (lo <= hi) {
+        int64_t mid = lo + (hi - lo) / 2;
+        int64_t k = s->keys[mid];
+        if (k == key) return s->vals[mid];
+        if (k < key) lo = mid + 1;
+        else hi = mid - 1;
+    }
+    return -1;
+}
+
+static inline int64_t mako_sst_len(MakoSst *s) {
+    return s ? s->n : 0;
+}
+
+static inline int64_t mako_sst_free(MakoSst *s) {
+    if (!s) return 0;
+    free(s->keys);
+    free(s->vals);
+    free(s);
+    return 0;
+}
+
+/* ---- Page cache (LRU of fixed slots) ---- */
+#define MAKO_PCACHE_SLOTS 16
+
+typedef struct {
+    int64_t page_id;
+    MakoPage *page;
+    int64_t last_use;
+    int used;
+} MakoPCacheSlot;
+
+typedef struct {
+    MakoPCacheSlot slots[MAKO_PCACHE_SLOTS];
+    int64_t clock;
+    int64_t hits;
+    int64_t misses;
+} MakoPageCache;
+
+static inline MakoPageCache *mako_pcache_new(void) {
+    return (MakoPageCache *)calloc(1, sizeof(MakoPageCache));
+}
+
+static inline MakoPage *mako_pcache_get(MakoPageCache *c, int64_t page_id) {
+    if (!c || page_id < 0) return NULL;
+    for (int i = 0; i < MAKO_PCACHE_SLOTS; i++) {
+        if (c->slots[i].used && c->slots[i].page_id == page_id) {
+            c->slots[i].last_use = ++c->clock;
+            c->hits++;
+            return c->slots[i].page;
+        }
+    }
+    c->misses++;
+    /* allocate new page into LRU victim */
+    int vic = 0;
+    int64_t oldest = c->slots[0].used ? c->slots[0].last_use : -1;
+    for (int i = 0; i < MAKO_PCACHE_SLOTS; i++) {
+        if (!c->slots[i].used) {
+            vic = i;
+            oldest = -1;
+            break;
+        }
+        if (c->slots[i].last_use < oldest) {
+            oldest = c->slots[i].last_use;
+            vic = i;
+        }
+    }
+    if (c->slots[vic].used && c->slots[vic].page) {
+        mako_page_free(c->slots[vic].page);
+    }
+    MakoPage *p = mako_page_alloc(4096);
+    c->slots[vic].page = p;
+    c->slots[vic].page_id = page_id;
+    c->slots[vic].last_use = ++c->clock;
+    c->slots[vic].used = 1;
+    return p;
+}
+
+static inline int64_t mako_pcache_hits(MakoPageCache *c) {
+    return c ? c->hits : 0;
+}
+
+static inline int64_t mako_pcache_misses(MakoPageCache *c) {
+    return c ? c->misses : 0;
+}
+
+static inline int64_t mako_pcache_free(MakoPageCache *c) {
+    if (!c) return 0;
+    for (int i = 0; i < MAKO_PCACHE_SLOTS; i++) {
+        if (c->slots[i].used && c->slots[i].page) mako_page_free(c->slots[i].page);
+    }
+    free(c);
+    return 0;
+}
+
+/* ---- Portable SIMD-ish seed: scalar loop (autovec-friendly) ---- */
+static inline int64_t mako_simd_dot_i64_4(
+    int64_t a0, int64_t a1, int64_t a2, int64_t a3,
+    int64_t b0, int64_t b1, int64_t b2, int64_t b3
+) {
+    return a0 * b0 + a1 * b1 + a2 * b2 + a3 * b3;
+}
+
+static inline int64_t mako_simd_sum_i64_4(int64_t a0, int64_t a1, int64_t a2, int64_t a3) {
+    return a0 + a1 + a2 + a3;
+}
+
 /* ---- Multiplayer rollback ring ---- */
 #define MAKO_RB_MAX 64
 typedef struct {

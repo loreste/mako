@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Storage product depth
+
+- **`btree_save` / `btree_load`** — persist ordered KV snapshot to disk.
+- **SST:** `sst_build4` / `sst_get` / `sst_len` / `sst_free` (sorted run + binary search).
+- **Page cache:** `pcache_new` / `pcache_get` / hits·misses (16-slot LRU).
+- **MVCC GC:** `mvcc_gc(min_ts)` / `mvcc_live`.
+- **SIMD seed:** `simd_dot_i64_4` / `simd_sum_i64_4`.
+- Tests: `storage_depth_test`.
+
 ### Domain tracks batch (no SIPREC/WebRTC)
 
 - **B-tree** `btree_new` / `put` / `get` / `len` / `free` (fanout 8).

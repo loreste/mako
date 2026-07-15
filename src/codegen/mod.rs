@@ -8345,6 +8345,8 @@ impl Codegen {
                 "Rollback" => "MakoRollback*".into(),
                 "GfxWindow" => "MakoGfxWindow*".into(),
                 "KvCache" => "MakoKvCache*".into(),
+                "Sst" => "MakoSst*".into(),
+                "PageCache" => "MakoPageCache*".into(),
                 "EvLoop" => "MakoEvLoop*".into(),
                 "Buf" => "MakoBuf*".into(),
                 "GameUDP" => "MakoGameUDP*".into(),
@@ -12899,6 +12901,99 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             let (_, t) = self.emit_expr(&args[0]);
                             return ("int64_t".into(), format!("mako_btree_free({t})"));
                         }
+
+                        "btree_save" => {
+                            let (_, t) = self.emit_expr(&args[0]);
+                            let (_, p) = self.emit_expr(&args[1]);
+                            return ("int64_t".into(), format!("mako_btree_save({t}, {p})"));
+                        }
+                        "btree_load" => {
+                            let (_, p) = self.emit_expr(&args[0]);
+                            let tmp = self.fresh("btl");
+                            self.line(&format!("MakoBTree *{tmp} = mako_btree_load({p});"));
+                            return ("MakoBTree*".into(), tmp);
+                        }
+                        "sst_build4" => {
+                            let (_, path) = self.emit_expr(&args[0]);
+                            let (_, k0) = self.emit_expr(&args[1]);
+                            let (_, v0) = self.emit_expr(&args[2]);
+                            let (_, k1) = self.emit_expr(&args[3]);
+                            let (_, v1) = self.emit_expr(&args[4]);
+                            let (_, k2) = self.emit_expr(&args[5]);
+                            let (_, v2) = self.emit_expr(&args[6]);
+                            let (_, k3) = self.emit_expr(&args[7]);
+                            let (_, v3) = self.emit_expr(&args[8]);
+                            let tmp = self.fresh("sst");
+                            self.line(&format!(
+                                "MakoSst *{tmp} = mako_sst_build4({path}, {k0}, {v0}, {k1}, {v1}, {k2}, {v2}, {k3}, {v3});"
+                            ));
+                            return ("MakoSst*".into(), tmp);
+                        }
+                        "sst_get" => {
+                            let (_, s) = self.emit_expr(&args[0]);
+                            let (_, k) = self.emit_expr(&args[1]);
+                            return ("int64_t".into(), format!("mako_sst_get({s}, {k})"));
+                        }
+                        "sst_len" => {
+                            let (_, s) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_sst_len({s})"));
+                        }
+                        "sst_free" => {
+                            let (_, s) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_sst_free({s})"));
+                        }
+                        "pcache_new" => {
+                            let tmp = self.fresh("pc");
+                            self.line(&format!("MakoPageCache *{tmp} = mako_pcache_new();"));
+                            return ("MakoPageCache*".into(), tmp);
+                        }
+                        "pcache_get" => {
+                            let (_, c) = self.emit_expr(&args[0]);
+                            let (_, id) = self.emit_expr(&args[1]);
+                            let tmp = self.fresh("pg");
+                            self.line(&format!("MakoPage *{tmp} = mako_pcache_get({c}, {id});"));
+                            return ("MakoPage*".into(), tmp);
+                        }
+                        "pcache_hits" => {
+                            let (_, c) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_pcache_hits({c})"));
+                        }
+                        "pcache_misses" => {
+                            let (_, c) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_pcache_misses({c})"));
+                        }
+                        "pcache_free" => {
+                            let (_, c) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_pcache_free({c})"));
+                        }
+                        "mvcc_gc" => {
+                            let (_, m) = self.emit_expr(&args[0]);
+                            let (_, ts) = self.emit_expr(&args[1]);
+                            return ("int64_t".into(), format!("mako_mvcc_gc({m}, {ts})"));
+                        }
+                        "mvcc_live" => {
+                            let (_, m) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_mvcc_live({m})"));
+                        }
+                        "simd_dot_i64_4" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            let (_, a1) = self.emit_expr(&args[1]);
+                            let (_, a2) = self.emit_expr(&args[2]);
+                            let (_, a3) = self.emit_expr(&args[3]);
+                            let (_, b0) = self.emit_expr(&args[4]);
+                            let (_, b1) = self.emit_expr(&args[5]);
+                            let (_, b2) = self.emit_expr(&args[6]);
+                            let (_, b3) = self.emit_expr(&args[7]);
+                            return ("int64_t".into(), format!("mako_simd_dot_i64_4({a0},{a1},{a2},{a3},{b0},{b1},{b2},{b3})"));
+                        }
+                        "simd_sum_i64_4" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            let (_, a1) = self.emit_expr(&args[1]);
+                            let (_, a2) = self.emit_expr(&args[2]);
+                            let (_, a3) = self.emit_expr(&args[3]);
+                            return ("int64_t".into(), format!("mako_simd_sum_i64_4({a0},{a1},{a2},{a3})"));
+                        }
+
                         "lsm_new" => {
                             let (_, c) = self.emit_expr(&args[0]);
                             let tmp = self.fresh("lsm");
