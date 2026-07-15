@@ -254,9 +254,226 @@ static inline int mako_sip_header_line_is(
     return 0;
 }
 
+/* ---- Zero-copy header/body views (hot path; no malloc) ----
+ * Locate APIs return pointers into msg.data (valid while msg buffer lives).
+ * Thread-local "last view" for Mako-friendly sip_header_view + sip_view_*.
+ */
+
+typedef struct {
+    const char *ptr;
+    size_t len;
+    const char *base;
+    size_t base_len;
+} MakoSipView;
+
+static __thread MakoSipView mako_sip_tls_view = {NULL, 0, NULL, 0};
+
+static inline void mako_sip_view_set(const char *base, size_t blen, const char *p, size_t n) {
+    mako_sip_tls_view.base = base;
+    mako_sip_tls_view.base_len = blen;
+    mako_sip_tls_view.ptr = p;
+    mako_sip_tls_view.len = n;
+}
+
+static inline void mako_sip_view_clear(void) {
+    mako_sip_tls_view.ptr = NULL;
+    mako_sip_tls_view.len = 0;
+    mako_sip_tls_view.base = NULL;
+    mako_sip_tls_view.base_len = 0;
+}
+
+/* Locate nth header value as contiguous first-line slice (after ':' LWS, before CRLF).
+ * Folded continuations are NOT included (use sip_header_n for full owned fold).
+ * Returns 1 and sets *out_p/*out_n; 0 if missing. Zero malloc. */
+static inline int mako_sip_header_locate_n(
+    MakoString msg, MakoString name, int64_t idx, const char **out_p, size_t *out_n
+) {
+    if (out_p) *out_p = NULL;
+    if (out_n) *out_n = 0;
+    if (!msg.data || !name.data || name.len == 0 || idx < 0) return 0;
+    size_t he = 0;
+    if (!mako_sip_body_start(msg.data, msg.len, &he)) return 0;
+    const char *p = msg.data;
+    const char *hend = msg.data + he;
+    const char *crlf = mako_sip_find_crlf(p, hend);
+    if (!crlf) return 0;
+    p = crlf + 2;
+    int64_t seen = 0;
+    while (p < hend) {
+        if (p[0] == '\r' && p + 1 < hend && p[1] == '\n') break;
+        const char *le = mako_sip_find_crlf(p, hend);
+        if (!le) break;
+        size_t llen = (size_t)(le - p);
+        if (llen > 0 && (p[0] == ' ' || p[0] == '\t')) {
+            p = le + 2;
+            continue;
+        }
+        if (mako_sip_header_line_is(p, llen, name.data, name.len)) {
+            if (seen == idx) {
+                const char *colon = p;
+                while (colon < le && *colon != ':') colon++;
+                if (colon >= le) return 0;
+                colon++;
+                while (colon < le && (*colon == ' ' || *colon == '\t')) colon++;
+                /* first-line value only (zero-copy contiguous) */
+                const char *vend = le;
+                while (vend > colon && (vend[-1] == ' ' || vend[-1] == '\t')) vend--;
+                if (out_p) *out_p = colon;
+                if (out_n) *out_n = (size_t)(vend - colon);
+                return 1;
+            }
+            seen++;
+        }
+        p = le + 2;
+    }
+    return 0;
+}
+
+static inline int mako_sip_header_locate(
+    MakoString msg, MakoString name, const char **out_p, size_t *out_n
+) {
+    return mako_sip_header_locate_n(msg, name, 0, out_p, out_n);
+}
+
+/* Set TLS view to header value; return 1 if found. Hot path for proxies. */
+static inline int64_t mako_sip_header_view(MakoString msg, MakoString name) {
+    const char *p = NULL;
+    size_t n = 0;
+    if (!mako_sip_header_locate(msg, name, &p, &n)) {
+        mako_sip_view_clear();
+        return 0;
+    }
+    mako_sip_view_set(msg.data, msg.len, p, n);
+    return 1;
+}
+
+static inline int64_t mako_sip_header_view_n(MakoString msg, MakoString name, int64_t idx) {
+    const char *p = NULL;
+    size_t n = 0;
+    if (!mako_sip_header_locate_n(msg, name, idx, &p, &n)) {
+        mako_sip_view_clear();
+        return 0;
+    }
+    mako_sip_view_set(msg.data, msg.len, p, n);
+    return 1;
+}
+
+/* Body as zero-copy view into msg (TLS). */
+static inline int64_t mako_sip_body_view(MakoString msg) {
+    if (!msg.data) {
+        mako_sip_view_clear();
+        return 0;
+    }
+    size_t he = 0;
+    const char *b = mako_sip_body_start(msg.data, msg.len, &he);
+    if (!b) {
+        mako_sip_view_clear();
+        return 0;
+    }
+    size_t blen = msg.len - (size_t)(b - msg.data);
+    mako_sip_view_set(msg.data, msg.len, b, blen);
+    return 1;
+}
+
+/* Method token as zero-copy view (requests only). */
+static inline int64_t mako_sip_method_view(MakoString msg) {
+    if (!mako_sip_is_request(msg)) {
+        mako_sip_view_clear();
+        return 0;
+    }
+    const char *p = msg.data;
+    const char *end = msg.data + msg.len;
+    const char *sp = p;
+    while (sp < end && *sp != ' ' && *sp != '\r' && *sp != '\n') sp++;
+    mako_sip_view_set(msg.data, msg.len, p, (size_t)(sp - p));
+    return 1;
+}
+
+static inline int64_t mako_sip_view_len(void) {
+    return (int64_t)mako_sip_tls_view.len;
+}
+
+static inline int64_t mako_sip_view_offset(void) {
+    if (!mako_sip_tls_view.ptr || !mako_sip_tls_view.base) return -1;
+    return (int64_t)(mako_sip_tls_view.ptr - mako_sip_tls_view.base);
+}
+
+/* Case-sensitive / case-insensitive compare of last view to a string (no alloc). */
+static inline int64_t mako_sip_view_eq(MakoString s) {
+    if (!mako_sip_tls_view.ptr) return s.len == 0 ? 1 : 0;
+    size_t n = s.data ? s.len : 0;
+    if (n != mako_sip_tls_view.len) return 0;
+    if (n == 0) return 1;
+    return memcmp(mako_sip_tls_view.ptr, s.data, n) == 0 ? 1 : 0;
+}
+
+static inline int64_t mako_sip_view_ci_eq(MakoString s) {
+    if (!mako_sip_tls_view.ptr) return s.len == 0 ? 1 : 0;
+    size_t n = s.data ? s.len : 0;
+    return mako_sip_ci_eq(mako_sip_tls_view.ptr, mako_sip_tls_view.len, s.data ? s.data : "", n)
+               ? 1
+               : 0;
+}
+
+static inline int64_t mako_sip_view_contains(MakoString needle) {
+    if (!mako_sip_tls_view.ptr || !needle.data || needle.len == 0) return 0;
+    if (needle.len > mako_sip_tls_view.len) return 0;
+    size_t lim = mako_sip_tls_view.len - needle.len;
+    for (size_t i = 0; i <= lim; i++) {
+        if (memcmp(mako_sip_tls_view.ptr + i, needle.data, needle.len) == 0) return 1;
+    }
+    return 0;
+}
+
+/* Allocate a copy of the last view (only when ownership is needed). */
+static inline MakoString mako_sip_view_copy(void) {
+    if (!mako_sip_tls_view.ptr || mako_sip_tls_view.len == 0) return mako_str_from_cstr("");
+    return mako_sip_slice_to_str(mako_sip_tls_view.ptr, mako_sip_tls_view.len);
+}
+
+/* One-shot compares without TLS (preferred in tight loops). */
+static inline int64_t mako_sip_header_eq(MakoString msg, MakoString name, MakoString expect) {
+    const char *p = NULL;
+    size_t n = 0;
+    if (!mako_sip_header_locate(msg, name, &p, &n)) return expect.len == 0 ? 1 : 0;
+    size_t el = expect.data ? expect.len : 0;
+    if (n != el) return 0;
+    if (n == 0) return 1;
+    return memcmp(p, expect.data, n) == 0 ? 1 : 0;
+}
+
+static inline int64_t mako_sip_header_ci_eq(MakoString msg, MakoString name, MakoString expect) {
+    const char *p = NULL;
+    size_t n = 0;
+    if (!mako_sip_header_locate(msg, name, &p, &n)) return expect.len == 0 ? 1 : 0;
+    return mako_sip_ci_eq(p, n, expect.data ? expect.data : "", expect.data ? expect.len : 0) ? 1
+                                                                                               : 0;
+}
+
+static inline int64_t mako_sip_header_contains(MakoString msg, MakoString name, MakoString needle) {
+    const char *p = NULL;
+    size_t n = 0;
+    if (!mako_sip_header_locate(msg, name, &p, &n) || !needle.data || needle.len == 0) return 0;
+    if (needle.len > n) return 0;
+    size_t lim = n - needle.len;
+    for (size_t i = 0; i <= lim; i++) {
+        if (memcmp(p + i, needle.data, needle.len) == 0) return 1;
+    }
+    return 0;
+}
+
+static inline int64_t mako_sip_method_eq(MakoString msg, MakoString method) {
+    if (!mako_sip_is_request(msg) || !method.data) return 0;
+    const char *p = msg.data;
+    const char *end = msg.data + msg.len;
+    const char *sp = p;
+    while (sp < end && *sp != ' ' && *sp != '\r' && *sp != '\n') sp++;
+    return mako_sip_ci_eq(p, (size_t)(sp - p), method.data, method.len) ? 1 : 0;
+}
+
 /* Value of nth occurrence (0-based) of header `name` (compact forms accepted).
  * Returns an owned MakoString (malloc); free with mako_str_free / scope drop.
- * Parse is length-bounded (msg need not be NUL-terminated). */
+ * Full fold normalization. Prefer sip_header_view / sip_header_eq on hot paths. */
 static inline MakoString mako_sip_header_n(MakoString msg, MakoString name, int64_t idx) {
     if (!msg.data || !name.data || name.len == 0 || idx < 0)
         return mako_str_from_cstr("");

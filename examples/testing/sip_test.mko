@@ -356,3 +356,49 @@ fn TestSipHeaderHotLoop() {
     }
     assert_eq(sip_ok(msg), 1)
 }
+
+fn TestSipZeroCopyViews() {
+    let msg = sample_invite()
+    // One-shot compares — no TLS, no malloc
+    assert_eq(sip_method_eq(msg, "INVITE"), 1)
+    assert_eq(sip_method_eq(msg, "invite"), 1) // case-insensitive
+    assert_eq(sip_method_eq(msg, "BYE"), 0)
+    assert_eq(sip_header_eq(msg, "Call-ID", "a84b4c76e66710"), 1)
+    assert_eq(sip_header_ci_eq(msg, "call-id", "a84b4c76e66710"), 1)
+    assert_eq(sip_header_contains(msg, "From", "alice@atlanta.com"), 1)
+    assert_eq(sip_header_contains(msg, "From", "nobody"), 0)
+    // TLS view pattern for multi-check without re-scan
+    assert_eq(sip_header_view(msg, "Via"), 1)
+    assert(sip_view_len() > 0)
+    assert(sip_view_offset() > 0)
+    assert_eq(sip_view_contains("192.0.2.1"), 1)
+    assert_eq(sip_view_contains("z9hG4bK"), 1)
+    let via_copy = sip_view_copy()
+    assert(str_contains(via_copy, "branch="))
+    assert_eq(sip_method_view(msg), 1)
+    assert_eq(sip_view_ci_eq("INVITE"), 1)
+    assert_eq(sip_view_eq("INVITE"), 1)
+    assert_eq(sip_body_view(msg), 1)
+    assert(sip_view_len() > 0)
+    assert_eq(sip_view_contains("m=audio"), 1)
+    // Compact form via view
+    let compact = "OPTIONS sip:b@x SIP/2.0\r\ni: cid-zc\r\nl: 0\r\n\r\n"
+    assert_eq(sip_header_view(compact, "Call-ID"), 1)
+    assert_eq(sip_view_eq("cid-zc"), 1)
+    // Missing header
+    assert_eq(sip_header_view(msg, "X-No-Such"), 0)
+    assert_eq(sip_view_len(), 0)
+}
+
+fn TestSipZeroCopyHotLoop() {
+    // No alloc on hot path: 20k method + header compares
+    let msg = sample_invite()
+    let mut i = 0
+    while i < 20000 {
+        assert(sip_method_eq(msg, "INVITE") == 1)
+        assert(sip_header_contains(msg, "Call-ID", "a84b4c76") == 1)
+        assert(sip_header_view(msg, "Via") == 1)
+        assert(sip_view_contains("branch=") == 1)
+        i = i + 1
+    }
+}

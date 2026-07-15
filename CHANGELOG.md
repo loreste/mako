@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Zero-copy SIP views (hot path)
+
+- `sip_header_view` / `sip_body_view` / `sip_method_view` + `sip_view_len` /
+  `offset` / `eq` / `ci_eq` / `contains` / `copy` (TLS last-view; no malloc on view).
+- One-shot: `sip_header_eq` / `sip_header_ci_eq` / `sip_header_contains` /
+  `sip_method_eq` — no TLS, no alloc.
+- First-line contiguous value only (folds still use owned `sip_header_n`).
+- Tests: `TestSipZeroCopyViews`, `TestSipZeroCopyHotLoop` (20k compares).
+
 ### Adversarial hardening (SIP NAT + SDP + SQL)
 
 - **Preserve `;maddr`** in `via_fix_source` (only strip received/rport) — RFC 3261 §18.2.2.

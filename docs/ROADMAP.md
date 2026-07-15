@@ -296,6 +296,7 @@ Percentages are weighted; update when a task flips.
 - [x] Deterministic simulation · FSM helpers · rings / SPSC / scatter-gather.
 - [x] GPU AI seed (OpenCL path) · local model store · GGUF F32/F16 · MHA · Q4_0/Q8_0 · BPE seed.
 - [x] **SIP proxy library** (builtins + `std/sip`): parse/build, Via/RR/rport, Digest HA1, framing; RTP/SRTP helpers; **SIPREC/WebRTC out of scope**.
+- [x] Zero-copy SIP hot path (`sip_header_view` / `sip_method_eq` / `sip_header_eq` / `sip_view_*`).
 - [x] Graphics/audio/physics soft seeds (`gfx_*`, `audio_mix`, `physics_step_*`).
 - [x] Multiplayer snapshot + rollback ring seeds (`snap_*`, `rollback_*`).
 - [x] Storage page/WAL/hindex/store + btree/LSM/MVCC seeds.

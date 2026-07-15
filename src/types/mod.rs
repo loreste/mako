@@ -2138,6 +2138,51 @@ impl TypeChecker {
             "sip_header_count".into(),
             Type::Fn(vec![Type::String, Type::String], Box::new(Type::Int)),
         );
+        // Zero-copy hot path (no malloc; TLS view or one-shot compares)
+        fns.insert(
+            "sip_header_view".into(),
+            Type::Fn(vec![Type::String, Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "sip_header_view_n".into(),
+            Type::Fn(vec![Type::String, Type::String, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert("sip_body_view".into(), Type::Fn(vec![Type::String], Box::new(Type::Int)));
+        fns.insert("sip_method_view".into(), Type::Fn(vec![Type::String], Box::new(Type::Int)));
+        fns.insert("sip_view_len".into(), Type::Fn(vec![], Box::new(Type::Int)));
+        fns.insert("sip_view_offset".into(), Type::Fn(vec![], Box::new(Type::Int)));
+        fns.insert("sip_view_eq".into(), Type::Fn(vec![Type::String], Box::new(Type::Int)));
+        fns.insert("sip_view_ci_eq".into(), Type::Fn(vec![Type::String], Box::new(Type::Int)));
+        fns.insert(
+            "sip_view_contains".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
+        fns.insert("sip_view_copy".into(), Type::Fn(vec![], Box::new(Type::String)));
+        fns.insert(
+            "sip_header_eq".into(),
+            Type::Fn(
+                vec![Type::String, Type::String, Type::String],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "sip_header_ci_eq".into(),
+            Type::Fn(
+                vec![Type::String, Type::String, Type::String],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "sip_header_contains".into(),
+            Type::Fn(
+                vec![Type::String, Type::String, Type::String],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "sip_method_eq".into(),
+            Type::Fn(vec![Type::String, Type::String], Box::new(Type::Int)),
+        );
         fns.insert("sip_body".into(), Type::Fn(vec![Type::String], Box::new(Type::String)));
         fns.insert("sip_content_length".into(), Type::Fn(vec![Type::String], Box::new(Type::Int)));
         fns.insert("sip_msg_complete".into(), Type::Fn(vec![Type::String], Box::new(Type::Int)));

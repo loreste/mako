@@ -88,6 +88,7 @@ Last inventory: 2026-07-14 (**unique Mako surface** · pack/pull types · full m
 | Multi-level LSM (L1–L3) · page-backed btree | Done seed — `domain_tracks_test` (`lsm_compact_down`, `pbtree_*`) |
 | Madis SQL/SIP P0–P1 (empty binds, query_strN, proxy Via/RR, HA1, framing) | Done — `sql_str4_empty_bind_test` · `sql_query_str_multi_test` · `sip_test` · `sip_digest_ha1_test` |
 | SIP proxy library (platform builtins + `std/sip` pack) | Done — RFC 3261/3581 Via/RR; pack re-exports; docs as first-class proxy API |
+| Zero-copy SIP views (hot path, no malloc) | Done — `sip_header_view` / `sip_method_eq` / `sip_header_eq` · `TestSipZeroCopyViews` |
 | ShareInt capture (shared mut via RC handle) | Done seed — `share_capture_test` |
 | Packaging seeds (deb/rpm/winget/matrix/homebrew) | Done seed — scripts + packaging/ |
 | Book samples `mako check` / `run` | PASS — `docs/book/examples/book_*.mko` |

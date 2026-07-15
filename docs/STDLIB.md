@@ -1481,9 +1481,11 @@ You own timers, dialog maps, routing, and media (e.g. rtpengine).
 | Framing | `sip_first_message_len`, `sip_msg_complete`, `sip_msg_needed` |
 | Auth | `sip_digest_response`, `sip_digest_response_ha1`, `sip_www_authenticate` |
 
-**Ownership:** `sip_header` and builders return **owned** strings. Parse is
-length-bounded (buffer need not be NUL-terminated). On hot paths, prefer
-targeted reads over scanning every header.
+**Ownership / hot path:** `sip_header` / builders return **owned** strings (malloc).
+For proxy hot paths use **zero-copy** APIs: `sip_method_eq`, `sip_header_eq` /
+`sip_header_contains`, or `sip_header_view` + `sip_view_eq` / `sip_view_contains`
+(views point into the message buffer; valid only while `msg` lives). Parse is
+length-bounded (buffer need not be NUL-terminated).
 
 **Name shadowing:** app `fn sip_*` shadows platform builtins — use **`std/sip`**
 (`sip.insert_via`, `sip.header`, …) in application code; call free builtins only

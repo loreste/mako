@@ -604,7 +604,10 @@ dialogs, routing, media (rtpengine). **Out of scope:** SIPREC, WebRTC, full B2BU
 | `sip_is_request` / `sip_is_response` / `sip_ok` | `(msg) -> int` | Classify message |
 | `sip_method` / `sip_request_uri` / `sip_version` | `(msg) -> string` | Request start-line |
 | `sip_status_code` / `sip_reason` | `(msg) -> int/string` | Response start-line |
-| `sip_header` / `sip_header_n` / `sip_header_count` | `(msg, name[, n])` | Case-insensitive + compact forms (`Call-ID`↔`i`, `Via`↔`v`, …); owned result |
+| `sip_header` / `sip_header_n` / `sip_header_count` | `(msg, name[, n])` | Case-insensitive + compact forms; **owned** (malloc) |
+| `sip_header_view` / `sip_body_view` / `sip_method_view` | → int | Zero-copy: set TLS view (1=found); use `sip_view_*` |
+| `sip_view_len` / `sip_view_offset` / `sip_view_eq` / `sip_view_ci_eq` / `sip_view_contains` / `sip_view_copy` | | Inspect last view; `copy` allocates only when needed |
+| `sip_header_eq` / `sip_header_ci_eq` / `sip_header_contains` / `sip_method_eq` | one-shot | Zero-copy compares (no TLS, no malloc) — prefer on hot path |
 | `sip_body` / `sip_content_length` | `(msg)` | Body and CL |
 | `sip_first_message_len` / `sip_msg_complete` / `sip_msg_needed` | `(buf) -> int` | TCP/TLS framing (first complete msg length / complete? / bytes needed) |
 | `sip_request` / `sip_response` | build full message (auto Content-Length) | |

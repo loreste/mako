@@ -21,6 +21,25 @@ export fn header_count(msg: string, name: string) -> int { return sip_header_cou
 export fn body(msg: string) -> string { return sip_body(msg) }
 export fn content_length(msg: string) -> int { return sip_content_length(msg) }
 export fn method_is(msg: string, m: string) -> int { return sip_method_is(msg, m) }
+// Zero-copy hot path (no malloc)
+export fn header_view(msg: string, name: string) -> int { return sip_header_view(msg, name) }
+export fn body_view(msg: string) -> int { return sip_body_view(msg) }
+export fn method_view(msg: string) -> int { return sip_method_view(msg) }
+export fn view_len() -> int { return sip_view_len() }
+export fn view_eq(s: string) -> int { return sip_view_eq(s) }
+export fn view_ci_eq(s: string) -> int { return sip_view_ci_eq(s) }
+export fn view_contains(s: string) -> int { return sip_view_contains(s) }
+export fn view_copy() -> string { return sip_view_copy() }
+export fn header_eq(msg: string, name: string, expect: string) -> int {
+    return sip_header_eq(msg, name, expect)
+}
+export fn header_ci_eq(msg: string, name: string, expect: string) -> int {
+    return sip_header_ci_eq(msg, name, expect)
+}
+export fn header_contains(msg: string, name: string, needle: string) -> int {
+    return sip_header_contains(msg, name, needle)
+}
+export fn method_eq(msg: string, method: string) -> int { return sip_method_eq(msg, method) }
 
 // ---- TCP/TLS framing ----
 export fn first_message_len(buf: string) -> int { return sip_first_message_len(buf) }
