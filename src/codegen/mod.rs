@@ -8626,14 +8626,13 @@ impl Codegen {
                     .join("_");
                 format!("MakoTup_{tag}")
             }
-            // Function values are stored as void* and cast at the call site
-            // (C declarator syntax for fn-pointer params is awkward otherwise).
-            TypeExpr::Fn(_, _) => "void*".into(),
+            // Function values are fat pointers (code + optional capture env).
+            TypeExpr::Fn(_, _) => "MakoFn".into(),
             _ => "int64_t".into(),
         }
     }
 
-    /// C cast type for calling a void* fn value, e.g. `int64_t (*)(int64_t)`.
+    /// C cast type for calling a bare fn pointer, e.g. `int64_t (*)(int64_t)`.
     fn fn_ptr_cast_ty(&self, params: &[TypeExpr], ret: &TypeExpr) -> String {
         let r = self.type_expr_c(ret);
         if params.is_empty() {
@@ -8644,7 +8643,108 @@ impl Codegen {
         }
     }
 
-    /// Emit a non-capturing lambda as a static C function, returned as `void*`.
+    /// Collect free local POD captures for a lambda body (int/bool/float seed).
+    fn collect_lambda_captures(
+        &self,
+        body: &Expr,
+        params: &[String],
+    ) -> Vec<(String, String)> {
+        let mut idents = Vec::new();
+        Self::collect_idents_in_expr(body, &mut idents);
+        let mut out: Vec<(String, String)> = Vec::new();
+        for n in idents {
+            if n == "_" || params.iter().any(|p| p == &n) {
+                continue;
+            }
+            if self.fn_params.contains_key(&n) || self.fn_rets.contains_key(&n) {
+                continue;
+            }
+            if self.extern_fns.contains(&n) || self.const_ints.contains_key(&n) {
+                continue;
+            }
+            let ty = self
+                .locals
+                .get(&n)
+                .or_else(|| self.locals.get(&mangle(&n)))
+                .cloned();
+            let Some(ty) = ty else { continue };
+            let ok = matches!(
+                ty.as_str(),
+                "int64_t" | "int32_t" | "int8_t" | "int" | "bool" | "double" | "_Bool"
+            );
+            if !ok {
+                continue;
+            }
+            if !out.iter().any(|(a, _)| a == &n) {
+                out.push((n, ty));
+            }
+        }
+        out
+    }
+
+    fn collect_idents_in_expr(e: &Expr, out: &mut Vec<String>) {
+        match e {
+            Expr::Ident(n) => out.push(n.clone()),
+            Expr::Call { callee, args } => {
+                Self::collect_idents_in_expr(callee, out);
+                for a in args {
+                    Self::collect_idents_in_expr(a, out);
+                }
+            }
+            Expr::Binary { left, right, .. } => {
+                Self::collect_idents_in_expr(left, out);
+                Self::collect_idents_in_expr(right, out);
+            }
+            Expr::Unary { expr, .. }
+            | Expr::Field { base: expr, .. }
+            | Expr::Try(expr)
+            | Expr::Join(expr) => Self::collect_idents_in_expr(expr, out),
+            Expr::Array(xs) => {
+                for x in xs {
+                    Self::collect_idents_in_expr(x, out);
+                }
+            }
+            Expr::Block(b) => {
+                for s in &b.stmts {
+                    match s {
+                        Stmt::Return(Some(e)) | Stmt::Expr(e) => {
+                            Self::collect_idents_in_expr(e, out);
+                        }
+                        Stmt::Let { init, .. } => Self::collect_idents_in_expr(init, out),
+                        Stmt::Assign { value, .. } => Self::collect_idents_in_expr(value, out),
+                        _ => {}
+                    }
+                }
+            }
+            Expr::Lambda { body, .. } => Self::collect_idents_in_expr(body, out),
+            Expr::IfExpr {
+                cond,
+                then_block,
+                else_block,
+            } => {
+                Self::collect_idents_in_expr(cond, out);
+                for s in &then_block.stmts {
+                    if let Stmt::Return(Some(e)) | Stmt::Expr(e) = s {
+                        Self::collect_idents_in_expr(e, out);
+                    }
+                }
+                for s in &else_block.stmts {
+                    if let Stmt::Return(Some(e)) | Stmt::Expr(e) = s {
+                        Self::collect_idents_in_expr(e, out);
+                    }
+                }
+            }
+            Expr::Method { receiver, args, .. } => {
+                Self::collect_idents_in_expr(receiver, out);
+                for a in args {
+                    Self::collect_idents_in_expr(a, out);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Emit a lambda as `MakoFn` (bare or capturing POD locals by value).
     /// When `param_tys` / `ret_ty` are set (from expected `fn(T)->R`), use those C types.
     fn emit_lambda_value(
         &mut self,
@@ -8666,16 +8766,7 @@ impl Codegen {
             })
             .collect();
         let pctys: Vec<String> = if let Some(pts) = param_tys {
-            pts.iter()
-                .enumerate()
-                .map(|(i, t)| {
-                    if i < pts.len() {
-                        self.type_expr_c(t)
-                    } else {
-                        "int64_t".into()
-                    }
-                })
-                .collect()
+            pts.iter().map(|t| self.type_expr_c(t)).collect()
         } else {
             pnames.iter().map(|_| "int64_t".to_string()).collect()
         };
@@ -8689,26 +8780,55 @@ impl Codegen {
             .map(|t| self.type_expr_c(t))
             .unwrap_or_else(|| "int64_t".into());
 
-        // Prefer pure_c for simple single-param bodies; for multi-param or string
-        // params, emit a statement body via a temporary function-scope simulation.
-        let use_pure = pnames.len() <= 1
-            && pctys.first().map(|t| t.as_str()) != Some("MakoString")
-            && !matches!(body, Expr::Block(_));
+        let captures = self.collect_lambda_captures(body, params);
+        let capture_fields: Vec<(String, String)> = captures
+            .iter()
+            .map(|(n, t)| (mangle(n), t.clone()))
+            .collect();
 
-        let helper_src = if use_pure {
-            let body_c = if pnames.is_empty() {
-                self.expr_as_pure_c(body, "_")
-            } else {
-                self.expr_as_pure_c(body, &pnames[0])
-            };
-            let param_cs = if pnames.is_empty() {
-                "void".into()
-            } else {
-                format!("{} {}", pctys[0], pnames[0])
-            };
-            format!("static {ret_c} {helper}({param_cs}) {{ return ({body_c}); }}\n")
-        } else {
-            // Statement-form helper: re-enter emit with isolated locals for params.
+        // Snapshot locals for pure_c emission of params + capture field access.
+        let saved_locals = self.locals.clone();
+        let saved_casts = self.fn_ptr_casts.clone();
+        self.locals.clear();
+        for (n, t) in pnames.iter().zip(pctys.iter()) {
+            self.locals.insert(n.clone(), t.clone());
+        }
+        for (orig, mangled) in params.iter().zip(pnames.iter()) {
+            if orig != "_" {
+                let ty = self
+                    .locals
+                    .get(mangled)
+                    .cloned()
+                    .unwrap_or_else(|| "int64_t".into());
+                self.locals.insert(orig.clone(), ty.clone());
+                self.locals.insert(mangle(orig), ty);
+            }
+        }
+        // Captures are referenced as e->field in the helper body.
+        let cap_map: HashMap<String, String> = captures
+            .iter()
+            .map(|(n, _)| (n.clone(), format!("e->{}", mangle(n))))
+            .collect();
+
+        let body_c = match body {
+            Expr::Block(b) => {
+                let mut last = "0".to_string();
+                for s in &b.stmts {
+                    match s {
+                        Stmt::Return(Some(e)) | Stmt::Expr(e) => {
+                            last = self.expr_as_pure_c_multi_caps(e, &pnames, &cap_map);
+                        }
+                        _ => {}
+                    }
+                }
+                last
+            }
+            other => self.expr_as_pure_c_multi_caps(other, &pnames, &cap_map),
+        };
+        self.locals = saved_locals;
+        self.fn_ptr_casts = saved_casts;
+
+        if capture_fields.is_empty() {
             let param_cs = if pnames.is_empty() {
                 "void".into()
             } else {
@@ -8719,53 +8839,160 @@ impl Codegen {
                     .collect::<Vec<_>>()
                     .join(", ")
             };
-            // Snapshot and install lambda locals
-            let saved_locals = self.locals.clone();
-            let saved_casts = self.fn_ptr_casts.clone();
-            let saved_indent = self.indent;
-            let saved_out_len = self.out.len();
-            self.locals.clear();
+            let helper_src =
+                format!("static {ret_c} {helper}({param_cs}) {{ return ({body_c}); }}\n");
+            self.insert_helper(&helper_src);
+            let tmp = self.fresh("fnv");
+            self.line(&format!("MakoFn {tmp} = mako_fn_bare((void*){helper});"));
+            ("MakoFn".into(), tmp)
+        } else {
+            let env_ty = format!("MakoEnv_{helper}");
+            let fields = capture_fields
+                .iter()
+                .map(|(n, t)| format!("    {t} {n};"))
+                .collect::<Vec<_>>()
+                .join("\n");
+            let mut params_cs = vec!["void *env".to_string()];
             for (n, t) in pnames.iter().zip(pctys.iter()) {
-                // Unmangle: param source names may differ from mangled C names.
-                // We only have mangled names in pnames; use them as locals keys.
-                self.locals.insert(n.clone(), t.clone());
+                params_cs.push(format!("{t} {n}"));
             }
-            // Also map original param names for Ident emission
-            for (orig, mangled) in params.iter().zip(pnames.iter()) {
-                if orig != "_" {
-                    let ty = self.locals.get(mangled).cloned().unwrap_or_else(|| "int64_t".into());
-                    self.locals.insert(orig.clone(), ty);
-                    // Ident uses mangle(name) so store under mangled key as well
-                    self.locals.insert(mangle(orig), self.locals.get(mangled).cloned().unwrap_or_else(|| "int64_t".into()));
+            // Single insert: insert_helper prepends, so typedef must ship with the body.
+            let helper_src = format!(
+                "typedef struct {{\n{fields}\n}} {env_ty};\n\
+                 static {ret_c} {helper}({}) {{\n    {env_ty} *e = ({env_ty}*)env;\n    return ({body_c});\n}}\n",
+                params_cs.join(", ")
+            );
+            self.insert_helper(&helper_src);
+
+            let env_tmp = self.fresh("env");
+            self.line(&format!(
+                "{env_ty} *{env_tmp} = ({env_ty}*)malloc(sizeof({env_ty}));"
+            ));
+            self.line(&format!(
+                "if (!{env_tmp}) {{ fprintf(stderr, \"mako: OOM in closure env\\n\"); abort(); }}"
+            ));
+            for (src_name, _) in &captures {
+                let field = mangle(src_name);
+                let val = mangle(src_name);
+                self.line(&format!("{env_tmp}->{field} = {val};"));
+            }
+            let tmp = self.fresh("fnv");
+            self.line(&format!(
+                "MakoFn {tmp} = mako_fn_closure((void*){helper}, {env_tmp});"
+            ));
+            ("MakoFn".into(), tmp)
+        }
+    }
+
+    /// Like `expr_as_pure_c` but rewrites lambda params and optional captures.
+    fn expr_as_pure_c_multi_caps(
+        &self,
+        e: &Expr,
+        pnames: &[String],
+        caps: &HashMap<String, String>,
+    ) -> String {
+        match e {
+            Expr::Ident(n) => {
+                if let Some(c) = caps.get(n) {
+                    c.clone()
+                } else if pnames.iter().any(|p| p == n || p == &mangle(n)) {
+                    mangle(n)
+                } else if let Some(v) = self.const_ints.get(n) {
+                    v.to_string()
+                } else if let Some(c) = caps.get(&mangle(n)) {
+                    c.clone()
+                } else {
+                    mangle(n)
                 }
             }
-            self.indent = 1;
-            // Emit into a string buffer via temporary out swap is hard; use pure_c
-            // multi-param with mangled names, expanding Call to builtins.
-            let body_c = match body {
-                Expr::Block(b) => {
-                    // last expr/return
-                    let mut last = "0".to_string();
-                    for s in &b.stmts {
-                        match s {
-                            Stmt::Return(Some(e)) | Stmt::Expr(e) => {
-                                last = self.expr_as_pure_c(e, pnames.first().map(|s| s.as_str()).unwrap_or("_"));
-                            }
-                            _ => {}
-                        }
+            Expr::Call { callee, args } => {
+                if let Expr::Ident(fname) = callee.as_ref() {
+                    let as_: Vec<_> = args
+                        .iter()
+                        .map(|a| self.expr_as_pure_c_multi_caps(a, pnames, caps))
+                        .collect();
+                    if fname == "len" && as_.len() == 1 {
+                        return format!("mako_str_len({})", as_[0]);
                     }
-                    last
+                    if fname == "str_len" && as_.len() == 1 {
+                        return format!("mako_str_len({})", as_[0]);
+                    }
+                    return format!("{}({})", mangle(fname), as_.join(", "));
                 }
-                other => self.expr_as_pure_c_multi(other, &pnames),
-            };
-            self.locals = saved_locals;
-            self.fn_ptr_casts = saved_casts;
-            self.indent = saved_indent;
-            let _ = saved_out_len;
-            format!("static {ret_c} {helper}({param_cs}) {{ return ({body_c}); }}\n")
-        };
-        self.insert_helper(&helper_src);
-        ("void*".into(), format!("(void*){helper}"))
+                "0".into()
+            }
+            Expr::Binary { op, left, right } => {
+                let l = self.expr_as_pure_c_multi_caps(left, pnames, caps);
+                let r = self.expr_as_pure_c_multi_caps(right, pnames, caps);
+                let o = match op {
+                    BinOp::Add => "+",
+                    BinOp::Sub => "-",
+                    BinOp::Mul => "*",
+                    BinOp::Div => "/",
+                    BinOp::Mod => "%",
+                    BinOp::Eq => "==",
+                    BinOp::Ne => "!=",
+                    BinOp::Lt => "<",
+                    BinOp::Le => "<=",
+                    BinOp::Gt => ">",
+                    BinOp::Ge => ">=",
+                    BinOp::And => "&&",
+                    BinOp::Or => "||",
+                    _ => "+",
+                };
+                format!("({l} {o} {r})")
+            }
+            Expr::Unary { op, expr } => {
+                let e = self.expr_as_pure_c_multi_caps(expr, pnames, caps);
+                match op {
+                    UnaryOp::Neg => format!("(-{e})"),
+                    UnaryOp::Not => format!("(!{e})"),
+                    UnaryOp::BitNot => format!("(~{e})"),
+                }
+            }
+            Expr::Int(n) => n.to_string(),
+            Expr::Bool(b) => if *b { "true" } else { "false" }.into(),
+            Expr::String(s) => format!("mako_str_from_cstr(\"{}\")", escape_c(s)),
+            Expr::IfExpr {
+                cond,
+                then_block,
+                else_block,
+            } => {
+                let c = self.expr_as_pure_c_multi_caps(cond, pnames, caps);
+                let t = self.block_last_pure_c(then_block, pnames, caps);
+                let e = self.block_last_pure_c(else_block, pnames, caps);
+                format!("(({c}) ? ({t}) : ({e}))")
+            }
+            Expr::Block(b) => {
+                for s in b.stmts.iter().rev() {
+                    match s {
+                        Stmt::Return(Some(e)) | Stmt::Expr(e) => {
+                            return self.expr_as_pure_c_multi_caps(e, pnames, caps);
+                        }
+                        _ => {}
+                    }
+                }
+                "0".into()
+            }
+            other => self.expr_as_pure_c_multi(other, pnames),
+        }
+    }
+
+    fn block_last_pure_c(
+        &self,
+        b: &Block,
+        pnames: &[String],
+        caps: &HashMap<String, String>,
+    ) -> String {
+        for s in b.stmts.iter().rev() {
+            match s {
+                Stmt::Return(Some(e)) | Stmt::Expr(e) => {
+                    return self.expr_as_pure_c_multi_caps(e, pnames, caps);
+                }
+                _ => {}
+            }
+        }
+        "0".into()
     }
 
     /// Like `expr_as_pure_c` but rewrites all lambda param idents (multi-arg).
@@ -10395,14 +10622,18 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                 if let Some(ty) = self.locals.get(n).cloned() {
                     return (ty, mangle(n));
                 }
-                // Named function as a first-class value → void* of the C symbol.
+                // Named function as a first-class value → MakoFn bare fat pointer.
                 if self.fn_params.contains_key(n) || self.fn_rets.contains_key(n) {
                     let fname = if self.extern_fns.contains(n) {
                         n.clone()
                     } else {
                         mangle(n)
                     };
-                    return ("void*".into(), format!("(void*){fname}"));
+                    let tmp = self.fresh("fnv");
+                    self.line(&format!(
+                        "MakoFn {tmp} = mako_fn_bare((void*){fname});"
+                    ));
+                    return ("MakoFn".into(), tmp);
                 }
                 ("int64_t".into(), mangle(n))
             }
@@ -23841,36 +24072,65 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             return ("int64_t".into(), format!("mako_slice_copy({d}, {s})"));
                         }
                         _ => {
-                            // Call through a local function pointer: `f(x)` where f is fn-typed.
+                            // Call through a local function value: `f(x)` where f is MakoFn.
                             if self.locals.contains_key(name) {
-                                let cast = self
-                                    .fn_ptr_casts
-                                    .get(name)
-                                    .cloned()
-                                    .unwrap_or_else(|| "int64_t (*)()".into());
-                                let mut arg_vals = Vec::new();
-                                for a in args {
-                                    let (_, v) = self.emit_expr(a);
-                                    arg_vals.push(v);
+                                let lty = self.locals.get(name).cloned().unwrap_or_default();
+                                if lty == "MakoFn"
+                                    || self.fn_ptr_casts.contains_key(name)
+                                {
+                                    let cast = self
+                                        .fn_ptr_casts
+                                        .get(name)
+                                        .cloned()
+                                        .unwrap_or_else(|| "int64_t (*)()".into());
+                                    let mut arg_vals = Vec::new();
+                                    for a in args {
+                                        let (_, v) = self.emit_expr(a);
+                                        arg_vals.push(v);
+                                    }
+                                    let ret = cast
+                                        .split("(*)")
+                                        .next()
+                                        .map(|s| s.trim().to_string())
+                                        .filter(|s| !s.is_empty())
+                                        .unwrap_or_else(|| "int64_t".into());
+                                    // Env-first cast for capturing closures.
+                                    let env_cast = if arg_vals.is_empty() {
+                                        format!("{ret} (*)(void*)")
+                                    } else {
+                                        // Reconstruct arg types from cast: ret (*)(T1, T2)
+                                        let inner = cast
+                                            .split("(*)")
+                                            .nth(1)
+                                            .unwrap_or("(void)")
+                                            .trim();
+                                        let inner = inner
+                                            .trim_start_matches('(')
+                                            .trim_end_matches(')');
+                                        if inner.is_empty() || inner == "void" {
+                                            format!("{ret} (*)(void*)")
+                                        } else {
+                                            format!("{ret} (*)(void*, {inner})")
+                                        }
+                                    };
+                                    let f = mangle(name);
+                                    let bare_args = arg_vals.join(", ");
+                                    let env_args = if arg_vals.is_empty() {
+                                        format!("{f}.env")
+                                    } else {
+                                        format!("{f}.env, {bare_args}")
+                                    };
+                                    let call = format!(
+                                        "({f}.env ? (({env_cast}){f}.fn)({env_args}) : (({cast}){f}.fn)({bare_args}))"
+                                    );
+                                    if ret == "void" {
+                                        self.line(&format!("{call};"));
+                                        return ("void".into(), "/*void*/".into());
+                                    }
+                                    let tmp = self.fresh("r");
+                                    self.line(&format!("{ret} {tmp} = {call};"));
+                                    return (ret, tmp);
                                 }
-                                let call = format!(
-                                    "(({cast}){})({})",
-                                    mangle(name),
-                                    arg_vals.join(", ")
-                                );
-                                let ret = cast
-                                    .split("(*)")
-                                    .next()
-                                    .map(|s| s.trim().to_string())
-                                    .filter(|s| !s.is_empty())
-                                    .unwrap_or_else(|| "int64_t".into());
-                                if ret == "void" {
-                                    self.line(&format!("{call};"));
-                                    return ("void".into(), "/*void*/".into());
-                                }
-                                let tmp = self.fresh("r");
-                                self.line(&format!("{ret} {tmp} = {call};"));
-                                return (ret, tmp);
                             }
                             // User enum variant constructor?
                             if let Some(enum_name) = self.variant_to_enum.get(name).cloned() {

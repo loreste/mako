@@ -16,7 +16,7 @@ STATUS north-star / MVP: **100%**. Prefer STATUS over this list when claiming Do
 | Scope | Approx. |
 |-------|---------|
 | MVP / STATUS north-star | **100%** |
-| General-purpose intention (weighted tracks below) | **~89%** |
+| General-purpose intention (weighted tracks below) | **~90%** |
 | Mako identity (preferred syntax) | **~90%** |
 | Standard library (target areas) | **~98%** |
 
@@ -112,14 +112,15 @@ Metrics/prom + span-lite JSON are in; **depth seeds landed** (2026-07-14).
 | Multi-field worker I/O | `chan[Struct]` + deep-POD kick args | `chan_struct_test` · [SPEED.md](SPEED.md) |
 | Struct update (spread) | `S { field: v, ..base }` / `S { ...base, field: v }` | `struct_update_test` |
 | Enum on kick-POD / channels | POD enum fields; `chan[Enum]` | `struct_update_test` |
-| First-class fn values (non-capturing) | `fn apply(f: fn(int)->int, …)` · named + lambda | `lang_ergonomics_test` · `first_class_fn_test` |
+| First-class fn values | `fn apply(f: fn(int)->int, …)` · named + lambda | `lang_ergonomics_test` · `first_class_fn_test` |
+| Capturing closures (POD env seed) | `|x| x + n` captures int/bool/float by value | `capturing_closure_test` |
 | `f"…{x}"` interpolation | single-buffer `StrBuilder` finish | `lang_ergonomics_test` |
 | Struct field defaults | `field: int = 0` on `struct` | `lang_ergonomics_test` |
 | Tuple channels | `chan[(int, string)]` | `lang_ergonomics_test` |
 
 **Still open (true residuals):**
 
-1. Capturing closures / env-bound first-class fns  
+1. Capturing **string / struct / mut ref** envs · lifetime / move semantics depth  
 2. Format specs inside `f"…"` (`{x:02}`) — use `fmt_sprintf*`  
 3. Kicking `Type::Fn` across crew (Send rejects)  
 
@@ -156,12 +157,12 @@ not the language identity.
 Checklist for **100% of the product intention**, not the MVP/STATUS bar.  
 Percentages are weighted; update when a task flips.
 
-**Overall intention completion:** **~89% / 100%**  
+**Overall intention completion:** **~90% / 100%**  
 **Mako identity (preferred syntax):** **~90%** — [IDENTITY.md](IDENTITY.md).
 
 | Track | Weight | Current |
 |-------|--------|---------|
-| 1. Language identity and core type system | 10% | 96% |
+| 1. Language identity and core type system | 10% | **98%** |
 | 2. Memory safety and allocation control | 10% | 88% |
 | 3. Concurrency and runtime trust | 10% | **88%** |
 | 4. Backend app surface | 12% | **100%** |

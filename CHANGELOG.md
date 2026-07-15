@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Language — capturing closures (seed)
+
+- **`MakoFn` fat pointer** (`fn` + optional `env`) for all first-class function
+  values; bare named fns use `mako_fn_bare`.
+- **POD captures:** lambdas may close over local `int` / `bool` / `float` by
+  value into a heap env; call sites dispatch env-first vs bare.
+- Works as args (`apply(|x| x + n, …)`), bound locals, multi-arg, and
+  `if` expressions in the body.
+- Not yet: string/struct capture, mut borrows, kicking `fn` values across crew.
+- Tests: `capturing_closure_test`.
+
 ### Observability depth — P2 seeds
 
 - **OTLP/HTTP JSON:** `trace_export_otlp_json()` (span ring + in-flight),

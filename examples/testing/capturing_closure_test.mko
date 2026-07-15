@@ -1,0 +1,54 @@
+// Capturing closures seed: POD env (int/bool) by value into MakoFn fat pointers.
+
+fn apply(f: fn(int) -> int, x: int) -> int {
+    return f(x)
+}
+
+fn apply2(f: fn(int, int) -> int, a: int, b: int) -> int {
+    return f(a, b)
+}
+
+fn TestCaptureIntAdd() {
+    let n = 10
+    assert_eq(apply(|x| x + n, 5), 15)
+}
+
+fn TestCaptureIntMul() {
+    let k = 3
+    assert_eq(apply(|x| x * k, 7), 21)
+}
+
+fn TestCaptureMulti() {
+    let a = 2
+    let b = 100
+    assert_eq(apply(|x| x * a + b, 5), 110)
+}
+
+fn TestCaptureTwoArgs() {
+    let base = 10
+    assert_eq(apply2(|x, y| x + y + base, 1, 2), 13)
+}
+
+fn TestCaptureBindLocal() {
+    let n = 4
+    let f: fn(int) -> int = |x| x + n
+    assert_eq(f(6), 10)
+    assert_eq(apply(f, 1), 5)
+}
+
+fn TestCaptureBlockBody() {
+    let n = 8
+    assert_eq(apply(fn(x) { return x + n }, 2), 10)
+}
+
+fn TestCaptureBool() {
+    let flag = true
+    // true → 1 in C path for arith seed
+    assert_eq(apply(|x| if flag { x + 1 } else { x }, 5), 6)
+}
+
+fn TestNoCaptureStillWorks() {
+    assert_eq(apply(|x| x * 2, 21), 42)
+    let g: fn(int) -> int = |x| x - 1
+    assert_eq(g(10), 9)
+}
