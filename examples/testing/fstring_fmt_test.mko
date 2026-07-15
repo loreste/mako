@@ -49,3 +49,44 @@ fn TestFStringStillPlain() {
     assert_eq_str(f"n={n}", "n=42")
     assert_eq_str(f"brace {{ok}}", "brace {ok}")
 }
+
+// ---- printf-ish flag parity seed ----
+
+fn TestFStringSignFlags() {
+    let n = 7
+    let m = -3
+    assert_eq_str(f"{n:+}", "+7")
+    assert_eq_str(f"{m:+}", "-3")
+    assert_eq_str(f"{n: }", " 7")
+    assert_eq_str(f"{m: }", "-3")
+}
+
+fn TestFStringAltHexOct() {
+    let n = 255
+    assert_eq_str(f"{n:#x}", "0xff")
+    assert_eq_str(f"{n:#X}", "0XFF")
+    let o = 8
+    assert_eq_str(f"{o:#o}", "010")
+    assert_eq_str(f"{o:#b}", "0b1000")
+}
+
+fn TestFStringLeftAlignInt() {
+    let n = 9
+    assert_eq_str(f"{n:-4}", "9   ")
+    assert_eq_str(f"{n:-4d}", "9   ")
+    assert_eq_str(f"{n:04}", "0009")
+}
+
+fn TestFStringFloatFlags() {
+    let x = 3.1
+    assert_eq_str(f"{x:+.1f}", "+3.1")
+    assert_eq_str(f"{x:8.2f}", "    3.10")
+    let y = 1000.0
+    assert_eq_str(f"{y:.0e}", "1e+03")
+}
+
+fn TestFStringStringDash() {
+    let s = "hi"
+    assert_eq_str(f"{s:-5}", "hi   ")
+    assert_eq_str(f"{s:>5}", "   hi")
+}

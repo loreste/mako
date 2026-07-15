@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Language — f-string format flag parity
+
+- Int flags: `+` / ` ` (sign), `#` (0x/0X/0/0b), `-` left-align, `0` zero-pad.
+- Types: `d` `x` `X` `o` `b`; float `f`/`e`/`g` with flags + width + precision.
+- String: `-` / `<` left-align; `>` right-align.
+- Parser keeps leading space in format specs (sign flag).
+- Tests: `fstring_fmt_test` (12 cases).
+
 ### Language / runtime — fn_drop + debugger/task inspect
 
 - **`fn_drop(f)` / `fn_has_env(f)`** — free capture env via generated `drop_env`

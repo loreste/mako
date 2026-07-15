@@ -115,14 +115,14 @@ Metrics/prom + span-lite JSON are in; **depth seeds landed** (2026-07-14).
 | First-class fn values | `fn apply(f: fn(int)->int, …)` · named + lambda | `lang_ergonomics_test` · `first_class_fn_test` |
 | Capturing closures (POD + string + struct env) | int/bool/float · string clone · struct copy | `capturing_closure_test` · `struct_capture_test` |
 | Kick `fn` values across crew | `kick(apply(f, x))` with bare/capturing `MakoFn` | `kick_fn_test` |
-| `f"…{x}"` + format specs | `{n:02}` `{n:x}` `{f:.2f}` `{s:4}` | `lang_ergonomics_test` · `fstring_fmt_test` |
+| `f"…{x}"` + format specs | `+` ` ` `#` `-` `0` · `xXob` · float `fe` · width | `fstring_fmt_test` |
 | Struct field defaults | `field: int = 0` on `struct` | `lang_ergonomics_test` |
 | Tuple channels | `chan[(int, string)]` | `lang_ergonomics_test` |
 
 **Still open (true residuals):**
 
 1. Mut-ref captures · deeper move/lifetime analysis  
-2. Full printf verb parity in f-strings (use `fmt_sprintf*` for exotic cases)  
+2. Remaining printf exotics in f-strings (`%n`, dynamic `*`, locale) — use `fmt_sprintf*`  
 3. Full debugger: source locals, real breakpoints, async frame walk  
 
 ### Language / stdlib residuals (lower priority)

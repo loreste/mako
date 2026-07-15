@@ -21,6 +21,7 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <limits.h>
 #include <signal.h>
 #if defined(__GLIBC__) || defined(__APPLE__)
 #include <execinfo.h>
@@ -1577,7 +1578,11 @@ static inline void mako_str_builder_write_i64(MakoStrBuilder *b, int64_t n) {
     b->data[b->len] = 0;
 }
 
-/* f-string format specs for ints: "02", "04d", "x", "X", "b", "o", "d", width. */
+/* f-string format specs for ints (printf-ish seed).
+ * Flags: - left, + sign, ' ' space-sign, # alternate, 0 zero-pad.
+ * Width digits, type: d / x / X / o / b (default d).
+ * Examples: "02", "+d", "#x", "-5d", "08X".
+ */
 static inline void mako_str_builder_write_i64_spec(
     MakoStrBuilder *b, int64_t n, const char *spec
 ) {
@@ -1585,49 +1590,76 @@ static inline void mako_str_builder_write_i64_spec(
         mako_str_builder_write_i64(b, n);
         return;
     }
-    char buf[128];
-    int written = 0;
-    /* Hex / oct / bin / decimal type letter (optional width prefix). */
     const char *p = spec;
-    int zero_pad = 0;
-    int width = 0;
-    if (*p == '0' && p[1] >= '0' && p[1] <= '9') {
-        zero_pad = 1;
+    int left = 0, plus = 0, space = 0, alt = 0, zero_pad = 0;
+    while (*p == '-' || *p == '+' || *p == ' ' || *p == '#' || *p == '0') {
+        if (*p == '-') left = 1;
+        else if (*p == '+') plus = 1;
+        else if (*p == ' ') space = 1;
+        else if (*p == '#') alt = 1;
+        else if (*p == '0') zero_pad = 1;
         p++;
     }
+    if (left) zero_pad = 0; /* - overrides 0 */
+    int width = 0;
     while (*p >= '0' && *p <= '9') {
         width = width * 10 + (*p - '0');
         p++;
     }
-    char type = *p ? *p : 'd';
-    if (type == 'x') {
-        if (zero_pad && width > 0)
-            written = snprintf(buf, sizeof(buf), "%0*llx", width, (unsigned long long)n);
-        else if (width > 0)
-            written = snprintf(buf, sizeof(buf), "%*llx", width, (unsigned long long)n);
-        else
-            written = snprintf(buf, sizeof(buf), "%llx", (unsigned long long)n);
-    } else if (type == 'X') {
-        if (zero_pad && width > 0)
-            written = snprintf(buf, sizeof(buf), "%0*llX", width, (unsigned long long)n);
-        else if (width > 0)
-            written = snprintf(buf, sizeof(buf), "%*llX", width, (unsigned long long)n);
-        else
-            written = snprintf(buf, sizeof(buf), "%llX", (unsigned long long)n);
+    char type = (*p == 'd' || *p == 'x' || *p == 'X' || *p == 'o' || *p == 'b' || *p == 'i'
+                 || *p == 'u')
+                    ? *p
+                    : 'd';
+    if (type == 'i' || type == 'u') type = 'd';
+
+    char num[96];
+    int nlen = 0;
+    char prefix[4];
+    int plen = 0;
+    prefix[0] = 0;
+
+    if (type == 'x' || type == 'X') {
+        unsigned long long u = (unsigned long long)n;
+        const char *digits = (type == 'X') ? "0123456789ABCDEF" : "0123456789abcdef";
+        if (u == 0) {
+            num[nlen++] = '0';
+        } else {
+            char rev[72];
+            int ri = 0;
+            while (u) {
+                rev[ri++] = digits[u & 15u];
+                u >>= 4;
+            }
+            while (ri > 0) num[nlen++] = rev[--ri];
+        }
+        num[nlen] = 0;
+        if (alt && n != 0) {
+            prefix[plen++] = '0';
+            prefix[plen++] = type; /* x or X */
+            prefix[plen] = 0;
+        }
     } else if (type == 'o') {
-        if (zero_pad && width > 0)
-            written = snprintf(buf, sizeof(buf), "%0*llo", width, (unsigned long long)n);
-        else if (width > 0)
-            written = snprintf(buf, sizeof(buf), "%*llo", width, (unsigned long long)n);
-        else
-            written = snprintf(buf, sizeof(buf), "%llo", (unsigned long long)n);
+        unsigned long long u = (unsigned long long)n;
+        if (u == 0) {
+            num[nlen++] = '0';
+        } else {
+            char rev[80];
+            int ri = 0;
+            while (u) {
+                rev[ri++] = (char)('0' + (u & 7u));
+                u >>= 3;
+            }
+            while (ri > 0) num[nlen++] = rev[--ri];
+        }
+        num[nlen] = 0;
+        if (alt && n != 0) {
+            prefix[plen++] = '0';
+            prefix[plen] = 0;
+        }
     } else if (type == 'b') {
-        /* Binary: manual. */
-        char bits[80];
-        int bi = 0;
         uint64_t u = (uint64_t)n;
         if (u == 0) {
-            bits[bi++] = '0';
+            num[nlen++] = '0';
         } else {
             char rev[66];
             int ri = 0;
@@ -1635,30 +1667,90 @@ static inline void mako_str_builder_write_i64_spec(
                 rev[ri++] = (char)('0' + (u & 1u));
                 u >>= 1;
             }
-            while (ri > 0) bits[bi++] = rev[--ri];
+            while (ri > 0) num[nlen++] = rev[--ri];
         }
-        bits[bi] = 0;
-        if (width > bi) {
-            char pad = zero_pad ? '0' : ' ';
-            int padn = width - bi;
-            if (padn > (int)sizeof(buf) - 1) padn = (int)sizeof(buf) - 1;
-            memset(buf, pad, (size_t)padn);
-            memcpy(buf + padn, bits, (size_t)bi + 1);
-            written = padn + bi;
-        } else {
-            written = snprintf(buf, sizeof(buf), "%s", bits);
+        num[nlen] = 0;
+        if (alt && n != 0) {
+            prefix[plen++] = '0';
+            prefix[plen++] = 'b';
+            prefix[plen] = 0;
         }
     } else {
-        /* d or bare width digits (e.g. "02" already consumed as zero+width, type d). */
-        if (type != 'd' && type != 0 && !(type >= '0' && type <= '9')) {
-            /* unknown letter → decimal */
+        /* decimal with optional sign */
+        int64_t v = n;
+        if (v < 0) {
+            prefix[plen++] = '-';
+            prefix[plen] = 0;
+            /* careful with INT64_MIN */
+            uint64_t u = (v == INT64_MIN)
+                             ? (uint64_t)1 << 63
+                             : (uint64_t)(-v);
+            if (u == 0) {
+                num[nlen++] = '0';
+            } else {
+                char rev[24];
+                int ri = 0;
+                while (u) {
+                    rev[ri++] = (char)('0' + (u % 10));
+                    u /= 10;
+                }
+                while (ri > 0) num[nlen++] = rev[--ri];
+            }
+        } else {
+            if (plus) {
+                prefix[plen++] = '+';
+                prefix[plen] = 0;
+            } else if (space) {
+                prefix[plen++] = ' ';
+                prefix[plen] = 0;
+            }
+            uint64_t u = (uint64_t)v;
+            if (u == 0) {
+                num[nlen++] = '0';
+            } else {
+                char rev[24];
+                int ri = 0;
+                while (u) {
+                    rev[ri++] = (char)('0' + (u % 10));
+                    u /= 10;
+                }
+                while (ri > 0) num[nlen++] = rev[--ri];
+            }
         }
-        if (zero_pad && width > 0)
-            written = snprintf(buf, sizeof(buf), "%0*lld", width, (long long)n);
-        else if (width > 0)
-            written = snprintf(buf, sizeof(buf), "%*lld", width, (long long)n);
-        else
-            written = snprintf(buf, sizeof(buf), "%lld", (long long)n);
+        num[nlen] = 0;
+    }
+
+    int total = plen + nlen;
+    int pad = (width > total) ? (width - total) : 0;
+    char buf[160];
+    int written = 0;
+    if (left) {
+        if (plen) {
+            memcpy(buf + written, prefix, (size_t)plen);
+            written += plen;
+        }
+        memcpy(buf + written, num, (size_t)nlen);
+        written += nlen;
+        memset(buf + written, ' ', (size_t)pad);
+        written += pad;
+    } else if (zero_pad && pad > 0) {
+        if (plen) {
+            memcpy(buf + written, prefix, (size_t)plen);
+            written += plen;
+        }
+        memset(buf + written, '0', (size_t)pad);
+        written += pad;
+        memcpy(buf + written, num, (size_t)nlen);
+        written += nlen;
+    } else {
+        memset(buf + written, ' ', (size_t)pad);
+        written += pad;
+        if (plen) {
+            memcpy(buf + written, prefix, (size_t)plen);
+            written += plen;
+        }
+        memcpy(buf + written, num, (size_t)nlen);
+        written += nlen;
     }
     if (written < 0) written = 0;
     if ((size_t)written >= sizeof(buf)) written = (int)sizeof(buf) - 1;
@@ -1668,38 +1760,61 @@ static inline void mako_str_builder_write_i64_spec(
     b->data[b->len] = 0;
 }
 
-/* Float specs: ".2", ".2f", "f", or empty (6 decimals default via format_float path). */
+/* Float specs: flags (+ - space 0), width, .prec, type f/e/g (default f). */
 static inline void mako_str_builder_write_f64_spec(
     MakoStrBuilder *b, double n, const char *spec
 ) {
+    int left = 0, plus = 0, space = 0, zero_pad = 0;
+    int width = 0;
     int prec = 6;
+    int have_prec = 0;
+    char type = 'f';
     if (spec && spec[0]) {
         const char *p = spec;
+        while (*p == '-' || *p == '+' || *p == ' ' || *p == '0') {
+            if (*p == '-') left = 1;
+            else if (*p == '+') plus = 1;
+            else if (*p == ' ') space = 1;
+            else if (*p == '0') zero_pad = 1;
+            p++;
+        }
+        if (left) zero_pad = 0;
+        while (*p >= '0' && *p <= '9') {
+            width = width * 10 + (*p - '0');
+            p++;
+        }
         if (*p == '.') {
             p++;
+            have_prec = 1;
             prec = 0;
             while (*p >= '0' && *p <= '9') {
                 prec = prec * 10 + (*p - '0');
                 p++;
             }
-        } else if (*p == 'f' || *p == 'F') {
-            prec = 6;
-        } else {
-            /* bare digits? treat as precision */
-            int v = 0;
-            int any = 0;
-            while (*p >= '0' && *p <= '9') {
-                v = v * 10 + (*p - '0');
-                p++;
-                any = 1;
-            }
-            if (any) prec = v;
+        }
+        if (*p == 'f' || *p == 'F' || *p == 'e' || *p == 'E' || *p == 'g' || *p == 'G') {
+            type = *p;
+        } else if (!have_prec && width > 0 && *p == 0) {
+            /* bare digits already consumed as width — keep prec 6 */
         }
         if (prec < 0) prec = 0;
         if (prec > 17) prec = 17;
     }
-    char buf[128];
-    int written = snprintf(buf, sizeof(buf), "%.*f", prec, n);
+    char fmt[32];
+    char flags[8];
+    int fi = 0;
+    if (left) flags[fi++] = '-';
+    if (plus) flags[fi++] = '+';
+    else if (space) flags[fi++] = ' ';
+    if (zero_pad) flags[fi++] = '0';
+    flags[fi] = 0;
+    if (width > 0) {
+        snprintf(fmt, sizeof(fmt), "%%%s%d.%d%c", flags, width, prec, type);
+    } else {
+        snprintf(fmt, sizeof(fmt), "%%%s.%d%c", flags, prec, type);
+    }
+    char buf[160];
+    int written = snprintf(buf, sizeof(buf), fmt, n);
     if (written < 0) written = 0;
     if ((size_t)written >= sizeof(buf)) written = (int)sizeof(buf) - 1;
     mako_str_builder_grow(b, b->len + (size_t)written + 1);
@@ -1708,7 +1823,7 @@ static inline void mako_str_builder_write_f64_spec(
     b->data[b->len] = 0;
 }
 
-/* String width pad: "10" left-pad spaces, "<10" left-align (pad right), ">10" right-align. */
+/* String width pad: flags -/< left, > right (default), 0 ignored; width digits. */
 static inline void mako_str_builder_write_str_spec(
     MakoStrBuilder *b, MakoString s, const char *spec
 ) {
@@ -1718,11 +1833,9 @@ static inline void mako_str_builder_write_str_spec(
     }
     int left_align = 0;
     const char *p = spec;
-    if (*p == '<') {
-        left_align = 1;
-        p++;
-    } else if (*p == '>') {
-        left_align = 0;
+    while (*p == '<' || *p == '>' || *p == '-' || *p == '0') {
+        if (*p == '<' || *p == '-') left_align = 1;
+        else if (*p == '>') left_align = 0;
         p++;
     }
     int width = 0;
