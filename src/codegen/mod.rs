@@ -8440,6 +8440,11 @@ impl Codegen {
                 "Sst" => "MakoSst*".into(),
                 "PageCache" => "MakoPageCache*".into(),
                 "PageBTree" => "MakoPageBTree*".into(),
+                // Storage polish seeds (0.1.4+): must map to pointers so they work as
+                // params, returns, and struct fields (not fall through to int64_t).
+                "Bloom" => "MakoBloom*".into(),
+                "PageMan" => "MakoPageMan*".into(),
+                "Predict" => "MakoPredict*".into(),
                 "EvLoop" => "MakoEvLoop*".into(),
                 "Buf" => "MakoBuf*".into(),
                 "GameUDP" => "MakoGameUDP*".into(),
@@ -8466,6 +8471,9 @@ impl Codegen {
                 "Secret" => "MakoSecret".into(),
                 "MysqlConn" => "MakoMysqlConn".into(),
                 "RedisConn" => "MakoRedisConn".into(),
+                "ZipWriter" => "MakoZipWriter*".into(),
+                "ReflectValue" => "MakoReflectValue*".into(),
+                "Limits" => "MakoLimits*".into(),
                 other if self.enums.contains_key(other) => self.enums[other].c_name.clone(),
                 other if self.structs.contains_key(other) => self.structs[other].c_name.clone(),
                 other if self.interfaces.iter().any(|(n, _)| n == other) => {
@@ -13535,6 +13543,10 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         "bloom_len" => {
                             let (_, b) = self.emit_expr(&args[0]);
                             return ("int64_t".into(), format!("mako_bloom_len({b})"));
+                        }
+                        "bloom_clear" => {
+                            let (_, b) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_bloom_clear({b})"));
                         }
                         "bloom_free" => {
                             let (_, b) = self.emit_expr(&args[0]);

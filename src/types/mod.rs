@@ -1836,6 +1836,7 @@ impl TypeChecker {
         fns.insert("bloom_add".into(), Type::Fn(vec![Type::Named("Bloom".into()), Type::Int], Box::new(Type::Int)));
         fns.insert("bloom_maybe".into(), Type::Fn(vec![Type::Named("Bloom".into()), Type::Int], Box::new(Type::Int)));
         fns.insert("bloom_len".into(), Type::Fn(vec![Type::Named("Bloom".into())], Box::new(Type::Int)));
+        fns.insert("bloom_clear".into(), Type::Fn(vec![Type::Named("Bloom".into())], Box::new(Type::Int)));
         fns.insert("bloom_free".into(), Type::Fn(vec![Type::Named("Bloom".into())], Box::new(Type::Int)));
         fns.insert(
             "btree_range".into(),

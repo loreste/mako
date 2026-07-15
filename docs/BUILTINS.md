@@ -333,8 +333,8 @@ config/log updates. Tests: `examples/testing/fs_storage_test.mko`.
 | `sst_build4` / `sst_get` / `sst_len` / `sst_free` | … | Sorted run + binary search |
 | `sst_range` | `sst_range(s, lo, hi) -> int` | Inclusive SST range → TLS buffer |
 | `range_len` / `range_key_at` / `range_val_at` | … | Read last range result (cap 128) |
-| `bloom_new` / `bloom_add` / `bloom_maybe` / `bloom_len` / `bloom_free` | … | Bloom filter (int64 keys; no false negatives) |
-| `pman_open` / `pman_alloc` / `pman_set` / `pman_get` / `pman_sync` / `pman_close` | … | Disk page manager (4 KiB file-backed) |
+| `bloom_new` / `bloom_add` / `bloom_maybe` / `bloom_len` / `bloom_clear` / `bloom_free` | … | Bloom filter (int64 keys; no false negatives). `bloom_clear` resets bits for rebuild; `Bloom` is a first-class handle: params, returns, struct fields |
+| `pman_open` / `pman_alloc` / `pman_set` / `pman_get` / `pman_sync` / `pman_close` | … | Disk page manager (4 KiB file-backed). `PageMan` handle works as param/return/struct field |
 | `pman_pages` / `pman_reads` / `pman_writes` | … | Page count + I/O counters |
 | `pcache_new` / `pcache_get` / `pcache_hits` / `pcache_misses` / `pcache_free` | … | 16-slot LRU page cache |
 | `mvcc_new` / `mvcc_begin` / `mvcc_put` / `mvcc_get` / `mvcc_gc` / `mvcc_live` / `mvcc_free` | … | Multi-version KV + GC |

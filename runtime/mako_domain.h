@@ -1177,6 +1177,14 @@ static inline int64_t mako_bloom_len(MakoBloom *b) {
     return b ? b->n : 0;
 }
 
+/* Clear bits and key count; keep the allocation (rebuild without free/new). */
+static inline int64_t mako_bloom_clear(MakoBloom *b) {
+    if (!b) return -1;
+    memset(b->bits, 0, sizeof(b->bits));
+    b->n = 0;
+    return 0;
+}
+
 static inline int64_t mako_bloom_free(MakoBloom *b) {
     free(b);
     return 0;

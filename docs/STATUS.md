@@ -91,6 +91,7 @@ const-fn depth (match/while/for/strings) · suite **165+** · [The Mako Book](bo
 | LSM compact · store WAL recover · hot-reload mtime | Done seed — `domain_tracks_test` (`lsm_compact`, `store_recover_wal`, `hot_reload_*`) |
 | Multi-level LSM (L1–L3) · page-backed btree | Done seed — `domain_tracks_test` (`lsm_compact_down`, `pbtree_*`) |
 | Storage polish (bloom · range · disk page manager) | Done seed — `domain_tracks_test` (`bloom_*`, `btree_range`/`sst_range`, `pman_*`) |
+| Domain handles as params/returns/struct fields | Done — `Bloom`/`PageMan`/`Predict`/… map to C pointers · `TestDomainHandleFieldsAndFns` |
 | SQL str4 empty-bind arity + multi-arg `sql_query_str2/3/4` | Done — `sql_str4_empty_bind_test` · `sql_query_str_multi_test` |
 | Zero-copy string regions (language) | Done — `str_slice_eq` / `str_slice_index` / `str_at_eq` / `str_byte_at` · `str_slice_zc_test` |
 | Debugger depth (line BP · frames · async parent · snapshot) | Done seed — `fn_drop_debug_test` |

@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+### Domain handle C types (Bloom · PageMan · Predict · …)
+
+- Map storage-polish / residual domain handles in `type_expr_c` so they are
+  real C pointers (`MakoBloom*`, `MakoPageMan*`, …) instead of falling through
+  to `int64_t`.
+- Enables **params**, **returns**, and **struct fields** for `Bloom`,
+  `PageMan`, `Predict`, plus `ZipWriter` / `ReflectValue` / `Limits`.
+- Tests: `TestDomainHandleFieldsAndFns` in `domain_tracks_test`.
+
+### `bloom_clear`
+
+- Reset filter bits and key count without freeing (`mako_bloom_clear`).
+- Lets product code rebuild a bloom in place (e.g. index rebuild).
+
 ## 0.1.7 — 2026-07-15
 
 **mako0.1.7** (`CARGO_PKG_VERSION`).

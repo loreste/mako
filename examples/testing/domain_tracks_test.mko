@@ -130,7 +130,75 @@ fn TestBloomFilter() {
     // Definitely absent keys return 0 (no false negatives)
     assert_eq(bloom_maybe(b, 999001), 0)
     assert_eq(bloom_maybe(b, 999002), 0)
+    // Rebuild in place
+    assert_eq(bloom_clear(b), 0)
+    assert_eq(bloom_len(b), 0)
+    assert_eq(bloom_maybe(b, 10), 0)
+    assert_eq(bloom_add(b, 77), 0)
+    assert_eq(bloom_maybe(b, 77), 1)
+    assert_eq(bloom_maybe(b, 10), 0)
     assert_eq(bloom_free(b), 0)
+}
+
+// Domain handles as params / returns / struct fields (C type mapping, not int64_t).
+struct BloomBox {
+    n: int
+    b: Bloom
+}
+
+struct BTreeBox {
+    t: BTree
+}
+
+struct PageManBox {
+    pm: PageMan
+}
+
+fn bloom_probe(b: Bloom, key: int) -> int {
+    return bloom_maybe(b, key)
+}
+
+fn bloom_make_with(key: int) -> Bloom {
+    let b = bloom_new()
+    let _ = bloom_add(b, key)
+    return b
+}
+
+fn btree_get_wrap(t: BTree, key: int) -> int {
+    return btree_get(t, key)
+}
+
+fn TestDomainHandleFieldsAndFns() {
+    // Bloom: return + param + struct field
+    let b = bloom_make_with(42)
+    assert_eq(bloom_probe(b, 42), 1)
+    assert_eq(bloom_probe(b, 999001), 0)
+    let box = BloomBox { n: 1, b: b }
+    assert_eq(bloom_maybe(box.b, 42), 1)
+    assert_eq(bloom_len(box.b), 1)
+    assert_eq(bloom_free(box.b), 0)
+
+    // BTree: param + struct field + range still works
+    let t = btree_new()
+    assert_eq(btree_put(t, 10, 100), 0)
+    assert_eq(btree_put(t, 20, 200), 0)
+    assert_eq(btree_get_wrap(t, 10), 100)
+    let tb = BTreeBox { t: t }
+    assert_eq(btree_get(tb.t, 20), 200)
+    assert_eq(btree_range(tb.t, 10, 20), 2)
+    assert_eq(range_val_at(0), 100)
+    assert_eq(range_val_at(1), 200)
+    assert_eq(btree_free(tb.t), 0)
+
+    // PageMan: struct field
+    let path = "/tmp/mako_pman_field.dat"
+    assert_eq(write_file(path, ""), 0)
+    let pm = pman_open(path)
+    let p1 = pman_alloc(pm)
+    assert_eq(pman_set(pm, p1, 0, 7), 0)
+    let pb = PageManBox { pm: pm }
+    assert_eq(pman_get(pb.pm, p1, 0), 7)
+    assert_eq(pman_close(pb.pm), 0)
 }
 
 fn TestBtreeAndSstRange() {
