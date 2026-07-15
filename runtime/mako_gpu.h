@@ -430,6 +430,31 @@ static inline int64_t mako_gpu_opencl_ok(void) {
 #endif
 }
 
+/* Metal / CUDA / Vulkan availability stubs (0 unless build flags). Product backends Later. */
+static inline int64_t mako_gpu_metal_ok(void) {
+#if defined(MAKO_HAS_METAL)
+    return 1;
+#else
+    return 0;
+#endif
+}
+
+static inline int64_t mako_gpu_cuda_ok(void) {
+#if defined(MAKO_HAS_CUDA)
+    return 1;
+#else
+    return 0;
+#endif
+}
+
+static inline int64_t mako_gpu_vulkan_ok(void) {
+#if defined(MAKO_HAS_VULKAN)
+    return 1;
+#else
+    return 0;
+#endif
+}
+
 /* Force host path (1) or restore prefer-OpenCL (0). Returns previous. */
 static inline int64_t mako_gpu_set_prefer_host(int64_t on) {
     int prev = mako_gpu_prefer_host;

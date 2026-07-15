@@ -1553,6 +1553,11 @@ impl TypeChecker {
             "snap_reconcile".into(),
             Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int)),
         );
+        fns.insert("snap_diff".into(), Type::Fn(vec![Type::String, Type::String], Box::new(Type::String)));
+        fns.insert("snap_apply_delta".into(), Type::Fn(vec![Type::String, Type::String], Box::new(Type::String)));
+        fns.insert("netcode_lag_comp_tick".into(), Type::Fn(vec![Type::Int, Type::Int, Type::Int], Box::new(Type::Int)));
+        fns.insert("netcode_interp".into(), Type::Fn(vec![Type::Int, Type::Int, Type::Int], Box::new(Type::Int)));
+
 
         fns.insert("btree_new".into(), Type::Fn(vec![], Box::new(Type::Named("BTree".into()))));
         fns.insert("btree_put".into(), Type::Fn(vec![Type::Named("BTree".into()), Type::Int, Type::Int], Box::new(Type::Int)));
@@ -1678,6 +1683,14 @@ impl TypeChecker {
             "hot_reload_changed".into(),
             Type::Fn(vec![Type::String], Box::new(Type::Int)),
         );
+        fns.insert(
+            "hot_reload_unwatch".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "hot_reload_watch_count".into(),
+            Type::Fn(vec![], Box::new(Type::Int)),
+        );
         fns.insert("mvcc_new".into(), Type::Fn(vec![], Box::new(Type::Named("Mvcc".into()))));
         fns.insert("mvcc_begin".into(), Type::Fn(vec![Type::Named("Mvcc".into())], Box::new(Type::Int)));
         fns.insert("mvcc_put".into(), Type::Fn(vec![Type::Named("Mvcc".into()), Type::Int, Type::Int], Box::new(Type::Int)));
@@ -1694,6 +1707,9 @@ impl TypeChecker {
         fns.insert("gfx_window_width".into(), Type::Fn(vec![Type::Named("GfxWindow".into())], Box::new(Type::Int)));
         fns.insert("gfx_window_height".into(), Type::Fn(vec![Type::Named("GfxWindow".into())], Box::new(Type::Int)));
         fns.insert("gfx_window_close".into(), Type::Fn(vec![Type::Named("GfxWindow".into())], Box::new(Type::Int)));
+        fns.insert("gfx_poll".into(), Type::Fn(vec![Type::Named("GfxWindow".into())], Box::new(Type::Int)));
+        fns.insert("gfx_backend_name".into(), Type::Fn(vec![], Box::new(Type::String)));
+
         fns.insert("gfx_shader_compile".into(), Type::Fn(vec![Type::String], Box::new(Type::Int)));
         fns.insert("gfx_asset_size".into(), Type::Fn(vec![Type::String], Box::new(Type::Int)));
         fns.insert("audio_mix".into(), Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int)));
@@ -4757,6 +4773,22 @@ impl TypeChecker {
             Type::Fn(vec![], Box::new(Type::Int)),
         );
         fns.insert(
+            "dap_initialize_response".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::String)),
+        );
+        fns.insert(
+            "dap_stopped_event".into(),
+            Type::Fn(vec![Type::String, Type::Int], Box::new(Type::String)),
+        );
+        fns.insert(
+            "dap_threads_response".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::String)),
+        );
+        fns.insert(
+            "dap_request_command".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::String)),
+        );
+        fns.insert(
             "process_rss_bytes".into(),
             Type::Fn(vec![], Box::new(Type::Int)),
         );
@@ -4807,6 +4839,14 @@ impl TypeChecker {
         fns.insert(
             "profile_samples_json".into(),
             Type::Fn(vec![], Box::new(Type::String)),
+        );
+        fns.insert(
+            "profile_samples_pprof_text".into(),
+            Type::Fn(vec![], Box::new(Type::String)),
+        );
+        fns.insert(
+            "profile_sample_thread_count".into(),
+            Type::Fn(vec![], Box::new(Type::Int)),
         );
         fns.insert(
             "ecs_world_new".into(),
@@ -4903,6 +4943,10 @@ impl TypeChecker {
             "gpu_opencl_ok".into(),
             Type::Fn(vec![], Box::new(Type::Int)),
         );
+        fns.insert("gpu_metal_ok".into(), Type::Fn(vec![], Box::new(Type::Int)));
+        fns.insert("gpu_cuda_ok".into(), Type::Fn(vec![], Box::new(Type::Int)));
+        fns.insert("gpu_vulkan_ok".into(), Type::Fn(vec![], Box::new(Type::Int)));
+
         fns.insert(
             "gpu_set_prefer_host".into(),
             Type::Fn(vec![Type::Int], Box::new(Type::Int)),
@@ -7635,6 +7679,11 @@ impl TypeChecker {
             "dlopen_probe".into(),
             Type::Fn(vec![Type::String], Box::new(Type::Int)),
         );
+        fns.insert("plugin_open".into(), Type::Fn(vec![Type::String], Box::new(Type::Int)));
+        fns.insert("plugin_call".into(), Type::Fn(vec![Type::Int, Type::String, Type::String], Box::new(Type::String)));
+        fns.insert("plugin_close".into(), Type::Fn(vec![Type::Int], Box::new(Type::Int)));
+        fns.insert("ffi_abi_name".into(), Type::Fn(vec![], Box::new(Type::String)));
+
         fns.insert(
             "http_listen".into(),
             Type::Fn(vec![Type::Int, Type::String], Box::new(Type::Int)),

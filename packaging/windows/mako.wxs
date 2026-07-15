@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- WiX MSI seed for Mako. Build after package-release.ps1 stages files.
+     See scripts/package-msi-notes.md. Requires WiX Toolset v3/v4.
+     Does not sign; signing is external (CI secrets). -->
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Product Id="*" Name="Mako" Language="1033" Version="0.1.3.0"
+           Manufacturer="Mako" UpgradeCode="A1B2C3D4-E5F6-7890-ABCD-EF1234567890">
+    <Package InstallerVersion="500" Compressed="yes" InstallScope="perMachine" />
+    <MajorUpgrade DowngradeErrorMessage="A newer version of Mako is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <Feature Id="ProductFeature" Title="Mako" Level="1">
+      <ComponentGroupRef Id="ProductComponents" />
+    </Feature>
+
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <Directory Id="ProgramFiles64Folder">
+        <Directory Id="INSTALLFOLDER" Name="Mako">
+          <Directory Id="BIN" Name="bin" />
+          <Directory Id="SHARE" Name="share">
+            <Directory Id="MAKO_SHARE" Name="mako">
+              <Directory Id="RUNTIME" Name="runtime" />
+              <Directory Id="STD" Name="std" />
+            </Directory>
+          </Directory>
+        </Directory>
+      </Directory>
+    </Directory>
+
+    <!-- Harvest staged layout with heat.exe in package-msi-seed.sh;
+         this skeleton documents the intended directory tree. -->
+    <ComponentGroup Id="ProductComponents" Directory="INSTALLFOLDER">
+      <Component Id="MakoExe" Guid="*">
+        <File Id="MakoBin" Source="!(bindpath.Stage)\bin\mako.exe" KeyPath="yes" />
+        <Environment Id="Path" Name="PATH" Value="[BIN]" Permanent="no" Part="last" Action="set" System="yes" />
+      </Component>
+    </ComponentGroup>
+  </Product>
+</Wix>

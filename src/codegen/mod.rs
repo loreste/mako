@@ -12931,6 +12931,38 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                                 format!("mako_snap_reconcile({p}, {a})"),
                             );
                         }
+                        "snap_diff" => {
+                            let (_, a) = self.emit_expr(&args[0]);
+                            let (_, b) = self.emit_expr(&args[1]);
+                            let tmp = self.fresh("sdf");
+                            self.line(&format!("MakoString {tmp} = mako_snap_diff({a}, {b});"));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "snap_apply_delta" => {
+                            let (_, a) = self.emit_expr(&args[0]);
+                            let (_, b) = self.emit_expr(&args[1]);
+                            let tmp = self.fresh("sad");
+                            self.line(&format!("MakoString {tmp} = mako_snap_apply_delta({a}, {b});"));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "netcode_lag_comp_tick" => {
+                            let (_, a) = self.emit_expr(&args[0]);
+                            let (_, b) = self.emit_expr(&args[1]);
+                            let (_, c) = self.emit_expr(&args[2]);
+                            return (
+                                "int64_t".into(),
+                                format!("mako_netcode_lag_comp_tick({a}, {b}, {c})"),
+                            );
+                        }
+                        "netcode_interp" => {
+                            let (_, a) = self.emit_expr(&args[0]);
+                            let (_, b) = self.emit_expr(&args[1]);
+                            let (_, c) = self.emit_expr(&args[2]);
+                            return (
+                                "int64_t".into(),
+                                format!("mako_netcode_interp({a}, {b}, {c})"),
+                            );
+                        }
 
                         "btree_new" => {
                             let tmp = self.fresh("bt");
@@ -13261,6 +13293,13 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             self.line(&format!("int64_t {tmp} = mako_hot_reload_changed({p});"));
                             return ("int64_t".into(), tmp);
                         }
+                        "hot_reload_unwatch" => {
+                            let (_, p) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_hot_reload_unwatch({p})"));
+                        }
+                        "hot_reload_watch_count" => {
+                            return ("int64_t".into(), "mako_hot_reload_watch_count()".into());
+                        }
                         "mvcc_new" => {
                             let tmp = self.fresh("mv");
                             self.line(&format!("MakoMvcc *{tmp} = mako_mvcc_new();"));
@@ -13340,6 +13379,15 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         "gfx_window_close" => {
                             let (_, w) = self.emit_expr(&args[0]);
                             return ("int64_t".into(), format!("mako_gfx_window_close({w})"));
+                        }
+                        "gfx_poll" => {
+                            let (_, w) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_gfx_poll({w})"));
+                        }
+                        "gfx_backend_name" => {
+                            let tmp = self.fresh("gbn");
+                            self.line(&format!("MakoString {tmp} = mako_gfx_backend_name();"));
+                            return ("MakoString".into(), tmp);
                         }
                         "gfx_shader_compile" => {
                             let (_, s) = self.emit_expr(&args[0]);
@@ -18713,6 +18761,31 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         "debug_current_task" => {
                             return ("int64_t".into(), "mako_debug_current_task()".into());
                         }
+                        "dap_initialize_response" => {
+                            let (_, s) = self.emit_expr(&args[0]);
+                            let tmp = self.fresh("dapinit");
+                            self.line(&format!("MakoString {tmp} = mako_dap_initialize_response({s});"));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "dap_stopped_event" => {
+                            let (_, r) = self.emit_expr(&args[0]);
+                            let (_, t) = self.emit_expr(&args[1]);
+                            let tmp = self.fresh("dapstop");
+                            self.line(&format!("MakoString {tmp} = mako_dap_stopped_event({r}, {t});"));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "dap_threads_response" => {
+                            let (_, s) = self.emit_expr(&args[0]);
+                            let tmp = self.fresh("dapthr");
+                            self.line(&format!("MakoString {tmp} = mako_dap_threads_response({s});"));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "dap_request_command" => {
+                            let (_, r) = self.emit_expr(&args[0]);
+                            let tmp = self.fresh("dapcmd");
+                            self.line(&format!("MakoString {tmp} = mako_dap_request_command({r});"));
+                            return ("MakoString".into(), tmp);
+                        }
                         "crash_report_install" => {
                             let (_, p) = self.emit_expr(&args[0]);
                             return (
@@ -18780,6 +18853,16 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                                 "MakoString {tmp} = mako_profile_samples_json();"
                             ));
                             return ("MakoString".into(), tmp);
+                        }
+                        "profile_samples_pprof_text" => {
+                            let tmp = self.fresh("ppf");
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_profile_samples_pprof_text();"
+                            ));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "profile_sample_thread_count" => {
+                            return ("int64_t".into(), "mako_profile_sample_thread_count()".into());
                         }
                         "ecs_world_new" => {
                             let (_, cap) = self.emit_expr(&args[0]);
@@ -22758,6 +22841,27 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             let (_, p) = self.emit_expr(&args[0]);
                             return ("int64_t".into(), format!("mako_dlopen_probe({p})"));
                         }
+                        "plugin_open" => {
+                            let (_, p) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_plugin_open({p})"));
+                        }
+                        "plugin_call" => {
+                            let (_, h) = self.emit_expr(&args[0]);
+                            let (_, o) = self.emit_expr(&args[1]);
+                            let (_, pl) = self.emit_expr(&args[2]);
+                            let tmp = self.fresh("plc");
+                            self.line(&format!("MakoString {tmp} = mako_plugin_call({h}, {o}, {pl});"));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "plugin_close" => {
+                            let (_, h) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_plugin_close({h})"));
+                        }
+                        "ffi_abi_name" => {
+                            let tmp = self.fresh("ffiabi");
+                            self.line(&format!("MakoString {tmp} = mako_ffi_abi_name();"));
+                            return ("MakoString".into(), tmp);
+                        }
                         "http_listen" => {
                             let (_, port) = self.emit_expr(&args[0]);
                             let (_, body) = self.emit_expr(&args[1]);
@@ -22973,6 +23077,15 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         }
                         "gpu_opencl_ok" => {
                             return ("int64_t".into(), "mako_gpu_opencl_ok()".into());
+                        }
+                        "gpu_metal_ok" => {
+                            return ("int64_t".into(), "mako_gpu_metal_ok()".into());
+                        }
+                        "gpu_cuda_ok" => {
+                            return ("int64_t".into(), "mako_gpu_cuda_ok()".into());
+                        }
+                        "gpu_vulkan_ok" => {
+                            return ("int64_t".into(), "mako_gpu_vulkan_ok()".into());
                         }
                         "gpu_set_prefer_host" => {
                             let (_, on) = self.emit_expr(&args[0]);

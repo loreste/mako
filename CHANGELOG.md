@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+### Residual roadmap seeds (DAP · pprof · packaging · domain · interop)
+
+- **DAP JSON:** `dap_initialize_response` / `dap_stopped_event` / `dap_threads_response` /
+  `dap_request_command` (adapter helpers; lldb remains DWARF path).
+- **pprof-text:** `profile_samples_pprof_text` · per-sample `tid` ·
+  `profile_sample_thread_count`.
+- **Packaging:** `packaging/windows/mako.wxs` · `package-msi-seed.sh` ·
+  `package-notarize-seed.sh` · `publish-homebrew-tap-seed.sh` ·
+  `publish-winget-seed.sh` · `.github/workflows/package-seed.yml`.
+- **Domain:** `gfx_poll` / `gfx_backend_name` · `gpu_metal_ok` / `cuda_ok` /
+  `vulkan_ok` stubs · `snap_diff` / `snap_apply_delta` · `netcode_*`.
+- **Interop / reload:** `plugin_open` / `plugin_call` / `plugin_close` ·
+  `ffi_abi_name` · `hot_reload_unwatch` / `hot_reload_watch_count`.
+- Tests: `residual_seeds_test.mko` (+ extended domain/profile tests).
+
 ### Sampling CPU profiler seed
 
 - `profile_sample_clear` / `once` / `start` / `stop` / `count` / `len`

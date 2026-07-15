@@ -5191,6 +5191,79 @@ static inline MakoString mako_debug_frames_json(void) {
     return (MakoString){buf, len};
 }
 
+/* ---- DAP (Debug Adapter Protocol) JSON seed — not a full DAP server ----
+ * Helpers for building initialize / stopped / scopes-style messages so tools
+ * can wire a thin adapter. Real DWARF locals remain via lldb on generated C.
+ */
+static inline MakoString mako_dap_initialize_response(int64_t req_seq) {
+    char buf[512];
+    int n = snprintf(
+        buf, sizeof(buf),
+        "{\"seq\":1,\"type\":\"response\",\"request_seq\":%" PRId64
+        ",\"success\":true,\"command\":\"initialize\","
+        "\"body\":{\"supportsConfigurationDoneRequest\":true,"
+        "\"supportsEvaluateForHovers\":true,\"supportsSetVariable\":false,"
+        "\"supportsStepBack\":false,\"supportsRestartRequest\":false,"
+        "\"exceptionBreakpointFilters\":[],"
+        "\"makoSeed\":true,\"schema\":\"mako.dap.v1\"}}",
+        req_seq
+    );
+    if (n < 0) return mako_str_from_cstr("{}");
+    return mako_str_from_cstr(buf);
+}
+
+static inline MakoString mako_dap_stopped_event(MakoString reason, int64_t thread_id) {
+    char rbuf[64];
+    size_t n = reason.data && reason.len < 63 ? reason.len : (reason.data ? 63 : 0);
+    if (reason.data && n) memcpy(rbuf, reason.data, n);
+    rbuf[n] = 0;
+    for (size_t i = 0; i < n; i++) {
+        if (rbuf[i] == '"' || rbuf[i] == '\\') rbuf[i] = '_';
+    }
+    char buf[384];
+    int w = snprintf(
+        buf, sizeof(buf),
+        "{\"seq\":2,\"type\":\"event\",\"event\":\"stopped\","
+        "\"body\":{\"reason\":\"%s\",\"threadId\":%" PRId64
+        ",\"allThreadsStopped\":false,\"schema\":\"mako.dap.v1\"}}",
+        rbuf[0] ? rbuf : "breakpoint",
+        thread_id
+    );
+    if (w < 0) return mako_str_from_cstr("{}");
+    return mako_str_from_cstr(buf);
+}
+
+static inline MakoString mako_dap_threads_response(int64_t req_seq) {
+    char buf[384];
+    int n = snprintf(
+        buf, sizeof(buf),
+        "{\"seq\":3,\"type\":\"response\",\"request_seq\":%" PRId64
+        ",\"success\":true,\"command\":\"threads\","
+        "\"body\":{\"threads\":[{\"id\":1,\"name\":\"main\"}]}}",
+        req_seq
+    );
+    if (n < 0) return mako_str_from_cstr("{}");
+    return mako_str_from_cstr(buf);
+}
+
+/* Extract "command" field from a tiny DAP request JSON (string scan). */
+static inline MakoString mako_dap_request_command(MakoString req) {
+    if (!req.data || req.len < 12) return mako_str_from_cstr("");
+    const char *p = strstr(req.data, "\"command\"");
+    if (!p) return mako_str_from_cstr("");
+    p = strchr(p + 9, '"');
+    if (!p) return mako_str_from_cstr("");
+    p++;
+    const char *e = strchr(p, '"');
+    if (!e || e <= p) return mako_str_from_cstr("");
+    size_t n = (size_t)(e - p);
+    char *d = (char *)malloc(n + 1);
+    if (!d) return mako_str_from_cstr("");
+    memcpy(d, p, n);
+    d[n] = 0;
+    return (MakoString){d, n};
+}
+
 /* Combined debugger snapshot for tools / exporters. */
 static inline MakoString mako_debug_snapshot_json(void) {
     MakoString tasks = mako_tasks_inspect_json();

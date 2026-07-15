@@ -9,6 +9,7 @@ quick inline prints to full-featured debugger sessions and sanitizer runs.
 
 1. [Debug vs release builds](#debug-vs-release-builds)
 2. [Inline debugging: dbg and dbg_str](#inline-debugging-dbg-and-dbg_str)
+2b. [DAP JSON seed](#dap-json-seed)
 3. [Running with lldb](#running-with-lldb)
 4. [Address sanitizer](#address-sanitizer)
 5. [Thread sanitizer](#thread-sanitizer)
@@ -20,6 +21,22 @@ quick inline prints to full-featured debugger sessions and sanitizer runs.
 11. [Example debugging session](#example-debugging-session)
 
 ---
+
+## DAP JSON seed
+
+Mako ships **helpers** for Debug Adapter Protocol–shaped JSON (not a full DAP
+server). Use them to prototype adapters; real source-level locals still go
+through **lldb on generated C** (`-g` + `#line` mapping).
+
+```mko
+let init = dap_initialize_response(1)
+let stop = dap_stopped_event("breakpoint", 1)
+let cmd = dap_request_command(req_json)  // extract "command"
+let snap = debug_snapshot_json()         // tasks + locals + frames
+```
+
+Also: `debug_line_bp_*`, `debug_push_frame` / `debug_frames_json`, soft
+`debug_break` / optional `debug_trap_enable`.
 
 ## Debug vs release builds
 

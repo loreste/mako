@@ -1,0 +1,25 @@
+name: Package seeds
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "packaging/**"
+      - "scripts/package-*.sh"
+      - "scripts/publish-*.sh"
+      - "Formula/**"
+      - ".github/workflows/package-seed.yml"
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: MSI seed
+        run: bash scripts/package-msi-seed.sh
+      - name: Notarize seed
+        run: bash scripts/package-notarize-seed.sh
+      - name: Homebrew publish seed
+        run: bash scripts/publish-homebrew-tap-seed.sh
+      - name: Winget publish seed
+        run: bash scripts/publish-winget-seed.sh

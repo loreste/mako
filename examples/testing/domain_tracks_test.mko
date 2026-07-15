@@ -224,6 +224,7 @@ fn TestHotReloadWatch() {
     assert_eq(write_file(path, "v2"), 0)
     assert_eq(hot_reload_changed(path), 1)
     assert_eq(hot_reload_changed(path), 0)
+    assert_eq(hot_reload_unwatch(path), 1)
 }
 
 fn TestMvccSnapshotRead() {

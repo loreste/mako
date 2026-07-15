@@ -92,6 +92,10 @@ Last inventory: 2026-07-14 (**unique Mako surface** · pack/pull types · full m
 | Debugger depth (line BP · frames · async parent · snapshot) | Done seed — `fn_drop_debug_test` |
 | OTLP protobuf + HTTP exporter client | Done seed — `trace_export_otlp_pb` · `otlp_export_traces_*` · `observability_depth_test` |
 | Sampling CPU profiler | Done seed — `profile_sample_*` · `profile_sample_test` |
+| DAP JSON + pprof-text + tid samples | Done seed — `residual_seeds_test` · `profile_sample_test` |
+| MSI/notarize/brew/winget publish seeds | Done seed — scripts + `package-seed.yml` · WiX skeleton |
+| gfx_poll · GPU backend stubs · netcode deltas | Done seed — `residual_seeds_test` |
+| plugin_open/call/close · hot_reload_unwatch | Done seed — `residual_seeds_test` · `domain_tracks_test` |
 | Installer UX (manifest + doctor + Windows) | Done seed — `install-manifest.json` · doctor fields · `install.ps1` |
 | Actor spawn_cap + interface `on T : I` sugar | Done seed — `actor_test` · `iface_on_iface_test` |
 | SIP library (platform builtins + `std/sip`) | Done — RFC 3261/3581 Via/RR/NAT, Digest HA1, framing, SDP rewrite |

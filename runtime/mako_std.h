@@ -4,6 +4,7 @@
 
 #include "mako_rt.h"
 #include "mako_stdlib.h"
+#include "mako_plugin.h"
 #if !defined(_WIN32)
 #include <dlfcn.h>
 #endif
@@ -1919,6 +1920,7 @@ static inline MakoString mako_profile_snapshot_json(void) {
 typedef struct {
     int64_t ts_ns;
     int64_t cpu_user_us;
+    int64_t tid; /* pthread / thread id seed for multi-thread samples */
     char label[MAKO_PROF_LABEL_CAP];
     char stack[MAKO_PROF_STACK_CAP];
     int used;
@@ -1935,6 +1937,14 @@ static struct sigaction mako_prof_old_sa;
 static int mako_prof_sa_saved = 0;
 #endif
 
+static inline int64_t mako_prof_current_tid(void) {
+#if defined(_WIN32) || defined(MAKO_WASI)
+    return 0;
+#else
+    return (int64_t)(uintptr_t)pthread_self();
+#endif
+}
+
 static inline void mako_prof_store_sample(const char *label, const char *stack) {
     int i = mako_prof_sample_head % MAKO_PROF_SAMPLE_MAX;
     mako_prof_sample_head++;
@@ -1943,6 +1953,7 @@ static inline void mako_prof_store_sample(const char *label, const char *stack) 
     s->used = 1;
     s->ts_ns = mako_now_ns();
     s->cpu_user_us = mako_process_cpu_user_us();
+    s->tid = mako_prof_current_tid();
     s->label[0] = 0;
     s->stack[0] = 0;
     if (label && label[0]) {
@@ -2111,10 +2122,11 @@ static inline MakoString mako_profile_samples_json(void) {
         n = snprintf(
             buf + len, cap - len,
             "%s{\"ts_ns\":%" PRId64 ",\"cpu_user_us\":%" PRId64
-            ",\"label\":\"%s\",\"stack\":\"%s\"}",
+            ",\"tid\":%" PRId64 ",\"label\":\"%s\",\"stack\":\"%s\"}",
             first ? "" : ",",
             s->ts_ns,
             s->cpu_user_us,
+            s->tid,
             s->label,
             s->stack
         );
@@ -2133,6 +2145,59 @@ static inline MakoString mako_profile_samples_json(void) {
     buf[len++] = '}';
     buf[len] = 0;
     return (MakoString){buf, len};
+}
+
+/* Folded-stack / pprof-text seed: "stack;frames label count" lines (not protobuf pprof). */
+static inline MakoString mako_profile_samples_pprof_text(void) {
+    size_t cap = 4096;
+    char *buf = (char *)malloc(cap);
+    if (!buf) abort();
+    size_t len = 0;
+    int n = snprintf(buf, cap, "# mako.profile_pprof_text.v1 samples=%d\n", mako_prof_sample_count);
+    if (n > 0) len = (size_t)n;
+    for (int i = 0; i < MAKO_PROF_SAMPLE_MAX; i++) {
+        if (!mako_prof_samples[i].used) continue;
+        MakoProfSample *s = &mako_prof_samples[i];
+        if (len + MAKO_PROF_STACK_CAP + 96 >= cap) {
+            cap *= 2;
+            char *nb = (char *)realloc(buf, cap);
+            if (!nb) {
+                free(buf);
+                abort();
+            }
+            buf = nb;
+        }
+        /* spaces in stack already collapsed; emit stack|label tid count=1 */
+        n = snprintf(
+            buf + len, cap - len,
+            "%s|%s tid=%" PRId64 " 1\n",
+            s->stack[0] ? s->stack : "(no-stack)",
+            s->label[0] ? s->label : "sample",
+            s->tid
+        );
+        if (n > 0) len += (size_t)n;
+    }
+    buf[len] = 0;
+    return (MakoString){buf, len};
+}
+
+/* Distinct thread ids observed in the ring (continuous multi-thread seed). */
+static inline int64_t mako_profile_sample_thread_count(void) {
+    int64_t seen[MAKO_PROF_SAMPLE_MAX];
+    int nseen = 0;
+    for (int i = 0; i < MAKO_PROF_SAMPLE_MAX; i++) {
+        if (!mako_prof_samples[i].used) continue;
+        int64_t tid = mako_prof_samples[i].tid;
+        int found = 0;
+        for (int j = 0; j < nseen; j++) {
+            if (seen[j] == tid) {
+                found = 1;
+                break;
+            }
+        }
+        if (!found && nseen < MAKO_PROF_SAMPLE_MAX) seen[nseen++] = tid;
+    }
+    return nseen;
 }
 
 /* Prometheus text exposition (0.0.4-ish) for the same 64 slots. */
@@ -3478,6 +3543,99 @@ static inline int64_t mako_safe_add(int64_t a, int64_t b) {
         mako_abort("integer overflow in safe_add");
     }
     return r;
+}
+
+/* ---- Plugin host loader seed (mako_plugin.h ABI) ---- */
+#define MAKO_PLUGIN_HOST_MAX 8
+typedef struct {
+    void *handle;
+    const MakoPluginVTable *vt;
+    int used;
+} MakoPluginHostSlot;
+static MakoPluginHostSlot mako_plugin_slots[MAKO_PLUGIN_HOST_MAX];
+
+static inline int64_t mako_plugin_open(MakoString path) {
+#if defined(_WIN32) || defined(MAKO_WASI)
+    (void)path;
+    return -1;
+#else
+    if (!path.data || path.len == 0 || path.len >= 512) return -1;
+    char pbuf[512];
+    memcpy(pbuf, path.data, path.len);
+    pbuf[path.len] = 0;
+    void *h = dlopen(pbuf, RTLD_NOW | RTLD_LOCAL);
+    if (!h) return -1;
+    MakoPluginEntryFn entry = (MakoPluginEntryFn)dlsym(h, "mako_plugin_entry");
+    if (!entry) {
+        dlclose(h);
+        return -1;
+    }
+    const MakoPluginVTable *vt = entry();
+    if (!vt || !mako_plugin_abi_compatible(vt->abi_version)) {
+        dlclose(h);
+        return -1;
+    }
+    for (int i = 0; i < MAKO_PLUGIN_HOST_MAX; i++) {
+        if (!mako_plugin_slots[i].used) {
+            mako_plugin_slots[i].handle = h;
+            mako_plugin_slots[i].vt = vt;
+            mako_plugin_slots[i].used = 1;
+            if (vt->init) {
+                MakoPluginHost host;
+                host.abi_version = MAKO_PLUGIN_ABI_VERSION;
+                host.log = NULL;
+                host.user_data = NULL;
+                (void)vt->init(&host);
+            }
+            return i;
+        }
+    }
+    dlclose(h);
+    return -1;
+#endif
+}
+
+static inline MakoString mako_plugin_call(int64_t handle, MakoString op, MakoString payload) {
+#if defined(_WIN32) || defined(MAKO_WASI)
+    (void)handle;
+    (void)op;
+    (void)payload;
+    return mako_str_from_cstr("");
+#else
+    if (handle < 0 || handle >= MAKO_PLUGIN_HOST_MAX || !mako_plugin_slots[handle].used)
+        return mako_str_from_cstr("");
+    const MakoPluginVTable *vt = mako_plugin_slots[handle].vt;
+    if (!vt || !vt->call) return mako_str_from_cstr("");
+    MakoString out = vt->call(op, payload);
+    /* Caller owns returned string; plugin free_string optional if copy needed. */
+    return out;
+#endif
+}
+
+static inline int64_t mako_plugin_close(int64_t handle) {
+#if defined(_WIN32) || defined(MAKO_WASI)
+    (void)handle;
+    return 0;
+#else
+    if (handle < 0 || handle >= MAKO_PLUGIN_HOST_MAX || !mako_plugin_slots[handle].used)
+        return 0;
+    const MakoPluginVTable *vt = mako_plugin_slots[handle].vt;
+    if (vt && vt->shutdown) vt->shutdown();
+    if (mako_plugin_slots[handle].handle) dlclose(mako_plugin_slots[handle].handle);
+    mako_plugin_slots[handle].handle = NULL;
+    mako_plugin_slots[handle].vt = NULL;
+    mako_plugin_slots[handle].used = 0;
+    return 1;
+#endif
+}
+
+/* Interop surface name seed (C sysv today; other ABIs Later). */
+static inline MakoString mako_ffi_abi_name(void) {
+#if defined(_WIN32)
+    return mako_str_from_cstr("c-win");
+#else
+    return mako_str_from_cstr("c-sysv");
+#endif
 }
 
 /* ---- Plugin / dlopen ---- */

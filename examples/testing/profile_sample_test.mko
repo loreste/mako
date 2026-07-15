@@ -44,4 +44,7 @@ fn TestProfileSampleStartStop() {
     assert(str_contains(js, "mako.profile_samples.v1"))
     assert(str_contains(js, "tick") || str_contains(js, "sigprof") || str_contains(js, "stack"))
     assert(total > 0)
+    let pprof = profile_samples_pprof_text()
+    assert(str_contains(pprof, "mako.profile_pprof_text.v1"))
+    assert(profile_sample_thread_count() >= 1)
 }

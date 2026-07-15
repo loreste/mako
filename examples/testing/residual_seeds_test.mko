@@ -1,0 +1,70 @@
+// Residual roadmap seeds: DAP, pprof text, gfx poll, GPU stubs, netcode,
+// hot-reload unwatch, plugin open fail path, ffi abi.
+
+fn TestDapJsonSeed() {
+    let init = dap_initialize_response(1)
+    assert(str_contains(init, "mako.dap.v1"))
+    assert(str_contains(init, "initialize"))
+    assert(str_contains(init, "supportsConfigurationDoneRequest"))
+    let stop = dap_stopped_event("breakpoint", 1)
+    assert(str_contains(stop, "stopped"))
+    assert(str_contains(stop, "breakpoint"))
+    let thr = dap_threads_response(2)
+    assert(str_contains(thr, "threads"))
+    let cmd = dap_request_command("{\"command\":\"initialize\",\"type\":\"request\"}")
+    assert_eq_str(cmd, "initialize")
+}
+
+fn TestPprofTextAndThreads() {
+    assert_eq(profile_sample_clear(), 1)
+    assert_eq(profile_sample_once("a"), 1)
+    assert_eq(profile_sample_once("b"), 1)
+    let txt = profile_samples_pprof_text()
+    assert(str_contains(txt, "mako.profile_pprof_text.v1"))
+    assert(str_contains(txt, "tid="))
+    assert(profile_sample_thread_count() >= 1)
+}
+
+fn TestGfxPollAndBackend() {
+    let w = gfx_window_open(320, 240, "seed")
+    assert_eq(gfx_poll(w), 0)
+    assert_eq_str(gfx_backend_name(), "soft")
+    assert_eq(gfx_window_close(w), 0)
+}
+
+fn TestGpuBackendStubs() {
+    // Stubs return 0 without MAKO_HAS_METAL/CUDA/VULKAN.
+    assert_eq(gpu_metal_ok(), 0)
+    assert_eq(gpu_cuda_ok(), 0)
+    assert_eq(gpu_vulkan_ok(), 0)
+}
+
+fn TestNetcodeSnapDelta() {
+    let a = snap_encode4(1, 2, 3, 4)
+    let b = snap_encode4(3, 5, 7, 9)
+    let d = snap_diff(a, b)
+    assert_eq(snap_get(d, 0), 2)
+    assert_eq(snap_get(d, 1), 3)
+    let c = snap_apply_delta(a, d)
+    assert_eq(snap_get(c, 0), 3)
+    assert_eq(snap_get(c, 1), 5)
+    assert_eq(netcode_lag_comp_tick(100, 48, 16), 97)
+    assert_eq(netcode_interp(0, 1000, 500), 500)
+}
+
+fn TestHotReloadUnwatch() {
+    let path = "/tmp/mako_hot_unwatch_seed.txt"
+    assert_eq(write_file(path, "x"), 0)
+    let id = hot_reload_watch(path)
+    assert(id >= 0)
+    assert(hot_reload_watch_count() >= 1)
+    assert_eq(hot_reload_unwatch(path), 1)
+    assert_eq(hot_reload_unwatch(path), 0)
+}
+
+fn TestPluginOpenMissingAndFfi() {
+    // Missing dylib → -1 (host loader seed).
+    assert_eq(plugin_open("/tmp/mako_no_such_plugin.so"), -1)
+    let abi = ffi_abi_name()
+    assert(str_contains(abi, "c-"))
+}

@@ -915,6 +915,46 @@ static inline int64_t mako_snap_get(MakoString s, int64_t i) {
 }
 
 /* Client prediction seed: apply input delta to a local state slot. */
+/* Per-slot delta of two snap blobs (n = min count). Returns encode4 of first 4 deltas. */
+static inline MakoString mako_snap_diff(MakoString a, MakoString b) {
+    int64_t na = mako_snap_count(a);
+    int64_t nb = mako_snap_count(b);
+    int64_t n = na < nb ? na : nb;
+    if (n < 1) return mako_snap_encode4(0, 0, 0, 0);
+    int64_t d0 = n > 0 ? mako_snap_get(b, 0) - mako_snap_get(a, 0) : 0;
+    int64_t d1 = n > 1 ? mako_snap_get(b, 1) - mako_snap_get(a, 1) : 0;
+    int64_t d2 = n > 2 ? mako_snap_get(b, 2) - mako_snap_get(a, 2) : 0;
+    int64_t d3 = n > 3 ? mako_snap_get(b, 3) - mako_snap_get(a, 3) : 0;
+    return mako_snap_encode4(d0, d1, d2, d3);
+}
+
+/* Apply delta snap to base: out[i] = base[i] + delta[i]. */
+static inline MakoString mako_snap_apply_delta(MakoString base, MakoString delta) {
+    int64_t n = mako_snap_count(base);
+    int64_t nd = mako_snap_count(delta);
+    if (n < 1) return mako_snap_encode4(0, 0, 0, 0);
+    int64_t v0 = mako_snap_get(base, 0) + (nd > 0 ? mako_snap_get(delta, 0) : 0);
+    int64_t v1 = (n > 1 ? mako_snap_get(base, 1) : 0) + (nd > 1 ? mako_snap_get(delta, 1) : 0);
+    int64_t v2 = (n > 2 ? mako_snap_get(base, 2) : 0) + (nd > 2 ? mako_snap_get(delta, 2) : 0);
+    int64_t v3 = (n > 3 ? mako_snap_get(base, 3) : 0) + (nd > 3 ? mako_snap_get(delta, 3) : 0);
+    return mako_snap_encode4(v0, v1, v2, v3);
+}
+
+/* Lag-compensated tick: server_tick - rtt_ms / tick_ms (seed). */
+static inline int64_t mako_netcode_lag_comp_tick(int64_t server_tick, int64_t rtt_ms, int64_t tick_ms) {
+    if (tick_ms <= 0) tick_ms = 16;
+    int64_t lag = rtt_ms / tick_ms;
+    if (lag < 0) lag = 0;
+    return server_tick - lag;
+}
+
+/* Linear interpolate fixed-point milli: a + (b-a)*t_milli/1000 */
+static inline int64_t mako_netcode_interp(int64_t a, int64_t b, int64_t t_milli) {
+    if (t_milli <= 0) return a;
+    if (t_milli >= 1000) return b;
+    return a + ((b - a) * t_milli) / 1000;
+}
+
 static inline int64_t mako_snap_predict(int64_t state, int64_t input_delta) {
     return state + input_delta;
 }

@@ -272,8 +272,10 @@ Percentages are weighted; update when a task flips.
 - [x] Debugger depth seed: line BPs · frame stack · async parent · trap flag · `debug_snapshot_json`.
 - [x] OTLP protobuf export seed (`trace_export_otlp_pb`) + HTTP exporter (`otlp_http_export` / `otlp_export_traces_*`).
 - [x] Sampling CPU profiler seed (`profile_sample_*` · SIGPROF + cooperative · `profile_samples_json`).
-- [ ] Full DWARF / DAP product debugger (lldb on generated C remains the external path).
-- [ ] Continuous / multi-thread pprof product profilers.
+- [x] DAP JSON seed (`dap_initialize_response` / `dap_stopped_event` / `dap_request_command`) · lldb still primary for DWARF.
+- [x] pprof-text + multi-thread tid seed (`profile_samples_pprof_text` / `profile_sample_thread_count`).
+- [ ] Full DAP server + DWARF-local product debugger (optional; lldb path remains).
+- [ ] Continuous multi-process pprof HTTP product.
 
 ### 9. Installer, distribution, and portability — 10%
 
@@ -287,8 +289,12 @@ Percentages are weighted; update when a task flips.
 - [x] Windows `install.ps1` writes the same manifest schema.
 - [x] Packaging seeds: `package-deb.sh` · `package-rpm.sh` · `packaging/winget/` · `Formula/mako.rb` · `validate-matrix.sh`.
 - [x] MSI / macOS notarize **workflow notes** (`scripts/package-msi-notes.md` · `package-macos-notarize-notes.md`).
-- [ ] Complete installer UX for macOS, Linux, and Windows (signed MSI / notarized pkg in CI).
-- [ ] homebrew-core / winget-pkgs publish automation (external).
+- [x] MSI WiX skeleton + dry-run seeds (`packaging/windows/mako.wxs` · `package-msi-seed.sh`).
+- [x] Notarize dry-run seed (`package-notarize-seed.sh`) · notes remain for real Apple credentials.
+- [x] homebrew / winget publish **seed scripts** (`publish-homebrew-tap-seed.sh` · `publish-winget-seed.sh`).
+- [x] CI package-seed workflow (validate packaging scripts).
+- [ ] Signed MSI / notarized pkg with secrets in production release CI.
+- [ ] homebrew-core / winget-pkgs merge (external maintainers).
 - [ ] CI multi-OS matrix green on FreeBSD / RISC-V hosts.
 - [ ] Console/platform-specific toolchain path where licensing permits.
 
@@ -311,12 +317,17 @@ Percentages are weighted; update when a task flips.
 - [x] Multi-level LSM (L1–L3 via `lsm_compact_down` / `lsm_sst_levels` / `lsm_level_len`).
 - [x] Page-backed btree seed (`pbtree_*` — nodes in `MakoPage`).
 - [x] Storage polish seeds: `bloom_*` · `btree_range` / `sst_range` + `range_*` · `pman_*` disk page manager.
-- [ ] Real windowing backends / GPU shaders / asset pipelines.
-- [ ] Full multiplayer netcode product.
-- [ ] More quant formats · Metal-native / CUDA / Vulkan backends.
+- [x] Window soft poll + backend name (`gfx_poll` / `gfx_backend_name`).
+- [x] GPU Metal/CUDA/Vulkan **availability stubs** (`gpu_metal_ok` / `cuda_ok` / `vulkan_ok`).
+- [x] Netcode seeds: `snap_diff` / `snap_apply_delta` · `netcode_lag_comp_tick` / `netcode_interp`.
+- [x] Plugin host loader seed (`plugin_open` / `call` / `close`) · `ffi_abi_name`.
+- [x] Hot-reload unwatch + count (`hot_reload_unwatch` / `hot_reload_watch_count`).
+- [ ] Real windowing backends / GPU shaders / asset pipelines product.
+- [ ] Full multiplayer netcode product (prediction service).
+- [ ] Real Metal-native / CUDA / Vulkan compute backends.
 - [x] SIMD portable seed (`simd_dot_i64_4` / `simd_sum_i64_4` — autovec-friendly).
 - [x] Hot-reload mtime watch seed (`file_mtime_ns` / `hot_reload_watch` / `hot_reload_changed`).
-- [ ] Interop beyond C · full hot code reload product · compile-time execution / safe domain extensions.
+- [ ] Full hot code reload product · deep comptime / domain CTFE.
 
 ---
 

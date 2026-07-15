@@ -475,6 +475,27 @@ static inline int64_t mako_hot_reload_changed(MakoString path) {
     return 0;
 }
 
+static inline int64_t mako_hot_reload_unwatch(MakoString path) {
+    if (!path.data || path.len == 0) return 0;
+    for (int i = 0; i < MAKO_HOT_WATCH_MAX; i++) {
+        if (mako_hot_watches[i].used
+            && strncmp(mako_hot_watches[i].path, path.data, path.len) == 0
+            && mako_hot_watches[i].path[path.len] == 0) {
+            mako_hot_watches[i].used = 0;
+            mako_hot_watches[i].path[0] = 0;
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static inline int64_t mako_hot_reload_watch_count(void) {
+    int n = 0;
+    for (int i = 0; i < MAKO_HOT_WATCH_MAX; i++)
+        if (mako_hot_watches[i].used) n++;
+    return n;
+}
+
 /* ---- MVCC seed: multi-version map (key, ts) -> val ---- */
 #define MAKO_MVCC_MAX 512
 typedef struct {
@@ -1412,6 +1433,17 @@ static inline int64_t mako_gfx_window_close(MakoGfxWindow *w) {
     w->open = 0;
     free(w);
     return 0;
+}
+
+/* Event poll seed (no real windowing backend): always 0 = no events. */
+static inline int64_t mako_gfx_poll(MakoGfxWindow *w) {
+    (void)w;
+    return 0;
+}
+
+/* Backend name for soft window seed. */
+static inline MakoString mako_gfx_backend_name(void) {
+    return mako_str_from_cstr("soft");
 }
 
 /* Shader "compile" seed: hash source length as id */
