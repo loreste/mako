@@ -1,0 +1,17 @@
+name: Cross-target seed
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "scripts/cross-target-seed.sh"
+      - "scripts/validate-matrix.sh"
+      - ".github/workflows/cross-target-seed.yml"
+
+jobs:
+  dry-run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Cross-target seed
+        run: bash scripts/cross-target-seed.sh

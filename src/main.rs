@@ -246,6 +246,12 @@ enum Commands {
         #[arg(long, default_value_t = false)]
         json: bool,
     },
+    /// DAP adapter seed: handle one JSON request from --request or stdin, print response
+    Dap {
+        /// Single DAP request JSON (if omitted, read one line from stdin)
+        #[arg(long)]
+        request: Option<String>,
+    },
     /// Build and run one program with compile/run timing and optional JSON profile
     Profile {
         /// Source file, package directory, or workspace root
@@ -596,6 +602,74 @@ fn print_version(verbose: bool) {
             _ => println!("commit: unknown"),
         }
     }
+}
+
+/// Thin DAP seed: one request → one response JSON on stdout (not a full debug adapter).
+fn cmd_dap_seed(request: Option<&str>) -> Result<(), ()> {
+    let req = if let Some(r) = request {
+        r.to_string()
+    } else {
+        use std::io::Read;
+        let mut buf = String::new();
+        std::io::stdin()
+            .read_to_string(&mut buf)
+            .map_err(|e| emit_plain_error(&format!("dap: read stdin: {e}")))?;
+        buf.trim().to_string()
+    };
+    if req.is_empty() {
+        emit_plain_error("dap: empty request (pass --request or pipe JSON on stdin)");
+        return Err(());
+    }
+    // Seed responses mirror runtime mako_dap_handle_request (stdlib not linked here).
+    let cmd = {
+        if let Some(i) = req.find("\"command\"") {
+            let rest = &req[i + 9..];
+            if let Some(q1) = rest.find('"') {
+                let rest = &rest[q1 + 1..];
+                if let Some(q2) = rest.find('"') {
+                    rest[..q2].to_string()
+                } else {
+                    String::new()
+                }
+            } else {
+                String::new()
+            }
+        } else {
+            String::new()
+        }
+    };
+    let seq = {
+        if let Some(i) = req.find("\"seq\"") {
+            let rest = &req[i + 5..];
+            rest.chars()
+                .skip_while(|c| !c.is_ascii_digit())
+                .take_while(|c| c.is_ascii_digit())
+                .collect::<String>()
+                .parse::<i64>()
+                .unwrap_or(0)
+        } else {
+            0
+        }
+    };
+    let out = match cmd.as_str() {
+        "initialize" => format!(
+            r#"{{"seq":1,"type":"response","request_seq":{seq},"success":true,"command":"initialize","body":{{"supportsConfigurationDoneRequest":true,"makoSeed":true,"schema":"mako.dap.v1"}}}}"#
+        ),
+        "threads" => format!(
+            r#"{{"seq":3,"type":"response","request_seq":{seq},"success":true,"command":"threads","body":{{"threads":[{{"id":1,"name":"main"}}]}}}}"#
+        ),
+        "disconnect" | "configurationDone" => format!(
+            r#"{{"seq":9,"type":"response","request_seq":{seq},"success":true,"command":"{cmd}"}}"#
+        ),
+        "stackTrace" => format!(
+            r#"{{"seq":11,"type":"response","request_seq":{seq},"success":true,"command":"stackTrace","body":{{"stackFrames":[],"totalFrames":0}}}}"#
+        ),
+        other => format!(
+            r#"{{"seq":99,"type":"response","request_seq":{seq},"success":false,"command":"{other}","message":"unsupported (mako dap seed)"}}"#
+        ),
+    };
+    println!("{out}");
+    Ok(())
 }
 
 fn cmd_doctor() -> Result<(), ()> {
@@ -1021,6 +1095,7 @@ fn run(cli: Cli) -> Result<(), ()> {
         Commands::Lsp => lsp::run_stdio().map_err(|e| {
             emit_plain_error(&format!("lsp: {e}"));
         }),
+        Commands::Dap { request } => cmd_dap_seed(request.as_deref()),
         Commands::Pkg { cmd } => run_pkg(cmd),
         Commands::Api { cmd } => match cmd {
             ApiCmd::Diff { old, new } => tooling::run_api_diff(&old, &new),

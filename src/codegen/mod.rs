@@ -18786,6 +18786,16 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             self.line(&format!("MakoString {tmp} = mako_dap_request_command({r});"));
                             return ("MakoString".into(), tmp);
                         }
+                        "dap_request_seq" => {
+                            let (_, r) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_dap_request_seq({r})"));
+                        }
+                        "dap_handle_request" => {
+                            let (_, r) = self.emit_expr(&args[0]);
+                            let tmp = self.fresh("daph");
+                            self.line(&format!("MakoString {tmp} = mako_dap_handle_request({r});"));
+                            return ("MakoString".into(), tmp);
+                        }
                         "crash_report_install" => {
                             let (_, p) = self.emit_expr(&args[0]);
                             return (
@@ -18863,6 +18873,17 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         }
                         "profile_sample_thread_count" => {
                             return ("int64_t".into(), "mako_profile_sample_thread_count()".into());
+                        }
+                        "profile_pprof_http_body" => {
+                            let tmp = self.fresh("pph");
+                            self.line(&format!("MakoString {tmp} = mako_profile_pprof_http_body();"));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "profile_http_route" => {
+                            let (_, p) = self.emit_expr(&args[0]);
+                            let tmp = self.fresh("phr");
+                            self.line(&format!("MakoString {tmp} = mako_profile_http_route({p});"));
+                            return ("MakoString".into(), tmp);
                         }
                         "ecs_world_new" => {
                             let (_, cap) = self.emit_expr(&args[0]);

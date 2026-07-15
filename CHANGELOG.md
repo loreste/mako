@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### DAP dispatch · profile HTTP · cross-target dry-run
+
+- **`dap_handle_request` / `dap_request_seq`** — one-shot DAP request dispatch.
+- **CLI:** `mako dap --request '…'` (or stdin) prints a seed response.
+- **Profile HTTP seed:** `profile_http_route("/debug/pprof/text|json")` ·
+  `profile_pprof_http_body` (app owns the TCP listener).
+- **Cross-target:** `scripts/cross-target-seed.sh` lists FreeBSD/RISC-V triples;
+  `.github/workflows/cross-target-seed.yml` dry-run.
+
 ### Residual roadmap seeds (DAP · pprof · packaging · domain · interop)
 
 - **DAP JSON:** `dap_initialize_response` / `dap_stopped_event` / `dap_threads_response` /

@@ -47,4 +47,12 @@ fn TestProfileSampleStartStop() {
     let pprof = profile_samples_pprof_text()
     assert(str_contains(pprof, "mako.profile_pprof_text.v1"))
     assert(profile_sample_thread_count() >= 1)
+    // Continuous-ish HTTP export seed (body only — app owns the listener)
+    let http = profile_http_route("/debug/pprof/text")
+    assert(str_contains(http, "HTTP/1.0 200"))
+    assert(str_contains(http, "text/plain"))
+    let jh = profile_http_route("/debug/pprof/json")
+    assert(str_contains(jh, "application/json"))
+    let miss = profile_http_route("/nope")
+    assert(str_contains(miss, "404"))
 }

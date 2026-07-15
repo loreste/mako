@@ -13,6 +13,15 @@ fn TestDapJsonSeed() {
     assert(str_contains(thr, "threads"))
     let cmd = dap_request_command("{\"command\":\"initialize\",\"type\":\"request\"}")
     assert_eq_str(cmd, "initialize")
+    // One-shot request dispatch (stdio adapter seed)
+    let resp = dap_handle_request("{\"seq\":7,\"type\":\"request\",\"command\":\"initialize\"}")
+    assert(str_contains(resp, "success\":true"))
+    assert(str_contains(resp, "initialize"))
+    assert_eq(dap_request_seq("{\"seq\":42,\"command\":\"threads\"}"), 42)
+    let thr2 = dap_handle_request("{\"seq\":3,\"command\":\"threads\"}")
+    assert(str_contains(thr2, "threads"))
+    let bad = dap_handle_request("{\"seq\":1,\"command\":\"launch\"}")
+    assert(str_contains(bad, "unsupported"))
 }
 
 fn TestPprofTextAndThreads() {

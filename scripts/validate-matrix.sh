@@ -44,10 +44,16 @@ for t in \
   aarch64-apple-darwin \
   x86_64-pc-windows-gnu \
   wasm32-wasip1 \
-  riscv64gc-unknown-linux-gnu
+  riscv64gc-unknown-linux-gnu \
+  x86_64-unknown-freebsd \
+  aarch64-unknown-freebsd
 do
   echo "  - $t   (mako build --target $t …)"
 done
+if [[ -x "$ROOT/scripts/cross-target-seed.sh" ]]; then
+  echo "=== cross-target-seed ==="
+  bash "$ROOT/scripts/cross-target-seed.sh" || true
+fi
 
 if command -v zig >/dev/null 2>&1; then
   echo "zig: $(zig version 2>/dev/null || echo present)"

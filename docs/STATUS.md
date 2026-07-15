@@ -93,6 +93,8 @@ Last inventory: 2026-07-14 (**unique Mako surface** · pack/pull types · full m
 | OTLP protobuf + HTTP exporter client | Done seed — `trace_export_otlp_pb` · `otlp_export_traces_*` · `observability_depth_test` |
 | Sampling CPU profiler | Done seed — `profile_sample_*` · `profile_sample_test` |
 | DAP JSON + pprof-text + tid samples | Done seed — `residual_seeds_test` · `profile_sample_test` |
+| DAP handle + `mako dap` CLI · profile HTTP routes | Done seed — `dap_handle_request` · `/debug/pprof/*` |
+| Cross-target FreeBSD/RISC-V dry-run | Done seed — `scripts/cross-target-seed.sh` · CI workflow |
 | MSI/notarize/brew/winget publish seeds | Done seed — scripts + `package-seed.yml` · WiX skeleton |
 | gfx_poll · GPU backend stubs · netcode deltas | Done seed — `residual_seeds_test` |
 | plugin_open/call/close · hot_reload_unwatch | Done seed — `residual_seeds_test` · `domain_tracks_test` |

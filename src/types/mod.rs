@@ -4789,6 +4789,14 @@ impl TypeChecker {
             Type::Fn(vec![Type::String], Box::new(Type::String)),
         );
         fns.insert(
+            "dap_request_seq".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "dap_handle_request".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::String)),
+        );
+        fns.insert(
             "process_rss_bytes".into(),
             Type::Fn(vec![], Box::new(Type::Int)),
         );
@@ -4847,6 +4855,14 @@ impl TypeChecker {
         fns.insert(
             "profile_sample_thread_count".into(),
             Type::Fn(vec![], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "profile_pprof_http_body".into(),
+            Type::Fn(vec![], Box::new(Type::String)),
+        );
+        fns.insert(
+            "profile_http_route".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::String)),
         );
         fns.insert(
             "ecs_world_new".into(),

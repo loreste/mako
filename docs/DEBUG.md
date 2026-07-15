@@ -32,7 +32,14 @@ through **lldb on generated C** (`-g` + `#line` mapping).
 let init = dap_initialize_response(1)
 let stop = dap_stopped_event("breakpoint", 1)
 let cmd = dap_request_command(req_json)  // extract "command"
+let resp = dap_handle_request(req_json)  // one-shot dispatch
 let snap = debug_snapshot_json()         // tasks + locals + frames
+```
+
+CLI seed (not a full DAP server):
+
+```bash
+mako dap --request '{"seq":1,"type":"request","command":"initialize"}'
 ```
 
 Also: `debug_line_bp_*`, `debug_push_frame` / `debug_frames_json`, soft

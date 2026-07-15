@@ -273,9 +273,11 @@ Percentages are weighted; update when a task flips.
 - [x] OTLP protobuf export seed (`trace_export_otlp_pb`) + HTTP exporter (`otlp_http_export` / `otlp_export_traces_*`).
 - [x] Sampling CPU profiler seed (`profile_sample_*` · SIGPROF + cooperative · `profile_samples_json`).
 - [x] DAP JSON seed (`dap_initialize_response` / `dap_stopped_event` / `dap_request_command`) · lldb still primary for DWARF.
+- [x] DAP dispatch + CLI seed (`dap_handle_request` · `mako dap --request …`).
 - [x] pprof-text + multi-thread tid seed (`profile_samples_pprof_text` / `profile_sample_thread_count`).
+- [x] Profile HTTP export seed (`profile_http_route` / `profile_pprof_http_body` for `/debug/pprof/*`).
 - [ ] Full DAP server + DWARF-local product debugger (optional; lldb path remains).
-- [ ] Continuous multi-process pprof HTTP product.
+- [ ] Continuous multi-process pprof service product.
 
 ### 9. Installer, distribution, and portability — 10%
 
@@ -293,9 +295,10 @@ Percentages are weighted; update when a task flips.
 - [x] Notarize dry-run seed (`package-notarize-seed.sh`) · notes remain for real Apple credentials.
 - [x] homebrew / winget publish **seed scripts** (`publish-homebrew-tap-seed.sh` · `publish-winget-seed.sh`).
 - [x] CI package-seed workflow (validate packaging scripts).
+- [x] Cross-target dry-run seed (`scripts/cross-target-seed.sh` · FreeBSD/RISC-V triples · CI workflow).
 - [ ] Signed MSI / notarized pkg with secrets in production release CI.
 - [ ] homebrew-core / winget-pkgs merge (external maintainers).
-- [ ] CI multi-OS matrix green on FreeBSD / RISC-V hosts.
+- [ ] CI multi-OS matrix green on FreeBSD / RISC-V **hosts** (real runners).
 - [ ] Console/platform-specific toolchain path where licensing permits.
 
 ### 10. Domain tracks and advanced systems — 10%

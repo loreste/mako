@@ -5264,6 +5264,83 @@ static inline MakoString mako_dap_request_command(MakoString req) {
     return (MakoString){d, n};
 }
 
+/* Extract request seq from DAP request JSON ("seq":N). */
+static inline int64_t mako_dap_request_seq(MakoString req) {
+    if (!req.data) return 0;
+    const char *p = strstr(req.data, "\"seq\"");
+    if (!p) return 0;
+    p = strchr(p, ':');
+    if (!p) return 0;
+    return (int64_t)strtoll(p + 1, NULL, 10);
+}
+
+/* Dispatch one DAP request JSON → response JSON (stdio adapter seed). */
+static inline MakoString mako_dap_handle_request(MakoString req) {
+    MakoString cmd = mako_dap_request_command(req);
+    int64_t seq = mako_dap_request_seq(req);
+    MakoString out;
+    if (cmd.data && cmd.len == 10 && memcmp(cmd.data, "initialize", 10) == 0) {
+        out = mako_dap_initialize_response(seq);
+    } else if (cmd.data && cmd.len == 7 && memcmp(cmd.data, "threads", 7) == 0) {
+        out = mako_dap_threads_response(seq);
+    } else if (cmd.data && cmd.len == 10 && memcmp(cmd.data, "disconnect", 10) == 0) {
+        char buf[256];
+        int n = snprintf(
+            buf, sizeof(buf),
+            "{\"seq\":9,\"type\":\"response\",\"request_seq\":%" PRId64
+            ",\"success\":true,\"command\":\"disconnect\"}",
+            seq
+        );
+        out = n > 0 ? mako_str_from_cstr(buf) : mako_str_from_cstr("{}");
+    } else if (cmd.data && cmd.len == 15 && memcmp(cmd.data, "configurationDone", 15) == 0) {
+        char buf[256];
+        int n = snprintf(
+            buf, sizeof(buf),
+            "{\"seq\":10,\"type\":\"response\",\"request_seq\":%" PRId64
+            ",\"success\":true,\"command\":\"configurationDone\"}",
+            seq
+        );
+        out = n > 0 ? mako_str_from_cstr(buf) : mako_str_from_cstr("{}");
+    } else if (cmd.data && cmd.len == 10 && memcmp(cmd.data, "stackTrace", 10) == 0) {
+        /* Embed soft frames if any. */
+        MakoString frames = mako_debug_frames_json();
+        size_t cap = frames.len + 256;
+        char *buf = (char *)malloc(cap);
+        if (!buf) {
+            mako_str_free(frames);
+            mako_str_free(cmd);
+            return mako_str_from_cstr("{}");
+        }
+        int n = snprintf(
+            buf, cap,
+            "{\"seq\":11,\"type\":\"response\",\"request_seq\":%" PRId64
+            ",\"success\":true,\"command\":\"stackTrace\","
+            "\"body\":{\"stackFrames\":[],\"totalFrames\":0,\"makoFrames\":%.*s}}",
+            seq, (int)frames.len, frames.data ? frames.data : "{}"
+        );
+        mako_str_free(frames);
+        if (n < 0) {
+            free(buf);
+            out = mako_str_from_cstr("{}");
+        } else {
+            out = (MakoString){buf, (size_t)n};
+        }
+    } else {
+        char buf[320];
+        int n = snprintf(
+            buf, sizeof(buf),
+            "{\"seq\":99,\"type\":\"response\",\"request_seq\":%" PRId64
+            ",\"success\":false,\"command\":\"%.*s\",\"message\":\"unsupported (mako dap seed)\"}",
+            seq,
+            cmd.data ? (int)cmd.len : 0,
+            cmd.data ? cmd.data : ""
+        );
+        out = n > 0 ? mako_str_from_cstr(buf) : mako_str_from_cstr("{}");
+    }
+    mako_str_free(cmd);
+    return out;
+}
+
 /* Combined debugger snapshot for tools / exporters. */
 static inline MakoString mako_debug_snapshot_json(void) {
     MakoString tasks = mako_tasks_inspect_json();

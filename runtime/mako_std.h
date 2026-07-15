@@ -2181,6 +2181,83 @@ static inline MakoString mako_profile_samples_pprof_text(void) {
     return (MakoString){buf, len};
 }
 
+/* Continuous-ish export: pprof-text body suitable for GET /debug/pprof/text. */
+static inline MakoString mako_profile_pprof_http_body(void) {
+    MakoString body = mako_profile_samples_pprof_text();
+    size_t cap = body.len + 128;
+    char *buf = (char *)malloc(cap);
+    if (!buf) {
+        mako_str_free(body);
+        abort();
+    }
+    int n = snprintf(
+        buf, cap,
+        "HTTP/1.0 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\n"
+        "Content-Length: %zu\r\nConnection: close\r\n\r\n%.*s",
+        body.len, (int)body.len, body.data ? body.data : ""
+    );
+    mako_str_free(body);
+    if (n < 0) {
+        free(buf);
+        return mako_str_from_cstr("");
+    }
+    return (MakoString){buf, (size_t)n};
+}
+
+/* Path router seed for a tiny profile exporter: returns body for known paths. */
+static inline MakoString mako_profile_http_route(MakoString path) {
+    if (!path.data) return mako_str_from_cstr("HTTP/1.0 404 Not Found\r\n\r\n");
+    if (path.len >= 17 && memcmp(path.data, "/debug/pprof/text", 17) == 0) {
+        return mako_profile_pprof_http_body();
+    }
+    if (path.len >= 17 && memcmp(path.data, "/debug/pprof/json", 17) == 0) {
+        MakoString body = mako_profile_samples_json();
+        size_t cap = body.len + 128;
+        char *buf = (char *)malloc(cap);
+        if (!buf) {
+            mako_str_free(body);
+            abort();
+        }
+        int n = snprintf(
+            buf, cap,
+            "HTTP/1.0 200 OK\r\nContent-Type: application/json\r\n"
+            "Content-Length: %zu\r\nConnection: close\r\n\r\n%.*s",
+            body.len, (int)body.len, body.data ? body.data : ""
+        );
+        mako_str_free(body);
+        if (n < 0) {
+            free(buf);
+            return mako_str_from_cstr("");
+        }
+        return (MakoString){buf, (size_t)n};
+    }
+    if (path.len >= 14 && memcmp(path.data, "/debug/profile", 14) == 0) {
+        MakoString body = mako_profile_snapshot_json();
+        size_t cap = body.len + 128;
+        char *buf = (char *)malloc(cap);
+        if (!buf) {
+            mako_str_free(body);
+            abort();
+        }
+        int n = snprintf(
+            buf, cap,
+            "HTTP/1.0 200 OK\r\nContent-Type: application/json\r\n"
+            "Content-Length: %zu\r\nConnection: close\r\n\r\n%.*s",
+            body.len, (int)body.len, body.data ? body.data : ""
+        );
+        mako_str_free(body);
+        if (n < 0) {
+            free(buf);
+            return mako_str_from_cstr("");
+        }
+        return (MakoString){buf, (size_t)n};
+    }
+    return mako_str_from_cstr(
+        "HTTP/1.0 404 Not Found\r\nContent-Type: text/plain\r\n\r\n"
+        "paths: /debug/pprof/text /debug/pprof/json /debug/profile\n"
+    );
+}
+
 /* Distinct thread ids observed in the ring (continuous multi-thread seed). */
 static inline int64_t mako_profile_sample_thread_count(void) {
     int64_t seen[MAKO_PROF_SAMPLE_MAX];
