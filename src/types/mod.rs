@@ -4056,6 +4056,19 @@ impl TypeChecker {
             "actor_stop".into(),
             Type::Fn(vec![Type::Chan(Box::new(Type::Int))], Box::new(Type::Void)),
         );
+        // Packed actor messages: tag (high 16) + int payload (low 48).
+        fns.insert(
+            "actor_pack".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "actor_msg_tag".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "actor_msg_payload".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
         fns.insert(
             "tcp_listen".into(),
             Type::Fn(vec![Type::Int], Box::new(Type::Int)),

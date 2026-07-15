@@ -17804,6 +17804,25 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             self.line(&format!("mako_actor_stop({a});"));
                             return ("void".into(), "/*void*/".into());
                         }
+                        "actor_pack" => {
+                            let (_, t) = self.emit_expr(&args[0]);
+                            let (_, p) = self.emit_expr(&args[1]);
+                            return (
+                                "int64_t".into(),
+                                format!("mako_actor_pack({t}, {p})"),
+                            );
+                        }
+                        "actor_msg_tag" => {
+                            let (_, m) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_actor_msg_tag({m})"));
+                        }
+                        "actor_msg_payload" => {
+                            let (_, m) = self.emit_expr(&args[0]);
+                            return (
+                                "int64_t".into(),
+                                format!("mako_actor_msg_payload({m})"),
+                            );
+                        }
                         "tcp_listen" => {
                             let (_, p) = self.emit_expr(&args[0]);
                             let tmp = self.fresh("tl");

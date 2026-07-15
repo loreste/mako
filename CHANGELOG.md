@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Actor int message payload seed
+
+- `receive Inc(delta)` / `receive Set(v: int)` — one int payload per message.
+- Packing: high 16 bits tag, low 48 bits signed payload (`actor_pack` /
+  `actor_msg_tag` / `actor_msg_payload`).
+- Constructors: `Counter_Inc()` → pack(tag, 0); `Accum_Add(10)` → pack(tag, 10).
+- Tests: `TestActorIntPayload` · `TestActorPackHelpers` in `actor_test`.
+
 ### Implicit interface method sets (Go-like)
 
 - Types that define `on T { fn m… }` or free `fn T_m(self T, …)` implement

@@ -56,3 +56,38 @@ fn TestActorSpawnCap() {
         assert_eq(loopj.join(), 1)
     }
 }
+
+// Int payload seed: receive Inc(delta) packs tag + payload on the mailbox.
+actor Accum {
+    n: int = 0
+    receive Add(delta) {
+        self.n = self.n + delta
+    }
+    receive Set(v: int) {
+        self.n = v
+    }
+    receive Bye {
+        let _ = 0
+    }
+}
+
+fn TestActorIntPayload() {
+    let a = Accum_spawn()
+    crew t {
+        let loopj = t.kick(Accum_loop(a))
+        assert(Accum_send(a, Accum_Add(10)))
+        assert(Accum_send(a, Accum_Add(5)))
+        assert(Accum_send(a, Accum_Set(100)))
+        assert(Accum_send(a, Accum_Add(-3)))
+        assert(Accum_send(a, Accum_Bye()))
+        assert_eq(loopj.join(), 97)
+    }
+}
+
+fn TestActorPackHelpers() {
+    let m = actor_pack(2, 42)
+    assert_eq(actor_msg_tag(m), 2)
+    assert_eq(actor_msg_payload(m), 42)
+    let neg = actor_pack(1, -7)
+    assert_eq(actor_msg_payload(neg), -7)
+}

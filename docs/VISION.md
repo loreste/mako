@@ -184,8 +184,9 @@ actor Counter {
 // Counter_spawn() / Counter_spawn_cap(n) · Counter_send · Counter_loop
 ```
 
-Owned state + `self.field` in receives; int-tag mailboxes; `Bye`/`Stop` ends the
-loop. Typed message payloads and supervision remain Later.
+Owned state + `self.field` in receives; packed mailboxes (tag + optional int
+payload: `receive Inc(delta)`); `Bye`/`Stop` ends the loop. Multi-field /
+string payloads and supervision remain Later.
 
 ---
 

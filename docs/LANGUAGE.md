@@ -121,13 +121,16 @@ Supported in const: `+ - * / %` bitwise, comparisons, `&&` `||` `!`, `let`,
 ```mko
 actor Counter {
     n: int = 0
-    receive Inc { self.n = self.n + 1 }
+    receive Inc { self.n = self.n + 1 }           // tag only
+    receive Add(delta) { self.n = self.n + delta } // int payload seed
     receive Bye { let _ = 0 }
 }
-// Counter_spawn() · Counter_spawn_cap(32) · Counter_send(m, Counter_Inc()) · Counter_loop(m)
+// Counter_spawn() · Counter_send(m, Counter_Add(5)) · Counter_loop(m)
 ```
 
-Desugars to mailbox helpers; `Bye`/`Stop` stops the loop. Tests: `actor_test.mko`.
+Desugars to mailbox helpers; messages pack **tag + optional int payload**
+(`actor_pack` / `actor_msg_tag` / `actor_msg_payload`). `Bye`/`Stop` stops the
+loop. Tests: `actor_test.mko`.
 
 ## Interfaces
 

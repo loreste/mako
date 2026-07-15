@@ -271,16 +271,32 @@ fn expand_actor(actor: ActorDef) -> Vec<Item> {
         }));
     }
 
-    // Tag helpers: Session_Invite() -> 1, etc.
+    // Message constructors: Session_Invite() -> pack(tag, 0)
+    // or Session_Inc(delta) -> pack(tag, delta) for receive Inc(delta).
     for (i, arm) in actor.receives.iter().enumerate() {
         let tag = (i + 1) as i64;
+        let (params, pack_args) = if let Some(ref pname) = arm.payload {
+            (
+                vec![Param {
+                    name: pname.clone(),
+                    ty: TypeExpr::Named("int".into()),
+                    mutable: false,
+                }],
+                vec![Expr::Int(tag), Expr::Ident(pname.clone())],
+            )
+        } else {
+            (vec![], vec![Expr::Int(tag), Expr::Int(0)])
+        };
         items.push(Item::Fn(FnDef {
             name: format!("{name}_{}", arm.message),
             type_params: Vec::new(),
-            params: vec![],
+            params,
             ret: Some(TypeExpr::Named("int".into())),
             body: Block {
-                stmts: vec![Stmt::Return(Some(Expr::Int(tag)))],
+                stmts: vec![Stmt::Return(Some(Expr::Call {
+                    callee: Box::new(Expr::Ident("actor_pack".into())),
+                    args: pack_args,
+                }))],
             },
             exported: false,
             is_const: false,
@@ -398,16 +414,38 @@ fn expand_actor(actor: ActorDef) -> Vec<Item> {
         });
     }
 
-    let mut while_body: Vec<Stmt> = vec![Stmt::Let {
-        name: "__m".into(),
-        mutable: false,
-        ownership: Ownership::None,
-        ty: None,
-        init: Expr::Call {
-            callee: Box::new(Expr::Ident("actor_recv".into())),
-            args: vec![Expr::Ident("__mbox".into())],
+    let mut while_body: Vec<Stmt> = vec![
+        Stmt::Let {
+            name: "__m".into(),
+            mutable: false,
+            ownership: Ownership::None,
+            ty: None,
+            init: Expr::Call {
+                callee: Box::new(Expr::Ident("actor_recv".into())),
+                args: vec![Expr::Ident("__mbox".into())],
+            },
         },
-    }];
+        Stmt::Let {
+            name: "__tag".into(),
+            mutable: false,
+            ownership: Ownership::None,
+            ty: None,
+            init: Expr::Call {
+                callee: Box::new(Expr::Ident("actor_msg_tag".into())),
+                args: vec![Expr::Ident("__m".into())],
+            },
+        },
+        Stmt::Let {
+            name: "__pl".into(),
+            mutable: false,
+            ownership: Ownership::None,
+            ty: None,
+            init: Expr::Call {
+                callee: Box::new(Expr::Ident("actor_msg_payload".into())),
+                args: vec![Expr::Ident("__m".into())],
+            },
+        },
+    ];
 
     for (i, arm) in actor.receives.iter().enumerate() {
         let tag = (i + 1) as i64;
@@ -415,7 +453,17 @@ fn expand_actor(actor: ActorDef) -> Vec<Item> {
         if has_state {
             rewrite_self_block(&mut arm_block, "__st");
         }
-        let mut arm_stmts = arm_block.stmts;
+        let mut arm_stmts = Vec::new();
+        if let Some(ref pname) = arm.payload {
+            arm_stmts.push(Stmt::Let {
+                name: pname.clone(),
+                mutable: false,
+                ownership: Ownership::None,
+                ty: Some(TypeExpr::Named("int".into())),
+                init: Expr::Ident("__pl".into()),
+            });
+        }
+        arm_stmts.extend(arm_block.stmts);
         // Convention: message named Bye / Stop ends the loop
         if arm.message == "Bye" || arm.message == "Stop" {
             arm_stmts.push(Stmt::Assign {
@@ -427,7 +475,7 @@ fn expand_actor(actor: ActorDef) -> Vec<Item> {
             init: None,
             cond: Expr::Binary {
                 op: BinOp::Eq,
-                left: Box::new(Expr::Ident("__m".into())),
+                left: Box::new(Expr::Ident("__tag".into())),
                 right: Box::new(Expr::Int(tag)),
             },
             then_block: Block { stmts: arm_stmts },

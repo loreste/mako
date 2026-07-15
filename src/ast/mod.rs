@@ -91,6 +91,8 @@ pub struct ActorDef {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ReceiveArm {
     pub message: String,
+    /// Optional single int payload: `receive Inc(delta) { … }` / `receive Inc(delta: int)`.
+    pub payload: Option<String>,
     pub body: Block,
 }
 

@@ -27,6 +27,13 @@ Remaining weight is **product** residual: install/portability polish, full debug
 
 ---
 
+## Just closed (2026-07-15) — actor int payload
+
+| Area | Status |
+|------|--------|
+| Actor message payload seed | **Done** — `receive Inc(delta)` packs tag+int · `actor_pack` / `msg_tag` / `msg_payload` |
+| Existing no-payload actors | Unchanged surface (`Counter_Inc()` packs payload 0) |
+
 ## Just closed (2026-07-15) — implicit interfaces
 
 | Area | Status |
@@ -239,6 +246,7 @@ Percentages are weighted; update when a task flips.
 - [x] `crew`, `kick`, `join`, channels, cancel seed, `fan`.
 - [x] Actor runtime seed.
 - [x] Full first-class `actor` / `receive` syntax with owned state (seed: fields + self).
+- [x] Actor int payload seed (`receive Inc(delta)` · packed tag+payload mailbox).
 - [x] Portable timeouts and deadlines across task/channel (seed; network has per-API timeouts).
 - [x] Structured error propagation from child tasks (nursery first_err / wait).
 - [x] Explicit detached-task syntax and lifecycle (`detach` + `detached_join_all`).

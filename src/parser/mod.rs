@@ -551,8 +551,30 @@ impl Parser {
             if matches!(self.peek_kind(), TokenKind::Receive) {
                 self.bump();
                 let message = self.expect_ident()?;
+                // Optional int payload: `receive Inc(delta)` or `receive Inc(delta: int)`
+                let payload = if matches!(self.peek_kind(), TokenKind::LParen) {
+                    self.bump();
+                    let pname = self.expect_ident()?;
+                    if matches!(self.peek_kind(), TokenKind::Colon) {
+                        self.bump();
+                        let ty = self.parse_type()?;
+                        if !matches!(ty, TypeExpr::Named(ref n) if n == "int" || n == "int64") {
+                            return Err(self.err(format!(
+                                "actor receive payload `{pname}` must be int (seed supports one int)"
+                            )));
+                        }
+                    }
+                    self.expect(TokenKind::RParen)?;
+                    Some(pname)
+                } else {
+                    None
+                };
                 let body = self.parse_block()?;
-                receives.push(ReceiveArm { message, body });
+                receives.push(ReceiveArm {
+                    message,
+                    payload,
+                    body,
+                });
                 continue;
             }
             // State field: `n: int` / `n: int = 0` / optional leading `mut`

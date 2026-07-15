@@ -8429,6 +8429,23 @@ static inline void mako_exit(int64_t code) {
 /* ---- Actors (mailbox = owned channel; state lives in the actor loop) ---- */
 typedef MakoChan MakoActor;
 
+/* Packed message: high 16 bits = tag (1..65535), low 48 bits = signed payload seed. */
+static inline int64_t mako_actor_pack(int64_t tag, int64_t payload) {
+    return (tag << 48) | (payload & 0x0000ffffffffffffLL);
+}
+
+static inline int64_t mako_actor_msg_tag(int64_t m) {
+    return (int64_t)(((uint64_t)m) >> 48);
+}
+
+static inline int64_t mako_actor_msg_payload(int64_t m) {
+    int64_t p = (int64_t)(((uint64_t)m) & 0x0000ffffffffffffULL);
+    if (p & 0x0000800000000000LL) {
+        p |= (int64_t)0xffff000000000000LL; /* sign-extend 48 → 64 */
+    }
+    return p;
+}
+
 static inline MakoActor *mako_actor_spawn(int64_t mailbox_cap) {
     return mako_chan_new(mailbox_cap < 1 ? 8 : mailbox_cap);
 }
