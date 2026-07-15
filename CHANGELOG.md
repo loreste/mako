@@ -2,6 +2,31 @@
 
 ## Unreleased
 
+### Full unicode + utf8 package
+
+- UTF-8: encode/decode at offset, last-rune, full_rune, rune_start, valid_rune,
+  constants (`rune_error` / `rune_self` / `max_rune` / `utf_max`).
+- Unicode UCD seed: `unicode_is_*` categories, case (`to_lower`/`to_upper`/
+  `to_title`/`simple_fold`), `unicode_is(prop, r)` (same tables as `\p{…}`).
+- Packages: `std/unicode`, expanded `std/unicode/utf8`.
+- Tests: `unicode_full_test`.
+
+### List[T] + richer collections
+
+- `List[T]` / `List<T>` aliases `[]T` with correct codegen for element types.
+- List helpers: new/push/pop/get/len/clear/insert/remove (int + string).
+- Stack peek + queue pop; `slices_reverse_strs` / `slices_unique_strs` /
+  `strings_index` / `strings_copy`.
+- Package: expanded `std/collections`.
+- Tests: `collections_list_test`.
+
+### Plugin as rich package
+
+- Host: name/version/kind/path/abi, alive/count/max_slots, last_error,
+  close_all, free_string copy-out, 16 slots.
+- Package: `std/plugin` (open/call/close + meta + hot-reload wrappers).
+- Tests: `plugin_package_test` (+ residual plugin seeds).
+
 ## 0.1.5 — 2026-07-15
 
 **mako0.1.5** (`CARGO_PKG_VERSION`).

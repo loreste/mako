@@ -2278,6 +2278,28 @@ Tests: `examples/testing/strong_log_test.mko`.
 | `simd_xor_bytes` | `simd_xor_bytes(b: []byte) -> int` | XOR all bytes (SIMD-accelerated) |
 | `utf8_valid` | `utf8_valid(s: string) -> int` | Check if string is valid UTF-8 |
 | `utf8_rune_len` | `utf8_rune_len(codepoint: int) -> int` | Get byte length of a rune |
+| `utf8_valid_rune` | `utf8_valid_rune(r: int) -> int` | 1 if r is a valid Unicode code point |
+| `utf8_decode_rune` | `utf8_decode_rune(s: string, off: int) -> int` | Code point at byte offset |
+| `utf8_decode_size` | `utf8_decode_size(s: string, off: int) -> int` | Byte width of sequence at offset |
+| `utf8_decode_last_rune` | `utf8_decode_last_rune(s: string) -> int` | Last complete rune |
+| `utf8_decode_last_size` | `utf8_decode_last_size() -> int` | Width of last `decode_last_rune` |
+| `utf8_encode_rune` | `utf8_encode_rune(r: int) -> string` | Encode one code point to UTF-8 |
+| `utf8_full_rune` | `utf8_full_rune(s: string) -> int` | Enough bytes for a complete sequence |
+| `utf8_rune_start` | `utf8_rune_start(b: int) -> int` | 1 if byte can start a sequence |
+| `utf8_rune_error` / `rune_self` / `max_rune` / `utf_max` | `() -> int` | UTF-8 constants (U+FFFD, 0x80, …) |
+| `unicode_is_letter` / `digit` / `space` / `punct` / `symbol` | `(r: int) -> int` | UCD category seeds |
+| `unicode_is_control` / `print` / `graphic` / `upper` / `lower` / `title` | `(r: int) -> int` | More category/case seeds |
+| `unicode_to_lower` / `to_upper` / `to_title` / `simple_fold` | `(r: int) -> int` | Case mapping seeds |
+| `unicode_is` | `unicode_is(prop: string, r: int) -> int` | `\p{Name}` table match |
+| `list_new_int` / `list_push_int` / `list_pop_int` / … | List[int] helpers | Growable list over `[]int` |
+| `list_*_str` | List[string] helpers | Same for strings |
+| `stack_peek_int` / `queue_pop_int` / `queue_popped_int` | stack/queue | LIFO peek / FIFO pop |
+| `slices_reverse_strs` / `slices_unique_strs` / `strings_index` / `strings_copy` | string slices | Richer collections |
+| `plugin_open` / `call` / `close` | host loader | Load `mako_plugin_entry` dylib |
+| `plugin_name` / `version` / `kind` / `path` / `alive` / `count` | meta | Plugin vtable info |
+| `plugin_last_error` / `last_error_str` / `close_all` / `max_slots` | host | Diagnostics + teardown |
+
+Packages: `std/unicode`, `std/unicode/utf8`, `std/collections`, `std/plugin`.
 
 ---
 

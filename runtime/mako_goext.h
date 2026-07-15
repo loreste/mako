@@ -989,6 +989,17 @@ static inline int64_t mako_atomic_cas(MakoAtomicInt *p, int64_t oldv, int64_t ne
 }
 
 /* ---- unicode/utf8 ---- */
+/* Go-like constants (as helpers so callers need no raw hex). */
+#define MAKO_UTF8_RUNE_ERROR  0xFFFD
+#define MAKO_UTF8_RUNE_SELF   0x80
+#define MAKO_UTF8_MAX_RUNE    0x10FFFF
+#define MAKO_UTF8_UTF_MAX     4
+
+static inline int64_t mako_utf8_rune_error(void) { return MAKO_UTF8_RUNE_ERROR; }
+static inline int64_t mako_utf8_rune_self(void) { return MAKO_UTF8_RUNE_SELF; }
+static inline int64_t mako_utf8_max_rune(void) { return MAKO_UTF8_MAX_RUNE; }
+static inline int64_t mako_utf8_utf_max(void) { return MAKO_UTF8_UTF_MAX; }
+
 static inline int64_t mako_utf8_valid(MakoString s) {
     size_t i = 0;
     while (i < s.len) {
@@ -1007,6 +1018,197 @@ static inline int64_t mako_utf8_rune_len(int64_t r) {
     if (r <= 0xFFFF) return 3;
     if (r <= 0x10FFFF) return 4;
     return 0;
+}
+
+static inline int64_t mako_utf8_valid_rune(int64_t r) {
+    if (r < 0 || r > MAKO_UTF8_MAX_RUNE) return 0;
+    if (r >= 0xD800 && r <= 0xDFFF) return 0; /* surrogates */
+    return 1;
+}
+
+/* Decode rune at byte offset. Invalid → RuneError. */
+static inline int64_t mako_utf8_decode_rune(MakoString s, int64_t off) {
+    if (off < 0 || (size_t)off >= s.len) return MAKO_UTF8_RUNE_ERROR;
+    int64_t r = 0;
+    (void)mako_utf8_decode(s.data, s.len, (size_t)off, &r);
+    return r;
+}
+
+/* Byte width of the sequence at offset (1..4; 1 on invalid/OOB). */
+static inline int64_t mako_utf8_decode_size(MakoString s, int64_t off) {
+    if (off < 0 || (size_t)off >= s.len) return 1;
+    int64_t r = 0;
+    return (int64_t)mako_utf8_decode(s.data, s.len, (size_t)off, &r);
+}
+
+/* Decode last complete rune; size via mako_utf8_decode_last_size after call. */
+static int64_t mako_utf8_last_decode_size_tls = 1;
+static inline int64_t mako_utf8_decode_last_rune(MakoString s) {
+    if (s.len == 0) {
+        mako_utf8_last_decode_size_tls = 0;
+        return MAKO_UTF8_RUNE_ERROR;
+    }
+    size_t i = s.len;
+    /* Walk back up to UTFMax bytes to find a start. */
+    size_t start = i > 4 ? i - 4 : 0;
+    for (size_t j = i; j > start;) {
+        j--;
+        unsigned char b = (unsigned char)s.data[j];
+        if (b < 0x80 || (b & 0xC0) != 0x80) {
+            int64_t r = 0;
+            size_t w = mako_utf8_decode(s.data, s.len, j, &r);
+            if (j + w == s.len) {
+                mako_utf8_last_decode_size_tls = (int64_t)w;
+                return r;
+            }
+            break;
+        }
+    }
+    mako_utf8_last_decode_size_tls = 1;
+    return MAKO_UTF8_RUNE_ERROR;
+}
+static inline int64_t mako_utf8_decode_last_size(void) {
+    return mako_utf8_last_decode_size_tls;
+}
+
+/* Encode one code point to a UTF-8 string (1..4 bytes). Invalid → U+FFFD. */
+static inline MakoString mako_utf8_encode_rune(int64_t r) {
+    if (!mako_utf8_valid_rune(r)) r = MAKO_UTF8_RUNE_ERROR;
+    char buf[5];
+    size_t n = 0;
+    if (r <= 0x7F) {
+        buf[0] = (char)r;
+        n = 1;
+    } else if (r <= 0x7FF) {
+        buf[0] = (char)(0xC0 | (r >> 6));
+        buf[1] = (char)(0x80 | (r & 0x3F));
+        n = 2;
+    } else if (r <= 0xFFFF) {
+        buf[0] = (char)(0xE0 | (r >> 12));
+        buf[1] = (char)(0x80 | ((r >> 6) & 0x3F));
+        buf[2] = (char)(0x80 | (r & 0x3F));
+        n = 3;
+    } else {
+        buf[0] = (char)(0xF0 | (r >> 18));
+        buf[1] = (char)(0x80 | ((r >> 12) & 0x3F));
+        buf[2] = (char)(0x80 | ((r >> 6) & 0x3F));
+        buf[3] = (char)(0x80 | (r & 0x3F));
+        n = 4;
+    }
+    buf[n] = 0;
+    char *d = (char *)malloc(n + 1);
+    if (!d) mako_abort("utf8_encode_rune OOM");
+    memcpy(d, buf, n + 1);
+    MakoString out = {d, n};
+    return out;
+}
+
+/* True if s has enough bytes for a complete UTF-8 sequence starting at [0]
+ * (Go FullRune; does not require the sequence to be valid). */
+static inline int64_t mako_utf8_full_rune(MakoString s) {
+    if (s.len == 0) return 1; /* empty is "complete" vacuously in Go */
+    unsigned char b0 = (unsigned char)s.data[0];
+    size_t need = 1;
+    if (b0 < 0x80) need = 1;
+    else if ((b0 & 0xE0) == 0xC0) need = 2;
+    else if ((b0 & 0xF0) == 0xE0) need = 3;
+    else if ((b0 & 0xF8) == 0xF0) need = 4;
+    else return 1; /* invalid lead: treated as single-byte complete */
+    return s.len >= need ? 1 : 0;
+}
+
+/* True if byte b can start a UTF-8 sequence (not a continuation). */
+static inline int64_t mako_utf8_rune_start(int64_t b) {
+    unsigned char c = (unsigned char)(b & 0xFF);
+    return ((c & 0xC0) != 0x80) ? 1 : 0;
+}
+
+/* ---- unicode UCD seed (range tables; not full UCD dump) ----
+ * Surfaces general categories + case + scripts used by regexp \p{…}. */
+static inline int64_t mako_unicode_is_letter(int64_t r) {
+    return mako_re_unicode_is_letter((uint32_t)r) ? 1 : 0;
+}
+static inline int64_t mako_unicode_is_digit(int64_t r) {
+    return mako_re_unicode_is_digit((uint32_t)r) ? 1 : 0;
+}
+static inline int64_t mako_unicode_is_space(int64_t r) {
+    return mako_re_unicode_is_space((uint32_t)r) ? 1 : 0;
+}
+static inline int64_t mako_unicode_is_punct(int64_t r) {
+    return mako_re_unicode_is_punct((uint32_t)r) ? 1 : 0;
+}
+static inline int64_t mako_unicode_is_symbol(int64_t r) {
+    return mako_re_unicode_is_symbol((uint32_t)r) ? 1 : 0;
+}
+static inline int64_t mako_unicode_is_control(int64_t r) {
+    if (r < 0) return 0;
+    if (r <= 0x1F || (r >= 0x7F && r <= 0x9F)) return 1;
+    return 0;
+}
+static inline int64_t mako_unicode_is_print(int64_t r) {
+    if (r < 0 || r > MAKO_UTF8_MAX_RUNE) return 0;
+    if (mako_unicode_is_control(r)) return 0;
+    if (r == 0xAD) return 0; /* soft hyphen */
+    return 1;
+}
+static inline int64_t mako_unicode_is_graphic(int64_t r) {
+    return mako_unicode_is_print(r)
+        || mako_unicode_is_space(r)
+        || (r >= 0x0300 && r <= 0x036F); /* combining marks seed */
+}
+static inline int64_t mako_unicode_is_upper(int64_t r) {
+    if (r >= 'A' && r <= 'Z') return 1;
+    if (r >= 0x00C0 && r <= 0x00D6) return 1;
+    if (r >= 0x00D8 && r <= 0x00DE) return 1;
+    if (r >= 0x0391 && r <= 0x03A9) return 1; /* Greek capital */
+    if (r >= 0x0410 && r <= 0x042F) return 1; /* Cyrillic capital */
+    return 0;
+}
+static inline int64_t mako_unicode_is_lower(int64_t r) {
+    if (r >= 'a' && r <= 'z') return 1;
+    if (r >= 0x00DF && r <= 0x00F6) return 1;
+    if (r >= 0x00F8 && r <= 0x00FF) return 1;
+    if (r >= 0x03B1 && r <= 0x03C9) return 1; /* Greek small */
+    if (r >= 0x0430 && r <= 0x044F) return 1; /* Cyrillic small */
+    return 0;
+}
+static inline int64_t mako_unicode_is_title(int64_t r) {
+    /* Titlecase seed: a few known Lt code points. */
+    return (r == 0x01C5 || r == 0x01C8 || r == 0x01CB || r == 0x01F2) ? 1 : 0;
+}
+static inline int64_t mako_unicode_to_lower(int64_t r) {
+    if (r >= 'A' && r <= 'Z') return r + 32;
+    if (r >= 0x00C0 && r <= 0x00D6) return r + 32;
+    if (r >= 0x00D8 && r <= 0x00DE) return r + 32;
+    if (r >= 0x0391 && r <= 0x03A9) return r + 32;
+    if (r >= 0x0410 && r <= 0x042F) return r + 32;
+    return r;
+}
+static inline int64_t mako_unicode_to_upper(int64_t r) {
+    if (r >= 'a' && r <= 'z') return r - 32;
+    if (r >= 0x00E0 && r <= 0x00F6) return r - 32;
+    if (r >= 0x00F8 && r <= 0x00FE) return r - 32;
+    if (r >= 0x03B1 && r <= 0x03C9) return r - 32;
+    if (r >= 0x0430 && r <= 0x044F) return r - 32;
+    return r;
+}
+static inline int64_t mako_unicode_to_title(int64_t r) {
+    return mako_unicode_to_upper(r); /* title seed ≡ upper for Latin/Greek/Cyrillic */
+}
+/* Simple case fold cycle seed (A↔a style for ASCII; identity else). */
+static inline int64_t mako_unicode_simple_fold(int64_t r) {
+    if (r >= 'A' && r <= 'Z') return r + 32;
+    if (r >= 'a' && r <= 'z') return r - 32;
+    int64_t lo = mako_unicode_to_lower(r);
+    if (lo != r) return lo;
+    int64_t up = mako_unicode_to_upper(r);
+    if (up != r) return up;
+    return r;
+}
+/* Property / script name match (same table as regexp \p{Name}). */
+static inline int64_t mako_unicode_is(MakoString prop, int64_t r) {
+    if (!prop.data || prop.len == 0 || r < 0) return 0;
+    return mako_re_unicode_prop_match(prop.data, prop.len, (uint32_t)r) ? 1 : 0;
 }
 
 /* ---- path/filepath walk (recursive, depth-limited) ---- */

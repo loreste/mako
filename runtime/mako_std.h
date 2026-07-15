@@ -3623,34 +3623,65 @@ static inline int64_t mako_safe_add(int64_t a, int64_t b) {
     return r;
 }
 
-/* ---- Plugin host loader seed (mako_plugin.h ABI) ---- */
-#define MAKO_PLUGIN_HOST_MAX 8
+/* ---- Plugin host loader (rich package over mako_plugin.h ABI) ---- */
+#define MAKO_PLUGIN_HOST_MAX 16
 typedef struct {
     void *handle;
     const MakoPluginVTable *vt;
     int used;
+    char path[512];
 } MakoPluginHostSlot;
 static MakoPluginHostSlot mako_plugin_slots[MAKO_PLUGIN_HOST_MAX];
+static int64_t mako_plugin_last_err = 0; /* 0=ok, 1=path, 2=dlopen, 3=entry, 4=abi, 5=full */
+
+static inline int64_t mako_plugin_max_slots(void) { return MAKO_PLUGIN_HOST_MAX; }
+static inline int64_t mako_plugin_abi_version(void) { return (int64_t)MAKO_PLUGIN_ABI_VERSION; }
+static inline MakoString mako_plugin_api_version(void) {
+    return mako_str_from_cstr(MAKO_PLUGIN_API_VERSION);
+}
+static inline int64_t mako_plugin_last_error(void) { return mako_plugin_last_err; }
+static inline MakoString mako_plugin_last_error_str(void) {
+    switch (mako_plugin_last_err) {
+        case 0: return mako_str_from_cstr("ok");
+        case 1: return mako_str_from_cstr("bad path");
+        case 2: return mako_str_from_cstr("dlopen failed");
+        case 3: return mako_str_from_cstr("missing mako_plugin_entry");
+        case 4: return mako_str_from_cstr("abi mismatch");
+        case 5: return mako_str_from_cstr("slot table full");
+        case 6: return mako_str_from_cstr("unsupported platform");
+        default: return mako_str_from_cstr("unknown");
+    }
+}
 
 static inline int64_t mako_plugin_open(MakoString path) {
 #if defined(_WIN32) || defined(MAKO_WASI)
     (void)path;
+    mako_plugin_last_err = 6;
     return -1;
 #else
-    if (!path.data || path.len == 0 || path.len >= 512) return -1;
+    mako_plugin_last_err = 0;
+    if (!path.data || path.len == 0 || path.len >= 512) {
+        mako_plugin_last_err = 1;
+        return -1;
+    }
     char pbuf[512];
     memcpy(pbuf, path.data, path.len);
     pbuf[path.len] = 0;
     void *h = dlopen(pbuf, RTLD_NOW | RTLD_LOCAL);
-    if (!h) return -1;
+    if (!h) {
+        mako_plugin_last_err = 2;
+        return -1;
+    }
     MakoPluginEntryFn entry = (MakoPluginEntryFn)dlsym(h, "mako_plugin_entry");
     if (!entry) {
         dlclose(h);
+        mako_plugin_last_err = 3;
         return -1;
     }
     const MakoPluginVTable *vt = entry();
     if (!vt || !mako_plugin_abi_compatible(vt->abi_version)) {
         dlclose(h);
+        mako_plugin_last_err = 4;
         return -1;
     }
     for (int i = 0; i < MAKO_PLUGIN_HOST_MAX; i++) {
@@ -3658,6 +3689,7 @@ static inline int64_t mako_plugin_open(MakoString path) {
             mako_plugin_slots[i].handle = h;
             mako_plugin_slots[i].vt = vt;
             mako_plugin_slots[i].used = 1;
+            memcpy(mako_plugin_slots[i].path, pbuf, path.len + 1);
             if (vt->init) {
                 MakoPluginHost host;
                 host.abi_version = MAKO_PLUGIN_ABI_VERSION;
@@ -3669,8 +3701,89 @@ static inline int64_t mako_plugin_open(MakoString path) {
         }
     }
     dlclose(h);
+    mako_plugin_last_err = 5;
     return -1;
 #endif
+}
+
+static inline int64_t mako_plugin_alive(int64_t handle) {
+#if defined(_WIN32) || defined(MAKO_WASI)
+    (void)handle;
+    return 0;
+#else
+    if (handle < 0 || handle >= MAKO_PLUGIN_HOST_MAX) return 0;
+    return mako_plugin_slots[handle].used ? 1 : 0;
+#endif
+}
+
+static inline MakoString mako_plugin_path(int64_t handle) {
+#if defined(_WIN32) || defined(MAKO_WASI)
+    (void)handle;
+    return mako_str_from_cstr("");
+#else
+    if (handle < 0 || handle >= MAKO_PLUGIN_HOST_MAX || !mako_plugin_slots[handle].used)
+        return mako_str_from_cstr("");
+    return mako_str_from_cstr(mako_plugin_slots[handle].path);
+#endif
+}
+
+static inline MakoString mako_plugin_name(int64_t handle) {
+#if defined(_WIN32) || defined(MAKO_WASI)
+    (void)handle;
+    return mako_str_from_cstr("");
+#else
+    if (handle < 0 || handle >= MAKO_PLUGIN_HOST_MAX || !mako_plugin_slots[handle].used)
+        return mako_str_from_cstr("");
+    const MakoPluginVTable *vt = mako_plugin_slots[handle].vt;
+    if (!vt || !vt->info.name) return mako_str_from_cstr("");
+    return mako_str_from_cstr(vt->info.name);
+#endif
+}
+
+static inline MakoString mako_plugin_version(int64_t handle) {
+#if defined(_WIN32) || defined(MAKO_WASI)
+    (void)handle;
+    return mako_str_from_cstr("");
+#else
+    if (handle < 0 || handle >= MAKO_PLUGIN_HOST_MAX || !mako_plugin_slots[handle].used)
+        return mako_str_from_cstr("");
+    const MakoPluginVTable *vt = mako_plugin_slots[handle].vt;
+    if (!vt || !vt->info.version) return mako_str_from_cstr("");
+    return mako_str_from_cstr(vt->info.version);
+#endif
+}
+
+static inline MakoString mako_plugin_kind(int64_t handle) {
+#if defined(_WIN32) || defined(MAKO_WASI)
+    (void)handle;
+    return mako_str_from_cstr("");
+#else
+    if (handle < 0 || handle >= MAKO_PLUGIN_HOST_MAX || !mako_plugin_slots[handle].used)
+        return mako_str_from_cstr("");
+    const MakoPluginVTable *vt = mako_plugin_slots[handle].vt;
+    if (!vt || !vt->info.kind) return mako_str_from_cstr("native");
+    return mako_str_from_cstr(vt->info.kind);
+#endif
+}
+
+static inline int64_t mako_plugin_plugin_abi(int64_t handle) {
+#if defined(_WIN32) || defined(MAKO_WASI)
+    (void)handle;
+    return -1;
+#else
+    if (handle < 0 || handle >= MAKO_PLUGIN_HOST_MAX || !mako_plugin_slots[handle].used)
+        return -1;
+    const MakoPluginVTable *vt = mako_plugin_slots[handle].vt;
+    return vt ? (int64_t)vt->abi_version : -1;
+#endif
+}
+
+static inline int64_t mako_plugin_count(void) {
+    int64_t n = 0;
+    for (int i = 0; i < MAKO_PLUGIN_HOST_MAX; i++) {
+        if (mako_plugin_slots[i].used) n++;
+    }
+    return n;
 }
 
 static inline MakoString mako_plugin_call(int64_t handle, MakoString op, MakoString payload) {
@@ -3685,9 +3798,19 @@ static inline MakoString mako_plugin_call(int64_t handle, MakoString op, MakoStr
     const MakoPluginVTable *vt = mako_plugin_slots[handle].vt;
     if (!vt || !vt->call) return mako_str_from_cstr("");
     MakoString out = vt->call(op, payload);
-    /* Caller owns returned string; plugin free_string optional if copy needed. */
+    /* If plugin provides free_string, copy into host-owned buffer and free. */
+    if (vt->free_string && out.data) {
+        MakoString copy = mako_str_clone(out);
+        vt->free_string(out);
+        return copy;
+    }
     return out;
 #endif
+}
+
+/* Call and report whether the plugin slot is alive (empty string may still be success). */
+static inline int64_t mako_plugin_call_ok(int64_t handle) {
+    return mako_plugin_alive(handle);
 }
 
 static inline int64_t mako_plugin_close(int64_t handle) {
@@ -3703,8 +3826,21 @@ static inline int64_t mako_plugin_close(int64_t handle) {
     mako_plugin_slots[handle].handle = NULL;
     mako_plugin_slots[handle].vt = NULL;
     mako_plugin_slots[handle].used = 0;
+    mako_plugin_slots[handle].path[0] = 0;
     return 1;
 #endif
+}
+
+/* Close all open plugin slots (test / process teardown). */
+static inline int64_t mako_plugin_close_all(void) {
+    int64_t n = 0;
+    for (int i = 0; i < MAKO_PLUGIN_HOST_MAX; i++) {
+        if (mako_plugin_slots[i].used) {
+            (void)mako_plugin_close(i);
+            n++;
+        }
+    }
+    return n;
 }
 
 /* Interop surface name seed (C sysv today; other ABIs Later). */

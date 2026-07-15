@@ -1,2 +1,17 @@
+// std/unicode/utf8 — UTF-8 encode/decode + validation (Go-like surface).
 fn valid(s: string) -> int { return utf8_valid(s) }
 fn rune_len(r: int) -> int { return utf8_rune_len(r) }
+fn valid_rune(r: int) -> int { return utf8_valid_rune(r) }
+fn decode_rune(s: string, off: int) -> int { return utf8_decode_rune(s, off) }
+fn decode_size(s: string, off: int) -> int { return utf8_decode_size(s, off) }
+fn decode_last_rune(s: string) -> int { return utf8_decode_last_rune(s) }
+fn decode_last_size() -> int { return utf8_decode_last_size() }
+fn encode_rune(r: int) -> string { return utf8_encode_rune(r) }
+fn full_rune(s: string) -> int { return utf8_full_rune(s) }
+fn rune_start(b: int) -> int { return utf8_rune_start(b) }
+// Builtin `rune_count` is the global name; package users call it directly or via import alias.
+fn count(s: string) -> int { return rune_count(s) }
+fn rune_error() -> int { return utf8_rune_error() }
+fn rune_self() -> int { return utf8_rune_self() }
+fn max_rune() -> int { return utf8_max_rune() }
+fn utf_max() -> int { return utf8_utf_max() }

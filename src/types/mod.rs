@@ -6493,6 +6493,81 @@ impl TypeChecker {
             Type::Fn(vec![Type::Int], Box::new(Type::Int)),
         );
         fns.insert(
+            "utf8_valid_rune".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "utf8_decode_rune".into(),
+            Type::Fn(vec![Type::String, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "utf8_decode_size".into(),
+            Type::Fn(vec![Type::String, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "utf8_decode_last_rune".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "utf8_decode_last_size".into(),
+            Type::Fn(vec![], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "utf8_encode_rune".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::String)),
+        );
+        fns.insert(
+            "utf8_full_rune".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "utf8_rune_start".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "utf8_rune_error".into(),
+            Type::Fn(vec![], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "utf8_rune_self".into(),
+            Type::Fn(vec![], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "utf8_max_rune".into(),
+            Type::Fn(vec![], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "utf8_utf_max".into(),
+            Type::Fn(vec![], Box::new(Type::Int)),
+        );
+        // unicode UCD seed (range tables)
+        for name in [
+            "unicode_is_letter",
+            "unicode_is_digit",
+            "unicode_is_space",
+            "unicode_is_punct",
+            "unicode_is_symbol",
+            "unicode_is_control",
+            "unicode_is_print",
+            "unicode_is_graphic",
+            "unicode_is_upper",
+            "unicode_is_lower",
+            "unicode_is_title",
+            "unicode_to_lower",
+            "unicode_to_upper",
+            "unicode_to_title",
+            "unicode_simple_fold",
+        ] {
+            fns.insert(
+                name.into(),
+                Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+            );
+        }
+        fns.insert(
+            "unicode_is".into(),
+            Type::Fn(vec![Type::String, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
             "filepath_walk".into(),
             Type::Fn(
                 vec![Type::String],
@@ -6512,6 +6587,183 @@ impl TypeChecker {
                 vec![Type::Array(Box::new(Type::Int))],
                 Box::new(Type::Array(Box::new(Type::Int))),
             ),
+        );
+        fns.insert(
+            "slices_reverse_strs".into(),
+            Type::Fn(
+                vec![Type::Array(Box::new(Type::String))],
+                Box::new(Type::Array(Box::new(Type::String))),
+            ),
+        );
+        fns.insert(
+            "slices_unique_strs".into(),
+            Type::Fn(
+                vec![Type::Array(Box::new(Type::String))],
+                Box::new(Type::Array(Box::new(Type::String))),
+            ),
+        );
+        fns.insert(
+            "strings_index".into(),
+            Type::Fn(
+                vec![Type::Array(Box::new(Type::String)), Type::String],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "strings_copy".into(),
+            Type::Fn(
+                vec![Type::Array(Box::new(Type::String))],
+                Box::new(Type::Array(Box::new(Type::String))),
+            ),
+        );
+        // List[int] / List[string] helpers (List[T] aliases []T)
+        fns.insert(
+            "list_new_int".into(),
+            Type::Fn(vec![], Box::new(Type::Array(Box::new(Type::Int)))),
+        );
+        fns.insert(
+            "list_new_str".into(),
+            Type::Fn(vec![], Box::new(Type::Array(Box::new(Type::String)))),
+        );
+        fns.insert(
+            "list_push_int".into(),
+            Type::Fn(
+                vec![Type::Array(Box::new(Type::Int)), Type::Int],
+                Box::new(Type::Array(Box::new(Type::Int))),
+            ),
+        );
+        fns.insert(
+            "list_push_str".into(),
+            Type::Fn(
+                vec![Type::Array(Box::new(Type::String)), Type::String],
+                Box::new(Type::Array(Box::new(Type::String))),
+            ),
+        );
+        fns.insert(
+            "list_pop_int".into(),
+            Type::Fn(
+                vec![Type::Array(Box::new(Type::Int))],
+                Box::new(Type::Array(Box::new(Type::Int))),
+            ),
+        );
+        fns.insert(
+            "list_popped_int".into(),
+            Type::Fn(vec![], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "list_pop_str".into(),
+            Type::Fn(
+                vec![Type::Array(Box::new(Type::String))],
+                Box::new(Type::Array(Box::new(Type::String))),
+            ),
+        );
+        fns.insert(
+            "list_popped_str".into(),
+            Type::Fn(vec![], Box::new(Type::String)),
+        );
+        fns.insert(
+            "list_get_int".into(),
+            Type::Fn(
+                vec![Type::Array(Box::new(Type::Int)), Type::Int],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "list_get_str".into(),
+            Type::Fn(
+                vec![Type::Array(Box::new(Type::String)), Type::Int],
+                Box::new(Type::String),
+            ),
+        );
+        fns.insert(
+            "list_len_int".into(),
+            Type::Fn(vec![Type::Array(Box::new(Type::Int))], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "list_len_str".into(),
+            Type::Fn(
+                vec![Type::Array(Box::new(Type::String))],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "list_clear_int".into(),
+            Type::Fn(
+                vec![Type::Array(Box::new(Type::Int))],
+                Box::new(Type::Array(Box::new(Type::Int))),
+            ),
+        );
+        fns.insert(
+            "list_clear_str".into(),
+            Type::Fn(
+                vec![Type::Array(Box::new(Type::String))],
+                Box::new(Type::Array(Box::new(Type::String))),
+            ),
+        );
+        fns.insert(
+            "list_insert_int".into(),
+            Type::Fn(
+                vec![Type::Array(Box::new(Type::Int)), Type::Int, Type::Int],
+                Box::new(Type::Array(Box::new(Type::Int))),
+            ),
+        );
+        fns.insert(
+            "list_insert_str".into(),
+            Type::Fn(
+                vec![
+                    Type::Array(Box::new(Type::String)),
+                    Type::Int,
+                    Type::String,
+                ],
+                Box::new(Type::Array(Box::new(Type::String))),
+            ),
+        );
+        fns.insert(
+            "list_remove_int".into(),
+            Type::Fn(
+                vec![Type::Array(Box::new(Type::Int)), Type::Int],
+                Box::new(Type::Array(Box::new(Type::Int))),
+            ),
+        );
+        fns.insert(
+            "list_remove_str".into(),
+            Type::Fn(
+                vec![Type::Array(Box::new(Type::String)), Type::Int],
+                Box::new(Type::Array(Box::new(Type::String))),
+            ),
+        );
+        fns.insert(
+            "stack_peek_int".into(),
+            Type::Fn(vec![Type::Array(Box::new(Type::Int))], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "stack_peek_str".into(),
+            Type::Fn(
+                vec![Type::Array(Box::new(Type::String))],
+                Box::new(Type::String),
+            ),
+        );
+        fns.insert(
+            "queue_pop_int".into(),
+            Type::Fn(
+                vec![Type::Array(Box::new(Type::Int))],
+                Box::new(Type::Array(Box::new(Type::Int))),
+            ),
+        );
+        fns.insert(
+            "queue_popped_int".into(),
+            Type::Fn(vec![], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "queue_pop_str".into(),
+            Type::Fn(
+                vec![Type::Array(Box::new(Type::String))],
+                Box::new(Type::Array(Box::new(Type::String))),
+            ),
+        );
+        fns.insert(
+            "queue_popped_str".into(),
+            Type::Fn(vec![], Box::new(Type::String)),
         );
         fns.insert(
             "embed_file".into(),
@@ -7769,6 +8021,20 @@ impl TypeChecker {
         fns.insert("plugin_open".into(), Type::Fn(vec![Type::String], Box::new(Type::Int)));
         fns.insert("plugin_call".into(), Type::Fn(vec![Type::Int, Type::String, Type::String], Box::new(Type::String)));
         fns.insert("plugin_close".into(), Type::Fn(vec![Type::Int], Box::new(Type::Int)));
+        fns.insert("plugin_close_all".into(), Type::Fn(vec![], Box::new(Type::Int)));
+        fns.insert("plugin_alive".into(), Type::Fn(vec![Type::Int], Box::new(Type::Int)));
+        fns.insert("plugin_path".into(), Type::Fn(vec![Type::Int], Box::new(Type::String)));
+        fns.insert("plugin_name".into(), Type::Fn(vec![Type::Int], Box::new(Type::String)));
+        fns.insert("plugin_version".into(), Type::Fn(vec![Type::Int], Box::new(Type::String)));
+        fns.insert("plugin_kind".into(), Type::Fn(vec![Type::Int], Box::new(Type::String)));
+        fns.insert("plugin_plugin_abi".into(), Type::Fn(vec![Type::Int], Box::new(Type::Int)));
+        fns.insert("plugin_count".into(), Type::Fn(vec![], Box::new(Type::Int)));
+        fns.insert("plugin_max_slots".into(), Type::Fn(vec![], Box::new(Type::Int)));
+        fns.insert("plugin_abi_version".into(), Type::Fn(vec![], Box::new(Type::Int)));
+        fns.insert("plugin_api_version".into(), Type::Fn(vec![], Box::new(Type::String)));
+        fns.insert("plugin_last_error".into(), Type::Fn(vec![], Box::new(Type::Int)));
+        fns.insert("plugin_last_error_str".into(), Type::Fn(vec![], Box::new(Type::String)));
+        fns.insert("plugin_call_ok".into(), Type::Fn(vec![Type::Int], Box::new(Type::Int)));
         fns.insert("ffi_abi_name".into(), Type::Fn(vec![], Box::new(Type::String)));
 
         fns.insert(
@@ -10915,7 +11181,7 @@ impl TypeChecker {
                     if args.len() != 1 {
                         return Err(TypeError::new("List needs 1 type arg"));
                     }
-                    // List<T> aliases to array for now (int arrays in codegen)
+                    // List[T] / List<T> aliases []T (rich helpers in std/collections)
                     Ok(Type::Array(Box::new(self.resolve_type(&args[0])?)))
                 }
                 "Map" | "map" => {

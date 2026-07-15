@@ -1,0 +1,70 @@
+// Full unicode + utf8 package depth (UCD seed + encode/decode).
+// Decimal code points (no 0x int literals in Mako source).
+
+fn TestUtf8Constants() {
+    assert_eq(utf8_rune_error(), 65533)   // U+FFFD
+    assert_eq(utf8_rune_self(), 128)      // 0x80
+    assert_eq(utf8_max_rune(), 1114111)   // 0x10FFFF
+    assert_eq(utf8_utf_max(), 4)
+}
+
+fn TestUtf8ValidAndCount() {
+    assert_eq(utf8_valid("café"), 1)
+    assert_eq(utf8_valid("hello"), 1)
+    assert_eq(rune_count("café"), 4)
+    assert_eq(utf8_rune_len(233), 2) // é
+    assert_eq(utf8_rune_len(128512), 4) // 😀 U+1F600
+    assert_eq(utf8_valid_rune(55296), 0) // surrogate U+D800
+    assert_eq(utf8_valid_rune(65), 1) // A
+}
+
+fn TestUtf8EncodeDecode() {
+    let s = utf8_encode_rune(233) // é
+    assert_eq(utf8_valid(s), 1)
+    assert_eq(utf8_decode_rune(s, 0), 233)
+    assert_eq(utf8_decode_size(s, 0), 2)
+    let smile = utf8_encode_rune(128512)
+    assert_eq(utf8_decode_size(smile, 0), 4)
+    assert_eq(utf8_full_rune(s), 1)
+    assert_eq(utf8_rune_start(65), 1)
+    assert_eq(utf8_rune_start(128), 0)
+    let last = utf8_decode_last_rune("abé")
+    assert_eq(last, 233)
+    assert(utf8_decode_last_size() >= 1)
+}
+
+fn TestUnicodeProps() {
+    assert_eq(unicode_is_letter(65), 1) // A
+    assert_eq(unicode_is_letter(49), 0) // 1
+    assert_eq(unicode_is_digit(53), 1) // 5
+    assert_eq(unicode_is_digit(1633), 1) // Arabic-Indic 1 U+0661
+    assert_eq(unicode_is_space(32), 1)
+    assert_eq(unicode_is_space(12288), 1) // ideographic space U+3000
+    assert_eq(unicode_is_punct(33), 1) // !
+    assert_eq(unicode_is_symbol(36), 1) // $
+    assert_eq(unicode_is_control(7), 1)
+    assert_eq(unicode_is_print(65), 1)
+    assert_eq(unicode_is_graphic(65), 1)
+}
+
+fn TestUnicodeCase() {
+    assert_eq(unicode_is_upper(65), 1)
+    assert_eq(unicode_is_lower(97), 1)
+    assert_eq(unicode_to_lower(65), 97)
+    assert_eq(unicode_to_upper(97), 65)
+    assert_eq(unicode_to_title(97), 65)
+    assert_eq(unicode_simple_fold(65), 97)
+    assert_eq(unicode_simple_fold(97), 65)
+    // Greek Α (913) → α (945)
+    assert_eq(unicode_to_lower(913), 945)
+    assert_eq(unicode_to_upper(945), 913)
+}
+
+fn TestUnicodeIsProp() {
+    assert_eq(unicode_is("L", 65), 1)
+    assert_eq(unicode_is("Letter", 65), 1)
+    assert_eq(unicode_is("Nd", 53), 1)
+    assert_eq(unicode_is("Greek", 945), 1)
+    assert_eq(unicode_is("Han", 20013), 1) // 中
+    assert_eq(unicode_is("Arabic", 1587), 1) // س U+0633
+}
