@@ -1,0 +1,78 @@
+// Full time package: calendar, parse/format, duration.
+
+fn TestTimeDateRoundtrip() {
+    let t = time_date(2020, 1, 2, 3, 4, 5, 6)
+    assert(t > 0)
+    assert_eq(time_year(t), 2020)
+    assert_eq(time_month(t), 1)
+    assert_eq(time_day(t), 2)
+    assert_eq(time_hour(t), 3)
+    assert_eq(time_minute(t), 4)
+    assert_eq(time_second(t), 5)
+    assert_eq(time_millisecond(t), 6)
+    assert(time_weekday(t) >= 0 && time_weekday(t) <= 6)
+    assert(time_yearday(t) >= 1 && time_yearday(t) <= 366)
+}
+
+fn TestTimeParseFormat() {
+    let t = time_date(2021, 6, 15, 12, 30, 0, 0)
+    let s = time_format(t)
+    assert(str_contains(s, "2021-06-15"))
+    assert(str_contains(s, "Z"))
+    let parsed = time_parse_rfc3339(s)
+    // allow ms truncation in format path
+    assert(parsed > 0)
+    assert_eq(time_year(parsed), 2021)
+    assert_eq(time_month(parsed), 6)
+    assert_eq(time_day(parsed), 15)
+    let d = time_parse_date("2022-03-04")
+    assert_eq(time_year(d), 2022)
+    assert_eq(time_month(d), 3)
+    assert_eq(time_day(d), 4)
+    assert_eq(time_hour(d), 0)
+    assert_eq_str(time_format_date(d), "2022-03-04")
+    assert_eq_str(time_format_clock(t), "12:30:00")
+    let loc = time_format_local(t)
+    assert(len(loc) > 0)
+}
+
+fn TestTimeArithmetic() {
+    let t = time_date(2020, 1, 1, 0, 0, 0, 0)
+    let t2 = time_add_ms(t, duration_hours(24))
+    assert_eq(time_day(t2), 2)
+    assert_eq(time_sub_ms(t2, t), duration_days(1))
+    assert_eq(time_after(t2, t), 1)
+    assert_eq(time_before(t, t2), 1)
+    assert_eq(time_equal(t, t), 1)
+    let day0 = time_trunc_day(time_date(2020, 5, 5, 15, 30, 0, 0))
+    assert_eq(time_hour(day0), 0)
+    assert_eq(time_minute(day0), 0)
+    let hour0 = time_trunc_hour(time_date(2020, 5, 5, 15, 30, 0, 0))
+    assert_eq(time_minute(hour0), 0)
+    assert_eq(time_hour(hour0), 15)
+}
+
+fn TestDuration() {
+    assert_eq(duration_seconds(2), 2000)
+    assert_eq(duration_minutes(1), 60000)
+    assert_eq(duration_hours(1), 3600000)
+    assert_eq(duration_days(1), 86400000)
+    assert_eq(duration_to_seconds(5000), 5)
+    assert_eq(duration_to_minutes(120000), 2)
+    assert_eq(duration_to_hours(7200000), 2)
+    let s = duration_string(3661000)
+    assert(str_contains(s, "h") || str_contains(s, "m"))
+    assert(time_local_offset_sec() > -86400 && time_local_offset_sec() < 86400)
+    let now = now_ms()
+    assert(time_since_ms(now - 100) >= 0)
+    assert(time_until_ms(now + 1000) > 0)
+}
+
+fn TestTimeParseZ() {
+    let t = time_parse_rfc3339("2020-01-02T03:04:05Z")
+    assert(t > 0)
+    assert_eq(time_year(t), 2020)
+    assert_eq(time_hour(t), 3)
+    let t2 = time_parse_rfc3339("2020-01-02T03:04:05.250Z")
+    assert_eq(time_millisecond(t2), 250)
+}

@@ -1,29 +1,36 @@
-// std/plugin — rich host package over mako_plugin.h ABI + hot-reload.
-// Open a native dylib that exports mako_plugin_entry (see mako deploy plugin).
+// std/plugin — product host over mako_plugin.h (load, call, meta, reload, manifest)
 
 fn open(path: string) -> int { return plugin_open(path) }
+fn open_manifest(toml: string) -> int { return plugin_open_manifest(toml) }
 fn call(handle: int, op: string, payload: string) -> string {
     return plugin_call(handle, op, payload)
 }
+fn call1(handle: int, op: string) -> string { return plugin_call1(handle, op) }
 fn close(handle: int) -> int { return plugin_close(handle) }
 fn close_all() -> int { return plugin_close_all() }
+fn reload(handle: int) -> int { return plugin_reload(handle) }
+fn find(name: string) -> int { return plugin_find(name) }
 fn alive(handle: int) -> int { return plugin_alive(handle) }
 fn path(handle: int) -> string { return plugin_path(handle) }
 fn name(handle: int) -> string { return plugin_name(handle) }
 fn version(handle: int) -> string { return plugin_version(handle) }
 fn kind(handle: int) -> string { return plugin_kind(handle) }
 fn plugin_abi(handle: int) -> int { return plugin_plugin_abi(handle) }
+fn info_json(handle: int) -> string { return plugin_info_json(handle) }
 fn count() -> int { return plugin_count() }
 fn max_slots() -> int { return plugin_max_slots() }
 fn abi_version() -> int { return plugin_abi_version() }
 fn api_version() -> string { return plugin_api_version() }
 fn last_error() -> int { return plugin_last_error() }
 fn last_error_str() -> string { return plugin_last_error_str() }
+fn last_log() -> string { return plugin_last_log() }
+fn last_log_level() -> int { return plugin_last_log_level() }
+fn log_count() -> int { return plugin_log_count() }
 fn call_ok(handle: int) -> int { return plugin_call_ok(handle) }
+fn manifest_artifact(toml: string) -> string { return plugin_manifest_artifact(toml) }
+fn manifest_lib_path(toml: string) -> string { return plugin_manifest_lib_path(toml) }
 fn probe(path: string) -> int { return dlopen_probe(path) }
 fn ffi_abi() -> string { return ffi_abi_name() }
-
-// Hot-reload: watch path, poll mtime, call, close.
 fn watch(path: string) -> int { return hot_reload_plugin_watch(path) }
 fn poll() -> int { return hot_reload_plugin_poll() }
 fn hot_call(op: string, payload: string) -> string {

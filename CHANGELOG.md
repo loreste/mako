@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+### Plugin product · rich collections · full time · full syscall
+
+- **Plugin product:** live dylib load/call (ping/echo/version), host log callback,
+  find-by-name, reload, manifest artifact parse, `plugin_info_json`,
+  `std/plugin` package; `plugin_product_test` compiles a real plugin with `cc`.
+- **Rich collections:** set ops, min-heap, lock-free ring, sum/min/max/concat/
+  fill/range/binary_search; expanded `std/collections`.
+- **Full time:** UTC calendar (`time_date` / year…weekday), RFC3339 parse/format,
+  local format, duration helpers, trunc/add/sub; `std/time` + `time_full_test`.
+- **Full syscall:** portable OS surface (pid/uid/host/uname/pipe/dup/read/write/
+  access/chmod/symlink/rlimit/…); `std/syscall` + `syscall_full_test`.
+
 ### Full unicode + utf8 package
 
 - UTF-8: encode/decode at offset, last-rune, full_rune, rune_start, valid_rune,

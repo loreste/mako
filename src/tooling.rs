@@ -1724,8 +1724,22 @@ static void plugin_shutdown(void) {{
 }}
 
 static MakoString plugin_call(MakoString operation, MakoString payload) {{
-    (void)operation;
-    (void)payload;
+    /* Product ops: ping, version, echo, name */
+    if (operation.len == 4 && memcmp(operation.data, "ping", 4) == 0)
+        return mako_str_from_cstr("pong");
+    if (operation.len == 7 && memcmp(operation.data, "version", 7) == 0)
+        return mako_str_from_cstr("0.1.0");
+    if (operation.len == 4 && memcmp(operation.data, "name", 4) == 0)
+        return mako_str_from_cstr("{name}");
+    if (operation.len == 4 && memcmp(operation.data, "echo", 4) == 0) {{
+        if (!payload.data || payload.len == 0) return mako_str_from_cstr("");
+        char *d = (char *)malloc(payload.len + 1);
+        if (!d) return mako_str_from_cstr("");
+        memcpy(d, payload.data, payload.len);
+        d[payload.len] = 0;
+        MakoString out = {{d, payload.len}};
+        return out;
+    }}
     return mako_str_from_cstr("{name}: ok");
 }}
 

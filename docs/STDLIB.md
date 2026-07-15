@@ -55,9 +55,10 @@ Tests: `examples/testing/stdlib_*`, plus area tests (`base64_test`, `regex_*`,
 | `errors` / `testing` / `httptest` / `regexp` / `log` / `slog` / `sql` | **Done** | RE2-ish + `\x` `(?:)` `\p{...}` scripts/categories + lookahead |
 | `image/png` / `gif` / `jpeg` | **Done** | LZW dict; DCT + Huffman block; JFIF shell + APP7 Mako payload |
 | `reflect` | **Done** | POD value bag (N fields + nested POD flatten) + clone/equal; map fields rejected |
-| `plugin` | **Done seed** | rich host package (`std/plugin`) over `mako_plugin.h` ABI |
-| `syscall` | skip | VISION |
-| `collections` | **Done** | List[T]=[]T + list/stack/queue int·str · reverse/unique |
+| `plugin` | **Done** | product host (`std/plugin`): load/call/meta/reload/manifest + live dylib |
+| `syscall` | **Done** | portable OS primitives (`std/syscall`): pid/uid/host/pipe/dup/… |
+| `time` | **Done** | clocks + calendar + parse/format + duration (`std/time`) |
+| `collections` | **Done** | List[T]=[]T + set/heap/ring/stack/queue/stats |
 | `embed` | **Done** | helper (not compile-time) |
 
 Runtime: `mako_rt.h` + `mako_goext.h` (Waves 1–9). Tests: `goext_wave{,3,4,5,6,7,8,9}_test.mko`.
@@ -914,7 +915,13 @@ import "time"
 | `deadline_ns` / `deadline_ms` / `deadline_remaining_ns` / `deadline_expired` | mono deadlines |
 | `sleep_ns` / `sleep_us` / `sleep_ms` / `sleep_until_ns` / `spin_until_ns` | waits |
 | `mono_res_ns` / `mono_overhead_ns` | resolution / calibration |
-| `time_unix` / `time_format` | wall seconds / RFC3339 |
+| `time_unix` / `time_format` | wall seconds / RFC3339 UTC |
+| `time_date` / `time_year`…`time_weekday` | build / extract UTC calendar |
+| `time_parse_rfc3339` / `time_parse_date` | parse → unix ms |
+| `time_format_local` / `date` / `clock` | format variants |
+| `time_add_ms` / `sub` / `after` / `before` / `trunc_*` | arithmetic |
+| `duration_*` / `duration_string` | duration in ms + pretty print |
+| `syscall_*` | portable OS: pid/uid/host/uname/pipe/dup/access/… |
 
 ### Low-latency pattern
 
@@ -953,7 +960,7 @@ fn main() {
 }
 ```
 
-Tests: `examples/testing/time_latency_test.mko`.
+Tests: `examples/testing/time_latency_test.mko` · `time_full_test.mko` · `syscall_full_test.mko`.
 
 ---
 
@@ -1060,7 +1067,7 @@ fn main() {
 | regexp | `regex_match` / `regex_find` / `regex_capture` |
 | log | Strong slog: `slog_set_level` / `set_json` / `set_service` / `set_output` / `with*` / `log_*` aliases |
 | math | `abs` / `min` / `max` / `clamp`, `math_sqrt` / `pow` / `floor` / `ceil` / `sin` / `cos` / `log` / `exp` / `math_abs` |
-| collections | `sort_*`, contains/index/copy, `list_*` push/pop/insert/remove, stack/queue, `slices_reverse(_strs)` / `slices_unique(_strs)` |
+| collections | `sort_*`, list push/pop/insert/remove, set union/intersect/diff, min-heap, lock-free ring, sum/min/max/concat/range/bsearch |
 
 ### Strong logging
 
@@ -1583,7 +1590,7 @@ Pull: `pull "uuid"` → `std/uuid/uuid.mko` re-exports. Prefer builtins on the h
 | `database/sql` one API | Done (`sql_*`; string params, last_insert/rows, multi-row cursor + bulk col; MySQL query still seed) |
 | Full `regexp` engine | RE2-ish (`\d\w\s`, `{n,m}`, `\b`, find_all/replace); not full RE2/PCRE |
 | `sync.WaitGroup` / RWMutex / atomic | Done |
-| Generics collections | slices + maps + `List[T]`/`List<T>` (=`[]T`) + list/stack/queue Done seed; full generic mono helpers Later |
+| Generics collections | slices + maps + `List[T]` + set/heap/ring/stats Done; fully polymorphic map/filter Later |
 | zip multi-file · png/gif/jpeg · reflect · httptest · gob/mail/smtp/slog/binary | Done (area-level; not every symbol) |
 | Full stdlib symbol parity | **Not claimed** (~98% major *areas*; not every symbol) |
 

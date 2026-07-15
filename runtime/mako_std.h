@@ -3633,6 +3633,16 @@ typedef struct {
 } MakoPluginHostSlot;
 static MakoPluginHostSlot mako_plugin_slots[MAKO_PLUGIN_HOST_MAX];
 static int64_t mako_plugin_last_err = 0; /* 0=ok, 1=path, 2=dlopen, 3=entry, 4=abi, 5=full */
+static char mako_plugin_log_buf[2048];
+static int64_t mako_plugin_log_level_v = 0;
+static int64_t mako_plugin_log_count_v = 0;
+static void mako_plugin_host_log(int32_t level, MakoString message) {
+    mako_plugin_log_level_v = level;
+    mako_plugin_log_count_v++;
+    size_t n = message.len < sizeof(mako_plugin_log_buf) - 1 ? message.len : sizeof(mako_plugin_log_buf) - 1;
+    if (message.data && n) memcpy(mako_plugin_log_buf, message.data, n);
+    mako_plugin_log_buf[n] = 0;
+}
 
 static inline int64_t mako_plugin_max_slots(void) { return MAKO_PLUGIN_HOST_MAX; }
 static inline int64_t mako_plugin_abi_version(void) { return (int64_t)MAKO_PLUGIN_ABI_VERSION; }
@@ -3693,7 +3703,7 @@ static inline int64_t mako_plugin_open(MakoString path) {
             if (vt->init) {
                 MakoPluginHost host;
                 host.abi_version = MAKO_PLUGIN_ABI_VERSION;
-                host.log = NULL;
+                host.log = mako_plugin_host_log;
                 host.user_data = NULL;
                 (void)vt->init(&host);
             }
@@ -3841,6 +3851,138 @@ static inline int64_t mako_plugin_close_all(void) {
         }
     }
     return n;
+}
+
+/* ---- Plugin product surface: registry, log host, reload, manifest ---- */
+static inline MakoString mako_plugin_last_log(void) {
+    return mako_str_from_cstr(mako_plugin_log_buf);
+}
+static inline int64_t mako_plugin_last_log_level(void) { return mako_plugin_log_level_v; }
+static inline int64_t mako_plugin_log_count(void) { return mako_plugin_log_count_v; }
+
+/* Re-open path for handle (hot swap same slot path). */
+static inline int64_t mako_plugin_reload(int64_t handle) {
+#if defined(_WIN32) || defined(MAKO_WASI)
+    (void)handle;
+    return -1;
+#else
+    if (handle < 0 || handle >= MAKO_PLUGIN_HOST_MAX || !mako_plugin_slots[handle].used)
+        return -1;
+    char path[512];
+    memcpy(path, mako_plugin_slots[handle].path, sizeof(path));
+    (void)mako_plugin_close(handle);
+    MakoString p = mako_str_from_cstr(path);
+    int64_t h = mako_plugin_open(p);
+    mako_str_free(p);
+    return h;
+#endif
+}
+
+/* Find first open plugin whose info.name equals `name`. */
+static inline int64_t mako_plugin_find(MakoString name) {
+#if defined(_WIN32) || defined(MAKO_WASI)
+    (void)name;
+    return -1;
+#else
+    if (!name.data || name.len == 0) return -1;
+    for (int i = 0; i < MAKO_PLUGIN_HOST_MAX; i++) {
+        if (!mako_plugin_slots[i].used) continue;
+        const MakoPluginVTable *vt = mako_plugin_slots[i].vt;
+        if (!vt || !vt->info.name) continue;
+        size_t n = strlen(vt->info.name);
+        if (n == name.len && memcmp(vt->info.name, name.data, n) == 0) return i;
+    }
+    return -1;
+#endif
+}
+
+/* Parse artifact= from a minimal mako.plugin.toml (key = "value" lines). */
+static inline MakoString mako_plugin_manifest_artifact(MakoString toml_path) {
+    MakoString raw = mako_read_file(toml_path);
+    if (!raw.data || raw.len == 0) return mako_str_from_cstr("");
+    /* Look for artifact = "..." */
+    const char *key = "artifact";
+    for (size_t i = 0; i + 8 < raw.len; i++) {
+        if (memcmp(raw.data + i, key, 8) != 0) continue;
+        size_t j = i + 8;
+        while (j < raw.len && (raw.data[j] == ' ' || raw.data[j] == '\t')) j++;
+        if (j >= raw.len || raw.data[j] != '=') continue;
+        j++;
+        while (j < raw.len && (raw.data[j] == ' ' || raw.data[j] == '\t')) j++;
+        if (j >= raw.len || raw.data[j] != '"') continue;
+        j++;
+        size_t start = j;
+        while (j < raw.len && raw.data[j] != '"') j++;
+        if (j >= raw.len) break;
+        size_t n = j - start;
+        char *d = (char *)malloc(n + 1);
+        if (!d) {
+            mako_str_free(raw);
+            return mako_str_from_cstr("");
+        }
+        memcpy(d, raw.data + start, n);
+        d[n] = 0;
+        mako_str_free(raw);
+        MakoString out = {d, n};
+        return out;
+    }
+    mako_str_free(raw);
+    return mako_str_from_cstr("");
+}
+
+/* Resolve relative artifact against directory of manifest path. */
+static inline MakoString mako_plugin_manifest_lib_path(MakoString toml_path) {
+    MakoString art = mako_plugin_manifest_artifact(toml_path);
+    if (!art.data || art.len == 0) return art;
+    /* If absolute, return as-is. */
+    if (art.data[0] == '/') return art;
+    /* dirname of toml */
+    size_t slash = toml_path.len;
+    while (slash > 0 && toml_path.data[slash - 1] != '/') slash--;
+    MakoString dir = mako_str_view(toml_path.data, slash > 0 ? slash - 1 : 0);
+    if (dir.len == 0) return art;
+    MakoString joined = mako_path_join(dir, art);
+    mako_str_free(art);
+    return joined;
+}
+
+static inline int64_t mako_plugin_open_manifest(MakoString toml_path) {
+    MakoString lib = mako_plugin_manifest_lib_path(toml_path);
+    if (!lib.data || lib.len == 0) {
+        mako_plugin_last_err = 1;
+        return -1;
+    }
+    int64_t h = mako_plugin_open(lib);
+    mako_str_free(lib);
+    return h;
+}
+
+/* Call with automatic empty-payload convenience. */
+static inline MakoString mako_plugin_call1(int64_t handle, MakoString op) {
+    return mako_plugin_call(handle, op, mako_str_from_cstr(""));
+}
+
+/* Product info JSON for a handle. */
+static inline MakoString mako_plugin_info_json(int64_t handle) {
+#if defined(_WIN32) || defined(MAKO_WASI)
+    (void)handle;
+    return mako_str_from_cstr("{}");
+#else
+    if (handle < 0 || handle >= MAKO_PLUGIN_HOST_MAX || !mako_plugin_slots[handle].used)
+        return mako_str_from_cstr("{}");
+    const MakoPluginVTable *vt = mako_plugin_slots[handle].vt;
+    const char *name = (vt && vt->info.name) ? vt->info.name : "";
+    const char *ver = (vt && vt->info.version) ? vt->info.version : "";
+    const char *kind = (vt && vt->info.kind) ? vt->info.kind : "native";
+    char buf[512];
+    int n = snprintf(buf, sizeof(buf),
+                     "{\"handle\":%lld,\"name\":\"%s\",\"version\":\"%s\",\"kind\":\"%s\","
+                     "\"abi\":%u,\"path\":\"%s\"}",
+                     (long long)handle, name, ver, kind,
+                     vt ? vt->abi_version : 0u, mako_plugin_slots[handle].path);
+    if (n < 0) n = 0;
+    return mako_str_from_cstr(buf);
+#endif
 }
 
 /* Interop surface name seed (C sysv today; other ABIs Later). */

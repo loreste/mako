@@ -1,4 +1,4 @@
-// time — clocks, sleep, deadlines (prefer mono_* for latency)
+// time — full clocks, calendar, parse/format, duration (prefer mono_* for latency)
 
 fn now() -> int { return now_ms() }
 fn wall() -> int { return wall_ms() }
@@ -10,8 +10,48 @@ fn sleep(ms: int) { sleep_ms(ms) }
 fn sleep_micros(us: int) { sleep_us(us) }
 fn sleep_nanos(ns: int) { sleep_ns(ns) }
 fn format(ms: int) -> string { return time_format(ms) }
+fn format_local(ms: int) -> string { return time_format_local(ms) }
+fn format_date(ms: int) -> string { return time_format_date(ms) }
+fn format_clock(ms: int) -> string { return time_format_clock(ms) }
 fn elapsed(start_ms: int) -> int { return elapsed_ms(start_ms) }
 fn elapsed_mono(start_ms: int) -> int { return elapsed_mono_ms(start_ms) }
 fn deadline(timeout_ms: int) -> int { return deadline_ms(timeout_ms) }
 fn remaining(deadline: int) -> int { return deadline_remaining_ns(deadline) }
 fn expired(deadline: int) -> int { return deadline_expired(deadline) }
+
+// Calendar (UTC)
+fn year(ms: int) -> int { return time_year(ms) }
+fn month(ms: int) -> int { return time_month(ms) }
+fn day(ms: int) -> int { return time_day(ms) }
+fn hour(ms: int) -> int { return time_hour(ms) }
+fn minute(ms: int) -> int { return time_minute(ms) }
+fn second(ms: int) -> int { return time_second(ms) }
+fn millisecond(ms: int) -> int { return time_millisecond(ms) }
+fn weekday(ms: int) -> int { return time_weekday(ms) }
+fn yearday(ms: int) -> int { return time_yearday(ms) }
+fn date(y: int, mo: int, d: int, h: int, mi: int, s: int, ms: int) -> int {
+    return time_date(y, mo, d, h, mi, s, ms)
+}
+fn add_ms(t: int, delta: int) -> int { return time_add_ms(t, delta) }
+fn sub_ms(a: int, b: int) -> int { return time_sub_ms(a, b) }
+fn after(a: int, b: int) -> int { return time_after(a, b) }
+fn before(a: int, b: int) -> int { return time_before(a, b) }
+fn equal(a: int, b: int) -> int { return time_equal(a, b) }
+fn since(t: int) -> int { return time_since_ms(t) }
+fn until(t: int) -> int { return time_until_ms(t) }
+fn trunc_day(ms: int) -> int { return time_trunc_day(ms) }
+fn trunc_hour(ms: int) -> int { return time_trunc_hour(ms) }
+fn local_offset_sec() -> int { return time_local_offset_sec() }
+fn parse_rfc3339(s: string) -> int { return time_parse_rfc3339(s) }
+fn parse_date(s: string) -> int { return time_parse_date(s) }
+
+// Duration (ms) — package names avoid shadowing builtins
+fn millis(n: int) -> int { return duration_ms(n) }
+fn seconds(n: int) -> int { return duration_seconds(n) }
+fn minutes(n: int) -> int { return duration_minutes(n) }
+fn hours(n: int) -> int { return duration_hours(n) }
+fn days(n: int) -> int { return duration_days(n) }
+fn to_seconds(ms: int) -> int { return duration_to_seconds(ms) }
+fn to_minutes(ms: int) -> int { return duration_to_minutes(ms) }
+fn to_hours(ms: int) -> int { return duration_to_hours(ms) }
+fn duration_str(ms: int) -> string { return duration_string(ms) }

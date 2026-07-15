@@ -106,8 +106,10 @@ const-fn depth (match/while/for/strings) · suite **165+** · [The Mako Book](bo
 | gfx_poll · GPU backend stubs · netcode deltas | Done seed — `residual_seeds_test` |
 | plugin_open/call/close · hot_reload_unwatch | Done seed — `residual_seeds_test` · `domain_tracks_test` |
 | Full unicode + utf8 package | Done seed — UCD props/case + encode/decode · `std/unicode` · `unicode_full_test` |
-| List[T] + richer collections | Done seed — List alias `[]T` + list/stack/queue · `std/collections` · `collections_list_test` |
-| Plugin as rich package | Done seed — info/error/slots + `std/plugin` · `plugin_package_test` |
+| List[T] + richer collections | Done — List/`[]T` + set/heap/ring/stats · `std/collections` · `collections_*_test` |
+| Plugin product package | Done — live dylib load/call/reload/manifest · `std/plugin` · `plugin_product_test` |
+| Full time package | Done — calendar/parse/format/duration · `std/time` · `time_full_test` |
+| Full syscall package | Done — portable OS primitives · `std/syscall` · `syscall_full_test` |
 | Installer UX (manifest + doctor + Windows) | Done seed — `install-manifest.json` · doctor fields · `install.ps1` |
 | Actor spawn_cap + interface `on T : I` sugar | Done seed — `actor_test` · `iface_on_iface_test` |
 | Error chain peel + tag helpers | Done seed — `error_unwrap` / `root` / `as_tag` / `has_tag` · `error_chain_test` |

@@ -1,0 +1,64 @@
+// Full syscall package: portable OS primitives.
+
+fn TestSyscallIdentity() {
+    assert_eq(syscall_available(), 1)
+    let pid = syscall_getpid()
+    assert(pid > 0)
+    let ppid = syscall_getppid()
+    assert(ppid >= 0)
+    let uid = syscall_getuid()
+    assert(uid >= 0)
+    assert(syscall_geteuid() >= 0)
+    assert(syscall_getgid() >= 0)
+    assert(syscall_getegid() >= 0)
+}
+
+fn TestSyscallHostInfo() {
+    let hn = syscall_hostname()
+    assert(len(hn) > 0)
+    let sys = syscall_uname_sysname()
+    assert(len(sys) > 0)
+    let mach = syscall_uname_machine()
+    assert(len(mach) > 0)
+    let j = syscall_uname_json()
+    assert(str_contains(j, "sysname"))
+    assert(syscall_pagesize() >= 4096)
+    assert(syscall_ncpu() >= 1)
+    let nofile = syscall_getrlimit_nofile()
+    assert(nofile > 0)
+}
+
+fn TestSyscallPipe() {
+    assert_eq(syscall_pipe(), 0)
+    let r = syscall_pipe_read_fd()
+    let w = syscall_pipe_write_fd()
+    assert(r >= 0)
+    assert(w >= 0)
+    let n = syscall_write(w, "hello")
+    assert_eq(n, 5)
+    let got = syscall_read(r, 16)
+    assert_eq_str(got, "hello")
+    assert_eq(syscall_close(r), 0)
+    assert_eq(syscall_close(w), 0)
+}
+
+fn TestSyscallAccessErrno() {
+    assert_eq(syscall_access("/tmp", 0), 0) // F_OK
+    assert_eq(syscall_access("/tmp/mako_no_such_path_xyz_99", 0), -1)
+    let _ = syscall_errno()
+    let es = syscall_errno_str()
+    assert(len(es) > 0)
+    // stdin may or may not be a tty in CI
+    let _ = syscall_isatty(0)
+}
+
+fn TestSyscallUmaskDup() {
+    let old = syscall_umask(18) // 022
+    let _ = syscall_umask(old) // restore
+    assert(old >= 0)
+    // dup stdin
+    let d = syscall_dup(0)
+    if d >= 0 {
+        assert_eq(syscall_close(d), 0)
+    }
+}
