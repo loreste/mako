@@ -59,3 +59,24 @@ fn TestTaskInspect() {
     let after = tasks_inspect_json()
     assert(str_contains(after, "tasks_spawned"))
 }
+
+// Auto fn_drop on scope exit — no explicit drop required.
+fn TestAutoFnDropScope() {
+    let n = 7
+    let f: fn(int) -> int = |x| x + n
+    assert_eq(fn_has_env(f), 1)
+    assert_eq(apply(f, 3), 10)
+    // scope end drops env; kick moves ownership so no double-free
+}
+
+fn TestKickMovesFnEnv() {
+    let n = 10
+    let f: fn(int) -> int = |x| x + n
+    assert_eq(fn_has_env(f), 1)
+    crew c {
+        let j = c.kick(apply(f, 5))
+        // f's env was moved into the task — source is bare after kick.
+        assert_eq(fn_has_env(f), 0)
+        assert_eq(j.join(), 15)
+    }
+}

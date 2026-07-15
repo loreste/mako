@@ -121,7 +121,7 @@ Metrics/prom + span-lite JSON are in; **depth seeds landed** (2026-07-14).
 
 **Still open (true residuals):**
 
-1. Mut-ref captures · move/lifetime depth · auto env drop on scope exit  
+1. Mut-ref captures · deeper move/lifetime analysis  
 2. Full printf verb parity in f-strings (use `fmt_sprintf*` for exotic cases)  
 3. Full debugger: source locals, real breakpoints, async frame walk  
 
@@ -263,6 +263,7 @@ Percentages are weighted; update when a task flips.
 - [x] PGO/LTO workflow (`MAKO_PGO_GEN` / `MAKO_PGO_USE` / `MAKO_NO_LTO` · howto).
 - [x] Debugger seed: `debug_break` / hits · `tasks_inspect_json` · `task_done` / `task_id` / `task_joined`.
 - [x] Closure env free: `fn_drop` / `fn_has_env` (+ generated drop_env for string fields).
+- [x] Auto `fn_drop` on scope exit; kick **moves** env into the task (no double-free).
 - [ ] Full debugger: source-level locals, real breakpoints, async frame walk.
 - [ ] Full OTLP protobuf + exporter HTTP client productization.
 - [ ] Sampling CPU profiler / continuous profilers.
