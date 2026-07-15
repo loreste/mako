@@ -1,0 +1,48 @@
+// sip_digest_response_ha1, challenge builders, framing, strip Via.
+// Shared with parallel Mako session (runtime + types already in tree).
+
+fn TestSipDigestHa1MatchesPassword() {
+    let nonce = "dcd98b7102dd2f0e8b11d0f600bfb0c093"
+    let ha1 = sip_md5_hex("alice:atlanta.com:secret")
+    let a = sip_digest_response(
+        "alice", "atlanta.com", "secret",
+        "REGISTER", "sip:atlanta.com", nonce)
+    let b = sip_digest_response_ha1(ha1, "REGISTER", "sip:atlanta.com", nonce)
+    assert_eq_str(a, b)
+    assert_eq_str(b, "10bc49bc9e937a490570b5326e311592")
+    assert_eq(len(ha1), 32)
+}
+
+fn TestSipAuthChallenge() {
+    let www = sip_www_authenticate("atlanta.com", "n1")
+    assert(str_contains(www, "Digest"))
+    assert(str_contains(www, "atlanta.com"))
+    assert(str_contains(www, "n1"))
+    let pxy = sip_proxy_authenticate("realm", "n2")
+    assert(str_contains(pxy, "Digest"))
+}
+
+fn TestSipFirstMessageLen() {
+    let branch = "z9hG4bKtest"
+    let via = sip_via_value("UDP", "127.0.0.1", 5060, branch)
+    let mut h = ""
+    h = sip_headers_append(h, "Via", via)
+    h = sip_headers_append(h, "From", sip_from_value("", "sip:a@x", "t1"))
+    h = sip_headers_append(h, "To", sip_to_value("", "sip:b@x", ""))
+    h = sip_headers_append(h, "Call-ID", "cid1")
+    h = sip_headers_append(h, "CSeq", sip_cseq_value(1, "OPTIONS"))
+    let msg = sip_request("OPTIONS", "sip:b@x", h, "")
+    let n = sip_first_message_len(msg)
+    assert_eq(n, len(msg))
+    let buf = msg + msg
+    assert_eq(sip_first_message_len(buf), len(msg))
+}
+
+fn TestSipStripTopVia() {
+    let msg = "SIP/2.0 200 OK\r\nVia: SIP/2.0/UDP proxy:5060;branch=z9hG4bK1\r\nVia: SIP/2.0/UDP ua:5060;branch=z9hG4bK2\r\nFrom: <sip:a@x>;tag=t\r\nTo: <sip:b@x>;tag=u\r\nCall-ID: c\r\nCSeq: 1 INVITE\r\nContent-Length: 0\r\n\r\n"
+    let out = sip_strip_via(msg)
+    assert(str_contains(out, "branch=z9hG4bK2"))
+    // top Via (proxy) removed
+    let bi = str_index(out, "branch=z9hG4bK1")
+    assert(bi < 0)
+}

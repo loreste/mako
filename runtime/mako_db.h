@@ -1672,18 +1672,45 @@ static inline void mako_sql_copy_str_param(char *dst, size_t cap, MakoString s) 
     dst[n] = 0;
 }
 
-/* How many of p1..p4 are “used”? Trailing all-empty slots are optional extras;
- * leading/mid empty strings are valid bound values (""). Count is max(placeholders, first non-trailing). */
-static inline int mako_sql_str4_count(MakoString p1, MakoString p2, MakoString p3, MakoString p4) {
-    int n = 4;
-    MakoString ps[4] = {p1, p2, p3, p4};
-    while (n > 0) {
-        MakoString s = ps[n - 1];
-        if (s.data && s.len > 0) break;
-        /* Treat {NULL,0} or {"",0} as unused trailing slot */
-        n--;
+/* Max placeholder index from SQL: max $N, or count of `?` (capped at 4 for str4).
+ * Empty string "" is a VALID bind value — do not infer arity from trailing empties. */
+static inline int mako_sql_placeholder_arity(MakoString sql) {
+    if (!sql.data || sql.len == 0) return 0;
+    int max_d = 0;
+    int qmarks = 0;
+    for (size_t i = 0; i < sql.len; i++) {
+        char c = sql.data[i];
+        if (c == '?') {
+            qmarks++;
+            continue;
+        }
+        if (c == '$' && i + 1 < sql.len && sql.data[i + 1] >= '1' && sql.data[i + 1] <= '9') {
+            int v = 0;
+            size_t j = i + 1;
+            while (j < sql.len && sql.data[j] >= '0' && sql.data[j] <= '9') {
+                v = v * 10 + (sql.data[j] - '0');
+                if (v > 99) break;
+                j++;
+            }
+            if (v > max_d) max_d = v;
+            i = j - 1;
+        }
     }
+    int n = max_d > 0 ? max_d : qmarks;
+    if (n < 0) n = 0;
+    if (n > 4) n = 4;
     return n;
+}
+
+/* Legacy: trailing-empty slot count. Prefer mako_sql_placeholder_arity(sql). */
+static inline int mako_sql_str4_count(MakoString p1, MakoString p2, MakoString p3, MakoString p4) {
+    (void)p1;
+    (void)p2;
+    (void)p3;
+    (void)p4;
+    /* Kept for ABI; always returns 4 so empty mid/trailing still bind when callers
+     * used this without SQL. New code paths use placeholder_arity. */
+    return 4;
 }
 
 /* Per-connection metadata for last insert id / rows affected (handle-keyed). */
@@ -1723,7 +1750,30 @@ static inline int64_t mako_sql_meta_key(MakoSqlDB db) {
 }
 
 #if defined(MAKO_HAS_SQLITE)
-/* Bind up to 4 text params on a prepared sqlite statement; returns 0 or -1. */
+/* Map sqlite parameter index (1-based) to slot 0..3 from name ($N / ?N) or position. */
+static inline int mako_sqlite_param_slot(sqlite3_stmt *st, int bind_i) {
+    const char *name = sqlite3_bind_parameter_name(st, bind_i);
+    if (name && name[0] && name[1]) {
+        /* $1, :1, @1, ?1 — use numeric suffix as 1-based slot */
+        const char *p = name;
+        if (*p == '$' || *p == ':' || *p == '@' || *p == '?') p++;
+        if (*p >= '1' && *p <= '9') {
+            int v = 0;
+            while (*p >= '0' && *p <= '9') {
+                v = v * 10 + (*p - '0');
+                p++;
+                if (v > 99) break;
+            }
+            if (v >= 1 && v <= 4) return v - 1;
+        }
+    }
+    /* Anonymous `?` or unknown: order of appearance */
+    return bind_i - 1;
+}
+
+/* Bind up to 4 text params on a prepared sqlite statement; returns 0 or -1.
+ * Maps $N by number (so SET x=$2 WHERE y=$1 binds p2 then p1 correctly).
+ * Empty string "" is a valid bound value. */
 static inline int64_t mako_sqlite_bind_str4(
     sqlite3_stmt *st,
     MakoString p1, MakoString p2, MakoString p3, MakoString p4
@@ -1735,12 +1785,15 @@ static inline int64_t mako_sqlite_bind_str4(
         return -1;
     }
     MakoString ps[4] = {p1, p2, p3, p4};
-    for (int i = 0; i < expected; i++) {
-        MakoString s = ps[i];
-        const char *ptr = (s.data && s.len > 0) ? s.data : "";
-        int len = (s.data && s.len > 0) ? (int)s.len : 0;
+    for (int i = 1; i <= expected; i++) {
+        int slot = mako_sqlite_param_slot(st, i);
+        if (slot < 0 || slot > 3) slot = i - 1;
+        MakoString s = ps[slot];
+        /* Empty string is a valid bind (len 0); only missing data uses "". */
+        const char *ptr = s.data ? s.data : "";
+        int len = s.data ? (int)s.len : 0;
         /* SQLITE_TRANSIENT: copy — MakoString buffers may not outlive the step */
-        if (sqlite3_bind_text(st, i + 1, ptr, len, SQLITE_TRANSIENT) != SQLITE_OK) {
+        if (sqlite3_bind_text(st, i, ptr, len, SQLITE_TRANSIENT) != SQLITE_OK) {
             return -1;
         }
     }
@@ -1783,10 +1836,10 @@ static inline int64_t mako_sqlite_exec_str4_handle(
     return out;
 }
 
-static inline MakoString mako_sqlite_query_str_handle(
+static inline MakoString mako_sqlite_query_str4_handle(
     void *handle,
     MakoString sql,
-    MakoString p1
+    MakoString p1, MakoString p2, MakoString p3, MakoString p4
 ) {
     if (!handle || !sql.data) return mako_str_from_cstr("");
     char qbuf[4096];
@@ -1799,19 +1852,9 @@ static inline MakoString mako_sqlite_query_str_handle(
         fprintf(stderr, "sqlite: prepare: %s\n", sqlite3_errmsg(sdb));
         return mako_str_from_cstr("");
     }
-    int expected = sqlite3_bind_parameter_count(st);
-    if (expected > 1) {
-        fprintf(stderr, "sqlite: sql_query_str supports 0 or 1 placeholder\n");
+    if (mako_sqlite_bind_str4(st, p1, p2, p3, p4) != 0) {
         sqlite3_finalize(st);
         return mako_str_from_cstr("");
-    }
-    if (expected == 1) {
-        const char *ptr = (p1.data && p1.len > 0) ? p1.data : "";
-        int len = (p1.data && p1.len > 0) ? (int)p1.len : 0;
-        if (sqlite3_bind_text(st, 1, ptr, len, SQLITE_TRANSIENT) != SQLITE_OK) {
-            sqlite3_finalize(st);
-            return mako_str_from_cstr("");
-        }
     }
     MakoString out = mako_str_from_cstr("");
     if (sqlite3_step(st) == SQLITE_ROW) {
@@ -1820,6 +1863,16 @@ static inline MakoString mako_sqlite_query_str_handle(
     }
     sqlite3_finalize(st);
     return out;
+}
+
+static inline MakoString mako_sqlite_query_str_handle(
+    void *handle,
+    MakoString sql,
+    MakoString p1
+) {
+    return mako_sqlite_query_str4_handle(
+        handle, sql, p1, mako_str_empty, mako_str_empty, mako_str_empty
+    );
 }
 #endif /* MAKO_HAS_SQLITE */
 
@@ -1864,7 +1917,8 @@ static inline int64_t mako_pg_query_int_params(
 
 /* Execute SQL with up to 4 string parameters (for INSERT/UPDATE with text values).
  * Placeholders: SQLite `?` or `$1..$4`; Postgres `$1..$4` (or `?` rewritten).
- * Trailing empty strings are unused slots; empty mid-values bind as "". */
+ * Bind count comes from SQL placeholder arity ($N / ?), NOT from trailing empty args.
+ * Empty string "" is a real bound value (e.g. SET ua = $2 with $2 = ""). */
 static inline int64_t mako_sql_exec_str4(MakoSqlDB db, MakoString sql, MakoString p1, MakoString p2, MakoString p3, MakoString p4) {
     if (db.driver == 1) {
 #if defined(MAKO_HAS_SQLITE)
@@ -1894,20 +1948,11 @@ static inline int64_t mako_sql_exec_str4(MakoSqlDB db, MakoString sql, MakoStrin
         mako_sql_copy_str_param(b2, sizeof(b2), p2);
         mako_sql_copy_str_param(b3, sizeof(b3), p3);
         mako_sql_copy_str_param(b4, sizeof(b4), p4);
-        int np = mako_sql_str4_count(p1, p2, p3, p4);
+        int np = mako_sql_placeholder_arity(sql);
         const char *vals[4] = {b1, b2, b3, b4};
         MakoString q = mako_sql_qmark_to_dollar(sql);
-        /* Prefer bind count from caller slots; empty trailing ok */
         int64_t rc = mako_pg_exec_params(pgc, q, vals, np);
         mako_str_free(q);
-        if (rc == 0) {
-            /* Refresh rows via a lightweight meta update in exec path */
-            /* pg_exec_params already cleared result — use 0 rows if unknown */
-            MakoSqlMeta *m = mako_sql_meta_slot(pgc.handle);
-            if (m && m->rows_affected == 0) {
-                /* leave; updated if query_int path used */
-            }
-        }
         return rc;
     }
 #else
@@ -1933,22 +1978,25 @@ static inline int64_t mako_sql_exec_plain(MakoSqlDB db, MakoString sql) {
     return rc;
 }
 
-/* Query a single string value (first column of first row); optional one string param. */
-static inline MakoString mako_sql_query_str(MakoSqlDB db, MakoString sql, MakoString p1) {
+/* Query first column of first row as string; up to 4 string binds.
+ * Bind count from SQL placeholder arity; "" is a valid bind value. */
+static inline MakoString mako_sql_query_str4(
+    MakoSqlDB db, MakoString sql, MakoString p1, MakoString p2, MakoString p3, MakoString p4
+) {
     if (db.driver == 1) {
 #if defined(MAKO_HAS_SQLITE)
         if (db.sqlite) {
-            return mako_sqlite_query_str_handle(db.sqlite, sql, p1);
+            return mako_sqlite_query_str4_handle(db.sqlite, sql, p1, p2, p3, p4);
         }
         {
             void *h = mako_sqlite_open_handle(db.dsn);
             if (!h) return mako_str_from_cstr("");
-            MakoString out = mako_sqlite_query_str_handle(h, sql, p1);
+            MakoString out = mako_sqlite_query_str4_handle(h, sql, p1, p2, p3, p4);
             mako_sqlite_close_handle(h);
             return out;
         }
 #else
-        (void)sql; (void)p1;
+        (void)sql; (void)p1; (void)p2; (void)p3; (void)p4;
         return mako_str_from_cstr("");
 #endif
     }
@@ -1957,7 +2005,7 @@ static inline MakoString mako_sql_query_str(MakoSqlDB db, MakoString sql, MakoSt
         MakoPgConn pgc = db.pg;
         PGconn *pg = (PGconn *)(intptr_t)pgc.handle;
         if (!pg || !sql.data) return mako_str_from_cstr("");
-        char qbuf[4096], pbuf[4096];
+        char qbuf[4096], b1[4096], b2[4096], b3[4096], b4[4096];
         if (sql.len >= sizeof(qbuf)) return mako_str_from_cstr("");
         MakoString q = mako_sql_qmark_to_dollar(sql);
         if (q.len >= sizeof(qbuf)) {
@@ -1967,21 +2015,12 @@ static inline MakoString mako_sql_query_str(MakoSqlDB db, MakoString sql, MakoSt
         memcpy(qbuf, q.data, q.len);
         qbuf[q.len] = 0;
         mako_str_free(q);
-        const char *vals[1] = {NULL};
-        int np = 0;
-        /* Bind when SQL has a placeholder; empty string is a valid value */
-        int has_ph = 0;
-        for (size_t i = 0; i < sql.len; i++) {
-            if (sql.data[i] == '?' || (sql.data[i] == '$' && i + 1 < sql.len && sql.data[i + 1] >= '1' && sql.data[i + 1] <= '9')) {
-                has_ph = 1;
-                break;
-            }
-        }
-        if (has_ph) {
-            mako_sql_copy_str_param(pbuf, sizeof(pbuf), p1);
-            vals[0] = pbuf;
-            np = 1;
-        }
+        mako_sql_copy_str_param(b1, sizeof(b1), p1);
+        mako_sql_copy_str_param(b2, sizeof(b2), p2);
+        mako_sql_copy_str_param(b3, sizeof(b3), p3);
+        mako_sql_copy_str_param(b4, sizeof(b4), p4);
+        int np = mako_sql_placeholder_arity(sql);
+        const char *vals[4] = {b1, b2, b3, b4};
         PGresult *r = PQexecParams(pg, qbuf, np, NULL, vals, NULL, NULL, 0);
         if (!r) return mako_str_from_cstr("");
         MakoString out = mako_str_from_cstr("");
@@ -1992,8 +2031,23 @@ static inline MakoString mako_sql_query_str(MakoSqlDB db, MakoString sql, MakoSt
         return out;
     }
 #endif
-    (void)db; (void)sql; (void)p1;
+    (void)db; (void)sql; (void)p1; (void)p2; (void)p3; (void)p4;
     return mako_str_from_cstr("");
+}
+
+/* Query a single string value; optional one string param (arity from SQL). */
+static inline MakoString mako_sql_query_str(MakoSqlDB db, MakoString sql, MakoString p1) {
+    return mako_sql_query_str4(db, sql, p1, mako_str_empty, mako_str_empty, mako_str_empty);
+}
+
+static inline MakoString mako_sql_query_str2(MakoSqlDB db, MakoString sql, MakoString p1, MakoString p2) {
+    return mako_sql_query_str4(db, sql, p1, p2, mako_str_empty, mako_str_empty);
+}
+
+static inline MakoString mako_sql_query_str3(
+    MakoSqlDB db, MakoString sql, MakoString p1, MakoString p2, MakoString p3
+) {
+    return mako_sql_query_str4(db, sql, p1, p2, p3, mako_str_empty);
 }
 
 /* Last INSERT row id (SQLite last_insert_rowid; Postgres lastval when available). */

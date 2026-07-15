@@ -1,0 +1,44 @@
+// sql_exec_str4: empty string is a valid bind; arity from SQL $N / ?, not trailing empties.
+
+fn db_open_test() -> SqlDB {
+    let url = env_get_or("MAKO_TEST_PG", "")
+    if len(url) > 0 {
+        return sql_open_postgres(url)
+    }
+    return sql_open_sqlite(":memory:")
+}
+
+fn TestUpdateEmptySecondParam() {
+    let db = db_open_test()
+    let _ = sql_exec_plain(db, "CREATE TABLE IF NOT EXISTS t_ua (aor TEXT PRIMARY KEY, user_agent TEXT)")
+    let _ = sql_exec_str4(db, "DELETE FROM t_ua WHERE aor = $1", "alice@x", "", "", "")
+    let _ = sql_exec_str4(
+        db,
+        "INSERT INTO t_ua (aor, user_agent) VALUES ($1, $2)",
+        "alice@x",
+        "old",
+        "",
+        ""
+    )
+    // Critical: p2 empty string must still bind as $2
+    let rc = sql_exec_str4(
+        db,
+        "UPDATE t_ua SET user_agent = $2 WHERE aor = $1",
+        "alice@x",
+        "",
+        "",
+        ""
+    )
+    assert_eq(rc, 0)
+    let ua = sql_query_str(db, "SELECT user_agent FROM t_ua WHERE aor = $1", "alice@x")
+    // empty string (or NULL depending on driver) — must not leave "old"
+    assert_eq_str(ua, "")
+}
+
+fn TestSinglePlaceholderIgnoresTrailing() {
+    let db = db_open_test()
+    let _ = sql_exec_plain(db, "CREATE TABLE IF NOT EXISTS t1 (id TEXT PRIMARY KEY)")
+    let _ = sql_exec_str4(db, "INSERT INTO t1 (id) VALUES ($1)", "k1", "", "", "")
+    let v = sql_query_str(db, "SELECT id FROM t1 WHERE id = $1", "k1")
+    assert_eq_str(v, "k1")
+}

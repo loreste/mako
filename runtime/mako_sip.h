@@ -17,6 +17,9 @@ extern "C" {
 
 /* ---- small utilities ---- */
 
+/* Non-owned string from a C string literal / static buffer. Do NOT mako_str_free. */
+#define MAKO_SIP_LIT(s) ((MakoString){(char *)(const char *)(s), sizeof(s) - 1})
+
 static inline int mako_sip_ci_eq(const char *a, size_t al, const char *b, size_t bl) {
     if (al != bl) return 0;
     for (size_t i = 0; i < al; i++) {
@@ -177,14 +180,74 @@ static inline MakoString mako_sip_version(MakoString msg) {
 static inline int mako_sip_header_name_match(
     const char *line, size_t line_len, const char *name, size_t nlen
 ) {
-    if (line_len < nlen + 1) return 0;
+    if (!line || !name || nlen == 0 || line_len < nlen + 1) return 0;
     if (!mako_sip_ci_eq(line, nlen, name, nlen)) return 0;
     size_t i = nlen;
     while (i < line_len && (line[i] == ' ' || line[i] == '\t')) i++;
     return i < line_len && line[i] == ':';
 }
 
-/* Value of nth occurrence (0-based) of header `name`. Compact form (f/t/i/v/m/c/l). */
+/* Compact form aliases (RFC 3261 §7.3.3 / §20). Bidirectional. */
+static inline int mako_sip_header_alias_pair(
+    const char *name, size_t nlen, const char **a, size_t *alen, const char **b, size_t *blen
+) {
+    /* long -> compact */
+    struct {
+        const char *longn;
+        const char *shortn;
+    } pairs[] = {
+        {"Call-ID", "i"},
+        {"Via", "v"},
+        {"From", "f"},
+        {"To", "t"},
+        {"Contact", "m"},
+        {"Content-Length", "l"},
+        {"Content-Type", "c"},
+        {"Subject", "s"},
+        {"Supported", "k"},
+        {"Refer-To", "r"},
+        {"Allow-Events", "u"},
+        {"Event", "o"},
+        {NULL, NULL},
+    };
+    for (int i = 0; pairs[i].longn; i++) {
+        size_t ll = strlen(pairs[i].longn);
+        size_t sl = strlen(pairs[i].shortn);
+        if (mako_sip_ci_eq(name, nlen, pairs[i].longn, ll)) {
+            *a = pairs[i].longn;
+            *alen = ll;
+            *b = pairs[i].shortn;
+            *blen = sl;
+            return 1;
+        }
+        if (mako_sip_ci_eq(name, nlen, pairs[i].shortn, sl)) {
+            *a = pairs[i].shortn;
+            *alen = sl;
+            *b = pairs[i].longn;
+            *blen = ll;
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/* Match header line name against `name` or its compact/long form. */
+static inline int mako_sip_header_line_is(
+    const char *line, size_t line_len, const char *name, size_t nlen
+) {
+    if (mako_sip_header_name_match(line, line_len, name, nlen)) return 1;
+    const char *a = NULL, *b = NULL;
+    size_t al = 0, bl = 0;
+    if (mako_sip_header_alias_pair(name, nlen, &a, &al, &b, &bl)) {
+        if (mako_sip_header_name_match(line, line_len, a, al)) return 1;
+        if (mako_sip_header_name_match(line, line_len, b, bl)) return 1;
+    }
+    return 0;
+}
+
+/* Value of nth occurrence (0-based) of header `name` (compact forms accepted).
+ * Returns an owned MakoString (malloc); free with mako_str_free / scope drop.
+ * Parse is length-bounded (msg need not be NUL-terminated). */
 static inline MakoString mako_sip_header_n(MakoString msg, MakoString name, int64_t idx) {
     if (!msg.data || !name.data || name.len == 0 || idx < 0)
         return mako_str_from_cstr("");
@@ -207,7 +270,7 @@ static inline MakoString mako_sip_header_n(MakoString msg, MakoString name, int6
             p = le + 2;
             continue;
         }
-        if (mako_sip_header_name_match(p, llen, name.data, name.len)) {
+        if (mako_sip_header_line_is(p, llen, name.data, name.len)) {
             if (seen == idx) {
                 const char *colon = p;
                 while (colon < le && *colon != ':') colon++;
@@ -270,7 +333,7 @@ static inline int64_t mako_sip_header_count(MakoString msg, MakoString name) {
             p = le + 2;
             continue;
         }
-        if (mako_sip_header_name_match(p, llen, name.data, name.len)) n++;
+        if (mako_sip_header_line_is(p, llen, name.data, name.len)) n++;
         p = le + 2;
     }
     return n;
@@ -286,12 +349,8 @@ static inline MakoString mako_sip_body(MakoString msg) {
 }
 
 static inline int64_t mako_sip_content_length(MakoString msg) {
-    MakoString cl = mako_sip_header(msg, mako_str_from_cstr("Content-Length"));
-    if (!cl.data || cl.len == 0) {
-        /* compact l */
-        mako_str_free(cl);
-        cl = mako_sip_header(msg, mako_str_from_cstr("l"));
-    }
+    /* Compact form `l` resolved via alias in sip_header. Name is non-owned lit. */
+    MakoString cl = mako_sip_header(msg, MAKO_SIP_LIT("Content-Length"));
     if (!cl.data || cl.len == 0) {
         mako_str_free(cl);
         return 0;
@@ -305,6 +364,12 @@ static inline int64_t mako_sip_content_length(MakoString msg) {
     return v;
 }
 
+/* Content-Length from a raw header region without allocating a full msg copy. */
+static inline int64_t mako_sip_content_length_raw(const char *hdrs, size_t hlen) {
+    MakoString h = {(char *)(uintptr_t)hdrs, hlen};
+    return mako_sip_content_length(h);
+}
+
 /* True if buffer holds a complete SIP message (headers + Content-Length body). */
 static inline int64_t mako_sip_msg_complete(MakoString buf) {
     if (!buf.data || buf.len < 4) return 0;
@@ -312,10 +377,7 @@ static inline int64_t mako_sip_msg_complete(MakoString buf) {
     const char *body = mako_sip_body_start(buf.data, buf.len, &he);
     if (!body) return 0;
     size_t have = buf.len - (size_t)(body - buf.data);
-    /* Content-Length from headers region only */
-    MakoString hdrs = mako_sip_slice_to_str(buf.data, (size_t)(body - buf.data));
-    int64_t need = mako_sip_content_length(hdrs);
-    mako_str_free(hdrs);
+    int64_t need = mako_sip_content_length_raw(buf.data, (size_t)(body - buf.data));
     return (int64_t)have >= need ? 1 : 0;
 }
 
@@ -326,11 +388,23 @@ static inline int64_t mako_sip_msg_needed(MakoString buf) {
     const char *body = mako_sip_body_start(buf.data, buf.len, &he);
     if (!body) return -1;
     size_t have = buf.len - (size_t)(body - buf.data);
-    MakoString hdrs = mako_sip_slice_to_str(buf.data, (size_t)(body - buf.data));
-    int64_t need = mako_sip_content_length(hdrs);
-    mako_str_free(hdrs);
+    int64_t need = mako_sip_content_length_raw(buf.data, (size_t)(body - buf.data));
     if ((int64_t)have >= need) return 0;
     return need - (int64_t)have;
+}
+
+/* Total byte length of the first complete SIP message in buf, or 0 if incomplete.
+ * For TCP/TLS framing: while (n = sip_first_message_len(buf)) { use buf[0..n); rest = buf[n..] }. */
+static inline int64_t mako_sip_first_message_len(MakoString buf) {
+    if (!buf.data || buf.len < 4) return 0;
+    size_t he = 0;
+    const char *body = mako_sip_body_start(buf.data, buf.len, &he);
+    if (!body) return 0;
+    int64_t need = mako_sip_content_length_raw(buf.data, (size_t)(body - buf.data));
+    if (need < 0) need = 0;
+    int64_t total = (int64_t)(body - buf.data) + need;
+    if (total <= 0 || (size_t)total > buf.len) return 0;
+    return total;
 }
 
 /* ---- message builders ---- */
@@ -489,6 +563,210 @@ static inline MakoString mako_sip_via_value(
         return mako_str_from_cstr("");
     }
     return (MakoString){d, (size_t)w};
+}
+
+/* Via value with RFC 3581 NAT params: ;rport[=N] and optional ;received=IP.
+ * rport < 0 → omit; rport == 0 → bare ;rport; rport > 0 → ;rport=N. */
+static inline MakoString mako_sip_via_value_nat(
+    MakoString transport,
+    MakoString host,
+    int64_t port,
+    MakoString branch,
+    MakoString received,
+    int64_t rport
+) {
+    MakoString base = mako_sip_via_value(transport, host, port, branch);
+    size_t extra = (received.data ? received.len : 0) + 48;
+    size_t n = base.len + extra + 1;
+    char *d = (char *)malloc(n);
+    if (!d) {
+        mako_str_free(base);
+        return mako_str_from_cstr("");
+    }
+    size_t o = 0;
+    if (base.data && base.len) {
+        memcpy(d, base.data, base.len);
+        o = base.len;
+    }
+    mako_str_free(base);
+    if (rport == 0) {
+        memcpy(d + o, ";rport", 6);
+        o += 6;
+    } else if (rport > 0) {
+        int w = snprintf(d + o, n - o, ";rport=%lld", (long long)rport);
+        if (w > 0) o += (size_t)w;
+    }
+    if (received.data && received.len > 0) {
+        int w = snprintf(
+            d + o, n - o, ";received=%.*s",
+            (int)received.len, received.data
+        );
+        if (w > 0) o += (size_t)w;
+    }
+    d[o] = 0;
+    return (MakoString){d, o};
+}
+
+/* Append ;received= and/or ;rport= to an existing Via value. */
+static inline MakoString mako_sip_via_add_received(MakoString via, MakoString host, int64_t rport) {
+    size_t n = via.len + (host.data ? host.len : 0) + 48;
+    char *d = (char *)malloc(n);
+    if (!d) return mako_str_from_cstr("");
+    size_t o = 0;
+    if (via.data && via.len) {
+        memcpy(d, via.data, via.len);
+        o = via.len;
+    }
+    if (host.data && host.len) {
+        int w = snprintf(d + o, n - o, ";received=%.*s", (int)host.len, host.data);
+        if (w > 0) o += (size_t)w;
+    }
+    if (rport > 0) {
+        int w = snprintf(d + o, n - o, ";rport=%lld", (long long)rport);
+        if (w > 0) o += (size_t)w;
+    } else if (rport == 0) {
+        memcpy(d + o, ";rport", 6);
+        o += 6;
+        d[o] = 0;
+    }
+    d[o] = 0;
+    return (MakoString){d, o};
+}
+
+/* Top Via sent-by host (after transport, before :port or ;params). */
+static inline MakoString mako_sip_via_host(MakoString via) {
+    if (!via.data || via.len < 8) return mako_str_from_cstr("");
+    /* find space after SIP/2.0/PROTO */
+    size_t i = 0;
+    while (i < via.len && via.data[i] != ' ') i++;
+    if (i >= via.len) return mako_str_from_cstr("");
+    i++;
+    while (i < via.len && (via.data[i] == ' ' || via.data[i] == '\t')) i++;
+    size_t start = i;
+    while (i < via.len && via.data[i] != ':' && via.data[i] != ';' && via.data[i] != ' ' &&
+           via.data[i] != '\t')
+        i++;
+    return mako_sip_slice_to_str(via.data + start, i - start);
+}
+
+/* Top Via sent-by port, or 0 if absent (default 5060 not applied). */
+static inline int64_t mako_sip_via_port(MakoString via) {
+    if (!via.data || via.len < 8) return 0;
+    size_t i = 0;
+    while (i < via.len && via.data[i] != ' ') i++;
+    if (i >= via.len) return 0;
+    i++;
+    while (i < via.len && (via.data[i] == ' ' || via.data[i] == '\t')) i++;
+    while (i < via.len && via.data[i] != ':' && via.data[i] != ';' && via.data[i] != ' ') i++;
+    if (i >= via.len || via.data[i] != ':') return 0;
+    i++;
+    int64_t p = 0;
+    while (i < via.len && via.data[i] >= '0' && via.data[i] <= '9') {
+        p = p * 10 + (via.data[i] - '0');
+        i++;
+    }
+    return p;
+}
+
+/* Record-Route value: <sip:host:port;lr;transport=udp> (loose routing). */
+static inline MakoString mako_sip_record_route(
+    MakoString host, int64_t port, MakoString transport
+) {
+    const char *tr = transport.data && transport.len ? transport.data : "udp";
+    size_t n = host.len + 64;
+    char *d = (char *)malloc(n);
+    if (!d) return mako_str_from_cstr("");
+    int w;
+    if (port > 0) {
+        w = snprintf(
+            d, n, "<sip:%.*s:%lld;lr;transport=%s>",
+            (int)host.len, host.data ? host.data : "127.0.0.1",
+            (long long)port, tr
+        );
+    } else {
+        w = snprintf(
+            d, n, "<sip:%.*s;lr;transport=%s>",
+            (int)host.len, host.data ? host.data : "127.0.0.1", tr
+        );
+    }
+    if (w < 0) {
+        free(d);
+        return mako_str_from_cstr("");
+    }
+    return (MakoString){d, (size_t)w};
+}
+
+/* Prepend a header after the start line (proxy hop insert). Owned result. */
+static inline MakoString mako_sip_prepend_header(
+    MakoString msg, MakoString name, MakoString value
+) {
+    if (!msg.data || msg.len == 0) return mako_str_from_cstr("");
+    const char *end = msg.data + msg.len;
+    const char *crlf = mako_sip_find_crlf(msg.data, end);
+    if (!crlf) return mako_sip_slice_to_str(msg.data, msg.len);
+    size_t start_len = (size_t)(crlf + 2 - msg.data);
+    MakoString line = mako_sip_header_line(name, value);
+    size_t n = msg.len + line.len + 1;
+    char *d = (char *)malloc(n);
+    if (!d) {
+        mako_str_free(line);
+        return mako_str_from_cstr("");
+    }
+    memcpy(d, msg.data, start_len);
+    memcpy(d + start_len, line.data ? line.data : "", line.len);
+    memcpy(d + start_len + line.len, msg.data + start_len, msg.len - start_len);
+    d[msg.len + line.len] = 0;
+    mako_str_free(line);
+    return (MakoString){d, msg.len + line.len};
+}
+
+static inline MakoString mako_sip_insert_via(MakoString msg, MakoString via_value) {
+    return mako_sip_prepend_header(msg, MAKO_SIP_LIT("Via"), via_value);
+}
+
+/* Remove top Via (or compact v) header — RFC 3261 §16.7 response path. */
+static inline MakoString mako_sip_strip_via(MakoString msg) {
+    if (!msg.data || msg.len == 0) return mako_str_from_cstr("");
+    size_t he = 0;
+    const char *body = mako_sip_body_start(msg.data, msg.len, &he);
+    if (!body) return mako_sip_slice_to_str(msg.data, msg.len);
+    const char *hend = msg.data + he;
+    const char *crlf = mako_sip_find_crlf(msg.data, hend);
+    if (!crlf) return mako_sip_slice_to_str(msg.data, msg.len);
+    const char *p = crlf + 2;
+    const char *skip_start = NULL;
+    const char *skip_end = NULL;
+    while (p < hend) {
+        if (p[0] == '\r' && p + 1 < hend && p[1] == '\n') break;
+        const char *le = mako_sip_find_crlf(p, hend);
+        if (!le) break;
+        size_t llen = (size_t)(le - p);
+        if (llen > 0 && (p[0] == ' ' || p[0] == '\t')) {
+            p = le + 2;
+            continue;
+        }
+        if (mako_sip_header_line_is(p, llen, "Via", 3)) {
+            skip_start = p;
+            skip_end = le + 2;
+            /* include folded continuations */
+            while (skip_end < hend && (*skip_end == ' ' || *skip_end == '\t')) {
+                const char *nle = mako_sip_find_crlf(skip_end, hend);
+                if (!nle) break;
+                skip_end = nle + 2;
+            }
+            break;
+        }
+        p = le + 2;
+    }
+    if (!skip_start) return mako_sip_slice_to_str(msg.data, msg.len);
+    size_t keep1 = (size_t)(skip_start - msg.data);
+    size_t keep2 = msg.len - (size_t)(skip_end - msg.data);
+    char *d = (char *)malloc(keep1 + keep2 + 1);
+    if (!d) return mako_str_from_cstr("");
+    memcpy(d, msg.data, keep1);
+    memcpy(d + keep1, skip_end, keep2);
+    d[keep1 + keep2] = 0;
+    return (MakoString){d, keep1 + keep2};
 }
 
 static inline MakoString mako_sip_addr_value(
@@ -1045,6 +1323,38 @@ static inline MakoString mako_sip_md5_hex(MakoString s) {
     return mako_str_from_cstr(out);
 }
 
+/* Digest response from stored HA1 = MD5(user:realm:pass) hex (server-side, no plaintext). */
+static inline MakoString mako_sip_digest_response_ha1(
+    MakoString ha1, MakoString method, MakoString uri, MakoString nonce
+) {
+    size_t n2 = method.len + uri.len + 4;
+    char *a2 = (char *)malloc(n2);
+    if (!a2) return mako_str_from_cstr("");
+    int w2 = snprintf(
+        a2, n2, "%.*s:%.*s",
+        (int)method.len, method.data ? method.data : "",
+        (int)uri.len, uri.data ? uri.data : ""
+    );
+    MakoString ha2 = mako_sip_md5_hex((MakoString){a2, (size_t)(w2 > 0 ? w2 : 0)});
+    free(a2);
+    size_t n3 = ha1.len + nonce.len + ha2.len + 4;
+    char *resp = (char *)malloc(n3);
+    if (!resp) {
+        mako_str_free(ha2);
+        return mako_str_from_cstr("");
+    }
+    int w3 = snprintf(
+        resp, n3, "%.*s:%.*s:%.*s",
+        (int)ha1.len, ha1.data ? ha1.data : "",
+        (int)nonce.len, nonce.data ? nonce.data : "",
+        (int)ha2.len, ha2.data ? ha2.data : ""
+    );
+    mako_str_free(ha2);
+    MakoString out = mako_sip_md5_hex((MakoString){resp, (size_t)(w3 > 0 ? w3 : 0)});
+    free(resp);
+    return out;
+}
+
 /* Digest response (MD5, qop absent): H(H(A1):nonce:H(A2)) */
 static inline MakoString mako_sip_digest_response(
     MakoString username,
@@ -1066,37 +1376,31 @@ static inline MakoString mako_sip_digest_response(
     );
     MakoString ha1 = mako_sip_md5_hex((MakoString){a1, (size_t)(w1 > 0 ? w1 : 0)});
     free(a1);
-    size_t n2 = method.len + uri.len + 4;
-    char *a2 = (char *)malloc(n2);
-    if (!a2) {
-        mako_str_free(ha1);
-        return mako_str_from_cstr("");
-    }
-    int w2 = snprintf(
-        a2, n2, "%.*s:%.*s",
-        (int)method.len, method.data ? method.data : "",
-        (int)uri.len, uri.data ? uri.data : ""
-    );
-    MakoString ha2 = mako_sip_md5_hex((MakoString){a2, (size_t)(w2 > 0 ? w2 : 0)});
-    free(a2);
-    size_t n3 = ha1.len + nonce.len + ha2.len + 4;
-    char *resp = (char *)malloc(n3);
-    if (!resp) {
-        mako_str_free(ha1);
-        mako_str_free(ha2);
-        return mako_str_from_cstr("");
-    }
-    int w3 = snprintf(
-        resp, n3, "%.*s:%.*s:%.*s",
-        (int)ha1.len, ha1.data ? ha1.data : "",
-        (int)nonce.len, nonce.data ? nonce.data : "",
-        (int)ha2.len, ha2.data ? ha2.data : ""
-    );
+    MakoString out = mako_sip_digest_response_ha1(ha1, method, uri, nonce);
     mako_str_free(ha1);
-    mako_str_free(ha2);
-    MakoString out = mako_sip_md5_hex((MakoString){resp, (size_t)(w3 > 0 ? w3 : 0)});
-    free(resp);
     return out;
+}
+
+/* WWW-Authenticate / Proxy-Authenticate challenge values (header value only). */
+static inline MakoString mako_sip_www_authenticate(MakoString realm, MakoString nonce) {
+    size_t n = realm.len + nonce.len + 64;
+    char *d = (char *)malloc(n);
+    if (!d) return mako_str_from_cstr("");
+    int w = snprintf(
+        d, n,
+        "Digest realm=\"%.*s\", nonce=\"%.*s\", algorithm=MD5",
+        (int)realm.len, realm.data ? realm.data : "",
+        (int)nonce.len, nonce.data ? nonce.data : ""
+    );
+    if (w < 0) {
+        free(d);
+        return mako_str_from_cstr("");
+    }
+    return (MakoString){d, (size_t)w};
+}
+
+static inline MakoString mako_sip_proxy_authenticate(MakoString realm, MakoString nonce) {
+    return mako_sip_www_authenticate(realm, nonce);
 }
 
 /* Authorization header value for Digest (no qop). */
@@ -1494,51 +1798,52 @@ static inline MakoString mako_rtp_pack(
     return (MakoString){d, n};
 }
 
-/* Convenience: reply 100/180/200 template headers from a request (copy Via/From/To/Call-ID/CSeq). */
+/* Convenience: reply 100/180/200 template headers from a request (copy Via/From/To/Call-ID/CSeq).
+ * Uses non-owned name literals to avoid per-header malloc leaks under proxy load. */
 static inline MakoString mako_sip_copy_headers_for_response(MakoString req) {
     MakoString h = mako_str_from_cstr("");
-    MakoString via = mako_sip_header(req, mako_str_from_cstr("Via"));
+    MakoString via = mako_sip_header(req, MAKO_SIP_LIT("Via"));
     if (via.len) {
-        MakoString nh = mako_sip_headers_append(h, mako_str_from_cstr("Via"), via);
+        MakoString nh = mako_sip_headers_append(h, MAKO_SIP_LIT("Via"), via);
         mako_str_free(h);
         h = nh;
     }
     mako_str_free(via);
     /* all Vias */
-    int64_t vc = mako_sip_header_count(req, mako_str_from_cstr("Via"));
+    int64_t vc = mako_sip_header_count(req, MAKO_SIP_LIT("Via"));
     for (int64_t i = 1; i < vc; i++) {
-        MakoString v = mako_sip_header_n(req, mako_str_from_cstr("Via"), i);
+        MakoString v = mako_sip_header_n(req, MAKO_SIP_LIT("Via"), i);
         if (v.len) {
-            MakoString nh = mako_sip_headers_append(h, mako_str_from_cstr("Via"), v);
+            MakoString nh = mako_sip_headers_append(h, MAKO_SIP_LIT("Via"), v);
             mako_str_free(h);
             h = nh;
         }
         mako_str_free(v);
     }
-    MakoString from = mako_sip_header(req, mako_str_from_cstr("From"));
+    MakoString from = mako_sip_header(req, MAKO_SIP_LIT("From"));
     if (from.len) {
-        MakoString nh = mako_sip_headers_append(h, mako_str_from_cstr("From"), from);
+        MakoString nh = mako_sip_headers_append(h, MAKO_SIP_LIT("From"), from);
         mako_str_free(h);
         h = nh;
     }
     mako_str_free(from);
-    MakoString to = mako_sip_header(req, mako_str_from_cstr("To"));
+    MakoString to = mako_sip_header(req, MAKO_SIP_LIT("To"));
     if (to.len) {
-        MakoString nh = mako_sip_headers_append(h, mako_str_from_cstr("To"), to);
+        MakoString nh = mako_sip_headers_append(h, MAKO_SIP_LIT("To"), to);
         mako_str_free(h);
         h = nh;
     }
     mako_str_free(to);
-    MakoString cid = mako_sip_header(req, mako_str_from_cstr("Call-ID"));
+    MakoString cid = mako_sip_header(req, MAKO_SIP_LIT("Call-ID"));
     if (cid.len) {
-        MakoString nh = mako_sip_headers_append(h, mako_str_from_cstr("Call-ID"), cid);
+        MakoString nh = mako_sip_headers_append(h, MAKO_SIP_LIT("Call-ID"), cid);
         mako_str_free(h);
         h = nh;
     }
     mako_str_free(cid);
-    MakoString cseq = mako_sip_header(req, mako_str_from_cstr("CSeq"));
+    MakoString cseq = mako_sip_header(req, MAKO_SIP_LIT("CSeq"));
     if (cseq.len) {
-        MakoString nh = mako_sip_headers_append(h, mako_str_from_cstr("CSeq"), cseq);
+        MakoString nh = mako_sip_headers_append(h, MAKO_SIP_LIT("CSeq"), cseq);
         mako_str_free(h);
         h = nh;
     }
@@ -1564,6 +1869,127 @@ static inline MakoString mako_sip_reply(
     }
     MakoString out = mako_sip_response(code, reason, base, body);
     mako_str_free(base);
+    return out;
+}
+
+/* Ensure To header has ;tag=… (proxy 1xx/2xx). Returns owned new message. */
+static inline MakoString mako_sip_ensure_to_tag(MakoString msg, MakoString tag) {
+    if (!msg.data || msg.len == 0) return mako_str_from_cstr("");
+    if (!tag.data || tag.len == 0) return mako_sip_slice_to_str(msg.data, msg.len);
+    MakoString to = mako_sip_header(msg, MAKO_SIP_LIT("To"));
+    if (to.len == 0) {
+        mako_str_free(to);
+        return mako_sip_slice_to_str(msg.data, msg.len);
+    }
+    MakoString existing = mako_sip_addr_tag(to);
+    if (existing.len > 0) {
+        mako_str_free(existing);
+        mako_str_free(to);
+        return mako_sip_slice_to_str(msg.data, msg.len);
+    }
+    mako_str_free(existing);
+    size_t nval = to.len + tag.len + 8;
+    char *nv = (char *)malloc(nval);
+    if (!nv) {
+        mako_str_free(to);
+        return mako_sip_slice_to_str(msg.data, msg.len);
+    }
+    int w = snprintf(
+        nv, nval, "%.*s;tag=%.*s",
+        (int)to.len, to.data ? to.data : "",
+        (int)tag.len, tag.data
+    );
+    mako_str_free(to);
+    if (w < 0) {
+        free(nv);
+        return mako_sip_slice_to_str(msg.data, msg.len);
+    }
+    MakoString new_to = {nv, (size_t)w};
+    size_t he = 0;
+    if (!mako_sip_body_start(msg.data, msg.len, &he)) {
+        mako_str_free(new_to);
+        return mako_sip_slice_to_str(msg.data, msg.len);
+    }
+    const char *hend = msg.data + he;
+    const char *crlf = mako_sip_find_crlf(msg.data, hend);
+    if (!crlf) {
+        mako_str_free(new_to);
+        return mako_sip_slice_to_str(msg.data, msg.len);
+    }
+    const char *p = crlf + 2;
+    const char *rep_s = NULL, *rep_e = NULL;
+    while (p < hend) {
+        if (p[0] == '\r' && p + 1 < hend && p[1] == '\n') break;
+        const char *le = mako_sip_find_crlf(p, hend);
+        if (!le) break;
+        size_t llen = (size_t)(le - p);
+        if (llen > 0 && (p[0] == ' ' || p[0] == '\t')) {
+            p = le + 2;
+            continue;
+        }
+        if (mako_sip_header_line_is(p, llen, "To", 2)) {
+            rep_s = p;
+            rep_e = le + 2;
+            while (rep_e < hend && (*rep_e == ' ' || *rep_e == '\t')) {
+                const char *nle = mako_sip_find_crlf(rep_e, hend);
+                if (!nle) break;
+                rep_e = nle + 2;
+            }
+            break;
+        }
+        p = le + 2;
+    }
+    MakoString line = mako_sip_header_line(MAKO_SIP_LIT("To"), new_to);
+    mako_str_free(new_to);
+    if (!line.data || line.len == 0) {
+        mako_str_free(line);
+        return mako_sip_slice_to_str(msg.data, msg.len);
+    }
+    if (!rep_s) {
+        size_t start_len = (size_t)(crlf + 2 - msg.data);
+        size_t nn = msg.len + line.len + 1;
+        char *d = (char *)malloc(nn);
+        if (!d) {
+            mako_str_free(line);
+            return mako_str_from_cstr("");
+        }
+        memcpy(d, msg.data, start_len);
+        memcpy(d + start_len, line.data, line.len);
+        memcpy(d + start_len + line.len, msg.data + start_len, msg.len - start_len);
+        size_t total = msg.len + line.len;
+        d[total] = 0;
+        mako_str_free(line);
+        return (MakoString){d, total};
+    }
+    size_t keep1 = (size_t)(rep_s - msg.data);
+    size_t keep2 = msg.len - (size_t)(rep_e - msg.data);
+    size_t nn = keep1 + line.len + keep2 + 1;
+    char *d = (char *)malloc(nn);
+    if (!d) {
+        mako_str_free(line);
+        return mako_str_from_cstr("");
+    }
+    memcpy(d, msg.data, keep1);
+    memcpy(d + keep1, line.data, line.len);
+    memcpy(d + keep1 + line.len, rep_e, keep2);
+    size_t total = keep1 + line.len + keep2;
+    d[total] = 0;
+    mako_str_free(line);
+    return (MakoString){d, total};
+}
+
+/* Reply and ensure To has a tag (common for 1xx/2xx from proxy). */
+static inline MakoString mako_sip_reply_with_to_tag(
+    MakoString req,
+    int64_t code,
+    MakoString reason,
+    MakoString extra_headers,
+    MakoString body,
+    MakoString tag
+) {
+    MakoString resp = mako_sip_reply(req, code, reason, extra_headers, body);
+    MakoString out = mako_sip_ensure_to_tag(resp, tag);
+    mako_str_free(resp);
     return out;
 }
 
