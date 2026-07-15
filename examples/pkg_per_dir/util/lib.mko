@@ -1,0 +1,5 @@
+pack util
+
+fn greet(name: string) -> string {
+    return "hi " + name
+}

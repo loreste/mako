@@ -1,0 +1,10 @@
+// Second unit of the same package directory.
+pack mathx
+
+fn mul(a: int, b: int) -> int {
+    return a * b
+}
+
+fn add3(a: int, b: int, c: int) -> int {
+    return add(a, b) + c
+}

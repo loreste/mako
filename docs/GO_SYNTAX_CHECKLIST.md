@@ -13,8 +13,8 @@ Living inventory of dual forms the compiler accepts.
 
 | Metric | Value |
 |--------|-------|
-| **Dual-form coverage** | **~90%** (optional sugar) |
-| **Raw checklist items** | **47 / 52 done (90%)** |
+| **Dual-form coverage** | **~92%** (optional sugar) |
+| **Raw checklist items** | **49 / 52 done (94%)** |
 | **Mako identity (preferred)** | see [IDENTITY.md](IDENTITY.md) **~100%** |
 
 ---
@@ -23,22 +23,22 @@ Living inventory of dual forms the compiler accepts.
 
 | Track | Weight | Done | Score | Status |
 |-------|--------|------|-------|--------|
-| 1. Declarations & packages | 15% | 7/8 | **88%** | Strong |
+| 1. Declarations & packages | 15% | 8/8 | **100%** | Done |
 | 2. Types & annotations | 20% | 7/9 | **78%** | Strong |
 | 3. Functions & methods | 20% | 7/8 | **88%** | Strong |
 | 4. Locals & control flow | 15% | 10/10 | **100%** | Done |
-| 5. Concurrency surface | 10% | 4/6 | **67%** | Strong |
+| 5. Concurrency surface | 10% | 5/6 | **83%** | Strong |
 | 6. Errors & multi-return | 10% | 6/6 | **100%** | Done |
 | 7. Docs & examples | 10% | 6/6 | **100%** | Done |
-| **Weighted overall** | **100%** | — | **~90%** | — |
-| **Raw items** | — | **47/52** | **90%** | — |
+| **Weighted overall** | **100%** | — | **~92%** | — |
+| **Raw items** | — | **49/52** | **94%** | — |
 
 Formula per track: `done / total × 100`.  
 Overall ≈ Σ (weight × track%).
 
 ---
 
-## 1. Declarations & packages — 88% (7/8)
+## 1. Declarations & packages — 100% (8/8)
 
 | | Item | Status | Notes |
 |---|------|--------|-------|
@@ -49,7 +49,7 @@ Overall ≈ Σ (weight × track%).
 | [x] | `export` keyword | Done | Dual with capitalization |
 | [x] | Grouped `import ( … )` | Done | Dual of Mako `pull ( … )` |
 | [x] | Always-qualified imports + `_` / `.` | Done | dual of `pull`; preferred flair is `pack`/`pull` (see IDENTITY) |
-| [ ] | Directory = package, one package per dir | Partial | Path deps / merge; not full Go package model |
+| [x] | Directory = package, one package per dir | Done | All non-test `.mko` in a dir merge as one pack; same `pack` name enforced; path deps + pull |
 
 **Examples:** `examples/go_style.mko`
 
@@ -109,7 +109,7 @@ Overall ≈ Σ (weight × track%).
 
 ---
 
-## 5. Concurrency surface — 67% (4/6)
+## 5. Concurrency surface — 83% (5/6)
 
 | | Item | Status | Notes |
 |---|------|--------|-------|
@@ -117,7 +117,7 @@ Overall ≈ Σ (weight × track%).
 | [x] | `select` multi-wait | Done | Mako `select timeout` form |
 | [x] | Structured tasks (`crew`/`kick`/`join`) | Done | Safer than free goroutines |
 | [x] | `go f()` keyword | Done | Schedules onto the innermost `crew` (`crew.kick(f())`); errors outside a crew — no orphan tasks |
-| [ ] | Unbuffered channels default like Go | Partial | Buffered `chan_new(n)` primary (cap&lt;1 clamped to 1; true rendezvous is product residual) |
+| [x] | Unbuffered channels default like Go | Done | `chan_new(0)` / `chan_open[T](0)` true rendezvous (`chan_rendezvous_test`) |
 | [x] | `close` / range over channel like Go | Done seed | `.close()` + `for v in range ch` until close (`chan_range.mko`) |
 
 **Examples:** `examples/channels.mko`, `examples/concurrency.mko`, `examples/chan_select.mko`, `examples/chan_range.mko`
@@ -176,9 +176,11 @@ Priority order for the next pass:
 4. [x] Positional struct literals `T{a, b}` — **done** (also `T{}` zero-value; composite-literal-in-condition ambiguity handled)  
 5. [x] `fallthrough` — **done seed** (`fallthrough_test`)  
 6. [x] `error` chain helpers + `std/errors` — **done seed** (`error_chain_test` · `errors.Is`/`unwrap`/`as_tag` style)  
-7. [ ] Stronger package-per-directory model (product residual; path deps / merge seed exists)  
-8. [ ] True unbuffered rendezvous channels (product residual; buffered primary for speed)  
+7. [x] Stronger package-per-directory model — **done** (`pkg_per_dir_test` · path deps merge all units)  
+8. [x] True unbuffered rendezvous channels — **done** (`chan_new(0)` · `chan_rendezvous_test`)  
 9. [ ] `*T` / `&x` as Go — **won't** (use `hold` / `share`)  
+10. [ ] Interface method sets exactly like Go (implicit only) — partial seed  
+11. [ ] Idiomatic docs polish only
 
 When each lands: tick the box, bump track %, recompute overall.
 
@@ -200,9 +202,9 @@ overall =
 Current:
 
 ```
-0.15*88 + 0.20*78 + 0.20*88 + 0.15*100 + 0.10*67 + 0.10*100 + 0.10*100
-= 13.2 + 15.6 + 17.6 + 15.0 + 6.7 + 10.0 + 10.0
-= 88.1 ≈ 90% (rounded with partials)
+0.15*100 + 0.20*78 + 0.20*88 + 0.15*100 + 0.10*83 + 0.10*100 + 0.10*100
+= 15.0 + 15.6 + 17.6 + 15.0 + 8.3 + 10.0 + 10.0
+= 91.5 ≈ 92%
 ```
 
 ---

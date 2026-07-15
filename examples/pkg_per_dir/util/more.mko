@@ -1,0 +1,5 @@
+pack util
+
+fn shout(name: string) -> string {
+    return greet(name) + "!"
+}

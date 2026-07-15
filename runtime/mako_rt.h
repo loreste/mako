@@ -4230,28 +4230,39 @@ static inline int64_t mako_slice_copy(MakoIntArray dst, MakoIntArray src) {
     return (int64_t)n;
 }
 
-/* ---- Int channels (pthread-safe ring buffer) ----
+/* ---- Int channels (pthread-safe ring buffer + unbuffered rendezvous) ----
  * Bounded MPMC channel for int64 values. Thread-safe via pthread mutex + condvars.
+ * capacity >= 1: classic ring buffer (send blocks when full).
+ * capacity == 0: true rendezvous — send waits until a receiver takes the value
+ *   (handoff slot); try_send succeeds only when a receiver is already waiting.
  * send() blocks when full; recv() blocks when empty. close() wakes all waiters.
- * After close, recv() returns 0 once drained. send() after close is a no-op (-1).
+ * After close, recv() returns 0 once drained. send() after close fails (0).
  * select() polls multiple channels with optional timeout.
  */
 typedef struct {
     int64_t *buf;
-    size_t cap;
+    size_t cap;       /* 0 = unbuffered rendezvous; else ring capacity */
     size_t head;
     size_t tail;
-    size_t count;
+    size_t count;     /* buffered depth, or 0/1 handoff for unbuffered */
     bool closed;
+    int waiters_recv; /* threads blocked in recv (for unbuffered try_send) */
     pthread_mutex_t mu;
     pthread_cond_t can_send;
     pthread_cond_t can_recv;
 } MakoChan;
 
+/* Storage slots: unbuffered still needs one handoff cell. */
+static inline size_t mako_chan_alloc_slots(size_t cap) {
+    return cap < 1 ? 1 : cap;
+}
+
 static inline MakoChan *mako_chan_new(int64_t capacity) {
-    size_t cap = capacity < 1 ? 1 : (size_t)capacity;
+    if (capacity < 0) capacity = 0;
+    size_t cap = (size_t)capacity;
+    size_t slots = mako_chan_alloc_slots(cap);
     MakoChan *c = (MakoChan *)calloc(1, sizeof(MakoChan));
-    c->buf = (int64_t *)calloc(cap, sizeof(int64_t));
+    c->buf = (int64_t *)calloc(slots, sizeof(int64_t));
     c->cap = cap;
     pthread_mutex_init(&c->mu, NULL);
     pthread_cond_init(&c->can_send, NULL);
@@ -4262,6 +4273,31 @@ static inline MakoChan *mako_chan_new(int64_t capacity) {
 
 static inline int64_t mako_chan_send(MakoChan *c, int64_t v) {
     pthread_mutex_lock(&c->mu);
+    if (c->cap == 0) {
+        /* Rendezvous: wait for free handoff, post, then wait until taken. */
+        while (c->count != 0 && !c->closed) {
+            int64_t t0 = mako_now_ns();
+            pthread_cond_wait(&c->can_send, &c->mu);
+            mako_rt_note_lock_wait(mako_now_ns() - t0);
+        }
+        if (c->closed) {
+            pthread_mutex_unlock(&c->mu);
+            return 0;
+        }
+        c->buf[0] = v;
+        c->count = 1;
+        mako_rt_counter_inc(&mako_rt_channel_sends);
+        mako_rt_observe_channel_depth(1);
+        pthread_cond_signal(&c->can_recv);
+        while (c->count != 0 && !c->closed) {
+            int64_t t0 = mako_now_ns();
+            pthread_cond_wait(&c->can_send, &c->mu);
+            mako_rt_note_lock_wait(mako_now_ns() - t0);
+        }
+        int64_t ok = (c->count == 0) ? 1 : 0; /* 0 if closed with handoff stuck */
+        pthread_mutex_unlock(&c->mu);
+        return ok;
+    }
     while (c->count == c->cap && !c->closed) {
         int64_t t0 = mako_now_ns();
         pthread_cond_wait(&c->can_send, &c->mu);
@@ -4283,6 +4319,21 @@ static inline int64_t mako_chan_send(MakoChan *c, int64_t v) {
 
 static inline int64_t mako_chan_try_send(MakoChan *c, int64_t v) {
     pthread_mutex_lock(&c->mu);
+    if (c->cap == 0) {
+        /* Only succeed when a receiver is already waiting and handoff free. */
+        if (c->closed || c->waiters_recv <= 0 || c->count != 0) {
+            mako_rt_counter_inc(&mako_rt_channel_try_send_drops);
+            pthread_mutex_unlock(&c->mu);
+            return 0;
+        }
+        c->buf[0] = v;
+        c->count = 1;
+        mako_rt_counter_inc(&mako_rt_channel_sends);
+        mako_rt_observe_channel_depth(1);
+        pthread_cond_signal(&c->can_recv);
+        pthread_mutex_unlock(&c->mu);
+        return 1;
+    }
     if (c->closed || c->count == c->cap) {
         mako_rt_counter_inc(&mako_rt_channel_try_send_drops);
         pthread_mutex_unlock(&c->mu);
@@ -4307,25 +4358,33 @@ static inline int64_t mako_chan_len(MakoChan *c) {
 
 static inline int64_t mako_chan_cap(MakoChan *c) {
     pthread_mutex_lock(&c->mu);
-    int64_t n = (int64_t)c->cap;
+    int64_t n = (int64_t)c->cap; /* 0 for unbuffered */
     pthread_mutex_unlock(&c->mu);
     return n;
 }
 
 static inline int64_t mako_chan_recv(MakoChan *c) {
     pthread_mutex_lock(&c->mu);
+    c->waiters_recv++;
     while (c->count == 0 && !c->closed) {
         int64_t t0 = mako_now_ns();
         pthread_cond_wait(&c->can_recv, &c->mu);
         mako_rt_note_lock_wait(mako_now_ns() - t0);
     }
+    c->waiters_recv--;
     if (c->count == 0 && c->closed) {
         pthread_mutex_unlock(&c->mu);
         return 0; /* closed empty */
     }
-    int64_t v = c->buf[c->head];
-    c->head = (c->head + 1) % c->cap;
-    c->count--;
+    int64_t v;
+    if (c->cap == 0) {
+        v = c->buf[0];
+        c->count = 0;
+    } else {
+        v = c->buf[c->head];
+        c->head = (c->head + 1) % c->cap;
+        c->count--;
+    }
     mako_rt_counter_inc(&mako_rt_channel_recvs);
     pthread_cond_signal(&c->can_send);
     pthread_mutex_unlock(&c->mu);
@@ -4335,16 +4394,24 @@ static inline int64_t mako_chan_recv(MakoChan *c) {
 /* Recv until close: returns 1 and writes *out, or 0 if channel closed and empty. */
 static inline int64_t mako_chan_recv_ok(MakoChan *c, int64_t *out) {
     pthread_mutex_lock(&c->mu);
+    c->waiters_recv++;
     while (c->count == 0 && !c->closed) {
         pthread_cond_wait(&c->can_recv, &c->mu);
     }
+    c->waiters_recv--;
     if (c->count == 0 && c->closed) {
         pthread_mutex_unlock(&c->mu);
         return 0;
     }
-    int64_t v = c->buf[c->head];
-    c->head = (c->head + 1) % c->cap;
-    c->count--;
+    int64_t v;
+    if (c->cap == 0) {
+        v = c->buf[0];
+        c->count = 0;
+    } else {
+        v = c->buf[c->head];
+        c->head = (c->head + 1) % c->cap;
+        c->count--;
+    }
     mako_rt_counter_inc(&mako_rt_channel_recvs);
     pthread_cond_signal(&c->can_send);
     pthread_mutex_unlock(&c->mu);
@@ -4367,9 +4434,15 @@ static inline int64_t mako_chan_try_recv(MakoChan *c, int64_t *out) {
         pthread_mutex_unlock(&c->mu);
         return 0;
     }
-    int64_t v = c->buf[c->head];
-    c->head = (c->head + 1) % c->cap;
-    c->count--;
+    int64_t v;
+    if (c->cap == 0) {
+        v = c->buf[0];
+        c->count = 0;
+    } else {
+        v = c->buf[c->head];
+        c->head = (c->head + 1) % c->cap;
+        c->count--;
+    }
     mako_rt_counter_inc(&mako_rt_channel_recvs);
     pthread_cond_signal(&c->can_send);
     pthread_mutex_unlock(&c->mu);
@@ -4516,20 +4589,23 @@ static inline int64_t mako_chan_select4(
  */
 typedef struct {
     MakoString *buf;
-    size_t cap;
+    size_t cap; /* 0 = unbuffered rendezvous */
     size_t head;
     size_t tail;
     size_t count;
     bool closed;
+    int waiters_recv;
     pthread_mutex_t mu;
     pthread_cond_t can_send;
     pthread_cond_t can_recv;
 } MakoChanStr;
 
 static inline MakoChanStr *mako_chan_str_new(int64_t capacity) {
-    size_t cap = capacity < 1 ? 1 : (size_t)capacity;
+    if (capacity < 0) capacity = 0;
+    size_t cap = (size_t)capacity;
+    size_t slots = mako_chan_alloc_slots(cap);
     MakoChanStr *c = (MakoChanStr *)calloc(1, sizeof(MakoChanStr));
-    c->buf = (MakoString *)calloc(cap, sizeof(MakoString));
+    c->buf = (MakoString *)calloc(slots, sizeof(MakoString));
     c->cap = cap;
     pthread_mutex_init(&c->mu, NULL);
     pthread_cond_init(&c->can_send, NULL);
@@ -4544,6 +4620,30 @@ static inline int64_t mako_chan_str_send_take(MakoChanStr *c, MakoString v) {
         return 0;
     }
     pthread_mutex_lock(&c->mu);
+    if (c->cap == 0) {
+        while (c->count != 0 && !c->closed) {
+            pthread_cond_wait(&c->can_send, &c->mu);
+        }
+        if (c->closed) {
+            pthread_mutex_unlock(&c->mu);
+            mako_str_free(v);
+            return 0;
+        }
+        c->buf[0] = v;
+        c->count = 1;
+        pthread_cond_signal(&c->can_recv);
+        while (c->count != 0 && !c->closed) {
+            pthread_cond_wait(&c->can_send, &c->mu);
+        }
+        int64_t ok = (c->count == 0) ? 1 : 0;
+        if (!ok) {
+            mako_str_free(c->buf[0]);
+            c->buf[0] = (MakoString){NULL, 0};
+            c->count = 0;
+        }
+        pthread_mutex_unlock(&c->mu);
+        return ok;
+    }
     while (c->count == c->cap && !c->closed) {
         pthread_cond_wait(&c->can_send, &c->mu);
     }
@@ -4566,13 +4666,26 @@ static inline int64_t mako_chan_str_send(MakoChanStr *c, MakoString v) {
 }
 
 /* Nonblocking try-send: 1 on queued, 0 if full/closed. Takes ownership on success;
- * on failure (full/closed) frees `v` so the call is always consuming. */
+ * on failure (full/closed) frees `v` so the call is always consuming.
+ * Unbuffered: succeeds only when a receiver is already waiting. */
 static inline int64_t mako_chan_str_try_send_take(MakoChanStr *c, MakoString v) {
     if (!c) {
         mako_str_free(v);
         return 0;
     }
     pthread_mutex_lock(&c->mu);
+    if (c->cap == 0) {
+        if (c->closed || c->waiters_recv <= 0 || c->count != 0) {
+            pthread_mutex_unlock(&c->mu);
+            mako_str_free(v);
+            return 0;
+        }
+        c->buf[0] = v;
+        c->count = 1;
+        pthread_cond_signal(&c->can_recv);
+        pthread_mutex_unlock(&c->mu);
+        return 1;
+    }
     if (c->closed || c->count == c->cap) {
         pthread_mutex_unlock(&c->mu);
         mako_str_free(v);
@@ -4593,17 +4706,26 @@ static inline int64_t mako_chan_str_try_send(MakoChanStr *c, MakoString v) {
 
 static inline MakoString mako_chan_str_recv(MakoChanStr *c) {
     pthread_mutex_lock(&c->mu);
+    c->waiters_recv++;
     while (c->count == 0 && !c->closed) {
         pthread_cond_wait(&c->can_recv, &c->mu);
     }
+    c->waiters_recv--;
     if (c->count == 0 && c->closed) {
         pthread_mutex_unlock(&c->mu);
         return mako_str_from_cstr("");
     }
-    MakoString v = c->buf[c->head];
-    c->buf[c->head] = (MakoString){NULL, 0};
-    c->head = (c->head + 1) % c->cap;
-    c->count--;
+    MakoString v;
+    if (c->cap == 0) {
+        v = c->buf[0];
+        c->buf[0] = (MakoString){NULL, 0};
+        c->count = 0;
+    } else {
+        v = c->buf[c->head];
+        c->buf[c->head] = (MakoString){NULL, 0};
+        c->head = (c->head + 1) % c->cap;
+        c->count--;
+    }
     pthread_cond_signal(&c->can_send);
     pthread_mutex_unlock(&c->mu);
     return v;
@@ -4626,10 +4748,17 @@ static inline int64_t mako_chan_str_try_recv(MakoChanStr *c, MakoString *out) {
         pthread_mutex_unlock(&c->mu);
         return 0;
     }
-    MakoString v = c->buf[c->head];
-    c->buf[c->head] = (MakoString){NULL, 0};
-    c->head = (c->head + 1) % c->cap;
-    c->count--;
+    MakoString v;
+    if (c->cap == 0) {
+        v = c->buf[0];
+        c->buf[0] = (MakoString){NULL, 0};
+        c->count = 0;
+    } else {
+        v = c->buf[c->head];
+        c->buf[c->head] = (MakoString){NULL, 0};
+        c->head = (c->head + 1) % c->cap;
+        c->count--;
+    }
     pthread_cond_signal(&c->can_send);
     pthread_mutex_unlock(&c->mu);
     if (out) *out = v;
@@ -4692,20 +4821,23 @@ static inline int64_t mako_chan_str_select2(
  */
 typedef struct {
     void **buf;
-    size_t cap;
+    size_t cap; /* 0 = unbuffered rendezvous */
     size_t head;
     size_t tail;
     size_t count;
     bool closed;
+    int waiters_recv;
     pthread_mutex_t mu;
     pthread_cond_t can_send;
     pthread_cond_t can_recv;
 } MakoChanPtr;
 
 static inline MakoChanPtr *mako_chan_ptr_new(int64_t capacity) {
-    size_t cap = capacity < 1 ? 1 : (size_t)capacity;
+    if (capacity < 0) capacity = 0;
+    size_t cap = (size_t)capacity;
+    size_t slots = mako_chan_alloc_slots(cap);
     MakoChanPtr *c = (MakoChanPtr *)calloc(1, sizeof(MakoChanPtr));
-    c->buf = (void **)calloc(cap, sizeof(void *));
+    c->buf = (void **)calloc(slots, sizeof(void *));
     c->cap = cap;
     pthread_mutex_init(&c->mu, NULL);
     pthread_cond_init(&c->can_send, NULL);
@@ -4715,6 +4847,24 @@ static inline MakoChanPtr *mako_chan_ptr_new(int64_t capacity) {
 
 static inline int64_t mako_chan_ptr_send(MakoChanPtr *c, void *v) {
     pthread_mutex_lock(&c->mu);
+    if (c->cap == 0) {
+        while (c->count != 0 && !c->closed) {
+            pthread_cond_wait(&c->can_send, &c->mu);
+        }
+        if (c->closed) {
+            pthread_mutex_unlock(&c->mu);
+            return 0;
+        }
+        c->buf[0] = v;
+        c->count = 1;
+        pthread_cond_signal(&c->can_recv);
+        while (c->count != 0 && !c->closed) {
+            pthread_cond_wait(&c->can_send, &c->mu);
+        }
+        int64_t ok = (c->count == 0) ? 1 : 0;
+        pthread_mutex_unlock(&c->mu);
+        return ok;
+    }
     while (c->count == c->cap && !c->closed) {
         pthread_cond_wait(&c->can_send, &c->mu);
     }
@@ -4732,17 +4882,26 @@ static inline int64_t mako_chan_ptr_send(MakoChanPtr *c, void *v) {
 
 static inline void *mako_chan_ptr_recv(MakoChanPtr *c) {
     pthread_mutex_lock(&c->mu);
+    c->waiters_recv++;
     while (c->count == 0 && !c->closed) {
         pthread_cond_wait(&c->can_recv, &c->mu);
     }
+    c->waiters_recv--;
     if (c->count == 0 && c->closed) {
         pthread_mutex_unlock(&c->mu);
         return NULL;
     }
-    void *v = c->buf[c->head];
-    c->buf[c->head] = NULL;
-    c->head = (c->head + 1) % c->cap;
-    c->count--;
+    void *v;
+    if (c->cap == 0) {
+        v = c->buf[0];
+        c->buf[0] = NULL;
+        c->count = 0;
+    } else {
+        v = c->buf[c->head];
+        c->buf[c->head] = NULL;
+        c->head = (c->head + 1) % c->cap;
+        c->count--;
+    }
     pthread_cond_signal(&c->can_send);
     pthread_mutex_unlock(&c->mu);
     return v;
@@ -4765,10 +4924,17 @@ static inline int64_t mako_chan_ptr_try_recv(MakoChanPtr *c, void **out) {
         pthread_mutex_unlock(&c->mu);
         return 0;
     }
-    void *v = c->buf[c->head];
-    c->buf[c->head] = NULL;
-    c->head = (c->head + 1) % c->cap;
-    c->count--;
+    void *v;
+    if (c->cap == 0) {
+        v = c->buf[0];
+        c->buf[0] = NULL;
+        c->count = 0;
+    } else {
+        v = c->buf[c->head];
+        c->buf[c->head] = NULL;
+        c->head = (c->head + 1) % c->cap;
+        c->count--;
+    }
     pthread_cond_signal(&c->can_send);
     pthread_mutex_unlock(&c->mu);
     if (out) *out = v;

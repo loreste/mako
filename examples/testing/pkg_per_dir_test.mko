@@ -1,0 +1,16 @@
+// Package-per-directory: pull a multi-file package as one unit.
+// Use a distinct name so we do not collide with examples/testing/add.mko.
+pull "./pkg_per_dir/mathx" as mathx
+
+fn TestPkgPerDirAddMul() {
+    assert_eq(mathx.add(2, 3), 5)
+    assert_eq(mathx.mul(4, 5), 20)
+}
+
+fn TestPkgPerDirCrossFileCall() {
+    // extra.mko calls add from lib.mko inside the same package (must use mathx.add,
+    // not the free add() from examples/testing/add.mko).
+    // 10*10 + 1 = 101 proves mul path; add3(10, 20, 1) = 31 proves cross-file add.
+    assert_eq(mathx.add3(10, 20, 1), 31)
+    assert_eq(mathx.mul(10, 10), 100)
+}

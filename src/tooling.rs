@@ -67,16 +67,14 @@ pub fn check_file(path: &Path) -> Result<Program, ()> {
     let program = resolve_imports(path, program).map_err(|e| {
         Diagnostic::error(&path_s, &src, Span::unknown(), e).emit();
     })?;
+    // Package-per-directory: merge sibling units (tests and normal packages).
+    let program = merge_package_dir_siblings(path, program).map_err(|e| {
+        Diagnostic::error(&path_s, &src, Span::unknown(), e).emit();
+    })?;
     let mut program = merge_path_dependencies(path, program).map_err(|e| {
         Diagnostic::error(&path_s, &src, Span::unknown(), e).emit();
     })?;
-    // Test files: merge same-directory package sources (same as `mako test`).
     if is_test_file(path) {
-        for sib in sibling_package_files(path) {
-            if let Ok(extra) = parse_program_file(&sib) {
-                program.items.extend(extra.items);
-            }
-        }
         program
             .items
             .retain(|item| !matches!(item, Item::Fn(f) if f.name == "main"));
@@ -158,14 +156,11 @@ fn check_file_structured(path: &Path) -> Result<Program, Diagnostic> {
     let program = desugar::desugar(program);
     let program = resolve_imports(path, program)
         .map_err(|e| Diagnostic::error(&path_s, &src, Span::unknown(), e))?;
+    let program = merge_package_dir_siblings(path, program)
+        .map_err(|e| Diagnostic::error(&path_s, &src, Span::unknown(), e))?;
     let mut program = merge_path_dependencies(path, program)
         .map_err(|e| Diagnostic::error(&path_s, &src, Span::unknown(), e))?;
     if is_test_file(path) {
-        for sib in sibling_package_files(path) {
-            if let Ok(extra) = parse_program_file(&sib) {
-                program.items.extend(extra.items);
-            }
-        }
         program
             .items
             .retain(|item| !matches!(item, Item::Fn(f) if f.name == "main"));
@@ -1901,22 +1896,13 @@ pub fn list_test_fns(program: &Program) -> Vec<String> {
     names
 }
 
+/// Non-test `.mko` siblings of `test_file` (same directory). Used by tooling/tests.
+#[allow(dead_code)]
 pub fn sibling_package_files(test_file: &Path) -> Vec<PathBuf> {
     let Some(dir) = test_file.parent() else {
         return Vec::new();
     };
-    let mut out = Vec::new();
-    let Ok(rd) = fs::read_dir(dir) else {
-        return out;
-    };
-    for e in rd.flatten() {
-        let p = e.path();
-        if is_mko_source(&p) && !is_test_file(&p) {
-            out.push(p);
-        }
-    }
-    out.sort();
-    out
+    package_dir_sources(dir).unwrap_or_default()
 }
 
 /// Package-level names for prefix rewrite.
@@ -2750,10 +2736,9 @@ pub fn package_main_mko(pkg_dir: &Path) -> Option<PathBuf> {
     }
 }
 
-/// `.mko` roots for a path dependency (documented layout):
+/// `.mko` roots for a path dependency (package-per-directory):
 /// - path to a `.mko` file → that file
-/// - package dir with `lib.mko` → only `lib.mko`
-/// - otherwise all top-level `.mko` except test files (incl. `main.mko`; `main` stripped later)
+/// - package dir → all non-test `.mko` except `main.mko` (binary entry stays out of lib surface)
 pub fn collect_path_dep_sources(dep_name: &str, dep_root: &Path) -> Result<Vec<PathBuf>, String> {
     let missing = || {
         format!(
@@ -2773,27 +2758,23 @@ pub fn collect_path_dep_sources(dep_name: &str, dep_root: &Path) -> Result<Vec<P
     if !dep_root.is_dir() {
         return Err(missing());
     }
-    let lib = dep_root.join("lib.mko");
-    if lib.is_file() {
-        return Ok(vec![lib]);
-    }
-    let mut out = Vec::new();
-    let rd = fs::read_dir(dep_root).map_err(|e| {
+    let mut out = package_dir_sources(dep_root).map_err(|e| {
         format!(
-            "path dep `{dep_name}` MISSING: {} ({e})",
+            "path dep `{dep_name}` has no .mko sources at {} ({e})",
             dep_root.display()
         )
     })?;
-    for e in rd.flatten() {
-        let p = e.path();
-        if is_mko_source(&p) && !is_test_file(&p) {
-            out.push(p);
-        }
-    }
-    out.sort();
+    // Library surface: drop binary entry so dependents do not pull `fn main`.
+    out.retain(|p| {
+        p.file_name()
+            .and_then(|n| n.to_str())
+            .map(|n| n != "main.mko")
+            .unwrap_or(true)
+    });
     if out.is_empty() {
         return Err(format!(
-            "path dep `{dep_name}` has no .mko sources at {} (add lib.mko or package-root .mko files)",
+            "path dep `{dep_name}` has no library .mko sources at {} \
+             (add lib.mko / package units; main.mko alone is not a library)",
             dep_root.display()
         ));
     }
@@ -2980,56 +2961,77 @@ fn resolve_imports_rec(
         match item {
             Item::Import { path, alias, mode } => {
                 let targets = resolve_import_targets(&base, &path)?;
-                for target in targets {
+                // Package-per-directory: merge all units first, then qualify once so
+                // cross-file calls (more.mko → greet in lib.mko) rewrite correctly.
+                let mut pkg_prog = Program { items: Vec::new() };
+                let mut pkg_name: Option<String> = None;
+                let mut path_alias: Option<String> = None;
+                let mut any_new = false;
+                for target in &targets {
                     let canon = target.canonicalize().map_err(|e| {
                         format!("import \"{path}\": cannot open {}: {e}", target.display())
                     })?;
                     if !seen.insert(canon.clone()) {
                         continue; // already merged (cycle or duplicate)
                     }
+                    any_new = true;
                     let imported = parse_program_file_raw(&canon)?;
-                    let pkg_name = package_name_of(&imported);
-                    let path_alias = path_default_alias(&path, &target);
-                    let mut merged =
+                    if pkg_name.is_none() {
+                        pkg_name = package_name_of(&imported);
+                    } else if let (Some(a), Some(b)) = (&pkg_name, package_name_of(&imported)) {
+                        if a != &b {
+                            return Err(format!(
+                                "import \"{path}\": package-per-directory clash — \
+                                 pack `{a}` vs pack `{b}` in {}",
+                                target.display()
+                            ));
+                        }
+                    }
+                    if path_alias.is_none() {
+                        path_alias = path_default_alias(&path, target);
+                    }
+                    let mut unit =
                         resolve_imports_rec(&canon, imported, seen, explicit_visibility)?;
-                    // Strip package clauses from merged unit (importer keeps its own).
-                    merged
-                        .items
-                        .retain(|i| !matches!(i, Item::Package { .. }));
-                    match mode {
-                        ImportMode::Blank => {
-                            // Blank import: load/typecheck dependency only.
-                            // Mako has no init(); drop symbols so they stay private.
-                            continue;
+                    unit.items
+                        .retain(|i| !matches!(i, Item::Package { .. } | Item::Import { .. }));
+                    pkg_prog.items.extend(unit.items);
+                }
+                if !any_new || pkg_prog.items.is_empty() {
+                    continue;
+                }
+                match mode {
+                    ImportMode::Blank => {
+                        // Blank import: load/typecheck dependency only.
+                        // Mako has no init(); drop symbols so they stay private.
+                        continue;
+                    }
+                    ImportMode::Dot => {
+                        if explicit_visibility {
+                            filter_exported_only(&mut pkg_prog);
                         }
-                        ImportMode::Dot => {
-                            if explicit_visibility {
-                                filter_exported_only(&mut merged);
-                            }
-                            out.items.extend(merged.items);
+                        out.items.extend(pkg_prog.items);
+                    }
+                    ImportMode::Normal => {
+                        // Always package-qualify. Default: package clause (≠ main), else path.
+                        let a = alias
+                            .clone()
+                            .or_else(|| {
+                                pkg_name
+                                    .clone()
+                                    .filter(|n| n != "main" && !n.is_empty())
+                            })
+                            .or(path_alias)
+                            .ok_or_else(|| {
+                                format!(
+                                    "pull \"{path}\": cannot derive pack name \
+                                     (add `pack name` or use `pull \"{path}\" as name`)"
+                                )
+                            })?;
+                        if explicit_visibility {
+                            filter_exported_only(&mut pkg_prog);
                         }
-                        ImportMode::Normal => {
-                            // Always package-qualify. Default: package clause (≠ main), else path.
-                            let a = alias
-                                .clone()
-                                .or_else(|| {
-                                    pkg_name
-                                        .clone()
-                                        .filter(|n| n != "main" && !n.is_empty())
-                                })
-                                .or(path_alias)
-                                .ok_or_else(|| {
-                                    format!(
-                                        "pull \"{path}\": cannot derive pack name \
-                                         (add `pack name` or use `pull \"{path}\" as name`)"
-                                    )
-                                })?;
-                            if explicit_visibility {
-                                filter_exported_only(&mut merged);
-                            }
-                            apply_import_prefix(&mut merged, &a);
-                            out.items.extend(merged.items);
-                        }
+                        apply_import_prefix(&mut pkg_prog, &a);
+                        out.items.extend(pkg_prog.items);
                     }
                 }
             }
@@ -3106,26 +3108,16 @@ fn resolve_import_targets(base: &Path, path: &str) -> Result<Vec<PathBuf>, Strin
     ))
 }
 
-/// Prefer `dir/name.mko`, `dir/lib.mko`, `dir/mod.mko`, then package dir scan.
+/// Prefer package directory (all units), else single-file `root/pkg.mko`.
 fn sources_under_root(root: &Path, pkg: &str) -> Result<Vec<PathBuf>, String> {
-    let base_name = Path::new(pkg)
-        .file_name()
-        .and_then(|s| s.to_str())
-        .unwrap_or(pkg);
-    let candidates = [
-        root.join(pkg).join(format!("{base_name}.mko")),
-        root.join(pkg).join("mod.mko"),
-        root.join(pkg).join("lib.mko"),
-        root.join(format!("{pkg}.mko")),
-    ];
-    for c in &candidates {
-        if c.is_file() {
-            return Ok(vec![c.clone()]);
-        }
-    }
     let dir = root.join(pkg);
     if dir.is_dir() {
+        // Package-per-directory: every non-test .mko in the dir is one package.
         return package_dir_sources(&dir);
+    }
+    let as_file = root.join(format!("{pkg}.mko"));
+    if as_file.is_file() {
+        return Ok(vec![as_file]);
     }
     Err(format!("no sources for `{pkg}` under {}", root.display()))
 }
@@ -3248,16 +3240,9 @@ fn parse_module_path(text: &str) -> Option<String> {
     None
 }
 
-/// Sources for a package directory: prefer `lib.mko`, else all non-test `.mko`.
+/// Sources for a package directory: **all** non-test `.mko` files (package-per-directory).
+/// Sorted with `lib.mko` first (if present), then alphabetical — stable merge order.
 fn package_dir_sources(dir: &Path) -> Result<Vec<PathBuf>, String> {
-    let lib = dir.join("lib.mko");
-    if lib.is_file() {
-        return Ok(vec![lib]);
-    }
-    let main = dir.join("main.mko");
-    if main.is_file() {
-        return Ok(vec![main]);
-    }
     let mut files = Vec::new();
     let rd = fs::read_dir(dir).map_err(|e| format!("read {}: {e}", dir.display()))?;
     for ent in rd.flatten() {
@@ -3271,11 +3256,96 @@ fn package_dir_sources(dir: &Path) -> Result<Vec<PathBuf>, String> {
         }
         files.push(p);
     }
-    files.sort();
+    files.sort_by(|a, b| {
+        let an = a.file_name().and_then(|n| n.to_str()).unwrap_or("");
+        let bn = b.file_name().and_then(|n| n.to_str()).unwrap_or("");
+        match (an == "lib.mko", bn == "lib.mko") {
+            (true, false) => std::cmp::Ordering::Less,
+            (false, true) => std::cmp::Ordering::Greater,
+            _ => an.cmp(bn),
+        }
+    });
     if files.is_empty() {
         return Err(format!("package dir {} has no .mko sources", dir.display()));
     }
     Ok(files)
+}
+
+/// Whether `entry`'s directory is a multi-file package root (not a flat demo dump).
+///
+/// Merge when:
+/// - the file is a `*_test.mko` (Go-style same-dir package under test), or
+/// - the directory has `mako.toml`, or
+/// - the directory has `lib.mko` / `main.mko` (package layout convention).
+fn package_dir_merge_enabled(entry: &Path) -> bool {
+    if is_test_file(entry) {
+        return true;
+    }
+    let Some(dir) = entry.parent() else {
+        return false;
+    };
+    if dir.join("mako.toml").is_file() {
+        return true;
+    }
+    if dir.join("lib.mko").is_file() || dir.join("main.mko").is_file() {
+        return true;
+    }
+    false
+}
+
+/// Merge same-directory non-test units into a program already loaded from `entry`.
+/// Enforces one `pack`/`package` name per directory (Go package-per-dir model).
+pub fn merge_package_dir_siblings(entry: &Path, mut program: Program) -> Result<Program, String> {
+    if !package_dir_merge_enabled(entry) {
+        return Ok(program);
+    }
+    let Some(dir) = entry.parent() else {
+        return Ok(program);
+    };
+    if !dir.is_dir() {
+        return Ok(program);
+    }
+    let entry_canon = entry
+        .canonicalize()
+        .unwrap_or_else(|_| entry.to_path_buf());
+    let entry_pkg = package_name_of(&program);
+    let sources = match package_dir_sources(dir) {
+        Ok(s) => s,
+        Err(_) => return Ok(program),
+    };
+    for sib in sources {
+        let sib_canon = sib
+            .canonicalize()
+            .unwrap_or_else(|_| sib.clone());
+        if sib_canon == entry_canon {
+            continue;
+        }
+        // Load sibling with its own imports; do not re-merge path deps (caller owns that).
+        let mut extra = parse_program_file_raw(&sib)
+            .map_err(|e| format!("{}: {e}", sib.display()))?;
+        extra = resolve_imports(&sib, extra)
+            .map_err(|e| format!("{}: {e}", sib.display()))?;
+        let sib_pkg = package_name_of(&extra);
+        match (&entry_pkg, &sib_pkg) {
+            (Some(a), Some(b)) if a != b => {
+                return Err(format!(
+                    "package-per-directory: {} declares pack `{a}` but {} declares pack `{b}` \
+                     (one package name per directory)",
+                    entry.display(),
+                    sib.display()
+                ));
+            }
+            (Some(_), None) | (None, Some(_)) => {
+                // One file omitted the clause — allow (clause is optional); prefer declared name.
+            }
+            _ => {}
+        }
+        extra
+            .items
+            .retain(|i| !matches!(i, Item::Package { .. } | Item::Import { .. }));
+        program.items.extend(extra.items);
+    }
+    Ok(program)
 }
 
 /// Locate `std/` next to the repo / install (mirrors runtime discovery).
@@ -3346,10 +3416,7 @@ pub fn parse_program_file(path: &Path) -> Result<Program, String> {
 /// Merge test file with same-directory package sources; strip `main` (harness provides it).
 pub fn load_test_package(test_file: &Path) -> Result<(Program, Vec<String>), String> {
     let mut program = parse_program_file(test_file)?;
-    for sib in sibling_package_files(test_file) {
-        let extra = parse_program_file(&sib)?;
-        program.items.extend(extra.items);
-    }
+    program = merge_package_dir_siblings(test_file, program)?;
     program = merge_path_dependencies(test_file, program)?;
     program
         .items

@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+### Package-per-directory · unbuffered rendezvous channels
+
+- **Package-per-directory:** all non-test `.mko` files in a package dir merge as
+  one unit (same `pack` name enforced). Path deps and `pull` qualify after the
+  full merge so cross-file calls rewrite correctly.
+- **Entry merge:** compile/check/test of `main.mko` / `lib.mko` / `*_test.mko`
+  (and dirs with `mako.toml`) pull sibling units; flat demo dumps stay single-file.
+- **Unbuffered channels:** `chan_new(0)` / `chan_open[T](0)` true rendezvous —
+  send waits until recv takes; `try_send` only succeeds with a waiting receiver.
+  `chan_cap` reports `0`. Int / string / pointer channels.
+- Tests: `pkg_per_dir_test` · `chan_rendezvous_test` · example `examples/pkg_per_dir`.
+
 ### Seeds & syntax (error chain · fallthrough)
 
 - **Richer error chain seed:** `error_unwrap` / `error_root` / `error_as_tag` /

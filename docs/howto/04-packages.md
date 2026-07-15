@@ -22,17 +22,26 @@ mako pkg init mylib
 
 ## Project layout
 
-A package with both library and application code:
+**Package-per-directory:** all non-test `.mko` files in a directory form **one**
+package and must share the same `pack` / `package` name (Go model).
 
 ```
 myapp/
   mako.toml
-  main.mko          # application entry point (fn main)
-  lib.mko           # library code (preferred for deps)
+  main.mko          # application entry (fn main)
+  lib.mko           # library unit (optional name; merged with siblings)
+  helpers.mko       # same pack — merged automatically
 ```
 
-When another package depends on yours, Mako includes `lib.mko` if it exists,
-otherwise all top-level `.mko` files (excluding tests and main).
+When another package depends on yours, Mako merges **all** non-test units except
+`main.mko` (binary entry stays out of the library surface). Cross-file calls
+inside the package resolve before the import prefix is applied.
+
+```
+util/
+  lib.mko           # pack util · greet
+  more.mko          # pack util · shout (calls greet)
+```
 
 ## Adding a local dependency
 

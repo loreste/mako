@@ -1,0 +1,49 @@
+// True unbuffered rendezvous: chan_new(0) / chan_open[int](0).
+
+fn ping(ch: chan[int], n: int) -> int {
+    let _ = ch.send(n)
+    return n
+}
+
+fn TestChanCapZero() {
+    let ch = chan_new(0)
+    assert_eq(chan_cap(ch), 0)
+    assert_eq(chan_len(ch), 0)
+    ch.close()
+}
+
+fn TestChanRendezvousSendRecv() {
+    let ch = chan_open[int](0)
+    assert_eq(chan_cap(ch), 0)
+    crew t {
+        let j = t.kick(ping(ch, 42))
+        assert_eq(ch.recv(), 42)
+        assert_eq(j.join(), 42)
+    }
+    ch.close()
+}
+
+fn TestChanRendezvousTrySendNoWaiter() {
+    // try_send on unbuffered with no waiting receiver must fail.
+    let ch = chan_new(0)
+    assert_eq(chan_try_send(ch, 7), 0)
+    ch.close()
+}
+
+fn TestChanRendezvousMulti() {
+    let ch = chan_new(0)
+    crew t {
+        let p = t.kick(ping(ch, 1))
+        let p2 = t.kick(ping(ch, 2))
+        let p3 = t.kick(ping(ch, 3))
+        let mut sum = 0
+        sum = sum + ch.recv()
+        sum = sum + ch.recv()
+        sum = sum + ch.recv()
+        ch.close()
+        let _ = p.join()
+        let _ = p2.join()
+        let _ = p3.join()
+        assert_eq(sum, 6)
+    }
+}

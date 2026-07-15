@@ -1,0 +1,6 @@
+pack main
+
+// Path dep from mako.toml supplies `util` (multi-file package-per-directory).
+fn main() {
+    print(util.shout("mako"))
+}
