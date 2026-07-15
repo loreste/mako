@@ -131,3 +131,54 @@ fn TestConstFnWhile() {
     assert_eq(pow2(0), 1)
     assert_eq(pow2(3), 8)
 }
+
+// --- Depth seed: for count + C-style for ---
+
+const fn sum_for(n: int) -> int {
+    let mut s = 0
+    for i in n {
+        s = s + i
+    }
+    return s
+}
+
+const fn sum_range_for(n: int) -> int {
+    let mut s = 0
+    for i in range n {
+        s = s + i
+    }
+    return s
+}
+
+const fn sum_cfor(n: int) -> int {
+    let mut s = 0
+    for i := 0; i < n; i = i + 1 {
+        s = s + i
+    }
+    return s
+}
+
+const fn fact_for(n: int) -> int {
+    let mut p = 1
+    for i in n {
+        p = p * (i + 1)
+    }
+    return p
+}
+
+const C_FOR = sum_for(5)
+const C_RFOR = sum_range_for(5)
+const C_CFOR = sum_cfor(5)
+const C_FACT = fact_for(5)
+
+fn TestConstFnFor() {
+    assert_eq(C_FOR, 10)
+    assert_eq(C_RFOR, 10)
+    assert_eq(C_CFOR, 10)
+    assert_eq(sum_for(0), 0)
+    assert_eq(sum_for(1), 0)
+    assert_eq(sum_cfor(4), 6)
+    // 1*2*3*4*5
+    assert_eq(C_FACT, 120)
+    assert_eq(fact_for(0), 1)
+}

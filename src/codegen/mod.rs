@@ -31211,6 +31211,74 @@ fn fold_const_c_block(
                     }
                 }
             }
+            Stmt::For {
+                binders,
+                iter,
+                body: fbody,
+                ..
+            } => {
+                let n = fold_const_c_env(iter, &locals, const_fns)?;
+                if n < 0 || n > 100_000 {
+                    return None;
+                }
+                let binder = binders.iter().find(|b| b.as_str() != "_").cloned();
+                for idx in 0..n {
+                    if let Some(ref b) = binder {
+                        locals.insert(b.clone(), idx);
+                    }
+                    match fold_const_c_loop_body(fbody, &mut locals, const_fns) {
+                        None => return None,
+                        Some(Some(ret)) => return Some(ret),
+                        Some(None) => {}
+                    }
+                }
+            }
+            Stmt::CFor {
+                init,
+                cond,
+                post,
+                body: fbody,
+                ..
+            } => {
+                match init.as_ref() {
+                    Stmt::Let { name, init: iv, .. } => {
+                        let v = fold_const_c_env(iv, &locals, const_fns)?;
+                        locals.insert(name.clone(), v);
+                    }
+                    Stmt::Assign { name, value } => {
+                        let v = fold_const_c_env(value, &locals, const_fns)?;
+                        locals.insert(name.clone(), v);
+                    }
+                    _ => return None,
+                }
+                const MAX_ITERS: i64 = 100_000;
+                let mut iters = 0i64;
+                while fold_const_c_env(cond, &locals, const_fns)? != 0 {
+                    iters += 1;
+                    if iters > MAX_ITERS {
+                        return None;
+                    }
+                    match fold_const_c_loop_body(fbody, &mut locals, const_fns) {
+                        None => return None,
+                        Some(Some(ret)) => return Some(ret),
+                        Some(None) => {}
+                    }
+                    match post.as_ref() {
+                        Stmt::Let { name, init: iv, .. } => {
+                            let v = fold_const_c_env(iv, &locals, const_fns)?;
+                            locals.insert(name.clone(), v);
+                        }
+                        Stmt::Assign { name, value } => {
+                            let v = fold_const_c_env(value, &locals, const_fns)?;
+                            locals.insert(name.clone(), v);
+                        }
+                        Stmt::Expr(e) => {
+                            let _ = fold_const_c_env(e, &locals, const_fns)?;
+                        }
+                        _ => return None,
+                    }
+                }
+            }
             Stmt::Expr(e) if is_last => {
                 return fold_const_c_env(e, &locals, const_fns);
             }
@@ -31271,6 +31339,45 @@ fn fold_const_c_loop_body(
             }
             Stmt::Expr(e) => {
                 let _ = fold_const_c_env(e, locals, const_fns)?;
+            }
+            Stmt::While {
+                cond, body: wbody, ..
+            } => {
+                const MAX_ITERS: i64 = 100_000;
+                let mut iters = 0i64;
+                while fold_const_c_env(cond, locals, const_fns)? != 0 {
+                    iters += 1;
+                    if iters > MAX_ITERS {
+                        return None;
+                    }
+                    match fold_const_c_loop_body(wbody, locals, const_fns) {
+                        None => return None,
+                        Some(Some(ret)) => return Some(Some(ret)),
+                        Some(None) => {}
+                    }
+                }
+            }
+            Stmt::For {
+                binders,
+                iter,
+                body: fbody,
+                ..
+            } => {
+                let n = fold_const_c_env(iter, locals, const_fns)?;
+                if n < 0 || n > 100_000 {
+                    return None;
+                }
+                let binder = binders.iter().find(|b| b.as_str() != "_").cloned();
+                for idx in 0..n {
+                    if let Some(ref b) = binder {
+                        locals.insert(b.clone(), idx);
+                    }
+                    match fold_const_c_loop_body(fbody, locals, const_fns) {
+                        None => return None,
+                        Some(Some(ret)) => return Some(Some(ret)),
+                        Some(None) => {}
+                    }
+                }
             }
             _ => return None,
         }

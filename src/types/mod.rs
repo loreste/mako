@@ -16081,6 +16081,90 @@ fn eval_const_fn_body(
                     }
                 }
             }
+            Stmt::For {
+                binders,
+                iter,
+                body: fbody,
+                ..
+            } => {
+                // Count form only: `for i in n` / `for i in range n` → i = 0..n-1
+                let n = fold_const_expr_with(iter, &env, const_fns)?;
+                if n < 0 {
+                    return Err(TypeError::new("const for count must be non-negative"));
+                }
+                if n > 100_000 {
+                    return Err(TypeError::new(
+                        "const for count exceeds 100000 (runaway loop?)",
+                    ));
+                }
+                let binder = binders.iter().find(|b| b.as_str() != "_").cloned();
+                for idx in 0..n {
+                    if let Some(ref b) = binder {
+                        env.insert(b.clone(), idx);
+                    }
+                    match eval_const_loop_body(fbody, &mut env, const_fns)? {
+                        Some(ret) => return Ok(ret),
+                        None => {}
+                    }
+                }
+            }
+            Stmt::CFor {
+                init,
+                cond,
+                post,
+                body: fbody,
+                ..
+            } => {
+                // Run init once (let / assign only).
+                match init.as_ref() {
+                    Stmt::Let { name, init: iv, .. } => {
+                        let v = fold_const_expr_with(iv, &env, const_fns)?;
+                        env.insert(name.clone(), v);
+                    }
+                    Stmt::Assign { name, value } => {
+                        let v = fold_const_expr_with(value, &env, const_fns)?;
+                        env.insert(name.clone(), v);
+                    }
+                    _ => {
+                        return Err(TypeError::new(
+                            "const C-style for init may only be let or assign",
+                        ));
+                    }
+                }
+                const MAX_ITERS: i64 = 100_000;
+                let mut iters = 0i64;
+                while fold_const_expr_with(cond, &env, const_fns)? != 0 {
+                    iters += 1;
+                    if iters > MAX_ITERS {
+                        return Err(TypeError::new(
+                            "const C-style for exceeded 100000 iterations (runaway loop?)",
+                        ));
+                    }
+                    match eval_const_loop_body(fbody, &mut env, const_fns)? {
+                        Some(ret) => return Ok(ret),
+                        None => {}
+                    }
+                    // Post clause
+                    match post.as_ref() {
+                        Stmt::Let { name, init: iv, .. } => {
+                            let v = fold_const_expr_with(iv, &env, const_fns)?;
+                            env.insert(name.clone(), v);
+                        }
+                        Stmt::Assign { name, value } => {
+                            let v = fold_const_expr_with(value, &env, const_fns)?;
+                            env.insert(name.clone(), v);
+                        }
+                        Stmt::Expr(e) => {
+                            let _ = fold_const_expr_with(e, &env, const_fns)?;
+                        }
+                        _ => {
+                            return Err(TypeError::new(
+                                "const C-style for post may only be let/assign/expr",
+                            ));
+                        }
+                    }
+                }
+            }
             Stmt::Expr(e) if is_last => {
                 return fold_const_expr_with(e, &env, const_fns);
             }
@@ -16097,7 +16181,7 @@ fn eval_const_fn_body(
             }
             _ => {
                 return Err(TypeError::new(
-                    "const fn body may only use let/assign/return/if/while of const expressions",
+                    "const fn body may only use let/assign/return/if/while/for of const expressions",
                 ));
             }
         }
@@ -16160,9 +16244,44 @@ fn eval_const_loop_body(
             Stmt::Expr(e) => {
                 let _ = fold_const_expr_with(e, env, const_fns)?;
             }
+            Stmt::While { cond, body: wbody, .. } => {
+                const MAX_ITERS: i64 = 100_000;
+                let mut iters = 0i64;
+                while fold_const_expr_with(cond, env, const_fns)? != 0 {
+                    iters += 1;
+                    if iters > MAX_ITERS {
+                        return Err(TypeError::new(
+                            "const while exceeded 100000 iterations (runaway loop?)",
+                        ));
+                    }
+                    if let Some(ret) = eval_const_loop_body(wbody, env, const_fns)? {
+                        return Ok(Some(ret));
+                    }
+                }
+            }
+            Stmt::For {
+                binders,
+                iter,
+                body: fbody,
+                ..
+            } => {
+                let n = fold_const_expr_with(iter, env, const_fns)?;
+                if n < 0 || n > 100_000 {
+                    return Err(TypeError::new("const for count out of range (0..100000)"));
+                }
+                let binder = binders.iter().find(|b| b.as_str() != "_").cloned();
+                for idx in 0..n {
+                    if let Some(ref b) = binder {
+                        env.insert(b.clone(), idx);
+                    }
+                    if let Some(ret) = eval_const_loop_body(fbody, env, const_fns)? {
+                        return Ok(Some(ret));
+                    }
+                }
+            }
             _ => {
                 return Err(TypeError::new(
-                    "const while body may only use let/assign/return/if of const expressions",
+                    "const loop body may only use let/assign/return/if/while/for of const expressions",
                 ));
             }
         }

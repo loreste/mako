@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Const-fn for loops
+
+- Const `for i in n` / `for i in range n` (count 0..n-1).
+- Const C-style `for init; cond; post` (let/assign init + post).
+- Same 100k iteration cap as const while.
+- Tests: `TestConstFnFor` in `const_fn_test`.
+
 ### Const-fn depth (match · while)
 
 - Const `match` on ints: literals, `a \| b`, `_`, binding patterns.
