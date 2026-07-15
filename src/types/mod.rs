@@ -9727,7 +9727,8 @@ impl TypeChecker {
             }
         }
 
-        // Interface method presence: `Iface_method` and/or `Iface_Concrete_method`.
+        // Interface method presence: `Iface_method`, `Iface_Concrete_method`,
+        // or Go-style `Concrete_method` method set.
         for iface in &self.interfaces.clone() {
             for (mname, params, ret) in &iface.methods {
                 let expected_params: Result<Vec<_>, _> =
@@ -9750,13 +9751,34 @@ impl TypeChecker {
                         }
                     }
                 }
+                // Go method set: `Struct_method` with self receiver.
+                for (sname, sty) in &self.types {
+                    if !matches!(sty, Type::Struct { .. }) {
+                        continue;
+                    }
+                    let free = format!("{sname}_{mname}");
+                    if candidates.iter().any(|c| c == &free) {
+                        continue;
+                    }
+                    if let Some(Type::Fn(fp, _)) = self.fns.get(&free) {
+                        if fp.len() == expected_params.len() + 1
+                            && self.types_equal_iface_self(
+                                &fp[0],
+                                &Type::Named(sname.clone()),
+                            )
+                        {
+                            candidates.push(free);
+                        }
+                    }
+                }
                 if candidates.is_empty() {
                     return Err(TypeError::new(format!(
                         "interface {}: missing implementation for `{mname}`",
                         iface.name
                     ))
                     .hint(format!(
-                        "define `fn {}_{mname}(...)` or `fn {}_{{Concrete}}_{mname}(...)`",
+                        "define `on SomeType {{ fn {mname}… }}`, `fn SomeType_{mname}…`, \
+                         `fn {}_{mname}…`, or `fn {}_{{Concrete}}_{mname}…`",
                         iface.name, iface.name
                     )));
                 }
@@ -15049,7 +15071,9 @@ impl TypeChecker {
     }
 
     /// True if concrete type has iface method impls.
-    /// Naming: `Iface_method` (self matches) or `Iface_Concrete_method`.
+    /// Naming (any of):
+    /// - `Iface_method` (self matches) or `Iface_Concrete_method`
+    /// - **Go-style implicit:** `Concrete_method` from `on Concrete { fn method… }` / free `fn Concrete_method`
     /// No-self-only interfaces are implemented by any concrete (unit dyn).
     fn implements_iface(&self, concrete: &Type, iface_name: &str) -> bool {
         let Some(iface) = self.interfaces.iter().find(|i| i.name == iface_name) else {
@@ -15063,20 +15087,37 @@ impl TypeChecker {
             _ => None,
         };
         let mut all_no_self = true;
-        for (mname, params, _ret) in &iface.methods {
+        for (mname, params, ret) in &iface.methods {
             let expected: Vec<Type> = params
                 .iter()
                 .filter_map(|t| self.resolve_type(t).ok())
                 .collect();
+            let expected_ret = self.resolve_type(ret).ok();
             if let Some(cn) = cname {
-                if let Some(fp) = self.lookup_iface_impl(iface_name, mname, cn) {
+                if let Some((fp, fr)) = self.lookup_iface_impl(iface_name, mname, cn) {
+                    if let Some(ref er) = expected_ret {
+                        if !self.compatible(&fr, er) {
+                            return false;
+                        }
+                    }
                     if fp.len() == expected.len() + 1 {
                         if !self.types_equal_iface_self(&fp[0], concrete) {
                             return false;
                         }
+                        // remaining args
+                        for (got, exp) in fp[1..].iter().zip(expected.iter()) {
+                            if !self.compatible(got, exp) {
+                                return false;
+                            }
+                        }
                         all_no_self = false;
                         continue;
                     } else if fp.len() == expected.len() {
+                        for (got, exp) in fp.iter().zip(expected.iter()) {
+                            if !self.compatible(got, exp) {
+                                return false;
+                            }
+                        }
                         continue;
                     }
                 }
@@ -15104,17 +15145,23 @@ impl TypeChecker {
             || self.interfaces.is_empty() && false
     }
 
-    /// Resolve impl fn params for `Iface_method` or `Iface_Concrete_method`.
-    fn lookup_iface_impl(&self, iface: &str, method: &str, concrete: &str) -> Option<Vec<Type>> {
+    /// Resolve impl fn params + return for iface method on a concrete type.
+    /// Order: `Iface_Concrete_method` → `Iface_method` → **`Concrete_method`** (Go implicit).
+    fn lookup_iface_impl(
+        &self,
+        iface: &str,
+        method: &str,
+        concrete: &str,
+    ) -> Option<(Vec<Type>, Type)> {
         let keyed = format!("{iface}_{concrete}_{method}");
-        if let Some(Type::Fn(fp, _)) = self.fns.get(&keyed) {
-            return Some(fp.clone());
+        if let Some(Type::Fn(fp, fr)) = self.fns.get(&keyed) {
+            return Some((fp.clone(), (**fr).clone()));
         }
         let key = format!("{iface}_{method}");
-        if let Some(Type::Fn(fp, _)) = self.fns.get(&key) {
+        if let Some(Type::Fn(fp, fr)) = self.fns.get(&key) {
             // Accept if self matches concrete or no-self
             if fp.is_empty() {
-                return Some(fp.clone());
+                return Some((fp.clone(), (**fr).clone()));
             }
             if self.types_equal_iface_self(&fp[0], &Type::Named(concrete.to_string()))
                 || matches!(
@@ -15122,15 +15169,25 @@ impl TypeChecker {
                     Type::Struct { name, .. } if name == concrete
                 )
             {
-                return Some(fp.clone());
+                return Some((fp.clone(), (**fr).clone()));
             }
             // no-self: first param is not a struct matching anything for this concrete
             if !matches!(&fp[0], Type::Struct { .. }) && !matches!(&fp[0], Type::Named(_)) {
-                return Some(fp.clone());
+                return Some((fp.clone(), (**fr).clone()));
             }
             // no-self string/int first arg
             if matches!(&fp[0], Type::String | Type::Int | Type::Bool | Type::Float) {
-                return Some(fp.clone());
+                return Some((fp.clone(), (**fr).clone()));
+            }
+        }
+        // Go-style method set: `on Concrete { fn method… }` → `Concrete_method`.
+        let free = format!("{concrete}_{method}");
+        if let Some(Type::Fn(fp, fr)) = self.fns.get(&free) {
+            if !fp.is_empty()
+                && (self.types_equal_iface_self(&fp[0], &Type::Named(concrete.to_string()))
+                    || matches!(&fp[0], Type::Struct { name, .. } if name == concrete))
+            {
+                return Some((fp.clone(), (**fr).clone()));
             }
         }
         None

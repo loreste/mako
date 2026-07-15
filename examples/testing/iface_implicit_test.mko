@@ -1,0 +1,52 @@
+// Go-style implicit interface satisfaction via method sets.
+// `on T { fn m… }` / `fn T_m` implements interface I without `on T : I`.
+
+struct Counter {
+    n: int
+}
+
+interface Adder {
+    fn add(int) -> int
+}
+
+// Method set only — no `on Counter : Adder` and no `Adder_add`.
+on Counter {
+    fn add(self, delta: int) -> int {
+        return self.n + delta
+    }
+}
+
+fn use_adder(a: Adder, d: int) -> int {
+    return a.add(d)
+}
+
+fn TestImplicitOnMethodSet() {
+    let c = Counter { n: 10 }
+    assert_eq(use_adder(c, 5), 15)
+    // Direct method still works.
+    assert_eq(c.add(1), 11)
+}
+
+struct Point {
+    x: int
+    y: int
+}
+
+interface Summer {
+    fn sum() -> int
+}
+
+// Free-function method style (same as desugared `on`).
+fn Point_sum(self: Point) -> int {
+    return self.x + self.y
+}
+
+fn use_summer(s: Summer) -> int {
+    return s.sum()
+}
+
+fn TestImplicitFreeMethod() {
+    let p = Point { x: 3, y: 4 }
+    assert_eq(use_summer(p), 7)
+    assert_eq(p.sum(), 7)
+}

@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Implicit interface method sets (Go-like)
+
+- Types that define `on T { fn m… }` or free `fn T_m(self T, …)` implement
+  interface `I` when signatures match — no `on T : I` required.
+- Vtable / coercion also resolve `Concrete_method` (alongside `I_method` /
+  `I_Concrete_method`).
+- Test: `iface_implicit_test.mko`.
+
 ### Package-per-directory · unbuffered rendezvous channels
 
 - **Package-per-directory:** all non-test `.mko` files in a package dir merge as

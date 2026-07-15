@@ -14,7 +14,7 @@ Last inventory: 2026-07-14 (**unique Mako surface** · pack/pull types · full m
 | **STATUS north-star** | **100%** |
 | **Mako identity (preferred syntax)** | **~100%** — [IDENTITY.md](IDENTITY.md) |
 | **Go/Rust pain coverage** | **~80%** strong rows — [PAIN_POINTS.md](PAIN_POINTS.md) |
-| **Dual-form coverage (optional sugar)** | **~92%** — [GO_SYNTAX_CHECKLIST.md](GO_SYNTAX_CHECKLIST.md) |
+| **Dual-form coverage (optional sugar)** | **~94%** — [GO_SYNTAX_CHECKLIST.md](GO_SYNTAX_CHECKLIST.md) |
 | **Standard library** | **~98%** of target areas Done (Wave 9; not every symbol) |
 
 ---
@@ -108,6 +108,7 @@ Last inventory: 2026-07-14 (**unique Mako surface** · pack/pull types · full m
 | Richer errors beyond stringly defaults | Done seed — `Result[T, Enum]` · wrap chain · `std/errors` |
 | Package-per-directory (multi-file pack) | Done — merge all units · same `pack` name · `pkg_per_dir_test` · `examples/pkg_per_dir` |
 | Unbuffered rendezvous channels | Done — `chan_new(0)` / `chan_open[T](0)` · `chan_rendezvous_test` |
+| Implicit interface method sets (Go-like) | Done — `on T { fn m }` / `T_m` implements I · `iface_implicit_test` |
 | SIP library (platform builtins + `std/sip`) | Done — RFC 3261/3581 Via/RR/NAT, Digest HA1, framing, SDP rewrite |
 | SIP zero-copy header/method views | Done — `sip_header_view` / `sip_method_eq` / `sip_header_eq` |
 | ShareInt capture (shared mut via RC handle) | Done seed — `share_capture_test` |

@@ -3251,7 +3251,7 @@ impl Codegen {
             let _ = writeln!(self.out, "}} {iface_c};");
             let _ = writeln!(self.out, "struct {vt_c} {{");
             for m in &methods {
-                // Prefer Iface_method; else any Iface_Concrete_method for signature.
+                // Prefer Iface_method; else Iface_Concrete_method; else Concrete_method (Go).
                 let mut key = format!("{iname}_{m}");
                 if !self.fn_params.contains_key(&key) {
                     let prefix = format!("{iname}_");
@@ -3267,6 +3267,20 @@ impl Codegen {
                         }
                     }
                 }
+                if !self.fn_params.contains_key(&key) {
+                    for (sname, sinfo) in &self.structs {
+                        let free = format!("{sname}_{m}");
+                        let free_c = format!("{}_{m}", sinfo.c_name);
+                        if self.fn_params.contains_key(&free) {
+                            key = free;
+                            break;
+                        }
+                        if self.fn_params.contains_key(&free_c) {
+                            key = free_c;
+                            break;
+                        }
+                    }
+                }
                 let ret = self
                     .fn_rets
                     .get(&key)
@@ -3274,7 +3288,10 @@ impl Codegen {
                     .unwrap_or_else(|| "int64_t".into());
                 let params = self.fn_params.get(&key).cloned().unwrap_or_default();
                 let arg_tys: Vec<String> =
-                    if !params.is_empty() && self.structs.values().any(|s| s.c_name == params[0]) {
+                    if !params.is_empty()
+                        && (self.structs.values().any(|s| s.c_name == params[0])
+                            || self.structs.contains_key(&params[0]))
+                    {
                         params[1..].to_vec()
                     } else {
                         params.clone()
@@ -3325,6 +3342,29 @@ impl Codegen {
                         has_no_self = true;
                     }
                 }
+                // Go-style method set: Struct_method (on Struct { fn m… } / free method).
+                for (sname, sinfo) in &self.structs {
+                    let free = format!("{sname}_{m}");
+                    let free_c = format!("{}_{m}", sinfo.c_name);
+                    let free_key = if self.fn_params.contains_key(&free) {
+                        Some(free)
+                    } else if self.fn_params.contains_key(&free_c) {
+                        Some(free_c)
+                    } else {
+                        None
+                    };
+                    if let Some(fk) = free_key {
+                        if let Some(params) = self.fn_params.get(&fk) {
+                            if let Some(p0) = params.first() {
+                                if p0 == &sinfo.c_name || p0 == sname {
+                                    if !concretes.iter().any(|c| c == &sinfo.c_name) {
+                                        concretes.push(sinfo.c_name.clone());
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
             let iface_c = format!("MakoIface_{iname}");
             let vt_c = format!("MakoIface_{iname}_VTable");
@@ -3332,8 +3372,50 @@ impl Codegen {
             for concrete in &concretes {
                 for m in &methods {
                     let keyed = format!("{iname}_{concrete}_{m}");
+                    let iface_m = format!("{iname}_{m}");
+                    // Source-name free method: map C concrete name back if needed.
+                    let free = format!("{concrete}_{m}");
+                    let free_src = self
+                        .structs
+                        .iter()
+                        .find(|(_, s)| &s.c_name == concrete)
+                        .map(|(n, _)| format!("{n}_{m}"));
                     let key = if self.fn_params.contains_key(&keyed) {
                         keyed
+                    } else if self.fn_params.contains_key(&iface_m) {
+                        // Prefer concrete-keyed Iface_method only when self matches;
+                        // else fall through to free method for multi-concrete.
+                        let params = self.fn_params.get(&iface_m).cloned().unwrap_or_default();
+                        if params.first().map(|p| p == concrete).unwrap_or(false)
+                            || params.is_empty()
+                            || params
+                                .first()
+                                .map(|p| {
+                                    !self.structs.values().any(|s| &s.c_name == p)
+                                        && !self.structs.contains_key(p)
+                                })
+                                .unwrap_or(true)
+                        {
+                            iface_m
+                        } else if self.fn_params.contains_key(&free) {
+                            free
+                        } else if let Some(ref fs) = free_src {
+                            if self.fn_params.contains_key(fs) {
+                                fs.clone()
+                            } else {
+                                iface_m
+                            }
+                        } else {
+                            iface_m
+                        }
+                    } else if self.fn_params.contains_key(&free) {
+                        free
+                    } else if let Some(ref fs) = free_src {
+                        if self.fn_params.contains_key(fs) {
+                            fs.clone()
+                        } else {
+                            format!("{iname}_{m}")
+                        }
                     } else {
                         format!("{iname}_{m}")
                     };
@@ -28280,7 +28362,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             return (ret, tmp);
                         }
                         // Interface method sugar: recv.method(args) → Iface_method([self,] args)
-                        // or Iface_Concrete_method when multi-concrete.
+                        // or Iface_Concrete_method when multi-concrete, or Concrete_method (Go).
                         let mut arg_vals = Vec::new();
                         for a in args {
                             let (_, v) = self.emit_expr(a);
@@ -28303,6 +28385,21 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                                     if self.fn_rets.contains_key(&alt) {
                                         resolved = Some(alt);
                                         break;
+                                    }
+                                    let free = format!("{cn}_{other}");
+                                    if self.fn_rets.contains_key(&free) {
+                                        resolved = Some(free);
+                                        break;
+                                    }
+                                    // Source name if rty is C name
+                                    if let Some((sname, _)) =
+                                        self.structs.iter().find(|(_, s)| s.c_name == *cn)
+                                    {
+                                        let free_s = format!("{sname}_{other}");
+                                        if self.fn_rets.contains_key(&free_s) {
+                                            resolved = Some(free_s);
+                                            break;
+                                        }
                                     }
                                 }
                                 let key = format!("{iname}_{other}");
