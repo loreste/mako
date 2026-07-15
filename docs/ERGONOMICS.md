@@ -504,19 +504,25 @@ Tests: `first_class_fn_test`, `capturing_closure_test`, `struct_capture_test`,
 let s = f"frontend={fe.name} bind={host}:{port}"
 // escapes: {{ and }} → literal braces
 
-// Format specs (seed)
+// Format specs (printf-ish seed)
 f"{n:02}"      // zero-pad: 07
+f"{n:+}"       // always sign: +7
+f"{n: }"       // space for positive: " 7"
+f"{n:#x}"      // 0xff
+f"{n:#X}"      // 0XFF
+f"{n:#o}"      // leading 0
+f"{n:#b}"      // 0b…
+f"{n:-4}"      // left-align
 f"{n:04x}"     // hex with width
-f"{n:X}"       // uppercase hex
-f"{n:b}"       // binary
-f"{x:.2f}"     // float precision
+f"{x:+.1f}"    // float flags + precision
+f"{x:.0e}"     // scientific
 f"{s:4}"       // right-align width
-f"{s:<4}"      // left-align width
+f"{s:<4}" / f"{s:-5}"  // left-align
 ```
 
 Holes accept expressions; ints/bools stringify; strings concat.
-Specs cover pad/hex/oct/bin/float precision/string width. Prefer
-`fmt_sprintf*` for full printf verbs or complex expressions with colons.
+Flags: `-` `+` ` ` `#` `0` · types: `d` `x` `X` `o` `b` · float `f`/`e`/`g`.
+Prefer `fmt_sprintf*` for remaining exotic printf cases.
 
 ### Struct field defaults
 

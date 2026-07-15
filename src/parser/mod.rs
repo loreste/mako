@@ -3033,7 +3033,10 @@ fn split_fstring_hole(hole: &str) -> (&str, Option<String>) {
             b'}' => depth -= 1,
             b':' if depth == 0 => {
                 let expr = hole[..i].trim();
-                let spec = hole[i + 1..].trim();
+                // Keep spaces (the ' ' sign flag). Only strip CR/LF/TAB from the right.
+                let raw = &hole[i + 1..];
+                let spec =
+                    raw.trim_end_matches(|c: char| c == '\n' || c == '\r' || c == '\t');
                 if !spec.is_empty() {
                     return (expr, Some(spec.to_string()));
                 }
