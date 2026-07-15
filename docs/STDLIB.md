@@ -47,7 +47,7 @@ Tests: `examples/testing/stdlib_*`, plus area tests (`base64_test`, `regex_*`,
 | `os` / `env` / `args` / `os/exec` / `os/signal` | **Done** | env/args/exec; signal Unix |
 | `flag` | **Done** | CLI flags |
 | `net` / `http` / `net/url` / `net/mail` / `net/smtp` | **Done** | MIME builder + SMTP session / STARTTLS / AUTH |
-| `encoding/*` + `gob` / `binary` / `yaml` / `toml` | **Done** | LE+BE; gob; YAML/TOML config subset |
+| `encoding/*` + `gob` / `binary` / `yaml` / `toml` / `cbor` / `msgpack` | **Done** | LE+BE; gob; YAML/TOML; CBOR/MP subset |
 | `compress/gzip` · `archive/tar` · `archive/zip` | **Done** | multi-file zip + deflate |
 | `mime` / `multipart` · `context` · `crypto` | **Done** | |
 | `math` / `rand` · `text/template` / `html/template` | **Done** | Go-style engine: if/range/with/define + HTML escape |
@@ -668,7 +668,8 @@ import "encoding/base64"
 | `json_*` (object/array/path/merge/…) | encode/decode into arenas |
 | `#[derive(json)]` | compile-time struct marshal/unmarshal codegen for scalar fields |
 | `yaml_*` / `toml_*` get+encode | `encoding/yaml` · `encoding/toml` (flat + section) |
-| `msgpack_int_hex` / `cbor_int_hex` / `avro_long_hex` | binary format integer encoding seeds |
+| `msgpack_*` / `cbor_*` encode·decode + hex | `encoding/msgpack` · `encoding/cbor` (int/bool/str/array) |
+| `list_take/drop/zip/map_*/filter_*/fold_*` | collections combinators (int) |
 | `base64_encode` / `base64_decode` | base64 |
 | `hex_encode` / `hex_decode` | hex |
 
@@ -1590,7 +1591,7 @@ Pull: `pull "uuid"` → `std/uuid/uuid.mko` re-exports. Prefer builtins on the h
 | `database/sql` one API | Done (`sql_*`; string params, last_insert/rows, multi-row cursor + bulk col; MySQL query still seed) |
 | Full `regexp` engine | RE2-ish (`\d\w\s`, `{n,m}`, `\b`, find_all/replace); not full RE2/PCRE |
 | `sync.WaitGroup` / RWMutex / atomic | Done |
-| Generics collections | slices + maps + `List[T]` + set/heap/ring/stats Done; fully polymorphic map/filter Later |
+| Generics collections | slices + maps + `List[T]` + set/heap/ring + take/drop/zip/map_add/filter/fold Done; full callback map/filter Later |
 | zip multi-file · png/gif/jpeg · reflect · httptest · gob/mail/smtp/slog/binary | Done (area-level; not every symbol) |
 | Full stdlib symbol parity | **Not claimed** (~98% major *areas*; not every symbol) |
 

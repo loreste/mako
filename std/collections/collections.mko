@@ -31,6 +31,21 @@ fn list_eq(a: []int, b: []int) -> int { return list_eq_int(a, b) }
 fn list_fill(n: int, v: int) -> []int { return list_fill_int(n, v) }
 fn list_range(start: int, end: int) -> []int { return list_range_int(start, end) }
 fn list_bsearch(a: []int, v: int) -> int { return list_binary_search_int(a, v) }
+// Combinators (int mono-style; no callbacks)
+fn take(a: []int, n: int) -> []int { return list_take_int(a, n) }
+fn drop(a: []int, n: int) -> []int { return list_drop_int(a, n) }
+fn zip(a: []int, b: []int) -> []int { return list_zip_int(a, b) }
+fn find(a: []int, v: int) -> int { return list_find_int(a, v) }
+fn count(a: []int, v: int) -> int { return list_count_int(a, v) }
+fn any_eq(a: []int, v: int) -> int { return list_any_eq_int(a, v) }
+fn all_eq(a: []int, v: int) -> int { return list_all_eq_int(a, v) }
+fn take_while_lt(a: []int, thr: int) -> []int { return list_take_while_lt_int(a, thr) }
+fn map_add(a: []int, delta: int) -> []int { return list_map_add_int(a, delta) }
+fn map_mul(a: []int, k: int) -> []int { return list_map_mul_int(a, k) }
+fn filter_lt(a: []int, thr: int) -> []int { return list_filter_lt_int(a, thr) }
+fn filter_gt(a: []int, thr: int) -> []int { return list_filter_gt_int(a, thr) }
+fn fold_add(a: []int, init: int) -> int { return list_fold_add_int(a, init) }
+fn fold_mul(a: []int, init: int) -> int { return list_fold_mul_int(a, init) }
 
 // List[string]
 fn list_new_s() -> []string { return list_new_str() }

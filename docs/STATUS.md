@@ -112,6 +112,8 @@ const-fn depth (match/while/for/strings) · suite **165+** · [The Mako Book](bo
 | Full syscall package | Done — portable OS primitives · `std/syscall` · `syscall_full_test` |
 | YAML + TOML encoding packages | Done — flat/section config · `std/encoding/{yaml,toml}` · `yaml_toml_test` |
 | Product version 0.1.6 | Done — tree-wide version sync |
+| CBOR + MessagePack binary | Done — encode/decode subset · `std/encoding/{cbor,msgpack}` · `cbor_msgpack_test` |
+| List combinators (map/filter/fold style) | Done — int mono helpers · `cbor_msgpack_test` |
 | Installer UX (manifest + doctor + Windows) | Done seed — `install-manifest.json` · doctor fields · `install.ps1` |
 | Actor spawn_cap + interface `on T : I` sugar | Done seed — `actor_test` · `iface_on_iface_test` |
 | Error chain peel + tag helpers | Done seed — `error_unwrap` / `root` / `as_tag` / `has_tag` · `error_chain_test` |

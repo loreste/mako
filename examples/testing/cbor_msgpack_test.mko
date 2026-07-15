@@ -1,0 +1,88 @@
+// CBOR + MessagePack binary encode/decode (subset).
+
+fn TestMsgpackIntRoundtrip() {
+    let cases = [0, 1, 127, 128, 255, 256, 65535, -1, -32, -33, -128, 1000, -1000]
+    let mut i = 0
+    while i < len(cases) {
+        let v = cases[i]
+        let bin = msgpack_encode_int(v)
+        assert_eq(msgpack_decode_int(bin), v)
+        i = i + 1
+    }
+    assert_eq(msgpack_is_nil(msgpack_encode_nil()), 1)
+    assert_eq(msgpack_decode_bool(msgpack_encode_bool(1)), 1)
+    assert_eq(msgpack_decode_bool(msgpack_encode_bool(0)), 0)
+}
+
+fn TestMsgpackStringAndArray() {
+    let s = msgpack_encode_string("hello")
+    assert_eq_str(msgpack_decode_string(s), "hello")
+    let a = msgpack_encode_array_int([1, 2, 3, -4])
+    let d = msgpack_decode_array_int(a)
+    assert_eq(len(d), 4)
+    assert_eq(d[0], 1)
+    assert_eq(d[3], -4)
+    let hex = bytes_to_hex(msgpack_encode_int(7))
+    assert(len(hex) >= 2)
+    assert_eq(msgpack_decode_int(hex_to_bytes(hex)), 7)
+}
+
+fn TestCborIntRoundtrip() {
+    let cases = [0, 23, 24, 255, 256, -1, -25, 100000, -999]
+    let mut i = 0
+    while i < len(cases) {
+        let v = cases[i]
+        let bin = cbor_encode_int(v)
+        assert_eq(cbor_decode_int(bin), v)
+        i = i + 1
+    }
+    // major type for positive small
+    assert_eq(cbor_type(cbor_encode_int(5)), 0)
+    assert_eq(cbor_type(cbor_encode_int(-3)), 1)
+    assert_eq(cbor_is_null(cbor_encode_null()), 1)
+    assert_eq(cbor_decode_bool(cbor_encode_bool(1)), 1)
+}
+
+fn TestCborStringAndArray() {
+    let s = cbor_encode_string("mako")
+    assert_eq_str(cbor_decode_string(s), "mako")
+    assert_eq(cbor_type(s), 3) // text
+    let a = cbor_encode_array_int([10, 20, -5])
+    assert_eq(cbor_type(a), 4)
+    let d = cbor_decode_array_int(a)
+    assert_eq(len(d), 3)
+    assert_eq(d[0], 10)
+    assert_eq(d[2], -5)
+}
+
+fn TestListCombinators() {
+    let a = [1, 2, 3, 4, 5]
+    let t = list_take_int(a, 3)
+    assert_eq(len(t), 3)
+    assert_eq(t[2], 3)
+    let dr = list_drop_int(a, 2)
+    assert_eq(len(dr), 3)
+    assert_eq(dr[0], 3)
+    let z = list_zip_int([1, 2], [10, 20, 30])
+    assert_eq(len(z), 4)
+    assert_eq(z[0], 1)
+    assert_eq(z[1], 10)
+    assert_eq(list_find_int(a, 4), 3)
+    assert_eq(list_count_int([1, 2, 1, 1], 1), 3)
+    assert_eq(list_any_eq_int(a, 5), 1)
+    assert_eq(list_all_eq_int([7, 7, 7], 7), 1)
+    assert_eq(list_all_eq_int(a, 1), 0)
+    let tw = list_take_while_lt_int(a, 4)
+    assert_eq(len(tw), 3)
+    let m = list_map_add_int([1, 2], 10)
+    assert_eq(m[0], 11)
+    assert_eq(m[1], 12)
+    let mu = list_map_mul_int([2, 3], 4)
+    assert_eq(mu[0], 8)
+    let fl = list_filter_lt_int(a, 3)
+    assert_eq(len(fl), 2)
+    let fg = list_filter_gt_int(a, 3)
+    assert_eq(len(fg), 2)
+    assert_eq(list_fold_add_int([1, 2, 3], 0), 6)
+    assert_eq(list_fold_mul_int([2, 3, 4], 1), 24)
+}

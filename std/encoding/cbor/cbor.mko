@@ -1,0 +1,15 @@
+// std/encoding/cbor — CBOR subset (int/bool/null/text/array[int])
+fn encode_int(v: int) -> string { return cbor_encode_int(v) }
+fn encode_bool(v: int) -> string { return cbor_encode_bool(v) }
+fn encode_null() -> string { return cbor_encode_null() }
+fn encode_string(s: string) -> string { return cbor_encode_string(s) }
+fn encode_array_int(a: []int) -> string { return cbor_encode_array_int(a) }
+fn type_of(bin: string) -> int { return cbor_type(bin) }
+fn decode_int(bin: string) -> int { return cbor_decode_int(bin) }
+fn decode_bool(bin: string) -> int { return cbor_decode_bool(bin) }
+fn is_null(bin: string) -> int { return cbor_is_null(bin) }
+fn decode_string(bin: string) -> string { return cbor_decode_string(bin) }
+fn decode_array_int(bin: string) -> []int { return cbor_decode_array_int(bin) }
+fn int_hex(v: int) -> string { return cbor_int_hex(v) }
+fn to_hex(bin: string) -> string { return bytes_to_hex(bin) }
+fn from_hex(hex: string) -> string { return hex_to_bytes(hex) }
