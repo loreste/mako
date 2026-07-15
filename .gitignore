@@ -59,3 +59,4 @@ runtime/third_party/quiche/bin/
 .DS_Store
 
 # Lock files (mako.lock is committed intentionally; Cargo.lock too)
+fsig
