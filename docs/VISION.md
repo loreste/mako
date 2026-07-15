@@ -213,7 +213,7 @@ extensions before third-party frameworks become mandatory.
 | Format | Status |
 |--------|--------|
 | JSON (manual / echo) | Seed |
-| XML / YAML / TOML / CSV | Partial / Later |
+| XML / YAML / TOML / CSV | Now (YAML/TOML config subset + CSV/XML; full YAML 1.2 / TOML 1.0 Later) |
 | Binary / CBOR / MessagePack / Protobuf / Avro | Later |
 | `derive(JSON)` / `derive(SQL)` compile-time | Later — no runtime reflect tax |
 
