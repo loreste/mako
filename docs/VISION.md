@@ -147,8 +147,9 @@ gateway, or job worker should all feel like obvious Mako programs.
 
 No mandatory GC. See [SECURITY.md](SECURITY.md).
 
-**Zero-copy (Next/Later):** slices, views, borrowed buffers, pools — avoid
-surprise allocs on the hot path.
+**Zero-copy:** string region ops (`str_slice_*` / `str_at_eq` / `str_byte_at`) are
+**Now** — compare/search `s[off:off+len]` without substring alloc. Packet/file
+views, borrowed buffers, and pools continue under Next/Later.
 
 ---
 

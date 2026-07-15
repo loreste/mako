@@ -2,13 +2,13 @@
 
 ## Unreleased
 
-### Language zero-copy string regions
+### Core string region ops (no substring alloc)
 
 - Builtins: `str_slice_eq` / `str_slice_ci_eq` / `str_slice_contains` /
   `str_slice_index` / `str_at_eq` / `str_byte_at` — operate on `s[off:off+len]`
   without allocating a substring.
-- Use for protocol scanners, header matching, and any hot path that would
-  otherwise call `s[i:j]` only to compare or search.
+- General-purpose: parsers, CSV/path/config scanners, text search, any hot path
+  that would otherwise allocate `s[i:j]` only to compare or search.
 - Tests: `examples/testing/str_slice_zc_test.mko`.
 
 ### Zero-copy SIP views (hot path)

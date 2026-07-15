@@ -202,7 +202,7 @@ Percentages are weighted; update when a task flips.
 - [x] Release safety profile: `[profile.release] bounds_checks = "on"`.
 - [x] Memory pools and reusable buffers.
 - [x] Borrowed string/byte views and zero-copy packet/file APIs.
-- [x] Language zero-copy string regions (`str_slice_eq` / `str_slice_index` / `str_at_eq` / `str_byte_at`).
+- [x] Core string region ops without substring alloc (`str_slice_eq` / `str_slice_index` / `str_at_eq` / `str_byte_at`).
 - [x] Optional GC for app workloads only (`[package] gc = true`; systems forbids).
 - [x] Tracing GC seed on `gc_alloc` heap.
 - [x] Leak detector and allocation reporting.
@@ -298,7 +298,6 @@ Percentages are weighted; update when a task flips.
 - [x] GPU AI seed (OpenCL path) · local model store · GGUF F32/F16 · MHA · Q4_0/Q8_0 · BPE seed.
 - [x] **SIP proxy library** (builtins + `std/sip`): parse/build, Via/RR/rport, Digest HA1, framing; RTP/SRTP helpers; **SIPREC/WebRTC out of scope**.
 - [x] Zero-copy SIP hot path (`sip_header_view` / `sip_method_eq` / `sip_header_eq` / `sip_view_*`).
-- [x] Language-level region scanners for custom parsers (`str_slice_*` — same model as SIP views).
 - [x] Graphics/audio/physics soft seeds (`gfx_*`, `audio_mix`, `physics_step_*`).
 - [x] Multiplayer snapshot + rollback ring seeds (`snap_*`, `rollback_*`).
 - [x] Storage page/WAL/hindex/store + btree/LSM/MVCC seeds.

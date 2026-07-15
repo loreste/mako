@@ -1,4 +1,4 @@
-// Language zero-copy string region ops (no substring allocation).
+// Core string region ops — no substring allocation (general-purpose language).
 
 fn TestStrSliceEq() {
     let s = "Hello, World"
@@ -13,14 +13,14 @@ fn TestStrSliceEq() {
 }
 
 fn TestStrSliceContainsIndex() {
-    let s = "INVITE sip:user@host SIP/2.0"
-    assert_eq(str_slice_contains(s, 0, len(s), "sip:"), 1)
-    assert_eq(str_slice_contains(s, 0, 6, "sip:"), 0) // only "INVITE"
-    assert_eq(str_slice_index(s, 0, len(s), "sip:"), 7)
-    assert_eq(str_slice_index(s, 0, 6, "sip:"), -1)
-    assert_eq(str_at_eq(s, 0, "INVITE"), 1)
-    assert_eq(str_at_eq(s, 7, "sip:"), 1)
-    assert_eq(str_at_eq(s, 7, "SIP:"), 0)
+    let s = "user=alice;role=admin;id=42"
+    assert_eq(str_slice_contains(s, 0, len(s), "role="), 1)
+    assert_eq(str_slice_contains(s, 0, 10, "role="), 0) // only "user=alice"
+    assert_eq(str_slice_index(s, 0, len(s), "role="), 11)
+    assert_eq(str_slice_index(s, 0, 10, "role="), -1)
+    assert_eq(str_at_eq(s, 0, "user="), 1)
+    assert_eq(str_at_eq(s, 5, "alice"), 1)
+    assert_eq(str_at_eq(s, 5, "ALICE"), 0)
 }
 
 fn TestStrByteAt() {
@@ -31,12 +31,28 @@ fn TestStrByteAt() {
     assert_eq(str_byte_at(s, -1), -1)
 }
 
-fn TestStrSliceProtocolScan() {
-    // Typical line-oriented protocol: find CRLF without substr alloc
-    let msg = "METHOD /path\r\nHost: x\r\n\r\n"
+fn TestStrSliceCsvAndPath() {
+    // CSV field without allocating substrings
+    let row = "id,name,score"
+    assert_eq(str_slice_eq(row, 0, 2, "id"), 1)
+    assert_eq(str_slice_index(row, 0, len(row), ","), 2)
+    let name_off = str_slice_index(row, 3, len(row) - 3, ",")
+    assert_eq(name_off, 7)
+    assert_eq(str_slice_eq(row, 3, 4, "name"), 1)
+
+    // Path prefix / extension checks
+    let path = "/var/log/app.log"
+    assert_eq(str_at_eq(path, 0, "/var/"), 1)
+    assert_eq(str_slice_eq(path, len(path) - 4, 4, ".log"), 1)
+    assert_eq(str_byte_at(path, 0), 47) // '/'
+}
+
+fn TestStrSliceLineScan() {
+    // Line-oriented text without substr alloc
+    let msg = "GET /health\r\nHost: api\r\n\r\n"
     let crlf = str_slice_index(msg, 0, len(msg), "\r\n")
     assert(crlf > 0)
-    assert_eq(str_slice_eq(msg, 0, crlf, "METHOD /path"), 1)
+    assert_eq(str_slice_eq(msg, 0, crlf, "GET /health"), 1)
     let host_key = str_slice_index(msg, crlf + 2, len(msg) - (crlf + 2), "Host:")
     assert(host_key >= 0)
 }

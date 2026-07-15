@@ -63,11 +63,11 @@ Packs: `std/fmt`, `std/print`. Tests: `fmt_print_test.mko`. Demo: `examples/fmt_
 | `str_has_suffix` | `str_has_suffix(s: string, suffix: string) -> bool` | Check if string ends with suffix |
 | `str_index` | `str_index(s: string, substr: string) -> int` | Return index of first occurrence of substr, or -1 |
 | `str_last_index` | `str_last_index(s: string, substr: string) -> int` | Return index of last occurrence of substr, or -1 |
-| `str_slice_eq` | `str_slice_eq(s: string, off: int, len: int, other: string) -> int` | Zero-copy: compare `s[off:off+len]` to `other` (1/0; OOB → 0) |
-| `str_slice_ci_eq` | `str_slice_ci_eq(s, off, len, other) -> int` | Zero-copy case-insensitive region equality |
-| `str_slice_contains` | `str_slice_contains(s, off, len, needle) -> int` | Zero-copy: needle inside `s[off:off+len]` |
+| `str_slice_eq` | `str_slice_eq(s: string, off: int, len: int, other: string) -> int` | Compare `s[off:off+len]` to `other` without allocating (1/0; OOB → 0) |
+| `str_slice_ci_eq` | `str_slice_ci_eq(s, off, len, other) -> int` | Case-insensitive region equality (no alloc) |
+| `str_slice_contains` | `str_slice_contains(s, off, len, needle) -> int` | Needle inside `s[off:off+len]` (no alloc) |
 | `str_slice_index` | `str_slice_index(s, off, len, needle) -> int` | First absolute index of needle in region, or −1 |
-| `str_at_eq` | `str_at_eq(s: string, off: int, other: string) -> int` | Zero-copy: `s[off..]` prefix equals `other` |
+| `str_at_eq` | `str_at_eq(s: string, off: int, other: string) -> int` | `s[off..]` prefix equals `other` (no alloc) |
 | `str_byte_at` | `str_byte_at(s: string, i: int) -> int` | Byte at index (0–255), or −1 if OOB |
 | `str_trim` | `str_trim(s: string, cutset: string) -> string` | Trim characters in cutset from both ends |
 | `str_trim_space` | `str_trim_space(s: string) -> string` | Trim whitespace from both ends |

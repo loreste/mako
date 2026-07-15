@@ -87,6 +87,19 @@ Bitwise: `&` `|` `^` `&^` `<<` `>>`, unary `^`.
 `==` / `!=` work on strings (by content), named structs (field-wise), and
 enums (tag + payload).
 
+## Strings
+
+Byte strings with length. Prefer region ops when you only need to compare or
+search a span — no substring allocation:
+
+| Builtin | Role |
+|---------|------|
+| `str_eq` / `str_contains` / `str_index` | whole-string |
+| `str_slice_eq` / `str_slice_ci_eq` / `str_slice_contains` / `str_slice_index` | `s[off:off+len]` without alloc |
+| `str_at_eq` / `str_byte_at` | prefix-at-offset · single byte |
+
+See [BUILTINS.md](BUILTINS.md) § Strings and `examples/testing/str_slice_zc_test.mko`.
+
 ## Collections (maps & slices)
 
 One monomorphized surface — no special collection package for everyday work.

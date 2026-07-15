@@ -482,7 +482,7 @@ impl TypeChecker {
             "str_has_suffix".into(),
             Type::Fn(vec![Type::String, Type::String], Box::new(Type::Bool)),
         );
-        // Zero-copy region ops (no substring alloc)
+        // String region ops (no substring alloc)
         fns.insert(
             "str_slice_eq".into(),
             Type::Fn(

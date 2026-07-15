@@ -194,6 +194,22 @@ let _ = chan_str_send_take(ch, owned_msg)
 let ok = chan_str_try_send_take(ch, owned_msg)
 ```
 
+### String regions (no substring alloc)
+
+Prefer region builtins over allocating `s[i:j]` when you only need to compare or
+search:
+
+```mko
+// Good: no temporary string
+if str_slice_eq(line, 0, 3, "GET") == 1 { ... }
+let comma = str_slice_index(row, 0, len(row), ",")
+if str_at_eq(path, 0, "/api/") == 1 { ... }
+let b = str_byte_at(s, i)   // 0..255 or -1
+```
+
+Same idea as `str_eq` / `str_contains`, scoped to a byte range. Applies to CSV,
+paths, config lines, log parsing, wire formats — any general text work.
+
 ### HTTP zero-copy + interning
 
 `http_fill_conn` / `http_parse_request` store method, path, body, Host, User-Agent,

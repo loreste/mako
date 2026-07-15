@@ -11,8 +11,7 @@
  *
  * Pack: std/sip (thin re-exports; prefer pack names to avoid app sip_ name shadowing).
  * Hot path: call builtins directly; strings from sip_header are owned (malloc).
- * Prefer sip_header_eq / sip_method_eq (zero-copy) or language str_slice_* for
- * custom scanners that avoid substring allocation. */
+ * Prefer sip_header_eq / sip_method_eq for SIP field compares without malloc. */
 #ifndef MAKO_SIP_H
 #define MAKO_SIP_H
 

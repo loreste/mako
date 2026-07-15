@@ -267,7 +267,7 @@ import "strings"
 | `str_len` / `str_eq` / `str_contains` | length, equality, substring |
 | `str_has_prefix` / `str_has_suffix` | prefix/suffix |
 | `str_index` / `str_last_index` | find (−1 if missing) |
-| `str_slice_eq` / `str_slice_ci_eq` / `str_slice_contains` / `str_slice_index` | zero-copy region ops (no substring alloc) |
+| `str_slice_eq` / `str_slice_ci_eq` / `str_slice_contains` / `str_slice_index` | region ops without substring alloc |
 | `str_at_eq` / `str_byte_at` | prefix-at-offset compare · byte load |
 | `str_trim` / `str_trim_space` / `str_trim_left` / `str_trim_right` | trim |
 | `str_to_lower` / `str_to_upper` / `str_repeat` | case / repeat |
@@ -293,11 +293,14 @@ fn main() {
     print_int(str_has_prefix("/api/users", "/api"))   // 1
     print_int(str_index("abcdef", "cd"))              // 2
 
-    // Zero-copy region ops (no substring allocation)
-    let line = "METHOD /path HTTP/1.1"
-    print_int(str_slice_eq(line, 0, 6, "METHOD"))    // 1
-    print_int(str_slice_index(line, 0, len(line), " /")) // 6
-    print_int(str_byte_at(line, 0))                  // 77 ('M')
+    // Region ops without allocating a substring
+    let row = "id,name,score"
+    print_int(str_slice_eq(row, 0, 2, "id"))         // 1
+    print_int(str_slice_index(row, 0, len(row), ",")) // 2
+    print_int(str_byte_at(row, 0))                   // 105 ('i')
+    let path = "/var/log/app.log"
+    print_int(str_at_eq(path, 0, "/var/"))           // 1
+    print_int(str_slice_eq(path, len(path) - 4, 4, ".log")) // 1
 
     // Trim and case
     let trimmed = str_trim_space("  hello  ")

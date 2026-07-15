@@ -1509,9 +1509,10 @@ static inline bool mako_str_contains(MakoString hay, MakoString needle) {
     return false;
 }
 
-/* ---- Zero-copy string regions (language hot path; no malloc) ----
+/* ---- String regions (core language; no malloc) ----
  * Compare/search within s[off .. off+len) without allocating a substring.
- * Bounds-safe: out-of-range returns false / -1.
+ * Bounds-safe: out-of-range returns 0 / -1. Use for any text scan that
+ * would otherwise allocate s[i:j] only to compare or search.
  */
 
 static inline int mako_str_ci_eq_bytes(const char *a, size_t al, const char *b, size_t bl) {
