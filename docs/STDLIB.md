@@ -51,11 +51,13 @@ Tests: `examples/testing/stdlib_*`, plus area tests (`base64_test`, `regex_*`,
 | `compress/gzip` · `archive/tar` · `archive/zip` | **Done** | multi-file zip + deflate |
 | `mime` / `multipart` · `context` · `crypto` | **Done** | |
 | `math` / `rand` · `text/template` / `html/template` | **Done** | Go-style engine: if/range/with/define + HTML escape |
-| `html` · `utf8` · `sync` / `atomic` · `slices` / `maps` | **Done** | |
+| `html` · `utf8` · `unicode` · `sync` / `atomic` · `slices` / `maps` | **Done** | UCD seed + full utf8 encode/decode |
 | `errors` / `testing` / `httptest` / `regexp` / `log` / `slog` / `sql` | **Done** | RE2-ish + `\x` `(?:)` `\p{...}` scripts/categories + lookahead |
 | `image/png` / `gif` / `jpeg` | **Done** | LZW dict; DCT + Huffman block; JFIF shell + APP7 Mako payload |
 | `reflect` | **Done** | POD value bag (N fields + nested POD flatten) + clone/equal; map fields rejected |
-| `plugin` / `syscall` | skip | VISION |
+| `plugin` | **Done seed** | rich host package (`std/plugin`) over `mako_plugin.h` ABI |
+| `syscall` | skip | VISION |
+| `collections` | **Done** | List[T]=[]T + list/stack/queue int·str · reverse/unique |
 | `embed` | **Done** | helper (not compile-time) |
 
 Runtime: `mako_rt.h` + `mako_goext.h` (Waves 1–9). Tests: `goext_wave{,3,4,5,6,7,8,9}_test.mko`.
@@ -138,7 +140,10 @@ High-level HTTP server with declarative routing:
 | `lookup_host` / `parse_ip_ok` / `dns_*` | net / DNS and address helpers |
 | `signal_notify` / `signal_received` | os/signal |
 | `atomic_*` | sync/atomic |
-| `utf8_valid` / `utf8_rune_len` | unicode/utf8 |
+| `utf8_valid` / `utf8_rune_len` / encode·decode / constants | unicode/utf8 |
+| `unicode_is_*` / `unicode_to_*` / `unicode_is(prop,r)` | unicode (UCD seed) |
+| `list_*` / `stack_peek_*` / `queue_pop_*` / `slices_*_strs` | collections / List[T] |
+| `plugin_open` / `call` / `close` / info·error·slots / hot-reload | plugin |
 | `filepath_walk` / `filepath_walk_n` | path/filepath |
 | `slices_reverse` / `slices_unique` | slices |
 | `embed_file` | embed helper |
@@ -1055,7 +1060,7 @@ fn main() {
 | regexp | `regex_match` / `regex_find` / `regex_capture` |
 | log | Strong slog: `slog_set_level` / `set_json` / `set_service` / `set_output` / `with*` / `log_*` aliases |
 | math | `abs` / `min` / `max` / `clamp`, `math_sqrt` / `pow` / `floor` / `ceil` / `sin` / `cos` / `log` / `exp` / `math_abs` |
-| collections | `sort_ints` / `sort_strings`, `ints_contains` / `strings_contains`, `ints_copy` / `ints_index` |
+| collections | `sort_*`, contains/index/copy, `list_*` push/pop/insert/remove, stack/queue, `slices_reverse(_strs)` / `slices_unique(_strs)` |
 
 ### Strong logging
 
@@ -1578,7 +1583,7 @@ Pull: `pull "uuid"` → `std/uuid/uuid.mko` re-exports. Prefer builtins on the h
 | `database/sql` one API | Done (`sql_*`; string params, last_insert/rows, multi-row cursor + bulk col; MySQL query still seed) |
 | Full `regexp` engine | RE2-ish (`\d\w\s`, `{n,m}`, `\b`, find_all/replace); not full RE2/PCRE |
 | `sync.WaitGroup` / RWMutex / atomic | Done |
-| Generics collections | slices + maps helpers Done; `List<T>` Later |
+| Generics collections | slices + maps + `List[T]`/`List<T>` (=`[]T`) + list/stack/queue Done seed; full generic mono helpers Later |
 | zip multi-file · png/gif/jpeg · reflect · httptest · gob/mail/smtp/slog/binary | Done (area-level; not every symbol) |
 | Full stdlib symbol parity | **Not claimed** (~98% major *areas*; not every symbol) |
 

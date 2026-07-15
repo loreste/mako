@@ -1,0 +1,34 @@
+// std/plugin — rich host package over mako_plugin.h ABI + hot-reload.
+// Open a native dylib that exports mako_plugin_entry (see mako deploy plugin).
+
+fn open(path: string) -> int { return plugin_open(path) }
+fn call(handle: int, op: string, payload: string) -> string {
+    return plugin_call(handle, op, payload)
+}
+fn close(handle: int) -> int { return plugin_close(handle) }
+fn close_all() -> int { return plugin_close_all() }
+fn alive(handle: int) -> int { return plugin_alive(handle) }
+fn path(handle: int) -> string { return plugin_path(handle) }
+fn name(handle: int) -> string { return plugin_name(handle) }
+fn version(handle: int) -> string { return plugin_version(handle) }
+fn kind(handle: int) -> string { return plugin_kind(handle) }
+fn plugin_abi(handle: int) -> int { return plugin_plugin_abi(handle) }
+fn count() -> int { return plugin_count() }
+fn max_slots() -> int { return plugin_max_slots() }
+fn abi_version() -> int { return plugin_abi_version() }
+fn api_version() -> string { return plugin_api_version() }
+fn last_error() -> int { return plugin_last_error() }
+fn last_error_str() -> string { return plugin_last_error_str() }
+fn call_ok(handle: int) -> int { return plugin_call_ok(handle) }
+fn probe(path: string) -> int { return dlopen_probe(path) }
+fn ffi_abi() -> string { return ffi_abi_name() }
+
+// Hot-reload: watch path, poll mtime, call, close.
+fn watch(path: string) -> int { return hot_reload_plugin_watch(path) }
+fn poll() -> int { return hot_reload_plugin_poll() }
+fn hot_call(op: string, payload: string) -> string {
+    return hot_reload_plugin_call(op, payload)
+}
+fn hot_handle() -> int { return hot_reload_plugin_handle() }
+fn hot_swaps() -> int { return hot_reload_plugin_swaps() }
+fn hot_close() -> int { return hot_reload_plugin_close() }

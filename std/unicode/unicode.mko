@@ -1,0 +1,19 @@
+// std/unicode — UCD property + case seed (range tables; not full UCD dump).
+// Scripts/categories also available via regexp \p{Name} and unicode_is.
+fn is_letter(r: int) -> int { return unicode_is_letter(r) }
+fn is_digit(r: int) -> int { return unicode_is_digit(r) }
+fn is_space(r: int) -> int { return unicode_is_space(r) }
+fn is_punct(r: int) -> int { return unicode_is_punct(r) }
+fn is_symbol(r: int) -> int { return unicode_is_symbol(r) }
+fn is_control(r: int) -> int { return unicode_is_control(r) }
+fn is_print(r: int) -> int { return unicode_is_print(r) }
+fn is_graphic(r: int) -> int { return unicode_is_graphic(r) }
+fn is_upper(r: int) -> int { return unicode_is_upper(r) }
+fn is_lower(r: int) -> int { return unicode_is_lower(r) }
+fn is_title(r: int) -> int { return unicode_is_title(r) }
+fn to_lower(r: int) -> int { return unicode_to_lower(r) }
+fn to_upper(r: int) -> int { return unicode_to_upper(r) }
+fn to_title(r: int) -> int { return unicode_to_title(r) }
+fn simple_fold(r: int) -> int { return unicode_simple_fold(r) }
+// Property/script name match (same tables as regexp \p{…}).
+fn is(prop: string, r: int) -> int { return unicode_is(prop, r) }

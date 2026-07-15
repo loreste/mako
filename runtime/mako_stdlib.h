@@ -597,6 +597,187 @@ static inline int64_t mako_ints_index(MakoIntArray a, int64_t v) {
     return -1;
 }
 
+/* ---- List[T] / richer collections (int + string specializations; List aliases []T) ---- */
+static inline MakoIntArray mako_list_new_int(void) {
+    return mako_int_array_make(0, 8);
+}
+static inline MakoStrArray mako_list_new_str(void) {
+    return mako_str_array_make(0, 8);
+}
+static inline MakoIntArray mako_list_push_int(MakoIntArray a, int64_t v) {
+    return mako_slice_append(a, v);
+}
+static inline MakoStrArray mako_list_push_str(MakoStrArray a, MakoString v) {
+    return mako_str_array_append(a, v);
+}
+/* Pop last: drop_last returns shortened list; last_* peeks without remove. */
+static int64_t mako_list_popped_int_tls = 0;
+static MakoString mako_list_popped_str_tls;
+static inline MakoIntArray mako_list_pop_int(MakoIntArray a) {
+    if (a.len == 0) {
+        mako_list_popped_int_tls = 0;
+        return a;
+    }
+    mako_list_popped_int_tls = a.data[a.len - 1];
+    a.len--;
+    return a;
+}
+static inline int64_t mako_list_popped_int(void) { return mako_list_popped_int_tls; }
+static inline MakoStrArray mako_list_pop_str(MakoStrArray a) {
+    if (a.len == 0) {
+        mako_list_popped_str_tls = mako_str_from_cstr("");
+        return a;
+    }
+    mako_list_popped_str_tls = a.data[a.len - 1];
+    a.len--;
+    return a;
+}
+static inline MakoString mako_list_popped_str(void) { return mako_list_popped_str_tls; }
+static inline int64_t mako_list_get_int(MakoIntArray a, int64_t i) {
+    if (i < 0 || (size_t)i >= a.len) return 0;
+    return a.data[i];
+}
+static inline MakoString mako_list_get_str(MakoStrArray a, int64_t i) {
+    if (i < 0 || (size_t)i >= a.len) return mako_str_from_cstr("");
+    return a.data[i];
+}
+static inline int64_t mako_list_len_int(MakoIntArray a) { return (int64_t)a.len; }
+static inline int64_t mako_list_len_str(MakoStrArray a) { return (int64_t)a.len; }
+static inline MakoIntArray mako_list_clear_int(MakoIntArray a) {
+    a.len = 0;
+    return a;
+}
+static inline MakoStrArray mako_list_clear_str(MakoStrArray a) {
+    a.len = 0;
+    return a;
+}
+/* Insert v at index i (clamped to [0,len]); returns new list. */
+static inline MakoIntArray mako_list_insert_int(MakoIntArray a, int64_t i, int64_t v) {
+    if (i < 0) i = 0;
+    if ((size_t)i > a.len) i = (int64_t)a.len;
+    MakoIntArray out = mako_int_array_make((int64_t)a.len + 1, (int64_t)a.len + 1);
+    size_t j = 0;
+    for (size_t k = 0; k < a.len; k++) {
+        if ((int64_t)k == i) out.data[j++] = v;
+        out.data[j++] = a.data[k];
+    }
+    if ((size_t)i == a.len) out.data[j++] = v;
+    out.len = j;
+    return out;
+}
+static inline MakoStrArray mako_list_insert_str(MakoStrArray a, int64_t i, MakoString v) {
+    if (i < 0) i = 0;
+    if ((size_t)i > a.len) i = (int64_t)a.len;
+    MakoStrArray out = mako_str_array_make((int64_t)a.len + 1, (int64_t)a.len + 1);
+    size_t j = 0;
+    for (size_t k = 0; k < a.len; k++) {
+        if ((int64_t)k == i) out.data[j++] = v;
+        out.data[j++] = a.data[k];
+    }
+    if ((size_t)i == a.len) out.data[j++] = v;
+    out.len = j;
+    return out;
+}
+/* Remove index i; OOB → copy. */
+static inline MakoIntArray mako_list_remove_int(MakoIntArray a, int64_t i) {
+    if (i < 0 || (size_t)i >= a.len) return mako_ints_copy(a);
+    MakoIntArray out = mako_int_array_make((int64_t)a.len - 1, (int64_t)a.len - 1);
+    size_t j = 0;
+    for (size_t k = 0; k < a.len; k++) {
+        if ((int64_t)k == i) continue;
+        out.data[j++] = a.data[k];
+    }
+    out.len = j;
+    return out;
+}
+static inline MakoStrArray mako_list_remove_str(MakoStrArray a, int64_t i) {
+    if (i < 0 || (size_t)i >= a.len) {
+        MakoStrArray out = mako_str_array_make((int64_t)a.len, (int64_t)a.len);
+        for (size_t k = 0; k < a.len; k++) out.data[k] = a.data[k];
+        out.len = a.len;
+        return out;
+    }
+    MakoStrArray out = mako_str_array_make((int64_t)a.len - 1, (int64_t)a.len - 1);
+    size_t j = 0;
+    for (size_t k = 0; k < a.len; k++) {
+        if ((int64_t)k == i) continue;
+        out.data[j++] = a.data[k];
+    }
+    out.len = j;
+    return out;
+}
+/* Stack: push=append, peek last. */
+static inline int64_t mako_stack_peek_int(MakoIntArray a) {
+    if (a.len == 0) return 0;
+    return a.data[a.len - 1];
+}
+static inline MakoString mako_stack_peek_str(MakoStrArray a) {
+    if (a.len == 0) return mako_str_from_cstr("");
+    return a.data[a.len - 1];
+}
+/* Queue: pop front — returns shortened list; value in queue_popped_*. */
+static int64_t mako_queue_popped_int_tls = 0;
+static MakoString mako_queue_popped_str_tls;
+static inline MakoIntArray mako_queue_pop_int(MakoIntArray a) {
+    if (a.len == 0) {
+        mako_queue_popped_int_tls = 0;
+        return a;
+    }
+    mako_queue_popped_int_tls = a.data[0];
+    MakoIntArray out = mako_int_array_make((int64_t)a.len - 1, (int64_t)a.len - 1);
+    for (size_t i = 1; i < a.len; i++) out.data[i - 1] = a.data[i];
+    out.len = a.len - 1;
+    return out;
+}
+static inline int64_t mako_queue_popped_int(void) { return mako_queue_popped_int_tls; }
+static inline MakoStrArray mako_queue_pop_str(MakoStrArray a) {
+    if (a.len == 0) {
+        mako_queue_popped_str_tls = mako_str_from_cstr("");
+        return a;
+    }
+    mako_queue_popped_str_tls = a.data[0];
+    MakoStrArray out = mako_str_array_make((int64_t)a.len - 1, (int64_t)a.len - 1);
+    for (size_t i = 1; i < a.len; i++) out.data[i - 1] = a.data[i];
+    out.len = a.len - 1;
+    return out;
+}
+static inline MakoString mako_queue_popped_str(void) { return mako_queue_popped_str_tls; }
+/* Set-like uniqueness: ints already have slices_unique; strings here. */
+static inline MakoStrArray mako_slices_unique_strs(MakoStrArray a) {
+    MakoStrArray sorted = mako_sort_strings(a);
+    size_t n = 0;
+    for (size_t i = 0; i < sorted.len; i++) {
+        if (i == 0 || !mako_str_eq(sorted.data[i], sorted.data[i - 1])) n++;
+    }
+    MakoStrArray out = mako_str_array_make((int64_t)n, (int64_t)n);
+    size_t j = 0;
+    for (size_t i = 0; i < sorted.len; i++) {
+        if (i == 0 || !mako_str_eq(sorted.data[i], sorted.data[i - 1])) {
+            out.data[j++] = sorted.data[i];
+        }
+    }
+    out.len = j;
+    return out;
+}
+static inline MakoStrArray mako_slices_reverse_strs(MakoStrArray a) {
+    MakoStrArray out = mako_str_array_make((int64_t)a.len, (int64_t)a.len);
+    for (size_t i = 0; i < a.len; i++) out.data[i] = a.data[a.len - 1 - i];
+    out.len = a.len;
+    return out;
+}
+static inline int64_t mako_strings_index(MakoStrArray a, MakoString v) {
+    for (size_t i = 0; i < a.len; i++) {
+        if (mako_str_eq(a.data[i], v)) return (int64_t)i;
+    }
+    return -1;
+}
+static inline MakoStrArray mako_strings_copy(MakoStrArray a) {
+    MakoStrArray out = mako_str_array_make((int64_t)a.len, (int64_t)a.len);
+    for (size_t i = 0; i < a.len; i++) out.data[i] = a.data[i];
+    out.len = a.len;
+    return out;
+}
+
 /* ---- time ---- */
 
 static inline MakoString mako_time_format_rfc3339(int64_t unix_ms) {

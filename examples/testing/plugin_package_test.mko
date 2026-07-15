@@ -1,0 +1,39 @@
+// Rich plugin package surface (host loader; no live dylib required).
+
+fn TestPluginMeta() {
+    assert(plugin_max_slots() >= 8)
+    assert_eq(plugin_abi_version(), 1)
+    assert_eq_str(plugin_api_version(), "mako.plugin.v1")
+    assert(plugin_count() >= 0)
+    let abi = ffi_abi_name()
+    assert(len(abi) > 0)
+}
+
+fn TestPluginOpenFail() {
+    let h = plugin_open("/tmp/mako_no_such_plugin_xyz.so")
+    assert_eq(h, -1)
+    assert_eq(plugin_alive(h), 0)
+    assert(plugin_last_error() != 0)
+    let msg = plugin_last_error_str()
+    assert(len(msg) > 0)
+    assert_eq_str(plugin_name(-1), "")
+    assert_eq_str(plugin_version(-1), "")
+    assert_eq_str(plugin_kind(-1), "")
+    assert_eq_str(plugin_path(-1), "")
+    assert_eq(plugin_plugin_abi(-1), -1)
+    assert_eq(plugin_close(-1), 0)
+    assert_eq_str(plugin_call(-1, "op", "pay"), "")
+}
+
+fn TestPluginCloseAll() {
+    let n = plugin_close_all()
+    assert(n >= 0)
+    assert_eq(plugin_count(), 0)
+}
+
+fn TestHotReloadMissing() {
+    assert_eq(hot_reload_plugin_watch("/tmp/mako_missing_hot_pkg.so"), -1)
+    assert_eq(hot_reload_plugin_handle(), -1)
+    let _ = hot_reload_plugin_poll()
+    assert_eq(hot_reload_plugin_close(), 1)
+}

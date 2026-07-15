@@ -1,6 +1,50 @@
+// std/collections — List[T] helpers + richer slice/set/stack/queue surface.
+// List[T] is a language alias for []T; int/string specializations below.
+
+// Sort / membership (existing)
 fn sort_i(a: []int) -> []int { return sort_ints(a) }
 fn sort_s(a: []string) -> []string { return sort_strings(a) }
 fn has_int(a: []int, v: int) -> bool { return ints_contains(a, v) }
 fn has_str(a: []string, v: string) -> bool { return strings_contains(a, v) }
 fn copy_ints(a: []int) -> []int { return ints_copy(a) }
+fn copy_strs(a: []string) -> []string { return strings_copy(a) }
 fn index_of(a: []int, v: int) -> int { return ints_index(a, v) }
+fn index_of_str(a: []string, v: string) -> int { return strings_index(a, v) }
+
+// Reverse / unique
+fn reverse_i(a: []int) -> []int { return slices_reverse(a) }
+fn reverse_s(a: []string) -> []string { return slices_reverse_strs(a) }
+fn unique_i(a: []int) -> []int { return slices_unique(a) }
+fn unique_s(a: []string) -> []string { return slices_unique_strs(a) }
+
+// List[int]
+fn list_new() -> []int { return list_new_int() }
+fn list_push(a: []int, v: int) -> []int { return list_push_int(a, v) }
+fn list_pop(a: []int) -> []int { return list_pop_int(a) }
+fn list_popped() -> int { return list_popped_int() }
+fn list_get(a: []int, i: int) -> int { return list_get_int(a, i) }
+fn list_len(a: []int) -> int { return list_len_int(a) }
+fn list_clear(a: []int) -> []int { return list_clear_int(a) }
+fn list_insert(a: []int, i: int, v: int) -> []int { return list_insert_int(a, i, v) }
+fn list_remove(a: []int, i: int) -> []int { return list_remove_int(a, i) }
+
+// List[string]
+fn list_new_s() -> []string { return list_new_str() }
+fn list_push_s(a: []string, v: string) -> []string { return list_push_str(a, v) }
+fn list_pop_s(a: []string) -> []string { return list_pop_str(a) }
+fn list_popped_s() -> string { return list_popped_str() }
+fn list_get_s(a: []string, i: int) -> string { return list_get_str(a, i) }
+fn list_len_s(a: []string) -> int { return list_len_str(a) }
+fn list_clear_s(a: []string) -> []string { return list_clear_str(a) }
+fn list_insert_s(a: []string, i: int, v: string) -> []string { return list_insert_str(a, i, v) }
+fn list_remove_s(a: []string, i: int) -> []string { return list_remove_str(a, i) }
+
+// Stack (LIFO) — push via list_push, pop via list_pop + list_popped
+fn stack_peek(a: []int) -> int { return stack_peek_int(a) }
+fn stack_peek_s(a: []string) -> string { return stack_peek_str(a) }
+
+// Queue (FIFO) — enqueue via list_push, dequeue via queue_pop + queue_popped
+fn queue_pop(a: []int) -> []int { return queue_pop_int(a) }
+fn queue_popped() -> int { return queue_popped_int() }
+fn queue_pop_s(a: []string) -> []string { return queue_pop_str(a) }
+fn queue_popped_s() -> string { return queue_popped_str() }
