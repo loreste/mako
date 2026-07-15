@@ -1545,7 +1545,28 @@ impl TypeChecker {
         fns.insert("lsm_get".into(), Type::Fn(vec![Type::Named("Lsm".into()), Type::Int], Box::new(Type::Int)));
         fns.insert("lsm_flush".into(), Type::Fn(vec![Type::Named("Lsm".into())], Box::new(Type::Int)));
         fns.insert("lsm_flushes".into(), Type::Fn(vec![Type::Named("Lsm".into())], Box::new(Type::Int)));
+        fns.insert("lsm_compact".into(), Type::Fn(vec![Type::Named("Lsm".into()), Type::String], Box::new(Type::Int)));
+        fns.insert("lsm_compactions".into(), Type::Fn(vec![Type::Named("Lsm".into())], Box::new(Type::Int)));
         fns.insert("lsm_free".into(), Type::Fn(vec![Type::Named("Lsm".into())], Box::new(Type::Int)));
+        fns.insert(
+            "store_recover_wal".into(),
+            Type::Fn(
+                vec![Type::Named("Store".into()), Type::Named("Wal".into())],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "file_mtime_ns".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "hot_reload_watch".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "hot_reload_changed".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
         fns.insert("mvcc_new".into(), Type::Fn(vec![], Box::new(Type::Named("Mvcc".into()))));
         fns.insert("mvcc_begin".into(), Type::Fn(vec![Type::Named("Mvcc".into())], Box::new(Type::Int)));
         fns.insert("mvcc_put".into(), Type::Fn(vec![Type::Named("Mvcc".into()), Type::Int, Type::Int], Box::new(Type::Int)));

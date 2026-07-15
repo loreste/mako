@@ -28,6 +28,66 @@ fn TestLsmFlushGet() {
     assert_eq(wal_close(w), 0)
 }
 
+fn TestLsmCompact() {
+    let run = "/tmp/mako_lsm_compact_run.log"
+    let sst = "/tmp/mako_lsm_compact.sst"
+    assert_eq(write_file(run, ""), 0)
+    let w = wal_open(run)
+    let l = lsm_new(32)
+    assert_eq(lsm_attach_run(l, w), 0)
+    assert_eq(lsm_put(l, 1, 10), 0)
+    assert_eq(lsm_put(l, 2, 20), 0)
+    assert_eq(lsm_flush(l), 0)
+    // Overlay then flush again — later wins after compact
+    assert_eq(lsm_put(l, 1, 11), 0)
+    assert_eq(lsm_flush(l), 0)
+    let n = lsm_compact(l, sst)
+    assert(n >= 2)
+    assert_eq(lsm_compactions(l), 1)
+    // Readable from L1 SST after compact
+    assert_eq(lsm_get(l, 1), 11)
+    assert_eq(lsm_get(l, 2), 20)
+    assert_eq(lsm_free(l), 0)
+    assert_eq(wal_close(w), 0)
+}
+
+fn TestStoreRecoverWal() {
+    let path = "/tmp/mako_store_recover.log"
+    assert_eq(write_file(path, ""), 0)
+    let w = wal_open(path)
+    let s = store_new(32)
+    assert_eq(store_attach_wal(s, w), 0)
+    assert_eq(store_begin(s), 0)
+    assert_eq(store_put(s, 3, 30), 0)
+    assert_eq(store_put(s, 4, 40), 0)
+    assert_eq(store_commit(s), 0)
+    assert_eq(store_free(s), 0)
+    assert_eq(wal_close(w), 0)
+
+    let w2 = wal_open(path)
+    let s2 = store_new(32)
+    let applied = store_recover_wal(s2, w2)
+    assert(applied >= 2)
+    assert_eq(store_get(s2, 3), 30)
+    assert_eq(store_get(s2, 4), 40)
+    assert_eq(store_free(s2), 0)
+    assert_eq(wal_close(w2), 0)
+}
+
+fn TestHotReloadWatch() {
+    let path = "/tmp/mako_hot_reload_seed.txt"
+    assert_eq(write_file(path, "v1"), 0)
+    assert(file_mtime_ns(path) > 0)
+    let id = hot_reload_watch(path)
+    assert(id >= 0)
+    assert_eq(hot_reload_changed(path), 0)
+    // Bump mtime past second-resolution FS clocks
+    let _ = sleep_ms(1100)
+    assert_eq(write_file(path, "v2"), 0)
+    assert_eq(hot_reload_changed(path), 1)
+    assert_eq(hot_reload_changed(path), 0)
+}
+
 fn TestMvccSnapshotRead() {
     let m = mvcc_new()
     let _ = mvcc_put(m, 7, 1)

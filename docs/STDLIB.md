@@ -200,9 +200,9 @@ Low-level unbuffered file operations and memory-mapped files (`runtime/mako_dio.
 | `page_alloc` / `page_read` / `page_write` / `page_free` | fixed-size memory pages |
 | `wal_open` / `wal_append` / `wal_sync` / `wal_read_at` / `wal_next_off` / `wal_close` | length-prefixed WAL |
 | `hindex_*` | open-addressing int→int hash index |
-| `store_*` | transactional KV (`begin` / `commit` / `rollback`; optional WAL) |
+| `store_*` | transactional KV (`begin` / `commit` / `rollback`; optional WAL; `store_recover_wal`) |
 
-Tests: `dio_test.mko`, `storage_wal_test.mko`, `store_index_test.mko`.  
+Tests: `dio_test.mko`, `storage_wal_test.mko`, `store_index_test.mko`, `domain_tracks_test.mko`.  
 Header: `runtime/mako_dio.h`.
 
 ---
@@ -215,8 +215,10 @@ Storage depth, multiplayer helpers, soft graphics, host AI, debug frame.
 | Area | Surface | Tests |
 |------|---------|-------|
 | B-tree | `btree_new` / `put` / `get` / `save` / `load` / `free` | `domain_tracks_test` · `storage_depth_test` |
-| LSM | `lsm_new` / `put` / `get` / `flush` / `attach_run` | `domain_tracks_test` |
+| LSM | `lsm_new` / `put` / `get` / `flush` / `compact` / `attach_run` | `domain_tracks_test` |
 | SST | `sst_build4` / `sst_get` / `sst_len` / `sst_free` | `storage_depth_test` |
+| Crash recovery | `store_recover_wal` | `domain_tracks_test` |
+| Hot reload | `file_mtime_ns` / `hot_reload_watch` / `hot_reload_changed` | `domain_tracks_test` |
 | Page cache | `pcache_new` / `pcache_get` / hits·misses | `storage_depth_test` |
 | MVCC | `mvcc_new` / `begin` / `put` / `get` / `gc` / `live` | both |
 | Snapshots | `snap_encode2` / `encode4` / `get` / `predict` / `reconcile` | `store_index_test` |

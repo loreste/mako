@@ -151,11 +151,25 @@ static inline int64_t mako_btree_free(MakoBTree *t) {
     return 0;
 }
 
-/* ---- LSM seed: memtable (hash) + sorted run file ---- */
+/* ---- SST shell (full impl later): needed complete for LSM compact ---- */
+typedef struct MakoSst {
+    int64_t *keys;
+    int64_t *vals;
+    int64_t n;
+    char path[512];
+} MakoSst;
+
+static inline int64_t mako_sst_get(MakoSst *s, int64_t key);
+static inline int64_t mako_sst_free(MakoSst *s);
+static inline MakoSst *mako_sst_build(MakoString path, int64_t *keys, int64_t *vals, int64_t n);
+
+/* ---- LSM seed: memtable (hash) + L0 run + L1 SST ---- */
 typedef struct {
     MakoHIndex *mem;
-    MakoWal *run; /* sorted-ish log of flushes; not fully sorted SST */
+    MakoWal *run; /* L0: append-only flush log */
+    MakoSst *sst; /* L1: compacted sorted run (owned) */
     int64_t flushes;
+    int64_t compactions;
 } MakoLsm;
 
 static inline MakoLsm *mako_lsm_new(int64_t mem_cap) {
@@ -183,30 +197,32 @@ static inline int64_t mako_lsm_get(MakoLsm *l, int64_t key) {
     if (!l) return -1;
     int64_t v = mako_hindex_get(l->mem, key);
     if (v != -1) return v;
-    /* Scan run WAL from end (last write wins) — O(n) seed */
-    if (!l->run) return -1;
-    int64_t off = 0;
-    int64_t found = -1;
-    for (;;) {
-        MakoString rec = mako_wal_read_at(l->run, off);
-        if (rec.len == 0) break;
-        /* format "P,key,val" */
-        if (rec.data && rec.len > 2 && rec.data[0] == 'P') {
-            long long k = 0, val = 0;
-            if (sscanf(rec.data, "P,%lld,%lld", &k, &val) == 2 && (int64_t)k == key) {
-                found = (int64_t)val;
+    /* L0 run: last write wins */
+    if (l->run) {
+        int64_t off = 0;
+        int64_t found = -1;
+        for (;;) {
+            MakoString rec = mako_wal_read_at(l->run, off);
+            if (rec.len == 0) break;
+            if (rec.data && rec.len > 2 && rec.data[0] == 'P') {
+                long long k = 0, val = 0;
+                if (sscanf(rec.data, "P,%lld,%lld", &k, &val) == 2 && (int64_t)k == key) {
+                    found = (int64_t)val;
+                }
             }
+            off = mako_wal_next_off();
+            mako_str_free(rec);
+            if (off < 0) break;
         }
-        off = mako_wal_next_off();
-        mako_str_free(rec);
-        if (off < 0) break;
+        if (found != -1) return found;
     }
-    return found;
+    /* L1 SST */
+    if (l->sst) return mako_sst_get(l->sst, key);
+    return -1;
 }
 
 static inline int64_t mako_lsm_flush(MakoLsm *l) {
     if (!l || !l->mem || !l->run) return -1;
-    /* Dump all live entries as P,key,val */
     for (size_t i = 0; i < l->mem->cap; i++) {
         int64_t k = l->mem->keys[i];
         if (k == MAKO_HINDEX_EMPTY || k == MAKO_HINDEX_TOMB) continue;
@@ -220,21 +236,186 @@ static inline int64_t mako_lsm_flush(MakoLsm *l) {
         }
     }
     if (mako_wal_sync(l->run) != 0) return -1;
-    /* clear memtable */
     for (size_t i = 0; i < l->mem->cap; i++) l->mem->keys[i] = MAKO_HINDEX_EMPTY;
     l->mem->len = 0;
     l->flushes++;
     return 0;
 }
 
+/* Compact L0 run (+ optional old SST) into a new L1 SST; truncate run. */
+static inline int64_t mako_lsm_compact(MakoLsm *l, MakoString sst_path) {
+    if (!l || !l->run || !sst_path.data) return -1;
+#define MAKO_LSM_COMPACT_MAX 4096
+    int64_t keys[MAKO_LSM_COMPACT_MAX];
+    int64_t vals[MAKO_LSM_COMPACT_MAX];
+    int n = 0;
+    /* Seed from existing SST */
+    if (l->sst && l->sst->keys) {
+        for (int64_t i = 0; i < l->sst->n && n < MAKO_LSM_COMPACT_MAX; i++) {
+            keys[n] = l->sst->keys[i];
+            vals[n] = l->sst->vals[i];
+            n++;
+        }
+    }
+    /* Overlay L0 run (later wins) */
+    int64_t off = 0;
+    for (;;) {
+        MakoString rec = mako_wal_read_at(l->run, off);
+        if (rec.len == 0) break;
+        if (rec.data && rec.len > 2 && rec.data[0] == 'P') {
+            long long k = 0, val = 0;
+            if (sscanf(rec.data, "P,%lld,%lld", &k, &val) == 2) {
+                int found = 0;
+                for (int i = 0; i < n; i++) {
+                    if (keys[i] == (int64_t)k) {
+                        vals[i] = (int64_t)val;
+                        found = 1;
+                        break;
+                    }
+                }
+                if (!found && n < MAKO_LSM_COMPACT_MAX) {
+                    keys[n] = (int64_t)k;
+                    vals[n] = (int64_t)val;
+                    n++;
+                }
+            }
+        }
+        off = mako_wal_next_off();
+        mako_str_free(rec);
+        if (off < 0) break;
+    }
+    MakoSst *ns = mako_sst_build(sst_path, keys, vals, n);
+    if (!ns) return -1;
+    if (l->sst) mako_sst_free(l->sst);
+    l->sst = ns;
+    /* Truncate L0 run */
+#if !defined(_WIN32)
+    if (l->run && l->run->fd >= 0) {
+        if (ftruncate(l->run->fd, 0) != 0) return -1;
+        lseek(l->run->fd, 0, SEEK_SET);
+    }
+#endif
+    l->compactions++;
+    return n;
+#undef MAKO_LSM_COMPACT_MAX
+}
+
 static inline int64_t mako_lsm_flushes(MakoLsm *l) {
     return l ? l->flushes : 0;
+}
+
+static inline int64_t mako_lsm_compactions(MakoLsm *l) {
+    return l ? l->compactions : 0;
 }
 
 static inline int64_t mako_lsm_free(MakoLsm *l) {
     if (!l) return 0;
     mako_hindex_free(l->mem);
+    if (l->sst) mako_sst_free(l->sst);
     free(l);
+    return 0;
+}
+
+/* ---- Crash recovery: replay WAL into a store ---- */
+static inline int64_t mako_store_recover_wal(MakoStore *s, MakoWal *w) {
+    if (!s || !w) return -1;
+    int64_t off = 0;
+    int64_t applied = 0;
+    for (;;) {
+        MakoString rec = mako_wal_read_at(w, off);
+        if (rec.len == 0) break;
+        if (rec.data && rec.len > 2) {
+            if (rec.data[0] == 'P') {
+                long long k = 0, v = 0;
+                if (sscanf(rec.data, "P,%lld,%lld", &k, &v) == 2) {
+                    if (mako_store_put(s, (int64_t)k, (int64_t)v) == 0) applied++;
+                }
+            } else if (rec.data[0] == 'D') {
+                long long k = 0;
+                if (sscanf(rec.data, "D,%lld", &k) == 1) {
+                    if (mako_store_del(s, (int64_t)k) == 0) applied++;
+                }
+            }
+        }
+        off = mako_wal_next_off();
+        mako_str_free(rec);
+        if (off < 0) break;
+    }
+    return applied;
+}
+
+/* ---- Hot reload seed: file mtime watch ---- */
+static inline int64_t mako_file_mtime_ns(MakoString path) {
+    if (!path.data || path.len == 0 || path.len >= 4096) return -1;
+#if defined(_WIN32)
+    return -1;
+#else
+    char buf[4096];
+    memcpy(buf, path.data, path.len);
+    buf[path.len] = 0;
+    struct stat st;
+    if (stat(buf, &st) != 0) return -1;
+    /* _POSIX_C_SOURCE (set by mako_rt.h) exposes st_mtime + st_mtimensec on
+     * Darwin; Linux POSIX.1-2008 uses st_mtim. */
+#if defined(__linux__)
+    return (int64_t)st.st_mtim.tv_sec * 1000000000LL + (int64_t)st.st_mtim.tv_nsec;
+#elif defined(__APPLE__)
+    return (int64_t)st.st_mtime * 1000000000LL + (int64_t)st.st_mtimensec;
+#else
+    return (int64_t)st.st_mtime * 1000000000LL;
+#endif
+#endif
+}
+
+#define MAKO_HOT_WATCH_MAX 8
+typedef struct {
+    char path[512];
+    int64_t mtime_ns;
+    int used;
+} MakoHotWatch;
+
+static MakoHotWatch mako_hot_watches[MAKO_HOT_WATCH_MAX];
+
+static inline int64_t mako_hot_reload_watch(MakoString path) {
+    if (!path.data || path.len == 0 || path.len >= 511) return -1;
+    int64_t mt = mako_file_mtime_ns(path);
+    if (mt < 0) return -1;
+    for (int i = 0; i < MAKO_HOT_WATCH_MAX; i++) {
+        if (mako_hot_watches[i].used
+            && strncmp(mako_hot_watches[i].path, path.data, path.len) == 0
+            && mako_hot_watches[i].path[path.len] == 0) {
+            mako_hot_watches[i].mtime_ns = mt;
+            return i;
+        }
+    }
+    for (int i = 0; i < MAKO_HOT_WATCH_MAX; i++) {
+        if (!mako_hot_watches[i].used) {
+            memcpy(mako_hot_watches[i].path, path.data, path.len);
+            mako_hot_watches[i].path[path.len] = 0;
+            mako_hot_watches[i].mtime_ns = mt;
+            mako_hot_watches[i].used = 1;
+            return i;
+        }
+    }
+    return -1;
+}
+
+/* 1 if file mtime changed since last watch/poll; updates stored mtime. */
+static inline int64_t mako_hot_reload_changed(MakoString path) {
+    if (!path.data || path.len == 0) return 0;
+    int64_t mt = mako_file_mtime_ns(path);
+    if (mt < 0) return 0;
+    for (int i = 0; i < MAKO_HOT_WATCH_MAX; i++) {
+        if (mako_hot_watches[i].used
+            && strncmp(mako_hot_watches[i].path, path.data, path.len) == 0
+            && mako_hot_watches[i].path[path.len] == 0) {
+            if (mt != mako_hot_watches[i].mtime_ns) {
+                mako_hot_watches[i].mtime_ns = mt;
+                return 1;
+            }
+            return 0;
+        }
+    }
     return 0;
 }
 
@@ -426,13 +607,6 @@ static inline MakoBTree *mako_btree_load(MakoString path) {
 }
 
 /* ---- SST: sorted immutable run (binary file for binary search) ---- */
-typedef struct {
-    int64_t *keys;
-    int64_t *vals;
-    int64_t n;
-    char path[512];
-} MakoSst;
-
 /* Build SST from in-memory pairs (caller provides sorted or we sort). */
 static inline int mako_sst_cmp_i64(const void *a, const void *b) {
     int64_t x = *(const int64_t *)a;

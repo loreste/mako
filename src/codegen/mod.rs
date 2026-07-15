@@ -13024,9 +13024,44 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             let (_, l) = self.emit_expr(&args[0]);
                             return ("int64_t".into(), format!("mako_lsm_flushes({l})"));
                         }
+                        "lsm_compact" => {
+                            let (_, l) = self.emit_expr(&args[0]);
+                            let (_, p) = self.emit_expr(&args[1]);
+                            return ("int64_t".into(), format!("mako_lsm_compact({l}, {p})"));
+                        }
+                        "lsm_compactions" => {
+                            let (_, l) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_lsm_compactions({l})"));
+                        }
                         "lsm_free" => {
                             let (_, l) = self.emit_expr(&args[0]);
                             return ("int64_t".into(), format!("mako_lsm_free({l})"));
+                        }
+                        "store_recover_wal" => {
+                            let (_, s) = self.emit_expr(&args[0]);
+                            let (_, w) = self.emit_expr(&args[1]);
+                            return (
+                                "int64_t".into(),
+                                format!("mako_store_recover_wal({s}, {w})"),
+                            );
+                        }
+                        "file_mtime_ns" => {
+                            let (_, p) = self.emit_expr(&args[0]);
+                            let tmp = self.fresh("fmtns");
+                            self.line(&format!("int64_t {tmp} = mako_file_mtime_ns({p});"));
+                            return ("int64_t".into(), tmp);
+                        }
+                        "hot_reload_watch" => {
+                            let (_, p) = self.emit_expr(&args[0]);
+                            let tmp = self.fresh("hrw");
+                            self.line(&format!("int64_t {tmp} = mako_hot_reload_watch({p});"));
+                            return ("int64_t".into(), tmp);
+                        }
+                        "hot_reload_changed" => {
+                            let (_, p) = self.emit_expr(&args[0]);
+                            let tmp = self.fresh("hrc");
+                            self.line(&format!("int64_t {tmp} = mako_hot_reload_changed({p});"));
+                            return ("int64_t".into(), tmp);
                         }
                         "mvcc_new" => {
                             let tmp = self.fresh("mv");

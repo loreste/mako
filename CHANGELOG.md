@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Storage polish · hot reload seeds
+
+- **LSM compact:** `lsm_compact(l, path)` merges L0 run (+ prior L1 SST) into a new
+  sorted SST, truncates the run; `lsm_compactions` / `lsm_flushes` counters.
+- **Crash recovery:** `store_recover_wal(s, w)` replays `P,k,v` / `D,k` WAL records.
+- **Hot reload:** `file_mtime_ns`, `hot_reload_watch`, `hot_reload_changed` (mtime slots).
+- Tests: `domain_tracks_test` (`TestLsmCompact`, `TestStoreRecoverWal`, `TestHotReloadWatch`).
+
 ## 0.1.3 — 2026-07-14
 
 **mako0.1.3** (`CARGO_PKG_VERSION`).

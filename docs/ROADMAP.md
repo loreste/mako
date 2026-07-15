@@ -300,12 +300,14 @@ Percentages are weighted; update when a task flips.
 - [x] Storage page/WAL/hindex/store + btree/LSM/MVCC seeds.
 - [x] On-disk btree save/load · sorted SST · page cache LRU · MVCC GC · SIMD dot/sum seed.
 - [x] GPU AI depth host seeds (RoPE, KV-cache, gemm2x2, f16 bits) + OpenCL matmul.
-- [ ] Storage product polish: multi-level LSM compaction, crash recovery, page-backed btree.
+- [x] LSM L0→L1 compact seed (`lsm_compact`) · `store_recover_wal` crash replay · `hot_reload_*` mtime watch.
+- [ ] Storage product polish: multi-level LSM beyond L0/L1 · page-backed btree productization.
 - [ ] Real windowing backends / GPU shaders / asset pipelines.
 - [ ] Full multiplayer netcode product.
 - [ ] More quant formats · Metal-native / CUDA / Vulkan backends.
 - [x] SIMD portable seed (`simd_dot_i64_4` / `simd_sum_i64_4` — autovec-friendly).
-- [ ] Interop beyond C · hot code reload · compile-time execution / safe domain extensions.
+- [x] Hot-reload mtime watch seed (`file_mtime_ns` / `hot_reload_watch` / `hot_reload_changed`).
+- [ ] Interop beyond C · full hot code reload product · compile-time execution / safe domain extensions.
 
 ---
 
