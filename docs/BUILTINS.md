@@ -609,9 +609,9 @@ code using maps, crews, mono clocks, `tls_*`, `aes_ctr`, `hmac_sha1_raw`.
 | `sip_first_message_len` / `sip_msg_complete` / `sip_msg_needed` | `(buf) -> int` | TCP/TLS framing (first complete msg length / complete? / bytes needed) |
 | `sip_request` / `sip_response` | build full message (auto Content-Length) | |
 | `sip_headers_append` / `sip_header_line` / `sip_prepend_header` | header blob builders | |
-| `sip_via_value` / `sip_via_value_nat` / `sip_via_add_received` | Via (+ `;rport` / `;received=`) | |
-| `sip_via_host` / `sip_via_port` / `sip_via_branch` | top Via sent-by / branch | |
-| `sip_insert_via` / `sip_strip_via` / `sip_record_route` | proxy hop insert / strip / RR value | |
+| `sip_via_value` / `sip_via_value_nat` / `sip_via_add_received` | Via (RFC 3261); `;received`/`;rport` (RFC 3581 rewrite, no dup params); branch magic cookie `z9hG4bK` | |
+| `sip_via_host` / `sip_via_port` / `sip_via_branch` | top Via sent-by (IPv6 brackets) / branch | |
+| `sip_insert_via` / `sip_strip_via` / `sip_record_route` | topmost Via insert/strip (§16.6/§16.7); RR with `;lr` (§20.30) | |
 | `sip_from_value` / `sip_to_value` / `sip_contact_value` / `sip_cseq_value` | common values | |
 | `sip_addr_tag` | extract tag= | |
 | `sip_branch` / `sip_tag` / `sip_call_id_new` / `sip_cseq_new` | ID generation (`z9hG4bK…`) | |
