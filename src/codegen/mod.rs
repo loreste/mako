@@ -14526,6 +14526,17 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             ));
                             return ("MakoString".into(), tmp);
                         }
+                        "sip_via_value_rport" => {
+                            let (_, t) = self.emit_expr(&args[0]);
+                            let (_, h) = self.emit_expr(&args[1]);
+                            let (_, p) = self.emit_expr(&args[2]);
+                            let (_, b) = self.emit_expr(&args[3]);
+                            let tmp = self.fresh("svvr");
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_sip_via_value_rport({t}, {h}, {p}, {b});"
+                            ));
+                            return ("MakoString".into(), tmp);
+                        }
                         "sip_via_add_received" => {
                             let (_, v) = self.emit_expr(&args[0]);
                             let (_, h) = self.emit_expr(&args[1]);
@@ -14533,6 +14544,16 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             let tmp = self.fresh("svar");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_sip_via_add_received({v}, {h}, {rp});"
+                            ));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "sip_via_fix_source" => {
+                            let (_, v) = self.emit_expr(&args[0]);
+                            let (_, h) = self.emit_expr(&args[1]);
+                            let (_, p) = self.emit_expr(&args[2]);
+                            let tmp = self.fresh("svfs");
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_sip_via_fix_source({v}, {h}, {p});"
                             ));
                             return ("MakoString".into(), tmp);
                         }
@@ -14545,6 +14566,80 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         "sip_via_port" => {
                             let (_, v) = self.emit_expr(&args[0]);
                             return ("int64_t".into(), format!("mako_sip_via_port({v})"));
+                        }
+                        "sip_via_has_rport" => {
+                            let (_, v) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_sip_via_has_rport({v})"));
+                        }
+                        "sip_via_rport" => {
+                            let (_, v) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_sip_via_rport({v})"));
+                        }
+                        "sip_via_received" => {
+                            let (_, v) = self.emit_expr(&args[0]);
+                            let tmp = self.fresh("svrcv");
+                            self.line(&format!("MakoString {tmp} = mako_sip_via_received({v});"));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "sip_via_maddr" => {
+                            let (_, v) = self.emit_expr(&args[0]);
+                            let tmp = self.fresh("svm");
+                            self.line(&format!("MakoString {tmp} = mako_sip_via_maddr({v});"));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "sip_via_transport" => {
+                            let (_, v) = self.emit_expr(&args[0]);
+                            let tmp = self.fresh("svt");
+                            self.line(&format!("MakoString {tmp} = mako_sip_via_transport({v});"));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "sip_via_response_host" => {
+                            let (_, v) = self.emit_expr(&args[0]);
+                            let tmp = self.fresh("svrh");
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_sip_via_response_host({v});"
+                            ));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "sip_via_response_port" => {
+                            let (_, v) = self.emit_expr(&args[0]);
+                            return (
+                                "int64_t".into(),
+                                format!("mako_sip_via_response_port({v})"),
+                            );
+                        }
+                        "sip_via_response_addr" => {
+                            let (_, v) = self.emit_expr(&args[0]);
+                            let tmp = self.fresh("svra");
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_sip_via_response_addr({v});"
+                            ));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "sip_msg_fix_top_via" => {
+                            let (_, m) = self.emit_expr(&args[0]);
+                            let (_, h) = self.emit_expr(&args[1]);
+                            let (_, p) = self.emit_expr(&args[2]);
+                            let tmp = self.fresh("smfv");
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_sip_msg_fix_top_via({m}, {h}, {p});"
+                            ));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "sip_msg_response_host" => {
+                            let (_, m) = self.emit_expr(&args[0]);
+                            let tmp = self.fresh("smrh");
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_sip_msg_response_host({m});"
+                            ));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "sip_msg_response_port" => {
+                            let (_, m) = self.emit_expr(&args[0]);
+                            return (
+                                "int64_t".into(),
+                                format!("mako_sip_msg_response_port({m})"),
+                            );
                         }
                         "sip_record_route" => {
                             let (_, h) = self.emit_expr(&args[0]);

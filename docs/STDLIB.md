@@ -1461,7 +1461,7 @@ You own timers, dialog maps, routing, and media (e.g. rtpengine).
 |-----------------|------------------|
 | Parse / build messages | `sip_header` (compact forms), `sip_request` / `sip_reply`, `sip_body` |
 | Proxy hop (RFC 3261 §16) | `sip_insert_via` / `sip_strip_via` / `sip_record_route` / `sip_prepend_header` |
-| NAT (RFC 3581) | `sip_via_value_nat` / `sip_via_add_received` / `sip_via_host` / `sip_via_port` |
+| NAT full (RFC 3261 §18.2 + RFC 3581) | `sip_via_value_rport` (UAC) · `sip_via_fix_source` / `sip_msg_fix_top_via` (ingress) · `sip_via_response_host`/`port`/`addr` (symmetric reply) |
 | Response To-tag | `sip_ensure_to_tag` / `sip_reply_with_to_tag` |
 | TCP/TLS framing | `sip_first_message_len` / `sip_msg_complete` / `sip_msg_needed` |
 | Digest (server HA1) | `sip_digest_response_ha1` · `sip_www_authenticate` / `sip_proxy_authenticate` |
