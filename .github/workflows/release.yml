@@ -95,7 +95,7 @@ jobs:
             echo "tag=${{ github.event.inputs.tag }}" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Publish to GitHub Release
+      - name: Publish platform artifacts to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.meta.outputs.tag }}
@@ -107,5 +107,14 @@ jobs:
             dist/${{ matrix.artifact }}.zip
             dist/${{ matrix.artifact }}.sha256
             dist/${{ matrix.artifact }}
+
+      # Only Linux uploads installers so Windows CRLF checkout never overwrites them.
+      - name: Publish install scripts (Linux only, LF)
+        if: runner.os == 'Linux'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.meta.outputs.tag }}
+          fail_on_unmatched_files: true
+          files: |
             dist/install-release.sh
             dist/install-linux.sh

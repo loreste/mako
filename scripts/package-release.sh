@@ -114,14 +114,13 @@ if [[ "$FULL" -eq 1 ]]; then
   fi
 fi
 
-cp "$ROOT/scripts/install.sh" "$STAGE/scripts/install.sh"
-cp "$ROOT/scripts/uninstall.sh" "$STAGE/scripts/uninstall.sh"
+# Shell scripts: strip CR so packages never ship CRLF shebangs.
+for s in install.sh uninstall.sh install-release.sh install-linux.sh; do
+  tr -d '\r' < "$ROOT/scripts/$s" > "$STAGE/scripts/$s"
+  chmod +x "$STAGE/scripts/$s"
+done
 cp "$ROOT/scripts/install.ps1" "$STAGE/scripts/install.ps1"
 cp "$ROOT/scripts/uninstall.ps1" "$STAGE/scripts/uninstall.ps1"
-cp "$ROOT/scripts/install-release.sh" "$STAGE/scripts/install-release.sh"
-cp "$ROOT/scripts/install-linux.sh" "$STAGE/scripts/install-linux.sh"
-chmod +x "$STAGE/scripts/install.sh" "$STAGE/scripts/uninstall.sh" \
-  "$STAGE/scripts/install-release.sh" "$STAGE/scripts/install-linux.sh"
 
 MODE_LABEL="slim"
 [[ "$FULL" -eq 1 ]] && MODE_LABEL="full"
@@ -165,9 +164,11 @@ rm -rf "$STAGE"
 mv "$DIST/${NAME}.bin" "$DIST/$NAME"
 chmod +x "$DIST/$NAME"
 
-cp "$ROOT/scripts/install-release.sh" "$DIST/install-release.sh"
-cp "$ROOT/scripts/install-linux.sh" "$DIST/install-linux.sh"
-chmod +x "$DIST/install-release.sh" "$DIST/install-linux.sh"
+# Always LF line endings so Unix curl|bash works (Windows checkout must not ship CRLF).
+for s in install-release.sh install-linux.sh; do
+  tr -d '\r' < "$ROOT/scripts/$s" > "$DIST/$s"
+  chmod +x "$DIST/$s"
+done
 
 BYTES="$(wc -c < "$DIST/$NAME.tar.gz" | tr -d ' ')"
 BIN_BYTES="$(wc -c < "$DIST/$NAME" | tr -d ' ')"
