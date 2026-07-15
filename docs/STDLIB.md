@@ -1468,7 +1468,8 @@ You own timers, dialog maps, routing, and media (e.g. rtpengine).
 | Txn / dialog keys | `sip_txn_key` · `sip_dialog_id` · `sip_branch` (magic cookie) |
 | REGISTER location | parse + `sql_*` / maps (your store) |
 | Timers T1…K | `mono_ns` / `deadline_*` / crews (you drive) |
-| SDP / RTP helpers | `sdp_*` / `rtp_*` (media termination elsewhere) |
+| SDP (RFC 4566) | media parse · direction · `sdp_replace_connection_addr` / `sdp_replace_media_port` · build audio/av |
+| RTP helpers | `rtp_*` (media termination usually rtpengine) |
 
 ### Builtins (also as `sip.*` via pack)
 
@@ -1487,7 +1488,7 @@ targeted reads over scanning every header.
 **Name shadowing:** app `fn sip_*` shadows platform builtins — use **`std/sip`**
 (`sip.insert_via`, `sip.header`, …) in application code; call free builtins only
 when you intentionally want the platform names.
-| SDP | `sdp_build_audio`, `sdp_media_*`, `sdp_connection_addr`, `sdp_attr`, `sdp_attr_rtpmap` |
+| SDP | `sdp_media_*` / formats / connection inheritance · `sdp_replace_*` · `sdp_build_audio`/`av` · direction |
 | RTP | `rtp_pack`, `rtp_seq`, `rtp_timestamp`, `rtp_ssrc`, `rtp_payload`, `rtp_payload_type` |
 | SRTP building blocks | `aes_ctr`, `hmac_sha1` / `hmac_sha1_raw`, `aes_gcm_*`, `random_bytes` |
 

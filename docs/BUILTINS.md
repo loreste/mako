@@ -625,7 +625,12 @@ dialogs, routing, media (rtpengine). **Out of scope:** SIPREC, WebRTC, full B2BU
 | `sip_md5_hex` / `sip_digest_response` / `sip_digest_response_ha1` | Digest MD5 (password or stored HA1) | |
 | `sip_www_authenticate` / `sip_proxy_authenticate` / `sip_authorization_digest` | challenge / Authorization values | |
 | `sip_reply` / `sip_reply_with_to_tag` / `sip_ensure_to_tag` | response build + To-tag | |
-| `sdp_*` | parse/build SDP media + attrs | |
+| `sdp_ok` / `sdp_version` / `sdp_origin` / `sdp_origin_addr` / `sdp_timing` | session lines | |
+| `sdp_connection` / `sdp_connection_addr` / `sdp_connection_is_ip6` | session `c=` (IP4/IP6) | |
+| `sdp_media_*` / `sdp_media_formats` / `sdp_media_connection_addr` | media sections; `c=` inheritance | |
+| `sdp_attr` / `sdp_media_attr` / `sdp_direction` / `sdp_media_direction` | attributes + sendrecv/… | |
+| `sdp_replace_connection_addr` / `sdp_replace_media_port` / `sdp_set_media_direction` | proxy NAT rewrite | |
+| `sdp_build_audio` / `sdp_build_av` / `sdp_attr_rtpmap` / `fmtp` / `candidate` | build helpers | |
 | `rtp_pack` / `rtp_parse_ok` / `rtp_seq` / `rtp_timestamp` / `rtp_ssrc` / `rtp_payload` / … | RTP V2 | |
 
 **Prefer `std/sip`** (`sip.insert_via`, `sip.header`, …) so app code does not shadow

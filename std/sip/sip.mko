@@ -145,9 +145,13 @@ export fn authorization_digest(user: string, realm: string, nonce: string, uri: 
 }
 export fn auth_param(header: string, key: string) -> string { return sip_auth_param(header, key) }
 
-// ---- SDP / RTP (media helpers; rtpengine owns termination in proxy products) ----
+// ---- SDP / RTP (use free sdp_* / rtp_* builtins for same names; pack aliases below) ----
+// Full parse/rewrite surface is platform builtins (sdp_media_*, sdp_replace_*, …).
 export fn sdp_audio(user: string, name: string, ip: string, port: int, codecs: string) -> string {
     return sdp_build_audio(user, name, ip, port, codecs)
+}
+export fn sdp_av(user: string, name: string, ip: string, aport: int, ac: string, vport: int, vc: string) -> string {
+    return sdp_build_av(user, name, ip, aport, ac, vport, vc)
 }
 export fn rtp(pt: int, seq: int, ts: int, ssrc: int, marker: int, payload: string) -> string {
     return rtp_pack(pt, seq, ts, ssrc, marker, payload)
