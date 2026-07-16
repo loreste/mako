@@ -23,7 +23,7 @@ Also:
   - no GC; hold moves, share is refcounted, arena is bump allocation
   - crew is structured concurrency (jobs do not outlive the crew)
   - fan runs a function over a slice across cores
-  - generics monomorphize; tuples and multi-return work
+  - generics (0.1.9): fns + structs + enums + bounds monomorphize; tuples/multi-return work
   - Result / Option; unused Result is a compile error
   - compound and parallel assignment; if as expression
   - stdlib is large (net, sql, crypto, http/2, …)
@@ -238,26 +238,18 @@ Short-circuit: && and || do not evaluate the right side when unnecessary.
 
 Missing return on a non-void function is a type error.
 
-7.1 User Generics
-------------------
-
+7.1 User Generics (0.1.9)
   // Generic functions with monomorphization:
-  fn id[T](x: T) -> T {
-      return x
-  }
-
-  fn first[T](a: T, b: T) -> T {
-      return a
-  }
-
-  // Called with inferred or explicit type:
-  let n = id(42)             // T = int, inferred
-  let s = id("hello")       // T = string, inferred
-
+  fn identity[T](x: T) -> T { return x }
+  // Bounds:
+  fn f[T: Iface](x: T) -> T { return x }
   // Generic types:
+  struct Pair[T] { a: T, b: T }
+  enum Box[T] { Val(T), Nothing }
+  // Built-in generic
   Result[T, E]               // built-in generic
   Option[T]                  // built-in generic
-  chan[T]                    // typed channels
+
 
 7.2 Lambdas / Closures
 ------------------------
@@ -638,47 +630,35 @@ Methods are defined using `on Type { ... }` blocks:
   let a: Adder = my_counter    // boxes into fat pointer
 
 ================================================================================
-14. GENERICS
-================================================================================
+14. GENERICS (0.1.9)
 
   // User-defined generic functions (monomorphized at compile time):
-  fn id[T](x: T) -> T {
-      return x
-  }
+  fn identity[T](x: T) -> T { return x }
+  fn first[T, U](a: T, b: U) -> T { return a }
+  // Dual sugar: fn id<T>(x: T) -> T
 
-  fn swap[T](a: T, b: T) -> (T, T) {
-      return (b, a)
-  }
+  // Interface bounds (structural method set):
+  fn describe_all[T: Describable](x: T) -> string { return x.describe() }
 
-  fn first[T](a: T, b: T) -> T {
-      return a
-  }
-
-  // Usage (type inferred from arguments):
-  let n = id(42)             // instantiates id[int]
-  let s = id("hello")       // instantiates id[string]
-  let a, b = swap(1, 2)     // instantiates swap[int]
+  // Generic structs / enums — type args required at construction:
+  struct Pair[T] { a: T, b: T }
+  enum MyBox[T] { Val(T), Nothing }
+  let p = Pair[int] { a: 1, b: 2 }
+  fn wrap(v: int) -> MyBox[int] { return Val(v) }
 
   // Built-in generic types:
-  fn parse_positive(n: int) -> Result[int, string] {
-      if n <= 0 {
-          return error("must be positive")
-      }
-      return Ok(n)
-  }
+  Result[T, E]
+  Option[T]
+  Job[T]
+  List[T]
+  map[K]V
+  chan[T]
+  []T
 
-  fn option_or(o: Option[int], fallback: int) -> int {
-      match o {
-          Some(v) => v,
-          None => fallback,
-      }
-  }
+  // Seeds: iterator next() -> Option[T] for `for`; mutable capture cells.
+  // Limitation: by-value self does not auto-advance iterators.
 
-  // Typed channels:
-  let ch = chan_open[int](8)
-  let sch = chan_open[string](4)
 
-================================================================================
 15. ERROR HANDLING
 ================================================================================
 

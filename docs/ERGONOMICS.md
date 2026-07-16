@@ -30,6 +30,23 @@ let parts = strings.split("a,b", ",")
 You write types on **API boundaries** (`fn` params / returns / struct fields),
 not on every local.
 
+### Generics — monomorphized, little ceremony
+
+```mko
+fn first[T](xs: []T) -> T {
+    return xs[0]
+}
+
+struct Pair[T] { a: T, b: T }
+
+fn main() {
+    let p = Pair[int] { a: 1, b: 2 }   // type args at construction
+    print(first([10, 20, 30]))         // T inferred at call
+}
+```
+
+Prefer `fn f[T: I](…)` bounds over ad-hoc `any`. See [GUIDE.md](GUIDE.md) §6.
+
 ### One `print` for the common cases
 
 ```mko

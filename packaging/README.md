@@ -48,7 +48,8 @@ Singleton manifests are **rejected** by `microsoft/winget-pkgs` (`Manifest-Valid
 
 **v0.1.4 PR (multi-file fix):** https://github.com/microsoft/winget-pkgs/pull/402823  
 **v0.1.7 PR:** https://github.com/microsoft/winget-pkgs/pull/403016  
-**v0.1.9 path:** `manifests/l/loreste/mako/0.1.9/` (open after `fill-release-packaging.sh`)
+**v0.1.9 path:** `manifests/l/loreste/mako/0.1.9/`  
+Checksums filled: see `packaging/RELEASE-CHECKSUMS-0.1.9.md` and `Formula/mako.rb`.
 
 Portable nested path (must match zip layout from `package-release.ps1`):
 

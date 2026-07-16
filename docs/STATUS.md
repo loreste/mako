@@ -117,6 +117,12 @@ const-fn depth (match/while/for/strings) · suite **165+** · [The Mako Book](bo
 | Product version 0.1.7 | Done — freeze codecs/combinators/packages wave |
 | Product version 0.1.8 | Done — speed wave (wyhash, f-string stack, select condvar, HTTP 1024) |
 | Product version 0.1.9 | Done — generic structs/enums, interface bounds, iterator/closure seeds |
+| Generic structs `struct Pair[T]` + multi-param | Done — monomorph `Pair__int` · `generic_struct_test` |
+| Generic enums `enum MyBox[T]` + match | Done — `generic_enum_test` |
+| Interface bounds `fn f[T: I](…)` | Done — structural · `generic_bounds_test` · `bad/generic_bound_fail` |
+| Nested generics / multi-instantiation | Done — `generic_adversarial_test` |
+| Iterator `Type_next` → `for` seed | Seed — by-value self limit · `iterator_test` |
+| Mutable closure capture cells | Seed — `mutable_closure_test` |
 | CBOR + MessagePack binary | Done — encode/decode subset · `std/encoding/{cbor,msgpack}` · `cbor_msgpack_test` |
 | List combinators (map/filter/fold style) | Done — int mono helpers · `cbor_msgpack_test` |
 | Avro binary + GraphQL/protobuf packages | Done — `std/encoding/{avro,protobuf}` · `std/graphql` · `avro_graphql_tz_test` |
@@ -273,6 +279,7 @@ const-fn depth (match/while/for/strings) · suite **165+** · [The Mako Book](bo
 | Piece | Status |
 |-------|--------|
 | User generics monomorphization `fn id[T](x: T) -> T` | Done |
+| Generic structs / enums + interface bounds (0.1.9) | Done — see product 0.1.9 rows above |
 | Mako methods `on Type { fn m(self) … }` | Done (desugars to `Type_m`) |
 | Tuples + tuple patterns | Done |
 | `export` + `visibility = "explicit"` seed | Done (default open) |

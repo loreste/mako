@@ -485,6 +485,16 @@ Generic list type (angle-bracket form also accepted):
 List[int]
 ```
 
+#### User-defined generic types (0.1.9)
+
+In addition to built-ins, **structs and enums** may declare type parameters
+(Section 3.4 / 3.5). Instantiations are monomorphized at compile time.
+
+```mko
+struct Pair[T] { a: T, b: T }
+enum Tree[T] { Leaf(T), Empty }
+```
+
 ### 2.4 Special Types
 
 | Type             | Description                                |
@@ -616,6 +626,28 @@ fn add(a: int, b: int) -> int {
 }
 ```
 
+#### Type parameters and bounds (0.1.9)
+
+User generics use square brackets (angle brackets are dual sugar). The compiler
+**monomorphizes** each concrete instantiation — no runtime dictionary.
+
+```mko
+fn identity[T](x: T) -> T {
+    return x
+}
+
+// Interface bound: T must provide the methods of Describable (structural).
+fn get_description[T: Describable](thing: T) -> string {
+    return thing.describe()
+}
+```
+
+- Type args may be inferred at call sites (`identity(42)` → `T = int`) or
+  written explicitly where required by context.
+- Bounds are checked against the concrete type’s method set (`on T { … }` /
+  `T_method` free functions). Missing methods are a **type error**.
+- Dual syntax: `fn id<T>(x: T) -> T` is accepted as sugar.
+
 #### Return Types
 
 - Explicit `-> ReturnType` specifies the return type.
@@ -700,6 +732,12 @@ struct Name {
     field1: Type
     field2: Type
 }
+
+// Generic (0.1.9): monomorphized to one C struct per concrete args
+struct Name[T, U] {
+    field1: T
+    field2: U
+}
 ```
 
 Examples:
@@ -719,9 +757,21 @@ struct Person {
     name: string
     addr: Addr
 }
+
+struct Pair[T] {
+    a: T
+    b: T
+}
+
+struct Triple[A, B] {
+    first: A
+    second: B
+    third: int
+}
 ```
 
-Struct construction uses field-value syntax:
+Struct construction uses field-value syntax. **Generic structs require type
+arguments** at the construction site:
 
 ```mko
 let p = Point { x: 3, y: 4 }
@@ -729,7 +779,13 @@ let person = Person {
     name: "Ada",
     addr: Addr { city: "Paris", zip: 75001 },
 }
+let pair = Pair[int] { a: 1, b: 2 }
+let mixed = Triple[string, float] { first: "x", second: 2.5, third: 7 }
+// Nested monomorphs: Box[Pair[int]]
 ```
+
+Internally, monomorph names look like `Pair__int` / `Triple__string__float`
+(implementation detail — write the surface form `Pair[int]`).
 
 Field access and mutation (when the binding is `mut`):
 
@@ -773,6 +829,12 @@ enum Name {
     Variant(Type),        // single-payload variant
     Variant(Type, Type),  // multi-payload variant
 }
+
+// Generic (0.1.9)
+enum Name[T] {
+    Val(T),
+    Nothing,
+}
 ```
 
 Examples:
@@ -783,14 +845,31 @@ enum Shape {
     Rect(int, int),
     Point,
 }
+
+enum MyBox[T] {
+    Val(T),
+    Nothing,
+}
 ```
 
-Enum values are constructed by variant name:
+Enum values are constructed by variant name. Generic enums monomorphize like
+structs; match works on the monomorphized variants:
 
 ```mko
 let c = Circle(5)
 let r = Rect(3, 4)
 let p = Point
+
+fn wrap(v: int) -> MyBox[int] {
+    return Val(v)
+}
+
+fn main() {
+    match wrap(42) {
+        Val(v) => print(v),
+        Nothing => {},
+    }
+}
 ```
 
 Enums are consumed via `match` (see Section 5.6). Match must be **exhaustive**:

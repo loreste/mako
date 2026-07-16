@@ -13,7 +13,9 @@ parse; do not prefer them. See docs/IDENTITY.md if you care about the style bar.
 
 Short facts:
 
-- Generics: `fn id[T](x: T) -> T` (monomorphized)
+- Generics (0.1.9): `fn id[T](x: T) -> T`, `struct Pair[T]`, `enum Box[T]`,
+  bounds `fn f[T: Iface](x: T)` — all monomorphized. Write `Pair[int] { … }`.
+  Iterator `next`/mutable captures are seeds (by-value self does not auto-advance).
 - Tuples / multi-return: `let a, b = f()` (incl. struct elements)
 - Methods: `on Type { fn m(self) -> T { ... } }`
 - Modules: `pack name`, `pull "path"`, always qualify: `pkg.fn`, `eng.Table`,

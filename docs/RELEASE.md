@@ -3,6 +3,10 @@
 **Product version:** **0.1.9** (`Cargo.toml` / `mako version` → `mako0.1.9`).  
 STATUS north-star / MVP: **100%**. External: homebrew-core publish (see STATUS).
 
+**Tag:** `v0.1.9` · **Release notes:** [packaging/RELEASE-NOTES-0.1.9.md](../packaging/RELEASE-NOTES-0.1.9.md) ·
+**Checksums:** [packaging/RELEASE-CHECKSUMS-0.1.9.md](../packaging/RELEASE-CHECKSUMS-0.1.9.md).  
+**Install:** `curl -fsSL …/releases/download/v0.1.9/install-release.sh | bash -s -- --version v0.1.9 --yes`
+
 ## Prerequisites by OS
 
 | OS | Rust | C compiler | Notes |
