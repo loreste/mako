@@ -682,11 +682,11 @@ structs after a `pull` (`let t, n = eng.grow_pair(t0, 1)`).
 For more complex cases you can still use a struct, but tuples cover the common
 multi-return pattern without boilerplate.
 
-## Generics
+## Generics (0.1.9)
 
-Functions and structs can be parameterized over types using square-bracket
-syntax. The compiler monomorphizes each instantiation, so there is no runtime
-cost:
+Functions, **structs**, and **enums** can be parameterized over types using
+square-bracket syntax (angle brackets are dual sugar). The compiler
+**monomorphizes** each instantiation — no runtime dictionaries.
 
 ```mko
 fn identity[T](x: T) -> T {
@@ -698,26 +698,79 @@ fn first[T, U](a: T, b: U) -> T {
 }
 
 fn main() {
-    print_int(identity(42))       // T = int
-    print(identity("hi"))         // T = string
-    print_int(first(1, "x"))     // T = int, U = string
+    print(identity(42))          // T = int
+    print(identity("hi"))        // T = string
+    print(first(1, "x"))         // T = int, U = string
 }
 ```
 
-Generic structs work the same way:
+### Generic structs and enums
+
+Type arguments are required at construction sites:
 
 ```mko
-struct Pair[A, B] {
-    left: A,
-    right: B,
+struct Pair[T] {
+    a: T
+    b: T
+}
+
+struct Triple[A, B] {
+    first: A
+    second: B
+    third: int
+}
+
+enum MyBox[T] {
+    Val(T)
+    Nothing
+}
+
+fn make_pair[T](a: T, b: T) -> Pair[T] {
+    return Pair[T] { a: a, b: b }
+}
+
+fn wrap(v: int) -> MyBox[int] {
+    return Val(v)
 }
 
 fn main() {
-    let p = Pair { left: 1, right: "one" }
-    print_int(p.left)
-    print(p.right)
+    let p = Pair[int] { a: 1, b: 2 }
+    let t = Triple[string, float] { first: "x", second: 2.5, third: 7 }
+    let q = make_pair("hi", "lo")
+    match wrap(42) {
+        Val(v) => print(v),
+        Nothing => {},
+    }
 }
 ```
+
+### Interface bounds
+
+Constrain a type parameter with a structural interface:
+
+```mko
+interface Describable {
+    fn describe(self) -> string
+}
+
+fn get_description[T: Describable](thing: T) -> string {
+    return thing.describe()
+}
+```
+
+The concrete type must provide the methods (via `on T { … }` or
+`T_method` free functions). Missing methods are a compile error.
+
+### Iterator protocol (seed)
+
+If a type has `next() -> Option[T]` (codegen: `Type_next`), `for x in expr`
+can call it. **Limitation:** by-value `self` does not advance the outer
+iterator automatically — design `next` carefully or mutate explicitly.
+
+### Mutable captures (seed)
+
+Closures that assign to outer locals use a heap cell for those captures.
+Simple by-value capture (`|x| x + n`) remains the common path.
 
 ## Closures (lambdas)
 
@@ -739,7 +792,8 @@ fn main() {
 }
 ```
 
-Closures can capture variables from their enclosing scope.
+Closures can capture variables from their enclosing scope (by value by default;
+see mutable-capture seed above when the body assigns to an outer local).
 
 ## Control flow
 

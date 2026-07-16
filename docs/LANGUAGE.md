@@ -82,6 +82,39 @@ Optional dual-form inventory: [GO_SYNTAX_CHECKLIST.md](GO_SYNTAX_CHECKLIST.md).
 
 ---
 
+## Generics (0.1.9)
+
+User type parameters on **functions**, **structs**, and **enums**. All
+instantiations are **monomorphized** (one concrete C shape per args).
+
+```mko
+fn id[T](x: T) -> T { return x }
+
+struct Pair[T] { a: T, b: T }
+enum Box[T] { Val(T), Nothing }
+
+fn describe_all[T: Describable](x: T) -> string {
+    return x.describe()
+}
+
+fn main() {
+    let p = Pair[int] { a: 1, b: 2 }
+    let q = id(p)
+}
+```
+
+| Topic | Status |
+|-------|--------|
+| Generic functions | Done (also dual `fn f<T>(…)`) |
+| Generic structs / enums | Done — write `Pair[int] { … }` |
+| Nested monomorphs | Done — e.g. `Box[Pair[int]]` |
+| Interface bounds `T: I` | Done — structural method set |
+| Iterator `for` via `next` | Seed — by-value `self` does not auto-advance |
+| Mutable lambda captures | Seed — heap cell when body assigns outer locals |
+
+Full grammar: [LANGUAGE_SPEC.md](../LANGUAGE_SPEC.md) · tour: [GUIDE.md](GUIDE.md) §6 ·
+book: [ch03](book/src/ch03-language-tour.md#generics-019).
+
 ## Operators
 
 `=` is assignment only. Comparisons: `==` `!=` `<` `>` `<=` `>=`.  

@@ -929,6 +929,76 @@ arena `make` + arena `append`) are supported. Interface methods are free
 functions `Iface_method` or `Iface_Concrete_method` with optional leading `self`;
 fat-pointer interface values box concrete receivers (or unit for no-self).
 
+### User generics (0.1.9) — monomorphized
+
+```mko
+// Function generics (also dual: fn id<T>(x: T) -> T)
+fn identity[T](x: T) -> T {
+    return x
+}
+
+// Interface bounds — structural method set
+interface Describable {
+    fn describe(self) -> string
+}
+
+fn get_description[T: Describable](thing: T) -> string {
+    return thing.describe()
+}
+
+// Generic structs / enums — type args required at construction
+struct Pair[T] {
+    a: T
+    b: T
+}
+
+enum MyBox[T] {
+    Val(T)
+    Nothing
+}
+
+fn make_pair[T](a: T, b: T) -> Pair[T] {
+    return Pair[T] { a: a, b: b }
+}
+
+fn wrap_int(v: int) -> MyBox[int] {
+    return Val(v)
+}
+
+fn main() {
+    let p = Pair[int] { a: 1, b: 2 }
+    let s = make_pair("hi", "lo")
+    match wrap_int(9) {
+        Val(v) => print(v),
+        Nothing => {},
+    }
+}
+```
+
+| Form | Notes |
+|------|--------|
+| `struct Foo[T] { … }` | One C monomorph per concrete `Foo[int]`, `Foo[string]`, … |
+| `enum Box[T] { Val(T), … }` | Match on monomorph variants |
+| `fn f[T: I](…)` | Call sites must satisfy interface `I` |
+| Nested | `Box[Pair[int]]` supported |
+
+Tests: `examples/testing/generic_struct_test.mko`, `generic_enum_test.mko`,
+`generic_bounds_test.mko`, `generic_adversarial_test.mko`,
+`examples/bad/generic_bound_fail.mko` (must fail).
+
+### Iterator protocol (seed)
+
+Types with `fn next(self) -> Option[T]` (as `Type_next`) can drive `for … in`.
+**By-value `self` does not mutate the outer value** — a `next` that always
+returns `Some(self.current)` will not terminate. Prefer explicit mutation
+patterns until mut-self iterators land. See `examples/testing/iterator_test.mko`.
+
+### Mutable captures (seed)
+
+Lambdas that **assign** to outer locals route those captures through a heap
+cell. Everyday by-value capture still works (`|x| x + n`). Multi-statement mut
+lambdas remain residual polish (`examples/testing/mutable_closure_test.mko`).
+
 ---
 
 ## 7. Ownership: let, mut, arena, hold, share

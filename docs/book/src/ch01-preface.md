@@ -186,9 +186,9 @@ As of the current release:
 | Stdlib coverage | Major backend areas covered (HTTP, TLS, JSON, SQL, etc.) |
 | Test suite | 165+ examples pass in the test suite |
 
-The language is usable for real work today. Some areas are still maturing
-(full Unicode support, reflection, advanced generics). These are tracked in
-STATUS.md.
+The language is usable for real work today. Generic structs/enums and interface
+bounds shipped in **0.1.9**; residual polish (mut-self iterators, multi-statement
+mutable lambdas, deeper CTFE) is tracked in STATUS.md and ROADMAP.md.
 
 ## How to use this book
 
