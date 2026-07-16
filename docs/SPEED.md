@@ -37,11 +37,19 @@ features (NLL, structured crews, parameterized DB) are free at steady state.
 | Surface | Cost model |
 |---------|------------|
 | Non-capturing `fn` values / lambdas | Static C helpers; `void*` + cast — **no env heap** |
-| `f"…{x}"` | **One** `MakoStrBuilder` + `write_cstr` / `write_i64` + `finish` (steal buffer) — not N concat temps |
+| `f"…{x}"` | **Stack-based builder** (256 B on stack, spills to heap only if needed) — zero malloc for short strings |
+| `x == "literal"` / `str_eq` / `str_has_prefix` / `match` arms | **Zero-copy view** of literals (points into `.rodata`, no alloc) |
+| `print("literal")` | **Zero-copy** — no heap allocation for string literal arguments |
+| `1 + 2` (literal operands) | **Compile-time fold** — no runtime code emitted |
+| Map key hashing | **wyhash** (8 bytes/iteration, 128-bit mix) — replaced byte-at-a-time FNV-1a |
+| HTTP header parsing | **Length-bucketed switch** — skip non-matching headers without comparing |
+| HTTP active connections | **Atomic counter** — O(1) instead of O(n) array scan |
+| `chan_cap()` | **Lock-free read** — capacity is immutable after creation, no mutex needed |
 | `fmt_sprintf*` | Prefer when you need format verbs; fewer pieces than a long f-string |
 | `chan[Struct]` / `chan[tuple]` / `chan[Enum]` | Ptr ring; payload boxes via **size freelist** (≤512B) to cut malloc churn |
-| Demand-driven map monomorphs | Emit only used `(K,V)` shapes — O(used), not N² |
+| Demand-driven map monomorphs | Emit only used `(K,V)` shapes — O(used), not N²; joined key lookup in codegen |
 | Timed chan / join | `send_timeout` / `recv_timeout` / `join_timeout` / `join_deadline` — **2ms sleep slices**, no busy-spin |
+| Slice append | `malloc + memcpy` on grow preserves sub-slice aliasing safety — no undefined behavior |
 
 Capturing closures (env boxes) stay residual until they can pay for themselves.
 

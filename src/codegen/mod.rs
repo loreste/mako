@@ -156,6 +156,8 @@ pub struct Codegen {
     /// `key_id` is `i`|`s`|`f`|`b` for scalars or `k:{Name}` for named keys.
     /// `val_tag` matches emit suffixes (`opt_int`, `Point`, `vWalRecord`, `arr_int`, …).
     used_maps: std::collections::HashSet<(String, String)>,
+    /// Joined key lookup set for want_map — avoids per-call String allocation.
+    used_maps_joined: std::collections::HashSet<String>,
     /// Array element monomorph tags needed for bare slices (`[]Option[T]`,
     /// `[]map[K]V`, `[]Result[T,E]`, nested `[][]…`). Distinct from `used_maps`
     /// so helpers emit even when the slice is never a map value.
@@ -234,14 +236,19 @@ impl Codegen {
             const_fns: HashMap::new(),
             emitted_arr_tags: std::collections::HashSet::new(),
             used_maps: std::collections::HashSet::new(),
+            used_maps_joined: std::collections::HashSet::new(),
             used_arr_elems: std::collections::HashSet::new(),
         }
     }
 
     /// True when this monomorph map appears in the compilation unit.
+    /// Uses a joined key lookup to avoid allocating String pairs on every call.
     fn want_map(&self, key_id: &str, val_tag: &str) -> bool {
-        self.used_maps
-            .contains(&(key_id.to_string(), val_tag.to_string()))
+        self.used_maps_joined
+            .contains(Self::map_join_key(key_id, val_tag).as_str())
+    }
+    fn map_join_key(key_id: &str, val_tag: &str) -> String {
+        format!("{key_id}\0{val_tag}")
     }
 
     /// True when any scalar-key map of this value monomorph is used.
@@ -2418,6 +2425,10 @@ impl Codegen {
         }
         // Demand-driven monomorphs: only emit map helpers used in this unit.
         self.collect_used_maps(program);
+        // Build joined lookup set for O(1) want_map without per-call allocation.
+        self.used_maps_joined = self.used_maps.iter()
+            .map(|(k, v)| Self::map_join_key(k, v))
+            .collect();
         // Emit C tagged unions + map monomorphs (gated by used_maps).
         for item in &program.items {
             if let Item::Enum(e) = item {
@@ -10942,6 +10953,31 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                 ("int64_t".into(), mangle(n))
             }
             Expr::Binary { op, left, right } => {
+                // Compile-time constant folding: int op int → literal.
+                if let (Expr::Int(a), Expr::Int(b)) = (left.as_ref(), right.as_ref()) {
+                    let folded = match op {
+                        BinOp::Add => Some(("int64_t", a.wrapping_add(*b))),
+                        BinOp::Sub => Some(("int64_t", a.wrapping_sub(*b))),
+                        BinOp::Mul => Some(("int64_t", a.wrapping_mul(*b))),
+                        BinOp::Div if *b != 0 => Some(("int64_t", a.wrapping_div(*b))),
+                        BinOp::Mod if *b != 0 => Some(("int64_t", a.wrapping_rem(*b))),
+                        BinOp::BitAnd => Some(("int64_t", a & b)),
+                        BinOp::BitOr  => Some(("int64_t", a | b)),
+                        BinOp::BitXor => Some(("int64_t", a ^ b)),
+                        BinOp::Shl    => Some(("int64_t", a.wrapping_shl(*b as u32))),
+                        BinOp::Shr    => Some(("int64_t", a.wrapping_shr(*b as u32))),
+                        BinOp::Eq => return ("bool".into(), if a == b { "true" } else { "false" }.into()),
+                        BinOp::Ne => return ("bool".into(), if a != b { "true" } else { "false" }.into()),
+                        BinOp::Lt => return ("bool".into(), if a < b { "true" } else { "false" }.into()),
+                        BinOp::Le => return ("bool".into(), if a <= b { "true" } else { "false" }.into()),
+                        BinOp::Gt => return ("bool".into(), if a > b { "true" } else { "false" }.into()),
+                        BinOp::Ge => return ("bool".into(), if a >= b { "true" } else { "false" }.into()),
+                        _ => None,
+                    };
+                    if let Some((ty, v)) = folded {
+                        return (ty.into(), v.to_string());
+                    }
+                }
                 if matches!(op, BinOp::And | BinOp::Or) {
                     let (_, lv) = self.emit_expr(left);
                     let tmp = self.fresh(if *op == BinOp::And { "and" } else { "or" });
@@ -11124,6 +11160,15 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                     }
                     match name.as_str() {
                         "print" => {
+                            // Zero-copy: print("literal") → view, no alloc.
+                            if let Expr::String(s) = &args[0] {
+                                let esc = escape_c(s);
+                                self.line(&format!(
+                                    "mako_print_str(mako_str_view(\"{esc}\", {}));",
+                                    s.len()
+                                ));
+                                return ("void".into(), "/*void*/".into());
+                            }
                             let (ty, v) = self.emit_expr(&args[0]);
                             match ty.as_str() {
                                 "MakoString" => {
@@ -11800,26 +11845,26 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             );
                         }
                         "str_eq" => {
-                            let (_, a) = self.emit_expr(&args[0]);
-                            let (_, b) = self.emit_expr(&args[1]);
+                            let a = str_lit_view_or(&args[0], self.emit_expr(&args[0]).1);
+                            let b = str_lit_view_or(&args[1], self.emit_expr(&args[1]).1);
                             return ("bool".into(), format!("mako_str_eq({a}, {b})"));
                         }
                         "str_contains" => {
-                            let (_, a) = self.emit_expr(&args[0]);
-                            let (_, b) = self.emit_expr(&args[1]);
+                            let a = str_lit_view_or(&args[0], self.emit_expr(&args[0]).1);
+                            let b = str_lit_view_or(&args[1], self.emit_expr(&args[1]).1);
                             return ("bool".into(), format!("mako_str_contains({a}, {b})"));
                         }
                         "str_has_prefix" => {
-                            let (_, a) = self.emit_expr(&args[0]);
-                            let (_, b) = self.emit_expr(&args[1]);
+                            let a = str_lit_view_or(&args[0], self.emit_expr(&args[0]).1);
+                            let b = str_lit_view_or(&args[1], self.emit_expr(&args[1]).1);
                             return (
                                 "bool".into(),
                                 format!("(bool)mako_str_has_prefix({a}, {b})"),
                             );
                         }
                         "str_has_suffix" => {
-                            let (_, a) = self.emit_expr(&args[0]);
-                            let (_, b) = self.emit_expr(&args[1]);
+                            let a = str_lit_view_or(&args[0], self.emit_expr(&args[0]).1);
+                            let b = str_lit_view_or(&args[1], self.emit_expr(&args[1]).1);
                             return (
                                 "bool".into(),
                                 format!("(bool)mako_str_has_suffix({a}, {b})"),
@@ -27629,59 +27674,61 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                 (cty, tmp)
             }
             Expr::StringInterp(parts) => {
-                // Single growable buffer: O(n) writes, one owned string via finish.
-                // Avoids N-1 temporary concatenations (each a full malloc+copy).
+                // Stack-based builder: 256-byte stack buffer avoids heap for short
+                // f-strings (routes, log lines). Spills to heap only when needed.
                 let b = self.fresh("sb");
                 let out = self.fresh("is");
-                self.line(&format!("MakoStrBuilder *{b} = mako_str_builder_new();"));
+                self.line(&format!("MakoSBStack {b}; mako_sbstack_init(&{b});"));
                 for p in parts {
                     match p {
                         crate::ast::InterpPart::Lit(s) => {
                             let escaped = escape_c(s);
                             self.line(&format!(
-                                "mako_str_builder_write_cstr({b}, \"{escaped}\");"
+                                "mako_sbstack_write_cstr(&{b}, \"{escaped}\");"
                             ));
                         }
                         crate::ast::InterpPart::Expr(e, fmt) => {
                             let (ty, v) = self.emit_expr(e);
                             if let Some(spec) = fmt {
                                 let esc = escape_c(spec);
+                                let tb = self.fresh("tb");
+                                self.line(&format!("MakoStrBuilder *{tb} = mako_str_builder_new();"));
                                 if ty == "MakoString" {
                                     self.line(&format!(
-                                        "mako_str_builder_write_str_spec({b}, {v}, \"{esc}\");"
+                                        "mako_str_builder_write_str_spec({tb}, {v}, \"{esc}\");"
                                     ));
                                 } else if ty == "double" {
                                     self.line(&format!(
-                                        "mako_str_builder_write_f64_spec({b}, {v}, \"{esc}\");"
+                                        "mako_str_builder_write_f64_spec({tb}, {v}, \"{esc}\");"
                                     ));
                                 } else {
-                                    // int/bool and other scalar → int64 path
                                     self.line(&format!(
-                                        "mako_str_builder_write_i64_spec({b}, (int64_t)({v}), \"{esc}\");"
+                                        "mako_str_builder_write_i64_spec({tb}, (int64_t)({v}), \"{esc}\");"
                                     ));
                                 }
+                                let ts = self.fresh("ts");
+                                self.line(&format!("MakoString {ts} = mako_str_builder_finish({tb});"));
+                                self.line(&format!("mako_sbstack_write(&{b}, {ts});"));
+                                self.line(&format!("mako_str_free({ts});"));
                             } else if ty == "MakoString" {
-                                self.line(&format!("mako_str_builder_write({b}, {v});"));
+                                self.line(&format!("mako_sbstack_write(&{b}, {v});"));
                             } else if ty == "int64_t" || ty == "bool" {
                                 self.line(&format!(
-                                    "mako_str_builder_write_i64({b}, (int64_t)({v}));"
+                                    "mako_sbstack_write_i64(&{b}, (int64_t)({v}));"
                                 ));
                             } else if ty == "double" {
-                                let tmp = self.fresh("fs");
                                 self.line(&format!(
-                                    "MakoString {tmp} = mako_format_float({v}, 6);"
+                                    "mako_sbstack_write_f64(&{b}, {v});"
                                 ));
-                                self.line(&format!("mako_str_builder_write({b}, {tmp});"));
-                                self.line(&format!("mako_str_free({tmp});"));
                             } else {
                                 self.line(&format!(
-                                    "mako_str_builder_write_i64({b}, (int64_t)({v}));"
+                                    "mako_sbstack_write_i64(&{b}, (int64_t)({v}));"
                                 ));
                             }
                         }
                     }
                 }
-                self.line(&format!("MakoString {out} = mako_str_builder_finish({b});"));
+                self.line(&format!("MakoString {out} = mako_sbstack_finish(&{b});"));
                 ("MakoString".into(), out)
             }
             Expr::StructLitPos { name, values } => {
@@ -30437,9 +30484,10 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
             }
             Pattern::Literal(Expr::Int(n)) => format!("({scrut} == {n})"),
             Pattern::Literal(Expr::String(s)) => {
+                let esc = escape_c(s);
                 format!(
-                    "mako_str_eq({scrut}, mako_str_from_cstr(\"{}\"))",
-                    escape_c(s)
+                    "mako_str_eq({scrut}, mako_str_view(\"{esc}\", {}))",
+                    s.len()
                 )
             }
             Pattern::Variant { name, .. } => {
@@ -31499,6 +31547,17 @@ fn type_expr_schema(t: &TypeExpr) -> String {
             let e: Vec<_> = elems.iter().map(type_expr_schema).collect();
             format!("({})", e.join(","))
         }
+    }
+}
+
+/// If `expr` is a string literal, return a zero-copy `mako_str_view` expression;
+/// otherwise return the pre-emitted `fallback` value unchanged.
+fn str_lit_view_or(expr: &Expr, fallback: String) -> String {
+    if let Expr::String(s) = expr {
+        let esc = escape_c(s);
+        format!("mako_str_view(\"{esc}\", {})", s.len())
+    } else {
+        fallback
     }
 }
 

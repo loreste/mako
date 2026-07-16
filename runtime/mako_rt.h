@@ -404,7 +404,6 @@ static inline MakoByteArray mako_byte_append(MakoByteArray s, int64_t v) {
     }
     size_t ncap = s.cap ? s.cap * 2 : 1;
     if (ncap < s.len + 1) ncap = s.len + 1;
-    /* Fresh backing on grow (never free the old) — see mako_slice_append. */
     uint8_t *nd = (uint8_t *)malloc(ncap);
     if (!nd) mako_abort("append: out of memory");
     if (s.len) memcpy(nd, s.data, s.len);
@@ -603,7 +602,6 @@ static inline MakoStrArray mako_str_array_append(MakoStrArray s, MakoString v) {
     if (s.len + 1 > s.cap) {
         size_t ncap = s.cap ? s.cap * 2 : 1;
         if (ncap < s.len + 1) ncap = s.len + 1;
-        /* Fresh backing on grow (never free the old) — see mako_slice_append. */
         MakoString *nd = (MakoString *)malloc(ncap * sizeof(MakoString));
         if (!nd) mako_abort("append: out of memory");
         if (s.len) memcpy(nd, s.data, s.len * sizeof(MakoString));
@@ -694,7 +692,6 @@ static inline MakoFloatArray mako_float_array_append(MakoFloatArray s, double v)
     if (s.len + 1 > s.cap) {
         size_t ncap = s.cap ? s.cap * 2 : 1;
         if (ncap < s.len + 1) ncap = s.len + 1;
-        /* Fresh backing on grow (never free the old) — see mako_slice_append. */
         double *nd = (double *)malloc(ncap * sizeof(double));
         if (!nd) mako_abort("append: out of memory");
         if (s.len) memcpy(nd, s.data, s.len * sizeof(double));
@@ -1699,6 +1696,67 @@ static inline MakoStrBuilder *mako_str_builder_new(void) {
     b->len = 0;
     b->cap = 64;
     return b;
+}
+
+/* ---- Stack-based fast builder for f-strings / interpolations ----
+ * 256-byte stack buffer; spills to heap only for larger strings.
+ * Avoids two malloc calls for the common case of short strings. */
+#define MAKO_SB_STACK_CAP 256
+typedef struct {
+    char  stack[MAKO_SB_STACK_CAP];
+    char *data;
+    size_t len;
+    size_t cap;
+} MakoSBStack;
+static inline void mako_sbstack_init(MakoSBStack *b) {
+    b->data = b->stack; b->len = 0; b->cap = MAKO_SB_STACK_CAP; b->stack[0] = 0;
+}
+static inline void mako_sbstack_grow(MakoSBStack *b, size_t need) {
+    if (need <= b->cap) return;
+    size_t ncap = b->cap * 2;
+    while (ncap < need) ncap *= 2;
+    if (b->data == b->stack) {
+        char *nd = (char *)malloc(ncap);
+        if (MAKO_UNLIKELY(!nd)) mako_abort("sbstack: OOM");
+        memcpy(nd, b->stack, b->len); b->data = nd;
+    } else {
+        char *nd = (char *)realloc(b->data, ncap);
+        if (MAKO_UNLIKELY(!nd)) mako_abort("sbstack: OOM");
+        b->data = nd;
+    }
+    b->cap = ncap;
+}
+static inline void mako_sbstack_write(MakoSBStack *b, MakoString s) {
+    mako_sbstack_grow(b, b->len + s.len + 1);
+    if (s.len) memcpy(b->data + b->len, s.data, s.len);
+    b->len += s.len; b->data[b->len] = 0;
+}
+static inline void mako_sbstack_write_cstr(MakoSBStack *b, const char *s) {
+    if (!s) return; size_t n = strlen(s);
+    mako_sbstack_grow(b, b->len + n + 1);
+    if (n) memcpy(b->data + b->len, s, n);
+    b->len += n; b->data[b->len] = 0;
+}
+static inline void mako_sbstack_write_i64(MakoSBStack *b, int64_t n) {
+    char buf[24]; int w = snprintf(buf, sizeof(buf), "%lld", (long long)n);
+    if (w > 0) mako_sbstack_write_cstr(b, buf);
+}
+static inline void mako_sbstack_write_f64(MakoSBStack *b, double n) {
+    char buf[32]; int w = snprintf(buf, sizeof(buf), "%g", n);
+    if (w > 0) mako_sbstack_write_cstr(b, buf);
+}
+static inline MakoString mako_sbstack_finish(MakoSBStack *b) {
+    if (b->len == 0) return mako_str_empty;
+    if (b->data == b->stack) {
+        char *d = (char *)malloc(b->len + 1);
+        if (MAKO_UNLIKELY(!d)) mako_abort("sbstack: OOM");
+        memcpy(d, b->stack, b->len); d[b->len] = 0;
+        return (MakoString){d, b->len};
+    }
+    b->data[b->len] = 0;
+    MakoString out = {b->data, b->len};
+    b->data = b->stack;
+    return out;
 }
 
 static inline void mako_str_builder_grow(MakoStrBuilder *b, size_t need) {
@@ -4293,6 +4351,8 @@ static inline MakoIntArray mako_slice_append(MakoIntArray s, int64_t v) {
     }
     size_t ncap = s.cap ? s.cap * 2 : 1;
     if (ncap < s.len + 1) ncap = s.len + 1;
+    /* malloc+copy (not realloc): sub-slices may alias interior pointers
+     * into the old backing array. realloc on those is undefined behavior. */
     int64_t *nd = (int64_t *)malloc(ncap * sizeof(int64_t));
     if (MAKO_UNLIKELY(!nd)) mako_abort("append: out of memory");
     if (s.len) memcpy(nd, s.data, s.len * sizeof(int64_t));
@@ -4467,10 +4527,7 @@ static inline int64_t mako_chan_len(MakoChan *c) {
 }
 
 static inline int64_t mako_chan_cap(MakoChan *c) {
-    pthread_mutex_lock(&c->mu);
-    int64_t n = (int64_t)c->cap; /* 0 for unbuffered */
-    pthread_mutex_unlock(&c->mu);
-    return n;
+    return (int64_t)c->cap; /* immutable after creation — no lock needed */
 }
 
 static inline int64_t mako_chan_recv(MakoChan *c) {

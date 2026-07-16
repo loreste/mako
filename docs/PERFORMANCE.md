@@ -106,6 +106,21 @@ mako build --release main.mko -o svc
 mako profile main.mko --release --json
 ```
 
+## Runtime hot-path optimizations
+
+These are built into the runtime and codegen — no user action required.
+
+| Optimization | What it does |
+|-------------|-------------|
+| **wyhash** | Map key hashing processes 8 bytes at a time (replaced byte-by-byte FNV-1a). Uses 128-bit multiply mixing. |
+| **Stack f-strings** | String interpolation uses a 256-byte stack buffer. Short f-strings never malloc. |
+| **Constant folding** | `1 + 2`, `n > 0` with literal operands fold to constants at compile time. |
+| **Zero-copy comparisons** | `x == "literal"`, `str_eq`, `str_has_prefix`, `str_has_suffix`, `str_contains`, match arms, and `print` with string literals all point into read-only data instead of allocating. |
+| **HTTP header switch** | Header interning dispatches by name length, skipping non-matching headers. |
+| **Atomic conn count** | Active HTTP connections tracked with an atomic counter, not a linear scan. |
+| **Lock-free `chan_cap`** | Channel capacity is immutable — reads skip the mutex entirely. |
+| **Codegen monomorph cache** | `want_map` checks use a joined key set, eliminating per-call heap allocation. |
+
 ## Memory & CPU practices
 
 1. **`--release`** for anything you measure or ship.

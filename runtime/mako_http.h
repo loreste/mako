@@ -134,8 +134,9 @@ typedef struct {
     size_t raw_len;
 } MakoHttpConn;
 
-#define MAKO_HTTP_CONN_MAX 32
+#define MAKO_HTTP_CONN_MAX 1024
 static MakoHttpConn mako_http_conns[MAKO_HTTP_CONN_MAX];
+static volatile atomic_llong mako_http_active_conn_count = 0;
 
 typedef struct {
     volatile int requested;
@@ -191,11 +192,7 @@ static inline int64_t mako_http_shutdown_expired(void) {
 }
 
 static inline int64_t mako_http_active_connections(void) {
-    int64_t n = 0;
-    for (int i = 0; i < MAKO_HTTP_CONN_MAX; i++) {
-        if (mako_http_conns[i].live) n++;
-    }
-    return n;
+    return (int64_t)atomic_load_explicit(&mako_http_active_conn_count, memory_order_relaxed);
 }
 
 typedef struct {
@@ -263,14 +260,31 @@ static inline int mako_http_ci_eq_n(const char *p, size_t n, const char *lit, si
 /* Intern a header *name* view: common names → static canonical view; else borrow. */
 static inline MakoString mako_http_intern_header_name(const char *p, size_t n) {
     if (!p || n == 0) return mako_str_empty;
-    if (mako_http_ci_eq_n(p, n, "host", 4)) return mako_http_h_host();
-    if (mako_http_ci_eq_n(p, n, "user-agent", 10)) return mako_http_h_user_agent();
-    if (mako_http_ci_eq_n(p, n, "content-type", 12)) return mako_http_h_content_type();
-    if (mako_http_ci_eq_n(p, n, "content-length", 14)) return mako_http_h_content_length();
-    if (mako_http_ci_eq_n(p, n, "connection", 10)) return mako_http_h_connection();
-    if (mako_http_ci_eq_n(p, n, "transfer-encoding", 17)) return mako_http_h_transfer_encoding();
-    if (mako_http_ci_eq_n(p, n, "accept", 6)) return mako_http_h_accept();
-    if (mako_http_ci_eq_n(p, n, "authorization", 13)) return mako_http_h_authorization();
+    /* Length-bucketed dispatch: only compare against headers of matching length. */
+    switch (n) {
+    case 4:
+        if (mako_http_ci_eq_n(p, n, "host", 4)) return mako_http_h_host();
+        break;
+    case 6:
+        if (mako_http_ci_eq_n(p, n, "accept", 6)) return mako_http_h_accept();
+        break;
+    case 10:
+        if (mako_http_ci_eq_n(p, n, "user-agent", 10)) return mako_http_h_user_agent();
+        if (mako_http_ci_eq_n(p, n, "connection", 10)) return mako_http_h_connection();
+        break;
+    case 12:
+        if (mako_http_ci_eq_n(p, n, "content-type", 12)) return mako_http_h_content_type();
+        break;
+    case 13:
+        if (mako_http_ci_eq_n(p, n, "authorization", 13)) return mako_http_h_authorization();
+        break;
+    case 14:
+        if (mako_http_ci_eq_n(p, n, "content-length", 14)) return mako_http_h_content_length();
+        break;
+    case 17:
+        if (mako_http_ci_eq_n(p, n, "transfer-encoding", 17)) return mako_http_h_transfer_encoding();
+        break;
+    }
     return mako_str_view(p, n);
 }
 

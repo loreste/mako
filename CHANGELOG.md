@@ -2,6 +2,50 @@
 
 ## Unreleased
 
+### Speed optimizations
+
+- **wyhash replaces FNV-1a** — map hashing now processes 8 bytes at a time
+  instead of byte-by-byte. 4-8x faster for string-keyed maps on typical
+  workloads. Uses 128-bit multiply mixing (hardware `__uint128_t` where
+  available, portable fallback elsewhere).
+- **Stack-based f-string builder** — string interpolation (`f"..."`) uses a
+  256-byte stack buffer instead of two heap allocations (struct + buffer).
+  Short interpolated strings (routes, log lines, error messages) never touch
+  the allocator.
+- **Compile-time constant folding** — integer binary expressions with literal
+  operands (`1 + 2`, `flags & 0xff`, `size > 0`) are folded at compile time.
+  No runtime code emitted for arithmetic on constants.
+- **Zero-copy string comparisons** — `x == "literal"` and `x != "literal"` use
+  `mako_str_view` for the literal side (zero allocation, points directly into
+  read-only data). Extends to `str_eq`, `str_has_prefix`, `str_has_suffix`,
+  `str_contains`, `match` arm string patterns, and `print("literal")`.
+  Previously every string literal in these contexts allocated via
+  `malloc + memcpy`.
+- **Codegen `want_map` lookup** — demand-driven monomorph checks use a joined
+  key set instead of allocating `String` pairs on every call. Cuts thousands
+  of heap allocations during compilation of map-heavy programs.
+- **HTTP connection table scaled** — `MAKO_HTTP_CONN_MAX` raised from 32 to
+  1024. Active connection count tracked via atomic counter instead of O(n)
+  linear scan.
+- **HTTP header interning optimized** — length-bucketed `switch` dispatch
+  replaces sequential string comparison. Headers of non-matching length are
+  skipped without any comparison.
+
+### Memory safety & concurrency
+
+- **Channel `cap` lock-free** — `chan_cap()` no longer takes the mutex to read
+  an immutable field. Removes unnecessary contention on high-throughput
+  channel workloads.
+- **Slice append aliasing safety** — append grow path correctly uses
+  `malloc + memcpy` (not `realloc`) to preserve sub-slice interior pointer
+  safety. `realloc` on a sub-slice's aliased pointer is undefined behavior.
+
+### Bug fixes
+
+- **msgpack test expectations** — fixed `TestBinaryFormatSeeds` to match
+  spec-compliant compact encoding (positive fixint, uint8, int8) instead of
+  expecting always-64-bit format.
+
 ### Storage / domain P0–P4 product surface
 
 **P0 — first-class handles + bloom rebuild**
