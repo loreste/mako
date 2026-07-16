@@ -251,6 +251,17 @@ impl Codegen {
         format!("{key_id}\0{val_tag}")
     }
 
+    /// Emit a string argument: literals become zero-copy `mako_str_view`,
+    /// other expressions go through full `emit_expr` (no double evaluation).
+    fn emit_str_arg(&mut self, expr: &Expr) -> String {
+        if let Expr::String(s) = expr {
+            let esc = escape_c(s);
+            format!("mako_str_view(\"{esc}\", {})", s.len())
+        } else {
+            self.emit_expr(expr).1
+        }
+    }
+
     /// True when any scalar-key map of this value monomorph is used.
     fn want_scalar_val(&self, val_tag: &str) -> bool {
         self.want_map("i", val_tag)
@@ -11845,26 +11856,26 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             );
                         }
                         "str_eq" => {
-                            let a = str_lit_view_or(&args[0], self.emit_expr(&args[0]).1);
-                            let b = str_lit_view_or(&args[1], self.emit_expr(&args[1]).1);
+                            let a = self.emit_str_arg(&args[0]);
+                            let b = self.emit_str_arg(&args[1]);
                             return ("bool".into(), format!("mako_str_eq({a}, {b})"));
                         }
                         "str_contains" => {
-                            let a = str_lit_view_or(&args[0], self.emit_expr(&args[0]).1);
-                            let b = str_lit_view_or(&args[1], self.emit_expr(&args[1]).1);
+                            let a = self.emit_str_arg(&args[0]);
+                            let b = self.emit_str_arg(&args[1]);
                             return ("bool".into(), format!("mako_str_contains({a}, {b})"));
                         }
                         "str_has_prefix" => {
-                            let a = str_lit_view_or(&args[0], self.emit_expr(&args[0]).1);
-                            let b = str_lit_view_or(&args[1], self.emit_expr(&args[1]).1);
+                            let a = self.emit_str_arg(&args[0]);
+                            let b = self.emit_str_arg(&args[1]);
                             return (
                                 "bool".into(),
                                 format!("(bool)mako_str_has_prefix({a}, {b})"),
                             );
                         }
                         "str_has_suffix" => {
-                            let a = str_lit_view_or(&args[0], self.emit_expr(&args[0]).1);
-                            let b = str_lit_view_or(&args[1], self.emit_expr(&args[1]).1);
+                            let a = self.emit_str_arg(&args[0]);
+                            let b = self.emit_str_arg(&args[1]);
                             return (
                                 "bool".into(),
                                 format!("(bool)mako_str_has_suffix({a}, {b})"),
@@ -31550,16 +31561,7 @@ fn type_expr_schema(t: &TypeExpr) -> String {
     }
 }
 
-/// If `expr` is a string literal, return a zero-copy `mako_str_view` expression;
-/// otherwise return the pre-emitted `fallback` value unchanged.
-fn str_lit_view_or(expr: &Expr, fallback: String) -> String {
-    if let Expr::String(s) = expr {
-        let esc = escape_c(s);
-        format!("mako_str_view(\"{esc}\", {})", s.len())
-    } else {
-        fallback
-    }
-}
+
 
 fn escape_c(s: &str) -> String {
     let mut out = String::new();

@@ -138,6 +138,20 @@ typedef struct {
 static MakoHttpConn mako_http_conns[MAKO_HTTP_CONN_MAX];
 static volatile atomic_llong mako_http_active_conn_count = 0;
 
+/* Keep the atomic active-count in sync with c->live transitions. */
+static inline void mako_http_conn_set_live(MakoHttpConn *c, int live) {
+    if (!c) return;
+    int was = c->live ? 1 : 0;
+    int now = live ? 1 : 0;
+    if (was == now) return;
+    c->live = now ? true : false;
+    if (now) {
+        atomic_fetch_add_explicit(&mako_http_active_conn_count, 1, memory_order_relaxed);
+    } else {
+        atomic_fetch_sub_explicit(&mako_http_active_conn_count, 1, memory_order_relaxed);
+    }
+}
+
 typedef struct {
     volatile int requested;
     volatile int ready;
@@ -462,7 +476,7 @@ static inline int64_t mako_http_bind(int64_t port) {
 
 /* Reap keep-alive slots whose peer has closed (curl/default KA left open).
  * Without this, one-shot servers that never call http_next/http_close fill
- * MAKO_HTTP_CONN_MAX after ~32 requests. */
+ * MAKO_HTTP_CONN_MAX after ~1024 requests. */
 static inline void mako_http_reap_dead(void) {
     for (int i = 0; i < MAKO_HTTP_CONN_MAX; i++) {
         MakoHttpConn *c = &mako_http_conns[i];
@@ -478,7 +492,7 @@ static inline void mako_http_reap_dead(void) {
         if (FD_ISSET(c->fd, &efds)) {
             mako_sock_close(c->fd);
             mako_arena_free(&c->arena);
-            c->live = false;
+            mako_http_conn_set_live(c, 0);
             continue;
         }
         if (!FD_ISSET(c->fd, &rfds)) continue;
@@ -488,7 +502,7 @@ static inline void mako_http_reap_dead(void) {
         if (n == 0) {
             mako_sock_close(c->fd);
             mako_arena_free(&c->arena);
-            c->live = false;
+            mako_http_conn_set_live(c, 0);
         }
         /* n > 0 → leave for http_next; n < 0 → leave (EAGAIN etc.) */
     }
@@ -520,7 +534,7 @@ static inline int64_t mako_http_accept(int64_t listen_fd) {
     MakoHttpConn *c = &mako_http_conns[slot];
     memset(c, 0, sizeof(*c));
     c->fd = cfd;
-    c->live = true;
+    mako_http_conn_set_live(c, 1);
     c->arena = mako_arena_new();
     mako_http_fill_conn(c, req, (size_t)n);
     return (int64_t)slot;
@@ -537,7 +551,7 @@ static inline int64_t mako_http_next(int64_t conn) {
     if (n <= 0) {
         mako_sock_close(c->fd);
         mako_arena_free(&c->arena);
-        c->live = false;
+        mako_http_conn_set_live(c, 0);
         return -1;
     }
     req[n] = 0;
@@ -1032,7 +1046,7 @@ static inline int64_t mako_http_respond(int64_t conn, int64_t status, MakoString
     if (!ka) {
         mako_sock_close(c->fd);
         mako_arena_free(&c->arena);
-        c->live = false;
+        mako_http_conn_set_live(c, 0);
     }
     return 1;
 }
@@ -1061,7 +1075,7 @@ static inline int64_t mako_http_respond_ct(
     if (!ka) {
         mako_sock_close(c->fd);
         mako_arena_free(&c->arena);
-        c->live = false;
+        mako_http_conn_set_live(c, 0);
     }
     return 1;
 }
@@ -1143,7 +1157,7 @@ static inline int64_t mako_http_shutdown_drain_conn(int64_t conn) {
     if (mako_http_shutdown_expired()) {
         mako_sock_close(c->fd);
         mako_arena_free(&c->arena);
-        c->live = false;
+        mako_http_conn_set_live(c, 0);
         return 2;
     }
     return 1;
@@ -1156,7 +1170,7 @@ static inline int64_t mako_http_close(int64_t conn) {
     MakoHttpConn *c = &mako_http_conns[conn];
     mako_sock_close(c->fd);
     mako_arena_free(&c->arena);
-    c->live = false;
+    mako_http_conn_set_live(c, 0);
     return 1;
 }
 
@@ -4067,7 +4081,7 @@ static inline int64_t mako_http_echo(int64_t port) {
         mako_http_reply(hc->fd, 200, "application/json; charset=utf-8", body);
         mako_sock_close(hc->fd);
         mako_arena_free(&hc->arena);
-        hc->live = false;
+        mako_http_conn_set_live(hc, 0);
     }
 }
 

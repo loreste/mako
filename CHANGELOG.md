@@ -42,6 +42,11 @@
 
 ### Bug fixes
 
+- **`http_active_connections` always returned 0** — the atomic active-count
+  added with the 1024-slot connection table was never incremented/decremented
+  on accept/close. Live transitions now go through `mako_http_conn_set_live`,
+  which keeps the counter in sync. Graceful-shutdown drain paths can rely on
+  a correct count again.
 - **msgpack test expectations** — fixed `TestBinaryFormatSeeds` to match
   spec-compliant compact encoding (positive fixint, uint8, int8) instead of
   expecting always-64-bit format.
