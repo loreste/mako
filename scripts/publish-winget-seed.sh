@@ -1,18 +1,26 @@
 #!/usr/bin/env bash
-# Validate winget manifest; print PR steps for microsoft/winget-pkgs.
+# Validate multi-file winget manifests; print PR steps for microsoft/winget-pkgs.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-YAML="$ROOT/packaging/winget/mako.locale.en-US.yaml"
+WDIR="$ROOT/packaging/winget"
+VER_FILE="$WDIR/loreste.mako.yaml"
+INST_FILE="$WDIR/loreste.mako.installer.yaml"
+LOC_FILE="$WDIR/loreste.mako.locale.en-US.yaml"
 echo "mako publish-winget"
-if [[ ! -f "$YAML" ]]; then
-  echo "error: missing $YAML" >&2
+for f in "$VER_FILE" "$INST_FILE" "$LOC_FILE"; do
+  if [[ ! -f "$f" ]]; then
+    echo "error: missing $f" >&2
+    exit 1
+  fi
+done
+# Reject deprecated singleton if still present
+if grep -q 'ManifestType: singleton' "$WDIR"/*.yaml 2>/dev/null; then
+  echo "error: singleton manifests are rejected by winget-pkgs — use multi-file 1.12.0" >&2
   exit 1
 fi
-grep -q 'PackageIdentifier' "$YAML"
-grep -q 'InstallerUrl' "$YAML"
-VER="$(grep -E '^PackageVersion:' "$YAML" | awk '{print $2}')"
-SHA="$(grep -E 'InstallerSha256:' "$YAML" | awk '{print $2}')"
-URL="$(grep -E 'InstallerUrl:' "$YAML" | awk '{print $2}')"
+VER="$(grep -E '^PackageVersion:' "$VER_FILE" | awk '{print $2}')"
+SHA="$(grep -E 'InstallerSha256:' "$INST_FILE" | awk '{print $2}')"
+URL="$(grep -E 'InstallerUrl:' "$INST_FILE" | awk '{print $2}')"
 echo "  version: $VER"
 echo "  url:     $URL"
 if [[ -z "$SHA" || "$SHA" == REPLACE* ]]; then
@@ -20,7 +28,6 @@ if [[ -z "$SHA" || "$SHA" == REPLACE* ]]; then
   exit 1
 fi
 echo "  sha256:  $SHA"
-# Live check: download header and compare sha if network ok
 if command -v curl >/dev/null 2>&1; then
   TMP="$(mktemp)"
   if curl -fsSL -o "$TMP" "$URL" 2>/dev/null; then
@@ -38,11 +45,11 @@ if command -v curl >/dev/null 2>&1; then
 fi
 echo "  next:"
 echo "    1. Fork https://github.com/microsoft/winget-pkgs"
-echo "    2. Copy packaging/winget/mako.locale.en-US.yaml →"
-echo "       manifests/l/loreste/mako/${VER}/loreste.mako.yaml"
-echo "    3. Open PR (winget bots will re-validate)"
+echo "    2. Copy all three packaging/winget/loreste.mako*.yaml files to:"
+echo "       manifests/l/loreste/mako/${VER}/"
+echo "    3. Open PR (CLA: @microsoft-github-policy-service agree)"
 if command -v wingetcreate >/dev/null 2>&1; then
-  echo "  wingetcreate: present — you can run: wingetcreate new $URL"
+  echo "  wingetcreate: present — optional: wingetcreate new $URL"
 else
   echo "  wingetcreate: not installed (optional)"
 fi

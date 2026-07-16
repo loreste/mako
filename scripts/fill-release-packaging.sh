@@ -40,22 +40,47 @@ curl -fsSL -o "$SRC" "https://github.com/loreste/mako/archive/refs/tags/${TAG}.t
 SRC_SHA="$(shasum -a 256 "$SRC" | awk '{ print $1 }')"
 echo "  source tar.gz sha256: $SRC_SHA"
 
-WINGET="$ROOT/packaging/winget/mako.locale.en-US.yaml"
-python3 - "$WINGET" "$VER" "$TAG" "$WIN_SHA" <<'PY'
-import pathlib, sys
-path, ver, tag, sha = sys.argv[1:5]
-text = pathlib.Path(path).read_text()
-# rewrite key fields
-import re
-text = re.sub(r"(?m)^PackageVersion:.*$", f"PackageVersion: {ver}", text)
-text = re.sub(
-    r"(?m)^(\s*)InstallerUrl:.*$",
-    rf"\1InstallerUrl: https://github.com/loreste/mako/releases/download/{tag}/mako-x86_64-pc-windows-msvc.zip",
-    text,
-)
-text = re.sub(r"(?m)^(\s*)InstallerSha256:.*$", rf"\1InstallerSha256: {sha}", text)
-pathlib.Path(path).write_text(text)
-print(f"  wrote {path}")
+# Multi-file winget manifests (singleton is rejected by microsoft/winget-pkgs).
+# Submit under: manifests/l/loreste/mako/<ver>/
+WINGET_DIR="$ROOT/packaging/winget"
+python3 - "$WINGET_DIR" "$VER" "$TAG" "$WIN_SHA" <<'PY'
+import pathlib, re, sys
+wdir, ver, tag, sha = sys.argv[1:5]
+wdir = pathlib.Path(wdir)
+for name in (
+    "loreste.mako.yaml",
+    "loreste.mako.installer.yaml",
+    "loreste.mako.locale.en-US.yaml",
+):
+    path = wdir / name
+    if not path.is_file():
+        print(f"  skip missing {path}")
+        continue
+    text = path.read_text()
+    text = re.sub(r"(?m)^PackageVersion:.*$", f"PackageVersion: {ver}", text)
+    text = re.sub(
+        r"(?m)^(  )?InstallerUrl:.*$",
+        f"  InstallerUrl: https://github.com/loreste/mako/releases/download/{tag}/mako-x86_64-pc-windows-msvc.zip",
+        text,
+    )
+    text = re.sub(r"(?m)^(  )?InstallerSha256:.*$", f"  InstallerSha256: {sha}", text)
+    text = re.sub(
+        r"(?m)^ReleaseNotesUrl:.*$",
+        f"ReleaseNotesUrl: https://github.com/loreste/mako/releases/tag/{tag}",
+        text,
+    )
+    text = re.sub(
+        r"(?m)^LicenseUrl:.*$",
+        f"LicenseUrl: https://github.com/loreste/mako/blob/{tag}/LICENSE",
+        text,
+    )
+    path.write_text(text)
+    print(f"  wrote {path}")
+# Remove deprecated singleton if present
+old = wdir / "mako.locale.en-US.yaml"
+if old.is_file():
+    old.unlink()
+    print(f"  removed deprecated singleton {old}")
 PY
 
 FORMULA="$ROOT/Formula/mako.rb"

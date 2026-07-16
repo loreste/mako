@@ -37,10 +37,17 @@ Updates:
 
 ## Winget (external PR)
 
-Manifest: `packaging/winget/mako.locale.en-US.yaml` (singleton, ManifestVersion 1.6.0).
+**Multi-file** manifests under `packaging/winget/` (ManifestVersion **1.12.0**).  
+Singleton manifests are **rejected** by `microsoft/winget-pkgs` (`Manifest-Validation-Error`).
 
-**v0.1.4 PR:** https://github.com/microsoft/winget-pkgs/pull/402823  
-**v0.1.7:** re-run fill after tag; path `manifests/l/loreste/mako/0.1.7/`.
+| File | Role |
+|------|------|
+| `loreste.mako.yaml` | version |
+| `loreste.mako.installer.yaml` | zip + NestedInstallerType portable |
+| `loreste.mako.locale.en-US.yaml` | defaultLocale |
+
+**v0.1.4 PR (fixed multi-file):** https://github.com/microsoft/winget-pkgs/pull/402823  
+**v0.1.7 path:** `manifests/l/loreste/mako/0.1.7/`
 
 Portable nested path (must match zip layout from `package-release.ps1`):
 
@@ -48,10 +55,10 @@ Portable nested path (must match zip layout from `package-release.ps1`):
 mako-x86_64-pc-windows-msvc\bin\mako.exe
 ```
 
-1. Ensure SHA is filled (`fill-release-packaging.sh`).
+1. Ensure SHA is filled (`./scripts/fill-release-packaging.sh v0.1.7`).
 2. Fork [microsoft/winget-pkgs](https://github.com/microsoft/winget-pkgs).
-3. Copy the YAML to `manifests/l/loreste/mako/0.1.7/loreste.mako.yaml`.
-4. Open a PR. If bots ask for CLA, comment:  
+3. Copy **all three** YAML files to `manifests/l/loreste/mako/<ver>/`.
+4. Open a PR. If bots ask for CLA, comment exactly:  
    `@microsoft-github-policy-service agree`
 
 ```bash
