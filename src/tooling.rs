@@ -113,6 +113,24 @@ pub fn check_file(path: &Path) -> Result<Program, ()> {
             program.items.push(Item::Fn(f));
         }
     }
+    for s in tc.mono_structs {
+        if !program
+            .items
+            .iter()
+            .any(|i| matches!(i, Item::Struct(x) if x.name == s.name))
+        {
+            program.items.push(Item::Struct(s));
+        }
+    }
+    for e in tc.mono_enums {
+        if !program
+            .items
+            .iter()
+            .any(|i| matches!(i, Item::Enum(x) if x.name == e.name))
+        {
+            program.items.push(Item::Enum(e));
+        }
+    }
     Ok(program)
 }
 
@@ -181,6 +199,24 @@ fn check_file_structured(path: &Path) -> Result<Program, Diagnostic> {
             .any(|i| matches!(i, Item::Fn(x) if x.name == f.name))
         {
             program.items.push(Item::Fn(f));
+        }
+    }
+    for s in tc.mono_structs {
+        if !program
+            .items
+            .iter()
+            .any(|i| matches!(i, Item::Struct(x) if x.name == s.name))
+        {
+            program.items.push(Item::Struct(s));
+        }
+    }
+    for e in tc.mono_enums {
+        if !program
+            .items
+            .iter()
+            .any(|i| matches!(i, Item::Enum(x) if x.name == e.name))
+        {
+            program.items.push(Item::Enum(e));
         }
     }
     Ok(program)
@@ -3450,6 +3486,24 @@ pub fn load_test_package(test_file: &Path) -> Result<(Program, Vec<String>), Str
             .any(|i| matches!(i, Item::Fn(x) if x.name == f.name))
         {
             program.items.push(Item::Fn(f));
+        }
+    }
+    for s in tc.mono_structs {
+        if !program
+            .items
+            .iter()
+            .any(|i| matches!(i, Item::Struct(x) if x.name == s.name))
+        {
+            program.items.push(Item::Struct(s));
+        }
+    }
+    for e in tc.mono_enums {
+        if !program
+            .items
+            .iter()
+            .any(|i| matches!(i, Item::Enum(x) if x.name == e.name))
+        {
+            program.items.push(Item::Enum(e));
         }
     }
     let tests = list_test_fns(&program);

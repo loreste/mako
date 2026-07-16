@@ -297,12 +297,23 @@ pub fn typecheck_incremental(
             // Fast path: if no generics in program, keep cache hit without work.
             let has_generics = program.items.iter().any(|i| {
                 matches!(i, crate::ast::Item::Fn(f) if !f.type_params.is_empty())
+                || matches!(i, crate::ast::Item::Struct(s) if !s.type_params.is_empty())
             });
             if has_generics {
                 let _ = tc.check(program);
                 for f in tc.mono_fns {
                     if !program.items.iter().any(|i| matches!(i, crate::ast::Item::Fn(x) if x.name == f.name)) {
                         program.items.push(crate::ast::Item::Fn(f));
+                    }
+                }
+                for s in tc.mono_structs {
+                    if !program.items.iter().any(|i| matches!(i, crate::ast::Item::Struct(x) if x.name == s.name)) {
+                        program.items.push(crate::ast::Item::Struct(s));
+                    }
+                }
+                for e in tc.mono_enums {
+                    if !program.items.iter().any(|i| matches!(i, crate::ast::Item::Enum(x) if x.name == e.name)) {
+                        program.items.push(crate::ast::Item::Enum(e));
                     }
                 }
             }
@@ -347,6 +358,24 @@ pub fn typecheck_incremental(
             .any(|i| matches!(i, crate::ast::Item::Fn(x) if x.name == f.name))
         {
             program.items.push(crate::ast::Item::Fn(f));
+        }
+    }
+    for s in tc.mono_structs {
+        if !program
+            .items
+            .iter()
+            .any(|i| matches!(i, crate::ast::Item::Struct(x) if x.name == s.name))
+        {
+            program.items.push(crate::ast::Item::Struct(s));
+        }
+    }
+    for e in tc.mono_enums {
+        if !program
+            .items
+            .iter()
+            .any(|i| matches!(i, crate::ast::Item::Enum(x) if x.name == e.name))
+        {
+            program.items.push(crate::ast::Item::Enum(e));
         }
     }
 

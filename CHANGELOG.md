@@ -2,6 +2,52 @@
 
 ## Unreleased
 
+## 0.1.9 — 2026-07-16
+
+**mako0.1.9** (`CARGO_PKG_VERSION`).
+
+Patch after 0.1.8: **generic types**, **interface bounds**, and seed **iterator /
+mutable-closure** infrastructure — the foundation for writing the stdlib in Mako.
+
+### Generics
+
+- **Generic structs** — `struct Pair[T] { a: T, b: T }`, multi-param
+  `struct Triple[A, B] { … }`. Monomorphized at compile time to one C struct
+  per concrete instantiation (`Pair__int`, `Pair__string`, …).
+- **Generic enums** — `enum MyBox[T] { Val(T), Nothing }` with match on
+  monomorphized variants.
+- **Generic functions returning / accepting generic types** — e.g.
+  `fn make_pair[T](a: T, b: T) -> Pair[T]`.
+- **Nested generics** — `Box[Pair[int]]` and multi-instantiation in one unit.
+
+### Interface bounds
+
+- **`fn f[T: Iface](…)`** — type parameters may name a structural interface
+  bound; call sites check method sets (`on T { fn m… }` satisfies `Iface`).
+- Negative: `examples/bad/generic_bound_fail.mko` rejects types that lack
+  required methods.
+
+### Iterator protocol (seed)
+
+- Types with a `Type_next` method returning `Option[…]` participate in
+  `for … in` codegen.
+- **Limitation:** by-value `self` does not mutate the outer iterator; loops that
+  only return `Some(self.current)` without advancing will not terminate.
+  Prefer explicit mut patterns until mut-self iterators land.
+
+### Mutable closures (seed)
+
+- Codegen detects assignments to captured locals and routes them through a
+  heap cell (`malloc` + pointer in env).
+- Existing by-value captures and struct captures remain supported.
+- Full multi-statement mutable lambdas remain residual polish.
+
+### Docs / packaging
+
+- Roadmap rewritten around 0.1.9 → 1.0 themes; `ROADMAP_IMPL.md` is the
+  implementation plan for agents.
+- Tests: `generic_*_test`, `iterator_test`, `mutable_closure_test`.
+
 ## 0.1.8 — 2026-07-16
 
 **mako0.1.8** (`CARGO_PKG_VERSION`).

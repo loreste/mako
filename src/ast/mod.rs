@@ -1,5 +1,6 @@
 //! Abstract syntax tree for Mako.
 
+use std::collections::HashMap;
 use std::fmt;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -125,6 +126,9 @@ pub struct FnDef {
     pub name: String,
     /// User generics: `fn id[T](x: T) -> T` or `fn id<T>(x: T) -> T` (dual syntax).
     pub type_params: Vec<String>,
+    /// Optional interface bounds: `fn sort[T: Orderable](a: []T)`.
+    /// Maps type param name → interface name. Only populated for bounded params.
+    pub type_bounds: HashMap<String, String>,
     pub params: Vec<Param>,
     pub ret: Option<TypeExpr>,
     pub body: Block,
@@ -146,6 +150,8 @@ pub struct Param {
 #[derive(Debug, Clone, PartialEq)]
 pub struct StructDef {
     pub name: String,
+    /// User generics: `struct Foo[T, U]` or `struct Foo<T, U>` (dual syntax).
+    pub type_params: Vec<String>,
     /// `(name, type, optional default expr)` — defaults are const-ish literals in v1.
     pub fields: Vec<(String, TypeExpr, Option<Expr>)>,
     /// e.g. ["json"] from `#[derive(json)]`
@@ -156,6 +162,8 @@ pub struct StructDef {
 #[derive(Debug, Clone, PartialEq)]
 pub struct EnumDef {
     pub name: String,
+    /// User generics: `enum Tree[T] { Leaf(T), Node(Tree[T], Tree[T]) }`
+    pub type_params: Vec<String>,
     pub variants: Vec<EnumVariant>,
     pub exported: bool,
 }

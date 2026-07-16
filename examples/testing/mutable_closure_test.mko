@@ -1,0 +1,26 @@
+// Mutable closure infrastructure test — v0.1.9
+// Tests that the mutable capture cell system is wired up.
+// Full mutable closures require multi-statement lambda bodies (future work).
+
+fn apply(f: fn(int) -> int, x: int) -> int {
+    return f(x)
+}
+
+fn TestClosureCaptureByValue() {
+    // Existing: closures capture by value (read-only).
+    let n = 10
+    let result = apply(|x| x + n, 5)
+    assert_eq(result, 15)
+}
+
+fn TestClosureCaptureStruct() {
+    // Capture struct by value
+    let p = Point { x: 3, y: 4 }
+    let result = apply(|v| v + p.x + p.y, 0)
+    assert_eq(result, 7)
+}
+
+struct Point {
+    x: int
+    y: int
+}

@@ -1,29 +1,146 @@
-# Mako roadmap (ordered)
+# Mako roadmap
 
-Short engineering queue. Product map: [VISION.md](VISION.md).  
+**Product version:** **0.1.9** · Last roadmap sync: **2026-07-16**.
+
 **Verified:** [STATUS.md](STATUS.md) · **Stdlib:** [STDLIB.md](STDLIB.md) · **Security:** [SECURITY.md](SECURITY.md) · **Release:** [RELEASE.md](RELEASE.md).  
-**Book:** [The Mako Book](book/) · **Identity:** [IDENTITY.md](IDENTITY.md) · **Pain map:** [PAIN_POINTS.md](PAIN_POINTS.md).
-
-STATUS north-star / MVP: **100%**. Prefer STATUS over this list when claiming Done.  
-**Mako identity:** [IDENTITY.md](IDENTITY.md) (**~100%** preferred surface).  
-**Dual sugar only:** [GO_SYNTAX_CHECKLIST.md](GO_SYNTAX_CHECKLIST.md) (**~94%**).  
-**Product version:** **0.1.8** · Last roadmap sync: **2026-07-16**.
+**Book:** [The Mako Book](book/) · **Identity:** [IDENTITY.md](IDENTITY.md) · **Pain map:** [PAIN_POINTS.md](PAIN_POINTS.md).  
+**Implementation plan:** [ROADMAP_IMPL.md](../ROADMAP_IMPL.md).
 
 ---
 
-## Product intention (at a glance)
+## What is next
 
-| Scope | Approx. |
-|-------|---------|
-| MVP / STATUS north-star | **100%** |
-| General-purpose intention (weighted tracks below) | **~96%** |
-| Mako identity (preferred syntax) | **~100%** |
-| Dual-form sugar (optional) | **~94%** |
-| Standard library (target areas) | **~98%** |
+| Version | Theme | Status |
+|---------|-------|--------|
+| **0.1.9** | Generics & iterators | **Shipped** |
+| **0.2.0** | Stdlib written in Mako | **Next** |
+| **0.2.1** | Safety & correctness | Planned |
+| **0.2.2** | Tooling | Planned |
+| **0.3.0** | Cross-platform | Planned |
+| **0.4.0** | Performance ceiling | Planned |
+| **1.0** | Stability | Planned |
 
-Tracks 4–7 (backend, protocols, data, toolchain) are effectively **Done**.  
-**Seedable language residuals are closed** (error chain · fallthrough · domain seeds).  
-Remaining weight is **product** residual: install/portability polish, full debugger UI, real OS GPU/window hosts, domain CTFE product.
+---
+
+## v0.1.9 — Generics & Iterators — **shipped**
+
+The foundation for everything that follows. Without generic types, the standard
+library cannot be written in Mako, and users cannot build reusable data
+structures.
+
+| Feature | Status | Description |
+|---------|--------|-------------|
+| **Generic structs** | Done | `struct Pair[T] { a: T, b: T }` — monomorphized; multi-param supported |
+| **Generic enums** | Done | `enum MyBox[T] { Val(T), Nothing }` — match on monomorphs |
+| **Interface bounds** | Done | `fn f[T: Describable](x: T)` — structural method-set check |
+| **Iterator protocol** | Seed | Types with `next() -> Option[T]` usable from `for`; by-value `self` does not auto-advance (use mut patterns) |
+| **Mutable closures** | Seed | Heap-cell capture infrastructure; multi-statement mut lambdas residual |
+
+Tests: `generic_struct_test`, `generic_enum_test`, `generic_bounds_test`,
+`generic_adversarial_test`, `iterator_test`, `mutable_closure_test`,
+`examples/bad/generic_bound_fail.mko`.
+
+---
+
+## v0.2.0 — Stdlib in Mako
+
+The standard library moves from C runtime wrappers to real Mako code. The stdlib
+must be idiomatic Mako and serve as example code for the community.
+
+| Feature | Description |
+|---------|-------------|
+| **io.Reader / io.Writer** | Composable I/O interfaces — bufio, compression, TLS all work through them |
+| **Generic collections** | `List[T]`, `Set[T]`, `Queue[T]`, `PriorityQueue[T]` written in Mako |
+| **encoding/json** | Struct-aware marshal/unmarshal using reflect — written in Mako, not C |
+| **net/http middleware** | Handler chains, request context, streaming bodies |
+| **context cancellation** | Deadline propagation, cancel trees, timeout scoping |
+| **database/sql pool** | Connection pooling, prepared statements, transactions |
+
+---
+
+## v0.2.1 — Safety & Correctness
+
+Close the gap between what Mako promises and what it verifies.
+
+| Feature | Description |
+|---------|-------------|
+| **Ownership verification** | Static use-after-move analysis — compiler error, not runtime crash |
+| **Lifetime tracking** | Prevent dangling pointers from sub-slices and borrowed views |
+| **Compile-time race detection** | Shared mutable state across `kick` boundaries is a compile error |
+| **Match exhaustiveness** | Compiler error when match arms do not cover all enum variants |
+| **Match guards** | `Ok(n) if n > 0 => ...` — boolean conditions on match arms |
+| **Nested destructuring** | `Some(Point { x, y }) => ...` — destructure through multiple layers |
+
+---
+
+## v0.2.2 — Tooling
+
+Production-grade developer experience.
+
+| Feature | Description |
+|---------|-------------|
+| **LSP: find-all-references** | Across files, respecting imports |
+| **LSP: rename refactoring** | Safe symbol rename across the project |
+| **LSP: signature help** | Parameter hints as you type function calls |
+| **LSP: inlay hints** | Show inferred types inline |
+| **Debugger** | Source-level breakpoints in `.mko` files, step through Mako lines, inspect variables |
+| **Package registry** | `mako publish` / `mako install` from a central registry |
+| **Dependency solver** | Version conflict resolution with integrity hashes |
+
+---
+
+## v0.3.0 — Cross-Platform
+
+Every target tested in CI, not just scripts.
+
+| Feature | Description |
+|---------|-------------|
+| **Windows** | All tests pass in CI, native threading (not pthread shims), IOCP networking, MSI installer |
+| **WASM** | Browser target with DOM bindings, no POSIX deps, WASI Preview 2 component model |
+| **ARM / RISC-V** | Tested in CI via QEMU or real hardware, cross-compilation from x86 works |
+
+---
+
+## v0.4.0 — Performance Ceiling
+
+Move beyond what the C backend can give.
+
+| Feature | Description |
+|---------|-------------|
+| **IR layer** | Intermediate representation between AST and C — enables language-aware optimizations |
+| **Dead code elimination** | Import-aware reachability — only emit code that is actually used |
+| **Escape analysis** | Stack-allocate values that do not escape their scope |
+| **Interface devirtualization** | Inline interface calls when the concrete type is known |
+| **Closure inlining** | Inline small closures at call sites |
+| **LLVM backend** | Optional direct LLVM IR emission for targets where clang is slow or unavailable |
+
+---
+
+## v1.0 — Stability
+
+| Feature | Description |
+|---------|-------------|
+| **Syntax frozen** | No breaking changes to the language |
+| **Stdlib API stable** | Semver guarantees on all public symbols |
+| **Self-hosting compiler** | The Mako compiler written in Mako |
+| **Formal memory model** | Documented guarantees for concurrent access |
+| **Ecosystem** | Package registry with community packages, IDE plugins, CI templates |
+
+---
+
+## What shipped recently
+
+### 0.1.8 — Speed & memory safety
+
+- wyhash for map keys (4-8x faster than FNV-1a)
+- Stack-based f-string builder (zero malloc for short strings)
+- Compile-time constant folding for integer expressions
+- Zero-copy string comparisons, match arms, and print
+- Channel select uses condvar wake (not 2ms polling)
+- HTTP connection table scaled to 1024 with atomic counter
+- HTTP header interning via length-bucketed dispatch
+- Codegen emit_line with format_args (no per-line String allocation)
+- Lock-free chan_cap, codegen monomorph cache
 
 ---
 

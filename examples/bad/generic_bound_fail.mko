@@ -1,0 +1,14 @@
+// This should fail: int does not implement Describable
+
+interface Describable {
+    fn describe(self) -> string
+}
+
+fn get_description[T: Describable](thing: T) -> string {
+    return thing.describe()
+}
+
+fn main() {
+    let x = get_description(42)
+    print(x)
+}

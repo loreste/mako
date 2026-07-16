@@ -327,7 +327,7 @@ VS Code extension.
 ## mako version
 
 ```bash
-mako version                       # e.g. mako version mako0.1.8 darwin/arm64
+mako version                       # e.g. mako version mako0.1.9 darwin/arm64
 mako version -v                    # include git commit hash
 mako --version                     # same as mako version
 mako -V                            # same

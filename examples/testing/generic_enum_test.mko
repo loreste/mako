@@ -1,0 +1,30 @@
+// Generic enum tests — v0.1.9
+
+enum MyBox[T] {
+    Val(T)
+    Nothing
+}
+
+fn wrap(v: int) -> MyBox[int] {
+    return Val(v)
+}
+
+fn empty() -> MyBox[int] {
+    return Nothing
+}
+
+fn TestGenericEnumVal() {
+    let b = wrap(42)
+    match b {
+        Val(v) => assert_eq(v, 42),
+        Nothing => assert(false),
+    }
+}
+
+fn TestGenericEnumNothing() {
+    let b = empty()
+    match b {
+        Val(_) => assert(false),
+        Nothing => assert(true),
+    }
+}

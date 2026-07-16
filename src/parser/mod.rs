@@ -316,9 +316,9 @@ impl Parser {
     }
 
     /// Optional `[T, U]` or `<T, U>` type parameter list.
-    fn parse_type_params_opt(&mut self) -> Result<Vec<String>, ParseError> {
+    fn parse_type_params_opt(&mut self) -> Result<(Vec<String>, std::collections::HashMap<String, String>), ParseError> {
         if !matches!(self.peek_kind(), TokenKind::LBracket | TokenKind::Lt) {
-            return Ok(Vec::new());
+            return Ok((Vec::new(), std::collections::HashMap::new()));
         }
         let close = if matches!(self.peek_kind(), TokenKind::LBracket) {
             self.bump();
@@ -328,9 +328,17 @@ impl Parser {
             TokenKind::Gt
         };
         let mut params = Vec::new();
+        let mut bounds = std::collections::HashMap::new();
         if std::mem::discriminant(self.peek_kind()) != std::mem::discriminant(&close) {
             loop {
-                params.push(self.expect_ident()?);
+                let name = self.expect_ident()?;
+                // Optional bound: `T: InterfaceName`
+                if matches!(self.peek_kind(), TokenKind::Colon) {
+                    self.bump();
+                    let bound = self.expect_ident()?;
+                    bounds.insert(name.clone(), bound);
+                }
+                params.push(name);
                 if matches!(self.peek_kind(), TokenKind::Comma) {
                     self.bump();
                 } else {
@@ -339,7 +347,7 @@ impl Parser {
             }
         }
         self.expect(close)?;
-        Ok(params)
+        Ok((params, bounds))
     }
 
     /// Item attributes: `#[derive(...)]`, `#[stable]`, `#[deprecated]` / `#[deprecated("msg")]`.
@@ -796,7 +804,7 @@ impl Parser {
         }
 
         let short_name = self.expect_ident()?;
-        let type_params = self.parse_type_params_opt()?;
+        let (type_params, type_bounds) = self.parse_type_params_opt()?;
         self.expect(TokenKind::LParen)?;
         let mut params = Vec::new();
         if let Some(recv) = go_receiver.clone() {
@@ -931,11 +939,12 @@ impl Parser {
         Ok(FnDef {
             name,
             type_params,
+            type_bounds,
             params,
             ret,
             body,
             exported: false,
-        is_const: false,
+            is_const: false,
             stability: crate::ast::ApiStability::Unspecified,
         })
     }
@@ -948,6 +957,7 @@ impl Parser {
         } else {
             self.expect_ident()?
         };
+        let (type_params, _type_bounds) = self.parse_type_params_opt()?;
         self.expect(TokenKind::LBrace)?;
         let mut fields = Vec::new();
         while !matches!(self.peek_kind(), TokenKind::RBrace) {
@@ -979,6 +989,7 @@ impl Parser {
         self.expect(TokenKind::RBrace)?;
         Ok(StructDef {
             name,
+            type_params,
             fields,
             derives: Vec::new(),
             exported: false,
@@ -1000,6 +1011,7 @@ impl Parser {
     fn parse_enum(&mut self) -> Result<EnumDef, ParseError> {
         self.expect(TokenKind::Enum)?;
         let name = self.expect_ident()?;
+        let (type_params, _type_bounds) = self.parse_type_params_opt()?;
         self.expect(TokenKind::LBrace)?;
         let mut variants = Vec::new();
         while !matches!(self.peek_kind(), TokenKind::RBrace) {
@@ -1030,6 +1042,7 @@ impl Parser {
         self.expect(TokenKind::RBrace)?;
         Ok(EnumDef {
             name,
+            type_params,
             variants,
             exported: false,
         })
@@ -2036,6 +2049,61 @@ impl Parser {
     /// After `{` has been consumed: parse a struct literal body for `name`.
     /// Returns `None` (and leaves the cursor after `{`) when the braces are not
     /// a clear named/positional literal — caller restores position.
+    /// Try to parse `Name[T, U] { field: val, ... }` as a generic struct literal.
+    /// Returns None (and resets pos) if the bracket sequence is not type args + `{`.
+    fn try_parse_generic_struct_lit(&mut self, name: &str) -> Result<Option<Expr>, ParseError> {
+        let save = self.pos;
+        // Parse `[T, U]` or `<T, U>` type args
+        let close_tok = if matches!(self.peek_kind(), TokenKind::LBracket) {
+            self.bump();
+            TokenKind::RBracket
+        } else if matches!(self.peek_kind(), TokenKind::Lt) {
+            self.bump();
+            TokenKind::Gt
+        } else {
+            return Ok(None);
+        };
+        let mut type_args = Vec::new();
+        loop {
+            if *self.peek_kind() == close_tok {
+                break;
+            }
+            // Try parsing a type expression — if it fails, this isn't type args
+            match self.parse_type() {
+                Ok(ty) => type_args.push(ty),
+                Err(_) => {
+                    self.pos = save;
+                    return Ok(None);
+                }
+            }
+            if matches!(self.peek_kind(), TokenKind::Comma) {
+                self.bump();
+            }
+        }
+        if type_args.is_empty() {
+            self.pos = save;
+            return Ok(None);
+        }
+        self.bump(); // close bracket
+        // Must be followed by `{` for a struct literal
+        if !matches!(self.peek_kind(), TokenKind::LBrace) {
+            self.pos = save;
+            return Ok(None);
+        }
+        // Build monomorphized name: Pair__int, Triple__string__float
+        let mono_name = format!(
+            "{}__{}",
+            name,
+            type_args.iter().map(|t| type_expr_mono_tag(t)).collect::<Vec<_>>().join("__")
+        );
+        self.bump(); // {
+        if let Some(lit) = self.try_parse_struct_lit_tail(mono_name)? {
+            return Ok(Some(lit));
+        }
+        self.pos = save;
+        Ok(None)
+    }
+
     fn try_parse_struct_lit_tail(&mut self, name: String) -> Result<Option<Expr>, ParseError> {
         let is_named = matches!(self.peek_kind(), TokenKind::DotDot)
             || (matches!(self.peek_kind(), TokenKind::Ident(_)) && {
@@ -2247,6 +2315,19 @@ impl Parser {
                         elem,
                         cap: Box::new(cap),
                     });
+                }
+                // Generic struct literal: `Pair[int] { a: 1, b: 2 }` or
+                // `Pair<int> { a: 1 }`. Parse type args, then struct body.
+                if matches!(self.peek_kind(), TokenKind::LBracket | TokenKind::Lt)
+                    && !self.no_struct_lit
+                {
+                    let save = self.pos;
+                    let bracket_is_lt = matches!(self.peek_kind(), TokenKind::Lt);
+                    if let Some(mono_name) = self.try_parse_generic_struct_lit(&name)? {
+                        return Ok(mono_name);
+                    }
+                    self.pos = save;
+                    let _ = bracket_is_lt;
                 }
                 // Struct literal: named `Person { name: "Ada", age: 36 }` or
                 // positional `Point{1, 2}` / empty `Point{}`. Suppressed in
@@ -3163,5 +3244,30 @@ fn incdec_binop(kind: &TokenKind) -> Option<BinOp> {
         TokenKind::PlusPlus => Some(BinOp::Add),
         TokenKind::MinusMinus => Some(BinOp::Sub),
         _ => None,
+    }
+}
+
+/// Simple mono tag for a type expression (used in parser for generic struct literal names).
+fn type_expr_mono_tag(t: &TypeExpr) -> String {
+    match t {
+        TypeExpr::Named(n) => match n.as_str() {
+            "int" | "int64" => "int".into(),
+            "float" | "float64" => "float".into(),
+            "bool" => "bool".into(),
+            "string" => "string".into(),
+            "byte" => "byte".into(),
+            other => other.to_string(),
+        },
+        TypeExpr::Array(inner) => format!("arr_{}", type_expr_mono_tag(inner)),
+        TypeExpr::Map(k, v) => format!("map_{}_{}", type_expr_mono_tag(k), type_expr_mono_tag(v)),
+        TypeExpr::Generic(name, args) => {
+            let tags: Vec<String> = args.iter().map(|a| type_expr_mono_tag(a)).collect();
+            format!("{}__{}", name, tags.join("__"))
+        }
+        TypeExpr::Tuple(elems) => {
+            let tags: Vec<String> = elems.iter().map(|e| type_expr_mono_tag(e)).collect();
+            format!("tup_{}", tags.join("_"))
+        }
+        TypeExpr::Fn(_, _) => "fn".into(),
     }
 }

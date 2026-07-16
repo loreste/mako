@@ -1,0 +1,63 @@
+struct Pair[T] {
+    a: T
+    b: T
+}
+
+struct Wrapper[T] {
+    value: T
+    label: string
+}
+
+struct Triple[A, B] {
+    first: A
+    second: B
+    third: int
+}
+
+fn TestGenericStructInt() {
+    let p = Pair[int] { a: 1, b: 2 }
+    assert_eq(p.a, 1)
+    assert_eq(p.b, 2)
+}
+
+fn TestGenericStructString() {
+    let p = Pair[string] { a: "hello", b: "world" }
+    assert_eq_str(p.a, "hello")
+    assert_eq_str(p.b, "world")
+}
+
+fn TestGenericStructMixed() {
+    let w = Wrapper[int] { value: 42, label: "answer" }
+    assert_eq(w.value, 42)
+    assert_eq_str(w.label, "answer")
+}
+
+fn TestGenericStructMultiParam() {
+    let t = Triple[string, float] { first: "x", second: 2.5, third: 7 }
+    assert_eq_str(t.first, "x")
+    assert_eq(t.third, 7)
+}
+
+fn TestGenericStructSameTypeTwice() {
+    let a = Pair[int] { a: 10, b: 20 }
+    let b = Pair[string] { a: "hi", b: "lo" }
+    assert_eq(a.a + a.b, 30)
+    assert_eq_str(b.a, "hi")
+}
+
+fn TestGenericStructFloat() {
+    let w = Wrapper[float] { value: 3.14, label: "pi" }
+    assert_eq_str(w.label, "pi")
+}
+
+fn TestGenericStructInGenericFn() {
+    let result = make_pair(42, 99)
+    assert_eq(result.a, 42)
+    assert_eq(result.b, 99)
+    let sp = make_pair("hello", "world")
+    assert_eq_str(sp.a, "hello")
+}
+
+fn make_pair[T](a: T, b: T) -> Pair[T] {
+    return Pair[T] { a: a, b: b }
+}

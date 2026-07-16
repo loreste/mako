@@ -86,7 +86,7 @@ fn expand_json_derive(s: &StructDef) -> Vec<Item> {
         .map(|first| pieces.fold(first, |acc, next| call("json_merge", vec![acc, next])))
         .unwrap_or_else(|| Expr::String("{}".into()));
 
-    items.push(Item::Fn(FnDef {
+    items.push(Item::Fn(FnDef { type_bounds: std::collections::HashMap::new(),
         name: fname,
         type_params: Vec::new(),
         params,
@@ -105,7 +105,7 @@ fn expand_json_derive(s: &StructDef) -> Vec<Item> {
             TypeExpr::Named(n) if n == "int" => ("json_get_int", "int"),
             _ => continue,
         };
-        items.push(Item::Fn(FnDef {
+        items.push(Item::Fn(FnDef { type_bounds: std::collections::HashMap::new(),
             name: format!("{}_{}_from_json", s.name, fname_field),
             type_params: Vec::new(),
             params: vec![Param {
@@ -265,6 +265,7 @@ fn expand_actor(actor: ActorDef) -> Vec<Item> {
     if has_state {
         items.push(Item::Struct(StructDef {
             name: state_ty.clone(),
+            type_params: Vec::new(),
             fields: actor.fields.clone(),
             derives: Vec::new(),
             exported: false,
@@ -287,7 +288,7 @@ fn expand_actor(actor: ActorDef) -> Vec<Item> {
         } else {
             (vec![], vec![Expr::Int(tag), Expr::Int(0)])
         };
-        items.push(Item::Fn(FnDef {
+        items.push(Item::Fn(FnDef { type_bounds: std::collections::HashMap::new(),
             name: format!("{name}_{}", arm.message),
             type_params: Vec::new(),
             params,
@@ -305,7 +306,7 @@ fn expand_actor(actor: ActorDef) -> Vec<Item> {
     }
 
     // Session_spawn() -> chan[int] (default mailbox 16)
-    items.push(Item::Fn(FnDef {
+    items.push(Item::Fn(FnDef { type_bounds: std::collections::HashMap::new(),
         name: format!("{name}_spawn"),
         type_params: Vec::new(),
         params: vec![],
@@ -325,7 +326,7 @@ fn expand_actor(actor: ActorDef) -> Vec<Item> {
     }));
 
     // Session_spawn_cap(cap) -> chan[int]
-    items.push(Item::Fn(FnDef {
+    items.push(Item::Fn(FnDef { type_bounds: std::collections::HashMap::new(),
         name: format!("{name}_spawn_cap"),
         type_params: Vec::new(),
         params: vec![Param {
@@ -349,7 +350,7 @@ fn expand_actor(actor: ActorDef) -> Vec<Item> {
     }));
 
     // Session_send(mbox, tag) -> bool
-    items.push(Item::Fn(FnDef {
+    items.push(Item::Fn(FnDef { type_bounds: std::collections::HashMap::new(),
         name: format!("{name}_send"),
         type_params: Vec::new(),
         params: vec![
@@ -516,7 +517,7 @@ fn expand_actor(actor: ActorDef) -> Vec<Item> {
     }));
     loop_stmts.push(Stmt::Return(Some(ret_expr)));
 
-    items.push(Item::Fn(FnDef {
+    items.push(Item::Fn(FnDef { type_bounds: std::collections::HashMap::new(),
         name: format!("{name}_loop"),
         type_params: Vec::new(),
         params: vec![Param {

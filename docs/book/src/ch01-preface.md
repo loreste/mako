@@ -25,7 +25,7 @@ concise, with explicit annotations only where they genuinely prevent bugs.
 > concurrency. Fast compiles. Clean error handling. Single-binary deployment.
 > A strong standard library. Great tooling from day one.
 
-These are not aspirational goals -- they are the shipped reality of Mako 0.1.8.
+These are not aspirational goals -- they are the shipped reality of Mako 0.1.9.
 
 ## Design philosophy
 
@@ -182,7 +182,7 @@ As of the current release:
 
 | Claim | Meaning |
 |-------|---------|
-| Version 0.1.8 | Current product (speed patch after 0.1.7); first public was 0.1.0 release, core language complete |
+| Version 0.1.9 | Current product (generics after 0.1.8); first public was 0.1.0 release, core language complete |
 | Stdlib coverage | Major backend areas covered (HTTP, TLS, JSON, SQL, etc.) |
 | Test suite | 165+ examples pass in the test suite |
 

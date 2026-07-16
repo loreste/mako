@@ -1,0 +1,42 @@
+// Interface bounds on generics — v0.1.9
+
+interface Describable {
+    fn describe(self) -> string
+}
+
+struct Dog {
+    name: string
+}
+
+on Dog {
+    fn describe(self) -> string {
+        return self.name
+    }
+}
+
+struct Cat {
+    color: string
+}
+
+on Cat {
+    fn describe(self) -> string {
+        return self.color
+    }
+}
+
+// Bounded generic: T must implement Describable
+fn get_description[T: Describable](thing: T) -> string {
+    return thing.describe()
+}
+
+fn TestBoundedGenericDog() {
+    let d = Dog { name: "Rex" }
+    let desc = get_description(d)
+    assert_eq_str(desc, "Rex")
+}
+
+fn TestBoundedGenericCat() {
+    let c = Cat { color: "orange" }
+    let desc = get_description(c)
+    assert_eq_str(desc, "orange")
+}

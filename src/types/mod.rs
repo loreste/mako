@@ -293,6 +293,18 @@ pub struct TypeChecker {
     pub bounds_checks_always: bool,
     /// Generic function templates: `fn id[T](x: T) -> T`
     generic_fns: HashMap<String, FnDef>,
+    /// Generic struct templates: `struct Pair[T] { a: T, b: T }`
+    generic_structs: HashMap<String, StructDef>,
+    /// Generic enum templates: `enum Tree[T] { Leaf(T), Branch(Tree[T], Tree[T]) }`
+    generic_enums: HashMap<String, EnumDef>,
+    /// Mono names already generated for generic enums.
+    mono_enum_generated: HashSet<String>,
+    /// Monomorphized enum defs (for codegen emission).
+    pub mono_enums: Vec<EnumDef>,
+    /// Mono names already generated for generic structs.
+    mono_struct_generated: HashSet<String>,
+    /// Monomorphized struct defs (for codegen emission).
+    pub mono_structs: Vec<StructDef>,
     /// `#[deprecated("msg")]` functions — call sites hard-error with the message.
     deprecated_fns: HashMap<String, String>,
     /// Active type parameters while checking a generic template body.
@@ -10485,6 +10497,12 @@ impl TypeChecker {
             explicit_visibility: false,
             bounds_checks_always: false,
             generic_fns: HashMap::new(),
+            generic_structs: HashMap::new(),
+            mono_struct_generated: HashSet::new(),
+            mono_structs: Vec::new(),
+            generic_enums: HashMap::new(),
+            mono_enum_generated: HashSet::new(),
+            mono_enums: Vec::new(),
             deprecated_fns: HashMap::new(),
             active_type_params: HashSet::new(),
             mono_fns: Vec::new(),
@@ -10687,6 +10705,11 @@ impl TypeChecker {
         for item in &program.items {
             match item {
                 Item::Struct(s) => {
+                    if !s.type_params.is_empty() {
+                        // Generic struct template — monomorphized on use.
+                        self.generic_structs.insert(s.name.clone(), s.clone());
+                        continue;
+                    }
                     let fields: Result<Vec<_>, _> = s
                         .fields
                         .iter()
@@ -10711,6 +10734,11 @@ impl TypeChecker {
                     );
                 }
                 Item::Enum(e) => {
+                    if !e.type_params.is_empty() {
+                        // Generic enum template — monomorphized on use.
+                        self.generic_enums.insert(e.name.clone(), e.clone());
+                        continue;
+                    }
                     let mut variants = Vec::new();
                     for v in &e.variants {
                         let fields: Result<Vec<_>, _> =
@@ -10814,6 +10842,26 @@ impl TypeChecker {
             }
         }
 
+        // Instantiate any generic enums referenced in function signatures.
+        // Must happen before body checking so variant constructors are available.
+        let fn_ret_names: Vec<String> = self
+            .fns
+            .values()
+            .filter_map(|t| {
+                if let Type::Fn(_, ret) = t {
+                    if let Type::Named(n) = ret.as_ref() {
+                        if n.contains("__") {
+                            return Some(n.clone());
+                        }
+                    }
+                }
+                None
+            })
+            .collect();
+        for mono_name in fn_ret_names {
+            let _ = self.try_instantiate_generic_enum(&mono_name);
+        }
+
         // Second pass: check bodies (skip generic templates — specialized on call)
         for item in &program.items {
             if let Item::Fn(f) = item {
@@ -10854,9 +10902,19 @@ impl TypeChecker {
             }
         }
 
+        // Collect interface names used as generic bounds — these don't need
+        // standalone implementations (they're verified at call sites).
+        let bound_ifaces: HashSet<String> = self
+            .generic_fns
+            .values()
+            .flat_map(|f| f.type_bounds.values().cloned())
+            .collect();
         // Interface method presence: `Iface_method`, `Iface_Concrete_method`,
         // or Go-style `Concrete_method` method set.
         for iface in &self.interfaces.clone() {
+            if bound_ifaces.contains(&iface.name) {
+                continue; // bound-only interfaces are checked at generic call sites
+            }
             for (mname, params, ret) in &iface.methods {
                 let expected_params: Result<Vec<_>, _> =
                     params.iter().map(|t| self.resolve_type(t)).collect();
@@ -12006,9 +12064,20 @@ impl TypeChecker {
                     Ok(Type::Map(Box::new(k), Box::new(v)))
                 }
                 other => {
-                    let args: Result<Vec<_>, _> =
+                    let resolved_args: Result<Vec<_>, _> =
                         args.iter().map(|a| self.resolve_type(a)).collect();
-                    let _ = args?;
+                    let resolved_args = resolved_args?;
+                    // Check if this is a generic struct or enum instantiation.
+                    if self.generic_structs.contains_key(other) {
+                        let tags: Vec<String> = resolved_args.iter().map(|t| t.mono_tag()).collect();
+                        let mono_name = format!("{other}__{}", tags.join("__"));
+                        return Ok(Type::Named(mono_name));
+                    }
+                    if self.generic_enums.contains_key(other) {
+                        let tags: Vec<String> = resolved_args.iter().map(|t| t.mono_tag()).collect();
+                        let mono_name = format!("{other}__{}", tags.join("__"));
+                        return Ok(Type::Named(mono_name));
+                    }
                     Ok(Type::Named(other.to_string()))
                 }
             },
@@ -13214,6 +13283,27 @@ impl TypeChecker {
                         return Err(TypeError::new(
                             "cannot use two binders over an int count; use `for i in n` or `for i in range n`",
                         ));
+                    }
+                    // Iterator protocol: struct with a `next` method returning Option[T]
+                    Type::Struct { name, .. } | Type::Named(name) => {
+                        let next_fn = format!("{name}_next");
+                        if let Some(Type::Fn(_, ret)) = self.fns.get(&next_fn) {
+                            match ret.as_ref() {
+                                Type::Option(inner) => {
+                                    (Type::Int, (**inner).clone(), false, false)
+                                }
+                                _ => {
+                                    return Err(TypeError::new(format!(
+                                        "`{name}_next` must return Option[T] for iterator protocol"
+                                    )));
+                                }
+                            }
+                        } else {
+                            return Err(TypeError::new(format!(
+                                "cannot iterate over {}; implement `on {name} {{ fn next(self) -> Option[T] }}` for iterator support",
+                                name
+                            )));
+                        }
                     }
                     other => {
                         return Err(TypeError::new(format!(
@@ -15281,7 +15371,18 @@ impl TypeChecker {
                     }
                 }
                 let bt = self.check_expr(base)?;
-                match bt {
+                // Resolve Named types to their struct definition.
+                let resolved_bt = match &bt {
+                    Type::Named(n) => {
+                        // Try to instantiate generic struct if needed.
+                        if !self.types.contains_key(n) {
+                            let _ = self.try_instantiate_generic_struct(n);
+                        }
+                        self.types.get(n).cloned().unwrap_or(bt.clone())
+                    }
+                    other => other.clone(),
+                };
+                match resolved_bt {
                     Type::Struct { fields, .. } => fields
                         .iter()
                         .find(|(n, _)| n == field)
@@ -15298,6 +15399,11 @@ impl TypeChecker {
                 fields,
                 update,
             } => {
+                // If this is a monomorphized generic struct (e.g. Pair__int),
+                // instantiate the template on first use.
+                if !self.types.contains_key(name) {
+                    self.try_instantiate_generic_struct(name)?;
+                }
                 let Some(Type::Struct {
                     name: sname,
                     fields: decl,
@@ -16063,6 +16169,230 @@ impl TypeChecker {
     }
 
     /// Infer type args and monomorphize a generic function call.
+    /// Try to instantiate a generic struct from a monomorphized name like `Pair__int`.
+    /// Parses the name to find the template and type args, substitutes, and registers.
+    fn try_instantiate_generic_struct(&mut self, mono_name: &str) -> Result<(), TypeError> {
+        if self.mono_struct_generated.contains(mono_name) {
+            return Ok(());
+        }
+        // Find the base generic struct name by trying known templates.
+        // e.g. for "Wrapper__Pair__int", try "Wrapper" first (it's a known template).
+        // The rest ("Pair__int") is the tag for type param T.
+        let mut base = "";
+        let mut tag_str = "";
+        for name in self.generic_structs.keys() {
+            if let Some(rest) = mono_name.strip_prefix(name.as_str()) {
+                if let Some(rest) = rest.strip_prefix("__") {
+                    if base.is_empty() || name.len() > base.len() {
+                        base = unsafe { &*(name.as_str() as *const str) };
+                        tag_str = unsafe { &*(rest as *const str) };
+                    }
+                }
+            }
+        }
+        if base.is_empty() {
+            return Ok(()); // no matching generic template
+        }
+        let template = self.generic_structs.get(base).cloned().unwrap();
+        // Split tag_str into N parts matching the number of type params.
+        // For 1 param, the entire tag_str is the tag (even if it contains __).
+        // For N params, split on __ but only N-1 times.
+        let tag_parts: Vec<&str> = if template.type_params.len() == 1 {
+            vec![tag_str]
+        } else {
+            tag_str.splitn(template.type_params.len(), "__").collect()
+        };
+        if tag_parts.len() != template.type_params.len() {
+            return Err(TypeError::new(format!(
+                "generic struct `{base}` has {} type params, got {} in `{mono_name}`",
+                template.type_params.len(),
+                tag_parts.len()
+            )));
+        }
+        // Build substitution map: T → resolved type
+        let mut subst: HashMap<String, Type> = HashMap::new();
+        for (tp, tag) in template.type_params.iter().zip(tag_parts.iter()) {
+            let te = self.tag_to_type_expr(tag);
+            let ty = self.resolve_type(&te)?;
+            subst.insert(tp.clone(), ty);
+        }
+        // Substitute type params in fields
+        let mono_fields: Vec<(String, TypeExpr, Option<Expr>)> = template
+            .fields
+            .iter()
+            .map(|(n, t, d)| (n.clone(), subst_type_expr(t, &subst), d.clone()))
+            .collect();
+        let mono_struct = StructDef {
+            name: mono_name.to_string(),
+            type_params: Vec::new(),
+            fields: mono_fields,
+            derives: template.derives.clone(),
+            exported: template.exported,
+        };
+        // Register the concrete struct type
+        let fields: Result<Vec<_>, _> = mono_struct
+            .fields
+            .iter()
+            .map(|(n, t, _)| Ok((n.clone(), self.resolve_type(t)?)))
+            .collect();
+        let fields = fields?;
+        self.types.insert(
+            mono_name.to_string(),
+            Type::Struct {
+                name: mono_name.to_string(),
+                fields,
+            },
+        );
+        self.mono_struct_generated.insert(mono_name.to_string());
+        self.mono_structs.push(mono_struct);
+        Ok(())
+    }
+
+    /// Convert a mono tag string back to a TypeExpr for substitution.
+    /// Handles both primitive tags and monomorphized struct names.
+    fn tag_to_type_expr(&mut self, tag: &str) -> TypeExpr {
+        match tag {
+            "int" | "int64" => TypeExpr::Named("int".into()),
+            "float" | "float64" => TypeExpr::Named("float".into()),
+            "bool" => TypeExpr::Named("bool".into()),
+            "string" => TypeExpr::Named("string".into()),
+            "byte" => TypeExpr::Named("byte".into()),
+            other => {
+                // If this looks like a monomorphized generic struct (contains __),
+                // try to instantiate it first so it's available as a type.
+                if other.contains("__") {
+                    let _ = self.try_instantiate_generic_struct(other);
+                }
+                TypeExpr::Named(other.to_string())
+            }
+        }
+    }
+
+    /// Try to instantiate a generic enum from a monomorphized name.
+    fn try_instantiate_generic_enum(&mut self, mono_name: &str) -> Result<(), TypeError> {
+        if self.mono_enum_generated.contains(mono_name) {
+            return Ok(());
+        }
+        let mut base = "";
+        let mut tag_str = "";
+        for name in self.generic_enums.keys() {
+            if let Some(rest) = mono_name.strip_prefix(name.as_str()) {
+                if let Some(rest) = rest.strip_prefix("__") {
+                    if base.is_empty() || name.len() > base.len() {
+                        base = unsafe { &*(name.as_str() as *const str) };
+                        tag_str = unsafe { &*(rest as *const str) };
+                    }
+                }
+            }
+        }
+        if base.is_empty() {
+            return Ok(());
+        }
+        let template = self.generic_enums.get(base).cloned().unwrap();
+        let tag_parts: Vec<&str> = if template.type_params.len() == 1 {
+            vec![tag_str]
+        } else {
+            tag_str.splitn(template.type_params.len(), "__").collect()
+        };
+        if tag_parts.len() != template.type_params.len() {
+            return Err(TypeError::new(format!(
+                "generic enum `{base}` has {} type params, got {} in `{mono_name}`",
+                template.type_params.len(),
+                tag_parts.len()
+            )));
+        }
+        let mut subst: HashMap<String, Type> = HashMap::new();
+        for (tp, tag) in template.type_params.iter().zip(tag_parts.iter()) {
+            let te = self.tag_to_type_expr(tag);
+            let ty = self.resolve_type(&te)?;
+            subst.insert(tp.clone(), ty);
+        }
+        let mono_variants: Vec<EnumVariant> = template
+            .variants
+            .iter()
+            .map(|v| EnumVariant {
+                name: v.name.clone(),
+                fields: v.fields.iter().map(|t| subst_type_expr(t, &subst)).collect(),
+            })
+            .collect();
+        let mono_enum = EnumDef {
+            name: mono_name.to_string(),
+            type_params: Vec::new(),
+            variants: mono_variants,
+            exported: template.exported,
+        };
+        // Register variants and the concrete enum type
+        let mut typed_variants = Vec::new();
+        for v in &mono_enum.variants {
+            let fields: Result<Vec<_>, _> = v.fields.iter().map(|t| self.resolve_type(t)).collect();
+            let fields = fields?;
+            self.variants.insert(
+                v.name.clone(),
+                VariantCtor {
+                    enum_name: mono_name.to_string(),
+                    fields: fields.clone(),
+                },
+            );
+            typed_variants.push((v.name.clone(), fields));
+        }
+        self.types.insert(
+            mono_name.to_string(),
+            Type::Enum {
+                name: mono_name.to_string(),
+                variants: typed_variants,
+            },
+        );
+        self.mono_enum_generated.insert(mono_name.to_string());
+        self.mono_enums.push(mono_enum);
+        Ok(())
+    }
+
+    /// Verify that `concrete_ty` satisfies the interface `iface_name`.
+    /// Checks that the concrete type has methods matching all interface methods.
+    fn check_interface_bound(
+        &self,
+        concrete_ty: &Type,
+        iface_name: &str,
+        fn_name: &str,
+        tp_name: &str,
+    ) -> Result<(), TypeError> {
+        // Find the interface definition
+        let iface = self
+            .interfaces
+            .iter()
+            .find(|d| d.name == iface_name);
+        let Some(iface_def) = iface else {
+            return Err(TypeError::new(format!(
+                "unknown interface `{iface_name}` used as bound on `{tp_name}` in `{fn_name}`"
+            )));
+        };
+        let methods = iface_def.methods.clone();
+        // Get the concrete type name for method lookup
+        let type_name = match concrete_ty {
+            Type::Struct { name, .. } => name.clone(),
+            Type::Named(n) => n.clone(),
+            Type::Int => "int".into(),
+            Type::Float => "float".into(),
+            Type::String => "string".into(),
+            Type::Bool => "bool".into(),
+            other => other.display(),
+        };
+        // Check each interface method exists on the concrete type
+        for (method_name, _param_tys, _ret_ty) in &methods {
+            let impl_name = format!("{type_name}_{method_name}");
+            if !self.fns.contains_key(&impl_name) {
+                return Err(TypeError::new(format!(
+                    "type `{}` does not satisfy interface `{iface_name}`: missing method `{method_name}`",
+                    concrete_ty.display()
+                ))
+                .hint(format!(
+                    "add `on {type_name} {{ fn {method_name}(self, ...) {{ ... }} }}`"
+                )));
+            }
+        }
+        Ok(())
+    }
+
     fn check_generic_call(&mut self, name: &str, args: &[Expr]) -> Result<Type, TypeError> {
         let template = self
             .generic_fns
@@ -16093,6 +16423,12 @@ impl TypeChecker {
                     "cannot infer type parameter `{tp}` for `{name}`"
                 ))
                 .hint("pass arguments that determine T, or use a concrete helper"));
+            }
+        }
+        // Check interface bounds: if T: Stringer, verify the concrete type has the methods.
+        for (tp, iface_name) in &template.type_bounds {
+            if let Some(concrete_ty) = subst.get(tp) {
+                self.check_interface_bound(concrete_ty, iface_name, name, tp)?;
             }
         }
         let mono_name = {
@@ -16428,6 +16764,31 @@ impl TypeChecker {
                         self.bind_pattern(b, ft)?;
                     }
                     Ok(())
+                }
+                Type::Named(n) => {
+                    // Resolve Named to its underlying Enum type.
+                    if let Some(Type::Enum { variants, .. }) = self.types.get(n) {
+                        let variants = variants.clone();
+                        let Some((_, fields)) = variants.iter().find(|(vn, _)| vn == name) else {
+                            return Err(TypeError::new(format!("unknown variant `{name}`")));
+                        };
+                        if fields.len() != bindings.len() {
+                            return Err(TypeError::new(format!(
+                                "variant `{name}` has {} fields, pattern has {}",
+                                fields.len(),
+                                bindings.len()
+                            )));
+                        }
+                        for (b, ft) in bindings.iter().zip(fields) {
+                            self.bind_pattern(b, ft)?;
+                        }
+                        Ok(())
+                    } else {
+                        Err(TypeError::new(format!(
+                            "cannot match variant on {}",
+                            n
+                        )))
+                    }
                 }
                 other => Err(TypeError::new(format!(
                     "cannot match variant on {}",
@@ -17751,6 +18112,7 @@ pub fn specialize_fn(template: &FnDef, mono_name: &str, subst: &HashMap<String, 
     FnDef {
         name: mono_name.to_string(),
         type_params: Vec::new(),
+        type_bounds: HashMap::new(),
         params: template
             .params
             .iter()
@@ -17913,6 +18275,43 @@ fn subst_expr(e: &Expr, subst: &HashMap<String, Type>) -> Expr {
             len: len.as_ref().map(|e| Box::new(subst_expr(e, subst))),
             cap: cap.as_ref().map(|e| Box::new(subst_expr(e, subst))),
         },
+        Expr::StructLit { name, fields, update } => {
+            // Substitute type param tags in monomorphized struct names.
+            // e.g. "Pair__T" with {T: int} → "Pair__int"
+            let mono_name = subst_mono_name(name, subst);
+            Expr::StructLit {
+                name: mono_name,
+                fields: fields
+                    .iter()
+                    .map(|(n, e)| (n.clone(), subst_expr(e, subst)))
+                    .collect(),
+                update: update.as_ref().map(|e| Box::new(subst_expr(e, subst))),
+            }
+        }
+        Expr::StructLitPos { name, values } => {
+            let mono_name = subst_mono_name(name, subst);
+            Expr::StructLitPos {
+                name: mono_name,
+                values: values.iter().map(|e| subst_expr(e, subst)).collect(),
+            }
+        }
         other => other.clone(),
     }
+}
+
+/// Replace type param tags in a monomorphized name. e.g. "Pair__T" with {T→int} → "Pair__int".
+fn subst_mono_name(name: &str, subst: &HashMap<String, Type>) -> String {
+    if !name.contains("__") {
+        return name.to_string();
+    }
+    let mut result = name.to_string();
+    for (param, ty) in subst {
+        result = result.replace(&format!("__{param}"), &format!("__{}", ty.mono_tag()));
+        // Also handle the param appearing as the entire tag after the last __
+        if result.ends_with(&format!("__{param}")) {
+            let prefix_len = result.len() - param.len() - 2;
+            result = format!("{}__{}", &result[..prefix_len], ty.mono_tag());
+        }
+    }
+    result
 }

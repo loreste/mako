@@ -3,12 +3,12 @@
 Mako aims for **simple everyday code**, **Rust-class performance**, and **memory
 safety without a mandatory GC** — with a **syntax surface that is Mako’s own**.
 
-**Current product:** **0.1.8**. See [IDENTITY.md](IDENTITY.md) for preferred forms.
+**Current product:** **0.1.9**. See [IDENTITY.md](IDENTITY.md) for preferred forms.
 
 ## Guarantees (0.x)
 
 1. **Source compatibility:** A program that `mako check`s on 0.1.0 keeps checking
-   on later 0.x releases (including **0.1.8**), unless the package opts into a stricter flag.
+   on later 0.x releases (including **0.1.9**), unless the package opts into a stricter flag.
 2. **Dual syntax stays:** Compat spellings remain accepted. Docs and `mako fmt`
    prefer Mako-native forms.
 3. **Additive APIs only:** New builtins and syntax never retype existing ones.

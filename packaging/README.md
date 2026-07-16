@@ -4,7 +4,7 @@ Assets for distributing **Mako** outside a source checkout.
 
 ## GitHub Releases
 
-**Product tip:** **v0.1.8** (after tag + CI). **v0.1.7** was the previous product tip.
+**Product tip:** **v0.1.9** (after tag + CI). **v0.1.8** was the previous product tip.
 
 Built by `.github/workflows/release.yml` on tag `v*`:
 
@@ -17,8 +17,8 @@ Built by `.github/workflows/release.yml` on tag `v*`:
 Installers: `install-release.sh`, `install-linux.sh` (LF only).
 
 ```bash
-curl -fsSL https://github.com/loreste/mako/releases/download/v0.1.8/install-release.sh \
-  | bash -s -- --version v0.1.8 --yes
+curl -fsSL https://github.com/loreste/mako/releases/download/v0.1.9/install-release.sh \
+  | bash -s -- --version v0.1.9 --yes
 ```
 
 ## Fill packaging from a release
@@ -26,7 +26,7 @@ curl -fsSL https://github.com/loreste/mako/releases/download/v0.1.8/install-rele
 After tagging and CI finishes:
 
 ```bash
-./scripts/fill-release-packaging.sh v0.1.8
+./scripts/fill-release-packaging.sh v0.1.9
 ```
 
 Updates:
@@ -48,7 +48,7 @@ Singleton manifests are **rejected** by `microsoft/winget-pkgs` (`Manifest-Valid
 
 **v0.1.4 PR (multi-file fix):** https://github.com/microsoft/winget-pkgs/pull/402823  
 **v0.1.7 PR:** https://github.com/microsoft/winget-pkgs/pull/403016  
-**v0.1.8 path:** `manifests/l/loreste/mako/0.1.8/` (open after `fill-release-packaging.sh`)
+**v0.1.9 path:** `manifests/l/loreste/mako/0.1.9/` (open after `fill-release-packaging.sh`)
 
 Portable nested path (must match zip layout from `package-release.ps1`):
 
@@ -56,7 +56,7 @@ Portable nested path (must match zip layout from `package-release.ps1`):
 mako-x86_64-pc-windows-msvc\bin\mako.exe
 ```
 
-1. Ensure SHA is filled (`./scripts/fill-release-packaging.sh v0.1.8`).
+1. Ensure SHA is filled (`./scripts/fill-release-packaging.sh v0.1.9`).
 2. Fork [microsoft/winget-pkgs](https://github.com/microsoft/winget-pkgs).
 3. Copy **all three** YAML files to `manifests/l/loreste/mako/<ver>/`.
 4. Open a PR. If bots ask for CLA, comment exactly:  
@@ -94,5 +94,5 @@ Signed MSI / notarized pkg need certificates in CI — not automated without sec
 
 ## Checksums
 
-See `packaging/RELEASE-CHECKSUMS-0.1.8.md` after running `fill-release-packaging.sh`
-(or `RELEASE-CHECKSUMS-0.1.4.md` for the previous release).
+See `packaging/RELEASE-CHECKSUMS-0.1.9.md` after running `fill-release-packaging.sh`
+(or `RELEASE-CHECKSUMS-0.1.8.md` for the previous release).

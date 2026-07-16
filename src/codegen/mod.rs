@@ -65,6 +65,9 @@ pub struct Codegen {
     /// MakoFn locals that may own a capture env — auto `fn_drop` on scope exit.
     fn_env_scopes: Vec<Vec<String>>,
     fn_env_live: std::collections::HashSet<String>,
+    /// Mutable closure captures: maps original var name → heap cell C variable name.
+    /// When a local is mutably captured, reads/writes go through `*cell` in outer scope.
+    mut_capture_cells: HashMap<String, String>,
     /// Nesting of `unsafe { }` — skip debug bounds checks when > 0.
     unsafe_depth: usize,
     /// Generic templates (not emitted; specialized as `name__tag`).
@@ -193,6 +196,7 @@ impl Codegen {
             share_live: std::collections::HashSet::new(),
             fn_env_scopes: Vec::new(),
             fn_env_live: std::collections::HashSet::new(),
+            mut_capture_cells: HashMap::new(),
             unsafe_depth: 0,
             generic_templates: HashMap::new(),
             bounds_checks_always: false,
@@ -2435,14 +2439,19 @@ impl Codegen {
         }
 
         // Register enums + structs first so demand collection can resolve names.
+        // Skip generic templates (non-empty type_params) — only monomorphized instances.
         for item in &program.items {
             if let Item::Enum(e) = item {
-                self.register_enum(e);
+                if e.type_params.is_empty() {
+                    self.register_enum(e);
+                }
             }
         }
         for item in &program.items {
             if let Item::Struct(s) = item {
-                self.register_struct(s);
+                if s.type_params.is_empty() {
+                    self.register_struct(s);
+                }
             }
         }
         // Demand-driven monomorphs: only emit map helpers used in this unit.
@@ -2454,13 +2463,17 @@ impl Codegen {
         // Emit C tagged unions + map monomorphs (gated by used_maps).
         for item in &program.items {
             if let Item::Enum(e) = item {
-                self.emit_enum_typedef(e);
+                if e.type_params.is_empty() {
+                    self.emit_enum_typedef(e);
+                }
             }
         }
         // Emit C structs + []T helpers + gated scalar-key maps.
         for item in &program.items {
             if let Item::Struct(s) = item {
-                self.emit_struct_typedef(s);
+                if s.type_params.is_empty() {
+                    self.emit_struct_typedef(s);
+                }
             }
         }
         // map[StructA]StructB after all []T / mako_eq / scalar-key helpers exist.
@@ -8846,6 +8859,24 @@ impl Codegen {
                 self.type_expr_c(&TypeExpr::Array(Box::new(args[0].clone())))
             }
             TypeExpr::Generic(n, _) if n == "List" => "MakoIntArray".into(),
+            // User-defined generic struct/enum: Pair[int] → Pair__int / MakoEnum_MyBox__int.
+            TypeExpr::Generic(n, args) if {
+                let tags: Vec<String> = args.iter().map(|a| c_type_mono_tag(&self.type_expr_c(a))).collect();
+                let mono = format!("{n}__{}", tags.join("__"));
+                self.structs.contains_key(n) || self.enums.contains_key(n)
+                || self.structs.contains_key(&mono) || self.enums.contains_key(&mono)
+            } => {
+                let tags: Vec<String> = args.iter().map(|a| c_type_mono_tag(&self.type_expr_c(a))).collect();
+                let mono = format!("{n}__{}", tags.join("__"));
+                // Look up the actual C type name from the registry.
+                if let Some(info) = self.enums.get(&mono) {
+                    info.c_name.clone()
+                } else if let Some(info) = self.structs.get(&mono) {
+                    info.c_name.clone()
+                } else {
+                    mono
+                }
+            }
             TypeExpr::Tuple(elems) => {
                 let tag = elems
                     .iter()
@@ -8918,6 +8949,38 @@ impl Codegen {
             }
         }
         out
+    }
+
+    /// Collect identifiers that are *assigned to* (mutated) within an expression.
+    fn collect_assigned_idents_in_expr(e: &Expr, out: &mut std::collections::HashSet<String>) {
+        match e {
+            Expr::Block(b) => {
+                for s in &b.stmts {
+                    match s {
+                        Stmt::Assign { name, value } => {
+                            out.insert(name.clone());
+                            Self::collect_assigned_idents_in_expr(value, out);
+                        }
+                        Stmt::Expr(e) | Stmt::Return(Some(e)) => {
+                            Self::collect_assigned_idents_in_expr(e, out);
+                        }
+                        Stmt::Let { init, .. } => {
+                            Self::collect_assigned_idents_in_expr(init, out);
+                        }
+                        Stmt::For { body, .. } => {
+                            for s in &body.stmts {
+                                if let Stmt::Assign { name, .. } = s {
+                                    out.insert(name.clone());
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            Expr::Lambda { body, .. } => Self::collect_assigned_idents_in_expr(body, out),
+            _ => {}
+        }
     }
 
     fn collect_idents_in_expr(e: &Expr, out: &mut Vec<String>) {
@@ -9019,9 +9082,20 @@ impl Codegen {
             .unwrap_or_else(|| "int64_t".into());
 
         let captures = self.collect_lambda_captures(body, params);
+        // Detect which captures are mutated inside the lambda body.
+        let mut mutated: std::collections::HashSet<String> = std::collections::HashSet::new();
+        Self::collect_assigned_idents_in_expr(body, &mut mutated);
+
         let capture_fields: Vec<(String, String)> = captures
             .iter()
-            .map(|(n, t)| (mangle(n), t.clone()))
+            .map(|(n, t)| {
+                if mutated.contains(n) {
+                    // Mutable capture: store as pointer to heap cell
+                    (mangle(n), format!("{t}*"))
+                } else {
+                    (mangle(n), t.clone())
+                }
+            })
             .collect();
 
         // Snapshot locals for pure_c emission of params + capture field access.
@@ -9043,9 +9117,16 @@ impl Codegen {
             }
         }
         // Captures are referenced as e->field in the helper body.
+        // Mutable captures use (*(e->field)) for dereference.
         let cap_map: HashMap<String, String> = captures
             .iter()
-            .map(|(n, _)| (n.clone(), format!("e->{}", mangle(n))))
+            .map(|(n, _)| {
+                if mutated.contains(n) {
+                    (n.clone(), format!("(*(e->{}))", mangle(n)))
+                } else {
+                    (n.clone(), format!("e->{}", mangle(n)))
+                }
+            })
             .collect();
 
         let body_c = match body {
@@ -9146,12 +9227,24 @@ impl Codegen {
             for (src_name, cty) in &captures {
                 let field = mangle(src_name);
                 let val = mangle(src_name);
-                if cty == "MakoString" {
+                if mutated.contains(src_name) {
+                    // Mutable capture: allocate a heap cell, store current value,
+                    // pass pointer to env. Outer scope reads through the cell too.
+                    let cell = self.fresh("cell");
+                    self.line(&format!(
+                        "{cty} *{cell} = ({cty}*)malloc(sizeof({cty}));"
+                    ));
+                    self.line(&format!("*{cell} = {val};"));
+                    self.line(&format!("{env_tmp}->{field} = {cell};"));
+                    // Redirect the outer local to read through the cell.
+                    // After this point, `counter` in the outer scope becomes `*cell`.
+                    self.mut_capture_cells
+                        .insert(src_name.clone(), cell);
+                } else if cty == "MakoString" {
                     self.line(&format!(
                         "{env_tmp}->{field} = mako_str_clone({val});"
                     ));
                 } else if cty == "MakoShareInt" {
-                    // Shared handle: clone RC into env (shared mutation pattern).
                     self.line(&format!(
                         "{env_tmp}->{field} = mako_share_clone({val});"
                     ));
@@ -9903,6 +9996,66 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
             return;
         }
 
+        // Iterator protocol: if the type has a `TypeName_next` method, use it.
+        // Emits: for (;;) { Option opt = Type_next(&iter); if (!opt.has) break; v = opt.value; body }
+        {
+            // Find the Mako struct name from the C type name.
+            let mako_name: Option<String> = self
+                .structs
+                .iter()
+                .find(|(_, v)| v.c_name == ty)
+                .map(|(k, _)| k.clone());
+            if let Some(ref mn) = mako_name {
+                let next_fn = format!("{mn}_next");
+                if let Some(opt_ty) = self.fn_rets.get(&next_fn).cloned() {
+                    let vtmp = self.fresh("it_opt");
+                    let next_mangled = mangle(&next_fn);
+                    self.line("for (;;) {");
+                    self.indent += 1;
+                    self.line(&format!(
+                        "{opt_ty} {vtmp} = {next_mangled}({val});"
+                    ));
+                    self.line(&format!("if (!{vtmp}.some) break;"));
+                    match binders {
+                        [] => {}
+                        [a] => {
+                            if a != "_" {
+                                self.line(&format!(
+                                    "int64_t {} = {vtmp}.value;",
+                                    mangle(a)
+                                ));
+                                self.locals.insert(a.clone(), "int64_t".into());
+                            }
+                        }
+                        [_, b] => {
+                            if b != "_" {
+                                self.line(&format!(
+                                    "int64_t {} = {vtmp}.value;",
+                                    mangle(b)
+                                ));
+                                self.locals.insert(b.clone(), "int64_t".into());
+                            }
+                        }
+                        _ => {}
+                    }
+                    self.push_share_scope();
+                    for s in &body.stmts {
+                        self.emit_stmt(s);
+                    }
+                    self.pop_share_scope();
+                    if let Some(lab) = label {
+                        self.emit_line(format_args!("__mako_cont_{lab}: ;"));
+                    }
+                    self.indent -= 1;
+                    self.line("}");
+                    if let Some(lab) = label {
+                        self.emit_line(format_args!("__mako_break_{lab}: ;"));
+                    }
+                    return;
+                }
+            }
+        }
+
         // Slice / byte array / string (legacy byte iteration)
         let i = self.fresh("ri");
         self.line(&format!("for (size_t {i} = 0; {i} < {val}.len; {i}++) {{"));
@@ -10554,7 +10707,12 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                 } else {
                     val
                 };
-                self.emit_line(format_args!("{} = {val};", mangle(name)));
+                // Mutable closure capture: write through heap cell pointer.
+                if let Some(cell) = self.mut_capture_cells.get(name).cloned() {
+                    self.emit_line(format_args!("*{cell} = {val};"));
+                } else {
+                    self.emit_line(format_args!("{} = {val};", mangle(name)));
+                }
             }
             Stmt::IndexAssign { base, index, value } => {
                 let (bty, b) = self.emit_expr(base);
@@ -10917,6 +11075,15 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                 )
             }
             Expr::Ident(n) => {
+                // Mutable closure capture: read through heap cell pointer.
+                if let Some(cell) = self.mut_capture_cells.get(n) {
+                    let ty = self
+                        .locals
+                        .get(n)
+                        .cloned()
+                        .unwrap_or_else(|| "int64_t".into());
+                    return (ty, format!("(*{cell})"));
+                }
                 if n == "None" {
                     return ("MakoOptionInt".into(), "mako_none_int()".into());
                 }
