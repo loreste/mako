@@ -181,6 +181,30 @@ static inline int pthread_cond_destroy(pthread_cond_t *c) {
 static inline int pthread_cond_wait(pthread_cond_t *c, pthread_mutex_t *m) {
     return SleepConditionVariableCS(c, m, INFINITE) ? 0 : -1;
 }
+/* Absolute-time timed wait (POSIX-shaped). Converts abstime → relative ms. */
+#ifndef ETIMEDOUT
+#define ETIMEDOUT 138 /* WSAETIMEDOUT-ish; MSVC may lack POSIX ETIMEDOUT */
+#endif
+static inline int pthread_cond_timedwait(
+    pthread_cond_t *c,
+    pthread_mutex_t *m,
+    const struct timespec *abstime
+) {
+    if (!c || !m || !abstime) return -1;
+    struct timespec now;
+    clock_gettime(CLOCK_REALTIME, &now);
+    int64_t wait_ms =
+        ((int64_t)abstime->tv_sec - (int64_t)now.tv_sec) * 1000 +
+        ((int64_t)abstime->tv_nsec - (int64_t)now.tv_nsec) / 1000000;
+    if (wait_ms <= 0) {
+        SetLastError(ERROR_TIMEOUT);
+        return ETIMEDOUT;
+    }
+    if (wait_ms > 0x7fffffff) wait_ms = 0x7fffffff;
+    if (SleepConditionVariableCS(c, m, (DWORD)wait_ms)) return 0;
+    if (GetLastError() == ERROR_TIMEOUT) return ETIMEDOUT;
+    return -1;
+}
 static inline int pthread_cond_signal(pthread_cond_t *c) {
     WakeConditionVariable(c);
     return 0;
