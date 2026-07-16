@@ -4692,12 +4692,41 @@ static inline int64_t mako_chan_select_value(void) {
 static int64_t mako_select_rr = 0;
 
 /* Global select wakeup: channels signal this on send so select waiters
- * wake immediately instead of polling every 2ms. */
-static pthread_mutex_t mako_select_mu = PTHREAD_MUTEX_INITIALIZER;
-static pthread_cond_t  mako_select_cv = PTHREAD_COND_INITIALIZER;
+ * wake immediately instead of polling every 2ms.
+ * Lazy-init — PTHREAD_MUTEX/COND_INITIALIZER is not portable on Windows
+ * CRITICAL_SECTION / CONDITION_VARIABLE shims. */
+static pthread_mutex_t mako_select_mu;
+static pthread_cond_t mako_select_cv;
+static int mako_select_sync_ready = 0;
+
+static inline void mako_select_sync_ensure(void) {
+    if (mako_select_sync_ready) return;
+#if defined(_WIN32) || defined(_WIN64)
+    static LONG once = 0;
+    if (InterlockedCompareExchange(&once, 1, 0) == 0) {
+        pthread_mutex_init(&mako_select_mu, NULL);
+        pthread_cond_init(&mako_select_cv, NULL);
+        mako_select_sync_ready = 1;
+        InterlockedExchange(&once, 2);
+    } else {
+        while (InterlockedCompareExchange(&once, 2, 2) != 2)
+            Sleep(0);
+    }
+#else
+    static pthread_mutex_t boot = PTHREAD_MUTEX_INITIALIZER;
+    pthread_mutex_lock(&boot);
+    if (!mako_select_sync_ready) {
+        pthread_mutex_init(&mako_select_mu, NULL);
+        pthread_cond_init(&mako_select_cv, NULL);
+        mako_select_sync_ready = 1;
+    }
+    pthread_mutex_unlock(&boot);
+#endif
+}
 
 /* Called by chan_send / try_send after enqueue — wakes select waiters. */
 static inline void mako_select_notify(void) {
+    mako_select_sync_ensure();
     pthread_mutex_lock(&mako_select_mu);
     pthread_cond_broadcast(&mako_select_cv);
     pthread_mutex_unlock(&mako_select_mu);
@@ -4736,6 +4765,7 @@ static inline int64_t mako_chan_selectn(
         /* Wait on shared condvar instead of busy-polling with nanosleep.
          * Timed wait (50ms cap) covers the race where a signal arrives
          * between try_recv and wait. */
+        mako_select_sync_ensure();
         pthread_mutex_lock(&mako_select_mu);
         struct timespec abstime;
         {
