@@ -15,7 +15,7 @@ native binary. Memory safety uses `hold` / `share` and arenas. Concurrency and
 parallelism are language features: structured `crew` / `kick` / `join`, `fan`
 across cores, channels, actors — no free-fire leaks, no async coloring.
 
-Mako is currently at version **0.1.7**. This book teaches idiomatic Mako as it
+Mako is currently at version **0.1.8**. This book teaches idiomatic Mako as it
 ships today. Identity checklist: [IDENTITY.md](../../IDENTITY.md).
 Collections (maps/slices/bag values): [language tour ch. 3](ch03-language-tour.md) ·
 [cookbook recipes](ch14-cookbook.md#collections-recipes) ·

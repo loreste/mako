@@ -4409,6 +4409,7 @@ static inline int64_t mako_slice_copy(MakoIntArray dst, MakoIntArray src) {
  * After close, recv() returns 0 once drained. send() after close fails (0).
  * select() polls multiple channels with optional timeout.
  */
+static inline void mako_select_notify(void); /* forward decl — wakes select waiters */
 typedef struct {
     int64_t *buf;
     size_t cap;       /* 0 = unbuffered rendezvous; else ring capacity */
@@ -4466,6 +4467,7 @@ static inline int64_t mako_chan_send(MakoChan *c, int64_t v) {
         }
         int64_t ok = (c->count == 0) ? 1 : 0; /* 0 if closed with handoff stuck */
         pthread_mutex_unlock(&c->mu);
+        if (ok) mako_select_notify();
         return ok;
     }
     while (c->count == c->cap && !c->closed) {
@@ -4484,6 +4486,7 @@ static inline int64_t mako_chan_send(MakoChan *c, int64_t v) {
     mako_rt_observe_channel_depth(c->count);
     pthread_cond_broadcast(&c->can_recv);
     pthread_mutex_unlock(&c->mu);
+    mako_select_notify();
     return 1;
 }
 
@@ -4502,6 +4505,7 @@ static inline int64_t mako_chan_try_send(MakoChan *c, int64_t v) {
         mako_rt_observe_channel_depth(1);
         pthread_cond_broadcast(&c->can_recv);
         pthread_mutex_unlock(&c->mu);
+        mako_select_notify();
         return 1;
     }
     if (c->closed || c->count == c->cap) {
@@ -4516,6 +4520,7 @@ static inline int64_t mako_chan_try_send(MakoChan *c, int64_t v) {
     mako_rt_observe_channel_depth(c->count);
     pthread_cond_broadcast(&c->can_recv);
     pthread_mutex_unlock(&c->mu);
+    mako_select_notify();
     return 1;
 }
 
@@ -4592,6 +4597,7 @@ static inline void mako_chan_close(MakoChan *c) {
     pthread_cond_broadcast(&c->can_send);
     pthread_cond_broadcast(&c->can_recv);
     pthread_mutex_unlock(&c->mu);
+    mako_select_notify(); /* wake select waiters watching this channel */
 }
 
 /* Non-blocking try-recv: 1 + value via out, or 0 if empty (not closed wait). */
@@ -4679,9 +4685,23 @@ static inline int64_t mako_chan_select_value(void) {
 }
 
 /* Select among up to 16 channels. Returns arm index or -1 on timeout.
- * Round-robin fairness: after a hit at index i, next scan starts at i+1. */
+ * Round-robin fairness: after a hit at index i, next scan starts at i+1.
+ * Uses a shared condvar instead of 2ms nanosleep polling — near-zero
+ * latency wakeup when any channel receives data. */
 #define MAKO_SELECT_MAX 16
 static int64_t mako_select_rr = 0;
+
+/* Global select wakeup: channels signal this on send so select waiters
+ * wake immediately instead of polling every 2ms. */
+static pthread_mutex_t mako_select_mu = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t  mako_select_cv = PTHREAD_COND_INITIALIZER;
+
+/* Called by chan_send / try_send after enqueue — wakes select waiters. */
+static inline void mako_select_notify(void) {
+    pthread_mutex_lock(&mako_select_mu);
+    pthread_cond_broadcast(&mako_select_cv);
+    pthread_mutex_unlock(&mako_select_mu);
+}
 
 static inline int64_t mako_chan_selectn(
     MakoChan **chs,
@@ -4713,8 +4733,35 @@ static inline int64_t mako_chan_selectn(
                 return -1;
             }
         }
-        struct timespec ts = {0, 2000000L};
-        nanosleep(&ts, NULL);
+        /* Wait on shared condvar instead of busy-polling with nanosleep.
+         * Timed wait (50ms cap) covers the race where a signal arrives
+         * between try_recv and wait. */
+        pthread_mutex_lock(&mako_select_mu);
+        struct timespec abstime;
+        {
+            struct timeval tv;
+            mako_gettimeofday(&tv, NULL);
+            int64_t wait_ms = 50; /* max wait slice */
+            if (timeout_ms >= 0) {
+                mako_gettimeofday(&now, NULL);
+                int64_t remaining = timeout_ms -
+                    ((now.tv_sec - start.tv_sec) * 1000 +
+                     (now.tv_usec - start.tv_usec) / 1000);
+                if (remaining <= 0) {
+                    pthread_mutex_unlock(&mako_select_mu);
+                    mako_rt_counter_inc(&mako_rt_channel_select_timeouts);
+                    return -1;
+                }
+                if (remaining < wait_ms) wait_ms = remaining;
+            }
+            /* tv + wait_ms → absolute timespec for pthread_cond_timedwait. */
+            int64_t add_ns = wait_ms * 1000000LL;
+            int64_t nsec = (int64_t)tv.tv_usec * 1000LL + add_ns;
+            abstime.tv_sec = tv.tv_sec + (time_t)(nsec / 1000000000LL);
+            abstime.tv_nsec = (long)(nsec % 1000000000LL);
+        }
+        pthread_cond_timedwait(&mako_select_cv, &mako_select_mu, &abstime);
+        pthread_mutex_unlock(&mako_select_mu);
     }
 }
 

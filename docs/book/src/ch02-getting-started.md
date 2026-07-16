@@ -41,14 +41,14 @@ Verify the installation:
 
 ```bash
 mako version
-# mako version mako0.1.7 darwin/arm64
+# mako version mako0.1.8 darwin/arm64
 ```
 
 The `--version` flag produces the same output:
 
 ```bash
 mako --version
-# mako version mako0.1.7 darwin/arm64
+# mako version mako0.1.8 darwin/arm64
 ```
 
 For verbose output including the git commit (when available):

@@ -1,6 +1,6 @@
 # Mako status (adversarial / verified)
 
-Last inventory: **2026-07-15** · product **mako0.1.7** (`CARGO_PKG_VERSION`).
+Last inventory: **2026-07-16** · product **mako0.1.8** (`CARGO_PKG_VERSION`).
 
 Unique Mako surface · pack/pull · map/slice/bag monomorphs · package-per-directory ·
 const-fn depth (match/while/for/strings) · suite **165+** · [The Mako Book](book/).
@@ -13,7 +13,7 @@ const-fn depth (match/while/for/strings) · suite **165+** · [The Mako Book](bo
 
 | Scope | Approx. |
 |-------|---------|
-| **Product version** | **0.1.7** |
+| **Product version** | **0.1.8** |
 | **MVP / usable language** | **100%** |
 | **STATUS north-star** | **100%** |
 | **Mako identity (preferred syntax)** | **~100%** — [IDENTITY.md](IDENTITY.md) |
@@ -115,6 +115,7 @@ const-fn depth (match/while/for/strings) · suite **165+** · [The Mako Book](bo
 | YAML + TOML encoding packages | Done — flat/section config · `std/encoding/{yaml,toml}` · `yaml_toml_test` |
 | Product version 0.1.6 | Done — tree-wide version sync |
 | Product version 0.1.7 | Done — freeze codecs/combinators/packages wave |
+| Product version 0.1.8 | Done — speed wave (wyhash, f-string stack, select condvar, HTTP 1024) |
 | CBOR + MessagePack binary | Done — encode/decode subset · `std/encoding/{cbor,msgpack}` · `cbor_msgpack_test` |
 | List combinators (map/filter/fold style) | Done — int mono helpers · `cbor_msgpack_test` |
 | Avro binary + GraphQL/protobuf packages | Done — `std/encoding/{avro,protobuf}` · `std/graphql` · `avro_graphql_tz_test` |

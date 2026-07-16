@@ -2,7 +2,7 @@
 # Fill winget SHA + Homebrew formula from a published GitHub release.
 # Usage:
 #   ./scripts/fill-release-packaging.sh            # default: latest tag v0.1.x
-#   ./scripts/fill-release-packaging.sh v0.1.7
+#   ./scripts/fill-release-packaging.sh v0.1.8
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
@@ -11,7 +11,7 @@ if [[ -z "$TAG" ]]; then
   TAG="$(gh release view --json tagName -q .tagName 2>/dev/null || true)"
 fi
 if [[ -z "$TAG" ]]; then
-  TAG="$(git describe --tags --abbrev=0 2>/dev/null || echo v0.1.7)"
+  TAG="$(git describe --tags --abbrev=0 2>/dev/null || echo v0.1.8)"
 fi
 VER="${TAG#v}"
 echo "fill-release-packaging: tag=$TAG version=$VER"

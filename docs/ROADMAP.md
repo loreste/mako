@@ -7,7 +7,7 @@ Short engineering queue. Product map: [VISION.md](VISION.md).
 STATUS north-star / MVP: **100%**. Prefer STATUS over this list when claiming Done.  
 **Mako identity:** [IDENTITY.md](IDENTITY.md) (**~100%** preferred surface).  
 **Dual sugar only:** [GO_SYNTAX_CHECKLIST.md](GO_SYNTAX_CHECKLIST.md) (**~94%**).  
-**Product version:** **0.1.7** · Last roadmap sync: **2026-07-15**.
+**Product version:** **0.1.8** · Last roadmap sync: **2026-07-16**.
 
 ---
 
@@ -413,6 +413,8 @@ Percentages are weighted; update when a task flips.
 - [x] CBOR + MessagePack binary subset · list combinators (`cbor_msgpack_test`).
 - [x] Avro binary · GraphQL/protobuf packages · named TZ offsets (`avro_graphql_tz_test`).
 - [x] Product version **0.1.7**.
+- [x] Speed wave: wyhash · stack f-strings · zero-copy string lits · select condvar · HTTP 1024.
+- [x] Product version **0.1.8**.
 - [x] Hot-reload unwatch + count (`hot_reload_unwatch` / `hot_reload_watch_count`).
 - [x] Client prediction service seed (`predict_new` / `input` / `reconcile` / `state` / `tick`).
 - [x] Live dylib hot-reload seed (`hot_reload_plugin_watch` / `poll` / `call` / `close`).

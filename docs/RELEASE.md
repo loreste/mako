@@ -1,6 +1,6 @@
 # Mako release & cross-platform guide
 
-**Product version:** **0.1.7** (`Cargo.toml` / `mako version` → `mako0.1.7`).  
+**Product version:** **0.1.8** (`Cargo.toml` / `mako version` → `mako0.1.8`).  
 STATUS north-star / MVP: **100%**. External: homebrew-core publish (see STATUS).
 
 ## Prerequisites by OS

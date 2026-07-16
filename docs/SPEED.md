@@ -49,7 +49,9 @@ features (NLL, structured crews, parameterized DB) are free at steady state.
 | `chan[Struct]` / `chan[tuple]` / `chan[Enum]` | Ptr ring; payload boxes via **size freelist** (≤512B) to cut malloc churn |
 | Demand-driven map monomorphs | Emit only used `(K,V)` shapes — O(used), not N²; joined key lookup in codegen |
 | Timed chan / join | `send_timeout` / `recv_timeout` / `join_timeout` / `join_deadline` — **2ms sleep slices**, no busy-spin |
+| `select` | Shared **condvar** wake on send/close (not 2 ms nanosleep poll); 50 ms max wait slice for races |
 | Slice append | `malloc + memcpy` on grow preserves sub-slice aliasing safety — no undefined behavior |
+| Codegen emit | Hot paths use `emit_line` / `format_args!` — no intermediate `String` per C line |
 
 Capturing closures (env boxes) stay residual until they can pay for themselves.
 

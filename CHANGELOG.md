@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.1.8 — 2026-07-16
+
+**mako0.1.8** (`CARGO_PKG_VERSION`).
+
+Patch after 0.1.7: **speed-first** runtime and codegen wave — hashing, strings,
+channels/select, HTTP table scale, and compiler allocation cuts. Memory-safety
+and concurrency correctness retained (or tightened) on every change.
+
 ### Speed optimizations
 
 - **wyhash replaces FNV-1a** — map hashing now processes 8 bytes at a time
@@ -24,12 +32,17 @@
 - **Codegen `want_map` lookup** — demand-driven monomorph checks use a joined
   key set instead of allocating `String` pairs on every call. Cuts thousands
   of heap allocations during compilation of map-heavy programs.
+- **Codegen `emit_line`** — hot emission paths write with `format_args!` into
+  the output buffer (no intermediate `String` per line).
 - **HTTP connection table scaled** — `MAKO_HTTP_CONN_MAX` raised from 32 to
   1024. Active connection count tracked via atomic counter instead of O(n)
   linear scan.
 - **HTTP header interning optimized** — length-bucketed `switch` dispatch
   replaces sequential string comparison. Headers of non-matching length are
   skipped without any comparison.
+- **`select` condvar wakeup** — channel `select` waits on a shared condition
+  variable instead of 2 ms nanosleep polling. Send/close notify waiters for
+  near-zero wakeup latency (50 ms max wait slice covers race windows).
 
 ### Memory safety & concurrency
 

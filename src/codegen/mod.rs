@@ -2199,14 +2199,14 @@ impl Codegen {
         if let Some(names) = self.fn_env_scopes.pop() {
             for name in names.into_iter().rev() {
                 if self.fn_env_live.remove(&name) {
-                    self.line(&format!("mako_fn_drop(&{name});"));
+                    self.emit_line(format_args!("mako_fn_drop(&{name});"));
                 }
             }
         }
         if let Some(names) = self.share_scopes.pop() {
             for name in names.into_iter().rev() {
                 if self.share_live.remove(&name) {
-                    self.line(&format!("mako_share_drop({name});"));
+                    self.emit_line(format_args!("mako_share_drop({name});"));
                 }
             }
         }
@@ -2364,6 +2364,17 @@ impl Codegen {
             self.out.push_str("    ");
         }
         self.out.push_str(s);
+        self.out.push('\n');
+    }
+
+    /// Write a formatted line directly into `self.out` without allocating an
+    /// intermediate `String`.  Callers use `format_args!` which builds a
+    /// stack-local `Arguments` struct — no heap allocation required.
+    fn emit_line(&mut self, args: std::fmt::Arguments<'_>) {
+        for _ in 0..self.indent {
+            self.out.push_str("    ");
+        }
+        let _ = std::fmt::Write::write_fmt(&mut self.out, args);
         self.out.push('\n');
     }
 
@@ -9521,7 +9532,7 @@ impl Codegen {
                 let (_, val) = self.emit_expr(e);
                 self.pop_share_scope();
                 self.emit_defers();
-                self.line(&format!("return {val};"));
+                self.emit_line(format_args!("return {val};"));
             }
         } else if !ret_void && !stmts.iter().any(|s| matches!(s, Stmt::Return(_))) {
             self.pop_share_scope();
@@ -9610,12 +9621,12 @@ impl Codegen {
             }
             self.pop_share_scope();
             if let Some(lab) = label {
-                self.line(&format!("__mako_cont_{lab}: ;"));
+                self.emit_line(format_args!("__mako_cont_{lab}: ;"));
             }
             self.indent -= 1;
             self.line("}");
             if let Some(lab) = label {
-                self.line(&format!("__mako_break_{lab}: ;"));
+                self.emit_line(format_args!("__mako_break_{lab}: ;"));
             }
             return;
         }
@@ -9656,12 +9667,12 @@ impl Codegen {
                 self.emit_stmt(s);
             }
             if let Some(lab) = label {
-                self.line(&format!("__mako_cont_{lab}: ;"));
+                self.emit_line(format_args!("__mako_cont_{lab}: ;"));
             }
             self.indent -= 1;
             self.line("}");
             if let Some(lab) = label {
-                self.line(&format!("__mako_break_{lab}: ;"));
+                self.emit_line(format_args!("__mako_break_{lab}: ;"));
             }
             return;
         }
@@ -9689,12 +9700,12 @@ impl Codegen {
                 self.emit_stmt(s);
             }
             if let Some(lab) = label {
-                self.line(&format!("__mako_cont_{lab}: ;"));
+                self.emit_line(format_args!("__mako_cont_{lab}: ;"));
             }
             self.indent -= 1;
             self.line("}");
             if let Some(lab) = label {
-                self.line(&format!("__mako_break_{lab}: ;"));
+                self.emit_line(format_args!("__mako_break_{lab}: ;"));
             }
             return;
         }
@@ -9882,12 +9893,12 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                 self.emit_stmt(s);
             }
             if let Some(lab) = label {
-                self.line(&format!("__mako_cont_{lab}: ;"));
+                self.emit_line(format_args!("__mako_cont_{lab}: ;"));
             }
             self.indent -= 1;
             self.line("}");
             if let Some(lab) = label {
-                self.line(&format!("__mako_break_{lab}: ;"));
+                self.emit_line(format_args!("__mako_break_{lab}: ;"));
             }
             return;
         }
@@ -10015,7 +10026,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                 if name == "_" {
                     let (_, val) = self.emit_expr(init);
                     if val != "/*void*/" {
-                        self.line(&format!("(void)({val});"));
+                        self.emit_line(format_args!("(void)({val});"));
                     }
                     return;
                 }
@@ -10129,7 +10140,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             let concrete = ty.clone();
                             let box_fn = format!("mako_iface_{iname}_from_{concrete}");
                             let tmp = self.fresh("ibox");
-                            self.line(&format!("{iface_ty} {tmp} = {box_fn}({val});"));
+                            self.emit_line(format_args!("{iface_ty} {tmp} = {box_fn}({val});"));
                             (iface_ty, tmp)
                         } else {
                             (ty, val)
@@ -10525,7 +10536,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                 if name == "_" {
                     let (_, val) = self.emit_expr(value);
                     if val != "/*void*/" {
-                        self.line(&format!("(void)({val});"));
+                        self.emit_line(format_args!("(void)({val});"));
                     }
                     return;
                 }
@@ -10535,7 +10546,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         let iname = &exp["MakoIface_".len()..];
                         let box_fn = format!("mako_iface_{iname}_from_{vty}");
                         let tmp = self.fresh("ibox");
-                        self.line(&format!("{exp} {tmp} = {box_fn}({val});"));
+                        self.emit_line(format_args!("{exp} {tmp} = {box_fn}({val});"));
                         tmp
                     } else {
                         val
@@ -10543,7 +10554,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                 } else {
                     val
                 };
-                self.line(&format!("{} = {val};", mangle(name)));
+                self.emit_line(format_args!("{} = {val};", mangle(name)));
             }
             Stmt::IndexAssign { base, index, value } => {
                 let (bty, b) = self.emit_expr(base);
@@ -10563,88 +10574,88 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                     }
                 }
                 if bty == "MakoMapSI*" {
-                    self.line(&format!("mako_map_si_set({b}, {i}, {v});"));
+                    self.emit_line(format_args!("mako_map_si_set({b}, {i}, {v});"));
                 } else if bty == "MakoMapII*" {
-                    self.line(&format!("mako_map_ii_set({b}, {i}, {v});"));
+                    self.emit_line(format_args!("mako_map_ii_set({b}, {i}, {v});"));
                 } else if bty == "MakoMapSS*" {
-                    self.line(&format!("mako_map_ss_set({b}, {i}, {v});"));
+                    self.emit_line(format_args!("mako_map_ss_set({b}, {i}, {v});"));
                 } else if bty == "MakoMapIF*" {
-                    self.line(&format!("mako_map_if_set({b}, {i}, {v});"));
+                    self.emit_line(format_args!("mako_map_if_set({b}, {i}, {v});"));
                 } else if bty == "MakoMapSF*" {
-                    self.line(&format!("mako_map_sf_set({b}, {i}, {v});"));
+                    self.emit_line(format_args!("mako_map_sf_set({b}, {i}, {v});"));
                 } else if bty == "MakoMapFI*" {
-                    self.line(&format!("mako_map_fi_set({b}, {i}, {v});"));
+                    self.emit_line(format_args!("mako_map_fi_set({b}, {i}, {v});"));
                 } else if bty == "MakoMapFS*" {
-                    self.line(&format!("mako_map_fs_set({b}, {i}, {v});"));
+                    self.emit_line(format_args!("mako_map_fs_set({b}, {i}, {v});"));
                 } else if bty == "MakoMapFF*" {
-                    self.line(&format!("mako_map_ff_set({b}, {i}, {v});"));
+                    self.emit_line(format_args!("mako_map_ff_set({b}, {i}, {v});"));
                 } else if bty == "MakoMapIB*" {
-                    self.line(&format!("mako_map_ib_set({b}, {i}, {v});"));
+                    self.emit_line(format_args!("mako_map_ib_set({b}, {i}, {v});"));
                 } else if bty == "MakoMapSB*" {
-                    self.line(&format!("mako_map_sb_set({b}, {i}, {v});"));
+                    self.emit_line(format_args!("mako_map_sb_set({b}, {i}, {v});"));
                 } else if bty == "MakoMapFB*" {
-                    self.line(&format!("mako_map_fb_set({b}, {i}, {v});"));
+                    self.emit_line(format_args!("mako_map_fb_set({b}, {i}, {v});"));
                 } else if bty == "MakoMapBI*" {
-                    self.line(&format!("mako_map_bi_set({b}, {i}, {v});"));
+                    self.emit_line(format_args!("mako_map_bi_set({b}, {i}, {v});"));
                 } else if bty == "MakoMapBS*" {
-                    self.line(&format!("mako_map_bs_set({b}, {i}, {v});"));
+                    self.emit_line(format_args!("mako_map_bs_set({b}, {i}, {v});"));
                 } else if bty == "MakoMapBF*" {
-                    self.line(&format!("mako_map_bf_set({b}, {i}, {v});"));
+                    self.emit_line(format_args!("mako_map_bf_set({b}, {i}, {v});"));
                 } else if bty == "MakoMapBB*" {
-                    self.line(&format!("mako_map_bb_set({b}, {i}, {v});"));
+                    self.emit_line(format_args!("mako_map_bb_set({b}, {i}, {v});"));
                 } else if let Some((ks, tag)) = parse_map_slice_val(&bty) {
-                    self.line(&format!("mako_map_{ks}_{tag}_set({b}, {i}, {v});"));
+                    self.emit_line(format_args!("mako_map_{ks}_{tag}_set({b}, {i}, {v});"));
                 } else if let Some((ks, tag)) = parse_map_map_val(&bty) {
-                    self.line(&format!("mako_map_{ks}_{tag}_set({b}, {i}, {v});"));
+                    self.emit_line(format_args!("mako_map_{ks}_{tag}_set({b}, {i}, {v});"));
                 } else if let Some((kn, tag)) = parse_map_k_slice_val(&bty) {
-                    self.line(&format!("mako_map_k_{kn}_{tag}_set({b}, {i}, {v});"));
+                    self.emit_line(format_args!("mako_map_k_{kn}_{tag}_set({b}, {i}, {v});"));
                 } else if let Some((kn, tag)) = parse_map_k_map_val(&bty) {
-                    self.line(&format!("mako_map_k_{kn}_{tag}_set({b}, {i}, {v});"));
+                    self.emit_line(format_args!("mako_map_k_{kn}_{tag}_set({b}, {i}, {v});"));
                 } else if let Some(sn) = bty
                     .strip_prefix("MakoMapI_")
                     .and_then(|s| s.strip_suffix('*'))
                 {
-                    self.line(&format!("mako_map_i_{sn}_set({b}, {i}, {v});"));
+                    self.emit_line(format_args!("mako_map_i_{sn}_set({b}, {i}, {v});"));
                 } else if let Some(sn) = bty
                     .strip_prefix("MakoMapS_")
                     .and_then(|s| s.strip_suffix('*'))
                 {
-                    self.line(&format!("mako_map_s_{sn}_set({b}, {i}, {v});"));
+                    self.emit_line(format_args!("mako_map_s_{sn}_set({b}, {i}, {v});"));
                 } else if let Some(sn) = bty
                     .strip_prefix("MakoMapF_")
                     .and_then(|s| s.strip_suffix('*'))
                 {
-                    self.line(&format!("mako_map_f_{sn}_set({b}, {i}, {v});"));
+                    self.emit_line(format_args!("mako_map_f_{sn}_set({b}, {i}, {v});"));
                 } else if let Some(sn) = bty
                     .strip_prefix("MakoMapB_")
                     .and_then(|s| s.strip_suffix('*'))
                 {
-                    self.line(&format!("mako_map_b_{sn}_set({b}, {i}, {v});"));
+                    self.emit_line(format_args!("mako_map_b_{sn}_set({b}, {i}, {v});"));
                 } else if let Some((kn, vs)) = parse_struct_key_map(&bty) {
-                    self.line(&format!("mako_map_k_{kn}_{vs}_set({b}, {i}, {v});"));
+                    self.emit_line(format_args!("mako_map_k_{kn}_{vs}_set({b}, {i}, {v});"));
                 } else if bty == "MakoByteArray" {
                     let tmp = self.fresh("iass");
-                    self.line(&format!("int64_t {tmp} = {i};"));
+                    self.emit_line(format_args!("int64_t {tmp} = {i};"));
                     self.line(&format!("mako_byte_set({b}, {tmp}, {v});"));
                 } else if bty == "MakoStrArray" {
                     let tmp = self.fresh("iass");
-                    self.line(&format!("int64_t {tmp} = {i};"));
+                    self.emit_line(format_args!("int64_t {tmp} = {i};"));
                     self.line(&format!("mako_str_array_set({b}, {tmp}, {v});"));
                 } else if bty == "MakoBoolArray" {
                     let tmp = self.fresh("iass");
-                    self.line(&format!("int64_t {tmp} = {i};"));
+                    self.emit_line(format_args!("int64_t {tmp} = {i};"));
                     self.line(&format!("mako_bool_array_set({b}, {tmp}, {v});"));
                 } else if bty == "MakoFloatArray" {
                     let tmp = self.fresh("iass");
-                    self.line(&format!("int64_t {tmp} = {i};"));
+                    self.emit_line(format_args!("int64_t {tmp} = {i};"));
                     self.line(&format!("mako_float_array_set({b}, {tmp}, {v});"));
                 } else if let Some(sn) = bty.strip_prefix("MakoArr_") {
                     let tmp = self.fresh("iass");
-                    self.line(&format!("int64_t {tmp} = {i};"));
+                    self.emit_line(format_args!("int64_t {tmp} = {i};"));
                     self.line(&format!("mako_arr_{sn}_set({b}, {tmp}, {v});"));
                 } else {
                     let tmp = self.fresh("iass");
-                    self.line(&format!("int64_t {tmp} = {i};"));
+                    self.emit_line(format_args!("int64_t {tmp} = {i};"));
                     self.emit_bounds_check(
                         &format!("{tmp} < 0 || (size_t){tmp} >= {b}.len"),
                         "index out of bounds",
@@ -10656,12 +10667,12 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                 let (bty, b) = self.emit_expr(base);
                 let (_, v) = self.emit_expr(value);
                 let _ = bty;
-                self.line(&format!("{b}.{field} = {v};"));
+                self.emit_line(format_args!("{b}.{field} = {v};"));
             }
             Stmt::Expr(e) => {
                 let (_, val) = self.emit_expr(e);
                 if val != "/*void*/" {
-                    self.line(&format!("{val};"));
+                    self.emit_line(format_args!("{val};"));
                 }
             }
             Stmt::Return(None) => {
@@ -10678,7 +10689,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                     self.pop_share_scope();
                 }
                 self.emit_defers();
-                self.line(&format!("return {val};"));
+                self.emit_line(format_args!("return {val};"));
             }
             Stmt::Defer { body } => {
                 self.defer_stack.push(body.clone());
@@ -10698,7 +10709,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                     self.emit_stmt(init);
                 }
                 let (_, c) = self.emit_expr(cond);
-                self.line(&format!("if ({c}) {{"));
+                self.emit_line(format_args!("if ({c}) {{"));
                 self.indent += 1;
                 self.push_share_scope();
                 for s in &then_block.stmts {
@@ -10724,31 +10735,31 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
             }
             Stmt::While { label, cond, body } => {
                 if let Some(lab) = label {
-                    self.line(&format!("{lab}: while (1) {{"));
+                    self.emit_line(format_args!("{lab}: while (1) {{"));
                 } else {
                     self.line("while (1) {");
                 }
                 self.indent += 1;
                 let (_, c) = self.emit_expr(cond);
-                self.line(&format!("if (!({c})) break;"));
+                self.emit_line(format_args!("if (!({c})) break;"));
                 self.push_share_scope();
                 for s in &body.stmts {
                     self.emit_stmt(s);
                 }
                 self.pop_share_scope();
                 if let Some(lab) = label {
-                    self.line(&format!("__mako_cont_{lab}: ;"));
+                    self.emit_line(format_args!("__mako_cont_{lab}: ;"));
                 }
                 self.indent -= 1;
                 self.line("}");
                 if let Some(lab) = label {
-                    self.line(&format!("__mako_break_{lab}: ;"));
+                    self.emit_line(format_args!("__mako_break_{lab}: ;"));
                 }
             }
             Stmt::Break(None) => self.line("break;"),
-            Stmt::Break(Some(lab)) => self.line(&format!("goto __mako_break_{lab};")),
+            Stmt::Break(Some(lab)) => self.emit_line(format_args!("goto __mako_break_{lab};")),
             Stmt::Continue(None) => self.line("continue;"),
-            Stmt::Continue(Some(lab)) => self.line(&format!("goto __mako_cont_{lab};")),
+            Stmt::Continue(Some(lab)) => self.emit_line(format_args!("goto __mako_cont_{lab};")),
             Stmt::For {
                 label,
                 binders,
@@ -10773,45 +10784,45 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                 self.indent += 1;
                 self.emit_stmt(init);
                 let post_str = self.post_c_expr(post);
-                self.line(&format!("for (;; {post_str}) {{"));
+                self.emit_line(format_args!("for (;; {post_str}) {{"));
                 self.indent += 1;
                 let (_, c) = self.emit_expr(cond);
-                self.line(&format!("if (!({c})) break;"));
+                self.emit_line(format_args!("if (!({c})) break;"));
                 self.push_share_scope();
                 for s in &body.stmts {
                     self.emit_stmt(s);
                 }
                 self.pop_share_scope();
                 if let Some(lab) = label {
-                    self.line(&format!("__mako_cont_{lab}: ;"));
+                    self.emit_line(format_args!("__mako_cont_{lab}: ;"));
                 }
                 self.indent -= 1;
                 self.line("}");
                 if let Some(lab) = label {
-                    self.line(&format!("__mako_break_{lab}: ;"));
+                    self.emit_line(format_args!("__mako_break_{lab}: ;"));
                 }
                 self.indent -= 1;
                 self.line("}");
             }
             Stmt::Crew { name, body } => {
                 self.locals.insert(name.clone(), "MakoNursery".into());
-                self.line(&format!("MakoNursery {name} = mako_nursery_new();"));
+                self.emit_line(format_args!("MakoNursery {name} = mako_nursery_new();"));
                 self.crew_stack.push(name.clone());
                 for s in &body.stmts {
                     self.emit_stmt(s);
                 }
                 self.crew_stack.pop();
-                self.line(&format!("mako_nursery_cancel_join(&{name});"));
+                self.emit_line(format_args!("mako_nursery_cancel_join(&{name});"));
             }
             Stmt::Arena { name, body } => {
                 self.locals.insert(name.clone(), "MakoArena".into());
-                self.line(&format!("MakoArena {name} = mako_arena_new();"));
+                self.emit_line(format_args!("MakoArena {name} = mako_arena_new();"));
                 let prev = self.current_arena.replace(name.clone());
                 for s in &body.stmts {
                     self.emit_stmt(s);
                 }
                 self.current_arena = prev;
-                self.line(&format!("mako_arena_free(&{name});"));
+                self.emit_line(format_args!("mako_arena_free(&{name});"));
             }
             Stmt::Unsafe { body } => {
                 self.line("/* unsafe: bounds checks elided (debug) */");
@@ -10845,7 +10856,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                 if all_str {
                     self.line(&format!("MakoChanStr *{arr}[{n}];"));
                     for (i, (ch, _)) in arms.iter().enumerate() {
-                        self.line(&format!("{arr}[{i}] = {ch};"));
+                        self.emit_line(format_args!("{arr}[{i}] = {ch};"));
                     }
                     self.line(&format!(
                         "int64_t {which} = mako_chan_str_selectn({arr}, {n}, {ms});"
@@ -10853,7 +10864,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                 } else if all_ptr {
                     self.line(&format!("MakoChanPtr *{arr}[{n}];"));
                     for (i, (ch, _)) in arms.iter().enumerate() {
-                        self.line(&format!("{arr}[{i}] = {ch};"));
+                        self.emit_line(format_args!("{arr}[{i}] = {ch};"));
                     }
                     self.line(&format!(
                         "int64_t {which} = mako_chan_ptr_selectn({arr}, {n}, {ms});"
@@ -10861,7 +10872,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                 } else {
                     self.line(&format!("MakoChan *{arr}[{n}];"));
                     for (i, (ch, _)) in arms.iter().enumerate() {
-                        self.line(&format!("{arr}[{i}] = {ch};"));
+                        self.emit_line(format_args!("{arr}[{i}] = {ch};"));
                     }
                     self.line(&format!(
                         "int64_t {which} = mako_chan_selectn({arr}, {n}, {ms});"
@@ -10869,9 +10880,9 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                 }
                 for (i, (_ch, body)) in arms.iter().enumerate() {
                     if i == 0 {
-                        self.line(&format!("if ({which} == {i}) {{"));
+                        self.emit_line(format_args!("if ({which} == {i}) {{"));
                     } else {
-                        self.line(&format!("}} else if ({which} == {i}) {{"));
+                        self.emit_line(format_args!("}} else if ({which} == {i}) {{"));
                     }
                     self.indent += 1;
                     for s in &body.stmts {
@@ -10880,7 +10891,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                     self.indent -= 1;
                 }
                 if let Some(def) = default_arm {
-                    self.line(&format!("}} else if ({which} < 0) {{"));
+                    self.emit_line(format_args!("}} else if ({which} < 0) {{"));
                     self.indent += 1;
                     for s in &def.stmts {
                         self.emit_stmt(s);
@@ -10928,11 +10939,11 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                                 let c_name = info.c_name.clone();
                                 let tmp = self.fresh("ev");
                                 // Zero all payload slots so map keys hash safely.
-                                self.line(&format!("{c_name} {tmp};"));
-                                self.line(&format!("{tmp}.tag = {tag};"));
-                                self.line(&format!("{tmp}.i0 = 0;"));
-                                self.line(&format!("{tmp}.i1 = 0;"));
-                                self.line(&format!("{tmp}.i2 = 0;"));
+                                self.emit_line(format_args!("{c_name} {tmp};"));
+                                self.emit_line(format_args!("{tmp}.tag = {tag};"));
+                                self.emit_line(format_args!("{tmp}.i0 = 0;"));
+                                self.emit_line(format_args!("{tmp}.i1 = 0;"));
+                                self.emit_line(format_args!("{tmp}.i2 = 0;"));
                                 self.line(&format!(
                                     "{tmp}.s0 = (MakoString){{NULL, 0}};"
                                 ));
@@ -10993,15 +11004,15 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                     let (_, lv) = self.emit_expr(left);
                     let tmp = self.fresh(if *op == BinOp::And { "and" } else { "or" });
                     if *op == BinOp::And {
-                        self.line(&format!("bool {tmp} = false;"));
-                        self.line(&format!("if ({lv}) {{"));
+                        self.emit_line(format_args!("bool {tmp} = false;"));
+                        self.emit_line(format_args!("if ({lv}) {{"));
                     } else {
-                        self.line(&format!("bool {tmp} = true;"));
-                        self.line(&format!("if (!({lv})) {{"));
+                        self.emit_line(format_args!("bool {tmp} = true;"));
+                        self.emit_line(format_args!("if (!({lv})) {{"));
                     }
                     self.indent += 1;
                     let (_, rv) = self.emit_expr(right);
-                    self.line(&format!("{tmp} = {rv};"));
+                    self.emit_line(format_args!("{tmp} = {rv};"));
                     self.indent -= 1;
                     self.line("}");
                     return ("bool".into(), tmp);
@@ -11037,7 +11048,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                 let (rt, rv) = self.emit_expr(right);
                 if *op == BinOp::Add && lt == "MakoString" {
                     let tmp = self.fresh("s");
-                    self.line(&format!("MakoString {tmp} = mako_str_concat({lv}, {rv});"));
+                    self.emit_line(format_args!("MakoString {tmp} = mako_str_concat({lv}, {rv});"));
                     return ("MakoString".into(), tmp);
                 }
                 if (*op == BinOp::Eq || *op == BinOp::Ne)
@@ -11183,41 +11194,41 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             let (ty, v) = self.emit_expr(&args[0]);
                             match ty.as_str() {
                                 "MakoString" => {
-                                    self.line(&format!("mako_print_str({v});"));
+                                    self.emit_line(format_args!("mako_print_str({v});"));
                                 }
                                 "int64_t" | "/*auto*/" => {
-                                    self.line(&format!("mako_print_int({v});"));
+                                    self.emit_line(format_args!("mako_print_int({v});"));
                                 }
                                 "bool" => {
-                                    self.line(&format!("mako_print_bool({v});"));
+                                    self.emit_line(format_args!("mako_print_bool({v});"));
                                 }
                                 "double" => {
-                                    self.line(&format!("mako_print_float({v});"));
+                                    self.emit_line(format_args!("mako_print_float({v});"));
                                 }
                                 _ => {
-                                    self.line(&format!("mako_print_int((int64_t){v});"));
+                                    self.emit_line(format_args!("mako_print_int((int64_t){v});"));
                                 }
                             }
                             return ("void".into(), "/*void*/".into());
                         }
                         "print_int" => {
                             let (_, v) = self.emit_expr(&args[0]);
-                            self.line(&format!("mako_print_int({v});"));
+                            self.emit_line(format_args!("mako_print_int({v});"));
                             return ("void".into(), "/*void*/".into());
                         }
                         "print_int64" => {
                             let (_, v) = self.emit_expr(&args[0]);
-                            self.line(&format!("mako_print_int({v});"));
+                            self.emit_line(format_args!("mako_print_int({v});"));
                             return ("void".into(), "/*void*/".into());
                         }
                         "print_int32" | "print_int8" | "print_uint64" => {
                             let (_, v) = self.emit_expr(&args[0]);
-                            self.line(&format!("mako_print_int({v});"));
+                            self.emit_line(format_args!("mako_print_int({v});"));
                             return ("void".into(), "/*void*/".into());
                         }
                         "print_float" => {
                             let (_, v) = self.emit_expr(&args[0]);
-                            self.line(&format!("mako_print_float({v});"));
+                            self.emit_line(format_args!("mako_print_float({v});"));
                             return ("void".into(), "/*void*/".into());
                         }
                         "int64" | "int32" | "int" | "byte" => {
@@ -11300,7 +11311,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                                 self.line(&format!(
                                     "{vty} *{boxn} = ({vty}*)malloc(sizeof({vty}));"
                                 ));
-                                self.line(&format!("*{boxn} = {v};"));
+                                self.emit_line(format_args!("*{boxn} = {v};"));
                                 return (
                                     "MakoResultInt".into(),
                                     format!("mako_ok_ptr((void*){boxn})"),
@@ -11312,7 +11323,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                                 self.line(&format!(
                                     "MakoIntArray *{boxn} = (MakoIntArray*)malloc(sizeof(MakoIntArray));"
                                 ));
-                                self.line(&format!("*{boxn} = {v};"));
+                                self.emit_line(format_args!("*{boxn} = {v};"));
                                 return (
                                     "MakoResultInt".into(),
                                     format!("mako_ok_ptr((void*){boxn})"),
@@ -11323,7 +11334,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                                 self.line(&format!(
                                     "MakoStrArray *{boxn} = (MakoStrArray*)malloc(sizeof(MakoStrArray));"
                                 ));
-                                self.line(&format!("*{boxn} = {v};"));
+                                self.emit_line(format_args!("*{boxn} = {v};"));
                                 return (
                                     "MakoResultInt".into(),
                                     format!("mako_ok_ptr((void*){boxn})"),
@@ -11334,7 +11345,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                                 self.line(&format!(
                                     "MakoFloatArray *{boxn} = (MakoFloatArray*)malloc(sizeof(MakoFloatArray));"
                                 ));
-                                self.line(&format!("*{boxn} = {v};"));
+                                self.emit_line(format_args!("*{boxn} = {v};"));
                                 return (
                                     "MakoResultInt".into(),
                                     format!("mako_ok_ptr((void*){boxn})"),
@@ -11346,7 +11357,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                                 self.line(&format!(
                                     "{vty} *{boxn} = ({vty}*)malloc(sizeof({vty}));"
                                 ));
-                                self.line(&format!("*{boxn} = {v};"));
+                                self.emit_line(format_args!("*{boxn} = {v};"));
                                 return (
                                     "MakoResultInt".into(),
                                     format!("mako_ok_ptr((void*){boxn})"),
@@ -11375,7 +11386,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                                 self.line(&format!(
                                     "MakoOptionInt *{boxn} = (MakoOptionInt*)malloc(sizeof(MakoOptionInt));"
                                 ));
-                                self.line(&format!("*{boxn} = {v};"));
+                                self.emit_line(format_args!("*{boxn} = {v};"));
                                 return (
                                     "MakoResultInt".into(),
                                     format!("mako_ok_ptr((void*){boxn})"),
@@ -11387,7 +11398,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                                 self.line(&format!(
                                     "MakoResultInt *{boxn} = (MakoResultInt*)malloc(sizeof(MakoResultInt));"
                                 ));
-                                self.line(&format!("*{boxn} = {v};"));
+                                self.emit_line(format_args!("*{boxn} = {v};"));
                                 return (
                                     "MakoResultInt".into(),
                                     format!("mako_ok_ptr((void*){boxn})"),
@@ -11525,7 +11536,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                                 self.line(&format!(
                                     "MakoOptionInt *{boxn} = (MakoOptionInt*)malloc(sizeof(MakoOptionInt));"
                                 ));
-                                self.line(&format!("*{boxn} = {v};"));
+                                self.emit_line(format_args!("*{boxn} = {v};"));
                                 return (
                                     "MakoOptionInt".into(),
                                     format!("mako_some_ptr((void*){boxn})"),
@@ -11537,7 +11548,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                                 self.line(&format!(
                                     "MakoResultInt *{boxn} = (MakoResultInt*)malloc(sizeof(MakoResultInt));"
                                 ));
-                                self.line(&format!("*{boxn} = {v};"));
+                                self.emit_line(format_args!("*{boxn} = {v};"));
                                 return (
                                     "MakoOptionInt".into(),
                                     format!("mako_some_ptr((void*){boxn})"),
@@ -11559,7 +11570,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                                 self.line(&format!(
                                     "{vty} *{boxn} = ({vty}*)malloc(sizeof({vty}));"
                                 ));
-                                self.line(&format!("*{boxn} = {v};"));
+                                self.emit_line(format_args!("*{boxn} = {v};"));
                                 return (
                                     "MakoOptionInt".into(),
                                     format!("mako_some_ptr((void*){boxn})"),
@@ -11570,7 +11581,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                                 self.line(&format!(
                                     "MakoIntArray *{boxn} = (MakoIntArray*)malloc(sizeof(MakoIntArray));"
                                 ));
-                                self.line(&format!("*{boxn} = {v};"));
+                                self.emit_line(format_args!("*{boxn} = {v};"));
                                 return (
                                     "MakoOptionInt".into(),
                                     format!("mako_some_ptr((void*){boxn})"),
@@ -11581,7 +11592,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                                 self.line(&format!(
                                     "MakoStrArray *{boxn} = (MakoStrArray*)malloc(sizeof(MakoStrArray));"
                                 ));
-                                self.line(&format!("*{boxn} = {v};"));
+                                self.emit_line(format_args!("*{boxn} = {v};"));
                                 return (
                                     "MakoOptionInt".into(),
                                     format!("mako_some_ptr((void*){boxn})"),
@@ -11592,7 +11603,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                                 self.line(&format!(
                                     "MakoFloatArray *{boxn} = (MakoFloatArray*)malloc(sizeof(MakoFloatArray));"
                                 ));
-                                self.line(&format!("*{boxn} = {v};"));
+                                self.emit_line(format_args!("*{boxn} = {v};"));
                                 return (
                                     "MakoOptionInt".into(),
                                     format!("mako_some_ptr((void*){boxn})"),
@@ -11603,7 +11614,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                                 self.line(&format!(
                                     "{vty} *{boxn} = ({vty}*)malloc(sizeof({vty}));"
                                 ));
-                                self.line(&format!("*{boxn} = {v};"));
+                                self.emit_line(format_args!("*{boxn} = {v};"));
                                 return (
                                     "MakoOptionInt".into(),
                                     format!("mako_some_ptr((void*){boxn})"),
@@ -28741,7 +28752,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                     return (vty, format!("mako_map_k_{kn}_{vs}_get({b}, {i})"));
                 }
                 let tmp = self.fresh("idx");
-                self.line(&format!("int64_t {tmp} = {i};"));
+                self.emit_line(format_args!("int64_t {tmp} = {i};"));
                 if bty == "MakoByteArray" {
                     return ("int64_t".into(), format!("mako_byte_get({b}, {tmp})"));
                 }
@@ -29157,7 +29168,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                                         self.line(&format!(
                                             "MakoUuid *{boxn} = (MakoUuid*)malloc(sizeof(MakoUuid));"
                                         ));
-                                        self.line(&format!("*{boxn} = {v};"));
+                                        self.emit_line(format_args!("*{boxn} = {v};"));
                                         self.line(&format!(
                                             "{arg_name}[{i}] = (intptr_t){boxn};"
                                         ));
@@ -29166,7 +29177,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                                         self.line(&format!(
                                             "MakoOptionInt *{boxn} = (MakoOptionInt*)malloc(sizeof(MakoOptionInt));"
                                         ));
-                                        self.line(&format!("*{boxn} = {v};"));
+                                        self.emit_line(format_args!("*{boxn} = {v};"));
                                         // Clone string payload when present.
                                         self.line(&format!(
                                             "if ({boxn}->some && {boxn}->ok_s.data) {{ {boxn}->ok_s = mako_str_clone({boxn}->ok_s); }}"
@@ -29179,7 +29190,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                                         self.line(&format!(
                                             "MakoResultInt *{boxn} = (MakoResultInt*)malloc(sizeof(MakoResultInt));"
                                         ));
-                                        self.line(&format!("*{boxn} = {v};"));
+                                        self.emit_line(format_args!("*{boxn} = {v};"));
                                         self.line(&format!(
                                             "if ({boxn}->ok && {boxn}->ok_s.data) {{ {boxn}->ok_s = mako_str_clone({boxn}->ok_s); }}"
                                         ));
@@ -29206,7 +29217,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                                         self.line(&format!(
                                             "MakoFn *{boxn} = (MakoFn*)malloc(sizeof(MakoFn));"
                                         ));
-                                        self.line(&format!("*{boxn} = {v};"));
+                                        self.emit_line(format_args!("*{boxn} = {v};"));
                                         // Detach env from a MakoFn *local* (not a bare named function).
                                         if let Expr::Ident(n) = a {
                                             let is_fn_local = self
@@ -29259,7 +29270,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                                         self.line(&format!(
                                             "{cname} *{boxn} = ({cname}*)malloc(sizeof({cname}));"
                                         ));
-                                        self.line(&format!("*{boxn} = {v};"));
+                                        self.emit_line(format_args!("*{boxn} = {v};"));
                                         for (fname, ft) in &fields {
                                             if ft == "MakoString" {
                                                 self.line(&format!(
@@ -29406,7 +29417,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             self.line(&format!(
                                 "{cname} *{boxn} = ({cname}*)mako_box_alloc(sizeof({cname}));"
                             ));
-                            self.line(&format!("*{boxn} = {v};"));
+                            self.emit_line(format_args!("*{boxn} = {v};"));
                             self.line(&format!(
                                 "bool {tmp} = mako_chan_ptr_send({rv}, {boxn}) != 0;"
                             ));
@@ -30026,10 +30037,10 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
         let (tag, fields) = info.variants.get(variant).cloned().unwrap();
         let tmp = self.fresh("ev");
         self.line(&format!("{} {tmp};", info.c_name));
-        self.line(&format!("{tmp}.tag = {tag};"));
-        self.line(&format!("{tmp}.i0 = 0;"));
-        self.line(&format!("{tmp}.i1 = 0;"));
-        self.line(&format!("{tmp}.i2 = 0;"));
+        self.emit_line(format_args!("{tmp}.tag = {tag};"));
+        self.emit_line(format_args!("{tmp}.i0 = 0;"));
+        self.emit_line(format_args!("{tmp}.i1 = 0;"));
+        self.emit_line(format_args!("{tmp}.i2 = 0;"));
         self.line(&format!("{tmp}.s0 = (MakoString){{NULL, 0}};"));
         self.line(&format!("{tmp}.s1 = (MakoString){{NULL, 0}};"));
         let mut int_slot = 0usize;
@@ -30100,7 +30111,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
         // value type is known (marker replaced below).
         let marker = format!("/*__IFE_DECL_{result}__*/");
         self.line(&marker);
-        self.line(&format!("if ({c}) {{"));
+        self.emit_line(format_args!("if ({c}) {{"));
         self.indent += 1;
         self.push_share_scope();
         let (tty, tval) = self.emit_block_trailing(then_block);
