@@ -1058,7 +1058,8 @@ Rejected: arrays, maps, arenas, non-POD structs (map/slice fields).
 Prefer chan[Struct] for multi-field worker results (do not bit-pack into one int).
 
 Loops: for i, v in range s / for k, v in range m / C-style for.
-Format: fmt_sprintf* / fmt_sprint* (no full f"…" interpol yet).
+F-strings: f"hello {name}" (stack-based builder, zero malloc for short strings).
+Format: fmt_sprintf* / fmt_sprint* for printf-style verbs.
 Dispatch: match on strings/ints/enums; switch/case on values.
 See docs/ERGONOMICS.md and docs/SPEED.md.
 
@@ -2609,7 +2610,47 @@ These still parse. Prefer the right-hand column in new code; mako fmt does too.
   Capitalized = exported            | export fn / export struct
 
 ================================================================================
-32. GOTCHAS (runtime)
+32. PERFORMANCE (runtime optimizations)
+================================================================================
+
+These are built in — no user action required.
+
+Map hashing
+  wyhash (8 bytes/iteration, 128-bit multiply mixing) replaces byte-at-a-time
+  FNV-1a. 4-8x faster for string-keyed maps.
+
+String interpolation
+  f"..." uses a 256-byte stack buffer. Short interpolated strings (routes,
+  log lines) never touch the allocator. Spills to heap only when needed.
+
+Constant folding
+  Integer binary expressions with literal operands (1 + 2, flags & 0xff)
+  are folded at compile time. No runtime code emitted.
+
+Zero-copy string comparisons
+  x == "literal", str_eq(s, "literal"), str_has_prefix, str_has_suffix,
+  str_contains, match arm string patterns, and print("literal") use
+  mako_str_view (zero allocation, points into read-only data).
+
+Channel select
+  select waits on a shared condition variable. send/close broadcast wakeups
+  (not 2ms nanosleep polling). 50ms max wait slice for edge races.
+
+HTTP connection tracking
+  Active connections tracked via atomic counter (O(1) instead of O(n) scan).
+  Connection table supports up to 1024 concurrent connections.
+
+HTTP header interning
+  Header name lookup dispatches by length (switch), skipping non-matching
+  headers without any string comparison.
+
+Codegen allocator pressure
+  Hot emission paths use format_args! into the output buffer directly,
+  avoiding per-line String heap allocation. Map monomorph checks use a
+  joined key set instead of per-call String pair allocation.
+
+================================================================================
+33. GOTCHAS (runtime)
 ================================================================================
 
 HTTP/2 DATA size
@@ -2627,9 +2668,9 @@ Edge ALPN
   solid. If you turn h2 back on, use a build that splits DATA frames.
 
 ================================================================================
-END
+34. END
 ================================================================================
 
 # https://mako-lang.com
 # https://github.com/loreste/mako
-# 0.1.1
+# 0.1.9

@@ -29,7 +29,8 @@ Short facts:
 - Kick Send: Copy, string, deep-POD structs, Option/Result/tuple of sendables, chan handles
   (not maps/arrays/non-POD). Prefer `chan[Struct]` for multi-field worker results.
 - Loops: `for i, v in range s` / `for k, v in range m` / C-style `for`
-- Format: `fmt_sprintf*` / `fmt_sprint*` (no full `f"…"` interpol yet)
+- F-strings: `f"hello {name}, age {age}"` — stack-based builder, zero malloc for short strings
+- Format: `fmt_sprintf*` / `fmt_sprint*` for printf-style verbs
 - Dispatch: `match` on strings/ints/enums; `switch`/`case` on values
 - Parallel work: `fan(xs, fn(x) { x * x })`
 - Concurrency: `crew` / `kick` / `join`, channels, `select`, `actor`
@@ -38,9 +39,15 @@ Short facts:
 - Ownership: hold, share, arena — no GC
 - Errors: `Result` / `Option`, `?`, unused Result is an error
 - Checked math: `checked_add` / `sub` / `mul`, `would_overflow_*`
-- Shutdown helpers, basic tracing, leak checks exist in the runtime
+- Const fn: `const fn f(n: int) -> int` with match/while/for/break/continue/strings
+- First-class functions: `fn` values, closures capture POD + string + struct by value
+- Iterator protocol: struct with `fn next(self) -> Option[T]` usable in for-range
+- Shutdown helpers, tracing, leak checks, crash reporting in the runtime
 - Release: `-O3 -flto`. WASM: `wasm32-wasip1`
-- Stdlib: HTTP (incl. HTTP/2), TLS, SQL, crypto, regex, UUID/ULID, channels, …
+- Stdlib: HTTP (incl. HTTP/2), TLS, SQL, crypto, regex, UUID/ULID, channels,
+  SIP signaling, SMTP, templates, domain storage (BTree/LSM/WAL/Bloom), …
+- Speed: wyhash maps, zero-copy string comparisons, compile-time constant folding,
+  stack-based f-strings, condvar channel select, atomic HTTP conn tracking
 
 HTTP/2 note: DATA frames larger than 16384 are split automatically. Empty
 string `""` is a singleton — do not raw-free it.
@@ -142,10 +149,13 @@ mako build --target wasm32-wasip1 file.mko -o out.wasm
 ## Stdlib (rough map)
 
 Output, strings, math, files, HTTP server/client, HTTP/2, TLS, JSON, SQLite /
-Postgres, crypto, base64/hex/gzip, regex, UUID/ULID, cookies/sessions/auth,
-channels (including string move-send), mutex/atomics/cmap, event loop, game net,
-signals, fs watch, UDP proxy, rate limit / circuit breaker, checked arithmetic,
-shutdown, tracing, leak checks, testing.
+Postgres / MySQL / Redis, crypto (SHA/HMAC/bcrypt/scram/SRTP), base64/hex/gzip/tar/zip,
+regex, UUID/ULID, cookies/sessions/auth, channels (int/float/string/struct/ptr),
+mutex/atomics/cmap/rwmutex, event loop (epoll/kqueue), game net (UDP),
+SIP signaling, SMTP mail, text/html templates, domain storage (BTree/LSM/WAL/
+Bloom/PageManager/SST), signals, fs watch, rate limit / circuit breaker,
+checked arithmetic, overflow detection, shutdown, tracing, leak checks,
+crash reporting, testing (assert/fuzz/property/snapshot/mock/fixture/coverage).
 
 ## Docs
 
