@@ -46,8 +46,9 @@ Singleton manifests are **rejected** by `microsoft/winget-pkgs` (`Manifest-Valid
 | `loreste.mako.installer.yaml` | zip + NestedInstallerType portable |
 | `loreste.mako.locale.en-US.yaml` | defaultLocale |
 
-**v0.1.4 PR (fixed multi-file):** https://github.com/microsoft/winget-pkgs/pull/402823  
-**v0.1.7 path:** `manifests/l/loreste/mako/0.1.7/`
+**v0.1.4 PR (multi-file fix):** https://github.com/microsoft/winget-pkgs/pull/402823  
+**v0.1.7 PR:** https://github.com/microsoft/winget-pkgs/pull/403016  
+**Path:** `manifests/l/loreste/mako/0.1.7/`
 
 Portable nested path (must match zip layout from `package-release.ps1`):
 
