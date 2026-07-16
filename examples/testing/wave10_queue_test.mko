@@ -10,7 +10,8 @@ fn quick() -> int {
 }
 
 fn slow_work() -> int {
-    sleep_ms(400)
+    // Match wave8: stay well above join_timeout so macOS CI load cannot finish first.
+    sleep_ms(2000)
     return 99
 }
 
@@ -31,8 +32,6 @@ fn TestJoinTimeoutOkResult() {
 fn TestJoinTimeoutMissResult() {
     crew t {
         let j = t.kick(slow_work())
-        // sleep_ms(400) in slow_work; keep deadline well under that so CI
-        // scheduling noise cannot complete the task early.
         match j.join_timeout(50) {
             Ok(_) => assert(false),
             Err(msg) => assert_eq_str(msg, "timeout"),
