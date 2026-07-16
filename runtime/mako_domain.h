@@ -702,7 +702,19 @@ static inline void mako_btree_collect(MakoBNode *n, int64_t *keys, int64_t *vals
     mako_btree_collect(n->kids[n->n], keys, vals, out_n, maxn);
 }
 
-/* Save as: [i64 count][count * (key,val)] little-endian-ish host layout. */
+/* FNV-1a over raw bytes (for btree snapshot checksum). */
+static inline uint64_t mako_fnv1a64(const void *p, size_t n) {
+    const unsigned char *b = (const unsigned char *)p;
+    uint64_t h = 14695981039346656037ULL;
+    for (size_t i = 0; i < n; i++) {
+        h ^= b[i];
+        h *= 1099511628211ULL;
+    }
+    return h;
+}
+
+/* Save v2: magic "MBT2" | count | checksum | count*(key,val). Empty path → -1. */
+#define MAKO_BTREE_SAVE_MAGIC 0x3254424DLL /* "MBT2" le */
 static inline int64_t mako_btree_save(MakoBTree *t, MakoString path) {
     if (!t || !path.data || path.len == 0 || path.len >= 500) return -1;
 #if defined(_WIN32)
@@ -717,8 +729,15 @@ static inline int64_t mako_btree_save(MakoBTree *t, MakoString path) {
     pbuf[path.len] = 0;
     int fd = open(pbuf, O_WRONLY | O_CREAT | O_TRUNC, 0644);
     if (fd < 0) return -1;
+    int64_t magic = (int64_t)MAKO_BTREE_SAVE_MAGIC;
     int64_t count = n;
-    if (write(fd, &count, sizeof(count)) != (ssize_t)sizeof(count)) {
+    uint64_t csum = mako_fnv1a64(keys, (size_t)n * sizeof(int64_t));
+    csum ^= mako_fnv1a64(vals, (size_t)n * sizeof(int64_t));
+    csum ^= (uint64_t)count * 0x9e3779b97f4a7c15ULL;
+    int64_t checksum = (int64_t)csum;
+    if (write(fd, &magic, sizeof(magic)) != (ssize_t)sizeof(magic)
+        || write(fd, &count, sizeof(count)) != (ssize_t)sizeof(count)
+        || write(fd, &checksum, sizeof(checksum)) != (ssize_t)sizeof(checksum)) {
         close(fd);
         return -1;
     }
@@ -734,6 +753,7 @@ static inline int64_t mako_btree_save(MakoBTree *t, MakoString path) {
 #endif
 }
 
+/* Load v2 (magic+checksum) or legacy v1 (count only, no magic). Missing file → NULL. */
 static inline MakoBTree *mako_btree_load(MakoString path) {
     if (!path.data || path.len == 0 || path.len >= 500) return NULL;
 #if defined(_WIN32)
@@ -744,9 +764,46 @@ static inline MakoBTree *mako_btree_load(MakoString path) {
     pbuf[path.len] = 0;
     int fd = open(pbuf, O_RDONLY);
     if (fd < 0) return NULL;
+    int64_t first = 0;
+    if (read(fd, &first, sizeof(first)) != (ssize_t)sizeof(first)) {
+        close(fd);
+        return NULL;
+    }
     int64_t count = 0;
-    if (read(fd, &count, sizeof(count)) != (ssize_t)sizeof(count) || count < 0
-        || count > MAKO_BTREE_SAVE_MAX) {
+    int is_v2 = 0;
+    if (first == (int64_t)MAKO_BTREE_SAVE_MAGIC) {
+        is_v2 = 1;
+        int64_t checksum = 0;
+        if (read(fd, &count, sizeof(count)) != (ssize_t)sizeof(count)
+            || read(fd, &checksum, sizeof(checksum)) != (ssize_t)sizeof(checksum)
+            || count < 0 || count > MAKO_BTREE_SAVE_MAX) {
+            close(fd);
+            return NULL;
+        }
+        int64_t keys[MAKO_BTREE_SAVE_MAX];
+        int64_t vals[MAKO_BTREE_SAVE_MAX];
+        for (int64_t i = 0; i < count; i++) {
+            if (read(fd, &keys[i], sizeof(int64_t)) != (ssize_t)sizeof(int64_t)
+                || read(fd, &vals[i], sizeof(int64_t)) != (ssize_t)sizeof(int64_t)) {
+                close(fd);
+                return NULL;
+            }
+        }
+        close(fd);
+        uint64_t csum = mako_fnv1a64(keys, (size_t)count * sizeof(int64_t));
+        csum ^= mako_fnv1a64(vals, (size_t)count * sizeof(int64_t));
+        csum ^= (uint64_t)count * 0x9e3779b97f4a7c15ULL;
+        if ((int64_t)csum != checksum) return NULL;
+        MakoBTree *t = mako_btree_new();
+        if (!t) return NULL;
+        for (int64_t i = 0; i < count; i++) (void)mako_btree_put(t, keys[i], vals[i]);
+        t->count = count;
+        return t;
+    }
+    /* Legacy v1: first word is count */
+    (void)is_v2;
+    count = first;
+    if (count < 0 || count > MAKO_BTREE_SAVE_MAX) {
         close(fd);
         return NULL;
     }
@@ -766,7 +823,6 @@ static inline MakoBTree *mako_btree_load(MakoString path) {
         (void)mako_btree_put(t, k, v);
     }
     close(fd);
-    /* reset inflated count from puts */
     t->count = count;
     return t;
 #endif
@@ -847,6 +903,34 @@ static inline MakoSst *mako_sst_build4(
     int64_t keys[4] = {k0, k1, k2, k3};
     int64_t vals[4] = {v0, v1, v2, v3};
     return mako_sst_build(path, keys, vals, 4);
+}
+
+/* Convenience: 8 fixed pairs (N≠4 product path). */
+static inline MakoSst *mako_sst_build8(
+    MakoString path,
+    int64_t k0, int64_t v0, int64_t k1, int64_t v1,
+    int64_t k2, int64_t v2, int64_t k3, int64_t v3,
+    int64_t k4, int64_t v4, int64_t k5, int64_t v5,
+    int64_t k6, int64_t v6, int64_t k7, int64_t v7
+) {
+    int64_t keys[8] = {k0, k1, k2, k3, k4, k5, k6, k7};
+    int64_t vals[8] = {v0, v1, v2, v3, v4, v5, v6, v7};
+    return mako_sst_build(path, keys, vals, 8);
+}
+
+/* Build SST from parallel key/val arrays (n pairs). n<=0 → empty SST. */
+static inline MakoSst *mako_sst_build_n(
+    MakoString path, int64_t n,
+    int64_t k0, int64_t v0, int64_t k1, int64_t v1,
+    int64_t k2, int64_t v2, int64_t k3, int64_t v3,
+    int64_t k4, int64_t v4, int64_t k5, int64_t v5,
+    int64_t k6, int64_t v6, int64_t k7, int64_t v7
+) {
+    if (n <= 0) return mako_sst_build(path, NULL, NULL, 0);
+    if (n > 8) n = 8;
+    int64_t keys[8] = {k0, k1, k2, k3, k4, k5, k6, k7};
+    int64_t vals[8] = {v0, v1, v2, v3, v4, v5, v6, v7};
+    return mako_sst_build(path, keys, vals, n);
 }
 
 static inline int64_t mako_sst_get(MakoSst *s, int64_t key) {
@@ -1190,25 +1274,89 @@ static inline int64_t mako_bloom_free(MakoBloom *b) {
     return 0;
 }
 
-/* ---- Ordered range scan seed (fills TLS buffer; inclusive lo..hi) ---- */
-#define MAKO_RANGE_MAX 128
-static __thread int64_t mako_range_keys[MAKO_RANGE_MAX];
-static __thread int64_t mako_range_vals[MAKO_RANGE_MAX];
+/* FNV-1a 64-bit (string → domain int key). Collisions inflate false positives only for bloom. */
+static inline int64_t mako_str_hash64(MakoString s) {
+    uint64_t h = 14695981039346656037ULL;
+    if (s.data) {
+        for (size_t i = 0; i < s.len; i++) {
+            h ^= (uint64_t)(unsigned char)s.data[i];
+            h *= 1099511628211ULL;
+        }
+    }
+    /* Keep non-negative for range seeds that treat keys as signed. */
+    if ((int64_t)h < 0) return (int64_t)(~h);
+    return (int64_t)h;
+}
+
+static inline int64_t mako_bloom_add_str(MakoBloom *b, MakoString key) {
+    return mako_bloom_add(b, mako_str_hash64(key));
+}
+
+static inline int64_t mako_bloom_maybe_str(MakoBloom *b, MakoString key) {
+    return mako_bloom_maybe(b, mako_str_hash64(key));
+}
+
+/* ---- Ordered range scan (TLS small + heap grow; inclusive lo..hi) ---- */
+#define MAKO_RANGE_TLS 128
+#define MAKO_RANGE_HEAP_MAX 65536
+static __thread int64_t mako_range_keys_tls[MAKO_RANGE_TLS];
+static __thread int64_t mako_range_vals_tls[MAKO_RANGE_TLS];
+static __thread int64_t *mako_range_keys_dyn;
+static __thread int64_t *mako_range_vals_dyn;
+static __thread int64_t mako_range_capacity;
 static __thread int64_t mako_range_n;
+static __thread int64_t mako_range_i; /* iterator cursor */
+
+static inline int64_t *mako_range_keys_ptr(void) {
+    return mako_range_keys_dyn ? mako_range_keys_dyn : mako_range_keys_tls;
+}
+static inline int64_t *mako_range_vals_ptr(void) {
+    return mako_range_vals_dyn ? mako_range_vals_dyn : mako_range_vals_tls;
+}
 
 static inline void mako_range_clear(void) {
     mako_range_n = 0;
+    mako_range_i = 0;
+    if (!mako_range_capacity) mako_range_capacity = MAKO_RANGE_TLS;
+}
+
+static inline int mako_range_ensure(int64_t need) {
+    if (need <= mako_range_capacity) return 0;
+    if (need > MAKO_RANGE_HEAP_MAX) return -1;
+    int64_t ncap = mako_range_capacity < MAKO_RANGE_TLS ? MAKO_RANGE_TLS : mako_range_capacity;
+    while (ncap < need) {
+        ncap *= 2;
+        if (ncap > MAKO_RANGE_HEAP_MAX) ncap = MAKO_RANGE_HEAP_MAX;
+    }
+    int64_t *nk = (int64_t *)realloc(mako_range_keys_dyn, (size_t)ncap * sizeof(int64_t));
+    int64_t *nv = (int64_t *)realloc(mako_range_vals_dyn, (size_t)ncap * sizeof(int64_t));
+    if (!nk || !nv) {
+        free(nk);
+        free(nv);
+        return -1;
+    }
+    if (!mako_range_keys_dyn && mako_range_n > 0) {
+        memcpy(nk, mako_range_keys_tls, (size_t)mako_range_n * sizeof(int64_t));
+        memcpy(nv, mako_range_vals_tls, (size_t)mako_range_n * sizeof(int64_t));
+    }
+    mako_range_keys_dyn = nk;
+    mako_range_vals_dyn = nv;
+    mako_range_capacity = ncap;
+    return 0;
 }
 
 static inline void mako_range_push(int64_t k, int64_t v) {
-    if (mako_range_n >= MAKO_RANGE_MAX) return;
-    mako_range_keys[mako_range_n] = k;
-    mako_range_vals[mako_range_n] = v;
+    if (mako_range_n >= MAKO_RANGE_HEAP_MAX) return;
+    if (mako_range_n >= mako_range_capacity || (mako_range_n >= MAKO_RANGE_TLS && !mako_range_keys_dyn)) {
+        if (mako_range_ensure(mako_range_n + 1) != 0) return;
+    }
+    mako_range_keys_ptr()[mako_range_n] = k;
+    mako_range_vals_ptr()[mako_range_n] = v;
     mako_range_n++;
 }
 
 static inline void mako_btree_range_node(MakoBNode *n, int64_t lo, int64_t hi) {
-    if (!n || mako_range_n >= MAKO_RANGE_MAX) return;
+    if (!n || mako_range_n >= MAKO_RANGE_HEAP_MAX) return;
     if (n->leaf) {
         for (int i = 0; i < n->n; i++) {
             if (n->keys[i] < lo) continue;
@@ -1219,14 +1367,14 @@ static inline void mako_btree_range_node(MakoBNode *n, int64_t lo, int64_t hi) {
     }
     for (int i = 0; i < n->n; i++) {
         mako_btree_range_node(n->kids[i], lo, hi);
-        if (mako_range_n >= MAKO_RANGE_MAX) return;
+        if (mako_range_n >= MAKO_RANGE_HEAP_MAX) return;
         if (n->keys[i] >= lo && n->keys[i] <= hi) mako_range_push(n->keys[i], n->vals[i]);
         if (n->keys[i] > hi) return;
     }
     mako_btree_range_node(n->kids[n->n], lo, hi);
 }
 
-/* Populate TLS range; return count of matches (capped at MAKO_RANGE_MAX). */
+/* Populate range buffer; return count of matches (cap MAKO_RANGE_HEAP_MAX). */
 static inline int64_t mako_btree_range(MakoBTree *t, int64_t lo, int64_t hi) {
     mako_range_clear();
     if (!t || !t->root || lo > hi) return 0;
@@ -1237,7 +1385,6 @@ static inline int64_t mako_btree_range(MakoBTree *t, int64_t lo, int64_t hi) {
 static inline int64_t mako_sst_range(MakoSst *s, int64_t lo, int64_t hi) {
     mako_range_clear();
     if (!s || !s->keys || s->n <= 0 || lo > hi) return 0;
-    /* lower_bound on lo */
     int64_t i = 0, j = s->n;
     while (i < j) {
         int64_t m = i + (j - i) / 2;
@@ -1246,7 +1393,7 @@ static inline int64_t mako_sst_range(MakoSst *s, int64_t lo, int64_t hi) {
     }
     for (; i < s->n && s->keys[i] <= hi; i++) {
         mako_range_push(s->keys[i], s->vals[i]);
-        if (mako_range_n >= MAKO_RANGE_MAX) break;
+        if (mako_range_n >= MAKO_RANGE_HEAP_MAX) break;
     }
     return mako_range_n;
 }
@@ -1255,14 +1402,63 @@ static inline int64_t mako_range_len(void) {
     return mako_range_n;
 }
 
+static inline int64_t mako_range_cap(void) {
+    return MAKO_RANGE_HEAP_MAX;
+}
+
 static inline int64_t mako_range_key_at(int64_t i) {
     if (i < 0 || i >= mako_range_n) return -1;
-    return mako_range_keys[i];
+    return mako_range_keys_ptr()[i];
 }
 
 static inline int64_t mako_range_val_at(int64_t i) {
     if (i < 0 || i >= mako_range_n) return -1;
-    return mako_range_vals[i];
+    return mako_range_vals_ptr()[i];
+}
+
+/* Iterator over last range result: rewind then next/key/val. */
+static inline int64_t mako_range_rewind(void) {
+    mako_range_i = 0;
+    return mako_range_n;
+}
+
+/* 1 = advanced, 0 = exhausted. After next, range_key/range_val read current. */
+static inline int64_t mako_range_next(void) {
+    if (mako_range_i >= mako_range_n) return 0;
+    mako_range_i++;
+    return 1;
+}
+
+static inline int64_t mako_range_key(void) {
+    if (mako_range_i <= 0 || mako_range_i > mako_range_n) return -1;
+    return mako_range_keys_ptr()[mako_range_i - 1];
+}
+
+static inline int64_t mako_range_val(void) {
+    if (mako_range_i <= 0 || mako_range_i > mako_range_n) return -1;
+    return mako_range_vals_ptr()[mako_range_i - 1];
+}
+
+/* Collect all values for an exact key into the range buffer (multi-value / first). */
+static inline int64_t mako_btree_get_all(MakoBTree *t, int64_t key) {
+    return mako_btree_range(t, key, key);
+}
+
+/* String-key helpers: hash domain key (collision risk on btree; safe for bloom). */
+static inline int64_t mako_btree_put_str(MakoBTree *t, MakoString key, int64_t val) {
+    return mako_btree_put(t, mako_str_hash64(key), val);
+}
+static inline int64_t mako_btree_get_str(MakoBTree *t, MakoString key) {
+    return mako_btree_get(t, mako_str_hash64(key));
+}
+static inline int64_t mako_btree_range_str(MakoBTree *t, MakoString lo, MakoString hi) {
+    int64_t a = mako_str_hash64(lo), b = mako_str_hash64(hi);
+    if (a > b) {
+        int64_t tmp = a;
+        a = b;
+        b = tmp;
+    }
+    return mako_btree_range(t, a, b);
 }
 
 /* ---- Disk page manager seed (fixed 4 KiB pages, file-backed) ---- */
@@ -1425,6 +1621,211 @@ static inline int64_t mako_pman_close(MakoPageMan *pm) {
     free(pm);
     return 0;
 #endif
+}
+
+/* Write raw page bytes (up to 4 KiB). Shorter data is zero-padded. */
+static inline int64_t mako_pman_write_page(MakoPageMan *pm, int64_t page_id, MakoString data) {
+#if defined(_WIN32)
+    (void)pm;
+    (void)page_id;
+    (void)data;
+    return -1;
+#else
+    if (!pm || pm->fd < 0 || page_id < 1 || page_id >= pm->npages) return -1;
+    char buf[MAKO_PMAN_PAGE];
+    memset(buf, 0, sizeof(buf));
+    size_t n = data.data && data.len > 0 ? data.len : 0;
+    if (n > MAKO_PMAN_PAGE) n = MAKO_PMAN_PAGE;
+    if (n && data.data) memcpy(buf, data.data, n);
+    if (lseek(pm->fd, (off_t)page_id * MAKO_PMAN_PAGE, SEEK_SET) < 0) return -1;
+    if (write(pm->fd, buf, MAKO_PMAN_PAGE) != MAKO_PMAN_PAGE) return -1;
+    pm->writes++;
+    return (int64_t)n;
+#endif
+}
+
+/* Read full page as string (always 4096 bytes on success). */
+static inline MakoString mako_pman_read_page(MakoPageMan *pm, int64_t page_id) {
+    MakoString out = {NULL, 0};
+#if defined(_WIN32)
+    (void)pm;
+    (void)page_id;
+    return out;
+#else
+    if (!pm || pm->fd < 0 || page_id < 1 || page_id >= pm->npages) return out;
+    char *buf = (char *)malloc(MAKO_PMAN_PAGE);
+    if (!buf) return out;
+    if (lseek(pm->fd, (off_t)page_id * MAKO_PMAN_PAGE, SEEK_SET) < 0) {
+        free(buf);
+        return out;
+    }
+    if (read(pm->fd, buf, MAKO_PMAN_PAGE) != MAKO_PMAN_PAGE) {
+        free(buf);
+        return out;
+    }
+    pm->reads++;
+    out.data = buf;
+    out.len = MAKO_PMAN_PAGE;
+    return out;
+#endif
+}
+
+/* ---- Multi-value ordered map (sorted pairs; duplicate keys allowed) ---- */
+typedef struct {
+    int64_t *keys;
+    int64_t *vals;
+    int64_t n;
+    int64_t cap;
+} MakoMultiMap;
+
+static inline MakoMultiMap *mako_multimap_new(void) {
+    MakoMultiMap *m = (MakoMultiMap *)calloc(1, sizeof(MakoMultiMap));
+    return m;
+}
+
+static inline int mako_multimap_grow(MakoMultiMap *m, int64_t need) {
+    if (!m) return -1;
+    if (need <= m->cap) return 0;
+    int64_t ncap = m->cap ? m->cap * 2 : 16;
+    while (ncap < need) ncap *= 2;
+    int64_t *nk = (int64_t *)realloc(m->keys, (size_t)ncap * sizeof(int64_t));
+    int64_t *nv = (int64_t *)realloc(m->vals, (size_t)ncap * sizeof(int64_t));
+    if (!nk || !nv) {
+        free(nk);
+        free(nv);
+        return -1;
+    }
+    m->keys = nk;
+    m->vals = nv;
+    m->cap = ncap;
+    return 0;
+}
+
+/* Insert (key,val) keeping sorted order; duplicates allowed (multi-value). */
+static inline int64_t mako_multimap_put(MakoMultiMap *m, int64_t key, int64_t val) {
+    if (!m || mako_multimap_grow(m, m->n + 1) != 0) return -1;
+    int64_t i = m->n;
+    while (i > 0 && m->keys[i - 1] > key) {
+        m->keys[i] = m->keys[i - 1];
+        m->vals[i] = m->vals[i - 1];
+        i--;
+    }
+    m->keys[i] = key;
+    m->vals[i] = val;
+    m->n++;
+    return 0;
+}
+
+static inline int64_t mako_multimap_len(MakoMultiMap *m) {
+    return m ? m->n : 0;
+}
+
+/* First value for key, or -1. */
+static inline int64_t mako_multimap_get(MakoMultiMap *m, int64_t key) {
+    if (!m || m->n <= 0) return -1;
+    int64_t lo = 0, hi = m->n;
+    while (lo < hi) {
+        int64_t mid = lo + (hi - lo) / 2;
+        if (m->keys[mid] < key) lo = mid + 1;
+        else hi = mid;
+    }
+    if (lo < m->n && m->keys[lo] == key) return m->vals[lo];
+    return -1;
+}
+
+/* All values for key → range buffer. */
+static inline int64_t mako_multimap_get_all(MakoMultiMap *m, int64_t key) {
+    mako_range_clear();
+    if (!m || m->n <= 0) return 0;
+    int64_t lo = 0, hi = m->n;
+    while (lo < hi) {
+        int64_t mid = lo + (hi - lo) / 2;
+        if (m->keys[mid] < key) lo = mid + 1;
+        else hi = mid;
+    }
+    for (; lo < m->n && m->keys[lo] == key; lo++) {
+        mako_range_push(m->keys[lo], m->vals[lo]);
+        if (mako_range_n >= MAKO_RANGE_HEAP_MAX) break;
+    }
+    return mako_range_n;
+}
+
+static inline int64_t mako_multimap_range(MakoMultiMap *m, int64_t lo_k, int64_t hi_k) {
+    mako_range_clear();
+    if (!m || m->n <= 0 || lo_k > hi_k) return 0;
+    int64_t lo = 0, hi = m->n;
+    while (lo < hi) {
+        int64_t mid = lo + (hi - lo) / 2;
+        if (m->keys[mid] < lo_k) lo = mid + 1;
+        else hi = mid;
+    }
+    for (; lo < m->n && m->keys[lo] <= hi_k; lo++) {
+        mako_range_push(m->keys[lo], m->vals[lo]);
+        if (mako_range_n >= MAKO_RANGE_HEAP_MAX) break;
+    }
+    return mako_range_n;
+}
+
+static inline int64_t mako_multimap_free(MakoMultiMap *m) {
+    if (!m) return 0;
+    free(m->keys);
+    free(m->vals);
+    free(m);
+    return 0;
+}
+
+/* ---- Process-local domain handle registry (int slots → opaque ptrs) ---- */
+#define MAKO_DOMREG_MAX 256
+#define MAKO_DOMREG_BLOOM 1
+#define MAKO_DOMREG_BTREE 2
+#define MAKO_DOMREG_PMAN 3
+#define MAKO_DOMREG_SST 4
+#define MAKO_DOMREG_MULTIMAP 5
+static void *mako_domreg_ptr[MAKO_DOMREG_MAX];
+static int8_t mako_domreg_kind[MAKO_DOMREG_MAX];
+
+static inline int64_t mako_domain_reg_put(void *p, int8_t kind) {
+    if (!p) return -1;
+    for (int i = 1; i < MAKO_DOMREG_MAX; i++) {
+        if (!mako_domreg_ptr[i]) {
+            mako_domreg_ptr[i] = p;
+            mako_domreg_kind[i] = kind;
+            return i;
+        }
+    }
+    return -1;
+}
+
+static inline void *mako_domain_reg_get(int64_t id, int8_t kind) {
+    if (id <= 0 || id >= MAKO_DOMREG_MAX) return NULL;
+    if (mako_domreg_kind[id] != kind) return NULL;
+    return mako_domreg_ptr[id];
+}
+
+static inline int64_t mako_domain_reg_del(int64_t id) {
+    if (id <= 0 || id >= MAKO_DOMREG_MAX) return -1;
+    mako_domreg_ptr[id] = NULL;
+    mako_domreg_kind[id] = 0;
+    return 0;
+}
+
+static inline int64_t mako_domain_reg_put_bloom(MakoBloom *b) {
+    return mako_domain_reg_put((void *)b, MAKO_DOMREG_BLOOM);
+}
+static inline MakoBloom *mako_domain_reg_get_bloom(int64_t id) {
+    return (MakoBloom *)mako_domain_reg_get(id, MAKO_DOMREG_BLOOM);
+}
+static inline int64_t mako_domain_reg_put_btree(MakoBTree *t) {
+    return mako_domain_reg_put((void *)t, MAKO_DOMREG_BTREE);
+}
+static inline MakoBTree *mako_domain_reg_get_btree(int64_t id) {
+    return (MakoBTree *)mako_domain_reg_get(id, MAKO_DOMREG_BTREE);
+}
+static inline int64_t mako_domain_reg_put_pman(MakoPageMan *pm) {
+    return mako_domain_reg_put((void *)pm, MAKO_DOMREG_PMAN);
+}
+static inline MakoPageMan *mako_domain_reg_get_pman(int64_t id) {
+    return (MakoPageMan *)mako_domain_reg_get(id, MAKO_DOMREG_PMAN);
 }
 
 /* ---- Portable SIMD-ish seed: scalar loop (autovec-friendly) ---- */

@@ -2,19 +2,34 @@
 
 ## Unreleased
 
-### Domain handle C types (Bloom · PageMan · Predict · …)
+### Storage / domain P0–P4 product surface
 
-- Map storage-polish / residual domain handles in `type_expr_c` so they are
-  real C pointers (`MakoBloom*`, `MakoPageMan*`, …) instead of falling through
-  to `int64_t`.
-- Enables **params**, **returns**, and **struct fields** for `Bloom`,
-  `PageMan`, `Predict`, plus `ZipWriter` / `ReflectValue` / `Limits`.
-- Tests: `TestDomainHandleFieldsAndFns` in `domain_tracks_test`.
+**P0 — first-class handles + bloom rebuild**
+- Domain handles (`Bloom`, `PageMan`, `Predict`, `MultiMap`, …) map to real C
+  pointers (params / returns / struct fields), not `int64_t`.
+- `bloom_clear` resets bits without free/new.
 
-### `bloom_clear`
+**P1 — range · multi-value · string keys**
+- Range buffer grows (TLS 128 → heap up to 65 536); `range_cap`.
+- Iterator: `range_rewind` / `range_next` / `range_key` / `range_val`.
+- `MultiMap` multi-value ordered map (`multimap_put` / `get_all` / `range`).
+- String keys: `bloom_add_str` / `bloom_maybe_str`, `btree_put_str` /
+  `get_str` / `range_str`, `str_hash64`.
 
-- Reset filter bits and key count without freeing (`mako_bloom_clear`).
-- Lets product code rebuild a bloom in place (e.g. index rebuild).
+**P2 — durable sidecars**
+- `btree_save` v2: magic `MBT2` + FNV checksum (legacy v1 load still works).
+- `pman_write_page` / `pman_read_page` (full 4 KiB bulk).
+
+**P3 — ergonomics**
+- `str_slice_ci_index` / `str_slice_ci_starts`, `builder_write_slice`.
+- `file_append2` / `file_append3` (writev multi-record flush).
+- Domain registry: `domain_reg_put_*` / `get_*` / `del` (int slots for handles).
+
+**P4 — extras**
+- `sst_build8` / `sst_build_n` (N≤8 pairs without C arrays).
+- Profile JSON schema remains `mako.profile_samples.v1` (stable).
+
+Tests: `TestDomainHandleFieldsAndFns`, `TestDomainStoragePolishP0toP4`.
 
 ## 0.1.7 — 2026-07-15
 

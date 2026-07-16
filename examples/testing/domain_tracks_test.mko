@@ -230,6 +230,121 @@ fn TestBtreeAndSstRange() {
     assert_eq(sst_free(s), 0)
 }
 
+fn TestDomainStoragePolishP0toP4() {
+    // --- bloom string keys + clear ---
+    let b = bloom_new()
+    assert_eq(bloom_add_str(b, "alpha"), 0)
+    assert_eq(bloom_add_str(b, "beta"), 0)
+    assert_eq(bloom_maybe_str(b, "alpha"), 1)
+    assert_eq(bloom_maybe_str(b, "nope-key-zzzz"), 0)
+    assert(str_hash64("alpha") > 0)
+
+    // --- multimap multi-value ---
+    let mm = multimap_new()
+    assert_eq(multimap_put(mm, 5, 50), 0)
+    assert_eq(multimap_put(mm, 5, 51), 0)
+    assert_eq(multimap_put(mm, 5, 52), 0)
+    assert_eq(multimap_put(mm, 7, 70), 0)
+    assert_eq(multimap_get(mm, 5), 50)
+    assert_eq(multimap_get_all(mm, 5), 3)
+    assert_eq(range_val_at(0), 50)
+    assert_eq(range_val_at(2), 52)
+    assert_eq(multimap_range(mm, 5, 7), 4)
+    assert_eq(multimap_len(mm), 4)
+    assert_eq(multimap_free(mm), 0)
+
+    // --- range iterator + large range cap ---
+    let t = btree_new()
+    let mut i = 0
+    while i < 200 {
+        assert_eq(btree_put(t, i, i * 10), 0)
+        i = i + 1
+    }
+    assert(range_cap() >= 200)
+    let n = btree_range(t, 0, 199)
+    assert_eq(n, 200)
+    assert_eq(range_len(), 200)
+    assert_eq(range_rewind(), 200)
+    let mut seen = 0
+    while range_next() == 1 {
+        seen = seen + 1
+    }
+    assert_eq(seen, 200)
+    assert_eq(btree_put_str(t, "user:1", 99), 0)
+    assert_eq(btree_get_str(t, "user:1"), 99)
+
+    // --- btree_save checksum round-trip ---
+    let snap = "/tmp/mako_btree_v2.snap"
+    assert(btree_save(t, snap) >= 200)
+    let t2 = btree_load(snap)
+    assert_eq(btree_get(t2, 50), 500)
+    assert_eq(btree_get_str(t2, "user:1"), 99)
+    assert_eq(btree_free(t), 0)
+    assert_eq(btree_free(t2), 0)
+
+    // --- sst_build8 / sst_build_n ---
+    let s8 = sst_build8("/tmp/mako_sst8.sst", 1, 10, 2, 20, 3, 30, 4, 40, 5, 50, 6, 60, 7, 70, 8, 80)
+    assert_eq(sst_len(s8), 8)
+    assert_eq(sst_get(s8, 8), 80)
+    assert_eq(sst_range(s8, 3, 6), 4)
+    assert_eq(sst_free(s8), 0)
+    let sn = sst_build_n("/tmp/mako_sstn.sst", 3, 10, 1, 20, 2, 30, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+    assert_eq(sst_len(sn), 3)
+    assert_eq(sst_get(sn, 20), 2)
+    assert_eq(sst_free(sn), 0)
+
+    // --- pman page bulk r/w ---
+    let path = "/tmp/mako_pman_bulk.dat"
+    assert_eq(write_file(path, ""), 0)
+    let pm = pman_open(path)
+    let p1 = pman_alloc(pm)
+    assert_eq(pman_write_page(pm, p1, "hello-pman-page"), 15)
+    let raw = pman_read_page(pm, p1)
+    assert(str_has_prefix(raw, "hello-pman-page") == true)
+    assert_eq(pman_sync(pm), 0)
+
+    // --- domain registry (handle slots / "slice" of handles) ---
+    let b2 = bloom_new()
+    let _ = bloom_add(b2, 1)
+    let id = domain_reg_put_bloom(b2)
+    assert(id > 0)
+    let b3 = domain_reg_get_bloom(id)
+    assert_eq(bloom_maybe(b3, 1), 1)
+    assert_eq(domain_reg_del(id), 0)
+    assert_eq(bloom_free(b2), 0)
+    let tid = domain_reg_put_btree(btree_new())
+    assert(tid > 0)
+    let tb = domain_reg_get_btree(tid)
+    assert_eq(btree_put(tb, 1, 2), 0)
+    assert_eq(btree_get(tb, 1), 2)
+    assert_eq(btree_free(tb), 0)
+    assert_eq(domain_reg_del(tid), 0)
+    let pmid = domain_reg_put_pman(pm)
+    assert(pmid > 0)
+    let pm2 = domain_reg_get_pman(pmid)
+    assert_eq(pman_get(pm2, p1, 0), pman_get(pm, p1, 0))
+    assert_eq(domain_reg_del(pmid), 0)
+    assert_eq(pman_close(pm), 0)
+
+    // --- zero-copy string helpers ---
+    assert_eq(str_slice_ci_index("Hello SELECT x", 0, 14, "select"), 6)
+    assert_eq(str_slice_ci_starts("INSERT INTO t", 0, "insert "), 1)
+    let sb = str_builder()
+    builder_write_slice(sb, "abcdef", 2, 3)
+    assert_eq_str(builder_string(sb), "cde")
+
+    // --- file_append2 group-commit style ---
+    let wpath = "/tmp/mako_append2.wal"
+    assert_eq(write_file(wpath, ""), 0)
+    let fd = file_open(wpath, 2, 0)
+    assert(fd >= 0)
+    assert(file_append2(fd, "rec1\n", "rec2\n") >= 8)
+    assert_eq(file_close(fd), 0)
+    let body = read_file(wpath)
+    assert(str_contains(body, "rec1") == true)
+    assert(str_contains(body, "rec2") == true)
+}
+
 fn TestDiskPageManager() {
     let path = "/tmp/mako_pman_seed.dat"
     assert_eq(write_file(path, ""), 0)

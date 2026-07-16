@@ -546,6 +546,20 @@ impl TypeChecker {
             ),
         );
         fns.insert(
+            "str_slice_ci_index".into(),
+            Type::Fn(
+                vec![Type::String, Type::Int, Type::Int, Type::String],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "str_slice_ci_starts".into(),
+            Type::Fn(
+                vec![Type::String, Type::Int, Type::String],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
             "str_at_eq".into(),
             Type::Fn(vec![Type::String, Type::Int, Type::String], Box::new(Type::Int)),
         );
@@ -628,6 +642,13 @@ impl TypeChecker {
         fns.insert(
             "builder_write".into(),
             Type::Fn(vec![Type::StrBuilder, Type::String], Box::new(Type::Void)),
+        );
+        fns.insert(
+            "builder_write_slice".into(),
+            Type::Fn(
+                vec![Type::StrBuilder, Type::String, Type::Int, Type::Int],
+                Box::new(Type::Void),
+            ),
         );
         fns.insert(
             "builder_write_byte".into(),
@@ -1550,6 +1571,20 @@ impl TypeChecker {
             Type::Fn(vec![Type::Int, Type::String], Box::new(Type::Int)),
         );
         fns.insert(
+            "file_append2".into(),
+            Type::Fn(
+                vec![Type::Int, Type::String, Type::String],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "file_append3".into(),
+            Type::Fn(
+                vec![Type::Int, Type::String, Type::String, Type::String],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
             "fsync".into(),
             Type::Fn(vec![Type::Int], Box::new(Type::Int)),
         );
@@ -1838,6 +1873,9 @@ impl TypeChecker {
         fns.insert("bloom_len".into(), Type::Fn(vec![Type::Named("Bloom".into())], Box::new(Type::Int)));
         fns.insert("bloom_clear".into(), Type::Fn(vec![Type::Named("Bloom".into())], Box::new(Type::Int)));
         fns.insert("bloom_free".into(), Type::Fn(vec![Type::Named("Bloom".into())], Box::new(Type::Int)));
+        fns.insert("bloom_add_str".into(), Type::Fn(vec![Type::Named("Bloom".into()), Type::String], Box::new(Type::Int)));
+        fns.insert("bloom_maybe_str".into(), Type::Fn(vec![Type::Named("Bloom".into()), Type::String], Box::new(Type::Int)));
+        fns.insert("str_hash64".into(), Type::Fn(vec![Type::String], Box::new(Type::Int)));
         fns.insert(
             "btree_range".into(),
             Type::Fn(
@@ -1845,6 +1883,10 @@ impl TypeChecker {
                 Box::new(Type::Int),
             ),
         );
+        fns.insert("btree_get_all".into(), Type::Fn(vec![Type::Named("BTree".into()), Type::Int], Box::new(Type::Int)));
+        fns.insert("btree_put_str".into(), Type::Fn(vec![Type::Named("BTree".into()), Type::String, Type::Int], Box::new(Type::Int)));
+        fns.insert("btree_get_str".into(), Type::Fn(vec![Type::Named("BTree".into()), Type::String], Box::new(Type::Int)));
+        fns.insert("btree_range_str".into(), Type::Fn(vec![Type::Named("BTree".into()), Type::String, Type::String], Box::new(Type::Int)));
         fns.insert(
             "sst_range".into(),
             Type::Fn(
@@ -1852,9 +1894,40 @@ impl TypeChecker {
                 Box::new(Type::Int),
             ),
         );
+        fns.insert("sst_build8".into(), Type::Fn(vec![
+            Type::String,
+            Type::Int, Type::Int, Type::Int, Type::Int, Type::Int, Type::Int, Type::Int, Type::Int,
+            Type::Int, Type::Int, Type::Int, Type::Int, Type::Int, Type::Int, Type::Int, Type::Int,
+        ], Box::new(Type::Named("Sst".into()))));
+        fns.insert("sst_build_n".into(), Type::Fn(vec![
+            Type::String, Type::Int,
+            Type::Int, Type::Int, Type::Int, Type::Int, Type::Int, Type::Int, Type::Int, Type::Int,
+            Type::Int, Type::Int, Type::Int, Type::Int, Type::Int, Type::Int, Type::Int, Type::Int,
+        ], Box::new(Type::Named("Sst".into()))));
         fns.insert("range_len".into(), Type::Fn(vec![], Box::new(Type::Int)));
+        fns.insert("range_cap".into(), Type::Fn(vec![], Box::new(Type::Int)));
         fns.insert("range_key_at".into(), Type::Fn(vec![Type::Int], Box::new(Type::Int)));
         fns.insert("range_val_at".into(), Type::Fn(vec![Type::Int], Box::new(Type::Int)));
+        fns.insert("range_rewind".into(), Type::Fn(vec![], Box::new(Type::Int)));
+        fns.insert("range_next".into(), Type::Fn(vec![], Box::new(Type::Int)));
+        fns.insert("range_key".into(), Type::Fn(vec![], Box::new(Type::Int)));
+        fns.insert("range_val".into(), Type::Fn(vec![], Box::new(Type::Int)));
+        // Multi-value ordered map (duplicate keys)
+        fns.insert("multimap_new".into(), Type::Fn(vec![], Box::new(Type::Named("MultiMap".into()))));
+        fns.insert("multimap_put".into(), Type::Fn(vec![Type::Named("MultiMap".into()), Type::Int, Type::Int], Box::new(Type::Int)));
+        fns.insert("multimap_get".into(), Type::Fn(vec![Type::Named("MultiMap".into()), Type::Int], Box::new(Type::Int)));
+        fns.insert("multimap_get_all".into(), Type::Fn(vec![Type::Named("MultiMap".into()), Type::Int], Box::new(Type::Int)));
+        fns.insert("multimap_range".into(), Type::Fn(vec![Type::Named("MultiMap".into()), Type::Int, Type::Int], Box::new(Type::Int)));
+        fns.insert("multimap_len".into(), Type::Fn(vec![Type::Named("MultiMap".into())], Box::new(Type::Int)));
+        fns.insert("multimap_free".into(), Type::Fn(vec![Type::Named("MultiMap".into())], Box::new(Type::Int)));
+        // Domain handle registry (int slots)
+        fns.insert("domain_reg_put_bloom".into(), Type::Fn(vec![Type::Named("Bloom".into())], Box::new(Type::Int)));
+        fns.insert("domain_reg_get_bloom".into(), Type::Fn(vec![Type::Int], Box::new(Type::Named("Bloom".into()))));
+        fns.insert("domain_reg_put_btree".into(), Type::Fn(vec![Type::Named("BTree".into())], Box::new(Type::Int)));
+        fns.insert("domain_reg_get_btree".into(), Type::Fn(vec![Type::Int], Box::new(Type::Named("BTree".into()))));
+        fns.insert("domain_reg_put_pman".into(), Type::Fn(vec![Type::Named("PageMan".into())], Box::new(Type::Int)));
+        fns.insert("domain_reg_get_pman".into(), Type::Fn(vec![Type::Int], Box::new(Type::Named("PageMan".into()))));
+        fns.insert("domain_reg_del".into(), Type::Fn(vec![Type::Int], Box::new(Type::Int)));
         fns.insert(
             "pman_open".into(),
             Type::Fn(vec![Type::String], Box::new(Type::Named("PageMan".into()))),
@@ -1903,6 +1976,20 @@ impl TypeChecker {
         fns.insert(
             "pman_close".into(),
             Type::Fn(vec![Type::Named("PageMan".into())], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "pman_write_page".into(),
+            Type::Fn(
+                vec![Type::Named("PageMan".into()), Type::Int, Type::String],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "pman_read_page".into(),
+            Type::Fn(
+                vec![Type::Named("PageMan".into()), Type::Int],
+                Box::new(Type::String),
+            ),
         );
         fns.insert(
             "store_recover_wal".into(),

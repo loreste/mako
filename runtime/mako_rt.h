@@ -1578,6 +1578,28 @@ static inline int64_t mako_str_slice_index(MakoString s, int64_t off, int64_t le
     return -1;
 }
 
+/* Case-insensitive first index of needle in s[off:off+len], or -1 (absolute offset). */
+static inline int64_t mako_str_slice_ci_index(MakoString s, int64_t off, int64_t len, MakoString needle) {
+    if (!s.data || off < 0 || len < 0) return -1;
+    if ((size_t)off + (size_t)len > s.len) return -1;
+    if (!needle.data || needle.len == 0) return off;
+    if (needle.len > (size_t)len) return -1;
+    size_t nlen = needle.len;
+    size_t lim = (size_t)len - nlen;
+    for (size_t i = 0; i <= lim; i++) {
+        if (mako_str_ci_eq_bytes(s.data + (size_t)off + i, nlen, needle.data, nlen)) {
+            return off + (int64_t)i;
+        }
+    }
+    return -1;
+}
+
+/* 1 if s[off:] starts with prefix (case-insensitive), without alloc. */
+static inline int64_t mako_str_slice_ci_starts(MakoString s, int64_t off, MakoString prefix) {
+    size_t plen = prefix.data ? prefix.len : 0;
+    return mako_str_slice_ci_eq(s, off, (int64_t)plen, prefix);
+}
+
 /* Byte at index, or -1 if OOB. */
 static inline int64_t mako_str_byte_at(MakoString s, int64_t i) {
     if (!s.data || i < 0 || (size_t)i >= s.len) return -1;
@@ -1693,6 +1715,16 @@ static inline void mako_str_builder_write(MakoStrBuilder *b, MakoString s) {
     mako_str_builder_grow(b, b->len + s.len + 1);
     if (s.len) memcpy(b->data + b->len, s.data, s.len);
     b->len += s.len;
+    b->data[b->len] = 0;
+}
+
+/* Append s[off:off+len] without allocating a substring. OOB → no-op. */
+static inline void mako_str_builder_write_slice(MakoStrBuilder *b, MakoString s, int64_t off, int64_t len) {
+    if (!b || !s.data || off < 0 || len <= 0) return;
+    if ((size_t)off + (size_t)len > s.len) return;
+    mako_str_builder_grow(b, b->len + (size_t)len + 1);
+    memcpy(b->data + b->len, s.data + (size_t)off, (size_t)len);
+    b->len += (size_t)len;
     b->data[b->len] = 0;
 }
 

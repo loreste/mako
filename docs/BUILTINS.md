@@ -327,15 +327,23 @@ config/log updates. Tests: `examples/testing/fs_storage_test.mko`.
 | `hindex_new` / `hindex_put` / `hindex_get` / `hindex_del` / `hindex_free` | … | Int→int open-addressing index |
 | `store_new` / `store_put` / `store_get` / `store_begin` / `store_commit` / `store_rollback` | … | Txn KV; optional `store_attach_wal` |
 | `store_recover_wal` | `store_recover_wal(s, w) -> int` | Replay WAL `P`/`D` records into store (crash recovery seed) |
-| `btree_new` / `btree_put` / `btree_get` / `btree_save` / `btree_load` / `btree_free` | … | In-memory B-tree + disk snapshot |
-| `btree_range` | `btree_range(t, lo, hi) -> int` | Inclusive ordered range → TLS buffer; count |
+| `btree_new` / `btree_put` / `btree_get` / `btree_save` / `btree_load` / `btree_free` | … | In-memory B-tree + disk snapshot (save v2: magic+checksum) |
+| `btree_range` | `btree_range(t, lo, hi) -> int` | Inclusive ordered range → buffer (grows to 65 536) |
+| `btree_get_all` / `btree_put_str` / `get_str` / `range_str` | … | Exact-key fill; hashed string keys |
 | `pbtree_new` / `pbtree_put` / `pbtree_get` / `pbtree_len` / `pbtree_pages` / `pbtree_free` | … | Page-backed B-tree (nodes in `MakoPage`) |
-| `sst_build4` / `sst_get` / `sst_len` / `sst_free` | … | Sorted run + binary search |
-| `sst_range` | `sst_range(s, lo, hi) -> int` | Inclusive SST range → TLS buffer |
-| `range_len` / `range_key_at` / `range_val_at` | … | Read last range result (cap 128) |
-| `bloom_new` / `bloom_add` / `bloom_maybe` / `bloom_len` / `bloom_clear` / `bloom_free` | … | Bloom filter (int64 keys; no false negatives). `bloom_clear` resets bits for rebuild; `Bloom` is a first-class handle: params, returns, struct fields |
-| `pman_open` / `pman_alloc` / `pman_set` / `pman_get` / `pman_sync` / `pman_close` | … | Disk page manager (4 KiB file-backed). `PageMan` handle works as param/return/struct field |
+| `sst_build4` / `sst_build8` / `sst_build_n` / `sst_get` / `sst_len` / `sst_free` | … | Sorted run; 4/8/N≤8 pair builders |
+| `sst_range` | `sst_range(s, lo, hi) -> int` | Inclusive SST range → buffer |
+| `range_len` / `range_cap` / `range_key_at` / `range_val_at` | … | Read last range result |
+| `range_rewind` / `range_next` / `range_key` / `range_val` | … | Iterator over last range |
+| `bloom_new` / `add` / `maybe` / `len` / `clear` / `free` | … | Int64 bloom; first-class `Bloom` handle |
+| `bloom_add_str` / `bloom_maybe_str` / `str_hash64` | … | String → FNV keys for bloom |
+| `multimap_*` | `multimap_new/put/get/get_all/range/len/free` | Multi-value ordered map |
+| `pman_open` / `alloc` / `set` / `get` / `sync` / `close` | … | Disk page manager; first-class `PageMan` |
+| `pman_write_page` / `pman_read_page` | … | Full 4 KiB bulk page I/O |
 | `pman_pages` / `pman_reads` / `pman_writes` | … | Page count + I/O counters |
+| `domain_reg_put_*` / `get_*` / `del` | … | Process-local handle registry (int slots) |
+| `file_append2` / `file_append3` | … | writev multi-string append |
+| `str_slice_ci_index` / `str_slice_ci_starts` / `builder_write_slice` | … | Zero-copy CI search / region append |
 | `pcache_new` / `pcache_get` / `pcache_hits` / `pcache_misses` / `pcache_free` | … | 16-slot LRU page cache |
 | `mvcc_new` / `mvcc_begin` / `mvcc_put` / `mvcc_get` / `mvcc_gc` / `mvcc_live` / `mvcc_free` | … | Multi-version KV + GC |
 | `lsm_new` / `lsm_put` / `lsm_get` / `lsm_flush` / `lsm_attach_run` / `lsm_free` | … | Memtable + L0 run WAL |

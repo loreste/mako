@@ -14,6 +14,8 @@ static inline int64_t mako_file_close(int64_t fd) { (void)fd; return -1; }
 static inline MakoString mako_pread(int64_t f, int64_t c, int64_t o) { (void)f;(void)c;(void)o; return mako_str_from_cstr(""); }
 static inline int64_t mako_pwrite(int64_t f, MakoString d, int64_t o) { (void)f;(void)d;(void)o; return -1; }
 static inline int64_t mako_file_append(int64_t f, MakoString d) { (void)f;(void)d; return -1; }
+static inline int64_t mako_file_append2(int64_t f, MakoString a, MakoString b) { (void)f;(void)a;(void)b; return -1; }
+static inline int64_t mako_file_append3(int64_t f, MakoString a, MakoString b, MakoString c) { (void)f;(void)a;(void)b;(void)c; return -1; }
 static inline int64_t mako_fsync(int64_t f) { (void)f; return -1; }
 static inline int64_t mako_fdatasync(int64_t f) { (void)f; return -1; }
 static inline int64_t mako_fallocate(int64_t f, int64_t s) { (void)f;(void)s; return -1; }
@@ -403,6 +405,31 @@ static inline int64_t mako_file_writev(int64_t fd, MakoString *parts, int64_t co
     ssize_t n = writev((int)fd, iov, (int)count);
     free(iov);
     return (int64_t)n;
+}
+
+/* Append two strings in one writev (group-commit / multi-record flush). */
+static inline int64_t mako_file_append2(int64_t fd, MakoString a, MakoString b) {
+    if (fd < 0) return -1;
+    MakoString parts[2];
+    int64_t n = 0;
+    if (a.data && a.len > 0) parts[n++] = a;
+    if (b.data && b.len > 0) parts[n++] = b;
+    if (n == 0) return 0;
+    if (n == 1) return mako_file_append(fd, parts[0]);
+    return mako_file_writev(fd, parts, 2);
+}
+
+/* Append three strings in one writev. */
+static inline int64_t mako_file_append3(int64_t fd, MakoString a, MakoString b, MakoString c) {
+    if (fd < 0) return -1;
+    MakoString parts[3];
+    int64_t n = 0;
+    if (a.data && a.len > 0) parts[n++] = a;
+    if (b.data && b.len > 0) parts[n++] = b;
+    if (c.data && c.len > 0) parts[n++] = c;
+    if (n == 0) return 0;
+    if (n == 1) return mako_file_append(fd, parts[0]);
+    return mako_file_writev(fd, parts, n);
 }
 
 /* ---- Read helpers ---- */
