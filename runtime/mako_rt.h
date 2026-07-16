@@ -4398,7 +4398,7 @@ static inline int64_t mako_chan_send(MakoChan *c, int64_t v) {
         c->count = 1;
         mako_rt_counter_inc(&mako_rt_channel_sends);
         mako_rt_observe_channel_depth(1);
-        pthread_cond_signal(&c->can_recv);
+        pthread_cond_broadcast(&c->can_recv);
         while (c->count != 0 && !c->closed) {
             int64_t t0 = mako_now_ns();
             pthread_cond_wait(&c->can_send, &c->mu);
@@ -4422,7 +4422,7 @@ static inline int64_t mako_chan_send(MakoChan *c, int64_t v) {
     c->count++;
     mako_rt_counter_inc(&mako_rt_channel_sends);
     mako_rt_observe_channel_depth(c->count);
-    pthread_cond_signal(&c->can_recv);
+    pthread_cond_broadcast(&c->can_recv);
     pthread_mutex_unlock(&c->mu);
     return 1;
 }
@@ -4440,7 +4440,7 @@ static inline int64_t mako_chan_try_send(MakoChan *c, int64_t v) {
         c->count = 1;
         mako_rt_counter_inc(&mako_rt_channel_sends);
         mako_rt_observe_channel_depth(1);
-        pthread_cond_signal(&c->can_recv);
+        pthread_cond_broadcast(&c->can_recv);
         pthread_mutex_unlock(&c->mu);
         return 1;
     }
@@ -4454,7 +4454,7 @@ static inline int64_t mako_chan_try_send(MakoChan *c, int64_t v) {
     c->count++;
     mako_rt_counter_inc(&mako_rt_channel_sends);
     mako_rt_observe_channel_depth(c->count);
-    pthread_cond_signal(&c->can_recv);
+    pthread_cond_broadcast(&c->can_recv);
     pthread_mutex_unlock(&c->mu);
     return 1;
 }
@@ -4496,7 +4496,7 @@ static inline int64_t mako_chan_recv(MakoChan *c) {
         c->count--;
     }
     mako_rt_counter_inc(&mako_rt_channel_recvs);
-    pthread_cond_signal(&c->can_send);
+    pthread_cond_broadcast(&c->can_send);
     pthread_mutex_unlock(&c->mu);
     return v;
 }
@@ -4523,7 +4523,7 @@ static inline int64_t mako_chan_recv_ok(MakoChan *c, int64_t *out) {
         c->count--;
     }
     mako_rt_counter_inc(&mako_rt_channel_recvs);
-    pthread_cond_signal(&c->can_send);
+    pthread_cond_broadcast(&c->can_send);
     pthread_mutex_unlock(&c->mu);
     if (out) *out = v;
     return 1;
@@ -4554,7 +4554,7 @@ static inline int64_t mako_chan_try_recv(MakoChan *c, int64_t *out) {
         c->count--;
     }
     mako_rt_counter_inc(&mako_rt_channel_recvs);
-    pthread_cond_signal(&c->can_send);
+    pthread_cond_broadcast(&c->can_send);
     pthread_mutex_unlock(&c->mu);
     if (out) *out = v;
     return 1;
@@ -4741,7 +4741,7 @@ static inline int64_t mako_chan_str_send_take(MakoChanStr *c, MakoString v) {
         }
         c->buf[0] = v;
         c->count = 1;
-        pthread_cond_signal(&c->can_recv);
+        pthread_cond_broadcast(&c->can_recv);
         while (c->count != 0 && !c->closed) {
             pthread_cond_wait(&c->can_send, &c->mu);
         }
@@ -4765,7 +4765,7 @@ static inline int64_t mako_chan_str_send_take(MakoChanStr *c, MakoString v) {
     c->buf[c->tail] = v; /* take */
     c->tail = (c->tail + 1) % c->cap;
     c->count++;
-    pthread_cond_signal(&c->can_recv);
+    pthread_cond_broadcast(&c->can_recv);
     pthread_mutex_unlock(&c->mu);
     return 1;
 }
@@ -4792,7 +4792,7 @@ static inline int64_t mako_chan_str_try_send_take(MakoChanStr *c, MakoString v) 
         }
         c->buf[0] = v;
         c->count = 1;
-        pthread_cond_signal(&c->can_recv);
+        pthread_cond_broadcast(&c->can_recv);
         pthread_mutex_unlock(&c->mu);
         return 1;
     }
@@ -4804,7 +4804,7 @@ static inline int64_t mako_chan_str_try_send_take(MakoChanStr *c, MakoString v) 
     c->buf[c->tail] = v;
     c->tail = (c->tail + 1) % c->cap;
     c->count++;
-    pthread_cond_signal(&c->can_recv);
+    pthread_cond_broadcast(&c->can_recv);
     pthread_mutex_unlock(&c->mu);
     return 1;
 }
@@ -4836,7 +4836,7 @@ static inline MakoString mako_chan_str_recv(MakoChanStr *c) {
         c->head = (c->head + 1) % c->cap;
         c->count--;
     }
-    pthread_cond_signal(&c->can_send);
+    pthread_cond_broadcast(&c->can_send);
     pthread_mutex_unlock(&c->mu);
     return v;
 }
@@ -4869,7 +4869,7 @@ static inline int64_t mako_chan_str_try_recv(MakoChanStr *c, MakoString *out) {
         c->head = (c->head + 1) % c->cap;
         c->count--;
     }
-    pthread_cond_signal(&c->can_send);
+    pthread_cond_broadcast(&c->can_send);
     pthread_mutex_unlock(&c->mu);
     if (out) *out = v;
     else mako_str_free(v);
@@ -4967,7 +4967,7 @@ static inline int64_t mako_chan_ptr_send(MakoChanPtr *c, void *v) {
         }
         c->buf[0] = v;
         c->count = 1;
-        pthread_cond_signal(&c->can_recv);
+        pthread_cond_broadcast(&c->can_recv);
         while (c->count != 0 && !c->closed) {
             pthread_cond_wait(&c->can_send, &c->mu);
         }
@@ -4985,7 +4985,7 @@ static inline int64_t mako_chan_ptr_send(MakoChanPtr *c, void *v) {
     c->buf[c->tail] = v;
     c->tail = (c->tail + 1) % c->cap;
     c->count++;
-    pthread_cond_signal(&c->can_recv);
+    pthread_cond_broadcast(&c->can_recv);
     pthread_mutex_unlock(&c->mu);
     return 1;
 }
@@ -5012,7 +5012,7 @@ static inline void *mako_chan_ptr_recv(MakoChanPtr *c) {
         c->head = (c->head + 1) % c->cap;
         c->count--;
     }
-    pthread_cond_signal(&c->can_send);
+    pthread_cond_broadcast(&c->can_send);
     pthread_mutex_unlock(&c->mu);
     return v;
 }
@@ -5045,7 +5045,7 @@ static inline int64_t mako_chan_ptr_try_recv(MakoChanPtr *c, void **out) {
         c->head = (c->head + 1) % c->cap;
         c->count--;
     }
-    pthread_cond_signal(&c->can_send);
+    pthread_cond_broadcast(&c->can_send);
     pthread_mutex_unlock(&c->mu);
     if (out) *out = v;
     else free(v);
