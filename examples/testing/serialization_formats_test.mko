@@ -10,9 +10,17 @@ fn TestYamlTomlSeeds() {
 }
 
 fn TestBinaryFormatSeeds() {
-    assert_eq_str(msgpack_int_hex(42), "d3000000000000002a")
-    assert_eq_str(cbor_int_hex(42), "1b000000000000002a")
-    assert_eq_str(cbor_int_hex(-1), "3b0000000000000000")
+    // msgpack compact encoding per spec
+    assert_eq_str(msgpack_int_hex(42), "2a")        // positive fixint
+    assert_eq_str(msgpack_int_hex(128), "cc80")      // uint8
+    assert_eq_str(msgpack_int_hex(-33), "d0df")      // int8
+    assert_eq_str(msgpack_int_hex(256), "cd0100")    // uint16
+    // cbor compact encoding per spec
+    assert_eq_str(cbor_int_hex(23), "17")            // tiny (< 24 → inline)
+    assert_eq_str(cbor_int_hex(42), "182a")          // 1-byte (24..255)
+    assert_eq_str(cbor_int_hex(-1), "20")            // major 1, val 0
+    assert_eq_str(cbor_int_hex(256), "190100")       // 2-byte uint16
+    // avro zig-zag varint
     assert_eq_str(avro_long_hex(64), "8001")
     assert_eq_str(avro_long_hex(-1), "01")
 }
