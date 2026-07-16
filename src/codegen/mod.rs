@@ -156,6 +156,10 @@ pub struct Codegen {
     /// `key_id` is `i`|`s`|`f`|`b` for scalars or `k:{Name}` for named keys.
     /// `val_tag` matches emit suffixes (`opt_int`, `Point`, `vWalRecord`, `arr_int`, …).
     used_maps: std::collections::HashSet<(String, String)>,
+    /// Array element monomorph tags needed for bare slices (`[]Option[T]`,
+    /// `[]map[K]V`, `[]Result[T,E]`, nested `[][]…`). Distinct from `used_maps`
+    /// so helpers emit even when the slice is never a map value.
+    used_arr_elems: std::collections::HashSet<String>,
 }
 
 pub use crate::overflow::OverflowMode;
@@ -230,6 +234,7 @@ impl Codegen {
             const_fns: HashMap::new(),
             emitted_arr_tags: std::collections::HashSet::new(),
             used_maps: std::collections::HashSet::new(),
+            used_arr_elems: std::collections::HashSet::new(),
         }
     }
 
@@ -258,9 +263,13 @@ impl Codegen {
         self.want_map(&format!("k:{key_name}"), val_tag)
     }
 
-    /// True when `MakoArr_{tag}` helpers are needed (as map value, bag payload, or slice).
+    /// True when `MakoArr_{tag}` helpers are needed (as map value, bag payload, or bare slice).
     fn want_arr_elem(&self, tag: &str) -> bool {
         let arr = format!("arr_{tag}");
+        // Bare `[]Option` / `[]map` / `[]Result` / nested slices (not map values).
+        if self.used_arr_elems.contains(tag) || self.used_arr_elems.contains(&arr) {
+            return true;
+        }
         self.want_scalar_val(tag)
             || self.want_scalar_val(&arr)
             || self.used_maps.iter().any(|(k, v)| {
@@ -278,10 +287,18 @@ impl Codegen {
             .insert((key_id.to_string(), val_tag.to_string()));
     }
 
+    fn note_used_arr_elem(&mut self, tag: &str) {
+        if tag.is_empty() {
+            return;
+        }
+        self.used_arr_elems.insert(tag.to_string());
+    }
+
     /// Collect every `map[K]V` monomorph actually mentioned in the program.
     /// Must run after structs/enums are registered so val tags resolve.
     fn collect_used_maps(&mut self, program: &Program) {
         self.used_maps.clear();
+        self.used_arr_elems.clear();
         for item in &program.items {
             match item {
                 Item::Struct(s) => {
@@ -555,7 +572,11 @@ impl Codegen {
                 self.collect_maps_in_type(k);
                 self.collect_maps_in_type(v);
             }
-            TypeExpr::Array(inner) => self.collect_maps_in_type(inner),
+            TypeExpr::Array(inner) => {
+                // Bare `[]Option` / `[]map` / … need MakoArr_* even without map use.
+                self.register_arr_elem_type(inner);
+                self.collect_maps_in_type(inner);
+            }
             TypeExpr::Tuple(elems) => {
                 for e in elems {
                     self.collect_maps_in_type(e);
@@ -579,6 +600,51 @@ impl Codegen {
                 self.collect_maps_in_type(ret);
             }
             TypeExpr::Named(_) => {}
+        }
+    }
+
+    /// Record monomorph tag for `[]E` when E needs generated `MakoArr_{tag}` helpers.
+    /// Built-in slices (`[]int` → `MakoIntArray`, …) are skipped.
+    fn register_arr_elem_type(&mut self, inner: &TypeExpr) {
+        match inner {
+            TypeExpr::Named(n)
+                if self.structs.contains_key(n) || self.enums.contains_key(n) =>
+            {
+                self.note_used_arr_elem(n);
+            }
+            TypeExpr::Array(_) => {
+                // Nested [][]T → tag of the inner array C type (arr_int, arr_opt_…, …).
+                let elem_c = self.type_expr_c(inner);
+                let tag = c_type_mono_tag(&elem_c);
+                self.note_used_arr_elem(&tag);
+            }
+            TypeExpr::Map(k, v) => {
+                let map_c = self.type_expr_c(&TypeExpr::Map(k.clone(), v.clone()));
+                let tag =
+                    map_ptr_mono_tag(&map_c).unwrap_or_else(|| c_type_mono_tag(&map_c));
+                self.note_used_arr_elem(&tag);
+            }
+            TypeExpr::Generic(n, args)
+                if (n == "Option" || n == "Result") && !args.is_empty() =>
+            {
+                let tag =
+                    bag_map_val_tag(n == "Option", &args[0], &self.structs, &self.enums);
+                self.note_used_arr_elem(&tag);
+            }
+            TypeExpr::Generic(n, args) if n == "chan" && !args.is_empty() => {
+                let tag = chan_map_val_tag(&args[0], &self.structs);
+                self.note_used_arr_elem(&tag);
+            }
+            TypeExpr::Generic(n, args) if n == "map" && args.len() == 2 => {
+                let map_c = self.type_expr_c(&TypeExpr::Map(
+                    Box::new(args[0].clone()),
+                    Box::new(args[1].clone()),
+                ));
+                let tag =
+                    map_ptr_mono_tag(&map_c).unwrap_or_else(|| c_type_mono_tag(&map_c));
+                self.note_used_arr_elem(&tag);
+            }
+            _ => {}
         }
     }
 
@@ -3948,13 +4014,8 @@ impl Codegen {
         ];
         for mt in map_arr_tags {
             let arr_tag = format!("arr_{mt}");
-            if self.want_scalar_val(mt)
-                || self.want_scalar_val(&arr_tag)
-                || self
-                    .used_maps
-                    .iter()
-                    .any(|(k, v)| k.starts_with("k:") && (v == mt || v == &arr_tag))
-            {
+            // Bare `[]map[K]V` (used_arr_elems) or map[K]map / map[K][]map values.
+            if self.want_arr_elem(mt) {
                 let map_c = map_map_val_c_ty(mt);
                 self.emit_nested_arr_helpers(mt, &map_c); // MakoArr_map_string_int
                 vals.push((arr_tag, format!("MakoArr_{mt}")));
@@ -6004,11 +6065,9 @@ impl Codegen {
     /// plus depth-3 `map[K]map[K2]map[K3]V` for core scalar leaf maps.
     fn emit_all_map_map_value_helpers(&mut self) {
         let leaf = self.leaf_map_value_specs();
-        // []map[…] for maps_values
+        // []map[…] for maps_values and bare `[]map` slices
         for (tag, vc) in &leaf {
-            if self.want_scalar_val(tag)
-                || self.used_maps.iter().any(|(k, v)| k.starts_with("k:") && v == tag)
-            {
+            if self.want_arr_elem(tag) {
                 self.emit_nested_arr_helpers(tag, vc);
             }
         }
@@ -6083,9 +6142,7 @@ impl Codegen {
             }
         }
         for (tag, vc) in &mid {
-            if self.want_scalar_val(tag)
-                || self.used_maps.iter().any(|(k, v)| k.starts_with("k:") && v == tag)
-            {
+            if self.want_arr_elem(tag) {
                 self.emit_nested_arr_helpers(tag, vc);
             }
         }
@@ -6130,14 +6187,9 @@ impl Codegen {
     /// Emit all `map[scalar|Named]chan[T]` helpers (channel-pointer values).
     fn emit_all_map_chan_value_helpers(&mut self) {
         let leaf = self.leaf_chan_value_specs();
-        // []chan for maps_values
+        // []chan for maps_values and bare `[]chan` slices
         for (tag, vc) in &leaf {
-            if self.want_scalar_val(tag)
-                || self.want_scalar_val(&format!("arr_{tag}"))
-                || self.used_maps.iter().any(|(k, v)| {
-                    k.starts_with("k:") && (v == tag || v == &format!("arr_{tag}"))
-                })
-            {
+            if self.want_arr_elem(tag) {
                 self.emit_nested_arr_helpers(tag, vc);
             }
         }

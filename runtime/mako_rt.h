@@ -2045,7 +2045,32 @@ static inline int64_t mako_str_builder_len(MakoStrBuilder *b) {
 enum { MAKO_BOX_BINS = 6 };
 /* bin i covers size up to 16 << i  (16, 32, 64, 128, 256, 512) */
 static void *mako_box_freelist[MAKO_BOX_BINS];
-static pthread_mutex_t mako_box_mu = PTHREAD_MUTEX_INITIALIZER;
+/* Lazy-init: PTHREAD_MUTEX_INITIALIZER is not portable to CRITICAL_SECTION (Windows). */
+static pthread_mutex_t mako_box_mu;
+static int mako_box_mu_ready = 0;
+
+static inline void mako_box_mu_ensure(void) {
+    if (mako_box_mu_ready) return;
+#if defined(_WIN32) || defined(_WIN64)
+    static LONG once = 0;
+    if (InterlockedCompareExchange(&once, 1, 0) == 0) {
+        pthread_mutex_init(&mako_box_mu, NULL);
+        mako_box_mu_ready = 1;
+        InterlockedExchange(&once, 2);
+    } else {
+        while (InterlockedCompareExchange(&once, 2, 2) != 2)
+            Sleep(0);
+    }
+#else
+    static pthread_mutex_t boot = PTHREAD_MUTEX_INITIALIZER;
+    pthread_mutex_lock(&boot);
+    if (!mako_box_mu_ready) {
+        pthread_mutex_init(&mako_box_mu, NULL);
+        mako_box_mu_ready = 1;
+    }
+    pthread_mutex_unlock(&boot);
+#endif
+}
 
 static inline int mako_box_bin(size_t sz) {
     size_t lim = 16;
@@ -2064,6 +2089,7 @@ static inline size_t mako_box_bin_size(int bin) {
 static inline void *mako_box_alloc(size_t sz) {
     int bin = mako_box_bin(sz);
     if (bin >= 0) {
+        mako_box_mu_ensure();
         pthread_mutex_lock(&mako_box_mu);
         void *p = mako_box_freelist[bin];
         if (p) {
@@ -2081,6 +2107,7 @@ static inline void mako_box_free(void *p, size_t sz) {
     if (!p) return;
     int bin = mako_box_bin(sz);
     if (bin >= 0) {
+        mako_box_mu_ensure();
         pthread_mutex_lock(&mako_box_mu);
         *(void **)p = mako_box_freelist[bin];
         mako_box_freelist[bin] = p;
@@ -2109,24 +2136,75 @@ typedef struct {
     size_t len;
 } MakoMapII;
 
+/* ---- wyhash core (self-contained, no external deps) ----
+ * Processes 8 bytes at a time; 4-8x faster than FNV-1a for string keys.
+ * Endian-neutral via memcpy reads (compilers optimize to native loads). */
+static inline uint64_t _wyr8(const uint8_t *p) {
+    uint64_t v; memcpy(&v, p, 8); return v;
+}
+static inline uint64_t _wyr4(const uint8_t *p) {
+    uint32_t v; memcpy(&v, p, 4); return v;
+}
+static inline uint64_t _wyr3(const uint8_t *p, size_t k) {
+    return ((uint64_t)p[0]) << 16 | ((uint64_t)p[k >> 1]) << 8 | p[k - 1];
+}
+static inline uint64_t _wymix(uint64_t a, uint64_t b) {
+#ifdef __SIZEOF_INT128__
+    __uint128_t r = (__uint128_t)a * b;
+    a = (uint64_t)r; b = (uint64_t)(r >> 64);
+#else
+    uint64_t ha = a >> 32, la = (uint32_t)a;
+    uint64_t hb = b >> 32, lb = (uint32_t)b;
+    uint64_t rh = ha * hb, rl = la * lb;
+    uint64_t rm0 = ha * lb, rm1 = hb * la;
+    uint64_t t = rl + (rm0 << 32); uint64_t c = (t < rl);
+    a = t + (rm1 << 32); c += (a < t);
+    b = rh + (rm0 >> 32) + (rm1 >> 32) + c;
+#endif
+    return a ^ b;
+}
+static const uint64_t _wyp[4] = {
+    0xa0761d6478bd642fULL, 0xe7037ed1a0b428dbULL,
+    0x8ebc6af09c88c6e3ULL, 0x589965cc75374cc3ULL
+};
+/* ---- end wyhash core ---- */
+
 static inline uint64_t mako_hash_bytes(const char *p, size_t n) {
-    uint64_t h = 14695981039346656037ULL;
-    if (!p || n == 0) return h;
-    for (size_t i = 0; i < n; i++) {
-        h ^= (unsigned char)p[i];
-        h *= 1099511628211ULL;
+    const uint64_t seed = 0x9E3779B97F4A7C15ULL;
+    if (!p || n == 0) return _wymix(seed ^ _wyp[0], _wyp[1]);
+    const uint8_t *b = (const uint8_t *)p;
+    uint64_t s = seed ^ _wyp[0];
+    if (n <= 16) {
+        if (n >= 4) {
+            uint64_t a = (_wyr4(b) << 32) | _wyr4(b + ((n >> 3) << 2));
+            uint64_t bb = (_wyr4(b + n - 4) << 32) | _wyr4(b + n - 4 - ((n >> 3) << 2));
+            return _wymix(a ^ _wyp[1], bb ^ _wyp[1]) ^ (uint64_t)n;
+        } else {
+            return _wymix(_wyr3(b, n) ^ _wyp[0], (uint64_t)n ^ _wyp[1]);
+        }
+    } else if (n <= 48) {
+        size_t i = 0;
+        for (; i + 16 <= n; i += 16)
+            s = _wymix(_wyr8(b + i) ^ _wyp[1], _wyr8(b + i + 8) ^ s);
+        return _wymix(_wyr8(b + n - 16) ^ _wyp[1], _wyr8(b + n - 8) ^ s) ^ (uint64_t)n;
+    } else {
+        uint64_t s1 = s, s2 = s;
+        size_t i = 0;
+        for (; i + 48 <= n; i += 48) {
+            s  = _wymix(_wyr8(b + i)      ^ _wyp[1], _wyr8(b + i + 8)  ^ s);
+            s1 = _wymix(_wyr8(b + i + 16) ^ _wyp[2], _wyr8(b + i + 24) ^ s1);
+            s2 = _wymix(_wyr8(b + i + 32) ^ _wyp[3], _wyr8(b + i + 40) ^ s2);
+        }
+        for (; i + 16 <= n; i += 16)
+            s = _wymix(_wyr8(b + i) ^ _wyp[1], _wyr8(b + i + 8) ^ s);
+        s ^= s1 ^ s2;
+        return _wymix(_wyr8(b + n - 16) ^ _wyp[1], _wyr8(b + n - 8) ^ s) ^ (uint64_t)n;
     }
-    return h;
 }
 
 static inline uint64_t mako_hash_i64(int64_t k) {
     uint64_t x = (uint64_t)k;
-    x ^= x >> 30;
-    x *= 0xbf58476d1ce4e5b9ULL;
-    x ^= x >> 27;
-    x *= 0x94d049bb133111ebULL;
-    x ^= x >> 31;
-    return x;
+    return _wymix(x ^ _wyp[0], x ^ _wyp[1]);
 }
 
 /* Float map keys: +0/-0 same key; all NaNs share one key. */
@@ -5797,7 +5875,32 @@ static inline void mako_nursery_join_all(MakoNursery *n) {
 /* ---- Detached tasks: process-scoped nursery joined on demand ---- */
 static MakoNursery mako_detached_root;
 static int mako_detached_inited = 0;
-static pthread_mutex_t mako_detached_mu = PTHREAD_MUTEX_INITIALIZER;
+/* Lazy-init: PTHREAD_MUTEX_INITIALIZER is not portable to CRITICAL_SECTION (Windows). */
+static pthread_mutex_t mako_detached_mu;
+static int mako_detached_mu_ready = 0;
+
+static inline void mako_detached_mu_ensure(void) {
+    if (mako_detached_mu_ready) return;
+#if defined(_WIN32) || defined(_WIN64)
+    static LONG once = 0;
+    if (InterlockedCompareExchange(&once, 1, 0) == 0) {
+        pthread_mutex_init(&mako_detached_mu, NULL);
+        mako_detached_mu_ready = 1;
+        InterlockedExchange(&once, 2);
+    } else {
+        while (InterlockedCompareExchange(&once, 2, 2) != 2)
+            Sleep(0);
+    }
+#else
+    static pthread_mutex_t boot = PTHREAD_MUTEX_INITIALIZER;
+    pthread_mutex_lock(&boot);
+    if (!mako_detached_mu_ready) {
+        pthread_mutex_init(&mako_detached_mu, NULL);
+        mako_detached_mu_ready = 1;
+    }
+    pthread_mutex_unlock(&boot);
+#endif
+}
 
 static inline void mako_detached_init(void) {
     if (mako_detached_inited) return;
@@ -5806,6 +5909,7 @@ static inline void mako_detached_init(void) {
 }
 
 static inline MakoTask *mako_detach_spawn(MakoTaskFn fn, void *arg) {
+    mako_detached_mu_ensure();
     pthread_mutex_lock(&mako_detached_mu);
     mako_detached_init();
     MakoTask *t = mako_spawn(&mako_detached_root, fn, arg);
@@ -5814,6 +5918,7 @@ static inline MakoTask *mako_detach_spawn(MakoTaskFn fn, void *arg) {
 }
 
 static inline void mako_detached_join_all(void) {
+    mako_detached_mu_ensure();
     pthread_mutex_lock(&mako_detached_mu);
     if (mako_detached_inited) {
         mako_nursery_join_pending(&mako_detached_root);
