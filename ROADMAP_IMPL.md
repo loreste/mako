@@ -1,8 +1,7 @@
 # Mako Implementation Roadmap
 
-This is the authoritative feature plan for Mako. AI assistants working on this
-codebase must follow this document when implementing new features or making
-architectural decisions.
+Detailed feature plan for Mako, organized by version. See
+[docs/ROADMAP.md](docs/ROADMAP.md) for the summary view.
 
 **Current version:** 0.1.9  
 **Next milestone:** 0.2.0  
@@ -243,33 +242,13 @@ Production-grade developer experience.
 
 ---
 
-## Rules for AI assistants
+## Contributing
 
-1. When implementing a feature, check this document first to see which version
-   it belongs to. Do not implement features from later versions before earlier
-   ones are complete.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines.
 
-2. v0.1.9 features (generics, iterators, mutable closures) are the current
-   priority. All other features wait.
+Design principles that apply to all versions:
 
-3. The compiler architecture is: `.mko` source -> parser -> AST -> type checker
-   -> codegen -> C source -> clang -> binary. All new features must work within
-   this pipeline until v0.4.0 introduces an IR layer.
-
-4. The runtime is C headers in `runtime/*.h`. New runtime features go there.
-   Standard library Mako code goes in `std/`. Keep them separate.
-
-5. Every feature must have tests in `examples/testing/`. No feature ships
-   without tests.
-
-6. Do not add garbage collection. Memory management uses ownership (`hold`),
-   shared references (`share`), and arenas (`arena`). No GC.
-
-7. Do not break existing tests. Run `make test` before declaring a feature
-   complete.
-
-8. Performance matters. Do not add features that silently allocate on the hot
-   path. If a feature has a cost, make it visible and opt-in.
-
-9. Do not mention any AI assistant in code, comments, commit messages, or
-   documentation.
+- Every feature must have tests in `examples/testing/`
+- No garbage collection — memory uses `hold`, `share`, and `arena`
+- Performance first — no silent hot-path allocations
+- The compiler pipeline is `.mko` → parser → AST → type checker → codegen → C → clang → binary
