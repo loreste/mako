@@ -1,0 +1,62 @@
+// JSON encoding/decoding tests — v0.2.0
+
+pull "encoding/json"
+
+fn TestObjectBuilder() {
+    let mut obj = json.new_object()
+    obj.set_string("name", "Ada")
+    obj.set_int("age", 36)
+    obj.set_bool("active", 1)
+    let result = obj.build()
+    assert_eq_str(json.get_string(result, "name"), "Ada")
+    assert_eq(json.get_int(result, "age"), 36)
+}
+
+fn TestObjectBuilderEmpty() {
+    let obj = json.new_object()
+    let result = obj.build()
+    assert_eq_str(result, "{}")
+}
+
+fn TestObjectBuilderNested() {
+    let mut inner = json.new_object()
+    inner.set_string("city", "Paris")
+    inner.set_int("zip", 75001)
+    let mut outer = json.new_object()
+    outer.set_string("name", "Ada")
+    outer.set_raw("address", inner.build())
+    let result = outer.build()
+    assert_eq_str(json.get_string(result, "name"), "Ada")
+    let addr = json.get_object(result, "address")
+    assert_eq_str(json.get_string(addr, "city"), "Paris")
+}
+
+fn TestArrayBuilder() {
+    let mut arr = json.new_array()
+    arr.push_string("a")
+    arr.push_string("b")
+    arr.push_string("c")
+    let result = arr.build()
+    assert_eq(arr.size(), 3)
+    assert_eq(json.array_len(result), 3)
+    assert_eq_str(json.array_get_string(result, 0), "a")
+    assert_eq_str(json.array_get_string(result, 2), "c")
+}
+
+fn TestArrayBuilderInts() {
+    let mut arr = json.new_array()
+    arr.push_int(10)
+    arr.push_int(20)
+    arr.push_int(30)
+    let result = arr.build()
+    assert_eq(json.array_get_int(result, 0), 10)
+    assert_eq(json.array_get_int(result, 1), 20)
+}
+
+fn TestParseExisting() {
+    let data = "{\"user\":\"admin\",\"count\":42}"
+    assert_eq_str(json.get_string(data, "user"), "admin")
+    assert_eq(json.get_int(data, "count"), 42)
+    assert_eq(json.has_key(data, "user"), 1)
+    assert_eq(json.has_key(data, "missing"), 0)
+}

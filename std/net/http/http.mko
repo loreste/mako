@@ -1,12 +1,102 @@
-fn bind(port: int) -> int { return http_bind(port) }
-fn accept(fd: int) -> int { return http_accept(fd) }
-fn method(conn: int) -> string { return http_method(conn) }
-fn path(conn: int) -> string { return http_path(conn) }
-fn body(conn: int) -> string { return http_body(conn) }
-fn respond(conn: int, status: int, body: string) -> int { return http_respond(conn, status, body) }
-fn get(url: string) -> string { return http_get(url) }
-fn post(url: string, body: string) -> string { return http_post(url, body) }
-fn parse_request(raw: string) -> HttpRequest { return http_request_parse(raw) }
-fn request_method(r: HttpRequest) -> string { return http_request_method(r) }
-fn request_path(r: HttpRequest) -> string { return http_request_path(r) }
-fn request_body(r: HttpRequest) -> string { return http_request_body(r) }
+// Package http provides HTTP server and client helpers.
+//
+// Low-level: bind, accept, respond (wrapping C builtins).
+// High-level: Request/Response types, handler chains, routing.
+
+pack http
+
+// ---- Low-level (C builtin wrappers) ----
+
+export fn bind(port: int) -> int { return http_bind(port) }
+export fn accept(fd: int) -> int { return http_accept(fd) }
+export fn method(conn: int) -> string { return http_method(conn) }
+export fn path(conn: int) -> string { return http_path(conn) }
+export fn raw_body(conn: int) -> string { return http_body(conn) }
+export fn respond(conn: int, status: int, body: string) -> int { return http_respond(conn, status, body) }
+export fn respond_json(conn: int, status: int, body: string) -> int { return http_respond_json(conn, status, body) }
+export fn close(conn: int) -> int { return http_close(conn) }
+export fn get(url: string) -> string { return http_get(url) }
+export fn post(url: string, body: string) -> string { return http_post(url, body) }
+export fn header(conn: int, name: string) -> string { return http_header(conn, name) }
+
+// ---- Request / Response types ----
+
+export struct Request {
+    conn: int
+    method_str: string
+    path_str: string
+    body_str: string
+}
+
+export struct Response {
+    status: int
+    body: string
+    content_type: string
+}
+
+export fn new_request(conn: int) -> Request {
+    return Request {
+        conn: conn,
+        method_str: http_method(conn),
+        path_str: http_path(conn),
+        body_str: http_body(conn)
+    }
+}
+
+export fn text_response(status: int, body: string) -> Response {
+    return Response { status: status, body: body, content_type: "text/plain" }
+}
+
+export fn json_response(status: int, body: string) -> Response {
+    return Response { status: status, body: body, content_type: "application/json" }
+}
+
+export fn html_response(status: int, body: string) -> Response {
+    return Response { status: status, body: body, content_type: "text/html" }
+}
+
+// ---- Simple router ----
+
+export struct Route {
+    method_match: string
+    path_match: string
+    handler_id: int
+}
+
+export struct Router {
+    routes: []Route
+    count: int
+}
+
+export fn new_router() -> Router {
+    return Router { routes: make([]Route, 0, 16), count: 0 }
+}
+
+on Router {
+    fn add(mut self, method_match: string, path_match: string, handler_id: int) {
+        self.routes = append(self.routes, Route {
+            method_match: method_match,
+            path_match: path_match,
+            handler_id: handler_id
+        })
+        self.count = self.count + 1
+    }
+
+    fn match_route(self, method_str: string, path_str: string) -> int {
+        let mut i = 0
+        while i < len(self.routes) {
+            let r = self.routes[i]
+            let method_ok = str_eq(r.method_match, "*") || str_eq(r.method_match, method_str)
+            let path_ok = str_eq(r.path_match, path_str) || str_has_prefix(path_str, r.path_match + "/")
+            if method_ok && path_ok {
+                return r.handler_id
+            }
+            i = i + 1
+        }
+        return -1
+    }
+
+    fn size(self) -> int {
+        return self.count
+    }
+}

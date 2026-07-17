@@ -1,18 +1,204 @@
-// std/encoding/json — pull "encoding/json" → json.*
-fn object_str(key: string, val: string) -> string {
-    return json_object(key, val)
+// Package json provides JSON encoding and decoding.
+//
+// Builder API for constructing JSON objects and arrays.
+// Parser API for extracting values from JSON strings.
+
+pack json
+
+// escape_str escapes a string for inclusion in JSON (handles \, ", newlines).
+fn escape_str(s: string) -> string {
+    let mut b = str_builder()
+    let mut i = 0
+    while i < len(s) {
+        let c = int(s[i])
+        if c == 92 {
+            builder_write(b, "\\\\")
+        } else if c == 34 {
+            builder_write(b, "\\\"")
+        } else if c == 10 {
+            builder_write(b, "\\n")
+        } else if c == 13 {
+            builder_write(b, "\\r")
+        } else if c == 9 {
+            builder_write(b, "\\t")
+        } else {
+            let mut ch = make([]byte, 0, 1)
+            ch = append(ch, byte(c))
+            builder_write(b, string(ch))
+        }
+        i = i + 1
+    }
+    return builder_string(b)
 }
-fn get_string(obj: string, key: string) -> string {
+
+// ---- Builder ----
+
+// ObjectBuilder constructs a JSON object incrementally.
+export struct ObjectBuilder {
+    buf: StrBuilder
+    count: int
+}
+
+export fn new_object() -> ObjectBuilder {
+    let b = str_builder()
+    builder_write(b, "{")
+    return ObjectBuilder { buf: b, count: 0 }
+}
+
+on ObjectBuilder {
+    fn set_string(mut self, key: string, val: string) {
+        if self.count > 0 {
+            builder_write(self.buf, ",")
+        }
+        builder_write(self.buf, "\"")
+        builder_write(self.buf, escape_str(key))
+        builder_write(self.buf, "\":\"")
+        builder_write(self.buf, escape_str(val))
+        builder_write(self.buf, "\"")
+        self.count = self.count + 1
+    }
+
+    fn set_int(mut self, key: string, val: int) {
+        if self.count > 0 {
+            builder_write(self.buf, ",")
+        }
+        builder_write(self.buf, "\"")
+        builder_write(self.buf, escape_str(key))
+        builder_write(self.buf, "\":")
+        builder_write(self.buf, int_to_string(val))
+        self.count = self.count + 1
+    }
+
+    fn set_bool(mut self, key: string, val: int) {
+        if self.count > 0 {
+            builder_write(self.buf, ",")
+        }
+        builder_write(self.buf, "\"")
+        builder_write(self.buf, escape_str(key))
+        builder_write(self.buf, "\":")
+        if val == 1 {
+            builder_write(self.buf, "true")
+        } else {
+            builder_write(self.buf, "false")
+        }
+        self.count = self.count + 1
+    }
+
+    fn set_null(mut self, key: string) {
+        if self.count > 0 {
+            builder_write(self.buf, ",")
+        }
+        builder_write(self.buf, "\"")
+        builder_write(self.buf, escape_str(key))
+        builder_write(self.buf, "\":null")
+        self.count = self.count + 1
+    }
+
+    fn set_raw(mut self, key: string, raw_json: string) {
+        if self.count > 0 {
+            builder_write(self.buf, ",")
+        }
+        builder_write(self.buf, "\"")
+        builder_write(self.buf, escape_str(key))
+        builder_write(self.buf, "\":")
+        builder_write(self.buf, raw_json)
+        self.count = self.count + 1
+    }
+
+    fn build(self) -> string {
+        let mut b = str_builder()
+        builder_write(b, builder_string(self.buf))
+        builder_write(b, "}")
+        return builder_string(b)
+    }
+}
+
+// ArrayBuilder constructs a JSON array incrementally.
+export struct ArrayBuilder {
+    buf: StrBuilder
+    count: int
+}
+
+export fn new_array() -> ArrayBuilder {
+    let b = str_builder()
+    builder_write(b, "[")
+    return ArrayBuilder { buf: b, count: 0 }
+}
+
+on ArrayBuilder {
+    fn push_string(mut self, val: string) {
+        if self.count > 0 {
+            builder_write(self.buf, ",")
+        }
+        builder_write(self.buf, "\"")
+        builder_write(self.buf, escape_str(val))
+        builder_write(self.buf, "\"")
+        self.count = self.count + 1
+    }
+
+    fn push_int(mut self, val: int) {
+        if self.count > 0 {
+            builder_write(self.buf, ",")
+        }
+        builder_write(self.buf, int_to_string(val))
+        self.count = self.count + 1
+    }
+
+    fn push_raw(mut self, raw_json: string) {
+        if self.count > 0 {
+            builder_write(self.buf, ",")
+        }
+        builder_write(self.buf, raw_json)
+        self.count = self.count + 1
+    }
+
+    fn build(self) -> string {
+        let mut b = str_builder()
+        builder_write(b, builder_string(self.buf))
+        builder_write(b, "]")
+        return builder_string(b)
+    }
+
+    fn size(self) -> int {
+        return self.count
+    }
+}
+
+// ---- Parser (wrappers around builtins) ----
+
+export fn get_string(obj: string, key: string) -> string {
     return json_get_string(obj, key)
 }
-fn get_int(obj: string, key: string) -> int {
+
+export fn get_int(obj: string, key: string) -> int {
     return json_get_int(obj, key)
 }
-fn has(obj: string, key: string) -> bool {
-    // true when key is present and non-empty string (seed)
-    let v = json_get_string(obj, key)
-    return !str_eq(v, "")
+
+export fn get_object(obj: string, key: string) -> string {
+    return json_get_object(obj, key)
 }
-fn object_ss(k1: string, v1: string, k2: string, v2: string) -> string {
-    return json_ss(k1, v1, k2, v2)
+
+export fn array_len(arr: string) -> int {
+    return json_array_len(arr)
+}
+
+export fn array_get_string(arr: string, idx: int) -> string {
+    return json_array_get_string(arr, idx)
+}
+
+export fn array_get_int(arr: string, idx: int) -> int {
+    return json_array_get_int(arr, idx)
+}
+
+// Compat: single key-value object (used by import_paths_test)
+export fn object_str(key: string, val: string) -> string {
+    return json_object(key, val)
+}
+
+export fn has_key(obj: string, key: string) -> int {
+    let v = json_get_string(obj, key)
+    if len(v) > 0 {
+        return 1
+    }
+    return 0
 }
