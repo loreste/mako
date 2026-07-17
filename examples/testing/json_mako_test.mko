@@ -60,3 +60,17 @@ fn TestParseExisting() {
     assert_eq(json.has_key(data, "user"), 1)
     assert_eq(json.has_key(data, "missing"), 0)
 }
+
+fn TestEscapeQuotesAndControls() {
+    let mut obj = json.new_object()
+    // quotes + newline + tab must appear escaped in the JSON text
+    obj.set_string("q", "a\"b")
+    obj.set_string("n", "line1\nline2")
+    obj.set_string("t", "a\tb")
+    let result = obj.build()
+    assert(str_contains(result, "\\\""))
+    assert(str_contains(result, "\\n"))
+    assert(str_contains(result, "\\t"))
+    // still a valid object with key q present
+    assert_eq(json.has_key(result, "q"), 1)
+}

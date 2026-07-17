@@ -51,10 +51,19 @@ on Pool {
     }
 
     // release returns a slot to the pool for reuse.
+    // Duplicate release of the same idx is ignored (no double-count).
     fn release(mut self, idx: int) {
-        if idx >= 0 {
-            self.available = append(self.available, idx)
+        if idx < 0 {
+            return
         }
+        let mut i = 0
+        while i < len(self.available) {
+            if self.available[i] == idx {
+                return
+            }
+            i = i + 1
+        }
+        self.available = append(self.available, idx)
     }
 
     // size returns the total number of slots created.

@@ -1471,6 +1471,12 @@ impl Codegen {
     }
 
     fn call_result_ok_struct(&self, fname: &str, args: &[Expr]) -> Option<String> {
+        // Builtin Ok(struct_val): derive struct name from the argument.
+        if fname == "Ok" && args.len() == 1 {
+            if let Some(sn) = self.struct_name_from_expr(&args[0]) {
+                return Some(sn);
+            }
+        }
         let mono = self.generic_mono_name_for_call(fname, args);
         self.fn_result_ok_struct
             .get(&mono)
@@ -1604,11 +1610,55 @@ impl Codegen {
     }
 
     fn call_option_some_struct(&self, fname: &str, args: &[Expr]) -> Option<String> {
+        // Builtin Some(struct_val): derive struct name from the argument.
+        if fname == "Some" && args.len() == 1 {
+            if let Some(sn) = self.struct_name_from_expr(&args[0]) {
+                return Some(sn);
+            }
+        }
         let mono = self.generic_mono_name_for_call(fname, args);
         self.fn_option_some_struct
             .get(&mono)
             .or_else(|| self.fn_option_some_struct.get(fname))
             .cloned()
+    }
+
+    /// Best-effort named-struct Mako name for an expression (Point, not C type).
+    fn struct_name_from_expr(&self, e: &Expr) -> Option<String> {
+        match e {
+            Expr::StructLit { name, .. } | Expr::StructLitPos { name, .. } => {
+                if self.structs.contains_key(name) {
+                    Some(name.clone())
+                } else {
+                    // Pack-qualified / already C-mangled — accept if registered by c_name.
+                    self.structs
+                        .iter()
+                        .find(|(_, s)| s.c_name == *name)
+                        .map(|(n, _)| n.clone())
+                }
+            }
+            Expr::Ident(n) => {
+                let cty = self.locals.get(n)?;
+                if cty == "int64_t"
+                    || cty == "bool"
+                    || cty == "double"
+                    || cty == "MakoString"
+                    || cty.ends_with('*')
+                    || cty.starts_with("Mako")
+                {
+                    return None;
+                }
+                // Locals store C names for structs; map back to Mako name when needed.
+                if self.structs.contains_key(cty) {
+                    return Some(cty.clone());
+                }
+                self.structs
+                    .iter()
+                    .find(|(_, s)| &s.c_name == cty)
+                    .map(|(n, _)| n.clone())
+            }
+            _ => None,
+        }
     }
 
     /// Bind Option Some payload into `bindings[0]` according to kind.

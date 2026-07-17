@@ -82,18 +82,27 @@ on Router {
         self.count = self.count + 1
     }
 
+    // Prefer the longest matching path (exact or prefix with "/").
+    // First registered still wins on equal path length.
     fn match_route(self, method_str: string, path_str: string) -> int {
+        let mut best_id = -1
+        let mut best_len = -1
         let mut i = 0
         while i < len(self.routes) {
             let r = self.routes[i]
             let method_ok = str_eq(r.method_match, "*") || str_eq(r.method_match, method_str)
-            let path_ok = str_eq(r.path_match, path_str) || str_has_prefix(path_str, r.path_match + "/")
-            if method_ok && path_ok {
-                return r.handler_id
+            let exact = str_eq(r.path_match, path_str)
+            let prefix = str_has_prefix(path_str, r.path_match + "/")
+            if method_ok && (exact || prefix) {
+                let plen = len(r.path_match)
+                if plen > best_len {
+                    best_len = plen
+                    best_id = r.handler_id
+                }
             }
             i = i + 1
         }
-        return -1
+        return best_id
     }
 
     fn size(self) -> int {

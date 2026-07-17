@@ -24,3 +24,13 @@ fn TestPoolExhausted() {
     let c = pool.acquire()
     assert_eq(c, -1)
 }
+
+fn TestPoolDoubleReleaseIgnored() {
+    let mut pool = sql.new_pool("postgres://test", 2)
+    let a = pool.acquire()
+    pool.release(a)
+    pool.release(a) // must not double-count
+    assert_eq(pool.idle(), 1)
+    assert_eq(pool.active(), 0)
+    assert_eq(pool.size(), 1)
+}

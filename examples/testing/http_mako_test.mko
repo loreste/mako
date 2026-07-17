@@ -41,3 +41,13 @@ fn TestRouterPrefixMatch() {
     assert_eq(router.match_route("GET", "/api/users"), 1)
     assert_eq(router.match_route("GET", "/api/posts"), 1)
 }
+
+fn TestRouterLongestMatch() {
+    // Shorter prefix registered first — longer path still wins.
+    let mut router = http.new_router()
+    router.add("GET", "/api", 1)
+    router.add("GET", "/api/v1", 2)
+    assert_eq(router.match_route("GET", "/api/v1/users"), 2)
+    assert_eq(router.match_route("GET", "/api/other"), 1)
+    assert_eq(router.match_route("GET", "/api/v1"), 2)
+}
