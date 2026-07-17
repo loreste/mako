@@ -1,0 +1,80 @@
+// io.Reader / io.Writer tests — v0.2.0
+
+pull "io"
+
+fn TestStringReaderBasic() {
+    let mut r = io.new_string_reader("hello world")
+    let mut buf = make([]byte, 5, 5)
+    let n, err = r.read(buf)
+    assert_eq(n, 5)
+    assert_eq_str(err, "")
+    assert_eq_str(string(buf), "hello")
+}
+
+fn TestStringReaderMultipleReads() {
+    let mut r = io.new_string_reader("abcdef")
+    let mut buf = make([]byte, 3, 3)
+    let n1, _ = r.read(buf)
+    assert_eq(n1, 3)
+    assert_eq_str(string(buf), "abc")
+    let n2, _ = r.read(buf)
+    assert_eq(n2, 3)
+    assert_eq_str(string(buf), "def")
+    let n3, err3 = r.read(buf)
+    assert_eq(n3, 0)
+    assert_eq_str(err3, "EOF")
+}
+
+fn TestStringReaderEOF() {
+    let mut r = io.new_string_reader("hi")
+    let mut buf = make([]byte, 10, 10)
+    let n, err = r.read(buf)
+    assert_eq(n, 2)
+    assert_eq_str(err, "")
+    let n2, err2 = r.read(buf)
+    assert_eq(n2, 0)
+    assert_eq_str(err2, "EOF")
+}
+
+fn TestByteWriterBasic() {
+    let mut w = io.new_byte_writer()
+    let data = bytes("hello ")
+    let n, err = w.write(data)
+    assert_eq(n, 6)
+    assert_eq_str(err, "")
+    let data2 = bytes("world")
+    let n2, _ = w.write(data2)
+    assert_eq(n2, 5)
+    assert_eq_str(w.to_string(), "hello world")
+    assert_eq(w.size(), 11)
+}
+
+fn TestDrain() {
+    let r = io.new_string_reader("the quick brown fox")
+    let content, err = io.drain(r)
+    assert_eq_str(err, "")
+    assert_eq_str(content, "the quick brown fox")
+}
+
+fn TestDrainEmpty() {
+    let r = io.new_string_reader("")
+    let content, err = io.drain(r)
+    assert_eq_str(err, "")
+    assert_eq_str(content, "")
+}
+
+fn TestStringReaderEmpty() {
+    let mut r = io.new_string_reader("")
+    let mut buf = make([]byte, 10, 10)
+    let n, err = r.read(buf)
+    assert_eq(n, 0)
+    assert_eq_str(err, "EOF")
+}
+
+fn TestByteWriterReset() {
+    let mut w = io.new_byte_writer()
+    let _ = w.write(bytes("hello"))
+    assert_eq(w.size(), 5)
+    w.reset()
+    assert_eq(w.size(), 0)
+}

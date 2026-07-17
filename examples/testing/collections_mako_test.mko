@@ -1,0 +1,82 @@
+// Generic collections written in Mako — v0.2.0
+
+pull "collections"
+
+fn TestIntStackPushPop() {
+    let mut s = collections.new_int_stack()
+    s.push(10)
+    s.push(20)
+    s.push(30)
+    assert_eq(s.size(), 3)
+    match s.pop() {
+        Some(v) => assert_eq(v, 30),
+        None => assert(false),
+    }
+    assert_eq(s.size(), 2)
+    match s.pop() {
+        Some(v) => assert_eq(v, 20),
+        None => assert(false),
+    }
+    match s.pop() {
+        Some(v) => assert_eq(v, 10),
+        None => assert(false),
+    }
+    match s.pop() {
+        Some(_) => assert(false),
+        None => assert(true),
+    }
+}
+
+fn TestIntStackPeek() {
+    let mut s = collections.new_int_stack()
+    s.push(42)
+    match s.peek() {
+        Some(v) => assert_eq(v, 42),
+        None => assert(false),
+    }
+    assert_eq(s.size(), 1)
+}
+
+fn TestIntStackEmpty() {
+    let s = collections.new_int_stack()
+    assert_eq(s.is_empty(), 1)
+    assert_eq(s.size(), 0)
+}
+
+fn TestIntQueueFIFO() {
+    let mut q = collections.new_int_queue()
+    q.enqueue(1)
+    q.enqueue(2)
+    q.enqueue(3)
+    assert_eq(q.size(), 3)
+    match q.dequeue() {
+        Some(v) => assert_eq(v, 1),
+        None => assert(false),
+    }
+    match q.dequeue() {
+        Some(v) => assert_eq(v, 2),
+        None => assert(false),
+    }
+    match q.dequeue() {
+        Some(v) => assert_eq(v, 3),
+        None => assert(false),
+    }
+    assert_eq(q.is_empty(), 1)
+}
+
+fn TestIntQueueEmpty() {
+    let mut q = collections.new_int_queue()
+    match q.dequeue() {
+        Some(_) => assert(false),
+        None => assert(true),
+    }
+}
+
+fn TestIntStackClear() {
+    let mut s = collections.new_int_stack()
+    s.push(1)
+    s.push(2)
+    s.clear()
+    assert_eq(s.size(), 0)
+    assert_eq(s.is_empty(), 1)
+}

@@ -1,0 +1,106 @@
+// Package io defines Reader and Writer types for byte-oriented I/O.
+//
+// StringReader reads from a string. ByteWriter collects bytes.
+// copy reads all from a StringReader into a ByteWriter.
+// read_all reads a StringReader into a string.
+
+pack io
+
+// StringReader reads from a string.
+export struct StringReader {
+    data: string
+    pos: int
+}
+
+export fn new_string_reader(s: string) -> StringReader {
+    return StringReader { data: s, pos: 0 }
+}
+
+on StringReader {
+    fn read(mut self, buf: []byte) -> (int, string) {
+        if self.pos >= len(self.data) {
+            return (0, "EOF")
+        }
+        let remaining = len(self.data) - self.pos
+        let mut n = len(buf)
+        if n > remaining {
+            n = remaining
+        }
+        let mut i = 0
+        while i < n {
+            buf[i] = byte(int(self.data[self.pos + i]))
+            i = i + 1
+        }
+        self.pos = self.pos + n
+        return (n, "")
+    }
+
+    fn reset(mut self) {
+        self.pos = 0
+    }
+}
+
+// ByteWriter collects written bytes into a growable buffer.
+export struct ByteWriter {
+    buf: []byte
+}
+
+export fn new_byte_writer() -> ByteWriter {
+    return ByteWriter { buf: make([]byte, 0, 256) }
+}
+
+on ByteWriter {
+    fn write(mut self, data: []byte) -> (int, string) {
+        let mut i = 0
+        while i < len(data) {
+            self.buf = append(self.buf, data[i])
+            i = i + 1
+        }
+        return (len(data), "")
+    }
+
+    fn to_string(self) -> string {
+        return string(self.buf)
+    }
+
+    fn size(self) -> int {
+        return len(self.buf)
+    }
+
+    fn reset(mut self) {
+        self.buf = make([]byte, 0, 256)
+    }
+}
+
+// read_all reads everything from a StringReader and returns it as a string.
+export fn read_all(s: string) -> string {
+    return s
+}
+
+// copy_string reads all bytes from a string and returns them.
+export fn copy_string(src: string) -> ([]byte, string) {
+    let data = bytes(src)
+    return (data, "")
+}
+
+// drain reads a StringReader to completion and returns the content.
+export fn drain(r: StringReader) -> (string, string) {
+    let mut reader = r
+    let mut out = make([]byte, 0, 256)
+    let mut buf = make([]byte, 1024, 1024)
+    while 1 == 1 {
+        let n, err = reader.read(buf)
+        let mut i = 0
+        while i < n {
+            out = append(out, buf[i])
+            i = i + 1
+        }
+        if str_eq(err, "EOF") {
+            return (string(out), "")
+        }
+        if len(err) > 0 {
+            return (string(out), err)
+        }
+    }
+    return (string(out), "")
+}

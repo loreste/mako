@@ -1,0 +1,42 @@
+// Context cancellation tests — v0.2.0
+
+pull "context"
+
+fn TestBackgroundNotDone() {
+    let ctx = context.background()
+    assert_eq(ctx.done(), 0)
+    assert_eq_str(ctx.err(), "")
+    assert_eq(ctx.has_deadline(), 0)
+    assert_eq(ctx.remaining(), -1)
+}
+
+fn TestWithTimeoutNotExpired() {
+    let ctx = context.with_timeout(5000)
+    assert_eq(ctx.done(), 0)
+    assert_eq(ctx.has_deadline(), 1)
+    assert(ctx.remaining() > 0)
+}
+
+fn TestWithTimeoutExpired() {
+    let ctx = context.with_timeout(1)
+    sleep_ms(10)
+    assert_eq(ctx.done(), 1)
+    assert_eq_str(ctx.err(), "deadline exceeded")
+    assert_eq(ctx.remaining(), 0)
+}
+
+fn TestCancel() {
+    let ctx = context.with_timeout(5000)
+    assert_eq(ctx.done(), 0)
+    let cancelled = ctx.with_cancel()
+    assert_eq(cancelled.done(), 1)
+    assert_eq_str(cancelled.err(), "cancelled")
+}
+
+fn TestCancelBackground() {
+    let ctx = context.background()
+    assert_eq(ctx.done(), 0)
+    let cancelled = ctx.with_cancel()
+    assert_eq(cancelled.done(), 1)
+    assert_eq_str(cancelled.err(), "cancelled")
+}

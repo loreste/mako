@@ -635,6 +635,20 @@ impl Parser {
             if !matches!(self.peek_kind(), TokenKind::RParen) {
                 loop {
                     // bare Type, `name Type`, or `name: Type`
+                    // Skip `mut` before param names (e.g. `mut self`)
+                    if matches!(self.peek_kind(), TokenKind::Mut) {
+                        self.bump();
+                    }
+                    // Skip `self` — interface methods don't include the receiver in params
+                    if matches!(self.peek_kind(), TokenKind::Ident(ref n) if n == "self") {
+                        self.bump();
+                        if matches!(self.peek_kind(), TokenKind::Comma) {
+                            self.bump();
+                            continue;
+                        } else {
+                            break;
+                        }
+                    }
                     if matches!(self.peek_kind(), TokenKind::Ident(_)) {
                         let save = self.pos;
                         let _ = self.expect_ident()?;
@@ -642,7 +656,6 @@ impl Parser {
                             self.bump();
                             params.push(self.parse_type()?);
                         } else if self.peek_is_type_start() {
-                            // Go `name Type` in interface — type only matters for iface
                             params.push(self.parse_type()?);
                         } else {
                             self.pos = save;

@@ -1,3 +1,79 @@
-fn with_timeout(ms: int) -> int { return context_with_timeout(ms) }
-fn expired(deadline: int) -> int { return context_expired(deadline) }
-fn remaining(deadline: int) -> int { return context_remaining(deadline) }
+// Package context provides deadline propagation and cancellation.
+//
+// A Context carries a deadline (absolute ms timestamp) and a cancelled flag.
+// Functions that accept a Context should check ctx.done() before expensive work.
+
+pack context
+
+export struct Context {
+    deadline_ms: int
+    cancelled: int
+}
+
+// background returns a context with no deadline and not cancelled.
+export fn background() -> Context {
+    return Context { deadline_ms: 0, cancelled: 0 }
+}
+
+// with_timeout returns a context that expires after ms milliseconds from now.
+export fn with_timeout(ms: int) -> Context {
+    return Context { deadline_ms: now_ms() + ms, cancelled: 0 }
+}
+
+// with_deadline returns a context with an absolute deadline (ms since epoch).
+export fn with_deadline(deadline_ms: int) -> Context {
+    return Context { deadline_ms: deadline_ms, cancelled: 0 }
+}
+
+on Context {
+    // done returns 1 if the context is cancelled or its deadline has passed.
+    fn done(self) -> int {
+        if self.cancelled == 1 {
+            return 1
+        }
+        if self.deadline_ms > 0 {
+            if now_ms() >= self.deadline_ms {
+                return 1
+            }
+        }
+        return 0
+    }
+
+    // cancelled returns a new context that is marked as cancelled.
+    fn with_cancel(self) -> Context {
+        return Context { deadline_ms: self.deadline_ms, cancelled: 1 }
+    }
+
+    // remaining returns milliseconds until deadline, or -1 if no deadline.
+    fn remaining(self) -> int {
+        if self.deadline_ms == 0 {
+            return -1
+        }
+        let r = self.deadline_ms - now_ms()
+        if r < 0 {
+            return 0
+        }
+        return r
+    }
+
+    // has_deadline returns 1 if the context has a deadline set.
+    fn has_deadline(self) -> int {
+        if self.deadline_ms > 0 {
+            return 1
+        }
+        return 0
+    }
+
+    // err returns "" if not done, "cancelled" if cancelled, "deadline exceeded" if expired.
+    fn err(self) -> string {
+        if self.cancelled == 1 {
+            return "cancelled"
+        }
+        if self.deadline_ms > 0 {
+            if now_ms() >= self.deadline_ms {
+                return "deadline exceeded"
+            }
+        }
+        return ""
+    }
+}

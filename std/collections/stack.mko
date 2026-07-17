@@ -1,0 +1,145 @@
+// Generic Stack[T] — LIFO container written in Mako.
+// Uses []int backing (int-only for now; generic backing requires generic struct fields with slices).
+
+pack collections
+
+export struct IntStack {
+    items: []int
+}
+
+export fn new_int_stack() -> IntStack {
+    return IntStack { items: make([]int, 0, 16) }
+}
+
+on IntStack {
+    fn push(mut self, v: int) {
+        self.items = append(self.items, v)
+    }
+
+    fn pop(mut self) -> Option[int] {
+        if len(self.items) == 0 {
+            return None
+        }
+        let v = self.items[len(self.items) - 1]
+        self.items = self.items[0:len(self.items) - 1]
+        return Some(v)
+    }
+
+    fn peek(self) -> Option[int] {
+        if len(self.items) == 0 {
+            return None
+        }
+        return Some(self.items[len(self.items) - 1])
+    }
+
+    fn size(self) -> int {
+        return len(self.items)
+    }
+
+    fn is_empty(self) -> int {
+        if len(self.items) == 0 {
+            return 1
+        }
+        return 0
+    }
+
+    fn clear(mut self) {
+        self.items = make([]int, 0, 16)
+    }
+}
+
+// String stack
+export struct StrStack {
+    items: []string
+}
+
+export fn new_str_stack() -> StrStack {
+    return StrStack { items: make([]string, 0, 16) }
+}
+
+on StrStack {
+    fn push(mut self, v: string) {
+        self.items = append(self.items, v)
+    }
+
+    fn pop(mut self) -> Option[string] {
+        if len(self.items) == 0 {
+            return None
+        }
+        let v = self.items[len(self.items) - 1]
+        self.items = self.items[0:len(self.items) - 1]
+        return Some(v)
+    }
+
+    fn peek(self) -> Option[string] {
+        if len(self.items) == 0 {
+            return None
+        }
+        return Some(self.items[len(self.items) - 1])
+    }
+
+    fn size(self) -> int {
+        return len(self.items)
+    }
+
+    fn is_empty(self) -> int {
+        if len(self.items) == 0 {
+            return 1
+        }
+        return 0
+    }
+}
+
+// Int queue (FIFO)
+export struct IntQueue {
+    items: []int
+    head: int
+}
+
+export fn new_int_queue() -> IntQueue {
+    return IntQueue { items: make([]int, 0, 16), head: 0 }
+}
+
+on IntQueue {
+    fn enqueue(mut self, v: int) {
+        self.items = append(self.items, v)
+    }
+
+    fn dequeue(mut self) -> Option[int] {
+        if self.head >= len(self.items) {
+            return None
+        }
+        let v = self.items[self.head]
+        self.head = self.head + 1
+        // Compact when half consumed
+        if self.head > len(self.items) / 2 {
+            let mut new_items = make([]int, 0, len(self.items) - self.head)
+            let mut i = self.head
+            while i < len(self.items) {
+                new_items = append(new_items, self.items[i])
+                i = i + 1
+            }
+            self.items = new_items
+            self.head = 0
+        }
+        return Some(v)
+    }
+
+    fn peek_front(self) -> Option[int] {
+        if self.head >= len(self.items) {
+            return None
+        }
+        return Some(self.items[self.head])
+    }
+
+    fn size(self) -> int {
+        return len(self.items) - self.head
+    }
+
+    fn is_empty(self) -> int {
+        if self.head >= len(self.items) {
+            return 1
+        }
+        return 0
+    }
+}
