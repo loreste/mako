@@ -1,0 +1,92 @@
+// Multi-statement lambda body tests — v0.1.10
+
+fn apply(f: fn(int) -> int, x: int) -> int {
+    return f(x)
+}
+
+fn run_void(f: fn() -> int) -> int {
+    return f()
+}
+
+fn TestLambdaWithAssignment() {
+    let result = apply(fn(x) {
+        let mut total = x
+        total = total + 5
+        return total
+    }, 10)
+    assert_eq(result, 15)
+}
+
+fn TestLambdaWithLetBinding() {
+    let result = apply(fn(x) {
+        let doubled = x * 2
+        let tripled = x * 3
+        return doubled + tripled
+    }, 4)
+    assert_eq(result, 20)
+}
+
+fn TestLambdaWithIfStatement() {
+    let result = apply(fn(x) {
+        let mut out = 0
+        if x > 5 {
+            out = 1
+        } else {
+            out = 0
+        }
+        return out
+    }, 10)
+    assert_eq(result, 1)
+}
+
+fn TestLambdaWithLoop() {
+    let result = run_void(fn() {
+        let mut sum = 0
+        let mut i = 0
+        while i < 5 {
+            sum = sum + i
+            i = i + 1
+        }
+        return sum
+    })
+    assert_eq(result, 10)
+}
+
+fn TestLambdaWithMultipleStatements() {
+    let result = apply(fn(x) {
+        let a = x + 1
+        let b = a * 2
+        let c = b - 3
+        return c
+    }, 5)
+    // (5 + 1) * 2 - 3 = 9
+    assert_eq(result, 9)
+}
+
+fn TestLambdaWithNestedIf() {
+    let result = apply(fn(x) {
+        let mut category = 0
+        if x > 100 {
+            category = 3
+        } else {
+            if x > 10 {
+                category = 2
+            } else {
+                category = 1
+            }
+        }
+        return category
+    }, 50)
+    assert_eq(result, 2)
+}
+
+fn TestLambdaLocalMutation() {
+    let result = run_void(fn() {
+        let mut acc = 0
+        acc = acc + 10
+        acc = acc + 20
+        acc = acc + 30
+        return acc
+    })
+    assert_eq(result, 60)
+}

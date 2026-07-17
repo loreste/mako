@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### v0.1.10 — Deepen generics
+
+- **Multi-statement lambda bodies** — lambdas can now contain `let` bindings,
+  assignments, `if`/`else`, `while` loops, and nested control flow. Previously
+  only single expressions were supported. Enables real callbacks in stdlib.
+- **`mut self` on methods** — `on Type { fn m(mut self) { self.field = v } }`
+  passes the receiver by pointer so mutations persist in the caller. Enables
+  real iterators and any method that modifies state.
+- **Generic enum variant disambiguation** — multiple instantiations of the
+  same generic enum (e.g. `MyBox[int]` and `MyBox[string]`) no longer collide
+  on shared variant names. Qualified lookup uses return type context to resolve
+  the correct instantiation in both type checker and codegen.
+
 ### Channels
 
 - **`chan_len` / `chan_cap` on any `chan[T]`** — type-check accepts struct,

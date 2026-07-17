@@ -13624,7 +13624,11 @@ impl TypeChecker {
                     }
                     return Ok(Type::Option(Box::new(Type::Int)));
                 }
-                if let Some(ctor) = self.variants.get(name) {
+                // Try qualified variant lookup first using return type context
+                let qctor = if let Type::Named(ret_name) = &self.current_ret {
+                    self.variants.get(&format!("{ret_name}::{name}")).cloned()
+                } else { None };
+                if let Some(ctor) = qctor.as_ref().or_else(|| self.variants.get(name)) {
                     if ctor.fields.is_empty() {
                         return Ok(Type::Enum {
                             name: ctor.enum_name.clone(),
@@ -14754,7 +14758,14 @@ impl TypeChecker {
                         }
                         _ => {}
                     }
-                    if let Some(ctor) = self.variants.get(name).cloned() {
+                    // Try qualified lookup first using return type context
+                    let qualified_ctor = if let Type::Named(ret_name) = &self.current_ret {
+                        let qname = format!("{ret_name}::{name}");
+                        self.variants.get(&qname).cloned()
+                    } else {
+                        None
+                    };
+                    if let Some(ctor) = qualified_ctor.or_else(|| self.variants.get(name).cloned()) {
                         if ctor.fields.len() != args.len() {
                             return Err(TypeError::new(format!(
                                 "variant `{name}` expects {} fields, got {}",
@@ -16330,8 +16341,19 @@ impl TypeChecker {
         for v in &mono_enum.variants {
             let fields: Result<Vec<_>, _> = v.fields.iter().map(|t| self.resolve_type(t)).collect();
             let fields = fields?;
+            // Register by bare name only if not already taken (first-wins)
+            if !self.variants.contains_key(&v.name) {
+                self.variants.insert(
+                    v.name.clone(),
+                    VariantCtor {
+                        enum_name: mono_name.to_string(),
+                        fields: fields.clone(),
+                    },
+                );
+            }
+            // Always register by qualified name for disambiguation
             self.variants.insert(
-                v.name.clone(),
+                format!("{}::{}", mono_name, v.name),
                 VariantCtor {
                     enum_name: mono_name.to_string(),
                     fields: fields.clone(),
