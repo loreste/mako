@@ -1,0 +1,11 @@
+// Guarded arms do not exhaust a variant — need unguarded Some or `_`.
+fn f(o: Option[int]) -> string {
+    match o {
+        Some(n) if n > 10 => "large",
+        None => "nothing",
+    }
+}
+
+fn main() {
+    print(f(Some(5)))
+}

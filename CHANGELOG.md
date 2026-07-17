@@ -22,6 +22,9 @@
   Extended to generic enums via `Type::Named` resolution.
 - **Match guards** — `pattern if condition => body`. Guard condition combined
   with pattern into single if-condition. `Some(n) if n > 10 => "large"`.
+- **Fix: guarded arms no longer exhaust** — `Some(n) if n > 10` alone does not
+  cover all `Some`; missing unguarded arm was a compile-time hole that aborted
+  at runtime (`non-exhaustive match`).
 - **Use-after-move detection** — 48 test cases verify that `hold` values
   produce compiler errors on use after move, partial moves, moves across
   control flow branches (break/continue/if).
