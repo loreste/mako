@@ -3,8 +3,7 @@
 **Product version:** **0.1.9** · Last roadmap sync: **2026-07-17**.
 
 **Verified:** [STATUS.md](STATUS.md) · **Stdlib:** [STDLIB.md](STDLIB.md) · **Security:** [SECURITY.md](SECURITY.md) · **Release:** [RELEASE.md](RELEASE.md).  
-**Book:** [The Mako Book](book/) · **Identity:** [IDENTITY.md](IDENTITY.md) · **Pain map:** [PAIN_POINTS.md](PAIN_POINTS.md).  
-**Implementation plan:** [ROADMAP_IMPL.md](../ROADMAP_IMPL.md).
+**Book:** [The Mako Book](book/) · **Identity:** [IDENTITY.md](IDENTITY.md) · **Pain map:** [PAIN_POINTS.md](PAIN_POINTS.md).
 
 ---
 
@@ -13,7 +12,8 @@
 | Version | Theme | Status |
 |---------|-------|--------|
 | **0.1.9** | Generics & iterators | **Shipped** |
-| **0.2.0** | Stdlib written in Mako | **Next** |
+| **0.1.10** | Deepen generics + speed | **In progress** |
+| **0.2.0** | Stdlib written in Mako | Planned |
 | **0.2.1** | Safety & correctness | Planned |
 | **0.2.2** | Tooling | Planned |
 | **0.3.0** | Cross-platform | Planned |
@@ -22,23 +22,60 @@
 
 ---
 
-## v0.1.9 — Generics & Iterators — **shipped**
+## v0.1.10 — Deepen generics + speed — **in progress**
 
-The foundation for everything that follows. Without generic types, the standard
-library cannot be written in Mako, and users cannot build reusable data
-structures.
+Two v0.1.9 features shipped as seeds. They need to be production-grade before
+the stdlib (v0.2.0) can be written in Mako.
 
 | Feature | Status | Description |
 |---------|--------|-------------|
-| **Generic structs** | Done | `struct Pair[T] { a: T, b: T }` — monomorphized; multi-param supported |
-| **Generic enums** | Done | `enum MyBox[T] { Val(T), Nothing }` — match on monomorphs |
-| **Interface bounds** | Done | `fn f[T: Describable](x: T)` — structural method-set check |
-| **Iterator protocol** | Seed | Types with `next() -> Option[T]` usable from `for`; by-value `self` does not auto-advance (use mut patterns) |
-| **Mutable closures** | Seed | Heap-cell capture infrastructure; multi-statement mut lambdas residual |
+| **Multi-statement lambda bodies** | Needed | Current lambdas are single-expression. Mutable closures require assignment statements inside the lambda body. Blocks v0.2.0 stdlib callbacks. |
+| **`&mut self` on methods** | Needed | Methods take `self` by value (copy). Iterators can't advance state. Blocks real iterator protocol and any method that mutates the receiver. |
+| **Tuple channel codegen** | Done | `chan[(int,int,int,int,int)]` send/recv works. Required by leba 0.6+. |
+| **`chan_len` / `chan_cap` for all channel types** | Done | Works on int, float, string, struct, enum, tuple channels. |
+| **Speed: wyhash** | Done | Map key hashing 4-8x faster. |
+| **Speed: stack f-strings** | Done | 256B stack buffer, zero malloc for short strings. |
+| **Speed: constant folding** | Done | `1 + 2` folded at compile time. |
+| **Speed: zero-copy strings** | Done | Comparisons, match arms, print, str_eq, str_has_prefix use `mako_str_view`. |
+| **Speed: select condvar** | Done | Channel select wakes on send, not 2ms polling. |
+| **Speed: emit_line** | Done | Codegen hot paths use `format_args!` — no per-line heap allocation. |
+
+### Residuals from v0.1.9
+
+- Generic enum variants shared across instantiations (e.g. `Val` from `MyBox[int]` and `MyBox[string]` collide)
+- Wrong-count type args on generic structs produce confusing error messages
+- Generic structs can't be used as map keys yet
+
+---
+
+## v0.1.9 — Generics & Iterators — **shipped**
+
+The foundation for everything that follows.
+
+| Feature | Status | Description |
+|---------|--------|-------------|
+| **Generic structs** | Done | `struct Pair[T] { a: T, b: T }` — monomorphized; multi-param; nested; in generic fns |
+| **Generic enums** | Done | `enum MyBox[T] { Val(T), Nothing }` — monomorphized; match works |
+| **Interface bounds** | Done | `fn f[T: Describable](x: T)` — structural method-set check; compile error on violation |
+| **Iterator protocol** | Seed | Types with `next() -> Option[T]` recognized as iterables; by-value self limits mutation |
+| **Mutable closures** | Seed | Heap-cell infrastructure built; needs multi-statement lambda bodies |
 
 Tests: `generic_struct_test`, `generic_enum_test`, `generic_bounds_test`,
 `generic_adversarial_test`, `iterator_test`, `mutable_closure_test`,
 `examples/bad/generic_bound_fail.mko`.
+
+### Ecosystem: Leba load balancer
+
+[Leba](https://github.com/loreste/leba) (v0.7.0) is a production load balancer
+written in Mako, deployed on mako-lang.com. It exercises channels, TLS, HTTP
+proxying, structured concurrency, and the full networking stdlib. Recent work:
+
+- Session cookie authentication with HMAC-signed tokens
+- Full admin dashboard (standalone HTML/CSS/JS) with RBAC
+- Proxy host management UI (add domains, servers, backends via browser)
+- Analytics dashboard (top paths, status breakdown, request rate chart)
+- Access log file output, per-client rate limiting, CORS, header rules
+- Config API with secret redaction, disabled write for security
 
 ---
 

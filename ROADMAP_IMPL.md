@@ -4,16 +4,43 @@ Detailed feature plan for Mako, organized by version. See
 [docs/ROADMAP.md](docs/ROADMAP.md) for the summary view.
 
 **Current version:** 0.1.9  
-**Next milestone:** 0.2.0  
+**Next milestone:** 0.1.10 (deepen generics), then 0.2.0 (stdlib)  
 **Last updated:** 2026-07-17
+
+---
+
+## v0.1.10 — Deepen generics + speed — **in progress**
+
+Two blockers must be resolved before the stdlib can be written in Mako.
+
+### Multi-statement lambda bodies
+
+Current lambdas compile to a single C expression via `expr_as_pure_c`. This
+prevents assignments, loops, and multi-line logic inside closures. The fix:
+emit lambda bodies as full C function bodies (like `emit_fn`), not single
+return expressions.
+
+### Mutable self on methods (`&mut self`)
+
+Methods desugar `on Type { fn m(self) }` to `fn Type_m(self: Type)` which
+passes by value. Mutations to `self.field` inside the method are lost. The
+fix: detect `mut self` and pass a pointer — `fn Type_m(self: *Type)` — so
+mutations persist. This unblocks real iterators and any stateful method.
+
+### Done in this cycle
+
+- Tuple channel codegen (`chan[(int,int,int,int,int)]`)
+- `chan_len` / `chan_cap` for all channel types
+- wyhash, stack f-strings, constant folding, zero-copy strings, select condvar
+- `emit_line` / `format_args!` codegen optimization
 
 ---
 
 ## v0.1.9 — Generics & Iterators — **shipped**
 
-Landed in product tip. Residual notes: iterator by-value `self` does not
+Shipped. Residual notes: iterator by-value `self` does not
 advance state automatically; mutable multi-statement lambdas are seed-quality.
-Everything downstream still depends on deepening these.
+Both addressed in v0.1.10.
 
 ### Generic structs
 
