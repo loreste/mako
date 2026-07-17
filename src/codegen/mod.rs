@@ -832,6 +832,7 @@ impl Codegen {
                     }
                     // Named struct element channels (MakoChanPtr*).
                     TypeExpr::Named(_) => "chan_struct",
+                    TypeExpr::Tuple(_) => "chan_struct",
                     _ => "chan_int",
                 }
             }
@@ -9552,6 +9553,31 @@ impl Codegen {
                 let deep = Self::successive_nest_kinds(&args[0]);
                 if !deep.is_empty() {
                     self.deep_nest_chains.insert(name.to_string(), deep);
+                }
+            }
+            TypeExpr::Generic(n, args) if n == "chan" && !args.is_empty() => {
+                match &args[0] {
+                    TypeExpr::Named(t)
+                        if !matches!(
+                            t.as_str(),
+                            "int" | "int64" | "int32" | "int8" | "byte" | "uint64"
+                                | "bool" | "float" | "float64" | "string"
+                        ) && (self.structs.contains_key(t) || self.enums.contains_key(t)) =>
+                    {
+                        self.chan_ptr_elems
+                            .insert(name.to_string(), t.clone());
+                    }
+                    TypeExpr::Tuple(elems) => {
+                        let tag = elems
+                            .iter()
+                            .map(|e| c_type_mono_tag(&self.type_expr_c(e)))
+                            .collect::<Vec<_>>()
+                            .join("_");
+                        let cname = format!("MakoTup_{tag}");
+                        self.chan_ptr_elems
+                            .insert(name.to_string(), cname);
+                    }
+                    _ => {}
                 }
             }
             _ => {}
