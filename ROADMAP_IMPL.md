@@ -3,44 +3,55 @@
 Detailed feature plan for Mako, organized by version. See
 [docs/ROADMAP.md](docs/ROADMAP.md) for the summary view.
 
-**Current version:** 0.1.9  
-**Next milestone:** 0.1.10 (deepen generics), then 0.2.0 (stdlib)  
+**Current version:** 0.2.0  
+**Next milestone:** 0.2.1 (safety & correctness)  
 **Last updated:** 2026-07-17
 
 ---
 
-## v0.1.10 — Deepen generics + speed — **in progress**
+## v0.2.0 — Stdlib in Mako — **shipped**
 
-Two blockers must be resolved before the stdlib can be written in Mako.
+Standard library packages rewritten in Mako instead of C runtime wrappers.
 
-### Multi-statement lambda bodies
+| Package | What shipped |
+|---------|-------------|
+| `std/io` | `StringReader` / `ByteWriter` with `mut self` read/write methods, `drain()` |
+| `std/collections` | `IntStack` / `StrStack` / `IntQueue` with push/pop/enqueue/dequeue, Option returns |
+| `std/context` | `Context` with `background()`, `with_timeout()`, `with_deadline()`, `with_cancel()`, `done()`, `err()` |
+| `std/encoding/json` | `ObjectBuilder` / `ArrayBuilder` with `set_string`/`set_int`/`set_bool`/`set_raw`, JSON escaping |
+| `std/net/http` | `Request`/`Response` types, `Router` with method+path matching, response constructors |
+| `std/database/sql` | `Pool` with `acquire()`/`release()` slot management, `begin_tx`/`commit_tx`/`rollback_tx` |
 
-Current lambdas compile to a single C expression via `expr_as_pure_c`. This
-prevents assignments, loops, and multi-line logic inside closures. The fix:
-emit lambda bodies as full C function bodies (like `emit_fn`), not single
-return expressions.
+Tests: `io_reader_writer_test`, `collections_mako_test`, `context_mako_test`,
+`json_mako_test`, `http_mako_test`, `sql_pool_test`.
 
-### Mutable self on methods (`&mut self`)
+### Known limitations
 
-Methods desugar `on Type { fn m(self) }` to `fn Type_m(self: Type)` which
-passes by value. Mutations to `self.field` inside the method are lost. The
-fix: detect `mut self` and pass a pointer — `fn Type_m(self: *Type)` — so
-mutations persist. This unblocks real iterators and any stateful method.
+- `io.copy(dst, src)` can't mutate caller's dst/src without reference types
+- `Option[string]` match extracts wrong slot in some codegen paths
+- `mut self` through `pull` imports doesn't always propagate the pointer flag
+- Structs with opaque handle fields (`SqlDB`) can't generate equality
 
-### Done in this cycle
+---
 
-- Tuple channel codegen (`chan[(int,int,int,int,int)]`)
-- `chan_len` / `chan_cap` for all channel types
-- wyhash, stack f-strings, constant folding, zero-copy strings, select condvar
-- `emit_line` / `format_args!` codegen optimization
+## v0.1.10 — Deepen generics + speed — **shipped**
+
+Resolved the blockers that prevented the stdlib rewrite.
+
+| Feature | Status |
+|---------|--------|
+| Multi-statement lambda bodies | Done — let, assign, if/else, while, nested loops in lambda bodies |
+| `mut self` on methods | Done — pointer-based receiver, mutations persist, `->` field access |
+| Generic enum variant disambiguation | Done — qualified lookup by return type context |
+| Tuple channels, chan_len/cap | Done |
+| Speed optimizations | Done — wyhash, stack f-strings, constant folding, zero-copy strings, select condvar |
 
 ---
 
 ## v0.1.9 — Generics & Iterators — **shipped**
 
-Shipped. Residual notes: iterator by-value `self` does not
-advance state automatically; mutable multi-statement lambdas are seed-quality.
-Both addressed in v0.1.10.
+Foundation for everything above. Generic structs, enums, interface bounds,
+iterator protocol seed, mutable closure infrastructure.
 
 ### Generic structs
 
