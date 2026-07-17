@@ -811,14 +811,8 @@ impl TypeChecker {
                 Box::new(Type::Int),
             ),
         );
-        fns.insert(
-            "chan_len".into(),
-            Type::Fn(vec![Type::Chan(Box::new(Type::Int))], Box::new(Type::Int)),
-        );
-        fns.insert(
-            "chan_cap".into(),
-            Type::Fn(vec![Type::Chan(Box::new(Type::Int))], Box::new(Type::Int)),
-        );
+        // chan_len and chan_cap accept any chan[T] — handled in check_expr
+        // as special-cased builtins rather than fixed signatures.
         fns.insert(
             "sleep_ms".into(),
             Type::Fn(vec![Type::Int], Box::new(Type::Void)),
@@ -14594,6 +14588,16 @@ impl TypeChecker {
                                 other => Err(TypeError::new(format!(
                                     "delete needs a map, got {}",
                                     other.display()
+                                ))),
+                            };
+                        }
+                        "chan_len" | "chan_cap" if args.len() == 1 => {
+                            let t = self.check_expr(&args[0])?;
+                            return match t {
+                                Type::Chan(_) => Ok(Type::Int),
+                                other => Err(TypeError::new(format!(
+                                    "{} needs a channel, got {}",
+                                    name, other.display()
                                 ))),
                             };
                         }
