@@ -2,9 +2,10 @@
 
 Batteries for **web and backends**, with naming conventions adapted to Mako.
 
-**Product tip:** **0.1.9**. Most of the surface today is **builtins + thin
-`std/` packages** over C runtime headers. **0.2.0** moves large pieces to
-idiomatic Mako using generics ([ROADMAP.md](ROADMAP.md)).
+**Product tip:** **0.2.0**. Core stdlib packages (`io`, `encoding/json`,
+`context`, `collections`, `net/http`, `database/sql`) are now written in
+idiomatic Mako with generics and `mut self`. Lower-level surface remains
+builtins over C runtime headers.
 
 Call builtins directly (`str_split`, `path_join`, …) **or** import std packages:
 

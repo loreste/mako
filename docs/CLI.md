@@ -327,7 +327,7 @@ VS Code extension.
 ## mako version
 
 ```bash
-mako version                       # e.g. mako version mako0.1.9 darwin/arm64
+mako version                       # e.g. mako version mako0.2.0 darwin/arm64
 mako version -v                    # include git commit hash
 mako --version                     # same as mako version
 mako -V                            # same
@@ -581,7 +581,7 @@ The compiler and runtime pass **320+ tests** covering:
 - `on Type { fn method(self) -> T { ... } }` method blocks
 - `pack` / `pull` / `export` module system (pack-qualified types, lits, enums)
 - User generics with monomorphization: `fn name[T](x: T) -> T`,
-  `struct Pair[T]`, `enum Box[T]`, bounds `fn f[T: I](…)` (0.1.9)
+  `struct Pair[T]`, `enum Box[T]`, bounds `fn f[T: I](…)` (0.2.0)
 - Tuples `(int, string)` and multi-return `let a, b = f()` (incl. structs)
 - Maps: keys `int|string|float`, values `int|string|float|Struct`; `maps_*`
 - `make(chan[T], n)` / `chan_open[T]` for int/bool/float/string/struct/enum/tuple;

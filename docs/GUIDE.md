@@ -111,7 +111,7 @@ mako check .
 mako run -p app
 ```
 
-`mako version` (also `mako --version` / `-V`) prints `mako version mako0.1.9 darwin/arm64`. Use `mako version -v` for an optional commit line.
+`mako version` (also `mako --version` / `-V`) prints `mako version mako0.2.0 darwin/arm64`. Use `mako version -v` for an optional commit line.
 Override headers if needed: `export MAKO_RUNTIME=/path/to/runtime`.
 
 Incremental builds are **on by default** (`-j` / `MAKO_JOBS`, `--no-incremental` to disable) — see [BUILD.md](BUILD.md). Release: `mako build --release` → `-O3 -flto` ([PERFORMANCE.md](PERFORMANCE.md): optimized on microbenches).
@@ -929,7 +929,7 @@ arena `make` + arena `append`) are supported. Interface methods are free
 functions `Iface_method` or `Iface_Concrete_method` with optional leading `self`;
 fat-pointer interface values box concrete receivers (or unit for no-self).
 
-### User generics (0.1.9) — monomorphized
+### User generics (0.2.0) — monomorphized
 
 ```mko
 // Function generics (also dual: fn id<T>(x: T) -> T)

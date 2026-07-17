@@ -4,7 +4,7 @@
 > Longer reference: https://mako-lang.com/llms-full.txt
 > Repo: https://github.com/loreste/mako
 
-Version **0.1.9**. Compiled language, `.mko` sources, C backend + clang, no GC.
+Version **0.2.0**. Compiled language, `.mko` sources, C backend + clang, no GC.
 
 Write new code with: `fn`, `let`, `on Type {}`, `pack` / `pull` / `export`,
 `hold` / `share` / `arena`, `crew` / `kick` / `join` / `fan`, `match`,
@@ -13,9 +13,12 @@ parse; do not prefer them. See docs/IDENTITY.md if you care about the style bar.
 
 Short facts:
 
-- Generics (0.1.9): `fn id[T](x: T) -> T`, `struct Pair[T]`, `enum Box[T]`,
+- Generics: `fn id[T](x: T) -> T`, `struct Pair[T]`, `enum Box[T]`,
   bounds `fn f[T: Iface](x: T)` — all monomorphized. Write `Pair[int] { … }`.
-  Iterator `next`/mutable captures are seeds (by-value self does not auto-advance).
+- `mut self` on methods: `fn push(mut self, v: int)` — mutations persist in caller
+- Multi-statement lambdas: `fn(x) { let a = x + 1; return a }` — full control flow
+- Stdlib in Mako: `pull "io"`, `pull "encoding/json"`, `pull "context"`,
+  `pull "net/http"`, `pull "database/sql"`, `pull "collections"`
 - Tuples / multi-return: `let a, b = f()` (incl. struct elements)
 - Methods: `on Type { fn m(self) -> T { ... } }`
 - Modules: `pack name`, `pull "path"`, always qualify: `pkg.fn`, `eng.Table`,

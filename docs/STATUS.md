@@ -1,6 +1,6 @@
 # Mako status (adversarial / verified)
 
-Last inventory: **2026-07-17** · product **mako0.1.9** (`CARGO_PKG_VERSION`).
+Last inventory: **2026-07-17** · product **mako0.2.0** (`CARGO_PKG_VERSION`).
 
 Unique Mako surface · pack/pull · map/slice/bag monomorphs · package-per-directory ·
 const-fn depth (match/while/for/strings) · suite **165+** · [The Mako Book](book/).
@@ -13,7 +13,7 @@ const-fn depth (match/while/for/strings) · suite **165+** · [The Mako Book](bo
 
 | Scope | Approx. |
 |-------|---------|
-| **Product version** | **0.1.9** |
+| **Product version** | **0.2.0** |
 | **MVP / usable language** | **100%** |
 | **STATUS north-star** | **100%** |
 | **Mako identity (preferred syntax)** | **~100%** — [IDENTITY.md](IDENTITY.md) |

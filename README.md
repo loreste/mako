@@ -8,12 +8,14 @@ Speed matters here: release builds use `-O3 -flto`, and concurrency is built in
 ownership and arenas, not a collector. The standard library is large enough for
 real services without pulling half the internet.
 
-This is version **0.1.9**. It runs. The surface is still early — expect change,
+This is version **0.2.0**. It runs. The surface is still early — expect change,
 rough edges, and missing pieces.
 
-**0.1.9 highlights:** generic structs/enums + interface bounds; typed channels
-for struct/tuple/enum with `chan_len` / `chan_cap` on any `chan[T]`.  
-**Next (roadmap):** **0.2.0** — stdlib written in Mako.
+**0.2.0 highlights:** generic structs/enums/bounds, multi-statement lambdas,
+`mut self` methods, stdlib written in Mako (io, json, http router, context,
+collections, sql pool), speed optimizations (wyhash, constant folding,
+zero-copy strings, stack f-strings).  
+**Next (roadmap):** **0.2.1** — safety & correctness.
 
 [mako-lang.com](https://mako-lang.com) · [Status](docs/STATUS.md) · [Roadmap](docs/ROADMAP.md) · [Guide](docs/GUIDE.md) · [Book](docs/book/)
 

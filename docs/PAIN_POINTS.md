@@ -25,7 +25,7 @@ Canonical surface: [IDENTITY.md](IDENTITY.md). Compat duals only: [COMPAT.md](CO
 | Go goroutine leaks | **First-class** structured `crew` / `kick` / `join` (jobs cannot outlive crew) | **Strong** |
 | Go shared-memory races | Ownership + structured concurrency; deep Send + static race on mut captures until join; TSan opt-in | **Strong** (type-level race model seed; TSan for residual UB) |
 | Slow / second-class parallel work | **First-class** `fan` + multi-kick crews ([SPEED.md](SPEED.md)) | **Strong** (keep optimizing) |
-| Go weak generics / empty `any` | User generics (fns + structs + enums) + bounds `T: I` (0.1.9) | **Strong** |
+| Go weak generics / empty `any` | User generics (fns + structs + enums) + bounds `T: I` (0.2.0) | **Strong** |
 | Go export-by-capital only | Explicit `export` (capital dual only) | **Strong** |
 | Rust lifetime ceremony | Local ownership: `hold` / `share` / scopes / arenas — no `'a` in everyday code | **Strong** |
 | Rust borrow-checker fights | Simple default `let`; power path is explicit `hold`/`share` | **Strong** (refine NLL) |
@@ -95,7 +95,7 @@ Everyday code stays simple (`let`). Power tools are **visible** (`hold` / `share
 
 | Go | Mako |
 |----|------|
-| Generics arrived late; often avoided | User generics monomorphized on **fns, structs, enums** + interface bounds (0.1.9) |
+| Generics arrived late; often avoided | User generics monomorphized on **fns, structs, enums** + interface bounds (0.2.0) |
 | Empty interface as escape hatch | Prefer typed APIs; interfaces for method sets |
 
 ### 1.8 Export and module culture

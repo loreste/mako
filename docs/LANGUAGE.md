@@ -3,7 +3,7 @@
 Mako is a systems and backend language: clear to write, strict at compile time,
 fast at runtime, and designed so **builds stay fast**.
 
-**Product version:** **0.1.9** (`mako version` → `mako0.1.9`).
+**Product version:** **0.2.0** (`mako version` → `mako0.2.0`).
 
 **Guided tour:** [The Mako Book](book/).  
 **Full syntax guide:** [GUIDE.md](GUIDE.md).  
@@ -82,7 +82,7 @@ Optional dual-form inventory: [GO_SYNTAX_CHECKLIST.md](GO_SYNTAX_CHECKLIST.md).
 
 ---
 
-## Generics (0.1.9)
+## Generics (0.2.0)
 
 User type parameters on **functions**, **structs**, and **enums**. All
 instantiations are **monomorphized** (one concrete C shape per args).

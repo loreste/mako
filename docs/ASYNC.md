@@ -1,6 +1,6 @@
 # Colored async / await (Vision Later — rejected by design)
 
-**Product tip:** **0.1.9** — concurrency remains colorless (`crew` / channels).
+**Product tip:** **0.2.0** — concurrency remains colorless (`crew` / channels).
 
 Mako concurrency is **colorless**: `crew` / `kick` / `join` / channels / `select`.
 
