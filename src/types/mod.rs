@@ -16903,6 +16903,11 @@ impl TypeChecker {
         let mut covered: Vec<String> = Vec::new();
 
         for arm in arms {
+            // Guarded arms do not cover their pattern: a failed guard falls
+            // through, so `Some(n) if n > 0` does not exhaust Option.
+            if arm.guard.is_some() {
+                continue;
+            }
             Self::cover_pattern(&arm.pattern, scrut, &mut has_wildcard, &mut covered);
         }
 
