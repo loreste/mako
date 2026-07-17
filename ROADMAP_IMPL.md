@@ -3,9 +3,27 @@
 Detailed feature plan for Mako, organized by version. See
 [docs/ROADMAP.md](docs/ROADMAP.md) for the summary view.
 
-**Current version:** 0.2.0  
-**Next milestone:** 0.2.1 (safety & correctness)  
+**Current version:** 0.2.1  
+**Next milestone:** 0.2.2 (tooling)  
 **Last updated:** 2026-07-17
+
+---
+
+## v0.2.1 — Safety & correctness — **shipped**
+
+| Feature | Status |
+|---------|--------|
+| Match exhaustiveness | Done — enum, Option, Result, Bool, generic enums. Compiler error with missing variant names. |
+| Match guards | Done — `pattern if condition => body`. Guard combined with pattern condition. |
+| Use-after-move | Verified — 48 `hold_*.mko` bad examples. Compiler error on use of moved `hold` values. |
+| Race detection | Verified — `race_mut_after_kick.mko`. Compiler flags mutation while kicked tasks may use the local. |
+| Nested destructuring | AST supports `Vec<Pattern>` nesting. Codegen partial — `Some(struct)` binding needs Option inner type tracking. |
+
+### Known limitations
+
+- `Some(StructType)` match binding extracts as `int64_t` not the struct type (codegen doesn't track Option inner type in all paths)
+- Match guard fallthrough across multiple arms with same pattern not supported (guard-failed arm skips to next `else if`)
+- `return` inside multi-statement lambda bodies still uses enclosing fn return type
 
 ---
 

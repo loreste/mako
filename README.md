@@ -8,14 +8,14 @@ Speed matters here: release builds use `-O3 -flto`, and concurrency is built in
 ownership and arenas, not a collector. The standard library is large enough for
 real services without pulling half the internet.
 
-This is version **0.2.0**. It runs. The surface is still early — expect change,
+This is version **0.2.1**. It runs. The surface is still early — expect change,
 rough edges, and missing pieces.
 
-**0.2.0 highlights:** generic structs/enums/bounds, multi-statement lambdas,
-`mut self` methods, stdlib written in Mako (io, json, http router, context,
-collections, sql pool), speed optimizations (wyhash, constant folding,
-zero-copy strings, stack f-strings).  
-**Next (roadmap):** **0.2.1** — safety & correctness.
+**0.2.1 highlights:** match exhaustiveness checking, match guards
+(`pattern if cond =>`), use-after-move detection for `hold` values,
+compile-time race detection for `kick` captures. Plus everything from 0.2.0:
+generics, `mut self`, stdlib in Mako, speed optimizations.  
+**Next (roadmap):** **0.2.2** — tooling (LSP, debugger, package registry).
 
 [mako-lang.com](https://mako-lang.com) · [Status](docs/STATUS.md) · [Roadmap](docs/ROADMAP.md) · [Guide](docs/GUIDE.md) · [Book](docs/book/)
 

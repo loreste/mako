@@ -2,7 +2,7 @@
 
 Source brief: `General_Purpose_Backend_Language_Vision.md`.
 
-**Product tip:** **0.2.0**. Next product version on the roadmap: **0.2.0**
+**Product tip:** **0.2.1**. Next product version on the roadmap: **0.2.1**
 (stdlib in Mako). See [ROADMAP.md](ROADMAP.md) · [STATUS.md](STATUS.md).
 
 Mako's product contract is:
