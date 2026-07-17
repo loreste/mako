@@ -1,0 +1,150 @@
+// Adversarial tests for v0.1.10 — try to break everything
+
+// --- Multi-statement lambdas ---
+
+fn apply(f: fn(int) -> int, x: int) -> int { return f(x) }
+fn run0(f: fn() -> int) -> int { return f() }
+
+fn TestLambdaNestedLoops() {
+    let result = run0(fn() {
+        let mut total = 0
+        let mut i = 0
+        while i < 3 {
+            let mut j = 0
+            while j < 3 {
+                total = total + 1
+                j = j + 1
+            }
+            i = i + 1
+        }
+        return total
+    })
+    assert_eq(result, 9)
+}
+
+fn TestLambdaWithConditional() {
+    let result = apply(fn(x) {
+        let mut out = x + 1
+        if x > 10 {
+            out = 999
+        }
+        return out
+    }, 5)
+    assert_eq(result, 6)
+}
+
+fn TestLambdaConditionalTriggered() {
+    let result = apply(fn(x) {
+        let mut out = x + 1
+        if x > 10 {
+            out = 999
+        }
+        return out
+    }, 20)
+    assert_eq(result, 999)
+}
+
+// --- Mut self ---
+
+struct Stack {
+    items: []int
+}
+
+on Stack {
+    fn push(mut self, v: int) {
+        self.items = append(self.items, v)
+    }
+
+    fn size(self) -> int {
+        return len(self.items)
+    }
+}
+
+fn TestMutSelfSliceAppend() {
+    let mut s = Stack { items: make([]int, 0, 4) }
+    s.push(10)
+    s.push(20)
+    s.push(30)
+    assert_eq(s.size(), 3)
+    assert_eq(s.items[0], 10)
+    assert_eq(s.items[2], 30)
+}
+
+// --- Generic enum multi-instantiation ---
+
+enum Maybe[T] {
+    Just(T)
+    Empty
+}
+
+fn just_int(v: int) -> Maybe[int] { return Just(v) }
+fn just_str(v: string) -> Maybe[string] { return Just(v) }
+fn no_int() -> Maybe[int] { return Empty }
+fn no_str() -> Maybe[string] { return Empty }
+
+fn TestGenericEnumCrossInstantiation() {
+    let a = just_int(7)
+    let b = just_str("ok")
+    let c = no_int()
+    let d = no_str()
+    match a {
+        Just(v) => assert_eq(v, 7),
+        Empty => assert(false),
+    }
+    match b {
+        Just(v) => assert_eq_str(v, "ok"),
+        Empty => assert(false),
+    }
+    match c {
+        Just(_) => assert(false),
+        Empty => assert(true),
+    }
+    match d {
+        Just(_) => assert(false),
+        Empty => assert(true),
+    }
+}
+
+// --- Generic struct + generic fn + mut self combined ---
+
+struct Pair[T] {
+    a: T
+    b: T
+}
+
+fn make_pair[T](a: T, b: T) -> Pair[T] {
+    return Pair[T] { a: a, b: b }
+}
+
+fn TestGenericFnAndStruct() {
+    let p = make_pair(10, 20)
+    assert_eq(p.a + p.b, 30)
+    let s = make_pair("x", "y")
+    assert_eq_str(s.a, "x")
+}
+
+// --- Interface bounds ---
+
+interface Measurable {
+    fn measure(self) -> int
+}
+
+struct Box {
+    w: int
+    h: int
+}
+
+on Box {
+    fn measure(self) -> int {
+        return self.w * self.h
+    }
+}
+
+fn get_measure[T: Measurable](x: T) -> int {
+    return x.measure()
+}
+
+fn TestBoundsWithMutSelf() {
+    let b = Box { w: 3, h: 4 }
+    assert_eq(get_measure(b), 12)
+}

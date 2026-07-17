@@ -1,0 +1,54 @@
+// Generic enum multiple instantiations — v0.1.10
+
+enum MyBox[T] {
+    Val(T)
+    Nothing
+}
+
+fn wrap_int(v: int) -> MyBox[int] {
+    return Val(v)
+}
+
+fn wrap_str(v: string) -> MyBox[string] {
+    return Val(v)
+}
+
+fn empty_int() -> MyBox[int] {
+    return Nothing
+}
+
+fn empty_str() -> MyBox[string] {
+    return Nothing
+}
+
+fn TestGenericEnumIntVal() {
+    let b = wrap_int(42)
+    match b {
+        Val(v) => assert_eq(v, 42),
+        Nothing => assert(false),
+    }
+}
+
+fn TestGenericEnumStrVal() {
+    let b = wrap_str("hello")
+    match b {
+        Val(v) => assert_eq_str(v, "hello"),
+        Nothing => assert(false),
+    }
+}
+
+fn TestGenericEnumEmptyInt() {
+    let b = empty_int()
+    match b {
+        Val(_) => assert(false),
+        Nothing => assert(true),
+    }
+}
+
+fn TestGenericEnumEmptyStr() {
+    let b = empty_str()
+    match b {
+        Val(_) => assert(false),
+        Nothing => assert(true),
+    }
+}

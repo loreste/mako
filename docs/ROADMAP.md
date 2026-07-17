@@ -1,6 +1,6 @@
 # Mako roadmap
 
-**Product version:** **0.1.9** · Last roadmap sync: **2026-07-17**.
+**Product version:** **0.1.10** · Last roadmap sync: **2026-07-17**.
 
 **Verified:** [STATUS.md](STATUS.md) · **Stdlib:** [STDLIB.md](STDLIB.md) · **Security:** [SECURITY.md](SECURITY.md) · **Release:** [RELEASE.md](RELEASE.md).  
 **Book:** [The Mako Book](book/) · **Identity:** [IDENTITY.md](IDENTITY.md) · **Pain map:** [PAIN_POINTS.md](PAIN_POINTS.md).
@@ -12,7 +12,7 @@
 | Version | Theme | Status |
 |---------|-------|--------|
 | **0.1.9** | Generics & iterators | **Shipped** |
-| **0.1.10** | Deepen generics + speed | **In progress** |
+| **0.1.10** | Deepen generics + speed | **Shipped** |
 | **0.2.0** | Stdlib written in Mako | Planned |
 | **0.2.1** | Safety & correctness | Planned |
 | **0.2.2** | Tooling | Planned |
@@ -22,15 +22,15 @@
 
 ---
 
-## v0.1.10 — Deepen generics + speed — **in progress**
+## v0.1.10 — Deepen generics + speed — **shipped**
 
-Two v0.1.9 features shipped as seeds. They need to be production-grade before
-the stdlib (v0.2.0) can be written in Mako.
+Resolved the two blockers that prevented the stdlib rewrite.
 
 | Feature | Status | Description |
 |---------|--------|-------------|
-| **Multi-statement lambda bodies** | Needed | Current lambdas are single-expression. Mutable closures require assignment statements inside the lambda body. Blocks v0.2.0 stdlib callbacks. |
-| **`&mut self` on methods** | Needed | Methods take `self` by value (copy). Iterators can't advance state. Blocks real iterator protocol and any method that mutates the receiver. |
+| **Multi-statement lambda bodies** | Done | Lambdas support `let`, assignments, `if`/`else`, `while`, nested loops. Blocks emitted as full C function bodies. |
+| **`mut self` on methods** | Done | `fn m(mut self)` passes receiver by pointer. Mutations persist in caller. Enables real iterators. |
+| **Generic enum variant disambiguation** | Done | Multiple instantiations of same generic enum no longer collide on variant names. Qualified lookup by return type context. |
 | **Tuple channel codegen** | Done | `chan[(int,int,int,int,int)]` send/recv works. Required by leba 0.6+. |
 | **`chan_len` / `chan_cap` for all channel types** | Done | Works on int, float, string, struct, enum, tuple channels. |
 | **Speed: wyhash** | Done | Map key hashing 4-8x faster. |
@@ -40,11 +40,13 @@ the stdlib (v0.2.0) can be written in Mako.
 | **Speed: select condvar** | Done | Channel select wakes on send, not 2ms polling. |
 | **Speed: emit_line** | Done | Codegen hot paths use `format_args!` — no per-line heap allocation. |
 
-### Residuals from v0.1.9
+Tests: `multi_stmt_lambda_test`, `mut_self_test`, `generic_enum_multi_test`, `v0110_adversarial_test`.
 
-- Generic enum variants shared across instantiations (e.g. `Val` from `MyBox[int]` and `MyBox[string]` collide)
-- Wrong-count type args on generic structs produce confusing error messages
-- Generic structs can't be used as map keys yet
+### Known limitations
+
+- `return` inside multi-statement lambda bodies triggers a type error (type checker uses enclosing function's return type). Workaround: use `let mut out = ...; return out` pattern.
+- Wrong-count type args on generic structs produce confusing error messages.
+- Generic structs can't be used as map keys yet.
 
 ---
 

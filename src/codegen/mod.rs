@@ -68,6 +68,8 @@ pub struct Codegen {
     /// Mutable closure captures: maps original var name → heap cell C variable name.
     /// When a local is mutably captured, reads/writes go through `*cell` in outer scope.
     mut_capture_cells: HashMap<String, String>,
+    /// Functions with `mut self` as first param — callers pass &receiver, function takes pointer.
+    mut_self_fns: std::collections::HashSet<String>,
     /// Nesting of `unsafe { }` — skip debug bounds checks when > 0.
     unsafe_depth: usize,
     /// Generic templates (not emitted; specialized as `name__tag`).
@@ -197,6 +199,7 @@ impl Codegen {
             fn_env_scopes: Vec::new(),
             fn_env_live: std::collections::HashSet::new(),
             mut_capture_cells: HashMap::new(),
+            mut_self_fns: std::collections::HashSet::new(),
             unsafe_depth: 0,
             generic_templates: HashMap::new(),
             bounds_checks_always: false,
@@ -2580,6 +2583,12 @@ impl Codegen {
                     let param_tys: Vec<String> =
                         f.params.iter().map(|p| self.type_expr_c(&p.ty)).collect();
                     self.fn_params.insert(f.name.clone(), param_tys);
+                    // Track mut self methods for pointer-based dispatch
+                    if let Some(first) = f.params.first() {
+                        if first.name == "self" && first.mutable {
+                            self.mut_self_fns.insert(f.name.clone());
+                        }
+                    }
                     self.fn_param_typeexprs.insert(
                         f.name.clone(),
                         f.params.iter().map(|p| p.ty.clone()).collect(),
@@ -2745,7 +2754,11 @@ impl Codegen {
                 })
                 .collect();
             variants.insert(v.name.clone(), (i, fields));
-            self.variant_to_enum.insert(v.name.clone(), e.name.clone());
+            // First-wins for bare name; always register qualified for disambiguation
+            if !self.variant_to_enum.contains_key(&v.name) {
+                self.variant_to_enum.insert(v.name.clone(), e.name.clone());
+            }
+            self.variant_to_enum.insert(format!("{}::{}", e.name, v.name), e.name.clone());
         }
         self.enums
             .insert(e.name.clone(), EnumInfo { c_name, variants });
@@ -8505,9 +8518,18 @@ impl Codegen {
         if f.params.is_empty() {
             return "void".into();
         }
+        let is_mut_self = self.mut_self_fns.contains(&f.name);
         f.params
             .iter()
-            .map(|p| format!("{} {}", self.type_expr_c(&p.ty), mangle(&p.name)))
+            .enumerate()
+            .map(|(i, p)| {
+                let ty = self.type_expr_c(&p.ty);
+                if i == 0 && p.name == "self" && is_mut_self {
+                    format!("{ty} *{}", mangle(&p.name))
+                } else {
+                    format!("{ty} {}", mangle(&p.name))
+                }
+            })
             .collect::<Vec<_>>()
             .join(", ")
     }
@@ -9087,11 +9109,22 @@ impl Codegen {
         let mut mutated: std::collections::HashSet<String> = std::collections::HashSet::new();
         Self::collect_assigned_idents_in_expr(body, &mut mutated);
 
+        // Detect if body needs multi-statement emission
+        let needs_full_body = match body {
+            Expr::Block(b) => b.stmts.iter().any(|s| matches!(s,
+                Stmt::Assign { .. } | Stmt::Let { .. } | Stmt::For { .. }
+                | Stmt::CFor { .. } | Stmt::While { .. } | Stmt::If { .. }
+                | Stmt::IndexAssign { .. } | Stmt::FieldAssign { .. }
+            )),
+            _ => false,
+        };
+
+        // For full-body lambdas, captures are plain values (accessed via #define alias).
+        // For single-expression lambdas with mutable captures, use pointer cells.
         let capture_fields: Vec<(String, String)> = captures
             .iter()
             .map(|(n, t)| {
-                if mutated.contains(n) {
-                    // Mutable capture: store as pointer to heap cell
+                if !needs_full_body && mutated.contains(n) {
                     (mangle(n), format!("{t}*"))
                 } else {
                     (mangle(n), t.clone())
@@ -9130,10 +9163,98 @@ impl Codegen {
             })
             .collect();
 
+        if needs_full_body {
+            // Full function body: emit each statement properly.
+            // We need to build the function body using emit_stmt, which writes to self.out.
+            // Save the main output, emit into a temporary buffer, then restore.
+            let saved_out = std::mem::take(&mut self.out);
+            let saved_indent = self.indent;
+            self.indent = 1;
+
+            // Set up locals for lambda params and captures
+            self.locals = saved_locals.clone();
+            for (n, t) in pnames.iter().zip(pctys.iter()) {
+                self.locals.insert(n.clone(), t.clone());
+            }
+            for (orig, mangled) in params.iter().zip(pnames.iter()) {
+                if orig != "_" {
+                    let ty = pctys.get(pnames.iter().position(|p| p == mangled).unwrap_or(0))
+                        .cloned().unwrap_or_else(|| "int64_t".into());
+                    self.locals.insert(orig.clone(), ty.clone());
+                    self.locals.insert(mangle(orig), ty);
+                }
+            }
+            // For capturing lambdas, use #define to alias captured vars to env fields.
+            // This way `counter` in the lambda body resolves to `e->counter`.
+            // Mutations go directly to the env and are visible to the outer scope.
+            if !captures.is_empty() {
+                for (src_name, cty) in &captures {
+                    let field = mangle(src_name);
+                    self.out.push_str(&format!("#define {field} (e->{field})\n"));
+                    self.locals.insert(src_name.clone(), cty.clone());
+                    self.locals.insert(field.clone(), cty.clone());
+                }
+            }
+
+            if let Expr::Block(b) = body {
+                for s in &b.stmts {
+                    self.emit_stmt(s);
+                }
+            }
+
+            // Add #undef for capture aliases
+            if !captures.is_empty() {
+                for (src_name, _) in &captures {
+                    let field = mangle(src_name);
+                    self.out.push_str(&format!("#undef {field}\n"));
+                }
+            }
+            let body_lines = std::mem::replace(&mut self.out, saved_out);
+            self.indent = saved_indent;
+            self.locals = saved_locals;
+            self.fn_ptr_casts = saved_casts;
+
+            if capture_fields.is_empty() {
+                let param_cs = if pnames.is_empty() { "void".into() } else {
+                    pnames.iter().zip(pctys.iter()).map(|(n, t)| format!("{t} {n}")).collect::<Vec<_>>().join(", ")
+                };
+                let helper_src = format!("static {ret_c} {helper}({param_cs}) {{\n{body_lines}}}\n");
+                self.insert_helper(&helper_src);
+                let tmp = self.fresh("fnv");
+                self.line(&format!("MakoFn {tmp} = mako_fn_bare((void*){helper});"));
+                return ("MakoFn".into(), tmp);
+            } else {
+                let env_ty = format!("MakoEnv_{helper}");
+                let fields = capture_fields.iter().map(|(n, t)| format!("    {t} {n};")).collect::<Vec<_>>().join("\n");
+                let mut params_cs = vec!["void *env".to_string()];
+                for (n, t) in pnames.iter().zip(pctys.iter()) { params_cs.push(format!("{t} {n}")); }
+                let drop_helper = format!("{helper}_drop");
+                let helper_src = format!(
+                    "typedef struct {{\n{fields}\n}} {env_ty};\nstatic {ret_c} {helper}({}) {{\n    {env_ty} *e = ({env_ty}*)env;\n{body_lines}}}\nstatic void {drop_helper}(void *env) {{\n    {env_ty} *e = ({env_ty}*)env;\n    if (!e) return;\n    free(e);\n}}\n",
+                    params_cs.join(", ")
+                );
+                self.insert_helper(&helper_src);
+                let env_tmp = self.fresh("env");
+                self.line(&format!("{env_ty} *{env_tmp} = ({env_ty}*)malloc(sizeof({env_ty}));"));
+                self.line(&format!("if (!{env_tmp}) {{ fprintf(stderr, \"mako: OOM in closure env\\n\"); abort(); }}"));
+                for (src_name, cty) in &captures {
+                    let field = mangle(src_name);
+                    let val = mangle(src_name);
+                    if cty == "MakoString" {
+                        self.line(&format!("{env_tmp}->{field} = mako_str_clone({val});"));
+                    } else {
+                        self.line(&format!("{env_tmp}->{field} = {val};"));
+                    }
+                }
+                let tmp = self.fresh("fnv");
+                self.line(&format!("MakoFn {tmp} = mako_fn_closure((void*){helper}, {env_tmp}, {drop_helper});"));
+                return ("MakoFn".into(), tmp);
+            }
+        }
+
+        // Simple single-expression lambda (original path)
         let body_c = match body {
             Expr::Block(b) => {
-                // Chain side-effecting exprs with the comma operator so
-                // `share_set(...); return share_get(...)` both run.
                 let mut parts: Vec<String> = Vec::new();
                 for s in &b.stmts {
                     match s {
@@ -9615,8 +9736,14 @@ impl Codegen {
             .and_then(|t| self.result_err_enum_c(t));
         self.current_fn_ret = f.ret.clone();
         self.push_share_scope();
-        for p in &f.params {
-            self.locals.insert(p.name.clone(), self.type_expr_c(&p.ty));
+        let is_mut_self_fn = self.mut_self_fns.contains(&f.name);
+        for (pi, p) in f.params.iter().enumerate() {
+            let pty = if pi == 0 && p.name == "self" && is_mut_self_fn {
+                format!("{}*", self.type_expr_c(&p.ty))
+            } else {
+                self.type_expr_c(&p.ty)
+            };
+            self.locals.insert(p.name.clone(), pty);
             self.register_local_type_metadata(&p.name, &p.ty);
             if let TypeExpr::Fn(ps, ret) = &p.ty {
                 self.fn_ptr_casts
@@ -10850,8 +10977,8 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
             Stmt::FieldAssign { base, field, value } => {
                 let (bty, b) = self.emit_expr(base);
                 let (_, v) = self.emit_expr(value);
-                let _ = bty;
-                self.emit_line(format_args!("{b}.{field} = {v};"));
+                let arrow = if bty.ends_with('*') && !bty.starts_with("Mako") { "->" } else { "." };
+                self.emit_line(format_args!("{b}{arrow}{field} = {v};"));
             }
             Stmt::Expr(e) => {
                 let (_, val) = self.emit_expr(e);
@@ -11123,8 +11250,15 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         format!("mako_str_from_cstr(\"{escaped}\")"),
                     );
                 }
-                // Unit enum variant used as value
-                if let Some(enum_name) = self.variant_to_enum.get(n).cloned() {
+                // Unit enum variant — try qualified lookup using fn return type
+                let ret_enum_ident = self.current_fn_ret.as_ref()
+                    .map(|t| self.type_expr_c(t))
+                    .and_then(|c| self.enums.iter().find(|(_, info)| info.c_name == c).map(|(nm, _)| nm.clone()));
+                let qn_ident = ret_enum_ident.as_ref().map(|e| format!("{e}::{n}"));
+                let enum_name_resolved = qn_ident.as_ref()
+                    .and_then(|q| self.variant_to_enum.get(q).cloned())
+                    .or_else(|| self.variant_to_enum.get(n).cloned());
+                if let Some(enum_name) = enum_name_resolved {
                     if let Some(info) = self.enums.get(&enum_name).cloned() {
                         if let Some((tag, fields)) = info.variants.get(n) {
                             if fields.is_empty() {
@@ -27738,9 +27872,23 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                                     return (ret, tmp);
                                 }
                             }
-                            // User enum variant constructor?
-                            if let Some(enum_name) = self.variant_to_enum.get(name).cloned() {
-                                return self.emit_enum_construct(&enum_name, name, args);
+                            // User enum variant constructor — try qualified lookup first
+                            {
+                                let ret_enum = self.current_fn_ret.as_ref()
+                                    .map(|t| self.type_expr_c(t))
+                                    .and_then(|c| {
+                                        // Strip MakoEnum_ prefix if present to get the Mako name
+                                        self.enums.iter()
+                                            .find(|(_, info)| info.c_name == c)
+                                            .map(|(n, _)| n.clone())
+                                    });
+                                let qname = ret_enum.as_ref().map(|e| format!("{e}::{name}"));
+                                let enum_name = qname.as_ref()
+                                    .and_then(|q| self.variant_to_enum.get(q).cloned())
+                                    .or_else(|| self.variant_to_enum.get(name).cloned());
+                                if let Some(enum_name) = enum_name {
+                                    return self.emit_enum_construct(&enum_name, name, args);
+                                }
                             }
                             // Emit args first (needed for generic mono tag inference).
                             // Lambdas use expected `fn(T)->R` from the callee's param TypeExpr.
@@ -29971,7 +30119,13 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                                 }
                                 let params = self.fn_params.get(&key).cloned().unwrap_or_default();
                                 let call_args = if params.len() == arg_vals.len() + 1 {
-                                    let mut all = vec![rv.clone()];
+                                    // For mut self methods, pass address of receiver
+                                    let recv = if self.mut_self_fns.contains(&key) {
+                                        format!("&{rv}")
+                                    } else {
+                                        rv.clone()
+                                    };
+                                    let mut all = vec![recv];
                                     all.extend(arg_vals);
                                     all
                                 } else {
@@ -30205,26 +30359,28 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                 }
                 // (handled below — pure-c helper also supports fields)
                 let (bty, b) = self.emit_expr(base);
-                if let Some(info) = self.structs.get(&bty) {
+                // Pointer types (mut self) use -> for field access
+                let deref_bty = bty.strip_suffix('*').unwrap_or(&bty);
+                let arrow = if bty.ends_with('*') && !bty.starts_with("Mako") { "->" } else { "." };
+                if let Some(info) = self.structs.get(deref_bty).or_else(|| self.structs.get(&bty)) {
                     let fty = info
                         .fields
                         .iter()
                         .find(|(n, _)| n == field)
                         .map(|(_, t)| t.clone())
                         .unwrap_or_else(|| "int64_t".into());
-                    return (fty, format!("{b}.{field}"));
+                    return (fty, format!("{b}{arrow}{field}"));
                 }
-                // Also resolve by struct C name (locals store C types).
-                if let Some(info) = self.structs.values().find(|s| s.c_name == bty) {
+                if let Some(info) = self.structs.values().find(|s| s.c_name == deref_bty || s.c_name == bty) {
                     let fty = info
                         .fields
                         .iter()
                         .find(|(n, _)| n == field)
                         .map(|(_, t)| t.clone())
                         .unwrap_or_else(|| "int64_t".into());
-                    return (fty, format!("{b}.{field}"));
+                    return (fty, format!("{b}{arrow}{field}"));
                 }
-                ("int64_t".into(), format!("{b}.{field}"))
+                ("int64_t".into(), format!("{b}{arrow}{field}"))
             }
         }
     }
@@ -30727,11 +30883,21 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                     } else {
                         format!("(!{scrut}.some)")
                     }
-                } else if let Some(enum_name) = self.variant_to_enum.get(name) {
-                    let tag = self.enums[enum_name].variants[name].0;
-                    format!("{scrut}.tag == {tag}")
                 } else {
-                    "0".into()
+                    // Try qualified variant lookup using scrutinee type
+                    let sty_enum = self.enums.iter()
+                        .find(|(_, info)| info.c_name == *sty)
+                        .map(|(n, _)| n.clone());
+                    let qn_match = sty_enum.as_ref().map(|e| format!("{e}::{name}"));
+                    let resolved = qn_match.as_ref()
+                        .and_then(|q| self.variant_to_enum.get(q).cloned())
+                        .or_else(|| self.variant_to_enum.get(name).cloned());
+                    if let Some(enum_name) = resolved {
+                        let tag = self.enums[&enum_name].variants[name].0;
+                        format!("{scrut}.tag == {tag}")
+                    } else {
+                        "0".into()
+                    }
                 }
             }
             Pattern::Literal(_) => "0".into(),
@@ -31160,7 +31326,16 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             .unwrap_or_else(|| "int".into());
                         self.emit_option_some_bind(scrut, &bindings, &kind);
                     }
-                } else if let Some(enum_name) = self.variant_to_enum.get(name).cloned() {
+                } else {
+                    // Qualified variant lookup using scrutinee type
+                    let sty_enum_bind = self.enums.iter()
+                        .find(|(_, info)| info.c_name == *sty)
+                        .map(|(n, _)| n.clone());
+                    let qn_bind = sty_enum_bind.as_ref().map(|e| format!("{e}::{name}"));
+                    let enum_name_bind = qn_bind.as_ref()
+                        .and_then(|q| self.variant_to_enum.get(q).cloned())
+                        .or_else(|| self.variant_to_enum.get(name).cloned());
+                    if let Some(enum_name) = enum_name_bind {
                     let fields = self.enums[&enum_name].variants[name].1.clone();
                     let mut int_slot = 0usize;
                     let mut str_slot = 0usize;
@@ -31184,7 +31359,8 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             }
                         }
                     }
-                }
+                    } // end if let Some(enum_name)
+                } // end else
             }
             _ => {}
         }

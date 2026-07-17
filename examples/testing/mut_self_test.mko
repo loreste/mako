@@ -1,0 +1,80 @@
+// Mutable self method tests — v0.1.10
+
+struct Counter {
+    value: int
+}
+
+on Counter {
+    fn increment(mut self) {
+        self.value = self.value + 1
+    }
+
+    fn add(mut self, n: int) {
+        self.value = self.value + n
+    }
+
+    fn get(self) -> int {
+        return self.value
+    }
+}
+
+fn TestMutSelfIncrement() {
+    let mut c = Counter { value: 0 }
+    c.increment()
+    assert_eq(c.get(), 1)
+    c.increment()
+    assert_eq(c.get(), 2)
+}
+
+fn TestMutSelfAdd() {
+    let mut c = Counter { value: 10 }
+    c.add(5)
+    assert_eq(c.get(), 15)
+    c.add(20)
+    assert_eq(c.get(), 35)
+}
+
+fn TestMutSelfIterator() {
+    let mut r = Range { current: 0, max: 5 }
+    let mut sum = 0
+    while r.current < r.max {
+        sum = sum + r.current
+        r.advance()
+    }
+    assert_eq(sum, 10)
+    assert_eq(r.current, 5)
+}
+
+struct Range {
+    current: int
+    max: int
+}
+
+on Range {
+    fn advance(mut self) {
+        self.current = self.current + 1
+    }
+
+    fn next_val(mut self) -> Option[int] {
+        if self.current >= self.max {
+            return None
+        }
+        let v = self.current
+        self.current = self.current + 1
+        return Some(v)
+    }
+}
+
+fn TestMutSelfNextVal() {
+    let mut r = Range { current: 0, max: 3 }
+    match r.next_val() {
+        Some(v) => assert_eq(v, 0),
+        None => assert(false),
+    }
+    assert_eq(r.current, 1)
+    match r.next_val() {
+        Some(v) => assert_eq(v, 1),
+        None => assert(false),
+    }
+    assert_eq(r.current, 2)
+}
