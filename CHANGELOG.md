@@ -25,6 +25,13 @@
 - **Fix: guarded arms no longer exhaust** — `Some(n) if n > 10` alone does not
   cover all `Some`; missing unguarded arm was a compile-time hole that aborted
   at runtime (`non-exhaustive match`).
+- **Fix: `Some(struct)` / nested struct match** — track struct payload names for
+  builtin `Some`/`Ok` so `match o { Some(Point { x, y }) => … }` codegen unboxes
+  the heap payload correctly (was treating it as `int64_t`).
+- **Fix: SQL pool double-release** — `Pool.release` ignores duplicate idx.
+- **Fix: HTTP router longest path match** — prefer longer path prefixes over
+  first-registered shorter ones.
+- **JSON `escape_str`** — also escapes `\b` `\f` and other C0 controls as `\u00XX`.
 - **Use-after-move detection** — 48 test cases verify that `hold` values
   produce compiler errors on use after move, partial moves, moves across
   control flow branches (break/continue/if).

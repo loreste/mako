@@ -1,0 +1,37 @@
+// Nested Option/Result + struct match destructuring
+
+struct Point {
+    x: int
+    y: int
+}
+
+fn TestOptionStructIdent() {
+    let p = Point { x: 3, y: 4 }
+    let o = Some(p)
+    match o {
+        Some(pt) => {
+            assert_eq(pt.x, 3)
+            assert_eq(pt.y, 4)
+        },
+        None => assert(false),
+    }
+}
+
+fn TestOptionStructNestedPattern() {
+    let o = Some(Point { x: 10, y: 20 })
+    match o {
+        Some(Point { x, y }) => {
+            assert_eq(x, 10)
+            assert_eq(y, 20)
+        },
+        None => assert(false),
+    }
+}
+
+fn TestOptionStructLit() {
+    let o = Some(Point { x: 1, y: 2 })
+    match o {
+        Some(pt) => assert_eq(pt.x + pt.y, 3),
+        None => assert(false),
+    }
+}

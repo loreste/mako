@@ -5,22 +5,41 @@
 
 pack json
 
-// escape_str escapes a string for inclusion in JSON (handles \, ", newlines).
+// escape_str escapes a string for inclusion in JSON.
+// Handles \, ", control chars (incl. \b \f \n \r \t), and \u00XX for other
+// bytes < 0x20. Non-ASCII multi-byte UTF-8 is passed through as raw bytes
+// (valid JSON UTF-8).
 fn escape_str(s: string) -> string {
     let mut b = str_builder()
     let mut i = 0
+    let hex = "0123456789abcdef"
     while i < len(s) {
         let c = int(s[i])
         if c == 92 {
             builder_write(b, "\\\\")
         } else if c == 34 {
             builder_write(b, "\\\"")
+        } else if c == 8 {
+            builder_write(b, "\\b")
+        } else if c == 12 {
+            builder_write(b, "\\f")
         } else if c == 10 {
             builder_write(b, "\\n")
         } else if c == 13 {
             builder_write(b, "\\r")
         } else if c == 9 {
             builder_write(b, "\\t")
+        } else if c < 32 {
+            // \u00XX for remaining C0 controls
+            builder_write(b, "\\u00")
+            let hi = c / 16
+            let lo = c - hi * 16
+            let mut hb = make([]byte, 0, 1)
+            hb = append(hb, byte(int(hex[hi])))
+            builder_write(b, string(hb))
+            let mut lb = make([]byte, 0, 1)
+            lb = append(lb, byte(int(hex[lo])))
+            builder_write(b, string(lb))
         } else {
             let mut ch = make([]byte, 0, 1)
             ch = append(ch, byte(c))
