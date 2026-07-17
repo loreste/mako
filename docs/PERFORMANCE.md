@@ -118,7 +118,8 @@ These are built into the runtime and codegen — no user action required.
 | **Zero-copy comparisons** | `x == "literal"`, `str_eq`, `str_has_prefix`, `str_has_suffix`, `str_contains`, match arms, and `print` with string literals all point into read-only data instead of allocating. |
 | **HTTP header switch** | Header interning dispatches by name length, skipping non-matching headers. |
 | **Atomic conn count** | Active HTTP connections tracked with an atomic counter, not a linear scan. |
-| **Lock-free `chan_cap`** | Channel capacity is immutable — reads skip the mutex entirely. |
+| **Lock-free `chan_cap`** | Channel capacity is immutable — reads skip the mutex entirely (int ring; ptr/str have matching helpers). |
+| **`chan_len` / `chan_cap` any `T`** | Typecheck + codegen for struct/tuple/string/enum channels — not only `chan[int]`. |
 | **`select` condvar** | Channel select waits on a shared condition variable; send/close broadcast wakeups (no 2 ms poll). |
 | **Codegen monomorph cache** | `want_map` checks use a joined key set, eliminating per-call heap allocation. |
 | **Codegen `emit_line`** | Hot emission writes with `format_args!` into the output buffer — no per-line `String`. |

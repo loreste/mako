@@ -1,5 +1,7 @@
 # Mako ABI And Plugin Seed
 
+**Product tip:** **0.1.9**.
+
 Mako's current FFI is `extern "C"` plus the runtime C headers. The plugin ABI
 seed gives native dynamic plugins and future WASM plugins one stable handshake.
 

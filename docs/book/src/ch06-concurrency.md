@@ -10,7 +10,8 @@ This chapter covers:
 - Crew blocks and task management (`crew`, `t.kick()`, `t.join()`)
 - Cancellation (`t.cancel()`, `t.cancelled()`)
 - Data-parallel fan
-- Channels (`chan_new`, `send`, `recv`, `close`, `for v in range ch`)
+- Channels (`chan_new` / `make(chan[T], n)` / `chan_open[T]`, `send`, `recv`,
+  `close`, `chan_len` / `chan_cap`, `for v in range ch`)
 - Channel select (`select`, `chan_select2`, `chan_select_value`)
 - Actors (`actor`, `receive`, `Session_spawn`, `Session_send`, `Session_loop`)
 - Practical concurrent patterns
@@ -306,6 +307,23 @@ that need different scheduling, use explicit crew blocks.
 
 Channels are typed, bounded FIFO queues for communication between tasks.
 
+### Element types
+
+| `T` in `chan[T]` | Notes |
+|------------------|--------|
+| int family, `bool` | Default int ring (`chan_new` is `chan[int]`) |
+| `float` | Bitcast on the int ring |
+| `string` | Owned strings |
+| named **struct** / **enum** | Heap-box on send (`MakoChanPtr`) |
+| **tuple** `(A, B[, …])` | Same pointer ring as structs |
+
+```mko
+let ch = chan_new(4)                       // chan[int]
+let cs = make(chan[string], 2)
+let ps = chan_open[Point](2)               // named struct
+let pt = make(chan[(int, string)], 1)      // tuple
+```
+
 ### Creating a channel
 
 ```mko
@@ -314,6 +332,7 @@ let ch = chan_new(4)    // buffered channel with capacity 4
 
 The argument is the buffer size. A capacity of 0 creates an unbuffered
 (rendezvous) channel where `send` blocks until a receiver is ready.
+Prefer `make(chan[T], n)` / `chan_open[T](n)` when `T` is not `int`.
 
 ### Sending and receiving
 
@@ -324,6 +343,21 @@ let v = ch.recv()      // blocks if buffer is empty
 
 Both `send` and `recv` block the calling thread when the buffer is at capacity
 (for send) or empty (for recv).
+
+### Depth and capacity
+
+`chan_len(ch)` and `chan_cap(ch)` accept **any** `chan[T]` (struct, tuple,
+string, and scalar rings — not only `chan[int]`):
+
+```mko
+let ch = make(chan[Point], 2)
+assert_eq(chan_cap(ch), 2)
+assert_eq(chan_len(ch), 0)
+let _ = ch.send(Point { x: 1, y: 2 })
+assert_eq(chan_len(ch), 1)
+```
+
+Capacity is fixed at creation. On int rings, `chan_cap` is lock-free.
 
 ### Closing a channel
 

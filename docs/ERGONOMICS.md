@@ -274,7 +274,11 @@ fields only), `Option`/`Result`/tuples of sendables, channel handles.
 Enum fields on structs are not deep-POD yet — use int flags or send enums on
 their own when allowed; prefer `chan[Struct]` for rich results.
 
-Tests: `chan_struct_test.mko`, `kick_send_test.mko`, POD kick waves · [SPEED.md](SPEED.md).
+`chan_len` / `chan_cap` work on these channels (any `chan[T]`), not only
+`chan[int]`. Tuple channels: `make(chan[(int, string)], n)`.
+
+Tests: `chan_struct_test.mko`, `chan_len_cap_test.mko`, `kick_send_test.mko`,
+POD kick waves · [SPEED.md](SPEED.md) · [howto/05-concurrency](howto/05-concurrency.md).
 
 ### Units without path soup
 

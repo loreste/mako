@@ -2,6 +2,8 @@
 
 **Security is first-class** — same tier as concurrency, under a speed-first product.
 
+**Product tip:** **0.1.9**.
+
 Mako treats safety as a **compiler and runtime contract**, not a style guide.
 The goal: make leaks, memory corruption, and common backend footguns hard to
 ship — by construction where possible, by hard errors where not — **without**

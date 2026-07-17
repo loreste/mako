@@ -2,11 +2,13 @@
 
 A guided tour of Mako: install, language, ownership, concurrency, stdlib, HTTP, packages, and tooling.
 
+**Product tip:** **0.1.9** (generics + channel surface). Next planned: **0.2.0** stdlib-in-Mako — [ROADMAP.md](../ROADMAP.md).
+
 | | |
 |--|--|
 | **Start here** | [src/ch01-preface.md](src/ch01-preface.md) |
 | **Table of contents** | [src/SUMMARY.md](src/SUMMARY.md) |
-| **Checkable samples** | [examples/](examples/) |
+| **Checkable samples** | [examples/](../../examples/) |
 
 ## Read as Markdown
 

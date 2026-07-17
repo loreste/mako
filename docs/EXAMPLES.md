@@ -417,6 +417,10 @@ mako run db_crud.mko
 
 Spawn workers in a crew, distribute work via channels, and collect results.
 
+Element types: int/bool/float/string, **named structs/enums**, and **tuples**.
+`chan_len` / `chan_cap` accept any `chan[T]`. Prefer `chan[Struct]` for
+multi-field worker results (see [ERGONOMICS.md](ERGONOMICS.md)).
+
 ```mko
 // workers.mko
 fn worker(id: int, jobs: chan[int], results: chan[int]) -> int {

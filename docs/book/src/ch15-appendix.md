@@ -176,11 +176,11 @@ the result is already determined by the left.
 | `[]Option[T]` / `[]Result[T,E]` | Bag element slices (make/append/index/range/lits) |
 | `[][]T`           | Nested slices (outer headers of inners)  |
 | `map[K]V`         | Hash map — keys: int\|string\|float\|bool\|Struct\|Enum; values: same, `[]T`, nested `map` (depth ≤3), `Option[T]`, `Result[T,E]`, `(T,U)`, `chan[T]` |
-| `chan[T]`          | Typed channel                            |
+| `chan[T]`          | Typed channel — int/bool/float/string/struct/enum/tuple |
 | `Option[T]`       | Some(T) or None                          |
 | `Result[T, E]`    | Ok(T) or Err(E)                          |
-| `struct Name { }` | Named product type                       |
-| `enum Name { }`   | Named sum type (with variants)           |
+| `struct Name { }` / `struct Name[T] { }` | Named product (generic monomorphs in 0.1.9) |
+| `enum Name { }` / `enum Name[T] { }` | Named sum (generic monomorphs in 0.1.9) |
 
 ### Type Conversions
 
@@ -420,10 +420,13 @@ Supported patterns: literals, `.`, `*`, `+`, `?`, `|`, `[abc]`, `[a-z]`,
 
 | Function          | Signature                        | Purpose              |
 |-------------------|----------------------------------|----------------------|
-| `chan_new`         | `(int) -> chan[T]`              | Create buffered channel |
+| `chan_new`         | `(int) -> chan[int]`            | Create buffered int channel |
+| `make(chan[T], n)` / `chan_open[T](n)` | `-> chan[T]` | Typed channel (struct/tuple/enum/string/…) |
 | `.send`           | `(T) -> int`                    | Send value           |
 | `.recv`           | `() -> T`                       | Receive value        |
 | `.close`          | `()`                            | Close channel        |
+| `chan_len`        | `(chan[T]) -> int`              | Buffered depth (any `T`) |
+| `chan_cap`        | `(chan[T]) -> int`              | Capacity (any `T`) |
 | `chan_select2`     | `(a, b, timeout) -> int`       | Select over 2 channels |
 | `chan_select3`     | `(a, b, c, timeout) -> int`    | Select over 3 channels |
 | `chan_select4`     | `(a, b, c, d, timeout) -> int` | Select over 4 channels |

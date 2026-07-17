@@ -20,17 +20,20 @@ working code you can run immediately.
 
 ## Prerequisites
 
-All guides assume you have Mako installed (`mako version` prints output).
+All guides assume you have Mako installed (`mako version` → **mako0.1.9** …).
 Guide 01 covers installation from scratch.
 
 ## Related documentation
 
-- [The Mako Book](../book/) -- guided language tour
-- [GUIDE.md](../GUIDE.md) -- syntax reference (Mako-native)
-- [ERGONOMICS.md](../ERGONOMICS.md) -- low-ceremony maps/slices patterns
-- [IDENTITY.md](../IDENTITY.md) -- our syntax identity + **%**
-- [COMPAT.md](../COMPAT.md) -- dual forms / compatibility
-- [STDLIB.md](../STDLIB.md) -- standard library surface
-- [BUILD.md](../BUILD.md) -- incremental build system
-- [DEBUG.md](../DEBUG.md) -- debugger integration
-- [PERFORMANCE.md](../PERFORMANCE.md) -- benchmarks and optimization
+- [The Mako Book](../book/) — guided language tour
+- [GUIDE.md](../GUIDE.md) — syntax reference (Mako-native; §6 generics, §9 channels)
+- [LANGUAGE.md](../LANGUAGE.md) — language overview + 0.1.9 generics table
+- [ERGONOMICS.md](../ERGONOMICS.md) — low-ceremony maps/slices/channels
+- [IDENTITY.md](../IDENTITY.md) — our syntax identity + **%**
+- [COMPAT.md](../COMPAT.md) — dual forms / compatibility
+- [STDLIB.md](../STDLIB.md) — standard library surface
+- [BUILTINS.md](../BUILTINS.md) — full builtin table
+- [STATUS.md](../STATUS.md) / [ROADMAP.md](../ROADMAP.md) — verified matrix / next releases
+- [BUILD.md](../BUILD.md) — incremental build system
+- [DEBUG.md](../DEBUG.md) — debugger integration
+- [PERFORMANCE.md](../PERFORMANCE.md) · [SPEED.md](../SPEED.md) — measure & hot path

@@ -5,7 +5,7 @@ Detailed feature plan for Mako, organized by version. See
 
 **Current version:** 0.1.9  
 **Next milestone:** 0.2.0  
-**Last updated:** 2026-07-16
+**Last updated:** 2026-07-17
 
 ---
 

@@ -4,7 +4,8 @@ Assets for distributing **Mako** outside a source checkout.
 
 ## GitHub Releases
 
-**Product tip:** **v0.1.9** (after tag + CI). **v0.1.8** was the previous product tip.
+**Product tip:** **v0.1.9** (tag + CI assets live). **v0.1.8** was the previous tip.  
+**Next planned product version (roadmap):** **0.2.0** — do not tag until the stdlib wave lands.
 
 Built by `.github/workflows/release.yml` on tag `v*`:
 

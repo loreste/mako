@@ -17,10 +17,13 @@ across cores, channels, actors — no free-fire leaks, no async coloring.
 
 Mako is currently at version **0.1.9**. This book teaches idiomatic Mako as it
 ships today. Identity checklist: [IDENTITY.md](../../IDENTITY.md).
-Collections (maps/slices/bag values): [language tour ch. 3](ch03-language-tour.md) ·
-[cookbook recipes](ch14-cookbook.md#collections-recipes) ·
-[howto/10-collections](../../howto/10-collections.md) ·
-[ERGONOMICS.md](../../ERGONOMICS.md).
+
+| Area | Where |
+|------|--------|
+| Generics (structs/enums/bounds) | [language tour § Generics](ch03-language-tour.md#generics-019) · [GUIDE §6](../../GUIDE.md) |
+| Channels (incl. struct/tuple + len/cap) | [ch. 6 concurrency](ch06-concurrency.md) · [howto/05](../../howto/05-concurrency.md) |
+| Collections (maps/slices/bags) | [ch. 3](ch03-language-tour.md) · [cookbook](ch14-cookbook.md#collections-recipes) · [howto/10](../../howto/10-collections.md) |
+| Low ceremony | [ERGONOMICS.md](../../ERGONOMICS.md) |
 
 ## Who is this book for?
 

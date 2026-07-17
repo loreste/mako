@@ -1,11 +1,16 @@
 # Mako release & cross-platform guide
 
 **Product version:** **0.1.9** (`Cargo.toml` / `mako version` → `mako0.1.9`).  
-STATUS north-star / MVP: **100%**. External: homebrew-core publish (see STATUS).
+STATUS north-star / MVP: **100%**. External: homebrew-core publish (see STATUS).  
+**Next (not released):** **0.2.0** — stdlib in Mako ([ROADMAP.md](ROADMAP.md)).
 
 **Tag:** `v0.1.9` · **Release notes:** [packaging/RELEASE-NOTES-0.1.9.md](../packaging/RELEASE-NOTES-0.1.9.md) ·
 **Checksums:** [packaging/RELEASE-CHECKSUMS-0.1.9.md](../packaging/RELEASE-CHECKSUMS-0.1.9.md).  
-**Install:** `curl -fsSL …/releases/download/v0.1.9/install-release.sh | bash -s -- --version v0.1.9 --yes`
+
+```bash
+curl -fsSL https://github.com/loreste/mako/releases/download/v0.1.9/install-release.sh \
+  | bash -s -- --version v0.1.9 --yes
+```
 
 ## Prerequisites by OS
 

@@ -83,7 +83,7 @@ Overall ≈ Σ (weight × track%).
 | [x] | Call methods `p.M()` | Done | Desugars to `T_M` |
 | [x] | `on T { func M(self) … }` | Done | Mako alternative |
 | [x] | Free function `T_M(self T, …)` | Done | Lowest-level form |
-| [x] | User generics `func id[T](x T) T` | Done | Monomorphized |
+| [x] | User generics `func id[T](x T) T` | Done | Monomorphized; also `struct`/`enum` type params + `T: I` bounds (0.1.9) |
 | [x] | Interface method sets exactly like Go (implicit only) | Done | `on T { fn m… }` / `T_m` implements I without `on T : I` (`iface_implicit_test`) |
 
 **Examples:** `examples/go_style.mko`, `examples/on_methods.mko`, `examples/iface_*.mko`

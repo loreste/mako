@@ -1,6 +1,6 @@
 # Mako roadmap
 
-**Product version:** **0.1.9** · Last roadmap sync: **2026-07-16**.
+**Product version:** **0.1.9** · Last roadmap sync: **2026-07-17**.
 
 **Verified:** [STATUS.md](STATUS.md) · **Stdlib:** [STDLIB.md](STDLIB.md) · **Security:** [SECURITY.md](SECURITY.md) · **Release:** [RELEASE.md](RELEASE.md).  
 **Book:** [The Mako Book](book/) · **Identity:** [IDENTITY.md](IDENTITY.md) · **Pain map:** [PAIN_POINTS.md](PAIN_POINTS.md).  
@@ -532,6 +532,8 @@ Percentages are weighted; update when a task flips.
 - [x] Product version **0.1.7**.
 - [x] Speed wave: wyhash · stack f-strings · zero-copy string lits · select condvar · HTTP 1024.
 - [x] Product version **0.1.8**.
+- [x] Product version **0.1.9** — generic structs/enums, bounds, iterator/closure seeds.
+- [x] `chan_len` / `chan_cap` on any `chan[T]` (struct/tuple/string rings).
 - [x] Hot-reload unwatch + count (`hot_reload_unwatch` / `hot_reload_watch_count`).
 - [x] Client prediction service seed (`predict_new` / `input` / `reconcile` / `state` / `tick`).
 - [x] Live dylib hot-reload seed (`hot_reload_plugin_watch` / `poll` / `call` / `close`).

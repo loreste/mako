@@ -2,6 +2,10 @@
 
 Batteries for **web and backends**, with naming conventions adapted to Mako.
 
+**Product tip:** **0.1.9**. Most of the surface today is **builtins + thin
+`std/` packages** over C runtime headers. **0.2.0** moves large pieces to
+idiomatic Mako using generics ([ROADMAP.md](ROADMAP.md)).
+
 Call builtins directly (`str_split`, `path_join`, …) **or** import std packages:
 
 ```mko
@@ -36,7 +40,7 @@ Tests: `examples/testing/stdlib_*`, plus area tests (`base64_test`, `regex_*`,
 
 ---
 
-## Package index (2026-07-10 · Wave 9)
+## Package index (synced 2026-07-17 · Wave 9 + codecs)
 
 | Package | Status | Role |
 |---------|--------|------|

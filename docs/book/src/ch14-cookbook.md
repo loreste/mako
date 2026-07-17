@@ -1648,6 +1648,30 @@ fn main() {
 }
 ```
 
+### Struct and tuple channels + `chan_len` / `chan_cap`
+
+```mko
+struct Done {
+    code: int
+    msg: string
+}
+
+fn main() {
+    let ch = make(chan[Done], 2)
+    assert_eq(chan_cap(ch), 2)
+    assert_eq(chan_len(ch), 0)
+    let _ = ch.send(Done { code: 200, msg: "ok" })
+    assert_eq(chan_len(ch), 1)
+
+    let tch = make(chan[(int, string)], 1)
+    let _ = tch.send((1, "a"))
+    assert_eq(chan_len(tch), 1)
+}
+```
+
+Any `chan[T]` accepts `chan_len` / `chan_cap` (not only `chan[int]`). See
+[ch. 6](ch06-concurrency.md) · [BUILTINS §23](../../BUILTINS.md).
+
 ### Named mailboxes (`map[K]chan[T]`)
 
 ```mko

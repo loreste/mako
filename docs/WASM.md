@@ -2,6 +2,8 @@
 
 Book: [§12 Cross-platform & WASI](book/src/ch12-cross-platform.md) · How-to: [howto/07-wasi.md](howto/07-wasi.md).
 
+**Product tip:** **0.1.9**. Deeper browser/DOM product is **0.3.0** on the roadmap.
+
 ## Status
 
 `mako build --target wasm32-wasi` (alias of **`wasm32-wasip1`**) uses **wasi-sdk**

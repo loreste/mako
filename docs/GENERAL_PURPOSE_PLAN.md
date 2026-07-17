@@ -2,6 +2,9 @@
 
 Source brief: `General_Purpose_Backend_Language_Vision.md`.
 
+**Product tip:** **0.1.9**. Next product version on the roadmap: **0.2.0**
+(stdlib in Mako). See [ROADMAP.md](ROADMAP.md) · [STATUS.md](STATUS.md).
+
 Mako's product contract is:
 
 > A simple, safe, fast, and versatile language for backend software, cloud

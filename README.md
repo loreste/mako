@@ -11,7 +11,11 @@ real services without pulling half the internet.
 This is version **0.1.9**. It runs. The surface is still early — expect change,
 rough edges, and missing pieces.
 
-[mako-lang.com](https://mako-lang.com) · [Status](docs/STATUS.md) · [Roadmap](docs/ROADMAP.md)
+**0.1.9 highlights:** generic structs/enums + interface bounds; typed channels
+for struct/tuple/enum with `chan_len` / `chan_cap` on any `chan[T]`.  
+**Next (roadmap):** **0.2.0** — stdlib written in Mako.
+
+[mako-lang.com](https://mako-lang.com) · [Status](docs/STATUS.md) · [Roadmap](docs/ROADMAP.md) · [Guide](docs/GUIDE.md) · [Book](docs/book/)
 
 ---
 

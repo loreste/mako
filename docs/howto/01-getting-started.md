@@ -5,10 +5,24 @@ your first program. By the end you will have a working development loop.
 
 ## Install Mako
 
-From a source checkout (requires cargo/rustc and clang):
+### Prebuilt (recommended — no Rust)
 
 ```bash
-make install
+# macOS
+curl -fsSL https://github.com/loreste/mako/releases/latest/download/install-release.sh | bash
+source "$HOME/.local/share/mako/env.sh"
+
+# Linux
+curl -fsSL https://github.com/loreste/mako/releases/latest/download/install-linux.sh | bash
+source "$HOME/.local/share/mako/env.sh"
+```
+
+Pin a version: `--version v0.1.9`. Needs **clang** so `.mko` files can compile.
+
+### From source
+
+```bash
+make install   # requires cargo/rustc + clang
 ```
 
 This places the `mako` binary in `~/.local/bin/` and runtime headers in

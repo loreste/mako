@@ -1,5 +1,7 @@
 # Colored async / await (Vision Later — rejected by design)
 
+**Product tip:** **0.1.9** — concurrency remains colorless (`crew` / channels).
+
 Mako concurrency is **colorless**: `crew` / `kick` / `join` / channels / `select`.
 
 The keywords `async` and `await` are **rejected at lex time** with a clear error pointing

@@ -26,8 +26,8 @@ Guided tour: [The Mako Book](book/) · Full syntax: [GUIDE.md](GUIDE.md) · Desi
 | `var` | Mutable local (`var x = 1`) — dual of `let mut` |
 | `pack` / `package` | Unit name (`pack lib`) — default pull qualifier; `package` dual |
 | `type` | Dual type decl: `type Point struct { … }` |
-| `struct` | Product type with named fields |
-| `enum` | Sum type with variants |
+| `struct` | Product type with named fields; generics: `struct Pair[T] { … }` (0.1.9) |
+| `enum` | Sum type with variants; generics: `enum Box[T] { … }` (0.1.9) |
 | `actor` | Actor type with `receive` arms |
 | `receive` | Actor message handler arm |
 | `interface` | Named method set (light interfaces) |

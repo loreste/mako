@@ -1,5 +1,7 @@
 # Mako syntax identity
 
+**Product tip:** **0.1.9**. Preferred surface: [LANGUAGE.md](LANGUAGE.md) · [GUIDE.md](GUIDE.md).
+
 **Mako is its own unique language with its own unique syntax.**
 
 Not a Go clone. Not a Rust clone. Not “Go with ownership” or “Rust with simpler
