@@ -15,6 +15,19 @@
   on shared variant names. Qualified lookup uses return type context to resolve
   the correct instantiation in both type checker and codegen.
 
+### v0.2.1 — Safety & correctness
+
+- **Match exhaustiveness** — compiler error when match arms don't cover all
+  enum variants, Option (Some/None), Result (Ok/Err), or Bool (true/false).
+  Extended to generic enums via `Type::Named` resolution.
+- **Match guards** — `pattern if condition => body`. Guard condition combined
+  with pattern into single if-condition. `Some(n) if n > 10 => "large"`.
+- **Use-after-move detection** — 48 test cases verify that `hold` values
+  produce compiler errors on use after move, partial moves, moves across
+  control flow branches (break/continue/if).
+- **Compile-time race detection** — mutation of locals while kicked tasks may
+  use them is flagged as a compiler error.
+
 ### v0.2.0 — Stdlib in Mako
 
 - **io package** (`std/io`) — `StringReader` with `read(mut self)` advancing

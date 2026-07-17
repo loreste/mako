@@ -1,0 +1,19 @@
+enum Color { Red, Green, Blue }
+
+fn TestExhaustiveEnumMatch() {
+    let c = Red
+    let name = match c {
+        Red => "red",
+        Green => "green",
+        Blue => "blue",
+    }
+    assert_eq_str(name, "red")
+}
+
+fn TestExhaustiveOption() {
+    let o = Some(42)
+    match o {
+        Some(v) => assert_eq(v, 42),
+        None => assert(false),
+    }
+}

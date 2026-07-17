@@ -30798,7 +30798,16 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
 
         let mut first = true;
         for arm in arms {
-            let cond = self.pattern_condition(&scrut, &sty, &arm.pattern);
+            let mut cond = self.pattern_condition(&scrut, &sty, &arm.pattern);
+            // For guards: bind pattern locals in a temp scope to evaluate the guard,
+            // then combine pattern + guard into one condition.
+            if let Some(guard) = &arm.guard {
+                // We need the pattern bindings to evaluate the guard.
+                // Emit bindings before the if, then include guard in condition.
+                self.bind_pattern_locals(&scrut, &sty, &arm.pattern);
+                let (_, gv) = self.emit_expr(guard);
+                cond = format!("({cond}) && ({gv})");
+            }
             if first {
                 self.line(&format!("if ({cond}) {{"));
                 first = false;
@@ -30806,7 +30815,10 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                 self.line(&format!("}} else if ({cond}) {{"));
             }
             self.indent += 1;
-            self.bind_pattern_locals(&scrut, &sty, &arm.pattern);
+            // Bind locals (again if guard already did, but idempotent for codegen)
+            if arm.guard.is_none() {
+                self.bind_pattern_locals(&scrut, &sty, &arm.pattern);
+            }
             let (bty, bval) = self.emit_expr(&arm.body);
             if result_ty.is_none() {
                 result_ty = Some(bty.clone());

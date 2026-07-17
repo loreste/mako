@@ -1,0 +1,27 @@
+fn TestMatchGuardBasic() {
+    let x = 15
+    let result = match x {
+        n if n > 10 => "big",
+        _ => "small",
+    }
+    assert_eq_str(result, "big")
+}
+
+fn TestMatchGuardFails() {
+    let x = 5
+    let result = match x {
+        n if n > 10 => "big",
+        _ => "small",
+    }
+    assert_eq_str(result, "small")
+}
+
+fn TestMatchGuardWithOption() {
+    let o = Some(20)
+    let result = match o {
+        Some(n) if n > 10 => "large",
+        Some(_) => "small",
+        None => "nothing",
+    }
+    assert_eq_str(result, "large")
+}

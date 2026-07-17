@@ -2532,12 +2532,19 @@ impl Parser {
         let mut arms = Vec::new();
         while !matches!(self.peek_kind(), TokenKind::RBrace) {
             let pattern = self.parse_pattern()?;
+            // Optional guard: `pattern if condition =>`
+            let guard = if matches!(self.peek_kind(), TokenKind::If) {
+                self.bump();
+                Some(self.parse_expr()?)
+            } else {
+                None
+            };
             self.expect(TokenKind::FatArrow)?;
             let body = self.parse_expr()?;
             if matches!(self.peek_kind(), TokenKind::Comma) {
                 self.bump();
             }
-            arms.push(MatchArm { pattern, body });
+            arms.push(MatchArm { pattern, guard, body });
         }
         self.expect(TokenKind::RBrace)?;
         Ok(Expr::Match {

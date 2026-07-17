@@ -1,6 +1,6 @@
 # Mako roadmap
 
-**Product version:** **0.2.0** · Last roadmap sync: **2026-07-17**.
+**Product version:** **0.2.1** · Last roadmap sync: **2026-07-17**.
 
 **Verified:** [STATUS.md](STATUS.md) · **Stdlib:** [STDLIB.md](STDLIB.md) · **Security:** [SECURITY.md](SECURITY.md) · **Release:** [RELEASE.md](RELEASE.md).  
 **Book:** [The Mako Book](book/) · **Identity:** [IDENTITY.md](IDENTITY.md) · **Pain map:** [PAIN_POINTS.md](PAIN_POINTS.md).
@@ -14,7 +14,7 @@
 | **0.1.9** | Generics & iterators | **Shipped** |
 | **0.1.10** | Deepen generics + speed | **Shipped** |
 | **0.2.0** | Stdlib written in Mako | **Shipped** |
-| **0.2.1** | Safety & correctness | Planned |
+| **0.2.1** | Safety & correctness | **Shipped** |
 | **0.2.2** | Tooling | Planned |
 | **0.3.0** | Cross-platform | Planned |
 | **0.4.0** | Performance ceiling | Planned |

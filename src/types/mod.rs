@@ -16926,6 +16926,14 @@ impl TypeChecker {
                 return Err(TypeError::new("this match is not exhaustive")
                     .hint("add a `_` arm to cover remaining values"));
             }
+            // Resolve Named types to their underlying enum for exhaustiveness
+            Type::Named(n) => {
+                if let Some(Type::Enum { variants, .. }) = self.types.get(n) {
+                    variants.iter().map(|(vn, _)| vn.as_str()).collect()
+                } else {
+                    return Ok(());
+                }
+            }
             _ => return Ok(()),
         };
 
@@ -18263,8 +18271,9 @@ fn subst_expr(e: &Expr, subst: &HashMap<String, Type>) -> Expr {
             scrutinee: Box::new(subst_expr(scrutinee, subst)),
             arms: arms
                 .iter()
-                .map(|a| MatchArm {
+                .map(|a| crate::ast::MatchArm {
                     pattern: a.pattern.clone(),
+                    guard: a.guard.as_ref().map(|g| subst_expr(g, subst)),
                     body: subst_expr(&a.body, subst),
                 })
                 .collect(),
