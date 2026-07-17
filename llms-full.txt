@@ -121,8 +121,9 @@ No implicit mixing: int + int64 is a type error. Convert explicitly.
                       are demand-driven (only used map shapes are emitted).
   []bool / []Enum     Bool and enum slices (make/append/index)
   [][]T               Nested slices (headers of inner slices; monomorphized)
-  chan[T]             Typed channel: int family, bool, float, string, named struct
-                      make(chan[T], n) and chan_open[T](n) accept the same T set
+  chan[T]             Typed channel: int family, bool, float, string, named
+                      struct/enum, tuples. make(chan[T], n) / chan_open[T](n)
+                      accept the same T set. chan_len/chan_cap work on any chan[T].
   Option[T]           Some(value) or None
   Result[T, E]        Ok(value) or Err(error)
   (T, U)              Tuple: (int, int), (int, string), (Point, int), etc.
@@ -985,8 +986,8 @@ Jobs cannot outlive their crew block:
   let ok = chan_try_send(ch, 42)         // 0 on success
 
   // Channel info:
-  print_int(chan_len(ch))                // items in channel
-  print_int(chan_cap(ch))                // capacity
+  print_int(chan_len(ch))                // items in channel (any chan[T])
+  print_int(chan_cap(ch))                // capacity (any chan[T])
 
   // Range over channel:
   for v in range ch {                    // recv until close
@@ -1752,8 +1753,8 @@ Below are the most important built-in functions organized by category.
   chan_open[string](capacity: int) -> chan[string]  Typed channel (string)
   chan_open[bool](capacity: int) -> chan[bool] Typed channel (bool)
   chan_try_send(ch: chan[int], val: int) -> int  Non-blocking send (0=ok)
-  chan_len(ch: chan[int]) -> int               Items in channel
-  chan_cap(ch: chan[int]) -> int               Channel capacity
+  chan_len(ch: chan[T]) -> int                 Items in channel (any T)
+  chan_cap(ch: chan[T]) -> int                 Channel capacity (any T)
   chan_select2(a: chan[int], b: chan[int], timeout_ms: int) -> int
   chan_select3(a: chan[int], b: chan[int], c: chan[int], timeout_ms: int) -> int
   chan_str_select2(a: chan[string], b: chan[string], timeout_ms: int) -> int

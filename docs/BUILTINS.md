@@ -909,8 +909,8 @@ application code. See `examples/testing/scram_test.mko` (RFC 7677 §3 vector),
 | `chan_recv_timeout` | `chan_recv_timeout(ch, ms) -> Result[int, string]` | Timed recv; `Ok(v)` / `Err("timeout"\|"closed")` |
 | `chan_str_send_take` | `chan_str_send_take(ch: chan[string], v: string) -> int` | Blocking move-send (no clone); **1** ok, **0** closed |
 | `chan_str_try_send_take` | `chan_str_try_send_take(ch: chan[string], v: string) -> int` | Non-blocking move-send; **1** queued, **0** full/closed (consumes `v`) |
-| `chan_len` | `chan_len(ch: chan[int]) -> int` | Return the number of items in the channel |
-| `chan_cap` | `chan_cap(ch: chan[int]) -> int` | Return the capacity of the channel |
+| `chan_len` | `chan_len(ch: chan[T]) -> int` | Buffered depth for **any** `chan[T]` (int/bool/float/string/struct/tuple/enum) |
+| `chan_cap` | `chan_cap(ch: chan[T]) -> int` | Capacity for **any** `chan[T]` (immutable after create; lock-free on int rings) |
 | `chan_select2` | `chan_select2(a: chan[int], b: chan[int], timeout_ms: int) -> int` | Select from two **int** channels with timeout |
 | `chan_select3` | `chan_select3(a: chan[int], b: chan[int], c: chan[int], timeout_ms: int) -> int` | Select from three int channels with timeout |
 | `chan_select4` | `chan_select4(a: chan[int], b: chan[int], c: chan[int], d: chan[int], timeout_ms: int) -> int` | Select from four int channels with timeout |
@@ -928,13 +928,20 @@ application code. See `examples/testing/scram_test.mko` (RFC 7677 §3 vector),
 | float | `MakoChan` | Bitcast via `mako_f64_to_bits` / `mako_bits_to_f64` |
 | string | `MakoChanStr` | Owned strings; `chan_str_select2` / select syntax |
 | named struct (incl. pack types) | `MakoChanPtr` | Heap-box on send; free on recv; **select takes the message** (do not `recv` again in the arm) |
+| named enum | `MakoChanPtr` | Same heap-box path as structs |
+| tuple `(T, U[, …])` | `MakoChanPtr` | Monomorph tag `MakoTup_…`; same as struct channels |
 
 `make(chan[T], n)` accepts the same `T` set as `chan_open[T](n)`.
+
+`chan_len` / `chan_cap` type-check as generics over any `chan[T]` (not only
+`chan[int]`). Codegen routes to `mako_chan_len` / `mako_chan_cap`,
+`mako_chan_str_len` / `mako_chan_str_cap`, or `mako_chan_ptr_len` /
+`mako_chan_ptr_cap` by channel runtime type.
 
 `select timeout … { }` uses int, string, or **struct/ptr** select when all arms match.
 Helpers: `chan_select_value` / `chan_select_value_str` / `mako_chan_select_value_ptr`.
 Tests: `chan_struct_test`, `chan_make_struct_test`, `chan_float_test`,
-`wave8_queue_test`, `wave9_queue_test`.
+`chan_backpressure_test`, `wave8_queue_test`, `wave9_queue_test`.
 
 ---
 

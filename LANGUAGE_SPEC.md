@@ -413,11 +413,15 @@ Typed, buffered channels for inter-task communication.
 let ch = chan_new(4)           // chan[int] with buffer size 4
 let cs = make(chan[string], 2)
 let cp = make(chan[Point], 1)  // structs (same as chan_open[Point](1))
+let ct = make(chan[(int, string)], 1)
 let ce = chan_open[eng.Point](1)
 ```
 
 `make(chan[T], n)` and `chan_open[T](n)` accept int family, `bool`, `float`,
-`string`, and **named structs** (including pack-qualified types).
+`string`, **named structs**, **named enums**, and **tuples** (including
+pack-qualified types).
+
+`chan_len(ch)` and `chan_cap(ch)` accept any `chan[T]` (not only `chan[int]`).
 
 Channel operations are described in Section 7.
 
@@ -1625,6 +1629,8 @@ ch.close()                   // close the channel
 | `ch.send(value)`  | Send a value into the channel               |
 | `ch.recv()`       | Receive a value (blocks until available)    |
 | `ch.close()`      | Close the channel                           |
+| `chan_len(ch)`    | Buffered item count — any `chan[T]`         |
+| `chan_cap(ch)`    | Capacity — any `chan[T]` (set at create)    |
 
 The send value must match the channel's element type. Receiving from a closed,
 drained channel returns a zero value.

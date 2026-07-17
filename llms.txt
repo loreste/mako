@@ -25,7 +25,8 @@ Short facts:
   tuples `(T,U[,…])` (bag/chan fields), `chan[T]`; `[]Option`/`[]Result`;
   `maps_*`. Map monomorph C helpers are demand-driven (only used shapes).
 - Struct/enum `==` `!=` structural (strings by content)
-- Channels: `make(chan[T], n)` / `chan_open[T](n)` for int/bool/float/string/struct
+- Channels: `make(chan[T], n)` / `chan_open[T](n)` for int/bool/float/string/struct/enum/tuple
+- `chan_len` / `chan_cap` work on any `chan[T]` (not only int rings)
 - Kick Send: Copy, string, deep-POD structs, Option/Result/tuple of sendables, chan handles
   (not maps/arrays/non-POD). Prefer `chan[Struct]` for multi-field worker results.
 - Loops: `for i, v in range s` / `for k, v in range m` / C-style `for`

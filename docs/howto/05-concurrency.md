@@ -57,7 +57,8 @@ detached_join_all()
 ## Channels
 
 Communicate between jobs using typed channels. Element types: int family, bool,
-float, string, and **named structs** (`chan_open[Point](n)` / `make(chan[Point], n)`).
+float, string, **named structs**, **named enums**, and **tuples**
+(`chan_open[Point](n)` / `make(chan[Point], n)` / `make(chan[(int, string)], n)`).
 
 ```mko
 fn producer(ch: chan[int], count: int) -> int {
@@ -126,6 +127,8 @@ Channel operations:
 | `ch.send(val)` | Send a value (blocks if full) |
 | `ch.recv()` | Receive a value (blocks if empty) |
 | `ch.close()` | Signal no more sends |
+| `chan_len(ch)` | Current buffered depth — **any** `chan[T]` |
+| `chan_cap(ch)` | Capacity — **any** `chan[T]` (immutable after create) |
 | `for v in range ch` | Receive until closed |
 
 ## Select

@@ -584,7 +584,8 @@ The compiler and runtime pass **320+ tests** covering:
   `struct Pair[T]`, `enum Box[T]`, bounds `fn f[T: I](…)` (0.1.9)
 - Tuples `(int, string)` and multi-return `let a, b = f()` (incl. structs)
 - Maps: keys `int|string|float`, values `int|string|float|Struct`; `maps_*`
-- `make(chan[T], n)` / `chan_open[T]` for int/bool/float/string/struct
+- `make(chan[T], n)` / `chan_open[T]` for int/bool/float/string/struct/enum/tuple;
+  `chan_len` / `chan_cap` on any `chan[T]`
 - Structural `==` / `!=` on structs and enums
 - `switch` / `case` / `default` alongside `match`
 - `fan(xs, fn(x) { x * x })` data parallelism

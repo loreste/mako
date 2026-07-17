@@ -1,0 +1,25 @@
+struct Point { x: int, y: int }
+
+fn TestStructChanLenCap() {
+    let ch = make(chan[Point], 2)
+    assert_eq(chan_cap(ch), 2)
+    assert_eq(chan_len(ch), 0)
+    let _ = ch.send(Point { x: 1, y: 2 })
+    assert_eq(chan_len(ch), 1)
+}
+
+fn TestStringChanLenCap() {
+    let ch = make(chan[string], 3)
+    assert_eq(chan_cap(ch), 3)
+    assert_eq(chan_len(ch), 0)
+    let _ = ch.send("hi")
+    assert_eq(chan_len(ch), 1)
+}
+
+fn TestTupleChanLenCap() {
+    let ch = make(chan[(int, string)], 1)
+    assert_eq(chan_cap(ch), 1)
+    assert_eq(chan_len(ch), 0)
+    let _ = ch.send((7, "ok"))
+    assert_eq(chan_len(ch), 1)
+}

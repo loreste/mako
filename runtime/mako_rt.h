@@ -4975,6 +4975,19 @@ static inline MakoString mako_chan_str_recv(MakoChanStr *c) {
     return v;
 }
 
+static inline int64_t mako_chan_str_len(MakoChanStr *c) {
+    if (!c) return 0;
+    pthread_mutex_lock(&c->mu);
+    int64_t n = (int64_t)c->count;
+    pthread_mutex_unlock(&c->mu);
+    return n;
+}
+
+static inline int64_t mako_chan_str_cap(MakoChanStr *c) {
+    if (!c) return 0;
+    return (int64_t)c->cap; /* immutable after creation */
+}
+
 static inline void mako_chan_str_close(MakoChanStr *c) {
     if (!c) return;
     pthread_mutex_lock(&c->mu);
@@ -5160,12 +5173,19 @@ static inline void mako_chan_ptr_close(MakoChanPtr *c) {
     pthread_mutex_unlock(&c->mu);
 }
 
-/* Nonblocking try-recv for pointer channels. */
+/* Depth / capacity for pointer channels (struct, tuple, enum payload boxes). */
 static inline int64_t mako_chan_ptr_len(MakoChanPtr *c) {
+    if (!c) return 0;
     pthread_mutex_lock(&c->mu);
     int64_t n = (int64_t)c->count;
     pthread_mutex_unlock(&c->mu);
     return n;
+}
+
+static inline int64_t mako_chan_ptr_cap(MakoChanPtr *c) {
+    if (!c) return 0;
+    /* cap is immutable after creation — no lock needed (same as mako_chan_cap). */
+    return (int64_t)c->cap;
 }
 
 static inline int64_t mako_chan_ptr_try_recv(MakoChanPtr *c, void **out) {

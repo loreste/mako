@@ -77,6 +77,7 @@ const-fn depth (match/while/for/strings) · suite **165+** · [The Mako Book](bo
 | Backend ergonomics already on tip (`for…in range`, `fmt_sprintf*`, `match`/`switch`, `chan[Struct]`, POD kick) | Documented — [ERGONOMICS.md](ERGONOMICS.md) · [SPEED.md](SPEED.md) |
 | Struct update `S { ..base, field: v }` + POD enum kick / `chan[Enum]` | Done — `struct_update_test` |
 | First-class fns · `f"…"` · field defaults · `chan[tuple]` | Done — `lang_ergonomics_test` |
+| `chan_len` / `chan_cap` on any `chan[T]` (struct/tuple/string rings) | Done — typecheck + codegen dispatch · ptr/str runtime helpers |
 | Portable timeouts (`send/recv_timeout`, `join_deadline`, `deadline_remaining_ms`) | Done — `timeout_portable_test` |
 | Crew child error prop (`first_err` / `wait`) · `detach` · actor state | Done — `crew_error_prop_test` · `detach_test` · `actor_test` |
 | Observability depth (OTLP JSON, profile snapshot, stack_trace, crash_report, PGO/LTO) | Done seed — `observability_depth_test` |

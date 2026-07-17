@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Channels
+
+- **`chan_len` / `chan_cap` on any `chan[T]`** — type-check accepts struct,
+  tuple, enum, and string channels (not only `chan[int]`). Runtime helpers
+  `mako_chan_ptr_len` / `mako_chan_ptr_cap` and `mako_chan_str_len` /
+  `mako_chan_str_cap` back the pointer and string rings.
+- **`chan[tuple]` codegen** — `TypeExpr::Tuple` and generic `chan[T]` forms
+  register correctly in `chan_ptr_elems` so len/cap and ptr helpers stay
+  consistent with `chan[Struct]`.
+
 ## 0.1.9 — 2026-07-16
 
 **mako0.1.9** (`CARGO_PKG_VERSION`).

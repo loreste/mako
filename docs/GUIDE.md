@@ -1167,7 +1167,7 @@ crew t {
 | `job.join_timeout(ms)` | Timed join → `Result[R, string]`: `Ok(value)` or `Err("timeout")` |
 | `crew.drain(ms)` | Cancel + join with timeout |
 | `fan(collection, mapper)` | Data-parallel map: `[]int` / `[]float` / `[]string` / `[]Struct` |
-| channels + `select` | Message-passing: `make(chan[T], n)` / `chan_open[T](n)` for int/bool/float/string/**struct** (incl. pack types) |
+| channels + `select` | Message-passing: `make(chan[T], n)` / `chan_open[T](n)` for int/bool/float/string/**struct**/enum/**tuple** (incl. pack types) |
 | `actor` / `receive` | Long-lived concurrent entities |
 
 ```mko
@@ -1201,20 +1201,30 @@ Tests: `examples/testing/crew_fan_test.mko`, `job_join_typed_test.mko`,
 ## 9. Channels and `select`
 
 `make(chan[T], n)` and `chan_open[T](n)` accept the same element types: int
-family, bool, float, string, and **named structs** (including pack types).
+family, bool, float, string, **named structs**, **named enums**, and **tuples**
+`(T, U[, …])` (including pack-qualified types).
 
 ```mko
 let ch = chan_new(4)              // int
 let cs = make(chan[string], 2)
 let fs = chan_open[float](2)      // float (bitcast ring)
 let ps = make(chan[Point], 2)     // same as chan_open[Point](2)
+let pt = make(chan[(int, string)], 1)
 // let pe = make(chan[eng.Table], 1)  // pack type after pull
 let _ = ch.send(1)
 let v = ch.recv()
 ch.close()
+// Depth / capacity work on every element type (not only chan[int]):
+assert_eq(chan_len(ch), 0)
+assert_eq(chan_cap(ps), 2)
 ```
 
-Tests: `chan_struct_test`, `chan_make_struct_test`, `chan_float_test`.
+`chan_len(ch)` / `chan_cap(ch)` accept **any** `chan[T]`. Struct, enum, and
+tuple channels use the pointer-ring runtime; int/bool/float use the int ring;
+string uses the string ring.
+
+Tests: `chan_struct_test`, `chan_make_struct_test`, `chan_float_test`,
+`chan_backpressure_test`, `lang_ergonomics_test` (`chan[tuple]`).
 
 ```mko
 // examples/select_default.mko — timeout + default + up to 16 arms

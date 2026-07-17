@@ -12715,7 +12715,9 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         "chan_cap" => {
                             let (cty, ch) = self.emit_expr(&args[0]);
                             if cty == "MakoChanPtr*" {
-                                return ("int64_t".into(), format!("mako_chan_ptr_len({ch})")); // cap not exposed for ptr; use len
+                                return ("int64_t".into(), format!("mako_chan_ptr_cap({ch})"));
+                            } else if cty == "MakoChanStr*" {
+                                return ("int64_t".into(), format!("mako_chan_str_cap({ch})"));
                             }
                             return ("int64_t".into(), format!("mako_chan_cap({ch})"));
                         }
