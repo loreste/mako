@@ -1,6 +1,79 @@
-fn open_sqlite(path: string) -> SqlDB { return sql_open_sqlite(path) }
-fn open_postgres(url: string) -> SqlDB { return sql_open_postgres(url) }
-fn ok(db: SqlDB) -> int { return sql_ok(db) }
-fn close(db: SqlDB) -> int { return sql_close(db) }
-fn query_int(db: SqlDB, sql: string, args: []int) -> int { return sql_query_int(db, sql, args) }
-fn exec(db: SqlDB, sql: string, args: []int) -> int { return sql_exec(db, sql, args) }
+// Package sql provides database access with connection pooling.
+//
+// Supports SQLite and PostgreSQL via C builtins.
+// Pool manages a set of connections with acquire/release semantics.
+
+pack sql
+
+// ---- Direct access (C builtin wrappers) ----
+
+export fn open_sqlite(path: string) -> SqlDB { return sql_open_sqlite(path) }
+export fn open_postgres(url: string) -> SqlDB { return sql_open_postgres(url) }
+export fn ok(db: SqlDB) -> int { return sql_ok(db) }
+export fn close(db: SqlDB) -> int { return sql_close(db) }
+export fn query_int(db: SqlDB, query: string, args: []int) -> int { return sql_query_int(db, query, args) }
+export fn query_str(db: SqlDB, query: string, arg: string) -> string { return sql_query_str(db, query, arg) }
+export fn exec(db: SqlDB, query: string, args: []int) -> int { return sql_exec(db, query, args) }
+export fn exec_plain(db: SqlDB, query: string) -> int { return sql_exec_plain(db, query) }
+
+// ---- Connection Pool ----
+
+export struct Pool {
+    url: string
+    max_size: int
+    available: []int
+    total: int
+}
+
+export fn new_pool(url: string, max_size: int) -> Pool {
+    return Pool {
+        url: url,
+        max_size: max_size,
+        available: make([]int, 0, max_size),
+        total: 0
+    }
+}
+
+on Pool {
+    // acquire returns a slot index. Returns -1 if pool is exhausted.
+    fn acquire(mut self) -> int {
+        if len(self.available) > 0 {
+            let idx = self.available[len(self.available) - 1]
+            self.available = self.available[0:len(self.available) - 1]
+            return idx
+        }
+        if self.total < self.max_size {
+            let idx = self.total
+            self.total = self.total + 1
+            return idx
+        }
+        return -1
+    }
+
+    // release returns a slot to the pool for reuse.
+    fn release(mut self, idx: int) {
+        if idx >= 0 {
+            self.available = append(self.available, idx)
+        }
+    }
+
+    // size returns the total number of slots created.
+    fn size(self) -> int {
+        return self.total
+    }
+
+    // idle returns the number of available (idle) slots.
+    fn idle(self) -> int {
+        return len(self.available)
+    }
+
+    // active returns the number of in-use slots.
+    fn active(self) -> int {
+        return self.total - len(self.available)
+    }
+}
+
+// Transaction helpers (direct function API — no struct since SqlDB is an opaque handle)
+export fn begin_tx(db: SqlDB) -> int { return sql_exec_plain(db, "BEGIN") }
+export fn commit_tx(db: SqlDB) -> int { return sql_exec_plain(db, "COMMIT") }
+export fn rollback_tx(db: SqlDB) -> int { return sql_exec_plain(db, "ROLLBACK") }

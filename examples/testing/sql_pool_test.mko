@@ -1,59 +1,26 @@
-fn TestSqlPoolLifecycle() {
-    let pool = sql_pool_open_sqlite(":memory:", 2)
-    assert(pool > 0)
-    assert_eq(sql_pool_ok(pool), 1)
-    assert_eq(sql_pool_size(pool), 2)
-    assert_eq(sql_pool_opened(pool), 0)
-    assert_eq(sql_pool_next_slot(pool), 0)
+pull "database/sql"
 
-    let empty = make([]int, 0)
-    let first = sql_pool_query_int(pool, "select 1", empty)
-    if first != 1 {
-        assert_eq(first, -1)
-    }
-    assert_eq(sql_pool_opened(pool), 1)
-    assert_eq(sql_pool_next_slot(pool), 1)
-
-    let args = make([]int, 1)
-    args[0] = 7
-    let second = sql_pool_query_int(pool, "select ?", args)
-    if second != 7 {
-        assert_eq(second, -1)
-    }
-    assert_eq(sql_pool_opened(pool), 2)
-    assert_eq(sql_pool_next_slot(pool), 0)
-
-    let third = sql_pool_query_int(pool, "select 3", empty)
-    if third != 3 {
-        assert_eq(third, -1)
-    }
-    assert_eq(sql_pool_opened(pool), 2)
-    assert_eq(sql_pool_next_slot(pool), 1)
-
-    assert_eq(sql_pool_close(pool), 1)
-    assert_eq(sql_pool_ok(pool), 0)
-    assert_eq(sql_pool_size(pool), 0)
-    assert_eq(sql_pool_opened(pool), 0)
+fn TestPoolAcquireRelease() {
+    let mut pool = sql.new_pool("postgres://test", 3)
+    assert_eq(pool.size(), 0)
+    let a = pool.acquire()
+    assert_eq(a, 0)
+    assert_eq(pool.size(), 1)
+    let b = pool.acquire()
+    assert_eq(b, 1)
+    assert_eq(pool.active(), 2)
+    pool.release(a)
+    assert_eq(pool.idle(), 1)
+    assert_eq(pool.active(), 1)
+    let c = pool.acquire()
+    assert_eq(c, 0)
+    assert_eq(pool.size(), 2)
 }
 
-fn TestSqlPoolInvalidAndClamp() {
-    assert_eq(sql_pool_ok(0), 0)
-    assert_eq(sql_pool_size(0), 0)
-    assert_eq(sql_pool_opened(0), 0)
-    assert_eq(sql_pool_next_slot(0), -1)
-
-    let empty = make([]int, 0)
-    assert_eq(sql_pool_query_int(0, "select 1", empty), -1)
-    assert_eq(sql_pool_exec(0, "select 1", empty), -1)
-    assert_eq(sql_pool_close(0), 0)
-
-    let one = sql_pool_open_sqlite(":memory:", 0)
-    assert(one > 0)
-    assert_eq(sql_pool_size(one), 1)
-    assert_eq(sql_pool_close(one), 1)
-
-    let capped = sql_pool_open_sqlite(":memory:", 99)
-    assert(capped > 0)
-    assert_eq(sql_pool_size(capped), 16)
-    assert_eq(sql_pool_close(capped), 1)
+fn TestPoolExhausted() {
+    let mut pool = sql.new_pool("postgres://test", 2)
+    let _ = pool.acquire()
+    let _ = pool.acquire()
+    let c = pool.acquire()
+    assert_eq(c, -1)
 }

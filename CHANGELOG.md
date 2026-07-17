@@ -15,6 +15,26 @@
   on shared variant names. Qualified lookup uses return type context to resolve
   the correct instantiation in both type checker and codegen.
 
+### v0.2.0 — Stdlib in Mako
+
+- **io package** (`std/io`) — `StringReader` with `read(mut self)` advancing
+  position, `ByteWriter` with `write(mut self)` appending bytes, `drain()`
+  reads to completion. Written in Mako, not C wrappers.
+- **collections** (`std/collections/stack.mko`) — `IntStack`, `StrStack`,
+  `IntQueue` with `push`/`pop`/`enqueue`/`dequeue` using `mut self`. Returns
+  `Option` for empty cases. Queue auto-compacts on dequeue.
+- **context** (`std/context`) — `Context` struct with `background()`,
+  `with_timeout(ms)`, `with_deadline(ms)`, `with_cancel()`, `done()`,
+  `err()`, `remaining()`. Deadline propagation and cancellation.
+- **encoding/json** (`std/encoding/json`) — `ObjectBuilder` and `ArrayBuilder`
+  for constructing JSON incrementally. `set_string`/`set_int`/`set_bool`/
+  `set_null`/`set_raw` with proper escaping. Parser wrappers for extraction.
+- **net/http** (`std/net/http`) — `Request`/`Response` types, `Router` with
+  `add()`/`match_route()` for method+path routing, `text_response`/
+  `json_response`/`html_response` constructors.
+- **database/sql** (`std/database/sql`) — `Pool` with `acquire()`/`release()`
+  slot management, `begin_tx`/`commit_tx`/`rollback_tx` transaction helpers.
+
 ### Channels
 
 - **`chan_len` / `chan_cap` on any `chan[T]`** — type-check accepts struct,
