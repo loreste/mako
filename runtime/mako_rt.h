@@ -5161,6 +5161,13 @@ static inline void mako_chan_ptr_close(MakoChanPtr *c) {
 }
 
 /* Nonblocking try-recv for pointer channels. */
+static inline int64_t mako_chan_ptr_len(MakoChanPtr *c) {
+    pthread_mutex_lock(&c->mu);
+    int64_t n = (int64_t)c->count;
+    pthread_mutex_unlock(&c->mu);
+    return n;
+}
+
 static inline int64_t mako_chan_ptr_try_recv(MakoChanPtr *c, void **out) {
     if (!c) return 0;
     pthread_mutex_lock(&c->mu);
@@ -5184,6 +5191,29 @@ static inline int64_t mako_chan_ptr_try_recv(MakoChanPtr *c, void **out) {
     if (out) *out = v;
     else free(v);
     return 1;
+}
+
+static inline void *mako_chan_ptr_recv_timeout(MakoChanPtr *c, int64_t timeout_ms) {
+    if (!c) return NULL;
+    struct timeval start, now;
+    mako_gettimeofday(&start, NULL);
+    for (;;) {
+        void *out = NULL;
+        if (mako_chan_ptr_try_recv(c, &out)) return out;
+        pthread_mutex_lock(&c->mu);
+        int closed_empty = (c->count == 0 && c->closed) ? 1 : 0;
+        pthread_mutex_unlock(&c->mu);
+        if (closed_empty) return NULL;
+        if (timeout_ms >= 0) {
+            mako_gettimeofday(&now, NULL);
+            int64_t elapsed =
+                (now.tv_sec - start.tv_sec) * 1000 +
+                (now.tv_usec - start.tv_usec) / 1000;
+            if (elapsed >= timeout_ms) return NULL;
+        }
+        struct timespec ts = {0, 2000000L};
+        nanosleep(&ts, NULL);
+    }
 }
 
 static void *mako_select_last_ptr = NULL;

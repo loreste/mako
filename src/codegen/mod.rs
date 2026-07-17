@@ -12678,11 +12678,19 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             );
                         }
                         "chan_len" => {
-                            let (_, ch) = self.emit_expr(&args[0]);
+                            let (cty, ch) = self.emit_expr(&args[0]);
+                            if cty == "MakoChanPtr*" {
+                                return ("int64_t".into(), format!("mako_chan_ptr_len({ch})"));
+                            } else if cty == "MakoChanStr*" {
+                                return ("int64_t".into(), format!("mako_chan_str_len({ch})"));
+                            }
                             return ("int64_t".into(), format!("mako_chan_len({ch})"));
                         }
                         "chan_cap" => {
-                            let (_, ch) = self.emit_expr(&args[0]);
+                            let (cty, ch) = self.emit_expr(&args[0]);
+                            if cty == "MakoChanPtr*" {
+                                return ("int64_t".into(), format!("mako_chan_ptr_len({ch})")); // cap not exposed for ptr; use len
+                            }
                             return ("int64_t".into(), format!("mako_chan_cap({ch})"));
                         }
                         "sleep_ms" | "time_sleep_ms" => {
@@ -29705,7 +29713,6 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             self.line(&format!(
                                 "int64_t {rc} = mako_chan_try_recv({rv}, &{outv});"
                             ));
-                            // try_recv: 0 empty → Err("empty"); 1 → Ok
                             self.line(&format!("MakoResultInt {tmp};"));
                             self.line(&format!(
                                 "if ({rc}) {{ {tmp} = mako_ok_int({outv}); }} \
