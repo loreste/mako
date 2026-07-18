@@ -10,6 +10,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::Arc;
 
 use sha2::{Digest, Sha256};
 
@@ -39,6 +40,173 @@ pub struct LockedPackage {
 pub struct Lockfile {
     pub version: u32,
     pub packages: Vec<LockedPackage>,
+}
+
+#[derive(Debug, Default)]
+pub(crate) struct VerifiedDependencyRoots {
+    by_manifest: HashMap<PathBuf, HashMap<String, Arc<VerifiedPackage>>>,
+    packages: HashMap<PathBuf, Arc<VerifiedPackage>>,
+}
+
+/// Exact package inputs retained from the hash pass so compilation never
+/// reopens mutable dependency files.
+#[derive(Debug)]
+pub(crate) struct VerifiedPackage {
+    root: PathBuf,
+    root_is_file: bool,
+    files: BTreeMap<PathBuf, Vec<u8>>,
+}
+
+impl VerifiedDependencyRoots {
+    fn manifest_id(manifest_dir: &Path) -> PathBuf {
+        manifest_dir
+            .canonicalize()
+            .unwrap_or_else(|_| manifest_dir.to_path_buf())
+    }
+
+    fn insert(&mut self, manifest_dir: &Path, name: String, package: Arc<VerifiedPackage>) {
+        self.packages
+            .entry(Self::manifest_id(package.root()))
+            .or_insert_with(|| package.clone());
+        self.by_manifest
+            .entry(Self::manifest_id(manifest_dir))
+            .or_default()
+            .insert(name, package);
+    }
+
+    pub(crate) fn get(&self, manifest_dir: &Path, name: &str) -> Option<&VerifiedPackage> {
+        self.by_manifest
+            .get(&Self::manifest_id(manifest_dir))?
+            .get(name)
+            .map(Arc::as_ref)
+    }
+
+    pub(crate) fn package_for_path(&self, path: &Path) -> Option<&VerifiedPackage> {
+        self.packages
+            .values()
+            .filter(|package| package.contains(path))
+            .max_by_key(|package| package.root().components().count())
+            .map(Arc::as_ref)
+    }
+}
+
+impl VerifiedPackage {
+    fn new(root: &Path, snapshot: PackageSnapshot) -> Result<Self, String> {
+        Ok(Self {
+            root: lexical_absolute(root)?,
+            root_is_file: snapshot.root_is_file,
+            files: snapshot.files,
+        })
+    }
+
+    pub(crate) fn root(&self) -> &Path {
+        &self.root
+    }
+
+    fn relative_path(&self, path: &Path) -> Option<PathBuf> {
+        let path = lexical_absolute(path).ok()?;
+        if self.root_is_file {
+            return if path == self.root {
+                self.files.keys().next().cloned()
+            } else {
+                None
+            };
+        }
+        path.strip_prefix(&self.root).ok().map(Path::to_path_buf)
+    }
+
+    fn contains(&self, path: &Path) -> bool {
+        let Some(relative) = self.relative_path(path) else {
+            return false;
+        };
+        relative.as_os_str().is_empty()
+            || self.files.contains_key(&relative)
+            || self
+                .files
+                .keys()
+                .any(|candidate| candidate.starts_with(&relative))
+    }
+
+    pub(crate) fn read_source(&self, path: &Path) -> Result<&str, String> {
+        let relative = self.relative_path(path).ok_or_else(|| {
+            format!(
+                "verified package input {} is outside {}",
+                path.display(),
+                self.root.display()
+            )
+        })?;
+        let contents = self.files.get(&relative).ok_or_else(|| {
+            format!(
+                "verified package input {} was not present during verification",
+                path.display()
+            )
+        })?;
+        std::str::from_utf8(contents)
+            .map_err(|error| format!("read verified source {}: {error}", path.display()))
+    }
+
+    pub(crate) fn source_paths_at(&self, target: &Path) -> Result<Vec<PathBuf>, String> {
+        let relative = self.relative_path(target).ok_or_else(|| {
+            format!(
+                "verified source path {} is outside {}",
+                target.display(),
+                self.root.display()
+            )
+        })?;
+        if self.files.contains_key(&relative) {
+            return Ok(vec![lexical_absolute(target)?]);
+        }
+
+        let mut files: Vec<_> = self
+            .files
+            .keys()
+            .filter(|path| path.parent() == Some(relative.as_path()))
+            .filter(|path| path.extension().and_then(|ext| ext.to_str()) == Some("mko"))
+            .filter(|path| {
+                let name = path.file_name().and_then(|name| name.to_str()).unwrap_or("");
+                !name.starts_with('.')
+                    && !name.ends_with("_test.mko")
+                    && !(name.starts_with("test_") && name.ends_with(".mko"))
+            })
+            .map(|path| self.root.join(path))
+            .collect();
+        files.sort_by(|left, right| {
+            let left = left.file_name().and_then(|name| name.to_str()).unwrap_or("");
+            let right = right.file_name().and_then(|name| name.to_str()).unwrap_or("");
+            match (left == "lib.mko", right == "lib.mko") {
+                (true, false) => std::cmp::Ordering::Less,
+                (false, true) => std::cmp::Ordering::Greater,
+                _ => left.cmp(right),
+            }
+        });
+        if files.is_empty() {
+            return Err(format!(
+                "verified package directory {} has no .mko sources",
+                target.display()
+            ));
+        }
+        Ok(files)
+    }
+
+    pub(crate) fn library_sources(&self) -> Result<Vec<PathBuf>, String> {
+        let mut files = self.source_paths_at(&self.root)?;
+        files.retain(|path| path.file_name().and_then(|name| name.to_str()) != Some("main.mko"));
+        if files.is_empty() {
+            return Err(format!(
+                "verified package {} has no library .mko sources",
+                self.root.display()
+            ));
+        }
+        Ok(files)
+    }
+
+    pub(crate) fn has_manifest(&self) -> bool {
+        !self.root_is_file && self.files.contains_key(Path::new("mako.toml"))
+    }
+
+    pub(crate) fn manifest_dir(&self) -> Option<&Path> {
+        self.has_manifest().then_some(self.root())
+    }
 }
 
 fn read_meta(text: &str) -> (Option<String>, Option<String>) {
@@ -136,9 +304,75 @@ fn normalized_lock_path(path: &Path) -> Result<String, String> {
     Ok(normalized)
 }
 
-fn locked_source_matches(dep: &ManifestDep, locked: &LockedPackage) -> Result<bool, String> {
+fn lexical_absolute(path: &Path) -> Result<PathBuf, String> {
+    let absolute = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir()
+            .map_err(|error| format!("read current directory: {error}"))?
+            .join(path)
+    };
+    let mut normalized = PathBuf::new();
+    for component in absolute.components() {
+        match component {
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                normalized.pop();
+            }
+            _ => normalized.push(component.as_os_str()),
+        }
+    }
+    Ok(normalized)
+}
+
+fn project_relative_path(project: &Path, target: &Path) -> Result<PathBuf, String> {
+    let project = lexical_absolute(project)?;
+    let target = lexical_absolute(target)?;
+    let project_parts: Vec<_> = project.components().collect();
+    let target_parts: Vec<_> = target.components().collect();
+    let common = project_parts
+        .iter()
+        .zip(&target_parts)
+        .take_while(|(left, right)| left == right)
+        .count();
+
+    if common == 0
+        || project_parts[common..]
+            .iter()
+            .any(|part| !matches!(part, std::path::Component::Normal(_)))
+        || target_parts[common..]
+            .iter()
+            .any(|part| !matches!(part, std::path::Component::Normal(_)))
+    {
+        return Err(format!(
+            "dependency path {} cannot be expressed relative to project {}",
+            target.display(),
+            project.display()
+        ));
+    }
+
+    let mut relative = PathBuf::new();
+    for _ in &project_parts[common..] {
+        relative.push("..");
+    }
+    for part in &target_parts[common..] {
+        relative.push(part.as_os_str());
+    }
+    Ok(relative)
+}
+
+fn lock_path_for(project: &Path, target: &Path) -> Result<String, String> {
+    normalized_lock_path(&project_relative_path(project, target)?)
+}
+
+fn locked_source_matches(
+    project: &Path,
+    manifest_dir: &Path,
+    dep: &ManifestDep,
+    locked: &LockedPackage,
+) -> Result<bool, String> {
     if let Some(path) = &dep.path {
-        let expected_path = normalized_lock_path(Path::new(path))?;
+        let expected_path = lock_path_for(project, &manifest_dir.join(path))?;
         return Ok(locked.source == "path" && locked.path.as_deref() == Some(&expected_path));
     }
     if dep.git.is_some() {
@@ -234,10 +468,16 @@ fn collect_package_files(
     Ok(())
 }
 
-/// Hash package inputs (root manifest + recursive `.mko` sources) with stable
-/// framing and normalized, relative paths. VCS metadata, Mako's dependency
-/// cache, Rust build output, and the lockfile itself are excluded.
-fn hash_path_dep(full: &Path) -> Result<String, String> {
+struct PackageSnapshot {
+    content_hash: String,
+    root_is_file: bool,
+    files: BTreeMap<PathBuf, Vec<u8>>,
+}
+
+/// Read and hash package inputs (root manifest + recursive `.mko` sources) with
+/// stable framing and normalized, relative paths. VCS metadata, Mako's
+/// dependency cache, Rust build output, and the lockfile itself are excluded.
+fn snapshot_path_dep(full: &Path) -> Result<PackageSnapshot, String> {
     if !full.exists() {
         return Err(format!(
             "cannot hash missing package path: {}",
@@ -246,7 +486,8 @@ fn hash_path_dep(full: &Path) -> Result<String, String> {
     }
 
     let mut files = Vec::new();
-    if full.is_file() {
+    let root_is_file = full.is_file();
+    if root_is_file {
         let name = full
             .file_name()
             .ok_or_else(|| format!("package file has no name: {}", full.display()))?;
@@ -265,17 +506,27 @@ fn hash_path_dep(full: &Path) -> Result<String, String> {
     files.sort_by(|a, b| a.0.cmp(&b.0));
 
     let mut hasher = Sha256::new();
+    let mut snapshot = BTreeMap::new();
     hasher.update(b"mako-package-content-v2\0");
     for (relative, path) in files {
         let contents = fs::read(&path)
             .map_err(|e| format!("read package file {} for hashing: {e}", path.display()))?;
-        let relative = relative.as_bytes();
-        hasher.update((relative.len() as u64).to_be_bytes());
-        hasher.update(relative);
+        let relative_bytes = relative.as_bytes();
+        hasher.update((relative_bytes.len() as u64).to_be_bytes());
+        hasher.update(relative_bytes);
         hasher.update((contents.len() as u64).to_be_bytes());
-        hasher.update(contents);
+        hasher.update(&contents);
+        snapshot.insert(PathBuf::from(relative), contents);
     }
-    Ok(format!("{PACKAGE_HASH_PREFIX}{:x}", hasher.finalize()))
+    Ok(PackageSnapshot {
+        content_hash: format!("{PACKAGE_HASH_PREFIX}{:x}", hasher.finalize()),
+        root_is_file,
+        files: snapshot,
+    })
+}
+
+fn hash_path_dep(full: &Path) -> Result<String, String> {
+    Ok(snapshot_path_dep(full)?.content_hash)
 }
 
 fn path_dep_version(full: &Path) -> Option<String> {
@@ -391,6 +642,7 @@ fn fetch_git(project: &Path, dep: &ManifestDep, offline: bool) -> Result<PathBuf
 /// Resolve one direct dep to an on-disk root + locked metadata.
 fn resolve_one(
     project: &Path,
+    manifest_dir: &Path,
     dep: &ManifestDep,
     prefer_highest: bool,
     offline: bool,
@@ -398,7 +650,7 @@ fn resolve_one(
     let _ = prefer_highest;
     let reg = effective_registry(project);
     if let Some(p) = &dep.path {
-        let full = project.join(p);
+        let full = manifest_dir.join(p);
         if !full.exists() {
             return Err(format!(
                 "path dep `{}` MISSING: {}",
@@ -421,7 +673,7 @@ fn resolve_one(
             name: dep.name.clone(),
             version: ver,
             source: "path".into(),
-            path: Some(normalized_lock_path(Path::new(p))?),
+            path: Some(lock_path_for(project, &full)?),
             git: None,
             rev: None,
             tag: None,
@@ -589,7 +841,7 @@ pub fn resolve_graph_with_options(
         if !update {
             if let Some(lock) = &existing {
                 if let Some(lp) = lock.packages.iter().find(|p| p.name == key) {
-                    if !locked_source_matches(&dep, lp)? {
+                    if !locked_source_matches(project, &from, &dep, lp)? {
                         return Err(format!(
                             "lockfile source for `{key}` does not match mako.toml — run `mako pkg update`"
                         ));
@@ -618,7 +870,7 @@ pub fn resolve_graph_with_options(
                             fetch_git(project, &dep, false)?;
                         }
                         if !full.exists() && lp.source == "registry" {
-                            resolve_one(project, &dep, true, offline)?;
+                            resolve_one(project, &from, &dep, true, offline)?;
                         }
                         if !full.exists() {
                             return Err(format!(
@@ -658,7 +910,7 @@ pub fn resolve_graph_with_options(
             }
         }
 
-        let locked = resolve_one(project, &dep, true, offline)?;
+        let locked = resolve_one(project, &from, &dep, true, offline)?;
         if let Some(combo) = reqs.get(&key) {
             for part in combo.split("&&") {
                 let part = part.trim();
@@ -719,6 +971,150 @@ pub fn resolve_graph_with_options(
 #[allow(dead_code)]
 pub fn resolve_graph(project: &Path, update: bool) -> Result<Lockfile, String> {
     resolve_graph_with_options(project, update, false)
+}
+
+/// Verify every dependency reachable from the manifest and return its locked
+/// source path. Unreachable lock entries are rejected, while projects without
+/// a lockfile retain the unlocked workflow.
+pub(crate) fn verified_dependency_roots(
+    project: &Path,
+) -> Result<Option<VerifiedDependencyRoots>, String> {
+    let lock_path = project.join("mako.lock");
+    if !lock_path.exists() {
+        return Ok(None);
+    }
+
+    let manifest_path = project.join("mako.toml");
+    let manifest = fs::read_to_string(&manifest_path)
+        .map_err(|error| format!("read {}: {error}", manifest_path.display()))?;
+    let lock = read_lockfile(&lock_path)?;
+    if lock.version != LOCKFILE_VERSION {
+        return Err(format!(
+            "mako.lock format version {} is not supported for integrity verification; run `mako pkg update` to create version {LOCKFILE_VERSION}",
+            lock.version
+        ));
+    }
+
+    let (root_name, root_version) = read_meta(&manifest);
+    let root_name = root_name.unwrap_or_else(|| "root".into());
+    let root_version = root_version.unwrap_or_else(|| "0.1.0".into());
+    let root = lock
+        .packages
+        .iter()
+        .find(|package| package.source == "path" && package.path.as_deref() == Some("."))
+        .ok_or_else(|| {
+            "mako.lock is missing the root package; run `mako pkg update`".to_string()
+        })?;
+    if root.name != root_name || root.version != root_version {
+        return Err(
+            "mako.lock root package does not match mako.toml; run `mako pkg update`".into(),
+        );
+    }
+
+    let locked: HashMap<_, _> = lock
+        .packages
+        .iter()
+        .map(|package| (package.name.as_str(), package))
+        .collect();
+    let mut queue: Vec<(PathBuf, ManifestDep)> = parse_manifest_deps(&manifest)
+        .into_iter()
+        .map(|dependency| (project.to_path_buf(), dependency))
+        .collect();
+    let mut verified_packages: HashMap<String, Arc<VerifiedPackage>> = HashMap::new();
+    let mut verified_roots = VerifiedDependencyRoots::default();
+
+    while let Some((from, dependency)) = queue.pop() {
+        let package = locked.get(dependency.name.as_str()).ok_or_else(|| {
+            format!(
+                "dependency `{}` from {} is not present in mako.lock; run `mako pkg update`",
+                dependency.name,
+                from.display()
+            )
+        })?;
+        if !locked_source_matches(project, &from, &dependency, package)? {
+            return Err(format!(
+                "lockfile source for `{}` does not match mako.toml; run `mako pkg update`",
+                dependency.name
+            ));
+        }
+        if let Some(requirement) = &dependency.version {
+            if !version_satisfies(&package.version, requirement) {
+                return Err(format!(
+                    "lockfile `{}` @ {} does not satisfy `{requirement}`; run `mako pkg update`",
+                    dependency.name, package.version
+                ));
+            }
+        }
+
+        if let Some(verified) = verified_packages.get(&package.name) {
+            verified_roots.insert(&from, package.name.clone(), verified.clone());
+            // The first visit already enqueued this package's dependencies.
+            continue;
+        }
+        let path = package
+            .path
+            .as_deref()
+            .ok_or_else(|| format!("locked dependency `{}` has no path to verify", package.name))?;
+        let full = project.join(path);
+        if !full.exists() {
+            return Err(format!(
+                "locked dependency `{}` is missing at {}; run `mako pkg install`",
+                package.name,
+                full.display()
+            ));
+        }
+        let snapshot = snapshot_path_dep(&full)?;
+        if snapshot.content_hash != package.content_hash {
+            return Err(format!(
+                "package integrity mismatch for `{}` at {}: expected {}, found {}; restore the locked content or run `mako pkg update` if the change is intentional",
+                package.name,
+                full.display(),
+                package.content_hash,
+                snapshot.content_hash
+            ));
+        }
+        let verified = Arc::new(VerifiedPackage::new(&full, snapshot)?);
+        verified_roots.insert(&from, package.name.clone(), verified.clone());
+        verified_packages.insert(package.name.clone(), verified.clone());
+
+        let dependency_dir = if full.is_file() {
+            full.parent().map(Path::to_path_buf)
+        } else {
+            Some(full)
+        };
+        if let Some(dir) = dependency_dir {
+            let manifest = if verified.has_manifest() {
+                Some(verified.read_source(&dir.join("mako.toml"))?.to_string())
+            } else {
+                read_dependency_manifest(&dir)?
+            };
+            if let Some(text) = manifest {
+                queue.extend(
+                    parse_manifest_deps(&text)
+                        .into_iter()
+                        .map(|dependency| (dir.clone(), dependency)),
+                );
+            }
+        }
+    }
+
+    let mut stale: Vec<_> = lock
+        .packages
+        .iter()
+        .filter(|package| {
+            package.name != root.name && !verified_packages.contains_key(&package.name)
+        })
+        .map(|package| package.name.as_str())
+        .collect();
+    if !stale.is_empty() {
+        stale.sort_unstable();
+        return Err(format!(
+            "mako.lock contains dependencies not reachable from mako.toml: {}; run `mako pkg update`",
+            stale.join(", ")
+        ));
+    }
+
+    Ok(Some(verified_roots))
 }
 
 fn validate_lock_value(field: &str, value: &str) -> Result<(), String> {
@@ -1241,6 +1637,141 @@ mod tests {
     }
 
     #[test]
+    fn locked_dependency_tampering_blocks_compilation() {
+        let dir = env::temp_dir().join(format!("mako_pkg_build_verify_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let app = dir.join("app");
+        let util = dir.join("util");
+        fs::create_dir_all(&app).unwrap();
+        fs::create_dir_all(&util).unwrap();
+        fs::write(
+            app.join("mako.toml"),
+            "name = \"app\"\nversion = \"0.1.0\"\n\n[dependencies]\n\"util\" = { path = \"../util\", version = \"1.0.0\" }\n",
+        )
+        .unwrap();
+        let main = app.join("main.mko");
+        fs::write(&main, "fn main() { print_int(util.answer()) }\n").unwrap();
+        fs::write(
+            util.join("mako.toml"),
+            "name = \"util\"\nversion = \"1.0.0\"\n",
+        )
+        .unwrap();
+        let source = util.join("lib.mko");
+        fs::write(&source, "fn answer() -> int { 42 }\n").unwrap();
+
+        let lock = resolve_graph(&app, true).unwrap();
+        write_lockfile(&app, &lock).unwrap();
+        crate::tooling::check_file(&main).unwrap();
+
+        fs::write(&source, "fn answer() -> int { 0 }\n").unwrap();
+        let (ok, report) = crate::tooling::check_file_json_report(&main);
+        assert!(!ok);
+        assert!(
+            report.contains("integrity mismatch"),
+            "unexpected: {report}"
+        );
+        let error = verified_dependency_roots(&app).unwrap_err();
+        assert!(error.contains("integrity mismatch"), "unexpected: {error}");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn locked_transitive_path_is_relative_to_its_manifest() {
+        let dir = env::temp_dir().join(format!(
+            "mako_pkg_transitive_path_{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        let app = dir.join("app");
+        let a = app.join("deps").join("a");
+        let declared_b = a.join("deps").join("b");
+        let wrong_b = app.join("deps").join("b");
+        fs::create_dir_all(&declared_b).unwrap();
+        fs::create_dir_all(&wrong_b).unwrap();
+
+        fs::write(
+            app.join("mako.toml"),
+            "name = \"app\"\nversion = \"0.1.0\"\n\n[dependencies]\n\"a\" = { path = \"deps/a\" }\n",
+        )
+        .unwrap();
+        fs::write(
+            a.join("mako.toml"),
+            "name = \"a\"\nversion = \"1.0.0\"\n\n[dependencies]\n\"b\" = { path = \"deps/b\" }\n",
+        )
+        .unwrap();
+        fs::write(a.join("lib.mko"), "fn marker() -> int { 1 }\n").unwrap();
+        fs::write(
+            declared_b.join("mako.toml"),
+            "name = \"b\"\nversion = \"1.0.0\"\n",
+        )
+        .unwrap();
+        fs::write(
+            declared_b.join("lib.mko"),
+            "fn answer() -> int { 42 }\n",
+        )
+        .unwrap();
+        fs::write(
+            wrong_b.join("mako.toml"),
+            "name = \"b\"\nversion = \"1.0.0\"\n",
+        )
+        .unwrap();
+        fs::write(wrong_b.join("lib.mko"), "fn unrelated() -> int { 0 }\n").unwrap();
+        let main = app.join("main.mko");
+        fs::write(&main, "fn main() { print_int(b.answer()) }\n").unwrap();
+
+        let lock = resolve_graph(&app, true).unwrap();
+        let locked_b = lock
+            .packages
+            .iter()
+            .find(|package| package.name == "b")
+            .unwrap();
+        assert_eq!(locked_b.path.as_deref(), Some("deps/a/deps/b"));
+        write_lockfile(&app, &lock).unwrap();
+
+        let roots = verified_dependency_roots(&app).unwrap().unwrap();
+        assert_eq!(
+            roots.get(&a, "b").map(VerifiedPackage::root),
+            Some(declared_b.as_path())
+        );
+        crate::tooling::check_file(&main).unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn build_verification_rejects_unlocked_manifest_dependencies() {
+        let dir = env::temp_dir().join(format!("mako_pkg_build_lockset_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let app = dir.join("app");
+        let util = dir.join("util");
+        fs::create_dir_all(&app).unwrap();
+        fs::create_dir_all(&util).unwrap();
+        fs::write(
+            app.join("mako.toml"),
+            "name = \"app\"\nversion = \"0.1.0\"\n\n[dependencies]\n\"util\" = { path = \"../util\", version = \"1.0.0\" }\n",
+        )
+        .unwrap();
+        fs::write(
+            util.join("mako.toml"),
+            "name = \"util\"\nversion = \"1.0.0\"\n",
+        )
+        .unwrap();
+        fs::write(util.join("lib.mko"), "fn answer() -> int { 42 }\n").unwrap();
+
+        let mut lock = resolve_graph(&app, true).unwrap();
+        lock.packages
+            .retain(|package| package.path.as_deref() == Some("."));
+        write_lockfile(&app, &lock).unwrap();
+
+        let error = verified_dependency_roots(&app).unwrap_err();
+        assert!(
+            error.contains("not present in mako.lock"),
+            "unexpected: {error}"
+        );
+        assert!(error.contains("mako pkg update"), "unexpected: {error}");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn legacy_lockfile_requires_explicit_update() {
         let dir = env::temp_dir().join(format!("mako_pkg_legacy_{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
@@ -1379,6 +1910,35 @@ content_hash = "{valid_hash}"
     }
 
     #[test]
+    fn lock_paths_are_relative_to_the_project() {
+        #[cfg(windows)]
+        let project = PathBuf::from(r"C:\workspace\app");
+        #[cfg(not(windows))]
+        let project = PathBuf::from("/workspace/app");
+
+        let cases = [
+            (project.clone(), "."),
+            (project.join("deps/a/deps/b"), "deps/a/deps/b"),
+            (project.join("deps/../util"), "util"),
+            (project.parent().unwrap().join("util"), "../util"),
+        ];
+        for (target, expected) in cases {
+            assert_eq!(lock_path_for(&project, &target).unwrap(), expected);
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn lock_paths_reject_targets_on_another_drive() {
+        let error = project_relative_path(Path::new(r"C:\workspace\app"), Path::new(r"D:\util"))
+            .unwrap_err();
+        assert!(
+            error.contains("cannot be expressed relative"),
+            "unexpected: {error}"
+        );
+    }
+
+    #[test]
     fn unreadable_transitive_manifest_is_a_hard_error() {
         let dir = env::temp_dir().join(format!("mako_pkg_manifest_{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
@@ -1494,11 +2054,11 @@ content_hash = "{valid_hash}"
         let reg = effective_registry(&lib);
         fs::write(
             app.join("mako.toml"),
-            format!(
-                "name = \"app\"\nversion = \"0.1.0\"\n\n[dependencies]\n\"util\" = {{ version = \"^1.0.0\" }}\n"
-            ),
+            "name = \"app\"\nversion = \"0.1.0\"\n\n[dependencies]\n\"util\" = { version = \"^1.0.0\" }\n",
         )
         .unwrap();
+        let main = app.join("main.mko");
+        fs::write(&main, "fn main() { print_int(util.add(2, 3)) }\n").unwrap();
         // Copy registry into app or set env — copy for isolation
         let app_reg = app.join(".mako").join("registry");
         copy_dir_recursive(&reg, &app_reg).unwrap();
@@ -1511,6 +2071,12 @@ content_hash = "{valid_hash}"
         assert_eq!(util.path.as_deref(), Some(".mako/deps/util"));
         write_lockfile(&app, &lock).unwrap();
         resolve_graph(&app, false).unwrap();
+        fs::write(
+            app_reg.join("util").join("1.2.0").join("lib.mko"),
+            "fn broken(",
+        )
+        .unwrap();
+        crate::tooling::check_file(&main).unwrap();
         fs::write(
             app.join(".mako").join("deps").join("util").join("lib.mko"),
             "fn add(a: int, b: int) -> int { 0 }\n",
@@ -1548,6 +2114,8 @@ version = "0.1.0"
         )
         .unwrap();
         fs::write(cached.join("lib.mko"), "fn ok() -> int { 1 }\n").unwrap();
+        let main = dir.join("main.mko");
+        fs::write(&main, "fn main() { print_int(util.ok()) }\n").unwrap();
 
         let lock = resolve_graph_with_options(&dir, true, true).unwrap();
         assert!(lock
@@ -1556,7 +2124,14 @@ version = "0.1.0"
             .any(|p| p.name == "util" && p.source == "git" && p.version == "1.2.0"));
         write_lockfile(&dir, &lock).unwrap();
         resolve_graph_with_options(&dir, false, true).unwrap();
+        crate::tooling::check_file(&main).unwrap();
         fs::write(cached.join("lib.mko"), "fn ok() -> int { 0 }\n").unwrap();
+        let (ok, build_error) = crate::tooling::check_file_json_report(&main);
+        assert!(!ok);
+        assert!(
+            build_error.contains("integrity mismatch"),
+            "unexpected: {build_error}"
+        );
         let error = resolve_graph_with_options(&dir, false, true).unwrap_err();
         assert!(error.contains("integrity mismatch"), "unexpected: {error}");
         let _ = fs::remove_dir_all(&dir);

@@ -2843,26 +2843,51 @@ fn path_dep_identity(dep_root: &Path) -> PathBuf {
 }
 
 /// Merge path + fetched-git deps declared in `manifest_dir/mako.toml` (transitive).
-/// Each package is namespaced by the name its *parent* declared: call `helper.add(...)`.
+/// Locked builds use only roots verified for the declaring manifest; an absent
+/// verified root is an error. Each package is namespaced by the name its *parent*
+/// declared: call `helper.add(...)`.
 fn merge_path_deps_from_manifest(
     manifest_dir: &Path,
     program: &mut Program,
     seen_pkgs: &mut std::collections::HashSet<PathBuf>,
     seen_sources: &mut std::collections::HashSet<PathBuf>,
+    locked_roots: Option<&crate::pkg::VerifiedDependencyRoots>,
 ) -> Result<(), String> {
     let manifest = manifest_dir.join("mako.toml");
-    if !manifest.exists() {
+    let verified_manifest =
+        locked_roots.and_then(|roots| roots.package_for_path(&manifest));
+    if !manifest.exists() && verified_manifest.is_none() {
         return Ok(());
     }
-    let text =
-        fs::read_to_string(&manifest).map_err(|e| format!("read {}: {e}", manifest.display()))?;
+    let text = match verified_manifest {
+        Some(package) => package.read_source(&manifest)?.to_string(),
+        None => fs::read_to_string(&manifest)
+            .map_err(|e| format!("read {}: {e}", manifest.display()))?,
+    };
     for dep in parse_manifest_deps(&text) {
-        let full = resolve_dep_root(manifest_dir, &dep)?;
+        let verified = match locked_roots {
+            Some(roots) => Some(roots.get(manifest_dir, &dep.name).ok_or_else(|| {
+                    format!(
+                        "locked dependency `{}` from {} was not verified; refusing an unlocked build",
+                        dep.name,
+                        manifest_dir.display()
+                    )
+                })?),
+            None => None,
+        };
+        let full = match verified {
+            Some(package) => package.root().to_path_buf(),
+            None => resolve_dep_root(manifest_dir, &dep)?,
+        };
         let pkg_id = path_dep_identity(&full);
         if !seen_pkgs.insert(pkg_id) {
             continue; // already merged this package (cycle or diamond)
         }
-        let sources = collect_path_dep_sources(&dep.name, &full).map_err(|e| {
+        let sources = match verified {
+            Some(package) => package.library_sources(),
+            None => collect_path_dep_sources(&dep.name, &full),
+        }
+        .map_err(|e| {
             if dep.is_git() && !full.exists() {
                 format!(
                     "git dep `{}` MISSING: {} — run `mako pkg fetch` first (needs git + network)",
@@ -2875,13 +2900,18 @@ fn merge_path_deps_from_manifest(
         })?;
         let mut pkg_prog = Program { items: Vec::new() };
         for src in sources {
-            let canon = src
-                .canonicalize()
-                .map_err(|e| format!("dep `{}` MISSING: {} ({e})", dep.name, src.display()))?;
+            let canon = if verified.is_some() {
+                src
+            } else {
+                src.canonicalize().unwrap_or(src)
+            };
             if !seen_sources.insert(canon.clone()) {
                 continue;
             }
-            let mut imported = parse_program_file(&canon)?;
+            let mut imported = match locked_roots {
+                Some(roots) => parse_program_file_verified(&canon, roots)?,
+                None => parse_program_file(&canon)?,
+            };
             strip_main_fn(&mut imported);
             pkg_prog.items.extend(imported.items);
         }
@@ -2896,8 +2926,17 @@ fn merge_path_deps_from_manifest(
             Some(full.clone())
         };
         if let Some(dir) = next_dir {
-            if dir.join("mako.toml").exists() {
-                merge_path_deps_from_manifest(&dir, program, seen_pkgs, seen_sources)?;
+            let has_manifest = verified
+                .map(crate::pkg::VerifiedPackage::has_manifest)
+                .unwrap_or_else(|| dir.join("mako.toml").exists());
+            if has_manifest {
+                merge_path_deps_from_manifest(
+                    &dir,
+                    program,
+                    seen_pkgs,
+                    seen_sources,
+                    locked_roots,
+                )?;
             }
         }
     }
@@ -2910,6 +2949,7 @@ pub fn merge_path_dependencies(entry: &Path, mut program: Program) -> Result<Pro
     let Some(manifest_dir) = find_nearest_manifest_dir(entry) else {
         return Ok(program);
     };
+    let locked_roots = crate::pkg::verified_dependency_roots(&manifest_dir)?;
     let mut seen_pkgs = std::collections::HashSet::new();
     let mut seen_sources = std::collections::HashSet::new();
     if let Ok(c) = entry.canonicalize() {
@@ -2926,6 +2966,7 @@ pub fn merge_path_dependencies(entry: &Path, mut program: Program) -> Result<Pro
         &mut program,
         &mut seen_pkgs,
         &mut seen_sources,
+        locked_roots.as_ref(),
     )?;
     Ok(program)
 }
@@ -2935,22 +2976,38 @@ pub fn merge_path_dependencies(entry: &Path, mut program: Program) -> Result<Pro
 /// When importer `mako.toml` has `visibility = "explicit"`, only `export`/capital
 /// items from pulled packs are merged.
 pub fn resolve_imports(from_file: &Path, program: Program) -> Result<Program, String> {
+    resolve_imports_with_verified(from_file, program, None)
+}
+
+fn resolve_imports_with_verified(
+    from_file: &Path,
+    program: Program,
+    locked_roots: Option<&crate::pkg::VerifiedDependencyRoots>,
+) -> Result<Program, String> {
     let mut seen = std::collections::HashSet::new();
     if let Some(canon) = from_file.canonicalize().ok() {
         seen.insert(canon);
     } else {
         seen.insert(from_file.to_path_buf());
     }
-    let explicit = read_visibility_explicit(from_file);
-    resolve_imports_rec(from_file, program, &mut seen, explicit)
+    let explicit = read_visibility_explicit(from_file, locked_roots);
+    resolve_imports_rec(from_file, program, &mut seen, explicit, locked_roots)
 }
 
 /// `visibility = "explicit"` from nearest `mako.toml` (importer).
-fn read_visibility_explicit(from_file: &Path) -> bool {
+fn read_visibility_explicit(
+    from_file: &Path,
+    locked_roots: Option<&crate::pkg::VerifiedDependencyRoots>,
+) -> bool {
     let Some(dir) = find_nearest_manifest_dir(from_file) else {
         return false;
     };
-    let Ok(text) = fs::read_to_string(dir.join("mako.toml")) else {
+    let manifest = dir.join("mako.toml");
+    let text = match locked_roots.and_then(|roots| roots.package_for_path(&manifest)) {
+        Some(package) => package.read_source(&manifest).map(str::to_string),
+        None => fs::read_to_string(&manifest).map_err(|error| error.to_string()),
+    };
+    let Ok(text) = text else {
         return false;
     };
     for line in text.lines() {
@@ -2999,6 +3056,7 @@ fn resolve_imports_rec(
     program: Program,
     seen: &mut std::collections::HashSet<PathBuf>,
     explicit_visibility: bool,
+    locked_roots: Option<&crate::pkg::VerifiedDependencyRoots>,
 ) -> Result<Program, String> {
     let base = from_file
         .parent()
@@ -3008,7 +3066,7 @@ fn resolve_imports_rec(
     for item in program.items {
         match item {
             Item::Import { path, alias, mode } => {
-                let targets = resolve_import_targets(&base, &path)?;
+                let targets = resolve_import_targets(&base, &path, locked_roots)?;
                 // Package-per-directory: merge all units first, then qualify once so
                 // cross-file calls (more.mko → greet in lib.mko) rewrite correctly.
                 let mut pkg_prog = Program { items: Vec::new() };
@@ -3016,14 +3074,21 @@ fn resolve_imports_rec(
                 let mut path_alias: Option<String> = None;
                 let mut any_new = false;
                 for target in &targets {
-                    let canon = target.canonicalize().map_err(|e| {
-                        format!("import \"{path}\": cannot open {}: {e}", target.display())
-                    })?;
+                    let canon = if locked_roots
+                        .and_then(|roots| roots.package_for_path(target))
+                        .is_some()
+                    {
+                        target.clone()
+                    } else {
+                        target.canonicalize().map_err(|e| {
+                            format!("import \"{path}\": cannot open {}: {e}", target.display())
+                        })?
+                    };
                     if !seen.insert(canon.clone()) {
                         continue; // already merged (cycle or duplicate)
                     }
                     any_new = true;
-                    let imported = parse_program_file_raw(&canon)?;
+                    let imported = parse_program_file_raw(&canon, locked_roots)?;
                     if pkg_name.is_none() {
                         pkg_name = package_name_of(&imported);
                     } else if let (Some(a), Some(b)) = (&pkg_name, package_name_of(&imported)) {
@@ -3038,8 +3103,13 @@ fn resolve_imports_rec(
                     if path_alias.is_none() {
                         path_alias = path_default_alias(&path, target);
                     }
-                    let mut unit =
-                        resolve_imports_rec(&canon, imported, seen, explicit_visibility)?;
+                    let mut unit = resolve_imports_rec(
+                        &canon,
+                        imported,
+                        seen,
+                        explicit_visibility,
+                        locked_roots,
+                    )?;
                     unit.items
                         .retain(|i| !matches!(i, Item::Package { .. } | Item::Import { .. }));
                     pkg_prog.items.extend(unit.items);
@@ -3118,7 +3188,11 @@ fn path_default_alias(import_path: &str, resolved: &Path) -> Option<String> {
 /// Resolve `import "./x.mko"`, `import "./pkg"`, `import "strings"`,
 /// `import "encoding/json"`, or module paths (`github.com/…`, `izi-iva/pkg/…`).
 /// Returns one or more source files (directory packages may expand to lib + siblings).
-fn resolve_import_targets(base: &Path, path: &str) -> Result<Vec<PathBuf>, String> {
+fn resolve_import_targets(
+    base: &Path,
+    path: &str,
+    locked_roots: Option<&crate::pkg::VerifiedDependencyRoots>,
+) -> Result<Vec<PathBuf>, String> {
     let is_rel = path.starts_with("./")
         || path.starts_with("../")
         || path.starts_with('/')
@@ -3130,20 +3204,20 @@ fn resolve_import_targets(base: &Path, path: &str) -> Result<Vec<PathBuf>, Strin
         } else {
             base.join(rel)
         };
-        return sources_at_path(&target)
+        return sources_at_path(&target, locked_roots)
             .map_err(|e| format!("import \"{path}\": {e}"));
     }
     let pkg = path.trim_matches('/');
 
     // 1) Std: `strings`, `encoding/json`, `net/http`, …
     if let Some(std_root) = find_std_root() {
-        if let Ok(srcs) = sources_under_root(&std_root, pkg) {
+        if let Ok(srcs) = sources_under_root(&std_root, pkg, locked_roots) {
             return Ok(srcs);
         }
     }
 
     // 2) Module / vendor / dependency paths (Go-style import paths)
-    if let Ok(srcs) = resolve_module_import_path(base, pkg) {
+    if let Ok(srcs) = resolve_module_import_path(base, pkg, locked_roots) {
         return Ok(srcs);
     }
 
@@ -3157,20 +3231,38 @@ fn resolve_import_targets(base: &Path, path: &str) -> Result<Vec<PathBuf>, Strin
 }
 
 /// Prefer package directory (all units), else single-file `root/pkg.mko`.
-fn sources_under_root(root: &Path, pkg: &str) -> Result<Vec<PathBuf>, String> {
+fn sources_under_root(
+    root: &Path,
+    pkg: &str,
+    locked_roots: Option<&crate::pkg::VerifiedDependencyRoots>,
+) -> Result<Vec<PathBuf>, String> {
     let dir = root.join(pkg);
-    if dir.is_dir() {
+    if dir.is_dir()
+        || locked_roots
+            .and_then(|roots| roots.package_for_path(&dir))
+            .is_some()
+    {
         // Package-per-directory: every non-test .mko in the dir is one package.
-        return package_dir_sources(&dir);
+        return sources_at_path(&dir, locked_roots);
     }
     let as_file = root.join(format!("{pkg}.mko"));
-    if as_file.is_file() {
+    if as_file.is_file()
+        || locked_roots
+            .and_then(|roots| roots.package_for_path(&as_file))
+            .is_some()
+    {
         return Ok(vec![as_file]);
     }
     Err(format!("no sources for `{pkg}` under {}", root.display()))
 }
 
-fn sources_at_path(target: &Path) -> Result<Vec<PathBuf>, String> {
+fn sources_at_path(
+    target: &Path,
+    locked_roots: Option<&crate::pkg::VerifiedDependencyRoots>,
+) -> Result<Vec<PathBuf>, String> {
+    if let Some(package) = locked_roots.and_then(|roots| roots.package_for_path(target)) {
+        return package.source_paths_at(target);
+    }
     if target.is_file() {
         return Ok(vec![target.to_path_buf()]);
     }
@@ -3178,6 +3270,9 @@ fn sources_at_path(target: &Path) -> Result<Vec<PathBuf>, String> {
         return package_dir_sources(target);
     }
     let with_ext = target.with_extension("mko");
+    if let Some(package) = locked_roots.and_then(|roots| roots.package_for_path(&with_ext)) {
+        return package.source_paths_at(&with_ext);
+    }
     if with_ext.is_file() {
         return Ok(vec![with_ext]);
     }
@@ -3192,20 +3287,40 @@ fn sources_at_path(target: &Path) -> Result<Vec<PathBuf>, String> {
 /// - `module = "izi-iva"` → `izi-iva/pkg/acd` maps to `<root>/pkg/acd`
 /// - `vendor/<path>/`
 /// - `.mako/pkg/<path>/`
-fn resolve_module_import_path(from_dir: &Path, path: &str) -> Result<Vec<PathBuf>, String> {
-    let Some(manifest_dir) = find_nearest_manifest_dir(from_dir) else {
+fn resolve_module_import_path(
+    from_dir: &Path,
+    path: &str,
+    locked_roots: Option<&crate::pkg::VerifiedDependencyRoots>,
+) -> Result<Vec<PathBuf>, String> {
+    let verified_package = locked_roots.and_then(|roots| roots.package_for_path(from_dir));
+    let manifest_dir = verified_package
+        .and_then(crate::pkg::VerifiedPackage::manifest_dir)
+        .map(Path::to_path_buf)
+        .or_else(|| find_nearest_manifest_dir(from_dir));
+    let Some(manifest_dir) = manifest_dir else {
         return Err("no mako.toml for module resolution".into());
     };
     let manifest = manifest_dir.join("mako.toml");
-    let text = fs::read_to_string(&manifest).unwrap_or_default();
+    let text = match verified_package {
+        Some(package) if package.has_manifest() => package.read_source(&manifest)?.to_string(),
+        _ => fs::read_to_string(&manifest).unwrap_or_default(),
+    };
 
     // Dependency keyed by full import path
     for dep in parse_manifest_deps(&text) {
         if dep.name == path {
-            let root = resolve_dep_root(&manifest_dir, &dep)?;
-            return sources_at_path(&root).or_else(|_| {
+            let root = match locked_roots {
+                Some(roots) => roots
+                    .get(&manifest_dir, &dep.name)
+                    .map(|package| package.root().to_path_buf())
+                    .ok_or_else(|| {
+                        format!("locked dependency `{path}` was not verified for import")
+                    })?,
+                None => resolve_dep_root(&manifest_dir, &dep)?,
+            };
+            return sources_at_path(&root, locked_roots).or_else(|_| {
                 if root.is_dir() {
-                    package_dir_sources(&root)
+                    sources_at_path(&root, locked_roots)
                 } else {
                     Err(format!("dep `{path}` has no .mko sources at {}", root.display()))
                 }
@@ -3221,7 +3336,7 @@ fn resolve_module_import_path(from_dir: &Path, path: &str) -> Result<Vec<PathBuf
         let prefix = format!("{mod_path}/");
         if let Some(rest) = path.strip_prefix(&prefix) {
             let target = manifest_dir.join(rest);
-            if let Ok(srcs) = sources_at_path(&target) {
+            if let Ok(srcs) = sources_at_path(&target, locked_roots) {
                 return Ok(srcs);
             }
         }
@@ -3229,13 +3344,13 @@ fn resolve_module_import_path(from_dir: &Path, path: &str) -> Result<Vec<PathBuf
 
     // vendor/<import path>
     let vendor = manifest_dir.join("vendor").join(path);
-    if let Ok(srcs) = sources_at_path(&vendor) {
+    if let Ok(srcs) = sources_at_path(&vendor, locked_roots) {
         return Ok(srcs);
     }
 
     // .mako/pkg/<import path> (fetched modules)
     let cached = manifest_dir.join(".mako").join("pkg").join(path);
-    if let Ok(srcs) = sources_at_path(&cached) {
+    if let Ok(srcs) = sources_at_path(&cached, locked_roots) {
         return Ok(srcs);
     }
 
@@ -3369,7 +3484,7 @@ pub fn merge_package_dir_siblings(entry: &Path, mut program: Program) -> Result<
             continue;
         }
         // Load sibling with its own imports; do not re-merge path deps (caller owns that).
-        let mut extra = parse_program_file_raw(&sib)
+        let mut extra = parse_program_file_raw(&sib, None)
             .map_err(|e| format!("{}: {e}", sib.display()))?;
         extra = resolve_imports(&sib, extra)
             .map_err(|e| format!("{}: {e}", sib.display()))?;
@@ -3449,16 +3564,30 @@ pub fn find_std_root() -> Option<PathBuf> {
 }
 
 /// Parse + desugar without resolving imports (used by import recursion).
-fn parse_program_file_raw(path: &Path) -> Result<Program, String> {
-    let src = fs::read_to_string(path).map_err(|e| e.to_string())?;
+fn parse_program_file_raw(
+    path: &Path,
+    locked_roots: Option<&crate::pkg::VerifiedDependencyRoots>,
+) -> Result<Program, String> {
+    let src = match locked_roots.and_then(|roots| roots.package_for_path(path)) {
+        Some(package) => package.read_source(path)?.to_string(),
+        None => fs::read_to_string(path).map_err(|e| e.to_string())?,
+    };
     let tokens = Lexer::new(&src).tokenize().map_err(|e| format!("{e}"))?;
     let program = Parser::new(tokens).parse().map_err(|e| format!("{e}"))?;
     Ok(desugar::desugar(program))
 }
 
 pub fn parse_program_file(path: &Path) -> Result<Program, String> {
-    let program = parse_program_file_raw(path)?;
+    let program = parse_program_file_raw(path, None)?;
     resolve_imports(path, program)
+}
+
+fn parse_program_file_verified(
+    path: &Path,
+    locked_roots: &crate::pkg::VerifiedDependencyRoots,
+) -> Result<Program, String> {
+    let program = parse_program_file_raw(path, Some(locked_roots))?;
+    resolve_imports_with_verified(path, program, Some(locked_roots))
 }
 
 /// Merge test file with same-directory package sources; strip `main` (harness provides it).
@@ -3567,6 +3696,116 @@ fn glob_match(pat: &str, text: &str) -> bool {
         }
     }
     rec(&p, &t)
+}
+
+#[cfg(test)]
+mod locked_dependency_tests {
+    use super::*;
+
+    #[test]
+    fn locked_merge_does_not_fall_back_to_unverified_paths() {
+        let dir = std::env::temp_dir().join(format!(
+            "mako_locked_merge_{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        let app = dir.join("app");
+        let util = dir.join("util");
+        fs::create_dir_all(&app).unwrap();
+        fs::create_dir_all(&util).unwrap();
+        fs::write(
+            app.join("mako.toml"),
+            "name = \"app\"\nversion = \"0.1.0\"\n\n[dependencies]\n\"util\" = { path = \"../util\" }\n",
+        )
+        .unwrap();
+        fs::write(util.join("lib.mko"), "fn answer() -> int { 42 }\n").unwrap();
+
+        let mut program = Program { items: Vec::new() };
+        let mut seen_packages = std::collections::HashSet::new();
+        let mut seen_sources = std::collections::HashSet::new();
+        let roots = crate::pkg::VerifiedDependencyRoots::default();
+        let error = merge_path_deps_from_manifest(
+            &app,
+            &mut program,
+            &mut seen_packages,
+            &mut seen_sources,
+            Some(&roots),
+        )
+        .unwrap_err();
+        assert!(error.contains("was not verified"), "unexpected: {error}");
+        assert!(
+            error.contains("refusing an unlocked build"),
+            "unexpected: {error}"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn locked_merge_compiles_the_verified_source_snapshot() {
+        let dir = std::env::temp_dir().join(format!(
+            "mako_locked_snapshot_{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        let app = dir.join("app");
+        let util = dir.join("util");
+        let internal = util.join("internal");
+        fs::create_dir_all(&app).unwrap();
+        fs::create_dir_all(&internal).unwrap();
+        fs::write(
+            app.join("mako.toml"),
+            "name = \"app\"\nversion = \"0.1.0\"\n\n[dependencies]\n\"util\" = { path = \"../util\" }\n",
+        )
+        .unwrap();
+        fs::write(
+            util.join("mako.toml"),
+            "name = \"util\"\nversion = \"1.0.0\"\n",
+        )
+        .unwrap();
+        fs::write(
+            app.join("main.mko"),
+            "fn main() { print_int(util.answer()) }\n",
+        )
+        .unwrap();
+        let lib = util.join("lib.mko");
+        let imported = internal.join("value.mko");
+        fs::write(
+            &lib,
+            "pull \"./internal/value.mko\"\nfn answer() -> int { internal.value() }\n",
+        )
+        .unwrap();
+        fs::write(&imported, "pack internal\nfn value() -> int { 42 }\n").unwrap();
+
+        let lock = crate::pkg::resolve_graph(&app, true).unwrap();
+        crate::pkg::write_lockfile(&app, &lock).unwrap();
+        let roots = crate::pkg::verified_dependency_roots(&app)
+            .unwrap()
+            .unwrap();
+
+        fs::write(&lib, "fn broken(").unwrap();
+        fs::write(&imported, "fn also_broken(").unwrap();
+
+        let mut program = Program { items: Vec::new() };
+        merge_path_deps_from_manifest(
+            &app,
+            &mut program,
+            &mut std::collections::HashSet::new(),
+            &mut std::collections::HashSet::new(),
+            Some(&roots),
+        )
+        .unwrap();
+        assert!(
+            program
+                .items
+                .iter()
+                .any(|item| matches!(item, Item::Fn(function) if function.name == "util__answer"))
+        );
+
+        let (ok, report) = check_file_json_report(&app.join("main.mko"));
+        assert!(!ok);
+        assert!(report.contains("integrity mismatch"), "unexpected: {report}");
+        let _ = fs::remove_dir_all(&dir);
+    }
 }
 
 #[cfg(test)]

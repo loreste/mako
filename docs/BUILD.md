@@ -27,7 +27,9 @@ Fingerprints include: compiler cache version, **full source + transitive deps**,
 | `MAKO_CACHE` | Override cache root |
 | `MAKO_CACHE_LOG=1` | Print HIT/MISS lines |
 
-Wired into `mako build`, `mako check`, and `mako run`.
+Wired into `mako build`, `mako check`, and `mako run`. When `mako.lock` exists,
+locked dependencies are rehashed before dependency loading or cache reuse, and
+compilation uses the verified source snapshot rather than reopening those files.
 
 ## Parallelism
 
