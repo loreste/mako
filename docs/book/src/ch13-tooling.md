@@ -393,7 +393,9 @@ Package management commands for dependencies declared in `mako.toml`.
 mako pkg init mylib                  # create a new package scaffold
 mako pkg list                        # show dependencies and their status
 mako pkg fetch                       # clone git dependencies into .mako/deps/
-mako pkg lock                        # pin content hashes in mako.lock
+mako pkg lock                        # pin SHA-256 content hashes in mako.lock
+mako pkg install                     # verify and install locked dependencies
+mako pkg update                      # accept changes / migrate v1 locks
 mako pkg add helper ../helper        # add a path dependency
 mako pkg add path=../helper          # same (name from directory basename)
 mako pkg remove helper               # remove a dependency

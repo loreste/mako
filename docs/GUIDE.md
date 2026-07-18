@@ -136,7 +136,9 @@ mako pkg fetch                      # clone git deps into `.mako/deps/` (needs g
 mako pkg add helper ../helper       # record / update path dep in [dependencies]
 mako pkg add path=../helper         # same; name from basename
 mako pkg remove helper              # drop a [dependencies] entry
-mako pkg lock                       # pin content_hash in mako.lock
+mako pkg lock                       # write SHA-256 content hashes to mako.lock
+mako pkg install                    # reuse the lock and verify dependency content
+mako pkg update                     # accept intentional changes / migrate v1 locks
 mako pkg audit                      # offline advisory + license policy check
 ```
 

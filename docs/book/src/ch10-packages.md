@@ -336,23 +336,35 @@ Generate or update the lockfile (`mako.lock`):
 mako pkg lock
 ```
 
-The lockfile pins exact versions and git commit hashes for reproducible builds:
+Lockfile version 2 pins exact versions and deterministic SHA-256 hashes of each
+dependency's manifest and recursive `.mko` sources:
 
 ```toml
 # mako.lock (auto-generated, do not edit)
+version = 2
+
 [[package]]
 name = "helper"
 version = "0.1.0"
-source = "path:../helper"
+source = "path"
+path = "../helper"
+content_hash = "sha256:99f6a808da075bdcda271838491b9383c1e20a3be7fdb724770e4f4f18a42d14"
 
 [[package]]
 name = "logger"
 version = "0.2.0"
-source = "git:https://github.com/org/mako-logger.git#abc1234"
+source = "git"
+path = ".mako/deps/logger"
+git = "https://github.com/org/mako-logger.git"
+rev = "abc1234"
+content_hash = "sha256:2a78b67c8f640e71c4ef635bdf6f28c59ad31977f4041e1d7b5c3a01d5d78f2e"
 ```
 
 Commit `mako.lock` to version control for reproducible builds across
-environments.
+environments. `mako pkg install` verifies locked dependency content and fails
+on a mismatch, an unreadable transitive manifest, or malformed lock metadata.
+Inspect intentional changes before accepting them with `mako pkg update`; that
+command also migrates legacy version 1 lockfiles.
 
 ### mako pkg update
 
@@ -366,7 +378,8 @@ mako pkg update
 mako pkg update logger
 ```
 
-Re-resolves versions within SemVer constraints and updates `mako.lock`.
+Re-resolves versions within SemVer constraints, recomputes integrity hashes,
+and updates `mako.lock`.
 
 ### mako pkg list
 
