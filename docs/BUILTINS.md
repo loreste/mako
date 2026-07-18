@@ -56,6 +56,26 @@ Packs: `std/fmt`, `std/print`. Tests: `fmt_print_test.mko`. Demo: `examples/fmt_
 
 ## 2. Strings
 
+### `string` vs `string_view` (SAFE-005)
+
+| Type | Role |
+|------|------|
+| `string` | Owning heap string (or empty singleton). Free on scope exit / reassign. |
+| `string_view` | Non-owning view of bytes (same C header as `string`). **Never free.** |
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `str_as_view` | `str_as_view(s: string) -> string_view` | Zero-copy view of an owned string (must not outlive `s`) |
+| `str_to_owned` | `str_to_owned(v: string_view) -> string` | Clone a view into an owning string |
+| `len` | `len(s: string \| string_view \| …) -> int` | Byte length (also arrays/maps) |
+
+```mko
+let v: string_view = "hello"      // points into .rodata; no free
+let s = f"x{1}"                   // owned
+let w = str_as_view(s)            // view of s
+let o = str_to_owned(v)           // owned clone
+```
+
 | Function | Signature | Description |
 |----------|-----------|-------------|
 | `str_len` | `str_len(s: string) -> int` | Return byte length of a string |
@@ -965,7 +985,9 @@ Tests: `chan_struct_test`, `chan_make_struct_test`, `chan_float_test`,
 | Construct | Meaning |
 |-----------|---------|
 | `crew t { … }` | Structured scope; ordinary kicked tasks are cooperatively cancel-joined on exit (blocked C/FFI may delay join) |
-| `t.kick(f(args…))` | Spawn on crew; returns `Job[R]` |
+| `t.kick(f(args…))` | Spawn on crew; returns `Job[R]`. Uses scheduler pool when `sched_set_workers(n>0)` |
+| `sched_set_workers` | `sched_set_workers(n: int) -> void` | RT-002: opt-in pool of `n` workers (0 = one pthread per kick, default) |
+| `sched_workers` | `sched_workers() -> int` | Current configured worker count |
 | `job.join()` / `join(job)` | Wait for result of type `R` |
 | `job.join_timeout(ms)` | Timed join → **`Result[R, string]`** (`Ok`/`Err("timeout")`). If `R` is already `Result[T, string]`, **flattens** (no nest). |
 | `job.join_deadline(dl)` | Same as `join_timeout`, but `dl` is absolute mono deadline from `deadline_ms`/`deadline_ns` |
@@ -1321,6 +1343,8 @@ or a dedicated reply socket — do not share one `GameUDP` handle across workers
 |----------|-----------|-------------|
 | `runtime_stats_json` | `runtime_stats_json() -> string` | Return runtime statistics as JSON |
 | `runtime_stats_reset` | `runtime_stats_reset() -> void` | Reset runtime statistics counters |
+| `sched_set_workers` | `sched_set_workers(n: int) -> void` | Bounded worker pool for kicks (see §24) |
+| `sched_workers` | `sched_workers() -> int` | Configured worker count |
 | `exit` | `exit(code: int) -> void` | Exit the process with a status code |
 | `leak_mark` | `leak_mark() -> int` | Mark current allocation state for leak detection |
 | `leak_bytes_since` | `leak_bytes_since(mark: int) -> int` | Bytes allocated since a leak mark |
@@ -1347,6 +1371,8 @@ Prefer over `m[k] = v` on bulk-insert hot paths when the key is an owned tempora
 | `chan_str_try_send_take` | `chan_str_try_send_take(ch: chan[string], v: string) -> int` | Non-blocking move; 1 queued, 0 full/closed (**consumes** `v` either way) |
 
 Default `ch.send(s)` still clones so the caller may reuse `s`. Prefer take on producer hot paths with owned temporaries.
+
+**Ownership:** take-send always consumes the local (success → channel owns; failure → runtime frees). Do not use the variable after take. See [MEMORY_MODEL.md](MEMORY_MODEL.md#5-channel-ownership-rt-004). Tests: `channel_ownership_test`.
 
 | Function | Signature | Description |
 |----------|-----------|-------------|

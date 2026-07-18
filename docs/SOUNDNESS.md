@@ -169,22 +169,23 @@ Related: [SECURITY.md](SECURITY.md) · [MEMORY_MODEL.md](MEMORY_MODEL.md) ·
 
 ## Implementation order
 
-### Shipped (0.2.4+)
+### Shipped (0.2.4)
 
 1. **SAFE-001 / 002 / 009 / 010 / RT-001 / RT-005 seed / RT-006** — bounds, categories, CMap, docs, crew, census.
 2. **SAFE-003 / 004** — owning slice/map free (built-in + monomorph); views; return transfer; free-on-reassign; nested free (safe).
-3. **SAFE-006 (break/continue/return/`?`)** — loop-exit cleanup; return transfer + materialize; `?` early free.
-4. **SAFE-007** — arena return/store escape; slice view escape/return.
-5. **RT-004 seed** — `channel_ownership_test`.
-6. **Lang safety** — field/index mut roots; temp lvalue reject; empty `[]` lit.
+3. **SAFE-005** — `string_view` + owning string free.
+4. **SAFE-006 (break/continue/return/`?`)** — loop-exit cleanup; return transfer + materialize; `?` early free.
+5. **SAFE-007 / 008** — arena/slice escape; capture matrix.
+6. **RT-002 / 003 / 004** — scheduler pool + spawn_blocking; channel take-send ownership.
+7. **Struct Own free** — deep free of string/slice fields on drop.
+8. **Lang safety** — field/index mut roots; temp lvalue reject; empty `[]` lit; stack POD lits.
 
-### Remaining (0.2.4+)
+### Remaining (optional depth / 0.2.5+)
 
 1. Longer TSan soak jobs on capture matrix (CI optional).
-2. RT-004 monomorph channel matrix beyond int/float/string.
+2. RT-004 monomorph channel take matrix beyond int/float/string.
 3. Deeper scheduler (dynamic resize, work-stealing) if pool soaks demand it.
-5. Nested Own fields inside structs (header free vs deep field free).
-6. **RT-005** — randomized longer soaks.
+4. **RT-005** — randomized longer soaks.
 
 See also [ROADMAP.md](ROADMAP.md) · [ROADMAP_IMPL.md](../ROADMAP_IMPL.md).
 

@@ -116,7 +116,27 @@ Override headers if needed: `export MAKO_RUNTIME=/path/to/runtime`.
 
 Incremental builds are **on by default** (`-j` / `MAKO_JOBS`, `--no-incremental` to disable) — see [BUILD.md](BUILD.md). Release: `mako build --release` → `-O3 -flto` ([PERFORMANCE.md](PERFORMANCE.md): optimized on microbenches).
 
-For speed: pre-size `make([]T, 0, n)` / `make(map[K]V, n)`, use arenas for request scope, prefer `hold` over `share`, measure with `now_ns` + `./scripts/bench.sh`.
+For speed: pre-size `make([]T, 0, n)` / `make(map[K]V, n)`, use arenas for request
+scope, prefer `hold` over `share`, short-lived POD lits stay on the stack
+(`[a,b,c]`), use `string_view` / `str_as_view` for zero-copy reads, measure with
+`now_ns` + `./scripts/bench.sh`. See [SPEED.md](SPEED.md) · [SOUNDNESS.md](SOUNDNESS.md).
+
+```mko
+// Ownership (0.2.4): free at scope exit; views never free
+let mut xs = make([]int, 0, 16)
+xs = append(xs, 1)
+let v: string_view = "route"     // no malloc, no free
+let s = f"id={1}"                // owned; freed at end of scope
+let w = str_as_view(s)
+
+// Scheduler (opt-in pool)
+sched_set_workers(4)
+crew t {
+    let j = t.kick(work(1))
+    print_int(j.join())
+}
+sched_set_workers(0)
+```
 
 From a source tree without installing:
 

@@ -13,7 +13,7 @@ Summary roadmap: **[docs/ROADMAP.md](docs/ROADMAP.md)**.
 
 ---
 
-## Soundness program (SAFE / RT) — **core shipped; residuals active**
+## Soundness program (SAFE / RT) — **shipped in 0.2.4**
 
 ### Audit 2026-07-18 (bugs found & fixed)
 

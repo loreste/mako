@@ -57,6 +57,8 @@ structured crews, parameterized DB) remain part of the default contract.
 | Empty `[]` / `make([],0,0)` | **No heap** — `{NULL,0,0}` until first grow |
 | Escape (return / store / map set) | `mako_*_array_to_owned` — identity if already heap-owned; copy views only |
 | Slice free | `MAKO_UNLIKELY(cap>0)` — free is cold; views and stack lits are no-ops |
+| `string_view` / `str_as_view` | **Zero-copy** reads; never free the view |
+| `sched_set_workers(n)` | Opt-in pool reuses worker threads for kicks (default n=0 = one pthread each) |
 
 **Ownership without a speed tax:** keep short-lived POD slices as stack views in
 tight loops; only pay for a heap copy when the value escapes. Prefer

@@ -5,9 +5,10 @@ ownership rules (`hold`/`share`) and region-based allocation (`arena`). This
 guide explains when to use each strategy; generated C and FFI remain outside
 the Mako type system.
 
-**Deeper contracts:** ownership categories and SAFE/RT drop/escape work are
-tracked in [SOUNDNESS.md](../SOUNDNESS.md). Slice/map auto-free at scope exit
-and arena escape rules are summarized there.
+**Deeper contracts:** ownership categories and SAFE/RT drop/escape rules are
+in [SOUNDNESS.md](../SOUNDNESS.md) and [MEMORY_MODEL.md](../MEMORY_MODEL.md).
+As of **0.2.4**, owning slices, maps, strings, and struct Own fields free at
+scope exit, reassign, break/continue, return transfer, and `?` early-return.
 
 ## Default bindings
 
@@ -17,9 +18,17 @@ Regular `let` bindings are the simplest form. They work like stack values:
 let x = 42              // immutable
 let mut y = 10          // mutable
 y = y + 1
+
+let mut s = make([]int, 0, 8)
+s = append(s, 1)        // s freed at end of scope
+
+let v: string_view = "route"   // zero-copy view — never free
+let owned = f"id={1}"          // owning string — free at scope exit
+let w = str_as_view(owned)
 ```
 
-For most local computation, this is all you need.
+For most local computation, this is all you need. Prefer `string_view` for
+read-only hot paths; use `make([]T, 0, n)` when you will grow.
 
 ## hold -- unique ownership
 
