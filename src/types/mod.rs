@@ -276,6 +276,10 @@ pub struct TypeChecker {
     const_strs: HashMap<String, String>,
     /// `const fn` definitions for compile-time evaluation.
     const_fns: HashMap<String, FnDef>,
+    /// Nesting depth of `arena { }` (SAFE-007 escape checks).
+    arena_depth: usize,
+    /// Locals bound to arena-backed storage in the current arena nest (names).
+    arena_owned: HashSet<String>,
     /// Nesting depth of `for` / `while` (for `break` / `continue`).
     loop_depth: usize,
     /// Innermost-first stack of loop labels (`None` = unlabeled).
@@ -10507,6 +10511,8 @@ impl TypeChecker {
             const_ints: HashMap::new(),
             const_strs: HashMap::new(),
             const_fns: HashMap::new(),
+            arena_depth: 0,
+            arena_owned: HashSet::new(),
             loop_depth: 0,
             loop_labels: Vec::new(),
             loop_continue_moved: Vec::new(),
@@ -12832,7 +12838,7 @@ impl TypeChecker {
                 Ok(())
             }
             Stmt::IndexAssign { base, index, value } => {
-                self.assert_mutable_index_root(base)?;
+                self.assert_mutable_write_root(base, "index-assign")?;
                 if let Some(name) = Self::race_write_root(base) {
                     if self.shared_borrows.contains_key(name) {
                         return Err(TypeError::new(format!(
@@ -12905,6 +12911,9 @@ impl TypeChecker {
                 }
             }
             Stmt::FieldAssign { base, field, value } => {
+                // Same mutability contract as index assign: named mutable root only.
+                // Zero runtime cost — compile-time check; C field store stays a single write.
+                self.assert_mutable_write_root(base, "field-assign")?;
                 // Hold field assign: mutate in place without consuming the binding.
                 if let Some(name) = Self::race_write_root(base) {
                     if self.shared_borrows.contains_key(name) {
@@ -12995,7 +13004,12 @@ impl TypeChecker {
                     {
                         self.current_ret.clone()
                     }
-                    Some(e) => self.check_expr(e)?,
+                    Some(e) => {
+                        if self.arena_depth > 0 {
+                            self.assert_no_arena_escape(e)?;
+                        }
+                        self.check_expr(e)?
+                    }
                     None => Type::Void,
                 };
                 if !self.compatible(&got, &self.current_ret) {
@@ -13538,9 +13552,29 @@ impl TypeChecker {
             Stmt::Arena { name, body } => {
                 self.push_scope();
                 self.define(name, Type::Arena, false);
+                self.arena_depth += 1;
+                let owned_before = self.arena_owned.len();
                 for stmt in &body.stmts {
                     self.check_stmt(stmt)?;
+                    // Track arena-backed locals for escape checks (SAFE-007).
+                    if let Stmt::Let {
+                        name: bind,
+                        init,
+                        ..
+                    } = stmt
+                    {
+                        if Self::expr_is_arena_alloc(init) {
+                            self.arena_owned.insert(bind.clone());
+                        }
+                    }
                 }
+                // Drop names introduced in this arena (best-effort: clear all new).
+                if self.arena_owned.len() > owned_before {
+                    // Rebuild without bindings defined only for this block: clear all
+                    // tracked names when leaving an arena — they cannot outlive it.
+                    self.arena_owned.clear();
+                }
+                self.arena_depth -= 1;
                 self.pop_scope();
                 Ok(())
             }
@@ -17494,14 +17528,70 @@ impl TypeChecker {
         }
     }
 
-    fn assert_mutable_index_root(&self, expr: &Expr) -> Result<(), TypeError> {
+    /// SAFE-007: arena-backed values and the arena handle must not escape the block.
+    fn expr_is_arena_alloc(expr: &Expr) -> bool {
+        match expr {
+            Expr::Call { callee, .. } => matches!(
+                callee.as_ref(),
+                Expr::Ident(n) if n == "arena_ints"
+                    || n == "arena_text"
+                    || n == "arena_stamp"
+                    || n.starts_with("arena_")
+            ),
+            _ => false,
+        }
+    }
+
+    fn assert_no_arena_escape(&self, expr: &Expr) -> Result<(), TypeError> {
+        match expr {
+            Expr::Ident(n) if self.arena_owned.contains(n) => {
+                return Err(TypeError::new(format!(
+                    "cannot return arena-backed `{n}` out of `arena` block"
+                ))
+                .hint("copy out POD/string values before the block ends, or use heap `make`"));
+            }
+            Expr::Ident(n) => {
+                if matches!(self.lookup(n), Some((Type::Arena, _))) {
+                    return Err(TypeError::new(
+                        "cannot return arena handle out of `arena` block",
+                    )
+                    .hint("use the arena only inside its scope"));
+                }
+            }
+            Expr::Index { base, .. }
+            | Expr::Slice { base, .. }
+            | Expr::Field { base, .. } => {
+                self.assert_no_arena_escape(base)?;
+            }
+            Expr::Array(elems) | Expr::Tuple(elems) => {
+                for e in elems {
+                    self.assert_no_arena_escape(e)?;
+                }
+            }
+            Expr::Call { args, .. } => {
+                for a in args {
+                    self.assert_no_arena_escape(a)?;
+                }
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    /// Field/index/slice writes need a named mutable root (`let mut` / `mut self`).
+    /// Temporaries (`get()[0] = …`, `mk().x = …`) are rejected so we never mutate
+    /// a stack value that is about to die — memory-safe by construction, free at runtime.
+    fn assert_mutable_write_root(&self, expr: &Expr, kind: &str) -> Result<(), TypeError> {
         let Some(name) = Self::race_write_root(expr) else {
-            return Ok(());
+            return Err(TypeError::new(format!(
+                "cannot {kind} into a temporary value"
+            ))
+            .hint("bind the target with `let mut` first"));
         };
         if let Some((_, mutable)) = self.lookup(name) {
             if !*mutable {
                 return Err(TypeError::new(format!(
-                    "cannot index-assign into immutable `{name}`"
+                    "cannot {kind} into immutable `{name}`"
                 ))
                 .hint(format!("use `let mut {name}`")));
             }

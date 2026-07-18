@@ -1,0 +1,158 @@
+# Mako concurrency memory model
+
+**SAFE-010 · RT-001 · RT-004** · Product tip **0.2.3+**
+
+Safe Mako aims for **data-race freedom by construction** for ordinary locals,
+with an explicit **Sync** escape hatch. There is no GC. Speed comes from
+structured concurrency and Send checks at kick boundaries — not from optional
+sanitizers (those remain opt-in for FFI and runtime smoke).
+
+Related: [SOUNDNESS.md](SOUNDNESS.md) · [SECURITY.md](SECURITY.md) ·
+[ASYNC.md](ASYNC.md) · [SPEED.md](SPEED.md).
+
+---
+
+## 1. Values and threads
+
+A **task** is a unit of concurrent work started by `crew.kick` / `go` inside a
+`crew` (or `fan` workers). Tasks may run on OS threads today (RT-002 will insert
+a bounded scheduler behind the same surface).
+
+Ordinary `let` / `let mut` locals are **task-local**. Crossing a task boundary
+requires a **Send** value or an explicit **Sync** handle.
+
+### Happens-before (informal)
+
+| Edge | Ordering |
+|------|----------|
+| Sequentially in one task | Program order |
+| `kick` argument setup → body of kicked task | Kick synchronizes-with start of task body |
+| Task body finish → `join` / crew exit join | Join synchronizes-with waiter |
+| Channel `send` → matching `recv` | Send synchronizes-with receive of that message |
+| Channel `close` → `recv` seeing drain/closed | Close happens-before closed observations |
+| `share_int` / Mutex / RWMutex / CMap / AtomicInt ops | As defined by those primitives (lock/unlock or atomic) |
+
+Safe Mako rejects compilations that would allow two tasks to race on the same
+unsynchronized mutable location.
+
+---
+
+## 2. Sync handles (intentional sharing)
+
+| Type | Role |
+|------|------|
+| `AtomicInt` | Atomic integer |
+| `ShareInt` | RC shared int with NLL vs source mutation |
+| `Mutex` / `RWMutex` | Exclusive / shared locks |
+| `CMap` | Concurrent map with readers/writer gate (**SAFE-009**) |
+| Channels | Message transfer, not shared memory |
+
+Use these for shared mutable state across kicks. Do not rely on `let mut`
+captured by two tasks.
+
+---
+
+## 3. Kick Send (compiler contract)
+
+`crew.kick(f(args…))` accepts **Send** arguments only:
+
+- Copy scalars (int family, bool, float, Uuid/ULID POD)
+- Deep-POD structs / POD enums
+- `string` (heap-cloned at boundary)
+- Channels, Sync handles (RC/clone as defined)
+- Option / Result / tuple of Send (heap-boxed when needed)
+
+**Rejected:** arrays, maps, non-POD structs, `Arena`, nested `Crew`.
+
+Captures: unsynchronized mutable captures and unknown environments are
+rejected; `fan` mappers must be capture-free.
+
+Evidence: `examples/bad/kick_*.mko`, `fan_capture.mko`.
+
+---
+
+## 4. Crew lifecycle (RT-001)
+
+```
+crew c {
+    let j = c.kick(work())
+    // …
+}   // ← cancel + join all ordinary kicks
+```
+
+| Event | Behavior |
+|-------|----------|
+| Enter crew | New nursery (`MakoNursery`) |
+| `kick` / `go` | Spawn task; if already cancelled, task does not start |
+| Explicit cancel | Sets cancel flag; cooperative observation via nursery cancelled |
+| Leave crew block | **cancel_join**: set cancel, join all tasks |
+| Child `Result` Err | First error message retained (`first_err`); count incremented |
+| Blocked C/FFI | May delay join until the call returns (documented limit) |
+| `detach` | Explicit; ordinary code should not use it for fire-and-forget |
+
+Cancellation is **cooperative** for already-running work. Prefer short critical
+sections and channel-based shutdown for production services.
+
+Tests: `examples/testing/cancel_policy_test.mko`.
+
+---
+
+## 5. Channel ownership (RT-004)
+
+### Scalar / POD channels
+
+- `send` / `try_send` / timeout: by value; **failed** try/timeout does **not**
+  consume the caller's local (value still owned by sender).
+- After successful send, the receiver owns the copy/value.
+
+### String channels
+
+- Default send **clones** the string (caller keeps its owned string).
+- Take variants move ownership into the channel; on **failed** take-send the
+  implementation must not leak (free or return ownership — see runtime
+  `mako_chan_str_try_send_take`).
+- `recv` returns an **owned** string (caller frees / drops).
+
+### Stats
+
+Failed try-sends increment `channel_try_send_drops` in `runtime_stats_json()`.
+
+### Select
+
+`select` with timeout: at most one arm receives; ownership follows the arm that
+fires. Timeout arm receives nothing.
+
+---
+
+## 6. Data races vs Sync races
+
+| Class | Safe Mako |
+|-------|-----------|
+| Two tasks write `let mut x` without Sync | **Compile error** (race model / capture rules) |
+| Two tasks use `CMap` / Mutex correctly | Allowed; runtime serializes |
+| FFI / `unsafe` raw memory | Outside the model — use TSan (`mako test --race`) |
+
+---
+
+## 7. Census (RT-006)
+
+```mko
+runtime_stats_reset()
+// … work …
+let s = runtime_stats_json()
+// tasks_spawned, tasks_joined, channels_*, lock_wait_ns, …
+```
+
+Use in soak tests to assert `tasks_spawned == tasks_joined` after crews complete
+and to watch channel peak depth / try_send drops.
+
+---
+
+## 8. What this model is not
+
+- Not the C++/LLVM memory model formalization (yet).
+- Not a promise that every FFI call is race-free.
+- Not a license to disable bounds checks (SAFE-001).
+
+Formalization may deepen; the **surface contracts** above are what the compiler
+and runtime implement today.

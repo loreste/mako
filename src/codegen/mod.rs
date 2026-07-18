@@ -65,6 +65,11 @@ pub struct Codegen {
     /// MakoFn locals that may own a capture env — auto `fn_drop` on scope exit.
     fn_env_scopes: Vec<Vec<String>>,
     fn_env_live: std::collections::HashSet<String>,
+    /// SAFE-003/004: owning slice/map locals per scope — free on `}` / return.
+    /// Entries are (mangled_c_name, free_fn) e.g. (`s_0`, `mako_int_array_free`).
+    own_drop_scopes: Vec<Vec<(String, String)>>,
+    /// Still-live own-drop keys (mangled); skip if already freed.
+    own_drop_live: std::collections::HashSet<String>,
     /// Mutable closure captures: maps original var name → heap cell C variable name.
     /// When a local is mutably captured, reads/writes go through `*cell` in outer scope.
     mut_capture_cells: HashMap<String, String>,
@@ -196,6 +201,8 @@ impl Codegen {
             share_live: std::collections::HashSet::new(),
             fn_env_scopes: Vec::new(),
             fn_env_live: std::collections::HashSet::new(),
+            own_drop_scopes: Vec::new(),
+            own_drop_live: std::collections::HashSet::new(),
             mut_capture_cells: HashMap::new(),
             mut_self_fns: std::collections::HashSet::new(),
             unsafe_depth: 0,
@@ -2238,6 +2245,7 @@ impl Codegen {
     fn push_share_scope(&mut self) {
         self.share_scopes.push(Vec::new());
         self.fn_env_scopes.push(Vec::new());
+        self.own_drop_scopes.push(Vec::new());
     }
 
     /// Emit a bounds check unless inside `unsafe { }`.
@@ -2250,7 +2258,79 @@ impl Codegen {
         self.line(&format!("MAKO_BOUNDS_CHECK({cond_c}, \"{msg}\");"));
     }
 
+    /// C free function for an owning runtime type, if any (SAFE-003/004).
+    fn own_free_fn(c_ty: &str) -> Option<&'static str> {
+        match c_ty {
+            "MakoIntArray" => Some("mako_int_array_free"),
+            "MakoByteArray" => Some("mako_byte_array_free"),
+            "MakoStrArray" => Some("mako_str_array_free"),
+            "MakoFloatArray" => Some("mako_float_array_free"),
+            "MakoBoolArray" => Some("mako_bool_array_free"),
+            "MakoMapSI*" => Some("mako_map_si_free"),
+            "MakoMapII*" => Some("mako_map_ii_free"),
+            "MakoMapSS*" => Some("mako_map_ss_free"),
+            "MakoMapIF*" => Some("mako_map_if_free"),
+            "MakoMapSF*" => Some("mako_map_sf_free"),
+            "MakoMapFI*" => Some("mako_map_fi_free"),
+            "MakoMapFS*" => Some("mako_map_fs_free"),
+            "MakoMapFF*" => Some("mako_map_ff_free"),
+            "MakoMapIB*" => Some("mako_map_ib_free"),
+            "MakoMapSB*" => Some("mako_map_sb_free"),
+            "MakoMapFB*" => Some("mako_map_fb_free"),
+            "MakoMapBI*" => Some("mako_map_bi_free"),
+            "MakoMapBS*" => Some("mako_map_bs_free"),
+            "MakoMapBF*" => Some("mako_map_bf_free"),
+            "MakoMapBB*" => Some("mako_map_bb_free"),
+            _ => None,
+        }
+    }
+
+    /// True when `init` allocates a fresh owning value (not an alias/view).
+    fn expr_is_fresh_own(init: &Expr) -> bool {
+        match init {
+            Expr::Array(_) | Expr::Make { .. } => true,
+            // `append` may allocate a new header/backing; treat as owning.
+            // `make` is also a Call in some desugar paths.
+            Expr::Call { callee, .. } => {
+                matches!(callee.as_ref(), Expr::Ident(n) if n == "append" || n == "make")
+            }
+            // `[]byte("…")` conversion allocates.
+            Expr::Convert { .. } => true,
+            _ => false,
+        }
+    }
+
+    fn register_own_drop(&mut self, mangled: &str, c_ty: &str) {
+        let Some(ff) = Self::own_free_fn(c_ty) else {
+            return;
+        };
+        if self.own_drop_live.contains(mangled) {
+            return;
+        }
+        self.own_drop_live.insert(mangled.to_string());
+        if let Some(scope) = self.own_drop_scopes.last_mut() {
+            scope.push((mangled.to_string(), ff.to_string()));
+        }
+    }
+
+    fn emit_own_drops_for_scope(&mut self, entries: Vec<(String, String)>) {
+        for (name, free_fn) in entries.into_iter().rev() {
+            if self.own_drop_live.remove(&name) {
+                // Maps are pointers; slices are by-value headers.
+                if free_fn.contains("map_") {
+                    self.emit_line(format_args!("{free_fn}({name});"));
+                } else {
+                    self.emit_line(format_args!("{free_fn}({name});"));
+                }
+            }
+        }
+    }
+
     fn pop_share_scope(&mut self) {
+        // Owning slices/maps first (SAFE-003/004), then fn env, then shares.
+        if let Some(entries) = self.own_drop_scopes.pop() {
+            self.emit_own_drops_for_scope(entries);
+        }
         // Drop MakoFn capture envs before share drops.
         if let Some(names) = self.fn_env_scopes.pop() {
             for name in names.into_iter().rev() {
@@ -2443,8 +2523,11 @@ impl Codegen {
             "#define MAKO_OVERFLOW_MODE {}\n",
             self.overflow_mode.c_define_value()
         ));
-        // Preserve the legacy flag in generated C; safe indexing is checked
-        // regardless of optimization level.
+        // SAFE-001: safe indexing is checked in every build, including -O3 -flto.
+        // Only `unsafe { }` / `unsafe_index` opt out (emit_bounds_check skips).
+        // MAKO_SAFE_DEFAULT makes the contract explicit in generated C; the
+        // runtime macro aborts either way — this is documentation + belt/suspenders.
+        self.out.push_str("#define MAKO_SAFE_DEFAULT 1\n");
         if self.bounds_checks_always {
             self.out.push_str("#define MAKO_BOUNDS_ALWAYS 1\n");
         }
@@ -9752,6 +9835,8 @@ impl Codegen {
         self.share_live.clear();
         self.fn_env_scopes.clear();
         self.fn_env_live.clear();
+        self.own_drop_scopes.clear();
+        self.own_drop_live.clear();
         self.result_err_enums.clear();
         self.result_ok_kinds.clear();
         self.result_ok_structs.clear();
@@ -10682,6 +10767,10 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                     self.register_fn_env_local(name);
                     // Also register under original unmangled key for Ident lookups.
                     // `name` is already mangled at this point.
+                }
+                // SAFE-003/004: free owning slices/maps at scope exit (not aliases/views).
+                if Self::expr_is_fresh_own(init) {
+                    self.register_own_drop(name, &ty);
                 }
             }
             Stmt::LetMulti { names, init, .. } => {

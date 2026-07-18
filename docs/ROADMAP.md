@@ -18,9 +18,29 @@
 | **0.2.2** | TLS SNI / HTTPS / JWT / lock integrity | **Shipped** |
 | **0.2.3** | JWT/HTTPS input hardening | **Shipped** |
 | **0.2.4** | Tooling (LSP depth) | **Next** |
+| **0.2.x** | Soundness program (SAFE/RT) | **Active** — [SOUNDNESS.md](SOUNDNESS.md) |
 | **0.3.0** | Cross-platform | Planned |
 | **0.4.0** | Performance ceiling | Planned |
 | **1.0** | Stability | Planned |
+
+### Soundness & runtime (SAFE / RT)
+
+Program of record: **[SOUNDNESS.md](SOUNDNESS.md)** · memory model:
+**[MEMORY_MODEL.md](MEMORY_MODEL.md)**.
+
+| ID | Theme | Status |
+|----|--------|--------|
+| SAFE-001 | Bounds checks in safe release | **Done** |
+| SAFE-002 | Ownership categories in LANGUAGE_SPEC | **Done** |
+| SAFE-003…006 | Compiler drops (slices, maps, strings, CFG) | Partial / planned |
+| SAFE-007…008 | Escape + capture ownership | Partial |
+| SAFE-009 | CMap readers/writer gate | **Done** |
+| SAFE-010 | Concurrency memory model doc | **Done** |
+| RT-001 | Crew exit / cancel / failure | **Done** |
+| RT-002…003 | Bounded scheduler / blocking split | Planned |
+| RT-004 | Channel send ownership table | Partial |
+| RT-005 | Channel/select stress | Seed shipped |
+| RT-006 | Task/resource census APIs | **Done** |
 
 ---
 

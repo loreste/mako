@@ -1,0 +1,32 @@
+// Empty slice literal `[]` — typed by annotation or defaulting to []int.
+
+fn TestEmptyIntLit() {
+    let mut s: []int = []
+    assert_eq(len(s), 0)
+    s = append(s, 7)
+    assert_eq(len(s), 1)
+    assert_eq(s[0], 7)
+}
+
+fn TestEmptyStringLit() {
+    let mut names: []string = []
+    assert_eq(len(names), 0)
+    names = append(names, "mako")
+    assert_eq(len(names), 1)
+    assert_eq_str(names[0], "mako")
+}
+
+fn TestEmptyThenIndexWrite() {
+    let mut s: []int = []
+    s = append(s, 1)
+    s = append(s, 2)
+    s[0] = 10
+    assert_eq(s[0], 10)
+    assert_eq(s[1], 2)
+}
+
+fn TestEmptyByteConvertStillWorks() {
+    let b = []byte("hi")
+    assert_eq(len(b), 2)
+    assert_eq(b[0], 104)
+}

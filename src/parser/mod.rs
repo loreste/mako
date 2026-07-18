@@ -2343,26 +2343,40 @@ impl Parser {
             TokenKind::LBracket => {
                 self.bump();
                 let saved = std::mem::replace(&mut self.no_struct_lit, false);
-                // Go-like `[]T(args)` conversion — not an array literal.
+                // `[]` = empty slice literal. Only `[]byte(...)` is a conversion
+                // today — match that form by name so a following statement like
+                // `assert_eq(...)` is never swallowed as a phantom `[]assert_eq(...)`
+                // (Mako statements need no `;`). Zero cost: two peeks, no alloc.
                 if matches!(self.peek_kind(), TokenKind::RBracket) {
                     self.bump();
-                    let inner = self.parse_type()?;
-                    let ty = TypeExpr::Array(Box::new(inner));
-                    self.expect(TokenKind::LParen)?;
-                    let mut args = Vec::new();
-                    if !matches!(self.peek_kind(), TokenKind::RParen) {
-                        loop {
-                            args.push(self.parse_expr()?);
-                            if matches!(self.peek_kind(), TokenKind::Comma) {
-                                self.bump();
-                            } else {
-                                break;
+                    let is_byte_convert = matches!(
+                        self.peek_kind(),
+                        TokenKind::Ident(name) if name == "byte"
+                    ) && self.pos + 1 < self.tokens.len()
+                        && matches!(self.tokens[self.pos + 1].kind, TokenKind::LParen);
+                    if is_byte_convert {
+                        self.bump(); // byte
+                        self.expect(TokenKind::LParen)?;
+                        let mut args = Vec::new();
+                        if !matches!(self.peek_kind(), TokenKind::RParen) {
+                            loop {
+                                args.push(self.parse_expr()?);
+                                if matches!(self.peek_kind(), TokenKind::Comma) {
+                                    self.bump();
+                                } else {
+                                    break;
+                                }
                             }
                         }
+                        self.expect(TokenKind::RParen)?;
+                        self.no_struct_lit = saved;
+                        return Ok(Expr::Convert {
+                            ty: TypeExpr::Array(Box::new(TypeExpr::Named("byte".into()))),
+                            args,
+                        });
                     }
-                    self.expect(TokenKind::RParen)?;
                     self.no_struct_lit = saved;
-                    return Ok(Expr::Convert { ty, args });
+                    return Ok(Expr::Array(vec![]));
                 }
                 let mut elems = Vec::new();
                 if !matches!(self.peek_kind(), TokenKind::RBracket) {

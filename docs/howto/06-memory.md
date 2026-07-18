@@ -5,6 +5,10 @@ ownership rules (`hold`/`share`) and region-based allocation (`arena`). This
 guide explains when to use each strategy; generated C and FFI remain outside
 the Mako type system.
 
+**Deeper contracts:** ownership categories and SAFE/RT drop/escape work are
+tracked in [SOUNDNESS.md](../SOUNDNESS.md). Slice/map auto-free at scope exit
+and arena escape rules are summarized there.
+
 ## Default bindings
 
 Regular `let` bindings are the simplest form. They work like stack values:

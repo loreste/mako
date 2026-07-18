@@ -293,9 +293,14 @@ let b: []byte = [72, 105]        // []byte
 let names: []string = ["a", "b"] // []string
 let flags = [true, false]        // []bool
 let grid: [][]int = [[1, 2], [3]] // nested
+let mut empty: []int = []        // empty slice; type from annotation (else []int)
 ```
 
-Pre-sized allocation uses `make`:
+Bare `[]` is an empty slice literal. The only `[]T(…)` conversion today is
+`[]byte("…" | []byte)` — other names after `[]` do not start a conversion
+(so a following statement like `assert_eq(…)` is not swallowed).
+
+Pre-sized allocation uses `make` (prefer when capacity is known):
 
 ```mko
 let s = make([]int, 3, 8)    // len=3, cap=8
@@ -319,6 +324,11 @@ Slice operations:
 | `copy(dst, src)` | `int`     | Copy elements, returns count copied   |
 
 Out-of-bounds access aborts at runtime.
+
+**Writes:** index assign (`s[i] = v`, `s[i:j][k] = v`, nested `m[i][j] = v`) and
+field assign (`p.x = v`, nested `p.a.b = v`) require a **named mutable root**
+(`let mut` / `mut self` / `hold let mut`). Temporaries (`f()[0] = v`, `g().x = v`)
+are rejected at typecheck — no runtime check, no silent mutation of dead values.
 
 Element types include scalars, named structs/enums, nested `[][]T`, maps
 (`[]map[K]V`), and bags **`[]Option[T]`** / **`[]Result[T,E]`** (make, append,
@@ -1413,15 +1423,40 @@ Mako provides deterministic resource management without a garbage collector.
 Memory is managed through a combination of scope-based cleanup, move semantics,
 shared references, and arena allocation.
 
+### Ownership categories {#ownership-categories}
+
+**SAFE-002.** Every type inhabits one primary **ownership category**. The
+compiler and runtime use these categories for moves, kicks (Send), drops, and
+escape checks. See also [docs/SOUNDNESS.md](docs/SOUNDNESS.md).
+
+| Category | Surface | Move | Cross-task | Drop / free |
+|----------|---------|------|------------|-------------|
+| **Copy** | `int` family, `bool`, `float`, Uuid/ULID POD | Copy, never moves | Send | Trivial |
+| **Own** | Owning `string`, owning heap headers when tracked | Move or clone at boundary | Send if deep-POD / cloned string | Free once at end of live range (**SAFE-003–006** rolling out for all shapes) |
+| **View** | Slice of existing storage; `[]byte` with `cap == 0`; `mako_str_view` | Must not free; must not outlive backing | Not Send unless copied | No free of `.data` |
+| **Share** | `share let` / `ShareInt` | Immutable while live; NLL ends share | RC clone on kick | `share_drop` (auto or explicit) |
+| **Arena** | Values allocated in `arena { … }` | Valid only inside arena scope | Not Send as arena pointers | Freed with arena (bump) |
+| **Sync** | `Mutex`, `RWMutex`, `CMap`, `AtomicInt`, channels | Handle clone / lock protocol | Intentional sharing | Handle drop / close |
+
+**Rules of thumb**
+
+1. Prefer **Copy** and stack **Own** POD for hot paths.
+2. **View** into a local or arena must not be returned past that scope (**SAFE-007**).
+3. Cross-task mutation only through **Sync** or messages — never two `let mut` aliases.
+4. Bounds checks apply to all safe indexing of Own and View slices (**SAFE-001**).
+
 ### 6.1 Default Bindings (`let`)
 
-A `let` binding owns its value. The value is cleaned up when the binding goes
-out of scope (scope-based deterministic cleanup).
+A `let` binding names a value in the current task. Scalars and POD are
+stack-like. Heap-backed values follow the ownership category of their type:
+shares and arenas have automatic cleanup today; systematic drop insertion for
+every owning slice/map shape is the SAFE-003–006 program.
 
 ```mko
 {
-    let s = make([]int, 0, 8)
-    // s is freed when this block exits
+    let mut s = make([]int, 0, 8)
+    s = append(s, 1)
+    // Prefer reusing capacity; full auto-drop of owning slices is SAFE-003.
 }
 ```
 

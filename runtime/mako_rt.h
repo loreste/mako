@@ -327,6 +327,12 @@ static inline MakoIntArray mako_int_array_make(int64_t len, int64_t cap) {
     return a;
 }
 
+/* SAFE-003: free owning slice headers. Views use cap==0 and must not free .data
+ * (sub-slices share backing; free is only valid for the original malloc base). */
+static inline void mako_int_array_free(MakoIntArray a) {
+    if (a.cap > 0 && a.data) free(a.data);
+}
+
 static inline void mako_abort(const char *msg); /* defined below */
 static inline MakoString mako_str_clone(MakoString s); /* defined below */
 
@@ -407,27 +413,28 @@ static inline MakoByteArray mako_byte_append(MakoByteArray s, int64_t v) {
     return s;
 }
 
+/* Free owning []byte (cap>0). cap==0 is a borrowed view — no free. */
+static inline void mako_byte_array_free(MakoByteArray a) {
+    if (a.cap > 0 && a.data) free(a.data);
+}
+
 static inline MakoByteArray mako_byte_slice_expr(
     MakoByteArray s, int64_t low, int64_t high, int64_t max, int has_max
 ) {
     int64_t len = (int64_t)s.len;
-    int64_t cap = (int64_t)s.cap;
     if (low < 0) low = 0;
     if (high < 0) high = 0;
     if (low > len) low = len;
     if (high > len) high = len;
     if (high < low) high = low;
+    (void)max;
+    (void)has_max;
+    /* SAFE-003: sub-slices are non-owning views (cap==0 → free is a no-op).
+     * Writes still hit shared backing; append reallocates fresh storage. */
     MakoByteArray out;
     out.data = s.data + (size_t)low;
     out.len = (size_t)(high - low);
-    if (has_max) {
-        if (max < high) max = high;
-        if (max > cap) max = cap;
-        if (max < low) max = low;
-        out.cap = (size_t)(max - low);
-    } else {
-        out.cap = (size_t)(cap - low);
-    }
+    out.cap = 0;
     return out;
 }
 
@@ -606,27 +613,27 @@ static inline MakoStrArray mako_str_array_append(MakoStrArray s, MakoString v) {
     return s;
 }
 
+static inline void mako_str_array_free(MakoStrArray a) {
+    if (!(a.cap > 0 && a.data)) return;
+    for (size_t i = 0; i < a.len; i++) mako_str_free(a.data[i]);
+    free(a.data);
+}
+
 static inline MakoStrArray mako_str_array_slice_expr(
     MakoStrArray s, int64_t low, int64_t high, int64_t max, int has_max
 ) {
     int64_t len = (int64_t)s.len;
-    int64_t cap = (int64_t)s.cap;
     if (low < 0) low = 0;
     if (high < 0) high = 0;
     if (low > len) low = len;
     if (high > len) high = len;
     if (high < low) high = low;
+    (void)max;
+    (void)has_max;
     MakoStrArray out;
     out.data = s.data + (size_t)low;
     out.len = (size_t)(high - low);
-    if (has_max) {
-        if (max < high) max = high;
-        if (max > cap) max = cap;
-        if (max < low) max = low;
-        out.cap = (size_t)(max - low);
-    } else {
-        out.cap = (size_t)(cap - low);
-    }
+    out.cap = 0; /* view — SAFE-003 */
     return out;
 }
 
@@ -696,27 +703,25 @@ static inline MakoFloatArray mako_float_array_append(MakoFloatArray s, double v)
     return s;
 }
 
+static inline void mako_float_array_free(MakoFloatArray a) {
+    if (a.cap > 0 && a.data) free(a.data);
+}
+
 static inline MakoFloatArray mako_float_array_slice_expr(
     MakoFloatArray s, int64_t low, int64_t high, int64_t max, int has_max
 ) {
     int64_t len = (int64_t)s.len;
-    int64_t cap = (int64_t)s.cap;
     if (low < 0) low = 0;
     if (high < 0) high = 0;
     if (low > len) low = len;
     if (high > len) high = len;
     if (high < low) high = low;
+    (void)max;
+    (void)has_max;
     MakoFloatArray out;
     out.data = s.data + (size_t)low;
     out.len = (size_t)(high - low);
-    if (has_max) {
-        if (max < high) max = high;
-        if (max > cap) max = cap;
-        if (max < low) max = low;
-        out.cap = (size_t)(max - low);
-    } else {
-        out.cap = (size_t)(cap - low);
-    }
+    out.cap = 0; /* view — SAFE-003 */
     return out;
 }
 
@@ -785,27 +790,25 @@ static inline MakoBoolArray mako_bool_array_append(MakoBoolArray s, bool v) {
     return s;
 }
 
+static inline void mako_bool_array_free(MakoBoolArray a) {
+    if (a.cap > 0 && a.data) free(a.data);
+}
+
 static inline MakoBoolArray mako_bool_array_slice_expr(
     MakoBoolArray s, int64_t low, int64_t high, int64_t max, int has_max
 ) {
     int64_t len = (int64_t)s.len;
-    int64_t cap = (int64_t)s.cap;
     if (low < 0) low = 0;
     if (high < 0) high = 0;
     if (low > len) low = len;
     if (high > len) high = len;
     if (high < low) high = low;
+    (void)max;
+    (void)has_max;
     MakoBoolArray out;
     out.data = s.data + (size_t)low;
     out.len = (size_t)(high - low);
-    if (has_max) {
-        if (max < high) max = high;
-        if (max > cap) max = cap;
-        if (max < low) max = low;
-        out.cap = (size_t)(max - low);
-    } else {
-        out.cap = (size_t)(cap - low);
-    }
+    out.cap = 0; /* view — SAFE-003 */
     return out;
 }
 
@@ -2555,6 +2558,22 @@ static inline MakoMapSI *mako_map_si_make(int64_t hint) {
     return m;
 }
 
+/* SAFE-004: free map heap handle + string keys. */
+static inline void mako_map_si_free(MakoMapSI *m) {
+    if (!m) return;
+    for (size_t i = 0; i < m->cap; i++) {
+        if (m->state[i] == MAKO_MAP_FULL) {
+            mako_str_free(m->keys[i]);
+            m->keys[i].data = NULL;
+            m->keys[i].len = 0;
+        }
+    }
+    free(m->state);
+    free(m->keys);
+    free(m->vals);
+    free(m);
+}
+
 static inline MakoMapII mako_map_ii_new(size_t hint) {
     size_t cap = 8;
     /* Pre-size so hint entries fit under ~75% load without immediate rehash. */
@@ -4283,17 +4302,16 @@ static inline void mako_abort(const char *msg) {
     abort();
 }
 
-/* ---- Bounds checks policy ----
+/* ---- Bounds checks policy (SAFE-001) ----
  * Safe Mako indexing is checked in every build, including optimized release
- * binaries. The explicit `unsafe` surface is the only way to opt out.
- * MAKO_BOUNDS_ALWAYS remains accepted for generated-code compatibility.
+ * binaries (`-O3 -flto -DNDEBUG`). Generated code defines MAKO_SAFE_DEFAULT.
+ * The only opt-out is the explicit `unsafe` surface (codegen skips emission
+ * inside `unsafe { }` / for `unsafe_index`). There is no release-unchecked
+ * path for safe Mako: one compare + cold abort; no debug-only metadata tax.
  */
-#if defined(MAKO_BOUNDS_ALWAYS) || defined(MAKO_SAFE_DEFAULT)
+#ifndef MAKO_BOUNDS_CHECK
 #define MAKO_BOUNDS_CHECK(cond, msg) \
-    do { if (cond) mako_abort(msg); } while (0)
-#else
-#define MAKO_BOUNDS_CHECK(cond, msg) \
-    do { if (cond) mako_abort(msg); } while (0)
+    do { if (MAKO_UNLIKELY(cond)) mako_abort(msg); } while (0)
 #endif
 
 /* Abort with file:line (prefer this from generated code). */
@@ -4354,7 +4372,8 @@ static inline MakoIntArray mako_slice_append(MakoIntArray s, int64_t v) {
     return s;
 }
 
-/* Go-like s[low:high] / s[low:high:max] — shares backing store. */
+/* Go-like s[low:high] / s[low:high:max] — shares backing store.
+ * SAFE-003: result is a non-owning view (cap==0). Free only the original. */
 static inline MakoIntArray mako_slice_expr(
     MakoIntArray s,
     int64_t low,
@@ -4363,23 +4382,17 @@ static inline MakoIntArray mako_slice_expr(
     int has_max
 ) {
     int64_t len = (int64_t)s.len;
-    int64_t cap = (int64_t)s.cap;
     if (low < 0) low = 0;
     if (high < 0) high = 0;
     if (low > len) low = len;
     if (high > len) high = len;
     if (high < low) high = low;
+    (void)max;
+    (void)has_max;
     MakoIntArray out;
     out.data = s.data + (size_t)low;
     out.len = (size_t)(high - low);
-    if (has_max) {
-        if (max < high) max = high;
-        if (max > cap) max = cap;
-        if (max < low) max = low;
-        out.cap = (size_t)(max - low);
-    } else {
-        out.cap = (size_t)(cap - low);
-    }
+    out.cap = 0;
     return out;
 }
 

@@ -5,6 +5,9 @@ set -euo pipefail
 # Run from any directory after building target/release/mako.
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 MAKO=${MAKO_BIN:-$ROOT/target/release/mako}
+# Prefer in-tree std/runtime so gates track the checkout, not a stale install.
+export MAKO_STD=${MAKO_STD:-$ROOT/std}
+export MAKO_RUNTIME=${MAKO_RUNTIME:-$ROOT/runtime}
 CACHE=${MAKO_CACHE:-/tmp/mako-claims-gate-cache-$(date +%s)}
 TMP=$(mktemp -d "${TMPDIR:-/tmp}/mako-claims.XXXXXX")
 trap 'rm -rf "$TMP"' EXIT
@@ -42,6 +45,14 @@ expect_failure unsafe-index env MAKO_CACHE="$CACHE/unsafe-index" \
     "$MAKO" check "$ROOT/examples/bad/unsafe_index_without_block.mko"
 expect_failure immutable-index env MAKO_CACHE="$CACHE/immutable-index" \
     "$MAKO" check "$ROOT/examples/bad/index_assign_immutable.mko"
+expect_failure immutable-field env MAKO_CACHE="$CACHE/immutable-field" \
+    "$MAKO" check "$ROOT/examples/bad/field_assign_immutable.mko"
+expect_failure temp-index env MAKO_CACHE="$CACHE/temp-index" \
+    "$MAKO" check "$ROOT/examples/bad/index_assign_temporary.mko"
+expect_failure temp-field env MAKO_CACHE="$CACHE/temp-field" \
+    "$MAKO" check "$ROOT/examples/bad/field_assign_temporary.mko"
+expect_failure arena-escape env MAKO_CACHE="$CACHE/arena-escape" \
+    "$MAKO" check "$ROOT/examples/bad/arena_escape_return.mko"
 expect_failure race-mut-after-kick env MAKO_CACHE="$CACHE/race-mut-after-kick" \
     "$MAKO" check "$ROOT/examples/bad/race_mut_after_kick.mko"
 expect_failure kick-mutable-closure env MAKO_CACHE="$CACHE/kick-mutable-closure" \

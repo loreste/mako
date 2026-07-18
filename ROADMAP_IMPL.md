@@ -4,8 +4,29 @@ Detailed feature plan for Mako, organized by version. See
 [docs/ROADMAP.md](docs/ROADMAP.md) for the summary view.
 
 **Current version:** 0.2.3  
-**Next milestone:** 0.2.4 (tooling)  
+**Next milestone:** 0.2.4 (tooling) + soundness program (SAFE/RT)  
 **Last updated:** 2026-07-18
+
+Soundness backlog with IDs and acceptance: **[docs/SOUNDNESS.md](docs/SOUNDNESS.md)**.  
+Concurrency model: **[docs/MEMORY_MODEL.md](docs/MEMORY_MODEL.md)**.
+
+---
+
+## Soundness program (SAFE / RT) — **active**
+
+| ID | Work | Status |
+|----|------|--------|
+| SAFE-001 | Release bounds always on | Done — `MAKO_SAFE_DEFAULT`, claims-gate `release-bounds` |
+| SAFE-002 | Ownership categories in LANGUAGE_SPEC | Done |
+| SAFE-003…006 | Drop plan for slices/maps/strings/CFG | Partial — design in SOUNDNESS.md |
+| SAFE-007…008 | Escape + capture audit | Partial |
+| SAFE-009 | CMap RW gate (no unsync open-addressed reads) | Done |
+| SAFE-010 | Publish concurrency memory model | Done — MEMORY_MODEL.md |
+| RT-001 | Crew cancel_join / failure | Done |
+| RT-002…003 | Scheduler + blocking split | Planned |
+| RT-004 | Channel send ownership | Partial — documented |
+| RT-005 | Select/channel stress | Seed test |
+| RT-006 | `runtime_stats_json` census | Done |
 
 ---
 

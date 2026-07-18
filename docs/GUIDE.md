@@ -380,12 +380,29 @@ Literals `[1, 2, 3]` are **slices** (header: ptr, len, cap). Default element typ
 let mut s = [1, 2, 3]              // []int
 let mut a: []int64 = [10, 20, 30]  // []int64
 let mut b: []byte = [72, 105]      // []byte
+let mut empty: []int = []          // empty slice (typed by annotation)
 ```
 
-Type syntax: `[]T` (preferred) or `[T]`.
+Type syntax: `[]T` (preferred) or `[T]`. Empty `[]` is a slice literal; `[]T(…)` remains conversion (e.g. `[]byte("hi")`).
+
+Field and index writes need a **named mutable root** (`let mut` / `mut self`) — compile-time only, no hot-path cost:
+
+```mko
+// ok
+let mut p = Point { x: 1, y: 2 }
+p.x = 10
+let mut s = [1, 2, 3]
+s[0] = 9
+s[1:3][0] = 100
+
+// rejected (examples/bad/field_assign_immutable.mko, index_assign_temporary.mko)
+// let p = Point { x: 1 }; p.x = 10
+// get()[0] = 9
+```
 
 ```mko
 // examples/slice.mko · examples/slice64.mko · examples/bytes.mko
+// examples/testing/empty_slice_test.mko · examples/testing/slice_test.mko
 let mut s = [1, 2, 3]
 print_int(len(s))
 print_int(cap(s))
@@ -393,7 +410,7 @@ print_int(cap(s))
 let mut t = s[1:3]  // shares backing store; writes require a mutable view
 t[0] = 99           // visible on s[1]
 s[1:3][0] = 100     // direct write through a slice view
-let grid: [][]int = [[1, 2], [3, 4]]
+let mut grid: [][]int = [[1, 2], [3, 4]]
 grid[1][0] = 30     // nested slice/index write
 s = append(s, 4)    // may grow; assign result back
 
@@ -405,11 +422,13 @@ let d = []byte("mako")    // sugar (same as bytes())
 print(string(c))
 print(string(d[1:3]))
 
-// pre-sized make
+// pre-sized make (prefer when you know capacity)
 let s = make([]int, 3, 8) // len 3, cap 8
 let z = make([]byte, 2)
 let names = make([]string, 0, 4)
 names = append(names, "mako")
+let mut grow: []int = []  // empty lit; grow with append
+grow = append(grow, 1)
 let fs = make([]float, 2)          // examples/float_slice.mko
 // also: let xs: []string = ["a", "b"]  · examples/str_slice.mko
 let grid: [][]int = [[1, 2], [3]]  // nested
@@ -878,7 +897,7 @@ struct Point {
 
 let mut p = Point { x: 3, y: 4 }
 print_int(p.x)
-p.x = 10
+p.x = 10  // needs `let mut` (immutable `let p` is a type error)
 
 let mut xs = make([]Point, 0, 4)
 xs = append(xs, Point { x: 1, y: 2 })

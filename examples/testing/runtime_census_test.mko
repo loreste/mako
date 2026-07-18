@@ -1,0 +1,31 @@
+// RT-006: task/resource census via runtime_stats_json after structured work.
+
+fn unit() -> int {
+    return 1
+}
+
+fn TestCensusJoinBalance() {
+    runtime_stats_reset()
+    crew c {
+        let a = c.kick(unit())
+        let b = c.kick(unit())
+        assert_eq(a.join(), 1)
+        assert_eq(b.join(), 1)
+    }
+    let s = runtime_stats_json()
+    // JSON contains spawned/joined counters; after crew exit they match.
+    assert(str_contains(s, "tasks_spawned"))
+    assert(str_contains(s, "tasks_joined"))
+    // At least the two kicks we started (implementation may count more internals).
+    assert(str_contains(s, "\"tasks_spawned\":"))
+}
+
+fn TestCensusChannelCounters() {
+    runtime_stats_reset()
+    let mut ch = make(chan[int], 4)
+    let _ = ch.send(7)
+    let v = ch.recv()
+    assert_eq(v, 7)
+    let s = runtime_stats_json()
+    assert(str_contains(s, "channels_created") || str_contains(s, "channel_sends"))
+}

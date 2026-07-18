@@ -15,7 +15,8 @@ making the default hot path slower than Rust.
 | **Concurrency** | Structured `crew` cancel-joins ordinary kicked tasks; blocked C/FFI calls can delay the join and `detach` is explicit |
 | **Security** | Memory, secrets, injection, bounds — hard errors preferred over soft advice |
 
-Guided tour: [The Mako Book §11](book/src/ch11-speed-safety.md) · Speed bar: [SPEED.md](SPEED.md).
+Guided tour: [The Mako Book §11](book/src/ch11-speed-safety.md) · Speed bar: [SPEED.md](SPEED.md).  
+Soundness program: [SOUNDNESS.md](SOUNDNESS.md) · Memory model: [MEMORY_MODEL.md](MEMORY_MODEL.md).
 
 ## Principles
 
@@ -370,9 +371,10 @@ fingerprint. See [BUILD.md](BUILD.md).
 
 A `Result` used as a bare statement is an **error**.
 
-### Bounds checks
+### Bounds checks (SAFE-001)
 
-Debug and release: abort on OOB. Explicit opt-out: `unsafe`.
+Debug and release (`-O3 -flto -DNDEBUG`): abort on OOB. Generated code defines
+`MAKO_SAFE_DEFAULT`. Explicit opt-out: `unsafe` / `unsafe_index` only.
 
 ### Diagnostics
 

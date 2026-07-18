@@ -1,0 +1,10 @@
+// Must fail: field writes require a mutable root binding.
+struct Point {
+    x: int
+    y: int
+}
+
+fn main() {
+    let p = Point { x: 1, y: 2 }
+    p.x = 9
+}

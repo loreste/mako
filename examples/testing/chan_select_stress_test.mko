@@ -1,0 +1,50 @@
+// RT-005 seed: multi-producer fan-in under select+timeout.
+// Deterministic; full random schedule remains an optional longer soak.
+
+fn producer(ch: chan[int], start: int, n: int) -> int {
+    let mut i = 0
+    while i < n {
+        let _ = ch.send(start + i)
+        i = i + 1
+    }
+    return n
+}
+
+fn TestSelectStressFanIn() {
+    let mut ch = make(chan[int], 32)
+    crew c {
+        let a = c.kick(producer(ch, 0, 20))
+        let b = c.kick(producer(ch, 1000, 20))
+        let mut got = 0
+        let mut sum = 0
+        while got < 40 {
+            select timeout 5000 {
+                ch => {
+                    let v = chan_select_value()
+                    sum = sum + v
+                    got = got + 1
+                }
+            }
+        }
+        let _ = a.join()
+        let _ = b.join()
+        assert_eq(got, 40)
+        // 0..19 sum = 190; 1000..1019 sum = 20190; total 20380
+        assert_eq(sum, 20380)
+    }
+}
+
+fn TestSelectTimeoutDefault() {
+    let mut ch = make(chan[int], 1)
+    let mut hit_default = 0
+    select timeout 5 {
+        ch => {
+            let _ = chan_select_value()
+            assert(false)
+        }
+        default => {
+            hit_default = 1
+        }
+    }
+    assert_eq(hit_default, 1)
+}

@@ -5,6 +5,10 @@ blocks and is joined before the block exits. Cancellation is cooperative, so a
 blocked C/FFI call can delay the join; explicit `detach` is a separate,
 process-scoped escape.
 
+**Memory model:** happens-before, Send/Sync, crew lifecycle, and channel
+ownership are specified in [MEMORY_MODEL.md](../MEMORY_MODEL.md). The full
+SAFE/RT program is in [SOUNDNESS.md](../SOUNDNESS.md).
+
 ## Crew blocks
 
 A `crew` spawns jobs with `kick` and collects results with `join`:

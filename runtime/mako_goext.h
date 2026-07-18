@@ -6116,3 +6116,149 @@ static inline int64_t mako_str_count(MakoString s, MakoString sub) {
 #endif
 
 #endif /* MAKO_GOEXT_H */
+
+/* ---- SAFE-004: free built-in map heap handles ---- */
+
+static inline void mako_map_ii_free(MakoMapII *m) {
+    if (!m) return;
+    free(m->state);
+    free(m->keys);
+    free(m->vals);
+    free(m);
+}
+
+static inline void mako_map_ss_free(MakoMapSS *m) {
+    if (!m) return;
+    for (size_t i = 0; i < m->cap; i++) {
+        if (m->state[i] == MAKO_MAP_FULL) {
+            mako_str_free(m->keys[i]);
+            m->keys[i].data = NULL; m->keys[i].len = 0;
+            mako_str_free(m->vals[i]);
+            m->vals[i].data = NULL; m->vals[i].len = 0;
+        }
+    }
+    free(m->state);
+    free(m->keys);
+    free(m->vals);
+    free(m);
+}
+
+static inline void mako_map_if_free(MakoMapIF *m) {
+    if (!m) return;
+    free(m->state);
+    free(m->keys);
+    free(m->vals);
+    free(m);
+}
+
+static inline void mako_map_sf_free(MakoMapSF *m) {
+    if (!m) return;
+    for (size_t i = 0; i < m->cap; i++) {
+        if (m->state[i] == MAKO_MAP_FULL) {
+            mako_str_free(m->keys[i]);
+            m->keys[i].data = NULL; m->keys[i].len = 0;
+        }
+    }
+    free(m->state);
+    free(m->keys);
+    free(m->vals);
+    free(m);
+}
+
+static inline void mako_map_fi_free(MakoMapFI *m) {
+    if (!m) return;
+    free(m->state);
+    free(m->keys);
+    free(m->vals);
+    free(m);
+}
+
+static inline void mako_map_fs_free(MakoMapFS *m) {
+    if (!m) return;
+    for (size_t i = 0; i < m->cap; i++) {
+        if (m->state[i] == MAKO_MAP_FULL) {
+            mako_str_free(m->vals[i]);
+            m->vals[i].data = NULL; m->vals[i].len = 0;
+        }
+    }
+    free(m->state);
+    free(m->keys);
+    free(m->vals);
+    free(m);
+}
+
+static inline void mako_map_ff_free(MakoMapFF *m) {
+    if (!m) return;
+    free(m->state);
+    free(m->keys);
+    free(m->vals);
+    free(m);
+}
+
+static inline void mako_map_ib_free(MakoMapIB *m) {
+    if (!m) return;
+    free(m->state);
+    free(m->keys);
+    free(m->vals);
+    free(m);
+}
+
+static inline void mako_map_sb_free(MakoMapSB *m) {
+    if (!m) return;
+    for (size_t i = 0; i < m->cap; i++) {
+        if (m->state[i] == MAKO_MAP_FULL) {
+            mako_str_free(m->keys[i]);
+            m->keys[i].data = NULL; m->keys[i].len = 0;
+        }
+    }
+    free(m->state);
+    free(m->keys);
+    free(m->vals);
+    free(m);
+}
+
+static inline void mako_map_fb_free(MakoMapFB *m) {
+    if (!m) return;
+    free(m->state);
+    free(m->keys);
+    free(m->vals);
+    free(m);
+}
+
+static inline void mako_map_bi_free(MakoMapBI *m) {
+    if (!m) return;
+    free(m->state);
+    free(m->keys);
+    free(m->vals);
+    free(m);
+}
+
+static inline void mako_map_bs_free(MakoMapBS *m) {
+    if (!m) return;
+    for (size_t i = 0; i < m->cap; i++) {
+        if (m->state[i] == MAKO_MAP_FULL) {
+            mako_str_free(m->vals[i]);
+            m->vals[i].data = NULL; m->vals[i].len = 0;
+        }
+    }
+    free(m->state);
+    free(m->keys);
+    free(m->vals);
+    free(m);
+}
+
+static inline void mako_map_bf_free(MakoMapBF *m) {
+    if (!m) return;
+    free(m->state);
+    free(m->keys);
+    free(m->vals);
+    free(m);
+}
+
+static inline void mako_map_bb_free(MakoMapBB *m) {
+    if (!m) return;
+    free(m->state);
+    free(m->keys);
+    free(m->vals);
+    free(m);
+}

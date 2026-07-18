@@ -1,0 +1,11 @@
+// SAFE-007: arena-backed values must not escape the arena block.
+fn escape() -> []int {
+    arena a {
+        let s = arena_ints(a, 4)
+        return s
+    }
+}
+
+fn main() {
+    let _ = escape()
+}

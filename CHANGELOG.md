@@ -5,6 +5,19 @@
 - Generalized mutable index lvalues: direct writes through slice views and
   nested slices (`s[1:3][0] = value`, `matrix[i][j] = value`) with the existing
   bounds, mutability, NLL, and race checks.
+- **Field and index writes require a named mutable root** — `let p = …; p.x = …`
+  and `get()[0] = …` are rejected at typecheck (zero runtime cost). Same bar as
+  plain `let mut` assign; holds memory safety without a slow path.
+- **Empty slice literal `[]`** — `let mut s: []int = []` parses as an empty
+  array; `[]T(…)` conversion is unchanged. Prefer `make([]T, 0, n)` when you
+  know capacity.
+- **Soundness program (SAFE/RT)** — [docs/SOUNDNESS.md](docs/SOUNDNESS.md) tracks
+  SAFE-001…010 and RT-001…006. Shipped: always-on release bounds (SAFE-001),
+  ownership categories (SAFE-002), **owning slice/map free at scope exit**
+  (SAFE-003/004 core shapes; sub-slices are `cap==0` views), **arena escape
+  reject on return** (SAFE-007), concurrency memory model (SAFE-010 / RT-001),
+  census + select stress (RT-005/006). Remaining: monomorph map free, full CFG
+  drop plan, scheduler (RT-002/003).
 
 ## 0.2.3 — 2026-07-18
 

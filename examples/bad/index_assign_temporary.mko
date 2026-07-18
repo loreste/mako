@@ -1,0 +1,8 @@
+// Must fail: index-assign into a call temporary has no mutable root.
+fn values() -> []int {
+    return [1, 2, 3]
+}
+
+fn main() {
+    values()[0] = 9
+}

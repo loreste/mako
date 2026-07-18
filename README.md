@@ -17,7 +17,7 @@ HTTP listen, and verified HTTPS/OIDC contracts. Builds on 0.2.2 TLS SNI,
 HTTPS client, RS256/JWKS, and package lock integrity.  
 **Next (roadmap):** **0.2.4** — tooling (LSP, debugger, package registry).
 
-[mako-lang.com](https://mako-lang.com) · [Status](docs/STATUS.md) · [Roadmap](docs/ROADMAP.md) · [Guide](docs/GUIDE.md) · [Book](docs/book/)
+[mako-lang.com](https://mako-lang.com) · [Status](docs/STATUS.md) · [Roadmap](docs/ROADMAP.md) · [Guide](docs/GUIDE.md) · [Book](docs/book/) · [Soundness](docs/SOUNDNESS.md) · [Memory model](docs/MEMORY_MODEL.md)
 
 ---
 
@@ -380,6 +380,8 @@ helper = { path = "../helper" }
 | [Examples](docs/EXAMPLES.md) | Runnable programs |
 | [Debugging](docs/DEBUG.md) | dbg(), lldb, sanitizers, error messages |
 | [Security](docs/SECURITY.md) | Safety model |
+| [Soundness](docs/SOUNDNESS.md) | SAFE/RT program (bounds, drops, ownership) |
+| [Memory model](docs/MEMORY_MODEL.md) | Concurrency, crew lifecycle, channel ownership |
 | [Performance](docs/PERFORMANCE.md) | Benchmarks |
 | [Status](docs/STATUS.md) | What works, what doesn't |
 | [Roadmap](docs/ROADMAP.md) | What's next |

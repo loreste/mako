@@ -1,0 +1,12 @@
+// Must fail: field assign on a temporary is not an lvalue.
+struct Point {
+    x: int
+}
+
+fn origin() -> Point {
+    return Point { x: 0 }
+}
+
+fn main() {
+    origin().x = 1
+}
