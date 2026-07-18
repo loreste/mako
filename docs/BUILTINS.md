@@ -463,6 +463,15 @@ Use **`wall_*` / `now_ms`** only for logs and absolute calendar time.
 | `http_last_status` | `http_last_status() -> int` | Get the status code of the last HTTP response |
 | `http_last_header` | `http_last_header(name: string) -> string` | Get a header from the last HTTP response |
 
+`http_*` accepts only `http://` and remains cleartext. Verified HTTPS is a
+separate surface:
+
+| `https_request` | `https_request(method, url, body, content_type, ca_pem, timeout_ms) -> string` | HTTPS/1.1 request; `ca_pem` is a CA PEM path (empty uses the platform trust paths) |
+| `https_get` / `https_post` | `https_get(url, ca_pem, timeout_ms)` / `https_post(url, body, content_type, ca_pem, timeout_ms)` | Verified HTTPS GET/POST |
+| `https_last_status` / `https_last_header` | `https_last_status()` / `https_last_header(name)` | Status and headers from the most recent HTTPS call |
+| `oidc_discovery` | `oidc_discovery(discovery_url, ca_pem, timeout_ms) -> string` | OIDC discovery JSON over verified HTTPS |
+| `oidc_token` | `oidc_token(token_url, form_body, ca_pem, timeout_ms) -> string` | OIDC token form POST over verified HTTPS |
+
 ### HTTP Request Parsing
 
 | Function | Signature | Description |
@@ -1234,7 +1243,9 @@ or a dedicated reply socket — do not share one `GameUDP` handle across workers
 | Function | Signature | Description |
 |----------|-----------|-------------|
 | `jwt_sign` | `jwt_sign(payload: string, secret: string) -> string` | Sign a JWT payload |
-| `jwt_verify` | `jwt_verify(token: string, secret: string) -> int` | Verify a JWT signature |
+| `jwt_verify` | `jwt_verify(token: string, secret: string) -> int` | Verify an HS256 JWT; the header algorithm must be exactly `HS256` |
+| `jwt_verify_rs256` | `jwt_verify_rs256(token: string, public_key_pem: string) -> int` | Verify an RS256 JWT with a PEM `PUBLIC KEY` (RSA >= 2048 bits) |
+| `jwt_verify_jwks` | `jwt_verify_jwks(token: string, jwks_json: string) -> int` | Verify RS256 using exactly one matching `kid` in a JWKS; rejects ambiguous or non-signing keys |
 | `jwt_payload` | `jwt_payload(token: string) -> string` | Extract the payload from a JWT |
 
 ### Backoff
@@ -1553,6 +1564,10 @@ read/write/close. Prefer `tls_client_new(ca_pem)` (VERIFY_PEER) over
 | `tls_client_new_insecure` | `tls_client_new_insecure() -> TlsClient` | Client ctx; **no** cert verify (dev only) |
 | `tls_client_free` | `tls_client_free(cli: TlsClient) -> int` | Free client context |
 | `tls_connect` | `tls_connect(cli: TlsClient, fd: int, host: string) -> TlsConn` | Blocking handshake + SNI |
+
+The generic `https_*` client is the verified HTTP/1.1 convenience layer over
+this TLS client. It is the required transport for the `oidc_*` helpers; do not
+route OIDC discovery or token requests through `http_*`.
 | `tls_connect_start` | `tls_connect_start(cli: TlsClient, fd: int, host: string) -> TlsConn` | Nonblocking handshake start |
 
 Drive both sides with `tls_handshake_step` when using `*_start` (blocking
