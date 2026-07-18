@@ -50,25 +50,31 @@ Pkg lock verification (PR #3): **17/17** `pkg::` unit tests pass.
 | Speed | Stack POD lits + empty no-malloc + cold free | `stack_array_lit_test`; SPEED.md |
 | Pkg | Locked dep verify at build (PR #3) | `cargo test --bin mako -- pkg::` |
 
-### Residuals (feed 0.2.4 / later)
+### Closed this wave (b91f633)
+
+| ID | Work | Evidence |
+|----|------|----------|
+| SAFE-005 | `string_view` + `str_as_view` / `str_to_owned` | `string_view_test` |
+| SAFE-008 | Capture matrix (kick/fan/nested crew) | `capture_matrix_test` |
+| RT-002/003 | `sched_set_workers` pool + `spawn_blocking` | `sched_pool_test` |
+| RT-004 | Take-send ownership + timeout POD | `channel_ownership_test` |
+| Struct Own | Free string/slice fields on drop | `struct_own_drop_test` |
+
+### Residuals (optional depth / 0.2.4+)
 
 | ID | Work | Status |
 |----|------|--------|
-| SAFE-005 residual | Surface `string_view` type | Partial — free path Done |
-| SAFE-008 | Capture matrix + TSan soak | Partial |
-| RT-002…003 | Bounded scheduler + blocking split | Planned |
-| RT-004 residual | Take-send + monomorph channel matrix | Partial — seed tests shipped |
 | RT-005 residual | Randomized longer soaks | Seed shipped |
-| Struct Own fields | Deep free of slice/map fields in structs | Residual |
+| SAFE-008 soak | Longer TSan CI job | Optional |
+| RT-004 monomorph | Take-send for more chan[T] shapes | Optional |
+| Scheduler depth | Work-stealing / dynamic resize | Optional |
 
 ### Implementation order (next)
 
-1. Capture audit (SAFE-008)  
-2. Surface `string_view` (SAFE-005 residual)  
-3. Channel ownership matrix (RT-004)  
-4. Scheduler (RT-002/003)  
-5. Struct nested Own free  
-6. Longer stress soaks (RT-005)
+1. Optional TSan soak CI  
+2. Longer RT-005 random soaks  
+3. Deeper monomorph channel take matrix  
+4. 0.2.4 tooling (LSP depth)
 
 ---
 
