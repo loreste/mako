@@ -2372,6 +2372,9 @@ impl Codegen {
     }
 
     fn register_own_drop(&mut self, mangled: &str, c_ty: &str) {
+        // Memory-safe by construction: owning slices/maps/strings free at scope
+        // exit, reassign, break/continue, return transfer, and `?` early-return.
+        // Do not disable this — fix free placement bugs instead.
         let Some(ff) = Self::own_free_fn(c_ty) else {
             return;
         };
@@ -2381,6 +2384,44 @@ impl Codegen {
         self.own_drop_live.insert(mangled.to_string());
         if let Some(scope) = self.own_drop_scopes.last_mut() {
             scope.push((mangled.to_string(), ff));
+        }
+    }
+
+    /// Free-on-reassign expression for nested arrays that share element headers
+    /// after append/grow. Deep `*_free` would free inners still used by `new`.
+    fn emit_reassign_free(&mut self, c_ty: &str, old: &str, new: &str, free_fn: &str) {
+        match c_ty {
+            "MakoArr_arr_int" => {
+                self.emit_line(format_args!(
+                    "mako_arr_arr_int_release_replaced({old}, {new});"
+                ));
+            }
+            "MakoArr_arr_string" => {
+                self.emit_line(format_args!(
+                    "mako_arr_arr_string_release_replaced({old}, {new});"
+                ));
+            }
+            "MakoArr_arr_float" => {
+                self.emit_line(format_args!(
+                    "mako_arr_arr_float_release_replaced({old}, {new});"
+                ));
+            }
+            "MakoArr_arr_bool" => {
+                self.emit_line(format_args!(
+                    "mako_arr_arr_bool_release_replaced({old}, {new});"
+                ));
+            }
+            other if other.starts_with("MakoArr_arr_") => {
+                // Monomorph nested: free outer only when pointer moved (inners shared).
+                self.emit_line(format_args!(
+                    "if ({old}.data != {new}.data && {old}.data) free({old}.data);"
+                ));
+            }
+            _ => {
+                self.emit_line(format_args!(
+                    "if ({old}.data != {new}.data) {free_fn}({old});"
+                ));
+            }
         }
     }
 
@@ -11309,9 +11350,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                                             let old = self.fresh("old");
                                             self.line(&format!("{cty} {old} = {mn};"));
                                             self.emit_line(format_args!("{mn} = {val};"));
-                                            self.emit_line(format_args!(
-                                                "if ({old}.data != {mn}.data) {ff}({old});"
-                                            ));
+                                            self.emit_reassign_free(&cty, &old, &mn, &ff);
                                             return;
                                         }
                                     }
@@ -11359,8 +11398,8 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                                 }
                                 return;
                             } else {
-                                // Slice header: free old only if backing pointer changed
-                                // (append in-place keeps data; new lit/grow reallocates).
+                                // Slice/nested header: free old only if backing moved.
+                                // Nested arrays use release_replaced so shared inners live.
                                 let old = self.fresh("old");
                                 self.line(&format!("{cty} {old} = {mn};"));
                                 if let Some(cell) = self.mut_capture_cells.get(name).cloned() {
@@ -11368,9 +11407,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                                 } else {
                                     self.emit_line(format_args!("{mn} = {val};"));
                                 }
-                                self.emit_line(format_args!(
-                                    "if ({old}.data != {mn}.data) {ff}({old});"
-                                ));
+                                self.emit_reassign_free(&cty, &old, &mn, &ff);
                                 if Self::expr_is_fresh_own(value) {
                                     self.register_own_drop(&mn, &cty);
                                 }
@@ -28352,7 +28389,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         }
                         "append" => {
                             let (sty, s) = self.emit_expr(&args[0]);
-                            let (_, v) = self.emit_expr(&args[1]);
+                            let (vty, mut v) = self.emit_expr(&args[1]);
                             let tmp = self.fresh("ap");
                             if sty == "MakoByteArray" {
                                 self.line(&format!(
@@ -28380,6 +28417,14 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             }
                             if let Some(sn) = sty.strip_prefix("MakoArr_") {
                                 let sn = sn.to_string();
+                                // Nested [][]T: heapify stack POD lits before store.
+                                if sn.starts_with("arr_") {
+                                    v = self.ensure_slice_owned(&vty, v);
+                                    // Transfer ownership of an owning local into the outer array.
+                                    if let Expr::Ident(n) = &args[1] {
+                                        self.note_own_drop_moved(&mangle(n));
+                                    }
+                                }
                                 if let Some(arena) = self.current_arena.clone() {
                                     self.line(&format!(
                                         "MakoArr_{sn} {tmp} = mako_arr_{sn}_arena_append(&{arena}, {s}, {v});"

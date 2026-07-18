@@ -959,9 +959,13 @@ static inline MakoArr_arr_int mako_arr_arr_int_append(MakoArr_arr_int s, MakoInt
     if (s.len + 1 > s.cap) {
         size_t ncap = s.cap ? s.cap * 2 : 1;
         if (ncap < s.len + 1) ncap = s.len + 1;
-        MakoIntArray *nd = (MakoIntArray *)realloc(s.data, ncap * sizeof(MakoIntArray));
+        /* malloc+copy (not realloc): free-on-reassign of the old header must
+         * still see a valid outer buffer; realloc would free it under us. */
+        MakoIntArray *nd = (MakoIntArray *)malloc(ncap * sizeof(MakoIntArray));
         if (!nd) mako_abort("append: out of memory");
-        s.data = nd; s.cap = ncap;
+        if (s.len) memcpy(nd, s.data, s.len * sizeof(MakoIntArray));
+        s.data = nd;
+        s.cap = ncap;
     }
     s.data[s.len++] = v;
     return s;
@@ -976,6 +980,24 @@ static inline void mako_arr_arr_int_free(MakoArr_arr_int a) {
     if (!(a.cap > 0 && a.data)) return;
     for (size_t i = 0; i < a.len; i++) mako_int_array_free(a.data[i]);
     free(a.data);
+}
+/* Free-on-reassign: drop unshared inners + old outer only. Shared headers after
+ * append/grow must not be deep-freed (would UAF the new array). */
+static inline void mako_arr_arr_int_release_replaced(MakoArr_arr_int old, MakoArr_arr_int neu) {
+    if (!(old.cap > 0 && old.data)) return;
+    for (size_t i = 0; i < old.len; i++) {
+        int shared = 0;
+        if (neu.data) {
+            for (size_t j = 0; j < neu.len; j++) {
+                if (old.data[i].data && old.data[i].data == neu.data[j].data) {
+                    shared = 1;
+                    break;
+                }
+            }
+        }
+        if (!shared) mako_int_array_free(old.data[i]);
+    }
+    if (old.data != neu.data) free(old.data);
 }
 static inline MakoArr_arr_int mako_arr_arr_int_slice_expr(MakoArr_arr_int s, int64_t low, int64_t high, int64_t max, int has_max) {
     int64_t len = (int64_t)s.len;
@@ -1027,9 +1049,11 @@ static inline MakoArr_arr_string mako_arr_arr_string_append(MakoArr_arr_string s
     if (s.len + 1 > s.cap) {
         size_t ncap = s.cap ? s.cap * 2 : 1;
         if (ncap < s.len + 1) ncap = s.len + 1;
-        MakoStrArray *nd = (MakoStrArray *)realloc(s.data, ncap * sizeof(MakoStrArray));
+        MakoStrArray *nd = (MakoStrArray *)malloc(ncap * sizeof(MakoStrArray));
         if (!nd) mako_abort("append: out of memory");
-        s.data = nd; s.cap = ncap;
+        if (s.len) memcpy(nd, s.data, s.len * sizeof(MakoStrArray));
+        s.data = nd;
+        s.cap = ncap;
     }
     s.data[s.len++] = v;
     return s;
@@ -1044,6 +1068,22 @@ static inline void mako_arr_arr_string_free(MakoArr_arr_string a) {
     if (!(a.cap > 0 && a.data)) return;
     for (size_t i = 0; i < a.len; i++) mako_str_array_free(a.data[i]);
     free(a.data);
+}
+static inline void mako_arr_arr_string_release_replaced(MakoArr_arr_string old, MakoArr_arr_string neu) {
+    if (!(old.cap > 0 && old.data)) return;
+    for (size_t i = 0; i < old.len; i++) {
+        int shared = 0;
+        if (neu.data) {
+            for (size_t j = 0; j < neu.len; j++) {
+                if (old.data[i].data && old.data[i].data == neu.data[j].data) {
+                    shared = 1;
+                    break;
+                }
+            }
+        }
+        if (!shared) mako_str_array_free(old.data[i]);
+    }
+    if (old.data != neu.data) free(old.data);
 }
 static inline MakoArr_arr_string mako_arr_arr_string_slice_expr(MakoArr_arr_string s, int64_t low, int64_t high, int64_t max, int has_max) {
     int64_t len = (int64_t)s.len;
@@ -1094,9 +1134,11 @@ static inline MakoArr_arr_float mako_arr_arr_float_append(MakoArr_arr_float s, M
     if (s.len + 1 > s.cap) {
         size_t ncap = s.cap ? s.cap * 2 : 1;
         if (ncap < s.len + 1) ncap = s.len + 1;
-        MakoFloatArray *nd = (MakoFloatArray *)realloc(s.data, ncap * sizeof(MakoFloatArray));
+        MakoFloatArray *nd = (MakoFloatArray *)malloc(ncap * sizeof(MakoFloatArray));
         if (!nd) mako_abort("append: out of memory");
-        s.data = nd; s.cap = ncap;
+        if (s.len) memcpy(nd, s.data, s.len * sizeof(MakoFloatArray));
+        s.data = nd;
+        s.cap = ncap;
     }
     s.data[s.len++] = v;
     return s;
@@ -1111,6 +1153,22 @@ static inline void mako_arr_arr_float_free(MakoArr_arr_float a) {
     if (!(a.cap > 0 && a.data)) return;
     for (size_t i = 0; i < a.len; i++) mako_float_array_free(a.data[i]);
     free(a.data);
+}
+static inline void mako_arr_arr_float_release_replaced(MakoArr_arr_float old, MakoArr_arr_float neu) {
+    if (!(old.cap > 0 && old.data)) return;
+    for (size_t i = 0; i < old.len; i++) {
+        int shared = 0;
+        if (neu.data) {
+            for (size_t j = 0; j < neu.len; j++) {
+                if (old.data[i].data && old.data[i].data == neu.data[j].data) {
+                    shared = 1;
+                    break;
+                }
+            }
+        }
+        if (!shared) mako_float_array_free(old.data[i]);
+    }
+    if (old.data != neu.data) free(old.data);
 }
 static inline MakoArr_arr_float mako_arr_arr_float_slice_expr(MakoArr_arr_float s, int64_t low, int64_t high, int64_t max, int has_max) {
     int64_t len = (int64_t)s.len;
@@ -1161,9 +1219,11 @@ static inline MakoArr_arr_bool mako_arr_arr_bool_append(MakoArr_arr_bool s, Mako
     if (s.len + 1 > s.cap) {
         size_t ncap = s.cap ? s.cap * 2 : 1;
         if (ncap < s.len + 1) ncap = s.len + 1;
-        MakoBoolArray *nd = (MakoBoolArray *)realloc(s.data, ncap * sizeof(MakoBoolArray));
+        MakoBoolArray *nd = (MakoBoolArray *)malloc(ncap * sizeof(MakoBoolArray));
         if (!nd) mako_abort("append: out of memory");
-        s.data = nd; s.cap = ncap;
+        if (s.len) memcpy(nd, s.data, s.len * sizeof(MakoBoolArray));
+        s.data = nd;
+        s.cap = ncap;
     }
     s.data[s.len++] = v;
     return s;
@@ -1178,6 +1238,22 @@ static inline void mako_arr_arr_bool_free(MakoArr_arr_bool a) {
     if (!(a.cap > 0 && a.data)) return;
     for (size_t i = 0; i < a.len; i++) mako_bool_array_free(a.data[i]);
     free(a.data);
+}
+static inline void mako_arr_arr_bool_release_replaced(MakoArr_arr_bool old, MakoArr_arr_bool neu) {
+    if (!(old.cap > 0 && old.data)) return;
+    for (size_t i = 0; i < old.len; i++) {
+        int shared = 0;
+        if (neu.data) {
+            for (size_t j = 0; j < neu.len; j++) {
+                if (old.data[i].data && old.data[i].data == neu.data[j].data) {
+                    shared = 1;
+                    break;
+                }
+            }
+        }
+        if (!shared) mako_bool_array_free(old.data[i]);
+    }
+    if (old.data != neu.data) free(old.data);
 }
 static inline MakoArr_arr_bool mako_arr_arr_bool_slice_expr(MakoArr_arr_bool s, int64_t low, int64_t high, int64_t max, int has_max) {
     int64_t len = (int64_t)s.len;

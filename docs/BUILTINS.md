@@ -1528,8 +1528,8 @@ Requires OpenSSL; `tls_server_available()` reports 1 when present.
 | Function | Signature | Description |
 |----------|-----------|-------------|
 | `tls_server_available` | `tls_server_available() -> int` | Whether the TLS server backend is available (1/0) |
-| `tls_server_new` | `tls_server_new(cert: string, key: string) -> TlsServer` | Create a TLS server (min TLS 1.2) |
-| `tls_server_new_tls13` | `tls_server_new_tls13(cert: string, key: string) -> TlsServer` | Create a TLS server that requires TLS 1.3 (rejects older clients) |
+| `tls_server_new` | `tls_server_new(cert: string, key: string) -> TlsServer` | Create a TLS server (min TLS 1.2); PEM certificate paths may point to a leaf-plus-intermediate chain such as `fullchain.pem` |
+| `tls_server_new_tls13` | `tls_server_new_tls13(cert: string, key: string) -> TlsServer` | Create a TLS server that requires TLS 1.3 (rejects older clients); certificate chains are loaded from the PEM path |
 | `tls_server_sni_add` | `tls_server_sni_add(server: TlsServer, hostname: string, cert: string, key: string) -> int` | Add a certificate selected by SNI; exact names beat wildcards, then longest wildcard suffix |
 | `tls_server_sni_update` | `tls_server_sni_update(server, hostname, cert, key) -> int` | Strict replace of an existing SNI name |
 | `tls_server_sni_remove` | `tls_server_sni_remove(server, hostname) -> int` | Drop an SNI name; future handshakes use the default cert |
