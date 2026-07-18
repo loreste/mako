@@ -20,6 +20,11 @@ fn TestJwtRs256AndJwks() {
     // Duplicate kid selection is ambiguous and must fail closed.
     let duplicate = "{\"keys\":[{\"kty\":\"RSA\",\"n\":\"" + n + "\",\"e\":\"AQAB\",\"kid\":\"dev\"},{\"kty\":\"RSA\",\"n\":\"" + n + "\",\"e\":\"AQAB\",\"kid\":\"dev\"}]}"
     assert_eq(jwt_verify_jwks(token, duplicate), 0)
+
+    // Reject malformed JSON instead of treating an unknown primitive or
+    // trailing bytes as harmless metadata.
+    assert_eq(jwt_verify_jwks(token, jwks + "junk"), 0)
+    assert_eq(jwt_verify_jwks(token, "{\"keys\":[],\"broken\":tru}"), 0)
 }
 
 fn TestHttpsDoesNotDowngradeHttp() {
