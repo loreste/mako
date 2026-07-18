@@ -63,15 +63,17 @@ Related: [SECURITY.md](SECURITY.md) · [MEMORY_MODEL.md](MEMORY_MODEL.md) ·
 
 | | |
 |--|--|
-| **Done** | Fresh owning `MakoString` locals can register `mako_str_free` on reassign/scope exit. |
-| **Gap** | No distinct `string_view` type; still rely on empty-singleton + runtime free conventions. |
+| **Done** | Owning `MakoString` locals free on scope exit / reassign: `str_from_cstr` lets, f-strings, concat (`a + b`), map/index gets that return strings. Empty singleton is never freed. Zero-copy `mako_str_view` stays in arg/compare positions only (not bound as owning lets). |
+| **Evidence** | `string_drop_test`; free-on-reassign + nested scope. |
+| **Gap** | No distinct `string_view` type in the surface language; view vs own is still a runtime/convention split. |
 
-### SAFE-006 — Branch / return / loop / `?` correct drop insertion — **Partial** (break/continue/return **Done**)
+### SAFE-006 — Branch / return / loop / `?` correct drop insertion — **Done** (core)
 
 | | |
 |--|--|
-| **Done** | Block exit free; return transfer; **break/continue** free owns in loop-body scopes (`cfg_drop_break_test`). |
-| **Gap** | Explicit `?` early-return path free of unrelated owns (depends on lowerer); labeled multi-loop edge cases. |
+| **Done** | Block exit free; return transfer + materialize-before-free; **break/continue** free owns in loop-body scopes; **`?` early-return** frees all live owns/shares/fn-envs + runs defers (`try_drop_test`). |
+| **Evidence** | `cfg_drop_break_test`, `slice_return_own_test`, `try_drop_test`, ASan probes. |
+| **Residual** | Labeled multi-loop edge cases if/when labels land. |
 
 ### SAFE-007 — Reject borrowed and arena value escapes — **Done** (core)
 
@@ -165,18 +167,18 @@ Related: [SECURITY.md](SECURITY.md) · [MEMORY_MODEL.md](MEMORY_MODEL.md) ·
 
 1. **SAFE-001 / 002 / 009 / 010 / RT-001 / RT-005 seed / RT-006** — bounds, categories, CMap, docs, crew, census.
 2. **SAFE-003 / 004** — owning slice/map free (built-in + monomorph); views; return transfer; free-on-reassign; nested free (safe).
-3. **SAFE-006 (break/continue/return)** — loop-exit cleanup; return transfer.
+3. **SAFE-006 (break/continue/return/`?`)** — loop-exit cleanup; return transfer + materialize; `?` early free.
 4. **SAFE-007** — arena return/store escape; slice view escape/return.
 5. **RT-004 seed** — `channel_ownership_test`.
 6. **Lang safety** — field/index mut roots; temp lvalue reject; empty `[]` lit.
 
 ### Remaining (0.2.4+)
 
-1. **SAFE-005** — distinct string view type / full free verification.
-2. **SAFE-006 residual** — `?` / multi-label loop drop edges.
-3. **SAFE-008** — capture matrix + TSan soak.
-4. **RT-004 residual** — take-send + all monomorph channels.
-5. **RT-002 / 003** — bounded scheduler + blocking pool.
+1. **SAFE-005 residual** — distinct surface `string_view` type (free path is already live for owning strings).
+2. **SAFE-008** — capture matrix + TSan soak.
+3. **RT-004 residual** — take-send + all monomorph channels.
+4. **RT-002 / 003** — bounded scheduler + blocking pool.
+5. Nested Own fields inside structs (header free vs deep field free).
 6. **RT-005** — randomized longer soaks.
 
 See also [ROADMAP.md](ROADMAP.md) · [ROADMAP_IMPL.md](../ROADMAP_IMPL.md).

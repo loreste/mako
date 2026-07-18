@@ -63,6 +63,12 @@ tight loops; only pay for a heap copy when the value escapes. Prefer
 `make([]T, 0, n)` when you know capacity and will grow. Avoid reallocating a
 fresh lit every iteration when a single buffer can be reused.
 
+**Memory-safe by construction on the free path:** scope exit, reassign, break /
+continue, return (transfer + materialize), and `?` early-return all free live
+owns. Views (`cap==0`) and the empty-string singleton never free backing
+storage. Speed stays in release: free is cold (`MAKO_UNLIKELY`); stack lits and
+zero-copy string compares never malloc.
+
 Capturing closures (env boxes) stay residual until they can pay for themselves.
 
 ### Portable timeouts (runtime trust seed)
