@@ -1398,6 +1398,34 @@ let _ = tls_server_sni_add(srv, "*.example.com", "wild.crt", "wild.key")
 Call `tls_server_sni_add` before accepting connections, or use it as a
 synchronized configuration update while the server is running. A duplicate or
 malformed hostname, unreadable certificate, or mismatched key returns `-1`.
+`tls_server_sni_update` strictly replaces an existing name and
+`tls_server_sni_remove` removes one. Both rebuild and atomically publish the
+full SNI set: active handshakes keep their old context, while later handshakes
+see the new set. A missing name returns `-1`.
+
+### Generic HTTPS client and OIDC
+
+`http_*` is intentionally cleartext and accepts only `http://` URLs. Use the
+separate verified HTTPS surface for outbound HTTP:
+
+```mko
+let discovery = oidc_discovery(
+    "https://id.example/.well-known/openid-configuration",
+    "/etc/ssl/certs/ca-bundle.crt",
+    5000
+)
+let token = oidc_token(
+    "https://id.example/oauth/token",
+    "grant_type=client_credentials&client_id=svc",
+    "/etc/ssl/certs/ca-bundle.crt",
+    5000
+)
+```
+
+`https_request` / `https_get` / `https_post` perform TLS 1.2+ with peer and
+hostname verification, bounded HTTP/1.1 response parsing, and separate
+`https_last_status` / `https_last_header` state. Empty CA paths use platform
+trust paths; production deployments should provide the intended CA bundle.
 
 ### HTTP/2 TLS server (Done — OpenSSL + ALPN h2)
 

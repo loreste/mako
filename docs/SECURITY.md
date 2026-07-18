@@ -185,10 +185,11 @@ Mako does **not** ship a full PKI product or “crypto framework.” It exposes
 | TLS server | `tls_server_new` / `tls_accept` / `tls_read`/`write` (+ NB handshake) | HTTPS, STARTTLS terminate |
 | TLS client | `tls_client_new` / `tls_connect` / SNI / VERIFY_PEER | Outbound TLS, SIPS, mTLS apps |
 | TLS inspect | `tls_conn_version`, `tls_peer_cn`, `tls_conn_alpn` | Logging / policy |
-| HTTP helpers | `tls_get` / `tls_post` (+ insecure demo variants) | Simple HTTPS clients |
+| HTTP helpers | `https_*` / `oidc_*` (+ `tls_get` / `tls_post` demos) | Verified HTTPS clients; OIDC never downgrades to `http_*` |
+| JWT verification | `jwt_verify` (HS256), `jwt_verify_rs256`, `jwt_verify_jwks` | Explicit algorithm/key type; RS256 requires RSA >= 2048 bits |
 
-**Secure defaults:** TLS min 1.2; modern cipher suites; client verify when using
-`tls_client_new(ca)`. Prefer Argon2id for new password storage. Use `const_eq` /
+**Secure defaults:** TLS min 1.2; modern cipher suites; client verify and host
+name verification when using `tls_client_new(ca)` / `https_*`. Prefer Argon2id for new password storage. Use `const_eq` /
 `secret_eq_str` for tokens — never `==` on secrets in hot auth paths if you care
 about timing (language `==` is not constant-time).
 
@@ -265,6 +266,8 @@ Process-local registry; pass the token over the wire for multi-node cancel:
 |-----|------|
 | `tls_server_new_mtls(cert, key, client_ca)` | Require + verify client certs |
 | `tls_server_sni_add(server, hostname, cert, key)` | Select a preloaded certificate by exact or left-most wildcard SNI |
+| `tls_server_sni_update(server, hostname, cert, key)` | Copy-on-write replacement of an existing SNI context |
+| `tls_server_sni_remove(server, hostname)` | Copy-on-write removal; active connections retain their selected context |
 | `tls_client_new_mtls(ca, client_cert, client_key)` | Present client cert |
 | `tls_unique(conn)` | Finished bytes for SCRAM tls-unique binding |
 | `scram_tls_unique_cbind(conn)` | SCRAM-PLUS `c=` from `tls_unique` (apps still own the dialogue) |

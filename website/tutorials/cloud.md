@@ -119,7 +119,8 @@ fn main() {
 
 ## JWT Token Signing and Verification
 
-Mako provides HMAC-SHA256 JWT signing and verification built in. This
+Mako provides explicit HS256 JWT signing/verification and RS256/JWKS
+verification built in. This
 is useful for API authentication and session tokens.
 
 ```mko
@@ -358,5 +359,7 @@ or query parameters to correlate spans across services.
 | `chash_node_count(ring)` | Active node count |
 | `chash_free(ring)` | Destroy ring |
 | `jwt_sign(payload, secret)` | Sign JWT (HMAC-SHA256) |
-| `jwt_verify(token, secret)` | Verify JWT (1=valid, 0=invalid) |
+| `jwt_verify(token, secret)` | Verify HS256 JWT (1=valid, 0=invalid) |
+| `jwt_verify_rs256(token, public_key_pem)` | Verify RS256 with an RSA public key |
+| `jwt_verify_jwks(token, jwks_json)` | Verify RS256 using a matching JWKS `kid` |
 | `jwt_payload(token)` | Extract payload (no verify) |
