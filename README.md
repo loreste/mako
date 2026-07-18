@@ -8,16 +8,15 @@ Speed matters here: release builds use `-O3 -flto`, and concurrency is built in
 ownership, shares, arenas, and explicit resource APIs. The standard library
 covers backend areas without requiring a framework for every service.
 
-This is version **0.2.3**. It runs. The surface is still early — expect change,
+This is version **0.2.4**. It runs. The surface is still early — expect change,
 rough edges, and missing pieces.
 
-**0.2.3 highlights:** stricter JWT JSON/JWKS parsing (reject trailing junk and
-unknown primitives), safer `jwt_sign`/`jwt_verify` buffer handling, dual-stack
-HTTP listen, and verified HTTPS/OIDC contracts. Builds on 0.2.2 TLS SNI,
-HTTPS client, RS256/JWKS, and package lock integrity.  
-**Next (roadmap):** **0.2.4** — tooling (LSP, debugger, package registry) plus
-soundness residuals (CFG drops, monomorph map free, scheduler). See
-[docs/ROADMAP.md](docs/ROADMAP.md) · [docs/SOUNDNESS.md](docs/SOUNDNESS.md).
+**0.2.4 highlights:** memory-safe drops by construction (slices/maps/strings/`?`),
+`string_view`, stack POD array lits, opt-in scheduler pool, channel take-send
+ownership, struct Own field free, and build-time lockfile verification (PR #3).
+Builds on 0.2.3 JWT/HTTPS hardening.  
+**Next (roadmap):** **0.2.5** — tooling (LSP depth, debugger, package registry).
+See [docs/ROADMAP.md](docs/ROADMAP.md) · [docs/SOUNDNESS.md](docs/SOUNDNESS.md).
 
 [mako-lang.com](https://mako-lang.com) · [Status](docs/STATUS.md) · [Roadmap](docs/ROADMAP.md) · [Guide](docs/GUIDE.md) · [Book](docs/book/) · [Soundness](docs/SOUNDNESS.md) · [Memory model](docs/MEMORY_MODEL.md)
 
@@ -67,7 +66,7 @@ Options:
 ```bash
 curl -fsSL …/install-linux.sh | bash -s -- --prefix /opt/mako --yes
 curl -fsSL …/install-linux.sh | bash -s -- --no-deps    # skip clang install
-curl -fsSL …/install-linux.sh | bash -s -- --version v0.2.3
+curl -fsSL …/install-linux.sh | bash -s -- --version v0.2.4
 ```
 
 **You do not need Rust or cargo on the machine that runs Mako.**

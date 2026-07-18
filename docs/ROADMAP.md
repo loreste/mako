@@ -1,6 +1,6 @@
 # Mako roadmap
 
-**Product version:** **0.2.3** · Last roadmap sync: **2026-07-18**.
+**Product version:** **0.2.4** · Last roadmap sync: **2026-07-18**.
 
 **Verified:** [STATUS.md](STATUS.md) · **Stdlib:** [STDLIB.md](STDLIB.md) · **Security:** [SECURITY.md](SECURITY.md) · **Release:** [RELEASE.md](RELEASE.md).  
 **Book:** [The Mako Book](book/) · **Identity:** [IDENTITY.md](IDENTITY.md) · **Pain map:** [PAIN_POINTS.md](PAIN_POINTS.md).  
@@ -18,8 +18,8 @@
 | **0.2.1** | Safety & correctness | **Shipped** |
 | **0.2.2** | TLS SNI / HTTPS / JWT / lock integrity | **Shipped** |
 | **0.2.3** | JWT/HTTPS input hardening | **Shipped** |
-| **0.2.3+** | Soundness wave (SAFE/RT core) | **Shipped on main** — [SOUNDNESS.md](SOUNDNESS.md) |
-| **0.2.4** | Tooling (LSP depth) + soundness residuals | **Next** |
+| **0.2.4** | Soundness wave + residuals (SAFE/RT, speed, lock verify) | **Shipped** — [SOUNDNESS.md](SOUNDNESS.md) |
+| **0.2.5** | Tooling (LSP depth) | **Next** |
 | **0.3.0** | Cross-platform | Planned |
 | **0.4.0** | Performance ceiling | Planned |
 | **1.0** | Stability | Planned |
@@ -29,11 +29,11 @@
 Program of record: **[SOUNDNESS.md](SOUNDNESS.md)** · memory model:
 **[MEMORY_MODEL.md](MEMORY_MODEL.md)**.
 
-Landed on `main` after 0.2.3 and verified in the **2026-07-18 audit**: field/index
-mut roots, empty `[]`, owning free (slice/map/string), return transfer +
-materialize, `?` early free, nested `[][]T` free-on-reassign (no shared-inner
-UAF), stack POD array lits, lockfile build verification (PR #3). **Residuals**
-feed 0.2.4 / later.
+Shipped as **0.2.4** after the **2026-07-18** audit: field/index mut roots,
+empty `[]`, owning free (slice/map/string), return transfer + materialize,
+`?` early free, nested `[][]T` free-on-reassign, stack POD array lits, lockfile
+build verification (PR #3), `string_view`, scheduler pool, capture matrix.
+Optional depth (TSan soaks, monomorph take-send) remains open.
 
 | ID | Theme | Status |
 |----|--------|--------|
@@ -189,7 +189,19 @@ Close the gap between what Mako promises and what it verifies.
 
 ---
 
-## v0.2.4 — Tooling
+## v0.2.4 — Soundness wave + residuals — **shipped**
+
+| Feature | Description |
+|---------|-------------|
+| **SAFE-001…010 core** | Bounds, ownership categories, slice/map free, string_view, CFG/`?` drops, capture matrix, CMap, memory model |
+| **RT-001…006 core** | Crew cancel, opt-in scheduler pool + spawn_blocking, channel take-send, census, select stress seed |
+| **Speed** | Stack POD array lits, empty no-malloc, cold free, escape `to_owned` |
+| **Pkg lock verify** | Build-time locked dependency integrity (PR #3) |
+| **Struct Own free** | Deep free of string/slice fields on scope exit |
+
+---
+
+## v0.2.5 — Tooling
 
 Developer-experience hardening.
 
