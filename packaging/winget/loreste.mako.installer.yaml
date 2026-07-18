@@ -6,8 +6,8 @@ NestedInstallerType: portable
 ReleaseDate: 2026-07-18
 Installers:
 - Architecture: x64
-  InstallerUrl: https://github.com/loreste/mako/releases/download/v0.1.9/mako-x86_64-pc-windows-msvc.zip
-  InstallerSha256: FF6907389C9841248F2E25FF6F58830465197A3D8216C6522C91A349A71E5A59
+  InstallerUrl: https://github.com/loreste/mako/releases/download/v0.2.2/mako-x86_64-pc-windows-msvc.zip
+  InstallerSha256: B1252329816827DD1444232EEEC16FFFB182F319BA5E657A14F6B891F01E4CB0
   NestedInstallerFiles:
   - RelativeFilePath: mako-x86_64-pc-windows-msvc\bin\mako.exe
     PortableCommandAlias: mako

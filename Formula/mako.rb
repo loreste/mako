@@ -15,8 +15,8 @@ class Mako < Formula
   desc "Mako — systems/backend language (.mko → native via C)"
   homepage "https://github.com/loreste/mako"
   # After tagging v0.1.5: ./scripts/fill-release-packaging.sh v0.1.5
-  url "https://github.com/loreste/mako/archive/refs/tags/v0.2.2tar.gz"
-  sha256 "4719d9c7a15b4ae5a5e1c64ffc986c5b2e7583633b1d03ecc219c08491ba416c"
+  url "https://github.com/loreste/mako/archive/refs/tags/v0.2.2.tar.gz"
+  sha256 "fd1f714959b3a858b937df4f5211b7296ccf9e023e1409e5ce2e84013d287c52"
   license "MIT"
   head "https://github.com/loreste/mako.git", branch: "main"
 
