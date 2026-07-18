@@ -26,7 +26,7 @@ where they prevent specific classes of bugs.
 > concurrency. Fast compiles. Clean error handling. Single-binary deployment.
 > A strong standard library. Great tooling from day one.
 
-These are the shipped parts of Mako 0.2.2. The status matrix separates
+These are the shipped parts of Mako 0.2.3. The status matrix separates
 implemented behavior from roadmap goals and platform-dependent paths.
 
 ## Design philosophy
@@ -186,7 +186,7 @@ As of the current release:
 
 | Claim | Meaning |
 |-------|---------|
-| Version 0.2.2 | Current product; first public was 0.1.0 release, core language exercised by the current suite |
+| Version 0.2.3 | Current product; first public was 0.1.0 release, core language exercised by the current suite |
 | Stdlib coverage | Major backend areas covered (HTTP, TLS, JSON, SQL, etc.) |
 | Test suite | 338 test programs pass in the current suite |
 

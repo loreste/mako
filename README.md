@@ -8,16 +8,14 @@ Speed matters here: release builds use `-O3 -flto`, and concurrency is built in
 ownership, shares, arenas, and explicit resource APIs. The standard library
 covers backend areas without requiring a framework for every service.
 
-This is version **0.2.2**. It runs. The surface is still early — expect change,
+This is version **0.2.3**. It runs. The surface is still early — expect change,
 rough edges, and missing pieces.
 
-**0.2.2 highlights:** match exhaustiveness checking, match guards
-(`pattern if cond =>`), use-after-move detection for `hold` values, and
-compile-time rejection of unsynchronized mutable closure captures at every
-`kick` boundary. `fan` mappers must be capture-free; explicit Sync handles are
-the safe shared-state escape hatch. Plus everything from 0.2.0:
-generics, `mut self`, stdlib in Mako, speed optimizations.  
-**Next (roadmap):** **0.2.2** — tooling (LSP, debugger, package registry).
+**0.2.3 highlights:** stricter JWT JSON/JWKS parsing (reject trailing junk and
+unknown primitives), safer `jwt_sign`/`jwt_verify` buffer handling, dual-stack
+HTTP listen, and verified HTTPS/OIDC contracts. Builds on 0.2.2 TLS SNI,
+HTTPS client, RS256/JWKS, and package lock integrity.  
+**Next (roadmap):** **0.2.4** — tooling (LSP, debugger, package registry).
 
 [mako-lang.com](https://mako-lang.com) · [Status](docs/STATUS.md) · [Roadmap](docs/ROADMAP.md) · [Guide](docs/GUIDE.md) · [Book](docs/book/)
 
@@ -67,7 +65,7 @@ Options:
 ```bash
 curl -fsSL …/install-linux.sh | bash -s -- --prefix /opt/mako --yes
 curl -fsSL …/install-linux.sh | bash -s -- --no-deps    # skip clang install
-curl -fsSL …/install-linux.sh | bash -s -- --version v0.2.2
+curl -fsSL …/install-linux.sh | bash -s -- --version v0.2.3
 ```
 
 **You do not need Rust or cargo on the machine that runs Mako.**

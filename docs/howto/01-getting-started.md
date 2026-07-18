@@ -17,7 +17,7 @@ curl -fsSL https://github.com/loreste/mako/releases/latest/download/install-linu
 source "$HOME/.local/share/mako/env.sh"
 ```
 
-Pin a version: `--version v0.2.2`. Needs **clang** so `.mko` files can compile.
+Pin a version: `--version v0.2.3`. Needs **clang** so `.mko` files can compile.
 
 ### From source
 
@@ -32,7 +32,7 @@ Verify the installation:
 
 ```bash
 mako version
-# mako version mako0.2.2 darwin/arm64
+# mako version mako0.2.3 darwin/arm64
 
 mako version -v
 # includes the git commit hash

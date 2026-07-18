@@ -3,13 +3,13 @@
 Detailed feature plan for Mako, organized by version. See
 [docs/ROADMAP.md](docs/ROADMAP.md) for the summary view.
 
-**Current version:** 0.2.2  
-**Next milestone:** 0.2.2 (tooling)  
-**Last updated:** 2026-07-17
+**Current version:** 0.2.3  
+**Next milestone:** 0.2.4 (tooling)  
+**Last updated:** 2026-07-18
 
 ---
 
-## v0.2.2 — Safety & correctness — **shipped**
+## v0.2.1 — Safety & correctness — **shipped**
 
 | Feature | Status |
 |---------|--------|
@@ -152,7 +152,7 @@ must be written in idiomatic Mako and serve as example code.
 
 ---
 
-## v0.2.2 — Safety & Correctness
+## v0.2.3 — Safety & Correctness
 
 Close the gap between safety claims and verified behavior.
 
@@ -194,7 +194,19 @@ Close the gap between safety claims and verified behavior.
 
 ---
 
-## v0.2.2 — Tooling
+## v0.2.3 — JWT / HTTPS input hardening — **shipped**
+
+| Feature | Status |
+|---------|--------|
+| Strict JWT JSON skip/parse | Done — numbers, true/false/null, depth limit, no trailing junk |
+| JWKS fail-closed | Done — malformed keys JSON rejects verify |
+| JWT sign/verify resource safety | Done — payload cap, HMAC length, free sig buffers |
+| Dual-stack HTTP listen | Done — shared TCP backlog helper |
+| TLS live tests | Done — free ports, assert SNI bind |
+
+---
+
+## v0.2.4 — Tooling
 
 Production-grade developer experience.
 

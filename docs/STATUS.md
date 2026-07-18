@@ -1,9 +1,9 @@
 # Mako status (adversarial / verified)
 
-Last inventory: **2026-07-18** · product **mako0.2.2** (`CARGO_PKG_VERSION`).
+Last inventory: **2026-07-18** · product **mako0.2.3** (`CARGO_PKG_VERSION`).
 
 Unique Mako surface · pack/pull · map/slice/bag monomorphs · package-per-directory ·
-const-fn depth (match/while/for/strings) · suite **338 test programs** · [The Mako Book](book/).
+const-fn depth (match/while/for/strings) · suite **340 test programs** · [The Mako Book](book/).
 
 **Book:** [The Mako Book](book/) · **Guide:** [GUIDE.md](GUIDE.md) · **Identity:** [IDENTITY.md](IDENTITY.md) · **Pain points:** [PAIN_POINTS.md](PAIN_POINTS.md) · **Build:** [BUILD.md](BUILD.md) · **Stdlib:** [STDLIB.md](STDLIB.md) · **Roadmap:** [ROADMAP.md](ROADMAP.md) · **Changelog:** [../CHANGELOG.md](../CHANGELOG.md) · **Release:** [RELEASE.md](RELEASE.md).
 
@@ -13,7 +13,7 @@ const-fn depth (match/while/for/strings) · suite **338 test programs** · [The 
 
 | Scope | Approx. |
 |-------|---------|
-| **Product version** | **0.2.2** |
+| **Product version** | **0.2.3** |
 | **MVP / usable language** | Core compiler/runtime scope is exercised; this is not a production-readiness claim |
 | **STATUS north-star** | Tracked scope is explicit; residuals below remain |
 | **Mako identity (preferred syntax)** | Checklist complete — [IDENTITY.md](IDENTITY.md); not a maturity score |
@@ -120,7 +120,7 @@ const-fn depth (match/while/for/strings) · suite **338 test programs** · [The 
 | Product version 0.1.9 | Done — generic structs/enums, interface bounds, iterator/closure seeds |
 | Product version 0.2.0 | Done — stdlib in Mako (io, collections, context, json, http, sql pool) |
 | Product version 0.2.1 | Done — match exhaustiveness, guards, safety verification |
-| Product version 0.2.2 | Done — TLS SNI COW/update/remove, HTTPS/OIDC, JWT RS256/JWKS, lock integrity |
+| Product version 0.2.3 | Done — JWT/HTTPS input hardening on top of 0.2.2 SNI/HTTPS/JWT/lock integrity |
 | Generic structs `struct Pair[T]` + multi-param | Done — monomorph `Pair__int` · `generic_struct_test` |
 | Generic enums `enum MyBox[T]` + match | Done — `generic_enum_test` |
 | Interface bounds `fn f[T: I](…)` | Done — structural · `generic_bounds_test` · `bad/generic_bound_fail` |
@@ -150,7 +150,7 @@ const-fn depth (match/while/for/strings) · suite **338 test programs** · [The 
 | ShareInt capture (shared mut via RC handle) | Done seed — `share_capture_test` |
 | Packaging seeds (deb/rpm/winget/matrix/homebrew) | Done seed — scripts + packaging/ |
 | Book samples `mako check` / `run` | PASS — `docs/book/examples/book_*.mko` |
-| `mako test examples/testing` | PASS — **338 passed**, 0 failed (2026-07-17) |
+| `mako test examples/testing` | PASS — **340 passed**, 0 failed (2026-07-18) |
 | GC removal regression checks | PASS — removed builtin and legacy `[package] gc = true` both fail, including isolated cache paths |
 | Speed gate | PASS — normal ≤2.0× and strict ≤1.5× Rust gates; final measured ratios 0.21×–0.65× |
 | Leba downstream smoke | PASS — current compiler builds/checks Leba; compiled `doctor` reports 0 errors |

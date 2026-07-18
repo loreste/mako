@@ -2,6 +2,32 @@
 
 ## Unreleased
 
+## 0.2.3 — 2026-07-18
+
+**mako0.2.3** (`CARGO_PKG_VERSION`).
+
+Security patch after 0.2.2: fail-closed JWT JSON/JWKS parsing, safer JWT
+sign/verify resource handling, dual-stack HTTP listen, and docs for the
+verified HTTPS contract.
+
+### JWT / JWKS
+
+- **Strict JSON value skip** — numbers, `true`/`false`/`null`, objects, and
+  arrays with depth limiting; reject trailing junk after a complete object.
+- **JWKS fail-closed** — malformed JSON and unknown primitives no longer skip
+  as harmless metadata (`jwt_verify_jwks` returns 0).
+- **`jwt_sign` / `jwt_verify`** — payload size cap, HMAC length checks, free
+  signature buffers on all exit paths.
+
+### HTTPS / listen
+
+- Dual-stack HTTP listen via the shared TCP backlog helper (wildcard binds).
+- TLS live tests use free ports and assert SNI listeners bind.
+
+### Docs
+
+- Document verified HTTPS vs cleartext `http_*`, OIDC, and JWT SNI contracts.
+
 ## 0.2.2 — 2026-07-18
 
 **mako0.2.2** (`CARGO_PKG_VERSION`).
