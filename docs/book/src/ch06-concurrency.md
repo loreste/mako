@@ -1,9 +1,9 @@
 # 6. Concurrency: Crews, Channels, and Actors
 
-Mako concurrency is **structured**. Every concurrent task lives inside a `crew`
-block, and no task can outlive its crew. When the crew block ends, all kicked
-tasks are joined automatically. This eliminates orphan threads, dangling
-references, and the fire-and-forget bugs that plague concurrent systems.
+Mako concurrency is **structured** for ordinary `crew` tasks. Kicked tasks are
+joined when their crew scope ends, so they do not outlive that scope. Running
+work is cancelled cooperatively; a blocked C/FFI call can delay the join, and
+explicit `detach` is the documented process-scoped escape hatch.
 
 This chapter covers:
 
@@ -52,15 +52,17 @@ fn main() {
 
 ### Why structured?
 
-Because tasks cannot outlive their crew, the compiler can guarantee that any
-reference passed into a kicked task remains valid for the task's entire lifetime.
-This is what makes `hold` and `share` ownership work correctly across threads.
+For ordinary kicked tasks, the compiler checks that references passed into the
+task remain valid for the task's lifetime. This is what makes `hold` and
+`share` ownership work across threads; generated C, FFI, and explicit detached
+work remain outside that language-level guarantee.
 
 ### `go f()` — fire-and-forget
 
 When you don't need the join handle, `go f()` schedules a call onto the innermost
 enclosing crew — the same as `t.kick(f())` with the result discarded. The crew
-still joins it at scope exit, so there are no orphan tasks:
+still joins it at scope exit for ordinary kicked work; blocked C/FFI calls can
+delay the join:
 
 ```mko
 fn main() {
@@ -814,11 +816,14 @@ fn main() {
 ## Concurrent Maps (CMap)
 
 When multiple crew tasks need to share mutable key-value state, `CMap` is the
-built-in solution. It is a concurrent hashmap with lock-free reads and
-per-stripe spinlock writes (512 stripes, FNV-1a hash, 1M initial capacity).
+built-in solution. It is a concurrent hashmap with shared-reader and
+exclusive-writer synchronization. The table starts at 1M slots and grows
+under the write gate.
 
 Unlike regular maps, a `CMap` can be read and written from any number of crew
-tasks simultaneously without channels, mutexes, or `hold`/`share` annotations:
+tasks simultaneously without caller-managed channels, mutexes, or `hold`/`share`
+annotations. Reads share the read side of the internal gate; writes take the
+exclusive side:
 
 ```mko
 fn worker(m: CMap, id: int) -> int {

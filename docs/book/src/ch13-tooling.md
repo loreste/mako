@@ -2,7 +2,8 @@
 
 Mako ships as a single binary that includes the compiler, test runner, formatter,
 linter, package manager, profiler, documentation generator, and language server.
-This chapter is a complete reference for every subcommand.
+This chapter is a reference for the current subcommands; platform-specific and
+optional integration limits are called out where they apply.
 
 ---
 
@@ -12,13 +13,13 @@ Prints the installed version, operating system, and architecture.
 
 ```bash
 mako version
-# mako version mako0.1.9 darwin/arm64
+# mako version mako0.2.1 darwin/arm64
 
 mako --version        # same output
 mako -V               # same output
 
 mako version -v       # verbose: includes git commit hash if available
-# mako version mako0.1.9 darwin/arm64
+# mako version mako0.2.1 darwin/arm64
 # commit: a1b2c3d
 ```
 
@@ -459,7 +460,7 @@ Checks your development environment and reports the status of required tools:
 
 ```bash
 mako doctor
-# mako: 0.1.9 (darwin/arm64)
+# mako: 0.2.1 (darwin/arm64)
 # clang: Apple clang version 15.0.0
 # zig: 0.11.0 (optional, for cross-compilation)
 # wasi-sdk: /opt/wasi-sdk (optional, for WASM)
@@ -565,7 +566,7 @@ mako deploy plugin my-plugin --name my-plugin --kind native
 | `docker`     | Multi-stage Dockerfile + .dockerignore          |
 | `serverless` | Docker + provider manifest (Cloud Run / Fly.io) |
 | `wasm`       | Browser/edge WASI starter (HTML + JS loader)    |
-| `plugin`     | Native or WASM plugin ABI skeleton              |
+| `plugin`     | Native or WASM plugin ABI starter               |
 
 ---
 

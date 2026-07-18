@@ -68,9 +68,12 @@ Tests: `generic_struct_test`, `generic_enum_test`, `generic_bounds_test`,
 
 ### Ecosystem: Leba load balancer
 
-[Leba](https://github.com/loreste/leba) (v0.7.0) is a production load balancer
-written in Mako, deployed on mako-lang.com. It exercises channels, TLS, HTTP
-proxying, structured concurrency, and the full networking stdlib. Recent work:
+[Leba](https://github.com/loreste/leba) (v0.7.0) is an independently maintained
+Mako application and systems-programming showcase. Its deployment and
+production claims belong to the Leba repository; this roadmap does not use it
+as evidence that every Mako program or the Mako toolchain is production-ready.
+It exercises channels, TLS, HTTP proxying, structured concurrency, and the
+networking stdlib. Recent work:
 
 - Session cookie authentication with HMAC-signed tokens
 - Full admin dashboard (standalone HTML/CSS/JS) with RBAC
@@ -105,7 +108,7 @@ Close the gap between what Mako promises and what it verifies.
 |---------|-------------|
 | **Ownership verification** | Static use-after-move analysis — compiler error, not runtime crash |
 | **Lifetime tracking** | Prevent dangling pointers from sub-slices and borrowed views |
-| **Compile-time race detection** | Shared mutable state across `kick` boundaries is a compile error |
+| **Compile-time race safety** | Safe Mako rejects unsynchronized mutable closure captures and unknown function environments across every `kick`; `fan` mappers are capture-free; nested field/index writes are checked |
 | **Match exhaustiveness** | Compiler error when match arms do not cover all enum variants |
 | **Match guards** | `Ok(n) if n > 0 => ...` — boolean conditions on match arms |
 | **Nested destructuring** | `Some(Point { x, y }) => ...` — destructure through multiple layers |
@@ -114,7 +117,7 @@ Close the gap between what Mako promises and what it verifies.
 
 ## v0.2.2 — Tooling
 
-Production-grade developer experience.
+Developer-experience hardening.
 
 | Feature | Description |
 |---------|-------------|
@@ -429,12 +432,12 @@ Percentages are weighted; update when a task flips.
 - [x] No null by default; explicit `Option`.
 - [x] Scope ownership, `arena`, `hold`, `share` seed, CFG/NLL checks.
 - [x] Debug bounds checks and explicit `unsafe` blocks.
-- [x] Release safety profile: `[profile.release] bounds_checks = "on"`.
+- [x] Release safety profile: safe indexing checks are retained; the legacy
+  `[profile.release] bounds_checks = "on"` setting remains accepted.
 - [x] Memory pools and reusable buffers.
 - [x] Borrowed string/byte views and zero-copy packet/file APIs.
 - [x] Core string region ops without substring alloc (`str_slice_eq` / `str_slice_index` / `str_at_eq` / `str_byte_at`).
-- [x] Optional GC for app workloads only (`[package] gc = true`; systems forbids).
-- [x] Tracing GC seed on `gc_alloc` heap.
+- [x] GC-free runtime invariant — no tracing collector or `gc_*` API.
 - [x] Leak detector and allocation reporting.
 
 ### 3. Concurrency and runtime trust — 10%
@@ -447,7 +450,7 @@ Percentages are weighted; update when a task flips.
 - [x] Structured error propagation from child tasks (nursery first_err / wait).
 - [x] Explicit detached-task syntax and lifecycle (`detach` + `detached_join_all`).
 - [x] Backpressure primitives and bounded queues.
-- [x] Race diagnostics (Send/Sync; mut captures until join; TSan via `--race`). Leak scopes Done.
+- [x] Race safety at language boundaries (Send/Sync; closure capture analysis; mut captures until join; nested field/index writes; TSan via `--race`). Leak scopes Done.
 - [x] Scheduler observability.
 
 ### 4. Backend app surface — 12%
@@ -462,7 +465,7 @@ Percentages are weighted; update when a task flips.
 
 - [x] TCP, HTTP/1.1, HTTP/2, gRPC-ish unary/stream seeds, H3 client/server pieces.
 - [x] TLS/QUIC/WebSocket seeds; UDP and Unix sockets; DNS polish.
-- [x] Production-grade WebSocket APIs; OpenAPI; GraphQL seed; SSE / streaming RPC.
+- [x] WebSocket APIs; OpenAPI; GraphQL seed; SSE / streaming RPC.
 - [x] Connection pooling, load-balancing, backpressure-aware network I/O.
 
 ### 6. Data, SQL, and serialization — 10%
@@ -555,7 +558,7 @@ Percentages are weighted; update when a task flips.
 - [x] Storage polish seeds: `bloom_*` · `btree_range` / `sst_range` + `range_*` · `pman_*` disk page manager.
 - [x] Window soft poll + backend name (`gfx_poll` / `gfx_backend_name`).
 - [x] Soft framebuffer (`gfx_window_fill` / `set_pixel` / `get_pixel` / `pixels`).
-- [x] GPU Metal/CUDA/Vulkan **availability stubs** (`gpu_metal_ok` / `cuda_ok` / `vulkan_ok`).
+- [x] GPU Metal/CUDA/Vulkan **availability probes** (`gpu_metal_ok` / `cuda_ok` / `vulkan_ok`).
 - [x] Netcode seeds: `snap_diff` / `snap_apply_delta` · `netcode_lag_comp_tick` / `netcode_interp`.
 - [x] Plugin host loader seed (`plugin_open` / `call` / `close`) · `ffi_abi_name`.
 - [x] Rich plugin package (`std/plugin` + info/error/slots/close_all · `plugin_package_test`).

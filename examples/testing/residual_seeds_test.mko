@@ -1,4 +1,4 @@
-// Residual roadmap seeds: DAP, pprof text, gfx poll, GPU stubs, netcode,
+// Residual roadmap seeds: DAP, pprof text, gfx poll, GPU availability,
 // hot-reload unwatch, plugin open fail path, ffi abi.
 
 fn TestDapJsonSeed() {
@@ -41,8 +41,8 @@ fn TestGfxPollAndBackend() {
     assert_eq(gfx_window_close(w), 0)
 }
 
-fn TestGpuBackendStubs() {
-    // Stubs return 0 without MAKO_HAS_METAL/CUDA/VULKAN.
+fn TestGpuBackendAvailability() {
+    // Availability is 0 unless MAKO_HAS_METAL/CUDA/VULKAN is enabled.
     assert_eq(gpu_metal_ok(), 0)
     assert_eq(gpu_cuda_ok(), 0)
     assert_eq(gpu_vulkan_ok(), 0)

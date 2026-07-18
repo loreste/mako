@@ -209,11 +209,10 @@ while 1 == 1 {
 
 ---
 
-## Complete Multiplayer Echo Server
+## Multiplayer Echo Server Example
 
-This full example combines UDP binding, peer tracking, a fixed tick
-loop, binary protocol handling, and broadcast into a single runnable
-server.
+This example combines UDP binding, peer tracking, a fixed tick loop, binary
+protocol handling, and broadcast into a single runnable server.
 
 ```mko
 fn pack_state(tick: int, peers: int) -> string {

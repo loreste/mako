@@ -1,0 +1,97 @@
+// End-to-end multi-certificate SNI coverage.
+// Opt in with MAKO_LIVE_TLS=1 because it binds a local TCP port and creates
+// temporary certificates. The non-live claim suite still type-checks this file.
+
+fn sni_serve(server: TlsServer, listener: int, requests: int) -> int {
+    let mut i = 0
+    while i < requests {
+        let fd = tcp_accept(listener)
+        if fd < 0 {
+            let _ = tcp_close(listener)
+            return -1
+        }
+        let conn = tls_accept(server, fd)
+        if tls_conn_fd(conn) < 0 {
+            let _ = tcp_close(fd)
+            let _ = tcp_close(listener)
+            return -1
+        }
+        let _ = tls_conn_close(conn)
+        i = i + 1
+    }
+    let _ = tcp_close(listener)
+    return 0
+}
+
+fn sni_peer_cn(client: TlsClient, port: int, hostname: string) -> string {
+    let fd = tcp_connect("127.0.0.1", port)
+    if fd < 0 {
+        return ""
+    }
+    let conn = tls_connect(client, fd, hostname)
+    let out = tls_peer_cn(conn)
+    if tls_conn_fd(conn) >= 0 {
+        let _ = tls_conn_close(conn)
+    } else {
+        let _ = tcp_close(fd)
+    }
+    return out
+}
+
+fn TestTlsMultiCertSniSelection() {
+    let enabled = env_get("MAKO_LIVE_TLS")
+    if tls_server_available() == 0 or (enabled != "1" and enabled != "true") {
+        return
+    }
+
+    let base_cert = "runtime/certs/dev.crt"
+    let base_key = "runtime/certs/dev.key"
+    let exact_cert = "/tmp/mako_sni_exact.crt"
+    let exact_key = "/tmp/mako_sni_exact.key"
+    let wildcard_cert = "/tmp/mako_sni_wildcard.crt"
+    let wildcard_key = "/tmp/mako_sni_wildcard.key"
+    let deep_cert = "/tmp/mako_sni_deep.crt"
+    let deep_key = "/tmp/mako_sni_deep.key"
+    assert_eq(tls_make_self_signed(exact_cert, exact_key, "api.example.com", 1), 0)
+    assert_eq(tls_make_self_signed(wildcard_cert, wildcard_key, "wild.example.com", 1), 0)
+    assert_eq(tls_make_self_signed(deep_cert, deep_key, "deep.service.example.com", 1), 0)
+
+    let server = tls_server_new(base_cert, base_key)
+    assert_eq(tls_server_sni_add(server, "api.example.com", exact_cert, exact_key), 0)
+    assert_eq(tls_server_sni_add(server, "*.example.com", wildcard_cert, wildcard_key), 0)
+    assert_eq(tls_server_sni_add(server, "*.service.example.com", deep_cert, deep_key), 0)
+
+    let mut port = 20000 + (now_ms() % 1000)
+    let mut listener = -1
+    let mut attempt = 0
+    for attempt < 32 {
+        if listener < 0 {
+            listener = tcp_listen_addr("127.0.0.1", port)
+            if listener < 0 {
+                port = port + 1
+            }
+        }
+        attempt = attempt + 1
+    }
+    if listener < 0 {
+        let _ = tls_server_free(server)
+        return
+    }
+    let client = tls_client_new_insecure()
+    crew sni {
+        let task = sni.kick(sni_serve(server, listener, 4))
+        sleep_ms(100)
+        assert_eq_str(sni_peer_cn(client, port, "API.EXAMPLE.COM"), "api.example.com")
+        assert_eq_str(sni_peer_cn(client, port, "one.example.com"), "wild.example.com")
+        assert_eq_str(
+            sni_peer_cn(client, port, "one.service.example.com"),
+            "deep.service.example.com"
+        )
+        // A wildcard does not match another nested label; this falls back to
+        // the default certificate instead of over-matching.
+        assert_eq_str(sni_peer_cn(client, port, "two.deep.service.example.com"), "localhost")
+        assert_eq(task.join(), 0)
+    }
+    let _ = tls_client_free(client)
+    let _ = tls_server_free(server)
+}

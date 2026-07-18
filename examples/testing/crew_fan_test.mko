@@ -49,3 +49,30 @@ fn TestCrewParallelKicks() {
         assert_eq(s, 30)
     }
 }
+
+fn TestCrewManyKicks() {
+    // Regression: task handles must remain valid while the nursery grows.
+    crew t {
+        let j1 = t.kick(square(1))
+        let j2 = t.kick(square(2))
+        let j3 = t.kick(square(3))
+        let j4 = t.kick(square(4))
+        let j5 = t.kick(square(5))
+        let j6 = t.kick(square(6))
+        let j7 = t.kick(square(7))
+        let j8 = t.kick(square(8))
+        let j9 = t.kick(square(9))
+        let j10 = t.kick(square(10))
+        let j11 = t.kick(square(11))
+        let j12 = t.kick(square(12))
+        let j13 = t.kick(square(13))
+        let j14 = t.kick(square(14))
+        let j15 = t.kick(square(15))
+        let j16 = t.kick(square(16))
+        let total = j1.join() + j2.join() + j3.join() + j4.join()
+            + j5.join() + j6.join() + j7.join() + j8.join()
+            + j9.join() + j10.join() + j11.join() + j12.join()
+            + j13.join() + j14.join() + j15.join() + j16.join()
+        assert_eq(total, 1496)
+    }
+}

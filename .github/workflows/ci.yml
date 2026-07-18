@@ -77,8 +77,17 @@ jobs:
           ./target/release/mako init "${RUNNER_TEMP}/mako-ci-demo" --name ci-demo
           ./target/release/mako run "${RUNNER_TEMP}/mako-ci-demo/main.mko"
 
+      - name: Intel macOS cross-artifact smoke
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          ./target/release/mako build examples/hello.mko \
+            --target x86_64-apple-darwin -o "${RUNNER_TEMP}/hello-macos-x86_64"
+          ./scripts/verify-target-artifact.sh \
+            x86_64-apple-darwin "${RUNNER_TEMP}/hello-macos-x86_64"
+
   cross-smoke:
-    name: Cross-compile smoke (Linux → Windows + static musl)
+    name: Cross-compile artifacts (Windows + Linux musl + WASI)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -102,8 +111,8 @@ jobs:
           ./target/release/mako build /tmp/mako-cross/main.mko \
             --target x86_64-pc-windows-gnu \
             -o /tmp/mako-cross/hello.exe
-          file /tmp/mako-cross/hello.exe || ls -la /tmp/mako-cross/
-          test -f /tmp/mako-cross/hello.exe
+          ./scripts/verify-target-artifact.sh \
+            x86_64-pc-windows-gnu /tmp/mako-cross/hello.exe
 
       - name: Cross-compile static Linux musl hello
         run: |
@@ -111,15 +120,25 @@ jobs:
           ./target/release/mako build /tmp/mako-musl/main.mko \
             --target x86_64-unknown-linux-musl \
             -o /tmp/mako-musl/hello-static
-          file /tmp/mako-musl/hello-static
-          test -f /tmp/mako-musl/hello-static
-          if ldd /tmp/mako-musl/hello-static 2>&1 | grep -Eqi 'not a dynamic executable|statically linked'; then
-            echo "static musl link verified"
-          else
-            echo "expected a static musl binary" >&2
-            ldd /tmp/mako-musl/hello-static || true
-            exit 1
-          fi
+          ./scripts/verify-target-artifact.sh \
+            x86_64-unknown-linux-musl /tmp/mako-musl/hello-static --static
+
+      - name: Cross-compile static Linux musl ARM64 hello
+        run: |
+          ./target/release/mako init /tmp/mako-musl-arm64 --name musl-arm64-hello
+          ./target/release/mako build /tmp/mako-musl-arm64/main.mko \
+            --target aarch64-unknown-linux-musl \
+            -o /tmp/mako-musl-arm64/hello-static
+          ./scripts/verify-target-artifact.sh \
+            aarch64-unknown-linux-musl /tmp/mako-musl-arm64/hello-static --static
+
+      - name: Cross-compile WASI hello
+        run: |
+          ./target/release/mako init /tmp/mako-wasi --name wasi-hello
+          ./target/release/mako build /tmp/mako-wasi/main.mko \
+            --target wasm32-wasip1 -o /tmp/mako-wasi/hello.wasm
+          ./scripts/verify-target-artifact.sh \
+            wasm32-wasip1 /tmp/mako-wasi/hello.wasm
 
       - name: Upload cross artifact
         uses: actions/upload-artifact@v4
@@ -128,6 +147,8 @@ jobs:
           path: |
             /tmp/mako-cross/hello.exe
             /tmp/mako-musl/hello-static
+            /tmp/mako-musl-arm64/hello-static
+            /tmp/mako-wasi/hello.wasm
 
   bench-gate:
     name: Bench gate vs Rust
@@ -144,9 +165,8 @@ jobs:
         run: ./scripts/bench-gate.sh
 
   bench-gate-strict:
-    name: Bench gate strict 1.5× (informational)
+    name: Bench gate strict 1.5×
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - name: Install Rust
@@ -157,6 +177,22 @@ jobs:
         run: cargo build --release
       - name: Run bench-gate 1.5×
         run: ./scripts/bench-gate.sh 1.5
+
+  claims-gate:
+    name: Product claims gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Install native dependencies
+        run: sudo apt-get update && sudo apt-get install -y clang libssl-dev libsqlite3-dev
+      - name: Build mako
+        run: cargo build --release
+      - name: Verify claims and regression fixtures
+        env:
+          MAKO_CACHE: ${{ runner.temp }}/mako-claims-cache
+        run: ./scripts/claims-gate.sh
 
   tsan:
     name: TSan concurrency smoke
@@ -211,6 +247,7 @@ jobs:
           ./target/release/mako test --race examples/testing/wave38_queue_test.mko
           ./target/release/mako test --race examples/testing/share_atomic_test.mko
           ./target/release/mako test --race examples/testing/kick_sync_test.mko
+          ./target/release/mako test --race examples/testing/cmap_stress_test.mko
           ./target/release/mako test --race examples/testing/kick_share_test.mko
           ./target/release/mako test --race examples/testing/job_join_typed_test.mko
           ./target/release/mako test --race examples/testing/select_nll_test.mko

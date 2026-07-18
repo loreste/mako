@@ -1,4 +1,4 @@
-/* Real TLS via OpenSSL when available; otherwise clear Stub. */
+/* Real TLS via OpenSSL when available; otherwise explicit unavailable errors. */
 #ifndef MAKO_TLS_H
 #define MAKO_TLS_H
 
@@ -297,10 +297,28 @@ static inline SSL_CTX *mako_tls_make_ctx(const char *cert, const char *key) {
 /* loop: bind/accept a plain TCP fd yourself (tcp_listen/tcp_accept), optionally */
 /* read pre-TLS bytes (e.g. a Postgres SSLRequest), then upgrade that same fd to */
 /* TLS and read/write decrypted data. Handles are opaque `void*` so the API      */
-/* still compiles when TLS is not linked (the stubs below just fail).           */
+/* still compiles when TLS is not linked (the fallbacks below fail clearly).    */
 /* ------------------------------------------------------------------------- */
 
-typedef struct { SSL *ssl; int fd; } MakoTlsConn;
+typedef struct MakoTlsServer MakoTlsServer;
+
+typedef struct {
+    char *pattern;
+    size_t pattern_len;
+    SSL_CTX *ctx;
+} MakoTlsSniCert;
+
+struct MakoTlsServer {
+    SSL_CTX *ctx;
+    MakoTlsSniCert *sni;
+    size_t sni_len;
+    size_t sni_cap;
+    pthread_mutex_t mu;
+    int closing;
+    unsigned int refs;
+};
+
+typedef struct { SSL *ssl; int fd; MakoTlsServer *server; } MakoTlsConn;
 
 /* ALPN select for reverse-proxy TLS.
  *
@@ -324,6 +342,162 @@ static inline int mako_tls_alpn_cb(SSL *ssl, const unsigned char **out,
     return SSL_TLSEXT_ERR_NOACK;
 }
 
+/* Canonicalize and validate a configured SNI name. A wildcard is deliberately
+ * restricted to the RFC-style left-most label (`*.example.com`); accepting
+ * arbitrary glob syntax would make precedence surprising and could route a
+ * certificate to a name its operator did not intend. Hostnames are compared
+ * case-insensitively and one trailing DNS root dot is ignored. */
+static inline int mako_tls_sni_canonicalize(
+    MakoString input, char *out, size_t out_cap, size_t *out_len
+) {
+    if (!input.data || input.len == 0 || input.len >= out_cap || !out_len) return -1;
+    size_t n = input.len;
+    if (input.data[n - 1] == '.') n--;
+    if (n == 0 || n >= out_cap) return -1;
+
+    int wildcard = n >= 2 && input.data[0] == '*' && input.data[1] == '.';
+    size_t label_len = 0;
+    for (size_t i = 0; i < n; i++) {
+        unsigned char c = (unsigned char)input.data[i];
+        if (c == 0 || c <= 0x20 || c >= 0x7f || c == '/' || c == ':') return -1;
+        if (c == '*') {
+            if (!wildcard || i != 0) return -1;
+        }
+        if (c == '.') {
+            if (label_len == 0) return -1;
+            label_len = 0;
+        } else {
+            label_len++;
+            if (label_len > 63) return -1;
+        }
+        if (c >= 'A' && c <= 'Z') c = (unsigned char)(c - 'A' + 'a');
+        out[i] = (char)c;
+    }
+    if (label_len == 0) return -1;
+    if (wildcard && n <= 2) return -1;
+    out[n] = 0;
+    *out_len = n;
+    return 0;
+}
+
+static inline int mako_tls_sni_matches(
+    const MakoTlsSniCert *entry, const char *host, size_t host_len
+) {
+    if (!entry || !host) return 0;
+    if (entry->pattern[0] != '*') {
+        return entry->pattern_len == host_len
+            && memcmp(entry->pattern, host, host_len) == 0;
+    }
+
+    /* A wildcard matches exactly one complete left-most label. */
+    size_t suffix_len = entry->pattern_len - 2;
+    if (host_len <= suffix_len + 1) return 0;
+    size_t prefix_len = host_len - suffix_len - 1;
+    return host[prefix_len] == '.'
+        && prefix_len > 0
+        && memcmp(host + prefix_len + 1, entry->pattern + 2, suffix_len) == 0
+        && memchr(host, '.', prefix_len) == NULL;
+}
+
+static inline MakoTlsSniCert *mako_tls_sni_find_locked(
+    MakoTlsServer *server, const char *host, size_t host_len
+) {
+    MakoTlsSniCert *wildcard = NULL;
+    for (size_t i = 0; i < server->sni_len; i++) {
+        MakoTlsSniCert *entry = &server->sni[i];
+        if (entry->pattern[0] != '*') {
+            if (mako_tls_sni_matches(entry, host, host_len)) return entry;
+        } else if (mako_tls_sni_matches(entry, host, host_len)
+                   && (!wildcard || entry->pattern_len > wildcard->pattern_len)) {
+            wildcard = entry;
+        }
+    }
+    return wildcard;
+}
+
+static inline int mako_tls_sni_cb(SSL *ssl, int *al, void *arg) {
+    (void)al;
+    MakoTlsServer *server = (MakoTlsServer *)arg;
+    const char *raw = ssl ? SSL_get_servername(ssl, TLSEXT_NAMETYPE_host_name) : NULL;
+    if (!server || !raw) return SSL_TLSEXT_ERR_NOACK;
+
+    char host[256];
+    size_t host_len = 0;
+    MakoString input = {(char *)raw, strlen(raw)};
+    if (mako_tls_sni_canonicalize(input, host, sizeof(host), &host_len) != 0)
+        return SSL_TLSEXT_ERR_NOACK;
+
+    pthread_mutex_lock(&server->mu);
+    MakoTlsSniCert *entry = mako_tls_sni_find_locked(server, host, host_len);
+    if (entry) {
+        /* SSL_set_SSL_CTX retains the selected context for this SSL object;
+         * the server keeps the configuration context alive until all active
+         * connections release their server references. */
+        (void)SSL_set_SSL_CTX(ssl, entry->ctx);
+        pthread_mutex_unlock(&server->mu);
+        return SSL_TLSEXT_ERR_OK;
+    }
+    pthread_mutex_unlock(&server->mu);
+    return SSL_TLSEXT_ERR_NOACK;
+}
+
+static inline int mako_tls_copy_server_policy(SSL_CTX *from, SSL_CTX *to) {
+    if (!from || !to) return -1;
+    if (SSL_CTX_set_min_proto_version(to, SSL_CTX_get_min_proto_version(from)) != 1
+        || SSL_CTX_set_max_proto_version(to, SSL_CTX_get_max_proto_version(from)) != 1)
+        return -1;
+    (void)SSL_CTX_set_options(to, SSL_CTX_get_options(from));
+    int verify_mode = SSL_CTX_get_verify_mode(from);
+    SSL_CTX_set_verify(to, verify_mode, SSL_CTX_get_verify_callback(from));
+    if (verify_mode != SSL_VERIFY_NONE) {
+        X509_STORE *store = NULL;
+        if (SSL_CTX_get0_verify_cert_store(from, &store) == 1 && store
+            && SSL_CTX_set1_verify_cert_store(to, store) != 1)
+            return -1;
+    }
+    return 0;
+}
+
+static inline int mako_tls_server_try_retain(MakoTlsServer *server) {
+    if (!server) return 0;
+    pthread_mutex_lock(&server->mu);
+    if (server->closing) {
+        pthread_mutex_unlock(&server->mu);
+        return 0;
+    }
+    server->refs++;
+    pthread_mutex_unlock(&server->mu);
+    return 1;
+}
+
+static inline void mako_tls_server_destroy(MakoTlsServer *server) {
+    pthread_mutex_lock(&server->mu);
+    SSL_CTX *ctx = server->ctx;
+    server->ctx = NULL;
+    for (size_t i = 0; i < server->sni_len; i++) {
+        free(server->sni[i].pattern);
+        SSL_CTX_free(server->sni[i].ctx);
+    }
+    free(server->sni);
+    server->sni = NULL;
+    server->sni_len = 0;
+    server->sni_cap = 0;
+    pthread_mutex_unlock(&server->mu);
+    if (ctx) SSL_CTX_free(ctx);
+    pthread_mutex_destroy(&server->mu);
+    free(server);
+}
+
+static inline void mako_tls_server_release(MakoTlsServer *server) {
+    if (!server) return;
+    int destroy = 0;
+    pthread_mutex_lock(&server->mu);
+    if (server->refs > 0) server->refs--;
+    if (server->refs == 0) destroy = 1;
+    pthread_mutex_unlock(&server->mu);
+    if (destroy) mako_tls_server_destroy(server);
+}
+
 /* Create a server TLS context from cert + key PEM paths. NULL on failure. */
 static inline void *mako_tls_server_new(MakoString cert, MakoString key) {
     char cbuf[1024], kbuf[1024];
@@ -331,54 +505,151 @@ static inline void *mako_tls_server_new(MakoString cert, MakoString key) {
     memcpy(cbuf, cert.data ? cert.data : "", cert.len); cbuf[cert.len] = 0;
     memcpy(kbuf, key.data ? key.data : "", key.len); kbuf[key.len] = 0;
     SSL_CTX *ctx = mako_tls_make_ctx(cbuf, kbuf);
-    if (ctx) SSL_CTX_set_alpn_select_cb(ctx, mako_tls_alpn_cb, NULL);
-    return (void *)ctx;
+    if (!ctx) return NULL;
+    MakoTlsServer *server = (MakoTlsServer *)calloc(1, sizeof(MakoTlsServer));
+    if (!server) {
+        SSL_CTX_free(ctx);
+        return NULL;
+    }
+    server->ctx = ctx;
+    server->refs = 1;
+    if (pthread_mutex_init(&server->mu, NULL) != 0) {
+        SSL_CTX_free(ctx);
+        free(server);
+        return NULL;
+    }
+    SSL_CTX_set_alpn_select_cb(ctx, mako_tls_alpn_cb, NULL);
+    SSL_CTX_set_tlsext_servername_callback(ctx, mako_tls_sni_cb);
+    SSL_CTX_set_tlsext_servername_arg(ctx, server);
+    return (void *)server;
 }
 
 /* Like tls_server_new but requires TLS 1.3: clients offering only 1.2 or below
  * are rejected at handshake. NULL on failure. */
 static inline void *mako_tls_server_new_tls13(MakoString cert, MakoString key) {
-    SSL_CTX *ctx = (SSL_CTX *)mako_tls_server_new(cert, key);
-    if (ctx) SSL_CTX_set_min_proto_version(ctx, TLS1_3_VERSION);
-    return (void *)ctx;
+    MakoTlsServer *server = (MakoTlsServer *)mako_tls_server_new(cert, key);
+    if (server) SSL_CTX_set_min_proto_version(server->ctx, TLS1_3_VERSION);
+    return (void *)server;
+}
+
+static inline int64_t mako_tls_server_free(void *ctx);
+
+/* Add a certificate selected by SNI. Configure before accepting connections or
+ * update concurrently through this function; selection and entry lifetime are
+ * protected by the server mutex. Exact names win over wildcards, and among
+ * wildcards the longest matching suffix wins. Returns 0 on success, -1 for an
+ * invalid/duplicate name or an unreadable/mismatched certificate pair. */
+static inline int64_t mako_tls_server_sni_add(
+    void *server_ptr, MakoString hostname, MakoString cert, MakoString key
+) {
+    MakoTlsServer *server = (MakoTlsServer *)server_ptr;
+    if (!server || !cert.data || cert.len == 0 || cert.len >= 1024
+        || !key.data || key.len == 0 || key.len >= 1024)
+        return -1;
+
+    char pattern[256];
+    size_t pattern_len = 0;
+    if (mako_tls_sni_canonicalize(hostname, pattern, sizeof(pattern), &pattern_len) != 0)
+        return -1;
+    char cbuf[1024], kbuf[1024];
+    memcpy(cbuf, cert.data, cert.len); cbuf[cert.len] = 0;
+    memcpy(kbuf, key.data, key.len); kbuf[key.len] = 0;
+
+    SSL_CTX *child = mako_tls_make_ctx(cbuf, kbuf);
+    if (!child) return -1;
+
+    pthread_mutex_lock(&server->mu);
+    if (server->closing || !server->ctx
+        || mako_tls_copy_server_policy(server->ctx, child) != 0) {
+        pthread_mutex_unlock(&server->mu);
+        SSL_CTX_free(child);
+        return -1;
+    }
+    SSL_CTX_set_alpn_select_cb(child, mako_tls_alpn_cb, NULL);
+    for (size_t i = 0; i < server->sni_len; i++) {
+        if (server->sni[i].pattern_len == pattern_len
+            && memcmp(server->sni[i].pattern, pattern, pattern_len) == 0) {
+            pthread_mutex_unlock(&server->mu);
+            SSL_CTX_free(child);
+            return -1;
+        }
+    }
+    if (server->sni_len == server->sni_cap) {
+        size_t next = server->sni_cap ? server->sni_cap * 2 : 4;
+        if (next < server->sni_len + 1 || next > SIZE_MAX / sizeof(MakoTlsSniCert)) {
+            pthread_mutex_unlock(&server->mu);
+            SSL_CTX_free(child);
+            return -1;
+        }
+        MakoTlsSniCert *grown = (MakoTlsSniCert *)realloc(
+            server->sni, next * sizeof(MakoTlsSniCert));
+        if (!grown) {
+            pthread_mutex_unlock(&server->mu);
+            SSL_CTX_free(child);
+            return -1;
+        }
+        server->sni = grown;
+        server->sni_cap = next;
+    }
+    char *saved_pattern = (char *)malloc(pattern_len + 1);
+    if (!saved_pattern) {
+        pthread_mutex_unlock(&server->mu);
+        SSL_CTX_free(child);
+        return -1;
+    }
+    memcpy(saved_pattern, pattern, pattern_len + 1);
+    server->sni[server->sni_len++] = (MakoTlsSniCert){saved_pattern, pattern_len, child};
+    pthread_mutex_unlock(&server->mu);
+    return 0;
 }
 
 /* mTLS server: server cert+key plus client CA. Requires and verifies peer certs. */
 static inline void *mako_tls_server_new_mtls(MakoString cert, MakoString key, MakoString client_ca) {
-    SSL_CTX *ctx = (SSL_CTX *)mako_tls_server_new(cert, key);
-    if (!ctx) return NULL;
+    MakoTlsServer *server = (MakoTlsServer *)mako_tls_server_new(cert, key);
+    if (!server) return NULL;
     if (!client_ca.data || client_ca.len == 0) {
-        SSL_CTX_free(ctx);
+        mako_tls_server_free(server);
         return NULL;
     }
     char cabuf[1024];
     if (client_ca.len >= sizeof(cabuf)) {
-        SSL_CTX_free(ctx);
+        mako_tls_server_free(server);
         return NULL;
     }
     memcpy(cabuf, client_ca.data, client_ca.len);
     cabuf[client_ca.len] = 0;
-    if (SSL_CTX_load_verify_locations(ctx, cabuf, NULL) != 1) {
+    if (SSL_CTX_load_verify_locations(server->ctx, cabuf, NULL) != 1) {
         fprintf(stderr, "tls_server_new_mtls: failed to load client CA %s\n", cabuf);
         ERR_print_errors_fp(stderr);
-        SSL_CTX_free(ctx);
+        mako_tls_server_free(server);
         return NULL;
     }
-    SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER | SSL_VERIFY_FAIL_IF_NO_PEER_CERT, NULL);
-    return (void *)ctx;
+    SSL_CTX_set_verify(server->ctx, SSL_VERIFY_PEER | SSL_VERIFY_FAIL_IF_NO_PEER_CERT, NULL);
+    return (void *)server;
 }
 
 /* Server TLS handshake on an already-accepted TCP fd (also used for STARTTLS-
  * style upgrades on the same socket). NULL on failure. */
 static inline void *mako_tls_accept(void *ctx, int64_t fd) {
-    if (!ctx || fd < 0) return NULL;
-    SSL *ssl = SSL_new((SSL_CTX *)ctx);
-    if (!ssl) return NULL;
+    MakoTlsServer *server = (MakoTlsServer *)ctx;
+    if (!server || fd < 0 || !mako_tls_server_try_retain(server)) return NULL;
+    pthread_mutex_lock(&server->mu);
+    SSL_CTX *server_ctx = server->ctx;
+    SSL *ssl = server_ctx ? SSL_new(server_ctx) : NULL;
+    pthread_mutex_unlock(&server->mu);
+    if (!ssl) {
+        mako_tls_server_release(server);
+        return NULL;
+    }
     SSL_set_fd(ssl, (int)fd);
-    if (SSL_accept(ssl) <= 0) { SSL_free(ssl); return NULL; }
+    if (SSL_accept(ssl) <= 0) {
+        SSL_free(ssl);
+        mako_tls_server_release(server);
+        return NULL;
+    }
     MakoTlsConn *c = (MakoTlsConn *)malloc(sizeof(MakoTlsConn));
-    if (!c) { SSL_free(ssl); return NULL; }
-    c->ssl = ssl; c->fd = (int)fd;
+    if (!c) { SSL_free(ssl); mako_tls_server_release(server); return NULL; }
+    c->ssl = ssl; c->fd = (int)fd; c->server = server;
     return (void *)c;
 }
 
@@ -386,7 +657,8 @@ static inline void *mako_tls_accept(void *ctx, int64_t fd) {
  * kicks SSL_accept once. Handshake may be incomplete — drive with
  * tls_handshake_step / poll on want-read/want-write. Returns conn or NULL. */
 static inline void *mako_tls_accept_start(void *ctx, int64_t fd) {
-    if (!ctx || fd < 0) return NULL;
+    MakoTlsServer *server = (MakoTlsServer *)ctx;
+    if (!server || fd < 0 || !mako_tls_server_try_retain(server)) return NULL;
 #if !defined(_WIN32)
     int flags = fcntl((int)fd, F_GETFL, 0);
     if (flags >= 0) fcntl((int)fd, F_SETFL, flags | O_NONBLOCK);
@@ -394,8 +666,11 @@ static inline void *mako_tls_accept_start(void *ctx, int64_t fd) {
     u_long mode = 1UL;
     ioctlsocket((mako_sock_t)fd, FIONBIO, &mode);
 #endif
-    SSL *ssl = SSL_new((SSL_CTX *)ctx);
-    if (!ssl) return NULL;
+    pthread_mutex_lock(&server->mu);
+    SSL_CTX *server_ctx = server->ctx;
+    SSL *ssl = server_ctx ? SSL_new(server_ctx) : NULL;
+    pthread_mutex_unlock(&server->mu);
+    if (!ssl) { mako_tls_server_release(server); return NULL; }
     SSL_set_fd(ssl, (int)fd);
     SSL_set_accept_state(ssl);
     int rc = SSL_accept(ssl);
@@ -403,13 +678,15 @@ static inline void *mako_tls_accept_start(void *ctx, int64_t fd) {
         int err = SSL_get_error(ssl, rc);
         if (err != SSL_ERROR_WANT_READ && err != SSL_ERROR_WANT_WRITE) {
             SSL_free(ssl);
+            mako_tls_server_release(server);
             return NULL;
         }
     }
     MakoTlsConn *c = (MakoTlsConn *)malloc(sizeof(MakoTlsConn));
-    if (!c) { SSL_free(ssl); return NULL; }
+    if (!c) { SSL_free(ssl); mako_tls_server_release(server); return NULL; }
     c->ssl = ssl;
     c->fd = (int)fd;
+    c->server = server;
     return (void *)c;
 }
 
@@ -527,12 +804,22 @@ static inline int64_t mako_tls_conn_close(void *conn) {
     if (!c) return -1;
     if (c->ssl) { SSL_shutdown(c->ssl); SSL_free(c->ssl); }
     if (c->fd >= 0) close(c->fd);
+    mako_tls_server_release(c->server);
     free(c);
     return 0;
 }
 
 static inline int64_t mako_tls_server_free(void *ctx) {
-    if (ctx) SSL_CTX_free((SSL_CTX *)ctx);
+    MakoTlsServer *server = (MakoTlsServer *)ctx;
+    if (!server) return 0;
+    int release = 0;
+    pthread_mutex_lock(&server->mu);
+    if (!server->closing) {
+        server->closing = 1;
+        release = 1;
+    }
+    pthread_mutex_unlock(&server->mu);
+    if (release) mako_tls_server_release(server);
     return 0;
 }
 
@@ -654,21 +941,36 @@ static inline MakoString mako_scram_plus_client_final_bare(void *conn, MakoStrin
     return bare;
 }
 
-/* Hot-reload server cert+key on an existing SSL_CTX (cert rotation). */
+/* Hot-reload the default server cert+key atomically. Existing connections keep
+ * their context; new connections use the replacement. SNI entries remain
+ * installed and are selected from the same server object. */
 static inline int64_t mako_tls_server_reload(void *server, MakoString cert, MakoString key) {
-    if (!server) return -1;
-    SSL_CTX *ctx = (SSL_CTX *)server;
-    char cbuf[512], kbuf[512];
-    if (!cert.data || cert.len == 0 || cert.len >= sizeof(cbuf)
-        || !key.data || key.len == 0 || key.len >= sizeof(kbuf))
+    MakoTlsServer *s = (MakoTlsServer *)server;
+    if (!s || !cert.data || cert.len == 0 || cert.len >= 1024
+        || !key.data || key.len == 0 || key.len >= 1024)
         return -1;
+    char cbuf[1024], kbuf[1024];
     memcpy(cbuf, cert.data, cert.len);
     cbuf[cert.len] = 0;
     memcpy(kbuf, key.data, key.len);
     kbuf[key.len] = 0;
-    if (SSL_CTX_use_certificate_file(ctx, cbuf, SSL_FILETYPE_PEM) != 1) return -1;
-    if (SSL_CTX_use_PrivateKey_file(ctx, kbuf, SSL_FILETYPE_PEM) != 1) return -1;
-    if (SSL_CTX_check_private_key(ctx) != 1) return -1;
+
+    SSL_CTX *replacement = mako_tls_make_ctx(cbuf, kbuf);
+    if (!replacement) return -1;
+    SSL_CTX_set_alpn_select_cb(replacement, mako_tls_alpn_cb, NULL);
+    SSL_CTX_set_tlsext_servername_callback(replacement, mako_tls_sni_cb);
+    SSL_CTX_set_tlsext_servername_arg(replacement, s);
+
+    pthread_mutex_lock(&s->mu);
+    if (s->closing || !s->ctx || mako_tls_copy_server_policy(s->ctx, replacement) != 0) {
+        pthread_mutex_unlock(&s->mu);
+        SSL_CTX_free(replacement);
+        return -1;
+    }
+    SSL_CTX *old = s->ctx;
+    s->ctx = replacement;
+    pthread_mutex_unlock(&s->mu);
+    SSL_CTX_free(old);
     return 0;
 }
 
@@ -1154,12 +1456,6 @@ static inline int64_t mako_tls_serve_n(
     close(fd);
     SSL_CTX_free(ctx);
     fprintf(stderr, "mako tls_serve_n done\n");
-    return 0;
-}
-
-static inline int64_t mako_tls_listen_stub(int64_t port) {
-    fprintf(stderr, "mako tls: use tls_serve / tls_serve_once (OpenSSL linked) port %lld\n",
-            (long long)port);
     return 0;
 }
 
@@ -3556,6 +3852,11 @@ static inline void *mako_tls_server_new_tls13(MakoString cert, MakoString key) {
 static inline void *mako_tls_server_new_mtls(MakoString cert, MakoString key, MakoString client_ca) {
     (void)cert; (void)key; (void)client_ca; return NULL;
 }
+static inline int64_t mako_tls_server_sni_add(
+    void *server, MakoString hostname, MakoString cert, MakoString key
+) {
+    (void)server; (void)hostname; (void)cert; (void)key; return -1;
+}
 static inline void *mako_tls_client_new_mtls(MakoString ca, MakoString cert, MakoString key) {
     (void)ca; (void)cert; (void)key; return NULL;
 }
@@ -3753,13 +4054,6 @@ static inline int64_t mako_tls_serve_n(
     (void)max_reqs;
     fprintf(stderr,
             "mako tls_serve_n: OpenSSL not linked (port %lld) — rebuild with OpenSSL\n",
-            (long long)port);
-    return 1;
-}
-
-static inline int64_t mako_tls_listen_stub(int64_t port) {
-    fprintf(stderr,
-            "mako tls: stub — OpenSSL not available (port %lld)\n",
             (long long)port);
     return 1;
 }
@@ -4090,7 +4384,7 @@ static inline MakoString mako_tls_certificate_der(MakoString msg) {
     return mako_str_slice(msg, 11, (int64_t)(11 + der_len));
 }
 
-/* CertificateVerify stub (type=15): scheme(2) + sig_len(2) + signature.
+/* CertificateVerify wire encoder (type=15): scheme(2) + sig_len(2) + signature.
  * Not a real signature — length-prefix wire shape only. */
 static inline MakoString mako_tls_certificate_verify(int64_t scheme, MakoString sig) {
     if (!sig.data || sig.len > 0xffff || scheme < 0 || scheme > 0xffff)
@@ -4124,7 +4418,7 @@ static inline MakoString mako_tls_certificate_verify_sig(MakoString msg) {
     return mako_str_slice(msg, 8, (int64_t)(8 + slen));
 }
 
-/* EncryptedExtensions stub (type=8): empty extensions list. */
+/* EncryptedExtensions encoder (type=8): empty extensions list. */
 static inline MakoString mako_tls_encrypted_extensions(void) {
     size_t body = 2; /* extensions_length = 0 */
     size_t total = 4 + body;
@@ -4741,7 +5035,7 @@ static inline MakoString mako_tls_server_handshake_traffic_secret_hex(
     return (MakoString){out, n};
 }
 
-/* Application traffic secrets from master secret placeholder (RFC 8446 labels).
+/* Application traffic secrets from a test-vector master secret (RFC 8446 labels).
  * Demo only — not a live TLS key schedule / exporter. */
 static inline MakoString mako_tls_client_application_traffic_secret(
     MakoString master_secret, MakoString transcript
@@ -4789,11 +5083,6 @@ static inline MakoString mako_tls_server_application_traffic_secret_hex(
     size_t n = raw.len * 2;
     mako_str_free(raw);
     return (MakoString){out, n};
-}
-
-static inline int64_t mako_quic_stub(int64_t port) {
-    fprintf(stderr, "mako quic: stub (port %lld)\n", (long long)port);
-    return 1;
 }
 
 #ifdef __cplusplus

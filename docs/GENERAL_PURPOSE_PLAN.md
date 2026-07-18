@@ -2,8 +2,8 @@
 
 Source brief: `General_Purpose_Backend_Language_Vision.md`.
 
-**Product tip:** **0.2.1**. Next product version on the roadmap: **0.2.1**
-(stdlib in Mako). See [ROADMAP.md](ROADMAP.md) · [STATUS.md](STATUS.md).
+**Product tip:** **0.2.1**. The next roadmap cycle is **0.2.2** (tooling and
+stdlib depth). See [ROADMAP.md](ROADMAP.md) · [STATUS.md](STATUS.md).
 
 Mako's product contract is:
 
@@ -34,7 +34,7 @@ identity.
 - Mako-owned syntax is required: familiar enough to learn quickly, but not a
   clone of any single existing language.
 - Simplicity and fast iteration stay central.
-- No mandatory GC.
+- No GC.
 - Safe defaults: no null, checked conversions, explicit unsafe, typed errors.
 - Fine-grained ownership control exists, but normal backend services should not
   require lifetime expertise.

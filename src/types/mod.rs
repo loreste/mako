@@ -231,6 +231,20 @@ struct VariantCtor {
     fields: Vec<Type>,
 }
 
+/// Static environment facts for a first-class function value.
+///
+/// `captured` is the flattened set of outer locals reachable through the
+/// closure environment. `unsafe_mut` is the subset that is mutable and is not
+/// an explicitly synchronized handle. `unknown` means the compiler cannot
+/// prove what the environment contains; such a value cannot cross a parallel
+/// boundary.
+#[derive(Debug, Clone, Default)]
+struct FnCaptureInfo {
+    captured: HashSet<String>,
+    unsafe_mut: HashSet<String>,
+    unknown: bool,
+}
+
 pub struct TypeChecker {
     types: HashMap<String, Type>,
     fns: HashMap<String, Type>,
@@ -277,19 +291,21 @@ pub struct TypeChecker {
     pending_defers: Vec<Block>,
     /// Nesting depth of `unsafe { }` (bounds-check opt-out in codegen).
     pub unsafe_depth: usize,
-    /// Package is a systems crate (`[package] systems = true`) — GC must not weaken ownership.
-    pub systems_crate: bool,
-    /// Optional GC enabled for this compile (never weakens systems crates).
-    pub gc_enabled: bool,
+    /// A removed `[package] gc = true` setting was requested.
+    pub gc_requested: bool,
     /// Locals captured by outstanding kicks that must not be mutated until join (race seed).
     race_outstanding: HashSet<String>,
     /// Stack of per-kick capture sets (join pops the latest; supports nested kicks).
     race_stack: Vec<HashSet<String>>,
     /// Names of `let mut` locals that are Sync-ish (Mutex/CMap/AtomicInt/ShareInt).
     race_sync_locals: HashSet<String>,
+    /// Capture metadata for function-valued locals, kept in lockstep with `scopes`.
+    /// A function value with an unknown environment is never allowed to cross a
+    /// parallel boundary: the compiler must be able to prove its captures.
+    fn_capture_scopes: Vec<HashMap<String, FnCaptureInfo>>,
     /// `visibility = "explicit"` — non-exported items stay package-private (seed).
     pub explicit_visibility: bool,
-    /// Keep bounds checks even in release (`[profile.release] bounds_checks = "on"`).
+    /// Legacy profile setting; safe bounds checks are always retained.
     pub bounds_checks_always: bool,
     /// Generic function templates: `fn id[T](x: T) -> T`
     generic_fns: HashMap<String, FnDef>,
@@ -2292,7 +2308,7 @@ impl TypeChecker {
             "remove_file".into(),
             Type::Fn(vec![Type::String], Box::new(Type::Int)),
         );
-        // Production filesystem / storage
+        // Filesystem / storage
         fns.insert(
             "rename".into(),
             Type::Fn(vec![Type::String, Type::String], Box::new(Type::Int)),
@@ -3368,10 +3384,6 @@ impl TypeChecker {
         );
         fns.insert(
             "http2_frame_flags".into(),
-            Type::Fn(vec![Type::String], Box::new(Type::Int)),
-        );
-        fns.insert(
-            "hpack_decode_stub".into(),
             Type::Fn(vec![Type::String], Box::new(Type::Int)),
         );
         fns.insert(
@@ -8860,14 +8872,6 @@ impl TypeChecker {
             Type::Fn(vec![Type::Int, Type::String], Box::new(Type::Int)),
         );
         fns.insert(
-            "tls_listen_stub".into(),
-            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
-        );
-        fns.insert(
-            "ws_echo_stub".into(),
-            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
-        );
-        fns.insert(
             "ws_echo_once".into(),
             Type::Fn(vec![Type::Int], Box::new(Type::Int)),
         );
@@ -8974,10 +8978,6 @@ impl TypeChecker {
         fns.insert(
             "ws_last_status".into(),
             Type::Fn(vec![], Box::new(Type::Int)),
-        );
-        fns.insert(
-            "quic_stub".into(),
-            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
         );
         fns.insert(
             "pg_connect".into(),
@@ -9239,59 +9239,6 @@ impl TypeChecker {
                 Box::new(Type::String),
             ),
         );
-        fns.insert(
-            "grpc_stub_ping".into(),
-            Type::Fn(vec![], Box::new(Type::Int)),
-        );
-        fns.insert(
-            "queue_stub_ping".into(),
-            Type::Fn(vec![], Box::new(Type::Int)),
-        );
-        fns.insert(
-            "sql_query".into(),
-            Type::Fn(vec![Type::String], Box::new(Type::String)),
-        );
-        fns.insert(
-            "gc_arena_new".into(),
-            Type::Fn(vec![], Box::new(Type::Arena)),
-        );
-        // Optional GC (apps only; forbidden when systems=true / gc=false).
-        fns.insert(
-            "gc_alloc".into(),
-            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
-        );
-        fns.insert(
-            "gc_collect".into(),
-            Type::Fn(vec![], Box::new(Type::Int)),
-        );
-        fns.insert(
-            "gc_live".into(),
-            Type::Fn(vec![], Box::new(Type::Int)),
-        );
-        fns.insert(
-            "gc_enabled".into(),
-            Type::Fn(vec![], Box::new(Type::Int)),
-        );
-        fns.insert(
-            "gc_root".into(),
-            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
-        );
-        fns.insert(
-            "gc_unroot".into(),
-            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
-        );
-        fns.insert(
-            "gc_link".into(),
-            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int)),
-        );
-        fns.insert(
-            "gc_mark".into(),
-            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
-        );
-        fns.insert(
-            "gc_root_count".into(),
-            Type::Fn(vec![], Box::new(Type::Int)),
-        );
         // HTTP handler surface
         fns.insert(
             "http_bind".into(),
@@ -9467,6 +9414,18 @@ impl TypeChecker {
             Type::Fn(
                 vec![Type::String, Type::String, Type::String],
                 Box::new(Type::Named("TlsServer".into())),
+            ),
+        );
+        fns.insert(
+            "tls_server_sni_add".into(),
+            Type::Fn(
+                vec![
+                    Type::Named("TlsServer".into()),
+                    Type::String,
+                    Type::String,
+                    Type::String,
+                ],
+                Box::new(Type::Int),
             ),
         );
         fns.insert(
@@ -10483,11 +10442,11 @@ impl TypeChecker {
             loop_break_moved: Vec::new(),
             pending_defers: Vec::new(),
             unsafe_depth: 0,
-            systems_crate: false,
-            gc_enabled: false,
+            gc_requested: false,
             race_outstanding: HashSet::new(),
             race_stack: Vec::new(),
             race_sync_locals: HashSet::new(),
+            fn_capture_scopes: vec![HashMap::new()],
             explicit_visibility: false,
             bounds_checks_always: false,
             generic_fns: HashMap::new(),
@@ -10691,9 +10650,11 @@ impl TypeChecker {
     }
 
     pub fn check(&mut self, program: &Program) -> Result<(), TypeError> {
-        // Systems crates keep full ownership checking; GC never weakens them.
-        if self.systems_crate {
-            self.gc_enabled = false;
+        if self.gc_requested {
+            return Err(TypeError::new(
+                "garbage collection was removed from Mako; `[package] gc = true` is unsupported",
+            )
+            .hint("use let/hold/share/arena for deterministic ownership instead"));
         }
         // First pass: collect type and function signatures
         for item in &program.items {
@@ -12100,6 +12061,7 @@ impl TypeChecker {
 
     fn push_scope(&mut self) {
         self.scopes.push(HashMap::new());
+        self.fn_capture_scopes.push(HashMap::new());
     }
 
     fn pop_scope(&mut self) {
@@ -12123,12 +12085,40 @@ impl TypeChecker {
             }
         }
         self.scopes.pop();
+        self.fn_capture_scopes.pop();
     }
 
     fn define(&mut self, name: &str, ty: Type, mutable: bool) {
         if let Some(scope) = self.scopes.last_mut() {
             scope.insert(name.to_string(), (ty, mutable));
         }
+    }
+
+    fn set_fn_capture_info(&mut self, name: &str, info: FnCaptureInfo) {
+        for scope in self.fn_capture_scopes.iter_mut().rev() {
+            if scope.contains_key(name) {
+                scope.insert(name.to_string(), info);
+                return;
+            }
+        }
+        if let Some(scope) = self.fn_capture_scopes.last_mut() {
+            scope.insert(name.to_string(), info);
+        }
+    }
+
+    fn clear_fn_capture_info(&mut self, name: &str) {
+        for scope in self.fn_capture_scopes.iter_mut().rev() {
+            if scope.remove(name).is_some() {
+                return;
+            }
+        }
+    }
+
+    fn fn_capture_info(&self, name: &str) -> Option<&FnCaptureInfo> {
+        self.fn_capture_scopes
+            .iter()
+            .rev()
+            .find_map(|scope| scope.get(name))
     }
 
     fn lookup(&self, name: &str) -> Option<&(Type, bool)> {
@@ -12584,6 +12574,12 @@ impl TypeChecker {
                     inferred
                 };
                 self.define(name, final_ty, *mutable);
+                if matches!(self.lookup(name).map(|(t, _)| t), Some(Type::Fn(_, _))) {
+                    let info = self.fn_capture_info_for_expr(init);
+                    self.set_fn_capture_info(name, info);
+                } else {
+                    self.clear_fn_capture_info(name);
+                }
                 if *ownership == Ownership::Hold {
                     self.hold_vars.insert(name.clone(), true);
                     self.moved_holds.insert(name.clone(), false);
@@ -12645,9 +12641,36 @@ impl TypeChecker {
                                 existing.display()
                             )));
                         }
+                        if matches!(existing, Type::Fn(_, _)) {
+                            let info = match init {
+                                Expr::Tuple(values) => values
+                                    .get(names.iter().position(|name| name == n).unwrap_or(usize::MAX))
+                                    .map(|value| self.fn_capture_info_for_expr(value))
+                                    .unwrap_or_else(|| FnCaptureInfo {
+                                        unknown: true,
+                                        ..FnCaptureInfo::default()
+                                    }),
+                                _ => FnCaptureInfo {
+                                    unknown: true,
+                                    ..FnCaptureInfo::default()
+                                },
+                            };
+                            self.set_fn_capture_info(n, info);
+                        } else {
+                            self.clear_fn_capture_info(n);
+                        }
                     } else {
                         // Fresh binding (`a, b := f()` or `let a, b = …`)
                         self.define(n, et.clone(), *mutable);
+                        if matches!(et, Type::Fn(_, _)) {
+                            self.set_fn_capture_info(
+                                n,
+                                FnCaptureInfo {
+                                    unknown: true,
+                                    ..FnCaptureInfo::default()
+                                },
+                            );
+                        }
                     }
                 }
                 Ok(())
@@ -12720,6 +12743,12 @@ impl TypeChecker {
                         ty.display()
                     )));
                 }
+                if matches!(ty, Type::Fn(_, _)) {
+                    let info = self.fn_capture_info_for_expr(value);
+                    self.set_fn_capture_info(name, info);
+                } else {
+                    self.clear_fn_capture_info(name);
+                }
                 // Assigning into a live hold binding re-establishes ownership of the new value.
                 if self.hold_vars.contains_key(name) {
                     self.moved_holds.insert(name.clone(), false);
@@ -12732,15 +12761,15 @@ impl TypeChecker {
                 Ok(())
             }
             Stmt::IndexAssign { base, index, value } => {
-                if let Expr::Ident(name) = base {
+                if let Some(name) = Self::race_write_root(base) {
                     if self.shared_borrows.contains_key(name) {
                         return Err(TypeError::new(format!(
                             "cannot index-assign `{name}` while shared"
                         ))
                         .hint("drop the share first"));
                     }
-                    self.assert_no_race_write(name)?;
                 }
+                self.assert_no_race_write_expr(base)?;
                 let bt = self.check_expr(base)?;
                 let it = self.check_expr(index)?;
                 match bt {
@@ -12805,14 +12834,16 @@ impl TypeChecker {
             }
             Stmt::FieldAssign { base, field, value } => {
                 // Hold field assign: mutate in place without consuming the binding.
-                let bt = if let Expr::Ident(name) = base {
+                if let Some(name) = Self::race_write_root(base) {
                     if self.shared_borrows.contains_key(name) {
                         return Err(TypeError::new(format!(
                             "cannot assign field on `{name}` while shared"
                         ))
                         .hint("drop the share first"));
                     }
-                    self.assert_no_race_write(name)?;
+                }
+                self.assert_no_race_write_expr(base)?;
+                let bt = if let Expr::Ident(name) = base {
                     if self.hold_vars.contains_key(name) {
                         if self.moved_holds.get(name).copied().unwrap_or(false) {
                             return Err(TypeError::new(format!("use of moved value `{name}`")));
@@ -13892,6 +13923,12 @@ impl TypeChecker {
             }
             Expr::Call { callee, args } => {
                 if let Expr::Ident(name) = callee.as_ref() {
+                    if name == "unsafe_index" && self.unsafe_depth == 0 {
+                        return Err(TypeError::new(
+                            "unsafe_index may only be used inside an unsafe block",
+                        )
+                        .hint("wrap the proven-safe access in `unsafe { ... }`"));
+                    }
                     // fn_drop / fn_has_env accept any fn value (arity-independent).
                     if name == "fn_drop" {
                         if args.len() != 1 {
@@ -13949,53 +13986,13 @@ impl TypeChecker {
                         return self.check_generic_call(name, args);
                     }
                     match name.as_str() {
-                        "gc_alloc" | "gc_collect" | "gc_live" | "gc_enabled" | "gc_root"
-                        | "gc_unroot" | "gc_link" | "gc_mark" | "gc_root_count" => {
-                            if !self.gc_enabled {
-                                return Err(TypeError::new(
-                                    "optional GC is disabled (enable with `[package] gc = true` in mako.toml; forbidden when systems = true)",
-                                )
-                                .hint("GC is app-only and never mandatory — prefer hold/share/arena on the hot path"));
-                            }
-                            if name == "gc_enabled"
-                                || name == "gc_collect"
-                                || name == "gc_live"
-                                || name == "gc_root_count"
-                            {
-                                if !args.is_empty() {
-                                    return Err(TypeError::new(format!(
-                                        "{name} takes no arguments"
-                                    )));
-                                }
-                                return Ok(Type::Int);
-                            }
-                            if name == "gc_link" {
-                                if args.len() != 2 {
-                                    return Err(TypeError::new(
-                                        "gc_link expects (parent: int, child: int)",
-                                    ));
-                                }
-                                for a in args {
-                                    let t = self.check_expr(a)?;
-                                    if !is_int_family(&t) {
-                                        return Err(TypeError::new("gc_link expects int handles"));
-                                    }
-                                }
-                                return Ok(Type::Int);
-                            }
-                            // gc_alloc / gc_root / gc_unroot / gc_mark (nbytes or handle)
-                            if args.len() != 1 {
-                                return Err(TypeError::new(format!(
-                                    "{name} expects one int argument"
-                                )));
-                            }
-                            let t = self.check_expr(&args[0])?;
-                            if !is_int_family(&t) {
-                                return Err(TypeError::new(format!(
-                                    "{name} expects int"
-                                )));
-                            }
-                            return Ok(Type::Int);
+                        "gc_arena_new" | "gc_alloc" | "gc_collect" | "gc_live"
+                        | "gc_enabled" | "gc_root" | "gc_unroot" | "gc_link" | "gc_mark"
+                        | "gc_root_count" => {
+                            return Err(TypeError::new(format!(
+                                "{name} is unavailable: Mako has no garbage collector"
+                            ))
+                            .hint("use let/hold/share/arena for deterministic ownership"));
                         }
                         "Ok" if args.len() == 1 => {
                             // Prefer expected Result shape from current_expected (nested
@@ -16142,6 +16139,7 @@ impl TypeChecker {
                         "fan on []int expects an int→int mapper",
                     ));
                 }
+                self.assert_fan_mapper_safe(mapper)?;
                 Ok(Type::Array(Box::new(ret)))
             }
         }
@@ -16962,9 +16960,21 @@ impl TypeChecker {
     /// and Option/Result/tuple of sendable payloads (heap-boxed across spawn).
     fn assert_kick_sendable(&self, expr: &Expr) -> Result<(), TypeError> {
         match expr {
-            Expr::Call { args, .. } => {
+            Expr::Call { callee, args } => {
+                if let Expr::Ident(name) = callee.as_ref() {
+                    if matches!(self.lookup(name).map(|(t, _)| t), Some(Type::Fn(_, _))) {
+                        return Err(TypeError::new(
+                            "kick requires a named function call; a function-valued callee is not spawnable",
+                        )
+                        .hint("pass the function value to a named worker function"));
+                    }
+                }
+                self.assert_function_value_safe(callee, "kick")?;
                 for a in args {
                     let t = self.peek_type(a)?;
+                    if matches!(a, Expr::Lambda { .. }) || matches!(t, Type::Fn(_, _)) {
+                        self.assert_function_value_safe(a, "kick")?;
+                    }
                     if !self.is_send_ty(&t) {
                         return Err(TypeError::new(format!(
                             "cannot kick value of type {} across a crew task (not Send)",
@@ -16981,6 +16991,442 @@ impl TypeChecker {
             }
             _ => Ok(()),
         }
+    }
+
+    /// A function value is only Send when its environment is known and does
+    /// not contain unsynchronized mutable state. Named functions have no
+    /// closure environment; local function values carry metadata recorded at
+    /// their binding or assignment site.
+    fn assert_function_value_safe(&self, expr: &Expr, boundary: &str) -> Result<(), TypeError> {
+        let is_fn_expr = matches!(expr, Expr::Lambda { .. })
+            || matches!(self.peek_type(expr), Ok(Type::Fn(_, _)));
+        if !is_fn_expr {
+            return Ok(());
+        }
+        let info = self.fn_capture_info_for_expr(expr);
+        if info.unknown {
+            return Err(TypeError::new(format!(
+                "cannot prove function environment is race-free across {boundary}"
+            ))
+            .hint(
+                "use a named function, a non-capturing lambda, or an explicit Sync handle (Mutex / RWMutex / CMap / AtomicInt / ShareInt / channel)",
+            ));
+        }
+        if let Some(name) = info.unsafe_mut.iter().next() {
+            return Err(TypeError::new(format!(
+                "mutable capture `{name}` cannot cross a {boundary} boundary"
+            ))
+            .hint(
+                "join before mutation, or capture/use an explicit Sync handle (Mutex / RWMutex / CMap / AtomicInt / ShareInt / channel)",
+            ));
+        }
+        Ok(())
+    }
+
+    /// `fan` currently lowers a mapper to a static worker function, so there
+    /// is no closure environment to copy or synchronize. Reject every local
+    /// capture until the lowering grows an explicit, checked environment.
+    fn assert_fan_mapper_safe(&self, mapper: &Expr) -> Result<(), TypeError> {
+        if let Expr::Ident(name) = mapper {
+            if matches!(self.lookup(name).map(|(t, _)| t), Some(Type::Fn(_, _))) {
+                return Err(TypeError::new(
+                    "fan needs a named function or an inline non-capturing lambda",
+                )
+                .hint("pass function values through a named worker before calling fan"));
+            }
+        }
+        let info = self.fn_capture_info_for_expr(mapper);
+        if info.unknown {
+            return Err(TypeError::new(
+                "fan mapper has an unknown capture environment",
+            )
+            .hint("use a non-capturing mapper; pass all data through the collection"));
+        }
+        if let Some(name) = info.captured.iter().next() {
+            return Err(TypeError::new(format!(
+                "fan mapper captures `{name}` across a parallel boundary"
+            ))
+            .hint("use a non-capturing mapper; pass all data through the collection"));
+        }
+        Ok(())
+    }
+
+    fn fn_capture_info_for_expr(&self, expr: &Expr) -> FnCaptureInfo {
+        match expr {
+            Expr::Lambda { params, body } => self.analyze_lambda_captures(params, body),
+            Expr::Ident(name) => {
+                if let Some((ty, _)) = self.lookup(name) {
+                    if matches!(ty, Type::Fn(_, _)) {
+                        return self.fn_capture_info(name).cloned().unwrap_or(FnCaptureInfo {
+                            unknown: true,
+                            ..FnCaptureInfo::default()
+                        });
+                    }
+                }
+                if self.fns.contains_key(name) {
+                    FnCaptureInfo::default()
+                } else {
+                    FnCaptureInfo {
+                        unknown: true,
+                        ..FnCaptureInfo::default()
+                    }
+                }
+            }
+            _ => {
+                if matches!(self.peek_type(expr), Ok(Type::Fn(_, _))) {
+                    FnCaptureInfo {
+                        unknown: true,
+                        ..FnCaptureInfo::default()
+                    }
+                } else {
+                    FnCaptureInfo::default()
+                }
+            }
+        }
+    }
+
+    fn analyze_lambda_captures(&self, params: &[String], body: &Expr) -> FnCaptureInfo {
+        let free = Self::lambda_free_identifiers(params, body);
+        let mut info = FnCaptureInfo::default();
+        for name in free {
+            let Some((ty, is_mut)) = self.lookup(&name).cloned() else {
+                // Function names, builtins, and constants are not closure captures.
+                continue;
+            };
+            info.captured.insert(name.clone());
+            if matches!(ty, Type::Fn(_, _)) {
+                // The closure emitter does not yet clone nested MakoFn values
+                // into another environment. Treat this as unknown rather than
+                // allowing a function-valued alias to smuggle an environment
+                // across the boundary.
+                info.unknown = true;
+                if let Some(nested) = self.fn_capture_info(&name) {
+                    info.captured.extend(nested.captured.iter().cloned());
+                    info.unsafe_mut.extend(nested.unsafe_mut.iter().cloned());
+                    info.unknown |= nested.unknown;
+                } else if !self.fns.contains_key(&name) {
+                    info.unknown = true;
+                }
+                continue;
+            }
+            if !self.is_lambda_capture_supported(&ty) {
+                info.unknown = true;
+            }
+            if is_mut && !self.is_sync_ty(&ty) {
+                info.unsafe_mut.insert(name);
+            }
+        }
+        info
+    }
+
+    fn is_lambda_capture_supported(&self, ty: &Type) -> bool {
+        match ty {
+            Type::Int
+            | Type::Int64
+            | Type::Int32
+            | Type::Int8
+            | Type::UInt64
+            | Type::Byte
+            | Type::Bool
+            | Type::Float
+            | Type::String => true,
+            Type::Named(name) => name == "ShareInt" || self.structs_named(name),
+            Type::Struct { name, .. } => self.structs_named(name),
+            _ => false,
+        }
+    }
+
+    fn lambda_free_identifiers(params: &[String], body: &Expr) -> HashSet<String> {
+        let mut bound: HashSet<String> = params.iter().cloned().collect();
+        let mut out = HashSet::new();
+        Self::collect_free_expr(body, &mut bound, &mut out);
+        out
+    }
+
+    fn collect_pattern_bindings(pattern: &Pattern, bound: &mut HashSet<String>) {
+        match pattern {
+            Pattern::Ident(name) if name != "_" => {
+                bound.insert(name.clone());
+            }
+            Pattern::Variant { bindings, .. } | Pattern::Or(bindings) | Pattern::Tuple(bindings) => {
+                for binding in bindings {
+                    Self::collect_pattern_bindings(binding, bound);
+                }
+            }
+            Pattern::Struct { fields, .. } => {
+                for (_, binding) in fields {
+                    Self::collect_pattern_bindings(binding, bound);
+                }
+            }
+            Pattern::Literal(expr) => Self::collect_free_expr(expr, bound, &mut HashSet::new()),
+            Pattern::Wildcard | Pattern::Ident(_) => {}
+        }
+    }
+
+    fn collect_free_expr(expr: &Expr, bound: &mut HashSet<String>, out: &mut HashSet<String>) {
+        match expr {
+            Expr::Ident(name) => {
+                if name != "_" && !bound.contains(name) {
+                    out.insert(name.clone());
+                }
+            }
+            Expr::Call { callee, args } => {
+                Self::collect_free_expr(callee, bound, out);
+                for arg in args {
+                    Self::collect_free_expr(arg, bound, out);
+                }
+            }
+            Expr::Method { receiver, args, .. } => {
+                Self::collect_free_expr(receiver, bound, out);
+                for arg in args {
+                    Self::collect_free_expr(arg, bound, out);
+                }
+            }
+            Expr::Binary { left, right, .. } => {
+                Self::collect_free_expr(left, bound, out);
+                Self::collect_free_expr(right, bound, out);
+            }
+            Expr::Unary { expr, .. }
+            | Expr::Field { base: expr, .. }
+            | Expr::Try(expr)
+            | Expr::Join(expr) => Self::collect_free_expr(expr, bound, out),
+            Expr::Index { base, index } => {
+                Self::collect_free_expr(base, bound, out);
+                Self::collect_free_expr(index, bound, out);
+            }
+            Expr::Slice {
+                base,
+                low,
+                high,
+                max,
+            } => {
+                Self::collect_free_expr(base, bound, out);
+                for part in [low, high, max].into_iter().flatten() {
+                    Self::collect_free_expr(part, bound, out);
+                }
+            }
+            Expr::StructLit { fields, update, .. } => {
+                for (_, value) in fields {
+                    Self::collect_free_expr(value, bound, out);
+                }
+                if let Some(update) = update {
+                    Self::collect_free_expr(update, bound, out);
+                }
+            }
+            Expr::StringInterp(parts) => {
+                for part in parts {
+                    if let InterpPart::Expr(value, _) = part {
+                        Self::collect_free_expr(value, bound, out);
+                    }
+                }
+            }
+            Expr::StructLitPos { values, .. } | Expr::Array(values) | Expr::Tuple(values) => {
+                for value in values {
+                    Self::collect_free_expr(value, bound, out);
+                }
+            }
+            Expr::Convert { args, .. } => {
+                for arg in args {
+                    Self::collect_free_expr(arg, bound, out);
+                }
+            }
+            Expr::Make { len, cap, .. } => {
+                if let Some(len) = len {
+                    Self::collect_free_expr(len, bound, out);
+                }
+                if let Some(cap) = cap {
+                    Self::collect_free_expr(cap, bound, out);
+                }
+            }
+            Expr::ChanOpen { cap, .. } => Self::collect_free_expr(cap, bound, out),
+            Expr::Lambda { params, body } => {
+                let mut nested_bound = bound.clone();
+                nested_bound.extend(params.iter().cloned());
+                Self::collect_free_expr(body, &mut nested_bound, out);
+            }
+            Expr::Match { scrutinee, arms } => {
+                Self::collect_free_expr(scrutinee, bound, out);
+                for arm in arms {
+                    let mut arm_bound = bound.clone();
+                    Self::collect_pattern_bindings(&arm.pattern, &mut arm_bound);
+                    if let Some(guard) = &arm.guard {
+                        Self::collect_free_expr(guard, &mut arm_bound, out);
+                    }
+                    Self::collect_free_expr(&arm.body, &mut arm_bound, out);
+                }
+            }
+            Expr::IfExpr {
+                cond,
+                then_block,
+                else_block,
+            } => {
+                Self::collect_free_expr(cond, bound, out);
+                Self::collect_free_block(then_block, &mut bound.clone(), out);
+                Self::collect_free_block(else_block, &mut bound.clone(), out);
+            }
+            Expr::Block(block) => Self::collect_free_block(block, &mut bound.clone(), out),
+            Expr::Kick { crew, expr } => {
+                if !bound.contains(crew) {
+                    out.insert(crew.clone());
+                }
+                Self::collect_free_expr(expr, bound, out);
+            }
+            Expr::Fan { collection, mapper } => {
+                Self::collect_free_expr(collection, bound, out);
+                Self::collect_free_expr(mapper, bound, out);
+            }
+            Expr::Int(_) | Expr::Float(_) | Expr::Bool(_) | Expr::String(_) => {}
+        }
+    }
+
+    fn collect_free_block(block: &Block, bound: &mut HashSet<String>, out: &mut HashSet<String>) {
+        for stmt in &block.stmts {
+            Self::collect_free_stmt(stmt, bound, out);
+        }
+    }
+
+    fn collect_free_stmt(stmt: &Stmt, bound: &mut HashSet<String>, out: &mut HashSet<String>) {
+        match stmt {
+            Stmt::Let { name, init, .. } => {
+                Self::collect_free_expr(init, bound, out);
+                if name != "_" {
+                    bound.insert(name.clone());
+                }
+            }
+            Stmt::LetMulti { names, init, .. } => {
+                Self::collect_free_expr(init, bound, out);
+                for name in names {
+                    if name != "_" {
+                        bound.insert(name.clone());
+                    }
+                }
+            }
+            Stmt::LetCommaOk {
+                value,
+                ok,
+                base,
+                index,
+                ..
+            } => {
+                Self::collect_free_expr(base, bound, out);
+                Self::collect_free_expr(index, bound, out);
+                if value != "_" {
+                    bound.insert(value.clone());
+                }
+                if ok != "_" {
+                    bound.insert(ok.clone());
+                }
+            }
+            Stmt::Assign { name, value } => {
+                if !bound.contains(name) && name != "_" {
+                    out.insert(name.clone());
+                }
+                Self::collect_free_expr(value, bound, out);
+            }
+            Stmt::IndexAssign { base, index, value } => {
+                Self::collect_free_expr(base, bound, out);
+                Self::collect_free_expr(index, bound, out);
+                Self::collect_free_expr(value, bound, out);
+            }
+            Stmt::FieldAssign { base, value, .. } => {
+                Self::collect_free_expr(base, bound, out);
+                Self::collect_free_expr(value, bound, out);
+            }
+            Stmt::Expr(expr) | Stmt::Return(Some(expr)) => {
+                Self::collect_free_expr(expr, bound, out)
+            }
+            Stmt::Return(None) | Stmt::Break(_) | Stmt::Continue(_) => {}
+            Stmt::If {
+                init,
+                cond,
+                then_block,
+                else_block,
+            } => {
+                let mut local = bound.clone();
+                if let Some(init) = init {
+                    Self::collect_free_stmt(init, &mut local, out);
+                }
+                Self::collect_free_expr(cond, &mut local, out);
+                Self::collect_free_block(then_block, &mut local.clone(), out);
+                if let Some(else_block) = else_block {
+                    Self::collect_free_block(else_block, &mut local, out);
+                }
+            }
+            Stmt::While { cond, body, .. } => {
+                Self::collect_free_expr(cond, bound, out);
+                Self::collect_free_block(body, &mut bound.clone(), out);
+            }
+            Stmt::For {
+                binders,
+                iter,
+                body,
+                ..
+            } => {
+                Self::collect_free_expr(iter, bound, out);
+                let mut local = bound.clone();
+                for binder in binders {
+                    if binder != "_" {
+                        local.insert(binder.clone());
+                    }
+                }
+                Self::collect_free_block(body, &mut local, out);
+            }
+            Stmt::CFor {
+                init,
+                cond,
+                post,
+                body,
+                ..
+            } => {
+                let mut local = bound.clone();
+                Self::collect_free_stmt(init, &mut local, out);
+                Self::collect_free_expr(cond, &mut local, out);
+                Self::collect_free_stmt(post, &mut local, out);
+                Self::collect_free_block(body, &mut local, out);
+            }
+            Stmt::Defer { body } | Stmt::Unsafe { body } | Stmt::Arena { body, .. } => {
+                Self::collect_free_block(body, &mut bound.clone(), out)
+            }
+            Stmt::Crew { name, body } => {
+                let mut local = bound.clone();
+                local.insert(name.clone());
+                Self::collect_free_block(body, &mut local, out);
+            }
+            Stmt::Select {
+                timeout_ms,
+                arms,
+                default_arm,
+            } => {
+                Self::collect_free_expr(timeout_ms, bound, out);
+                for (channel, body) in arms {
+                    if !bound.contains(channel) {
+                        out.insert(channel.clone());
+                    }
+                    Self::collect_free_block(body, &mut bound.clone(), out);
+                }
+                if let Some(default_arm) = default_arm {
+                    Self::collect_free_block(default_arm, &mut bound.clone(), out);
+                }
+            }
+        }
+    }
+
+    fn race_write_root(expr: &Expr) -> Option<&str> {
+        match expr {
+            Expr::Ident(name) => Some(name),
+            Expr::Field { base, .. }
+            | Expr::Index { base, .. }
+            | Expr::Slice { base, .. } => Self::race_write_root(base),
+            Expr::Unary { expr, .. } | Expr::Try(expr) => Self::race_write_root(expr),
+            _ => None,
+        }
+    }
+
+    fn assert_no_race_write_expr(&self, expr: &Expr) -> Result<(), TypeError> {
+        if let Some(name) = Self::race_write_root(expr) {
+            self.assert_no_race_write(name)?;
+        }
+        Ok(())
     }
 
     /// Deep POD (kick Send): scalars/string fields, nested POD structs, or POD enums.
@@ -17141,6 +17587,7 @@ impl TypeChecker {
                 || n == "RWMutex"
                 || n == "CMap"
                 || n == "WaitGroup"
+                || n == "TlsServer"
         )
     }
 
@@ -17245,9 +17692,15 @@ impl TypeChecker {
             Expr::Binary { left, .. } => self.peek_type(left),
             Expr::Call { callee, .. } => {
                 if let Expr::Ident(name) = callee.as_ref() {
+                    if let Some(Type::Fn(_, ret)) = self.lookup(name).map(|(t, _)| t) {
+                        return Ok((**ret).clone());
+                    }
                     if let Some(Type::Fn(_, ret)) = self.fns.get(name) {
                         return Ok((**ret).clone());
                     }
+                }
+                if let Ok(Type::Fn(_, ret)) = self.peek_type(callee) {
+                    return Ok(*ret);
                 }
                 Ok(Type::Int)
             }
@@ -17295,6 +17748,9 @@ fn is_kick_sendable(t: &Type) -> bool {
         // TlsConn: exclusive SSL* handle (void*). Send moves ownership to the worker —
         // caller must not use the conn after kick (same model as raw TCP fds).
         Type::Named(n) if n == "TlsConn" => true,
+        // TlsServer: synchronized shared SSL_CTX/SNI configuration handle. The
+        // runtime retains it while accepted connections are handshaking.
+        Type::Named(n) if n == "TlsServer" => true,
         Type::Named(n) if n == "Arena" || n == "Crew" => false,
         Type::Named(_) => false, // non-POD / handled in TypeChecker::is_kick_sendable_ty
         // Option/Result/tuple/enum handled in TypeChecker::is_kick_sendable_ty (fuller Send).

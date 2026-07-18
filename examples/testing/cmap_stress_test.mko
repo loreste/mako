@@ -1,0 +1,67 @@
+// Adversarial CMap coverage: readers overlap with replacement/deletion writers,
+// while several tasks increment the same numeric key.  Every operation must
+// complete without exposing a freed slot or losing an atomic increment.
+
+fn cmap_writer(m: CMap, id: int, loops: int) -> int {
+    let key = "slot-" + format_int(id)
+    var i = 0
+    for i < loops {
+        cmap_set(m, key, format_int(i))
+        let _ = cmap_has(m, key)
+        let _ = cmap_get(m, key)
+        if i % 17 == 0 {
+            let _ = cmap_del(m, key)
+        }
+        i++
+    }
+    return 0
+}
+
+fn cmap_reader(m: CMap, loops: int) -> int {
+    var i = 0
+    for i < loops {
+        let _ = cmap_get(m, "slot-0")
+        let _ = cmap_get(m, "slot-1")
+        let _ = cmap_has(m, "slot-2")
+        let _ = cmap_len(m)
+        i++
+    }
+    return 0
+}
+
+fn cmap_incrementer(m: CMap, loops: int) -> int {
+    var i = 0
+    for i < loops {
+        let _ = cmap_incr(m, "total", 1)
+        i++
+    }
+    return 0
+}
+
+func TestCMapConcurrentReadWriteAndIncr() {
+    let m = cmap_new()
+    cmap_set(m, "total", "0")
+
+    crew t {
+        let w0 = t.kick(cmap_writer(m, 0, 2000))
+        let w1 = t.kick(cmap_writer(m, 1, 2000))
+        let w2 = t.kick(cmap_writer(m, 2, 2000))
+        let r0 = t.kick(cmap_reader(m, 3000))
+        let r1 = t.kick(cmap_reader(m, 3000))
+        let n0 = t.kick(cmap_incrementer(m, 2000))
+        let n1 = t.kick(cmap_incrementer(m, 2000))
+        let n2 = t.kick(cmap_incrementer(m, 2000))
+        let _ = w0.join()
+        let _ = w1.join()
+        let _ = w2.join()
+        let _ = r0.join()
+        let _ = r1.join()
+        let _ = n0.join()
+        let _ = n1.join()
+        let _ = n2.join()
+    }
+
+    assert_eq_str(cmap_get(m, "total"), "6000")
+    cmap_set(m, "stable", "safe")
+    assert_eq_str(cmap_get(m, "stable"), "safe")
+}

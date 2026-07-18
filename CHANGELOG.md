@@ -4,6 +4,18 @@
 
 ### v0.1.10 — Deepen generics
 
+- **Multi-certificate TLS SNI** — `tls_server_sni_add` preloads exact and
+  left-most wildcard certificate contexts. Exact names win, then the longest
+  wildcard suffix; malformed/duplicate hostnames and invalid key pairs fail
+  closed. Selection is synchronized for concurrent accept loops.
+- **Cross-target artifact verification** — Windows GNU PE32+, x86-64/ARM64
+  Linux musl static ELF, WASI WebAssembly, and Intel macOS Mach-O outputs are
+  checked for target architecture in CI. Windows-GNU cross builds no longer
+  collide with MinGW's `clock_gettime`/`nanosleep` declarations, and WASI uses
+  explicit portability fallbacks for unsupported POSIX process APIs.
+- **Stdlib surface gate** — all 71 checked-in stdlib package files are
+  type-checked in the claims gate; fixed stale `slog` and boolean-print wrappers.
+
 - **Multi-statement lambda bodies** — lambdas can now contain `let` bindings,
   assignments, `if`/`else`, `while` loops, and nested control flow. Previously
   only single expressions were supported. Enables real callbacks in stdlib.

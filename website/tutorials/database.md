@@ -252,7 +252,7 @@ fn main() {
 
 ---
 
-## Complete Example: Notes Database
+## Example: Notes Database
 
 ```mko
 fn main() {

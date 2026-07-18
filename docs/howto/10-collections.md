@@ -15,7 +15,7 @@ This guide covers:
 - **Compile cost:** demand-driven monomorphs (only used map shapes)
 
 Identity and low-ceremony patterns: [ERGONOMICS.md](../ERGONOMICS.md).  
-Full syntax: [GUIDE.md](../GUIDE.md) §4b–4c · book tour: [ch03](../book/src/ch03-language-tour.md).
+Current syntax: [GUIDE.md](../GUIDE.md) §4b–4c · book tour: [ch03](../book/src/ch03-language-tour.md).
 
 ---
 

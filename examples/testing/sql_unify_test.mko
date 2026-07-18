@@ -10,7 +10,7 @@ fn TestSqlOpenSqlite() {
     let _ = sql_close(db)
 }
 
-fn TestSqlOpenPostgresStub() {
+fn TestSqlOpenPostgresUnavailable() {
     // Without libpq / server: open fails → sql_ok == 0
     let db = sql_open_postgres("postgres://127.0.0.1:1/none")
     assert(sql_ok(db) == 0 || sql_ok(db) == 1)

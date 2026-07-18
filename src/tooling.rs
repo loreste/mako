@@ -277,7 +277,7 @@ fn top_level_symbol_count(program: &Program) -> usize {
         .count()
 }
 
-/// Apply `[package] systems = true` / `gc = true` / visibility / profile from mako.toml.
+/// Apply package visibility and profile settings from mako.toml.
 pub fn apply_package_safety_flags(tc: &mut TypeChecker, toml: &str) {
     let mut in_package = false;
     let mut in_profile_release = false;
@@ -302,13 +302,8 @@ pub fn apply_package_safety_flags(tc: &mut TypeChecker, toml: &str) {
             continue;
         }
         if in_package {
-            if t.starts_with("systems") && t.contains('=') {
-                let v = t.split('=').nth(1).unwrap_or("").trim();
-                tc.systems_crate = v == "true" || v == "1";
-            }
             if (t.starts_with("gc") || t.starts_with("optional_gc")) && t.contains('=') {
-                let v = t.split('=').nth(1).unwrap_or("").trim();
-                tc.gc_enabled = v == "true" || v == "1";
+                tc.gc_requested = true;
             }
             if t.starts_with("visibility") && t.contains('=') {
                 let v = t
@@ -329,33 +324,26 @@ pub fn apply_package_safety_flags(tc: &mut TypeChecker, toml: &str) {
                 .trim()
                 .trim_matches('"')
                 .trim_matches('\'');
-            // "on" | "always" → keep checks even under NDEBUG; default/debug_only = current
+            // Legacy profile setting: true keeps the already-mandatory safe checks.
             tc.bounds_checks_always = v == "on" || v == "always" || v == "true" || v == "1";
         }
     }
-    // Systems crates never allow GC to weaken ownership.
-    if tc.systems_crate {
-        tc.gc_enabled = false;
-    }
 }
 
-/// Release/profile flags for codegen (bounds checks, source maps, optional GC).
+/// Release/profile flags for codegen (bounds checks and source maps).
 #[derive(Clone, Debug, Default)]
 pub struct CodegenProfile {
     pub bounds_checks_always: bool,
-    pub gc_enabled: bool,
     pub source_file: Option<String>,
 }
 
 pub fn codegen_profile_from_toml(toml: &str, source_file: Option<String>) -> CodegenProfile {
     let mut p = CodegenProfile {
         bounds_checks_always: false,
-        gc_enabled: false,
         source_file,
     };
     let mut in_package = false;
     let mut in_profile_release = false;
-    let mut systems = false;
     for line in toml.lines() {
         let t = line.trim();
         if t.starts_with('#') || t.is_empty() {
@@ -377,14 +365,6 @@ pub fn codegen_profile_from_toml(toml: &str, source_file: Option<String>) -> Cod
             continue;
         }
         if in_package {
-            if t.starts_with("systems") && t.contains('=') {
-                let v = t.split('=').nth(1).unwrap_or("").trim();
-                systems = v == "true" || v == "1";
-            }
-            if (t.starts_with("gc") || t.starts_with("optional_gc")) && t.contains('=') {
-                let v = t.split('=').nth(1).unwrap_or("").trim();
-                p.gc_enabled = v == "true" || v == "1";
-            }
         }
         if in_profile_release && t.starts_with("bounds_checks") && t.contains('=') {
             let v = t
@@ -396,9 +376,6 @@ pub fn codegen_profile_from_toml(toml: &str, source_file: Option<String>) -> Cod
                 .trim_matches('\'');
             p.bounds_checks_always = v == "on" || v == "always" || v == "true" || v == "1";
         }
-    }
-    if systems {
-        p.gc_enabled = false;
     }
     p
 }
@@ -1500,7 +1477,7 @@ pub fn run_deploy_serverless(
     path: &Path,
     provider: DeployServerlessProvider,
     name: &str,
-    image: &str,
+    image: Option<&str>,
     entry: &Path,
     bin: &str,
     port: u16,
@@ -1511,13 +1488,29 @@ pub fn run_deploy_serverless(
         );
         return Err(());
     }
-    if !valid_image_ref(image) {
-        eprintln!("mako deploy serverless: --image must be a non-empty image reference without whitespace");
-        return Err(());
-    }
+    let cloud_run_image = match provider {
+        DeployServerlessProvider::CloudRun => {
+            let Some(image) = image else {
+                eprintln!("mako deploy serverless: --image is required for --provider cloud-run");
+                return Err(());
+            };
+            if !valid_image_ref(image) {
+                eprintln!("mako deploy serverless: --image must be a non-empty image reference without whitespace");
+                return Err(());
+            }
+            Some(image)
+        }
+        DeployServerlessProvider::Fly => None,
+    };
     run_deploy_docker(path, entry, bin, port, DeployDockerMode::Scratch)?;
     match provider {
-        DeployServerlessProvider::CloudRun => write_cloud_run(path, name, image, port),
+        DeployServerlessProvider::CloudRun => {
+            let Some(image) = cloud_run_image else {
+                eprintln!("mako deploy serverless: internal image validation failure");
+                return Err(());
+            };
+            write_cloud_run(path, name, image, port)
+        }
         DeployServerlessProvider::Fly => write_fly(path, name, port),
     }
 }
@@ -1673,7 +1666,7 @@ Open `http://127.0.0.1:{}/`.
 ## Boundary
 
 - Today: WASI preview1 build output, browser loader/polyfill for console output,
-  argv/env stubs, clock/random, and a small virtual file overlay.
+  argv/env fallbacks, clock/random, and a small virtual file overlay.
 - Not claimed yet: WASI preview2 components, HTTP sockets in WASI, DOM bindings,
   Workers request adapters, or component-model interface generation.
 "#,
@@ -1824,9 +1817,10 @@ echo "wrote $ROOT/target/lib{safe_sym}.so"
 
 fn write_wasm_plugin(path: &Path, name: &str) -> Result<(), ()> {
     let src = format!(
-        r#"// Mako WASM plugin skeleton.
-// Build this module with your WASM toolchain and export `mako_plugin_call`.
+        r#"// Mako WASM plugin starter.
+// Build this module with your WASM toolchain and export the two ABI functions.
 // Host ABI target: {api}
+// `mako_plugin_call("ping", "")` returns 1; unsupported operations return 0.
 
 #[no_mangle]
 pub extern "C" fn mako_plugin_abi_version() -> u32 {{
@@ -1834,9 +1828,13 @@ pub extern "C" fn mako_plugin_abi_version() -> u32 {{
 }}
 
 #[no_mangle]
-pub extern "C" fn mako_plugin_call(_op_ptr: u32, _op_len: u32, _payload_ptr: u32, _payload_len: u32) -> u32 {{
-    // Return convention is host-defined for now; see docs/ABI.md.
-    0
+pub extern "C" fn mako_plugin_call(op_ptr: u32, op_len: u32, _payload_ptr: u32, payload_len: u32) -> u32 {{
+    if op_len != 4 || payload_len != 0 {{
+        return 0;
+    }}
+    // The host owns the pointer/length contract for this WASM ABI.
+    let op = unsafe {{ core::slice::from_raw_parts(op_ptr as *const u8, op_len as usize) }};
+    (op == b"ping") as u32
 }}
 "#,
         api = "mako.plugin.v1"
@@ -1845,7 +1843,7 @@ pub extern "C" fn mako_plugin_call(_op_ptr: u32, _op_len: u32, _payload_ptr: u32
     write_plugin_files(
         path,
         &[
-            ("plugin.wasm.stub.rs", src),
+            ("plugin.wasm.rs", src),
             ("mako.plugin.toml", manifest),
             ("README.md", plugin_readme(name, "wasm")),
         ],
@@ -1889,7 +1887,7 @@ fn plugin_readme(name: &str, kind: &str) -> String {
     format!(
         r#"# {name}
 
-Mako {kind} plugin skeleton.
+Mako {kind} plugin starter.
 
 ABI:
 
@@ -1898,7 +1896,7 @@ ABI:
 - Native entrypoint: `mako_plugin_entry`
 - Manifest: `mako.plugin.toml`
 
-This is a stable ABI seed. Host-side dynamic loading, capability negotiation,
+This is a stable ABI surface. Host-side dynamic loading, capability negotiation,
 and WASM component-model adapters are still roadmap work.
 "#
     )

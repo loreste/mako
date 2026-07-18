@@ -1,4 +1,4 @@
-// Production HTTP/3 server — bind UDP, accept streams, respond with content-type.
+// HTTP/3 server example — bind UDP, accept streams, respond with content-type.
 // Requires quiche linked (MAKO_HAS_QUICHE). Certs: runtime/certs/dev.{crt,key}
 //
 //   mako build examples/h3_server.mko -o out/h3_server

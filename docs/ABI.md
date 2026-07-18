@@ -3,7 +3,7 @@
 **Product tip:** **0.2.1**.
 
 Mako's current FFI is `extern "C"` plus the runtime C headers. The plugin ABI
-seed gives native dynamic plugins and future WASM plugins one stable handshake.
+gives native dynamic plugins and future WASM plugins one stable handshake.
 
 ## Native ABI v1
 
@@ -22,7 +22,7 @@ The ABI surface is intentionally small:
 - `MakoPluginHost`: host callbacks, currently logging and opaque user data
 - `MakoPluginVTable`: init, shutdown, call, string free callback
 
-Generate a native skeleton:
+Generate a native starter:
 
 ```bash
 mako deploy plugin my-plugin --name my-plugin --kind native
@@ -30,15 +30,17 @@ cd my-plugin
 ./build-plugin.sh
 ```
 
-## WASM Plugin Seed
+## WASM Plugin Starter
 
-Generate a WASM plugin manifest/skeleton:
+Generate a WASM plugin manifest/starter:
 
 ```bash
 mako deploy plugin my-wasm-plugin --name my-wasm-plugin --kind wasm
 ```
 
-The WASM skeleton documents exported ABI-version and call functions. Full WASM
+The WASM starter exports ABI-version and call functions. Its generated example
+implements a deterministic `ping` operation (`ping` with an empty payload
+returns `1`; unsupported operations return `0`). Full WASM
 component-model adapters, WIT generation, capability negotiation, and host-side
 dynamic loading remain roadmap work.
 
@@ -46,9 +48,9 @@ dynamic loading remain roadmap work.
 
 Done now:
 
-- Stable ABI header seed
-- Native plugin skeleton generator
-- WASM plugin manifest/skeleton generator
+- Stable ABI header
+- Native plugin starter generator
+- WASM plugin manifest/starter generator
 - Release archives include the ABI docs/header
 
 Not done yet:

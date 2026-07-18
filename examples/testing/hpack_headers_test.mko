@@ -2,7 +2,7 @@ fn TestHpackIndexed() {
     let b = hpack_encode_indexed(2)
     assert_eq(len(b), 1)
     assert_eq(hpack_decode_indexed(b), 2)
-    assert_eq(hpack_decode_stub(b), 2)
+    assert_eq(hpack_decode_indexed(b), 2)
     assert(str_eq(hpack_static_name(2), ":method"))
     assert(str_eq(hpack_static_value(2), "GET"))
     assert_eq(hpack_decode_indexed("x"), -1)

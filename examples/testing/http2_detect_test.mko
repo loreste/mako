@@ -35,7 +35,7 @@ fn TestHttp2FrameHeader() {
     assert_eq(http2_frame_stream(data), 0)
     assert_eq(http2_frame_len(data), 0)
     assert_eq(http2_frame_flags(data), 0)
-    assert_eq(hpack_decode_stub("x"), -1)
+    assert_eq(hpack_decode_indexed("x"), -1)
     assert(str_eq(hpack_static_name(1), ":authority"))
     assert(str_eq(hpack_static_name(31), "content-type"))
     assert_eq(len(hpack_static_name(999)), 0)
@@ -134,7 +134,7 @@ fn TestQuicDetect() {
     cr[4] = byte(1)
     cr[5] = byte(0)
     cr[6] = byte(0)
-    cr[7] = byte(0) // PN placeholder
+    cr[7] = byte(0) // reserved packet-number byte
     cr[8] = byte(0)
     cr[9] = byte(0)
     cr[10] = byte(0)
@@ -165,4 +165,3 @@ fn TestTlsRecord() {
     assert_eq(tls_record_len(string(r)), 2)
     assert_eq(tls_record_type("hi"), -1)
 }
-

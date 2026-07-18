@@ -6,7 +6,7 @@ fast at runtime, and designed so **builds stay fast**.
 **Product version:** **0.2.1** (`mako version` → `mako0.2.1`).
 
 **Guided tour:** [The Mako Book](book/).  
-**Full syntax guide:** [GUIDE.md](GUIDE.md).  
+**Current syntax guide:** [GUIDE.md](GUIDE.md).
 **Low ceremony:** [ERGONOMICS.md](ERGONOMICS.md).  
 **Identity (our syntax):** [IDENTITY.md](IDENTITY.md).  
 **Keywords:** [KEYWORDS.md](KEYWORDS.md).  
@@ -27,7 +27,7 @@ fast at runtime, and designed so **builds stay fast**.
 | **Speed** | As close to Rust as possible — no GC, native `-O3 -flto` ([SPEED.md](SPEED.md)) |
 | **Concurrent (first-class)** | `crew` / `kick` / `join` / channels / `select` / `actor` — structured, no orphans |
 | **Parallel (first-class)** | `fan` — data-parallel map over cores; multi-kick crews |
-| Memory | `hold` / `share` / `arena` — **no mandatory GC** |
+| Memory | `hold` / `share` / `arena` — **no GC** |
 | Safe by default | Bounds checks; unused `Result` is an error |
 
 ---
@@ -246,7 +246,8 @@ crew t {
 let out = fan items, fn(x) { heavy(x) }
 ```
 
-No orphan background work: kicked jobs finish with the crew.  
+Ordinary kicked jobs are joined with the crew. A blocked C/FFI call can delay
+that join. An explicit `detach` must be paired with `detached_join_all()`.
 No async coloring. Details: [SPEED.md](SPEED.md).
 
 ## Memory

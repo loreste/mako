@@ -1,6 +1,7 @@
 # Mako CLI reference
 
-Complete reference for every `mako` command, flag, and workflow.
+Reference for the current `mako` commands, flags, and workflows. Platform- and
+integration-specific limits are called out where they apply.
 
 ---
 
@@ -79,7 +80,7 @@ mako build -p app                           # build one workspace member
 | `--sanitize <TYPE>` | Pass `-fsanitize=` to clang (e.g. `address`, `thread`) |
 | `--static-link` | Force static linking |
 | `--overflow <MODE>` | Integer overflow: `wrap` (default), `trap` (abort), `ignore` |
-| `--bounds <MODE>` | Bounds checks: `default` or `always`. **Release builds force always** |
+| `--bounds <MODE>` | Legacy bounds policy spelling; safe indexing is checked in every build |
 | `--no-incremental` | Disable build caching |
 | `-j, --jobs <N>` | Parallel compile jobs (default: CPU count) |
 | `-p, --package <NAME>` | Build one workspace member |
@@ -94,6 +95,7 @@ mako build -p app                           # build one workspace member
 | `x86_64-unknown-linux-gnu` | Linux x86_64 |
 | `aarch64-unknown-linux-gnu` | Linux ARM64 |
 | `x86_64-unknown-linux-musl` | Linux static (musl) |
+| `aarch64-unknown-linux-musl` | Linux ARM64 static (musl) |
 | `x86_64-pc-windows-gnu` | Windows x86_64 |
 | `wasm32-wasip1` | WebAssembly (WASI) |
 
@@ -123,7 +125,7 @@ Arguments after `--` are forwarded to the compiled program. Access them with
 | `--no-incremental` | Disable build caching |
 | `-j, --jobs <N>` | Parallel compile jobs |
 | `--overflow <MODE>` | `wrap` / `trap` / `ignore` (integer `+ - *`) |
-| `--bounds always` | Keep bounds checks in release |
+| `--bounds always` | Legacy-compatible spelling; safe checks are already retained |
 
 ---
 
@@ -304,9 +306,10 @@ Generate deployment scaffolds.
 
 ```bash
 mako deploy docker                 # Dockerfile + .dockerignore
-mako deploy serverless             # serverless/container-edge starters
+mako deploy serverless --provider fly --name my-app  # Fly starter
+# Cloud Run additionally requires an --image that you have pushed.
 mako deploy wasm                   # browser/edge WASM starter files
-mako deploy plugin                 # native or WASM plugin skeleton
+mako deploy plugin                 # native or WASM plugin starter
 ```
 
 ---
@@ -343,8 +346,10 @@ Start the language server (stdio JSON-RPC).
 mako lsp
 ```
 
-Supports: diagnostics, hover, completion, go-to-definition, references,
-rename, document symbols, workspace symbols, signature help.
+Supports diagnostics, hover, completion, go-to-definition, document symbols,
+workspace symbols, signature help, and reference/rename operations for the
+implemented same-file and imported-function paths. Broader project-wide
+language analysis remains a roadmap item.
 
 Configure your editor to run `mako lsp` as the language server for `.mko` files.
 
@@ -475,13 +480,13 @@ version = "0.1.0"
 members = ["core", "lib", "app"]
 ```
 
-### Systems crate (strict ownership)
+### Legacy systems marker
 
 ```toml
 [package]
 name = "my-engine"
 version = "0.1.0"
-systems = true    # hold/share rules never weakened, GC forbidden
+systems = true    # legacy marker; all packages use the same ownership rules
 ```
 
 ### Fields
@@ -490,14 +495,14 @@ systems = true    # hold/share rules never weakened, GC forbidden
 |-------|-------------|
 | `name` | Package name |
 | `version` | SemVer version string |
-| `systems` | If `true`, ownership rules are strict, no GC weakening |
+| `systems` | Legacy marker; it does not change ownership and Mako has no GC |
 
 ### Profile / safety vs speed
 
 | Flag / toml | Effect |
 |-------------|--------|
-| `mako build --release` | `-O3 -flto -DNDEBUG` — **elides** bounds checks on the hot path |
-| `mako build --release --bounds always` | Keep bounds checks even under `NDEBUG` (safer, slower) |
+| `mako build --release` | `-O3 -flto -DNDEBUG` — safe bounds checks remain enabled |
+| `mako build --release --bounds always` | Legacy-compatible spelling; safe checks are already retained |
 | `[profile.release] bounds_checks = "on"` | Same as `--bounds always` for that package |
 | `[dependencies]` | Map of dependency name → source |
 | `[workspace]` | Workspace configuration |

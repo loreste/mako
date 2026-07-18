@@ -109,6 +109,25 @@ pub fn prefer_zig(opts: &BuildOpts) -> bool {
     if std::env::var_os("MAKO_USE_ZIG").is_some() {
         return zig_on_path();
     }
+    if opts
+        .target
+        .as_ref()
+        .is_some_and(|t| t.contains("wasm"))
+    {
+        // Without wasi-sdk, zig cc supplies the WASI sysroot. If wasi-sdk is
+        // installed, resolve_cc selects its clang first.
+        return zig_on_path();
+    }
+    if opts
+        .target
+        .as_ref()
+        .is_some_and(|t| t.contains("apple-darwin"))
+        && macos_sdk_path().is_some()
+    {
+        // The host Apple clang knows how to consume the installed SDK. Zig's
+        // macOS target still needs an SDK supplied explicitly.
+        return false;
+    }
     if opts.target.as_ref().is_some_and(|t| !t.contains("wasm")) && is_cross(opts.target.as_deref())
     {
         return zig_on_path();
@@ -150,8 +169,36 @@ fn wasi_sdk_path() -> Option<PathBuf> {
         })
 }
 
+fn macos_sdk_path() -> Option<PathBuf> {
+    if let Some(root) = std::env::var_os("SDKROOT") {
+        let path = PathBuf::from(root);
+        if path.is_dir() && path != Path::new("/") {
+            return Some(path);
+        }
+    }
+    Command::new("xcrun")
+        .args(["--sdk", "macosx", "--show-sdk-path"])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .and_then(|o| {
+            let path = PathBuf::from(String::from_utf8_lossy(&o.stdout).trim());
+            path.is_dir().then_some(path)
+        })
+}
+
 pub fn wasi_sdk() -> Option<PathBuf> {
     wasi_sdk_path()
+}
+
+/// Add the host Apple SDK when clang is cross-compiling Darwin.
+pub fn push_macos_sysroot(cmd: &mut Command, triple: &str, zig: bool) {
+    if zig || !triple.contains("apple-darwin") || !is_cross(Some(triple)) {
+        return;
+    }
+    if let Some(sdk) = macos_sdk_path() {
+        cmd.arg("-isysroot").arg(sdk);
+    }
 }
 
 pub fn using_zig(cc: &Path) -> bool {
@@ -167,10 +214,15 @@ pub fn apply_cc_prefix(cmd: &mut Command, cc: &Path) {
 
 pub fn push_target_args(cmd: &mut Command, triple: &str, zig: bool) {
     if triple.contains("wasm") {
-        let t = if triple == "wasm32-wasi" || triple == "wasm32-unknown-wasi" {
-            "wasm32-wasip1"
-        } else {
-            triple
+        let t = match (zig, triple) {
+            // Zig's libc target is `wasm32-wasi`; `wasm32-wasip1` is Mako's
+            // public/Rust spelling and is accepted by wasi-sdk clang.
+            (true, "wasm32-wasi")
+            | (true, "wasm32-unknown-wasi")
+            | (true, "wasm32-wasip1")
+            | (true, "wasm32-unknown-wasip1") => "wasm32-wasi",
+            (false, "wasm32-wasi") | (false, "wasm32-unknown-wasi") => "wasm32-wasip1",
+            _ => triple,
         };
         if zig {
             cmd.arg("-target").arg(t);
