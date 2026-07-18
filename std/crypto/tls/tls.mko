@@ -15,6 +15,14 @@ fn server_new_mtls(cert: string, key: string, client_ca: string) -> TlsServer {
 fn server_sni_add(server: TlsServer, hostname: string, cert: string, key: string) -> int {
     return tls_server_sni_add(server, hostname, cert, key)
 }
+// Strict replace of an existing SNI name (use add for a new hostname).
+fn server_sni_update(server: TlsServer, hostname: string, cert: string, key: string) -> int {
+    return tls_server_sni_update(server, hostname, cert, key)
+}
+// Remove an SNI certificate; future handshakes fall back to the default cert.
+fn server_sni_remove(server: TlsServer, hostname: string) -> int {
+    return tls_server_sni_remove(server, hostname)
+}
 fn client_new_mtls(ca: string, cert: string, key: string) -> TlsClient {
     return tls_client_new_mtls(ca, cert, key)
 }

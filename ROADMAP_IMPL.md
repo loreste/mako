@@ -3,13 +3,13 @@
 Detailed feature plan for Mako, organized by version. See
 [docs/ROADMAP.md](docs/ROADMAP.md) for the summary view.
 
-**Current version:** 0.2.1  
+**Current version:** 0.2.2  
 **Next milestone:** 0.2.2 (tooling)  
 **Last updated:** 2026-07-17
 
 ---
 
-## v0.2.1 — Safety & correctness — **shipped**
+## v0.2.2 — Safety & correctness — **shipped**
 
 | Feature | Status |
 |---------|--------|
@@ -152,7 +152,7 @@ must be written in idiomatic Mako and serve as example code.
 
 ---
 
-## v0.2.1 — Safety & Correctness
+## v0.2.2 — Safety & Correctness
 
 Close the gap between safety claims and verified behavior.
 

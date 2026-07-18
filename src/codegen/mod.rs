@@ -15120,6 +15120,24 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             self.line(&format!("int64_t {tmp} = mako_jwt_verify({t}, {s});"));
                             return ("int64_t".into(), tmp);
                         }
+                        "jwt_verify_rs256" => {
+                            let (_, t) = self.emit_expr(&args[0]);
+                            let (_, k) = self.emit_expr(&args[1]);
+                            let tmp = self.fresh("jvr");
+                            self.line(&format!(
+                                "int64_t {tmp} = mako_jwt_verify_rs256({t}, {k});"
+                            ));
+                            return ("int64_t".into(), tmp);
+                        }
+                        "jwt_verify_jwks" => {
+                            let (_, t) = self.emit_expr(&args[0]);
+                            let (_, j) = self.emit_expr(&args[1]);
+                            let tmp = self.fresh("jwj");
+                            self.line(&format!(
+                                "int64_t {tmp} = mako_jwt_verify_jwks({t}, {j});"
+                            ));
+                            return ("int64_t".into(), tmp);
+                        }
                         "jwt_payload" => {
                             let (_, t) = self.emit_expr(&args[0]);
                             let tmp = self.fresh("jp");
@@ -15456,6 +15474,49 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             let (_, b) = self.emit_expr(&args[1]);
                             let tmp = self.fresh("hp");
                             self.line(&format!("MakoString {tmp} = mako_http_post({u}, {b});"));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "https_get" => {
+                            let (_, u) = self.emit_expr(&args[0]);
+                            let (_, ca) = self.emit_expr(&args[1]);
+                            let (_, t) = self.emit_expr(&args[2]);
+                            let tmp = self.fresh("hsg");
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_https_get({u}, {ca}, {t});"
+                            ));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "https_post" => {
+                            let (_, u) = self.emit_expr(&args[0]);
+                            let (_, b) = self.emit_expr(&args[1]);
+                            let (_, ct) = self.emit_expr(&args[2]);
+                            let (_, ca) = self.emit_expr(&args[3]);
+                            let (_, t) = self.emit_expr(&args[4]);
+                            let tmp = self.fresh("hsp");
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_https_post({u}, {b}, {ct}, {ca}, {t});"
+                            ));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "oidc_discovery" => {
+                            let (_, u) = self.emit_expr(&args[0]);
+                            let (_, ca) = self.emit_expr(&args[1]);
+                            let (_, t) = self.emit_expr(&args[2]);
+                            let tmp = self.fresh("odisc");
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_oidc_discovery({u}, {ca}, {t});"
+                            ));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "oidc_token" => {
+                            let (_, u) = self.emit_expr(&args[0]);
+                            let (_, form) = self.emit_expr(&args[1]);
+                            let (_, ca) = self.emit_expr(&args[2]);
+                            let (_, t) = self.emit_expr(&args[3]);
+                            let tmp = self.fresh("otok");
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_oidc_token({u}, {form}, {ca}, {t});"
+                            ));
                             return ("MakoString".into(), tmp);
                         }
                         "llm_message" => {
@@ -16742,6 +16803,19 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             ));
                             return ("MakoString".into(), tmp);
                         }
+                        "https_request" => {
+                            let (_, m) = self.emit_expr(&args[0]);
+                            let (_, u) = self.emit_expr(&args[1]);
+                            let (_, b) = self.emit_expr(&args[2]);
+                            let (_, ct) = self.emit_expr(&args[3]);
+                            let (_, ca) = self.emit_expr(&args[4]);
+                            let (_, t) = self.emit_expr(&args[5]);
+                            let tmp = self.fresh("hsrq");
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_https_request({m}, {u}, {b}, {ct}, {ca}, {t});"
+                            ));
+                            return ("MakoString".into(), tmp);
+                        }
                         "http_get_timeout" => {
                             let (_, u) = self.emit_expr(&args[0]);
                             let (_, t) = self.emit_expr(&args[1]);
@@ -16766,10 +16840,23 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             self.line(&format!("int64_t {tmp} = mako_http_last_status();"));
                             return ("int64_t".into(), tmp);
                         }
+                        "https_last_status" => {
+                            let tmp = self.fresh("hsls");
+                            self.line(&format!("int64_t {tmp} = mako_https_last_status();"));
+                            return ("int64_t".into(), tmp);
+                        }
                         "http_last_header" => {
                             let (_, n) = self.emit_expr(&args[0]);
                             let tmp = self.fresh("hlh");
                             self.line(&format!("MakoString {tmp} = mako_http_last_header({n});"));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "https_last_header" => {
+                            let (_, n) = self.emit_expr(&args[0]);
+                            let tmp = self.fresh("hslh");
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_https_last_header({n});"
+                            ));
                             return ("MakoString".into(), tmp);
                         }
                         "udp_bind" => {
@@ -25731,6 +25818,26 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             let tmp = self.fresh("tssni");
                             self.line(&format!(
                                 "int64_t {tmp} = mako_tls_server_sni_add({s}, {h}, {c}, {k});"
+                            ));
+                            return ("int64_t".into(), tmp);
+                        }
+                        "tls_server_sni_update" => {
+                            let (_, s) = self.emit_expr(&args[0]);
+                            let (_, h) = self.emit_expr(&args[1]);
+                            let (_, c) = self.emit_expr(&args[2]);
+                            let (_, k) = self.emit_expr(&args[3]);
+                            let tmp = self.fresh("tssniu");
+                            self.line(&format!(
+                                "int64_t {tmp} = mako_tls_server_sni_update({s}, {h}, {c}, {k});"
+                            ));
+                            return ("int64_t".into(), tmp);
+                        }
+                        "tls_server_sni_remove" => {
+                            let (_, s) = self.emit_expr(&args[0]);
+                            let (_, h) = self.emit_expr(&args[1]);
+                            let tmp = self.fresh("tssnir");
+                            self.line(&format!(
+                                "int64_t {tmp} = mako_tls_server_sni_remove({s}, {h});"
                             ));
                             return ("int64_t".into(), tmp);
                         }

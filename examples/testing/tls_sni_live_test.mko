@@ -95,3 +95,61 @@ fn TestTlsMultiCertSniSelection() {
     let _ = tls_client_free(client)
     let _ = tls_server_free(server)
 }
+
+// SNI mutations publish a replacement set without invalidating an active
+// server handle. Existing handshakes retain their old context; later ones see
+// the updated or removed entry.
+fn TestTlsMultiCertSniUpdateRemove() {
+    let enabled = env_get("MAKO_LIVE_TLS")
+    if tls_server_available() == 0 or (enabled != "1" and enabled != "true") {
+        return
+    }
+
+    let base_cert = "runtime/certs/dev.crt"
+    let base_key = "runtime/certs/dev.key"
+    let exact_cert = "/tmp/mako_sni_mutation_exact.crt"
+    let exact_key = "/tmp/mako_sni_mutation_exact.key"
+    let updated_cert = "/tmp/mako_sni_mutation_updated.crt"
+    let updated_key = "/tmp/mako_sni_mutation_updated.key"
+    let wildcard_cert = "/tmp/mako_sni_mutation_wildcard.crt"
+    let wildcard_key = "/tmp/mako_sni_mutation_wildcard.key"
+    assert_eq(tls_make_self_signed(exact_cert, exact_key, "before.example.com", 1), 0)
+    assert_eq(tls_make_self_signed(updated_cert, updated_key, "after.example.com", 1), 0)
+    assert_eq(tls_make_self_signed(wildcard_cert, wildcard_key, "wild.example.com", 1), 0)
+
+    let server = tls_server_new(base_cert, base_key)
+    assert_eq(tls_server_sni_add(server, "api.example.com", exact_cert, exact_key), 0)
+    assert_eq(tls_server_sni_add(server, "*.example.com", wildcard_cert, wildcard_key), 0)
+    assert_eq(tls_server_sni_update(server, "api.example.com", updated_cert, updated_key), 0)
+    assert_eq(tls_server_sni_remove(server, "*.example.com"), 0)
+    assert_eq(tls_server_sni_update(server, "missing.example.com", updated_cert, updated_key), -1)
+    assert_eq(tls_server_sni_remove(server, "missing.example.com"), -1)
+
+    let mut port = 21000 + (now_ms() % 1000)
+    let mut listener = -1
+    let mut attempt = 0
+    for attempt < 32 {
+        if listener < 0 {
+            listener = tcp_listen_addr("127.0.0.1", port)
+            if listener < 0 {
+                port = port + 1
+            }
+        }
+        attempt = attempt + 1
+    }
+    if listener < 0 {
+        let _ = tls_server_free(server)
+        return
+    }
+    let client = tls_client_new_insecure()
+    crew sni_mutation {
+        let task = sni_mutation.kick(sni_serve(server, listener, 2))
+        sleep_ms(100)
+        assert_eq_str(sni_peer_cn(client, port, "api.example.com"), "after.example.com")
+        // Removed wildcard falls back to the default certificate.
+        assert_eq_str(sni_peer_cn(client, port, "one.example.com"), "localhost")
+        assert_eq(task.join(), 0)
+    }
+    let _ = tls_client_free(client)
+    let _ = tls_server_free(server)
+}

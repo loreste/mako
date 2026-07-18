@@ -1,0 +1,33 @@
+// RS256/JWKS and HTTPS contract tests.
+// The RSA vector uses the repository's development key only as a deterministic
+// test fixture; production callers should load a rotated public key/JWKS.
+
+fn TestJwtRs256AndJwks() {
+    if tls_client_available() == 0 {
+        return
+    }
+    let token = "eyJhbGciOiJSUzI1NiIsImtpZCI6ImRldiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJtYWtvIiwiaXNzIjoidGVzdCJ9.G5LOeGoK1fD60rrSRzaARCzUo0GUTHKf-3zeUuwPszKo5OYDkz-EAqhe1MfTjj2zWbyDuYMVj2CDaq-IBGdlVTsGuXCiBGJ95YzOB4jB_BB0N8mVhhEf_cdduSzCyoH-0z_NUr4BiIANNBngpDkw3UccQR9lHo-0NL7pPzj5fxsSqpAQ278KUaGYSgdC4ySJaWEvC6jGcu-9dOSYPuSeCKPFEWQw8CeFwVBmMHn9hB6NnStC_9QpRVfLxSOP5dYZmSnE_W7c0roCWYz8ike8NjKZ0vm0_2nh9zm6hCaLGb21ROQEQWn5jloiqpT1AFyhtPJD8Xt6vYeGc5MU4TcXTA"
+    let tampered = "eyJhbGciOiJSUzI1NiIsImtpZCI6ImRldiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJtYWtvIiwiaXNzIjoidGVzdCJ9.G5LOeGoK1fD60rrSRzaARCzUo0GUTHKf-3zeUuwPszKo5OYDkz-EAqhe1MfTjj2zWbyDuYMVj2CDaq-IBGdlVTsGuXCiBGJ95YzOB4jB_BB0N8mVhhEf_cdduSzCyoH-0z_NUr4BiIANNBngpDkw3UccQR9lHo-0NL7pPzj5fxsSqpAQ278KUaGYSgdC4ySJaWEvC6jGcu-9dOSYPuSeCKPFEWQw8CeFwVBmMHn9hB6NnStC_9QpRVfLxSOP5dYZmSnE_W7c0roCWYz8ike8NjKZ0vm0_2nh9zm6hCaLGb21ROQEQWn5jloiqpT1AFyhtPJD8Xt6vYeGc5MU4TcXTB"
+    let n = "oYgkFC2NZN7xpxps0pZyf6JXo1--sFe6fdpk4igYsotyTjwjtq6LS81q8PmjGA1D1HGCOl-iuQeB_N_ywy66wkrKGkcapnYrEKpKD-5eL-wX4NqOPNdplCuq0YC-048mGx63jKPkfjjXBFlW5YnGvfHZzcsQj-5mMhax42LLscI_WXM1VDoyiqIhzWwr32Goz2Iis7b_RNqVqRuNYE02GEMeEe327CtpYu8Pzj4cxo5YMqvkH8HVjvQObj8q_cXo0jJG3cfVY73PIyCz3TQo30vgBVThqKUPcuYHhdybuL8ZesUidF_M5delSOml7SO92q_of-7ucdo4jKwf5hdckQ"
+    let jwks = "{\"keys\":[{\"kty\":\"RSA\",\"n\":\"" + n + "\",\"e\":\"AQAB\",\"alg\":\"RS256\",\"use\":\"sig\",\"kid\":\"dev\",\"key_ops\":[\"verify\"]}]}"
+    assert_eq(jwt_verify_jwks(token, jwks), 1)
+    assert_eq(jwt_verify_jwks(tampered, jwks), 0)
+    assert_eq(jwt_verify(token, "not-an-rsa-secret"), 0)
+
+    let pem = "-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAoYgkFC2NZN7xpxps0pZy\nf6JXo1++sFe6fdpk4igYsotyTjwjtq6LS81q8PmjGA1D1HGCOl+iuQeB/N/ywy66\nwkrKGkcapnYrEKpKD+5eL+wX4NqOPNdplCuq0YC+048mGx63jKPkfjjXBFlW5YnG\nvfHZzcsQj+5mMhax42LLscI/WXM1VDoyiqIhzWwr32Goz2Iis7b/RNqVqRuNYE02\nGEMeEe327CtpYu8Pzj4cxo5YMqvkH8HVjvQObj8q/cXo0jJG3cfVY73PIyCz3TQo\n30vgBVThqKUPcuYHhdybuL8ZesUidF/M5delSOml7SO92q/of+7ucdo4jKwf5hdc\nkQIDAQAB\n-----END PUBLIC KEY-----\n"
+    assert_eq(jwt_verify_rs256(token, pem), 1)
+
+    // Duplicate kid selection is ambiguous and must fail closed.
+    let duplicate = "{\"keys\":[{\"kty\":\"RSA\",\"n\":\"" + n + "\",\"e\":\"AQAB\",\"kid\":\"dev\"},{\"kty\":\"RSA\",\"n\":\"" + n + "\",\"e\":\"AQAB\",\"kid\":\"dev\"}]}"
+    assert_eq(jwt_verify_jwks(token, duplicate), 0)
+}
+
+fn TestHttpsDoesNotDowngradeHttp() {
+    // https_* rejects cleartext URLs before DNS or socket work. http_* remains
+    // a separate cleartext API and is not silently upgraded or changed.
+    assert_eq_str(https_get("http://127.0.0.1/", "", 10), "")
+    assert_eq(https_last_status(), 0)
+    assert_eq_str(https_last_header("content-type"), "")
+    assert_eq_str(oidc_discovery("http://127.0.0.1/.well-known/openid-configuration", "", 10), "")
+    assert_eq_str(oidc_token("http://127.0.0.1/token", "grant_type=client_credentials", "", 10), "")
+}

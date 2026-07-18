@@ -728,6 +728,8 @@ application code. See `examples/testing/scram_test.mko` (RFC 7677 §3 vector),
 | `session_cancel` / `session_cancelled` / `session_cancel_clear` | `(token) -> int` | Remote session cancel registry |
 | `tls_server_new_mtls` | `(cert, key, client_ca) -> TlsServer` | mTLS server (require client cert) |
 | `tls_server_sni_add` | `(server, hostname, cert, key) -> int` | Add an exact or left-most wildcard SNI certificate |
+| `tls_server_sni_update` | `(server, hostname, cert, key) -> int` | Replace an existing SNI cert (0=ok, -1 if missing/invalid) |
+| `tls_server_sni_remove` | `(server, hostname) -> int` | Remove an SNI cert (0=ok, -1 if missing) |
 | `tls_client_new_mtls` | `(ca, client_cert, client_key) -> TlsClient` | mTLS client (present cert) |
 | `tls_unique` | `(conn: TlsConn) -> string` | Finished bytes for tls-unique binding |
 | `scram_tls_unique_cbind` | `(conn: TlsConn) -> string` | SCRAM-PLUS `c=` from `tls_unique` |
@@ -1518,6 +1520,8 @@ Requires OpenSSL; `tls_server_available()` reports 1 when present.
 | `tls_server_new` | `tls_server_new(cert: string, key: string) -> TlsServer` | Create a TLS server (min TLS 1.2) |
 | `tls_server_new_tls13` | `tls_server_new_tls13(cert: string, key: string) -> TlsServer` | Create a TLS server that requires TLS 1.3 (rejects older clients) |
 | `tls_server_sni_add` | `tls_server_sni_add(server: TlsServer, hostname: string, cert: string, key: string) -> int` | Add a certificate selected by SNI; exact names beat wildcards, then longest wildcard suffix |
+| `tls_server_sni_update` | `tls_server_sni_update(server, hostname, cert, key) -> int` | Strict replace of an existing SNI name |
+| `tls_server_sni_remove` | `tls_server_sni_remove(server, hostname) -> int` | Drop an SNI name; future handshakes use the default cert |
 | `tls_accept` | `tls_accept(srv: TlsServer, fd: int) -> TlsConn` | Blocking TLS handshake on an accepted TCP fd |
 | `tls_accept_start` | `tls_accept_start(srv: TlsServer, fd: int) -> TlsConn` | Nonblocking TLS accept start (handshake may be incomplete) |
 | `tls_handshake_step` | `tls_handshake_step(conn: TlsConn) -> int` | Drive handshake: `1` done, `0` want-read, `2` want-write, `-1` error |
