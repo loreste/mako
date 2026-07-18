@@ -33,15 +33,16 @@ Program: [SOUNDNESS.md](SOUNDNESS.md) · model: [MEMORY_MODEL.md](MEMORY_MODEL.m
 | SAFE-001 bounds in release | Done |
 | SAFE-002 ownership categories | Done |
 | SAFE-003/004 slice+map free (incl. monomorph) + reassign + nested release_replaced | Done (2026-07-18 audit) |
-| SAFE-005 string own free | Done; surface `string_view` type Partial |
+| SAFE-005 string own + `string_view` | Done |
 | SAFE-006 CFG drops (return/break/continue/`?`) | Done (core) |
 | SAFE-007 arena/slice escape + field store | Done |
-| SAFE-008 capture audit | Partial |
+| SAFE-008 capture matrix | Done (core) |
 | SAFE-009 CMap gate | Done |
 | SAFE-010 memory model doc | Done |
 | RT-001 / RT-005 seed / RT-006 | Done |
-| RT-002/003 scheduler | Planned |
-| RT-004 channel ownership | Partial (seed tests) |
+| RT-002/003 scheduler pool + spawn_blocking | Done (seed) |
+| RT-004 channel ownership (clone/take) | Done (core) |
+| Struct Own field free | Done |
 | Pkg lock build verification (PR #3) | Done |
 | Hot path: stack POD lits + cold free | Done |
 

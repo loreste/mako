@@ -937,6 +937,30 @@ impl TypeChecker {
             "runtime_stats_reset".into(),
             Type::Fn(vec![], Box::new(Type::Void)),
         );
+        // RT-002/003: bounded scheduler (opt-in worker pool behind kick).
+        fns.insert(
+            "sched_set_workers".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Void)),
+        );
+        fns.insert(
+            "sched_workers".into(),
+            Type::Fn(vec![], Box::new(Type::Int)),
+        );
+        // SAFE-005: string_view surface — zero-copy view; own via str_to_owned.
+        fns.insert(
+            "str_as_view".into(),
+            Type::Fn(
+                vec![Type::String],
+                Box::new(Type::Named("string_view".into())),
+            ),
+        );
+        fns.insert(
+            "str_to_owned".into(),
+            Type::Fn(
+                vec![Type::Named("string_view".into())],
+                Box::new(Type::String),
+            ),
+        );
         fns.insert(
             "path_join".into(),
             Type::Fn(vec![Type::String, Type::String], Box::new(Type::String)),
@@ -12033,6 +12057,7 @@ impl TypeChecker {
                 "float" | "float64" => Ok(Type::Float),
                 "bool" => Ok(Type::Bool),
                 "string" => Ok(Type::String),
+                "string_view" => Ok(Type::Named("string_view".into())),
                 "void" => Ok(Type::Void),
                 "Arena" => Ok(Type::Arena),
                 "Crew" => Ok(Type::Crew),
@@ -14690,8 +14715,9 @@ impl TypeChecker {
                                 | Type::String
                                 | Type::Map(_, _)
                                 | Type::StrBuilder => Ok(Type::Int),
+                                Type::Named(n) if n == "string_view" => Ok(Type::Int),
                                 other => Err(TypeError::new(format!(
-                                    "len needs slice/array/string/map, got {}",
+                                    "len needs slice/array/string/map/string_view, got {}",
                                     other.display()
                                 ))),
                             };
@@ -16274,6 +16300,15 @@ impl TypeChecker {
             return true;
         }
         match (got, expected) {
+            // SAFE-005: owned string may be viewed as string_view (no clone).
+            (Type::String, Type::Named(n)) if n == "string_view" => true,
+            (Type::Named(n), Type::String) if n == "string_view" => true,
+            // string_view result of str_as_view / annotated lit.
+            (Type::Named(n), Type::Named(m))
+                if n == "string_view" && m == "string_view" =>
+            {
+                true
+            }
             (Type::Named(a), Type::Named(b)) if a == b => true,
             (Type::Array(a), Type::Array(b)) => self.compatible(a, b),
             (Type::Map(k1, v1), Type::Map(k2, v2)) => {

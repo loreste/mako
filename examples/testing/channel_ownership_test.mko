@@ -1,4 +1,5 @@
 // RT-004: channel send ownership — clone send keeps caller string; recv owns.
+// Take-send moves string ownership; failed try_send does not consume POD.
 
 fn TestStringSendKeepsCaller() {
     let mut ch = make(chan[string], 2)
@@ -7,6 +8,25 @@ fn TestStringSendKeepsCaller() {
     assert_eq_str(s, "payload")
     let got = ch.recv()
     assert_eq_str(got, "payload")
+}
+
+fn TestStringTakeSend() {
+    let mut ch = make(chan[string], 1)
+    let s = f"take-{1}"
+    // take-send moves ownership into the channel
+    assert(chan_str_send_take(ch, s) == 1)
+    let got = ch.recv()
+    assert(got == "take-1")
+}
+
+fn TestStringTrySendTakeFull() {
+    let mut ch = make(chan[string], 1)
+    ch.send("full")
+    let s = f"drop-{2}"
+    // channel full — take-send must not leak (runtime frees or rejects cleanly)
+    let ok = chan_str_try_send_take(ch, s)
+    assert(ok == 0)
+    assert(ch.recv() == "full")
 }
 
 fn TestIntSendRecv() {
@@ -21,5 +41,21 @@ fn TestTrySendFull() {
     let v = 99
     ch.try_send(v)
     assert_eq(v, 99)
+    ch.recv()
+}
+
+fn TestFloatSendRecv() {
+    let mut ch = make(chan[float], 1)
+    ch.send(1.5)
+    assert(ch.recv() == 1.5)
+}
+
+fn TestSendTimeoutKeepsPod() {
+    let mut ch = make(chan[int], 1)
+    ch.send(1)
+    let v = 2
+    // full — timeout send fails; caller still owns v
+    let _ = ch.send_timeout(v, 5)
+    assert(v == 2)
     ch.recv()
 }

@@ -5486,6 +5486,7 @@ typedef struct {
     atomic_bool joined;
     bool cancelled_start; /* set if cancel before/during — cooperative */
     atomic_int done;      /* 1 when trampoline finished (for timed join) */
+    int pooled;           /* 1 = ran on scheduler pool (no dedicated pthread) */
     int64_t debug_id;     /* registry id for task inspect (0 = unregistered) */
     int64_t parent_id;    /* async parent task id (0 = root / unknown) */
 } MakoTask;
@@ -6108,6 +6109,120 @@ static inline MakoString mako_debug_snapshot_json(void) {
     return (MakoString){buf, (size_t)n};
 }
 
+/* ---- RT-002 / RT-003: bounded scheduler behind spawn (opt-in) ----
+ * Default remains one pthread per kick (predictable). Call
+ * mako_sched_set_workers(N) with N>0 to enable a fixed pool of N workers.
+ * mako_spawn routes compute work to the pool; mako_spawn_blocking always
+ * creates a dedicated pthread (I/O / FFI that must not stall pool workers).
+ */
+typedef struct {
+    MakoTaskFn fn;
+    void *arg;
+    MakoTask *task; /* optional: set done/result when finished */
+} MakoSchedJob;
+
+typedef struct {
+    MakoSchedJob *q;
+    size_t cap;
+    size_t head;
+    size_t tail;
+    size_t len;
+    pthread_mutex_t mu;
+    pthread_cond_t cv;
+    pthread_t *workers;
+    int nworkers;
+    int running;
+    int shutdown;
+} MakoSched;
+
+static MakoSched mako_sched = {0};
+static atomic_int mako_sched_workers_cfg = 0; /* 0 = direct pthread */
+
+static inline void mako_sched_set_workers(int64_t n) {
+    if (n < 0) n = 0;
+    if (n > 256) n = 256;
+    atomic_store_explicit(&mako_sched_workers_cfg, (int)n, memory_order_release);
+}
+
+static inline int64_t mako_sched_workers(void) {
+    return (int64_t)atomic_load_explicit(&mako_sched_workers_cfg, memory_order_acquire);
+}
+
+static void *mako_sched_worker_main(void *arg) {
+    (void)arg;
+    for (;;) {
+        pthread_mutex_lock(&mako_sched.mu);
+        while (mako_sched.len == 0 && !mako_sched.shutdown) {
+            pthread_cond_wait(&mako_sched.cv, &mako_sched.mu);
+        }
+        if (mako_sched.shutdown && mako_sched.len == 0) {
+            pthread_mutex_unlock(&mako_sched.mu);
+            return NULL;
+        }
+        MakoSchedJob job = mako_sched.q[mako_sched.head];
+        mako_sched.head = (mako_sched.head + 1) % mako_sched.cap;
+        mako_sched.len--;
+        pthread_mutex_unlock(&mako_sched.mu);
+        void *r = NULL;
+        if (job.fn) r = job.fn(job.arg);
+        if (job.task) {
+            job.task->result = r;
+            atomic_store_explicit(&job.task->done, 1, memory_order_release);
+        }
+    }
+}
+
+static inline void mako_sched_ensure_pool(void) {
+    int want = atomic_load_explicit(&mako_sched_workers_cfg, memory_order_acquire);
+    if (want <= 0) return;
+    if (mako_sched.running && mako_sched.nworkers == want) return;
+    /* Lazy init once; resizing after start is ignored (stable workers). */
+    if (mako_sched.running) return;
+    memset(&mako_sched, 0, sizeof(mako_sched));
+    mako_sched.cap = 256;
+    mako_sched.q = (MakoSchedJob *)calloc(mako_sched.cap, sizeof(MakoSchedJob));
+    if (!mako_sched.q) mako_abort("sched: OOM");
+    pthread_mutex_init(&mako_sched.mu, NULL);
+    pthread_cond_init(&mako_sched.cv, NULL);
+    mako_sched.nworkers = want;
+    mako_sched.workers = (pthread_t *)calloc((size_t)want, sizeof(pthread_t));
+    if (!mako_sched.workers) mako_abort("sched: OOM");
+    mako_sched.running = 1;
+    for (int i = 0; i < want; i++) {
+        if (pthread_create(&mako_sched.workers[i], NULL, mako_sched_worker_main, NULL) != 0) {
+            mako_abort("sched: worker create failed");
+        }
+    }
+}
+
+static inline int mako_sched_enqueue(MakoTaskFn fn, void *arg, MakoTask *task) {
+    mako_sched_ensure_pool();
+    if (!mako_sched.running) return 0;
+    pthread_mutex_lock(&mako_sched.mu);
+    if (mako_sched.len + 1 >= mako_sched.cap) {
+        size_t ncap = mako_sched.cap * 2;
+        MakoSchedJob *nq = (MakoSchedJob *)malloc(ncap * sizeof(MakoSchedJob));
+        if (!nq) {
+            pthread_mutex_unlock(&mako_sched.mu);
+            mako_abort("sched: OOM grow");
+        }
+        for (size_t i = 0; i < mako_sched.len; i++) {
+            nq[i] = mako_sched.q[(mako_sched.head + i) % mako_sched.cap];
+        }
+        free(mako_sched.q);
+        mako_sched.q = nq;
+        mako_sched.cap = ncap;
+        mako_sched.head = 0;
+        mako_sched.tail = mako_sched.len;
+    }
+    mako_sched.q[mako_sched.tail] = (MakoSchedJob){fn, arg, task};
+    mako_sched.tail = (mako_sched.tail + 1) % mako_sched.cap;
+    mako_sched.len++;
+    pthread_cond_signal(&mako_sched.cv);
+    pthread_mutex_unlock(&mako_sched.mu);
+    return 1;
+}
+
 /* MakoNursery — structured concurrency scope (Mako `crew` block).
  * Owns a set of spawned tasks. On scope exit, cancel_join cancels all tasks
  * then joins them — no orphaned threads. Tasks observe cancellation via
@@ -6191,7 +6306,7 @@ static void *mako_task_trampoline(void *arg) {
     return r;
 }
 
-static inline MakoTask *mako_spawn(MakoNursery *n, MakoTaskFn fn, void *arg) {
+static inline MakoTask *mako_spawn_ex(MakoNursery *n, MakoTaskFn fn, void *arg, int blocking) {
     if (!n || !fn) mako_abort("invalid task spawn");
     if (n->len == n->cap) {
         size_t nc = n->cap ? n->cap * 2 : 4;
@@ -6209,6 +6324,7 @@ static inline MakoTask *mako_spawn(MakoNursery *n, MakoTaskFn fn, void *arg) {
     atomic_init(&t->joined, false);
     t->cancelled_start = atomic_load_explicit(&n->cancelled, memory_order_acquire);
     atomic_init(&t->done, 0);
+    t->pooled = 0;
     t->debug_id = 0;
     t->parent_id = 0;
     mako_rt_counter_inc(&mako_rt_tasks_spawned);
@@ -6219,6 +6335,15 @@ static inline MakoTask *mako_spawn(MakoNursery *n, MakoTaskFn fn, void *arg) {
         t->result = (void *)(intptr_t)0;
         return t;
     }
+    /* RT-002: opt-in worker pool for non-blocking kicks. */
+    if (!blocking && atomic_load_explicit(&mako_sched_workers_cfg, memory_order_acquire) > 0) {
+        t->pooled = 1;
+        if (mako_sched_enqueue(fn, arg, t)) {
+            mako_task_reg_add(t);
+            return t;
+        }
+        t->pooled = 0;
+    }
     if (pthread_create(&t->thread, NULL, mako_task_trampoline, t) != 0) {
         n->len--;
         free(t);
@@ -6228,12 +6353,28 @@ static inline MakoTask *mako_spawn(MakoNursery *n, MakoTaskFn fn, void *arg) {
     return t;
 }
 
+static inline MakoTask *mako_spawn(MakoNursery *n, MakoTaskFn fn, void *arg) {
+    return mako_spawn_ex(n, fn, arg, /*blocking=*/0);
+}
+
+/* RT-003: always dedicated thread — for blocking I/O / FFI. */
+static inline MakoTask *mako_spawn_blocking(MakoNursery *n, MakoTaskFn fn, void *arg) {
+    return mako_spawn_ex(n, fn, arg, /*blocking=*/1);
+}
+
 static inline void *mako_await(MakoTask *t) {
     if (!t) return NULL;
     if (!atomic_load_explicit(&t->joined, memory_order_acquire)) {
-        pthread_join(t->thread, &t->result);
+        if (t->pooled) {
+            while (!atomic_load_explicit(&t->done, memory_order_acquire)) {
+                struct timespec step = {0, 2000000L}; /* 2ms */
+                nanosleep(&step, NULL);
+            }
+        } else {
+            pthread_join(t->thread, &t->result);
+            atomic_store_explicit(&t->done, 1, memory_order_release);
+        }
         atomic_store_explicit(&t->joined, true, memory_order_release);
-        atomic_store_explicit(&t->done, 1, memory_order_release);
         mako_rt_counter_inc(&mako_rt_tasks_joined);
         mako_task_reg_remove(t);
     }
@@ -6257,7 +6398,9 @@ static inline int64_t mako_await_timeout_ms(MakoTask *t, int64_t ms, int64_t *ou
     while (waited < ms) {
         int done = atomic_load_explicit(&t->done, memory_order_acquire);
         if (done) {
-            pthread_join(t->thread, &t->result);
+            if (!t->pooled) {
+                pthread_join(t->thread, &t->result);
+            }
             atomic_store_explicit(&t->joined, true, memory_order_release);
             mako_rt_counter_inc(&mako_rt_tasks_joined);
             mako_task_reg_remove(t);
@@ -6271,7 +6414,9 @@ static inline int64_t mako_await_timeout_ms(MakoTask *t, int64_t ms, int64_t *ou
     /* Final check after last sleep */
     int done = atomic_load_explicit(&t->done, memory_order_acquire);
     if (done) {
-        pthread_join(t->thread, &t->result);
+        if (!t->pooled) {
+            pthread_join(t->thread, &t->result);
+        }
         atomic_store_explicit(&t->joined, true, memory_order_release);
         mako_rt_counter_inc(&mako_rt_tasks_joined);
         mako_task_reg_remove(t);

@@ -1,0 +1,24 @@
+// Deep free of Own fields when a struct leaves scope.
+
+struct Bundle {
+    label: string
+    xs: []int
+}
+
+fn TestStructFieldDrops() {
+    {
+        let mut b = Bundle { label: f"n={1}", xs: make([]int, 4) }
+        b.xs[0] = 7
+        assert(b.xs[0] == 7)
+        assert(b.label == "n=1")
+    }
+    // fields freed at block exit (ASan)
+    print("ok")
+}
+
+fn TestStructFieldReassign() {
+    let mut b = Bundle { label: "a", xs: make([]int, 2) }
+    b = Bundle { label: "b", xs: make([]int, 1) }
+    assert(b.label == "b")
+    assert(len(b.xs) == 1)
+}

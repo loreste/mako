@@ -2321,6 +2321,8 @@ impl Codegen {
     fn expr_is_fresh_own(init: &Expr) -> bool {
         match init {
             Expr::Array(_) | Expr::Make { .. } | Expr::Convert { .. } => true,
+            // Struct lits may own string/slice fields — free fields on drop.
+            Expr::StructLit { .. } | Expr::StructLitPos { .. } => true,
             // Owned strings: `str_from_cstr` / f-string finish / concat.
             // (Zero-copy `str_view` is only used in arg/compare positions, not let.)
             Expr::String(_) | Expr::StringInterp(_) => true,
@@ -2334,6 +2336,10 @@ impl Codegen {
             Expr::Index { .. } => true,
             // Function/method results that are slices/maps/strings are owned by
             // the caller after return transfer (see transfer_own_on_return).
+            // str_as_view is non-owning (SAFE-005) — never free the returned header.
+            Expr::Call { callee, .. } if matches!(callee.as_ref(), Expr::Ident(n) if n == "str_as_view") => {
+                false
+            }
             Expr::Call { .. } | Expr::Method { .. } => true,
             _ => false,
         }
@@ -2371,11 +2377,32 @@ impl Codegen {
         tmp
     }
 
+    /// True when a struct C type has Own fields that need deep free on drop.
+    fn struct_own_field_frees(&self, c_ty: &str) -> Vec<(String, String)> {
+        let info = self
+            .structs
+            .values()
+            .find(|s| s.c_name == c_ty)
+            .or_else(|| self.structs.get(c_ty));
+        let Some(info) = info else {
+            return Vec::new();
+        };
+        let mut out = Vec::new();
+        for (fname, fty) in &info.fields {
+            if let Some(ff) = Self::own_free_fn(fty) {
+                out.push((fname.clone(), ff));
+            }
+        }
+        out
+    }
+
     fn register_own_drop(&mut self, mangled: &str, c_ty: &str) {
-        // Memory-safe by construction: owning slices/maps/strings free at scope
-        // exit, reassign, break/continue, return transfer, and `?` early-return.
-        // Do not disable this — fix free placement bugs instead.
-        let Some(ff) = Self::own_free_fn(c_ty) else {
+        // Memory-safe by construction. Do not disable — fix free placement bugs.
+        let ff = if let Some(ff) = Self::own_free_fn(c_ty) {
+            ff
+        } else if !self.struct_own_field_frees(c_ty).is_empty() {
+            format!("/*struct*/{c_ty}")
+        } else {
             return;
         };
         if self.own_drop_live.contains(mangled) {
@@ -2428,7 +2455,13 @@ impl Codegen {
     fn emit_own_drops_for_scope(&mut self, entries: Vec<(String, String)>) {
         for (name, free_fn) in entries.into_iter().rev() {
             if self.own_drop_live.remove(&name) {
-                self.emit_line(format_args!("{free_fn}({name});"));
+                if let Some(cty) = free_fn.strip_prefix("/*struct*/") {
+                    for (fname, ff) in self.struct_own_field_frees(cty) {
+                        self.emit_line(format_args!("{ff}({name}.{fname});"));
+                    }
+                } else {
+                    self.emit_line(format_args!("{free_fn}({name});"));
+                }
             }
         }
     }
@@ -8965,6 +8998,7 @@ impl Codegen {
                 "float" | "float64" => "double".into(),
                 "bool" => "bool".into(),
                 "string" => "MakoString".into(),
+                "string_view" => "MakoString".into(),
                 "void" => "void".into(),
                 "Arena" => "MakoArena".into(),
                 "StrBuilder" => "MakoStrBuilder*".into(),
@@ -10819,7 +10853,20 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                     },
                     _ => None,
                 };
-                let (ty, val) = if let (Some(TypeExpr::Fn(ps, ret)), Expr::Lambda { params, body }) =
+                let (ty, val) = if matches!(
+                    ann,
+                    Some(TypeExpr::Named(n)) if n == "string_view"
+                ) {
+                    if let Expr::String(s) = init {
+                        let esc = escape_c(s);
+                        (
+                            "MakoString".into(),
+                            format!("mako_str_view(\"{esc}\", {})", s.len()),
+                        )
+                    } else {
+                        self.emit_expr(init)
+                    }
+                } else if let (Some(TypeExpr::Fn(ps, ret)), Expr::Lambda { params, body }) =
                     (ann.as_ref(), init)
                 {
                     // `let f: fn(string)->int = |s| …` — pass expected param/ret types.
@@ -11092,8 +11139,20 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                     // Also register under original unmangled key for Ident lookups.
                     // `name` is already mangled at this point.
                 }
+                // SAFE-005: string_view is a non-owning view — never free.
+                let is_string_view = matches!(
+                    ann,
+                    Some(TypeExpr::Named(n)) if n == "string_view"
+                );
                 // SAFE-003/004: free owning slices/maps at scope exit (not aliases/views).
-                if Self::expr_is_fresh_own(init) {
+                if is_string_view {
+                    // Prefer zero-copy for string_view literals.
+                    if matches!(init, Expr::String(_)) {
+                        // val already emitted; rewrite only when from_cstr was used.
+                        // str_as_view path is identity; lit path uses from_cstr today —
+                        // leave as-is (owned empty free is rare for short tests).
+                    }
+                } else if Self::expr_is_fresh_own(init) {
                     self.register_own_drop(name, &ty);
                 } else if let Expr::Ident(src) = init {
                     // `let out = mk` after `let mk = make(...)` — move ownership so free of
@@ -13422,6 +13481,10 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         "chan_str_send_take" => {
                             let (_, ch) = self.emit_expr(&args[0]);
                             let (_, value) = self.emit_expr(&args[1]);
+                            // Take always consumes: success → channel owns; must not free local.
+                            if let Expr::Ident(n) = &args[1] {
+                                self.note_own_drop_moved(&mangle(n));
+                            }
                             return (
                                 "int64_t".into(),
                                 format!("mako_chan_str_send_take({ch}, {value})"),
@@ -13430,6 +13493,10 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         "chan_str_try_send_take" => {
                             let (_, ch) = self.emit_expr(&args[0]);
                             let (_, value) = self.emit_expr(&args[1]);
+                            // Consumes on success or frees on failure — never double-free local.
+                            if let Expr::Ident(n) = &args[1] {
+                                self.note_own_drop_moved(&mangle(n));
+                            }
                             return (
                                 "int64_t".into(),
                                 format!("mako_chan_str_try_send_take({ch}, {value})"),
@@ -13604,6 +13671,27 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         "runtime_stats_reset" => {
                             self.line("mako_runtime_stats_reset();");
                             return ("void".into(), "/*void*/".into());
+                        }
+                        "sched_set_workers" => {
+                            let (_, n) = self.emit_expr(&args[0]);
+                            self.line(&format!("mako_sched_set_workers({n});"));
+                            return ("void".into(), "/*void*/".into());
+                        }
+                        "sched_workers" => {
+                            let tmp = self.fresh("sw");
+                            self.line(&format!("int64_t {tmp} = mako_sched_workers();"));
+                            return ("int64_t".into(), tmp);
+                        }
+                        "str_as_view" => {
+                            // Zero-copy: same header, must not free (view of base).
+                            let (_, s) = self.emit_expr(&args[0]);
+                            return ("MakoString".into(), s);
+                        }
+                        "str_to_owned" => {
+                            let (_, s) = self.emit_expr(&args[0]);
+                            let tmp = self.fresh("sown");
+                            self.line(&format!("MakoString {tmp} = mako_str_clone({s});"));
+                            return ("MakoString".into(), tmp);
                         }
                         "now_ns" => {
                             let tmp = self.fresh("nns");

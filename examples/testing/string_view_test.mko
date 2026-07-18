@@ -1,0 +1,21 @@
+// SAFE-005: string_view is a non-owning view of string bytes.
+
+fn TestStringViewFromLit() {
+    let v: string_view = "hello"
+    assert(v == "hello")
+    assert(len(v) == 5)
+}
+
+fn TestStringViewFromOwned() {
+    let s = f"x{1}"
+    let v = str_as_view(s)
+    assert(v == "x1")
+    // base still usable
+    assert(s == "x1")
+}
+
+fn TestStringViewToOwned() {
+    let v: string_view = "abc"
+    let o = str_to_owned(v)
+    assert(o == "abc")
+}

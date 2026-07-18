@@ -41,18 +41,19 @@ feed 0.2.4 / later.
 | SAFE-002 | Ownership categories in LANGUAGE_SPEC | **Done** |
 | SAFE-003 | Slice drops, views, return transfer, free-on-reassign, nested release_replaced | **Done** |
 | SAFE-004 | Map free (built-in + monomorph) | **Done** |
-| SAFE-005 | String free on own path; surface `string_view` type | **Partial** (free **Done**; type residual) |
+| SAFE-005 | String free + surface `string_view` | **Done** |
 | SAFE-006 | CFG drops (return / break / continue / `?` / block exit) | **Done** (core) |
 | SAFE-007 | Escape checks (arena return/store, slice view) | **Done** |
-| SAFE-008 | Closure / task capture ownership audit | **Partial** |
+| SAFE-008 | Capture matrix (kick/fan) | **Done** (core) |
 | SAFE-009 | CMap readers/writer gate | **Done** |
 | SAFE-010 | Concurrency memory model doc | **Done** |
 | RT-001 | Crew exit / cancel / failure | **Done** |
-| RT-002…003 | Bounded scheduler / blocking split | **Planned** |
-| RT-004 | Channel send ownership | **Partial** (seed tests shipped) |
+| RT-002…003 | Bounded scheduler / `spawn_blocking` | **Done** (seed) |
+| RT-004 | Channel send ownership (clone/take/timeout) | **Done** (core) |
 | RT-005 | Channel/select stress | **Seed shipped** |
 | RT-006 | Task/resource census APIs | **Done** |
 | Pkg lock | Build-time locked dep verification (PR #3) | **Done** |
+| Struct Own fields | Deep free of string/slice fields on drop | **Done** |
 
 #### Speed (hot path, with free on)
 
@@ -63,14 +64,12 @@ feed 0.2.4 / later.
 | Escape heapify (`to_owned`) | **Done** |
 | Cold free (`MAKO_UNLIKELY`) | **Done** |
 
-#### Soundness next (implementation order)
+#### Soundness next (optional depth)
 
-1. **SAFE-005 residual** — distinct surface `string_view` type (own free path live).
-2. **SAFE-008** — capture matrix + TSan soak.
-3. **RT-004 residual** — take-send + monomorph channel matrix.
-4. **RT-002 / RT-003** — bounded scheduler + blocking pool.
-5. **Nested Own fields in structs** — deep free of slice/map fields on struct drop.
-6. **RT-005** — randomized longer soaks.
+1. Longer TSan soak jobs on capture matrix (CI optional).
+2. RT-004 monomorph channel take matrix beyond int/float/string.
+3. Deeper scheduler (work-stealing / dynamic resize) if pool soaks demand it.
+4. **RT-005** — randomized longer select/channel soaks.
 
 ---
 

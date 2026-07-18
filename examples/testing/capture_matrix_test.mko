@@ -1,0 +1,41 @@
+// SAFE-008: capture matrix — allowed kicks and fan (POD / string).
+
+fn add1(x: int) -> int {
+    return x + 1
+}
+
+fn id_str(s: string) -> string {
+    return s
+}
+
+fn TestKickPodCopy() {
+    crew t {
+        let j = t.kick(add1(41))
+        assert(j.join() == 42)
+    }
+}
+
+fn TestKickStringClone() {
+    crew t {
+        let j = t.kick(id_str("hi"))
+        assert(j.join() == "hi")
+    }
+}
+
+fn TestFanCapturePod() {
+    let xs = [1, 2, 3]
+    let out = fan(xs, |x| x + 1)
+    assert(out[0] == 2)
+    assert(out[2] == 4)
+}
+
+fn TestNestedCrewJoin() {
+    crew outer {
+        let a = outer.kick(add1(1))
+        crew inner {
+            let b = inner.kick(add1(2))
+            assert(b.join() == 3)
+        }
+        assert(a.join() == 2)
+    }
+}

@@ -1,0 +1,25 @@
+// RT-002: bounded worker pool behind kick (opt-in).
+
+fn work(x: int) -> int {
+    return x * 2
+}
+
+fn TestSchedWorkersConfig() {
+    sched_set_workers(0)
+    assert(sched_workers() == 0)
+    sched_set_workers(4)
+    assert(sched_workers() == 4)
+    sched_set_workers(0)
+    assert(sched_workers() == 0)
+}
+
+fn TestSchedPoolKick() {
+    sched_set_workers(4)
+    crew t {
+        let a = t.kick(work(3))
+        let b = t.kick(work(5))
+        assert(a.join() == 6)
+        assert(b.join() == 10)
+    }
+    sched_set_workers(0)
+}

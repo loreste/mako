@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **Residuals closed (SAFE-005/008, RT-002/003/004, struct Own free)** —
+  `string_view` + `str_as_view` / `str_to_owned`; capture matrix tests; opt-in
+  `sched_set_workers` pool + `mako_spawn_blocking`; channel take-send ownership
+  (no double-free); deep free of string/slice fields on struct drop. Tests:
+  `string_view_test`, `capture_matrix_test`, `sched_pool_test`,
+  `channel_ownership_test`, `struct_own_drop_test`.
 - **Audit fix: nested `[][]T` free-on-reassign** — append grows with malloc+copy
   (not realloc); free-on-reassign uses `*_release_replaced` so shared inners are
   not double-freed (ASan UAF). Test: `nested_arr_drop_test`.

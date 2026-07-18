@@ -99,19 +99,12 @@ Tests: `examples/testing/cancel_policy_test.mko`.
 
 ## 5. Channel ownership (RT-004)
 
-### Scalar / POD channels
-
-- `send` / `try_send` / timeout: by value; **failed** try/timeout does **not**
-  consume the caller's local (value still owned by sender).
-- After successful send, the receiver owns the copy/value.
-
-### String channels
-
-- Default send **clones** the string (caller keeps its owned string).
-- Take variants move ownership into the channel; on **failed** take-send the
-  implementation must not leak (free or return ownership — see runtime
-  `mako_chan_str_try_send_take`).
-- `recv` returns an **owned** string (caller frees / drops).
+| Channel element | `send` / `try_send` / timeout | Failed send | `recv` |
+|-----------------|-------------------------------|-------------|--------|
+| `int` / `float` / `bool` / POD enum | By value (copy) | Caller keeps value | By value |
+| `string` (default) | **Clone** into channel | Caller keeps owned string | **Owned** string |
+| `string` take (`chan_str_send_take` / `try_send_take`) | **Move** into channel | Payload freed by runtime (no double-free of caller local) | **Owned** string |
+| `chan[Struct]` / ptr ring | Box / handle as documented | Caller keeps unless take API | Owned / handle |
 
 ### Stats
 
@@ -121,6 +114,15 @@ Failed try-sends increment `channel_try_send_drops` in `runtime_stats_json()`.
 
 `select` with timeout: at most one arm receives; ownership follows the arm that
 fires. Timeout arm receives nothing.
+
+### Scheduler (RT-002 / RT-003)
+
+| API | Role |
+|-----|------|
+| `sched_set_workers(n)` | n>0 enables fixed worker pool for kicks; n=0 = one pthread per kick (default) |
+| `sched_workers()` | Current configured worker count |
+| `mako_spawn` | Pool when configured; else dedicated pthread |
+| `mako_spawn_blocking` | Always dedicated pthread (blocking I/O / FFI) |
 
 ---
 

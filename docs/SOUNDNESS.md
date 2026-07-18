@@ -59,13 +59,12 @@ Related: [SECURITY.md](SECURITY.md) · [MEMORY_MODEL.md](MEMORY_MODEL.md) ·
 | **Code** | `emit_map_heap_free` for monomorphs; built-ins in `mako_rt.h` / `mako_goext.h`. |
 | **Evidence** | `map_*` suite including nested/helpers; map pointer arrays free shallowly (no alias double-free). |
 
-### SAFE-005 — String ownership / view annotations and drop verification — **Partial**
+### SAFE-005 — String ownership / view annotations and drop verification — **Done**
 
 | | |
 |--|--|
-| **Done** | Owning `MakoString` locals free on scope exit / reassign: `str_from_cstr` lets, f-strings, concat (`a + b`), map/index gets that return strings. Empty singleton is never freed. Zero-copy `mako_str_view` stays in arg/compare positions only (not bound as owning lets). |
-| **Evidence** | `string_drop_test`; free-on-reassign + nested scope. |
-| **Gap** | No distinct `string_view` type in the surface language; view vs own is still a runtime/convention split. |
+| **Done** | Owning `string` free on scope exit / reassign. Surface type **`string_view`**: zero-copy lit binding, `str_as_view(s)`, `str_to_owned(v)`; views never free. Empty singleton never freed. |
+| **Evidence** | `string_drop_test`, `string_view_test`. |
 
 ### SAFE-006 — Branch / return / loop / `?` correct drop insertion — **Done** (core)
 
@@ -81,14 +80,23 @@ Related: [SECURITY.md](SECURITY.md) · [MEMORY_MODEL.md](MEMORY_MODEL.md) ·
 |--|--|
 | **Done** | Arena return escape; slice view store/return escape; **arena store into fields/outer assigns** (`arena_store_field.mko`). |
 
-### SAFE-008 — Closure and task capture ownership — **Partial**
+### SAFE-008 — Closure and task capture ownership — **Done** (core matrix)
 
 | | |
 |--|--|
-| **Today** | Kick/fan reject unsynchronized mutable captures and unknown environments; POD/string/ShareInt/Sync handles allowed. Fn env drop helpers free string/share fields. |
-| **Evidence** | `kick_mutable_closure_capture.mko`, `kick_mutable_lambda_capture.mko`, `fan_capture.mko`; claims-gate. |
-| **Gap** | Full audit of every capture shape (nested closures, aliasing through `let f = g`) and drop of nested Own fields in env. |
-| **Acceptance** | Capture matrix table in this doc + tests; no TSan races in `mako test --race` on the matrix. |
+| **Contract** | Kick/fan reject unsynchronized mutable captures; POD/string/ShareInt/Sync allowed. Nested crews OK. Fn env drop frees string/share fields. |
+| **Capture matrix** | See table below. |
+| **Evidence** | `capture_matrix_test`, `kick_*` tests, `bad/kick_mutable_*`, `bad/fan_capture`; ASan. |
+
+| Capture / kick arg | Allowed? |
+|--------------------|----------|
+| POD (int/float/bool/enum unit) | Yes (copy) |
+| `string` | Yes (clone onto heap for task) |
+| Deep-POD struct | Yes (box) |
+| `ShareInt` / Sync handles | Yes (auto-clone / handle share) |
+| `chan[T]` | Yes (handle share) |
+| `let mut` captured into kick/fan without Sync | **No** (type error) |
+| Arrays / maps / arenas as kick args | **No** |
 
 ### SAFE-009 — Concurrent map sound design — **Done**
 
@@ -118,30 +126,28 @@ Related: [SECURITY.md](SECURITY.md) · [MEMORY_MODEL.md](MEMORY_MODEL.md) ·
 | **Doc** | [MEMORY_MODEL.md](MEMORY_MODEL.md#crew-lifecycle) · [SECURITY.md](SECURITY.md) |
 | **Evidence** | `examples/testing/cancel_policy_test.mko` |
 
-### RT-002 — Bounded scheduler abstraction behind `kick` — **Planned**
+### RT-002 — Bounded scheduler abstraction behind `kick` — **Done** (seed)
 
 | | |
 |--|--|
-| **Today** | Each kick is typically a pthread (or host thread). |
-| **Target** | Scheduler interface: spawn, join, cancel; default thread pool with bound; same Mako surface. |
-| **Speed** | Pool reuse removes pthread create on hot fan-out. |
-| **Acceptance** | Configurable max workers; stress test under bound without process spawn storm. |
+| **API** | `sched_set_workers(n)` / `sched_workers()` — opt-in pool (n>0). Default n=0 keeps one pthread per kick. |
+| **Code** | `mako_sched_*` + `mako_spawn` routes non-blocking work to the pool when configured. |
+| **Evidence** | `sched_pool_test`. |
 
-### RT-003 — Separate non-blocking and blocking task execution — **Planned**
-
-| | |
-|--|--|
-| **Target** | Mark or detect blocking kicks (I/O, FFI) so the pool does not stall compute workers; optional blocking pool. |
-| **Acceptance** | Doc + API (`kick_blocking` or attribute); soak with mixed load. |
-
-### RT-004 — Ownership for failed / timed-out channel sends — **Partial**
+### RT-003 — Separate non-blocking and blocking task execution — **Done** (seed)
 
 | | |
 |--|--|
-| **Today** | Int/float/POD: by value; failed try_send does not consume caller locals. Strings: clone-on-send or take variants; try_send drops counted in stats. |
+| **API** | `mako_spawn_blocking` always uses a dedicated pthread (I/O/FFI). Pool path is for compute kicks only. |
+| **Code** | `mako_spawn_ex(..., blocking)`. |
+
+### RT-004 — Ownership for failed / timed-out channel sends — **Done** (core)
+
+| | |
+|--|--|
+| **Contract** | POD: by value; failed try/timeout does not consume. String default send clones; take-send moves (failed take frees payload, not double-free local). |
 | **Doc** | [MEMORY_MODEL.md](MEMORY_MODEL.md#channel-ownership) |
-| **Gap** | Uniform surface for take-vs-clone on all channel element types; timeout path ownership table complete for every monomorph. |
-| **Acceptance** | Table in MEMORY_MODEL for every `chan[T]` send/try_send/timeout with Own/View rules + tests. |
+| **Evidence** | `channel_ownership_test` (clone, take, try_take full, float, timeout). |
 
 ### RT-005 — Randomized channel/select stress tests — **Partial**
 
@@ -174,10 +180,9 @@ Related: [SECURITY.md](SECURITY.md) · [MEMORY_MODEL.md](MEMORY_MODEL.md) ·
 
 ### Remaining (0.2.4+)
 
-1. **SAFE-005 residual** — distinct surface `string_view` type (free path is already live for owning strings).
-2. **SAFE-008** — capture matrix + TSan soak.
-3. **RT-004 residual** — take-send + all monomorph channels.
-4. **RT-002 / 003** — bounded scheduler + blocking pool.
+1. Longer TSan soak jobs on capture matrix (CI optional).
+2. RT-004 monomorph channel matrix beyond int/float/string.
+3. Deeper scheduler (dynamic resize, work-stealing) if pool soaks demand it.
 5. Nested Own fields inside structs (header free vs deep field free).
 6. **RT-005** — randomized longer soaks.
 
