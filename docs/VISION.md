@@ -2,42 +2,33 @@
 
 **North star**
 
-> **Speed · speed · speed** · concurrency & parallelism **first-class** · security **first-class** · no GC · fast builds · deployable native binary where supported · strong stdlib.
+> Native compilation · no garbage collector · structured concurrency ·
+> ownership-based memory · practical standard library · fast builds.
 
-**The game:** run **as close to Rust as possible**, with **first-class concurrency
-and parallelism** (`crew` / `kick` / `join` / `fan` / channels / actors) that do
-not leak work or color the whole language, and **first-class security** (memory,
-crews, secrets, secure defaults) that does not silently tax the hot path.
-Write-ups: [SPEED.md](SPEED.md) · [SECURITY.md](SECURITY.md).
+**Goal:** a compiled language for backend and systems development that is
+simple to write, produces fast native binaries, and manages memory without
+a tracing GC. Concurrency and parallelism are language primitives, not
+library abstractions.
 
-**Why Mako exists:** fix the real **pain points of Go and Rust** without cloning
-either language. Go’s GC/nil/err-noise/goroutine leaks and Rust’s
-lifetime/trait/async ceremony are product problems we answer with *Mako*
-tools (`hold`/`share`/`arena`, `crew`/`kick`/`fan`, `Result`/`?`, `enum`/`match`,
-`pack`/`pull`). Full map: [PAIN_POINTS.md](PAIN_POINTS.md).
-
-**Product goal:** Mako is a versatile, general-purpose backend and
-infrastructure language. It aims to be approachable and deployable, with
-strong safety mechanisms, a **Rust-class performance bar**, first-class
-concurrent/parallel work, and low cognitive overhead for everyday backend work.
+**Why Mako exists:** we wanted a language that compiles to native code,
+handles memory deterministically, has structured concurrency built in, and
+doesn’t require heavy ceremony for everyday backend work. Mako is our
+answer — still experimental, still evolving.
 
 | Principle | What it means |
 |-----------|---------------|
-| **Speed first** | **The name of the game** — as close to Rust as possible ([PERFORMANCE.md](PERFORMANCE.md), [SPEED.md](SPEED.md)) |
-| **Concurrency first-class** | `crew` / `kick` / `join` / channels / `select` / `actor` — structured, no free-fire leaks |
+| **Native performance** | Compiled to C, then native — no interpreter or VM overhead |
+| **Concurrency first-class** | `crew` / `kick` / `join` / channels / `select` / `actor` — structured, no leaked tasks |
 | **Parallelism first-class** | `fan` + multi-kick crews — use the cores without a third-party pool |
-| **Security first-class** | Compiler + runtime contract — NLL, bounds, secrets, secure stdlib ([SECURITY.md](SECURITY.md)) |
+| **Memory safety (in progress)** | Ownership, arenas, explicit resource control — active UAF prevention via ASan-verified drops |
 | Simple syntax | Clean, readable code that gets out of your way |
 | **Low ceremony** | Real work without a lot of typing ([ERGONOMICS.md](ERGONOMICS.md)) |
-| Fast builds | Compile times stay short even as projects grow |
-| Easy deploy | Static binaries where the target/toolchain supports them; otherwise document runtime libraries |
-| Practical stdlib | Batteries included for real backend work |
-| Memory safety | Ownership, arenas, explicit resource control — active UAF prevention, not a formal proof |
-| Low-overhead abstractions | High-level constructs compile to efficient machine code |
+| Fast builds | Incremental compilation; compile times stay short |
+| Easy deploy | Static binaries where the target/toolchain supports them |
+| Practical stdlib | Batteries for common backend tasks (HTTP, TLS, JSON, SQL, networking) |
 
-Mako is for **backend software, cloud infrastructure, networking systems,
-developer tools, databases, and high-performance services** — without academic
-ceremony and without a mandatory garbage collector. Product surfaces that must
+Mako is for **backend software, networking systems, developer tools, and
+services** — without a mandatory garbage collector. Product surfaces that must
 work over time:
 
 - **Backend applications** and **API services** (HTTP/JSON, `mako init --backend`)
@@ -51,11 +42,11 @@ work over time:
 **Core promise:** Ship fast binaries, run concurrent and parallel work as a
 first-class part of the language, stay safe without a GC, keep everyday code short.
 
-**Syntax promise:** Mako has its **own flair** — not a Go or Rust clone. It may
-accept dual spellings for familiarity, but preferred docs, examples, and
-`mako fmt` always lead with Mako forms: `fn`, `let`, `on`, `pack` / `pull`,
-`hold` / `share` / `arena`, `crew` / `kick` / `join`, `match`, `export`,
-`.mko`. See [IDENTITY.md](IDENTITY.md).
+**Syntax promise:** Mako has its **own syntax**. It may accept dual spellings
+for familiarity, but preferred docs, examples, and `mako fmt` always lead
+with Mako forms: `fn`, `let`, `on`, `pack` / `pull`, `hold` / `share` /
+`arena`, `crew` / `kick` / `join`, `match`, `export`, `.mko`.
+See [IDENTITY.md](IDENTITY.md).
 
 Honest status lives in [STATUS.md](STATUS.md). **How to write Mako today:**
 [The Mako Book](book/) (guided tour) and [GUIDE.md](GUIDE.md) (verified syntax).
@@ -68,7 +59,7 @@ This file is the product map (includes Target ideas).
 | Pillar | Target |
 |--------|--------|
 | Memory | Ownership + arenas; RC/manual escapes; no tracing GC |
-| Speed | Rust-class hot path; measure; no silent cost |
+| Speed | Native performance; measure; no silent cost |
 | Concurrency | First-class `crew` / channels / actors / `select` (structured) |
 | Parallelism | First-class `fan` + multi-kick crews |
 | Syntax | Unique Mako surface; familiar, concise, practical backend style |

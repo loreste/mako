@@ -348,7 +348,7 @@ echo "checksum: ok"
 echo ""
 
 echo "extracting …"
-tar -xzf "$ARCHIVE" -C "$WORK"
+tar --no-same-owner -xzf "$ARCHIVE" -C "$WORK"
 
 STAGE="$WORK/$ARTIFACT"
 if [[ ! -d "$STAGE" ]]; then

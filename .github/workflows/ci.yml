@@ -59,17 +59,31 @@ jobs:
         shell: bash
         run: ./target/release/mako --help
 
-      - name: Default test suite
+      - name: Default test suite (Linux/macOS)
+        if: runner.os != 'Windows'
         shell: bash
         run: cargo run --quiet --release -- test examples/testing
-        # Windows lacks OpenSSL, SQLite, and some POSIX APIs — some tests
-        # fail due to missing optional deps, not compiler bugs.
-        continue-on-error: ${{ runner.os == 'Windows' }}
         env:
-          # Live TLS/QUIC/nghttp2 smokes stay opt-in; suite skips without deps.
+          MAKO_TEST_TIMEOUT_SECS: "90"
           MAKO_LIVE_TLS: ""
           MAKO_LIVE_NGHTTP2: ""
           MAKO_LIVE_QUIC: ""
+
+      - name: Core test suite (Windows — no OpenSSL/POSIX deps)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          # Run tests that don't require OpenSSL, SQLite, or POSIX-only APIs.
+          # This ensures the compiler and core language work on Windows.
+          cargo run --quiet --release -- test examples/testing/match_test.mko
+          cargo run --quiet --release -- test examples/testing/generic_bounds_test.mko
+          cargo run --quiet --release -- test examples/testing/collections_list_test.mko
+          cargo run --quiet --release -- test examples/testing/slice_test.mko
+          cargo run --quiet --release -- test examples/testing/enum_test.mko
+          cargo run --quiet --release -- test examples/testing/fstring_test.mko
+          cargo run --quiet --release -- test examples/testing/asan_stress_test.mko
+        env:
+          MAKO_TEST_TIMEOUT_SECS: "90"
 
       - name: Init smoke
         shell: bash
@@ -256,3 +270,55 @@ jobs:
           ./target/release/mako test --race examples/testing/chan_float_test.mko
           ./target/release/mako test --race examples/testing/crew_fan_test.mko
           ./target/release/mako test --race examples/testing/crew_drain_test.mko
+
+  asan:
+    name: ASan memory safety
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Install clang
+        run: sudo apt-get update && sudo apt-get install -y clang
+      - name: Build mako
+        run: cargo build --release
+      - name: Run full suite under AddressSanitizer
+        env:
+          MAKO_TEST_TIMEOUT_SECS: "120"
+        run: |
+          ./target/release/mako test --sanitize address examples/testing
+
+  ubsan:
+    name: UBSan undefined behavior
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Install clang
+        run: sudo apt-get update && sudo apt-get install -y clang
+      - name: Build mako
+        run: cargo build --release
+      - name: Run full suite under UndefinedBehaviorSanitizer
+        env:
+          MAKO_TEST_TIMEOUT_SECS: "120"
+        run: |
+          ./target/release/mako test --sanitize undefined examples/testing
+
+  gcc:
+    name: GCC compilation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust + GCC
+        uses: dtolnay/rust-toolchain@stable
+      - name: Install GCC
+        run: sudo apt-get update && sudo apt-get install -y gcc
+      - name: Build mako
+        run: cargo build --release
+      - name: Run full suite compiled with GCC
+        env:
+          MAKO_CC: gcc
+          MAKO_TEST_TIMEOUT_SECS: "90"
+        run: |
+          ./target/release/mako test examples/testing

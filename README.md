@@ -1,21 +1,26 @@
 # Mako
 
-Mako is a compiled language. You write `.mko` files; the compiler turns them into
-native binaries. There is no garbage collector or VM in the Mako runtime.
+Mako is an experimental compiled language for backend and systems development.
+You write `.mko` files; the compiler turns them into native binaries via C.
+There is no garbage collector or VM.
 
-Speed matters here: release builds use `-O3 -flto`, and concurrency is built in
-(`crew` / `kick` / `join` / `fan`, channels, actors). Memory is handled with
-ownership, shares, arenas, and explicit resource APIs. The standard library
-covers backend areas without requiring a framework for every service.
+Memory is managed through ownership (`hold`), shared references (`share`),
+and arenas — no tracing GC. Concurrency uses structured primitives (`crew` /
+`kick` / `fan`, channels, actors). The standard library provides HTTP, TLS,
+JSON, database, and networking APIs, though coverage is still incomplete in
+places.
 
-This is version **0.2.4**. It runs. The surface is still early — expect change,
-rough edges, and missing pieces.
+**Status: experimental/alpha (v0.2.4).** The language works and compiles real
+programs, but the surface is young. Expect breaking changes, missing features,
+and bugs. The ownership model is actively being hardened — the full test suite
+(356 programs) passes under AddressSanitizer with zero memory errors, but edge
+cases remain. This is not yet suitable for production use without careful
+evaluation.
 
-**0.2.4 highlights:** memory-safe drops by construction (slices/maps/strings/`?`),
-`string_view`, stack POD array lits, opt-in scheduler pool, channel take-send
-ownership, struct Own field free, and build-time lockfile verification (PR #3).
-Builds on 0.2.3 JWT/HTTPS hardening.  
-**Next (roadmap):** **0.2.5** — tooling (LSP depth, debugger, package registry).
+**0.2.4 highlights:** ownership drop system (slices/maps/strings/`?`),
+`string_view`, stack POD array lits, scheduler pool, channel ownership,
+struct field free, lockfile verification.  
+**Next:** **0.2.5** — LSP depth, broader sanitizer coverage, tooling.  
 See [docs/ROADMAP.md](docs/ROADMAP.md) · [docs/SOUNDNESS.md](docs/SOUNDNESS.md).
 
 [mako-lang.com](https://mako-lang.com) · [Status](docs/STATUS.md) · [Roadmap](docs/ROADMAP.md) · [Guide](docs/GUIDE.md) · [Book](docs/book/) · [Soundness](docs/SOUNDNESS.md) · [Memory model](docs/MEMORY_MODEL.md)
@@ -111,17 +116,14 @@ routes, power (`hold` / `crew` / `arena`) only when you need it.
 
 ## How it works
 
-### Speed first
+### Native compilation
 
-Native binaries, no GC, release `-O3 -flto`. Concurrent and parallel
-work is **first-class** (`crew`, `fan`) — not a slow afterthought.
-[Speed](docs/SPEED.md) · [Performance](docs/PERFORMANCE.md).
+Compiles to C, then to native binaries via clang (`-O3 -flto` in release
+mode). No interpreter, no JIT, no runtime VM. Concurrency primitives
+(`crew`, `fan`, channels) are part of the language, not a library bolt-on.
 
-The repository’s claim boundaries and current evidence are tracked in
-[STATUS.md](docs/STATUS.md), [SECURITY.md](docs/SECURITY.md), and the
-[release/cross-target guide](docs/RELEASE.md). “No GC” means there is no
-tracing collector or mandatory collector mode; explicit MVCC version
-reclamation is a storage operation, not runtime garbage collection.
+“No GC” means there is no tracing collector. Memory is freed
+deterministically through ownership, scope exits, and arenas.
 
 ### Ownership instead of garbage collection
 
@@ -171,11 +173,12 @@ fn load() -> Result[int, string] {
 
 ### Standard library
 
-HTTP, TLS, WebSocket, JSON, SQLite, Postgres, crypto, compression, regex,
-file I/O, event loops, binary buffers, rate limiters, circuit breakers,
-consistent hashing, game networking, and session management are covered by the
-stdlib/runtime surface. Optional integrations still depend on their platform
-libraries; see [STDLIB](docs/STDLIB.md) and [Release](docs/RELEASE.md).
+The stdlib provides APIs for common backend tasks: HTTP server/client,
+TLS, WebSocket, JSON, SQLite, regex, file I/O, channels, binary buffers,
+and more. Some are fully tested integrations; others are early API surfaces
+that verify shape but lack deep integration testing. External dependencies
+(OpenSSL, SQLite, etc.) are optional — the stdlib soft-skips when they're
+absent. See [STDLIB](docs/STDLIB.md) for what's implemented vs. planned.
 
 ```mko
 fn main() {
@@ -402,13 +405,15 @@ implemented features in LSP-compatible editors.
 ```bash
 mako test examples/testing
 mako test -r TestAdd -v
-mako test --coverage
+mako test --sanitize address examples/testing  # ASan
+mako test --race examples/testing/crew_fan_test.mko  # TSan
 ```
 
-Unit, property, fuzz, snapshot, fixture, and mock tests. The default suite is
-designed to run without external services; network-bound tests still require
-local socket permissions, and optional-service tests skip or soft-fail when the
-service/library is absent.
+356 test programs. The suite runs under AddressSanitizer and
+ThreadSanitizer in CI. Tests that require optional external libraries
+(SQLite, QUIC) soft-skip when the dep is absent — they verify API shape
+but not full integration. See [TEST_CATEGORIES.md](examples/testing/TEST_CATEGORIES.md)
+for what each test actually proves.
 
 ## Our syntax — its own
 

@@ -430,8 +430,9 @@ fn signature_help(src: &str, line: u32, character: u32) -> String {
     for (n, label, _pc) in collect_fn_sigs(src) {
         if n == name {
             let active = commas as u32;
+            let params_json = build_param_info(&label);
             return format!(
-                r#"{{"signatures":[{{"label":"{}","parameters":[]}}],"activeSignature":0,"activeParameter":{active}}}"#,
+                r#"{{"signatures":[{{"label":"{}","parameters":[{params_json}]}}],"activeSignature":0,"activeParameter":{active}}}"#,
                 json_escape(&label)
             );
         }
@@ -452,12 +453,314 @@ fn signature_help(src: &str, line: u32, character: u32) -> String {
     ];
     for (n, label) in builtins {
         if *n == name {
+            let params_json = build_param_info(label);
             return format!(
-                r#"{{"signatures":[{{"label":"{label}","parameters":[]}}],"activeSignature":0,"activeParameter":{commas}}}"#
+                r#"{{"signatures":[{{"label":"{label}","parameters":[{params_json}]}}],"activeSignature":0,"activeParameter":{commas}}}"#
             );
         }
     }
     "null".into()
+}
+
+/// Build LSP ParameterInformation[] JSON from a signature label like "foo(a: int, b: string)".
+fn build_param_info(label: &str) -> String {
+    // Extract the part between ( and )
+    let Some(start) = label.find('(') else {
+        return String::new();
+    };
+    let Some(end) = label.rfind(')') else {
+        return String::new();
+    };
+    if start >= end {
+        return String::new();
+    }
+    let params_str = &label[start + 1..end];
+    if params_str.trim().is_empty() {
+        return String::new();
+    }
+    // Split by comma respecting brackets
+    let mut params = Vec::new();
+    let mut cur = String::new();
+    let mut depth = 0i32;
+    for ch in params_str.chars() {
+        match ch {
+            '(' | '[' => {
+                depth += 1;
+                cur.push(ch);
+            }
+            ')' | ']' => {
+                depth -= 1;
+                cur.push(ch);
+            }
+            ',' if depth == 0 => {
+                params.push(cur.trim().to_string());
+                cur.clear();
+            }
+            _ => cur.push(ch),
+        }
+    }
+    if !cur.trim().is_empty() {
+        params.push(cur.trim().to_string());
+    }
+    // Build JSON for each param using label offsets
+    let mut items = Vec::new();
+    let mut offset = start + 1; // position after '('
+    for (i, p) in params.iter().enumerate() {
+        // Find this param in the label starting from offset
+        if let Some(pos) = label[offset..].find(p.as_str()) {
+            let abs_start = offset + pos;
+            let abs_end = abs_start + p.len();
+            items.push(format!(
+                r#"{{"label":[{abs_start},{abs_end}]}}"#
+            ));
+            offset = abs_end;
+            // Skip the comma separator
+            if i < params.len() - 1 {
+                if let Some(comma) = label[offset..].find(',') {
+                    offset += comma + 1;
+                }
+            }
+        }
+    }
+    items.join(",")
+}
+
+/// textDocument/hover — show type info for identifiers (fns, structs, locals).
+fn hover_info(_uri: &str, src: &str, line: u32, character: u32) -> String {
+    let word = word_at(src, line, character);
+    if word.is_empty() {
+        return "null".into();
+    }
+
+    // Check if it's a keyword
+    if KEYWORDS.contains(&word.as_str()) {
+        let val = format!("(keyword) **{word}**");
+        return format!(
+            r#"{{"contents":{{"kind":"markdown","value":"{}"}}}}"#,
+            json_escape(&val)
+        );
+    }
+
+    // Check fn signatures in current file
+    for (name, label, _pc) in collect_fn_sigs(src) {
+        if name == word {
+            let val = format!("```mako\nfn {label}\n```");
+            return format!(
+                r#"{{"contents":{{"kind":"markdown","value":"{}"}}}}"#,
+                json_escape(&val)
+            );
+        }
+    }
+
+    // Check struct definitions
+    for (name, ..) in collect_struct_defs(src) {
+        if name == word {
+            let fields = collect_struct_fields(src, &name);
+            let val = if fields.is_empty() {
+                format!("```mako\nstruct {name}\n```")
+            } else {
+                format!("```mako\nstruct {name} {{\n{fields}\n}}\n```")
+            };
+            return format!(
+                r#"{{"contents":{{"kind":"markdown","value":"{}"}}}}"#,
+                json_escape(&val)
+            );
+        }
+    }
+
+    // Try type checker for local bindings
+    if let Some(ty_display) = typecheck_hover(src, &word) {
+        let val = format!("```mako\nlet {word}: {ty_display}\n```");
+        return format!(
+            r#"{{"contents":{{"kind":"markdown","value":"{}"}}}}"#,
+            json_escape(&val)
+        );
+    }
+
+    "null".into()
+}
+
+/// Run the type checker in LSP mode and look up a binding's type.
+fn typecheck_hover(src: &str, name: &str) -> Option<String> {
+    let tokens = Lexer::new(src).tokenize().ok()?;
+    let program = Parser::new(tokens).parse().ok()?;
+    let program = desugar::desugar(program);
+    let mut tc = TypeChecker::new();
+    let symbols = tc.check_for_lsp(&program);
+    // Check collected bindings first (inferred let types)
+    for (bname, btype) in &tc.lsp_bindings {
+        if bname == name {
+            return Some(btype.clone());
+        }
+    }
+    // Check function/type symbols
+    symbols.get(name).cloned()
+}
+
+/// Collect struct fields as "  name: type" lines for hover display.
+fn collect_struct_fields(src: &str, struct_name: &str) -> String {
+    let Ok(tokens) = Lexer::new(src).tokenize() else {
+        return String::new();
+    };
+    let mut i = 0;
+    while i + 1 < tokens.len() {
+        if matches!(tokens[i].kind, TokenKind::Struct) {
+            if let TokenKind::Ident(ref n) = tokens[i + 1].kind {
+                if n == struct_name {
+                    // Find the opening brace
+                    let mut j = i + 2;
+                    while j < tokens.len() && !matches!(tokens[j].kind, TokenKind::LBrace) {
+                        j += 1;
+                    }
+                    if j >= tokens.len() {
+                        return String::new();
+                    }
+                    j += 1; // past {
+                    let mut fields = Vec::new();
+                    let mut depth = 1i32;
+                    while j < tokens.len() && depth > 0 {
+                        match &tokens[j].kind {
+                            TokenKind::LBrace => depth += 1,
+                            TokenKind::RBrace => {
+                                depth -= 1;
+                                if depth == 0 {
+                                    break;
+                                }
+                            }
+                            TokenKind::Ident(fname) if depth == 1 => {
+                                // field_name: type
+                                let mut field_str = format!("  {fname}");
+                                if j + 1 < tokens.len()
+                                    && matches!(tokens[j + 1].kind, TokenKind::Colon)
+                                {
+                                    field_str.push_str(": ");
+                                    let mut k = j + 2;
+                                    while k < tokens.len() {
+                                        match &tokens[k].kind {
+                                            TokenKind::Comma
+                                            | TokenKind::RBrace
+                                            | TokenKind::Ident(_)
+                                                if k > j + 2
+                                                    && matches!(
+                                                        tokens[k - 1].kind,
+                                                        TokenKind::Comma | TokenKind::RBrace
+                                                    ) =>
+                                            {
+                                                break
+                                            }
+                                            TokenKind::Comma | TokenKind::RBrace => break,
+                                            TokenKind::Ident(t) => field_str.push_str(t),
+                                            TokenKind::LBracket => field_str.push('['),
+                                            TokenKind::RBracket => field_str.push(']'),
+                                            _ => break,
+                                        }
+                                        k += 1;
+                                    }
+                                }
+                                fields.push(field_str);
+                            }
+                            _ => {}
+                        }
+                        j += 1;
+                    }
+                    // Limit fields to prevent oversized hover
+                    if fields.len() > 12 {
+                        fields.truncate(12);
+                        fields.push("  ...".into());
+                    }
+                    return fields.join("\n");
+                }
+            }
+        }
+        i += 1;
+    }
+    String::new()
+}
+
+/// textDocument/inlayHint — show inferred types on `let` bindings without annotations.
+fn inlay_hints(src: &str) -> String {
+    let Ok(tokens) = Lexer::new(src).tokenize() else {
+        return "[]".into();
+    };
+    let program = match Parser::new(tokens.clone()).parse() {
+        Ok(p) => p,
+        Err(_) => return "[]".into(),
+    };
+    let program = desugar::desugar(program);
+    let mut tc = TypeChecker::new();
+    let _ = tc.check_for_lsp(&program);
+
+    if tc.lsp_bindings.is_empty() {
+        return "[]".into();
+    }
+
+    // Map binding names to their token positions (find `let NAME` patterns)
+    let mut hints = Vec::new();
+    let mut seen = HashMap::new(); // name → last position (handle shadowing)
+
+    let mut i = 0;
+    while i + 1 < tokens.len() {
+        let is_let = matches!(tokens[i].kind, TokenKind::Let);
+        if is_let {
+            // Skip `mut` / `hold` / `share` if present
+            let mut name_idx = i + 1;
+            while name_idx < tokens.len()
+                && matches!(
+                    tokens[name_idx].kind,
+                    TokenKind::Mut | TokenKind::Hold | TokenKind::Share
+                )
+            {
+                name_idx += 1;
+            }
+            if name_idx < tokens.len() {
+                if let TokenKind::Ident(ref name) = tokens[name_idx].kind {
+                    if name != "_" {
+                        // Check that next token is NOT a colon (no explicit annotation)
+                        let next = name_idx + 1;
+                        let has_annotation =
+                            next < tokens.len() && matches!(tokens[next].kind, TokenKind::Colon);
+                        if !has_annotation {
+                            let line = tokens[name_idx].line.saturating_sub(1) as u32;
+                            let col =
+                                tokens[name_idx].col.saturating_sub(1) as u32 + name.len() as u32;
+                            let count = *seen.entry(name.clone()).or_insert(0usize);
+                            *seen.get_mut(name).unwrap() += 1;
+                            hints.push((name.clone(), count, line, col));
+                        }
+                    }
+                }
+            }
+        }
+        i += 1;
+    }
+
+    // Match hints to type-checker bindings (in order — shadowed names repeat)
+    let mut binding_counts: HashMap<String, usize> = HashMap::new();
+    let mut items = Vec::new();
+    // Cap hints to avoid oversized responses
+    let max_hints = 50usize;
+
+    for (bname, btype) in &tc.lsp_bindings {
+        if items.len() >= max_hints {
+            break;
+        }
+        let idx = binding_counts.entry(bname.clone()).or_insert(0);
+        // Find matching hint
+        for (hname, hcount, line, col) in &hints {
+            if hname == bname && hcount == idx {
+                // Skip trivial types that don't add info
+                if btype != "void" {
+                    items.push(format!(
+                        r#"{{"position":{{"line":{line},"character":{col}}},"label":": {btype}","kind":1,"paddingLeft":false,"paddingRight":true}}"#
+                    ));
+                }
+                break;
+            }
+        }
+        *binding_counts.entry(bname.clone()).or_insert(0) += 1;
+    }
+
+    format!("[{}]", items.join(","))
 }
 
 /// Collect `struct Name` definitions (same shape as fn defs).
@@ -1097,7 +1400,7 @@ pub fn run_stdio() -> io::Result<()> {
 
         match method {
             "initialize" => {
-                let result = r#"{"capabilities":{"hoverProvider":true,"completionProvider":{"triggerCharacters":["."]},"textDocumentSync":{"openClose":true,"change":1},"definitionProvider":true,"documentSymbolProvider":true,"workspaceSymbolProvider":true,"referencesProvider":true,"codeActionProvider":true,"signatureHelpProvider":{"triggerCharacters":["(",","]},"renameProvider":{"prepareProvider":true}},"serverInfo":{"name":"mako-lsp","version":"0.4.6"}}"#;
+                let result = r#"{"capabilities":{"hoverProvider":true,"completionProvider":{"triggerCharacters":["."]},"textDocumentSync":{"openClose":true,"change":1},"definitionProvider":true,"documentSymbolProvider":true,"workspaceSymbolProvider":true,"referencesProvider":true,"codeActionProvider":true,"signatureHelpProvider":{"triggerCharacters":["(",","]},"renameProvider":{"prepareProvider":true},"inlayHintProvider":true},"serverInfo":{"name":"mako-lsp","version":"0.5.0"}}"#;
                 let body = format!(r#"{{"jsonrpc":"2.0","id":{id},"result":{result}}}"#);
                 write_message(&mut stdout, &body)?;
             }
@@ -1153,7 +1456,10 @@ pub fn run_stdio() -> io::Result<()> {
                 }
             }
             "textDocument/hover" => {
-                let result = r#"{"contents":{"kind":"markdown","value":"**mako** LSP Partial\n\nDiagnostics on open/change · keyword completion · `mako check` for CLI."}}"#;
+                let uri = json_get_str(&msg, "uri").unwrap_or("");
+                let (line, character) = parse_position(&msg);
+                let src = docs.get(uri).map(|s| s.as_str()).unwrap_or("");
+                let result = hover_info(uri, src, line, character);
                 let body = format!(r#"{{"jsonrpc":"2.0","id":{id},"result":{result}}}"#);
                 write_message(&mut stdout, &body)?;
             }
@@ -1228,6 +1534,13 @@ pub fn run_stdio() -> io::Result<()> {
                 let new_name = json_get_str(&msg, "newName").unwrap_or("");
                 let src = docs.get(uri).map(|s| s.as_str()).unwrap_or("");
                 let result = rename_symbol(uri, src, line, character, new_name);
+                let body = format!(r#"{{"jsonrpc":"2.0","id":{id},"result":{result}}}"#);
+                write_message(&mut stdout, &body)?;
+            }
+            "textDocument/inlayHint" => {
+                let uri = json_get_str(&msg, "uri").unwrap_or("");
+                let src = docs.get(uri).map(|s| s.as_str()).unwrap_or("");
+                let result = inlay_hints(src);
                 let body = format!(r#"{{"jsonrpc":"2.0","id":{id},"result":{result}}}"#);
                 write_message(&mut stdout, &body)?;
             }

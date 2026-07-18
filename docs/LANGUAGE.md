@@ -24,7 +24,7 @@ fast at runtime, and designed so **builds stay fast**.
 | Strict | Static types, no null, exhaustive `match`, `Result` / `Option` |
 | Fast binaries | Native code via C (today) |
 | Fast builds | Linear frontend; debug `-O0` by default |
-| **Speed** | As close to Rust as possible — no GC, native `-O3 -flto` ([SPEED.md](SPEED.md)) |
+| **Speed** | Native compilation, no GC, release `-O3 -flto` ([SPEED.md](SPEED.md)) |
 | **Concurrent (first-class)** | `crew` / `kick` / `join` / channels / `select` / `actor` — structured, no orphans |
 | **Parallel (first-class)** | `fan` — data-parallel map over cores; multi-kick crews |
 | Memory | `hold` / `share` / `arena` — **no GC** |

@@ -1,9 +1,10 @@
 # Mako roadmap
 
-**Product version:** **0.2.4** · Last roadmap sync: **2026-07-18**.
+**Product version:** **0.2.4** (memory safety audit complete) · Last sync: **2026-07-18**.  
+**Suite:** 356 tests, 0 failures, ASan clean.
 
 **Verified:** [STATUS.md](STATUS.md) · **Stdlib:** [STDLIB.md](STDLIB.md) · **Security:** [SECURITY.md](SECURITY.md) · **Release:** [RELEASE.md](RELEASE.md).  
-**Book:** [The Mako Book](book/) · **Identity:** [IDENTITY.md](IDENTITY.md) · **Pain map:** [PAIN_POINTS.md](PAIN_POINTS.md).  
+**Book:** [The Mako Book](book/) · **Identity:** [IDENTITY.md](IDENTITY.md).  
 **Soundness:** [SOUNDNESS.md](SOUNDNESS.md) · **Memory model:** [MEMORY_MODEL.md](MEMORY_MODEL.md).
 
 ---

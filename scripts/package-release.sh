@@ -146,7 +146,7 @@ Requires a C compiler on the target machine (clang). No Rust toolchain needed.
 Docs: https://github.com/loreste/mako/blob/main/docs/RELEASE.md
 EOF
 
-tar -C "$DIST" -czf "$DIST/$NAME.tar.gz" "$NAME"
+tar --owner=0 --group=0 -C "$DIST" -czf "$DIST/$NAME.tar.gz" "$NAME"
 (
   cd "$DIST"
   if command -v sha256sum >/dev/null 2>&1; then

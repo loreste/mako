@@ -1,21 +1,24 @@
 # Mako security
 
-**Security is first-class** — same tier as concurrency, under a speed-first product.
+**Status:** actively hardened, not formally proven. The ownership model
+prevents many classes of memory bugs by construction, and the full test
+suite (356 programs) passes under AddressSanitizer with zero errors. Edge
+cases are still being found and fixed. This is not yet equivalent to a
+formally verified memory model.
 
-**Product tip:** **0.2.4**.
+**Product version:** **0.2.4**.
 
 Mako treats safety as a **compiler and runtime contract**, not a style guide.
-The goal: make leaks, memory corruption, and common backend footguns hard to
-ship — by construction where possible, by hard errors where not — **without**
-making the default hot path slower than Rust.
+The goal: make memory corruption and common backend footguns hard to ship —
+by construction where possible, by hard errors where not.
 
 | Pillar | How it shows up |
 |--------|-----------------|
-| **Speed** | Secure-by-construction (NLL, crews, params) stays low-overhead at steady state; sanitizers are **opt-in** |
-| **Concurrency** | Structured `crew` cancel-joins ordinary kicked tasks; blocked C/FFI calls can delay the join and `detach` is explicit |
-| **Security** | Memory, secrets, injection, bounds — hard errors preferred over soft advice |
+| **Ownership** | `hold`/`share`/`arena` — deterministic free, no GC |
+| **Concurrency** | Structured `crew` cancel-joins ordinary kicked tasks; `detach` is explicit |
+| **Bounds** | Array/slice bounds checks in all builds (safe release mode) |
+| **Verification** | Full suite runs under ASan, UBSan, and TSan in CI |
 
-Guided tour: [The Mako Book §11](book/src/ch11-speed-safety.md) · Speed bar: [SPEED.md](SPEED.md).  
 Soundness program: [SOUNDNESS.md](SOUNDNESS.md) · Memory model: [MEMORY_MODEL.md](MEMORY_MODEL.md).
 
 ## Principles

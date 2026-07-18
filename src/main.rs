@@ -2160,14 +2160,44 @@ fn run_test_package(
             bounds_always: false,
         },
     )?;
-    let status = Command::new(&out_bin).status().map_err(|e| {
+    // Per-test timeout: default 60s, override with MAKO_TEST_TIMEOUT_SECS.
+    let timeout_secs: u64 = std::env::var("MAKO_TEST_TIMEOUT_SECS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(60);
+    let mut child = Command::new(&out_bin).spawn().map_err(|e| {
         emit_plain_error(&format!("could not run test binary: {e}"));
     })?;
-    if !status.success() {
-        report_test_exit(file, &status);
-        return Err(());
+    let start = std::time::Instant::now();
+    let timeout = std::time::Duration::from_secs(timeout_secs);
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                if !status.success() {
+                    report_test_exit(file, &status);
+                    return Err(());
+                }
+                return Ok(());
+            }
+            Ok(None) => {
+                if start.elapsed() >= timeout {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    emit_plain_error(&format!(
+                        "{}: test timed out after {}s (hung or too slow — set MAKO_TEST_TIMEOUT_SECS to increase)",
+                        file.display(),
+                        timeout_secs
+                    ));
+                    return Err(());
+                }
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+            Err(e) => {
+                emit_plain_error(&format!("could not wait on test binary: {e}"));
+                return Err(());
+            }
+        }
     }
-    Ok(())
 }
 
 /// Explain *why* a test binary failed. Assertion failures print their own detail
