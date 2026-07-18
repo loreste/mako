@@ -1,8 +1,9 @@
 # Memory Management
 
-Mako has no garbage collector. Memory safety is achieved through ownership
-rules (`hold`/`share`) and region-based allocation (`arena`). This guide
-explains when to use each strategy.
+Mako has no garbage collector. Active memory/resource safety mechanisms include
+ownership rules (`hold`/`share`) and region-based allocation (`arena`). This
+guide explains when to use each strategy; generated C and FFI remain outside
+the Mako type system.
 
 ## Default bindings
 
@@ -102,8 +103,8 @@ Rules enforced at compile time:
 | Short-lived local computation | plain `let` |
 | Large allocation, bounded lifetime | `arena` |
 
-Prefer `hold` (unique ownership) whenever possible. It has zero overhead and
-gives the compiler maximum freedom to optimize.
+Prefer `hold` (unique ownership) whenever possible. It adds no reference-counting
+traffic and gives the compiler maximum freedom to optimize.
 
 ## Arenas -- region-based allocation
 

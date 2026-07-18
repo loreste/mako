@@ -74,10 +74,8 @@ pub struct Codegen {
     unsafe_depth: usize,
     /// Generic templates (not emitted; specialized as `name__tag`).
     generic_templates: HashMap<String, FnDef>,
-    /// Keep bounds checks under NDEBUG when true.
+    /// Legacy compatibility flag; safe bounds checks are always retained.
     pub bounds_checks_always: bool,
-    /// Optional app GC enabled (`[package] gc = true`).
-    pub gc_enabled: bool,
     /// Current function return TypeExpr (for exotic `?` cross-conversion).
     current_fn_ret: Option<TypeExpr>,
     /// Integer overflow: Wrap (C default), Trap (abort), Ignore (same as wrap).
@@ -203,7 +201,6 @@ impl Codegen {
             unsafe_depth: 0,
             generic_templates: HashMap::new(),
             bounds_checks_always: false,
-            gc_enabled: false,
             current_fn_ret: None,
             overflow_mode: OverflowMode::Wrap,
             source_file: None,
@@ -2244,7 +2241,8 @@ impl Codegen {
     }
 
     /// Emit a bounds check unless inside `unsafe { }`.
-    /// Uses `MAKO_BOUNDS_CHECK` from mako_rt.h (honors `MAKO_BOUNDS_ALWAYS` / NDEBUG).
+    /// Safe Mako indexing remains checked in optimized builds; only explicit
+    /// unsafe code skips this emission.
     fn emit_bounds_check(&mut self, cond_c: &str, msg: &str) {
         if self.unsafe_depth > 0 {
             return;
@@ -2445,10 +2443,10 @@ impl Codegen {
             "#define MAKO_OVERFLOW_MODE {}\n",
             self.overflow_mode.c_define_value()
         ));
-        // Default release-safe bounds when requested via codegen flag.
+        // Preserve the legacy flag in generated C; safe indexing is checked
+        // regardless of optimization level.
         if self.bounds_checks_always {
             self.out.push_str("#define MAKO_BOUNDS_ALWAYS 1\n");
-            self.out.push_str("#ifndef NDEBUG\n/* bounds also forced under NDEBUG via MAKO_BOUNDS_ALWAYS */\n#endif\n");
         }
         self.out.push_str("#include \"mako_overflow.h\"\n");
         self.out.push_str("#ifndef MAKO_WASI\n");
@@ -2759,9 +2757,6 @@ impl Codegen {
         if let Some(tests) = &self.test_fns {
             self.out.push_str("\nint main(int argc, char **argv) {\n");
             self.out.push_str("    mako_set_args(argc, argv);\n");
-            if self.gc_enabled {
-                self.out.push_str("    mako_gc_set_enabled(1);\n");
-            }
             self.out.push_str("    mako_test_install_crash_handler();\n");
             self.out.push_str("    int failed = 0;\n");
             for t in tests {
@@ -2773,15 +2768,9 @@ impl Codegen {
             self.out
                 .push_str("    printf(\"PASS\\n\");\n    fflush(stdout);\n    return 0;\n}\n");
         } else {
-            if self.gc_enabled {
-                self.out.push_str(
-                    "\nint main(int argc, char **argv) {\n    mako_set_args(argc, argv);\n    mako_gc_set_enabled(1);\n    mako_main();\n    return 0;\n}\n",
-                );
-            } else {
-                self.out.push_str(
-                    "\nint main(int argc, char **argv) {\n    mako_set_args(argc, argv);\n    mako_main();\n    return 0;\n}\n",
-                );
-            }
+            self.out.push_str(
+                "\nint main(int argc, char **argv) {\n    mako_set_args(argc, argv);\n    mako_main();\n    return 0;\n}\n",
+            );
         }
         self.out
     }
@@ -3820,7 +3809,7 @@ impl Codegen {
         );
         let _ = writeln!(
             self.out,
-            "#ifndef NDEBUG\n    if (i < 0 || (size_t)i >= a.len) mako_abort(\"struct slice index out of bounds\");\n#endif"
+            "    if (i < 0 || (size_t)i >= a.len) mako_abort(\"struct slice index out of bounds\");"
         );
         let _ = writeln!(self.out, "    return a.data[i];");
         let _ = writeln!(self.out, "}}");
@@ -3830,7 +3819,7 @@ impl Codegen {
         );
         let _ = writeln!(
             self.out,
-            "#ifndef NDEBUG\n    if (i < 0 || (size_t)i >= a.len) mako_abort(\"struct slice index out of bounds\");\n#endif"
+            "    if (i < 0 || (size_t)i >= a.len) mako_abort(\"struct slice index out of bounds\");"
         );
         let _ = writeln!(self.out, "    a.data[i] = v;");
         let _ = writeln!(self.out, "}}");
@@ -11186,7 +11175,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                 self.emit_line(format_args!("mako_arena_free(&{name});"));
             }
             Stmt::Unsafe { body } => {
-                self.line("/* unsafe: bounds checks elided (debug) */");
+                self.line("/* unsafe: caller assumes the index invariant */");
                 self.unsafe_depth += 1;
                 for s in &body.stmts {
                     self.emit_stmt(s);
@@ -17127,12 +17116,6 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             let (_, s) = self.emit_expr(&args[0]);
                             let tmp = self.fresh("h2fl");
                             self.line(&format!("int64_t {tmp} = mako_http2_frame_flags({s});"));
-                            return ("int64_t".into(), tmp);
-                        }
-                        "hpack_decode_stub" => {
-                            let (_, s) = self.emit_expr(&args[0]);
-                            let tmp = self.fresh("hp");
-                            self.line(&format!("int64_t {tmp} = mako_hpack_decode_stub({s});"));
                             return ("int64_t".into(), tmp);
                         }
                         "hpack_encode_indexed" => {
@@ -24934,16 +24917,6 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             ));
                             return ("int64_t".into(), tmp);
                         }
-                        "tls_listen_stub" => {
-                            let (_, p) = self.emit_expr(&args[0]);
-                            return ("int64_t".into(), format!("mako_tls_listen_stub({p})"));
-                        }
-                        "ws_echo_stub" => {
-                            let (_, p) = self.emit_expr(&args[0]);
-                            let tmp = self.fresh("ws");
-                            self.line(&format!("int64_t {tmp} = mako_ws_echo_stub({p});"));
-                            return ("int64_t".into(), tmp);
-                        }
                         "ws_echo_once" => {
                             let (_, p) = self.emit_expr(&args[0]);
                             let tmp = self.fresh("wso");
@@ -25750,6 +25723,17 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             ));
                             return ("void*".into(), tmp);
                         }
+                        "tls_server_sni_add" => {
+                            let (_, s) = self.emit_expr(&args[0]);
+                            let (_, h) = self.emit_expr(&args[1]);
+                            let (_, c) = self.emit_expr(&args[2]);
+                            let (_, k) = self.emit_expr(&args[3]);
+                            let tmp = self.fresh("tssni");
+                            self.line(&format!(
+                                "int64_t {tmp} = mako_tls_server_sni_add({s}, {h}, {c}, {k});"
+                            ));
+                            return ("int64_t".into(), tmp);
+                        }
                         "tls_client_new_mtls" => {
                             let (_, ca) = self.emit_expr(&args[0]);
                             let (_, c) = self.emit_expr(&args[1]);
@@ -26471,10 +26455,6 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             let (_, n) = self.emit_expr(&args[1]);
                             return ("int64_t".into(), format!("mako_redis_mock_kv({p}, {n})"));
                         }
-                        "quic_stub" => {
-                            let (_, p) = self.emit_expr(&args[0]);
-                            return ("int64_t".into(), format!("mako_quic_stub({p})"));
-                        }
                         "pg_connect" => {
                             let (_, u) = self.emit_expr(&args[0]);
                             let tmp = self.fresh("pg");
@@ -26846,54 +26826,6 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                                 "MakoString {tmp} = mako_grpc_http2_client_stream_flow({st}, {n1}, {i1}, {n2}, {i2}, {reply}, {rid}, {status});"
                             ));
                             return ("MakoString".into(), tmp);
-                        }
-                        "grpc_stub_ping" => {
-                            return ("int64_t".into(), "mako_grpc_stub_ping()".into());
-                        }
-                        "queue_stub_ping" => {
-                            return ("int64_t".into(), "mako_queue_stub_ping()".into());
-                        }
-                        "sql_query" => {
-                            let (_, q) = self.emit_expr(&args[0]);
-                            return ("MakoString".into(), format!("mako_sql_query({q})"));
-                        }
-                        "gc_arena_new" => {
-                            let tmp = self.fresh("gc");
-                            self.line(&format!("MakoArena {tmp} = mako_gc_arena_new();"));
-                            return ("MakoArena".into(), tmp);
-                        }
-                        "gc_alloc" => {
-                            let (_, n) = self.emit_expr(&args[0]);
-                            return ("int64_t".into(), format!("mako_gc_alloc({n})"));
-                        }
-                        "gc_collect" => {
-                            return ("int64_t".into(), "mako_gc_collect()".into());
-                        }
-                        "gc_live" => {
-                            return ("int64_t".into(), "mako_gc_live()".into());
-                        }
-                        "gc_enabled" => {
-                            return ("int64_t".into(), "mako_gc_enabled()".into());
-                        }
-                        "gc_root" => {
-                            let (_, h) = self.emit_expr(&args[0]);
-                            return ("int64_t".into(), format!("mako_gc_root({h})"));
-                        }
-                        "gc_unroot" => {
-                            let (_, h) = self.emit_expr(&args[0]);
-                            return ("int64_t".into(), format!("mako_gc_unroot({h})"));
-                        }
-                        "gc_link" => {
-                            let (_, p) = self.emit_expr(&args[0]);
-                            let (_, c) = self.emit_expr(&args[1]);
-                            return ("int64_t".into(), format!("mako_gc_link({p}, {c})"));
-                        }
-                        "gc_mark" => {
-                            let (_, h) = self.emit_expr(&args[0]);
-                            return ("int64_t".into(), format!("mako_gc_mark({h})"));
-                        }
-                        "gc_root_count" => {
-                            return ("int64_t".into(), "mako_gc_root_count()".into());
                         }
                         "http_bind" => {
                             let (_, p) = self.emit_expr(&args[0]);
@@ -30348,6 +30280,56 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                     }
                     let helper_src =
                         format!("static int64_t {helper}(int64_t {p}) {{ return {body_c}; }}\n");
+                    self.insert_helper(&helper_src);
+                    self.line(&format!(
+                        "MakoIntArray {tmp} = mako_par_map_int({coll}, {helper});"
+                    ));
+                    return ("MakoIntArray".into(), tmp);
+                }
+                if let Expr::Ident(fname) = mapper.as_ref() {
+                    let helper = format!("__fan_{map_fn}");
+                    let target = mangle(fname);
+                    let tmp = self.fresh("pm");
+                    if cty == "MakoFloatArray" {
+                        let helper_src = format!(
+                            "static double {helper}(double x) {{ return (double){target}(x); }}\n"
+                        );
+                        self.insert_helper(&helper_src);
+                        self.line(&format!(
+                            "MakoFloatArray {tmp} = mako_par_map_float({coll}, {helper});"
+                        ));
+                        return ("MakoFloatArray".into(), tmp);
+                    }
+                    if cty == "MakoStrArray" {
+                        let helper_src = format!(
+                            "static MakoString {helper}(MakoString x) {{ return {target}(x); }}\n"
+                        );
+                        self.insert_helper(&helper_src);
+                        self.line(&format!(
+                            "MakoStrArray {tmp} = mako_par_map_str({coll}, {helper});"
+                        ));
+                        return ("MakoStrArray".into(), tmp);
+                    }
+                    if let Some(sn) = cty.strip_prefix("MakoArr_") {
+                        let map_one = format!("{helper}_one");
+                        let helper_src = format!(
+                            "static void {map_one}(void *dst, const void *src) {{\n\
+	{sn} x = *({sn} const *)src;\n\
+	*({sn} *)dst = {target}(x);\n\
+                             }}\n"
+                        );
+                        self.insert_helper(&helper_src);
+                        self.line(&format!(
+                            "{cty} {tmp} = mako_arr_{sn}_make({coll}.len, 0);"
+                        ));
+                        self.line(&format!(
+                            "mako_par_map_bytes({coll}.data, {tmp}.data, (size_t){coll}.len, sizeof({sn}), {map_one});"
+                        ));
+                        return (cty, tmp);
+                    }
+                    let helper_src = format!(
+                        "static int64_t {helper}(int64_t x) {{ return (int64_t){target}(x); }}\n"
+                    );
                     self.insert_helper(&helper_src);
                     self.line(&format!(
                         "MakoIntArray {tmp} = mako_par_map_int({coll}, {helper});"

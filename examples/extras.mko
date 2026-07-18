@@ -32,9 +32,4 @@ fn main() {
 
     print_int(safe_add(100, 23))
 
-    let q = sql_query("select 1")
-    print(q)
-
-    let _ = grpc_stub_ping()
-    let _ = queue_stub_ping()
 }

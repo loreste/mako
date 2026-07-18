@@ -1,7 +1,7 @@
 /* Mako strong logging — structured KV + JSON lines, levels, redaction, trace.
  * Production defaults: filterable levels, ISO-8601 timestamps, optional JSON,
  * service name, multi-field records, stderr or file. Fast path: one fprintf
- * family write; no mandatory GC. Include after mako_trace.h when possible. */
+ * family write; no GC. Include after mako_trace.h when possible. */
 #ifndef MAKO_LOG_H
 #define MAKO_LOG_H
 

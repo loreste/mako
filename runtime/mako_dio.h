@@ -7,7 +7,7 @@
 #include "mako_rt.h"
 
 #if defined(_WIN32)
-/* Direct I/O primitives are POSIX-only for now. Stubs on Windows. */
+/* Direct I/O primitives are POSIX-only for now. Windows reports unavailable. */
 typedef struct { int fd; } MakoMMap;
 static inline int64_t mako_file_open(MakoString p, int64_t m, int64_t f) { (void)p;(void)m;(void)f; return -1; }
 static inline int64_t mako_file_close(int64_t fd) { (void)fd; return -1; }

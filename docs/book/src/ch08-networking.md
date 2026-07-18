@@ -418,7 +418,7 @@ handshake — for example Postgres's `SSLRequest` negotiation.
 
 ```mko
 fn main() {
-    let srv = tls_server_new("cert.pem", "key.pem")   // TlsServer (SSL context)
+    let srv = tls_server_new("cert.pem", "key.pem")   // TlsServer
     let lfd = tcp_listen(5432)
     while true {
         let fd = tcp_accept(lfd)
@@ -453,6 +453,21 @@ let srv = tls_server_new_tls13("cert.pem", "key.pem")
 
 The default `tls_server_new` negotiates TLS 1.2+ (picking 1.3 when the client
 supports it).
+
+### Multiple certificates with SNI
+
+Preload additional certificates on a socket-style server with
+`tls_server_sni_add(server, hostname, cert, key)`. Hostnames are matched
+case-insensitively. Exact names take precedence over left-most wildcards, and
+the longest matching wildcard suffix wins; a wildcard matches exactly one
+label. Certificate files are validated and loaded during configuration, not
+during each handshake.
+
+```mko
+let srv = tls_server_new("default.crt", "default.key")
+let _ = tls_server_sni_add(srv, "api.example.com", "api.crt", "api.key")
+let _ = tls_server_sni_add(srv, "*.example.com", "wild.crt", "wild.key")
+```
 
 ---
 
@@ -660,10 +675,11 @@ let conn = tls_accept_start(srv, client_fd)
 //   or == 0 want-read / == 2 want-write
 ```
 
-### HTTP/3 production server
+### HTTP/3 server surface
 
-When quiche is linked (`MAKO_HAS_QUICHE`), `h3_server_*` is a production UDP
-HTTP/3 accept loop:
+When quiche is linked (`MAKO_HAS_QUICHE`), `h3_server_*` provides an
+implemented UDP HTTP/3 accept loop. Deployment hardening, certificates, and
+operational limits remain application responsibilities:
 
 ```mko
 fn main() {

@@ -1,6 +1,8 @@
 # Mako Built-in Functions Reference
 
-Complete reference for every built-in function available in Mako.
+Current documented reference for Mako built-ins. Platform-specific and
+optional-library boundaries are marked in the tables; symbol-for-symbol stdlib
+parity is not claimed.
 Signatures use the form `function_name(param: type, ...) -> return_type`.
 
 ---
@@ -345,7 +347,7 @@ config/log updates. Tests: `examples/testing/fs_storage_test.mko`.
 | `file_append2` / `file_append3` | … | writev multi-string append |
 | `str_slice_ci_index` / `str_slice_ci_starts` / `builder_write_slice` | … | Zero-copy CI search / region append |
 | `pcache_new` / `pcache_get` / `pcache_hits` / `pcache_misses` / `pcache_free` | … | 16-slot LRU page cache |
-| `mvcc_new` / `mvcc_begin` / `mvcc_put` / `mvcc_get` / `mvcc_gc` / `mvcc_live` / `mvcc_free` | … | Multi-version KV + GC |
+| `mvcc_new` / `mvcc_begin` / `mvcc_put` / `mvcc_get` / `mvcc_gc` / `mvcc_live` / `mvcc_free` | … | Multi-version KV + explicit version reclamation (not tracing GC) |
 | `lsm_new` / `lsm_put` / `lsm_get` / `lsm_flush` / `lsm_attach_run` / `lsm_free` | … | Memtable + L0 run WAL |
 | `lsm_compact` / `lsm_compact_down` / `lsm_compactions` / `lsm_flushes` | … | L0→L1 compact; promote/merge L1→L2→L3 |
 | `lsm_sst_levels` / `lsm_level_len` | `lsm_level_len(l, level) -> int` | Non-empty SST count; key count at level 1–3 |
@@ -562,7 +564,6 @@ Use **`wall_*` / `now_ms`** only for logs and absolute calendar time.
 | `sql_migration_applied` | `sql_migration_applied(db: SqlDB, version: int) -> int` | Check if a migration has been applied |
 | `sql_migrate` | `sql_migrate(db: SqlDB, version: int, sql: string) -> int` | Apply a migration |
 | `sql_check_typed` | `sql_check_typed(table: string, col: string, type_name: string, constraint: string) -> int` | Validate column type constraints |
-| `sql_query` | `sql_query(sql: string) -> string` | Execute a raw SQL query string |
 
 ### SQL Connection Pool
 
@@ -726,6 +727,7 @@ application code. See `examples/testing/scram_test.mko` (RFC 7677 §3 vector),
 | `session_cancel_token` | `() -> string` | Mint cancel token |
 | `session_cancel` / `session_cancelled` / `session_cancel_clear` | `(token) -> int` | Remote session cancel registry |
 | `tls_server_new_mtls` | `(cert, key, client_ca) -> TlsServer` | mTLS server (require client cert) |
+| `tls_server_sni_add` | `(server, hostname, cert, key) -> int` | Add an exact or left-most wildcard SNI certificate |
 | `tls_client_new_mtls` | `(ca, client_cert, client_key) -> TlsClient` | mTLS client (present cert) |
 | `tls_unique` | `(conn: TlsConn) -> string` | Finished bytes for tls-unique binding |
 | `scram_tls_unique_cbind` | `(conn: TlsConn) -> string` | SCRAM-PLUS `c=` from `tls_unique` |
@@ -951,7 +953,7 @@ Tests: `chan_struct_test`, `chan_make_struct_test`, `chan_float_test`,
 
 | Construct | Meaning |
 |-----------|---------|
-| `crew t { … }` | Structured scope; cancel+join on exit (no orphan tasks) |
+| `crew t { … }` | Structured scope; ordinary kicked tasks are cooperatively cancel-joined on exit (blocked C/FFI may delay join) |
 | `t.kick(f(args…))` | Spawn on crew; returns `Job[R]` |
 | `job.join()` / `join(job)` | Wait for result of type `R` |
 | `job.join_timeout(ms)` | Timed join → **`Result[R, string]`** (`Ok`/`Err("timeout")`). If `R` is already `Result[T, string]`, **flattens** (no nest). |
@@ -1044,6 +1046,12 @@ Tests: `crew_fan_test.mko`, `job_join_typed_test.mko`, `fan_struct_test.mko`, `f
 | `cmap_del` | `cmap_del(m: CMap, key: string) -> int` | Delete a key |
 | `cmap_len` | `cmap_len(m: CMap) -> int` | Return the number of entries |
 | `cmap_incr` | `cmap_incr(m: CMap, key: string, delta: int) -> int` | Atomically increment a numeric value |
+
+All CMap operations are linearizable. Reads share an internal readers/writer
+gate; mutations are exclusive, and `cmap_get` copies the value before the
+gate is released. The table grows under the write gate. `cmap_incr` reserves
+`INT64_MIN` as its error result for a non-numeric value or arithmetic overflow;
+separate calls do not establish ordering across tasks.
 
 ---
 
@@ -1306,16 +1314,8 @@ or a dedicated reply socket — do not share one `GameUDP` handle across workers
 | `leak_detected` | `leak_detected(mark: int) -> int` | Check if any leak detected since mark |
 | `leak_assert_clear` | `leak_assert_clear(mark: int) -> int` | Assert no leaks since mark |
 | `leak_report_json` | `leak_report_json(mark: int) -> string` | Leak report as JSON |
-| `gc_arena_new` | `gc_arena_new() -> Arena` | Create a new GC arena (always available; alias of arena) |
-| `gc_alloc` | `gc_alloc(nbytes: int) -> int` | Optional app GC alloc (handle bits); requires `[package] gc = true` |
-| `gc_collect` | `gc_collect() -> int` | Tracing collect: mark roots+edges, free unmarked; returns freed count |
-| `gc_live` | `gc_live() -> int` | Live GC objects count |
-| `gc_enabled` | `gc_enabled() -> int` | 1 if optional GC runtime is on |
-| `gc_root` | `gc_root(handle: int) -> int` | Register root (kept across collect) |
-| `gc_unroot` | `gc_unroot(handle: int) -> int` | Drop root registration |
-| `gc_link` | `gc_link(parent: int, child: int) -> int` | Trace edge parent→child |
-| `gc_mark` | `gc_mark(handle: int) -> int` | Manual mark (cleared at collect start unless rooted) |
-| `gc_root_count` | `gc_root_count() -> int` | Number of registered roots |
+Mako has no tracing-GC builtins. Use `let`/`hold`/`share`/`arena` for
+deterministic ownership; calls to the removed `gc_*` names are compile errors.
 
 ### Map take (no string-key clone)
 
@@ -1500,7 +1500,6 @@ Tests: `examples/testing/proxy_pool_test.mko`, `examples/testing/proxy_edge_test
 | `tls_serve` | `tls_serve(port: int, cert: string, key: string, handler: string) -> int` | Start a TLS server |
 | `tls_serve_once` | `tls_serve_once(port: int, cert: string, key: string, response: string) -> int` | Serve one TLS request |
 | `tls_serve_n` | `tls_serve_n(port: int, cert: string, key: string, response: string, n: int) -> int` | Serve n TLS requests |
-| `tls_listen_stub` | `tls_listen_stub(port: int) -> int` | Stub TLS listener |
 | `tls_get_insecure` | `tls_get_insecure(host: string, port: int, path: string) -> string` | TLS GET without certificate verification |
 | `tls_get` | `tls_get(host: string, port: int, path: string, ca: string) -> string` | TLS GET with CA certificate |
 | `tls_post` | `tls_post(host: string, port: int, path: string, ca: string, body: string) -> string` | TLS POST with CA certificate |
@@ -1516,8 +1515,9 @@ Requires OpenSSL; `tls_server_available()` reports 1 when present.
 | Function | Signature | Description |
 |----------|-----------|-------------|
 | `tls_server_available` | `tls_server_available() -> int` | Whether the TLS server backend is available (1/0) |
-| `tls_server_new` | `tls_server_new(cert: string, key: string) -> TlsServer` | Create a TLS server context (min TLS 1.2) |
+| `tls_server_new` | `tls_server_new(cert: string, key: string) -> TlsServer` | Create a TLS server (min TLS 1.2) |
 | `tls_server_new_tls13` | `tls_server_new_tls13(cert: string, key: string) -> TlsServer` | Create a TLS server that requires TLS 1.3 (rejects older clients) |
+| `tls_server_sni_add` | `tls_server_sni_add(server: TlsServer, hostname: string, cert: string, key: string) -> int` | Add a certificate selected by SNI; exact names beat wildcards, then longest wildcard suffix |
 | `tls_accept` | `tls_accept(srv: TlsServer, fd: int) -> TlsConn` | Blocking TLS handshake on an accepted TCP fd |
 | `tls_accept_start` | `tls_accept_start(srv: TlsServer, fd: int) -> TlsConn` | Nonblocking TLS accept start (handshake may be incomplete) |
 | `tls_handshake_step` | `tls_handshake_step(conn: TlsConn) -> int` | Drive handshake: `1` done, `0` want-read, `2` want-write, `-1` error |
@@ -1804,7 +1804,6 @@ initial window, max frame, max header list) are parsed from the peer.
 | `hpack_encode_literal` | `hpack_encode_literal(name: string, value: string) -> string` | Encode a literal header |
 | `hpack_literal_name` | `hpack_literal_name(data: string) -> string` | Decode literal header name |
 | `hpack_literal_value` | `hpack_literal_value(data: string) -> string` | Decode literal header value |
-| `hpack_decode_stub` | `hpack_decode_stub(data: string) -> int` | Stub HPACK decoder |
 | `hpack_decode_block` | `hpack_decode_block(block: string) -> int` | Decode a complete header block |
 | `hpack_decoded_count` | `hpack_decoded_count() -> int` | Number of decoded headers |
 | `hpack_decoded_name` | `hpack_decoded_name(idx: int) -> string` | Get decoded header name |
@@ -1845,7 +1844,6 @@ initial window, max frame, max header list) are parsed from the peer.
 | `quic_vn_version_count` | `quic_vn_version_count(pkt: string) -> int` | Count offered versions |
 | `quic_vn_version_at` | `quic_vn_version_at(pkt: string, idx: int) -> int` | Get a specific offered version |
 | `quic_vn_select` | `quic_vn_select(pkt: string, preferred: int) -> int` | Select a preferred version |
-| `quic_stub` | `quic_stub(port: int) -> int` | Stub QUIC endpoint |
 
 ### QUIC Crypto Frames
 
@@ -1929,8 +1927,9 @@ initial window, max frame, max header list) are parsed from the peer.
 | `h3_response` | `h3_response(handle, stream, status, content_type, body) -> int` | Structured response with content-type |
 | `h3_server_close` | `h3_server_close(handle) -> int` | Close server and UDP fd |
 
-Production H3 server: up to **32** concurrent QUIC connections and **64** ready
-requests; **64 KiB** body buffer per request. Requires `MAKO_HAS_QUICHE`.
+The implemented H3 server surface supports up to **32** concurrent QUIC
+connections and **64** ready requests, with a **64 KiB** body buffer per
+request. Requires `MAKO_HAS_QUICHE`.
 Example: `examples/h3_server.mko` · smoke: `./scripts/h3-server-smoke.sh`.
 | `nghttp2_available` | `nghttp2_available() -> int` | Check if nghttp2 is available |
 | `nghttp2_get` | `nghttp2_get(host: string, port: int, ca: string, path: string) -> string` | HTTP/2 GET via nghttp2 |
@@ -1969,7 +1968,7 @@ Example: `examples/h3_server.mko` · smoke: `./scripts/h3-server-smoke.sh`.
 
 ## 42. WebSocket (RFC 6455)
 
-Production frame I/O: masking (client→server), 7/16/64-bit lengths (cap 16 MiB),
+Implemented frame I/O: masking (client→server), 7/16/64-bit lengths (cap 16 MiB),
 fragment reassembly, auto-pong on ping, close codes. Server APIs send **unmasked**;
 client APIs send **masked**. WSS = compose `tls_*` + these primitives.
 
@@ -1991,7 +1990,6 @@ client APIs send **masked**. WSS = compose `tls_*` + these primitives.
 | `ws_send_pong` | `ws_send_pong(conn: int, data: string) -> int` | Server: unmasked pong (payload ≤ 125) |
 | `ws_send_close` | `ws_send_close(conn: int, code: int, reason: string) -> int` | Server: unmasked close |
 | `ws_close` | `ws_close(conn: int) -> int` | Close underlying socket (1 ok) |
-| `ws_echo_stub` | `ws_echo_stub(port: int) -> int` | Alias of `ws_echo_once` |
 | `ws_echo_once` | `ws_echo_once(port: int) -> int` | Bind port, accept one, echo one message, close |
 | `ws_echo` | `ws_echo(port: int) -> int` | Bind port, forever echo loop (blocks) |
 | `ws_client_connect` | `ws_client_connect(host: string, port: int, path: string, key: string) -> int` | TCP + upgrade; Happy Eyeballs connect |
@@ -2030,7 +2028,6 @@ Tests: `examples/testing/ws_api_test.mko` (handshake + loopback e2e).
 | `grpc_http2_stream_two` | `grpc_http2_stream_two(stream: int, payload1: string, id1: int, payload2: string, id2: int) -> string` | Build two gRPC stream messages |
 | `grpc_http2_stream_data_count` | `grpc_http2_stream_data_count(frames: string, stream: int) -> int` | Count gRPC stream data frames |
 | `grpc_http2_client_stream_flow` | `grpc_http2_client_stream_flow(stream: int, p1: string, id1: int, p2: string, id2: int, p3: string, id3: int, window: int) -> string` | Build gRPC client stream with flow control |
-| `grpc_stub_ping` | `grpc_stub_ping() -> int` | gRPC stub ping |
 
 ### TLS + gRPC
 
@@ -2819,7 +2816,6 @@ Example: `examples/llm_chat.mko` · tests: `examples/testing/llm_test.mko` · pa
 | `clickhouse_select` | `clickhouse_select(db: string, table: string, where_clause: string) -> string` | Build a ClickHouse SELECT |
 | `elastic_connect_url` | `elastic_connect_url(url: string) -> string` | Parse an Elasticsearch connection URL |
 | `elastic_search_request` | `elastic_search_request(index: string, query: string) -> string` | Build an Elasticsearch search request |
-| `queue_stub_ping` | `queue_stub_ping() -> int` | Queue stub ping |
 
 ---
 
@@ -2930,7 +2926,7 @@ Test: `examples/testing/trace_log_test.mko`.
 | Flag / command | Meaning |
 |----------------|---------|
 | `--overflow trap\|wrap\|ignore` | Integer overflow codegen (build/run) |
-| `--bounds always` | Keep bounds checks in release |
+| `--bounds always` | Legacy-compatible spelling; safe bounds checks are always retained |
 | `mako test --race` | ThreadSanitizer (also `mako build --sanitize thread`) |
 | `mako dev [file]` | Watch mtime → rebuild + rerun (hot reload seed) |
 | `./scripts/bench-gate.sh [2.0\|1.5]` | Microbench vs Rust (CI job on ubuntu) |
@@ -3053,4 +3049,3 @@ Rules:
 |----------|-----------|-------------|
 | `crew_drain` | `crew_drain(timeout_ms: int) -> int` | Drain all crew tasks with timeout |
 | `evloop_shutdown` | `evloop_shutdown(el: EvLoop) -> int` | Close event-loop backend and free |
-

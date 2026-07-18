@@ -4,7 +4,10 @@ Assets for distributing **Mako** outside a source checkout.
 
 ## GitHub Releases
 
-**Product tip:** **v0.1.9** (tag + CI assets live). **v0.1.8** was the previous tip.  
+**Historical snapshot:** this directory contains the **v0.1.9** packaging
+metadata. It is not current v0.2.1 release metadata; regenerate manifests and
+checksums before publishing a new package.
+**Current product tip:** **v0.2.1** — see [the GitHub release](https://github.com/loreste/mako/releases/tag/v0.2.1).
 **Next planned product version (roadmap):** **0.2.0** — do not tag until the stdlib wave lands.
 
 Built by `.github/workflows/release.yml` on tag `v*`:

@@ -1,0 +1,3 @@
+fn main() {
+    let _ = cookie_make("sid\r\nX-Injected", "value", 60)
+}

@@ -1,7 +1,9 @@
 # 4. Ownership: hold, share, and arenas
 
-Mako has **no mandatory garbage collector**. Memory safety is achieved through
-three complementary mechanisms that work at compile time:
+Mako has **no garbage collector**. Active memory/resource safety mechanisms
+include compile-time ownership checks and runtime scope/region cleanup. They
+prevent important classes of bugs; generated C and FFI remain outside the Mako
+type system:
 
 1. **Scope-based cleanup** -- local values are freed when their scope exits
 2. **`hold` bindings** -- enforce move semantics with compile-time tracking
@@ -499,9 +501,9 @@ fn process_file(path: string) -> Result[int, string] {
 
 | Mechanism | When to use | Cost |
 |-----------|-------------|------|
-| Plain `let` | Default for all locals | Zero overhead |
+| Plain `let` | Default for all locals | No ownership bookkeeping |
 | `defer` | Cleanup on scope exit | Minimal (LIFO call) |
-| `hold` | Enforce single-owner / move | Zero runtime cost (compile-time only) |
+| `hold` | Enforce single-owner / move | No reference-counting traffic; move checks compile-time |
 | `share` | Multiple readers of same data | Reference count increment/decrement |
 | `arena` | Bulk temporary allocations | Bump allocator + single free |
 

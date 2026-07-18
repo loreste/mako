@@ -40,7 +40,7 @@ use crate::tooling::{find_nearest_manifest_dir, parse_manifest_deps, resolve_dep
 use crate::types::{TypeChecker, TypeError};
 
 /// Bump when fingerprint inputs or cache layout change (invalidates all caches).
-pub const COMPILER_CACHE_VERSION: &str = "mako-incr-5";
+pub const COMPILER_CACHE_VERSION: &str = "mako-incr-7";
 
 #[derive(Clone, Debug)]
 pub struct IncrOptions {
@@ -54,7 +54,7 @@ pub struct IncrOptions {
     pub cc: PathBuf,
     /// Integer overflow codegen mode.
     pub overflow: OverflowMode,
-    /// Keep bounds checks in release.
+    /// Legacy compatibility flag; safe bounds checks are always retained.
     pub bounds_always: bool,
 }
 
@@ -82,6 +82,29 @@ pub fn default_jobs() -> usize {
     std::thread::available_parallelism()
         .map(|n| n.get())
         .unwrap_or(4)
+}
+
+/// Release LTO is part of the object-cache identity.  The opt-out is explicit
+/// because reusing an LTO object for a non-LTO build (or the reverse) produces
+/// a binary with optimization inputs different from the requested build.
+pub fn release_lto_enabled() -> bool {
+    std::env::var_os("MAKO_NO_LTO").is_none()
+}
+
+/// Identify the C driver and its reported version for cache invalidation.
+/// A compiler path alone is insufficient: package upgrades can replace the
+/// executable in place while leaving every source byte unchanged.
+pub fn compiler_identity(cc: &Path) -> String {
+    let version = Command::new(cc)
+        .arg("--version")
+        .output()
+        .map(|out| {
+            let mut bytes = out.stdout;
+            bytes.extend_from_slice(&out.stderr);
+            String::from_utf8_lossy(&bytes).into_owned()
+        })
+        .unwrap_or_else(|e| format!("unavailable:{e}"));
+    fingerprint_str(&format!("path={}\nversion={version}", cc.display()))
 }
 
 fn fnv1a(bytes: &[u8]) -> u64 {
@@ -271,6 +294,25 @@ pub fn record_typecheck_ok(entry: &Path, opts: &IncrOptions) -> Result<(), Strin
     Ok(())
 }
 
+fn emit_type_error(path: &str, src_for_diag: &str, error: TypeError) {
+    let TypeError::At {
+        message,
+        hint,
+        line,
+        col,
+    } = error;
+    let span = if line > 0 {
+        Span::new(line, col)
+    } else {
+        Span::unknown()
+    };
+    let mut diagnostic = Diagnostic::error(path, src_for_diag, span, message);
+    if let Some(h) = hint {
+        diagnostic = diagnostic.with_hint(h);
+    }
+    diagnostic.emit();
+}
+
 /// Run typecheck unless full-program fingerprint cache hits.
 /// On hit, borrow/NLL was already proven for identical source bytes.
 /// On miss, append monomorphized generic specializations to `program`.
@@ -292,6 +334,16 @@ pub fn typecheck_incremental(
                 let manifest = dir.join("mako.toml");
                 if let Ok(text) = std::fs::read_to_string(&manifest) {
                     crate::tooling::apply_package_safety_flags(&mut tc, &text);
+                }
+            }
+            // A cache stamp proves the source bytes were checked, but it must
+            // never suppress a current hard policy rejection from the
+            // manifest. In particular, legacy `[package] gc = true` must fail
+            // even when the program's old typecheck stamp is still present.
+            if tc.gc_requested {
+                if let Err(e) = tc.check(program) {
+                    emit_type_error(&path, src_for_diag, e);
+                    return Err(());
                 }
             }
             // Fast path: if no generics in program, keep cache hit without work.
@@ -332,24 +384,8 @@ pub fn typecheck_incremental(
             crate::tooling::apply_package_safety_flags(&mut tc, &text);
         }
     }
-    tc.check(program).map_err(|e| {
-        let TypeError::At {
-            message,
-            hint,
-            line,
-            col,
-        } = e;
-        let span = if line > 0 {
-            Span::new(line, col)
-        } else {
-            Span::unknown()
-        };
-        let mut d = Diagnostic::error(&path, src_for_diag, span, message);
-        if let Some(h) = hint {
-            d = d.with_hint(h);
-        }
-        d.emit();
-    })?;
+    tc.check(program)
+        .map_err(|e| emit_type_error(&path, src_for_diag, e))?;
 
     for f in tc.mono_fns {
         if !program
@@ -434,8 +470,17 @@ pub fn plan_object_units(
     cg.overflow_mode = opts.overflow;
     cg.bounds_checks_always = opts.bounds_always;
     let c = cg.emit(program);
-    // Release: -O3 -flto (see docs/PERFORMANCE.md). Fingerprint must match clang flags.
-    let opt = if opts.release { "O3flto" } else { "O0g" };
+    // Release flags are part of the fingerprint; the explicit MAKO_NO_LTO
+    // opt-out must never reuse an LTO object (or vice versa).
+    let opt = if opts.release {
+        if release_lto_enabled() {
+            "O3flto"
+        } else {
+            "O3"
+        }
+    } else {
+        "O0g"
+    };
     let rt_fp = runtime_headers_fp(runtime_dir);
     let fp = fingerprint_bytes(&[
         COMPILER_CACHE_VERSION.as_bytes(),
@@ -528,10 +573,10 @@ fn compile_one_unit(job: CompileJob) -> JobResult {
         cmd.arg("cc");
     }
     if job.release {
-        if std::env::var_os("MAKO_NO_LTO").is_some() {
-            cmd.arg("-O3").arg("-DNDEBUG");
-        } else {
+        if release_lto_enabled() {
             cmd.arg("-O3").arg("-flto").arg("-DNDEBUG");
+        } else {
+            cmd.arg("-O3").arg("-DNDEBUG");
         }
     } else {
         cmd.arg("-O0").arg("-g");
@@ -726,10 +771,10 @@ pub fn link_objects(
         cmd.arg("cc");
     }
     if opts.release {
-        if std::env::var_os("MAKO_NO_LTO").is_some() {
-            cmd.arg("-O3").arg("-DNDEBUG");
-        } else {
+        if release_lto_enabled() {
             cmd.arg("-O3").arg("-flto").arg("-DNDEBUG");
+        } else {
+            cmd.arg("-O3").arg("-DNDEBUG");
         }
     } else {
         cmd.arg("-O0").arg("-g");

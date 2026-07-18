@@ -1725,7 +1725,7 @@ static inline int64_t mako_quiche_stop_server(int64_t pid) {
     return 0;
 }
 
-/* H3 server surface stubs when quiche is not linked. */
+/* H3 server surface reports unavailable when quiche is not linked. */
 static inline int64_t mako_h3_server_new(MakoString cert, MakoString key) {
     (void)cert; (void)key; return -1;
 }

@@ -116,7 +116,7 @@ Overall ≈ Σ (weight × track%).
 | [x] | Channels `chan` / `send` / `recv` | Done | `chan_new`, typed `chan_open[T]` |
 | [x] | `select` multi-wait | Done | Mako `select timeout` form |
 | [x] | Structured tasks (`crew`/`kick`/`join`) | Done | Safer than free goroutines |
-| [x] | `go f()` keyword | Done | Schedules onto the innermost `crew` (`crew.kick(f())`); errors outside a crew — no orphan tasks |
+| [x] | `go f()` keyword | Done | Schedules onto the innermost `crew` (`crew.kick(f())`); errors outside a crew — ordinary kicked work is joined |
 | [x] | Unbuffered channels default like Go | Done | `chan_new(0)` / `chan_open[T](0)` true rendezvous (`chan_rendezvous_test`) |
 | [x] | `close` / range over channel like Go | Done seed | `.close()` + `for v in range ch` until close (`chan_range.mko`) |
 
@@ -158,9 +158,9 @@ These are **not** checklist failures; they are product choices:
 
 | Topic | Mako choice | Why |
 |-------|-------------|-----|
-| GC | No mandatory GC | Predictable latency |
-| Free `go` | `crew` scopes | No orphan tasks |
-| Ownership | `hold` / `share` / `arena` | Memory safety without GC |
+| GC | No GC | Predictable latency |
+| Free `go` | `crew` scopes | Ordinary kicked work is joined |
+| Ownership | `hold` / `share` / `arena` | Active memory/resource safety mechanisms without GC |
 | Unused `Result` | Compile error | Catch ignored errors |
 | File extension | `.mko` | Distinct identity |
 
@@ -214,7 +214,7 @@ Remaining open dual item is intentional: `*T`/`&x` (ownership via `hold`/`share`
 
 | Doc | Role |
 |------|------|
-| [GUIDE.md](GUIDE.md) | Full syntax guide (Go-first) |
+| [GUIDE.md](GUIDE.md) | Current syntax guide (Go-first) |
 | [LANGUAGE.md](LANGUAGE.md) | Design identity |
 | [COMPAT.md](COMPAT.md) | Backward-compat + dual forms |
 | [KEYWORDS.md](KEYWORDS.md) | Reserved words |

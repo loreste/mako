@@ -1,0 +1,17 @@
+// EXPECT: mutable capture
+// The anonymous lambda path must enforce the same rule as a named function value.
+
+fn apply(f: fn(int) -> int, n: int) -> int {
+    return f(n)
+}
+
+fn main() {
+    let mut total = 0
+    crew c {
+        let j = c.kick(apply(|n| {
+            total = total + n
+            return total
+        }, 1))
+        let _ = j.join()
+    }
+}

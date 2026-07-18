@@ -1,0 +1,4 @@
+// Must fail: Mako intentionally has no garbage collector API.
+fn main() {
+    let _ = gc_alloc(16)
+}

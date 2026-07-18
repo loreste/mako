@@ -1,8 +1,9 @@
 # Concurrency
 
-Mako uses structured concurrency: all parallel work lives inside `crew` blocks,
-and every job is guaranteed to complete before the block exits. No leaked
-threads, no forgotten futures.
+Mako uses structured concurrency: ordinary kicked work lives inside `crew`
+blocks and is joined before the block exits. Cancellation is cooperative, so a
+blocked C/FFI call can delay the join; explicit `detach` is a separate,
+process-scoped escape.
 
 ## Crew blocks
 
@@ -20,7 +21,7 @@ fn main() {
         print_int(a.join())   // 49
         print_int(b.join())   // 81
     }
-    // All jobs finished here -- guaranteed
+    // Ordinary kicked jobs have been joined here.
 }
 ```
 

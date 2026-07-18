@@ -20,7 +20,7 @@ fn with3(
 fn with_int(level: string, msg: string, key: string, val: int) {
     slog_with_int(level, msg, key, val)
 }
-fn set_json(on: int) { slog_set_json(on) }
+fn set_json(enabled: int) { slog_set_json(enabled) }
 fn is_json() -> int { return slog_is_json() }
 fn set_service(name: string) { slog_set_service(name) }
 fn set_output(path: string) -> int { return slog_set_output(path) }

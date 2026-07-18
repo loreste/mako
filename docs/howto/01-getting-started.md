@@ -17,7 +17,7 @@ curl -fsSL https://github.com/loreste/mako/releases/latest/download/install-linu
 source "$HOME/.local/share/mako/env.sh"
 ```
 
-Pin a version: `--version v0.1.9`. Needs **clang** so `.mko` files can compile.
+Pin a version: `--version v0.2.1`. Needs **clang** so `.mko` files can compile.
 
 ### From source
 
@@ -32,7 +32,7 @@ Verify the installation:
 
 ```bash
 mako version
-# mako version mako0.1.9 darwin/arm64
+# mako version mako0.2.1 darwin/arm64
 
 mako version -v
 # includes the git commit hash
@@ -126,7 +126,7 @@ Inside the program, use `argc()`, `arg_get(i)`, or `args()` to read them.
 | `mako check file.mko` | Typecheck (incremental, fast) |
 | `mako run file.mko` | Compile and execute |
 | `mako build file.mko` | Produce a binary |
-| `mako build --release file.mko` | Optimized production binary |
+| `mako build --release file.mko` | Optimized release binary |
 | `mako build -j 8 file.mko` | Parallel compilation |
 | `mako test path/` | Run tests |
 | `mako fmt file.mko` | Format source code |

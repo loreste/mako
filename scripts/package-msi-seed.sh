@@ -14,7 +14,7 @@ fi
 grep -q 'Product' "$WXS"
 grep -q 'INSTALLFOLDER' "$WXS"
 grep -q 'mako.exe' "$WXS" || grep -q 'MakoBin' "$WXS"
-echo "  wxs: ok (schema skeleton present)"
+echo "  wxs: ok (schema present)"
 if command -v candle >/dev/null 2>&1 && command -v light >/dev/null 2>&1; then
   echo "  wix: candle/light on PATH (real MSI build possible)"
 else

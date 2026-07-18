@@ -37,7 +37,7 @@ Version: $VERSION
 Section: devel
 Priority: optional
 Architecture: $ARCH
-Maintainer: Mako contributors <noreply@example.com>
+Maintainer: Mako contributors <maintainers@mako-lang.com>
 Description: Mako language compiler (.mko → native via C)
  Homepage: https://github.com/loreste/mako
 EOF

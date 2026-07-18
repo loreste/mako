@@ -11,6 +11,10 @@ fn server_new(cert: string, key: string) -> TlsServer {
 fn server_new_mtls(cert: string, key: string, client_ca: string) -> TlsServer {
     return tls_server_new_mtls(cert, key, client_ca)
 }
+// Add an exact or left-most wildcard SNI certificate to a live server.
+fn server_sni_add(server: TlsServer, hostname: string, cert: string, key: string) -> int {
+    return tls_server_sni_add(server, hostname, cert, key)
+}
 fn client_new_mtls(ca: string, cert: string, key: string) -> TlsClient {
     return tls_client_new_mtls(ca, cert, key)
 }

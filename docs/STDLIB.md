@@ -38,6 +38,10 @@ Runtime: `runtime/mako_rt.h`, `runtime/mako_stdlib.h`, `runtime/mako_std.h`,
 
 Tests: `examples/testing/stdlib_*`, plus area tests (`base64_test`, `regex_*`,
 `errors_test`, `path_join_test`, …). Demo: `examples/stdlib/demo.mko`.
+The claims gate also runs `scripts/stdlib-gate.sh`, which type-checks every
+checked-in `std/**/*.mko` package file so a stale wrapper cannot remain hidden
+because no application imports it. This proves package-surface validity, not
+symbol-for-symbol parity with Go or any optional platform integration.
 
 ---
 
@@ -556,11 +560,12 @@ Tests: `examples/testing/proxy_pool_test.mko`, `proxy_edge_test.mko`.
 | `http_get_timeout` / `http_post_timeout` | timeouts |
 | `http_last_status` / `http_last_header` | last response |
 
-HTTPS/H2/H3/gRPC/WS: `tls_*`, `http2_*` (64-stream mux, dual FC, HPACK, auto WU),
+HTTPS/H2/H3/gRPC/WS: `tls_*` (including multi-certificate SNI), `http2_*` (64-stream mux, dual FC, HPACK, auto WU),
 `h3_server_*` / `quiche_h3_*` (HTTP/3 when quiche linked; 64 KiB body cap),
 `nghttp2_*`, **`ws_*` (RFC 6455)** — client/server frames, mask, fragmentation,
 auto-pong, close codes; loopback tests in `ws_api_test.mko`. WSS = `tls_*` +
-`ws_*` (compose in Mako). Production H2 servers: `tls_server_new` + `http2_conn_*`
+`ws_*` (compose in Mako). The supported H2 server path is
+`tls_server_new` + `http2_conn_*`
 (not the `tls_serve_h2_routes` demo helper).
 
 GPU AI seed: `gpu_*` device/buffer + f32 **AI kernels** (`matmul`, `relu`,
@@ -986,7 +991,7 @@ import "sync"
 | `mutex_new` / `mutex_lock` / `mutex_unlock` | mutex |
 | `rwmutex_new` / `rwmutex_rlock` / `runlock` / `lock` / `unlock` | RWMutex |
 | `wait_group_new` / `wait_group_add` / `done` / `wait` | WaitGroup |
-| `cmap_new` / `cmap_set` / `cmap_get` / `cmap_has` / `cmap_del` / `cmap_len` / `cmap_incr` | CMap (concurrent hashmap with lock-free reads) |
+| `cmap_new` / `cmap_set` / `cmap_get` / `cmap_has` / `cmap_del` / `cmap_len` / `cmap_incr` | CMap (concurrent hashmap with linearizable operations) |
 | `chan_new` / `chan_open[T]` / `send` / `recv` / `chan_select*` | channels: int/bool/float/string/struct; select is int-ring |
 | `runtime_stats_json` / `runtime_stats_reset` | runtime scheduler/channel introspection |
 | `crew` / `kick` / `join` / `drain` / cancel | structured concurrency; join returns job type |
@@ -994,7 +999,10 @@ import "sync"
 | `actor_spawn` / `actor_send` / `actor_recv` / `actor_stop` | actors |
 | `actor` / `receive` syntax | desugar (see GUIDE) |
 
-Race smoke: `mako test --race` (CI TSan job).
+The compiler rejects unsynchronized mutable closure captures and unknown
+function environments across `kick`; `fan` mappers cannot capture locals.
+Race smoke: `mako test --race` (CI TSan job), which covers runtime and FFI
+edges that are outside the safe-language boundary.
 
 ### Mutex usage example
 
@@ -1057,8 +1065,8 @@ fn main() {
 fn main() {
     let m = cmap_new()
     cmap_set(m, "hits", "0")
-    cmap_incr(m, "hits")
-    cmap_incr(m, "hits")
+    cmap_incr(m, "hits", 1)
+    cmap_incr(m, "hits", 1)
     print(cmap_get(m, "hits"))          // 2
     print_int(cmap_len(m))              // 1
     print_int(cmap_has(m, "hits"))      // 1
@@ -1527,7 +1535,7 @@ when you intentionally want the platform names.
 | SRTP building blocks | `aes_ctr`, `hmac_sha1` / `hmac_sha1_raw`, `aes_gcm_*`, `random_bytes` |
 
 ```mko
-// Skeleton: you own the transaction map + timers.
+// Integration boundary: you own the transaction map + timers.
 fn on_datagram(raw: string, peer_host: string, peer_port: int) {
     if sip_ok(raw) == 0 { return }
     if sip_is_request(raw) == 1 {
@@ -1564,11 +1572,11 @@ See [howto/04-packages.md](howto/04-packages.md).
 
 ## Performance principles
 
-1. **No mandatory GC** — backends stay predictable; optional GC is app opt-in only.
+1. **No GC** — backends stay predictable; ownership, shares, and arenas are explicit.
 2. **Arena per request** — allocate freely; free the region once.
 3. **Dense values** — less pointer chasing.
 4. **Explicit buffers** — fewer hidden copies (`bytes_view`, pools).
-5. **Crew concurrency** — no orphan tasks; cancel/timeouts.
+5. **Crew concurrency** — ordinary kicked tasks are joined; cancellation and timeouts are explicit.
 6. **Future I/O** — io_uring / kqueue, pooling, HTTP/2–3 depth.
 
 ---

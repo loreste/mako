@@ -11,8 +11,8 @@ making the default hot path slower than Rust.
 
 | Pillar | How it shows up |
 |--------|-----------------|
-| **Speed** | Secure-by-construction (NLL, crews, params) stays zero-cost at steady state; trap/bounds-always/sanitizers are **opt-in** |
-| **Concurrency** | Structured `crew` cancel-joins — no orphan tasks that outlive security boundaries |
+| **Speed** | Secure-by-construction (NLL, crews, params) stays low-overhead at steady state; sanitizers are **opt-in** |
+| **Concurrency** | Structured `crew` cancel-joins ordinary kicked tasks; blocked C/FFI calls can delay the join and `detach` is explicit |
 | **Security** | Memory, secrets, injection, bounds — hard errors preferred over soft advice |
 
 Guided tour: [The Mako Book §11](book/src/ch11-speed-safety.md) · Speed bar: [SPEED.md](SPEED.md).
@@ -21,12 +21,11 @@ Guided tour: [The Mako Book §11](book/src/ch11-speed-safety.md) · Speed bar: [
 
 1. **Prevent, don't advise** — illegal states should not compile or should abort
    with a clear diagnostic.
-2. **No mandatory GC** — backends and systems code stay on ownership + arenas
-   for predictable latency. An **optional** GC mode may exist for application
-   crates only; **`[package] systems = true` forbids GC weakening** of
+2. **No GC** — all packages stay on ownership, shares, and arenas for
+   predictable latency. There is no collector mode that can weaken
    hold/share/move rules.
 3. **Secure defaults in the stdlib** — parameterized DB APIs, header validation,
-   constant-time token compare, zero-on-drop secrets.
+   constant-time token compare, and explicit secret wiping.
 4. **Speed is the name of the game** — security features that cost cycles stay
    opt-in or debug-only; do not silently tax every release binary.
 
@@ -38,9 +37,18 @@ channels, `ShareInt` / `AtomicInt` (RC clone), locked handles (`CMap` / `Mutex` 
 `RWMutex`), and **Option/Result/tuple of Send** payloads (heap-boxed across spawn).  
 Rejected: arrays, maps, non-POD structs, `Arena`, nested `Crew`
 (`examples/bad/kick_non_pod.mko`, `kick_array_arg.mko`).  
-Static race seed: mut Option/Result/tuple captures must not be written before `join`.  
-Runtime race smoke: `mako test --race` (TSan). Prefer channels over shared mutable
-state. **Uuid is Copy** — free re-read under `hold`, kick without move.
+
+The compiler also analyzes every function value and lambda that crosses a
+`kick` boundary. Unsynchronized mutable captures are rejected, including
+captures hidden behind a function alias; unknown closure environments are
+rejected rather than guessed safe. `fan` mappers are required to be
+capture-free because their workers have no checked environment. Use
+`Mutex`/`RWMutex`/`CMap`/`AtomicInt`/`ShareInt`/channels for intentional shared
+state. The adversarial fixtures are
+`examples/bad/kick_mutable_closure_capture.mko`,
+`kick_mutable_lambda_capture.mko`, and `fan_capture.mko`. TSan remains a
+runtime smoke check (`mako test --race`) for the runtime and FFI boundary.
+**Uuid is Copy** — free re-read under `hold`, kick without move.
 
 SMTP TLS: `smtp_send_starttls` uses `SSL_connect`. Set **`MAKO_SMTP_TLS_VERIFY=1`**
 to enable peer certificate verification (`SSL_VERIFY_PEER`); default is off for
@@ -53,8 +61,8 @@ dev soft paths.
 | Integer overflow | `checked_add/sub/mul` + `--overflow trap` mode |
 | Leaks (testing) | `leak_mark/check/scope_enter/exit` + `leak_report_json` |
 | Leaks (scoped work) | Values and `arena` regions are released at scope end |
-| Orphan threads | `crew` **cancel_joins** all kicked jobs on exit |
-| Buffer overflow | Array/string index bounds-checked in debug; `unsafe` / `unsafe_index` opt-out |
+| Orphan threads | `crew` **cancel_joins** ordinary kicked jobs on exit; cancellation is cooperative and blocked C/FFI may delay the join |
+| Buffer overflow | Array/string index bounds-checked in debug and release; explicit `unsafe` / `unsafe_index` opt-out |
 | Use-after-move | CFG NLL + `hold` move checker (`use of moved value`) |
 | Secrets in memory | `secret_from_str` / `secret_drop` — wipe via `mako_secure_zero` |
 | Raw pointer games | Not available in safe Mako |
@@ -117,7 +125,7 @@ Runtime: `runtime/mako_leak.h`.
 Use-after-move is a hard type error with a clear hint. See
 `examples/bad/hold_use_after_move.mko` and GUIDE § ownership.
 
-### Zero-on-drop secrets (Done)
+### Explicit secret wiping (Done)
 
 ```mko
 let tok = secret_from_str(api_key)
@@ -135,9 +143,9 @@ unsafe {
 }
 ```
 
-Default indexing stays checked in debug (`-O0 -g`). Release may elide checks
-under `NDEBUG`. Prefer `unsafe { }` only when you have proven the index is in
-range.
+Default indexing stays checked in both debug and release builds. `unsafe_index`
+is rejected unless it appears inside an explicit `unsafe { }` block. Use that
+escape only when you have proven the index is in range.
 
 ### HTTP header validation (Done)
 
@@ -256,6 +264,7 @@ Process-local registry; pass the token over the wire for multi-node cancel:
 | API | Role |
 |-----|------|
 | `tls_server_new_mtls(cert, key, client_ca)` | Require + verify client certs |
+| `tls_server_sni_add(server, hostname, cert, key)` | Select a preloaded certificate by exact or left-most wildcard SNI |
 | `tls_client_new_mtls(ca, client_cert, client_key)` | Present client cert |
 | `tls_unique(conn)` | Finished bytes for SCRAM tls-unique binding |
 | `scram_tls_unique_cbind(conn)` | SCRAM-PLUS `c=` from `tls_unique` (apps still own the dialogue) |
@@ -287,8 +296,9 @@ Tests: `security_test.mko`, `security_crypto_test.mko`, `password_hash_test.mko`
 Mako's session management, authentication, and authorization toolkit uses
 defense-in-depth to prevent common web security vulnerabilities.
 
-**Constant-time cookie and token checks.** All session and auth comparisons use
-`const_eq` internally, preventing timing side-channel attacks:
+**Constant-time token-bearing checks.** Cookie, CSRF, bearer, basic-header, and
+signed-token verification use `const_eq` internally, preventing timing
+side-channel attacks for those secret comparisons:
 
 ```mko
 // All of these are constant-time by construction:
@@ -299,10 +309,10 @@ auth_token_check(token, secret)                   // HMAC-SHA256 token verify
 csrf_check(expected, submitted)                   // CSRF token verify
 ```
 
-**HttpOnly cookie defaults.** `cookie_make` always sets `HttpOnly` (prevents
-JavaScript access via `document.cookie`), `SameSite=Lax` (blocks cross-site
-POST requests from carrying the cookie), and `Path=/`. There is no API to
-create insecure cookies -- safe defaults are the only option.
+**HttpOnly cookie defaults.** `cookie_make` validates the name/value and always
+sets `HttpOnly` (prevents JavaScript access via `document.cookie`),
+`SameSite=Lax` (blocks cross-site POST requests from carrying the cookie), and
+`Path=/`. Invalid delimiter/control input fails closed.
 
 **Cryptographic session IDs.** `session_id_new` uses `mako_random_bytes` (backed
 by the OS CSPRNG) to generate 16 random bytes, formatted as 32 hex characters.
@@ -335,19 +345,16 @@ Runtime: `runtime/mako_security.h` (`MakoSession`, `MakoCSRF`, `MakoAuth`).
 ### Channels + cancel policy (Done)
 
 `crew` exit calls `mako_nursery_cancel_join` — cancel flag set, then all tasks
-joined. New kicks after `cancel()` do not start threads. Tests:
+joined. Cancellation is cooperative for already-running work; a blocked C/FFI
+call can delay the join. New kicks after `cancel()` do not start threads. Tests:
 `examples/testing/cancel_policy_test.mko`.
 
-### Optional GC vs systems crates (Done)
+### GC-free runtime (Done)
 
-In `mako.toml`:
-
-```toml
-[package]
-name = "my-svc"
-systems = true    # ownership rules never weakened; gc ignored/forced off
-# gc = true       # app crates only — ignored when systems = true
-```
+Mako has no tracing garbage collector in the compiler, generated C, runtime, or
+standard-library API. The ownership rules are therefore not a mode that can be
+weakened by package configuration. A legacy `[package] gc = true` setting is
+rejected, and removed `gc_*` calls are compile errors.
 
 ## Incremental build cache
 
@@ -362,7 +369,7 @@ A `Result` used as a bare statement is an **error**.
 
 ### Bounds checks
 
-Debug: abort on OOB. Release: may elide (`NDEBUG`). Explicit opt-out: `unsafe`.
+Debug and release: abort on OOB. Explicit opt-out: `unsafe`.
 
 ### Diagnostics
 
@@ -373,4 +380,4 @@ Lexer/parser/type errors print `file:line:col`, caret, and `help:` hints.
 Mako does not claim "memory safe like a proof assistant." It claims **active
 prevention** of the failures that hurt backends most: ignored errors, overruns,
 leaked tasks, use-after-move, header/SQL injection footguns — with ownership
-rules that systems crates keep even if GC is enabled elsewhere.
+rules that every Mako package keeps.

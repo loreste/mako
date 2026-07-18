@@ -1,4 +1,4 @@
-// Production filesystem / storage: atomic write, mkdir_all, rename, dio, mmap.
+// Filesystem/storage regression surface: atomic write, mkdir_all, rename, dio, mmap.
 
 fn TestMkdirAllAndRemoveAll() {
     let root = "/tmp/mako_fs_storage_test"

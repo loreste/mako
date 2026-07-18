@@ -69,9 +69,9 @@ message indicating the file, line, index, and length:
 abort: index 5 out of bounds (len 3) at main.mko:12
 ```
 
-This prevents buffer overflows from ever becoming exploitable. The cost of a
-bounds check is typically a single comparison and branch -- modern CPUs predict
-the taken (in-bounds) path with near-zero overhead.
+For safe Mako indexing, this prevents an out-of-bounds access from becoming a
+buffer overflow. The check is typically a comparison and branch; measure the
+cost on the workload that matters before opting into `unsafe_index`.
 
 ### When You Need to Opt Out
 
@@ -419,7 +419,7 @@ This prevents HTTP response splitting attacks at the API level.
 ## Thread-Safe Data Structures
 
 For concurrent workloads that need shared mutable state, Mako provides `CMap` --
-a concurrent hashmap with lock-free reads and per-stripe spinlock writes. It can
+a concurrent hashmap with shared-reader and exclusive-writer synchronization. It can
 be shared across crew tasks without channels, mutexes, or ownership annotations:
 
 ```mko
@@ -440,9 +440,10 @@ fn increment(m: CMap, key: string) -> int {
 }
 ```
 
-CMap is safe by construction: the runtime uses 512 stripes with FNV-1a hashing
-to minimize contention, and reads are lock-free. For most concurrent key-value
-patterns, prefer CMap over channel-based coordination.
+CMap provides internally synchronized concurrent key-value operations: each
+operation is linearizable, reads share a readers/writer gate, and writes take
+its exclusive side. For direct shared key-value state, this can avoid
+application-managed channel coordination.
 
 ---
 
@@ -635,7 +636,7 @@ diagnostics on violation. Use them in CI test runs.
 
 ---
 
-## The `[package] systems = true` Marker
+## The legacy `[package] systems = true` Marker
 
 In `mako.toml`, a package can declare:
 
@@ -645,9 +646,8 @@ name = "mykernel"
 systems = true
 ```
 
-This opts into stricter rules: if a future optional GC mode is added, this
-package will never use it. The `hold`/`share` ownership rules remain fully
-enforced with no runtime weakening.
+The marker is retained for manifest compatibility only. Mako has no tracing GC
+mode, and the `hold`/`share` ownership rules are enforced for every package.
 
 ---
 
@@ -767,11 +767,11 @@ control over per-connection drain when needed.
 ## Summary
 
 Mako achieves speed through direct compilation to C with `-O3 -flto`, arena
-allocation, zero-cost ownership, and no garbage collector. It achieves safety
+allocation, low-overhead ownership, and no garbage collector. It achieves safety
 through compile-time move analysis, runtime bounds checks, structured
 concurrency, and explicit `unsafe` opt-out. The two goals reinforce each other:
 the ownership system eliminates the need for a GC (speed) while preventing
-use-after-free (safety). Bounds checks prevent overflows (safety) with negligible
-performance cost on modern hardware (speed).
+use-after-free (safety). Bounds checks prevent overflows (safety); measure their
+cost on the workload that matters (speed).
 
 Next: [Cross-platform and WASI](ch12-cross-platform.md).

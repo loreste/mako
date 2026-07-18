@@ -4,6 +4,8 @@ import (
     "fmt"
     "net/http"
     "path/filepath"
+    "print"
+    "log/slog"
     "strings"
     "sync"
     "time"
@@ -27,6 +29,12 @@ fn TestHttpPackResolves() {
 
 fn TestTimePackResolves() {
     assert(true)
+}
+
+fn TestStdlibWrapperPackages() {
+    print.bool(true)
+    slog.set_json(0)
+    assert_eq(slog.is_json(), 0)
 }
 
 fn TestBlankLineGroupParses() {

@@ -179,8 +179,8 @@ the result is already determined by the left.
 | `chan[T]`          | Typed channel — int/bool/float/string/struct/enum/tuple |
 | `Option[T]`       | Some(T) or None                          |
 | `Result[T, E]`    | Ok(T) or Err(E)                          |
-| `struct Name { }` / `struct Name[T] { }` | Named product (generic monomorphs in 0.1.9) |
-| `enum Name { }` / `enum Name[T] { }` | Named sum (generic monomorphs in 0.1.9) |
+| `struct Name { }` / `struct Name[T] { }` | Named product (generic monomorphs in 0.2.0) |
+| `enum Name { }` / `enum Name[T] { }` | Named sum (generic monomorphs in 0.2.0) |
 
 ### Type Conversions
 
@@ -795,11 +795,11 @@ Supported patterns: literals, `.`, `*`, `+`, `?`, `|`, `[abc]`, `[a-z]`,
 [package]
 name = "myapp"
 version = "0.1.0"
-systems = false          # true = strict ownership, no future GC weakening
+systems = false          # legacy marker; ownership is always enforced; no GC
 
 [dependencies]
 "helper" = { path = "../helper", version = "0.1.0" }
-"crypto" = { git = "https://example.com/crypto.git", tag = "v1.0.0", version = "1.0.0" }
+"crypto" = { path = "../crypto", version = "1.0.0" }
 "util"   = { version = "^1.0.0" }   # registry-only (from .mako/registry/)
 
 [workspace]

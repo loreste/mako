@@ -3060,7 +3060,8 @@ static inline int64_t mako_argon2id_verify(MakoString phc, MakoString password) 
 
 /* ---- bcrypt (libxcrypt `$2b$`) ---- */
 /* Available where <crypt.h> ships crypt_gensalt_rn + crypt_r (Linux/libxcrypt).
- * Elsewhere (e.g. macOS system crypt lacks $2b$) these are safe stubs; prefer
+ * Elsewhere (e.g. macOS system crypt lacks $2b$) these are safe unavailable
+ * fallbacks; prefer
  * Argon2id when bcrypt is unavailable. */
 #if defined(MAKO_HAS_CRYPT)
 #include <crypt.h>

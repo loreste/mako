@@ -41,14 +41,14 @@ Verify the installation:
 
 ```bash
 mako version
-# mako version mako0.1.9 darwin/arm64
+# mako version mako0.2.1 darwin/arm64
 ```
 
 The `--version` flag produces the same output:
 
 ```bash
 mako --version
-# mako version mako0.1.9 darwin/arm64
+# mako version mako0.2.1 darwin/arm64
 ```
 
 For verbose output including the git commit (when available):
@@ -239,8 +239,9 @@ mako build --release main.mko
 ```
 
 This enables `-O3` optimization and link-time optimization (`-flto`), producing
-a smaller, faster binary. The resulting binary is a single statically-linked
-executable suitable for deployment anywhere.
+a smaller, faster binary. Static linking depends on the target and toolchain;
+Linux musl is the documented static path, while glibc and platform libraries
+may remain dynamic. See [Cross-platform builds](ch12-cross-platform.md).
 
 ## A more complete first program
 
@@ -449,7 +450,7 @@ settings.
   style and avoids formatting debates.
 - Map a keybinding to `mako check` for rapid feedback without a full build.
 - The compiler emits standard error diagnostics with file, line, and column,
-  so any editor that can parse `file:line:col: message` format will show
+  so editors that can parse the `file:line:col: message` format will show
   inline errors.
 
 ## Common first-day commands

@@ -1569,11 +1569,11 @@ The ownership checker uses a **Control Flow Graph (CFG)** with NLL analysis:
 - **Break/continue**: dead code after a diverging statement (`break`,
   `continue`, `return`) does not contribute to move analysis.
 
-### 6.7 Systems Crate Mode
+### 6.7 Legacy Systems Marker
 
-When `[package] systems = true` is set in `mako.toml`, the package is a
-systems crate. In this mode, the optional GC (if enabled) never weakens
-ownership semantics.
+`[package] systems = true` is accepted as a legacy manifest marker. It does not
+change the safety model: all Mako packages use the same ownership rules, and
+Mako has no garbage collector to enable or disable.
 
 ---
 
@@ -1932,7 +1932,7 @@ version = "0.1.0"
 
 [dependencies]
 "helper" = { path = "../helper", version = "0.1.0" }
-"tool" = { git = "https://example.com/tool.git", tag = "v0.1.0", version = "0.1.0" }
+"tool" = { path = "../tool", version = "0.1.0" }
 ```
 
 #### Dependency Resolution
@@ -2691,7 +2691,7 @@ The following features are planned but not yet part of the specification:
 - GPU backends beyond OpenCL seed (`gpu_*` + OpenCL multi-vendor + host; Metal-native/CUDA/Vulkan later)
 - Full PCRE-compatible regular expressions
 - WASI preview 2 / component model
-- Optional garbage collector (never weakens ownership in systems crates)
+- Tracing garbage collector (Mako intentionally does not provide one)
 - Deeper nesting beyond `[][]T` / `map[K]map[K2]V` (depth 3+ maps, `map` of
   slice-maps, deeper composite monomorphization) as needed
 

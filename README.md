@@ -1,19 +1,21 @@
 # Mako
 
 Mako is a compiled language. You write `.mko` files; the compiler turns them into
-native binaries. No garbage collector, no VM sitting under your process.
+native binaries. There is no garbage collector or VM in the Mako runtime.
 
 Speed matters here: release builds use `-O3 -flto`, and concurrency is built in
 (`crew` / `kick` / `join` / `fan`, channels, actors). Memory is handled with
-ownership and arenas, not a collector. The standard library is large enough for
-real services without pulling half the internet.
+ownership, shares, arenas, and explicit resource APIs. The standard library
+covers backend areas without requiring a framework for every service.
 
 This is version **0.2.1**. It runs. The surface is still early — expect change,
 rough edges, and missing pieces.
 
 **0.2.1 highlights:** match exhaustiveness checking, match guards
-(`pattern if cond =>`), use-after-move detection for `hold` values,
-compile-time race detection for `kick` captures. Plus everything from 0.2.0:
+(`pattern if cond =>`), use-after-move detection for `hold` values, and
+compile-time rejection of unsynchronized mutable closure captures at every
+`kick` boundary. `fan` mappers must be capture-free; explicit Sync handles are
+the safe shared-state escape hatch. Plus everything from 0.2.0:
 generics, `mut self`, stdlib in Mako, speed optimizations.  
 **Next (roadmap):** **0.2.2** — tooling (LSP, debugger, package registry).
 
@@ -65,7 +67,7 @@ Options:
 ```bash
 curl -fsSL …/install-linux.sh | bash -s -- --prefix /opt/mako --yes
 curl -fsSL …/install-linux.sh | bash -s -- --no-deps    # skip clang install
-curl -fsSL …/install-linux.sh | bash -s -- --version v0.1.9
+curl -fsSL …/install-linux.sh | bash -s -- --version v0.2.1
 ```
 
 **You do not need Rust or cargo on the machine that runs Mako.**
@@ -112,9 +114,15 @@ routes, power (`hold` / `crew` / `arena`) only when you need it.
 
 ### Speed first
 
-Native binaries, no mandatory GC, release `-O3 -flto`. Concurrent and parallel
+Native binaries, no GC, release `-O3 -flto`. Concurrent and parallel
 work is **first-class** (`crew`, `fan`) — not a slow afterthought.
 [Speed](docs/SPEED.md) · [Performance](docs/PERFORMANCE.md).
+
+The repository’s claim boundaries and current evidence are tracked in
+[STATUS.md](docs/STATUS.md), [SECURITY.md](docs/SECURITY.md), and the
+[release/cross-target guide](docs/RELEASE.md). “No GC” means there is no
+tracing collector or mandatory collector mode; explicit MVCC version
+reclamation is a storage operation, not runtime garbage collection.
 
 ### Ownership instead of garbage collection
 
@@ -133,8 +141,9 @@ arena a {
 
 ### Concurrency that cleans up
 
-`crew` blocks own their tasks. When the block ends, every task gets joined.
-You can't leak a thread:
+`crew` blocks own jobs started with `kick`. When the block ends, those jobs are
+cancelled and joined. Explicit `detach` is a process-scoped escape and must be
+followed by `detached_join_all()`:
 
 ```mko
 fn main() {
@@ -165,7 +174,9 @@ fn load() -> Result[int, string] {
 
 HTTP, TLS, WebSocket, JSON, SQLite, Postgres, crypto, compression, regex,
 file I/O, event loops, binary buffers, rate limiters, circuit breakers,
-consistent hashing, game networking, session management — it's all built in.
+consistent hashing, game networking, and session management are covered by the
+stdlib/runtime surface. Optional integrations still depend on their platform
+libraries; see [STDLIB](docs/STDLIB.md) and [Release](docs/RELEASE.md).
 
 ```mko
 fn main() {
@@ -358,17 +369,17 @@ helper = { path = "../helper" }
 | | |
 |---|---|
 | **[The Mako Book](docs/book/)** | Start here |
-| **[Identity](docs/IDENTITY.md)** | Our syntax + **~86%** identity checklist |
+| **[Identity](docs/IDENTITY.md)** | Our syntax + identity checklist |
 | [Dual-form inventory](docs/GO_SYNTAX_CHECKLIST.md) | Optional sugar (not preferred) |
 | [How-to Guides](docs/howto/README.md) | Practical walkthroughs |
-| [Language Guide](docs/GUIDE.md) | Full syntax reference (Mako-native) |
+| [Language Guide](docs/GUIDE.md) | Current syntax reference (Mako-native) |
 | [Compat](docs/COMPAT.md) | Dual forms / what won't break |
 | [Standard Library](docs/STDLIB.md) | What's included |
-| [Built-in Functions](docs/BUILTINS.md) | Every function, every signature |
+| [Built-in Functions](docs/BUILTINS.md) | Documented built-ins and signatures |
 | [Language Spec](LANGUAGE_SPEC.md) | Formal specification |
-| [CLI Reference](docs/CLI.md) | Every command, flag, and workflow |
+| [CLI Reference](docs/CLI.md) | Current commands, flags, and workflows |
 | [Tutorials](website/tutorials/) | Backend, game networking, databases, FFI, concurrency, cloud |
-| [Examples](docs/EXAMPLES.md) | Complete runnable programs |
+| [Examples](docs/EXAMPLES.md) | Runnable programs |
 | [Debugging](docs/DEBUG.md) | dbg(), lldb, sanitizers, error messages |
 | [Security](docs/SECURITY.md) | Safety model |
 | [Performance](docs/PERFORMANCE.md) | Benchmarks |
@@ -378,10 +389,12 @@ helper = { path = "../helper" }
 
 ## Editor support
 
-VS Code extension with syntax highlighting, LSP, debugging, format-on-save,
-and a custom dark theme. See [editors/vscode/](editors/vscode/).
+VS Code extension with syntax highlighting, LSP, format-on-save, launch
+configurations, and a custom dark theme. Debugging uses host adapters where
+available. See [editors/vscode/](editors/vscode/).
 
-The language server (`mako lsp`) works with any LSP-compatible editor.
+The language server (`mako lsp`) speaks stdio JSON-RPC and supports the
+implemented features in LSP-compatible editors.
 
 ## Testing
 
@@ -391,8 +404,10 @@ mako test -r TestAdd -v
 mako test --coverage
 ```
 
-Unit, property, fuzz, snapshot, fixture, and mock tests. Default suite runs
-without external services.
+Unit, property, fuzz, snapshot, fixture, and mock tests. The default suite is
+designed to run without external services; network-bound tests still require
+local socket permissions, and optional-service tests skip or soft-fail when the
+service/library is absent.
 
 ## Our syntax — its own
 
@@ -430,7 +445,7 @@ fn main() {
     print(q)
     print(r)
 
-    // Structured concurrency (no orphan tasks)
+    // Structured concurrency (ordinary kicked tasks are joined)
     crew t {
         let j = t.kick(work())
         print(j.join())

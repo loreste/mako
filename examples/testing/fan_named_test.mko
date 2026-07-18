@@ -1,0 +1,12 @@
+// Named-function fan mappers use the same parallel map kernels as inline lambdas.
+
+fn double_for_fan(n: int) -> int {
+    return n * 2
+}
+
+fn TestNamedFanMapper() {
+    let xs = [1, 2, 3, 4]
+    let ys = fan(xs, double_for_fan)
+    assert_eq(ys[0], 2)
+    assert_eq(ys[3], 8)
+}

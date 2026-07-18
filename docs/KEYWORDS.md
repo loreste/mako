@@ -14,7 +14,7 @@ an `Ident`. There are **no contextual keywords** today: you cannot name a variab
 conversions `T(x)` / `bytes(s)`, `Ok`/`Err`/`assert*`/`t_run`, `len`/`cap`/`append`/`copy`/
 `rune_count`/`has`/`delete`/`str_builder`/`builder_*`/`uuid_*`, etc. See [GUIDE.md](GUIDE.md).
 
-Guided tour: [The Mako Book](book/) · Full syntax: [GUIDE.md](GUIDE.md) · Design: [LANGUAGE.md](LANGUAGE.md).
+Guided tour: [The Mako Book](book/) · Current syntax: [GUIDE.md](GUIDE.md) · Design: [LANGUAGE.md](LANGUAGE.md).
 
 ---
 

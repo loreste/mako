@@ -25,6 +25,7 @@
 
 # Internal working docs (not for public repo)
 /docs/internal/
+/docs/CLAIMS.md
 
 # Local agent / editor state (do not commit)
 .claude/

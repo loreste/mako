@@ -1,0 +1,16 @@
+// Explicit Sync handles are the intentional shared-state exception for
+// function values crossing a kick boundary.
+
+fn apply_sync(f: fn(int) -> int, n: int) -> int {
+    return f(n)
+}
+
+fn TestKickShareCapture() {
+    let s = share_int(10)
+    let f: fn(int) -> int = |n| n + share_get(s)
+    crew c {
+        let j = c.kick(apply_sync(f, 5))
+        assert_eq(j.join(), 15)
+    }
+    share_drop(s)
+}

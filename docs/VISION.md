@@ -2,7 +2,7 @@
 
 **North star**
 
-> **Speed · speed · speed** · concurrency & parallelism **first-class** · security **first-class** · no mandatory GC · fast builds · single binary · strong stdlib.
+> **Speed · speed · speed** · concurrency & parallelism **first-class** · security **first-class** · no GC · fast builds · deployable native binary where supported · strong stdlib.
 
 **The game:** run **as close to Rust as possible**, with **first-class concurrency
 and parallelism** (`crew` / `kick` / `join` / `fan` / channels / actors) that do
@@ -16,10 +16,10 @@ lifetime/trait/async ceremony are product problems we answer with *Mako*
 tools (`hold`/`share`/`arena`, `crew`/`kick`/`fan`, `Result`/`?`, `enum`/`match`,
 `pack`/`pull`). Full map: [PAIN_POINTS.md](PAIN_POINTS.md).
 
-**Product contract:** Mako is a versatile, general-purpose backend and
-infrastructure language. It is approachable and deployable, with strong safety
-guarantees, **Rust-class speed**, first-class concurrent/parallel work, and low
-cognitive overhead for everyday backend work.
+**Product goal:** Mako is a versatile, general-purpose backend and
+infrastructure language. It aims to be approachable and deployable, with
+strong safety mechanisms, a **Rust-class performance bar**, first-class
+concurrent/parallel work, and low cognitive overhead for everyday backend work.
 
 | Principle | What it means |
 |-----------|---------------|
@@ -30,10 +30,10 @@ cognitive overhead for everyday backend work.
 | Simple syntax | Clean, readable code that gets out of your way |
 | **Low ceremony** | Real work without a lot of typing ([ERGONOMICS.md](ERGONOMICS.md)) |
 | Fast builds | Compile times stay short even as projects grow |
-| Easy deploy | Static binaries, no runtime dependencies |
+| Easy deploy | Static binaries where the target/toolchain supports them; otherwise document runtime libraries |
 | Practical stdlib | Batteries included for real backend work |
-| Memory safety | Ownership, arenas, explicit resource control — no UAF |
-| Zero-cost abstractions | High-level constructs compile to efficient machine code |
+| Memory safety | Ownership, arenas, explicit resource control — active UAF prevention, not a formal proof |
+| Low-overhead abstractions | High-level constructs compile to efficient machine code |
 
 Mako is for **backend software, cloud infrastructure, networking systems,
 developer tools, databases, and high-performance services** — without academic
@@ -46,7 +46,7 @@ work over time:
 - **Systems programming** (arenas, hold/share, bytes/files, append logs)
 - **Database / storage engines** (mini embedded KV in `examples/db_engine/`, plus SQL clients)
 - **Realtime and telecom systems** (actors, timers, protocol stacks, session state)
-- **Fast native binaries** (release `-O3 -flto`, no mandatory GC — [PERFORMANCE.md](PERFORMANCE.md))
+- **Fast native binaries** (release `-O3 -flto`, no GC — [PERFORMANCE.md](PERFORMANCE.md))
 
 **Core promise:** Ship fast binaries, run concurrent and parallel work as a
 first-class part of the language, stay safe without a GC, keep everyday code short.
@@ -67,7 +67,7 @@ This file is the product map (includes Target ideas).
 
 | Pillar | Target |
 |--------|--------|
-| Memory | Ownership + arenas; RC/manual escapes; **optional** GC for apps only |
+| Memory | Ownership + arenas; RC/manual escapes; no tracing GC |
 | Speed | Rust-class hot path; measure; no silent cost |
 | Concurrency | First-class `crew` / channels / actors / `select` (structured) |
 | Parallelism | First-class `fan` + multi-kick crews |
@@ -113,8 +113,11 @@ actor Session {
 }
 ```
 
-Each actor owns its state — no shared-memory races. Under the hood today:
-mailboxes on channels + crew (see `examples/actor.mko`).
+The actor model keeps actor state behind message passing rather than exposing
+it as ordinary shared mutable state. Under the hood today: mailboxes on
+channels + crew (see `examples/actor.mko`). This is a language/runtime design
+boundary. The compiler enforces this boundary for safe Mako `kick`/`fan` code;
+generated C, FFI, and explicit `unsafe` code remain outside that guarantee.
 
 ### Realtime / telecom priority stack
 
@@ -143,9 +146,9 @@ gateway, or job worker should all feel like obvious Mako programs.
 | `arena` | Request/batch | Now |
 | `share` / RC | Opt-in graphs | Next |
 | `hold` / manual | Systems escapes | Next |
-| Optional GC | App opt-in only | Later |
+| GC | No tracing collector | Now |
 
-No mandatory GC. See [SECURITY.md](SECURITY.md).
+No tracing GC. See [SECURITY.md](SECURITY.md).
 
 **Zero-copy:** string region ops (`str_slice_*` / `str_at_eq` / `str_byte_at`) are
 **Now** — compare/search `s[off:off+len]` without substring alloc. Packet/file
@@ -238,7 +241,7 @@ No trait maze; embedding/generic bounds remain Later.
 | Capability | Status |
 |------------|--------|
 | `mako.toml` + `mako.lock` | Now (foundation) |
-| Version pinning / content hashes | Now (lock stub) |
+| Version pinning / content hashes | Now (local lock foundation; registry and reproducibility depth remain) |
 | Private modules / path deps | Next |
 | Reproducible builds | Next |
 | Supply-chain / vuln scan (`mako pkg audit`) | Now (offline advisory + license policy) |
@@ -274,7 +277,8 @@ without pulling in a large framework.
 ## Testing (built-in)
 
 Unit · integration · fuzz · bench · race · property · snapshot · mocks —
-**Next** (`mako test` / `mako bench` stubs exist).
+**Now** (`mako test` / `mako bench` are implemented; coverage and diagnostics
+depth continue to improve).
 
 Coverage, fixtures, parallel tests, leak/race detection, and end-to-end test
 helpers are part of the general-purpose backend bar.
@@ -293,7 +297,7 @@ API stability annotations — Later. Module isolation — Later.
 | Tool | Status |
 |------|--------|
 | `mako check` / `build` / `run` | Now |
-| `mako fmt` / `lint` / `test` / `bench` | Stub |
+| `mako fmt` / `lint` / `test` / `bench` | Implemented — deeper IDE/debug workflows remain |
 | `mako pkg init` / `lock` / `audit` | Now |
 | Docs generator | Later |
 | LSP: rename / extract / debug / profile | Later (day-one intent) |
@@ -343,7 +347,7 @@ serverless functions, edge apps, desktop utilities, and embedded agents.
 3. `hold` / `share` · interfaces · `mako test` for real  
 4. JSON derive · Postgres · race detector  
 5. Async I/O · QUIC/WS · incremental compile · LSP  
-6. Optional GC · SIMD/GPU · comptime · WASM  
+6. SIMD/GPU · comptime · WASM
 
 ---
 

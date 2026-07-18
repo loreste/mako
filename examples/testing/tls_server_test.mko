@@ -13,3 +13,25 @@ func TestTlsServerNewBadCertIsSafe() {
     let _ = tls_server_free(s)
     assert(true)
 }
+
+func TestTlsServerSniConfiguration() {
+    if tls_server_available() == 0 {
+        return
+    }
+    let cert = "runtime/certs/dev.crt"
+    let key = "runtime/certs/dev.key"
+    let s = tls_server_new(cert, key)
+    assert_eq(tls_server_sni_add(s, "api.example.com", cert, key), 0)
+    assert_eq(tls_server_sni_add(s, "API.EXAMPLE.COM.", cert, key), -1)
+    assert_eq(tls_server_sni_add(s, "*.example.com", cert, key), 0)
+    assert_eq(tls_server_sni_add(s, "*example.com", cert, key), -1)
+    assert_eq(tls_server_sni_add(s, "a.*.example.com", cert, key), -1)
+    assert_eq(tls_server_sni_add(s, "*.example.com", cert, key), -1)
+    assert_eq(tls_server_sni_add(s, "one.example.com", "/no/cert", "/no/key"), -1)
+    let _ = tls_server_free(s)
+
+    // SNI contexts inherit the mTLS verification policy and trust store.
+    let mtls = tls_server_new_mtls(cert, key, cert)
+    assert_eq(tls_server_sni_add(mtls, "mtls.example.com", cert, key), 0)
+    let _ = tls_server_free(mtls)
+}

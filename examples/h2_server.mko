@@ -3,7 +3,7 @@
 // Curl:  curl -sk --http2 https://127.0.0.1:18446/health https://127.0.0.1:18446/
 // Smoke: ./scripts/h2-server-smoke.sh  (skips if OpenSSL / curl --http2 missing)
 // Certs: runtime/certs/dev.crt + dev.key
-// Production HTTP/2 TLS server (ALPN h2). See docs/STATUS.md · docs/BUILTINS.md.
+// HTTP/2 TLS server example (ALPN h2). See docs/STATUS.md · docs/BUILTINS.md.
 
 fn main() {
     let code = tls_serve_h2_routes(

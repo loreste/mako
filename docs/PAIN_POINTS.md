@@ -8,7 +8,7 @@ ecosystems while keeping their strengths as *goals* (simple code, strong control
 | Keep as goals | Reject as identity |
 |---------------|--------------------|
 | Short programs, fast builds, great stdlib | Go keywords / ceremony as preferred syntax |
-| Memory safety, **performance as close to Rust as possible**, no mandatory GC, explicit errors | Lifetime maze, trait soup, async coloring |
+| Memory safety, **performance as close to Rust as possible**, no GC, explicit errors | Lifetime maze, trait soup, async coloring |
 
 Canonical surface: [IDENTITY.md](IDENTITY.md). Compat duals only: [COMPAT.md](COMPAT.md).
 
@@ -18,7 +18,7 @@ Canonical surface: [IDENTITY.md](IDENTITY.md). Compat duals only: [COMPAT.md](CO
 
 | Source of pain | Mako response | Status |
 |----------------|---------------|--------|
-| Go GC / tail latency | No mandatory GC; `hold` / `share` / `arena` | **Strong** |
+| Go GC / tail latency | No GC; `hold` / `share` / `arena` | **Strong** |
 | Go `nil` + silent mistakes | No null; `Option` / `Result`; unused `Result` is illegal | **Strong** |
 | Go `if err != nil` noise | `Result[T, E]` + `?` + `match` | **Strong** |
 | Go no real sum types | `enum` + exhaustive `match` | **Strong** |
@@ -54,7 +54,7 @@ rejected. “Looks like Go/Rust” is never a sufficient reason.
 
 | Go | Mako |
 |----|------|
-| GC is always on; hard real-time / p99 latency is a fight | **No mandatory GC.** Scope cleanup, `arena` bulk free, `hold` moves, `share` when needed |
+| GC is always on; hard real-time / p99 latency is a fight | **No GC.** Scope cleanup, `arena` bulk free, `hold` moves, `share` when needed |
 
 Everyday code stays simple (`let`). Power tools are **visible** (`hold` / `share` / `arena`), not hidden runtime cost.
 
@@ -89,7 +89,7 @@ Everyday code stays simple (`let`). Power tools are **visible** (`hold` / `share
 | Go | Mako |
 |----|------|
 | Race detector optional; ownership is social convention | Ownership keywords + structured concurrency |
-| Data-race freedom not in the type system | Deep Send (Option/Result/tuple/deep-POD) + static race diagnostics on mut captures before join; `--race` TSan |
+| Data-race freedom needs a language contract | Safe Mako rejects unsynchronized mutable closure captures and unknown environments across `kick`; `fan` is capture-free; explicit Sync handles cover intentional sharing |
 
 ### 1.7 Generics and “just use `any`”
 
@@ -182,7 +182,7 @@ Tracked also in [STATUS.md](STATUS.md) / [ROADMAP.md](ROADMAP.md). Closing these
 
 | # | Pain still open | Direction (Mako-shaped) |
 |---|-----------------|-------------------------|
-| R1 | Data races / runtime trust across `crew` | **Send seed done** (Copy/string/chan/deep-POD/Option·Result·tuple). Still open: portable timeouts, child error prop, detached lifecycle, fuller race model |
+| R1 | Data races / runtime trust across `crew` | **Language boundary closed** (Send/Sync, closure aliases, unknown environments, nested writes, and `fan` mapper captures are checked). Remaining limits are cooperative cancellation and C/FFI/`unsafe` code |
 | R2 | Richer errors than stringly `Err` | Typed error enums + context, still `?`-friendly |
 | R3 | NLL / ownership edge cases | Stronger checker without new surface ceremony |
 | R4 | Package visibility beyond seed | `export` + `visibility = "explicit"` finished |
@@ -225,7 +225,7 @@ Mako:     unique syntax
           fmt_sprintf*             → logs/JSON without builder walls
           chan[Struct] / POD kick  → multi-field worker results (no bit-pack)
           pack / pull / export     → clear units
-          no mandatory GC          → predictable performance
+          no GC                    → predictable performance
 ```
 
 ---

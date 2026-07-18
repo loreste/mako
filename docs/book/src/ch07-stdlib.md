@@ -585,8 +585,9 @@ Atomic operations are available for lock-free counters and flags.
 ### CMap (Concurrent Hashmap)
 
 `CMap` is a built-in concurrent hashmap optimized for high-throughput workloads.
-It uses lock-free reads and per-stripe spinlock writes (512 stripes, FNV-1a
-hash, 1M initial capacity). No import needed -- it is a builtin type.
+It uses a portable readers/writer gate with shared reads and exclusive writes;
+the table starts at 1M slots and grows under the write gate. No import needed
+-- it is a builtin type.
 
 ```mko
 fn main() {

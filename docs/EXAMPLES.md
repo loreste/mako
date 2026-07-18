@@ -710,7 +710,7 @@ got value:
 ## 12. Arena-scoped work
 
 Arenas let you allocate freely within a block, then free everything at once
-when the block exits. No garbage collector needed.
+when the block exits. No garbage collector is involved.
 
 ```mko
 // arena_demo.mko
@@ -1076,7 +1076,7 @@ mako run examples/showcase.mko
 
 ## What next
 
-- **[GUIDE.md](GUIDE.md)** -- full language reference with all syntax details.
+- **[GUIDE.md](GUIDE.md)** -- current language guide and syntax details.
 - **[STDLIB.md](STDLIB.md)** -- standard library packages and function listings.
 - **[DEBUG.md](DEBUG.md)** -- debugging tools, sanitizers, and error messages.
 - **[howto/](howto/)** -- task-oriented how-to guides for common scenarios.

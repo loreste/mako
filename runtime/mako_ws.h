@@ -789,11 +789,6 @@ static inline int64_t mako_ws_echo(int64_t port) {
     }
 }
 
-/* Legacy stub name → real once. */
-static inline int64_t mako_ws_echo_stub(int64_t port) {
-    return mako_ws_echo_once(port);
-}
-
 #ifdef __cplusplus
 }
 #endif

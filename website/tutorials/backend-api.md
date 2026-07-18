@@ -1,6 +1,6 @@
 # Building a Backend API
 
-This tutorial builds a complete REST API with routing, JSON, validation,
+This tutorial builds a REST API example with routing, JSON, validation,
 in-memory storage, and health checks.
 
 ```bash
@@ -165,15 +165,15 @@ print(cmap_len(store))
 
 Always validate incoming data before storing it. Use `json_get_string`
 to extract fields and check for empty strings. Return a `400` status
-with a JSON error body when validation fails. The complete example
+with a JSON error body when validation fails. The example
 below demonstrates this pattern.
 
 ---
 
-## Complete Runnable Example
+## Runnable Example
 
-This is a full notes API with GET, POST, and DELETE support, health
-checks, validation, and structured JSON responses.
+This notes API example shows GET, POST, and DELETE handlers, health checks,
+validation, and structured JSON responses.
 
 ```mko
 fn main() {

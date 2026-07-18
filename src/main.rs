@@ -33,7 +33,7 @@ use parser::Parser;
 #[command(
     name = "mako",
     version,
-    about = "Mako — memory safety, simple concurrency, fast builds, no mandatory GC.",
+    about = "Mako — memory safety, simple concurrency, fast builds, no GC.",
     long_about = "Mako compiles .mko sources to native binaries via C.\n\
                   Beachhead: network servers and session-oriented backends.\n\
                   Docs: docs/GUIDE.md · Status: docs/STATUS.md · Release: docs/RELEASE.md\n\n\
@@ -373,9 +373,9 @@ enum DeployCmd {
         /// Service/app name
         #[arg(long, default_value = "mako-app")]
         name: String,
-        /// Container image reference placeholder or final image
-        #[arg(long, default_value = "gcr.io/PROJECT_ID/mako-app:latest")]
-        image: String,
+        /// Container image reference (required for Cloud Run)
+        #[arg(long)]
+        image: Option<String>,
         /// Mako entry file to build inside the generated Dockerfile
         #[arg(long, default_value = "main.mko")]
         entry: PathBuf,
@@ -401,7 +401,7 @@ enum DeployCmd {
         #[arg(long, default_value_t = 8080)]
         port: u16,
     },
-    /// Write a native or WASM plugin skeleton using the Mako plugin ABI
+    /// Write a native or WASM plugin starter using the Mako plugin ABI
     Plugin {
         /// Directory where plugin files will be written
         #[arg(default_value = "mako-plugin")]
@@ -433,9 +433,9 @@ pub(crate) enum DeployServerlessProvider {
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
 pub(crate) enum DeployPluginKind {
-    /// Native dynamic library skeleton using mako_plugin.h
+    /// Native dynamic library starter using mako_plugin.h
     Native,
-    /// WASM plugin manifest and exported function skeleton
+    /// WASM plugin manifest and exported function starter
     Wasm,
 }
 
@@ -574,7 +574,7 @@ fn main() {
     }
 }
 
-/// Clap prints `{name} {version}` → with this string: `mako version mako0.1.9 darwin/arm64`.
+/// Clap prints `{name} {version}` → with this string: `mako version mako0.2.1 darwin/arm64`.
 fn clap_version_string() -> String {
     format!(
         "version mako{} {}/{}",
@@ -1231,7 +1231,15 @@ fn run(cli: Cli) -> Result<(), ()> {
                 entry,
                 bin,
                 port,
-            } => tooling::run_deploy_serverless(&path, provider, &name, &image, &entry, &bin, port),
+            } => tooling::run_deploy_serverless(
+                &path,
+                provider,
+                &name,
+                image.as_deref(),
+                &entry,
+                &bin,
+                port,
+            ),
             DeployCmd::Wasm {
                 path,
                 entry,
@@ -1581,7 +1589,21 @@ fn make_incr_opts(
     jobs: Option<usize>,
     build: &BuildOpts,
 ) -> incremental::IncrOptions {
+    let cc = cc::resolve_cc(build);
     let mut flags = String::new();
+    flags.push_str("compiler=");
+    flags.push_str(&cc.display().to_string());
+    flags.push(';');
+    flags.push_str("compiler-version=");
+    flags.push_str(&incremental::compiler_identity(&cc));
+    flags.push(';');
+    if release {
+        flags.push_str(if incremental::release_lto_enabled() {
+            "release-opt=O3+flto;"
+        } else {
+            "release-opt=O3;"
+        });
+    }
     if let Some(t) = &build.target {
         flags.push_str("target=");
         flags.push_str(t);
@@ -1599,13 +1621,35 @@ fn make_incr_opts(
     if build.bounds_always {
         flags.push_str("bounds=always;");
     }
+
+    // External flags and PGO profiles can affect generated objects without
+    // changing Mako source.  They are intentionally non-cacheable: a raw
+    // flag string cannot describe headers or changing profile contents.
+    let external_codegen_inputs = std::env::var_os("MAKO_CFLAGS").is_some()
+        || std::env::var_os("MAKO_PGO_GEN").is_some()
+        || std::env::var_os("MAKO_PGO_USE").is_some();
+    if let Ok(extra) = std::env::var("MAKO_CFLAGS") {
+        flags.push_str("external-cflags=");
+        flags.push_str(&extra);
+        flags.push(';');
+    }
+    if let Some(mode) = std::env::var_os("MAKO_PGO_GEN") {
+        flags.push_str("pgo-gen=");
+        flags.push_str(&mode.to_string_lossy());
+        flags.push(';');
+    }
+    if let Some(profile) = std::env::var_os("MAKO_PGO_USE") {
+        flags.push_str("pgo-use=");
+        flags.push_str(&profile.to_string_lossy());
+        flags.push(';');
+    }
     incremental::IncrOptions {
-        incremental,
+        incremental: incremental && !external_codegen_inputs,
         jobs: jobs.unwrap_or_else(incremental::default_jobs).max(1),
         release,
         verbose_cache: std::env::var_os("MAKO_CACHE_LOG").is_some(),
         flags_fp: flags,
-        cc: cc::resolve_cc(build),
+        cc,
         overflow: build.overflow,
         bounds_always: build.bounds_always,
     }
@@ -1770,9 +1814,9 @@ fn cmd_build(
         );
         return Err(());
     }
-    // Speed bar: release elides bounds checks via `-DNDEBUG` unless the user
-    // opts in with `--bounds always` or `[profile.release] bounds_checks = "on"`.
-    // Forcing bounds on every release silently taxed the hot path (map/slice index).
+    // Safe Mako indexing is checked in release as well as debug. The explicit
+    // `unsafe` surface is the opt-out; retaining this CLI flag preserves
+    // compatibility with older manifests and scripts.
     let opts = BuildOpts {
         target,
         sanitize,
@@ -2095,7 +2139,6 @@ fn run_test_package(
                 Some(file.display().to_string()),
             );
             cg.bounds_checks_always = prof.bounds_checks_always;
-            cg.gc_enabled = prof.gc_enabled;
         }
     }
     let c_src = cg.emit(program);
@@ -2340,7 +2383,7 @@ version = "0.1.0"
 
     write_new_file(
         &path.join("main.mko"),
-        r#"// Backend API skeleton — see docs/GUIDE.md "Building APIs"
+        r#"// Backend API starter — see docs/GUIDE.md "Building APIs"
 // Run: mako run main.mko
 // Curl: curl -sS http://127.0.0.1:18080/health
 
@@ -3098,7 +3141,6 @@ fn compile_to_c_timed(file: &Path) -> Result<(String, f64), ()> {
                 Some(file.display().to_string()),
             );
             cg.bounds_checks_always = prof.bounds_checks_always;
-            cg.gc_enabled = prof.gc_enabled;
             if prof.source_file.is_some() {
                 cg.source_file = prof.source_file;
             }
@@ -3449,10 +3491,12 @@ fn build_c(
             );
         }
         cmd.arg("-DMAKO_WASI");
+        cmd.arg("-D_WASI_EMULATED_SIGNAL");
         cmd.arg("-D_WASI_EMULATED_PROCESS_CLOCKS");
         cmd.arg("-D_POSIX_C_SOURCE=200809L");
     } else if let Some(t) = &opts.target {
         cc::push_target_args(&mut cmd, t, zig);
+        cc::push_macos_sysroot(&mut cmd, t, zig);
     }
 
     // gnu11 for wasm so wasi-libc POSIX decls stay visible with feature macros.
@@ -3472,6 +3516,7 @@ fn build_c(
     cmd.arg("-o").arg(out_bin);
 
     if is_wasm {
+        cmd.arg("-lwasi-emulated-signal");
         cmd.arg("-lwasi-emulated-process-clocks");
     } else {
         for a in link_args_native(opts, &runtime_dir) {

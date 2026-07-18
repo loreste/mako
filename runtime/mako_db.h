@@ -363,7 +363,7 @@ static inline int64_t mako_sqlite_finalize_stmt(void *stmt) {
 
 #endif
 
-/* ---- Postgres (Partial): real libpq when MAKO_HAS_LIBPQ; else stub.
+/* ---- Postgres (Partial): real libpq when MAKO_HAS_LIBPQ; otherwise unavailable.
  * pg_connect returns handle=0 on failure (server down / no libpq) — never fake success.
  * pg_ok(c)==0 means not connected.
  * pg_exec on a disconnected handle returns -1 (no crash).
@@ -497,7 +497,7 @@ static inline int64_t mako_pg_close(MakoPgConn c) {
 
 static inline MakoPgConn mako_pg_connect(MakoString url) {
     (void)url;
-    fprintf(stderr, "mako: pg_connect stub (no libpq linked)\n");
+    fprintf(stderr, "mako: pg_connect unavailable (libpq not linked)\n");
     return (MakoPgConn){0};
 }
 static inline int64_t mako_pg_ok(MakoPgConn c) {

@@ -1,4 +1,4 @@
 [package]
-name = "gc_app"
+name = "gc_removed_package"
 version = "0.1.0"
 gc = true

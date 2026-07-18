@@ -1,7 +1,7 @@
 # Debugging Mako
 
-This guide covers every tool Mako provides for finding and fixing bugs, from
-quick inline prints to full-featured debugger sessions and sanitizer runs.
+This guide covers the implemented Mako debugging tools, from quick inline
+prints to generated-C debugger sessions and sanitizer runs.
 
 **Product tip:** **0.2.1**.
 

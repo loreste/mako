@@ -207,7 +207,7 @@ our spelling is `pack` / `pull`.
 | [ERGONOMICS.md](ERGONOMICS.md) | **Less typing** — happy path short, power opt-in |
 | [LANGUAGE.md](LANGUAGE.md) | Design overview |
 | [COMPAT.md](COMPAT.md) | Compatibility + dual forms |
-| [GUIDE.md](GUIDE.md) | Full syntax guide |
+| [GUIDE.md](GUIDE.md) | Current syntax guide |
 | [GO_SYNTAX_CHECKLIST.md](GO_SYNTAX_CHECKLIST.md) | Optional dual/interop checklist (**not** identity) |
 | [KEYWORDS.md](KEYWORDS.md) | Reserved words |
 | [VISION.md](VISION.md) | Product north star |

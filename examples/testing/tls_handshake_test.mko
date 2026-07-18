@@ -72,7 +72,7 @@ fn TestTlsTrafficSecrets() {
 }
 
 fn TestTlsAppTrafficSecrets() {
-    // Master secret placeholder → c/s ap traffic (distinct from hs traffic).
+    // Test-vector master secret → c/s ap traffic (distinct from hs traffic).
     let ms = "fedcba9876543210fedcba9876543210"
     let tx = ch_sh_seed()
     let c = tls_client_application_traffic_secret_hex(ms, tx)

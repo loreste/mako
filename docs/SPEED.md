@@ -8,7 +8,7 @@ not silently tax the hot path.
 
 | Priority | Bar |
 |----------|-----|
-| **1. Speed** | **Name of the game.** Hot path ≈ Rust: native binary, no GC, release `-O3 -flto`, zero-cost defaults |
+| **1. Speed** | **Name of the game.** Hot path ≈ Rust: native binary, no GC, release `-O3 -flto`, low-overhead defaults |
 | **2. Concurrency** | **First-class:** `crew` / `kick` / `join` / channels / `select` / actors |
 | **3. Parallelism** | **First-class:** `fan` and crew work across cores — not a library afterthought |
 | **4. Security** | **First-class:** memory + resource contracts, secure defaults — see [SECURITY.md](SECURITY.md) |
@@ -20,7 +20,7 @@ Security is not a linter plugin.
 
 ## Speed (non-negotiable)
 
-- **No mandatory GC** — no stop-the-world tax on p99
+- **No GC** — no stop-the-world tax on p99
 - **Native codegen** — `.mko` → C → clang
 - **Release:** `-O3 -flto`
 - **Visible cost** — `hold` / `share` / `arena` / channels when you pay
@@ -28,9 +28,9 @@ Security is not a linter plugin.
 
 Any feature that silently slows the hot path must justify itself or stay opt-in.
 
-Security tools that cost (bounds-always, overflow trap, sanitizers) stay **opt-in**
-or debug-default so release hot paths stay Rust-competitive. Safe-by-construction
-features (NLL, structured crews, parameterized DB) are free at steady state.
+Sanitizers and overflow traps stay **opt-in** so release hot paths stay
+Rust-competitive. Safe-by-construction features (NLL, checked indexing,
+structured crews, parameterized DB) remain part of the default contract.
 
 ### Hot-path efficiency (current practice)
 
@@ -88,7 +88,7 @@ Not “use a package.” Not colored `async`/`await`. Keywords in the language:
 
 | Tool | Role |
 |------|------|
-| `crew t { … }` | Structured scope — jobs cannot outlive the crew |
+| `crew t { … }` | Structured scope — `kick` jobs cannot outlive the crew |
 | `t.kick(work())` | Start concurrent work on the crew |
 | `job.join()` | Wait for result (`int` / `string` / `Result` / float; heap-box non-int) |
 | `t.drain(ms)` | Cancel + join with timeout |
@@ -101,7 +101,7 @@ crew t {
     let b = t.kick(fetch_b())
     print(a.join() + b.join())
 }
-// both jobs done — no orphans
+// both kicked jobs done — no orphans
 ```
 
 **Vs Go:** no free `go f()` leaks.  

@@ -1,4 +1,4 @@
-// Production HTTP/2: content-type responses, SETTINGS accessors, auto WINDOW_UPDATE, GOAWAY.
+// HTTP/2 regression surface: content-type responses, SETTINGS accessors, auto WINDOW_UPDATE, GOAWAY.
 
 fn TestHttp2ResponseCt() {
     let resp = http2_response_ct(1, 200, "application/json", "{\"ok\":true}")

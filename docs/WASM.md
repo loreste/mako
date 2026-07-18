@@ -28,7 +28,7 @@ Sockets, preview2 components, Workers request adapters, and full browser DOM
 bindings remain target work.
 
 `env_set` soft-fails on WASI (no `setenv` in wasi-libc) — pass env from the host
-(`wasmtime --env KEY=VAL`). Browser loader still stubs empty argv/environ.
+(`wasmtime --env KEY=VAL`). Browser loader supplies empty argv/environ.
 
 **FS paths:** use relative names with `--dir=HOST::.` (guest `.` = sandbox), or
 absolute `/file` with `--dir=HOST::/`. Without a matching preopen, `read_file`
@@ -104,7 +104,7 @@ with a minimal `wasi_snapshot_preview1` import object:
 - **`fd_filestat_get`** → filetype regular + `size` for virtual file fds
 - **`fd_read` / `fd_write`** → virtual file bytes; writable fds append via `fd_write` and are readable back
 
-Other WASI calls are stubs (return 0 / ENOSYS).
+Other WASI calls are unsupported and return 0 / `ENOSYS`.
 
 ```bash
 ./scripts/wasi-ci-build.sh

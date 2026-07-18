@@ -1,7 +1,8 @@
 # Mako compatibility policy (0.x)
 
-Mako aims for **simple everyday code**, **Rust-class performance**, and **memory
-safety without a mandatory GC** — with a **syntax surface that is Mako’s own**.
+Mako aims for **simple everyday code**, a **Rust-class performance bar**, and
+active memory/resource safety mechanisms without a GC — with a **syntax surface
+that is Mako’s own**.
 
 **Current product:** **0.2.1**. See [IDENTITY.md](IDENTITY.md) for preferred forms.
 
@@ -17,8 +18,8 @@ safety without a mandatory GC** — with a **syntax surface that is Mako’s own
 | Flag | Default | Effect |
 |------|---------|--------|
 | `[package] visibility = "explicit"` | open | Only `export` / capital items are package-public (seed) |
-| `[package] systems = true` | false | Ownership never weakened; GC forced off |
-| `[profile.release] bounds_checks = "on"` | debug_only | Keep bounds checks under `-DNDEBUG` |
+| `[package] systems = true` | false | Legacy marker; ownership is always enforced and no GC exists |
+| `[profile.release] bounds_checks = "on"` | debug_only | Legacy-compatible setting; safe bounds checks are always retained |
 
 5. **No silent default ownership change:** Bare `let` stays simple. `hold` /
    `share` / `arena` remain the explicit power path.
@@ -44,7 +45,7 @@ docs and `mako fmt` always lead with the Mako column.
 
 ## Performance & safety
 
-- **No mandatory GC.**
+- **No GC.**
 - **Release:** `-O3 -flto`.
 - **Safety:** Debug bounds checks by default; release profile can keep them on.
 - **`#line`** maps generated C back to `.mko`.

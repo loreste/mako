@@ -94,7 +94,7 @@ if [[ -d "$ROOT/std" ]]; then
   cp -R "$ROOT/std/." "$STAGE/share/mako/std/"
 fi
 
-# Always ship a tiny docs stub (not the whole docs/ tree).
+# Always ship a small README document (the full docs tree is optional).
 mkdir -p "$STAGE/share/mako/docs"
 if [[ -f "$ROOT/README.md" ]]; then
   cp "$ROOT/README.md" "$STAGE/share/mako/docs/README.md"

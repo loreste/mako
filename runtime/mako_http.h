@@ -1557,11 +1557,6 @@ static inline int64_t mako_hpack_decode_indexed(MakoString block) {
     return idx;
 }
 
-/* Legacy name: now decodes indexed form (or -1). */
-static inline int64_t mako_hpack_decode_stub(MakoString block) {
-    return mako_hpack_decode_indexed(block);
-}
-
 /* Encode HPACK string (RFC 7541 §5.2): 7-bit length, no Huffman. Max len 127. */
 static inline int mako_hpack_put_string(char *dst, size_t cap, MakoString s, size_t *wrote) {
     size_t n = s.data ? s.len : 0;

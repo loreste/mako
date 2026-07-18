@@ -15,7 +15,7 @@ native binary. Memory safety uses `hold` / `share` and arenas. Concurrency and
 parallelism are language features: structured `crew` / `kick` / `join`, `fan`
 across cores, channels, actors — no free-fire leaks, no async coloring.
 
-Mako is currently at version **0.1.9**. This book teaches idiomatic Mako as it
+Mako is currently at version **0.2.1**. This book teaches idiomatic Mako as it
 ships today. Identity checklist: [IDENTITY.md](../../IDENTITY.md).
 
 | Area | Where |
@@ -228,7 +228,7 @@ mako test examples/testing
 - Run `mako --help` for command-line usage
 - Run `mako doctor` to diagnose your installation
 - Check [STATUS.md](../../STATUS.md) for what is implemented
-- Check [GUIDE.md](../../GUIDE.md) for the full syntax reference
+- Check [GUIDE.md](../../GUIDE.md) for the current syntax reference
 
 Let's get started. Turn to [Chapter 1: Preface](ch01-preface.md) to learn why
 Mako exists and what problems it solves.

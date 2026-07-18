@@ -12,20 +12,22 @@ and **fast iteration**. Most approaches force a trade-off:
 - Low-level systems approaches give total control but leave memory safety,
   ownership discipline, and concurrency correctness to the programmer's
   vigilance.
-- Ownership-focused approaches give safety guarantees but can feel heavy for
+- Ownership-focused approaches give strong safety mechanisms but can feel heavy for
   everyday HTTP servers and session-oriented work.
 
 Mako's position is practical: you should not have to choose between safety and
-simplicity. The language is designed so that the common case is both safe and
-concise, with explicit annotations only where they genuinely prevent bugs.
+simplicity. The language is designed so that the common case gets compiler and
+runtime safety checks without excessive ceremony, with explicit annotations
+where they prevent specific classes of bugs.
 
 ## The Mako bet
 
-> Memory safety without a mandatory garbage collector. Simple structured
+> Active memory/resource safety without a mandatory garbage collector. Simple structured
 > concurrency. Fast compiles. Clean error handling. Single-binary deployment.
 > A strong standard library. Great tooling from day one.
 
-These are not aspirational goals -- they are the shipped reality of Mako 0.1.9.
+These are the shipped parts of Mako 0.2.1. The status matrix separates
+implemented behavior from roadmap goals and platform-dependent paths.
 
 ## Design philosophy
 
@@ -50,10 +52,11 @@ fn classify(code: int) -> string {
 
 ### 2. Safety at compile time, not runtime
 
-The ownership system (`hold` and `share`) catches use-after-move, double-free,
-and data races at compile time. Result types are enforced -- you cannot silently
-ignore a fallible operation. The compiler rejects programs that would have
-undefined behavior, before any code runs.
+The ownership system (`hold` and `share`) catches use-after-move and enforces
+the resource rules implemented by the compiler. Result types are enforced --
+you cannot silently ignore a fallible operation. Mako actively prevents several
+important classes of mistakes; generated C, FFI, and platform libraries remain
+outside the Mako type system.
 
 ```mko
 fn safe_divide(a: int, b: int) -> Result[int, string] {
@@ -77,8 +80,9 @@ fn main() {
 
 ### 3. No garbage collector
 
-Mako achieves memory safety without a tracing garbage collector. Instead, it
-uses three complementary mechanisms:
+Mako provides active memory/resource safety mechanisms without a tracing
+garbage collector. These mechanisms prevent important classes of bugs, but are
+not a formal proof for generated C, FFI, or every program:
 
 - **Scope-based cleanup**: Local values are freed when their enclosing scope
   exits. `defer` statements run cleanup in LIFO order.
@@ -88,8 +92,8 @@ uses three complementary mechanisms:
   processing), an arena allocates many objects and frees them all at once when
   the arena exits. One deallocation for an entire request's worth of memory.
 
-This means no GC pauses, no stop-the-world events, and predictable latency
-under load.
+This means no tracing-GC pauses or stop-the-world collector events. Latency
+still depends on allocation, I/O, scheduling, and the surrounding C/FFI code.
 
 ### 4. Fast compiles
 
@@ -100,10 +104,10 @@ edit-compile-run loop even for large projects.
 
 ### 5. Single binary deployment
 
-`mako build --release` produces a statically-linked native binary. No runtime
-to install on the target machine. No dependency conflicts. Copy the binary,
-run it. This is ideal for containers, edge deployments, and distribution to
-end users.
+`mako build --release` can produce a statically-linked native binary on
+supported targets. In that case there is no Mako runtime to install on the
+target machine; platform libraries and optional integrations can still impose
+their own requirements.
 
 ### 6. Batteries included
 
@@ -162,7 +166,7 @@ file to copy).
 ### Infrastructure tools
 
 Proxies, load balancers, and protocol implementations benefit from low-level
-control over memory layout combined with high-level safety guarantees. Mako
+control over memory layout combined with high-level safety mechanisms. Mako
 gives you both without forcing you to choose.
 
 ### Developer tools and CLIs
@@ -182,12 +186,12 @@ As of the current release:
 
 | Claim | Meaning |
 |-------|---------|
-| Version 0.1.9 | Current product (generics after 0.1.8); first public was 0.1.0 release, core language complete |
+| Version 0.2.1 | Current product; first public was 0.1.0 release, core language exercised by the current suite |
 | Stdlib coverage | Major backend areas covered (HTTP, TLS, JSON, SQL, etc.) |
-| Test suite | 165+ examples pass in the test suite |
+| Test suite | 338 test programs pass in the current suite |
 
 The language is usable for real work today. Generic structs/enums and interface
-bounds shipped in **0.1.9**; residual polish (mut-self iterators, multi-statement
+bounds shipped in **0.2.0**; residual polish (mut-self iterators, multi-statement
 mutable lambdas, deeper CTFE) is tracked in STATUS.md and ROADMAP.md.
 
 ## How to use this book
@@ -197,7 +201,7 @@ other:
 
 1. **Getting Started** -- install and run your first program
 2. **Language Tour** -- syntax, types, control flow
-3. **Ownership** -- memory safety without GC
+3. **Ownership** -- active memory/resource safety without GC
 4. **Errors** -- Result types and error handling
 
 Once you have the foundations, jump to chapters 7 through 10 when building

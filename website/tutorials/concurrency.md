@@ -197,8 +197,9 @@ fn main() {
 
 ## Shared State with CMap
 
-`CMap` is a lock-free concurrent hashmap. Multiple crew tasks can read
-and write without channels or mutexes.
+`CMap` is a concurrent hashmap with lock-free reads and internally
+striped-locked writes. Multiple crew tasks can use it without caller-managed
+channels or mutexes.
 
 ```mko
 fn writer(store: int, id: int) -> int {
@@ -375,12 +376,14 @@ fn main() {
 
 ## Key Takeaways
 
-- `crew` blocks guarantee that no task outlives its scope
+- Ordinary kicked tasks are joined before their `crew` scope exits; blocked
+  C/FFI calls can delay the join, and `detach` is an explicit escape
 - `t.kick(expr)` launches work; `.join()` collects the result
 - Channels (`chan_new`, `send`, `recv`, `close`) are the primary
   communication primitive
 - `select timeout` multiplexes multiple channels with a deadline
 - `fan(slice, fn(x) { ... })` provides one-line data parallelism
 - Actors (`actor` / `receive`) encapsulate stateful message handling
-- `CMap` gives lock-free shared state across tasks
+- `CMap` gives shared key-value state across tasks; reads are lock-free and
+  writes use internal striped locks
 - `t.cancel()` / `t.cancelled()` enable cooperative cancellation

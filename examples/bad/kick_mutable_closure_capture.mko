@@ -1,0 +1,19 @@
+// EXPECT: mutable capture
+// A closure that mutates an ordinary local cannot cross a kick boundary.
+
+fn apply(f: fn(int) -> int, n: int) -> int {
+    return f(n)
+}
+
+fn main() {
+    let mut total = 0
+    let f: fn(int) -> int = |n| {
+        total = total + n
+        return total
+    }
+    let g = f
+    crew c {
+        let j = c.kick(apply(g, 1))
+        let _ = j.join()
+    }
+}

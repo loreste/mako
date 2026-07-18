@@ -3,7 +3,7 @@
 Last inventory: **2026-07-17** · product **mako0.2.1** (`CARGO_PKG_VERSION`).
 
 Unique Mako surface · pack/pull · map/slice/bag monomorphs · package-per-directory ·
-const-fn depth (match/while/for/strings) · suite **165+** · [The Mako Book](book/).
+const-fn depth (match/while/for/strings) · suite **338 test programs** · [The Mako Book](book/).
 
 **Book:** [The Mako Book](book/) · **Guide:** [GUIDE.md](GUIDE.md) · **Identity:** [IDENTITY.md](IDENTITY.md) · **Pain points:** [PAIN_POINTS.md](PAIN_POINTS.md) · **Build:** [BUILD.md](BUILD.md) · **Stdlib:** [STDLIB.md](STDLIB.md) · **Roadmap:** [ROADMAP.md](ROADMAP.md) · **Changelog:** [../CHANGELOG.md](../CHANGELOG.md) · **Release:** [RELEASE.md](RELEASE.md).
 
@@ -14,12 +14,12 @@ const-fn depth (match/while/for/strings) · suite **165+** · [The Mako Book](bo
 | Scope | Approx. |
 |-------|---------|
 | **Product version** | **0.2.1** |
-| **MVP / usable language** | **100%** |
-| **STATUS north-star** | **100%** |
-| **Mako identity (preferred syntax)** | **~100%** — [IDENTITY.md](IDENTITY.md) |
+| **MVP / usable language** | Core compiler/runtime scope is exercised; this is not a production-readiness claim |
+| **STATUS north-star** | Tracked scope is explicit; residuals below remain |
+| **Mako identity (preferred syntax)** | Checklist complete — [IDENTITY.md](IDENTITY.md); not a maturity score |
 | **Go/Rust pain coverage** | **~80%** strong rows — [PAIN_POINTS.md](PAIN_POINTS.md) |
 | **Dual-form coverage (optional sugar)** | **~94%** — [GO_SYNTAX_CHECKLIST.md](GO_SYNTAX_CHECKLIST.md) |
-| **Standard library** | **~98%** of target areas Done (Wave 9; not every symbol) |
+| **Standard library** | **~98%** of target areas Done (Wave 9; not every symbol or integration) |
 
 ---
 
@@ -88,7 +88,7 @@ const-fn depth (match/while/for/strings) · suite **165+** · [The Mako Book](bo
 | Storage page + WAL seeds | Done seed — `storage_wal_test` |
 | Hash index + store txn + snap predict seeds | Done seed — `store_index_test` |
 | Domain tracks (btree/LSM/MVCC/rollback/gfx/AI/debug frame) | Done seed — `domain_tracks_test` (no SIPREC/WebRTC) |
-| Storage depth (btree disk, SST, pcache, mvcc_gc, simd) | Done seed — `storage_depth_test` |
+| Storage depth (btree disk, SST, pcache, MVCC version reclamation, SIMD) | Done seed — `storage_depth_test` |
 | LSM compact · store WAL recover · hot-reload mtime | Done seed — `domain_tracks_test` (`lsm_compact`, `store_recover_wal`, `hot_reload_*`) |
 | Multi-level LSM (L1–L3) · page-backed btree | Done seed — `domain_tracks_test` (`lsm_compact_down`, `pbtree_*`) |
 | Storage polish (bloom · range · disk page manager) | Done seed — `domain_tracks_test` (`bloom_*`, `btree_range`/`sst_range`, `pman_*`) |
@@ -106,7 +106,7 @@ const-fn depth (match/while/for/strings) · suite **165+** · [The Mako Book](bo
 | Hot-reload swap/stamp · predict service | Done seed — `residual_seeds_test` |
 | DAP --stdio · profile-serve · plugin live reload · soft FB | Done seed — CLI + `residual_seeds_test` |
 | MSI/notarize/brew/winget publish seeds | Done seed — scripts + `package-seed.yml` · WiX skeleton |
-| gfx_poll · GPU backend stubs · netcode deltas | Done seed — `residual_seeds_test` |
+| gfx_poll · GPU backend availability · netcode deltas | Done seed — `residual_seeds_test` |
 | plugin_open/call/close · hot_reload_unwatch | Done seed — `residual_seeds_test` · `domain_tracks_test` |
 | Full unicode + utf8 package | Done seed — UCD props/case + encode/decode · `std/unicode` · `unicode_full_test` |
 | List[T] + richer collections | Done — List/`[]T` + set/heap/ring/stats · `std/collections` · `collections_*_test` |
@@ -147,7 +147,10 @@ const-fn depth (match/while/for/strings) · suite **165+** · [The Mako Book](bo
 | ShareInt capture (shared mut via RC handle) | Done seed — `share_capture_test` |
 | Packaging seeds (deb/rpm/winget/matrix/homebrew) | Done seed — scripts + packaging/ |
 | Book samples `mako check` / `run` | PASS — `docs/book/examples/book_*.mko` |
-| `mako test examples/testing` | PASS — **165 passed**, 0 failed |
+| `mako test examples/testing` | PASS — **338 passed**, 0 failed (2026-07-17) |
+| GC removal regression checks | PASS — removed builtin and legacy `[package] gc = true` both fail, including isolated cache paths |
+| Speed gate | PASS — normal ≤2.0× and strict ≤1.5× Rust gates; final measured ratios 0.21×–0.65× |
+| Leba downstream smoke | PASS — current compiler builds/checks Leba; compiled `doctor` reports 0 errors |
 | `if init; cond { }` + both-branches-return body | Done — `examples/testing/if_init_test.mko` |
 | Go `switch`/`case`/`default` (value, expr-less, init) | Done — `examples/testing/switch_test.mko` |
 | Go `fallthrough` (case body merge) | Done seed — `examples/testing/fallthrough_test.mko` |
@@ -170,12 +173,13 @@ const-fn depth (match/while/for/strings) · suite **165+** · [The Mako Book](bo
 | Nonblocking connect + fd splice/copy | Done — `tcp_connect_nb` / `tcp_fd_copy` / `tcp_splice` |
 | Socket tuning (`reuseport`, buffers, `accept4`) | Done |
 | Async TLS accept (`tls_accept_start` / handshake step) | Done — event-loop friendly surface |
+| Multi-certificate TLS SNI | Done — exact + longest left-most wildcard selection; opt-in live handshake coverage in `examples/testing/tls_sni_live_test.mko` |
 | HTTP/2 stream multiplexing (ready queue, 64 slots) | Done — `http2_next_ready_stream` / `stream_take` / `stream_body` |
 | HTTP/2 hardened path (dual FC, SETTINGS, auto WU, PADDED, overflow hard-fail) | Done — `http2_conn_*` · `examples/testing/http2_prod_test.mko` |
 | HTTP/2 TLS one-shot (`tls_serve_h2_routes`) | Demo/smoke only — production path is `tls_server_new` + `http2_conn_*` |
 | HTTP/3 server surface (UDP bind/poll/stream) | Done — `h3_server_*` (quiche when linked) |
 | HTTP/3 hardened path (64 KiB bodies, no silent truncate, accessors, `h3_response`) | Done — `examples/h3_server.mko` · `h3_server_test.mko` · smoke |
-| FS / storage production (`atomic_write`, `mkdir_all`, `remove_all`, dio CLOEXEC, mmap) | Done — `examples/testing/fs_storage_test.mko` |
+| FS / storage surface (`atomic_write`, `mkdir_all`, `remove_all`, dio CLOEXEC, mmap) | Done — `examples/testing/fs_storage_test.mko` |
 | Low-level networking (peer/local addr, UDP sender, write_all/read_n, shutdown, CLOEXEC) | Done — `examples/testing/net_lowlevel_test.mko` |
 | IPv6 dual-stack listen/connect + Happy Eyeballs `tcp_connect` | Done — `examples/testing/net_ipv6_he_test.mko` |
 | Low-latency clocks (`mono_*` / deadlines / sleep_ns / spin_until) | Done — `examples/testing/time_latency_test.mko` |
@@ -198,10 +202,10 @@ const-fn depth (match/while/for/strings) · suite **165+** · [The Mako Book](bo
 | fmt / print packages (Sprintf/Print/Errorf, multi-arg) | Done — `mako_fmt.h` · `std/fmt` · `std/print` · `fmt_print_test.mko` |
 | Hex/dec/bin/oct format + parse (bases 2–36, %#x/%08x) | Done — `format_int_*` / `parse_int_*` · `fmt_print_test.mko` |
 | Language residuals wave 40 (deep Send/race, NLL, patterns, stability, GC, reflect, JPEG baseline, Unicode) | Done — `lang_residuals_test.mko` · `nll_multi_label_test.mko` · `api_stable_test.mko` |
-| Language residuals wave 41 (Ok(Some) non-generic, exotic `?`, race stack, tracing GC, UCD/PCRE depth) | Done — `lang_residuals_test.mko` · `gc_app/gc_trace_test.mko` |
+| Language residuals wave 41 (Ok(Some) non-generic, exotic `?`, race stack, UCD/PCRE depth) | Done — `lang_residuals_test.mko` |
 | UUID v4/v5/v7 + ULID (Copy POD, kick/Send, parse polish) | Done — `runtime/mako_uuid.h` · `uuid_test.mko` · `std/uuid` |
 | Speed gate vs Rust (fib/slice/map ≤2×) | PASS — `./scripts/bench-gate.sh` |
-| Speed audit: release no longer forces bounds-always; empty str singleton; map 75% load | Done — see PERFORMANCE.md |
+| Speed audit: safe release bounds; empty str singleton; map 75% load | Done — see PERFORMANCE.md |
 | Map set_take (no string-key clone) + HTTP zero-copy views into raw | Done — `map_take_http_test.mko` |
 | Header/Content-Type interning + `respond_json` static CT | Done — runtime `mako_http_intern_*` |
 | HTTP/2 DATA auto-split (≤16384) + proxy/map free safety | Done — `http2_data_frame` split; `http2_prod_test` |
@@ -343,7 +347,7 @@ Result/Option reject · script/category `\p{…}` · expanded TSan · prior work
 
 **Pain residuals (language) — Wave 40 close:** see [PAIN_POINTS.md](PAIN_POINTS.md).
 
-1. **Fuller data-race model** — deep Send + Sync; per-kick race stack; mut Option/Result/tuple/enum/array/map captures until join; field/index writes checked; TSan opt-in (`--race`)  
+1. **Language-boundary race safety** — deep Send + Sync; per-kick race stack; closure/function-value capture analysis (including aliases); mut Option/Result/tuple/enum/array/map captures until join; nested field/index writes; capture-free `fan`; TSan opt-in (`--race`). C/FFI and explicit `unsafe` remain outside the safe-language guarantee.
 2. **Result/Option edge shapes** — non-generic `Ok(Some(v))`; exotic `?` cross (Option→Result Err("None"), Result→Option None); generic nests (wave18+)  
 3. **Stronger NLL multi-label** — const-fold + multi-label break products  
 
@@ -354,7 +358,8 @@ Result/Option reject · script/category `\p{…}` · expanded TSan · prior work
 8. **Reflect non-POD** — Option/Result/array/map fields (chan still rejected)  
 9. Symbol-level parity inside Done packages  
 
-**Also:** `#[stable]` / `#[deprecated]`; optional **tracing GC** (`gc_root`/`gc_link`/`gc_collect`, `[package] gc = true`).
+**Also:** `#[stable]` / `#[deprecated]`. Mako intentionally has no tracing GC;
+ownership, `hold`/`share`, and arenas are the only memory-management model.
 
 ---
 
