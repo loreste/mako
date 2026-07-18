@@ -1425,18 +1425,6 @@ static _Thread_local int mako_https_client_last_status = 0;
 static _Thread_local char mako_https_client_last_raw[MAKO_HTTPS_MAX_HEADER];
 static _Thread_local size_t mako_https_client_last_raw_len = 0;
 
-static inline int mako_https_ci_eq(const char *a, const char *b) {
-    if (!a || !b) return 0;
-    while (*a && *b) {
-        unsigned char x = (unsigned char)*a++;
-        unsigned char y = (unsigned char)*b++;
-        if (x >= 'A' && x <= 'Z') x = (unsigned char)(x - 'A' + 'a');
-        if (y >= 'A' && y <= 'Z') y = (unsigned char)(y - 'A' + 'a');
-        if (x != y) return 0;
-    }
-    return *a == 0 && *b == 0;
-}
-
 static inline int mako_https_parse_port(const char *p, size_t len, int *out) {
     if (!p || !out || len == 0 || len > 5) return -1;
     int port = 0;
@@ -1701,7 +1689,8 @@ static inline MakoString mako_https_request(
         memcpy(ct, content_type.data, content_type.len);
         ct[content_type.len] = 0;
         for (size_t i = 0; i < content_type.len; i++) {
-            if ((unsigned char)ct[i] <= 0x20 || ct[i] == '\r' || ct[i] == '\n')
+            unsigned char c = (unsigned char)ct[i];
+            if (c == 0 || c == '\r' || c == '\n' || (c < 0x20 && c != '\t'))
                 return mako_str_from_cstr("");
         }
         ctype = ct;

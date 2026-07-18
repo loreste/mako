@@ -444,43 +444,93 @@ static inline int mako_jwt_json_string(
     return -1;
 }
 
-static inline int mako_jwt_json_skip_value(
-    const char *s, size_t len, size_t *pos
+static inline int mako_jwt_json_number(const char *s, size_t len, size_t *pos) {
+    size_t p = *pos;
+    if (p < len && s[p] == '-') p++;
+    if (p >= len) return -1;
+    if (s[p] == '0') {
+        p++;
+        if (p < len && s[p] >= '0' && s[p] <= '9') return -1;
+    } else {
+        if (s[p] < '1' || s[p] > '9') return -1;
+        while (p < len && s[p] >= '0' && s[p] <= '9') p++;
+    }
+    if (p < len && s[p] == '.') {
+        p++;
+        size_t fraction = p;
+        while (p < len && s[p] >= '0' && s[p] <= '9') p++;
+        if (p == fraction) return -1;
+    }
+    if (p < len && (s[p] == 'e' || s[p] == 'E')) {
+        p++;
+        if (p < len && (s[p] == '+' || s[p] == '-')) p++;
+        size_t exponent = p;
+        while (p < len && s[p] >= '0' && s[p] <= '9') p++;
+        if (p == exponent) return -1;
+    }
+    *pos = p;
+    return 0;
+}
+
+static inline int mako_jwt_json_skip_value_depth(
+    const char *s, size_t len, size_t *pos, size_t depth
 ) {
-    if (!s || !pos) return -1;
+    if (!s || !pos || depth > 64) return -1;
     *pos = mako_jwt_json_ws(s, len, *pos);
     if (*pos >= len) return -1;
     if (s[*pos] == '"') return mako_jwt_json_string(s, len, pos, NULL, 0, NULL);
-    if (s[*pos] == '{' || s[*pos] == '[') {
-        char stack[64];
-        size_t depth = 0;
-        int in_string = 0, escaped = 0;
-        for (; *pos < len; (*pos)++) {
-            char c = s[*pos];
-            if (in_string) {
-                if (escaped) escaped = 0;
-                else if (c == '\\') escaped = 1;
-                else if (c == '"') in_string = 0;
-                else if ((unsigned char)c < 0x20) return -1;
-                continue;
-            }
-            if (c == '"') { in_string = 1; continue; }
-            if (c == '{' || c == '[') {
-                if (depth >= sizeof(stack)) return -1;
-                stack[depth++] = c;
-            } else if (c == '}' || c == ']') {
-                if (depth == 0
-                    || (c == '}' && stack[depth - 1] != '{')
-                    || (c == ']' && stack[depth - 1] != '[')) return -1;
-                depth--;
-                if (depth == 0) { (*pos)++; return 0; }
-            }
+    if (s[*pos] == '{') {
+        (*pos)++;
+        *pos = mako_jwt_json_ws(s, len, *pos);
+        if (*pos < len && s[*pos] == '}') { (*pos)++; return 0; }
+        for (;;) {
+            if (*pos >= len || s[*pos] != '"'
+                || mako_jwt_json_string(s, len, pos, NULL, 0, NULL) != 0)
+                return -1;
+            *pos = mako_jwt_json_ws(s, len, *pos);
+            if (*pos >= len || s[(*pos)++] != ':') return -1;
+            if (mako_jwt_json_skip_value_depth(s, len, pos, depth + 1) != 0) return -1;
+            *pos = mako_jwt_json_ws(s, len, *pos);
+            if (*pos >= len) return -1;
+            if (s[*pos] == '}') { (*pos)++; return 0; }
+            if (s[(*pos)++] != ',') return -1;
+            *pos = mako_jwt_json_ws(s, len, *pos);
+            if (*pos >= len || s[*pos] == '}') return -1;
         }
-        return -1;
     }
-    size_t start = *pos;
-    while (*pos < len && s[*pos] != ',' && s[*pos] != '}' && s[*pos] != ']') (*pos)++;
-    return *pos > start ? 0 : -1;
+    if (s[*pos] == '[') {
+        (*pos)++;
+        *pos = mako_jwt_json_ws(s, len, *pos);
+        if (*pos < len && s[*pos] == ']') { (*pos)++; return 0; }
+        for (;;) {
+            if (mako_jwt_json_skip_value_depth(s, len, pos, depth + 1) != 0) return -1;
+            *pos = mako_jwt_json_ws(s, len, *pos);
+            if (*pos >= len) return -1;
+            if (s[*pos] == ']') { (*pos)++; return 0; }
+            if (s[(*pos)++] != ',') return -1;
+            *pos = mako_jwt_json_ws(s, len, *pos);
+            if (*pos >= len || s[*pos] == ']') return -1;
+        }
+    }
+    if (len - *pos >= 4 && memcmp(s + *pos, "true", 4) == 0) {
+        *pos += 4;
+        return 0;
+    }
+    if (len - *pos >= 5 && memcmp(s + *pos, "false", 5) == 0) {
+        *pos += 5;
+        return 0;
+    }
+    if (len - *pos >= 4 && memcmp(s + *pos, "null", 4) == 0) {
+        *pos += 4;
+        return 0;
+    }
+    return mako_jwt_json_number(s, len, pos);
+}
+
+static inline int mako_jwt_json_skip_value(
+    const char *s, size_t len, size_t *pos
+) {
+    return mako_jwt_json_skip_value_depth(s, len, pos, 0);
 }
 
 /* Return the span of a direct JSON object field's value. */
@@ -499,7 +549,8 @@ static inline int mako_jwt_json_field(
     for (;;) {
         pos = mako_jwt_json_ws(s, len, pos);
         if (pos < len && s[pos] == '}') {
-            return after_comma ? -1 : 0;
+            if (after_comma) return -1;
+            return mako_jwt_json_ws(s, len, pos + 1) == len ? 0 : -1;
         }
         char field[128];
         size_t field_len = 0;
@@ -526,7 +577,7 @@ static inline int mako_jwt_json_field(
                 *value_len = found_len;
                 if (present) *present = 1;
             }
-            return 0;
+            return mako_jwt_json_ws(s, len, pos + 1) == len ? 0 : -1;
         }
         return -1;
     }
@@ -648,9 +699,11 @@ static inline MakoString mako_jwt_sign(MakoString payload, MakoString secret) {
     /* Header is always {"alg":"HS256","typ":"JWT"} */
     const char *hdr_json = "{\"alg\":\"HS256\",\"typ\":\"JWT\"}";
     size_t hdr_len = strlen(hdr_json);
+    if (payload.len > 0 && !payload.data) return mako_str_from_cstr("");
 
     /* Base64url encode header and payload */
     char hdr_b64[128], pay_b64[8192];
+    if (payload.len > 6000) return mako_str_from_cstr("");
     size_t hdr_b64_len = mako_b64url_encode((const uint8_t *)hdr_json, hdr_len, hdr_b64, sizeof(hdr_b64));
     size_t pay_b64_len = mako_b64url_encode((const uint8_t *)payload.data, payload.len, pay_b64, sizeof(pay_b64));
 
@@ -666,6 +719,11 @@ static inline MakoString mako_jwt_sign(MakoString payload, MakoString secret) {
     /* HMAC-SHA256 */
     MakoString input_str = {input, input_len};
     MakoString sig_raw = mako_hmac_sha256_raw(secret, input_str);
+    if (!sig_raw.data || sig_raw.len != 32) {
+        free(input);
+        mako_str_free(sig_raw);
+        return mako_str_from_cstr("");
+    }
 
     /* Base64url encode signature */
     char sig_b64[128];
@@ -674,13 +732,18 @@ static inline MakoString mako_jwt_sign(MakoString payload, MakoString secret) {
     /* Build final token: header.payload.signature */
     size_t total = input_len + 1 + sig_b64_len;
     char *token = (char *)malloc(total + 1);
-    if (!token) { free(input); return mako_str_from_cstr(""); }
+    if (!token) {
+        free(input);
+        mako_str_free(sig_raw);
+        return mako_str_from_cstr("");
+    }
     memcpy(token, input, input_len);
     token[input_len] = '.';
     memcpy(token + input_len + 1, sig_b64, sig_b64_len);
     token[total] = 0;
 
     free(input);
+    mako_str_free(sig_raw);
     return (MakoString){token, total};
 }
 
@@ -716,14 +779,17 @@ static inline int64_t mako_jwt_verify(MakoString token, MakoString secret) {
     if (provided_len != sig_b64_len
         || mako_jwt_b64url_decode_strict(
                provided, provided_len, provided_raw, sizeof(provided_raw), &provided_raw_len) != 0
-        || provided_raw_len != sig_raw.len)
+        || provided_raw_len != sig_raw.len) {
+        mako_str_free(sig_raw);
         return 0;
+    }
 
     /* Constant-time compare to prevent timing attacks */
     uint8_t diff = 0;
     for (size_t i = 0; i < sig_b64_len; i++) {
         diff |= (uint8_t)(sig_b64[i] ^ provided[i]);
     }
+    mako_str_free(sig_raw);
     return diff == 0 ? 1 : 0;
 }
 
