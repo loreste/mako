@@ -1432,8 +1432,8 @@ escape checks. See also [docs/SOUNDNESS.md](docs/SOUNDNESS.md).
 | Category | Surface | Move | Cross-task | Drop / free |
 |----------|---------|------|------------|-------------|
 | **Copy** | `int` family, `bool`, `float`, Uuid/ULID POD | Copy, never moves | Send | Trivial |
-| **Own** | Owning `string`, owning heap headers when tracked | Move or clone at boundary | Send if deep-POD / cloned string | Free once at end of live range (**SAFE-003–006** rolling out for all shapes) |
-| **View** | Slice of existing storage; `[]byte` with `cap == 0`; `mako_str_view` | Must not free; must not outlive backing | Not Send unless copied | No free of `.data` |
+| **Own** | Owning `string`, owning heap headers (`[]T`, maps, struct Own fields) | Move or clone at boundary | Send if deep-POD / cloned string | Free once at end of live range (SAFE-003–006) |
+| **View** | Slice of existing storage; `[]T` with `cap == 0`; **`string_view`** / `mako_str_view` | Must not free; must not outlive backing | Not Send unless copied | No free of `.data` |
 | **Share** | `share let` / `ShareInt` | Immutable while live; NLL ends share | RC clone on kick | `share_drop` (auto or explicit) |
 | **Arena** | Values allocated in `arena { … }` | Valid only inside arena scope | Not Send as arena pointers | Freed with arena (bump) |
 | **Sync** | `Mutex`, `RWMutex`, `CMap`, `AtomicInt`, channels | Handle clone / lock protocol | Intentional sharing | Handle drop / close |
@@ -1449,14 +1449,16 @@ escape checks. See also [docs/SOUNDNESS.md](docs/SOUNDNESS.md).
 
 A `let` binding names a value in the current task. Scalars and POD are
 stack-like. Heap-backed values follow the ownership category of their type:
-shares and arenas have automatic cleanup today; systematic drop insertion for
-every owning slice/map shape is the SAFE-003–006 program.
+owning slices, maps, strings, and struct Own fields free at scope exit /
+reassign / `?` / break-continue (SAFE-003–006). Prefer `string_view` for
+zero-copy reads; `make([]T, 0, n)` when you will grow.
 
 ```mko
 {
     let mut s = make([]int, 0, 8)
     s = append(s, 1)
-    // Prefer reusing capacity; full auto-drop of owning slices is SAFE-003.
+    // s freed at end of block
+    let v: string_view = "lit"   // no free
 }
 ```
 

@@ -31,6 +31,24 @@ fn main() {
 
 Jobs cannot escape their crew. When the block ends, all kicked work has joined.
 
+### Scheduler pool (opt-in)
+
+By default each `kick` creates one OS thread. For high fan-out, enable a fixed
+worker pool (RT-002):
+
+```mko
+sched_set_workers(4)    // reuse 4 workers for kicks
+crew t {
+    let a = t.kick(compute(1))
+    let b = t.kick(compute(2))
+    print_int(a.join() + b.join())
+}
+sched_set_workers(0)    // back to one pthread per kick
+```
+
+Blocking I/O/FFI should use a dedicated thread path (`mako_spawn_blocking` in
+the runtime) so pool workers are not stalled (RT-003).
+
 ### Child errors
 
 When a kicked function returns `Result[T, string]` and you `join` it, any `Err`

@@ -13,18 +13,18 @@ const-fn depth (match/while/for/strings) · suite **340 test programs** · [The 
 
 | Scope | Approx. |
 |-------|---------|
-| **Product version** | **0.2.4** (+ soundness wave on main) |
+| **Product version** | **0.2.4** ([release](https://github.com/loreste/mako/releases/tag/v0.2.4)) |
 | **MVP / usable language** | Core compiler/runtime scope is exercised; this is not a production-readiness claim |
-| **STATUS north-star** | Tracked scope is explicit; residuals below remain |
+| **STATUS north-star** | Tracked scope is explicit; optional depth below remains |
 | **Mako identity (preferred syntax)** | Checklist complete — [IDENTITY.md](IDENTITY.md); not a maturity score |
 | **Go/Rust pain coverage** | **~80%** strong rows — [PAIN_POINTS.md](PAIN_POINTS.md) |
 | **Dual-form coverage (optional sugar)** | **~94%** — [GO_SYNTAX_CHECKLIST.md](GO_SYNTAX_CHECKLIST.md) |
 | **Standard library** | **~98%** of target areas Done (Wave 9; not every symbol or integration) |
-| **Soundness (SAFE/RT core)** | **Core shipped** — drops, mut roots, view escape, memory model; residuals in [SOUNDNESS.md](SOUNDNESS.md) |
+| **Soundness (SAFE/RT core)** | **Shipped in 0.2.4** — [SOUNDNESS.md](SOUNDNESS.md); optional soaks remain |
 
 ---
 
-## Soundness — **core shipped; residuals open**
+## Soundness — **shipped in 0.2.4**
 
 Program: [SOUNDNESS.md](SOUNDNESS.md) · model: [MEMORY_MODEL.md](MEMORY_MODEL.md) · roadmap: [ROADMAP.md](ROADMAP.md).
 

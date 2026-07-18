@@ -12,7 +12,7 @@ working code you can run immediately.
 | 03 | [Errors and Debugging](03-errors-debugging.md) | Handle errors with Result and `?`, wrap context, debug with `dbg` and lldb |
 | 04 | [Packages](04-packages.md) | Create reusable packages, manage dependencies, set up workspaces |
 | 05 | [Concurrency](05-concurrency.md) | Use crew blocks, channels, select, fan, and actors for parallel work |
-| 06 | [Memory](06-memory.md) | Understand ownership with hold/share, use arenas, choose the right strategy |
+| 06 | [Memory](06-memory.md) | Ownership (`hold`/`share`), auto-free of slices/maps/strings, `string_view`, arenas |
 | 07 | [WASI](07-wasi.md) | Compile to WebAssembly, run with wasmtime, pass args and access files |
 | 08 | [Testing](08-testing.md) | Write tests, run them, filter by name, measure coverage, use subtests |
 | 09 | [Release Builds](09-release-builds.md) | Optimize binaries, cross-compile, static link, package for deployment |
@@ -20,7 +20,7 @@ working code you can run immediately.
 
 ## Prerequisites
 
-All guides assume you have Mako installed (`mako version` → **mako0.2.3** …).
+All guides assume you have Mako installed (`mako version` → **mako0.2.4** …).
 Guide 01 covers installation from scratch.
 
 ## Related documentation

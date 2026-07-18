@@ -34,10 +34,15 @@ Short facts:
   (not maps/arrays/non-POD). Prefer `chan[Struct]` for multi-field worker results.
 - Loops: `for i, v in range s` / `for k, v in range m` / C-style `for`
 - F-strings: `f"hello {name}, age {age}"` — stack-based builder, zero malloc for short strings
+- `string_view` / `str_as_view` / `str_to_owned` — zero-copy views; owning strings free at scope exit
+- Stack POD array lits `[a,b,c]` — no malloc; empty `[]` allocates nothing
 - Format: `fmt_sprintf*` / `fmt_sprint*` for printf-style verbs
 - Dispatch: `match` on strings/ints/enums; `switch`/`case` on values
 - Parallel work: `fan(xs, fn(x) { x * x })`
 - Concurrency: `crew` / `kick` / `join`, channels, `select`, `actor`
+- Scheduler: `sched_set_workers(n)` opt-in pool (0 = one pthread per kick)
+- Channel string take: `chan_str_send_take` / `chan_str_try_send_take` (move; no clone)
+- Build: locked deps verified at compile (`mako.lock` content hashes)
 - `+= -= *= /= ++ --`, `a, b = b, a`, `let x = if c { a } else { b }`
 - `if init; cond { }`
 - Ownership: hold, share, arena — no GC

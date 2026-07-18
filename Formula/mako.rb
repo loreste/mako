@@ -54,7 +54,7 @@ class Mako < Formula
   end
 
   test do
-    assert_match "mako0.2.3", shell_output("#{bin}/mako --version")
+    assert_match "mako0.2.4", shell_output("#{bin}/mako --version")
     (testpath/"hello.mko").write <<~EOS
       fn main() {
           print("ok")
