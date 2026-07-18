@@ -3006,53 +3006,6 @@ fn resolve_path_dep_version(full: &Path) -> Option<String> {
     None
 }
 
-#[allow(dead_code)]
-fn simple_hash(bytes: &[u8]) -> String {
-    let mut h: u64 = 0xcbf29ce484222325;
-    for b in bytes {
-        h ^= u64::from(*b);
-        h = h.wrapping_mul(0x100000001b3);
-    }
-    format!("{h:016x}")
-}
-
-/// Hash a path dep: file contents, or directory's `mako.toml` + sorted `.mko` files.
-#[allow(dead_code)]
-fn hash_path_dep(full: &Path) -> String {
-    if !full.exists() {
-        return "missing".into();
-    }
-    if full.is_file() {
-        return fs::read(full)
-            .map(|b| simple_hash(&b))
-            .unwrap_or_else(|_| "missing".into());
-    }
-    let mut buf = Vec::new();
-    let manifest = full.join("mako.toml");
-    if let Ok(b) = fs::read(&manifest) {
-        buf.extend_from_slice(&b);
-    }
-    let mut mko: Vec<_> = fs::read_dir(full)
-        .into_iter()
-        .flatten()
-        .filter_map(|e| e.ok())
-        .map(|e| e.path())
-        .filter(|p| p.extension().and_then(|x| x.to_str()) == Some("mko"))
-        .collect();
-    mko.sort();
-    for p in mko {
-        if let Ok(b) = fs::read(&p) {
-            buf.extend_from_slice(p.to_string_lossy().as_bytes());
-            buf.extend_from_slice(&b);
-        }
-    }
-    if buf.is_empty() {
-        "empty".into()
-    } else {
-        simple_hash(&buf)
-    }
-}
-
 fn emit_plain_error(message: &str) {
     Diagnostic::error("", "", Span::unknown(), message).emit();
 }

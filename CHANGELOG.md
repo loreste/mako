@@ -4,6 +4,12 @@
 
 ### v0.1.10 — Deepen generics
 
+- **Package lock integrity v2** — manifests and recursive `.mko` sources are
+  hashed with deterministic SHA-256 digests over normalized relative paths.
+  `pkg install` now verifies every reused lock entry and fails closed on source
+  changes and missing, modified, or unreadable content. Malformed lockfiles,
+  unsafe serialized paths, and unreadable transitive manifests are rejected;
+  legacy v1 locks require an explicit `pkg update`.
 - **Multi-certificate TLS SNI** — `tls_server_sni_add` preloads exact and
   left-most wildcard certificate contexts. Exact names win, then the longest
   wildcard suffix; malformed/duplicate hostnames and invalid key pairs fail

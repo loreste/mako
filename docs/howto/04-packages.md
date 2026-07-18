@@ -127,7 +127,15 @@ Pin exact versions for reproducible builds:
 mako pkg lock
 ```
 
-This writes `mako.lock` with content hashes. Commit it to version control.
+This writes lockfile version 2 with deterministic SHA-256 hashes of the root
+manifest and recursive `.mko` sources. Commit it to version control. A later
+`mako pkg install` rehashes locked dependencies and fails if their content
+changed, including nested source files. It also fails closed when a transitive
+manifest cannot be read or the lockfile has malformed or contradictory fields.
+
+Use `mako pkg update` only after inspecting an intentional dependency change.
+The same command migrates legacy version 1 lockfiles; install does not silently
+trust their older non-cryptographic hashes.
 
 ## Package commands
 

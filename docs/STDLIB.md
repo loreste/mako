@@ -1562,8 +1562,8 @@ handshake, or browser WebRTC. Those are **Mako programs** on top of this surface
 mako pkg init
 mako pkg add util path=../util
 mako pkg publish          # → .mako/registry (or $MAKO_REGISTRY)
-mako pkg install         # resolve SemVer + write mako.lock
-mako pkg update
+mako pkg install         # resolve SemVer + write/verify mako.lock v2
+mako pkg update          # accept changes / migrate a v1 lockfile
 ```
 
 See [howto/04-packages.md](howto/04-packages.md).

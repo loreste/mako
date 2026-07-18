@@ -11,10 +11,16 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use sha2::{Digest, Sha256};
+
 use crate::tooling::{
     git_dep_cache_abs, parse_manifest_deps, parse_semver, registry_resolve, registry_root,
     valid_dep_cache_name, version_satisfies, ManifestDep,
 };
+
+const LOCKFILE_VERSION: u32 = 2;
+const LEGACY_LOCKFILE_VERSION: u32 = 1;
+const PACKAGE_HASH_PREFIX: &str = "sha256:";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LockedPackage {
@@ -63,48 +69,213 @@ fn read_meta(text: &str) -> (Option<String>, Option<String>) {
     (name, version)
 }
 
-fn simple_hash(bytes: &[u8]) -> String {
-    let mut h: u64 = 0xcbf29ce484222325;
-    for b in bytes {
-        h ^= u64::from(*b);
-        h = h.wrapping_mul(0x100000001b3);
-    }
-    format!("{h:016x}")
+fn excluded_package_entry(name: &str) -> bool {
+    matches!(name, ".git" | ".mako" | "target" | "mako.lock")
 }
 
-fn hash_path_dep(full: &Path) -> String {
-    if !full.exists() {
-        return "missing".into();
-    }
-    if full.is_file() {
-        return fs::read(full)
-            .map(|b| simple_hash(&b))
-            .unwrap_or_else(|_| "missing".into());
-    }
-    let mut buf = Vec::new();
-    let manifest = full.join("mako.toml");
-    if let Ok(b) = fs::read(&manifest) {
-        buf.extend_from_slice(&b);
-    }
-    let mut mko: Vec<_> = fs::read_dir(full)
-        .into_iter()
-        .flatten()
-        .filter_map(|e| e.ok())
-        .map(|e| e.path())
-        .filter(|p| p.extension().and_then(|x| x.to_str()) == Some("mko"))
-        .collect();
-    mko.sort();
-    for p in mko {
-        if let Ok(b) = fs::read(&p) {
-            buf.extend_from_slice(p.to_string_lossy().as_bytes());
-            buf.extend_from_slice(&b);
+fn normalized_relative_path(path: &Path) -> Result<String, String> {
+    let mut parts = Vec::new();
+    for component in path.components() {
+        match component {
+            std::path::Component::Normal(part) => parts.push(
+                part.to_str()
+                    .ok_or_else(|| {
+                        format!(
+                            "package path is not valid UTF-8 and cannot be hashed reproducibly: {}",
+                            path.display()
+                        )
+                    })?
+                    .to_string(),
+            ),
+            _ => {
+                return Err(format!(
+                    "package hash received a non-relative path: {}",
+                    path.display()
+                ));
+            }
         }
     }
-    if buf.is_empty() {
-        "empty".into()
-    } else {
-        simple_hash(&buf)
+    Ok(parts.join("/"))
+}
+
+fn normalized_lock_path(path: &Path) -> Result<String, String> {
+    let mut parts = Vec::new();
+    for component in path.components() {
+        match component {
+            std::path::Component::CurDir => parts.push(".".to_string()),
+            std::path::Component::ParentDir => parts.push("..".to_string()),
+            std::path::Component::Normal(part) => parts.push(
+                part.to_str()
+                    .ok_or_else(|| {
+                        format!(
+                            "dependency path is not valid UTF-8 and cannot be locked reproducibly: {}",
+                            path.display()
+                        )
+                    })?
+                    .to_string(),
+            ),
+            std::path::Component::Prefix(_) | std::path::Component::RootDir => {
+                return Err(format!(
+                    "dependency path must be relative to the project: {}",
+                    path.display()
+                ));
+            }
+        }
     }
+    let normalized = if parts.is_empty() {
+        ".".into()
+    } else {
+        parts.join("/")
+    };
+    validate_lock_value("path", &normalized).map_err(|_| {
+        format!(
+            "dependency path contains a quote, backslash, or control character and cannot be locked reproducibly: {}",
+            path.display()
+        )
+    })?;
+    Ok(normalized)
+}
+
+fn locked_source_matches(dep: &ManifestDep, locked: &LockedPackage) -> Result<bool, String> {
+    if let Some(path) = &dep.path {
+        let expected_path = normalized_lock_path(Path::new(path))?;
+        return Ok(locked.source == "path" && locked.path.as_deref() == Some(&expected_path));
+    }
+    if dep.git.is_some() {
+        return Ok(locked.source == "git"
+            && locked.git == dep.git
+            && locked.rev == dep.rev
+            && locked.tag == dep.tag
+            && locked.branch == dep.branch);
+    }
+    if dep.version.is_some() {
+        return Ok(locked.source == "registry");
+    }
+    Ok(false)
+}
+
+fn read_dependency_manifest(dir: &Path) -> Result<Option<String>, String> {
+    let manifest = dir.join("mako.toml");
+    match fs::read_to_string(&manifest) {
+        Ok(text) => Ok(Some(text)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(format!(
+            "read dependency manifest {}: {error}",
+            manifest.display()
+        )),
+    }
+}
+
+fn enqueue_transitive_dependencies(
+    package_name: &str,
+    dir: &Path,
+    queue: &mut Vec<(PathBuf, ManifestDep)>,
+    visiting: &mut HashSet<String>,
+) -> Result<(), String> {
+    let Some(text) = read_dependency_manifest(dir)? else {
+        return Ok(());
+    };
+    for dependency in parse_manifest_deps(&text) {
+        if visiting.insert(format!("{package_name}->{}", dependency.name)) {
+            queue.push((dir.to_path_buf(), dependency));
+        }
+    }
+    Ok(())
+}
+
+fn collect_package_files(
+    root: &Path,
+    dir: &Path,
+    files: &mut Vec<(String, PathBuf)>,
+) -> Result<(), String> {
+    let entries =
+        fs::read_dir(dir).map_err(|e| format!("read package directory {}: {e}", dir.display()))?;
+    for entry in entries {
+        let entry = entry.map_err(|e| format!("read package entry in {}: {e}", dir.display()))?;
+        let name = entry
+            .file_name()
+            .to_str()
+            .ok_or_else(|| {
+                format!(
+                    "package path is not valid UTF-8 and cannot be hashed reproducibly: {}",
+                    entry.path().display()
+                )
+            })?
+            .to_string();
+        if excluded_package_entry(&name) {
+            continue;
+        }
+        let path = entry.path();
+        let file_type = entry
+            .file_type()
+            .map_err(|e| format!("inspect package entry {}: {e}", path.display()))?;
+        if file_type.is_symlink() {
+            return Err(format!(
+                "package integrity hashing does not support symbolic links: {}",
+                path.display()
+            ));
+        }
+        if file_type.is_dir() {
+            collect_package_files(root, &path, files)?;
+        } else if file_type.is_file() {
+            let relative = path
+                .strip_prefix(root)
+                .map_err(|e| format!("make package path relative: {e}"))?;
+            if relative == Path::new("mako.toml")
+                || relative
+                    .extension()
+                    .and_then(|extension| extension.to_str())
+                    == Some("mko")
+            {
+                files.push((normalized_relative_path(relative)?, path));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Hash package inputs (root manifest + recursive `.mko` sources) with stable
+/// framing and normalized, relative paths. VCS metadata, Mako's dependency
+/// cache, Rust build output, and the lockfile itself are excluded.
+fn hash_path_dep(full: &Path) -> Result<String, String> {
+    if !full.exists() {
+        return Err(format!(
+            "cannot hash missing package path: {}",
+            full.display()
+        ));
+    }
+
+    let mut files = Vec::new();
+    if full.is_file() {
+        let name = full
+            .file_name()
+            .ok_or_else(|| format!("package file has no name: {}", full.display()))?;
+        files.push((
+            normalized_relative_path(Path::new(name))?,
+            full.to_path_buf(),
+        ));
+    } else if full.is_dir() {
+        collect_package_files(full, full, &mut files)?;
+    } else {
+        return Err(format!(
+            "package path is neither a regular file nor directory: {}",
+            full.display()
+        ));
+    }
+    files.sort_by(|a, b| a.0.cmp(&b.0));
+
+    let mut hasher = Sha256::new();
+    hasher.update(b"mako-package-content-v2\0");
+    for (relative, path) in files {
+        let contents = fs::read(&path)
+            .map_err(|e| format!("read package file {} for hashing: {e}", path.display()))?;
+        let relative = relative.as_bytes();
+        hasher.update((relative.len() as u64).to_be_bytes());
+        hasher.update(relative);
+        hasher.update((contents.len() as u64).to_be_bytes());
+        hasher.update(contents);
+    }
+    Ok(format!("{PACKAGE_HASH_PREFIX}{:x}", hasher.finalize()))
 }
 
 fn path_dep_version(full: &Path) -> Option<String> {
@@ -250,12 +421,12 @@ fn resolve_one(
             name: dep.name.clone(),
             version: ver,
             source: "path".into(),
-            path: Some(p.clone()),
+            path: Some(normalized_lock_path(Path::new(p))?),
             git: None,
             rev: None,
             tag: None,
             branch: None,
-            content_hash: hash_path_dep(&full),
+            content_hash: hash_path_dep(&full)?,
         });
     }
     if dep.git.is_some() {
@@ -267,17 +438,20 @@ fn resolve_one(
             name: dep.name.clone(),
             version: ver,
             source: "git".into(),
-            path: Some(
-                dest.strip_prefix(project)
-                    .unwrap_or(&dest)
-                    .to_string_lossy()
-                    .to_string(),
-            ),
+            path: Some(normalized_lock_path(dest.strip_prefix(project).map_err(
+                |_| {
+                    format!(
+                        "git dependency cache {} is outside project {}",
+                        dest.display(),
+                        project.display()
+                    )
+                },
+            )?)?),
             git: dep.git.clone(),
             rev: dep.rev.clone(),
             tag: dep.tag.clone(),
             branch: dep.branch.clone(),
-            content_hash: hash_path_dep(&dest),
+            content_hash: hash_path_dep(&dest)?,
         });
     }
     if let Some(req) = &dep.version {
@@ -303,18 +477,20 @@ fn resolve_one(
             name: dep.name.clone(),
             version: ver,
             source: "registry".into(),
-            path: Some(
-                use_path
-                    .strip_prefix(project)
-                    .unwrap_or(use_path)
-                    .to_string_lossy()
-                    .to_string(),
-            ),
+            path: Some(normalized_lock_path(
+                use_path.strip_prefix(project).map_err(|_| {
+                    format!(
+                        "registry dependency cache {} is outside project {}",
+                        use_path.display(),
+                        project.display()
+                    )
+                })?,
+            )?),
             git: None,
             rev: None,
             tag: None,
             branch: None,
-            content_hash: hash_path_dep(use_path),
+            content_hash: hash_path_dep(use_path)?,
         });
     }
     Err(format!(
@@ -353,8 +529,16 @@ pub fn resolve_graph_with_options(
     let root_name = root_name.unwrap_or_else(|| "root".into());
     let root_ver = root_ver.unwrap_or_else(|| "0.1.0".into());
 
-    let existing = if !update {
-        read_lockfile(&project.join("mako.lock")).ok()
+    let lock_path = project.join("mako.lock");
+    let existing = if !update && lock_path.exists() {
+        let lock = read_lockfile(&lock_path)?;
+        if lock.version != LOCKFILE_VERSION {
+            return Err(format!(
+                "mako.lock format version {} is not supported for integrity verification; run `mako pkg update` to create version {LOCKFILE_VERSION}",
+                lock.version
+            ));
+        }
+        Some(lock)
     } else {
         None
     };
@@ -405,6 +589,11 @@ pub fn resolve_graph_with_options(
         if !update {
             if let Some(lock) = &existing {
                 if let Some(lp) = lock.packages.iter().find(|p| p.name == key) {
+                    if !locked_source_matches(&dep, lp)? {
+                        return Err(format!(
+                            "lockfile source for `{key}` does not match mako.toml — run `mako pkg update`"
+                        ));
+                    }
                     if let Some(req) = &dep.version {
                         for part in req.split("&&") {
                             if !version_satisfies(&lp.version, part.trim()) {
@@ -426,11 +615,30 @@ pub fn resolve_graph_with_options(
                                     full.display()
                                 ));
                             }
-                            let _ = fetch_git(project, &dep, false);
+                            fetch_git(project, &dep, false)?;
                         }
                         if !full.exists() && lp.source == "registry" {
-                            let _ = resolve_one(project, &dep, true, offline)?;
+                            resolve_one(project, &dep, true, offline)?;
                         }
+                        if !full.exists() {
+                            return Err(format!(
+                                "locked dependency `{}` is missing at {}",
+                                key,
+                                full.display()
+                            ));
+                        }
+                        let actual_hash = hash_path_dep(&full)?;
+                        if actual_hash != lp.content_hash {
+                            return Err(format!(
+                                "package integrity mismatch for `{}` at {}: expected {}, found {}; restore the locked content or run `mako pkg update` if the change is intentional",
+                                key,
+                                full.display(),
+                                lp.content_hash,
+                                actual_hash
+                            ));
+                        }
+                    } else {
+                        return Err(format!("locked dependency `{}` has no path to verify", key));
                     }
                     resolved.insert(key.clone(), lp.clone());
                     // Transitive from locked path
@@ -442,13 +650,7 @@ pub fn resolve_graph_with_options(
                             Some(dir)
                         };
                         if let Some(nd) = next {
-                            if let Ok(t) = fs::read_to_string(nd.join("mako.toml")) {
-                                for td in parse_manifest_deps(&t) {
-                                    if visiting.insert(format!("{}->{}", key, td.name)) {
-                                        queue.push((nd.clone(), td));
-                                    }
-                                }
-                            }
+                            enqueue_transitive_dependencies(&key, &nd, &mut queue, &mut visiting)?;
                         }
                     }
                     continue;
@@ -486,13 +688,7 @@ pub fn resolve_graph_with_options(
                 Some(dir)
             };
             if let Some(nd) = next {
-                if let Ok(t) = fs::read_to_string(nd.join("mako.toml")) {
-                    for td in parse_manifest_deps(&t) {
-                        if visiting.insert(format!("{}->{}", key, td.name)) {
-                            queue.push((nd.clone(), td));
-                        }
-                    }
-                }
+                enqueue_transitive_dependencies(&key, &nd, &mut queue, &mut visiting)?;
             }
         }
     }
@@ -510,12 +706,12 @@ pub fn resolve_graph_with_options(
             rev: None,
             tag: None,
             branch: None,
-            content_hash: simple_hash(&fs::read(&manifest).unwrap_or_default()),
+            content_hash: hash_path_dep(project)?,
         },
     );
 
     Ok(Lockfile {
-        version: 1,
+        version: LOCKFILE_VERSION,
         packages,
     })
 }
@@ -525,99 +721,293 @@ pub fn resolve_graph(project: &Path, update: bool) -> Result<Lockfile, String> {
     resolve_graph_with_options(project, update, false)
 }
 
+fn validate_lock_value(field: &str, value: &str) -> Result<(), String> {
+    if value
+        .chars()
+        .any(|character| character == '"' || character == '\\' || character.is_control())
+    {
+        return Err(format!(
+            "lockfile {field} contains an unsupported quote, backslash, or control character"
+        ));
+    }
+    Ok(())
+}
+
+fn is_valid_sha256_hash(value: &str) -> bool {
+    let Some(hex) = value.strip_prefix(PACKAGE_HASH_PREFIX) else {
+        return false;
+    };
+    hex.len() == 64
+        && hex
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
+fn validate_locked_package(package: &LockedPackage, lock_version: u32) -> Result<(), String> {
+    for (field, value) in [
+        ("package name", package.name.as_str()),
+        ("package version", package.version.as_str()),
+        ("package source", package.source.as_str()),
+        ("content_hash", package.content_hash.as_str()),
+    ] {
+        if value.is_empty() {
+            return Err(format!("lockfile package has an empty {field}"));
+        }
+        validate_lock_value(field, value)?;
+    }
+    for (field, value) in [
+        ("path", package.path.as_deref()),
+        ("git", package.git.as_deref()),
+        ("rev", package.rev.as_deref()),
+        ("tag", package.tag.as_deref()),
+        ("branch", package.branch.as_deref()),
+    ] {
+        if let Some(value) = value {
+            if value.is_empty() {
+                return Err(format!(
+                    "lockfile package `{}` has an empty {field}",
+                    package.name
+                ));
+            }
+            validate_lock_value(field, value)?;
+        }
+    }
+    if package.path.is_none() {
+        return Err(format!(
+            "lockfile package `{}` is missing path",
+            package.name
+        ));
+    }
+    match package.source.as_str() {
+        "path" | "registry" => {
+            if package.git.is_some()
+                || package.rev.is_some()
+                || package.tag.is_some()
+                || package.branch.is_some()
+            {
+                return Err(format!(
+                    "lockfile package `{}` has source `{}` but contains git metadata",
+                    package.name, package.source
+                ));
+            }
+        }
+        "git" => {
+            if package.git.is_none() {
+                return Err(format!(
+                    "lockfile git package `{}` is missing git URL",
+                    package.name
+                ));
+            }
+        }
+        other => {
+            return Err(format!(
+                "lockfile package `{}` has unsupported source `{other}`",
+                package.name
+            ));
+        }
+    }
+    if lock_version == LOCKFILE_VERSION && !is_valid_sha256_hash(&package.content_hash) {
+        return Err(format!(
+            "lockfile package `{}` has invalid SHA-256 content_hash",
+            package.name
+        ));
+    }
+    Ok(())
+}
+
+fn validate_lockfile(lock: &Lockfile) -> Result<(), String> {
+    if lock.version == 0 {
+        return Err("lockfile version must be a positive integer".into());
+    }
+    if lock.version != LEGACY_LOCKFILE_VERSION && lock.version != LOCKFILE_VERSION {
+        return Err(format!(
+            "lockfile format version {} is not supported",
+            lock.version
+        ));
+    }
+    if lock.version == LOCKFILE_VERSION && lock.packages.is_empty() {
+        return Err("lockfile version 2 must contain at least one package".into());
+    }
+    let mut names = HashSet::new();
+    for package in &lock.packages {
+        validate_locked_package(package, lock.version)?;
+        if !names.insert(package.name.as_str()) {
+            return Err(format!(
+                "lockfile contains duplicate package `{}`",
+                package.name
+            ));
+        }
+    }
+    Ok(())
+}
+
 pub fn write_lockfile(project: &Path, lock: &Lockfile) -> Result<PathBuf, String> {
+    if lock.version != LOCKFILE_VERSION {
+        return Err(format!(
+            "refusing to write lockfile format version {}; current version is {LOCKFILE_VERSION}",
+            lock.version
+        ));
+    }
+    validate_lockfile(lock)?;
     let mut out = String::from(
         "# mako.lock — reproducible dependency pin\n# Generated by `mako pkg install` / `mako pkg lock`\n",
     );
     out.push_str(&format!("version = {}\n", lock.version));
-    for p in &lock.packages {
+    for package in &lock.packages {
         out.push_str("\n[[package]]\n");
-        out.push_str(&format!("name = \"{}\"\n", p.name));
-        out.push_str(&format!("version = \"{}\"\n", p.version));
-        out.push_str(&format!("source = \"{}\"\n", p.source));
-        if let Some(path) = &p.path {
+        out.push_str(&format!("name = \"{}\"\n", package.name));
+        out.push_str(&format!("version = \"{}\"\n", package.version));
+        out.push_str(&format!("source = \"{}\"\n", package.source));
+        if let Some(path) = &package.path {
             out.push_str(&format!("path = \"{path}\"\n"));
         }
-        if let Some(g) = &p.git {
-            out.push_str(&format!("git = \"{g}\"\n"));
+        if let Some(git) = &package.git {
+            out.push_str(&format!("git = \"{git}\"\n"));
         }
-        if let Some(r) = &p.rev {
-            out.push_str(&format!("rev = \"{r}\"\n"));
+        if let Some(revision) = &package.rev {
+            out.push_str(&format!("rev = \"{revision}\"\n"));
         }
-        if let Some(t) = &p.tag {
-            out.push_str(&format!("tag = \"{t}\"\n"));
+        if let Some(tag) = &package.tag {
+            out.push_str(&format!("tag = \"{tag}\"\n"));
         }
-        if let Some(b) = &p.branch {
-            out.push_str(&format!("branch = \"{b}\"\n"));
+        if let Some(branch) = &package.branch {
+            out.push_str(&format!("branch = \"{branch}\"\n"));
         }
-        out.push_str(&format!("content_hash = \"{}\"\n", p.content_hash));
+        out.push_str(&format!("content_hash = \"{}\"\n", package.content_hash));
     }
     let path = project.join("mako.lock");
     fs::write(&path, out).map_err(|e| format!("write mako.lock: {e}"))?;
     Ok(path)
 }
 
+fn parse_lock_string(path: &Path, line: usize, value: &str) -> Result<String, String> {
+    let value = value.trim();
+    let Some(value) = value
+        .strip_prefix('"')
+        .and_then(|value| value.strip_suffix('"'))
+    else {
+        return Err(format!(
+            "parse {} line {line}: expected a quoted string",
+            path.display()
+        ));
+    };
+    validate_lock_value("string value", value)
+        .map_err(|error| format!("parse {} line {line}: {error}", path.display()))?;
+    Ok(value.to_string())
+}
+
+fn empty_locked_package() -> LockedPackage {
+    LockedPackage {
+        name: String::new(),
+        version: String::new(),
+        source: String::new(),
+        path: None,
+        git: None,
+        rev: None,
+        tag: None,
+        branch: None,
+        content_hash: String::new(),
+    }
+}
+
 pub fn read_lockfile(path: &Path) -> Result<Lockfile, String> {
     let text = fs::read_to_string(path).map_err(|e| format!("read {}: {e}", path.display()))?;
-    let mut version = 1u32;
+    let mut version = None;
     let mut packages = Vec::new();
-    let mut cur: Option<LockedPackage> = None;
-    let flush = |cur: &mut Option<LockedPackage>, packages: &mut Vec<LockedPackage>| {
-        if let Some(p) = cur.take() {
-            if !p.name.is_empty() {
-                packages.push(p);
+    let mut current_package = None;
+    let mut seen_fields = HashSet::new();
+    for (line_index, line) in text.lines().enumerate() {
+        let line_number = line_index + 1;
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        if line == "[[package]]" {
+            if let Some(package) = current_package.take() {
+                packages.push(package);
             }
-        }
-    };
-    for line in text.lines() {
-        let t = line.trim();
-        if t.is_empty() || t.starts_with('#') {
+            current_package = Some(empty_locked_package());
+            seen_fields.clear();
             continue;
         }
-        if t.starts_with("version") && !t.contains('"') {
-            if let Some(n) = t.split('=').nth(1) {
-                version = n.trim().parse().unwrap_or(1);
+        let Some((key, raw_value)) = line.split_once('=') else {
+            return Err(format!(
+                "parse {} line {line_number}: expected `key = value`",
+                path.display()
+            ));
+        };
+        let key = key.trim();
+        let package = match current_package.as_mut() {
+            Some(package) => package,
+            None => {
+                if key != "version" {
+                    return Err(format!(
+                        "parse {} line {line_number}: unexpected field `{key}` outside a package",
+                        path.display()
+                    ));
+                }
+                if version.is_some() {
+                    return Err(format!(
+                        "parse {} line {line_number}: duplicate lockfile version",
+                        path.display()
+                    ));
+                }
+                version = Some(raw_value.trim().parse::<u32>().map_err(|_| {
+                    format!(
+                        "parse {} line {line_number}: lockfile version must be a positive integer",
+                        path.display()
+                    )
+                })?);
+                continue;
             }
-            continue;
-        }
-        if t == "[[package]]" {
-            flush(&mut cur, &mut packages);
-            cur = Some(LockedPackage {
-                name: String::new(),
-                version: "0.0.0".into(),
-                source: "path".into(),
-                path: None,
-                git: None,
-                rev: None,
-                tag: None,
-                branch: None,
-                content_hash: String::new(),
-            });
-            continue;
-        }
-        let Some(pkg) = cur.as_mut() else {
-            continue;
         };
-        let Some((k, v)) = t.split_once('=') else {
-            continue;
-        };
-        let k = k.trim();
-        let v = v.trim().trim_matches('"').to_string();
-        match k {
-            "name" => pkg.name = v,
-            "version" => pkg.version = v,
-            "source" => pkg.source = v,
-            "path" => pkg.path = Some(v),
-            "git" => pkg.git = Some(v),
-            "rev" => pkg.rev = Some(v),
-            "tag" => pkg.tag = Some(v),
-            "branch" => pkg.branch = Some(v),
-            "content_hash" => pkg.content_hash = v,
-            _ => {}
+        if !matches!(
+            key,
+            "name"
+                | "version"
+                | "source"
+                | "path"
+                | "git"
+                | "rev"
+                | "tag"
+                | "branch"
+                | "content_hash"
+        ) {
+            return Err(format!(
+                "parse {} line {line_number}: unknown package field `{key}`",
+                path.display()
+            ));
         }
+        if !seen_fields.insert(key.to_string()) {
+            return Err(format!(
+                "parse {} line {line_number}: duplicate package field `{key}`",
+                path.display()
+            ));
+        }
+        let value = parse_lock_string(path, line_number, raw_value)?;
+        match key {
+            "name" => package.name = value,
+            "version" => package.version = value,
+            "source" => package.source = value,
+            "path" => package.path = Some(value),
+            "git" => package.git = Some(value),
+            "rev" => package.rev = Some(value),
+            "tag" => package.tag = Some(value),
+            "branch" => package.branch = Some(value),
+            "content_hash" => package.content_hash = value,
+            _ => unreachable!(),
+        };
     }
-    flush(&mut cur, &mut packages);
-    Ok(Lockfile { version, packages })
+    if let Some(package) = current_package {
+        packages.push(package);
+    }
+    let lock = Lockfile {
+        version: version
+            .ok_or_else(|| format!("parse {}: missing lockfile format version", path.display()))?,
+        packages,
+    };
+    validate_lockfile(&lock).map_err(|error| format!("parse {}: {error}", path.display()))?;
+    Ok(lock)
 }
 
 pub fn pkg_install(project: &Path, offline: bool) -> Result<(), String> {
@@ -718,8 +1108,366 @@ mod tests {
         let lock = resolve_graph(&dir, true).unwrap();
         let path = write_lockfile(&dir, &lock).unwrap();
         let back = read_lockfile(&path).unwrap();
+        assert_eq!(back.version, LOCKFILE_VERSION);
         assert_eq!(back.packages.len(), 1);
         assert_eq!(back.packages[0].name, "app");
+        assert!(back.packages[0]
+            .content_hash
+            .starts_with(PACKAGE_HASH_PREFIX));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn package_hash_is_recursive_relocatable_and_excludes_local_state() {
+        let dir = env::temp_dir().join(format!("mako_pkg_hash_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let first = dir.join("first");
+        let second = dir.join("second");
+        for root in [&first, &second] {
+            fs::create_dir_all(root.join("src").join("nested")).unwrap();
+            fs::write(
+                root.join("mako.toml"),
+                "name = \"util\"\nversion = \"1.0.0\"\n",
+            )
+            .unwrap();
+            fs::write(
+                root.join("src").join("nested").join("math.mko"),
+                "fn answer() -> int { 42 }\n",
+            )
+            .unwrap();
+        }
+
+        let initial = hash_path_dep(&first).unwrap();
+        assert_eq!(initial, hash_path_dep(&second).unwrap());
+        assert_eq!(initial.len(), PACKAGE_HASH_PREFIX.len() + 64);
+
+        fs::create_dir_all(first.join(".mako").join("deps")).unwrap();
+        fs::create_dir_all(first.join(".git").join("objects")).unwrap();
+        fs::create_dir_all(first.join("target").join("debug")).unwrap();
+        fs::write(first.join(".mako").join("deps").join("cache"), "ignored").unwrap();
+        fs::write(
+            first.join(".git").join("objects").join("generated.mko"),
+            "fn ignored_git() -> int { 1 }\n",
+        )
+        .unwrap();
+        fs::write(
+            first.join("target").join("debug").join("generated.mko"),
+            "fn ignored_target() -> int { 1 }\n",
+        )
+        .unwrap();
+        fs::write(first.join("mako.lock"), "ignored").unwrap();
+        fs::write(first.join("NOTES.local.md"), "ignored").unwrap();
+        assert_eq!(initial, hash_path_dep(&first).unwrap());
+
+        fs::write(
+            first.join("src").join("nested").join("math.mko"),
+            "fn answer() -> int { 43 }\n",
+        )
+        .unwrap();
+        assert_ne!(initial, hash_path_dep(&first).unwrap());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn package_hash_wire_format_has_known_answer() {
+        let dir = env::temp_dir().join(format!("mako_pkg_hash_golden_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(
+            dir.join("mako.toml"),
+            "name = \"golden\"\nversion = \"1.0.0\"\n",
+        )
+        .unwrap();
+        fs::write(dir.join("lib.mko"), "fn answer() -> int { 42 }\n").unwrap();
+
+        assert_eq!(
+            hash_path_dep(&dir).unwrap(),
+            "sha256:9e7e2239891f3a4b15002916b264cd3fe289610fe2e855f506bf38bd137dfbd3"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn package_hash_rejects_symbolic_links() {
+        use std::os::unix::fs::symlink;
+
+        let dir = env::temp_dir().join(format!("mako_pkg_hash_symlink_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(
+            dir.join("mako.toml"),
+            "name = \"linked\"\nversion = \"1.0.0\"\n",
+        )
+        .unwrap();
+        fs::write(dir.join("real.mko"), "fn value() -> int { 1 }\n").unwrap();
+        symlink(dir.join("real.mko"), dir.join("alias.mko")).unwrap();
+
+        let error = hash_path_dep(&dir).unwrap_err();
+        assert!(error.contains("symbolic links"), "unexpected: {error}");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn locked_dependency_tampering_is_rejected() {
+        let dir = env::temp_dir().join(format!("mako_pkg_tamper_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let app = dir.join("app");
+        let util = dir.join("util");
+        fs::create_dir_all(&app).unwrap();
+        fs::create_dir_all(util.join("src").join("nested")).unwrap();
+        fs::write(
+            app.join("mako.toml"),
+            "name = \"app\"\nversion = \"0.1.0\"\n\n[dependencies]\n\"util\" = { path = \"../util\", version = \"1.0.0\" }\n",
+        )
+        .unwrap();
+        fs::write(
+            util.join("mako.toml"),
+            "name = \"util\"\nversion = \"1.0.0\"\n",
+        )
+        .unwrap();
+        let nested = util.join("src").join("nested").join("math.mko");
+        fs::write(&nested, "fn answer() -> int { 42 }\n").unwrap();
+
+        let lock = resolve_graph(&app, true).unwrap();
+        write_lockfile(&app, &lock).unwrap();
+        resolve_graph(&app, false).unwrap();
+
+        fs::write(&nested, "fn answer() -> int { 0 }\n").unwrap();
+        let err = resolve_graph(&app, false).unwrap_err();
+        assert!(err.contains("integrity mismatch"), "unexpected: {err}");
+        assert!(err.contains("mako pkg update"), "unexpected: {err}");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn legacy_lockfile_requires_explicit_update() {
+        let dir = env::temp_dir().join(format!("mako_pkg_legacy_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(
+            dir.join("mako.toml"),
+            "name = \"app\"\nversion = \"0.1.0\"\n\n[dependencies]\n",
+        )
+        .unwrap();
+        fs::write(dir.join("mako.lock"), "version = 1\n").unwrap();
+
+        let err = resolve_graph(&dir, false).unwrap_err();
+        assert!(err.contains("version 1"), "unexpected: {err}");
+        assert!(err.contains("mako pkg update"), "unexpected: {err}");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn malformed_lockfiles_are_rejected() {
+        let dir = env::temp_dir().join(format!("mako_pkg_bad_lock_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("mako.lock");
+        let valid_hash = format!("sha256:{}", "0".repeat(64));
+        let cases = [
+            (
+                "invalid version",
+                "version = 2xyz\n".to_string(),
+                "positive integer",
+            ),
+            (
+                "unsupported version",
+                "version = 99\n".to_string(),
+                "format version 99 is not supported",
+            ),
+            (
+                "missing version",
+                format!(
+                    r#"[[package]]
+name = "app"
+version = "1.0.0"
+source = "path"
+path = "."
+content_hash = "{valid_hash}"
+"#
+                ),
+                "missing lockfile format version",
+            ),
+            (
+                "source field mismatch",
+                format!(
+                    r#"version = 2
+
+[[package]]
+name = "app"
+version = "1.0.0"
+source = "path"
+path = "."
+git = "https://example.invalid/app.git"
+content_hash = "{valid_hash}"
+"#
+                ),
+                "contains git metadata",
+            ),
+            (
+                "bad content hash",
+                r#"version = 2
+
+[[package]]
+name = "app"
+version = "1.0.0"
+source = "path"
+path = "."
+content_hash = "garbage"
+"#
+                .to_string(),
+                "invalid SHA-256",
+            ),
+            (
+                "unquoted field",
+                format!(
+                    r#"version = 2
+
+[[package]]
+name = app
+version = "1.0.0"
+source = "path"
+path = "."
+content_hash = "{valid_hash}"
+"#
+                ),
+                "expected a quoted string",
+            ),
+        ];
+        for (case, contents, expected) in cases {
+            fs::write(&path, contents).unwrap();
+            let error = read_lockfile(&path).unwrap_err();
+            assert!(
+                error.contains(expected),
+                "{case}: expected `{expected}` in `{error}`"
+            );
+        }
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn lockfile_paths_reject_unrepresentable_characters() {
+        for path in ["dep\"quoted", "dep\ncontrol"] {
+            let error = normalized_lock_path(Path::new(path)).unwrap_err();
+            assert!(
+                error.contains("cannot be locked reproducibly"),
+                "unexpected: {error}"
+            );
+        }
+
+        let dir = env::temp_dir().join(format!("mako_pkg_bad_path_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let lock = Lockfile {
+            version: LOCKFILE_VERSION,
+            packages: vec![LockedPackage {
+                name: "app".into(),
+                version: "1.0.0".into(),
+                source: "path".into(),
+                path: Some("dep\"quoted".into()),
+                git: None,
+                rev: None,
+                tag: None,
+                branch: None,
+                content_hash: format!("sha256:{}", "0".repeat(64)),
+            }],
+        };
+        let error = write_lockfile(&dir, &lock).unwrap_err();
+        assert!(error.contains("unsupported quote"), "unexpected: {error}");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn unreadable_transitive_manifest_is_a_hard_error() {
+        let dir = env::temp_dir().join(format!("mako_pkg_manifest_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let app = dir.join("app");
+        let mid = dir.join("mid");
+        let leaf = dir.join("leaf");
+        fs::create_dir_all(&app).unwrap();
+        fs::create_dir_all(&mid).unwrap();
+        fs::create_dir_all(&leaf).unwrap();
+        fs::write(
+            app.join("mako.toml"),
+            "name = \"app\"\nversion = \"0.1.0\"\n\n[dependencies]\n\"mid\" = { path = \"../mid\", version = \"1.0.0\" }\n",
+        )
+        .unwrap();
+        fs::write(
+            mid.join("mako.toml"),
+            "name = \"mid\"\nversion = \"1.0.0\"\n\n[dependencies]\n\"leaf\" = { path = \"../leaf\", version = \"1.0.0\" }\n",
+        )
+        .unwrap();
+        fs::write(mid.join("lib.mko"), "fn mid() -> int { 1 }\n").unwrap();
+        fs::write(
+            leaf.join("mako.toml"),
+            "name = \"leaf\"\nversion = \"1.0.0\"\n",
+        )
+        .unwrap();
+        fs::write(leaf.join("lib.mko"), "fn leaf() -> int { 1 }\n").unwrap();
+
+        let mut lock = resolve_graph(&app, true).unwrap();
+        fs::write(mid.join("mako.toml"), [0xff, 0xfe, 0xfd]).unwrap();
+
+        let update_error = resolve_graph(&app, true).unwrap_err();
+        assert!(
+            update_error.contains("read dependency manifest"),
+            "unexpected: {update_error}"
+        );
+
+        let mid_lock = lock
+            .packages
+            .iter_mut()
+            .find(|package| package.name == "mid")
+            .unwrap();
+        mid_lock.content_hash = hash_path_dep(&mid).unwrap();
+        write_lockfile(&app, &lock).unwrap();
+        let install_error = resolve_graph(&app, false).unwrap_err();
+        assert!(
+            install_error.contains("read dependency manifest"),
+            "unexpected: {install_error}"
+        );
+        assert!(
+            install_error.contains("mako.toml"),
+            "unexpected: {install_error}"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn locked_dependency_source_change_requires_update() {
+        let dir = env::temp_dir().join(format!("mako_pkg_source_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let app = dir.join("app");
+        let first = dir.join("first");
+        let second = dir.join("second");
+        fs::create_dir_all(&app).unwrap();
+        for dependency in [&first, &second] {
+            fs::create_dir_all(dependency).unwrap();
+            fs::write(
+                dependency.join("mako.toml"),
+                "name = \"util\"\nversion = \"1.0.0\"\n",
+            )
+            .unwrap();
+            fs::write(dependency.join("lib.mko"), "fn value() -> int { 1 }\n").unwrap();
+        }
+        let manifest = app.join("mako.toml");
+        fs::write(
+            &manifest,
+            "name = \"app\"\nversion = \"0.1.0\"\n\n[dependencies]\n\"util\" = { path = \"../first\", version = \"1.0.0\" }\n",
+        )
+        .unwrap();
+        let lock = resolve_graph(&app, true).unwrap();
+        write_lockfile(&app, &lock).unwrap();
+
+        fs::write(
+            &manifest,
+            "name = \"app\"\nversion = \"0.1.0\"\n\n[dependencies]\n\"util\" = { path = \"../second\", version = \"1.0.0\" }\n",
+        )
+        .unwrap();
+        let err = resolve_graph(&app, false).unwrap_err();
+        assert!(err.contains("source"), "unexpected: {err}");
+        assert!(err.contains("mako pkg update"), "unexpected: {err}");
         let _ = fs::remove_dir_all(&dir);
     }
 
@@ -759,6 +1507,17 @@ mod tests {
             .packages
             .iter()
             .any(|p| p.name == "util" && p.version.starts_with("1.")));
+        let util = lock.packages.iter().find(|p| p.name == "util").unwrap();
+        assert_eq!(util.path.as_deref(), Some(".mako/deps/util"));
+        write_lockfile(&app, &lock).unwrap();
+        resolve_graph(&app, false).unwrap();
+        fs::write(
+            app.join(".mako").join("deps").join("util").join("lib.mko"),
+            "fn add(a: int, b: int) -> int { 0 }\n",
+        )
+        .unwrap();
+        let error = resolve_graph(&app, false).unwrap_err();
+        assert!(error.contains("integrity mismatch"), "unexpected: {error}");
         let _ = fs::remove_dir_all(&dir);
     }
 
@@ -795,6 +1554,11 @@ version = "0.1.0"
             .packages
             .iter()
             .any(|p| p.name == "util" && p.source == "git" && p.version == "1.2.0"));
+        write_lockfile(&dir, &lock).unwrap();
+        resolve_graph_with_options(&dir, false, true).unwrap();
+        fs::write(cached.join("lib.mko"), "fn ok() -> int { 0 }\n").unwrap();
+        let error = resolve_graph_with_options(&dir, false, true).unwrap_err();
+        assert!(error.contains("integrity mismatch"), "unexpected: {error}");
         let _ = fs::remove_dir_all(&dir);
     }
 
