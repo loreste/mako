@@ -2238,6 +2238,8 @@ impl TypeChecker {
         fns.insert("breaker_free".into(), Type::Fn(vec![Type::CircuitBreaker], Box::new(Type::Void)));
         fns.insert("jwt_sign".into(), Type::Fn(vec![Type::String, Type::String], Box::new(Type::String)));
         fns.insert("jwt_verify".into(), Type::Fn(vec![Type::String, Type::String], Box::new(Type::Int)));
+        fns.insert("jwt_verify_rs256".into(), Type::Fn(vec![Type::String, Type::String], Box::new(Type::Int)));
+        fns.insert("jwt_verify_jwks".into(), Type::Fn(vec![Type::String, Type::String], Box::new(Type::Int)));
         fns.insert("jwt_payload".into(), Type::Fn(vec![Type::String], Box::new(Type::String)));
         fns.insert("backoff_ms".into(), Type::Fn(vec![Type::Int, Type::Int, Type::Int], Box::new(Type::Int)));
         fns.insert("env_get_or".into(), Type::Fn(vec![Type::String, Type::String], Box::new(Type::String)));
@@ -2412,6 +2414,56 @@ impl TypeChecker {
         );
         fns.insert(
             "http_request".into(),
+            Type::Fn(
+                vec![Type::String, Type::String, Type::String, Type::Int],
+                Box::new(Type::String),
+            ),
+        );
+        fns.insert(
+            "https_request".into(),
+            Type::Fn(
+                vec![
+                    Type::String,
+                    Type::String,
+                    Type::String,
+                    Type::String,
+                    Type::String,
+                    Type::Int,
+                ],
+                Box::new(Type::String),
+            ),
+        );
+        fns.insert(
+            "https_get".into(),
+            Type::Fn(
+                vec![Type::String, Type::String, Type::Int],
+                Box::new(Type::String),
+            ),
+        );
+        fns.insert(
+            "https_post".into(),
+            Type::Fn(
+                vec![Type::String, Type::String, Type::String, Type::String, Type::Int],
+                Box::new(Type::String),
+            ),
+        );
+        fns.insert(
+            "https_last_status".into(),
+            Type::Fn(vec![], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "https_last_header".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::String)),
+        );
+        fns.insert(
+            "oidc_discovery".into(),
+            Type::Fn(
+                vec![Type::String, Type::String, Type::Int],
+                Box::new(Type::String),
+            ),
+        );
+        fns.insert(
+            "oidc_token".into(),
             Type::Fn(
                 vec![Type::String, Type::String, Type::String, Type::Int],
                 Box::new(Type::String),
@@ -9425,6 +9477,25 @@ impl TypeChecker {
                     Type::String,
                     Type::String,
                 ],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "tls_server_sni_update".into(),
+            Type::Fn(
+                vec![
+                    Type::Named("TlsServer".into()),
+                    Type::String,
+                    Type::String,
+                    Type::String,
+                ],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "tls_server_sni_remove".into(),
+            Type::Fn(
+                vec![Type::Named("TlsServer".into()), Type::String],
                 Box::new(Type::Int),
             ),
         );

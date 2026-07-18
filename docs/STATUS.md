@@ -1,6 +1,6 @@
 # Mako status (adversarial / verified)
 
-Last inventory: **2026-07-17** · product **mako0.2.1** (`CARGO_PKG_VERSION`).
+Last inventory: **2026-07-18** · product **mako0.2.2** (`CARGO_PKG_VERSION`).
 
 Unique Mako surface · pack/pull · map/slice/bag monomorphs · package-per-directory ·
 const-fn depth (match/while/for/strings) · suite **338 test programs** · [The Mako Book](book/).
@@ -13,7 +13,7 @@ const-fn depth (match/while/for/strings) · suite **338 test programs** · [The 
 
 | Scope | Approx. |
 |-------|---------|
-| **Product version** | **0.2.1** |
+| **Product version** | **0.2.2** |
 | **MVP / usable language** | Core compiler/runtime scope is exercised; this is not a production-readiness claim |
 | **STATUS north-star** | Tracked scope is explicit; residuals below remain |
 | **Mako identity (preferred syntax)** | Checklist complete — [IDENTITY.md](IDENTITY.md); not a maturity score |
@@ -118,6 +118,9 @@ const-fn depth (match/while/for/strings) · suite **338 test programs** · [The 
 | Product version 0.1.7 | Done — freeze codecs/combinators/packages wave |
 | Product version 0.1.8 | Done — speed wave (wyhash, f-string stack, select condvar, HTTP 1024) |
 | Product version 0.1.9 | Done — generic structs/enums, interface bounds, iterator/closure seeds |
+| Product version 0.2.0 | Done — stdlib in Mako (io, collections, context, json, http, sql pool) |
+| Product version 0.2.1 | Done — match exhaustiveness, guards, safety verification |
+| Product version 0.2.2 | Done — TLS SNI COW/update/remove, HTTPS/OIDC, JWT RS256/JWKS, lock integrity |
 | Generic structs `struct Pair[T]` + multi-param | Done — monomorph `Pair__int` · `generic_struct_test` |
 | Generic enums `enum MyBox[T]` + match | Done — `generic_enum_test` |
 | Interface bounds `fn f[T: I](…)` | Done — structural · `generic_bounds_test` · `bad/generic_bound_fail` |

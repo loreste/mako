@@ -11,6 +11,14 @@
 #include <time.h>
 #include <stdint.h>
 
+#if defined(MAKO_HAS_OPENSSL) || defined(MAKO_USE_OPENSSL)
+#include <openssl/bio.h>
+#include <openssl/evp.h>
+#include <openssl/pem.h>
+#include <openssl/rsa.h>
+#define MAKO_CLOUD_OPENSSL 1
+#endif
+
 /* ============================================================
  * Consistent Hash Ring — distribute keys across N nodes.
  * Uses virtual nodes (vnodes) for even distribution.
@@ -283,8 +291,10 @@ static inline void mako_breaker_reset(MakoCircuitBreaker *cb) {
 static inline void mako_breaker_free(MakoCircuitBreaker *cb) { free(cb); }
 
 /* ============================================================
- * JWT (HMAC-SHA256) — sign and verify tokens.
- * Minimal implementation: header.payload.signature
+ * JWT — explicit HS256 and RS256 verification.
+ * `jwt_sign`/`jwt_verify` are intentionally HS256-only.  RS256 uses separate
+ * verify APIs so a caller cannot accidentally pass a shared secret to an RSA
+ * path or accept an algorithm selected by an untrusted token header.
  * ============================================================ */
 
 /* Base64url encode (no padding) */
@@ -338,6 +348,299 @@ static inline size_t mako_b64url_decode(const char *src, size_t slen, uint8_t *d
     return o;
 }
 
+/* Strict, canonical base64url decoder for security-sensitive JWT fields. */
+static inline int8_t mako_jwt_b64url_value(unsigned char c) {
+    if (c >= 'A' && c <= 'Z') return (int8_t)(c - 'A');
+    if (c >= 'a' && c <= 'z') return (int8_t)(c - 'a' + 26);
+    if (c >= '0' && c <= '9') return (int8_t)(c - '0' + 52);
+    if (c == '-') return 62;
+    if (c == '_') return 63;
+    return -1;
+}
+
+static inline int mako_jwt_b64url_decode_strict(
+    const char *src, size_t slen, uint8_t *dst, size_t dcap, size_t *out_len
+) {
+    if (!src || !dst || !out_len || slen == 0 || (slen & 3u) == 1u) return -1;
+    size_t expected = (slen / 4) * 3;
+    if ((slen & 3u) == 2u) expected += 1;
+    else if ((slen & 3u) == 3u) expected += 2;
+    if (expected == 0 || expected > dcap) return -1;
+    size_t o = 0, i = 0;
+    while (i + 4 <= slen) {
+        int8_t a = mako_jwt_b64url_value((unsigned char)src[i++]);
+        int8_t b = mako_jwt_b64url_value((unsigned char)src[i++]);
+        int8_t c = mako_jwt_b64url_value((unsigned char)src[i++]);
+        int8_t d = mako_jwt_b64url_value((unsigned char)src[i++]);
+        if (a < 0 || b < 0 || c < 0 || d < 0) return -1;
+        uint32_t v = ((uint32_t)a << 18) | ((uint32_t)b << 12)
+                   | ((uint32_t)c << 6) | (uint32_t)d;
+        dst[o++] = (uint8_t)(v >> 16);
+        dst[o++] = (uint8_t)(v >> 8);
+        dst[o++] = (uint8_t)v;
+    }
+    size_t rem = slen - i;
+    if (rem == 2) {
+        int8_t a = mako_jwt_b64url_value((unsigned char)src[i]);
+        int8_t b = mako_jwt_b64url_value((unsigned char)src[i + 1]);
+        if (a < 0 || b < 0 || (b & 15) != 0) return -1;
+        dst[o++] = (uint8_t)(((uint32_t)a << 2) | ((uint32_t)b >> 4));
+    } else if (rem == 3) {
+        int8_t a = mako_jwt_b64url_value((unsigned char)src[i]);
+        int8_t b = mako_jwt_b64url_value((unsigned char)src[i + 1]);
+        int8_t c = mako_jwt_b64url_value((unsigned char)src[i + 2]);
+        if (a < 0 || b < 0 || c < 0 || (c & 3) != 0) return -1;
+        uint32_t v = ((uint32_t)a << 12) | ((uint32_t)b << 6) | (uint32_t)c;
+        dst[o++] = (uint8_t)(v >> 10);
+        dst[o++] = (uint8_t)(v >> 2);
+    } else if (rem != 0) {
+        return -1;
+    }
+    if (o != expected) return -1;
+    *out_len = o;
+    return 0;
+}
+
+static inline size_t mako_jwt_json_ws(const char *s, size_t len, size_t pos) {
+    while (pos < len && (s[pos] == ' ' || s[pos] == '\t' || s[pos] == '\r' || s[pos] == '\n'))
+        pos++;
+    return pos;
+}
+
+/* Parse a JSON string. Non-ASCII escapes are rejected deliberately: JWT
+ * metadata used for algorithm/key selection is ASCII by contract. */
+static inline int mako_jwt_json_string(
+    const char *s, size_t len, size_t *pos, char *out, size_t cap, size_t *out_len
+) {
+    if (!s || !pos || *pos >= len || s[*pos] != '"') return -1;
+    size_t p = *pos + 1, n = 0;
+    while (p < len) {
+        unsigned char c = (unsigned char)s[p++];
+        if (c == '"') {
+            if (out && cap > 0) out[n < cap ? n : cap - 1] = 0;
+            if (out_len) *out_len = n;
+            *pos = p;
+            return n < cap || !out ? 0 : -1;
+        }
+        if (c < 0x20) return -1;
+        if (c == '\\') {
+            if (p >= len) return -1;
+            unsigned char esc = (unsigned char)s[p++];
+            if (esc == '"' || esc == '\\' || esc == '/') c = esc;
+            else if (esc == 'b') c = '\b';
+            else if (esc == 'f') c = '\f';
+            else if (esc == 'n') c = '\n';
+            else if (esc == 'r') c = '\r';
+            else if (esc == 't') c = '\t';
+            else if (esc == 'u') return -1;
+            else return -1;
+        }
+        if (out) {
+            if (n + 1 >= cap) return -1;
+            out[n] = (char)c;
+        }
+        n++;
+    }
+    return -1;
+}
+
+static inline int mako_jwt_json_skip_value(
+    const char *s, size_t len, size_t *pos
+) {
+    if (!s || !pos) return -1;
+    *pos = mako_jwt_json_ws(s, len, *pos);
+    if (*pos >= len) return -1;
+    if (s[*pos] == '"') return mako_jwt_json_string(s, len, pos, NULL, 0, NULL);
+    if (s[*pos] == '{' || s[*pos] == '[') {
+        char stack[64];
+        size_t depth = 0;
+        int in_string = 0, escaped = 0;
+        for (; *pos < len; (*pos)++) {
+            char c = s[*pos];
+            if (in_string) {
+                if (escaped) escaped = 0;
+                else if (c == '\\') escaped = 1;
+                else if (c == '"') in_string = 0;
+                else if ((unsigned char)c < 0x20) return -1;
+                continue;
+            }
+            if (c == '"') { in_string = 1; continue; }
+            if (c == '{' || c == '[') {
+                if (depth >= sizeof(stack)) return -1;
+                stack[depth++] = c;
+            } else if (c == '}' || c == ']') {
+                if (depth == 0
+                    || (c == '}' && stack[depth - 1] != '{')
+                    || (c == ']' && stack[depth - 1] != '[')) return -1;
+                depth--;
+                if (depth == 0) { (*pos)++; return 0; }
+            }
+        }
+        return -1;
+    }
+    size_t start = *pos;
+    while (*pos < len && s[*pos] != ',' && s[*pos] != '}' && s[*pos] != ']') (*pos)++;
+    return *pos > start ? 0 : -1;
+}
+
+/* Return the span of a direct JSON object field's value. */
+static inline int mako_jwt_json_field(
+    const char *s, size_t len, const char *key,
+    const char **value, size_t *value_len, int *present
+) {
+    if (present) *present = 0;
+    if (!s || !key || !value || !value_len) return -1;
+    size_t pos = mako_jwt_json_ws(s, len, 0);
+    if (pos >= len || s[pos++] != '{') return -1;
+    const char *found_value = NULL;
+    size_t found_len = 0;
+    int found = 0;
+    int after_comma = 0;
+    for (;;) {
+        pos = mako_jwt_json_ws(s, len, pos);
+        if (pos < len && s[pos] == '}') {
+            return after_comma ? -1 : 0;
+        }
+        char field[128];
+        size_t field_len = 0;
+        if (mako_jwt_json_string(s, len, &pos, field, sizeof(field), &field_len) != 0)
+            return -1;
+        pos = mako_jwt_json_ws(s, len, pos);
+        if (pos >= len || s[pos++] != ':') return -1;
+        pos = mako_jwt_json_ws(s, len, pos);
+        size_t start = pos;
+        if (mako_jwt_json_skip_value(s, len, &pos) != 0) return -1;
+        if (strlen(key) == field_len && memcmp(field, key, field_len) == 0) {
+            if (found) return -1; /* duplicate security-relevant field */
+            found_value = s + start;
+            found_len = pos - start;
+            found = 1;
+        }
+        after_comma = 0;
+        pos = mako_jwt_json_ws(s, len, pos);
+        if (pos >= len) return -1;
+        if (s[pos] == ',') { pos++; after_comma = 1; continue; }
+        if (s[pos] == '}') {
+            if (found) {
+                *value = found_value;
+                *value_len = found_len;
+                if (present) *present = 1;
+            }
+            return 0;
+        }
+        return -1;
+    }
+}
+
+static inline int mako_jwt_json_field_string(
+    const char *s, size_t len, const char *key,
+    char *out, size_t cap, int *present
+) {
+    const char *value = NULL;
+    size_t value_len = 0;
+    int found = 0;
+    if (mako_jwt_json_field(s, len, key, &value, &value_len, &found) != 0) return -1;
+    if (present) *present = found;
+    if (!found) return 0;
+    size_t pos = 0, n = 0;
+    if (mako_jwt_json_string(value, value_len, &pos, out, cap, &n) != 0
+        || mako_jwt_json_ws(value, value_len, pos) != value_len)
+        return -1;
+    return 0;
+}
+
+static inline int mako_jwt_json_array_has_string(
+    const char *s, size_t len, const char *wanted
+) {
+    size_t pos = mako_jwt_json_ws(s, len, 0);
+    if (pos >= len || s[pos++] != '[') return -1;
+    int found = 0;
+    int after_comma = 0;
+    for (;;) {
+        pos = mako_jwt_json_ws(s, len, pos);
+        if (pos < len && s[pos] == ']') return after_comma ? -1 : 0;
+        char value[128];
+        size_t n = 0;
+        if (mako_jwt_json_string(s, len, &pos, value, sizeof(value), &n) != 0) return -1;
+        if (strlen(wanted) == n && memcmp(value, wanted, n) == 0) found = 1;
+        after_comma = 0;
+        pos = mako_jwt_json_ws(s, len, pos);
+        if (pos >= len) return -1;
+        if (s[pos] == ',') { pos++; after_comma = 1; continue; }
+        if (s[pos] == ']') return found;
+        return -1;
+    }
+}
+
+static inline int mako_jwt_parts(
+    MakoString token, size_t *first, size_t *second
+) {
+    if (!token.data || token.len < 5 || token.len > (1u << 20)) return -1;
+    size_t a = SIZE_MAX, b = SIZE_MAX;
+    for (size_t i = 0; i < token.len; i++) {
+        if (token.data[i] != '.') continue;
+        if (a == SIZE_MAX) a = i;
+        else if (b == SIZE_MAX) b = i;
+        else return -1;
+    }
+    if (a == SIZE_MAX || b == SIZE_MAX || a == 0 || b <= a + 1 || b + 1 >= token.len
+        || a > 4096 || b - a - 1 > 16384 || token.len - b - 1 > 8192)
+        return -1;
+    if (first) *first = a;
+    if (second) *second = b;
+    return 0;
+}
+
+static inline int mako_jwt_header(
+    MakoString token, char *header, size_t header_cap, char *kid, size_t kid_cap,
+    int require_kid, size_t *first_dot, size_t *second_dot
+) {
+    size_t a = 0, b = 0;
+    if (mako_jwt_parts(token, &a, &b) != 0 || !header || header_cap == 0) return -1;
+    size_t header_len = 0;
+    if (mako_jwt_b64url_decode_strict(
+            token.data, a, (uint8_t *)header, header_cap - 1, &header_len) != 0)
+        return -1;
+    header[header_len] = 0;
+    int has_alg = 0;
+    char alg[16];
+    if (mako_jwt_json_field_string(
+            header, header_len, "alg", alg, sizeof(alg), &has_alg) != 0
+        || !has_alg || strcmp(alg, "RS256") != 0) return -1;
+    if (kid) {
+        int has_kid = 0;
+        if (mako_jwt_json_field_string(
+                header, header_len, "kid", kid, kid_cap, &has_kid) != 0
+            || (require_kid && (!has_kid || kid[0] == 0))) return -1;
+    }
+    if (first_dot) *first_dot = a;
+    if (second_dot) *second_dot = b;
+    return 0;
+}
+
+#if defined(MAKO_CLOUD_OPENSSL)
+static inline int64_t mako_jwt_verify_pkey(
+    MakoString token, size_t first_dot, size_t second_dot, EVP_PKEY *pkey
+) {
+    if (!pkey || EVP_PKEY_base_id(pkey) != EVP_PKEY_RSA
+        || EVP_PKEY_get_bits(pkey) < 2048 || EVP_PKEY_get_bits(pkey) > 16384) return 0;
+    uint8_t signature[8192];
+    size_t signature_len = 0;
+    if (mako_jwt_b64url_decode_strict(
+            token.data + second_dot + 1, token.len - second_dot - 1,
+            signature, sizeof(signature), &signature_len) != 0)
+        return 0;
+    EVP_MD_CTX *ctx = EVP_MD_CTX_new();
+    if (!ctx) return 0;
+    int ok = EVP_DigestVerifyInit(ctx, NULL, EVP_sha256(), NULL, pkey) == 1
+        && EVP_DigestVerifyUpdate(ctx, token.data, second_dot) == 1
+        && EVP_DigestVerifyFinal(ctx, signature, signature_len) == 1;
+    OPENSSL_cleanse(signature, sizeof(signature));
+    EVP_MD_CTX_free(ctx);
+    return ok ? 1 : 0;
+}
+#endif
+
 /* Uses mako_hmac_sha256_raw from mako_std.h (included before this file) */
 
 /* Sign a JWT payload with HMAC-SHA256. Returns "header.payload.signature". */
@@ -383,17 +686,22 @@ static inline MakoString mako_jwt_sign(MakoString payload, MakoString secret) {
 
 /* Verify a JWT token. Returns 1 if valid, 0 if invalid. */
 static inline int64_t mako_jwt_verify(MakoString token, MakoString secret) {
-    if (!token.data || token.len < 5) return 0;
+    size_t first_dot = 0, second_dot = 0;
+    if (mako_jwt_parts(token, &first_dot, &second_dot) != 0) return 0;
+    char header[4097];
+    size_t header_len = 0;
+    if (mako_jwt_b64url_decode_strict(
+            token.data, first_dot, (uint8_t *)header, sizeof(header) - 1, &header_len) != 0)
+        return 0;
+    header[header_len] = 0;
+    char alg[16];
+    int has_alg = 0;
+    if (mako_jwt_json_field_string(
+            header, header_len, "alg", alg, sizeof(alg), &has_alg) != 0
+        || !has_alg || strcmp(alg, "HS256") != 0)
+        return 0;
 
-    /* Find last dot (separates signature) */
-    int last_dot = -1;
-    for (int i = (int)token.len - 1; i >= 0; i--) {
-        if (token.data[i] == '.') { last_dot = i; break; }
-    }
-    if (last_dot < 0) return 0;
-
-    /* Signing input = everything before last dot */
-    MakoString input = {token.data, (size_t)last_dot};
+    MakoString input = {token.data, second_dot};
 
     /* Recompute HMAC */
     MakoString sig_raw = mako_hmac_sha256_raw(secret, input);
@@ -401,10 +709,15 @@ static inline int64_t mako_jwt_verify(MakoString token, MakoString secret) {
     size_t sig_b64_len = mako_b64url_encode((const uint8_t *)sig_raw.data, sig_raw.len, sig_b64, sizeof(sig_b64));
 
     /* Compare with provided signature */
-    const char *provided = token.data + last_dot + 1;
-    size_t provided_len = token.len - (size_t)last_dot - 1;
-
-    if (provided_len != sig_b64_len) return 0;
+    const char *provided = token.data + second_dot + 1;
+    size_t provided_len = token.len - second_dot - 1;
+    uint8_t provided_raw[64];
+    size_t provided_raw_len = 0;
+    if (provided_len != sig_b64_len
+        || mako_jwt_b64url_decode_strict(
+               provided, provided_len, provided_raw, sizeof(provided_raw), &provided_raw_len) != 0
+        || provided_raw_len != sig_raw.len)
+        return 0;
 
     /* Constant-time compare to prevent timing attacks */
     uint8_t diff = 0;
@@ -414,25 +727,147 @@ static inline int64_t mako_jwt_verify(MakoString token, MakoString secret) {
     return diff == 0 ? 1 : 0;
 }
 
+/* Verify an RS256 JWT with a PEM SubjectPublicKeyInfo RSA public key. */
+static inline int64_t mako_jwt_verify_rs256(MakoString token, MakoString public_key_pem) {
+#if !defined(MAKO_CLOUD_OPENSSL)
+    (void)token; (void)public_key_pem;
+    return 0;
+#else
+    char header[4097];
+    size_t first_dot = 0, second_dot = 0;
+    if (!public_key_pem.data || public_key_pem.len == 0 || public_key_pem.len > 16384
+        || mako_jwt_header(token, header, sizeof(header), NULL, 0, 0,
+                           &first_dot, &second_dot) != 0)
+        return 0;
+    BIO *bio = BIO_new_mem_buf(public_key_pem.data, (int)public_key_pem.len);
+    if (!bio) return 0;
+    EVP_PKEY *pkey = PEM_read_bio_PUBKEY(bio, NULL, NULL, NULL);
+    BIO_free(bio);
+    if (!pkey) return 0;
+    int64_t ok = mako_jwt_verify_pkey(token, first_dot, second_dot, pkey);
+    EVP_PKEY_free(pkey);
+    return ok;
+#endif
+}
+
+/* Verify an RS256 JWT against a JWKS JSON document.  Exactly one RSA signing
+ * key with the token's kid must match; ambiguous or metadata-incompatible sets
+ * fail closed. */
+static inline int64_t mako_jwt_verify_jwks(MakoString token, MakoString jwks_json) {
+#if !defined(MAKO_CLOUD_OPENSSL)
+    (void)token; (void)jwks_json;
+    return 0;
+#else
+    if (!jwks_json.data || jwks_json.len == 0 || jwks_json.len > (1u << 20)) return 0;
+    char header[4097], kid[256];
+    size_t first_dot = 0, second_dot = 0;
+    if (mako_jwt_header(token, header, sizeof(header), kid, sizeof(kid), 1,
+                        &first_dot, &second_dot) != 0)
+        return 0;
+    const char *keys = NULL;
+    size_t keys_len = 0;
+    int has_keys = 0;
+    if (mako_jwt_json_field(
+            jwks_json.data, jwks_json.len, "keys", &keys, &keys_len, &has_keys) != 0
+        || !has_keys) return 0;
+    size_t pos = mako_jwt_json_ws(keys, keys_len, 0);
+    if (pos >= keys_len || keys[pos++] != '[') return 0;
+    EVP_PKEY *selected = NULL;
+    size_t matches = 0;
+    for (;;) {
+        pos = mako_jwt_json_ws(keys, keys_len, pos);
+        if (pos >= keys_len) break;
+        if (keys[pos] == ']') { pos++; break; }
+        size_t start = pos;
+        if (mako_jwt_json_skip_value(keys, keys_len, &pos) != 0) goto done;
+        const char *obj = keys + start;
+        size_t obj_len = pos - start;
+        if (obj_len == 0 || obj[0] != '{') goto next;
+
+        char key_kid[256], kty[16], alg[16], use[16], n_b64[8192], e_b64[64];
+        int has_kid = 0, has_kty = 0, has_alg = 0, has_use = 0, has_n = 0, has_e = 0;
+        if (mako_jwt_json_field_string(obj, obj_len, "kid", key_kid, sizeof(key_kid), &has_kid) != 0
+            || mako_jwt_json_field_string(obj, obj_len, "kty", kty, sizeof(kty), &has_kty) != 0
+            || mako_jwt_json_field_string(obj, obj_len, "alg", alg, sizeof(alg), &has_alg) != 0
+            || mako_jwt_json_field_string(obj, obj_len, "use", use, sizeof(use), &has_use) != 0
+            || mako_jwt_json_field_string(obj, obj_len, "n", n_b64, sizeof(n_b64), &has_n) != 0
+            || mako_jwt_json_field_string(obj, obj_len, "e", e_b64, sizeof(e_b64), &has_e) != 0)
+            goto done;
+        if (!has_kid || strcmp(key_kid, kid) != 0) goto next;
+        matches++;
+        if (!has_kty || strcmp(kty, "RSA") != 0 || (has_alg && strcmp(alg, "RS256") != 0)
+            || (has_use && strcmp(use, "sig") != 0) || !has_n || !has_e) goto next;
+        const char *ops = NULL;
+        size_t ops_len = 0;
+        int has_ops = 0;
+        if (mako_jwt_json_field(obj, obj_len, "key_ops", &ops, &ops_len, &has_ops) != 0)
+            goto done;
+        if (has_ops) {
+            int verifies = mako_jwt_json_array_has_string(ops, ops_len, "verify");
+            if (verifies != 1) goto next;
+        }
+        uint8_t n_raw[4096], e_raw[16];
+        size_t n_len = 0, e_len = 0;
+        if (mako_jwt_b64url_decode_strict(
+                n_b64, strlen(n_b64), n_raw, sizeof(n_raw), &n_len) != 0
+            || mako_jwt_b64url_decode_strict(
+                e_b64, strlen(e_b64), e_raw, sizeof(e_raw), &e_len) != 0
+            || n_len < 256 || e_len == 0 || e_len > 8)
+            goto next;
+        RSA *rsa = RSA_new();
+        BIGNUM *bn = BN_bin2bn(n_raw, (int)n_len, NULL);
+        BIGNUM *be = BN_bin2bn(e_raw, (int)e_len, NULL);
+        if (!rsa || !bn || !be || BN_is_negative(bn) || BN_is_negative(be)
+            || BN_is_zero(be) || !BN_is_odd(be) || RSA_set0_key(rsa, bn, be, NULL) != 1) {
+            if (rsa) RSA_free(rsa);
+            if (bn) BN_free(bn);
+            if (be) BN_free(be);
+            goto next;
+        }
+        bn = NULL; be = NULL;
+        EVP_PKEY *pkey = EVP_PKEY_new();
+        if (!pkey || EVP_PKEY_assign_RSA(pkey, rsa) != 1) {
+            if (pkey) EVP_PKEY_free(pkey);
+            else RSA_free(rsa);
+            goto next;
+        }
+        if (selected) {
+            EVP_PKEY_free(pkey);
+        } else {
+            selected = pkey;
+        }
+next:
+        pos = mako_jwt_json_ws(keys, keys_len, pos);
+        if (pos < keys_len && keys[pos] == ',') { pos++; continue; }
+        if (pos < keys_len && keys[pos] == ']') { pos++; break; }
+        goto done;
+    }
+done:
+    {
+        int64_t ok = 0;
+        if (matches == 1 && selected)
+            ok = mako_jwt_verify_pkey(token, first_dot, second_dot, selected);
+        if (selected) EVP_PKEY_free(selected);
+        return ok;
+    }
+#endif
+}
+
 /* Extract payload from JWT (base64url-decoded). Does NOT verify! */
 static inline MakoString mako_jwt_payload(MakoString token) {
     if (!token.data) return mako_str_from_cstr("");
-    /* Find first and second dots */
-    int first_dot = -1, second_dot = -1;
-    for (size_t i = 0; i < token.len; i++) {
-        if (token.data[i] == '.') {
-            if (first_dot < 0) first_dot = (int)i;
-            else { second_dot = (int)i; break; }
-        }
-    }
-    if (first_dot < 0 || second_dot < 0) return mako_str_from_cstr("");
+    size_t first_dot = 0, second_dot = 0;
+    if (mako_jwt_parts(token, &first_dot, &second_dot) != 0)
+        return mako_str_from_cstr("");
 
     const char *pay_b64 = token.data + first_dot + 1;
-    size_t pay_b64_len = (size_t)(second_dot - first_dot - 1);
+    size_t pay_b64_len = second_dot - first_dot - 1;
 
-    uint8_t decoded[8192];
-    size_t dlen = mako_b64url_decode(pay_b64, pay_b64_len, decoded, sizeof(decoded));
-    if (dlen == 0) return mako_str_from_cstr("");
+    uint8_t decoded[16384];
+    size_t dlen = 0;
+    if (mako_jwt_b64url_decode_strict(
+            pay_b64, pay_b64_len, decoded, sizeof(decoded), &dlen) != 0)
+        return mako_str_from_cstr("");
 
     char *out = (char *)malloc(dlen + 1);
     if (!out) return mako_str_from_cstr("");

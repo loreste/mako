@@ -1,0 +1,8 @@
+fn TestHttpsLastStatusDefault() {
+    // No request yet — status should be safe (0)
+    assert_eq(https_last_status(), 0)
+}
+fn TestJwtVerifyBadToken() {
+    // Malformed token must fail closed (0)
+    assert_eq(jwt_verify_rs256("not.a.jwt", "-----BEGIN PUBLIC KEY-----\nMIIB\n-----END PUBLIC KEY-----"), 0)
+}

@@ -1,6 +1,6 @@
 # Mako roadmap
 
-**Product version:** **0.2.1** · Last roadmap sync: **2026-07-17**.
+**Product version:** **0.2.2** · Last roadmap sync: **2026-07-18**.
 
 **Verified:** [STATUS.md](STATUS.md) · **Stdlib:** [STDLIB.md](STDLIB.md) · **Security:** [SECURITY.md](SECURITY.md) · **Release:** [RELEASE.md](RELEASE.md).  
 **Book:** [The Mako Book](book/) · **Identity:** [IDENTITY.md](IDENTITY.md) · **Pain map:** [PAIN_POINTS.md](PAIN_POINTS.md).
@@ -15,7 +15,8 @@
 | **0.1.10** | Deepen generics + speed | **Shipped** |
 | **0.2.0** | Stdlib written in Mako | **Shipped** |
 | **0.2.1** | Safety & correctness | **Shipped** |
-| **0.2.2** | Tooling | Planned |
+| **0.2.2** | TLS SNI / HTTPS / JWT / lock integrity | **Shipped** |
+| **0.2.3** | Tooling (LSP depth) | **Next** |
 | **0.3.0** | Cross-platform | Planned |
 | **0.4.0** | Performance ceiling | Planned |
 | **1.0** | Stability | Planned |
@@ -100,7 +101,7 @@ must be idiomatic Mako and serve as example code for the community.
 
 ---
 
-## v0.2.1 — Safety & Correctness
+## v0.2.1 — Safety & Correctness — **shipped**
 
 Close the gap between what Mako promises and what it verifies.
 
@@ -115,7 +116,19 @@ Close the gap between what Mako promises and what it verifies.
 
 ---
 
-## v0.2.2 — Tooling
+## v0.2.2 — TLS · HTTPS · JWT · lock integrity — **shipped**
+
+| Feature | Description |
+|---------|-------------|
+| **SNI multi-cert** | Concurrent-safe set rebuild; `sni_add` / `sni_update` / `sni_remove` |
+| **HTTPS client** | `https_get` / `https_post` / `https_request` + last status/headers |
+| **OIDC helpers** | `oidc_discovery` / `oidc_token` |
+| **JWT RS256 / JWKS** | `jwt_verify_rs256` / `jwt_verify_jwks` |
+| **pkg lock v2** | Deterministic SHA-256 integrity on install |
+
+---
+
+## v0.2.3 — Tooling
 
 Developer-experience hardening.
 

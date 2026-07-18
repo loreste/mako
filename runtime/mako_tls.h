@@ -498,6 +498,110 @@ static inline void mako_tls_server_release(MakoTlsServer *server) {
     if (destroy) mako_tls_server_destroy(server);
 }
 
+/* Release one SNI configuration set (patterns + SSL_CTX ownership refs).
+ * Updates rebuild a fresh set under the server mutex, swap the published
+ * pointer, unlock, then free the retired set.  The SNI callback holds the
+ * same mutex while it looks up and SSL_set_SSL_CTX (which retains the selected
+ * context for the connection), so free-after-unlock is safe. */
+static inline void mako_tls_sni_set_free(MakoTlsSniCert *entries, size_t len) {
+    if (!entries) return;
+    for (size_t i = 0; i < len; i++) {
+        free(entries[i].pattern);
+        if (entries[i].ctx) SSL_CTX_free(entries[i].ctx);
+    }
+    free(entries);
+}
+
+/* Build an SNI set without mutating the currently published set.
+ * mode: 0=add, 1=update, 2=remove.
+ * On success, ownership of `replacement` is taken by the new set (when used).
+ * On failure, this helper frees `replacement` if still non-NULL — callers must
+ * not free it again. */
+static inline int mako_tls_sni_set_build(
+    MakoTlsServer *server,
+    const char *pattern,
+    size_t pattern_len,
+    SSL_CTX *replacement,
+    int mode,
+    MakoTlsSniCert **out_entries,
+    size_t *out_len,
+    size_t *out_cap
+) {
+    if (!server || !out_entries || !out_len || !out_cap) return -1;
+    size_t old_len = server->sni_len;
+    size_t new_len = old_len;
+    if (mode == 0) {
+        if (old_len == SIZE_MAX) return -1;
+        new_len++;
+    } else if (mode == 2) {
+        if (old_len == 0) return -1;
+        new_len--;
+    }
+    if (new_len > SIZE_MAX / sizeof(MakoTlsSniCert)) return -1;
+
+    size_t cap = 0;
+    if (new_len > 0) {
+        cap = 4;
+        while (cap < new_len) {
+            if (cap > SIZE_MAX / 2) { cap = new_len; break; }
+            cap *= 2;
+        }
+    }
+    MakoTlsSniCert *entries = NULL;
+    if (cap > 0) {
+        entries = (MakoTlsSniCert *)calloc(cap, sizeof(MakoTlsSniCert));
+        if (!entries) return -1;
+    }
+
+    size_t w = 0;
+    int replaced = 0;
+    for (size_t i = 0; i < old_len; i++) {
+        MakoTlsSniCert *old = &server->sni[i];
+        int same = old->pattern_len == pattern_len
+            && pattern && old->pattern
+            && memcmp(old->pattern, pattern, pattern_len) == 0;
+        if (same) {
+            if (mode == 2) continue; /* drop this entry */
+            if (mode == 0) goto fail; /* duplicate name — caller should reject first */
+            if (mode == 1) {
+                char *copy = (char *)malloc(pattern_len + 1);
+                if (!copy) goto fail;
+                memcpy(copy, pattern, pattern_len + 1);
+                entries[w++] = (MakoTlsSniCert){copy, pattern_len, replacement};
+                replacement = NULL; /* ownership transferred */
+                replaced = 1;
+                continue;
+            }
+        }
+        if (!old->pattern || !old->ctx || SSL_CTX_up_ref(old->ctx) != 1) goto fail;
+        char *copy = (char *)malloc(old->pattern_len + 1);
+        if (!copy) {
+            SSL_CTX_free(old->ctx); /* undo the up_ref above */
+            goto fail;
+        }
+        memcpy(copy, old->pattern, old->pattern_len + 1);
+        entries[w++] = (MakoTlsSniCert){copy, old->pattern_len, old->ctx};
+    }
+    if (mode == 0) {
+        if (!replacement || !pattern) goto fail;
+        char *copy = (char *)malloc(pattern_len + 1);
+        if (!copy) goto fail;
+        memcpy(copy, pattern, pattern_len + 1);
+        entries[w++] = (MakoTlsSniCert){copy, pattern_len, replacement};
+        replacement = NULL;
+    }
+    if ((mode == 1 && !replaced) || w != new_len) goto fail;
+    *out_entries = entries;
+    *out_len = w;
+    *out_cap = cap;
+    return 0;
+
+fail:
+    mako_tls_sni_set_free(entries, w);
+    if (replacement) SSL_CTX_free(replacement);
+    return -1;
+}
+
 /* Create a server TLS context from cert + key PEM paths. NULL on failure. */
 static inline void *mako_tls_server_new(MakoString cert, MakoString key) {
     char cbuf[1024], kbuf[1024];
@@ -534,11 +638,11 @@ static inline void *mako_tls_server_new_tls13(MakoString cert, MakoString key) {
 
 static inline int64_t mako_tls_server_free(void *ctx);
 
-/* Add a certificate selected by SNI. Configure before accepting connections or
- * update concurrently through this function; selection and entry lifetime are
- * protected by the server mutex. Exact names win over wildcards, and among
- * wildcards the longest matching suffix wins. Returns 0 on success, -1 for an
- * invalid/duplicate name or an unreadable/mismatched certificate pair. */
+/* Add a certificate selected by SNI.  The complete SNI set is rebuilt and
+ * swapped, so callbacks already in progress keep their old immutable set.
+ * Exact names win over wildcards, and among wildcards the longest matching
+ * suffix wins. Returns 0 on success, -1 for an invalid/duplicate name or an
+ * unreadable/mismatched certificate pair. */
 static inline int64_t mako_tls_server_sni_add(
     void *server_ptr, MakoString hostname, MakoString cert, MakoString key
 ) {
@@ -574,32 +678,123 @@ static inline int64_t mako_tls_server_sni_add(
             return -1;
         }
     }
-    if (server->sni_len == server->sni_cap) {
-        size_t next = server->sni_cap ? server->sni_cap * 2 : 4;
-        if (next < server->sni_len + 1 || next > SIZE_MAX / sizeof(MakoTlsSniCert)) {
-            pthread_mutex_unlock(&server->mu);
-            SSL_CTX_free(child);
-            return -1;
-        }
-        MakoTlsSniCert *grown = (MakoTlsSniCert *)realloc(
-            server->sni, next * sizeof(MakoTlsSniCert));
-        if (!grown) {
-            pthread_mutex_unlock(&server->mu);
-            SSL_CTX_free(child);
-            return -1;
-        }
-        server->sni = grown;
-        server->sni_cap = next;
+    MakoTlsSniCert *replacement = NULL;
+    size_t replacement_len = 0, replacement_cap = 0;
+    if (mako_tls_sni_set_build(
+            server, pattern, pattern_len, child, 0,
+            &replacement, &replacement_len, &replacement_cap) != 0) {
+        pthread_mutex_unlock(&server->mu);
+        return -1;
     }
-    char *saved_pattern = (char *)malloc(pattern_len + 1);
-    if (!saved_pattern) {
+    MakoTlsSniCert *old = server->sni;
+    size_t old_len = server->sni_len;
+    server->sni = replacement;
+    server->sni_len = replacement_len;
+    server->sni_cap = replacement_cap;
+    pthread_mutex_unlock(&server->mu);
+    mako_tls_sni_set_free(old, old_len);
+    return 0;
+}
+
+/* Replace an existing exact or wildcard SNI certificate.  This is a strict
+ * update: use sni_add for a new hostname. */
+static inline int64_t mako_tls_server_sni_update(
+    void *server_ptr, MakoString hostname, MakoString cert, MakoString key
+) {
+    MakoTlsServer *server = (MakoTlsServer *)server_ptr;
+    if (!server || !cert.data || cert.len == 0 || cert.len >= 1024
+        || !key.data || key.len == 0 || key.len >= 1024)
+        return -1;
+    char pattern[256];
+    size_t pattern_len = 0;
+    if (mako_tls_sni_canonicalize(hostname, pattern, sizeof(pattern), &pattern_len) != 0)
+        return -1;
+    char cbuf[1024], kbuf[1024];
+    memcpy(cbuf, cert.data, cert.len); cbuf[cert.len] = 0;
+    memcpy(kbuf, key.data, key.len); kbuf[key.len] = 0;
+    SSL_CTX *child = mako_tls_make_ctx(cbuf, kbuf);
+    if (!child) return -1;
+
+    pthread_mutex_lock(&server->mu);
+    if (server->closing || !server->ctx
+        || mako_tls_copy_server_policy(server->ctx, child) != 0) {
         pthread_mutex_unlock(&server->mu);
         SSL_CTX_free(child);
         return -1;
     }
-    memcpy(saved_pattern, pattern, pattern_len + 1);
-    server->sni[server->sni_len++] = (MakoTlsSniCert){saved_pattern, pattern_len, child};
+    SSL_CTX_set_alpn_select_cb(child, mako_tls_alpn_cb, NULL);
+    int found = 0;
+    for (size_t i = 0; i < server->sni_len; i++) {
+        if (server->sni[i].pattern_len == pattern_len
+            && memcmp(server->sni[i].pattern, pattern, pattern_len) == 0) {
+            found = 1;
+            break;
+        }
+    }
+    if (!found) {
+        pthread_mutex_unlock(&server->mu);
+        SSL_CTX_free(child);
+        return -1;
+    }
+    MakoTlsSniCert *replacement = NULL;
+    size_t replacement_len = 0, replacement_cap = 0;
+    if (mako_tls_sni_set_build(
+            server, pattern, pattern_len, child, 1,
+            &replacement, &replacement_len, &replacement_cap) != 0) {
+        pthread_mutex_unlock(&server->mu);
+        return -1;
+    }
+    MakoTlsSniCert *old = server->sni;
+    size_t old_len = server->sni_len;
+    server->sni = replacement;
+    server->sni_len = replacement_len;
+    server->sni_cap = replacement_cap;
     pthread_mutex_unlock(&server->mu);
+    mako_tls_sni_set_free(old, old_len);
+    return 0;
+}
+
+/* Remove an exact or wildcard SNI certificate.  Existing connections keep
+ * their selected context; future handshakes fall back to the default cert. */
+static inline int64_t mako_tls_server_sni_remove(void *server_ptr, MakoString hostname) {
+    MakoTlsServer *server = (MakoTlsServer *)server_ptr;
+    if (!server) return -1;
+    char pattern[256];
+    size_t pattern_len = 0;
+    if (mako_tls_sni_canonicalize(hostname, pattern, sizeof(pattern), &pattern_len) != 0)
+        return -1;
+    pthread_mutex_lock(&server->mu);
+    if (server->closing || !server->ctx) {
+        pthread_mutex_unlock(&server->mu);
+        return -1;
+    }
+    int found = 0;
+    for (size_t i = 0; i < server->sni_len; i++) {
+        if (server->sni[i].pattern_len == pattern_len
+            && memcmp(server->sni[i].pattern, pattern, pattern_len) == 0) {
+            found = 1;
+            break;
+        }
+    }
+    if (!found) {
+        pthread_mutex_unlock(&server->mu);
+        return -1;
+    }
+    MakoTlsSniCert *replacement = NULL;
+    size_t replacement_len = 0, replacement_cap = 0;
+    if (mako_tls_sni_set_build(
+            server, pattern, pattern_len, NULL, 2,
+            &replacement, &replacement_len, &replacement_cap) != 0) {
+        pthread_mutex_unlock(&server->mu);
+        return -1;
+    }
+    MakoTlsSniCert *old = server->sni;
+    size_t old_len = server->sni_len;
+    server->sni = replacement;
+    server->sni_len = replacement_len;
+    server->sni_cap = replacement_cap;
+    pthread_mutex_unlock(&server->mu);
+    mako_tls_sni_set_free(old, old_len);
     return 0;
 }
 
@@ -874,6 +1069,9 @@ static inline void *mako_tls_client_new(MakoString ca_pem_path) {
             SSL_CTX_free(ctx);
             return NULL;
         }
+    } else if (SSL_CTX_set_default_verify_paths(ctx) != 1) {
+        SSL_CTX_free(ctx);
+        return NULL;
     }
     return (void *)ctx;
 }
@@ -1129,6 +1327,11 @@ static inline void *mako_tls_connect(void *ctx, int64_t fd, MakoString host) {
         memcpy(hbuf, host.data, host.len);
         hbuf[host.len] = 0;
         SSL_set_tlsext_host_name(ssl, hbuf);
+        if ((SSL_get_verify_mode(ssl) & SSL_VERIFY_PEER)
+            && X509_VERIFY_PARAM_set1_host(SSL_get0_param(ssl), hbuf, 0) != 1) {
+            SSL_free(ssl);
+            return NULL;
+        }
     }
     if (SSL_connect(ssl) <= 0) {
         ERR_print_errors_fp(stderr);
@@ -1150,6 +1353,7 @@ static inline void *mako_tls_connect(void *ctx, int64_t fd, MakoString host) {
     }
     c->ssl = ssl;
     c->fd = (int)fd;
+    c->server = NULL;
     return (void *)c;
 }
 
@@ -1171,6 +1375,11 @@ static inline void *mako_tls_connect_start(void *ctx, int64_t fd, MakoString hos
         memcpy(hbuf, host.data, host.len);
         hbuf[host.len] = 0;
         SSL_set_tlsext_host_name(ssl, hbuf);
+        if ((SSL_get_verify_mode(ssl) & SSL_VERIFY_PEER)
+            && X509_VERIFY_PARAM_set1_host(SSL_get0_param(ssl), hbuf, 0) != 1) {
+            SSL_free(ssl);
+            return NULL;
+        }
     }
     SSL_set_connect_state(ssl);
     int rc = SSL_connect(ssl);
@@ -1188,7 +1397,504 @@ static inline void *mako_tls_connect_start(void *ctx, int64_t fd, MakoString hos
     }
     c->ssl = ssl;
     c->fd = (int)fd;
+    c->server = NULL;
     return (void *)c;
+}
+
+/* ------------------------------------------------------------------------- */
+/* Generic HTTPS/1.1 client.                                                   */
+/*                                                                             */
+/* This is deliberately separate from mako_http_*: http_* accepts only         */
+/* http:// URLs and remains cleartext.  HTTPS always creates a verified TLS    */
+/* client, sends SNI, verifies the peer hostname, and fails closed on any      */
+/* malformed URL, unsupported transfer framing, or response over the cap.     */
+/* ------------------------------------------------------------------------- */
+
+#define MAKO_HTTPS_MAX_URL 8192
+#define MAKO_HTTPS_MAX_HEADER 8192
+#define MAKO_HTTPS_MAX_RESPONSE (16u * 1024u * 1024u)
+
+typedef struct {
+    char host[256];
+    char authority[320];
+    char path[MAKO_HTTPS_MAX_URL];
+    int port;
+} MakoHttpsUrl;
+
+static _Thread_local int mako_https_client_last_status = 0;
+static _Thread_local char mako_https_client_last_raw[MAKO_HTTPS_MAX_HEADER];
+static _Thread_local size_t mako_https_client_last_raw_len = 0;
+
+static inline int mako_https_ci_eq(const char *a, const char *b) {
+    if (!a || !b) return 0;
+    while (*a && *b) {
+        unsigned char x = (unsigned char)*a++;
+        unsigned char y = (unsigned char)*b++;
+        if (x >= 'A' && x <= 'Z') x = (unsigned char)(x - 'A' + 'a');
+        if (y >= 'A' && y <= 'Z') y = (unsigned char)(y - 'A' + 'a');
+        if (x != y) return 0;
+    }
+    return *a == 0 && *b == 0;
+}
+
+static inline int mako_https_parse_port(const char *p, size_t len, int *out) {
+    if (!p || !out || len == 0 || len > 5) return -1;
+    int port = 0;
+    for (size_t i = 0; i < len; i++) {
+        if (p[i] < '0' || p[i] > '9') return -1;
+        port = port * 10 + (p[i] - '0');
+    }
+    if (port < 1 || port > 65535) return -1;
+    *out = port;
+    return 0;
+}
+
+static inline int mako_https_parse_url(MakoString url, MakoHttpsUrl *out) {
+    if (!out || !url.data || url.len < 8 || url.len > MAKO_HTTPS_MAX_URL
+        || memcmp(url.data, "https://", 8) != 0)
+        return -1;
+    memset(out, 0, sizeof(*out));
+    out->port = 443;
+    size_t authority_start = 8, authority_end = authority_start;
+    while (authority_end < url.len && url.data[authority_end] != '/'
+           && url.data[authority_end] != '?' && url.data[authority_end] != '#') {
+        unsigned char c = (unsigned char)url.data[authority_end];
+        if (c == 0 || c <= 0x20 || c == '@' || c >= 0x7f) return -1;
+        authority_end++;
+    }
+    if (authority_end == authority_start
+        || authority_end - authority_start >= sizeof(out->authority)) return -1;
+    size_t authority_len = authority_end - authority_start;
+    memcpy(out->authority, url.data + authority_start, authority_len);
+    out->authority[authority_len] = 0;
+
+    size_t host_start = authority_start;
+    size_t host_end = authority_end;
+    if (url.data[host_start] == '[') {
+        size_t rb = host_start + 1;
+        while (rb < authority_end && url.data[rb] != ']') rb++;
+        if (rb == host_start + 1 || rb >= authority_end) return -1;
+        host_start++;
+        host_end = rb;
+        if (rb + 1 < authority_end) {
+            if (url.data[rb + 1] != ':') return -1;
+            if (mako_https_parse_port(
+                    url.data + rb + 2, authority_end - rb - 2, &out->port) != 0)
+                return -1;
+        }
+    } else {
+        size_t colon = authority_end;
+        for (size_t i = authority_start; i < authority_end; i++) {
+            if (url.data[i] == ':') {
+                if (colon != authority_end) return -1; /* IPv6 must be bracketed. */
+                colon = i;
+            }
+        }
+        if (colon != authority_end) {
+            host_end = colon;
+            if (mako_https_parse_port(
+                    url.data + colon + 1, authority_end - colon - 1, &out->port) != 0)
+                return -1;
+        }
+    }
+    if (host_end <= host_start || host_end - host_start >= sizeof(out->host)) return -1;
+    memcpy(out->host, url.data + host_start, host_end - host_start);
+    out->host[host_end - host_start] = 0;
+    for (size_t i = 0; i < host_end - host_start; i++) {
+        unsigned char c = (unsigned char)out->host[i];
+        if (c == 0 || c <= 0x20 || c >= 0x7f) return -1;
+    }
+
+    if (authority_end == url.len) {
+        memcpy(out->path, "/", 2);
+        return 0;
+    }
+    if (url.data[authority_end] == '#') return -1; /* URL fragments are not sent. */
+    size_t path_len = url.len - authority_end;
+    if (path_len >= sizeof(out->path)) return -1;
+    if (url.data[authority_end] == '?') {
+        if (path_len + 1 >= sizeof(out->path)) return -1;
+        out->path[0] = '/';
+        memcpy(out->path + 1, url.data + authority_end, path_len);
+        out->path[path_len + 1] = 0;
+    } else {
+        memcpy(out->path, url.data + authority_end, path_len);
+        out->path[path_len] = 0;
+    }
+    for (size_t i = 0; i < strlen(out->path); i++) {
+        unsigned char c = (unsigned char)out->path[i];
+        if (c == 0 || c == '\r' || c == '\n') return -1;
+        if (c == '#') return -1;
+    }
+    return 0;
+}
+
+static inline int mako_https_write_all(void *conn, const char *data, size_t len) {
+    if (!conn || (!data && len != 0)) return -1;
+    size_t off = 0;
+    while (off < len) {
+        size_t chunk_len = len - off;
+        if (chunk_len > (size_t)INT_MAX) chunk_len = (size_t)INT_MAX;
+        MakoString chunk = {(char *)(data + off), chunk_len};
+        int64_t wrote = mako_tls_write(conn, chunk);
+        if (wrote <= 0 || (size_t)wrote > chunk_len) return -1;
+        off += (size_t)wrote;
+    }
+    return 0;
+}
+
+static inline const char *mako_https_header_end(const char *data, size_t len) {
+    if (!data || len < 4) return NULL;
+    for (size_t i = 0; i + 4 <= len; i++) {
+        if (data[i] == '\r' && data[i + 1] == '\n'
+            && data[i + 2] == '\r' && data[i + 3] == '\n')
+            return data + i;
+    }
+    return NULL;
+}
+
+static inline int mako_https_copy_header(const char *head, size_t head_len) {
+    if (!head || head_len == 0) return -1;
+    size_t n = head_len < sizeof(mako_https_client_last_raw) - 1
+        ? head_len : sizeof(mako_https_client_last_raw) - 1;
+    memcpy(mako_https_client_last_raw, head, n);
+    mako_https_client_last_raw[n] = 0;
+    mako_https_client_last_raw_len = n;
+    return 0;
+}
+
+/* Return 1 for a valid final `chunked` transfer coding, 0 when absent, and
+ * -1 for a malformed/unsupported coding list.  Chunked must be the final
+ * coding because this client does not implement an additional decoder. */
+static inline int mako_https_transfer_chunked(const char *headers) {
+    const char *value = NULL;
+    size_t len = 0;
+    if (!mako_http_find_header_view(headers, "Transfer-Encoding", &value, &len)) return 0;
+    size_t pos = 0;
+    int saw_chunked = 0;
+    for (;;) {
+        while (pos < len && (value[pos] == ' ' || value[pos] == '\t')) pos++;
+        size_t start = pos;
+        while (pos < len && value[pos] != ',') pos++;
+        size_t end = pos;
+        while (end > start && (value[end - 1] == ' ' || value[end - 1] == '\t')) end--;
+        if (end == start) return -1;
+        size_t n = end - start;
+        int is_chunked = n == 7;
+        if (is_chunked) {
+            for (size_t i = 0; i < n; i++) {
+                char c = value[start + i];
+                if (c >= 'A' && c <= 'Z') c = (char)(c - 'A' + 'a');
+                if (c != "chunked"[i]) { is_chunked = 0; break; }
+            }
+        }
+        if (is_chunked) saw_chunked = 1;
+        if (pos == len) break;
+        if (saw_chunked) return -1; /* chunked was not final */
+        pos++;
+    }
+    return saw_chunked ? 1 : -1;
+}
+
+static inline int mako_https_content_length(const char *headers, size_t *out) {
+    const char *value = NULL;
+    size_t len = 0;
+    if (!mako_http_find_header_view(headers, "Content-Length", &value, &len)) return 0;
+    size_t start = 0, end = len;
+    while (start < end && (value[start] == ' ' || value[start] == '\t')) start++;
+    while (end > start && (value[end - 1] == ' ' || value[end - 1] == '\t')) end--;
+    if (start == end || !out) return -1;
+    size_t parsed = 0;
+    for (size_t i = start; i < end; i++) {
+        if (value[i] < '0' || value[i] > '9'
+            || parsed > (MAKO_HTTPS_MAX_RESPONSE - (size_t)(value[i] - '0')) / 10)
+            return -1;
+        parsed = parsed * 10 + (size_t)(value[i] - '0');
+    }
+    *out = parsed;
+    return 1;
+}
+
+static inline int mako_https_decode_chunked(
+    const char *src, size_t src_len, char **out, size_t *out_len
+) {
+    if (!src || !out || !out_len) return -1;
+    size_t pos = 0, total = 0;
+    char *decoded = (char *)malloc(1);
+    if (!decoded) return -1;
+    for (;;) {
+        size_t line_start = pos;
+        while (pos + 1 < src_len
+               && !(src[pos] == '\r' && src[pos + 1] == '\n')) pos++;
+        if (pos + 1 >= src_len || pos == line_start) goto fail;
+        size_t hex_end = line_start;
+        while (hex_end < pos && src[hex_end] != ';') hex_end++;
+        if (hex_end == line_start || hex_end - line_start > 16) goto fail;
+        size_t chunk_size = 0;
+        for (size_t i = line_start; i < hex_end; i++) {
+            unsigned char c = (unsigned char)src[i];
+            size_t digit;
+            if (c >= '0' && c <= '9') digit = c - '0';
+            else if (c >= 'a' && c <= 'f') digit = c - 'a' + 10;
+            else if (c >= 'A' && c <= 'F') digit = c - 'A' + 10;
+            else goto fail;
+            if (chunk_size > (MAKO_HTTPS_MAX_RESPONSE - digit) / 16) goto fail;
+            chunk_size = chunk_size * 16 + digit;
+        }
+        pos += 2;
+        if (chunk_size == 0) {
+            /* Trailer fields are optional; require the terminating empty line. */
+            while (pos + 1 < src_len) {
+                if (src[pos] == '\r' && src[pos + 1] == '\n') {
+                    *out = decoded;
+                    *out_len = total;
+                    return 0;
+                }
+                while (pos + 1 < src_len
+                       && !(src[pos] == '\r' && src[pos + 1] == '\n')) pos++;
+                if (pos + 1 >= src_len) goto fail;
+                pos += 2;
+            }
+            goto fail;
+        }
+        if (pos > src_len || src_len - pos < 2
+            || chunk_size > MAKO_HTTPS_MAX_RESPONSE - total
+            || chunk_size > src_len - pos - 2) goto fail;
+        char *grown = (char *)realloc(decoded, total + chunk_size + 1);
+        if (!grown) goto fail;
+        decoded = grown;
+        memcpy(decoded + total, src + pos, chunk_size);
+        total += chunk_size;
+        pos += chunk_size;
+        if (pos + 1 >= src_len || src[pos] != '\r' || src[pos + 1] != '\n') goto fail;
+        pos += 2;
+    }
+fail:
+    free(decoded);
+    return -1;
+}
+
+static inline MakoString mako_https_request(
+    MakoString method,
+    MakoString url,
+    MakoString body,
+    MakoString content_type,
+    MakoString ca_pem_path,
+    int64_t timeout_ms
+) {
+    mako_https_client_last_status = 0;
+    mako_https_client_last_raw_len = 0;
+    mako_https_client_last_raw[0] = 0;
+    MakoHttpsUrl parsed;
+    if (mako_https_parse_url(url, &parsed) != 0) return mako_str_from_cstr("");
+    if (!method.data || method.len == 0 || method.len >= 32) return mako_str_from_cstr("");
+    for (size_t i = 0; i < method.len; i++) {
+        unsigned char c = (unsigned char)method.data[i];
+        if (c <= 0x20 || c >= 0x7f || c == ':' || c == '\r' || c == '\n')
+            return mako_str_from_cstr("");
+    }
+    if (body.len > MAKO_HTTPS_MAX_RESPONSE) return mako_str_from_cstr("");
+    char ct[256];
+    const char *ctype = "application/octet-stream";
+    if (content_type.data && content_type.len > 0) {
+        if (content_type.len >= sizeof(ct)) return mako_str_from_cstr("");
+        memcpy(ct, content_type.data, content_type.len);
+        ct[content_type.len] = 0;
+        for (size_t i = 0; i < content_type.len; i++) {
+            if ((unsigned char)ct[i] <= 0x20 || ct[i] == '\r' || ct[i] == '\n')
+                return mako_str_from_cstr("");
+        }
+        ctype = ct;
+    }
+
+    MakoString host = {(char *)parsed.host, strlen(parsed.host)};
+    int64_t fd = mako_tcp_connect_timeout(host, parsed.port, timeout_ms);
+    if (fd < 0) return mako_str_from_cstr("");
+    mako_http_client_set_timeout((int)fd, timeout_ms);
+    void *client = mako_tls_client_new(ca_pem_path);
+    if (!client) {
+        mako_sock_close((mako_sock_t)fd);
+        return mako_str_from_cstr("");
+    }
+    void *conn = mako_tls_connect(client, fd, host);
+    mako_tls_client_free(client);
+    if (!conn) {
+        mako_sock_close((mako_sock_t)fd);
+        return mako_str_from_cstr("");
+    }
+
+    char request[MAKO_HTTPS_MAX_HEADER];
+    int n = snprintf(
+        request, sizeof(request),
+        "%.*s %s HTTP/1.1\r\nHost: %s\r\nAccept: */*\r\nConnection: close\r\n"
+        "Content-Length: %zu\r\n%s%s\r\n",
+        (int)method.len, method.data, parsed.path, parsed.authority, body.len,
+        body.len ? "Content-Type: " : "", body.len ? ctype : ""
+    );
+    if (n < 0 || (size_t)n >= sizeof(request)
+        || mako_https_write_all(conn, request, (size_t)n) != 0
+        || (body.len && mako_https_write_all(conn, body.data, body.len) != 0)) {
+        mako_tls_conn_close(conn);
+        return mako_str_from_cstr("");
+    }
+
+    size_t cap = 8192, len = 0;
+    char *raw = (char *)malloc(cap + 1);
+    if (!raw) {
+        mako_tls_conn_close(conn);
+        return mako_str_from_cstr("");
+    }
+    for (;;) {
+        MakoString part = mako_tls_read(conn, 65536);
+        if (!part.data || part.len == 0) {
+            mako_str_free(part);
+            break;
+        }
+        if (part.len > MAKO_HTTPS_MAX_RESPONSE - len) {
+            mako_str_free(part);
+            free(raw);
+            mako_tls_conn_close(conn);
+            return mako_str_from_cstr("");
+        }
+        if (len + part.len > cap) {
+            size_t next = cap;
+            while (next < len + part.len) {
+                if (next > MAKO_HTTPS_MAX_RESPONSE / 2) { next = MAKO_HTTPS_MAX_RESPONSE; break; }
+                next *= 2;
+            }
+            char *grown = (char *)realloc(raw, next + 1);
+            if (!grown) {
+                mako_str_free(part);
+                free(raw);
+                mako_tls_conn_close(conn);
+                return mako_str_from_cstr("");
+            }
+            raw = grown;
+            cap = next;
+        }
+        memcpy(raw + len, part.data, part.len);
+        len += part.len;
+        mako_str_free(part);
+    }
+    mako_tls_conn_close(conn);
+    raw[len] = 0;
+
+    const char *head_end = mako_https_header_end(raw, len);
+    if (!head_end || len < 12 || memcmp(raw, "HTTP/", 5) != 0) {
+        free(raw);
+        return mako_str_from_cstr("");
+    }
+    size_t head_len = (size_t)(head_end - raw) + 4;
+    if (head_len >= MAKO_HTTPS_MAX_HEADER) {
+        free(raw);
+        return mako_str_from_cstr("");
+    }
+    const char *sp = strchr(raw, ' ');
+    if (!sp || (size_t)(sp - raw) > 16 || sp + 4 > head_end
+        || sp[1] < '0' || sp[1] > '9' || sp[2] < '0' || sp[2] > '9'
+        || sp[3] < '0' || sp[3] > '9') {
+        free(raw);
+        return mako_str_from_cstr("");
+    }
+    int status = atoi(sp + 1);
+    if (status < 200 || status > 599) {
+        free(raw);
+        return mako_str_from_cstr("");
+    }
+    mako_https_client_last_status = status;
+    (void)mako_https_copy_header(raw, head_len);
+    const char *body_start = head_end + 4;
+    size_t response_body_len = len - (size_t)(body_start - raw);
+    int chunked_state = mako_https_transfer_chunked(mako_https_client_last_raw);
+    if (chunked_state < 0) {
+        free(raw);
+        return mako_str_from_cstr("");
+    }
+    int chunked = chunked_state == 1;
+    if (chunked) {
+        char *decoded = NULL;
+        size_t decoded_len = 0;
+        if (mako_https_decode_chunked(body_start, response_body_len, &decoded, &decoded_len) != 0) {
+            free(raw);
+            return mako_str_from_cstr("");
+        }
+        free(raw);
+        decoded[decoded_len] = 0;
+        return (MakoString){decoded, decoded_len};
+    }
+    size_t expected = 0;
+    int content_length_state = mako_https_content_length(
+        mako_https_client_last_raw, &expected);
+    if (content_length_state < 0) {
+        free(raw);
+        return mako_str_from_cstr("");
+    }
+    if (content_length_state == 1) {
+        if (expected > response_body_len) {
+            free(raw);
+            return mako_str_from_cstr("");
+        }
+        response_body_len = expected;
+    }
+    char *out = (char *)malloc(response_body_len + 1);
+    if (!out) {
+        free(raw);
+        return mako_str_from_cstr("");
+    }
+    memcpy(out, body_start, response_body_len);
+    out[response_body_len] = 0;
+    free(raw);
+    return (MakoString){out, response_body_len};
+}
+
+static inline MakoString mako_https_get(MakoString url, MakoString ca_pem, int64_t timeout_ms) {
+    MakoString method = {(char *)(uintptr_t)"GET", 3};
+    MakoString empty = {(char *)(uintptr_t)"", 0};
+    return mako_https_request(method, url, empty, empty, ca_pem, timeout_ms);
+}
+
+static inline MakoString mako_https_post(
+    MakoString url, MakoString body, MakoString content_type,
+    MakoString ca_pem, int64_t timeout_ms
+) {
+    MakoString method = {(char *)(uintptr_t)"POST", 4};
+    return mako_https_request(method, url, body, content_type, ca_pem, timeout_ms);
+}
+
+static inline int64_t mako_https_last_status(void) {
+    return (int64_t)mako_https_client_last_status;
+}
+
+static inline MakoString mako_https_last_header(MakoString name) {
+    if (mako_https_client_last_raw_len == 0 || !name.data || name.len == 0)
+        return mako_str_from_cstr("");
+    char nbuf[128], value[512];
+    if (name.len >= sizeof(nbuf)) return mako_str_from_cstr("");
+    memcpy(nbuf, name.data, name.len);
+    nbuf[name.len] = 0;
+    if (!mako_http_find_header(
+            mako_https_client_last_raw, nbuf, value, sizeof(value)))
+        return mako_str_from_cstr("");
+    return mako_str_from_cstr(value);
+}
+
+/* OIDC endpoints use this TLS-only surface rather than the cleartext http_*
+ * client.  The URL is the discovery/token endpoint supplied by the caller;
+ * the response remains raw JSON for application-level validation. */
+static inline MakoString mako_oidc_discovery(
+    MakoString discovery_url, MakoString ca_pem, int64_t timeout_ms
+) {
+    return mako_https_get(discovery_url, ca_pem, timeout_ms);
+}
+
+static inline MakoString mako_oidc_token(
+    MakoString token_url, MakoString form_body, MakoString ca_pem, int64_t timeout_ms
+) {
+    MakoString content_type = {
+        (char *)(uintptr_t)"application/x-www-form-urlencoded",
+        sizeof("application/x-www-form-urlencoded") - 1
+    };
+    return mako_https_post(token_url, form_body, content_type, ca_pem, timeout_ms);
 }
 
 /* Peer certificate subject summary (CN=... if present), or "". */
@@ -3857,6 +4563,14 @@ static inline int64_t mako_tls_server_sni_add(
 ) {
     (void)server; (void)hostname; (void)cert; (void)key; return -1;
 }
+static inline int64_t mako_tls_server_sni_update(
+    void *server, MakoString hostname, MakoString cert, MakoString key
+) {
+    (void)server; (void)hostname; (void)cert; (void)key; return -1;
+}
+static inline int64_t mako_tls_server_sni_remove(void *server, MakoString hostname) {
+    (void)server; (void)hostname; return -1;
+}
 static inline void *mako_tls_client_new_mtls(MakoString ca, MakoString cert, MakoString key) {
     (void)ca; (void)cert; (void)key; return NULL;
 }
@@ -3917,6 +4631,40 @@ static inline void *mako_tls_client_new_insecure(void) { return NULL; }
 static inline int64_t mako_tls_client_free(void *ctx) {
     (void)ctx;
     return 0;
+}
+static inline MakoString mako_https_request(
+    MakoString method, MakoString url, MakoString body, MakoString content_type,
+    MakoString ca_pem, int64_t timeout_ms
+) {
+    (void)method; (void)url; (void)body; (void)content_type; (void)ca_pem; (void)timeout_ms;
+    return mako_str_from_cstr("");
+}
+static inline MakoString mako_https_get(MakoString url, MakoString ca_pem, int64_t timeout_ms) {
+    (void)url; (void)ca_pem; (void)timeout_ms;
+    return mako_str_from_cstr("");
+}
+static inline MakoString mako_https_post(
+    MakoString url, MakoString body, MakoString content_type,
+    MakoString ca_pem, int64_t timeout_ms
+) {
+    (void)url; (void)body; (void)content_type; (void)ca_pem; (void)timeout_ms;
+    return mako_str_from_cstr("");
+}
+static inline int64_t mako_https_last_status(void) { return 0; }
+static inline MakoString mako_https_last_header(MakoString name) {
+    (void)name; return mako_str_from_cstr("");
+}
+static inline MakoString mako_oidc_discovery(
+    MakoString url, MakoString ca_pem, int64_t timeout_ms
+) {
+    (void)url; (void)ca_pem; (void)timeout_ms;
+    return mako_str_from_cstr("");
+}
+static inline MakoString mako_oidc_token(
+    MakoString url, MakoString form, MakoString ca_pem, int64_t timeout_ms
+) {
+    (void)url; (void)form; (void)ca_pem; (void)timeout_ms;
+    return mako_str_from_cstr("");
 }
 static inline void *mako_tls_connect(void *ctx, int64_t fd, MakoString host) {
     (void)ctx;

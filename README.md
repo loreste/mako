@@ -8,10 +8,10 @@ Speed matters here: release builds use `-O3 -flto`, and concurrency is built in
 ownership, shares, arenas, and explicit resource APIs. The standard library
 covers backend areas without requiring a framework for every service.
 
-This is version **0.2.1**. It runs. The surface is still early — expect change,
+This is version **0.2.2**. It runs. The surface is still early — expect change,
 rough edges, and missing pieces.
 
-**0.2.1 highlights:** match exhaustiveness checking, match guards
+**0.2.2 highlights:** match exhaustiveness checking, match guards
 (`pattern if cond =>`), use-after-move detection for `hold` values, and
 compile-time rejection of unsynchronized mutable closure captures at every
 `kick` boundary. `fan` mappers must be capture-free; explicit Sync handles are
@@ -67,7 +67,7 @@ Options:
 ```bash
 curl -fsSL …/install-linux.sh | bash -s -- --prefix /opt/mako --yes
 curl -fsSL …/install-linux.sh | bash -s -- --no-deps    # skip clang install
-curl -fsSL …/install-linux.sh | bash -s -- --version v0.2.1
+curl -fsSL …/install-linux.sh | bash -s -- --version v0.2.2
 ```
 
 **You do not need Rust or cargo on the machine that runs Mako.**

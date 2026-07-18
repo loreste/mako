@@ -2,6 +2,43 @@
 
 ## Unreleased
 
+## 0.2.2 — 2026-07-18
+
+**mako0.2.2** (`CARGO_PKG_VERSION`).
+
+Security and packaging patch after 0.2.1: concurrent-safe multi-cert SNI,
+verified TLS hostnames, HTTPS/OIDC client helpers, JWT RS256/JWKS verify, and
+SHA-256 package lock integrity.
+
+### TLS / SNI
+
+- **Copy-on-write SNI sets** — `tls_server_sni_add` rebuilds and swaps the full
+  certificate set under the server mutex so accept callbacks never see a
+  half-updated table.
+- **`tls_server_sni_update` / `tls_server_sni_remove`** — strict replace and
+  remove of named SNI certificates (exact or `*.example.com` wildcards).
+- **Hostname verification** — when peer verify is enabled, client connect sets
+  `X509_VERIFY_PARAM_set1_host` from the SNI hostname.
+
+### HTTPS / OIDC / JWT
+
+- **`https_request` / `https_get` / `https_post`** — TLS HTTP client with optional
+  CA PEM path and timeout; `https_last_status` / `https_last_header` for the
+  last response.
+- **`oidc_discovery` / `oidc_token`** — OpenID Connect discovery document and
+  token endpoint helpers over HTTPS.
+- **`jwt_verify_rs256` / `jwt_verify_jwks`** — strict base64url JWT signature
+  verification with PEM public keys or JWKS JSON.
+
+### Packaging
+
+- **Lockfile integrity v2** — deterministic SHA-256 digests over package sources;
+  `pkg install` fails closed on mismatch (from 0.2.1 tip merges).
+
+### Prior tip notes (0.2.1 and earlier)
+
+See sections below for generics, stdlib-in-Mako, and match safety.
+
 ### v0.1.10 — Deepen generics
 
 - **Package lock integrity v2** — manifests and recursive `.mko` sources are

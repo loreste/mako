@@ -20,14 +20,14 @@ working code you can run immediately.
 
 ## Prerequisites
 
-All guides assume you have Mako installed (`mako version` → **mako0.2.1** …).
+All guides assume you have Mako installed (`mako version` → **mako0.2.2** …).
 Guide 01 covers installation from scratch.
 
 ## Related documentation
 
 - [The Mako Book](../book/) — guided language tour
 - [GUIDE.md](../GUIDE.md) — syntax reference (Mako-native; §6 generics, §9 channels)
-- [LANGUAGE.md](../LANGUAGE.md) — language overview + 0.2.1 generics table
+- [LANGUAGE.md](../LANGUAGE.md) — language overview + 0.2.2 generics table
 - [ERGONOMICS.md](../ERGONOMICS.md) — low-ceremony maps/slices/channels
 - [IDENTITY.md](../IDENTITY.md) — our syntax identity + **%**
 - [COMPAT.md](../COMPAT.md) — dual forms / compatibility
