@@ -10,6 +10,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::Arc;
 
 use sha2::{Digest, Sha256};
 
@@ -43,7 +44,17 @@ pub struct Lockfile {
 
 #[derive(Debug, Default)]
 pub(crate) struct VerifiedDependencyRoots {
-    by_manifest: HashMap<PathBuf, HashMap<String, PathBuf>>,
+    by_manifest: HashMap<PathBuf, HashMap<String, Arc<VerifiedPackage>>>,
+    packages: HashMap<PathBuf, Arc<VerifiedPackage>>,
+}
+
+/// Exact package inputs retained from the hash pass so compilation never
+/// reopens mutable dependency files.
+#[derive(Debug)]
+pub(crate) struct VerifiedPackage {
+    root: PathBuf,
+    root_is_file: bool,
+    files: BTreeMap<PathBuf, Vec<u8>>,
 }
 
 impl VerifiedDependencyRoots {
@@ -53,18 +64,148 @@ impl VerifiedDependencyRoots {
             .unwrap_or_else(|_| manifest_dir.to_path_buf())
     }
 
-    fn insert(&mut self, manifest_dir: &Path, name: String, root: PathBuf) {
+    fn insert(&mut self, manifest_dir: &Path, name: String, package: Arc<VerifiedPackage>) {
+        self.packages
+            .entry(Self::manifest_id(package.root()))
+            .or_insert_with(|| package.clone());
         self.by_manifest
             .entry(Self::manifest_id(manifest_dir))
             .or_default()
-            .insert(name, root);
+            .insert(name, package);
     }
 
-    pub(crate) fn get(&self, manifest_dir: &Path, name: &str) -> Option<&Path> {
+    pub(crate) fn get(&self, manifest_dir: &Path, name: &str) -> Option<&VerifiedPackage> {
         self.by_manifest
             .get(&Self::manifest_id(manifest_dir))?
             .get(name)
-            .map(PathBuf::as_path)
+            .map(Arc::as_ref)
+    }
+
+    pub(crate) fn package_for_path(&self, path: &Path) -> Option<&VerifiedPackage> {
+        self.packages
+            .values()
+            .filter(|package| package.contains(path))
+            .max_by_key(|package| package.root().components().count())
+            .map(Arc::as_ref)
+    }
+}
+
+impl VerifiedPackage {
+    fn new(root: &Path, snapshot: PackageSnapshot) -> Result<Self, String> {
+        Ok(Self {
+            root: lexical_absolute(root)?,
+            root_is_file: snapshot.root_is_file,
+            files: snapshot.files,
+        })
+    }
+
+    pub(crate) fn root(&self) -> &Path {
+        &self.root
+    }
+
+    fn relative_path(&self, path: &Path) -> Option<PathBuf> {
+        let path = lexical_absolute(path).ok()?;
+        if self.root_is_file {
+            return if path == self.root {
+                self.files.keys().next().cloned()
+            } else {
+                None
+            };
+        }
+        path.strip_prefix(&self.root).ok().map(Path::to_path_buf)
+    }
+
+    fn contains(&self, path: &Path) -> bool {
+        let Some(relative) = self.relative_path(path) else {
+            return false;
+        };
+        relative.as_os_str().is_empty()
+            || self.files.contains_key(&relative)
+            || self
+                .files
+                .keys()
+                .any(|candidate| candidate.starts_with(&relative))
+    }
+
+    pub(crate) fn read_source(&self, path: &Path) -> Result<&str, String> {
+        let relative = self.relative_path(path).ok_or_else(|| {
+            format!(
+                "verified package input {} is outside {}",
+                path.display(),
+                self.root.display()
+            )
+        })?;
+        let contents = self.files.get(&relative).ok_or_else(|| {
+            format!(
+                "verified package input {} was not present during verification",
+                path.display()
+            )
+        })?;
+        std::str::from_utf8(contents)
+            .map_err(|error| format!("read verified source {}: {error}", path.display()))
+    }
+
+    pub(crate) fn source_paths_at(&self, target: &Path) -> Result<Vec<PathBuf>, String> {
+        let relative = self.relative_path(target).ok_or_else(|| {
+            format!(
+                "verified source path {} is outside {}",
+                target.display(),
+                self.root.display()
+            )
+        })?;
+        if self.files.contains_key(&relative) {
+            return Ok(vec![lexical_absolute(target)?]);
+        }
+
+        let mut files: Vec<_> = self
+            .files
+            .keys()
+            .filter(|path| path.parent() == Some(relative.as_path()))
+            .filter(|path| path.extension().and_then(|ext| ext.to_str()) == Some("mko"))
+            .filter(|path| {
+                let name = path.file_name().and_then(|name| name.to_str()).unwrap_or("");
+                !name.starts_with('.')
+                    && !name.ends_with("_test.mko")
+                    && !(name.starts_with("test_") && name.ends_with(".mko"))
+            })
+            .map(|path| self.root.join(path))
+            .collect();
+        files.sort_by(|left, right| {
+            let left = left.file_name().and_then(|name| name.to_str()).unwrap_or("");
+            let right = right.file_name().and_then(|name| name.to_str()).unwrap_or("");
+            match (left == "lib.mko", right == "lib.mko") {
+                (true, false) => std::cmp::Ordering::Less,
+                (false, true) => std::cmp::Ordering::Greater,
+                _ => left.cmp(right),
+            }
+        });
+        if files.is_empty() {
+            return Err(format!(
+                "verified package directory {} has no .mko sources",
+                target.display()
+            ));
+        }
+        Ok(files)
+    }
+
+    pub(crate) fn library_sources(&self) -> Result<Vec<PathBuf>, String> {
+        let mut files = self.source_paths_at(&self.root)?;
+        files.retain(|path| path.file_name().and_then(|name| name.to_str()) != Some("main.mko"));
+        if files.is_empty() {
+            return Err(format!(
+                "verified package {} has no library .mko sources",
+                self.root.display()
+            ));
+        }
+        Ok(files)
+    }
+
+    pub(crate) fn has_manifest(&self) -> bool {
+        !self.root_is_file && self.files.contains_key(Path::new("mako.toml"))
+    }
+
+    pub(crate) fn manifest_dir(&self) -> Option<&Path> {
+        self.has_manifest().then_some(self.root())
     }
 }
 
@@ -327,10 +468,16 @@ fn collect_package_files(
     Ok(())
 }
 
-/// Hash package inputs (root manifest + recursive `.mko` sources) with stable
-/// framing and normalized, relative paths. VCS metadata, Mako's dependency
-/// cache, Rust build output, and the lockfile itself are excluded.
-fn hash_path_dep(full: &Path) -> Result<String, String> {
+struct PackageSnapshot {
+    content_hash: String,
+    root_is_file: bool,
+    files: BTreeMap<PathBuf, Vec<u8>>,
+}
+
+/// Read and hash package inputs (root manifest + recursive `.mko` sources) with
+/// stable framing and normalized, relative paths. VCS metadata, Mako's
+/// dependency cache, Rust build output, and the lockfile itself are excluded.
+fn snapshot_path_dep(full: &Path) -> Result<PackageSnapshot, String> {
     if !full.exists() {
         return Err(format!(
             "cannot hash missing package path: {}",
@@ -339,7 +486,8 @@ fn hash_path_dep(full: &Path) -> Result<String, String> {
     }
 
     let mut files = Vec::new();
-    if full.is_file() {
+    let root_is_file = full.is_file();
+    if root_is_file {
         let name = full
             .file_name()
             .ok_or_else(|| format!("package file has no name: {}", full.display()))?;
@@ -358,17 +506,27 @@ fn hash_path_dep(full: &Path) -> Result<String, String> {
     files.sort_by(|a, b| a.0.cmp(&b.0));
 
     let mut hasher = Sha256::new();
+    let mut snapshot = BTreeMap::new();
     hasher.update(b"mako-package-content-v2\0");
     for (relative, path) in files {
         let contents = fs::read(&path)
             .map_err(|e| format!("read package file {} for hashing: {e}", path.display()))?;
-        let relative = relative.as_bytes();
-        hasher.update((relative.len() as u64).to_be_bytes());
-        hasher.update(relative);
+        let relative_bytes = relative.as_bytes();
+        hasher.update((relative_bytes.len() as u64).to_be_bytes());
+        hasher.update(relative_bytes);
         hasher.update((contents.len() as u64).to_be_bytes());
-        hasher.update(contents);
+        hasher.update(&contents);
+        snapshot.insert(PathBuf::from(relative), contents);
     }
-    Ok(format!("{PACKAGE_HASH_PREFIX}{:x}", hasher.finalize()))
+    Ok(PackageSnapshot {
+        content_hash: format!("{PACKAGE_HASH_PREFIX}{:x}", hasher.finalize()),
+        root_is_file,
+        files: snapshot,
+    })
+}
+
+fn hash_path_dep(full: &Path) -> Result<String, String> {
+    Ok(snapshot_path_dep(full)?.content_hash)
 }
 
 fn path_dep_version(full: &Path) -> Option<String> {
@@ -862,7 +1020,7 @@ pub(crate) fn verified_dependency_roots(
         .into_iter()
         .map(|dependency| (project.to_path_buf(), dependency))
         .collect();
-    let mut verified_packages: HashMap<String, PathBuf> = HashMap::new();
+    let mut verified_packages: HashMap<String, Arc<VerifiedPackage>> = HashMap::new();
     let mut verified_roots = VerifiedDependencyRoots::default();
 
     while let Some((from, dependency)) = queue.pop() {
@@ -888,8 +1046,8 @@ pub(crate) fn verified_dependency_roots(
             }
         }
 
-        if let Some(full) = verified_packages.get(&package.name) {
-            verified_roots.insert(&from, package.name.clone(), full.clone());
+        if let Some(verified) = verified_packages.get(&package.name) {
+            verified_roots.insert(&from, package.name.clone(), verified.clone());
             // The first visit already enqueued this package's dependencies.
             continue;
         }
@@ -905,18 +1063,19 @@ pub(crate) fn verified_dependency_roots(
                 full.display()
             ));
         }
-        let actual_hash = hash_path_dep(&full)?;
-        if actual_hash != package.content_hash {
+        let snapshot = snapshot_path_dep(&full)?;
+        if snapshot.content_hash != package.content_hash {
             return Err(format!(
                 "package integrity mismatch for `{}` at {}: expected {}, found {}; restore the locked content or run `mako pkg update` if the change is intentional",
                 package.name,
                 full.display(),
                 package.content_hash,
-                actual_hash
+                snapshot.content_hash
             ));
         }
-        verified_roots.insert(&from, package.name.clone(), full.clone());
-        verified_packages.insert(package.name.clone(), full.clone());
+        let verified = Arc::new(VerifiedPackage::new(&full, snapshot)?);
+        verified_roots.insert(&from, package.name.clone(), verified.clone());
+        verified_packages.insert(package.name.clone(), verified.clone());
 
         let dependency_dir = if full.is_file() {
             full.parent().map(Path::to_path_buf)
@@ -924,7 +1083,12 @@ pub(crate) fn verified_dependency_roots(
             Some(full)
         };
         if let Some(dir) = dependency_dir {
-            if let Some(text) = read_dependency_manifest(&dir)? {
+            let manifest = if verified.has_manifest() {
+                Some(verified.read_source(&dir.join("mako.toml"))?.to_string())
+            } else {
+                read_dependency_manifest(&dir)?
+            };
+            if let Some(text) = manifest {
                 queue.extend(
                     parse_manifest_deps(&text)
                         .into_iter()
@@ -1565,7 +1729,10 @@ mod tests {
         write_lockfile(&app, &lock).unwrap();
 
         let roots = verified_dependency_roots(&app).unwrap().unwrap();
-        assert_eq!(roots.get(&a, "b"), Some(declared_b.as_path()));
+        assert_eq!(
+            roots.get(&a, "b").map(VerifiedPackage::root),
+            Some(declared_b.as_path())
+        );
         crate::tooling::check_file(&main).unwrap();
         let _ = fs::remove_dir_all(&dir);
     }
