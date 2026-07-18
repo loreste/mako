@@ -361,10 +361,11 @@ content_hash = "sha256:2a78b67c8f640e71c4ef635bdf6f28c59ad31977f4041e1d7b5c3a01d
 ```
 
 Commit `mako.lock` to version control for reproducible builds across
-environments. `mako pkg install` verifies locked dependency content and fails
-on a mismatch, an unreadable transitive manifest, or malformed lock metadata.
-Inspect intentional changes before accepting them with `mako pkg update`; that
-command also migrates legacy version 1 lockfiles.
+environments. `mako pkg install`, `mako build`, `mako run`, and `mako check`
+verify locked dependency content and fail on a mismatch, an unreadable
+transitive manifest, or malformed lock metadata. Inspect intentional changes
+before accepting them with `mako pkg update`; that command also migrates legacy
+version 1 lockfiles.
 
 ### mako pkg update
 
