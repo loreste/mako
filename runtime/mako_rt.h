@@ -292,25 +292,54 @@ typedef struct {
     size_t cap;
 } MakoIntArray;
 
-static inline MakoIntArray mako_int_array_new(size_t n) {
+/* Empty POD slice — no heap. cap==0 ⇒ free is a no-op (SAFE-003 view). */
+static inline MakoIntArray mako_int_array_empty(void) {
     MakoIntArray a;
-    a.data = (int64_t *)calloc(n ? n : 1, sizeof(int64_t));
+    a.data = NULL;
+    a.len = 0;
+    a.cap = 0;
+    return a;
+}
+
+/* Non-owning view of existing storage (stack lit / sub-slice). No malloc. */
+static inline MakoIntArray mako_int_array_view(int64_t *data, size_t n) {
+    MakoIntArray a;
+    a.data = data;
     a.len = n;
-    a.cap = n ? n : 1;
+    a.cap = 0;
+    return a;
+}
+
+static inline MakoIntArray mako_int_array_new(size_t n) {
+    if (n == 0) return mako_int_array_empty();
+    MakoIntArray a;
+    a.data = (int64_t *)calloc(n, sizeof(int64_t));
+    a.len = n;
+    a.cap = n;
     return a;
 }
 
 static inline MakoIntArray mako_int_array_of(const int64_t *vals, size_t n) {
+    if (n == 0) return mako_int_array_empty();
     MakoIntArray a = mako_int_array_new(n);
-    if (n) memcpy(a.data, vals, n * sizeof(int64_t));
+    memcpy(a.data, vals, n * sizeof(int64_t));
     return a;
 }
 
+/* Escape / return: identity if already heap-owned (cap>0); else copy to heap. */
+static inline MakoIntArray mako_int_array_to_owned(MakoIntArray a) {
+    if (MAKO_LIKELY(a.cap > 0)) return a;
+    if (a.len == 0) return mako_int_array_empty();
+    return mako_int_array_of(a.data, a.len);
+}
+
 /* Go-like make([]int, len) / make([]int, len, cap).
- * Allocates `cap` slots, zeroes the first `len`. Aborts on OOM. */
+ * Allocates `cap` slots, zeroes the first `len`. Aborts on OOM.
+ * make(0, 0) is empty (no heap) — append allocates on first growth. */
 static inline MakoIntArray mako_int_array_make(int64_t len, int64_t cap) {
     if (len < 0) len = 0;
     if (cap < len) cap = len;
+    if (len == 0 && cap == 0) return mako_int_array_empty();
     size_t c = (size_t)(cap ? cap : 1);
     size_t l = (size_t)len;
     /* malloc + zero only the live prefix — avoid zeroing unused capacity (CPU+RSS). */
@@ -330,7 +359,7 @@ static inline MakoIntArray mako_int_array_make(int64_t len, int64_t cap) {
 /* SAFE-003: free owning slice headers. Views use cap==0 and must not free .data
  * (sub-slices share backing; free is only valid for the original malloc base). */
 static inline void mako_int_array_free(MakoIntArray a) {
-    if (a.cap > 0 && a.data) free(a.data);
+    if (MAKO_UNLIKELY(a.cap > 0 && a.data)) free(a.data);
 }
 
 static inline void mako_abort(const char *msg); /* defined below */
@@ -346,15 +375,33 @@ typedef struct {
     size_t cap;
 } MakoByteArray;
 
-static inline MakoByteArray mako_byte_array_new(size_t n) {
+static inline MakoByteArray mako_byte_array_empty(void) {
     MakoByteArray a;
-    a.data = (uint8_t *)calloc(n ? n : 1, 1);
+    a.data = NULL;
+    a.len = 0;
+    a.cap = 0;
+    return a;
+}
+
+static inline MakoByteArray mako_byte_array_view(uint8_t *data, size_t n) {
+    MakoByteArray a;
+    a.data = data;
     a.len = n;
-    a.cap = n ? n : 1;
+    a.cap = 0;
+    return a;
+}
+
+static inline MakoByteArray mako_byte_array_new(size_t n) {
+    if (n == 0) return mako_byte_array_empty();
+    MakoByteArray a;
+    a.data = (uint8_t *)calloc(n, 1);
+    a.len = n;
+    a.cap = n;
     return a;
 }
 
 static inline MakoByteArray mako_byte_array_of(const int64_t *vals, size_t n) {
+    if (n == 0) return mako_byte_array_empty();
     MakoByteArray a = mako_byte_array_new(n);
     for (size_t i = 0; i < n; i++) {
         int64_t v = vals[i];
@@ -364,9 +411,24 @@ static inline MakoByteArray mako_byte_array_of(const int64_t *vals, size_t n) {
     return a;
 }
 
+/* From already-materialized uint8 buffer (stack lit path). */
+static inline MakoByteArray mako_byte_array_of_u8(const uint8_t *vals, size_t n) {
+    if (n == 0) return mako_byte_array_empty();
+    MakoByteArray a = mako_byte_array_new(n);
+    memcpy(a.data, vals, n);
+    return a;
+}
+
+static inline MakoByteArray mako_byte_array_to_owned(MakoByteArray a) {
+    if (MAKO_LIKELY(a.cap > 0)) return a;
+    if (a.len == 0) return mako_byte_array_empty();
+    return mako_byte_array_of_u8(a.data, a.len);
+}
+
 static inline MakoByteArray mako_byte_array_make(int64_t len, int64_t cap) {
     if (len < 0) len = 0;
     if (cap < len) cap = len;
+    if (len == 0 && cap == 0) return mako_byte_array_empty();
     size_t c = (size_t)(cap ? cap : 1);
     size_t l = (size_t)len;
     uint8_t *data = (uint8_t *)malloc(c);
@@ -415,7 +477,7 @@ static inline MakoByteArray mako_byte_append(MakoByteArray s, int64_t v) {
 
 /* Free owning []byte (cap>0). cap==0 is a borrowed view — no free. */
 static inline void mako_byte_array_free(MakoByteArray a) {
-    if (a.cap > 0 && a.data) free(a.data);
+    if (MAKO_UNLIKELY(a.cap > 0 && a.data)) free(a.data);
 }
 
 static inline MakoByteArray mako_byte_slice_expr(
@@ -614,7 +676,7 @@ static inline MakoStrArray mako_str_array_append(MakoStrArray s, MakoString v) {
 }
 
 static inline void mako_str_array_free(MakoStrArray a) {
-    if (!(a.cap > 0 && a.data)) return;
+    if (MAKO_LIKELY(!(a.cap > 0 && a.data))) return;
     for (size_t i = 0; i < a.len; i++) mako_str_free(a.data[i]);
     free(a.data);
 }
@@ -652,23 +714,48 @@ typedef struct {
     size_t cap;
 } MakoFloatArray;
 
-static inline MakoFloatArray mako_float_array_new(size_t n) {
+static inline MakoFloatArray mako_float_array_empty(void) {
     MakoFloatArray a;
-    a.data = (double *)calloc(n ? n : 1, sizeof(double));
+    a.data = NULL;
+    a.len = 0;
+    a.cap = 0;
+    return a;
+}
+
+static inline MakoFloatArray mako_float_array_view(double *data, size_t n) {
+    MakoFloatArray a;
+    a.data = data;
     a.len = n;
-    a.cap = n ? n : 1;
+    a.cap = 0;
+    return a;
+}
+
+static inline MakoFloatArray mako_float_array_new(size_t n) {
+    if (n == 0) return mako_float_array_empty();
+    MakoFloatArray a;
+    a.data = (double *)calloc(n, sizeof(double));
+    a.len = n;
+    a.cap = n;
     return a;
 }
 
 static inline MakoFloatArray mako_float_array_of(const double *vals, size_t n) {
+    if (n == 0) return mako_float_array_empty();
     MakoFloatArray a = mako_float_array_new(n);
-    if (n) memcpy(a.data, vals, n * sizeof(double));
+    memcpy(a.data, vals, n * sizeof(double));
     return a;
+}
+
+static inline MakoFloatArray mako_float_array_to_owned(MakoFloatArray a) {
+    if (MAKO_LIKELY(a.cap > 0)) return a;
+    if (a.len == 0) return mako_float_array_empty();
+    return mako_float_array_of(a.data, a.len);
 }
 
 static inline MakoFloatArray mako_float_array_make(int64_t len, int64_t cap) {
     if (len < 0) len = 0;
     if (cap < len) cap = len;
+    if (len == 0 && cap == 0) return mako_float_array_empty();
     MakoFloatArray a;
     a.data = (double *)calloc((size_t)(cap ? cap : 1), sizeof(double));
     a.len = (size_t)len;
@@ -704,7 +791,7 @@ static inline MakoFloatArray mako_float_array_append(MakoFloatArray s, double v)
 }
 
 static inline void mako_float_array_free(MakoFloatArray a) {
-    if (a.cap > 0 && a.data) free(a.data);
+    if (MAKO_UNLIKELY(a.cap > 0 && a.data)) free(a.data);
 }
 
 static inline MakoFloatArray mako_float_array_slice_expr(
@@ -739,23 +826,48 @@ typedef struct {
     size_t cap;
 } MakoBoolArray;
 
-static inline MakoBoolArray mako_bool_array_new(size_t n) {
+static inline MakoBoolArray mako_bool_array_empty(void) {
     MakoBoolArray a;
-    a.data = (bool *)calloc(n ? n : 1, sizeof(bool));
+    a.data = NULL;
+    a.len = 0;
+    a.cap = 0;
+    return a;
+}
+
+static inline MakoBoolArray mako_bool_array_view(bool *data, size_t n) {
+    MakoBoolArray a;
+    a.data = data;
     a.len = n;
-    a.cap = n ? n : 1;
+    a.cap = 0;
+    return a;
+}
+
+static inline MakoBoolArray mako_bool_array_new(size_t n) {
+    if (n == 0) return mako_bool_array_empty();
+    MakoBoolArray a;
+    a.data = (bool *)calloc(n, sizeof(bool));
+    a.len = n;
+    a.cap = n;
     return a;
 }
 
 static inline MakoBoolArray mako_bool_array_of(const bool *vals, size_t n) {
+    if (n == 0) return mako_bool_array_empty();
     MakoBoolArray a = mako_bool_array_new(n);
-    if (n) memcpy(a.data, vals, n * sizeof(bool));
+    memcpy(a.data, vals, n * sizeof(bool));
     return a;
+}
+
+static inline MakoBoolArray mako_bool_array_to_owned(MakoBoolArray a) {
+    if (MAKO_LIKELY(a.cap > 0)) return a;
+    if (a.len == 0) return mako_bool_array_empty();
+    return mako_bool_array_of(a.data, a.len);
 }
 
 static inline MakoBoolArray mako_bool_array_make(int64_t len, int64_t cap) {
     if (len < 0) len = 0;
     if (cap < len) cap = len;
+    if (len == 0 && cap == 0) return mako_bool_array_empty();
     MakoBoolArray a;
     a.data = (bool *)calloc((size_t)(cap ? cap : 1), sizeof(bool));
     a.len = (size_t)len;
@@ -791,7 +903,7 @@ static inline MakoBoolArray mako_bool_array_append(MakoBoolArray s, bool v) {
 }
 
 static inline void mako_bool_array_free(MakoBoolArray a) {
-    if (a.cap > 0 && a.data) free(a.data);
+    if (MAKO_UNLIKELY(a.cap > 0 && a.data)) free(a.data);
 }
 
 static inline MakoBoolArray mako_bool_array_slice_expr(

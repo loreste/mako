@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **Fast POD array literals** — `[a, b, c]` for `int`/`float`/`bool`/`byte` is a
+  stack buffer + `cap==0` view (no malloc/free in hot loops). Empty `[]` and
+  `make([], 0, 0)` allocate nothing. Escape (return / field / map store) uses
+  `mako_*_array_to_owned` (identity when already heap-owned). Free helpers use
+  `MAKO_UNLIKELY`. Return materializes values before scope free (fixes
+  free-before-return UAF on `return s[i] + …`). Test:
+  `examples/testing/stack_array_lit_test.mko`.
 - Generalized mutable index lvalues: direct writes through slice views and
   nested slices (`s[1:3][0] = value`, `matrix[i][j] = value`) with the existing
   bounds, mutability, NLL, and race checks.

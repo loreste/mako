@@ -2316,6 +2316,8 @@ impl Codegen {
 
     /// True when `init` produces a fresh owning value (caller must free).
     /// Not Ident (alias) or Slice (view into another local).
+    /// POD array lits are stack views (`cap==0`) — free is a no-op (still register
+    /// so string/struct array lits that heap-allocate are freed correctly).
     fn expr_is_fresh_own(init: &Expr) -> bool {
         match init {
             Expr::Array(_) | Expr::Make { .. } | Expr::Convert { .. } => true,
@@ -2325,6 +2327,38 @@ impl Codegen {
             // Explicit append is a Call; covered above.
             _ => false,
         }
+    }
+
+    /// Heapify a POD slice view on escape (return / store). Identity if `cap>0`.
+    fn ensure_slice_owned(&mut self, c_ty: &str, val: String) -> String {
+        let own_fn = match c_ty {
+            "MakoIntArray" => "mako_int_array_to_owned",
+            "MakoByteArray" => "mako_byte_array_to_owned",
+            "MakoFloatArray" => "mako_float_array_to_owned",
+            "MakoBoolArray" => "mako_bool_array_to_owned",
+            _ => return val,
+        };
+        let tmp = self.fresh("own");
+        self.emit_line(format_args!("{c_ty} {tmp} = {own_fn}({val});"));
+        tmp
+    }
+
+    /// Force `val` into a C local before scope free. Bare expressions like
+    /// `s.data[i]` would otherwise be evaluated *after* `mako_*_free(s)`.
+    fn materialize_return_val(&mut self, c_ty: &str, val: String) -> String {
+        if c_ty == "void" || val == "/*void*/" {
+            return val;
+        }
+        // Already a plain C identifier (no operators / calls / indexing).
+        if val
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_')
+        {
+            return val;
+        }
+        let tmp = self.fresh("retv");
+        self.emit_line(format_args!("{c_ty} {tmp} = {val};"));
+        tmp
     }
 
     fn register_own_drop(&mut self, mangled: &str, c_ty: &str) {
@@ -2495,6 +2529,10 @@ impl Codegen {
 
     fn emit_byte_array_lit(&mut self, elems: &[Expr]) -> (String, String) {
         let tmp = self.fresh("barr");
+        if elems.is_empty() {
+            self.line(&format!("MakoByteArray {tmp} = mako_byte_array_empty();"));
+            return ("MakoByteArray".into(), tmp);
+        }
         let vals: Vec<String> = elems
             .iter()
             .map(|e| {
@@ -2503,14 +2541,16 @@ impl Codegen {
             })
             .collect();
         let lit = self.fresh("blit");
-        let body = if vals.is_empty() {
-            "0".to_string()
-        } else {
-            vals.join(", ")
-        };
-        self.line(&format!("int64_t {lit}[] = {{ {body} }};"));
+        // Stack storage + cap=0 view: no malloc/free on hot paths.
         self.line(&format!(
-            "MakoByteArray {tmp} = mako_byte_array_of({lit}, {});",
+            "uint8_t {lit}[] = {{ {} }};",
+            vals.iter()
+                .map(|v| format!("(uint8_t)({v})"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+        self.line(&format!(
+            "MakoByteArray {tmp} = mako_byte_array_view({lit}, {});",
             elems.len()
         ));
         ("MakoByteArray".into(), tmp)
@@ -2532,6 +2572,7 @@ impl Codegen {
             vals.join(", ")
         };
         self.line(&format!("MakoString {lit}[] = {{ {body} }};"));
+        // String arrays still heap-allocate (must own cloned element strings).
         self.line(&format!(
             "MakoStrArray {tmp} = mako_str_array_of({lit}, {});",
             elems.len()
@@ -2541,6 +2582,10 @@ impl Codegen {
 
     fn emit_float_array_lit(&mut self, elems: &[Expr]) -> (String, String) {
         let tmp = self.fresh("farr");
+        if elems.is_empty() {
+            self.line(&format!("MakoFloatArray {tmp} = mako_float_array_empty();"));
+            return ("MakoFloatArray".into(), tmp);
+        }
         let vals: Vec<String> = elems
             .iter()
             .map(|e| {
@@ -2549,14 +2594,9 @@ impl Codegen {
             })
             .collect();
         let lit = self.fresh("flit");
-        let body = if vals.is_empty() {
-            "0.0".to_string()
-        } else {
-            vals.join(", ")
-        };
-        self.line(&format!("double {lit}[] = {{ {body} }};"));
+        self.line(&format!("double {lit}[] = {{ {} }};", vals.join(", ")));
         self.line(&format!(
-            "MakoFloatArray {tmp} = mako_float_array_of({lit}, {});",
+            "MakoFloatArray {tmp} = mako_float_array_view({lit}, {});",
             elems.len()
         ));
         ("MakoFloatArray".into(), tmp)
@@ -2564,6 +2604,10 @@ impl Codegen {
 
     fn emit_bool_array_lit(&mut self, elems: &[Expr]) -> (String, String) {
         let tmp = self.fresh("barr");
+        if elems.is_empty() {
+            self.line(&format!("MakoBoolArray {tmp} = mako_bool_array_empty();"));
+            return ("MakoBoolArray".into(), tmp);
+        }
         let vals: Vec<String> = elems
             .iter()
             .map(|e| {
@@ -2572,14 +2616,9 @@ impl Codegen {
             })
             .collect();
         let lit = self.fresh("blit");
-        let body = if vals.is_empty() {
-            "false".to_string()
-        } else {
-            vals.join(", ")
-        };
-        self.line(&format!("bool {lit}[] = {{ {body} }};"));
+        self.line(&format!("bool {lit}[] = {{ {} }};", vals.join(", ")));
         self.line(&format!(
-            "MakoBoolArray {tmp} = mako_bool_array_of({lit}, {});",
+            "MakoBoolArray {tmp} = mako_bool_array_view({lit}, {});",
             elems.len()
         ));
         ("MakoBoolArray".into(), tmp)
@@ -10073,8 +10112,13 @@ impl Codegen {
         }
         if implicit_return {
             if let Some(Stmt::Expr(e)) = stmts.last() {
-                let (_, val) = self.emit_expr(e);
+                let (ty, val) = self.emit_expr(e);
+                // Materialize before free — index/expr strings may reference locals
+                // that own_drop frees (free-before-return UAF).
+                let val = self.materialize_return_val(&ty, val);
                 self.transfer_own_on_return(e);
+                // Stack/view POD slices must be heap-copied before leaving the frame.
+                let val = self.ensure_slice_owned(&ty, val);
                 self.pop_share_scope();
                 self.emit_defers();
                 self.emit_line(format_args!("return {val};"));
@@ -10961,6 +11005,16 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                 // SAFE-003/004: free owning slices/maps at scope exit (not aliases/views).
                 if Self::expr_is_fresh_own(init) {
                     self.register_own_drop(name, &ty);
+                } else if let Expr::Ident(src) = init {
+                    // `let out = mk` after `let mk = make(...)` — move ownership so free of
+                    // `mk` does not free the value now held by `out`.
+                    let src_m = mangle(src);
+                    if self.own_drop_live.contains(&src_m) {
+                        if Self::own_free_fn(&ty).is_some() {
+                            self.note_own_drop_moved(&src_m);
+                            self.register_own_drop(name, &ty);
+                        }
+                    }
                 }
             }
             Stmt::LetMulti { names, init, .. } => {
@@ -11179,6 +11233,51 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                     val
                 };
                 let mn = mangle(name);
+                // Move ownership when assigning from an owning local (e.g. out = ap_temp
+                // after append). Without this, free of the temp freess the value now held
+                // by `out` (double-free / use-after-free under SAFE-003).
+                if let Expr::Ident(src) = value {
+                    let src_m = mangle(src);
+                    if self.own_drop_live.contains(&src_m) {
+                        self.note_own_drop_moved(&src_m);
+                        // Destination takes ownership for later free.
+                        if let Some(cty) = self.locals.get(name).cloned() {
+                            if Self::own_free_fn(&cty).is_some() {
+                                // Free previous dest value if it was owned and data differs.
+                                if self.own_drop_live.contains(&mn) {
+                                    if let Some(ff) = Self::own_free_fn(&cty) {
+                                        if cty.ends_with('*') {
+                                            self.emit_line(format_args!("{ff}({mn});"));
+                                        } else if cty == "MakoString" {
+                                            let old = self.fresh("old");
+                                            self.line(&format!("MakoString {old} = {mn};"));
+                                            self.emit_line(format_args!("{mn} = {val};"));
+                                            self.emit_line(format_args!(
+                                                "if ({old}.data != {mn}.data) mako_str_free({old});"
+                                            ));
+                                            return;
+                                        } else {
+                                            let old = self.fresh("old");
+                                            self.line(&format!("{cty} {old} = {mn};"));
+                                            self.emit_line(format_args!("{mn} = {val};"));
+                                            self.emit_line(format_args!(
+                                                "if ({old}.data != {mn}.data) {ff}({old});"
+                                            ));
+                                            return;
+                                        }
+                                    }
+                                }
+                                if let Some(cell) = self.mut_capture_cells.get(name).cloned() {
+                                    self.emit_line(format_args!("*{cell} = {val};"));
+                                } else {
+                                    self.emit_line(format_args!("{mn} = {val};"));
+                                }
+                                self.register_own_drop(&mn, &cty);
+                                return;
+                            }
+                        }
+                    }
+                }
                 // SAFE-003 residual: free previous owned value on reassign.
                 if let Some(cty) = self.locals.get(name).cloned() {
                     if let Some(ff) = Self::own_free_fn(&cty) {
@@ -11247,6 +11346,8 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                 let (bty, b) = self.emit_expr(base);
                 let (_, i) = self.emit_expr(index);
                 let (vty, mut v) = self.emit_expr(value);
+                // Heapify POD stack/view slices before storing into maps/nested arrays.
+                v = self.ensure_slice_owned(&vty, v);
                 // Transfer ownership of an owning local written into a map/array so
                 // SAFE free does not free the same backing store after set stores
                 // the header by value (e.g. map[string][]int vals[slot] = cur).
@@ -11358,7 +11459,12 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
             }
             Stmt::FieldAssign { base, field, value } => {
                 let (bty, b) = self.emit_expr(base);
-                let (_, v) = self.emit_expr(value);
+                let (vty, v) = self.emit_expr(value);
+                // Escape POD stack/views into long-lived struct fields.
+                let v = self.ensure_slice_owned(&vty, v);
+                if let Expr::Ident(n) = value {
+                    self.note_own_drop_moved(&mangle(n));
+                }
                 let arrow = if bty.ends_with('*') && !bty.starts_with("Mako") { "->" } else { "." };
                 self.emit_line(format_args!("{b}{arrow}{field} = {v};"));
             }
@@ -11377,10 +11483,15 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                 self.line("return;");
             }
             Stmt::Return(Some(e)) => {
-                let (_, val) = self.emit_expr(e);
+                let (ty, val) = self.emit_expr(e);
+                // Materialize before free — `s.data[i]` expressions outlive the free
+                // of `s` if left as bare C expressions (SAFE free-before-return).
+                let val = self.materialize_return_val(&ty, val);
                 // SAFE-003/004: returning an owned local transfers it to the caller —
                 // must not free before `return` (use-after-free).
                 self.transfer_own_on_return(e);
+                // Stack-backed array lits / cap==0 views: copy to heap on escape.
+                let val = self.ensure_slice_owned(&ty, val);
                 while !self.share_scopes.is_empty() {
                     self.pop_share_scope();
                 }
@@ -28492,7 +28603,12 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                     }
                 }
                 for (fname, fexpr) in fields {
-                    let (_, v) = self.emit_expr(fexpr);
+                    let (fty, v) = self.emit_expr(fexpr);
+                    // Heapify POD stack/view slices stored in struct fields.
+                    let v = self.ensure_slice_owned(&fty, v);
+                    if let Expr::Ident(n) = fexpr {
+                        self.note_own_drop_moved(&mangle(n));
+                    }
                     self.line(&format!("{tmp}.{fname} = {v};"));
                 }
                 (cty, tmp)
@@ -28569,7 +28685,11 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                 self.line(&format!("{cty} {tmp};"));
                 self.line(&format!("memset(&{tmp}, 0, sizeof({tmp}));"));
                 for (i, vexpr) in values.iter().enumerate() {
-                    let (_, v) = self.emit_expr(vexpr);
+                    let (fty, v) = self.emit_expr(vexpr);
+                    let v = self.ensure_slice_owned(&fty, v);
+                    if let Expr::Ident(n) = vexpr {
+                        self.note_own_drop_moved(&mangle(n));
+                    }
                     if let Some(fname) = field_names.get(i) {
                         self.line(&format!("{tmp}.{fname} = {v};"));
                     }
@@ -28838,6 +28958,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         return (outer, tmp);
                     }
                     // Non-map first element: int-family array (legacy path).
+                    // Stack buffer + cap=0 view — zero malloc/free in hot loops.
                     let mut vals = vec![v0];
                     for e in elems.iter().skip(1) {
                         let (_, v) = self.emit_expr(e);
@@ -28847,15 +28968,13 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                     let lit = self.fresh("lit");
                     self.line(&format!("int64_t {lit}[] = {{ {} }};", vals.join(", ")));
                     self.line(&format!(
-                        "MakoIntArray {tmp} = mako_int_array_of({lit}, {});",
+                        "MakoIntArray {tmp} = mako_int_array_view({lit}, {});",
                         elems.len()
                     ));
                     return ("MakoIntArray".into(), tmp);
                 }
                 let tmp = self.fresh("arr");
-                self.line(&format!(
-                    "MakoIntArray {tmp} = mako_int_array_make(0, 0);"
-                ));
+                self.line(&format!("MakoIntArray {tmp} = mako_int_array_empty();"));
                 ("MakoIntArray".into(), tmp)
             }
             Expr::Convert { ty, args } => {

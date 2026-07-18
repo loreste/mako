@@ -1,0 +1,59 @@
+// Hot-path POD array lits: stack storage (cap==0 view), no malloc per lit.
+// Escape (return / append / store) heapifies via mako_*_array_to_owned.
+
+fn sum3(a: int, b: int, c: int) -> int {
+    let s = [a, b, c]
+    return s[0] + s[1] + s[2]
+}
+
+fn return_lit() -> []int {
+    return [10, 20, 30]
+}
+
+fn hot_loop(n: int) -> int {
+    let mut acc = 0
+    let mut i = 0
+    while i < n {
+        let s = [i, i + 1, i + 2]
+        acc = acc + s[0] + s[1] + s[2]
+        i = i + 1
+    }
+    return acc
+}
+
+fn append_from_lit() -> int {
+    let mut s = [1, 2]
+    s = append(s, 3)
+    return s[0] + s[1] + s[2]
+}
+
+fn TestStackLitSum() {
+    assert_eq(sum3(1, 2, 3), 6)
+}
+
+fn TestStackLitReturnOwned() {
+    let r = return_lit()
+    assert_eq(len(r), 3)
+    assert_eq(r[0], 10)
+    assert_eq(r[1], 20)
+    assert_eq(r[2], 30)
+}
+
+fn TestStackLitHotLoop() {
+    // sum_{i=0}^{n-1} (3i+3) = 3n(n+1)/2
+    let n = 5000
+    assert_eq(hot_loop(n), 3 * n * (n + 1) / 2)
+}
+
+fn TestStackLitAppendGrows() {
+    assert_eq(append_from_lit(), 6)
+}
+
+fn TestEmptyLitNoMalloc() {
+    let s: []int = []
+    assert_eq(len(s), 0)
+    let mut t = []
+    t = append(t, 7)
+    assert_eq(len(t), 1)
+    assert_eq(t[0], 7)
+}

@@ -118,6 +118,9 @@ These are built into the runtime and codegen — no user action required.
 | **`select` condvar** | Channel select waits on a shared condition variable; send/close broadcast wakeups (no 2 ms poll). |
 | **Codegen monomorph cache** | `want_map` checks use a joined key set, eliminating per-call heap allocation. |
 | **Codegen `emit_line`** | Hot emission writes with `format_args!` into the output buffer — no per-line `String`. |
+| **Stack POD array lits** | `[a,b,c]` for int/float/bool/byte → stack buffer + `cap==0` view (no malloc/free). Escape heapifies. |
+| **Empty slices** | `[]` / `make([],0,0)` → no heap until first grow. |
+| **Cold free** | Slice free is `MAKO_UNLIKELY(cap>0)` — views and stack lits cost a predicted-not-taken branch. |
 
 ## Memory & CPU practices
 
@@ -129,6 +132,8 @@ These are built into the runtime and codegen — no user action required.
 4. Prefer **`hold`** over **`share`** when unique ownership works (no RC traffic).
 5. Avoid hidden clones: map rehash **moves** keys; HTTP parse copies once into the arena.
 6. Measure with **`now_ns`** / `black_box` for microbenches (ms timers hide wins).
+7. **Hot loops:** short-lived POD lits stay on the stack; use one buffer when you
+   need growable storage across iterations (append/reuse, not a fresh lit each time).
 
 ## Runtime / codegen wins (shipped)
 
