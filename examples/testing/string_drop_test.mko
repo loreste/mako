@@ -1,0 +1,24 @@
+// SAFE-005 seed: owning strings free on reassign and scope exit.
+
+fn TestStringReassignFreesOld() {
+    let mut s = "hello"
+    s = "world"
+    s = f"n={3}"
+    assert(s == "n=3")
+}
+
+fn TestStringScopeDrop() {
+    {
+        let t = f"inner-{1}"
+        assert(t == "inner-1")
+    }
+    let outer = "ok"
+    assert(outer == "ok")
+}
+
+fn TestStringConcatOwned() {
+    let a = "ab"
+    let b = "cd"
+    let c = a + b
+    assert(c == "abcd")
+}

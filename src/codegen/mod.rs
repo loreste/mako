@@ -2321,10 +2321,20 @@ impl Codegen {
     fn expr_is_fresh_own(init: &Expr) -> bool {
         match init {
             Expr::Array(_) | Expr::Make { .. } | Expr::Convert { .. } => true,
-            // Function/method results that are slices/maps are owned by the caller
-            // after return transfer (see transfer_own_on_return).
+            // Owned strings: `str_from_cstr` / f-string finish / concat.
+            // (Zero-copy `str_view` is only used in arg/compare positions, not let.)
+            Expr::String(_) | Expr::StringInterp(_) => true,
+            // String concat (`a + b`) and similar produce owned values; int Add
+            // also matches but `own_free_fn` is None so register is a no-op.
+            Expr::Binary {
+                op: crate::ast::BinOp::Add,
+                ..
+            } => true,
+            // Map/index gets may return owned string/slice headers.
+            Expr::Index { .. } => true,
+            // Function/method results that are slices/maps/strings are owned by
+            // the caller after return transfer (see transfer_own_on_return).
             Expr::Call { .. } | Expr::Method { .. } => true,
-            // Explicit append is a Call; covered above.
             _ => false,
         }
     }
@@ -2408,6 +2418,45 @@ impl Codegen {
                 }
             }
             self.share_scopes[i].clear();
+        }
+    }
+
+    /// SAFE-006: free every still-live own/share/fn-env before a `?` early return.
+    /// Does **not** clear tracking — the success path still frees at scope exit.
+    /// Only the early-return C branch executes these frees.
+    fn emit_try_early_return_cleanup(&mut self) {
+        // Owns: reverse scope order, reverse within scope (same as pop).
+        for i in (0..self.own_drop_scopes.len()).rev() {
+            let entries = self.own_drop_scopes[i].clone();
+            for (name, free_fn) in entries.into_iter().rev() {
+                if self.own_drop_live.contains(&name) {
+                    self.emit_line(format_args!("{free_fn}({name});"));
+                }
+            }
+        }
+        for i in (0..self.fn_env_scopes.len()).rev() {
+            let names = self.fn_env_scopes[i].clone();
+            for name in names.into_iter().rev() {
+                if self.fn_env_live.contains(&name) {
+                    self.emit_line(format_args!("mako_fn_drop(&{name});"));
+                }
+            }
+        }
+        for i in (0..self.share_scopes.len()).rev() {
+            let names = self.share_scopes[i].clone();
+            for name in names.into_iter().rev() {
+                if self.share_live.contains(&name) {
+                    self.emit_line(format_args!("mako_share_drop({name});"));
+                }
+            }
+        }
+        // Defers that have been registered so far (LIFO).
+        for block in self.defer_stack.clone().into_iter().rev() {
+            self.push_share_scope();
+            for stmt in &block.stmts {
+                self.emit_stmt(stmt);
+            }
+            self.pop_share_scope();
         }
     }
 
@@ -29890,18 +29939,36 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                 if is_option {
                     self.line(&format!("MakoOptionInt {tmp} = {v};"));
                     if ret_is_result {
-                        self.line(&format!(
-                            "if (!{tmp}.some) return mako_err_int(mako_str_from_cstr(\"None\"));"
-                        ));
+                        self.line(&format!("if (!{tmp}.some) {{"));
+                        self.indent += 1;
+                        self.emit_try_early_return_cleanup();
+                        self.line("return mako_err_int(mako_str_from_cstr(\"None\"));");
+                        self.indent -= 1;
+                        self.line("}");
                     } else {
-                        self.line(&format!("if (!{tmp}.some) return {tmp};"));
+                        self.line(&format!("if (!{tmp}.some) {{"));
+                        self.indent += 1;
+                        self.emit_try_early_return_cleanup();
+                        self.line(&format!("return {tmp};"));
+                        self.indent -= 1;
+                        self.line("}");
                     }
                 } else {
                     self.line(&format!("MakoResultInt {tmp} = {v};"));
                     if ret_is_option {
-                        self.line(&format!("if (!{tmp}.ok) return mako_none_int();"));
+                        self.line(&format!("if (!{tmp}.ok) {{"));
+                        self.indent += 1;
+                        self.emit_try_early_return_cleanup();
+                        self.line("return mako_none_int();");
+                        self.indent -= 1;
+                        self.line("}");
                     } else {
-                        self.line(&format!("if (!{tmp}.ok) return {tmp};"));
+                        self.line(&format!("if (!{tmp}.ok) {{"));
+                        self.indent += 1;
+                        self.emit_try_early_return_cleanup();
+                        self.line(&format!("return {tmp};"));
+                        self.indent -= 1;
+                        self.line("}");
                     }
                 }
                 match kind.as_str() {
