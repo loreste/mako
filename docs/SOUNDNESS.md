@@ -42,48 +42,42 @@ Related: [SECURITY.md](SECURITY.md) · [MEMORY_MODEL.md](MEMORY_MODEL.md) ·
 | **Doc** | [LANGUAGE_SPEC.md § Ownership categories](../LANGUAGE_SPEC.md#ownership-categories) |
 | **Evidence** | Spec text + examples under `hold` / `share` / `arena` / `unsafe`. |
 
-### SAFE-003 — Compiler-generated drops for core slices — **Done** (core shapes)
+### SAFE-003 — Compiler-generated drops for core slices — **Done**
 
 | | |
 |--|--|
-| **Contract** | Owning `[]int`/`[]byte`/`[]string`/`[]float`/`[]bool` from lit/`make`/`append`/`[]byte(…)` free at scope exit via `mako_*_array_free`. Sub-slices are **views** (`cap==0`) and never free backing. |
-| **Code** | `runtime/mako_rt.h` free helpers + view slice_expr; codegen `own_drop_scopes` on block/`return`. |
-| **Evidence** | `own_drop_slice_test.mko`, `slice_return_own_test.mko`; shared-view writes still pass. |
-| **Also** | Return of owned local **transfers** (no free-before-return). Sub-slice store that outlives base is a type error (`slice_view_escape`). Return of slice view of local is rejected (`slice_view_return`). |
-| **Gap** | Nested `[][]T` / monomorph `MakoArr_*` full free graph; free-on-reassign of intermediate grow-leaks. |
+| **Contract** | Owning slices free at scope exit / reassign (when backing pointer changes). Views use `cap==0`. Nested `[][]T` free outer + scalar inners. |
+| **Code** | `mako_*_array_free`, `mako_arr_arr_*_free`; codegen `own_drop_scopes` + reassign free. |
+| **Evidence** | `own_drop_slice_test`, `slice_return_own_test`, ASan reassign/break probes. |
+| **Also** | Return transfers ownership; view escape/return type errors. |
 
-### SAFE-004 — Compiler-generated drops for built-in map shapes — **Done** (built-ins)
+### SAFE-004 — Compiler-generated drops for maps — **Done**
 
 | | |
 |--|--|
-| **Contract** | Built-in `map[K]V` pointer maps free on scope exit (`mako_map_*_free`). |
-| **Code** | Free helpers in `mako_rt.h` / `mako_goext.h`; codegen registers fresh `make(map…)` locals. |
-| **Gap** | Demand monomorph `MakoMapS_Point*` etc. still need free in monomorph emitter (follow-up). |
+| **Contract** | Built-in and monomorph `map[K]V` heap handles free on scope exit (`mako_map_*_free` / `{fnp}_free`). |
+| **Code** | `emit_map_heap_free` for monomorphs; built-ins in `mako_rt.h` / `mako_goext.h`. |
+| **Evidence** | `map_*` suite including nested/helpers; map pointer arrays free shallowly (no alias double-free). |
 
 ### SAFE-005 — String ownership / view annotations and drop verification — **Partial**
 
 | | |
 |--|--|
-| **Today** | `MakoString` owned vs process-empty singleton; `mako_str_view` / `mako_str_free` no-op for empty; zero-copy compares use views. |
-| **Gap** | Type system does not yet distinguish `string` (owned) vs `string_view` (borrowed) at the Mako surface; free of views is a runtime convention. |
-| **Target** | Optional surface or analysis: views never free; owned free once; kick/return of view from local backing rejected (ties to SAFE-007). |
-| **Acceptance** | Bad examples for free-after-view and view-escape; claims-gate or unit tests. |
+| **Done** | Fresh owning `MakoString` locals can register `mako_str_free` on reassign/scope exit. |
+| **Gap** | No distinct `string_view` type; still rely on empty-singleton + runtime free conventions. |
 
-### SAFE-006 — Branch / return / loop / `?` correct drop insertion — **Partial**
+### SAFE-006 — Branch / return / loop / `?` correct drop insertion — **Partial** (break/continue/return **Done**)
 
 | | |
 |--|--|
-| **Today** | Auto-drop for `share` (mid-scope NLL + block exit), MakoFn capture envs, arenas. Hold is move-checked, not drop-inserted for heap payloads. |
-| **Target** | Single drop-plan pass over CFG: every Own value dropped exactly once on every exit (return, break, continue, `?`, panic-abort path). |
-| **Speed** | Drop plan computed at compile time; no RC on the default path. |
-| **Acceptance** | CFG suite: early return, loop continue, `?` from nested Result, both if arms — all free owning temps once (ASan / custom counters). |
+| **Done** | Block exit free; return transfer; **break/continue** free owns in loop-body scopes (`cfg_drop_break_test`). |
+| **Gap** | Explicit `?` early-return path free of unrelated owns (depends on lowerer); labeled multi-loop edge cases. |
 
-### SAFE-007 — Reject borrowed and arena value escapes — **Partial** (arena return **Done**)
+### SAFE-007 — Reject borrowed and arena value escapes — **Done** (core)
 
 | | |
 |--|--|
-| **Done** | Return of arena handle or `arena_*`-backed local from inside `arena { }` is a type error (`arena_escape_return.mko` + claims-gate). |
-| **Gap** | Storing arena views into longer-lived structs; general View lifetime beyond arena. |
+| **Done** | Arena return escape; slice view store/return escape; **arena store into fields/outer assigns** (`arena_store_field.mko`). |
 
 ### SAFE-008 — Closure and task capture ownership — **Partial**
 
@@ -170,21 +164,20 @@ Related: [SECURITY.md](SECURITY.md) · [MEMORY_MODEL.md](MEMORY_MODEL.md) ·
 ### Shipped (0.2.3+)
 
 1. **SAFE-001 / 002 / 009 / 010 / RT-001 / RT-005 seed / RT-006** — bounds, categories, CMap, docs, crew, census.
-2. **SAFE-003 / 004 (core)** — owning slice/map free; views `cap==0`; return transfer; view escape/return reject.
-3. **SAFE-007 (core)** — arena return escape; slice view lifetime store/return.
-4. **Lang safety** — field/index mut roots; temp lvalue reject; empty `[]` lit.
+2. **SAFE-003 / 004** — owning slice/map free (built-in + monomorph); views; return transfer; free-on-reassign; nested free (safe).
+3. **SAFE-006 (break/continue/return)** — loop-exit cleanup; return transfer.
+4. **SAFE-007** — arena return/store escape; slice view escape/return.
+5. **RT-004 seed** — `channel_ownership_test`.
+6. **Lang safety** — field/index mut roots; temp lvalue reject; empty `[]` lit.
 
-### Next residuals (0.2.4+)
+### Remaining (0.2.4+)
 
-1. **SAFE-004 residual** — monomorph map free.
-2. **SAFE-006** — full CFG drops (`?`, break/continue, if-join).
-3. **SAFE-005** — string own/view.
-4. **SAFE-003 residual** — free-on-reassign; nested `[][]T`.
-5. **SAFE-007 residual** — store into longer-lived structs.
-6. **SAFE-008** — capture matrix + TSan.
-7. **RT-004** — channel ownership monomorph tests.
-8. **RT-002 / 003** — bounded scheduler + blocking pool.
-9. **RT-005** — randomized longer soaks.
+1. **SAFE-005** — distinct string view type / full free verification.
+2. **SAFE-006 residual** — `?` / multi-label loop drop edges.
+3. **SAFE-008** — capture matrix + TSan soak.
+4. **RT-004 residual** — take-send + all monomorph channels.
+5. **RT-002 / 003** — bounded scheduler + blocking pool.
+6. **RT-005** — randomized longer soaks.
 
 See also [ROADMAP.md](ROADMAP.md) · [ROADMAP_IMPL.md](../ROADMAP_IMPL.md).
 

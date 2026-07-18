@@ -12825,6 +12825,7 @@ impl TypeChecker {
                 }
                 self.assert_no_race_write(name)?;
                 self.assert_slice_view_lifetime(name, value)?;
+                self.assert_no_arena_value_store(value)?;
                 let vt = self.check_expr(value)?;
                 if !self.compatible(&vt, &ty) {
                     return Err(TypeError::new(format!(
@@ -12938,6 +12939,8 @@ impl TypeChecker {
                     }
                 }
                 self.assert_no_race_write_expr(base)?;
+                // SAFE-007: do not store arena-backed values into longer-lived structs.
+                self.assert_no_arena_value_store(value)?;
                 let bt = if let Expr::Ident(name) = base {
                     if self.hold_vars.contains_key(name) {
                         if self.moved_holds.get(name).copied().unwrap_or(false) {
@@ -17587,6 +17590,34 @@ impl TypeChecker {
                 "slice view of `{base_name}` cannot be stored in `{target_name}` — base would free first"
             ))
             .hint("keep the view in the same block as its base, or copy elements out"));
+        }
+        Ok(())
+    }
+
+    /// SAFE-007 residual: arena-backed values must not be stored into fields
+    /// or outer bindings that outlive the arena.
+    fn assert_no_arena_value_store(&self, value: &Expr) -> Result<(), TypeError> {
+        if self.arena_depth == 0 {
+            return Ok(());
+        }
+        if let Some(n) = Self::race_write_root(value) {
+            if self.arena_owned.contains(n) {
+                return Err(TypeError::new(format!(
+                    "cannot store arena-backed `{n}` outside the arena"
+                ))
+                .hint("copy POD/string data out before the arena ends"));
+            }
+        }
+        if let Expr::Call { callee, .. } = value {
+            if matches!(
+                callee.as_ref(),
+                Expr::Ident(cn) if cn.starts_with("arena_")
+            ) {
+                return Err(TypeError::new(
+                    "cannot store arena allocation outside the arena",
+                )
+                .hint("keep arena-backed values inside the `arena` block"));
+            }
         }
         Ok(())
     }

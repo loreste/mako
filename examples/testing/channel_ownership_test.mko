@@ -1,0 +1,25 @@
+// RT-004: channel send ownership — clone send keeps caller string; recv owns.
+
+fn TestStringSendKeepsCaller() {
+    let mut ch = make(chan[string], 2)
+    let s = "payload"
+    ch.send(s)
+    assert_eq_str(s, "payload")
+    let got = ch.recv()
+    assert_eq_str(got, "payload")
+}
+
+fn TestIntSendRecv() {
+    let mut ch = make(chan[int], 1)
+    ch.send(42)
+    assert_eq(ch.recv(), 42)
+}
+
+fn TestTrySendFull() {
+    let mut ch = make(chan[int], 1)
+    ch.send(7)
+    let v = 99
+    ch.try_send(v)
+    assert_eq(v, 99)
+    ch.recv()
+}

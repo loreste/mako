@@ -32,16 +32,16 @@ Program: [SOUNDNESS.md](SOUNDNESS.md) · model: [MEMORY_MODEL.md](MEMORY_MODEL.m
 |------|--------|
 | SAFE-001 bounds in release | Done |
 | SAFE-002 ownership categories | Done |
-| SAFE-003/004 slice+map free (core) + return transfer + view escape | Done |
+| SAFE-003/004 slice+map free (incl. monomorph) + reassign + views | Done |
 | SAFE-005 string own/view | Partial |
-| SAFE-006 full CFG drops | Partial |
-| SAFE-007 arena/slice escape (core) | Partial (core Done) |
+| SAFE-006 CFG drops (return/break/continue) | Partial (`?` residual) |
+| SAFE-007 arena/slice escape + field store | Done |
 | SAFE-008 capture audit | Partial |
 | SAFE-009 CMap gate | Done |
 | SAFE-010 memory model doc | Done |
 | RT-001 / RT-005 seed / RT-006 | Done |
 | RT-002/003 scheduler | Planned |
-| RT-004 channel ownership monomorphs | Partial |
+| RT-004 channel ownership | Partial (seed tests) |
 
 ---
 

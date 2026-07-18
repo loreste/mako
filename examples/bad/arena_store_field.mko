@@ -1,0 +1,12 @@
+// SAFE-007: arena-backed values must not be stored into longer-lived fields.
+struct Box {
+    data: []int
+}
+
+fn main() {
+    let mut b = Box { data: [0] }
+    arena a {
+        let s = arena_ints(a, 4)
+        b.data = s
+    }
+}

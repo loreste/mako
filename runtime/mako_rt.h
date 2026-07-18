@@ -859,25 +859,25 @@ static inline MakoArr_arr_int mako_arr_arr_int_of(const MakoIntArray *vals, size
     if (n) memcpy(a.data, vals, n * sizeof(MakoIntArray));
     return a;
 }
+/* Free owning nested [][]int (and each inner owned header). Views: cap==0. */
+static inline void mako_arr_arr_int_free(MakoArr_arr_int a) {
+    if (!(a.cap > 0 && a.data)) return;
+    for (size_t i = 0; i < a.len; i++) mako_int_array_free(a.data[i]);
+    free(a.data);
+}
 static inline MakoArr_arr_int mako_arr_arr_int_slice_expr(MakoArr_arr_int s, int64_t low, int64_t high, int64_t max, int has_max) {
     int64_t len = (int64_t)s.len;
-    int64_t cap = (int64_t)s.cap;
     if (low < 0) low = 0;
     if (high < 0) high = 0;
     if (low > len) low = len;
     if (high > len) high = len;
     if (high < low) high = low;
+    (void)max;
+    (void)has_max;
     MakoArr_arr_int out;
     out.data = s.data + (size_t)low;
     out.len = (size_t)(high - low);
-    if (has_max) {
-        if (max < high) max = high;
-        if (max > cap) max = cap;
-        if (max < low) max = low;
-        out.cap = (size_t)(max - low);
-    } else {
-        out.cap = (size_t)(cap - low);
-    }
+    out.cap = 0; /* view */
     return out;
 }
 static inline int64_t mako_arr_arr_int_copy(MakoArr_arr_int dst, MakoArr_arr_int src) {
@@ -927,25 +927,24 @@ static inline MakoArr_arr_string mako_arr_arr_string_of(const MakoStrArray *vals
     if (n) memcpy(a.data, vals, n * sizeof(MakoStrArray));
     return a;
 }
+/* Free owning nested [][]string. */
+static inline void mako_arr_arr_string_free(MakoArr_arr_string a) {
+    if (!(a.cap > 0 && a.data)) return;
+    for (size_t i = 0; i < a.len; i++) mako_str_array_free(a.data[i]);
+    free(a.data);
+}
 static inline MakoArr_arr_string mako_arr_arr_string_slice_expr(MakoArr_arr_string s, int64_t low, int64_t high, int64_t max, int has_max) {
     int64_t len = (int64_t)s.len;
-    int64_t cap = (int64_t)s.cap;
     if (low < 0) low = 0;
     if (high < 0) high = 0;
     if (low > len) low = len;
     if (high > len) high = len;
     if (high < low) high = low;
+    (void)max; (void)has_max;
     MakoArr_arr_string out;
     out.data = s.data + (size_t)low;
     out.len = (size_t)(high - low);
-    if (has_max) {
-        if (max < high) max = high;
-        if (max > cap) max = cap;
-        if (max < low) max = low;
-        out.cap = (size_t)(max - low);
-    } else {
-        out.cap = (size_t)(cap - low);
-    }
+    out.cap = 0;
     return out;
 }
 static inline int64_t mako_arr_arr_string_copy(MakoArr_arr_string dst, MakoArr_arr_string src) {
@@ -995,25 +994,24 @@ static inline MakoArr_arr_float mako_arr_arr_float_of(const MakoFloatArray *vals
     if (n) memcpy(a.data, vals, n * sizeof(MakoFloatArray));
     return a;
 }
+/* Free owning nested [][]float. */
+static inline void mako_arr_arr_float_free(MakoArr_arr_float a) {
+    if (!(a.cap > 0 && a.data)) return;
+    for (size_t i = 0; i < a.len; i++) mako_float_array_free(a.data[i]);
+    free(a.data);
+}
 static inline MakoArr_arr_float mako_arr_arr_float_slice_expr(MakoArr_arr_float s, int64_t low, int64_t high, int64_t max, int has_max) {
     int64_t len = (int64_t)s.len;
-    int64_t cap = (int64_t)s.cap;
     if (low < 0) low = 0;
     if (high < 0) high = 0;
     if (low > len) low = len;
     if (high > len) high = len;
     if (high < low) high = low;
+    (void)max; (void)has_max;
     MakoArr_arr_float out;
     out.data = s.data + (size_t)low;
     out.len = (size_t)(high - low);
-    if (has_max) {
-        if (max < high) max = high;
-        if (max > cap) max = cap;
-        if (max < low) max = low;
-        out.cap = (size_t)(max - low);
-    } else {
-        out.cap = (size_t)(cap - low);
-    }
+    out.cap = 0;
     return out;
 }
 static inline int64_t mako_arr_arr_float_copy(MakoArr_arr_float dst, MakoArr_arr_float src) {
@@ -1063,25 +1061,24 @@ static inline MakoArr_arr_bool mako_arr_arr_bool_of(const MakoBoolArray *vals, s
     if (n) memcpy(a.data, vals, n * sizeof(MakoBoolArray));
     return a;
 }
+/* Free owning nested [][]bool. */
+static inline void mako_arr_arr_bool_free(MakoArr_arr_bool a) {
+    if (!(a.cap > 0 && a.data)) return;
+    for (size_t i = 0; i < a.len; i++) mako_bool_array_free(a.data[i]);
+    free(a.data);
+}
 static inline MakoArr_arr_bool mako_arr_arr_bool_slice_expr(MakoArr_arr_bool s, int64_t low, int64_t high, int64_t max, int has_max) {
     int64_t len = (int64_t)s.len;
-    int64_t cap = (int64_t)s.cap;
     if (low < 0) low = 0;
     if (high < 0) high = 0;
     if (low > len) low = len;
     if (high > len) high = len;
     if (high < low) high = low;
+    (void)max; (void)has_max;
     MakoArr_arr_bool out;
     out.data = s.data + (size_t)low;
     out.len = (size_t)(high - low);
-    if (has_max) {
-        if (max < high) max = high;
-        if (max > cap) max = cap;
-        if (max < low) max = low;
-        out.cap = (size_t)(max - low);
-    } else {
-        out.cap = (size_t)(cap - low);
-    }
+    out.cap = 0;
     return out;
 }
 static inline int64_t mako_arr_arr_bool_copy(MakoArr_arr_bool dst, MakoArr_arr_bool src) {

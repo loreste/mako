@@ -37,30 +37,28 @@ docs + claims-gate). **Next residuals** feed 0.2.4 / later.
 |----|--------|--------|
 | SAFE-001 | Bounds checks in safe release | **Done** |
 | SAFE-002 | Ownership categories in LANGUAGE_SPEC | **Done** |
-| SAFE-003 | Core slice drops + view convention + return transfer | **Done** (core shapes) |
-| SAFE-004 | Built-in map free on scope exit | **Done** (built-ins; monomorph gap) |
+| SAFE-003 | Slice drops, views, return transfer, free-on-reassign, nested free | **Done** |
+| SAFE-004 | Map free (built-in + monomorph) | **Done** |
 | SAFE-005 | String own/view surface + free verification | **Partial** |
-| SAFE-006 | Full CFG drop plan (`?` / break / continue / all edges) | **Partial** (return transfer + block exit done) |
-| SAFE-007 | Escape checks (arena return, slice view store/return) | **Partial** (core done; struct-field store gap) |
+| SAFE-006 | CFG drops (return / break / continue / block exit) | **Partial** (`?` residual) |
+| SAFE-007 | Escape checks (arena return/store, slice view) | **Done** |
 | SAFE-008 | Closure / task capture ownership audit | **Partial** |
 | SAFE-009 | CMap readers/writer gate | **Done** |
 | SAFE-010 | Concurrency memory model doc | **Done** |
 | RT-001 | Crew exit / cancel / failure | **Done** |
 | RT-002…003 | Bounded scheduler / blocking split | **Planned** |
-| RT-004 | Channel send ownership table (all monomorphs) | **Partial** |
+| RT-004 | Channel send ownership | **Partial** (seed tests shipped) |
 | RT-005 | Channel/select stress | **Seed shipped** |
 | RT-006 | Task/resource census APIs | **Done** |
 
 #### Soundness next (implementation order)
 
-1. **SAFE-004 residual** — free helpers for demand-monomorph maps (`MakoMapS_*` / …).
-2. **SAFE-006** — drop on every CFG exit (`?`, break/continue, both if arms, early return temps).
-3. **SAFE-005** — string own vs view analysis; free owned once.
-4. **SAFE-003 residual** — free-on-reassign; nested `[][]T` element free graph.
-5. **SAFE-007 residual** — arena/view store into longer-lived structs.
-6. **SAFE-008** — capture matrix + TSan soak.
-7. **RT-004** — finish channel ownership table with tests.
-8. **RT-002 / RT-003** — bounded scheduler + blocking pool (speed under fan-out).
+1. **SAFE-005** — string own vs view surface.
+2. **SAFE-006 residual** — `?` early-return free of unrelated owns.
+3. **SAFE-008** — capture matrix + TSan soak.
+4. **RT-004 residual** — take-send + monomorph channel matrix.
+5. **RT-002 / RT-003** — bounded scheduler + blocking pool.
+6. **RT-005** — randomized longer soaks.
 
 ---
 

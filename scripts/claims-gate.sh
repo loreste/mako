@@ -57,6 +57,8 @@ expect_failure slice-view-escape env MAKO_CACHE="$CACHE/slice-view-escape" \
     "$MAKO" check "$ROOT/examples/bad/slice_view_escape.mko"
 expect_failure slice-view-return env MAKO_CACHE="$CACHE/slice-view-return" \
     "$MAKO" check "$ROOT/examples/bad/slice_view_return.mko"
+expect_failure arena-store-field env MAKO_CACHE="$CACHE/arena-store-field" \
+    "$MAKO" check "$ROOT/examples/bad/arena_store_field.mko"
 expect_failure race-mut-after-kick env MAKO_CACHE="$CACHE/race-mut-after-kick" \
     "$MAKO" check "$ROOT/examples/bad/race_mut_after_kick.mko"
 expect_failure kick-mutable-closure env MAKO_CACHE="$CACHE/kick-mutable-closure" \

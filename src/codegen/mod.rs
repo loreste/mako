@@ -70,6 +70,8 @@ pub struct Codegen {
     own_drop_scopes: Vec<Vec<(String, String)>>,
     /// Still-live own-drop keys (mangled); skip if already freed.
     own_drop_live: std::collections::HashSet<String>,
+    /// `own_drop_scopes.len()` at each loop body entry (for break/continue cleanup).
+    loop_drop_bases: Vec<usize>,
     /// Mutable closure captures: maps original var name → heap cell C variable name.
     /// When a local is mutably captured, reads/writes go through `*cell` in outer scope.
     mut_capture_cells: HashMap<String, String>,
@@ -203,6 +205,7 @@ impl Codegen {
             fn_env_live: std::collections::HashSet::new(),
             own_drop_scopes: Vec::new(),
             own_drop_live: std::collections::HashSet::new(),
+            loop_drop_bases: Vec::new(),
             mut_capture_cells: HashMap::new(),
             mut_self_fns: std::collections::HashSet::new(),
             unsafe_depth: 0,
@@ -2258,29 +2261,55 @@ impl Codegen {
         self.line(&format!("MAKO_BOUNDS_CHECK({cond_c}, \"{msg}\");"));
     }
 
-    /// C free function for an owning runtime type, if any (SAFE-003/004).
-    fn own_free_fn(c_ty: &str) -> Option<&'static str> {
+    /// C free function for an owning runtime type, if any (SAFE-003/004/005).
+    fn own_free_fn(c_ty: &str) -> Option<String> {
         match c_ty {
-            "MakoIntArray" => Some("mako_int_array_free"),
-            "MakoByteArray" => Some("mako_byte_array_free"),
-            "MakoStrArray" => Some("mako_str_array_free"),
-            "MakoFloatArray" => Some("mako_float_array_free"),
-            "MakoBoolArray" => Some("mako_bool_array_free"),
-            "MakoMapSI*" => Some("mako_map_si_free"),
-            "MakoMapII*" => Some("mako_map_ii_free"),
-            "MakoMapSS*" => Some("mako_map_ss_free"),
-            "MakoMapIF*" => Some("mako_map_if_free"),
-            "MakoMapSF*" => Some("mako_map_sf_free"),
-            "MakoMapFI*" => Some("mako_map_fi_free"),
-            "MakoMapFS*" => Some("mako_map_fs_free"),
-            "MakoMapFF*" => Some("mako_map_ff_free"),
-            "MakoMapIB*" => Some("mako_map_ib_free"),
-            "MakoMapSB*" => Some("mako_map_sb_free"),
-            "MakoMapFB*" => Some("mako_map_fb_free"),
-            "MakoMapBI*" => Some("mako_map_bi_free"),
-            "MakoMapBS*" => Some("mako_map_bs_free"),
-            "MakoMapBF*" => Some("mako_map_bf_free"),
-            "MakoMapBB*" => Some("mako_map_bb_free"),
+            "MakoIntArray" => Some("mako_int_array_free".into()),
+            "MakoByteArray" => Some("mako_byte_array_free".into()),
+            "MakoStrArray" => Some("mako_str_array_free".into()),
+            "MakoFloatArray" => Some("mako_float_array_free".into()),
+            "MakoBoolArray" => Some("mako_bool_array_free".into()),
+            "MakoString" => Some("mako_str_free".into()),
+            "MakoArr_arr_int" => Some("mako_arr_arr_int_free".into()),
+            "MakoArr_arr_string" => Some("mako_arr_arr_string_free".into()),
+            "MakoArr_arr_float" => Some("mako_arr_arr_float_free".into()),
+            "MakoArr_arr_bool" => Some("mako_arr_arr_bool_free".into()),
+            "MakoMapSI*" => Some("mako_map_si_free".into()),
+            "MakoMapII*" => Some("mako_map_ii_free".into()),
+            "MakoMapSS*" => Some("mako_map_ss_free".into()),
+            "MakoMapIF*" => Some("mako_map_if_free".into()),
+            "MakoMapSF*" => Some("mako_map_sf_free".into()),
+            "MakoMapFI*" => Some("mako_map_fi_free".into()),
+            "MakoMapFS*" => Some("mako_map_fs_free".into()),
+            "MakoMapFF*" => Some("mako_map_ff_free".into()),
+            "MakoMapIB*" => Some("mako_map_ib_free".into()),
+            "MakoMapSB*" => Some("mako_map_sb_free".into()),
+            "MakoMapFB*" => Some("mako_map_fb_free".into()),
+            "MakoMapBI*" => Some("mako_map_bi_free".into()),
+            "MakoMapBS*" => Some("mako_map_bs_free".into()),
+            "MakoMapBF*" => Some("mako_map_bf_free".into()),
+            "MakoMapBB*" => Some("mako_map_bb_free".into()),
+            other if other.starts_with("MakoArr_") => {
+                let tag = &other["MakoArr_".len()..];
+                Some(format!("mako_arr_{tag}_free"))
+            }
+            other if other.starts_with("MakoMap") && other.ends_with('*') => {
+                // Monomorph: MakoMapS_Point* → mako_map_s_Point_free
+                // Slice/map val: MakoMapS_arr_int* → mako_map_s_arr_int_free
+                let body = &other["MakoMap".len()..other.len() - 1];
+                if let Some((ks, rest)) = body.split_once('_') {
+                    let ks = ks.to_ascii_lowercase();
+                    if ks == "k" {
+                        // MakoMapK_Name_tag*
+                        Some(format!("mako_map_k_{rest}_free"))
+                    } else {
+                        Some(format!("mako_map_{ks}_{rest}_free"))
+                    }
+                } else {
+                    // SI, II, …
+                    Some(format!("mako_map_{}_free", body.to_ascii_lowercase()))
+                }
+            }
             _ => None,
         }
     }
@@ -2307,20 +2336,44 @@ impl Codegen {
         }
         self.own_drop_live.insert(mangled.to_string());
         if let Some(scope) = self.own_drop_scopes.last_mut() {
-            scope.push((mangled.to_string(), ff.to_string()));
+            scope.push((mangled.to_string(), ff));
         }
     }
 
     fn emit_own_drops_for_scope(&mut self, entries: Vec<(String, String)>) {
         for (name, free_fn) in entries.into_iter().rev() {
             if self.own_drop_live.remove(&name) {
-                // Maps are pointers; slices are by-value headers.
-                if free_fn.contains("map_") {
-                    self.emit_line(format_args!("{free_fn}({name});"));
-                } else {
-                    self.emit_line(format_args!("{free_fn}({name});"));
+                self.emit_line(format_args!("{free_fn}({name});"));
+            }
+        }
+    }
+
+    /// SAFE-006: free owns/shares from loop-body scopes before break/continue.
+    fn emit_loop_exit_cleanup(&mut self) {
+        let base = self.loop_drop_bases.last().copied().unwrap_or(0);
+        // Free owns in scopes from base..end (inner first).
+        for i in (base..self.own_drop_scopes.len()).rev() {
+            let entries = self.own_drop_scopes[i].clone();
+            self.emit_own_drops_for_scope(entries);
+            self.own_drop_scopes[i].clear();
+        }
+        for i in (base..self.fn_env_scopes.len()).rev() {
+            let names = self.fn_env_scopes[i].clone();
+            for name in names.into_iter().rev() {
+                if self.fn_env_live.remove(&name) {
+                    self.emit_line(format_args!("mako_fn_drop(&{name});"));
                 }
             }
+            self.fn_env_scopes[i].clear();
+        }
+        for i in (base..self.share_scopes.len()).rev() {
+            let names = self.share_scopes[i].clone();
+            for name in names.into_iter().rev() {
+                if self.share_live.remove(&name) {
+                    self.emit_line(format_args!("mako_share_drop({name});"));
+                }
+            }
+            self.share_scopes[i].clear();
         }
     }
 
@@ -2380,9 +2433,52 @@ impl Codegen {
             Expr::Ident(n) => {
                 self.note_own_drop_moved(&mangle(n));
             }
-            // Parenthesized / trivial wrappers not used in AST; Call results are temps.
+            // `return AdminResult { servers: out, ... }` — transfer each field that is an
+            // owning local so SAFE free does not free after the struct is returned.
+            Expr::StructLit { fields, update, .. } => {
+                for (_fname, fexpr) in fields {
+                    self.transfer_own_on_return(fexpr);
+                }
+                if let Some(base) = update {
+                    self.transfer_own_on_return(base);
+                }
+            }
+            Expr::StructLitPos { values, .. } => {
+                for v in values {
+                    self.transfer_own_on_return(v);
+                }
+            }
+            Expr::Tuple(values) | Expr::Array(values) => {
+                for v in values {
+                    self.transfer_own_on_return(v);
+                }
+            }
+            // Parenthesized / call results are temps (owned by caller after return).
             _ => {}
         }
+    }
+
+    /// Emit `{fnp}_free` for a heap map pointer (SAFE-004 monomorph).
+    /// `free_str_keys` frees owned string keys before releasing the table.
+    fn emit_map_heap_free(&mut self, fnp: &str, mt: &str, free_str_keys: bool) {
+        let _ = writeln!(
+            self.out,
+            "static inline void {fnp}_free({mt} *m) {{"
+        );
+        let _ = writeln!(self.out, "    if (!m) return;");
+        if free_str_keys {
+            let _ = writeln!(self.out, "    for (size_t i = 0; i < m->cap; i++) {{");
+            let _ = writeln!(
+                self.out,
+                "        if (m->state[i] == MAKO_MAP_FULL) {{ mako_str_free(m->keys[i]); m->keys[i].data = NULL; m->keys[i].len = 0; }}"
+            );
+            let _ = writeln!(self.out, "    }}");
+        }
+        let _ = writeln!(
+            self.out,
+            "    free(m->state); free(m->keys); free(m->vals); free(m);"
+        );
+        let _ = writeln!(self.out, "}}");
     }
 
     /// Emit a Go-like test harness that runs each `TestXxx` via `mako_test_run`.
@@ -3029,6 +3125,10 @@ impl Codegen {
         let _ = writeln!(self.out, "}}");
         let _ = writeln!(
             self.out,
+            "static inline void mako_arr_{short}_free({arr} a) {{ if (a.cap > 0 && a.data) free(a.data); }}"
+        );
+        let _ = writeln!(
+            self.out,
             "static inline int64_t mako_arr_{short}_len({arr} a) {{ return (int64_t)a.len; }}"
         );
         let _ = writeln!(
@@ -3430,6 +3530,10 @@ impl Codegen {
                 );
             }
             let _ = writeln!(self.out, "}}");
+            {
+                let free_str = *key_suf == "s";
+                self.emit_map_heap_free(&fnp, &mt, free_str);
+            }
             let _ = writeln!(
                 self.out,
                 "static inline {mt} *mako_maps_clone_{key_suf}_{short}({mt} *m) {{"
@@ -3894,6 +3998,10 @@ impl Codegen {
         let _ = writeln!(self.out, "}}");
         let _ = writeln!(
             self.out,
+            "static inline void mako_arr_{c_name}_free({arr} a) {{ if (a.cap > 0 && a.data) free(a.data); }}"
+        );
+        let _ = writeln!(
+            self.out,
             "static inline int64_t mako_arr_{c_name}_len({arr} a) {{ return (int64_t)a.len; }}"
         );
         let _ = writeln!(
@@ -4028,6 +4136,27 @@ impl Codegen {
         let _ = writeln!(self.out, "    a.len = (size_t)len;");
         let _ = writeln!(self.out, "    a.cap = (size_t)(cap ? cap : 1);");
         let _ = writeln!(self.out, "    return a;");
+        let _ = writeln!(self.out, "}}");
+        // Nested free: only deep-free plain slice headers (int/string/float/bool/byte
+        // arrays). Map/channel/handle/nested-arr elements may alias or own
+        // differently — free only the outer buffer for those.
+        let deep = match elem_c {
+            "MakoIntArray" => Some("mako_int_array_free"),
+            "MakoStrArray" => Some("mako_str_array_free"),
+            "MakoFloatArray" => Some("mako_float_array_free"),
+            "MakoBoolArray" => Some("mako_bool_array_free"),
+            "MakoByteArray" => Some("mako_byte_array_free"),
+            _ => None,
+        };
+        let _ = writeln!(self.out, "static inline void {pref}_free({mt} a) {{");
+        let _ = writeln!(self.out, "    if (!(a.cap > 0 && a.data)) return;");
+        if let Some(ef) = deep {
+            let _ = writeln!(
+                self.out,
+                "    for (size_t i = 0; i < a.len; i++) {ef}(a.data[i]);"
+            );
+        }
+        let _ = writeln!(self.out, "    free(a.data);");
         let _ = writeln!(self.out, "}}");
         let _ = writeln!(
             self.out,
@@ -5535,6 +5664,10 @@ impl Codegen {
             let _ = writeln!(self.out, "    if (!m) return; memset(m->state, 0, m->cap); m->len = 0;");
         }
         let _ = writeln!(self.out, "}}");
+        {
+            let free_str = key_suf == "s";
+            self.emit_map_heap_free(&fnp, &mt, free_str);
+        }
         let _ = writeln!(self.out, "static inline {mt} *mako_maps_clone_{key_suf}_{val_tag}({mt} *m) {{");
         let _ = writeln!(self.out, "    {mt} *n = {fnp}_make(m ? (int64_t)m->len : 0);");
         let _ = writeln!(self.out, "    if (!m) return n;");
@@ -5686,6 +5819,10 @@ impl Codegen {
         let _ = writeln!(self.out, "static inline void mako_maps_clear_k_{key_name}_{val_tag}({mt} *m) {{");
         let _ = writeln!(self.out, "    if (!m) return; memset(m->state, 0, m->cap); m->len = 0;");
         let _ = writeln!(self.out, "}}");
+        {
+            let free_name = format!("mako_map_k_{key_name}_{val_tag}");
+            self.emit_map_heap_free(&free_name, &mt, false);
+        }
         let _ = writeln!(self.out, "static inline {mt} *mako_maps_clone_k_{key_name}_{val_tag}({mt} *m) {{");
         let _ = writeln!(self.out, "    {mt} *n = {fnp}_make(m ? (int64_t)m->len : 0);");
         let _ = writeln!(self.out, "    if (!m) return n;");
@@ -5959,6 +6096,10 @@ impl Codegen {
             let _ = writeln!(self.out, "    if (!m) return; memset(m->state, 0, m->cap); m->len = 0;");
         }
         let _ = writeln!(self.out, "}}");
+        {
+            let free_str = key_suf == "s";
+            self.emit_map_heap_free(&fnp, &mt, free_str);
+        }
         let _ = writeln!(self.out, "static inline {mt} *mako_maps_clone_{key_suf}_{val_tag}({mt} *m) {{");
         let _ = writeln!(self.out, "    {mt} *n = {fnp}_make(m ? (int64_t)m->len : 0);");
         let _ = writeln!(self.out, "    if (!m) return n;");
@@ -6151,6 +6292,10 @@ impl Codegen {
         let _ = writeln!(self.out, "static inline void mako_maps_clear_k_{key_name}_{val_tag}({mt} *m) {{");
         let _ = writeln!(self.out, "    if (!m) return; memset(m->state, 0, m->cap); m->len = 0;");
         let _ = writeln!(self.out, "}}");
+        {
+            let free_name = format!("mako_map_k_{key_name}_{val_tag}");
+            self.emit_map_heap_free(&free_name, &mt, false);
+        }
         let _ = writeln!(self.out, "static inline {mt} *mako_maps_clone_k_{key_name}_{val_tag}({mt} *m) {{");
         let _ = writeln!(self.out, "    {mt} *n = {fnp}_make(m ? (int64_t)m->len : 0);");
         let _ = writeln!(self.out, "    if (!m) return n;");
@@ -6635,6 +6780,10 @@ impl Codegen {
             let _ = writeln!(self.out, "    if (!m) return; memset(m->state, 0, m->cap); m->len = 0;");
         }
         let _ = writeln!(self.out, "}}");
+        {
+            let free_str = key_suf == "s";
+            self.emit_map_heap_free(&fnp, &mt, free_str);
+        }
         let _ = writeln!(self.out, "static inline {mt} *mako_maps_clone_{key_suf}_{val_tag}({mt} *m) {{");
         let _ = writeln!(self.out, "    {mt} *n = {fnp}_make(m ? (int64_t)m->len : 0);");
         let _ = writeln!(self.out, "    if (!m) return n;");
@@ -6785,6 +6934,10 @@ impl Codegen {
         let _ = writeln!(self.out, "static inline void mako_maps_clear_k_{key_name}_{val_tag}({mt} *m) {{");
         let _ = writeln!(self.out, "    if (!m) return; memset(m->state, 0, m->cap); m->len = 0;");
         let _ = writeln!(self.out, "}}");
+        {
+            let free_name = format!("mako_map_k_{key_name}_{val_tag}");
+            self.emit_map_heap_free(&free_name, &mt, false);
+        }
         let _ = writeln!(self.out, "static inline {mt} *mako_maps_clone_k_{key_name}_{val_tag}({mt} *m) {{");
         let _ = writeln!(self.out, "    {mt} *n = {fnp}_make(m ? (int64_t)m->len : 0);");
         let _ = writeln!(self.out, "    if (!m) return n;");
@@ -6993,6 +7146,7 @@ impl Codegen {
             "    *m = mako_map_i_{c_name}_new(hint > 0 ? (size_t)hint : 0); return m;"
         );
         let _ = writeln!(self.out, "}}");
+        self.emit_map_heap_free(&format!("mako_map_i_{c_name}"), &mi, false);
 
         // --- map[string]T ---
         let ms = format!("MakoMapS_{c_name}");
@@ -7199,6 +7353,7 @@ impl Codegen {
             "    *m = mako_map_s_{c_name}_new(hint > 0 ? (size_t)hint : 0); return m;"
         );
         let _ = writeln!(self.out, "}}");
+        self.emit_map_heap_free(&format!("mako_map_s_{c_name}"), &ms, true);
 
         // maps_* helpers for monomorphized struct maps
         let arr = format!("MakoArr_{c_name}");
@@ -7575,6 +7730,7 @@ impl Codegen {
             "    *m = mako_map_f_{c_name}_new(hint > 0 ? (size_t)hint : 0); return m;"
         );
         let _ = writeln!(self.out, "}}");
+        self.emit_map_heap_free(&format!("mako_map_f_{c_name}"), &mf, false);
         let _ = writeln!(
             self.out,
             "static inline MakoFloatArray mako_maps_keys_f_{c_name}({mf} *m) {{"
@@ -7844,6 +8000,7 @@ impl Codegen {
             "    *m = mako_map_b_{c_name}_new(hint > 0 ? (size_t)hint : 0); return m;"
         );
         let _ = writeln!(self.out, "}}");
+        self.emit_map_heap_free(&format!("mako_map_b_{c_name}"), &mb, false);
         let _ = writeln!(
             self.out,
             "static inline MakoBoolArray mako_maps_keys_b_{c_name}({mb} *m) {{"
@@ -8425,6 +8582,8 @@ impl Codegen {
                 "    *m = {pref}_new(hint > 0 ? (size_t)hint : 0); return m;"
             );
             let _ = writeln!(self.out, "}}");
+            // free_str here is for string *values*; keys are structs (no str free).
+            self.emit_map_heap_free(&pref, &mt, false);
             // maps_keys -> []key struct
             let _ = writeln!(
                 self.out,
@@ -9851,6 +10010,7 @@ impl Codegen {
         self.fn_env_live.clear();
         self.own_drop_scopes.clear();
         self.own_drop_live.clear();
+        self.loop_drop_bases.clear();
         self.result_err_enums.clear();
         self.result_ok_kinds.clear();
         self.result_ok_structs.clear();
@@ -10001,9 +10161,11 @@ impl Codegen {
             ));
             self.indent += 1;
             self.push_share_scope();
+            self.loop_drop_bases.push(self.own_drop_scopes.len().saturating_sub(1));
             for s in &body.stmts {
                 self.emit_stmt(s);
             }
+            self.loop_drop_bases.pop();
             self.pop_share_scope();
             if let Some(lab) = label {
                 self.emit_line(format_args!("__mako_cont_{lab}: ;"));
@@ -10352,6 +10514,11 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
         let i = self.fresh("ri");
         self.line(&format!("for (size_t {i} = 0; {i} < {val}.len; {i}++) {{"));
         self.indent += 1;
+        // SAFE-003/004: own-drop scope must be the loop body so locals like
+        // `let mut cur` free inside the C block (not after `}` where they are out of scope).
+        self.push_share_scope();
+        self.loop_drop_bases
+            .push(self.own_drop_scopes.len().saturating_sub(1));
 
         match binders {
             [] => {}
@@ -10381,8 +10548,16 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
         for s in &body.stmts {
             self.emit_stmt(s);
         }
+        self.loop_drop_bases.pop();
+        self.pop_share_scope();
+        if let Some(lab) = label {
+            self.emit_line(format_args!("__mako_cont_{lab}: ;"));
+        }
         self.indent -= 1;
         self.line("}");
+        if let Some(lab) = label {
+            self.emit_line(format_args!("__mako_break_{lab}: ;"));
+        }
     }
 
     /// Render a C-style `for` post clause as a single C expression for the loop
@@ -11003,17 +11178,81 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                 } else {
                     val
                 };
+                let mn = mangle(name);
+                // SAFE-003 residual: free previous owned value on reassign.
+                if let Some(cty) = self.locals.get(name).cloned() {
+                    if let Some(ff) = Self::own_free_fn(&cty) {
+                        if self.own_drop_live.contains(&mn) {
+                            if cty.ends_with('*') {
+                                // Map handle: free old pointer then overwrite.
+                                self.emit_line(format_args!("{ff}({mn});"));
+                                if let Some(cell) = self.mut_capture_cells.get(name).cloned() {
+                                    self.emit_line(format_args!("*{cell} = {val};"));
+                                } else {
+                                    self.emit_line(format_args!("{mn} = {val};"));
+                                }
+                                if Self::expr_is_fresh_own(value) {
+                                    self.register_own_drop(&mn, &cty);
+                                }
+                                return;
+                            } else if cty == "MakoString" {
+                                let old = self.fresh("old");
+                                self.line(&format!("MakoString {old} = {mn};"));
+                                if let Some(cell) = self.mut_capture_cells.get(name).cloned() {
+                                    self.emit_line(format_args!("*{cell} = {val};"));
+                                } else {
+                                    self.emit_line(format_args!("{mn} = {val};"));
+                                }
+                                self.emit_line(format_args!(
+                                    "if ({old}.data != {mn}.data) mako_str_free({old});"
+                                ));
+                                if Self::expr_is_fresh_own(value) {
+                                    self.register_own_drop(&mn, &cty);
+                                }
+                                return;
+                            } else {
+                                // Slice header: free old only if backing pointer changed
+                                // (append in-place keeps data; new lit/grow reallocates).
+                                let old = self.fresh("old");
+                                self.line(&format!("{cty} {old} = {mn};"));
+                                if let Some(cell) = self.mut_capture_cells.get(name).cloned() {
+                                    self.emit_line(format_args!("*{cell} = {val};"));
+                                } else {
+                                    self.emit_line(format_args!("{mn} = {val};"));
+                                }
+                                self.emit_line(format_args!(
+                                    "if ({old}.data != {mn}.data) {ff}({old});"
+                                ));
+                                if Self::expr_is_fresh_own(value) {
+                                    self.register_own_drop(&mn, &cty);
+                                }
+                                return;
+                            }
+                        }
+                    }
+                }
                 // Mutable closure capture: write through heap cell pointer.
                 if let Some(cell) = self.mut_capture_cells.get(name).cloned() {
                     self.emit_line(format_args!("*{cell} = {val};"));
                 } else {
-                    self.emit_line(format_args!("{} = {val};", mangle(name)));
+                    self.emit_line(format_args!("{mn} = {val};"));
+                }
+                if let Some(cty) = self.locals.get(name).cloned() {
+                    if Self::expr_is_fresh_own(value) {
+                        self.register_own_drop(&mn, &cty);
+                    }
                 }
             }
             Stmt::IndexAssign { base, index, value } => {
                 let (bty, b) = self.emit_expr(base);
                 let (_, i) = self.emit_expr(index);
                 let (vty, mut v) = self.emit_expr(value);
+                // Transfer ownership of an owning local written into a map/array so
+                // SAFE free does not free the same backing store after set stores
+                // the header by value (e.g. map[string][]int vals[slot] = cur).
+                if let Expr::Ident(n) = value {
+                    self.note_own_drop_moved(&mangle(n));
+                }
                 // Layout-compatible tuple retag: (int, Option[string]) map vs lit that
                 // monomorphized as MakoTup_int_opt_int (None leaves no string metadata).
                 if let Some(exp_vty) = self.map_value_c_ty(&bty) {
@@ -11200,9 +11439,11 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                 let (_, c) = self.emit_expr(cond);
                 self.emit_line(format_args!("if (!({c})) break;"));
                 self.push_share_scope();
+                self.loop_drop_bases.push(self.own_drop_scopes.len().saturating_sub(1));
                 for s in &body.stmts {
                     self.emit_stmt(s);
                 }
+                self.loop_drop_bases.pop();
                 self.pop_share_scope();
                 if let Some(lab) = label {
                     self.emit_line(format_args!("__mako_cont_{lab}: ;"));
@@ -11213,10 +11454,22 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                     self.emit_line(format_args!("__mako_break_{lab}: ;"));
                 }
             }
-            Stmt::Break(None) => self.line("break;"),
-            Stmt::Break(Some(lab)) => self.emit_line(format_args!("goto __mako_break_{lab};")),
-            Stmt::Continue(None) => self.line("continue;"),
-            Stmt::Continue(Some(lab)) => self.emit_line(format_args!("goto __mako_cont_{lab};")),
+            Stmt::Break(None) => {
+                self.emit_loop_exit_cleanup();
+                self.line("break;");
+            }
+            Stmt::Break(Some(lab)) => {
+                self.emit_loop_exit_cleanup();
+                self.emit_line(format_args!("goto __mako_break_{lab};"));
+            }
+            Stmt::Continue(None) => {
+                self.emit_loop_exit_cleanup();
+                self.line("continue;");
+            }
+            Stmt::Continue(Some(lab)) => {
+                self.emit_loop_exit_cleanup();
+                self.emit_line(format_args!("goto __mako_cont_{lab};"));
+            }
             Stmt::For {
                 label,
                 binders,
@@ -11246,9 +11499,11 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                 let (_, c) = self.emit_expr(cond);
                 self.emit_line(format_args!("if (!({c})) break;"));
                 self.push_share_scope();
+                self.loop_drop_bases.push(self.own_drop_scopes.len().saturating_sub(1));
                 for s in &body.stmts {
                     self.emit_stmt(s);
                 }
+                self.loop_drop_bases.pop();
                 self.pop_share_scope();
                 if let Some(lab) = label {
                     self.emit_line(format_args!("__mako_cont_{lab}: ;"));

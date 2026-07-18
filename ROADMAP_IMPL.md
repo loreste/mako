@@ -30,31 +30,31 @@ Summary roadmap: **[docs/ROADMAP.md](docs/ROADMAP.md)**.
 | RT-001 | Crew cancel_join | cancel_policy_test + docs |
 | RT-005 | Select/channel stress seed | `chan_select_stress_test` |
 | RT-006 | Census APIs | `runtime_census_test` |
+| SAFE-003/004 full | free-on-reassign; monomorph map free; nested free | map_* suite + ASan |
+| SAFE-006 break/continue | loop-exit own free | `cfg_drop_break_test` |
+| SAFE-007 field store | arena store into outer fields | `bad/arena_store_field` |
+| RT-004 seed | channel clone/try_send ownership | `channel_ownership_test` |
 | (lang) | Field/index mut roots; temp lvalue reject; empty `[]` | bad examples + `empty_slice_test` |
 
 ### Residuals (feed 0.2.4 / later)
 
 | ID | Work | Status |
 |----|------|--------|
-| SAFE-004 residual | Monomorph map free (`MakoMapS_*` / …) | Planned |
 | SAFE-005 | String own/view surface + free once | Partial |
-| SAFE-006 | Full CFG drops (`?`, break/continue, if-join) | Partial — block exit + return transfer done |
-| SAFE-003 residual | Free-on-reassign; nested `[][]T` free graph | Planned |
-| SAFE-007 residual | Arena/view store into longer-lived structs | Planned |
+| SAFE-006 residual | `?` early-return free edges | Partial — break/continue/return done |
 | SAFE-008 | Capture matrix + TSan soak | Partial |
 | RT-002…003 | Bounded scheduler + blocking split | Planned |
-| RT-004 | Channel ownership table for all monomorphs | Partial |
+| RT-004 residual | Take-send + monomorph channel matrix | Partial — seed tests shipped |
+| RT-005 residual | Randomized longer soaks | Seed shipped |
 
 ### Implementation order (next)
 
-1. Monomorph map free (SAFE-004 residual)  
-2. CFG drop completeness (SAFE-006)  
-3. String own/view (SAFE-005)  
-4. Free-on-reassign + nested slices (SAFE-003 residual)  
-5. Escape into structs (SAFE-007 residual)  
-6. Capture audit (SAFE-008)  
-7. Channel ownership tests (RT-004)  
-8. Scheduler (RT-002/003)
+1. String own/view (SAFE-005)  
+2. `?` free residual (SAFE-006)  
+3. Capture audit (SAFE-008)  
+4. Channel ownership matrix (RT-004)  
+5. Scheduler (RT-002/003)  
+6. Longer stress soaks (RT-005)
 
 ---
 
