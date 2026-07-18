@@ -73,10 +73,7 @@ fn TestTlsMultiCertSniSelection() {
         }
         attempt = attempt + 1
     }
-    if listener < 0 {
-        let _ = tls_server_free(server)
-        return
-    }
+    assert(listener >= 0)
     let client = tls_client_new_insecure()
     crew sni {
         let task = sni.kick(sni_serve(server, listener, 4))
@@ -137,10 +134,7 @@ fn TestTlsMultiCertSniUpdateRemove() {
         }
         attempt = attempt + 1
     }
-    if listener < 0 {
-        let _ = tls_server_free(server)
-        return
-    }
+    assert(listener >= 0)
     let client = tls_client_new_insecure()
     crew sni_mutation {
         let task = sni_mutation.kick(sni_serve(server, listener, 2))

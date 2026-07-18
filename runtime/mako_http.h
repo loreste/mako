@@ -35,25 +35,10 @@ extern "C" {
 #endif
 
 static inline int mako_http_listen_fd_addr(MakoString host, int64_t port) {
-    if (!mako_net_init()) return -1;
-    mako_sock_t fd = socket(AF_INET, SOCK_STREAM, 0);
-    if (fd == MAKO_INVALID_SOCK) return -1;
-    int yes = 1;
-    setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, (const char *)&yes, sizeof(yes));
-    struct sockaddr_in addr;
-    if (!mako_bind_ipv4_addr(&addr, host, port)) {
-        mako_sock_close(fd);
-        return -1;
-    }
-    if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
-        mako_sock_close(fd);
-        return -1;
-    }
-    if (listen(fd, 4096) < 0) {
-        mako_sock_close(fd);
-        return -1;
-    }
-    return (int)fd;
+    /* Keep HTTP servers on the same dual-stack listener used by the TCP API.
+     * The old IPv4-only helper rejected the empty wildcard host because the
+     * networking layer prefers an IPv6 dual-stack socket for wildcard binds. */
+    return (int)mako_tcp_listen_backlog(host, port, 4096);
 }
 
 static inline int mako_http_listen_fd(int64_t port) {

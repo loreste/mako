@@ -79,7 +79,7 @@ fn TestGenericHttpsClient() {
         let s = t.kick(serve_generic_https())
         sleep_ms(100)
         let body = https_get(
-            "https://localhost:18459/oidc/.well-known/openid-configuration",
+            "https://localhost:29159/oidc/.well-known/openid-configuration",
             "runtime/certs/dev.crt",
             5000
         )
@@ -92,7 +92,7 @@ fn TestGenericHttpsClient() {
 
 fn serve_generic_https() -> int {
     return tls_serve_once(
-        18459,
+        29159,
         "runtime/certs/dev.crt",
         "runtime/certs/dev.key",
         "generic-https-ok\n"
