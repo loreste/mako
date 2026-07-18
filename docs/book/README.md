@@ -2,7 +2,7 @@
 
 A guided tour of Mako: install, language, ownership, concurrency, stdlib, HTTP, packages, and tooling.
 
-**Product tip:** **0.2.3** (native compilation, ownership, concurrency, and
+**Product tip:** **0.2.4** (native compilation, ownership, concurrency, and
 stdlib surface). Next planned: **0.2.4** tooling and stdlib depth — [ROADMAP.md](../ROADMAP.md).
 
 | | |

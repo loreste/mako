@@ -2,48 +2,48 @@
 
 ## Unreleased
 
-- **Residuals closed (SAFE-005/008, RT-002/003/004, struct Own free)** —
-  `string_view` + `str_as_view` / `str_to_owned`; capture matrix tests; opt-in
-  `sched_set_workers` pool + `mako_spawn_blocking`; channel take-send ownership
-  (no double-free); deep free of string/slice fields on struct drop. Tests:
-  `string_view_test`, `capture_matrix_test`, `sched_pool_test`,
-  `channel_ownership_test`, `struct_own_drop_test`.
-- **Audit fix: nested `[][]T` free-on-reassign** — append grows with malloc+copy
-  (not realloc); free-on-reassign uses `*_release_replaced` so shared inners are
-  not double-freed (ASan UAF). Test: `nested_arr_drop_test`.
-- **Complete TLS certificate chains** — TLS server contexts now load the full
-  PEM chain from certificate paths such as Let's Encrypt `fullchain.pem`, so
-  clients receive intermediates during the handshake instead of only the leaf.
-- **Memory safety (drops)** — free registration stays on; `?` early-return frees
-  all live owns/shares (SAFE-006); owning strings free on reassign/scope exit;
-  return materializes before free. Tests: `try_drop_test`, `string_drop_test`,
-  ASan ownership suite.
+## 0.2.4 — 2026-07-18
 
-- **Fast POD array literals** — `[a, b, c]` for `int`/`float`/`bool`/`byte` is a
-  stack buffer + `cap==0` view (no malloc/free in hot loops). Empty `[]` and
-  `make([], 0, 0)` allocate nothing. Escape (return / field / map store) uses
-  `mako_*_array_to_owned` (identity when already heap-owned). Free helpers use
-  `MAKO_UNLIKELY`. Return materializes values before scope free (fixes
-  free-before-return UAF on `return s[i] + …`). Test:
-  `examples/testing/stack_array_lit_test.mko`.
-- Generalized mutable index lvalues: direct writes through slice views and
-  nested slices (`s[1:3][0] = value`, `matrix[i][j] = value`) with the existing
-  bounds, mutability, NLL, and race checks.
-- **Field and index writes require a named mutable root** — `let p = …; p.x = …`
-  and `get()[0] = …` are rejected at typecheck (zero runtime cost). Same bar as
-  plain `let mut` assign; holds memory safety without a slow path.
-- **Empty slice literal `[]`** — `let mut s: []int = []` parses as an empty
-  array; `[]T(…)` conversion is unchanged. Prefer `make([]T, 0, n)` when you
-  know capacity.
-- **Soundness program (SAFE/RT)** — [docs/SOUNDNESS.md](docs/SOUNDNESS.md) tracks
-  SAFE-001…010 and RT-001…006. Shipped: always-on release bounds (SAFE-001),
-  ownership categories (SAFE-002), **owning slice/map free at scope exit**
-  (SAFE-003/004; sub-slices are `cap==0` views), **return transfers ownership**
-  (no free-before-return UAF), **slice view escape/return rejects**, arena
-  escape on return (SAFE-007), concurrency memory model (SAFE-010 / RT-001),
-  census + select stress (RT-005/006). Follow-up: monomorph map free, free-on-
-  reassign, break/continue drops, arena field-store escape, channel ownership
-  tests. Residuals (string view type, `?` free, scheduler) under 0.2.4+.
+**mako0.2.4** (`CARGO_PKG_VERSION`).
+
+Soundness and efficiency release after 0.2.3: memory-safe drops by construction,
+stack POD array lits, closed SAFE/RT residuals, build-time lockfile verification.
+
+### Soundness (SAFE / RT)
+
+- **Always-on release bounds** (SAFE-001); ownership categories in the language
+  spec (SAFE-002).
+- **Owning slice/map free** at scope exit, reassign, break/continue, return
+  transfer + materialize-before-free (SAFE-003/004/006); nested `[][]T`
+  free-on-reassign via `*_release_replaced` (no shared-inner UAF).
+- **`string_view`** surface + `str_as_view` / `str_to_owned` (SAFE-005); owning
+  strings free on reassign/scope exit.
+- **`?` early-return** frees live owns (SAFE-006).
+- **Capture matrix** for kick/fan (SAFE-008); arena/slice escape rejects
+  (SAFE-007); CMap gate (SAFE-009); concurrency memory model (SAFE-010).
+- **RT-001…006:** crew cancel; opt-in `sched_set_workers` pool +
+  `mako_spawn_blocking`; channel take-send ownership; census; select stress seed.
+- **Struct Own free:** deep free of string/slice fields on drop.
+
+### Speed
+
+- Stack POD array literals (`cap==0` views); empty slices allocate nothing.
+- Escape heapify (`mako_*_array_to_owned`); cold free (`MAKO_UNLIKELY`).
+
+### Packages
+
+- Build-time verification of locked dependencies (PR #3): content hashes,
+  verified snapshots, fail-closed merge.
+
+### Other
+
+- Complete TLS certificate chains (`SSL_CTX_use_certificate_chain_file`).
+- Field/index mut roots; empty `[]` lit; chained slice index assign.
+
+Tests: `string_view_test`, `struct_own_drop_test`, `sched_pool_test`,
+`capture_matrix_test`, `channel_ownership_test`, `nested_arr_drop_test`,
+`try_drop_test`, `string_drop_test`, `stack_array_lit_test`, `own_drop_*`,
+`pkg::` unit suite.
 
 ## 0.2.3 — 2026-07-18
 

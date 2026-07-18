@@ -2,7 +2,7 @@
 
 Source brief: `General_Purpose_Backend_Language_Vision.md`.
 
-**Product tip:** **0.2.3**. The next roadmap cycle is **0.2.4** (tooling and
+**Product tip:** **0.2.4**. The next roadmap cycle is **0.2.5** (tooling and
 stdlib depth). See [ROADMAP.md](ROADMAP.md) · [STATUS.md](STATUS.md).
 
 Mako's product contract is:

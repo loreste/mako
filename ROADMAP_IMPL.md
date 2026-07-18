@@ -3,9 +3,9 @@
 Detailed feature plan for Mako, organized by version. See
 [docs/ROADMAP.md](docs/ROADMAP.md) for the summary view.
 
-**Current version:** 0.2.3  
-**Next milestone:** 0.2.4 (tooling) + soundness **residuals**  
-**Last updated:** 2026-07-18 (post-audit)
+**Current version:** 0.2.4  
+**Next milestone:** 0.2.5 (tooling / LSP depth)  
+**Last updated:** 2026-07-18 (release 0.2.4)
 
 Soundness program of record: **[docs/SOUNDNESS.md](docs/SOUNDNESS.md)**.  
 Concurrency model: **[docs/MEMORY_MODEL.md](docs/MEMORY_MODEL.md)**.  
@@ -28,7 +28,7 @@ Summary roadmap: **[docs/ROADMAP.md](docs/ROADMAP.md)**.
 
 Pkg lock verification (PR #3): **17/17** `pkg::` unit tests pass.
 
-### Shipped on main (0.2.3+)
+### Shipped on main (0.2.4+)
 
 | ID | Work | Evidence |
 |----|------|----------|
@@ -221,7 +221,7 @@ must be written in idiomatic Mako and serve as example code.
 
 ---
 
-## v0.2.3 — Safety & Correctness
+## v0.2.4 — Safety & Correctness
 
 Close the gap between safety claims and verified behavior.
 
@@ -263,7 +263,7 @@ Close the gap between safety claims and verified behavior.
 
 ---
 
-## v0.2.3 — JWT / HTTPS input hardening — **shipped**
+## v0.2.4 — JWT / HTTPS input hardening — **shipped**
 
 | Feature | Status |
 |---------|--------|
