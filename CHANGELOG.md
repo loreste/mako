@@ -14,10 +14,10 @@
 - **Soundness program (SAFE/RT)** — [docs/SOUNDNESS.md](docs/SOUNDNESS.md) tracks
   SAFE-001…010 and RT-001…006. Shipped: always-on release bounds (SAFE-001),
   ownership categories (SAFE-002), **owning slice/map free at scope exit**
-  (SAFE-003/004 core shapes; sub-slices are `cap==0` views), **arena escape
-  reject on return** (SAFE-007), concurrency memory model (SAFE-010 / RT-001),
-  census + select stress (RT-005/006). Remaining: monomorph map free, full CFG
-  drop plan, scheduler (RT-002/003).
+  (SAFE-003/004; sub-slices are `cap==0` views), **return transfers ownership**
+  (no free-before-return UAF), **slice view escape/return rejects**, arena
+  escape on return (SAFE-007), concurrency memory model (SAFE-010 / RT-001),
+  census + select stress (RT-005/006).
 
 ## 0.2.3 — 2026-07-18
 

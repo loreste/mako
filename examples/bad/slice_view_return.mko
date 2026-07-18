@@ -1,0 +1,9 @@
+// Must fail: returning a slice view of a local dangles after the local is freed.
+fn bad() -> []int {
+    let mut s = [1, 2, 3, 4]
+    return s[1:3]
+}
+
+fn main() {
+    let _ = bad()
+}

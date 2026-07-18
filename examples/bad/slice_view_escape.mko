@@ -1,0 +1,9 @@
+// Must fail: sub-slice view must not outlive its base (UAF after free).
+fn main() {
+    let mut view: []int = []
+    {
+        let mut s = [1, 2, 3, 4]
+        view = s[1:3]
+    }
+    print(view[0])
+}

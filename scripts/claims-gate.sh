@@ -53,6 +53,10 @@ expect_failure temp-field env MAKO_CACHE="$CACHE/temp-field" \
     "$MAKO" check "$ROOT/examples/bad/field_assign_temporary.mko"
 expect_failure arena-escape env MAKO_CACHE="$CACHE/arena-escape" \
     "$MAKO" check "$ROOT/examples/bad/arena_escape_return.mko"
+expect_failure slice-view-escape env MAKO_CACHE="$CACHE/slice-view-escape" \
+    "$MAKO" check "$ROOT/examples/bad/slice_view_escape.mko"
+expect_failure slice-view-return env MAKO_CACHE="$CACHE/slice-view-return" \
+    "$MAKO" check "$ROOT/examples/bad/slice_view_return.mko"
 expect_failure race-mut-after-kick env MAKO_CACHE="$CACHE/race-mut-after-kick" \
     "$MAKO" check "$ROOT/examples/bad/race_mut_after_kick.mko"
 expect_failure kick-mutable-closure env MAKO_CACHE="$CACHE/kick-mutable-closure" \
