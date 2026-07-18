@@ -29,18 +29,20 @@
 Program of record: **[SOUNDNESS.md](SOUNDNESS.md)** · memory model:
 **[MEMORY_MODEL.md](MEMORY_MODEL.md)**.
 
-Landed on `main` after 0.2.3 (field/index mut roots, empty `[]`, owning slice/map
-scope free with return transfer, slice-view escape rejects, arena return escape,
-docs + claims-gate). **Next residuals** feed 0.2.4 / later.
+Landed on `main` after 0.2.3 and verified in the **2026-07-18 audit**: field/index
+mut roots, empty `[]`, owning free (slice/map/string), return transfer +
+materialize, `?` early free, nested `[][]T` free-on-reassign (no shared-inner
+UAF), stack POD array lits, lockfile build verification (PR #3). **Residuals**
+feed 0.2.4 / later.
 
 | ID | Theme | Status |
 |----|--------|--------|
 | SAFE-001 | Bounds checks in safe release | **Done** |
 | SAFE-002 | Ownership categories in LANGUAGE_SPEC | **Done** |
-| SAFE-003 | Slice drops, views, return transfer, free-on-reassign, nested free | **Done** |
+| SAFE-003 | Slice drops, views, return transfer, free-on-reassign, nested release_replaced | **Done** |
 | SAFE-004 | Map free (built-in + monomorph) | **Done** |
-| SAFE-005 | String own/view surface + free verification | **Partial** |
-| SAFE-006 | CFG drops (return / break / continue / block exit) | **Partial** (`?` residual) |
+| SAFE-005 | String free on own path; surface `string_view` type | **Partial** (free **Done**; type residual) |
+| SAFE-006 | CFG drops (return / break / continue / `?` / block exit) | **Done** (core) |
 | SAFE-007 | Escape checks (arena return/store, slice view) | **Done** |
 | SAFE-008 | Closure / task capture ownership audit | **Partial** |
 | SAFE-009 | CMap readers/writer gate | **Done** |
@@ -50,14 +52,24 @@ docs + claims-gate). **Next residuals** feed 0.2.4 / later.
 | RT-004 | Channel send ownership | **Partial** (seed tests shipped) |
 | RT-005 | Channel/select stress | **Seed shipped** |
 | RT-006 | Task/resource census APIs | **Done** |
+| Pkg lock | Build-time locked dep verification (PR #3) | **Done** |
+
+#### Speed (hot path, with free on)
+
+| Item | Status |
+|------|--------|
+| Stack POD array lits (`cap==0` view) | **Done** |
+| Empty slices no-malloc | **Done** |
+| Escape heapify (`to_owned`) | **Done** |
+| Cold free (`MAKO_UNLIKELY`) | **Done** |
 
 #### Soundness next (implementation order)
 
-1. **SAFE-005** — string own vs view surface.
-2. **SAFE-006 residual** — `?` early-return free of unrelated owns.
-3. **SAFE-008** — capture matrix + TSan soak.
-4. **RT-004 residual** — take-send + monomorph channel matrix.
-5. **RT-002 / RT-003** — bounded scheduler + blocking pool.
+1. **SAFE-005 residual** — distinct surface `string_view` type (own free path live).
+2. **SAFE-008** — capture matrix + TSan soak.
+3. **RT-004 residual** — take-send + monomorph channel matrix.
+4. **RT-002 / RT-003** — bounded scheduler + blocking pool.
+5. **Nested Own fields in structs** — deep free of slice/map fields on struct drop.
 6. **RT-005** — randomized longer soaks.
 
 ---

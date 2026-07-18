@@ -437,6 +437,11 @@ fn main() {
 }
 ```
 
+The certificate path may contain a PEM certificate chain, including the leaf
+certificate followed by intermediate certificates (for example, a Let's
+Encrypt `fullchain.pem`). The runtime sends that chain to clients so they do
+not need to have the intermediate cached locally.
+
 For plain HTTPS (no pre-TLS bytes), just `tcp_accept` then `tls_accept`
 immediately. `tls_server_available()` reports whether a TLS backend is linked.
 

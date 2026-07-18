@@ -2,10 +2,17 @@
 
 ## Unreleased
 
-- **Memory safety (drops)** — `?` early-return frees all live owns/shares
-  (SAFE-006); owning strings free on reassign/scope exit (f-string, concat,
-  `str_from_cstr` lets); return materializes before free (no free-before-return
-  UAF). Tests: `try_drop_test`, `string_drop_test`, ASan ownership suite.
+- **Audit fix: nested `[][]T` free-on-reassign** — append grows with malloc+copy
+  (not realloc); free-on-reassign uses `*_release_replaced` so shared inners are
+  not double-freed (ASan UAF). Test: `nested_arr_drop_test`.
+- **Complete TLS certificate chains** — TLS server contexts now load the full
+  PEM chain from certificate paths such as Let's Encrypt `fullchain.pem`, so
+  clients receive intermediates during the handshake instead of only the leaf.
+- **Memory safety (drops)** — free registration stays on; `?` early-return frees
+  all live owns/shares (SAFE-006); owning strings free on reassign/scope exit;
+  return materializes before free. Tests: `try_drop_test`, `string_drop_test`,
+  ASan ownership suite.
+
 - **Fast POD array literals** — `[a, b, c]` for `int`/`float`/`bool`/`byte` is a
   stack buffer + `cap==0` view (no malloc/free in hot loops). Empty `[]` and
   `make([], 0, 0)` allocate nothing. Escape (return / field / map store) uses

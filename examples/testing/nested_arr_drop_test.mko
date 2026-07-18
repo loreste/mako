@@ -1,0 +1,21 @@
+// Nested [][]int free-on-reassign after append must not free shared inners.
+
+fn TestNestedAppendAndIndex() {
+    let mut a = make([][]int, 0)
+    a = append(a, [1, 2])
+    a = append(a, [3, 4, 5])
+    assert(a[0][0] == 1)
+    assert(a[1][2] == 5)
+}
+
+fn TestNestedReplaceOuter() {
+    let mut a = make([][]int, 0)
+    let mut inner = make([]int, 3)
+    inner[0] = 1
+    inner[1] = 2
+    inner[2] = 3
+    a = append(a, inner)
+    a = make([][]int, 0)
+    a = append(a, [9])
+    assert(a[0][0] == 9)
+}

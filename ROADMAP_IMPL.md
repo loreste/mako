@@ -5,7 +5,7 @@ Detailed feature plan for Mako, organized by version. See
 
 **Current version:** 0.2.3  
 **Next milestone:** 0.2.4 (tooling) + soundness **residuals**  
-**Last updated:** 2026-07-18
+**Last updated:** 2026-07-18 (post-audit)
 
 Soundness program of record: **[docs/SOUNDNESS.md](docs/SOUNDNESS.md)**.  
 Concurrency model: **[docs/MEMORY_MODEL.md](docs/MEMORY_MODEL.md)**.  
@@ -15,45 +15,59 @@ Summary roadmap: **[docs/ROADMAP.md](docs/ROADMAP.md)**.
 
 ## Soundness program (SAFE / RT) — **core shipped; residuals active**
 
+### Audit 2026-07-18 (bugs found & fixed)
+
+| Bug | Fix | Evidence |
+|-----|-----|----------|
+| Free registration stubbed off (leaks / false “stable”) | Re-enabled `register_own_drop` with “do not disable” comment | free emits in C |
+| `?` early-return leaked owns | `emit_try_early_return_cleanup` | `try_drop_test` ASan |
+| Free-before-return UAF on `return s[i]+…` | `materialize_return_val` before scope free | ASan return probes |
+| Nested `[][]T` free-on-reassign UAF after append | malloc-grow append + `*_release_replaced` unshared free | `nested_arr_drop_test` ASan |
+| Stack POD lit malloc tax | stack view + escape `to_owned` | `stack_array_lit_test` |
+| String owns not freed | `expr_is_fresh_own` for String/Interp/concat/Index | `string_drop_test` |
+
+Pkg lock verification (PR #3): **17/17** `pkg::` unit tests pass.
+
 ### Shipped on main (0.2.3+)
 
 | ID | Work | Evidence |
 |----|------|----------|
 | SAFE-001 | Release bounds always on | `MAKO_SAFE_DEFAULT`; claims-gate `release-bounds` |
 | SAFE-002 | Ownership categories | LANGUAGE_SPEC § Ownership categories |
-| SAFE-003 | Core slice free + `cap==0` views + return transfer | `own_drop_slice_test`, `slice_return_own_test`; ASan |
+| SAFE-003 | Core slice free + `cap==0` views + return transfer + materialize | `own_drop_slice_test`, `slice_return_own_test`; ASan |
+| SAFE-003 nested | Nested free-on-reassign without shared-inner UAF | `nested_arr_drop_test` |
 | SAFE-003/007 | Slice view escape / view-return reject | `bad/slice_view_escape`, `slice_view_return` |
-| SAFE-004 | Built-in map free | `mako_map_*_free`; own_drop for `make(map…)` |
-| SAFE-007 | Arena return escape | `bad/arena_escape_return` |
+| SAFE-004 | Built-in + monomorph map free | `mako_map_*_free`; own_drop for `make(map…)` |
+| SAFE-005 own free | String free on reassign/scope (cstr, f-string, concat) | `string_drop_test` |
+| SAFE-006 | break/continue + return + **`?` early free** | `cfg_drop_break_test`, `try_drop_test` |
+| SAFE-007 | Arena return/store escape | `bad/arena_escape_*` |
 | SAFE-009 | CMap RW gate | `mako_cmap.h` |
 | SAFE-010 | Memory model doc | MEMORY_MODEL.md |
 | RT-001 | Crew cancel_join | cancel_policy_test + docs |
 | RT-005 | Select/channel stress seed | `chan_select_stress_test` |
 | RT-006 | Census APIs | `runtime_census_test` |
-| SAFE-003/004 full | free-on-reassign; monomorph map free; nested free | map_* suite + ASan |
-| SAFE-006 break/continue | loop-exit own free | `cfg_drop_break_test` |
-| SAFE-007 field store | arena store into outer fields | `bad/arena_store_field` |
 | RT-004 seed | channel clone/try_send ownership | `channel_ownership_test` |
-| (lang) | Field/index mut roots; temp lvalue reject; empty `[]` | bad examples + `empty_slice_test` |
+| Speed | Stack POD lits + empty no-malloc + cold free | `stack_array_lit_test`; SPEED.md |
+| Pkg | Locked dep verify at build (PR #3) | `cargo test --bin mako -- pkg::` |
 
 ### Residuals (feed 0.2.4 / later)
 
 | ID | Work | Status |
 |----|------|--------|
-| SAFE-005 | String own/view surface + free once | Partial |
-| SAFE-006 residual | `?` early-return free edges | Partial — break/continue/return done |
+| SAFE-005 residual | Surface `string_view` type | Partial — free path Done |
 | SAFE-008 | Capture matrix + TSan soak | Partial |
 | RT-002…003 | Bounded scheduler + blocking split | Planned |
 | RT-004 residual | Take-send + monomorph channel matrix | Partial — seed tests shipped |
 | RT-005 residual | Randomized longer soaks | Seed shipped |
+| Struct Own fields | Deep free of slice/map fields in structs | Residual |
 
 ### Implementation order (next)
 
-1. String own/view (SAFE-005)  
-2. `?` free residual (SAFE-006)  
-3. Capture audit (SAFE-008)  
-4. Channel ownership matrix (RT-004)  
-5. Scheduler (RT-002/003)  
+1. Capture audit (SAFE-008)  
+2. Surface `string_view` (SAFE-005 residual)  
+3. Channel ownership matrix (RT-004)  
+4. Scheduler (RT-002/003)  
+5. Struct nested Own free  
 6. Longer stress soaks (RT-005)
 
 ---

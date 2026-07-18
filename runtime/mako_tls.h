@@ -275,7 +275,13 @@ static inline SSL_CTX *mako_tls_make_ctx(const char *cert, const char *key) {
         "ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:"
         "ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305"
     );
-    if (SSL_CTX_use_certificate_file(ctx, cert, SSL_FILETYPE_PEM) != 1) {
+    /*
+     * Load the complete PEM chain. Let's Encrypt and other public CAs publish
+     * the leaf plus intermediates in a fullchain.pem; use_certificate_file()
+     * loads only the leaf and causes clients without a cached intermediate to
+     * fail certificate validation.
+     */
+    if (SSL_CTX_use_certificate_chain_file(ctx, cert) != 1) {
         SSL_CTX_free(ctx);
         return NULL;
     }
