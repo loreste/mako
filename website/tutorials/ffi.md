@@ -2,7 +2,7 @@
 
 This tutorial covers calling C functions from Mako, writing C functions
 that Mako can call, linking external libraries, and working with C
-types. Mako's `extern "C"` declarations provide direct, zero-overhead
+types. Mako's `extern "C"` declarations provide direct, low-overhead
 interop with the C ABI.
 
 ---

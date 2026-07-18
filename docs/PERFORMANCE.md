@@ -10,9 +10,9 @@ stay fast too (`crew`, `fan`, channels) — see [SPEED.md](SPEED.md).
 | Principle | Practice |
 |-----------|----------|
 | Speed first | Prefer the fast design; convenience features stay off the hot path or opt-in |
-| No mandatory GC | Scope cleanup, `hold` / `share` / `arena` — no stop-the-world tax |
+| No GC | Scope cleanup, `hold` / `share` / `arena` — no stop-the-world tax |
 | Native codegen | `.mko` → C → clang; release **`-O3 -flto`** |
-| Zero-cost default | Everyday constructs should not allocate or synchronize under the hood |
+| Low-overhead default | Scalar locals and direct calls avoid ownership/refcount synchronization; allocation and synchronization costs stay explicit |
 | Explicit cost | Heavier tools (`share`, channels, `crew`) are visible when they cost |
 | First-class concurrent/parallel | Language keywords, structured joins — not a slow thread-pool package |
 | Measure | Prefer `./scripts/bench-vs-go-rust.sh` and real workloads over vibes |
@@ -57,18 +57,8 @@ minimum, include:
 - Result: requests/sec, p50/p95/p99 latency, error count, CPU utilization, and
   peak RSS.
 
-Example format:
-
-```text
-HTTP throughput: N req/sec
-Server: commit <sha>, `mako build --release examples/http_server.mko -o out/http_server`
-Client: `wrk -t8 -c256 -d30s http://127.0.0.1:18080/`
-Machine: <CPU>, <RAM>, <OS>; client and server on localhost
-Response: <bytes>, keep-alive on, no TLS, access logs off
-Latency: p50 <x> ms, p95 <y> ms, p99 <z> ms; errors: 0
-```
-
-If any of those details are missing, describe the number as an informal local
+Do not publish a throughput number until every field above comes from an actual
+run. If any details are missing, describe the number as an informal local
 experiment, not a benchmark result.
 
 ## Measured wall-clock times (median of 5 runs, this machine, 2026-07-09)
@@ -94,8 +84,13 @@ script on a normal shell for RSS lines.
 | Profile | Flags | Use |
 |---------|-------|-----|
 | **Debug** (default) | `-O0 -g` | Dev, tests, ASan (`--sanitize=address`) |
-| **Release** (`--release`) | `-O3 -flto -DNDEBUG` | Production — bounds checks elided (see below) |
+| **Release** (`--release`) | `-O3 -flto -DNDEBUG` | Optimized native build; safe indexing remains checked |
 | Optional strip | `MAKO_STRIP=1` | Smaller deploy artifacts |
+
+Release object-cache fingerprints include the selected optimization mode and
+C compiler identity. Builds using `MAKO_CFLAGS` or PGO (`MAKO_PGO_GEN` /
+`MAKO_PGO_USE`) bypass incremental object/typecheck reuse because external
+headers and profile contents can change without changing `.mko` sources.
 
 `mako profile` builds and runs one program, then reports frontend, backend,
 build, run, total wall time, and exit code. `--json` emits the stable
@@ -148,19 +143,18 @@ These are built into the runtime and codegen — no user action required.
 | HTTP: `mako_arena_cstr` / `arena_text_n` | No malloc+arena double copy |
 | Empty string singleton + `mako_str_free` | No malloc for `""`; safe free of singleton |
 | `str_clone` / `str_concat` empty fast paths | Less allocator traffic |
-| **Release does not force bounds-always** | Index hot path free unless `--bounds always` |
-| Bounds checks under `#ifndef NDEBUG` | Debug checks; release elided by default |
+| **Safe release indexing** | Safe bounds checks remain enabled; the C optimizer can remove checks it proves redundant |
 
 ### Release bounds checks (safety)
 
-Debug builds abort on OOB. **Default release** (`-DNDEBUG`) elides generated
-`MAKO_BOUNDS_CHECK` and most runtime `#ifndef NDEBUG` index checks for
-maximum throughput — **OOB is a programmer bug / UB in release**.
+Debug and release builds abort on out-of-bounds safe indexing. The C optimizer
+can still remove checks it proves redundant. `unsafe { ... }` and
+`unsafe_index` are the explicit, reviewed opt-out for a proven index invariant.
 
 To keep checks in production:
 
 ```bash
-mako build --release --bounds always main.mko -o svc
+mako build --release main.mko -o svc
 # or in mako.toml:
 # [profile.release]
 # bounds_checks = "on"
@@ -172,7 +166,7 @@ Prefer debug + ASan while developing. See [SECURITY.md](SECURITY.md).
 
 | Issue | Impact | Fix |
 |-------|--------|-----|
-| `mako build --release` forced `MAKO_BOUNDS_ALWAYS` | Every index paid a branch+compare in release | Default release no longer forces it |
+| Safe release checks were elided by default | Out-of-bounds safe code could become undefined behavior | Safe checks are retained; explicit `unsafe` is the opt-out |
 | Empty `mako_str_from_cstr("")` always `malloc` | Alloc pressure on empty strings | Process-wide empty singleton |
 | Map grow at 70% load | Extra rehash on dense inserts | Grow at ~75% (`4/3` pre-size) |
 | No branch hints on map/append | Mispredict on hot loops | `MAKO_LIKELY` / `UNLIKELY` |
@@ -184,7 +178,7 @@ Prefer debug + ASan while developing. See [SECURITY.md](SECURITY.md).
 
 Still intentional costs (visible when you use them): `share` RC, channel sync,
 default `m[k]=v` still clones string keys (safe), default `ch.send(s)` clones
-(safe), kick heap-box for multi-word types, opt-in GC.
+(safe), kick heap-box for multi-word types.
 
 ### Map string keys (hot path)
 

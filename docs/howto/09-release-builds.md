@@ -8,7 +8,7 @@ mode to produce fast, small binaries.
 | Profile | Compiler flags | Behavior |
 |---------|---------------|----------|
 | Debug (default) | `-O0 -g` | Full debug symbols, bounds checks enabled |
-| Release | `-O3 -flto -DNDEBUG` | Maximum optimization, checks elided |
+| Release | `-O3 -flto -DNDEBUG` | Maximum optimization; safe indexing checks retained |
 
 ## Building for release
 
@@ -72,6 +72,12 @@ Disable LTO when link time matters more than peak speed (or a toolchain is flaky
 MAKO_NO_LTO=1 mako build --release main.mko -o server
 ```
 
+The incremental cache fingerprints the release optimization mode and C compiler
+identity, so switching between default LTO and `MAKO_NO_LTO=1` cannot reuse
+objects from the other mode. `MAKO_CFLAGS` and PGO builds bypass incremental
+reuse because external headers and profile contents are not fully represented
+by Mako source fingerprints.
+
 ## Profile-guided optimization (PGO)
 
 Two-pass PGO with the system C compiler:
@@ -95,8 +101,8 @@ MAKO_CFLAGS="-march=native" mako build --release main.mko -o server
 
 ## Static linking
 
-On supported targets, produce a fully static binary with no runtime
-dependencies:
+On a target with a static-capable toolchain, produce a fully static binary with
+no dynamic loader dependency:
 
 ```bash
 mako build --release --static-link main.mko -o server
@@ -104,6 +110,17 @@ mako build --release --static-link main.mko -o server
 
 This is the default for Linux musl targets. On other platforms, use
 `--static-link` explicitly when supported.
+
+The repository CI contract currently verifies x86-64 and ARM64 Linux musl
+artifacts. Verify a produced artifact before shipping it:
+
+```bash
+scripts/verify-target-artifact.sh \
+  x86_64-unknown-linux-musl ./server --static
+```
+
+Windows GNU is also cross-compiled and checked as a PE32+ x86-64 artifact, but
+it is not claimed to be statically linked by Mako's default policy.
 
 To force dynamic linking:
 
@@ -120,7 +137,7 @@ Build for a different target triple:
 mako build --release --target x86_64-unknown-linux-musl main.mko -o server
 
 # WebAssembly
-mako build --target wasm32-wasi main.mko -o app.wasm
+mako build --target wasm32-wasip1 main.mko -o app.wasm
 ```
 
 The target triple follows the pattern: `arch-vendor-os-env`.
@@ -182,7 +199,7 @@ arena req {
 }
 ```
 
-3. Prefer `hold` over `share` (zero overhead vs reference counting)
+3. Prefer `hold` over `share` (no reference-counting traffic)
 
 4. Measure with `now_ns`:
 ```mko

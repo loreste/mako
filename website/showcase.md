@@ -1,14 +1,15 @@
 # Projects Built with Mako
 
-Real-world projects demonstrating what Mako can do in production.
+Independent projects that exercise Mako in real systems programs. Project
+status and production claims belong to each project's own repository.
 
 ---
 
 ## Load balancer / reverse proxy
 
-A full-featured Linux load balancer written entirely in Mako — both a
-production-ready tool and a showcase of the language’s systems programming
-capabilities.
+A Linux load balancer written entirely in Mako and maintained in the separate
+[loreste/leba repository](https://github.com/loreste/leba). It is a systems
+programming showcase, not a blanket production-readiness claim for Mako.
 
 ### What It Does
 
@@ -35,10 +36,10 @@ automatic health checks, TLS termination, and live metrics.
 
 ### Why It Matters
 
-This class of service shows Mako is ready for latency-sensitive, concurrent
-network infrastructure. It exercises channels, fan-out, shared state, graceful
-shutdown, and the full networking standard library — all in clear, readable
-code.
+This class of service exercises latency-sensitive, concurrent network
+infrastructure. It exercises channels, fan-out, shared state, graceful
+shutdown, and the networking surface; consult Leba's own README for supported
+protocols and known limits.
 
 ### Quick Look
 
@@ -60,4 +61,5 @@ fn forward_loop(front: i32, backends: []Backend, ch: chan[Conn]) {
 
 ## More projects
 
-As more production Mako services ship, they will be listed here.
+As more independent Mako services ship, they will be listed here with links to
+their own source and status documentation.

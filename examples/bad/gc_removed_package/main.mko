@@ -1,0 +1,4 @@
+// Must fail: the legacy GC manifest setting is rejected.
+fn main() {
+    print("unreachable")
+}

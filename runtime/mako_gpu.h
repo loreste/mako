@@ -430,7 +430,7 @@ static inline int64_t mako_gpu_opencl_ok(void) {
 #endif
 }
 
-/* Metal / CUDA / Vulkan availability stubs (0 unless build flags). Product backends Later. */
+/* Metal / CUDA / Vulkan availability probes (0 unless build flags). Product backends are optional. */
 static inline int64_t mako_gpu_metal_ok(void) {
 #if defined(MAKO_HAS_METAL)
     return 1;

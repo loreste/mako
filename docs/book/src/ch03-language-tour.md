@@ -682,7 +682,7 @@ structs after a `pull` (`let t, n = eng.grow_pair(t0, 1)`).
 For more complex cases you can still use a struct, but tuples cover the common
 multi-return pattern without boilerplate.
 
-## Generics (0.1.9)
+## Generics (0.2.0)
 
 Functions, **structs**, and **enums** can be parameterized over types using
 square-bracket syntax (angle brackets are dual sugar). The compiler
@@ -1347,8 +1347,10 @@ fn main() {
 }
 ```
 
-CMap uses lock-free reads and striped spinlock writes internally, so it can be
-shared across `crew` tasks without wrapping in channels or mutexes.
+CMap uses a portable readers/writer gate internally: reads share the read side
+and writes take the exclusive side. It can be shared across `crew` tasks
+without wrapping in channels or mutexes; each operation is linearizable, but
+separate operations do not establish cross-task ordering.
 
 ## Channels
 

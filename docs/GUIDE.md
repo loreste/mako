@@ -145,7 +145,7 @@ Example `mako.toml` dependency lines:
 ```toml
 [dependencies]
 "helper" = { path = "../helper", version = "0.1.0" }   # version is informational only
-"tool" = { git = "https://example.com/tool.git", tag = "v0.1.0", version = "0.1.0" }
+"tool" = { path = "../tool", version = "0.1.0" }
 ```
 
 `version` on path deps is checked with SemVer (`^` / `~` / exact) against the
@@ -705,9 +705,10 @@ Hands-on: [howto/10-collections.md](howto/10-collections.md) · book tour
 ## 4c-2. Concurrent Maps (CMap)
 
 `CMap` is a built-in concurrent hashmap designed for high-throughput key-value
-workloads. It uses lock-free reads and per-stripe spinlock writes (512 stripes,
-FNV-1a hash, 1M initial capacity). Safe to share across `crew` tasks without
-`hold`/`share` concerns.
+workloads. It uses a portable readers/writer gate: reads share the read side,
+while `set`, `del`, and `incr` take the write side for the complete operation.
+The table starts with 1M slots and grows under the write gate. Safe to share
+across `crew` tasks without `hold`/`share` concerns.
 
 ```mko
 // examples/cmap.mko
@@ -737,7 +738,12 @@ fn main() {
 | `cmap_incr(m, key, delta)` | Atomic increment, returns new value |
 
 Thread-safe by design: multiple `crew` tasks can read and write the same `CMap`
-concurrently without channels or mutexes. Runtime: `runtime/mako_cmap.h`.
+concurrently without caller-managed channels or mutexes. Each operation is
+linearizable, and `cmap_get` copies the value before releasing its read gate,
+so concurrent replacement or deletion cannot invalidate the returned string.
+Separate operations have no cross-task ordering guarantee; use a channel or
+another synchronization primitive for compound check-then-set protocols.
+Runtime: `runtime/mako_cmap.h`.
 
 ---
 
@@ -1373,6 +1379,24 @@ curl -sk https://127.0.0.1:18443/health   # → {"ok":true}
 Also: `tls_serve` / `tls_serve_once` (fixed body). Not a full HTTPS framework —
 no middleware, no ACME, no production TLS policy surface.
 
+### Multi-certificate SNI
+
+The socket-style server can preload multiple certificate/key pairs. SNI
+selection is case-insensitive: an exact hostname wins, then the matching
+left-most wildcard with the longest suffix. Wildcards match one DNS label only;
+`*.example.com` does not match `a.b.example.com`. Certificates are loaded when
+configured, so handshakes do not read certificate files on the hot path.
+
+```mko
+let srv = tls_server_new("default.crt", "default.key")
+let _ = tls_server_sni_add(srv, "api.example.com", "api.crt", "api.key")
+let _ = tls_server_sni_add(srv, "*.example.com", "wild.crt", "wild.key")
+```
+
+Call `tls_server_sni_add` before accepting connections, or use it as a
+synchronized configuration update while the server is running. A duplicate or
+malformed hostname, unreadable certificate, or mismatched key returns `-1`.
+
 ### HTTP/2 TLS server (Done — OpenSSL + ALPN h2)
 
 `tls_serve_h2_routes(port, cert, key, root_body, health_body, max)` — one TLS
@@ -1696,7 +1720,7 @@ fn main() {
 
 ### Systems programming
 
-Ownership (`hold`/`share`), arenas, bytes, and files — no mandatory GC:
+Ownership (`hold`/`share`), arenas, bytes, and files — no GC:
 
 | Pattern | Example |
 |---------|---------|
@@ -2281,10 +2305,12 @@ into `scratch`; `--mode debian` uses `debian:bookworm-slim` with CA certificates
 for apps that need OS trust stores or shell/debug tooling.
 `mako deploy serverless` builds on that Dockerfile and writes provider starter
 manifests: `cloudrun.service.yaml` for Cloud Run or `fly.toml` for Fly.io.
+Cloud Run requires an explicit `--image` pointing to an image you have pushed;
+Fly builds from the generated Dockerfile and does not use that option.
 `mako deploy wasm` writes a browser/edge static starter around the WASI
 preview1 loader: `index.html`, `mako-wasi-loader.js`, `build-wasm.sh`, and a
 README that names the preview2/component boundary.
-`mako deploy plugin` writes native or WASM plugin skeletons using the ABI seed
+`mako deploy plugin` writes native or WASM plugin starters using the ABI
 in `runtime/mako_plugin.h`; see [ABI.md](ABI.md).
 
 ### Security APIs (stdlib)
@@ -2295,14 +2321,15 @@ let s = secret_from_str(key); secret_drop(s)
 assert(http_header_ok(name, val) == 1)    // reject CR/LF injection
 unsafe { let v = unsafe_index(xs, i) }    // explicit bounds opt-out
 // DB: sqlite_query_int / sqlite_query_int_params — parameterized only
-// Crew exit cancel_joins; [package] systems = true forbids GC weakening
+// Crew exit cancel_joins; all packages use the same ownership rules
 ```
 
 ### Session Management, Authentication & Authorization
 
-Mako ships a complete toolkit for cookies, sessions, CSRF protection,
-authentication, signed tokens, and role-based access control. All security-
-sensitive comparisons use constant-time equality to prevent timing attacks.
+Mako ships security building blocks for cookies, sessions, CSRF protection,
+authentication, signed tokens, and role-based access control. Use the provided
+constant-time comparison APIs for token-bearing values; ordinary `==` is not
+constant-time.
 
 Runtime: `runtime/mako_security.h`.
 
@@ -2474,7 +2501,8 @@ mako deploy plugin my-wasm-plugin --name my-wasm-plugin --kind wasm
 ```
 
 Native plugins use `runtime/mako_plugin.h` and export `mako_plugin_entry`.
-WASM plugin skeletons emit a manifest and exported function sketch. Host-side
+WASM plugin starters emit a manifest and exported functions, including the
+working `ping` operation. Host-side
 loading/capabilities remain roadmap work.
 
 ---
@@ -2522,7 +2550,7 @@ Still **Target / Later** (VISION): colored `async`/`await`, complete Unicode pro
 (script seeds: Latin/Greek/Cyrillic/Arabic/Hebrew/Han/Hiragana/Katakana/Hangul/Thai/Devanagari/Tamil/Armenian/Ethiopic/Georgian/Cherokee/Bengali/Sinhala/Myanmar/Khmer/Tibetan/Syriac/Coptic/Runic/Thaana/Tagalog/Bopomofo/Braille/Ogham/Gothic/Canadian/Gujarati/Kannada/Malayalam/Telugu/Oriya/Lao/Balinese/Javanese/Sundanese/Buginese/Cham/Rejang/Lisu/Nko/Tifinagh/Samaritan/Mandaic/Saurashtra/Tai_Le/Kayah_Li/New_Tai_Lue/Ol_Chiki/Limbu/Lepcha/Batak/Tai_Tham/Syloti_Nagri/Vai/Yi/Glagolitic/Meetei_Mayek/Phags_Pa/Buhid/Hanunoo/Tagbanwa/Bamum/Mongolian/Tai_Viet/Inherited/Common + categories incl. Mn/Mc/Sm/Sk/Pc),
 Huffman JPEG viewer parity (mako APP7 layout checks + roundtrip + DCT/huff evidence today; not full viewer Huffman), reflect for non-POD fields
 (nested POD flatten done; map/slice/chan/nested map·slice·Option·Result fields rejected), full SMTP AUTH-over-TLS polish, native WASI preview2 / browser DOM,
-optional GC, SIMD/GPU, deep LSP, homebrew-core publish (external). See [VISION.md](VISION.md)
+SIMD/GPU, deep LSP, homebrew-core publish (external). See [VISION.md](VISION.md)
 and [STATUS.md](STATUS.md).
 
 **Book:** [The Mako Book](book/).

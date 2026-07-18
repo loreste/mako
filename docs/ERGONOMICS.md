@@ -617,7 +617,7 @@ If (1) is “longer” without a safety win, reject it.
 | [IDENTITY.md](IDENTITY.md) | Unique surface |
 | [PAIN_POINTS.md](PAIN_POINTS.md) | Why we exist · residuals R8–R11 (spread, HOF, interpol, enum kick) |
 | [VISION.md](VISION.md) | Product north star |
-| [GUIDE.md](GUIDE.md) | Full syntax (maps §4c, control flow §4, concurrency §8–9) |
+| [GUIDE.md](GUIDE.md) | Current syntax (maps §4c, control flow §4, concurrency §8–9) |
 | [SPEED.md](SPEED.md) | Send-like kick · fan · channels |
 | [ROADMAP.md](ROADMAP.md) | What’s done vs open for language ergonomics |
 | [LANGUAGE.md](LANGUAGE.md) | Surface summary |

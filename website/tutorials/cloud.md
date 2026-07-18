@@ -161,7 +161,7 @@ fn authenticate(token: string, secret: string) -> Result[string, string] {
 
 ## Building a Rate-Limited API Gateway
 
-Complete example combining all primitives.
+Example combining the primitives above.
 
 ```mko
 fn main() {

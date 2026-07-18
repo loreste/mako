@@ -1111,7 +1111,7 @@ See docs/ERGONOMICS.md and docs/SPEED.md.
 
   [dependencies]
   "helper" = { path = "../helper", version = "0.1.0" }
-  "tool" = { git = "https://example.com/tool.git", tag = "v0.1.0" }
+  "tool" = { path = "../tool", version = "0.1.0" }
 
   # Commands:
   mako pkg add helper ../helper

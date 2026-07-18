@@ -119,8 +119,8 @@ fn main() {
 }
 ```
 
-This guarantee means that errors cannot silently slip by. Every fallible
-operation must be consciously handled or explicitly discarded.
+For `Result`-returning operations, this rule means errors cannot silently slip
+by. The result must be consciously handled or explicitly discarded.
 
 ## Error wrapping with wrap_err
 
@@ -410,7 +410,7 @@ fn load_port() -> int {
 
 fn parse_port_from_env() -> Result[int, string] {
     // try to parse PORT from environment
-    let port_str = "8080"  // placeholder
+    let port_str = "8080"  // example default
     let v = parse_int(port_str)?
     if v <= 0 || v > 65535 {
         return error("port out of range")

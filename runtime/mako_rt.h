@@ -380,24 +380,18 @@ static inline int64_t mako_byte_array_len(MakoByteArray a) { return (int64_t)a.l
 static inline int64_t mako_byte_array_cap(MakoByteArray a) { return (int64_t)a.cap; }
 
 static inline int64_t mako_byte_get(MakoByteArray a, int64_t i) {
-#ifndef NDEBUG
     if (i < 0 || (size_t)i >= a.len) mako_abort("byte index out of bounds");
-#endif
     return (int64_t)a.data[i];
 }
 
 static inline void mako_byte_set(MakoByteArray a, int64_t i, int64_t v) {
-#ifndef NDEBUG
     if (i < 0 || (size_t)i >= a.len) mako_abort("byte index out of bounds");
     if (v < 0 || v > 255) mako_abort("byte value out of range 0..255");
-#endif
     a.data[i] = (uint8_t)v;
 }
 
 static inline MakoByteArray mako_byte_append(MakoByteArray s, int64_t v) {
-#ifndef NDEBUG
     if (v < 0 || v > 255) mako_abort("byte value out of range 0..255");
-#endif
     if (s.len < s.cap) {
         s.data[s.len++] = (uint8_t)v;
         return s;
@@ -4290,15 +4284,13 @@ static inline void mako_abort(const char *msg) {
 }
 
 /* ---- Bounds checks policy ----
- * Debug builds always check. Release (`-DNDEBUG`) strips checks unless
- * MAKO_BOUNDS_ALWAYS is set (`mako build --bounds always` or
- * `[profile.release] bounds_checks = "on"`). Default release is the speed path.
+ * Safe Mako indexing is checked in every build, including optimized release
+ * binaries. The explicit `unsafe` surface is the only way to opt out.
+ * MAKO_BOUNDS_ALWAYS remains accepted for generated-code compatibility.
  */
-#if defined(MAKO_BOUNDS_ALWAYS)
+#if defined(MAKO_BOUNDS_ALWAYS) || defined(MAKO_SAFE_DEFAULT)
 #define MAKO_BOUNDS_CHECK(cond, msg) \
     do { if (cond) mako_abort(msg); } while (0)
-#elif defined(NDEBUG)
-#define MAKO_BOUNDS_CHECK(cond, msg) ((void)0)
 #else
 #define MAKO_BOUNDS_CHECK(cond, msg) \
     do { if (cond) mako_abort(msg); } while (0)
@@ -5293,11 +5285,11 @@ typedef struct {
     MakoTaskFn fn;
     void *arg;
     void *result;
-    bool joined;
+    atomic_bool joined;
     bool cancelled_start; /* set if cancel before/during — cooperative */
-    volatile int done;    /* 1 when trampoline finished (for timed join) */
-    int64_t debug_id;    /* registry id for task inspect (0 = unregistered) */
-    int64_t parent_id;   /* async parent task id (0 = root / unknown) */
+    atomic_int done;      /* 1 when trampoline finished (for timed join) */
+    int64_t debug_id;     /* registry id for task inspect (0 = unregistered) */
+    int64_t parent_id;    /* async parent task id (0 = root / unknown) */
 } MakoTask;
 
 /* TLS: current task id for parent-link seed when spawning children. */
@@ -5314,20 +5306,42 @@ static MakoTaskRegSlot mako_task_reg[MAKO_TASK_REG_MAX];
 static atomic_llong mako_task_id_seq = 1;
 static atomic_llong mako_debug_break_count = 0;
 static int mako_debug_trap_enabled = 0;
+#if defined(_WIN32) || defined(_WIN64)
+static pthread_mutex_t mako_task_reg_mu;
+static volatile LONG mako_task_reg_mu_once = 0;
+#else
+static pthread_mutex_t mako_task_reg_mu = PTHREAD_MUTEX_INITIALIZER;
+#endif
+
+static inline void mako_task_reg_mu_ensure(void) {
+#if defined(_WIN32) || defined(_WIN64)
+    if (InterlockedCompareExchange(&mako_task_reg_mu_once, 1, 0) == 0) {
+        pthread_mutex_init(&mako_task_reg_mu, NULL);
+        InterlockedExchange(&mako_task_reg_mu_once, 2);
+    } else {
+        while (InterlockedCompareExchange(&mako_task_reg_mu_once, 2, 2) != 2)
+            Sleep(0);
+    }
+#endif
+}
 
 static inline void mako_task_reg_add(MakoTask *t) {
     if (!t) return;
     int64_t id = (int64_t)atomic_fetch_add_explicit(&mako_task_id_seq, 1, memory_order_relaxed);
     t->debug_id = id;
     t->parent_id = mako_debug_current_task_id;
+    mako_task_reg_mu_ensure();
+    pthread_mutex_lock(&mako_task_reg_mu);
     for (int i = 0; i < MAKO_TASK_REG_MAX; i++) {
         if (!mako_task_reg[i].active) {
             mako_task_reg[i].task = t;
             mako_task_reg[i].id = id;
             mako_task_reg[i].active = 1;
+            pthread_mutex_unlock(&mako_task_reg_mu);
             return;
         }
     }
+    pthread_mutex_unlock(&mako_task_reg_mu);
 }
 
 static inline int64_t mako_debug_set_current_task(int64_t id) {
@@ -5341,26 +5355,26 @@ static inline int64_t mako_debug_current_task(void) {
 
 static inline void mako_task_reg_remove(MakoTask *t) {
     if (!t || t->debug_id == 0) return;
+    mako_task_reg_mu_ensure();
+    pthread_mutex_lock(&mako_task_reg_mu);
     for (int i = 0; i < MAKO_TASK_REG_MAX; i++) {
         if (mako_task_reg[i].active && mako_task_reg[i].id == t->debug_id) {
             mako_task_reg[i].active = 0;
             mako_task_reg[i].task = NULL;
+            pthread_mutex_unlock(&mako_task_reg_mu);
             return;
         }
     }
+    pthread_mutex_unlock(&mako_task_reg_mu);
 }
 
 static inline int64_t mako_task_done(MakoTask *t) {
     if (!t) return 1;
-#if defined(__STDC_NO_ATOMICS__)
-    return t->done ? 1 : 0;
-#else
-    return __atomic_load_n(&t->done, __ATOMIC_ACQUIRE) ? 1 : 0;
-#endif
+    return atomic_load_explicit(&t->done, memory_order_acquire) ? 1 : 0;
 }
 
 static inline int64_t mako_task_joined(MakoTask *t) {
-    return (t && t->joined) ? 1 : 0;
+    return (t && atomic_load_explicit(&t->joined, memory_order_acquire)) ? 1 : 0;
 }
 
 static inline int64_t mako_task_id(MakoTask *t) {
@@ -5386,6 +5400,8 @@ static inline MakoString mako_tasks_inspect_json(void) {
     if (n < 0) n = 0;
     len = (size_t)n;
     int first = 1;
+    mako_task_reg_mu_ensure();
+    pthread_mutex_lock(&mako_task_reg_mu);
     for (int i = 0; i < MAKO_TASK_REG_MAX; i++) {
         if (!mako_task_reg[i].active || !mako_task_reg[i].task) continue;
         MakoTask *t = mako_task_reg[i].task;
@@ -5407,12 +5423,13 @@ static inline MakoString mako_tasks_inspect_json(void) {
             t->debug_id,
             t->parent_id,
             mako_task_done(t) ? 1 : 0,
-            t->joined ? 1 : 0,
+            atomic_load_explicit(&t->joined, memory_order_acquire) ? 1 : 0,
             t->cancelled_start ? 1 : 0
         );
         if (n > 0) len += (size_t)n;
         first = 0;
     }
+    pthread_mutex_unlock(&mako_task_reg_mu);
     if (len + 4 >= cap) {
         cap = len + 8;
         char *next = (char *)realloc(buf, cap);
@@ -5439,7 +5456,7 @@ static inline int64_t mako_debug_break(MakoString label) {
         label.data ? label.data : ""
     );
     fflush(stderr);
-#if !defined(_WIN32)
+#if !defined(_WIN32) && !defined(MAKO_WASI)
     if (mako_debug_trap_enabled) {
         raise(SIGTRAP);
     }
@@ -5899,10 +5916,10 @@ static inline MakoString mako_debug_snapshot_json(void) {
  * mako_nursery_cancelled() and should exit cooperatively.
  */
 typedef struct {
-    MakoTask *tasks;
+    MakoTask **tasks;
     size_t len;
     size_t cap;
-    volatile bool cancelled;
+    atomic_bool cancelled;
     /* Structured child errors: first Err message from joined Result jobs. */
     char *first_err;   /* heap C string, or NULL */
     size_t first_err_len;
@@ -5914,7 +5931,7 @@ static inline MakoNursery mako_nursery_new(void) {
     n.tasks = NULL;
     n.len = 0;
     n.cap = 0;
-    n.cancelled = false;
+    atomic_init(&n.cancelled, false);
     n.first_err = NULL;
     n.first_err_len = 0;
     n.err_count = 0;
@@ -5922,11 +5939,11 @@ static inline MakoNursery mako_nursery_new(void) {
 }
 
 static inline void mako_nursery_cancel(MakoNursery *n) {
-    n->cancelled = true;
+    if (n) atomic_store_explicit(&n->cancelled, true, memory_order_release);
 }
 
 static inline int64_t mako_nursery_cancelled(MakoNursery *n) {
-    return n->cancelled ? 1 : 0;
+    return (n && atomic_load_explicit(&n->cancelled, memory_order_acquire)) ? 1 : 0;
 }
 
 /* Record a child task error (clones msg). Keeps only the first message. */
@@ -5972,47 +5989,53 @@ static void *mako_task_trampoline(void *arg) {
     void *r = NULL;
     if (t->fn) r = t->fn(t->arg);
     t->result = r;
-#if defined(__STDC_NO_ATOMICS__)
-    t->done = 1;
-#else
-    __atomic_store_n(&t->done, 1, __ATOMIC_RELEASE);
-#endif
+    atomic_store_explicit(&t->done, 1, memory_order_release);
     return r;
 }
 
 static inline MakoTask *mako_spawn(MakoNursery *n, MakoTaskFn fn, void *arg) {
+    if (!n || !fn) mako_abort("invalid task spawn");
     if (n->len == n->cap) {
         size_t nc = n->cap ? n->cap * 2 : 4;
-        n->tasks = (MakoTask *)realloc(n->tasks, nc * sizeof(MakoTask));
+        MakoTask **next = (MakoTask **)realloc(n->tasks, nc * sizeof(MakoTask *));
+        if (!next) mako_abort("task nursery: out of memory");
+        n->tasks = next;
         n->cap = nc;
     }
-    MakoTask *t = &n->tasks[n->len++];
+    MakoTask *t = (MakoTask *)calloc(1, sizeof(MakoTask));
+    if (!t) mako_abort("task: out of memory");
+    n->tasks[n->len++] = t;
     t->fn = fn;
     t->arg = arg;
     t->result = NULL;
-    t->joined = false;
-    t->cancelled_start = n->cancelled;
-    t->done = 0;
+    atomic_init(&t->joined, false);
+    t->cancelled_start = atomic_load_explicit(&n->cancelled, memory_order_acquire);
+    atomic_init(&t->done, 0);
     t->debug_id = 0;
     t->parent_id = 0;
     mako_rt_counter_inc(&mako_rt_tasks_spawned);
-    if (n->cancelled) {
+    if (t->cancelled_start) {
         /* do not start new work after cancel */
-        t->joined = true;
-        t->done = 1;
+        atomic_store_explicit(&t->joined, true, memory_order_release);
+        atomic_store_explicit(&t->done, 1, memory_order_release);
         t->result = (void *)(intptr_t)0;
         return t;
     }
-    pthread_create(&t->thread, NULL, mako_task_trampoline, t);
+    if (pthread_create(&t->thread, NULL, mako_task_trampoline, t) != 0) {
+        n->len--;
+        free(t);
+        mako_abort("task: unable to create worker thread");
+    }
     mako_task_reg_add(t);
     return t;
 }
 
 static inline void *mako_await(MakoTask *t) {
-    if (!t->joined) {
+    if (!t) return NULL;
+    if (!atomic_load_explicit(&t->joined, memory_order_acquire)) {
         pthread_join(t->thread, &t->result);
-        t->joined = true;
-        t->done = 1;
+        atomic_store_explicit(&t->joined, true, memory_order_release);
+        atomic_store_explicit(&t->done, 1, memory_order_release);
         mako_rt_counter_inc(&mako_rt_tasks_joined);
         mako_task_reg_remove(t);
     }
@@ -6023,22 +6046,21 @@ static inline void *mako_await(MakoTask *t) {
  * Polls task->done then joins; does not block past timeout on unfinished work.
  */
 static inline int64_t mako_await_timeout_ms(MakoTask *t, int64_t ms, int64_t *out) {
-    if (t->joined) {
+    if (!t) {
+        if (out) *out = 0;
+        return 1;
+    }
+    if (atomic_load_explicit(&t->joined, memory_order_acquire)) {
         if (out) *out = (int64_t)(intptr_t)t->result;
         return 1;
     }
     if (ms < 0) ms = 0;
     int64_t waited = 0;
     while (waited < ms) {
-        int done =
-#if defined(__STDC_NO_ATOMICS__)
-            t->done;
-#else
-            __atomic_load_n(&t->done, __ATOMIC_ACQUIRE);
-#endif
+        int done = atomic_load_explicit(&t->done, memory_order_acquire);
         if (done) {
             pthread_join(t->thread, &t->result);
-            t->joined = true;
+            atomic_store_explicit(&t->joined, true, memory_order_release);
             mako_rt_counter_inc(&mako_rt_tasks_joined);
             mako_task_reg_remove(t);
             if (out) *out = (int64_t)(intptr_t)t->result;
@@ -6049,15 +6071,10 @@ static inline int64_t mako_await_timeout_ms(MakoTask *t, int64_t ms, int64_t *ou
         waited += 2;
     }
     /* Final check after last sleep */
-    int done =
-#if defined(__STDC_NO_ATOMICS__)
-        t->done;
-#else
-        __atomic_load_n(&t->done, __ATOMIC_ACQUIRE);
-#endif
+    int done = atomic_load_explicit(&t->done, memory_order_acquire);
     if (done) {
         pthread_join(t->thread, &t->result);
-        t->joined = true;
+        atomic_store_explicit(&t->joined, true, memory_order_release);
         mako_rt_counter_inc(&mako_rt_tasks_joined);
         mako_task_reg_remove(t);
         if (out) *out = (int64_t)(intptr_t)t->result;
@@ -6070,15 +6087,21 @@ static inline int64_t mako_await_timeout_ms(MakoTask *t, int64_t ms, int64_t *ou
 static inline void mako_nursery_join_pending(MakoNursery *n) {
     if (!n) return;
     for (size_t i = 0; i < n->len; i++) {
-        if (!n->tasks[i].joined) {
-            mako_await(&n->tasks[i]);
+        if (n->tasks[i] && !atomic_load_explicit(&n->tasks[i]->joined, memory_order_acquire)) {
+            mako_await(n->tasks[i]);
         }
     }
 }
 
 static inline void mako_nursery_join_all(MakoNursery *n) {
+    if (!n) return;
     for (size_t i = 0; i < n->len; i++) {
-        mako_await(&n->tasks[i]);
+        MakoTask *t = n->tasks[i];
+        if (t) {
+            mako_await(t);
+            free(t);
+            n->tasks[i] = NULL;
+        }
     }
     free(n->first_err);
     n->first_err = NULL;
@@ -6137,11 +6160,7 @@ static inline void mako_detached_join_all(void) {
     mako_detached_mu_ensure();
     pthread_mutex_lock(&mako_detached_mu);
     if (mako_detached_inited) {
-        mako_nursery_join_pending(&mako_detached_root);
-        mako_nursery_clear_errs(&mako_detached_root);
-        free(mako_detached_root.tasks);
-        mako_detached_root.tasks = NULL;
-        mako_detached_root.len = mako_detached_root.cap = 0;
+        mako_nursery_join_all(&mako_detached_root);
     }
     pthread_mutex_unlock(&mako_detached_mu);
 }
@@ -6161,13 +6180,17 @@ static inline int64_t mako_nursery_drain(MakoNursery *n, int64_t timeout_ms) {
     int64_t start = mako_now_ms();
     int64_t joined = 0;
     for (size_t i = 0; i < n->len; i++) {
+        MakoTask *t = n->tasks[i];
+        if (!t) continue;
         int64_t left = timeout_ms - (mako_now_ms() - start);
         if (left < 0) left = 0;
         int64_t out = 0;
-        if (mako_await_timeout_ms(&n->tasks[i], left, &out) == 0) {
+        if (mako_await_timeout_ms(t, left, &out) == 0) {
             /* timed out — force join without further wait budget */
-            mako_await(&n->tasks[i]);
+            mako_await(t);
         }
+        free(t);
+        n->tasks[i] = NULL;
         joined++;
     }
     free(n->tasks);
@@ -7945,7 +7968,7 @@ static inline int64_t mako_append_file(MakoString path, MakoString contents) {
     return (w == n) ? 0 : -1;
 }
 
-/* ---- Production filesystem / storage helpers ---- */
+/* ---- Filesystem / storage helpers ---- */
 /* mako_fs_path_buf is defined earlier (with sys/stat includes). */
 
 /* Rename / move within the same filesystem. Returns 0 ok, -1 error. */
@@ -8153,6 +8176,18 @@ static inline MakoString mako_temp_file(MakoString prefix) {
     snprintf(path, sizeof(path), "%s\\%s-%u-%u.tmp",
              dir.data ? dir.data : ".", pfx, (unsigned)_getpid(),
              (unsigned)(time(NULL) & 0xfffffff));
+    mako_str_free(dir);
+    FILE *f = fopen(path, "wb");
+    if (!f) return mako_str_from_cstr("");
+    fclose(f);
+    return mako_str_from_cstr(path);
+#elif defined(MAKO_WASI)
+    /* WASI has no mkstemp. Keep the temp-file contract with a process-local,
+     * atomic sequence; the caller still receives an already-created file. */
+    static atomic_uint mako_wasi_temp_seq = 0;
+    unsigned seq = atomic_fetch_add_explicit(&mako_wasi_temp_seq, 1, memory_order_relaxed);
+    snprintf(path, sizeof(path), "%s/%s-%u.tmp",
+             dir.data ? dir.data : "/tmp", pfx, seq);
     mako_str_free(dir);
     FILE *f = fopen(path, "wb");
     if (!f) return mako_str_from_cstr("");
@@ -8442,6 +8477,11 @@ static inline MakoString mako_stack_trace(void) {
 static char mako_crash_report_path[512];
 static int mako_crash_report_installed = 0;
 
+#if defined(MAKO_WASI)
+static void mako_crash_report_handler(int sig) {
+    (void)sig;
+}
+#else
 static void mako_crash_report_handler(int sig) {
     const char *sn =
         sig == SIGSEGV ? "SIGSEGV" :
@@ -8486,9 +8526,15 @@ static void mako_crash_report_handler(int sig) {
     signal(sig, SIG_DFL);
     raise(sig);
 }
+#endif
 
 /* Install process crash reporter. path empty → stderr only. Returns 1. */
 static inline int64_t mako_crash_report_install(MakoString path) {
+#if defined(MAKO_WASI)
+    (void)path;
+    mako_crash_report_installed = 0;
+    return 0;
+#else
     if (path.data && path.len > 0 && path.len < (int)sizeof(mako_crash_report_path)) {
         size_t n = path.len < sizeof(mako_crash_report_path) - 1
                        ? path.len
@@ -8517,6 +8563,7 @@ static inline int64_t mako_crash_report_install(MakoString path) {
 #endif
     mako_crash_report_installed = 1;
     return 1;
+#endif
 }
 
 static inline int64_t mako_crash_report_installed_p(void) {
@@ -8535,6 +8582,8 @@ static inline int64_t mako_process_rss_bytes(void) {
         == KERN_SUCCESS) {
         return (int64_t)info.resident_size;
     }
+    return -1;
+#elif defined(MAKO_WASI)
     return -1;
 #else
     /* Linux: prefer /proc; ru_maxrss is kilobytes. */
@@ -8562,7 +8611,7 @@ static inline int64_t mako_process_rss_bytes(void) {
 static inline int64_t mako_process_cpu_user_us(void) {
 #if defined(_WIN32)
     return -1;
-#elif defined(RUSAGE_SELF)
+#elif defined(RUSAGE_SELF) && !defined(MAKO_WASI)
     struct rusage ru;
     if (getrusage(RUSAGE_SELF, &ru) != 0) return -1;
     return (int64_t)ru.ru_utime.tv_sec * 1000000LL + (int64_t)ru.ru_utime.tv_usec;
@@ -8574,7 +8623,7 @@ static inline int64_t mako_process_cpu_user_us(void) {
 static inline int64_t mako_process_cpu_sys_us(void) {
 #if defined(_WIN32)
     return -1;
-#elif defined(RUSAGE_SELF)
+#elif defined(RUSAGE_SELF) && !defined(MAKO_WASI)
     struct rusage ru;
     if (getrusage(RUSAGE_SELF, &ru) != 0) return -1;
     return (int64_t)ru.ru_stime.tv_sec * 1000000LL + (int64_t)ru.ru_stime.tv_usec;
@@ -8785,7 +8834,7 @@ static inline void mako_actor_stop(MakoActor *a) {
 
 /* ---- Go-like testing (setjmp so one failure doesn't abort the process) ---- */
 #if defined(__wasi__)
-/* wasi-libc setjmp needs Wasm EH; soft stubs for wasm32-wasip1 hello builds. */
+/* wasi-libc setjmp needs Wasm EH; explicit fallbacks for wasm32-wasip1 builds. */
 typedef int jmp_buf[1];
 static inline int setjmp(jmp_buf env) {
     (void)env;
@@ -8942,6 +8991,11 @@ static inline void mako_assert_eq_str(MakoString a, MakoString b) {
 /* On a native fault (SIGABRT/SIGSEGV/SIGBUS/SIGFPE) inside a test, report which
  * test was running and a backtrace before dying, so a crash points at a place
  * instead of just "killed by signal N". */
+#if defined(MAKO_WASI)
+static void mako_test_crash_handler(int sig) {
+    (void)sig;
+}
+#else
 static void mako_test_crash_handler(int sig) {
     const char *nm = mako_test_current ? mako_test_current : "(none)";
     const char *sn =
@@ -8962,9 +9016,12 @@ static void mako_test_crash_handler(int sig) {
     signal(sig, SIG_DFL);
     raise(sig);
 }
+#endif
 
 static inline void mako_test_install_crash_handler(void) {
-#if defined(_WIN32)
+#if defined(MAKO_WASI)
+    return;
+#elif defined(_WIN32)
     signal(SIGSEGV, mako_test_crash_handler);
     signal(SIGABRT, mako_test_crash_handler);
     signal(SIGFPE, mako_test_crash_handler);

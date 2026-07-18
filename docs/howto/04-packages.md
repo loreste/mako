@@ -103,11 +103,11 @@ app -> helper -> core
 
 ## Git dependencies
 
-For remote packages (requires git on PATH):
+For a concrete local package:
 
 ```toml
 [dependencies]
-"tool" = { git = "https://example.com/tool.git", tag = "v0.1.0" }
+"tool" = { path = "../tool", version = "0.1.0" }
 ```
 
 Then fetch:

@@ -38,8 +38,8 @@ The target triple follows the `<arch>-<vendor>-<os>[-<abi>]` convention.
 The host target is detected automatically. `mako version` prints it:
 
 ```text
-mako version mako0.1.9 darwin/arm64
-mako version mako0.1.9 linux/amd64
+mako version mako0.2.1 darwin/arm64
+mako version mako0.2.1 linux/amd64
 ```
 
 ---
@@ -68,7 +68,7 @@ Set it to `zig cc` to get zig's cross-compilation sysroots.
 
 - Ships sysroots for Linux glibc (many versions), musl, and Windows.
 - No separate toolchain installation per target.
-- Single binary, no dependencies.
+- Single native binary when the selected target and libraries support static linking.
 - Drop-in replacement for clang in most cases.
 
 ### When to Use System Clang
@@ -81,7 +81,8 @@ Set it to `zig cc` to get zig's cross-compilation sysroots.
 
 ## Static Linking with Musl
 
-Linux musl targets produce fully static binaries with no runtime dependencies:
+Linux musl targets can produce fully static binaries without a glibc runtime
+dependency when the required cross-toolchain is installed:
 
 ```bash
 mako build main.mko --target x86_64-unknown-linux-musl -o bin/app
@@ -89,9 +90,9 @@ file bin/app
 # bin/app: ELF 64-bit LSB executable, x86-64, statically linked
 ```
 
-Musl targets default to `--static-link`. The resulting binary runs on any Linux
-kernel of the right architecture, regardless of the distribution or installed
-libraries.
+Musl targets default to `--static-link`. The resulting binary is portable across
+Linux distributions for the matching architecture, subject to kernel and
+deployment-policy requirements.
 
 You can also force static linking on glibc targets:
 
@@ -292,20 +293,20 @@ The `version` command reports the Mako version, OS, and architecture:
 
 ```bash
 mako version
-# mako version mako0.1.9 darwin/arm64
+# mako version mako0.2.1 darwin/arm64
 
 mako --version
-# mako version mako0.1.9 darwin/arm64
+# mako version mako0.2.1 darwin/arm64
 
 mako -V
-# mako version mako0.1.9 darwin/arm64
+# mako version mako0.2.1 darwin/arm64
 ```
 
 For verbose output including the git commit:
 
 ```bash
 mako version -v
-# mako version mako0.1.9 darwin/arm64
+# mako version mako0.2.1 darwin/arm64
 # commit: a1b2c3d (when built from git with MAKO_GIT_HASH)
 ```
 

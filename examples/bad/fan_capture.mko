@@ -1,0 +1,8 @@
+// EXPECT: fan mapper captures
+// fan lowers to a static parallel worker; captures must be explicit and checked.
+
+fn main() {
+    let mut offset = 10
+    let xs = [1, 2, 3]
+    let _ = fan(xs, |x| x + offset)
+}
