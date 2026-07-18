@@ -2843,12 +2843,15 @@ fn path_dep_identity(dep_root: &Path) -> PathBuf {
 }
 
 /// Merge path + fetched-git deps declared in `manifest_dir/mako.toml` (transitive).
-/// Each package is namespaced by the name its *parent* declared: call `helper.add(...)`.
+/// Locked builds use only roots verified for the declaring manifest; an absent
+/// verified root is an error. Each package is namespaced by the name its *parent*
+/// declared: call `helper.add(...)`.
 fn merge_path_deps_from_manifest(
     manifest_dir: &Path,
     program: &mut Program,
     seen_pkgs: &mut std::collections::HashSet<PathBuf>,
     seen_sources: &mut std::collections::HashSet<PathBuf>,
+    locked_roots: Option<&crate::pkg::VerifiedDependencyRoots>,
 ) -> Result<(), String> {
     let manifest = manifest_dir.join("mako.toml");
     if !manifest.exists() {
@@ -2857,7 +2860,19 @@ fn merge_path_deps_from_manifest(
     let text =
         fs::read_to_string(&manifest).map_err(|e| format!("read {}: {e}", manifest.display()))?;
     for dep in parse_manifest_deps(&text) {
-        let full = resolve_dep_root(manifest_dir, &dep)?;
+        let full = match locked_roots {
+            Some(roots) => roots
+                .get(manifest_dir, &dep.name)
+                .map(Path::to_path_buf)
+                .ok_or_else(|| {
+                    format!(
+                        "locked dependency `{}` from {} was not verified; refusing an unlocked build",
+                        dep.name,
+                        manifest_dir.display()
+                    )
+                })?,
+            None => resolve_dep_root(manifest_dir, &dep)?,
+        };
         let pkg_id = path_dep_identity(&full);
         if !seen_pkgs.insert(pkg_id) {
             continue; // already merged this package (cycle or diamond)
@@ -2897,7 +2912,13 @@ fn merge_path_deps_from_manifest(
         };
         if let Some(dir) = next_dir {
             if dir.join("mako.toml").exists() {
-                merge_path_deps_from_manifest(&dir, program, seen_pkgs, seen_sources)?;
+                merge_path_deps_from_manifest(
+                    &dir,
+                    program,
+                    seen_pkgs,
+                    seen_sources,
+                    locked_roots,
+                )?;
             }
         }
     }
@@ -2910,6 +2931,7 @@ pub fn merge_path_dependencies(entry: &Path, mut program: Program) -> Result<Pro
     let Some(manifest_dir) = find_nearest_manifest_dir(entry) else {
         return Ok(program);
     };
+    let locked_roots = crate::pkg::verified_dependency_roots(&manifest_dir)?;
     let mut seen_pkgs = std::collections::HashSet::new();
     let mut seen_sources = std::collections::HashSet::new();
     if let Ok(c) = entry.canonicalize() {
@@ -2926,6 +2948,7 @@ pub fn merge_path_dependencies(entry: &Path, mut program: Program) -> Result<Pro
         &mut program,
         &mut seen_pkgs,
         &mut seen_sources,
+        locked_roots.as_ref(),
     )?;
     Ok(program)
 }
@@ -3567,6 +3590,49 @@ fn glob_match(pat: &str, text: &str) -> bool {
         }
     }
     rec(&p, &t)
+}
+
+#[cfg(test)]
+mod locked_dependency_tests {
+    use super::*;
+
+    #[test]
+    fn locked_merge_does_not_fall_back_to_unverified_paths() {
+        let dir = std::env::temp_dir().join(format!(
+            "mako_locked_merge_{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        let app = dir.join("app");
+        let util = dir.join("util");
+        fs::create_dir_all(&app).unwrap();
+        fs::create_dir_all(&util).unwrap();
+        fs::write(
+            app.join("mako.toml"),
+            "name = \"app\"\nversion = \"0.1.0\"\n\n[dependencies]\n\"util\" = { path = \"../util\" }\n",
+        )
+        .unwrap();
+        fs::write(util.join("lib.mko"), "fn answer() -> int { 42 }\n").unwrap();
+
+        let mut program = Program { items: Vec::new() };
+        let mut seen_packages = std::collections::HashSet::new();
+        let mut seen_sources = std::collections::HashSet::new();
+        let roots = crate::pkg::VerifiedDependencyRoots::default();
+        let error = merge_path_deps_from_manifest(
+            &app,
+            &mut program,
+            &mut seen_packages,
+            &mut seen_sources,
+            Some(&roots),
+        )
+        .unwrap_err();
+        assert!(error.contains("was not verified"), "unexpected: {error}");
+        assert!(
+            error.contains("refusing an unlocked build"),
+            "unexpected: {error}"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
 }
 
 #[cfg(test)]

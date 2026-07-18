@@ -128,10 +128,11 @@ mako pkg lock
 ```
 
 This writes lockfile version 2 with deterministic SHA-256 hashes of the root
-manifest and recursive `.mko` sources. Commit it to version control. A later
-`mako pkg install` rehashes locked dependencies and fails if their content
-changed, including nested source files. It also fails closed when a transitive
-manifest cannot be read or the lockfile has malformed or contradictory fields.
+manifest and recursive `.mko` sources. Commit it to version control. The
+`mako pkg install`, `mako build`, `mako run`, and `mako check` commands rehash
+locked dependencies and fail if their content changed, including nested source
+files. They also fail closed when a transitive manifest cannot be read or the
+lockfile has malformed or contradictory fields.
 
 Use `mako pkg update` only after inspecting an intentional dependency change.
 The same command migrates legacy version 1 lockfiles; install does not silently

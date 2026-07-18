@@ -414,7 +414,8 @@ Resolve all dependencies (SemVer, path, git, local registry), fetch, and
 write `mako.lock`. When a lockfile already exists, every locked dependency is
 rehashed and installation fails if its source metadata or content differs, a
 transitive manifest cannot be read, or the lockfile is malformed. Alias of
-`lock`.
+`lock`. `build`, `run`, and `check` perform the same verification before loading
+dependencies.
 
 ```bash
 mako pkg install
@@ -559,9 +560,9 @@ required fields, source-specific metadata, duplicate package names, and
 `sha256:` digest syntax are validated when the file is read.
 
 Do not edit the lockfile manually. Commit it to version control for
-reproducible builds. If `mako pkg install` reports an integrity mismatch,
-restore the dependency or inspect the change and run `mako pkg update` to
-accept it intentionally.
+reproducible builds. `mako pkg install`, `build`, `run`, and `check` reject
+integrity mismatches. Restore the dependency or inspect the change and run
+`mako pkg update` to accept it intentionally.
 
 ---
 

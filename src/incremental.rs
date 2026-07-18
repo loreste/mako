@@ -223,6 +223,10 @@ pub fn collect_program_inputs(entry: &Path) -> Vec<PathBuf> {
     if let Some(manifest_dir) = find_nearest_manifest_dir(entry) {
         collect_dep_files(&manifest_dir, &mut files);
         files.push(manifest_dir.join("mako.toml"));
+        let lockfile = manifest_dir.join("mako.lock");
+        if lockfile.exists() {
+            files.push(lockfile);
+        }
     }
     files.sort();
     files.dedup();
@@ -844,6 +848,23 @@ mod tests {
         let a = fingerprint_bytes(&[b"ab", b"c"]);
         let b = fingerprint_bytes(&[b"a", b"bc"]);
         assert_ne!(a, b);
+    }
+
+    #[test]
+    fn typecheck_fingerprint_includes_lockfile() {
+        let dir = std::env::temp_dir().join(format!("mako_incr_lock_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let entry = dir.join("main.mko");
+        fs::write(&entry, "fn main() {}\n").unwrap();
+        fs::write(dir.join("mako.toml"), "name = \"app\"\n").unwrap();
+        fs::write(dir.join("mako.lock"), "version = 1\n").unwrap();
+        let before = program_typecheck_fingerprint(&entry).unwrap();
+
+        fs::write(dir.join("mako.lock"), "version = 2\n").unwrap();
+        let after = program_typecheck_fingerprint(&entry).unwrap();
+        assert_ne!(before, after);
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
