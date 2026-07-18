@@ -469,6 +469,75 @@ let _ = tls_server_sni_add(srv, "api.example.com", "api.crt", "api.key")
 let _ = tls_server_sni_add(srv, "*.example.com", "wild.crt", "wild.key")
 ```
 
+SNI changes are strict and copy-on-write. `tls_server_sni_update` replaces an
+existing name; `tls_server_sni_remove` drops one. Both return `0` on success
+and `-1` for a missing or invalid name. The runtime rebuilds and publishes the
+complete set while holding the server lock, so an in-flight handshake keeps its
+selected context and later handshakes see the new set. Certificate and private
+key files are loaded and matched before the new set is published.
+
+### Verified HTTPS client and OIDC
+
+The `http_*` client is deliberately cleartext-only and accepts only
+`http://` URLs. Use the separate HTTPS surface for outbound requests:
+
+```mko
+let body = https_get(
+    "https://api.example.com/health",
+    "/etc/ssl/certs/ca-bundle.crt",
+    5000
+)
+let code = https_last_status()
+let request_body = https_post(
+    "https://api.example.com/events",
+    "{\"ok\":true}",
+    "application/json",
+    "/etc/ssl/certs/ca-bundle.crt",
+    5000
+)
+```
+
+`https_request`, `https_get`, and `https_post` perform TLS 1.2+ with peer and
+hostname verification, then bounded HTTP/1.1 response parsing. The most recent
+HTTPS status and headers are available through `https_last_status` and
+`https_last_header`; they are separate from the `http_*` client state. An empty
+CA path uses the platform trust paths. OpenSSL must be linked. Failed transport
+or validation returns an empty string; the status is `0` when no response
+status was parsed.
+
+OIDC discovery and token helpers use this verified HTTPS transport directly;
+they never downgrade to `http_*`:
+
+```mko
+let config = oidc_discovery(
+    "https://id.example/.well-known/openid-configuration",
+    "/etc/ssl/certs/ca-bundle.crt",
+    5000
+)
+let token = oidc_token(
+    "https://id.example/oauth/token",
+    "grant_type=client_credentials&client_id=service",
+    "/etc/ssl/certs/ca-bundle.crt",
+    5000
+)
+```
+
+### JWT algorithms and JWKS
+
+`jwt_sign` and `jwt_verify` are intentionally HS256-only. For an RSA-signed
+token, use `jwt_verify_rs256` with a PEM `PUBLIC KEY`, or
+`jwt_verify_jwks` with a JWKS document:
+
+```mko
+let ok = jwt_verify_rs256(token, public_key_pem)
+let ok_from_jwks = jwt_verify_jwks(token, jwks_json)
+```
+
+RS256 verification requires OpenSSL and an RSA key of at least 2048 bits. The
+header algorithm must be exactly `RS256`; JWKS verification requires exactly
+one matching `kid` and a signing-compatible RSA key. Ambiguous, malformed, or
+non-signing key sets fail closed with `0`.
+
 ---
 
 ## Bind address & session controls

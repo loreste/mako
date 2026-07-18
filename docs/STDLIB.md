@@ -559,6 +559,14 @@ Tests: `examples/testing/proxy_pool_test.mko`, `proxy_edge_test.mko`.
 | `http_get` / `http_post` / `http_request` | client |
 | `http_get_timeout` / `http_post_timeout` | timeouts |
 | `http_last_status` / `http_last_header` | last response |
+| `https_request` / `https_get` / `https_post` | verified TLS 1.2+ HTTP/1.1 client; OpenSSL required |
+| `https_last_status` / `https_last_header` | last HTTPS response status and headers, separate from `http_*` |
+| `oidc_discovery` / `oidc_token` | OIDC discovery and form-token POST over verified HTTPS; never `http_*` |
+
+`http_*` is cleartext-only and accepts `http://` URLs. `https_*` verifies the
+peer and hostname, bounds the HTTP/1.1 response, and uses platform trust paths
+when its CA argument is empty. See [BUILTINS.md](BUILTINS.md) for signatures
+and the failure contract.
 
 HTTPS/H2/H3/gRPC/WS: `tls_*` (including multi-certificate SNI), `http2_*` (64-stream mux, dual FC, HPACK, auto WU),
 `h3_server_*` / `quiche_h3_*` (HTTP/3 when quiche linked; 64 KiB body cap),
