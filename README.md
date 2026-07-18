@@ -10,14 +10,16 @@ and arenas — no tracing GC. Concurrency uses structured primitives (`crew` /
 JSON, database, and networking APIs, though coverage is still incomplete in
 places.
 
-**Status: experimental/alpha (v0.2.4).** The language works and compiles real
+**Status: experimental/alpha (v0.2.5).** The language works and compiles real
 programs, but the surface is young. Expect breaking changes, missing features,
 and bugs. The ownership model is actively being hardened — the full test suite
 (356 programs) passes under AddressSanitizer with zero memory errors, but edge
 cases remain. This is not yet suitable for production use without careful
 evaluation.
 
-**0.2.4 highlights:** ownership drop system (slices/maps/strings/`?`),
+**0.2.5 highlights:** memory safety audit (8 codegen bugs fixed, ASan clean),
+LSP hover/inlay-hints/signature-help, per-test timeouts, honest docs.  
+**0.2.4:** ownership drop system (slices/maps/strings/`?`),
 `string_view`, stack POD array lits, scheduler pool, channel ownership,
 struct field free, lockfile verification.  
 **Next:** **0.2.5** — LSP depth, broader sanitizer coverage, tooling.  

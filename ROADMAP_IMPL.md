@@ -3,8 +3,8 @@
 Detailed feature plan for Mako, organized by version. See
 [docs/ROADMAP.md](docs/ROADMAP.md) for the summary view.
 
-**Current version:** 0.2.4 (memory safety audit complete)  
-**Next milestone:** 0.2.5 (tooling / LSP depth)  
+**Current version:** 0.2.5 (memory safety audit + LSP + docs honesty)  
+**Next milestone:** 0.3.0 (cross-platform hardening)  
 **Last updated:** 2026-07-18  
 **Test suite:** 356 programs, 0 failures, ASan clean
 

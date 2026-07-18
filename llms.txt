@@ -4,7 +4,7 @@
 > Longer reference: https://mako-lang.com/llms-full.txt
 > Repo: https://github.com/loreste/mako
 
-Version **0.2.4** (experimental). Compiled language, `.mko` sources, C backend + clang, no GC.
+Version **0.2.5** (experimental). Compiled language, `.mko` sources, C backend + clang, no GC.
 356 tests pass under AddressSanitizer. Ownership model actively hardened.
 
 Write new code with: `fn`, `let`, `on Type {}`, `pack` / `pull` / `export`,

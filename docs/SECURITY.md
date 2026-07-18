@@ -6,7 +6,7 @@ suite (356 programs) passes under AddressSanitizer with zero errors. Edge
 cases are still being found and fixed. This is not yet equivalent to a
 formally verified memory model.
 
-**Product version:** **0.2.4**.
+**Product version:** **0.2.5**.
 
 Mako treats safety as a **compiler and runtime contract**, not a style guide.
 The goal: make memory corruption and common backend footguns hard to ship —
