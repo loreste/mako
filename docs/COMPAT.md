@@ -1,8 +1,8 @@
 # Mako compatibility policy (0.x)
 
-Mako aims for **simple everyday code**, a **Rust-class performance bar**, and
-active memory/resource safety mechanisms without a GC — with a **syntax surface
-that is Mako’s own**.
+Mako aims for **simple everyday code**, **native performance** (a design goal,
+not yet broadly benchmarked), and active memory/resource safety mechanisms
+without a GC — with a **syntax surface that is Mako’s own**.
 
 **Current product:** **0.2.4**. See [IDENTITY.md](IDENTITY.md) for preferred forms.
 
