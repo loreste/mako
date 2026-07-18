@@ -1,0 +1,25 @@
+// SAFE-003: returning an owned slice transfers ownership (no free-before-return).
+
+fn make_triple() -> []int {
+    let mut s = [1, 2, 3]
+    return s
+}
+
+fn TestReturnOwnedSlice() {
+    let mut t = make_triple()
+    assert_eq(t[0], 1)
+    assert_eq(t[2], 3)
+    t[1] = 20
+    assert_eq(t[1], 20)
+}
+
+fn make_map() -> map[string]int {
+    let mut m = make(map[string]int)
+    m["k"] = 7
+    return m
+}
+
+fn TestReturnOwnedMap() {
+    let mut m = make_map()
+    assert_eq(m["k"], 7)
+}

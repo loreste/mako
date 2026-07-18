@@ -280,6 +280,8 @@ pub struct TypeChecker {
     arena_depth: usize,
     /// Locals bound to arena-backed storage in the current arena nest (names).
     arena_owned: HashSet<String>,
+    /// Binding name → scope depth when defined (for slice-view escape checks).
+    binding_depth: HashMap<String, usize>,
     /// Nesting depth of `for` / `while` (for `break` / `continue`).
     loop_depth: usize,
     /// Innermost-first stack of loop labels (`None` = unlabeled).
@@ -10513,6 +10515,7 @@ impl TypeChecker {
             const_fns: HashMap::new(),
             arena_depth: 0,
             arena_owned: HashSet::new(),
+            binding_depth: HashMap::new(),
             loop_depth: 0,
             loop_labels: Vec::new(),
             loop_continue_moved: Vec::new(),
@@ -12161,6 +12164,12 @@ impl TypeChecker {
                 }
             }
         }
+        // Drop binding depths for names that lived only in this scope.
+        if let Some(scope) = self.scopes.last() {
+            for name in scope.keys() {
+                self.binding_depth.remove(name);
+            }
+        }
         self.scopes.pop();
         self.fn_capture_scopes.pop();
     }
@@ -12169,6 +12178,8 @@ impl TypeChecker {
         if let Some(scope) = self.scopes.last_mut() {
             scope.insert(name.to_string(), (ty, mutable));
         }
+        self.binding_depth
+            .insert(name.to_string(), self.scopes.len());
     }
 
     fn set_fn_capture_info(&mut self, name: &str, info: FnCaptureInfo) {
@@ -12651,6 +12662,8 @@ impl TypeChecker {
                     inferred
                 };
                 self.define(name, final_ty, *mutable);
+                // Sub-slice stored in this binding must not outlive its base.
+                self.assert_slice_view_lifetime(name, init)?;
                 if matches!(self.lookup(name).map(|(t, _)| t), Some(Type::Fn(_, _))) {
                     let info = self.fn_capture_info_for_expr(init);
                     self.set_fn_capture_info(name, info);
@@ -12811,6 +12824,7 @@ impl TypeChecker {
                     )));
                 }
                 self.assert_no_race_write(name)?;
+                self.assert_slice_view_lifetime(name, value)?;
                 let vt = self.check_expr(value)?;
                 if !self.compatible(&vt, &ty) {
                     return Err(TypeError::new(format!(
@@ -13008,6 +13022,7 @@ impl TypeChecker {
                         if self.arena_depth > 0 {
                             self.assert_no_arena_escape(e)?;
                         }
+                        self.assert_no_slice_view_return(e)?;
                         self.check_expr(e)?
                     }
                     None => Type::Void,
@@ -17539,6 +17554,56 @@ impl TypeChecker {
                     || n.starts_with("arena_")
             ),
             _ => false,
+        }
+    }
+
+    /// SAFE-003/007: a sub-slice view must not outlive its base binding.
+    /// Target depth must be >= base depth (same or inner scope).
+    fn assert_slice_view_lifetime(
+        &self,
+        target_name: &str,
+        value: &Expr,
+    ) -> Result<(), TypeError> {
+        let Expr::Slice { base, .. } = value else {
+            // Also chained index of a slice: s[1:3][0] is Index, not a view store.
+            return Ok(());
+        };
+        let Some(base_name) = Self::race_write_root(base) else {
+            return Ok(());
+        };
+        let target_d = self
+            .binding_depth
+            .get(target_name)
+            .copied()
+            .unwrap_or(self.scopes.len());
+        let base_d = self
+            .binding_depth
+            .get(base_name)
+            .copied()
+            .unwrap_or(self.scopes.len());
+        // Base defined in a deeper (inner) scope than the target → view escapes.
+        if base_d > target_d {
+            return Err(TypeError::new(format!(
+                "slice view of `{base_name}` cannot be stored in `{target_name}` — base would free first"
+            ))
+            .hint("keep the view in the same block as its base, or copy elements out"));
+        }
+        Ok(())
+    }
+
+    /// Returning a slice expression of a local is a view that dangles after free.
+    fn assert_no_slice_view_return(&self, expr: &Expr) -> Result<(), TypeError> {
+        match expr {
+            Expr::Slice { base, .. } => {
+                if let Some(base_name) = Self::race_write_root(base) {
+                    return Err(TypeError::new(format!(
+                        "cannot return a slice view of local `{base_name}`"
+                    ))
+                    .hint("return the whole slice (moves ownership) or copy into a new slice"));
+                }
+                Ok(())
+            }
+            _ => Ok(()),
         }
     }
 

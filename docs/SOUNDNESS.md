@@ -48,7 +48,8 @@ Related: [SECURITY.md](SECURITY.md) · [MEMORY_MODEL.md](MEMORY_MODEL.md) ·
 |--|--|
 | **Contract** | Owning `[]int`/`[]byte`/`[]string`/`[]float`/`[]bool` from lit/`make`/`append`/`[]byte(…)` free at scope exit via `mako_*_array_free`. Sub-slices are **views** (`cap==0`) and never free backing. |
 | **Code** | `runtime/mako_rt.h` free helpers + view slice_expr; codegen `own_drop_scopes` on block/`return`. |
-| **Evidence** | `own_drop_slice_test.mko`; shared-view writes still pass. |
+| **Evidence** | `own_drop_slice_test.mko`, `slice_return_own_test.mko`; shared-view writes still pass. |
+| **Also** | Return of owned local **transfers** (no free-before-return). Sub-slice store that outlives base is a type error (`slice_view_escape`). Return of slice view of local is rejected (`slice_view_return`). |
 | **Gap** | Nested `[][]T` / monomorph `MakoArr_*` full free graph; free-on-reassign of intermediate grow-leaks. |
 
 ### SAFE-004 — Compiler-generated drops for built-in map shapes — **Done** (built-ins)

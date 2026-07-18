@@ -2285,17 +2285,15 @@ impl Codegen {
         }
     }
 
-    /// True when `init` allocates a fresh owning value (not an alias/view).
+    /// True when `init` produces a fresh owning value (caller must free).
+    /// Not Ident (alias) or Slice (view into another local).
     fn expr_is_fresh_own(init: &Expr) -> bool {
         match init {
-            Expr::Array(_) | Expr::Make { .. } => true,
-            // `append` may allocate a new header/backing; treat as owning.
-            // `make` is also a Call in some desugar paths.
-            Expr::Call { callee, .. } => {
-                matches!(callee.as_ref(), Expr::Ident(n) if n == "append" || n == "make")
-            }
-            // `[]byte("…")` conversion allocates.
-            Expr::Convert { .. } => true,
+            Expr::Array(_) | Expr::Make { .. } | Expr::Convert { .. } => true,
+            // Function/method results that are slices/maps are owned by the caller
+            // after return transfer (see transfer_own_on_return).
+            Expr::Call { .. } | Expr::Method { .. } => true,
+            // Explicit append is a Call; covered above.
             _ => false,
         }
     }
@@ -2369,6 +2367,22 @@ impl Codegen {
 
     fn note_fn_env_dropped(&mut self, name: &str) {
         self.fn_env_live.remove(name);
+    }
+
+    /// Transfer ownership out of the function (return) — do not free this local.
+    fn note_own_drop_moved(&mut self, mangled: &str) {
+        self.own_drop_live.remove(mangled);
+    }
+
+    /// If `expr` is a returned local that we own, transfer it (skip free).
+    fn transfer_own_on_return(&mut self, expr: &Expr) {
+        match expr {
+            Expr::Ident(n) => {
+                self.note_own_drop_moved(&mangle(n));
+            }
+            // Parenthesized / trivial wrappers not used in AST; Call results are temps.
+            _ => {}
+        }
     }
 
     /// Emit a Go-like test harness that runs each `TestXxx` via `mako_test_run`.
@@ -9900,6 +9914,7 @@ impl Codegen {
         if implicit_return {
             if let Some(Stmt::Expr(e)) = stmts.last() {
                 let (_, val) = self.emit_expr(e);
+                self.transfer_own_on_return(e);
                 self.pop_share_scope();
                 self.emit_defers();
                 self.emit_line(format_args!("return {val};"));
@@ -11124,6 +11139,9 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
             }
             Stmt::Return(Some(e)) => {
                 let (_, val) = self.emit_expr(e);
+                // SAFE-003/004: returning an owned local transfers it to the caller —
+                // must not free before `return` (use-after-free).
+                self.transfer_own_on_return(e);
                 while !self.share_scopes.is_empty() {
                     self.pop_share_scope();
                 }
