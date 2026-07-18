@@ -17,7 +17,8 @@
   (SAFE-003/004; sub-slices are `cap==0` views), **return transfers ownership**
   (no free-before-return UAF), **slice view escape/return rejects**, arena
   escape on return (SAFE-007), concurrency memory model (SAFE-010 / RT-001),
-  census + select stress (RT-005/006).
+  census + select stress (RT-005/006). Roadmap updated: core soundness wave on
+  main; residuals ordered under 0.2.4+ ([docs/ROADMAP.md](docs/ROADMAP.md)).
 
 ## 0.2.3 — 2026-07-18
 

@@ -3,7 +3,8 @@
 **Product version:** **0.2.3** · Last roadmap sync: **2026-07-18**.
 
 **Verified:** [STATUS.md](STATUS.md) · **Stdlib:** [STDLIB.md](STDLIB.md) · **Security:** [SECURITY.md](SECURITY.md) · **Release:** [RELEASE.md](RELEASE.md).  
-**Book:** [The Mako Book](book/) · **Identity:** [IDENTITY.md](IDENTITY.md) · **Pain map:** [PAIN_POINTS.md](PAIN_POINTS.md).
+**Book:** [The Mako Book](book/) · **Identity:** [IDENTITY.md](IDENTITY.md) · **Pain map:** [PAIN_POINTS.md](PAIN_POINTS.md).  
+**Soundness:** [SOUNDNESS.md](SOUNDNESS.md) · **Memory model:** [MEMORY_MODEL.md](MEMORY_MODEL.md).
 
 ---
 
@@ -17,8 +18,8 @@
 | **0.2.1** | Safety & correctness | **Shipped** |
 | **0.2.2** | TLS SNI / HTTPS / JWT / lock integrity | **Shipped** |
 | **0.2.3** | JWT/HTTPS input hardening | **Shipped** |
-| **0.2.4** | Tooling (LSP depth) | **Next** |
-| **0.2.x** | Soundness program (SAFE/RT) | **Active** — [SOUNDNESS.md](SOUNDNESS.md) |
+| **0.2.3+** | Soundness wave (SAFE/RT core) | **Shipped on main** — [SOUNDNESS.md](SOUNDNESS.md) |
+| **0.2.4** | Tooling (LSP depth) + soundness residuals | **Next** |
 | **0.3.0** | Cross-platform | Planned |
 | **0.4.0** | Performance ceiling | Planned |
 | **1.0** | Stability | Planned |
@@ -28,19 +29,38 @@
 Program of record: **[SOUNDNESS.md](SOUNDNESS.md)** · memory model:
 **[MEMORY_MODEL.md](MEMORY_MODEL.md)**.
 
+Landed on `main` after 0.2.3 (field/index mut roots, empty `[]`, owning slice/map
+scope free with return transfer, slice-view escape rejects, arena return escape,
+docs + claims-gate). **Next residuals** feed 0.2.4 / later.
+
 | ID | Theme | Status |
 |----|--------|--------|
 | SAFE-001 | Bounds checks in safe release | **Done** |
 | SAFE-002 | Ownership categories in LANGUAGE_SPEC | **Done** |
-| SAFE-003…006 | Compiler drops (slices, maps, strings, CFG) | Partial / planned |
-| SAFE-007…008 | Escape + capture ownership | Partial |
+| SAFE-003 | Core slice drops + view convention + return transfer | **Done** (core shapes) |
+| SAFE-004 | Built-in map free on scope exit | **Done** (built-ins; monomorph gap) |
+| SAFE-005 | String own/view surface + free verification | **Partial** |
+| SAFE-006 | Full CFG drop plan (`?` / break / continue / all edges) | **Partial** (return transfer + block exit done) |
+| SAFE-007 | Escape checks (arena return, slice view store/return) | **Partial** (core done; struct-field store gap) |
+| SAFE-008 | Closure / task capture ownership audit | **Partial** |
 | SAFE-009 | CMap readers/writer gate | **Done** |
 | SAFE-010 | Concurrency memory model doc | **Done** |
 | RT-001 | Crew exit / cancel / failure | **Done** |
-| RT-002…003 | Bounded scheduler / blocking split | Planned |
-| RT-004 | Channel send ownership table | Partial |
-| RT-005 | Channel/select stress | Seed shipped |
+| RT-002…003 | Bounded scheduler / blocking split | **Planned** |
+| RT-004 | Channel send ownership table (all monomorphs) | **Partial** |
+| RT-005 | Channel/select stress | **Seed shipped** |
 | RT-006 | Task/resource census APIs | **Done** |
+
+#### Soundness next (implementation order)
+
+1. **SAFE-004 residual** — free helpers for demand-monomorph maps (`MakoMapS_*` / …).
+2. **SAFE-006** — drop on every CFG exit (`?`, break/continue, both if arms, early return temps).
+3. **SAFE-005** — string own vs view analysis; free owned once.
+4. **SAFE-003 residual** — free-on-reassign; nested `[][]T` element free graph.
+5. **SAFE-007 residual** — arena/view store into longer-lived structs.
+6. **SAFE-008** — capture matrix + TSan soak.
+7. **RT-004** — finish channel ownership table with tests.
+8. **RT-002 / RT-003** — bounded scheduler + blocking pool (speed under fan-out).
 
 ---
 

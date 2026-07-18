@@ -13,13 +13,35 @@ const-fn depth (match/while/for/strings) · suite **340 test programs** · [The 
 
 | Scope | Approx. |
 |-------|---------|
-| **Product version** | **0.2.3** |
+| **Product version** | **0.2.3** (+ soundness wave on main) |
 | **MVP / usable language** | Core compiler/runtime scope is exercised; this is not a production-readiness claim |
 | **STATUS north-star** | Tracked scope is explicit; residuals below remain |
 | **Mako identity (preferred syntax)** | Checklist complete — [IDENTITY.md](IDENTITY.md); not a maturity score |
 | **Go/Rust pain coverage** | **~80%** strong rows — [PAIN_POINTS.md](PAIN_POINTS.md) |
 | **Dual-form coverage (optional sugar)** | **~94%** — [GO_SYNTAX_CHECKLIST.md](GO_SYNTAX_CHECKLIST.md) |
 | **Standard library** | **~98%** of target areas Done (Wave 9; not every symbol or integration) |
+| **Soundness (SAFE/RT core)** | **Core shipped** — drops, mut roots, view escape, memory model; residuals in [SOUNDNESS.md](SOUNDNESS.md) |
+
+---
+
+## Soundness — **core shipped; residuals open**
+
+Program: [SOUNDNESS.md](SOUNDNESS.md) · model: [MEMORY_MODEL.md](MEMORY_MODEL.md) · roadmap: [ROADMAP.md](ROADMAP.md).
+
+| Area | Status |
+|------|--------|
+| SAFE-001 bounds in release | Done |
+| SAFE-002 ownership categories | Done |
+| SAFE-003/004 slice+map free (core) + return transfer + view escape | Done |
+| SAFE-005 string own/view | Partial |
+| SAFE-006 full CFG drops | Partial |
+| SAFE-007 arena/slice escape (core) | Partial (core Done) |
+| SAFE-008 capture audit | Partial |
+| SAFE-009 CMap gate | Done |
+| SAFE-010 memory model doc | Done |
+| RT-001 / RT-005 seed / RT-006 | Done |
+| RT-002/003 scheduler | Planned |
+| RT-004 channel ownership monomorphs | Partial |
 
 ---
 

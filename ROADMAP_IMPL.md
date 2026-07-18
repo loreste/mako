@@ -4,29 +4,57 @@ Detailed feature plan for Mako, organized by version. See
 [docs/ROADMAP.md](docs/ROADMAP.md) for the summary view.
 
 **Current version:** 0.2.3  
-**Next milestone:** 0.2.4 (tooling) + soundness program (SAFE/RT)  
+**Next milestone:** 0.2.4 (tooling) + soundness **residuals**  
 **Last updated:** 2026-07-18
 
-Soundness backlog with IDs and acceptance: **[docs/SOUNDNESS.md](docs/SOUNDNESS.md)**.  
-Concurrency model: **[docs/MEMORY_MODEL.md](docs/MEMORY_MODEL.md)**.
+Soundness program of record: **[docs/SOUNDNESS.md](docs/SOUNDNESS.md)**.  
+Concurrency model: **[docs/MEMORY_MODEL.md](docs/MEMORY_MODEL.md)**.  
+Summary roadmap: **[docs/ROADMAP.md](docs/ROADMAP.md)**.
 
 ---
 
-## Soundness program (SAFE / RT) — **active**
+## Soundness program (SAFE / RT) — **core shipped; residuals active**
+
+### Shipped on main (0.2.3+)
+
+| ID | Work | Evidence |
+|----|------|----------|
+| SAFE-001 | Release bounds always on | `MAKO_SAFE_DEFAULT`; claims-gate `release-bounds` |
+| SAFE-002 | Ownership categories | LANGUAGE_SPEC § Ownership categories |
+| SAFE-003 | Core slice free + `cap==0` views + return transfer | `own_drop_slice_test`, `slice_return_own_test`; ASan |
+| SAFE-003/007 | Slice view escape / view-return reject | `bad/slice_view_escape`, `slice_view_return` |
+| SAFE-004 | Built-in map free | `mako_map_*_free`; own_drop for `make(map…)` |
+| SAFE-007 | Arena return escape | `bad/arena_escape_return` |
+| SAFE-009 | CMap RW gate | `mako_cmap.h` |
+| SAFE-010 | Memory model doc | MEMORY_MODEL.md |
+| RT-001 | Crew cancel_join | cancel_policy_test + docs |
+| RT-005 | Select/channel stress seed | `chan_select_stress_test` |
+| RT-006 | Census APIs | `runtime_census_test` |
+| (lang) | Field/index mut roots; temp lvalue reject; empty `[]` | bad examples + `empty_slice_test` |
+
+### Residuals (feed 0.2.4 / later)
 
 | ID | Work | Status |
 |----|------|--------|
-| SAFE-001 | Release bounds always on | Done — `MAKO_SAFE_DEFAULT`, claims-gate `release-bounds` |
-| SAFE-002 | Ownership categories in LANGUAGE_SPEC | Done |
-| SAFE-003…006 | Drop plan for slices/maps/strings/CFG | Partial — design in SOUNDNESS.md |
-| SAFE-007…008 | Escape + capture audit | Partial |
-| SAFE-009 | CMap RW gate (no unsync open-addressed reads) | Done |
-| SAFE-010 | Publish concurrency memory model | Done — MEMORY_MODEL.md |
-| RT-001 | Crew cancel_join / failure | Done |
-| RT-002…003 | Scheduler + blocking split | Planned |
-| RT-004 | Channel send ownership | Partial — documented |
-| RT-005 | Select/channel stress | Seed test |
-| RT-006 | `runtime_stats_json` census | Done |
+| SAFE-004 residual | Monomorph map free (`MakoMapS_*` / …) | Planned |
+| SAFE-005 | String own/view surface + free once | Partial |
+| SAFE-006 | Full CFG drops (`?`, break/continue, if-join) | Partial — block exit + return transfer done |
+| SAFE-003 residual | Free-on-reassign; nested `[][]T` free graph | Planned |
+| SAFE-007 residual | Arena/view store into longer-lived structs | Planned |
+| SAFE-008 | Capture matrix + TSan soak | Partial |
+| RT-002…003 | Bounded scheduler + blocking split | Planned |
+| RT-004 | Channel ownership table for all monomorphs | Partial |
+
+### Implementation order (next)
+
+1. Monomorph map free (SAFE-004 residual)  
+2. CFG drop completeness (SAFE-006)  
+3. String own/view (SAFE-005)  
+4. Free-on-reassign + nested slices (SAFE-003 residual)  
+5. Escape into structs (SAFE-007 residual)  
+6. Capture audit (SAFE-008)  
+7. Channel ownership tests (RT-004)  
+8. Scheduler (RT-002/003)
 
 ---
 

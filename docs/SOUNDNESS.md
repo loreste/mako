@@ -165,15 +165,28 @@ Related: [SECURITY.md](SECURITY.md) · [MEMORY_MODEL.md](MEMORY_MODEL.md) ·
 
 ---
 
-## Implementation order (recommended)
+## Implementation order
 
-1. **SAFE-001 / 009 / 010 / RT-001 / RT-006** — lock and document (this ship).
-2. **SAFE-002** — ownership categories (this ship).
-3. **SAFE-003 → 004 → 005 → 006** — drop plan (codegen CFG); largest compiler work.
-4. **SAFE-007 / 008** — escape + capture audit on top of categories.
-5. **RT-004** — finish channel ownership table with monomorph tests.
-6. **RT-002 / 003** — scheduler (speed + isolation).
-7. **RT-005** — expand stress/soak.
+### Shipped (0.2.3+)
+
+1. **SAFE-001 / 002 / 009 / 010 / RT-001 / RT-005 seed / RT-006** — bounds, categories, CMap, docs, crew, census.
+2. **SAFE-003 / 004 (core)** — owning slice/map free; views `cap==0`; return transfer; view escape/return reject.
+3. **SAFE-007 (core)** — arena return escape; slice view lifetime store/return.
+4. **Lang safety** — field/index mut roots; temp lvalue reject; empty `[]` lit.
+
+### Next residuals (0.2.4+)
+
+1. **SAFE-004 residual** — monomorph map free.
+2. **SAFE-006** — full CFG drops (`?`, break/continue, if-join).
+3. **SAFE-005** — string own/view.
+4. **SAFE-003 residual** — free-on-reassign; nested `[][]T`.
+5. **SAFE-007 residual** — store into longer-lived structs.
+6. **SAFE-008** — capture matrix + TSan.
+7. **RT-004** — channel ownership monomorph tests.
+8. **RT-002 / 003** — bounded scheduler + blocking pool.
+9. **RT-005** — randomized longer soaks.
+
+See also [ROADMAP.md](ROADMAP.md) · [ROADMAP_IMPL.md](../ROADMAP_IMPL.md).
 
 ## Non-goals
 

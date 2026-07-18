@@ -15,7 +15,9 @@ rough edges, and missing pieces.
 unknown primitives), safer `jwt_sign`/`jwt_verify` buffer handling, dual-stack
 HTTP listen, and verified HTTPS/OIDC contracts. Builds on 0.2.2 TLS SNI,
 HTTPS client, RS256/JWKS, and package lock integrity.  
-**Next (roadmap):** **0.2.4** — tooling (LSP, debugger, package registry).
+**Next (roadmap):** **0.2.4** — tooling (LSP, debugger, package registry) plus
+soundness residuals (CFG drops, monomorph map free, scheduler). See
+[docs/ROADMAP.md](docs/ROADMAP.md) · [docs/SOUNDNESS.md](docs/SOUNDNESS.md).
 
 [mako-lang.com](https://mako-lang.com) · [Status](docs/STATUS.md) · [Roadmap](docs/ROADMAP.md) · [Guide](docs/GUIDE.md) · [Book](docs/book/) · [Soundness](docs/SOUNDNESS.md) · [Memory model](docs/MEMORY_MODEL.md)
 
