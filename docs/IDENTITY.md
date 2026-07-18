@@ -1,6 +1,6 @@
 # Mako syntax identity
 
-**Product tip:** **0.2.2**. Preferred surface: [LANGUAGE.md](LANGUAGE.md) · [GUIDE.md](GUIDE.md).
+**Product tip:** **0.2.3**. Preferred surface: [LANGUAGE.md](LANGUAGE.md) · [GUIDE.md](GUIDE.md).
 
 **Mako is its own unique language with its own unique syntax.**
 

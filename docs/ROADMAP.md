@@ -1,6 +1,6 @@
 # Mako roadmap
 
-**Product version:** **0.2.2** · Last roadmap sync: **2026-07-18**.
+**Product version:** **0.2.3** · Last roadmap sync: **2026-07-18**.
 
 **Verified:** [STATUS.md](STATUS.md) · **Stdlib:** [STDLIB.md](STDLIB.md) · **Security:** [SECURITY.md](SECURITY.md) · **Release:** [RELEASE.md](RELEASE.md).  
 **Book:** [The Mako Book](book/) · **Identity:** [IDENTITY.md](IDENTITY.md) · **Pain map:** [PAIN_POINTS.md](PAIN_POINTS.md).
@@ -16,7 +16,8 @@
 | **0.2.0** | Stdlib written in Mako | **Shipped** |
 | **0.2.1** | Safety & correctness | **Shipped** |
 | **0.2.2** | TLS SNI / HTTPS / JWT / lock integrity | **Shipped** |
-| **0.2.3** | Tooling (LSP depth) | **Next** |
+| **0.2.3** | JWT/HTTPS input hardening | **Shipped** |
+| **0.2.4** | Tooling (LSP depth) | **Next** |
 | **0.3.0** | Cross-platform | Planned |
 | **0.4.0** | Performance ceiling | Planned |
 | **1.0** | Stability | Planned |
@@ -128,7 +129,18 @@ Close the gap between what Mako promises and what it verifies.
 
 ---
 
-## v0.2.3 — Tooling
+## v0.2.3 — JWT / HTTPS input hardening — **shipped**
+
+| Feature | Description |
+|---------|-------------|
+| **Strict JWT JSON** | Numbers/literals/objects/arrays with depth limit; reject trailing junk |
+| **JWKS fail-closed** | Malformed JSON and unknown primitives no longer skip as metadata |
+| **JWT sign safety** | Payload size cap, HMAC length checks, free signature buffers |
+| **HTTPS inputs** | Dead helper cleanup; dual-stack HTTP listen; hardened TLS live tests |
+
+---
+
+## v0.2.4 — Tooling
 
 Developer-experience hardening.
 
