@@ -1,0 +1,148 @@
+// Adversarial ownership stress test.
+// Every pattern here historically crashed or leaked under ASan.
+// If any of these fail, the ownership model has a regression.
+
+// --- Pattern 1: Return struct field (string) ---
+struct Named {
+    label: string
+}
+
+on Named {
+    fn get_label(self) -> string {
+        return self.label
+    }
+}
+
+fn TestReturnStructField() {
+    let n = Named { label: "hello" }
+    let s = n.get_label()
+    assert_eq_str(s, "hello")
+}
+
+// --- Pattern 2: Chained list push (consumed-arg) ---
+fn TestChainedListPush() {
+    let mut xs = make([]int, 0, 2)
+    xs = append(xs, 1)
+    xs = append(xs, 2)
+    xs = append(xs, 3)
+    xs = append(xs, 4)
+    xs = append(xs, 5)
+    assert_eq(len(xs), 5)
+    assert_eq(xs[4], 5)
+}
+
+// --- Pattern 3: String list push (deep ownership) ---
+fn TestStringListPush() {
+    let mut ss = make([]string, 0, 2)
+    ss = append(ss, "alpha")
+    ss = append(ss, "beta")
+    ss = append(ss, "gamma")
+    ss = append(ss, "delta")
+    assert_eq(len(ss), 4)
+    assert_eq_str(ss[0], "alpha")
+    assert_eq_str(ss[3], "delta")
+}
+
+// --- Pattern 4: Arena with append ---
+fn TestArenaAppendStress() {
+    arena a {
+        let mut xs = make([]int, 0, 1)
+        let mut i = 0
+        while i < 20 {
+            xs = append(xs, i)
+            i = i + 1
+        }
+        assert_eq(len(xs), 20)
+        assert_eq(xs[19], 19)
+    }
+}
+
+// --- Pattern 5: Ok() wrapping a slice ---
+fn nums() -> Result[[]int, string] {
+    return Ok([100, 200, 300])
+}
+
+fn TestResultSliceOwnership() {
+    match nums() {
+        Ok(xs) => {
+            assert_eq(len(xs), 3)
+            assert_eq(xs[0], 100)
+            assert_eq(xs[2], 300)
+        },
+        Err(_) => assert(false),
+    }
+}
+
+// --- Pattern 6: Some() wrapping a slice ---
+fn opt_nums() -> Option[[]int] {
+    return Some([10, 20, 30])
+}
+
+fn TestOptionSliceOwnership() {
+    match opt_nums() {
+        Some(xs) => {
+            assert_eq(len(xs), 3)
+            assert_eq(xs[1], 20)
+        },
+        None => assert(false),
+    }
+}
+
+// --- Pattern 7: Ok() wrapping a map ---
+fn map_res() -> Result[map[string]int, string] {
+    let mut m = make(map[string]int)
+    m["x"] = 42
+    m["y"] = 99
+    return Ok(m)
+}
+
+fn TestResultMapOwnership() {
+    match map_res() {
+        Ok(m) => {
+            assert_eq(m["x"], 42)
+            assert_eq(m["y"], 99)
+        },
+        Err(_) => assert(false),
+    }
+}
+
+// --- Pattern 8: Struct from array indexing (borrow) ---
+struct Point {
+    x: int
+    y: int
+    name: string
+}
+
+fn TestStructBorrowFromArray() {
+    let mut pts = make([]Point, 0, 4)
+    pts = append(pts, Point { x: 1, y: 2, name: "a" })
+    pts = append(pts, Point { x: 3, y: 4, name: "b" })
+    pts = append(pts, Point { x: 5, y: 6, name: "c" })
+    // Iterating and reading struct fields — must not double-free
+    let mut sum = 0
+    let mut i = 0
+    while i < len(pts) {
+        let p = pts[i]
+        sum = sum + p.x + p.y
+        i = i + 1
+    }
+    assert_eq(sum, 21)
+}
+
+// --- Pattern 9: buf_get / buf_put (sink consumption) ---
+fn TestBufPoolSink() {
+    let mut b = buf_get(64)
+    b = append(b, 1)
+    b = append(b, 2)
+    b = append(b, 3)
+    assert_eq(len(b), 3)
+    buf_put(b)
+}
+
+// --- Pattern 10: Multiple reassigns of string locals ---
+fn TestStringReassign() {
+    let mut s = "hello"
+    s = s + " world"
+    s = s + "!"
+    assert_eq_str(s, "hello world!")
+}

@@ -84,7 +84,7 @@ fn main() {
 | `hold` / `share` / `arena` | — |
 
 Goal: **simple everyday code**, **systems-grade control**, **unique Mako surface** —
-and close the real [pain points of Go and Rust](PAIN_POINTS.md) without cloning either.
+addressing real backend [pain points](PAIN_POINTS.md) with Mako's own tools.
 
 ## Quickstart (install + init)
 

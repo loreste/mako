@@ -3,9 +3,10 @@
 Detailed feature plan for Mako, organized by version. See
 [docs/ROADMAP.md](docs/ROADMAP.md) for the summary view.
 
-**Current version:** 0.2.4  
+**Current version:** 0.2.4 (memory safety audit complete)  
 **Next milestone:** 0.2.5 (tooling / LSP depth)  
-**Last updated:** 2026-07-18 (release 0.2.4)
+**Last updated:** 2026-07-18  
+**Test suite:** 356 programs, 0 failures, ASan clean
 
 Soundness program of record: **[docs/SOUNDNESS.md](docs/SOUNDNESS.md)**.  
 Concurrency model: **[docs/MEMORY_MODEL.md](docs/MEMORY_MODEL.md)**.  
@@ -15,7 +16,7 @@ Summary roadmap: **[docs/ROADMAP.md](docs/ROADMAP.md)**.
 
 ## Soundness program (SAFE / RT) — **shipped in 0.2.4**
 
-### Audit 2026-07-18 (bugs found & fixed)
+### Audit 2026-07-18 (bugs found & fixed — wave 1)
 
 | Bug | Fix | Evidence |
 |-----|-----|----------|
@@ -25,6 +26,21 @@ Summary roadmap: **[docs/ROADMAP.md](docs/ROADMAP.md)**.
 | Nested `[][]T` free-on-reassign UAF after append | malloc-grow append + `*_release_replaced` unshared free | `nested_arr_drop_test` ASan |
 | Stack POD lit malloc tax | stack view + escape `to_owned` | `stack_array_lit_test` |
 | String owns not freed | `expr_is_fresh_own` for String/Interp/concat/Index | `string_drop_test` |
+
+### Audit 2026-07-18 (bugs found & fixed — wave 2, independent validation)
+
+| Bug | Fix | Evidence |
+|-----|-----|----------|
+| Return struct field double-free | `clone_own_val` on `Expr::Field` return | `generic_bounds_test` ASan |
+| Consumed-arg list push double-free | `extract_consumed_arg` marks old binding moved | `collections_list_test` ASan |
+| Void-sink call use-after-free | `buf_put(b)` marks `b` moved on void calls | `buf_pool_test` ASan |
+| Arena individual free (should be bulk) | Skip `register_own_drop` when `current_arena.is_some()` | `arena_*_test` ASan |
+| Stack-view boxed in Ok/Some (dangling) | `ensure_slice_owned` before boxing into Result/Option | `wave11-14, wave39` ASan |
+| Ok(m)/Some(m) scope-exit frees returned value | `transfer_own_on_return` recurses into Call args | `wave12, wave13` ASan |
+| Struct-borrow from array index freed fields | Skip struct-field drop for Index-sourced locals | `http_mako_test` ASan |
+| String array reassign deep-frees shared strings | Shallow outer-only free for MakoStrArray/MakoArr_* on reassign | `collections_list_test` ASan |
+
+**Result: 356 tests, 0 failures, full suite ASan clean.**
 
 Pkg lock verification (PR #3): **17/17** `pkg::` unit tests pass.
 

@@ -1,17 +1,15 @@
 # Speed · concurrency · parallelism · security
 
-**The name of the game is speed.**  
-Mako exists to run **as close to Rust as possible** on real workloads — then go
-further with **first-class concurrency and parallelism** that do not leak tasks
-or paint the language with async colors, and **first-class security** that does
-not silently tax the hot path.
+Mako compiles to native code via C with `-O3 -flto` in release mode.
+There is no garbage collector, interpreter, or VM. Concurrency and
+parallelism are language primitives, not library add-ons.
 
 | Priority | Bar |
 |----------|-----|
-| **1. Speed** | **Name of the game.** Hot path ≈ Rust: native binary, no GC, release `-O3 -flto`, low-overhead defaults |
+| **1. Speed** | Native binary, no GC, release `-O3 -flto`, low-overhead defaults |
 | **2. Concurrency** | **First-class:** `crew` / `kick` / `join` / channels / `select` / actors |
-| **3. Parallelism** | **First-class:** `fan` and crew work across cores — not a library afterthought |
-| **4. Security** | **First-class:** memory + resource contracts, secure defaults — see [SECURITY.md](SECURITY.md) |
+| **3. Parallelism** | **First-class:** `fan` and crew work across cores |
+| **4. Security** | Memory + resource contracts, secure defaults — see [SECURITY.md](SECURITY.md) |
 
 Syntax stays **Mako’s own**. Speed is not optional. Concurrency is not bolted on.
 Security is not a linter plugin.
@@ -29,8 +27,8 @@ Security is not a linter plugin.
 Any feature that silently slows the hot path must justify itself or stay opt-in.
 
 Sanitizers and overflow traps stay **opt-in** so release hot paths stay
-Rust-competitive. Safe-by-construction features (NLL, checked indexing,
-structured crews, parameterized DB) remain part of the default contract.
+fast. Safe-by-construction features (NLL, checked indexing, structured
+crews, parameterized DB) remain part of the default contract.
 
 ### Hot-path efficiency (current practice)
 
@@ -65,11 +63,12 @@ tight loops; only pay for a heap copy when the value escapes. Prefer
 `make([]T, 0, n)` when you know capacity and will grow. Avoid reallocating a
 fresh lit every iteration when a single buffer can be reused.
 
-**Memory-safe by construction on the free path:** scope exit, reassign, break /
+**Ownership-based drops on the free path:** scope exit, reassign, break /
 continue, return (transfer + materialize), and `?` early-return all free live
 owns. Views (`cap==0`) and the empty-string singleton never free backing
-storage. Speed stays in release: free is cold (`MAKO_UNLIKELY`); stack lits and
-zero-copy string compares never malloc.
+storage. The full suite passes under AddressSanitizer (within safe Mako code;
+`unsafe` blocks and FFI remain outside this guarantee). Free is cold
+(`MAKO_UNLIKELY`); stack lits and zero-copy string compares never malloc.
 
 Capturing closures (env boxes) stay residual until they can pay for themselves.
 
@@ -121,8 +120,8 @@ crew t {
 // both kicked jobs done — no orphans
 ```
 
-**Vs Go:** no free `go f()` leaks.  
-**Vs Rust:** no async coloring / executor maze for the default path.
+Kicked tasks are always joined at `crew` exit — no orphaned work.
+Concurrency is synchronous by default — no function coloring.
 
 Race smoke: `mako test --race` · CI TSan job on concurrency tests.
 

@@ -12,7 +12,7 @@ Judging a syntax choice:
 1. Does it look and feel like **Mako**? (If it looks like Go or Rust first, reject it as preferred.)
 2. Does it help people **build real work without a lot of typing**? ([ERGONOMICS.md](ERGONOMICS.md))
 3. Is safety visible where it matters — without taxing the common path?
-4. Does it stay **as close to Rust-class performance as possible**? ([PERFORMANCE.md](PERFORMANCE.md), [SPEED.md](SPEED.md))
+4. Does it stay **fast** — native compilation, no GC overhead? ([PERFORMANCE.md](PERFORMANCE.md), [SPEED.md](SPEED.md))
 5. If it touches concurrent/parallel work, is that still **first-class, structured, and fast**?
 
 If (1), (2), (4), or (5) fails, the form is wrong even if it is familiar.

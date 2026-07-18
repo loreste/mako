@@ -1,11 +1,13 @@
 # Mako performance
 
-**The name of the game is speed.**  
-**Bar: as close to Rust as possible.**
+Mako compiles to native code via C. Release builds use `-O3 -flto`.
+There is no garbage collector, interpreter, or VM overhead.
 
-Mako is not a Rust dialect, but on hot paths it must **compete with Rust** —
-not with GC languages. Concurrent and parallel work is **first-class** and must
-stay fast too (`crew`, `fan`, channels) — see [SPEED.md](SPEED.md).
+Performance is a design goal, not a proven claim. The current benchmark
+coverage is limited to three microkernels (fib, slice, map). Broader
+workload benchmarks (HTTP throughput, JSON, allocation pressure,
+concurrent channels) are in progress but not yet published with
+reproducible methodology.
 
 | Principle | Practice |
 |-----------|----------|
@@ -14,26 +16,28 @@ stay fast too (`crew`, `fan`, channels) — see [SPEED.md](SPEED.md).
 | Native codegen | `.mko` → C → clang; release **`-O3 -flto`** |
 | Low-overhead default | Scalar locals and direct calls avoid ownership/refcount synchronization; allocation and synchronization costs stay explicit |
 | Explicit cost | Heavier tools (`share`, channels, `crew`) are visible when they cost |
-| First-class concurrent/parallel | Language keywords, structured joins — not a slow thread-pool package |
-| Measure | Prefer `./scripts/bench-vs-go-rust.sh` and real workloads over vibes |
+| First-class concurrent/parallel | Language keywords, structured joins |
+| Measure | Reproducible scripts with documented methodology — no unverified claims |
 
 Targets **backend and systems** workloads: arenas for request scope, tight
-slice/map layouts, single static binaries.
+slice/map layouts, native binaries.
 
 Book: [§11 Speed & memory safety](book/src/ch11-speed-safety.md) · Release how-to: [howto/09-release-builds.md](howto/09-release-builds.md).
 
 **Do not invent numbers.** Re-run locally:
 
 ```bash
-./scripts/bench-vs-go-rust.sh
-# optional parsing:
-./scripts/bench-vs-go-rust.sh 2>&1 | awk '/=== CPU/,/=== Memory/' | python3 scripts/parse_bench_ns.py
-
-# CI-style gate (fib/slice/map vs Rust; default max 2.0×):
+# Microbenchmarks (fib, slice, map):
 ./scripts/bench-gate.sh
-./scripts/bench-gate.sh 1.5   # stricter
-# GitHub Actions: job "Bench gate vs Rust" on ubuntu-latest
+./scripts/bench-gate.sh 1.5   # stricter threshold
+
+# HTTP throughput (requires wrk or hey):
+./scripts/bench-http.sh
 ```
+
+The CI bench gate verifies that three microkernels stay within 2× of a
+compiled baseline. This is a regression gate, not a general performance
+claim. Broader benchmarks are tracked in `scripts/bench-http.sh`.
 
 **IDs on the hot path:** `Uuid` / ULID are **16-byte Copy POD** (stack, no GC).
 Prefer `uuid_v7` / `ulid_new` for time-ordered keys; format to string only at

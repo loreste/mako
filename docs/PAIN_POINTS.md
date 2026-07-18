@@ -8,7 +8,7 @@ ecosystems while keeping their strengths as *goals* (simple code, strong control
 | Keep as goals | Reject as identity |
 |---------------|--------------------|
 | Short programs, fast builds, great stdlib | Go keywords / ceremony as preferred syntax |
-| Memory safety, **performance as close to Rust as possible**, no GC, explicit errors | Lifetime maze, trait soup, async coloring |
+| Memory safety, **native performance**, no GC, explicit errors | Excessive ceremony for common tasks |
 
 Canonical surface: [IDENTITY.md](IDENTITY.md). Compat duals only: [COMPAT.md](COMPAT.md).
 
@@ -120,7 +120,7 @@ Everyday code stays simple (`let`). Power tools are **visible** (`hold` / `share
 |------|------|
 | Explicit lifetimes, HRTBs, “fighting the borrow checker” | Everyday: `let` / scopes. When ownership matters: **`hold`** / **`share`** / **`arena`** — short words, no `'a` tax on every API |
 
-Goal: **Rust-class safety where it counts**, without making the common path academic.
+Goal: **strong memory safety where it counts**, without making the common path academic.
 
 ### 2.2 Trait / impl / orphan complexity
 

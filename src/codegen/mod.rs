@@ -2444,6 +2444,18 @@ impl Codegen {
                     "if ({old}.data != {new}.data && {old}.data) free({old}.data);"
                 ));
             }
+            // String arrays after append share string pointers — only free outer buffer.
+            "MakoStrArray" => {
+                self.emit_line(format_args!(
+                    "if ({old}.data != {new}.data && {old}.data) free({old}.data);"
+                ));
+            }
+            // Struct arrays after append share element data — only free outer buffer.
+            other if other.starts_with("MakoArr_") => {
+                self.emit_line(format_args!(
+                    "if ({old}.data != {new}.data && {old}.data) free({old}.data);"
+                ));
+            }
             _ => {
                 self.emit_line(format_args!(
                     "if ({old}.data != {new}.data) {free_fn}({old});"
@@ -2584,6 +2596,81 @@ impl Codegen {
         self.own_drop_live.remove(mangled);
     }
 
+    /// True when expr is a field access on a struct (e.g. `self.name`, `s.color`).
+    /// Returning such a field borrows from the struct — must clone for ownership transfer.
+    fn is_field_borrow_return(expr: &Expr) -> bool {
+        matches!(expr, Expr::Field { .. })
+    }
+
+    /// If a call/method takes an Ident as its first argument (same-type consuming pattern),
+    /// return that ident name so the caller can mark it as moved.
+    /// Covers: `let ys2 = list_push(ys, v)`, `let s2 = append(s, x)`, etc.
+    fn extract_consumed_arg(expr: &Expr) -> Option<String> {
+        match expr {
+            Expr::Call { args, .. } => {
+                if let Some(Expr::Ident(name)) = args.first() {
+                    Some(name.clone())
+                } else {
+                    None
+                }
+            }
+            Expr::Method { receiver, .. } => {
+                if let Expr::Ident(name) = receiver.as_ref() {
+                    Some(name.clone())
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        }
+    }
+
+    /// Clone an owning value (string or array) so the caller receives a fresh allocation.
+    fn clone_own_val(&mut self, c_ty: &str, val: &str) -> String {
+        let tmp = self.fresh("cloned");
+        match c_ty {
+            "MakoString" => {
+                self.emit_line(format_args!("MakoString {tmp} = mako_str_clone({val});"));
+            }
+            "MakoIntArray" => {
+                self.emit_line(format_args!(
+                    "MakoIntArray {tmp} = mako_int_array_to_owned({val});"
+                ));
+            }
+            "MakoByteArray" => {
+                self.emit_line(format_args!(
+                    "MakoByteArray {tmp} = mako_byte_array_to_owned({val});"
+                ));
+            }
+            "MakoFloatArray" => {
+                self.emit_line(format_args!(
+                    "MakoFloatArray {tmp} = mako_float_array_to_owned({val});"
+                ));
+            }
+            "MakoBoolArray" => {
+                self.emit_line(format_args!(
+                    "MakoBoolArray {tmp} = mako_bool_array_to_owned({val});"
+                ));
+            }
+            "MakoStrArray" => {
+                // Deep clone: allocate new array and clone each string element.
+                self.emit_line(format_args!("MakoStrArray {tmp};"));
+                self.emit_line(format_args!("{tmp}.len = {val}.len; {tmp}.cap = {val}.len;"));
+                self.emit_line(format_args!(
+                    "{tmp}.data = (MakoString*)malloc(sizeof(MakoString) * ({val}.len ? {val}.len : 1));"
+                ));
+                self.emit_line(format_args!(
+                    "for (int64_t _i = 0; _i < {val}.len; _i++) {{ {tmp}.data[_i] = mako_str_clone({val}.data[_i]); }}"
+                ));
+            }
+            _ => {
+                // For other owning types, shallow copy is safe (maps are ptrs).
+                self.emit_line(format_args!("{c_ty} {tmp} = {val};"));
+            }
+        }
+        tmp
+    }
+
     /// If `expr` is a returned local that we own, transfer it (skip free).
     fn transfer_own_on_return(&mut self, expr: &Expr) {
         match expr {
@@ -2610,7 +2697,12 @@ impl Codegen {
                     self.transfer_own_on_return(v);
                 }
             }
-            // Parenthesized / call results are temps (owned by caller after return).
+            // Ok(x), Err(x), Some(x) — transfer the inner argument.
+            Expr::Call { args, .. } => {
+                for a in args {
+                    self.transfer_own_on_return(a);
+                }
+            }
             _ => {}
         }
     }
@@ -11153,7 +11245,28 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         // leave as-is (owned empty free is rare for short tests).
                     }
                 } else if Self::expr_is_fresh_own(init) {
-                    self.register_own_drop(name, &ty);
+                    // SAFE: arena-allocated data is freed in bulk — never individual free.
+                    if self.current_arena.is_none() {
+                        // SAFE: struct values from array indexing are borrows —
+                        // their string/slice fields share pointers with the array.
+                        // Only skip for struct-typed locals (not string/slice/map).
+                        let is_struct_borrow = matches!(init, Expr::Index { .. })
+                            && Self::own_free_fn(&ty).is_none()
+                            && !self.struct_own_field_frees(&ty).is_empty();
+                        if !is_struct_borrow {
+                            self.register_own_drop(name, &ty);
+                        }
+                    }
+                    // SAFE: if call/method takes an owning argument of the same type,
+                    // the argument's ownership is consumed (e.g. list_push returns new list).
+                    if let Some(moved_arg) = Self::extract_consumed_arg(init) {
+                        let arg_m = mangle(&moved_arg);
+                        if self.own_drop_live.contains(&arg_m) {
+                            if Self::own_free_fn(&ty).is_some() {
+                                self.note_own_drop_moved(&arg_m);
+                            }
+                        }
+                    }
                 } else if let Expr::Ident(src) = init {
                     // `let out = mk` after `let mk = make(...)` — move ownership so free of
                     // `mk` does not free the value now held by `out`.
@@ -11419,13 +11532,17 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                                 } else {
                                     self.emit_line(format_args!("{mn} = {val};"));
                                 }
-                                self.register_own_drop(&mn, &cty);
+                                if self.current_arena.is_none() {
+                                    self.register_own_drop(&mn, &cty);
+                                }
                                 return;
                             }
                         }
                     }
                 }
                 // SAFE-003 residual: free previous owned value on reassign.
+                // Skip inside arena — arena frees all in bulk.
+                if self.current_arena.is_none() {
                 if let Some(cty) = self.locals.get(name).cloned() {
                     if let Some(ff) = Self::own_free_fn(&cty) {
                         if self.own_drop_live.contains(&mn) {
@@ -11475,15 +11592,18 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         }
                     }
                 }
+                } // end arena guard
                 // Mutable closure capture: write through heap cell pointer.
                 if let Some(cell) = self.mut_capture_cells.get(name).cloned() {
                     self.emit_line(format_args!("*{cell} = {val};"));
                 } else {
                     self.emit_line(format_args!("{mn} = {val};"));
                 }
-                if let Some(cty) = self.locals.get(name).cloned() {
-                    if Self::expr_is_fresh_own(value) {
-                        self.register_own_drop(&mn, &cty);
+                if self.current_arena.is_none() {
+                    if let Some(cty) = self.locals.get(name).cloned() {
+                        if Self::expr_is_fresh_own(value) {
+                            self.register_own_drop(&mn, &cty);
+                        }
                     }
                 }
             }
@@ -11614,9 +11734,19 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                 self.emit_line(format_args!("{b}{arrow}{field} = {v};"));
             }
             Stmt::Expr(e) => {
-                let (_, val) = self.emit_expr(e);
+                let (ty, val) = self.emit_expr(e);
                 if val != "/*void*/" {
                     self.emit_line(format_args!("{val};"));
+                }
+                // SAFE: void-returning calls that take an owned binding as first arg
+                // consume ownership (e.g. buf_put, channel send, free wrappers).
+                if ty == "void" || val == "/*void*/" {
+                    if let Some(consumed) = Self::extract_consumed_arg(e) {
+                        let cm = mangle(&consumed);
+                        if self.own_drop_live.contains(&cm) {
+                            self.note_own_drop_moved(&cm);
+                        }
+                    }
                 }
             }
             Stmt::Return(None) => {
@@ -11629,6 +11759,14 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
             }
             Stmt::Return(Some(e)) => {
                 let (ty, val) = self.emit_expr(e);
+                // SAFE: returning a struct field that is an owning type (string/slice)
+                // must clone — caller owns the result, struct still owns the field.
+                let val = if Self::is_field_borrow_return(e) && Self::own_free_fn(&ty).is_some() {
+                    let cloned = self.clone_own_val(&ty, &val);
+                    cloned
+                } else {
+                    val
+                };
                 // Materialize before free — `s.data[i]` expressions outlive the free
                 // of `s` if left as bare C expressions (SAFE free-before-return).
                 let val = self.materialize_return_val(&ty, val);
@@ -12301,8 +12439,11 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                                     format!("mako_ok_ptr((void*){boxn})"),
                                 );
                             }
-                            // []int / []string / []float Ok: box the array
+                            // []int / []string / []float Ok: box the array.
+                            // SAFE: stack views (cap==0) must be copied to heap before boxing
+                            // to avoid dangling pointers to dead stack frames.
                             if vty == "MakoIntArray" {
+                                let v = self.ensure_slice_owned("MakoIntArray", v);
                                 let boxn = self.fresh("iabox");
                                 self.line(&format!(
                                     "MakoIntArray *{boxn} = (MakoIntArray*)malloc(sizeof(MakoIntArray));"
@@ -12325,6 +12466,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                                 );
                             }
                             if vty == "MakoFloatArray" {
+                                let v = self.ensure_slice_owned("MakoFloatArray", v);
                                 let boxn = self.fresh("fabox");
                                 self.line(&format!(
                                     "MakoFloatArray *{boxn} = (MakoFloatArray*)malloc(sizeof(MakoFloatArray));"
@@ -12561,6 +12703,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                                 );
                             }
                             if vty == "MakoIntArray" {
+                                let v = self.ensure_slice_owned("MakoIntArray", v);
                                 let boxn = self.fresh("opbox");
                                 self.line(&format!(
                                     "MakoIntArray *{boxn} = (MakoIntArray*)malloc(sizeof(MakoIntArray));"
@@ -12583,6 +12726,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                                 );
                             }
                             if vty == "MakoFloatArray" {
+                                let v = self.ensure_slice_owned("MakoFloatArray", v);
                                 let boxn = self.fresh("opbox");
                                 self.line(&format!(
                                     "MakoFloatArray *{boxn} = (MakoFloatArray*)malloc(sizeof(MakoFloatArray));"

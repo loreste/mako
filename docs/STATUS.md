@@ -3,7 +3,8 @@
 Last inventory: **2026-07-18** · product **mako0.2.4** (`CARGO_PKG_VERSION`).
 
 Unique Mako surface · pack/pull · map/slice/bag monomorphs · package-per-directory ·
-const-fn depth (match/while/for/strings) · suite **340 test programs** · [The Mako Book](book/).
+const-fn depth (match/while/for/strings) · suite **356 test programs** (0 failures,
+ASan clean) · [The Mako Book](book/).
 
 **Book:** [The Mako Book](book/) · **Guide:** [GUIDE.md](GUIDE.md) · **Identity:** [IDENTITY.md](IDENTITY.md) · **Pain points:** [PAIN_POINTS.md](PAIN_POINTS.md) · **Build:** [BUILD.md](BUILD.md) · **Stdlib:** [STDLIB.md](STDLIB.md) · **Roadmap:** [ROADMAP.md](ROADMAP.md) · **Changelog:** [../CHANGELOG.md](../CHANGELOG.md) · **Release:** [RELEASE.md](RELEASE.md) · **Soundness:** [SOUNDNESS.md](SOUNDNESS.md) · **Memory model:** [MEMORY_MODEL.md](MEMORY_MODEL.md).
 
@@ -17,7 +18,7 @@ const-fn depth (match/while/for/strings) · suite **340 test programs** · [The 
 | **MVP / usable language** | Core compiler/runtime scope is exercised; this is not a production-readiness claim |
 | **STATUS north-star** | Tracked scope is explicit; optional depth below remains |
 | **Mako identity (preferred syntax)** | Checklist complete — [IDENTITY.md](IDENTITY.md); not a maturity score |
-| **Go/Rust pain coverage** | **~80%** strong rows — [PAIN_POINTS.md](PAIN_POINTS.md) |
+| **Target pain coverage** | **~80%** strong rows — [PAIN_POINTS.md](PAIN_POINTS.md) |
 | **Dual-form coverage (optional sugar)** | **~94%** — [GO_SYNTAX_CHECKLIST.md](GO_SYNTAX_CHECKLIST.md) |
 | **Standard library** | **~98%** of target areas Done (Wave 9; not every symbol or integration) |
 | **Soundness (SAFE/RT core)** | **Shipped in 0.2.4** — [SOUNDNESS.md](SOUNDNESS.md); optional soaks remain |

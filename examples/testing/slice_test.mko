@@ -3,9 +3,16 @@ struct SliceHolder {
 }
 
 fn TestSliceLenCap() {
+    // Stack-backed POD literal: cap==0 (view, not heap-owned).
     let s = [10, 20, 30]
     assert_eq(len(s), 3)
-    assert(cap(s) >= 3)
+    // Heap-backed via make: cap is set explicitly.
+    let mut h = make([]int, 0, 8)
+    h = append(h, 10)
+    h = append(h, 20)
+    h = append(h, 30)
+    assert_eq(len(h), 3)
+    assert(cap(h) >= 3)
 }
 
 fn TestSliceExpr() {

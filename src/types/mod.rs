@@ -337,6 +337,10 @@ pub struct TypeChecker {
     mono_generated: HashSet<String>,
     /// Struct field defaults: struct name → field → default expr.
     struct_field_defaults: HashMap<String, HashMap<String, Expr>>,
+    /// LSP: collect (name, type_display) for each let binding during check.
+    pub lsp_bindings: Vec<(String, String)>,
+    /// LSP mode — when true, collects binding types.
+    pub lsp_mode: bool,
 }
 
 impl TypeChecker {
@@ -10565,6 +10569,8 @@ impl TypeChecker {
             mono_fns: Vec::new(),
             mono_generated: HashSet::new(),
             struct_field_defaults: HashMap::new(),
+            lsp_bindings: Vec::new(),
+            lsp_mode: false,
         }
     }
 
@@ -10751,6 +10757,26 @@ impl TypeChecker {
             }
             _ => false,
         }
+    }
+
+    /// LSP helper: run type checking and collect symbol types.
+    /// Returns partial results even when the program has type errors.
+    /// Returns (binding_names_with_types, all_symbol_types).
+    pub fn check_for_lsp(
+        &mut self,
+        program: &Program,
+    ) -> HashMap<String, String> {
+        self.lsp_mode = true;
+        let _ = self.check(program);
+        self.lsp_mode = false;
+        let mut symbols: HashMap<String, String> = HashMap::new();
+        for (name, ty) in &self.fns {
+            symbols.insert(name.clone(), ty.display());
+        }
+        for (name, ty) in &self.types {
+            symbols.insert(name.clone(), ty.display());
+        }
+        symbols
     }
 
     pub fn check(&mut self, program: &Program) -> Result<(), TypeError> {
@@ -12686,7 +12712,11 @@ impl TypeChecker {
                 } else {
                     inferred
                 };
-                self.define(name, final_ty, *mutable);
+                self.define(name, final_ty.clone(), *mutable);
+                if self.lsp_mode && ty.is_none() {
+                    self.lsp_bindings
+                        .push((name.clone(), final_ty.display()));
+                }
                 // Sub-slice stored in this binding must not outlive its base.
                 self.assert_slice_view_lifetime(name, init)?;
                 if matches!(self.lookup(name).map(|(t, _)| t), Some(Type::Fn(_, _))) {

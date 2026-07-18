@@ -1,0 +1,26 @@
+// Minimal HTTP benchmark server.
+// Responds to all requests with a small JSON payload.
+// Used by scripts/bench-http.sh for reproducible throughput measurement.
+
+fn main() {
+    let port = 9800
+    let srv = http_listen(port)
+    if srv < 0 {
+        print("error: could not bind port 9800")
+        return
+    }
+    print("bench server listening on :9800")
+    while true {
+        let conn = http_accept(srv)
+        if conn < 0 {
+            continue
+        }
+        let req = http_read_request(conn)
+        if str_contains(req, "GET /health") {
+            http_respond(conn, 200, "ok")
+        } else {
+            http_respond(conn, 200, "{\"status\":\"ok\",\"server\":\"mako\"}")
+        }
+        http_close(conn)
+    }
+}
