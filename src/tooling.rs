@@ -2438,20 +2438,23 @@ pub fn version_satisfies(version: &str, req: &str) -> bool {
     }
 }
 
-/// Local registry layout: `.mako/registry/<name>/<version>/` with `mako.toml`.
+/// Local registry root. Scoped names use the same single-segment encoding as
+/// dependency cache keys (`scope/name` becomes `scope!name`).
 pub fn registry_root(project: &Path) -> PathBuf {
     project.join(".mako").join("registry")
 }
 
-/// Path to `.mako/registry/<name>/<version>/` (local registry layout).
+/// Path to a package version in the local registry.
 #[allow(dead_code)]
 pub fn registry_package_dir(project: &Path, name: &str, version: &str) -> PathBuf {
-    registry_root(project).join(name).join(version)
+    registry_root(project)
+        .join(dep_cache_key(name))
+        .join(version)
 }
 
-/// Resolve `name` @ `req` from `.mako/registry/<name>/*` (highest matching SemVer).
+/// Resolve `name` @ `req` from the local registry (highest matching SemVer).
 pub fn registry_resolve(project: &Path, name: &str, req: &str) -> Result<PathBuf, String> {
-    let root = registry_root(project).join(name);
+    let root = registry_root(project).join(dep_cache_key(name));
     if !root.is_dir() {
         return Err(format!(
             "no local registry entry for `{name}` under {}",
@@ -2628,8 +2631,8 @@ pub fn git_dep_cache_abs(root: &Path, name: &str) -> PathBuf {
 }
 
 /// Resolve on-disk roots for compile/list: path deps as declared; git deps from
-/// `.mako/deps/<name>`; registry-only (`version` without path/git) from
-/// `.mako/registry/<name>/<ver>/`.
+/// `.mako/deps/<key>`; registry-only (`version` without path/git) from the local
+/// registry.
 pub fn resolve_dep_root(manifest_dir: &Path, dep: &ManifestDep) -> Result<PathBuf, String> {
     if let Some(p) = &dep.path {
         // Explicit path wins (includes old `.mako/cache/...` from pkg add).

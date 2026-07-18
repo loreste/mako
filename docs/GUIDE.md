@@ -152,7 +152,9 @@ Example `mako.toml` dependency lines:
 
 `version` on path deps is checked with SemVer (`^` / `~` / exact) against the
 path’s `mako.toml`. Registry-only deps (`"util" = { version = "^1.0.0" }`) resolve
-from `.mako/registry/<name>/<ver>/` (highest match) — see `examples/pkg_registry/`.
+from `.mako/registry/<key>/<ver>/` (highest match). Scoped names use a
+single-segment key (`scope/util` becomes `scope!util`) — see
+`examples/pkg_registry/`.
 
 `mako pkg list` exits non-zero if a path dep is missing **or** a git dep is not under `.mako/deps/` yet. `mako check` / `build` / `run` fail with the same **MISSING** wording (`run mako pkg fetch first` for git). Default CI does **not** live-fetch.
 
