@@ -2602,24 +2602,35 @@ impl Codegen {
         matches!(expr, Expr::Field { .. })
     }
 
-    /// If a call/method takes an Ident as its first argument (same-type consuming pattern),
-    /// return that ident name so the caller can mark it as moved.
-    /// Covers: `let ys2 = list_push(ys, v)`, `let s2 = append(s, x)`, etc.
+    /// If a call/method is a known consuming function (append, push, pop, insert,
+    /// remove, clear, buf_put), return the first arg ident so caller can mark it moved.
+    /// Only applies to functions that take ownership and return the same container type.
     fn extract_consumed_arg(expr: &Expr) -> Option<String> {
         match expr {
-            Expr::Call { args, .. } => {
-                if let Some(Expr::Ident(name)) = args.first() {
-                    Some(name.clone())
-                } else {
-                    None
+            Expr::Call { callee, args, .. } => {
+                let fname = match callee.as_ref() {
+                    Expr::Ident(n) => n.as_str(),
+                    _ => return None,
+                };
+                // Only known consuming functions — NOT arbitrary calls.
+                let is_consuming = fname == "append"
+                    || fname.starts_with("list_push")
+                    || fname.starts_with("list_pop")
+                    || fname.starts_with("list_insert")
+                    || fname.starts_with("list_remove")
+                    || fname.starts_with("list_clear")
+                    || fname.starts_with("queue_pop")
+                    || fname.starts_with("slices_reverse")
+                    || fname.starts_with("slices_unique")
+                    || fname.starts_with("strings_copy")
+                    || fname == "buf_put"
+                    || fname == "mako_byte_append";
+                if is_consuming {
+                    if let Some(Expr::Ident(name)) = args.first() {
+                        return Some(name.clone());
+                    }
                 }
-            }
-            Expr::Method { receiver, .. } => {
-                if let Expr::Ident(name) = receiver.as_ref() {
-                    Some(name.clone())
-                } else {
-                    None
-                }
+                None
             }
             _ => None,
         }
