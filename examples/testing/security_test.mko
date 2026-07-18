@@ -21,7 +21,7 @@ fn TestSecretDrop() {
 }
 
 fn TestUnsafeIndex() {
-    let xs = make([]int, 3)
+    let mut xs = make([]int, 3)
     xs[0] = 10
     xs[1] = 20
     xs[2] = 30

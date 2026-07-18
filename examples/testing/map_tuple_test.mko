@@ -94,7 +94,7 @@ fn TestMapTupleHelpers() {
     let mut m = make(map[string](int, int))
     m["a"] = (1, 2)
     m["b"] = (3, 4)
-    let c = maps_clone(m)
+    let mut c = maps_clone(m)
     assert_eq(maps_equal(m, c), 1)
     c["a"] = (9, 9)
     assert_eq(maps_equal(m, c), 0)

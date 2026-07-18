@@ -1093,7 +1093,10 @@ The leading `|...|` in a lambda is disambiguated from infix `|` by the parser.
 | `>>=`    | Right shift and assign     |
 
 Assignment targets must be `let mut` bindings, mutable struct fields, slice
-elements, or map entries.
+elements, or map entries. Index targets may be chained through slice views and
+nested slices (`s[1:3][0] = value`, `matrix[i][j] = value`); each base and index
+expression is evaluated once, with the normal bounds, mutability, NLL, and race
+checks still enforced.
 
 ### 4.7 Special Operators
 
@@ -2636,6 +2639,10 @@ Statement    = LetStmt | AssignStmt | ExprStmt | ReturnStmt
              | DeferStmt | BreakStmt | ContinueStmt
              | CrewStmt | ArenaStmt | UnsafeStmt .
 LetStmt      = [ "hold" | "share" ] "let" [ "mut" ] Ident [ ":" Type ] "=" Expr .
+AssignStmt   = AssignTarget AssignOp Expr .
+AssignTarget = Ident | FieldTarget | IndexExpr .
+FieldTarget  = Ident { "." Ident } .
+AssignOp     = "=" | "+=" | "-=" | "*=" | "/=" | "%=" .
 ```
 
 ### A.5 Types

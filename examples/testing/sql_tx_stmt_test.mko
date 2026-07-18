@@ -14,7 +14,7 @@ fn TestSqlTransactionsAndStatements() {
 
     let stmt = sql_prepare(db, "select ?")
     assert(stmt > 0)
-    let args = make([]int, 1)
+    let mut args = make([]int, 1)
     args[0] = 42
     let got = sql_stmt_query_int(stmt, args)
     if got != 42 {

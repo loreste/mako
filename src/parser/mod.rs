@@ -1391,124 +1391,45 @@ impl Parser {
                         name,
                     });
                 }
-                // `name.field = value` or `name.a.b = value` (nested field assign)
-                if matches!(self.peek_kind(), TokenKind::Dot) {
-                    let mut base = Expr::Ident(name);
-                    loop {
-                        self.bump(); // .
-                        let field = self.expect_ident()?;
-                        if matches!(self.peek_kind(), TokenKind::Assign) {
-                            self.bump();
-                            let value = self.parse_expr()?;
-                            if matches!(self.peek_kind(), TokenKind::Semicolon) {
-                                self.bump();
-                            }
-                            return Ok(Stmt::FieldAssign { base, field, value });
-                        }
-                        // `obj.field += e` / `obj.field++`
-                        if let Some(op) = compound_binop(self.peek_kind()) {
-                            self.bump();
-                            let rhs = self.parse_expr()?;
-                            if matches!(self.peek_kind(), TokenKind::Semicolon) {
-                                self.bump();
-                            }
-                            let cur = Expr::Field {
-                                base: Box::new(base.clone()),
-                                field: field.clone(),
-                            };
-                            return Ok(Stmt::FieldAssign {
-                                base,
-                                field,
-                                value: Expr::Binary {
-                                    op,
-                                    left: Box::new(cur),
-                                    right: Box::new(rhs),
-                                },
-                            });
-                        }
-                        if let Some(op) = incdec_binop(self.peek_kind()) {
-                            self.bump();
-                            if matches!(self.peek_kind(), TokenKind::Semicolon) {
-                                self.bump();
-                            }
-                            let cur = Expr::Field {
-                                base: Box::new(base.clone()),
-                                field: field.clone(),
-                            };
-                            return Ok(Stmt::FieldAssign {
-                                base,
-                                field,
-                                value: Expr::Binary {
-                                    op,
-                                    left: Box::new(cur),
-                                    right: Box::new(Expr::Int(1)),
-                                },
-                            });
-                        }
-                        if matches!(self.peek_kind(), TokenKind::Dot) {
-                            base = Expr::Field {
-                                base: Box::new(base),
-                                field,
-                            };
-                            continue;
-                        }
-                        self.pos = checkpoint;
-                        break;
-                    }
-                } else if matches!(self.peek_kind(), TokenKind::LBracket) {
-                    // `name[i] = value`
+                // Parse the remaining expression as a potential lvalue. This
+                // handles the complete postfix chain, including forms such as
+                // `s[1:3][0]` and `matrix[i][j]`, before the assignment operator
+                // is consumed. Field assignments remain limited to identifiers
+                // and nested fields; indexing a field is handled by IndexAssign.
+                self.pos = checkpoint;
+                let lhs = self.parse_expr()?;
+                if matches!(self.peek_kind(), TokenKind::Assign) {
                     self.bump();
-                    let index = self.parse_expr()?;
-                    self.expect(TokenKind::RBracket)?;
-                    if matches!(self.peek_kind(), TokenKind::Assign) {
+                    let value = self.parse_expr()?;
+                    if matches!(self.peek_kind(), TokenKind::Semicolon) {
                         self.bump();
-                        let value = self.parse_expr()?;
-                        if matches!(self.peek_kind(), TokenKind::Semicolon) {
-                            self.bump();
-                        }
-                        return Ok(Stmt::IndexAssign {
-                            base: Expr::Ident(name),
-                            index,
-                            value,
-                        });
                     }
-                    // `arr[i] += e` / `arr[i]++`
-                    let compound = compound_binop(self.peek_kind())
-                        .map(|op| (op, false))
-                        .or_else(|| incdec_binop(self.peek_kind()).map(|op| (op, true)));
-                    if let Some((op, is_incdec)) = compound {
-                        self.bump();
-                        let rhs = if is_incdec {
-                            Expr::Int(1)
-                        } else {
-                            self.parse_expr()?
-                        };
-                        if matches!(self.peek_kind(), TokenKind::Semicolon) {
-                            self.bump();
-                        }
-                        let cur = Expr::Index {
-                            base: Box::new(Expr::Ident(name.clone())),
-                            index: Box::new(index.clone()),
-                        };
-                        return Ok(Stmt::IndexAssign {
-                            base: Expr::Ident(name),
-                            index,
-                            value: Expr::Binary {
-                                op,
-                                left: Box::new(cur),
-                                right: Box::new(rhs),
-                            },
-                        });
-                    }
-                    self.pos = checkpoint;
-                } else {
-                    self.pos = checkpoint;
+                    return self.lower_lvalue_assign(lhs, value);
                 }
-                let e = self.parse_expr()?;
+                let compound = compound_binop(self.peek_kind())
+                    .map(|op| (op, false))
+                    .or_else(|| incdec_binop(self.peek_kind()).map(|op| (op, true)));
+                if let Some((op, is_incdec)) = compound {
+                    self.bump();
+                    let rhs = if is_incdec {
+                        Expr::Int(1)
+                    } else {
+                        self.parse_expr()?
+                    };
+                    if matches!(self.peek_kind(), TokenKind::Semicolon) {
+                        self.bump();
+                    }
+                    let value = Expr::Binary {
+                        op,
+                        left: Box::new(lhs.clone()),
+                        right: Box::new(rhs),
+                    };
+                    return self.lower_lvalue_assign(lhs, value);
+                }
                 if matches!(self.peek_kind(), TokenKind::Semicolon) {
                     self.bump();
                 }
-                Ok(Stmt::Expr(e))
+                Ok(Stmt::Expr(lhs))
             }
             _ => {
                 let e = self.parse_expr()?;
@@ -2057,6 +1978,43 @@ impl Parser {
             }
         }
         Ok(expr)
+    }
+
+    /// Lower a parsed assignment target into the statement forms consumed by
+    /// the type checker and code generator. Index targets intentionally accept
+    /// any postfix expression so slice views and nested arrays can be mutated
+    /// without introducing a temporary binding.
+    fn lower_lvalue_assign(&self, lhs: Expr, value: Expr) -> Result<Stmt, ParseError> {
+        match lhs {
+            Expr::Ident(name) => Ok(Stmt::Assign { name, value }),
+            Expr::Index { base, index } => Ok(Stmt::IndexAssign {
+                base: *base,
+                index: *index,
+                value,
+            }),
+            Expr::Field { base, field } if Self::is_field_lvalue_base(&base) => {
+                Ok(Stmt::FieldAssign {
+                    base: *base,
+                    field,
+                    value,
+                })
+            }
+            _ => Err(self.err(
+                "invalid assignment target; expected a name, field, or index expression".into(),
+            )),
+        }
+    }
+
+    /// Field assignment has historically supported names and nested fields.
+    /// Keep that path restricted: assigning a field on an indexed value would
+    /// require a true field-lvalue emitter rather than mutating a temporary
+    /// struct value. Indexing a field remains supported through IndexAssign.
+    fn is_field_lvalue_base(expr: &Expr) -> bool {
+        match expr {
+            Expr::Ident(_) => true,
+            Expr::Field { base, .. } => Self::is_field_lvalue_base(base),
+            _ => false,
+        }
     }
 
     /// After `{` has been consumed: parse a struct literal body for `name`.

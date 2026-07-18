@@ -27,7 +27,7 @@ fn TestMapStringMapStringInt() {
     assert(has(outer, "a"))
     assert(not has(outer, "nope"))
     // mutate through retrieved pointer
-    let inner = outer["a"]
+    let mut inner = outer["a"]
     inner["x"] = 9
     assert_eq(outer["a"]["x"], 9)
     delete(outer, "b")

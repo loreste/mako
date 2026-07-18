@@ -160,6 +160,7 @@ const-fn depth (match/while/for/strings) · suite **340 test programs** · [The 
 | Positional struct literals `Point{1, 2}` / `Point{}` | Done — `examples/testing/struct_positional_test.mko` |
 | `go f()` → kick onto enclosing crew | Done — `examples/testing/go_stmt_test.mko` |
 | Compound assign `+= … ++ --` (ident/field/index) | Done — `examples/testing/compound_assign_test.mko` |
+| Generalized mutable index lvalues | Done — chained slice views, nested slices, and field-backed slices; `examples/testing/slice_test.mko` |
 | Go `for` forms (C-style, while, infinite, range) | Done — `examples/testing/for_forms_test.mko` |
 | Parallel binding/assignment (`a, b = b, a` swap) | Done — `examples/testing/parallel_assign_test.mko` |
 | `if` as an expression (`let x = if c { a } else { b }`) | Done — `examples/testing/if_expr_test.mko` |

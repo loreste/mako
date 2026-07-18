@@ -390,8 +390,11 @@ let mut s = [1, 2, 3]
 print_int(len(s))
 print_int(cap(s))
 
-let t = s[1:3]      // shares backing store
+let mut t = s[1:3]  // shares backing store; writes require a mutable view
 t[0] = 99           // visible on s[1]
+s[1:3][0] = 100     // direct write through a slice view
+let grid: [][]int = [[1, 2], [3, 4]]
+grid[1][0] = 30     // nested slice/index write
 s = append(s, 4)    // may grow; assign result back
 
 let n = copy(dst, s)   // returns count copied
@@ -428,7 +431,8 @@ rows = append(rows, [10, 20])
 Compile-time: `int8(200)` / `byte(300)` rejected at `mako check` when the arg is a constant
 (`examples/bad/int8_literal_oor.mko`, `byte_literal_oor.mko`). Runtime still aborts for non-const OOR.
 
-`append` / `copy` are type-safe. Tests: `slice_test`, `slice64_test`, `bytes_test`,
+`append` / `copy` and chained index writes are type-safe and bounds-checked.
+Each base/index expression is evaluated once. Tests: `slice_test`, `slice64_test`, `bytes_test`,
 `make_bytes_test`, `str_slice_test`, `float_slice_test`, `nested_slice_test`,
 `map_bool_test` (`[]bool`), `map_enum_test` (`[]Enum`).
 

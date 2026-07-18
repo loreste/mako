@@ -366,6 +366,7 @@ Metrics/prom + span-lite JSON are in; **depth seeds landed** (2026-07-14).
 | Loops | `for i, v in range s` · `for k, v in range m` · C-style `for` | `for_forms_test` · [ERGONOMICS.md](ERGONOMICS.md) |
 | Formatting | `fmt_sprintf*` / `fmt_sprint*` / `fmt_errorf` | `fmt_print_test` |
 | String/int dispatch | `match "…" { … }` · `switch` / `case` | `ergonomics_test` · `switch_test` |
+| Generalized mutable index lvalues | `s[1:3][0] = value` and `matrix[i][j] = value`; single evaluation plus bounds, mutability, NLL, and race checks | `slice_test` |
 | Multi-field worker I/O | `chan[Struct]` + deep-POD kick args | `chan_struct_test` · [SPEED.md](SPEED.md) |
 | Struct update (spread) | `S { field: v, ..base }` / `S { ...base, field: v }` | `struct_update_test` |
 | Enum on kick-POD / channels | POD enum fields; `chan[Enum]` | `struct_update_test` |
@@ -381,10 +382,6 @@ Metrics/prom + span-lite JSON are in; **depth seeds landed** (2026-07-14).
 1. Stack mut-ref captures (use `ShareInt` / share handles for shared mut) · deeper NLL  
 2. Remaining printf exotics (`%n`, dynamic `*`, locale) — use `fmt_sprintf*`  
 3. Full debugger DWARF/locals UI (seed: `debug_set_int` / `debug_locals_json` / `debug_bp`)  
-4. Generalized mutable index lvalues — support direct writes through slice and
-   nested index expressions such as `s[1:3][0] = value` and `matrix[i][j] =
-   value`, with single evaluation, mutability, bounds, NLL, and race checks.
-   Direct `name[index] = value` writes on mutable slices and maps already work.
 
 ### Language / stdlib residuals (lower priority)
 

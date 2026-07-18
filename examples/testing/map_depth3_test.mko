@@ -17,8 +17,8 @@ fn TestMapStringDepth3Int() {
     assert(has(outer, "a"))
     assert(not has(outer, "z"))
     // mutate through retrieved mid / leaf pointers
-    let m = outer["a"]
-    let row = m["row"]
+    let mut m = outer["a"]
+    let mut row = m["row"]
     row["n"] = 7
     assert_eq(outer["a"]["row"]["n"], 7)
     delete(outer, "a")

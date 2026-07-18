@@ -12832,6 +12832,7 @@ impl TypeChecker {
                 Ok(())
             }
             Stmt::IndexAssign { base, index, value } => {
+                self.assert_mutable_index_root(base)?;
                 if let Some(name) = Self::race_write_root(base) {
                     if self.shared_borrows.contains_key(name) {
                         return Err(TypeError::new(format!(
@@ -17491,6 +17492,21 @@ impl TypeChecker {
             Expr::Unary { expr, .. } | Expr::Try(expr) => Self::race_write_root(expr),
             _ => None,
         }
+    }
+
+    fn assert_mutable_index_root(&self, expr: &Expr) -> Result<(), TypeError> {
+        let Some(name) = Self::race_write_root(expr) else {
+            return Ok(());
+        };
+        if let Some((_, mutable)) = self.lookup(name) {
+            if !*mutable {
+                return Err(TypeError::new(format!(
+                    "cannot index-assign into immutable `{name}`"
+                ))
+                .hint(format!("use `let mut {name}`")));
+            }
+        }
+        Ok(())
     }
 
     fn assert_no_race_write_expr(&self, expr: &Expr) -> Result<(), TypeError> {

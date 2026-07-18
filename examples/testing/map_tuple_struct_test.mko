@@ -82,7 +82,7 @@ fn TestMapTupleStructHelpers() {
     let mut m = make(map[string](Point, int))
     m["a"] = (Point { x: 1, y: 2 }, 1)
     m["b"] = (Point { x: 3, y: 4 }, 2)
-    let c = maps_clone(m)
+    let mut c = maps_clone(m)
     assert_eq(maps_equal(m, c), 1)
     c["a"] = (Point { x: 0, y: 0 }, 0)
     assert_eq(maps_equal(m, c), 0)

@@ -1,0 +1,5 @@
+// Must fail: a chained slice/index write needs a mutable root binding.
+fn main() {
+    let values = [1, 2, 3]
+    values[1:3][0] = 9
+}

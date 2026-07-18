@@ -40,6 +40,8 @@ expect_failure gc-config env MAKO_CACHE="$CACHE/gc-config" \
     "$MAKO" check "$ROOT/examples/bad/gc_removed_package/main.mko"
 expect_failure unsafe-index env MAKO_CACHE="$CACHE/unsafe-index" \
     "$MAKO" check "$ROOT/examples/bad/unsafe_index_without_block.mko"
+expect_failure immutable-index env MAKO_CACHE="$CACHE/immutable-index" \
+    "$MAKO" check "$ROOT/examples/bad/index_assign_immutable.mko"
 expect_failure race-mut-after-kick env MAKO_CACHE="$CACHE/race-mut-after-kick" \
     "$MAKO" check "$ROOT/examples/bad/race_mut_after_kick.mko"
 expect_failure kick-mutable-closure env MAKO_CACHE="$CACHE/kick-mutable-closure" \

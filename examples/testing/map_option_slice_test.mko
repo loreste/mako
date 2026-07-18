@@ -75,7 +75,7 @@ fn TestMapOptionSliceHelpers() {
     assert_eq(len(ks), 2)
     let vs = maps_values(m)
     assert_eq(len(vs), 2)
-    let c = maps_clone(m)
+    let mut c = maps_clone(m)
     assert_eq(maps_equal(m, c), 1)
     // mutate clone
     c["a"] = [Some(99)]

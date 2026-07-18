@@ -17,7 +17,7 @@ export fn new_string_reader(s: string) -> StringReader {
 }
 
 on StringReader {
-    fn read(mut self, buf: []byte) -> (int, string) {
+    fn read(mut self, mut buf: []byte) -> (int, string) {
         if self.pos >= len(self.data) {
             return (0, "EOF")
         }

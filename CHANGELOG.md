@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Generalized mutable index lvalues: direct writes through slice views and
+  nested slices (`s[1:3][0] = value`, `matrix[i][j] = value`) with the existing
+  bounds, mutability, NLL, and race checks.
+
 ## 0.2.3 — 2026-07-18
 
 **mako0.2.3** (`CARGO_PKG_VERSION`).

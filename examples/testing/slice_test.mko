@@ -1,3 +1,7 @@
+struct SliceHolder {
+    values: []int
+}
+
 fn TestSliceLenCap() {
     let s = [10, 20, 30]
     assert_eq(len(s), 3)
@@ -6,7 +10,7 @@ fn TestSliceLenCap() {
 
 fn TestSliceExpr() {
     let s = [1, 2, 3, 4]
-    let t = s[1:3]
+    let mut t = s[1:3]
     assert_eq(len(t), 2)
     assert_eq(t[0], 2)
     assert_eq(t[1], 3)
@@ -21,7 +25,36 @@ fn TestAppend() {
 
 fn TestSharedBacking() {
     let mut s = [1, 2, 3]
-    let t = s[1:3]
+    let mut t = s[1:3]
     t[0] = 42
     assert_eq(s[1], 42)
+}
+
+fn TestChainedSliceIndexAssign() {
+    let mut s = [1, 2, 3, 4]
+    s[1:3][0] = 20
+    s[1:3][1] += 30
+    assert_eq(s[1], 20)
+    assert_eq(s[2], 33)
+}
+
+fn TestNestedIndexAssign() {
+    let mut matrix: [][]int = [[1, 2], [3, 4]]
+    matrix[0][1] = 20
+    matrix[1][0] += 30
+    assert_eq(matrix[0][1], 20)
+    assert_eq(matrix[1][0], 33)
+}
+
+fn TestMapBackedSliceIndexAssign() {
+    let mut rows = make(map[string][]int)
+    rows["main"] = [1, 2, 3]
+    rows["main"][1] = 20
+    assert_eq(rows["main"][1], 20)
+}
+
+fn TestFieldBackedSliceIndexAssign() {
+    let mut holder = SliceHolder { values: [4, 5, 6] }
+    holder.values[1] = 50
+    assert_eq(holder.values[1], 50)
 }

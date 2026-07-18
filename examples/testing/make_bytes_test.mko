@@ -6,7 +6,7 @@ fn TestByteLitSugar() {
 }
 
 fn TestMakeInt() {
-    let s = make([]int, 2, 5)
+    let mut s = make([]int, 2, 5)
     assert_eq(len(s), 2)
     assert(cap(s) >= 5)
     s[0] = 7
@@ -14,7 +14,7 @@ fn TestMakeInt() {
 }
 
 fn TestMakeByte() {
-    let b = make([]byte, 3)
+    let mut b = make([]byte, 3)
     assert_eq(len(b), 3)
     assert(cap(b) >= 3)
     b[0] = 1
