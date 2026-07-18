@@ -7,8 +7,8 @@ programming language.
 
 Mako is a systems and backend language built for **speed first**, with
 **first-class concurrency and parallelism**, plus clarity and safety.
-**Syntax is Mako’s own** — not a Go or Rust clone. Safety comes from ownership
-and arenas — **not a GC**. The performance bar is **as close to Rust as possible**.
+**Syntax is Mako’s own**. Safety comes from ownership and arenas — **not a GC**.
+Native performance is a design goal (compiled to C with `-O3 -flto`).
 
 It compiles `.mko` source files to C, then links them via clang into a single
 native binary. Memory safety uses `hold` / `share` and arenas. Concurrency and
