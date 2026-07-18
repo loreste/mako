@@ -53,6 +53,15 @@ structured crews, parameterized DB) remain part of the default contract.
 | `select` | Shared **condvar** wake on send/close (not 2 ms nanosleep poll); 50 ms max wait slice for races |
 | Slice append | `malloc + memcpy` on grow preserves sub-slice aliasing safety — no undefined behavior |
 | Codegen emit | Hot paths use `emit_line` / `format_args!` — no intermediate `String` per C line |
+| POD array lits `[a,b,c]` | **Stack buffer + `cap==0` view** — zero malloc/free in hot loops (`int`/`float`/`bool`/`byte`) |
+| Empty `[]` / `make([],0,0)` | **No heap** — `{NULL,0,0}` until first grow |
+| Escape (return / store / map set) | `mako_*_array_to_owned` — identity if already heap-owned; copy views only |
+| Slice free | `MAKO_UNLIKELY(cap>0)` — free is cold; views and stack lits are no-ops |
+
+**Ownership without a speed tax:** keep short-lived POD slices as stack views in
+tight loops; only pay for a heap copy when the value escapes. Prefer
+`make([]T, 0, n)` when you know capacity and will grow. Avoid reallocating a
+fresh lit every iteration when a single buffer can be reused.
 
 Capturing closures (env boxes) stay residual until they can pay for themselves.
 
