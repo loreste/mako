@@ -381,6 +381,10 @@ Metrics/prom + span-lite JSON are in; **depth seeds landed** (2026-07-14).
 1. Stack mut-ref captures (use `ShareInt` / share handles for shared mut) · deeper NLL  
 2. Remaining printf exotics (`%n`, dynamic `*`, locale) — use `fmt_sprintf*`  
 3. Full debugger DWARF/locals UI (seed: `debug_set_int` / `debug_locals_json` / `debug_bp`)  
+4. Generalized mutable index lvalues — support direct writes through slice and
+   nested index expressions such as `s[1:3][0] = value` and `matrix[i][j] =
+   value`, with single evaluation, mutability, bounds, NLL, and race checks.
+   Direct `name[index] = value` writes on mutable slices and maps already work.
 
 ### Language / stdlib residuals (lower priority)
 
