@@ -2452,43 +2452,9 @@ pub fn registry_package_dir(project: &Path, name: &str, version: &str) -> PathBu
         .join(version)
 }
 
-/// Resolve `name` @ `req` from the local registry (highest matching SemVer).
+/// Resolve and verify `name` @ `req` from the local registry.
 pub fn registry_resolve(project: &Path, name: &str, req: &str) -> Result<PathBuf, String> {
-    let root = registry_root(project).join(dep_cache_key(name));
-    if !root.is_dir() {
-        return Err(format!(
-            "no local registry entry for `{name}` under {}",
-            registry_root(project).display()
-        ));
-    }
-    let mut best: Option<(u64, u64, u64, PathBuf)> = None;
-    let rd = fs::read_dir(&root).map_err(|e| format!("read registry: {e}"))?;
-    for ent in rd.flatten() {
-        let ver_name = ent.file_name().to_string_lossy().to_string();
-        if !version_satisfies(&ver_name, req) {
-            continue;
-        }
-        let Some(sv) = parse_semver(&ver_name) else {
-            continue;
-        };
-        let path = ent.path();
-        if !path.join("mako.toml").exists() && !path.is_dir() {
-            continue;
-        }
-        match &best {
-            None => best = Some((sv.0, sv.1, sv.2, path)),
-            Some((a, b, c, _)) if (sv.0, sv.1, sv.2) > (*a, *b, *c) => {
-                best = Some((sv.0, sv.1, sv.2, path));
-            }
-            _ => {}
-        }
-    }
-    let path = best
-        .map(|(_, _, _, p)| p)
-        .ok_or_else(|| format!("no version of `{name}` satisfies `{req}` in local registry"))?;
-    // Verify content digest if present (tamper detection).
-    crate::pkg::verify_published_package(&path)?;
-    Ok(path)
+    crate::pkg::registry_resolve_project(project, name, req)
 }
 
 impl ManifestDep {
