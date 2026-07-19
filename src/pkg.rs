@@ -579,8 +579,11 @@ fn registry_resolve_in(reg: &Path, name: &str, req: &str) -> Result<(PathBuf, St
             _ => {}
         }
     }
-    best.map(|(_, _, _, p, v)| (p, v))
-        .ok_or_else(|| format!("no version of `{name}` satisfies `{req}` in local registry"))
+    let (_, _, _, path, ver) = best
+        .ok_or_else(|| format!("no version of `{name}` satisfies `{req}` in local registry"))?;
+    // Verify content digest if present (tamper detection).
+    verify_published_package(&path)?;
+    Ok((path, ver))
 }
 
 fn fetch_git(project: &Path, dep: &ManifestDep, offline: bool) -> Result<PathBuf, String> {
@@ -1569,10 +1572,44 @@ fn collect_files_recursive(dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), Str
     Ok(())
 }
 
+/// Verify a published package directory against its PACKAGE.sha256 digest.
+/// Returns Ok(()) if the digest matches, Err with detail if missing, malformed,
+/// or mismatched. Called during registry resolution to detect tampered packages.
+pub fn verify_published_package(dir: &Path) -> Result<(), String> {
+    let digest_path = dir.join("PACKAGE.sha256");
+    if !digest_path.exists() {
+        // Packages published before digest support lack this file — allow them.
+        return Ok(());
+    }
+    let content = fs::read_to_string(&digest_path)
+        .map_err(|e| format!("read {}: {e}", digest_path.display()))?;
+    let expected = content
+        .split_whitespace()
+        .next()
+        .unwrap_or("")
+        .trim()
+        .to_lowercase();
+    if expected.len() != 64 || !expected.chars().all(|c| c.is_ascii_hexdigit()) {
+        return Err(format!(
+            "malformed PACKAGE.sha256 in {}",
+            dir.display()
+        ));
+    }
+    let actual = compute_package_digest(dir)?;
+    if actual != expected {
+        return Err(format!(
+            "package integrity check failed for {}: expected {expected}, got {actual}",
+            dir.display()
+        ));
+    }
+    Ok(())
+}
+
 /// Publish a package with validated registry coordinates. Existing versions
 /// are immutable (CLI-enforced), so publishing the same name and version
-/// returns an error. A content digest (PACKAGE.sha256) is written alongside
-/// the published files for post-publication tamper detection.
+/// returns an error. A content digest (PACKAGE.sha256) is written inside the
+/// staging directory before the atomic rename, ensuring the package is never
+/// visible without its digest.
 pub fn pkg_publish(project: &Path) -> Result<(), String> {
     let manifest = project.join("mako.toml");
     if !manifest.exists() {
@@ -1624,19 +1661,35 @@ pub fn pkg_publish(project: &Path) -> Result<(), String> {
         return Err(error);
     }
     // Re-verify staged manifest matches the intended coordinates.
+    // Missing manifest is a hard failure — not optional.
     let staged_toml = staging.join("mako.toml");
-    if staged_toml.exists() {
-        let staged_text = fs::read_to_string(&staged_toml).unwrap_or_default();
-        let (staged_name, staged_ver) = read_meta(&staged_text);
-        if staged_name.as_deref() != Some(&name) || staged_ver.as_deref() != Some(&version) {
-            cleanup_publish_staging(&staging);
-            return Err(format!(
-                "staged manifest does not match: expected {name}@{version}, got {}@{}",
-                staged_name.unwrap_or_default(),
-                staged_ver.unwrap_or_default()
-            ));
-        }
+    if !staged_toml.exists() {
+        cleanup_publish_staging(&staging);
+        return Err("staged mako.toml is missing — cannot verify package identity".into());
     }
+    let staged_text = fs::read_to_string(&staged_toml).map_err(|e| {
+        cleanup_publish_staging(&staging);
+        format!("read staged manifest: {e}")
+    })?;
+    let (staged_name, staged_ver) = read_meta(&staged_text);
+    if staged_name.as_deref() != Some(&name) || staged_ver.as_deref() != Some(&version) {
+        cleanup_publish_staging(&staging);
+        return Err(format!(
+            "staged manifest does not match: expected {name}@{version}, got {}@{}",
+            staged_name.unwrap_or_default(),
+            staged_ver.unwrap_or_default()
+        ));
+    }
+    // Compute and write content digest INSIDE staging — the package must never
+    // become visible without its digest (no window for unverified resolution).
+    let digest = compute_package_digest(&staging).map_err(|e| {
+        cleanup_publish_staging(&staging);
+        format!("compute package digest: {e}")
+    })?;
+    fs::write(staging.join("PACKAGE.sha256"), format!("{digest}  .\n")).map_err(|e| {
+        cleanup_publish_staging(&staging);
+        format!("write PACKAGE.sha256: {e}")
+    })?;
     if dest.exists() {
         cleanup_publish_staging(&staging);
         return Err(format!(
@@ -1653,10 +1706,6 @@ pub fn pkg_publish(project: &Path) -> Result<(), String> {
             format!("finalize package publication: {error}")
         }
     })?;
-    // Write content digest so consumers can detect post-publication tampering.
-    if let Ok(digest) = compute_package_digest(&dest) {
-        let _ = fs::write(dest.join("PACKAGE.sha256"), format!("{digest}  .\n"));
-    }
     println!("published {name}@{version} → {}", dest.display());
     println!(
         "hint: depend with `\"{name}\" = {{ version = \"^{version}\" }}` then `mako pkg install`"
@@ -2568,6 +2617,104 @@ version = "0.1.0"
         assert!(
             err.contains("conflict") || err.contains("does not satisfy"),
             "unexpected: {err}"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn publish_creates_digest() {
+        let dir = env::temp_dir().join(format!("mako_pkg_digest_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("mako.toml"), "name = \"dtest\"\nversion = \"1.0.0\"\n").unwrap();
+        fs::write(dir.join("lib.mko"), "fn hello() { print(\"hi\") }\n").unwrap();
+        pkg_publish(&dir).unwrap();
+        let reg = effective_registry(&dir);
+        let published = reg.join("dtest").join("1.0.0");
+        assert!(published.join("PACKAGE.sha256").exists(), "digest file must exist");
+        let content = fs::read_to_string(published.join("PACKAGE.sha256")).unwrap();
+        let hash = content.split_whitespace().next().unwrap();
+        assert_eq!(hash.len(), 64, "digest must be 64 hex chars");
+        assert!(hash.chars().all(|c| c.is_ascii_hexdigit()), "digest must be hex");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn digest_is_deterministic() {
+        let dir = env::temp_dir().join(format!("mako_pkg_det_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("mako.toml"), "name = \"det\"\nversion = \"1.0.0\"\n").unwrap();
+        fs::write(dir.join("main.mko"), "fn main() {}\n").unwrap();
+        pkg_publish(&dir).unwrap();
+        let reg = effective_registry(&dir);
+        let published = reg.join("det").join("1.0.0");
+        let digest1 = compute_package_digest(&published).unwrap();
+        let digest2 = compute_package_digest(&published).unwrap();
+        assert_eq!(digest1, digest2, "digest must be deterministic");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn tampered_package_fails_verification() {
+        let dir = env::temp_dir().join(format!("mako_pkg_tamper_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("mako.toml"), "name = \"tamp\"\nversion = \"1.0.0\"\n").unwrap();
+        fs::write(dir.join("lib.mko"), "fn original() {}\n").unwrap();
+        pkg_publish(&dir).unwrap();
+        let reg = effective_registry(&dir);
+        let published = reg.join("tamp").join("1.0.0");
+        // Tamper with a source file.
+        fs::write(published.join("lib.mko"), "fn TAMPERED() {}\n").unwrap();
+        let err = verify_published_package(&published).unwrap_err();
+        assert!(err.contains("integrity check failed"), "expected integrity error, got: {err}");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn malformed_digest_fails_verification() {
+        let dir = env::temp_dir().join(format!("mako_pkg_malform_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("mako.toml"), "name = \"mal\"\nversion = \"1.0.0\"\n").unwrap();
+        fs::write(dir.join("lib.mko"), "fn f() {}\n").unwrap();
+        pkg_publish(&dir).unwrap();
+        let reg = effective_registry(&dir);
+        let published = reg.join("mal").join("1.0.0");
+        // Overwrite digest with garbage.
+        fs::write(published.join("PACKAGE.sha256"), "not-a-valid-hash\n").unwrap();
+        let err = verify_published_package(&published).unwrap_err();
+        assert!(err.contains("malformed"), "expected malformed error, got: {err}");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn tampered_package_blocks_resolution() {
+        let dir = env::temp_dir().join(format!("mako_pkg_block_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let lib = dir.join("lib");
+        let app = dir.join("app");
+        fs::create_dir_all(&lib).unwrap();
+        fs::create_dir_all(&app).unwrap();
+        fs::write(lib.join("mako.toml"), "name = \"blk\"\nversion = \"1.0.0\"\n").unwrap();
+        fs::write(lib.join("lib.mko"), "fn f() {}\n").unwrap();
+        pkg_publish(&lib).unwrap();
+        let reg = effective_registry(&lib);
+        let app_reg = app.join(".mako").join("registry");
+        copy_dir_recursive(&reg, &app_reg).unwrap();
+        // Tamper with the published file in app's registry copy.
+        let tampered = app_reg.join("blk").join("1.0.0").join("lib.mko");
+        fs::write(&tampered, "fn INJECTED() {}\n").unwrap();
+        fs::write(
+            app.join("mako.toml"),
+            "name = \"app\"\nversion = \"0.1.0\"\n\n[dependencies]\n\"blk\" = { version = \"^1.0\" }\n",
+        )
+        .unwrap();
+        let err = resolve_graph(&app, true).unwrap_err();
+        assert!(
+            err.contains("integrity") || err.contains("tamper"),
+            "expected integrity error during resolution, got: {err}"
         );
         let _ = fs::remove_dir_all(&dir);
     }

@@ -434,9 +434,11 @@ mako pkg update
 
 Publish to the local registry (`.mako/registry/` or `$MAKO_REGISTRY`). Published
 versions are CLI-enforced immutable: `mako pkg publish` rejects republishing
-the same name and version. A `PACKAGE.sha256` content digest is written for
-post-publication tamper detection. This is local-registry immutability, not
-cryptographic — users with filesystem access can still modify files directly.
+the same name and version. A `PACKAGE.sha256` content digest is computed in
+staging and written before the package becomes visible. Resolution verifies
+the digest and rejects tampered packages. This is local-registry immutability —
+users with filesystem access can still modify files, but the resolver will
+detect and reject the modification.
 Names use ASCII letters, digits, `.`, `_`, and `-`; `/` separates scoped name
 components. Components may not start with `.`, and versions must be SemVer.
 

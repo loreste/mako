@@ -2483,8 +2483,12 @@ pub fn registry_resolve(project: &Path, name: &str, req: &str) -> Result<PathBuf
             _ => {}
         }
     }
-    best.map(|(_, _, _, p)| p)
-        .ok_or_else(|| format!("no version of `{name}` satisfies `{req}` in local registry"))
+    let path = best
+        .map(|(_, _, _, p)| p)
+        .ok_or_else(|| format!("no version of `{name}` satisfies `{req}` in local registry"))?;
+    // Verify content digest if present (tamper detection).
+    crate::pkg::verify_published_package(&path)?;
+    Ok(path)
 }
 
 impl ManifestDep {
