@@ -65,7 +65,8 @@ fn TestJpegDctGifLzw() {
     let j = jpeg_encode_gray_dct(8, 8, gray)
     assert(len(j) > 20)
     assert_eq_str(jpeg_decode_gray(j), gray)
-    let _ = jpeg_dct_dc(j)
+    // Every sample is below 128, so the first block has a negative DC value.
+    assert(jpeg_dct_dc(j) < 0)
     let px = "ABCDEF" // 2x1
     let g = gif_encode_rgb_lzw(2, 1, px)
     assert(len(g) > 10)

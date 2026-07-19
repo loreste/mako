@@ -1679,7 +1679,7 @@ static inline int64_t mako_rune_count(MakoString s) {
 }
 
 static inline bool mako_str_eq(MakoString a, MakoString b) {
-    return a.len == b.len && memcmp(a.data, b.data, a.len) == 0;
+    return a.len == b.len && (a.len == 0 || memcmp(a.data, b.data, a.len) == 0);
 }
 
 static inline bool mako_str_contains(MakoString hay, MakoString needle) {
@@ -8417,6 +8417,9 @@ static inline int64_t mako_chmod(MakoString path, int64_t mode) {
     if (mako_fs_path_buf(path, pbuf, sizeof(pbuf)) < 0) return -1;
 #if defined(_WIN32)
     return _chmod(pbuf, (int)mode) == 0 ? 0 : -1;
+#elif defined(MAKO_WASI)
+    (void)mode;
+    return -1;
 #else
     return chmod(pbuf, (mode_t)mode) == 0 ? 0 : -1;
 #endif
@@ -8451,6 +8454,10 @@ static inline int64_t mako_atomic_write_file(MakoString path, MakoString content
     char tbuf[4224];
 #if defined(_WIN32)
     snprintf(tbuf, sizeof(tbuf), "%s.tmp.%u", pbuf, (unsigned)_getpid());
+#elif defined(MAKO_WASI)
+    static atomic_uint mako_wasi_write_seq = 0;
+    unsigned seq = atomic_fetch_add_explicit(&mako_wasi_write_seq, 1, memory_order_relaxed);
+    snprintf(tbuf, sizeof(tbuf), "%s.tmp.%u", pbuf, seq);
 #else
     snprintf(tbuf, sizeof(tbuf), "%s.tmp.%ld", pbuf, (long)getpid());
 #endif
@@ -8587,6 +8594,9 @@ static inline MakoString mako_realpath(MakoString path) {
     DWORD n = GetFullPathNameA(pbuf, (DWORD)sizeof(out), out, NULL);
     if (n == 0 || n >= sizeof(out)) return mako_str_from_cstr("");
     return mako_str_from_cstr(out);
+#elif defined(MAKO_WASI)
+    /* WASI preview1 has no realpath; empty is the existing unsupported/error sentinel. */
+    return mako_str_from_cstr("");
 #else
     char *r = realpath(pbuf, NULL);
     if (!r) return mako_str_from_cstr("");

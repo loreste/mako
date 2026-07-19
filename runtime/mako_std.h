@@ -5215,7 +5215,7 @@ static inline int64_t mako_pb_key_wire(MakoString s) {
 
 /* Zigzag for sint32/sint64 (Partial protobuf). */
 static inline int64_t mako_pb_zigzag_encode(int64_t n) {
-    return (n << 1) ^ (n >> 63);
+    return (int64_t)(((uint64_t)n << 1) ^ -(uint64_t)(n < 0));
 }
 
 static inline int64_t mako_pb_zigzag_decode(int64_t n) {

@@ -10,8 +10,12 @@ fn TestTcpConnectLocalhostHe() {
     assert(tcp_get_he_delay_ms() == 50 || tcp_get_he_delay_ms() == 250)
     let cli = tcp_connect_timeout("127.0.0.1", 18771, 5000)
     assert(cli >= 0)
-    let srv = tcp_accept(lfd)
+    assert_eq(tcp_set_timeout(cli, 5000), 1)
+    assert_eq(io_wait(lfd, 5000), 1)
+    let srv = tcp_accept_nb(lfd)
     assert(srv >= 0)
+    assert_eq(io_set_nonblocking(srv, 0), 1)
+    assert_eq(tcp_set_timeout(srv, 5000), 1)
     assert_eq(tcp_write_all(cli, "he-ok"), 5)
     assert_eq_str(tcp_read_n(srv, 5), "he-ok")
     let _ = tcp_close(cli)
@@ -35,8 +39,12 @@ fn TestTcpListenIpv6Loopback() {
         let _ = tcp_close(lfd)
         return
     }
-    let srv = tcp_accept(lfd)
+    assert_eq(tcp_set_timeout(cli, 5000), 1)
+    assert_eq(io_wait(lfd, 5000), 1)
+    let srv = tcp_accept_nb(lfd)
     assert(srv >= 0)
+    assert_eq(io_set_nonblocking(srv, 0), 1)
+    assert_eq(tcp_set_timeout(srv, 5000), 1)
     let peer = tcp_peer_addr(srv)
     // peer may be [::1]:port or ::1 style
     assert(str_contains(peer, "1") || str_contains(peer, ":"))
@@ -59,6 +67,8 @@ fn TestUdpIpv6Loopback() {
         let _ = udp_close(srv)
         return
     }
+    // tcp_set_timeout sets generic socket timeouts and also applies to UDP.
+    assert_eq(tcp_set_timeout(srv, 5000), 1)
     let n = udp_send_to(cli, "::1", port, "u6")
     if n < 0 {
         let _ = udp_close(cli)
@@ -80,11 +90,23 @@ fn TestTcpConnectHostname() {
     if lfd < 0 {
         return
     }
-    let cli = tcp_connect("localhost", 18773)
+    let cli = tcp_connect_timeout("localhost", 18773, 5000)
     // may fail if localhost is v6-only and we listen v4-only — soft
     if cli >= 0 {
-        let srv = tcp_accept(lfd)
+        if tcp_set_timeout(cli, 5000) != 1 {
+            let _ = tcp_close(cli)
+            let _ = tcp_close(lfd)
+            return
+        }
+        let ready = io_wait(lfd, 5000)
+        let srv = if ready == 1 { tcp_accept_nb(lfd) } else { -1 }
         if srv >= 0 {
+            if io_set_nonblocking(srv, 0) != 1 || tcp_set_timeout(srv, 5000) != 1 {
+                let _ = tcp_close(srv)
+                let _ = tcp_close(cli)
+                let _ = tcp_close(lfd)
+                return
+            }
             assert_eq(tcp_write_all(cli, "hn"), 2)
             assert_eq_str(tcp_read_n(srv, 2), "hn")
             let _ = tcp_close(srv)

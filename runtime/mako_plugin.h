@@ -7,8 +7,6 @@
 #ifndef MAKO_PLUGIN_H
 #define MAKO_PLUGIN_H
 
-#include <stdint.h>
-#include <stddef.h>
 #include "mako_rt.h"
 
 #ifdef __cplusplus
