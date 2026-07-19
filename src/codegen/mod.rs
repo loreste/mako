@@ -2596,6 +2596,49 @@ impl Codegen {
         self.own_drop_live.remove(mangled);
     }
 
+    /// Snapshot ownership/share/fn-env tracking for path-insensitive control flow.
+    /// `return` pops all scopes when emitting C; without restore, later arms lose
+    /// the function-level live set (leaks / missed frees on fallthrough).
+    fn snapshot_drop_state(
+        &self,
+    ) -> (
+        std::collections::HashSet<String>,
+        Vec<Vec<(String, String)>>,
+        std::collections::HashSet<String>,
+        Vec<Vec<String>>,
+        std::collections::HashSet<String>,
+        Vec<Vec<String>>,
+    ) {
+        (
+            self.own_drop_live.clone(),
+            self.own_drop_scopes.clone(),
+            self.share_live.clone(),
+            self.share_scopes.clone(),
+            self.fn_env_live.clone(),
+            self.fn_env_scopes.clone(),
+        )
+    }
+
+    fn restore_drop_state(
+        &mut self,
+        snap: (
+            std::collections::HashSet<String>,
+            Vec<Vec<(String, String)>>,
+            std::collections::HashSet<String>,
+            Vec<Vec<String>>,
+            std::collections::HashSet<String>,
+            Vec<Vec<String>>,
+        ),
+    ) {
+        let (ol, os, sl, ss, fl, fs) = snap;
+        self.own_drop_live = ol;
+        self.own_drop_scopes = os;
+        self.share_live = sl;
+        self.share_scopes = ss;
+        self.fn_env_live = fl;
+        self.fn_env_scopes = fs;
+    }
+
     /// True when expr is a field access on a struct (e.g. `self.name`, `s.color`).
     /// Returning such a field borrows from the struct — must clone for ownership transfer.
     fn is_field_borrow_return(expr: &Expr) -> bool {
@@ -11278,16 +11321,12 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             }
                         }
                     }
-                } else if let Expr::Ident(src) = init {
-                    // `let out = mk` after `let mk = make(...)` — move ownership so free of
-                    // `mk` does not free the value now held by `out`.
-                    let src_m = mangle(src);
-                    if self.own_drop_live.contains(&src_m) {
-                        if Self::own_free_fn(&ty).is_some() {
-                            self.note_own_drop_moved(&src_m);
-                            self.register_own_drop(name, &ty);
-                        }
-                    }
+                } else if let Expr::Ident(_src) = init {
+                    // Non-`hold` Ident bind is an *alias* of the same Own value
+                    // (typecheck allows re-use of `src`). Only the original owner
+                    // is registered for free — never move or dual-register, or
+                    // if-arm free + outer free double-frees / UAFs.
+                    // Explicit moves remain `hold let`.
                 }
             }
             Stmt::LetMulti { names, init, .. } => {
@@ -11767,26 +11806,39 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                 }
             }
             Stmt::Return(None) => {
-                // Drop all nested share scopes before leaving the function.
+                // Snapshot tracking so sibling if-arms / later stmts still see
+                // the pre-return live set (return destroys scope stacks otherwise).
+                let snap = self.snapshot_drop_state();
                 while !self.share_scopes.is_empty() {
                     self.pop_share_scope();
                 }
                 self.emit_defers();
                 self.line("return;");
+                self.restore_drop_state(snap);
             }
             Stmt::Return(Some(e)) => {
                 let (ty, val) = self.emit_expr(e);
                 // SAFE: returning a struct field that is an owning type (string/slice)
                 // must clone — caller owns the result, struct still owns the field.
                 let val = if Self::is_field_borrow_return(e) && Self::own_free_fn(&ty).is_some() {
-                    let cloned = self.clone_own_val(&ty, &val);
-                    cloned
+                    self.clone_own_val(&ty, &val)
+                } else if let Expr::Ident(n) = e {
+                    // Alias return: Ident not in own_drop_live still points at
+                    // data owned by another local that will be freed below.
+                    let mn = mangle(n);
+                    if Self::own_free_fn(&ty).is_some() && !self.own_drop_live.contains(&mn) {
+                        self.clone_own_val(&ty, &val)
+                    } else {
+                        val
+                    }
                 } else {
                     val
                 };
                 // Materialize before free — `s.data[i]` expressions outlive the free
                 // of `s` if left as bare C expressions (SAFE free-before-return).
                 let val = self.materialize_return_val(&ty, val);
+                // Snapshot *before* transfer so sibling arms still track the local.
+                let snap = self.snapshot_drop_state();
                 // SAFE-003/004: returning an owned local transfers it to the caller —
                 // must not free before `return` (use-after-free).
                 self.transfer_own_on_return(e);
@@ -11797,6 +11849,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                 }
                 self.emit_defers();
                 self.emit_line(format_args!("return {val};"));
+                self.restore_drop_state(snap);
             }
             Stmt::Defer { body } => {
                 self.defer_stack.push(body.clone());
@@ -11818,26 +11871,31 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                 let (_, c) = self.emit_expr(cond);
                 self.emit_line(format_args!("if ({c}) {{"));
                 self.indent += 1;
+                // SAFE control-flow ownership (path-insensitive codegen):
+                // 1. Snapshot live set before the arm (for early-return / sibling arms).
+                // 2. Emit arm stmts — may free/move outer locals or register arm-locals.
+                // 3. Free *this arm's* still-live owns while the live set is accurate
+                //    (must run BEFORE restore, or arm-local owns leak).
+                // 4. Restore the pre-arm live set so early-return removals do not poison
+                //    the else arm or post-if fallthrough.
                 self.push_share_scope();
-                // SAFE: save own_drop_live so that frees inside a return-branch
-                // don't permanently remove outer locals from the live set.
                 let saved_live = self.own_drop_live.clone();
                 for s in &then_block.stmts {
                     self.emit_stmt(s);
                 }
-                // Restore: if the then-branch returned/exited, its removals should
-                // not affect the continuation (the else or post-if code).
-                self.own_drop_live = saved_live;
                 self.pop_share_scope();
+                self.own_drop_live = saved_live;
                 self.indent -= 1;
                 if let Some(eb) = else_block {
                     self.line("} else {");
                     self.indent += 1;
                     self.push_share_scope();
+                    let saved_live_else = self.own_drop_live.clone();
                     for s in &eb.stmts {
                         self.emit_stmt(s);
                     }
                     self.pop_share_scope();
+                    self.own_drop_live = saved_live_else;
                     self.indent -= 1;
                 }
                 self.line("}");

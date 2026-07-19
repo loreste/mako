@@ -85,3 +85,33 @@ fn TestNestedReassign() {
     assert_eq_str(nested_reassign(1, 5), "val=changed_5")
     assert_eq_str(nested_reassign(99, 0), "early")
 }
+
+// Else-arm early return must not poison own_drop_live for the then-fallthrough path.
+fn else_return_gauntlet(flag: int, path: string) -> string {
+    let mut out = path
+    if flag == 1 {
+        // fall through
+    } else {
+        return "else:" + out
+    }
+    return "then:" + out
+}
+
+fn TestElseReturnFallthrough() {
+    assert(str_contains(else_return_gauntlet(0, "p"), "else:p"))
+    assert(str_contains(else_return_gauntlet(1, "p"), "then:p"))
+}
+
+// Arm-local owns must free on fallthrough (pop before restore of outer live set).
+fn if_local_own_fallthrough(flag: int) -> int {
+    if flag == 1 {
+        let temp = f"local-{flag}"
+        assert(str_len(temp) > 0)
+    }
+    return flag
+}
+
+fn TestIfLocalOwnFallthrough() {
+    assert_eq(if_local_own_fallthrough(1), 1)
+    assert_eq(if_local_own_fallthrough(0), 0)
+}
