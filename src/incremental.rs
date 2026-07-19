@@ -218,10 +218,10 @@ pub fn export_signature(program: &Program) -> String {
 }
 
 /// Collect entry + transitive package sources that affect typecheck / codegen.
-pub fn collect_program_inputs(entry: &Path) -> Vec<PathBuf> {
+pub fn collect_program_inputs(entry: &Path) -> Result<Vec<PathBuf>, String> {
     let mut files = vec![entry.to_path_buf()];
     if let Some(manifest_dir) = find_nearest_manifest_dir(entry) {
-        collect_dep_files(&manifest_dir, &mut files);
+        collect_dep_files(&manifest_dir, &mut files)?;
         files.push(manifest_dir.join("mako.toml"));
         let lockfile = manifest_dir.join("mako.lock");
         if lockfile.exists() {
@@ -230,19 +230,17 @@ pub fn collect_program_inputs(entry: &Path) -> Vec<PathBuf> {
     }
     files.sort();
     files.dedup();
-    files
+    Ok(files)
 }
 
-fn collect_dep_files(manifest_dir: &Path, out: &mut Vec<PathBuf>) {
+fn collect_dep_files(manifest_dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), String> {
     let manifest = manifest_dir.join("mako.toml");
     let Ok(text) = fs::read_to_string(&manifest) else {
-        return;
+        return Ok(());
     };
     out.push(manifest.clone());
     for dep in parse_manifest_deps(&text) {
-        let Ok(root) = resolve_dep_root(manifest_dir, &dep) else {
-            continue;
-        };
+        let root = resolve_dep_root(manifest_dir, &dep)?;
         if root.is_file() {
             out.push(root);
             continue;
@@ -256,14 +254,15 @@ fn collect_dep_files(manifest_dir: &Path, out: &mut Vec<PathBuf>) {
             }
         }
         if root.join("mako.toml").exists() {
-            collect_dep_files(&root, out);
+            collect_dep_files(&root, out)?;
         }
     }
+    Ok(())
 }
 
 /// Fingerprint of all sources that affect typecheck (incl. bodies — NLL/borrows).
 pub fn program_typecheck_fingerprint(entry: &Path) -> Result<String, String> {
-    let files = collect_program_inputs(entry);
+    let files = collect_program_inputs(entry)?;
     let mut parts: Vec<Vec<u8>> = vec![COMPILER_CACHE_VERSION.as_bytes().to_vec()];
     for f in &files {
         let b = fs::read(f).unwrap_or_default();

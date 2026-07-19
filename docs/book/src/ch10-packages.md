@@ -680,6 +680,12 @@ Simple names are used as-is. Scoped names are stored in one directory segment,
 so `scope/util` uses the key `scope!util` and cannot overlap another package's
 version directory.
 
+Each version contains `PACKAGE.sha256`. Mako stages this digest with the package
+and verifies it before resolving or caching that version. Missing, malformed,
+or mismatched digests stop resolution. New publications use a `v2:` record;
+legacy unversioned records keep their original hashing rules. Package sources
+may not define a top-level `PACKAGE.sha256`, which is reserved for this metadata.
+
 SemVer resolution follows standard rules:
 - `"0.1.0"` — exact version
 - `"^0.1"` — compatible with 0.1.x
