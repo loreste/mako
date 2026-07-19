@@ -1575,11 +1575,19 @@ fn collect_files_recursive(dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), Str
 /// Verify a published package directory against its PACKAGE.sha256 digest.
 /// Returns Ok(()) if the digest matches, Err with detail if missing, malformed,
 /// or mismatched. Called during registry resolution to detect tampered packages.
+///
+/// Fail closed: missing digest = rejected. All packages published by v0.2.5+
+/// include a digest. A missing file means either the package was tampered with
+/// (digest deleted) or it was published by an older compiler. In the latter
+/// case, republish with `mako pkg publish` to generate a digest.
 pub fn verify_published_package(dir: &Path) -> Result<(), String> {
     let digest_path = dir.join("PACKAGE.sha256");
     if !digest_path.exists() {
-        // Packages published before digest support lack this file — allow them.
-        return Ok(());
+        return Err(format!(
+            "missing PACKAGE.sha256 in {} — package may be tampered or was published \
+             by an older compiler; republish with `mako pkg publish` to generate a digest",
+            dir.display()
+        ));
     }
     let content = fs::read_to_string(&digest_path)
         .map_err(|e| format!("read {}: {e}", digest_path.display()))?;
@@ -2686,6 +2694,24 @@ version = "0.1.0"
         fs::write(published.join("PACKAGE.sha256"), "not-a-valid-hash\n").unwrap();
         let err = verify_published_package(&published).unwrap_err();
         assert!(err.contains("malformed"), "expected malformed error, got: {err}");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn deleted_digest_blocks_resolution() {
+        let dir = env::temp_dir().join(format!("mako_pkg_deldig_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("mako.toml"), "name = \"deldig\"\nversion = \"1.0.0\"\n").unwrap();
+        fs::write(dir.join("lib.mko"), "fn f() {}\n").unwrap();
+        pkg_publish(&dir).unwrap();
+        let reg = effective_registry(&dir);
+        let published = reg.join("deldig").join("1.0.0");
+        assert!(published.join("PACKAGE.sha256").exists());
+        // Delete the digest — simulates tampering.
+        fs::remove_file(published.join("PACKAGE.sha256")).unwrap();
+        let err = verify_published_package(&published).unwrap_err();
+        assert!(err.contains("missing PACKAGE.sha256"), "expected missing digest error, got: {err}");
         let _ = fs::remove_dir_all(&dir);
     }
 
