@@ -480,7 +480,7 @@ enum PkgCmd {
         #[arg(long, default_value_t = false)]
         offline: bool,
     },
-    /// Publish this package into the local registry (`.mako/registry` or `$MAKO_REGISTRY`)
+    /// Publish an immutable version to the local registry (`.mako/registry` or `$MAKO_REGISTRY`)
     Publish {
         #[arg(default_value = ".")]
         path: PathBuf,

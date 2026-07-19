@@ -673,8 +673,12 @@ The default test suite runs green without any live services.
 For published packages, Mako resolves from the local registry cache:
 
 ```
-.mako/registry/<name>/<version>/
+.mako/registry/<key>/<version>/
 ```
+
+Simple names are used as-is. Scoped names are stored in one directory segment,
+so `scope/util` uses the key `scope!util` and cannot overlap another package's
+version directory.
 
 SemVer resolution follows standard rules:
 - `"0.1.0"` — exact version

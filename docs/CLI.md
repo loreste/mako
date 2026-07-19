@@ -432,7 +432,11 @@ mako pkg update
 
 ### mako pkg publish
 
-Publish to the local registry (`.mako/registry/` or `$MAKO_REGISTRY`).
+Publish to the local registry (`.mako/registry/` or `$MAKO_REGISTRY`). Published
+versions are immutable: publishing the same package name and version again is
+rejected. Choose a new version when the package content changes. Names use
+ASCII letters, digits, `.`, `_`, and `-`; `/` separates scoped name components.
+Components may not start with `.`, and versions must be SemVer.
 
 ```bash
 mako pkg publish
