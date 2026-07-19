@@ -1,0 +1,18 @@
+const BORROWED_ERROR = "borrowed"
+
+export fn TestDiscardedBorrowedBag() {
+    let mut indexed = make(map[int]Result[int, string])
+    indexed[1] = Err(str_as_view(BORROWED_ERROR))
+    let _ = indexed[1]
+    match indexed[1] {
+        Ok(_) => assert(false)
+        Err(e) => assert_eq_str(e, BORROWED_ERROR)
+    }
+    let _ = Some(indexed)
+    let indexed_array: []Result[int, string] = [Err(str_as_view(BORROWED_ERROR))]
+    let _ = indexed_array[0]
+    match indexed_array[0] {
+        Ok(_) => assert(false)
+        Err(e) => assert_eq_str(e, BORROWED_ERROR)
+    }
+}

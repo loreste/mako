@@ -1,0 +1,113 @@
+fn option_ints() -> Option[[]int] {
+    return Some([1, 2, 3])
+}
+
+fn result_map() -> Result[map[int]int, string] {
+    let mut m = make(map[int]int)
+    m[1] = 42
+    return Ok(m)
+}
+
+fn result_error() -> Result[int, string] {
+    return Err(int_to_string(7))
+}
+
+fn nested_result() -> Option[Result[[]int, string]] {
+    return Some(Ok([1, 2, 3]))
+}
+
+export struct OwnedRecord {
+    name: string
+    values: []int
+}
+
+export struct Point {
+    x: int
+    y: int
+}
+
+export struct NestedRecord {
+    record: OwnedRecord
+}
+
+export struct ErrorRecord {
+    error: DropError
+}
+
+export enum DropError {
+    Code(int)
+    Message(string)
+}
+
+fn option_record() -> Option[OwnedRecord] {
+    return Some(OwnedRecord { name: int_to_string(9), values: [4, 5, 6] })
+}
+
+fn result_float_error() -> Result[float, string] {
+    return Err(int_to_string(20))
+}
+
+fn result_string() -> Result[string, string] {
+    return Ok(int_to_string(21))
+}
+
+fn option_map() -> Option[map[int]int] {
+    let mut values = make(map[int]int)
+    values[1] = 22
+    return Some(values)
+}
+
+fn result_option() -> Result[Option[[]int], string] {
+    return Ok(Some([23, 24]))
+}
+
+fn enum_error() -> Result[int, DropError] {
+    return Err(Message(int_to_string(25)))
+}
+
+fn option_nested_record() -> Option[NestedRecord] {
+    let record = OwnedRecord { name: int_to_string(26), values: [26, 27] }
+    return Some(NestedRecord { record: record })
+}
+
+fn option_error_record() -> Option[ErrorRecord] {
+    return Some(ErrorRecord { error: Message(int_to_string(27)) })
+}
+
+export fn TestDiscardedBagPayloads() {
+    let mut i = 0
+    while i < 100 {
+        let _ = option_ints()
+        let _ = result_map()
+        let _ = result_error()
+        let _ = result_float_error()
+        let _ = result_string()
+        let _ = nested_result()
+        let _ = option_record()
+        let _ = option_map()
+        let _ = result_option()
+        let _ = enum_error()
+        let _ = option_nested_record()
+        let _ = option_error_record()
+        let record = OwnedRecord { name: "", values: [] }
+        let _ = record.result()
+        let _: Option[string] = Some(int_to_string(11))
+        let _ = Some(int_to_string(12))
+        let _ = Ok([7, 8, 9])
+        let _ = Ok(int_to_string(14))
+        let _ = Some([Point { x: 1, y: 2 }, Point { x: 3, y: 4 }])
+        let _ = Err(int_to_string(13))
+        _ = result_error()
+        option_ints()
+        i = i + 1
+    }
+    let mut local = make(map[int]int)
+    local[1] = 17
+    let _ = Some(local)
+    let local_record = OwnedRecord { name: int_to_string(19), values: [19, 20] }
+    let _ = Some(local_record)
+}
+
+export fn OwnedRecord_result(self: OwnedRecord) -> Result[[]int, string] {
+    return Ok([14, 15, 16])
+}

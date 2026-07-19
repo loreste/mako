@@ -309,6 +309,18 @@ jobs:
           MAKO_TEST_TIMEOUT_SECS: "120"
         run: |
           ./target/release/mako test --sanitize address examples/testing
+      - name: Check discarded bag cleanup
+        env:
+          ASAN_OPTIONS: detect_leaks=1
+          MAKO_TEST_TIMEOUT_SECS: "120"
+        run: |
+          ./target/release/mako test --sanitize address examples/testing/discarded_bag_drop_test.mko
+      - name: Check borrowed bag discard
+        env:
+          ASAN_OPTIONS: detect_leaks=0
+          MAKO_TEST_TIMEOUT_SECS: "120"
+        run: |
+          ./target/release/mako test --sanitize address examples/testing/discarded_bag_borrow_test.mko
 
   ubsan:
     name: UBSan undefined behavior

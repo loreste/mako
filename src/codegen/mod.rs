@@ -16,6 +16,8 @@ struct StructInfo {
     c_name: String,
     /// field name → C type
     fields: Vec<(String, String)>,
+    /// field name → source type
+    field_types: Vec<(String, TypeExpr)>,
     /// field name → default expression (from struct def)
     defaults: HashMap<String, Expr>,
 }
@@ -26,6 +28,8 @@ pub struct Codegen {
     indent: usize,
     /// Function name → C return type
     fn_rets: HashMap<String, String>,
+    /// Function name → source return type for type-directed bag cleanup.
+    fn_ret_types: HashMap<String, TypeExpr>,
     /// Function name → C param types
     fn_params: HashMap<String, Vec<String>>,
     /// Function name → original Mako param TypeExprs (for typed lambda args).
@@ -191,6 +195,7 @@ impl Codegen {
             tmp: 0,
             indent: 0,
             fn_rets: HashMap::new(),
+            fn_ret_types: HashMap::new(),
             fn_params: HashMap::new(),
             fn_param_typeexprs: HashMap::new(),
             locals: HashMap::new(),
@@ -2365,6 +2370,354 @@ impl Codegen {
         }
     }
 
+    fn bag_type_for_discard(&self, expr: &Expr, ann: Option<&TypeExpr>) -> Option<TypeExpr> {
+        let is_bag = |ty: &&TypeExpr| {
+            matches!(ty, TypeExpr::Generic(name, _) if name == "Option" || name == "Result")
+        };
+        if let Some(ty) = ann.filter(is_bag) {
+            return Some(ty.clone());
+        }
+        match expr {
+            Expr::Call { callee, args } => {
+                let Expr::Ident(name) = callee.as_ref() else {
+                    return None;
+                };
+                match name.as_str() {
+                    "Some" => {
+                        let payload = args
+                            .first()
+                            .and_then(|arg| self.payload_type_for_discard(arg))?;
+                        return Some(TypeExpr::Generic("Option".into(), vec![payload]));
+                    }
+                    "None" => return Some(Self::scalar_option_type()),
+                    "Ok" => {
+                        let payload = args
+                            .first()
+                            .and_then(|arg| self.payload_type_for_discard(arg))?;
+                        return Some(Self::result_type(payload));
+                    }
+                    "Err" => return Some(Self::scalar_result_type()),
+                    _ => {}
+                }
+                let mono = self.generic_mono_name_for_call(name, args);
+                self.fn_ret_types
+                    .get(&mono)
+                    .or_else(|| self.fn_ret_types.get(name))
+                    .filter(is_bag)
+                    .cloned()
+            }
+            Expr::Method {
+                receiver, method, ..
+            } => self.method_return_type(receiver, method).filter(is_bag).cloned(),
+            _ => None,
+        }
+    }
+
+    fn discarded_bag_is_owned(expr: &Expr) -> bool {
+        // Index and field expressions borrow their bag from the containing value.
+        // Calls and constructors transfer fresh ownership to the returned bag.
+        !matches!(expr, Expr::Index { .. } | Expr::Field { .. })
+            && Self::expr_is_fresh_own(expr)
+    }
+
+    fn scalar_option_type() -> TypeExpr {
+        TypeExpr::Generic("Option".into(), vec![TypeExpr::Named("int".into())])
+    }
+
+    fn scalar_result_type() -> TypeExpr {
+        Self::result_type(TypeExpr::Named("int".into()))
+    }
+
+    fn result_type(payload: TypeExpr) -> TypeExpr {
+        TypeExpr::Generic(
+            "Result".into(),
+            vec![payload, TypeExpr::Named("string".into())],
+        )
+    }
+
+    fn method_return_type(&self, receiver: &Expr, method: &str) -> Option<&TypeExpr> {
+        if let Expr::Ident(alias) = receiver {
+            let imported = format!("{alias}__{method}");
+            if !self.locals.contains_key(alias) {
+                if let Some(ty) = self.fn_ret_types.get(&imported) {
+                    return Some(ty);
+                }
+            }
+        }
+
+        let receiver_ty = self.peek_expr_c_ty(receiver);
+        if let Some(interface) = receiver_ty.strip_prefix("MakoIface_") {
+            return self.fn_ret_types.get(&format!("{interface}_{method}"));
+        }
+        let source_ty = self
+            .structs
+            .iter()
+            .find(|(name, info)| name.as_str() == receiver_ty || info.c_name == receiver_ty)
+            .map(|(name, _)| name.as_str())
+            .or_else(|| {
+                self.enums
+                    .iter()
+                    .find(|(name, info)| name.as_str() == receiver_ty || info.c_name == receiver_ty)
+                    .map(|(name, _)| name.as_str())
+            })?;
+        self.fn_ret_types
+            .get(&format!("{source_ty}_{method}"))
+    }
+
+    fn payload_type_for_discard(&self, expr: &Expr) -> Option<TypeExpr> {
+        match expr {
+            Expr::Make { ty, .. } | Expr::Convert { ty, .. } => return Some(ty.clone()),
+            Expr::StructLit { name, .. } | Expr::StructLitPos { name, .. } => {
+                return Some(TypeExpr::Named(name.clone()));
+            }
+            Expr::Call { callee, .. }
+                if matches!(callee.as_ref(), Expr::Ident(name)
+                    if name == "Some" || name == "None" || name == "Ok" || name == "Err") =>
+            {
+                return self.bag_type_for_discard(expr, None);
+            }
+            Expr::Call { callee, args } => {
+                if let Expr::Ident(name) = callee.as_ref() {
+                    if matches!(name.as_str(), "int_to_string" | "format_int" | "string") {
+                        return Some(TypeExpr::Named("string".into()));
+                    }
+                    let mono = self.generic_mono_name_for_call(name, args);
+                    if let Some(ty) = self
+                        .fn_ret_types
+                        .get(&mono)
+                        .or_else(|| self.fn_ret_types.get(name))
+                    {
+                        return Some(ty.clone());
+                    }
+                }
+            }
+            Expr::Method {
+                receiver, method, ..
+            } => {
+                if let Some(ty) = self.method_return_type(receiver, method) {
+                    return Some(ty.clone());
+                }
+            }
+            _ => {}
+        }
+        let named = |name: &str| TypeExpr::Named(name.into());
+        Some(match self.peek_expr_c_ty(expr).as_str() {
+            "MakoString" => named("string"),
+            "double" => named("float"),
+            "bool" => named("bool"),
+            "int64_t" => named("int"),
+            "MakoIntArray" => TypeExpr::Array(Box::new(named("int"))),
+            "MakoByteArray" => TypeExpr::Array(Box::new(named("byte"))),
+            "MakoStrArray" => TypeExpr::Array(Box::new(named("string"))),
+            "MakoFloatArray" => TypeExpr::Array(Box::new(named("float"))),
+            "MakoBoolArray" => TypeExpr::Array(Box::new(named("bool"))),
+            c_ty if Self::own_free_fn(c_ty).is_some() => named(c_ty),
+            c_ty => {
+                let name = self
+                    .structs
+                    .iter()
+                    .find(|(name, info)| name.as_str() == c_ty || info.c_name == c_ty)
+                    .map(|(name, _)| name.clone())?;
+                TypeExpr::Named(name)
+            }
+        })
+    }
+
+    /// Destroy a fresh Option/Result value that is explicitly ignored.
+    fn emit_discarded_bag(
+        &mut self,
+        expr: &Expr,
+        ann: Option<&TypeExpr>,
+        c_ty: &str,
+        val: &str,
+    ) -> bool {
+        if !matches!(
+            c_ty,
+            "MakoOptionInt" | "MakoResultInt" | "MakoResultFloat"
+        )
+        {
+            return false;
+        }
+        let inferred_ty = self.bag_type_for_discard(expr, ann);
+        if !Self::discarded_bag_is_owned(expr) {
+            return false;
+        }
+        if c_ty == "MakoResultFloat" {
+            let tmp = self.fresh("discard");
+            self.emit_line(format_args!("MakoResultFloat {tmp} = {val};"));
+            self.emit_line(format_args!("if (!{tmp}.ok) mako_str_free({tmp}.err);"));
+            return true;
+        }
+        if inferred_ty.is_none() {
+            #[cfg(debug_assertions)]
+            eprintln!(
+                "warning: could not infer the payload type of a discarded {c_ty}; owned payload cleanup may be incomplete"
+            );
+        }
+        let bag_ty = inferred_ty.or_else(|| {
+            // Even when a built-in Result lacks source-level type metadata, its
+            // error arm always owns a string and must not be leaked.
+            (c_ty == "MakoResultInt").then(Self::scalar_result_type)
+        });
+        let Some(bag_ty) = bag_ty else {
+            return false;
+        };
+        let tmp = self.fresh("discard");
+        self.emit_line(format_args!("{c_ty} {tmp} = {val};"));
+        self.emit_bag_drop(&tmp, &bag_ty);
+        true
+    }
+
+    fn emit_bag_drop(&mut self, bag: &str, ty: &TypeExpr) {
+        let TypeExpr::Generic(name, args) = ty else {
+            return;
+        };
+        let Some(payload) = args.first() else {
+            return;
+        };
+        let bag = format!("({bag})");
+        match name.as_str() {
+            "Option" => {
+                self.emit_line(format_args!("if ({bag}.some) {{"));
+                self.indent += 1;
+                self.emit_bag_payload_drop(&bag, payload, true);
+                self.indent -= 1;
+                self.line("}");
+            }
+            "Result" => {
+                self.emit_line(format_args!("if ({bag}.ok) {{"));
+                self.indent += 1;
+                self.emit_bag_payload_drop(&bag, payload, false);
+                self.indent -= 1;
+                self.emit_line(format_args!("}} else if ({bag}.err_kind == 0) {{"));
+                self.indent += 1;
+                self.emit_line(format_args!("mako_str_free({bag}.err);"));
+                self.indent -= 1;
+                self.line("} else {");
+                self.indent += 1;
+                self.emit_line(format_args!("mako_str_free({bag}.err_s0);"));
+                self.emit_line(format_args!("mako_str_free({bag}.err_s1);"));
+                self.indent -= 1;
+                self.line("}");
+            }
+            _ => {}
+        }
+    }
+
+    fn emit_bag_payload_drop(&mut self, bag: &str, payload: &TypeExpr, option: bool) {
+        let ptr = if option {
+            "mako_option_some_ptr"
+        } else {
+            "mako_result_ok_ptr"
+        };
+        match payload {
+            TypeExpr::Named(name) if name == "string" => {
+                self.emit_line(format_args!("mako_str_free({bag}.ok_s);"));
+            }
+            TypeExpr::Generic(name, _args) if name == "Option" || name == "Result" => {
+                let c_ty = if name == "Option" {
+                    "MakoOptionInt"
+                } else {
+                    "MakoResultInt"
+                };
+                let p = self.fresh("bagp");
+                self.emit_line(format_args!(
+                    "{c_ty} *{p} = ({c_ty}*){ptr}({bag});"
+                ));
+                self.emit_line(format_args!("if ({p}) {{"));
+                self.indent += 1;
+                self.emit_bag_drop(&format!("*{p}"), payload);
+                self.emit_line(format_args!("free({p});"));
+                self.indent -= 1;
+                self.line("}");
+            }
+            TypeExpr::Named(name) if self.structs.contains_key(name) => {
+                let c_ty = self.type_expr_c(payload);
+                let p = self.fresh("bagp");
+                self.emit_line(format_args!(
+                    "{c_ty} *{p} = ({c_ty}*){ptr}({bag});"
+                ));
+                self.emit_line(format_args!("if ({p}) {{"));
+                self.indent += 1;
+                self.emit_struct_fields_drop(&p, name);
+                self.emit_line(format_args!("free({p});"));
+                self.indent -= 1;
+                self.line("}");
+            }
+            _ => {
+                let c_ty = match payload {
+                    TypeExpr::Named(name) if name.starts_with("Mako") => name.clone(),
+                    _ => self.type_expr_c(payload),
+                };
+                let Some(free_fn) = Self::own_free_fn(&c_ty) else {
+                    return;
+                };
+                if c_ty.ends_with('*') {
+                    self.emit_line(format_args!("{free_fn}(({c_ty}){ptr}({bag}));"));
+                } else {
+                    let p = self.fresh("bagp");
+                    self.emit_line(format_args!(
+                        "{c_ty} *{p} = ({c_ty}*){ptr}({bag});"
+                    ));
+                    self.emit_line(format_args!(
+                        "if ({p}) {{ {free_fn}(*{p}); free({p}); }}"
+                    ));
+                }
+            }
+        }
+    }
+
+    fn emit_struct_fields_drop(&mut self, ptr: &str, name: &str) {
+        let fields = self
+            .structs
+            .get(name)
+            .map(|info| info.field_types.clone())
+            .unwrap_or_default();
+        for (field, ty) in fields {
+            self.emit_inline_value_drop(&format!("{ptr}->{field}"), &ty);
+        }
+    }
+
+    fn emit_inline_value_drop(&mut self, value: &str, ty: &TypeExpr) {
+        if matches!(ty, TypeExpr::Named(name) if name == "string") {
+            self.emit_line(format_args!("mako_str_free({value});"));
+            return;
+        }
+        if matches!(ty, TypeExpr::Generic(name, _) if name == "Option" || name == "Result") {
+            self.emit_bag_drop(value, ty);
+            return;
+        }
+        if let TypeExpr::Named(name) = ty {
+            if self.structs.contains_key(name) {
+                let fields = self
+                    .structs
+                    .get(name)
+                    .map(|info| info.field_types.clone())
+                    .unwrap_or_default();
+                for (field, field_ty) in fields {
+                    self.emit_inline_value_drop(&format!("({value}).{field}"), &field_ty);
+                }
+                return;
+            }
+            if self.enums.get(name).is_some_and(|info| {
+                info.variants
+                    .values()
+                    .any(|(_, fields)| fields.contains(&"string"))
+            }) {
+                self.emit_line(format_args!("mako_str_free(({value}).s0);"));
+                self.emit_line(format_args!("mako_str_free(({value}).s1);"));
+                return;
+            }
+        }
+        let c_ty = match ty {
+            TypeExpr::Named(name) if name.starts_with("Mako") => name.clone(),
+            _ => self.type_expr_c(ty),
+        };
+        if let Some(free_fn) = Self::own_free_fn(&c_ty) {
+            self.emit_line(format_args!("{free_fn}({value});"));
+        }
+    }
+
     /// Heapify a POD slice view on escape (return / store). Identity if `cap>0`.
     fn ensure_slice_owned(&mut self, c_ty: &str, val: String) -> String {
         let own_fn = match c_ty {
@@ -3176,6 +3529,10 @@ impl Codegen {
             if let Item::Interface(iface) = item {
                 let methods: Vec<String> =
                     iface.methods.iter().map(|(n, _, _)| n.clone()).collect();
+                for (name, _, ret) in &iface.methods {
+                    self.fn_ret_types
+                        .insert(format!("{}_{name}", iface.name), ret.clone());
+                }
                 self.interfaces.push((iface.name.clone(), methods));
             }
         }
@@ -3244,6 +3601,7 @@ impl Codegen {
                     let ret = self.c_ret_type_resolved(f);
                     self.fn_rets.insert(f.name.clone(), ret);
                     if let Some(rt) = f.ret.as_ref() {
+                        self.fn_ret_types.insert(f.name.clone(), rt.clone());
                         if let Some(ec) = self.result_err_enum_c(rt) {
                             self.fn_result_err_enum.insert(f.name.clone(), ec);
                         }
@@ -3345,6 +3703,9 @@ impl Codegen {
                         .map(|t| self.type_expr_c(t))
                         .unwrap_or_else(|| "void".into());
                     self.fn_rets.insert(ext.name.clone(), ret);
+                    if let Some(ret) = ext.ret.as_ref() {
+                        self.fn_ret_types.insert(ext.name.clone(), ret.clone());
+                    }
                     self.fn_params.insert(
                         ext.name.clone(),
                         ext.params.iter().map(|p| self.type_expr_c(&p.ty)).collect(),
@@ -4108,6 +4469,11 @@ impl Codegen {
             StructInfo {
                 c_name,
                 fields,
+                field_types: s
+                    .fields
+                    .iter()
+                    .map(|(name, ty, _)| (name.clone(), ty.clone()))
+                    .collect(),
                 defaults,
             },
         );
@@ -11151,8 +11517,10 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                 mutable,
             } => {
                 if name == "_" {
-                    let (_, val) = self.emit_expr(init);
-                    if val != "/*void*/" {
+                    let (ty, val) = self.emit_expr(init);
+                    if val != "/*void*/"
+                        && !self.emit_discarded_bag(init, ann.as_ref(), &ty, &val)
+                    {
                         self.emit_line(format_args!("(void)({val});"));
                     }
                     return;
@@ -11736,8 +12104,10 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
             }
             Stmt::Assign { name, value } => {
                 if name == "_" {
-                    let (_, val) = self.emit_expr(value);
-                    if val != "/*void*/" {
+                    let (ty, val) = self.emit_expr(value);
+                    if val != "/*void*/"
+                        && !self.emit_discarded_bag(value, None, &ty, &val)
+                    {
                         self.emit_line(format_args!("(void)({val});"));
                     }
                     return;
@@ -11986,7 +12356,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
             }
             Stmt::Expr(e) => {
                 let (ty, val) = self.emit_expr(e);
-                if val != "/*void*/" {
+                if val != "/*void*/" && !self.emit_discarded_bag(e, None, &ty, &val) {
                     self.emit_line(format_args!("{val};"));
                 }
                 // SAFE: void-returning calls that take an owned binding as first arg
@@ -34807,4 +35177,28 @@ fn fold_const_c_loop_body(
         }
     }
     Some(ConstCLoopCtl::Fall)
+}
+
+#[cfg(test)]
+mod discard_tests {
+    use super::*;
+
+    #[test]
+    fn discarded_float_result_frees_its_error() {
+        let expr = Expr::Call {
+            callee: Box::new(Expr::Ident("Err".into())),
+            args: vec![Expr::String("failed".into())],
+        };
+        let mut codegen = Codegen::new();
+
+        assert!(codegen.emit_discarded_bag(
+            &expr,
+            None,
+            "MakoResultFloat",
+            "make_result()"
+        ));
+        assert!(codegen.out.contains("MakoResultFloat discard_"));
+        assert!(codegen.out.contains(".err);"));
+        assert!(!codegen.out.contains("err_kind"));
+    }
 }

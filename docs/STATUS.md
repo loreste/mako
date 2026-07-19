@@ -35,7 +35,7 @@ Program: [SOUNDNESS.md](SOUNDNESS.md) · model: [MEMORY_MODEL.md](MEMORY_MODEL.m
 | SAFE-002 ownership categories | Done |
 | SAFE-003/004 slice+map free (incl. monomorph) + reassign + nested release_replaced | Done (2026-07-18 audit) |
 | SAFE-005 string own + `string_view` | Done |
-| SAFE-006 CFG drops (return/break/continue/`?`/match) + double-free guards | Done (core) — bind-scope free, `__own` alias mut, move/clone store |
+| SAFE-006 CFG drops (return/break/continue/`?`/match/discard) + double-free guards | Done (core) — resolved bag payload cleanup, borrowed-bag guard, bind-scope free, `__own` alias mut, move/clone store |
 | SAFE-007 arena/slice escape + field store | Done |
 | SAFE-008 capture matrix | Done (core) |
 | SAFE-009 CMap gate | Done |
