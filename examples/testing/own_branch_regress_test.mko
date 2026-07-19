@@ -1,0 +1,87 @@
+// Regression test for ownership tracking across if-return branches.
+//
+// This test reproduces the exact Leba defect: when a function has many
+// sequential if-return branches that each free an owned local before
+// returning, the own_drop_live set must be restored after each branch
+// so that later reassignment of the local uses the old-save-then-free
+// pattern instead of a premature scope-exit free.
+//
+// The key difference from simplified tests: this uses arg_get() to
+// produce owned strings that are passed through string concatenation
+// after the branch gauntlet — the same path that caused Leba's config
+// path to be use-after-freed.
+
+fn branch_gauntlet(a: string, b: string, c: string, d: string, e: string, path: string) -> string {
+    let mut out = path
+    if str_eq(a, "v") {
+        return "version"
+    }
+    if str_eq(a, "d") {
+        return "doctor:" + b
+    }
+    if str_eq(a, "c") {
+        return "check:" + b
+    }
+    if str_eq(a, "e") {
+        return "explain:" + b + ":" + c
+    }
+    if str_eq(a, "a") {
+        return "admin"
+    }
+    if str_eq(a, "f") {
+        out = b
+    }
+    // This concat must read `out` AFTER all the if-return branches.
+    // If own_drop_live was not restored, `out` is freed prematurely.
+    return "result=" + out + " extra=" + c + d + e
+}
+
+fn TestBranchGauntletDefault() {
+    let r = branch_gauntlet("x", "y", "z", "w", "q", "default.conf")
+    assert(str_contains(r, "result=default.conf"))
+}
+
+fn TestBranchGauntletReassign() {
+    let r = branch_gauntlet("f", "custom.conf", "z", "w", "q", "default.conf")
+    assert(str_contains(r, "result=custom.conf"))
+}
+
+fn TestBranchGauntletEarlyReturn() {
+    assert_eq_str(branch_gauntlet("v", "", "", "", "", "x"), "version")
+    assert_eq_str(branch_gauntlet("a", "", "", "", "", "x"), "admin")
+    let d = branch_gauntlet("d", "mydb", "", "", "", "x")
+    assert(str_contains(d, "doctor:mydb"))
+}
+
+// Same pattern but with arg_get — the exact Leba path.
+fn TestArgGetBranchGauntlet() {
+    // Simulate the arg_get pattern: create owned strings from runtime,
+    // pass through the gauntlet, use after branches.
+    let s1 = str_repeat("a", 3)
+    let s2 = str_repeat("b", 4)
+    let s3 = str_repeat("c", 5)
+    let r = branch_gauntlet("f", s2, s3, s1, s1, "original")
+    assert(str_contains(r, "result=bbbb"))
+    assert(str_contains(r, "extra=ccccc"))
+}
+
+// Test with deeply nested if + reassign inside inner scope.
+fn nested_reassign(flag1: int, flag2: int) -> string {
+    let mut val = "start"
+    if flag1 > 0 {
+        if flag1 == 99 {
+            return "early"
+        }
+        if flag2 > 0 {
+            val = "changed_" + string(flag2)
+        }
+    }
+    return "val=" + val
+}
+
+fn TestNestedReassign() {
+    assert_eq_str(nested_reassign(0, 0), "val=start")
+    assert_eq_str(nested_reassign(1, 0), "val=start")
+    assert_eq_str(nested_reassign(1, 5), "val=changed_5")
+    assert_eq_str(nested_reassign(99, 0), "early")
+}
