@@ -30939,6 +30939,27 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                                         None
                                     }
                                 })
+                                .or_else(|| {
+                                    // Field receivers / let-bound chans from fields lose the
+                                    // local chan_ptr_elems key. Infer element type from the
+                                    // payload when it is a known struct/enum/tuple.
+                                    if self.structs.contains_key(&vty)
+                                        || self.enums.contains_key(&vty)
+                                        || vty.starts_with("MakoTup_")
+                                    {
+                                        Some(vty.clone())
+                                    } else if let Some(s) =
+                                        self.structs.values().find(|s| s.c_name == vty)
+                                    {
+                                        Some(s.c_name.clone())
+                                    } else if let Some(e) =
+                                        self.enums.values().find(|e| e.c_name == vty)
+                                    {
+                                        Some(e.c_name.clone())
+                                    } else {
+                                        None
+                                    }
+                                })
                                 .unwrap_or_else(|| "int64_t".into());
                             let cname = self
                                 .structs
