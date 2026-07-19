@@ -132,8 +132,12 @@ Pkg lock verification (PR #3): **17/17** `pkg::` unit tests pass.
 | Move live Own; clone alias / field / index | Double-free prevention |
 | Alias mut `{name}__own` freer flag | Param-alias double-free |
 | If/match arm live merge (`finish_arm_own_live`) | Path-insensitive free |
+| Rebind `own_bind_scope` on sequential same-name lets | Undeclared free (leba) |
+| `bind_scope_active` path-local free on early-return | Free only names in scope |
+| Clear arm freer flags on arm exit | Stale `__own` on siblings |
 
-Evidence: `match_own_free_test`, `double_free_guard_test`, `own_branch_regress_test` (ASan).
+Evidence: `match_own_free_test`, `double_free_guard_test`, `early_return_path_free_test`,
+`own_branch_regress_test` (ASan); leba `main.mko` build + core tests.
 
 ### LSP v0.5.0
 

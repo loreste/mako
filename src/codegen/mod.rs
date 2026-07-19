@@ -2417,11 +2417,23 @@ impl Codegen {
     }
 
     /// Record which own-drop scope owns this binding (params / lets / pattern binds).
+    ///
+    /// Sequential `if` arms often reuse the same source name (`let blob = …` in
+    /// arm A, later `let blob = …` in arm B). The C name is block-scoped, but
+    /// path-insensitive free tracking is function-wide — sticky first-bind would
+    /// attach arm B's free to arm A's scope index and emit `free(blob)` on paths
+    /// where `blob` was never declared (leba admin early-return compile errors).
     fn note_own_bind_scope(&mut self, mangled: &str) {
-        if self.own_bind_scope.contains_key(mangled) {
+        let idx = self.own_drop_scopes.len().saturating_sub(1);
+        if self.own_bind_scope.get(mangled) == Some(&idx) {
             return;
         }
-        let idx = self.own_drop_scopes.len().saturating_sub(1);
+        // Drop stale free entries / live bit from a prior same-name binding.
+        for scope in &mut self.own_drop_scopes {
+            scope.retain(|(n, _)| n != mangled);
+        }
+        self.own_drop_live.remove(mangled);
+        self.own_cond_flags.remove(mangled);
         self.own_bind_scope.insert(mangled.to_string(), idx);
     }
 
@@ -2628,17 +2640,36 @@ impl Codegen {
         self.fn_env_live.remove(name);
     }
 
+    /// True when `mangled`'s bind scope is still on the stack — i.e. the C
+    /// binding is in scope on this path. Path-insensitive free must not emit
+    /// `free(name)` / `name__own` for bindings whose block has already closed.
+    fn bind_scope_active(&self, mangled: &str) -> bool {
+        match self.own_bind_scope.get(mangled) {
+            Some(&idx) => idx < self.own_drop_scopes.len(),
+            // No bind record (cleared arm-local, or never noted): only free if
+            // still present in an active scope free-list entry.
+            None => self
+                .own_drop_scopes
+                .iter()
+                .any(|s| s.iter().any(|(n, _)| n == mangled)),
+        }
+    }
+
     /// Transfer ownership out of the function (return) — do not free this local.
     fn note_own_drop_moved(&mut self, mangled: &str) {
         self.own_drop_live.remove(mangled);
-        if self.own_cond_flags.contains(mangled) {
+        if self.own_cond_flags.contains(mangled) && self.bind_scope_active(mangled) {
             // Runtime freer flag: moved value must not be free'd at scope exit.
             self.emit_line(format_args!("{mangled}__own = 0;"));
         }
     }
 
     /// Emit free of one Own local (respects conditional `__own` freer flag).
+    /// Skips names not bound on this path (closed bind scope).
     fn emit_free_one(&mut self, name: &str, free_fn: &str) {
+        if !self.bind_scope_active(name) {
+            return;
+        }
         if self.own_cond_flags.contains(name) {
             if let Some(cty) = free_fn.strip_prefix("/*struct*/") {
                 self.emit_line(format_args!("if ({name}__own) {{"));
@@ -2721,6 +2752,20 @@ impl Codegen {
         after_live: std::collections::HashSet<String>,
     ) {
         self.pop_share_scope();
+        // Arm-local binds are done: drop freer flags and bind-scope entries so a
+        // later arm that reuses the same source name does not emit free/`__own`
+        // for a C binding that only exists in the finished arm's block.
+        let arm_locals: Vec<String> = self
+            .own_bind_scope
+            .iter()
+            .filter(|(_, &idx)| idx == arm_scope_idx)
+            .map(|(n, _)| n.clone())
+            .collect();
+        for n in &arm_locals {
+            self.own_bind_scope.remove(n);
+            self.own_cond_flags.remove(n);
+            self.own_drop_live.remove(n);
+        }
         let mut live = saved_live.clone();
         // Outer names that died in the arm (moved into another outer) stay dead.
         for name in saved_live {
@@ -2743,6 +2788,10 @@ impl Codegen {
             {
                 live.insert(name.clone());
             }
+        }
+        // Do not resurrect arm-locals cleared above.
+        for n in &arm_locals {
+            live.remove(n);
         }
         self.own_drop_live = live;
     }

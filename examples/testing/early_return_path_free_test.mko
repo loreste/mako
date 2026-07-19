@@ -1,0 +1,75 @@
+// Early-return must only free names bound on that path.
+// Sequential if-arms reusing `let blob` must not free undeclared blob on siblings.
+
+fn read_blob() -> string {
+    return str_repeat("B", 4)
+}
+
+struct Resp {
+    handled: int
+    status: int
+    body: string
+}
+
+// First arm binds blob; later sibling early-returns must not free that name.
+fn handle_reuse_name(path: string, method: string) -> Resp {
+    if str_eq(path, "/other") {
+        let blob = read_blob()
+        return Resp {
+            handled: 1,
+            status: 200,
+            body: "other:" + blob,
+        }
+    }
+    if str_eq(path, "/auth") {
+        if str_eq(method, "GET") {
+            let blob = read_blob()
+            return Resp {
+                handled: 1,
+                status: 200,
+                body: "get:" + blob,
+            }
+        }
+        if not str_eq(method, "POST") {
+            return Resp {
+                handled: 1,
+                status: 405,
+                body: "method-not-allowed",
+            }
+        }
+        let frontend = "fe"
+        if str_eq(frontend, "bad") {
+            return Resp {
+                handled: 1,
+                status: 400,
+                body: "bad-fe",
+            }
+        }
+        let blob0 = read_blob()
+        let blob = blob0 + "-post"
+        return Resp {
+            handled: 1,
+            status: 200,
+            body: "post:" + blob,
+        }
+    }
+    return Resp {
+        handled: 0,
+        status: 0,
+        body: "skip",
+    }
+}
+
+fn TestReuseNameEarlyReturn() {
+    let a = handle_reuse_name("/other", "GET")
+    assert_eq(a.status, 200)
+    let b = handle_reuse_name("/auth", "GET")
+    assert_eq(b.status, 200)
+    assert(str_contains(b.body, "get:"))
+    let c = handle_reuse_name("/auth", "PUT")
+    assert_eq(c.status, 405)
+    assert_eq_str(c.body, "method-not-allowed")
+    let d = handle_reuse_name("/auth", "POST")
+    assert_eq(d.status, 200)
+    assert(str_contains(d.body, "post:"))
+}

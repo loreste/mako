@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-### Ownership free (SAFE-006 depth) — no double-free
+### Ownership free (SAFE-006 depth) — no double-free / path-local free
 
 - **Match Own free:** Result/Option pattern payloads (string, slice, map, Err
   string, struct Own fields) free at arm exit unless moved into the match result.
@@ -15,8 +15,11 @@
   caller/param buffer when a reassign arm is not taken.
 - **If/match arm live merge:** arm-local free via pop; outer moves stay dead;
   outer reassigns stay live for fallthrough free.
-- Evidence (ASan): `match_own_free_test`, `double_free_guard_test` (incl.
-  `TestPassLocalPathNoReassign`), `own_branch_regress_test`, ownership suite.
+- **Path-local early-return free:** free only names whose bind scope is still
+  active; rebind `own_bind_scope` when sequential arms reuse `let blob`; clear
+  arm freer flags on arm exit (fixes undeclared `free(blob)` in leba admin).
+- Evidence (ASan): `match_own_free_test`, `double_free_guard_test`,
+  `early_return_path_free_test`, `own_branch_regress_test`; leba `main.mko` build.
 
 ## 0.2.5 — 2026-07-19
 
