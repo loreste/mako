@@ -2,7 +2,7 @@
 
 Mako compiles packages to **cached native objects** under `.mako/cache/` (or `$MAKO_CACHE`), then links. Unchanged units skip `clang -c`.
 
-**Product tip:** **0.2.4**. Generic monomorphs and channel ptr helpers participate
+**Product tip:** **0.2.5**. Generic monomorphs and channel ptr helpers participate
 in unit fingerprints like any other generated C.
 
 ## Layout

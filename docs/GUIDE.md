@@ -111,7 +111,7 @@ mako check .
 mako run -p app
 ```
 
-`mako version` (also `mako --version` / `-V`) prints `mako version mako0.2.4 darwin/arm64`. Use `mako version -v` for an optional commit line.
+`mako version` (also `mako --version` / `-V`) prints `mako version mako0.2.5 darwin/arm64`. Use `mako version -v` for an optional commit line.
 Override headers if needed: `export MAKO_RUNTIME=/path/to/runtime`.
 
 Incremental builds are **on by default** (`-j` / `MAKO_JOBS`, `--no-incremental` to disable) — see [BUILD.md](BUILD.md). Release: `mako build --release` → `-O3 -flto` ([PERFORMANCE.md](PERFORMANCE.md): optimized on microbenches).
@@ -122,7 +122,7 @@ scope, prefer `hold` over `share`, short-lived POD lits stay on the stack
 `now_ns` + `./scripts/bench.sh`. See [SPEED.md](SPEED.md) · [SOUNDNESS.md](SOUNDNESS.md).
 
 ```mko
-// Ownership (0.2.4): free at scope exit; views never free
+// Ownership (0.2.5): free at scope exit; views never free
 let mut xs = make([]int, 0, 16)
 xs = append(xs, 1)
 let v: string_view = "route"     // no malloc, no free

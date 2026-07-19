@@ -13,7 +13,7 @@ places.
 **Status: experimental/alpha (v0.2.5).** The language works and compiles real
 programs, but the surface is young. Expect breaking changes, missing features,
 and bugs. The ownership model is actively being hardened — the full test suite
-(356 programs) passes under AddressSanitizer with zero memory errors, but edge
+(357 programs) passes under AddressSanitizer with zero memory errors, but edge
 cases remain. This is not yet suitable for production use without careful
 evaluation.
 
@@ -22,7 +22,7 @@ LSP hover/inlay-hints/signature-help, per-test timeouts, honest docs.
 **0.2.4:** ownership drop system (slices/maps/strings/`?`),
 `string_view`, stack POD array lits, scheduler pool, channel ownership,
 struct field free, lockfile verification.  
-**Next:** **0.2.5** — LSP depth, broader sanitizer coverage, tooling.  
+**Next:** **0.3.0** — cross-platform hardening, complex ownership tracking.  
 See [docs/ROADMAP.md](docs/ROADMAP.md) · [docs/SOUNDNESS.md](docs/SOUNDNESS.md).
 
 [mako-lang.com](https://mako-lang.com) · [Status](docs/STATUS.md) · [Roadmap](docs/ROADMAP.md) · [Guide](docs/GUIDE.md) · [Book](docs/book/) · [Soundness](docs/SOUNDNESS.md) · [Memory model](docs/MEMORY_MODEL.md)
@@ -73,7 +73,7 @@ Options:
 ```bash
 curl -fsSL …/install-linux.sh | bash -s -- --prefix /opt/mako --yes
 curl -fsSL …/install-linux.sh | bash -s -- --no-deps    # skip clang install
-curl -fsSL …/install-linux.sh | bash -s -- --version v0.2.4
+curl -fsSL …/install-linux.sh | bash -s -- --version v0.2.5
 ```
 
 **You do not need Rust or cargo on the machine that runs Mako.**
@@ -411,7 +411,7 @@ mako test --sanitize address examples/testing  # ASan
 mako test --race examples/testing/crew_fan_test.mko  # TSan
 ```
 
-356 test programs. The suite runs under AddressSanitizer and
+357 test programs. The suite runs under AddressSanitizer and
 ThreadSanitizer in CI. Tests that require optional external libraries
 (SQLite, QUIC) soft-skip when the dep is absent — they verify API shape
 but not full integration. See [TEST_CATEGORIES.md](examples/testing/TEST_CATEGORIES.md)

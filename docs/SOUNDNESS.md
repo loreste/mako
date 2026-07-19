@@ -1,6 +1,6 @@
 # Mako soundness and runtime program
 
-**Product tip:** 0.2.4+ · **Last sync:** 2026-07-18
+**Product tip:** 0.2.5+ · **Last sync:** 2026-07-18
 
 This is the program of record for memory soundness and structured concurrency.
 Each ID has a status, contract, and acceptance bar. Work stays **fast by
@@ -169,7 +169,7 @@ Related: [SECURITY.md](SECURITY.md) · [MEMORY_MODEL.md](MEMORY_MODEL.md) ·
 
 ## Implementation order
 
-### Shipped (0.2.4)
+### Shipped (0.2.4, extended in 0.2.5)
 
 1. **SAFE-001 / 002 / 009 / 010 / RT-001 / RT-005 seed / RT-006** — bounds, categories, CMap, docs, crew, census.
 2. **SAFE-003 / 004** — owning slice/map free (built-in + monomorph); views; return transfer; free-on-reassign; nested free (safe).

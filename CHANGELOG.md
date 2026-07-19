@@ -2,6 +2,54 @@
 
 ## Unreleased
 
+## 0.2.5 — 2026-07-19
+
+**mako0.2.5** (`CARGO_PKG_VERSION`). 357 Mako tests + 75 Rust tests, 0 failures.
+
+### Memory safety audit
+
+- 10 codegen ownership bugs fixed (return-from-field clone, consumed-argument
+  transfer, arena scope suppression, stack-view boxing in Result/Option,
+  Ok/Err/Some transfer_own_on_return, struct-borrow from indexing, string array
+  reassign shallow-free, save/restore own_drop_live across if-branches, source
+  temp moved on reassign, consumed-arg restricted to known functions)
+- Full suite passes under AddressSanitizer with zero errors
+- Proven regression test: `own_branch_regress_test` fails on pre-fix compiler,
+  passes on fixed compiler (verified both directions)
+
+### Package integrity (PR #4 + hardening)
+
+- Immutable publication: reject same name+version republish
+- PACKAGE.sha256 content digest computed in staging before atomic rename
+- Digest verified on resolution — tampered packages block dependency resolution
+- Fail closed on missing digest (deleted = rejected)
+- Staged manifest revalidation before publication
+- `mako pkg seal` for legacy package migration (TOFU)
+- Lockfile content_hash as independent trust anchor
+- Scoped package names, symlink rejection, input validation
+
+### LSP v0.5.0
+
+- Hover with real type info (fn signatures, struct definitions, inferred types)
+- Inlay hints (inferred types on let bindings without annotations)
+- Signature help with ParameterInformation objects
+
+### Infrastructure
+
+- Per-test timeout (60s default, MAKO_TEST_TIMEOUT_SECS override)
+- ASan + UBSan + GCC CI jobs added
+- Windows CI corrected (valid test paths, core subset)
+- Installer: `tar --no-same-owner`, graceful read-only shell RC handling
+- Release tarballs normalized (`--owner=0 --group=0`)
+
+### Documentation
+
+- Removed all language comparisons and overstated claims
+- Explicitly marked as experimental/alpha
+- No unverified performance claims
+- Test categories documented (core vs soft-fallback vs live integration)
+- Repo description and website meta updated for honesty
+
 ## 0.2.4 — 2026-07-18
 
 **mako0.2.4** (`CARGO_PKG_VERSION`).
@@ -1122,7 +1170,7 @@ Patch release for production edge stability and CI green. `mako version` reports
 - **Empty string singleton** — `""` / zero-len clone avoids `malloc`; `mako_str_free`
   skips the singleton (safe for map key/value free).
 - **Map load ~75%** — fewer rehashes; `MAKO_LIKELY` on map set/get and slice append.
-- Bench gate still **PASS** (≤2× Rust fib/slice/map).
+- Bench gate still **PASS** (≤2× baseline on fib/slice/map microbenchmarks).
 
 ## 0.1.0 — 2026-07-13 (UUID/ULID + speed/safety)
 
@@ -1135,7 +1183,7 @@ Patch release for production edge stability and CI green. `mako version` reports
 - **ULID** — `ulid_new` / `ulid_string` / `ulid_parse` / `ulid_timestamp_ms` (same 16-byte POD)
 - **Copy + Send** — `Uuid` is Copy (NLL re-read, crew kick heap-boxed pack)
 - Pack: `std/uuid` · tests: `examples/testing/uuid_test.mko` (9 tests)
-- **Speed gate** — `./scripts/bench-gate.sh` PASS (fib/slice/map ≤2× Rust; local run faster than Rust)
+- **Speed gate** — `./scripts/bench-gate.sh` PASS (fib/slice/map ≤2× baseline threshold)
 
 ## 0.1.0 — 2026-07-13 (language residuals wave 41)
 
