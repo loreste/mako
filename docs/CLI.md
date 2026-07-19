@@ -446,6 +446,17 @@ components. Components may not start with `.`, and versions must be SemVer.
 mako pkg publish
 ```
 
+### mako pkg seal
+
+Generate a `PACKAGE.sha256` content digest for a legacy package directory
+that was published before v0.2.5. This is trust-on-first-use: it
+legitimizes whatever content currently exists. Run this only on packages
+whose content you have verified. Will not overwrite an existing digest.
+
+```bash
+mako pkg seal .mako/registry/util/1.0.0
+```
+
 ### mako pkg audit
 
 Check `mako.lock` against advisory and license policy files.

@@ -2831,24 +2831,29 @@ version = "0.1.0"
         write_lockfile(&app, &lock).unwrap();
         // Tamper: modify source AND recompute digest (attacker with fs access).
         let pkg_dir = app.join(".mako").join("deps").join("e2erec");
-        if pkg_dir.join("lib.mko").exists() {
-            fs::write(pkg_dir.join("lib.mko"), "fn INJECTED() {}\n").unwrap();
-            let new_digest = compute_package_digest(&pkg_dir).unwrap();
-            fs::write(pkg_dir.join("PACKAGE.sha256"), format!("{new_digest}  .\n")).unwrap();
-        }
-        // pkg_install should catch the content_hash mismatch from the lockfile.
-        let result = pkg_install(&app, true);
-        if let Err(e) = result {
-            assert!(
-                e.contains("integrity mismatch") || e.contains("content_hash"),
-                "expected lockfile integrity error, got: {e}"
-            );
-        }
-        // Either way, verify the content_hash changed.
-        if pkg_dir.join("lib.mko").exists() {
-            let new_hash = hash_path_dep(&pkg_dir).unwrap_or_default();
-            assert_ne!(new_hash, orig_hash, "content_hash must differ after tampering");
-        }
+        assert!(
+            pkg_dir.join("lib.mko").exists(),
+            "lib.mko must exist in deps copy to test tampering"
+        );
+        fs::write(pkg_dir.join("lib.mko"), "fn INJECTED() {}\n").unwrap();
+        let new_digest = compute_package_digest(&pkg_dir).unwrap();
+        fs::write(
+            pkg_dir.join("PACKAGE.sha256"),
+            format!("{new_digest}  .\n"),
+        )
+        .unwrap();
+        // Verify the content_hash actually changed from the original.
+        let new_hash = hash_path_dep(&pkg_dir).unwrap();
+        assert_ne!(
+            new_hash, orig_hash,
+            "content_hash must differ after tampering"
+        );
+        // pkg_install MUST catch the content_hash mismatch from the lockfile.
+        let err = pkg_install(&app, true).unwrap_err();
+        assert!(
+            err.contains("integrity mismatch"),
+            "expected lockfile integrity error, got: {err}"
+        );
         let _ = fs::remove_dir_all(&dir);
     }
 
