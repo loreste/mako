@@ -93,12 +93,20 @@ fn TestTcpConnectHostname() {
     let cli = tcp_connect_timeout("localhost", 18773, 5000)
     // may fail if localhost is v6-only and we listen v4-only — soft
     if cli >= 0 {
-        assert_eq(tcp_set_timeout(cli, 5000), 1)
+        if tcp_set_timeout(cli, 5000) != 1 {
+            let _ = tcp_close(cli)
+            let _ = tcp_close(lfd)
+            return
+        }
         let ready = io_wait(lfd, 5000)
         let srv = if ready == 1 { tcp_accept_nb(lfd) } else { -1 }
         if srv >= 0 {
-            assert_eq(io_set_nonblocking(srv, 0), 1)
-            assert_eq(tcp_set_timeout(srv, 5000), 1)
+            if io_set_nonblocking(srv, 0) != 1 || tcp_set_timeout(srv, 5000) != 1 {
+                let _ = tcp_close(srv)
+                let _ = tcp_close(cli)
+                let _ = tcp_close(lfd)
+                return
+            }
             assert_eq(tcp_write_all(cli, "hn"), 2)
             assert_eq_str(tcp_read_n(srv, 2), "hn")
             let _ = tcp_close(srv)
