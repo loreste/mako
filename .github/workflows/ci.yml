@@ -69,12 +69,21 @@ jobs:
           MAKO_LIVE_NGHTTP2: ""
           MAKO_LIVE_QUIC: ""
 
-      - name: Core test suite (Windows — no OpenSSL/POSIX deps)
+      - name: Default test suite (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: cargo run --quiet --release -- test examples/testing
+        continue-on-error: true
+        env:
+          MAKO_TEST_TIMEOUT_SECS: "90"
+          MAKO_LIVE_TLS: ""
+          MAKO_LIVE_NGHTTP2: ""
+          MAKO_LIVE_QUIC: ""
+
+      - name: Core language tests (Windows — must pass)
         if: runner.os == 'Windows'
         shell: bash
         run: |
-          # Run tests that don't require OpenSSL, SQLite, or POSIX-only APIs.
-          # This ensures the compiler and core language work on Windows.
           cargo run --quiet --release -- test examples/testing/match_guard_test.mko
           cargo run --quiet --release -- test examples/testing/match_or_test.mko
           cargo run --quiet --release -- test examples/testing/generic_bounds_test.mko
@@ -84,6 +93,14 @@ jobs:
           cargo run --quiet --release -- test examples/testing/generic_enum_test.mko
           cargo run --quiet --release -- test examples/testing/fstring_fmt_test.mko
           cargo run --quiet --release -- test examples/testing/asan_stress_test.mko
+          cargo run --quiet --release -- test examples/testing/own_branch_regress_test.mko
+          cargo run --quiet --release -- test examples/testing/double_free_guard_test.mko
+          cargo run --quiet --release -- test examples/testing/match_own_free_test.mko
+          cargo run --quiet --release -- test examples/testing/early_return_path_free_test.mko
+          cargo run --quiet --release -- test examples/testing/add_test.mko
+          cargo run --quiet --release -- test examples/testing/context_mako_test.mko
+          cargo run --quiet --release -- test examples/testing/json_mako_test.mko
+          cargo run --quiet --release -- test examples/testing/collections_mako_test.mko
         env:
           MAKO_TEST_TIMEOUT_SECS: "90"
 
