@@ -11583,6 +11583,8 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                                 if Self::expr_is_fresh_own(value) {
                                     self.register_own_drop(&mn, &cty);
                                 }
+                                // SAFE: source temp was moved to dest — don't free it on scope exit.
+                                self.note_own_drop_moved(&val);
                                 return;
                             } else {
                                 // Slice/nested header: free old only if backing moved.
@@ -11595,6 +11597,8 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                                     self.emit_line(format_args!("{mn} = {val};"));
                                 }
                                 self.emit_reassign_free(&cty, &old, &mn, &ff);
+                                // SAFE: source temp was moved — don't free on scope exit.
+                                self.note_own_drop_moved(&val);
                                 if Self::expr_is_fresh_own(value) {
                                     self.register_own_drop(&mn, &cty);
                                 }
