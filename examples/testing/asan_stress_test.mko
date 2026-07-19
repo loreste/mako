@@ -146,3 +146,60 @@ fn TestStringReassign() {
     s = s + "!"
     assert_eq_str(s, "hello world!")
 }
+
+// --- Pattern 11: String reassign after if-return branches (leba path bug) ---
+// The critical pattern: many sequential if-return branches that free an
+// owned local on return, then the local is reassigned in a later branch.
+// Without save/restore of own_drop_live, the reassign sees the local as
+// not-owned and emits a scope-exit free of the new value.
+fn leba_path_pattern(mode: int) -> string {
+    let mut path = "default.conf"
+    if mode == 1 {
+        return "version"
+    }
+    if mode == 2 {
+        return "doctor"
+    }
+    if mode == 3 {
+        return "check"
+    }
+    if mode == 4 {
+        return "explain"
+    }
+    if mode == 5 {
+        path = "custom.conf"
+    }
+    return "path=" + path
+}
+
+fn TestLebaPathPattern() {
+    assert_eq_str(leba_path_pattern(0), "path=default.conf")
+    assert_eq_str(leba_path_pattern(1), "version")
+    assert_eq_str(leba_path_pattern(5), "path=custom.conf")
+}
+
+// --- Pattern 12: Reassign from function call in nested if ---
+fn TestReassignFromCallInNestedIf() {
+    let mut name = "initial"
+    if true {
+        if true {
+            name = str_repeat("x", 5)
+        }
+    }
+    assert_eq_str(name, "xxxxx")
+}
+
+// --- Pattern 13: Multiple string reassigns across branches ---
+fn TestMultiReassignBranches() {
+    let mut s = "a"
+    if true {
+        s = s + "b"
+    }
+    if true {
+        s = s + "c"
+    }
+    if true {
+        s = s + "d"
+    }
+    assert_eq_str(s, "abcd")
+}

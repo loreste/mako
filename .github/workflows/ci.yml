@@ -75,12 +75,14 @@ jobs:
         run: |
           # Run tests that don't require OpenSSL, SQLite, or POSIX-only APIs.
           # This ensures the compiler and core language work on Windows.
-          cargo run --quiet --release -- test examples/testing/match_test.mko
+          cargo run --quiet --release -- test examples/testing/match_guard_test.mko
+          cargo run --quiet --release -- test examples/testing/match_or_test.mko
           cargo run --quiet --release -- test examples/testing/generic_bounds_test.mko
           cargo run --quiet --release -- test examples/testing/collections_list_test.mko
           cargo run --quiet --release -- test examples/testing/slice_test.mko
-          cargo run --quiet --release -- test examples/testing/enum_test.mko
-          cargo run --quiet --release -- test examples/testing/fstring_test.mko
+          cargo run --quiet --release -- test examples/testing/enum_method_test.mko
+          cargo run --quiet --release -- test examples/testing/generic_enum_test.mko
+          cargo run --quiet --release -- test examples/testing/fstring_fmt_test.mko
           cargo run --quiet --release -- test examples/testing/asan_stress_test.mko
         env:
           MAKO_TEST_TIMEOUT_SECS: "90"
