@@ -14,6 +14,7 @@ fn TestTcpConnectLocalhostHe() {
     assert_eq(io_wait(lfd, 5000), 1)
     let srv = tcp_accept_nb(lfd)
     assert(srv >= 0)
+    assert_eq(io_set_nonblocking(srv, 0), 1)
     assert_eq(tcp_set_timeout(srv, 5000), 1)
     assert_eq(tcp_write_all(cli, "he-ok"), 5)
     assert_eq_str(tcp_read_n(srv, 5), "he-ok")
@@ -42,6 +43,7 @@ fn TestTcpListenIpv6Loopback() {
     assert_eq(io_wait(lfd, 5000), 1)
     let srv = tcp_accept_nb(lfd)
     assert(srv >= 0)
+    assert_eq(io_set_nonblocking(srv, 0), 1)
     assert_eq(tcp_set_timeout(srv, 5000), 1)
     let peer = tcp_peer_addr(srv)
     // peer may be [::1]:port or ::1 style
@@ -95,6 +97,7 @@ fn TestTcpConnectHostname() {
         let ready = io_wait(lfd, 5000)
         let srv = if ready == 1 { tcp_accept_nb(lfd) } else { -1 }
         if srv >= 0 {
+            assert_eq(io_set_nonblocking(srv, 0), 1)
             assert_eq(tcp_set_timeout(srv, 5000), 1)
             assert_eq(tcp_write_all(cli, "hn"), 2)
             assert_eq_str(tcp_read_n(srv, 2), "hn")
