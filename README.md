@@ -17,7 +17,8 @@ and bugs. The ownership model is actively being hardened — the full test suite
 cases remain. This is not yet suitable for production use without careful
 evaluation.
 
-**0.2.5 highlights:** memory safety audit (8 codegen bugs fixed, ASan clean),
+**0.2.5 highlights:** memory safety audit (codegen free paths ASan clean),
+match Own free + bind-scope drops + alias-mut freer flag (no double-free),
 LSP hover/inlay-hints/signature-help, per-test timeouts, honest docs.  
 **0.2.4:** ownership drop system (slices/maps/strings/`?`),
 `string_view`, stack POD array lits, scheduler pool, channel ownership,

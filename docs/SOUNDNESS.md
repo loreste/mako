@@ -1,6 +1,6 @@
 # Mako soundness and runtime program
 
-**Product tip:** 0.2.5+ · **Last sync:** 2026-07-18
+**Product tip:** 0.2.5+ · **Last sync:** 2026-07-19
 
 This is the program of record for memory soundness and structured concurrency.
 Each ID has a status, contract, and acceptance bar. Work stays **fast by
@@ -66,13 +66,16 @@ Related: [SECURITY.md](SECURITY.md) · [MEMORY_MODEL.md](MEMORY_MODEL.md) ·
 | **Done** | Owning `string` free on scope exit / reassign. Surface type **`string_view`**: zero-copy lit binding, `str_as_view(s)`, `str_to_owned(v)`; views never free. Empty singleton never freed. |
 | **Evidence** | `string_drop_test`, `string_view_test`. |
 
-### SAFE-006 — Branch / return / loop / `?` correct drop insertion — **Done** (core)
+### SAFE-006 — Branch / return / loop / `?` / match correct drop insertion — **Done** (core)
 
 | | |
 |--|--|
-| **Done** | Block exit free; return transfer + materialize-before-free; **break/continue** free owns in loop-body scopes; **`?` early-return** frees all live owns/shares/fn-envs + runs defers (`try_drop_test`). |
-| **Evidence** | `cfg_drop_break_test`, `slice_return_own_test`, `try_drop_test`, ASan probes. |
-| **Residual** | Labeled multi-loop edge cases if/when labels land. |
+| **Done** | Block exit free; return transfer + materialize-before-free; **break/continue** free owns in loop-body scopes; **`?` early-return** frees all live owns/shares/fn-envs + runs defers; **match** Result/Option Own payloads free at arm exit (or move into match result); if/match arm-local free via pop-before-restore. |
+| **Double-free guards** | Live Own **moves** on store/arm value; **aliases** and field/index borrows **clone**. Free attaches to **bind scope** (not nested if/match arm). Alias muts (`let mut out = path`) use a runtime `{name}__own` flag so path-insensitive free never frees a still-aliased caller/param buffer when a reassign arm is not taken. |
+| **Code** | `own_drop_scopes` / `own_bind_scope` / `own_cond_flags`; `prepare_own_store_rhs`; `finish_arm_own_live`; match pattern `register_own_drop`; `transfer_or_clone_expr_own`. |
+| **Evidence** | `cfg_drop_break_test`, `slice_return_own_test`, `try_drop_test`, `own_branch_regress_test`, `match_own_free_test`, `double_free_guard_test` (incl. param-alias no-reassign), ASan ownership suite. |
+| **Speed** | Move when the source is the registered freer (no extra alloc). Clone only for aliases / field-index borrows. Conditional free is one branch per alias mut. |
+| **Residual** | Dropping an unmatched `Result`/`Option` bag without unboxing (payload free when bag is discarded); labeled multi-loop edge cases if/when multi-level labels land. |
 
 ### SAFE-007 — Reject borrowed and arena value escapes — **Done** (core)
 
@@ -174,7 +177,7 @@ Related: [SECURITY.md](SECURITY.md) · [MEMORY_MODEL.md](MEMORY_MODEL.md) ·
 1. **SAFE-001 / 002 / 009 / 010 / RT-001 / RT-005 seed / RT-006** — bounds, categories, CMap, docs, crew, census.
 2. **SAFE-003 / 004** — owning slice/map free (built-in + monomorph); views; return transfer; free-on-reassign; nested free (safe).
 3. **SAFE-005** — `string_view` + owning string free.
-4. **SAFE-006 (break/continue/return/`?`)** — loop-exit cleanup; return transfer + materialize; `?` early free.
+4. **SAFE-006 (break/continue/return/`?`/match)** — loop-exit cleanup; return transfer + materialize; `?` early free; match Own free; bind-scope free; alias-mut `__own` flag; move/clone store rules (no double-free).
 5. **SAFE-007 / 008** — arena/slice escape; capture matrix.
 6. **RT-002 / 003 / 004** — scheduler pool + spawn_blocking; channel take-send ownership.
 7. **Struct Own free** — deep free of string/slice fields on drop.
@@ -186,6 +189,7 @@ Related: [SECURITY.md](SECURITY.md) · [MEMORY_MODEL.md](MEMORY_MODEL.md) ·
 2. RT-004 monomorph channel take matrix beyond int/float/string.
 3. Deeper scheduler (dynamic resize, work-stealing) if pool soaks demand it.
 4. **RT-005** — randomized longer soaks.
+5. Result/Option bag drop when discarded without match (payload free).
 
 See also [ROADMAP.md](ROADMAP.md) · [ROADMAP_IMPL.md](../ROADMAP_IMPL.md).
 

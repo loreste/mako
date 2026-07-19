@@ -43,7 +43,7 @@ Optional depth (TSan soaks, monomorph take-send) remains open.
 | SAFE-003 | Slice drops, views, return transfer, free-on-reassign, nested release_replaced | **Done** |
 | SAFE-004 | Map free (built-in + monomorph) | **Done** |
 | SAFE-005 | String free + surface `string_view` | **Done** |
-| SAFE-006 | CFG drops (return / break / continue / `?` / block exit) | **Done** (core) |
+| SAFE-006 | CFG drops (return / break / continue / `?` / match / block exit); bind-scope free; alias-mut `__own`; move/clone store (no double-free) | **Done** (core) |
 | SAFE-007 | Escape checks (arena return/store, slice view) | **Done** |
 | SAFE-008 | Capture matrix (kick/fan) | **Done** (core) |
 | SAFE-009 | CMap readers/writer gate | **Done** |
@@ -71,6 +71,7 @@ Optional depth (TSan soaks, monomorph take-send) remains open.
 2. RT-004 monomorph channel take matrix beyond int/float/string.
 3. Deeper scheduler (work-stealing / dynamic resize) if pool soaks demand it.
 4. **RT-005** — randomized longer select/channel soaks.
+5. Free Own payloads when a `Result`/`Option` bag is discarded without match.
 
 ---
 

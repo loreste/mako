@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+### Ownership free (SAFE-006 depth) — no double-free
+
+- **Match Own free:** Result/Option pattern payloads (string, slice, map, Err
+  string, struct Own fields) free at arm exit unless moved into the match result.
+- **Bind-scope free:** Own free records attach to the binding’s scope, not a
+  nested if/match arm (fixes early free of outer muts like `out = b` in `if`).
+- **Move vs clone on store / arm value:** live registered Own **moves**; aliases
+  and field/index borrows **clone** (no double-free of one buffer by two freers).
+- **Alias mut freer flag:** `let mut out = path` emits `out__own`; free is
+  `if (out__own) …` so path-insensitive free never frees a still-aliased
+  caller/param buffer when a reassign arm is not taken.
+- **If/match arm live merge:** arm-local free via pop; outer moves stay dead;
+  outer reassigns stay live for fallthrough free.
+- Evidence (ASan): `match_own_free_test`, `double_free_guard_test` (incl.
+  `TestPassLocalPathNoReassign`), `own_branch_regress_test`, ownership suite.
+
 ## 0.2.5 — 2026-07-19
 
 **mako0.2.5** (`CARGO_PKG_VERSION`). 357 Mako tests + 75 Rust tests, 0 failures.

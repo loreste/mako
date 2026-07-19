@@ -15,7 +15,11 @@ This chapter covers each in detail.
 ## Scope-based cleanup: the default
 
 Most values in Mako live on the stack or are heap-allocated and freed when their
-enclosing scope exits. This is the default -- no annotation needed.
+enclosing scope exits. This is the default -- no annotation needed. Owning
+strings, slices, maps, and struct Own fields free at scope exit, reassign,
+break/continue, return transfer, `?` early-return, and **match** arm exit
+(unless moved into a larger result). Live Own values **move** into a new freer;
+aliases and field/index borrows **clone** so only one freer runs.
 
 ```mko
 fn main() {

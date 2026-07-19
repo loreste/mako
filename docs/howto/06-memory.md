@@ -7,8 +7,12 @@ the Mako type system.
 
 **Deeper contracts:** ownership categories and SAFE/RT drop/escape rules are
 in [SOUNDNESS.md](../SOUNDNESS.md) and [MEMORY_MODEL.md](../MEMORY_MODEL.md).
-As of **0.2.4**, owning slices, maps, strings, and struct Own fields free at
-scope exit, reassign, break/continue, return transfer, and `?` early-return.
+As of **0.2.5**, owning slices, maps, strings, and struct Own fields free at
+scope exit, reassign, break/continue, return transfer, `?` early-return, and
+**match** Own payloads. Free is **once** per allocation: live owns **move** into
+a new freer; aliases and field/index borrows **clone**. Alias muts that start as
+a view of another owner (`let mut out = path`) only free after they take Own
+(conditional freer flag — no double-free with the caller).
 
 ## Default bindings
 
@@ -29,6 +33,47 @@ let w = str_as_view(owned)
 
 For most local computation, this is all you need. Prefer `string_view` for
 read-only hot paths; use `make([]T, 0, n)` when you will grow.
+
+### Match and free
+
+Matching on `Result` / `Option` Own payloads takes ownership of the payload for
+the arm. The arm frees it unless you move it into a larger expression result:
+
+```mko
+fn load() -> Result[string, string] {
+    return Ok("payload")
+}
+
+fn use_match() {
+    match load() {
+        Ok(s) => {
+            // s freed at end of arm
+            assert(str_len(s) > 0)
+        },
+        Err(e) => {
+            // e freed at end of arm
+            assert(str_len(e) > 0)
+        },
+    }
+    // Move into a let — only the let frees
+    let s = match load() {
+        Ok(x) => x,
+        Err(e) => e,
+    }
+}
+```
+
+### Alias mut reassign
+
+```mko
+fn branch(a: string, path: string) -> string {
+    let mut out = path          // alias of path until reassigned
+    if str_eq(a, "f") {
+        out = "custom"          // out becomes freer of its Own buffer
+    }
+    return out                  // free only if out took Own (not the raw param)
+}
+```
 
 ## hold -- unique ownership
 

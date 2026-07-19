@@ -2,8 +2,10 @@
 
 Mako compiles to C, then to native machine code via clang. There is no garbage
 collector. Memory is managed through ownership (`hold`/`share`) and arena
-allocation. This chapter explains how Mako keeps your programs both fast and
-safe, and the tools you have when you need to push further in either direction.
+allocation. Own free is **once** per allocation: live owns **move** (no extra
+alloc); aliases and field borrows **clone** only when required. This chapter
+explains how Mako keeps your programs both fast and safe, and the tools you
+have when you need to push further in either direction.
 
 ---
 

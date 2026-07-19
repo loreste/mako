@@ -1,10 +1,10 @@
 # Mako status (adversarial / verified)
 
-Last inventory: **2026-07-18** · product **mako0.2.5** (`CARGO_PKG_VERSION`).
+Last inventory: **2026-07-19** · product **mako0.2.5** (`CARGO_PKG_VERSION`).
 
 Unique Mako surface · pack/pull · map/slice/bag monomorphs · package-per-directory ·
-const-fn depth (match/while/for/strings) · suite **357 test programs + 75 Rust unit tests** (0 failures,
-ASan clean) · [The Mako Book](book/).
+const-fn depth (match/while/for/strings) · suite **357+ test programs + 75 Rust unit tests** (0 failures,
+ASan clean ownership suite) · [The Mako Book](book/).
 
 **Book:** [The Mako Book](book/) · **Guide:** [GUIDE.md](GUIDE.md) · **Identity:** [IDENTITY.md](IDENTITY.md) · **Pain points:** [PAIN_POINTS.md](PAIN_POINTS.md) · **Build:** [BUILD.md](BUILD.md) · **Stdlib:** [STDLIB.md](STDLIB.md) · **Roadmap:** [ROADMAP.md](ROADMAP.md) · **Changelog:** [../CHANGELOG.md](../CHANGELOG.md) · **Release:** [RELEASE.md](RELEASE.md) · **Soundness:** [SOUNDNESS.md](SOUNDNESS.md) · **Memory model:** [MEMORY_MODEL.md](MEMORY_MODEL.md).
 
@@ -35,7 +35,7 @@ Program: [SOUNDNESS.md](SOUNDNESS.md) · model: [MEMORY_MODEL.md](MEMORY_MODEL.m
 | SAFE-002 ownership categories | Done |
 | SAFE-003/004 slice+map free (incl. monomorph) + reassign + nested release_replaced | Done (2026-07-18 audit) |
 | SAFE-005 string own + `string_view` | Done |
-| SAFE-006 CFG drops (return/break/continue/`?`) | Done (core) |
+| SAFE-006 CFG drops (return/break/continue/`?`/match) + double-free guards | Done (core) — bind-scope free, `__own` alias mut, move/clone store |
 | SAFE-007 arena/slice escape + field store | Done |
 | SAFE-008 capture matrix | Done (core) |
 | SAFE-009 CMap gate | Done |
@@ -96,7 +96,9 @@ Program: [SOUNDNESS.md](SOUNDNESS.md) · model: [MEMORY_MODEL.md](MEMORY_MODEL.m
 
 | Check | Result |
 |-------|--------|
+| Ownership free + no double-free (match Own, bind-scope, alias mut `__own`, move/clone) | PASS — ASan: `double_free_guard_test`, `match_own_free_test`, `own_branch_regress_test`, ownership suite |
 | `cargo build --release` | PASS |
+| `cargo test --release` | PASS — 75 unit tests |
 | `map[K]Option[T]` / `map[K]Result[T,E]` | PASS — `map_option_result_test` (11 tests) |
 | Security residuals (at-rest, limits, cancel, mTLS, SCRAM cbind) | PASS — `security_residuals_test` |
 | Security product polish (path size, PEM, CSR/self-signed, prom/trace, SCRAM-PLUS helpers) | PASS — `security_product_test` |
