@@ -17692,6 +17692,13 @@ impl TypeChecker {
         match expr {
             Expr::Slice { base, .. } => {
                 if let Some(base_name) = Self::race_write_root(base) {
+                    // String slices return owned copies (mako_str_slice clones).
+                    // Only reject non-string slice views that would dangle.
+                    if let Some((ty, _)) = self.lookup(&base_name) {
+                        if matches!(ty, Type::String) {
+                            return Ok(());
+                        }
+                    }
                     return Err(TypeError::new(format!(
                         "cannot return a slice view of local `{base_name}`"
                     ))
