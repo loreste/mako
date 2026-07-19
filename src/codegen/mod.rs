@@ -11619,7 +11619,9 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                 if self.own_drop_live.contains(&val) {
                     self.note_own_drop_moved(&val);
                 }
-                if self.current_arena.is_none() {
+                // Only register the destination if it wasn't already owned.
+                // Re-registering in an inner scope would cause premature free.
+                if self.current_arena.is_none() && !self.own_drop_live.contains(&mn) {
                     if let Some(cty) = self.locals.get(name).cloned() {
                         if Self::expr_is_fresh_own(value) {
                             self.register_own_drop(&mn, &cty);
