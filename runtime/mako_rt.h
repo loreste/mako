@@ -8592,6 +8592,7 @@ static inline MakoString mako_realpath(MakoString path) {
     if (n == 0 || n >= sizeof(out)) return mako_str_from_cstr("");
     return mako_str_from_cstr(out);
 #elif defined(MAKO_WASI)
+    /* WASI preview1 has no realpath; empty is the existing unsupported/error sentinel. */
     return mako_str_from_cstr("");
 #else
     char *r = realpath(pbuf, NULL);

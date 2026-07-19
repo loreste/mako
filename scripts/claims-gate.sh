@@ -12,6 +12,11 @@ CACHE=${MAKO_CACHE:-/tmp/mako-claims-gate-cache-$(date +%s)}
 TMP=$(mktemp -d "${TMPDIR:-/tmp}/mako-claims.XXXXXX")
 trap 'rm -rf "$TMP"' EXIT
 
+if ! command -v rg >/dev/null 2>&1; then
+    echo "claims-gate: ripgrep (rg) is required" >&2
+    exit 1
+fi
+
 if git -C "$ROOT" ls-files --error-unmatch docs/CLAIMS.md >/dev/null 2>&1; then
     echo "claims-gate: docs/CLAIMS.md must remain local and untracked" >&2
     exit 1

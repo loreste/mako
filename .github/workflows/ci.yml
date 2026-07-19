@@ -274,7 +274,7 @@ jobs:
           ./target/release/mako test --race examples/testing/crew_drain_test.mko
 
   asan:
-    name: ASan memory safety
+    name: ASan invalid memory access
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -286,7 +286,8 @@ jobs:
         run: cargo build --release
       - name: Run full suite under AddressSanitizer
         env:
-          # Runtime globals live until process exit; this job checks invalid memory access.
+          # Test programs do not yet reclaim every owned allocation at exit.
+          # Keep this job focused on use-after-free and out-of-bounds access.
           ASAN_OPTIONS: detect_leaks=0
           MAKO_TEST_TIMEOUT_SECS: "120"
         run: |
