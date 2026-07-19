@@ -70,13 +70,13 @@ Related: [SECURITY.md](SECURITY.md) · [MEMORY_MODEL.md](MEMORY_MODEL.md) ·
 
 | | |
 |--|--|
-| **Done** | Block exit free; return transfer + materialize-before-free; **break/continue** free owns in loop-body scopes; **`?` early-return** frees all live owns/shares/fn-envs + runs defers; **match** Result/Option Own payloads free at arm exit (or move into match result); if/match arm-local free via pop-before-restore. |
+| **Done** | Block exit free; return transfer + materialize-before-free; **break/continue** free owns in loop-body scopes; **`?` early-return** frees all live owns/shares/fn-envs + runs defers; **match** Result/Option Own payloads free at arm exit (or move into match result); fresh discarded bags free resolved payload shapes while indexed/field bags remain borrowed; if/match arm-local free via pop-before-restore. |
 | **Double-free guards** | Live Own **moves** on store/arm value; **aliases** and field/index borrows **clone**. Free attaches to **bind scope** (not nested if/match arm). Alias muts (`let mut out = path`) use a runtime `{name}__own` flag so path-insensitive free never frees a still-aliased caller/param buffer when a reassign arm is not taken. |
 | **Path-local free** | Early-return free only names whose bind scope is still on the stack (`bind_scope_active`). Sequential if-arms reusing `let blob` rebind `own_bind_scope` per arm; finished arms clear freer flags so sibling early-returns do not emit `free(blob)` for an undeclared C local (leba admin). |
 | **Code** | `own_drop_scopes` / `own_bind_scope` / `own_cond_flags`; `prepare_own_store_rhs`; `finish_arm_own_live`; `bind_scope_active` / `emit_free_one`; match pattern `register_own_drop`; `transfer_or_clone_expr_own`. |
-| **Evidence** | `cfg_drop_break_test`, `slice_return_own_test`, `try_drop_test`, `own_branch_regress_test`, `match_own_free_test`, `double_free_guard_test`, `early_return_path_free_test`, ASan ownership suite; leba `main.mko` builds. |
+| **Evidence** | `cfg_drop_break_test`, `slice_return_own_test`, `try_drop_test`, `own_branch_regress_test`, `match_own_free_test`, `discarded_bag_drop_test`, `discarded_bag_borrow_test`, `double_free_guard_test`, `early_return_path_free_test`, ASan ownership suite; leba `main.mko` builds. |
 | **Speed** | Move when the source is the registered freer (no extra alloc). Clone only for aliases / field-index borrows. Conditional free is one branch per alias mut. |
-| **Residual** | Dropping an unmatched `Result`/`Option` bag without unboxing (payload free when bag is discarded); labeled multi-loop edge cases if/when multi-level labels land. |
+| **Residual** | Payload cleanup for discarded expressions whose source type cannot yet be recovered by codegen; labeled multi-loop edge cases if/when multi-level labels land. |
 
 ### SAFE-007 — Reject borrowed and arena value escapes — **Done** (core)
 
@@ -190,7 +190,7 @@ Related: [SECURITY.md](SECURITY.md) · [MEMORY_MODEL.md](MEMORY_MODEL.md) ·
 2. RT-004 monomorph channel take matrix beyond int/float/string.
 3. Deeper scheduler (dynamic resize, work-stealing) if pool soaks demand it.
 4. **RT-005** — randomized longer soaks.
-5. Result/Option bag drop when discarded without match (payload free).
+5. Make discarded bag cleanup type-complete when typed expression metadata reaches codegen.
 
 See also [ROADMAP.md](ROADMAP.md) · [ROADMAP_IMPL.md](../ROADMAP_IMPL.md).
 

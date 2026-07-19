@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Ownership free
+
+- **Discarded bag free:** explicitly ignored `Option` and `Result` values free
+  resolved string, slice, map, struct, nested bag, and error payloads. Borrowed
+  bags from fields and indexes remain owned by their container.
+- Evidence (ASan): `discarded_bag_drop_test`, `discarded_bag_borrow_test`.
+
 ## 0.3.0 — 2026-07-19
 
 **mako0.3.0** (`CARGO_PKG_VERSION`). 360 Mako tests + 79 Rust tests, 0 failures.

@@ -63,6 +63,18 @@ fn use_match() {
 }
 ```
 
+### Explicit discard
+
+`let _ = value` and `_ = value` destroy the resolved payload of a fresh
+`Option` or `Result`. Common string, slice, map, struct, and nested-bag shapes
+are supported. Bags borrowed from fields or indexes are left untouched so the
+containing value remains valid. A debug compiler warns when it cannot resolve
+the payload type and therefore cannot complete cleanup.
+
+```mko
+let _ = load()
+```
+
 ### Alias mut reassign
 
 ```mko
