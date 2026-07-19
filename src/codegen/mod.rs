@@ -11614,6 +11614,11 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                 } else {
                     self.emit_line(format_args!("{mn} = {val};"));
                 }
+                // SAFE: if val is a temp that was registered for own-drop,
+                // it's now moved to the destination — don't free it on scope exit.
+                if self.own_drop_live.contains(&val) {
+                    self.note_own_drop_moved(&val);
+                }
                 if self.current_arena.is_none() {
                     if let Some(cty) = self.locals.get(name).cloned() {
                         if Self::expr_is_fresh_own(value) {
