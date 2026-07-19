@@ -74,7 +74,7 @@ Options:
 ```bash
 curl -fsSL …/install-linux.sh | bash -s -- --prefix /opt/mako --yes
 curl -fsSL …/install-linux.sh | bash -s -- --no-deps    # skip clang install
-curl -fsSL …/install-linux.sh | bash -s -- --version v0.2.5
+curl -fsSL …/install-linux.sh | bash -s -- --version v0.3.0
 ```
 
 **You do not need Rust or cargo on the machine that runs Mako.**

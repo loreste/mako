@@ -14,7 +14,7 @@ ASan clean ownership suite) · [The Mako Book](book/).
 
 | Scope | Approx. |
 |-------|---------|
-| **Product version** | **0.3.0** ([release](https://github.com/loreste/mako/releases/tag/v0.2.5)) |
+| **Product version** | **0.3.0** ([release](https://github.com/loreste/mako/releases/tag/v0.3.0)) |
 | **MVP / usable language** | Core compiler/runtime scope is exercised; this is not a production-readiness claim |
 | **STATUS north-star** | Tracked scope is explicit; optional depth below remains |
 | **Mako identity (preferred syntax)** | Checklist complete — [IDENTITY.md](IDENTITY.md); not a maturity score |
