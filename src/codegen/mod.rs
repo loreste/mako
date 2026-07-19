@@ -11819,9 +11819,15 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                 self.emit_line(format_args!("if ({c}) {{"));
                 self.indent += 1;
                 self.push_share_scope();
+                // SAFE: save own_drop_live so that frees inside a return-branch
+                // don't permanently remove outer locals from the live set.
+                let saved_live = self.own_drop_live.clone();
                 for s in &then_block.stmts {
                     self.emit_stmt(s);
                 }
+                // Restore: if the then-branch returned/exited, its removals should
+                // not affect the continuation (the else or post-if code).
+                self.own_drop_live = saved_live;
                 self.pop_share_scope();
                 self.indent -= 1;
                 if let Some(eb) = else_block {
