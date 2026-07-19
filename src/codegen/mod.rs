@@ -70,6 +70,14 @@ pub struct Codegen {
     own_drop_scopes: Vec<Vec<(String, String)>>,
     /// Still-live own-drop keys (mangled); skip if already freed.
     own_drop_live: std::collections::HashSet<String>,
+    /// Mangled local → `own_drop_scopes` index where the binding was introduced.
+    /// Own free entries must be recorded in that scope (not a nested if/match arm),
+    /// or arm-exit free double-frees / use-after-frees outer muts (`out = b` in `if`).
+    own_bind_scope: std::collections::HashMap<String, usize>,
+    /// Mangled locals that use a runtime `{name}__own` flag. Alias muts
+    /// (`let mut out = path`) start with `__own == 0`; path-insensitive free after
+    /// a conditional reassign must not free the alias when the arm did not run.
+    own_cond_flags: std::collections::HashSet<String>,
     /// `own_drop_scopes.len()` at each loop body entry (for break/continue cleanup).
     loop_drop_bases: Vec<usize>,
     /// Mutable closure captures: maps original var name → heap cell C variable name.
@@ -205,6 +213,8 @@ impl Codegen {
             fn_env_live: std::collections::HashSet::new(),
             own_drop_scopes: Vec::new(),
             own_drop_live: std::collections::HashSet::new(),
+            own_bind_scope: std::collections::HashMap::new(),
+            own_cond_flags: std::collections::HashSet::new(),
             loop_drop_bases: Vec::new(),
             mut_capture_cells: HashMap::new(),
             mut_self_fns: std::collections::HashSet::new(),
@@ -1772,6 +1782,7 @@ impl Codegen {
         if kind == "string" {
             self.locals.insert(bindings[0].clone(), "MakoString".into());
             self.line(&format!("MakoString {b} = {scrut}.ok_s;"));
+            self.register_own_drop(&b, "MakoString");
         } else if kind == "float" {
             self.locals.insert(bindings[0].clone(), "double".into());
             self.line(&format!("double {b} = {scrut}.ok_f;"));
@@ -1795,6 +1806,7 @@ impl Codegen {
             self.line(&format!(
                 "if ({p}) {{ {b} = *{p}; free({p}); }} else {{ memset(&{b}, 0, sizeof({b})); }}"
             ));
+            self.register_own_drop(&b, &cname);
         } else if kind == "slice" {
             let p = self.fresh("ops");
             self.locals.insert(bindings[0].clone(), "MakoIntArray".into());
@@ -1805,6 +1817,7 @@ impl Codegen {
             self.line(&format!(
                 "if ({p}) {{ {b} = *{p}; free({p}); }} else {{ {b}.data = NULL; {b}.len = 0; {b}.cap = 0; }}"
             ));
+            self.register_own_drop(&b, "MakoIntArray");
         } else if kind == "slice_str" {
             let p = self.fresh("ops");
             self.locals.insert(bindings[0].clone(), "MakoStrArray".into());
@@ -1815,6 +1828,7 @@ impl Codegen {
             self.line(&format!(
                 "if ({p}) {{ {b} = *{p}; free({p}); }} else {{ {b}.data = NULL; {b}.len = 0; {b}.cap = 0; }}"
             ));
+            self.register_own_drop(&b, "MakoStrArray");
         } else if kind == "slice_float" {
             let p = self.fresh("ops");
             self.locals.insert(bindings[0].clone(), "MakoFloatArray".into());
@@ -1825,6 +1839,7 @@ impl Codegen {
             self.line(&format!(
                 "if ({p}) {{ {b} = *{p}; free({p}); }} else {{ {b}.data = NULL; {b}.len = 0; {b}.cap = 0; }}"
             ));
+            self.register_own_drop(&b, "MakoFloatArray");
         } else if kind == "slice_struct" {
             let sn = self
                 .option_some_structs
@@ -1846,6 +1861,7 @@ impl Codegen {
             self.line(&format!(
                 "if ({p}) {{ {b} = *{p}; free({p}); }} else {{ {b}.data = NULL; {b}.len = 0; {b}.cap = 0; }}"
             ));
+            self.register_own_drop(&b, &arr);
         } else if kind == "map"
             || kind == "map_si"
             || kind == "map_ii"
@@ -1877,6 +1893,7 @@ impl Codegen {
             self.line(&format!(
                 "{cty} {b} = ({cty})mako_option_some_ptr({scrut});"
             ));
+            self.register_own_drop(&b, &cty);
         } else if kind.starts_with("chan_") {
             // Option[chan[T]]: pointer in value slot (not heap-boxed header).
             let cty = match kind {
@@ -2341,6 +2358,9 @@ impl Codegen {
                 false
             }
             Expr::Call { .. } | Expr::Method { .. } => true,
+            // Match / if-expr results take ownership of arm values (pattern binds
+            // move or outer owns are cloned into the result temp).
+            Expr::Match { .. } | Expr::IfExpr { .. } => true,
             _ => false,
         }
     }
@@ -2396,6 +2416,15 @@ impl Codegen {
         out
     }
 
+    /// Record which own-drop scope owns this binding (params / lets / pattern binds).
+    fn note_own_bind_scope(&mut self, mangled: &str) {
+        if self.own_bind_scope.contains_key(mangled) {
+            return;
+        }
+        let idx = self.own_drop_scopes.len().saturating_sub(1);
+        self.own_bind_scope.insert(mangled.to_string(), idx);
+    }
+
     fn register_own_drop(&mut self, mangled: &str, c_ty: &str) {
         // Memory-safe by construction. Do not disable — fix free placement bugs.
         let ff = if let Some(ff) = Self::own_free_fn(c_ty) {
@@ -2409,7 +2438,21 @@ impl Codegen {
             return;
         }
         self.own_drop_live.insert(mangled.to_string());
-        if let Some(scope) = self.own_drop_scopes.last_mut() {
+        // Already listed in some scope (re-activate after early-return restore) — done.
+        for scope in &self.own_drop_scopes {
+            if scope.iter().any(|(n, _)| n == mangled) {
+                return;
+            }
+        }
+        // Attach free to the binding's scope, not a nested if/match arm.
+        let idx = self
+            .own_bind_scope
+            .get(mangled)
+            .copied()
+            .unwrap_or_else(|| self.own_drop_scopes.len().saturating_sub(1));
+        if let Some(scope) = self.own_drop_scopes.get_mut(idx) {
+            scope.push((mangled.to_string(), ff));
+        } else if let Some(scope) = self.own_drop_scopes.last_mut() {
             scope.push((mangled.to_string(), ff));
         }
     }
@@ -2467,13 +2510,7 @@ impl Codegen {
     fn emit_own_drops_for_scope(&mut self, entries: Vec<(String, String)>) {
         for (name, free_fn) in entries.into_iter().rev() {
             if self.own_drop_live.remove(&name) {
-                if let Some(cty) = free_fn.strip_prefix("/*struct*/") {
-                    for (fname, ff) in self.struct_own_field_frees(cty) {
-                        self.emit_line(format_args!("{ff}({name}.{fname});"));
-                    }
-                } else {
-                    self.emit_line(format_args!("{free_fn}({name});"));
-                }
+                self.emit_free_one(&name, &free_fn);
             }
         }
     }
@@ -2516,7 +2553,7 @@ impl Codegen {
             let entries = self.own_drop_scopes[i].clone();
             for (name, free_fn) in entries.into_iter().rev() {
                 if self.own_drop_live.contains(&name) {
-                    self.emit_line(format_args!("{free_fn}({name});"));
+                    self.emit_free_one(&name, &free_fn);
                 }
             }
         }
@@ -2594,6 +2631,36 @@ impl Codegen {
     /// Transfer ownership out of the function (return) — do not free this local.
     fn note_own_drop_moved(&mut self, mangled: &str) {
         self.own_drop_live.remove(mangled);
+        if self.own_cond_flags.contains(mangled) {
+            // Runtime freer flag: moved value must not be free'd at scope exit.
+            self.emit_line(format_args!("{mangled}__own = 0;"));
+        }
+    }
+
+    /// Emit free of one Own local (respects conditional `__own` freer flag).
+    fn emit_free_one(&mut self, name: &str, free_fn: &str) {
+        if self.own_cond_flags.contains(name) {
+            if let Some(cty) = free_fn.strip_prefix("/*struct*/") {
+                self.emit_line(format_args!("if ({name}__own) {{"));
+                self.indent += 1;
+                for (fname, ff) in self.struct_own_field_frees(cty) {
+                    self.emit_line(format_args!("{ff}({name}.{fname});"));
+                }
+                self.emit_line(format_args!("{name}__own = 0;"));
+                self.indent -= 1;
+                self.line("}");
+            } else {
+                self.emit_line(format_args!(
+                    "if ({name}__own) {{ {free_fn}({name}); {name}__own = 0; }}"
+                ));
+            }
+        } else if let Some(cty) = free_fn.strip_prefix("/*struct*/") {
+            for (fname, ff) in self.struct_own_field_frees(cty) {
+                self.emit_line(format_args!("{ff}({name}.{fname});"));
+            }
+        } else {
+            self.emit_line(format_args!("{free_fn}({name});"));
+        }
     }
 
     /// Snapshot ownership/share/fn-env tracking for path-insensitive control flow.
@@ -2639,10 +2706,83 @@ impl Codegen {
         self.fn_env_scopes = fs;
     }
 
+    /// After an if/match arm: free arm-locals via `pop_share_scope`, then merge
+    /// ownership tracking so that:
+    /// - Early-return / path-insensitive codegen still sees pre-arm live names
+    ///   that the arm did not move (return restores its own snap first).
+    /// - Outer muts reassigned in the arm (`out = b`) stay live for fallthrough
+    ///   free (blind restore would drop them → leak; arm-scoped register would
+    ///   free at arm exit → UAF/double-free).
+    /// - Outer names moved during the arm stay dead (no double-free with dest).
+    fn finish_arm_own_live(
+        &mut self,
+        saved_live: &std::collections::HashSet<String>,
+        arm_scope_idx: usize,
+        after_live: std::collections::HashSet<String>,
+    ) {
+        self.pop_share_scope();
+        let mut live = saved_live.clone();
+        // Outer names that died in the arm (moved into another outer) stay dead.
+        for name in saved_live {
+            if !after_live.contains(name) {
+                if self
+                    .own_bind_scope
+                    .get(name)
+                    .is_some_and(|&idx| idx < arm_scope_idx)
+                {
+                    live.remove(name);
+                }
+            }
+        }
+        // Outer names live after the arm (including new Own registration) stay live.
+        for name in &after_live {
+            if self
+                .own_bind_scope
+                .get(name)
+                .is_some_and(|&idx| idx < arm_scope_idx)
+            {
+                live.insert(name.clone());
+            }
+        }
+        self.own_drop_live = live;
+    }
+
     /// True when expr is a field access on a struct (e.g. `self.name`, `s.color`).
     /// Returning such a field borrows from the struct — must clone for ownership transfer.
     fn is_field_borrow_return(expr: &Expr) -> bool {
         matches!(expr, Expr::Field { .. })
+    }
+
+    /// RHS for store into a new Own destination: move live owner, else clone borrows/aliases.
+    /// Prevents double-free when both the source owner and the destination free the same data.
+    fn prepare_own_store_rhs(&mut self, value: &Expr, c_ty: &str, val: String) -> String {
+        if Self::own_free_fn(c_ty).is_none() && self.struct_own_field_frees(c_ty).is_empty() {
+            return val;
+        }
+        match value {
+            Expr::Ident(n) => {
+                let mn = mangle(n);
+                if self.own_drop_live.contains(&mn) {
+                    // Real owner — transfer into destination.
+                    self.note_own_drop_moved(&mn);
+                    val
+                } else if self.locals.contains_key(n) {
+                    // Alias of another live owner (or field-bound name) — clone.
+                    self.clone_own_val(c_ty, &val)
+                } else {
+                    // Codegen temp not tracked for free — destination becomes sole freer.
+                    val
+                }
+            }
+            Expr::Field { .. } | Expr::Index { .. } => self.clone_own_val(c_ty, &val),
+            _ => {
+                // Fresh owns (calls, concat, lits): if emit produced a tracked temp, move it.
+                if self.own_drop_live.contains(&val) {
+                    self.note_own_drop_moved(&val);
+                }
+                val
+            }
+        }
     }
 
     /// If a call/method is a known consuming function (append, push, pop, insert,
@@ -10319,6 +10459,8 @@ impl Codegen {
         self.fn_env_live.clear();
         self.own_drop_scopes.clear();
         self.own_drop_live.clear();
+        self.own_bind_scope.clear();
+        self.own_cond_flags.clear();
         self.loop_drop_bases.clear();
         self.result_err_enums.clear();
         self.result_ok_kinds.clear();
@@ -10351,6 +10493,8 @@ impl Codegen {
                 self.type_expr_c(&p.ty)
             };
             self.locals.insert(p.name.clone(), pty);
+            // Params live for the whole function body (scope 0 after push_share_scope).
+            self.note_own_bind_scope(&mangle(&p.name));
             self.register_local_type_metadata(&p.name, &p.ty);
             if let TypeExpr::Fn(ps, ret) = &p.ty {
                 self.fn_ptr_casts
@@ -10955,7 +11099,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                 init,
                 ty: ann,
                 ownership,
-                ..
+                mutable,
             } => {
                 if name == "_" {
                     let (_, val) = self.emit_expr(init);
@@ -11116,6 +11260,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                     }
                 }
                 self.locals.insert(name.clone(), ty.clone());
+                self.note_own_bind_scope(&mangle(name));
                 // Annotated lets: Result/Option nest metadata from the type.
                 if let Some(ann_ty) = ann {
                     self.register_local_type_metadata(name, ann_ty);
@@ -11327,6 +11472,24 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                     // is registered for free — never move or dual-register, or
                     // if-arm free + outer free double-frees / UAFs.
                     // Explicit moves remain `hold let`.
+                    // Mutable alias may later take ownership in a branch; free must
+                    // be conditional so path-insensitive drop does not free the
+                    // still-aliased caller/param buffer when the branch is not taken.
+                    let may_own = Self::own_free_fn(&ty).is_some()
+                        || !self.struct_own_field_frees(&ty).is_empty();
+                    if *mutable && may_own && self.current_arena.is_none() {
+                        self.emit_line(format_args!("int {name}__own = 0;"));
+                        self.own_cond_flags.insert(name.to_string());
+                    }
+                } else {
+                    // Other non-fresh inits (field/index borrow, etc.): same flag
+                    // if mutable Own — later assign may path-insensitively free.
+                    let may_own = Self::own_free_fn(&ty).is_some()
+                        || !self.struct_own_field_frees(&ty).is_empty();
+                    if *mutable && may_own && self.current_arena.is_none() {
+                        self.emit_line(format_args!("int {name}__own = 0;"));
+                        self.own_cond_flags.insert(name.to_string());
+                    }
                 }
             }
             Stmt::LetMulti { names, init, .. } => {
@@ -11545,68 +11708,39 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                     val
                 };
                 let mn = mangle(name);
-                // Move ownership when assigning from an owning local (e.g. out = ap_temp
-                // after append). Without this, free of the temp freess the value now held
-                // by `out` (double-free / use-after-free under SAFE-003).
-                if let Expr::Ident(src) = value {
-                    let src_m = mangle(src);
-                    if self.own_drop_live.contains(&src_m) {
-                        self.note_own_drop_moved(&src_m);
-                        // Destination takes ownership for later free.
-                        if let Some(cty) = self.locals.get(name).cloned() {
-                            if Self::own_free_fn(&cty).is_some() {
-                                // Free previous dest value if it was owned and data differs.
-                                if self.own_drop_live.contains(&mn) {
-                                    if let Some(ff) = Self::own_free_fn(&cty) {
-                                        if cty.ends_with('*') {
-                                            self.emit_line(format_args!("{ff}({mn});"));
-                                        } else if cty == "MakoString" {
-                                            let old = self.fresh("old");
-                                            self.line(&format!("MakoString {old} = {mn};"));
-                                            self.emit_line(format_args!("{mn} = {val};"));
-                                            self.emit_line(format_args!(
-                                                "if ({old}.data != {mn}.data) mako_str_free({old});"
-                                            ));
-                                            return;
-                                        } else {
-                                            let old = self.fresh("old");
-                                            self.line(&format!("{cty} {old} = {mn};"));
-                                            self.emit_line(format_args!("{mn} = {val};"));
-                                            self.emit_reassign_free(&cty, &old, &mn, &ff);
-                                            return;
-                                        }
-                                    }
-                                }
-                                if let Some(cell) = self.mut_capture_cells.get(name).cloned() {
-                                    self.emit_line(format_args!("*{cell} = {val};"));
-                                } else {
-                                    self.emit_line(format_args!("{mn} = {val};"));
-                                }
-                                if self.current_arena.is_none() {
-                                    self.register_own_drop(&mn, &cty);
-                                }
-                                return;
-                            }
-                        }
-                    }
-                }
+                // Double-free guard: move live owns, clone aliases/field/index borrows.
+                // Destination always becomes a freer for Own types after this store.
+                let cty_for_rhs = self
+                    .locals
+                    .get(name)
+                    .cloned()
+                    .unwrap_or_else(|| vty.clone());
+                let val = self.prepare_own_store_rhs(value, &cty_for_rhs, val);
+                let cond_own = self.own_cond_flags.contains(&mn);
                 // SAFE-003 residual: free previous owned value on reassign.
                 // Skip inside arena — arena frees all in bulk.
                 if self.current_arena.is_none() {
                 if let Some(cty) = self.locals.get(name).cloned() {
                     if let Some(ff) = Self::own_free_fn(&cty) {
-                        if self.own_drop_live.contains(&mn) {
+                        if self.own_drop_live.contains(&mn) || cond_own {
                             if cty.ends_with('*') {
                                 // Map handle: free old pointer then overwrite.
-                                self.emit_line(format_args!("{ff}({mn});"));
+                                if cond_own {
+                                    self.emit_line(format_args!(
+                                        "if ({mn}__own) {ff}({mn});"
+                                    ));
+                                } else {
+                                    self.emit_line(format_args!("{ff}({mn});"));
+                                }
                                 if let Some(cell) = self.mut_capture_cells.get(name).cloned() {
                                     self.emit_line(format_args!("*{cell} = {val};"));
                                 } else {
                                     self.emit_line(format_args!("{mn} = {val};"));
                                 }
-                                if Self::expr_is_fresh_own(value) {
-                                    self.register_own_drop(&mn, &cty);
+                                if cond_own {
+                                    self.emit_line(format_args!("{mn}__own = 1;"));
                                 }
+                                self.register_own_drop(&mn, &cty);
                                 return;
                             } else if cty == "MakoString" {
                                 let old = self.fresh("old");
@@ -11616,14 +11750,17 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                                 } else {
                                     self.emit_line(format_args!("{mn} = {val};"));
                                 }
-                                self.emit_line(format_args!(
-                                    "if ({old}.data != {mn}.data) mako_str_free({old});"
-                                ));
-                                if Self::expr_is_fresh_own(value) {
-                                    self.register_own_drop(&mn, &cty);
+                                if cond_own {
+                                    self.emit_line(format_args!(
+                                        "if ({mn}__own && {old}.data != {mn}.data) mako_str_free({old});"
+                                    ));
+                                    self.emit_line(format_args!("{mn}__own = 1;"));
+                                } else {
+                                    self.emit_line(format_args!(
+                                        "if ({old}.data != {mn}.data) mako_str_free({old});"
+                                    ));
                                 }
-                                // SAFE: source temp was moved to dest — don't free it on scope exit.
-                                self.note_own_drop_moved(&val);
+                                self.register_own_drop(&mn, &cty);
                                 return;
                             } else {
                                 // Slice/nested header: free old only if backing moved.
@@ -11635,14 +11772,32 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                                 } else {
                                     self.emit_line(format_args!("{mn} = {val};"));
                                 }
-                                self.emit_reassign_free(&cty, &old, &mn, &ff);
-                                // SAFE: source temp was moved — don't free on scope exit.
-                                self.note_own_drop_moved(&val);
-                                if Self::expr_is_fresh_own(value) {
-                                    self.register_own_drop(&mn, &cty);
+                                if cond_own {
+                                    self.emit_line(format_args!("if ({mn}__own) {{"));
+                                    self.indent += 1;
+                                    self.emit_reassign_free(&cty, &old, &mn, &ff);
+                                    self.indent -= 1;
+                                    self.line("}");
+                                    self.emit_line(format_args!("{mn}__own = 1;"));
+                                } else {
+                                    self.emit_reassign_free(&cty, &old, &mn, &ff);
                                 }
+                                self.register_own_drop(&mn, &cty);
                                 return;
                             }
+                        } else {
+                            // Dest not yet tracked (first Own write into a non-own or
+                            // restored after early-return tracking) — store then register.
+                            if let Some(cell) = self.mut_capture_cells.get(name).cloned() {
+                                self.emit_line(format_args!("*{cell} = {val};"));
+                            } else {
+                                self.emit_line(format_args!("{mn} = {val};"));
+                            }
+                            if cond_own {
+                                self.emit_line(format_args!("{mn}__own = 1;"));
+                            }
+                            self.register_own_drop(&mn, &cty);
+                            return;
                         }
                     }
                 }
@@ -11653,15 +11808,9 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                 } else {
                     self.emit_line(format_args!("{mn} = {val};"));
                 }
-                // SAFE: if val is a temp that was registered for own-drop,
-                // it's now moved to the destination — don't free it on scope exit.
-                if self.own_drop_live.contains(&val) {
-                    self.note_own_drop_moved(&val);
-                }
-                // Do NOT re-register the destination for own-drop here.
-                // Reassigning into an existing local that was already registered
-                // (even if it was freed on an early-return branch) must not create
-                // a new scope entry — that causes premature free when the inner scope closes.
+                // Do NOT re-register the destination for own-drop here when it was
+                // already live — that would double-free on scope exit. Non-own types
+                // fall through without registration.
             }
             Stmt::IndexAssign { base, index, value } => {
                 let (bty, b) = self.emit_expr(base);
@@ -11669,12 +11818,9 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                 let (vty, mut v) = self.emit_expr(value);
                 // Heapify POD stack/view slices before storing into maps/nested arrays.
                 v = self.ensure_slice_owned(&vty, v);
-                // Transfer ownership of an owning local written into a map/array so
-                // SAFE free does not free the same backing store after set stores
-                // the header by value (e.g. map[string][]int vals[slot] = cur).
-                if let Expr::Ident(n) = value {
-                    self.note_own_drop_moved(&mangle(n));
-                }
+                // Move live owns / clone aliases & field borrows so container free
+                // does not double-free with a still-live source owner.
+                v = self.prepare_own_store_rhs(value, &vty, v);
                 // Layout-compatible tuple retag: (int, Option[string]) map vs lit that
                 // monomorphized as MakoTup_int_opt_int (None leaves no string metadata).
                 if let Some(exp_vty) = self.map_value_c_ty(&bty) {
@@ -11783,9 +11929,9 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                 let (vty, v) = self.emit_expr(value);
                 // Escape POD stack/views into long-lived struct fields.
                 let v = self.ensure_slice_owned(&vty, v);
-                if let Expr::Ident(n) = value {
-                    self.note_own_drop_moved(&mangle(n));
-                }
+                // Move live owns / clone aliases & field borrows — struct field free
+                // at drop must not double-free with a still-live source.
+                let v = self.prepare_own_store_rhs(value, &vty, v);
                 let arrow = if bty.ends_with('*') && !bty.starts_with("Mako") { "->" } else { "." };
                 self.emit_line(format_args!("{b}{arrow}{field} = {v};"));
             }
@@ -11872,30 +12018,30 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                 self.emit_line(format_args!("if ({c}) {{"));
                 self.indent += 1;
                 // SAFE control-flow ownership (path-insensitive codegen):
-                // 1. Snapshot live set before the arm (for early-return / sibling arms).
+                // 1. Snapshot live set before the arm.
                 // 2. Emit arm stmts — may free/move outer locals or register arm-locals.
-                // 3. Free *this arm's* still-live owns while the live set is accurate
-                //    (must run BEFORE restore, or arm-local owns leak).
-                // 4. Restore the pre-arm live set so early-return removals do not poison
-                //    the else arm or post-if fallthrough.
+                // 3. Free arm-local owns (pop), then merge outer live changes so
+                //    reassigned outer muts free once at their bind scope (not arm exit).
                 self.push_share_scope();
+                let arm_idx = self.own_drop_scopes.len().saturating_sub(1);
                 let saved_live = self.own_drop_live.clone();
                 for s in &then_block.stmts {
                     self.emit_stmt(s);
                 }
-                self.pop_share_scope();
-                self.own_drop_live = saved_live;
+                let after_then = self.own_drop_live.clone();
+                self.finish_arm_own_live(&saved_live, arm_idx, after_then);
                 self.indent -= 1;
                 if let Some(eb) = else_block {
                     self.line("} else {");
                     self.indent += 1;
                     self.push_share_scope();
+                    let arm_idx_else = self.own_drop_scopes.len().saturating_sub(1);
                     let saved_live_else = self.own_drop_live.clone();
                     for s in &eb.stmts {
                         self.emit_stmt(s);
                     }
-                    self.pop_share_scope();
-                    self.own_drop_live = saved_live_else;
+                    let after_else = self.own_drop_live.clone();
+                    self.finish_arm_own_live(&saved_live_else, arm_idx_else, after_else);
                     self.indent -= 1;
                 }
                 self.line("}");
@@ -31516,21 +31662,30 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
         self.line(&marker);
         self.emit_line(format_args!("if ({c}) {{"));
         self.indent += 1;
+        // Path-insensitive: free arm-locals; merge outer live (same as Stmt::If).
         self.push_share_scope();
+        let arm_idx_then = self.own_drop_scopes.len().saturating_sub(1);
+        let saved_then = self.own_drop_live.clone();
         let (tty, tval) = self.emit_block_trailing(then_block);
+        let tval = self.transfer_or_clone_arm_value(then_block, &tty, tval);
         if tval != "/*void*/" {
             self.line(&format!("{result} = {tval};"));
         }
-        self.pop_share_scope();
+        let after_then = self.own_drop_live.clone();
+        self.finish_arm_own_live(&saved_then, arm_idx_then, after_then);
         self.indent -= 1;
         self.line("} else {");
         self.indent += 1;
         self.push_share_scope();
+        let arm_idx_else = self.own_drop_scopes.len().saturating_sub(1);
+        let saved_else = self.own_drop_live.clone();
         let (ety, eval) = self.emit_block_trailing(else_block);
+        let eval = self.transfer_or_clone_arm_value(else_block, &ety, eval);
         if eval != "/*void*/" {
             self.line(&format!("{result} = {eval};"));
         }
-        self.pop_share_scope();
+        let after_else = self.own_drop_live.clone();
+        self.finish_arm_own_live(&saved_else, arm_idx_else, after_else);
         self.indent -= 1;
         self.line("}");
         let ty = if tty != "void" {
@@ -31549,6 +31704,68 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
             self.out.replace_range(pos..pos + marker.len(), &decl);
         }
         (ty, result)
+    }
+
+    /// If the arm value is an Ident Own: move when bound in this arm's drop scope,
+    /// otherwise clone so outer free + result free do not double-free.
+    /// Field/index borrows of Own payloads are always cloned (struct/array still owns).
+    fn transfer_or_clone_arm_value(
+        &mut self,
+        block: &Block,
+        c_ty: &str,
+        val: String,
+    ) -> String {
+        let trailing = block.stmts.last().and_then(|s| match s {
+            Stmt::Expr(e) => Some(e),
+            _ => None,
+        });
+        self.transfer_or_clone_expr_own(trailing, c_ty, val)
+    }
+
+    fn transfer_or_clone_expr_own(
+        &mut self,
+        expr: Option<&Expr>,
+        c_ty: &str,
+        val: String,
+    ) -> String {
+        if c_ty == "void" || val == "/*void*/" {
+            return val;
+        }
+        let owns = Self::own_free_fn(c_ty).is_some()
+            || !self.struct_own_field_frees(c_ty).is_empty();
+        if !owns {
+            return val;
+        }
+        let Some(expr) = expr else {
+            return val;
+        };
+        // `n.label` / `xs[i]` are borrows — cloning prevents free-of-owner + free-of-result.
+        if Self::is_field_borrow_return(expr)
+            || matches!(expr, Expr::Index { .. })
+        {
+            return self.clone_own_val(c_ty, &val);
+        }
+        let Expr::Ident(n) = expr else {
+            // Fresh owns (calls, concat, lits) — result takes the value; no second free.
+            return val;
+        };
+        let mn = mangle(n);
+        let in_arm = self
+            .own_drop_scopes
+            .last()
+            .map(|s| s.iter().any(|(name, _)| name == &mn))
+            .unwrap_or(false);
+        if in_arm {
+            // Pattern / arm-local own moves into the result temp.
+            self.note_own_drop_moved(&mn);
+            val
+        } else if self.own_drop_live.contains(&mn) {
+            // Outer own still freed at its scope — clone for the result.
+            self.clone_own_val(c_ty, &val)
+        } else {
+            // Alias Ident (not the registered owner) — clone to avoid free-of-owner UAF.
+            self.clone_own_val(c_ty, &val)
+        }
     }
 
     fn emit_match(&mut self, scrutinee: &Expr, arms: &[MatchArm]) -> (String, String) {
@@ -31841,39 +32058,55 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
         let marker = format!("/*__MATCH_DECL_{result}__*/");
         self.line(&marker);
 
-        let mut first = true;
+        // Path-insensitive match: each arm gets its own drop scope so pattern owns
+        // (Ok(s)/Some(xs)/Err(e)/maps/slices) free on arm exit unless moved into
+        // the match result. Live set is restored after each arm so sibling arms
+        // and post-match fallthrough keep a correct outer free list.
+        //
+        // Guards that need pattern binds use a matched-flag chain so binds live
+        // only inside the arm (and failed guards free binds and try the next arm).
+        let matched = self.fresh("mm");
+        self.line(&format!("int {matched} = 0;"));
         for arm in arms {
-            let mut cond = self.pattern_condition(&scrut, &sty, &arm.pattern);
-            // For guards: bind pattern locals in a temp scope to evaluate the guard,
-            // then combine pattern + guard into one condition.
-            if let Some(guard) = &arm.guard {
-                // We need the pattern bindings to evaluate the guard.
-                // Emit bindings before the if, then include guard in condition.
-                self.bind_pattern_locals(&scrut, &sty, &arm.pattern);
-                let (_, gv) = self.emit_expr(guard);
-                cond = format!("({cond}) && ({gv})");
-            }
-            if first {
-                self.line(&format!("if ({cond}) {{"));
-                first = false;
-            } else {
-                self.line(&format!("}} else if ({cond}) {{"));
-            }
+            let pcond = self.pattern_condition(&scrut, &sty, &arm.pattern);
+            self.line(&format!("if (!{matched} && ({pcond})) {{"));
             self.indent += 1;
-            // Bind locals (again if guard already did, but idempotent for codegen)
-            if arm.guard.is_none() {
-                self.bind_pattern_locals(&scrut, &sty, &arm.pattern);
+            self.push_share_scope();
+            let arm_idx = self.own_drop_scopes.len().saturating_sub(1);
+            let saved_live = self.own_drop_live.clone();
+            self.bind_pattern_locals(&scrut, &sty, &arm.pattern);
+            // Own transfers are registered inside bind_pattern_locals /
+            // emit_option_some_bind (Result/Option payloads). Struct field
+            // patterns are aliases and must not be free-registered.
+
+            let mut body_open = false;
+            if let Some(guard) = &arm.guard {
+                let (_, gv) = self.emit_expr(guard);
+                self.line(&format!("if ({gv}) {{"));
+                self.indent += 1;
+                body_open = true;
             }
+
             let (bty, bval) = self.emit_expr(&arm.body);
             if result_ty.is_none() {
                 result_ty = Some(bty.clone());
             }
+            let bval = self.transfer_or_clone_expr_own(Some(&arm.body), &bty, bval);
             if bval != "/*void*/" {
                 self.line(&format!("{result} = {bval};"));
             }
+            self.line(&format!("{matched} = 1;"));
+
+            if body_open {
+                self.indent -= 1;
+                self.line("}");
+            }
+            let after_arm = self.own_drop_live.clone();
+            self.finish_arm_own_live(&saved_live, arm_idx, after_arm);
             self.indent -= 1;
+            self.line("}");
         }
-        self.line("} else {");
+        self.line(&format!("if (!{matched}) {{"));
         self.indent += 1;
         self.line("fprintf(stderr, \"non-exhaustive match\\n\"); abort();");
         self.indent -= 1;
@@ -31894,6 +32127,8 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
         }
         (ty, result)
     }
+
+
 
     fn pattern_condition(&self, scrut: &str, sty: &str, pattern: &Pattern) -> String {
         match pattern {
@@ -32153,11 +32388,10 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             .cloned()
                             .unwrap_or_else(|| "int".into());
                         if ok_kind == "string" {
+                            let b = mangle(&bindings[0]);
                             self.locals.insert(bindings[0].clone(), "MakoString".into());
-                            self.line(&format!(
-                                "MakoString {} = {scrut}.ok_s;",
-                                mangle(&bindings[0])
-                            ));
+                            self.line(&format!("MakoString {b} = {scrut}.ok_s;"));
+                            self.register_own_drop(&b, "MakoString");
                         } else if ok_kind == "float" {
                             self.locals.insert(bindings[0].clone(), "double".into());
                             self.line(&format!(
@@ -32185,6 +32419,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             self.line(&format!(
                                 "if ({p}) {{ {b} = *{p}; free({p}); }} else {{ memset(&{b}, 0, sizeof({b})); }}"
                             ));
+                            self.register_own_drop(&b, &cname);
                         } else if ok_kind == "slice" {
                             let b = mangle(&bindings[0]);
                             let p = self.fresh("oks");
@@ -32196,6 +32431,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             self.line(&format!(
                                 "if ({p}) {{ {b} = *{p}; free({p}); }} else {{ {b}.data = NULL; {b}.len = 0; {b}.cap = 0; }}"
                             ));
+                            self.register_own_drop(&b, "MakoIntArray");
                         } else if ok_kind == "slice_str" {
                             let b = mangle(&bindings[0]);
                             let p = self.fresh("oks");
@@ -32207,6 +32443,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             self.line(&format!(
                                 "if ({p}) {{ {b} = *{p}; free({p}); }} else {{ {b}.data = NULL; {b}.len = 0; {b}.cap = 0; }}"
                             ));
+                            self.register_own_drop(&b, "MakoStrArray");
                         } else if ok_kind == "slice_float" {
                             let b = mangle(&bindings[0]);
                             let p = self.fresh("oks");
@@ -32218,6 +32455,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             self.line(&format!(
                                 "if ({p}) {{ {b} = *{p}; free({p}); }} else {{ {b}.data = NULL; {b}.len = 0; {b}.cap = 0; }}"
                             ));
+                            self.register_own_drop(&b, "MakoFloatArray");
                         } else if ok_kind == "slice_struct" {
                             let sn = self
                                 .result_ok_structs
@@ -32240,6 +32478,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             self.line(&format!(
                                 "if ({p}) {{ {b} = *{p}; free({p}); }} else {{ {b}.data = NULL; {b}.len = 0; {b}.cap = 0; }}"
                             ));
+                            self.register_own_drop(&b, &arr);
                         } else if ok_kind == "map"
                             || ok_kind == "map_si"
                             || ok_kind == "map_ii"
@@ -32274,6 +32513,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             self.line(&format!(
                                 "{cty} {b} = ({cty})mako_result_ok_ptr({scrut});"
                             ));
+                            self.register_own_drop(&b, &cty);
                         } else if ok_kind.starts_with("chan_") {
                             let b = mangle(&bindings[0]);
                             let cty = match ok_kind.as_str() {
@@ -32369,9 +32609,12 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                                  {b}.s0 = {scrut}.err_s0; \
                                  {b}.s1 = {scrut}.err_s1;"
                             ));
+                            // Enum payload may own string slots s0/s1.
+                            self.register_own_drop(&b, &cty);
                         } else {
                             self.locals.insert(bindings[0].clone(), "MakoString".into());
                             self.line(&format!("MakoString {b} = {scrut}.err;"));
+                            self.register_own_drop(&b, "MakoString");
                         }
                     }
                 } else if sty == "MakoOptionInt" {

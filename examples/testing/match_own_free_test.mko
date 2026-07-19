@@ -1,0 +1,58 @@
+fn give_slice() -> Result[[]int, string] {
+    return Ok([1, 2, 3])
+}
+
+fn give_str() -> Result[string, string] {
+    return Ok("hello-owned")
+}
+
+fn give_err() -> Result[string, string] {
+    return Err("boom-err")
+}
+
+fn TestMatchSliceFree() {
+    match give_slice() {
+        Ok(xs) => {
+            assert_eq(len(xs), 3)
+            assert_eq(xs[0], 1)
+        },
+        Err(_) => assert(false),
+    }
+}
+
+fn TestMatchStringFree() {
+    match give_str() {
+        Ok(s) => {
+            assert_eq_str(s, "hello-owned")
+        },
+        Err(_) => assert(false),
+    }
+}
+
+fn TestMatchErrFree() {
+    match give_err() {
+        Ok(_) => assert(false),
+        Err(e) => {
+            assert_eq_str(e, "boom-err")
+        },
+    }
+}
+
+fn TestMatchMoveToLet() {
+    let s = match give_str() {
+        Ok(x) => x,
+        Err(e) => e,
+    }
+    assert_eq_str(s, "hello-owned")
+}
+
+fn TestMatchOptionSlice() {
+    let o = Some([10, 20])
+    match o {
+        Some(xs) => {
+            assert_eq(len(xs), 2)
+            assert_eq(xs[1], 20)
+        },
+        None => assert(false),
+    }
+}

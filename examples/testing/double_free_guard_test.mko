@@ -1,0 +1,195 @@
+// Adversarial double-free probes. Every path below must stay ASan-clean.
+
+struct Named {
+    label: string
+}
+
+fn give_named() -> Result[Named, string] {
+    return Ok(Named { label: "owned-label" })
+}
+
+fn give_str() -> Result[string, string] {
+    return Ok("payload")
+}
+
+fn give_slice() -> Result[[]int, string] {
+    return Ok([7, 8, 9])
+}
+
+// Field borrow out of matched Own must clone (not free with struct + free result).
+fn TestMatchFieldNoDoubleFree() {
+    let s = match give_named() {
+        Ok(n) => n.label,
+        Err(e) => e,
+    }
+    assert_eq_str(s, "owned-label")
+}
+
+// Move pattern bind into outer mut — arm free must not free moved value.
+fn TestMatchAssignMoveNoDoubleFree() {
+    let mut out = "init"
+    match give_str() {
+        Ok(s) => {
+            out = s
+        },
+        Err(e) => {
+            out = e
+        },
+    }
+    assert_eq_str(out, "payload")
+}
+
+// Alias let must not free twice.
+fn TestAliasLetNoDoubleFree() {
+    let a = str_repeat("z", 4)
+    let b = a
+    assert_eq_str(a, "zzzz")
+    assert_eq_str(b, "zzzz")
+}
+
+// Reassign same string data path.
+fn TestReassignNoDoubleFree() {
+    let mut s = "hello"
+    s = s + "!"
+    s = s + "?"
+    assert_eq_str(s, "hello!?")
+}
+
+// Match move to let — only one free of the payload.
+fn TestMatchMoveChain() {
+    let a = match give_str() {
+        Ok(x) => x,
+        Err(e) => e,
+    }
+    let b = a
+    assert_eq_str(b, "payload")
+}
+
+// Slice match + reassign outer.
+fn TestMatchSliceAssign() {
+    let mut xs = make([]int, 0, 1)
+    match give_slice() {
+        Ok(got) => {
+            xs = got
+        },
+        Err(_) => assert(false),
+    }
+    assert_eq(len(xs), 3)
+    assert_eq(xs[2], 9)
+}
+
+// If-expr move of arm-local own.
+fn TestIfExprArmLocal() {
+    let flag = 1
+    let s = if flag > 0 {
+        let t = str_repeat("q", 3)
+        t
+    } else {
+        "nope"
+    }
+    assert_eq_str(s, "qqq")
+}
+
+// Outer own returned from if-expr must clone (both arms free-safe).
+fn TestIfExprOuterClone() {
+    let outer = str_repeat("o", 2)
+    let flag = 1
+    let s = if flag > 0 {
+        outer
+    } else {
+        "x"
+    }
+    assert_eq_str(s, "oo")
+    assert_eq_str(outer, "oo")
+}
+
+// Nested match with explicit Option type.
+fn TestNestedMatchNoDoubleFree() {
+    let r: Result[Option[string], string] = Ok(Some("nest"))
+    match r {
+        Ok(opt) => {
+            match opt {
+                Some(s) => {
+                    assert_eq_str(s, "nest")
+                },
+                None => assert(false),
+            }
+        },
+        Err(_) => assert(false),
+    }
+}
+
+// Multiple sequential matches — each free own once.
+fn TestSequentialMatchFree() {
+    match give_str() {
+        Ok(s) => assert(str_len(s) > 0),
+        Err(_) => assert(false),
+    }
+    match give_str() {
+        Ok(s) => assert_eq_str(s, "payload"),
+        Err(_) => assert(false),
+    }
+}
+
+// Struct field free once when struct drops (not also via alias field let).
+fn TestStructFieldAliasNoDoubleFree() {
+    let n = Named { label: str_repeat("L", 3) }
+    let lab = n.label
+    assert_eq_str(lab, "LLL")
+    assert_eq_str(n.label, "LLL")
+}
+
+// Field store into mut local — must clone (struct still owns field).
+fn TestFieldAssignNoDoubleFree() {
+    let n = Named { label: str_repeat("A", 5) }
+    let mut s = "init"
+    s = n.label
+    assert_eq_str(s, "AAAAA")
+    assert_eq_str(n.label, "AAAAA")
+}
+
+// Alias assign into mut — must clone (original still owns).
+fn TestAliasAssignNoDoubleFree() {
+    let a = str_repeat("c", 4)
+    let b = a
+    let mut d = "init"
+    d = b
+    assert_eq_str(a, "cccc")
+    assert_eq_str(d, "cccc")
+}
+
+// Move from live owner into mut — no clone needed, single free.
+fn TestMoveAssignNoDoubleFree() {
+    let a = str_repeat("m", 3)
+    let mut d = "init"
+    d = a
+    assert_eq_str(d, "mmm")
+}
+
+// Field write from live local moves into struct.
+fn TestFieldWriteMove() {
+    let mut n = Named { label: "old" }
+    let s = str_repeat("N", 2)
+    n.label = s
+    assert_eq_str(n.label, "NN")
+}
+fn branch_like(a: string, b: string, path: string) -> string {
+    let mut out = path
+    if str_eq(a, "f") {
+        out = b
+    }
+    return "r=" + out
+}
+
+fn TestPassLocalPathNoReassign() {
+    let p = str_repeat("p", 6)
+    let r = branch_like("x", "b", p)
+    assert(str_contains(r, "r=pppppp"))
+    // p still live for free at scope end — must not double-free with branch_like
+}
+
+fn TestPassLocalPathReassign() {
+    let p = str_repeat("q", 4)
+    let r = branch_like("f", str_repeat("B", 3), p)
+    assert(str_contains(r, "r=BBB"))
+}
