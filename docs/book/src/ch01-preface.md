@@ -186,7 +186,7 @@ As of the current release:
 
 | Claim | Meaning |
 |-------|---------|
-| Version 0.2.4 | Current product; first public was 0.1.0 release, core language exercised by the current suite |
+| Version 0.3.0 | Current product; first public was 0.1.0 release, core language exercised by the current suite |
 | Stdlib coverage | Major backend areas covered (HTTP, TLS, JSON, SQL, etc.) |
 | Test suite | 338 test programs pass in the current suite |
 

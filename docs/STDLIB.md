@@ -2,7 +2,7 @@
 
 Batteries for **web and backends**, with naming conventions adapted to Mako.
 
-**Product tip:** **0.2.5**. Core stdlib packages (`io`, `encoding/json`,
+**Product tip:** **0.3.0**. Core stdlib packages (`io`, `encoding/json`,
 `context`, `collections`, `net/http`, `database/sql`) are now written in
 idiomatic Mako with generics and `mut self`. Lower-level surface remains
 builtins over C runtime headers.

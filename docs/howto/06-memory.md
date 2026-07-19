@@ -7,7 +7,7 @@ the Mako type system.
 
 **Deeper contracts:** ownership categories and SAFE/RT drop/escape rules are
 in [SOUNDNESS.md](../SOUNDNESS.md) and [MEMORY_MODEL.md](../MEMORY_MODEL.md).
-As of **0.2.5**, owning slices, maps, strings, and struct Own fields free at
+As of **0.3.0**, owning slices, maps, strings, and struct Own fields free at
 scope exit, reassign, break/continue, return transfer, `?` early-return, and
 **match** Own payloads. Free is **once** per allocation: live owns **move** into
 a new freer; aliases and field/index borrows **clone**. Alias muts that start as
