@@ -3,8 +3,8 @@
 //! Layout:
 //! - Manifest: `mako.toml` (`name`/`version` + `[dependencies]`)
 //! - Lockfile: `mako.lock` (reproducible pins)
-//! - Local registry: `$MAKO_REGISTRY` or `<project>/.mako/registry/<name>/<ver>/`
-//! - Git cache: `<project>/.mako/deps/<name>/`
+//! - Local registry: `$MAKO_REGISTRY` or `<project>/.mako/registry/<key>/<ver>/`
+//! - Git cache: `<project>/.mako/deps/<key>/`
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
@@ -15,8 +15,8 @@ use std::sync::Arc;
 use sha2::{Digest, Sha256};
 
 use crate::tooling::{
-    git_dep_cache_abs, parse_manifest_deps, parse_semver, registry_resolve, registry_root,
-    valid_dep_cache_name, version_satisfies, ManifestDep,
+    dep_cache_key, git_dep_cache_abs, parse_manifest_deps, parse_semver, registry_resolve,
+    registry_root, valid_dep_cache_name, version_satisfies, ManifestDep,
 };
 
 const LOCKFILE_VERSION: u32 = 2;
@@ -550,7 +550,7 @@ pub fn effective_registry(project: &Path) -> PathBuf {
 }
 
 fn registry_resolve_in(reg: &Path, name: &str, req: &str) -> Result<(PathBuf, String), String> {
-    let root = reg.join(name);
+    let root = reg.join(dep_cache_key(name));
     if !root.is_dir() {
         return Err(format!(
             "no local registry entry for `{name}` under {}",
@@ -716,7 +716,10 @@ fn resolve_one(
             registry_resolve_in(&reg, &dep.name, req)?
         };
         // Copy into project cache for reproducible builds if outside project.
-        let cache = project.join(".mako").join("deps").join(&dep.name);
+        let cache = project
+            .join(".mako")
+            .join("deps")
+            .join(dep_cache_key(&dep.name));
         if !cache.exists() {
             if let Some(parent) = cache.parent() {
                 fs::create_dir_all(parent).map_err(|e| format!("mkdir: {e}"))?;
@@ -1447,7 +1450,89 @@ pub fn pkg_lock(project: &Path, offline: bool) -> Result<(), String> {
     pkg_install(project, offline)
 }
 
-/// Publish current package into local registry (`MAKO_REGISTRY` or `.mako/registry`).
+fn valid_registry_component(value: &str) -> bool {
+    !value.is_empty()
+        && value != "."
+        && value != ".."
+        && !value.starts_with('.')
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
+}
+
+fn valid_registry_version(version: &str) -> bool {
+    !version.is_empty()
+        && !version.starts_with('.')
+        && version
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'+' | b'-'))
+        && parse_semver(version).is_some()
+}
+
+fn valid_registry_name(name: &str) -> bool {
+    !name.starts_with('/')
+        && !name.ends_with('/')
+        && !name.contains('\\')
+        && name.split('/').all(valid_registry_component)
+}
+
+fn copy_publish_dir_recursive(src: &Path, dest: &Path) -> Result<(), String> {
+    fs::create_dir_all(dest).map_err(|e| format!("mkdir {}: {e}", dest.display()))?;
+    for ent in fs::read_dir(src).map_err(|e| format!("read {}: {e}", src.display()))? {
+        let ent = ent.map_err(|e| format!("readdir: {e}"))?;
+        let from = ent.path();
+        let to = dest.join(ent.file_name());
+        let kind = ent
+            .file_type()
+            .map_err(|e| format!("inspect {}: {e}", from.display()))?;
+        if kind.is_symlink() {
+            return Err(format!("refusing to publish symlink {}", from.display()));
+        }
+        if kind.is_dir() {
+            copy_publish_dir_recursive(&from, &to)?;
+        } else if kind.is_file() {
+            fs::copy(&from, &to).map_err(|e| format!("copy {}: {e}", from.display()))?;
+        }
+    }
+    Ok(())
+}
+
+fn copy_package_for_publish(project: &Path, manifest: &Path, dest: &Path) -> Result<(), String> {
+    fs::copy(manifest, dest.join("mako.toml")).map_err(|e| format!("copy toml: {e}"))?;
+    for ent in fs::read_dir(project).map_err(|e| format!("readdir: {e}"))? {
+        let ent = ent.map_err(|e| e.to_string())?;
+        let path = ent.path();
+        let name = ent.file_name();
+        let name = name.to_string_lossy();
+        if name == ".mako" || name == "mako.lock" || name.starts_with('.') {
+            continue;
+        }
+        let kind = ent
+            .file_type()
+            .map_err(|e| format!("inspect {}: {e}", path.display()))?;
+        if kind.is_symlink() {
+            return Err(format!("refusing to publish symlink {}", path.display()));
+        }
+        if kind.is_file() && path.extension().and_then(|x| x.to_str()) == Some("mko") {
+            fs::copy(&path, dest.join(&*name)).map_err(|e| format!("copy: {e}"))?;
+        } else if kind.is_dir() && (name == "src" || name == "lib") {
+            copy_publish_dir_recursive(&path, &dest.join(&*name))?;
+        }
+    }
+    Ok(())
+}
+
+fn cleanup_publish_staging(staging: &Path) {
+    if let Err(error) = fs::remove_dir_all(staging) {
+        eprintln!(
+            "warning: could not remove publish staging directory {}: {error}",
+            staging.display()
+        );
+    }
+}
+
+/// Publish a package with validated registry coordinates. Existing versions
+/// are immutable, so publishing the same name and version returns an error.
 pub fn pkg_publish(project: &Path) -> Result<(), String> {
     let manifest = project.join("mako.toml");
     if !manifest.exists() {
@@ -1457,28 +1542,63 @@ pub fn pkg_publish(project: &Path) -> Result<(), String> {
     let (name, version) = read_meta(&text);
     let name = name.ok_or_else(|| "mako.toml missing `name`".to_string())?;
     let version = version.ok_or_else(|| "mako.toml missing `version`".to_string())?;
+    if !valid_registry_name(&name) {
+        return Err(format!(
+            "invalid package name `{name}` for registry publication"
+        ));
+    }
+    if !valid_registry_version(&version) {
+        return Err(format!(
+            "invalid package version `{version}` for registry publication"
+        ));
+    }
     let reg = effective_registry(project);
-    let dest = reg.join(&name).join(&version);
+    let package_dir = reg.join(dep_cache_key(&name));
+    let dest = package_dir.join(&version);
     if dest.exists() {
-        fs::remove_dir_all(&dest).map_err(|e| format!("clear old publish: {e}"))?;
+        return Err(format!(
+            "package `{name}@{version}` is already published; choose a new version"
+        ));
     }
-    fs::create_dir_all(&dest).map_err(|e| format!("mkdir: {e}"))?;
-    fs::copy(&manifest, dest.join("mako.toml")).map_err(|e| format!("copy toml: {e}"))?;
-    // Copy .mko sources (non-recursive top-level + common lib/)
-    for ent in fs::read_dir(project).map_err(|e| format!("readdir: {e}"))? {
-        let ent = ent.map_err(|e| e.to_string())?;
-        let p = ent.path();
-        let name_os = ent.file_name();
-        let n = name_os.to_string_lossy();
-        if n == ".mako" || n == "mako.lock" || n.starts_with('.') {
-            continue;
+    fs::create_dir_all(&package_dir).map_err(|e| format!("mkdir: {e}"))?;
+    let staging = package_dir.join(format!(
+        ".{version}.publish-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+    ));
+
+    match fs::create_dir(&staging) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+            return Err(format!(
+                "a publish of `{name}@{version}` is already in progress; retry"
+            ));
         }
-        if p.is_file() && p.extension().and_then(|x| x.to_str()) == Some("mko") {
-            fs::copy(&p, dest.join(&*n)).map_err(|e| format!("copy: {e}"))?;
-        } else if p.is_dir() && (n == "src" || n == "lib") {
-            copy_dir_recursive(&p, &dest.join(&*n))?;
-        }
+        Err(error) => return Err(format!("create publish staging directory: {error}")),
     }
+    if let Err(error) = copy_package_for_publish(project, &manifest, &staging) {
+        cleanup_publish_staging(&staging);
+        return Err(error);
+    }
+    if dest.exists() {
+        cleanup_publish_staging(&staging);
+        return Err(format!(
+            "package `{name}@{version}` was published concurrently; choose a new version"
+        ));
+    }
+    // Published directories are non-empty, so rename cannot replace one on
+    // Windows or Unix. It either installs this staging tree or fails the race.
+    fs::rename(&staging, &dest).map_err(|error| {
+        cleanup_publish_staging(&staging);
+        if error.kind() == std::io::ErrorKind::AlreadyExists || dest.exists() {
+            format!("package `{name}@{version}` was published concurrently; choose a new version")
+        } else {
+            format!("finalize package publication: {error}")
+        }
+    })?;
     println!("published {name}@{version} → {}", dest.display());
     println!(
         "hint: depend with `\"{name}\" = {{ version = \"^{version}\" }}` then `mako pkg install`"
@@ -2028,6 +2148,189 @@ content_hash = "{valid_hash}"
         let err = resolve_graph(&app, false).unwrap_err();
         assert!(err.contains("source"), "unexpected: {err}");
         assert!(err.contains("mako pkg update"), "unexpected: {err}");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn published_versions_are_immutable() {
+        let dir =
+            env::temp_dir().join(format!("mako_pkg_immutable_publish_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let package = dir.join("lib");
+        fs::create_dir_all(&package).unwrap();
+        fs::write(
+            package.join("mako.toml"),
+            "name = \"util\"\nversion = \"1.0.0\"\n",
+        )
+        .unwrap();
+        let source = package.join("lib.mko");
+        fs::write(&source, "fn answer() -> int { 42 }\n").unwrap();
+        fs::create_dir_all(package.join("src").join("nested")).unwrap();
+        fs::write(
+            package.join("src").join("nested").join("feature.mko"),
+            "fn feature() -> int { 7 }\n",
+        )
+        .unwrap();
+        fs::create_dir_all(package.join("lib")).unwrap();
+        fs::write(
+            package.join("lib").join("module.mko"),
+            "fn module() -> int { 8 }\n",
+        )
+        .unwrap();
+        fs::write(package.join(".secret.mko"), "fn secret() {}\n").unwrap();
+        fs::write(package.join("mako.lock"), "local state\n").unwrap();
+        fs::create_dir_all(package.join(".mako")).unwrap();
+        fs::write(package.join(".mako").join("cache"), "local state\n").unwrap();
+
+        pkg_publish(&package).unwrap();
+        let published = effective_registry(&package).join("util").join("1.0.0");
+        assert_eq!(
+            fs::read_to_string(published.join("mako.toml")).unwrap(),
+            "name = \"util\"\nversion = \"1.0.0\"\n"
+        );
+        assert_eq!(
+            fs::read_to_string(published.join("lib.mko")).unwrap(),
+            "fn answer() -> int { 42 }\n"
+        );
+        assert!(published.join("src/nested/feature.mko").is_file());
+        assert!(published.join("lib/module.mko").is_file());
+        assert!(!published.join(".secret.mko").exists());
+        assert!(!published.join("mako.lock").exists());
+        assert!(!published.join(".mako").exists());
+
+        fs::write(&source, "fn answer() -> int { 0 }\n").unwrap();
+        let error = pkg_publish(&package).unwrap_err();
+        assert!(error.contains("already published"), "unexpected: {error}");
+        assert_eq!(
+            fs::read_to_string(published.join("lib.mko")).unwrap(),
+            "fn answer() -> int { 42 }\n"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn publish_rejects_unsafe_registry_coordinates() {
+        let dir = env::temp_dir().join(format!(
+            "mako_pkg_publish_coordinates_{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("lib.mko"), "fn answer() -> int { 42 }\n").unwrap();
+
+        let cases = [
+            ("../escape", "1.0.0", "invalid package name"),
+            ("scope//util", "1.0.0", "invalid package name"),
+            ("scope\\util", "1.0.0", "invalid package name"),
+            (".hidden", "1.0.0", "invalid package name"),
+            ("scope/.hidden", "1.0.0", "invalid package name"),
+            ("util", "../1.0.0", "invalid package version"),
+            ("util", "1/0", "invalid package version"),
+            ("util", "1\\0", "invalid package version"),
+            ("util", ".1.0.0", "invalid package version"),
+        ];
+        for (name, version, expected) in cases {
+            fs::write(
+                dir.join("mako.toml"),
+                format!("name = \"{name}\"\nversion = \"{version}\"\n"),
+            )
+            .unwrap();
+            let error = pkg_publish(&dir).unwrap_err();
+            assert!(
+                error.contains(expected),
+                "{name}@{version}: unexpected: {error}"
+            );
+        }
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn scoped_registry_names_are_disjoint_and_resolve() {
+        let dir = env::temp_dir().join(format!("mako_pkg_scoped_publish_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let manifest = dir.join("mako.toml");
+        let source = dir.join("lib.mko");
+
+        fs::write(&manifest, "name = \"foo\"\nversion = \"1.0.0\"\n").unwrap();
+        fs::write(&source, "fn plain() -> int { 1 }\n").unwrap();
+        pkg_publish(&dir).unwrap();
+
+        fs::write(
+            &manifest,
+            "name = \"foo/1.0.0\"\nversion = \"2.0.0+linux\"\n",
+        )
+        .unwrap();
+        fs::write(&source, "fn scoped() -> int { 2 }\n").unwrap();
+        pkg_publish(&dir).unwrap();
+
+        let registry = effective_registry(&dir);
+        let plain = registry.join("foo").join("1.0.0");
+        let scoped = registry.join("foo!1.0.0").join("2.0.0+linux");
+        assert_eq!(
+            fs::read_to_string(plain.join("lib.mko")).unwrap(),
+            "fn plain() -> int { 1 }\n"
+        );
+        assert!(!plain.join("2.0.0+linux").exists());
+        assert_eq!(
+            registry_resolve_in(&registry, "foo/1.0.0", "^2.0.0")
+                .unwrap()
+                .0,
+            scoped
+        );
+        assert_eq!(
+            crate::tooling::registry_resolve(&dir, "foo/1.0.0", "^2.0.0").unwrap(),
+            scoped
+        );
+
+        let app = dir.join("app");
+        fs::create_dir_all(&app).unwrap();
+        copy_dir_recursive(&registry, &app.join(".mako").join("registry")).unwrap();
+        fs::write(
+            app.join("mako.toml"),
+            "name = \"app\"\nversion = \"0.1.0\"\n\n[dependencies]\n\"foo/1.0.0\" = { version = \"^2.0.0\" }\n",
+        )
+        .unwrap();
+        let lock = resolve_graph(&app, true).unwrap();
+        let package = lock
+            .packages
+            .iter()
+            .find(|package| package.name == "foo/1.0.0")
+            .unwrap();
+        assert_eq!(package.version, "2.0.0+linux");
+        assert_eq!(package.path.as_deref(), Some(".mako/deps/foo!1.0.0"));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn publish_rejects_symlinked_sources() {
+        use std::os::unix::fs::symlink;
+
+        let dir = env::temp_dir().join(format!("mako_pkg_publish_symlink_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(dir.join("src")).unwrap();
+        fs::write(
+            dir.join("mako.toml"),
+            "name = \"util\"\nversion = \"1.0.0\"\n",
+        )
+        .unwrap();
+        let outside = dir.join("outside.mko");
+        fs::write(&outside, "fn outside() {}\n").unwrap();
+        symlink(&outside, dir.join("src").join("linked.mko")).unwrap();
+
+        let error = pkg_publish(&dir).unwrap_err();
+        assert!(error.contains("symlink"), "unexpected: {error}");
+        let package_dir = effective_registry(&dir).join("util");
+        assert!(!package_dir.join("1.0.0").exists());
+        let has_staging = fs::read_dir(package_dir).unwrap().any(|entry| {
+            entry
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .contains(".publish-")
+        });
+        assert!(!has_staging);
         let _ = fs::remove_dir_all(&dir);
     }
 
