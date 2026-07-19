@@ -2,11 +2,11 @@
 
 **Status:** actively hardened, not formally proven. The ownership model
 prevents many classes of memory bugs by construction, and the full test
-suite (356 programs) passes under AddressSanitizer with zero errors. Edge
+suite (360 programs) passes under AddressSanitizer with zero errors. Edge
 cases are still being found and fixed. This is not yet equivalent to a
 formally verified memory model.
 
-**Product version:** **0.2.5**.
+**Product version:** **0.3.0**.
 
 Mako treats safety as a **compiler and runtime contract**, not a style guide.
 The goal: make memory corruption and common backend footguns hard to ship —

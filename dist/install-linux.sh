@@ -247,13 +247,17 @@ append_shell_rc() {
         continue
       fi
       if [[ "$YES" -eq 1 ]] || [[ ! -t 0 ]]; then
-        # non-interactive (curl|bash): auto-append
-        {
+        # non-interactive (curl|bash): auto-append (best-effort)
+        if {
           echo ""
           echo "$line"
           echo "$src_line"
-        } >> "$rc"
-        echo "  updated $rc"
+        } >> "$rc" 2>/dev/null; then
+          echo "  updated $rc"
+        else
+          echo "  note: could not write to $rc (read-only); add manually:"
+          echo "    $src_line"
+        fi
       else
         echo "  to enable in new shells, add to $rc:"
         echo "    $src_line"
