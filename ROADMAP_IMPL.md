@@ -3,10 +3,10 @@
 Detailed feature plan for Mako, organized by version. See
 [docs/ROADMAP.md](docs/ROADMAP.md) for the summary view.
 
-**Current version:** 0.2.5  
-**Next milestone:** 0.3.0 (cross-platform hardening)  
+**Current version:** 0.3.0  
+**Next milestone:** 0.4.0 (performance ceiling)  
 **Last updated:** 2026-07-19  
-**Test suite:** 357 Mako tests + 75 Rust tests, 0 failures, ASan clean
+**Test suite:** 360 Mako tests + 79 Rust tests, 0 failures, ASan clean
 
 Soundness program of record: **[docs/SOUNDNESS.md](docs/SOUNDNESS.md)**.  
 Concurrency model: **[docs/MEMORY_MODEL.md](docs/MEMORY_MODEL.md)**.  
@@ -52,7 +52,7 @@ Summary roadmap: **[docs/ROADMAP.md](docs/ROADMAP.md)**.
 **Proven regression:** `TestNestedReassign` fails with heap-use-after-free on
 pre-fix compiler, passes on fixed compiler (verified both directions).
 
-**Result: 357 Mako tests + 75 Rust tests, 0 failures, full suite ASan clean.**
+**Result: 360 Mako tests + 79 Rust tests, 0 failures, full suite ASan clean.**
 
 Pkg lock verification (PR #3): **17/17** `pkg::` unit tests pass.
 

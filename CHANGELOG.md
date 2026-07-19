@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+## 0.3.0 — 2026-07-19
+
+**mako0.3.0** (`CARGO_PKG_VERSION`). 360 Mako tests + 79 Rust tests, 0 failures.
+**All 11 CI jobs pass** (ubuntu, macOS, Windows, ASan, UBSan, GCC, TSan,
+cross-compile, bench gates, claims gate).
+
+### Cross-platform (all CI green)
+
+- Cross-compile to Windows, Linux musl (static), WASI — all pass
+- GCC compilation — full suite passes (`_XOPEN_SOURCE 700` for `stack_t`)
+- Windows CI expanded: full suite (soft) + 17 core tests (strict)
+- ASan with `detect_leaks=0` (focused on use-after-free / out-of-bounds)
+- UBSan full suite passes
+- IPv6 test timeouts fixed (non-blocking accept, socket timeouts)
+- `clock_gettime` shim for Windows cross-compile
+
 ### Ownership free (SAFE-006 depth) — no double-free / path-local free
 
 - **Match Own free:** Result/Option pattern payloads (string, slice, map, Err
@@ -13,13 +29,24 @@
 - **Alias mut freer flag:** `let mut out = path` emits `out__own`; free is
   `if (out__own) …` so path-insensitive free never frees a still-aliased
   caller/param buffer when a reassign arm is not taken.
-- **If/match arm live merge:** arm-local free via pop; outer moves stay dead;
-  outer reassigns stay live for fallthrough free.
 - **Path-local early-return free:** free only names whose bind scope is still
   active; rebind `own_bind_scope` when sequential arms reuse `let blob`; clear
-  arm freer flags on arm exit (fixes undeclared `free(blob)` in leba admin).
+  arm freer flags on arm exit.
 - Evidence (ASan): `match_own_free_test`, `double_free_guard_test`,
   `early_return_path_free_test`, `own_branch_regress_test`; leba `main.mko` build.
+
+### Package integrity (PR #5 hardening)
+
+- V2 digest format with reserved `PACKAGE.sha256` name
+- Registry verification integrated into build-time dep resolution
+- `collect_program_inputs` propagates verification errors
+- Legacy unversioned digests remain readable
+
+### Other
+
+- String slice return allowed for params (str_slice always clones)
+- Channel element type inference from field receivers
+- Merged PRs #5, #6, #7
 
 ## 0.2.5 — 2026-07-19
 
