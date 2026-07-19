@@ -3,7 +3,7 @@
 Last inventory: **2026-07-18** · product **mako0.2.5** (`CARGO_PKG_VERSION`).
 
 Unique Mako surface · pack/pull · map/slice/bag monomorphs · package-per-directory ·
-const-fn depth (match/while/for/strings) · suite **356 test programs** (0 failures,
+const-fn depth (match/while/for/strings) · suite **357 test programs + 75 Rust unit tests** (0 failures,
 ASan clean) · [The Mako Book](book/).
 
 **Book:** [The Mako Book](book/) · **Guide:** [GUIDE.md](GUIDE.md) · **Identity:** [IDENTITY.md](IDENTITY.md) · **Pain points:** [PAIN_POINTS.md](PAIN_POINTS.md) · **Build:** [BUILD.md](BUILD.md) · **Stdlib:** [STDLIB.md](STDLIB.md) · **Roadmap:** [ROADMAP.md](ROADMAP.md) · **Changelog:** [../CHANGELOG.md](../CHANGELOG.md) · **Release:** [RELEASE.md](RELEASE.md) · **Soundness:** [SOUNDNESS.md](SOUNDNESS.md) · **Memory model:** [MEMORY_MODEL.md](MEMORY_MODEL.md).

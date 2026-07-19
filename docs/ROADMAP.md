@@ -1,7 +1,7 @@
 # Mako roadmap
 
-**Product version:** **0.2.5** · Last sync: **2026-07-18**.  
-**Suite:** 356 tests, 0 failures, ASan clean.
+**Product version:** **0.2.5** · Last sync: **2026-07-19**.  
+**Suite:** 357 Mako tests + 75 Rust tests, 0 failures, ASan clean.
 
 **Verified:** [STATUS.md](STATUS.md) · **Stdlib:** [STDLIB.md](STDLIB.md) · **Security:** [SECURITY.md](SECURITY.md) · **Release:** [RELEASE.md](RELEASE.md).  
 **Book:** [The Mako Book](book/) · **Identity:** [IDENTITY.md](IDENTITY.md).  
@@ -20,8 +20,8 @@
 | **0.2.2** | TLS SNI / HTTPS / JWT / lock integrity | **Shipped** |
 | **0.2.3** | JWT/HTTPS input hardening | **Shipped** |
 | **0.2.4** | Soundness wave + residuals (SAFE/RT, speed, lock verify) | **Shipped** — [SOUNDNESS.md](SOUNDNESS.md) |
-| **0.2.5** | Memory safety audit + LSP + docs honesty | **Shipped** |
-| **0.3.0** | Cross-platform hardening | **Next** |
+| **0.2.5** | Memory safety audit, LSP, package integrity, honest docs | **Shipped** |
+| **0.3.0** | Cross-platform hardening, complex ownership tracking | **Next** |
 | **0.4.0** | Performance ceiling | Planned |
 | **1.0** | Stability | Planned |
 

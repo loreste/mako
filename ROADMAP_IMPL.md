@@ -3,10 +3,10 @@
 Detailed feature plan for Mako, organized by version. See
 [docs/ROADMAP.md](docs/ROADMAP.md) for the summary view.
 
-**Current version:** 0.2.5 (memory safety audit + LSP + docs honesty)  
+**Current version:** 0.2.5  
 **Next milestone:** 0.3.0 (cross-platform hardening)  
-**Last updated:** 2026-07-18  
-**Test suite:** 356 programs, 0 failures, ASan clean
+**Last updated:** 2026-07-19  
+**Test suite:** 357 Mako tests + 75 Rust tests, 0 failures, ASan clean
 
 Soundness program of record: **[docs/SOUNDNESS.md](docs/SOUNDNESS.md)**.  
 Concurrency model: **[docs/MEMORY_MODEL.md](docs/MEMORY_MODEL.md)**.  
@@ -40,7 +40,19 @@ Summary roadmap: **[docs/ROADMAP.md](docs/ROADMAP.md)**.
 | Struct-borrow from array index freed fields | Skip struct-field drop for Index-sourced locals | `http_mako_test` ASan |
 | String array reassign deep-frees shared strings | Shallow outer-only free for MakoStrArray/MakoArr_* on reassign | `collections_list_test` ASan |
 
-**Result: 356 tests, 0 failures, full suite ASan clean.**
+### Audit 2026-07-19 (bugs found & fixed — wave 3, leba integration)
+
+| Bug | Fix | Evidence |
+|-----|-----|----------|
+| Consumed-arg too aggressive (arbitrary calls) | Restrict `extract_consumed_arg` to known consuming fns | leba string corruption |
+| Source temp freed after reassign to existing local | `note_own_drop_moved(&val)` in reassign paths | leba path UAF |
+| Owned local re-registered in inner scope on reassign | Skip `register_own_drop` if already owned | leba scope-exit free |
+| own_drop_live not restored across if-return branches | Save/restore `own_drop_live` around `Stmt::If` then-blocks | `own_branch_regress_test` ASan |
+
+**Proven regression:** `TestNestedReassign` fails with heap-use-after-free on
+pre-fix compiler, passes on fixed compiler (verified both directions).
+
+**Result: 357 Mako tests + 75 Rust tests, 0 failures, full suite ASan clean.**
 
 Pkg lock verification (PR #3): **17/17** `pkg::` unit tests pass.
 
@@ -85,12 +97,84 @@ Pkg lock verification (PR #3): **17/17** `pkg::` unit tests pass.
 | RT-004 monomorph | Take-send for more chan[T] shapes | Optional |
 | Scheduler depth | Work-stealing / dynamic resize | Optional |
 
-### Implementation order (next)
+### Residual work (0.3.0+)
 
-1. Optional TSan soak CI  
-2. Longer RT-005 random soaks  
-3. Deeper monomorph channel take matrix  
-4. 0.2.4 tooling (LSP depth)
+1. Complex multi-file ownership tracking (leba config parser corruption)
+2. Optional TSan soak CI
+3. Longer RT-005 random soaks
+4. Parser regression (site.mko EOF error with new parser)
+
+---
+
+## v0.2.5 — Memory safety + LSP + package integrity — **shipped**
+
+### Memory safety audit (10 codegen ownership bugs)
+
+| Fix | Category |
+|-----|----------|
+| Return-from-field clone | Double-free prevention |
+| Consumed-argument ownership transfer | Move semantics |
+| Void-call sink consumption | Move semantics |
+| Arena scope free suppression | Arena correctness |
+| Stack-view boxing in Result/Option | Dangling pointer prevention |
+| Ok/Err/Some transfer_own_on_return | Scope-exit UAF |
+| Struct-borrow from array indexing | Field-free on borrows |
+| String/struct array reassign shallow-free | Shared element protection |
+| Save/restore own_drop_live across if-branches | Branch-aware ownership |
+| Source temp marked as moved on reassign | Scope-exit UAF |
+
+### LSP v0.5.0
+
+| Feature | Status |
+|---------|--------|
+| Hover with type info (fn sigs, structs, inferred types) | Done |
+| Inlay hints (inferred types on let bindings) | Done |
+| Signature help with ParameterInformation | Done |
+| inlayHintProvider capability | Done |
+
+### Package integrity (PR #4 + hardening)
+
+| Feature | Status |
+|---------|--------|
+| Immutable publication (reject same name+version) | Done |
+| Scoped package names (scope/name → scope!name) | Done |
+| Symlink rejection during publish | Done |
+| Input validation (name chars, SemVer) | Done |
+| Atomic staging (temp dir → rename) | Done |
+| PACKAGE.sha256 content digest (computed in staging) | Done |
+| Digest verification on resolution (both paths) | Done |
+| Fail closed on missing digest | Done |
+| Staged manifest revalidation | Done |
+| `mako pkg seal` for legacy migration (TOFU) | Done |
+| Lockfile content_hash as trust anchor | Done |
+| Tampered package blocks resolution (tested) | Done |
+| Recomputed-digest caught by lockfile (tested) | Done |
+
+### Infrastructure
+
+| Feature | Status |
+|---------|--------|
+| Per-test timeout (60s default, MAKO_TEST_TIMEOUT_SECS) | Done |
+| ASan CI job (full suite) | Done |
+| UBSan CI job (full suite) | Done |
+| GCC compilation CI job | Done |
+| Windows CI (correct test paths, core subset) | Done |
+| Installer --no-same-owner + read-only RC handling | Done |
+| Release tarball --owner=0 --group=0 | Done |
+| Test categories documented (TEST_CATEGORIES.md) | Done |
+| HTTP benchmark scaffold (scripts/bench-http.sh) | Done |
+
+### Documentation honesty
+
+| Change | Status |
+|--------|--------|
+| Removed all language comparisons | Done |
+| Explicitly marked experimental/alpha | Done |
+| No unverified performance claims | Done |
+| Repo description updated | Done |
+| Website meta description updated | Done |
+| Test count updated (357) | Done |
+| CLI docs: pkg publish/seal with TOFU warning | Done |
 
 ---
 
