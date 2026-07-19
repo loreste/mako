@@ -67,7 +67,7 @@ Pkg lock verification (PR #3): **17/17** `pkg::` unit tests pass.
 | SAFE-003/007 | Slice view escape / view-return reject | `bad/slice_view_escape`, `slice_view_return` |
 | SAFE-004 | Built-in + monomorph map free | `mako_map_*_free`; own_drop for `make(map…)` |
 | SAFE-005 own free | String free on reassign/scope (cstr, f-string, concat) | `string_drop_test` |
-| SAFE-006 | break/continue + return + **`?` early free** | `cfg_drop_break_test`, `try_drop_test` |
+| SAFE-006 | break/continue + return + **`?` early free** + match Own + bind-scope + `__own` | `cfg_drop_break_test`, `try_drop_test`, `match_own_free_test`, `double_free_guard_test` |
 | SAFE-007 | Arena return/store escape | `bad/arena_escape_*` |
 | SAFE-009 | CMap RW gate | `mako_cmap.h` |
 | SAFE-010 | Memory model doc | MEMORY_MODEL.md |
@@ -122,6 +122,18 @@ Pkg lock verification (PR #3): **17/17** `pkg::` unit tests pass.
 | String/struct array reassign shallow-free | Shared element protection |
 | Save/restore own_drop_live across if-branches | Branch-aware ownership |
 | Source temp marked as moved on reassign | Scope-exit UAF |
+
+### Ownership free depth (post-audit, SAFE-006)
+
+| Fix | Category |
+|-----|----------|
+| Match Result/Option Own payload free at arm exit | Leak prevention |
+| Bind-scope free (not nested if/match arm) | Early-free / UAF |
+| Move live Own; clone alias / field / index | Double-free prevention |
+| Alias mut `{name}__own` freer flag | Param-alias double-free |
+| If/match arm live merge (`finish_arm_own_live`) | Path-insensitive free |
+
+Evidence: `match_own_free_test`, `double_free_guard_test`, `own_branch_regress_test` (ASan).
 
 ### LSP v0.5.0
 

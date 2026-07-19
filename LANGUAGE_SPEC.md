@@ -1450,8 +1450,10 @@ escape checks. See also [docs/SOUNDNESS.md](docs/SOUNDNESS.md).
 A `let` binding names a value in the current task. Scalars and POD are
 stack-like. Heap-backed values follow the ownership category of their type:
 owning slices, maps, strings, and struct Own fields free at scope exit /
-reassign / `?` / break-continue (SAFE-003–006). Prefer `string_view` for
-zero-copy reads; `make([]T, 0, n)` when you will grow.
+reassign / `?` / break-continue / **match** Own payloads (SAFE-003–006). Live
+Own **moves** into a new freer; aliases and field/index borrows **clone** (one
+freer per allocation). Prefer `string_view` for zero-copy reads; `make([]T, 0, n)`
+when you will grow.
 
 ```mko
 {
@@ -1596,8 +1598,11 @@ array access). The compiler tracks `unsafe` nesting depth. Code inside
 The ownership checker uses a **Control Flow Graph (CFG)** with NLL analysis:
 
 - **If/else joins**: moves from non-diverging arms are unioned. If neither
-  arm moves a `hold` binding, it remains usable after the `if`.
-- **Match joins**: same union semantics across match arms.
+  arm moves a `hold` binding, it remains usable after the `if`. Runtime free
+  for Own uses bind-scope tracking and (for alias muts) a freer flag so
+  path-insensitive arms do not double-free parameters.
+- **Match joins**: same union semantics across match arms. Own payloads free
+  at arm exit unless moved into the match value.
 - **While/for loops**: the body is re-checked only when some path can
   re-enter the header (via `continue` or fall-through). An always-`break`
   body skips the second pass.

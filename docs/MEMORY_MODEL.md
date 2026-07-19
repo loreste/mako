@@ -97,7 +97,29 @@ Tests: `examples/testing/cancel_policy_test.mko`.
 
 ---
 
-## 5. Channel ownership (RT-004)
+## 5. Sequential Own free (SAFE-003–006, single freer)
+
+Within one task, heap **Own** values free **once** at the end of their live
+range. Path-insensitive codegen (if/match arms) must not free the same buffer
+from two freers or free a still-aliased parameter.
+
+| Rule | Behavior |
+|------|----------|
+| Scope / block exit | Free still-live owns registered for that scope |
+| Reassign | Free previous Own when backing pointer changes (nested: `*_release_replaced`) |
+| Return | Transfer (no free of returned Own); materialize before free of other locals |
+| break / continue / `?` | Free loop-body or early-return lives as documented in [SOUNDNESS.md](SOUNDNESS.md) |
+| **match** Own payload | Free at arm exit, or **move** into the match result / `let` |
+| Store of live Own | **Move** free duty to destination |
+| Store of alias / field / index | **Clone** so the original freer and the destination do not share free |
+| Alias mut (`let mut out = path`) | Runtime freer flag: free only after a reassign takes Own |
+
+Evidence (ASan): `own_branch_regress_test`, `match_own_free_test`,
+`double_free_guard_test`. Details: [SOUNDNESS.md SAFE-006](SOUNDNESS.md).
+
+---
+
+## 6. Channel ownership (RT-004)
 
 | Channel element | `send` / `try_send` / timeout | Failed send | `recv` |
 |-----------------|-------------------------------|-------------|--------|
@@ -126,7 +148,7 @@ fires. Timeout arm receives nothing.
 
 ---
 
-## 6. Data races vs Sync races
+## 7. Data races vs Sync races
 
 | Class | Safe Mako |
 |-------|-----------|
@@ -136,7 +158,7 @@ fires. Timeout arm receives nothing.
 
 ---
 
-## 7. Census (RT-006)
+## 8. Census (RT-006)
 
 ```mko
 runtime_stats_reset()
@@ -150,7 +172,7 @@ and to watch channel peak depth / try_send drops.
 
 ---
 
-## 8. What this model is not
+## 9. What this model is not
 
 - Not the C++/LLVM memory model formalization (yet).
 - Not a promise that every FFI call is race-free.
