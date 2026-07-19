@@ -1531,8 +1531,48 @@ fn cleanup_publish_staging(staging: &Path) {
     }
 }
 
+/// Compute a SHA-256 digest over all files in a published package directory.
+/// Files are hashed in sorted order for reproducibility.
+fn compute_package_digest(dir: &Path) -> Result<String, String> {
+    let mut paths = Vec::new();
+    collect_files_recursive(dir, &mut paths)?;
+    paths.sort();
+    let mut hasher = Sha256::new();
+    for path in &paths {
+        let rel = path
+            .strip_prefix(dir)
+            .unwrap_or(path)
+            .to_string_lossy()
+            .replace('\\', "/");
+        hasher.update(rel.as_bytes());
+        hasher.update(b"\0");
+        let content = fs::read(path).map_err(|e| format!("read {}: {e}", path.display()))?;
+        hasher.update(&(content.len() as u64).to_le_bytes());
+        hasher.update(&content);
+    }
+    Ok(format!("{:x}", hasher.finalize()))
+}
+
+fn collect_files_recursive(dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), String> {
+    for entry in fs::read_dir(dir).map_err(|e| format!("readdir: {e}"))? {
+        let entry = entry.map_err(|e| format!("readdir: {e}"))?;
+        let path = entry.path();
+        if path.is_dir() {
+            collect_files_recursive(&path, out)?;
+        } else if path.is_file() {
+            // Skip the digest file itself if it somehow exists.
+            if path.file_name().and_then(|n| n.to_str()) != Some("PACKAGE.sha256") {
+                out.push(path);
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Publish a package with validated registry coordinates. Existing versions
-/// are immutable, so publishing the same name and version returns an error.
+/// are immutable (CLI-enforced), so publishing the same name and version
+/// returns an error. A content digest (PACKAGE.sha256) is written alongside
+/// the published files for post-publication tamper detection.
 pub fn pkg_publish(project: &Path) -> Result<(), String> {
     let manifest = project.join("mako.toml");
     if !manifest.exists() {
@@ -1583,6 +1623,20 @@ pub fn pkg_publish(project: &Path) -> Result<(), String> {
         cleanup_publish_staging(&staging);
         return Err(error);
     }
+    // Re-verify staged manifest matches the intended coordinates.
+    let staged_toml = staging.join("mako.toml");
+    if staged_toml.exists() {
+        let staged_text = fs::read_to_string(&staged_toml).unwrap_or_default();
+        let (staged_name, staged_ver) = read_meta(&staged_text);
+        if staged_name.as_deref() != Some(&name) || staged_ver.as_deref() != Some(&version) {
+            cleanup_publish_staging(&staging);
+            return Err(format!(
+                "staged manifest does not match: expected {name}@{version}, got {}@{}",
+                staged_name.unwrap_or_default(),
+                staged_ver.unwrap_or_default()
+            ));
+        }
+    }
     if dest.exists() {
         cleanup_publish_staging(&staging);
         return Err(format!(
@@ -1599,6 +1653,10 @@ pub fn pkg_publish(project: &Path) -> Result<(), String> {
             format!("finalize package publication: {error}")
         }
     })?;
+    // Write content digest so consumers can detect post-publication tampering.
+    if let Ok(digest) = compute_package_digest(&dest) {
+        let _ = fs::write(dest.join("PACKAGE.sha256"), format!("{digest}  .\n"));
+    }
     println!("published {name}@{version} → {}", dest.display());
     println!(
         "hint: depend with `\"{name}\" = {{ version = \"^{version}\" }}` then `mako pkg install`"
