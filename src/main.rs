@@ -485,6 +485,12 @@ enum PkgCmd {
         #[arg(default_value = ".")]
         path: PathBuf,
     },
+    /// Generate PACKAGE.sha256 for legacy packages published without a digest.
+    /// Run this inside the registry version directory, or pass its path.
+    Seal {
+        #[arg(default_value = ".")]
+        path: PathBuf,
+    },
     /// Record a path or URL dependency in mako.toml (updates in place if already present)
     ///
     /// Forms: `mako pkg add helper ../helper` · `mako pkg add helper path=../helper` ·
@@ -2695,6 +2701,7 @@ fn run_pkg(cmd: PkgCmd) -> Result<(), ()> {
             pkg::pkg_update(&path, offline).map_err(|e| emit_plain_error(&e))
         }
         PkgCmd::Publish { path } => pkg::pkg_publish(&path).map_err(|e| emit_plain_error(&e)),
+        PkgCmd::Seal { path } => pkg::pkg_seal(&path).map_err(|e| emit_plain_error(&e)),
         PkgCmd::Add {
             name,
             source,

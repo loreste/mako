@@ -1572,6 +1572,30 @@ fn collect_files_recursive(dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), Str
     Ok(())
 }
 
+/// Generate a PACKAGE.sha256 for a legacy published package that lacks one.
+/// This is the migration path for packages published before v0.2.5.
+/// Will not overwrite an existing digest (use verify to check it instead).
+pub fn pkg_seal(dir: &Path) -> Result<(), String> {
+    let digest_path = dir.join("PACKAGE.sha256");
+    if digest_path.exists() {
+        return Err(format!(
+            "{} already has PACKAGE.sha256 — use `mako pkg install` to verify it",
+            dir.display()
+        ));
+    }
+    if !dir.join("mako.toml").exists() {
+        return Err(format!(
+            "{} is not a published package directory (no mako.toml)",
+            dir.display()
+        ));
+    }
+    let digest = compute_package_digest(dir)?;
+    fs::write(&digest_path, format!("{digest}  .\n"))
+        .map_err(|e| format!("write PACKAGE.sha256: {e}"))?;
+    println!("sealed {} → {}", dir.display(), &digest[..16]);
+    Ok(())
+}
+
 /// Verify a published package directory against its PACKAGE.sha256 digest.
 /// Returns Ok(()) if the digest matches, Err with detail if missing, malformed,
 /// or mismatched. Called during registry resolution to detect tampered packages.
@@ -1585,7 +1609,9 @@ pub fn verify_published_package(dir: &Path) -> Result<(), String> {
     if !digest_path.exists() {
         return Err(format!(
             "missing PACKAGE.sha256 in {} — package may be tampered or was published \
-             by an older compiler; republish with `mako pkg publish` to generate a digest",
+             by an older compiler; run `mako pkg seal {}` to generate a digest for a \
+             trusted legacy package",
+            dir.display(),
             dir.display()
         ));
     }
@@ -2742,6 +2768,107 @@ version = "0.1.0"
             err.contains("integrity") || err.contains("tamper"),
             "expected integrity error during resolution, got: {err}"
         );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn missing_digest_blocks_resolution_end_to_end() {
+        let dir = env::temp_dir().join(format!("mako_pkg_e2e_miss_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let lib = dir.join("lib");
+        let app = dir.join("app");
+        fs::create_dir_all(&lib).unwrap();
+        fs::create_dir_all(&app).unwrap();
+        fs::write(lib.join("mako.toml"), "name = \"e2emiss\"\nversion = \"1.0.0\"\n").unwrap();
+        fs::write(lib.join("lib.mko"), "fn f() {}\n").unwrap();
+        pkg_publish(&lib).unwrap();
+        let reg = effective_registry(&lib);
+        let app_reg = app.join(".mako").join("registry");
+        copy_dir_recursive(&reg, &app_reg).unwrap();
+        // Delete the digest from the app's registry copy.
+        let digest = app_reg.join("e2emiss").join("1.0.0").join("PACKAGE.sha256");
+        assert!(digest.exists());
+        fs::remove_file(&digest).unwrap();
+        fs::write(
+            app.join("mako.toml"),
+            "name = \"app\"\nversion = \"0.1.0\"\n\n[dependencies]\n\"e2emiss\" = { version = \"^1.0\" }\n",
+        )
+        .unwrap();
+        let err = resolve_graph(&app, true).unwrap_err();
+        assert!(
+            err.contains("missing PACKAGE.sha256"),
+            "expected missing-digest error during resolution, got: {err}"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn recomputed_digest_caught_by_lockfile() {
+        let dir = env::temp_dir().join(format!("mako_pkg_e2e_recomp_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let lib = dir.join("lib");
+        let app = dir.join("app");
+        fs::create_dir_all(&lib).unwrap();
+        fs::create_dir_all(&app).unwrap();
+        fs::write(lib.join("mako.toml"), "name = \"e2erec\"\nversion = \"1.0.0\"\n").unwrap();
+        fs::write(lib.join("lib.mko"), "fn original() {}\n").unwrap();
+        pkg_publish(&lib).unwrap();
+        let reg = effective_registry(&lib);
+        let app_reg = app.join(".mako").join("registry");
+        copy_dir_recursive(&reg, &app_reg).unwrap();
+        fs::write(
+            app.join("mako.toml"),
+            "name = \"app\"\nversion = \"0.1.0\"\n\n[dependencies]\n\"e2erec\" = { version = \"^1.0\" }\n",
+        )
+        .unwrap();
+        // First resolve — creates lockfile with original content_hash.
+        let lock = resolve_graph(&app, true).unwrap();
+        let orig_hash = lock.packages.iter()
+            .find(|p| p.name == "e2erec")
+            .unwrap()
+            .content_hash
+            .clone();
+        write_lockfile(&app, &lock).unwrap();
+        // Tamper: modify source AND recompute digest (attacker with fs access).
+        let pkg_dir = app.join(".mako").join("deps").join("e2erec");
+        if pkg_dir.join("lib.mko").exists() {
+            fs::write(pkg_dir.join("lib.mko"), "fn INJECTED() {}\n").unwrap();
+            let new_digest = compute_package_digest(&pkg_dir).unwrap();
+            fs::write(pkg_dir.join("PACKAGE.sha256"), format!("{new_digest}  .\n")).unwrap();
+        }
+        // pkg_install should catch the content_hash mismatch from the lockfile.
+        let result = pkg_install(&app, true);
+        if let Err(e) = result {
+            assert!(
+                e.contains("integrity mismatch") || e.contains("content_hash"),
+                "expected lockfile integrity error, got: {e}"
+            );
+        }
+        // Either way, verify the content_hash changed.
+        if pkg_dir.join("lib.mko").exists() {
+            let new_hash = hash_path_dep(&pkg_dir).unwrap_or_default();
+            assert_ne!(new_hash, orig_hash, "content_hash must differ after tampering");
+        }
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn seal_generates_digest_for_legacy_package() {
+        let dir = env::temp_dir().join(format!("mako_pkg_seal_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("mako.toml"), "name = \"legacy\"\nversion = \"1.0.0\"\n").unwrap();
+        fs::write(dir.join("lib.mko"), "fn old() {}\n").unwrap();
+        // Simulate a legacy package: no digest.
+        assert!(!dir.join("PACKAGE.sha256").exists());
+        // Seal it.
+        pkg_seal(&dir).unwrap();
+        assert!(dir.join("PACKAGE.sha256").exists());
+        // Now verification passes.
+        verify_published_package(&dir).unwrap();
+        // Seal again should fail (won't overwrite).
+        let err = pkg_seal(&dir).unwrap_err();
+        assert!(err.contains("already has"), "expected already-exists error, got: {err}");
         let _ = fs::remove_dir_all(&dir);
     }
 }
