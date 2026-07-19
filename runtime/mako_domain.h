@@ -510,13 +510,13 @@ static inline int64_t mako_hot_reload_swap_count(void) {
 
 /* Combined stamp of all watched mtimes (xor of ns) for change detection. */
 static inline int64_t mako_hot_reload_stamp(void) {
-    int64_t h = 0;
+    uint64_t h = 0;
     for (int i = 0; i < MAKO_HOT_WATCH_MAX; i++) {
         if (!mako_hot_watches[i].used) continue;
-        h ^= mako_hot_watches[i].mtime_ns;
-        h = (h << 7) | ((h >> 57) & 0x7f);
+        h ^= (uint64_t)mako_hot_watches[i].mtime_ns;
+        h = (h << 7) | (h >> 57);
     }
-    return h;
+    return (int64_t)h;
 }
 
 static inline MakoString mako_hot_reload_status_json(void) {

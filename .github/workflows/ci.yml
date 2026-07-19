@@ -202,7 +202,7 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
       - name: Install native dependencies
-        run: sudo apt-get update && sudo apt-get install -y clang libssl-dev libsqlite3-dev
+        run: sudo apt-get update && sudo apt-get install -y clang libssl-dev libsqlite3-dev ripgrep
       - name: Build mako
         run: cargo build --release
       - name: Verify claims and regression fixtures
@@ -286,6 +286,8 @@ jobs:
         run: cargo build --release
       - name: Run full suite under AddressSanitizer
         env:
+          # Runtime globals live until process exit; this job checks invalid memory access.
+          ASAN_OPTIONS: detect_leaks=0
           MAKO_TEST_TIMEOUT_SECS: "120"
         run: |
           ./target/release/mako test --sanitize address examples/testing

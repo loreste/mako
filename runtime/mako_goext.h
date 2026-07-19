@@ -3804,7 +3804,7 @@ static inline MakoString mako_gob_encode_int(int64_t v) {
     char *buf = (char *)malloc(cap);
     size_t len = 0;
     mako_gob_put_uvarint(&buf, &len, &cap, 2); /* tag int */
-    uint64_t zig = (uint64_t)((v << 1) ^ (v >> 63));
+    uint64_t zig = ((uint64_t)v << 1) ^ -(uint64_t)(v < 0);
     mako_gob_put_uvarint(&buf, &len, &cap, zig);
     buf[len] = 0;
     return (MakoString){buf, len};
@@ -4442,7 +4442,11 @@ static inline int64_t mako_jpeg_dct_dc(MakoString jpeg) {
     size_t off = 2;
     while (off + 4 < jpeg.len) {
         if (p[off] == 0xFF && p[off + 1] == 0xE8 && off + 8 <= jpeg.len) {
-            return (int64_t)((p[off + 4] << 24) | (p[off + 5] << 16) | (p[off + 6] << 8) | p[off + 7]);
+            uint32_t dc = ((uint32_t)p[off + 4] << 24)
+                | ((uint32_t)p[off + 5] << 16)
+                | ((uint32_t)p[off + 6] << 8)
+                | (uint32_t)p[off + 7];
+            return (int64_t)(int32_t)dc;
         }
         if (p[off] != 0xFF) { off++; continue; }
         unsigned char m = p[off + 1];

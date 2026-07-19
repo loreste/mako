@@ -59,6 +59,7 @@ fn TestUdpIpv6Loopback() {
         let _ = udp_close(srv)
         return
     }
+    let _ = tcp_set_timeout(srv, 5000)
     let n = udp_send_to(cli, "::1", port, "u6")
     if n < 0 {
         let _ = udp_close(cli)
