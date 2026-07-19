@@ -11619,15 +11619,10 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                 if self.own_drop_live.contains(&val) {
                     self.note_own_drop_moved(&val);
                 }
-                // Only register the destination if it wasn't already owned.
-                // Re-registering in an inner scope would cause premature free.
-                if self.current_arena.is_none() && !self.own_drop_live.contains(&mn) {
-                    if let Some(cty) = self.locals.get(name).cloned() {
-                        if Self::expr_is_fresh_own(value) {
-                            self.register_own_drop(&mn, &cty);
-                        }
-                    }
-                }
+                // Do NOT re-register the destination for own-drop here.
+                // Reassigning into an existing local that was already registered
+                // (even if it was freed on an early-return branch) must not create
+                // a new scope entry — that causes premature free when the inner scope closes.
             }
             Stmt::IndexAssign { base, index, value } => {
                 let (bty, b) = self.emit_expr(base);
