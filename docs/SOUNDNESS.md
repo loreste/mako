@@ -153,13 +153,13 @@ Related: [SECURITY.md](SECURITY.md) · [MEMORY_MODEL.md](MEMORY_MODEL.md) ·
 | **Doc** | [MEMORY_MODEL.md](MEMORY_MODEL.md#channel-ownership) |
 | **Evidence** | `channel_ownership_test` (clone, take, try_take full, float, timeout). |
 
-### RT-005 — Randomized channel/select stress tests — **Partial**
+### RT-005 — Seeded channel/select stress tests — **Done (core)**
 
 | | |
 |--|--|
-| **Today** | Deterministic tests: `chan_*`, select in wave tests, cancel policy. |
-| **Shipped seed** | `examples/testing/chan_select_stress_test.mko` — multi-sender/receiver under timeout select. |
-| **Target** | Seed-controlled random schedules, longer soaks in CI optional job. |
+| **Today** | Seed-controlled producer jitter, channel capacity, close/receive races, and concurrent int, string, and struct selectors. |
+| **Replay** | Set `MAKO_RT_STRESS_SEED` and `MAKO_RT_STRESS_ROUNDS` when running `examples/testing/chan_select_stress_test.mko`. CI replays two fixed seeds under TSan. |
+| **Optional depth** | Periodic jobs can raise the round count or add more seeds for longer soaks. |
 
 ### RT-006 — Task and resource census APIs for soak tests — **Done**
 
@@ -175,7 +175,7 @@ Related: [SECURITY.md](SECURITY.md) · [MEMORY_MODEL.md](MEMORY_MODEL.md) ·
 
 ### Shipped (0.2.4, extended in 0.2.5)
 
-1. **SAFE-001 / 002 / 009 / 010 / RT-001 / RT-005 seed / RT-006** — bounds, categories, CMap, docs, crew, census.
+1. **SAFE-001 / 002 / 009 / 010 / RT-001 / RT-005 / RT-006** — bounds, categories, CMap, docs, crew, channel stress, census.
 2. **SAFE-003 / 004** — owning slice/map free (built-in + monomorph); views; return transfer; free-on-reassign; nested free (safe).
 3. **SAFE-005** — `string_view` + owning string free.
 4. **SAFE-006 (break/continue/return/`?`/match)** — loop-exit cleanup; return transfer + materialize; `?` early free; match Own free; bind-scope free; alias-mut `__own` flag; move/clone store rules (no double-free).
@@ -189,7 +189,7 @@ Related: [SECURITY.md](SECURITY.md) · [MEMORY_MODEL.md](MEMORY_MODEL.md) ·
 1. Longer TSan soak jobs on capture matrix (CI optional).
 2. RT-004 monomorph channel take matrix beyond int/float/string.
 3. Deeper scheduler (dynamic resize, work-stealing) if pool soaks demand it.
-4. **RT-005** — randomized longer soaks.
+4. Longer channel/select soaks with additional seeds.
 5. Make discarded bag cleanup type-complete when typed expression metadata reaches codegen.
 
 See also [ROADMAP.md](ROADMAP.md) · [ROADMAP_IMPL.md](../ROADMAP_IMPL.md).

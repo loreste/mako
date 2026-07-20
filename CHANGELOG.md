@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Concurrency
+
+- **Seeded channel/select stress:** cover producer jitter, channel capacities,
+  close races, and concurrent int, string, and struct selectors with replayable
+  seeds under TSan.
+- Initialize the shared select wakeup once without a data race, and keep each
+  thread's selected value and round-robin cursor independent.
+
 ### Ownership free
 
 - **Discarded bag free:** explicitly ignored `Option` and `Result` values free
