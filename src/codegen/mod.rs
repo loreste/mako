@@ -12136,6 +12136,29 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                     .unwrap_or_else(|| vty.clone());
                 let val = self.prepare_own_store_rhs(value, &cty_for_rhs, val);
                 let cond_own = self.own_cond_flags.contains(&mn);
+                // A call receiving the destination's current owned value consumes
+                // that value. It may return the same allocation (append/realloc is
+                // the common case), so snapshotting/freeing the pre-call pointer is
+                // a use-after-move and potentially a double-free.
+                let self_consuming_call = matches!(
+                    value,
+                    Expr::Call { args, .. }
+                        if args.iter().any(|arg| matches!(arg, Expr::Ident(base) if base == name))
+                );
+                if self_consuming_call {
+                    if let Some(cell) = self.mut_capture_cells.get(name).cloned() {
+                        self.emit_line(format_args!("*{cell} = {val};"));
+                    } else {
+                        self.emit_line(format_args!("{mn} = {val};"));
+                    }
+                    if cond_own {
+                        self.emit_line(format_args!("{mn}__own = 1;"));
+                    }
+                    if let Some(cty) = self.locals.get(name).cloned() {
+                        self.register_own_drop(&mn, &cty);
+                    }
+                    return;
+                }
                 // SAFE-003 residual: free previous owned value on reassign.
                 // Skip inside arena — arena frees all in bulk.
                 if self.current_arena.is_none() {

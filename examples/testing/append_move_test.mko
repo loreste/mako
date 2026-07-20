@@ -1,0 +1,18 @@
+// Regression: an owned slice moved through a call and returned to the same
+// binding must not have its pre-call pointer freed by the caller.
+
+fn append_one(xs: []int, value: int) -> []int {
+    return append(xs, value)
+}
+
+fn TestAppendMoveThroughCall() {
+    let mut xs: []int = []
+    let mut i = 0
+    while i < 128 {
+        xs = append_one(xs, i)
+        i = i + 1
+    }
+    assert_eq(len(xs), 128)
+    assert_eq(xs[0], 0)
+    assert_eq(xs[127], 127)
+}
