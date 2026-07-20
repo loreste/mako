@@ -3122,9 +3122,10 @@ fn compile_to_ast_with(file: &Path, incr: &incremental::IncrOptions) -> Result<a
 fn compile_to_c_timed(file: &Path) -> Result<(String, f64), ()> {
     let t0 = Instant::now();
     let program = compile_to_ast(file)?;
-    // Warn about unused imports and unreachable code.
+    // Lint warnings: unused imports, unreachable code, unused variables.
     dce::warn_unused_imports(file, &program, &["main".into(), "mako_main".into()]);
     dce::warn_unreachable_code(&program);
+    dce::warn_unused_variables(&program);
     // Dead code elimination: remove unreachable functions before codegen.
     let program = if std::env::var_os("MAKO_NO_DCE").is_none() {
         dce::eliminate(&program, &["main".into(), "mako_main".into()])
@@ -3173,9 +3174,10 @@ fn build_incremental(
 
     let t0 = Instant::now();
     let program = compile_to_ast_with(file, incr)?;
-    // Warn about unused imports and unreachable code.
+    // Lint warnings.
     dce::warn_unused_imports(file, &program, &["main".into(), "mako_main".into()]);
     dce::warn_unreachable_code(&program);
+    dce::warn_unused_variables(&program);
     // Dead code elimination: remove unreachable functions before codegen.
     let program = if std::env::var_os("MAKO_NO_DCE").is_none() {
         dce::eliminate(&program, &["main".into(), "mako_main".into()])

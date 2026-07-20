@@ -220,6 +220,199 @@ fn extract_import_path(rest: &str) -> Option<String> {
     None
 }
 
+/// Warn about unused variables in function bodies.
+pub fn warn_unused_variables(program: &Program) {
+    for item in &program.items {
+        if let Item::Fn(f) = item {
+            // Skip test functions (test helpers often have unused bindings).
+            if f.name.starts_with("Test") {
+                continue;
+            }
+            let mut declared: Vec<(String, bool)> = Vec::new(); // (name, used)
+            // Collect let bindings.
+            collect_let_names(&f.body, &mut declared);
+            // Mark used names.
+            let mut used_names: HashSet<String> = HashSet::new();
+            collect_used_names_block(&f.body, &mut used_names);
+            // Warn about unused.
+            for (name, _) in &declared {
+                if name != "_" && !name.starts_with("_") && !used_names.contains(name) {
+                    eprintln!(
+                        "warning: unused variable `{name}` in `{}`",
+                        f.name
+                    );
+                }
+            }
+        }
+    }
+}
+
+fn collect_let_names(block: &Block, out: &mut Vec<(String, bool)>) {
+    for stmt in &block.stmts {
+        match stmt {
+            Stmt::Let { name, .. } => {
+                out.push((name.clone(), false));
+            }
+            Stmt::LetMulti { names, .. } => {
+                for n in names {
+                    out.push((n.clone(), false));
+                }
+            }
+            Stmt::If { then_block, else_block, .. } => {
+                collect_let_names(then_block, out);
+                if let Some(eb) = else_block {
+                    collect_let_names(eb, out);
+                }
+            }
+            Stmt::While { body, .. } | Stmt::For { body, .. } | Stmt::CFor { body, .. }
+            | Stmt::Crew { body, .. } | Stmt::Arena { body, .. } | Stmt::Unsafe { body }
+            | Stmt::Defer { body } => {
+                collect_let_names(body, out);
+            }
+            _ => {}
+        }
+    }
+}
+
+fn collect_used_names_block(block: &Block, out: &mut HashSet<String>) {
+    for stmt in &block.stmts {
+        collect_used_names_stmt(stmt, out);
+    }
+}
+
+fn collect_used_names_stmt(stmt: &Stmt, out: &mut HashSet<String>) {
+    match stmt {
+        Stmt::Let { init, .. } => collect_used_names_expr(init, out),
+        Stmt::LetMulti { init, .. } => collect_used_names_expr(init, out),
+        Stmt::Assign { name, value, .. } => {
+            out.insert(name.clone());
+            collect_used_names_expr(value, out);
+        }
+        Stmt::IndexAssign { base, index, value } => {
+            collect_used_names_expr(base, out);
+            collect_used_names_expr(index, out);
+            collect_used_names_expr(value, out);
+        }
+        Stmt::FieldAssign { base, value, .. } => {
+            collect_used_names_expr(base, out);
+            collect_used_names_expr(value, out);
+        }
+        Stmt::Expr(e) | Stmt::Return(Some(e)) => collect_used_names_expr(e, out),
+        Stmt::Return(None) => {}
+        Stmt::If { init, cond, then_block, else_block } => {
+            if let Some(i) = init {
+                collect_used_names_stmt(i, out);
+            }
+            collect_used_names_expr(cond, out);
+            collect_used_names_block(then_block, out);
+            if let Some(eb) = else_block {
+                collect_used_names_block(eb, out);
+            }
+        }
+        Stmt::While { cond, body, .. } => {
+            collect_used_names_expr(cond, out);
+            collect_used_names_block(body, out);
+        }
+        Stmt::For { iter, body, binders, .. } => {
+            for b in binders {
+                out.insert(b.clone()); // loop var is "used" by the loop itself
+            }
+            collect_used_names_expr(iter, out);
+            collect_used_names_block(body, out);
+        }
+        Stmt::CFor { init, cond, post, body, .. } => {
+            collect_used_names_stmt(init, out);
+            collect_used_names_expr(cond, out);
+            collect_used_names_stmt(post, out);
+            collect_used_names_block(body, out);
+        }
+        Stmt::Crew { body, .. } | Stmt::Arena { body, .. } | Stmt::Unsafe { body }
+        | Stmt::Defer { body } => {
+            collect_used_names_block(body, out);
+        }
+        Stmt::Select { arms, default_arm, .. } => {
+            for (_ch, body) in arms {
+                collect_used_names_block(body, out);
+            }
+            if let Some(d) = default_arm {
+                collect_used_names_block(d, out);
+            }
+        }
+        Stmt::Break(_) | Stmt::Continue(_) | Stmt::LetCommaOk { .. } => {}
+    }
+}
+
+fn collect_used_names_expr(expr: &Expr, out: &mut HashSet<String>) {
+    match expr {
+        Expr::Ident(name) => { out.insert(name.clone()); }
+        Expr::Call { callee, args } => {
+            collect_used_names_expr(callee, out);
+            for a in args { collect_used_names_expr(a, out); }
+        }
+        Expr::Method { receiver, args, .. } => {
+            collect_used_names_expr(receiver, out);
+            for a in args { collect_used_names_expr(a, out); }
+        }
+        Expr::Binary { left, right, .. } => {
+            collect_used_names_expr(left, out);
+            collect_used_names_expr(right, out);
+        }
+        Expr::Unary { expr, .. } | Expr::Try(expr) | Expr::Kick { expr, .. } | Expr::Join(expr) => {
+            collect_used_names_expr(expr, out);
+        }
+        Expr::Index { base, index } => {
+            collect_used_names_expr(base, out);
+            collect_used_names_expr(index, out);
+        }
+        Expr::Slice { base, low, high, max } => {
+            collect_used_names_expr(base, out);
+            if let Some(l) = low { collect_used_names_expr(l, out); }
+            if let Some(h) = high { collect_used_names_expr(h, out); }
+            if let Some(m) = max { collect_used_names_expr(m, out); }
+        }
+        Expr::Field { base, .. } => collect_used_names_expr(base, out),
+        Expr::StructLit { fields, update, .. } => {
+            for (_, e) in fields { collect_used_names_expr(e, out); }
+            if let Some(u) = update { collect_used_names_expr(u, out); }
+        }
+        Expr::StructLitPos { values, .. } | Expr::Array(values) | Expr::Tuple(values) => {
+            for v in values { collect_used_names_expr(v, out); }
+        }
+        Expr::StringInterp(parts) => {
+            for p in parts {
+                if let InterpPart::Expr(e, _) = p { collect_used_names_expr(e, out); }
+            }
+        }
+        Expr::Match { scrutinee, arms } => {
+            collect_used_names_expr(scrutinee, out);
+            for arm in arms {
+                if let Some(g) = &arm.guard { collect_used_names_expr(g, out); }
+                collect_used_names_expr(&arm.body, out);
+            }
+        }
+        Expr::IfExpr { cond, then_block, else_block } => {
+            collect_used_names_expr(cond, out);
+            collect_used_names_block(then_block, out);
+            collect_used_names_block(else_block, out);
+        }
+        Expr::Block(b) => collect_used_names_block(b, out),
+        Expr::Lambda { body, .. } => collect_used_names_expr(body, out),
+        Expr::Fan { collection, mapper } => {
+            collect_used_names_expr(collection, out);
+            collect_used_names_expr(mapper, out);
+        }
+        Expr::Convert { args, .. } => {
+            for a in args { collect_used_names_expr(a, out); }
+        }
+        Expr::Make { len, cap, .. } => {
+            if let Some(l) = len { collect_used_names_expr(l, out); }
+            if let Some(c) = cap { collect_used_names_expr(c, out); }
+        }
+        Expr::ChanOpen { cap, .. } => collect_used_names_expr(cap, out),
+        Expr::Int(_) | Expr::Float(_) | Expr::Bool(_) | Expr::String(_) => {}
+    }
+}
+
 /// Warn about unreachable code — statements after return/break/continue.
 pub fn warn_unreachable_code(program: &Program) {
     for item in &program.items {
