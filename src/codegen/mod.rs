@@ -2374,6 +2374,26 @@ impl Codegen {
         matches!(expr, Expr::Tuple(_))
     }
 
+    /// Compile-time string concatenation for adjacent string literals.
+    fn const_str_concat(left: &Expr, right: &Expr) -> Option<String> {
+        let l = Self::const_str_value(left)?;
+        let r = Self::const_str_value(right)?;
+        Some(format!("{}{}", l, r))
+    }
+
+    fn const_str_value(expr: &Expr) -> Option<String> {
+        match expr {
+            Expr::String(s) => Some(s.clone()),
+            // Recursively fold nested string concatenations.
+            Expr::Binary { op, left, right } if *op == BinOp::Add => {
+                let l = Self::const_str_value(left)?;
+                let r = Self::const_str_value(right)?;
+                Some(format!("{l}{r}"))
+            }
+            _ => None,
+        }
+    }
+
     /// Compile-time length for string and array literals.
     fn const_len(expr: &Expr) -> Option<i64> {
         match expr {
@@ -12955,6 +12975,16 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         } else {
                             ("bool".into(), format!("(!{eq})"))
                         };
+                    }
+                }
+                // Compile-time string concatenation: "hello" + " world" → "hello world"
+                if *op == BinOp::Add {
+                    if let Some(s) = Self::const_str_concat(left, right) {
+                        let escaped = escape_c(&s);
+                        return (
+                            "MakoString".into(),
+                            format!("mako_str_from_cstr(\"{escaped}\")"),
+                        );
                     }
                 }
                 let (lt, lv) = self.emit_expr(left);
