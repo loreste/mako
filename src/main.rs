@@ -1,6 +1,7 @@
 mod ast;
 mod cc;
 mod codegen;
+mod dce;
 mod desugar;
 mod diag;
 mod errors;
@@ -2147,7 +2148,7 @@ fn run_test_package(
             cg.bounds_checks_always = prof.bounds_checks_always;
         }
     }
-    let c_src = cg.emit(program);
+    let c_src = cg.emit(&program);
     let out_bin = std::env::temp_dir().join(format!(
         "mako_gotest_{}",
         file.file_stem().and_then(|s| s.to_str()).unwrap_or("prog")
@@ -3121,6 +3122,12 @@ fn compile_to_ast_with(file: &Path, incr: &incremental::IncrOptions) -> Result<a
 fn compile_to_c_timed(file: &Path) -> Result<(String, f64), ()> {
     let t0 = Instant::now();
     let program = compile_to_ast(file)?;
+    // Dead code elimination: opt-in via MAKO_DCE=1 (experimental).
+    let program = if std::env::var_os("MAKO_DCE").is_some() {
+        dce::eliminate(&program, &["main".into(), "mako_main".into()])
+    } else {
+        program
+    };
     let mut cg = Codegen::new();
     cg.source_file = Some(file.display().to_string());
     if let Some(dir) = tooling::find_nearest_manifest_dir(file) {
