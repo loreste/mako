@@ -8457,6 +8457,8 @@ static inline int64_t mako_chmod(MakoString path, int64_t mode) {
     if (mako_fs_path_buf(path, pbuf, sizeof(pbuf)) < 0) return -1;
 #if defined(_WIN32)
     return _chmod(pbuf, (int)mode) == 0 ? 0 : -1;
+#elif defined(MAKO_WASI)
+    (void)pbuf; (void)mode; return -1; /* WASI: no chmod */
 #else
     return chmod(pbuf, (mode_t)mode) == 0 ? 0 : -1;
 #endif
@@ -8627,6 +8629,8 @@ static inline MakoString mako_realpath(MakoString path) {
     DWORD n = GetFullPathNameA(pbuf, (DWORD)sizeof(out), out, NULL);
     if (n == 0 || n >= sizeof(out)) return mako_str_from_cstr("");
     return mako_str_from_cstr(out);
+#elif defined(MAKO_WASI)
+    return mako_str_from_cstr(pbuf); /* WASI: no realpath, return as-is */
 #else
     char *r = realpath(pbuf, NULL);
     if (!r) return mako_str_from_cstr("");
