@@ -5222,13 +5222,17 @@ impl Codegen {
         // map[K][][]chan[T] — nested channel slices (MakoArr_arr_chan_int, …).
         let chan_leaf = self.leaf_chan_value_specs();
         for (ctag, cc) in &chan_leaf {
-            self.emit_nested_arr_helpers(ctag, cc); // MakoArr_chan_int
+            if self.want_arr_elem(ctag) {
+                self.emit_nested_arr_helpers(ctag, cc); // MakoArr_chan_int
+            }
             vals.push((format!("arr_{ctag}"), format!("MakoArr_{ctag}")));
             // Outer of []chan for [][]chan
-            self.emit_nested_arr_helpers(
-                &format!("arr_{ctag}"),
-                &format!("MakoArr_{ctag}"),
-            );
+            if self.want_arr_elem(&format!("arr_{ctag}")) {
+                self.emit_nested_arr_helpers(
+                    &format!("arr_{ctag}"),
+                    &format!("MakoArr_{ctag}"),
+                );
+            }
             vals.push((
                 format!("arr_arr_{ctag}"),
                 format!("MakoArr_arr_{ctag}"),
