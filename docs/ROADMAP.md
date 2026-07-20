@@ -1,7 +1,7 @@
 # Mako roadmap
 
-**Product version:** **0.3.0** · Last sync: **2026-07-19**.  
-**Suite:** 360 Mako tests + 79 Rust tests, 0 failures, ASan clean.
+**Product version:** **0.4.0** · Last sync: **2026-07-19**.  
+**Suite:** 362 Mako tests + 80 Rust tests, 0 failures, ASan clean.
 
 **Verified:** [STATUS.md](STATUS.md) · **Stdlib:** [STDLIB.md](STDLIB.md) · **Security:** [SECURITY.md](SECURITY.md) · **Release:** [RELEASE.md](RELEASE.md).  
 **Book:** [The Mako Book](book/) · **Identity:** [IDENTITY.md](IDENTITY.md).  
@@ -22,7 +22,7 @@
 | **0.2.4** | Soundness wave + residuals (SAFE/RT, speed, lock verify) | **Shipped** — [SOUNDNESS.md](SOUNDNESS.md) |
 | **0.2.5** | Memory safety audit, LSP, package integrity, honest docs | **Shipped** |
 | **0.3.0** | Cross-platform, CI green, ownership hardening | **Shipped** |
-| **0.4.0** | Performance — DCE, constant folding | **In progress** |
+| **0.4.0** | Performance — DCE, constant folding, runtime speed, lint | **Shipped** |
 | **1.0** | Stability | Planned |
 
 ### Soundness & runtime (SAFE / RT)

@@ -2,6 +2,34 @@
 
 ## Unreleased
 
+## 0.4.0 — 2026-07-20
+
+**mako0.4.0** (`CARGO_PKG_VERSION`). 362 Mako tests + 80 Rust tests, 0 failures.
+
+### Performance
+
+- **Dead code elimination** — removes unreachable functions/structs/enums (default-on)
+- **99.8% C output reduction** — hello.mko: 30,184 → 64 lines generated C
+- **Demand-driven type helpers** — tuple/array/channel helpers only when used
+- **Fast int-to-string** — direct digit extraction, 24x faster than snprintf path
+- **Realloc string concat** — `mako_str_concat_own` reuses buffer on chained ops
+- **Compile-time string folding** — concat, contains, prefix, suffix, len, repeat, replace
+- **Compile-time boolean folding** — `true && false` → `false`
+- **Literal len folding** — `len("hello")` → `5`
+- **Demand-driven includes** — opt-in `MAKO_LEAN_INCLUDES=1`
+
+### Lint (`mako lint`)
+
+- **Unused imports** — warn when pull/import contributes no reachable functions
+- **Unreachable code** — warn on statements after return/break/continue
+- **Unused variables** — warn on unused `let` bindings (skip `_` prefix)
+- **Shadowed variables** — `mako lint --shadow` or `MAKO_LINT_SHADOW=1`
+
+### Build
+
+- **`--strip`** flag for smaller deploy binaries
+- **`MAKO_NO_DCE=1`** escape hatch to disable dead code elimination
+
 ### Ownership free
 
 - **Discarded bag free:** explicitly ignored `Option` and `Result` values free

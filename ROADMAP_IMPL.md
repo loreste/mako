@@ -3,8 +3,8 @@
 Detailed feature plan for Mako, organized by version. See
 [docs/ROADMAP.md](docs/ROADMAP.md) for the summary view.
 
-**Current version:** 0.3.0  
-**Next milestone:** 0.4.0 (performance ceiling)  
+**Current version:** 0.4.0  
+**Next milestone:** 1.0 (stability)  
 **Last updated:** 2026-07-19  
 **Test suite:** 360 Mako tests + 79 Rust tests, 0 failures, ASan clean
 

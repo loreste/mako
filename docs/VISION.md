@@ -278,7 +278,7 @@ helpers are part of the general-purpose backend bar.
 
 ## Compatibility
 
-Strong backward compat, clear versioning (**0.3.0** tip), stable stdlib, no constant breaks.
+Strong backward compat, clear versioning (**0.4.0** tip), stable stdlib, no constant breaks.
 API stability annotations — Later. Module isolation — Later.
 
 ---

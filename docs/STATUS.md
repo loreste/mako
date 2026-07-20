@@ -1,6 +1,6 @@
 # Mako status (adversarial / verified)
 
-Last inventory: **2026-07-19** · product **mako0.3.0** (`CARGO_PKG_VERSION`).
+Last inventory: **2026-07-19** · product **mako0.4.0** (`CARGO_PKG_VERSION`).
 
 Unique Mako surface · pack/pull · map/slice/bag monomorphs · package-per-directory ·
 const-fn depth (match/while/for/strings) · suite **357+ test programs + 75 Rust unit tests** (0 failures,
@@ -14,7 +14,7 @@ ASan clean ownership suite) · [The Mako Book](book/).
 
 | Scope | Approx. |
 |-------|---------|
-| **Product version** | **0.3.0** ([release](https://github.com/loreste/mako/releases/tag/v0.3.0)) |
+| **Product version** | **0.4.0** ([release](https://github.com/loreste/mako/releases/tag/v0.4.0)) |
 | **MVP / usable language** | Core compiler/runtime scope is exercised; this is not a production-readiness claim |
 | **STATUS north-star** | Tracked scope is explicit; optional depth below remains |
 | **Mako identity (preferred syntax)** | Checklist complete — [IDENTITY.md](IDENTITY.md); not a maturity score |
@@ -149,7 +149,7 @@ Program: [SOUNDNESS.md](SOUNDNESS.md) · model: [MEMORY_MODEL.md](MEMORY_MODEL.m
 | Product version 0.2.0 | Done — stdlib in Mako (io, collections, context, json, http, sql pool) |
 | Product version 0.2.1 | Done — match exhaustiveness, guards, safety verification |
 | Product version 0.2.3 | Done — JWT/HTTPS input hardening on top of 0.2.2 SNI/HTTPS/JWT/lock integrity |
-| Product version 0.3.0 | Done — soundness wave (SAFE/RT), string_view, scheduler pool, stack lits, lock verify |
+| Product version 0.4.0 | Done — soundness wave (SAFE/RT), string_view, scheduler pool, stack lits, lock verify |
 | Generic structs `struct Pair[T]` + multi-param | Done — monomorph `Pair__int` · `generic_struct_test` |
 | Generic enums `enum MyBox[T]` + match | Done — `generic_enum_test` |
 | Interface bounds `fn f[T: I](…)` | Done — structural · `generic_bounds_test` · `bad/generic_bound_fail` |

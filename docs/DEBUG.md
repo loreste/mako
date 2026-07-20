@@ -3,7 +3,7 @@
 This guide covers the implemented Mako debugging tools, from quick inline
 prints to generated-C debugger sessions and sanitizer runs.
 
-**Product tip:** **0.3.0**.
+**Product tip:** **0.4.0**.
 
 ---
 

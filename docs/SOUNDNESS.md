@@ -1,6 +1,6 @@
 # Mako soundness and runtime program
 
-**Product tip:** 0.3.0 · **Last sync:** 2026-07-19
+**Product tip:** 0.4.0 · **Last sync:** 2026-07-19
 
 This is the program of record for memory soundness and structured concurrency.
 Each ID has a status, contract, and acceptance bar. Work stays **fast by
@@ -184,7 +184,7 @@ Related: [SECURITY.md](SECURITY.md) · [MEMORY_MODEL.md](MEMORY_MODEL.md) ·
 7. **Struct Own free** — deep free of string/slice fields on drop.
 8. **Lang safety** — field/index mut roots; temp lvalue reject; empty `[]` lit; stack POD lits.
 
-### Remaining (optional depth / 0.3.0+)
+### Remaining (optional depth / 0.4.0+)
 
 1. Longer TSan soak jobs on capture matrix (CI optional).
 2. RT-004 monomorph channel take matrix beyond int/float/string.

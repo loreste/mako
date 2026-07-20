@@ -10,14 +10,14 @@ and arenas — no tracing GC. Concurrency uses structured primitives (`crew` /
 JSON, database, and networking APIs, though coverage is still incomplete in
 places.
 
-**Status: experimental/alpha (v0.3.0).** The language works and compiles real
+**Status: experimental/alpha (v0.4.0).** The language works and compiles real
 programs, but the surface is young. Expect breaking changes, missing features,
 and bugs. The ownership model is actively being hardened — the full test suite
 (360 programs) passes under AddressSanitizer with zero memory errors, but edge
 cases remain. This is not yet suitable for production use without careful
 evaluation.
 
-**0.3.0 highlights:** memory safety audit (codegen free paths ASan clean),
+**0.4.0 highlights:** memory safety audit (codegen free paths ASan clean),
 match Own free + bind-scope drops + alias-mut freer flag (no double-free),
 LSP hover/inlay-hints/signature-help, per-test timeouts, honest docs.  
 **0.2.4:** ownership drop system (slices/maps/strings/`?`),
@@ -74,7 +74,7 @@ Options:
 ```bash
 curl -fsSL …/install-linux.sh | bash -s -- --prefix /opt/mako --yes
 curl -fsSL …/install-linux.sh | bash -s -- --no-deps    # skip clang install
-curl -fsSL …/install-linux.sh | bash -s -- --version v0.3.0
+curl -fsSL …/install-linux.sh | bash -s -- --version v0.4.0
 ```
 
 **You do not need Rust or cargo on the machine that runs Mako.**

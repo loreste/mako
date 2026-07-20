@@ -1,6 +1,6 @@
 # Mako concurrency memory model
 
-**SAFE-010 · RT-001 · RT-004** · Product tip **0.3.0**
+**SAFE-010 · RT-001 · RT-004** · Product tip **0.4.0**
 
 Safe Mako aims for **data-race freedom by construction** for ordinary locals,
 with an explicit **Sync** escape hatch. There is no GC. Speed comes from
