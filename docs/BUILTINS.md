@@ -2979,7 +2979,7 @@ Test: `examples/testing/trace_log_test.mko`.
 Tests: `examples/testing/overflow_shutdown_test.mko`. Multi-error recovery:
 `examples/bad/multi_error.mko` (`mako check` reports all top-level parse errors).
 
-**CI** (`.github/workflows/ci.yml`): native matrix · cross-smoke · **bench-gate** · **TSan** concurrency smoke (`crew_fan`, `kick_send`, `chan_struct`, `crew_drain`).
+**CI** (`.github/workflows/ci.yml`): native matrix · cross-smoke · **bench-gate** · **TSan** concurrency smoke, including fixed-seed channel/select stress. Replay locally with `MAKO_RT_STRESS_SEED=7 MAKO_RT_STRESS_ROUNDS=8 mako test --race examples/testing/chan_select_stress_test.mko`.
 
 ---
 

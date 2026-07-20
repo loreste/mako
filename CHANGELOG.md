@@ -25,6 +25,11 @@
 - **Unused variables** — warn on unused `let` bindings (skip `_` prefix)
 - **Shadowed variables** — `mako lint --shadow` or `MAKO_LINT_SHADOW=1`
 
+### Concurrency
+
+- **Seeded channel/select stress:** thread-local select state, replayable seeds under TSan
+- Initialize shared select wakeup once without a data race
+
 ### Build
 
 - **`--strip`** flag for smaller deploy binaries
