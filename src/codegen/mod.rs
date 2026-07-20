@@ -2340,6 +2340,40 @@ impl Codegen {
     /// Not Ident (alias) or Slice (view into another local).
     /// POD array lits are stack views (`cap==0`) — free is a no-op (still register
     /// so string/struct array lits that heap-allocate are freed correctly).
+    /// Check if a function body contains any tuple expressions or types.
+    fn body_has_tuple(block: &Block) -> bool {
+        for stmt in &block.stmts {
+            if Self::stmt_has_tuple(stmt) {
+                return true;
+            }
+        }
+        false
+    }
+
+    fn stmt_has_tuple(stmt: &Stmt) -> bool {
+        match stmt {
+            Stmt::Let { ty, init, .. } => {
+                matches!(ty, Some(TypeExpr::Tuple(_))) || Self::expr_has_tuple(init)
+            }
+            Stmt::LetMulti { .. } => true, // multi-return implies tuple
+            Stmt::Expr(e) | Stmt::Return(Some(e)) | Stmt::Assign { value: e, .. } => {
+                Self::expr_has_tuple(e)
+            }
+            Stmt::If { then_block, else_block, .. } => {
+                Self::body_has_tuple(then_block)
+                    || else_block.as_ref().map_or(false, |b| Self::body_has_tuple(b))
+            }
+            Stmt::While { body, .. } | Stmt::For { body, .. } | Stmt::CFor { body, .. }
+            | Stmt::Crew { body, .. } | Stmt::Arena { body, .. } | Stmt::Unsafe { body }
+            | Stmt::Defer { body } => Self::body_has_tuple(body),
+            _ => false,
+        }
+    }
+
+    fn expr_has_tuple(expr: &Expr) -> bool {
+        matches!(expr, Expr::Tuple(_))
+    }
+
     /// Compile-time length for string and array literals.
     fn const_len(expr: &Expr) -> Option<i64> {
         match expr {
@@ -3589,7 +3623,19 @@ impl Codegen {
         self.emit_all_map_slice_value_helpers();
         self.emit_all_map_map_value_helpers();
         self.emit_all_map_option_result_helpers();
-        self.emit_all_map_tuple_value_helpers();
+        // Only emit tuple type grid when the program actually uses tuples.
+        // Check if any function signature or body references a tuple type.
+        let has_tuples = program.items.iter().any(|item| match item {
+            Item::Fn(f) => {
+                f.params.iter().any(|p| matches!(&p.ty, TypeExpr::Tuple(_)))
+                    || matches!(&f.ret, Some(TypeExpr::Tuple(_)))
+                    || Self::body_has_tuple(&f.body)
+            }
+            _ => false,
+        });
+        if has_tuples {
+            self.emit_all_map_tuple_value_helpers();
+        }
         self.emit_all_map_chan_value_helpers();
         // Register Mako struct schemas for reflect_type_schema / reflect_value_of_type.
         for item in &program.items {
