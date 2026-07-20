@@ -17,7 +17,7 @@ class Mako < Formula
   # After tagging v0.1.5: ./scripts/fill-release-packaging.sh v0.1.5
   # sha256 filled after tag by scripts/fill-release-packaging.sh v0.4.0
   url "https://github.com/loreste/mako/archive/refs/tags/v0.4.0.tar.gz"
-  sha256 "c9741ddd73669b9ea2261e43b4758a2c714b77590774989359e2955edec2aa07"
+  sha256 "0cb4d2c89394f649c56c8ed133939bf56ebd10f6b76f7d1e6f603e8b01e61821"
   license "MIT"
   head "https://github.com/loreste/mako.git", branch: "main"
 
