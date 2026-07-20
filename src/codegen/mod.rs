@@ -5753,7 +5753,10 @@ impl Codegen {
         }
         // []tup for maps_values
         for (tag, vc, _, _) in &tags {
-            self.emit_nested_arr_helpers(tag, vc);
+            // Only emit array helpers for tuples that are actually used in slices.
+            if self.want_arr_elem(tag) {
+                self.emit_nested_arr_helpers(tag, vc);
+            }
         }
         let keys: &[(&str, &str)] = &[
             ("i", "int64_t"),
