@@ -22,7 +22,7 @@
 | **0.2.4** | Soundness wave + residuals (SAFE/RT, speed, lock verify) | **Shipped** — [SOUNDNESS.md](SOUNDNESS.md) |
 | **0.2.5** | Memory safety audit, LSP, package integrity, honest docs | **Shipped** |
 | **0.3.0** | Cross-platform, CI green, ownership hardening | **Shipped** |
-| **0.4.0** | Performance ceiling | Planned |
+| **0.4.0** | Performance — DCE, constant folding | **In progress** |
 | **1.0** | Stability | Planned |
 
 ### Soundness & runtime (SAFE / RT)
@@ -243,6 +243,7 @@ Move beyond what the C backend can give.
 | **Interface devirtualization** | Inline interface calls when the concrete type is known |
 | **Closure inlining** | Inline small closures at call sites |
 | **LLVM backend** | Optional direct LLVM IR emission for targets where clang is slow or unavailable |
+| **Direct machine-code backend** | Compile Mako IR directly to native object code, bypassing the source-to-Clang pipeline; staged by target with parity, debug-info, linker, and safety-gate requirements |
 
 ---
 
