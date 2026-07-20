@@ -12994,7 +12994,15 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                 let (rt, rv) = self.emit_expr(right);
                 if *op == BinOp::Add && lt == "MakoString" {
                     let tmp = self.fresh("s");
-                    self.emit_line(format_args!("MakoString {tmp} = mako_str_concat({lv}, {rv});"));
+                    // Use concat_own (realloc) when the left side is a fresh temp
+                    // (call result, another concat, f-string — not a named variable).
+                    let left_is_fresh = Self::expr_is_fresh_own(left);
+                    let fn_name = if left_is_fresh {
+                        "mako_str_concat_own"
+                    } else {
+                        "mako_str_concat"
+                    };
+                    self.emit_line(format_args!("MakoString {tmp} = {fn_name}({lv}, {rv});"));
                     return ("MakoString".into(), tmp);
                 }
                 if (*op == BinOp::Eq || *op == BinOp::Ne)
