@@ -11666,6 +11666,9 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                     }
                     return;
                 }
+                // Note: constant propagation for `let` bindings is NOT safe without
+                // escape analysis — the binding could be passed by reference to a
+                // function that modifies it. Only `const` declarations are propagated.
                 // Keep the C variable name consistent with its uses (Ident emission
                 // also mangles), so a name colliding with a C keyword stays valid.
                 let name = mangle(name);
