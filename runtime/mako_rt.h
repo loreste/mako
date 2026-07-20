@@ -1883,10 +1883,24 @@ static inline int64_t mako_error_has_tag(MakoResultInt r, MakoString tag) {
 }
 
 static inline MakoString mako_int_to_string(int64_t n) {
+    /* Fast path: write digits directly without snprintf for small numbers. */
     char buf[32];
-    int written = snprintf(buf, sizeof(buf), "%lld", (long long)n);
-    if (written < 0) written = 0;
-    return mako_str_from_cstr(buf);
+    int neg = 0;
+    uint64_t v;
+    if (n < 0) { neg = 1; v = (uint64_t)(-(n + 1)) + 1; }
+    else { v = (uint64_t)n; }
+    char *p = buf + sizeof(buf) - 1;
+    *p = 0;
+    if (v == 0) { *--p = '0'; }
+    else {
+        while (v > 0) { *--p = '0' + (char)(v % 10); v /= 10; }
+    }
+    if (neg) *--p = '-';
+    size_t len = (size_t)(buf + sizeof(buf) - 1 - p);
+    char *d = (char *)malloc(len + 1);
+    if (MAKO_UNLIKELY(!d)) abort();
+    memcpy(d, p, len + 1);
+    return (MakoString){d, len};
 }
 
 /* ---- String builder (growable buffer → string) ---- */
