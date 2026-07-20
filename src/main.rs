@@ -3126,6 +3126,9 @@ fn compile_to_c_timed(file: &Path) -> Result<(String, f64), ()> {
     dce::warn_unused_imports(file, &program, &["main".into(), "mako_main".into()]);
     dce::warn_unreachable_code(&program);
     dce::warn_unused_variables(&program);
+    if std::env::var_os("MAKO_LINT_SHADOW").is_some() {
+        dce::warn_shadowed_variables(&program);
+    }
     // Dead code elimination: remove unreachable functions before codegen.
     let program = if std::env::var_os("MAKO_NO_DCE").is_none() {
         dce::eliminate(&program, &["main".into(), "mako_main".into()])
@@ -3178,6 +3181,9 @@ fn build_incremental(
     dce::warn_unused_imports(file, &program, &["main".into(), "mako_main".into()]);
     dce::warn_unreachable_code(&program);
     dce::warn_unused_variables(&program);
+    if std::env::var_os("MAKO_LINT_SHADOW").is_some() {
+        dce::warn_shadowed_variables(&program);
+    }
     // Dead code elimination: remove unreachable functions before codegen.
     let program = if std::env::var_os("MAKO_NO_DCE").is_none() {
         dce::eliminate(&program, &["main".into(), "mako_main".into()])

@@ -413,6 +413,64 @@ fn collect_used_names_expr(expr: &Expr, out: &mut HashSet<String>) {
     }
 }
 
+/// Warn about shadowed variables — a let binding reuses a name from an outer scope.
+pub fn warn_shadowed_variables(program: &Program) {
+    for item in &program.items {
+        if let Item::Fn(f) = item {
+            if f.name.starts_with("Test") {
+                continue;
+            }
+            let mut scope_stack: Vec<HashSet<String>> = Vec::new();
+            // Add params to initial scope.
+            let mut param_scope: HashSet<String> = HashSet::new();
+            for p in &f.params {
+                param_scope.insert(p.name.clone());
+            }
+            scope_stack.push(param_scope);
+            check_shadow_block(&f.body, &mut scope_stack, &f.name);
+        }
+    }
+}
+
+fn is_in_outer_scope(name: &str, stack: &[HashSet<String>]) -> bool {
+    // Check all scopes except the innermost.
+    for scope in stack.iter().rev().skip(1) {
+        if scope.contains(name) {
+            return true;
+        }
+    }
+    false
+}
+
+fn check_shadow_block(block: &Block, stack: &mut Vec<HashSet<String>>, fn_name: &str) {
+    stack.push(HashSet::new());
+    for stmt in &block.stmts {
+        match stmt {
+            Stmt::Let { name, .. } => {
+                if name != "_" && !name.starts_with("_") && is_in_outer_scope(name, stack) {
+                    eprintln!("warning: variable `{name}` shadows outer binding in `{fn_name}`");
+                }
+                if let Some(scope) = stack.last_mut() {
+                    scope.insert(name.clone());
+                }
+            }
+            Stmt::If { then_block, else_block, .. } => {
+                check_shadow_block(then_block, stack, fn_name);
+                if let Some(eb) = else_block {
+                    check_shadow_block(eb, stack, fn_name);
+                }
+            }
+            Stmt::While { body, .. } | Stmt::For { body, .. } | Stmt::CFor { body, .. }
+            | Stmt::Crew { body, .. } | Stmt::Arena { body, .. } | Stmt::Unsafe { body }
+            | Stmt::Defer { body } => {
+                check_shadow_block(body, stack, fn_name);
+            }
+            _ => {}
+        }
+    }
+    stack.pop();
+}
+
 /// Warn about unreachable code — statements after return/break/continue.
 pub fn warn_unreachable_code(program: &Program) {
     for item in &program.items {
