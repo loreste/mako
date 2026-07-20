@@ -1,8 +1,11 @@
 //! Dead code elimination — remove unreachable functions, structs, and enums
 //! from `program.items` before codegen. Walks the call graph starting from
 //! roots (main / test functions) and keeps only reachable items.
+//!
+//! Also detects unused imports and emits warnings.
 
 use std::collections::HashSet;
+use std::path::Path;
 
 use crate::ast::*;
 
@@ -41,6 +44,9 @@ pub fn eliminate(program: &Program, roots: &[String]) -> Program {
             collect_fn_refs(f, &mut queue, &mut reachable_types);
         }
     }
+
+    // Check for unused imports (if source file is provided).
+    // This runs after BFS so reachable_fns is complete.
 
     // Collect method names (bare names like "describe", "push") so we can
     // keep all `Type_method` implementations when the method is called.
@@ -107,6 +113,108 @@ pub fn eliminate(program: &Program, roots: &[String]) -> Program {
         .collect();
 
     Program { items }
+}
+
+/// Check for unused imports in the source file. Reads the original source,
+/// finds `pull` / `import` lines, resolves each to a file, extracts its
+/// top-level `fn` names, and warns if none are in the reachable set.
+pub fn warn_unused_imports(source_file: &Path, program: &Program, roots: &[String]) {
+    // Build the reachable set (same BFS as eliminate).
+    let mut reachable_fns: HashSet<String> = HashSet::new();
+    let mut reachable_types: HashSet<String> = HashSet::new();
+    let mut queue: Vec<String> = roots.to_vec();
+    let fn_map: std::collections::HashMap<String, &FnDef> = program
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            Item::Fn(f) => Some((f.name.clone(), f)),
+            _ => None,
+        })
+        .collect();
+    for item in &program.items {
+        if let Item::ExternC(e) = item {
+            reachable_fns.insert(e.name.clone());
+        }
+    }
+    while let Some(name) = queue.pop() {
+        if !reachable_fns.insert(name.clone()) {
+            continue;
+        }
+        if let Some(f) = fn_map.get(&name) {
+            collect_fn_refs(f, &mut queue, &mut reachable_types);
+        }
+    }
+
+    // Read the original source and find import lines.
+    let Ok(src) = std::fs::read_to_string(source_file) else {
+        return;
+    };
+    let base = source_file.parent().unwrap_or(Path::new("."));
+    for line in src.lines() {
+        let trimmed = line.trim();
+        // Match: pull "path" or pull . "path" or import "path"
+        let path = if let Some(rest) = trimmed.strip_prefix("pull") {
+            extract_import_path(rest)
+        } else if let Some(rest) = trimmed.strip_prefix("import") {
+            extract_import_path(rest)
+        } else {
+            None
+        };
+        let Some(import_path) = path else { continue };
+        // Resolve the imported file.
+        let resolved = if import_path.starts_with("./") || import_path.starts_with("../") {
+            base.join(&import_path)
+        } else {
+            // stdlib pull — skip (we don't have the stdlib path here).
+            continue;
+        };
+        let resolved = if resolved.extension().is_none() {
+            resolved.with_extension("mko")
+        } else {
+            resolved
+        };
+        if !resolved.exists() {
+            continue;
+        }
+        // Extract function names from the imported file.
+        let Ok(imp_src) = std::fs::read_to_string(&resolved) else {
+            continue;
+        };
+        let mut has_reachable = false;
+        for imp_line in imp_src.lines() {
+            let imp_trimmed = imp_line.trim();
+            if let Some(rest) = imp_trimmed.strip_prefix("fn ") {
+                if let Some(name) = rest.split('(').next() {
+                    let name = name.trim();
+                    if reachable_fns.contains(name) {
+                        has_reachable = true;
+                        break;
+                    }
+                }
+            }
+        }
+        if !has_reachable {
+            let display_path = resolved
+                .strip_prefix(base)
+                .unwrap_or(&resolved)
+                .display();
+            eprintln!(
+                "warning: unused import `{import_path}` — no reachable functions from {display_path}"
+            );
+        }
+    }
+}
+
+fn extract_import_path(rest: &str) -> Option<String> {
+    // pull "path" / pull . "path" / import "path"
+    let rest = rest.trim();
+    let rest = rest.strip_prefix('.').unwrap_or(rest).trim();
+    if let Some(s) = rest.strip_prefix('"') {
+        if let Some(end) = s.find('"') {
+            return Some(s[..end].to_string());
+        }
+    }
+    None
 }
 
 /// Collect function names called and type names referenced from a function def.
