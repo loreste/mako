@@ -51,7 +51,7 @@ Optional depth (TSan soaks, monomorph take-send) remains open.
 | RT-001 | Crew exit / cancel / failure | **Done** |
 | RT-002…003 | Bounded scheduler / `spawn_blocking` | **Done** (seed) |
 | RT-004 | Channel send ownership (clone/take/timeout) | **Done** (core) |
-| RT-005 | Channel/select stress | **Seed shipped** |
+| RT-005 | Seeded channel/select stress with TSan replay | **Done** (core) |
 | RT-006 | Task/resource census APIs | **Done** |
 | Pkg lock | Build-time locked dep verification (PR #3) | **Done** |
 | Struct Own fields | Deep free of string/slice fields on drop | **Done** |
@@ -70,7 +70,7 @@ Optional depth (TSan soaks, monomorph take-send) remains open.
 1. Longer TSan soak jobs on capture matrix (CI optional).
 2. RT-004 monomorph channel take matrix beyond int/float/string.
 3. Deeper scheduler (work-stealing / dynamic resize) if pool soaks demand it.
-4. **RT-005** — randomized longer select/channel soaks.
+4. Longer channel/select soaks with additional seeds.
 5. Make discarded bag cleanup type-complete when typed expression metadata reaches codegen.
 
 ---

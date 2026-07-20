@@ -40,7 +40,7 @@ Program: [SOUNDNESS.md](SOUNDNESS.md) · model: [MEMORY_MODEL.md](MEMORY_MODEL.m
 | SAFE-008 capture matrix | Done (core) |
 | SAFE-009 CMap gate | Done |
 | SAFE-010 memory model doc | Done |
-| RT-001 / RT-005 seed / RT-006 | Done |
+| RT-001 / RT-005 / RT-006 | Done |
 | RT-002/003 scheduler pool + spawn_blocking | Done (seed) |
 | RT-004 channel ownership (clone/take) | Done (core) |
 | Struct Own field free | Done |
