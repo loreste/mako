@@ -9,6 +9,7 @@ mod incremental;
 mod leak;
 mod lexer;
 mod lsp;
+mod native_codegen;
 mod overflow;
 mod parser;
 mod pkg;
@@ -50,6 +51,15 @@ enum OptLevel {
     #[default]
     Debug,
     Release,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, ValueEnum)]
+enum BackendCli {
+    /// Mature Mako → C → system compiler backend.
+    #[default]
+    C,
+    /// Direct Mako AST → Cranelift → native object backend (host target).
+    Native,
 }
 
 #[derive(Subcommand)]
@@ -98,6 +108,9 @@ enum Commands {
         /// Write generated C to stdout / beside sources instead of linking only
         #[arg(long)]
         emit_c: bool,
+        /// Code-generation backend: `c` (default) or direct `native` object code
+        #[arg(long, value_enum, default_value_t = BackendCli::C)]
+        backend: BackendCli,
         /// Optimize (`-O3 -flto`); default is debug `-O0`
         #[arg(long, default_value_t = false)]
         release: bool,
@@ -160,6 +173,9 @@ enum Commands {
         /// Optimize before run (`-O3 -flto`)
         #[arg(long, default_value_t = false)]
         release: bool,
+        /// Code-generation backend: `c` (default) or direct `native` object code
+        #[arg(long, value_enum, default_value_t = BackendCli::C)]
+        backend: BackendCli,
         /// Print compile timings before the program runs
         #[arg(long)]
         time: bool,
@@ -575,8 +591,31 @@ fn main() {
     let ver: &'static str = Box::leak(clap_version_string().into_boxed_str());
     let matches = Cli::command().version(ver).get_matches();
     let cli = Cli::from_arg_matches(&matches).unwrap_or_else(|e| e.exit());
-    if let Err(()) = run(cli) {
-        std::process::exit(1);
+    // Large real-world programs can create deeply nested typed/codegen walks.
+    // Use an explicit worker stack so compiler capacity is deterministic across
+    // platforms (macOS' main-thread default is particularly small). This is a
+    // bootstrap safeguard; iterative IR walks remain the self-hosted design.
+    let stack_mb = std::env::var("MAKO_COMPILER_STACK_MB")
+        .ok()
+        .and_then(|s| s.parse::<usize>().ok())
+        .unwrap_or(16)
+        .clamp(4, 256);
+    let result = std::thread::Builder::new()
+        .name("mako-compiler".into())
+        .stack_size(stack_mb * 1024 * 1024)
+        .spawn(move || run(cli))
+        .and_then(|worker| {
+            worker.join().map_err(|_| {
+                std::io::Error::other("compiler worker panicked")
+            })
+        });
+    match result {
+        Ok(Ok(())) => {}
+        Ok(Err(())) => std::process::exit(1),
+        Err(e) => {
+            emit_plain_error(&format!("could not run compiler worker: {e}"));
+            std::process::exit(1);
+        }
     }
 }
 
@@ -1064,6 +1103,7 @@ fn run(cli: Cli) -> Result<(), ()> {
             package,
             out,
             emit_c,
+            backend,
             release,
             time,
             target,
@@ -1081,6 +1121,7 @@ fn run(cli: Cli) -> Result<(), ()> {
                 package.as_deref(),
                 out,
                 emit_c,
+                backend,
                 release,
                 time,
                 target,
@@ -1096,6 +1137,7 @@ fn run(cli: Cli) -> Result<(), ()> {
             file,
             package,
             release,
+            backend,
             time,
             no_incremental,
             jobs,
@@ -1106,6 +1148,7 @@ fn run(cli: Cli) -> Result<(), ()> {
             &file,
             package.as_deref(),
             release,
+            backend,
             time,
             !no_incremental,
             jobs,
@@ -1721,6 +1764,7 @@ fn cmd_dev(
         path,
         package,
         release,
+        BackendCli::C,
         false,
         true,
         None,
@@ -1741,6 +1785,7 @@ fn cmd_dev(
                 path,
                 package,
                 release,
+                BackendCli::C,
                 false,
                 true,
                 None,
@@ -1802,6 +1847,7 @@ fn cmd_build(
     package: Option<&str>,
     out: Option<PathBuf>,
     emit_c: bool,
+    backend: BackendCli,
     release: bool,
     time: bool,
     target: Option<String>,
@@ -1835,7 +1881,7 @@ fn cmd_build(
         let out_bin = out.clone().unwrap_or_else(|| default_out_bin(file));
         let out_bin = cc::with_exe_suffix(out_bin, &opts);
         let (frontend_ms, backend_ms) =
-            build_incremental(file, &out_bin, emit_c, level, &opts, &incr)?;
+            build_incremental(file, &out_bin, emit_c, backend, level, &opts, &incr)?;
         if time {
             eprintln!(
                 "mako frontend: {frontend_ms:.1}ms  backend: {backend_ms:.1}ms  total: {:.1}ms ({})",
@@ -1855,6 +1901,7 @@ fn cmd_run(
     path: &Path,
     package: Option<&str>,
     release: bool,
+    backend: BackendCli,
     time: bool,
     incremental: bool,
     jobs: Option<usize>,
@@ -1876,7 +1923,8 @@ fn cmd_run(
         "mako_run_{}",
         file.file_stem().and_then(|s| s.to_str()).unwrap_or("prog")
     ));
-    let (frontend_ms, backend_ms) = build_incremental(&file, &out_bin, false, level, &opts, &incr)?;
+    let (frontend_ms, backend_ms) =
+        build_incremental(&file, &out_bin, false, backend, level, &opts, &incr)?;
     if time {
         eprintln!(
             "mako frontend: {frontend_ms:.1}ms  backend: {backend_ms:.1}ms  total: {:.1}ms",
@@ -1973,7 +2021,15 @@ fn cmd_profile(
         "mako_profile_{}",
         file.file_stem().and_then(|s| s.to_str()).unwrap_or("prog")
     ));
-    let (frontend_ms, backend_ms) = build_incremental(&file, &out_bin, false, level, &opts, &incr)?;
+    let (frontend_ms, backend_ms) = build_incremental(
+        &file,
+        &out_bin,
+        false,
+        BackendCli::C,
+        level,
+        &opts,
+        &incr,
+    )?;
     let run_start = Instant::now();
     let status = if json {
         let output = Command::new(&out_bin).args(args).output().map_err(|e| {
@@ -3146,6 +3202,7 @@ fn build_incremental(
     file: &Path,
     out_bin: &Path,
     emit_c: bool,
+    backend: BackendCli,
     level: OptLevel,
     opts: &BuildOpts,
     incr: &incremental::IncrOptions,
@@ -3155,7 +3212,8 @@ fn build_incremental(
         .as_ref()
         .map(|t| t.contains("wasm"))
         .unwrap_or(false);
-    let use_sep = !emit_c
+    let use_sep = incr.incremental
+        && !emit_c
         && !is_wasm
         && opts.target.is_none()
         && opts.sanitize.is_none()
@@ -3164,6 +3222,15 @@ fn build_incremental(
     let t0 = Instant::now();
     let program = compile_to_ast_with(file, incr)?;
     let frontend_ms = t0.elapsed().as_secs_f64() * 1000.0;
+
+    if backend == BackendCli::Native {
+        if emit_c {
+            emit_plain_error("--emit-c cannot be used with --backend native");
+            return Err(());
+        }
+        let backend_ms = build_native_object(&program, out_bin, file, level, opts)?;
+        return Ok((frontend_ms, backend_ms));
+    }
 
     if !use_sep {
         let mut cg = Codegen::new();
@@ -3378,6 +3445,89 @@ fn link_args_native(opts: &BuildOpts, _runtime_dir: &Path) -> Vec<String> {
         }
     }
     args
+}
+
+/// Direct AST → Cranelift → host object path. A platform linker is still
+/// required to produce the final executable, just as it is for Rust and C.
+fn build_native_object(
+    program: &ast::Program,
+    out_bin: &Path,
+    src_file: &Path,
+    level: OptLevel,
+    opts: &BuildOpts,
+) -> Result<f64, ()> {
+    if opts.target.is_some() {
+        emit_plain_error("--backend native currently supports the host target only");
+        return Err(());
+    }
+    if opts.sanitize.is_some() {
+        emit_plain_error("--sanitize is not implemented for --backend native yet");
+        return Err(());
+    }
+    if opts.static_link {
+        emit_plain_error("--static is not implemented for --backend native yet");
+        return Err(());
+    }
+    if opts.overflow != OverflowMode::Wrap {
+        emit_plain_error("--backend native currently supports --overflow wrap only");
+        return Err(());
+    }
+
+    let t0 = Instant::now();
+    let object = native_codegen::compile_object(program, matches!(level, OptLevel::Release))
+        .map_err(|e| {
+            Diagnostic::error(
+                &src_file.display().to_string(),
+                "",
+                Span::unknown(),
+                "direct native code generation failed",
+            )
+            .with_hint(e.to_string())
+            .emit();
+        })?;
+    let object_path = std::env::temp_dir().join(format!(
+        "mako_native_{}_{}.o",
+        std::process::id(),
+        src_file
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("out")
+    ));
+    fs::write(&object_path, object).map_err(|e| {
+        emit_plain_error(&format!("could not write native object: {e}"));
+    })?;
+
+    let cc_bin = cc::resolve_cc(opts);
+    let mut cmd = Command::new(&cc_bin);
+    cc::apply_cc_prefix(&mut cmd, &cc_bin);
+    cmd.arg(&object_path).arg("-o").arg(out_bin);
+    let runtime_dir = runtime_include_dir().unwrap_or_else(|_| PathBuf::new());
+    for arg in link_args_native(opts, &runtime_dir) {
+        cmd.arg(arg);
+    }
+    let output = cmd.output().map_err(|e| {
+        let _ = fs::remove_file(&object_path);
+        emit_plain_error(&format!(
+            "native linker failed to start ({}): {e}",
+            cc_bin.display()
+        ));
+    })?;
+    let _ = fs::remove_file(&object_path);
+    if !output.status.success() {
+        Diagnostic::error(
+            &src_file.display().to_string(),
+            "",
+            Span::unknown(),
+            "direct native object link failed",
+        )
+        .with_hint(String::from_utf8_lossy(&output.stderr).trim().to_string())
+        .emit();
+        return Err(());
+    }
+    if matches!(level, OptLevel::Release) && std::env::var_os("MAKO_STRIP").is_some() {
+        let _ = Command::new("strip").arg(out_bin).status();
+    }
+    Ok(t0.elapsed().as_secs_f64() * 1000.0)
 }
 
 fn build_c(

@@ -1,0 +1,47 @@
+// Native backend: structs with scalar fields (value semantics).
+// Exercises struct literals, field read/write, functional update (`..base`),
+// struct parameters and returns, mixed scalar field kinds, and value-copy
+// semantics. Differentially validated against the C backend.
+
+struct NvPoint {
+    x: int
+    y: int
+}
+
+struct NvFlag {
+    n: int
+    active: bool
+}
+
+fn add(a: NvPoint, b: NvPoint) -> NvPoint {
+    return NvPoint { x: a.x + b.x, y: a.y + b.y }
+}
+
+fn main() {
+    let p = NvPoint { x: 3, y: 4 }
+    print_int(p.x)
+    print_int(p.y)
+
+    var q = NvPoint { x: 10, y: 20 }
+    q.x = q.x + 1
+    print_int(q.x)
+    print_int(q.y)
+
+    let r = add(p, q)
+    print_int(r.x)
+    print_int(r.y)
+
+    // Functional update: keep r's y, override x.
+    let s = NvPoint { x: 100, ..r }
+    print_int(s.x)
+    print_int(s.y)
+
+    // Mixed scalar fields and value-copy semantics.
+    let f = NvFlag { n: 7, active: true }
+    print_int(f.n)
+    print(f.active)
+    var g = f
+    g.active = false
+    print(g.active)
+    print(f.active)
+}

@@ -1,0 +1,43 @@
+// Native backend: string values with heap ownership.
+// Exercises concat (heap), nested concat, reassignment (drop-on-reassign),
+// move between locals, string parameters/returns, and printing owned
+// temporaries. Differentially validated against the C backend (identical
+// stdout/exit) and checked for leaks / double-frees under an allocator guard.
+
+fn shout(word: string) -> string {
+    return word + "!"
+}
+
+fn pick(flag: bool, a: string, b: string) -> string {
+    if flag {
+        return a
+    }
+    return b
+}
+
+fn main() {
+    let s = "hello from mako"
+    print(s)
+
+    let greeting = "hello, " + "world"
+    print(greeting)
+
+    let loud = shout("mako")
+    print(loud)
+
+    print("a" + "b" + "c")
+
+    var acc = "x"
+    acc = acc + "y"
+    acc = acc + "z"
+    print(acc)
+
+    let moved = greeting
+    print(moved)
+
+    let chosen = pick(true, "first", "second")
+    print(chosen)
+    print(pick(false, "unused", "picked"))
+
+    print("trailing literal")
+}

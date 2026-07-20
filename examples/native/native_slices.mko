@@ -1,0 +1,84 @@
+// Native backend: []int slices with heap ownership.
+// Exercises array literals, make([]int, n), indexing (bounds-checked), len,
+// iteration, reassignment (drop-on-reassign), move between locals, indexing
+// owned temporaries, slice parameters/returns, and index assignment.
+// Differentially validated against the C backend and checked for leaks /
+// double-frees under an allocator guard.
+
+fn sum(xs: []int) -> int {
+    var s = 0
+    var i = 0
+    while i < len(xs) {
+        s = s + xs[i]
+        i = i + 1
+    }
+    return s
+}
+
+fn squares(n: int) -> []int {
+    var xs = make([]int, n)
+    var i = 0
+    while i < n {
+        xs[i] = i * i
+        i = i + 1
+    }
+    return xs
+}
+
+// Build a slice by appending — exercises in-place growth, reallocation with
+// free-of-old-buffer, and returning the grown slice.
+fn tens(n: int) -> []int {
+    var xs = make([]int, 0)
+    var i = 0
+    while i < n {
+        xs = append(xs, i * 10)
+        i = i + 1
+    }
+    return xs
+}
+
+fn main() {
+    let a = [10, 20, 30]
+    print_int(a[0])
+    print_int(a[2])
+    print_int(len(a))
+
+    let b = make([]int, 3)
+    print_int(len(b))
+    print_int(b[1])
+
+    var s = 0
+    var i = 0
+    while i < len(a) {
+        s = s + a[i]
+        i = i + 1
+    }
+    print_int(s)
+
+    // Reassign a slice: the old buffer is dropped before the new one is stored.
+    var xs = [1, 2]
+    xs = make([]int, 4)
+    print_int(len(xs))
+
+    // Move between locals.
+    let ys = xs
+    print_int(len(ys))
+
+    // Index and len applied to owned temporaries (freed after use).
+    print_int([5, 6, 7][1])
+    print_int(len(make([]int, 8)))
+
+    // Slice parameters, returns, and index assignment.
+    print_int(sum(a))
+    let sq = squares(5)
+    print_int(sum(sq))
+    print_int(sq[3])
+    print_int(sum(squares(6)))
+
+    // append: build, index, sum.
+    let t = tens(5)
+    print_int(len(t))
+    print_int(t[4])
+    print_int(sum(t))
+    print_int(sum(tens(6)))
+}

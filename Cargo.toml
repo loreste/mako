@@ -11,6 +11,11 @@ path = "src/main.rs"
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
+cranelift-codegen = "0.133.1"
+cranelift-frontend = "0.133.1"
+cranelift-module = "0.133.1"
+cranelift-native = "0.133.1"
+cranelift-object = "0.133.1"
 regex = "1"
 sha2 = "0.10"
 thiserror = "2"

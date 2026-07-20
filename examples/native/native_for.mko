@@ -1,0 +1,51 @@
+// Native backend: for loops — counted ranges and slice iteration (index + value),
+// with break, continue, and nesting. Differentially validated against C backend.
+
+fn main() {
+    var s = 0
+    for i in 5 {
+        s = s + i
+    }
+    print_int(s)
+
+    var t = 0
+    for i in range 4 {
+        t = t + i
+    }
+    print_int(t)
+
+    let xs = [10, 20, 30]
+    var sum = 0
+    for i, v in range xs {
+        sum = sum + i + v
+    }
+    print_int(sum)
+
+    var idxs = 0
+    for j in range xs {
+        idxs = idxs + j
+    }
+    print_int(idxs)
+
+    // break / continue
+    var bc = 0
+    for i in 10 {
+        if i == 2 {
+            continue
+        }
+        if i == 5 {
+            break
+        }
+        bc = bc + i
+    }
+    print_int(bc)
+
+    // nested
+    var grid = 0
+    for a in 3 {
+        for b in 3 {
+            grid = grid + a * b
+        }
+    }
+    print_int(grid)
+}
