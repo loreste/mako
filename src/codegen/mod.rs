@@ -13634,6 +13634,9 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             return ("int64_t".into(), tmp);
                         }
                         "str_len" => {
+                            if let Expr::String(s) = &args[0] {
+                                return ("int64_t".into(), s.len().to_string());
+                            }
                             let (_, v) = self.emit_expr(&args[0]);
                             return ("int64_t".into(), format!("mako_str_len({v})"));
                         }
@@ -13983,6 +13986,13 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             return ("MakoString".into(), tmp);
                         }
                         "str_repeat" => {
+                            if let (Expr::String(s), Expr::Int(n)) = (&args[0], &args[1]) {
+                                if *n >= 0 && *n <= 1024 {
+                                    let result = s.repeat(*n as usize);
+                                    let escaped = escape_c(&result);
+                                    return ("MakoString".into(), format!("mako_str_from_cstr(\"{escaped}\")"));
+                                }
+                            }
                             let (_, a) = self.emit_expr(&args[0]);
                             let (_, n) = self.emit_expr(&args[1]);
                             let tmp = self.fresh("srp");
@@ -13990,6 +14000,13 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             return ("MakoString".into(), tmp);
                         }
                         "str_replace" => {
+                            if let (Expr::String(s), Expr::String(old), Expr::String(new)) =
+                                (&args[0], &args[1], &args[2])
+                            {
+                                let result = s.replace(old.as_str(), new.as_str());
+                                let escaped = escape_c(&result);
+                                return ("MakoString".into(), format!("mako_str_from_cstr(\"{escaped}\")"));
+                            }
                             let (_, s) = self.emit_expr(&args[0]);
                             let (_, o) = self.emit_expr(&args[1]);
                             let (_, n) = self.emit_expr(&args[2]);
