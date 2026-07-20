@@ -3535,37 +3535,42 @@ impl Codegen {
             self.out.push_str("#define MAKO_BOUNDS_ALWAYS 1\n");
         }
         self.out.push_str("#include \"mako_overflow.h\"\n");
-        self.out.push_str("#ifndef MAKO_WASI\n");
-        self.out.push_str("#include \"mako_uuid.h\"\n");
-        self.out.push_str("#include \"mako_net.h\"\n");
-        self.out.push_str("#include \"mako_proxy.h\"\n");
-        self.out.push_str("#include \"mako_http.h\"\n");
-        self.out.push_str("#include \"mako_trace.h\"\n"); /* before log/std so log_* can emit trace= */
-        self.out.push_str("#include \"mako_log.h\"\n");   /* strong structured logging */
-        self.out.push_str("#include \"mako_std.h\"\n");
-        self.out.push_str("#include \"mako_leak.h\"\n");
-        self.out.push_str("#include \"mako_shutdown.h\"\n");
-        self.out.push_str("#include \"mako_tls.h\"\n");
-        self.out.push_str("#include \"mako_llm.h\"\n");
-        self.out.push_str("#include \"mako_sip.h\"\n");
-        self.out.push_str("#include \"mako_nghttp2.h\"\n");
-        self.out.push_str("#include \"mako_quiche.h\"\n");
-        self.out.push_str("#include \"mako_ws.h\"\n");
-        self.out.push_str("#include \"mako_db.h\"\n");
-        self.out.push_str("#include \"mako_cmap.h\"\n");
-        self.out.push_str("#include \"mako_dio.h\"\n");
-        self.out.push_str("#include \"mako_domain.h\"\n");
-        self.out.push_str("#include \"mako_evloop.h\"\n");
-        self.out.push_str("#include \"mako_game.h\"\n");
-        self.out.push_str("#include \"mako_gpu.h\"\n");
-        self.out.push_str("#include \"mako_model.h\"\n");
-        self.out.push_str("#include \"mako_tok.h\"\n");
-        self.out.push_str("#include \"mako_mail.h\"\n");
-        self.out.push_str("#include \"mako_template.h\"\n");
-        self.out.push_str("#include \"mako_fmt.h\"\n");
-        self.out.push_str("#include \"mako_cloud.h\"\n");
-        self.out.push_str("#include \"mako_httpengine.h\"\n");
-        self.out.push_str("#endif /* MAKO_WASI */\n\n");
+        // Demand-driven includes when MAKO_LEAN_INCLUDES is set; otherwise all headers.
+        if std::env::var_os("MAKO_LEAN_INCLUDES").is_some() {
+            self.out.push_str("/*__MAKO_INCLUDES__*/\n\n");
+        } else {
+            self.out.push_str("#ifndef MAKO_WASI\n");
+            self.out.push_str("#include \"mako_uuid.h\"\n");
+            self.out.push_str("#include \"mako_net.h\"\n");
+            self.out.push_str("#include \"mako_proxy.h\"\n");
+            self.out.push_str("#include \"mako_http.h\"\n");
+            self.out.push_str("#include \"mako_trace.h\"\n");
+            self.out.push_str("#include \"mako_log.h\"\n");
+            self.out.push_str("#include \"mako_std.h\"\n");
+            self.out.push_str("#include \"mako_leak.h\"\n");
+            self.out.push_str("#include \"mako_shutdown.h\"\n");
+            self.out.push_str("#include \"mako_tls.h\"\n");
+            self.out.push_str("#include \"mako_llm.h\"\n");
+            self.out.push_str("#include \"mako_sip.h\"\n");
+            self.out.push_str("#include \"mako_nghttp2.h\"\n");
+            self.out.push_str("#include \"mako_quiche.h\"\n");
+            self.out.push_str("#include \"mako_ws.h\"\n");
+            self.out.push_str("#include \"mako_db.h\"\n");
+            self.out.push_str("#include \"mako_cmap.h\"\n");
+            self.out.push_str("#include \"mako_dio.h\"\n");
+            self.out.push_str("#include \"mako_domain.h\"\n");
+            self.out.push_str("#include \"mako_evloop.h\"\n");
+            self.out.push_str("#include \"mako_game.h\"\n");
+            self.out.push_str("#include \"mako_gpu.h\"\n");
+            self.out.push_str("#include \"mako_model.h\"\n");
+            self.out.push_str("#include \"mako_tok.h\"\n");
+            self.out.push_str("#include \"mako_mail.h\"\n");
+            self.out.push_str("#include \"mako_template.h\"\n");
+            self.out.push_str("#include \"mako_fmt.h\"\n");
+            self.out.push_str("#include \"mako_cloud.h\"\n");
+            self.out.push_str("#include \"mako_httpengine.h\"\n");
+            self.out.push_str("#endif /* MAKO_WASI */\n\n");
+        }
 
         // Collect interfaces for method dispatch sugar
         for item in &program.items {
@@ -3878,7 +3883,60 @@ impl Codegen {
                 "\nint main(int argc, char **argv) {\n    mako_set_args(argc, argv);\n    mako_main();\n    return 0;\n}\n",
             );
         }
+        // Resolve demand-driven includes: scan the generated C for function prefixes
+        // and only include headers that are actually referenced.
+        let includes = Self::resolve_includes(&self.out);
+        self.out = self.out.replace("/*__MAKO_INCLUDES__*/", &includes);
         self.out
+    }
+
+    /// Scan generated C for function prefixes and return the needed #include lines.
+    /// Core headers (std, net, http, trace, log, fmt) are always included because
+    /// mako_std.h has cross-dependencies on them. Only truly optional modules
+    /// (SIP, QUIC, game, GPU, LLM, etc.) are gated.
+    fn resolve_includes(c_src: &str) -> String {
+        let mut inc = String::new();
+        inc.push_str("#ifndef MAKO_WASI\n");
+        // Core headers — always needed (mako_std.h depends on net/http/trace/log).
+        inc.push_str("#include \"mako_uuid.h\"\n");
+        inc.push_str("#include \"mako_net.h\"\n");
+        inc.push_str("#include \"mako_proxy.h\"\n");
+        inc.push_str("#include \"mako_http.h\"\n");
+        inc.push_str("#include \"mako_trace.h\"\n");
+        inc.push_str("#include \"mako_log.h\"\n");
+        inc.push_str("#include \"mako_std.h\"\n");
+        inc.push_str("#include \"mako_leak.h\"\n");
+        inc.push_str("#include \"mako_shutdown.h\"\n");
+        inc.push_str("#include \"mako_fmt.h\"\n");
+        inc.push_str("#include \"mako_cmap.h\"\n");
+        // Optional headers — only when the program uses their functions.
+        let conditional: &[(&[&str], &str)] = &[
+            (&["mako_tls_", "tls_", "ssl_", "jwt_", "hmac_", "x509_", "pem_", "scram_"], "mako_tls.h"),
+            (&["mako_llm_", "llm_"], "mako_llm.h"),
+            (&["mako_sip_", "sip_"], "mako_sip.h"),
+            (&["mako_nghttp2", "nghttp2_"], "mako_nghttp2.h"),
+            (&["mako_quiche", "quiche_", "h3_"], "mako_quiche.h"),
+            (&["mako_ws_", "ws_", "websocket_"], "mako_ws.h"),
+            (&["mako_sql_", "sql_", "sqlite_", "pg_", "redis_", "mysql_"], "mako_db.h"),
+            (&["mako_dio_", "dio_", "direct_io", "wal_", "page_", "btree_", "multistore_", "store_", "kv_", "fs_store"], "mako_dio.h"),
+            (&["mako_domain_", "domain_"], "mako_domain.h"),
+            (&["mako_evloop", "evloop_"], "mako_evloop.h"),
+            (&["mako_game_", "game_udp"], "mako_game.h"),
+            (&["mako_gpu_", "gpu_"], "mako_gpu.h"),
+            (&["mako_model_", "model_", "gguf_"], "mako_model.h"),
+            (&["mako_tok_", "tok_", "bpe_"], "mako_tok.h"),
+            (&["mako_smtp_", "smtp_", "mail_"], "mako_mail.h"),
+            (&["mako_template_", "template_"], "mako_template.h"),
+            (&["mako_cloud_", "cloud_", "s3_", "base64url"], "mako_cloud.h"),
+            (&["mako_httpengine", "httpengine_"], "mako_httpengine.h"),
+        ];
+        for (prefixes, header) in conditional {
+            if prefixes.iter().any(|p| c_src.contains(p)) {
+                inc.push_str(&format!("#include \"{header}\"\n"));
+            }
+        }
+        inc.push_str("#endif /* MAKO_WASI */\n");
+        inc
     }
 
     fn register_enum(&mut self, e: &EnumDef) {
