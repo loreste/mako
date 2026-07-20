@@ -5234,13 +5234,14 @@ impl Codegen {
                 format!("MakoArr_arr_{ctag}"),
             ));
         }
-        // Outer arrays for maps_values (MakoArr_arr_arr_int / MakoArr_arr_opt_… / …)
+        // Outer arrays for maps_values — only when the nested type is actually used.
         for (vt, vc) in &vals {
-            if vt.starts_with("arr_arr_")
+            if (vt.starts_with("arr_arr_")
                 || vt.starts_with("arr_map_")
                 || vt.starts_with("arr_opt_")
                 || vt.starts_with("arr_res_")
-                || vt.starts_with("arr_chan_")
+                || vt.starts_with("arr_chan_"))
+                && self.want_arr_elem(vt)
             {
                 self.emit_nested_arr_helpers(vt, vc);
             }
