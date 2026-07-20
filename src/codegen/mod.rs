@@ -13824,11 +13824,21 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             return ("bool".into(), format!("mako_str_eq({a}, {b})"));
                         }
                         "str_contains" => {
+                            // Compile-time fold when both args are literals.
+                            if let (Expr::String(a), Expr::String(b)) = (&args[0], &args[1]) {
+                                let result = a.contains(b.as_str());
+                                return ("bool".into(), if result { "true" } else { "false" }.into());
+                            }
                             let a = self.emit_str_arg(&args[0]);
                             let b = self.emit_str_arg(&args[1]);
                             return ("bool".into(), format!("mako_str_contains({a}, {b})"));
                         }
                         "str_has_prefix" => {
+                            // Compile-time fold when both args are literals.
+                            if let (Expr::String(a), Expr::String(b)) = (&args[0], &args[1]) {
+                                let result = a.starts_with(b.as_str());
+                                return ("bool".into(), if result { "true" } else { "false" }.into());
+                            }
                             let a = self.emit_str_arg(&args[0]);
                             let b = self.emit_str_arg(&args[1]);
                             return (
@@ -13837,6 +13847,10 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             );
                         }
                         "str_has_suffix" => {
+                            if let (Expr::String(a), Expr::String(b)) = (&args[0], &args[1]) {
+                                let result = a.ends_with(b.as_str());
+                                return ("bool".into(), if result { "true" } else { "false" }.into());
+                            }
                             let a = self.emit_str_arg(&args[0]);
                             let b = self.emit_str_arg(&args[1]);
                             return (
