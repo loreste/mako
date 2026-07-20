@@ -131,6 +131,9 @@ enum Commands {
         /// Keep bounds checks on even in release (`always`)
         #[arg(long, value_enum, default_value_t = BoundsCli::Default)]
         bounds: BoundsCli,
+        /// Strip debug symbols from the binary (smaller deploy)
+        #[arg(long, default_value_t = false)]
+        strip: bool,
     },
     /// Watch `.mko` sources and rebuild+rerun on change (hot reload seed)
     Dev {
@@ -1078,7 +1081,11 @@ fn run(cli: Cli) -> Result<(), ()> {
             jobs,
             overflow,
             bounds,
+            strip,
         } => {
+            if strip {
+                std::env::set_var("MAKO_STRIP", "1");
+            }
             let static_link = effective_static_link(target.as_deref(), static_link, no_static_link);
             cmd_build(
                 &file,
@@ -1855,6 +1862,16 @@ fn cmd_build(
                     OptLevel::Release => "release -O3 -flto",
                 }
             );
+        }
+        // Strip debug symbols when --strip is passed.
+        if std::env::var_os("MAKO_STRIP").is_some() && out_bin.exists() {
+            let status = std::process::Command::new("strip")
+                .arg(&out_bin)
+                .status();
+            match status {
+                Ok(s) if s.success() => {}
+                _ => eprintln!("warning: strip failed (binary still usable)"),
+            }
         }
         println!("built {}", out_bin.display());
     }
