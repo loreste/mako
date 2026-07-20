@@ -201,6 +201,9 @@ pub fn warn_unused_imports(source_file: &Path, program: &Program, roots: &[Strin
             eprintln!(
                 "warning: unused import `{import_path}` — no reachable functions from {display_path}"
             );
+            eprintln!(
+                "  hint: remove the import or use a function from it"
+            );
         }
     }
 }
