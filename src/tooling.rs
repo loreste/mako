@@ -480,6 +480,26 @@ pub fn run_lint(path: &Path, identity: bool) -> Result<(), ()> {
         if identity {
             issues += lint_identity_surface(f);
         }
+        // DCE-based lints: unused variables, unreachable code, shadows.
+        crate::dce::warn_unreachable_code(&program);
+        crate::dce::warn_unused_variables(&program);
+        if std::env::var_os("MAKO_LINT_SHADOW").is_some() {
+            crate::dce::warn_shadowed_variables(&program);
+        }
+        // Unused imports (need roots for reachability).
+        let roots: Vec<String> = program
+            .items
+            .iter()
+            .filter_map(|i| match i {
+                Item::Fn(fd) if fd.name == "main" || fd.name.starts_with("Test") => {
+                    Some(fd.name.clone())
+                }
+                _ => None,
+            })
+            .collect();
+        if !roots.is_empty() {
+            crate::dce::warn_unused_imports(f, &program, &roots);
+        }
     }
     if issues == 0 {
         if identity {

@@ -235,6 +235,9 @@ enum Commands {
         /// Flag dual/compat spellings (`func`, `:=`, `import`, …) as style — Mako flair preferred
         #[arg(long, default_value_t = false)]
         identity: bool,
+        /// Include shadowed variable warnings
+        #[arg(long, default_value_t = false)]
+        shadow: bool,
     },
     /// Time compile+run of bench_*.mko (workspace-aware; optional `-p`)
     Bench {
@@ -1189,9 +1192,15 @@ fn run(cli: Cli) -> Result<(), ()> {
             path,
             package,
             identity,
-        } => cmd_tool_paths(&path, package.as_deref(), |member| {
-            tooling::run_lint(member, identity)
-        }),
+            shadow,
+        } => {
+            if shadow {
+                std::env::set_var("MAKO_LINT_SHADOW", "1");
+            }
+            cmd_tool_paths(&path, package.as_deref(), |member| {
+                tooling::run_lint(member, identity)
+            })
+        }
         Commands::Bench {
             path,
             package,
