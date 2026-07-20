@@ -1,0 +1,3 @@
+fn main() {
+    let invalid = make(map[string]int, 1, 2)
+}

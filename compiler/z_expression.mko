@@ -1,0 +1,408 @@
+// Flat Pratt-expression arena. Child links are integer indexes, keeping the
+// representation compact and suitable for later parallel function lowering.
+
+const EXPR_INT = 1
+const EXPR_FLOAT = 2
+const EXPR_STRING = 3
+const EXPR_BOOL = 4
+const EXPR_IDENT = 5
+const EXPR_UNARY = 6
+const EXPR_BINARY = 7
+const EXPR_CALL = 8
+const EXPR_INDEX = 9
+const EXPR_FIELD = 10
+const EXPR_ARRAY = 11
+const EXPR_STRUCT = 12
+const EXPR_FIELD_INIT = 13
+const EXPR_TUPLE = 14
+const EXPR_SLICE = 15
+const EXPR_STRUCT_UPDATE = 16
+const EXPR_TYPE_REF = 17
+const EXPR_MAKE = 18
+
+struct ExprNode {
+    kind: int
+    token: int
+    left: int
+    right: int
+}
+
+struct ExprParse {
+    nodes: []ExprNode
+    root: int
+    next: int
+    ok: bool
+    error: string
+}
+
+// Stage 0 does not yet model partial moves out of returned structs. Keep the
+// bootstrap parser memory-safe by copying the compact, integer-only arena at
+// recursive ownership boundaries. The self-hosted arena allocator will remove
+// these copies once stage 1 owns lowering and drop insertion.
+fn clone_expr_nodes(nodes: []ExprNode) -> []ExprNode {
+    let mut out = make([]ExprNode, 0, len(nodes))
+    let mut i = 0
+    while i < len(nodes) {
+        out = append(out, nodes[i])
+        i = i + 1
+    }
+    return out
+}
+
+fn binary_precedence(kind: int) -> int {
+    if kind == TK_PIPE_PIPE or kind == TK_OR { return 1 }
+    if kind == TK_AMP_AMP or kind == TK_AND { return 2 }
+    if kind == TK_EQ_EQ or kind == TK_BANG_EQ { return 3 }
+    if kind == TK_LT or kind == TK_LE or kind == TK_GT or kind == TK_GE { return 4 }
+    if kind == TK_PIPE { return 5 }
+    if kind == TK_CARET { return 6 }
+    if kind == TK_AMP or kind == TK_AMP_CARET { return 7 }
+    if kind == TK_SHL or kind == TK_SHR { return 8 }
+    if kind == TK_PLUS or kind == TK_MINUS { return 9 }
+    if kind == TK_STAR or kind == TK_SLASH or kind == TK_PERCENT { return 10 }
+    return -1
+}
+
+fn parse_atom(source: string, tokens: []Token, pos: int, mut nodes: []ExprNode) -> ExprParse {
+    if pos >= len(tokens) {
+        return ExprParse { nodes: nodes, root: -1, next: pos, ok: false, error: "expected expression" }
+    }
+    let token = tokens[pos]
+    let mut kind = -1
+    if token.kind == TK_INT { kind = EXPR_INT }
+    if token.kind == TK_FLOAT { kind = EXPR_FLOAT }
+    if token.kind == TK_STRING or token.kind == TK_FSTRING { kind = EXPR_STRING }
+    if token.kind == TK_TRUE or token.kind == TK_FALSE { kind = EXPR_BOOL }
+    if token.kind == TK_IDENT { kind = EXPR_IDENT }
+    if token.kind == TK_IDENT and token_text(source, token) == "make" and pos + 1 < len(tokens) and tokens[pos + 1].kind == TK_LPAREN {
+        let parsed_type = parse_type(source, tokens, pos + 2, make([]TypeNode, 0, 4), make([]int, 0, 4))
+        if not parsed_type.ok {
+            return ExprParse { nodes: nodes, root: -1, next: parsed_type.next, ok: false, error: parsed_type.error }
+        }
+        let mut out = clone_expr_nodes(nodes)
+        let type_root = len(out)
+        out = append(out, ExprNode { kind: EXPR_TYPE_REF, token: pos + 2, left: parsed_type.next, right: -1 })
+        let mut root = len(out)
+        out = append(out, ExprNode { kind: EXPR_MAKE, token: pos, left: type_root, right: -1 })
+        let mut next = parsed_type.next
+        let mut argument_count = 0
+        while next < len(tokens) and tokens[next].kind == TK_COMMA {
+            if argument_count >= 2 {
+                return ExprParse { nodes: out, root: -1, next: next, ok: false, error: "make accepts at most length and capacity arguments" }
+            }
+            let argument = parse_expression(source, tokens, next + 1, out, 0)
+            if not argument.ok { return argument }
+            out = clone_expr_nodes(argument.nodes)
+            let combined = len(out)
+            out = append(out, ExprNode { kind: EXPR_MAKE, token: pos, left: root, right: argument.root })
+            root = combined
+            next = argument.next
+            argument_count = argument_count + 1
+        }
+        if next >= len(tokens) or tokens[next].kind != TK_RPAREN {
+            return ExprParse { nodes: out, root: -1, next: next, ok: false, error: "expected `)` after make expression" }
+        }
+        return ExprParse { nodes: out, root: root, next: next + 1, ok: true, error: "" }
+    }
+    if kind >= 0 {
+        let mut out = clone_expr_nodes(nodes)
+        let root = len(out)
+        out = append(out, ExprNode { kind: kind, token: pos, left: -1, right: -1 })
+        return ExprParse { nodes: out, root: root, next: pos + 1, ok: true, error: "" }
+    }
+    if token.kind == TK_MINUS or token.kind == TK_BANG or token.kind == TK_NOT or token.kind == TK_CARET {
+        let inner = parse_expression(source, tokens, pos + 1, nodes, 11)
+        if not inner.ok { return inner }
+        let mut out = clone_expr_nodes(inner.nodes)
+        let root = len(out)
+        out = append(out, ExprNode { kind: EXPR_UNARY, token: pos, left: inner.root, right: -1 })
+        return ExprParse { nodes: out, root: root, next: inner.next, ok: true, error: "" }
+    }
+    if token.kind == TK_LPAREN {
+        let inner = parse_expression(source, tokens, pos + 1, nodes, 0)
+        if not inner.ok { return inner }
+        if inner.next < len(tokens) and tokens[inner.next].kind == TK_COMMA {
+            let mut out = clone_expr_nodes(inner.nodes)
+            let mut root = len(out)
+            out = append(out, ExprNode { kind: EXPR_TUPLE, token: pos, left: -1, right: inner.root })
+            let mut next = inner.next + 1
+            while next < len(tokens) and tokens[next].kind != TK_RPAREN {
+                let element = parse_expression(source, tokens, next, out, 0)
+                if not element.ok { return element }
+                out = clone_expr_nodes(element.nodes)
+                let combined = len(out)
+                out = append(out, ExprNode { kind: EXPR_TUPLE, token: pos, left: root, right: element.root })
+                root = combined
+                next = element.next
+                if next < len(tokens) and tokens[next].kind == TK_COMMA {
+                    next = next + 1
+                    continue
+                }
+                break
+            }
+            if next >= len(tokens) or tokens[next].kind != TK_RPAREN {
+                return ExprParse { nodes: out, root: -1, next: next, ok: false, error: "expected `)` after tuple literal" }
+            }
+            return ExprParse { nodes: out, root: root, next: next + 1, ok: true, error: "" }
+        }
+        if inner.next >= len(tokens) or tokens[inner.next].kind != TK_RPAREN {
+            return ExprParse { nodes: inner.nodes, root: -1, next: inner.next, ok: false, error: "expected `)`" }
+        }
+        return ExprParse { nodes: inner.nodes, root: inner.root, next: inner.next + 1, ok: true, error: "" }
+    }
+    if token.kind == TK_LBRACKET {
+        let mut out = clone_expr_nodes(nodes)
+        let mut root = len(out)
+        out = append(out, ExprNode { kind: EXPR_ARRAY, token: pos, left: -1, right: -1 })
+        let mut next = pos + 1
+        if next < len(tokens) and tokens[next].kind == TK_RBRACKET {
+            return ExprParse { nodes: out, root: root, next: next + 1, ok: true, error: "" }
+        }
+        while next < len(tokens) {
+            let element = parse_expression(source, tokens, next, out, 0)
+            if not element.ok { return element }
+            out = clone_expr_nodes(element.nodes)
+            let combined = len(out)
+            out = append(out, ExprNode { kind: EXPR_ARRAY, token: pos, left: root, right: element.root })
+            root = combined
+            next = element.next
+            if next < len(tokens) and tokens[next].kind == TK_COMMA {
+                next = next + 1
+                if next < len(tokens) and tokens[next].kind == TK_RBRACKET { break }
+                continue
+            }
+            break
+        }
+        if next >= len(tokens) or tokens[next].kind != TK_RBRACKET {
+            return ExprParse { nodes: out, root: -1, next: next, ok: false, error: "expected `]` after array literal" }
+        }
+        return ExprParse { nodes: out, root: root, next: next + 1, ok: true, error: "" }
+    }
+    return ExprParse { nodes: nodes, root: -1, next: pos, ok: false, error: "expected expression" }
+}
+
+fn parse_expression(source: string, tokens: []Token, pos: int, nodes: []ExprNode, min_precedence: int) -> ExprParse {
+    let first = parse_atom(source, tokens, pos, nodes)
+    if not first.ok { return first }
+    let mut out = clone_expr_nodes(first.nodes)
+    let mut root = first.root
+    let mut next = first.next
+    // Postfix operators bind tighter than every unary/binary operator. Calls
+    // with multiple arguments are represented as a compact left-associated
+    // CALL chain: CALL(CALL(callee, arg0), arg1).
+    while next < len(tokens) {
+        // Generic constructor/call: parse the complete type application only
+        // when it is followed by `{` or `(`. Ordinary `items[index]` remains
+        // an index expression, even when the index happens to be an identifier.
+        if out[root].kind == EXPR_IDENT and (tokens[next].kind == TK_LBRACKET or tokens[next].kind == TK_LT) {
+            let typed = parse_type(source, tokens, out[root].token, make([]TypeNode, 0, 4), make([]int, 0, 4))
+            if typed.ok and typed.next < len(tokens) and (tokens[typed.next].kind == TK_LBRACE or tokens[typed.next].kind == TK_LPAREN) {
+                let type_root = len(out)
+                out = append(out, ExprNode { kind: EXPR_TYPE_REF, token: out[root].token, left: typed.next, right: root })
+                root = type_root
+                next = typed.next
+                continue
+            }
+        }
+        if tokens[next].kind == TK_LBRACE and (out[root].kind == EXPR_IDENT or out[root].kind == EXPR_TYPE_REF) {
+            let struct_token = next
+            let mut struct_root = len(out)
+            out = append(out, ExprNode { kind: EXPR_STRUCT, token: struct_token, left: root, right: -1 })
+            next = next + 1
+            if next < len(tokens) and tokens[next].kind == TK_RBRACE {
+                root = struct_root
+                next = next + 1
+                continue
+            }
+            while next < len(tokens) {
+                let mut field_token = -1
+                if tokens[next].kind == TK_DOT_DOT {
+                    let update = parse_expression(source, tokens, next + 1, out, 0)
+                    if not update.ok { return update }
+                    out = clone_expr_nodes(update.nodes)
+                    let update_root = len(out)
+                    out = append(out, ExprNode { kind: EXPR_STRUCT_UPDATE, token: next, left: -1, right: update.root })
+                    let combined = len(out)
+                    out = append(out, ExprNode { kind: EXPR_STRUCT, token: struct_token, left: struct_root, right: update_root })
+                    struct_root = combined
+                    next = update.next
+                    if next < len(tokens) and tokens[next].kind == TK_COMMA {
+                        next = next + 1
+                    }
+                    break
+                }
+                if next + 1 < len(tokens) and tokens[next].kind == TK_IDENT and tokens[next + 1].kind == TK_COLON {
+                    field_token = next
+                    next = next + 2
+                }
+                let value = parse_expression(source, tokens, next, out, 0)
+                if not value.ok { return value }
+                out = clone_expr_nodes(value.nodes)
+                let mut value_root = value.root
+                if field_token >= 0 {
+                    let field_root = len(out)
+                    out = append(out, ExprNode { kind: EXPR_FIELD_INIT, token: field_token, left: -1, right: value.root })
+                    value_root = field_root
+                }
+                let combined = len(out)
+                out = append(out, ExprNode { kind: EXPR_STRUCT, token: struct_token, left: struct_root, right: value_root })
+                struct_root = combined
+                next = value.next
+                if next < len(tokens) and tokens[next].kind == TK_COMMA {
+                    next = next + 1
+                    if next < len(tokens) and tokens[next].kind == TK_RBRACE { break }
+                    continue
+                }
+                break
+            }
+            if next >= len(tokens) or tokens[next].kind != TK_RBRACE {
+                return ExprParse { nodes: out, root: -1, next: next, ok: false, error: "expected `}` after struct literal" }
+            }
+            root = struct_root
+            next = next + 1
+            continue
+        }
+        if tokens[next].kind == TK_LPAREN {
+            let call_token = next
+            next = next + 1
+            if next < len(tokens) and tokens[next].kind == TK_RPAREN {
+                let call_root = len(out)
+                out = append(out, ExprNode { kind: EXPR_CALL, token: call_token, left: root, right: -1 })
+                root = call_root
+                next = next + 1
+                continue
+            }
+            while next < len(tokens) {
+                let argument = parse_expression(source, tokens, next, out, 0)
+                if not argument.ok { return argument }
+                out = clone_expr_nodes(argument.nodes)
+                let call_root = len(out)
+                out = append(out, ExprNode { kind: EXPR_CALL, token: call_token, left: root, right: argument.root })
+                root = call_root
+                next = argument.next
+                if next < len(tokens) and tokens[next].kind == TK_COMMA {
+                    next = next + 1
+                    continue
+                }
+                if next >= len(tokens) or tokens[next].kind != TK_RPAREN {
+                    return ExprParse { nodes: out, root: -1, next: next, ok: false, error: "expected `)` after call arguments" }
+                }
+                next = next + 1
+                break
+            }
+            continue
+        }
+        if tokens[next].kind == TK_LBRACKET {
+            let index_token = next
+            let mut cursor = next + 1
+            let mut low_root = -1
+            if cursor < len(tokens) and tokens[cursor].kind != TK_COLON and tokens[cursor].kind != TK_RBRACKET {
+                let low = parse_expression(source, tokens, cursor, out, 0)
+                if not low.ok { return low }
+                out = clone_expr_nodes(low.nodes)
+                low_root = low.root
+                cursor = low.next
+            }
+            if cursor < len(tokens) and tokens[cursor].kind == TK_COLON {
+                cursor = cursor + 1
+                let mut high_root = -1
+                let mut max_root = -1
+                if cursor < len(tokens) and tokens[cursor].kind != TK_COLON and tokens[cursor].kind != TK_RBRACKET {
+                    let high = parse_expression(source, tokens, cursor, out, 0)
+                    if not high.ok { return high }
+                    out = clone_expr_nodes(high.nodes)
+                    high_root = high.root
+                    cursor = high.next
+                }
+                if cursor < len(tokens) and tokens[cursor].kind == TK_COLON {
+                    cursor = cursor + 1
+                    if cursor < len(tokens) and tokens[cursor].kind != TK_RBRACKET {
+                        let maximum = parse_expression(source, tokens, cursor, out, 0)
+                        if not maximum.ok { return maximum }
+                        out = clone_expr_nodes(maximum.nodes)
+                        max_root = maximum.root
+                        cursor = maximum.next
+                    }
+                }
+                if cursor >= len(tokens) or tokens[cursor].kind != TK_RBRACKET {
+                    return ExprParse { nodes: out, root: -1, next: cursor, ok: false, error: "expected `]` after slice expression" }
+                }
+                let low_node = len(out)
+                out = append(out, ExprNode { kind: EXPR_SLICE, token: index_token, left: root, right: low_root })
+                let high_node = len(out)
+                out = append(out, ExprNode { kind: EXPR_SLICE, token: index_token, left: low_node, right: high_root })
+                let max_node = len(out)
+                out = append(out, ExprNode { kind: EXPR_SLICE, token: index_token, left: high_node, right: max_root })
+                root = max_node
+                next = cursor + 1
+                continue
+            }
+            if low_root < 0 or cursor >= len(tokens) or tokens[cursor].kind != TK_RBRACKET {
+                return ExprParse { nodes: out, root: -1, next: cursor, ok: false, error: "expected index or slice expression" }
+            }
+            let index_root = len(out)
+            out = append(out, ExprNode { kind: EXPR_INDEX, token: index_token, left: root, right: low_root })
+            root = index_root
+            next = cursor + 1
+            continue
+        }
+        if tokens[next].kind == TK_DOT {
+            if next + 1 >= len(tokens) or tokens[next + 1].kind != TK_IDENT {
+                return ExprParse { nodes: out, root: -1, next: next, ok: false, error: "expected field name after `.`" }
+            }
+            let field_root = len(out)
+            out = append(out, ExprNode { kind: EXPR_FIELD, token: next + 1, left: root, right: -1 })
+            root = field_root
+            next = next + 2
+            continue
+        }
+        break
+    }
+    while next < len(tokens) {
+        let precedence = binary_precedence(tokens[next].kind)
+        if precedence < min_precedence { break }
+        let operator = next
+        let rhs = parse_expression(source, tokens, next + 1, out, precedence + 1)
+        if not rhs.ok { return rhs }
+        out = clone_expr_nodes(rhs.nodes)
+        let combined = len(out)
+        out = append(out, ExprNode { kind: EXPR_BINARY, token: operator, left: root, right: rhs.root })
+        root = combined
+        next = rhs.next
+    }
+    return ExprParse { nodes: out, root: root, next: next, ok: true, error: "" }
+}
+
+fn expression_smoke_test() -> bool {
+    let lexed = lex_source("items[1 + 2].method(3 * 4)")
+    if not lexed.ok { return false }
+    let parsed = parse_expression("items[1 + 2].method(3 * 4)", lexed.tokens, 0, make([]ExprNode, 0, 8), 0)
+    if not (parsed.ok and parsed.next == 13 and len(parsed.nodes) == 10) { return false }
+
+    let literal_lexed = lex_source("Point { x: [1, 2 + 3], y: other.value }")
+    if not literal_lexed.ok { return false }
+    let literal = parse_expression("Point { x: [1, 2 + 3], y: other.value }", literal_lexed.tokens, 0, make([]ExprNode, 0, 16), 0)
+    if not (literal.ok and literal.next == 18 and len(literal.nodes) == 15) { return false }
+
+    let bad_lexed = lex_source("[1, 2")
+    if not bad_lexed.ok { return false }
+    let bad = parse_expression("[1, 2", bad_lexed.tokens, 0, make([]ExprNode, 0, 4), 0)
+    if bad.ok or bad.error != "expected `]` after array literal" { return false }
+
+    let rich_lexed = lex_source("(items[1:4:8], Point { x: 9, ..base })")
+    if not rich_lexed.ok { return false }
+    let rich = parse_expression("(items[1:4:8], Point { x: 9, ..base })", rich_lexed.tokens, 0, make([]ExprNode, 0, 16), 0)
+    if not (rich.ok and rich.next == 20 and len(rich.nodes) == 17) { return false }
+
+    let make_source = "make(map[string]int, 32)"
+    let make_lexed = lex_source(make_source)
+    if not make_lexed.ok { return false }
+    let made = parse_expression(make_source, make_lexed.tokens, 0, make([]ExprNode, 0, 8), 0)
+    if not (made.ok and made.next == 10 and len(made.nodes) == 4) { return false }
+
+    let generic_source = "(Pair[int] { first: 1, second: 2 }, chan_open[int](4))"
+    let generic_lexed = lex_source(generic_source)
+    if not generic_lexed.ok { return false }
+    let generic = parse_expression(generic_source, generic_lexed.tokens, 0, make([]ExprNode, 0, 16), 0)
+    return generic.ok and generic.next == 23 and len(generic.nodes) == 15
+}

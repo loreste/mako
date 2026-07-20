@@ -1,0 +1,10 @@
+fn inspect_label(label: string) -> int {
+    return 1
+}
+
+fn choose_inspection(flag: bool, label: string) -> int {
+    if flag {
+        return inspect_label(label)
+    }
+    return 0
+}

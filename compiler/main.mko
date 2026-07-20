@@ -1,0 +1,137 @@
+// Stage-1 self-hosted Mako compiler entry point.
+// The frontend is being brought up component-by-component under differential
+// tests against the stage-0 compiler.
+
+fn main() {
+    if not expression_smoke_test() {
+        print("internal compiler error: expression parser smoke test failed")
+        exit(70)
+    }
+    if not type_smoke_test() {
+        print("internal compiler error: type parser smoke test failed")
+        exit(70)
+    }
+    if not statement_smoke_test() {
+        print("internal compiler error: statement parser smoke test failed")
+        exit(70)
+    }
+    if not expression_attachment_smoke_test() {
+        print("internal compiler error: statement expression attachment smoke test failed")
+        exit(70)
+    }
+    if not symbol_smoke_test() {
+        print("internal compiler error: symbol table smoke test failed")
+        exit(70)
+    }
+    if not resolution_smoke_test() {
+        print("internal compiler error: global resolution smoke test failed")
+        exit(70)
+    }
+    if not local_resolution_smoke_test() {
+        print("internal compiler error: local resolution smoke test failed")
+        exit(70)
+    }
+    if not branch_scope_smoke_test() {
+        print("internal compiler error: branch scope smoke test failed")
+        exit(70)
+    }
+    if not semantic_type_smoke_test() {
+        print("internal compiler error: semantic type smoke test failed")
+        exit(70)
+    }
+    if not typed_ir_smoke_test() {
+        print("internal compiler error: typed IR smoke test failed")
+        exit(70)
+    }
+    if not typed_ir_verifier_smoke_test() {
+        print("internal compiler error: typed IR verifier smoke test failed")
+        exit(70)
+    }
+    if not typed_ir_block_parameter_verifier_smoke_test() {
+        print("internal compiler error: typed IR block parameter verifier smoke test failed")
+        exit(70)
+    }
+    if not typed_ir_arm_placement_smoke_test() {
+        print("internal compiler error: typed IR arm placement smoke test failed")
+        exit(70)
+    }
+    if not typed_ir_dominance_verifier_smoke_test() {
+        print("internal compiler error: typed IR dominance verifier smoke test failed")
+        exit(70)
+    }
+    if not typed_ir_statement_merge_ownership_smoke_test() {
+        print("internal compiler error: typed IR statement-merge ownership smoke test failed")
+        exit(70)
+    }
+    if not typed_ir_ownership_smoke_test() {
+        print("internal compiler error: typed IR ownership smoke test failed")
+        exit(70)
+    }
+    if not typed_ir_ownership_verifier_smoke_test() {
+        print("internal compiler error: typed IR ownership verifier smoke test failed")
+        exit(70)
+    }
+    if not typed_ir_call_smoke_test() {
+        print("internal compiler error: typed IR call smoke test failed")
+        exit(70)
+    }
+    if not typed_ir_call_verifier_smoke_test() {
+        print("internal compiler error: typed IR call verifier smoke test failed")
+        exit(70)
+    }
+    if argc() < 2 {
+        print("usage: makoc <source.mko>")
+        exit(2)
+    }
+    let path = arg_get(1)
+    let source = read_file(path)
+    let result = lex_source(source)
+    if not result.ok {
+        print(path + ":" + format_int(result.error_line) + ":" + format_int(result.error_col) + ": " + result.error)
+        exit(1)
+    }
+    let parsed = parse_frontend(source, result.tokens)
+    if not parsed.ok {
+        print(path + ":" + format_int(parsed.error_line) + ":" + format_int(parsed.error_col) + ": " + parsed.error)
+        exit(1)
+    }
+    let ir = lower_typed_ir(
+        source, result.tokens, parsed.items, parsed.signatures, parsed.statements,
+        parsed.statement_edges, parsed.expressions, parsed.expression_types, parsed.locals,
+        parsed.local_types, parsed.expression_locals, parsed.symbols, parsed.expression_symbols
+    )
+    if not ir.ok {
+        print(path + ": typed IR lowering failed: " + ir.error)
+        exit(1)
+    }
+    let ir_verification = verify_typed_ir(
+        ir.functions, ir.blocks, ir.instructions, ir.constants, ir.successors,
+        ir.call_sites, ir.call_arguments, ir.value_count
+    )
+    if not ir_verification.ok {
+        print(path + ": typed IR verification failed: " + ir_verification.error)
+        exit(1)
+    }
+    print(
+        "tokens " + format_int(parsed.token_count) +
+        " items " + format_int(len(parsed.items)) +
+        " types " + format_int(len(parsed.types)) +
+        " signatures " + format_int(len(parsed.signatures)) +
+        " parameters " + format_int(len(parsed.parameters)) +
+        " statements " + format_int(len(parsed.statements)) +
+        " bodies " + format_int(len(parsed.bodies)) +
+        " expressions " + format_int(len(parsed.expressions)) +
+        " symbols " + format_int(len(parsed.symbols)) +
+        " resolved " + format_int(parsed.resolved_globals) +
+        " locals " + format_int(len(parsed.locals)) +
+        " local_refs " + format_int(parsed.resolved_locals) +
+        " typed " + format_int(parsed.typed_expressions) +
+        " ir_functions " + format_int(len(ir.functions)) +
+        " ir_blocks " + format_int(len(ir.blocks)) +
+        " ir_instructions " + format_int(len(ir.instructions)) +
+        " ir_constants " + format_int(len(ir.constants)) +
+        " ir_values " + format_int(ir.value_count) +
+        " ir_skipped " + format_int(ir.skipped_functions) +
+        " ir_verified " + format_int(ir_verification.checked_values)
+    )
+}

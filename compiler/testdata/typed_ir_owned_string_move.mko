@@ -1,0 +1,4 @@
+fn build_label() -> string {
+    let label = "mako"
+    return label
+}

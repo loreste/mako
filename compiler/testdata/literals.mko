@@ -1,0 +1,26 @@
+struct Point {
+    x: int
+    y: int
+}
+
+struct Pair[T] {
+    first: T
+    second: T
+}
+
+fn main() {
+    let values = [1, 2 + 3]
+    let point = Point { x: values[0], y: 4 }
+    let window = values[0:2]
+    let pair = (point.x, window[1])
+    let updated = Point { y: 9, ..point }
+    let lookup = make(map[string]int, 8)
+    let scratch = make([]int, 2, 4)
+    let generic = Pair[int] { first: 5, second: 6 }
+    let channel = chan_open[int](1)
+    if len(values) > 0 {
+        let branch_value = updated.y
+        print_int(branch_value)
+    }
+    print_int(window[1] + updated.y)
+}

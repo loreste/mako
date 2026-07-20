@@ -1,0 +1,4 @@
+fn discard_label() -> int {
+    let label = "mako"
+    return 1
+}

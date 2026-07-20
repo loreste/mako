@@ -1,0 +1,2082 @@
+// Target-independent typed IR. This bootstrap slice lowers only straight-line
+// functions whose parameters and attached expressions have known semantic
+// types. Unsupported control flow is skipped until CFG construction lands;
+// it is never silently represented as a linear block.
+
+const IR_PARAM = 1
+const IR_CONST = 2
+const IR_UNARY = 3
+const IR_BINARY = 4
+const IR_CALL = 5
+const IR_ARRAY = 6
+const IR_INDEX = 7
+const IR_SLICE = 8
+const IR_MAKE = 9
+const IR_RETURN = 10
+const IR_BRANCH = 11
+const IR_JUMP = 12
+const IR_BLOCK_PARAM = 13
+const IR_MOVE = 14
+const IR_DROP = 15
+const IR_CLONE = 16
+
+struct IrInstruction {
+    op: int
+    result: int
+    type_kind: int
+    left: int
+    right: int
+    aux: int
+    token: int
+}
+
+struct IrConstant {
+    type_kind: int
+    int_value: int
+    float_value: float
+    start: int
+    end: int
+}
+
+struct IrBlock {
+    function: int
+    instruction_start: int
+    instruction_count: int
+    terminator: int
+    successor_start: int
+    successor_count: int
+}
+
+struct IrFunction {
+    item: int
+    entry_block: int
+    block_count: int
+    parameter_count: int
+    value_start: int
+    value_count: int
+}
+
+struct IrCallSite {
+    callee_item: int
+    argument_start: int
+    argument_count: int
+}
+
+struct TypedIr {
+    functions: []IrFunction
+    blocks: []IrBlock
+    instructions: []IrInstruction
+    constants: []IrConstant
+    successors: []int
+    call_sites: []IrCallSite
+    call_arguments: []int
+    expression_values: []int
+    value_count: int
+    skipped_functions: int
+    ok: bool
+    error: string
+}
+
+struct IrVerification {
+    ok: bool
+    error: string
+    checked_values: int
+}
+
+fn ir_expression_opcode(kind: int) -> int {
+    if kind == EXPR_INT or kind == EXPR_FLOAT or kind == EXPR_BOOL or kind == EXPR_STRING { return IR_CONST }
+    if kind == EXPR_UNARY { return IR_UNARY }
+    if kind == EXPR_BINARY { return IR_BINARY }
+    if kind == EXPR_CALL { return IR_CALL }
+    if kind == EXPR_ARRAY { return IR_ARRAY }
+    if kind == EXPR_INDEX { return IR_INDEX }
+    if kind == EXPR_SLICE { return IR_SLICE }
+    if kind == EXPR_MAKE { return IR_MAKE }
+    return 0
+}
+
+fn ir_type_is_owned(kind: int) -> bool {
+    return kind == SEM_STRING or kind == SEM_ARRAY_INT or kind == SEM_ARRAY_FLOAT or
+        kind == SEM_ARRAY_BOOL or kind == SEM_ARRAY_STRING or kind == SEM_MAP
+}
+
+fn ir_instruction_consumes_left(instruction: IrInstruction, instructions: []IrInstruction, definitions: []int) -> bool {
+    if instruction.left < 0 or instruction.left >= len(definitions) or definitions[instruction.left] <= 0 { return false }
+    let source_type = instructions[definitions[instruction.left] - 1].type_kind
+    return instruction.op == IR_MOVE or instruction.op == IR_DROP or instruction.op == IR_SLICE or
+        ((instruction.op == IR_ARRAY or instruction.op == IR_RETURN or instruction.op == IR_JUMP) and
+            ir_type_is_owned(source_type))
+}
+
+fn ir_instruction_consumes_right(instruction: IrInstruction, instructions: []IrInstruction, definitions: []int) -> bool {
+    if instruction.op != IR_ARRAY or instruction.right < 0 or instruction.right >= len(definitions) or
+        definitions[instruction.right] <= 0 { return false }
+    return ir_type_is_owned(instructions[definitions[instruction.right] - 1].type_kind)
+}
+
+fn ir_instruction_list_consumes_value(
+    instructions: []IrInstruction,
+    call_sites: []IrCallSite,
+    call_arguments: []int,
+    value: int
+) -> bool {
+    let mut instruction_index = 0
+    while instruction_index < len(instructions) {
+        let instruction = instructions[instruction_index]
+        if instruction.left == value and
+            (instruction.op == IR_MOVE or instruction.op == IR_DROP or
+                instruction.op == IR_SLICE or instruction.op == IR_ARRAY) {
+            return true
+        }
+        if instruction.right == value and instruction.op == IR_ARRAY { return true }
+        if instruction.op == IR_CALL and instruction.aux >= 0 and instruction.aux < len(call_sites) {
+            let call_site = call_sites[instruction.aux]
+            let mut argument_index = call_site.argument_start
+            while argument_index < call_site.argument_start + call_site.argument_count {
+                if call_arguments[argument_index] == value { return true }
+                argument_index = argument_index + 1
+            }
+        }
+        instruction_index = instruction_index + 1
+    }
+    return false
+}
+
+fn verify_owned_ir_paths(
+    functions: []IrFunction,
+    blocks: []IrBlock,
+    instructions: []IrInstruction,
+    successors: []int,
+    call_sites: []IrCallSite,
+    call_arguments: []int,
+    definitions: []int
+) -> IrVerification {
+    let mut value = 0
+    while value < len(definitions) {
+        let definition = definitions[value] - 1
+        if definition >= 0 and ir_type_is_owned(instructions[definition].type_kind) {
+            let function_index = blocks[instruction_block(instructions, blocks, definition)].function
+            let function = functions[function_index]
+            let mut queue_blocks: []int = []
+            let mut queue_states: []int = []
+            let mut seen = make([]int, len(blocks) * 3, len(blocks) * 3)
+            queue_blocks = append(queue_blocks, function.entry_block)
+            queue_states = append(queue_states, 0)
+            let mut queue_index = 0
+            while queue_index < len(queue_blocks) {
+                let block_index = queue_blocks[queue_index]
+                let mut state = queue_states[queue_index]
+                queue_index = queue_index + 1
+                let seen_index = block_index * 3 + state
+                if seen[seen_index] != 0 { continue }
+                seen[seen_index] = 1
+                let block = blocks[block_index]
+                let mut instruction_index = block.instruction_start
+                while instruction_index < block.instruction_start + block.instruction_count {
+                    let instruction = instructions[instruction_index]
+                    if instruction.result == value {
+                        if state != 0 {
+                            return IrVerification { ok: false, error: "IR owned value is defined more than once on a path", checked_values: 0 }
+                        }
+                        state = 1
+                    }
+                    if instruction.left == value or instruction.right == value {
+                        if state == 0 {
+                            return IrVerification { ok: false, error: "IR instruction uses undefined owned value on a path", checked_values: 0 }
+                        }
+                        if state == 2 {
+                            let message = if instruction.op == IR_DROP { "IR owned value is dropped twice" } else { "IR instruction uses consumed owned value" }
+                            return IrVerification { ok: false, error: message, checked_values: 0 }
+                        }
+                    }
+                    if instruction.op == IR_CALL and instruction.aux >= 0 and instruction.aux < len(call_sites) {
+                        let call_site = call_sites[instruction.aux]
+                        let mut argument_index = call_site.argument_start
+                        while argument_index < call_site.argument_start + call_site.argument_count {
+                            if call_arguments[argument_index] == value {
+                                if state == 0 {
+                                    return IrVerification { ok: false, error: "IR call uses undefined owned value on a path", checked_values: 0 }
+                                }
+                                if state == 2 {
+                                    return IrVerification { ok: false, error: "IR call uses consumed owned value", checked_values: 0 }
+                                }
+                                state = 2
+                            }
+                            argument_index = argument_index + 1
+                        }
+                    }
+                    if (instruction.left == value and ir_instruction_consumes_left(instruction, instructions, definitions)) or
+                        (instruction.right == value and ir_instruction_consumes_right(instruction, instructions, definitions)) {
+                        state = 2
+                    }
+                    instruction_index = instruction_index + 1
+                }
+                if instructions[block.terminator].op == IR_RETURN {
+                    if state == 1 {
+                        return IrVerification { ok: false, error: "IR owned value is not consumed exactly once", checked_values: 0 }
+                    }
+                } else {
+                    let mut edge = block.successor_start
+                    while edge < block.successor_start + block.successor_count {
+                        queue_blocks = append(queue_blocks, successors[edge])
+                        queue_states = append(queue_states, state)
+                        edge = edge + 1
+                    }
+                }
+            }
+        }
+        value = value + 1
+    }
+    return IrVerification { ok: true, error: "", checked_values: 0 }
+}
+
+fn instruction_block(instructions: []IrInstruction, blocks: []IrBlock, instruction: int) -> int {
+    let mut block = 0
+    while block < len(blocks) {
+        if instruction >= blocks[block].instruction_start and
+            instruction < blocks[block].instruction_start + blocks[block].instruction_count { return block }
+        block = block + 1
+    }
+    return -1
+}
+
+fn ir_parse_decimal_int(source: string, token: Token) -> int {
+    let mut value = 0
+    let mut i = token.start
+    while i < token.end {
+        let digit = str_byte_at(source, i) - 48
+        if value > 922337203685477580 or (value == 922337203685477580 and digit > 7) {
+            return -1
+        }
+        value = value * 10 + digit
+        i = i + 1
+    }
+    return value
+}
+
+fn lower_typed_ir(
+    source: string,
+    tokens: []Token,
+    items: []TopItem,
+    signatures: []FnSignature,
+    statements: []StmtNode,
+    statement_edges: []int,
+    expressions: []ExprNode,
+    expression_types: []int,
+    locals: []LocalBinding,
+    local_types: []int,
+    expression_locals: []int,
+    symbols: []Symbol,
+    expression_symbols: []int
+) -> TypedIr {
+    let mut functions: []IrFunction = []
+    let mut blocks: []IrBlock = []
+    let mut instructions: []IrInstruction = []
+    let mut constants: []IrConstant = []
+    let mut successors: []int = []
+    let mut call_sites: []IrCallSite = []
+    let mut call_arguments: []int = []
+    let mut expression_values = make([]int, len(expressions), len(expressions))
+    let mut local_values = make([]int, len(locals), len(locals))
+    let mut i = 0
+    while i < len(expression_values) {
+        expression_values[i] = -1
+        i = i + 1
+    }
+    i = 0
+    while i < len(local_values) {
+        local_values[i] = -1
+        i = i + 1
+    }
+    let mut continued_calls = make([]int, len(expressions), len(expressions))
+    i = 0
+    while i < len(expressions) {
+        if expressions[i].kind == EXPR_CALL and expressions[i].left >= 0 and
+            expressions[i].left < len(expressions) and expressions[expressions[i].left].kind == EXPR_CALL {
+            continued_calls[expressions[i].left] = 1
+        }
+        i = i + 1
+    }
+    let mut next_value = 0
+    let mut skipped = 0
+    let mut signature_index = 0
+    while signature_index < len(signatures) {
+        let signature = signatures[signature_index]
+        let mut supported = signature.item >= 0 and signature.item < len(items)
+        let item = if supported { items[signature.item] } else { items[0] }
+        let mut if_statement = -1
+        let mut then_return = -1
+        let mut continuation_return = -1
+        let mut first_child = -1
+        let mut second_child = -1
+        let mut if_count = 0
+        let mut return_count = 0
+        let mut statement_index = 0
+        while supported and statement_index < len(statements) {
+            let statement = statements[statement_index]
+            if statement.token_start >= item.body_start and statement.token_start < item.body_end {
+                if statement.kind == STMT_IF {
+                    if_count = if_count + 1
+                    if_statement = statement_index
+                } else if statement.kind == STMT_RETURN {
+                    return_count = return_count + 1
+                } else if statement.kind != STMT_LET {
+                    supported = false
+                }
+                if statement.expr_root >= 0 and
+                    (statement.expr_root >= len(expression_types) or expression_types[statement.expr_root] == SEM_UNKNOWN) {
+                    supported = false
+                }
+            }
+            statement_index = statement_index + 1
+        }
+        let mut simple_if = false
+        let mut merge_return_values = false
+        let mut simple_merge_if = false
+        if supported and if_count == 0 and return_count > 1 { supported = false }
+        if supported and if_count > 1 { supported = false }
+        if supported and if_count == 1 {
+            let branch = statements[if_statement]
+            let mut has_else = false
+            let mut token_index = branch.token_start
+            while token_index < branch.token_end {
+                if tokens[token_index].kind == TK_ELSE { has_else = true }
+                token_index = token_index + 1
+            }
+            let expected_children = if has_else { 2 } else { 1 }
+            if branch.child_count != expected_children or branch.child_start < 0 or
+                branch.child_start + expected_children > len(statement_edges) {
+                supported = false
+            } else {
+                first_child = statement_edges[branch.child_start]
+                if has_else {
+                    second_child = statement_edges[branch.child_start + 1]
+                }
+                if first_child < 0 or first_child >= len(statements) or
+                    (has_else and (second_child < 0 or second_child >= len(statements))) { supported = false }
+            }
+            let mut fallthrough_return = -1
+            statement_index = 0
+            while statement_index < len(statements) {
+                let statement = statements[statement_index]
+                if statement_index != first_child and statement_index != second_child and statement.kind == STMT_RETURN and
+                    statement.token_start >= branch.token_end and statement.scope_start == item.body_start {
+                    fallthrough_return = statement_index
+                }
+                statement_index = statement_index + 1
+            }
+            if supported and has_else and statements[first_child].kind == STMT_RETURN and
+                statements[second_child].kind == STMT_RETURN and return_count == 2 {
+                then_return = first_child
+                continuation_return = second_child
+                simple_if = true
+                merge_return_values = true
+            } else if supported and not has_else and statements[first_child].kind == STMT_RETURN and
+                return_count == 2 and fallthrough_return >= 0 {
+                then_return = first_child
+                continuation_return = fallthrough_return
+                simple_if = true
+            } else if supported and has_else and statements[first_child].kind == STMT_LET and
+                statements[second_child].kind == STMT_LET and return_count == 1 and fallthrough_return >= 0 {
+                continuation_return = fallthrough_return
+                simple_merge_if = true
+            } else {
+                supported = false
+            }
+            let mut expression_index = 0
+            while supported and expression_index < len(expressions) {
+                let expression = expressions[expression_index]
+                if expression.token >= item.body_start and expression.token < item.body_end and
+                    expression.kind != EXPR_IDENT and expression.kind != EXPR_INT and expression.kind != EXPR_FLOAT and
+                    expression.kind != EXPR_BOOL and expression.kind != EXPR_STRING and
+                    expression.kind != EXPR_UNARY and expression.kind != EXPR_BINARY and
+                    expression.kind != EXPR_CALL {
+                    supported = false
+                }
+                expression_index = expression_index + 1
+            }
+            expression_index = 0
+            while supported and expression_index < len(expressions) {
+                let expression = expressions[expression_index]
+                if expression.token >= item.body_start and expression.token < item.body_end and
+                    expression.kind == EXPR_CALL {
+                    if expression.right >= 0 and expression.right < len(expression_types) and
+                        ir_type_is_owned(expression_types[expression.right]) {
+                        let argument_expression = expressions[expression.right]
+                        if argument_expression.kind == EXPR_IDENT {
+                            let argument_local = if expression.right < len(expression_locals) {
+                                expression_locals[expression.right]
+                            } else {
+                                -1
+                            }
+                            if argument_local < 0 or argument_local >= len(locals) or
+                                (not locals[argument_local].is_parameter and
+                                    locals[argument_local].declaration_end > branch.token_start) {
+                                supported = false
+                            }
+                        } else if argument_expression.kind != EXPR_STRING and
+                            argument_expression.kind != EXPR_CALL {
+                            supported = false
+                        }
+                    }
+                }
+                expression_index = expression_index + 1
+            }
+        }
+        let mut call_index = 0
+        while supported and call_index < len(expressions) {
+            let call = expressions[call_index]
+            if call.token >= item.body_start and call.token < item.body_end and call.kind == EXPR_CALL and
+                continued_calls[call_index] == 0 {
+                let mut callee = call_index
+                let mut steps = 0
+                while callee >= 0 and callee < len(expressions) and expressions[callee].kind == EXPR_CALL and
+                    steps < len(expressions) {
+                    callee = expressions[callee].left
+                    steps = steps + 1
+                }
+                if callee < 0 or callee >= len(expressions) or expressions[callee].kind != EXPR_IDENT or
+                    semantic_function_signature(signatures, symbols, expression_symbols, callee) < 0 {
+                    supported = false
+                }
+            }
+            call_index = call_index + 1
+        }
+        let mut local_index = 0
+        while supported and local_index < len(locals) {
+            if locals[local_index].item == signature.item and locals[local_index].is_parameter and
+                (local_index >= len(local_types) or local_types[local_index] == SEM_UNKNOWN) {
+                supported = false
+            }
+            local_index = local_index + 1
+        }
+        if not supported {
+            skipped = skipped + 1
+            signature_index = signature_index + 1
+            continue
+        }
+
+        let function_index = len(functions)
+        let instruction_start = len(instructions)
+        let value_start = next_value
+        let mut parameter_count = 0
+        let mut then_instructions: []IrInstruction = []
+        let mut else_instructions: []IrInstruction = []
+        local_index = 0
+        while local_index < len(locals) {
+            let local = locals[local_index]
+            if local.item == signature.item and local.is_parameter {
+                let result = next_value
+                next_value = next_value + 1
+                local_values[local_index] = result
+                instructions = append(instructions, IrInstruction {
+                    op: IR_PARAM, result: result, type_kind: local_types[local_index],
+                    left: -1, right: -1, aux: local_index, token: item.token_start,
+                })
+                parameter_count = parameter_count + 1
+            }
+            local_index = local_index + 1
+        }
+
+        i = 0
+        while i < len(expressions) {
+            let expression = expressions[i]
+            let in_function = expression.token >= item.body_start and expression.token < item.body_end
+            if in_function and i < len(expression_types) and expression_types[i] != SEM_UNKNOWN {
+                if expression.kind == EXPR_IDENT and i < len(expression_locals) {
+                    let local = expression_locals[i]
+                    if local >= 0 and local < len(local_values) and local_values[local] >= 0 {
+                        expression_values[i] = local_values[local]
+                    }
+                } else {
+                    let op = if expression.kind == EXPR_CALL and continued_calls[i] != 0 {
+                        0
+                    } else {
+                        ir_expression_opcode(expression.kind)
+                    }
+                    if op > 0 {
+                        let mut left = if expression.left >= 0 and expression.left < len(expression_values) { expression_values[expression.left] } else { -1 }
+                        let mut right = if expression.right >= 0 and expression.right < len(expression_values) { expression_values[expression.right] } else { -1 }
+                        let mut call_callee = -1
+                        let mut reversed_arguments: []int = []
+                        let mut reversed_argument_expressions: []int = []
+                        let mut call_prefix: []IrInstruction = []
+                        let mut call_ready = true
+                        if op == IR_CALL {
+                            let mut cursor = i
+                            let mut steps = 0
+                            while cursor >= 0 and cursor < len(expressions) and expressions[cursor].kind == EXPR_CALL and
+                                steps < len(expressions) {
+                                let argument = expressions[cursor].right
+                                if argument >= 0 {
+                                    let argument_value = if argument < len(expression_values) { expression_values[argument] } else { -1 }
+                                    if argument_value < 0 { call_ready = false }
+                                    reversed_arguments = append(reversed_arguments, argument_value)
+                                    reversed_argument_expressions = append(reversed_argument_expressions, argument)
+                                }
+                                cursor = expressions[cursor].left
+                                steps = steps + 1
+                            }
+                            call_callee = cursor
+                            left = -1
+                            right = -1
+                        }
+                        let mut ready = true
+                        if (op == IR_UNARY or op == IR_BINARY or op == IR_INDEX) and left < 0 { ready = false }
+                        if (op == IR_BINARY or op == IR_INDEX) and right < 0 { ready = false }
+                        if op == IR_CALL and not call_ready { ready = false }
+                        if ready {
+                            let mut aux = if op == IR_UNARY or op == IR_BINARY { tokens[expression.token].kind } else { expression.left }
+                            if op == IR_CALL {
+                                let call_signature = semantic_function_signature(
+                                    signatures, symbols, expression_symbols, call_callee
+                                )
+                                let argument_start = len(call_arguments)
+                                let mut argument_index = len(reversed_arguments) - 1
+                                while argument_index >= 0 {
+                                    let argument_expression = reversed_argument_expressions[argument_index]
+                                    let mut argument_value = reversed_arguments[argument_index]
+                                    if argument_expression >= 0 and argument_expression < len(expressions) and
+                                        expressions[argument_expression].kind == EXPR_IDENT and
+                                        argument_expression < len(expression_locals) {
+                                        let argument_local = expression_locals[argument_expression]
+                                        if argument_local >= 0 and argument_local < len(locals) and
+                                            argument_expression < len(expression_types) and
+                                            ir_type_is_owned(expression_types[argument_expression]) and
+                                            locals[argument_local].ownership != LOCAL_OWN_HOLD {
+                                            let cloned_value = next_value
+                                            next_value = next_value + 1
+                                            call_prefix = append(call_prefix, IrInstruction {
+                                                op: IR_CLONE, result: cloned_value,
+                                                type_kind: expression_types[argument_expression],
+                                                left: argument_value, right: -1, aux: -1,
+                                                token: expressions[argument_expression].token,
+                                            })
+                                            argument_value = cloned_value
+                                        }
+                                    }
+                                    call_arguments = append(call_arguments, argument_value)
+                                    argument_index = argument_index - 1
+                                }
+                                aux = len(call_sites)
+                                call_sites = append(call_sites, IrCallSite {
+                                    callee_item: if call_signature >= 0 { signatures[call_signature].item } else { -1 },
+                                    argument_start: argument_start,
+                                    argument_count: len(reversed_arguments),
+                                })
+                            }
+                            if op == IR_CONST {
+                                let token = tokens[expression.token]
+                                let mut int_value = 0
+                                let mut float_value = 0.0
+                                let mut start = token.start
+                                let mut end = token.end
+                                if expression.kind == EXPR_INT {
+                                    int_value = ir_parse_decimal_int(source, token)
+                                    if int_value < 0 {
+                                        return TypedIr {
+                                            functions: functions, blocks: blocks, instructions: instructions,
+                                            constants: constants, successors: successors,
+                                            call_sites: call_sites, call_arguments: call_arguments,
+                                            expression_values: expression_values,
+                                            value_count: next_value, skipped_functions: skipped,
+                                            ok: false, error: "integer constant is out of range",
+                                        }
+                                    }
+                                }
+                                if expression.kind == EXPR_FLOAT { float_value = parse_float(token_text(source, token)) }
+                                if expression.kind == EXPR_BOOL { int_value = if token.kind == TK_TRUE { 1 } else { 0 } }
+                                if expression.kind == EXPR_STRING {
+                                    start = token.start + 1
+                                    end = token.end - 1
+                                }
+                                aux = len(constants)
+                                constants = append(constants, IrConstant {
+                                    type_kind: expression_types[i], int_value: int_value,
+                                    float_value: float_value, start: start, end: end,
+                                })
+                            }
+                            let result = next_value
+                            next_value = next_value + 1
+                            let lowered = IrInstruction {
+                                op: op, result: result, type_kind: expression_types[i],
+                                left: left, right: right, aux: aux, token: expression.token,
+                            }
+                            let arm_lowering = simple_if or simple_merge_if
+                            let then_arm = if simple_if { then_return } else { first_child }
+                            let else_arm = if simple_if { continuation_return } else { second_child }
+                            if arm_lowering and then_arm >= 0 and
+                                expression.token >= statements[then_arm].token_start and
+                                expression.token < statements[then_arm].token_end {
+                                let mut prefix_index = 0
+                                while prefix_index < len(call_prefix) {
+                                    then_instructions = append(then_instructions, call_prefix[prefix_index])
+                                    prefix_index = prefix_index + 1
+                                }
+                                then_instructions = append(then_instructions, lowered)
+                            } else if arm_lowering and else_arm >= 0 and
+                                expression.token >= statements[else_arm].token_start and
+                                expression.token < statements[else_arm].token_end {
+                                let mut prefix_index = 0
+                                while prefix_index < len(call_prefix) {
+                                    else_instructions = append(else_instructions, call_prefix[prefix_index])
+                                    prefix_index = prefix_index + 1
+                                }
+                                else_instructions = append(else_instructions, lowered)
+                            } else {
+                                let mut prefix_index = 0
+                                while prefix_index < len(call_prefix) {
+                                    instructions = append(instructions, call_prefix[prefix_index])
+                                    prefix_index = prefix_index + 1
+                                }
+                                instructions = append(instructions, lowered)
+                            }
+                            expression_values[i] = result
+                        }
+                    }
+                }
+                if expression_values[i] >= 0 {
+                    local_index = 0
+                    while local_index < len(locals) {
+                        if locals[local_index].item == signature.item and locals[local_index].initializer_root == i {
+                            local_values[local_index] = expression_values[i]
+                        }
+                        local_index = local_index + 1
+                    }
+                }
+            }
+            i = i + 1
+        }
+
+        if simple_if {
+            let branch_statement = statements[if_statement]
+            if branch_statement.expr_root < 0 or branch_statement.expr_root >= len(expression_values) {
+                return TypedIr {
+                    functions: functions, blocks: blocks, instructions: instructions,
+                    constants: constants, successors: successors,
+                    call_sites: call_sites, call_arguments: call_arguments,
+                    expression_values: expression_values,
+                    value_count: next_value, skipped_functions: skipped,
+                    ok: false, error: "typed if condition has no expression",
+                }
+            }
+            let condition = expression_values[branch_statement.expr_root]
+            if condition < 0 {
+                return TypedIr {
+                    functions: functions, blocks: blocks, instructions: instructions,
+                    constants: constants, successors: successors,
+                    call_sites: call_sites, call_arguments: call_arguments,
+                    expression_values: expression_values,
+                    value_count: next_value, skipped_functions: skipped,
+                    ok: false, error: "typed if condition did not lower to an SSA value",
+                }
+            }
+            let entry_terminator = len(instructions)
+            instructions = append(instructions, IrInstruction {
+                op: IR_BRANCH, result: -1, type_kind: SEM_BOOL,
+                left: condition, right: -1, aux: -1, token: branch_statement.token_start,
+            })
+            let entry_block = len(blocks)
+            let successor_start = len(successors)
+            successors = append(successors, entry_block + 1)
+            successors = append(successors, entry_block + 2)
+            blocks = append(blocks, IrBlock {
+                function: function_index, instruction_start: instruction_start,
+                instruction_count: len(instructions) - instruction_start,
+                terminator: entry_terminator, successor_start: successor_start, successor_count: 2,
+            })
+
+            let then_statement = statements[then_return]
+            let then_start = len(instructions)
+            i = 0
+            while i < len(then_instructions) {
+                instructions = append(instructions, then_instructions[i])
+                i = i + 1
+            }
+            let then_value = if then_statement.expr_root >= 0 and then_statement.expr_root < len(expression_values) { expression_values[then_statement.expr_root] } else { -1 }
+            let then_type = if then_statement.expr_root >= 0 and then_statement.expr_root < len(expression_types) { expression_types[then_statement.expr_root] } else { SEM_UNKNOWN }
+            let continuation_statement = statements[continuation_return]
+            let continuation_value = if continuation_statement.expr_root >= 0 and continuation_statement.expr_root < len(expression_values) { expression_values[continuation_statement.expr_root] } else { -1 }
+            let continuation_type = if continuation_statement.expr_root >= 0 and continuation_statement.expr_root < len(expression_types) { expression_types[continuation_statement.expr_root] } else { SEM_UNKNOWN }
+            if merge_return_values {
+                if then_value < 0 or continuation_value < 0 or then_type == SEM_UNKNOWN or then_type != continuation_type {
+                    return TypedIr {
+                        functions: functions, blocks: blocks, instructions: instructions,
+                        constants: constants, successors: successors,
+                        call_sites: call_sites, call_arguments: call_arguments,
+                        expression_values: expression_values,
+                        value_count: next_value, skipped_functions: skipped,
+                        ok: false, error: "typed branch values cannot form a block parameter",
+                    }
+                }
+                let merge_block = entry_block + 3
+                local_index = len(locals) - 1
+                while local_index >= 0 {
+                    if locals[local_index].item == signature.item and
+                        (locals[local_index].is_parameter or
+                            locals[local_index].declaration_end <= branch_statement.token_start) and
+                        local_values[local_index] >= 0 and
+                        ir_type_is_owned(local_types[local_index]) and local_values[local_index] != then_value and
+                        not ir_instruction_list_consumes_value(
+                            then_instructions, call_sites, call_arguments, local_values[local_index]
+                        ) {
+                        instructions = append(instructions, IrInstruction {
+                            op: IR_DROP, result: -1, type_kind: local_types[local_index],
+                            left: local_values[local_index], right: -1, aux: -1, token: then_statement.token_start,
+                        })
+                    }
+                    local_index = local_index - 1
+                }
+                instructions = append(instructions, IrInstruction {
+                    op: IR_JUMP, result: -1, type_kind: then_type,
+                    left: then_value, right: -1, aux: -1, token: then_statement.token_start,
+                })
+                let then_successor = len(successors)
+                successors = append(successors, merge_block)
+                blocks = append(blocks, IrBlock {
+                    function: function_index, instruction_start: then_start,
+                    instruction_count: len(instructions) - then_start,
+                    terminator: len(instructions) - 1, successor_start: then_successor, successor_count: 1,
+                })
+
+                let continuation_start = len(instructions)
+                i = 0
+                while i < len(else_instructions) {
+                    instructions = append(instructions, else_instructions[i])
+                    i = i + 1
+                }
+                local_index = len(locals) - 1
+                while local_index >= 0 {
+                    if locals[local_index].item == signature.item and
+                        (locals[local_index].is_parameter or
+                            locals[local_index].declaration_end <= branch_statement.token_start) and
+                        local_values[local_index] >= 0 and
+                        ir_type_is_owned(local_types[local_index]) and local_values[local_index] != continuation_value and
+                        not ir_instruction_list_consumes_value(
+                            else_instructions, call_sites, call_arguments, local_values[local_index]
+                        ) {
+                        instructions = append(instructions, IrInstruction {
+                            op: IR_DROP, result: -1, type_kind: local_types[local_index],
+                            left: local_values[local_index], right: -1, aux: -1, token: continuation_statement.token_start,
+                        })
+                    }
+                    local_index = local_index - 1
+                }
+                instructions = append(instructions, IrInstruction {
+                    op: IR_JUMP, result: -1, type_kind: continuation_type,
+                    left: continuation_value, right: -1, aux: -1, token: continuation_statement.token_start,
+                })
+                let continuation_successor = len(successors)
+                successors = append(successors, merge_block)
+                blocks = append(blocks, IrBlock {
+                    function: function_index, instruction_start: continuation_start,
+                    instruction_count: len(instructions) - continuation_start,
+                    terminator: len(instructions) - 1, successor_start: continuation_successor, successor_count: 1,
+                })
+
+                let merge_start = len(instructions)
+                let merged_value = next_value
+                next_value = next_value + 1
+                instructions = append(instructions, IrInstruction {
+                    op: IR_BLOCK_PARAM, result: merged_value, type_kind: then_type,
+                    left: -1, right: -1, aux: 0, token: branch_statement.token_start,
+                })
+                instructions = append(instructions, IrInstruction {
+                    op: IR_RETURN, result: -1, type_kind: then_type,
+                    left: merged_value, right: -1, aux: -1, token: continuation_statement.token_start,
+                })
+                blocks = append(blocks, IrBlock {
+                    function: function_index, instruction_start: merge_start, instruction_count: 2,
+                    terminator: merge_start + 1, successor_start: len(successors), successor_count: 0,
+                })
+            } else {
+                local_index = len(locals) - 1
+                while local_index >= 0 {
+                    if locals[local_index].item == signature.item and
+                        (locals[local_index].is_parameter or
+                            locals[local_index].declaration_end <= branch_statement.token_start) and
+                        local_values[local_index] >= 0 and
+                        ir_type_is_owned(local_types[local_index]) and local_values[local_index] != then_value and
+                        not ir_instruction_list_consumes_value(
+                            then_instructions, call_sites, call_arguments, local_values[local_index]
+                        ) {
+                        instructions = append(instructions, IrInstruction {
+                            op: IR_DROP, result: -1, type_kind: local_types[local_index],
+                            left: local_values[local_index], right: -1, aux: -1,
+                            token: then_statement.token_start,
+                        })
+                    }
+                    local_index = local_index - 1
+                }
+                instructions = append(instructions, IrInstruction {
+                    op: IR_RETURN, result: -1, type_kind: then_type,
+                    left: then_value, right: -1, aux: -1, token: then_statement.token_start,
+                })
+                blocks = append(blocks, IrBlock {
+                    function: function_index, instruction_start: then_start,
+                    instruction_count: len(instructions) - then_start,
+                    terminator: len(instructions) - 1,
+                    successor_start: len(successors), successor_count: 0,
+                })
+
+                let continuation_start = len(instructions)
+                i = 0
+                while i < len(else_instructions) {
+                    instructions = append(instructions, else_instructions[i])
+                    i = i + 1
+                }
+                local_index = len(locals) - 1
+                while local_index >= 0 {
+                    if locals[local_index].item == signature.item and
+                        (locals[local_index].is_parameter or
+                            locals[local_index].declaration_end <= branch_statement.token_start) and
+                        local_values[local_index] >= 0 and
+                        ir_type_is_owned(local_types[local_index]) and local_values[local_index] != continuation_value and
+                        not ir_instruction_list_consumes_value(
+                            else_instructions, call_sites, call_arguments, local_values[local_index]
+                        ) {
+                        instructions = append(instructions, IrInstruction {
+                            op: IR_DROP, result: -1, type_kind: local_types[local_index],
+                            left: local_values[local_index], right: -1, aux: -1,
+                            token: continuation_statement.token_start,
+                        })
+                    }
+                    local_index = local_index - 1
+                }
+                instructions = append(instructions, IrInstruction {
+                    op: IR_RETURN, result: -1, type_kind: continuation_type,
+                    left: continuation_value, right: -1, aux: -1, token: continuation_statement.token_start,
+                })
+                blocks = append(blocks, IrBlock {
+                    function: function_index, instruction_start: continuation_start,
+                    instruction_count: len(instructions) - continuation_start,
+                    terminator: len(instructions) - 1,
+                    successor_start: len(successors), successor_count: 0,
+                })
+            }
+            functions = append(functions, IrFunction {
+                item: signature.item, entry_block: entry_block, block_count: if merge_return_values { 4 } else { 3 },
+                parameter_count: parameter_count, value_start: value_start,
+                value_count: next_value - value_start,
+            })
+            signature_index = signature_index + 1
+            continue
+        }
+
+        if simple_merge_if {
+            let branch_statement = statements[if_statement]
+            if branch_statement.expr_root < 0 or branch_statement.expr_root >= len(expression_values) {
+                return TypedIr {
+                    functions: functions, blocks: blocks, instructions: instructions,
+                    constants: constants, successors: successors,
+                    call_sites: call_sites, call_arguments: call_arguments,
+                    expression_values: expression_values,
+                    value_count: next_value, skipped_functions: skipped,
+                    ok: false, error: "typed merge condition has no expression",
+                }
+            }
+            let condition = expression_values[branch_statement.expr_root]
+            if condition < 0 {
+                return TypedIr {
+                    functions: functions, blocks: blocks, instructions: instructions,
+                    constants: constants, successors: successors,
+                    call_sites: call_sites, call_arguments: call_arguments,
+                    expression_values: expression_values,
+                    value_count: next_value, skipped_functions: skipped,
+                    ok: false, error: "typed merge condition did not lower to an SSA value",
+                }
+            }
+            let merge_statement = statements[continuation_return]
+            let merge_value = if merge_statement.expr_root >= 0 and merge_statement.expr_root < len(expression_values) { expression_values[merge_statement.expr_root] } else { -1 }
+            let merge_type = if merge_statement.expr_root >= 0 and merge_statement.expr_root < len(expression_types) { expression_types[merge_statement.expr_root] } else { SEM_UNKNOWN }
+            let entry_terminator = len(instructions)
+            instructions = append(instructions, IrInstruction {
+                op: IR_BRANCH, result: -1, type_kind: SEM_BOOL,
+                left: condition, right: -1, aux: -1, token: branch_statement.token_start,
+            })
+            let entry_block = len(blocks)
+            let merge_block = entry_block + 3
+            let entry_successors = len(successors)
+            successors = append(successors, entry_block + 1)
+            successors = append(successors, entry_block + 2)
+            blocks = append(blocks, IrBlock {
+                function: function_index, instruction_start: instruction_start,
+                instruction_count: len(instructions) - instruction_start,
+                terminator: entry_terminator, successor_start: entry_successors, successor_count: 2,
+            })
+
+            let then_start = len(instructions)
+            i = 0
+            while i < len(then_instructions) {
+                instructions = append(instructions, then_instructions[i])
+                i = i + 1
+            }
+            i = len(then_instructions) - 1
+            while i >= 0 {
+                let arm_instruction = then_instructions[i]
+                if arm_instruction.result >= 0 and ir_type_is_owned(arm_instruction.type_kind) and
+                    arm_instruction.result != merge_value and
+                    not ir_instruction_list_consumes_value(
+                        then_instructions, call_sites, call_arguments, arm_instruction.result
+                    ) {
+                    instructions = append(instructions, IrInstruction {
+                        op: IR_DROP, result: -1, type_kind: arm_instruction.type_kind,
+                        left: arm_instruction.result, right: -1, aux: -1,
+                        token: statements[first_child].token_start,
+                    })
+                }
+                i = i - 1
+            }
+            local_index = len(locals) - 1
+            while local_index >= 0 {
+                if locals[local_index].item == signature.item and
+                    (locals[local_index].is_parameter or
+                        locals[local_index].declaration_end <= branch_statement.token_start) and
+                    local_values[local_index] >= 0 and
+                    ir_type_is_owned(local_types[local_index]) and
+                    local_values[local_index] != merge_value and
+                    not ir_instruction_list_consumes_value(
+                        then_instructions, call_sites, call_arguments, local_values[local_index]
+                    ) {
+                    instructions = append(instructions, IrInstruction {
+                        op: IR_DROP, result: -1, type_kind: local_types[local_index],
+                        left: local_values[local_index], right: -1, aux: -1,
+                        token: statements[first_child].token_start,
+                    })
+                }
+                local_index = local_index - 1
+            }
+            instructions = append(instructions, IrInstruction {
+                op: IR_JUMP, result: -1, type_kind: SEM_UNKNOWN,
+                left: -1, right: -1, aux: -1, token: branch_statement.token_start,
+            })
+            let then_successor = len(successors)
+            successors = append(successors, merge_block)
+            blocks = append(blocks, IrBlock {
+                function: function_index, instruction_start: then_start,
+                instruction_count: len(instructions) - then_start,
+                terminator: len(instructions) - 1, successor_start: then_successor, successor_count: 1,
+            })
+
+            let else_start = len(instructions)
+            i = 0
+            while i < len(else_instructions) {
+                instructions = append(instructions, else_instructions[i])
+                i = i + 1
+            }
+            i = len(else_instructions) - 1
+            while i >= 0 {
+                let arm_instruction = else_instructions[i]
+                if arm_instruction.result >= 0 and ir_type_is_owned(arm_instruction.type_kind) and
+                    arm_instruction.result != merge_value and
+                    not ir_instruction_list_consumes_value(
+                        else_instructions, call_sites, call_arguments, arm_instruction.result
+                    ) {
+                    instructions = append(instructions, IrInstruction {
+                        op: IR_DROP, result: -1, type_kind: arm_instruction.type_kind,
+                        left: arm_instruction.result, right: -1, aux: -1,
+                        token: statements[second_child].token_start,
+                    })
+                }
+                i = i - 1
+            }
+            local_index = len(locals) - 1
+            while local_index >= 0 {
+                if locals[local_index].item == signature.item and
+                    (locals[local_index].is_parameter or
+                        locals[local_index].declaration_end <= branch_statement.token_start) and
+                    local_values[local_index] >= 0 and
+                    ir_type_is_owned(local_types[local_index]) and
+                    local_values[local_index] != merge_value and
+                    not ir_instruction_list_consumes_value(
+                        else_instructions, call_sites, call_arguments, local_values[local_index]
+                    ) {
+                    instructions = append(instructions, IrInstruction {
+                        op: IR_DROP, result: -1, type_kind: local_types[local_index],
+                        left: local_values[local_index], right: -1, aux: -1,
+                        token: statements[second_child].token_start,
+                    })
+                }
+                local_index = local_index - 1
+            }
+            instructions = append(instructions, IrInstruction {
+                op: IR_JUMP, result: -1, type_kind: SEM_UNKNOWN,
+                left: -1, right: -1, aux: -1, token: branch_statement.token_start,
+            })
+            let else_successor = len(successors)
+            successors = append(successors, merge_block)
+            blocks = append(blocks, IrBlock {
+                function: function_index, instruction_start: else_start,
+                instruction_count: len(instructions) - else_start,
+                terminator: len(instructions) - 1, successor_start: else_successor, successor_count: 1,
+            })
+
+            let merge_start = len(instructions)
+            instructions = append(instructions, IrInstruction {
+                op: IR_RETURN, result: -1, type_kind: merge_type,
+                left: merge_value, right: -1, aux: -1, token: merge_statement.token_start,
+            })
+            blocks = append(blocks, IrBlock {
+                function: function_index, instruction_start: merge_start, instruction_count: 1,
+                terminator: merge_start, successor_start: len(successors), successor_count: 0,
+            })
+            functions = append(functions, IrFunction {
+                item: signature.item, entry_block: entry_block, block_count: 4,
+                parameter_count: parameter_count, value_start: value_start,
+                value_count: next_value - value_start,
+            })
+            signature_index = signature_index + 1
+            continue
+        }
+
+        let mut return_value = -1
+        let mut return_type = SEM_UNKNOWN
+        let mut return_token = item.body_end
+        statement_index = 0
+        while statement_index < len(statements) {
+            let statement = statements[statement_index]
+            if statement.kind == STMT_RETURN and statement.token_start >= item.body_start and statement.token_start < item.body_end {
+                return_value = if statement.expr_root >= 0 and statement.expr_root < len(expression_values) { expression_values[statement.expr_root] } else { -1 }
+                return_type = if statement.expr_root >= 0 and statement.expr_root < len(expression_types) { expression_types[statement.expr_root] } else { SEM_UNKNOWN }
+                return_token = statement.token_start
+            }
+            statement_index = statement_index + 1
+        }
+        let mut owned_live = make([]int, next_value, next_value)
+        let mut owned_types = make([]int, next_value, next_value)
+        let mut ownership_index = instruction_start
+        while ownership_index < len(instructions) {
+            let owned_instruction = instructions[ownership_index]
+            if owned_instruction.result >= 0 and ir_type_is_owned(owned_instruction.type_kind) {
+                owned_live[owned_instruction.result] = 1
+                owned_types[owned_instruction.result] = owned_instruction.type_kind
+            }
+            if (owned_instruction.op == IR_ARRAY or owned_instruction.op == IR_SLICE) and
+                owned_instruction.left >= 0 and owned_live[owned_instruction.left] == 1 {
+                owned_live[owned_instruction.left] = 0
+            }
+            if owned_instruction.op == IR_ARRAY and owned_instruction.right >= 0 and
+                owned_live[owned_instruction.right] == 1 {
+                owned_live[owned_instruction.right] = 0
+            }
+            if owned_instruction.op == IR_CALL and owned_instruction.aux >= 0 and
+                owned_instruction.aux < len(call_sites) {
+                let owned_call = call_sites[owned_instruction.aux]
+                let mut owned_argument = owned_call.argument_start
+                while owned_argument < owned_call.argument_start + owned_call.argument_count {
+                    let argument_value = call_arguments[owned_argument]
+                    if argument_value >= 0 and argument_value < len(owned_live) and
+                        owned_live[argument_value] == 1 {
+                        owned_live[argument_value] = 0
+                    }
+                    owned_argument = owned_argument + 1
+                }
+            }
+            ownership_index = ownership_index + 1
+        }
+        if return_value >= 0 and return_value < len(owned_live) and owned_live[return_value] == 1 {
+            let moved_value = next_value
+            next_value = next_value + 1
+            instructions = append(instructions, IrInstruction {
+                op: IR_MOVE, result: moved_value, type_kind: return_type,
+                left: return_value, right: -1, aux: -1, token: return_token,
+            })
+            owned_live[return_value] = 0
+            return_value = moved_value
+        }
+        ownership_index = len(owned_live) - 1
+        while ownership_index >= value_start {
+            if owned_live[ownership_index] == 1 {
+                instructions = append(instructions, IrInstruction {
+                    op: IR_DROP, result: -1, type_kind: owned_types[ownership_index],
+                    left: ownership_index, right: -1, aux: -1, token: return_token,
+                })
+            }
+            ownership_index = ownership_index - 1
+        }
+        let terminator = len(instructions)
+        instructions = append(instructions, IrInstruction {
+            op: IR_RETURN, result: -1, type_kind: return_type,
+            left: return_value, right: -1, aux: -1, token: return_token,
+        })
+        let block_index = len(blocks)
+        blocks = append(blocks, IrBlock {
+            function: function_index, instruction_start: instruction_start,
+            instruction_count: len(instructions) - instruction_start,
+            terminator: terminator, successor_start: len(successors), successor_count: 0,
+        })
+        functions = append(functions, IrFunction {
+            item: signature.item, entry_block: block_index, block_count: 1,
+            parameter_count: parameter_count, value_start: value_start,
+            value_count: next_value - value_start,
+        })
+        signature_index = signature_index + 1
+    }
+    return TypedIr {
+        functions: functions, blocks: blocks, instructions: instructions,
+        constants: constants, successors: successors,
+        call_sites: call_sites, call_arguments: call_arguments,
+        expression_values: expression_values,
+        value_count: next_value, skipped_functions: skipped, ok: true, error: "",
+    }
+}
+
+fn verify_typed_ir(
+    functions: []IrFunction,
+    blocks: []IrBlock,
+    instructions: []IrInstruction,
+    constants: []IrConstant,
+    successors: []int,
+    call_sites: []IrCallSite,
+    call_arguments: []int,
+    value_count: int
+) -> IrVerification {
+    if value_count < 0 {
+        return IrVerification { ok: false, error: "IR value count is negative", checked_values: 0 }
+    }
+    let mut definitions = make([]int, value_count, value_count)
+    let mut value_owners = make([]int, value_count, value_count)
+    let mut constant_references = make([]int, len(constants), len(constants))
+    let mut call_site_references = make([]int, len(call_sites), len(call_sites))
+    let mut call_argument_owners = make([]int, len(call_arguments), len(call_arguments))
+    let mut instruction_owners = make([]int, len(instructions), len(instructions))
+    let mut i = 0
+    while i < len(value_owners) {
+        value_owners[i] = -1
+        i = i + 1
+    }
+    i = 0
+    while i < len(instruction_owners) {
+        instruction_owners[i] = -1
+        i = i + 1
+    }
+    i = 0
+    while i < len(call_argument_owners) {
+        call_argument_owners[i] = -1
+        i = i + 1
+    }
+
+    i = 0
+    while i < len(functions) {
+        let function = functions[i]
+        if function.entry_block < 0 or function.entry_block >= len(blocks) or function.block_count <= 0 or
+            function.entry_block + function.block_count > len(blocks) {
+            return IrVerification { ok: false, error: "IR function has invalid block range", checked_values: 0 }
+        }
+        if function.value_start < 0 or function.value_count < 0 or function.value_start + function.value_count > value_count {
+            return IrVerification { ok: false, error: "IR function has invalid value range", checked_values: 0 }
+        }
+        if function.parameter_count < 0 or function.parameter_count > function.value_count {
+            return IrVerification { ok: false, error: "IR function has invalid parameter count", checked_values: 0 }
+        }
+        let mut block_index = function.entry_block
+        while block_index < function.entry_block + function.block_count {
+            if blocks[block_index].function != i {
+                return IrVerification { ok: false, error: "IR block belongs to wrong function", checked_values: 0 }
+            }
+            block_index = block_index + 1
+        }
+        let mut value_index = function.value_start
+        while value_index < function.value_start + function.value_count {
+            if value_owners[value_index] >= 0 {
+                return IrVerification { ok: false, error: "IR value belongs to multiple functions", checked_values: 0 }
+            }
+            value_owners[value_index] = i
+            value_index = value_index + 1
+        }
+        i = i + 1
+    }
+
+    i = 0
+    while i < len(blocks) {
+        let block = blocks[i]
+        if block.function < 0 or block.function >= len(functions) {
+            return IrVerification { ok: false, error: "IR block has invalid function", checked_values: 0 }
+        }
+        if block.instruction_start < 0 or block.instruction_count <= 0 or
+            block.instruction_start + block.instruction_count > len(instructions) {
+            return IrVerification { ok: false, error: "IR block has invalid instruction range", checked_values: 0 }
+        }
+        if block.terminator < block.instruction_start or block.terminator >= block.instruction_start + block.instruction_count or
+            block.terminator != block.instruction_start + block.instruction_count - 1 or
+            (instructions[block.terminator].op != IR_RETURN and instructions[block.terminator].op != IR_BRANCH and
+                instructions[block.terminator].op != IR_JUMP) {
+            return IrVerification { ok: false, error: "IR block has invalid terminator", checked_values: 0 }
+        }
+        let has_block_parameter = instructions[block.instruction_start].op == IR_BLOCK_PARAM
+        let mut parameter_scan = block.instruction_start + 1
+        while parameter_scan < block.instruction_start + block.instruction_count {
+            if instructions[parameter_scan].op == IR_BLOCK_PARAM {
+                return IrVerification { ok: false, error: "IR block parameter must be first and unique", checked_values: 0 }
+            }
+            parameter_scan = parameter_scan + 1
+        }
+        if has_block_parameter {
+            if i == functions[block.function].entry_block {
+                return IrVerification { ok: false, error: "IR entry block cannot have a block parameter", checked_values: 0 }
+            }
+            let parameter = instructions[block.instruction_start]
+            if parameter.aux != 0 or parameter.left >= 0 or parameter.right >= 0 or parameter.type_kind == SEM_UNKNOWN {
+                return IrVerification { ok: false, error: "IR block parameter is malformed", checked_values: 0 }
+            }
+            let mut incoming = 0
+            let mut predecessor = 0
+            while predecessor < len(blocks) {
+                let candidate = blocks[predecessor]
+                let mut edge = candidate.successor_start
+                while edge < candidate.successor_start + candidate.successor_count {
+                    if successors[edge] == i { incoming = incoming + 1 }
+                    edge = edge + 1
+                }
+                predecessor = predecessor + 1
+            }
+            if incoming == 0 {
+                return IrVerification { ok: false, error: "IR block parameter has no incoming edges", checked_values: 0 }
+            }
+        }
+        if block.successor_start < 0 or block.successor_count < 0 or
+            block.successor_start + block.successor_count > len(successors) {
+            return IrVerification { ok: false, error: "IR block has invalid successor range", checked_values: 0 }
+        }
+        let mut successor_index = block.successor_start
+        while successor_index < block.successor_start + block.successor_count {
+            if successors[successor_index] < 0 or successors[successor_index] >= len(blocks) {
+                return IrVerification { ok: false, error: "IR block has invalid successor", checked_values: 0 }
+            }
+            if blocks[successors[successor_index]].function != block.function {
+                return IrVerification { ok: false, error: "IR successor crosses function boundary", checked_values: 0 }
+            }
+            successor_index = successor_index + 1
+        }
+        let terminator_op = instructions[block.terminator].op
+        if terminator_op == IR_RETURN and block.successor_count != 0 {
+            return IrVerification { ok: false, error: "IR return block has successors", checked_values: 0 }
+        }
+        if terminator_op == IR_BRANCH and block.successor_count != 2 {
+            return IrVerification { ok: false, error: "IR branch must have two successors", checked_values: 0 }
+        }
+        if terminator_op == IR_JUMP and block.successor_count != 1 {
+            return IrVerification { ok: false, error: "IR jump must have one successor", checked_values: 0 }
+        }
+        let mut checked_successor = block.successor_start
+        while checked_successor < block.successor_start + block.successor_count {
+            let target = blocks[successors[checked_successor]]
+            let target_has_parameter = instructions[target.instruction_start].op == IR_BLOCK_PARAM
+            if target_has_parameter {
+                if terminator_op != IR_JUMP or instructions[block.terminator].left < 0 or
+                    instructions[block.terminator].right >= 0 or
+                    instructions[block.terminator].type_kind != instructions[target.instruction_start].type_kind {
+                    return IrVerification { ok: false, error: "IR edge does not provide matching block argument", checked_values: 0 }
+                }
+            } else if terminator_op == IR_JUMP and
+                (instructions[block.terminator].left >= 0 or instructions[block.terminator].right >= 0) {
+                return IrVerification { ok: false, error: "IR jump has an unexpected block argument", checked_values: 0 }
+            }
+            checked_successor = checked_successor + 1
+        }
+        let mut instruction_index = block.instruction_start
+        while instruction_index < block.instruction_start + block.instruction_count {
+            if instruction_owners[instruction_index] >= 0 {
+                return IrVerification { ok: false, error: "IR instruction belongs to multiple blocks", checked_values: 0 }
+            }
+            instruction_owners[instruction_index] = i
+            instruction_index = instruction_index + 1
+        }
+        i = i + 1
+    }
+
+    i = 0
+    while i < len(instructions) {
+        if instruction_owners[i] < 0 {
+            return IrVerification { ok: false, error: "IR instruction has no owning block", checked_values: 0 }
+        }
+        let instruction = instructions[i]
+        let owner_function = blocks[instruction_owners[i]].function
+        if instruction.left >= 0 and (instruction.left >= value_count or definitions[instruction.left] == 0) {
+            return IrVerification { ok: false, error: "IR instruction uses undefined left value", checked_values: 0 }
+        }
+        if instruction.right >= 0 and (instruction.right >= value_count or definitions[instruction.right] == 0) {
+            return IrVerification { ok: false, error: "IR instruction uses undefined right value", checked_values: 0 }
+        }
+        if instruction.left >= 0 and value_owners[instruction.left] != owner_function {
+            return IrVerification { ok: false, error: "IR left value crosses function boundary", checked_values: 0 }
+        }
+        if instruction.right >= 0 and value_owners[instruction.right] != owner_function {
+            return IrVerification { ok: false, error: "IR right value crosses function boundary", checked_values: 0 }
+        }
+        let owner_block = instruction_owners[i]
+        let entry_block = functions[owner_function].entry_block
+        if instruction.left >= 0 {
+            let definition_block = instruction_owners[definitions[instruction.left] - 1]
+            if definition_block != owner_block and definition_block != entry_block {
+                return IrVerification { ok: false, error: "IR left value does not dominate its use", checked_values: 0 }
+            }
+        }
+        if instruction.right >= 0 {
+            let definition_block = instruction_owners[definitions[instruction.right] - 1]
+            if definition_block != owner_block and definition_block != entry_block {
+                return IrVerification { ok: false, error: "IR right value does not dominate its use", checked_values: 0 }
+            }
+        }
+        if instruction.op == IR_RETURN or instruction.op == IR_BRANCH or instruction.op == IR_JUMP or instruction.op == IR_DROP {
+            if instruction.result >= 0 {
+                return IrVerification { ok: false, error: "IR terminator unexpectedly defines a value", checked_values: 0 }
+            }
+        } else {
+            if instruction.result < 0 or instruction.result >= value_count {
+                return IrVerification { ok: false, error: "IR instruction has invalid result value", checked_values: 0 }
+            }
+            if value_owners[instruction.result] != owner_function {
+                return IrVerification { ok: false, error: "IR result belongs to wrong function", checked_values: 0 }
+            }
+            if instruction.type_kind == SEM_UNKNOWN {
+                return IrVerification { ok: false, error: "IR result has unknown type", checked_values: 0 }
+            }
+            if definitions[instruction.result] != 0 {
+                return IrVerification { ok: false, error: "IR value has multiple definitions", checked_values: 0 }
+            }
+            definitions[instruction.result] = i + 1
+        }
+        if instruction.op == IR_BRANCH {
+            if instruction.left < 0 {
+                return IrVerification { ok: false, error: "IR branch has no condition", checked_values: 0 }
+            }
+            let condition_instruction = definitions[instruction.left] - 1
+            if condition_instruction < 0 or instructions[condition_instruction].type_kind != SEM_BOOL {
+                return IrVerification { ok: false, error: "IR branch condition is not bool", checked_values: 0 }
+            }
+        }
+        if instruction.op == IR_JUMP and instruction.left >= 0 {
+            let argument_instruction = definitions[instruction.left] - 1
+            if argument_instruction < 0 or instructions[argument_instruction].type_kind != instruction.type_kind {
+                return IrVerification { ok: false, error: "IR jump argument type does not match its value", checked_values: 0 }
+            }
+        }
+        if instruction.op == IR_MOVE or instruction.op == IR_DROP {
+            if instruction.left < 0 or instruction.right >= 0 {
+                return IrVerification { ok: false, error: "IR ownership operation has invalid operands", checked_values: 0 }
+            }
+            let source_instruction = definitions[instruction.left] - 1
+            if source_instruction < 0 or not ir_type_is_owned(instructions[source_instruction].type_kind) or
+                instructions[source_instruction].type_kind != instruction.type_kind {
+                return IrVerification { ok: false, error: "IR ownership operation has invalid type", checked_values: 0 }
+            }
+        }
+        if instruction.op == IR_CLONE {
+            if instruction.left < 0 or instruction.right >= 0 or instruction.aux >= 0 {
+                return IrVerification { ok: false, error: "IR clone has invalid operands", checked_values: 0 }
+            }
+            let source_instruction = definitions[instruction.left] - 1
+            if source_instruction < 0 or not ir_type_is_owned(instructions[source_instruction].type_kind) or
+                instructions[source_instruction].type_kind != instruction.type_kind {
+                return IrVerification { ok: false, error: "IR clone has invalid type", checked_values: 0 }
+            }
+        }
+        if instruction.op == IR_CALL {
+            if instruction.aux < 0 or instruction.aux >= len(call_sites) or
+                instruction.left >= 0 or instruction.right >= 0 {
+                return IrVerification { ok: false, error: "IR call has invalid callee or argument layout", checked_values: 0 }
+            }
+            let call_site = call_sites[instruction.aux]
+            if call_site.argument_start < 0 or call_site.argument_count < 0 or
+                call_site.argument_start + call_site.argument_count > len(call_arguments) {
+                return IrVerification { ok: false, error: "IR call has invalid argument range", checked_values: 0 }
+            }
+            let mut callee_index = -1
+            let mut candidate_index = 0
+            while candidate_index < len(functions) {
+                if functions[candidate_index].item == call_site.callee_item { callee_index = candidate_index }
+                candidate_index = candidate_index + 1
+            }
+            if callee_index < 0 {
+                return IrVerification { ok: false, error: "IR call targets a function without an IR body", checked_values: 0 }
+            }
+            let callee = functions[callee_index]
+            if call_site.argument_count != callee.parameter_count {
+                return IrVerification { ok: false, error: "IR call argument count does not match callee", checked_values: 0 }
+            }
+            let callee_entry = blocks[callee.entry_block]
+            let mut argument_offset = 0
+            while argument_offset < call_site.argument_count {
+                let argument_index = call_site.argument_start + argument_offset
+                if call_argument_owners[argument_index] >= 0 {
+                    return IrVerification { ok: false, error: "IR call argument belongs to multiple call sites", checked_values: 0 }
+                }
+                call_argument_owners[argument_index] = instruction.aux
+                let argument = call_arguments[argument_index]
+                if argument < 0 or argument >= value_count or definitions[argument] == 0 {
+                    return IrVerification { ok: false, error: "IR call uses undefined argument value", checked_values: 0 }
+                }
+                if value_owners[argument] != owner_function {
+                    return IrVerification { ok: false, error: "IR call argument crosses function boundary", checked_values: 0 }
+                }
+                let definition_block = instruction_owners[definitions[argument] - 1]
+                if definition_block != owner_block and definition_block != entry_block {
+                    return IrVerification { ok: false, error: "IR call argument does not dominate call", checked_values: 0 }
+                }
+                let parameter_instruction = callee_entry.instruction_start + argument_offset
+                if parameter_instruction >= callee_entry.instruction_start + callee_entry.instruction_count or
+                    instructions[parameter_instruction].op != IR_PARAM or
+                    instructions[parameter_instruction].type_kind != instructions[definitions[argument] - 1].type_kind {
+                    return IrVerification { ok: false, error: "IR call argument type does not match callee parameter", checked_values: 0 }
+                }
+                argument_offset = argument_offset + 1
+            }
+            call_site_references[instruction.aux] = call_site_references[instruction.aux] + 1
+        }
+        if instruction.op == IR_CONST {
+            if instruction.aux < 0 or instruction.aux >= len(constants) {
+                return IrVerification { ok: false, error: "IR constant has invalid pool index", checked_values: 0 }
+            }
+            let constant = constants[instruction.aux]
+            if constant.type_kind != instruction.type_kind or constant.start < 0 or constant.end < constant.start {
+                return IrVerification { ok: false, error: "IR constant payload does not match instruction", checked_values: 0 }
+            }
+            constant_references[instruction.aux] = constant_references[instruction.aux] + 1
+        }
+        i = i + 1
+    }
+    let mut checked = 0
+    i = 0
+    while i < len(definitions) {
+        if value_owners[i] < 0 {
+            return IrVerification { ok: false, error: "IR value has no owning function", checked_values: checked }
+        }
+        if definitions[i] == 0 {
+            return IrVerification { ok: false, error: "IR value has no definition", checked_values: checked }
+        }
+        checked = checked + 1
+        i = i + 1
+    }
+    i = 0
+    while i < len(constant_references) {
+        if constant_references[i] == 0 {
+            return IrVerification { ok: false, error: "IR constant has no instruction", checked_values: checked }
+        }
+        i = i + 1
+    }
+    i = 0
+    while i < len(call_site_references) {
+        if call_site_references[i] != 1 {
+            return IrVerification { ok: false, error: "IR call site is not referenced exactly once", checked_values: checked }
+        }
+        i = i + 1
+    }
+    i = 0
+    while i < len(call_argument_owners) {
+        if call_argument_owners[i] < 0 {
+            return IrVerification { ok: false, error: "IR call argument has no owning call site", checked_values: checked }
+        }
+        i = i + 1
+    }
+    let ownership = verify_owned_ir_paths(
+        functions, blocks, instructions, successors, call_sites, call_arguments, definitions
+    )
+    if not ownership.ok { return ownership }
+    return IrVerification { ok: true, error: "", checked_values: checked }
+}
+
+fn typed_ir_smoke_test() -> bool {
+    let source = "fn add(a: int, b: int) -> int {\nlet offset = 1\nlet ratio = 1.5\nlet enabled = true\nlet label = \"mako\"\nlet sum = a + b + offset\nreturn sum\n}"
+    let lexed = lex_source(source)
+    if not lexed.ok { return false }
+    let parsed = parse_frontend(source, lexed.tokens)
+    if not parsed.ok { return false }
+    let ir = lower_typed_ir(
+        source, lexed.tokens, parsed.items, parsed.signatures, parsed.statements,
+        parsed.statement_edges, parsed.expressions, parsed.expression_types, parsed.locals,
+        parsed.local_types, parsed.expression_locals, parsed.symbols, parsed.expression_symbols
+    )
+    if not ir.ok or len(ir.functions) != 1 or len(ir.blocks) != 1 or len(ir.instructions) != 10 or len(ir.constants) != 4 or ir.value_count != 8 { return false }
+    let verified = verify_typed_ir(
+        ir.functions, ir.blocks, ir.instructions, ir.constants, ir.successors,
+        ir.call_sites, ir.call_arguments, ir.value_count
+    )
+    return verified.ok and verified.checked_values == 8 and
+        ir.constants[0].type_kind == SEM_INT and ir.constants[0].int_value == 1 and
+        ir.constants[1].type_kind == SEM_FLOAT and ir.constants[1].float_value == 1.5 and
+        ir.constants[2].type_kind == SEM_BOOL and ir.constants[2].int_value == 1 and
+        ir.constants[3].type_kind == SEM_STRING and ir.constants[3].end - ir.constants[3].start == 4 and
+        ir.instructions[0].op == IR_PARAM and ir.instructions[1].op == IR_PARAM and
+        ir.instructions[2].op == IR_CONST and ir.instructions[2].aux == 0 and
+        ir.instructions[6].op == IR_BINARY and ir.instructions[6].type_kind == SEM_INT and
+        ir.instructions[6].left == 0 and ir.instructions[6].right == 1 and
+        ir.instructions[7].op == IR_BINARY and ir.instructions[7].left == 6 and ir.instructions[7].right == 2 and
+        ir.instructions[8].op == IR_DROP and ir.instructions[8].left == 5 and
+        ir.instructions[9].op == IR_RETURN and ir.instructions[9].left == 7
+}
+
+fn typed_ir_verifier_smoke_test() -> bool {
+    let mut functions: []IrFunction = []
+    let mut blocks: []IrBlock = []
+    let mut instructions: []IrInstruction = []
+    functions = append(functions, IrFunction {
+        item: 0, entry_block: 0, block_count: 1,
+        parameter_count: 0, value_start: 0, value_count: 1,
+    })
+    blocks = append(blocks, IrBlock {
+        function: 0, instruction_start: 0, instruction_count: 2,
+        terminator: 1, successor_start: 0, successor_count: 0,
+    })
+    instructions = append(instructions, IrInstruction {
+        op: IR_BINARY, result: 0, type_kind: SEM_INT,
+        left: 1, right: -1, aux: TK_PLUS, token: 0,
+    })
+    instructions = append(instructions, IrInstruction {
+        op: IR_RETURN, result: -1, type_kind: SEM_INT,
+        left: 0, right: -1, aux: -1, token: 0,
+    })
+    let verified = verify_typed_ir(
+        functions, blocks, instructions, make([]IrConstant, 0, 0), make([]int, 0, 0),
+        make([]IrCallSite, 0, 0), make([]int, 0, 0), 1
+    )
+    return not verified.ok and verified.error == "IR instruction uses undefined left value"
+}
+
+fn typed_ir_block_parameter_verifier_smoke_test() -> bool {
+    let mut functions: []IrFunction = []
+    let mut blocks: []IrBlock = []
+    let mut instructions: []IrInstruction = []
+    let mut successors: []int = []
+    functions = append(functions, IrFunction {
+        item: 0, entry_block: 0, block_count: 4,
+        parameter_count: 2, value_start: 0, value_count: 3,
+    })
+    instructions = append(instructions, IrInstruction {
+        op: IR_PARAM, result: 0, type_kind: SEM_INT,
+        left: -1, right: -1, aux: 0, token: 0,
+    })
+    instructions = append(instructions, IrInstruction {
+        op: IR_PARAM, result: 1, type_kind: SEM_BOOL,
+        left: -1, right: -1, aux: 1, token: 0,
+    })
+    instructions = append(instructions, IrInstruction {
+        op: IR_BRANCH, result: -1, type_kind: SEM_BOOL,
+        left: 1, right: -1, aux: -1, token: 0,
+    })
+    successors = append(successors, 1)
+    successors = append(successors, 2)
+    blocks = append(blocks, IrBlock {
+        function: 0, instruction_start: 0, instruction_count: 3,
+        terminator: 2, successor_start: 0, successor_count: 2,
+    })
+    instructions = append(instructions, IrInstruction {
+        op: IR_JUMP, result: -1, type_kind: SEM_INT,
+        left: -1, right: -1, aux: -1, token: 0,
+    })
+    successors = append(successors, 3)
+    blocks = append(blocks, IrBlock {
+        function: 0, instruction_start: 3, instruction_count: 1,
+        terminator: 3, successor_start: 2, successor_count: 1,
+    })
+    instructions = append(instructions, IrInstruction {
+        op: IR_JUMP, result: -1, type_kind: SEM_INT,
+        left: 0, right: -1, aux: -1, token: 0,
+    })
+    successors = append(successors, 3)
+    blocks = append(blocks, IrBlock {
+        function: 0, instruction_start: 4, instruction_count: 1,
+        terminator: 4, successor_start: 3, successor_count: 1,
+    })
+    instructions = append(instructions, IrInstruction {
+        op: IR_BLOCK_PARAM, result: 2, type_kind: SEM_INT,
+        left: -1, right: -1, aux: 0, token: 0,
+    })
+    instructions = append(instructions, IrInstruction {
+        op: IR_RETURN, result: -1, type_kind: SEM_INT,
+        left: 2, right: -1, aux: -1, token: 0,
+    })
+    blocks = append(blocks, IrBlock {
+        function: 0, instruction_start: 5, instruction_count: 2,
+        terminator: 6, successor_start: 4, successor_count: 0,
+    })
+    let verified = verify_typed_ir(
+        functions, blocks, instructions, make([]IrConstant, 0, 0), successors,
+        make([]IrCallSite, 0, 0), make([]int, 0, 0), 3
+    )
+    return not verified.ok and verified.error == "IR edge does not provide matching block argument"
+}
+
+fn typed_ir_arm_placement_smoke_test() -> bool {
+    let source = "fn choose(value: int) -> int {\nif value > 0 {\nreturn value\n} else {\nreturn 0\n}\n}"
+    let lexed = lex_source(source)
+    if not lexed.ok { return false }
+    let parsed = parse_frontend(source, lexed.tokens)
+    if not parsed.ok { return false }
+    let ir = lower_typed_ir(
+        source, lexed.tokens, parsed.items, parsed.signatures, parsed.statements,
+        parsed.statement_edges, parsed.expressions, parsed.expression_types, parsed.locals,
+        parsed.local_types, parsed.expression_locals, parsed.symbols, parsed.expression_symbols
+    )
+    if not ir.ok or len(ir.functions) != 1 or len(ir.blocks) != 4 or
+        len(ir.instructions) != 9 or ir.value_count != 5 { return false }
+    let verified = verify_typed_ir(
+        ir.functions, ir.blocks, ir.instructions, ir.constants, ir.successors,
+        ir.call_sites, ir.call_arguments, ir.value_count
+    )
+    return verified.ok and verified.checked_values == 5 and
+        ir.blocks[0].instruction_start == 0 and ir.blocks[0].instruction_count == 4 and
+        ir.instructions[3].op == IR_BRANCH and
+        ir.blocks[1].instruction_start == 4 and ir.blocks[1].instruction_count == 1 and
+        ir.instructions[4].op == IR_JUMP and ir.instructions[4].left == 0 and
+        ir.blocks[2].instruction_start == 5 and ir.blocks[2].instruction_count == 2 and
+        ir.instructions[5].op == IR_CONST and ir.instructions[6].op == IR_JUMP and
+        ir.instructions[6].left == ir.instructions[5].result and
+        ir.blocks[3].instruction_start == 7 and ir.blocks[3].instruction_count == 2 and
+        ir.instructions[7].op == IR_BLOCK_PARAM and ir.instructions[8].op == IR_RETURN and
+        ir.instructions[8].left == ir.instructions[7].result
+}
+
+fn typed_ir_dominance_verifier_smoke_test() -> bool {
+    let mut functions: []IrFunction = []
+    let mut blocks: []IrBlock = []
+    let mut instructions: []IrInstruction = []
+    let mut successors: []int = []
+    functions = append(functions, IrFunction {
+        item: 0, entry_block: 0, block_count: 3,
+        parameter_count: 1, value_start: 0, value_count: 2,
+    })
+    instructions = append(instructions, IrInstruction {
+        op: IR_PARAM, result: 0, type_kind: SEM_BOOL,
+        left: -1, right: -1, aux: 0, token: 0,
+    })
+    instructions = append(instructions, IrInstruction {
+        op: IR_BRANCH, result: -1, type_kind: SEM_BOOL,
+        left: 0, right: -1, aux: -1, token: 0,
+    })
+    successors = append(successors, 1)
+    successors = append(successors, 2)
+    blocks = append(blocks, IrBlock {
+        function: 0, instruction_start: 0, instruction_count: 2,
+        terminator: 1, successor_start: 0, successor_count: 2,
+    })
+    instructions = append(instructions, IrInstruction {
+        op: IR_UNARY, result: 1, type_kind: SEM_BOOL,
+        left: 0, right: -1, aux: TK_NOT, token: 0,
+    })
+    instructions = append(instructions, IrInstruction {
+        op: IR_JUMP, result: -1, type_kind: SEM_UNKNOWN,
+        left: -1, right: -1, aux: -1, token: 0,
+    })
+    successors = append(successors, 2)
+    blocks = append(blocks, IrBlock {
+        function: 0, instruction_start: 2, instruction_count: 2,
+        terminator: 3, successor_start: 2, successor_count: 1,
+    })
+    instructions = append(instructions, IrInstruction {
+        op: IR_RETURN, result: -1, type_kind: SEM_BOOL,
+        left: 1, right: -1, aux: -1, token: 0,
+    })
+    blocks = append(blocks, IrBlock {
+        function: 0, instruction_start: 4, instruction_count: 1,
+        terminator: 4, successor_start: 3, successor_count: 0,
+    })
+    let verified = verify_typed_ir(
+        functions, blocks, instructions, make([]IrConstant, 0, 0), successors,
+        make([]IrCallSite, 0, 0), make([]int, 0, 0), 2
+    )
+    return not verified.ok and verified.error == "IR left value does not dominate its use"
+}
+
+fn typed_ir_statement_merge_ownership_smoke_test() -> bool {
+    let source = "fn make_label() -> string {\nreturn \"mako\"\n}\nfn choose_side_effect(flag: bool) -> int {\nif flag {\nlet label = make_label()\n} else {\nlet label = make_label()\n}\nreturn 1\n}"
+    let lexed = lex_source(source)
+    if not lexed.ok { return false }
+    let parsed = parse_frontend(source, lexed.tokens)
+    if not parsed.ok { return false }
+    let ir = lower_typed_ir(
+        source, lexed.tokens, parsed.items, parsed.signatures, parsed.statements,
+        parsed.statement_edges, parsed.expressions, parsed.expression_types, parsed.locals,
+        parsed.local_types, parsed.expression_locals, parsed.symbols, parsed.expression_symbols
+    )
+    if not ir.ok or len(ir.functions) != 2 or len(ir.blocks) != 5 or
+        len(ir.instructions) != 13 or ir.value_count != 6 or
+        len(ir.call_sites) != 2 or len(ir.call_arguments) != 0 or
+        ir.instructions[6].op != IR_CALL or ir.instructions[7].op != IR_DROP or
+        ir.instructions[7].left != ir.instructions[6].result or
+        ir.instructions[8].op != IR_JUMP or ir.instructions[9].op != IR_CALL or
+        ir.instructions[10].op != IR_DROP or
+        ir.instructions[10].left != ir.instructions[9].result or
+        ir.instructions[11].op != IR_JUMP or ir.instructions[12].op != IR_RETURN {
+        return false
+    }
+    let verified = verify_typed_ir(
+        ir.functions, ir.blocks, ir.instructions, ir.constants, ir.successors,
+        ir.call_sites, ir.call_arguments, ir.value_count
+    )
+    return verified.ok and verified.checked_values == 6
+}
+
+fn typed_ir_ownership_smoke_test() -> bool {
+    let discard_source = "fn discard_values() -> int {\nlet values = [1, 2, 3]\nreturn 7\n}"
+    let discard_lexed = lex_source(discard_source)
+    if not discard_lexed.ok { return false }
+    let discard = parse_frontend(discard_source, discard_lexed.tokens)
+    if not discard.ok { return false }
+    let drop_ir = lower_typed_ir(
+        discard_source, discard_lexed.tokens, discard.items, discard.signatures, discard.statements,
+        discard.statement_edges, discard.expressions, discard.expression_types, discard.locals,
+        discard.local_types, discard.expression_locals, discard.symbols, discard.expression_symbols
+    )
+    if not drop_ir.ok or len(drop_ir.instructions) != 9 or
+        drop_ir.instructions[7].op != IR_DROP or drop_ir.instructions[8].op != IR_RETURN { return false }
+    let drop_verified = verify_typed_ir(
+        drop_ir.functions, drop_ir.blocks, drop_ir.instructions, drop_ir.constants,
+        drop_ir.successors, drop_ir.call_sites, drop_ir.call_arguments, drop_ir.value_count
+    )
+    if not drop_verified.ok { return false }
+
+    let move_source = "fn build_values() -> []int {\nlet values = [1, 2, 3]\nreturn values\n}"
+    let move_lexed = lex_source(move_source)
+    if not move_lexed.ok { return false }
+    let moved = parse_frontend(move_source, move_lexed.tokens)
+    if not moved.ok { return false }
+    let move_ir = lower_typed_ir(
+        move_source, move_lexed.tokens, moved.items, moved.signatures, moved.statements,
+        moved.statement_edges, moved.expressions, moved.expression_types, moved.locals,
+        moved.local_types, moved.expression_locals, moved.symbols, moved.expression_symbols
+    )
+    if not move_ir.ok or len(move_ir.instructions) != 8 or move_ir.value_count != 7 or
+        move_ir.instructions[6].op != IR_MOVE or move_ir.instructions[7].op != IR_RETURN or
+        move_ir.instructions[7].left != move_ir.instructions[6].result { return false }
+    let move_verified = verify_typed_ir(
+        move_ir.functions, move_ir.blocks, move_ir.instructions, move_ir.constants,
+        move_ir.successors, move_ir.call_sites, move_ir.call_arguments, move_ir.value_count
+    )
+    if not move_verified.ok or move_verified.checked_values != 7 { return false }
+
+    let cfg_source = "fn choose_values(flag: bool, left: []int, right: []int) -> []int {\nif flag {\nreturn left\n} else {\nreturn right\n}\n}"
+    let cfg_lexed = lex_source(cfg_source)
+    if not cfg_lexed.ok { return false }
+    let cfg = parse_frontend(cfg_source, cfg_lexed.tokens)
+    if not cfg.ok { return false }
+    let cfg_ir = lower_typed_ir(
+        cfg_source, cfg_lexed.tokens, cfg.items, cfg.signatures, cfg.statements,
+        cfg.statement_edges, cfg.expressions, cfg.expression_types, cfg.locals,
+        cfg.local_types, cfg.expression_locals, cfg.symbols, cfg.expression_symbols
+    )
+    if not cfg_ir.ok or len(cfg_ir.blocks) != 4 or len(cfg_ir.instructions) != 10 or
+        cfg_ir.value_count != 4 or cfg_ir.instructions[4].op != IR_DROP or
+        cfg_ir.instructions[4].left != 2 or cfg_ir.instructions[5].op != IR_JUMP or
+        cfg_ir.instructions[5].left != 1 or cfg_ir.instructions[6].op != IR_DROP or
+        cfg_ir.instructions[6].left != 1 or cfg_ir.instructions[7].op != IR_JUMP or
+        cfg_ir.instructions[7].left != 2 or cfg_ir.instructions[8].op != IR_BLOCK_PARAM or
+        cfg_ir.instructions[9].op != IR_RETURN { return false }
+    let cfg_verified = verify_typed_ir(
+        cfg_ir.functions, cfg_ir.blocks, cfg_ir.instructions, cfg_ir.constants,
+        cfg_ir.successors, cfg_ir.call_sites, cfg_ir.call_arguments, cfg_ir.value_count
+    )
+    return cfg_verified.ok and cfg_verified.checked_values == 4
+}
+
+fn typed_ir_ownership_verifier_smoke_test() -> bool {
+    let mut functions: []IrFunction = []
+    let mut blocks: []IrBlock = []
+    let mut instructions: []IrInstruction = []
+    functions = append(functions, IrFunction {
+        item: 0, entry_block: 0, block_count: 1,
+        parameter_count: 1, value_start: 0, value_count: 1,
+    })
+    instructions = append(instructions, IrInstruction {
+        op: IR_PARAM, result: 0, type_kind: SEM_ARRAY_INT,
+        left: -1, right: -1, aux: 0, token: 0,
+    })
+    instructions = append(instructions, IrInstruction {
+        op: IR_DROP, result: -1, type_kind: SEM_ARRAY_INT,
+        left: 0, right: -1, aux: -1, token: 0,
+    })
+    instructions = append(instructions, IrInstruction {
+        op: IR_DROP, result: -1, type_kind: SEM_ARRAY_INT,
+        left: 0, right: -1, aux: -1, token: 0,
+    })
+    instructions = append(instructions, IrInstruction {
+        op: IR_RETURN, result: -1, type_kind: SEM_UNKNOWN,
+        left: -1, right: -1, aux: -1, token: 0,
+    })
+    blocks = append(blocks, IrBlock {
+        function: 0, instruction_start: 0, instruction_count: 4,
+        terminator: 3, successor_start: 0, successor_count: 0,
+    })
+    let double_drop = verify_typed_ir(
+        functions, blocks, instructions, make([]IrConstant, 0, 0), make([]int, 0, 0),
+        make([]IrCallSite, 0, 0), make([]int, 0, 0), 1
+    )
+    if double_drop.ok or double_drop.error != "IR owned value is dropped twice" { return false }
+
+    functions = make([]IrFunction, 0, 0)
+    blocks = make([]IrBlock, 0, 0)
+    instructions = make([]IrInstruction, 0, 0)
+    functions = append(functions, IrFunction {
+        item: 0, entry_block: 0, block_count: 1,
+        parameter_count: 1, value_start: 0, value_count: 3,
+    })
+    instructions = append(instructions, IrInstruction {
+        op: IR_PARAM, result: 0, type_kind: SEM_ARRAY_INT,
+        left: -1, right: -1, aux: 0, token: 0,
+    })
+    instructions = append(instructions, IrInstruction {
+        op: IR_MOVE, result: 1, type_kind: SEM_ARRAY_INT,
+        left: 0, right: -1, aux: -1, token: 0,
+    })
+    instructions = append(instructions, IrInstruction {
+        op: IR_MOVE, result: 2, type_kind: SEM_ARRAY_INT,
+        left: 0, right: -1, aux: -1, token: 0,
+    })
+    instructions = append(instructions, IrInstruction {
+        op: IR_RETURN, result: -1, type_kind: SEM_ARRAY_INT,
+        left: 2, right: -1, aux: -1, token: 0,
+    })
+    blocks = append(blocks, IrBlock {
+        function: 0, instruction_start: 0, instruction_count: 4,
+        terminator: 3, successor_start: 0, successor_count: 0,
+    })
+    let use_after_move = verify_typed_ir(
+        functions, blocks, instructions, make([]IrConstant, 0, 0), make([]int, 0, 0),
+        make([]IrCallSite, 0, 0), make([]int, 0, 0), 3
+    )
+    return not use_after_move.ok and use_after_move.error == "IR instruction uses consumed owned value"
+}
+
+fn typed_ir_call_smoke_test() -> bool {
+    let source = "fn identity(value: int) -> int {\nreturn value\n}\nfn use_identity() -> int {\nreturn identity(1)\n}"
+    let lexed = lex_source(source)
+    if not lexed.ok { return false }
+    let parsed = parse_frontend(source, lexed.tokens)
+    if not parsed.ok { return false }
+    let ir = lower_typed_ir(
+        source, lexed.tokens, parsed.items, parsed.signatures, parsed.statements,
+        parsed.statement_edges, parsed.expressions, parsed.expression_types, parsed.locals,
+        parsed.local_types, parsed.expression_locals, parsed.symbols, parsed.expression_symbols
+    )
+    if not ir.ok or len(ir.functions) != 2 or len(ir.blocks) != 2 or
+        len(ir.instructions) != 5 or ir.value_count != 3 { return false }
+    let verified = verify_typed_ir(
+        ir.functions, ir.blocks, ir.instructions, ir.constants, ir.successors,
+        ir.call_sites, ir.call_arguments, ir.value_count
+    )
+    if not verified.ok or verified.checked_values != 3 { return false }
+    if ir.instructions[2].op != IR_CONST or ir.instructions[3].op != IR_CALL or
+        ir.instructions[3].left >= 0 or ir.instructions[3].right >= 0 or
+        ir.instructions[3].aux != 0 or len(ir.call_sites) != 1 or len(ir.call_arguments) != 1 or
+        ir.call_sites[0].callee_item != 0 or ir.call_sites[0].argument_start != 0 or
+        ir.call_sites[0].argument_count != 1 or
+        ir.call_arguments[0] != ir.instructions[2].result { return false }
+
+    let owned_source = "fn make_label() -> string {\nreturn \"mako\"\n}\nfn use_label() -> string {\nreturn make_label()\n}"
+    let owned_lexed = lex_source(owned_source)
+    if not owned_lexed.ok { return false }
+    let owned = parse_frontend(owned_source, owned_lexed.tokens)
+    if not owned.ok { return false }
+    let owned_ir = lower_typed_ir(
+        owned_source, owned_lexed.tokens, owned.items, owned.signatures, owned.statements,
+        owned.statement_edges, owned.expressions, owned.expression_types, owned.locals,
+        owned.local_types, owned.expression_locals, owned.symbols, owned.expression_symbols
+    )
+    if not owned_ir.ok or len(owned_ir.instructions) != 6 or owned_ir.value_count != 4 or
+        owned_ir.instructions[3].op != IR_CALL or owned_ir.instructions[3].left >= 0 or
+        owned_ir.instructions[3].aux != 0 or len(owned_ir.call_sites) != 1 or
+        owned_ir.call_sites[0].callee_item != 0 or owned_ir.call_sites[0].argument_count != 0 or
+        len(owned_ir.call_arguments) != 0 or owned_ir.instructions[4].op != IR_MOVE or
+        owned_ir.instructions[4].left != owned_ir.instructions[3].result or
+        owned_ir.instructions[5].op != IR_RETURN or
+        owned_ir.instructions[5].left != owned_ir.instructions[4].result { return false }
+    let owned_verified = verify_typed_ir(
+        owned_ir.functions, owned_ir.blocks, owned_ir.instructions, owned_ir.constants,
+        owned_ir.successors, owned_ir.call_sites, owned_ir.call_arguments, owned_ir.value_count
+    )
+    if not owned_verified.ok or owned_verified.checked_values != 4 { return false }
+
+    let multi_source = "fn join_values(prefix: string, suffix: string) -> string {\nreturn prefix + suffix\n}\nfn use_join() -> string {\nreturn join_values(\"mako\", \"lang\")\n}"
+    let multi_lexed = lex_source(multi_source)
+    if not multi_lexed.ok { return false }
+    let multi = parse_frontend(multi_source, multi_lexed.tokens)
+    if not multi.ok { return false }
+    let multi_ir = lower_typed_ir(
+        multi_source, multi_lexed.tokens, multi.items, multi.signatures, multi.statements,
+        multi.statement_edges, multi.expressions, multi.expression_types, multi.locals,
+        multi.local_types, multi.expression_locals, multi.symbols, multi.expression_symbols
+    )
+    if not multi_ir.ok or len(multi_ir.instructions) != 12 or multi_ir.value_count != 8 or
+        len(multi_ir.call_sites) != 1 or len(multi_ir.call_arguments) != 2 or
+        multi_ir.call_sites[0].callee_item != 0 or multi_ir.call_sites[0].argument_start != 0 or
+        multi_ir.call_sites[0].argument_count != 2 or multi_ir.call_arguments[0] != 4 or
+        multi_ir.call_arguments[1] != 5 or multi_ir.instructions[9].op != IR_CALL or
+        multi_ir.instructions[10].op != IR_MOVE or multi_ir.instructions[11].op != IR_RETURN { return false }
+    let multi_verified = verify_typed_ir(
+        multi_ir.functions, multi_ir.blocks, multi_ir.instructions, multi_ir.constants,
+        multi_ir.successors, multi_ir.call_sites, multi_ir.call_arguments, multi_ir.value_count
+    )
+    if not multi_verified.ok or multi_verified.checked_values != 8 { return false }
+
+    let clone_source = "fn keep_label(label: string) -> string {\nreturn label\n}\nfn reuse_label() -> string {\nlet label = \"mako\"\nlet copy = keep_label(label)\nreturn label\n}"
+    let clone_lexed = lex_source(clone_source)
+    if not clone_lexed.ok { return false }
+    let clone = parse_frontend(clone_source, clone_lexed.tokens)
+    if not clone.ok { return false }
+    let clone_ir = lower_typed_ir(
+        clone_source, clone_lexed.tokens, clone.items, clone.signatures, clone.statements,
+        clone.statement_edges, clone.expressions, clone.expression_types, clone.locals,
+        clone.local_types, clone.expression_locals, clone.symbols, clone.expression_symbols
+    )
+    if not clone_ir.ok or len(clone_ir.instructions) != 9 or clone_ir.value_count != 6 or
+        len(clone_ir.call_sites) != 1 or len(clone_ir.call_arguments) != 1 or
+        clone_ir.instructions[3].op != IR_CONST or clone_ir.instructions[4].op != IR_CLONE or
+        clone_ir.instructions[4].left != clone_ir.instructions[3].result or
+        clone_ir.instructions[5].op != IR_CALL or clone_ir.instructions[5].aux != 0 or
+        clone_ir.call_arguments[0] != clone_ir.instructions[4].result or
+        clone_ir.instructions[6].op != IR_MOVE or
+        clone_ir.instructions[6].left != clone_ir.instructions[3].result or
+        clone_ir.instructions[7].op != IR_DROP or
+        clone_ir.instructions[7].left != clone_ir.instructions[5].result or
+        clone_ir.instructions[8].op != IR_RETURN or
+        clone_ir.instructions[8].left != clone_ir.instructions[6].result { return false }
+    let clone_verified = verify_typed_ir(
+        clone_ir.functions, clone_ir.blocks, clone_ir.instructions, clone_ir.constants,
+        clone_ir.successors, clone_ir.call_sites, clone_ir.call_arguments, clone_ir.value_count
+    )
+    if not clone_verified.ok or clone_verified.checked_values != 6 { return false }
+
+    let cfg_source = "fn choose_value(flag: bool) -> int {\nif flag {\nreturn identity(1)\n}\nreturn identity(2)\n}\nfn identity(value: int) -> int {\nreturn value\n}"
+    let cfg_lexed = lex_source(cfg_source)
+    if not cfg_lexed.ok { return false }
+    let cfg = parse_frontend(cfg_source, cfg_lexed.tokens)
+    if not cfg.ok { return false }
+    let cfg_ir = lower_typed_ir(
+        cfg_source, cfg_lexed.tokens, cfg.items, cfg.signatures, cfg.statements,
+        cfg.statement_edges, cfg.expressions, cfg.expression_types, cfg.locals,
+        cfg.local_types, cfg.expression_locals, cfg.symbols, cfg.expression_symbols
+    )
+    if not cfg_ir.ok or len(cfg_ir.functions) != 2 or len(cfg_ir.blocks) != 4 or
+        len(cfg_ir.instructions) != 10 or cfg_ir.value_count != 6 or
+        len(cfg_ir.call_sites) != 2 or len(cfg_ir.call_arguments) != 2 or
+        cfg_ir.call_sites[0].callee_item != cfg.signatures[1].item or
+        cfg_ir.call_sites[1].callee_item != cfg.signatures[1].item or
+        cfg_ir.call_sites[0].argument_count != 1 or
+        cfg_ir.call_sites[1].argument_count != 1 { return false }
+    let cfg_verified = verify_typed_ir(
+        cfg_ir.functions, cfg_ir.blocks, cfg_ir.instructions, cfg_ir.constants,
+        cfg_ir.successors, cfg_ir.call_sites, cfg_ir.call_arguments, cfg_ir.value_count
+    )
+    if not cfg_verified.ok or cfg_verified.checked_values != 6 { return false }
+
+    let owned_cfg_source = "fn make_label() -> string {\nreturn \"mako\"\n}\nfn choose_label(flag: bool) -> string {\nif flag {\nreturn make_label()\n}\nreturn make_label()\n}"
+    let owned_cfg_lexed = lex_source(owned_cfg_source)
+    if not owned_cfg_lexed.ok { return false }
+    let owned_cfg = parse_frontend(owned_cfg_source, owned_cfg_lexed.tokens)
+    if not owned_cfg.ok { return false }
+    let owned_cfg_ir = lower_typed_ir(
+        owned_cfg_source, owned_cfg_lexed.tokens, owned_cfg.items, owned_cfg.signatures,
+        owned_cfg.statements, owned_cfg.statement_edges, owned_cfg.expressions,
+        owned_cfg.expression_types, owned_cfg.locals, owned_cfg.local_types,
+        owned_cfg.expression_locals, owned_cfg.symbols, owned_cfg.expression_symbols
+    )
+    if not owned_cfg_ir.ok or owned_cfg_ir.skipped_functions != 0 or
+        len(owned_cfg_ir.functions) != 2 or len(owned_cfg_ir.blocks) != 4 or
+        len(owned_cfg_ir.instructions) != 9 or owned_cfg_ir.value_count != 5 or
+        len(owned_cfg_ir.call_sites) != 2 or len(owned_cfg_ir.call_arguments) != 0 or
+        owned_cfg_ir.instructions[5].op != IR_CALL or
+        owned_cfg_ir.instructions[6].op != IR_RETURN or
+        owned_cfg_ir.instructions[6].left != owned_cfg_ir.instructions[5].result or
+        owned_cfg_ir.instructions[7].op != IR_CALL or
+        owned_cfg_ir.instructions[8].op != IR_RETURN or
+        owned_cfg_ir.instructions[8].left != owned_cfg_ir.instructions[7].result { return false }
+    let owned_cfg_verified = verify_typed_ir(
+        owned_cfg_ir.functions, owned_cfg_ir.blocks, owned_cfg_ir.instructions,
+        owned_cfg_ir.constants, owned_cfg_ir.successors, owned_cfg_ir.call_sites,
+        owned_cfg_ir.call_arguments, owned_cfg_ir.value_count
+    )
+    if not owned_cfg_verified.ok or owned_cfg_verified.checked_values != 5 { return false }
+
+    let owned_argument_source = "fn inspect_label(label: string) -> int {\nreturn 1\n}\nfn choose_inspection(flag: bool, label: string) -> int {\nif flag {\nreturn inspect_label(label)\n}\nreturn 0\n}"
+    let owned_argument_lexed = lex_source(owned_argument_source)
+    if not owned_argument_lexed.ok { return false }
+    let owned_argument = parse_frontend(owned_argument_source, owned_argument_lexed.tokens)
+    if not owned_argument.ok { return false }
+    let owned_argument_ir = lower_typed_ir(
+        owned_argument_source, owned_argument_lexed.tokens, owned_argument.items,
+        owned_argument.signatures, owned_argument.statements, owned_argument.statement_edges,
+        owned_argument.expressions, owned_argument.expression_types, owned_argument.locals,
+        owned_argument.local_types, owned_argument.expression_locals, owned_argument.symbols,
+        owned_argument.expression_symbols
+    )
+    if not owned_argument_ir.ok or owned_argument_ir.skipped_functions != 0 or
+        len(owned_argument_ir.functions) != 2 or len(owned_argument_ir.blocks) != 4 or
+        len(owned_argument_ir.instructions) != 14 or owned_argument_ir.value_count != 7 or
+        len(owned_argument_ir.call_sites) != 1 or len(owned_argument_ir.call_arguments) != 1 or
+        owned_argument_ir.instructions[7].op != IR_CLONE or
+        owned_argument_ir.instructions[8].op != IR_CALL or
+        owned_argument_ir.call_arguments[0] != owned_argument_ir.instructions[7].result or
+        owned_argument_ir.instructions[9].op != IR_DROP or
+        owned_argument_ir.instructions[9].left != owned_argument_ir.instructions[5].result or
+        owned_argument_ir.instructions[12].op != IR_DROP or
+        owned_argument_ir.instructions[12].left != owned_argument_ir.instructions[5].result {
+        return false
+    }
+    let owned_argument_verified = verify_typed_ir(
+        owned_argument_ir.functions, owned_argument_ir.blocks, owned_argument_ir.instructions,
+        owned_argument_ir.constants, owned_argument_ir.successors, owned_argument_ir.call_sites,
+        owned_argument_ir.call_arguments, owned_argument_ir.value_count
+    )
+    if not owned_argument_verified.ok or owned_argument_verified.checked_values != 7 { return false }
+
+    let held_argument_source = "fn inspect_held(label: string) -> int {\nreturn 1\n}\nfn choose_held(flag: bool) -> int {\nhold let label = \"mako\"\nif flag {\nreturn inspect_held(label)\n}\nreturn 0\n}"
+    let held_argument_lexed = lex_source(held_argument_source)
+    if not held_argument_lexed.ok { return false }
+    let held_argument = parse_frontend(held_argument_source, held_argument_lexed.tokens)
+    if not held_argument.ok { return false }
+    let held_argument_ir = lower_typed_ir(
+        held_argument_source, held_argument_lexed.tokens, held_argument.items,
+        held_argument.signatures, held_argument.statements, held_argument.statement_edges,
+        held_argument.expressions, held_argument.expression_types, held_argument.locals,
+        held_argument.local_types, held_argument.expression_locals, held_argument.symbols,
+        held_argument.expression_symbols
+    )
+    if not held_argument_ir.ok or held_argument_ir.skipped_functions != 0 or
+        len(held_argument_ir.functions) != 2 or len(held_argument_ir.blocks) != 4 or
+        len(held_argument_ir.instructions) != 12 or held_argument_ir.value_count != 6 or
+        len(held_argument_ir.call_sites) != 1 or len(held_argument_ir.call_arguments) != 1 or
+        held_argument_ir.instructions[7].op != IR_CALL or
+        held_argument_ir.call_arguments[0] != held_argument_ir.instructions[5].result or
+        held_argument_ir.instructions[8].op != IR_RETURN or
+        held_argument_ir.instructions[9].op != IR_CONST or
+        held_argument_ir.instructions[10].op != IR_DROP or
+        held_argument_ir.instructions[10].left != held_argument_ir.instructions[5].result or
+        held_argument_ir.instructions[11].op != IR_RETURN { return false }
+    let held_argument_verified = verify_typed_ir(
+        held_argument_ir.functions, held_argument_ir.blocks, held_argument_ir.instructions,
+        held_argument_ir.constants, held_argument_ir.successors, held_argument_ir.call_sites,
+        held_argument_ir.call_arguments, held_argument_ir.value_count
+    )
+    return held_argument_verified.ok and held_argument_verified.checked_values == 6
+}
+
+fn typed_ir_call_verifier_smoke_test() -> bool {
+    let mut functions: []IrFunction = []
+    let mut blocks: []IrBlock = []
+    let mut instructions: []IrInstruction = []
+    functions = append(functions, IrFunction {
+        item: 0, entry_block: 0, block_count: 1,
+        parameter_count: 1, value_start: 0, value_count: 2,
+    })
+    instructions = append(instructions, IrInstruction {
+        op: IR_PARAM, result: 0, type_kind: SEM_STRING,
+        left: -1, right: -1, aux: 0, token: 0,
+    })
+    instructions = append(instructions, IrInstruction {
+        op: IR_CALL, result: 1, type_kind: SEM_STRING,
+        left: -1, right: -1, aux: 0, token: 0,
+    })
+    instructions = append(instructions, IrInstruction {
+        op: IR_RETURN, result: -1, type_kind: SEM_STRING,
+        left: 1, right: -1, aux: -1, token: 0,
+    })
+    blocks = append(blocks, IrBlock {
+        function: 0, instruction_start: 0, instruction_count: 3,
+        terminator: 2, successor_start: 0, successor_count: 0,
+    })
+    let verified = verify_typed_ir(
+        functions, blocks, instructions, make([]IrConstant, 0, 0), make([]int, 0, 0),
+        make([]IrCallSite, 0, 0), make([]int, 0, 0), 2
+    )
+    return not verified.ok and verified.error == "IR call has invalid callee or argument layout"
+}

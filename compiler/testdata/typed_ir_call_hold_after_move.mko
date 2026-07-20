@@ -1,0 +1,9 @@
+fn keep_label(label: string) -> string {
+    return label
+}
+
+fn reuse_moved_label() -> string {
+    hold let label = "mako"
+    let copy = keep_label(label)
+    return label
+}
