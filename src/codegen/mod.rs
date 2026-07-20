@@ -2340,6 +2340,15 @@ impl Codegen {
     /// Not Ident (alias) or Slice (view into another local).
     /// POD array lits are stack views (`cap==0`) — free is a no-op (still register
     /// so string/struct array lits that heap-allocate are freed correctly).
+    /// Compile-time length for string and array literals.
+    fn const_len(expr: &Expr) -> Option<i64> {
+        match expr {
+            Expr::String(s) => Some(s.len() as i64),
+            Expr::Array(elems) => Some(elems.len() as i64),
+            _ => None,
+        }
+    }
+
     fn expr_is_fresh_own(init: &Expr) -> bool {
         match init {
             Expr::Array(_) | Expr::Make { .. } | Expr::Convert { .. } => true,
@@ -12766,6 +12775,30 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                     };
                     if let Some((ty, v)) = folded {
                         return (ty.into(), v.to_string());
+                    }
+                }
+                // Compile-time boolean folding: true && false → false, etc.
+                if let (Expr::Bool(a), Expr::Bool(b)) = (left.as_ref(), right.as_ref()) {
+                    let result = match op {
+                        BinOp::And => Some(*a && *b),
+                        BinOp::Or => Some(*a || *b),
+                        BinOp::Eq => Some(a == b),
+                        BinOp::Ne => Some(a != b),
+                        _ => None,
+                    };
+                    if let Some(v) = result {
+                        return ("bool".into(), if v { "true" } else { "false" }.into());
+                    }
+                }
+                // Compile-time string equality: "hello" == "hello" → true.
+                if let (Expr::String(a), Expr::String(b)) = (left.as_ref(), right.as_ref()) {
+                    let result = match op {
+                        BinOp::Eq => Some(a == b),
+                        BinOp::Ne => Some(a != b),
+                        _ => None,
+                    };
+                    if let Some(v) = result {
+                        return ("bool".into(), if v { "true" } else { "false" }.into());
                     }
                 }
                 if matches!(op, BinOp::And | BinOp::Or) {
@@ -28953,6 +28986,10 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             return ("int64_t".into(), "mako_chan_select_value()".into());
                         }
                         "len" => {
+                            // Compile-time len for literals.
+                            if let Some(n) = Self::const_len(&args[0]) {
+                                return ("int64_t".into(), n.to_string());
+                            }
                             let (ty, v) = self.emit_expr(&args[0]);
                             if ty == "MakoString" {
                                 return ("int64_t".into(), format!("mako_str_len({v})"));
