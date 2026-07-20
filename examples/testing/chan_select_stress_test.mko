@@ -1,41 +1,386 @@
-// RT-005 seed: multi-producer fan-in under select+timeout.
-// Deterministic; full random schedule remains an optional longer soak.
+// Reproduce failures with MAKO_RT_STRESS_SEED and MAKO_RT_STRESS_ROUNDS.
 
-fn producer(ch: chan[int], start: int, n: int) -> int {
-    let mut i = 0
-    while i < n {
-        let _ = ch.send(start + i)
-        i = i + 1
-    }
-    return n
+struct SelectPoint {
+    value: int
 }
 
-fn TestSelectStressFanIn() {
-    let mut ch = make(chan[int], 32)
-    crew c {
-        let a = c.kick(producer(ch, 0, 20))
-        let b = c.kick(producer(ch, 1000, 20))
-        let mut got = 0
-        let mut sum = 0
-        while got < 40 {
+fn stress_setting(name: string, fallback: int) -> int {
+    let raw = env_get_or(name, "")
+    if len(raw) == 0 {
+        return fallback
+    }
+    match parse_int(raw) {
+        Ok(value) => {
+            return value
+        }
+        Err(_) => {
+            return fallback
+        }
+    }
+    return fallback
+}
+
+fn producer(ch: chan[int], base: int, count: int, seed: int) -> int {
+    let mut state = seed
+    let mut i = 0
+    while i < count {
+        state = det_rng_next(state)
+        let delay = det_rng_range(state, 4)
+        if delay > 0 {
+            sleep_ms(delay)
+        }
+        assert(ch.send(base + i))
+        i = i + 1
+    }
+    return count
+}
+
+fn closing_producer(ch: chan[int], count: int, seed: int) -> int {
+    let mut state = seed
+    let mut i = 0
+    while i < count {
+        state = det_rng_next(state)
+        let delay = det_rng_range(state, 3)
+        if delay > 0 {
+            sleep_ms(delay)
+        }
+        assert(ch.send(i))
+        i = i + 1
+    }
+    ch.close()
+    return count
+}
+
+fn select_worker(left: chan[int], right: chan[int], out: chan[int], count: int) -> int {
+    let mut received = 0
+    while received < count {
+        select timeout 5000 {
+            left => {
+                assert(out.send(chan_select_value()))
+                received = received + 1
+            }
+            right => {
+                assert(out.send(chan_select_value()))
+                received = received + 1
+            }
+            default => {
+                assert(false)
+            }
+        }
+    }
+    return received
+}
+
+fn run_select_round(seed: int, count: int, capacity: int) {
+    runtime_stats_reset()
+    let left = make(chan[int], capacity)
+    let middle = make(chan[int], capacity)
+    let right = make(chan[int], capacity)
+    let total = count * 3
+    let mut seen = make([]int, total)
+    crew group {
+        let a = group.kick(producer(left, 0, count, seed))
+        let b = group.kick(producer(middle, count, count, det_rng_next(seed)))
+        let c = group.kick(producer(right, count * 2, count, det_rng_next(det_rng_next(seed))))
+        let mut received = 0
+        while received < total {
             select timeout 5000 {
-                ch => {
-                    let v = chan_select_value()
-                    sum = sum + v
-                    got = got + 1
+                left => {
+                    let value = chan_select_value()
+                    assert(value >= 0 && value < total)
+                    assert_eq(seen[value], 0)
+                    seen[value] = 1
+                    received = received + 1
+                }
+                middle => {
+                    let value = chan_select_value()
+                    assert(value >= 0 && value < total)
+                    assert_eq(seen[value], 0)
+                    seen[value] = 1
+                    received = received + 1
+                }
+                right => {
+                    let value = chan_select_value()
+                    assert(value >= 0 && value < total)
+                    assert_eq(seen[value], 0)
+                    seen[value] = 1
+                    received = received + 1
+                }
+                default => {
+                    assert(false)
                 }
             }
         }
-        let _ = a.join()
-        let _ = b.join()
-        assert_eq(got, 40)
-        // 0..19 sum = 190; 1000..1019 sum = 20190; total 20380
-        assert_eq(sum, 20380)
+        assert_eq(a.join(), count)
+        assert_eq(b.join(), count)
+        assert_eq(c.join(), count)
     }
+
+    let mut verify_index = 0
+    while verify_index < total {
+        assert_eq(seen[verify_index], 1)
+        verify_index = verify_index + 1
+    }
+    let stats = runtime_stats_json()
+    let spawned = json_get_int(stats, "tasks_spawned")
+    assert(spawned >= 3)
+    assert_eq(json_get_int(stats, "tasks_joined"), spawned)
+    assert_eq(json_get_int(stats, "channels_created"), 3)
+    assert_eq(json_get_int(stats, "channel_sends"), total)
+    assert_eq(json_get_int(stats, "channel_recvs"), total)
+    assert_eq(json_get_int(stats, "channel_select_timeouts"), 0)
+    left.close()
+    middle.close()
+    right.close()
+}
+
+fn run_close_round(seed: int, count: int, capacity: int) {
+    runtime_stats_reset()
+    let ch = make(chan[int], capacity)
+    let mut seen = make([]int, count)
+    crew group {
+        let job = group.kick(closing_producer(ch, count, seed))
+        let mut received = 0
+        let mut closed = false
+        while !closed {
+            match ch.recv_timeout(5000) {
+                Ok(value) => {
+                    assert(value >= 0 && value < count)
+                    assert_eq(seen[value], 0)
+                    seen[value] = 1
+                    received = received + 1
+                }
+                Err(message) => {
+                    assert_eq_str(message, "closed")
+                    closed = true
+                }
+            }
+        }
+        assert_eq(job.join(), count)
+        assert_eq(received, count)
+    }
+
+    let mut i = 0
+    while i < count {
+        assert_eq(seen[i], 1)
+        i = i + 1
+    }
+    let stats = runtime_stats_json()
+    assert_eq(json_get_int(stats, "tasks_spawned"), 1)
+    assert_eq(json_get_int(stats, "tasks_joined"), 1)
+    assert_eq(json_get_int(stats, "channels_created"), 1)
+    assert_eq(json_get_int(stats, "channel_sends"), count)
+    assert_eq(json_get_int(stats, "channel_recvs"), count)
+    assert_eq(json_get_int(stats, "channel_select_timeouts"), 0)
+}
+
+fn run_parallel_select_round(seed: int, count: int, capacity: int) {
+    runtime_stats_reset()
+    let left = make(chan[int], capacity)
+    let right = make(chan[int], capacity)
+    let total = count * 2
+    let out = make(chan[int], total)
+    let mut seen = make([]int, total)
+    crew group {
+        let a = group.kick(producer(left, 0, count, seed))
+        let b = group.kick(producer(right, count, count, det_rng_next(seed)))
+        let c = group.kick(select_worker(left, right, out, count))
+        let d = group.kick(select_worker(left, right, out, count))
+        assert_eq(a.join(), count)
+        assert_eq(b.join(), count)
+        assert_eq(c.join(), count)
+        assert_eq(d.join(), count)
+
+        let mut i = 0
+        while i < total {
+            let value = out.recv()
+            assert(value >= 0 && value < total)
+            assert_eq(seen[value], 0)
+            seen[value] = 1
+            i = i + 1
+        }
+    }
+
+    let mut verify_index = 0
+    while verify_index < total {
+        assert_eq(seen[verify_index], 1)
+        verify_index = verify_index + 1
+    }
+    let stats = runtime_stats_json()
+    assert_eq(json_get_int(stats, "tasks_spawned"), 4)
+    assert_eq(json_get_int(stats, "tasks_joined"), 4)
+    assert_eq(json_get_int(stats, "channels_created"), 3)
+    assert_eq(json_get_int(stats, "channel_sends"), total * 2)
+    assert_eq(json_get_int(stats, "channel_recvs"), total * 2)
+    assert_eq(json_get_int(stats, "channel_select_timeouts"), 0)
+    left.close()
+    right.close()
+    out.close()
+}
+
+fn string_select_worker(
+    left: chan[string],
+    right: chan[string],
+    out: chan[string],
+    count: int
+) -> int {
+    let mut received = 0
+    while received < count {
+        select timeout 5000 {
+            left => {
+                assert(out.send(chan_select_value_str()))
+                received = received + 1
+            }
+            right => {
+                assert(out.send(chan_select_value_str()))
+                received = received + 1
+            }
+            default => {
+                assert(false)
+            }
+        }
+    }
+    return received
+}
+
+fn run_parallel_string_select_round(count: int) {
+    runtime_stats_reset()
+    let left = make(chan[string], count)
+    let right = make(chan[string], count)
+    let total = count * 2
+    let out = make(chan[string], total)
+    let mut seen = make([]int, total)
+
+    let mut i = 0
+    while i < count {
+        assert(left.send(int_to_string(i)))
+        assert(right.send(int_to_string(count + i)))
+        i = i + 1
+    }
+
+    crew group {
+        let a = group.kick(string_select_worker(left, right, out, count))
+        let b = group.kick(string_select_worker(left, right, out, count))
+        assert_eq(a.join(), count)
+        assert_eq(b.join(), count)
+    }
+
+    i = 0
+    while i < total {
+        match parse_int(out.recv()) {
+            Ok(value) => {
+                assert(value >= 0 && value < total)
+                assert_eq(seen[value], 0)
+                seen[value] = 1
+            }
+            Err(_) => {
+                assert(false)
+            }
+        }
+        i = i + 1
+    }
+
+    i = 0
+    while i < total {
+        assert_eq(seen[i], 1)
+        i = i + 1
+    }
+    let stats = runtime_stats_json()
+    assert_eq(json_get_int(stats, "tasks_spawned"), 2)
+    assert_eq(json_get_int(stats, "tasks_joined"), 2)
+    assert_eq(json_get_int(stats, "channel_select_timeouts"), 0)
+    left.close()
+    right.close()
+    out.close()
+}
+
+fn point_select_once(
+    left: chan[SelectPoint],
+    right: chan[SelectPoint],
+    out: chan[int]
+) -> int {
+    select timeout 5000 {
+        left => {
+            assert(out.send(1))
+        }
+        right => {
+            assert(out.send(1))
+        }
+        default => {
+            assert(false)
+        }
+    }
+    return 1
+}
+
+fn run_parallel_point_select_round() {
+    // Struct channels use the pointer-backed select state in the runtime.
+    runtime_stats_reset()
+    let left = make(chan[SelectPoint], 1)
+    let right = make(chan[SelectPoint], 1)
+    let out = make(chan[int], 2)
+    assert(left.send(SelectPoint { value: 1 }))
+    assert(right.send(SelectPoint { value: 2 }))
+
+    crew group {
+        let a = group.kick(point_select_once(left, right, out))
+        let b = group.kick(point_select_once(left, right, out))
+        assert_eq(a.join(), 1)
+        assert_eq(b.join(), 1)
+    }
+    assert_eq(out.recv(), 1)
+    assert_eq(out.recv(), 1)
+
+    let stats = runtime_stats_json()
+    assert_eq(json_get_int(stats, "tasks_spawned"), 2)
+    assert_eq(json_get_int(stats, "tasks_joined"), 2)
+    assert_eq(json_get_int(stats, "channel_select_timeouts"), 0)
+    left.close()
+    right.close()
+    out.close()
+}
+
+fn TestSeededChannelSelectStress() {
+    let seed = stress_setting("MAKO_RT_STRESS_SEED", 104729)
+    let mut rounds = stress_setting("MAKO_RT_STRESS_ROUNDS", 8)
+    if rounds < 1 {
+        rounds = 1
+    }
+    if rounds > 200 {
+        rounds = 200
+    }
+    print("RT-005 seed")
+    print_int(seed)
+    print("RT-005 rounds")
+    print_int(rounds)
+
+    let mut state = seed
+    let mut round = 0
+    while round < rounds {
+        state = det_rng_next(state)
+        let count = 8 + det_rng_range(state, 24)
+        state = det_rng_next(state)
+        let capacity = det_rng_range(state, 5)
+        run_select_round(state, count, capacity)
+
+        state = det_rng_next(state)
+        let close_count = 4 + det_rng_range(state, 16)
+        run_close_round(state, close_count, capacity)
+        round = round + 1
+    }
+
+    state = det_rng_next(state)
+    let parallel_count = 8 + det_rng_range(state, 16)
+    run_parallel_select_round(state, parallel_count, det_rng_range(det_rng_next(state), 5))
+}
+
+fn TestConcurrentTypedSelectors() {
+    run_parallel_string_select_round(16)
+    run_parallel_point_select_round()
 }
 
 fn TestSelectTimeoutDefault() {
-    let mut ch = make(chan[int], 1)
+    let ch = make(chan[int], 1)
     let mut hit_default = 0
     select timeout 5 {
         ch => {
@@ -47,4 +392,5 @@ fn TestSelectTimeoutDefault() {
         }
     }
     assert_eq(hit_default, 1)
+    ch.close()
 }

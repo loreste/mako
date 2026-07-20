@@ -289,6 +289,8 @@ jobs:
           ./target/release/mako test --race examples/testing/chan_float_test.mko
           ./target/release/mako test --race examples/testing/crew_fan_test.mko
           ./target/release/mako test --race examples/testing/crew_drain_test.mko
+          MAKO_RT_STRESS_SEED=7 MAKO_RT_STRESS_ROUNDS=8 ./target/release/mako test --race examples/testing/chan_select_stress_test.mko
+          MAKO_RT_STRESS_SEED=104729 MAKO_RT_STRESS_ROUNDS=8 ./target/release/mako test --race examples/testing/chan_select_stress_test.mko
 
   asan:
     name: ASan invalid memory access

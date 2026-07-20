@@ -4870,8 +4870,9 @@ static inline int64_t mako_chan_recv_timeout(MakoChan *c, int64_t *out, int64_t 
 
 /* Select between two channels with timeout_ms.
  * Returns 0 if a ready, 1 if b ready, -1 on timeout.
- * Value available via mako_chan_select_value(). */
-static int64_t mako_select_last_val = 0;
+ * Value available via mako_chan_select_value(). Selectors can run concurrently,
+ * so result and fairness state are per-thread. */
+static __thread int64_t mako_select_last_val = 0;
 
 static inline int64_t mako_chan_select_value(void) {
     return mako_select_last_val;
@@ -4882,7 +4883,7 @@ static inline int64_t mako_chan_select_value(void) {
  * Uses a shared condvar instead of 2ms nanosleep polling — near-zero
  * latency wakeup when any channel receives data. */
 #define MAKO_SELECT_MAX 16
-static int64_t mako_select_rr = 0;
+static __thread int64_t mako_select_rr = 0;
 
 /* Global select wakeup: channels signal this on send so select waiters
  * wake immediately instead of polling every 2ms.
@@ -4890,30 +4891,29 @@ static int64_t mako_select_rr = 0;
  * CRITICAL_SECTION / CONDITION_VARIABLE shims. */
 static pthread_mutex_t mako_select_mu;
 static pthread_cond_t mako_select_cv;
-static int mako_select_sync_ready = 0;
+
+#if defined(_WIN32) || defined(_WIN64)
+static volatile LONG mako_select_sync_once = 0;
+#else
+static pthread_once_t mako_select_sync_once = PTHREAD_ONCE_INIT;
+#endif
+
+static void mako_select_sync_init(void) {
+    pthread_mutex_init(&mako_select_mu, NULL);
+    pthread_cond_init(&mako_select_cv, NULL);
+}
 
 static inline void mako_select_sync_ensure(void) {
-    if (mako_select_sync_ready) return;
 #if defined(_WIN32) || defined(_WIN64)
-    static LONG once = 0;
-    if (InterlockedCompareExchange(&once, 1, 0) == 0) {
-        pthread_mutex_init(&mako_select_mu, NULL);
-        pthread_cond_init(&mako_select_cv, NULL);
-        mako_select_sync_ready = 1;
-        InterlockedExchange(&once, 2);
+    if (InterlockedCompareExchange(&mako_select_sync_once, 1, 0) == 0) {
+        mako_select_sync_init();
+        InterlockedExchange(&mako_select_sync_once, 2);
     } else {
-        while (InterlockedCompareExchange(&once, 2, 2) != 2)
+        while (InterlockedCompareExchange(&mako_select_sync_once, 2, 2) != 2)
             Sleep(0);
     }
 #else
-    static pthread_mutex_t boot = PTHREAD_MUTEX_INITIALIZER;
-    pthread_mutex_lock(&boot);
-    if (!mako_select_sync_ready) {
-        pthread_mutex_init(&mako_select_mu, NULL);
-        pthread_cond_init(&mako_select_cv, NULL);
-        mako_select_sync_ready = 1;
-    }
-    pthread_mutex_unlock(&boot);
+    pthread_once(&mako_select_sync_once, mako_select_sync_init);
 #endif
 }
 
@@ -5216,9 +5216,10 @@ static inline int64_t mako_chan_str_try_recv(MakoChanStr *c, MakoString *out) {
     return 1;
 }
 
-/* Select among string channels. Returns arm index or -1; value via mako_chan_select_value_str. */
-static MakoString mako_select_last_str = {NULL, 0};
-static int64_t mako_select_rr_str = 0;
+/* Select among string channels. The owned result is per-thread so concurrent
+ * selectors cannot overwrite it before an arm reads the value. */
+static __thread MakoString mako_select_last_str = {NULL, 0};
+static __thread int64_t mako_select_rr_str = 0;
 
 static inline MakoString mako_chan_select_value_str(void) {
     return mako_str_clone(mako_select_last_str);
@@ -5429,8 +5430,9 @@ static inline void *mako_chan_ptr_recv_timeout(MakoChanPtr *c, int64_t timeout_m
     }
 }
 
-static void *mako_select_last_ptr = NULL;
-static int64_t mako_select_rr_ptr = 0;
+/* Pointer-backed selectors need the same per-thread result isolation. */
+static __thread void *mako_select_last_ptr = NULL;
+static __thread int64_t mako_select_rr_ptr = 0;
 
 static inline void *mako_chan_select_value_ptr(void) {
     return mako_select_last_ptr;
