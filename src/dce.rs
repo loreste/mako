@@ -220,6 +220,57 @@ fn extract_import_path(rest: &str) -> Option<String> {
     None
 }
 
+/// Warn about unreachable code — statements after return/break/continue.
+pub fn warn_unreachable_code(program: &Program) {
+    for item in &program.items {
+        if let Item::Fn(f) = item {
+            check_block_unreachable(&f.body, &f.name);
+        }
+    }
+}
+
+fn check_block_unreachable(block: &Block, fn_name: &str) {
+    let stmts = &block.stmts;
+    for (i, stmt) in stmts.iter().enumerate() {
+        // Check if this statement always diverges AND there are more statements after.
+        let diverges = matches!(
+            stmt,
+            Stmt::Return(_) | Stmt::Break(_) | Stmt::Continue(_)
+        );
+        if diverges && i + 1 < stmts.len() {
+            // Skip if the next statement is just a closing brace artifact.
+            let next = &stmts[i + 1];
+            if !matches!(next, Stmt::Expr(Expr::Int(_))) {
+                eprintln!(
+                    "warning: unreachable code after {} in `{fn_name}`",
+                    match stmt {
+                        Stmt::Return(_) => "return",
+                        Stmt::Break(_) => "break",
+                        Stmt::Continue(_) => "continue",
+                        _ => "diverging statement",
+                    }
+                );
+                break; // Only warn once per block.
+            }
+        }
+        // Recurse into sub-blocks.
+        match stmt {
+            Stmt::If { then_block, else_block, .. } => {
+                check_block_unreachable(then_block, fn_name);
+                if let Some(eb) = else_block {
+                    check_block_unreachable(eb, fn_name);
+                }
+            }
+            Stmt::While { body, .. } | Stmt::For { body, .. } | Stmt::CFor { body, .. }
+            | Stmt::Crew { body, .. } | Stmt::Arena { body, .. } | Stmt::Unsafe { body }
+            | Stmt::Defer { body } => {
+                check_block_unreachable(body, fn_name);
+            }
+            _ => {}
+        }
+    }
+}
+
 /// Collect function names called and type names referenced from a function def.
 fn collect_fn_refs(f: &FnDef, queue: &mut Vec<String>, types: &mut HashSet<String>) {
     // Params and return type.
