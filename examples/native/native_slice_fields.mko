@@ -1,0 +1,27 @@
+// Native backend: structs with an owned `[]int` field (recursive clone/drop).
+// Exercises construction (moving an owned slice literal in), field read as a
+// borrow, indexing/`len` through a field, by-value pass (deep clone of the
+// slice), value-copy semantics, and per-field slice drop on scope exit.
+// Differentially validated against the C backend.
+
+struct Bag {
+    items: []int
+    tag: int
+}
+
+fn first(b: Bag) -> int {
+    return b.items[0]
+}
+
+fn main() {
+    let b = Bag { items: [10, 20, 30], tag: 9 }
+    print_int(b.tag)
+    print_int(len(b.items))
+    print_int(first(b))
+
+    var c = b
+    c.tag = 99
+    print_int(c.tag)
+    print_int(b.tag)
+    print_int(c.items[2])
+}

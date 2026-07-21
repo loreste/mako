@@ -63,6 +63,10 @@ fn main() {
         print("internal compiler error: typed IR statement-merge ownership smoke test failed")
         exit(70)
     }
+    if not typed_ir_local_transfer_smoke_test() {
+        print("internal compiler error: typed IR local-transfer smoke test failed")
+        exit(70)
+    }
     if not typed_ir_ownership_smoke_test() {
         print("internal compiler error: typed IR ownership smoke test failed")
         exit(70)

@@ -120,8 +120,21 @@ fn ir_instruction_list_consumes_value(
     call_arguments: []int,
     value: int
 ) -> bool {
-    let mut instruction_index = 0
-    while instruction_index < len(instructions) {
+    return ir_instruction_range_consumes_value(
+        instructions, call_sites, call_arguments, 0, len(instructions), value
+    )
+}
+
+fn ir_instruction_range_consumes_value(
+    instructions: []IrInstruction,
+    call_sites: []IrCallSite,
+    call_arguments: []int,
+    start: int,
+    end: int,
+    value: int
+) -> bool {
+    let mut instruction_index = start
+    while instruction_index < end {
         let instruction = instructions[instruction_index]
         if instruction.left == value and
             (instruction.op == IR_MOVE or instruction.op == IR_DROP or
@@ -639,7 +652,42 @@ fn lower_typed_ir(
                     local_index = 0
                     while local_index < len(locals) {
                         if locals[local_index].item == signature.item and locals[local_index].initializer_root == i {
-                            local_values[local_index] = expression_values[i]
+                            let mut initializer_value = expression_values[i]
+                            if expressions[i].kind == EXPR_IDENT and i < len(expression_locals) and
+                                ir_type_is_owned(expression_types[i]) {
+                                let source_local = expression_locals[i]
+                                if source_local >= 0 and source_local < len(locals) {
+                                    let transfer_value = next_value
+                                    next_value = next_value + 1
+                                    let transfer = IrInstruction {
+                                        op: if locals[source_local].ownership == LOCAL_OWN_HOLD {
+                                            IR_MOVE
+                                        } else {
+                                            IR_CLONE
+                                        },
+                                        result: transfer_value, type_kind: expression_types[i],
+                                        left: initializer_value, right: -1, aux: -1,
+                                        token: expressions[i].token,
+                                    }
+                                    let arm_lowering = simple_if or simple_merge_if
+                                    let then_arm = if simple_if { then_return } else { first_child }
+                                    let else_arm = if simple_if { continuation_return } else { second_child }
+                                    if arm_lowering and then_arm >= 0 and
+                                        expressions[i].token >= statements[then_arm].token_start and
+                                        expressions[i].token < statements[then_arm].token_end {
+                                        then_instructions = append(then_instructions, transfer)
+                                    } else if arm_lowering and else_arm >= 0 and
+                                        expressions[i].token >= statements[else_arm].token_start and
+                                        expressions[i].token < statements[else_arm].token_end {
+                                        else_instructions = append(else_instructions, transfer)
+                                    } else {
+                                        instructions = append(instructions, transfer)
+                                    }
+                                    initializer_value = transfer_value
+                                    expression_values[i] = transfer_value
+                                }
+                            }
+                            local_values[local_index] = initializer_value
                         }
                         local_index = local_index + 1
                     }
@@ -717,6 +765,10 @@ fn lower_typed_ir(
                             locals[local_index].declaration_end <= branch_statement.token_start) and
                         local_values[local_index] >= 0 and
                         ir_type_is_owned(local_types[local_index]) and local_values[local_index] != then_value and
+                        not ir_instruction_range_consumes_value(
+                            instructions, call_sites, call_arguments, instruction_start,
+                            entry_terminator, local_values[local_index]
+                        ) and
                         not ir_instruction_list_consumes_value(
                             then_instructions, call_sites, call_arguments, local_values[local_index]
                         ) {
@@ -752,6 +804,10 @@ fn lower_typed_ir(
                             locals[local_index].declaration_end <= branch_statement.token_start) and
                         local_values[local_index] >= 0 and
                         ir_type_is_owned(local_types[local_index]) and local_values[local_index] != continuation_value and
+                        not ir_instruction_range_consumes_value(
+                            instructions, call_sites, call_arguments, instruction_start,
+                            entry_terminator, local_values[local_index]
+                        ) and
                         not ir_instruction_list_consumes_value(
                             else_instructions, call_sites, call_arguments, local_values[local_index]
                         ) {
@@ -797,6 +853,10 @@ fn lower_typed_ir(
                             locals[local_index].declaration_end <= branch_statement.token_start) and
                         local_values[local_index] >= 0 and
                         ir_type_is_owned(local_types[local_index]) and local_values[local_index] != then_value and
+                        not ir_instruction_range_consumes_value(
+                            instructions, call_sites, call_arguments, instruction_start,
+                            entry_terminator, local_values[local_index]
+                        ) and
                         not ir_instruction_list_consumes_value(
                             then_instructions, call_sites, call_arguments, local_values[local_index]
                         ) {
@@ -832,6 +892,10 @@ fn lower_typed_ir(
                             locals[local_index].declaration_end <= branch_statement.token_start) and
                         local_values[local_index] >= 0 and
                         ir_type_is_owned(local_types[local_index]) and local_values[local_index] != continuation_value and
+                        not ir_instruction_range_consumes_value(
+                            instructions, call_sites, call_arguments, instruction_start,
+                            entry_terminator, local_values[local_index]
+                        ) and
                         not ir_instruction_list_consumes_value(
                             else_instructions, call_sites, call_arguments, local_values[local_index]
                         ) {
@@ -935,6 +999,10 @@ fn lower_typed_ir(
                     local_values[local_index] >= 0 and
                     ir_type_is_owned(local_types[local_index]) and
                     local_values[local_index] != merge_value and
+                    not ir_instruction_range_consumes_value(
+                        instructions, call_sites, call_arguments, instruction_start,
+                        entry_terminator, local_values[local_index]
+                    ) and
                     not ir_instruction_list_consumes_value(
                         then_instructions, call_sites, call_arguments, local_values[local_index]
                     ) {
@@ -988,6 +1056,10 @@ fn lower_typed_ir(
                     local_values[local_index] >= 0 and
                     ir_type_is_owned(local_types[local_index]) and
                     local_values[local_index] != merge_value and
+                    not ir_instruction_range_consumes_value(
+                        instructions, call_sites, call_arguments, instruction_start,
+                        entry_terminator, local_values[local_index]
+                    ) and
                     not ir_instruction_list_consumes_value(
                         else_instructions, call_sites, call_arguments, local_values[local_index]
                     ) {
@@ -1051,7 +1123,8 @@ fn lower_typed_ir(
                 owned_live[owned_instruction.result] = 1
                 owned_types[owned_instruction.result] = owned_instruction.type_kind
             }
-            if (owned_instruction.op == IR_ARRAY or owned_instruction.op == IR_SLICE) and
+            if (owned_instruction.op == IR_ARRAY or owned_instruction.op == IR_SLICE or
+                owned_instruction.op == IR_MOVE) and
                 owned_instruction.left >= 0 and owned_live[owned_instruction.left] == 1 {
                 owned_live[owned_instruction.left] = 0
             }
@@ -1705,6 +1778,74 @@ fn typed_ir_statement_merge_ownership_smoke_test() -> bool {
         ir.call_sites, ir.call_arguments, ir.value_count
     )
     return verified.ok and verified.checked_values == 6
+}
+
+fn typed_ir_local_transfer_smoke_test() -> bool {
+    let clone_source = "fn keep_original() -> string {\nlet first = \"mako\"\nlet second = first\nreturn first\n}"
+    let clone_lexed = lex_source(clone_source)
+    if not clone_lexed.ok { return false }
+    let clone = parse_frontend(clone_source, clone_lexed.tokens)
+    if not clone.ok { return false }
+    let clone_ir = lower_typed_ir(
+        clone_source, clone_lexed.tokens, clone.items, clone.signatures, clone.statements,
+        clone.statement_edges, clone.expressions, clone.expression_types, clone.locals,
+        clone.local_types, clone.expression_locals, clone.symbols, clone.expression_symbols
+    )
+    if not clone_ir.ok or len(clone_ir.instructions) != 5 or clone_ir.value_count != 3 or
+        clone_ir.instructions[0].op != IR_CONST or clone_ir.instructions[1].op != IR_CLONE or
+        clone_ir.instructions[1].left != clone_ir.instructions[0].result or
+        clone_ir.instructions[2].op != IR_MOVE or
+        clone_ir.instructions[2].left != clone_ir.instructions[0].result or
+        clone_ir.instructions[3].op != IR_DROP or
+        clone_ir.instructions[3].left != clone_ir.instructions[1].result or
+        clone_ir.instructions[4].op != IR_RETURN or
+        clone_ir.instructions[4].left != clone_ir.instructions[2].result { return false }
+    let clone_verified = verify_typed_ir(
+        clone_ir.functions, clone_ir.blocks, clone_ir.instructions, clone_ir.constants,
+        clone_ir.successors, clone_ir.call_sites, clone_ir.call_arguments, clone_ir.value_count
+    )
+    if not clone_verified.ok or clone_verified.checked_values != 3 { return false }
+
+    let move_source = "fn transfer_local() -> string {\nhold let first = \"mako\"\nlet second = first\nreturn second\n}"
+    let move_lexed = lex_source(move_source)
+    if not move_lexed.ok { return false }
+    let moved = parse_frontend(move_source, move_lexed.tokens)
+    if not moved.ok { return false }
+    let move_ir = lower_typed_ir(
+        move_source, move_lexed.tokens, moved.items, moved.signatures, moved.statements,
+        moved.statement_edges, moved.expressions, moved.expression_types, moved.locals,
+        moved.local_types, moved.expression_locals, moved.symbols, moved.expression_symbols
+    )
+    if not move_ir.ok or len(move_ir.instructions) != 4 or move_ir.value_count != 3 or
+        move_ir.instructions[1].op != IR_MOVE or move_ir.instructions[2].op != IR_MOVE or
+        move_ir.instructions[2].left != move_ir.instructions[1].result or
+        move_ir.instructions[3].op != IR_RETURN or
+        move_ir.instructions[3].left != move_ir.instructions[2].result { return false }
+    let move_verified = verify_typed_ir(
+        move_ir.functions, move_ir.blocks, move_ir.instructions, move_ir.constants,
+        move_ir.successors, move_ir.call_sites, move_ir.call_arguments, move_ir.value_count
+    )
+    if not move_verified.ok or move_verified.checked_values != 3 { return false }
+
+    let invalid_source = "fn reuse_moved_local() -> string {\nhold let first = \"mako\"\nlet second = first\nreturn first\n}"
+    let invalid_lexed = lex_source(invalid_source)
+    if not invalid_lexed.ok { return false }
+    let invalid = parse_frontend(invalid_source, invalid_lexed.tokens)
+    if not invalid.ok { return false }
+    let invalid_ir = lower_typed_ir(
+        invalid_source, invalid_lexed.tokens, invalid.items, invalid.signatures,
+        invalid.statements, invalid.statement_edges, invalid.expressions,
+        invalid.expression_types, invalid.locals, invalid.local_types,
+        invalid.expression_locals, invalid.symbols, invalid.expression_symbols
+    )
+    if not invalid_ir.ok { return false }
+    let invalid_verified = verify_typed_ir(
+        invalid_ir.functions, invalid_ir.blocks, invalid_ir.instructions, invalid_ir.constants,
+        invalid_ir.successors, invalid_ir.call_sites, invalid_ir.call_arguments,
+        invalid_ir.value_count
+    )
+    return not invalid_verified.ok and
+        invalid_verified.error == "IR instruction uses consumed owned value"
 }
 
 fn typed_ir_ownership_smoke_test() -> bool {

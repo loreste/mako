@@ -498,9 +498,7 @@ impl Codegen {
                     self.collect_maps_in_expr(a);
                 }
             }
-            Expr::Method {
-                receiver, args, ..
-            } => {
+            Expr::Method { receiver, args, .. } => {
                 self.collect_maps_in_expr(receiver);
                 for a in args {
                     self.collect_maps_in_expr(a);
@@ -597,18 +595,11 @@ impl Codegen {
             Expr::Try(inner) => self.collect_maps_in_expr(inner),
             Expr::Kick { expr, .. } => self.collect_maps_in_expr(expr),
             Expr::Join(inner) => self.collect_maps_in_expr(inner),
-            Expr::Fan {
-                collection,
-                mapper,
-            } => {
+            Expr::Fan { collection, mapper } => {
                 self.collect_maps_in_expr(collection);
                 self.collect_maps_in_expr(mapper);
             }
-            Expr::Int(_)
-            | Expr::Float(_)
-            | Expr::Bool(_)
-            | Expr::String(_)
-            | Expr::Ident(_) => {}
+            Expr::Int(_) | Expr::Float(_) | Expr::Bool(_) | Expr::String(_) | Expr::Ident(_) => {}
         }
     }
 
@@ -654,9 +645,7 @@ impl Codegen {
     /// Built-in slices (`[]int` → `MakoIntArray`, …) are skipped.
     fn register_arr_elem_type(&mut self, inner: &TypeExpr) {
         match inner {
-            TypeExpr::Named(n)
-                if self.structs.contains_key(n) || self.enums.contains_key(n) =>
-            {
+            TypeExpr::Named(n) if self.structs.contains_key(n) || self.enums.contains_key(n) => {
                 self.note_used_arr_elem(n);
             }
             TypeExpr::Array(_) => {
@@ -667,15 +656,11 @@ impl Codegen {
             }
             TypeExpr::Map(k, v) => {
                 let map_c = self.type_expr_c(&TypeExpr::Map(k.clone(), v.clone()));
-                let tag =
-                    map_ptr_mono_tag(&map_c).unwrap_or_else(|| c_type_mono_tag(&map_c));
+                let tag = map_ptr_mono_tag(&map_c).unwrap_or_else(|| c_type_mono_tag(&map_c));
                 self.note_used_arr_elem(&tag);
             }
-            TypeExpr::Generic(n, args)
-                if (n == "Option" || n == "Result") && !args.is_empty() =>
-            {
-                let tag =
-                    bag_map_val_tag(n == "Option", &args[0], &self.structs, &self.enums);
+            TypeExpr::Generic(n, args) if (n == "Option" || n == "Result") && !args.is_empty() => {
+                let tag = bag_map_val_tag(n == "Option", &args[0], &self.structs, &self.enums);
                 self.note_used_arr_elem(&tag);
             }
             TypeExpr::Generic(n, args) if n == "chan" && !args.is_empty() => {
@@ -687,8 +672,7 @@ impl Codegen {
                     Box::new(args[0].clone()),
                     Box::new(args[1].clone()),
                 ));
-                let tag =
-                    map_ptr_mono_tag(&map_c).unwrap_or_else(|| c_type_mono_tag(&map_c));
+                let tag = map_ptr_mono_tag(&map_c).unwrap_or_else(|| c_type_mono_tag(&map_c));
                 self.note_used_arr_elem(&tag);
             }
             _ => {}
@@ -698,15 +682,18 @@ impl Codegen {
     /// Record one map[K]V monomorph for emission filtering.
     fn register_map_type(&mut self, k: &TypeExpr, v: &TypeExpr) {
         let key_id = match k {
-            TypeExpr::Named(n) if matches!(n.as_str(), "int" | "int64" | "int32" | "int8" | "byte" | "uint64") => {
+            TypeExpr::Named(n)
+                if matches!(
+                    n.as_str(),
+                    "int" | "int64" | "int32" | "int8" | "byte" | "uint64"
+                ) =>
+            {
                 "i".to_string()
             }
             TypeExpr::Named(n) if n == "string" => "s".to_string(),
             TypeExpr::Named(n) if n == "float" || n == "float64" => "f".to_string(),
             TypeExpr::Named(n) if n == "bool" => "b".to_string(),
-            TypeExpr::Named(n)
-                if self.structs.contains_key(n) || self.enums.contains_key(n) =>
-            {
+            TypeExpr::Named(n) if self.structs.contains_key(n) || self.enums.contains_key(n) => {
                 format!("k:{n}")
             }
             _ => return,
@@ -790,7 +777,10 @@ impl Codegen {
                         return format!("arr_{tag}");
                     }
                     TypeExpr::Map(k2, v2) => {
-                        return format!("arr_{}", leaf_map_mono_tag(k2, v2, &self.structs, &self.enums));
+                        return format!(
+                            "arr_{}",
+                            leaf_map_mono_tag(k2, v2, &self.structs, &self.enums)
+                        );
                     }
                     TypeExpr::Generic(n, args)
                         if (n == "Option" || n == "Result") && !args.is_empty() =>
@@ -811,19 +801,14 @@ impl Codegen {
                 // Nested map as value: match type_expr_c / map_ptr_mono_tag
                 // so depth-2 is map_string_int and depth-3 is map_string_map_string_int.
                 let inner_c = self.type_expr_c(&TypeExpr::Map(k2.clone(), v2.clone()));
-                map_ptr_mono_tag(&inner_c).unwrap_or_else(|| {
-                    leaf_map_mono_tag(k2, v2, &self.structs, &self.enums)
-                })
+                map_ptr_mono_tag(&inner_c)
+                    .unwrap_or_else(|| leaf_map_mono_tag(k2, v2, &self.structs, &self.enums))
             }
-            TypeExpr::Tuple(elems) => {
-                map_tuple_val_tag(elems, &self.structs, &self.enums)
-            }
+            TypeExpr::Tuple(elems) => map_tuple_val_tag(elems, &self.structs, &self.enums),
             TypeExpr::Generic(n, args) if n == "chan" && !args.is_empty() => {
                 chan_map_val_tag(&args[0], &self.structs)
             }
-            TypeExpr::Generic(n, args)
-                if (n == "Option" || n == "Result") && !args.is_empty() =>
-            {
+            TypeExpr::Generic(n, args) if (n == "Option" || n == "Result") && !args.is_empty() => {
                 bag_map_val_tag(n == "Option", &args[0], &self.structs, &self.enums)
             }
             _ => "int".into(),
@@ -927,7 +912,9 @@ impl Codegen {
                 {
                     "map_fb"
                 }
-                (TypeExpr::Named(kk), TypeExpr::Named(vv)) if kk == "bool" && (vv == "int" || vv == "int64") => {
+                (TypeExpr::Named(kk), TypeExpr::Named(vv))
+                    if kk == "bool" && (vv == "int" || vv == "int64") =>
+                {
                     "map_bi"
                 }
                 (TypeExpr::Named(kk), TypeExpr::Named(vv)) if kk == "bool" && vv == "string" => {
@@ -1075,9 +1062,7 @@ impl Codegen {
     /// Example: `Option[Result[Option[string]]]` → `["result", "option", "string"]`.
     fn successive_nest_kinds(payload: &TypeExpr) -> Vec<String> {
         match payload {
-            TypeExpr::Generic(n, args)
-                if (n == "Option" || n == "Result") && !args.is_empty() =>
-            {
+            TypeExpr::Generic(n, args) if (n == "Option" || n == "Result") && !args.is_empty() => {
                 let child = &args[0];
                 let k = Self::value_payload_kind(child);
                 let mut v = vec![k.to_string()];
@@ -1171,7 +1156,9 @@ impl Codegen {
                     .structs
                     .get(ft)
                     .or_else(|| self.structs.values().find(|s| s.c_name == *ft))
-                    .map(|info| !info.fields.is_empty() && self.fields_are_reflect_pod(&info.fields))
+                    .map(|info| {
+                        !info.fields.is_empty() && self.fields_are_reflect_pod(&info.fields)
+                    })
                     .unwrap_or(false)
         })
     }
@@ -1253,9 +1240,7 @@ impl Codegen {
                 *idx += 1;
             } else if ft.starts_with("MakoMap") {
                 let s = self.fresh("rfs");
-                self.line(&format!(
-                    "MakoString {s} = mako_str_from_cstr(\"map\");"
-                ));
+                self.line(&format!("MakoString {s} = mako_str_from_cstr(\"map\");"));
                 self.line(&format!(
                     "mako_reflect_value_set_at({tmp}, {idx}, {s}); free({s}.data);"
                 ));
@@ -1344,20 +1329,20 @@ impl Codegen {
                     "MakoString" => "MakoStrArray".into(),
                     "double" => "MakoFloatArray".into(),
                     "int64_t" | "bool" => "MakoIntArray".into(),
-                    other if self.structs.contains_key(other)
-                        || self.structs.values().any(|s| s.c_name == other) =>
+                    other
+                        if self.structs.contains_key(other)
+                            || self.structs.values().any(|s| s.c_name == other) =>
                     {
                         format!("MakoArr_{other}")
                     }
                     _ => "MakoIntArray".into(),
                 }
             }
-            Expr::StructLit { name, .. } => {
-                self.structs
-                    .get(name)
-                    .map(|s| s.c_name.clone())
-                    .unwrap_or_else(|| name.clone())
-            }
+            Expr::StructLit { name, .. } => self
+                .structs
+                .get(name)
+                .map(|s| s.c_name.clone())
+                .unwrap_or_else(|| name.clone()),
             Expr::Make { ty, .. } | Expr::Convert { ty, .. } => self.type_expr_c(ty),
             Expr::Call { callee, args } => {
                 if let Expr::Ident(fname) = callee.as_ref() {
@@ -1692,7 +1677,8 @@ impl Codegen {
         if kind == "option" {
             // Nested Option: unbox heap Option and consume one link of the kind chain.
             let p = self.fresh("opnest");
-            self.locals.insert(bindings[0].clone(), "MakoOptionInt".into());
+            self.locals
+                .insert(bindings[0].clone(), "MakoOptionInt".into());
             self.line(&format!(
                 "MakoOptionInt *{p} = (MakoOptionInt*)mako_option_some_ptr({scrut});"
             ));
@@ -1703,11 +1689,7 @@ impl Codegen {
             if let Some(chain) = self.deep_nest_chains.get(scrut).cloned() {
                 self.apply_deep_nest_chain(&bindings[0], "option", &chain);
             } else {
-                let chain = self
-                    .option_chains
-                    .get(scrut)
-                    .cloned()
-                    .unwrap_or_default();
+                let chain = self.option_chains.get(scrut).cloned().unwrap_or_default();
                 if let Some((next, rest)) = chain.split_first() {
                     self.option_some_kinds
                         .insert(bindings[0].clone(), next.clone());
@@ -1715,8 +1697,7 @@ impl Codegen {
                         self.option_chains
                             .insert(bindings[0].clone(), rest.to_vec());
                     } else if next == "option" {
-                        self.option_chains
-                            .insert(bindings[0].clone(), Vec::new());
+                        self.option_chains.insert(bindings[0].clone(), Vec::new());
                     }
                     if next == "result" {
                         if let Some(rik) = self.option_result_inners.get(scrut).cloned() {
@@ -1726,8 +1707,7 @@ impl Codegen {
                     // Propagate struct / struct-chan names for deeper match arms.
                     if next == "struct" || next == "chan_struct" || next == "slice_struct" {
                         if let Some(sn) = self.option_some_structs.get(scrut).cloned() {
-                            self.option_some_structs
-                                .insert(bindings[0].clone(), sn);
+                            self.option_some_structs.insert(bindings[0].clone(), sn);
                         }
                     }
                 } else {
@@ -1740,7 +1720,8 @@ impl Codegen {
         if kind == "result" {
             // Option[Result[T,E]]: unbox nested Result
             let p = self.fresh("opres");
-            self.locals.insert(bindings[0].clone(), "MakoResultInt".into());
+            self.locals
+                .insert(bindings[0].clone(), "MakoResultInt".into());
             self.line(&format!(
                 "MakoResultInt *{p} = (MakoResultInt*)mako_option_some_ptr({scrut});"
             ));
@@ -1754,13 +1735,11 @@ impl Codegen {
                 // Option[Result[Option[T]]]: after Ok, Option needs leaf Some-kind
                 if ik == "option" {
                     if let Some(leaf) = self.option_result_option_leafs.get(scrut).cloned() {
-                        self.result_option_inners
-                            .insert(bindings[0].clone(), leaf);
+                        self.result_option_inners.insert(bindings[0].clone(), leaf);
                     }
                     // Propagate deeper Option chains if any
                     if let Some(ch) = self.result_option_chains.get(scrut).cloned() {
-                        self.result_option_chains
-                            .insert(bindings[0].clone(), ch);
+                        self.result_option_chains.insert(bindings[0].clone(), ch);
                     }
                 }
                 self.result_ok_kinds.insert(bindings[0].clone(), ik);
@@ -1774,13 +1753,11 @@ impl Codegen {
             {
                 self.result_ok_structs
                     .insert(bindings[0].clone(), sn.clone());
-                self.option_some_structs
-                    .insert(bindings[0].clone(), sn);
+                self.option_some_structs.insert(bindings[0].clone(), sn);
             }
             // Channel float / nested Result metadata
             if let Some(rik) = self.result_result_inners.get(scrut).cloned() {
-                self.result_result_inners
-                    .insert(bindings[0].clone(), rik);
+                self.result_result_inners.insert(bindings[0].clone(), rik);
             }
             return;
         }
@@ -1814,7 +1791,8 @@ impl Codegen {
             self.register_own_drop(&b, &cname);
         } else if kind == "slice" {
             let p = self.fresh("ops");
-            self.locals.insert(bindings[0].clone(), "MakoIntArray".into());
+            self.locals
+                .insert(bindings[0].clone(), "MakoIntArray".into());
             self.line(&format!(
                 "MakoIntArray *{p} = (MakoIntArray*)mako_option_some_ptr({scrut});"
             ));
@@ -1825,7 +1803,8 @@ impl Codegen {
             self.register_own_drop(&b, "MakoIntArray");
         } else if kind == "slice_str" {
             let p = self.fresh("ops");
-            self.locals.insert(bindings[0].clone(), "MakoStrArray".into());
+            self.locals
+                .insert(bindings[0].clone(), "MakoStrArray".into());
             self.line(&format!(
                 "MakoStrArray *{p} = (MakoStrArray*)mako_option_some_ptr({scrut});"
             ));
@@ -1836,7 +1815,8 @@ impl Codegen {
             self.register_own_drop(&b, "MakoStrArray");
         } else if kind == "slice_float" {
             let p = self.fresh("ops");
-            self.locals.insert(bindings[0].clone(), "MakoFloatArray".into());
+            self.locals
+                .insert(bindings[0].clone(), "MakoFloatArray".into());
             self.line(&format!(
                 "MakoFloatArray *{p} = (MakoFloatArray*)mako_option_some_ptr({scrut});"
             ));
@@ -1976,8 +1956,7 @@ impl Codegen {
                 }
                 other if other.starts_with("map_") => {
                     let cty = map_map_val_c_ty(other);
-                    self.option_map_ctys
-                        .insert(temp.to_string(), cty);
+                    self.option_map_ctys.insert(temp.to_string(), cty);
                     other.to_string()
                 }
                 other if other.starts_with("opt_") => {
@@ -1999,7 +1978,8 @@ impl Codegen {
                                 .insert(temp.to_string(), leaf.to_string());
                         }
                     }
-                    if other.contains("chan_") && !other.ends_with("chan_int")
+                    if other.contains("chan_")
+                        && !other.ends_with("chan_int")
                         && !other.ends_with("chan_string")
                         && !other.ends_with("chan_float")
                         && !other.ends_with("chan_bool")
@@ -2043,8 +2023,7 @@ impl Codegen {
                 }
             };
             self.option_some_kinds.insert(temp.to_string(), kind);
-            self.locals
-                .insert(temp.to_string(), "MakoOptionInt".into());
+            self.locals.insert(temp.to_string(), "MakoOptionInt".into());
         } else if let Some(rest) = tag.strip_prefix("res_") {
             let kind = match rest {
                 "int" | "bool" => "int".into(),
@@ -2061,8 +2040,7 @@ impl Codegen {
                 }
                 other if other.starts_with("map_") => {
                     let cty = map_map_val_c_ty(other);
-                    self.result_ok_map_ctys
-                        .insert(temp.to_string(), cty);
+                    self.result_ok_map_ctys.insert(temp.to_string(), cty);
                     other.to_string()
                 }
                 other if other.starts_with("opt_") => {
@@ -2120,8 +2098,7 @@ impl Codegen {
                 }
             };
             self.result_ok_kinds.insert(temp.to_string(), kind);
-            self.locals
-                .insert(temp.to_string(), "MakoResultInt".into());
+            self.locals.insert(temp.to_string(), "MakoResultInt".into());
         }
     }
 
@@ -2263,8 +2240,7 @@ impl Codegen {
         // Both maps are consulted by the matching paths.
         self.option_result_inners
             .insert(temp.to_string(), ok_kind.clone());
-        self.result_result_inners
-            .insert(temp.to_string(), ok_kind);
+        self.result_result_inners.insert(temp.to_string(), ok_kind);
     }
 
     fn push_share_scope(&mut self) {
@@ -2371,9 +2347,7 @@ impl Codegen {
     }
 
     fn bag_type_for_discard(&self, expr: &Expr, ann: Option<&TypeExpr>) -> Option<TypeExpr> {
-        let is_bag = |ty: &&TypeExpr| {
-            matches!(ty, TypeExpr::Generic(name, _) if name == "Option" || name == "Result")
-        };
+        let is_bag = |ty: &&TypeExpr| matches!(ty, TypeExpr::Generic(name, _) if name == "Option" || name == "Result");
         if let Some(ty) = ann.filter(is_bag) {
             return Some(ty.clone());
         }
@@ -2408,7 +2382,10 @@ impl Codegen {
             }
             Expr::Method {
                 receiver, method, ..
-            } => self.method_return_type(receiver, method).filter(is_bag).cloned(),
+            } => self
+                .method_return_type(receiver, method)
+                .filter(is_bag)
+                .cloned(),
             _ => None,
         }
     }
@@ -2416,8 +2393,7 @@ impl Codegen {
     fn discarded_bag_is_owned(expr: &Expr) -> bool {
         // Index and field expressions borrow their bag from the containing value.
         // Calls and constructors transfer fresh ownership to the returned bag.
-        !matches!(expr, Expr::Index { .. } | Expr::Field { .. })
-            && Self::expr_is_fresh_own(expr)
+        !matches!(expr, Expr::Index { .. } | Expr::Field { .. }) && Self::expr_is_fresh_own(expr)
     }
 
     fn scalar_option_type() -> TypeExpr {
@@ -2460,8 +2436,7 @@ impl Codegen {
                     .find(|(name, info)| name.as_str() == receiver_ty || info.c_name == receiver_ty)
                     .map(|(name, _)| name.as_str())
             })?;
-        self.fn_ret_types
-            .get(&format!("{source_ty}_{method}"))
+        self.fn_ret_types.get(&format!("{source_ty}_{method}"))
     }
 
     fn payload_type_for_discard(&self, expr: &Expr) -> Option<TypeExpr> {
@@ -2531,11 +2506,7 @@ impl Codegen {
         c_ty: &str,
         val: &str,
     ) -> bool {
-        if !matches!(
-            c_ty,
-            "MakoOptionInt" | "MakoResultInt" | "MakoResultFloat"
-        )
-        {
+        if !matches!(c_ty, "MakoOptionInt" | "MakoResultInt" | "MakoResultFloat") {
             return false;
         }
         let inferred_ty = self.bag_type_for_discard(expr, ann);
@@ -2621,9 +2592,7 @@ impl Codegen {
                     "MakoResultInt"
                 };
                 let p = self.fresh("bagp");
-                self.emit_line(format_args!(
-                    "{c_ty} *{p} = ({c_ty}*){ptr}({bag});"
-                ));
+                self.emit_line(format_args!("{c_ty} *{p} = ({c_ty}*){ptr}({bag});"));
                 self.emit_line(format_args!("if ({p}) {{"));
                 self.indent += 1;
                 self.emit_bag_drop(&format!("*{p}"), payload);
@@ -2634,9 +2603,7 @@ impl Codegen {
             TypeExpr::Named(name) if self.structs.contains_key(name) => {
                 let c_ty = self.type_expr_c(payload);
                 let p = self.fresh("bagp");
-                self.emit_line(format_args!(
-                    "{c_ty} *{p} = ({c_ty}*){ptr}({bag});"
-                ));
+                self.emit_line(format_args!("{c_ty} *{p} = ({c_ty}*){ptr}({bag});"));
                 self.emit_line(format_args!("if ({p}) {{"));
                 self.indent += 1;
                 self.emit_struct_fields_drop(&p, name);
@@ -2656,12 +2623,8 @@ impl Codegen {
                     self.emit_line(format_args!("{free_fn}(({c_ty}){ptr}({bag}));"));
                 } else {
                     let p = self.fresh("bagp");
-                    self.emit_line(format_args!(
-                        "{c_ty} *{p} = ({c_ty}*){ptr}({bag});"
-                    ));
-                    self.emit_line(format_args!(
-                        "if ({p}) {{ {free_fn}(*{p}); free({p}); }}"
-                    ));
+                    self.emit_line(format_args!("{c_ty} *{p} = ({c_ty}*){ptr}({bag});"));
+                    self.emit_line(format_args!("if ({p}) {{ {free_fn}(*{p}); free({p}); }}"));
                 }
             }
         }
@@ -2739,10 +2702,7 @@ impl Codegen {
             return val;
         }
         // Already a plain C identifier (no operators / calls / indexing).
-        if val
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '_')
-        {
+        if val.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
             return val;
         }
         let tmp = self.fresh("retv");
@@ -3251,7 +3211,9 @@ impl Codegen {
             "MakoStrArray" => {
                 // Deep clone: allocate new array and clone each string element.
                 self.emit_line(format_args!("MakoStrArray {tmp};"));
-                self.emit_line(format_args!("{tmp}.len = {val}.len; {tmp}.cap = {val}.len;"));
+                self.emit_line(format_args!(
+                    "{tmp}.len = {val}.len; {tmp}.cap = {val}.len;"
+                ));
                 self.emit_line(format_args!(
                     "{tmp}.data = (MakoString*)malloc(sizeof(MakoString) * ({val}.len ? {val}.len : 1));"
                 ));
@@ -3306,10 +3268,7 @@ impl Codegen {
     /// Emit `{fnp}_free` for a heap map pointer (SAFE-004 monomorph).
     /// `free_str_keys` frees owned string keys before releasing the table.
     fn emit_map_heap_free(&mut self, fnp: &str, mt: &str, free_str_keys: bool) {
-        let _ = writeln!(
-            self.out,
-            "static inline void {fnp}_free({mt} *m) {{"
-        );
+        let _ = writeln!(self.out, "static inline void {fnp}_free({mt} *m) {{");
         let _ = writeln!(self.out, "    if (!m) return;");
         if free_str_keys {
             let _ = writeln!(self.out, "    for (size_t i = 0; i < m->cap; i++) {{");
@@ -3498,7 +3457,7 @@ impl Codegen {
         self.out.push_str("#include \"mako_proxy.h\"\n");
         self.out.push_str("#include \"mako_http.h\"\n");
         self.out.push_str("#include \"mako_trace.h\"\n"); /* before log/std so log_* can emit trace= */
-        self.out.push_str("#include \"mako_log.h\"\n");   /* strong structured logging */
+        self.out.push_str("#include \"mako_log.h\"\n"); /* strong structured logging */
         self.out.push_str("#include \"mako_std.h\"\n");
         self.out.push_str("#include \"mako_leak.h\"\n");
         self.out.push_str("#include \"mako_shutdown.h\"\n");
@@ -3556,7 +3515,9 @@ impl Codegen {
         // Demand-driven monomorphs: only emit map helpers used in this unit.
         self.collect_used_maps(program);
         // Build joined lookup set for O(1) want_map without per-call allocation.
-        self.used_maps_joined = self.used_maps.iter()
+        self.used_maps_joined = self
+            .used_maps
+            .iter()
             .map(|(k, v)| Self::map_join_key(k, v))
             .collect();
         // Emit C tagged unions + map monomorphs (gated by used_maps).
@@ -3617,8 +3578,7 @@ impl Codegen {
                             }
                             let chain = Self::option_nest_chain_for_type(rt);
                             if !chain.is_empty() {
-                                self.fn_result_option_chain
-                                    .insert(f.name.clone(), chain);
+                                self.fn_result_option_chain.insert(f.name.clone(), chain);
                             }
                             if let Some(rik) = Self::result_result_inner_kind(rt) {
                                 self.fn_result_result_inner
@@ -3628,8 +3588,7 @@ impl Codegen {
                                 if n == "Result" && !args.is_empty() {
                                     let deep = Self::successive_nest_kinds(&args[0]);
                                     if !deep.is_empty() {
-                                        self.fn_deep_nest_chain
-                                            .insert(f.name.clone(), deep);
+                                        self.fn_deep_nest_chain.insert(f.name.clone(), deep);
                                     }
                                 }
                             }
@@ -3656,8 +3615,7 @@ impl Codegen {
                                 if n == "Option" && !args.is_empty() {
                                     let deep = Self::successive_nest_kinds(&args[0]);
                                     if !deep.is_empty() {
-                                        self.fn_deep_nest_chain
-                                            .insert(f.name.clone(), deep);
+                                        self.fn_deep_nest_chain.insert(f.name.clone(), deep);
                                     }
                                 }
                             }
@@ -3784,20 +3742,21 @@ impl Codegen {
                 | Item::Import { .. } => {}
                 Item::ExternC(_) => {}
                 Item::Const(c) => {
-                    if let Some(v) =
-                        fold_const_c_env(&c.value, &self.const_ints, &self.const_strs, &self.const_fns)
-                    {
+                    if let Some(v) = fold_const_c_env(
+                        &c.value,
+                        &self.const_ints,
+                        &self.const_strs,
+                        &self.const_fns,
+                    ) {
                         self.const_ints.insert(c.name.clone(), v);
                         // Emit as #define so uses in C are valid integer constants
-                        let _ = writeln!(
-                            self.out,
-                            "#define {} ((int64_t){})",
-                            mangle(&c.name),
-                            v
-                        );
-                    } else if let Some(s) =
-                        fold_const_c_str(&c.value, &self.const_ints, &self.const_strs, &self.const_fns)
-                    {
+                        let _ = writeln!(self.out, "#define {} ((int64_t){})", mangle(&c.name), v);
+                    } else if let Some(s) = fold_const_c_str(
+                        &c.value,
+                        &self.const_ints,
+                        &self.const_strs,
+                        &self.const_fns,
+                    ) {
                         self.const_strs.insert(c.name.clone(), s);
                         // String consts are substituted at use sites (no #define).
                     }
@@ -3808,7 +3767,8 @@ impl Codegen {
         if let Some(tests) = &self.test_fns {
             self.out.push_str("\nint main(int argc, char **argv) {\n");
             self.out.push_str("    mako_set_args(argc, argv);\n");
-            self.out.push_str("    mako_test_install_crash_handler();\n");
+            self.out
+                .push_str("    mako_test_install_crash_handler();\n");
             self.out.push_str("    int failed = 0;\n");
             for t in tests {
                 let _ = writeln!(self.out, "    failed += mako_test_run(\"{t}\", {t});");
@@ -3848,7 +3808,8 @@ impl Codegen {
             if !self.variant_to_enum.contains_key(&v.name) {
                 self.variant_to_enum.insert(v.name.clone(), e.name.clone());
             }
-            self.variant_to_enum.insert(format!("{}::{}", e.name, v.name), e.name.clone());
+            self.variant_to_enum
+                .insert(format!("{}::{}", e.name, v.name), e.name.clone());
         }
         self.enums
             .insert(e.name.clone(), EnumInfo { c_name, variants });
@@ -3905,11 +3866,7 @@ impl Codegen {
                         }
                     }
                 }
-                let _ = writeln!(
-                    self.out,
-                    "    case {tag}: return {};",
-                    parts.join(" && ")
-                );
+                let _ = writeln!(self.out, "    case {tag}: return {};", parts.join(" && "));
             }
             let _ = writeln!(self.out, "    default: return true;");
             let _ = writeln!(self.out, "    }}");
@@ -3922,26 +3879,14 @@ impl Codegen {
             self.out,
             "static inline uint64_t mako_hash_{c_name}({c_name} k) {{"
         );
-        let _ = writeln!(
-            self.out,
-            "    uint64_t h = 14695981039346656037ULL;"
-        );
+        let _ = writeln!(self.out, "    uint64_t h = 14695981039346656037ULL;");
         let _ = writeln!(
             self.out,
             "    h ^= (uint64_t)(uint32_t)k.tag; h *= 1099511628211ULL;"
         );
-        let _ = writeln!(
-            self.out,
-            "    h ^= (uint64_t)k.i0; h *= 1099511628211ULL;"
-        );
-        let _ = writeln!(
-            self.out,
-            "    h ^= (uint64_t)k.i1; h *= 1099511628211ULL;"
-        );
-        let _ = writeln!(
-            self.out,
-            "    h ^= (uint64_t)k.i2; h *= 1099511628211ULL;"
-        );
+        let _ = writeln!(self.out, "    h ^= (uint64_t)k.i0; h *= 1099511628211ULL;");
+        let _ = writeln!(self.out, "    h ^= (uint64_t)k.i1; h *= 1099511628211ULL;");
+        let _ = writeln!(self.out, "    h ^= (uint64_t)k.i2; h *= 1099511628211ULL;");
         let _ = writeln!(
             self.out,
             "    h ^= mako_hash_bytes(k.s0.data ? k.s0.data : \"\", k.s0.data ? k.s0.len : 0); h *= 1099511628211ULL;"
@@ -4097,15 +4042,9 @@ impl Codegen {
             let _ = writeln!(self.out, "    size_t cap;");
             let _ = writeln!(self.out, "    size_t len;");
             let _ = writeln!(self.out, "}} {mt};");
-            let _ = writeln!(
-                self.out,
-                "static inline {mt} {fnp}_new(size_t hint) {{"
-            );
+            let _ = writeln!(self.out, "static inline {mt} {fnp}_new(size_t hint) {{");
             let _ = writeln!(self.out, "    size_t cap = 8;");
-            let _ = writeln!(
-                self.out,
-                "    size_t need = hint ? (hint * 4 / 3 + 1) : 8;"
-            );
+            let _ = writeln!(self.out, "    size_t need = hint ? (hint * 4 / 3 + 1) : 8;");
             let _ = writeln!(self.out, "    while (cap < need) cap *= 2;");
             let _ = writeln!(self.out, "    {mt} m;");
             let _ = writeln!(self.out, "    m.state = (uint8_t *)calloc(cap, 1);");
@@ -4158,10 +4097,7 @@ impl Codegen {
             );
             let _ = writeln!(self.out, "            m->state[slot] = MAKO_MAP_FULL;");
             if free_str_key {
-                let _ = writeln!(
-                    self.out,
-                    "            m->keys[slot] = mako_str_clone(key);"
-                );
+                let _ = writeln!(self.out, "            m->keys[slot] = mako_str_clone(key);");
             } else {
                 let _ = writeln!(self.out, "            m->keys[slot] = key;");
             }
@@ -4189,7 +4125,10 @@ impl Codegen {
             let _ = writeln!(self.out, "    size_t ocap = m->cap;");
             let _ = writeln!(self.out, "    {mt} n = {fnp}_new(ncap / 2);");
             let _ = writeln!(self.out, "    for (size_t i = 0; i < ocap; i++) {{");
-            let _ = writeln!(self.out, "        if (ostate[i] != MAKO_MAP_FULL) continue;");
+            let _ = writeln!(
+                self.out,
+                "        if (ostate[i] != MAKO_MAP_FULL) continue;"
+            );
             let _ = writeln!(self.out, "        {key_c} key = okeys[i];");
             let _ = writeln!(self.out, "        {c_ty} val = ovals[i];");
             if *key_suf == "f" {
@@ -4200,10 +4139,7 @@ impl Codegen {
                     "        uint64_t h = mako_hash_bytes(key.data, key.len);"
                 );
             } else if *key_suf == "b" {
-                let _ = writeln!(
-                    self.out,
-                    "        uint64_t h = mako_hash_i64(key ? 1 : 0);"
-                );
+                let _ = writeln!(self.out, "        uint64_t h = mako_hash_i64(key ? 1 : 0);");
             } else {
                 let _ = writeln!(self.out, "        uint64_t h = mako_hash_i64(key);");
             }
@@ -4213,9 +4149,15 @@ impl Codegen {
                 "        while (n.state[j] == MAKO_MAP_FULL) j = (j + 1) & (n.cap - 1);"
             );
             let _ = writeln!(self.out, "        n.state[j] = MAKO_MAP_FULL;");
-            let _ = writeln!(self.out, "        n.keys[j] = key; n.vals[j] = val; n.len++;");
+            let _ = writeln!(
+                self.out,
+                "        n.keys[j] = key; n.vals[j] = val; n.len++;"
+            );
             let _ = writeln!(self.out, "    }}");
-            let _ = writeln!(self.out, "    free(ostate); free(okeys); free(ovals); *m = n;");
+            let _ = writeln!(
+                self.out,
+                "    free(ostate); free(okeys); free(ovals); *m = n;"
+            );
             let _ = writeln!(self.out, "}}");
             let _ = writeln!(
                 self.out,
@@ -4275,7 +4217,10 @@ impl Codegen {
             let _ = writeln!(self.out, "    uint64_t h = {hash};");
             let _ = writeln!(self.out, "    size_t i = (size_t)(h & (m->cap - 1));");
             let _ = writeln!(self.out, "    for (;;) {{");
-            let _ = writeln!(self.out, "        if (m->state[i] == MAKO_MAP_EMPTY) return;");
+            let _ = writeln!(
+                self.out,
+                "        if (m->state[i] == MAKO_MAP_EMPTY) return;"
+            );
             let _ = writeln!(
                 self.out,
                 "        if (m->state[i] == MAKO_MAP_FULL && {key_eq_get}) {{"
@@ -4298,14 +4243,8 @@ impl Codegen {
                 self.out,
                 "static inline int64_t {fnp}_len({mt} *m) {{ return m ? (int64_t)m->len : 0; }}"
             );
-            let _ = writeln!(
-                self.out,
-                "static inline {mt} *{fnp}_make(int64_t hint) {{"
-            );
-            let _ = writeln!(
-                self.out,
-                "    {mt} *m = ({mt} *)malloc(sizeof({mt}));"
-            );
+            let _ = writeln!(self.out, "static inline {mt} *{fnp}_make(int64_t hint) {{");
+            let _ = writeln!(self.out, "    {mt} *m = ({mt} *)malloc(sizeof({mt}));");
             let _ = writeln!(
                 self.out,
                 "    *m = {fnp}_new(hint > 0 ? (size_t)hint : 0); return m;"
@@ -4348,7 +4287,10 @@ impl Codegen {
             );
             let _ = writeln!(self.out, "    if (!m) return out;");
             let _ = writeln!(self.out, "    for (size_t i = 0; i < m->cap; i++) {{");
-            let _ = writeln!(self.out, "        if (m->state[i] == MAKO_MAP_FULL) {{ {keys_append} }}");
+            let _ = writeln!(
+                self.out,
+                "        if (m->state[i] == MAKO_MAP_FULL) {{ {keys_append} }}"
+            );
             let _ = writeln!(self.out, "    }} return out;");
             let _ = writeln!(self.out, "}}");
             let _ = writeln!(
@@ -4419,11 +4361,11 @@ impl Codegen {
             );
             let _ = writeln!(self.out, "    if (a->len != b->len) return 0;");
             let _ = writeln!(self.out, "    for (size_t i = 0; i < a->cap; i++) {{");
-            let _ = writeln!(self.out, "        if (a->state[i] != MAKO_MAP_FULL) continue;");
             let _ = writeln!(
                 self.out,
-                "        if (!{fnp}_has(b, a->keys[i])) return 0;"
+                "        if (a->state[i] != MAKO_MAP_FULL) continue;"
             );
+            let _ = writeln!(self.out, "        if (!{fnp}_has(b, a->keys[i])) return 0;");
             let _ = writeln!(
                 self.out,
                 "        if (!mako_eq_{c_ty}(a->vals[i], {fnp}_get(b, a->keys[i]))) return 0;"
@@ -4526,15 +4468,14 @@ impl Codegen {
                     .cloned()
                     .unwrap_or_else(|| "int64_t".into());
                 let params = self.fn_params.get(&key).cloned().unwrap_or_default();
-                let arg_tys: Vec<String> =
-                    if !params.is_empty()
-                        && (self.structs.values().any(|s| s.c_name == params[0])
-                            || self.structs.contains_key(&params[0]))
-                    {
-                        params[1..].to_vec()
-                    } else {
-                        params.clone()
-                    };
+                let arg_tys: Vec<String> = if !params.is_empty()
+                    && (self.structs.values().any(|s| s.c_name == params[0])
+                        || self.structs.contains_key(&params[0]))
+                {
+                    params[1..].to_vec()
+                } else {
+                    params.clone()
+                };
                 let mut sig = vec!["void *self".to_string()];
                 for (i, t) in arg_tys.iter().enumerate() {
                     sig.push(format!("{t} a{i}"));
@@ -4824,10 +4765,7 @@ impl Codegen {
             self.out,
             "static inline uint64_t mako_hash_{c_name}({c_name} k) {{"
         );
-        let _ = writeln!(
-            self.out,
-            "    uint64_t h = 14695981039346656037ULL;"
-        );
+        let _ = writeln!(self.out, "    uint64_t h = 14695981039346656037ULL;");
         if info.fields.is_empty() {
             let _ = writeln!(self.out, "    (void)k;");
         } else {
@@ -5216,14 +5154,8 @@ impl Codegen {
             self.emit_nested_arr_helpers(ctag, cc); // MakoArr_chan_int
             vals.push((format!("arr_{ctag}"), format!("MakoArr_{ctag}")));
             // Outer of []chan for [][]chan
-            self.emit_nested_arr_helpers(
-                &format!("arr_{ctag}"),
-                &format!("MakoArr_{ctag}"),
-            );
-            vals.push((
-                format!("arr_arr_{ctag}"),
-                format!("MakoArr_arr_{ctag}"),
-            ));
+            self.emit_nested_arr_helpers(&format!("arr_{ctag}"), &format!("MakoArr_{ctag}"));
+            vals.push((format!("arr_arr_{ctag}"), format!("MakoArr_arr_{ctag}")));
         }
         // Outer arrays for maps_values (MakoArr_arr_arr_int / MakoArr_arr_opt_… / …)
         for (vt, vc) in &vals {
@@ -5300,10 +5232,8 @@ impl Codegen {
                 for (c, cc) in bases {
                     let tag = format!("tup_{a}_{b}_{c}");
                     let cty = format!("MakoTup_{a}_{b}_{c}");
-                    if self.note_tuple_typedef(
-                        &cty,
-                        vec![(*ac).into(), (*bc).into(), (*cc).into()],
-                    ) {
+                    if self.note_tuple_typedef(&cty, vec![(*ac).into(), (*bc).into(), (*cc).into()])
+                    {
                         let _ = writeln!(
                             self.out,
                             "typedef struct {{\n    {ac} _0;\n    {bc} _1;\n    {cc} _2;\n}} {cty};"
@@ -6363,20 +6293,38 @@ impl Codegen {
         let _ = writeln!(self.out, "    {mt} m;");
         let _ = writeln!(self.out, "    m.state = (uint8_t *)calloc(cap, 1);");
         if free_str_key {
-            let _ = writeln!(self.out, "    m.keys = ({key_c} *)calloc(cap, sizeof({key_c}));");
+            let _ = writeln!(
+                self.out,
+                "    m.keys = ({key_c} *)calloc(cap, sizeof({key_c}));"
+            );
         } else {
-            let _ = writeln!(self.out, "    m.keys = ({key_c} *)malloc(cap * sizeof({key_c}));");
+            let _ = writeln!(
+                self.out,
+                "    m.keys = ({key_c} *)malloc(cap * sizeof({key_c}));"
+            );
         }
-        let _ = writeln!(self.out, "    m.vals = ({val_c} *)calloc(cap, sizeof({val_c}));");
+        let _ = writeln!(
+            self.out,
+            "    m.vals = ({val_c} *)calloc(cap, sizeof({val_c}));"
+        );
         let _ = writeln!(self.out, "    if (!m.keys || !m.vals) {{ fprintf(stderr, \"mako: OOM in {fnp}_new\\n\"); abort(); }}");
         let _ = writeln!(self.out, "    m.cap = cap; m.len = 0; return m;");
         let _ = writeln!(self.out, "}}");
-        let _ = writeln!(self.out, "static inline void {fnp}_rehash({mt} *m, size_t ncap);");
-        let _ = writeln!(self.out, "static inline void {fnp}_set({mt} *m, {key_c} key, {val_c} val) {{");
+        let _ = writeln!(
+            self.out,
+            "static inline void {fnp}_rehash({mt} *m, size_t ncap);"
+        );
+        let _ = writeln!(
+            self.out,
+            "static inline void {fnp}_set({mt} *m, {key_c} key, {val_c} val) {{"
+        );
         if key_suf == "f" {
             let _ = writeln!(self.out, "    key = mako_f64_key_norm(key);");
         }
-        let _ = writeln!(self.out, "    if ((m->len + 1) * 4 >= m->cap * 3) {fnp}_rehash(m, m->cap * 2);");
+        let _ = writeln!(
+            self.out,
+            "    if ((m->len + 1) * 4 >= m->cap * 3) {fnp}_rehash(m, m->cap * 2);"
+        );
         let _ = writeln!(self.out, "    uint64_t h = {hash};");
         let _ = writeln!(self.out, "    size_t mask = m->cap - 1;");
         let _ = writeln!(self.out, "    size_t i = (size_t)(h & mask);");
@@ -6384,7 +6332,10 @@ impl Codegen {
         let _ = writeln!(self.out, "    for (;;) {{");
         let _ = writeln!(self.out, "        uint8_t st = m->state[i];");
         let _ = writeln!(self.out, "        if (st == MAKO_MAP_EMPTY) {{");
-        let _ = writeln!(self.out, "            size_t slot = (first_tomb != (size_t)-1) ? first_tomb : i;");
+        let _ = writeln!(
+            self.out,
+            "            size_t slot = (first_tomb != (size_t)-1) ? first_tomb : i;"
+        );
         let _ = writeln!(self.out, "            m->state[slot] = MAKO_MAP_FULL;");
         if free_str_key {
             let _ = writeln!(self.out, "            m->keys[slot] = mako_str_clone(key);");
@@ -6394,19 +6345,31 @@ impl Codegen {
         let _ = writeln!(self.out, "            m->vals[slot] = val;");
         let _ = writeln!(self.out, "            m->len++; return;");
         let _ = writeln!(self.out, "        }}");
-        let _ = writeln!(self.out, "        if (st == MAKO_MAP_TOMB) {{ if (first_tomb == (size_t)-1) first_tomb = i; }}");
-        let _ = writeln!(self.out, "        else if ({key_eq}) {{ m->vals[i] = val; return; }}");
+        let _ = writeln!(
+            self.out,
+            "        if (st == MAKO_MAP_TOMB) {{ if (first_tomb == (size_t)-1) first_tomb = i; }}"
+        );
+        let _ = writeln!(
+            self.out,
+            "        else if ({key_eq}) {{ m->vals[i] = val; return; }}"
+        );
         let _ = writeln!(self.out, "        i = (i + 1) & mask;");
         let _ = writeln!(self.out, "    }}");
         let _ = writeln!(self.out, "}}");
-        let _ = writeln!(self.out, "static inline void {fnp}_rehash({mt} *m, size_t ncap) {{");
+        let _ = writeln!(
+            self.out,
+            "static inline void {fnp}_rehash({mt} *m, size_t ncap) {{"
+        );
         let _ = writeln!(self.out, "    uint8_t *ostate = m->state;");
         let _ = writeln!(self.out, "    {key_c} *okeys = m->keys;");
         let _ = writeln!(self.out, "    {val_c} *ovals = m->vals;");
         let _ = writeln!(self.out, "    size_t ocap = m->cap;");
         let _ = writeln!(self.out, "    {mt} n = {fnp}_new(ncap / 2);");
         let _ = writeln!(self.out, "    for (size_t i = 0; i < ocap; i++) {{");
-        let _ = writeln!(self.out, "        if (ostate[i] != MAKO_MAP_FULL) continue;");
+        let _ = writeln!(
+            self.out,
+            "        if (ostate[i] != MAKO_MAP_FULL) continue;"
+        );
         let _ = writeln!(self.out, "        {key_c} key = okeys[i];");
         let _ = writeln!(self.out, "        {val_c} val = ovals[i];");
         let rehash_h = match key_suf {
@@ -6417,13 +6380,25 @@ impl Codegen {
         };
         let _ = writeln!(self.out, "        uint64_t h = {rehash_h};");
         let _ = writeln!(self.out, "        size_t j = (size_t)(h & (n.cap - 1));");
-        let _ = writeln!(self.out, "        while (n.state[j] == MAKO_MAP_FULL) j = (j + 1) & (n.cap - 1);");
+        let _ = writeln!(
+            self.out,
+            "        while (n.state[j] == MAKO_MAP_FULL) j = (j + 1) & (n.cap - 1);"
+        );
         let _ = writeln!(self.out, "        n.state[j] = MAKO_MAP_FULL;");
-        let _ = writeln!(self.out, "        n.keys[j] = key; n.vals[j] = val; n.len++;");
+        let _ = writeln!(
+            self.out,
+            "        n.keys[j] = key; n.vals[j] = val; n.len++;"
+        );
         let _ = writeln!(self.out, "    }}");
-        let _ = writeln!(self.out, "    free(ostate); free(okeys); free(ovals); *m = n;");
+        let _ = writeln!(
+            self.out,
+            "    free(ostate); free(okeys); free(ovals); *m = n;"
+        );
         let _ = writeln!(self.out, "}}");
-        let _ = writeln!(self.out, "static inline {val_c} {fnp}_get({mt} *m, {key_c} key) {{");
+        let _ = writeln!(
+            self.out,
+            "static inline {val_c} {fnp}_get({mt} *m, {key_c} key) {{"
+        );
         if key_suf == "f" {
             let _ = writeln!(self.out, "    key = mako_f64_key_norm(key);");
         }
@@ -6431,12 +6406,21 @@ impl Codegen {
         let _ = writeln!(self.out, "    uint64_t h = {hash};");
         let _ = writeln!(self.out, "    size_t i = (size_t)(h & (m->cap - 1));");
         let _ = writeln!(self.out, "    for (;;) {{");
-        let _ = writeln!(self.out, "        if (m->state[i] == MAKO_MAP_EMPTY) return {zero_val};");
-        let _ = writeln!(self.out, "        if (m->state[i] == MAKO_MAP_FULL && {key_eq}) return m->vals[i];");
+        let _ = writeln!(
+            self.out,
+            "        if (m->state[i] == MAKO_MAP_EMPTY) return {zero_val};"
+        );
+        let _ = writeln!(
+            self.out,
+            "        if (m->state[i] == MAKO_MAP_FULL && {key_eq}) return m->vals[i];"
+        );
         let _ = writeln!(self.out, "        i = (i + 1) & (m->cap - 1);");
         let _ = writeln!(self.out, "    }}");
         let _ = writeln!(self.out, "}}");
-        let _ = writeln!(self.out, "static inline bool {fnp}_has({mt} *m, {key_c} key) {{");
+        let _ = writeln!(
+            self.out,
+            "static inline bool {fnp}_has({mt} *m, {key_c} key) {{"
+        );
         if key_suf == "f" {
             let _ = writeln!(self.out, "    key = mako_f64_key_norm(key);");
         }
@@ -6444,12 +6428,21 @@ impl Codegen {
         let _ = writeln!(self.out, "    uint64_t h = {hash};");
         let _ = writeln!(self.out, "    size_t i = (size_t)(h & (m->cap - 1));");
         let _ = writeln!(self.out, "    for (;;) {{");
-        let _ = writeln!(self.out, "        if (m->state[i] == MAKO_MAP_EMPTY) return false;");
-        let _ = writeln!(self.out, "        if (m->state[i] == MAKO_MAP_FULL && {key_eq}) return true;");
+        let _ = writeln!(
+            self.out,
+            "        if (m->state[i] == MAKO_MAP_EMPTY) return false;"
+        );
+        let _ = writeln!(
+            self.out,
+            "        if (m->state[i] == MAKO_MAP_FULL && {key_eq}) return true;"
+        );
         let _ = writeln!(self.out, "        i = (i + 1) & (m->cap - 1);");
         let _ = writeln!(self.out, "    }}");
         let _ = writeln!(self.out, "}}");
-        let _ = writeln!(self.out, "static inline void {fnp}_delete({mt} *m, {key_c} key) {{");
+        let _ = writeln!(
+            self.out,
+            "static inline void {fnp}_delete({mt} *m, {key_c} key) {{"
+        );
         if key_suf == "f" {
             let _ = writeln!(self.out, "    key = mako_f64_key_norm(key);");
         }
@@ -6457,49 +6450,88 @@ impl Codegen {
         let _ = writeln!(self.out, "    uint64_t h = {hash};");
         let _ = writeln!(self.out, "    size_t i = (size_t)(h & (m->cap - 1));");
         let _ = writeln!(self.out, "    for (;;) {{");
-        let _ = writeln!(self.out, "        if (m->state[i] == MAKO_MAP_EMPTY) return;");
-        let _ = writeln!(self.out, "        if (m->state[i] == MAKO_MAP_FULL && {key_eq}) {{");
+        let _ = writeln!(
+            self.out,
+            "        if (m->state[i] == MAKO_MAP_EMPTY) return;"
+        );
+        let _ = writeln!(
+            self.out,
+            "        if (m->state[i] == MAKO_MAP_FULL && {key_eq}) {{"
+        );
         if free_str_key {
             let _ = writeln!(self.out, "            mako_str_free(m->keys[i]); m->keys[i].data = NULL; m->keys[i].len = 0;");
         }
-        let _ = writeln!(self.out, "            m->state[i] = MAKO_MAP_TOMB; m->len--; return;");
+        let _ = writeln!(
+            self.out,
+            "            m->state[i] = MAKO_MAP_TOMB; m->len--; return;"
+        );
         let _ = writeln!(self.out, "        }}");
         let _ = writeln!(self.out, "        i = (i + 1) & (m->cap - 1);");
         let _ = writeln!(self.out, "    }}");
         let _ = writeln!(self.out, "}}");
-        let _ = writeln!(self.out, "static inline int64_t {fnp}_len({mt} *m) {{ return m ? (int64_t)m->len : 0; }}");
+        let _ = writeln!(
+            self.out,
+            "static inline int64_t {fnp}_len({mt} *m) {{ return m ? (int64_t)m->len : 0; }}"
+        );
         let _ = writeln!(self.out, "static inline {mt} *{fnp}_make(int64_t hint) {{");
         let _ = writeln!(self.out, "    {mt} *m = ({mt} *)malloc(sizeof({mt}));");
-        let _ = writeln!(self.out, "    *m = {fnp}_new(hint > 0 ? (size_t)hint : 0); return m;");
+        let _ = writeln!(
+            self.out,
+            "    *m = {fnp}_new(hint > 0 ? (size_t)hint : 0); return m;"
+        );
         let _ = writeln!(self.out, "}}");
         // maps_keys (same shape as slice maps)
         if key_suf == "s" {
-            let _ = writeln!(self.out, "static inline MakoStrArray mako_maps_keys_{key_suf}_{val_tag}({mt} *m) {{");
-            let _ = writeln!(self.out, "    MakoStrArray out = mako_str_array_make(0, m ? (int64_t)m->len : 0);");
+            let _ = writeln!(
+                self.out,
+                "static inline MakoStrArray mako_maps_keys_{key_suf}_{val_tag}({mt} *m) {{"
+            );
+            let _ = writeln!(
+                self.out,
+                "    MakoStrArray out = mako_str_array_make(0, m ? (int64_t)m->len : 0);"
+            );
             let _ = writeln!(self.out, "    if (!m) return out;");
             let _ = writeln!(self.out, "    for (size_t i = 0; i < m->cap; i++) {{");
             let _ = writeln!(self.out, "        if (m->state[i] == MAKO_MAP_FULL) out = mako_str_array_append(out, m->keys[i]);");
             let _ = writeln!(self.out, "    }} return out;");
             let _ = writeln!(self.out, "}}");
         } else if key_suf == "f" {
-            let _ = writeln!(self.out, "static inline MakoFloatArray mako_maps_keys_{key_suf}_{val_tag}({mt} *m) {{");
-            let _ = writeln!(self.out, "    MakoFloatArray out = mako_float_array_make(0, m ? (int64_t)m->len : 0);");
+            let _ = writeln!(
+                self.out,
+                "static inline MakoFloatArray mako_maps_keys_{key_suf}_{val_tag}({mt} *m) {{"
+            );
+            let _ = writeln!(
+                self.out,
+                "    MakoFloatArray out = mako_float_array_make(0, m ? (int64_t)m->len : 0);"
+            );
             let _ = writeln!(self.out, "    if (!m) return out;");
             let _ = writeln!(self.out, "    for (size_t i = 0; i < m->cap; i++) {{");
             let _ = writeln!(self.out, "        if (m->state[i] == MAKO_MAP_FULL) out = mako_float_array_append(out, m->keys[i]);");
             let _ = writeln!(self.out, "    }} return out;");
             let _ = writeln!(self.out, "}}");
         } else if key_suf == "b" {
-            let _ = writeln!(self.out, "static inline MakoBoolArray mako_maps_keys_{key_suf}_{val_tag}({mt} *m) {{");
-            let _ = writeln!(self.out, "    MakoBoolArray out = mako_bool_array_make(0, m ? (int64_t)m->len : 0);");
+            let _ = writeln!(
+                self.out,
+                "static inline MakoBoolArray mako_maps_keys_{key_suf}_{val_tag}({mt} *m) {{"
+            );
+            let _ = writeln!(
+                self.out,
+                "    MakoBoolArray out = mako_bool_array_make(0, m ? (int64_t)m->len : 0);"
+            );
             let _ = writeln!(self.out, "    if (!m) return out;");
             let _ = writeln!(self.out, "    for (size_t i = 0; i < m->cap; i++) {{");
             let _ = writeln!(self.out, "        if (m->state[i] == MAKO_MAP_FULL) out = mako_bool_array_append(out, m->keys[i]);");
             let _ = writeln!(self.out, "    }} return out;");
             let _ = writeln!(self.out, "}}");
         } else {
-            let _ = writeln!(self.out, "static inline MakoIntArray mako_maps_keys_{key_suf}_{val_tag}({mt} *m) {{");
-            let _ = writeln!(self.out, "    MakoIntArray out = mako_int_array_make(0, m ? (int64_t)m->len : 0);");
+            let _ = writeln!(
+                self.out,
+                "static inline MakoIntArray mako_maps_keys_{key_suf}_{val_tag}({mt} *m) {{"
+            );
+            let _ = writeln!(
+                self.out,
+                "    MakoIntArray out = mako_int_array_make(0, m ? (int64_t)m->len : 0);"
+            );
             let _ = writeln!(self.out, "    if (!m) return out;");
             let _ = writeln!(self.out, "    for (size_t i = 0; i < m->cap; i++) {{");
             let _ = writeln!(self.out, "        if (m->state[i] == MAKO_MAP_FULL) {{");
@@ -6509,14 +6541,23 @@ impl Codegen {
             let _ = writeln!(self.out, "    }} return out;");
             let _ = writeln!(self.out, "}}");
         }
-        let _ = writeln!(self.out, "static inline MakoArr_{val_tag} mako_maps_values_{key_suf}_{val_tag}({mt} *m) {{");
-        let _ = writeln!(self.out, "    MakoArr_{val_tag} out = mako_arr_{val_tag}_make(0, m ? (int64_t)m->len : 0);");
+        let _ = writeln!(
+            self.out,
+            "static inline MakoArr_{val_tag} mako_maps_values_{key_suf}_{val_tag}({mt} *m) {{"
+        );
+        let _ = writeln!(
+            self.out,
+            "    MakoArr_{val_tag} out = mako_arr_{val_tag}_make(0, m ? (int64_t)m->len : 0);"
+        );
         let _ = writeln!(self.out, "    if (!m) return out;");
         let _ = writeln!(self.out, "    for (size_t i = 0; i < m->cap; i++) {{");
         let _ = writeln!(self.out, "        if (m->state[i] == MAKO_MAP_FULL) out = mako_arr_{val_tag}_append(out, m->vals[i]);");
         let _ = writeln!(self.out, "    }} return out;");
         let _ = writeln!(self.out, "}}");
-        let _ = writeln!(self.out, "static inline void mako_maps_clear_{key_suf}_{val_tag}({mt} *m) {{");
+        let _ = writeln!(
+            self.out,
+            "static inline void mako_maps_clear_{key_suf}_{val_tag}({mt} *m) {{"
+        );
         if free_str_key {
             let _ = writeln!(self.out, "    if (!m) return;");
             let _ = writeln!(self.out, "    for (size_t i = 0; i < m->cap; i++) {{");
@@ -6524,31 +6565,58 @@ impl Codegen {
             let _ = writeln!(self.out, "        m->state[i] = MAKO_MAP_EMPTY;");
             let _ = writeln!(self.out, "    }} m->len = 0;");
         } else {
-            let _ = writeln!(self.out, "    if (!m) return; memset(m->state, 0, m->cap); m->len = 0;");
+            let _ = writeln!(
+                self.out,
+                "    if (!m) return; memset(m->state, 0, m->cap); m->len = 0;"
+            );
         }
         let _ = writeln!(self.out, "}}");
         {
             let free_str = key_suf == "s";
             self.emit_map_heap_free(&fnp, &mt, free_str);
         }
-        let _ = writeln!(self.out, "static inline {mt} *mako_maps_clone_{key_suf}_{val_tag}({mt} *m) {{");
-        let _ = writeln!(self.out, "    {mt} *n = {fnp}_make(m ? (int64_t)m->len : 0);");
+        let _ = writeln!(
+            self.out,
+            "static inline {mt} *mako_maps_clone_{key_suf}_{val_tag}({mt} *m) {{"
+        );
+        let _ = writeln!(
+            self.out,
+            "    {mt} *n = {fnp}_make(m ? (int64_t)m->len : 0);"
+        );
         let _ = writeln!(self.out, "    if (!m) return n;");
         let _ = writeln!(self.out, "    for (size_t i = 0; i < m->cap; i++) {{");
-        let _ = writeln!(self.out, "        if (m->state[i] == MAKO_MAP_FULL) {fnp}_set(n, m->keys[i], m->vals[i]);");
+        let _ = writeln!(
+            self.out,
+            "        if (m->state[i] == MAKO_MAP_FULL) {fnp}_set(n, m->keys[i], m->vals[i]);"
+        );
         let _ = writeln!(self.out, "    }} return n;");
         let _ = writeln!(self.out, "}}");
-        let _ = writeln!(self.out, "static inline int64_t mako_maps_equal_{key_suf}_{val_tag}({mt} *a, {mt} *b) {{");
-        let _ = writeln!(self.out, "    if (!a && !b) return 1; if (!a || !b) return 0;");
+        let _ = writeln!(
+            self.out,
+            "static inline int64_t mako_maps_equal_{key_suf}_{val_tag}({mt} *a, {mt} *b) {{"
+        );
+        let _ = writeln!(
+            self.out,
+            "    if (!a && !b) return 1; if (!a || !b) return 0;"
+        );
         let _ = writeln!(self.out, "    if (a->len != b->len) return 0;");
         let _ = writeln!(self.out, "    for (size_t i = 0; i < a->cap; i++) {{");
-        let _ = writeln!(self.out, "        if (a->state[i] != MAKO_MAP_FULL) continue;");
+        let _ = writeln!(
+            self.out,
+            "        if (a->state[i] != MAKO_MAP_FULL) continue;"
+        );
         let _ = writeln!(self.out, "        if (!{fnp}_has(b, a->keys[i])) return 0;");
-        let _ = writeln!(self.out, "        {val_c} av = a->vals[i], bv = {fnp}_get(b, a->keys[i]);");
+        let _ = writeln!(
+            self.out,
+            "        {val_c} av = a->vals[i], bv = {fnp}_get(b, a->keys[i]);"
+        );
         let _ = writeln!(self.out, "        if (!{eq_fn}) return 0;");
         let _ = writeln!(self.out, "    }} return 1;");
         let _ = writeln!(self.out, "}}");
-        let _ = writeln!(self.out, "static inline void mako_maps_copy_{key_suf}_{val_tag}({mt} *dst, {mt} *src) {{");
+        let _ = writeln!(
+            self.out,
+            "static inline void mako_maps_copy_{key_suf}_{val_tag}({mt} *dst, {mt} *src) {{"
+        );
         let _ = writeln!(self.out, "    if (!dst || !src) return;");
         let _ = writeln!(self.out, "    for (size_t i = 0; i < src->cap; i++) {{");
         let _ = writeln!(self.out, "        if (src->state[i] == MAKO_MAP_FULL) {fnp}_set(dst, src->keys[i], src->vals[i]);");
@@ -6584,14 +6652,29 @@ impl Codegen {
         let _ = writeln!(self.out, "    while (cap < need) cap *= 2;");
         let _ = writeln!(self.out, "    {mt} m;");
         let _ = writeln!(self.out, "    m.state = (uint8_t *)calloc(cap, 1);");
-        let _ = writeln!(self.out, "    m.keys = ({key_c} *)calloc(cap, sizeof({key_c}));");
-        let _ = writeln!(self.out, "    m.vals = ({val_c} *)calloc(cap, sizeof({val_c}));");
+        let _ = writeln!(
+            self.out,
+            "    m.keys = ({key_c} *)calloc(cap, sizeof({key_c}));"
+        );
+        let _ = writeln!(
+            self.out,
+            "    m.vals = ({val_c} *)calloc(cap, sizeof({val_c}));"
+        );
         let _ = writeln!(self.out, "    if (!m.keys || !m.vals) {{ fprintf(stderr, \"mako: OOM in {fnp}_new\\n\"); abort(); }}");
         let _ = writeln!(self.out, "    m.cap = cap; m.len = 0; return m;");
         let _ = writeln!(self.out, "}}");
-        let _ = writeln!(self.out, "static inline void {fnp}_rehash({mt} *m, size_t ncap);");
-        let _ = writeln!(self.out, "static inline void {fnp}_set({mt} *m, {key_c} key, {val_c} val) {{");
-        let _ = writeln!(self.out, "    if ((m->len + 1) * 4 >= m->cap * 3) {fnp}_rehash(m, m->cap * 2);");
+        let _ = writeln!(
+            self.out,
+            "static inline void {fnp}_rehash({mt} *m, size_t ncap);"
+        );
+        let _ = writeln!(
+            self.out,
+            "static inline void {fnp}_set({mt} *m, {key_c} key, {val_c} val) {{"
+        );
+        let _ = writeln!(
+            self.out,
+            "    if ((m->len + 1) * 4 >= m->cap * 3) {fnp}_rehash(m, m->cap * 2);"
+        );
         let _ = writeln!(self.out, "    uint64_t h = {hash};");
         let _ = writeln!(self.out, "    size_t mask = m->cap - 1;");
         let _ = writeln!(self.out, "    size_t i = (size_t)(h & mask);");
@@ -6599,111 +6682,213 @@ impl Codegen {
         let _ = writeln!(self.out, "    for (;;) {{");
         let _ = writeln!(self.out, "        uint8_t st = m->state[i];");
         let _ = writeln!(self.out, "        if (st == MAKO_MAP_EMPTY) {{");
-        let _ = writeln!(self.out, "            size_t slot = (first_tomb != (size_t)-1) ? first_tomb : i;");
+        let _ = writeln!(
+            self.out,
+            "            size_t slot = (first_tomb != (size_t)-1) ? first_tomb : i;"
+        );
         let _ = writeln!(self.out, "            m->state[slot] = MAKO_MAP_FULL;");
         let _ = writeln!(self.out, "            m->keys[slot] = key;");
         let _ = writeln!(self.out, "            m->vals[slot] = val;");
         let _ = writeln!(self.out, "            m->len++; return;");
         let _ = writeln!(self.out, "        }}");
-        let _ = writeln!(self.out, "        if (st == MAKO_MAP_TOMB) {{ if (first_tomb == (size_t)-1) first_tomb = i; }}");
-        let _ = writeln!(self.out, "        else if ({key_eq}) {{ m->vals[i] = val; return; }}");
+        let _ = writeln!(
+            self.out,
+            "        if (st == MAKO_MAP_TOMB) {{ if (first_tomb == (size_t)-1) first_tomb = i; }}"
+        );
+        let _ = writeln!(
+            self.out,
+            "        else if ({key_eq}) {{ m->vals[i] = val; return; }}"
+        );
         let _ = writeln!(self.out, "        i = (i + 1) & mask;");
         let _ = writeln!(self.out, "    }}");
         let _ = writeln!(self.out, "}}");
-        let _ = writeln!(self.out, "static inline void {fnp}_rehash({mt} *m, size_t ncap) {{");
+        let _ = writeln!(
+            self.out,
+            "static inline void {fnp}_rehash({mt} *m, size_t ncap) {{"
+        );
         let _ = writeln!(self.out, "    uint8_t *ostate = m->state;");
         let _ = writeln!(self.out, "    {key_c} *okeys = m->keys;");
         let _ = writeln!(self.out, "    {val_c} *ovals = m->vals;");
         let _ = writeln!(self.out, "    size_t ocap = m->cap;");
         let _ = writeln!(self.out, "    {mt} n = {fnp}_new(ncap / 2);");
         let _ = writeln!(self.out, "    for (size_t i = 0; i < ocap; i++) {{");
-        let _ = writeln!(self.out, "        if (ostate[i] != MAKO_MAP_FULL) continue;");
+        let _ = writeln!(
+            self.out,
+            "        if (ostate[i] != MAKO_MAP_FULL) continue;"
+        );
         let _ = writeln!(self.out, "        {key_c} key = okeys[i];");
         let _ = writeln!(self.out, "        {val_c} val = ovals[i];");
         let _ = writeln!(self.out, "        uint64_t h = mako_hash_{key_c}(key);");
         let _ = writeln!(self.out, "        size_t j = (size_t)(h & (n.cap - 1));");
-        let _ = writeln!(self.out, "        while (n.state[j] == MAKO_MAP_FULL) j = (j + 1) & (n.cap - 1);");
+        let _ = writeln!(
+            self.out,
+            "        while (n.state[j] == MAKO_MAP_FULL) j = (j + 1) & (n.cap - 1);"
+        );
         let _ = writeln!(self.out, "        n.state[j] = MAKO_MAP_FULL;");
-        let _ = writeln!(self.out, "        n.keys[j] = key; n.vals[j] = val; n.len++;");
+        let _ = writeln!(
+            self.out,
+            "        n.keys[j] = key; n.vals[j] = val; n.len++;"
+        );
         let _ = writeln!(self.out, "    }}");
-        let _ = writeln!(self.out, "    free(ostate); free(okeys); free(ovals); *m = n;");
+        let _ = writeln!(
+            self.out,
+            "    free(ostate); free(okeys); free(ovals); *m = n;"
+        );
         let _ = writeln!(self.out, "}}");
-        let _ = writeln!(self.out, "static inline {val_c} {fnp}_get({mt} *m, {key_c} key) {{");
+        let _ = writeln!(
+            self.out,
+            "static inline {val_c} {fnp}_get({mt} *m, {key_c} key) {{"
+        );
         let _ = writeln!(self.out, "    if (!m) return {zero_val};");
         let _ = writeln!(self.out, "    uint64_t h = {hash};");
         let _ = writeln!(self.out, "    size_t i = (size_t)(h & (m->cap - 1));");
         let _ = writeln!(self.out, "    for (;;) {{");
-        let _ = writeln!(self.out, "        if (m->state[i] == MAKO_MAP_EMPTY) return {zero_val};");
-        let _ = writeln!(self.out, "        if (m->state[i] == MAKO_MAP_FULL && {key_eq}) return m->vals[i];");
+        let _ = writeln!(
+            self.out,
+            "        if (m->state[i] == MAKO_MAP_EMPTY) return {zero_val};"
+        );
+        let _ = writeln!(
+            self.out,
+            "        if (m->state[i] == MAKO_MAP_FULL && {key_eq}) return m->vals[i];"
+        );
         let _ = writeln!(self.out, "        i = (i + 1) & (m->cap - 1);");
         let _ = writeln!(self.out, "    }}");
         let _ = writeln!(self.out, "}}");
-        let _ = writeln!(self.out, "static inline bool {fnp}_has({mt} *m, {key_c} key) {{");
+        let _ = writeln!(
+            self.out,
+            "static inline bool {fnp}_has({mt} *m, {key_c} key) {{"
+        );
         let _ = writeln!(self.out, "    if (!m) return false;");
         let _ = writeln!(self.out, "    uint64_t h = {hash};");
         let _ = writeln!(self.out, "    size_t i = (size_t)(h & (m->cap - 1));");
         let _ = writeln!(self.out, "    for (;;) {{");
-        let _ = writeln!(self.out, "        if (m->state[i] == MAKO_MAP_EMPTY) return false;");
-        let _ = writeln!(self.out, "        if (m->state[i] == MAKO_MAP_FULL && {key_eq}) return true;");
+        let _ = writeln!(
+            self.out,
+            "        if (m->state[i] == MAKO_MAP_EMPTY) return false;"
+        );
+        let _ = writeln!(
+            self.out,
+            "        if (m->state[i] == MAKO_MAP_FULL && {key_eq}) return true;"
+        );
         let _ = writeln!(self.out, "        i = (i + 1) & (m->cap - 1);");
         let _ = writeln!(self.out, "    }}");
         let _ = writeln!(self.out, "}}");
-        let _ = writeln!(self.out, "static inline void {fnp}_delete({mt} *m, {key_c} key) {{");
+        let _ = writeln!(
+            self.out,
+            "static inline void {fnp}_delete({mt} *m, {key_c} key) {{"
+        );
         let _ = writeln!(self.out, "    if (!m) return;");
         let _ = writeln!(self.out, "    uint64_t h = {hash};");
         let _ = writeln!(self.out, "    size_t i = (size_t)(h & (m->cap - 1));");
         let _ = writeln!(self.out, "    for (;;) {{");
-        let _ = writeln!(self.out, "        if (m->state[i] == MAKO_MAP_EMPTY) return;");
-        let _ = writeln!(self.out, "        if (m->state[i] == MAKO_MAP_FULL && {key_eq}) {{");
-        let _ = writeln!(self.out, "            m->state[i] = MAKO_MAP_TOMB; m->len--; return;");
+        let _ = writeln!(
+            self.out,
+            "        if (m->state[i] == MAKO_MAP_EMPTY) return;"
+        );
+        let _ = writeln!(
+            self.out,
+            "        if (m->state[i] == MAKO_MAP_FULL && {key_eq}) {{"
+        );
+        let _ = writeln!(
+            self.out,
+            "            m->state[i] = MAKO_MAP_TOMB; m->len--; return;"
+        );
         let _ = writeln!(self.out, "        }}");
         let _ = writeln!(self.out, "        i = (i + 1) & (m->cap - 1);");
         let _ = writeln!(self.out, "    }}");
         let _ = writeln!(self.out, "}}");
-        let _ = writeln!(self.out, "static inline int64_t {fnp}_len({mt} *m) {{ return m ? (int64_t)m->len : 0; }}");
+        let _ = writeln!(
+            self.out,
+            "static inline int64_t {fnp}_len({mt} *m) {{ return m ? (int64_t)m->len : 0; }}"
+        );
         let _ = writeln!(self.out, "static inline {mt} *{fnp}_make(int64_t hint) {{");
         let _ = writeln!(self.out, "    {mt} *m = ({mt} *)malloc(sizeof({mt}));");
-        let _ = writeln!(self.out, "    *m = {fnp}_new(hint > 0 ? (size_t)hint : 0); return m;");
+        let _ = writeln!(
+            self.out,
+            "    *m = {fnp}_new(hint > 0 ? (size_t)hint : 0); return m;"
+        );
         let _ = writeln!(self.out, "}}");
-        let _ = writeln!(self.out, "static inline MakoArr_{key_name} mako_maps_keys_k_{key_name}_{val_tag}({mt} *m) {{");
-        let _ = writeln!(self.out, "    MakoArr_{key_name} out = mako_arr_{key_name}_make(0, m ? (int64_t)m->len : 0);");
+        let _ = writeln!(
+            self.out,
+            "static inline MakoArr_{key_name} mako_maps_keys_k_{key_name}_{val_tag}({mt} *m) {{"
+        );
+        let _ = writeln!(
+            self.out,
+            "    MakoArr_{key_name} out = mako_arr_{key_name}_make(0, m ? (int64_t)m->len : 0);"
+        );
         let _ = writeln!(self.out, "    if (!m) return out;");
         let _ = writeln!(self.out, "    for (size_t i = 0; i < m->cap; i++) {{");
         let _ = writeln!(self.out, "        if (m->state[i] == MAKO_MAP_FULL) out = mako_arr_{key_name}_append(out, m->keys[i]);");
         let _ = writeln!(self.out, "    }} return out;");
         let _ = writeln!(self.out, "}}");
-        let _ = writeln!(self.out, "static inline MakoArr_{val_tag} mako_maps_values_k_{key_name}_{val_tag}({mt} *m) {{");
-        let _ = writeln!(self.out, "    MakoArr_{val_tag} out = mako_arr_{val_tag}_make(0, m ? (int64_t)m->len : 0);");
+        let _ = writeln!(
+            self.out,
+            "static inline MakoArr_{val_tag} mako_maps_values_k_{key_name}_{val_tag}({mt} *m) {{"
+        );
+        let _ = writeln!(
+            self.out,
+            "    MakoArr_{val_tag} out = mako_arr_{val_tag}_make(0, m ? (int64_t)m->len : 0);"
+        );
         let _ = writeln!(self.out, "    if (!m) return out;");
         let _ = writeln!(self.out, "    for (size_t i = 0; i < m->cap; i++) {{");
         let _ = writeln!(self.out, "        if (m->state[i] == MAKO_MAP_FULL) out = mako_arr_{val_tag}_append(out, m->vals[i]);");
         let _ = writeln!(self.out, "    }} return out;");
         let _ = writeln!(self.out, "}}");
-        let _ = writeln!(self.out, "static inline void mako_maps_clear_k_{key_name}_{val_tag}({mt} *m) {{");
-        let _ = writeln!(self.out, "    if (!m) return; memset(m->state, 0, m->cap); m->len = 0;");
+        let _ = writeln!(
+            self.out,
+            "static inline void mako_maps_clear_k_{key_name}_{val_tag}({mt} *m) {{"
+        );
+        let _ = writeln!(
+            self.out,
+            "    if (!m) return; memset(m->state, 0, m->cap); m->len = 0;"
+        );
         let _ = writeln!(self.out, "}}");
         {
             let free_name = format!("mako_map_k_{key_name}_{val_tag}");
             self.emit_map_heap_free(&free_name, &mt, false);
         }
-        let _ = writeln!(self.out, "static inline {mt} *mako_maps_clone_k_{key_name}_{val_tag}({mt} *m) {{");
-        let _ = writeln!(self.out, "    {mt} *n = {fnp}_make(m ? (int64_t)m->len : 0);");
+        let _ = writeln!(
+            self.out,
+            "static inline {mt} *mako_maps_clone_k_{key_name}_{val_tag}({mt} *m) {{"
+        );
+        let _ = writeln!(
+            self.out,
+            "    {mt} *n = {fnp}_make(m ? (int64_t)m->len : 0);"
+        );
         let _ = writeln!(self.out, "    if (!m) return n;");
         let _ = writeln!(self.out, "    for (size_t i = 0; i < m->cap; i++) {{");
-        let _ = writeln!(self.out, "        if (m->state[i] == MAKO_MAP_FULL) {fnp}_set(n, m->keys[i], m->vals[i]);");
+        let _ = writeln!(
+            self.out,
+            "        if (m->state[i] == MAKO_MAP_FULL) {fnp}_set(n, m->keys[i], m->vals[i]);"
+        );
         let _ = writeln!(self.out, "    }} return n;");
         let _ = writeln!(self.out, "}}");
-        let _ = writeln!(self.out, "static inline int64_t mako_maps_equal_k_{key_name}_{val_tag}({mt} *a, {mt} *b) {{");
-        let _ = writeln!(self.out, "    if (!a && !b) return 1; if (!a || !b) return 0;");
+        let _ = writeln!(
+            self.out,
+            "static inline int64_t mako_maps_equal_k_{key_name}_{val_tag}({mt} *a, {mt} *b) {{"
+        );
+        let _ = writeln!(
+            self.out,
+            "    if (!a && !b) return 1; if (!a || !b) return 0;"
+        );
         let _ = writeln!(self.out, "    if (a->len != b->len) return 0;");
         let _ = writeln!(self.out, "    for (size_t i = 0; i < a->cap; i++) {{");
-        let _ = writeln!(self.out, "        if (a->state[i] != MAKO_MAP_FULL) continue;");
+        let _ = writeln!(
+            self.out,
+            "        if (a->state[i] != MAKO_MAP_FULL) continue;"
+        );
         let _ = writeln!(self.out, "        if (!{fnp}_has(b, a->keys[i])) return 0;");
-        let _ = writeln!(self.out, "        {val_c} av = a->vals[i], bv = {fnp}_get(b, a->keys[i]);");
+        let _ = writeln!(
+            self.out,
+            "        {val_c} av = a->vals[i], bv = {fnp}_get(b, a->keys[i]);"
+        );
         let _ = writeln!(self.out, "        if (!{eq_fn}) return 0;");
         let _ = writeln!(self.out, "    }} return 1;");
         let _ = writeln!(self.out, "}}");
-        let _ = writeln!(self.out, "static inline void mako_maps_copy_k_{key_name}_{val_tag}({mt} *dst, {mt} *src) {{");
+        let _ = writeln!(
+            self.out,
+            "static inline void mako_maps_copy_k_{key_name}_{val_tag}({mt} *dst, {mt} *src) {{"
+        );
         let _ = writeln!(self.out, "    if (!dst || !src) return;");
         let _ = writeln!(self.out, "    for (size_t i = 0; i < src->cap; i++) {{");
         let _ = writeln!(self.out, "        if (src->state[i] == MAKO_MAP_FULL) {fnp}_set(dst, src->keys[i], src->vals[i]);");
@@ -6795,20 +6980,38 @@ impl Codegen {
         let _ = writeln!(self.out, "    {mt} m;");
         let _ = writeln!(self.out, "    m.state = (uint8_t *)calloc(cap, 1);");
         if free_str_key {
-            let _ = writeln!(self.out, "    m.keys = ({key_c} *)calloc(cap, sizeof({key_c}));");
+            let _ = writeln!(
+                self.out,
+                "    m.keys = ({key_c} *)calloc(cap, sizeof({key_c}));"
+            );
         } else {
-            let _ = writeln!(self.out, "    m.keys = ({key_c} *)malloc(cap * sizeof({key_c}));");
+            let _ = writeln!(
+                self.out,
+                "    m.keys = ({key_c} *)malloc(cap * sizeof({key_c}));"
+            );
         }
-        let _ = writeln!(self.out, "    m.vals = ({val_c} *)calloc(cap, sizeof({val_c}));");
+        let _ = writeln!(
+            self.out,
+            "    m.vals = ({val_c} *)calloc(cap, sizeof({val_c}));"
+        );
         let _ = writeln!(self.out, "    if (!m.keys || !m.vals) {{ fprintf(stderr, \"mako: OOM in {fnp}_new\\n\"); abort(); }}");
         let _ = writeln!(self.out, "    m.cap = cap; m.len = 0; return m;");
         let _ = writeln!(self.out, "}}");
-        let _ = writeln!(self.out, "static inline void {fnp}_rehash({mt} *m, size_t ncap);");
-        let _ = writeln!(self.out, "static inline void {fnp}_set({mt} *m, {key_c} key, {val_c} val) {{");
+        let _ = writeln!(
+            self.out,
+            "static inline void {fnp}_rehash({mt} *m, size_t ncap);"
+        );
+        let _ = writeln!(
+            self.out,
+            "static inline void {fnp}_set({mt} *m, {key_c} key, {val_c} val) {{"
+        );
         if key_suf == "f" {
             let _ = writeln!(self.out, "    key = mako_f64_key_norm(key);");
         }
-        let _ = writeln!(self.out, "    if ((m->len + 1) * 4 >= m->cap * 3) {fnp}_rehash(m, m->cap * 2);");
+        let _ = writeln!(
+            self.out,
+            "    if ((m->len + 1) * 4 >= m->cap * 3) {fnp}_rehash(m, m->cap * 2);"
+        );
         let _ = writeln!(self.out, "    uint64_t h = {hash};");
         let _ = writeln!(self.out, "    size_t mask = m->cap - 1;");
         let _ = writeln!(self.out, "    size_t i = (size_t)(h & mask);");
@@ -6816,7 +7019,10 @@ impl Codegen {
         let _ = writeln!(self.out, "    for (;;) {{");
         let _ = writeln!(self.out, "        uint8_t st = m->state[i];");
         let _ = writeln!(self.out, "        if (st == MAKO_MAP_EMPTY) {{");
-        let _ = writeln!(self.out, "            size_t slot = (first_tomb != (size_t)-1) ? first_tomb : i;");
+        let _ = writeln!(
+            self.out,
+            "            size_t slot = (first_tomb != (size_t)-1) ? first_tomb : i;"
+        );
         let _ = writeln!(self.out, "            m->state[slot] = MAKO_MAP_FULL;");
         if free_str_key {
             let _ = writeln!(self.out, "            m->keys[slot] = mako_str_clone(key);");
@@ -6826,19 +7032,31 @@ impl Codegen {
         let _ = writeln!(self.out, "            m->vals[slot] = val;");
         let _ = writeln!(self.out, "            m->len++; return;");
         let _ = writeln!(self.out, "        }}");
-        let _ = writeln!(self.out, "        if (st == MAKO_MAP_TOMB) {{ if (first_tomb == (size_t)-1) first_tomb = i; }}");
-        let _ = writeln!(self.out, "        else if ({key_eq}) {{ m->vals[i] = val; return; }}");
+        let _ = writeln!(
+            self.out,
+            "        if (st == MAKO_MAP_TOMB) {{ if (first_tomb == (size_t)-1) first_tomb = i; }}"
+        );
+        let _ = writeln!(
+            self.out,
+            "        else if ({key_eq}) {{ m->vals[i] = val; return; }}"
+        );
         let _ = writeln!(self.out, "        i = (i + 1) & mask;");
         let _ = writeln!(self.out, "    }}");
         let _ = writeln!(self.out, "}}");
-        let _ = writeln!(self.out, "static inline void {fnp}_rehash({mt} *m, size_t ncap) {{");
+        let _ = writeln!(
+            self.out,
+            "static inline void {fnp}_rehash({mt} *m, size_t ncap) {{"
+        );
         let _ = writeln!(self.out, "    uint8_t *ostate = m->state;");
         let _ = writeln!(self.out, "    {key_c} *okeys = m->keys;");
         let _ = writeln!(self.out, "    {val_c} *ovals = m->vals;");
         let _ = writeln!(self.out, "    size_t ocap = m->cap;");
         let _ = writeln!(self.out, "    {mt} n = {fnp}_new(ncap / 2);");
         let _ = writeln!(self.out, "    for (size_t i = 0; i < ocap; i++) {{");
-        let _ = writeln!(self.out, "        if (ostate[i] != MAKO_MAP_FULL) continue;");
+        let _ = writeln!(
+            self.out,
+            "        if (ostate[i] != MAKO_MAP_FULL) continue;"
+        );
         let _ = writeln!(self.out, "        {key_c} key = okeys[i];");
         let _ = writeln!(self.out, "        {val_c} val = ovals[i];");
         let rehash_h = match key_suf {
@@ -6849,13 +7067,25 @@ impl Codegen {
         };
         let _ = writeln!(self.out, "        uint64_t h = {rehash_h};");
         let _ = writeln!(self.out, "        size_t j = (size_t)(h & (n.cap - 1));");
-        let _ = writeln!(self.out, "        while (n.state[j] == MAKO_MAP_FULL) j = (j + 1) & (n.cap - 1);");
+        let _ = writeln!(
+            self.out,
+            "        while (n.state[j] == MAKO_MAP_FULL) j = (j + 1) & (n.cap - 1);"
+        );
         let _ = writeln!(self.out, "        n.state[j] = MAKO_MAP_FULL;");
-        let _ = writeln!(self.out, "        n.keys[j] = key; n.vals[j] = val; n.len++;");
+        let _ = writeln!(
+            self.out,
+            "        n.keys[j] = key; n.vals[j] = val; n.len++;"
+        );
         let _ = writeln!(self.out, "    }}");
-        let _ = writeln!(self.out, "    free(ostate); free(okeys); free(ovals); *m = n;");
+        let _ = writeln!(
+            self.out,
+            "    free(ostate); free(okeys); free(ovals); *m = n;"
+        );
         let _ = writeln!(self.out, "}}");
-        let _ = writeln!(self.out, "static inline {val_c} {fnp}_get({mt} *m, {key_c} key) {{");
+        let _ = writeln!(
+            self.out,
+            "static inline {val_c} {fnp}_get({mt} *m, {key_c} key) {{"
+        );
         if key_suf == "f" {
             let _ = writeln!(self.out, "    key = mako_f64_key_norm(key);");
         }
@@ -6863,12 +7093,21 @@ impl Codegen {
         let _ = writeln!(self.out, "    uint64_t h = {hash};");
         let _ = writeln!(self.out, "    size_t i = (size_t)(h & (m->cap - 1));");
         let _ = writeln!(self.out, "    for (;;) {{");
-        let _ = writeln!(self.out, "        if (m->state[i] == MAKO_MAP_EMPTY) return {zero_val};");
-        let _ = writeln!(self.out, "        if (m->state[i] == MAKO_MAP_FULL && {key_eq}) return m->vals[i];");
+        let _ = writeln!(
+            self.out,
+            "        if (m->state[i] == MAKO_MAP_EMPTY) return {zero_val};"
+        );
+        let _ = writeln!(
+            self.out,
+            "        if (m->state[i] == MAKO_MAP_FULL && {key_eq}) return m->vals[i];"
+        );
         let _ = writeln!(self.out, "        i = (i + 1) & (m->cap - 1);");
         let _ = writeln!(self.out, "    }}");
         let _ = writeln!(self.out, "}}");
-        let _ = writeln!(self.out, "static inline bool {fnp}_has({mt} *m, {key_c} key) {{");
+        let _ = writeln!(
+            self.out,
+            "static inline bool {fnp}_has({mt} *m, {key_c} key) {{"
+        );
         if key_suf == "f" {
             let _ = writeln!(self.out, "    key = mako_f64_key_norm(key);");
         }
@@ -6876,12 +7115,21 @@ impl Codegen {
         let _ = writeln!(self.out, "    uint64_t h = {hash};");
         let _ = writeln!(self.out, "    size_t i = (size_t)(h & (m->cap - 1));");
         let _ = writeln!(self.out, "    for (;;) {{");
-        let _ = writeln!(self.out, "        if (m->state[i] == MAKO_MAP_EMPTY) return false;");
-        let _ = writeln!(self.out, "        if (m->state[i] == MAKO_MAP_FULL && {key_eq}) return true;");
+        let _ = writeln!(
+            self.out,
+            "        if (m->state[i] == MAKO_MAP_EMPTY) return false;"
+        );
+        let _ = writeln!(
+            self.out,
+            "        if (m->state[i] == MAKO_MAP_FULL && {key_eq}) return true;"
+        );
         let _ = writeln!(self.out, "        i = (i + 1) & (m->cap - 1);");
         let _ = writeln!(self.out, "    }}");
         let _ = writeln!(self.out, "}}");
-        let _ = writeln!(self.out, "static inline void {fnp}_delete({mt} *m, {key_c} key) {{");
+        let _ = writeln!(
+            self.out,
+            "static inline void {fnp}_delete({mt} *m, {key_c} key) {{"
+        );
         if key_suf == "f" {
             let _ = writeln!(self.out, "    key = mako_f64_key_norm(key);");
         }
@@ -6889,49 +7137,88 @@ impl Codegen {
         let _ = writeln!(self.out, "    uint64_t h = {hash};");
         let _ = writeln!(self.out, "    size_t i = (size_t)(h & (m->cap - 1));");
         let _ = writeln!(self.out, "    for (;;) {{");
-        let _ = writeln!(self.out, "        if (m->state[i] == MAKO_MAP_EMPTY) return;");
-        let _ = writeln!(self.out, "        if (m->state[i] == MAKO_MAP_FULL && {key_eq}) {{");
+        let _ = writeln!(
+            self.out,
+            "        if (m->state[i] == MAKO_MAP_EMPTY) return;"
+        );
+        let _ = writeln!(
+            self.out,
+            "        if (m->state[i] == MAKO_MAP_FULL && {key_eq}) {{"
+        );
         if free_str_key {
             let _ = writeln!(self.out, "            mako_str_free(m->keys[i]); m->keys[i].data = NULL; m->keys[i].len = 0;");
         }
-        let _ = writeln!(self.out, "            m->state[i] = MAKO_MAP_TOMB; m->len--; return;");
+        let _ = writeln!(
+            self.out,
+            "            m->state[i] = MAKO_MAP_TOMB; m->len--; return;"
+        );
         let _ = writeln!(self.out, "        }}");
         let _ = writeln!(self.out, "        i = (i + 1) & (m->cap - 1);");
         let _ = writeln!(self.out, "    }}");
         let _ = writeln!(self.out, "}}");
-        let _ = writeln!(self.out, "static inline int64_t {fnp}_len({mt} *m) {{ return m ? (int64_t)m->len : 0; }}");
+        let _ = writeln!(
+            self.out,
+            "static inline int64_t {fnp}_len({mt} *m) {{ return m ? (int64_t)m->len : 0; }}"
+        );
         let _ = writeln!(self.out, "static inline {mt} *{fnp}_make(int64_t hint) {{");
         let _ = writeln!(self.out, "    {mt} *m = ({mt} *)malloc(sizeof({mt}));");
-        let _ = writeln!(self.out, "    *m = {fnp}_new(hint > 0 ? (size_t)hint : 0); return m;");
+        let _ = writeln!(
+            self.out,
+            "    *m = {fnp}_new(hint > 0 ? (size_t)hint : 0); return m;"
+        );
         let _ = writeln!(self.out, "}}");
         // maps_keys
         if key_suf == "s" {
-            let _ = writeln!(self.out, "static inline MakoStrArray mako_maps_keys_{key_suf}_{val_tag}({mt} *m) {{");
-            let _ = writeln!(self.out, "    MakoStrArray out = mako_str_array_make(0, m ? (int64_t)m->len : 0);");
+            let _ = writeln!(
+                self.out,
+                "static inline MakoStrArray mako_maps_keys_{key_suf}_{val_tag}({mt} *m) {{"
+            );
+            let _ = writeln!(
+                self.out,
+                "    MakoStrArray out = mako_str_array_make(0, m ? (int64_t)m->len : 0);"
+            );
             let _ = writeln!(self.out, "    if (!m) return out;");
             let _ = writeln!(self.out, "    for (size_t i = 0; i < m->cap; i++) {{");
             let _ = writeln!(self.out, "        if (m->state[i] == MAKO_MAP_FULL) out = mako_str_array_append(out, m->keys[i]);");
             let _ = writeln!(self.out, "    }} return out;");
             let _ = writeln!(self.out, "}}");
         } else if key_suf == "f" {
-            let _ = writeln!(self.out, "static inline MakoFloatArray mako_maps_keys_{key_suf}_{val_tag}({mt} *m) {{");
-            let _ = writeln!(self.out, "    MakoFloatArray out = mako_float_array_make(0, m ? (int64_t)m->len : 0);");
+            let _ = writeln!(
+                self.out,
+                "static inline MakoFloatArray mako_maps_keys_{key_suf}_{val_tag}({mt} *m) {{"
+            );
+            let _ = writeln!(
+                self.out,
+                "    MakoFloatArray out = mako_float_array_make(0, m ? (int64_t)m->len : 0);"
+            );
             let _ = writeln!(self.out, "    if (!m) return out;");
             let _ = writeln!(self.out, "    for (size_t i = 0; i < m->cap; i++) {{");
             let _ = writeln!(self.out, "        if (m->state[i] == MAKO_MAP_FULL) out = mako_float_array_append(out, m->keys[i]);");
             let _ = writeln!(self.out, "    }} return out;");
             let _ = writeln!(self.out, "}}");
         } else if key_suf == "b" {
-            let _ = writeln!(self.out, "static inline MakoBoolArray mako_maps_keys_{key_suf}_{val_tag}({mt} *m) {{");
-            let _ = writeln!(self.out, "    MakoBoolArray out = mako_bool_array_make(0, m ? (int64_t)m->len : 0);");
+            let _ = writeln!(
+                self.out,
+                "static inline MakoBoolArray mako_maps_keys_{key_suf}_{val_tag}({mt} *m) {{"
+            );
+            let _ = writeln!(
+                self.out,
+                "    MakoBoolArray out = mako_bool_array_make(0, m ? (int64_t)m->len : 0);"
+            );
             let _ = writeln!(self.out, "    if (!m) return out;");
             let _ = writeln!(self.out, "    for (size_t i = 0; i < m->cap; i++) {{");
             let _ = writeln!(self.out, "        if (m->state[i] == MAKO_MAP_FULL) out = mako_bool_array_append(out, m->keys[i]);");
             let _ = writeln!(self.out, "    }} return out;");
             let _ = writeln!(self.out, "}}");
         } else {
-            let _ = writeln!(self.out, "static inline MakoIntArray mako_maps_keys_{key_suf}_{val_tag}({mt} *m) {{");
-            let _ = writeln!(self.out, "    MakoIntArray out = mako_int_array_make(0, m ? (int64_t)m->len : 0);");
+            let _ = writeln!(
+                self.out,
+                "static inline MakoIntArray mako_maps_keys_{key_suf}_{val_tag}({mt} *m) {{"
+            );
+            let _ = writeln!(
+                self.out,
+                "    MakoIntArray out = mako_int_array_make(0, m ? (int64_t)m->len : 0);"
+            );
             let _ = writeln!(self.out, "    if (!m) return out;");
             let _ = writeln!(self.out, "    for (size_t i = 0; i < m->cap; i++) {{");
             let _ = writeln!(self.out, "        if (m->state[i] == MAKO_MAP_FULL) {{");
@@ -6941,14 +7228,23 @@ impl Codegen {
             let _ = writeln!(self.out, "    }} return out;");
             let _ = writeln!(self.out, "}}");
         }
-        let _ = writeln!(self.out, "static inline MakoArr_{val_tag} mako_maps_values_{key_suf}_{val_tag}({mt} *m) {{");
-        let _ = writeln!(self.out, "    MakoArr_{val_tag} out = mako_arr_{val_tag}_make(0, m ? (int64_t)m->len : 0);");
+        let _ = writeln!(
+            self.out,
+            "static inline MakoArr_{val_tag} mako_maps_values_{key_suf}_{val_tag}({mt} *m) {{"
+        );
+        let _ = writeln!(
+            self.out,
+            "    MakoArr_{val_tag} out = mako_arr_{val_tag}_make(0, m ? (int64_t)m->len : 0);"
+        );
         let _ = writeln!(self.out, "    if (!m) return out;");
         let _ = writeln!(self.out, "    for (size_t i = 0; i < m->cap; i++) {{");
         let _ = writeln!(self.out, "        if (m->state[i] == MAKO_MAP_FULL) out = mako_arr_{val_tag}_append(out, m->vals[i]);");
         let _ = writeln!(self.out, "    }} return out;");
         let _ = writeln!(self.out, "}}");
-        let _ = writeln!(self.out, "static inline void mako_maps_clear_{key_suf}_{val_tag}({mt} *m) {{");
+        let _ = writeln!(
+            self.out,
+            "static inline void mako_maps_clear_{key_suf}_{val_tag}({mt} *m) {{"
+        );
         if free_str_key {
             let _ = writeln!(self.out, "    if (!m) return;");
             let _ = writeln!(self.out, "    for (size_t i = 0; i < m->cap; i++) {{");
@@ -6956,42 +7252,67 @@ impl Codegen {
             let _ = writeln!(self.out, "        m->state[i] = MAKO_MAP_EMPTY;");
             let _ = writeln!(self.out, "    }} m->len = 0;");
         } else {
-            let _ = writeln!(self.out, "    if (!m) return; memset(m->state, 0, m->cap); m->len = 0;");
+            let _ = writeln!(
+                self.out,
+                "    if (!m) return; memset(m->state, 0, m->cap); m->len = 0;"
+            );
         }
         let _ = writeln!(self.out, "}}");
         {
             let free_str = key_suf == "s";
             self.emit_map_heap_free(&fnp, &mt, free_str);
         }
-        let _ = writeln!(self.out, "static inline {mt} *mako_maps_clone_{key_suf}_{val_tag}({mt} *m) {{");
-        let _ = writeln!(self.out, "    {mt} *n = {fnp}_make(m ? (int64_t)m->len : 0);");
+        let _ = writeln!(
+            self.out,
+            "static inline {mt} *mako_maps_clone_{key_suf}_{val_tag}({mt} *m) {{"
+        );
+        let _ = writeln!(
+            self.out,
+            "    {mt} *n = {fnp}_make(m ? (int64_t)m->len : 0);"
+        );
         let _ = writeln!(self.out, "    if (!m) return n;");
         let _ = writeln!(self.out, "    for (size_t i = 0; i < m->cap; i++) {{");
-        let _ = writeln!(self.out, "        if (m->state[i] == MAKO_MAP_FULL) {fnp}_set(n, m->keys[i], m->vals[i]);");
+        let _ = writeln!(
+            self.out,
+            "        if (m->state[i] == MAKO_MAP_FULL) {fnp}_set(n, m->keys[i], m->vals[i]);"
+        );
         let _ = writeln!(self.out, "    }} return n;");
         let _ = writeln!(self.out, "}}");
-        let _ = writeln!(self.out, "static inline int64_t mako_maps_equal_{key_suf}_{val_tag}({mt} *a, {mt} *b) {{");
-        let _ = writeln!(self.out, "    if (!a && !b) return 1; if (!a || !b) return 0;");
+        let _ = writeln!(
+            self.out,
+            "static inline int64_t mako_maps_equal_{key_suf}_{val_tag}({mt} *a, {mt} *b) {{"
+        );
+        let _ = writeln!(
+            self.out,
+            "    if (!a && !b) return 1; if (!a || !b) return 0;"
+        );
         let _ = writeln!(self.out, "    if (a->len != b->len) return 0;");
         let _ = writeln!(self.out, "    for (size_t i = 0; i < a->cap; i++) {{");
-        let _ = writeln!(self.out, "        if (a->state[i] != MAKO_MAP_FULL) continue;");
+        let _ = writeln!(
+            self.out,
+            "        if (a->state[i] != MAKO_MAP_FULL) continue;"
+        );
         let _ = writeln!(self.out, "        if (!{fnp}_has(b, a->keys[i])) return 0;");
-        let _ = writeln!(self.out, "        {val_c} av = a->vals[i], bv = {fnp}_get(b, a->keys[i]);");
+        let _ = writeln!(
+            self.out,
+            "        {val_c} av = a->vals[i], bv = {fnp}_get(b, a->keys[i]);"
+        );
         let _ = writeln!(self.out, "        if (av.len != bv.len) return 0;");
         let _ = writeln!(self.out, "        for (size_t j = 0; j < av.len; j++) {{");
         let _ = writeln!(self.out, "            if ({elem_eq}) return 0;");
         let _ = writeln!(self.out, "        }}");
         let _ = writeln!(self.out, "    }} return 1;");
         let _ = writeln!(self.out, "}}");
-        let _ = writeln!(self.out, "static inline void mako_maps_copy_{key_suf}_{val_tag}({mt} *dst, {mt} *src) {{");
+        let _ = writeln!(
+            self.out,
+            "static inline void mako_maps_copy_{key_suf}_{val_tag}({mt} *dst, {mt} *src) {{"
+        );
         let _ = writeln!(self.out, "    if (!dst || !src) return;");
         let _ = writeln!(self.out, "    for (size_t i = 0; i < src->cap; i++) {{");
         let _ = writeln!(self.out, "        if (src->state[i] == MAKO_MAP_FULL) {fnp}_set(dst, src->keys[i], src->vals[i]);");
         let _ = writeln!(self.out, "    }}");
         let _ = writeln!(self.out, "}}");
     }
-
-
 
     /// `map[NamedKey][]T` — named struct/enum key, slice value.
     fn emit_map_named_key_slice_helpers(
@@ -7056,14 +7377,29 @@ impl Codegen {
         let _ = writeln!(self.out, "    while (cap < need) cap *= 2;");
         let _ = writeln!(self.out, "    {mt} m;");
         let _ = writeln!(self.out, "    m.state = (uint8_t *)calloc(cap, 1);");
-        let _ = writeln!(self.out, "    m.keys = ({key_c} *)calloc(cap, sizeof({key_c}));");
-        let _ = writeln!(self.out, "    m.vals = ({val_c} *)calloc(cap, sizeof({val_c}));");
+        let _ = writeln!(
+            self.out,
+            "    m.keys = ({key_c} *)calloc(cap, sizeof({key_c}));"
+        );
+        let _ = writeln!(
+            self.out,
+            "    m.vals = ({val_c} *)calloc(cap, sizeof({val_c}));"
+        );
         let _ = writeln!(self.out, "    if (!m.keys || !m.vals) {{ fprintf(stderr, \"mako: OOM in {fnp}_new\\n\"); abort(); }}");
         let _ = writeln!(self.out, "    m.cap = cap; m.len = 0; return m;");
         let _ = writeln!(self.out, "}}");
-        let _ = writeln!(self.out, "static inline void {fnp}_rehash({mt} *m, size_t ncap);");
-        let _ = writeln!(self.out, "static inline void {fnp}_set({mt} *m, {key_c} key, {val_c} val) {{");
-        let _ = writeln!(self.out, "    if ((m->len + 1) * 4 >= m->cap * 3) {fnp}_rehash(m, m->cap * 2);");
+        let _ = writeln!(
+            self.out,
+            "static inline void {fnp}_rehash({mt} *m, size_t ncap);"
+        );
+        let _ = writeln!(
+            self.out,
+            "static inline void {fnp}_set({mt} *m, {key_c} key, {val_c} val) {{"
+        );
+        let _ = writeln!(
+            self.out,
+            "    if ((m->len + 1) * 4 >= m->cap * 3) {fnp}_rehash(m, m->cap * 2);"
+        );
         let _ = writeln!(self.out, "    uint64_t h = {hash};");
         let _ = writeln!(self.out, "    size_t mask = m->cap - 1;");
         let _ = writeln!(self.out, "    size_t i = (size_t)(h & mask);");
@@ -7071,115 +7407,217 @@ impl Codegen {
         let _ = writeln!(self.out, "    for (;;) {{");
         let _ = writeln!(self.out, "        uint8_t st = m->state[i];");
         let _ = writeln!(self.out, "        if (st == MAKO_MAP_EMPTY) {{");
-        let _ = writeln!(self.out, "            size_t slot = (first_tomb != (size_t)-1) ? first_tomb : i;");
+        let _ = writeln!(
+            self.out,
+            "            size_t slot = (first_tomb != (size_t)-1) ? first_tomb : i;"
+        );
         let _ = writeln!(self.out, "            m->state[slot] = MAKO_MAP_FULL;");
         let _ = writeln!(self.out, "            m->keys[slot] = key;");
         let _ = writeln!(self.out, "            m->vals[slot] = val;");
         let _ = writeln!(self.out, "            m->len++; return;");
         let _ = writeln!(self.out, "        }}");
-        let _ = writeln!(self.out, "        if (st == MAKO_MAP_TOMB) {{ if (first_tomb == (size_t)-1) first_tomb = i; }}");
-        let _ = writeln!(self.out, "        else if ({key_eq}) {{ m->vals[i] = val; return; }}");
+        let _ = writeln!(
+            self.out,
+            "        if (st == MAKO_MAP_TOMB) {{ if (first_tomb == (size_t)-1) first_tomb = i; }}"
+        );
+        let _ = writeln!(
+            self.out,
+            "        else if ({key_eq}) {{ m->vals[i] = val; return; }}"
+        );
         let _ = writeln!(self.out, "        i = (i + 1) & mask;");
         let _ = writeln!(self.out, "    }}");
         let _ = writeln!(self.out, "}}");
-        let _ = writeln!(self.out, "static inline void {fnp}_rehash({mt} *m, size_t ncap) {{");
+        let _ = writeln!(
+            self.out,
+            "static inline void {fnp}_rehash({mt} *m, size_t ncap) {{"
+        );
         let _ = writeln!(self.out, "    uint8_t *ostate = m->state;");
         let _ = writeln!(self.out, "    {key_c} *okeys = m->keys;");
         let _ = writeln!(self.out, "    {val_c} *ovals = m->vals;");
         let _ = writeln!(self.out, "    size_t ocap = m->cap;");
         let _ = writeln!(self.out, "    {mt} n = {fnp}_new(ncap / 2);");
         let _ = writeln!(self.out, "    for (size_t i = 0; i < ocap; i++) {{");
-        let _ = writeln!(self.out, "        if (ostate[i] != MAKO_MAP_FULL) continue;");
+        let _ = writeln!(
+            self.out,
+            "        if (ostate[i] != MAKO_MAP_FULL) continue;"
+        );
         let _ = writeln!(self.out, "        {key_c} key = okeys[i];");
         let _ = writeln!(self.out, "        {val_c} val = ovals[i];");
         let _ = writeln!(self.out, "        uint64_t h = mako_hash_{key_c}(key);");
         let _ = writeln!(self.out, "        size_t j = (size_t)(h & (n.cap - 1));");
-        let _ = writeln!(self.out, "        while (n.state[j] == MAKO_MAP_FULL) j = (j + 1) & (n.cap - 1);");
+        let _ = writeln!(
+            self.out,
+            "        while (n.state[j] == MAKO_MAP_FULL) j = (j + 1) & (n.cap - 1);"
+        );
         let _ = writeln!(self.out, "        n.state[j] = MAKO_MAP_FULL;");
-        let _ = writeln!(self.out, "        n.keys[j] = key; n.vals[j] = val; n.len++;");
+        let _ = writeln!(
+            self.out,
+            "        n.keys[j] = key; n.vals[j] = val; n.len++;"
+        );
         let _ = writeln!(self.out, "    }}");
-        let _ = writeln!(self.out, "    free(ostate); free(okeys); free(ovals); *m = n;");
+        let _ = writeln!(
+            self.out,
+            "    free(ostate); free(okeys); free(ovals); *m = n;"
+        );
         let _ = writeln!(self.out, "}}");
-        let _ = writeln!(self.out, "static inline {val_c} {fnp}_get({mt} *m, {key_c} key) {{");
+        let _ = writeln!(
+            self.out,
+            "static inline {val_c} {fnp}_get({mt} *m, {key_c} key) {{"
+        );
         let _ = writeln!(self.out, "    if (!m) return {zero_val};");
         let _ = writeln!(self.out, "    uint64_t h = {hash};");
         let _ = writeln!(self.out, "    size_t i = (size_t)(h & (m->cap - 1));");
         let _ = writeln!(self.out, "    for (;;) {{");
-        let _ = writeln!(self.out, "        if (m->state[i] == MAKO_MAP_EMPTY) return {zero_val};");
-        let _ = writeln!(self.out, "        if (m->state[i] == MAKO_MAP_FULL && {key_eq}) return m->vals[i];");
+        let _ = writeln!(
+            self.out,
+            "        if (m->state[i] == MAKO_MAP_EMPTY) return {zero_val};"
+        );
+        let _ = writeln!(
+            self.out,
+            "        if (m->state[i] == MAKO_MAP_FULL && {key_eq}) return m->vals[i];"
+        );
         let _ = writeln!(self.out, "        i = (i + 1) & (m->cap - 1);");
         let _ = writeln!(self.out, "    }}");
         let _ = writeln!(self.out, "}}");
-        let _ = writeln!(self.out, "static inline bool {fnp}_has({mt} *m, {key_c} key) {{");
+        let _ = writeln!(
+            self.out,
+            "static inline bool {fnp}_has({mt} *m, {key_c} key) {{"
+        );
         let _ = writeln!(self.out, "    if (!m) return false;");
         let _ = writeln!(self.out, "    uint64_t h = {hash};");
         let _ = writeln!(self.out, "    size_t i = (size_t)(h & (m->cap - 1));");
         let _ = writeln!(self.out, "    for (;;) {{");
-        let _ = writeln!(self.out, "        if (m->state[i] == MAKO_MAP_EMPTY) return false;");
-        let _ = writeln!(self.out, "        if (m->state[i] == MAKO_MAP_FULL && {key_eq}) return true;");
+        let _ = writeln!(
+            self.out,
+            "        if (m->state[i] == MAKO_MAP_EMPTY) return false;"
+        );
+        let _ = writeln!(
+            self.out,
+            "        if (m->state[i] == MAKO_MAP_FULL && {key_eq}) return true;"
+        );
         let _ = writeln!(self.out, "        i = (i + 1) & (m->cap - 1);");
         let _ = writeln!(self.out, "    }}");
         let _ = writeln!(self.out, "}}");
-        let _ = writeln!(self.out, "static inline void {fnp}_delete({mt} *m, {key_c} key) {{");
+        let _ = writeln!(
+            self.out,
+            "static inline void {fnp}_delete({mt} *m, {key_c} key) {{"
+        );
         let _ = writeln!(self.out, "    if (!m) return;");
         let _ = writeln!(self.out, "    uint64_t h = {hash};");
         let _ = writeln!(self.out, "    size_t i = (size_t)(h & (m->cap - 1));");
         let _ = writeln!(self.out, "    for (;;) {{");
-        let _ = writeln!(self.out, "        if (m->state[i] == MAKO_MAP_EMPTY) return;");
-        let _ = writeln!(self.out, "        if (m->state[i] == MAKO_MAP_FULL && {key_eq}) {{");
-        let _ = writeln!(self.out, "            m->state[i] = MAKO_MAP_TOMB; m->len--; return;");
+        let _ = writeln!(
+            self.out,
+            "        if (m->state[i] == MAKO_MAP_EMPTY) return;"
+        );
+        let _ = writeln!(
+            self.out,
+            "        if (m->state[i] == MAKO_MAP_FULL && {key_eq}) {{"
+        );
+        let _ = writeln!(
+            self.out,
+            "            m->state[i] = MAKO_MAP_TOMB; m->len--; return;"
+        );
         let _ = writeln!(self.out, "        }}");
         let _ = writeln!(self.out, "        i = (i + 1) & (m->cap - 1);");
         let _ = writeln!(self.out, "    }}");
         let _ = writeln!(self.out, "}}");
-        let _ = writeln!(self.out, "static inline int64_t {fnp}_len({mt} *m) {{ return m ? (int64_t)m->len : 0; }}");
+        let _ = writeln!(
+            self.out,
+            "static inline int64_t {fnp}_len({mt} *m) {{ return m ? (int64_t)m->len : 0; }}"
+        );
         let _ = writeln!(self.out, "static inline {mt} *{fnp}_make(int64_t hint) {{");
         let _ = writeln!(self.out, "    {mt} *m = ({mt} *)malloc(sizeof({mt}));");
-        let _ = writeln!(self.out, "    *m = {fnp}_new(hint > 0 ? (size_t)hint : 0); return m;");
+        let _ = writeln!(
+            self.out,
+            "    *m = {fnp}_new(hint > 0 ? (size_t)hint : 0); return m;"
+        );
         let _ = writeln!(self.out, "}}");
         // maps_keys → []Key
-        let _ = writeln!(self.out, "static inline MakoArr_{key_name} mako_maps_keys_k_{key_name}_{val_tag}({mt} *m) {{");
-        let _ = writeln!(self.out, "    MakoArr_{key_name} out = mako_arr_{key_name}_make(0, m ? (int64_t)m->len : 0);");
+        let _ = writeln!(
+            self.out,
+            "static inline MakoArr_{key_name} mako_maps_keys_k_{key_name}_{val_tag}({mt} *m) {{"
+        );
+        let _ = writeln!(
+            self.out,
+            "    MakoArr_{key_name} out = mako_arr_{key_name}_make(0, m ? (int64_t)m->len : 0);"
+        );
         let _ = writeln!(self.out, "    if (!m) return out;");
         let _ = writeln!(self.out, "    for (size_t i = 0; i < m->cap; i++) {{");
         let _ = writeln!(self.out, "        if (m->state[i] == MAKO_MAP_FULL) out = mako_arr_{key_name}_append(out, m->keys[i]);");
         let _ = writeln!(self.out, "    }} return out;");
         let _ = writeln!(self.out, "}}");
-        let _ = writeln!(self.out, "static inline MakoArr_{val_tag} mako_maps_values_k_{key_name}_{val_tag}({mt} *m) {{");
-        let _ = writeln!(self.out, "    MakoArr_{val_tag} out = mako_arr_{val_tag}_make(0, m ? (int64_t)m->len : 0);");
+        let _ = writeln!(
+            self.out,
+            "static inline MakoArr_{val_tag} mako_maps_values_k_{key_name}_{val_tag}({mt} *m) {{"
+        );
+        let _ = writeln!(
+            self.out,
+            "    MakoArr_{val_tag} out = mako_arr_{val_tag}_make(0, m ? (int64_t)m->len : 0);"
+        );
         let _ = writeln!(self.out, "    if (!m) return out;");
         let _ = writeln!(self.out, "    for (size_t i = 0; i < m->cap; i++) {{");
         let _ = writeln!(self.out, "        if (m->state[i] == MAKO_MAP_FULL) out = mako_arr_{val_tag}_append(out, m->vals[i]);");
         let _ = writeln!(self.out, "    }} return out;");
         let _ = writeln!(self.out, "}}");
-        let _ = writeln!(self.out, "static inline void mako_maps_clear_k_{key_name}_{val_tag}({mt} *m) {{");
-        let _ = writeln!(self.out, "    if (!m) return; memset(m->state, 0, m->cap); m->len = 0;");
+        let _ = writeln!(
+            self.out,
+            "static inline void mako_maps_clear_k_{key_name}_{val_tag}({mt} *m) {{"
+        );
+        let _ = writeln!(
+            self.out,
+            "    if (!m) return; memset(m->state, 0, m->cap); m->len = 0;"
+        );
         let _ = writeln!(self.out, "}}");
         {
             let free_name = format!("mako_map_k_{key_name}_{val_tag}");
             self.emit_map_heap_free(&free_name, &mt, false);
         }
-        let _ = writeln!(self.out, "static inline {mt} *mako_maps_clone_k_{key_name}_{val_tag}({mt} *m) {{");
-        let _ = writeln!(self.out, "    {mt} *n = {fnp}_make(m ? (int64_t)m->len : 0);");
+        let _ = writeln!(
+            self.out,
+            "static inline {mt} *mako_maps_clone_k_{key_name}_{val_tag}({mt} *m) {{"
+        );
+        let _ = writeln!(
+            self.out,
+            "    {mt} *n = {fnp}_make(m ? (int64_t)m->len : 0);"
+        );
         let _ = writeln!(self.out, "    if (!m) return n;");
         let _ = writeln!(self.out, "    for (size_t i = 0; i < m->cap; i++) {{");
-        let _ = writeln!(self.out, "        if (m->state[i] == MAKO_MAP_FULL) {fnp}_set(n, m->keys[i], m->vals[i]);");
+        let _ = writeln!(
+            self.out,
+            "        if (m->state[i] == MAKO_MAP_FULL) {fnp}_set(n, m->keys[i], m->vals[i]);"
+        );
         let _ = writeln!(self.out, "    }} return n;");
         let _ = writeln!(self.out, "}}");
-        let _ = writeln!(self.out, "static inline int64_t mako_maps_equal_k_{key_name}_{val_tag}({mt} *a, {mt} *b) {{");
-        let _ = writeln!(self.out, "    if (!a && !b) return 1; if (!a || !b) return 0;");
+        let _ = writeln!(
+            self.out,
+            "static inline int64_t mako_maps_equal_k_{key_name}_{val_tag}({mt} *a, {mt} *b) {{"
+        );
+        let _ = writeln!(
+            self.out,
+            "    if (!a && !b) return 1; if (!a || !b) return 0;"
+        );
         let _ = writeln!(self.out, "    if (a->len != b->len) return 0;");
         let _ = writeln!(self.out, "    for (size_t i = 0; i < a->cap; i++) {{");
-        let _ = writeln!(self.out, "        if (a->state[i] != MAKO_MAP_FULL) continue;");
+        let _ = writeln!(
+            self.out,
+            "        if (a->state[i] != MAKO_MAP_FULL) continue;"
+        );
         let _ = writeln!(self.out, "        if (!{fnp}_has(b, a->keys[i])) return 0;");
-        let _ = writeln!(self.out, "        {val_c} av = a->vals[i], bv = {fnp}_get(b, a->keys[i]);");
+        let _ = writeln!(
+            self.out,
+            "        {val_c} av = a->vals[i], bv = {fnp}_get(b, a->keys[i]);"
+        );
         let _ = writeln!(self.out, "        if (av.len != bv.len) return 0;");
         let _ = writeln!(self.out, "        for (size_t j = 0; j < av.len; j++) {{");
         let _ = writeln!(self.out, "            if ({elem_eq}) return 0;");
         let _ = writeln!(self.out, "        }}");
         let _ = writeln!(self.out, "    }} return 1;");
         let _ = writeln!(self.out, "}}");
-        let _ = writeln!(self.out, "static inline void mako_maps_copy_k_{key_name}_{val_tag}({mt} *dst, {mt} *src) {{");
+        let _ = writeln!(
+            self.out,
+            "static inline void mako_maps_copy_k_{key_name}_{val_tag}({mt} *dst, {mt} *src) {{"
+        );
         let _ = writeln!(self.out, "    if (!dst || !src) return;");
         let _ = writeln!(self.out, "    for (size_t i = 0; i < src->cap; i++) {{");
         let _ = writeln!(self.out, "        if (src->state[i] == MAKO_MAP_FULL) {fnp}_set(dst, src->keys[i], src->vals[i]);");
@@ -7239,10 +7677,22 @@ impl Codegen {
             out.push((format!("map_{n}_bool"), format!("MakoMapK_{n}_b*")));
             // map[Named][]T / [][]T as nested-map values
             out.push((format!("map_{n}_arr_int"), format!("MakoMapK_{n}_arr_int*")));
-            out.push((format!("map_{n}_arr_string"), format!("MakoMapK_{n}_arr_string*")));
-            out.push((format!("map_{n}_arr_float"), format!("MakoMapK_{n}_arr_float*")));
-            out.push((format!("map_{n}_arr_bool"), format!("MakoMapK_{n}_arr_bool*")));
-            out.push((format!("map_{n}_arr_arr_int"), format!("MakoMapK_{n}_arr_arr_int*")));
+            out.push((
+                format!("map_{n}_arr_string"),
+                format!("MakoMapK_{n}_arr_string*"),
+            ));
+            out.push((
+                format!("map_{n}_arr_float"),
+                format!("MakoMapK_{n}_arr_float*"),
+            ));
+            out.push((
+                format!("map_{n}_arr_bool"),
+                format!("MakoMapK_{n}_arr_bool*"),
+            ));
+            out.push((
+                format!("map_{n}_arr_arr_int"),
+                format!("MakoMapK_{n}_arr_arr_int*"),
+            ));
             // map[scalar][]Named
             out.push((format!("map_int_arr_{n}"), format!("MakoMapI_arr_{n}*")));
             out.push((format!("map_string_arr_{n}"), format!("MakoMapS_arr_{n}*")));
@@ -7252,14 +7702,8 @@ impl Codegen {
         // map[Named]Named (struct/enum values under named keys)
         for k in &names {
             for v in &names {
-                out.push((
-                    format!("map_{k}_{v}"),
-                    format!("MakoMapK_{k}_v{v}*"),
-                ));
-                out.push((
-                    format!("map_{k}_arr_{v}"),
-                    format!("MakoMapK_{k}_arr_{v}*"),
-                ));
+                out.push((format!("map_{k}_{v}"), format!("MakoMapK_{k}_v{v}*")));
+                out.push((format!("map_{k}_arr_{v}"), format!("MakoMapK_{k}_arr_{v}*")));
             }
         }
         out
@@ -7479,20 +7923,38 @@ impl Codegen {
         let _ = writeln!(self.out, "    {mt} m;");
         let _ = writeln!(self.out, "    m.state = (uint8_t *)calloc(cap, 1);");
         if free_str_key {
-            let _ = writeln!(self.out, "    m.keys = ({key_c} *)calloc(cap, sizeof({key_c}));");
+            let _ = writeln!(
+                self.out,
+                "    m.keys = ({key_c} *)calloc(cap, sizeof({key_c}));"
+            );
         } else {
-            let _ = writeln!(self.out, "    m.keys = ({key_c} *)malloc(cap * sizeof({key_c}));");
+            let _ = writeln!(
+                self.out,
+                "    m.keys = ({key_c} *)malloc(cap * sizeof({key_c}));"
+            );
         }
-        let _ = writeln!(self.out, "    m.vals = ({val_c} *)calloc(cap, sizeof({val_c}));");
+        let _ = writeln!(
+            self.out,
+            "    m.vals = ({val_c} *)calloc(cap, sizeof({val_c}));"
+        );
         let _ = writeln!(self.out, "    if (!m.keys || !m.vals) {{ fprintf(stderr, \"mako: OOM in {fnp}_new\\n\"); abort(); }}");
         let _ = writeln!(self.out, "    m.cap = cap; m.len = 0; return m;");
         let _ = writeln!(self.out, "}}");
-        let _ = writeln!(self.out, "static inline void {fnp}_rehash({mt} *m, size_t ncap);");
-        let _ = writeln!(self.out, "static inline void {fnp}_set({mt} *m, {key_c} key, {val_c} val) {{");
+        let _ = writeln!(
+            self.out,
+            "static inline void {fnp}_rehash({mt} *m, size_t ncap);"
+        );
+        let _ = writeln!(
+            self.out,
+            "static inline void {fnp}_set({mt} *m, {key_c} key, {val_c} val) {{"
+        );
         if key_suf == "f" {
             let _ = writeln!(self.out, "    key = mako_f64_key_norm(key);");
         }
-        let _ = writeln!(self.out, "    if ((m->len + 1) * 4 >= m->cap * 3) {fnp}_rehash(m, m->cap * 2);");
+        let _ = writeln!(
+            self.out,
+            "    if ((m->len + 1) * 4 >= m->cap * 3) {fnp}_rehash(m, m->cap * 2);"
+        );
         let _ = writeln!(self.out, "    uint64_t h = {hash};");
         let _ = writeln!(self.out, "    size_t mask = m->cap - 1;");
         let _ = writeln!(self.out, "    size_t i = (size_t)(h & mask);");
@@ -7500,7 +7962,10 @@ impl Codegen {
         let _ = writeln!(self.out, "    for (;;) {{");
         let _ = writeln!(self.out, "        uint8_t st = m->state[i];");
         let _ = writeln!(self.out, "        if (st == MAKO_MAP_EMPTY) {{");
-        let _ = writeln!(self.out, "            size_t slot = (first_tomb != (size_t)-1) ? first_tomb : i;");
+        let _ = writeln!(
+            self.out,
+            "            size_t slot = (first_tomb != (size_t)-1) ? first_tomb : i;"
+        );
         let _ = writeln!(self.out, "            m->state[slot] = MAKO_MAP_FULL;");
         if free_str_key {
             let _ = writeln!(self.out, "            m->keys[slot] = mako_str_clone(key);");
@@ -7510,19 +7975,31 @@ impl Codegen {
         let _ = writeln!(self.out, "            m->vals[slot] = val;");
         let _ = writeln!(self.out, "            m->len++; return;");
         let _ = writeln!(self.out, "        }}");
-        let _ = writeln!(self.out, "        if (st == MAKO_MAP_TOMB) {{ if (first_tomb == (size_t)-1) first_tomb = i; }}");
-        let _ = writeln!(self.out, "        else if ({key_eq}) {{ m->vals[i] = val; return; }}");
+        let _ = writeln!(
+            self.out,
+            "        if (st == MAKO_MAP_TOMB) {{ if (first_tomb == (size_t)-1) first_tomb = i; }}"
+        );
+        let _ = writeln!(
+            self.out,
+            "        else if ({key_eq}) {{ m->vals[i] = val; return; }}"
+        );
         let _ = writeln!(self.out, "        i = (i + 1) & mask;");
         let _ = writeln!(self.out, "    }}");
         let _ = writeln!(self.out, "}}");
-        let _ = writeln!(self.out, "static inline void {fnp}_rehash({mt} *m, size_t ncap) {{");
+        let _ = writeln!(
+            self.out,
+            "static inline void {fnp}_rehash({mt} *m, size_t ncap) {{"
+        );
         let _ = writeln!(self.out, "    uint8_t *ostate = m->state;");
         let _ = writeln!(self.out, "    {key_c} *okeys = m->keys;");
         let _ = writeln!(self.out, "    {val_c} *ovals = m->vals;");
         let _ = writeln!(self.out, "    size_t ocap = m->cap;");
         let _ = writeln!(self.out, "    {mt} n = {fnp}_new(ncap / 2);");
         let _ = writeln!(self.out, "    for (size_t i = 0; i < ocap; i++) {{");
-        let _ = writeln!(self.out, "        if (ostate[i] != MAKO_MAP_FULL) continue;");
+        let _ = writeln!(
+            self.out,
+            "        if (ostate[i] != MAKO_MAP_FULL) continue;"
+        );
         let _ = writeln!(self.out, "        {key_c} key = okeys[i];");
         let _ = writeln!(self.out, "        {val_c} val = ovals[i];");
         let rehash_h = match key_suf {
@@ -7533,13 +8010,25 @@ impl Codegen {
         };
         let _ = writeln!(self.out, "        uint64_t h = {rehash_h};");
         let _ = writeln!(self.out, "        size_t j = (size_t)(h & (n.cap - 1));");
-        let _ = writeln!(self.out, "        while (n.state[j] == MAKO_MAP_FULL) j = (j + 1) & (n.cap - 1);");
+        let _ = writeln!(
+            self.out,
+            "        while (n.state[j] == MAKO_MAP_FULL) j = (j + 1) & (n.cap - 1);"
+        );
         let _ = writeln!(self.out, "        n.state[j] = MAKO_MAP_FULL;");
-        let _ = writeln!(self.out, "        n.keys[j] = key; n.vals[j] = val; n.len++;");
+        let _ = writeln!(
+            self.out,
+            "        n.keys[j] = key; n.vals[j] = val; n.len++;"
+        );
         let _ = writeln!(self.out, "    }}");
-        let _ = writeln!(self.out, "    free(ostate); free(okeys); free(ovals); *m = n;");
+        let _ = writeln!(
+            self.out,
+            "    free(ostate); free(okeys); free(ovals); *m = n;"
+        );
         let _ = writeln!(self.out, "}}");
-        let _ = writeln!(self.out, "static inline {val_c} {fnp}_get({mt} *m, {key_c} key) {{");
+        let _ = writeln!(
+            self.out,
+            "static inline {val_c} {fnp}_get({mt} *m, {key_c} key) {{"
+        );
         if key_suf == "f" {
             let _ = writeln!(self.out, "    key = mako_f64_key_norm(key);");
         }
@@ -7547,12 +8036,21 @@ impl Codegen {
         let _ = writeln!(self.out, "    uint64_t h = {hash};");
         let _ = writeln!(self.out, "    size_t i = (size_t)(h & (m->cap - 1));");
         let _ = writeln!(self.out, "    for (;;) {{");
-        let _ = writeln!(self.out, "        if (m->state[i] == MAKO_MAP_EMPTY) return {zero_val};");
-        let _ = writeln!(self.out, "        if (m->state[i] == MAKO_MAP_FULL && {key_eq}) return m->vals[i];");
+        let _ = writeln!(
+            self.out,
+            "        if (m->state[i] == MAKO_MAP_EMPTY) return {zero_val};"
+        );
+        let _ = writeln!(
+            self.out,
+            "        if (m->state[i] == MAKO_MAP_FULL && {key_eq}) return m->vals[i];"
+        );
         let _ = writeln!(self.out, "        i = (i + 1) & (m->cap - 1);");
         let _ = writeln!(self.out, "    }}");
         let _ = writeln!(self.out, "}}");
-        let _ = writeln!(self.out, "static inline bool {fnp}_has({mt} *m, {key_c} key) {{");
+        let _ = writeln!(
+            self.out,
+            "static inline bool {fnp}_has({mt} *m, {key_c} key) {{"
+        );
         if key_suf == "f" {
             let _ = writeln!(self.out, "    key = mako_f64_key_norm(key);");
         }
@@ -7560,12 +8058,21 @@ impl Codegen {
         let _ = writeln!(self.out, "    uint64_t h = {hash};");
         let _ = writeln!(self.out, "    size_t i = (size_t)(h & (m->cap - 1));");
         let _ = writeln!(self.out, "    for (;;) {{");
-        let _ = writeln!(self.out, "        if (m->state[i] == MAKO_MAP_EMPTY) return false;");
-        let _ = writeln!(self.out, "        if (m->state[i] == MAKO_MAP_FULL && {key_eq}) return true;");
+        let _ = writeln!(
+            self.out,
+            "        if (m->state[i] == MAKO_MAP_EMPTY) return false;"
+        );
+        let _ = writeln!(
+            self.out,
+            "        if (m->state[i] == MAKO_MAP_FULL && {key_eq}) return true;"
+        );
         let _ = writeln!(self.out, "        i = (i + 1) & (m->cap - 1);");
         let _ = writeln!(self.out, "    }}");
         let _ = writeln!(self.out, "}}");
-        let _ = writeln!(self.out, "static inline void {fnp}_delete({mt} *m, {key_c} key) {{");
+        let _ = writeln!(
+            self.out,
+            "static inline void {fnp}_delete({mt} *m, {key_c} key) {{"
+        );
         if key_suf == "f" {
             let _ = writeln!(self.out, "    key = mako_f64_key_norm(key);");
         }
@@ -7573,49 +8080,88 @@ impl Codegen {
         let _ = writeln!(self.out, "    uint64_t h = {hash};");
         let _ = writeln!(self.out, "    size_t i = (size_t)(h & (m->cap - 1));");
         let _ = writeln!(self.out, "    for (;;) {{");
-        let _ = writeln!(self.out, "        if (m->state[i] == MAKO_MAP_EMPTY) return;");
-        let _ = writeln!(self.out, "        if (m->state[i] == MAKO_MAP_FULL && {key_eq}) {{");
+        let _ = writeln!(
+            self.out,
+            "        if (m->state[i] == MAKO_MAP_EMPTY) return;"
+        );
+        let _ = writeln!(
+            self.out,
+            "        if (m->state[i] == MAKO_MAP_FULL && {key_eq}) {{"
+        );
         if free_str_key {
             let _ = writeln!(self.out, "            mako_str_free(m->keys[i]); m->keys[i].data = NULL; m->keys[i].len = 0;");
         }
-        let _ = writeln!(self.out, "            m->state[i] = MAKO_MAP_TOMB; m->len--; return;");
+        let _ = writeln!(
+            self.out,
+            "            m->state[i] = MAKO_MAP_TOMB; m->len--; return;"
+        );
         let _ = writeln!(self.out, "        }}");
         let _ = writeln!(self.out, "        i = (i + 1) & (m->cap - 1);");
         let _ = writeln!(self.out, "    }}");
         let _ = writeln!(self.out, "}}");
-        let _ = writeln!(self.out, "static inline int64_t {fnp}_len({mt} *m) {{ return m ? (int64_t)m->len : 0; }}");
+        let _ = writeln!(
+            self.out,
+            "static inline int64_t {fnp}_len({mt} *m) {{ return m ? (int64_t)m->len : 0; }}"
+        );
         let _ = writeln!(self.out, "static inline {mt} *{fnp}_make(int64_t hint) {{");
         let _ = writeln!(self.out, "    {mt} *m = ({mt} *)malloc(sizeof({mt}));");
-        let _ = writeln!(self.out, "    *m = {fnp}_new(hint > 0 ? (size_t)hint : 0); return m;");
+        let _ = writeln!(
+            self.out,
+            "    *m = {fnp}_new(hint > 0 ? (size_t)hint : 0); return m;"
+        );
         let _ = writeln!(self.out, "}}");
         // maps_keys
         if key_suf == "s" {
-            let _ = writeln!(self.out, "static inline MakoStrArray mako_maps_keys_{key_suf}_{val_tag}({mt} *m) {{");
-            let _ = writeln!(self.out, "    MakoStrArray out = mako_str_array_make(0, m ? (int64_t)m->len : 0);");
+            let _ = writeln!(
+                self.out,
+                "static inline MakoStrArray mako_maps_keys_{key_suf}_{val_tag}({mt} *m) {{"
+            );
+            let _ = writeln!(
+                self.out,
+                "    MakoStrArray out = mako_str_array_make(0, m ? (int64_t)m->len : 0);"
+            );
             let _ = writeln!(self.out, "    if (!m) return out;");
             let _ = writeln!(self.out, "    for (size_t i = 0; i < m->cap; i++) {{");
             let _ = writeln!(self.out, "        if (m->state[i] == MAKO_MAP_FULL) out = mako_str_array_append(out, m->keys[i]);");
             let _ = writeln!(self.out, "    }} return out;");
             let _ = writeln!(self.out, "}}");
         } else if key_suf == "f" {
-            let _ = writeln!(self.out, "static inline MakoFloatArray mako_maps_keys_{key_suf}_{val_tag}({mt} *m) {{");
-            let _ = writeln!(self.out, "    MakoFloatArray out = mako_float_array_make(0, m ? (int64_t)m->len : 0);");
+            let _ = writeln!(
+                self.out,
+                "static inline MakoFloatArray mako_maps_keys_{key_suf}_{val_tag}({mt} *m) {{"
+            );
+            let _ = writeln!(
+                self.out,
+                "    MakoFloatArray out = mako_float_array_make(0, m ? (int64_t)m->len : 0);"
+            );
             let _ = writeln!(self.out, "    if (!m) return out;");
             let _ = writeln!(self.out, "    for (size_t i = 0; i < m->cap; i++) {{");
             let _ = writeln!(self.out, "        if (m->state[i] == MAKO_MAP_FULL) out = mako_float_array_append(out, m->keys[i]);");
             let _ = writeln!(self.out, "    }} return out;");
             let _ = writeln!(self.out, "}}");
         } else if key_suf == "b" {
-            let _ = writeln!(self.out, "static inline MakoBoolArray mako_maps_keys_{key_suf}_{val_tag}({mt} *m) {{");
-            let _ = writeln!(self.out, "    MakoBoolArray out = mako_bool_array_make(0, m ? (int64_t)m->len : 0);");
+            let _ = writeln!(
+                self.out,
+                "static inline MakoBoolArray mako_maps_keys_{key_suf}_{val_tag}({mt} *m) {{"
+            );
+            let _ = writeln!(
+                self.out,
+                "    MakoBoolArray out = mako_bool_array_make(0, m ? (int64_t)m->len : 0);"
+            );
             let _ = writeln!(self.out, "    if (!m) return out;");
             let _ = writeln!(self.out, "    for (size_t i = 0; i < m->cap; i++) {{");
             let _ = writeln!(self.out, "        if (m->state[i] == MAKO_MAP_FULL) out = mako_bool_array_append(out, m->keys[i]);");
             let _ = writeln!(self.out, "    }} return out;");
             let _ = writeln!(self.out, "}}");
         } else {
-            let _ = writeln!(self.out, "static inline MakoIntArray mako_maps_keys_{key_suf}_{val_tag}({mt} *m) {{");
-            let _ = writeln!(self.out, "    MakoIntArray out = mako_int_array_make(0, m ? (int64_t)m->len : 0);");
+            let _ = writeln!(
+                self.out,
+                "static inline MakoIntArray mako_maps_keys_{key_suf}_{val_tag}({mt} *m) {{"
+            );
+            let _ = writeln!(
+                self.out,
+                "    MakoIntArray out = mako_int_array_make(0, m ? (int64_t)m->len : 0);"
+            );
             let _ = writeln!(self.out, "    if (!m) return out;");
             let _ = writeln!(self.out, "    for (size_t i = 0; i < m->cap; i++) {{");
             let _ = writeln!(self.out, "        if (m->state[i] == MAKO_MAP_FULL) {{");
@@ -7625,14 +8171,23 @@ impl Codegen {
             let _ = writeln!(self.out, "    }} return out;");
             let _ = writeln!(self.out, "}}");
         }
-        let _ = writeln!(self.out, "static inline MakoArr_{val_tag} mako_maps_values_{key_suf}_{val_tag}({mt} *m) {{");
-        let _ = writeln!(self.out, "    MakoArr_{val_tag} out = mako_arr_{val_tag}_make(0, m ? (int64_t)m->len : 0);");
+        let _ = writeln!(
+            self.out,
+            "static inline MakoArr_{val_tag} mako_maps_values_{key_suf}_{val_tag}({mt} *m) {{"
+        );
+        let _ = writeln!(
+            self.out,
+            "    MakoArr_{val_tag} out = mako_arr_{val_tag}_make(0, m ? (int64_t)m->len : 0);"
+        );
         let _ = writeln!(self.out, "    if (!m) return out;");
         let _ = writeln!(self.out, "    for (size_t i = 0; i < m->cap; i++) {{");
         let _ = writeln!(self.out, "        if (m->state[i] == MAKO_MAP_FULL) out = mako_arr_{val_tag}_append(out, m->vals[i]);");
         let _ = writeln!(self.out, "    }} return out;");
         let _ = writeln!(self.out, "}}");
-        let _ = writeln!(self.out, "static inline void mako_maps_clear_{key_suf}_{val_tag}({mt} *m) {{");
+        let _ = writeln!(
+            self.out,
+            "static inline void mako_maps_clear_{key_suf}_{val_tag}({mt} *m) {{"
+        );
         if free_str_key {
             let _ = writeln!(self.out, "    if (!m) return;");
             let _ = writeln!(self.out, "    for (size_t i = 0; i < m->cap; i++) {{");
@@ -7640,31 +8195,58 @@ impl Codegen {
             let _ = writeln!(self.out, "        m->state[i] = MAKO_MAP_EMPTY;");
             let _ = writeln!(self.out, "    }} m->len = 0;");
         } else {
-            let _ = writeln!(self.out, "    if (!m) return; memset(m->state, 0, m->cap); m->len = 0;");
+            let _ = writeln!(
+                self.out,
+                "    if (!m) return; memset(m->state, 0, m->cap); m->len = 0;"
+            );
         }
         let _ = writeln!(self.out, "}}");
         {
             let free_str = key_suf == "s";
             self.emit_map_heap_free(&fnp, &mt, free_str);
         }
-        let _ = writeln!(self.out, "static inline {mt} *mako_maps_clone_{key_suf}_{val_tag}({mt} *m) {{");
-        let _ = writeln!(self.out, "    {mt} *n = {fnp}_make(m ? (int64_t)m->len : 0);");
+        let _ = writeln!(
+            self.out,
+            "static inline {mt} *mako_maps_clone_{key_suf}_{val_tag}({mt} *m) {{"
+        );
+        let _ = writeln!(
+            self.out,
+            "    {mt} *n = {fnp}_make(m ? (int64_t)m->len : 0);"
+        );
         let _ = writeln!(self.out, "    if (!m) return n;");
         let _ = writeln!(self.out, "    for (size_t i = 0; i < m->cap; i++) {{");
-        let _ = writeln!(self.out, "        if (m->state[i] == MAKO_MAP_FULL) {fnp}_set(n, m->keys[i], m->vals[i]);");
+        let _ = writeln!(
+            self.out,
+            "        if (m->state[i] == MAKO_MAP_FULL) {fnp}_set(n, m->keys[i], m->vals[i]);"
+        );
         let _ = writeln!(self.out, "    }} return n;");
         let _ = writeln!(self.out, "}}");
         // Shallow equal: same keys + same inner-map pointers (clone is shallow).
-        let _ = writeln!(self.out, "static inline int64_t mako_maps_equal_{key_suf}_{val_tag}({mt} *a, {mt} *b) {{");
-        let _ = writeln!(self.out, "    if (!a && !b) return 1; if (!a || !b) return 0;");
+        let _ = writeln!(
+            self.out,
+            "static inline int64_t mako_maps_equal_{key_suf}_{val_tag}({mt} *a, {mt} *b) {{"
+        );
+        let _ = writeln!(
+            self.out,
+            "    if (!a && !b) return 1; if (!a || !b) return 0;"
+        );
         let _ = writeln!(self.out, "    if (a->len != b->len) return 0;");
         let _ = writeln!(self.out, "    for (size_t i = 0; i < a->cap; i++) {{");
-        let _ = writeln!(self.out, "        if (a->state[i] != MAKO_MAP_FULL) continue;");
+        let _ = writeln!(
+            self.out,
+            "        if (a->state[i] != MAKO_MAP_FULL) continue;"
+        );
         let _ = writeln!(self.out, "        if (!{fnp}_has(b, a->keys[i])) return 0;");
-        let _ = writeln!(self.out, "        if (a->vals[i] != {fnp}_get(b, a->keys[i])) return 0;");
+        let _ = writeln!(
+            self.out,
+            "        if (a->vals[i] != {fnp}_get(b, a->keys[i])) return 0;"
+        );
         let _ = writeln!(self.out, "    }} return 1;");
         let _ = writeln!(self.out, "}}");
-        let _ = writeln!(self.out, "static inline void mako_maps_copy_{key_suf}_{val_tag}({mt} *dst, {mt} *src) {{");
+        let _ = writeln!(
+            self.out,
+            "static inline void mako_maps_copy_{key_suf}_{val_tag}({mt} *dst, {mt} *src) {{"
+        );
         let _ = writeln!(self.out, "    if (!dst || !src) return;");
         let _ = writeln!(self.out, "    for (size_t i = 0; i < src->cap; i++) {{");
         let _ = writeln!(self.out, "        if (src->state[i] == MAKO_MAP_FULL) {fnp}_set(dst, src->keys[i], src->vals[i]);");
@@ -7699,14 +8281,29 @@ impl Codegen {
         let _ = writeln!(self.out, "    while (cap < need) cap *= 2;");
         let _ = writeln!(self.out, "    {mt} m;");
         let _ = writeln!(self.out, "    m.state = (uint8_t *)calloc(cap, 1);");
-        let _ = writeln!(self.out, "    m.keys = ({key_c} *)calloc(cap, sizeof({key_c}));");
-        let _ = writeln!(self.out, "    m.vals = ({val_c} *)calloc(cap, sizeof({val_c}));");
+        let _ = writeln!(
+            self.out,
+            "    m.keys = ({key_c} *)calloc(cap, sizeof({key_c}));"
+        );
+        let _ = writeln!(
+            self.out,
+            "    m.vals = ({val_c} *)calloc(cap, sizeof({val_c}));"
+        );
         let _ = writeln!(self.out, "    if (!m.keys || !m.vals) {{ fprintf(stderr, \"mako: OOM in {fnp}_new\\n\"); abort(); }}");
         let _ = writeln!(self.out, "    m.cap = cap; m.len = 0; return m;");
         let _ = writeln!(self.out, "}}");
-        let _ = writeln!(self.out, "static inline void {fnp}_rehash({mt} *m, size_t ncap);");
-        let _ = writeln!(self.out, "static inline void {fnp}_set({mt} *m, {key_c} key, {val_c} val) {{");
-        let _ = writeln!(self.out, "    if ((m->len + 1) * 4 >= m->cap * 3) {fnp}_rehash(m, m->cap * 2);");
+        let _ = writeln!(
+            self.out,
+            "static inline void {fnp}_rehash({mt} *m, size_t ncap);"
+        );
+        let _ = writeln!(
+            self.out,
+            "static inline void {fnp}_set({mt} *m, {key_c} key, {val_c} val) {{"
+        );
+        let _ = writeln!(
+            self.out,
+            "    if ((m->len + 1) * 4 >= m->cap * 3) {fnp}_rehash(m, m->cap * 2);"
+        );
         let _ = writeln!(self.out, "    uint64_t h = {hash};");
         let _ = writeln!(self.out, "    size_t mask = m->cap - 1;");
         let _ = writeln!(self.out, "    size_t i = (size_t)(h & mask);");
@@ -7714,110 +8311,212 @@ impl Codegen {
         let _ = writeln!(self.out, "    for (;;) {{");
         let _ = writeln!(self.out, "        uint8_t st = m->state[i];");
         let _ = writeln!(self.out, "        if (st == MAKO_MAP_EMPTY) {{");
-        let _ = writeln!(self.out, "            size_t slot = (first_tomb != (size_t)-1) ? first_tomb : i;");
+        let _ = writeln!(
+            self.out,
+            "            size_t slot = (first_tomb != (size_t)-1) ? first_tomb : i;"
+        );
         let _ = writeln!(self.out, "            m->state[slot] = MAKO_MAP_FULL;");
         let _ = writeln!(self.out, "            m->keys[slot] = key;");
         let _ = writeln!(self.out, "            m->vals[slot] = val;");
         let _ = writeln!(self.out, "            m->len++; return;");
         let _ = writeln!(self.out, "        }}");
-        let _ = writeln!(self.out, "        if (st == MAKO_MAP_TOMB) {{ if (first_tomb == (size_t)-1) first_tomb = i; }}");
-        let _ = writeln!(self.out, "        else if ({key_eq}) {{ m->vals[i] = val; return; }}");
+        let _ = writeln!(
+            self.out,
+            "        if (st == MAKO_MAP_TOMB) {{ if (first_tomb == (size_t)-1) first_tomb = i; }}"
+        );
+        let _ = writeln!(
+            self.out,
+            "        else if ({key_eq}) {{ m->vals[i] = val; return; }}"
+        );
         let _ = writeln!(self.out, "        i = (i + 1) & mask;");
         let _ = writeln!(self.out, "    }}");
         let _ = writeln!(self.out, "}}");
-        let _ = writeln!(self.out, "static inline void {fnp}_rehash({mt} *m, size_t ncap) {{");
+        let _ = writeln!(
+            self.out,
+            "static inline void {fnp}_rehash({mt} *m, size_t ncap) {{"
+        );
         let _ = writeln!(self.out, "    uint8_t *ostate = m->state;");
         let _ = writeln!(self.out, "    {key_c} *okeys = m->keys;");
         let _ = writeln!(self.out, "    {val_c} *ovals = m->vals;");
         let _ = writeln!(self.out, "    size_t ocap = m->cap;");
         let _ = writeln!(self.out, "    {mt} n = {fnp}_new(ncap / 2);");
         let _ = writeln!(self.out, "    for (size_t i = 0; i < ocap; i++) {{");
-        let _ = writeln!(self.out, "        if (ostate[i] != MAKO_MAP_FULL) continue;");
+        let _ = writeln!(
+            self.out,
+            "        if (ostate[i] != MAKO_MAP_FULL) continue;"
+        );
         let _ = writeln!(self.out, "        {key_c} key = okeys[i];");
         let _ = writeln!(self.out, "        {val_c} val = ovals[i];");
         let _ = writeln!(self.out, "        uint64_t h = mako_hash_{key_c}(key);");
         let _ = writeln!(self.out, "        size_t j = (size_t)(h & (n.cap - 1));");
-        let _ = writeln!(self.out, "        while (n.state[j] == MAKO_MAP_FULL) j = (j + 1) & (n.cap - 1);");
+        let _ = writeln!(
+            self.out,
+            "        while (n.state[j] == MAKO_MAP_FULL) j = (j + 1) & (n.cap - 1);"
+        );
         let _ = writeln!(self.out, "        n.state[j] = MAKO_MAP_FULL;");
-        let _ = writeln!(self.out, "        n.keys[j] = key; n.vals[j] = val; n.len++;");
+        let _ = writeln!(
+            self.out,
+            "        n.keys[j] = key; n.vals[j] = val; n.len++;"
+        );
         let _ = writeln!(self.out, "    }}");
-        let _ = writeln!(self.out, "    free(ostate); free(okeys); free(ovals); *m = n;");
+        let _ = writeln!(
+            self.out,
+            "    free(ostate); free(okeys); free(ovals); *m = n;"
+        );
         let _ = writeln!(self.out, "}}");
-        let _ = writeln!(self.out, "static inline {val_c} {fnp}_get({mt} *m, {key_c} key) {{");
+        let _ = writeln!(
+            self.out,
+            "static inline {val_c} {fnp}_get({mt} *m, {key_c} key) {{"
+        );
         let _ = writeln!(self.out, "    if (!m) return {zero_val};");
         let _ = writeln!(self.out, "    uint64_t h = {hash};");
         let _ = writeln!(self.out, "    size_t i = (size_t)(h & (m->cap - 1));");
         let _ = writeln!(self.out, "    for (;;) {{");
-        let _ = writeln!(self.out, "        if (m->state[i] == MAKO_MAP_EMPTY) return {zero_val};");
-        let _ = writeln!(self.out, "        if (m->state[i] == MAKO_MAP_FULL && {key_eq}) return m->vals[i];");
+        let _ = writeln!(
+            self.out,
+            "        if (m->state[i] == MAKO_MAP_EMPTY) return {zero_val};"
+        );
+        let _ = writeln!(
+            self.out,
+            "        if (m->state[i] == MAKO_MAP_FULL && {key_eq}) return m->vals[i];"
+        );
         let _ = writeln!(self.out, "        i = (i + 1) & (m->cap - 1);");
         let _ = writeln!(self.out, "    }}");
         let _ = writeln!(self.out, "}}");
-        let _ = writeln!(self.out, "static inline bool {fnp}_has({mt} *m, {key_c} key) {{");
+        let _ = writeln!(
+            self.out,
+            "static inline bool {fnp}_has({mt} *m, {key_c} key) {{"
+        );
         let _ = writeln!(self.out, "    if (!m) return false;");
         let _ = writeln!(self.out, "    uint64_t h = {hash};");
         let _ = writeln!(self.out, "    size_t i = (size_t)(h & (m->cap - 1));");
         let _ = writeln!(self.out, "    for (;;) {{");
-        let _ = writeln!(self.out, "        if (m->state[i] == MAKO_MAP_EMPTY) return false;");
-        let _ = writeln!(self.out, "        if (m->state[i] == MAKO_MAP_FULL && {key_eq}) return true;");
+        let _ = writeln!(
+            self.out,
+            "        if (m->state[i] == MAKO_MAP_EMPTY) return false;"
+        );
+        let _ = writeln!(
+            self.out,
+            "        if (m->state[i] == MAKO_MAP_FULL && {key_eq}) return true;"
+        );
         let _ = writeln!(self.out, "        i = (i + 1) & (m->cap - 1);");
         let _ = writeln!(self.out, "    }}");
         let _ = writeln!(self.out, "}}");
-        let _ = writeln!(self.out, "static inline void {fnp}_delete({mt} *m, {key_c} key) {{");
+        let _ = writeln!(
+            self.out,
+            "static inline void {fnp}_delete({mt} *m, {key_c} key) {{"
+        );
         let _ = writeln!(self.out, "    if (!m) return;");
         let _ = writeln!(self.out, "    uint64_t h = {hash};");
         let _ = writeln!(self.out, "    size_t i = (size_t)(h & (m->cap - 1));");
         let _ = writeln!(self.out, "    for (;;) {{");
-        let _ = writeln!(self.out, "        if (m->state[i] == MAKO_MAP_EMPTY) return;");
-        let _ = writeln!(self.out, "        if (m->state[i] == MAKO_MAP_FULL && {key_eq}) {{");
-        let _ = writeln!(self.out, "            m->state[i] = MAKO_MAP_TOMB; m->len--; return;");
+        let _ = writeln!(
+            self.out,
+            "        if (m->state[i] == MAKO_MAP_EMPTY) return;"
+        );
+        let _ = writeln!(
+            self.out,
+            "        if (m->state[i] == MAKO_MAP_FULL && {key_eq}) {{"
+        );
+        let _ = writeln!(
+            self.out,
+            "            m->state[i] = MAKO_MAP_TOMB; m->len--; return;"
+        );
         let _ = writeln!(self.out, "        }}");
         let _ = writeln!(self.out, "        i = (i + 1) & (m->cap - 1);");
         let _ = writeln!(self.out, "    }}");
         let _ = writeln!(self.out, "}}");
-        let _ = writeln!(self.out, "static inline int64_t {fnp}_len({mt} *m) {{ return m ? (int64_t)m->len : 0; }}");
+        let _ = writeln!(
+            self.out,
+            "static inline int64_t {fnp}_len({mt} *m) {{ return m ? (int64_t)m->len : 0; }}"
+        );
         let _ = writeln!(self.out, "static inline {mt} *{fnp}_make(int64_t hint) {{");
         let _ = writeln!(self.out, "    {mt} *m = ({mt} *)malloc(sizeof({mt}));");
-        let _ = writeln!(self.out, "    *m = {fnp}_new(hint > 0 ? (size_t)hint : 0); return m;");
+        let _ = writeln!(
+            self.out,
+            "    *m = {fnp}_new(hint > 0 ? (size_t)hint : 0); return m;"
+        );
         let _ = writeln!(self.out, "}}");
-        let _ = writeln!(self.out, "static inline MakoArr_{key_name} mako_maps_keys_k_{key_name}_{val_tag}({mt} *m) {{");
-        let _ = writeln!(self.out, "    MakoArr_{key_name} out = mako_arr_{key_name}_make(0, m ? (int64_t)m->len : 0);");
+        let _ = writeln!(
+            self.out,
+            "static inline MakoArr_{key_name} mako_maps_keys_k_{key_name}_{val_tag}({mt} *m) {{"
+        );
+        let _ = writeln!(
+            self.out,
+            "    MakoArr_{key_name} out = mako_arr_{key_name}_make(0, m ? (int64_t)m->len : 0);"
+        );
         let _ = writeln!(self.out, "    if (!m) return out;");
         let _ = writeln!(self.out, "    for (size_t i = 0; i < m->cap; i++) {{");
         let _ = writeln!(self.out, "        if (m->state[i] == MAKO_MAP_FULL) out = mako_arr_{key_name}_append(out, m->keys[i]);");
         let _ = writeln!(self.out, "    }} return out;");
         let _ = writeln!(self.out, "}}");
-        let _ = writeln!(self.out, "static inline MakoArr_{val_tag} mako_maps_values_k_{key_name}_{val_tag}({mt} *m) {{");
-        let _ = writeln!(self.out, "    MakoArr_{val_tag} out = mako_arr_{val_tag}_make(0, m ? (int64_t)m->len : 0);");
+        let _ = writeln!(
+            self.out,
+            "static inline MakoArr_{val_tag} mako_maps_values_k_{key_name}_{val_tag}({mt} *m) {{"
+        );
+        let _ = writeln!(
+            self.out,
+            "    MakoArr_{val_tag} out = mako_arr_{val_tag}_make(0, m ? (int64_t)m->len : 0);"
+        );
         let _ = writeln!(self.out, "    if (!m) return out;");
         let _ = writeln!(self.out, "    for (size_t i = 0; i < m->cap; i++) {{");
         let _ = writeln!(self.out, "        if (m->state[i] == MAKO_MAP_FULL) out = mako_arr_{val_tag}_append(out, m->vals[i]);");
         let _ = writeln!(self.out, "    }} return out;");
         let _ = writeln!(self.out, "}}");
-        let _ = writeln!(self.out, "static inline void mako_maps_clear_k_{key_name}_{val_tag}({mt} *m) {{");
-        let _ = writeln!(self.out, "    if (!m) return; memset(m->state, 0, m->cap); m->len = 0;");
+        let _ = writeln!(
+            self.out,
+            "static inline void mako_maps_clear_k_{key_name}_{val_tag}({mt} *m) {{"
+        );
+        let _ = writeln!(
+            self.out,
+            "    if (!m) return; memset(m->state, 0, m->cap); m->len = 0;"
+        );
         let _ = writeln!(self.out, "}}");
         {
             let free_name = format!("mako_map_k_{key_name}_{val_tag}");
             self.emit_map_heap_free(&free_name, &mt, false);
         }
-        let _ = writeln!(self.out, "static inline {mt} *mako_maps_clone_k_{key_name}_{val_tag}({mt} *m) {{");
-        let _ = writeln!(self.out, "    {mt} *n = {fnp}_make(m ? (int64_t)m->len : 0);");
+        let _ = writeln!(
+            self.out,
+            "static inline {mt} *mako_maps_clone_k_{key_name}_{val_tag}({mt} *m) {{"
+        );
+        let _ = writeln!(
+            self.out,
+            "    {mt} *n = {fnp}_make(m ? (int64_t)m->len : 0);"
+        );
         let _ = writeln!(self.out, "    if (!m) return n;");
         let _ = writeln!(self.out, "    for (size_t i = 0; i < m->cap; i++) {{");
-        let _ = writeln!(self.out, "        if (m->state[i] == MAKO_MAP_FULL) {fnp}_set(n, m->keys[i], m->vals[i]);");
+        let _ = writeln!(
+            self.out,
+            "        if (m->state[i] == MAKO_MAP_FULL) {fnp}_set(n, m->keys[i], m->vals[i]);"
+        );
         let _ = writeln!(self.out, "    }} return n;");
         let _ = writeln!(self.out, "}}");
-        let _ = writeln!(self.out, "static inline int64_t mako_maps_equal_k_{key_name}_{val_tag}({mt} *a, {mt} *b) {{");
-        let _ = writeln!(self.out, "    if (!a && !b) return 1; if (!a || !b) return 0;");
+        let _ = writeln!(
+            self.out,
+            "static inline int64_t mako_maps_equal_k_{key_name}_{val_tag}({mt} *a, {mt} *b) {{"
+        );
+        let _ = writeln!(
+            self.out,
+            "    if (!a && !b) return 1; if (!a || !b) return 0;"
+        );
         let _ = writeln!(self.out, "    if (a->len != b->len) return 0;");
         let _ = writeln!(self.out, "    for (size_t i = 0; i < a->cap; i++) {{");
-        let _ = writeln!(self.out, "        if (a->state[i] != MAKO_MAP_FULL) continue;");
+        let _ = writeln!(
+            self.out,
+            "        if (a->state[i] != MAKO_MAP_FULL) continue;"
+        );
         let _ = writeln!(self.out, "        if (!{fnp}_has(b, a->keys[i])) return 0;");
-        let _ = writeln!(self.out, "        if (a->vals[i] != {fnp}_get(b, a->keys[i])) return 0;");
+        let _ = writeln!(
+            self.out,
+            "        if (a->vals[i] != {fnp}_get(b, a->keys[i])) return 0;"
+        );
         let _ = writeln!(self.out, "    }} return 1;");
         let _ = writeln!(self.out, "}}");
-        let _ = writeln!(self.out, "static inline void mako_maps_copy_k_{key_name}_{val_tag}({mt} *dst, {mt} *src) {{");
+        let _ = writeln!(
+            self.out,
+            "static inline void mako_maps_copy_k_{key_name}_{val_tag}({mt} *dst, {mt} *src) {{"
+        );
         let _ = writeln!(self.out, "    if (!dst || !src) return;");
         let _ = writeln!(self.out, "    for (size_t i = 0; i < src->cap; i++) {{");
         let _ = writeln!(self.out, "        if (src->state[i] == MAKO_MAP_FULL) {fnp}_set(dst, src->keys[i], src->vals[i]);");
@@ -7854,10 +8553,7 @@ impl Codegen {
             "static inline {mi} mako_map_i_{c_name}_new(size_t hint) {{"
         );
         let _ = writeln!(self.out, "    size_t cap = 8;");
-        let _ = writeln!(
-            self.out,
-            "    size_t need = hint ? (hint * 4 / 3 + 1) : 8;"
-        );
+        let _ = writeln!(self.out, "    size_t need = hint ? (hint * 4 / 3 + 1) : 8;");
         let _ = writeln!(self.out, "    while (cap < need) cap *= 2;");
         let _ = writeln!(self.out, "    {mi} m;");
         let _ = writeln!(self.out, "    m.state = (uint8_t *)calloc(cap, 1);");
@@ -7922,12 +8618,12 @@ impl Codegen {
         let _ = writeln!(self.out, "    int64_t *okeys = m->keys;");
         let _ = writeln!(self.out, "    {c_name} *ovals = m->vals;");
         let _ = writeln!(self.out, "    size_t ocap = m->cap;");
+        let _ = writeln!(self.out, "    {mi} n = mako_map_i_{c_name}_new(ncap / 2);");
+        let _ = writeln!(self.out, "    for (size_t i = 0; i < ocap; i++) {{");
         let _ = writeln!(
             self.out,
-            "    {mi} n = mako_map_i_{c_name}_new(ncap / 2);"
+            "        if (ostate[i] != MAKO_MAP_FULL) continue;"
         );
-        let _ = writeln!(self.out, "    for (size_t i = 0; i < ocap; i++) {{");
-        let _ = writeln!(self.out, "        if (ostate[i] != MAKO_MAP_FULL) continue;");
         let _ = writeln!(self.out, "        int64_t key = okeys[i];");
         let _ = writeln!(self.out, "        {c_name} val = ovals[i];");
         let _ = writeln!(self.out, "        uint64_t h = mako_hash_i64(key);");
@@ -7937,9 +8633,15 @@ impl Codegen {
             "        while (n.state[j] == MAKO_MAP_FULL) j = (j + 1) & (n.cap - 1);"
         );
         let _ = writeln!(self.out, "        n.state[j] = MAKO_MAP_FULL;");
-        let _ = writeln!(self.out, "        n.keys[j] = key; n.vals[j] = val; n.len++;");
+        let _ = writeln!(
+            self.out,
+            "        n.keys[j] = key; n.vals[j] = val; n.len++;"
+        );
         let _ = writeln!(self.out, "    }}");
-        let _ = writeln!(self.out, "    free(ostate); free(okeys); free(ovals); *m = n;");
+        let _ = writeln!(
+            self.out,
+            "    free(ostate); free(okeys); free(ovals); *m = n;"
+        );
         let _ = writeln!(self.out, "}}");
         let _ = writeln!(
             self.out,
@@ -7950,7 +8652,10 @@ impl Codegen {
         let _ = writeln!(self.out, "    uint64_t h = mako_hash_i64(key);");
         let _ = writeln!(self.out, "    size_t i = (size_t)(h & (m->cap - 1));");
         let _ = writeln!(self.out, "    for (;;) {{");
-        let _ = writeln!(self.out, "        if (m->state[i] == MAKO_MAP_EMPTY) return z;");
+        let _ = writeln!(
+            self.out,
+            "        if (m->state[i] == MAKO_MAP_EMPTY) return z;"
+        );
         let _ = writeln!(
             self.out,
             "        if (m->state[i] == MAKO_MAP_FULL && m->keys[i] == key) return m->vals[i];"
@@ -7966,7 +8671,10 @@ impl Codegen {
         let _ = writeln!(self.out, "    uint64_t h = mako_hash_i64(key);");
         let _ = writeln!(self.out, "    size_t i = (size_t)(h & (m->cap - 1));");
         let _ = writeln!(self.out, "    for (;;) {{");
-        let _ = writeln!(self.out, "        if (m->state[i] == MAKO_MAP_EMPTY) return false;");
+        let _ = writeln!(
+            self.out,
+            "        if (m->state[i] == MAKO_MAP_EMPTY) return false;"
+        );
         let _ = writeln!(
             self.out,
             "        if (m->state[i] == MAKO_MAP_FULL && m->keys[i] == key) return true;"
@@ -7982,12 +8690,18 @@ impl Codegen {
         let _ = writeln!(self.out, "    uint64_t h = mako_hash_i64(key);");
         let _ = writeln!(self.out, "    size_t i = (size_t)(h & (m->cap - 1));");
         let _ = writeln!(self.out, "    for (;;) {{");
-        let _ = writeln!(self.out, "        if (m->state[i] == MAKO_MAP_EMPTY) return;");
+        let _ = writeln!(
+            self.out,
+            "        if (m->state[i] == MAKO_MAP_EMPTY) return;"
+        );
         let _ = writeln!(
             self.out,
             "        if (m->state[i] == MAKO_MAP_FULL && m->keys[i] == key) {{"
         );
-        let _ = writeln!(self.out, "            m->state[i] = MAKO_MAP_TOMB; m->len--; return;");
+        let _ = writeln!(
+            self.out,
+            "            m->state[i] = MAKO_MAP_TOMB; m->len--; return;"
+        );
         let _ = writeln!(self.out, "        }}");
         let _ = writeln!(self.out, "        i = (i + 1) & (m->cap - 1);");
         let _ = writeln!(self.out, "    }}");
@@ -8000,10 +8714,7 @@ impl Codegen {
             self.out,
             "static inline {mi} *mako_map_i_{c_name}_make(int64_t hint) {{"
         );
-        let _ = writeln!(
-            self.out,
-            "    {mi} *m = ({mi} *)malloc(sizeof({mi}));"
-        );
+        let _ = writeln!(self.out, "    {mi} *m = ({mi} *)malloc(sizeof({mi}));");
         let _ = writeln!(
             self.out,
             "    *m = mako_map_i_{c_name}_new(hint > 0 ? (size_t)hint : 0); return m;"
@@ -8025,10 +8736,7 @@ impl Codegen {
             "static inline {ms} mako_map_s_{c_name}_new(size_t hint) {{"
         );
         let _ = writeln!(self.out, "    size_t cap = 8;");
-        let _ = writeln!(
-            self.out,
-            "    size_t need = hint ? (hint * 4 / 3 + 1) : 8;"
-        );
+        let _ = writeln!(self.out, "    size_t need = hint ? (hint * 4 / 3 + 1) : 8;");
         let _ = writeln!(self.out, "    while (cap < need) cap *= 2;");
         let _ = writeln!(self.out, "    {ms} m;");
         let _ = writeln!(self.out, "    m.state = (uint8_t *)calloc(cap, 1);");
@@ -8110,12 +8818,12 @@ impl Codegen {
         let _ = writeln!(self.out, "    MakoString *okeys = m->keys;");
         let _ = writeln!(self.out, "    {c_name} *ovals = m->vals;");
         let _ = writeln!(self.out, "    size_t ocap = m->cap;");
+        let _ = writeln!(self.out, "    {ms} n = mako_map_s_{c_name}_new(ncap / 2);");
+        let _ = writeln!(self.out, "    for (size_t i = 0; i < ocap; i++) {{");
         let _ = writeln!(
             self.out,
-            "    {ms} n = mako_map_s_{c_name}_new(ncap / 2);"
+            "        if (ostate[i] != MAKO_MAP_FULL) continue;"
         );
-        let _ = writeln!(self.out, "    for (size_t i = 0; i < ocap; i++) {{");
-        let _ = writeln!(self.out, "        if (ostate[i] != MAKO_MAP_FULL) continue;");
         let _ = writeln!(self.out, "        MakoString key = okeys[i];");
         let _ = writeln!(self.out, "        {c_name} val = ovals[i];");
         let _ = writeln!(
@@ -8128,9 +8836,15 @@ impl Codegen {
             "        while (n.state[j] == MAKO_MAP_FULL) j = (j + 1) & (n.cap - 1);"
         );
         let _ = writeln!(self.out, "        n.state[j] = MAKO_MAP_FULL;");
-        let _ = writeln!(self.out, "        n.keys[j] = key; n.vals[j] = val; n.len++;");
+        let _ = writeln!(
+            self.out,
+            "        n.keys[j] = key; n.vals[j] = val; n.len++;"
+        );
         let _ = writeln!(self.out, "    }}");
-        let _ = writeln!(self.out, "    free(ostate); free(okeys); free(ovals); *m = n;");
+        let _ = writeln!(
+            self.out,
+            "    free(ostate); free(okeys); free(ovals); *m = n;"
+        );
         let _ = writeln!(self.out, "}}");
         let _ = writeln!(
             self.out,
@@ -8144,7 +8858,10 @@ impl Codegen {
         );
         let _ = writeln!(self.out, "    size_t i = (size_t)(h & (m->cap - 1));");
         let _ = writeln!(self.out, "    for (;;) {{");
-        let _ = writeln!(self.out, "        if (m->state[i] == MAKO_MAP_EMPTY) return z;");
+        let _ = writeln!(
+            self.out,
+            "        if (m->state[i] == MAKO_MAP_EMPTY) return z;"
+        );
         let _ = writeln!(
             self.out,
             "        if (m->state[i] == MAKO_MAP_FULL && m->keys[i].len == key.len && memcmp(m->keys[i].data, key.data, key.len) == 0) return m->vals[i];"
@@ -8163,7 +8880,10 @@ impl Codegen {
         );
         let _ = writeln!(self.out, "    size_t i = (size_t)(h & (m->cap - 1));");
         let _ = writeln!(self.out, "    for (;;) {{");
-        let _ = writeln!(self.out, "        if (m->state[i] == MAKO_MAP_EMPTY) return false;");
+        let _ = writeln!(
+            self.out,
+            "        if (m->state[i] == MAKO_MAP_EMPTY) return false;"
+        );
         let _ = writeln!(
             self.out,
             "        if (m->state[i] == MAKO_MAP_FULL && m->keys[i].len == key.len && memcmp(m->keys[i].data, key.data, key.len) == 0) return true;"
@@ -8182,7 +8902,10 @@ impl Codegen {
         );
         let _ = writeln!(self.out, "    size_t i = (size_t)(h & (m->cap - 1));");
         let _ = writeln!(self.out, "    for (;;) {{");
-        let _ = writeln!(self.out, "        if (m->state[i] == MAKO_MAP_EMPTY) return;");
+        let _ = writeln!(
+            self.out,
+            "        if (m->state[i] == MAKO_MAP_EMPTY) return;"
+        );
         let _ = writeln!(
             self.out,
             "        if (m->state[i] == MAKO_MAP_FULL && m->keys[i].len == key.len && memcmp(m->keys[i].data, key.data, key.len) == 0) {{"
@@ -8207,10 +8930,7 @@ impl Codegen {
             self.out,
             "static inline {ms} *mako_map_s_{c_name}_make(int64_t hint) {{"
         );
-        let _ = writeln!(
-            self.out,
-            "    {ms} *m = ({ms} *)malloc(sizeof({ms}));"
-        );
+        let _ = writeln!(self.out, "    {ms} *m = ({ms} *)malloc(sizeof({ms}));");
         let _ = writeln!(
             self.out,
             "    *m = mako_map_s_{c_name}_new(hint > 0 ? (size_t)hint : 0); return m;"
@@ -8230,9 +8950,15 @@ impl Codegen {
         );
         let _ = writeln!(self.out, "    if (!m) return out;");
         let _ = writeln!(self.out, "    for (size_t i = 0; i < m->cap; i++) {{");
-        let _ = writeln!(self.out, "        if (m->state[i] != MAKO_MAP_FULL) continue;");
+        let _ = writeln!(
+            self.out,
+            "        if (m->state[i] != MAKO_MAP_FULL) continue;"
+        );
         let _ = writeln!(self.out, "        if (out.len >= out.cap) {{");
-        let _ = writeln!(self.out, "            size_t ncap = out.cap ? out.cap * 2 : 8;");
+        let _ = writeln!(
+            self.out,
+            "            size_t ncap = out.cap ? out.cap * 2 : 8;"
+        );
         let _ = writeln!(
             self.out,
             "            out.data = (int64_t *)realloc(out.data, ncap * sizeof(int64_t)); out.cap = ncap;"
@@ -8288,10 +9014,16 @@ impl Codegen {
             self.out,
             "static inline int64_t mako_maps_equal_i_{c_name}({mi} *a, {mi} *b) {{"
         );
-        let _ = writeln!(self.out, "    if (!a && !b) return 1; if (!a || !b) return 0;");
+        let _ = writeln!(
+            self.out,
+            "    if (!a && !b) return 1; if (!a || !b) return 0;"
+        );
         let _ = writeln!(self.out, "    if (a->len != b->len) return 0;");
         let _ = writeln!(self.out, "    for (size_t i = 0; i < a->cap; i++) {{");
-        let _ = writeln!(self.out, "        if (a->state[i] != MAKO_MAP_FULL) continue;");
+        let _ = writeln!(
+            self.out,
+            "        if (a->state[i] != MAKO_MAP_FULL) continue;"
+        );
         let _ = writeln!(
             self.out,
             "        if (!mako_map_i_{c_name}_has(b, a->keys[i])) return 0;"
@@ -8300,10 +9032,7 @@ impl Codegen {
             self.out,
             "        {c_name} av = a->vals[i], bv = mako_map_i_{c_name}_get(b, a->keys[i]);"
         );
-        let _ = writeln!(
-            self.out,
-            "        if (!mako_eq_{c_name}(av, bv)) return 0;"
-        );
+        let _ = writeln!(self.out, "        if (!mako_eq_{c_name}(av, bv)) return 0;");
         let _ = writeln!(self.out, "    }} return 1;");
         let _ = writeln!(self.out, "}}");
         let _ = writeln!(
@@ -8388,10 +9117,16 @@ impl Codegen {
             self.out,
             "static inline int64_t mako_maps_equal_s_{c_name}({ms} *a, {ms} *b) {{"
         );
-        let _ = writeln!(self.out, "    if (!a && !b) return 1; if (!a || !b) return 0;");
+        let _ = writeln!(
+            self.out,
+            "    if (!a && !b) return 1; if (!a || !b) return 0;"
+        );
         let _ = writeln!(self.out, "    if (a->len != b->len) return 0;");
         let _ = writeln!(self.out, "    for (size_t i = 0; i < a->cap; i++) {{");
-        let _ = writeln!(self.out, "        if (a->state[i] != MAKO_MAP_FULL) continue;");
+        let _ = writeln!(
+            self.out,
+            "        if (a->state[i] != MAKO_MAP_FULL) continue;"
+        );
         let _ = writeln!(
             self.out,
             "        if (!mako_map_s_{c_name}_has(b, a->keys[i])) return 0;"
@@ -8400,10 +9135,7 @@ impl Codegen {
             self.out,
             "        {c_name} av = a->vals[i], bv = mako_map_s_{c_name}_get(b, a->keys[i]);"
         );
-        let _ = writeln!(
-            self.out,
-            "        if (!mako_eq_{c_name}(av, bv)) return 0;"
-        );
+        let _ = writeln!(self.out, "        if (!mako_eq_{c_name}(av, bv)) return 0;");
         let _ = writeln!(self.out, "    }} return 1;");
         let _ = writeln!(self.out, "}}");
         let _ = writeln!(
@@ -8434,10 +9166,7 @@ impl Codegen {
             "static inline {mf} mako_map_f_{c_name}_new(size_t hint) {{"
         );
         let _ = writeln!(self.out, "    size_t cap = 8;");
-        let _ = writeln!(
-            self.out,
-            "    size_t need = hint ? (hint * 4 / 3 + 1) : 8;"
-        );
+        let _ = writeln!(self.out, "    size_t need = hint ? (hint * 4 / 3 + 1) : 8;");
         let _ = writeln!(self.out, "    while (cap < need) cap *= 2;");
         let _ = writeln!(self.out, "    {mf} m;");
         let _ = writeln!(self.out, "    m.state = (uint8_t *)calloc(cap, 1);");
@@ -8503,12 +9232,12 @@ impl Codegen {
         let _ = writeln!(self.out, "    double *okeys = m->keys;");
         let _ = writeln!(self.out, "    {c_name} *ovals = m->vals;");
         let _ = writeln!(self.out, "    size_t ocap = m->cap;");
+        let _ = writeln!(self.out, "    {mf} n = mako_map_f_{c_name}_new(ncap / 2);");
+        let _ = writeln!(self.out, "    for (size_t i = 0; i < ocap; i++) {{");
         let _ = writeln!(
             self.out,
-            "    {mf} n = mako_map_f_{c_name}_new(ncap / 2);"
+            "        if (ostate[i] != MAKO_MAP_FULL) continue;"
         );
-        let _ = writeln!(self.out, "    for (size_t i = 0; i < ocap; i++) {{");
-        let _ = writeln!(self.out, "        if (ostate[i] != MAKO_MAP_FULL) continue;");
         let _ = writeln!(self.out, "        double key = okeys[i];");
         let _ = writeln!(self.out, "        {c_name} val = ovals[i];");
         let _ = writeln!(self.out, "        uint64_t h = mako_hash_f64(key);");
@@ -8518,9 +9247,15 @@ impl Codegen {
             "        while (n.state[j] == MAKO_MAP_FULL) j = (j + 1) & (n.cap - 1);"
         );
         let _ = writeln!(self.out, "        n.state[j] = MAKO_MAP_FULL;");
-        let _ = writeln!(self.out, "        n.keys[j] = key; n.vals[j] = val; n.len++;");
+        let _ = writeln!(
+            self.out,
+            "        n.keys[j] = key; n.vals[j] = val; n.len++;"
+        );
         let _ = writeln!(self.out, "    }}");
-        let _ = writeln!(self.out, "    free(ostate); free(okeys); free(ovals); *m = n;");
+        let _ = writeln!(
+            self.out,
+            "    free(ostate); free(okeys); free(ovals); *m = n;"
+        );
         let _ = writeln!(self.out, "}}");
         let _ = writeln!(
             self.out,
@@ -8532,7 +9267,10 @@ impl Codegen {
         let _ = writeln!(self.out, "    uint64_t h = mako_hash_f64(key);");
         let _ = writeln!(self.out, "    size_t i = (size_t)(h & (m->cap - 1));");
         let _ = writeln!(self.out, "    for (;;) {{");
-        let _ = writeln!(self.out, "        if (m->state[i] == MAKO_MAP_EMPTY) return z;");
+        let _ = writeln!(
+            self.out,
+            "        if (m->state[i] == MAKO_MAP_EMPTY) return z;"
+        );
         let _ = writeln!(
             self.out,
             "        if (m->state[i] == MAKO_MAP_FULL && mako_f64_key_eq(m->keys[i], key)) return m->vals[i];"
@@ -8549,7 +9287,10 @@ impl Codegen {
         let _ = writeln!(self.out, "    uint64_t h = mako_hash_f64(key);");
         let _ = writeln!(self.out, "    size_t i = (size_t)(h & (m->cap - 1));");
         let _ = writeln!(self.out, "    for (;;) {{");
-        let _ = writeln!(self.out, "        if (m->state[i] == MAKO_MAP_EMPTY) return false;");
+        let _ = writeln!(
+            self.out,
+            "        if (m->state[i] == MAKO_MAP_EMPTY) return false;"
+        );
         let _ = writeln!(
             self.out,
             "        if (m->state[i] == MAKO_MAP_FULL && mako_f64_key_eq(m->keys[i], key)) return true;"
@@ -8566,12 +9307,18 @@ impl Codegen {
         let _ = writeln!(self.out, "    uint64_t h = mako_hash_f64(key);");
         let _ = writeln!(self.out, "    size_t i = (size_t)(h & (m->cap - 1));");
         let _ = writeln!(self.out, "    for (;;) {{");
-        let _ = writeln!(self.out, "        if (m->state[i] == MAKO_MAP_EMPTY) return;");
+        let _ = writeln!(
+            self.out,
+            "        if (m->state[i] == MAKO_MAP_EMPTY) return;"
+        );
         let _ = writeln!(
             self.out,
             "        if (m->state[i] == MAKO_MAP_FULL && mako_f64_key_eq(m->keys[i], key)) {{"
         );
-        let _ = writeln!(self.out, "            m->state[i] = MAKO_MAP_TOMB; m->len--; return;");
+        let _ = writeln!(
+            self.out,
+            "            m->state[i] = MAKO_MAP_TOMB; m->len--; return;"
+        );
         let _ = writeln!(self.out, "        }}");
         let _ = writeln!(self.out, "        i = (i + 1) & (m->cap - 1);");
         let _ = writeln!(self.out, "    }}");
@@ -8584,10 +9331,7 @@ impl Codegen {
             self.out,
             "static inline {mf} *mako_map_f_{c_name}_make(int64_t hint) {{"
         );
-        let _ = writeln!(
-            self.out,
-            "    {mf} *m = ({mf} *)malloc(sizeof({mf}));"
-        );
+        let _ = writeln!(self.out, "    {mf} *m = ({mf} *)malloc(sizeof({mf}));");
         let _ = writeln!(
             self.out,
             "    *m = mako_map_f_{c_name}_new(hint > 0 ? (size_t)hint : 0); return m;"
@@ -8657,10 +9401,16 @@ impl Codegen {
             self.out,
             "static inline int64_t mako_maps_equal_f_{c_name}({mf} *a, {mf} *b) {{"
         );
-        let _ = writeln!(self.out, "    if (!a && !b) return 1; if (!a || !b) return 0;");
+        let _ = writeln!(
+            self.out,
+            "    if (!a && !b) return 1; if (!a || !b) return 0;"
+        );
         let _ = writeln!(self.out, "    if (a->len != b->len) return 0;");
         let _ = writeln!(self.out, "    for (size_t i = 0; i < a->cap; i++) {{");
-        let _ = writeln!(self.out, "        if (a->state[i] != MAKO_MAP_FULL) continue;");
+        let _ = writeln!(
+            self.out,
+            "        if (a->state[i] != MAKO_MAP_FULL) continue;"
+        );
         let _ = writeln!(
             self.out,
             "        if (!mako_map_f_{c_name}_has(b, a->keys[i])) return 0;"
@@ -8669,10 +9419,7 @@ impl Codegen {
             self.out,
             "        {c_name} av = a->vals[i], bv = mako_map_f_{c_name}_get(b, a->keys[i]);"
         );
-        let _ = writeln!(
-            self.out,
-            "        if (!mako_eq_{c_name}(av, bv)) return 0;"
-        );
+        let _ = writeln!(self.out, "        if (!mako_eq_{c_name}(av, bv)) return 0;");
         let _ = writeln!(self.out, "    }} return 1;");
         let _ = writeln!(self.out, "}}");
         let _ = writeln!(
@@ -8703,10 +9450,7 @@ impl Codegen {
             "static inline {mb} mako_map_b_{c_name}_new(size_t hint) {{"
         );
         let _ = writeln!(self.out, "    size_t cap = 8;");
-        let _ = writeln!(
-            self.out,
-            "    size_t need = hint ? (hint * 4 / 3 + 1) : 8;"
-        );
+        let _ = writeln!(self.out, "    size_t need = hint ? (hint * 4 / 3 + 1) : 8;");
         let _ = writeln!(self.out, "    while (cap < need) cap *= 2;");
         let _ = writeln!(self.out, "    {mb} m;");
         let _ = writeln!(self.out, "    m.state = (uint8_t *)calloc(cap, 1);");
@@ -8768,12 +9512,12 @@ impl Codegen {
         let _ = writeln!(self.out, "    bool *okeys = m->keys;");
         let _ = writeln!(self.out, "    {c_name} *ovals = m->vals;");
         let _ = writeln!(self.out, "    size_t ocap = m->cap;");
+        let _ = writeln!(self.out, "    {mb} n = mako_map_b_{c_name}_new(ncap / 2);");
+        let _ = writeln!(self.out, "    for (size_t i = 0; i < ocap; i++) {{");
         let _ = writeln!(
             self.out,
-            "    {mb} n = mako_map_b_{c_name}_new(ncap / 2);"
+            "        if (ostate[i] != MAKO_MAP_FULL) continue;"
         );
-        let _ = writeln!(self.out, "    for (size_t i = 0; i < ocap; i++) {{");
-        let _ = writeln!(self.out, "        if (ostate[i] != MAKO_MAP_FULL) continue;");
         let _ = writeln!(self.out, "        bool key = okeys[i];");
         let _ = writeln!(self.out, "        {c_name} val = ovals[i];");
         let _ = writeln!(self.out, "        uint64_t h = mako_hash_i64(key ? 1 : 0);");
@@ -8783,9 +9527,15 @@ impl Codegen {
             "        while (n.state[j] == MAKO_MAP_FULL) j = (j + 1) & (n.cap - 1);"
         );
         let _ = writeln!(self.out, "        n.state[j] = MAKO_MAP_FULL;");
-        let _ = writeln!(self.out, "        n.keys[j] = key; n.vals[j] = val; n.len++;");
+        let _ = writeln!(
+            self.out,
+            "        n.keys[j] = key; n.vals[j] = val; n.len++;"
+        );
         let _ = writeln!(self.out, "    }}");
-        let _ = writeln!(self.out, "    free(ostate); free(okeys); free(ovals); *m = n;");
+        let _ = writeln!(
+            self.out,
+            "    free(ostate); free(okeys); free(ovals); *m = n;"
+        );
         let _ = writeln!(self.out, "}}");
         let _ = writeln!(
             self.out,
@@ -8836,7 +9586,10 @@ impl Codegen {
         let _ = writeln!(self.out, "    uint64_t h = mako_hash_i64(key ? 1 : 0);");
         let _ = writeln!(self.out, "    size_t i = (size_t)(h & (m->cap - 1));");
         let _ = writeln!(self.out, "    for (;;) {{");
-        let _ = writeln!(self.out, "        if (m->state[i] == MAKO_MAP_EMPTY) return;");
+        let _ = writeln!(
+            self.out,
+            "        if (m->state[i] == MAKO_MAP_EMPTY) return;"
+        );
         let _ = writeln!(
             self.out,
             "        if (m->state[i] == MAKO_MAP_FULL && m->keys[i] == key) {{"
@@ -8926,10 +9679,16 @@ impl Codegen {
             self.out,
             "static inline int64_t mako_maps_equal_b_{c_name}({mb} *a, {mb} *b) {{"
         );
-        let _ = writeln!(self.out, "    if (!a && !b) return 1; if (!a || !b) return 0;");
+        let _ = writeln!(
+            self.out,
+            "    if (!a && !b) return 1; if (!a || !b) return 0;"
+        );
         let _ = writeln!(self.out, "    if (a->len != b->len) return 0;");
         let _ = writeln!(self.out, "    for (size_t i = 0; i < a->cap; i++) {{");
-        let _ = writeln!(self.out, "        if (a->state[i] != MAKO_MAP_FULL) continue;");
+        let _ = writeln!(
+            self.out,
+            "        if (a->state[i] != MAKO_MAP_FULL) continue;"
+        );
         let _ = writeln!(
             self.out,
             "        if (!mako_map_b_{c_name}_has(b, a->keys[i])) return 0;"
@@ -8938,10 +9697,7 @@ impl Codegen {
             self.out,
             "        {c_name} av = a->vals[i], bv = mako_map_b_{c_name}_get(b, a->keys[i]);"
         );
-        let _ = writeln!(
-            self.out,
-            "        if (!mako_eq_{c_name}(av, bv)) return 0;"
-        );
+        let _ = writeln!(self.out, "        if (!mako_eq_{c_name}(av, bv)) return 0;");
         let _ = writeln!(self.out, "    }} return 1;");
         let _ = writeln!(self.out, "}}");
         let _ = writeln!(
@@ -9083,11 +9839,7 @@ impl Codegen {
         for e in elems {
             if let Expr::Call { callee, args } = e {
                 if let Expr::Ident(cn) = callee.as_ref() {
-                    let is_ctor = if is_option {
-                        cn == "Some"
-                    } else {
-                        cn == "Ok"
-                    };
+                    let is_ctor = if is_option { cn == "Some" } else { cn == "Ok" };
                     if is_ctor {
                         if let Some(a0) = args.first() {
                             // Nested bags: Some(Some(v)) / Some(Ok(v)) / Ok(Some(v)) / Ok(Ok(v))
@@ -9182,13 +9934,7 @@ impl Codegen {
                 if !self.want_named_map(key, vsuf) {
                     continue;
                 }
-                vals.push((
-                    vty.into(),
-                    vsuf.into(),
-                    zero.into(),
-                    free_str,
-                    false,
-                ));
+                vals.push((vty.into(), vsuf.into(), zero.into(), free_str, false));
             }
         }
         for (vty, vsuf, zero, free_str, is_struct_val) in vals {
@@ -9201,15 +9947,9 @@ impl Codegen {
             let _ = writeln!(self.out, "    size_t cap;");
             let _ = writeln!(self.out, "    size_t len;");
             let _ = writeln!(self.out, "}} {mt};");
-            let _ = writeln!(
-                self.out,
-                "static inline {mt} {pref}_new(size_t hint) {{"
-            );
+            let _ = writeln!(self.out, "static inline {mt} {pref}_new(size_t hint) {{");
             let _ = writeln!(self.out, "    size_t cap = 8;");
-            let _ = writeln!(
-                self.out,
-                "    size_t need = hint ? (hint * 4 / 3 + 1) : 8;"
-            );
+            let _ = writeln!(self.out, "    size_t need = hint ? (hint * 4 / 3 + 1) : 8;");
             let _ = writeln!(self.out, "    while (cap < need) cap *= 2;");
             let _ = writeln!(self.out, "    {mt} m;");
             let _ = writeln!(self.out, "    m.state = (uint8_t *)calloc(cap, 1);");
@@ -9261,10 +10001,7 @@ impl Codegen {
             let _ = writeln!(self.out, "            m->state[slot] = MAKO_MAP_FULL;");
             let _ = writeln!(self.out, "            m->keys[slot] = key;");
             if free_str {
-                let _ = writeln!(
-                    self.out,
-                    "            m->vals[slot] = mako_str_clone(val);"
-                );
+                let _ = writeln!(self.out, "            m->vals[slot] = mako_str_clone(val);");
             } else {
                 let _ = writeln!(self.out, "            m->vals[slot] = val;");
             }
@@ -9303,7 +10040,10 @@ impl Codegen {
             let _ = writeln!(self.out, "    size_t ocap = m->cap;");
             let _ = writeln!(self.out, "    {mt} n = {pref}_new(ncap / 2);");
             let _ = writeln!(self.out, "    for (size_t i = 0; i < ocap; i++) {{");
-            let _ = writeln!(self.out, "        if (ostate[i] != MAKO_MAP_FULL) continue;");
+            let _ = writeln!(
+                self.out,
+                "        if (ostate[i] != MAKO_MAP_FULL) continue;"
+            );
             if free_str {
                 // move string ownership
                 let _ = writeln!(self.out, "        {key_c} key = okeys[i];");
@@ -9315,7 +10055,10 @@ impl Codegen {
                     "        while (n.state[j] == MAKO_MAP_FULL) j = (j + 1) & (n.cap - 1);"
                 );
                 let _ = writeln!(self.out, "        n.state[j] = MAKO_MAP_FULL;");
-                let _ = writeln!(self.out, "        n.keys[j] = key; n.vals[j] = val; n.len++;");
+                let _ = writeln!(
+                    self.out,
+                    "        n.keys[j] = key; n.vals[j] = val; n.len++;"
+                );
             } else {
                 let _ = writeln!(self.out, "        {key_c} key = okeys[i];");
                 let _ = writeln!(self.out, "        {vty} val = ovals[i];");
@@ -9326,10 +10069,16 @@ impl Codegen {
                     "        while (n.state[j] == MAKO_MAP_FULL) j = (j + 1) & (n.cap - 1);"
                 );
                 let _ = writeln!(self.out, "        n.state[j] = MAKO_MAP_FULL;");
-                let _ = writeln!(self.out, "        n.keys[j] = key; n.vals[j] = val; n.len++;");
+                let _ = writeln!(
+                    self.out,
+                    "        n.keys[j] = key; n.vals[j] = val; n.len++;"
+                );
             }
             let _ = writeln!(self.out, "    }}");
-            let _ = writeln!(self.out, "    free(ostate); free(okeys); free(ovals); *m = n;");
+            let _ = writeln!(
+                self.out,
+                "    free(ostate); free(okeys); free(ovals); *m = n;"
+            );
             let _ = writeln!(self.out, "}}");
             // get
             let _ = writeln!(
@@ -9409,7 +10158,10 @@ impl Codegen {
             let _ = writeln!(self.out, "    uint64_t h = mako_hash_{key_c}(key);");
             let _ = writeln!(self.out, "    size_t i = (size_t)(h & (m->cap - 1));");
             let _ = writeln!(self.out, "    for (;;) {{");
-            let _ = writeln!(self.out, "        if (m->state[i] == MAKO_MAP_EMPTY) return;");
+            let _ = writeln!(
+                self.out,
+                "        if (m->state[i] == MAKO_MAP_EMPTY) return;"
+            );
             let _ = writeln!(
                 self.out,
                 "        if (m->state[i] == MAKO_MAP_FULL && mako_eq_{key_c}(m->keys[i], key)) {{"
@@ -9432,14 +10184,8 @@ impl Codegen {
                 self.out,
                 "static inline int64_t {pref}_len({mt} *m) {{ return m ? (int64_t)m->len : 0; }}"
             );
-            let _ = writeln!(
-                self.out,
-                "static inline {mt} *{pref}_make(int64_t hint) {{"
-            );
-            let _ = writeln!(
-                self.out,
-                "    {mt} *m = ({mt} *)malloc(sizeof({mt}));"
-            );
+            let _ = writeln!(self.out, "static inline {mt} *{pref}_make(int64_t hint) {{");
+            let _ = writeln!(self.out, "    {mt} *m = ({mt} *)malloc(sizeof({mt}));");
             let _ = writeln!(
                 self.out,
                 "    *m = {pref}_new(hint > 0 ? (size_t)hint : 0); return m;"
@@ -9614,10 +10360,16 @@ impl Codegen {
                 self.out,
                 "static inline int64_t mako_maps_equal_k_{key}_{vsuf}({mt} *a, {mt} *b) {{"
             );
-            let _ = writeln!(self.out, "    if (!a && !b) return 1; if (!a || !b) return 0;");
+            let _ = writeln!(
+                self.out,
+                "    if (!a && !b) return 1; if (!a || !b) return 0;"
+            );
             let _ = writeln!(self.out, "    if (a->len != b->len) return 0;");
             let _ = writeln!(self.out, "    for (size_t i = 0; i < a->cap; i++) {{");
-            let _ = writeln!(self.out, "        if (a->state[i] != MAKO_MAP_FULL) continue;");
+            let _ = writeln!(
+                self.out,
+                "        if (a->state[i] != MAKO_MAP_FULL) continue;"
+            );
             let _ = writeln!(
                 self.out,
                 "        if (!{pref}_has(b, a->keys[i])) return 0;"
@@ -9947,7 +10699,10 @@ impl Codegen {
                         "string" => format!("MakoMapS_{tag}*"),
                         "float" | "float64" => format!("MakoMapF_{tag}*"),
                         "bool" => format!("MakoMapB_{tag}*"),
-                        other if self.structs.contains_key(other) || self.enums.contains_key(other) => {
+                        other
+                            if self.structs.contains_key(other)
+                                || self.enums.contains_key(other) =>
+                        {
                             format!("MakoMapK_{other}_{tag}*")
                         }
                         _ => "MakoMapSI*".into(),
@@ -9956,14 +10711,17 @@ impl Codegen {
                 // map[scalar|Named]map[K2]V
                 (TypeExpr::Named(kk), TypeExpr::Map(ik, iv)) => {
                     let inner_c = self.type_expr_c(&TypeExpr::Map(ik.clone(), iv.clone()));
-                    let tag = map_ptr_mono_tag(&inner_c)
-                        .unwrap_or_else(|| c_type_mono_tag(&inner_c));
+                    let tag =
+                        map_ptr_mono_tag(&inner_c).unwrap_or_else(|| c_type_mono_tag(&inner_c));
                     match kk.as_str() {
                         "int" => format!("MakoMapI_{tag}*"),
                         "string" => format!("MakoMapS_{tag}*"),
                         "float" | "float64" => format!("MakoMapF_{tag}*"),
                         "bool" => format!("MakoMapB_{tag}*"),
-                        other if self.structs.contains_key(other) || self.enums.contains_key(other) => {
+                        other
+                            if self.structs.contains_key(other)
+                                || self.enums.contains_key(other) =>
+                        {
                             format!("MakoMapK_{other}_{tag}*")
                         }
                         _ => "MakoMapSI*".into(),
@@ -9979,7 +10737,10 @@ impl Codegen {
                         "string" => format!("MakoMapS_{tag}*"),
                         "float" | "float64" => format!("MakoMapF_{tag}*"),
                         "bool" => format!("MakoMapB_{tag}*"),
-                        other if self.structs.contains_key(other) || self.enums.contains_key(other) => {
+                        other
+                            if self.structs.contains_key(other)
+                                || self.enums.contains_key(other) =>
+                        {
                             format!("MakoMapK_{other}_{tag}*")
                         }
                         _ => "MakoMapSI*".into(),
@@ -9993,7 +10754,10 @@ impl Codegen {
                         "string" => format!("MakoMapS_{tag}*"),
                         "float" | "float64" => format!("MakoMapF_{tag}*"),
                         "bool" => format!("MakoMapB_{tag}*"),
-                        other if self.structs.contains_key(other) || self.enums.contains_key(other) => {
+                        other
+                            if self.structs.contains_key(other)
+                                || self.enums.contains_key(other) =>
+                        {
                             format!("MakoMapK_{other}_{tag}*")
                         }
                         _ => "MakoMapSI*".into(),
@@ -10009,7 +10773,10 @@ impl Codegen {
                         "string" => format!("MakoMapS_{tag}*"),
                         "float" | "float64" => format!("MakoMapF_{tag}*"),
                         "bool" => format!("MakoMapB_{tag}*"),
-                        other if self.structs.contains_key(other) || self.enums.contains_key(other) => {
+                        other
+                            if self.structs.contains_key(other)
+                                || self.enums.contains_key(other) =>
+                        {
                             format!("MakoMapK_{other}_{tag}*")
                         }
                         _ => "MakoMapSI*".into(),
@@ -10019,36 +10786,44 @@ impl Codegen {
             },
             TypeExpr::Generic(n, _) if n == "Result" => "MakoResultInt".into(),
             TypeExpr::Generic(n, _) if n == "Option" => "MakoOptionInt".into(),
-            TypeExpr::Generic(n, args) if n == "chan" => {
-                match args.first() {
-                    Some(TypeExpr::Named(t)) if t == "string" => "MakoChanStr*".into(),
-                    Some(TypeExpr::Named(t))
-                        if (self.structs.contains_key(t) || self.enums.contains_key(t))
-                            && t != "int"
-                            && t != "int64"
-                            && t != "bool"
-                            && t != "float"
-                            && t != "float64"
-                            && t != "string" =>
-                    {
-                        "MakoChanPtr*".into()
-                    }
-                    Some(TypeExpr::Tuple(_)) => "MakoChanPtr*".into(),
-                    _ => "MakoChan*".into(),
+            TypeExpr::Generic(n, args) if n == "chan" => match args.first() {
+                Some(TypeExpr::Named(t)) if t == "string" => "MakoChanStr*".into(),
+                Some(TypeExpr::Named(t))
+                    if (self.structs.contains_key(t) || self.enums.contains_key(t))
+                        && t != "int"
+                        && t != "int64"
+                        && t != "bool"
+                        && t != "float"
+                        && t != "float64"
+                        && t != "string" =>
+                {
+                    "MakoChanPtr*".into()
                 }
-            }
+                Some(TypeExpr::Tuple(_)) => "MakoChanPtr*".into(),
+                _ => "MakoChan*".into(),
+            },
             TypeExpr::Generic(n, args) if n == "List" && !args.is_empty() => {
                 self.type_expr_c(&TypeExpr::Array(Box::new(args[0].clone())))
             }
             TypeExpr::Generic(n, _) if n == "List" => "MakoIntArray".into(),
             // User-defined generic struct/enum: Pair[int] → Pair__int / MakoEnum_MyBox__int.
-            TypeExpr::Generic(n, args) if {
-                let tags: Vec<String> = args.iter().map(|a| c_type_mono_tag(&self.type_expr_c(a))).collect();
-                let mono = format!("{n}__{}", tags.join("__"));
-                self.structs.contains_key(n) || self.enums.contains_key(n)
-                || self.structs.contains_key(&mono) || self.enums.contains_key(&mono)
-            } => {
-                let tags: Vec<String> = args.iter().map(|a| c_type_mono_tag(&self.type_expr_c(a))).collect();
+            TypeExpr::Generic(n, args)
+                if {
+                    let tags: Vec<String> = args
+                        .iter()
+                        .map(|a| c_type_mono_tag(&self.type_expr_c(a)))
+                        .collect();
+                    let mono = format!("{n}__{}", tags.join("__"));
+                    self.structs.contains_key(n)
+                        || self.enums.contains_key(n)
+                        || self.structs.contains_key(&mono)
+                        || self.enums.contains_key(&mono)
+                } =>
+            {
+                let tags: Vec<String> = args
+                    .iter()
+                    .map(|a| c_type_mono_tag(&self.type_expr_c(a)))
+                    .collect();
                 let mono = format!("{n}__{}", tags.join("__"));
                 // Look up the actual C type name from the registry.
                 if let Some(info) = self.enums.get(&mono) {
@@ -10085,11 +10860,7 @@ impl Codegen {
     }
 
     /// Collect free local POD captures for a lambda body (int/bool/float seed).
-    fn collect_lambda_captures(
-        &self,
-        body: &Expr,
-        params: &[String],
-    ) -> Vec<(String, String)> {
+    fn collect_lambda_captures(&self, body: &Expr, params: &[String]) -> Vec<(String, String)> {
         let mut idents = Vec::new();
         Self::collect_idents_in_expr(body, &mut idents);
         let mut out: Vec<(String, String)> = Vec::new();
@@ -10109,8 +10880,8 @@ impl Codegen {
                 .or_else(|| self.locals.get(&mangle(&n)))
                 .cloned();
             let Some(ty) = ty else { continue };
-            let is_struct = self.structs.contains_key(&ty)
-                || self.structs.values().any(|s| s.c_name == ty);
+            let is_struct =
+                self.structs.contains_key(&ty) || self.structs.values().any(|s| s.c_name == ty);
             let ok = matches!(
                 ty.as_str(),
                 "int64_t"
@@ -10270,11 +11041,19 @@ impl Codegen {
 
         // Detect if body needs multi-statement emission
         let needs_full_body = match body {
-            Expr::Block(b) => b.stmts.iter().any(|s| matches!(s,
-                Stmt::Assign { .. } | Stmt::Let { .. } | Stmt::For { .. }
-                | Stmt::CFor { .. } | Stmt::While { .. } | Stmt::If { .. }
-                | Stmt::IndexAssign { .. } | Stmt::FieldAssign { .. }
-            )),
+            Expr::Block(b) => b.stmts.iter().any(|s| {
+                matches!(
+                    s,
+                    Stmt::Assign { .. }
+                        | Stmt::Let { .. }
+                        | Stmt::For { .. }
+                        | Stmt::CFor { .. }
+                        | Stmt::While { .. }
+                        | Stmt::If { .. }
+                        | Stmt::IndexAssign { .. }
+                        | Stmt::FieldAssign { .. }
+                )
+            }),
             _ => false,
         };
 
@@ -10337,8 +11116,10 @@ impl Codegen {
             }
             for (orig, mangled) in params.iter().zip(pnames.iter()) {
                 if orig != "_" {
-                    let ty = pctys.get(pnames.iter().position(|p| p == mangled).unwrap_or(0))
-                        .cloned().unwrap_or_else(|| "int64_t".into());
+                    let ty = pctys
+                        .get(pnames.iter().position(|p| p == mangled).unwrap_or(0))
+                        .cloned()
+                        .unwrap_or_else(|| "int64_t".into());
                     self.locals.insert(orig.clone(), ty.clone());
                     self.locals.insert(mangle(orig), ty);
                 }
@@ -10349,7 +11130,8 @@ impl Codegen {
             if !captures.is_empty() {
                 for (src_name, cty) in &captures {
                     let field = mangle(src_name);
-                    self.out.push_str(&format!("#define {field} (e->{field})\n"));
+                    self.out
+                        .push_str(&format!("#define {field} (e->{field})\n"));
                     self.locals.insert(src_name.clone(), cty.clone());
                     self.locals.insert(field.clone(), cty.clone());
                 }
@@ -10374,19 +11156,33 @@ impl Codegen {
             self.fn_ptr_casts = saved_casts;
 
             if capture_fields.is_empty() {
-                let param_cs = if pnames.is_empty() { "void".into() } else {
-                    pnames.iter().zip(pctys.iter()).map(|(n, t)| format!("{t} {n}")).collect::<Vec<_>>().join(", ")
+                let param_cs = if pnames.is_empty() {
+                    "void".into()
+                } else {
+                    pnames
+                        .iter()
+                        .zip(pctys.iter())
+                        .map(|(n, t)| format!("{t} {n}"))
+                        .collect::<Vec<_>>()
+                        .join(", ")
                 };
-                let helper_src = format!("static {ret_c} {helper}({param_cs}) {{\n{body_lines}}}\n");
+                let helper_src =
+                    format!("static {ret_c} {helper}({param_cs}) {{\n{body_lines}}}\n");
                 self.insert_helper(&helper_src);
                 let tmp = self.fresh("fnv");
                 self.line(&format!("MakoFn {tmp} = mako_fn_bare((void*){helper});"));
                 return ("MakoFn".into(), tmp);
             } else {
                 let env_ty = format!("MakoEnv_{helper}");
-                let fields = capture_fields.iter().map(|(n, t)| format!("    {t} {n};")).collect::<Vec<_>>().join("\n");
+                let fields = capture_fields
+                    .iter()
+                    .map(|(n, t)| format!("    {t} {n};"))
+                    .collect::<Vec<_>>()
+                    .join("\n");
                 let mut params_cs = vec!["void *env".to_string()];
-                for (n, t) in pnames.iter().zip(pctys.iter()) { params_cs.push(format!("{t} {n}")); }
+                for (n, t) in pnames.iter().zip(pctys.iter()) {
+                    params_cs.push(format!("{t} {n}"));
+                }
                 let drop_helper = format!("{helper}_drop");
                 let helper_src = format!(
                     "typedef struct {{\n{fields}\n}} {env_ty};\nstatic {ret_c} {helper}({}) {{\n    {env_ty} *e = ({env_ty}*)env;\n{body_lines}}}\nstatic void {drop_helper}(void *env) {{\n    {env_ty} *e = ({env_ty}*)env;\n    if (!e) return;\n    free(e);\n}}\n",
@@ -10394,7 +11190,9 @@ impl Codegen {
                 );
                 self.insert_helper(&helper_src);
                 let env_tmp = self.fresh("env");
-                self.line(&format!("{env_ty} *{env_tmp} = ({env_ty}*)malloc(sizeof({env_ty}));"));
+                self.line(&format!(
+                    "{env_ty} *{env_tmp} = ({env_ty}*)malloc(sizeof({env_ty}));"
+                ));
                 self.line(&format!("if (!{env_tmp}) {{ fprintf(stderr, \"mako: OOM in closure env\\n\"); abort(); }}"));
                 for (src_name, cty) in &captures {
                     let field = mangle(src_name);
@@ -10406,7 +11204,9 @@ impl Codegen {
                     }
                 }
                 let tmp = self.fresh("fnv");
-                self.line(&format!("MakoFn {tmp} = mako_fn_closure((void*){helper}, {env_tmp}, {drop_helper});"));
+                self.line(&format!(
+                    "MakoFn {tmp} = mako_fn_closure((void*){helper}, {env_tmp}, {drop_helper});"
+                ));
                 return ("MakoFn".into(), tmp);
             }
         }
@@ -10512,23 +11312,16 @@ impl Codegen {
                     // Mutable capture: allocate a heap cell, store current value,
                     // pass pointer to env. Outer scope reads through the cell too.
                     let cell = self.fresh("cell");
-                    self.line(&format!(
-                        "{cty} *{cell} = ({cty}*)malloc(sizeof({cty}));"
-                    ));
+                    self.line(&format!("{cty} *{cell} = ({cty}*)malloc(sizeof({cty}));"));
                     self.line(&format!("*{cell} = {val};"));
                     self.line(&format!("{env_tmp}->{field} = {cell};"));
                     // Redirect the outer local to read through the cell.
                     // After this point, `counter` in the outer scope becomes `*cell`.
-                    self.mut_capture_cells
-                        .insert(src_name.clone(), cell);
+                    self.mut_capture_cells.insert(src_name.clone(), cell);
                 } else if cty == "MakoString" {
-                    self.line(&format!(
-                        "{env_tmp}->{field} = mako_str_clone({val});"
-                    ));
+                    self.line(&format!("{env_tmp}->{field} = mako_str_clone({val});"));
                 } else if cty == "MakoShareInt" {
-                    self.line(&format!(
-                        "{env_tmp}->{field} = mako_share_clone({val});"
-                    ));
+                    self.line(&format!("{env_tmp}->{field} = mako_share_clone({val});"));
                 } else if self.structs.contains_key(cty)
                     || self.structs.values().any(|s| s.c_name == *cty)
                 {
@@ -10597,10 +11390,7 @@ impl Codegen {
                         return format!("mako_share_get({})", as_[0]);
                     }
                     if fname == "share_set" && as_.len() == 2 {
-                        return format!(
-                            "(mako_share_set({}, {}), (int64_t)0)",
-                            as_[0], as_[1]
-                        );
+                        return format!("(mako_share_set({}, {}), (int64_t)0)", as_[0], as_[1]);
                     }
                     return format!("{}({})", mangle(fname), as_.join(", "));
                 }
@@ -10785,8 +11575,7 @@ impl Codegen {
                 }
                 let chain = Self::option_nest_chain_for_type(ty);
                 if !chain.is_empty() {
-                    self.result_option_chains
-                        .insert(name.to_string(), chain);
+                    self.result_option_chains.insert(name.to_string(), chain);
                 }
                 if let Some(rik) = Self::result_result_inner_kind(ty) {
                     self.result_result_inners
@@ -10835,31 +11624,35 @@ impl Codegen {
                     self.deep_nest_chains.insert(name.to_string(), deep);
                 }
             }
-            TypeExpr::Generic(n, args) if n == "chan" && !args.is_empty() => {
-                match &args[0] {
-                    TypeExpr::Named(t)
-                        if !matches!(
-                            t.as_str(),
-                            "int" | "int64" | "int32" | "int8" | "byte" | "uint64"
-                                | "bool" | "float" | "float64" | "string"
-                        ) && (self.structs.contains_key(t) || self.enums.contains_key(t)) =>
-                    {
-                        self.chan_ptr_elems
-                            .insert(name.to_string(), t.clone());
-                    }
-                    TypeExpr::Tuple(elems) => {
-                        let tag = elems
-                            .iter()
-                            .map(|e| c_type_mono_tag(&self.type_expr_c(e)))
-                            .collect::<Vec<_>>()
-                            .join("_");
-                        let cname = format!("MakoTup_{tag}");
-                        self.chan_ptr_elems
-                            .insert(name.to_string(), cname);
-                    }
-                    _ => {}
+            TypeExpr::Generic(n, args) if n == "chan" && !args.is_empty() => match &args[0] {
+                TypeExpr::Named(t)
+                    if !matches!(
+                        t.as_str(),
+                        "int"
+                            | "int64"
+                            | "int32"
+                            | "int8"
+                            | "byte"
+                            | "uint64"
+                            | "bool"
+                            | "float"
+                            | "float64"
+                            | "string"
+                    ) && (self.structs.contains_key(t) || self.enums.contains_key(t)) =>
+                {
+                    self.chan_ptr_elems.insert(name.to_string(), t.clone());
                 }
-            }
+                TypeExpr::Tuple(elems) => {
+                    let tag = elems
+                        .iter()
+                        .map(|e| c_type_mono_tag(&self.type_expr_c(e)))
+                        .collect::<Vec<_>>()
+                        .join("_");
+                    let cname = format!("MakoTup_{tag}");
+                    self.chan_ptr_elems.insert(name.to_string(), cname);
+                }
+                _ => {}
+            },
             _ => {}
         }
     }
@@ -10894,10 +11687,7 @@ impl Codegen {
         // Per-function channel metadata (must not leak across functions with same local names).
         self.chan_float.clear();
         self.chan_ptr_elems.clear();
-        self.current_result_err_enum = f
-            .ret
-            .as_ref()
-            .and_then(|t| self.result_err_enum_c(t));
+        self.current_result_err_enum = f.ret.as_ref().and_then(|t| self.result_err_enum_c(t));
         self.current_fn_ret = f.ret.clone();
         self.push_share_scope();
         let is_mut_self_fn = self.mut_self_fns.contains(&f.name);
@@ -11034,7 +11824,8 @@ impl Codegen {
             ));
             self.indent += 1;
             self.push_share_scope();
-            self.loop_drop_bases.push(self.own_drop_scopes.len().saturating_sub(1));
+            self.loop_drop_bases
+                .push(self.own_drop_scopes.len().saturating_sub(1));
             for s in &body.stmts {
                 self.emit_stmt(s);
             }
@@ -11181,12 +11972,10 @@ impl Codegen {
                 || ty == "MakoMapBF*"
                 || ty == "MakoMapBB*"
                 || is_struct_map_b;
-                        let struct_key = parse_struct_key_map(&ty).or_else(|| {
-                parse_map_k_slice_val(&ty).map(|(kn, _)| (kn, "/*slice*/".into()))
-            }).or_else(|| {
-                parse_map_k_map_val(&ty).map(|(kn, _)| (kn, "/*map*/".into()))
-            });
-let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
+            let struct_key = parse_struct_key_map(&ty)
+                .or_else(|| parse_map_k_slice_val(&ty).map(|(kn, _)| (kn, "/*slice*/".into())))
+                .or_else(|| parse_map_k_map_val(&ty).map(|(kn, _)| (kn, "/*map*/".into())));
+            let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                 Some(map_slice_val_c_ty(&tag))
             } else if let Some((_, tag)) = parse_map_k_slice_val(&ty) {
                 Some(map_slice_val_c_ty(&tag))
@@ -11257,8 +12046,8 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             self.line(&format!("{sn} {} = {val}->vals[{i}];", mangle(b)));
                             self.locals.insert(b.clone(), sn.clone());
                             // Propagate bag/chan payload metadata for composite map values.
-                            if let Some((_, tag)) = parse_map_slice_val(&ty)
-                                .or_else(|| parse_map_k_slice_val(&ty))
+                            if let Some((_, tag)) =
+                                parse_map_slice_val(&ty).or_else(|| parse_map_k_slice_val(&ty))
                             {
                                 self.register_bag_payload_on_temp(b, &tag);
                                 self.register_chan_payload_on_temp(b, &tag);
@@ -11282,10 +12071,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         } else if ty == "MakoMapSS*" || ty == "MakoMapFS*" {
                             self.line(&format!("MakoString {} = {val}->vals[{i}];", mangle(b)));
                             self.locals.insert(b.clone(), "MakoString".into());
-                        } else if ty == "MakoMapIF*"
-                            || ty == "MakoMapSF*"
-                            || ty == "MakoMapFF*"
-                        {
+                        } else if ty == "MakoMapIF*" || ty == "MakoMapSF*" || ty == "MakoMapFF*" {
                             self.line(&format!("double {} = {val}->vals[{i}];", mangle(b)));
                             self.locals.insert(b.clone(), "double".into());
                         } else if ty == "MakoMapIB*"
@@ -11339,27 +12125,19 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                     let next_mangled = mangle(&next_fn);
                     self.line("for (;;) {");
                     self.indent += 1;
-                    self.line(&format!(
-                        "{opt_ty} {vtmp} = {next_mangled}({val});"
-                    ));
+                    self.line(&format!("{opt_ty} {vtmp} = {next_mangled}({val});"));
                     self.line(&format!("if (!{vtmp}.some) break;"));
                     match binders {
                         [] => {}
                         [a] => {
                             if a != "_" {
-                                self.line(&format!(
-                                    "int64_t {} = {vtmp}.value;",
-                                    mangle(a)
-                                ));
+                                self.line(&format!("int64_t {} = {vtmp}.value;", mangle(a)));
                                 self.locals.insert(a.clone(), "int64_t".into());
                             }
                         }
                         [_, b] => {
                             if b != "_" {
-                                self.line(&format!(
-                                    "int64_t {} = {vtmp}.value;",
-                                    mangle(b)
-                                ));
+                                self.line(&format!("int64_t {} = {vtmp}.value;", mangle(b)));
                                 self.locals.insert(b.clone(), "int64_t".into());
                             }
                         }
@@ -11518,8 +12296,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
             } => {
                 if name == "_" {
                     let (ty, val) = self.emit_expr(init);
-                    if val != "/*void*/"
-                        && !self.emit_discarded_bag(init, ann.as_ref(), &ty, &val)
+                    if val != "/*void*/" && !self.emit_discarded_bag(init, ann.as_ref(), &ty, &val)
                     {
                         self.emit_line(format_args!("(void)({val});"));
                     }
@@ -11935,8 +12712,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         let mut tags: Vec<String> = Vec::new();
                         let mut j = 0;
                         while j < parts.len() {
-                            if (parts[j] == "opt" || parts[j] == "res") && j + 1 < parts.len()
-                            {
+                            if (parts[j] == "opt" || parts[j] == "res") && j + 1 < parts.len() {
                                 let pref = parts[j];
                                 j += 1;
                                 if parts[j] == "chan" && j + 1 < parts.len() {
@@ -11949,10 +12725,8 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             } else if parts[j] == "chan" && j + 1 < parts.len() {
                                 tags.push(format!("chan_{}", parts[j + 1]));
                                 j += 2;
-                            } else if matches!(
-                                parts[j],
-                                "int" | "string" | "float" | "bool"
-                            ) || parts[j].starts_with("MakoEnum")
+                            } else if matches!(parts[j], "int" | "string" | "float" | "bool")
+                                || parts[j].starts_with("MakoEnum")
                             {
                                 tags.push(parts[j].to_string());
                                 j += 1;
@@ -11982,21 +12756,81 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                 let (bty, b) = self.emit_expr(base);
                 let (_, i) = self.emit_expr(index);
                 let (vty, get_fn, has_fn) = match bty.as_str() {
-                    "MakoMapSI*" => ("int64_t".into(), "mako_map_si_get".into(), "mako_map_si_has".into()),
-                    "MakoMapII*" => ("int64_t".into(), "mako_map_ii_get".into(), "mako_map_ii_has".into()),
-                    "MakoMapSS*" => ("MakoString".into(), "mako_map_ss_get".into(), "mako_map_ss_has".into()),
-                    "MakoMapIF*" => ("double".into(), "mako_map_if_get".into(), "mako_map_if_has".into()),
-                    "MakoMapSF*" => ("double".into(), "mako_map_sf_get".into(), "mako_map_sf_has".into()),
-                    "MakoMapFI*" => ("int64_t".into(), "mako_map_fi_get".into(), "mako_map_fi_has".into()),
-                    "MakoMapFS*" => ("MakoString".into(), "mako_map_fs_get".into(), "mako_map_fs_has".into()),
-                    "MakoMapFF*" => ("double".into(), "mako_map_ff_get".into(), "mako_map_ff_has".into()),
-                    "MakoMapIB*" => ("bool".into(), "mako_map_ib_get".into(), "mako_map_ib_has".into()),
-                    "MakoMapSB*" => ("bool".into(), "mako_map_sb_get".into(), "mako_map_sb_has".into()),
-                    "MakoMapFB*" => ("bool".into(), "mako_map_fb_get".into(), "mako_map_fb_has".into()),
-                    "MakoMapBI*" => ("int64_t".into(), "mako_map_bi_get".into(), "mako_map_bi_has".into()),
-                    "MakoMapBS*" => ("MakoString".into(), "mako_map_bs_get".into(), "mako_map_bs_has".into()),
-                    "MakoMapBF*" => ("double".into(), "mako_map_bf_get".into(), "mako_map_bf_has".into()),
-                    "MakoMapBB*" => ("bool".into(), "mako_map_bb_get".into(), "mako_map_bb_has".into()),
+                    "MakoMapSI*" => (
+                        "int64_t".into(),
+                        "mako_map_si_get".into(),
+                        "mako_map_si_has".into(),
+                    ),
+                    "MakoMapII*" => (
+                        "int64_t".into(),
+                        "mako_map_ii_get".into(),
+                        "mako_map_ii_has".into(),
+                    ),
+                    "MakoMapSS*" => (
+                        "MakoString".into(),
+                        "mako_map_ss_get".into(),
+                        "mako_map_ss_has".into(),
+                    ),
+                    "MakoMapIF*" => (
+                        "double".into(),
+                        "mako_map_if_get".into(),
+                        "mako_map_if_has".into(),
+                    ),
+                    "MakoMapSF*" => (
+                        "double".into(),
+                        "mako_map_sf_get".into(),
+                        "mako_map_sf_has".into(),
+                    ),
+                    "MakoMapFI*" => (
+                        "int64_t".into(),
+                        "mako_map_fi_get".into(),
+                        "mako_map_fi_has".into(),
+                    ),
+                    "MakoMapFS*" => (
+                        "MakoString".into(),
+                        "mako_map_fs_get".into(),
+                        "mako_map_fs_has".into(),
+                    ),
+                    "MakoMapFF*" => (
+                        "double".into(),
+                        "mako_map_ff_get".into(),
+                        "mako_map_ff_has".into(),
+                    ),
+                    "MakoMapIB*" => (
+                        "bool".into(),
+                        "mako_map_ib_get".into(),
+                        "mako_map_ib_has".into(),
+                    ),
+                    "MakoMapSB*" => (
+                        "bool".into(),
+                        "mako_map_sb_get".into(),
+                        "mako_map_sb_has".into(),
+                    ),
+                    "MakoMapFB*" => (
+                        "bool".into(),
+                        "mako_map_fb_get".into(),
+                        "mako_map_fb_has".into(),
+                    ),
+                    "MakoMapBI*" => (
+                        "int64_t".into(),
+                        "mako_map_bi_get".into(),
+                        "mako_map_bi_has".into(),
+                    ),
+                    "MakoMapBS*" => (
+                        "MakoString".into(),
+                        "mako_map_bs_get".into(),
+                        "mako_map_bs_has".into(),
+                    ),
+                    "MakoMapBF*" => (
+                        "double".into(),
+                        "mako_map_bf_get".into(),
+                        "mako_map_bf_has".into(),
+                    ),
+                    "MakoMapBB*" => (
+                        "bool".into(),
+                        "mako_map_bb_get".into(),
+                        "mako_map_bb_has".into(),
+                    ),
                     // Slice/map-value maps before bare MakoMapI_/S_/F_/B_ (arr_*/map_* tags).
                     other if parse_map_slice_val(other).is_some() => {
                         let (ks, tag) = parse_map_slice_val(other).unwrap();
@@ -12087,8 +12921,8 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                 if value != "_" {
                     self.line(&format!("{vty} {} = {get_fn}({b}, {i});", mangle(value)));
                     // Propagate bag/chan payload metadata from monomorph tag when present.
-                    if let Some((_, tag)) = parse_map_slice_val(&bty)
-                        .or_else(|| parse_map_k_slice_val(&bty))
+                    if let Some((_, tag)) =
+                        parse_map_slice_val(&bty).or_else(|| parse_map_k_slice_val(&bty))
                     {
                         self.register_bag_payload_on_temp(value, &tag);
                         self.register_chan_payload_on_temp(value, &tag);
@@ -12105,9 +12939,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
             Stmt::Assign { name, value } => {
                 if name == "_" {
                     let (ty, val) = self.emit_expr(value);
-                    if val != "/*void*/"
-                        && !self.emit_discarded_bag(value, None, &ty, &val)
-                    {
+                    if val != "/*void*/" && !self.emit_discarded_bag(value, None, &ty, &val) {
                         self.emit_line(format_args!("(void)({val});"));
                     }
                     return;
@@ -12162,89 +12994,87 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                 // SAFE-003 residual: free previous owned value on reassign.
                 // Skip inside arena — arena frees all in bulk.
                 if self.current_arena.is_none() {
-                if let Some(cty) = self.locals.get(name).cloned() {
-                    if let Some(ff) = Self::own_free_fn(&cty) {
-                        if self.own_drop_live.contains(&mn) || cond_own {
-                            if cty.ends_with('*') {
-                                // Map handle: free old pointer then overwrite.
-                                if cond_own {
-                                    self.emit_line(format_args!(
-                                        "if ({mn}__own) {ff}({mn});"
-                                    ));
-                                } else {
-                                    self.emit_line(format_args!("{ff}({mn});"));
-                                }
-                                if let Some(cell) = self.mut_capture_cells.get(name).cloned() {
-                                    self.emit_line(format_args!("*{cell} = {val};"));
-                                } else {
-                                    self.emit_line(format_args!("{mn} = {val};"));
-                                }
-                                if cond_own {
-                                    self.emit_line(format_args!("{mn}__own = 1;"));
-                                }
-                                self.register_own_drop(&mn, &cty);
-                                return;
-                            } else if cty == "MakoString" {
-                                let old = self.fresh("old");
-                                self.line(&format!("MakoString {old} = {mn};"));
-                                if let Some(cell) = self.mut_capture_cells.get(name).cloned() {
-                                    self.emit_line(format_args!("*{cell} = {val};"));
-                                } else {
-                                    self.emit_line(format_args!("{mn} = {val};"));
-                                }
-                                if cond_own {
-                                    self.emit_line(format_args!(
+                    if let Some(cty) = self.locals.get(name).cloned() {
+                        if let Some(ff) = Self::own_free_fn(&cty) {
+                            if self.own_drop_live.contains(&mn) || cond_own {
+                                if cty.ends_with('*') {
+                                    // Map handle: free old pointer then overwrite.
+                                    if cond_own {
+                                        self.emit_line(format_args!("if ({mn}__own) {ff}({mn});"));
+                                    } else {
+                                        self.emit_line(format_args!("{ff}({mn});"));
+                                    }
+                                    if let Some(cell) = self.mut_capture_cells.get(name).cloned() {
+                                        self.emit_line(format_args!("*{cell} = {val};"));
+                                    } else {
+                                        self.emit_line(format_args!("{mn} = {val};"));
+                                    }
+                                    if cond_own {
+                                        self.emit_line(format_args!("{mn}__own = 1;"));
+                                    }
+                                    self.register_own_drop(&mn, &cty);
+                                    return;
+                                } else if cty == "MakoString" {
+                                    let old = self.fresh("old");
+                                    self.line(&format!("MakoString {old} = {mn};"));
+                                    if let Some(cell) = self.mut_capture_cells.get(name).cloned() {
+                                        self.emit_line(format_args!("*{cell} = {val};"));
+                                    } else {
+                                        self.emit_line(format_args!("{mn} = {val};"));
+                                    }
+                                    if cond_own {
+                                        self.emit_line(format_args!(
                                         "if ({mn}__own && {old}.data != {mn}.data) mako_str_free({old});"
                                     ));
-                                    self.emit_line(format_args!("{mn}__own = 1;"));
+                                        self.emit_line(format_args!("{mn}__own = 1;"));
+                                    } else {
+                                        self.emit_line(format_args!(
+                                            "if ({old}.data != {mn}.data) mako_str_free({old});"
+                                        ));
+                                    }
+                                    self.register_own_drop(&mn, &cty);
+                                    return;
                                 } else {
-                                    self.emit_line(format_args!(
-                                        "if ({old}.data != {mn}.data) mako_str_free({old});"
-                                    ));
+                                    // Slice/nested header: free old only if backing moved.
+                                    // Nested arrays use release_replaced so shared inners live.
+                                    let old = self.fresh("old");
+                                    self.line(&format!("{cty} {old} = {mn};"));
+                                    if let Some(cell) = self.mut_capture_cells.get(name).cloned() {
+                                        self.emit_line(format_args!("*{cell} = {val};"));
+                                    } else {
+                                        self.emit_line(format_args!("{mn} = {val};"));
+                                    }
+                                    if cond_own {
+                                        self.emit_line(format_args!("if ({mn}__own) {{"));
+                                        self.indent += 1;
+                                        self.emit_reassign_free(&cty, &old, &mn, &ff);
+                                        self.indent -= 1;
+                                        self.line("}");
+                                        self.emit_line(format_args!("{mn}__own = 1;"));
+                                    } else {
+                                        self.emit_reassign_free(&cty, &old, &mn, &ff);
+                                    }
+                                    self.register_own_drop(&mn, &cty);
+                                    return;
                                 }
-                                self.register_own_drop(&mn, &cty);
-                                return;
                             } else {
-                                // Slice/nested header: free old only if backing moved.
-                                // Nested arrays use release_replaced so shared inners live.
-                                let old = self.fresh("old");
-                                self.line(&format!("{cty} {old} = {mn};"));
+                                // Dest not yet tracked (first Own write into a non-own or
+                                // restored after early-return tracking) — store then register.
                                 if let Some(cell) = self.mut_capture_cells.get(name).cloned() {
                                     self.emit_line(format_args!("*{cell} = {val};"));
                                 } else {
                                     self.emit_line(format_args!("{mn} = {val};"));
                                 }
                                 if cond_own {
-                                    self.emit_line(format_args!("if ({mn}__own) {{"));
-                                    self.indent += 1;
-                                    self.emit_reassign_free(&cty, &old, &mn, &ff);
-                                    self.indent -= 1;
-                                    self.line("}");
                                     self.emit_line(format_args!("{mn}__own = 1;"));
-                                } else {
-                                    self.emit_reassign_free(&cty, &old, &mn, &ff);
                                 }
                                 self.register_own_drop(&mn, &cty);
                                 return;
                             }
-                        } else {
-                            // Dest not yet tracked (first Own write into a non-own or
-                            // restored after early-return tracking) — store then register.
-                            if let Some(cell) = self.mut_capture_cells.get(name).cloned() {
-                                self.emit_line(format_args!("*{cell} = {val};"));
-                            } else {
-                                self.emit_line(format_args!("{mn} = {val};"));
-                            }
-                            if cond_own {
-                                self.emit_line(format_args!("{mn}__own = 1;"));
-                            }
-                            self.register_own_drop(&mn, &cty);
-                            return;
                         }
                     }
-                }
                 } // end arena guard
-                // Mutable closure capture: write through heap cell pointer.
+                  // Mutable closure capture: write through heap cell pointer.
                 if let Some(cell) = self.mut_capture_cells.get(name).cloned() {
                     self.emit_line(format_args!("*{cell} = {val};"));
                 } else {
@@ -12272,7 +13102,9 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         && self.tuple_fields_layout_eq(&vty, &exp_vty)
                     {
                         let tmp = self.fresh("tcast");
-                        self.line(&format!("{exp_vty} {tmp}; memcpy(&{tmp}, &{v}, sizeof({tmp}));"));
+                        self.line(&format!(
+                            "{exp_vty} {tmp}; memcpy(&{tmp}, &{v}, sizeof({tmp}));"
+                        ));
                         v = tmp;
                     }
                 }
@@ -12374,7 +13206,11 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                 // Move live owns / clone aliases & field borrows — struct field free
                 // at drop must not double-free with a still-live source.
                 let v = self.prepare_own_store_rhs(value, &vty, v);
-                let arrow = if bty.ends_with('*') && !bty.starts_with("Mako") { "->" } else { "." };
+                let arrow = if bty.ends_with('*') && !bty.starts_with("Mako") {
+                    "->"
+                } else {
+                    "."
+                };
                 self.emit_line(format_args!("{b}{arrow}{field} = {v};"));
             }
             Stmt::Expr(e) => {
@@ -12502,7 +13338,8 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                 let (_, c) = self.emit_expr(cond);
                 self.emit_line(format_args!("if (!({c})) break;"));
                 self.push_share_scope();
-                self.loop_drop_bases.push(self.own_drop_scopes.len().saturating_sub(1));
+                self.loop_drop_bases
+                    .push(self.own_drop_scopes.len().saturating_sub(1));
                 for s in &body.stmts {
                     self.emit_stmt(s);
                 }
@@ -12562,7 +13399,8 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                 let (_, c) = self.emit_expr(cond);
                 self.emit_line(format_args!("if (!({c})) break;"));
                 self.push_share_scope();
-                self.loop_drop_bases.push(self.own_drop_scopes.len().saturating_sub(1));
+                self.loop_drop_bases
+                    .push(self.own_drop_scopes.len().saturating_sub(1));
                 for s in &body.stmts {
                     self.emit_stmt(s);
                 }
@@ -12715,11 +13553,19 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                     );
                 }
                 // Unit enum variant — try qualified lookup using fn return type
-                let ret_enum_ident = self.current_fn_ret.as_ref()
+                let ret_enum_ident = self
+                    .current_fn_ret
+                    .as_ref()
                     .map(|t| self.type_expr_c(t))
-                    .and_then(|c| self.enums.iter().find(|(_, info)| info.c_name == c).map(|(nm, _)| nm.clone()));
+                    .and_then(|c| {
+                        self.enums
+                            .iter()
+                            .find(|(_, info)| info.c_name == c)
+                            .map(|(nm, _)| nm.clone())
+                    });
                 let qn_ident = ret_enum_ident.as_ref().map(|e| format!("{e}::{n}"));
-                let enum_name_resolved = qn_ident.as_ref()
+                let enum_name_resolved = qn_ident
+                    .as_ref()
                     .and_then(|q| self.variant_to_enum.get(q).cloned())
                     .or_else(|| self.variant_to_enum.get(n).cloned());
                 if let Some(enum_name) = enum_name_resolved {
@@ -12735,12 +13581,8 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                                 self.emit_line(format_args!("{tmp}.i0 = 0;"));
                                 self.emit_line(format_args!("{tmp}.i1 = 0;"));
                                 self.emit_line(format_args!("{tmp}.i2 = 0;"));
-                                self.line(&format!(
-                                    "{tmp}.s0 = (MakoString){{NULL, 0}};"
-                                ));
-                                self.line(&format!(
-                                    "{tmp}.s1 = (MakoString){{NULL, 0}};"
-                                ));
+                                self.line(&format!("{tmp}.s0 = (MakoString){{NULL, 0}};"));
+                                self.line(&format!("{tmp}.s1 = (MakoString){{NULL, 0}};"));
                                 return (c_name, tmp);
                             }
                         }
@@ -12758,9 +13600,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         mangle(n)
                     };
                     let tmp = self.fresh("fnv");
-                    self.line(&format!(
-                        "MakoFn {tmp} = mako_fn_bare((void*){fname});"
-                    ));
+                    self.line(&format!("MakoFn {tmp} = mako_fn_bare((void*){fname});"));
                     return ("MakoFn".into(), tmp);
                 }
                 ("int64_t".into(), mangle(n))
@@ -12775,16 +13615,28 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         BinOp::Div if *b != 0 => Some(("int64_t", a.wrapping_div(*b))),
                         BinOp::Mod if *b != 0 => Some(("int64_t", a.wrapping_rem(*b))),
                         BinOp::BitAnd => Some(("int64_t", a & b)),
-                        BinOp::BitOr  => Some(("int64_t", a | b)),
+                        BinOp::BitOr => Some(("int64_t", a | b)),
                         BinOp::BitXor => Some(("int64_t", a ^ b)),
-                        BinOp::Shl    => Some(("int64_t", a.wrapping_shl(*b as u32))),
-                        BinOp::Shr    => Some(("int64_t", a.wrapping_shr(*b as u32))),
-                        BinOp::Eq => return ("bool".into(), if a == b { "true" } else { "false" }.into()),
-                        BinOp::Ne => return ("bool".into(), if a != b { "true" } else { "false" }.into()),
-                        BinOp::Lt => return ("bool".into(), if a < b { "true" } else { "false" }.into()),
-                        BinOp::Le => return ("bool".into(), if a <= b { "true" } else { "false" }.into()),
-                        BinOp::Gt => return ("bool".into(), if a > b { "true" } else { "false" }.into()),
-                        BinOp::Ge => return ("bool".into(), if a >= b { "true" } else { "false" }.into()),
+                        BinOp::Shl => Some(("int64_t", a.wrapping_shl(*b as u32))),
+                        BinOp::Shr => Some(("int64_t", a.wrapping_shr(*b as u32))),
+                        BinOp::Eq => {
+                            return ("bool".into(), if a == b { "true" } else { "false" }.into())
+                        }
+                        BinOp::Ne => {
+                            return ("bool".into(), if a != b { "true" } else { "false" }.into())
+                        }
+                        BinOp::Lt => {
+                            return ("bool".into(), if a < b { "true" } else { "false" }.into())
+                        }
+                        BinOp::Le => {
+                            return ("bool".into(), if a <= b { "true" } else { "false" }.into())
+                        }
+                        BinOp::Gt => {
+                            return ("bool".into(), if a > b { "true" } else { "false" }.into())
+                        }
+                        BinOp::Ge => {
+                            return ("bool".into(), if a >= b { "true" } else { "false" }.into())
+                        }
                         _ => None,
                     };
                     if let Some((ty, v)) = folded {
@@ -12839,7 +13691,9 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                 let (rt, rv) = self.emit_expr(right);
                 if *op == BinOp::Add && lt == "MakoString" {
                     let tmp = self.fresh("s");
-                    self.emit_line(format_args!("MakoString {tmp} = mako_str_concat({lv}, {rv});"));
+                    self.emit_line(format_args!(
+                        "MakoString {tmp} = mako_str_concat({lv}, {rv});"
+                    ));
                     return ("MakoString".into(), tmp);
                 }
                 if (*op == BinOp::Eq || *op == BinOp::Ne)
@@ -13089,10 +13943,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                                 return ("MakoResultInt".into(), format!("mako_ok_str({v})"));
                             }
                             if vty == "double" {
-                                return (
-                                    "MakoResultInt".into(),
-                                    format!("mako_ok_float_res({v})"),
-                                );
+                                return ("MakoResultInt".into(), format!("mako_ok_float_res({v})"));
                             }
                             // Named struct Ok: heap-box and pack pointer in value.
                             if self.structs.contains_key(&vty)
@@ -13166,9 +14017,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                                 );
                             }
                             // Channel handles Ok
-                            if vty == "MakoChan*"
-                                || vty == "MakoChanStr*"
-                                || vty == "MakoChanPtr*"
+                            if vty == "MakoChan*" || vty == "MakoChanStr*" || vty == "MakoChanPtr*"
                             {
                                 return (
                                     "MakoResultInt".into(),
@@ -13239,9 +14088,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             let (_, a) = self.emit_expr(&args[0]);
                             let (_, b) = self.emit_expr(&args[1]);
                             let tmp = self.fresh("ej");
-                            self.line(&format!(
-                                "MakoResultInt {tmp} = mako_error_join({a}, {b});"
-                            ));
+                            self.line(&format!("MakoResultInt {tmp} = mako_error_join({a}, {b});"));
                             return ("MakoResultInt".into(), tmp);
                         }
                         "error_tag" => {
@@ -13274,9 +14121,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         "error_unwrap" => {
                             let (_, r) = self.emit_expr(&args[0]);
                             let tmp = self.fresh("eu");
-                            self.line(&format!(
-                                "MakoResultInt {tmp} = mako_error_unwrap({r});"
-                            ));
+                            self.line(&format!("MakoResultInt {tmp} = mako_error_unwrap({r});"));
                             return ("MakoResultInt".into(), tmp);
                         }
                         "error_root" => {
@@ -13425,16 +14270,17 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                                 );
                             }
                             // Channel handles (int/bool/float ring, string, struct-ptr)
-                            if vty == "MakoChan*"
-                                || vty == "MakoChanStr*"
-                                || vty == "MakoChanPtr*"
+                            if vty == "MakoChan*" || vty == "MakoChanStr*" || vty == "MakoChanPtr*"
                             {
                                 return (
                                     "MakoOptionInt".into(),
                                     format!("mako_some_ptr((void*){v})"),
                                 );
                             }
-                            return ("MakoOptionInt".into(), format!("mako_some_int((int64_t)({v}))"));
+                            return (
+                                "MakoOptionInt".into(),
+                                format!("mako_some_int((int64_t)({v}))"),
+                            );
                         }
                         "None" => {
                             return ("MakoOptionInt".into(), "mako_none_int()".into());
@@ -13658,10 +14504,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         }
                         "ulid_timestamp_ms" => {
                             let (_, u) = self.emit_expr(&args[0]);
-                            return (
-                                "int64_t".into(),
-                                format!("mako_ulid_timestamp_ms({u})"),
-                            );
+                            return ("int64_t".into(), format!("mako_ulid_timestamp_ms({u})"));
                         }
                         "str_eq" => {
                             let a = self.emit_str_arg(&args[0]);
@@ -13752,10 +14595,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             let (_, s) = self.emit_expr(&args[0]);
                             let (_, o) = self.emit_expr(&args[1]);
                             let (_, t) = self.emit_expr(&args[2]);
-                            return (
-                                "int64_t".into(),
-                                format!("mako_str_at_eq({s}, {o}, {t})"),
-                            );
+                            return ("int64_t".into(), format!("mako_str_at_eq({s}, {o}, {t})"));
                         }
                         "str_byte_at" => {
                             let (_, s) = self.emit_expr(&args[0]);
@@ -13881,9 +14721,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             let (_, f) = self.emit_expr(&args[0]);
                             let (_, a) = self.emit_expr(&args[1]);
                             let tmp = self.fresh("fs");
-                            self.line(&format!(
-                                "MakoString {tmp} = mako_fmt_sprintf1({f}, {a});"
-                            ));
+                            self.line(&format!("MakoString {tmp} = mako_fmt_sprintf1({f}, {a});"));
                             return ("MakoString".into(), tmp);
                         }
                         "fmt_sprintf_d" => {
@@ -13908,9 +14746,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         "format_int_hex" => {
                             let (_, n) = self.emit_expr(&args[0]);
                             let tmp = self.fresh("fih");
-                            self.line(&format!(
-                                "MakoString {tmp} = mako_format_int_hex({n});"
-                            ));
+                            self.line(&format!("MakoString {tmp} = mako_format_int_hex({n});"));
                             return ("MakoString".into(), tmp);
                         }
                         "format_int_hex_upper" => {
@@ -13924,25 +14760,19 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         "format_int_bin" => {
                             let (_, n) = self.emit_expr(&args[0]);
                             let tmp = self.fresh("fib");
-                            self.line(&format!(
-                                "MakoString {tmp} = mako_format_int_bin({n});"
-                            ));
+                            self.line(&format!("MakoString {tmp} = mako_format_int_bin({n});"));
                             return ("MakoString".into(), tmp);
                         }
                         "format_int_oct" => {
                             let (_, n) = self.emit_expr(&args[0]);
                             let tmp = self.fresh("fio");
-                            self.line(&format!(
-                                "MakoString {tmp} = mako_format_int_oct({n});"
-                            ));
+                            self.line(&format!("MakoString {tmp} = mako_format_int_oct({n});"));
                             return ("MakoString".into(), tmp);
                         }
                         "format_int_dec" => {
                             let (_, n) = self.emit_expr(&args[0]);
                             let tmp = self.fresh("fid");
-                            self.line(&format!(
-                                "MakoString {tmp} = mako_format_int_dec({n});"
-                            ));
+                            self.line(&format!("MakoString {tmp} = mako_format_int_dec({n});"));
                             return ("MakoString".into(), tmp);
                         }
                         "format_int_base" => {
@@ -13993,33 +14823,25 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         "parse_int_hex" => {
                             let (_, s) = self.emit_expr(&args[0]);
                             let tmp = self.fresh("pih");
-                            self.line(&format!(
-                                "MakoResultInt {tmp} = mako_parse_int_hex({s});"
-                            ));
+                            self.line(&format!("MakoResultInt {tmp} = mako_parse_int_hex({s});"));
                             return ("MakoResultInt".into(), tmp);
                         }
                         "parse_int_bin" => {
                             let (_, s) = self.emit_expr(&args[0]);
                             let tmp = self.fresh("pibin");
-                            self.line(&format!(
-                                "MakoResultInt {tmp} = mako_parse_int_bin({s});"
-                            ));
+                            self.line(&format!("MakoResultInt {tmp} = mako_parse_int_bin({s});"));
                             return ("MakoResultInt".into(), tmp);
                         }
                         "parse_int_oct" => {
                             let (_, s) = self.emit_expr(&args[0]);
                             let tmp = self.fresh("pio");
-                            self.line(&format!(
-                                "MakoResultInt {tmp} = mako_parse_int_oct({s});"
-                            ));
+                            self.line(&format!("MakoResultInt {tmp} = mako_parse_int_oct({s});"));
                             return ("MakoResultInt".into(), tmp);
                         }
                         "parse_int_auto" => {
                             let (_, s) = self.emit_expr(&args[0]);
                             let tmp = self.fresh("pia");
-                            self.line(&format!(
-                                "MakoResultInt {tmp} = mako_parse_int_auto({s});"
-                            ));
+                            self.line(&format!("MakoResultInt {tmp} = mako_parse_int_auto({s});"));
                             return ("MakoResultInt".into(), tmp);
                         }
                         "fmt_sprintf2" => {
@@ -14075,9 +14897,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             let (_, a) = self.emit_expr(&args[0]);
                             let (_, b) = self.emit_expr(&args[1]);
                             let tmp = self.fresh("fsp2");
-                            self.line(&format!(
-                                "MakoString {tmp} = mako_fmt_sprint2({a}, {b});"
-                            ));
+                            self.line(&format!("MakoString {tmp} = mako_fmt_sprint2({a}, {b});"));
                             return ("MakoString".into(), tmp);
                         }
                         "fmt_sprint3" => {
@@ -14093,18 +14913,14 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         "fmt_sprintln" => {
                             let (_, a) = self.emit_expr(&args[0]);
                             let tmp = self.fresh("fsl");
-                            self.line(&format!(
-                                "MakoString {tmp} = mako_fmt_sprintln1({a});"
-                            ));
+                            self.line(&format!("MakoString {tmp} = mako_fmt_sprintln1({a});"));
                             return ("MakoString".into(), tmp);
                         }
                         "fmt_sprintln2" => {
                             let (_, a) = self.emit_expr(&args[0]);
                             let (_, b) = self.emit_expr(&args[1]);
                             let tmp = self.fresh("fsl2");
-                            self.line(&format!(
-                                "MakoString {tmp} = mako_fmt_sprintln2({a}, {b});"
-                            ));
+                            self.line(&format!("MakoString {tmp} = mako_fmt_sprintln2({a}, {b});"));
                             return ("MakoString".into(), tmp);
                         }
                         "fmt_print" => {
@@ -14114,10 +14930,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         "fmt_print2" => {
                             let (_, a) = self.emit_expr(&args[0]);
                             let (_, b) = self.emit_expr(&args[1]);
-                            return (
-                                "int64_t".into(),
-                                format!("mako_fmt_print2({a}, {b})"),
-                            );
+                            return ("int64_t".into(), format!("mako_fmt_print2({a}, {b})"));
                         }
                         "fmt_println" => {
                             let (_, a) = self.emit_expr(&args[0]);
@@ -14126,27 +14939,18 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         "fmt_println2" => {
                             let (_, a) = self.emit_expr(&args[0]);
                             let (_, b) = self.emit_expr(&args[1]);
-                            return (
-                                "int64_t".into(),
-                                format!("mako_fmt_println2({a}, {b})"),
-                            );
+                            return ("int64_t".into(), format!("mako_fmt_println2({a}, {b})"));
                         }
                         "fmt_printf" => {
                             let (_, f) = self.emit_expr(&args[0]);
                             let (_, a) = self.emit_expr(&args[1]);
-                            return (
-                                "int64_t".into(),
-                                format!("mako_fmt_printf1({f}, {a})"),
-                            );
+                            return ("int64_t".into(), format!("mako_fmt_printf1({f}, {a})"));
                         }
                         "fmt_printf2" => {
                             let (_, f) = self.emit_expr(&args[0]);
                             let (_, a) = self.emit_expr(&args[1]);
                             let (_, b) = self.emit_expr(&args[2]);
-                            return (
-                                "int64_t".into(),
-                                format!("mako_fmt_printf2({f}, {a}, {b})"),
-                            );
+                            return ("int64_t".into(), format!("mako_fmt_printf2({f}, {a}, {b})"));
                         }
                         "fmt_printf3" => {
                             let (_, f) = self.emit_expr(&args[0]);
@@ -14169,18 +14973,13 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         "fmt_eprintf" => {
                             let (_, f) = self.emit_expr(&args[0]);
                             let (_, a) = self.emit_expr(&args[1]);
-                            return (
-                                "int64_t".into(),
-                                format!("mako_fmt_eprintf1({f}, {a})"),
-                            );
+                            return ("int64_t".into(), format!("mako_fmt_eprintf1({f}, {a})"));
                         }
                         "fmt_errorf" => {
                             let (_, f) = self.emit_expr(&args[0]);
                             let (_, a) = self.emit_expr(&args[1]);
                             let tmp = self.fresh("fe");
-                            self.line(&format!(
-                                "MakoString {tmp} = mako_fmt_errorf1({f}, {a});"
-                            ));
+                            self.line(&format!("MakoString {tmp} = mako_fmt_errorf1({f}, {a});"));
                             return ("MakoString".into(), tmp);
                         }
                         "fmt_errorf2" => {
@@ -14361,33 +15160,25 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         "elapsed_ms" => {
                             let (_, start) = self.emit_expr(&args[0]);
                             let tmp = self.fresh("el");
-                            self.line(&format!(
-                                "int64_t {tmp} = mako_elapsed_ms({start});"
-                            ));
+                            self.line(&format!("int64_t {tmp} = mako_elapsed_ms({start});"));
                             return ("int64_t".into(), tmp);
                         }
                         "elapsed_ns" => {
                             let (_, start) = self.emit_expr(&args[0]);
                             let tmp = self.fresh("eln");
-                            self.line(&format!(
-                                "int64_t {tmp} = mako_elapsed_ns({start});"
-                            ));
+                            self.line(&format!("int64_t {tmp} = mako_elapsed_ns({start});"));
                             return ("int64_t".into(), tmp);
                         }
                         "elapsed_us" => {
                             let (_, start) = self.emit_expr(&args[0]);
                             let tmp = self.fresh("elu");
-                            self.line(&format!(
-                                "int64_t {tmp} = mako_elapsed_us({start});"
-                            ));
+                            self.line(&format!("int64_t {tmp} = mako_elapsed_us({start});"));
                             return ("int64_t".into(), tmp);
                         }
                         "elapsed_mono_ms" => {
                             let (_, start) = self.emit_expr(&args[0]);
                             let tmp = self.fresh("elm");
-                            self.line(&format!(
-                                "int64_t {tmp} = mako_elapsed_mono_ms({start});"
-                            ));
+                            self.line(&format!("int64_t {tmp} = mako_elapsed_mono_ms({start});"));
                             return ("int64_t".into(), tmp);
                         }
                         "deadline_ns" => {
@@ -14405,25 +15196,19 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         "deadline_remaining_ns" => {
                             let (_, d) = self.emit_expr(&args[0]);
                             let tmp = self.fresh("dlr");
-                            self.line(&format!(
-                                "int64_t {tmp} = mako_deadline_remaining_ns({d});"
-                            ));
+                            self.line(&format!("int64_t {tmp} = mako_deadline_remaining_ns({d});"));
                             return ("int64_t".into(), tmp);
                         }
                         "deadline_remaining_ms" => {
                             let (_, d) = self.emit_expr(&args[0]);
                             let tmp = self.fresh("dlrm");
-                            self.line(&format!(
-                                "int64_t {tmp} = mako_deadline_remaining_ms({d});"
-                            ));
+                            self.line(&format!("int64_t {tmp} = mako_deadline_remaining_ms({d});"));
                             return ("int64_t".into(), tmp);
                         }
                         "deadline_expired" => {
                             let (_, d) = self.emit_expr(&args[0]);
                             let tmp = self.fresh("dle");
-                            self.line(&format!(
-                                "int64_t {tmp} = mako_deadline_expired({d});"
-                            ));
+                            self.line(&format!("int64_t {tmp} = mako_deadline_expired({d});"));
                             return ("int64_t".into(), tmp);
                         }
                         "exit" => {
@@ -14667,7 +15452,8 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         }
                         "time_year" | "time_month" | "time_day" | "time_hour" | "time_minute"
                         | "time_second" | "time_millisecond" | "time_weekday" | "time_yearday"
-                        | "time_trunc_day" | "time_trunc_hour" | "time_since_ms" | "time_until_ms" => {
+                        | "time_trunc_day" | "time_trunc_hour" | "time_since_ms"
+                        | "time_until_ms" => {
                             let (_, t) = self.emit_expr(&args[0]);
                             let fname = match name.as_str() {
                                 "time_year" => "mako_time_year",
@@ -14735,9 +15521,15 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             };
                             return ("int64_t".into(), format!("{fname}({s})"));
                         }
-                        "duration_ms" | "duration_us_as_ms" | "duration_seconds"
-                        | "duration_minutes" | "duration_hours" | "duration_days"
-                        | "duration_to_seconds" | "duration_to_minutes" | "duration_to_hours" => {
+                        "duration_ms"
+                        | "duration_us_as_ms"
+                        | "duration_seconds"
+                        | "duration_minutes"
+                        | "duration_hours"
+                        | "duration_days"
+                        | "duration_to_seconds"
+                        | "duration_to_minutes"
+                        | "duration_to_hours" => {
                             let (_, n) = self.emit_expr(&args[0]);
                             let fname = match name.as_str() {
                                 "duration_ms" => "mako_duration_ms",
@@ -14755,24 +15547,34 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         "duration_string" => {
                             let (_, n) = self.emit_expr(&args[0]);
                             let tmp = self.fresh("durs");
-                            self.line(&format!(
-                                "MakoString {tmp} = mako_duration_string({n});"
-                            ));
+                            self.line(&format!("MakoString {tmp} = mako_duration_string({n});"));
                             return ("MakoString".into(), tmp);
                         }
                         "syscall_available" => {
                             return ("int64_t".into(), "mako_syscall_available()".into());
                         }
-                        "syscall_getpid" | "syscall_getppid" | "syscall_getuid"
-                        | "syscall_geteuid" | "syscall_getgid" | "syscall_getegid"
-                        | "syscall_errno" | "syscall_pagesize" | "syscall_ncpu"
-                        | "syscall_getrlimit_nofile" | "syscall_pipe"
-                        | "syscall_pipe_read_fd" | "syscall_pipe_write_fd" => {
+                        "syscall_getpid"
+                        | "syscall_getppid"
+                        | "syscall_getuid"
+                        | "syscall_geteuid"
+                        | "syscall_getgid"
+                        | "syscall_getegid"
+                        | "syscall_errno"
+                        | "syscall_pagesize"
+                        | "syscall_ncpu"
+                        | "syscall_getrlimit_nofile"
+                        | "syscall_pipe"
+                        | "syscall_pipe_read_fd"
+                        | "syscall_pipe_write_fd" => {
                             let fname = format!("mako_{name}");
                             return ("int64_t".into(), format!("{fname}()"));
                         }
-                        "syscall_hostname" | "syscall_uname_sysname" | "syscall_uname_release"
-                        | "syscall_uname_machine" | "syscall_uname_json" | "syscall_errno_str" => {
+                        "syscall_hostname"
+                        | "syscall_uname_sysname"
+                        | "syscall_uname_release"
+                        | "syscall_uname_machine"
+                        | "syscall_uname_json"
+                        | "syscall_errno_str" => {
                             let fname = format!("mako_{name}");
                             let tmp = self.fresh("syss");
                             self.line(&format!("MakoString {tmp} = {fname}();"));
@@ -14781,12 +15583,12 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         "syscall_kill" => {
                             let (_, p) = self.emit_expr(&args[0]);
                             let (_, s) = self.emit_expr(&args[1]);
-                            return (
-                                "int64_t".into(),
-                                format!("mako_syscall_kill({p}, {s})"),
-                            );
+                            return ("int64_t".into(), format!("mako_syscall_kill({p}, {s})"));
                         }
-                        "syscall_umask" | "syscall_isatty" | "syscall_close" | "syscall_dup"
+                        "syscall_umask"
+                        | "syscall_isatty"
+                        | "syscall_close"
+                        | "syscall_dup"
                         | "syscall_setrlimit_nofile" => {
                             let (_, a) = self.emit_expr(&args[0]);
                             let fname = format!("mako_{name}");
@@ -14795,26 +15597,18 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         "syscall_dup2" => {
                             let (_, a) = self.emit_expr(&args[0]);
                             let (_, b) = self.emit_expr(&args[1]);
-                            return (
-                                "int64_t".into(),
-                                format!("mako_syscall_dup2({a}, {b})"),
-                            );
+                            return ("int64_t".into(), format!("mako_syscall_dup2({a}, {b})"));
                         }
                         "syscall_write" => {
                             let (_, fd) = self.emit_expr(&args[0]);
                             let (_, d) = self.emit_expr(&args[1]);
-                            return (
-                                "int64_t".into(),
-                                format!("mako_syscall_write({fd}, {d})"),
-                            );
+                            return ("int64_t".into(), format!("mako_syscall_write({fd}, {d})"));
                         }
                         "syscall_read" => {
                             let (_, fd) = self.emit_expr(&args[0]);
                             let (_, n) = self.emit_expr(&args[1]);
                             let tmp = self.fresh("sysr");
-                            self.line(&format!(
-                                "MakoString {tmp} = mako_syscall_read({fd}, {n});"
-                            ));
+                            self.line(&format!("MakoString {tmp} = mako_syscall_read({fd}, {n});"));
                             return ("MakoString".into(), tmp);
                         }
                         "syscall_access" | "syscall_chmod" => {
@@ -14826,17 +15620,12 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         "syscall_symlink" => {
                             let (_, t) = self.emit_expr(&args[0]);
                             let (_, l) = self.emit_expr(&args[1]);
-                            return (
-                                "int64_t".into(),
-                                format!("mako_syscall_symlink({t}, {l})"),
-                            );
+                            return ("int64_t".into(), format!("mako_syscall_symlink({t}, {l})"));
                         }
                         "syscall_readlink" => {
                             let (_, p) = self.emit_expr(&args[0]);
                             let tmp = self.fresh("sysrl");
-                            self.line(&format!(
-                                "MakoString {tmp} = mako_syscall_readlink({p});"
-                            ));
+                            self.line(&format!("MakoString {tmp} = mako_syscall_readlink({p});"));
                             return ("MakoString".into(), tmp);
                         }
                         "mutex_new" => {
@@ -15049,7 +15838,9 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             let (_, f) = self.emit_expr(&args[0]);
                             let (_, n) = self.emit_expr(&args[1]);
                             let tmp = self.fresh("fre");
-                            self.line(&format!("MakoString {tmp} = mako_file_read_exact({f}, {n});"));
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_file_read_exact({f}, {n});"
+                            ));
                             return ("MakoString".into(), tmp);
                         }
                         "mmap_open" => {
@@ -15071,7 +15862,9 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             let (_, o) = self.emit_expr(&args[1]);
                             let (_, c) = self.emit_expr(&args[2]);
                             let tmp = self.fresh("mr");
-                            self.line(&format!("MakoString {tmp} = mako_mmap_read({m}, {o}, {c});"));
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_mmap_read({m}, {o}, {c});"
+                            ));
                             return ("MakoString".into(), tmp);
                         }
                         "mmap_write" => {
@@ -15109,10 +15902,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             let (_, p) = self.emit_expr(&args[0]);
                             let (_, o) = self.emit_expr(&args[1]);
                             let (_, d) = self.emit_expr(&args[2]);
-                            return (
-                                "int64_t".into(),
-                                format!("mako_page_write({p}, {o}, {d})"),
-                            );
+                            return ("int64_t".into(), format!("mako_page_write({p}, {o}, {d})"));
                         }
                         "page_read" => {
                             let (_, p) = self.emit_expr(&args[0]);
@@ -15151,9 +15941,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             let (_, w) = self.emit_expr(&args[0]);
                             let (_, o) = self.emit_expr(&args[1]);
                             let tmp = self.fresh("wrec");
-                            self.line(&format!(
-                                "MakoString {tmp} = mako_wal_read_at({w}, {o});"
-                            ));
+                            self.line(&format!("MakoString {tmp} = mako_wal_read_at({w}, {o});"));
                             return ("MakoString".into(), tmp);
                         }
                         "wal_next_off" => {
@@ -15173,10 +15961,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             let (_, h) = self.emit_expr(&args[0]);
                             let (_, k) = self.emit_expr(&args[1]);
                             let (_, v) = self.emit_expr(&args[2]);
-                            return (
-                                "int64_t".into(),
-                                format!("mako_hindex_put({h}, {k}, {v})"),
-                            );
+                            return ("int64_t".into(), format!("mako_hindex_put({h}, {k}, {v})"));
                         }
                         "hindex_get" => {
                             let (_, h) = self.emit_expr(&args[0]);
@@ -15205,10 +15990,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         "store_attach_wal" => {
                             let (_, s) = self.emit_expr(&args[0]);
                             let (_, w) = self.emit_expr(&args[1]);
-                            return (
-                                "int64_t".into(),
-                                format!("mako_store_attach_wal({s}, {w})"),
-                            );
+                            return ("int64_t".into(), format!("mako_store_attach_wal({s}, {w})"));
                         }
                         "store_get" => {
                             let (_, s) = self.emit_expr(&args[0]);
@@ -15219,10 +16001,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             let (_, s) = self.emit_expr(&args[0]);
                             let (_, k) = self.emit_expr(&args[1]);
                             let (_, v) = self.emit_expr(&args[2]);
-                            return (
-                                "int64_t".into(),
-                                format!("mako_store_put({s}, {k}, {v})"),
-                            );
+                            return ("int64_t".into(), format!("mako_store_put({s}, {k}, {v})"));
                         }
                         "store_del" => {
                             let (_, s) = self.emit_expr(&args[0]);
@@ -15253,9 +16032,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             let (_, a) = self.emit_expr(&args[0]);
                             let (_, b) = self.emit_expr(&args[1]);
                             let tmp = self.fresh("sn");
-                            self.line(&format!(
-                                "MakoString {tmp} = mako_snap_encode2({a}, {b});"
-                            ));
+                            self.line(&format!("MakoString {tmp} = mako_snap_encode2({a}, {b});"));
                             return ("MakoString".into(), tmp);
                         }
                         "snap_encode4" => {
@@ -15281,18 +16058,12 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         "snap_predict" => {
                             let (_, st) = self.emit_expr(&args[0]);
                             let (_, d) = self.emit_expr(&args[1]);
-                            return (
-                                "int64_t".into(),
-                                format!("mako_snap_predict({st}, {d})"),
-                            );
+                            return ("int64_t".into(), format!("mako_snap_predict({st}, {d})"));
                         }
                         "snap_reconcile" => {
                             let (_, p) = self.emit_expr(&args[0]);
                             let (_, a) = self.emit_expr(&args[1]);
-                            return (
-                                "int64_t".into(),
-                                format!("mako_snap_reconcile({p}, {a})"),
-                            );
+                            return ("int64_t".into(), format!("mako_snap_reconcile({p}, {a})"));
                         }
                         "snap_diff" => {
                             let (_, a) = self.emit_expr(&args[0]);
@@ -15305,7 +16076,9 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             let (_, a) = self.emit_expr(&args[0]);
                             let (_, b) = self.emit_expr(&args[1]);
                             let tmp = self.fresh("sad");
-                            self.line(&format!("MakoString {tmp} = mako_snap_apply_delta({a}, {b});"));
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_snap_apply_delta({a}, {b});"
+                            ));
                             return ("MakoString".into(), tmp);
                         }
                         "netcode_lag_comp_tick" => {
@@ -15348,13 +16121,15 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         "predict_reconcile" => {
                             let (_, p) = self.emit_expr(&args[0]);
                             let (_, a) = self.emit_expr(&args[1]);
-                            return ("int64_t".into(), format!("mako_predict_reconcile({p}, {a})"));
+                            return (
+                                "int64_t".into(),
+                                format!("mako_predict_reconcile({p}, {a})"),
+                            );
                         }
                         "predict_free" => {
                             let (_, p) = self.emit_expr(&args[0]);
                             return ("int64_t".into(), format!("mako_predict_free({p})"));
                         }
-
 
                         "btree_new" => {
                             let tmp = self.fresh("bt");
@@ -15463,14 +16238,22 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             let (_, b1) = self.emit_expr(&args[5]);
                             let (_, b2) = self.emit_expr(&args[6]);
                             let (_, b3) = self.emit_expr(&args[7]);
-                            return ("int64_t".into(), format!("mako_simd_dot_i64_4({a0},{a1},{a2},{a3},{b0},{b1},{b2},{b3})"));
+                            return (
+                                "int64_t".into(),
+                                format!(
+                                    "mako_simd_dot_i64_4({a0},{a1},{a2},{a3},{b0},{b1},{b2},{b3})"
+                                ),
+                            );
                         }
                         "simd_sum_i64_4" => {
                             let (_, a0) = self.emit_expr(&args[0]);
                             let (_, a1) = self.emit_expr(&args[1]);
                             let (_, a2) = self.emit_expr(&args[2]);
                             let (_, a3) = self.emit_expr(&args[3]);
-                            return ("int64_t".into(), format!("mako_simd_sum_i64_4({a0},{a1},{a2},{a3})"));
+                            return (
+                                "int64_t".into(),
+                                format!("mako_simd_sum_i64_4({a0},{a1},{a2},{a3})"),
+                            );
                         }
 
                         "lsm_new" => {
@@ -15617,7 +16400,10 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             let (_, t) = self.emit_expr(&args[0]);
                             let (_, k) = self.emit_expr(&args[1]);
                             let (_, v) = self.emit_expr(&args[2]);
-                            return ("int64_t".into(), format!("mako_btree_put_str({t}, {k}, {v})"));
+                            return (
+                                "int64_t".into(),
+                                format!("mako_btree_put_str({t}, {k}, {v})"),
+                            );
                         }
                         "btree_get_str" => {
                             let (_, t) = self.emit_expr(&args[0]);
@@ -15637,10 +16423,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             let (_, s) = self.emit_expr(&args[0]);
                             let (_, lo) = self.emit_expr(&args[1]);
                             let (_, hi) = self.emit_expr(&args[2]);
-                            return (
-                                "int64_t".into(),
-                                format!("mako_sst_range({s}, {lo}, {hi})"),
-                            );
+                            return ("int64_t".into(), format!("mako_sst_range({s}, {lo}, {hi})"));
                         }
                         "sst_build8" => {
                             let (_, path) = self.emit_expr(&args[0]);
@@ -15706,7 +16489,10 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             let (_, m) = self.emit_expr(&args[0]);
                             let (_, k) = self.emit_expr(&args[1]);
                             let (_, v) = self.emit_expr(&args[2]);
-                            return ("int64_t".into(), format!("mako_multimap_put({m}, {k}, {v})"));
+                            return (
+                                "int64_t".into(),
+                                format!("mako_multimap_put({m}, {k}, {v})"),
+                            );
                         }
                         "multimap_get" => {
                             let (_, m) = self.emit_expr(&args[0]);
@@ -15737,10 +16523,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         }
                         "domain_reg_put_bloom" => {
                             let (_, b) = self.emit_expr(&args[0]);
-                            return (
-                                "int64_t".into(),
-                                format!("mako_domain_reg_put_bloom({b})"),
-                            );
+                            return ("int64_t".into(), format!("mako_domain_reg_put_bloom({b})"));
                         }
                         "domain_reg_get_bloom" => {
                             let (_, id) = self.emit_expr(&args[0]);
@@ -15752,10 +16535,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         }
                         "domain_reg_put_btree" => {
                             let (_, t) = self.emit_expr(&args[0]);
-                            return (
-                                "int64_t".into(),
-                                format!("mako_domain_reg_put_btree({t})"),
-                            );
+                            return ("int64_t".into(), format!("mako_domain_reg_put_btree({t})"));
                         }
                         "domain_reg_get_btree" => {
                             let (_, id) = self.emit_expr(&args[0]);
@@ -15767,10 +16547,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         }
                         "domain_reg_put_pman" => {
                             let (_, p) = self.emit_expr(&args[0]);
-                            return (
-                                "int64_t".into(),
-                                format!("mako_domain_reg_put_pman({p})"),
-                            );
+                            return ("int64_t".into(), format!("mako_domain_reg_put_pman({p})"));
                         }
                         "domain_reg_get_pman" => {
                             let (_, id) = self.emit_expr(&args[0]);
@@ -15808,10 +16585,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             let (_, pm) = self.emit_expr(&args[0]);
                             let (_, id) = self.emit_expr(&args[1]);
                             let (_, sl) = self.emit_expr(&args[2]);
-                            return (
-                                "int64_t".into(),
-                                format!("mako_pman_get({pm}, {id}, {sl})"),
-                            );
+                            return ("int64_t".into(), format!("mako_pman_get({pm}, {id}, {sl})"));
                         }
                         "pman_sync" => {
                             let (_, pm) = self.emit_expr(&args[0]);
@@ -15895,12 +16669,17 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         }
                         "hot_reload_status_json" => {
                             let tmp = self.fresh("hrs");
-                            self.line(&format!("MakoString {tmp} = mako_hot_reload_status_json();"));
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_hot_reload_status_json();"
+                            ));
                             return ("MakoString".into(), tmp);
                         }
                         "hot_reload_plugin_watch" => {
                             let (_, p) = self.emit_expr(&args[0]);
-                            return ("int64_t".into(), format!("mako_hot_reload_plugin_watch({p})"));
+                            return (
+                                "int64_t".into(),
+                                format!("mako_hot_reload_plugin_watch({p})"),
+                            );
                         }
                         "hot_reload_plugin_poll" => {
                             return ("int64_t".into(), "mako_hot_reload_plugin_poll()".into());
@@ -15909,11 +16688,16 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             let (_, o) = self.emit_expr(&args[0]);
                             let (_, p) = self.emit_expr(&args[1]);
                             let tmp = self.fresh("hrpc");
-                            self.line(&format!("MakoString {tmp} = mako_hot_reload_plugin_call({o}, {p});"));
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_hot_reload_plugin_call({o}, {p});"
+                            ));
                             return ("MakoString".into(), tmp);
                         }
                         "hot_reload_plugin_handle" => {
-                            return ("int64_t".into(), "mako_hot_reload_plugin_handle_id()".into());
+                            return (
+                                "int64_t".into(),
+                                "mako_hot_reload_plugin_handle_id()".into(),
+                            );
                         }
                         "hot_reload_plugin_swaps" => {
                             return ("int64_t".into(), "mako_hot_reload_plugin_swaps()".into());
@@ -15960,18 +16744,27 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             let (_, r) = self.emit_expr(&args[0]);
                             let (_, t) = self.emit_expr(&args[1]);
                             let (_, sn) = self.emit_expr(&args[2]);
-                            return ("int64_t".into(), format!("mako_rollback_push({r}, {t}, {sn})"));
+                            return (
+                                "int64_t".into(),
+                                format!("mako_rollback_push({r}, {t}, {sn})"),
+                            );
                         }
                         "rollback_get" => {
                             let (_, r) = self.emit_expr(&args[0]);
                             let (_, t) = self.emit_expr(&args[1]);
                             let (_, s) = self.emit_expr(&args[2]);
-                            return ("int64_t".into(), format!("mako_rollback_get({r}, {t}, {s})"));
+                            return (
+                                "int64_t".into(),
+                                format!("mako_rollback_get({r}, {t}, {s})"),
+                            );
                         }
                         "rollback_restore_slot0" => {
                             let (_, r) = self.emit_expr(&args[0]);
                             let (_, t) = self.emit_expr(&args[1]);
-                            return ("int64_t".into(), format!("mako_rollback_restore_slot0({r}, {t})"));
+                            return (
+                                "int64_t".into(),
+                                format!("mako_rollback_restore_slot0({r}, {t})"),
+                            );
                         }
                         "rollback_len" => {
                             let (_, r) = self.emit_expr(&args[0]);
@@ -15986,7 +16779,9 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             let (_, h) = self.emit_expr(&args[1]);
                             let (_, t) = self.emit_expr(&args[2]);
                             let tmp = self.fresh("gw");
-                            self.line(&format!("MakoGfxWindow *{tmp} = mako_gfx_window_open({w}, {h}, {t});"));
+                            self.line(&format!(
+                                "MakoGfxWindow *{tmp} = mako_gfx_window_open({w}, {h}, {t});"
+                            ));
                             return ("MakoGfxWindow*".into(), tmp);
                         }
                         "gfx_window_width" => {
@@ -16055,13 +16850,19 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             let (_, x) = self.emit_expr(&args[0]);
                             let (_, v) = self.emit_expr(&args[1]);
                             let (_, d) = self.emit_expr(&args[2]);
-                            return ("int64_t".into(), format!("mako_physics_step_x({x}, {v}, {d})"));
+                            return (
+                                "int64_t".into(),
+                                format!("mako_physics_step_x({x}, {v}, {d})"),
+                            );
                         }
                         "physics_step_v" => {
                             let (_, v) = self.emit_expr(&args[0]);
                             let (_, a) = self.emit_expr(&args[1]);
                             let (_, d) = self.emit_expr(&args[2]);
-                            return ("int64_t".into(), format!("mako_physics_step_v({v}, {a}, {d})"));
+                            return (
+                                "int64_t".into(),
+                                format!("mako_physics_step_v({v}, {a}, {d})"),
+                            );
                         }
                         "ai_rope_cos" => {
                             let (_, t) = self.emit_expr(&args[0]);
@@ -16075,13 +16876,19 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             let (_, x) = self.emit_expr(&args[0]);
                             let (_, y) = self.emit_expr(&args[1]);
                             let (_, t) = self.emit_expr(&args[2]);
-                            return ("int64_t".into(), format!("mako_ai_rope_apply_x({x}, {y}, {t})"));
+                            return (
+                                "int64_t".into(),
+                                format!("mako_ai_rope_apply_x({x}, {y}, {t})"),
+                            );
                         }
                         "ai_rope_apply_y" => {
                             let (_, x) = self.emit_expr(&args[0]);
                             let (_, y) = self.emit_expr(&args[1]);
                             let (_, t) = self.emit_expr(&args[2]);
-                            return ("int64_t".into(), format!("mako_ai_rope_apply_y({x}, {y}, {t})"));
+                            return (
+                                "int64_t".into(),
+                                format!("mako_ai_rope_apply_y({x}, {y}, {t})"),
+                            );
                         }
                         "kv_cache_new" => {
                             let (_, c) = self.emit_expr(&args[0]);
@@ -16093,7 +16900,10 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             let (_, c) = self.emit_expr(&args[0]);
                             let (_, k) = self.emit_expr(&args[1]);
                             let (_, v) = self.emit_expr(&args[2]);
-                            return ("int64_t".into(), format!("mako_kv_cache_append({c}, {k}, {v})"));
+                            return (
+                                "int64_t".into(),
+                                format!("mako_kv_cache_append({c}, {k}, {v})"),
+                            );
                         }
                         "kv_cache_get_k" => {
                             let (_, c) = self.emit_expr(&args[0]);
@@ -16122,7 +16932,12 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             let (_, b1) = self.emit_expr(&args[5]);
                             let (_, b2) = self.emit_expr(&args[6]);
                             let (_, b3) = self.emit_expr(&args[7]);
-                            return ("int64_t".into(), format!("mako_gemm2x2({a0}, {a1}, {a2}, {a3}, {b0}, {b1}, {b2}, {b3})"));
+                            return (
+                                "int64_t".into(),
+                                format!(
+                                    "mako_gemm2x2({a0}, {a1}, {a2}, {a3}, {b0}, {b1}, {b2}, {b3})"
+                                ),
+                            );
                         }
                         "gemm_c01" => return ("int64_t".into(), "mako_gemm_c01_get()".into()),
                         "gemm_c10" => return ("int64_t".into(), "mako_gemm_c10_get()".into()),
@@ -16165,7 +16980,9 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             let (_, fd) = self.emit_expr(&args[1]);
                             let (_, fl) = self.emit_expr(&args[2]);
                             let tmp = self.fresh("ea");
-                            self.line(&format!("int64_t {tmp} = mako_evloop_add({el}, {fd}, {fl});"));
+                            self.line(&format!(
+                                "int64_t {tmp} = mako_evloop_add({el}, {fd}, {fl});"
+                            ));
                             return ("int64_t".into(), tmp);
                         }
                         "evloop_mod" => {
@@ -16173,7 +16990,9 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             let (_, fd) = self.emit_expr(&args[1]);
                             let (_, fl) = self.emit_expr(&args[2]);
                             let tmp = self.fresh("em");
-                            self.line(&format!("int64_t {tmp} = mako_evloop_mod({el}, {fd}, {fl});"));
+                            self.line(&format!(
+                                "int64_t {tmp} = mako_evloop_mod({el}, {fd}, {fl});"
+                            ));
                             return ("int64_t".into(), tmp);
                         }
                         "evloop_del" => {
@@ -16201,7 +17020,9 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             let (_, el) = self.emit_expr(&args[0]);
                             let (_, i) = self.emit_expr(&args[1]);
                             let tmp = self.fresh("efl");
-                            self.line(&format!("int64_t {tmp} = mako_evloop_event_flags({el}, {i});"));
+                            self.line(&format!(
+                                "int64_t {tmp} = mako_evloop_event_flags({el}, {i});"
+                            ));
                             return ("int64_t".into(), tmp);
                         }
                         "evloop_close" => {
@@ -16220,9 +17041,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             let (_, c) = self.emit_expr(&args[0]);
                             let (_, ms) = self.emit_expr(&args[1]);
                             let tmp = self.fresh("cdr");
-                            self.line(&format!(
-                                "int64_t {tmp} = mako_crew_drain(&{c}, {ms});"
-                            ));
+                            self.line(&format!("int64_t {tmp} = mako_crew_drain(&{c}, {ms});"));
                             return ("int64_t".into(), tmp);
                         }
                         "nb_listen" => {
@@ -16321,7 +17140,8 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             self.line(&format!("mako_buf_write_u8({b}, {v});"));
                             return ("void".into(), "/*void*/".into());
                         }
-                        "buf_write_u16" | "buf_write_u32" | "buf_write_u64" | "buf_write_i32" | "buf_write_u16be" | "buf_write_u32be" => {
+                        "buf_write_u16" | "buf_write_u32" | "buf_write_u64" | "buf_write_i32"
+                        | "buf_write_u16be" | "buf_write_u32be" => {
                             let (_, b) = self.emit_expr(&args[0]);
                             let (_, v) = self.emit_expr(&args[1]);
                             self.line(&format!("mako_{name}({b}, {v});"));
@@ -16339,7 +17159,8 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             self.line(&format!("mako_{name}({b}, {s});"));
                             return ("void".into(), "/*void*/".into());
                         }
-                        "buf_read_u8" | "buf_read_u16" | "buf_read_u32" | "buf_read_u64" | "buf_read_i32" | "buf_read_u16be" | "buf_read_u32be" => {
+                        "buf_read_u8" | "buf_read_u16" | "buf_read_u32" | "buf_read_u64"
+                        | "buf_read_i32" | "buf_read_u16be" | "buf_read_u32be" => {
                             let (_, b) = self.emit_expr(&args[0]);
                             let tmp = self.fresh("br");
                             self.line(&format!("int64_t {tmp} = mako_{name}({b});"));
@@ -16355,7 +17176,9 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             let (_, b) = self.emit_expr(&args[0]);
                             let (_, n) = self.emit_expr(&args[1]);
                             let tmp = self.fresh("brb");
-                            self.line(&format!("MakoString {tmp} = mako_buf_read_bytes({b}, {n});"));
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_buf_read_bytes({b}, {n});"
+                            ));
                             return ("MakoString".into(), tmp);
                         }
                         "buf_read_str" => {
@@ -16379,7 +17202,9 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             let (_, h) = self.emit_expr(&args[0]);
                             let (_, p) = self.emit_expr(&args[1]);
                             let tmp = self.fresh("guba");
-                            self.line(&format!("MakoGameUDP *{tmp} = mako_game_udp_bind_addr({h}, {p});"));
+                            self.line(&format!(
+                                "MakoGameUDP *{tmp} = mako_game_udp_bind_addr({h}, {p});"
+                            ));
                             return ("MakoGameUDP*".into(), tmp);
                         }
                         "game_udp_recv" => {
@@ -16418,14 +17243,18 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             let (_, p) = self.emit_expr(&args[1]);
                             let (_, d) = self.emit_expr(&args[2]);
                             let tmp = self.fresh("gsd");
-                            self.line(&format!("int64_t {tmp} = mako_game_udp_send({u}, {p}, {d});"));
+                            self.line(&format!(
+                                "int64_t {tmp} = mako_game_udp_send({u}, {p}, {d});"
+                            ));
                             return ("int64_t".into(), tmp);
                         }
                         "game_udp_broadcast" => {
                             let (_, u) = self.emit_expr(&args[0]);
                             let (_, d) = self.emit_expr(&args[1]);
                             let tmp = self.fresh("gbc");
-                            self.line(&format!("int64_t {tmp} = mako_game_udp_broadcast({u}, {d});"));
+                            self.line(&format!(
+                                "int64_t {tmp} = mako_game_udp_broadcast({u}, {d});"
+                            ));
                             return ("int64_t".into(), tmp);
                         }
                         "game_udp_kick" => {
@@ -16506,7 +17335,9 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             let (_, r) = self.emit_expr(&args[0]);
                             let (_, b) = self.emit_expr(&args[1]);
                             let tmp = self.fresh("rl");
-                            self.line(&format!("MakoRateLimiter *{tmp} = mako_ratelimit_new({r}, {b});"));
+                            self.line(&format!(
+                                "MakoRateLimiter *{tmp} = mako_ratelimit_new({r}, {b});"
+                            ));
                             return ("MakoRateLimiter*".into(), tmp);
                         }
                         "ratelimit_allow" => {
@@ -16531,7 +17362,9 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             let (_, to) = self.emit_expr(&args[1]);
                             let (_, h) = self.emit_expr(&args[2]);
                             let tmp = self.fresh("cb");
-                            self.line(&format!("MakoCircuitBreaker *{tmp} = mako_breaker_new({t}, {to}, {h});"));
+                            self.line(&format!(
+                                "MakoCircuitBreaker *{tmp} = mako_breaker_new({t}, {to}, {h});"
+                            ));
                             return ("MakoCircuitBreaker*".into(), tmp);
                         }
                         "breaker_allow" => {
@@ -16584,18 +17417,14 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             let (_, t) = self.emit_expr(&args[0]);
                             let (_, k) = self.emit_expr(&args[1]);
                             let tmp = self.fresh("jvr");
-                            self.line(&format!(
-                                "int64_t {tmp} = mako_jwt_verify_rs256({t}, {k});"
-                            ));
+                            self.line(&format!("int64_t {tmp} = mako_jwt_verify_rs256({t}, {k});"));
                             return ("int64_t".into(), tmp);
                         }
                         "jwt_verify_jwks" => {
                             let (_, t) = self.emit_expr(&args[0]);
                             let (_, j) = self.emit_expr(&args[1]);
                             let tmp = self.fresh("jwj");
-                            self.line(&format!(
-                                "int64_t {tmp} = mako_jwt_verify_jwks({t}, {j});"
-                            ));
+                            self.line(&format!("int64_t {tmp} = mako_jwt_verify_jwks({t}, {j});"));
                             return ("int64_t".into(), tmp);
                         }
                         "jwt_payload" => {
@@ -16630,7 +17459,9 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             let (_, p) = self.emit_expr(&args[0]);
                             let (_, w) = self.emit_expr(&args[1]);
                             let tmp = self.fresh("he");
-                            self.line(&format!("MakoHttpEngine *{tmp} = mako_httpengine_new({p}, {w});"));
+                            self.line(&format!(
+                                "MakoHttpEngine *{tmp} = mako_httpengine_new({p}, {w});"
+                            ));
                             return ("MakoHttpEngine*".into(), tmp);
                         }
                         "httpengine_route" => {
@@ -16639,7 +17470,9 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             let (_, status) = self.emit_expr(&args[2]);
                             let (_, ctype) = self.emit_expr(&args[3]);
                             let (_, body) = self.emit_expr(&args[4]);
-                            self.line(&format!("mako_httpengine_route({e}, {path}, {status}, {ctype}, {body});"));
+                            self.line(&format!(
+                                "mako_httpengine_route({e}, {path}, {status}, {ctype}, {body});"
+                            ));
                             return ("void".into(), "/*void*/".into());
                         }
                         "httpengine_serve" => {
@@ -16698,7 +17531,9 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             let (_, x2) = self.emit_expr(&args[2]);
                             let (_, y2) = self.emit_expr(&args[3]);
                             let tmp = self.fresh("d2");
-                            self.line(&format!("double {tmp} = mako_dist2d({x1}, {y1}, {x2}, {y2});"));
+                            self.line(&format!(
+                                "double {tmp} = mako_dist2d({x1}, {y1}, {x2}, {y2});"
+                            ));
                             return ("double".into(), tmp);
                         }
                         "lerp" => {
@@ -17027,9 +17862,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         "llm_estimate_tokens" => {
                             let (_, t) = self.emit_expr(&args[0]);
                             let tmp = self.fresh("letk");
-                            self.line(&format!(
-                                "int64_t {tmp} = mako_llm_estimate_tokens({t});"
-                            ));
+                            self.line(&format!("int64_t {tmp} = mako_llm_estimate_tokens({t});"));
                             return ("int64_t".into(), tmp);
                         }
                         "llm_retry_delay_ms" => {
@@ -17057,9 +17890,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         "llm_finish_reason" => {
                             let (_, r) = self.emit_expr(&args[0]);
                             let tmp = self.fresh("lfr");
-                            self.line(&format!(
-                                "MakoString {tmp} = mako_llm_finish_reason({r});"
-                            ));
+                            self.line(&format!("MakoString {tmp} = mako_llm_finish_reason({r});"));
                             return ("MakoString".into(), tmp);
                         }
                         "llm_usage_prompt_tokens" => {
@@ -17089,9 +17920,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         "llm_tool_call_count" => {
                             let (_, r) = self.emit_expr(&args[0]);
                             let tmp = self.fresh("ltcc");
-                            self.line(&format!(
-                                "int64_t {tmp} = mako_llm_tool_call_count({r});"
-                            ));
+                            self.line(&format!("int64_t {tmp} = mako_llm_tool_call_count({r});"));
                             return ("int64_t".into(), tmp);
                         }
                         "llm_tool_call_name" => {
@@ -17136,9 +17965,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         "llm_json_extract" => {
                             let (_, t) = self.emit_expr(&args[0]);
                             let tmp = self.fresh("lje");
-                            self.line(&format!(
-                                "MakoString {tmp} = mako_llm_json_extract({t});"
-                            ));
+                            self.line(&format!("MakoString {tmp} = mako_llm_json_extract({t});"));
                             return ("MakoString".into(), tmp);
                         }
                         "llm_api_key" => {
@@ -17184,16 +18011,12 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             let (_, u) = self.emit_expr(&args[1]);
                             let (_, t) = self.emit_expr(&args[2]);
                             let tmp = self.fresh("lask");
-                            self.line(&format!(
-                                "MakoString {tmp} = mako_llm_ask({s}, {u}, {t});"
-                            ));
+                            self.line(&format!("MakoString {tmp} = mako_llm_ask({s}, {u}, {t});"));
                             return ("MakoString".into(), tmp);
                         }
                         "llm_https_available" => {
                             let tmp = self.fresh("lha");
-                            self.line(&format!(
-                                "int64_t {tmp} = mako_llm_https_available();"
-                            ));
+                            self.line(&format!("int64_t {tmp} = mako_llm_https_available();"));
                             return ("int64_t".into(), tmp);
                         }
                         "llm_last_status" => {
@@ -17206,9 +18029,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         "llm_error_message" => {
                             let (_, r) = self.emit_expr(&args[0]);
                             let tmp = self.fresh("lem");
-                            self.line(&format!(
-                                "MakoString {tmp} = mako_llm_error_message({r});"
-                            ));
+                            self.line(&format!("MakoString {tmp} = mako_llm_error_message({r});"));
                             return ("MakoString".into(), tmp);
                         }
                         "llm_should_retry" => {
@@ -17270,24 +18091,17 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             let (_, i) = self.emit_expr(&args[0]);
                             let (_, t) = self.emit_expr(&args[1]);
                             let tmp = self.fresh("le");
-                            self.line(&format!(
-                                "MakoString {tmp} = mako_llm_embed({i}, {t});"
-                            ));
+                            self.line(&format!("MakoString {tmp} = mako_llm_embed({i}, {t});"));
                             return ("MakoString".into(), tmp);
                         }
                         "llm_embedding_dim" => {
                             let (_, r) = self.emit_expr(&args[0]);
-                            return (
-                                "int64_t".into(),
-                                format!("mako_llm_embedding_dim({r})"),
-                            );
+                            return ("int64_t".into(), format!("mako_llm_embedding_dim({r})"));
                         }
                         "llm_embedding_json" => {
                             let (_, r) = self.emit_expr(&args[0]);
                             let tmp = self.fresh("lej");
-                            self.line(&format!(
-                                "MakoString {tmp} = mako_llm_embedding_json({r});"
-                            ));
+                            self.line(&format!("MakoString {tmp} = mako_llm_embedding_json({r});"));
                             return ("MakoString".into(), tmp);
                         }
                         // ---- SIP / SDP / RTP ----
@@ -17351,10 +18165,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         "sip_header_view" => {
                             let (_, m) = self.emit_expr(&args[0]);
                             let (_, n) = self.emit_expr(&args[1]);
-                            return (
-                                "int64_t".into(),
-                                format!("mako_sip_header_view({m}, {n})"),
-                            );
+                            return ("int64_t".into(), format!("mako_sip_header_view({m}, {n})"));
                         }
                         "sip_header_view_n" => {
                             let (_, m) = self.emit_expr(&args[0]);
@@ -17426,18 +18237,12 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         "sip_method_eq" => {
                             let (_, m) = self.emit_expr(&args[0]);
                             let (_, n) = self.emit_expr(&args[1]);
-                            return (
-                                "int64_t".into(),
-                                format!("mako_sip_method_eq({m}, {n})"),
-                            );
+                            return ("int64_t".into(), format!("mako_sip_method_eq({m}, {n})"));
                         }
                         "sip_header_count" => {
                             let (_, m) = self.emit_expr(&args[0]);
                             let (_, n) = self.emit_expr(&args[1]);
-                            return (
-                                "int64_t".into(),
-                                format!("mako_sip_header_count({m}, {n})"),
-                            );
+                            return ("int64_t".into(), format!("mako_sip_header_count({m}, {n})"));
                         }
                         "sip_body" => {
                             let (_, m) = self.emit_expr(&args[0]);
@@ -17599,10 +18404,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         }
                         "sip_via_response_port" => {
                             let (_, v) = self.emit_expr(&args[0]);
-                            return (
-                                "int64_t".into(),
-                                format!("mako_sip_via_response_port({v})"),
-                            );
+                            return ("int64_t".into(), format!("mako_sip_via_response_port({v})"));
                         }
                         "sip_via_response_addr" => {
                             let (_, v) = self.emit_expr(&args[0]);
@@ -17632,10 +18434,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         }
                         "sip_msg_response_port" => {
                             let (_, m) = self.emit_expr(&args[0]);
-                            return (
-                                "int64_t".into(),
-                                format!("mako_sip_msg_response_port({m})"),
-                            );
+                            return ("int64_t".into(), format!("mako_sip_msg_response_port({m})"));
                         }
                         "sip_record_route" => {
                             let (_, h) = self.emit_expr(&args[0]);
@@ -17661,7 +18460,9 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             let (_, m) = self.emit_expr(&args[0]);
                             let (_, v) = self.emit_expr(&args[1]);
                             let tmp = self.fresh("siv");
-                            self.line(&format!("MakoString {tmp} = mako_sip_insert_via({m}, {v});"));
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_sip_insert_via({m}, {v});"
+                            ));
                             return ("MakoString".into(), tmp);
                         }
                         "sip_strip_via" => {
@@ -17672,10 +18473,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         }
                         "sip_first_message_len" => {
                             let (_, m) = self.emit_expr(&args[0]);
-                            return (
-                                "int64_t".into(),
-                                format!("mako_sip_first_message_len({m})"),
-                            );
+                            return ("int64_t".into(), format!("mako_sip_first_message_len({m})"));
                         }
                         "sip_from_value" => {
                             let (_, d) = self.emit_expr(&args[0]);
@@ -17700,9 +18498,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         "sip_contact_value" => {
                             let (_, u) = self.emit_expr(&args[0]);
                             let tmp = self.fresh("scv");
-                            self.line(&format!(
-                                "MakoString {tmp} = mako_sip_contact_value({u});"
-                            ));
+                            self.line(&format!("MakoString {tmp} = mako_sip_contact_value({u});"));
                             return ("MakoString".into(), tmp);
                         }
                         "sip_cseq_value" => {
@@ -17739,9 +18535,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         "sip_call_id_new" => {
                             let (_, h) = self.emit_expr(&args[0]);
                             let tmp = self.fresh("scid");
-                            self.line(&format!(
-                                "MakoString {tmp} = mako_sip_call_id_new({h});"
-                            ));
+                            self.line(&format!("MakoString {tmp} = mako_sip_call_id_new({h});"));
                             return ("MakoString".into(), tmp);
                         }
                         "sip_cseq_new" => {
@@ -17761,9 +18555,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             let (_, b) = self.emit_expr(&args[0]);
                             let (_, m) = self.emit_expr(&args[1]);
                             let tmp = self.fresh("stk");
-                            self.line(&format!(
-                                "MakoString {tmp} = mako_sip_txn_key({b}, {m});"
-                            ));
+                            self.line(&format!("MakoString {tmp} = mako_sip_txn_key({b}, {m});"));
                             return ("MakoString".into(), tmp);
                         }
                         "sip_uri_scheme" => {
@@ -17817,9 +18609,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             let (_, f) = self.emit_expr(&args[0]);
                             let (_, n) = self.emit_expr(&args[1]);
                             let tmp = self.fresh("sur");
-                            self.line(&format!(
-                                "MakoString {tmp} = mako_sip_udp_recv({f}, {n});"
-                            ));
+                            self.line(&format!("MakoString {tmp} = mako_sip_udp_recv({f}, {n});"));
                             return ("MakoString".into(), tmp);
                         }
                         "sip_tcp_send" => {
@@ -17941,10 +18731,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         "sip_method_is" => {
                             let (_, m) = self.emit_expr(&args[0]);
                             let (_, n) = self.emit_expr(&args[1]);
-                            return (
-                                "int64_t".into(),
-                                format!("mako_sip_method_is({m}, {n})"),
-                            );
+                            return ("int64_t".into(), format!("mako_sip_method_is({m}, {n})"));
                         }
                         "sdp_ok" => {
                             let (_, s) = self.emit_expr(&args[0]);
@@ -17971,9 +18758,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         "sdp_session_name" => {
                             let (_, s) = self.emit_expr(&args[0]);
                             let tmp = self.fresh("sdsn");
-                            self.line(&format!(
-                                "MakoString {tmp} = mako_sdp_session_name({s});"
-                            ));
+                            self.line(&format!("MakoString {tmp} = mako_sdp_session_name({s});"));
                             return ("MakoString".into(), tmp);
                         }
                         "sdp_timing" => {
@@ -17985,9 +18770,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         "sdp_connection" => {
                             let (_, s) = self.emit_expr(&args[0]);
                             let tmp = self.fresh("sdc");
-                            self.line(&format!(
-                                "MakoString {tmp} = mako_sdp_connection({s});"
-                            ));
+                            self.line(&format!("MakoString {tmp} = mako_sdp_connection({s});"));
                             return ("MakoString".into(), tmp);
                         }
                         "sdp_connection_addr" => {
@@ -18000,10 +18783,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         }
                         "sdp_connection_is_ip6" => {
                             let (_, s) = self.emit_expr(&args[0]);
-                            return (
-                                "int64_t".into(),
-                                format!("mako_sdp_connection_is_ip6({s})"),
-                            );
+                            return ("int64_t".into(), format!("mako_sdp_connection_is_ip6({s})"));
                         }
                         "sdp_media_count" => {
                             let (_, s) = self.emit_expr(&args[0]);
@@ -18013,9 +18793,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             let (_, s) = self.emit_expr(&args[0]);
                             let (_, i) = self.emit_expr(&args[1]);
                             let tmp = self.fresh("sdm");
-                            self.line(&format!(
-                                "MakoString {tmp} = mako_sdp_media({s}, {i});"
-                            ));
+                            self.line(&format!("MakoString {tmp} = mako_sdp_media({s}, {i});"));
                             return ("MakoString".into(), tmp);
                         }
                         "sdp_media_type" => {
@@ -18030,10 +18808,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         "sdp_media_port" => {
                             let (_, s) = self.emit_expr(&args[0]);
                             let (_, i) = self.emit_expr(&args[1]);
-                            return (
-                                "int64_t".into(),
-                                format!("mako_sdp_media_port({s}, {i})"),
-                            );
+                            return ("int64_t".into(), format!("mako_sdp_media_port({s}, {i})"));
                         }
                         "sdp_media_proto" => {
                             let (_, s) = self.emit_expr(&args[0]);
@@ -18075,9 +18850,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             let (_, s) = self.emit_expr(&args[0]);
                             let (_, n) = self.emit_expr(&args[1]);
                             let tmp = self.fresh("sda");
-                            self.line(&format!(
-                                "MakoString {tmp} = mako_sdp_attr({s}, {n});"
-                            ));
+                            self.line(&format!("MakoString {tmp} = mako_sdp_attr({s}, {n});"));
                             return ("MakoString".into(), tmp);
                         }
                         "sdp_media_attr" => {
@@ -18314,9 +19087,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         "https_last_header" => {
                             let (_, n) = self.emit_expr(&args[0]);
                             let tmp = self.fresh("hslh");
-                            self.line(&format!(
-                                "MakoString {tmp} = mako_https_last_header({n});"
-                            ));
+                            self.line(&format!("MakoString {tmp} = mako_https_last_header({n});"));
                             return ("MakoString".into(), tmp);
                         }
                         "udp_bind" => {
@@ -18329,9 +19100,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             let (_, h) = self.emit_expr(&args[0]);
                             let (_, port) = self.emit_expr(&args[1]);
                             let tmp = self.fresh("udba");
-                            self.line(&format!(
-                                "int64_t {tmp} = mako_udp_bind_addr({h}, {port});"
-                            ));
+                            self.line(&format!("int64_t {tmp} = mako_udp_bind_addr({h}, {port});"));
                             return ("int64_t".into(), tmp);
                         }
                         "udp_send_to" => {
@@ -18363,16 +19132,12 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         }
                         "udp_last_sender_host" => {
                             let tmp = self.fresh("udsh");
-                            self.line(&format!(
-                                "MakoString {tmp} = mako_udp_last_sender_host();"
-                            ));
+                            self.line(&format!("MakoString {tmp} = mako_udp_last_sender_host();"));
                             return ("MakoString".into(), tmp);
                         }
                         "udp_last_sender_port" => {
                             let tmp = self.fresh("udsp");
-                            self.line(&format!(
-                                "int64_t {tmp} = mako_udp_last_sender_port();"
-                            ));
+                            self.line(&format!("int64_t {tmp} = mako_udp_last_sender_port();"));
                             return ("int64_t".into(), tmp);
                         }
                         "udp_last_sender" => {
@@ -18466,17 +19231,13 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         }
                         "http2_conn_new" => {
                             let tmp = self.fresh("h2c");
-                            self.line(&format!(
-                                "MakoHttp2Conn *{tmp} = mako_http2_conn_new();"
-                            ));
+                            self.line(&format!("MakoHttp2Conn *{tmp} = mako_http2_conn_new();"));
                             return ("MakoHttp2Conn*".into(), tmp);
                         }
                         "http2_conn_use" => {
                             let (_, c) = self.emit_expr(&args[0]);
                             let tmp = self.fresh("h2u");
-                            self.line(&format!(
-                                "int64_t {tmp} = mako_http2_conn_use({c});"
-                            ));
+                            self.line(&format!("int64_t {tmp} = mako_http2_conn_use({c});"));
                             return ("int64_t".into(), tmp);
                         }
                         "http2_conn_free" => {
@@ -18600,16 +19361,12 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         "http2_recv_window_of" => {
                             let (_, s) = self.emit_expr(&args[0]);
                             let tmp = self.fresh("h2rwo");
-                            self.line(&format!(
-                                "int64_t {tmp} = mako_http2_recv_window_of({s});"
-                            ));
+                            self.line(&format!("int64_t {tmp} = mako_http2_recv_window_of({s});"));
                             return ("int64_t".into(), tmp);
                         }
                         "http2_recv_window_conn" => {
                             let tmp = self.fresh("h2rwc");
-                            self.line(&format!(
-                                "int64_t {tmp} = mako_http2_recv_window_conn();"
-                            ));
+                            self.line(&format!("int64_t {tmp} = mako_http2_recv_window_conn();"));
                             return ("int64_t".into(), tmp);
                         }
                         "http2_window_conn" => {
@@ -18787,9 +19544,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         "http2_conn_goaway" => {
                             let (_, e) = self.emit_expr(&args[0]);
                             let tmp = self.fresh("h2ga");
-                            self.line(&format!(
-                                "MakoString {tmp} = mako_http2_conn_goaway({e});"
-                            ));
+                            self.line(&format!("MakoString {tmp} = mako_http2_conn_goaway({e});"));
                             return ("MakoString".into(), tmp);
                         }
                         "http2_conn_initial_window" => {
@@ -18815,9 +19570,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         }
                         "http2_conn_enable_push" => {
                             let tmp = self.fresh("h2ep");
-                            self.line(&format!(
-                                "int64_t {tmp} = mako_http2_conn_enable_push();"
-                            ));
+                            self.line(&format!("int64_t {tmp} = mako_http2_conn_enable_push();"));
                             return ("int64_t".into(), tmp);
                         }
                         "http2_conn_max_header_list" => {
@@ -18829,9 +19582,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         }
                         "http2_conn_unacked" => {
                             let tmp = self.fresh("h2ua");
-                            self.line(&format!(
-                                "int64_t {tmp} = mako_http2_conn_unacked();"
-                            ));
+                            self.line(&format!("int64_t {tmp} = mako_http2_conn_unacked();"));
                             return ("int64_t".into(), tmp);
                         }
                         "http2_ready_streams" => {
@@ -18847,9 +19598,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         "http2_stream_body" => {
                             let (_, s) = self.emit_expr(&args[0]);
                             let tmp = self.fresh("h2body");
-                            self.line(&format!(
-                                "MakoString {tmp} = mako_http2_stream_body({s});"
-                            ));
+                            self.line(&format!("MakoString {tmp} = mako_http2_stream_body({s});"));
                             return ("MakoString".into(), tmp);
                         }
                         "http2_stream_body_len" => {
@@ -20333,10 +21082,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         "actor_pack" => {
                             let (_, t) = self.emit_expr(&args[0]);
                             let (_, p) = self.emit_expr(&args[1]);
-                            return (
-                                "int64_t".into(),
-                                format!("mako_actor_pack({t}, {p})"),
-                            );
+                            return ("int64_t".into(), format!("mako_actor_pack({t}, {p})"));
                         }
                         "actor_msg_tag" => {
                             let (_, m) = self.emit_expr(&args[0]);
@@ -20344,10 +21090,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         }
                         "actor_msg_payload" => {
                             let (_, m) = self.emit_expr(&args[0]);
-                            return (
-                                "int64_t".into(),
-                                format!("mako_actor_msg_payload({m})"),
-                            );
+                            return ("int64_t".into(), format!("mako_actor_msg_payload({m})"));
                         }
                         "tcp_listen" => {
                             let (_, p) = self.emit_expr(&args[0]);
@@ -20385,9 +21128,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             let (_, f) = self.emit_expr(&args[0]);
                             let (_, s) = self.emit_expr(&args[1]);
                             let tmp = self.fresh("twa");
-                            self.line(&format!(
-                                "int64_t {tmp} = mako_tcp_write_all({f}, {s});"
-                            ));
+                            self.line(&format!("int64_t {tmp} = mako_tcp_write_all({f}, {s});"));
                             return ("int64_t".into(), tmp);
                         }
                         "tcp_read_print" => {
@@ -20425,9 +21166,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             let (_, f) = self.emit_expr(&args[0]);
                             let (_, h) = self.emit_expr(&args[1]);
                             let tmp = self.fresh("tsh");
-                            self.line(&format!(
-                                "int64_t {tmp} = mako_tcp_shutdown({f}, {h});"
-                            ));
+                            self.line(&format!("int64_t {tmp} = mako_tcp_shutdown({f}, {h});"));
                             return ("int64_t".into(), tmp);
                         }
                         "tcp_linger" => {
@@ -20435,9 +21174,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             let (_, o) = self.emit_expr(&args[1]);
                             let (_, s) = self.emit_expr(&args[2]);
                             let tmp = self.fresh("tlg");
-                            self.line(&format!(
-                                "int64_t {tmp} = mako_tcp_linger({f}, {o}, {s});"
-                            ));
+                            self.line(&format!("int64_t {tmp} = mako_tcp_linger({f}, {o}, {s});"));
                             return ("int64_t".into(), tmp);
                         }
                         "sock_error" => {
@@ -20891,9 +21628,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         }
                         "avro_encode_null" => {
                             let tmp = self.fresh("avn");
-                            self.line(&format!(
-                                "MakoString {tmp} = mako_avro_encode_null();"
-                            ));
+                            self.line(&format!("MakoString {tmp} = mako_avro_encode_null();"));
                             return ("MakoString".into(), tmp);
                         }
                         "avro_encode_string" | "avro_decode_string" => {
@@ -20926,10 +21661,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         }
                         "graphql_is_query" => {
                             let (_, q) = self.emit_expr(&args[0]);
-                            return (
-                                "int64_t".into(),
-                                format!("mako_graphql_is_query({q})"),
-                            );
+                            return ("int64_t".into(), format!("mako_graphql_is_query({q})"));
                         }
                         "graphql_operation_name" => {
                             let (_, q) = self.emit_expr(&args[0]);
@@ -20969,10 +21701,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         }
                         "time_offset_named" => {
                             let (_, n) = self.emit_expr(&args[0]);
-                            return (
-                                "int64_t".into(),
-                                format!("mako_time_offset_named({n})"),
-                            );
+                            return ("int64_t".into(), format!("mako_time_offset_named({n})"));
                         }
                         "time_format_offset" => {
                             let (_, t) = self.emit_expr(&args[0]);
@@ -20986,20 +21715,23 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         "time_in_offset" => {
                             let (_, t) = self.emit_expr(&args[0]);
                             let (_, o) = self.emit_expr(&args[1]);
-                            return (
-                                "int64_t".into(),
-                                format!("mako_time_in_offset({t}, {o})"),
-                            );
+                            return ("int64_t".into(), format!("mako_time_in_offset({t}, {o})"));
                         }
-                        "bytes_to_hex" | "hex_to_bytes" | "msgpack_encode_string"
-                        | "msgpack_decode_string" | "cbor_encode_string" | "cbor_decode_string" => {
+                        "bytes_to_hex"
+                        | "hex_to_bytes"
+                        | "msgpack_encode_string"
+                        | "msgpack_decode_string"
+                        | "cbor_encode_string"
+                        | "cbor_decode_string" => {
                             let (_, s) = self.emit_expr(&args[0]);
                             let fname = format!("mako_{name}");
                             let tmp = self.fresh("bin");
                             self.line(&format!("MakoString {tmp} = {fname}({s});"));
                             return ("MakoString".into(), tmp);
                         }
-                        "msgpack_encode_int" | "msgpack_encode_bool" | "cbor_encode_int"
+                        "msgpack_encode_int"
+                        | "msgpack_encode_bool"
+                        | "cbor_encode_int"
                         | "cbor_encode_bool" => {
                             let (_, v) = self.emit_expr(&args[0]);
                             let fname = format!("mako_{name}");
@@ -21009,16 +21741,12 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         }
                         "msgpack_encode_nil" => {
                             let tmp = self.fresh("mpn");
-                            self.line(&format!(
-                                "MakoString {tmp} = mako_msgpack_encode_nil();"
-                            ));
+                            self.line(&format!("MakoString {tmp} = mako_msgpack_encode_nil();"));
                             return ("MakoString".into(), tmp);
                         }
                         "cbor_encode_null" => {
                             let tmp = self.fresh("cbn");
-                            self.line(&format!(
-                                "MakoString {tmp} = mako_cbor_encode_null();"
-                            ));
+                            self.line(&format!("MakoString {tmp} = mako_cbor_encode_null();"));
                             return ("MakoString".into(), tmp);
                         }
                         "msgpack_encode_array_int" | "cbor_encode_array_int" => {
@@ -21028,8 +21756,13 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             self.line(&format!("MakoString {tmp} = {fname}({a});"));
                             return ("MakoString".into(), tmp);
                         }
-                        "msgpack_decode_int" | "msgpack_decode_bool" | "msgpack_is_nil"
-                        | "cbor_type" | "cbor_decode_int" | "cbor_decode_bool" | "cbor_is_null" => {
+                        "msgpack_decode_int"
+                        | "msgpack_decode_bool"
+                        | "msgpack_is_nil"
+                        | "cbor_type"
+                        | "cbor_decode_int"
+                        | "cbor_decode_bool"
+                        | "cbor_is_null" => {
                             let (_, s) = self.emit_expr(&args[0]);
                             let fname = format!("mako_{name}");
                             return ("int64_t".into(), format!("{fname}({s})"));
@@ -21041,8 +21774,12 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             self.line(&format!("MakoIntArray {tmp} = {fname}({s});"));
                             return ("MakoIntArray".into(), tmp);
                         }
-                        "list_take_int" | "list_drop_int" | "list_take_while_lt_int"
-                        | "list_map_add_int" | "list_map_mul_int" | "list_filter_lt_int"
+                        "list_take_int"
+                        | "list_drop_int"
+                        | "list_take_while_lt_int"
+                        | "list_map_add_int"
+                        | "list_map_mul_int"
+                        | "list_filter_lt_int"
                         | "list_filter_gt_int" => {
                             let (_, a) = self.emit_expr(&args[0]);
                             let (_, n) = self.emit_expr(&args[1]);
@@ -21565,16 +22302,11 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         }
                         "trace_export_otlp_pb" => {
                             let tmp = self.fresh("teotlppb");
-                            self.line(&format!(
-                                "MakoString {tmp} = mako_trace_export_otlp_pb();"
-                            ));
+                            self.line(&format!("MakoString {tmp} = mako_trace_export_otlp_pb();"));
                             return ("MakoString".into(), tmp);
                         }
                         "trace_export_otlp_pb_len" => {
-                            return (
-                                "int64_t".into(),
-                                "mako_trace_export_otlp_pb_len()".into(),
-                            );
+                            return ("int64_t".into(), "mako_trace_export_otlp_pb_len()".into());
                         }
                         "otlp_http_export" => {
                             let (_, u) = self.emit_expr(&args[0]);
@@ -21681,9 +22413,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         }
                         "tasks_inspect_json" => {
                             let tmp = self.fresh("tij");
-                            self.line(&format!(
-                                "MakoString {tmp} = mako_tasks_inspect_json();"
-                            ));
+                            self.line(&format!("MakoString {tmp} = mako_tasks_inspect_json();"));
                             return ("MakoString".into(), tmp);
                         }
                         "debug_break" => {
@@ -21699,10 +22429,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         "debug_set_int" => {
                             let (_, n) = self.emit_expr(&args[0]);
                             let (_, v) = self.emit_expr(&args[1]);
-                            return (
-                                "int64_t".into(),
-                                format!("mako_debug_set_int({n}, {v})"),
-                            );
+                            return ("int64_t".into(), format!("mako_debug_set_int({n}, {v})"));
                         }
                         "debug_get_int" => {
                             let (_, n) = self.emit_expr(&args[0]);
@@ -21710,9 +22437,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         }
                         "debug_locals_json" => {
                             let tmp = self.fresh("dlj");
-                            self.line(&format!(
-                                "MakoString {tmp} = mako_debug_locals_json();"
-                            ));
+                            self.line(&format!("MakoString {tmp} = mako_debug_locals_json();"));
                             return ("MakoString".into(), tmp);
                         }
                         "debug_bp_enable" => {
@@ -21744,17 +22469,11 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         }
                         "debug_line_bp_clear" => {
                             let (_, id) = self.emit_expr(&args[0]);
-                            return (
-                                "int64_t".into(),
-                                format!("mako_debug_line_bp_clear({id})"),
-                            );
+                            return ("int64_t".into(), format!("mako_debug_line_bp_clear({id})"));
                         }
                         "debug_line_bp_hits" => {
                             let (_, id) = self.emit_expr(&args[0]);
-                            return (
-                                "int64_t".into(),
-                                format!("mako_debug_line_bp_hits({id})"),
-                            );
+                            return ("int64_t".into(), format!("mako_debug_line_bp_hits({id})"));
                         }
                         "debug_push_frame" => {
                             let (_, f) = self.emit_expr(&args[0]);
@@ -21773,16 +22492,12 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         }
                         "debug_frames_json" => {
                             let tmp = self.fresh("dfj");
-                            self.line(&format!(
-                                "MakoString {tmp} = mako_debug_frames_json();"
-                            ));
+                            self.line(&format!("MakoString {tmp} = mako_debug_frames_json();"));
                             return ("MakoString".into(), tmp);
                         }
                         "debug_snapshot_json" => {
                             let tmp = self.fresh("dsj");
-                            self.line(&format!(
-                                "MakoString {tmp} = mako_debug_snapshot_json();"
-                            ));
+                            self.line(&format!("MakoString {tmp} = mako_debug_snapshot_json();"));
                             return ("MakoString".into(), tmp);
                         }
                         "debug_set_current_task" => {
@@ -21798,26 +22513,34 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         "dap_initialize_response" => {
                             let (_, s) = self.emit_expr(&args[0]);
                             let tmp = self.fresh("dapinit");
-                            self.line(&format!("MakoString {tmp} = mako_dap_initialize_response({s});"));
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_dap_initialize_response({s});"
+                            ));
                             return ("MakoString".into(), tmp);
                         }
                         "dap_stopped_event" => {
                             let (_, r) = self.emit_expr(&args[0]);
                             let (_, t) = self.emit_expr(&args[1]);
                             let tmp = self.fresh("dapstop");
-                            self.line(&format!("MakoString {tmp} = mako_dap_stopped_event({r}, {t});"));
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_dap_stopped_event({r}, {t});"
+                            ));
                             return ("MakoString".into(), tmp);
                         }
                         "dap_threads_response" => {
                             let (_, s) = self.emit_expr(&args[0]);
                             let tmp = self.fresh("dapthr");
-                            self.line(&format!("MakoString {tmp} = mako_dap_threads_response({s});"));
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_dap_threads_response({s});"
+                            ));
                             return ("MakoString".into(), tmp);
                         }
                         "dap_request_command" => {
                             let (_, r) = self.emit_expr(&args[0]);
                             let tmp = self.fresh("dapcmd");
-                            self.line(&format!("MakoString {tmp} = mako_dap_request_command({r});"));
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_dap_request_command({r});"
+                            ));
                             return ("MakoString".into(), tmp);
                         }
                         "dap_request_seq" => {
@@ -21832,16 +22555,10 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         }
                         "crash_report_install" => {
                             let (_, p) = self.emit_expr(&args[0]);
-                            return (
-                                "int64_t".into(),
-                                format!("mako_crash_report_install({p})"),
-                            );
+                            return ("int64_t".into(), format!("mako_crash_report_install({p})"));
                         }
                         "crash_report_installed" => {
-                            return (
-                                "int64_t".into(),
-                                "mako_crash_report_installed_p()".into(),
-                            );
+                            return ("int64_t".into(), "mako_crash_report_installed_p()".into());
                         }
                         "process_rss_bytes" => {
                             return ("int64_t".into(), "mako_process_rss_bytes()".into());
@@ -21854,9 +22571,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         }
                         "profile_snapshot_json" => {
                             let tmp = self.fresh("psnap");
-                            self.line(&format!(
-                                "MakoString {tmp} = mako_profile_snapshot_json();"
-                            ));
+                            self.line(&format!("MakoString {tmp} = mako_profile_snapshot_json();"));
                             return ("MakoString".into(), tmp);
                         }
                         "profile_sample_clear" => {
@@ -21864,10 +22579,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         }
                         "profile_sample_once" => {
                             let (_, lab) = self.emit_expr(&args[0]);
-                            return (
-                                "int64_t".into(),
-                                format!("mako_profile_sample_once({lab})"),
-                            );
+                            return ("int64_t".into(), format!("mako_profile_sample_once({lab})"));
                         }
                         "profile_sample_count" => {
                             return ("int64_t".into(), "mako_profile_sample_count()".into());
@@ -21877,10 +22589,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         }
                         "profile_sample_start" => {
                             let (_, ms) = self.emit_expr(&args[0]);
-                            return (
-                                "int64_t".into(),
-                                format!("mako_profile_sample_start({ms})"),
-                            );
+                            return ("int64_t".into(), format!("mako_profile_sample_start({ms})"));
                         }
                         "profile_sample_stop" => {
                             return ("int64_t".into(), "mako_profile_sample_stop()".into());
@@ -21893,9 +22602,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         }
                         "profile_samples_json" => {
                             let tmp = self.fresh("psj");
-                            self.line(&format!(
-                                "MakoString {tmp} = mako_profile_samples_json();"
-                            ));
+                            self.line(&format!("MakoString {tmp} = mako_profile_samples_json();"));
                             return ("MakoString".into(), tmp);
                         }
                         "profile_samples_pprof_text" => {
@@ -21906,11 +22613,16 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             return ("MakoString".into(), tmp);
                         }
                         "profile_sample_thread_count" => {
-                            return ("int64_t".into(), "mako_profile_sample_thread_count()".into());
+                            return (
+                                "int64_t".into(),
+                                "mako_profile_sample_thread_count()".into(),
+                            );
                         }
                         "profile_pprof_http_body" => {
                             let tmp = self.fresh("pph");
-                            self.line(&format!("MakoString {tmp} = mako_profile_pprof_http_body();"));
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_profile_pprof_http_body();"
+                            ));
                             return ("MakoString".into(), tmp);
                         }
                         "profile_http_route" => {
@@ -22064,10 +22776,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         "limits_try_mem" => {
                             let (_, l) = self.emit_expr(&args[0]);
                             let (_, n) = self.emit_expr(&args[1]);
-                            return (
-                                "int64_t".into(),
-                                format!("mako_limits_try_mem({l}, {n})"),
-                            );
+                            return ("int64_t".into(), format!("mako_limits_try_mem({l}, {n})"));
                         }
                         "limits_release_mem" => {
                             let (_, l) = self.emit_expr(&args[0]);
@@ -22079,44 +22788,27 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         }
                         "limits_check_time" => {
                             let (_, l) = self.emit_expr(&args[0]);
-                            return (
-                                "int64_t".into(),
-                                format!("mako_limits_check_time({l})"),
-                            );
+                            return ("int64_t".into(), format!("mako_limits_check_time({l})"));
                         }
                         "limits_try_conn" => {
                             let (_, l) = self.emit_expr(&args[0]);
-                            return (
-                                "int64_t".into(),
-                                format!("mako_limits_try_conn({l})"),
-                            );
+                            return ("int64_t".into(), format!("mako_limits_try_conn({l})"));
                         }
                         "limits_release_conn" => {
                             let (_, l) = self.emit_expr(&args[0]);
-                            return (
-                                "int64_t".into(),
-                                format!("mako_limits_release_conn({l})"),
-                            );
+                            return ("int64_t".into(), format!("mako_limits_release_conn({l})"));
                         }
                         "limits_mem_used" => {
                             let (_, l) = self.emit_expr(&args[0]);
-                            return (
-                                "int64_t".into(),
-                                format!("mako_limits_mem_used({l})"),
-                            );
+                            return ("int64_t".into(), format!("mako_limits_mem_used({l})"));
                         }
                         "limits_open_conns" => {
                             let (_, l) = self.emit_expr(&args[0]);
-                            return (
-                                "int64_t".into(),
-                                format!("mako_limits_open_conns({l})"),
-                            );
+                            return ("int64_t".into(), format!("mako_limits_open_conns({l})"));
                         }
                         "session_cancel_token" => {
                             let tmp = self.fresh("sct");
-                            self.line(&format!(
-                                "MakoString {tmp} = mako_session_cancel_token();"
-                            ));
+                            self.line(&format!("MakoString {tmp} = mako_session_cancel_token();"));
                             return ("MakoString".into(), tmp);
                         }
                         "session_cancel" => {
@@ -22125,24 +22817,16 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         }
                         "session_cancelled" => {
                             let (_, t) = self.emit_expr(&args[0]);
-                            return (
-                                "int64_t".into(),
-                                format!("mako_session_cancelled({t})"),
-                            );
+                            return ("int64_t".into(), format!("mako_session_cancelled({t})"));
                         }
                         "session_cancel_clear" => {
                             let (_, t) = self.emit_expr(&args[0]);
-                            return (
-                                "int64_t".into(),
-                                format!("mako_session_cancel_clear({t})"),
-                            );
+                            return ("int64_t".into(), format!("mako_session_cancel_clear({t})"));
                         }
                         "scram_gs2_header" => {
                             let (_, n) = self.emit_expr(&args[0]);
                             let tmp = self.fresh("sg2");
-                            self.line(&format!(
-                                "MakoString {tmp} = mako_scram_gs2_header({n});"
-                            ));
+                            self.line(&format!("MakoString {tmp} = mako_scram_gs2_header({n});"));
                             return ("MakoString".into(), tmp);
                         }
                         "scram_cbind_b64" => {
@@ -22853,14 +23537,19 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             let (_, p2) = self.emit_expr(&args[3]);
                             let (_, p3) = self.emit_expr(&args[4]);
                             let (_, p4) = self.emit_expr(&args[5]);
-                            return ("int64_t".into(), format!("mako_sql_exec_str4({d}, {q}, {p1}, {p2}, {p3}, {p4})"));
+                            return (
+                                "int64_t".into(),
+                                format!("mako_sql_exec_str4({d}, {q}, {p1}, {p2}, {p3}, {p4})"),
+                            );
                         }
                         "sql_query_str" => {
                             let (_, d) = self.emit_expr(&args[0]);
                             let (_, q) = self.emit_expr(&args[1]);
                             let (_, p1) = self.emit_expr(&args[2]);
                             let tmp = self.fresh("sqs");
-                            self.line(&format!("MakoString {tmp} = mako_sql_query_str({d}, {q}, {p1});"));
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_sql_query_str({d}, {q}, {p1});"
+                            ));
                             return ("MakoString".into(), tmp);
                         }
                         "sql_query_str2" => {
@@ -22942,9 +23631,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             let (_, h) = self.emit_expr(&args[0]);
                             let (_, c) = self.emit_expr(&args[1]);
                             let tmp = self.fresh("srs");
-                            self.line(&format!(
-                                "MakoString {tmp} = mako_sql_rows_str({h}, {c});"
-                            ));
+                            self.line(&format!("MakoString {tmp} = mako_sql_rows_str({h}, {c});"));
                             return ("MakoString".into(), tmp);
                         }
                         "sql_rows_cols" => {
@@ -23350,9 +24037,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             let (_, t) = self.emit_expr(&args[0]);
                             let (_, d) = self.emit_expr(&args[1]);
                             let tmp = self.fresh("tx");
-                            self.line(&format!(
-                                "MakoString {tmp} = mako_tmpl_execute({t}, {d});"
-                            ));
+                            self.line(&format!("MakoString {tmp} = mako_tmpl_execute({t}, {d});"));
                             return ("MakoString".into(), tmp);
                         }
                         "tmpl_html_execute" => {
@@ -23368,18 +24053,14 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             let (_, s) = self.emit_expr(&args[0]);
                             let (_, d) = self.emit_expr(&args[1]);
                             let tmp = self.fresh("tt");
-                            self.line(&format!(
-                                "MakoString {tmp} = mako_tmpl_text({s}, {d});"
-                            ));
+                            self.line(&format!("MakoString {tmp} = mako_tmpl_text({s}, {d});"));
                             return ("MakoString".into(), tmp);
                         }
                         "tmpl_html" => {
                             let (_, s) = self.emit_expr(&args[0]);
                             let (_, d) = self.emit_expr(&args[1]);
                             let tmp = self.fresh("th");
-                            self.line(&format!(
-                                "MakoString {tmp} = mako_tmpl_html({s}, {d});"
-                            ));
+                            self.line(&format!("MakoString {tmp} = mako_tmpl_html({s}, {d});"));
                             return ("MakoString".into(), tmp);
                         }
                         "base32_encode" => {
@@ -23557,25 +24238,16 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         "utf8_decode_rune" => {
                             let (_, s) = self.emit_expr(&args[0]);
                             let (_, o) = self.emit_expr(&args[1]);
-                            return (
-                                "int64_t".into(),
-                                format!("mako_utf8_decode_rune({s}, {o})"),
-                            );
+                            return ("int64_t".into(), format!("mako_utf8_decode_rune({s}, {o})"));
                         }
                         "utf8_decode_size" => {
                             let (_, s) = self.emit_expr(&args[0]);
                             let (_, o) = self.emit_expr(&args[1]);
-                            return (
-                                "int64_t".into(),
-                                format!("mako_utf8_decode_size({s}, {o})"),
-                            );
+                            return ("int64_t".into(), format!("mako_utf8_decode_size({s}, {o})"));
                         }
                         "utf8_decode_last_rune" => {
                             let (_, s) = self.emit_expr(&args[0]);
-                            return (
-                                "int64_t".into(),
-                                format!("mako_utf8_decode_last_rune({s})"),
-                            );
+                            return ("int64_t".into(), format!("mako_utf8_decode_last_rune({s})"));
                         }
                         "utf8_decode_last_size" => {
                             return ("int64_t".into(), "mako_utf8_decode_last_size()".into());
@@ -23583,9 +24255,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         "utf8_encode_rune" => {
                             let (_, r) = self.emit_expr(&args[0]);
                             let tmp = self.fresh("uer");
-                            self.line(&format!(
-                                "MakoString {tmp} = mako_utf8_encode_rune({r});"
-                            ));
+                            self.line(&format!("MakoString {tmp} = mako_utf8_encode_rune({r});"));
                             return ("MakoString".into(), tmp);
                         }
                         "utf8_full_rune" => {
@@ -23666,10 +24336,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         }
                         "unicode_simple_fold" => {
                             let (_, r) = self.emit_expr(&args[0]);
-                            return (
-                                "int64_t".into(),
-                                format!("mako_unicode_simple_fold({r})"),
-                            );
+                            return ("int64_t".into(), format!("mako_unicode_simple_fold({r})"));
                         }
                         "unicode_is" => {
                             let (_, p) = self.emit_expr(&args[0]);
@@ -23717,31 +24384,22 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         "strings_index" => {
                             let (_, a) = self.emit_expr(&args[0]);
                             let (_, v) = self.emit_expr(&args[1]);
-                            return (
-                                "int64_t".into(),
-                                format!("mako_strings_index({a}, {v})"),
-                            );
+                            return ("int64_t".into(), format!("mako_strings_index({a}, {v})"));
                         }
                         "strings_copy" => {
                             let (_, a) = self.emit_expr(&args[0]);
                             let tmp = self.fresh("scopy");
-                            self.line(&format!(
-                                "MakoStrArray {tmp} = mako_strings_copy({a});"
-                            ));
+                            self.line(&format!("MakoStrArray {tmp} = mako_strings_copy({a});"));
                             return ("MakoStrArray".into(), tmp);
                         }
                         "list_new_int" => {
                             let tmp = self.fresh("lni");
-                            self.line(&format!(
-                                "MakoIntArray {tmp} = mako_list_new_int();"
-                            ));
+                            self.line(&format!("MakoIntArray {tmp} = mako_list_new_int();"));
                             return ("MakoIntArray".into(), tmp);
                         }
                         "list_new_str" => {
                             let tmp = self.fresh("lns");
-                            self.line(&format!(
-                                "MakoStrArray {tmp} = mako_list_new_str();"
-                            ));
+                            self.line(&format!("MakoStrArray {tmp} = mako_list_new_str();"));
                             return ("MakoStrArray".into(), tmp);
                         }
                         "list_push_int" => {
@@ -23765,9 +24423,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         "list_pop_int" => {
                             let (_, a) = self.emit_expr(&args[0]);
                             let tmp = self.fresh("lpoi");
-                            self.line(&format!(
-                                "MakoIntArray {tmp} = mako_list_pop_int({a});"
-                            ));
+                            self.line(&format!("MakoIntArray {tmp} = mako_list_pop_int({a});"));
                             return ("MakoIntArray".into(), tmp);
                         }
                         "list_popped_int" => {
@@ -23776,33 +24432,24 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         "list_pop_str" => {
                             let (_, a) = self.emit_expr(&args[0]);
                             let tmp = self.fresh("lpos");
-                            self.line(&format!(
-                                "MakoStrArray {tmp} = mako_list_pop_str({a});"
-                            ));
+                            self.line(&format!("MakoStrArray {tmp} = mako_list_pop_str({a});"));
                             return ("MakoStrArray".into(), tmp);
                         }
                         "list_popped_str" => {
                             let tmp = self.fresh("lposv");
-                            self.line(&format!(
-                                "MakoString {tmp} = mako_list_popped_str();"
-                            ));
+                            self.line(&format!("MakoString {tmp} = mako_list_popped_str();"));
                             return ("MakoString".into(), tmp);
                         }
                         "list_get_int" => {
                             let (_, a) = self.emit_expr(&args[0]);
                             let (_, i) = self.emit_expr(&args[1]);
-                            return (
-                                "int64_t".into(),
-                                format!("mako_list_get_int({a}, {i})"),
-                            );
+                            return ("int64_t".into(), format!("mako_list_get_int({a}, {i})"));
                         }
                         "list_get_str" => {
                             let (_, a) = self.emit_expr(&args[0]);
                             let (_, i) = self.emit_expr(&args[1]);
                             let tmp = self.fresh("lgs");
-                            self.line(&format!(
-                                "MakoString {tmp} = mako_list_get_str({a}, {i});"
-                            ));
+                            self.line(&format!("MakoString {tmp} = mako_list_get_str({a}, {i});"));
                             return ("MakoString".into(), tmp);
                         }
                         "list_len_int" => {
@@ -23816,17 +24463,13 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         "list_clear_int" => {
                             let (_, a) = self.emit_expr(&args[0]);
                             let tmp = self.fresh("lci");
-                            self.line(&format!(
-                                "MakoIntArray {tmp} = mako_list_clear_int({a});"
-                            ));
+                            self.line(&format!("MakoIntArray {tmp} = mako_list_clear_int({a});"));
                             return ("MakoIntArray".into(), tmp);
                         }
                         "list_clear_str" => {
                             let (_, a) = self.emit_expr(&args[0]);
                             let tmp = self.fresh("lcs");
-                            self.line(&format!(
-                                "MakoStrArray {tmp} = mako_list_clear_str({a});"
-                            ));
+                            self.line(&format!("MakoStrArray {tmp} = mako_list_clear_str({a});"));
                             return ("MakoStrArray".into(), tmp);
                         }
                         "list_insert_int" => {
@@ -23874,17 +24517,13 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         "stack_peek_str" => {
                             let (_, a) = self.emit_expr(&args[0]);
                             let tmp = self.fresh("spk");
-                            self.line(&format!(
-                                "MakoString {tmp} = mako_stack_peek_str({a});"
-                            ));
+                            self.line(&format!("MakoString {tmp} = mako_stack_peek_str({a});"));
                             return ("MakoString".into(), tmp);
                         }
                         "queue_pop_int" => {
                             let (_, a) = self.emit_expr(&args[0]);
                             let tmp = self.fresh("qpi");
-                            self.line(&format!(
-                                "MakoIntArray {tmp} = mako_queue_pop_int({a});"
-                            ));
+                            self.line(&format!("MakoIntArray {tmp} = mako_queue_pop_int({a});"));
                             return ("MakoIntArray".into(), tmp);
                         }
                         "queue_popped_int" => {
@@ -23893,16 +24532,12 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         "queue_pop_str" => {
                             let (_, a) = self.emit_expr(&args[0]);
                             let tmp = self.fresh("qps");
-                            self.line(&format!(
-                                "MakoStrArray {tmp} = mako_queue_pop_str({a});"
-                            ));
+                            self.line(&format!("MakoStrArray {tmp} = mako_queue_pop_str({a});"));
                             return ("MakoStrArray".into(), tmp);
                         }
                         "queue_popped_str" => {
                             let tmp = self.fresh("qpsv");
-                            self.line(&format!(
-                                "MakoString {tmp} = mako_queue_popped_str();"
-                            ));
+                            self.line(&format!("MakoString {tmp} = mako_queue_popped_str();"));
                             return ("MakoString".into(), tmp);
                         }
                         "list_sum_int" | "list_min_int" | "list_max_int" | "heap_peek_int" => {
@@ -23939,9 +24574,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             let (_, b) = self.emit_expr(&args[1]);
                             let fname = format!("mako_{name}");
                             let tmp = self.fresh("seto");
-                            self.line(&format!(
-                                "MakoIntArray {tmp} = {fname}({a}, {b});"
-                            ));
+                            self.line(&format!("MakoIntArray {tmp} = {fname}({a}, {b});"));
                             return ("MakoIntArray".into(), tmp);
                         }
                         "heap_push_int" => {
@@ -23956,9 +24589,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         "heap_pop_int" => {
                             let (_, a) = self.emit_expr(&args[0]);
                             let tmp = self.fresh("hpop");
-                            self.line(&format!(
-                                "MakoIntArray {tmp} = mako_heap_pop_int({a});"
-                            ));
+                            self.line(&format!("MakoIntArray {tmp} = mako_heap_pop_int({a});"));
                             return ("MakoIntArray".into(), tmp);
                         }
                         "heap_popped_int" => {
@@ -23967,19 +24598,14 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         "list_eq_int" => {
                             let (_, a) = self.emit_expr(&args[0]);
                             let (_, b) = self.emit_expr(&args[1]);
-                            return (
-                                "int64_t".into(),
-                                format!("mako_list_eq_int({a}, {b})"),
-                            );
+                            return ("int64_t".into(), format!("mako_list_eq_int({a}, {b})"));
                         }
                         "list_fill_int" | "list_range_int" => {
                             let (_, a) = self.emit_expr(&args[0]);
                             let (_, b) = self.emit_expr(&args[1]);
                             let fname = format!("mako_{name}");
                             let tmp = self.fresh("lfill");
-                            self.line(&format!(
-                                "MakoIntArray {tmp} = {fname}({a}, {b});"
-                            ));
+                            self.line(&format!("MakoIntArray {tmp} = {fname}({a}, {b});"));
                             return ("MakoIntArray".into(), tmp);
                         }
                         "embed_file" => {
@@ -24060,27 +24686,19 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             let (ty, m) = self.emit_expr(&args[0]);
                             let tmp = self.fresh("mk");
                             if ty == "MakoMapSI*" {
-                                self.line(&format!(
-                                    "MakoStrArray {tmp} = mako_maps_keys_si({m});"
-                                ));
+                                self.line(&format!("MakoStrArray {tmp} = mako_maps_keys_si({m});"));
                                 return ("MakoStrArray".into(), tmp);
                             }
                             if ty == "MakoMapSS*" {
-                                self.line(&format!(
-                                    "MakoStrArray {tmp} = mako_maps_keys_ss({m});"
-                                ));
+                                self.line(&format!("MakoStrArray {tmp} = mako_maps_keys_ss({m});"));
                                 return ("MakoStrArray".into(), tmp);
                             }
                             if ty == "MakoMapII*" {
-                                self.line(&format!(
-                                    "MakoIntArray {tmp} = mako_maps_keys_ii({m});"
-                                ));
+                                self.line(&format!("MakoIntArray {tmp} = mako_maps_keys_ii({m});"));
                                 return ("MakoIntArray".into(), tmp);
                             }
                             if ty == "MakoMapIF*" {
-                                self.line(&format!(
-                                    "MakoIntArray {tmp} = mako_maps_keys_if({m});"
-                                ));
+                                self.line(&format!("MakoIntArray {tmp} = mako_maps_keys_if({m});"));
                                 return ("MakoIntArray".into(), tmp);
                             }
                             if ty == "MakoMapFI*" || ty == "MakoMapFS*" || ty == "MakoMapFF*" {
@@ -24089,21 +24707,15 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                                     "MakoMapFS*" => "mako_maps_keys_fs",
                                     _ => "mako_maps_keys_ff",
                                 };
-                                self.line(&format!(
-                                    "MakoFloatArray {tmp} = {fn_name}({m});"
-                                ));
+                                self.line(&format!("MakoFloatArray {tmp} = {fn_name}({m});"));
                                 return ("MakoFloatArray".into(), tmp);
                             }
                             if ty == "MakoMapIB*" {
-                                self.line(&format!(
-                                    "MakoIntArray {tmp} = mako_maps_keys_ib({m});"
-                                ));
+                                self.line(&format!("MakoIntArray {tmp} = mako_maps_keys_ib({m});"));
                                 return ("MakoIntArray".into(), tmp);
                             }
                             if ty == "MakoMapSB*" {
-                                self.line(&format!(
-                                    "MakoStrArray {tmp} = mako_maps_keys_sb({m});"
-                                ));
+                                self.line(&format!("MakoStrArray {tmp} = mako_maps_keys_sb({m});"));
                                 return ("MakoStrArray".into(), tmp);
                             }
                             if ty == "MakoMapFB*" {
@@ -24112,16 +24724,18 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                                 ));
                                 return ("MakoFloatArray".into(), tmp);
                             }
-                            if ty == "MakoMapBI*" || ty == "MakoMapBS*" || ty == "MakoMapBF*" || ty == "MakoMapBB*" {
+                            if ty == "MakoMapBI*"
+                                || ty == "MakoMapBS*"
+                                || ty == "MakoMapBF*"
+                                || ty == "MakoMapBB*"
+                            {
                                 let fn_name = match ty.as_str() {
                                     "MakoMapBI*" => "mako_maps_keys_bi",
                                     "MakoMapBS*" => "mako_maps_keys_bs",
                                     "MakoMapBF*" => "mako_maps_keys_bf",
                                     _ => "mako_maps_keys_bb",
                                 };
-                                self.line(&format!(
-                                    "MakoBoolArray {tmp} = {fn_name}({m});"
-                                ));
+                                self.line(&format!("MakoBoolArray {tmp} = {fn_name}({m});"));
                                 return ("MakoBoolArray".into(), tmp);
                             }
                             if let Some((ks, tag)) = parse_map_slice_val(&ty) {
@@ -24190,9 +24804,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                                 return ("MakoIntArray".into(), tmp);
                             }
                             if ty == "MakoMapSF*" {
-                                self.line(&format!(
-                                    "MakoStrArray {tmp} = mako_maps_keys_sf({m});"
-                                ));
+                                self.line(&format!("MakoStrArray {tmp} = mako_maps_keys_sf({m});"));
                                 return ("MakoStrArray".into(), tmp);
                             }
                             if let Some(sn) = ty
@@ -24228,9 +24840,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                                 ));
                                 return (format!("MakoArr_{kn}"), tmp);
                             }
-                            self.line(&format!(
-                                "MakoStrArray {tmp} = mako_maps_keys_si({m});"
-                            ));
+                            self.line(&format!("MakoStrArray {tmp} = mako_maps_keys_si({m});"));
                             return ("MakoStrArray".into(), tmp);
                         }
                         "maps_values" => {
@@ -24427,9 +25037,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                                     }
                                 }
                             }
-                            self.line(&format!(
-                                "MakoIntArray {tmp} = mako_maps_values_si({m});"
-                            ));
+                            self.line(&format!("MakoIntArray {tmp} = mako_maps_values_si({m});"));
                             return ("MakoIntArray".into(), tmp);
                         }
                         "maps_clear" => {
@@ -24501,93 +25109,63 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             let (ty, m) = self.emit_expr(&args[0]);
                             let tmp = self.fresh("mc");
                             if ty == "MakoMapSI*" {
-                                self.line(&format!(
-                                    "MakoMapSI *{tmp} = mako_maps_clone_si({m});"
-                                ));
+                                self.line(&format!("MakoMapSI *{tmp} = mako_maps_clone_si({m});"));
                                 return ("MakoMapSI*".into(), tmp);
                             }
                             if ty == "MakoMapII*" {
-                                self.line(&format!(
-                                    "MakoMapII *{tmp} = mako_maps_clone_ii({m});"
-                                ));
+                                self.line(&format!("MakoMapII *{tmp} = mako_maps_clone_ii({m});"));
                                 return ("MakoMapII*".into(), tmp);
                             }
                             if ty == "MakoMapSS*" {
-                                self.line(&format!(
-                                    "MakoMapSS *{tmp} = mako_maps_clone_ss({m});"
-                                ));
+                                self.line(&format!("MakoMapSS *{tmp} = mako_maps_clone_ss({m});"));
                                 return ("MakoMapSS*".into(), tmp);
                             }
                             if ty == "MakoMapIF*" {
-                                self.line(&format!(
-                                    "MakoMapIF *{tmp} = mako_maps_clone_if({m});"
-                                ));
+                                self.line(&format!("MakoMapIF *{tmp} = mako_maps_clone_if({m});"));
                                 return ("MakoMapIF*".into(), tmp);
                             }
                             if ty == "MakoMapSF*" {
-                                self.line(&format!(
-                                    "MakoMapSF *{tmp} = mako_maps_clone_sf({m});"
-                                ));
+                                self.line(&format!("MakoMapSF *{tmp} = mako_maps_clone_sf({m});"));
                                 return ("MakoMapSF*".into(), tmp);
                             }
                             if ty == "MakoMapFI*" {
-                                self.line(&format!(
-                                    "MakoMapFI *{tmp} = mako_maps_clone_fi({m});"
-                                ));
+                                self.line(&format!("MakoMapFI *{tmp} = mako_maps_clone_fi({m});"));
                                 return ("MakoMapFI*".into(), tmp);
                             }
                             if ty == "MakoMapFS*" {
-                                self.line(&format!(
-                                    "MakoMapFS *{tmp} = mako_maps_clone_fs({m});"
-                                ));
+                                self.line(&format!("MakoMapFS *{tmp} = mako_maps_clone_fs({m});"));
                                 return ("MakoMapFS*".into(), tmp);
                             }
                             if ty == "MakoMapFF*" {
-                                self.line(&format!(
-                                    "MakoMapFF *{tmp} = mako_maps_clone_ff({m});"
-                                ));
+                                self.line(&format!("MakoMapFF *{tmp} = mako_maps_clone_ff({m});"));
                                 return ("MakoMapFF*".into(), tmp);
                             }
                             if ty == "MakoMapIB*" {
-                                self.line(&format!(
-                                    "MakoMapIB *{tmp} = mako_maps_clone_ib({m});"
-                                ));
+                                self.line(&format!("MakoMapIB *{tmp} = mako_maps_clone_ib({m});"));
                                 return ("MakoMapIB*".into(), tmp);
                             }
                             if ty == "MakoMapSB*" {
-                                self.line(&format!(
-                                    "MakoMapSB *{tmp} = mako_maps_clone_sb({m});"
-                                ));
+                                self.line(&format!("MakoMapSB *{tmp} = mako_maps_clone_sb({m});"));
                                 return ("MakoMapSB*".into(), tmp);
                             }
                             if ty == "MakoMapFB*" {
-                                self.line(&format!(
-                                    "MakoMapFB *{tmp} = mako_maps_clone_fb({m});"
-                                ));
+                                self.line(&format!("MakoMapFB *{tmp} = mako_maps_clone_fb({m});"));
                                 return ("MakoMapFB*".into(), tmp);
                             }
                             if ty == "MakoMapBI*" {
-                                self.line(&format!(
-                                    "MakoMapBI *{tmp} = mako_maps_clone_bi({m});"
-                                ));
+                                self.line(&format!("MakoMapBI *{tmp} = mako_maps_clone_bi({m});"));
                                 return ("MakoMapBI*".into(), tmp);
                             }
                             if ty == "MakoMapBS*" {
-                                self.line(&format!(
-                                    "MakoMapBS *{tmp} = mako_maps_clone_bs({m});"
-                                ));
+                                self.line(&format!("MakoMapBS *{tmp} = mako_maps_clone_bs({m});"));
                                 return ("MakoMapBS*".into(), tmp);
                             }
                             if ty == "MakoMapBF*" {
-                                self.line(&format!(
-                                    "MakoMapBF *{tmp} = mako_maps_clone_bf({m});"
-                                ));
+                                self.line(&format!("MakoMapBF *{tmp} = mako_maps_clone_bf({m});"));
                                 return ("MakoMapBF*".into(), tmp);
                             }
                             if ty == "MakoMapBB*" {
-                                self.line(&format!(
-                                    "MakoMapBB *{tmp} = mako_maps_clone_bb({m});"
-                                ));
+                                self.line(&format!("MakoMapBB *{tmp} = mako_maps_clone_bb({m});"));
                                 return ("MakoMapBB*".into(), tmp);
                             }
                             if let Some((ks, tag)) = parse_map_slice_val(&ty) {
@@ -24668,9 +25246,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                                 ));
                                 return (format!("MakoMapK_{kn}_{vs}*"), tmp);
                             }
-                            self.line(&format!(
-                                "MakoMapSI *{tmp} = mako_maps_clone_si({m});"
-                            ));
+                            self.line(&format!("MakoMapSI *{tmp} = mako_maps_clone_si({m});"));
                             return ("MakoMapSI*".into(), tmp);
                         }
                         "maps_equal" => {
@@ -24943,34 +25519,26 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             let (_, h) = self.emit_expr(&args[0]);
                             let (_, p) = self.emit_expr(&args[1]);
                             let tmp = self.fresh("a2v");
-                            self.line(&format!(
-                                "int64_t {tmp} = mako_argon2id_verify({h}, {p});"
-                            ));
+                            self.line(&format!("int64_t {tmp} = mako_argon2id_verify({h}, {p});"));
                             return ("int64_t".into(), tmp);
                         }
                         "bcrypt_hash" => {
                             let (_, p) = self.emit_expr(&args[0]);
                             let (_, c) = self.emit_expr(&args[1]);
                             let tmp = self.fresh("bch");
-                            self.line(&format!(
-                                "MakoString {tmp} = mako_bcrypt_hash({p}, {c});"
-                            ));
+                            self.line(&format!("MakoString {tmp} = mako_bcrypt_hash({p}, {c});"));
                             return ("MakoString".into(), tmp);
                         }
                         "bcrypt_verify" => {
                             let (_, h) = self.emit_expr(&args[0]);
                             let (_, p) = self.emit_expr(&args[1]);
                             let tmp = self.fresh("bcv");
-                            self.line(&format!(
-                                "int64_t {tmp} = mako_bcrypt_verify({h}, {p});"
-                            ));
+                            self.line(&format!("int64_t {tmp} = mako_bcrypt_verify({h}, {p});"));
                             return ("int64_t".into(), tmp);
                         }
                         "bcrypt_available" => {
                             let tmp = self.fresh("bca");
-                            self.line(&format!(
-                                "int64_t {tmp} = mako_bcrypt_available();"
-                            ));
+                            self.line(&format!("int64_t {tmp} = mako_bcrypt_available();"));
                             return ("int64_t".into(), tmp);
                         }
                         "aes_gcm_seal" => {
@@ -25040,27 +25608,21 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             let (_, iv) = self.emit_expr(&args[1]);
                             let (_, d) = self.emit_expr(&args[2]);
                             let tmp = self.fresh("actr");
-                            self.line(&format!(
-                                "MakoString {tmp} = mako_aes_ctr({k}, {iv}, {d});"
-                            ));
+                            self.line(&format!("MakoString {tmp} = mako_aes_ctr({k}, {iv}, {d});"));
                             return ("MakoString".into(), tmp);
                         }
                         "hmac_sha1" => {
                             let (_, k) = self.emit_expr(&args[0]);
                             let (_, m) = self.emit_expr(&args[1]);
                             let tmp = self.fresh("hs1");
-                            self.line(&format!(
-                                "MakoString {tmp} = mako_hmac_sha1_hex({k}, {m});"
-                            ));
+                            self.line(&format!("MakoString {tmp} = mako_hmac_sha1_hex({k}, {m});"));
                             return ("MakoString".into(), tmp);
                         }
                         "hmac_sha1_raw" => {
                             let (_, k) = self.emit_expr(&args[0]);
                             let (_, m) = self.emit_expr(&args[1]);
                             let tmp = self.fresh("hs1r");
-                            self.line(&format!(
-                                "MakoString {tmp} = mako_hmac_sha1_raw({k}, {m});"
-                            ));
+                            self.line(&format!("MakoString {tmp} = mako_hmac_sha1_raw({k}, {m});"));
                             return ("MakoString".into(), tmp);
                         }
                         "chacha20_poly1305_seal" => {
@@ -25836,10 +26398,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         }
                         "jpeg_is_baseline_huff" => {
                             let (_, s) = self.emit_expr(&args[0]);
-                            return (
-                                "int64_t".into(),
-                                format!("mako_jpeg_is_baseline_huff({s})"),
-                            );
+                            return ("int64_t".into(), format!("mako_jpeg_is_baseline_huff({s})"));
                         }
                         "jpeg_huff_block" => {
                             let (_, s) = self.emit_expr(&args[0]);
@@ -25899,11 +26458,17 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         }
                         "jpeg_sof0_component_id" => {
                             let (_, s) = self.emit_expr(&args[0]);
-                            return ("int64_t".into(), format!("mako_jpeg_sof0_component_id({s})"));
+                            return (
+                                "int64_t".into(),
+                                format!("mako_jpeg_sof0_component_id({s})"),
+                            );
                         }
                         "jpeg_jfif_density_units" => {
                             let (_, s) = self.emit_expr(&args[0]);
-                            return ("int64_t".into(), format!("mako_jpeg_jfif_density_units({s})"));
+                            return (
+                                "int64_t".into(),
+                                format!("mako_jpeg_jfif_density_units({s})"),
+                            );
                         }
                         "jpeg_jfif_x_density" => {
                             let (_, s) = self.emit_expr(&args[0]);
@@ -25927,7 +26492,10 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         }
                         "jpeg_jfif_thumb_height" => {
                             let (_, s) = self.emit_expr(&args[0]);
-                            return ("int64_t".into(), format!("mako_jpeg_jfif_thumb_height({s})"));
+                            return (
+                                "int64_t".into(),
+                                format!("mako_jpeg_jfif_thumb_height({s})"),
+                            );
                         }
                         "jpeg_is_mako_jfif" => {
                             let (_, s) = self.emit_expr(&args[0]);
@@ -25939,7 +26507,10 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         }
                         "jpeg_sof0_matches_app7" => {
                             let (_, s) = self.emit_expr(&args[0]);
-                            return ("int64_t".into(), format!("mako_jpeg_sof0_matches_app7({s})"));
+                            return (
+                                "int64_t".into(),
+                                format!("mako_jpeg_sof0_matches_app7({s})"),
+                            );
                         }
                         "jpeg_is_mako_complete" => {
                             let (_, s) = self.emit_expr(&args[0]);
@@ -25995,7 +26566,10 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         }
                         "jpeg_app7_len_matches_payload" => {
                             let (_, s) = self.emit_expr(&args[0]);
-                            return ("int64_t".into(), format!("mako_jpeg_app7_len_matches_payload({s})"));
+                            return (
+                                "int64_t".into(),
+                                format!("mako_jpeg_app7_len_matches_payload({s})"),
+                            );
                         }
                         "smtp_send_starttls" => {
                             let (_, h) = self.emit_expr(&args[0]);
@@ -26088,9 +26662,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         "mail_msg_build" => {
                             let (_, m) = self.emit_expr(&args[0]);
                             let tmp = self.fresh("mmb");
-                            self.line(&format!(
-                                "MakoString {tmp} = mako_mail_msg_build({m});"
-                            ));
+                            self.line(&format!("MakoString {tmp} = mako_mail_msg_build({m});"));
                             return ("MakoString".into(), tmp);
                         }
                         "mail_msg_envelope_from" => {
@@ -26103,10 +26675,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         }
                         "mail_msg_rcpt_count" => {
                             let (_, m) = self.emit_expr(&args[0]);
-                            return (
-                                "int64_t".into(),
-                                format!("mako_mail_msg_rcpt_count({m})"),
-                            );
+                            return ("int64_t".into(), format!("mako_mail_msg_rcpt_count({m})"));
                         }
                         "mail_msg_rcpt_at" => {
                             let (_, m) = self.emit_expr(&args[0]);
@@ -26166,10 +26735,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         "smtp_mail_from" => {
                             let (_, c) = self.emit_expr(&args[0]);
                             let (_, f) = self.emit_expr(&args[1]);
-                            return (
-                                "int64_t".into(),
-                                format!("mako_smtp_mail_from({c}, {f})"),
-                            );
+                            return ("int64_t".into(), format!("mako_smtp_mail_from({c}, {f})"));
                         }
                         "smtp_rcpt_to" => {
                             let (_, c) = self.emit_expr(&args[0]);
@@ -26192,9 +26758,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         "smtp_last_reply" => {
                             let (_, c) = self.emit_expr(&args[0]);
                             let tmp = self.fresh("slr");
-                            self.line(&format!(
-                                "MakoString {tmp} = mako_smtp_last_reply({c});"
-                            ));
+                            self.line(&format!("MakoString {tmp} = mako_smtp_last_reply({c});"));
                             return ("MakoString".into(), tmp);
                         }
                         "smtp_last_code" => {
@@ -26204,10 +26768,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         "smtp_send_built" => {
                             let (_, c) = self.emit_expr(&args[0]);
                             let (_, m) = self.emit_expr(&args[1]);
-                            return (
-                                "int64_t".into(),
-                                format!("mako_smtp_send_built({c}, {m})"),
-                            );
+                            return ("int64_t".into(), format!("mako_smtp_send_built({c}, {m})"));
                         }
                         "smtp_send_msg" => {
                             let (_, h) = self.emit_expr(&args[0]);
@@ -26218,9 +26779,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             let (_, tls) = self.emit_expr(&args[5]);
                             return (
                                 "int64_t".into(),
-                                format!(
-                                    "mako_smtp_send_msg({h}, {p}, {u}, {pw}, {m}, {tls})"
-                                ),
+                                format!("mako_smtp_send_msg({h}, {p}, {u}, {pw}, {m}, {tls})"),
                             );
                         }
                         "smtp_mock_start" => {
@@ -26242,16 +26801,12 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         }
                         "smtp_mock_last_from" => {
                             let tmp = self.fresh("smlf");
-                            self.line(&format!(
-                                "MakoString {tmp} = mako_smtp_mock_last_from();"
-                            ));
+                            self.line(&format!("MakoString {tmp} = mako_smtp_mock_last_from();"));
                             return ("MakoString".into(), tmp);
                         }
                         "smtp_mock_last_rcpt" => {
                             let tmp = self.fresh("smlr");
-                            self.line(&format!(
-                                "MakoString {tmp} = mako_smtp_mock_last_rcpt();"
-                            ));
+                            self.line(&format!("MakoString {tmp} = mako_smtp_mock_last_rcpt();"));
                             return ("MakoString".into(), tmp);
                         }
                         "smtp_mock_stop" => {
@@ -26315,7 +26870,9 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             let (_, o) = self.emit_expr(&args[1]);
                             let (_, pl) = self.emit_expr(&args[2]);
                             let tmp = self.fresh("plc");
-                            self.line(&format!("MakoString {tmp} = mako_plugin_call({h}, {o}, {pl});"));
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_plugin_call({h}, {o}, {pl});"
+                            ));
                             return ("MakoString".into(), tmp);
                         }
                         "plugin_close" => {
@@ -26332,41 +26889,30 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         "plugin_path" => {
                             let (_, h) = self.emit_expr(&args[0]);
                             let tmp = self.fresh("ppath");
-                            self.line(&format!(
-                                "MakoString {tmp} = mako_plugin_path({h});"
-                            ));
+                            self.line(&format!("MakoString {tmp} = mako_plugin_path({h});"));
                             return ("MakoString".into(), tmp);
                         }
                         "plugin_name" => {
                             let (_, h) = self.emit_expr(&args[0]);
                             let tmp = self.fresh("pname");
-                            self.line(&format!(
-                                "MakoString {tmp} = mako_plugin_name({h});"
-                            ));
+                            self.line(&format!("MakoString {tmp} = mako_plugin_name({h});"));
                             return ("MakoString".into(), tmp);
                         }
                         "plugin_version" => {
                             let (_, h) = self.emit_expr(&args[0]);
                             let tmp = self.fresh("pver");
-                            self.line(&format!(
-                                "MakoString {tmp} = mako_plugin_version({h});"
-                            ));
+                            self.line(&format!("MakoString {tmp} = mako_plugin_version({h});"));
                             return ("MakoString".into(), tmp);
                         }
                         "plugin_kind" => {
                             let (_, h) = self.emit_expr(&args[0]);
                             let tmp = self.fresh("pkind");
-                            self.line(&format!(
-                                "MakoString {tmp} = mako_plugin_kind({h});"
-                            ));
+                            self.line(&format!("MakoString {tmp} = mako_plugin_kind({h});"));
                             return ("MakoString".into(), tmp);
                         }
                         "plugin_plugin_abi" => {
                             let (_, h) = self.emit_expr(&args[0]);
-                            return (
-                                "int64_t".into(),
-                                format!("mako_plugin_plugin_abi({h})"),
-                            );
+                            return ("int64_t".into(), format!("mako_plugin_plugin_abi({h})"));
                         }
                         "plugin_count" => {
                             return ("int64_t".into(), "mako_plugin_count()".into());
@@ -26379,9 +26925,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         }
                         "plugin_api_version" => {
                             let tmp = self.fresh("papi");
-                            self.line(&format!(
-                                "MakoString {tmp} = mako_plugin_api_version();"
-                            ));
+                            self.line(&format!("MakoString {tmp} = mako_plugin_api_version();"));
                             return ("MakoString".into(), tmp);
                         }
                         "plugin_last_error" => {
@@ -26389,9 +26933,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         }
                         "plugin_last_error_str" => {
                             let tmp = self.fresh("perr");
-                            self.line(&format!(
-                                "MakoString {tmp} = mako_plugin_last_error_str();"
-                            ));
+                            self.line(&format!("MakoString {tmp} = mako_plugin_last_error_str();"));
                             return ("MakoString".into(), tmp);
                         }
                         "plugin_call_ok" => {
@@ -26400,9 +26942,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         }
                         "plugin_last_log" => {
                             let tmp = self.fresh("plog");
-                            self.line(&format!(
-                                "MakoString {tmp} = mako_plugin_last_log();"
-                            ));
+                            self.line(&format!("MakoString {tmp} = mako_plugin_last_log();"));
                             return ("MakoString".into(), tmp);
                         }
                         "plugin_last_log_level" => {
@@ -26428,26 +26968,19 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         }
                         "plugin_open_manifest" => {
                             let (_, p) = self.emit_expr(&args[0]);
-                            return (
-                                "int64_t".into(),
-                                format!("mako_plugin_open_manifest({p})"),
-                            );
+                            return ("int64_t".into(), format!("mako_plugin_open_manifest({p})"));
                         }
                         "plugin_call1" => {
                             let (_, h) = self.emit_expr(&args[0]);
                             let (_, o) = self.emit_expr(&args[1]);
                             let tmp = self.fresh("plc1");
-                            self.line(&format!(
-                                "MakoString {tmp} = mako_plugin_call1({h}, {o});"
-                            ));
+                            self.line(&format!("MakoString {tmp} = mako_plugin_call1({h}, {o});"));
                             return ("MakoString".into(), tmp);
                         }
                         "plugin_info_json" => {
                             let (_, h) = self.emit_expr(&args[0]);
                             let tmp = self.fresh("pij");
-                            self.line(&format!(
-                                "MakoString {tmp} = mako_plugin_info_json({h});"
-                            ));
+                            self.line(&format!("MakoString {tmp} = mako_plugin_info_json({h});"));
                             return ("MakoString".into(), tmp);
                         }
                         "ffi_abi_name" => {
@@ -26633,25 +27166,19 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         "gpu_device_backend" => {
                             let (_, d) = self.emit_expr(&args[0]);
                             let tmp = self.fresh("gpudb");
-                            self.line(&format!(
-                                "MakoString {tmp} = mako_gpu_device_backend({d});"
-                            ));
+                            self.line(&format!("MakoString {tmp} = mako_gpu_device_backend({d});"));
                             return ("MakoString".into(), tmp);
                         }
                         "gpu_device_name" => {
                             let (_, d) = self.emit_expr(&args[0]);
                             let tmp = self.fresh("gpudn");
-                            self.line(&format!(
-                                "MakoString {tmp} = mako_gpu_device_name({d});"
-                            ));
+                            self.line(&format!("MakoString {tmp} = mako_gpu_device_name({d});"));
                             return ("MakoString".into(), tmp);
                         }
                         "gpu_device_vendor" => {
                             let (_, d) = self.emit_expr(&args[0]);
                             let tmp = self.fresh("gpudv");
-                            self.line(&format!(
-                                "MakoString {tmp} = mako_gpu_device_vendor({d});"
-                            ));
+                            self.line(&format!("MakoString {tmp} = mako_gpu_device_vendor({d});"));
                             return ("MakoString".into(), tmp);
                         }
                         "gpu_device_is_gpu" => {
@@ -26672,10 +27199,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         }
                         "gpu_set_prefer_host" => {
                             let (_, on) = self.emit_expr(&args[0]);
-                            return (
-                                "int64_t".into(),
-                                format!("mako_gpu_set_prefer_host({on})"),
-                            );
+                            return ("int64_t".into(), format!("mako_gpu_set_prefer_host({on})"));
                         }
                         "gpu_buf_new" => {
                             let (_, d) = self.emit_expr(&args[0]);
@@ -26711,10 +27235,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         "gpu_upload_f32" => {
                             let (_, h) = self.emit_expr(&args[0]);
                             let (_, v) = self.emit_expr(&args[1]);
-                            return (
-                                "int64_t".into(),
-                                format!("mako_gpu_upload_f32({h}, {v})"),
-                            );
+                            return ("int64_t".into(), format!("mako_gpu_upload_f32({h}, {v})"));
                         }
                         "gpu_download_f32" => {
                             let (_, h) = self.emit_expr(&args[0]);
@@ -26732,19 +27253,13 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             let (_, o) = self.emit_expr(&args[0]);
                             let (_, a) = self.emit_expr(&args[1]);
                             let (_, b) = self.emit_expr(&args[2]);
-                            return (
-                                "int64_t".into(),
-                                format!("mako_gpu_add_f32({o}, {a}, {b})"),
-                            );
+                            return ("int64_t".into(), format!("mako_gpu_add_f32({o}, {a}, {b})"));
                         }
                         "gpu_mul_f32" => {
                             let (_, o) = self.emit_expr(&args[0]);
                             let (_, a) = self.emit_expr(&args[1]);
                             let (_, b) = self.emit_expr(&args[2]);
-                            return (
-                                "int64_t".into(),
-                                format!("mako_gpu_mul_f32({o}, {a}, {b})"),
-                            );
+                            return ("int64_t".into(), format!("mako_gpu_mul_f32({o}, {a}, {b})"));
                         }
                         "gpu_scale_f32" => {
                             let (_, o) = self.emit_expr(&args[0]);
@@ -26787,9 +27302,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             let (_, cols) = self.emit_expr(&args[4]);
                             return (
                                 "int64_t".into(),
-                                format!(
-                                    "mako_gpu_bias_add_f32({o}, {a}, {bias}, {rows}, {cols})"
-                                ),
+                                format!("mako_gpu_bias_add_f32({o}, {a}, {bias}, {rows}, {cols})"),
                             );
                         }
                         "gpu_matmul_f32" => {
@@ -26862,9 +27375,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             let (_, dim) = self.emit_expr(&args[5]);
                             return (
                                 "int64_t".into(),
-                                format!(
-                                    "mako_gpu_attention_f32({o}, {q}, {k}, {v}, {seq}, {dim})"
-                                ),
+                                format!("mako_gpu_attention_f32({o}, {q}, {k}, {v}, {seq}, {dim})"),
                             );
                         }
                         "gpu_mha_f32" => {
@@ -26877,9 +27388,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             let (_, hd) = self.emit_expr(&args[6]);
                             return (
                                 "int64_t".into(),
-                                format!(
-                                    "mako_gpu_mha_f32({o}, {q}, {k}, {v}, {seq}, {nh}, {hd})"
-                                ),
+                                format!("mako_gpu_mha_f32({o}, {q}, {k}, {v}, {seq}, {nh}, {hd})"),
                             );
                         }
                         "model_new" => {
@@ -26906,10 +27415,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         "model_tensor_buf" => {
                             let (_, h) = self.emit_expr(&args[0]);
                             let (_, n) = self.emit_expr(&args[1]);
-                            return (
-                                "int64_t".into(),
-                                format!("mako_model_tensor_buf({h}, {n})"),
-                            );
+                            return ("int64_t".into(), format!("mako_model_tensor_buf({h}, {n})"));
                         }
                         "model_tensor_elems" => {
                             let (_, h) = self.emit_expr(&args[0]);
@@ -26962,10 +27468,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         "model_load_gguf" => {
                             let (_, h) = self.emit_expr(&args[0]);
                             let (_, p) = self.emit_expr(&args[1]);
-                            return (
-                                "int64_t".into(),
-                                format!("mako_model_load_gguf({h}, {p})"),
-                            );
+                            return ("int64_t".into(), format!("mako_model_load_gguf({h}, {p})"));
                         }
                         "model_save" => {
                             let (_, h) = self.emit_expr(&args[0]);
@@ -27005,10 +27508,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             let (_, h) = self.emit_expr(&args[0]);
                             let (_, tok) = self.emit_expr(&args[1]);
                             let (_, id) = self.emit_expr(&args[2]);
-                            return (
-                                "int64_t".into(),
-                                format!("mako_tok_set({h}, {tok}, {id})"),
-                            );
+                            return ("int64_t".into(), format!("mako_tok_set({h}, {tok}, {id})"));
                         }
                         "tok_size" => {
                             let (_, h) = self.emit_expr(&args[0]);
@@ -27023,52 +27523,37 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             let (_, h) = self.emit_expr(&args[0]);
                             let (_, id) = self.emit_expr(&args[1]);
                             let tmp = self.fresh("tokt");
-                            self.line(&format!(
-                                "MakoString {tmp} = mako_tok_token({h}, {id});"
-                            ));
+                            self.line(&format!("MakoString {tmp} = mako_tok_token({h}, {id});"));
                             return ("MakoString".into(), tmp);
                         }
                         "tok_load_json" => {
                             let (_, h) = self.emit_expr(&args[0]);
                             let (_, p) = self.emit_expr(&args[1]);
-                            return (
-                                "int64_t".into(),
-                                format!("mako_tok_load_json({h}, {p})"),
-                            );
+                            return ("int64_t".into(), format!("mako_tok_load_json({h}, {p})"));
                         }
                         "tok_load_lines" => {
                             let (_, h) = self.emit_expr(&args[0]);
                             let (_, p) = self.emit_expr(&args[1]);
-                            return (
-                                "int64_t".into(),
-                                format!("mako_tok_load_lines({h}, {p})"),
-                            );
+                            return ("int64_t".into(), format!("mako_tok_load_lines({h}, {p})"));
                         }
                         "tok_encode" => {
                             let (_, h) = self.emit_expr(&args[0]);
                             let (_, s) = self.emit_expr(&args[1]);
                             let tmp = self.fresh("toke");
-                            self.line(&format!(
-                                "MakoIntArray {tmp} = mako_tok_encode({h}, {s});"
-                            ));
+                            self.line(&format!("MakoIntArray {tmp} = mako_tok_encode({h}, {s});"));
                             return ("MakoIntArray".into(), tmp);
                         }
                         "tok_decode" => {
                             let (_, h) = self.emit_expr(&args[0]);
                             let (_, ids) = self.emit_expr(&args[1]);
                             let tmp = self.fresh("tokd");
-                            self.line(&format!(
-                                "MakoString {tmp} = mako_tok_decode({h}, {ids});"
-                            ));
+                            self.line(&format!("MakoString {tmp} = mako_tok_decode({h}, {ids});"));
                             return ("MakoString".into(), tmp);
                         }
                         "tok_load_merges" => {
                             let (_, h) = self.emit_expr(&args[0]);
                             let (_, p) = self.emit_expr(&args[1]);
-                            return (
-                                "int64_t".into(),
-                                format!("mako_tok_load_merges({h}, {p})"),
-                            );
+                            return ("int64_t".into(), format!("mako_tok_load_merges({h}, {p})"));
                         }
                         "tok_load_bpe" => {
                             let (_, h) = self.emit_expr(&args[0]);
@@ -27239,9 +27724,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         "tls_conn_version" => {
                             let (_, c) = self.emit_expr(&args[0]);
                             let tmp = self.fresh("tcv");
-                            self.line(&format!(
-                                "MakoString {tmp} = mako_tls_conn_version({c});"
-                            ));
+                            self.line(&format!("MakoString {tmp} = mako_tls_conn_version({c});"));
                             return ("MakoString".into(), tmp);
                         }
                         "tls_server_new" => {
@@ -27314,9 +27797,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         "tls_unique" => {
                             let (_, c) = self.emit_expr(&args[0]);
                             let tmp = self.fresh("tuniq");
-                            self.line(&format!(
-                                "MakoString {tmp} = mako_tls_unique({c});"
-                            ));
+                            self.line(&format!("MakoString {tmp} = mako_tls_unique({c});"));
                             return ("MakoString".into(), tmp);
                         }
                         "scram_tls_unique_cbind" => {
@@ -27410,17 +27891,11 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         }
                         "tls_handshake_step" => {
                             let (_, c) = self.emit_expr(&args[0]);
-                            return (
-                                "int64_t".into(),
-                                format!("mako_tls_handshake_step({c})"),
-                            );
+                            return ("int64_t".into(), format!("mako_tls_handshake_step({c})"));
                         }
                         "tls_is_init_finished" => {
                             let (_, c) = self.emit_expr(&args[0]);
-                            return (
-                                "int64_t".into(),
-                                format!("mako_tls_is_init_finished({c})"),
-                            );
+                            return ("int64_t".into(), format!("mako_tls_is_init_finished({c})"));
                         }
                         "tls_want_read" => {
                             let (_, c) = self.emit_expr(&args[0]);
@@ -27438,18 +27913,13 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             let (_, c) = self.emit_expr(&args[0]);
                             let (_, n) = self.emit_expr(&args[1]);
                             let tmp = self.fresh("trnb");
-                            self.line(&format!(
-                                "MakoString {tmp} = mako_tls_read_nb({c}, {n});"
-                            ));
+                            self.line(&format!("MakoString {tmp} = mako_tls_read_nb({c}, {n});"));
                             return ("MakoString".into(), tmp);
                         }
                         "tls_write_nb" => {
                             let (_, c) = self.emit_expr(&args[0]);
                             let (_, d) = self.emit_expr(&args[1]);
-                            return (
-                                "int64_t".into(),
-                                format!("mako_tls_write_nb({c}, {d})"),
-                            );
+                            return ("int64_t".into(), format!("mako_tls_write_nb({c}, {d})"));
                         }
                         "tls_read" => {
                             let (_, c) = self.emit_expr(&args[0]);
@@ -27673,10 +28143,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         "h3_server_new" => {
                             let (_, c) = self.emit_expr(&args[0]);
                             let (_, k) = self.emit_expr(&args[1]);
-                            return (
-                                "int64_t".into(),
-                                format!("mako_h3_server_new({c}, {k})"),
-                            );
+                            return ("int64_t".into(), format!("mako_h3_server_new({c}, {k})"));
                         }
                         "h3_server_bind" => {
                             let (_, h) = self.emit_expr(&args[0]);
@@ -27694,10 +28161,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         "h3_server_poll" => {
                             let (_, h) = self.emit_expr(&args[0]);
                             let (_, ms) = self.emit_expr(&args[1]);
-                            return (
-                                "int64_t".into(),
-                                format!("mako_h3_server_poll({h}, {ms})"),
-                            );
+                            return ("int64_t".into(), format!("mako_h3_server_poll({h}, {ms})"));
                         }
                         "h3_accept_stream" => {
                             let (_, h) = self.emit_expr(&args[0]);
@@ -27855,16 +28319,11 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         }
                         "chan_select_value_str" => {
                             let tmp = self.fresh("sels");
-                            self.line(&format!(
-                                "MakoString {tmp} = mako_chan_select_value_str();"
-                            ));
+                            self.line(&format!("MakoString {tmp} = mako_chan_select_value_str();"));
                             return ("MakoString".into(), tmp);
                         }
                         "chan_select_value_ptr" => {
-                            return (
-                                "void*".into(),
-                                "mako_chan_select_value_ptr()".into(),
-                            );
+                            return ("void*".into(), "mako_chan_select_value_ptr()".into());
                         }
                         "chan_select3" => {
                             let (_, a) = self.emit_expr(&args[0]);
@@ -27921,10 +28380,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         "secret_eq_str" => {
                             let (_, s) = self.emit_expr(&args[0]);
                             let (_, o) = self.emit_expr(&args[1]);
-                            return (
-                                "int64_t".into(),
-                                format!("mako_secret_eq_str({s}, {o})"),
-                            );
+                            return ("int64_t".into(), format!("mako_secret_eq_str({s}, {o})"));
                         }
                         "hkdf_sha256" => {
                             let (_, ikm) = self.emit_expr(&args[0]);
@@ -28725,19 +29181,13 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             let (_, s) = self.emit_expr(&args[0]);
                             let (_, d) = self.emit_expr(&args[1]);
                             let (_, m) = self.emit_expr(&args[2]);
-                            return (
-                                "int64_t".into(),
-                                format!("mako_tcp_fd_copy({s}, {d}, {m})"),
-                            );
+                            return ("int64_t".into(), format!("mako_tcp_fd_copy({s}, {d}, {m})"));
                         }
                         "tcp_splice" => {
                             let (_, s) = self.emit_expr(&args[0]);
                             let (_, d) = self.emit_expr(&args[1]);
                             let (_, m) = self.emit_expr(&args[2]);
-                            return (
-                                "int64_t".into(),
-                                format!("mako_tcp_splice({s}, {d}, {m})"),
-                            );
+                            return ("int64_t".into(), format!("mako_tcp_splice({s}, {d}, {m})"));
                         }
                         "tcp_proxy_pump" => {
                             let (_, a) = self.emit_expr(&args[0]);
@@ -28752,18 +29202,12 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         "tcp_set_recv_buf" => {
                             let (_, f) = self.emit_expr(&args[0]);
                             let (_, s) = self.emit_expr(&args[1]);
-                            return (
-                                "int64_t".into(),
-                                format!("mako_tcp_set_recv_buf({f}, {s})"),
-                            );
+                            return ("int64_t".into(), format!("mako_tcp_set_recv_buf({f}, {s})"));
                         }
                         "tcp_set_send_buf" => {
                             let (_, f) = self.emit_expr(&args[0]);
                             let (_, s) = self.emit_expr(&args[1]);
-                            return (
-                                "int64_t".into(),
-                                format!("mako_tcp_set_send_buf({f}, {s})"),
-                            );
+                            return ("int64_t".into(), format!("mako_tcp_set_send_buf({f}, {s})"));
                         }
                         "tcp_reuseport" => {
                             let (_, f) = self.emit_expr(&args[0]);
@@ -28832,10 +29276,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         }
                         "http_forward_body_len" => {
                             let (_, r) = self.emit_expr(&args[0]);
-                            return (
-                                "int64_t".into(),
-                                format!("mako_http_forward_body_len({r})"),
-                            );
+                            return ("int64_t".into(), format!("mako_http_forward_body_len({r})"));
                         }
                         "http_forward_total_bytes" => {
                             let (_, r) = self.emit_expr(&args[0]);
@@ -28847,9 +29288,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         "http_forward_body" => {
                             let (_, r) = self.emit_expr(&args[0]);
                             let tmp = self.fresh("fwd_body");
-                            self.line(&format!(
-                                "MakoString {tmp} = mako_http_forward_body({r});"
-                            ));
+                            self.line(&format!("MakoString {tmp} = mako_http_forward_body({r});"));
                             return ("MakoString".into(), tmp);
                         }
                         "http_forward_headers" => {
@@ -28884,17 +29323,12 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         }
                         "proxy_io_bytes_read" => {
                             let (_, r) = self.emit_expr(&args[0]);
-                            return (
-                                "int64_t".into(),
-                                format!("mako_proxy_io_bytes_read({r})"),
-                            );
+                            return ("int64_t".into(), format!("mako_proxy_io_bytes_read({r})"));
                         }
                         "http_parse" => {
                             let (_, s) = self.emit_expr(&args[0]);
                             let tmp = self.fresh("http_parsed");
-                            self.line(&format!(
-                                "MakoHttpParsed {tmp} = mako_http_parse({s});"
-                            ));
+                            self.line(&format!("MakoHttpParsed {tmp} = mako_http_parse({s});"));
                             return ("MakoHttpParsed".into(), tmp);
                         }
                         "http_parsed_ok" => {
@@ -28910,33 +29344,24 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         }
                         "http_parsed_chunked" => {
                             let (_, r) = self.emit_expr(&args[0]);
-                            return (
-                                "int64_t".into(),
-                                format!("mako_http_parsed_chunked({r})"),
-                            );
+                            return ("int64_t".into(), format!("mako_http_parsed_chunked({r})"));
                         }
                         "http_parsed_method" => {
                             let (_, r) = self.emit_expr(&args[0]);
                             let tmp = self.fresh("pm");
-                            self.line(&format!(
-                                "MakoString {tmp} = mako_http_parsed_method({r});"
-                            ));
+                            self.line(&format!("MakoString {tmp} = mako_http_parsed_method({r});"));
                             return ("MakoString".into(), tmp);
                         }
                         "http_parsed_path" => {
                             let (_, r) = self.emit_expr(&args[0]);
                             let tmp = self.fresh("pp");
-                            self.line(&format!(
-                                "MakoString {tmp} = mako_http_parsed_path({r});"
-                            ));
+                            self.line(&format!("MakoString {tmp} = mako_http_parsed_path({r});"));
                             return ("MakoString".into(), tmp);
                         }
                         "http_parsed_host" => {
                             let (_, r) = self.emit_expr(&args[0]);
                             let tmp = self.fresh("ph");
-                            self.line(&format!(
-                                "MakoString {tmp} = mako_http_parsed_host({r});"
-                            ));
+                            self.line(&format!("MakoString {tmp} = mako_http_parsed_host({r});"));
                             return ("MakoString".into(), tmp);
                         }
                         "http_parsed_headers" => {
@@ -28950,9 +29375,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         "http_parsed_body" => {
                             let (_, r) = self.emit_expr(&args[0]);
                             let tmp = self.fresh("pb");
-                            self.line(&format!(
-                                "MakoString {tmp} = mako_http_parsed_body({r});"
-                            ));
+                            self.line(&format!("MakoString {tmp} = mako_http_parsed_body({r});"));
                             return ("MakoString".into(), tmp);
                         }
                         "http_parsed_header" => {
@@ -29041,16 +29464,10 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                                 return ("int64_t".into(), format!("mako_map_bb_len({v})"));
                             }
                             if let Some((ks, tag)) = parse_map_slice_val(&ty) {
-                                return (
-                                    "int64_t".into(),
-                                    format!("mako_map_{ks}_{tag}_len({v})"),
-                                );
+                                return ("int64_t".into(), format!("mako_map_{ks}_{tag}_len({v})"));
                             }
                             if let Some((ks, tag)) = parse_map_map_val(&ty) {
-                                return (
-                                    "int64_t".into(),
-                                    format!("mako_map_{ks}_{tag}_len({v})"),
-                                );
+                                return ("int64_t".into(), format!("mako_map_{ks}_{tag}_len({v})"));
                             }
                             if let Some((kn, tag)) = parse_map_k_slice_val(&ty) {
                                 return (
@@ -29372,9 +29789,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             // Call through a local function value: `f(x)` where f is MakoFn.
                             if self.locals.contains_key(name) {
                                 let lty = self.locals.get(name).cloned().unwrap_or_default();
-                                if lty == "MakoFn"
-                                    || self.fn_ptr_casts.contains_key(name)
-                                {
+                                if lty == "MakoFn" || self.fn_ptr_casts.contains_key(name) {
                                     let cast = self
                                         .fn_ptr_casts
                                         .get(name)
@@ -29396,14 +29811,10 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                                         format!("{ret} (*)(void*)")
                                     } else {
                                         // Reconstruct arg types from cast: ret (*)(T1, T2)
-                                        let inner = cast
-                                            .split("(*)")
-                                            .nth(1)
-                                            .unwrap_or("(void)")
-                                            .trim();
-                                        let inner = inner
-                                            .trim_start_matches('(')
-                                            .trim_end_matches(')');
+                                        let inner =
+                                            cast.split("(*)").nth(1).unwrap_or("(void)").trim();
+                                        let inner =
+                                            inner.trim_start_matches('(').trim_end_matches(')');
                                         if inner.is_empty() || inner == "void" {
                                             format!("{ret} (*)(void*)")
                                         } else {
@@ -29431,16 +29842,20 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             }
                             // User enum variant constructor — try qualified lookup first
                             {
-                                let ret_enum = self.current_fn_ret.as_ref()
+                                let ret_enum = self
+                                    .current_fn_ret
+                                    .as_ref()
                                     .map(|t| self.type_expr_c(t))
                                     .and_then(|c| {
                                         // Strip MakoEnum_ prefix if present to get the Mako name
-                                        self.enums.iter()
+                                        self.enums
+                                            .iter()
                                             .find(|(_, info)| info.c_name == c)
                                             .map(|(n, _)| n.clone())
                                     });
                                 let qname = ret_enum.as_ref().map(|e| format!("{e}::{name}"));
-                                let enum_name = qname.as_ref()
+                                let enum_name = qname
+                                    .as_ref()
                                     .and_then(|q| self.variant_to_enum.get(q).cloned())
                                     .or_else(|| self.variant_to_enum.get(name).cloned());
                                 if let Some(enum_name) = enum_name {
@@ -29618,16 +30033,16 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                     match p {
                         crate::ast::InterpPart::Lit(s) => {
                             let escaped = escape_c(s);
-                            self.line(&format!(
-                                "mako_sbstack_write_cstr(&{b}, \"{escaped}\");"
-                            ));
+                            self.line(&format!("mako_sbstack_write_cstr(&{b}, \"{escaped}\");"));
                         }
                         crate::ast::InterpPart::Expr(e, fmt) => {
                             let (ty, v) = self.emit_expr(e);
                             if let Some(spec) = fmt {
                                 let esc = escape_c(spec);
                                 let tb = self.fresh("tb");
-                                self.line(&format!("MakoStrBuilder *{tb} = mako_str_builder_new();"));
+                                self.line(&format!(
+                                    "MakoStrBuilder *{tb} = mako_str_builder_new();"
+                                ));
                                 if ty == "MakoString" {
                                     self.line(&format!(
                                         "mako_str_builder_write_str_spec({tb}, {v}, \"{esc}\");"
@@ -29642,7 +30057,9 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                                     ));
                                 }
                                 let ts = self.fresh("ts");
-                                self.line(&format!("MakoString {ts} = mako_str_builder_finish({tb});"));
+                                self.line(&format!(
+                                    "MakoString {ts} = mako_str_builder_finish({tb});"
+                                ));
                                 self.line(&format!("mako_sbstack_write(&{b}, {ts});"));
                                 self.line(&format!("mako_str_free({ts});"));
                             } else if ty == "MakoString" {
@@ -29652,9 +30069,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                                     "mako_sbstack_write_i64(&{b}, (int64_t)({v}));"
                                 ));
                             } else if ty == "double" {
-                                self.line(&format!(
-                                    "mako_sbstack_write_f64(&{b}, {v});"
-                                ));
+                                self.line(&format!("mako_sbstack_write_f64(&{b}, {v});"));
                             } else {
                                 self.line(&format!(
                                     "mako_sbstack_write_i64(&{b}, (int64_t)({v}));"
@@ -29775,9 +30190,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                     // Insert at the helpers marker so an inline tuple literal (e.g.
                     // parallel assignment `a, b = b, a`) has its type declared even
                     // when first seen during body emission.
-                    self.insert_helper(&format!(
-                        "typedef struct {{\n{fields}}} {cname};\n"
-                    ));
+                    self.insert_helper(&format!("typedef struct {{\n{fields}}} {cname};\n"));
                 }
                 let tmp = self.fresh("tup");
                 self.line(&format!("{cname} {tmp};"));
@@ -29791,9 +30204,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                 let tmp = self.fresh("ch");
                 match elem {
                     TypeExpr::Named(n) if n == "string" => {
-                        self.line(&format!(
-                            "MakoChanStr *{tmp} = mako_chan_str_new({c});"
-                        ));
+                        self.line(&format!("MakoChanStr *{tmp} = mako_chan_str_new({c});"));
                         ("MakoChanStr*".into(), tmp)
                     }
                     TypeExpr::Named(n) if n == "float" || n == "float64" => {
@@ -29813,17 +30224,13 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             && n != "string"
                             && (self.structs.contains_key(n) || self.enums.contains_key(n)) =>
                     {
-                        self.line(&format!(
-                            "MakoChanPtr *{tmp} = mako_chan_ptr_new({c});"
-                        ));
+                        self.line(&format!("MakoChanPtr *{tmp} = mako_chan_ptr_new({c});"));
                         // Remember element type for this temporary / binding
                         self.chan_ptr_elems.insert(tmp.clone(), n.clone());
                         ("MakoChanPtr*".into(), tmp)
                     }
                     TypeExpr::Tuple(elems) => {
-                        self.line(&format!(
-                            "MakoChanPtr *{tmp} = mako_chan_ptr_new({c});"
-                        ));
+                        self.line(&format!("MakoChanPtr *{tmp} = mako_chan_ptr_new({c});"));
                         let field_tys: Vec<String> =
                             elems.iter().map(|e| self.type_expr_c(e)).collect();
                         let tag = field_tys
@@ -29890,8 +30297,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             let (_, v) = self.emit_expr(e);
                             vals.push(v);
                         }
-                        let tag = map_ptr_mono_tag(&ty0)
-                            .unwrap_or_else(|| c_type_mono_tag(&ty0));
+                        let tag = map_ptr_mono_tag(&ty0).unwrap_or_else(|| c_type_mono_tag(&ty0));
                         let outer = format!("MakoArr_{tag}");
                         let tmp = self.fresh("marr");
                         let lit = self.fresh("mlit");
@@ -29921,10 +30327,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         return (outer, tmp);
                     }
                     // []chan[T] lit: [ch0, ch1, …]
-                    if ty0 == "MakoChan*"
-                        || ty0 == "MakoChanStr*"
-                        || ty0 == "MakoChanPtr*"
-                    {
+                    if ty0 == "MakoChan*" || ty0 == "MakoChanStr*" || ty0 == "MakoChanPtr*" {
                         let mut vals = vec![v0.clone()];
                         for e in elems.iter().skip(1) {
                             let (_, v) = self.emit_expr(e);
@@ -29995,7 +30398,10 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                 // make(chan[T], n) — same element rules as chan_open[T](n)
                 if let TypeExpr::Generic(n, args) = ty {
                     if n == "chan" && args.len() == 1 {
-                        let cap_e = len.as_ref().map(|e| e.as_ref()).or(cap.as_ref().map(|e| e.as_ref()));
+                        let cap_e = len
+                            .as_ref()
+                            .map(|e| e.as_ref())
+                            .or(cap.as_ref().map(|e| e.as_ref()));
                         let c = if let Some(ce) = cap_e {
                             let (_, v) = self.emit_expr(ce);
                             v
@@ -30005,9 +30411,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         let tmp = self.fresh("ch");
                         match &args[0] {
                             TypeExpr::Named(en) if en == "string" => {
-                                self.line(&format!(
-                                    "MakoChanStr *{tmp} = mako_chan_str_new({c});"
-                                ));
+                                self.line(&format!("MakoChanStr *{tmp} = mako_chan_str_new({c});"));
                                 return ("MakoChanStr*".into(), tmp);
                             }
                             TypeExpr::Named(en) if en == "float" || en == "float64" => {
@@ -30028,16 +30432,12 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                                     && (self.structs.contains_key(en)
                                         || self.enums.contains_key(en)) =>
                             {
-                                self.line(&format!(
-                                    "MakoChanPtr *{tmp} = mako_chan_ptr_new({c});"
-                                ));
+                                self.line(&format!("MakoChanPtr *{tmp} = mako_chan_ptr_new({c});"));
                                 self.chan_ptr_elems.insert(tmp.clone(), en.clone());
                                 return ("MakoChanPtr*".into(), tmp);
                             }
                             TypeExpr::Tuple(elems) => {
-                                self.line(&format!(
-                                    "MakoChanPtr *{tmp} = mako_chan_ptr_new({c});"
-                                ));
+                                self.line(&format!("MakoChanPtr *{tmp} = mako_chan_ptr_new({c});"));
                                 let field_tys: Vec<String> =
                                     elems.iter().map(|e| self.type_expr_c(e)).collect();
                                 let tag = field_tys
@@ -30115,7 +30515,9 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             self.line(&format!("MakoMapFF *{tmp} = mako_map_ff_make({hint});"));
                             "MakoMapFF*".into()
                         }
-                        (TypeExpr::Named(kk), TypeExpr::Named(vv)) if kk == "int" && vv == "bool" => {
+                        (TypeExpr::Named(kk), TypeExpr::Named(vv))
+                            if kk == "int" && vv == "bool" =>
+                        {
                             self.line(&format!("MakoMapIB *{tmp} = mako_map_ib_make({hint});"));
                             "MakoMapIB*".into()
                         }
@@ -30131,7 +30533,9 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             self.line(&format!("MakoMapFB *{tmp} = mako_map_fb_make({hint});"));
                             "MakoMapFB*".into()
                         }
-                        (TypeExpr::Named(kk), TypeExpr::Named(vv)) if kk == "bool" && vv == "int" => {
+                        (TypeExpr::Named(kk), TypeExpr::Named(vv))
+                            if kk == "bool" && vv == "int" =>
+                        {
                             self.line(&format!("MakoMapBI *{tmp} = mako_map_bi_make({hint});"));
                             "MakoMapBI*".into()
                         }
@@ -30147,13 +30551,16 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             self.line(&format!("MakoMapBF *{tmp} = mako_map_bf_make({hint});"));
                             "MakoMapBF*".into()
                         }
-                        (TypeExpr::Named(kk), TypeExpr::Named(vv)) if kk == "bool" && vv == "bool" => {
+                        (TypeExpr::Named(kk), TypeExpr::Named(vv))
+                            if kk == "bool" && vv == "bool" =>
+                        {
                             self.line(&format!("MakoMapBB *{tmp} = mako_map_bb_make({hint});"));
                             "MakoMapBB*".into()
                         }
                         (TypeExpr::Named(kk), TypeExpr::Named(vv))
                             if kk == "int"
-                                && (self.structs.contains_key(vv) || self.enums.contains_key(vv)) =>
+                                && (self.structs.contains_key(vv)
+                                    || self.enums.contains_key(vv)) =>
                         {
                             self.line(&format!(
                                 "MakoMapI_{vv} *{tmp} = mako_map_i_{vv}_make({hint});"
@@ -30162,7 +30569,8 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         }
                         (TypeExpr::Named(kk), TypeExpr::Named(vv))
                             if kk == "string"
-                                && (self.structs.contains_key(vv) || self.enums.contains_key(vv)) =>
+                                && (self.structs.contains_key(vv)
+                                    || self.enums.contains_key(vv)) =>
                         {
                             self.line(&format!(
                                 "MakoMapS_{vv} *{tmp} = mako_map_s_{vv}_make({hint});"
@@ -30171,7 +30579,8 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         }
                         (TypeExpr::Named(kk), TypeExpr::Named(vv))
                             if (kk == "float" || kk == "float64")
-                                && (self.structs.contains_key(vv) || self.enums.contains_key(vv)) =>
+                                && (self.structs.contains_key(vv)
+                                    || self.enums.contains_key(vv)) =>
                         {
                             self.line(&format!(
                                 "MakoMapF_{vv} *{tmp} = mako_map_f_{vv}_make({hint});"
@@ -30180,7 +30589,8 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         }
                         (TypeExpr::Named(kk), TypeExpr::Named(vv))
                             if kk == "bool"
-                                && (self.structs.contains_key(vv) || self.enums.contains_key(vv)) =>
+                                && (self.structs.contains_key(vv)
+                                    || self.enums.contains_key(vv)) =>
                         {
                             self.line(&format!(
                                 "MakoMapB_{vv} *{tmp} = mako_map_b_{vv}_make({hint});"
@@ -30225,7 +30635,8 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         }
                         (TypeExpr::Named(kk), TypeExpr::Named(vv))
                             if (self.structs.contains_key(kk) || self.enums.contains_key(kk))
-                                && (self.structs.contains_key(vv) || self.enums.contains_key(vv)) =>
+                                && (self.structs.contains_key(vv)
+                                    || self.enums.contains_key(vv)) =>
                         {
                             self.line(&format!(
                                 "MakoMapK_{kk}_v{vv} *{tmp} = mako_map_k_{kk}_v{vv}_make({hint});"
@@ -30237,7 +30648,9 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             let tag = c_type_mono_tag(&val_c);
                             let (mt, fnp) = match kk.as_str() {
                                 "int" => (format!("MakoMapI_{tag}"), format!("mako_map_i_{tag}")),
-                                "string" => (format!("MakoMapS_{tag}"), format!("mako_map_s_{tag}")),
+                                "string" => {
+                                    (format!("MakoMapS_{tag}"), format!("mako_map_s_{tag}"))
+                                }
                                 "float" | "float64" => {
                                     (format!("MakoMapF_{tag}"), format!("mako_map_f_{tag}"))
                                 }
@@ -30257,13 +30670,14 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             format!("{mt}*")
                         }
                         (TypeExpr::Named(kk), TypeExpr::Map(ik, iv)) => {
-                            let inner_c =
-                                self.type_expr_c(&TypeExpr::Map(ik.clone(), iv.clone()));
+                            let inner_c = self.type_expr_c(&TypeExpr::Map(ik.clone(), iv.clone()));
                             let tag = map_ptr_mono_tag(&inner_c)
                                 .unwrap_or_else(|| c_type_mono_tag(&inner_c));
                             let (mt, fnp) = match kk.as_str() {
                                 "int" => (format!("MakoMapI_{tag}"), format!("mako_map_i_{tag}")),
-                                "string" => (format!("MakoMapS_{tag}"), format!("mako_map_s_{tag}")),
+                                "string" => {
+                                    (format!("MakoMapS_{tag}"), format!("mako_map_s_{tag}"))
+                                }
                                 "float" | "float64" => {
                                     (format!("MakoMapF_{tag}"), format!("mako_map_f_{tag}"))
                                 }
@@ -30293,7 +30707,9 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             );
                             let (mt, fnp) = match kk.as_str() {
                                 "int" => (format!("MakoMapI_{tag}"), format!("mako_map_i_{tag}")),
-                                "string" => (format!("MakoMapS_{tag}"), format!("mako_map_s_{tag}")),
+                                "string" => {
+                                    (format!("MakoMapS_{tag}"), format!("mako_map_s_{tag}"))
+                                }
                                 "float" | "float64" => {
                                     (format!("MakoMapF_{tag}"), format!("mako_map_f_{tag}"))
                                 }
@@ -30318,7 +30734,9 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             let tag = map_tuple_val_tag(elems, &self.structs, &self.enums);
                             let (mt, fnp) = match kk.as_str() {
                                 "int" => (format!("MakoMapI_{tag}"), format!("mako_map_i_{tag}")),
-                                "string" => (format!("MakoMapS_{tag}"), format!("mako_map_s_{tag}")),
+                                "string" => {
+                                    (format!("MakoMapS_{tag}"), format!("mako_map_s_{tag}"))
+                                }
                                 "float" | "float64" => {
                                     (format!("MakoMapF_{tag}"), format!("mako_map_f_{tag}"))
                                 }
@@ -30343,7 +30761,9 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             let tag = chan_map_val_tag(&args[0], &self.structs);
                             let (mt, fnp) = match kk.as_str() {
                                 "int" => (format!("MakoMapI_{tag}"), format!("mako_map_i_{tag}")),
-                                "string" => (format!("MakoMapS_{tag}"), format!("mako_map_s_{tag}")),
+                                "string" => {
+                                    (format!("MakoMapS_{tag}"), format!("mako_map_s_{tag}"))
+                                }
                                 "float" | "float64" => {
                                     (format!("MakoMapF_{tag}"), format!("mako_map_f_{tag}"))
                                 }
@@ -30497,22 +30917,16 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                 } else if let Some(elem_c) = nested_elem_c {
                     let tag = c_type_mono_tag(&elem_c);
                     let outer = format!("MakoArr_{tag}");
-                    self.line(&format!(
-                        "{outer} {tmp} = mako_arr_{tag}_make({l}, {c});"
-                    ));
+                    self.line(&format!("{outer} {tmp} = mako_arr_{tag}_make({l}, {c});"));
                     (outer, tmp)
                 } else if let Some(map_c) = map_elem_c {
                     let tag = map_ptr_mono_tag(&map_c).unwrap_or_else(|| c_type_mono_tag(&map_c));
                     let outer = format!("MakoArr_{tag}");
-                    self.line(&format!(
-                        "{outer} {tmp} = mako_arr_{tag}_make({l}, {c});"
-                    ));
+                    self.line(&format!("{outer} {tmp} = mako_arr_{tag}_make({l}, {c});"));
                     (outer, tmp)
                 } else if let Some(tag) = bag_elem_tag {
                     let outer = format!("MakoArr_{tag}");
-                    self.line(&format!(
-                        "{outer} {tmp} = mako_arr_{tag}_make({l}, {c});"
-                    ));
+                    self.line(&format!("{outer} {tmp} = mako_arr_{tag}_make({l}, {c});"));
                     (outer, tmp)
                 } else if let Some(sn) = struct_elem {
                     self.line(&format!(
@@ -30583,9 +30997,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                 if let Some((ks, tag)) = parse_map_slice_val(&bty) {
                     let out = self.fresh("mg");
                     let vty = map_slice_val_c_ty(&tag);
-                    self.line(&format!(
-                        "{vty} {out} = mako_map_{ks}_{tag}_get({b}, {i});"
-                    ));
+                    self.line(&format!("{vty} {out} = mako_map_{ks}_{tag}_get({b}, {i});"));
                     self.register_bag_payload_on_temp(&out, &tag);
                     self.register_chan_payload_on_temp(&out, &tag);
                     return (vty, out);
@@ -30593,9 +31005,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                 if let Some((ks, tag)) = parse_map_map_val(&bty) {
                     let out = self.fresh("mg");
                     let vty = map_map_val_c_ty(&tag);
-                    self.line(&format!(
-                        "{vty} {out} = mako_map_{ks}_{tag}_get({b}, {i});"
-                    ));
+                    self.line(&format!("{vty} {out} = mako_map_{ks}_{tag}_get({b}, {i});"));
                     return (vty, out);
                 }
                 if let Some((kn, tag)) = parse_map_k_slice_val(&bty) {
@@ -30929,9 +31339,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             .unwrap_or(sn);
                         let out = self.fresh("tryv");
                         let p = self.fresh("tryp");
-                        self.line(&format!(
-                            "{cname} *{p} = ({cname}*){ptr_get}({tmp});"
-                        ));
+                        self.line(&format!("{cname} *{p} = ({cname}*){ptr_get}({tmp});"));
                         self.line(&format!("{cname} {out};"));
                         self.line(&format!(
                             "if ({p}) {{ {out} = *{p}; free({p}); }} else {{ memset(&{out}, 0, sizeof({out})); }}"
@@ -31039,23 +31447,17 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                     }
                     "map" | "map_si" => {
                         let out = self.fresh("trym");
-                        self.line(&format!(
-                            "MakoMapSI *{out} = (MakoMapSI*){ptr_get}({tmp});"
-                        ));
+                        self.line(&format!("MakoMapSI *{out} = (MakoMapSI*){ptr_get}({tmp});"));
                         ("MakoMapSI*".into(), out)
                     }
                     "map_ii" => {
                         let out = self.fresh("trym");
-                        self.line(&format!(
-                            "MakoMapII *{out} = (MakoMapII*){ptr_get}({tmp});"
-                        ));
+                        self.line(&format!("MakoMapII *{out} = (MakoMapII*){ptr_get}({tmp});"));
                         ("MakoMapII*".into(), out)
                     }
                     "map_ss" => {
                         let out = self.fresh("trym");
-                        self.line(&format!(
-                            "MakoMapSS *{out} = (MakoMapSS*){ptr_get}({tmp});"
-                        ));
+                        self.line(&format!("MakoMapSS *{out} = (MakoMapSS*){ptr_get}({tmp});"));
                         ("MakoMapSS*".into(), out)
                     }
                     _ => ("int64_t".into(), format!("{tmp}.value")),
@@ -31090,12 +31492,8 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                                         self.line(&format!(
                                             "MakoShareInt *{boxn} = (MakoShareInt*)malloc(sizeof(MakoShareInt));"
                                         ));
-                                        self.line(&format!(
-                                            "*{boxn} = mako_share_clone({v});"
-                                        ));
-                                        self.line(&format!(
-                                            "{arg_name}[{i}] = (intptr_t){boxn};"
-                                        ));
+                                        self.line(&format!("*{boxn} = mako_share_clone({v});"));
+                                        self.line(&format!("{arg_name}[{i}] = (intptr_t){boxn};"));
                                     } else if aty == "MakoUuid" || pty == "MakoUuid" {
                                         // 16-byte POD: heap-box for intptr_t spawn pack (still Copy in language).
                                         let boxn = self.fresh("ubox");
@@ -31103,9 +31501,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                                             "MakoUuid *{boxn} = (MakoUuid*)malloc(sizeof(MakoUuid));"
                                         ));
                                         self.emit_line(format_args!("*{boxn} = {v};"));
-                                        self.line(&format!(
-                                            "{arg_name}[{i}] = (intptr_t){boxn};"
-                                        ));
+                                        self.line(&format!("{arg_name}[{i}] = (intptr_t){boxn};"));
                                     } else if aty == "MakoOptionInt" || pty == "MakoOptionInt" {
                                         let boxn = self.fresh("obox");
                                         self.line(&format!(
@@ -31116,9 +31512,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                                         self.line(&format!(
                                             "if ({boxn}->some && {boxn}->ok_s.data) {{ {boxn}->ok_s = mako_str_clone({boxn}->ok_s); }}"
                                         ));
-                                        self.line(&format!(
-                                            "{arg_name}[{i}] = (intptr_t){boxn};"
-                                        ));
+                                        self.line(&format!("{arg_name}[{i}] = (intptr_t){boxn};"));
                                     } else if aty == "MakoResultInt" || pty == "MakoResultInt" {
                                         let boxn = self.fresh("rbox");
                                         self.line(&format!(
@@ -31131,20 +31525,14 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                                         self.line(&format!(
                                             "if (!{boxn}->ok && {boxn}->err.data) {{ {boxn}->err = mako_str_clone({boxn}->err); }}"
                                         ));
-                                        self.line(&format!(
-                                            "{arg_name}[{i}] = (intptr_t){boxn};"
-                                        ));
+                                        self.line(&format!("{arg_name}[{i}] = (intptr_t){boxn};"));
                                     } else if aty == "MakoString" || pty == "MakoString" {
                                         let boxn = self.fresh("sbox");
                                         self.line(&format!(
                                             "MakoString *{boxn} = (MakoString*)malloc(sizeof(MakoString));"
                                         ));
-                                        self.line(&format!(
-                                            "*{boxn} = mako_str_clone({v});"
-                                        ));
-                                        self.line(&format!(
-                                            "{arg_name}[{i}] = (intptr_t){boxn};"
-                                        ));
+                                        self.line(&format!("*{boxn} = mako_str_clone({v});"));
+                                        self.line(&format!("{arg_name}[{i}] = (intptr_t){boxn};"));
                                     } else if aty == "MakoFn" || pty == "MakoFn" {
                                         // Move ownership of capture env into the task box.
                                         let boxn = self.fresh("fnbox");
@@ -31172,9 +31560,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                                                 self.note_fn_env_dropped(n);
                                             }
                                         }
-                                        self.line(&format!(
-                                            "{arg_name}[{i}] = (intptr_t){boxn};"
-                                        ));
+                                        self.line(&format!("{arg_name}[{i}] = (intptr_t){boxn};"));
                                     } else if aty == "double" || pty == "double" {
                                         self.line(&format!(
                                             "{arg_name}[{i}] = (intptr_t)mako_f64_to_bits({v});"
@@ -31212,9 +31598,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                                                 ));
                                             }
                                         }
-                                        self.line(&format!(
-                                            "{arg_name}[{i}] = (intptr_t){boxn};"
-                                        ));
+                                        self.line(&format!("{arg_name}[{i}] = (intptr_t){boxn};"));
                                     } else if pty.contains('*') || aty.contains('*') {
                                         self.line(&format!("{arg_name}[{i}] = (intptr_t){v};"));
                                     } else {
@@ -31276,8 +31660,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         });
                     }
                     // Pack-qualified variant: `eng.Green(7)` → bare `Green(7)`.
-                    if !self.locals.contains_key(alias)
-                        && self.variant_to_enum.contains_key(method)
+                    if !self.locals.contains_key(alias) && self.variant_to_enum.contains_key(method)
                     {
                         if let Some(enum_name) = self.variant_to_enum.get(method) {
                             if enum_name.starts_with(&format!("{alias}__")) {
@@ -31316,9 +31699,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         let (vty, v) = self.emit_expr(&args[0]);
                         let tmp = self.fresh("ok");
                         if rty == "MakoChanStr*" {
-                            self.line(&format!(
-                                "bool {tmp} = mako_chan_str_send({rv}, {v}) != 0;"
-                            ));
+                            self.line(&format!("bool {tmp} = mako_chan_str_send({rv}, {v}) != 0;"));
                         } else if rty == "MakoChanPtr*" {
                             let st = self
                                 .chan_ptr_elems
@@ -31385,9 +31766,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                                     "bool {tmp} = mako_chan_send({rv}, mako_f64_to_bits({v})) != 0;"
                                 ));
                             } else {
-                                self.line(&format!(
-                                    "bool {tmp} = mako_chan_send({rv}, {v}) != 0;"
-                                ));
+                                self.line(&format!("bool {tmp} = mako_chan_send({rv}, {v}) != 0;"));
                             }
                         }
                         ("bool".into(), tmp)
@@ -31419,7 +31798,9 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                                 ));
                             }
                         } else {
-                            self.line(&format!("int64_t {tmp} = 0; /* send_timeout: unsupported chan */"));
+                            self.line(&format!(
+                                "int64_t {tmp} = 0; /* send_timeout: unsupported chan */"
+                            ));
                         }
                         ("int64_t".into(), tmp)
                     }
@@ -31528,9 +31909,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                     "drain" => {
                         let (_, ms) = self.emit_expr(&args[0]);
                         let tmp = self.fresh("cdr");
-                        self.line(&format!(
-                            "int64_t {tmp} = mako_crew_drain(&{rv}, {ms});"
-                        ));
+                        self.line(&format!("int64_t {tmp} = mako_crew_drain(&{rv}, {ms});"));
                         ("int64_t".into(), tmp)
                     }
                     "cancelled" => (
@@ -31539,9 +31918,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                     ),
                     "err_count" => {
                         let tmp = self.fresh("nec");
-                        self.line(&format!(
-                            "int64_t {tmp} = mako_nursery_err_count(&{rv});"
-                        ));
+                        self.line(&format!("int64_t {tmp} = mako_nursery_err_count(&{rv});"));
                         ("int64_t".into(), tmp)
                     }
                     "first_err" => {
@@ -31660,9 +32037,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             ("int64_t".into(), format!("mako_str_array_len({rv})"))
                         } else if rty == "MakoByteArray" {
                             ("int64_t".into(), format!("mako_byte_array_len({rv})"))
-                        } else if rty == "MakoIntArray"
-                            || rty.starts_with("MakoArr_")
-                        {
+                        } else if rty == "MakoIntArray" || rty.starts_with("MakoArr_") {
                             ("int64_t".into(), format!("mako_array_len({rv})"))
                         } else {
                             // Unknown .len — try Type_len by rty name
@@ -31941,9 +32316,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                              }}\n"
                         );
                         self.insert_helper(&helper_src);
-                        self.line(&format!(
-                            "{cty} {tmp} = mako_arr_{sn}_make({coll}.len, 0);"
-                        ));
+                        self.line(&format!("{cty} {tmp} = mako_arr_{sn}_make({coll}.len, 0);"));
                         self.line(&format!(
                             "mako_par_map_bytes({coll}.data, {tmp}.data, (size_t){coll}.len, sizeof({sn}), {map_one});"
                         ));
@@ -32015,8 +32388,16 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                 let (bty, b) = self.emit_expr(base);
                 // Pointer types (mut self) use -> for field access
                 let deref_bty = bty.strip_suffix('*').unwrap_or(&bty);
-                let arrow = if bty.ends_with('*') && !bty.starts_with("Mako") { "->" } else { "." };
-                if let Some(info) = self.structs.get(deref_bty).or_else(|| self.structs.get(&bty)) {
+                let arrow = if bty.ends_with('*') && !bty.starts_with("Mako") {
+                    "->"
+                } else {
+                    "."
+                };
+                if let Some(info) = self
+                    .structs
+                    .get(deref_bty)
+                    .or_else(|| self.structs.get(&bty))
+                {
                     let fty = info
                         .fields
                         .iter()
@@ -32025,7 +32406,11 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         .unwrap_or_else(|| "int64_t".into());
                     return (fty, format!("{b}{arrow}{field}"));
                 }
-                if let Some(info) = self.structs.values().find(|s| s.c_name == deref_bty || s.c_name == bty) {
+                if let Some(info) = self
+                    .structs
+                    .values()
+                    .find(|s| s.c_name == deref_bty || s.c_name == bty)
+                {
                     let fty = info
                         .fields
                         .iter()
@@ -32172,12 +32557,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
     /// If the arm value is an Ident Own: move when bound in this arm's drop scope,
     /// otherwise clone so outer free + result free do not double-free.
     /// Field/index borrows of Own payloads are always cloned (struct/array still owns).
-    fn transfer_or_clone_arm_value(
-        &mut self,
-        block: &Block,
-        c_ty: &str,
-        val: String,
-    ) -> String {
+    fn transfer_or_clone_arm_value(&mut self, block: &Block, c_ty: &str, val: String) -> String {
         let trailing = block.stmts.last().and_then(|s| match s {
             Stmt::Expr(e) => Some(e),
             _ => None,
@@ -32194,8 +32574,8 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
         if c_ty == "void" || val == "/*void*/" {
             return val;
         }
-        let owns = Self::own_free_fn(c_ty).is_some()
-            || !self.struct_own_field_frees(c_ty).is_empty();
+        let owns =
+            Self::own_free_fn(c_ty).is_some() || !self.struct_own_field_frees(c_ty).is_empty();
         if !owns {
             return val;
         }
@@ -32203,9 +32583,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
             return val;
         };
         // `n.label` / `xs[i]` are borrows — cloning prevents free-of-owner + free-of-result.
-        if Self::is_field_borrow_return(expr)
-            || matches!(expr, Expr::Index { .. })
-        {
+        if Self::is_field_borrow_return(expr) || matches!(expr, Expr::Index { .. }) {
             return self.clone_own_val(c_ty, &val);
         }
         let Expr::Ident(n) = expr else {
@@ -32272,9 +32650,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                     _ => self.result_ok_kinds.get(&sval).cloned(),
                 },
                 Expr::Method {
-                    receiver,
-                    method,
-                    ..
+                    receiver, method, ..
                 } if method == "join" => match receiver.as_ref() {
                     Expr::Ident(n) => self.job_ok_kinds.get(n).cloned(),
                     _ => self.result_ok_kinds.get(&sval).cloned(),
@@ -32591,8 +32967,6 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
         (ty, result)
     }
 
-
-
     fn pattern_condition(&self, scrut: &str, sty: &str, pattern: &Pattern) -> String {
         match pattern {
             Pattern::Wildcard => "1".into(),
@@ -32640,11 +33014,14 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                     }
                 } else {
                     // Try qualified variant lookup using scrutinee type
-                    let sty_enum = self.enums.iter()
+                    let sty_enum = self
+                        .enums
+                        .iter()
                         .find(|(_, info)| info.c_name == *sty)
                         .map(|(n, _)| n.clone());
                     let qn_match = sty_enum.as_ref().map(|e| format!("{e}::{name}"));
-                    let resolved = qn_match.as_ref()
+                    let resolved = qn_match
+                        .as_ref()
                         .and_then(|q| self.variant_to_enum.get(q).cloned())
                         .or_else(|| self.variant_to_enum.get(name).cloned());
                     if let Some(enum_name) = resolved {
@@ -32748,7 +33125,8 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
             }
             Pattern::Variant { name, bindings } => {
                 // Nested patterns: Ok(Some(x)) — unbox outer then recurse.
-                if bindings.len() == 1 && Self::pattern_ident_name(&bindings[0]).is_none()
+                if bindings.len() == 1
+                    && Self::pattern_ident_name(&bindings[0]).is_none()
                     && !matches!(bindings[0], Pattern::Wildcard)
                 {
                     if sty == "MakoResultInt" && name == "Ok" {
@@ -32857,10 +33235,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             self.register_own_drop(&b, "MakoString");
                         } else if ok_kind == "float" {
                             self.locals.insert(bindings[0].clone(), "double".into());
-                            self.line(&format!(
-                                "double {} = {scrut}.ok_f;",
-                                mangle(&bindings[0])
-                            ));
+                            self.line(&format!("double {} = {scrut}.ok_f;", mangle(&bindings[0])));
                         } else if ok_kind == "struct" {
                             let sn = self
                                 .result_ok_structs
@@ -32886,7 +33261,8 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         } else if ok_kind == "slice" {
                             let b = mangle(&bindings[0]);
                             let p = self.fresh("oks");
-                            self.locals.insert(bindings[0].clone(), "MakoIntArray".into());
+                            self.locals
+                                .insert(bindings[0].clone(), "MakoIntArray".into());
                             self.line(&format!(
                                 "MakoIntArray *{p} = (MakoIntArray*)mako_result_ok_ptr({scrut});"
                             ));
@@ -32898,7 +33274,8 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         } else if ok_kind == "slice_str" {
                             let b = mangle(&bindings[0]);
                             let p = self.fresh("oks");
-                            self.locals.insert(bindings[0].clone(), "MakoStrArray".into());
+                            self.locals
+                                .insert(bindings[0].clone(), "MakoStrArray".into());
                             self.line(&format!(
                                 "MakoStrArray *{p} = (MakoStrArray*)mako_result_ok_ptr({scrut});"
                             ));
@@ -32910,7 +33287,8 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         } else if ok_kind == "slice_float" {
                             let b = mangle(&bindings[0]);
                             let p = self.fresh("oks");
-                            self.locals.insert(bindings[0].clone(), "MakoFloatArray".into());
+                            self.locals
+                                .insert(bindings[0].clone(), "MakoFloatArray".into());
                             self.line(&format!(
                                 "MakoFloatArray *{p} = (MakoFloatArray*)mako_result_ok_ptr({scrut});"
                             ));
@@ -32973,9 +33351,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             self.locals.insert(bindings[0].clone(), cty.clone());
                             self.result_ok_map_ctys
                                 .insert(bindings[0].clone(), cty.clone());
-                            self.line(&format!(
-                                "{cty} {b} = ({cty})mako_result_ok_ptr({scrut});"
-                            ));
+                            self.line(&format!("{cty} {b} = ({cty})mako_result_ok_ptr({scrut});"));
                             self.register_own_drop(&b, &cty);
                         } else if ok_kind.starts_with("chan_") {
                             let b = mangle(&bindings[0]);
@@ -32985,9 +33361,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                                 _ => "MakoChan*".to_string(),
                             };
                             self.locals.insert(bindings[0].clone(), cty.clone());
-                            self.line(&format!(
-                                "{cty} {b} = ({cty})mako_result_ok_ptr({scrut});"
-                            ));
+                            self.line(&format!("{cty} {b} = ({cty})mako_result_ok_ptr({scrut});"));
                             if ok_kind == "chan_float" {
                                 self.chan_float.insert(bindings[0].clone());
                             } else if ok_kind == "chan_struct" {
@@ -32998,7 +33372,8 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         } else if ok_kind == "option" {
                             let b = mangle(&bindings[0]);
                             let p = self.fresh("okopt");
-                            self.locals.insert(bindings[0].clone(), "MakoOptionInt".into());
+                            self.locals
+                                .insert(bindings[0].clone(), "MakoOptionInt".into());
                             self.line(&format!(
                                 "MakoOptionInt *{p} = (MakoOptionInt*)mako_result_ok_ptr({scrut});"
                             ));
@@ -33018,8 +33393,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                                 }
                                 // Result[Option[Result[…]]]: propagate Result Ok metadata onto Option
                                 if let Some(rik) = self.option_result_inners.get(scrut).cloned() {
-                                    self.option_result_inners
-                                        .insert(bindings[0].clone(), rik);
+                                    self.option_result_inners.insert(bindings[0].clone(), rik);
                                 }
                                 if let Some(leaf) =
                                     self.option_result_option_leafs.get(scrut).cloned()
@@ -33031,7 +33405,8 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         } else if ok_kind == "result" {
                             let b = mangle(&bindings[0]);
                             let p = self.fresh("okres");
-                            self.locals.insert(bindings[0].clone(), "MakoResultInt".into());
+                            self.locals
+                                .insert(bindings[0].clone(), "MakoResultInt".into());
                             self.line(&format!(
                                 "MakoResultInt *{p} = (MakoResultInt*)mako_result_ok_ptr({scrut});"
                             ));
@@ -33041,15 +33416,12 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                             ));
                             if let Some(chain) = self.deep_nest_chains.get(scrut).cloned() {
                                 self.apply_deep_nest_chain(&bindings[0], "result", &chain);
-                            } else if let Some(ik) =
-                                self.result_result_inners.get(scrut).cloned()
-                            {
+                            } else if let Some(ik) = self.result_result_inners.get(scrut).cloned() {
                                 self.result_ok_kinds.insert(bindings[0].clone(), ik);
                             }
                             // Struct / chan_struct names for nested Result Ok unbox
                             if let Some(sn) = self.result_ok_structs.get(scrut).cloned() {
-                                self.result_ok_structs
-                                    .insert(bindings[0].clone(), sn);
+                                self.result_ok_structs.insert(bindings[0].clone(), sn);
                             }
                         } else {
                             self.locals.insert(bindings[0].clone(), "int64_t".into());
@@ -33091,37 +33463,49 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                     }
                 } else {
                     // Qualified variant lookup using scrutinee type
-                    let sty_enum_bind = self.enums.iter()
+                    let sty_enum_bind = self
+                        .enums
+                        .iter()
                         .find(|(_, info)| info.c_name == *sty)
                         .map(|(n, _)| n.clone());
                     let qn_bind = sty_enum_bind.as_ref().map(|e| format!("{e}::{name}"));
-                    let enum_name_bind = qn_bind.as_ref()
+                    let enum_name_bind = qn_bind
+                        .as_ref()
                         .and_then(|q| self.variant_to_enum.get(q).cloned())
                         .or_else(|| self.variant_to_enum.get(name).cloned());
                     if let Some(enum_name) = enum_name_bind {
-                    let fields = self.enums[&enum_name].variants[name].1.clone();
-                    let mut int_slot = 0usize;
-                    let mut str_slot = 0usize;
-                    for (i, b) in bindings.iter().enumerate() {
-                        let kind = fields.get(i).copied().unwrap_or("int");
-                        match kind {
-                            "string" => {
-                                self.locals.insert(b.clone(), "MakoString".into());
-                                self.line(&format!("MakoString {} = {scrut}.s{str_slot};", mangle(b)));
-                                str_slot += 1;
-                            }
-                            "bool" => {
-                                self.locals.insert(b.clone(), "bool".into());
-                                self.line(&format!("bool {} = (bool){scrut}.i{int_slot};", mangle(b)));
-                                int_slot += 1;
-                            }
-                            _ => {
-                                self.locals.insert(b.clone(), "int64_t".into());
-                                self.line(&format!("int64_t {} = {scrut}.i{int_slot};", mangle(b)));
-                                int_slot += 1;
+                        let fields = self.enums[&enum_name].variants[name].1.clone();
+                        let mut int_slot = 0usize;
+                        let mut str_slot = 0usize;
+                        for (i, b) in bindings.iter().enumerate() {
+                            let kind = fields.get(i).copied().unwrap_or("int");
+                            match kind {
+                                "string" => {
+                                    self.locals.insert(b.clone(), "MakoString".into());
+                                    self.line(&format!(
+                                        "MakoString {} = {scrut}.s{str_slot};",
+                                        mangle(b)
+                                    ));
+                                    str_slot += 1;
+                                }
+                                "bool" => {
+                                    self.locals.insert(b.clone(), "bool".into());
+                                    self.line(&format!(
+                                        "bool {} = (bool){scrut}.i{int_slot};",
+                                        mangle(b)
+                                    ));
+                                    int_slot += 1;
+                                }
+                                _ => {
+                                    self.locals.insert(b.clone(), "int64_t".into());
+                                    self.line(&format!(
+                                        "int64_t {} = {scrut}.i{int_slot};",
+                                        mangle(b)
+                                    ));
+                                    int_slot += 1;
+                                }
                             }
                         }
-                    }
                     } // end if let Some(enum_name)
                 } // end else
             }
@@ -33178,8 +33562,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
             } else {
                 format!("return (void*)(intptr_t)(int64_t){call};\n")
             };
-            let helper_src =
-                format!("static void *{helper}(void *arg) {{ (void)arg;\n{body}}}\n");
+            let helper_src = format!("static void *{helper}(void *arg) {{ (void)arg;\n{body}}}\n");
             self.insert_helper(&helper_src);
             return;
         }
@@ -33293,7 +33676,9 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
         let tmp = self.fresh("jn");
         if ret_ty == "MakoString" {
             let p = self.fresh("jsp");
-            self.line(&format!("MakoString *{p} = (MakoString*)mako_await({task});"));
+            self.line(&format!(
+                "MakoString *{p} = (MakoString*)mako_await({task});"
+            ));
             self.line(&format!("MakoString {tmp};"));
             self.line(&format!(
                 "if ({p}) {{ {tmp} = *{p}; free({p}); }} else {{ {tmp} = mako_str_from_cstr(\"\"); }}"
@@ -33364,7 +33749,13 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                     format!("{s}.0")
                 }
             }
-            Expr::Bool(b) => if *b { "1".into() } else { "0".into() },
+            Expr::Bool(b) => {
+                if *b {
+                    "1".into()
+                } else {
+                    "0".into()
+                }
+            }
             Expr::Binary { op, left, right } => {
                 let l = self.expr_as_pure_c(left, param);
                 let r = self.expr_as_pure_c(right, param);
@@ -33540,9 +33931,7 @@ fn struct_field_eq_expr(
         format!("mako_eq_result_float({a}.{fname}, {b}.{fname})")
     } else if is_c_slice_or_array_ty(fty) {
         // Identity only — deep content eq is not used for map keys of engine tables.
-        format!(
-            "(({a}.{fname}.data == {b}.{fname}.data) && ({a}.{fname}.len == {b}.{fname}.len))"
-        )
+        format!("(({a}.{fname}.data == {b}.{fname}.data) && ({a}.{fname}.len == {b}.{fname}.len))")
     } else if is_c_map_or_ptr_ty(fty) {
         format!("({a}.{fname} == {b}.{fname})")
     } else if fty.starts_with("MakoEnum_") {
@@ -33562,9 +33951,7 @@ fn struct_field_hash_step(
     structs: &HashMap<String, StructInfo>,
 ) -> String {
     if fty == "MakoString" {
-        format!(
-            "h ^= mako_hash_bytes({k}.{fname}.data, {k}.{fname}.len); h *= 1099511628211ULL;"
-        )
+        format!("h ^= mako_hash_bytes({k}.{fname}.data, {k}.{fname}.len); h *= 1099511628211ULL;")
     } else if fty == "MakoOptionInt" {
         format!("h ^= mako_hash_option_int({k}.{fname}); h *= 1099511628211ULL;")
     } else if fty == "MakoResultInt" {
@@ -33580,9 +33967,7 @@ fn struct_field_hash_step(
             "h ^= (uint64_t)(uintptr_t){k}.{fname}.data; h *= 1099511628211ULL; h ^= (uint64_t){k}.{fname}.len; h *= 1099511628211ULL;"
         )
     } else if is_c_map_or_ptr_ty(fty) {
-        format!(
-            "h ^= (uint64_t)(uintptr_t){k}.{fname}; h *= 1099511628211ULL;"
-        )
+        format!("h ^= (uint64_t)(uintptr_t){k}.{fname}; h *= 1099511628211ULL;")
     } else if fty.starts_with("MakoEnum_") {
         format!("h ^= mako_hash_{fty}({k}.{fname}); h *= 1099511628211ULL;")
     } else if structs.values().any(|s| s.c_name == *fty) {
@@ -33713,8 +34098,6 @@ fn type_expr_schema(t: &TypeExpr) -> String {
     }
 }
 
-
-
 fn escape_c(s: &str) -> String {
     let mut out = String::new();
     for c in s.chars() {
@@ -33729,7 +34112,6 @@ fn escape_c(s: &str) -> String {
     }
     out
 }
-
 
 /// C type → monomorphization tag. Must match `Type::mono_tag` for the same value.
 fn c_type_mono_tag(c_ty: &str) -> String {
@@ -33955,10 +34337,7 @@ impl Codegen {
                 for (i, t) in c_tys.iter().enumerate() {
                     fields.push_str(&format!("    {t} _{i};\n"));
                 }
-                let _ = writeln!(
-                    self.out,
-                    "typedef struct {{\n{fields}}} {cname};\n"
-                );
+                let _ = writeln!(self.out, "typedef struct {{\n{fields}}} {cname};\n");
             }
         }
         // Flush any pending (should be empty here)
@@ -34007,7 +34386,12 @@ impl Codegen {
 /// `MakoMapS_chan_int*` → (`s`, `chan_int`).
 fn parse_map_slice_val(bty: &str) -> Option<(String, String)> {
     let rest = bty.strip_suffix('*')?;
-    for (pref, ks) in [("MakoMapI_", "i"), ("MakoMapS_", "s"), ("MakoMapF_", "f"), ("MakoMapB_", "b")] {
+    for (pref, ks) in [
+        ("MakoMapI_", "i"),
+        ("MakoMapS_", "s"),
+        ("MakoMapF_", "f"),
+        ("MakoMapB_", "b"),
+    ] {
         if let Some(tag) = rest.strip_prefix(pref) {
             if tag.starts_with("arr_")
                 || tag.starts_with("opt_")
@@ -34196,9 +34580,7 @@ fn map_tuple_val_tag(
                 chan_map_val_tag(&args[0], structs)
             }
             // Option[T] / Result[T,E] → opt_int / res_chan_string / …
-            TypeExpr::Generic(n, args)
-                if (n == "Option" || n == "Result") && !args.is_empty() =>
-            {
+            TypeExpr::Generic(n, args) if (n == "Option" || n == "Result") && !args.is_empty() => {
                 bag_map_val_tag(n == "Option", &args[0], structs, enums)
             }
             _ => "int".into(),
@@ -34281,9 +34663,7 @@ fn bag_map_val_tag(
             }
             // Option[[]Option[T]] / Result[[]Option[T],E] → opt_arr_opt_int / …
             // Option[[]Result[T,E]] → opt_arr_res_int / …
-            TypeExpr::Generic(n, args)
-                if (n == "Option" || n == "Result") && !args.is_empty() =>
-            {
+            TypeExpr::Generic(n, args) if (n == "Option" || n == "Result") && !args.is_empty() => {
                 let etag = bag_map_val_tag(n == "Option", &args[0], structs, enums);
                 format!("{pref}_arr_{etag}")
             }
@@ -34837,7 +35217,9 @@ fn fold_const_c_env(
         Expr::Match { scrutinee, arms } => {
             let scrut = fold_const_c_env(scrutinee, consts, const_strs, const_fns)?;
             for arm in arms {
-                if let Some(binds) = match_const_c_pattern(&arm.pattern, scrut, consts, const_strs, const_fns) {
+                if let Some(binds) =
+                    match_const_c_pattern(&arm.pattern, scrut, consts, const_strs, const_fns)
+                {
                     let mut env = consts.clone();
                     for (k, v) in binds {
                         env.insert(k, v);
@@ -34950,7 +35332,8 @@ fn fold_const_c_block(
                     if let Stmt::Let { name, init, .. } = init_stmt.as_ref() {
                         if let Some(v) = fold_const_c_env(init, &locals, &str_env, const_fns) {
                             locals.insert(name.clone(), v);
-                        } else if let Some(s) = fold_const_c_str(init, &locals, &str_env, const_fns) {
+                        } else if let Some(s) = fold_const_c_str(init, &locals, &str_env, const_fns)
+                        {
                             str_env.insert(name.clone(), s);
                         } else {
                             return None;
@@ -34978,22 +35361,27 @@ fn fold_const_c_block(
                 iter,
                 body: fbody,
                 ..
-            } => match run_const_c_for_count(binders, iter, fbody, &mut locals, &str_env, const_fns) {
-                None => return None,
-                Some(Some(ret)) => return Some(ret),
-                Some(None) => {}
-            },
+            } => {
+                match run_const_c_for_count(binders, iter, fbody, &mut locals, &str_env, const_fns)
+                {
+                    None => return None,
+                    Some(Some(ret)) => return Some(ret),
+                    Some(None) => {}
+                }
+            }
             Stmt::CFor {
                 init,
                 cond,
                 post,
                 body: fbody,
                 ..
-            } => match run_const_c_cfor(init, cond, post, fbody, &mut locals, &str_env, const_fns) {
-                None => return None,
-                Some(Some(ret)) => return Some(ret),
-                Some(None) => {}
-            },
+            } => {
+                match run_const_c_cfor(init, cond, post, fbody, &mut locals, &str_env, const_fns) {
+                    None => return None,
+                    Some(Some(ret)) => return Some(ret),
+                    Some(None) => {}
+                }
+            }
             Stmt::Expr(e) if is_last => {
                 return fold_const_c_env(e, &locals, &str_env, const_fns);
             }
@@ -35098,22 +35486,20 @@ fn run_const_c_cfor(
         match ctl {
             ConstCLoopCtl::Ret(v) => return Some(Some(v)),
             ConstCLoopCtl::Break => break,
-            ConstCLoopCtl::Continue | ConstCLoopCtl::Fall => {
-                match post {
-                    Stmt::Let { name, init: iv, .. } => {
-                        let v = fold_const_c_env(iv, locals, const_strs, const_fns)?;
-                        locals.insert(name.clone(), v);
-                    }
-                    Stmt::Assign { name, value } => {
-                        let v = fold_const_c_env(value, locals, const_strs, const_fns)?;
-                        locals.insert(name.clone(), v);
-                    }
-                    Stmt::Expr(e) => {
-                        let _ = fold_const_c_env(e, locals, const_strs, const_fns)?;
-                    }
-                    _ => return None,
+            ConstCLoopCtl::Continue | ConstCLoopCtl::Fall => match post {
+                Stmt::Let { name, init: iv, .. } => {
+                    let v = fold_const_c_env(iv, locals, const_strs, const_fns)?;
+                    locals.insert(name.clone(), v);
                 }
-            }
+                Stmt::Assign { name, value } => {
+                    let v = fold_const_c_env(value, locals, const_strs, const_fns)?;
+                    locals.insert(name.clone(), v);
+                }
+                Stmt::Expr(e) => {
+                    let _ = fold_const_c_env(e, locals, const_strs, const_fns)?;
+                }
+                _ => return None,
+            },
         }
     }
     Some(None)
@@ -35129,7 +35515,9 @@ fn fold_const_c_loop_body(
     for stmt in &body.stmts {
         match stmt {
             Stmt::Return(Some(e)) => {
-                return Some(ConstCLoopCtl::Ret(fold_const_c_env(e, locals, const_strs, const_fns)?));
+                return Some(ConstCLoopCtl::Ret(fold_const_c_env(
+                    e, locals, const_strs, const_fns,
+                )?));
             }
             Stmt::Break(None) => return Some(ConstCLoopCtl::Break),
             Stmt::Break(Some(_)) => return None,
@@ -35182,10 +35570,12 @@ fn fold_const_c_loop_body(
                 iter,
                 body: fbody,
                 ..
-            } => match run_const_c_for_count(binders, iter, fbody, locals, const_strs, const_fns)? {
-                Some(v) => return Some(ConstCLoopCtl::Ret(v)),
-                None => {}
-            },
+            } => {
+                match run_const_c_for_count(binders, iter, fbody, locals, const_strs, const_fns)? {
+                    Some(v) => return Some(ConstCLoopCtl::Ret(v)),
+                    None => {}
+                }
+            }
             Stmt::CFor {
                 init,
                 cond,
@@ -35214,12 +35604,7 @@ mod discard_tests {
         };
         let mut codegen = Codegen::new();
 
-        assert!(codegen.emit_discarded_bag(
-            &expr,
-            None,
-            "MakoResultFloat",
-            "make_result()"
-        ));
+        assert!(codegen.emit_discarded_bag(&expr, None, "MakoResultFloat", "make_result()"));
         assert!(codegen.out.contains("MakoResultFloat discard_"));
         assert!(codegen.out.contains(".err);"));
         assert!(!codegen.out.contains("err_kind"));

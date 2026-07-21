@@ -280,6 +280,12 @@ local, and rejecting a transferred `hold` local. `share` currently uses the safe
 clone fallback; reference-counted sharing and explicit borrow parameter modes
 remain future call-ownership milestones.
 
+Owned local-to-local bindings follow the same source-ownership rule. Reading an
+ordinary or `share` owner into a new binding emits `IR_CLONE`, while reading a
+`hold` owner emits `IR_MOVE` and invalidates the source. This prevents two local
+names from silently sharing one linear SSA owner. The verifier rejects reuse of
+the moved source, and CFG cleanup drops each distinct cloned owner exactly once.
+
 Scalar calls and calls returning owned values are also supported in the current
 single-`if` CFG forms. Their arguments must dominate the call within the same
 arm or from the entry block, and the usual call-site, arity, type, and linear

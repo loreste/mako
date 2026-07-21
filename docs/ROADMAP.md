@@ -1,6 +1,6 @@
 # Mako roadmap
 
-**Product version:** **0.3.0** · Last sync: **2026-07-19**.  
+**Product version:** **0.4.1** · Last sync: **2026-07-20**.  
 **Suite:** 360 Mako tests + 79 Rust tests, 0 failures, ASan clean.
 
 **Verified:** [STATUS.md](STATUS.md) · **Stdlib:** [STDLIB.md](STDLIB.md) · **Security:** [SECURITY.md](SECURITY.md) · **Release:** [RELEASE.md](RELEASE.md).  
@@ -22,8 +22,31 @@
 | **0.2.4** | Soundness wave + residuals (SAFE/RT, speed, lock verify) | **Shipped** — [SOUNDNESS.md](SOUNDNESS.md) |
 | **0.2.5** | Memory safety audit, LSP, package integrity, honest docs | **Shipped** |
 | **0.3.0** | Cross-platform, CI green, ownership hardening | **Shipped** |
-| **0.4.0** | Performance ceiling | Planned |
+| **0.4.1** | Native compiler foundation and Linux packaging | **In progress** |
 | **1.0** | Stability | Planned |
+
+### Native compiler completion checklist (manual implementation)
+
+The C backend remains the language-feature oracle. Native support must be
+implemented and verified feature-by-feature; unsupported constructs must remain
+hard errors rather than silently falling back to C.
+
+- [x] Backend-neutral ownership-explicit IR
+- [x] Cranelift scalar CFG, strings, primitive slices, and initial `[]string`
+- [x] Native/C differential fixtures and Guard Malloc/leak coverage
+- [x] Bundled runtime archive and Linux x86_64 package workflow
+- [ ] LLVM `[]string` lowering, recursive clone, and drop paths
+- [ ] Nested slices and nested owned aggregate layout/drop
+- [ ] Complete structs, enums, maps, tuples, and methods
+- [ ] `defer`, labeled loops, complete `match`, and guards
+- [ ] Native runtime interop (networking, TLS, database, formatting)
+- [ ] `crew`, `kick`, `fan`, channels, and `select`
+- [ ] Cross-compilation, WASM, static, sanitizer, and overflow build modes
+- [ ] Full C/native/LLVM correctness, leak, latency, RSS, and binary-size gates
+
+The unchecked items are intentionally left as manual work. Each completed item
+needs a positive differential fixture, memory-safety coverage where applicable,
+and an update to [docs/NATIVE_COMPILER_PLAN.md](NATIVE_COMPILER_PLAN.md).
 
 ### Soundness & runtime (SAFE / RT)
 

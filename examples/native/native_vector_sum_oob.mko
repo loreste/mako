@@ -1,0 +1,18 @@
+// The SIMD reduction may consume the first pair, but must return to checked
+// scalar lowering and trap when the source upper bound exceeds the slice.
+
+fn sum_bound(xs: []int, bound: int) -> int {
+    var sum = 0
+    var i = 0
+    while i < bound {
+        sum = sum + xs[i]
+        i = i + 1
+    }
+    return sum
+}
+
+fn main() {
+    // Consume one full SIMD batch, one valid scalar tail, then trap at index 9.
+    let values = [1, 2, 3, 4, 5, 6, 7, 8, 9]
+    print_int(sum_bound(values, 10))
+}

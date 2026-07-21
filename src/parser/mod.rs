@@ -316,7 +316,9 @@ impl Parser {
     }
 
     /// Optional `[T, U]` or `<T, U>` type parameter list.
-    fn parse_type_params_opt(&mut self) -> Result<(Vec<String>, std::collections::HashMap<String, String>), ParseError> {
+    fn parse_type_params_opt(
+        &mut self,
+    ) -> Result<(Vec<String>, std::collections::HashMap<String, String>), ParseError> {
         if !matches!(self.peek_kind(), TokenKind::LBracket | TokenKind::Lt) {
             return Ok((Vec::new(), std::collections::HashMap::new()));
         }
@@ -719,9 +721,7 @@ impl Parser {
                 } else if self.peek_is_type_start() {
                     self.parse_type()?
                 } else {
-                    return Err(self.err(format!(
-                        "extern param `{pname}` needs a type"
-                    )));
+                    return Err(self.err(format!("extern param `{pname}` needs a type")));
                 };
                 params.push(Param {
                     name: pname,
@@ -1194,7 +1194,9 @@ impl Parser {
             TokenKind::Fallthrough => Err(self.err(
                 "`fallthrough` is only valid as the last statement of a switch `case` arm".into(),
             )),
-            TokenKind::Hold | TokenKind::Share | TokenKind::Let | TokenKind::Var => self.parse_let(),
+            TokenKind::Hold | TokenKind::Share | TokenKind::Let | TokenKind::Var => {
+                self.parse_let()
+            }
             TokenKind::Unsafe => {
                 self.bump();
                 let body = self.parse_block()?;
@@ -1321,10 +1323,7 @@ impl Parser {
                         self.bump();
                         names.push(self.expect_ident()?);
                     }
-                    if matches!(
-                        self.peek_kind(),
-                        TokenKind::ColonAssign | TokenKind::Assign
-                    ) {
+                    if matches!(self.peek_kind(), TokenKind::ColonAssign | TokenKind::Assign) {
                         let mutable = matches!(self.peek_kind(), TokenKind::ColonAssign);
                         self.bump();
                         // RHS may be a single tuple-valued expression (`a, b = f()`)
@@ -1528,10 +1527,7 @@ impl Parser {
                 self.bump();
                 names.push(self.expect_ident()?);
             }
-            if !matches!(
-                self.peek_kind(),
-                TokenKind::Assign | TokenKind::ColonAssign
-            ) {
+            if !matches!(self.peek_kind(), TokenKind::Assign | TokenKind::ColonAssign) {
                 return Err(self.err("expected `=` or `:=` after multi-name binding".into()));
             }
             self.bump();
@@ -2056,7 +2052,7 @@ impl Parser {
             return Ok(None);
         }
         self.bump(); // close bracket
-        // Must be followed by `{` for a struct literal
+                     // Must be followed by `{` for a struct literal
         if !matches!(self.peek_kind(), TokenKind::LBrace) {
             self.pos = save;
             return Ok(None);
@@ -2065,7 +2061,11 @@ impl Parser {
         let mono_name = format!(
             "{}__{}",
             name,
-            type_args.iter().map(|t| type_expr_mono_tag(t)).collect::<Vec<_>>().join("__")
+            type_args
+                .iter()
+                .map(|t| type_expr_mono_tag(t))
+                .collect::<Vec<_>>()
+                .join("__")
         );
         self.bump(); // {
         if let Some(lit) = self.try_parse_struct_lit_tail(mono_name)? {
@@ -2089,9 +2089,9 @@ impl Parser {
                 if matches!(self.peek_kind(), TokenKind::DotDot) {
                     self.bump();
                     if update.is_some() {
-                        return Err(self.err(
-                            "struct literal allows at most one `..base` update".into(),
-                        ));
+                        return Err(
+                            self.err("struct literal allows at most one `..base` update".into())
+                        );
                     }
                     update = Some(Box::new(self.parse_expr()?));
                 } else {
@@ -2176,8 +2176,8 @@ impl Parser {
                 }
                 let hole = &raw[start..i];
                 i += 1; // }
-                // Split optional format spec: `{expr:spec}` at top-level `:`.
-                // (Nested `{}` / colons inside the expr are rare; use fmt_sprintf* for complex.)
+                        // Split optional format spec: `{expr:spec}` at top-level `:`.
+                        // (Nested `{}` / colons inside the expr are rare; use fmt_sprintf* for complex.)
                 let (expr_src, fmt_opt) = split_fstring_hole(hole);
                 // Re-lex and parse the hole as an expression.
                 let tokens = crate::lexer::Lexer::new(expr_src)
@@ -2477,9 +2477,7 @@ impl Parser {
         let cond = self.parse_header_expr()?;
         let then_block = self.parse_block()?;
         if !matches!(self.peek_kind(), TokenKind::Else) {
-            return Err(self.err(
-                "an `if` used as a value needs an `else` branch".into(),
-            ));
+            return Err(self.err("an `if` used as a value needs an `else` branch".into()));
         }
         self.bump(); // else
         let else_block = if matches!(self.peek_kind(), TokenKind::If) {
@@ -2516,7 +2514,11 @@ impl Parser {
             if matches!(self.peek_kind(), TokenKind::Comma) {
                 self.bump();
             }
-            arms.push(MatchArm { pattern, guard, body });
+            arms.push(MatchArm {
+                pattern,
+                guard,
+                body,
+            });
         }
         self.expect(TokenKind::RBrace)?;
         Ok(Expr::Match {
@@ -2570,9 +2572,9 @@ impl Parser {
             return Err(self.err("`go` requires a function call, e.g. `go worker()`".into()));
         }
         let Some(crew) = self.crew_stack.last().cloned() else {
-            return Err(self.err(
-                "`go` must be inside a `crew { … }` (Mako has no orphan tasks)".into(),
-            ));
+            return Err(
+                self.err("`go` must be inside a `crew { … }` (Mako has no orphan tasks)".into())
+            );
         };
         if matches!(self.peek_kind(), TokenKind::Semicolon) {
             self.bump();
@@ -2589,9 +2591,9 @@ impl Parser {
         self.bump(); // `detach`
         let call = self.parse_expr()?;
         if !matches!(call, Expr::Call { .. } | Expr::Method { .. }) {
-            return Err(self.err(
-                "`detach` requires a function call, e.g. `detach worker()`".into(),
-            ));
+            return Err(
+                self.err("`detach` requires a function call, e.g. `detach worker()`".into())
+            );
         }
         if matches!(self.peek_kind(), TokenKind::Semicolon) {
             self.bump();
@@ -2623,7 +2625,7 @@ impl Parser {
     ///   switch x := f(); x { … }                          // with init clause
     fn parse_switch(&mut self) -> Result<Stmt, ParseError> {
         self.bump(); // `switch`
-        // Optional init clause: `switch x := f(); x { … }`.
+                     // Optional init clause: `switch x := f(); x { … }`.
         let init = if self.has_stmt_before_block() {
             Some(self.parse_stmt()?)
         } else {
@@ -2649,9 +2651,9 @@ impl Parser {
                 }
                 let (body, falls) = self.parse_switch_case_body()?;
                 if falls {
-                    return Err(self.err(
-                        "`fallthrough` cannot be the last statement of `default`".into(),
-                    ));
+                    return Err(
+                        self.err("`fallthrough` cannot be the last statement of `default`".into())
+                    );
                 }
                 default_block = Some(body);
             } else if matches!(self.peek_kind(), TokenKind::Ident(s) if s == "case") {
@@ -2807,9 +2809,9 @@ impl Parser {
                 TokenKind::RBrace | TokenKind::Default | TokenKind::Eof
             ) && !matches!(self.peek_kind(), TokenKind::Ident(s) if s == "case")
             {
-                return Err(self.err(
-                    "`fallthrough` must be the last statement in a case arm".into(),
-                ));
+                return Err(
+                    self.err("`fallthrough` must be the last statement in a case arm".into())
+                );
             }
             true
         } else {
@@ -3013,7 +3015,7 @@ impl Parser {
 
     fn parse_for(&mut self, label: Option<String>) -> Result<Stmt, ParseError> {
         self.bump(); // for
-        // `for { ... }` — infinite loop (Go form) → `while true`.
+                     // `for { ... }` — infinite loop (Go form) → `while true`.
         if matches!(self.peek_kind(), TokenKind::LBrace) {
             let body = self.parse_block()?;
             return Ok(Stmt::While {
@@ -3175,7 +3177,6 @@ fn still_ok() { return 2 }
     }
 }
 
-
 /// Parsed item-level attribute (`#[…]`).
 enum ItemAttr {
     Derive(Vec<String>),
@@ -3185,7 +3186,10 @@ enum ItemAttr {
 
 /// Go-style: names starting with an uppercase letter are package-exported.
 fn is_exported_name(name: &str) -> bool {
-    name.chars().next().map(|c| c.is_ascii_uppercase()).unwrap_or(false)
+    name.chars()
+        .next()
+        .map(|c| c.is_ascii_uppercase())
+        .unwrap_or(false)
 }
 
 /// Maps a compound-assignment token (`+=`, `-=`, `*=`, `/=`, `%=`) to its binary
@@ -3204,8 +3208,7 @@ fn split_fstring_hole(hole: &str) -> (&str, Option<String>) {
                 let expr = hole[..i].trim();
                 // Keep spaces (the ' ' sign flag). Only strip CR/LF/TAB from the right.
                 let raw = &hole[i + 1..];
-                let spec =
-                    raw.trim_end_matches(|c: char| c == '\n' || c == '\r' || c == '\t');
+                let spec = raw.trim_end_matches(|c: char| c == '\n' || c == '\r' || c == '\t');
                 if !spec.is_empty() {
                     return (expr, Some(spec.to_string()));
                 }

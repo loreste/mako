@@ -170,7 +170,10 @@ impl VerifiedPackage {
             .filter(|path| path.parent() == Some(relative.as_path()))
             .filter(|path| path.extension().and_then(|ext| ext.to_str()) == Some("mko"))
             .filter(|path| {
-                let name = path.file_name().and_then(|name| name.to_str()).unwrap_or("");
+                let name = path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or("");
                 !name.starts_with('.')
                     && !name.ends_with("_test.mko")
                     && !(name.starts_with("test_") && name.ends_with(".mko"))
@@ -178,8 +181,14 @@ impl VerifiedPackage {
             .map(|path| self.root.join(path))
             .collect();
         files.sort_by(|left, right| {
-            let left = left.file_name().and_then(|name| name.to_str()).unwrap_or("");
-            let right = right.file_name().and_then(|name| name.to_str()).unwrap_or("");
+            let left = left
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("");
+            let right = right
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("");
             match (left == "lib.mko", right == "lib.mko") {
                 (true, false) => std::cmp::Ordering::Less,
                 (false, true) => std::cmp::Ordering::Greater,
@@ -575,7 +584,10 @@ fn registry_lookup_in(reg: &Path, name: &str, req: &str) -> Result<RegistryLooku
         let ent = ent.map_err(|e| format!("read registry entry: {e}"))?;
         let path = ent.path();
         let ver_name = ent.file_name().into_string().map_err(|_| {
-            format!("registry version path is not valid UTF-8: {}", path.display())
+            format!(
+                "registry version path is not valid UTF-8: {}",
+                path.display()
+            )
         })?;
         if !version_satisfies(&ver_name, req) {
             continue;
@@ -765,15 +777,14 @@ fn resolve_one(
     }
     if let Some(req) = &dep.version {
         // Prefer project registry, then MAKO_REGISTRY / effective.
-        let (dir, ver) = if let Some(r) =
-            registry_resolve_project_for_install(project, &dep.name, req)?
-        {
-            let v = path_dep_version(&r)
-                .unwrap_or_else(|| req.trim_start_matches(['^', '~']).to_string());
-            (r, v)
-        } else {
-            registry_resolve_in(registry, &dep.name, req)?
-        };
+        let (dir, ver) =
+            if let Some(r) = registry_resolve_project_for_install(project, &dep.name, req)? {
+                let v = path_dep_version(&r)
+                    .unwrap_or_else(|| req.trim_start_matches(['^', '~']).to_string());
+                (r, v)
+            } else {
+                registry_resolve_in(registry, &dep.name, req)?
+            };
         // Copy into project cache for reproducible builds if outside project.
         let cache = project
             .join(".mako")
@@ -1579,7 +1590,10 @@ fn copy_package_for_publish(project: &Path, manifest: &Path, dest: &Path) -> Res
     let manifest_kind = fs::symlink_metadata(manifest)
         .map_err(|e| format!("inspect {}: {e}", manifest.display()))?;
     if manifest_kind.file_type().is_symlink() {
-        return Err(format!("refusing to publish symlink {}", manifest.display()));
+        return Err(format!(
+            "refusing to publish symlink {}",
+            manifest.display()
+        ));
     }
     fs::copy(manifest, dest.join("mako.toml")).map_err(|e| format!("copy toml: {e}"))?;
     for ent in fs::read_dir(project).map_err(|e| format!("readdir: {e}"))? {
@@ -1630,9 +1644,13 @@ fn compute_package_digest(dir: &Path, format: PackageDigestFormat) -> Result<Str
     paths.sort();
     let mut hasher = Sha256::new();
     for path in &paths {
-        let relative = path
-            .strip_prefix(dir)
-            .map_err(|_| format!("package file {} is outside {}", path.display(), dir.display()))?;
+        let relative = path.strip_prefix(dir).map_err(|_| {
+            format!(
+                "package file {} is outside {}",
+                path.display(),
+                dir.display()
+            )
+        })?;
         let rel = match format {
             PackageDigestFormat::Legacy => relative.to_string_lossy().replace('\\', "/"),
             PackageDigestFormat::V2 => relative
@@ -1678,11 +1696,8 @@ fn collect_files_recursive(dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), Str
 
 fn write_package_digest(dir: &Path) -> Result<(), String> {
     let digest = compute_package_digest(dir, PackageDigestFormat::V2)?;
-    fs::write(
-        dir.join(PACKAGE_DIGEST_FILE),
-        format!("v2:{digest}  .\n"),
-    )
-    .map_err(|e| format!("write package digest: {e}"))
+    fs::write(dir.join(PACKAGE_DIGEST_FILE), format!("v2:{digest}  .\n"))
+        .map_err(|e| format!("write package digest: {e}"))
 }
 
 /// Verify a published package against its `PACKAGE.sha256` digest.
@@ -2060,10 +2075,7 @@ mod tests {
 
     #[test]
     fn locked_transitive_path_is_relative_to_its_manifest() {
-        let dir = env::temp_dir().join(format!(
-            "mako_pkg_transitive_path_{}",
-            std::process::id()
-        ));
+        let dir = env::temp_dir().join(format!("mako_pkg_transitive_path_{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         let app = dir.join("app");
         let a = app.join("deps").join("a");
@@ -2088,11 +2100,7 @@ mod tests {
             "name = \"b\"\nversion = \"1.0.0\"\n",
         )
         .unwrap();
-        fs::write(
-            declared_b.join("lib.mko"),
-            "fn answer() -> int { 42 }\n",
-        )
-        .unwrap();
+        fs::write(declared_b.join("lib.mko"), "fn answer() -> int { 42 }\n").unwrap();
         fs::write(
             wrong_b.join("mako.toml"),
             "name = \"b\"\nversion = \"1.0.0\"\n",
@@ -2498,10 +2506,7 @@ content_hash = "{valid_hash}"
 
     #[test]
     fn registry_digest_is_required_and_verified() {
-        let dir = env::temp_dir().join(format!(
-            "mako_pkg_registry_digest_{}",
-            std::process::id()
-        ));
+        let dir = env::temp_dir().join(format!("mako_pkg_registry_digest_{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         fs::write(
@@ -2535,7 +2540,10 @@ content_hash = "{valid_hash}"
         ] {
             fs::write(&digest_path, malformed).unwrap();
             let error = verify_published_package(&published).unwrap_err();
-            assert!(error.contains("malformed package digest"), "unexpected: {error}");
+            assert!(
+                error.contains("malformed package digest"),
+                "unexpected: {error}"
+            );
         }
         fs::write(&digest_path, digest_record).unwrap();
 
@@ -2545,11 +2553,17 @@ content_hash = "{valid_hash}"
 
         fs::write(published.join(PACKAGE_DIGEST_FILE), "not a digest\n").unwrap();
         let error = registry_resolve_in(&registry, "util", "^1.0.0").unwrap_err();
-        assert!(error.contains("malformed package digest"), "unexpected: {error}");
+        assert!(
+            error.contains("malformed package digest"),
+            "unexpected: {error}"
+        );
 
         fs::remove_file(published.join(PACKAGE_DIGEST_FILE)).unwrap();
         let error = crate::tooling::registry_resolve(&dir, "util", "^1.0.0").unwrap_err();
-        assert!(error.contains("missing PACKAGE.sha256"), "unexpected: {error}");
+        assert!(
+            error.contains("missing PACKAGE.sha256"),
+            "unexpected: {error}"
+        );
         let _ = fs::remove_dir_all(&dir);
     }
 
@@ -2744,7 +2758,10 @@ content_hash = "{valid_hash}"
         });
         assert!(!has_staging);
         let error = copy_dir_recursive(&dir.join("src"), &dir.join("copy")).unwrap_err();
-        assert!(error.contains("refusing to copy symlink"), "unexpected: {error}");
+        assert!(
+            error.contains("refusing to copy symlink"),
+            "unexpected: {error}"
+        );
         let _ = fs::remove_dir_all(&dir);
     }
 
@@ -2954,12 +2971,19 @@ version = "0.1.0"
         let dir = env::temp_dir().join(format!("mako_pkg_digest_{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
-        fs::write(dir.join("mako.toml"), "name = \"dtest\"\nversion = \"1.0.0\"\n").unwrap();
+        fs::write(
+            dir.join("mako.toml"),
+            "name = \"dtest\"\nversion = \"1.0.0\"\n",
+        )
+        .unwrap();
         fs::write(dir.join("lib.mko"), "fn hello() { print(\"hi\") }\n").unwrap();
         pkg_publish(&dir).unwrap();
         let reg = effective_registry(&dir);
         let published = reg.join("dtest").join("1.0.0");
-        assert!(published.join("PACKAGE.sha256").exists(), "digest file must exist");
+        assert!(
+            published.join("PACKAGE.sha256").exists(),
+            "digest file must exist"
+        );
         let content = fs::read_to_string(published.join("PACKAGE.sha256")).unwrap();
         let hash = content
             .split_whitespace()
@@ -2967,7 +2991,10 @@ version = "0.1.0"
             .and_then(|record| record.strip_prefix("v2:"))
             .unwrap();
         assert_eq!(hash.len(), 64, "digest must be 64 hex chars");
-        assert!(hash.chars().all(|c| c.is_ascii_hexdigit()), "digest must be hex");
+        assert!(
+            hash.chars().all(|c| c.is_ascii_hexdigit()),
+            "digest must be hex"
+        );
         let _ = fs::remove_dir_all(&dir);
     }
 
@@ -2976,7 +3003,11 @@ version = "0.1.0"
         let dir = env::temp_dir().join(format!("mako_pkg_det_{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
-        fs::write(dir.join("mako.toml"), "name = \"det\"\nversion = \"1.0.0\"\n").unwrap();
+        fs::write(
+            dir.join("mako.toml"),
+            "name = \"det\"\nversion = \"1.0.0\"\n",
+        )
+        .unwrap();
         fs::write(dir.join("main.mko"), "fn main() {}\n").unwrap();
         pkg_publish(&dir).unwrap();
         let reg = effective_registry(&dir);
@@ -2992,7 +3023,11 @@ version = "0.1.0"
         let dir = env::temp_dir().join(format!("mako_pkg_tamper_{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
-        fs::write(dir.join("mako.toml"), "name = \"tamp\"\nversion = \"1.0.0\"\n").unwrap();
+        fs::write(
+            dir.join("mako.toml"),
+            "name = \"tamp\"\nversion = \"1.0.0\"\n",
+        )
+        .unwrap();
         fs::write(dir.join("lib.mko"), "fn original() {}\n").unwrap();
         pkg_publish(&dir).unwrap();
         let reg = effective_registry(&dir);
@@ -3000,7 +3035,10 @@ version = "0.1.0"
         // Tamper with a source file.
         fs::write(published.join("lib.mko"), "fn TAMPERED() {}\n").unwrap();
         let err = verify_published_package(&published).unwrap_err();
-        assert!(err.contains("integrity check failed"), "expected integrity error, got: {err}");
+        assert!(
+            err.contains("integrity check failed"),
+            "expected integrity error, got: {err}"
+        );
         let _ = fs::remove_dir_all(&dir);
     }
 
@@ -3009,7 +3047,11 @@ version = "0.1.0"
         let dir = env::temp_dir().join(format!("mako_pkg_malform_{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
-        fs::write(dir.join("mako.toml"), "name = \"mal\"\nversion = \"1.0.0\"\n").unwrap();
+        fs::write(
+            dir.join("mako.toml"),
+            "name = \"mal\"\nversion = \"1.0.0\"\n",
+        )
+        .unwrap();
         fs::write(dir.join("lib.mko"), "fn f() {}\n").unwrap();
         pkg_publish(&dir).unwrap();
         let reg = effective_registry(&dir);
@@ -3017,7 +3059,10 @@ version = "0.1.0"
         // Overwrite digest with garbage.
         fs::write(published.join("PACKAGE.sha256"), "not-a-valid-hash\n").unwrap();
         let err = verify_published_package(&published).unwrap_err();
-        assert!(err.contains("malformed"), "expected malformed error, got: {err}");
+        assert!(
+            err.contains("malformed"),
+            "expected malformed error, got: {err}"
+        );
         let _ = fs::remove_dir_all(&dir);
     }
 
@@ -3026,7 +3071,11 @@ version = "0.1.0"
         let dir = env::temp_dir().join(format!("mako_pkg_deldig_{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
-        fs::write(dir.join("mako.toml"), "name = \"deldig\"\nversion = \"1.0.0\"\n").unwrap();
+        fs::write(
+            dir.join("mako.toml"),
+            "name = \"deldig\"\nversion = \"1.0.0\"\n",
+        )
+        .unwrap();
         fs::write(dir.join("lib.mko"), "fn f() {}\n").unwrap();
         pkg_publish(&dir).unwrap();
         let reg = effective_registry(&dir);
@@ -3035,7 +3084,10 @@ version = "0.1.0"
         // Delete the digest — simulates tampering.
         fs::remove_file(published.join("PACKAGE.sha256")).unwrap();
         let err = verify_published_package(&published).unwrap_err();
-        assert!(err.contains("missing PACKAGE.sha256"), "expected missing digest error, got: {err}");
+        assert!(
+            err.contains("missing PACKAGE.sha256"),
+            "expected missing digest error, got: {err}"
+        );
         let _ = fs::remove_dir_all(&dir);
     }
 
@@ -3047,7 +3099,11 @@ version = "0.1.0"
         let app = dir.join("app");
         fs::create_dir_all(&lib).unwrap();
         fs::create_dir_all(&app).unwrap();
-        fs::write(lib.join("mako.toml"), "name = \"blk\"\nversion = \"1.0.0\"\n").unwrap();
+        fs::write(
+            lib.join("mako.toml"),
+            "name = \"blk\"\nversion = \"1.0.0\"\n",
+        )
+        .unwrap();
         fs::write(lib.join("lib.mko"), "fn f() {}\n").unwrap();
         pkg_publish(&lib).unwrap();
         let reg = effective_registry(&lib);
@@ -3077,7 +3133,11 @@ version = "0.1.0"
         let app = dir.join("app");
         fs::create_dir_all(&lib).unwrap();
         fs::create_dir_all(&app).unwrap();
-        fs::write(lib.join("mako.toml"), "name = \"e2emiss\"\nversion = \"1.0.0\"\n").unwrap();
+        fs::write(
+            lib.join("mako.toml"),
+            "name = \"e2emiss\"\nversion = \"1.0.0\"\n",
+        )
+        .unwrap();
         fs::write(lib.join("lib.mko"), "fn f() {}\n").unwrap();
         pkg_publish(&lib).unwrap();
         let reg = effective_registry(&lib);
@@ -3108,7 +3168,11 @@ version = "0.1.0"
         let app = dir.join("app");
         fs::create_dir_all(&lib).unwrap();
         fs::create_dir_all(&app).unwrap();
-        fs::write(lib.join("mako.toml"), "name = \"e2erec\"\nversion = \"1.0.0\"\n").unwrap();
+        fs::write(
+            lib.join("mako.toml"),
+            "name = \"e2erec\"\nversion = \"1.0.0\"\n",
+        )
+        .unwrap();
         fs::write(lib.join("lib.mko"), "fn original() {}\n").unwrap();
         pkg_publish(&lib).unwrap();
         let reg = effective_registry(&lib);
@@ -3121,7 +3185,9 @@ version = "0.1.0"
         .unwrap();
         // First resolve — creates lockfile with original content_hash.
         let lock = resolve_graph(&app, true).unwrap();
-        let orig_hash = lock.packages.iter()
+        let orig_hash = lock
+            .packages
+            .iter()
             .find(|p| p.name == "e2erec")
             .unwrap()
             .content_hash
@@ -3160,7 +3226,11 @@ version = "0.1.0"
         let dir = env::temp_dir().join(format!("mako_pkg_seal_{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
-        fs::write(dir.join("mako.toml"), "name = \"legacy\"\nversion = \"1.0.0\"\n").unwrap();
+        fs::write(
+            dir.join("mako.toml"),
+            "name = \"legacy\"\nversion = \"1.0.0\"\n",
+        )
+        .unwrap();
         fs::write(dir.join("lib.mko"), "fn old() {}\n").unwrap();
         // Simulate a legacy package: no digest.
         assert!(!dir.join("PACKAGE.sha256").exists());
@@ -3171,7 +3241,10 @@ version = "0.1.0"
         verify_published_package(&dir).unwrap();
         // Seal again should fail (won't overwrite).
         let err = pkg_seal(&dir).unwrap_err();
-        assert!(err.contains("already has"), "expected already-exists error, got: {err}");
+        assert!(
+            err.contains("already has"),
+            "expected already-exists error, got: {err}"
+        );
         let _ = fs::remove_dir_all(&dir);
     }
 }

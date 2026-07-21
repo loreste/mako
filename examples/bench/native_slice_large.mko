@@ -1,0 +1,10 @@
+fn checksum(n: int) -> int {
+    var xs = make([]int, 0, n)
+    var i = 0
+    while i < n { xs = append(xs, i + 1); i = i + 1 }
+    var sum = 0
+    i = 0
+    while i < n { sum = sum + xs[i]; i = i + 1 }
+    return sum
+}
+fn main() { print_int(checksum(100000)) }

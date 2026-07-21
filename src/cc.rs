@@ -109,11 +109,7 @@ pub fn prefer_zig(opts: &BuildOpts) -> bool {
     if std::env::var_os("MAKO_USE_ZIG").is_some() {
         return zig_on_path();
     }
-    if opts
-        .target
-        .as_ref()
-        .is_some_and(|t| t.contains("wasm"))
-    {
+    if opts.target.as_ref().is_some_and(|t| t.contains("wasm")) {
         // Without wasi-sdk, zig cc supplies the WASI sysroot. If wasi-sdk is
         // installed, resolve_cc selects its clang first.
         return zig_on_path();
