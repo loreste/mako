@@ -1,6 +1,6 @@
 # Mako status (adversarial / verified)
 
-Last inventory: **2026-07-19** · product **mako0.3.0** (`CARGO_PKG_VERSION`).
+Last inventory: **2026-07-20** · product **mako0.4.1** (`CARGO_PKG_VERSION`).
 
 Unique Mako surface · pack/pull · map/slice/bag monomorphs · package-per-directory ·
 const-fn depth (match/while/for/strings) · suite **357+ test programs + 75 Rust unit tests** (0 failures,
@@ -14,7 +14,7 @@ ASan clean ownership suite) · [The Mako Book](book/).
 
 | Scope | Approx. |
 |-------|---------|
-| **Product version** | **0.3.0** ([release](https://github.com/loreste/mako/releases/tag/v0.3.0)) |
+| **Product version** | **0.4.1** (native compiler increment; release metadata pending) |
 | **MVP / usable language** | Core compiler/runtime scope is exercised; this is not a production-readiness claim |
 | **STATUS north-star** | Tracked scope is explicit; optional depth below remains |
 | **Mako identity (preferred syntax)** | Checklist complete — [IDENTITY.md](IDENTITY.md); not a maturity score |

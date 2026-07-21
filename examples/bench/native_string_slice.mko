@@ -1,0 +1,20 @@
+fn build_strings(n: int) -> []string {
+    var values = make([]string, 0, n)
+    var i = 0
+    while i < n {
+        if i % 2 == 0 {
+            values = append(values, "alpha")
+        } else {
+            values = append(values, "beta")
+        }
+        i = i + 1
+    }
+    return values
+}
+
+fn main() {
+    let values = build_strings(100000)
+    print(values[0])
+    print(values[99999])
+    print_int(len(values))
+}

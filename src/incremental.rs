@@ -34,8 +34,8 @@ use std::time::Instant;
 
 use crate::ast::{Item, Program};
 use crate::codegen::Codegen;
-use crate::overflow::OverflowMode;
 use crate::diag::{Diagnostic, Span};
+use crate::overflow::OverflowMode;
 use crate::tooling::{find_nearest_manifest_dir, parse_manifest_deps, resolve_dep_root};
 use crate::types::{TypeChecker, TypeError};
 
@@ -352,22 +352,34 @@ pub fn typecheck_incremental(
             // Fast path: if no generics in program, keep cache hit without work.
             let has_generics = program.items.iter().any(|i| {
                 matches!(i, crate::ast::Item::Fn(f) if !f.type_params.is_empty())
-                || matches!(i, crate::ast::Item::Struct(s) if !s.type_params.is_empty())
+                    || matches!(i, crate::ast::Item::Struct(s) if !s.type_params.is_empty())
             });
             if has_generics {
                 let _ = tc.check(program);
                 for f in tc.mono_fns {
-                    if !program.items.iter().any(|i| matches!(i, crate::ast::Item::Fn(x) if x.name == f.name)) {
+                    if !program
+                        .items
+                        .iter()
+                        .any(|i| matches!(i, crate::ast::Item::Fn(x) if x.name == f.name))
+                    {
                         program.items.push(crate::ast::Item::Fn(f));
                     }
                 }
                 for s in tc.mono_structs {
-                    if !program.items.iter().any(|i| matches!(i, crate::ast::Item::Struct(x) if x.name == s.name)) {
+                    if !program
+                        .items
+                        .iter()
+                        .any(|i| matches!(i, crate::ast::Item::Struct(x) if x.name == s.name))
+                    {
                         program.items.push(crate::ast::Item::Struct(s));
                     }
                 }
                 for e in tc.mono_enums {
-                    if !program.items.iter().any(|i| matches!(i, crate::ast::Item::Enum(x) if x.name == e.name)) {
+                    if !program
+                        .items
+                        .iter()
+                        .any(|i| matches!(i, crate::ast::Item::Enum(x) if x.name == e.name))
+                    {
                         program.items.push(crate::ast::Item::Enum(e));
                     }
                 }

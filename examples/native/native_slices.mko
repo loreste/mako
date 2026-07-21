@@ -8,11 +8,32 @@
 fn sum(xs: []int) -> int {
     var s = 0
     var i = 0
-    while i < len(xs) {
+    let bound = len(xs)
+    while i < bound {
         s = s + xs[i]
         i = i + 1
     }
     return s
+}
+
+fn sum_seeded_prefix(xs: []int, bound: int, start: int) -> int {
+    var s = 7
+    var i = start
+    while i < bound {
+        s = s + xs[i]
+        i = i + 1
+    }
+    return s
+}
+
+fn recurrence(n: int) -> int {
+    var state = 1
+    var i = 0
+    while i < n {
+        state = (state * 48271) % 2147483647
+        i = i + 1
+    }
+    return state
 }
 
 fn squares(n: int) -> []int {
@@ -70,6 +91,8 @@ fn main() {
 
     // Slice parameters, returns, and index assignment.
     print_int(sum(a))
+    print_int(sum_seeded_prefix(a, 3, 0))
+    print_int(sum_seeded_prefix(a, 2, 1))
     let sq = squares(5)
     print_int(sum(sq))
     print_int(sq[3])
@@ -81,4 +104,27 @@ fn main() {
     print_int(t[4])
     print_int(sum(t))
     print_int(sum(tens(6)))
+
+    // Executes one full eight-element SIMD reduction plus a checked tail.
+    let wide = [1, 2, 3, 4, 5, 6, 7, 8, 9]
+    print_int(sum(wide))
+    print_int(recurrence(10))
+
+    // Slicing: borrowed views, clamping, full-slice syntax, owned temporaries,
+    // append-from-view copying, and borrowed return cloning.
+    var middle = a[1:3]
+    print_int(len(middle))
+    print_int(sum(middle))
+    middle = append(middle, 99)
+    print_int(sum(middle))
+    print_int(a[2])
+
+    let clamped = a[-4:99]
+    print_int(len(clamped))
+    print_int(sum(clamped))
+    print_int(len(a[2:1]))
+    print_int(len(a[1:3:2]))
+
+    let temporary_view = [7, 8, 9][1:]
+    print_int(sum(temporary_view))
 }

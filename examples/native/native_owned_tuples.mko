@@ -1,0 +1,19 @@
+// Native backend: tuples with owned `string` elements + owned multi-return.
+// Exercises constructing a tuple of owned strings, returning it by value, and
+// destructuring it (`let a, b = ...`) so each binding owns an independent copy
+// while the tuple drops its own elements. Differentially validated against C.
+
+fn split(s: string) -> (string, string) {
+    return ("Hello, " + s, "Bye, " + s)
+}
+
+fn main() {
+    let a, b = split("Ada")
+    print(a)
+    print(b)
+
+    let t = ("x" + "y", 42)
+    let s, n = t
+    print(s)
+    print_int(n)
+}

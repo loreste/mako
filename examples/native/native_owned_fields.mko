@@ -1,0 +1,38 @@
+// Native backend: structs with owned `string` fields (recursive clone/drop).
+// Exercises construction (moving a temp / cloning a borrow), field read as a
+// borrow, functional update carrying an owned field, value-copy semantics
+// (mutating a copy leaves the original intact), owned fields through function
+// parameters and returns, and per-field drop on scope exit.
+// Differentially validated against the C backend.
+
+struct User {
+    name: string
+    age: int
+}
+
+fn make_user(n: string, a: int) -> User {
+    return User { name: n, age: a }
+}
+
+fn greet(u: User) -> string {
+    return "Hello, " + u.name
+}
+
+fn main() {
+    let u = User { name: "Ada", age: 36 }
+    print(u.name)
+    print_int(u.age)
+
+    var v = u
+    v.name = "Grace"
+    print(v.name)
+    print(u.name)
+
+    let w = User { age: 40, ..u }
+    print(w.name)
+    print_int(w.age)
+
+    let z = make_user("Bob", 7)
+    print(greet(z))
+    print(z.name)
+}

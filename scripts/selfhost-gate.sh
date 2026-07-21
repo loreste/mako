@@ -79,6 +79,12 @@ if [[ "$typed_ir_statement_merge_owned_result" != "tokens 43 items 2 types 3 sig
   exit 1
 fi
 
+typed_ir_cfg_owned_alias_result="$($stage1 "$repo_dir/compiler/testdata/typed_ir_cfg_owned_alias.mko")"
+if [[ "$typed_ir_cfg_owned_alias_result" != "tokens 37 items 1 types 2 signatures 1 parameters 1 statements 6 bodies 1 expressions 6 symbols 1 resolved 0 locals 5 local_refs 2 typed 6 ir_functions 1 ir_blocks 4 ir_instructions 14 ir_constants 4 ir_values 6 ir_skipped 0 ir_verified 6" ]]; then
+  echo "selfhost frontend gate: typed IR owned alias shape changed: $typed_ir_cfg_owned_alias_result" >&2
+  exit 1
+fi
+
 typed_ir_owned_drop_result="$($stage1 "$repo_dir/compiler/testdata/typed_ir_owned_drop.mko")"
 if [[ "$typed_ir_owned_drop_result" != "tokens 21 items 1 types 1 signatures 1 parameters 0 statements 2 bodies 1 expressions 8 symbols 1 resolved 0 locals 1 local_refs 0 typed 7 ir_functions 1 ir_blocks 1 ir_instructions 9 ir_constants 4 ir_values 7 ir_skipped 0 ir_verified 7" ]]; then
   echo "selfhost frontend gate: typed IR owned-drop shape changed: $typed_ir_owned_drop_result" >&2

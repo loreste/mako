@@ -1,0 +1,32 @@
+// Native backend: enums with an owned `string` payload (Result-like).
+// Each variant has dedicated, non-overlapping payload slots, so the flat
+// recursive clone/drop is correct: the active variant's string is cloned/
+// dropped and inactive slots hold null (handled null-safely). Exercises
+// construction with an owned payload, payload binding in `match`, deep-copy of
+// an enum (cloning the active payload), and per-variant drop on scope exit.
+// Differentially validated against the C backend.
+
+enum Msg {
+    Text(string)
+    Code(int)
+    Quit
+}
+
+fn kind(m: Msg) -> int {
+    return match m {
+        Text(s) => 1,
+        Code(n) => n,
+        Quit => 0,
+    }
+}
+
+fn main() {
+    print_int(kind(Text("hello")))
+    print_int(kind(Code(42)))
+    print_int(kind(Quit))
+
+    var b = Text("world")
+    var c = b
+    print_int(kind(c))
+    print_int(kind(b))
+}

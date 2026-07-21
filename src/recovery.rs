@@ -42,10 +42,7 @@ pub fn parse_errors_to_diagnostics(
             let ParseError::Message { message, line, col } = e;
             let mut hint = recovery_hint(message);
             if n > 1 && i + 1 < n {
-                hint = format!(
-                    "{hint}; recovery continues ({} more error(s))",
-                    n - i - 1
-                );
+                hint = format!("{hint}; recovery continues ({} more error(s))", n - i - 1);
             } else if n > 1 && i + 1 == n {
                 hint = format!("{hint}; last recovered error in this file");
             }
@@ -57,8 +54,7 @@ pub fn parse_errors_to_diagnostics(
 fn recovery_hint(message: &str) -> String {
     let m = message.to_ascii_lowercase();
     if m.contains("found fn") || m.contains("found struct") || m.contains("found enum") {
-        "incomplete previous declaration — this token starts the next item; recovery kept it"
-            .into()
+        "incomplete previous declaration — this token starts the next item; recovery kept it".into()
     } else if m.contains("expected") && m.contains("found eof") {
         "file ended mid-declaration — close braces/parens or finish the signature".into()
     } else if m.contains("expected") {

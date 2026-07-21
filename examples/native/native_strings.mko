@@ -39,5 +39,10 @@ fn main() {
     print(chosen)
     print(pick(false, "unused", "picked"))
 
+    // Equality (content compare); an owned temporary operand is freed after.
+    print(chosen == "first choice")
+    print(chosen != "nope")
+    print("hello, " + "world" == greeting)
+
     print("trailing literal")
 }

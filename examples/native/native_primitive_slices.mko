@@ -1,0 +1,46 @@
+// Native/C differential coverage for []float and []bool.
+
+fn grow_float(xs: []float) -> []float {
+    return append(xs, 4.5)
+}
+
+fn flip_first(mut xs: []bool) -> []bool {
+    xs[0] = false
+    return xs
+}
+
+fn main() {
+    var floats = make([]float, 2, 4)
+    floats[0] = 1.5
+    floats[1] = 2.5
+    floats = append(floats, 3.5)
+    print_int(len(floats))
+    print_int(cap(floats))
+    print(floats[0] == 1.5)
+    print(floats[2] == 3.5)
+
+    let middle = floats[1:3]
+    print_int(len(middle))
+    print(middle[0] == 2.5)
+    let grown = grow_float(middle)
+    print_int(len(grown))
+    print(grown[2] == 4.5)
+    print([7.5, 8.5][1] == 8.5)
+
+    var flags = make([]bool, 0, 2)
+    flags = append(flags, true)
+    flags = append(flags, false)
+    flags = append(flags, true)
+    print_int(len(flags))
+    print(flags[0])
+    print(flags[1])
+    flags[1] = true
+    print(flags[1])
+
+    let first_two = flags[:2]
+    print_int(len(first_two))
+    print(first_two[0])
+    let changed = flip_first(first_two)
+    print(changed[0])
+    print([true, false][1])
+}

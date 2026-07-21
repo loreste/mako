@@ -1,0 +1,18 @@
+// Canonical Fibonacci recurrence: exercises native fast-doubling lowering and
+// differential behavior for base cases, negative input, and recursive input.
+
+fn fib(n: int) -> int {
+    if n < 2 {
+        return n
+    }
+    return fib(n - 1) + fib(n - 2)
+}
+
+fn main() {
+    print_int(fib(-3))
+    print_int(fib(0))
+    print_int(fib(1))
+    print_int(fib(2))
+    print_int(fib(10))
+    print_int(fib(40))
+}

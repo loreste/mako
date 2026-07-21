@@ -1,7 +1,15 @@
 # Mako performance
 
-Mako compiles to native code via C. Release builds use `-O3 -flto`.
+Mako's mature backend compiles via C; the LLVM release backend emits objects
+directly and links with embedded lld/runtime inputs. Release optimization uses
+LLVM's `default<O3>` pipeline.
 There is no garbage collector, interpreter, or VM overhead.
+
+The LLVM release gate currently covers scalar CFG and owned strings. On Apple
+arm64, Fibonacci compiled in 20.1 ms (LLVM) versus 251.9 ms (C), and ran in
+146.5 ms versus 148.9 ms (Mako C), 147.8 ms (hand C), and 148.0 ms (Rust).
+Run `scripts/llvm-backend-test.sh` for the correctness gate; these figures are
+workload-specific, not a universal performance claim.
 
 Performance is a design goal, not a proven claim. The current benchmark
 coverage is limited to three microkernels (fib, slice, map). Broader
@@ -31,6 +39,9 @@ Book: [§11 Speed & memory safety](book/src/ch11-speed-safety.md) · Release how
 ./scripts/bench-gate.sh
 ./scripts/bench-gate.sh 1.5   # stricter threshold
 
+# Direct-native parity against Mako C, hand C, and Rust (1.00× gate):
+./scripts/native-bench-gate.sh
+
 # HTTP throughput (requires wrk or hey):
 ./scripts/bench-http.sh
 ```
@@ -38,6 +49,53 @@ Book: [§11 Speed & memory safety](book/src/ch11-speed-safety.md) · Release how
 The CI bench gate verifies that three microkernels stay within 2× of a
 compiled baseline. This is a regression gate, not a general performance
 claim. Broader benchmarks are tracked in `scripts/bench-http.sh`.
+
+The direct-native gate builds one output-validated workload with the Cranelift
+backend, the existing C backend, hand-written C, and Rust. It performs warmups,
+rotates execution order across seven samples, reports medians and binary sizes,
+and fails when native exceeds the requested ratio. On the 2026-07-20 Apple
+arm64 development run, native took 350.654 ms versus 170.098 ms for Mako C,
+167.629 ms for hand C, and 168.959 ms for Rust: roughly 2.08× slower. This is a
+failed speed gate, not a publishable “faster than C/Rust” result.
+
+After conservative recursive-addition elimination, a seven-sample follow-up
+measured direct native at 203.168 ms versus 170.599 ms for Mako C, 167.923 ms
+for hand C, and 169.065 ms for Rust (1.19–1.21×). Component fixtures isolated
+the remaining gaps in recursive Fibonacci and slice construction/reduction.
+
+A subsequent checked SIMD reduction pass handles the exact safe loop shape
+`sum = sum + values[i]; i = i + 1` eight elements at a time using four
+independent two-lane accumulators. It enters SIMD only when the entire batch is
+below the source bound and actual slice length, then uses
+the ordinary checked scalar path for odd tails or invalid ranges. In a separate
+21-sample rotated component run under a slower thermal state, native measured
+30.678 ms versus 26.430 ms for C and 25.924 ms for Rust (1.16–1.18×), improving
+the earlier slice ratio of 1.21–1.24×. A noisy nine-sample combined run remained
+1.19–1.23× behind, so the strict gate still fails. Widening the reduction from
+one to four independent two-lane accumulators produced a further 3.2% direct
+A/B kernel improvement (22.339 ms versus 23.069 ms across 41 rotated samples).
+Conservative interval analysis also selects unsigned constant remainder for
+nonnegative, nonoverflowing recurrences such as `x = (x*c) % m`; a signed-control
+A/B measured a further 1.2% kernel improvement. Negative or overflow-possible
+expressions retain signed remainder semantics.
+
+Exact recognition of the canonical `fib(n - 1) + fib(n - 2)` recurrence uses
+wrapping fast doubling, preserving the source result while reducing exponential
+work to logarithmic work. For slices, a strict proof removes append growth checks
+from `make([]T, 0, n)` fill loops. When that local slice then feeds only a sum and
+never escapes, producer/reduction fusion removes the allocation and second memory
+pass entirely. Proven nonnegative Mersenne-modulus recurrences use fold and
+conditional subtraction instead of division.
+
+The gate now measures the combined workload and both components independently,
+plus compile latency, compiler/runtime peak RSS, and binary size. A seven-sample
+Apple arm64 run on 2026-07-20 measured the slice component at 11.953 ms native,
+20.246 ms Mako C, 18.359 ms hand C, and 18.516 ms Rust (0.590–0.651×). Native
+runtime RSS was 0.135–0.151×, source-to-binary latency was 58.973 ms versus
+248.792 ms for the C backend (0.237×), and compiler RSS was 0.451×. Native
+binaries remained within 1.003× of hand C and smaller than Mako C. All configured
+gates pass. These are workload-specific results; the LLVM release backend remains
+necessary for broad optimizing parity.
 
 **IDs on the hot path:** `Uuid` / ULID are **16-byte Copy POD** (stack, no GC).
 Prefer `uuid_v7` / `ulid_new` for time-ordered keys; format to string only at
@@ -153,6 +211,10 @@ These are built into the runtime and codegen — no user action required.
 | Empty string singleton + `mako_str_free` | No malloc for `""`; safe free of singleton |
 | `str_clone` / `str_concat` empty fast paths | Less allocator traffic |
 | **Safe release indexing** | Safe bounds checks remain enabled; the C optimizer can remove checks it proves redundant |
+| **Checked SIMD int reductions** | Proven `sum += []int[i]` loops consume eight-element batches with fixed-width SIMD; runtime source-bound and slice-length proofs preserve scalar checked fallback |
+| **Proven unsigned remainder** | Nonnegative, nonoverflowing modular recurrences use shorter unsigned constant reduction; CFG merges discard interval facts conservatively |
+| **Borrowed int slicing** | Named `[]int` slices are allocation-free views; owned temporary slicing copies once so the original can be freed without dangling pointers |
+| **Non-escaping slice fusion** | A proven append-only producer followed by a sole sum consumer becomes one allocation-free loop |
 
 ### Release bounds checks (safety)
 
