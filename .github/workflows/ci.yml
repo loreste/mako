@@ -59,6 +59,11 @@ jobs:
         shell: bash
         run: ./target/release/mako --help
 
+      - name: Recursive debug compiler (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: cargo run --quiet -- test examples/testing/deep_expr_stack_test.mko
+
       - name: Default test suite (Linux/macOS)
         if: runner.os != 'Windows'
         shell: bash

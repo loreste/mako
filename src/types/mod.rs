@@ -11,6 +11,24 @@ use std::collections::{HashMap, HashSet};
 use crate::ast::*;
 use nll::{block_always_diverges, const_bool, expr_always_diverges, loop_body_may_reach_header};
 
+// A chunk returns Some(result) for a recognized builtin and None to continue.
+// The closure preserves the existing early-return behavior inside each arm.
+macro_rules! check_builtin_match {
+    ($name:expr, { $($arms:tt)* }) => {{
+        let mut unmatched = false;
+        let result = (|| -> Result<Type, TypeError> {
+            match $name {
+                $($arms)*
+                _ => {
+                    unmatched = true;
+                    Ok(Type::Void)
+                }
+            }
+        })();
+        if unmatched { None } else { Some(result) }
+    }};
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Type {
     Void,
@@ -13786,12 +13804,8 @@ impl TypeChecker {
         }
     }
 
-    fn check_expr(&mut self, expr: &Expr) -> Result<Type, TypeError> {
+    fn check_ident_expr(&mut self, expr: &Expr) -> Result<Type, TypeError> {
         match expr {
-            Expr::Int(_) => Ok(Type::Int),
-            Expr::Float(_) => Ok(Type::Float),
-            Expr::Bool(_) => Ok(Type::Bool),
-            Expr::String(_) => Ok(Type::String),
             Expr::Ident(name) => {
                 if self.moved_holds.get(name).copied().unwrap_or(false) {
                     return Err(TypeError::new(format!("use of moved value `{name}`"))
@@ -13874,6 +13888,12 @@ impl TypeChecker {
                     }
                 }
             }
+            _ => unreachable!(),
+        }
+    }
+
+    fn check_binary_expr(&mut self, expr: &Expr) -> Result<Type, TypeError> {
+        match expr {
             Expr::Binary { op, left, right } => {
                 let lt = self.check_expr(left)?;
                 let rt = self.check_expr(right)?;
@@ -14002,6 +14022,12 @@ impl TypeChecker {
                     }
                 }
             }
+            _ => unreachable!(),
+        }
+    }
+
+    fn check_unary_expr(&mut self, expr: &Expr) -> Result<Type, TypeError> {
+        match expr {
             Expr::Unary { op, expr } => {
                 let t = self.check_expr(expr)?;
                 match op {
@@ -14036,6 +14062,12 @@ impl TypeChecker {
                     _ => Err(TypeError::new("invalid unary operand")),
                 }
             }
+            _ => unreachable!(),
+        }
+    }
+
+    fn check_tuple_expr(&mut self, expr: &Expr) -> Result<Type, TypeError> {
+        match expr {
             Expr::Tuple(elems) => {
                 if elems.len() < 2 {
                     return Err(TypeError::new("tuple needs at least 2 elements"));
@@ -14060,6 +14092,12 @@ impl TypeChecker {
                 }
                 Ok(Type::Tuple(tys))
             }
+            _ => unreachable!(),
+        }
+    }
+
+    fn check_chan_open_expr(&mut self, expr: &Expr) -> Result<Type, TypeError> {
+        match expr {
             Expr::ChanOpen { elem, cap } => {
                 let cap_t = self.check_expr(cap)?;
                 if cap_t != Type::Int {
@@ -14100,6 +14138,825 @@ impl TypeChecker {
                     .hint("chan_new(n) remains the int channel API (backward compatible)")),
                 }
             }
+            _ => unreachable!(),
+        }
+    }
+
+    fn check_builtin_call_00(
+        &mut self,
+        name: &str,
+        args: &[Expr],
+    ) -> Option<Result<Type, TypeError>> {
+        check_builtin_match!(name, {
+            "gc_arena_new" | "gc_alloc" | "gc_collect" | "gc_live"
+            | "gc_enabled" | "gc_root" | "gc_unroot" | "gc_link" | "gc_mark"
+            | "gc_root_count" => {
+                return Err(TypeError::new(format!(
+                    "{name} is unavailable: Mako has no garbage collector"
+                ))
+                .hint("use let/hold/share/arena for deterministic ownership"));
+            }
+            "Ok" if args.len() == 1 => {
+                // Prefer expected Result shape from current_expected (nested
+                // constructors) or function return type.
+                let expected = match &self.current_expected {
+                    Some(Type::Result(ok, err)) => {
+                        Some((ok.as_ref().clone(), err.as_ref().clone()))
+                    }
+                    _ => match &self.current_ret {
+                        Type::Result(ok, err) => {
+                            Some((ok.as_ref().clone(), err.as_ref().clone()))
+                        }
+                        _ => None,
+                    },
+                };
+                if let Some((ok, err)) = expected {
+                    let saved_ret = self.current_ret.clone();
+                    let saved_exp = self.current_expected.clone();
+                    self.current_expected = Some(ok.clone());
+                    if matches!(&ok, Type::Result(_, _)) {
+                        self.current_ret = ok.clone();
+                    }
+                    let t = self.check_expr(&args[0])?;
+                    self.current_ret = saved_ret;
+                    self.current_expected = saved_exp;
+                    if !self.compatible(&t, &ok) {
+                        return Err(TypeError::new(format!(
+                            "Ok(...) type mismatch: expected {}, got {}",
+                            ok.display(),
+                            t.display()
+                        )));
+                    }
+                    return Ok(Type::Result(Box::new(ok), Box::new(err)));
+                }
+                let t = self.check_expr(&args[0])?;
+                return Ok(Type::Result(Box::new(t), Box::new(Type::String)));
+            }
+            "Err" if args.len() == 1 => {
+                let expected = match &self.current_expected {
+                    Some(Type::Result(ok, err)) => {
+                        Some((ok.as_ref().clone(), err.as_ref().clone()))
+                    }
+                    _ => match &self.current_ret {
+                        Type::Result(ok, err) => {
+                            Some((ok.as_ref().clone(), err.as_ref().clone()))
+                        }
+                        _ => None,
+                    },
+                };
+                if let Some((ok, err)) = expected {
+                    let e = self.check_expr(&args[0])?;
+                    if !self.compatible(&e, &err) {
+                        return Err(TypeError::new(format!(
+                            "Err(...) type mismatch: expected {}, got {}",
+                            err.display(),
+                            e.display()
+                        )));
+                    }
+                    return Ok(Type::Result(Box::new(ok), Box::new(err)));
+                }
+                let e = self.check_expr(&args[0])?;
+                return Ok(Type::Result(Box::new(Type::Int), Box::new(e)));
+            }
+            "error" if args.len() == 1 => {
+                let e = self.check_expr(&args[0])?;
+                if e != Type::String {
+                    return Err(TypeError::new("error(...) expects a string message"));
+                }
+                return Ok(Type::Result(Box::new(Type::Int), Box::new(Type::String)));
+            }
+            // error_context(r, msg) — richer error seed (alias of wrap_err)
+            "error_context" | "wrap_err" if args.len() == 2 => {
+                let r = self.check_expr(&args[0])?;
+                let msg = self.check_expr(&args[1])?;
+                match &r {
+                    Type::Result(_, e) if **e == Type::String => {
+                        if msg != Type::String {
+                            return Err(TypeError::new(
+                                "wrap_err / error_context prefix must be string",
+                            ));
+                        }
+                        return Ok(r);
+                    }
+                    other => {
+                        return Err(TypeError::new(format!(
+                            "wrap_err expects Result[_, string], got {}",
+                            other.display()
+                        )));
+                    }
+                }
+            }
+            "errorf" if args.len() == 2 => {
+                let fmt = self.check_expr(&args[0])?;
+                let arg = self.check_expr(&args[1])?;
+                if fmt != Type::String || arg != Type::String {
+                    return Err(TypeError::new(
+                        "errorf(fmt, arg) expects two strings (Go-like fmt.Errorf)",
+                    ));
+                }
+                return Ok(Type::Result(Box::new(Type::Int), Box::new(Type::String)));
+            }
+            // error_join(a, b): if either Err, return Err with both messages; else Ok(a)
+            "error_join" if args.len() == 2 => {
+                let a = self.check_expr(&args[0])?;
+                let b = self.check_expr(&args[1])?;
+                match (&a, &b) {
+                    (Type::Result(_, e1), Type::Result(_, e2))
+                        if **e1 == Type::String && **e2 == Type::String =>
+                    {
+                        return Ok(a);
+                    }
+                    _ => {
+                        return Err(TypeError::new(
+                            "error_join expects two Result[_, string] values",
+                        ));
+                    }
+                }
+            }
+            "error_tag" if args.len() == 2 => {
+                let tag = self.check_expr(&args[0])?;
+                let msg = self.check_expr(&args[1])?;
+                if tag != Type::String || msg != Type::String {
+                    return Err(TypeError::new(
+                        "error_tag(tag, msg) expects two strings",
+                    ));
+                }
+                if let Type::Result(ok, err) = &self.current_ret {
+                    if **err == Type::String {
+                        return Ok(Type::Result(ok.clone(), err.clone()));
+                    }
+                }
+                return Ok(Type::Result(
+                    Box::new(Type::Int),
+                    Box::new(Type::String),
+                ));
+            }
+            "error_is" if args.len() == 2 => {
+                let r = self.check_expr(&args[0])?;
+                let needle = self.check_expr(&args[1])?;
+                match &r {
+                    Type::Result(_, e) if **e == Type::String => {
+                        if needle != Type::String {
+                            return Err(TypeError::new(
+                                "error_is needle must be string",
+                            ));
+                        }
+                        return Ok(Type::Bool);
+                    }
+                    other => {
+                        return Err(TypeError::new(format!(
+                            "error_is expects Result[_, string], got {}",
+                            other.display()
+                        )));
+                    }
+                }
+            }
+            "error_string" if args.len() == 1 => {
+                let r = self.check_expr(&args[0])?;
+                match &r {
+                    Type::Result(_, e) if **e == Type::String => {
+                        return Ok(Type::String);
+                    }
+                    other => {
+                        return Err(TypeError::new(format!(
+                            "error_string expects Result[_, string], got {}",
+                            other.display()
+                        )));
+                    }
+                }
+            }
+        })
+    }
+
+    fn check_builtin_call_01(
+        &mut self,
+        name: &str,
+        args: &[Expr],
+    ) -> Option<Result<Type, TypeError>> {
+        check_builtin_match!(name, {
+            "error_unwrap" | "error_root" if args.len() == 1 => {
+                let r = self.check_expr(&args[0])?;
+                match &r {
+                    Type::Result(_, e) if **e == Type::String => {
+                        return Ok(r);
+                    }
+                    other => {
+                        return Err(TypeError::new(format!(
+                            "error_unwrap/error_root expects Result[_, string], got {}",
+                            other.display()
+                        )));
+                    }
+                }
+            }
+            "error_as_tag" if args.len() == 1 => {
+                let r = self.check_expr(&args[0])?;
+                match &r {
+                    Type::Result(_, e) if **e == Type::String => {
+                        return Ok(Type::String);
+                    }
+                    other => {
+                        return Err(TypeError::new(format!(
+                            "error_as_tag expects Result[_, string], got {}",
+                            other.display()
+                        )));
+                    }
+                }
+            }
+            "error_has_tag" if args.len() == 2 => {
+                let r = self.check_expr(&args[0])?;
+                let tag = self.check_expr(&args[1])?;
+                match &r {
+                    Type::Result(_, e) if **e == Type::String => {
+                        if tag != Type::String {
+                            return Err(TypeError::new(
+                                "error_has_tag tag must be string",
+                            ));
+                        }
+                        return Ok(Type::Bool);
+                    }
+                    other => {
+                        return Err(TypeError::new(format!(
+                            "error_has_tag expects Result[_, string], got {}",
+                            other.display()
+                        )));
+                    }
+                }
+            }
+            "dbg" if args.len() == 1 => {
+                let t = self.check_expr(&args[0])?;
+                if !matches!(
+                    t,
+                    Type::Int
+                        | Type::Int64
+                        | Type::Int32
+                        | Type::Int8
+                        | Type::Byte
+                        | Type::Bool
+                ) {
+                    return Err(TypeError::new(
+                        "dbg(x) expects an integer (use dbg_str for strings)",
+                    ));
+                }
+                return Ok(t);
+            }
+            "dbg_str" if args.len() == 1 => {
+                let t = self.check_expr(&args[0])?;
+                if t != Type::String {
+                    return Err(TypeError::new("dbg_str expects string"));
+                }
+                return Ok(Type::String);
+            }
+            "reflect_value_of" if args.len() == 1 => {
+                let t = self.check_expr(&args[0])?;
+                return match &t {
+                    Type::Named(n) if self.is_reflectable_struct(n) => {
+                        Ok(Type::Named("ReflectValue".into()))
+                    }
+                    Type::Struct { name, .. } if self.is_reflectable_struct(name) => {
+                        Ok(Type::Named("ReflectValue".into()))
+                    }
+                    _ => Err(TypeError::new(
+                        "reflect_value_of expects a reflectable struct (POD leaves, \
+                         nested POD, Option/Result/array/map of reflectable fields)",
+                    )),
+                };
+            }
+            "share_int" if args.len() == 1 => {
+                let t = self.check_expr(&args[0])?;
+                if t != Type::Int {
+                    return Err(TypeError::new(format!(
+                        "share_int expects int, got {}",
+                        t.display()
+                    )));
+                }
+                if let Expr::Ident(src) = &args[0] {
+                    if self.shared_borrows.contains_key(src) {
+                        return Err(TypeError::new(format!(
+                            "cannot share `{src}` — already shared"
+                        ))
+                        .hint("drop the existing share first (NLL: one live share of a local)"));
+                    }
+                    self.shared_borrows.insert(src.clone(), true);
+                }
+                return Ok(Type::Named("ShareInt".into()));
+            }
+            "share_drop" if args.len() == 1 => {
+                let t = self.check_expr(&args[0])?;
+                let _ = t;
+                if let Expr::Ident(share_name) = &args[0] {
+                    self.share_vars.remove(share_name);
+                    self.share_scope_depth.remove(share_name);
+                    if let Some(src) = self.share_sources.remove(share_name) {
+                        let still = self.share_sources.values().any(|s| s == &src);
+                        if !still {
+                            self.shared_borrows.remove(&src);
+                        }
+                    } else {
+                        // Unknown mapping — clear all (legacy).
+                        self.shared_borrows.clear();
+                    }
+                } else {
+                    self.shared_borrows.clear();
+                }
+                return Ok(Type::Void);
+            }
+            "Some" if args.len() == 1 => {
+                // Nested Some under Ok(Some(...)) or Option return: use expected inner.
+                let expected_inner = match &self.current_expected {
+                    Some(Type::Option(i)) => Some(i.as_ref().clone()),
+                    _ => match &self.current_ret {
+                        Type::Option(i) => Some(i.as_ref().clone()),
+                        _ => None,
+                    },
+                };
+                if let Some(inner) = expected_inner {
+                    let saved_ret = self.current_ret.clone();
+                    let saved_exp = self.current_expected.clone();
+                    self.current_expected = Some(inner.clone());
+                    if matches!(&inner, Type::Result(_, _)) {
+                        self.current_ret = inner.clone();
+                    }
+                    let t = self.check_expr(&args[0])?;
+                    self.current_ret = saved_ret;
+                    self.current_expected = saved_exp;
+                    if !self.compatible(&t, &inner) {
+                        return Err(TypeError::new(format!(
+                            "Some(...) type mismatch: expected {}, got {}",
+                            inner.display(),
+                            t.display()
+                        )));
+                    }
+                    return Ok(Type::Option(Box::new(inner)));
+                }
+                let t = self.check_expr(&args[0])?;
+                return Ok(Type::Option(Box::new(t)));
+            }
+            "None" if args.is_empty() => {
+                if let Some(Type::Option(i)) = &self.current_expected {
+                    return Ok(Type::Option(i.clone()));
+                }
+                if let Type::Option(i) = &self.current_ret {
+                    return Ok(Type::Option(i.clone()));
+                }
+                return Ok(Type::Option(Box::new(Type::Int)));
+            }
+            "print" => {
+                if args.len() != 1 {
+                    return Err(TypeError::new("print takes 1 arg"));
+                }
+                self.check_expr(&args[0])?;
+                return Ok(Type::Void);
+            }
+        })
+    }
+
+    fn check_builtin_call_02(
+        &mut self,
+        name: &str,
+        args: &[Expr],
+    ) -> Option<Result<Type, TypeError>> {
+        check_builtin_match!(name, {
+            "print_int64" if args.len() == 1 => {
+                let t = self.check_expr(&args[0])?;
+                if t != Type::Int64 {
+                    return Err(TypeError::new(format!(
+                        "print_int64 expects int64, got {}",
+                        t.display()
+                    ))
+                    .hint("use print_int for int, or int64(x) to convert"));
+                }
+                return Ok(Type::Void);
+            }
+            "print_int32" if args.len() == 1 => {
+                let t = self.check_expr(&args[0])?;
+                if t != Type::Int32 {
+                    return Err(TypeError::new(format!(
+                        "print_int32 expects int32, got {}",
+                        t.display()
+                    )));
+                }
+                return Ok(Type::Void);
+            }
+            "print_int8" if args.len() == 1 => {
+                let t = self.check_expr(&args[0])?;
+                if t != Type::Int8 {
+                    return Err(TypeError::new(format!(
+                        "print_int8 expects int8, got {}",
+                        t.display()
+                    )));
+                }
+                return Ok(Type::Void);
+            }
+            "print_uint64" if args.len() == 1 => {
+                let t = self.check_expr(&args[0])?;
+                if t != Type::UInt64 {
+                    return Err(TypeError::new(format!(
+                        "print_uint64 expects uint64, got {}",
+                        t.display()
+                    )));
+                }
+                return Ok(Type::Void);
+            }
+            "print_float" if args.len() == 1 => {
+                let t = self.check_expr(&args[0])?;
+                if t != Type::Float {
+                    return Err(TypeError::new(format!(
+                        "print_float expects float, got {}",
+                        t.display()
+                    )));
+                }
+                return Ok(Type::Void);
+            }
+            // Go-like conversions between integer kinds + string/[]byte
+            "int64" if args.len() == 1 => {
+                let t = self.check_expr(&args[0])?;
+                if is_int_family(&t) || t == Type::Float {
+                    return Ok(Type::Int64);
+                }
+                return Err(TypeError::new(format!(
+                    "cannot convert {} to int64",
+                    t.display()
+                )));
+            }
+            "int32" if args.len() == 1 => {
+                let t = self.check_expr(&args[0])?;
+                if is_int_family(&t) || t == Type::Float {
+                    return Ok(Type::Int32);
+                }
+                return Err(TypeError::new(format!(
+                    "cannot convert {} to int32",
+                    t.display()
+                )));
+            }
+            "int8" if args.len() == 1 => {
+                if let Ok(v) = try_fold_const(&args[0]) {
+                    if v < -128 || v > 127 {
+                        return Err(TypeError::new(format!(
+                            "int8({v}) out of range -128..127"
+                        )));
+                    }
+                }
+                let t = self.check_expr(&args[0])?;
+                if is_int_family(&t) || t == Type::Float {
+                    return Ok(Type::Int8);
+                }
+                return Err(TypeError::new(format!(
+                    "cannot convert {} to int8",
+                    t.display()
+                )));
+            }
+            "uint64" if args.len() == 1 => {
+                if let Ok(v) = try_fold_const(&args[0]) {
+                    if v < 0 {
+                        return Err(TypeError::new(format!(
+                            "uint64({v}) rejects negative constant"
+                        )));
+                    }
+                }
+                let t = self.check_expr(&args[0])?;
+                if is_int_family(&t) || t == Type::Float {
+                    return Ok(Type::UInt64);
+                }
+                return Err(TypeError::new(format!(
+                    "cannot convert {} to uint64",
+                    t.display()
+                )));
+            }
+            "byte" if args.len() == 1 => {
+                if let Ok(v) = try_fold_const(&args[0]) {
+                    if v < 0 || v > 255 {
+                        return Err(TypeError::new(format!(
+                            "byte({v}) out of range 0..255"
+                        )));
+                    }
+                }
+                let t = self.check_expr(&args[0])?;
+                if is_int_family(&t) || t == Type::Float {
+                    return Ok(Type::Byte);
+                }
+                return Err(TypeError::new(format!(
+                    "cannot convert {} to byte",
+                    t.display()
+                )));
+            }
+            "int" if args.len() == 1 => {
+                let t = self.check_expr(&args[0])?;
+                if is_int_family(&t) || t == Type::Float {
+                    return Ok(Type::Int);
+                }
+                return Err(TypeError::new(format!(
+                    "cannot convert {} to int",
+                    t.display()
+                )));
+            }
+            "float" | "float64" if args.len() == 1 => {
+                let t = self.check_expr(&args[0])?;
+                if is_int_family(&t) || t == Type::Float {
+                    return Ok(Type::Float);
+                }
+                return Err(TypeError::new(format!(
+                    "cannot convert {} to float",
+                    t.display()
+                )));
+            }
+            // string([]byte) / string(int…) / string(string)
+            "string" if args.len() == 1 => {
+                let t = self.check_expr(&args[0])?;
+                match t {
+                    Type::Array(inner) if *inner == Type::Byte => {
+                        return Ok(Type::String);
+                    }
+                    Type::String => return Ok(Type::String),
+                    t if is_int_family(&t) => return Ok(Type::String),
+                    other => {
+                        return Err(TypeError::new(format!(
+                            "cannot convert {} to string (need []byte, int family, or string)",
+                            other.display()
+                        )));
+                    }
+                }
+            }
+            // Go `[]byte(s)` — Mako uses bytes(s) (type `[]byte` is not a call)
+            "bytes" if args.len() == 1 => {
+                let t = self.check_expr(&args[0])?;
+                match t {
+                    Type::String => {
+                        return Ok(Type::Array(Box::new(Type::Byte)));
+                    }
+                    Type::Array(inner) if *inner == Type::Byte => {
+                        return Ok(Type::Array(Box::new(Type::Byte)));
+                    }
+                    other => {
+                        return Err(TypeError::new(format!(
+                            "bytes(...) expects string or []byte, got {}",
+                            other.display()
+                        )));
+                    }
+                }
+            }
+        })
+    }
+
+    fn check_builtin_call_03(
+        &mut self,
+        name: &str,
+        args: &[Expr],
+    ) -> Option<Result<Type, TypeError>> {
+        check_builtin_match!(name, {
+            "assert_eq" if args.len() == 2 => {
+                let a = self.check_expr(&args[0])?;
+                let b = if matches!(args[1], Expr::Int(_)) && is_int_family(&a) {
+                    a.clone()
+                } else {
+                    self.check_expr(&args[1])?
+                };
+                let a = if matches!(args[0], Expr::Int(_)) && is_int_family(&b) {
+                    b.clone()
+                } else {
+                    a
+                };
+                let ok = a == b && is_int_family(&a);
+                if !ok {
+                    return Err(TypeError::new(format!(
+                        "assert_eq needs matching integer kinds, got {} and {}",
+                        a.display(),
+                        b.display()
+                    )));
+                }
+                return Ok(Type::Void);
+            }
+            "copy" if args.len() == 2 => {
+                let dt = self.check_expr(&args[0])?;
+                let st = self.check_expr(&args[1])?;
+                match (&dt, &st) {
+                    (Type::Array(a), Type::Array(b)) if self.compatible(a, b) => {
+                        return Ok(Type::Int);
+                    }
+                    (Type::Array(_), Type::Array(_)) => {
+                        return Err(TypeError::new(format!(
+                            "copy element type mismatch: {} vs {}",
+                            dt.display(),
+                            st.display()
+                        )));
+                    }
+                    _ => {
+                        return Err(TypeError::new(format!(
+                            "copy needs two slices, got {} and {}",
+                            dt.display(),
+                            st.display()
+                        )));
+                    }
+                }
+            }
+            "len" if args.len() == 1 => {
+                let t = self.check_expr(&args[0])?;
+                return match t {
+                    Type::Array(_)
+                    | Type::String
+                    | Type::Map(_, _)
+                    | Type::StrBuilder => Ok(Type::Int),
+                    Type::Named(n) if n == "string_view" => Ok(Type::Int),
+                    other => Err(TypeError::new(format!(
+                        "len needs slice/array/string/map/string_view, got {}",
+                        other.display()
+                    ))),
+                };
+            }
+            "delete" if args.len() == 2 => {
+                let mt = self.check_expr(&args[0])?;
+                let kt = self.check_expr(&args[1])?;
+                return match mt {
+                    Type::Map(k, _) => {
+                        if !self.compatible(&kt, &k) {
+                            return Err(TypeError::new(format!(
+                                "delete key type mismatch: expected {}, got {}",
+                                k.display(),
+                                kt.display()
+                            )));
+                        }
+                        Ok(Type::Void)
+                    }
+                    other => Err(TypeError::new(format!(
+                        "delete needs a map, got {}",
+                        other.display()
+                    ))),
+                };
+            }
+            "chan_len" | "chan_cap" if args.len() == 1 => {
+                let t = self.check_expr(&args[0])?;
+                return match t {
+                    Type::Chan(_) => Ok(Type::Int),
+                    other => Err(TypeError::new(format!(
+                        "{} needs a channel, got {}",
+                        name, other.display()
+                    ))),
+                };
+            }
+            "maps_keys" if args.len() == 1 => {
+                let t = self.check_expr(&args[0])?;
+                return match t {
+                    Type::Map(k, _) if matches!(k.as_ref(), Type::String) => {
+                        Ok(Type::Array(Box::new(Type::String)))
+                    }
+                    Type::Map(k, _) if matches!(k.as_ref(), Type::Int) => {
+                        Ok(Type::Array(Box::new(Type::Int)))
+                    }
+                    Type::Map(k, _) if matches!(k.as_ref(), Type::Float) => {
+                        Ok(Type::Array(Box::new(Type::Float)))
+                    }
+                    Type::Map(k, _) if matches!(k.as_ref(), Type::Bool) => {
+                        Ok(Type::Array(Box::new(Type::Bool)))
+                    }
+                    Type::Map(k, _) if matches!(k.as_ref(), Type::Struct { .. }) => {
+                        Ok(Type::Array(k))
+                    }
+                    Type::Map(k, _) if matches!(k.as_ref(), Type::Enum { .. }) => {
+                        Ok(Type::Array(k))
+                    }
+                    other => Err(TypeError::new(format!(
+                        "maps_keys needs a map, got {}",
+                        other.display()
+                    ))),
+                };
+            }
+            "maps_values" if args.len() == 1 => {
+                let t = self.check_expr(&args[0])?;
+                return match t {
+                    Type::Map(_, v) => Ok(Type::Array(v)),
+                    other => Err(TypeError::new(format!(
+                        "maps_values needs a map, got {}",
+                        other.display()
+                    ))),
+                };
+            }
+            "maps_clear" if args.len() == 1 => {
+                let t = self.check_expr(&args[0])?;
+                return match t {
+                    Type::Map(_, _) => Ok(Type::Void),
+                    other => Err(TypeError::new(format!(
+                        "maps_clear needs a map, got {}",
+                        other.display()
+                    ))),
+                };
+            }
+            "maps_clone" if args.len() == 1 => {
+                let t = self.check_expr(&args[0])?;
+                return match t {
+                    Type::Map(_, _) => Ok(t),
+                    other => Err(TypeError::new(format!(
+                        "maps_clone needs a map, got {}",
+                        other.display()
+                    ))),
+                };
+            }
+            "maps_equal" if args.len() == 2 => {
+                let a = self.check_expr(&args[0])?;
+                let b = self.check_expr(&args[1])?;
+                return match (&a, &b) {
+                    (Type::Map(k1, v1), Type::Map(k2, v2))
+                        if self.compatible(k1, k2) && self.compatible(v1, v2) =>
+                    {
+                        Ok(Type::Int)
+                    }
+                    _ => Err(TypeError::new(format!(
+                        "maps_equal needs two maps of the same type, got {} and {}",
+                        a.display(),
+                        b.display()
+                    ))),
+                };
+            }
+            "maps_copy" if args.len() == 2 => {
+                let a = self.check_expr(&args[0])?;
+                let b = self.check_expr(&args[1])?;
+                return match (&a, &b) {
+                    (Type::Map(k1, v1), Type::Map(k2, v2))
+                        if self.compatible(k1, k2) && self.compatible(v1, v2) =>
+                    {
+                        Ok(Type::Void)
+                    }
+                    _ => Err(TypeError::new(format!(
+                        "maps_copy needs two maps of the same type, got {} and {}",
+                        a.display(),
+                        b.display()
+                    ))),
+                };
+            }
+        })
+    }
+
+    fn check_builtin_call_04(
+        &mut self,
+        name: &str,
+        args: &[Expr],
+    ) -> Option<Result<Type, TypeError>> {
+        check_builtin_match!(name, {
+            "has" if args.len() == 2 => {
+                let mt = self.check_expr(&args[0])?;
+                let kt = self.check_expr(&args[1])?;
+                return match mt {
+                    Type::Map(k, _) => {
+                        if !self.compatible(&kt, &k) {
+                            return Err(TypeError::new(format!(
+                                "has key type mismatch: expected {}, got {}",
+                                k.display(),
+                                kt.display()
+                            )));
+                        }
+                        Ok(Type::Bool)
+                    }
+                    other => Err(TypeError::new(format!(
+                        "has needs a map, got {}",
+                        other.display()
+                    ))),
+                };
+            }
+            "cap" if args.len() == 1 => {
+                let t = self.check_expr(&args[0])?;
+                return match t {
+                    Type::Array(_) => Ok(Type::Int),
+                    other => Err(TypeError::new(format!(
+                        "cap needs slice ([]int), got {}",
+                        other.display()
+                    ))),
+                };
+            }
+            "append" if args.len() == 2 => {
+                let st = self.check_expr(&args[0])?;
+                match st {
+                    Type::Array(inner) => {
+                        // Push element type so None/Some/Ok/Err match []Option / []Result.
+                        let saved_expected = self.current_expected.clone();
+                        self.current_expected = Some(inner.as_ref().clone());
+                        let vt = if matches!(args[1], Expr::Int(_))
+                            && is_literal_int_kind(inner.as_ref())
+                        {
+                            (*inner).clone()
+                        } else {
+                            self.check_expr(&args[1])?
+                        };
+                        self.current_expected = saved_expected;
+                        if !self.compatible(&vt, &inner) {
+                            return Err(TypeError::new(format!(
+                                "append element type mismatch: expected {}, got {}",
+                                inner.display(),
+                                vt.display()
+                            )));
+                        }
+                        return Ok(Type::Array(inner));
+                    }
+                    other => {
+                        return Err(TypeError::new(format!(
+                            "append needs slice, got {}",
+                            other.display()
+                        )));
+                    }
+                }
+            }
+        })
+    }
+
+    fn check_call_expr(&mut self, expr: &Expr) -> Result<Type, TypeError> {
+        match expr {
             Expr::Call { callee, args } => {
                 if let Expr::Ident(name) = callee.as_ref() {
                     if name == "unsafe_index" && self.unsafe_depth == 0 {
@@ -14164,776 +15021,20 @@ impl TypeChecker {
                     if self.generic_fns.contains_key(name) {
                         return self.check_generic_call(name, args);
                     }
-                    match name.as_str() {
-                        "gc_arena_new" | "gc_alloc" | "gc_collect" | "gc_live"
-                        | "gc_enabled" | "gc_root" | "gc_unroot" | "gc_link" | "gc_mark"
-                        | "gc_root_count" => {
-                            return Err(TypeError::new(format!(
-                                "{name} is unavailable: Mako has no garbage collector"
-                            ))
-                            .hint("use let/hold/share/arena for deterministic ownership"));
-                        }
-                        "Ok" if args.len() == 1 => {
-                            // Prefer expected Result shape from current_expected (nested
-                            // constructors) or function return type.
-                            let expected = match &self.current_expected {
-                                Some(Type::Result(ok, err)) => {
-                                    Some((ok.as_ref().clone(), err.as_ref().clone()))
-                                }
-                                _ => match &self.current_ret {
-                                    Type::Result(ok, err) => {
-                                        Some((ok.as_ref().clone(), err.as_ref().clone()))
-                                    }
-                                    _ => None,
-                                },
-                            };
-                            if let Some((ok, err)) = expected {
-                                let saved_ret = self.current_ret.clone();
-                                let saved_exp = self.current_expected.clone();
-                                self.current_expected = Some(ok.clone());
-                                if matches!(&ok, Type::Result(_, _)) {
-                                    self.current_ret = ok.clone();
-                                }
-                                let t = self.check_expr(&args[0])?;
-                                self.current_ret = saved_ret;
-                                self.current_expected = saved_exp;
-                                if !self.compatible(&t, &ok) {
-                                    return Err(TypeError::new(format!(
-                                        "Ok(...) type mismatch: expected {}, got {}",
-                                        ok.display(),
-                                        t.display()
-                                    )));
-                                }
-                                return Ok(Type::Result(Box::new(ok), Box::new(err)));
-                            }
-                            let t = self.check_expr(&args[0])?;
-                            return Ok(Type::Result(Box::new(t), Box::new(Type::String)));
-                        }
-                        "Err" if args.len() == 1 => {
-                            let expected = match &self.current_expected {
-                                Some(Type::Result(ok, err)) => {
-                                    Some((ok.as_ref().clone(), err.as_ref().clone()))
-                                }
-                                _ => match &self.current_ret {
-                                    Type::Result(ok, err) => {
-                                        Some((ok.as_ref().clone(), err.as_ref().clone()))
-                                    }
-                                    _ => None,
-                                },
-                            };
-                            if let Some((ok, err)) = expected {
-                                let e = self.check_expr(&args[0])?;
-                                if !self.compatible(&e, &err) {
-                                    return Err(TypeError::new(format!(
-                                        "Err(...) type mismatch: expected {}, got {}",
-                                        err.display(),
-                                        e.display()
-                                    )));
-                                }
-                                return Ok(Type::Result(Box::new(ok), Box::new(err)));
-                            }
-                            let e = self.check_expr(&args[0])?;
-                            return Ok(Type::Result(Box::new(Type::Int), Box::new(e)));
-                        }
-                        "error" if args.len() == 1 => {
-                            let e = self.check_expr(&args[0])?;
-                            if e != Type::String {
-                                return Err(TypeError::new("error(...) expects a string message"));
-                            }
-                            return Ok(Type::Result(Box::new(Type::Int), Box::new(Type::String)));
-                        }
-                        // error_context(r, msg) — richer error seed (alias of wrap_err)
-                        "error_context" | "wrap_err" if args.len() == 2 => {
-                            let r = self.check_expr(&args[0])?;
-                            let msg = self.check_expr(&args[1])?;
-                            match &r {
-                                Type::Result(_, e) if **e == Type::String => {
-                                    if msg != Type::String {
-                                        return Err(TypeError::new(
-                                            "wrap_err / error_context prefix must be string",
-                                        ));
-                                    }
-                                    return Ok(r);
-                                }
-                                other => {
-                                    return Err(TypeError::new(format!(
-                                        "wrap_err expects Result[_, string], got {}",
-                                        other.display()
-                                    )));
-                                }
-                            }
-                        }
-                        "errorf" if args.len() == 2 => {
-                            let fmt = self.check_expr(&args[0])?;
-                            let arg = self.check_expr(&args[1])?;
-                            if fmt != Type::String || arg != Type::String {
-                                return Err(TypeError::new(
-                                    "errorf(fmt, arg) expects two strings (Go-like fmt.Errorf)",
-                                ));
-                            }
-                            return Ok(Type::Result(Box::new(Type::Int), Box::new(Type::String)));
-                        }
-                        // error_join(a, b): if either Err, return Err with both messages; else Ok(a)
-                        "error_join" if args.len() == 2 => {
-                            let a = self.check_expr(&args[0])?;
-                            let b = self.check_expr(&args[1])?;
-                            match (&a, &b) {
-                                (Type::Result(_, e1), Type::Result(_, e2))
-                                    if **e1 == Type::String && **e2 == Type::String =>
-                                {
-                                    return Ok(a);
-                                }
-                                _ => {
-                                    return Err(TypeError::new(
-                                        "error_join expects two Result[_, string] values",
-                                    ));
-                                }
-                            }
-                        }
-                        "error_tag" if args.len() == 2 => {
-                            let tag = self.check_expr(&args[0])?;
-                            let msg = self.check_expr(&args[1])?;
-                            if tag != Type::String || msg != Type::String {
-                                return Err(TypeError::new(
-                                    "error_tag(tag, msg) expects two strings",
-                                ));
-                            }
-                            if let Type::Result(ok, err) = &self.current_ret {
-                                if **err == Type::String {
-                                    return Ok(Type::Result(ok.clone(), err.clone()));
-                                }
-                            }
-                            return Ok(Type::Result(
-                                Box::new(Type::Int),
-                                Box::new(Type::String),
-                            ));
-                        }
-                        "error_is" if args.len() == 2 => {
-                            let r = self.check_expr(&args[0])?;
-                            let needle = self.check_expr(&args[1])?;
-                            match &r {
-                                Type::Result(_, e) if **e == Type::String => {
-                                    if needle != Type::String {
-                                        return Err(TypeError::new(
-                                            "error_is needle must be string",
-                                        ));
-                                    }
-                                    return Ok(Type::Bool);
-                                }
-                                other => {
-                                    return Err(TypeError::new(format!(
-                                        "error_is expects Result[_, string], got {}",
-                                        other.display()
-                                    )));
-                                }
-                            }
-                        }
-                        "error_string" if args.len() == 1 => {
-                            let r = self.check_expr(&args[0])?;
-                            match &r {
-                                Type::Result(_, e) if **e == Type::String => {
-                                    return Ok(Type::String);
-                                }
-                                other => {
-                                    return Err(TypeError::new(format!(
-                                        "error_string expects Result[_, string], got {}",
-                                        other.display()
-                                    )));
-                                }
-                            }
-                        }
-                        "error_unwrap" | "error_root" if args.len() == 1 => {
-                            let r = self.check_expr(&args[0])?;
-                            match &r {
-                                Type::Result(_, e) if **e == Type::String => {
-                                    return Ok(r);
-                                }
-                                other => {
-                                    return Err(TypeError::new(format!(
-                                        "error_unwrap/error_root expects Result[_, string], got {}",
-                                        other.display()
-                                    )));
-                                }
-                            }
-                        }
-                        "error_as_tag" if args.len() == 1 => {
-                            let r = self.check_expr(&args[0])?;
-                            match &r {
-                                Type::Result(_, e) if **e == Type::String => {
-                                    return Ok(Type::String);
-                                }
-                                other => {
-                                    return Err(TypeError::new(format!(
-                                        "error_as_tag expects Result[_, string], got {}",
-                                        other.display()
-                                    )));
-                                }
-                            }
-                        }
-                        "error_has_tag" if args.len() == 2 => {
-                            let r = self.check_expr(&args[0])?;
-                            let tag = self.check_expr(&args[1])?;
-                            match &r {
-                                Type::Result(_, e) if **e == Type::String => {
-                                    if tag != Type::String {
-                                        return Err(TypeError::new(
-                                            "error_has_tag tag must be string",
-                                        ));
-                                    }
-                                    return Ok(Type::Bool);
-                                }
-                                other => {
-                                    return Err(TypeError::new(format!(
-                                        "error_has_tag expects Result[_, string], got {}",
-                                        other.display()
-                                    )));
-                                }
-                            }
-                        }
-                        "dbg" if args.len() == 1 => {
-                            let t = self.check_expr(&args[0])?;
-                            if !matches!(
-                                t,
-                                Type::Int
-                                    | Type::Int64
-                                    | Type::Int32
-                                    | Type::Int8
-                                    | Type::Byte
-                                    | Type::Bool
-                            ) {
-                                return Err(TypeError::new(
-                                    "dbg(x) expects an integer (use dbg_str for strings)",
-                                ));
-                            }
-                            return Ok(t);
-                        }
-                        "dbg_str" if args.len() == 1 => {
-                            let t = self.check_expr(&args[0])?;
-                            if t != Type::String {
-                                return Err(TypeError::new("dbg_str expects string"));
-                            }
-                            return Ok(Type::String);
-                        }
-                        "reflect_value_of" if args.len() == 1 => {
-                            let t = self.check_expr(&args[0])?;
-                            return match &t {
-                                Type::Named(n) if self.is_reflectable_struct(n) => {
-                                    Ok(Type::Named("ReflectValue".into()))
-                                }
-                                Type::Struct { name, .. } if self.is_reflectable_struct(name) => {
-                                    Ok(Type::Named("ReflectValue".into()))
-                                }
-                                _ => Err(TypeError::new(
-                                    "reflect_value_of expects a reflectable struct (POD leaves, \
-                                     nested POD, Option/Result/array/map of reflectable fields)",
-                                )),
-                            };
-                        }
-                        "share_int" if args.len() == 1 => {
-                            let t = self.check_expr(&args[0])?;
-                            if t != Type::Int {
-                                return Err(TypeError::new(format!(
-                                    "share_int expects int, got {}",
-                                    t.display()
-                                )));
-                            }
-                            if let Expr::Ident(src) = &args[0] {
-                                if self.shared_borrows.contains_key(src) {
-                                    return Err(TypeError::new(format!(
-                                        "cannot share `{src}` — already shared"
-                                    ))
-                                    .hint("drop the existing share first (NLL: one live share of a local)"));
-                                }
-                                self.shared_borrows.insert(src.clone(), true);
-                            }
-                            return Ok(Type::Named("ShareInt".into()));
-                        }
-                        "share_drop" if args.len() == 1 => {
-                            let t = self.check_expr(&args[0])?;
-                            let _ = t;
-                            if let Expr::Ident(share_name) = &args[0] {
-                                self.share_vars.remove(share_name);
-                                self.share_scope_depth.remove(share_name);
-                                if let Some(src) = self.share_sources.remove(share_name) {
-                                    let still = self.share_sources.values().any(|s| s == &src);
-                                    if !still {
-                                        self.shared_borrows.remove(&src);
-                                    }
-                                } else {
-                                    // Unknown mapping — clear all (legacy).
-                                    self.shared_borrows.clear();
-                                }
-                            } else {
-                                self.shared_borrows.clear();
-                            }
-                            return Ok(Type::Void);
-                        }
-                        "Some" if args.len() == 1 => {
-                            // Nested Some under Ok(Some(...)) or Option return: use expected inner.
-                            let expected_inner = match &self.current_expected {
-                                Some(Type::Option(i)) => Some(i.as_ref().clone()),
-                                _ => match &self.current_ret {
-                                    Type::Option(i) => Some(i.as_ref().clone()),
-                                    _ => None,
-                                },
-                            };
-                            if let Some(inner) = expected_inner {
-                                let saved_ret = self.current_ret.clone();
-                                let saved_exp = self.current_expected.clone();
-                                self.current_expected = Some(inner.clone());
-                                if matches!(&inner, Type::Result(_, _)) {
-                                    self.current_ret = inner.clone();
-                                }
-                                let t = self.check_expr(&args[0])?;
-                                self.current_ret = saved_ret;
-                                self.current_expected = saved_exp;
-                                if !self.compatible(&t, &inner) {
-                                    return Err(TypeError::new(format!(
-                                        "Some(...) type mismatch: expected {}, got {}",
-                                        inner.display(),
-                                        t.display()
-                                    )));
-                                }
-                                return Ok(Type::Option(Box::new(inner)));
-                            }
-                            let t = self.check_expr(&args[0])?;
-                            return Ok(Type::Option(Box::new(t)));
-                        }
-                        "None" if args.is_empty() => {
-                            if let Some(Type::Option(i)) = &self.current_expected {
-                                return Ok(Type::Option(i.clone()));
-                            }
-                            if let Type::Option(i) = &self.current_ret {
-                                return Ok(Type::Option(i.clone()));
-                            }
-                            return Ok(Type::Option(Box::new(Type::Int)));
-                        }
-                        "print" => {
-                            if args.len() != 1 {
-                                return Err(TypeError::new("print takes 1 arg"));
-                            }
-                            self.check_expr(&args[0])?;
-                            return Ok(Type::Void);
-                        }
-                        "print_int64" if args.len() == 1 => {
-                            let t = self.check_expr(&args[0])?;
-                            if t != Type::Int64 {
-                                return Err(TypeError::new(format!(
-                                    "print_int64 expects int64, got {}",
-                                    t.display()
-                                ))
-                                .hint("use print_int for int, or int64(x) to convert"));
-                            }
-                            return Ok(Type::Void);
-                        }
-                        "print_int32" if args.len() == 1 => {
-                            let t = self.check_expr(&args[0])?;
-                            if t != Type::Int32 {
-                                return Err(TypeError::new(format!(
-                                    "print_int32 expects int32, got {}",
-                                    t.display()
-                                )));
-                            }
-                            return Ok(Type::Void);
-                        }
-                        "print_int8" if args.len() == 1 => {
-                            let t = self.check_expr(&args[0])?;
-                            if t != Type::Int8 {
-                                return Err(TypeError::new(format!(
-                                    "print_int8 expects int8, got {}",
-                                    t.display()
-                                )));
-                            }
-                            return Ok(Type::Void);
-                        }
-                        "print_uint64" if args.len() == 1 => {
-                            let t = self.check_expr(&args[0])?;
-                            if t != Type::UInt64 {
-                                return Err(TypeError::new(format!(
-                                    "print_uint64 expects uint64, got {}",
-                                    t.display()
-                                )));
-                            }
-                            return Ok(Type::Void);
-                        }
-                        "print_float" if args.len() == 1 => {
-                            let t = self.check_expr(&args[0])?;
-                            if t != Type::Float {
-                                return Err(TypeError::new(format!(
-                                    "print_float expects float, got {}",
-                                    t.display()
-                                )));
-                            }
-                            return Ok(Type::Void);
-                        }
-                        // Go-like conversions between integer kinds + string/[]byte
-                        "int64" if args.len() == 1 => {
-                            let t = self.check_expr(&args[0])?;
-                            if is_int_family(&t) || t == Type::Float {
-                                return Ok(Type::Int64);
-                            }
-                            return Err(TypeError::new(format!(
-                                "cannot convert {} to int64",
-                                t.display()
-                            )));
-                        }
-                        "int32" if args.len() == 1 => {
-                            let t = self.check_expr(&args[0])?;
-                            if is_int_family(&t) || t == Type::Float {
-                                return Ok(Type::Int32);
-                            }
-                            return Err(TypeError::new(format!(
-                                "cannot convert {} to int32",
-                                t.display()
-                            )));
-                        }
-                        "int8" if args.len() == 1 => {
-                            if let Ok(v) = try_fold_const(&args[0]) {
-                                if v < -128 || v > 127 {
-                                    return Err(TypeError::new(format!(
-                                        "int8({v}) out of range -128..127"
-                                    )));
-                                }
-                            }
-                            let t = self.check_expr(&args[0])?;
-                            if is_int_family(&t) || t == Type::Float {
-                                return Ok(Type::Int8);
-                            }
-                            return Err(TypeError::new(format!(
-                                "cannot convert {} to int8",
-                                t.display()
-                            )));
-                        }
-                        "uint64" if args.len() == 1 => {
-                            if let Ok(v) = try_fold_const(&args[0]) {
-                                if v < 0 {
-                                    return Err(TypeError::new(format!(
-                                        "uint64({v}) rejects negative constant"
-                                    )));
-                                }
-                            }
-                            let t = self.check_expr(&args[0])?;
-                            if is_int_family(&t) || t == Type::Float {
-                                return Ok(Type::UInt64);
-                            }
-                            return Err(TypeError::new(format!(
-                                "cannot convert {} to uint64",
-                                t.display()
-                            )));
-                        }
-                        "byte" if args.len() == 1 => {
-                            if let Ok(v) = try_fold_const(&args[0]) {
-                                if v < 0 || v > 255 {
-                                    return Err(TypeError::new(format!(
-                                        "byte({v}) out of range 0..255"
-                                    )));
-                                }
-                            }
-                            let t = self.check_expr(&args[0])?;
-                            if is_int_family(&t) || t == Type::Float {
-                                return Ok(Type::Byte);
-                            }
-                            return Err(TypeError::new(format!(
-                                "cannot convert {} to byte",
-                                t.display()
-                            )));
-                        }
-                        "int" if args.len() == 1 => {
-                            let t = self.check_expr(&args[0])?;
-                            if is_int_family(&t) || t == Type::Float {
-                                return Ok(Type::Int);
-                            }
-                            return Err(TypeError::new(format!(
-                                "cannot convert {} to int",
-                                t.display()
-                            )));
-                        }
-                        "float" | "float64" if args.len() == 1 => {
-                            let t = self.check_expr(&args[0])?;
-                            if is_int_family(&t) || t == Type::Float {
-                                return Ok(Type::Float);
-                            }
-                            return Err(TypeError::new(format!(
-                                "cannot convert {} to float",
-                                t.display()
-                            )));
-                        }
-                        // string([]byte) / string(int…) / string(string)
-                        "string" if args.len() == 1 => {
-                            let t = self.check_expr(&args[0])?;
-                            match t {
-                                Type::Array(inner) if *inner == Type::Byte => {
-                                    return Ok(Type::String);
-                                }
-                                Type::String => return Ok(Type::String),
-                                t if is_int_family(&t) => return Ok(Type::String),
-                                other => {
-                                    return Err(TypeError::new(format!(
-                                        "cannot convert {} to string (need []byte, int family, or string)",
-                                        other.display()
-                                    )));
-                                }
-                            }
-                        }
-                        // Go `[]byte(s)` — Mako uses bytes(s) (type `[]byte` is not a call)
-                        "bytes" if args.len() == 1 => {
-                            let t = self.check_expr(&args[0])?;
-                            match t {
-                                Type::String => {
-                                    return Ok(Type::Array(Box::new(Type::Byte)));
-                                }
-                                Type::Array(inner) if *inner == Type::Byte => {
-                                    return Ok(Type::Array(Box::new(Type::Byte)));
-                                }
-                                other => {
-                                    return Err(TypeError::new(format!(
-                                        "bytes(...) expects string or []byte, got {}",
-                                        other.display()
-                                    )));
-                                }
-                            }
-                        }
-                        "assert_eq" if args.len() == 2 => {
-                            let a = self.check_expr(&args[0])?;
-                            let b = if matches!(args[1], Expr::Int(_)) && is_int_family(&a) {
-                                a.clone()
-                            } else {
-                                self.check_expr(&args[1])?
-                            };
-                            let a = if matches!(args[0], Expr::Int(_)) && is_int_family(&b) {
-                                b.clone()
-                            } else {
-                                a
-                            };
-                            let ok = a == b && is_int_family(&a);
-                            if !ok {
-                                return Err(TypeError::new(format!(
-                                    "assert_eq needs matching integer kinds, got {} and {}",
-                                    a.display(),
-                                    b.display()
-                                )));
-                            }
-                            return Ok(Type::Void);
-                        }
-                        "copy" if args.len() == 2 => {
-                            let dt = self.check_expr(&args[0])?;
-                            let st = self.check_expr(&args[1])?;
-                            match (&dt, &st) {
-                                (Type::Array(a), Type::Array(b)) if self.compatible(a, b) => {
-                                    return Ok(Type::Int);
-                                }
-                                (Type::Array(_), Type::Array(_)) => {
-                                    return Err(TypeError::new(format!(
-                                        "copy element type mismatch: {} vs {}",
-                                        dt.display(),
-                                        st.display()
-                                    )));
-                                }
-                                _ => {
-                                    return Err(TypeError::new(format!(
-                                        "copy needs two slices, got {} and {}",
-                                        dt.display(),
-                                        st.display()
-                                    )));
-                                }
-                            }
-                        }
-                        "len" if args.len() == 1 => {
-                            let t = self.check_expr(&args[0])?;
-                            return match t {
-                                Type::Array(_)
-                                | Type::String
-                                | Type::Map(_, _)
-                                | Type::StrBuilder => Ok(Type::Int),
-                                Type::Named(n) if n == "string_view" => Ok(Type::Int),
-                                other => Err(TypeError::new(format!(
-                                    "len needs slice/array/string/map/string_view, got {}",
-                                    other.display()
-                                ))),
-                            };
-                        }
-                        "delete" if args.len() == 2 => {
-                            let mt = self.check_expr(&args[0])?;
-                            let kt = self.check_expr(&args[1])?;
-                            return match mt {
-                                Type::Map(k, _) => {
-                                    if !self.compatible(&kt, &k) {
-                                        return Err(TypeError::new(format!(
-                                            "delete key type mismatch: expected {}, got {}",
-                                            k.display(),
-                                            kt.display()
-                                        )));
-                                    }
-                                    Ok(Type::Void)
-                                }
-                                other => Err(TypeError::new(format!(
-                                    "delete needs a map, got {}",
-                                    other.display()
-                                ))),
-                            };
-                        }
-                        "chan_len" | "chan_cap" if args.len() == 1 => {
-                            let t = self.check_expr(&args[0])?;
-                            return match t {
-                                Type::Chan(_) => Ok(Type::Int),
-                                other => Err(TypeError::new(format!(
-                                    "{} needs a channel, got {}",
-                                    name, other.display()
-                                ))),
-                            };
-                        }
-                        "maps_keys" if args.len() == 1 => {
-                            let t = self.check_expr(&args[0])?;
-                            return match t {
-                                Type::Map(k, _) if matches!(k.as_ref(), Type::String) => {
-                                    Ok(Type::Array(Box::new(Type::String)))
-                                }
-                                Type::Map(k, _) if matches!(k.as_ref(), Type::Int) => {
-                                    Ok(Type::Array(Box::new(Type::Int)))
-                                }
-                                Type::Map(k, _) if matches!(k.as_ref(), Type::Float) => {
-                                    Ok(Type::Array(Box::new(Type::Float)))
-                                }
-                                Type::Map(k, _) if matches!(k.as_ref(), Type::Bool) => {
-                                    Ok(Type::Array(Box::new(Type::Bool)))
-                                }
-                                Type::Map(k, _) if matches!(k.as_ref(), Type::Struct { .. }) => {
-                                    Ok(Type::Array(k))
-                                }
-                                Type::Map(k, _) if matches!(k.as_ref(), Type::Enum { .. }) => {
-                                    Ok(Type::Array(k))
-                                }
-                                other => Err(TypeError::new(format!(
-                                    "maps_keys needs a map, got {}",
-                                    other.display()
-                                ))),
-                            };
-                        }
-                        "maps_values" if args.len() == 1 => {
-                            let t = self.check_expr(&args[0])?;
-                            return match t {
-                                Type::Map(_, v) => Ok(Type::Array(v)),
-                                other => Err(TypeError::new(format!(
-                                    "maps_values needs a map, got {}",
-                                    other.display()
-                                ))),
-                            };
-                        }
-                        "maps_clear" if args.len() == 1 => {
-                            let t = self.check_expr(&args[0])?;
-                            return match t {
-                                Type::Map(_, _) => Ok(Type::Void),
-                                other => Err(TypeError::new(format!(
-                                    "maps_clear needs a map, got {}",
-                                    other.display()
-                                ))),
-                            };
-                        }
-                        "maps_clone" if args.len() == 1 => {
-                            let t = self.check_expr(&args[0])?;
-                            return match t {
-                                Type::Map(_, _) => Ok(t),
-                                other => Err(TypeError::new(format!(
-                                    "maps_clone needs a map, got {}",
-                                    other.display()
-                                ))),
-                            };
-                        }
-                        "maps_equal" if args.len() == 2 => {
-                            let a = self.check_expr(&args[0])?;
-                            let b = self.check_expr(&args[1])?;
-                            return match (&a, &b) {
-                                (Type::Map(k1, v1), Type::Map(k2, v2))
-                                    if self.compatible(k1, k2) && self.compatible(v1, v2) =>
-                                {
-                                    Ok(Type::Int)
-                                }
-                                _ => Err(TypeError::new(format!(
-                                    "maps_equal needs two maps of the same type, got {} and {}",
-                                    a.display(),
-                                    b.display()
-                                ))),
-                            };
-                        }
-                        "maps_copy" if args.len() == 2 => {
-                            let a = self.check_expr(&args[0])?;
-                            let b = self.check_expr(&args[1])?;
-                            return match (&a, &b) {
-                                (Type::Map(k1, v1), Type::Map(k2, v2))
-                                    if self.compatible(k1, k2) && self.compatible(v1, v2) =>
-                                {
-                                    Ok(Type::Void)
-                                }
-                                _ => Err(TypeError::new(format!(
-                                    "maps_copy needs two maps of the same type, got {} and {}",
-                                    a.display(),
-                                    b.display()
-                                ))),
-                            };
-                        }
-                        "has" if args.len() == 2 => {
-                            let mt = self.check_expr(&args[0])?;
-                            let kt = self.check_expr(&args[1])?;
-                            return match mt {
-                                Type::Map(k, _) => {
-                                    if !self.compatible(&kt, &k) {
-                                        return Err(TypeError::new(format!(
-                                            "has key type mismatch: expected {}, got {}",
-                                            k.display(),
-                                            kt.display()
-                                        )));
-                                    }
-                                    Ok(Type::Bool)
-                                }
-                                other => Err(TypeError::new(format!(
-                                    "has needs a map, got {}",
-                                    other.display()
-                                ))),
-                            };
-                        }
-                        "cap" if args.len() == 1 => {
-                            let t = self.check_expr(&args[0])?;
-                            return match t {
-                                Type::Array(_) => Ok(Type::Int),
-                                other => Err(TypeError::new(format!(
-                                    "cap needs slice ([]int), got {}",
-                                    other.display()
-                                ))),
-                            };
-                        }
-                        "append" if args.len() == 2 => {
-                            let st = self.check_expr(&args[0])?;
-                            match st {
-                                Type::Array(inner) => {
-                                    // Push element type so None/Some/Ok/Err match []Option / []Result.
-                                    let saved_expected = self.current_expected.clone();
-                                    self.current_expected = Some(inner.as_ref().clone());
-                                    let vt = if matches!(args[1], Expr::Int(_))
-                                        && is_literal_int_kind(inner.as_ref())
-                                    {
-                                        (*inner).clone()
-                                    } else {
-                                        self.check_expr(&args[1])?
-                                    };
-                                    self.current_expected = saved_expected;
-                                    if !self.compatible(&vt, &inner) {
-                                        return Err(TypeError::new(format!(
-                                            "append element type mismatch: expected {}, got {}",
-                                            inner.display(),
-                                            vt.display()
-                                        )));
-                                    }
-                                    return Ok(Type::Array(inner));
-                                }
-                                other => {
-                                    return Err(TypeError::new(format!(
-                                        "append needs slice, got {}",
-                                        other.display()
-                                    )));
-                                }
-                            }
-                        }
-                        _ => {}
+                    if let Some(result) = self.check_builtin_call_00(name, args) {
+                        return result;
+                    }
+                    if let Some(result) = self.check_builtin_call_01(name, args) {
+                        return result;
+                    }
+                    if let Some(result) = self.check_builtin_call_02(name, args) {
+                        return result;
+                    }
+                    if let Some(result) = self.check_builtin_call_03(name, args) {
+                        return result;
+                    }
+                    if let Some(result) = self.check_builtin_call_04(name, args) {
+                        return result;
                     }
                     // Try qualified lookup first using return type context
                     let qualified_ctor = if let Type::Named(ret_name) = &self.current_ret {
@@ -15019,6 +15120,12 @@ impl TypeChecker {
                     other => Err(TypeError::new(format!("cannot call {}", other.display()))),
                 }
             }
+            _ => unreachable!(),
+        }
+    }
+
+    fn check_method_expr(&mut self, expr: &Expr) -> Result<Type, TypeError> {
+        match expr {
             Expr::Method {
                 receiver,
                 method,
@@ -15400,6 +15507,12 @@ impl TypeChecker {
                     }
                 }
             }
+            _ => unreachable!(),
+        }
+    }
+
+    fn check_index_expr(&mut self, expr: &Expr) -> Result<Type, TypeError> {
+        match expr {
             Expr::Index { base, index } => {
                 let bt = self.check_expr(base)?;
                 let it = self.check_expr(index)?;
@@ -15429,6 +15542,12 @@ impl TypeChecker {
                     other => Err(TypeError::new(format!("cannot index {}", other.display()))),
                 }
             }
+            _ => unreachable!(),
+        }
+    }
+
+    fn check_slice_expr(&mut self, expr: &Expr) -> Result<Type, TypeError> {
+        match expr {
             Expr::Slice {
                 base,
                 low,
@@ -15467,6 +15586,12 @@ impl TypeChecker {
                     ))),
                 }
             }
+            _ => unreachable!(),
+        }
+    }
+
+    fn check_field_expr(&mut self, expr: &Expr) -> Result<Type, TypeError> {
+        match expr {
             Expr::Field { base, field } => {
                 // Pack-qualified unit variant: `eng.Red` (alias is not a value).
                 if let Expr::Ident(alias) = base.as_ref() {
@@ -15586,6 +15711,12 @@ impl TypeChecker {
                     ))),
                 }
             }
+            _ => unreachable!(),
+        }
+    }
+
+    fn check_struct_lit_expr(&mut self, expr: &Expr) -> Result<Type, TypeError> {
+        match expr {
             Expr::StructLit {
                 name,
                 fields,
@@ -15670,14 +15801,12 @@ impl TypeChecker {
                     fields: decl,
                 })
             }
-            Expr::StringInterp(parts) => {
-                for p in parts {
-                    if let InterpPart::Expr(e, _) = p {
-                        let _ = self.check_expr(e)?;
-                    }
-                }
-                Ok(Type::String)
-            }
+            _ => unreachable!(),
+        }
+    }
+
+    fn check_struct_lit_pos_expr(&mut self, expr: &Expr) -> Result<Type, TypeError> {
+        match expr {
             Expr::StructLitPos { name, values } => {
                 let Some(Type::Struct {
                     name: sname,
@@ -15721,6 +15850,12 @@ impl TypeChecker {
                     fields: decl,
                 })
             }
+            _ => unreachable!(),
+        }
+    }
+
+    fn check_array_expr(&mut self, expr: &Expr) -> Result<Type, TypeError> {
+        match expr {
             Expr::Array(elems) => {
                 // Prefer element type from expected `[]T` (Option/Result bags, annotated lits).
                 let expected_elem = match &self.current_expected {
@@ -15763,6 +15898,12 @@ impl TypeChecker {
                 }
                 Ok(Type::Array(Box::new(first)))
             }
+            _ => unreachable!(),
+        }
+    }
+
+    fn check_convert_expr(&mut self, expr: &Expr) -> Result<Type, TypeError> {
+        match expr {
             Expr::Convert { ty, args } => {
                 let target = self.resolve_type(ty)?;
                 match &target {
@@ -15789,6 +15930,12 @@ impl TypeChecker {
                     .hint("use bytes(s) or []byte(s) for string→bytes")),
                 }
             }
+            _ => unreachable!(),
+        }
+    }
+
+    fn check_make_expr(&mut self, expr: &Expr) -> Result<Type, TypeError> {
+        match expr {
             Expr::Make { ty, len, cap } => {
                 let target = self.resolve_type(ty)?;
                 match target {
@@ -15915,6 +16062,12 @@ impl TypeChecker {
                     ))),
                 }
             }
+            _ => unreachable!(),
+        }
+    }
+
+    fn check_lambda_expr(&mut self, expr: &Expr) -> Result<Type, TypeError> {
+        match expr {
             Expr::Lambda { params, body } => {
                 // Prefer expected `fn(T, …) -> R` for param/return types (first-class seed).
                 // Fall back to all-int params (fan / untyped) when no expectation.
@@ -15971,6 +16124,12 @@ impl TypeChecker {
                     Ok(Type::Fn(param_tys, Box::new(ret)))
                 }
             }
+            _ => unreachable!(),
+        }
+    }
+
+    fn check_if_expr(&mut self, expr: &Expr) -> Result<Type, TypeError> {
+        match expr {
             Expr::IfExpr {
                 cond,
                 then_block,
@@ -15997,6 +16156,12 @@ impl TypeChecker {
                 }
                 Ok(if tty != Type::Void { tty } else { ety })
             }
+            _ => unreachable!(),
+        }
+    }
+
+    fn check_match_expr(&mut self, expr: &Expr) -> Result<Type, TypeError> {
+        match expr {
             Expr::Match { scrutinee, arms } => {
                 let st = self.check_expr(scrutinee)?;
                 if arms.is_empty() {
@@ -16109,6 +16274,12 @@ impl TypeChecker {
                 }
                 result.ok_or_else(|| TypeError::new("match has no reachable value arm"))
             }
+            _ => unreachable!(),
+        }
+    }
+
+    fn check_try_expr(&mut self, expr: &Expr) -> Result<Type, TypeError> {
+        match expr {
             Expr::Try(inner) => {
                 let t = self.check_expr(inner)?;
                 match t {
@@ -16193,10 +16364,12 @@ impl TypeChecker {
                     ))),
                 }
             }
-            Expr::Block(b) => {
-                self.check_block(b)?;
-                Ok(Type::Void)
-            }
+            _ => unreachable!(),
+        }
+    }
+
+    fn check_kick_expr(&mut self, expr: &Expr) -> Result<Type, TypeError> {
+        match expr {
             Expr::Kick { crew, expr } => {
                 // Process-scoped detach uses a sentinel crew name (no local nursery).
                 if crew != "__detached__" {
@@ -16214,6 +16387,12 @@ impl TypeChecker {
                 self.note_kick_race_captures(expr);
                 Ok(Type::Job(Box::new(t)))
             }
+            _ => unreachable!(),
+        }
+    }
+
+    fn check_join_expr(&mut self, expr: &Expr) -> Result<Type, TypeError> {
+        match expr {
             Expr::Join(inner) => {
                 let t = self.check_expr(inner)?;
                 match t {
@@ -16228,6 +16407,12 @@ impl TypeChecker {
                     ))),
                 }
             }
+            _ => unreachable!(),
+        }
+    }
+
+    fn check_fan_expr(&mut self, expr: &Expr) -> Result<Type, TypeError> {
+        match expr {
             Expr::Fan { collection, mapper } => {
                 let ct = self.check_expr(collection)?;
                 let elem = match ct {
@@ -16322,6 +16507,52 @@ impl TypeChecker {
                 self.assert_fan_mapper_safe(mapper)?;
                 Ok(Type::Array(Box::new(ret)))
             }
+            _ => unreachable!(),
+        }
+    }
+
+    // Variant handlers are deliberately separate so recursive type checking does
+    // not reserve every variant's locals in one Windows debug stack frame.
+    fn check_expr(&mut self, expr: &Expr) -> Result<Type, TypeError> {
+        match expr {
+            Expr::Int(_) => Ok(Type::Int),
+            Expr::Float(_) => Ok(Type::Float),
+            Expr::Bool(_) => Ok(Type::Bool),
+            Expr::String(_) => Ok(Type::String),
+            Expr::Ident(..) => self.check_ident_expr(expr),
+            Expr::Binary { .. } => self.check_binary_expr(expr),
+            Expr::Unary { .. } => self.check_unary_expr(expr),
+            Expr::Tuple(..) => self.check_tuple_expr(expr),
+            Expr::ChanOpen { .. } => self.check_chan_open_expr(expr),
+            Expr::Call { .. } => self.check_call_expr(expr),
+            Expr::Method { .. } => self.check_method_expr(expr),
+            Expr::Index { .. } => self.check_index_expr(expr),
+            Expr::Slice { .. } => self.check_slice_expr(expr),
+            Expr::Field { .. } => self.check_field_expr(expr),
+            Expr::StructLit { .. } => self.check_struct_lit_expr(expr),
+            Expr::StringInterp(parts) => {
+                for p in parts {
+                    if let InterpPart::Expr(e, _) = p {
+                        let _ = self.check_expr(e)?;
+                    }
+                }
+                Ok(Type::String)
+            }
+            Expr::StructLitPos { .. } => self.check_struct_lit_pos_expr(expr),
+            Expr::Array(..) => self.check_array_expr(expr),
+            Expr::Convert { .. } => self.check_convert_expr(expr),
+            Expr::Make { .. } => self.check_make_expr(expr),
+            Expr::Lambda { .. } => self.check_lambda_expr(expr),
+            Expr::IfExpr { .. } => self.check_if_expr(expr),
+            Expr::Match { .. } => self.check_match_expr(expr),
+            Expr::Try(..) => self.check_try_expr(expr),
+            Expr::Block(b) => {
+                self.check_block(b)?;
+                Ok(Type::Void)
+            }
+            Expr::Kick { .. } => self.check_kick_expr(expr),
+            Expr::Join(..) => self.check_join_expr(expr),
+            Expr::Fan { .. } => self.check_fan_expr(expr),
         }
     }
 
