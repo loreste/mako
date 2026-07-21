@@ -289,7 +289,7 @@ static inline int64_t mako_tcp_accept(int64_t listen_fd) {
     memset(&peer, 0, sizeof(peer));
     int cfd = accept((int)listen_fd, (struct sockaddr *)&peer, &plen);
     if (cfd < 0) {
-        fprintf(stderr, "error: tcp: accept failed\n");
+        if (errno != EAGAIN && errno != EWOULDBLOCK) fprintf(stderr, "error: tcp: accept failed\n");
         return -1;
     }
     mako_sock_set_cloexec((mako_sock_t)cfd);
