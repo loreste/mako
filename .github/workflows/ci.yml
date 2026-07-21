@@ -19,6 +19,11 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
       - name: Install clang + OpenSSL (Linux)
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y clang libssl-dev
@@ -58,6 +63,38 @@ jobs:
       - name: Help
         shell: bash
         run: ./target/release/mako --help
+
+      - name: Validate compiler benchmark matrix
+        if: runner.os == 'Linux'
+        run: >-
+          python scripts/bench-compile.py
+          --root "${{ runner.temp }}/mako-compile-bench"
+          --generate-only
+
+      - name: Compile benchmark build smoke
+        if: runner.os == 'Linux'
+        run: >-
+          python scripts/bench-compile.py
+          --root "${{ runner.temp }}/mako-compile-bench"
+          --sizes 10000
+          --shapes single generic
+          --repeat 1
+          --build
+          --output "${{ runner.temp }}/mako-compile-build-bench.json"
+
+      - name: Compile benchmark fixture smoke
+        run: >-
+          python scripts/bench-compile.py
+          --root "${{ runner.temp }}/mako-compile-bench"
+          --sizes 1000
+          --repeat 1
+          --output "${{ runner.temp }}/mako-compile-bench.json"
+
+      - name: Upload compiler benchmark sample
+        uses: actions/upload-artifact@v4
+        with:
+          name: mako-compile-bench-${{ matrix.os }}
+          path: ${{ runner.temp }}/mako-compile-*.json
 
       - name: Recursive debug compiler (Windows)
         if: runner.os == 'Windows'

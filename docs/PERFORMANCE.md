@@ -33,11 +33,23 @@ Book: [§11 Speed & memory safety](book/src/ch11-speed-safety.md) · Release how
 
 # HTTP throughput (requires wrk or hey):
 ./scripts/bench-http.sh
+
+# Compiler scaling (cold and cached checks, JSON output):
+python3 scripts/bench-compile.py --output out/compile-bench.json
+
+# Include full debug builds (requires the configured C compiler):
+python3 scripts/bench-compile.py --build --output out/compile-build-bench.json
 ```
 
 The CI bench gate verifies that three microkernels stay within 2× of a
 compiled baseline. This is a regression gate, not a general performance
-claim. Broader benchmarks are tracked in `scripts/bench-http.sh`.
+claim. Broader runtime benchmarks are tracked in `scripts/bench-http.sh`.
+Compiler fixtures cover exact 1k, 10k, and 100k source sizes across four
+project shapes. CI validates the complete generated matrix on Linux, exercises
+a 10k full build there, and records a 1k smoke sample on every platform without
+enforcing timing thresholds. See
+[`benchmarks/compile/README.md`](../benchmarks/compile/README.md) for the
+fixture definitions and focused-run options.
 
 **IDs on the hot path:** `Uuid` / ULID are **16-byte Copy POD** (stack, no GC).
 Prefer `uuid_v7` / `ulid_new` for time-ordered keys; format to string only at
