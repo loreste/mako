@@ -1,14 +1,16 @@
 # Mako
 
-Mako is an experimental compiled language for backend and systems development.
-You write `.mko` files; the compiler turns them into native binaries via C.
-There is no garbage collector or VM.
+Mako is a compiled language for backend and systems work. You write `.mko`
+files; Mako turns them into standalone native binaries — no garbage collector,
+no VM, nothing extra to install next to them at runtime.
 
-Memory is managed through ownership (`hold`), shared references (`share`),
-and arenas — no tracing GC. Concurrency uses structured primitives (`crew` /
-`kick` / `fan`, channels, actors). The standard library provides HTTP, TLS,
-JSON, database, and networking APIs, though coverage is still incomplete in
-places.
+Memory is managed by ownership (`hold`), shared references (`share`), and
+arenas, so it's freed deterministically instead of by a tracing GC that stalls
+your service at the worst moment. Concurrency is built into the language rather
+than bolted on: structured `crew` / `kick` / `fan`, channels, and actors that
+tidy up after themselves. The standard library covers the everyday backend
+surface — HTTP, TLS, JSON, databases, networking — and is candid about which
+corners are battle-tested and which are still shallow.
 
 **Status: experimental/alpha (v0.4.1).** The language works and compiles real
 programs, but the surface is young. Expect breaking changes, missing features,
@@ -17,16 +19,22 @@ and bugs. The ownership model is actively being hardened — the full test suite
 cases remain. This is not yet suitable for production use without careful
 evaluation.
 
-**0.4.1 highlights:** native compilation on Linux/macOS with the ownership-explicit
-Cranelift backend, bundled runtime support, and memory-safety differential gates.
-**0.3.0 highlights:** memory safety audit (codegen free paths ASan clean),
-match Own free + bind-scope drops + alias-mut freer flag (no double-free),
-LSP hover/inlay-hints/signature-help, per-test timeouts, honest docs.  
-**0.2.4:** ownership drop system (slices/maps/strings/`?`),
-`string_view`, stack POD array lits, scheduler pool, channel ownership,
-struct field free, lockfile verification.  
-**Next:** **0.4.0** — performance ceiling, IR layer, dead code elimination.  
-See [docs/ROADMAP.md](docs/ROADMAP.md) · [docs/SOUNDNESS.md](docs/SOUNDNESS.md).
+**What's new in 0.4.1:** Mako is growing a second way to reach machine code — a
+direct backend that skips C entirely. It lowers your program to an
+ownership-explicit IR and emits object code through LLVM (release builds) or
+Cranelift (fast debug builds), then links with a bundled linker, so there's no
+external toolchain to install. On the compute workloads it handles today it's
+already matching or beating hand-written C and Rust on speed, with a fraction of
+the memory footprint and binaries an order of magnitude smaller than Rust's —
+and every step is checked against the C backend for byte-identical output under
+leak and AddressSanitizer gates. It doesn't cover the whole language yet, and
+the docs say so plainly.
+
+Before that: 0.3.0 hardened memory safety (ASan-clean free paths, no
+double-frees) and grew the LSP; 0.2.4 landed the ownership drop system, string
+views, and channel ownership. Full history is in the
+[changelog](CHANGELOG.md); where it's headed is in the
+[roadmap](docs/ROADMAP.md) · [soundness program](docs/SOUNDNESS.md).
 
 [mako-lang.com](https://mako-lang.com) · [Status](docs/STATUS.md) · [Roadmap](docs/ROADMAP.md) · [Guide](docs/GUIDE.md) · [Book](docs/book/) · [Soundness](docs/SOUNDNESS.md) · [Memory model](docs/MEMORY_MODEL.md)
 
@@ -121,14 +129,21 @@ routes, power (`hold` / `crew` / `arena`) only when you need it.
 
 ## How it works
 
-### Native compilation
+### From source to a binary
 
-Compiles to C, then to native binaries via clang (`-O3 -flto` in release
-mode). No interpreter, no JIT, no runtime VM. Concurrency primitives
-(`crew`, `fan`, channels) are part of the language, not a library bolt-on.
+Two paths, one language. The mature path lowers your `.mko` to C and lets clang
+optimize it (`-O3 -flto` in release) — that's what compiles the full language
+today. Alongside it, a newer **direct backend** skips C altogether: it turns
+your program into an ownership-explicit IR and emits machine code through LLVM
+(release) or Cranelift (fast debug builds), links it with a bundled linker, and
+ships a single standalone binary — no clang, no system linker, nothing to
+install. It doesn't cover the whole language yet, but where it does, the
+binaries come out small and fast.
 
-“No GC” means there is no tracing collector. Memory is freed
-deterministically through ownership, scope exits, and arenas.
+Either way there's no interpreter, no JIT, no runtime VM, and no tracing
+collector. Memory is freed deterministically — ownership, scope exits, arenas —
+and concurrency (`crew`, `fan`, channels) is part of the language, not a library
+bolt-on.
 
 ### Ownership instead of garbage collection
 
