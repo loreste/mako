@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Build
+
+- Keep debug type checking and code generation within the default Windows stack limit.
+
 ## 0.4.0 — 2026-07-20
 
 **mako0.4.0** (`CARGO_PKG_VERSION`). 362 Mako tests + 80 Rust tests, 0 failures.
