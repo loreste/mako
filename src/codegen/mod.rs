@@ -20789,6 +20789,12 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                 self.line(&format!("MakoString {tmp} = mako_tcp_read({f});"));
                 return ("MakoString".into(), tmp);
             }
+            "tcp_read_fast" => {
+                let (_, f) = self.emit_expr(&args[0]);
+                let tmp = self.fresh("trf");
+                self.line(&format!("MakoString {tmp} = mako_tcp_read_fast({f});"));
+                return ("MakoString".into(), tmp);
+            }
             "tcp_read_n" => {
                 let (_, f) = self.emit_expr(&args[0]);
                 let (_, n) = self.emit_expr(&args[1]);

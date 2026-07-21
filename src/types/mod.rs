@@ -4512,6 +4512,10 @@ impl TypeChecker {
             Type::Fn(vec![Type::Int], Box::new(Type::String)),
         );
         fns.insert(
+            "tcp_read_fast".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::String)),
+        );
+        fns.insert(
             "tcp_read_n".into(),
             Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::String)),
         );

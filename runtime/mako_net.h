@@ -227,6 +227,9 @@ static inline int64_t mako_tcp_listen_backlog(MakoString host, int64_t port, int
     }
     int yes = 1;
     setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, (const char *)&yes, sizeof(yes));
+#if defined(SO_REUSEPORT)
+    setsockopt(fd, SOL_SOCKET, SO_REUSEPORT, (const char *)&yes, sizeof(yes));
+#endif
 #if defined(IPV6_V6ONLY)
     if (fam == AF_INET6) {
         int v6only = dual ? 0 : 1;
@@ -245,6 +248,9 @@ static inline int64_t mako_tcp_listen_backlog(MakoString host, int64_t port, int
             fd = mako_sock_create_af(AF_INET, SOCK_STREAM);
             if (fd == MAKO_INVALID_SOCK) return -1;
             setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, (const char *)&yes, sizeof(yes));
+#if defined(SO_REUSEPORT)
+    setsockopt(fd, SOL_SOCKET, SO_REUSEPORT, (const char *)&yes, sizeof(yes));
+#endif
             if (bind(fd, (struct sockaddr *)&a4, sizeof(a4)) < 0) {
                 fprintf(stderr, "error: tcp: bind failed\n");
                 mako_sock_close(fd);
@@ -775,6 +781,9 @@ static inline int64_t mako_udp_bind_addr(MakoString host, int64_t port) {
     }
     int yes = 1;
     setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, (const char *)&yes, sizeof(yes));
+#if defined(SO_REUSEPORT)
+    setsockopt(fd, SOL_SOCKET, SO_REUSEPORT, (const char *)&yes, sizeof(yes));
+#endif
 #if defined(IPV6_V6ONLY)
     if (fam == AF_INET6) {
         int v6only = dual ? 0 : 1;
@@ -792,6 +801,9 @@ static inline int64_t mako_udp_bind_addr(MakoString host, int64_t port) {
             fd = mako_sock_create_af(AF_INET, SOCK_DGRAM);
             if (fd == MAKO_INVALID_SOCK) return -1;
             setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, (const char *)&yes, sizeof(yes));
+#if defined(SO_REUSEPORT)
+    setsockopt(fd, SOL_SOCKET, SO_REUSEPORT, (const char *)&yes, sizeof(yes));
+#endif
             if (bind(fd, (struct sockaddr *)&a4, sizeof(a4)) < 0) {
                 mako_sock_close(fd);
                 return -1;
@@ -1258,6 +1270,20 @@ static inline int64_t mako_tcp_accept_nb(int64_t listen_fd) {
     }
     return (int64_t)cfd;
 #endif
+}
+
+#ifdef __cplusplus
+}
+#endif
+
+
+/* Fast TCP read for HTTP servers: thread-local buffer, no malloc per read. */
+static __thread char mako_tcp_read_fast_buf[8192];
+static inline MakoString mako_tcp_read_fast(int64_t fd) {
+    ssize_t n = recv((int)fd, mako_tcp_read_fast_buf, sizeof(mako_tcp_read_fast_buf) - 1, 0);
+    if (n <= 0) return mako_str_empty;
+    mako_tcp_read_fast_buf[n] = 0;
+    return (MakoString){mako_tcp_read_fast_buf, (size_t)n};
 }
 
 #ifdef __cplusplus
