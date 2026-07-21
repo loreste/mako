@@ -1,0 +1,26 @@
+// Owned match results: return a string payload from a match arm. The payload
+// is cloned (or moved) before the scrutinee drops so the result does not dangle.
+// Differentially validated against the C backend.
+
+enum Msg {
+    Text(string)
+    Code(int)
+    Quit
+}
+
+fn payload(m: Msg) -> string {
+    return match m {
+        Text(s) => s,
+        Code(n) => "code",
+        Quit => "quit",
+    }
+}
+
+fn main() {
+    print(payload(Text("hello")))
+    print(payload(Code(7)))
+    print(payload(Quit))
+
+    let owned = Text("world")
+    print(payload(owned))
+}

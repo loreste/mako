@@ -1,3 +1,4 @@
+#include <limits.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -241,6 +242,8 @@ MakoNativeIntSlice *mako_native_int_slice_slice_ptr(const MakoNativeIntSlice *va
 }
 
 MakoNativeIntSlice *mako_native_int_slice_clone_ptr(const MakoNativeIntSlice *value) {
+    // Null-safe: inactive enum/struct payload slots hold a null header.
+    if (!value) return NULL;
     MakoNativeIntSlice *out = malloc(sizeof(*out));
     if (!out) abort();
     mako_native_int_slice_clone(out, value->data, value->len, value->cap, value->owned);
@@ -310,6 +313,8 @@ void mako_native_string_slice_set_ptr(MakoNativeStringSlice *value, int64_t inde
 
 MakoNativeStringSlice *mako_native_string_slice_clone_ptr(
     const MakoNativeStringSlice *value) {
+    // Null-safe: inactive aggregate slots hold a null header.
+    if (!value) return NULL;
     MakoNativeStringSlice *out = mako_native_string_slice_make_ptr(value->len, value->len);
     for (size_t i = 0; i < value->len; ++i) out->data[i] = mako_native_string_clone_ptr_value(value->data[i]);
     return out;
@@ -349,6 +354,183 @@ MakoNativeStringSlice *mako_native_string_slice_slice_ptr(
 void mako_native_string_slice_drop_ptr(MakoNativeStringSlice *value) {
     if (!value) return;
     mako_native_string_slice_free_elements(value); free(value);
+}
+
+// Value ABI for []string (LLVM). Elements are MakoNativeString values
+// ({data,len}) packed in a flat array — matching the int-slice value layout
+// shape of (data, len, cap, owned). Clone/drop recurse into each element.
+typedef struct {
+    MakoNativeString *data;
+    size_t len;
+    size_t cap;
+    int64_t owned;
+} MakoNativeStrSliceValue;
+
+void mako_native_str_slice_make(MakoNativeStrSliceValue *result, size_t len, size_t cap) {
+    if (cap < len) abort();
+    MakoNativeString *data = cap ? calloc(cap, sizeof(*data)) : NULL;
+    if (cap && data == NULL) abort();
+    *result = (MakoNativeStrSliceValue){data, len, cap, 1};
+}
+
+void mako_native_str_slice_literal(MakoNativeStrSliceValue *result,
+                                   const MakoNativeString *values, size_t len) {
+    mako_native_str_slice_make(result, len, len);
+    for (size_t i = 0; i < len; ++i) {
+        result->data[i] = mako_native_string_clone(values[i]);
+    }
+}
+
+int64_t mako_native_str_slice_len(MakoNativeString *data, size_t len, size_t cap, int64_t owned) {
+    (void)data; (void)cap; (void)owned;
+    return (int64_t)len;
+}
+
+MakoNativeString mako_native_str_slice_get(MakoNativeString *data, size_t len, size_t cap,
+                                           int64_t owned, int64_t index) {
+    (void)cap; (void)owned;
+    if (index < 0 || (uint64_t)index >= len) abort();
+    return mako_native_string_clone(data[index]);
+}
+
+void mako_native_str_slice_set(MakoNativeString *data, size_t len, size_t cap, int64_t owned,
+                               int64_t index, MakoNativeString element) {
+    (void)cap; (void)owned;
+    if (index < 0 || (uint64_t)index >= len) abort();
+    mako_native_string_drop(data[index]);
+    data[index] = mako_native_string_clone(element);
+}
+
+void mako_native_str_slice_append(MakoNativeStrSliceValue *result, MakoNativeString *data,
+                                  size_t len, size_t cap, int64_t owned,
+                                  MakoNativeString element) {
+    if (owned && len < cap) {
+        data[len] = mako_native_string_clone(element);
+        *result = (MakoNativeStrSliceValue){data, len + 1, cap, 1};
+        return;
+    }
+    size_t new_cap = cap ? cap * 2 : 1;
+    if (new_cap < len + 1) new_cap = len + 1;
+    MakoNativeString *new_data = calloc(new_cap, sizeof(*new_data));
+    if (!new_data) abort();
+    if (len) memcpy(new_data, data, len * sizeof(*new_data));
+    new_data[len] = mako_native_string_clone(element);
+    if (owned) free(data);
+    *result = (MakoNativeStrSliceValue){new_data, len + 1, new_cap, 1};
+}
+
+void mako_native_str_slice_slice(MakoNativeStrSliceValue *result, MakoNativeString *data,
+                                 size_t len, size_t cap, int64_t owned,
+                                 int64_t low, int64_t high, int64_t max) {
+    (void)cap; (void)owned; (void)max;
+    int64_t length = (int64_t)len;
+    if (low < 0) low = 0;
+    if (high < 0 || high > length) high = length;
+    if (low > length) low = length;
+    if (high < low) high = low;
+    size_t out_len = (size_t)(high - low);
+    mako_native_str_slice_make(result, out_len, out_len);
+    for (int64_t i = low; i < high; ++i) {
+        result->data[i - low] = mako_native_string_clone(data[i]);
+    }
+}
+
+void mako_native_str_slice_clone(MakoNativeStrSliceValue *result, MakoNativeString *data,
+                                 size_t len, size_t cap, int64_t owned) {
+    (void)cap; (void)owned;
+    if (data == NULL && len == 0) {
+        *result = (MakoNativeStrSliceValue){NULL, 0, 0, 0};
+        return;
+    }
+    mako_native_str_slice_make(result, len, len);
+    for (size_t i = 0; i < len; ++i) {
+        result->data[i] = mako_native_string_clone(data[i]);
+    }
+}
+
+void mako_native_str_slice_drop(MakoNativeString *data, size_t len, size_t cap, int64_t owned) {
+    (void)cap;
+    if (!owned || !data) return;
+    for (size_t i = 0; i < len; ++i) {
+        mako_native_string_drop(data[i]);
+    }
+    free(data);
+}
+
+// ---- Formatting / interop seeds (value + pointer ABIs) --------------------
+
+MakoNativeString mako_native_int_to_string(int64_t n) {
+    char buf[32];
+    int written = snprintf(buf, sizeof(buf), "%lld", (long long)n);
+    if (written < 0) written = 0;
+    return mako_native_string_clone((MakoNativeString){buf, (size_t)written});
+}
+
+MakoNativeString *mako_native_int_to_string_ptr(int64_t n) {
+    MakoNativeString value = mako_native_int_to_string(n);
+    MakoNativeString *out = malloc(sizeof(*out));
+    if (!out) abort();
+    *out = value;
+    return out;
+}
+
+MakoNativeString mako_native_bool_to_string(int64_t b) {
+    // Match the C backend's f-string / print path, which writes bools as 0/1.
+    const char *s = b ? "1" : "0";
+    return mako_native_string_clone((MakoNativeString){s, 1});
+}
+
+MakoNativeString *mako_native_bool_to_string_ptr(int64_t b) {
+    MakoNativeString value = mako_native_bool_to_string(b);
+    MakoNativeString *out = malloc(sizeof(*out));
+    if (!out) abort();
+    *out = value;
+    return out;
+}
+
+// Overflow-trapping arithmetic used when `--overflow trap` is selected.
+static void mako_native_overflow_trap(const char *op) {
+    fprintf(stderr, "integer overflow in %s\n", op ? op : "arithmetic");
+    abort();
+}
+
+int64_t mako_native_add_i64_trap(int64_t a, int64_t b) {
+    int64_t r;
+#if defined(__GNUC__) || defined(__clang__)
+    if (__builtin_add_overflow(a, b, &r)) mako_native_overflow_trap("add");
+#else
+    if ((b > 0 && a > INT64_MAX - b) || (b < 0 && a < INT64_MIN - b))
+        mako_native_overflow_trap("add");
+    r = a + b;
+#endif
+    return r;
+}
+
+int64_t mako_native_sub_i64_trap(int64_t a, int64_t b) {
+    int64_t r;
+#if defined(__GNUC__) || defined(__clang__)
+    if (__builtin_sub_overflow(a, b, &r)) mako_native_overflow_trap("sub");
+#else
+    if ((b < 0 && a > INT64_MAX + b) || (b > 0 && a < INT64_MIN + b))
+        mako_native_overflow_trap("sub");
+    r = a - b;
+#endif
+    return r;
+}
+
+int64_t mako_native_mul_i64_trap(int64_t a, int64_t b) {
+    int64_t r;
+#if defined(__GNUC__) || defined(__clang__)
+    if (__builtin_mul_overflow(a, b, &r)) mako_native_overflow_trap("mul");
+#else
+    if (a != 0 && b != 0 && ((a > 0 && b > 0 && a > INT64_MAX / b) ||
+                             (a > 0 && b < 0 && b < INT64_MIN / a) ||
+                             (a < 0 && b > 0 && a < INT64_MIN / b) ||
+                             (a < 0 && b < 0 && a < INT64_MAX / b)))
+        mako_native_overflow_trap("mul");
+    r = a * b;
+#endif
+    return r;
 }
 
 // Struct ABI used by the shared-IR backend. A struct value is a heap block of

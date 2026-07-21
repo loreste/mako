@@ -86,15 +86,58 @@ if [[ "$(uname -s)" == "Darwin" ]]; then
   fi
 fi
 
-echo "[4/5] aggregate differential and unsupported constructs fail without C fallback"
+echo "[4/5] aggregate + []string differential (no C fallback)"
 "$tmp_dir/native_slices-llvm" >/dev/null
+for fixture in \
+  "$repo_dir/examples/native/native_structs.mko" \
+  "$repo_dir/examples/native/native_string_slices.mko" \
+  "$repo_dir/examples/native/native_nested_structs.mko" \
+  "$repo_dir/examples/native/native_match_owned.mko" \
+  "$repo_dir/examples/native/native_for.mko" \
+  "$repo_dir/examples/native/native_match_guards.mko" \
+  "$repo_dir/examples/native/native_defer.mko" \
+  "$repo_dir/examples/native/native_cfor.mko" \
+  "$repo_dir/examples/native/native_labeled.mko" \
+  "$repo_dir/examples/native/native_fmt.mko" \
+  "$repo_dir/examples/native/native_match.mko" \
+  "$repo_dir/examples/native/native_mem_stress.mko"
+do
+  name="$(basename "$fixture" .mko)"
+  env -u SDKROOT PATH=/nonexistent "$repo_dir/target/debug/mako" build "$fixture" \
+    --release --backend llvm -o "$tmp_dir/$name-llvm"
+  "$repo_dir/target/debug/mako" build "$fixture" --release --backend c \
+    --no-incremental -o "$tmp_dir/$name-c"
+  "$tmp_dir/$name-c" >"$tmp_dir/$name.c.out"
+  "$tmp_dir/$name-llvm" >"$tmp_dir/$name.llvm.out"
+  cmp "$tmp_dir/$name.c.out" "$tmp_dir/$name.llvm.out"
+  # Memory safety is mandatory on every heap fixture.
+  if [[ "$(uname -s)" == "Darwin" && -r /usr/lib/libgmalloc.dylib ]]; then
+    DYLD_INSERT_LIBRARIES=/usr/lib/libgmalloc.dylib \
+      MallocScribble=1 MallocPreScribble=1 "$tmp_dir/$name-llvm" >/dev/null
+  fi
+  if [[ "$(uname -s)" == "Darwin" ]]; then
+    set +e
+    leaks --atExit -- "$tmp_dir/$name-llvm" >"$tmp_dir/$name-llvm.leaks" 2>&1
+    set -e
+    if grep -Eq "([1-9][0-9]* leaks for|[1-9][0-9]* total leaked bytes)" \
+      "$tmp_dir/$name-llvm.leaks"; then
+      echo "LLVM backend test: leaks in $name" >&2
+      grep -E "leaks for|leaked bytes" "$tmp_dir/$name-llvm.leaks" >&2 || true
+      exit 1
+    fi
+  fi
+done
+# Generics remain unsupported and must hard-error (no silent C fallback).
 if env PATH=/nonexistent "$repo_dir/target/debug/mako" build \
-  "$repo_dir/examples/native/native_structs.mko" --release --backend llvm \
+  "$repo_dir/examples/generics_user.mko" --release --backend llvm \
   -o "$tmp_dir/unsupported" >"$tmp_dir/unsupported.out" 2>&1; then
-  :
+  echo "LLVM backend test: generics unexpectedly compiled" >&2
+  exit 1
 fi
-grep -Eq "unsupported|not implemented|not in the scalar increment|failed" "$tmp_dir/unsupported.out" || {
-  echo "LLVM backend test: unsupported aggregate did not produce a diagnostic" >&2; exit 1;
+grep -Eq "unsupported|not implemented|not in the scalar|generic|failed" "$tmp_dir/unsupported.out" || {
+  echo "LLVM backend test: unsupported construct did not produce a diagnostic" >&2
+  cat "$tmp_dir/unsupported.out" >&2
+  exit 1
 }
 
 echo "[5/5] LLVM release performance and artifact parity"

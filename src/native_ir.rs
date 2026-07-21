@@ -117,6 +117,28 @@ pub enum Inst {
     PrintString {
         value: Value,
     },
+    /// Byte length of a string value (`len(s)`).
+    StringLen {
+        out: Value,
+        value: Value,
+    },
+    /// `format_int(n)` / int interpolation → owned heap string.
+    IntToString {
+        out: Value,
+        value: Value,
+    },
+    /// Bool interpolation → owned heap string `"true"` / `"false"`.
+    BoolToString {
+        out: Value,
+        value: Value,
+    },
+    /// Null/zero heap value (pointer ABI: null; string value ABI: `{NULL,0}`).
+    /// Dropping it is always a safe no-op. Used to initialise loop binders so
+    /// path-insensitive continue/break drops never free garbage.
+    NullHeap {
+        out: Value,
+        ty: Type,
+    },
     DropString {
         value: Value,
     },
@@ -387,6 +409,23 @@ fn scalar_type(ty: &TypeExpr) -> Result<Type, IrError> {
     }
 }
 
+/// Types that may appear as struct/tuple fields or enum payloads. Nested
+/// aggregates are allowed because every aggregate is a heap pointer (or an
+/// owned string/slice header); recursive clone/drop walks the layout.
+fn is_field_type(ty: Type) -> bool {
+    matches!(
+        ty,
+        Type::I1
+            | Type::I32
+            | Type::I64
+            | Type::F64
+            | Type::Str
+            | Type::IntSlice
+            | Type::StrSlice
+            | Type::Struct(_)
+    )
+}
+
 /// Resolve a type expression, allowing user struct names in addition to the
 /// scalar set. Struct names bind to their registry index.
 fn resolve_type(ty: &TypeExpr, structs: &StructRegistry) -> Result<Type, IrError> {
@@ -402,10 +441,7 @@ fn resolve_type(ty: &TypeExpr, structs: &StructRegistry) -> Result<Type, IrError
                 .iter()
                 .map(|element| {
                     let field_ty = resolve_type(element, structs)?;
-                    if !matches!(
-                        field_ty,
-                        Type::I1 | Type::I32 | Type::I64 | Type::F64 | Type::Str | Type::IntSlice
-                    ) {
+                    if !is_field_type(field_ty) {
                         return Err(IrError::new(
                             "native IR: tuple element type is not supported in the current increment",
                         ));
@@ -419,131 +455,144 @@ fn resolve_type(ty: &TypeExpr, structs: &StructRegistry) -> Result<Type, IrError
     }
 }
 
-/// Collect scalar-field struct definitions before lowering any function. Fields
-/// must be scalar (`int`/`bool`/`float`); string, slice, and nested-struct
-/// fields need drops/nested layout and are deferred with an explicit error.
+/// Collect aggregate layouts before lowering any function. Two passes so a
+/// struct/enum field may name another aggregate defined later (or mutually).
+/// Clone/drop is recursive over the field types of each layout id.
 fn build_structs(program: &Program) -> Result<StructRegistry, IrError> {
     let mut by_name = HashMap::new();
     let mut layouts: Vec<StructLayout> = Vec::new();
-    for item in &program.items {
-        if let Item::Struct(def) = item {
-            if !def.type_params.is_empty() {
-                return Err(IrError::new(format!(
-                    "native IR: generic struct `{}` is not implemented yet",
-                    def.name
-                )));
-            }
-            let id = layouts.len() as u32;
-            if by_name.insert(def.name.clone(), id).is_some() {
-                return Err(IrError::new(format!(
-                    "native IR: duplicate struct `{}`",
-                    def.name
-                )));
-            }
-            let mut fields = Vec::with_capacity(def.fields.len());
-            for (fname, fty, _default) in &def.fields {
-                let ty = scalar_type(fty).map_err(|_| {
-                    IrError::new(format!(
-                        "native IR: struct field `{}.{fname}` type is not in the scalar-field increment",
-                        def.name
-                    ))
-                })?;
-                // Scalars, owned `string`, and owned `[]int` fields are
-                // supported; `[]string` and nested-aggregate fields still need
-                // recursive layout and are deferred with an explicit error.
-                if !matches!(
-                    ty,
-                    Type::I1 | Type::I32 | Type::I64 | Type::F64 | Type::Str | Type::IntSlice
-                ) {
-                    return Err(IrError::new(format!(
-                        "native IR: struct field `{}.{fname}` of type `{fty}` needs nested layout (deferred)",
-                        def.name
-                    )));
-                }
-                fields.push((fname.clone(), ty));
-            }
-            layouts.push(StructLayout {
-                name: def.name.clone(),
-                fields,
-            });
-        }
-    }
-
-    // Enums: laid out as `[tag]` followed by each variant's dedicated payload
-    // slots (non-overlapping). `int` and owned `string` payloads are supported.
-    // Reuses the struct heap block, so ownership/clone/drop come for free; only
-    // construction and `match` are enum-specific.
-    let mut variants: HashMap<String, VariantInfo> = HashMap::new();
     let mut enum_ids = std::collections::HashSet::new();
+
+    // Pass 1: reserve an id for every named aggregate so field resolution can
+    // refer to types declared later in the file.
     for item in &program.items {
-        if let Item::Enum(def) = item {
-            if !def.type_params.is_empty() {
-                return Err(IrError::new(format!(
-                    "native IR: generic enum `{}` is not implemented yet",
-                    def.name
-                )));
-            }
-            let id = layouts.len() as u32;
-            if by_name.insert(def.name.clone(), id).is_some() {
-                return Err(IrError::new(format!(
-                    "native IR: duplicate type `{}`",
-                    def.name
-                )));
-            }
-            let mut fields = vec![("tag".to_string(), Type::I64)];
-            let mut slot_bases = Vec::with_capacity(def.variants.len());
-            for variant in &def.variants {
-                slot_bases.push(fields.len());
-                for (index, field) in variant.fields.iter().enumerate() {
-                    let ty = scalar_type(field).map_err(|_| {
-                        IrError::new(format!(
-                            "native IR: enum `{}` variant `{}` has an unsupported payload",
-                            def.name, variant.name
-                        ))
-                    })?;
-                    if !matches!(ty, Type::I64 | Type::Str) {
-                        return Err(IrError::new(format!(
-                            "native IR: enum `{}` variant `{}` payload must be `int` or `string` in the current increment",
-                            def.name, variant.name
-                        )));
-                    }
-                    fields.push((format!("{}_{index}", variant.name), ty));
-                }
-            }
-            layouts.push(StructLayout {
-                name: def.name.clone(),
-                fields,
-            });
-            enum_ids.insert(id);
-            for (tag, variant) in def.variants.iter().enumerate() {
-                if variants
-                    .insert(
-                        variant.name.clone(),
-                        VariantInfo {
-                            enum_id: id,
-                            tag: tag as i64,
-                            arity: variant.fields.len(),
-                            slot_base: slot_bases[tag],
-                        },
-                    )
-                    .is_some()
-                {
+        match item {
+            Item::Struct(def) => {
+                if !def.type_params.is_empty() {
                     return Err(IrError::new(format!(
-                        "native IR: duplicate enum variant `{}`",
-                        variant.name
+                        "native IR: generic struct `{}` is not implemented yet",
+                        def.name
                     )));
                 }
+                let id = layouts.len() as u32;
+                if by_name.insert(def.name.clone(), id).is_some() {
+                    return Err(IrError::new(format!(
+                        "native IR: duplicate struct `{}`",
+                        def.name
+                    )));
+                }
+                layouts.push(StructLayout {
+                    name: def.name.clone(),
+                    fields: Vec::new(),
+                });
             }
+            Item::Enum(def) => {
+                if !def.type_params.is_empty() {
+                    return Err(IrError::new(format!(
+                        "native IR: generic enum `{}` is not implemented yet",
+                        def.name
+                    )));
+                }
+                let id = layouts.len() as u32;
+                if by_name.insert(def.name.clone(), id).is_some() {
+                    return Err(IrError::new(format!(
+                        "native IR: duplicate type `{}`",
+                        def.name
+                    )));
+                }
+                layouts.push(StructLayout {
+                    name: def.name.clone(),
+                    fields: Vec::new(),
+                });
+                enum_ids.insert(id);
+            }
+            _ => {}
         }
     }
 
-    Ok(StructRegistry {
+    let mut registry = StructRegistry {
         by_name,
         layouts: RefCell::new(layouts),
         tuple_shapes: RefCell::new(HashMap::new()),
-        variants,
+        variants: HashMap::new(),
         enum_ids,
-    })
+    };
+
+    // Pass 2: fill field lists with fully resolved types (including nested
+    // aggregates and []string). Enums keep non-overlapping payload slots so the
+    // flat recursive clone/drop remains correct for inactive null slots.
+    for item in &program.items {
+        match item {
+            Item::Struct(def) => {
+                let id = registry.by_name[&def.name];
+                let mut fields = Vec::with_capacity(def.fields.len());
+                for (fname, fty, _default) in &def.fields {
+                    let ty = resolve_type(fty, &registry).map_err(|_| {
+                        IrError::new(format!(
+                            "native IR: struct field `{}.{fname}` type is not supported",
+                            def.name
+                        ))
+                    })?;
+                    if !is_field_type(ty) {
+                        return Err(IrError::new(format!(
+                            "native IR: struct field `{}.{fname}` of type `{fty}` is not supported",
+                            def.name
+                        )));
+                    }
+                    fields.push((fname.clone(), ty));
+                }
+                registry.layouts.borrow_mut()[id as usize].fields = fields;
+            }
+            Item::Enum(def) => {
+                let id = registry.by_name[&def.name];
+                let mut fields = vec![("tag".to_string(), Type::I64)];
+                let mut slot_bases = Vec::with_capacity(def.variants.len());
+                for variant in &def.variants {
+                    slot_bases.push(fields.len());
+                    for (index, field) in variant.fields.iter().enumerate() {
+                        let ty = resolve_type(field, &registry).map_err(|_| {
+                            IrError::new(format!(
+                                "native IR: enum `{}` variant `{}` has an unsupported payload",
+                                def.name, variant.name
+                            ))
+                        })?;
+                        // Scalars, owned string/slice, and nested aggregates.
+                        if !is_field_type(ty) {
+                            return Err(IrError::new(format!(
+                                "native IR: enum `{}` variant `{}` payload type is not supported",
+                                def.name, variant.name
+                            )));
+                        }
+                        fields.push((format!("{}_{index}", variant.name), ty));
+                    }
+                }
+                registry.layouts.borrow_mut()[id as usize].fields = fields;
+                for (tag, variant) in def.variants.iter().enumerate() {
+                    if registry
+                        .variants
+                        .insert(
+                            variant.name.clone(),
+                            VariantInfo {
+                                enum_id: id,
+                                tag: tag as i64,
+                                arity: variant.fields.len(),
+                                slot_base: slot_bases[tag],
+                            },
+                        )
+                        .is_some()
+                    {
+                        return Err(IrError::new(format!(
+                            "native IR: duplicate enum variant `{}`",
+                            variant.name
+                        )));
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    Ok(registry)
 }
 
 pub fn lower(program: &Program) -> Result<Module, IrError> {
@@ -592,6 +641,11 @@ struct FunctionLowerer<'a> {
     current: BlockId,
     locals: HashMap<String, (Value, Type)>,
     heap_owned: HashMap<String, bool>,
+    /// Innermost-first stack of `(optional_label, break_target, continue_target)`.
+    loops: Vec<(Option<String>, BlockId, BlockId)>,
+    /// `defer` bodies (LIFO). Run on every return and fallthrough exit, before
+    /// owned locals are dropped so a defer can still observe them.
+    defers: Vec<crate::ast::Block>,
 }
 
 impl<'a> FunctionLowerer<'a> {
@@ -643,6 +697,8 @@ impl<'a> FunctionLowerer<'a> {
             current: entry,
             locals,
             heap_owned,
+            loops: Vec::new(),
+            defers: Vec::new(),
         })
     }
 
@@ -651,10 +707,12 @@ impl<'a> FunctionLowerer<'a> {
         if self.block().terminator.is_none() {
             if source.name == "main" {
                 let zero = self.const_int(0, Type::I32);
+                self.emit_defers()?;
                 self.drop_owned_locals();
                 self.terminate(Terminator::Return(Some(zero)))?;
                 self.function.ret = Some(Type::I32);
             } else if self.function.ret.is_none() {
+                self.emit_defers()?;
                 self.drop_owned_locals();
                 self.terminate(Terminator::Return(None))?;
             } else {
@@ -665,6 +723,42 @@ impl<'a> FunctionLowerer<'a> {
             }
         }
         Ok(self.function)
+    }
+
+    fn emit_defers(&mut self) -> Result<(), IrError> {
+        // LIFO: last deferred runs first.
+        let bodies: Vec<_> = self.defers.iter().rev().cloned().collect();
+        for body in bodies {
+            self.lower_block(&body)?;
+            if self.block().terminator.is_some() {
+                return Err(IrError::new(
+                    "native IR: defer body must not return/break/continue",
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    fn resolve_loop(
+        &self,
+        label: Option<&str>,
+    ) -> Result<(BlockId, BlockId), IrError> {
+        match label {
+            None => self
+                .loops
+                .last()
+                .map(|(_, b, c)| (*b, *c))
+                .ok_or_else(|| IrError::new("native IR: break/continue outside loop")),
+            Some(lab) => self
+                .loops
+                .iter()
+                .rev()
+                .find(|(l, _, _)| l.as_deref() == Some(lab))
+                .map(|(_, b, c)| (*b, *c))
+                .ok_or_else(|| {
+                    IrError::new(format!("native IR: unknown loop label `{lab}`"))
+                }),
+        }
     }
 
     fn value(&mut self) -> Value {
@@ -934,15 +1028,25 @@ impl<'a> FunctionLowerer<'a> {
                     }
                     None => None,
                 };
+                self.emit_defers()?;
                 self.drop_owned_locals();
                 self.terminate(Terminator::Return(value))?;
             }
+            Stmt::Defer { body } => {
+                self.defers.push(body.clone());
+            }
             Stmt::If {
-                init: None,
+                init,
                 cond,
                 then_block,
                 else_block,
             } => {
+                // Optional Go-style init is scoped to the whole if/else.
+                let saved_locals = self.locals.clone();
+                let saved_owned = self.heap_owned.clone();
+                if let Some(init) = init {
+                    self.lower_stmt(init)?;
+                }
                 let owned_before = self.heap_owned.clone();
                 let (condition, ty, condition_owned) = self.lower_expr(cond)?;
                 if condition_owned {
@@ -984,12 +1088,24 @@ impl<'a> FunctionLowerer<'a> {
                 }
                 self.heap_owned = owned_before;
                 self.current = merge_id;
+                // Drop init-scoped owned locals, restore pre-init bindings.
+                for (name, owned) in self.heap_owned.clone() {
+                    if owned && !saved_owned.contains_key(&name) {
+                        if let Some((ptr, ty)) = self.locals.get(&name).copied() {
+                            let v = self.value();
+                            self.emit(Inst::Load {
+                                out: v,
+                                ptr,
+                                ty,
+                            });
+                            self.emit_drop(v, ty);
+                        }
+                    }
+                }
+                self.locals = saved_locals;
+                self.heap_owned = saved_owned;
             }
-            Stmt::While {
-                label: None,
-                cond,
-                body,
-            } => {
+            Stmt::While { label, cond, body } => {
                 let header = self.new_block();
                 let body_id = self.new_block();
                 let done = self.new_block();
@@ -1009,7 +1125,9 @@ impl<'a> FunctionLowerer<'a> {
                     else_block: done,
                 })?;
                 self.current = body_id;
+                self.loops.push((label.clone(), done, header));
                 self.lower_block(body)?;
+                self.loops.pop();
                 if self.heap_owned != owned_before {
                     return Err(IrError::new(
                         "native IR: string ownership changes inside a loop",
@@ -1020,8 +1138,369 @@ impl<'a> FunctionLowerer<'a> {
                 }
                 self.current = done;
             }
+            Stmt::For {
+                label,
+                binders,
+                is_range: _,
+                iter,
+                body,
+            } => {
+                self.lower_for(label.clone(), binders, iter, body)?;
+            }
+            Stmt::CFor {
+                label,
+                init,
+                cond,
+                post,
+                body,
+            } => {
+                self.lower_cfor(label.clone(), init, cond, post, body)?;
+            }
+            Stmt::Break(label) => {
+                let (break_target, _) = self.resolve_loop(label.as_deref())?;
+                self.terminate(Terminator::Jump(break_target))?;
+            }
+            Stmt::Continue(label) => {
+                let (_, cont_target) = self.resolve_loop(label.as_deref())?;
+                self.terminate(Terminator::Jump(cont_target))?;
+            }
             _ => return Err(IrError::new("native IR: statement not implemented yet")),
         }
+        Ok(())
+    }
+
+    /// C-style `for init; cond; post { body }`. `continue` runs `post`.
+    fn lower_cfor(
+        &mut self,
+        label: Option<String>,
+        init: &Stmt,
+        cond: &Expr,
+        post: &Stmt,
+        body: &crate::ast::Block,
+    ) -> Result<(), IrError> {
+        let saved_locals = self.locals.clone();
+        let saved_owned = self.heap_owned.clone();
+        self.lower_stmt(init)?;
+        let header = self.new_block();
+        let body_id = self.new_block();
+        let latch = self.new_block();
+        let done = self.new_block();
+        self.terminate(Terminator::Jump(header))?;
+        self.current = header;
+        let owned_before = self.heap_owned.clone();
+        let (condition, ty, condition_owned) = self.lower_expr(cond)?;
+        if condition_owned {
+            return Err(IrError::new("native IR: owned string c-for condition"));
+        }
+        if ty != Type::I1 {
+            return Err(IrError::new("native IR: c-for condition must be bool"));
+        }
+        self.terminate(Terminator::Branch {
+            condition,
+            then_block: body_id,
+            else_block: done,
+        })?;
+        self.current = body_id;
+        self.loops.push((label, done, latch));
+        self.lower_block(body)?;
+        self.loops.pop();
+        if self.heap_owned != owned_before {
+            return Err(IrError::new(
+                "native IR: string ownership changes inside a c-for",
+            ));
+        }
+        if self.block().terminator.is_none() {
+            self.terminate(Terminator::Jump(latch))?;
+        }
+        self.current = latch;
+        self.lower_stmt(post)?;
+        if self.block().terminator.is_none() {
+            self.terminate(Terminator::Jump(header))?;
+        }
+        self.current = done;
+        // Drop init-scoped owned locals.
+        for (name, owned) in self.heap_owned.clone() {
+            if owned && !saved_owned.contains_key(&name) {
+                if let Some((ptr, ty)) = self.locals.get(&name).copied() {
+                    let v = self.value();
+                    self.emit(Inst::Load {
+                        out: v,
+                        ptr,
+                        ty,
+                    });
+                    self.emit_drop(v, ty);
+                }
+            }
+        }
+        self.locals = saved_locals;
+        self.heap_owned = saved_owned;
+        Ok(())
+    }
+
+    /// `for i in n` / `for i in range n` (0..n) and `for i[, v] in range xs`
+    /// over a borrowed `[]int` or `[]string`. `continue` targets the increment
+    /// latch; `break` exits. Owned temporary iterators are rejected.
+    fn lower_for(
+        &mut self,
+        label: Option<String>,
+        binders: &[String],
+        iter: &Expr,
+        body: &crate::ast::Block,
+    ) -> Result<(), IrError> {
+        let (iter_val, iter_ty, iter_owned) = self.lower_expr(iter)?;
+        if iter_owned {
+            return Err(IrError::new(
+                "native IR: iterating an owned temporary requires binding it first",
+            ));
+        }
+        let (bound, slice) = match iter_ty {
+            Type::I64 => {
+                if binders.len() != 1 {
+                    return Err(IrError::new(
+                        "native IR: counted for requires a single binder",
+                    ));
+                }
+                (iter_val, None)
+            }
+            Type::IntSlice | Type::StrSlice => {
+                if binders.is_empty() || binders.len() > 2 {
+                    return Err(IrError::new(
+                        "native IR: slice for requires one or two binders",
+                    ));
+                }
+                let len = self.value();
+                if iter_ty == Type::IntSlice {
+                    self.emit(Inst::SliceLen {
+                        out: len,
+                        slice: iter_val,
+                    });
+                } else {
+                    self.emit(Inst::StrSliceLen {
+                        out: len,
+                        slice: iter_val,
+                    });
+                }
+                (len, Some((iter_val, iter_ty)))
+            }
+            _ => {
+                return Err(IrError::new(
+                    "native IR: for iterator must be int or a primitive/string slice",
+                ))
+            }
+        };
+
+        // Counter local (always the first binder, or a synthetic index for
+        // blank/`for range xs` zero-binder — binders is never empty here for
+        // slices/count; zero-binder is unsupported above).
+        let index_name = &binders[0];
+        let counter_slot = self.value();
+        self.emit(Inst::Alloca {
+            out: counter_slot,
+            ty: Type::I64,
+        });
+        let zero = self.const_int(0, Type::I64);
+        self.emit(Inst::Store {
+            ptr: counter_slot,
+            value: zero,
+        });
+        // Value binder (optional): re-bound each iteration. Heap binders are
+        // null-initialised so start-of-body / done drops are always safe, even
+        // across continue/break (ownership flags are not path-sensitive).
+        let value_slot = if binders.len() == 2 {
+            let Some((_, slice_ty)) = slice else {
+                return Err(IrError::new(
+                    "native IR: two-binder for requires a slice iterator",
+                ));
+            };
+            let elem_ty = if slice_ty == Type::IntSlice {
+                Type::I64
+            } else {
+                Type::Str
+            };
+            let slot = self.value();
+            self.emit(Inst::Alloca {
+                out: slot,
+                ty: elem_ty,
+            });
+            if elem_ty.is_heap() {
+                // Null so the first start-of-body drop is a no-op (free(NULL)).
+                let null = self.value();
+                self.emit(Inst::NullHeap {
+                    out: null,
+                    ty: elem_ty,
+                });
+                self.emit(Inst::Store {
+                    ptr: slot,
+                    value: null,
+                });
+            }
+            Some((binders[1].clone(), slot, elem_ty))
+        } else {
+            None
+        };
+
+        let header = self.new_block();
+        let body_id = self.new_block();
+        let latch = self.new_block();
+        let done = self.new_block();
+        self.terminate(Terminator::Jump(header))?;
+
+        // header: if counter < bound → body else done
+        self.current = header;
+        let iv = self.value();
+        self.emit(Inst::Load {
+            out: iv,
+            ptr: counter_slot,
+            ty: Type::I64,
+        });
+        let cmp = self.value();
+        self.emit(Inst::Binary {
+            out: cmp,
+            op: BinOp::Lt,
+            left: iv,
+            right: bound,
+            ty: Type::I64,
+        });
+        self.terminate(Terminator::Branch {
+            condition: cmp,
+            then_block: body_id,
+            else_block: done,
+        })?;
+
+        // body: always drop previous heap binder (null-safe), rebind, lower.
+        self.current = body_id;
+        let owned_before = self.heap_owned.clone();
+        let locals_before = self.locals.clone();
+        if index_name != "_" {
+            self.locals
+                .insert(index_name.clone(), (counter_slot, Type::I64));
+        }
+        if let Some((ref vname, vslot, elem_ty)) = value_slot {
+            if elem_ty.is_heap() {
+                // Always free whatever the slot holds (previous iter, or null).
+                // continue lands here on the next iter without a fallthrough drop.
+                let old = self.value();
+                self.emit(Inst::Load {
+                    out: old,
+                    ptr: vslot,
+                    ty: elem_ty,
+                });
+                self.emit_drop(old, elem_ty);
+            }
+            let (slice_ptr, slice_ty) = slice.expect("value binder implies slice");
+            let elem = self.value();
+            if slice_ty == Type::IntSlice {
+                self.emit(Inst::SliceIndex {
+                    out: elem,
+                    slice: slice_ptr,
+                    index: iv,
+                });
+            } else {
+                self.emit(Inst::StrSliceIndex {
+                    out: elem,
+                    slice: slice_ptr,
+                    index: iv,
+                });
+            }
+            self.emit(Inst::Store {
+                ptr: vslot,
+                value: elem,
+            });
+            if vname != "_" {
+                self.locals.insert(vname.clone(), (vslot, elem_ty));
+                // []string index returns an owned clone; []int is a scalar copy.
+                // Path-insensitive: keep the flag true for the whole loop so a
+                // late drop at `done` knows the binder is heap-typed. The actual
+                // free is driven by null-safe drops at body entry / done, not
+                // by this flag alone.
+                if elem_ty.is_heap() {
+                    self.heap_owned.insert(vname.clone(), true);
+                }
+            } else if elem_ty.is_heap() {
+                self.emit_drop(elem, elem_ty);
+                // Slot is live but holds a freed value — re-null it.
+                let null = self.value();
+                self.emit(Inst::NullHeap {
+                    out: null,
+                    ty: elem_ty,
+                });
+                self.emit(Inst::Store {
+                    ptr: vslot,
+                    value: null,
+                });
+            }
+        }
+
+        self.loops.push((label, done, latch));
+        self.lower_block(body)?;
+        self.loops.pop();
+
+        // Fallthrough → latch. Do NOT drop the value binder here: continue also
+        // reaches the next body without this path, and the next body's entry
+        // drop (or the done drop after break/exhaustion) frees it once.
+        if self.block().terminator.is_none() {
+            let mut owned_after = self.heap_owned.clone();
+            if let Some((ref vname, _, _)) = value_slot {
+                owned_after.remove(vname);
+            }
+            let mut owned_cmp = owned_before.clone();
+            if let Some((ref vname, _, _)) = value_slot {
+                owned_cmp.remove(vname);
+            }
+            if owned_after != owned_cmp {
+                return Err(IrError::new(
+                    "native IR: string ownership changes inside a loop",
+                ));
+            }
+            self.terminate(Terminator::Jump(latch))?;
+        }
+
+        // latch: counter += 1; jump header
+        self.current = latch;
+        let cur = self.value();
+        self.emit(Inst::Load {
+            out: cur,
+            ptr: counter_slot,
+            ty: Type::I64,
+        });
+        let one = self.const_int(1, Type::I64);
+        let next = self.value();
+        self.emit(Inst::Binary {
+            out: next,
+            op: BinOp::Add,
+            left: cur,
+            right: one,
+            ty: Type::I64,
+        });
+        self.emit(Inst::Store {
+            ptr: counter_slot,
+            value: next,
+        });
+        self.terminate(Terminator::Jump(header))?;
+
+        self.current = done;
+        // Always free the heap value binder (null-safe): covers break, and the
+        // last live element when the loop exits via the header→done edge.
+        if let Some((ref vname, vslot, elem_ty)) = value_slot {
+            if elem_ty.is_heap() {
+                let old = self.value();
+                self.emit(Inst::Load {
+                    out: old,
+                    ptr: vslot,
+                    ty: elem_ty,
+                });
+                self.emit_drop(old, elem_ty);
+            }
+            self.heap_owned.remove(vname);
+            self.locals.remove(vname);
+        }
+        if index_name != "_" {
+            self.locals.remove(index_name);
+        }
+        for (name, binding) in locals_before {
+            self.locals.entry(name).or_insert(binding);
+        }
+        self.heap_owned = owned_before;
         Ok(())
     }
 
@@ -1252,17 +1731,30 @@ impl<'a> FunctionLowerer<'a> {
                 }
                 if function == "len" && args.len() == 1 {
                     let (s, t, o) = self.lower_expr(&args[0])?;
-                    if t != Type::IntSlice && t != Type::StrSlice {
-                        return Err(IrError::new("native IR: len expects []int"));
-                    }
                     let out = self.value();
-                    if t == Type::IntSlice { self.emit(Inst::SliceLen { out, slice: s }); }
-                    else { self.emit(Inst::StrSliceLen { out, slice: s }); }
+                    match t {
+                        Type::IntSlice => self.emit(Inst::SliceLen { out, slice: s }),
+                        Type::StrSlice => self.emit(Inst::StrSliceLen { out, slice: s }),
+                        Type::Str => self.emit(Inst::StringLen { out, value: s }),
+                        _ => {
+                            return Err(IrError::new(
+                                "native IR: len expects string, []int, or []string",
+                            ))
+                        }
+                    }
                     if o {
-                        if t == Type::IntSlice { self.emit(Inst::DropSlice { value: s }); }
-                        else { self.emit(Inst::DropStrSlice { value: s }); }
+                        self.emit_drop(s, t);
                     }
                     return Ok((out, Type::I64, false));
+                }
+                if (function == "format_int" || function == "format_int_dec") && args.len() == 1 {
+                    let (v, ty, owned) = self.lower_expr(&args[0])?;
+                    if ty != Type::I64 || owned {
+                        return Err(IrError::new("native IR: format_int expects int"));
+                    }
+                    let out = self.value();
+                    self.emit(Inst::IntToString { out, value: v });
+                    return Ok((out, Type::Str, true));
                 }
                 if function == "append" && args.len() == 2 {
                     let (s, t, _) = self.lower_expr(&args[0])?;
@@ -1545,14 +2037,97 @@ impl<'a> FunctionLowerer<'a> {
                 Ok((out, Type::Struct(id), true))
             }
             Expr::Match { scrutinee, arms } => self.lower_match(scrutinee, arms),
+            Expr::StringInterp(parts) => self.lower_string_interp(parts),
             _ => Err(IrError::new("native IR: expression not implemented yet")),
         }
     }
 
-    /// Lower a `match` on an enum scrutinee. The result is merged through a
-    /// stack slot because the IR has no block parameters. The scrutinee is
-    /// dropped exactly once on the taken arm (after its payload is read), so an
-    /// owned scrutinee neither leaks nor double-frees.
+    /// `f"…{expr}…"` — fold to a left-associative chain of owned concatenations.
+    /// Supported holes: `string`, `int`, `bool` (no format specs yet).
+    fn lower_string_interp(
+        &mut self,
+        parts: &[crate::ast::InterpPart],
+    ) -> Result<(Value, Type, bool), IrError> {
+        use crate::ast::InterpPart;
+        let mut acc: Option<(Value, bool)> = None;
+        let mut drop_temps = Vec::new();
+        for part in parts {
+            let (piece, piece_owned) = match part {
+                InterpPart::Lit(s) => {
+                    let out = self.value();
+                    self.emit(Inst::StringLiteral {
+                        out,
+                        bytes: s.as_bytes().to_vec(),
+                    });
+                    (out, false)
+                }
+                InterpPart::Expr(expr, spec) => {
+                    if spec.is_some() {
+                        return Err(IrError::new(
+                            "native IR: format specs in f-strings are not implemented yet",
+                        ));
+                    }
+                    let (v, ty, owned) = self.lower_expr(expr)?;
+                    match ty {
+                        Type::Str => (v, owned),
+                        Type::I64 => {
+                            let out = self.value();
+                            self.emit(Inst::IntToString { out, value: v });
+                            (out, true)
+                        }
+                        Type::I1 => {
+                            let out = self.value();
+                            self.emit(Inst::BoolToString { out, value: v });
+                            (out, true)
+                        }
+                        _ => {
+                            return Err(IrError::new(
+                                "native IR: f-string hole must be string, int, or bool",
+                            ))
+                        }
+                    }
+                }
+            };
+            match acc {
+                None => acc = Some((piece, piece_owned)),
+                Some((left, left_owned)) => {
+                    let out = self.value();
+                    self.emit(Inst::StringConcat {
+                        out,
+                        left,
+                        right: piece,
+                    });
+                    if left_owned {
+                        drop_temps.push(left);
+                    }
+                    if piece_owned {
+                        drop_temps.push(piece);
+                    }
+                    // Concat consumes copies of the bytes; drop owned operands
+                    // after the concat instruction (backends free after copy).
+                    for d in drop_temps.drain(..) {
+                        self.emit(Inst::DropString { value: d });
+                    }
+                    acc = Some((out, true));
+                }
+            }
+        }
+        match acc {
+            Some((v, owned)) => Ok((v, Type::Str, owned)),
+            None => {
+                let out = self.value();
+                self.emit(Inst::StringLiteral {
+                    out,
+                    bytes: Vec::new(),
+                });
+                Ok((out, Type::Str, false))
+            }
+        }
+    }
+
+    /// Lower a `match`. Enum and scalar (int/bool) scrutinees are supported.
+    /// Results merge through a stack slot (no block parameters). An owned enum
+    /// scrutinee is dropped exactly once on the taken arm.
     fn lower_match(
         &mut self,
         scrutinee: &Expr,
@@ -1561,14 +2136,209 @@ impl<'a> FunctionLowerer<'a> {
         if arms.is_empty() {
             return Err(IrError::new("native IR: empty match"));
         }
-        let (sptr, sty, sowned) = self.lower_expr(scrutinee)?;
-        let Type::Struct(enum_id) = sty else {
-            return Err(IrError::new("native IR: match scrutinee must be an enum"));
-        };
-        if !self.structs.is_enum(enum_id) {
-            return Err(IrError::new("native IR: match scrutinee must be an enum"));
+        let (sval, sty, sowned) = self.lower_expr(scrutinee)?;
+        match sty {
+            Type::Struct(id) if self.structs.is_enum(id) => {
+                self.lower_enum_match(sval, id, sowned, arms)
+            }
+            Type::I64 | Type::I1 => self.lower_scalar_match(sval, sty, arms),
+            _ => Err(IrError::new(
+                "native IR: match scrutinee must be an enum, int, or bool",
+            )),
+        }
+    }
+
+    fn lower_scalar_match(
+        &mut self,
+        scrutinee: Value,
+        sty: Type,
+        arms: &[crate::ast::MatchArm],
+    ) -> Result<(Value, Type, bool), IrError> {
+        let result_slot = self.value();
+        let result_block = self.current;
+        let result_index = self.block().instructions.len();
+        self.emit(Inst::Alloca {
+            out: result_slot,
+            ty: Type::I64,
+        });
+        let mut result_ty: Option<Type> = None;
+        let merge = self.new_block();
+        let saved_locals = self.locals.clone();
+        let saved_owned = self.heap_owned.clone();
+        let mut test_block = self.current;
+
+        for (i, arm) in arms.iter().enumerate() {
+            let is_last = i == arms.len() - 1;
+            let (match_values, catch_all, bind_name) =
+                self.resolve_scalar_pattern(&arm.pattern, sty)?;
+            self.current = test_block;
+            let arm_block = self.new_block();
+            let next_block = if is_last {
+                None
+            } else {
+                Some(self.new_block())
+            };
+
+            if is_last || catch_all {
+                self.terminate(Terminator::Jump(arm_block))?;
+            } else {
+                // Or-pattern: value equals any of the listed literals.
+                let mut any = None;
+                for lit in &match_values {
+                    let expected = self.const_int(*lit, sty);
+                    let cmp = self.value();
+                    self.emit(Inst::Binary {
+                        out: cmp,
+                        op: BinOp::Eq,
+                        left: scrutinee,
+                        right: expected,
+                        ty: sty,
+                    });
+                    any = Some(match any {
+                        None => cmp,
+                        Some(prev) => {
+                            let or = self.value();
+                            self.emit(Inst::Binary {
+                                out: or,
+                                op: BinOp::Or,
+                                left: prev,
+                                right: cmp,
+                                ty: Type::I1,
+                            });
+                            or
+                        }
+                    });
+                }
+                let cond = any.ok_or_else(|| {
+                    IrError::new("native IR: scalar match arm has no literals")
+                })?;
+                self.terminate(Terminator::Branch {
+                    condition: cond,
+                    then_block: arm_block,
+                    else_block: next_block.unwrap(),
+                })?;
+            }
+
+            self.current = arm_block;
+            self.locals = saved_locals.clone();
+            self.heap_owned = saved_owned.clone();
+            if let Some(name) = bind_name {
+                // Whole-scrutinee identifier binding (`x => x + 1`).
+                let local = self.value();
+                self.emit(Inst::Alloca { out: local, ty: sty });
+                self.emit(Inst::Store {
+                    ptr: local,
+                    value: scrutinee,
+                });
+                self.locals.insert(name, (local, sty));
+            }
+            if let Some(guard) = &arm.guard {
+                let (gval, gty, gowned) = self.lower_expr(guard)?;
+                if gowned || gty != Type::I1 {
+                    return Err(IrError::new("native IR: match guard must be bool"));
+                }
+                let body_block = self.new_block();
+                if let Some(next) = next_block {
+                    self.terminate(Terminator::Branch {
+                        condition: gval,
+                        then_block: body_block,
+                        else_block: next,
+                    })?;
+                } else {
+                    self.terminate(Terminator::Jump(body_block))?;
+                    let _ = gval;
+                }
+                self.current = body_block;
+            }
+            let (mut body_value, body_ty, body_owned) = self.lower_expr(&arm.body)?;
+            if body_ty.is_heap() && !body_owned {
+                body_value = self.emit_clone(body_value, body_ty);
+            }
+            match result_ty {
+                None => result_ty = Some(body_ty),
+                Some(t) if t != body_ty => {
+                    return Err(IrError::new("native IR: match arms disagree on result type"));
+                }
+                _ => {}
+            }
+            self.emit(Inst::Store {
+                ptr: result_slot,
+                value: body_value,
+            });
+            self.terminate(Terminator::Jump(merge))?;
+            if let Some(next) = next_block {
+                test_block = next;
+            }
         }
 
+        self.locals = saved_locals;
+        self.heap_owned = saved_owned;
+        self.current = merge;
+        let result_ty = result_ty.expect("non-empty match");
+        if let Inst::Alloca { ty, .. } =
+            &mut self.function.blocks[result_block.0 as usize].instructions[result_index]
+        {
+            *ty = result_ty;
+        }
+        let out = self.value();
+        self.emit(Inst::Load {
+            out,
+            ptr: result_slot,
+            ty: result_ty,
+        });
+        Ok((out, result_ty, result_ty.is_heap()))
+    }
+
+    /// Resolve a scalar match pattern to `(literal values, is_catch_all, bind)`.
+    fn resolve_scalar_pattern(
+        &self,
+        pattern: &Pattern,
+        sty: Type,
+    ) -> Result<(Vec<i64>, bool, Option<String>), IrError> {
+        match pattern {
+            Pattern::Wildcard => Ok((Vec::new(), true, None)),
+            Pattern::Ident(name) => Ok((Vec::new(), true, Some(name.clone()))),
+            Pattern::Literal(expr) => {
+                let v = self.scalar_literal_value(expr, sty)?;
+                Ok((vec![v], false, None))
+            }
+            Pattern::Or(parts) => {
+                let mut values = Vec::new();
+                for part in parts {
+                    let (vs, catch, bind) = self.resolve_scalar_pattern(part, sty)?;
+                    if catch || bind.is_some() {
+                        return Err(IrError::new(
+                            "native IR: or-pattern must be literal-only",
+                        ));
+                    }
+                    values.extend(vs);
+                }
+                Ok((values, false, None))
+            }
+            _ => Err(IrError::new(
+                "native IR: unsupported scalar match pattern",
+            )),
+        }
+    }
+
+    fn scalar_literal_value(&self, expr: &Expr, sty: Type) -> Result<i64, IrError> {
+        match (expr, sty) {
+            (Expr::Int(n), Type::I64) => Ok(*n),
+            (Expr::Bool(b), Type::I1) => Ok(i64::from(*b)),
+            (Expr::Bool(b), Type::I64) => Ok(i64::from(*b)),
+            _ => Err(IrError::new(
+                "native IR: match literal type does not match scrutinee",
+            )),
+        }
+    }
+
+    fn lower_enum_match(
+        &mut self,
+        sptr: Value,
+        enum_id: u32,
+        sowned: bool,
+        arms: &[crate::ast::MatchArm],
+    ) -> Result<(Value, Type, bool), IrError> {
         // Discriminant (slot 0), then the result slot (type patched once known).
         let tag = self.value();
         self.emit(Inst::StructField {
@@ -1593,10 +2363,7 @@ impl<'a> FunctionLowerer<'a> {
 
         let mut test_block = self.current;
         for (i, arm) in arms.iter().enumerate() {
-            if arm.guard.is_some() {
-                return Err(IrError::new("native IR: match guards are not implemented yet"));
-            }
-            let (arm_tag, bindings, catch_all) =
+            let (arm_tag, bindings, catch_all, whole_bind) =
                 self.resolve_match_pattern(enum_id, &arm.pattern)?;
             let is_last = i == arms.len() - 1;
 
@@ -1604,8 +2371,6 @@ impl<'a> FunctionLowerer<'a> {
             let arm_block = self.new_block();
             let next_block = if is_last { None } else { Some(self.new_block()) };
             if is_last || catch_all {
-                // Exhaustiveness (frontend-guaranteed) makes the final arm the
-                // fallthrough for whatever tag was not explicitly tested.
                 self.terminate(Terminator::Jump(arm_block))?;
             } else {
                 let expected = self.const_int(arm_tag, Type::I64);
@@ -1624,10 +2389,23 @@ impl<'a> FunctionLowerer<'a> {
                 })?;
             }
 
-            // Arm body in its own lexical scope.
             self.current = arm_block;
             self.locals = saved_locals.clone();
             self.heap_owned = saved_owned.clone();
+            if let Some(name) = whole_bind {
+                // Bind the whole scrutinee as a borrow of the enum block.
+                let local = self.value();
+                self.emit(Inst::Alloca {
+                    out: local,
+                    ty: Type::Struct(enum_id),
+                });
+                self.emit(Inst::Store {
+                    ptr: local,
+                    value: sptr,
+                });
+                self.locals
+                    .insert(name, (local, Type::Struct(enum_id)));
+            }
             for (name, slot, ty) in &bindings {
                 let payload = self.value();
                 self.emit(Inst::StructField {
@@ -1645,14 +2423,42 @@ impl<'a> FunctionLowerer<'a> {
                 });
                 self.locals.insert(name.clone(), (local, *ty));
             }
-            let (body_value, body_ty, _body_owned) = self.lower_expr(&arm.body)?;
-            // A heap result would either leak (owned temp) or dangle (a borrow of
-            // the scrutinee's payload, freed by the scrutinee drop below), so
-            // owned match results are restricted to scalars for now.
-            if body_ty.is_heap() {
-                return Err(IrError::new(
-                    "native IR: owned match results are not implemented yet",
-                ));
+            if let Some(guard) = &arm.guard {
+                let (gval, gty, gowned) = self.lower_expr(guard)?;
+                if gowned {
+                    return Err(IrError::new("native IR: owned string match guard"));
+                }
+                if gty != Type::I1 {
+                    return Err(IrError::new("native IR: match guard must be bool"));
+                }
+                let body_block = self.new_block();
+                if let Some(next) = next_block {
+                    self.terminate(Terminator::Branch {
+                        condition: gval,
+                        then_block: body_block,
+                        else_block: next,
+                    })?;
+                } else {
+                    let fail = self.new_block();
+                    self.terminate(Terminator::Branch {
+                        condition: gval,
+                        then_block: body_block,
+                        else_block: fail,
+                    })?;
+                    self.current = fail;
+                    if sowned {
+                        self.emit(Inst::DropStruct {
+                            value: sptr,
+                            struct_id: enum_id,
+                        });
+                    }
+                    self.terminate(Terminator::Jump(merge))?;
+                }
+                self.current = body_block;
+            }
+            let (mut body_value, body_ty, body_owned) = self.lower_expr(&arm.body)?;
+            if body_ty.is_heap() && !body_owned {
+                body_value = self.emit_clone(body_value, body_ty);
             }
             match result_ty {
                 None => result_ty = Some(body_ty),
@@ -1693,29 +2499,28 @@ impl<'a> FunctionLowerer<'a> {
             ptr: result_slot,
             ty: result_ty,
         });
-        Ok((out, result_ty, false))
+        Ok((out, result_ty, result_ty.is_heap()))
     }
 
-    /// Resolve a match arm pattern to `(variant tag, payload bindings, is
-    /// catch-all)`. Payload bindings are `(name, slot index, type)`.
+    /// Resolve an enum match pattern to
+    /// `(tag, payload_bindings, is_catch_all, whole_scrutinee_bind)`.
+    /// Payload bindings are `(name, slot index, type)`.
     #[allow(clippy::type_complexity)]
     fn resolve_match_pattern(
         &self,
         enum_id: u32,
         pattern: &Pattern,
-    ) -> Result<(i64, Vec<(String, u32, Type)>, bool), IrError> {
+    ) -> Result<(i64, Vec<(String, u32, Type)>, bool, Option<String>), IrError> {
         match pattern {
-            Pattern::Wildcard => Ok((0, Vec::new(), true)),
+            Pattern::Wildcard => Ok((0, Vec::new(), true, None)),
             Pattern::Ident(name) => match self.structs.variant(name) {
                 // A bare capitalized nullary variant (`Point`, `None`).
                 Some(info) if info.enum_id == enum_id && info.arity == 0 => {
-                    Ok((info.tag, Vec::new(), false))
+                    Ok((info.tag, Vec::new(), false, None))
                 }
                 Some(_) => Err(IrError::new("native IR: variant pattern arity mismatch")),
-                // Binding the whole scrutinee needs enum-move handling; defer.
-                None => Err(IrError::new(
-                    "native IR: identifier match patterns are not implemented yet",
-                )),
+                // Lowercase identifier binds the whole scrutinee.
+                None => Ok((0, Vec::new(), true, Some(name.clone()))),
             },
             Pattern::Variant { name, bindings } => {
                 let info = self.structs.variant(name).ok_or_else(|| {
@@ -1736,6 +2541,14 @@ impl<'a> FunctionLowerer<'a> {
                     match binding {
                         Pattern::Ident(name) => binds.push((name.clone(), slot, slot_ty)),
                         Pattern::Wildcard => {}
+                        // Nested pattern on an enum payload of enum type:
+                        // only a single-level Ident/Wildcard is required for
+                        // current fixtures; deeper nesting stays deferred.
+                        Pattern::Variant { .. } => {
+                            return Err(IrError::new(
+                                "native IR: nested payload patterns are not implemented yet",
+                            ))
+                        }
                         _ => {
                             return Err(IrError::new(
                                 "native IR: nested payload patterns are not implemented yet",
@@ -1743,7 +2556,7 @@ impl<'a> FunctionLowerer<'a> {
                         }
                     }
                 }
-                Ok((info.tag, binds, false))
+                Ok((info.tag, binds, false, None))
             }
             _ => Err(IrError::new("native IR: unsupported match pattern")),
         }
@@ -2195,5 +3008,102 @@ mod tests {
         assert!(instructions
             .iter()
             .any(|i| matches!(i, Inst::DropSlice { .. })));
+    }
+
+    #[test]
+    fn lowers_nested_struct_fields() {
+        let source = r#"
+            struct Addr { city: string, zip: int }
+            struct Person { name: string, addr: Addr }
+            fn main() {
+                let p = Person { name: "Ada", addr: Addr { city: "Paris", zip: 1 } }
+                print(p.addr.city)
+            }
+        "#;
+        let tokens = Lexer::new(source).tokenize().unwrap();
+        let program = Parser::new(tokens).parse().unwrap();
+        let module = lower(&program).unwrap();
+        let person = module.structs.iter().find(|l| l.name == "Person").unwrap();
+        assert!(matches!(person.fields[1].1, Type::Struct(_)));
+        let main = module.functions.iter().find(|f| f.name == "main").unwrap();
+        let insts = main.blocks.iter().flat_map(|b| &b.instructions).collect::<Vec<_>>();
+        assert!(insts.iter().any(|i| matches!(i, Inst::StructMake { .. })));
+        assert!(insts.iter().any(|i| matches!(i, Inst::DropStruct { .. })));
+    }
+
+    #[test]
+    fn owned_match_results_clone_payload_before_scrutinee_drop() {
+        let source = r#"
+            enum Msg { Text(string), Quit }
+            fn payload(m: Msg) -> string {
+                return match m {
+                    Text(s) => s,
+                    Quit => "x",
+                }
+            }
+            fn main() { print(payload(Text("hi"))) }
+        "#;
+        let tokens = Lexer::new(source).tokenize().unwrap();
+        let program = Parser::new(tokens).parse().unwrap();
+        let module = lower(&program).unwrap();
+        let payload = module.functions.iter().find(|f| f.name == "payload").unwrap();
+        let insts = payload.blocks.iter().flat_map(|b| &b.instructions).collect::<Vec<_>>();
+        // Payload arm clones the borrowed string before the match result is stored.
+        assert!(
+            insts.iter().any(|i| matches!(i, Inst::StringClone { .. })),
+            "owned match result must clone a borrowed payload"
+        );
+    }
+
+    #[test]
+    fn lowers_for_loops_with_latch() {
+        let source = r#"
+            fn main() {
+                var s = 0
+                for i in 3 { s = s + i }
+                print_int(s)
+            }
+        "#;
+        let tokens = Lexer::new(source).tokenize().unwrap();
+        let program = Parser::new(tokens).parse().unwrap();
+        let module = lower(&program).unwrap();
+        let main = module.functions.iter().find(|f| f.name == "main").unwrap();
+        assert!(main.blocks.len() >= 4, "header/body/latch/done");
+        assert!(main
+            .blocks
+            .iter()
+            .any(|b| matches!(b.terminator, Some(Terminator::Branch { .. }))));
+    }
+
+    #[test]
+    fn lowers_match_guards() {
+        let source = r#"
+            enum Msg { Text(string), Code(int), Quit }
+            fn classify(m: Msg) -> int {
+                return match m {
+                    Text(s) if len(s) > 3 => 1,
+                    Text(s) => 2,
+                    Code(n) if n > 10 => 3,
+                    Code(n) => 4,
+                    Quit => 0,
+                }
+            }
+            fn main() { print_int(classify(Text("hi"))) }
+        "#;
+        let tokens = Lexer::new(source).tokenize().unwrap();
+        let program = Parser::new(tokens).parse().unwrap();
+        let module = lower(&program).unwrap();
+        let classify = module.functions.iter().find(|f| f.name == "classify").unwrap();
+        let branches = classify
+            .blocks
+            .iter()
+            .filter(|b| matches!(b.terminator, Some(Terminator::Branch { .. })))
+            .count();
+        assert!(branches >= 3, "tag dispatch + at least one guard branch");
+        assert!(classify
+            .blocks
+            .iter()
+            .flat_map(|b| &b.instructions)
+            .any(|i| matches!(i, Inst::StringLen { .. })));
     }
 }

@@ -62,7 +62,18 @@ fn llvm_type<'ctx>(context: &'ctx Context, ty: Type) -> BasicTypeEnum<'ctx> {
                 false,
             )
             .into(),
-        Type::StrSlice => context.ptr_type(Default::default()).into(),
+        // Value ABI matching MakoNativeStrSliceValue { data, len, cap, owned }.
+        Type::StrSlice => context
+            .struct_type(
+                &[
+                    context.ptr_type(Default::default()).into(),
+                    context.i64_type().into(),
+                    context.i64_type().into(),
+                    context.i64_type().into(),
+                ],
+                false,
+            )
+            .into(),
         // A struct value is an owning heap pointer; its concrete layout is
         // carried separately (see `struct_layouts`) for field GEPs.
         Type::Struct(_) => context.ptr_type(Default::default()).into(),
@@ -197,18 +208,23 @@ fn emit_function<'ctx>(
     builder.position_at_end(blocks[0]);
     for block in &function.blocks {
         for instruction in &block.instructions {
-            let out = match instruction {
+            let out_ty = match instruction {
                 Inst::SliceLiteral { out, .. }
                 | Inst::SliceMake { out, .. }
                 | Inst::SliceAppend { out, .. }
                 | Inst::SliceSlice { out, .. }
-                | Inst::SliceClone { out, .. } => Some(*out),
+                | Inst::SliceClone { out, .. } => Some((*out, Type::IntSlice)),
+                Inst::StrSliceLiteral { out, .. }
+                | Inst::StrSliceMake { out, .. }
+                | Inst::StrSliceAppend { out, .. }
+                | Inst::StrSliceSlice { out, .. }
+                | Inst::StrSliceClone { out, .. } => Some((*out, Type::StrSlice)),
                 _ => None,
             };
-            if let Some(out) = out {
+            if let Some((out, ty)) = out_ty {
                 let slot = builder
                     .build_alloca(
-                        llvm_type(context, Type::IntSlice),
+                        llvm_type(context, ty),
                         &format!("{}.result", value_name(out)),
                     )
                     .map_err(builder_error)?;
@@ -520,6 +536,86 @@ fn emit_instruction<'ctx>(
                 .build_call(drop, &[values[value].into()], "drop_string")
                 .map_err(builder_error)?;
         }
+        Inst::StringLen { out, value } => {
+            // Value ABI: string is { data, len }; extract field 1.
+            let len = builder
+                .build_extract_value(values[value].into_struct_value(), 1, &value_name(*out))
+                .map_err(builder_error)?;
+            values.insert(*out, len);
+        }
+        Inst::NullHeap { out, ty } => {
+            let value = match ty {
+                Type::Str => pack_string(
+                    context,
+                    builder,
+                    context.ptr_type(Default::default()).const_null(),
+                    context.i64_type().const_zero(),
+                    &value_name(*out),
+                )?
+                .into(),
+                Type::IntSlice | Type::StrSlice => {
+                    let st = llvm_type(context, *ty).into_struct_type();
+                    let mut agg = st.get_undef();
+                    for i in 0..4 {
+                        let zero: BasicValueEnum = if i == 0 {
+                            context.ptr_type(Default::default()).const_null().into()
+                        } else {
+                            context.i64_type().const_zero().into()
+                        };
+                        agg = builder
+                            .build_insert_value(agg, zero, i, &format!("null.{}", i))
+                            .map_err(builder_error)?
+                            .into_struct_value();
+                    }
+                    agg.into()
+                }
+                Type::Struct(_) => context.ptr_type(Default::default()).const_null().into(),
+                _ => {
+                    return Err(LlvmError::new(
+                        "LLVM backend: NullHeap only applies to heap types",
+                    ))
+                }
+            };
+            values.insert(*out, value);
+        }
+        Inst::IntToString { out, value } => {
+            let string_type = llvm_type(context, Type::Str);
+            let f = external_function(
+                module,
+                "mako_native_int_to_string",
+                string_type.fn_type(&[context.i64_type().into()], false),
+            );
+            let s = builder
+                .build_call(f, &[values[value].into()], &value_name(*out))
+                .map_err(builder_error)?
+                .try_as_basic_value()
+                .basic()
+                .ok_or_else(|| LlvmError::new("int_to_string returned void"))?;
+            values.insert(*out, s);
+        }
+        Inst::BoolToString { out, value } => {
+            let string_type = llvm_type(context, Type::Str);
+            let f = external_function(
+                module,
+                "mako_native_bool_to_string",
+                string_type.fn_type(&[context.i64_type().into()], false),
+            );
+            // Bool is i1 in IR; widen to i64 for the C ABI.
+            let as_i64 = builder
+                .build_int_z_extend(
+                    values[value].into_int_value(),
+                    context.i64_type(),
+                    "bool.i64",
+                )
+                .map_err(builder_error)?;
+            let s = builder
+                .build_call(f, &[as_i64.into()], &value_name(*out))
+                .map_err(builder_error)?
+                .try_as_basic_value()
+                .basic()
+                .ok_or_else(|| LlvmError::new("bool_to_string returned void"))?;
+            values.insert(*out, s);
+        }
         Inst::SliceMake { out, len, cap } => {
             let capacity = cap.map(|value| values[&value]).unwrap_or(values[len]);
             let function_type = context.void_type().fn_type(
@@ -823,84 +919,17 @@ fn emit_instruction<'ctx>(
                 .map_err(builder_error)?;
         }
         Inst::StructClone { out, base, struct_id } => {
-            // Deep copy: allocate a fresh block and copy each field, recursively
-            // cloning owned (string) fields. A shallow memcpy would make the copy
-            // and the original share (and double-free) the same string buffer.
-            let struct_ty = struct_types[*struct_id as usize];
-            let fields = &layouts[*struct_id as usize].fields;
-            let size = struct_ty
-                .size_of()
-                .ok_or_else(|| LlvmError::new("LLVM backend: unsized struct"))?;
-            let malloc = external_function(
+            let cloned = llvm_emit_struct_clone(
+                context,
                 module,
-                "malloc",
-                context
-                    .ptr_type(Default::default())
-                    .fn_type(&[context.i64_type().into()], false),
-            );
-            let ptr = builder
-                .build_call(malloc, &[size.into()], &value_name(*out))
-                .map_err(builder_error)?
-                .try_as_basic_value()
-                .basic()
-                .ok_or_else(|| LlvmError::new("malloc returned void"))?
-                .into_pointer_value();
-            let base_ptr = values[base].into_pointer_value();
-            for (index, (_, field_ty)) in fields.iter().enumerate() {
-                let src = builder
-                    .build_struct_gep(struct_ty, base_ptr, index as u32, "clone.src")
-                    .map_err(|_| LlvmError::new("LLVM backend: struct clone GEP failed"))?;
-                let loaded = builder
-                    .build_load(llvm_type(context, *field_ty), src, "clone.field")
-                    .map_err(builder_error)?;
-                let stored = match field_ty {
-                    Type::Str => {
-                        let string_ty = llvm_type(context, Type::Str);
-                        let clone = external_function(
-                            module,
-                            "mako_native_string_clone",
-                            string_ty.fn_type(&[string_ty.into()], false),
-                        );
-                        builder
-                            .build_call(clone, &[loaded.into()], "clone.string")
-                            .map_err(builder_error)?
-                            .try_as_basic_value()
-                            .basic()
-                            .ok_or_else(|| LlvmError::new("string clone returned void"))?
-                    }
-                    Type::IntSlice => {
-                        let slot = builder
-                            .build_alloca(llvm_type(context, Type::IntSlice), "clone.slice.slot")
-                            .map_err(builder_error)?;
-                        let function_type = context.void_type().fn_type(
-                            &[
-                                context.ptr_type(Default::default()).into(),
-                                context.ptr_type(Default::default()).into(),
-                                context.i64_type().into(),
-                                context.i64_type().into(),
-                                context.i64_type().into(),
-                            ],
-                            false,
-                        );
-                        call_slice_return(
-                            context,
-                            module,
-                            builder,
-                            slot,
-                            "mako_native_int_slice_clone",
-                            function_type,
-                            &slice_parts(builder, loaded.into_struct_value())?,
-                            "clone.slice",
-                        )?
-                    }
-                    _ => loaded,
-                };
-                let dst = builder
-                    .build_struct_gep(struct_ty, ptr, index as u32, "clone.dst")
-                    .map_err(|_| LlvmError::new("LLVM backend: struct clone GEP failed"))?;
-                builder.build_store(dst, stored).map_err(builder_error)?;
-            }
-            values.insert(*out, ptr.into());
+                builder,
+                *struct_id,
+                values[base].into_pointer_value(),
+                struct_types,
+                layouts,
+                &value_name(*out),
+            )?;
+            values.insert(*out, cloned.into());
         }
         Inst::EnumMake { out, enum_id, tag, slot_base, payload } => {
             // calloc a zeroed block so inactive owned slots are null; store the
@@ -945,83 +974,590 @@ fn emit_instruction<'ctx>(
             values.insert(*out, ptr.into());
         }
         Inst::DropStruct { value, struct_id } => {
-            // Drop owned (string) fields, then free the block.
-            let struct_ty = struct_types[*struct_id as usize];
-            let fields = &layouts[*struct_id as usize].fields;
-            let base_ptr = values[value].into_pointer_value();
-            for (index, (_, field_ty)) in fields.iter().enumerate() {
-                match field_ty {
-                    Type::Str => {
-                        let gep = builder
-                            .build_struct_gep(struct_ty, base_ptr, index as u32, "drop.field")
-                            .map_err(|_| LlvmError::new("LLVM backend: struct drop GEP failed"))?;
-                        let string_ty = llvm_type(context, Type::Str);
-                        let loaded = builder
-                            .build_load(string_ty, gep, "drop.string")
-                            .map_err(builder_error)?;
-                        let drop = external_function(
-                            module,
-                            "mako_native_string_drop",
-                            context.void_type().fn_type(&[string_ty.into()], false),
-                        );
-                        builder
-                            .build_call(drop, &[loaded.into()], "drop.string.call")
-                            .map_err(builder_error)?;
-                    }
-                    Type::IntSlice => {
-                        let gep = builder
-                            .build_struct_gep(struct_ty, base_ptr, index as u32, "drop.field")
-                            .map_err(|_| LlvmError::new("LLVM backend: struct drop GEP failed"))?;
-                        let loaded = builder
-                            .build_load(llvm_type(context, Type::IntSlice), gep, "drop.slice")
-                            .map_err(builder_error)?;
-                        let drop = external_function(
-                            module,
-                            "mako_native_int_slice_drop",
-                            context.void_type().fn_type(
-                                &[
-                                    context.ptr_type(Default::default()).into(),
-                                    context.i64_type().into(),
-                                    context.i64_type().into(),
-                                    context.i64_type().into(),
-                                ],
-                                false,
-                            ),
-                        );
-                        builder
-                            .build_call(
-                                drop,
-                                &slice_parts(builder, loaded.into_struct_value())?,
-                                "drop.slice.call",
-                            )
-                            .map_err(builder_error)?;
-                    }
-                    _ => {}
-                }
-            }
-            let free = external_function(
+            llvm_emit_struct_drop(
+                context,
                 module,
-                "free",
-                context
-                    .void_type()
-                    .fn_type(&[context.ptr_type(Default::default()).into()], false),
+                builder,
+                *struct_id,
+                values[value].into_pointer_value(),
+                struct_types,
+                layouts,
+            )?;
+        }
+        // []string value ABI (MakoNativeStrSliceValue), parallel to []int.
+        Inst::StrSliceMake { out, len, cap } => {
+            let capacity = cap.map(|v| values[&v]).unwrap_or(values[len]);
+            let slot = slice_result_slots[out];
+            let function_type = context.void_type().fn_type(
+                &[
+                    context.ptr_type(Default::default()).into(),
+                    context.i64_type().into(),
+                    context.i64_type().into(),
+                ],
+                false,
             );
+            let f = external_function(module, "mako_native_str_slice_make", function_type);
             builder
-                .build_call(free, &[base_ptr.into()], "struct.drop")
+                .build_call(
+                    f,
+                    &[slot.into(), values[len].into(), capacity.into()],
+                    "strslice.make",
+                )
+                .map_err(builder_error)?;
+            let loaded = builder
+                .build_load(llvm_type(context, Type::StrSlice), slot, &value_name(*out))
+                .map_err(builder_error)?;
+            values.insert(*out, loaded);
+        }
+        Inst::StrSliceLiteral { out, elements } => {
+            let string_ty = llvm_type(context, Type::Str);
+            let array_ty = string_ty
+                .into_struct_type()
+                .array_type(elements.len().max(1) as u32);
+            // Use an array of string values; for empty, still allocate one slot.
+            let array_ty = if elements.is_empty() {
+                context.struct_type(
+                    &[
+                        context.ptr_type(Default::default()).into(),
+                        context.i64_type().into(),
+                    ],
+                    false,
+                )
+                .array_type(1)
+            } else {
+                array_ty
+            };
+            let slot_elems = builder
+                .build_alloca(array_ty, "strslice.lit")
+                .map_err(builder_error)?;
+            for (i, element) in elements.iter().enumerate() {
+                let gep = unsafe {
+                    builder.build_in_bounds_gep(
+                        string_ty,
+                        slot_elems,
+                        &[context.i64_type().const_int(i as u64, false)],
+                        "strslice.lit.elem",
+                    )
+                }
+                .map_err(builder_error)?;
+                builder
+                    .build_store(gep, values[element])
+                    .map_err(builder_error)?;
+            }
+            let result_slot = slice_result_slots[out];
+            let function_type = context.void_type().fn_type(
+                &[
+                    context.ptr_type(Default::default()).into(),
+                    context.ptr_type(Default::default()).into(),
+                    context.i64_type().into(),
+                ],
+                false,
+            );
+            let f = external_function(module, "mako_native_str_slice_literal", function_type);
+            builder
+                .build_call(
+                    f,
+                    &[
+                        result_slot.into(),
+                        slot_elems.into(),
+                        context
+                            .i64_type()
+                            .const_int(elements.len() as u64, false)
+                            .into(),
+                    ],
+                    "strslice.literal",
+                )
+                .map_err(builder_error)?;
+            let loaded = builder
+                .build_load(
+                    llvm_type(context, Type::StrSlice),
+                    result_slot,
+                    &value_name(*out),
+                )
+                .map_err(builder_error)?;
+            values.insert(*out, loaded);
+        }
+        Inst::StrSliceLen { out, slice } => {
+            let parts = slice_parts(builder, values[slice].into_struct_value())?;
+            let f = external_function(
+                module,
+                "mako_native_str_slice_len",
+                context.i64_type().fn_type(
+                    &[
+                        context.ptr_type(Default::default()).into(),
+                        context.i64_type().into(),
+                        context.i64_type().into(),
+                        context.i64_type().into(),
+                    ],
+                    false,
+                ),
+            );
+            let len = builder
+                .build_call(f, &parts, &value_name(*out))
+                .map_err(builder_error)?
+                .try_as_basic_value()
+                .basic()
+                .ok_or_else(|| LlvmError::new("string slice len returned void"))?;
+            values.insert(*out, len);
+        }
+        Inst::StrSliceIndex { out, slice, index } => {
+            let parts = slice_parts(builder, values[slice].into_struct_value())?;
+            let string_ty = llvm_type(context, Type::Str);
+            let f = external_function(
+                module,
+                "mako_native_str_slice_get",
+                string_ty.fn_type(
+                    &[
+                        context.ptr_type(Default::default()).into(),
+                        context.i64_type().into(),
+                        context.i64_type().into(),
+                        context.i64_type().into(),
+                        context.i64_type().into(),
+                    ],
+                    false,
+                ),
+            );
+            let mut args = parts.to_vec();
+            args.push(values[index].into());
+            let element = builder
+                .build_call(f, &args, &value_name(*out))
+                .map_err(builder_error)?
+                .try_as_basic_value()
+                .basic()
+                .ok_or_else(|| LlvmError::new("string slice get returned void"))?;
+            values.insert(*out, element);
+        }
+        Inst::StrSliceStore { slice, index, value } => {
+            let parts = slice_parts(builder, values[slice].into_struct_value())?;
+            let string_ty = llvm_type(context, Type::Str);
+            let f = external_function(
+                module,
+                "mako_native_str_slice_set",
+                context.void_type().fn_type(
+                    &[
+                        context.ptr_type(Default::default()).into(),
+                        context.i64_type().into(),
+                        context.i64_type().into(),
+                        context.i64_type().into(),
+                        context.i64_type().into(),
+                        string_ty.into(),
+                    ],
+                    false,
+                ),
+            );
+            let mut args = parts.to_vec();
+            args.push(values[index].into());
+            args.push(values[value].into());
+            builder
+                .build_call(f, &args, "strslice.set")
                 .map_err(builder_error)?;
         }
-        Inst::StrSliceLiteral { .. }
-        | Inst::StrSliceMake { .. }
-        | Inst::StrSliceLen { .. }
-        | Inst::StrSliceIndex { .. }
-        | Inst::StrSliceStore { .. }
-        | Inst::StrSliceAppend { .. }
-        | Inst::StrSliceSlice { .. }
-        | Inst::StrSliceClone { .. }
-        | Inst::DropStrSlice { .. } => {
-            return Err(LlvmError::new("LLVM backend: []string ABI is not implemented yet"));
+        Inst::StrSliceAppend { out, slice, value } => {
+            let parts = slice_parts(builder, values[slice].into_struct_value())?;
+            let slot = slice_result_slots[out];
+            let string_ty = llvm_type(context, Type::Str);
+            let function_type = context.void_type().fn_type(
+                &[
+                    context.ptr_type(Default::default()).into(),
+                    context.ptr_type(Default::default()).into(),
+                    context.i64_type().into(),
+                    context.i64_type().into(),
+                    context.i64_type().into(),
+                    string_ty.into(),
+                ],
+                false,
+            );
+            let f = external_function(module, "mako_native_str_slice_append", function_type);
+            let mut args: Vec<BasicMetadataValueEnum> = vec![slot.into()];
+            args.extend_from_slice(&parts);
+            args.push(values[value].into());
+            builder
+                .build_call(f, &args, "strslice.append")
+                .map_err(builder_error)?;
+            let loaded = builder
+                .build_load(llvm_type(context, Type::StrSlice), slot, &value_name(*out))
+                .map_err(builder_error)?;
+            values.insert(*out, loaded);
+        }
+        Inst::StrSliceSlice {
+            out,
+            slice,
+            low,
+            high,
+            max,
+        } => {
+            let parts = slice_parts(builder, values[slice].into_struct_value())?;
+            let max_v = max
+                .map(|v| values[&v])
+                .unwrap_or_else(|| context.i64_type().const_int((-1i64) as u64, true).into());
+            let slot = slice_result_slots[out];
+            let function_type = context.void_type().fn_type(
+                &[
+                    context.ptr_type(Default::default()).into(),
+                    context.ptr_type(Default::default()).into(),
+                    context.i64_type().into(),
+                    context.i64_type().into(),
+                    context.i64_type().into(),
+                    context.i64_type().into(),
+                    context.i64_type().into(),
+                    context.i64_type().into(),
+                ],
+                false,
+            );
+            let f = external_function(module, "mako_native_str_slice_slice", function_type);
+            let mut args: Vec<BasicMetadataValueEnum> = vec![slot.into()];
+            args.extend_from_slice(&parts);
+            args.push(values[low].into());
+            args.push(values[high].into());
+            args.push(max_v.into());
+            builder
+                .build_call(f, &args, "strslice.slice")
+                .map_err(builder_error)?;
+            let loaded = builder
+                .build_load(llvm_type(context, Type::StrSlice), slot, &value_name(*out))
+                .map_err(builder_error)?;
+            values.insert(*out, loaded);
+        }
+        Inst::StrSliceClone { out, slice } => {
+            let parts = slice_parts(builder, values[slice].into_struct_value())?;
+            let slot = slice_result_slots[out];
+            let function_type = context.void_type().fn_type(
+                &[
+                    context.ptr_type(Default::default()).into(),
+                    context.ptr_type(Default::default()).into(),
+                    context.i64_type().into(),
+                    context.i64_type().into(),
+                    context.i64_type().into(),
+                ],
+                false,
+            );
+            let f = external_function(module, "mako_native_str_slice_clone", function_type);
+            let mut args: Vec<BasicMetadataValueEnum> = vec![slot.into()];
+            args.extend_from_slice(&parts);
+            builder
+                .build_call(f, &args, "strslice.clone")
+                .map_err(builder_error)?;
+            let loaded = builder
+                .build_load(llvm_type(context, Type::StrSlice), slot, &value_name(*out))
+                .map_err(builder_error)?;
+            values.insert(*out, loaded);
+        }
+        Inst::DropStrSlice { value } => {
+            let parts = slice_parts(builder, values[value].into_struct_value())?;
+            let f = external_function(
+                module,
+                "mako_native_str_slice_drop",
+                context.void_type().fn_type(
+                    &[
+                        context.ptr_type(Default::default()).into(),
+                        context.i64_type().into(),
+                        context.i64_type().into(),
+                        context.i64_type().into(),
+                    ],
+                    false,
+                ),
+            );
+            builder
+                .build_call(f, &parts, "strslice.drop")
+                .map_err(builder_error)?;
         }
     }
+    Ok(())
+}
+
+/// Null-safe deep clone of a heap struct (recursive for nested aggregates and
+/// owned string/slice fields). Result is written through a stack slot so nested
+/// clones do not fight over phi nodes.
+fn llvm_emit_struct_clone<'ctx>(
+    context: &'ctx Context,
+    module: &Module<'ctx>,
+    builder: &Builder<'ctx>,
+    struct_id: u32,
+    base_ptr: PointerValue<'ctx>,
+    struct_types: &[inkwell::types::StructType<'ctx>],
+    layouts: &[native_ir::StructLayout],
+    result_name: &str,
+) -> Result<PointerValue<'ctx>, LlvmError> {
+    let function = builder
+        .get_insert_block()
+        .and_then(|b| b.get_parent())
+        .ok_or_else(|| LlvmError::new("LLVM backend: no insert block for struct clone"))?;
+    let ptr_ty = context.ptr_type(Default::default());
+    let result_slot = builder
+        .build_alloca(ptr_ty, "clone.result.slot")
+        .map_err(builder_error)?;
+    builder
+        .build_store(result_slot, ptr_ty.const_null())
+        .map_err(builder_error)?;
+
+    let is_null = builder
+        .build_int_compare(
+            inkwell::IntPredicate::EQ,
+            builder
+                .build_ptr_to_int(base_ptr, context.i64_type(), "clone.base.int")
+                .map_err(builder_error)?,
+            context.i64_type().const_zero(),
+            "clone.is_null",
+        )
+        .map_err(builder_error)?;
+    let clone_bb = context.append_basic_block(function, "clone.body");
+    let merge_bb = context.append_basic_block(function, "clone.merge");
+    builder
+        .build_conditional_branch(is_null, merge_bb, clone_bb)
+        .map_err(builder_error)?;
+
+    builder.position_at_end(clone_bb);
+    let struct_ty = struct_types[struct_id as usize];
+    let fields = &layouts[struct_id as usize].fields;
+    let size = struct_ty
+        .size_of()
+        .ok_or_else(|| LlvmError::new("LLVM backend: unsized struct"))?;
+    let malloc = external_function(
+        module,
+        "malloc",
+        ptr_ty.fn_type(&[context.i64_type().into()], false),
+    );
+    let ptr = builder
+        .build_call(malloc, &[size.into()], result_name)
+        .map_err(builder_error)?
+        .try_as_basic_value()
+        .basic()
+        .ok_or_else(|| LlvmError::new("malloc returned void"))?
+        .into_pointer_value();
+    for (index, (_, field_ty)) in fields.iter().enumerate() {
+        let src = builder
+            .build_struct_gep(struct_ty, base_ptr, index as u32, "clone.src")
+            .map_err(|_| LlvmError::new("LLVM backend: struct clone GEP failed"))?;
+        let loaded = builder
+            .build_load(llvm_type(context, *field_ty), src, "clone.field")
+            .map_err(builder_error)?;
+        let stored = match field_ty {
+            Type::Str => {
+                let string_ty = llvm_type(context, Type::Str);
+                let clone = external_function(
+                    module,
+                    "mako_native_string_clone",
+                    string_ty.fn_type(&[string_ty.into()], false),
+                );
+                builder
+                    .build_call(clone, &[loaded.into()], "clone.string")
+                    .map_err(builder_error)?
+                    .try_as_basic_value()
+                    .basic()
+                    .ok_or_else(|| LlvmError::new("string clone returned void"))?
+            }
+            Type::IntSlice => {
+                let slot = builder
+                    .build_alloca(llvm_type(context, Type::IntSlice), "clone.slice.slot")
+                    .map_err(builder_error)?;
+                let function_type = context.void_type().fn_type(
+                    &[
+                        ptr_ty.into(),
+                        ptr_ty.into(),
+                        context.i64_type().into(),
+                        context.i64_type().into(),
+                        context.i64_type().into(),
+                    ],
+                    false,
+                );
+                call_slice_return(
+                    context,
+                    module,
+                    builder,
+                    slot,
+                    "mako_native_int_slice_clone",
+                    function_type,
+                    &slice_parts(builder, loaded.into_struct_value())?,
+                    "clone.slice",
+                )?
+            }
+            Type::StrSlice => {
+                let slot = builder
+                    .build_alloca(llvm_type(context, Type::StrSlice), "clone.strslice.slot")
+                    .map_err(builder_error)?;
+                let function_type = context.void_type().fn_type(
+                    &[
+                        ptr_ty.into(),
+                        ptr_ty.into(),
+                        context.i64_type().into(),
+                        context.i64_type().into(),
+                        context.i64_type().into(),
+                    ],
+                    false,
+                );
+                call_slice_return_ty(
+                    context,
+                    module,
+                    builder,
+                    slot,
+                    "mako_native_str_slice_clone",
+                    function_type,
+                    &slice_parts(builder, loaded.into_struct_value())?,
+                    "clone.strslice",
+                    Type::StrSlice,
+                )?
+            }
+            Type::Struct(nested_id) => llvm_emit_struct_clone(
+                context,
+                module,
+                builder,
+                *nested_id,
+                loaded.into_pointer_value(),
+                struct_types,
+                layouts,
+                "clone.nested",
+            )?
+            .into(),
+            _ => loaded,
+        };
+        let dst = builder
+            .build_struct_gep(struct_ty, ptr, index as u32, "clone.dst")
+            .map_err(|_| LlvmError::new("LLVM backend: struct clone GEP failed"))?;
+        builder.build_store(dst, stored).map_err(builder_error)?;
+    }
+    builder.build_store(result_slot, ptr).map_err(builder_error)?;
+    builder
+        .build_unconditional_branch(merge_bb)
+        .map_err(builder_error)?;
+
+    builder.position_at_end(merge_bb);
+    builder
+        .build_load(ptr_ty, result_slot, result_name)
+        .map_err(builder_error)
+        .map(|v| v.into_pointer_value())
+}
+
+fn llvm_emit_struct_drop<'ctx>(
+    context: &'ctx Context,
+    module: &Module<'ctx>,
+    builder: &Builder<'ctx>,
+    struct_id: u32,
+    base_ptr: PointerValue<'ctx>,
+    struct_types: &[inkwell::types::StructType<'ctx>],
+    layouts: &[native_ir::StructLayout],
+) -> Result<(), LlvmError> {
+    let function = builder
+        .get_insert_block()
+        .and_then(|b| b.get_parent())
+        .ok_or_else(|| LlvmError::new("LLVM backend: no insert block for struct drop"))?;
+    let is_null = builder
+        .build_int_compare(
+            inkwell::IntPredicate::EQ,
+            builder
+                .build_ptr_to_int(base_ptr, context.i64_type(), "drop.base.int")
+                .map_err(builder_error)?,
+            context.i64_type().const_zero(),
+            "drop.is_null",
+        )
+        .map_err(builder_error)?;
+    let drop_bb = context.append_basic_block(function, "drop.body");
+    let cont_bb = context.append_basic_block(function, "drop.cont");
+    builder
+        .build_conditional_branch(is_null, cont_bb, drop_bb)
+        .map_err(builder_error)?;
+    builder.position_at_end(drop_bb);
+    let struct_ty = struct_types[struct_id as usize];
+    let fields = &layouts[struct_id as usize].fields;
+    for (index, (_, field_ty)) in fields.iter().enumerate() {
+        let gep = builder
+            .build_struct_gep(struct_ty, base_ptr, index as u32, "drop.field")
+            .map_err(|_| LlvmError::new("LLVM backend: struct drop GEP failed"))?;
+        match field_ty {
+            Type::Str => {
+                let string_ty = llvm_type(context, Type::Str);
+                let loaded = builder
+                    .build_load(string_ty, gep, "drop.string")
+                    .map_err(builder_error)?;
+                let drop = external_function(
+                    module,
+                    "mako_native_string_drop",
+                    context.void_type().fn_type(&[string_ty.into()], false),
+                );
+                builder
+                    .build_call(drop, &[loaded.into()], "drop.string.call")
+                    .map_err(builder_error)?;
+            }
+            Type::IntSlice => {
+                let loaded = builder
+                    .build_load(llvm_type(context, Type::IntSlice), gep, "drop.slice")
+                    .map_err(builder_error)?;
+                let drop = external_function(
+                    module,
+                    "mako_native_int_slice_drop",
+                    context.void_type().fn_type(
+                        &[
+                            context.ptr_type(Default::default()).into(),
+                            context.i64_type().into(),
+                            context.i64_type().into(),
+                            context.i64_type().into(),
+                        ],
+                        false,
+                    ),
+                );
+                builder
+                    .build_call(
+                        drop,
+                        &slice_parts(builder, loaded.into_struct_value())?,
+                        "drop.slice.call",
+                    )
+                    .map_err(builder_error)?;
+            }
+            Type::StrSlice => {
+                let loaded = builder
+                    .build_load(llvm_type(context, Type::StrSlice), gep, "drop.strslice")
+                    .map_err(builder_error)?;
+                let drop = external_function(
+                    module,
+                    "mako_native_str_slice_drop",
+                    context.void_type().fn_type(
+                        &[
+                            context.ptr_type(Default::default()).into(),
+                            context.i64_type().into(),
+                            context.i64_type().into(),
+                            context.i64_type().into(),
+                        ],
+                        false,
+                    ),
+                );
+                builder
+                    .build_call(
+                        drop,
+                        &slice_parts(builder, loaded.into_struct_value())?,
+                        "drop.strslice.call",
+                    )
+                    .map_err(builder_error)?;
+            }
+            Type::Struct(nested_id) => {
+                let loaded = builder
+                    .build_load(llvm_type(context, Type::Struct(*nested_id)), gep, "drop.nested")
+                    .map_err(builder_error)?;
+                llvm_emit_struct_drop(
+                    context,
+                    module,
+                    builder,
+                    *nested_id,
+                    loaded.into_pointer_value(),
+                    struct_types,
+                    layouts,
+                )?;
+            }
+            _ => {}
+        }
+    }
+    let free = external_function(
+        module,
+        "free",
+        context
+            .void_type()
+            .fn_type(&[context.ptr_type(Default::default()).into()], false),
+    );
+    builder
+        .build_call(free, &[base_ptr.into()], "struct.drop")
+        .map_err(builder_error)?;
+    builder
+        .build_unconditional_branch(cont_bb)
+        .map_err(builder_error)?;
+    builder.position_at_end(cont_bb);
     Ok(())
 }
 
@@ -1045,7 +1581,32 @@ fn call_slice_return<'ctx>(
     arguments: &[BasicMetadataValueEnum<'ctx>],
     result_name: &str,
 ) -> Result<BasicValueEnum<'ctx>, LlvmError> {
-    let slice_type = llvm_type(context, Type::IntSlice);
+    // Int and string slice value ABIs share the same four-field layout.
+    call_slice_return_ty(
+        context,
+        module,
+        builder,
+        result_slot,
+        name,
+        function_type,
+        arguments,
+        result_name,
+        Type::IntSlice,
+    )
+}
+
+fn call_slice_return_ty<'ctx>(
+    context: &'ctx Context,
+    module: &Module<'ctx>,
+    builder: &Builder<'ctx>,
+    result_slot: PointerValue<'ctx>,
+    name: &str,
+    function_type: inkwell::types::FunctionType<'ctx>,
+    arguments: &[BasicMetadataValueEnum<'ctx>],
+    result_name: &str,
+    result_ty: Type,
+) -> Result<BasicValueEnum<'ctx>, LlvmError> {
+    let slice_type = llvm_type(context, result_ty);
     let function = external_function(module, name, function_type);
     let mut call_arguments = Vec::with_capacity(arguments.len() + 1);
     call_arguments.push(result_slot.into());

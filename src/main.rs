@@ -3455,9 +3455,8 @@ fn build_native_object(
         emit_plain_error("--static is not implemented for --backend native yet");
         return Err(());
     }
-    if opts.overflow != OverflowMode::Wrap {
-        emit_plain_error("--backend native currently supports --overflow wrap only");
-        return Err(());
+    if matches!(opts.overflow, OverflowMode::Ignore) {
+        // Ignore is documented as wrap-equivalent for native.
     }
 
     let t0 = Instant::now();
@@ -3467,15 +3466,23 @@ fn build_native_object(
             // subset. Cranelift retains its mature AST lowering for aggregates
             // while their ownership ABI is being migrated into that IR.
             let native_ir_error = std::cell::RefCell::new(None);
-            let native_ir_object = native_ir::lower(program).ok().and_then(|ir| {
-                match native_codegen::compile_ir(&ir, matches!(level, OptLevel::Release)) {
+            let native_ir_object = match native_ir::lower(program) {
+                Ok(ir) => match native_codegen::compile_ir_with_overflow(
+                    &ir,
+                    matches!(level, OptLevel::Release),
+                    opts.overflow,
+                ) {
                     Ok(object) => Some(object),
                     Err(error) => {
                         *native_ir_error.borrow_mut() = Some(error.to_string());
                         None
                     }
+                },
+                Err(error) => {
+                    *native_ir_error.borrow_mut() = Some(error.to_string());
+                    None
                 }
-            });
+            };
             if native_ir_object.is_none()
                 && std::env::var_os("MAKO_NATIVE_SHARED_IR_ONLY").is_some()
             {

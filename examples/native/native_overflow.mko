@@ -1,0 +1,8 @@
+// Overflow-trap path: INT64_MAX + 1 must abort under --overflow trap.
+// Used by the gate to confirm trap parity with the C backend.
+
+fn main() {
+    let a = 9223372036854775807
+    let b = a + 1
+    print_int(b)
+}

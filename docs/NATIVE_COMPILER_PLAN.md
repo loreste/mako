@@ -150,9 +150,10 @@ compile as early as possible.
      int/float conversions, and fixed-ABI float printing are included. Fixtures
      `native_primitive_slices.mko` and `float_slice.mko` run under C/native
      differential coverage; the ownership fixture also runs under Guard Malloc.
-     `[]string` is now supported by the Cranelift shared-IR path with recursive
-     clone/drop and pointer-wrapper runtime calls. It remains deferred in LLVM
-     and nested slices still require recursive element layout and ownership.
+     `[]string` is supported by both backends: Cranelift uses the pointer-header
+     ABI (`mako_native_string_slice_*_ptr`); LLVM uses the value ABI
+     (`mako_native_str_slice_*`, parallel to `[]int`). Nested slices of slices
+     are still deferred.
    - *3c [done]* — **structs with scalar fields** (value semantics): struct
      registry, literals, field read/write, functional update (`..base`), struct
      parameters/returns (flattened one ABI slot per field), mixed scalar field
@@ -201,10 +202,7 @@ compile as early as possible.
      an owned slice literal in / clones a borrow, indexing and `len` work through
      a field, by-value passing deep-clones the slice, and each owned slice field
      is dropped on scope exit. `native_slice_fields.mko` validated on both
-     backends (identical output, 0 leaks, GuardMalloc-clean; the local C oracle
-     is unavailable for slice programs because the installed runtime headers are
-     stale, so the two native backends plus hand-computed output are the check).
-     Deferred: `[]string` fields (LLVM `[]string` not yet implemented).
+     backends (C-identical, 0 leaks, GuardMalloc-clean).
    - *3e [done]* — **scalar tuples in the backend-neutral IR** (both backends).
      A tuple is lowered as an anonymous positional struct: each tuple *shape* is
      interned once into the same `StructLayout` list (fields named `"0"`, `"1"`,
@@ -224,12 +222,13 @@ compile as early as possible.
      (C-identical, 0 leaks, GuardMalloc-clean). Deferred: tuples with struct/enum
      elements.
 4. **Control flow** — `for`, c-style `for`, `match`, `defer`, labeled loops.
-   - *4-for [done]* — `for` loops: counted `for i in n` / `for i in range n`
-     (0..n), and `[]int` iteration `for i, v in range xs` (index + value) or
-     `for i in range xs` (index only, Go semantics), for int/float/bool slices.
-     `continue` targets an
-     increment latch; `break`/nesting supported. Owned-temporary iteration is
-     rejected (bind to a local first). Fixture `examples/native/native_for.mko`.
+   - *4-for [done]* — `for` loops in the **shared IR** (both backends): counted
+     `for i in n` / `for i in range n` (0..n), and `[]int`/`[]string` iteration
+     `for i, v in range xs` (index + value) or `for i in range xs` (index only).
+     `continue` targets an increment latch; `break`/nesting supported via a loop
+     stack (also wires unlabeled break/continue for `while`). Owned-temporary
+     iteration is rejected (bind to a local first). Fixture
+     `examples/native/native_for.mko` (C-identical on Cranelift and LLVM).
      Deferred: c-style `for init; cond; post`, `defer`, labeled loops.
    - *4-enum [done]* — **user enums with int/nullary payloads + `match`** in the
      backend-neutral IR (both backends; no backend changes needed). An enum is a
@@ -260,7 +259,20 @@ compile as early as possible.
      deferred, since a returned payload borrow would dangle at scrutinee drop).
      Fixture `native_enum_payload.mko` passes on both backends (C-identical, 0
      leaks, GuardMalloc-clean). Deferred: slice payloads, bool/float payloads,
-     multi-owned-payload variants beyond string, and owned match results.
+     multi-owned-payload variants beyond string.
+   - *3h [done]* — **nested aggregate fields** (struct-in-struct, recursive
+     clone/drop). Aggregate layouts are built in two passes so a field may name
+     another aggregate declared later. Both backends walk each layout
+     recursively (null-safe): nested `Struct` fields re-enter the same
+     per-layout clone/drop walk, and `[]string` fields/payloads are allowed.
+     Fixture `native_nested_structs.mko` passes on Cranelift and LLVM
+     (C-identical, 0 leaks, GuardMalloc-clean).
+   - *4-enum-owned-result [done]* — **owned match results**
+     (`match m { Text(s) => s }`). Heap arm results are cloned (if borrowed —
+     typically a payload binding into the scrutinee) or moved (if already
+     owned) into the merge slot **before** the scrutinee drops, so the result
+     never dangles. Fixture `native_match_owned.mko` passes on both backends
+     (C-identical, 0 leaks, GuardMalloc-clean).
    - *4-match [done]* — scalar `match` (int/bool scrutinee): literal arms,
      or-patterns (`1 | 2 | 3`), wildcard, exhaustive bool, and identifier
      catch-all that binds the scrutinee. Lowered as a linear decision chain with
@@ -285,69 +297,170 @@ reaching parity with the mature C backend. Each item ships a positive
 differential fixture and, where heap is involved, `leaks` + GuardMalloc coverage
 before it counts as done.
 
-**Shared IR handles today:** scalar CFG, `if`/`while`, owned strings,
-`[]int`/`[]float`/`[]bool`, `[]string` (Cranelift only), structs (scalar /
-`string` / `[]int` fields), tuples (+owned elements, +owned multi-return), enums
-(int / nullary / `string` payloads) + `match`. All covered fixtures are 0-leak
-and GuardMalloc-clean on both backends.
+**Shared IR handles today:** scalar CFG, `if`/`while`/`if init; cond`,
+counted/`range` `for`, c-style `for`, `defer` (LIFO on exit/return), labeled
+loops + labeled `break`/`continue`, owned strings (`len(s)`, `format_int`,
+f-string interp for string/int/bool), `[]int`/`[]float`/`[]bool`, `[]string`
+(both backends), structs (scalar / `string` / `[]int` / `[]string` /
+nested-aggregate fields), tuples (+owned elements, +owned multi-return), enums
+(int / nullary / `string` payloads) + `match` (enum + scalar int/bool, or-
+patterns, guards, owned results, whole-scrutinee binding). `--overflow trap`
+works on the native shared-IR path. All covered fixtures are 0-leak and
+GuardMalloc-clean on both backends.
 
 ### Aggregates — remaining depth
-- [ ] Nested aggregate fields (struct/tuple/enum inside another). Best unlocked
-      by emitting **per-type clone/drop functions** — the change that generalizes
-      the rest of this section.
-- [ ] `[]string` and other slice fields/payloads; slice-typed enum payloads.
+- [x] Nested aggregate fields (struct-in-struct) via recursive per-layout
+      clone/drop (null-safe). Fixture `native_nested_structs.mko`.
+- [x] `[]string` fields (both backends). Remaining: slice-typed enum payloads;
+      other slice fields (`[]float`/`[]bool` in structs).
 - [ ] `bool`/`float` enum payloads; multi-owned-payload variants.
 - [ ] Maps (`map[K]V`) — none in the shared IR yet.
 - [ ] Methods (`on Type { fn m(self) }`) on native aggregates.
-- [ ] Owned `match` results (`match m { Text(s) => s }`) — move-out/clone before
-      the scrutinee drops.
+- [x] Owned `match` results (`match m { Text(s) => s }`). Fixture
+      `native_match_owned.mko`.
 - [ ] Generics — generic structs/enums (`Option[T]`/`Result[T,E]`), shared-IR
       monomorphization.
 
 ### Control flow — remaining
-- [ ] `for` (counted + range) and c-style `for` in the shared IR (AST-path only
-      today, so LLVM can't compile them).
-- [ ] `defer`, labeled loops + labeled `break`/`continue`.
-- [ ] Complete `match`: guards, non-enum scrutinees, nested/`|`/literal patterns,
-      whole-scrutinee identifier binding.
+- [x] `for` (counted + range) and c-style `for` in the shared IR. Fixtures
+      `native_for.mko`, `native_cfor.mko`.
+- [x] `defer`, labeled loops + labeled `break`/`continue`. Fixtures
+      `native_defer.mko`, `native_labeled.mko`.
+- [x] Match: guards, scalar (int/bool) scrutinees, or-patterns, whole-
+      scrutinee identifier binding. Fixtures `native_match.mko`,
+      `native_match_guards.mko`. Remaining: deeply nested payload patterns.
 - [ ] `if`-as-expression and block expressions (richer `match` arm bodies).
-- [ ] `switch`/`case`, `if init; cond`.
+- [ ] `switch`/`case`.
 
 ### LLVM-specific gaps
-- [ ] LLVM `[]string` lowering (currently a hard "not implemented" reject).
+- [x] LLVM `[]string` lowering (value ABI `mako_native_str_slice_*`).
 - [ ] LLVM `[]float`/`[]bool` slices.
 
 ### Runtime interop
-- [ ] Call the precompiled runtime archive from native: networking, TLS,
-      database, formatting/`fmt`, f-strings (`StringInterp`), and the wider
-      stdlib. The shared IR knows only `print`/`len`/`append`/`make` today.
+- [x] Seed: `format_int`, f-string interp (string/int/bool), `len(string)`.
+      Fixture `native_fmt.mko`.
+- [ ] Full precompiled runtime archive from native: networking, TLS, database,
+      wider `fmt`/stdlib. Still only a handful of builtins beyond the seed.
 
 ### Concurrency
 - [ ] `crew`, `kick`, `fan`, channels, `select` — none in the native path yet.
 
 ### Build modes
+- [x] `--overflow trap` on the native shared-IR path (parity gate vs C).
 - [ ] Cross-compilation (native is host-only), WASM, `--static`, sanitizers
-      (`--sanitize`), overflow-checked arithmetic (`--overflow trap`; native is
-      wrap-only).
+      (`--sanitize`).
 
 ### Gates, infra & cleanup
-- [ ] macOS gate builds without `--features llvm-backend`, so it cannot link
-      native binaries there (bundled lld is feature-gated) — add the feature on
-      macOS CI.
-- [ ] Stale installed runtime headers (`~/.local/share/mako/runtime`) break the
-      C oracle for slice programs locally; a `scripts/install.sh` resync restores
-      the C differential.
-- [ ] Re-add the slice fixtures (`native_slices`, `native_slice_fields`) to the
-      C-differential gate list once the oracle works.
+- [x] macOS gate enables `--features llvm-backend` when the static lld
+      toolchain is present (`scripts/native-compiler-test.sh`).
+- [x] Runtime headers resynced via `scripts/install.sh --skip-build`; C oracle
+      for slice programs works with `MAKO_RUNTIME` pointing at the checkout (or
+      a resynced install).
+- [x] Slice fixtures + new control-flow/fmt fixtures in the C-differential gate.
 - [ ] Full latency / RSS / binary-size gates across C/native/LLVM (leak +
-      correctness are covered; perf gates are partial).
+      correctness are covered; perf gates are partial — LLVM gate has compile/
+      runtime/RSS/binary ratios).
 - [ ] Confirm the whole suite on the Linux box (where `cc` linking + the C
       differential work without the feature build).
 
-**Suggested order:** per-type clone/drop functions → `for`/`match`-guards in the
-shared IR → LLVM `[]string` → runtime interop → concurrency → build modes. The
-infra items are quick wins worth doing first so the gate is trustworthy on both
-machines.
+**Suggested order next:** runtime archive interop → concurrency → remaining
+build modes → Linux confirmation.
+
+## Roadmap to 100%
+
+"100%" is defined by two **measurable gates**, not assertions. The granular
+checklist above tracks features; this section tracks the milestones and the
+gates that certify them.
+
+### The two gates
+
+1. **Syntax gate = full differential parity.** Every program the C backend
+   accepts, the native backend (LLVM release + Cranelift debug) compiles and
+   runs with byte-identical stdout/stderr/exit — across the whole
+   `examples/testing` corpus (357+ programs) plus downstream (leba), 0
+   differential failures, all memory-safe (0 leaks + GuardMalloc/ASan).
+2. **Perf gate = leadership across a broad suite.** On a published multi-workload
+   suite, native (LLVM) is ≤ C **and** ≤ Rust on wall-clock, CPU, **and**
+   peak-RSS, with binary ≤ C — never worse than 5% on any single workload,
+   faster on the majority. Every result records flags, hardware, samples,
+   variance, RSS, alloc count, binary size, and compile time.
+
+### Baseline (measured, Apple arm64, this checkout)
+
+- **Syntax:** shared IR compiles ~15% of real programs (24/160 top-level
+  examples); the dominant blocker is runtime/stdlib interop (~57% of rejections
+  are `unknown call`), then maps/generics, then top-level items.
+- **Perf (LLVM release, 7 samples):** faster-or-tied vs C and Rust on 3 of 4
+  bench workloads (`fib`, `parity`, `string_slice`); the append-heavy `slice`
+  workload is ~17% behind hand-C/Rust. Peak-RSS equal-or-better everywhere
+  (0.22× on `fib`); binaries ~1.1× of C and 11–12× smaller than Rust.
+
+### Milestones (syntax track)
+
+- **M1 · Compute-complete** *(pure-compute programs; ~40% coverage)* —
+  foundation is **per-type `clone`/`drop` functions** (nested composition falls
+  out).
+  - [x] Control flow: `for`/c-for/`defer`/labeled loops/`match` guards/owned
+        match results/whole-scrutinee binding.
+  - [ ] `if`-as-expression, block expressions, `switch`/`case`; deeply nested
+        payload patterns.
+  - [ ] Expressions: full f-strings, closures/lambdas + first-class fn values,
+        `Convert`, compound/parallel assign.
+  - [ ] Types: **maps** (`map[K]V`), **generics** (shared-IR monomorphization →
+        `Option[T]`/`Result[T,E]`), `bool`/`float` enum payloads, remaining slice
+        element/field kinds.
+  - [ ] Top-level: `const`, **methods** (`on Type`), **interfaces + dynamic
+        dispatch**, `extern` C, multi-file imports/packs, visibility.
+  - **Exit:** native compiles every pure-compute program in the corpus; perf gate
+    green on an expanded compute suite.
+- **M2 · Interop-complete** *(the #1 coverage lever → ~80%)* — teach native
+  codegen to call the **existing precompiled runtime archive** with correct
+  ABI + ownership (not reimplement it): `fmt`/`print`, string/math/time/os/fs/
+  collections/encoding, then networking/TLS/HTTP/database/crypto.
+  - [x] Seed: `format_int`, f-string interp, `len(string)` (`native_fmt.mko`).
+  - [ ] Full runtime/stdlib surface.
+  - **Exit:** native compiles the majority of real programs; leba builds & runs
+    through native.
+- **M3 · Concurrency** — `crew`/`kick`/`fan`/channels/`select` wired to the
+  existing runtime scheduler. **Exit:** concurrency corpus passes differential +
+  race gates on native.
+- **M4 · Build modes & targets → full parity** — sanitizers, `--static`,
+  cross-compile, WASM (overflow-trap ✅). **Exit: syntax gate = 100%** (full
+  corpus, all targets, 0 differential failures).
+
+### Milestones (perf track, parallel)
+
+- **P1 · Close the known gap** — the `slice`/`append` path (~17% behind hand-C):
+  inline `append`/growth, elide bounds checks from ownership+range facts, drop
+  redundant memcpy.
+- **P2 · Cash in "better IR than clang/rustc"** — `noalias` from ownership,
+  ownership/range bounds-check elision, **escape analysis → stack allocation**,
+  guaranteed devirtualization, closure inlining, import-aware DCE, PGO.
+- **P3 · Broaden the suite** — add string/hashing/JSON/map-heavy/alloc-heavy/
+  HTTP-throughput/tail-latency/multi-core-scaling workloads with C + Rust
+  baselines and published records. **Exit: perf gate = 100%.**
+
+### Certification (durable gates, run in CI on every change)
+
+- [ ] **Ratcheting coverage gate** — run the full C corpus through native each
+      CI run; track pass %, never regress, until 100%.
+- [ ] **Perf gate** on the broad suite with per-workload records + ratchet.
+- [ ] **Cross-platform** — all gates on macOS-arm64 + Linux-x86_64 + ARM/RISC-V.
+- [x] Local infra: install/runtime-header resync so the C oracle works for slice
+      programs; slice fixtures back in the C-differential list.
+
+### Sequencing
+
+```
+M1 compute ─► M2 interop ─► M3 concurrency ─► M4 modes  = SYNTAX 100%
+        └─────────► P1 ─► P2 ─► P3                       = PERF 100%
+(ratcheting coverage + perf gates certify each step; self-host fixed point
+ per docs/SELF_HOSTING.md is a longer-horizon, optional M5.)
+```
+
+**Highest ROI to start:** M2 interop (largest coverage jump) and P1 (the one
+perf gap) — they move both headline numbers fastest. The per-type clone/drop
+generalization (start of M1) unlocks maps/generics/nesting and should land early.
 
 ## Ownership model (increment 2, implemented)
 
@@ -380,10 +493,18 @@ by the embedded runtime; formatting remains deferred.
 
 ## Verification
 
-`./scripts/native-compiler-test.sh` (Rust unit tests, self-host frontend gate,
-ownership + instrumented memory-safety regressions, and native/C differential
-execution). New backend features must extend the differential fixture set before
-they count as done.
-The LLVM-specific gate is `scripts/llvm-backend-test.sh`; it checks shared-IR
-tests, C/LLVM differential output, SDK/PATH independence, Guard Malloc, and
-unsupported-feature rejection.
+**Memory safety is mandatory**, not optional. An increment is not done until:
+
+1. GuardMalloc (macOS) / ASan (elsewhere) runs clean — no UAF, no double-free.
+2. `leaks --atExit` reports **0 leaked bytes** on every heap-touching fixture.
+3. C/native (and C/LLVM) differential stdout/stderr/exit match.
+
+`./scripts/native-compiler-test.sh` enforces this for the full native fixture
+set under `[4b/5]` (including `native_mem_stress.mko`, which exercises
+continue/break over `[]string`, owned match results, defer, nested owned
+fields, and f-strings). The LLVM gate applies the same GuardMalloc + leaks
+bar to its differential fixtures.
+
+`./scripts/native-compiler-test.sh` also covers Rust unit tests, the self-host
+frontend gate, ownership regressions, and native/C differential execution.
+The LLVM-specific gate is `scripts/llvm-backend-test.sh`.

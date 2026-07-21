@@ -1,0 +1,27 @@
+// Match guards on enum arms. A failing guard falls through to the next arm;
+// payload bindings are in scope for the guard expression.
+// Differentially validated against the C backend.
+
+enum Msg {
+    Text(string)
+    Code(int)
+    Quit
+}
+
+fn classify(m: Msg) -> int {
+    return match m {
+        Text(s) if len(s) > 3 => 1,
+        Text(s) => 2,
+        Code(n) if n > 10 => 3,
+        Code(n) => 4,
+        Quit => 0,
+    }
+}
+
+fn main() {
+    print_int(classify(Text("hi")))
+    print_int(classify(Text("hello")))
+    print_int(classify(Code(3)))
+    print_int(classify(Code(42)))
+    print_int(classify(Quit))
+}

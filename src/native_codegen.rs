@@ -854,7 +854,16 @@ pub fn compile_object(program: &Program, release: bool) -> Result<Vec<u8>, Nativ
 /// Compile the backend-neutral IR directly with Cranelift. Strings use a
 /// pointer-to-runtime-header ABI; LLVM keeps its independently compatible
 /// value ABI. Ownership remains explicit in the IR and is lowered here.
+#[allow(dead_code)]
 pub fn compile_ir(ir: &native_ir::Module, release: bool) -> Result<Vec<u8>, NativeError> {
+    compile_ir_with_overflow(ir, release, crate::overflow::OverflowMode::Wrap)
+}
+
+pub fn compile_ir_with_overflow(
+    ir: &native_ir::Module,
+    release: bool,
+    overflow: crate::overflow::OverflowMode,
+) -> Result<Vec<u8>, NativeError> {
     let mut flags = settings::builder();
     flags
         .set("opt_level", if release { "speed" } else { "none" })
@@ -900,6 +909,14 @@ pub fn compile_ir(ir: &native_ir::Module, release: bool) -> Result<Vec<u8>, Nati
     let string_equal = declare_bool_return_fn(&mut module, "mako_native_string_equal_ptr", 2)?;
     let string_print = declare_void_ptr_fn(&mut module, "mako_native_string_print_ptr", 1)?;
     let string_drop = declare_void_ptr_fn(&mut module, "mako_native_string_drop_ptr", 1)?;
+    let int_to_string =
+        declare_string_ptr_fn(&mut module, "mako_native_int_to_string_ptr", 1, true)?;
+    let bool_to_string =
+        declare_string_ptr_fn(&mut module, "mako_native_bool_to_string_ptr", 1, true)?;
+    let add_trap = declare_string_ptr_fn(&mut module, "mako_native_add_i64_trap", 2, true)?;
+    let sub_trap = declare_string_ptr_fn(&mut module, "mako_native_sub_i64_trap", 2, true)?;
+    let mul_trap = declare_string_ptr_fn(&mut module, "mako_native_mul_i64_trap", 2, true)?;
+    let trap_arith = overflow == crate::overflow::OverflowMode::Trap;
     let slice_make = declare_string_ptr_fn(&mut module, "mako_native_int_slice_make_ptr", 2, true)?;
     let slice_literal = declare_string_ptr_fn(&mut module, "mako_native_int_slice_literal_ptr", 2, true)?;
     let slice_len = declare_string_ptr_fn(&mut module, "mako_native_int_slice_len_ptr", 1, true)?;
@@ -985,13 +1002,32 @@ pub fn compile_ir(ir: &native_ir::Module, release: bool) -> Result<Vec<u8>, Nati
                         let l = vals[left];
                         let r = vals[right];
                         let v = match (op, ty) {
+                            (BinOp::Add, IrType::I64) if trap_arith => {
+                                let f = module.declare_func_in_func(add_trap, &mut fb.func);
+                                let call = fb.ins().call(f, &[l, r]);
+                                fb.inst_results(call)[0]
+                            }
+                            (BinOp::Sub, IrType::I64) if trap_arith => {
+                                let f = module.declare_func_in_func(sub_trap, &mut fb.func);
+                                let call = fb.ins().call(f, &[l, r]);
+                                fb.inst_results(call)[0]
+                            }
+                            (BinOp::Mul, IrType::I64) if trap_arith => {
+                                let f = module.declare_func_in_func(mul_trap, &mut fb.func);
+                                let call = fb.ins().call(f, &[l, r]);
+                                fb.inst_results(call)[0]
+                            }
                             (BinOp::Add, IrType::I64) => fb.ins().iadd(l, r),
                             (BinOp::Sub, IrType::I64) => fb.ins().isub(l, r),
                             (BinOp::Mul, IrType::I64) => fb.ins().imul(l, r),
                             (BinOp::Div, IrType::I64) => fb.ins().sdiv(l, r),
                             (BinOp::Mod, IrType::I64) => fb.ins().srem(l, r),
-                            (BinOp::Eq, IrType::I64) => fb.ins().icmp(IntCC::Equal, l, r),
-                            (BinOp::Ne, IrType::I64) => fb.ins().icmp(IntCC::NotEqual, l, r),
+                            (BinOp::Eq, IrType::I64) | (BinOp::Eq, IrType::I1) => {
+                                fb.ins().icmp(IntCC::Equal, l, r)
+                            }
+                            (BinOp::Ne, IrType::I64) | (BinOp::Ne, IrType::I1) => {
+                                fb.ins().icmp(IntCC::NotEqual, l, r)
+                            }
                             (BinOp::Lt, IrType::I64) => fb.ins().icmp(IntCC::SignedLessThan, l, r),
                             (BinOp::Le, IrType::I64) => {
                                 fb.ins().icmp(IntCC::SignedLessThanOrEqual, l, r)
@@ -1128,6 +1164,32 @@ pub fn compile_ir(ir: &native_ir::Module, release: bool) -> Result<Vec<u8>, Nati
                         let reference = module.declare_func_in_func(string_drop, &mut fb.func);
                         fb.ins().call(reference, &[vals[value]]);
                     }
+                    IrInst::StringLen { out, value } => {
+                        // Pointer ABI: header is { data:ptr, len:i64 }; len at +8.
+                        let len = fb.ins().load(
+                            types::I64,
+                            MemFlagsData::new(),
+                            vals[value],
+                            8,
+                        );
+                        vals.insert(*out, len);
+                    }
+                    IrInst::IntToString { out, value } => {
+                        let fref = module.declare_func_in_func(int_to_string, &mut fb.func);
+                        let call = fb.ins().call(fref, &[vals[value]]);
+                        vals.insert(*out, fb.inst_results(call)[0]);
+                    }
+                    IrInst::BoolToString { out, value } => {
+                        let fref = module.declare_func_in_func(bool_to_string, &mut fb.func);
+                        let widened = fb.ins().uextend(types::I64, vals[value]);
+                        let call = fb.ins().call(fref, &[widened]);
+                        vals.insert(*out, fb.inst_results(call)[0]);
+                    }
+                    IrInst::NullHeap { out, ty } => {
+                        // Pointer ABI: every heap value is an i64 header pointer.
+                        let _ = ty;
+                        vals.insert(*out, fb.ins().iconst(types::I64, 0));
+                    }
                     IrInst::SliceMake { out, len, cap } => {
                         let capacity = cap.map(|v| vals[&v]).unwrap_or(vals[len]);
                         let reference = module.declare_func_in_func(slice_make, &mut fb.func);
@@ -1262,42 +1324,20 @@ pub fn compile_ir(ir: &native_ir::Module, release: bool) -> Result<Vec<u8>, Nati
                         );
                     }
                     IrInst::StructClone { out, base, struct_id } => {
-                        // Deep copy: allocate a fresh block, then copy each field,
-                        // recursively cloning owned (string) fields so the copy
-                        // and the original never share a heap value.
-                        let fields = ir.structs[*struct_id as usize].fields.clone();
-                        let nbytes = (fields.len() * 8) as i64;
-                        let size = fb.ins().iconst(types::I64, nbytes);
-                        let make = module.declare_func_in_func(struct_make, &mut fb.func);
-                        let call = fb.ins().call(make, &[size]);
-                        let new_ptr = fb.inst_results(call)[0];
-                        for (i, (_, fty)) in fields.iter().enumerate() {
-                            let offset = (i * 8) as i32;
-                            let loaded = fb.ins().load(
-                                ir_clif_type(*fty)?,
-                                MemFlagsData::new(),
-                                vals[base],
-                                offset,
-                            );
-                            let stored = match fty {
-                                IrType::Str => {
-                                    let clone =
-                                        module.declare_func_in_func(string_clone, &mut fb.func);
-                                    let call = fb.ins().call(clone, &[loaded]);
-                                    fb.inst_results(call)[0]
-                                }
-                                IrType::IntSlice => {
-                                    let clone =
-                                        module.declare_func_in_func(slice_clone, &mut fb.func);
-                                    let call = fb.ins().call(clone, &[loaded]);
-                                    fb.inst_results(call)[0]
-                                }
-                                _ => loaded,
-                            };
-                            fb.ins()
-                                .store(MemFlagsData::new(), stored, new_ptr, offset);
-                        }
-                        vals.insert(*out, new_ptr);
+                        // Per-layout deep clone: recurse into nested aggregates
+                        // and owned fields. Null base (inactive enum slot) → null.
+                        let cloned = emit_struct_clone(
+                            &mut fb,
+                            &mut module,
+                            ir,
+                            *struct_id,
+                            vals[base],
+                            string_clone,
+                            slice_clone,
+                            ss_clone,
+                            struct_make,
+                        )?;
+                        vals.insert(*out, cloned);
                     }
                     IrInst::EnumMake { out, enum_id, tag, slot_base, payload } => {
                         // struct_make calloc's a zeroed block; store the tag and
@@ -1317,27 +1357,18 @@ pub fn compile_ir(ir: &native_ir::Module, release: bool) -> Result<Vec<u8>, Nati
                         vals.insert(*out, ptr);
                     }
                     IrInst::DropStruct { value, struct_id } => {
-                        // Drop owned (string) fields, then free the block.
-                        let fields = ir.structs[*struct_id as usize].fields.clone();
-                        for (i, (_, fty)) in fields.iter().enumerate() {
-                            let dropper = match fty {
-                                IrType::Str => Some(string_drop),
-                                IrType::IntSlice => Some(slice_drop),
-                                _ => None,
-                            };
-                            if let Some(dropper) = dropper {
-                                let loaded = fb.ins().load(
-                                    types::I64,
-                                    MemFlagsData::new(),
-                                    vals[value],
-                                    (i * 8) as i32,
-                                );
-                                let drop = module.declare_func_in_func(dropper, &mut fb.func);
-                                fb.ins().call(drop, &[loaded]);
-                            }
-                        }
-                        let free = module.declare_func_in_func(struct_drop, &mut fb.func);
-                        fb.ins().call(free, &[vals[value]]);
+                        // Per-layout recursive drop (null-safe).
+                        emit_struct_drop(
+                            &mut fb,
+                            &mut module,
+                            ir,
+                            *struct_id,
+                            vals[value],
+                            string_drop,
+                            slice_drop,
+                            ss_drop,
+                            struct_drop,
+                        )?;
                     }
                 }
             }
@@ -1396,6 +1427,141 @@ fn ir_clif_type(ty: IrType) -> Result<cranelift_codegen::ir::Type, NativeError> 
         IrType::StrSlice => Ok(types::I64),
         IrType::Struct(_) => Ok(types::I64),
     }
+}
+
+/// Emit a null-safe deep clone of the struct at `base` with layout `struct_id`.
+/// Nested aggregate fields recurse through this helper so any nesting depth is
+/// correct (the architectural per-type clone walk, specialised at emit time).
+fn emit_struct_clone(
+    fb: &mut FunctionBuilder,
+    module: &mut ObjectModule,
+    ir: &native_ir::Module,
+    struct_id: u32,
+    base: Value,
+    string_clone: FuncId,
+    slice_clone: FuncId,
+    ss_clone: FuncId,
+    struct_make: FuncId,
+) -> Result<Value, NativeError> {
+    let fields = ir.structs[struct_id as usize].fields.clone();
+    let null_ptr = fb.ins().iconst(types::I64, 0);
+    let is_null = fb.ins().icmp(IntCC::Equal, base, null_ptr);
+    let clone_block = fb.create_block();
+    let merge_block = fb.create_block();
+    fb.append_block_param(merge_block, types::I64);
+    fb.ins().brif(
+        is_null,
+        merge_block,
+        &[BlockArg::from(null_ptr)],
+        clone_block,
+        &[],
+    );
+    fb.switch_to_block(clone_block);
+    let size = fb.ins().iconst(types::I64, (fields.len() * 8) as i64);
+    let make = module.declare_func_in_func(struct_make, &mut fb.func);
+    let call = fb.ins().call(make, &[size]);
+    let new_ptr = fb.inst_results(call)[0];
+    for (i, (_, fty)) in fields.iter().enumerate() {
+        let offset = (i * 8) as i32;
+        let loaded = fb
+            .ins()
+            .load(ir_clif_type(*fty)?, MemFlagsData::new(), base, offset);
+        let stored = match fty {
+            IrType::Str => {
+                let f = module.declare_func_in_func(string_clone, &mut fb.func);
+                let call = fb.ins().call(f, &[loaded]);
+                fb.inst_results(call)[0]
+            }
+            IrType::IntSlice => {
+                let f = module.declare_func_in_func(slice_clone, &mut fb.func);
+                let call = fb.ins().call(f, &[loaded]);
+                fb.inst_results(call)[0]
+            }
+            IrType::StrSlice => {
+                let f = module.declare_func_in_func(ss_clone, &mut fb.func);
+                let call = fb.ins().call(f, &[loaded]);
+                fb.inst_results(call)[0]
+            }
+            IrType::Struct(nested_id) => emit_struct_clone(
+                fb,
+                module,
+                ir,
+                *nested_id,
+                loaded,
+                string_clone,
+                slice_clone,
+                ss_clone,
+                struct_make,
+            )?,
+            _ => loaded,
+        };
+        fb.ins()
+            .store(MemFlagsData::new(), stored, new_ptr, offset);
+    }
+    fb.ins().jump(merge_block, &[BlockArg::from(new_ptr)]);
+    fb.seal_block(clone_block);
+    fb.switch_to_block(merge_block);
+    Ok(fb.block_params(merge_block)[0])
+}
+
+/// Emit a null-safe recursive drop of the struct at `value`.
+fn emit_struct_drop(
+    fb: &mut FunctionBuilder,
+    module: &mut ObjectModule,
+    ir: &native_ir::Module,
+    struct_id: u32,
+    value: Value,
+    string_drop: FuncId,
+    slice_drop: FuncId,
+    ss_drop: FuncId,
+    struct_drop: FuncId,
+) -> Result<(), NativeError> {
+    let fields = ir.structs[struct_id as usize].fields.clone();
+    let null_ptr = fb.ins().iconst(types::I64, 0);
+    let is_null = fb.ins().icmp(IntCC::Equal, value, null_ptr);
+    let drop_block = fb.create_block();
+    let cont_block = fb.create_block();
+    fb.ins().brif(is_null, cont_block, &[], drop_block, &[]);
+    fb.switch_to_block(drop_block);
+    for (i, (_, fty)) in fields.iter().enumerate() {
+        let loaded = fb
+            .ins()
+            .load(types::I64, MemFlagsData::new(), value, (i * 8) as i32);
+        match fty {
+            IrType::Str => {
+                let f = module.declare_func_in_func(string_drop, &mut fb.func);
+                fb.ins().call(f, &[loaded]);
+            }
+            IrType::IntSlice => {
+                let f = module.declare_func_in_func(slice_drop, &mut fb.func);
+                fb.ins().call(f, &[loaded]);
+            }
+            IrType::StrSlice => {
+                let f = module.declare_func_in_func(ss_drop, &mut fb.func);
+                fb.ins().call(f, &[loaded]);
+            }
+            IrType::Struct(nested_id) => {
+                emit_struct_drop(
+                    fb,
+                    module,
+                    ir,
+                    *nested_id,
+                    loaded,
+                    string_drop,
+                    slice_drop,
+                    ss_drop,
+                    struct_drop,
+                )?;
+            }
+            _ => {}
+        }
+    }
+    let free = module.declare_func_in_func(struct_drop, &mut fb.func);
+    fb.ins().call(free, &[value]);
+    fb.ins().jump(cont_block, &[]);
+    fb.seal_block(drop_block);
+    fb.switch_to_block(cont_block);
+    Ok(())
 }
 
 fn declare_string_ptr_fn(
