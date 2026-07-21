@@ -14,3 +14,8 @@ clap = { version = "4", features = ["derive"] }
 regex = "1"
 sha2 = "0.10"
 thiserror = "2"
+
+[profile.dev]
+# The split type/codegen dispatchers deliberately stay uninlined at opt-level 0;
+# Windows CI checks them against the default 1 MiB stack. Do not flatten them.
+opt-level = 0
