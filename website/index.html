@@ -36,16 +36,16 @@
   <nav><div class="wrap"><strong>Mako</strong><span><a href="/docs">Docs</a><a href="/book">Book</a><a href="https://github.com/loreste/mako">GitHub</a></span></div></nav>
   <header><div class="wrap">
     <h1>A systems language for backend work.</h1>
-    <p class="lead">Mako compiles <code>.mko</code> source to C and then to native binaries. No garbage collector, no VM. Ownership-based memory, structured concurrency, and a backend standard library. 365 tests, 11 CI jobs, ASan verified.</p>
+    <p class="lead">Mako compiles <code>.mko</code> source to C and then to native binaries. No garbage collector, no VM. Ownership-based memory, structured concurrency, and a backend standard library. Experimental &mdash; not yet production-ready.</p>
     <div class="buttons"><a class="button primary" href="#install">Get started</a><a class="button" href="https://github.com/loreste/mako/blob/main/docs/STATUS.md">Status and evidence</a><a class="button" href="https://github.com/loreste/mako">Source</a></div>
   </div></header>
   <main>
     <section><div class="wrap"><h2>What is implemented</h2><div class="grid">
       <article><h3>Native compilation</h3><p>The compiler emits C and invokes the target C toolchain. Release builds use <code>-O3 -flto</code>. Dead code elimination removes unreachable functions.</p></article>
-      <article><h3>No garbage collector</h3><p>Memory uses scopes, <code>hold</code>, <code>share</code>, arenas, pools, and explicit resource APIs. ASan verified across 365+ tests.</p></article>
+      <article><h3>No garbage collector</h3><p>Memory uses scopes, <code>hold</code>, <code>share</code>, arenas, pools, and explicit resource APIs. Deterministic cleanup, no stop-the-world pauses.</p></article>
       <article><h3>Structured concurrency</h3><p><code>crew</code> owns <code>kick</code> jobs and cancel-joins them at scope exit. Channels, select, and timed joins are built in.</p></article>
       <article><h3>Backend standard library</h3><p>Networking, TLS, HTTP, JSON, databases, crypto, direct I/O, memory-mapped files, WAL, and observability across Linux, macOS, and Windows.</p></article>
-      <article><h3>Safety mechanisms</h3><p>Move checking, bounds checks in release builds, typed errors, Send restrictions, secret wiping, and leak diagnostics. CI runs ASan, UBSan, and TSan.</p></article>
+      <article><h3>Safety mechanisms</h3><p>Move checking, bounds checks in release builds, typed errors, Send restrictions, and leak diagnostics. The safety model is experimental and actively being hardened.</p></article>
       <article><h3>Cross platform</h3><p>Native Linux, macOS, and Windows builds. Cross-compile to Linux musl and WASI. 11 CI jobs verify every commit.</p></article>
     </div></div></section>
     <section id="install"><div class="wrap"><h2>Install</h2><p class="note">A published binary release can be installed without Rust or Cargo. Clang is needed to compile Mako programs.</p><pre><code># Linux / macOS

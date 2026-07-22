@@ -10,20 +10,18 @@ and arenas — no tracing GC. Concurrency uses structured primitives (`crew` /
 JSON, database, and networking APIs, though coverage is still incomplete in
 places.
 
-**Status: experimental/alpha (v0.4.0).** The language works and compiles real
+**Status: experimental/alpha (v0.4.1).** The language works and compiles real
 programs, but the surface is young. Expect breaking changes, missing features,
-and bugs. The ownership model is actively being hardened — the full test suite
-(360 programs) passes under AddressSanitizer with zero memory errors, but edge
-cases remain. This is not yet suitable for production use without careful
+and bugs. This is not yet suitable for production use without careful
 evaluation.
 
-**0.4.0 highlights:** memory safety audit (codegen free paths ASan clean),
-match Own free + bind-scope drops + alias-mut freer flag (no double-free),
-LSP hover/inlay-hints/signature-help, per-test timeouts, honest docs.  
-**0.2.4:** ownership drop system (slices/maps/strings/`?`),
-`string_view`, stack POD array lits, scheduler pool, channel ownership,
-struct field free, lockfile verification.  
-**Next:** **0.4.0** — performance ceiling, IR layer, dead code elimination.  
+Mako provides compiler-enforced ownership, bounds checks (including in release
+builds), escape checks, and deterministic cleanup without a tracing garbage
+collector. The safety model is still experimental and is being validated through
+sanitizer and adversarial testing — the test suite passes under ASan, UBSan,
+and TSan, but that does not prove complete memory safety. `unsafe` blocks,
+the C runtime, and FFI are outside the safety model.
+
 See [docs/ROADMAP.md](docs/ROADMAP.md) · [docs/SOUNDNESS.md](docs/SOUNDNESS.md).
 
 [mako-lang.com](https://mako-lang.com) · [Status](docs/STATUS.md) · [Roadmap](docs/ROADMAP.md) · [Guide](docs/GUIDE.md) · [Book](docs/book/) · [Soundness](docs/SOUNDNESS.md) · [Memory model](docs/MEMORY_MODEL.md)

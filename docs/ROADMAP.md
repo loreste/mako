@@ -1,7 +1,7 @@
 # Mako roadmap
 
-**Product version:** **0.4.0** · Last sync: **2026-07-19**.  
-**Suite:** 362 Mako tests + 80 Rust tests, 0 failures, ASan clean.
+**Product version:** **0.4.1** · Last sync: **2026-07-22**.  
+**Suite:** Run `make test` and `cargo test` for current counts. CI runs ASan, UBSan, TSan.
 
 **Verified:** [STATUS.md](STATUS.md) · **Stdlib:** [STDLIB.md](STDLIB.md) · **Security:** [SECURITY.md](SECURITY.md) · **Release:** [RELEASE.md](RELEASE.md).  
 **Book:** [The Mako Book](book/) · **Identity:** [IDENTITY.md](IDENTITY.md).  

@@ -4,8 +4,9 @@
 > Longer reference: https://mako-lang.com/llms-full.txt
 > Repo: https://github.com/loreste/mako
 
-Version **0.4.0** (experimental). Compiled language, `.mko` sources, C backend + clang, no GC.
-360 tests pass under AddressSanitizer. Ownership model actively hardened.
+Version **0.4.1** (experimental). Compiled language, `.mko` sources, C backend + clang, no GC.
+Ownership model actively hardened. Safety validated through sanitizer testing
+but not proven complete — `unsafe`, the C runtime, and FFI are outside the model.
 
 Write new code with: `fn`, `let`, `on Type {}`, `pack` / `pull` / `export`,
 `hold` / `share` / `arena`, `crew` / `kick` / `join` / `fan`, `match`,
