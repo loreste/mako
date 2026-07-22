@@ -22,7 +22,7 @@ tag cut; do not merge to `main` until release (or an explicit cut decision).
 | **0.3.0** | Cross-platform, CI green, ownership hardening | **Shipped** |
 | **0.4.0** | Performance — DCE, constant folding, runtime speed, lint | **Shipped** |
 | **0.4.1** | Windows/runtime/edge stability | **Shipped** (see CHANGELOG) |
-| **0.4.5** | Native compiler product path (language + release cut) | **Tagged `v0.4.5`** — multi-OS assets via release workflow |
+| **0.4.5** | Native compiler product path (language + release cut) | **Shipped** — tag `v0.4.5` + multi-OS GitHub Release |
 | **0.5.0** | Native-first platform: default backend policy, CI green, dual-backend truth | **Planned** |
 | **0.5.1** | Toolchain & IDE depth (LSP, DAP/DWARF, doc/bench product) | **Planned** |
 | **0.5.2** | Runtime trust & production concurrency soaks | **Planned** |
