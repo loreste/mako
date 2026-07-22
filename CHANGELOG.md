@@ -1,6 +1,12 @@
 # Changelog
 
-## Unreleased (0.5.0 residual + platform prep on main)
+## 0.4.6 — 2026-07-22 (tip; tag when packaging cut)
+
+**Theme:** Post-`v0.4.5` residual patch — smaller ship, not a mega-0.5.  
+**Versioning:** [docs/VERSIONING.md](docs/VERSIONING.md) — prefer patches (`0.4.6`,
+`0.4.7`, …) over waiting for `0.5.0`.  
+**Next patches:** 0.4.7 modes truth table · 0.4.8 map/I/O gates · then **0.5.0**
+CLI default flip.
 
 ### Performance
 
@@ -20,24 +26,24 @@
 - **Bench gate defaults:** runtime ≤ **1.25×** baselines; binary ≤ **1.05×**;
   slice RSS ≤ **1.25×** (honest residual ship bars).
 
-### Platform (0.5.0 prep)
+### Platform
 
 - **Backend policy** documented in [docs/BUILD.md](docs/BUILD.md) (c default;
   recommend native for debug, llvm for release when available).
 - **`MAKO_BACKEND`** env for `build` / `run` / `test` when CLI is still default
   `c`; `MAKO_TEST_BACKEND` still preferred for tests. Explicit `--backend`
-  always wins. No silent native→C hybrid.
+  always wins. No silent native→C hybrid. (**Default CLI flip is 0.5.0**, not this patch.)
 
-### Packaging
+### Packaging note
 
-- Homebrew + winget seeds validated for `v0.4.5` (publish scripts ok; external
-  homebrew-core / winget-pkgs PRs remain user/maintainer actions).
+- Homebrew + winget seeds remain on **v0.4.5** until `v0.4.6` is tagged and
+  `fill-release-packaging.sh v0.4.6` is run.
 
 ## 0.4.5 — 2026-07-22
 
 **Theme:** Native compiler product path. Integration branch: `native-compiler`.  
-**After 0.4.5:** 0.5.0 native-first platform → 0.5.1 toolchain/IDE → 0.5.2 runtime
-trust. Full map: [docs/ROADMAP.md](docs/ROADMAP.md).
+**After 0.4.5:** patch train **0.4.6+** then minor **0.5.0** (default flip). Full
+map: [docs/ROADMAP.md](docs/ROADMAP.md) · [docs/VERSIONING.md](docs/VERSIONING.md).
 
 ### Native compiler
 

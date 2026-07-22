@@ -12,7 +12,7 @@ tidy up after themselves. The standard library covers the everyday backend
 surface — HTTP, TLS, JSON, databases, networking — and is candid about which
 corners are battle-tested and which are still shallow.
 
-**Status: experimental/alpha (v0.4.5).** The language works and compiles real
+**Status: experimental/alpha (v0.4.6 tip; last tag v0.4.5).** The language works and compiles real
 programs, but the surface is young. Expect breaking changes, missing features,
 and bugs. This is not yet suitable for production use without careful
 evaluation.
@@ -26,7 +26,7 @@ double-free) and UBSan, while a focused concurrency suite is exercised under
 TSan. This does not prove complete memory safety. `unsafe` blocks, the C
 runtime, and FFI are outside the safety model.
 
-**What's new in 0.4.5:** a direct native backend that skips C for many builds —
+**What's new in 0.4.5+:** a direct native backend that skips C for many builds —
 ownership-explicit IR to Cranelift (debug) or LLVM (release) plus a bundled
 linker. The full `examples/testing` suite passes on `--backend native` (**367/367**).
 Release artifacts and install scripts ship for Linux, macOS, and Windows. Runtime

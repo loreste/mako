@@ -16,6 +16,7 @@
 | [COMPAT.md](COMPAT.md) | Dual forms / backward compatibility |
 | [STATUS.md](STATUS.md) | Done matrix (adversarial) |
 | [BUILD.md](BUILD.md) | Incremental cache, backends (c / native / llvm), `-j` |
+| [VERSIONING.md](VERSIONING.md) | Patch-first release policy (`0.4.6`, `0.4.7`, …) |
 | [PERFORMANCE.md](PERFORMANCE.md) | Release `-O3 -flto`, benchmarks |
 | [DEBUG.md](DEBUG.md) | lldb/gdb, `dbg`, sanitizers |
 | [SECURITY.md](SECURITY.md) | Memory safety + cache guarantees |
