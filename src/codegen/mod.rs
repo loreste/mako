@@ -2452,6 +2452,33 @@ impl Codegen {
         }
     }
 
+    fn expr_is_fresh_string_key(&self, expr: &Expr) -> bool {
+        match expr {
+            Expr::String(_) | Expr::StringInterp(_) => true,
+            Expr::Binary {
+                op: crate::ast::BinOp::Add,
+                ..
+            } => true,
+            Expr::Call { callee, args }
+                if matches!(callee.as_ref(), Expr::Ident(name) if name == "string")
+                    && args.len() == 1 =>
+            {
+                match &args[0] {
+                    Expr::Int(_) | Expr::Bool(_) => true,
+                    Expr::Ident(name) => matches!(
+                        self.locals.get(name).map(String::as_str),
+                        Some("int64_t" | "bool")
+                    ),
+                    Expr::Unary { .. } | Expr::Binary { .. } => {
+                        matches!(self.peek_expr_c_ty(&args[0]).as_str(), "int64_t" | "bool")
+                    }
+                    _ => false,
+                }
+            }
+            _ => false,
+        }
+    }
+
     fn bag_type_for_discard(&self, expr: &Expr, ann: Option<&TypeExpr>) -> Option<TypeExpr> {
         let is_bag = |ty: &&TypeExpr| {
             matches!(ty, TypeExpr::Generic(name, _) if name == "Option" || name == "Result")
@@ -12418,7 +12445,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                 }
                 if bty == "MakoMapSI*" {
                     // Use set_take when the key is a fresh allocation (avoids clone).
-                    if Self::expr_is_fresh_own(index) {
+                    if self.expr_is_fresh_string_key(index) {
                         self.emit_line(format_args!("mako_map_si_set_take({b}, {i}, {v});"));
                     } else {
                         self.emit_line(format_args!("mako_map_si_set({b}, {i}, {v});"));
@@ -12426,7 +12453,7 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                 } else if bty == "MakoMapII*" {
                     self.emit_line(format_args!("mako_map_ii_set({b}, {i}, {v});"));
                 } else if bty == "MakoMapSS*" {
-                    if Self::expr_is_fresh_own(index) {
+                    if self.expr_is_fresh_string_key(index) {
                         self.emit_line(format_args!("mako_map_ss_set_take({b}, {i}, {v});"));
                     } else {
                         self.emit_line(format_args!("mako_map_ss_set({b}, {i}, {v});"));
@@ -36715,8 +36742,50 @@ fn fold_const_c_loop_body(
 }
 
 #[cfg(test)]
-mod discard_tests {
+mod ownership_tests {
     use super::*;
+
+    #[test]
+    fn only_owned_string_expressions_can_transfer_map_keys() {
+        let int_string_call = Expr::Call {
+            callee: Box::new(Expr::Ident("string".into())),
+            args: vec![Expr::Ident("number".into())],
+        };
+        let borrowed_string_call = Expr::Call {
+            callee: Box::new(Expr::Ident("string".into())),
+            args: vec![Expr::Ident("text".into())],
+        };
+        let borrowed_index = Expr::Index {
+            base: Box::new(Expr::Ident("items".into())),
+            index: Box::new(Expr::Int(0)),
+        };
+        let other_call = Expr::Call {
+            callee: Box::new(Expr::Ident("lookup".into())),
+            args: vec![],
+        };
+        let method = Expr::Method {
+            receiver: Box::new(Expr::Ident("source".into())),
+            method: "key".into(),
+            args: vec![],
+        };
+
+        let mut codegen = Codegen::new();
+        codegen.locals.insert("number".into(), "int64_t".into());
+        codegen.locals.insert("text".into(), "MakoString".into());
+
+        assert!(codegen.expr_is_fresh_string_key(&Expr::String("key".into())));
+        assert!(codegen.expr_is_fresh_string_key(&Expr::StringInterp(vec![])));
+        assert!(codegen.expr_is_fresh_string_key(&Expr::Binary {
+            op: BinOp::Add,
+            left: Box::new(Expr::String("k".into())),
+            right: Box::new(Expr::String("1".into())),
+        }));
+        assert!(codegen.expr_is_fresh_string_key(&int_string_call));
+        assert!(!codegen.expr_is_fresh_string_key(&borrowed_string_call));
+        assert!(!codegen.expr_is_fresh_string_key(&borrowed_index));
+        assert!(!codegen.expr_is_fresh_string_key(&other_call));
+        assert!(!codegen.expr_is_fresh_string_key(&method));
+    }
 
     #[test]
     fn discarded_float_result_frees_its_error() {

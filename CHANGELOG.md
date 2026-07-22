@@ -12,6 +12,12 @@
 
 - Preserve task return values when joining native Windows worker threads.
 
+### Performance
+
+- Sort integer slices with inline introsort and linear sorted/reverse fast paths.
+- Avoid cloning map keys for literals, interpolation, concatenation, and integer
+  string conversions while retaining borrowed-key safety.
+
 ## 0.4.0 — 2026-07-20
 
 **mako0.4.0** (`CARGO_PKG_VERSION`). 362 Mako tests + 80 Rust tests, 0 failures.

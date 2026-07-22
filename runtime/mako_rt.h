@@ -1903,21 +1903,6 @@ static inline MakoString mako_int_to_string(int64_t n) {
     return (MakoString){d, len};
 }
 
-/* Stack-based int-to-string for temporary use (no malloc). */
-static inline MakoString mako_int_to_stack_str(int64_t n, char *buf, size_t bufsz) {
-    int neg = 0;
-    uint64_t v;
-    if (n < 0) { neg = 1; v = (uint64_t)(-(n + 1)) + 1; }
-    else { v = (uint64_t)n; }
-    char *p = buf + bufsz - 1;
-    *p = 0;
-    if (v == 0) { *--p = '0'; }
-    else { while (v > 0) { *--p = '0' + (char)(v % 10); v /= 10; } }
-    if (neg) *--p = '-';
-    size_t len = (size_t)(buf + bufsz - 1 - p);
-    return (MakoString){p, len};
-}
-
 /* ---- String builder (growable buffer → string) ---- */
 typedef struct {
     char *data;
@@ -4602,9 +4587,8 @@ static inline MakoIntArray mako_slice_append(MakoIntArray s, int64_t v) {
     }
     size_t ncap = s.cap ? s.cap * 2 : 1;
     if (ncap < s.len + 1) ncap = s.len + 1;
-    /* malloc+copy (not realloc): the codegen's reassign-free logic tracks
-     * the old data pointer and frees it on reassign. realloc invalidates
-     * that pointer, causing a double-free. Safe alternative: new alloc. */
+    /* malloc+copy (not realloc): sub-slices may alias interior pointers
+     * into the old backing array. realloc on those is undefined behavior. */
     int64_t *nd = (int64_t *)malloc(ncap * sizeof(int64_t));
     if (MAKO_UNLIKELY(!nd)) mako_abort("append: out of memory");
     if (s.len) memcpy(nd, s.data, s.len * sizeof(int64_t));
@@ -5541,7 +5525,7 @@ typedef struct {
     pthread_t thread;
     MakoTaskFn fn;
     void *arg;
-    void *result;
+    void *result;        /* Read only after joining or acquiring done/joined. */
     atomic_bool joined;
     bool cancelled_start; /* set if cancel before/during — cooperative */
     atomic_int done;      /* 1 when trampoline finished (for timed join) */
@@ -6421,6 +6405,11 @@ static inline MakoTask *mako_spawn_blocking(MakoNursery *n, MakoTaskFn fn, void 
     return mako_spawn_ex(n, fn, arg, /*blocking=*/1);
 }
 
+static inline void mako_task_join_thread(MakoTask *t) {
+    /* Keep retval NULL: the Windows pthread shim would replace t->result with NULL. */
+    pthread_join(t->thread, NULL);
+}
+
 static inline void *mako_await(MakoTask *t) {
     if (!t) return NULL;
     if (!atomic_load_explicit(&t->joined, memory_order_acquire)) {
@@ -6430,7 +6419,7 @@ static inline void *mako_await(MakoTask *t) {
                 nanosleep(&step, NULL);
             }
         } else {
-            pthread_join(t->thread, &t->result);
+            mako_task_join_thread(t);
             atomic_store_explicit(&t->done, 1, memory_order_release);
         }
         atomic_store_explicit(&t->joined, true, memory_order_release);
@@ -6458,7 +6447,7 @@ static inline int64_t mako_await_timeout_ms(MakoTask *t, int64_t ms, int64_t *ou
         int done = atomic_load_explicit(&t->done, memory_order_acquire);
         if (done) {
             if (!t->pooled) {
-                pthread_join(t->thread, &t->result);
+                mako_task_join_thread(t);
             }
             atomic_store_explicit(&t->joined, true, memory_order_release);
             mako_rt_counter_inc(&mako_rt_tasks_joined);
@@ -6474,7 +6463,7 @@ static inline int64_t mako_await_timeout_ms(MakoTask *t, int64_t ms, int64_t *ou
     int done = atomic_load_explicit(&t->done, memory_order_acquire);
     if (done) {
         if (!t->pooled) {
-            pthread_join(t->thread, &t->result);
+            mako_task_join_thread(t);
         }
         atomic_store_explicit(&t->joined, true, memory_order_release);
         mako_rt_counter_inc(&mako_rt_tasks_joined);
@@ -7168,8 +7157,9 @@ static inline void mako_sort_i64_inplace(int64_t *d, size_t n) {
         }
         return;
     }
+    /* Standard introsort limit: twice floor(log2(n)). */
     int depth = 0;
-    for (size_t k = n; k > 0; k >>= 1) depth++;
+    for (size_t k = n; k > 1; k >>= 1) depth++;
     depth *= 2;
     mako_qsort_i64(d, n, depth);
 }
