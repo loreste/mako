@@ -2,19 +2,22 @@
 
 ## 0.4.8 — 2026-07-22 (tip; tag when packaging cut)
 
-**Theme:** Map + I/O native bench workloads and regression budget.
+**Theme:** Map + I/O native bench workloads, map hot-path speed, regression budget.
+
+### Map performance
+
+- Faster native `map[int]int`: identity-key open addressing, 75% load / `grow_at`,
+  contiguous state|keys|vals slab, non-recursive rehash.
+- **LLVM inlines** `map_ii_set` / `map_ii_get` probe loops (no per-op runtime call).
+- Bench `native_map` uses **1e6** entries. On Apple arm64 (LLVM release):  
+  **~0.29× Rust**, **~0.37× mako-c**, **~1.7× hand-C** (hand-C still wins on
+  fully inlined stack tables; residual toward ≤1.0×).
 
 ### Bench
 
-- New fixtures: `examples/bench/native_map.{mko,c,rs}` (100k `map[int]int`
-  set+sum) and `native_io.{mko,c,rs}` (50×4KiB write_file/read_file).
-- `scripts/native-bench-gate.sh` includes map/io by default; override with
-  `MAKO_NATIVE_WORKLOADS`.
-- `scripts/native-bench-baselines.json` — recorded ratios + per-workload
-  absolute limits; fail if current ratio exceeds recorded ×
-  `MAKO_NATIVE_REGRESSION` (default **1.15**).
-- Honest residual bars: map ≤ **2.50×**, io ≤ **2.00×** vs hand C/Rust;
-  core workloads remain ≤ **1.25×**. Map ≈ **1.0×** mako-c; io ≈ **0.95×** mako-c.
+- Fixtures: `examples/bench/native_map.{mko,c,rs}` and `native_io.{mko,c,rs}`.
+- Gate includes map/io; baselines in `scripts/native-bench-baselines.json`
+  (regression ≤ recorded × **1.15**). Absolute bars: map ≤ **2.00×**, io ≤ **2.00×**.
 
 ## 0.4.7 — 2026-07-22
 

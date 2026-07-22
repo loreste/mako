@@ -17,5 +17,5 @@ fn map_checksum(n: int) -> int {
 }
 
 fn main() {
-    print_int(map_checksum(100000))
+    print_int(map_checksum(1000000))
 }

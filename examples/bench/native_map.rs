@@ -13,5 +13,5 @@ fn map_checksum(n: i64) -> i64 {
 }
 
 fn main() {
-    println!("{}", map_checksum(100_000));
+    println!("{}", map_checksum(1_000_000));
 }

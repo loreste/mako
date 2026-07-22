@@ -8,7 +8,7 @@
     "native_parity": { "max_ratio": 1.25 },
     "native_slice": { "max_ratio": 1.25 },
     "native_string_slice": { "max_ratio": 1.25 },
-    "native_map": { "max_ratio": 2.50 },
+    "native_map": { "max_ratio": 2.00 },
     "native_io": { "max_ratio": 2.00 }
   },
   "ratios": {
@@ -33,9 +33,9 @@
       "rust": 1.20
     },
     "native_map": {
-      "mako-c": 1.01,
-      "hand-c": 2.44,
-      "rust": 1.53
+      "mako-c": 0.37,
+      "hand-c": 1.72,
+      "rust": 0.30
     },
     "native_io": {
       "mako-c": 0.94,

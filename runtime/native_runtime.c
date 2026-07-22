@@ -1259,6 +1259,7 @@ typedef struct {
     int64_t *vals;
     size_t cap;
     size_t len;
+    size_t grow_at; /* rehash when len >= grow_at (~75% load) */
 } MakoNativeMapII;
 
 typedef struct {
@@ -1269,12 +1270,13 @@ typedef struct {
     size_t len;
 } MakoNativeMapSI;
 
-static uint64_t mako_native_hash_i64(int64_t k) {
-    uint64_t x = (uint64_t)k;
-    x ^= x >> 30; x *= 0xbf58476d1ce4e5b9ULL;
-    x ^= x >> 27; x *= 0x94d049bb133111ebULL;
-    x ^= x >> 31;
-    return x;
+/* Integer map keys use their own bits as the hash. Open-addressing with a
+ * power-of-two table already mixes via the mask; a heavy mixer destroys
+ * sequential-key locality (map bench) and is the dominant cost vs hand C.
+ * Pathological key sets that share low bits may probe longer — acceptable
+ * tradeoff for map[int]* (string keys keep their own hash). */
+static inline uint64_t mako_native_hash_i64(int64_t k) {
+    return (uint64_t)k;
 }
 
 static uint64_t mako_native_hash_str(const MakoNativeString *s) {
@@ -1348,16 +1350,30 @@ int64_t mako_native_struct_content_key_flat(void *p, int64_t nfields, int64_t st
     return mako_native_struct_content_key(p, nfields, str_mask, 0, 0, 0);
 }
 
+/* One contiguous slab: [state:cap][pad to 8][keys:cap][vals:cap]. */
+static void mako_native_map_ii_alloc_tables(MakoNativeMapII *m, size_t cap) {
+    size_t state_bytes = (cap + 7u) & ~7u;
+    size_t bytes = state_bytes + cap * sizeof(int64_t) * 2;
+    uint8_t *block = calloc(1, bytes);
+    if (!block) abort();
+    m->state = block;
+    m->keys = (int64_t *)(block + state_bytes);
+    m->vals = m->keys + cap;
+    m->cap = cap;
+    m->grow_at = (cap * 3) / 4;
+    if (m->grow_at < 1) m->grow_at = 1;
+}
+
 static MakoNativeMapII *mako_native_map_ii_new(size_t hint) {
     size_t cap = 8;
-    while (cap < hint * 2 + 8) cap *= 2;
+    /* Pre-size so `hint` entries fit under ~75% load without an immediate rehash
+     * (matches C-backend mako_map_ii_new). */
+    size_t need = hint ? (hint * 4 / 3 + 1) : 8;
+    while (cap < need) cap *= 2;
     MakoNativeMapII *m = calloc(1, sizeof(*m));
     if (!m) abort();
-    m->state = calloc(cap, 1);
-    m->keys = calloc(cap, sizeof(int64_t));
-    m->vals = calloc(cap, sizeof(int64_t));
-    if (!m->state || !m->keys || !m->vals) abort();
-    m->cap = cap; m->len = 0;
+    mako_native_map_ii_alloc_tables(m, cap);
+    m->len = 0;
     return m;
 }
 
@@ -1369,11 +1385,15 @@ static void mako_native_map_ii_rehash(MakoNativeMapII *m, size_t ncap);
 
 void mako_native_map_ii_set_ptr(MakoNativeMapII *m, int64_t key, int64_t val) {
     if (!m) abort();
-    if (m->len * 10 >= m->cap * 7) mako_native_map_ii_rehash(m, m->cap * 2);
-    size_t i = (size_t)(mako_native_hash_i64(key) & (m->cap - 1));
+    if (m->len >= m->grow_at) {
+        mako_native_map_ii_rehash(m, m->cap * 2);
+    }
+    size_t mask = m->cap - 1;
+    size_t i = (size_t)(mako_native_hash_i64(key) & mask);
     size_t first_tomb = (size_t)-1;
-    for (size_t n = 0; n < m->cap; ++n) {
-        if (m->state[i] == MAKO_NMAP_EMPTY) {
+    for (;;) {
+        uint8_t st = m->state[i];
+        if (st == MAKO_NMAP_EMPTY) {
             size_t slot = first_tomb != (size_t)-1 ? first_tomb : i;
             m->state[slot] = MAKO_NMAP_FULL;
             m->keys[slot] = key;
@@ -1381,59 +1401,88 @@ void mako_native_map_ii_set_ptr(MakoNativeMapII *m, int64_t key, int64_t val) {
             m->len++;
             return;
         }
-        if (m->state[i] == MAKO_NMAP_TOMB && first_tomb == (size_t)-1) first_tomb = i;
-        if (m->state[i] == MAKO_NMAP_FULL && m->keys[i] == key) {
+        if (st == MAKO_NMAP_TOMB) {
+            if (first_tomb == (size_t)-1) first_tomb = i;
+        } else if (m->keys[i] == key) {
             m->vals[i] = val;
             return;
         }
-        i = (i + 1) & (m->cap - 1);
+        i = (i + 1) & mask;
     }
-    abort();
 }
 
 static void mako_native_map_ii_rehash(MakoNativeMapII *m, size_t ncap) {
-    MakoNativeMapII *n = mako_native_map_ii_new(ncap / 2);
-    for (size_t i = 0; i < m->cap; ++i) {
-        if (m->state[i] == MAKO_NMAP_FULL)
-            mako_native_map_ii_set_ptr(n, m->keys[i], m->vals[i]);
+    /* Direct re-insert into a fresh slab (no recursive set_ptr). */
+    uint8_t *ostate = m->state;
+    int64_t *okeys = m->keys;
+    int64_t *ovals = m->vals;
+    size_t ocap = m->cap;
+    size_t olen = m->len;
+    size_t need = ncap / 2;
+    size_t cap = 8;
+    while (cap < need) cap *= 2;
+    mako_native_map_ii_alloc_tables(m, cap);
+    m->len = 0;
+    for (size_t i = 0; i < ocap; ++i) {
+        if (ostate[i] != MAKO_NMAP_FULL) continue;
+        int64_t key = okeys[i];
+        int64_t val = ovals[i];
+        size_t j = (size_t)(mako_native_hash_i64(key) & (m->cap - 1));
+        while (m->state[j] == MAKO_NMAP_FULL) {
+            j = (j + 1) & (m->cap - 1);
+        }
+        m->state[j] = MAKO_NMAP_FULL;
+        m->keys[j] = key;
+        m->vals[j] = val;
+        m->len++;
     }
-    free(m->state); free(m->keys); free(m->vals);
-    *m = *n; free(n);
+    (void)olen;
+    free(ostate); /* frees whole slab (state is base of block) */
 }
 
 int64_t mako_native_map_ii_get_ptr(const MakoNativeMapII *m, int64_t key) {
     if (!m || !m->cap) return 0;
-    size_t i = (size_t)(mako_native_hash_i64(key) & (m->cap - 1));
-    for (size_t n = 0; n < m->cap; ++n) {
-        if (m->state[i] == MAKO_NMAP_EMPTY) return 0;
-        if (m->state[i] == MAKO_NMAP_FULL && m->keys[i] == key) return m->vals[i];
-        i = (i + 1) & (m->cap - 1);
+    size_t mask = m->cap - 1;
+    size_t i = (size_t)(mako_native_hash_i64(key) & mask);
+    for (;;) {
+        uint8_t st = m->state[i];
+        if (st == MAKO_NMAP_FULL) {
+            if (m->keys[i] == key) return m->vals[i];
+        } else if (st == MAKO_NMAP_EMPTY) {
+            return 0;
+        }
+        i = (i + 1) & mask;
     }
-    return 0;
 }
 
 int64_t mako_native_map_ii_has_ptr(const MakoNativeMapII *m, int64_t key) {
     if (!m || !m->cap) return 0;
-    size_t i = (size_t)(mako_native_hash_i64(key) & (m->cap - 1));
-    for (size_t n = 0; n < m->cap; ++n) {
-        if (m->state[i] == MAKO_NMAP_EMPTY) return 0;
-        if (m->state[i] == MAKO_NMAP_FULL && m->keys[i] == key) return 1;
-        i = (i + 1) & (m->cap - 1);
+    size_t mask = m->cap - 1;
+    size_t i = (size_t)(mako_native_hash_i64(key) & mask);
+    for (;;) {
+        uint8_t st = m->state[i];
+        if (st == MAKO_NMAP_FULL) {
+            if (m->keys[i] == key) return 1;
+        } else if (st == MAKO_NMAP_EMPTY) {
+            return 0;
+        }
+        i = (i + 1) & mask;
     }
-    return 0;
 }
 
 void mako_native_map_ii_delete_ptr(MakoNativeMapII *m, int64_t key) {
     if (!m || !m->cap) return;
-    size_t i = (size_t)(mako_native_hash_i64(key) & (m->cap - 1));
-    for (size_t n = 0; n < m->cap; ++n) {
-        if (m->state[i] == MAKO_NMAP_EMPTY) return;
-        if (m->state[i] == MAKO_NMAP_FULL && m->keys[i] == key) {
+    size_t mask = m->cap - 1;
+    size_t i = (size_t)(mako_native_hash_i64(key) & mask);
+    for (;;) {
+        uint8_t st = m->state[i];
+        if (st == MAKO_NMAP_EMPTY) return;
+        if (st == MAKO_NMAP_FULL && m->keys[i] == key) {
             m->state[i] = MAKO_NMAP_TOMB;
             m->len--;
             return;
         }
-        i = (i + 1) & (m->cap - 1);
+        i = (i + 1) & mask;
     }
 }
 
@@ -1687,7 +1736,9 @@ int64_t mako_native_maps_equal_struct_key(
 
 void mako_native_map_ii_drop_ptr(MakoNativeMapII *m) {
     if (!m) return;
-    free(m->state); free(m->keys); free(m->vals); free(m);
+    /* state is the base of the contiguous slab (state|keys|vals). */
+    free(m->state);
+    free(m);
 }
 
 MakoNativeMapII *mako_native_map_ii_clone_ptr(const MakoNativeMapII *m) {

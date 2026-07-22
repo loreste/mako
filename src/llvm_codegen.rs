@@ -496,6 +496,31 @@ fn emit_instruction<'ctx>(
             args,
             ret,
         } => {
+            // Hot map[int]int path: inline open-addressing probe (avoids 200k
+            // external calls on the map bench). Rehash still calls runtime.
+            if function == "mako_native_map_ii_set_ptr" && args.len() == 3 {
+                return emit_map_ii_set_inline(
+                    context,
+                    module,
+                    builder,
+                    values[&args[0]].into_pointer_value(),
+                    values[&args[1]].into_int_value(),
+                    values[&args[2]].into_int_value(),
+                );
+            }
+            if function == "mako_native_map_ii_get_ptr" && args.len() == 2 {
+                if let Some(outv) = out {
+                    let got = emit_map_ii_get_inline(
+                        context,
+                        builder,
+                        values[&args[0]].into_pointer_value(),
+                        values[&args[1]].into_int_value(),
+                        &value_name(*outv),
+                    )?;
+                    values.insert(*outv, got.into());
+                }
+                return Ok(());
+            }
             // Pointer-ABI runtime names (`*_ptr`) map to value-ABI entry points
             // when the LLVM string ABI is a struct (not a header pointer).
             let function_name = match function.as_str() {
@@ -2365,6 +2390,473 @@ fn pack_string<'ctx>(
         .build_insert_value(with_data, len, 1, &format!("{name}.len"))
         .map_err(builder_error)?
         .into_struct_value())
+}
+
+/// Layout of `MakoNativeMapII` in `native_runtime.c` (pointer ABI):
+/// `{ state*, keys*, vals*, cap, len, grow_at }` — all fields 8-byte aligned.
+const MAP_II_OFF_STATE: i32 = 0;
+const MAP_II_OFF_KEYS: i32 = 8;
+const MAP_II_OFF_VALS: i32 = 16;
+const MAP_II_OFF_CAP: i32 = 24;
+const MAP_II_OFF_LEN: i32 = 32;
+const MAP_II_OFF_GROW: i32 = 40;
+const MAP_II_FULL: i64 = 1;
+const MAP_II_TOMB: i64 = 2;
+
+/// Inline `map[int]int` set. Calls runtime only when a rehash is required.
+fn emit_map_ii_set_inline<'ctx>(
+    context: &'ctx Context,
+    module: &Module<'ctx>,
+    builder: &Builder<'ctx>,
+    map: PointerValue<'ctx>,
+    key: IntValue<'ctx>,
+    val: IntValue<'ctx>,
+) -> Result<(), LlvmError> {
+    let parent = builder
+        .get_insert_block()
+        .and_then(|b| b.get_parent())
+        .ok_or_else(|| LlvmError::new("map set: no insert block"))?;
+    let i64t = context.i64_type();
+    let i8t = context.i8_type();
+    let ptr_ty = context.ptr_type(Default::default());
+    let grow_at = builder
+        .build_load(i64t, unsafe {
+            builder
+                .build_gep(i8t, map, &[i64t.const_int(MAP_II_OFF_GROW as u64, false)], "m.grow.p")
+                .map_err(builder_error)?
+        }, "m.grow")
+        .map_err(builder_error)?
+        .into_int_value();
+    let len = builder
+        .build_load(i64t, unsafe {
+            builder
+                .build_gep(i8t, map, &[i64t.const_int(MAP_II_OFF_LEN as u64, false)], "m.len.p")
+                .map_err(builder_error)?
+        }, "m.len")
+        .map_err(builder_error)?
+        .into_int_value();
+    let need_grow = builder
+        .build_int_compare(IntPredicate::UGE, len, grow_at, "m.need_grow")
+        .map_err(builder_error)?;
+    let grow_bb = context.append_basic_block(parent, "map.set.grow");
+    let body_bb = context.append_basic_block(parent, "map.set.body");
+    builder
+        .build_conditional_branch(need_grow, grow_bb, body_bb)
+        .map_err(builder_error)?;
+
+    builder.position_at_end(grow_bb);
+    let set_fn = external_function(
+        module,
+        "mako_native_map_ii_set_ptr",
+        context.void_type().fn_type(&[ptr_ty.into(), i64t.into(), i64t.into()], false),
+    );
+    builder
+        .build_call(set_fn, &[map.into(), key.into(), val.into()], "map.set.rehash")
+        .map_err(builder_error)?;
+    let cont_bb = context.append_basic_block(parent, "map.set.done");
+    builder
+        .build_unconditional_branch(cont_bb)
+        .map_err(builder_error)?;
+
+    builder.position_at_end(body_bb);
+    let state = builder
+        .build_load(ptr_ty, unsafe {
+            builder
+                .build_gep(i8t, map, &[i64t.const_int(MAP_II_OFF_STATE as u64, false)], "m.st.p")
+                .map_err(builder_error)?
+        }, "m.state")
+        .map_err(builder_error)?
+        .into_pointer_value();
+    let keys = builder
+        .build_load(ptr_ty, unsafe {
+            builder
+                .build_gep(i8t, map, &[i64t.const_int(MAP_II_OFF_KEYS as u64, false)], "m.k.p")
+                .map_err(builder_error)?
+        }, "m.keys")
+        .map_err(builder_error)?
+        .into_pointer_value();
+    let vals = builder
+        .build_load(ptr_ty, unsafe {
+            builder
+                .build_gep(i8t, map, &[i64t.const_int(MAP_II_OFF_VALS as u64, false)], "m.v.p")
+                .map_err(builder_error)?
+        }, "m.vals")
+        .map_err(builder_error)?
+        .into_pointer_value();
+    let cap = builder
+        .build_load(i64t, unsafe {
+            builder
+                .build_gep(i8t, map, &[i64t.const_int(MAP_II_OFF_CAP as u64, false)], "m.cap.p")
+                .map_err(builder_error)?
+        }, "m.cap")
+        .map_err(builder_error)?
+        .into_int_value();
+    let mask = builder
+        .build_int_sub(cap, i64t.const_int(1, false), "m.mask")
+        .map_err(builder_error)?;
+    // Identity hash for int keys (see native_runtime.c).
+    let start = builder.build_and(key, mask, "m.i0").map_err(builder_error)?;
+
+    let loop_bb = context.append_basic_block(parent, "map.set.loop");
+    let empty_bb = context.append_basic_block(parent, "map.set.empty");
+    let full_bb = context.append_basic_block(parent, "map.set.full");
+    let tomb_bb = context.append_basic_block(parent, "map.set.tomb");
+    let next_bb = context.append_basic_block(parent, "map.set.next");
+    // phi: i, first_tomb (-1 = none)
+    builder
+        .build_unconditional_branch(loop_bb)
+        .map_err(builder_error)?;
+    builder.position_at_end(loop_bb);
+    let i_phi = builder.build_phi(i64t, "m.i").map_err(builder_error)?;
+    let tomb_phi = builder.build_phi(i64t, "m.tomb").map_err(builder_error)?;
+    let neg1 = i64t.const_int((-1i64) as u64, true);
+    i_phi.add_incoming(&[(&start, body_bb)]);
+    tomb_phi.add_incoming(&[(&neg1, body_bb)]);
+    let i = i_phi.as_basic_value().into_int_value();
+    let first_tomb = tomb_phi.as_basic_value().into_int_value();
+
+    let st_ptr = unsafe {
+        builder
+            .build_gep(i8t, state, &[i], "m.st.slot")
+            .map_err(builder_error)?
+    };
+    let st = builder
+        .build_load(i8t, st_ptr, "m.st")
+        .map_err(builder_error)?
+        .into_int_value();
+    let st64 = builder
+        .build_int_z_extend(st, i64t, "m.st64")
+        .map_err(builder_error)?;
+    let is_empty = builder
+        .build_int_compare(IntPredicate::EQ, st64, i64t.const_zero(), "m.empty")
+        .map_err(builder_error)?;
+    let is_full = builder
+        .build_int_compare(
+            IntPredicate::EQ,
+            st64,
+            i64t.const_int(MAP_II_FULL as u64, false),
+            "m.full",
+        )
+        .map_err(builder_error)?;
+    // empty → empty_bb; full → full_bb; else tomb
+    let not_empty = context.append_basic_block(parent, "map.set.nempty");
+    builder
+        .build_conditional_branch(is_empty, empty_bb, not_empty)
+        .map_err(builder_error)?;
+    builder.position_at_end(not_empty);
+    builder
+        .build_conditional_branch(is_full, full_bb, tomb_bb)
+        .map_err(builder_error)?;
+
+    // EMPTY: insert at first_tomb or i
+    builder.position_at_end(empty_bb);
+    let has_tomb = builder
+        .build_int_compare(IntPredicate::NE, first_tomb, neg1, "m.has_tomb")
+        .map_err(builder_error)?;
+    let slot = builder
+        .build_select(has_tomb, first_tomb, i, "m.slot")
+        .map_err(builder_error)?
+        .into_int_value();
+    let slot_st = unsafe {
+        builder
+            .build_gep(i8t, state, &[slot], "m.slot.st")
+            .map_err(builder_error)?
+    };
+    builder
+        .build_store(slot_st, i8t.const_int(MAP_II_FULL as u64, false))
+        .map_err(builder_error)?;
+    let slot_k = unsafe {
+        builder
+            .build_gep(i64t, keys, &[slot], "m.slot.k")
+            .map_err(builder_error)?
+    };
+    let slot_v = unsafe {
+        builder
+            .build_gep(i64t, vals, &[slot], "m.slot.v")
+            .map_err(builder_error)?
+    };
+    builder.build_store(slot_k, key).map_err(builder_error)?;
+    builder.build_store(slot_v, val).map_err(builder_error)?;
+    let new_len = builder
+        .build_int_add(len, i64t.const_int(1, false), "m.newlen")
+        .map_err(builder_error)?;
+    let len_p = unsafe {
+        builder
+            .build_gep(i8t, map, &[i64t.const_int(MAP_II_OFF_LEN as u64, false)], "m.len.pw")
+            .map_err(builder_error)?
+    };
+    builder.build_store(len_p, new_len).map_err(builder_error)?;
+    builder
+        .build_unconditional_branch(cont_bb)
+        .map_err(builder_error)?;
+
+    // FULL: update if key matches, else probe
+    builder.position_at_end(full_bb);
+    let k_ptr = unsafe {
+        builder
+            .build_gep(i64t, keys, &[i], "m.k.slot")
+            .map_err(builder_error)?
+    };
+    let ek = builder
+        .build_load(i64t, k_ptr, "m.ek")
+        .map_err(builder_error)?
+        .into_int_value();
+    let same = builder
+        .build_int_compare(IntPredicate::EQ, ek, key, "m.same")
+        .map_err(builder_error)?;
+    let upd_bb = context.append_basic_block(parent, "map.set.upd");
+    builder
+        .build_conditional_branch(same, upd_bb, next_bb)
+        .map_err(builder_error)?;
+    builder.position_at_end(upd_bb);
+    let v_ptr = unsafe {
+        builder
+            .build_gep(i64t, vals, &[i], "m.v.slot")
+            .map_err(builder_error)?
+    };
+    builder.build_store(v_ptr, val).map_err(builder_error)?;
+    builder
+        .build_unconditional_branch(cont_bb)
+        .map_err(builder_error)?;
+
+    // TOMB: remember first tomb, continue
+    builder.position_at_end(tomb_bb);
+    let no_tomb = builder
+        .build_int_compare(IntPredicate::EQ, first_tomb, neg1, "m.no_tomb")
+        .map_err(builder_error)?;
+    let new_tomb = builder
+        .build_select(no_tomb, i, first_tomb, "m.new_tomb")
+        .map_err(builder_error)?
+        .into_int_value();
+    // fall through to next with updated tomb via phi from tomb_bb
+    let tomb_next = context.append_basic_block(parent, "map.set.tomb.next");
+    builder
+        .build_unconditional_branch(tomb_next)
+        .map_err(builder_error)?;
+
+    builder.position_at_end(next_bb);
+    let next_i = builder
+        .build_and(
+            builder
+                .build_int_add(i, i64t.const_int(1, false), "m.i1")
+                .map_err(builder_error)?,
+            mask,
+            "m.inext",
+        )
+        .map_err(builder_error)?;
+    i_phi.add_incoming(&[(&next_i, next_bb)]);
+    tomb_phi.add_incoming(&[(&first_tomb, next_bb)]);
+    builder
+        .build_unconditional_branch(loop_bb)
+        .map_err(builder_error)?;
+
+    builder.position_at_end(tomb_next);
+    let next_i2 = builder
+        .build_and(
+            builder
+                .build_int_add(i, i64t.const_int(1, false), "m.i1t")
+                .map_err(builder_error)?,
+            mask,
+            "m.inextt",
+        )
+        .map_err(builder_error)?;
+    i_phi.add_incoming(&[(&next_i2, tomb_next)]);
+    tomb_phi.add_incoming(&[(&new_tomb, tomb_next)]);
+    builder
+        .build_unconditional_branch(loop_bb)
+        .map_err(builder_error)?;
+
+    builder.position_at_end(cont_bb);
+    Ok(())
+}
+
+fn emit_map_ii_get_inline<'ctx>(
+    context: &'ctx Context,
+    builder: &Builder<'ctx>,
+    map: PointerValue<'ctx>,
+    key: IntValue<'ctx>,
+    name: &str,
+) -> Result<IntValue<'ctx>, LlvmError> {
+    let parent = builder
+        .get_insert_block()
+        .and_then(|b| b.get_parent())
+        .ok_or_else(|| LlvmError::new("map get: no insert block"))?;
+    let i64t = context.i64_type();
+    let i8t = context.i8_type();
+    let ptr_ty = context.ptr_type(Default::default());
+    // Null / empty map → 0
+    let map_i = builder
+        .build_ptr_to_int(map, i64t, "m.ptr.i")
+        .map_err(builder_error)?;
+    let is_null = builder
+        .build_int_compare(IntPredicate::EQ, map_i, i64t.const_zero(), "m.null")
+        .map_err(builder_error)?;
+    let null_bb = context.append_basic_block(parent, "map.get.null");
+    let body_bb = context.append_basic_block(parent, "map.get.body");
+    let merge_bb = context.append_basic_block(parent, "map.get.merge");
+    builder
+        .build_conditional_branch(is_null, null_bb, body_bb)
+        .map_err(builder_error)?;
+    builder.position_at_end(null_bb);
+    builder
+        .build_unconditional_branch(merge_bb)
+        .map_err(builder_error)?;
+
+    builder.position_at_end(body_bb);
+    let state = builder
+        .build_load(ptr_ty, unsafe {
+            builder
+                .build_gep(i8t, map, &[i64t.const_int(MAP_II_OFF_STATE as u64, false)], "g.st.p")
+                .map_err(builder_error)?
+        }, "g.state")
+        .map_err(builder_error)?
+        .into_pointer_value();
+    let keys = builder
+        .build_load(ptr_ty, unsafe {
+            builder
+                .build_gep(i8t, map, &[i64t.const_int(MAP_II_OFF_KEYS as u64, false)], "g.k.p")
+                .map_err(builder_error)?
+        }, "g.keys")
+        .map_err(builder_error)?
+        .into_pointer_value();
+    let vals = builder
+        .build_load(ptr_ty, unsafe {
+            builder
+                .build_gep(i8t, map, &[i64t.const_int(MAP_II_OFF_VALS as u64, false)], "g.v.p")
+                .map_err(builder_error)?
+        }, "g.vals")
+        .map_err(builder_error)?
+        .into_pointer_value();
+    let cap = builder
+        .build_load(i64t, unsafe {
+            builder
+                .build_gep(i8t, map, &[i64t.const_int(MAP_II_OFF_CAP as u64, false)], "g.cap.p")
+                .map_err(builder_error)?
+        }, "g.cap")
+        .map_err(builder_error)?
+        .into_int_value();
+    let cap0 = builder
+        .build_int_compare(IntPredicate::EQ, cap, i64t.const_zero(), "g.cap0")
+        .map_err(builder_error)?;
+    let cap0_bb = context.append_basic_block(parent, "map.get.cap0");
+    let loop_setup = context.append_basic_block(parent, "map.get.setup");
+    builder
+        .build_conditional_branch(cap0, cap0_bb, loop_setup)
+        .map_err(builder_error)?;
+    builder.position_at_end(cap0_bb);
+    builder
+        .build_unconditional_branch(merge_bb)
+        .map_err(builder_error)?;
+
+    builder.position_at_end(loop_setup);
+    let mask = builder
+        .build_int_sub(cap, i64t.const_int(1, false), "g.mask")
+        .map_err(builder_error)?;
+    let start = builder.build_and(key, mask, "g.i0").map_err(builder_error)?;
+    let loop_bb = context.append_basic_block(parent, "map.get.loop");
+    let found_bb = context.append_basic_block(parent, "map.get.found");
+    let miss_bb = context.append_basic_block(parent, "map.get.miss");
+    let next_bb = context.append_basic_block(parent, "map.get.next");
+    builder
+        .build_unconditional_branch(loop_bb)
+        .map_err(builder_error)?;
+    builder.position_at_end(loop_bb);
+    let i_phi = builder.build_phi(i64t, "g.i").map_err(builder_error)?;
+    i_phi.add_incoming(&[(&start, loop_setup)]);
+    let i = i_phi.as_basic_value().into_int_value();
+    let st_ptr = unsafe {
+        builder
+            .build_gep(i8t, state, &[i], "g.st.s")
+            .map_err(builder_error)?
+    };
+    let st = builder
+        .build_load(i8t, st_ptr, "g.st")
+        .map_err(builder_error)?
+        .into_int_value();
+    let st64 = builder
+        .build_int_z_extend(st, i64t, "g.st64")
+        .map_err(builder_error)?;
+    let is_empty = builder
+        .build_int_compare(IntPredicate::EQ, st64, i64t.const_zero(), "g.empty")
+        .map_err(builder_error)?;
+    let not_empty = context.append_basic_block(parent, "map.get.nempty");
+    builder
+        .build_conditional_branch(is_empty, miss_bb, not_empty)
+        .map_err(builder_error)?;
+    builder.position_at_end(not_empty);
+    let is_full = builder
+        .build_int_compare(
+            IntPredicate::EQ,
+            st64,
+            i64t.const_int(MAP_II_FULL as u64, false),
+            "g.full",
+        )
+        .map_err(builder_error)?;
+    builder
+        .build_conditional_branch(is_full, found_bb, next_bb)
+        .map_err(builder_error)?;
+
+    builder.position_at_end(found_bb);
+    let k_ptr = unsafe {
+        builder
+            .build_gep(i64t, keys, &[i], "g.k.s")
+            .map_err(builder_error)?
+    };
+    let ek = builder
+        .build_load(i64t, k_ptr, "g.ek")
+        .map_err(builder_error)?
+        .into_int_value();
+    let same = builder
+        .build_int_compare(IntPredicate::EQ, ek, key, "g.same")
+        .map_err(builder_error)?;
+    let hit_bb = context.append_basic_block(parent, "map.get.hit");
+    builder
+        .build_conditional_branch(same, hit_bb, next_bb)
+        .map_err(builder_error)?;
+    builder.position_at_end(hit_bb);
+    let v_ptr = unsafe {
+        builder
+            .build_gep(i64t, vals, &[i], "g.v.s")
+            .map_err(builder_error)?
+    };
+    let hit_val = builder
+        .build_load(i64t, v_ptr, "g.hit")
+        .map_err(builder_error)?
+        .into_int_value();
+    builder
+        .build_unconditional_branch(merge_bb)
+        .map_err(builder_error)?;
+
+    builder.position_at_end(next_bb);
+    let next_i = builder
+        .build_and(
+            builder
+                .build_int_add(i, i64t.const_int(1, false), "g.i1")
+                .map_err(builder_error)?,
+            mask,
+            "g.inext",
+        )
+        .map_err(builder_error)?;
+    i_phi.add_incoming(&[(&next_i, next_bb)]);
+    builder
+        .build_unconditional_branch(loop_bb)
+        .map_err(builder_error)?;
+
+    builder.position_at_end(miss_bb);
+    builder
+        .build_unconditional_branch(merge_bb)
+        .map_err(builder_error)?;
+
+    builder.position_at_end(merge_bb);
+    let phi = builder.build_phi(i64t, name).map_err(builder_error)?;
+    let zero = i64t.const_zero();
+    phi.add_incoming(&[
+        (&zero, null_bb),
+        (&zero, cap0_bb),
+        (&zero, miss_bb),
+        (&hit_val, hit_bb),
+    ]);
+    Ok(phi.as_basic_value().into_int_value())
 }
 
 /// Clone a string value, or share it when the immortal/static high bit is set.

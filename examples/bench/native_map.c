@@ -70,6 +70,6 @@ static int64_t map_checksum(int64_t n) {
 }
 
 int main(void) {
-    printf("%lld\n", (long long)map_checksum(100000));
+    printf("%lld\n", (long long)map_checksum(1000000));
     return 0;
 }
