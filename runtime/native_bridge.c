@@ -3891,6 +3891,30 @@ int64_t mako_native_file_append2_ptr(int64_t fd, MakoNativeString *a, MakoNative
     return (int64_t)mako_file_append2(fd, bridge_borrow_str(a), bridge_borrow_str(b));
 }
 
+int64_t mako_native_file_append3_ptr(
+    int64_t fd, MakoNativeString *a, MakoNativeString *b, MakoNativeString *c
+) {
+    return (int64_t)mako_file_append3(
+        fd, bridge_borrow_str(a), bridge_borrow_str(b), bridge_borrow_str(c)
+    );
+}
+
+int64_t mako_native_file_seek(int64_t fd, int64_t offset, int64_t whence) {
+    return (int64_t)mako_file_seek(fd, offset, whence);
+}
+
+MakoNativeString *mako_native_file_read_exact_ptr(int64_t fd, int64_t count) {
+    return bridge_take_str(mako_file_read_exact(fd, count));
+}
+
+int64_t mako_native_fdatasync(int64_t fd) {
+    return (int64_t)mako_fdatasync(fd);
+}
+
+int64_t mako_native_fallocate(int64_t fd, int64_t size) {
+    return (int64_t)mako_fallocate(fd, size);
+}
+
 /* ---- simple stdlib / goext bridges ---- */
 int64_t mako_native_fmt_eprintf_ptr(MakoNativeString *fmt, MakoNativeString *a0) {
     return (int64_t)mako_fmt_eprintf1(bridge_borrow_str(fmt), bridge_borrow_str(a0));

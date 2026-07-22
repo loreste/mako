@@ -12520,8 +12520,11 @@ impl<'a> FunctionLowerer<'a> {
                         }
                         if !vo {
                             v = self.emit_clone(v, Type::Str);
+                        } else if let Expr::Ident(name) = &args[0] {
+                            // Move owned local into the channel — do not drop later.
+                            self.heap_owned.insert(name.clone(), false);
                         }
-                        // Leak into channel ownership (channel free later drops).
+                        // Channel owns the header after a successful send.
                     }
                     let out = self.value();
                     let fname = if method == "send" {
@@ -12782,24 +12785,62 @@ impl<'a> FunctionLowerer<'a> {
                         value: ok_out,
                     });
                     self.terminate(Terminator::Jump(merge))?;
+                    // rc == 0 → Err("timeout"); else (rc == -1) → Err("closed")
                     self.current = else_b;
-                    let msg_lit = self.value();
+                    let zc = self.const_int(0, Type::I64);
+                    let is_timeout = self.value();
+                    self.emit(Inst::Binary {
+                        out: is_timeout,
+                        op: BinOp::Eq,
+                        left: rc,
+                        right: zc,
+                        ty: Type::I64,
+                    });
+                    let timeout_b = self.new_block();
+                    let closed_b = self.new_block();
+                    self.terminate(Terminator::Branch {
+                        condition: is_timeout,
+                        then_block: timeout_b,
+                        else_block: closed_b,
+                    })?;
+                    self.current = timeout_b;
+                    let timeout_lit = self.value();
                     self.emit(Inst::StringLiteral {
-                        out: msg_lit,
+                        out: timeout_lit,
                         bytes: b"timeout".to_vec(),
                     });
-                    let msg = self.emit_clone(msg_lit, Type::Str);
-                    let err_out = self.value();
+                    let timeout_msg = self.emit_clone(timeout_lit, Type::Str);
+                    let timeout_err = self.value();
                     self.emit(Inst::EnumMake {
-                        out: err_out,
+                        out: timeout_err,
                         enum_id: err_info.enum_id,
                         tag: err_info.tag,
                         slot_base: err_info.slot_base as u32,
-                        payload: vec![msg],
+                        payload: vec![timeout_msg],
                     });
                     self.emit(Inst::Store {
                         ptr: result_slot,
-                        value: err_out,
+                        value: timeout_err,
+                    });
+                    self.terminate(Terminator::Jump(merge))?;
+                    self.current = closed_b;
+                    let closed_lit = self.value();
+                    self.emit(Inst::StringLiteral {
+                        out: closed_lit,
+                        bytes: b"closed".to_vec(),
+                    });
+                    let closed_msg = self.emit_clone(closed_lit, Type::Str);
+                    let closed_err = self.value();
+                    self.emit(Inst::EnumMake {
+                        out: closed_err,
+                        enum_id: err_info.enum_id,
+                        tag: err_info.tag,
+                        slot_base: err_info.slot_base as u32,
+                        payload: vec![closed_msg],
+                    });
+                    self.emit(Inst::Store {
+                        ptr: result_slot,
+                        value: closed_err,
                     });
                     self.terminate(Terminator::Jump(merge))?;
                     self.current = merge;
@@ -18372,6 +18413,36 @@ impl<'a> FunctionLowerer<'a> {
             "file_append2" if args.len() == 3 => Some((
                 "mako_native_file_append2_ptr",
                 &[Type::I64, Type::Str, Type::Str],
+                Some(Type::I64),
+                false,
+            )),
+            "file_append3" if args.len() == 4 => Some((
+                "mako_native_file_append3_ptr",
+                &[Type::I64, Type::Str, Type::Str, Type::Str],
+                Some(Type::I64),
+                false,
+            )),
+            "file_seek" if args.len() == 3 => Some((
+                "mako_native_file_seek",
+                &[Type::I64, Type::I64, Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "file_read_exact" if args.len() == 2 => Some((
+                "mako_native_file_read_exact_ptr",
+                &[Type::I64, Type::I64],
+                Some(Type::Str),
+                true,
+            )),
+            "fdatasync" if args.len() == 1 => Some((
+                "mako_native_fdatasync",
+                &[Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "fallocate" if args.len() == 2 => Some((
+                "mako_native_fallocate",
+                &[Type::I64, Type::I64],
                 Some(Type::I64),
                 false,
             )),
