@@ -19,6 +19,11 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
       - name: Install clang + OpenSSL (Linux)
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y clang libssl-dev
@@ -58,6 +63,43 @@ jobs:
       - name: Help
         shell: bash
         run: ./target/release/mako --help
+
+      - name: Validate compiler benchmark matrix
+        if: runner.os == 'Linux'
+        run: >-
+          python scripts/bench-compile.py
+          --root "${{ runner.temp }}/mako-compile-bench"
+          --generate-only
+
+      - name: Compile benchmark build smoke
+        if: runner.os == 'Linux'
+        run: >-
+          python scripts/bench-compile.py
+          --root "${{ runner.temp }}/mako-compile-bench"
+          --sizes 10000
+          --shapes single generic
+          --repeat 1
+          --build
+          --output "${{ runner.temp }}/mako-compile-build-bench.json"
+
+      - name: Compile benchmark fixture smoke
+        run: >-
+          python scripts/bench-compile.py
+          --root "${{ runner.temp }}/mako-compile-bench"
+          --sizes 1000
+          --repeat 1
+          --output "${{ runner.temp }}/mako-compile-bench.json"
+
+      - name: Upload compiler benchmark sample
+        uses: actions/upload-artifact@v4
+        with:
+          name: mako-compile-bench-${{ matrix.os }}
+          path: ${{ runner.temp }}/mako-compile-*.json
+
+      - name: Recursive debug compiler (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: cargo run --quiet -- test examples/testing/deep_expr_stack_test.mko
 
       - name: Default test suite (Linux/macOS)
         if: runner.os != 'Windows'
@@ -101,6 +143,26 @@ jobs:
           cargo run --quiet --release -- test examples/testing/context_mako_test.mko
           cargo run --quiet --release -- test examples/testing/json_mako_test.mko
           cargo run --quiet --release -- test examples/testing/collections_mako_test.mko
+          cargo run --quiet --release -- test examples/testing/crew_fan_test.mko
+          cargo run --quiet --release -- test examples/testing/kick_fn_test.mko
+          cargo run --quiet --release -- test examples/testing/job_join_typed_test.mko
+          cargo run --quiet --release -- test examples/testing/actor_test.mko
+          cargo run --quiet --release -- test examples/testing/wave8_queue_test.mko
+          cargo run --quiet --release -- test examples/testing/wave10_queue_test.mko
+          cargo run --quiet --release -- test examples/testing/bufio_test.mko
+          cargo run --quiet --release -- test examples/testing/db_engine_test.mko
+          cargo run --quiet --release -- test examples/testing/file_env_test.mko
+          cargo run --quiet --release -- test examples/testing/fs_polish_test.mko
+          cargo run --quiet --release -- test examples/testing/plugin_product_test.mko
+        env:
+          MAKO_TEST_TIMEOUT_SECS: "90"
+
+      - name: Windows storage I/O
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          cargo run --quiet --release -- test examples/testing/storage_portable_io_test.mko
+          cargo run --quiet --release -- test examples/ci/windows_direct_io_test.mko
         env:
           MAKO_TEST_TIMEOUT_SECS: "90"
 
@@ -289,6 +351,8 @@ jobs:
           ./target/release/mako test --race examples/testing/chan_float_test.mko
           ./target/release/mako test --race examples/testing/crew_fan_test.mko
           ./target/release/mako test --race examples/testing/crew_drain_test.mko
+          MAKO_RT_STRESS_SEED=7 MAKO_RT_STRESS_ROUNDS=8 ./target/release/mako test --race examples/testing/chan_select_stress_test.mko
+          MAKO_RT_STRESS_SEED=104729 MAKO_RT_STRESS_ROUNDS=8 ./target/release/mako test --race examples/testing/chan_select_stress_test.mko
 
   asan:
     name: ASan invalid memory access
@@ -321,6 +385,12 @@ jobs:
           MAKO_TEST_TIMEOUT_SECS: "120"
         run: |
           ./target/release/mako test --sanitize address examples/testing/discarded_bag_borrow_test.mko
+      - name: Check map key ownership
+        env:
+          ASAN_OPTIONS: detect_leaks=0
+          MAKO_TEST_TIMEOUT_SECS: "120"
+        run: |
+          ./target/release/mako test --sanitize address examples/testing/map_set_take_alias_test.mko
 
   ubsan:
     name: UBSan undefined behavior

@@ -20,7 +20,7 @@ working code you can run immediately.
 
 ## Prerequisites
 
-All guides assume you have Mako installed (`mako version` → **mako0.3.0** …).
+All guides assume you have Mako installed (`mako version` → **mako0.4.0** …).
 Guide 01 covers installation from scratch.
 
 ## Related documentation

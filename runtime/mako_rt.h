@@ -38,6 +38,7 @@
 #if !defined(_WIN32)
 #include <sys/time.h>
 #include <sys/resource.h>
+#include <sys/uio.h>
 #include <unistd.h>
 #endif
 #if defined(__APPLE__)
@@ -265,23 +266,73 @@ static inline MakoString mako_str_concat(MakoString a, MakoString b) {
     return out;
 }
 
+/* Concat that takes ownership of `a` — realloc in-place when possible.
+ * Saves one malloc + memcpy on chained concatenations ("a" + "b" + "c").
+ * The caller must not use `a` after this call. */
+static inline MakoString mako_str_concat_own(MakoString a, MakoString b) {
+    if (MAKO_UNLIKELY(b.len == 0)) return a;
+    if (MAKO_UNLIKELY(a.len == 0)) {
+        /* a is empty — just clone b; no realloc benefit. */
+        char *d = (char *)malloc(b.len + 1);
+        if (MAKO_UNLIKELY(!d)) abort();
+        memcpy(d, b.data, b.len);
+        d[b.len] = 0;
+        return (MakoString){d, b.len};
+    }
+    /* Realloc a's buffer to fit a + b. */
+    char *d = (char *)realloc(a.data, a.len + b.len + 1);
+    if (MAKO_UNLIKELY(!d)) {
+        fprintf(stderr, "mako: OOM in str_concat_own\n");
+        abort();
+    }
+    memcpy(d + a.len, b.data, b.len);
+    d[a.len + b.len] = 0;
+    return (MakoString){d, a.len + b.len};
+}
+
 static inline void mako_print_str(MakoString s) {
+#if !defined(_WIN32) && !defined(__wasi__)
+    /* writev: single syscall for data+newline, no fflush needed. */
+    struct iovec iov[2] = {{(void *)s.data, s.len}, {(void *)"\n", 1}};
+    (void)writev(STDOUT_FILENO, iov, 2);
+#else
     fwrite(s.data, 1, s.len, stdout);
     fputc('\n', stdout);
     fflush(stdout);
+#endif
 }
 
 static inline void mako_print_int(int64_t n) {
+#if !defined(_WIN32) && !defined(__wasi__)
+    char buf[24];
+    int w = snprintf(buf, sizeof(buf), "%lld", (long long)n);
+    struct iovec iov[2] = {{buf, (size_t)w}, {(void *)"\n", 1}};
+    (void)writev(STDOUT_FILENO, iov, 2);
+#else
     printf("%lld\n", (long long)n);
     fflush(stdout);
+#endif
 }
 
 static inline void mako_print_float(double n) {
+#if !defined(_WIN32) && !defined(__wasi__)
+    char buf[32];
+    int w = snprintf(buf, sizeof(buf), "%g", n);
+    struct iovec iov[2] = {{buf, (size_t)w}, {(void *)"\n", 1}};
+    (void)writev(STDOUT_FILENO, iov, 2);
+#else
     printf("%g\n", n);
+#endif
 }
 
 static inline void mako_print_bool(bool b) {
+#if !defined(_WIN32) && !defined(__wasi__)
+    const char *s = b ? "true" : "false";
+    struct iovec iov[2] = {{(void *)s, b ? 4u : 5u}, {(void *)"\n", 1}};
+    (void)writev(STDOUT_FILENO, iov, 2);
+#else
     puts(b ? "true" : "false");
+#endif
 }
 
 /* ---- Dynamic int arrays ----
@@ -463,14 +514,14 @@ static inline void mako_byte_set(MakoByteArray a, int64_t i, int64_t v) {
 
 static inline MakoByteArray mako_byte_append(MakoByteArray s, int64_t v) {
     if (v < 0 || v > 255) mako_abort("byte value out of range 0..255");
-    if (s.len < s.cap) {
+    if (MAKO_LIKELY(s.len < s.cap)) {
         s.data[s.len++] = (uint8_t)v;
         return s;
     }
     size_t ncap = s.cap ? s.cap * 2 : 1;
     if (ncap < s.len + 1) ncap = s.len + 1;
     uint8_t *nd = (uint8_t *)malloc(ncap);
-    if (!nd) mako_abort("append: out of memory");
+    if (MAKO_UNLIKELY(!nd)) mako_abort("append: out of memory");
     if (s.len) memcpy(nd, s.data, s.len);
     s.data = nd;
     s.cap = ncap;
@@ -665,7 +716,7 @@ static inline void mako_str_array_set(MakoStrArray a, int64_t i, MakoString v) {
 }
 
 static inline MakoStrArray mako_str_array_append(MakoStrArray s, MakoString v) {
-    if (s.len + 1 > s.cap) {
+    if (MAKO_UNLIKELY(s.len + 1 > s.cap)) {
         size_t ncap = s.cap ? s.cap * 2 : 1;
         if (ncap < s.len + 1) ncap = s.len + 1;
         MakoString *nd = (MakoString *)malloc(ncap * sizeof(MakoString));
@@ -780,7 +831,7 @@ static inline void mako_float_array_set(MakoFloatArray a, int64_t i, double v) {
 }
 
 static inline MakoFloatArray mako_float_array_append(MakoFloatArray s, double v) {
-    if (s.len + 1 > s.cap) {
+    if (MAKO_UNLIKELY(s.len + 1 > s.cap)) {
         size_t ncap = s.cap ? s.cap * 2 : 1;
         if (ncap < s.len + 1) ncap = s.len + 1;
         double *nd = (double *)malloc(ncap * sizeof(double));
@@ -892,7 +943,7 @@ static inline void mako_bool_array_set(MakoBoolArray a, int64_t i, bool v) {
 }
 
 static inline MakoBoolArray mako_bool_array_append(MakoBoolArray s, bool v) {
-    if (s.len + 1 > s.cap) {
+    if (MAKO_UNLIKELY(s.len + 1 > s.cap)) {
         size_t ncap = s.cap ? s.cap * 2 : 1;
         if (ncap < s.len + 1) ncap = s.len + 1;
         bool *nd = (bool *)malloc(ncap * sizeof(bool));
@@ -1380,24 +1431,21 @@ typedef struct {
 } MakoResultInt;
 
 static inline MakoResultInt mako_ok_int(int64_t v) {
-    MakoResultInt r;
-    memset(&r, 0, sizeof(r));
+    MakoResultInt r = {0};
     r.ok = true;
     r.value = v;
     return r;
 }
 
 static inline MakoResultInt mako_ok_str(MakoString s) {
-    MakoResultInt r;
-    memset(&r, 0, sizeof(r));
+    MakoResultInt r = {0};
     r.ok = true;
     r.ok_s = s;
     return r;
 }
 
 static inline MakoResultInt mako_ok_float_res(double v) {
-    MakoResultInt r;
-    memset(&r, 0, sizeof(r));
+    MakoResultInt r = {0};
     r.ok = true;
     r.ok_f = v;
     return r;
@@ -1405,8 +1453,7 @@ static inline MakoResultInt mako_ok_float_res(double v) {
 
 /* Ok payload for Result[Struct, E]: heap-owned box; match Ok unboxes and frees. */
 static inline MakoResultInt mako_ok_ptr(void *p) {
-    MakoResultInt r;
-    memset(&r, 0, sizeof(r));
+    MakoResultInt r = {0};
     r.ok = true;
     r.value = (int64_t)(intptr_t)p; /* pointer bits in value slot */
     return r;
@@ -1417,21 +1464,14 @@ static inline void *mako_result_ok_ptr(MakoResultInt r) {
 }
 
 static inline MakoResultInt mako_err_int(MakoString e) {
-    MakoResultInt r;
-    memset(&r, 0, sizeof(r));
-    r.ok = false;
-    r.value = 0;
+    MakoResultInt r = {0};
     r.err = e;
-    r.err_kind = 0;
     return r;
 }
 
 /* Err with enum payload: tag + optional int/string fields (unit enums use tag only). */
 static inline MakoResultInt mako_err_enum(int tag, int64_t i0, int64_t i1, MakoString s0) {
-    MakoResultInt r;
-    memset(&r, 0, sizeof(r));
-    r.ok = false;
-    r.value = 0;
+    MakoResultInt r = {0};
     r.err_kind = 1;
     r.err_tag = tag;
     r.err_i0 = i0;
@@ -1444,9 +1484,7 @@ static inline MakoResultInt mako_err_enum(int tag, int64_t i0, int64_t i1, MakoS
 static inline MakoResultInt mako_err_enum_ex(
     int tag, int64_t i0, int64_t i1, int64_t i2, MakoString s0, MakoString s1
 ) {
-    MakoResultInt r;
-    memset(&r, 0, sizeof(r));
-    r.ok = false;
+    MakoResultInt r = {0};
     r.err_kind = 1;
     r.err_tag = tag;
     r.err_i0 = i0;
@@ -1487,9 +1525,9 @@ static inline MakoResultFloat mako_err_float(MakoString e) {
  * Go-like: fmt.Errorf("context: %w", err) — message chain for humans + error_is. */
 static inline MakoResultInt mako_wrap_err(MakoResultInt r, MakoString prefix) {
     if (r.ok) return r;
-    MakoString sep = mako_str_from_cstr(": ");
-    MakoString mid = mako_str_concat(prefix, sep);
+    MakoString mid = mako_str_concat(prefix, mako_str_view(": ", 2));
     MakoString out = mako_str_concat(mid, r.err);
+    mako_str_free(mid);
     return mako_err_int(out);
 }
 
@@ -1498,16 +1536,18 @@ static inline MakoResultInt mako_error_join(MakoResultInt a, MakoResultInt b) {
     if (a.ok && b.ok) return a;
     if (!a.ok && b.ok) return a;
     if (a.ok && !b.ok) return b;
-    MakoString sep = mako_str_from_cstr("; ");
-    MakoString mid = mako_str_concat(a.err, sep);
-    return mako_err_int(mako_str_concat(mid, b.err));
+    MakoString mid = mako_str_concat(a.err, mako_str_view("; ", 2));
+    MakoString out = mako_str_concat(mid, b.err);
+    mako_str_free(mid);
+    return mako_err_int(out);
 }
 
 /* Enum-like tagged errors: error_tag("NotFound", "user 7") → Err("NotFound: user 7"). */
 static inline MakoResultInt mako_error_tag(MakoString tag, MakoString msg) {
-    MakoString sep = mako_str_from_cstr(": ");
-    MakoString mid = mako_str_concat(tag, sep);
-    return mako_err_int(mako_str_concat(mid, msg));
+    MakoString mid = mako_str_concat(tag, mako_str_view(": ", 2));
+    MakoString out = mako_str_concat(mid, msg);
+    mako_str_free(mid);
+    return mako_err_int(out);
 }
 
 /* errorf("open %s", path) — format a string error (printf-style, one %s or plain). */
@@ -1679,7 +1719,7 @@ static inline int64_t mako_rune_count(MakoString s) {
 }
 
 static inline bool mako_str_eq(MakoString a, MakoString b) {
-    return a.len == b.len && (a.len == 0 || memcmp(a.data, b.data, a.len) == 0);
+    return a.len == b.len && memcmp(a.data, b.data, a.len) == 0;
 }
 
 static inline bool mako_str_contains(MakoString hay, MakoString needle) {
@@ -1859,10 +1899,24 @@ static inline int64_t mako_error_has_tag(MakoResultInt r, MakoString tag) {
 }
 
 static inline MakoString mako_int_to_string(int64_t n) {
+    /* Fast path: write digits directly without snprintf for small numbers. */
     char buf[32];
-    int written = snprintf(buf, sizeof(buf), "%lld", (long long)n);
-    if (written < 0) written = 0;
-    return mako_str_from_cstr(buf);
+    int neg = 0;
+    uint64_t v;
+    if (n < 0) { neg = 1; v = (uint64_t)(-(n + 1)) + 1; }
+    else { v = (uint64_t)n; }
+    char *p = buf + sizeof(buf) - 1;
+    *p = 0;
+    if (v == 0) { *--p = '0'; }
+    else {
+        while (v > 0) { *--p = '0' + (char)(v % 10); v /= 10; }
+    }
+    if (neg) *--p = '-';
+    size_t len = (size_t)(buf + sizeof(buf) - 1 - p);
+    char *d = (char *)malloc(len + 1);
+    if (MAKO_UNLIKELY(!d)) abort();
+    memcpy(d, p, len + 1);
+    return (MakoString){d, len};
 }
 
 /* ---- String builder (growable buffer → string) ---- */
@@ -1942,6 +1996,19 @@ static inline MakoString mako_sbstack_finish(MakoSBStack *b) {
     MakoString out = {b->data, b->len};
     b->data = b->stack;
     return out;
+}
+
+/* Stack string finish: return view into stack buffer (no malloc).
+ * ONLY safe when the result is consumed immediately (write/print/compare).
+ * The returned MakoString.data points to the MakoSBStack's internal buffer. */
+static inline MakoString mako_sbstack_finish_view(MakoSBStack *b) {
+    if (b->len == 0) return mako_str_empty;
+    if (b->data == b->stack) {
+        b->stack[b->len] = 0;
+        return (MakoString){b->stack, b->len};
+    }
+    b->data[b->len] = 0;
+    return (MakoString){b->data, b->len};
 }
 
 static inline void mako_str_builder_grow(MakoStrBuilder *b, size_t need) {
@@ -2397,6 +2464,7 @@ enum { MAKO_MAP_EMPTY = 0, MAKO_MAP_FULL = 1, MAKO_MAP_TOMB = 2 };
 
 typedef struct {
     uint8_t *state;
+    uint64_t *hashes;
     MakoString *keys;
     int64_t *vals;
     size_t cap;
@@ -2478,8 +2546,13 @@ static inline uint64_t mako_hash_bytes(const char *p, size_t n) {
 }
 
 static inline uint64_t mako_hash_i64(int64_t k) {
+    /* Fast multiply-shift: single multiply, good distribution for sequential keys.
+     * Fibonacci hashing constant (golden ratio * 2^64). */
     uint64_t x = (uint64_t)k;
-    return _wymix(x ^ _wyp[0], x ^ _wyp[1]);
+    x ^= x >> 33;
+    x *= 0xff51afd7ed558ccdULL;
+    x ^= x >> 33;
+    return x;
 }
 
 /* Float map keys: +0/-0 same key; all NaNs share one key. */
@@ -2617,9 +2690,10 @@ static inline MakoMapSI mako_map_si_new(size_t hint) {
     while (cap < need) cap *= 2;
     MakoMapSI m;
     m.state = (uint8_t *)calloc(cap, 1);
+    m.hashes = (uint64_t *)malloc(cap * sizeof(uint64_t));
     m.keys = (MakoString *)calloc(cap, sizeof(MakoString));
     m.vals = (int64_t *)malloc(cap * sizeof(int64_t));
-    if (!m.keys || !m.vals) {
+    if (!m.keys || !m.vals || !m.hashes) {
         fprintf(stderr, "mako: OOM in map_si_new\n");
         abort();
     }
@@ -2644,6 +2718,7 @@ static inline void mako_map_si_set_take(MakoMapSI *m, MakoString key, int64_t va
         if (MAKO_LIKELY(st == MAKO_MAP_EMPTY)) {
             size_t slot = (first_tomb != (size_t)-1) ? first_tomb : i;
             m->state[slot] = MAKO_MAP_FULL;
+            m->hashes[slot] = h;
             m->keys[slot] = key; /* take ownership */
             m->vals[slot] = val;
             m->len++;
@@ -2651,7 +2726,7 @@ static inline void mako_map_si_set_take(MakoMapSI *m, MakoString key, int64_t va
         }
         if (st == MAKO_MAP_TOMB) {
             if (first_tomb == (size_t)-1) first_tomb = i;
-        } else if (m->keys[i].len == key.len
+        } else if (m->hashes[i] == h && m->keys[i].len == key.len
                    && memcmp(m->keys[i].data, key.data, key.len) == 0) {
             /* Key already present — drop the taken key, keep stored key. */
             mako_str_free(key);
@@ -2670,25 +2745,26 @@ static inline void mako_map_si_set(MakoMapSI *m, MakoString key, int64_t val) {
 static inline void mako_map_si_rehash(MakoMapSI *m, size_t ncap) {
     /* Move owned keys into the new table — no clone/free churn (vs Go map grow). */
     uint8_t *ostate = m->state;
+    uint64_t *ohashes = m->hashes;
     MakoString *okeys = m->keys;
     int64_t *ovals = m->vals;
     size_t ocap = m->cap;
     MakoMapSI n = mako_map_si_new(ncap / 2);
     for (size_t i = 0; i < ocap; i++) {
         if (ostate[i] != MAKO_MAP_FULL) continue;
-        MakoString key = okeys[i];
-        int64_t val = ovals[i];
-        uint64_t h = mako_hash_bytes(key.data, key.len);
+        uint64_t h = ohashes[i];
         size_t j = (size_t)(h & (n.cap - 1));
         while (n.state[j] == MAKO_MAP_FULL) {
             j = (j + 1) & (n.cap - 1);
         }
         n.state[j] = MAKO_MAP_FULL;
-        n.keys[j] = key;
-        n.vals[j] = val;
+        n.hashes[j] = h;
+        n.keys[j] = okeys[i];
+        n.vals[j] = ovals[i];
         n.len++;
     }
     free(ostate);
+    free(ohashes);
     free(okeys);
     free(ovals);
     *m = n;
@@ -2696,27 +2772,37 @@ static inline void mako_map_si_rehash(MakoMapSI *m, size_t ncap) {
 
 static inline int64_t mako_map_si_get(MakoMapSI *m, MakoString key) {
     uint64_t h = mako_hash_bytes(key.data, key.len);
-    size_t i = (size_t)(h & (m->cap - 1));
+    size_t mask = m->cap - 1;
+    size_t i = (size_t)(h & mask);
     for (;;) {
-        if (m->state[i] == MAKO_MAP_EMPTY) return 0;
-        if (m->state[i] == MAKO_MAP_FULL && m->keys[i].len == key.len
-            && memcmp(m->keys[i].data, key.data, key.len) == 0) {
-            return m->vals[i];
+        uint8_t st = m->state[i];
+        if (MAKO_LIKELY(st == MAKO_MAP_FULL)) {
+            if (m->hashes[i] == h && m->keys[i].len == key.len
+                && memcmp(m->keys[i].data, key.data, key.len) == 0) {
+                return m->vals[i];
+            }
+        } else if (st == MAKO_MAP_EMPTY) {
+            return 0;
         }
-        i = (i + 1) & (m->cap - 1);
+        i = (i + 1) & mask;
     }
 }
 
 static inline bool mako_map_si_has(MakoMapSI *m, MakoString key) {
     uint64_t h = mako_hash_bytes(key.data, key.len);
-    size_t i = (size_t)(h & (m->cap - 1));
+    size_t mask = m->cap - 1;
+    size_t i = (size_t)(h & mask);
     for (;;) {
-        if (m->state[i] == MAKO_MAP_EMPTY) return false;
-        if (m->state[i] == MAKO_MAP_FULL && m->keys[i].len == key.len
-            && memcmp(m->keys[i].data, key.data, key.len) == 0) {
-            return true;
+        uint8_t st = m->state[i];
+        if (MAKO_LIKELY(st == MAKO_MAP_FULL)) {
+            if (m->hashes[i] == h && m->keys[i].len == key.len
+                && memcmp(m->keys[i].data, key.data, key.len) == 0) {
+                return true;
+            }
+        } else if (st == MAKO_MAP_EMPTY) {
+            return false;
         }
-        i = (i + 1) & (m->cap - 1);
+        i = (i + 1) & mask;
     }
 }
 
@@ -2725,7 +2811,8 @@ static inline void mako_map_si_delete(MakoMapSI *m, MakoString key) {
     size_t i = (size_t)(h & (m->cap - 1));
     for (;;) {
         if (m->state[i] == MAKO_MAP_EMPTY) return;
-        if (m->state[i] == MAKO_MAP_FULL && m->keys[i].len == key.len
+        if (m->state[i] == MAKO_MAP_FULL && m->hashes[i] == h
+            && m->keys[i].len == key.len
             && memcmp(m->keys[i].data, key.data, key.len) == 0) {
             mako_str_free(m->keys[i]);
             m->keys[i].data = NULL;
@@ -2757,6 +2844,7 @@ static inline void mako_map_si_free(MakoMapSI *m) {
         }
     }
     free(m->state);
+    free(m->hashes);
     free(m->keys);
     free(m->vals);
     free(m);
@@ -4342,6 +4430,7 @@ static inline MakoMapBB *mako_map_bb_make(int64_t hint) {
 /* map[string]string */
 typedef struct {
     uint8_t *state;
+    uint64_t *hashes;
     MakoString *keys;
     MakoString *vals;
     size_t cap;
@@ -4354,8 +4443,15 @@ static inline MakoMapSS mako_map_ss_new(size_t hint) {
     while (cap < need) cap *= 2;
     MakoMapSS m;
     m.state = (uint8_t *)calloc(cap, 1);
+    m.hashes = (uint64_t *)malloc(cap * sizeof(uint64_t));
     m.keys = (MakoString *)calloc(cap, sizeof(MakoString));
     m.vals = (MakoString *)calloc(cap, sizeof(MakoString));
+    if (!m.state || !m.hashes || !m.keys || !m.vals) {
+        free(m.state); free(m.hashes); free(m.keys); free(m.vals);
+        m.state = NULL; m.hashes = NULL; m.keys = NULL; m.vals = NULL;
+        m.cap = 0; m.len = 0;
+        return m;
+    }
     m.cap = cap;
     m.len = 0;
     return m;
@@ -4377,6 +4473,7 @@ static inline void mako_map_ss_set_take(MakoMapSS *m, MakoString key, MakoString
         if (MAKO_LIKELY(st == MAKO_MAP_EMPTY)) {
             size_t slot = (first_tomb != (size_t)-1) ? first_tomb : i;
             m->state[slot] = MAKO_MAP_FULL;
+            m->hashes[slot] = h;
             m->keys[slot] = key;
             m->vals[slot] = val;
             m->len++;
@@ -4384,7 +4481,7 @@ static inline void mako_map_ss_set_take(MakoMapSS *m, MakoString key, MakoString
         }
         if (st == MAKO_MAP_TOMB) {
             if (first_tomb == (size_t)-1) first_tomb = i;
-        } else if (m->keys[i].len == key.len
+        } else if (m->hashes[i] == h && m->keys[i].len == key.len
                    && memcmp(m->keys[i].data, key.data, key.len) == 0) {
             mako_str_free(key);
             mako_str_free(m->vals[i]);
@@ -4402,6 +4499,7 @@ static inline void mako_map_ss_set(MakoMapSS *m, MakoString key, MakoString val)
 static inline void mako_map_ss_rehash(MakoMapSS *m, size_t ncap) {
     /* Move owned keys/vals — no clone/free churn. */
     uint8_t *ostate = m->state;
+    uint64_t *ohashes = m->hashes;
     MakoString *okeys = m->keys;
     MakoString *ovals = m->vals;
     size_t ocap = m->cap;
@@ -4410,17 +4508,19 @@ static inline void mako_map_ss_rehash(MakoMapSS *m, size_t ncap) {
         if (ostate[i] != MAKO_MAP_FULL) continue;
         MakoString key = okeys[i];
         MakoString val = ovals[i];
-        uint64_t h = mako_hash_bytes(key.data, key.len);
+        uint64_t h = ohashes[i];
         size_t j = (size_t)(h & (n.cap - 1));
         while (n.state[j] == MAKO_MAP_FULL) {
             j = (j + 1) & (n.cap - 1);
         }
         n.state[j] = MAKO_MAP_FULL;
+        n.hashes[j] = h;
         n.keys[j] = key;
         n.vals[j] = val;
         n.len++;
     }
     free(ostate);
+    free(ohashes);
     free(okeys);
     free(ovals);
     *m = n;
@@ -4428,16 +4528,19 @@ static inline void mako_map_ss_rehash(MakoMapSS *m, size_t ncap) {
 
 static inline MakoString mako_map_ss_get(MakoMapSS *m, MakoString key) {
     uint64_t h = mako_hash_bytes(key.data, key.len);
-    size_t i = (size_t)(h & (m->cap - 1));
+    size_t mask = m->cap - 1;
+    size_t i = (size_t)(h & mask);
     for (;;) {
-        if (m->state[i] == MAKO_MAP_EMPTY) {
-            return mako_str_from_cstr("");
+        uint8_t st = m->state[i];
+        if (MAKO_LIKELY(st == MAKO_MAP_FULL)) {
+            if (m->hashes[i] == h && m->keys[i].len == key.len
+                && memcmp(m->keys[i].data, key.data, key.len) == 0) {
+                return mako_str_clone(m->vals[i]);
+            }
+        } else if (st == MAKO_MAP_EMPTY) {
+            return mako_str_empty;
         }
-        if (m->state[i] == MAKO_MAP_FULL && m->keys[i].len == key.len
-            && memcmp(m->keys[i].data, key.data, key.len) == 0) {
-            return mako_str_clone(m->vals[i]);
-        }
-        i = (i + 1) & (m->cap - 1);
+        i = (i + 1) & mask;
     }
 }
 
@@ -4446,7 +4549,8 @@ static inline bool mako_map_ss_has(MakoMapSS *m, MakoString key) {
     size_t i = (size_t)(h & (m->cap - 1));
     for (;;) {
         if (m->state[i] == MAKO_MAP_EMPTY) return false;
-        if (m->state[i] == MAKO_MAP_FULL && m->keys[i].len == key.len
+        if (m->state[i] == MAKO_MAP_FULL && m->hashes[i] == h
+            && m->keys[i].len == key.len
             && memcmp(m->keys[i].data, key.data, key.len) == 0) {
             return true;
         }
@@ -4459,7 +4563,8 @@ static inline void mako_map_ss_delete(MakoMapSS *m, MakoString key) {
     size_t i = (size_t)(h & (m->cap - 1));
     for (;;) {
         if (m->state[i] == MAKO_MAP_EMPTY) return;
-        if (m->state[i] == MAKO_MAP_FULL && m->keys[i].len == key.len
+        if (m->state[i] == MAKO_MAP_FULL && m->hashes[i] == h
+            && m->keys[i].len == key.len
             && memcmp(m->keys[i].data, key.data, key.len) == 0) {
             mako_str_free(m->keys[i]);
             mako_str_free(m->vals[i]);
@@ -4481,6 +4586,26 @@ static inline MakoMapSS *mako_map_ss_make(int64_t hint) {
     MakoMapSS *m = (MakoMapSS *)malloc(sizeof(MakoMapSS));
     *m = mako_map_ss_new(hint > 0 ? (size_t)hint : 0);
     return m;
+}
+
+/* SAFE-004: free map heap handle + string keys/vals. */
+static inline void mako_map_ss_free(MakoMapSS *m) {
+    if (!m) return;
+    for (size_t i = 0; i < m->cap; i++) {
+        if (m->state[i] == MAKO_MAP_FULL) {
+            mako_str_free(m->keys[i]);
+            m->keys[i].data = NULL;
+            m->keys[i].len = 0;
+            mako_str_free(m->vals[i]);
+            m->vals[i].data = NULL;
+            m->vals[i].len = 0;
+        }
+    }
+    free(m->state);
+    free(m->hashes);
+    free(m->keys);
+    free(m->vals);
+    free(m);
 }
 
 /* ---- Debug / abort (early — used by slice/array helpers) ---- */
@@ -4870,8 +4995,9 @@ static inline int64_t mako_chan_recv_timeout(MakoChan *c, int64_t *out, int64_t 
 
 /* Select between two channels with timeout_ms.
  * Returns 0 if a ready, 1 if b ready, -1 on timeout.
- * Value available via mako_chan_select_value(). */
-static int64_t mako_select_last_val = 0;
+ * Value available via mako_chan_select_value(). Selectors can run concurrently,
+ * so result and fairness state are per-thread. */
+static __thread int64_t mako_select_last_val = 0;
 
 static inline int64_t mako_chan_select_value(void) {
     return mako_select_last_val;
@@ -4882,7 +5008,7 @@ static inline int64_t mako_chan_select_value(void) {
  * Uses a shared condvar instead of 2ms nanosleep polling — near-zero
  * latency wakeup when any channel receives data. */
 #define MAKO_SELECT_MAX 16
-static int64_t mako_select_rr = 0;
+static __thread int64_t mako_select_rr = 0;
 
 /* Global select wakeup: channels signal this on send so select waiters
  * wake immediately instead of polling every 2ms.
@@ -4890,30 +5016,29 @@ static int64_t mako_select_rr = 0;
  * CRITICAL_SECTION / CONDITION_VARIABLE shims. */
 static pthread_mutex_t mako_select_mu;
 static pthread_cond_t mako_select_cv;
-static int mako_select_sync_ready = 0;
+
+#if defined(_WIN32) || defined(_WIN64)
+static volatile LONG mako_select_sync_once = 0;
+#else
+static pthread_once_t mako_select_sync_once = PTHREAD_ONCE_INIT;
+#endif
+
+static void mako_select_sync_init(void) {
+    pthread_mutex_init(&mako_select_mu, NULL);
+    pthread_cond_init(&mako_select_cv, NULL);
+}
 
 static inline void mako_select_sync_ensure(void) {
-    if (mako_select_sync_ready) return;
 #if defined(_WIN32) || defined(_WIN64)
-    static LONG once = 0;
-    if (InterlockedCompareExchange(&once, 1, 0) == 0) {
-        pthread_mutex_init(&mako_select_mu, NULL);
-        pthread_cond_init(&mako_select_cv, NULL);
-        mako_select_sync_ready = 1;
-        InterlockedExchange(&once, 2);
+    if (InterlockedCompareExchange(&mako_select_sync_once, 1, 0) == 0) {
+        mako_select_sync_init();
+        InterlockedExchange(&mako_select_sync_once, 2);
     } else {
-        while (InterlockedCompareExchange(&once, 2, 2) != 2)
+        while (InterlockedCompareExchange(&mako_select_sync_once, 2, 2) != 2)
             Sleep(0);
     }
 #else
-    static pthread_mutex_t boot = PTHREAD_MUTEX_INITIALIZER;
-    pthread_mutex_lock(&boot);
-    if (!mako_select_sync_ready) {
-        pthread_mutex_init(&mako_select_mu, NULL);
-        pthread_cond_init(&mako_select_cv, NULL);
-        mako_select_sync_ready = 1;
-    }
-    pthread_mutex_unlock(&boot);
+    pthread_once(&mako_select_sync_once, mako_select_sync_init);
 #endif
 }
 
@@ -5216,9 +5341,10 @@ static inline int64_t mako_chan_str_try_recv(MakoChanStr *c, MakoString *out) {
     return 1;
 }
 
-/* Select among string channels. Returns arm index or -1; value via mako_chan_select_value_str. */
-static MakoString mako_select_last_str = {NULL, 0};
-static int64_t mako_select_rr_str = 0;
+/* Select among string channels. The owned result is per-thread so concurrent
+ * selectors cannot overwrite it before an arm reads the value. */
+static __thread MakoString mako_select_last_str = {NULL, 0};
+static __thread int64_t mako_select_rr_str = 0;
 
 static inline MakoString mako_chan_select_value_str(void) {
     return mako_str_clone(mako_select_last_str);
@@ -5429,8 +5555,9 @@ static inline void *mako_chan_ptr_recv_timeout(MakoChanPtr *c, int64_t timeout_m
     }
 }
 
-static void *mako_select_last_ptr = NULL;
-static int64_t mako_select_rr_ptr = 0;
+/* Pointer-backed selectors need the same per-thread result isolation. */
+static __thread void *mako_select_last_ptr = NULL;
+static __thread int64_t mako_select_rr_ptr = 0;
 
 static inline void *mako_chan_select_value_ptr(void) {
     return mako_select_last_ptr;
@@ -5485,7 +5612,7 @@ typedef struct {
     pthread_t thread;
     MakoTaskFn fn;
     void *arg;
-    void *result;
+    void *result;        /* Read only after joining or acquiring done/joined. */
     atomic_bool joined;
     bool cancelled_start; /* set if cancel before/during — cooperative */
     atomic_int done;      /* 1 when trampoline finished (for timed join) */
@@ -6365,6 +6492,11 @@ static inline MakoTask *mako_spawn_blocking(MakoNursery *n, MakoTaskFn fn, void 
     return mako_spawn_ex(n, fn, arg, /*blocking=*/1);
 }
 
+static inline void mako_task_join_thread(MakoTask *t) {
+    /* Keep retval NULL: the Windows pthread shim would replace t->result with NULL. */
+    pthread_join(t->thread, NULL);
+}
+
 static inline void *mako_await(MakoTask *t) {
     if (!t) return NULL;
     if (!atomic_load_explicit(&t->joined, memory_order_acquire)) {
@@ -6374,7 +6506,7 @@ static inline void *mako_await(MakoTask *t) {
                 nanosleep(&step, NULL);
             }
         } else {
-            pthread_join(t->thread, &t->result);
+            mako_task_join_thread(t);
             atomic_store_explicit(&t->done, 1, memory_order_release);
         }
         atomic_store_explicit(&t->joined, true, memory_order_release);
@@ -6402,7 +6534,7 @@ static inline int64_t mako_await_timeout_ms(MakoTask *t, int64_t ms, int64_t *ou
         int done = atomic_load_explicit(&t->done, memory_order_acquire);
         if (done) {
             if (!t->pooled) {
-                pthread_join(t->thread, &t->result);
+                mako_task_join_thread(t);
             }
             atomic_store_explicit(&t->joined, true, memory_order_release);
             mako_rt_counter_inc(&mako_rt_tasks_joined);
@@ -6418,7 +6550,7 @@ static inline int64_t mako_await_timeout_ms(MakoTask *t, int64_t ms, int64_t *ou
     int done = atomic_load_explicit(&t->done, memory_order_acquire);
     if (done) {
         if (!t->pooled) {
-            pthread_join(t->thread, &t->result);
+            mako_task_join_thread(t);
         }
         atomic_store_explicit(&t->joined, true, memory_order_release);
         mako_rt_counter_inc(&mako_rt_tasks_joined);
@@ -7063,11 +7195,67 @@ static int mako_cmp_i64(const void *a, const void *b) {
     return (x > y) - (x < y);
 }
 
+/* Inline insertion sort for small partitions. */
+static inline void mako_isort_i64(int64_t *d, size_t n) {
+    for (size_t i = 1; i < n; i++) {
+        int64_t key = d[i];
+        size_t j = i;
+        while (j > 0 && d[j - 1] > key) { d[j] = d[j - 1]; j--; }
+        d[j] = key;
+    }
+}
+
+/* Inline introsort for int64 — no function-pointer overhead. */
+static inline void mako_qsort_i64(int64_t *d, size_t n, int depth) {
+    while (n > 16) {
+        if (depth <= 0) { qsort(d, n, sizeof(int64_t), mako_cmp_i64); return; }
+        depth--;
+        size_t mid = n / 2;
+        if (d[0] > d[mid]) { int64_t t = d[0]; d[0] = d[mid]; d[mid] = t; }
+        if (d[0] > d[n-1]) { int64_t t = d[0]; d[0] = d[n-1]; d[n-1] = t; }
+        if (d[mid] > d[n-1]) { int64_t t = d[mid]; d[mid] = d[n-1]; d[n-1] = t; }
+        int64_t pivot = d[mid];
+        size_t lo = 0, hi = n - 1;
+        while (lo <= hi) {
+            while (d[lo] < pivot) lo++;
+            while (d[hi] > pivot) hi--;
+            if (lo <= hi) { int64_t t = d[lo]; d[lo] = d[hi]; d[hi] = t; lo++; if (hi == 0) break; hi--; }
+        }
+        if (hi + 1 < n - lo) { mako_qsort_i64(d, hi + 1, depth); d += lo; n -= lo; }
+        else { mako_qsort_i64(d + lo, n - lo, depth); n = hi + 1; }
+    }
+    mako_isort_i64(d, n);
+}
+
+static inline void mako_sort_i64_inplace(int64_t *d, size_t n) {
+    if (n <= 1) return;
+    /* Pattern detection: check if already sorted or reverse sorted. O(n). */
+    int sorted = 1, rev = 1;
+    for (size_t i = 1; i < n; i++) {
+        if (d[i] < d[i-1]) sorted = 0;
+        if (d[i] > d[i-1]) rev = 0;
+        if (!sorted && !rev) break;
+    }
+    if (sorted) return; /* Already sorted — O(n) scan, O(1) work. */
+    if (rev) {
+        /* Reverse in-place — O(n). */
+        for (size_t i = 0, j = n - 1; i < j; i++, j--) {
+            int64_t t = d[i]; d[i] = d[j]; d[j] = t;
+        }
+        return;
+    }
+    /* Standard introsort limit: twice floor(log2(n)). */
+    int depth = 0;
+    for (size_t k = n; k > 1; k >>= 1) depth++;
+    depth *= 2;
+    mako_qsort_i64(d, n, depth);
+}
+
 static inline MakoIntArray mako_sort_ints(MakoIntArray a) {
     MakoIntArray out = mako_int_array_make((int64_t)a.len, (int64_t)a.len);
     if (a.len) memcpy(out.data, a.data, a.len * sizeof(int64_t));
     out.len = a.len;
-    if (out.len > 1) qsort(out.data, out.len, sizeof(int64_t), mako_cmp_i64);
+    if (out.len > 1) mako_sort_i64_inplace(out.data, out.len);
     return out;
 }
 
@@ -8418,8 +8606,7 @@ static inline int64_t mako_chmod(MakoString path, int64_t mode) {
 #if defined(_WIN32)
     return _chmod(pbuf, (int)mode) == 0 ? 0 : -1;
 #elif defined(MAKO_WASI)
-    (void)mode;
-    return -1;
+    (void)pbuf; (void)mode; return -1; /* WASI: no chmod */
 #else
     return chmod(pbuf, (mode_t)mode) == 0 ? 0 : -1;
 #endif
@@ -8454,10 +8641,6 @@ static inline int64_t mako_atomic_write_file(MakoString path, MakoString content
     char tbuf[4224];
 #if defined(_WIN32)
     snprintf(tbuf, sizeof(tbuf), "%s.tmp.%u", pbuf, (unsigned)_getpid());
-#elif defined(MAKO_WASI)
-    static atomic_uint mako_wasi_write_seq = 0;
-    unsigned seq = atomic_fetch_add_explicit(&mako_wasi_write_seq, 1, memory_order_relaxed);
-    snprintf(tbuf, sizeof(tbuf), "%s.tmp.%u", pbuf, seq);
 #else
     snprintf(tbuf, sizeof(tbuf), "%s.tmp.%ld", pbuf, (long)getpid());
 #endif
@@ -8595,8 +8778,7 @@ static inline MakoString mako_realpath(MakoString path) {
     if (n == 0 || n >= sizeof(out)) return mako_str_from_cstr("");
     return mako_str_from_cstr(out);
 #elif defined(MAKO_WASI)
-    /* WASI preview1 has no realpath; empty is the existing unsupported/error sentinel. */
-    return mako_str_from_cstr("");
+    return mako_str_from_cstr(pbuf); /* WASI: no realpath, return as-is */
 #else
     char *r = realpath(pbuf, NULL);
     if (!r) return mako_str_from_cstr("");

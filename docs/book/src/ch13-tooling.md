@@ -13,13 +13,13 @@ Prints the installed version, operating system, and architecture.
 
 ```bash
 mako version
-# mako version mako0.3.0 darwin/arm64
+# mako version mako0.4.0 darwin/arm64
 
 mako --version        # same output
 mako -V               # same output
 
 mako version -v       # verbose: includes git commit hash if available
-# mako version mako0.3.0 darwin/arm64
+# mako version mako0.4.0 darwin/arm64
 # commit: a1b2c3d
 ```
 
