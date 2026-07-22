@@ -12,7 +12,7 @@ tidy up after themselves. The standard library covers the everyday backend
 surface — HTTP, TLS, JSON, databases, networking — and is candid about which
 corners are battle-tested and which are still shallow.
 
-**Status: experimental/alpha (v0.4.8 tip; last tag v0.4.5).** The language works and compiles real
+**Status: experimental/alpha (v0.4.9 tip; last tag v0.4.5).** The language works and compiles real
 programs, but the surface is young. Expect breaking changes, missing features,
 and bugs. This is not yet suitable for production use without careful
 evaluation.

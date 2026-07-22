@@ -1,13 +1,13 @@
 # Mako release & cross-platform guide
 
-**Product version:** **0.4.8** tip (`Cargo.toml` / `mako version` → `mako0.4.8`);
+**Product version:** **0.4.9** tip (`Cargo.toml` / `mako version` → `mako0.4.9`);
 last published tag **v0.4.5**.  
 **Tree status:** native compiler language gate **367/367** on
 `mako test examples/testing --backend native` (2026-07-22).  
 **Versioning:** small patches preferred — [VERSIONING.md](VERSIONING.md).  
 **Backends:** default **c**; recommend `MAKO_BACKEND=native` for debug and
 `--backend llvm --release` for optimizing builds (see [BUILD.md § Backend policy](BUILD.md)).  
-**Train:** **0.4.6** residual · **0.4.7** modes matrix (fail closed) · **0.4.8** gates · **0.5.0** CLI default flip.  
+**Train:** **0.4.6–0.4.8** residual/modes/gates · **0.4.9** LLVM CI + install smoke · **0.5.0** CLI default flip.  
 **Modes:** native/LLVM refuse sanitize/static/cross/wasm/emit-c — use `--backend c` (see [BUILD.md § Modes matrix](BUILD.md)).  
 **Published release:** last tagged GitHub release may lag the tree — check
 [releases](https://github.com/loreste/mako/releases). Platform-specific workflow

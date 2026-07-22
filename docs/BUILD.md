@@ -1,4 +1,4 @@
-# Mako builds (v0.4.8 tip)
+# Mako builds (v0.4.9 tip)
 
 **Versioning:** [VERSIONING.md](VERSIONING.md) — ship small patches often.
 
@@ -79,8 +79,12 @@ mako test examples/testing --backend c --sanitize address
 | Explicit `--backend …` | Always wins over env |
 
 **CI (primary hosts):** both `mako test examples/testing` (C) and
-`mako test examples/testing --backend native` are required. LLVM is optional when
-the static toolchain is present.
+`mako test examples/testing --backend native` are required. **LLVM** runs as a
+dedicated **macOS** job (`llvm-backend`) that bootstraps static lld and executes
+`scripts/llvm-backend-test.sh`. Non-Darwin hosts skip LLVM today (bundled
+`lldMachO` only); set `MAKO_LLVM_SKIP_IF_UNAVAILABLE=1` for a soft skip in
+local/optional scripts. Install smoke: `scripts/install-smoke.sh` (`doctor` +
+init/run).
 
 **Product default:** remains **c** until 0.5.0 flips the default after policy +
 CI confidence; use env/`--backend` today for native-first workflows.

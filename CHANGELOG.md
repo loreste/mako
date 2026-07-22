@@ -1,6 +1,24 @@
 # Changelog
 
-## 0.4.8 — 2026-07-22 (tip; tag when packaging cut)
+## 0.4.9 — 2026-07-22 (tip; tag when packaging cut)
+
+**Theme:** LLVM CI job (macOS) + install/doctor smoke on primary hosts.
+
+### CI
+
+- **`llvm-backend` job** on `macos-latest`: brew LLVM 21, cache static lld,
+  `scripts/bootstrap-native-toolchain.sh`, then `scripts/llvm-backend-test.sh`.
+- **Skip policy:** non-Darwin / missing toolchain exits 0 when
+  `MAKO_LLVM_SKIP_IF_UNAVAILABLE=1` (documented in the script + BUILD.md).
+  The macOS CI job fails hard when the toolchain is expected.
+- Differential fixtures include `examples/bench/native_map.mko` and `native_fib.mko`.
+
+### Install smoke
+
+- **`scripts/install-smoke.sh`**: version + `mako doctor` + init/run.
+- Wired into the main CI matrix on Linux/macOS/Windows after release build.
+
+## 0.4.8 — 2026-07-22
 
 **Theme:** Map + I/O native bench workloads, map hot-path speed, regression budget.
 

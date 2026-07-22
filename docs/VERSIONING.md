@@ -35,8 +35,8 @@ See [ROADMAP.md](ROADMAP.md) version map. Tip after `v0.4.5`:
 ```text
 0.4.6  residual perf + binary size + honest bench bars + backend policy env
 0.4.7  modes truth table (fail closed)
-0.4.8  map/I/O bench gates + perf regression budget  (tip)
-0.4.9  optional LLVM CI job polish (if not already green)
+0.4.8  map/I/O bench gates + perf regression budget
+0.4.9  LLVM CI (macOS) + install/doctor smoke  (tip)
 0.5.0  native-first default (CLI default flip — minor)
 0.5.1  toolchain / IDE depth
 0.5.2  runtime trust soaks

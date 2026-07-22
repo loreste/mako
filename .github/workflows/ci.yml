@@ -191,6 +191,13 @@ jobs:
           ./target/release/mako init "${RUNNER_TEMP}/mako-ci-demo" --name ci-demo
           ./target/release/mako run "${RUNNER_TEMP}/mako-ci-demo/main.mko"
 
+      # 0.4.9 49-B: doctor + init/run install smoke on every primary host.
+      - name: Install / doctor smoke
+        shell: bash
+        run: ./scripts/install-smoke.sh
+        env:
+          MAKO_BIN: ${{ github.workspace }}/target/release/mako
+
       - name: Intel macOS cross-artifact smoke
         if: runner.os == 'macOS'
         shell: bash
@@ -199,6 +206,51 @@ jobs:
             --target x86_64-apple-darwin -o "${RUNNER_TEMP}/hello-macos-x86_64"
           ./scripts/verify-target-artifact.sh \
             x86_64-apple-darwin "${RUNNER_TEMP}/hello-macos-x86_64"
+
+  # 0.4.9 49-A: optimizing LLVM backend (macOS + bundled lldMachO only).
+  # Linux/Windows skip is documented in scripts/llvm-backend-test.sh and BUILD.md.
+  llvm-backend:
+    name: LLVM backend (macOS)
+    runs-on: macos-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install LLVM 21 + cmake
+        run: |
+          brew install llvm@21 cmake
+          echo "LLVM_SYS_211_PREFIX=$(brew --prefix llvm@21)" >> "$GITHUB_ENV"
+          echo "$(brew --prefix llvm@21)/bin" >> "$GITHUB_PATH"
+
+      - name: Cache static lld toolchain
+        uses: actions/cache@v4
+        id: lld-cache
+        with:
+          path: out/native-toolchain
+          key: native-toolchain-llvmorg-21.1.8-${{ runner.os }}-${{ runner.arch }}-v1
+
+      - name: Bootstrap static lld (cache miss)
+        if: steps.lld-cache.outputs.cache-hit != 'true'
+        run: ./scripts/bootstrap-native-toolchain.sh
+        env:
+          MAKO_LLVM_PREFIX: ${{ env.LLVM_SYS_211_PREFIX }}
+
+      - name: Export lld env
+        run: |
+          echo "MAKO_LLD_STATIC_DIR=${{ github.workspace }}/out/native-toolchain/lld-build/lib" >> "$GITHUB_ENV"
+          echo "MAKO_LLD_INCLUDE_DIR=${{ github.workspace }}/out/native-toolchain/llvm-project-llvmorg-21.1.8/lld/include" >> "$GITHUB_ENV"
+          test -f out/native-toolchain/lld-build/lib/liblldMachO.a
+          test -f out/native-toolchain/llvm-project-llvmorg-21.1.8/lld/include/lld/Common/Driver.h
+
+      - name: LLVM backend correctness gate
+        run: ./scripts/llvm-backend-test.sh
+        env:
+          MAKO_RUNTIME: ${{ github.workspace }}/runtime
+          # Fail hard on macOS when toolchain is present (do not soft-skip).
+          MAKO_LLVM_SKIP_IF_UNAVAILABLE: "0"
 
   cross-smoke:
     name: Cross-compile artifacts (Windows + Linux musl + WASI)

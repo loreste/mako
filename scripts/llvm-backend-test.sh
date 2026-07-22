@@ -1,11 +1,30 @@
 #!/usr/bin/env bash
-# Correctness gate for the statically linked optimizing backend.
+# Correctness gate for the statically linked optimizing backend (macOS +
+# bundled lldMachO). CI: .github/workflows/ci.yml job `llvm-backend`.
+#
+# Skip policy (documented for optional CI):
+#   - Non-Darwin hosts: exit 0 when MAKO_LLVM_SKIP_IF_UNAVAILABLE=1, else 2.
+#   - Missing LLVM 21 / static lld: same (run bootstrap-native-toolchain.sh).
 set -euo pipefail
 
 repo_dir="$(cd "$(dirname "$0")/.." && pwd)"
 export MAKO_RUNTIME="$repo_dir/runtime"
 toolchain_dir="${MAKO_NATIVE_TOOLCHAIN_DIR:-$repo_dir/out/native-toolchain}"
 llvm_tag="llvmorg-21.1.8"
+
+skip_or_fail() {
+  local msg="$1"
+  if [[ "${MAKO_LLVM_SKIP_IF_UNAVAILABLE:-}" == "1" ]]; then
+    echo "LLVM backend test: SKIP — $msg" >&2
+    exit 0
+  fi
+  echo "LLVM backend test: $msg" >&2
+  exit 2
+}
+
+if [[ "$(uname -s)" != "Darwin" ]]; then
+  skip_or_fail "llvm-backend is macOS-only today (bundled static lldMachO)"
+fi
 
 find_llvm_prefix() {
   if [[ -n "${LLVM_SYS_211_PREFIX:-}" ]]; then
@@ -26,8 +45,7 @@ export MAKO_LLD_STATIC_DIR="${MAKO_LLD_STATIC_DIR:-$toolchain_dir/lld-build/lib}
 export MAKO_LLD_INCLUDE_DIR="${MAKO_LLD_INCLUDE_DIR:-$toolchain_dir/llvm-project-$llvm_tag/lld/include}"
 if [[ -z "$LLVM_SYS_211_PREFIX" || ! -f "$MAKO_LLD_STATIC_DIR/liblldMachO.a" || \
       ! -f "$MAKO_LLD_INCLUDE_DIR/lld/Common/Driver.h" ]]; then
-  echo "LLVM backend test: run scripts/bootstrap-native-toolchain.sh first" >&2
-  exit 2
+  skip_or_fail "run scripts/bootstrap-native-toolchain.sh (LLVM 21 + static lld)"
 fi
 
 tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/mako-llvm-test.XXXXXX")"
@@ -105,7 +123,9 @@ for fixture in \
   "$repo_dir/examples/native/native_methods.mko" \
   "$repo_dir/examples/native/native_builtins.mko" \
   "$repo_dir/examples/native/native_maps.mko" \
-  "$repo_dir/examples/native/native_result.mko"
+  "$repo_dir/examples/native/native_result.mko" \
+  "$repo_dir/examples/bench/native_map.mko" \
+  "$repo_dir/examples/bench/native_fib.mko"
 do
   name="$(basename "$fixture" .mko)"
   env -u SDKROOT PATH=/nonexistent "$repo_dir/target/debug/mako" build "$fixture" \

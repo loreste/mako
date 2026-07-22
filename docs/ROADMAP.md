@@ -1,6 +1,6 @@
 # Mako roadmap
 
-**Product version:** **0.4.8** (tip) · last tagged **v0.4.5** · Last sync: **2026-07-22**.  
+**Product version:** **0.4.9** (tip) · last tagged **v0.4.5** · Last sync: **2026-07-22**.  
 **Suite:** **367** Mako tests on `examples/testing` (C + native backends) + Rust
 unit tests, 0 failures on the native gate · CI ASan/UBSan/TSan as configured.
 
@@ -25,8 +25,8 @@ unit tests, 0 failures on the native gate · CI ASan/UBSan/TSan as configured.
 | **0.4.5** | Native compiler product path (language + release cut) | **Shipped** — tag `v0.4.5` |
 | **0.4.6** | Residual: string_slice + binary size + bench bars + backend policy env | **In tree** (untagged; may ship with 0.4.7) |
 | **0.4.7** | Cross / WASM / static / sanitize truth table (hard-error gaps) | **In tree** |
-| **0.4.8** | Map/I/O workload gates + perf regression budget | **In tree** (tip; cut when ready to tag) |
-| **0.4.9** | Optional LLVM CI job polish / package smoke | **Planned** patch (skip if empty) |
+| **0.4.8** | Map/I/O workload gates + perf regression budget | **In tree** |
+| **0.4.9** | LLVM CI (macOS) + install/doctor smoke | **In tree** (tip; cut when ready to tag) |
 | **0.5.0** | Native-first **default** (CLI default flip — minor theme) | **Planned** minor |
 | **0.5.1** | Toolchain & IDE depth (LSP, DAP/DWARF, doc/bench product) | **Planned** |
 | **0.5.2** | Runtime trust & production concurrency soaks | **Planned** |
@@ -39,8 +39,8 @@ unit tests, 0 failures on the native gate · CI ASan/UBSan/TSan as configured.
 0.4.5  language gate ✓  [tagged]
 0.4.6  residual perf + size + MAKO_BACKEND policy  [in tree]
 0.4.7  modes truth table  [in tree]
-0.4.8  map/I/O gates + regression baselines  [tip]
-0.4.9  LLVM CI / packaging polish (optional)
+0.4.8  map/I/O gates + regression baselines  [in tree]
+0.4.9  LLVM CI (macOS) + install/doctor smoke  [tip]
 0.5.0  native-first CLI default (minor)
 0.5.1  toolchain/IDE
 0.5.2  runtime trust
@@ -202,14 +202,12 @@ silently falling back to C.
 
 ---
 
-## 0.4.9 — LLVM CI / packaging polish (optional patch)
+## 0.4.9 — LLVM CI + install smoke
 
-Skip this number if empty at cut time; renumber is fine as long as tags do not skip *after* publish.
-
-| ID | Deliverable | Acceptance |
-|----|-------------|------------|
-| **49-A** | Optional LLVM CI job | Runs when toolchain present; skip documented |
-| **49-B** | Install/package smoke on primary hosts | doctor ok on slim tarball |
+| ID | Deliverable | Status |
+|----|-------------|--------|
+| **49-A** | LLVM CI job (macOS) | **Done** — `llvm-backend` in `.github/workflows/ci.yml`; skip policy in `llvm-backend-test.sh` |
+| **49-B** | Install/doctor smoke | **Done** — `scripts/install-smoke.sh` on primary CI matrix |
 
 ---
 
@@ -231,7 +229,7 @@ Skip this number if empty at cut time; renumber is fine as long as tags do not s
 |----|-------------|------------|
 | **50-A** | Backend policy in GUIDE/BUILD/RELEASE | **Done seed** in 0.4.6 — [BUILD.md](BUILD.md) |
 | **50-B** | CI: c + native required | **Done** on Linux/macOS CI jobs |
-| **50-C** | Optional LLVM CI job | Prefer land in **0.4.9** if ready earlier |
+| **50-C** | Optional LLVM CI job | **Done** in **0.4.9** (macOS `llvm-backend` job) |
 | **50-D** | **Default backend flip** | `mako build` / `test` default native (or documented MAKO_BACKEND default=native); `--backend c` override |
 | **50-E** | Cross / WASM / static matrix | Prefer land in **0.4.7** |
 | **50-F** | Perf regression budget | Prefer land in **0.4.8** |
