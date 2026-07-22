@@ -1,9 +1,9 @@
 # Mako versioning
 
-**Product string:** `mako` + `CARGO_PKG_VERSION` (e.g. `mako0.4.6`).  
+**Product string:** `mako` + `CARGO_PKG_VERSION` (e.g. `mako0.4.7`).  
 **Git tags:** `vMAJOR.MINOR.PATCH` matching `Cargo.toml`.
 
-## Policy (from 0.4.6)
+## Policy (from 0.4.6+)
 
 Ship **small, measurable increments**. Prefer a **patch** over waiting for a large minor.
 
@@ -33,8 +33,8 @@ Ship **small, measurable increments**. Prefer a **patch** over waiting for a lar
 See [ROADMAP.md](ROADMAP.md) version map. Tip after `v0.4.5`:
 
 ```text
-0.4.6  residual perf + binary size + honest bench bars + backend policy env  (tip)
-0.4.7  cross/WASM/static truth table + mode hard-errors
+0.4.6  residual perf + binary size + honest bench bars + backend policy env
+0.4.7  modes truth table (fail closed)  (tip)
 0.4.8  map/I/O bench gates + perf regression budget
 0.4.9  optional LLVM CI job polish (if not already green)
 0.5.0  native-first default (CLI default flip — minor)

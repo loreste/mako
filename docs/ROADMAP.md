@@ -1,6 +1,6 @@
 # Mako roadmap
 
-**Product version:** **0.4.6** (tip) · last tagged **v0.4.5** · Last sync: **2026-07-22**.  
+**Product version:** **0.4.7** (tip) · last tagged **v0.4.5** · Last sync: **2026-07-22**.  
 **Suite:** **367** Mako tests on `examples/testing` (C + native backends) + Rust
 unit tests, 0 failures on the native gate · CI ASan/UBSan/TSan as configured.
 
@@ -23,8 +23,8 @@ unit tests, 0 failures on the native gate · CI ASan/UBSan/TSan as configured.
 | **0.4.0** | Performance — DCE, constant folding, runtime speed, lint | **Shipped** |
 | **0.4.1** | Windows/runtime/edge stability | **Shipped** (see CHANGELOG) |
 | **0.4.5** | Native compiler product path (language + release cut) | **Shipped** — tag `v0.4.5` |
-| **0.4.6** | Residual: string_slice + binary size + bench bars + backend policy env | **In tree** (cut when ready to tag) |
-| **0.4.7** | Cross / WASM / static / sanitize truth table (hard-error gaps) | **Planned** patch |
+| **0.4.6** | Residual: string_slice + binary size + bench bars + backend policy env | **In tree** (untagged; may ship with 0.4.7) |
+| **0.4.7** | Cross / WASM / static / sanitize truth table (hard-error gaps) | **In tree** (tip; cut when ready to tag) |
 | **0.4.8** | Map/I/O workload gates + perf regression budget | **Planned** patch |
 | **0.4.9** | Optional LLVM CI job polish / package smoke | **Planned** patch (skip if empty) |
 | **0.5.0** | Native-first **default** (CLI default flip — minor theme) | **Planned** minor |
@@ -37,8 +37,8 @@ unit tests, 0 failures on the native gate · CI ASan/UBSan/TSan as configured.
 
 ```text
 0.4.5  language gate ✓  [tagged]
-0.4.6  residual perf + size + MAKO_BACKEND policy  [tip]
-0.4.7  modes truth table
+0.4.6  residual perf + size + MAKO_BACKEND policy  [in tree]
+0.4.7  modes truth table  [tip]
 0.4.8  map/I/O gates
 0.4.9  LLVM CI / packaging polish (optional)
 0.5.0  native-first CLI default (minor)
@@ -183,11 +183,12 @@ silently falling back to C.
 
 **Theme:** every unsupported mode hard-errors with a clear pointer (no silent hybrid).
 
-| ID | Deliverable | Acceptance |
-|----|-------------|------------|
-| **47-A** | Sanitize / overflow / static on native/LLVM | Implement **or** hard-error → use C |
-| **47-B** | Cross + WASM documented triples | Working list in BUILD/RELEASE; others fail closed |
-| **47-C** | Doctor reports mode support | `mako doctor` lists backend + mode matrix |
+| ID | Deliverable | Status |
+|----|-------------|--------|
+| **47-A** | Sanitize / static / emit-c / target on native/LLVM | **Done** — `validate_direct_backend_modes` fail-closed |
+| **47-B** | Modes matrix documented | **Done** — [BUILD.md § Modes matrix](BUILD.md) |
+| **47-C** | Doctor reports mode support | **Done** — `mako doctor` backends / modes block |
+| **47-D** | LLVM tests use release opt level | **Done** — harness honors release-only llvm |
 
 ---
 
