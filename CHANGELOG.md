@@ -3,8 +3,9 @@
 ## 0.4.5 — Unreleased (target)
 
 **Theme:** Native compiler product path — language gate complete; LLVM release
-perf + packaging + tag remaining. Integration branch: `native-compiler`.
-Full plan: [docs/ROADMAP.md](docs/ROADMAP.md) §0.4.5.
+perf + packaging + tag remaining. Integration branch: `native-compiler`.  
+**After 0.4.5:** 0.5.0 native-first platform → 0.5.1 toolchain/IDE → 0.5.2 runtime
+trust → 0.5.x patches → 1.0. Full map: [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ### Native compiler
 

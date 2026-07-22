@@ -14,22 +14,31 @@ tag cut; do not merge to `main` until release (or an explicit cut decision).
 
 ---
 
-## What is next
+## Version map (0.4.5 → 0.5.x → 1.0)
 
 | Version | Theme | Status |
 |---------|-------|--------|
-| **0.1.9** | Generics & iterators | **Shipped** |
-| **0.1.10** | Deepen generics + speed | **Shipped** |
-| **0.2.0** | Stdlib written in Mako | **Shipped** |
-| **0.2.1** | Safety & correctness | **Shipped** |
-| **0.2.2** | TLS SNI / HTTPS / JWT / lock integrity | **Shipped** |
-| **0.2.3** | JWT/HTTPS input hardening | **Shipped** |
-| **0.2.4** | Soundness wave + residuals (SAFE/RT, speed, lock verify) | **Shipped** — [SOUNDNESS.md](SOUNDNESS.md) |
-| **0.2.5** | Memory safety audit, LSP, package integrity, honest docs | **Shipped** |
+| **0.1.9–0.2.5** | Generics → stdlib → soundness → tooling honesty | **Shipped** |
 | **0.3.0** | Cross-platform, CI green, ownership hardening | **Shipped** |
 | **0.4.0** | Performance — DCE, constant folding, runtime speed, lint | **Shipped** |
-| **0.4.5** | Native compiler product path | **Language gate done** — perf + packaging + release cut remaining |
-| **1.0** | Stability | Planned |
+| **0.4.1** | Windows/runtime/edge stability | **Shipped** (see CHANGELOG) |
+| **0.4.5** | Native compiler product path (language + release cut) | **In progress** — language gate done |
+| **0.5.0** | Native-first platform: default backend policy, CI green, dual-backend truth | **Planned** |
+| **0.5.1** | Toolchain & IDE depth (LSP, DAP/DWARF, doc/bench product) | **Planned** |
+| **0.5.2** | Runtime trust & production concurrency soaks | **Planned** |
+| **0.5.x** | Patch trains on 0.5 (perf, install, portability) | **Planned** as needed |
+| **1.0** | Stability contract (compat, LTS-ish discipline) | **Planned** after 0.5 series |
+
+**Principle:** ship **measurable** gates each minor; do not reopen identity (no free `go`, no lifetime params, no silent native→C fallback).
+
+```text
+0.4.5  language gate ✓ → LLVM + package + tag
+0.5.0  native-first platform (defaults + CI + honesty)
+0.5.1  toolchain/IDE product depth
+0.5.2  runtime trust soaks
+0.5.x  patches
+1.0    stability freeze
+```
 
 ---
 
@@ -143,7 +152,151 @@ silently falling back to C.
 - [ ] Cross-compilation, WASM, static, sanitizer, and overflow build modes (or hard-error)
 - [ ] Full leak, latency, RSS, and binary-size gates in CI packaging
 
-### Soundness & runtime (SAFE / RT)
+---
+
+## 0.5.0 — Native-first platform
+
+**Depends on:** tagged **0.4.5** (or equivalent: language gate + install path + LLVM story).  
+**Theme:** make the native path the **default product experience**, with C as oracle/fallback, not the primary story.
+
+### North star
+
+1. Documented **backend policy**: debug → Cranelift; release → LLVM; C retained for oracle, sanitizers, and gaps.
+2. **CI green** on both c and native for the full testing corpus on primary hosts.
+3. Default `mako build` / `mako test` policy either switches to native or clearly offers it without hidden C fallback.
+4. Windows + Linux + macOS install paths honest for what works.
+
+### Deliverables
+
+| ID | Deliverable | Acceptance |
+|----|-------------|------------|
+| **50-A** | Backend policy in GUIDE/BUILD/RELEASE | Users know which backend is default for debug vs release |
+| **50-B** | CI: `mako test examples/testing --backend c` and `--backend native` required | PR red if either fails on primary matrix |
+| **50-C** | Optional LLVM CI job | Runs when toolchain present; documented skip otherwise |
+| **50-D** | Default backend selection | Either native default with C override, or explicit `MAKO_BACKEND` with documented default — no silent hybrid |
+| **50-E** | Cross / WASM / static matrix truth table | Working triples listed; others hard-error |
+| **50-F** | Perf regression budget post-0.4.5 | Re-run slice/map gates; fail on >N% regression vs 0.4.5 baselines |
+
+### Exit 0.5.0
+
+- Tagged `v0.5.0` with changelog.
+- Primary hosts: install + test native + (where available) LLVM release build.
+- C backend still passes full suite (oracle).
+
+### Non-goals for 0.5.0
+
+- Removing the C backend.
+- Self-hosting the full compiler in Mako.
+- Full IDE debugger product (that is 0.5.1).
+
+---
+
+## 0.5.1 — Toolchain & IDE depth
+
+**Depends on:** 0.5.0 platform defaults stable enough that tooling targets one primary native path.
+
+### North star
+
+Coherent **official toolchain**: LSP, debug, docs, bench, and doctor feel like one product.
+
+### Deliverables
+
+| ID | Deliverable | Acceptance |
+|----|-------------|------------|
+| **51-A** | LSP product depth | go-to-def / references / rename / diagnostics stable on multi-file packages |
+| **51-B** | Debugger depth | DWARF locals + DAP stdio usable from VS Code for native binaries (beyond seed) |
+| **51-C** | `mako doc` + package docs | Publishable API docs for std and user packs |
+| **51-D** | `mako bench` + gate scripts | Official microbench entry; documents vs C/Rust |
+| **51-E** | Editor extension polish | VS Code tasks, problem matcher, launch configs match 0.5 defaults |
+| **51-F** | `mako doctor` / install matrix | Catches missing runtime/std/LLVM-optional components cleanly |
+
+### Exit 0.5.1
+
+- Tagged `v0.5.1`.
+- “Open a package, jump to def, run tests, attach debugger” works for a hello backend on primary OS.
+
+### Non-goals for 0.5.1
+
+- Full JetBrains / multi-IDE parity.
+- Time-travel debugging / rr product.
+
+---
+
+## 0.5.2 — Runtime trust & production concurrency
+
+**Depends on:** 0.5.0 (and ideally 0.5.1 for debugability under load).
+
+### North star
+
+Production backends can rely on **structured concurrency + ownership** under stress, with evidence (not only unit tests).
+
+### Deliverables
+
+| ID | Deliverable | Acceptance |
+|----|-------------|------------|
+| **52-A** | TSan soaks | Capture matrix + channel/select stress in optional/nightly CI |
+| **52-B** | Channel monomorph take matrix | Beyond int/float/string for send/take/timeout |
+| **52-C** | Scheduler depth | Document pool limits; optional work-stealing only if soaks demand it |
+| **52-D** | Cancellation / deadline product | Portable timeout story end-to-end (task + channel + net APIs) |
+| **52-E** | Leak / resource census under load | RT-006-style APIs + soak that fails on growth |
+| **52-F** | Race model docs ↔ code | MEMORY_MODEL and typecheck `is_sync_ty` table stay in lockstep |
+
+### Exit 0.5.2
+
+- Tagged `v0.5.2`.
+- Published soak results; no known “must not ship” races on documented patterns.
+
+### Non-goals for 0.5.2
+
+- Claiming data-race freedom for all unsafe/FFI.
+- Actor model as the only concurrency story (crew/channels remain first-class).
+
+---
+
+## 0.5.x — Patch trains
+
+Use **0.5.3+** only for:
+
+- Perf regressions / install breakage after 0.5.0–0.5.2.
+- Portability fixes (new triple, WASM polish).
+- Security patches.
+- Doc/tooling hotfixes that do not change language surface.
+
+Avoid stuffing large language features into 0.5.x patches; open **0.6** if needed for a new theme (e.g. self-hosting, domain packs).
+
+---
+
+## Toward 1.0 (after 0.5 series)
+
+Not a commitment to ship immediately after 0.5.2. Preconditions:
+
+| Gate | Meaning |
+|------|---------|
+| Compat | 0.x → 1.0 migration story; dual syntax freeze policy ([COMPAT.md](COMPAT.md)) |
+| Backends | Native (debug+release) default; C optional oracle |
+| CI | Multi-OS matrix green for install + test |
+| Soundness | SAFE/RT core + documented soaks |
+| Docs | Book + GUIDE match preferred syntax; STATUS honest |
+
+**1.0 theme:** stability and support discipline — not a feature dump.
+
+---
+
+## Dependency sketch
+
+```text
+0.4.5 ──tag──► 0.5.0 (native-first platform)
+                  │
+                  ├──────────► 0.5.1 (toolchain / IDE)
+                  │
+                  └──────────► 0.5.2 (runtime trust soaks)
+                                   │
+                                   └── 0.5.x patches ──► 1.0 when gates hold
+```
+
+---
+
+## Soundness & runtime (SAFE / RT)
 
 Program of record: **[SOUNDNESS.md](SOUNDNESS.md)** · memory model:
 **[MEMORY_MODEL.md](MEMORY_MODEL.md)**.
