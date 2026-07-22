@@ -1,11 +1,11 @@
 # Mako status (adversarial / verified)
 
-Last inventory: **2026-07-22** · product **mako0.4.1** (`CARGO_PKG_VERSION`).
+Last inventory: **2026-07-22** · product **mako0.4.5** (`CARGO_PKG_VERSION`).
 
 Unique Mako surface · pack/pull · map/slice/bag monomorphs · package-per-directory ·
-const-fn depth (match/while/for/strings) · run `make test` and `cargo test` for
-current counts · full suite exercised under ASan and UBSan; focused concurrency
-suite under TSan · [The Mako Book](book/).
+const-fn depth (match/while/for/strings · `s[i]`) · suite **367** `examples/testing`
+programs on **native** (0 failures) + Rust unit tests · full suite under ASan/UBSan;
+focused concurrency suite under TSan · [The Mako Book](book/).
 
 **Book:** [The Mako Book](book/) · **Guide:** [GUIDE.md](GUIDE.md) · **Identity:** [IDENTITY.md](IDENTITY.md) · **Pain points:** [PAIN_POINTS.md](PAIN_POINTS.md) · **Build:** [BUILD.md](BUILD.md) · **Stdlib:** [STDLIB.md](STDLIB.md) · **Roadmap:** [ROADMAP.md](ROADMAP.md) · **Changelog:** [../CHANGELOG.md](../CHANGELOG.md) · **Release:** [RELEASE.md](RELEASE.md) · **Soundness:** [SOUNDNESS.md](SOUNDNESS.md) · **Memory model:** [MEMORY_MODEL.md](MEMORY_MODEL.md).
 
@@ -15,7 +15,7 @@ suite under TSan · [The Mako Book](book/).
 
 | Scope | Approx. |
 |-------|---------|
-| **Product version** | **0.4.1** ([release](https://github.com/loreste/mako/releases/tag/v0.4.1)) |
+| **Product version** | **0.4.5** ([release](https://github.com/loreste/mako/releases/tag/v0.4.5)) — native gate **367/367** · then **0.5.0–0.5.2** ([ROADMAP.md](ROADMAP.md)) |
 | **MVP / usable language** | Core compiler/runtime scope is exercised; this is not a production-readiness claim |
 | **STATUS north-star** | Tracked scope is explicit; optional depth below remains |
 | **Mako identity (preferred syntax)** | Checklist complete — [IDENTITY.md](IDENTITY.md); not a maturity score |
@@ -155,7 +155,7 @@ Program: [SOUNDNESS.md](SOUNDNESS.md) · model: [MEMORY_MODEL.md](MEMORY_MODEL.m
 | Generic enums `enum MyBox[T]` + match | Done — `generic_enum_test` |
 | Interface bounds `fn f[T: I](…)` | Done — structural · `generic_bounds_test` · `bad/generic_bound_fail` |
 | Nested generics / multi-instantiation | Done — `generic_adversarial_test` |
-| Iterator `Type_next` → `for` seed | Seed — by-value self limit · `iterator_test` |
+| Iterator `Type_next` → `for` with `mut self` | Done — advances binding · `iterator_test` |
 | Mutable closure capture cells | Seed — `mutable_closure_test` |
 | CBOR + MessagePack binary | Done — encode/decode subset · `std/encoding/{cbor,msgpack}` · `cbor_msgpack_test` |
 | List combinators (map/filter/fold style) | Done — int mono helpers · `cbor_msgpack_test` |
@@ -180,7 +180,8 @@ Program: [SOUNDNESS.md](SOUNDNESS.md) · model: [MEMORY_MODEL.md](MEMORY_MODEL.m
 | ShareInt capture (shared mut via RC handle) | Done seed — `share_capture_test` |
 | Packaging seeds (deb/rpm/winget/matrix/homebrew) | Done seed — scripts + packaging/ |
 | Book samples `mako check` / `run` | PASS — `docs/book/examples/book_*.mko` |
-| `mako test examples/testing` | PASS — **340 passed**, 0 failed (2026-07-18) |
+| `mako test examples/testing` | PASS — **363 passed**, 0 failed (C backend oracle) |
+| `mako test examples/testing --backend native` | PASS — **363 passed**, 0 failed (2026-07-22; shared-IR Cranelift + native bridge) |
 | GC removal regression checks | PASS — removed builtin and legacy `[package] gc = true` both fail, including isolated cache paths |
 | Speed gate | PASS — normal ≤2.0× and strict ≤1.5× Rust gates; final measured ratios 0.21×–0.65× |
 | Leba downstream smoke | PASS — current compiler builds/checks Leba; compiled `doctor` reports 0 errors |

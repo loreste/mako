@@ -1,0 +1,10 @@
+fn choose_value(flag: bool) -> int {
+    if flag {
+        return identity(1)
+    }
+    return identity(2)
+}
+
+fn identity(value: int) -> int {
+    return value
+}

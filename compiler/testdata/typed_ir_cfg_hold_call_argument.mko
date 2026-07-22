@@ -1,0 +1,11 @@
+fn inspect_held(label: string) -> int {
+    return 1
+}
+
+fn choose_held(flag: bool) -> int {
+    hold let label = "mako"
+    if flag {
+        return inspect_held(label)
+    }
+    return 0
+}

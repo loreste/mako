@@ -1,0 +1,7 @@
+fn choose_values(flag: bool, left: []int, right: []int) -> []int {
+    if flag {
+        return left
+    } else {
+        return right
+    }
+}

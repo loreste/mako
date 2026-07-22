@@ -1,0 +1,217 @@
+// Compact statement arena. Each node owns only token spans and a range of
+// child statement indexes, keeping function bodies cheap to partition later.
+
+const STMT_LET = 1
+const STMT_RETURN = 2
+const STMT_IF = 3
+const STMT_WHILE = 4
+const STMT_FOR = 5
+const STMT_BREAK = 6
+const STMT_CONTINUE = 7
+const STMT_DEFER = 8
+const STMT_BLOCK = 9
+const STMT_EXPR = 10
+const STMT_MATCH = 11
+const STMT_SELECT = 12
+const STMT_CONCURRENT = 13
+
+struct StmtNode {
+    kind: int
+    token_start: int
+    token_end: int
+    child_start: int
+    child_count: int
+    expr_root: int
+    scope_start: int
+    scope_end: int
+}
+
+struct BodyParse {
+    nodes: []StmtNode
+    edges: []int
+    roots_start: int
+    roots_count: int
+    next: int
+    ok: bool
+    error: string
+    error_token: int
+}
+
+struct FnBody {
+    item: int
+    stmt_start: int
+    stmt_count: int
+}
+
+fn clone_stmt_nodes(nodes: []StmtNode) -> []StmtNode {
+    let mut out = make([]StmtNode, 0, len(nodes))
+    let mut i = 0
+    while i < len(nodes) {
+        out = append(out, nodes[i])
+        i = i + 1
+    }
+    return out
+}
+
+fn clone_stmt_edges(edges: []int) -> []int {
+    let mut out = make([]int, 0, len(edges))
+    let mut i = 0
+    while i < len(edges) {
+        out = append(out, edges[i])
+        i = i + 1
+    }
+    return out
+}
+
+fn body_failure(nodes: []StmtNode, edges: []int, token: int, message: string) -> BodyParse {
+    return BodyParse {
+        nodes: nodes, edges: edges, roots_start: len(edges), roots_count: 0,
+        next: token, ok: false, error: message, error_token: token,
+    }
+}
+
+fn statement_kind(kind: int) -> int {
+    if kind == TK_LET or kind == TK_VAR or kind == TK_HOLD or kind == TK_SHARE { return STMT_LET }
+    if kind == TK_RETURN { return STMT_RETURN }
+    if kind == TK_IF or kind == TK_ELSE { return STMT_IF }
+    if kind == TK_WHILE { return STMT_WHILE }
+    if kind == TK_FOR { return STMT_FOR }
+    if kind == TK_BREAK { return STMT_BREAK }
+    if kind == TK_CONTINUE or kind == TK_FALLTHROUGH { return STMT_CONTINUE }
+    if kind == TK_DEFER { return STMT_DEFER }
+    if kind == TK_MATCH { return STMT_MATCH }
+    if kind == TK_SELECT { return STMT_SELECT }
+    if kind == TK_CREW or kind == TK_ARENA or kind == TK_UNSAFE or kind == TK_FAN { return STMT_CONCURRENT }
+    return STMT_EXPR
+}
+
+fn statement_has_block(kind: int) -> bool {
+    return kind == TK_IF or kind == TK_ELSE or kind == TK_WHILE or kind == TK_FOR or
+        kind == TK_MATCH or kind == TK_SELECT or kind == TK_CREW or kind == TK_ARENA or
+        kind == TK_UNSAFE or kind == TK_FAN or kind == TK_DEFER
+}
+
+fn find_statement_brace(tokens: []Token, start: int, end: int) -> int {
+    let mut parens = 0
+    let mut brackets = 0
+    let mut i = start
+    while i < end {
+        if tokens[i].kind == TK_LPAREN { parens = parens + 1 }
+        if tokens[i].kind == TK_RPAREN { parens = parens - 1 }
+        if tokens[i].kind == TK_LBRACKET { brackets = brackets + 1 }
+        if tokens[i].kind == TK_RBRACKET { brackets = brackets - 1 }
+        if tokens[i].kind == TK_LBRACE and parens == 0 and brackets == 0 { return i }
+        i = i + 1
+    }
+    return -1
+}
+
+fn simple_statement_end(tokens: []Token, start: int, end: int) -> int {
+    let mut parens = 0
+    let mut brackets = 0
+    let mut braces = 0
+    let mut i = start
+    while i < end {
+        let kind = tokens[i].kind
+        if kind == TK_LPAREN { parens = parens + 1 }
+        if kind == TK_RPAREN { parens = parens - 1 }
+        if kind == TK_LBRACKET { brackets = brackets + 1 }
+        if kind == TK_RBRACKET { brackets = brackets - 1 }
+        if kind == TK_LBRACE { braces = braces + 1 }
+        if kind == TK_RBRACE { braces = braces - 1 }
+        if kind == TK_SEMICOLON and parens == 0 and brackets == 0 and braces == 0 { return i + 1 }
+        if i + 1 < end and parens == 0 and brackets == 0 and braces == 0 and tokens[i + 1].line > tokens[i].line {
+            return i + 1
+        }
+        i = i + 1
+    }
+    return end
+}
+
+fn parse_statement_block(tokens: []Token, start: int, end: int, nodes: []StmtNode, edges: []int) -> BodyParse {
+    let mut out_nodes = clone_stmt_nodes(nodes)
+    let mut out_edges = clone_stmt_edges(edges)
+    let mut roots: []int = []
+    let mut next = start
+    while next < end {
+        if tokens[next].kind == TK_SEMICOLON {
+            next = next + 1
+            continue
+        }
+        let begin = next
+        let kind = statement_kind(tokens[begin].kind)
+        let mut child_roots: []int = []
+        if statement_has_block(tokens[begin].kind) {
+            let open = find_statement_brace(tokens, begin + 1, end)
+            if open < 0 { return body_failure(out_nodes, out_edges, begin, "expected statement block") }
+            let close = find_matching(tokens, open)
+            if close < 0 or close > end { return body_failure(out_nodes, out_edges, open, "unterminated statement block") }
+            let body = parse_statement_block(tokens, open + 1, close, out_nodes, out_edges)
+            if not body.ok { return body }
+            out_nodes = clone_stmt_nodes(body.nodes)
+            out_edges = clone_stmt_edges(body.edges)
+            let mut c = 0
+            while c < body.roots_count {
+                child_roots = append(child_roots, out_edges[body.roots_start + c])
+                c = c + 1
+            }
+            next = close + 1
+            // Keep an else/else-if chain within the same statement span.
+            if tokens[begin].kind == TK_IF and next < end and tokens[next].kind == TK_ELSE {
+                let else_open = find_statement_brace(tokens, next + 1, end)
+                if else_open < 0 { return body_failure(out_nodes, out_edges, next, "expected block after else") }
+                let else_close = find_matching(tokens, else_open)
+                if else_close < 0 or else_close > end { return body_failure(out_nodes, out_edges, else_open, "unterminated else block") }
+                let else_body = parse_statement_block(tokens, else_open + 1, else_close, out_nodes, out_edges)
+                if not else_body.ok { return else_body }
+                out_nodes = clone_stmt_nodes(else_body.nodes)
+                out_edges = clone_stmt_edges(else_body.edges)
+                c = 0
+                while c < else_body.roots_count {
+                    child_roots = append(child_roots, out_edges[else_body.roots_start + c])
+                    c = c + 1
+                }
+                next = else_close + 1
+            }
+        } else {
+            next = simple_statement_end(tokens, begin, end)
+            if next <= begin { return body_failure(out_nodes, out_edges, begin, "could not find end of statement") }
+        }
+        let child_start = len(out_edges)
+        let mut c = 0
+        while c < len(child_roots) {
+            out_edges = append(out_edges, child_roots[c])
+            c = c + 1
+        }
+        let root = len(out_nodes)
+        out_nodes = append(out_nodes, StmtNode {
+            kind: kind, token_start: begin, token_end: next,
+            child_start: child_start, child_count: len(child_roots),
+            expr_root: -1,
+            scope_start: start, scope_end: end,
+        })
+        roots = append(roots, root)
+    }
+    let roots_start = len(out_edges)
+    let mut r = 0
+    while r < len(roots) {
+        out_edges = append(out_edges, roots[r])
+        r = r + 1
+    }
+    return BodyParse {
+        nodes: out_nodes, edges: out_edges, roots_start: roots_start, roots_count: len(roots),
+        next: next, ok: true, error: "", error_token: 0,
+    }
+}
+
+fn statement_smoke_test() -> bool {
+    let source = "fn demo(n: int) -> int {\nlet mut x = n\nwhile x > 0 {\nif x == 2 { break } else { x = x - 1 }\n}\nreturn x\n}"
+    let lexed = lex_source(source)
+    if not lexed.ok { return false }
+    let open = find_kind(lexed.tokens, 0, TK_LBRACE)
+    if open < 0 { return false }
+    let close = find_matching(lexed.tokens, open)
+    if close < 0 { return false }
+    let parsed = parse_statement_block(lexed.tokens, open + 1, close, make([]StmtNode, 0, 8), make([]int, 0, 8))
+    return parsed.ok and parsed.roots_count == 3 and len(parsed.nodes) == 6
+}

@@ -195,9 +195,7 @@ impl fmt::Display for TypeExpr {
                     if !pkg.is_empty()
                         && !ty.is_empty()
                         && !ty.contains("__")
-                        && pkg
-                            .chars()
-                            .all(|c| c.is_ascii_alphanumeric() || c == '_')
+                        && pkg.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
                         && ty.chars().next().is_some_and(|c| c.is_ascii_uppercase())
                     {
                         return write!(f, "{pkg}.{ty}");

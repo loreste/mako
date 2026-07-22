@@ -1,6 +1,6 @@
 # yaml-language-server: $schema=https://aka.ms/winget-manifest.defaultLocale.1.12.0.schema.json
 PackageIdentifier: loreste.mako
-PackageVersion: 0.4.1
+PackageVersion: 0.4.5
 PackageLocale: en-US
 Publisher: loreste
 PublisherUrl: https://github.com/loreste/mako
@@ -9,7 +9,7 @@ Author: loreste
 PackageName: Mako
 PackageUrl: https://github.com/loreste/mako
 License: MIT
-LicenseUrl: https://github.com/loreste/mako/blob/v0.4.1/LICENSE
+LicenseUrl: https://github.com/loreste/mako/blob/v0.4.5/LICENSE
 Copyright: Copyright (c) loreste
 ShortDescription: Mako systems/backend language (.mko to native via C)
 Description: |-
@@ -21,6 +21,6 @@ Tags:
 - compiler
 - programming-language
 - systems
-ReleaseNotesUrl: https://github.com/loreste/mako/releases/tag/v0.4.1
+ReleaseNotesUrl: https://github.com/loreste/mako/releases/tag/v0.4.5
 ManifestType: defaultLocale
 ManifestVersion: 1.12.0

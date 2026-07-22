@@ -1,0 +1,123 @@
+// Allocation-conscious global symbol indexing. Names remain source spans;
+// lookup hashes bytes in place and resolves collisions by span comparison.
+
+fn symbol_hash(source: string, start: int, end: int) -> int {
+    let mut hash = 17
+    let mut i = start
+    while i < end {
+        // Bounded arithmetic keeps behavior identical under wrap/trap modes.
+        hash = (hash * 131 + str_byte_at(source, i)) % 2147483647
+        i = i + 1
+    }
+    return hash
+}
+
+fn span_equal(source: string, a_start: int, a_end: int, b_start: int, b_end: int) -> bool {
+    if a_end - a_start != b_end - b_start { return false }
+    let mut i = 0
+    while a_start + i < a_end {
+        if str_byte_at(source, a_start + i) != str_byte_at(source, b_start + i) { return false }
+        i = i + 1
+    }
+    return true
+}
+
+fn symbol_capacity(item_count: int) -> int {
+    let mut capacity = 8
+    while capacity < item_count * 2 + 1 {
+        capacity = capacity * 2
+    }
+    return capacity
+}
+
+fn item_defines_symbol(kind: int) -> bool {
+    return kind == ITEM_FN or kind == ITEM_STRUCT or kind == ITEM_ENUM or
+        kind == ITEM_ACTOR or kind == ITEM_INTERFACE or kind == ITEM_EXTERN or
+        kind == ITEM_CONST
+}
+
+fn build_symbols(source: string, tokens: []Token, items: []TopItem) -> SymbolParse {
+    let capacity = symbol_capacity(len(items))
+    let mut slots = make([]int, capacity, capacity)
+    let mut symbols: []Symbol = []
+    let mut item_index = 0
+    while item_index < len(items) {
+        let item = items[item_index]
+        if item_defines_symbol(item.kind) and item.name_end > item.name_start {
+            let hash = symbol_hash(source, item.name_start, item.name_end)
+            let mut slot = hash % capacity
+            let mut probes = 0
+            while slots[slot] != 0 and probes < capacity {
+                let existing_index = slots[slot] - 1
+                let existing = symbols[existing_index]
+                if existing.hash == hash and span_equal(source, existing.name_start, existing.name_end, item.name_start, item.name_end) {
+                    let token = tokens[item.token_start]
+                    return SymbolParse {
+                        symbols: symbols, slots: slots, ok: false,
+                        error: "duplicate top-level declaration `" + source[item.name_start:item.name_end] + "`",
+                        error_line: token.line, error_col: token.col,
+                    }
+                }
+                slot = (slot + 1) % capacity
+                probes = probes + 1
+            }
+            if probes >= capacity {
+                let token = tokens[item.token_start]
+                return SymbolParse {
+                    symbols: symbols, slots: slots, ok: false,
+                    error: "global symbol table is full", error_line: token.line, error_col: token.col,
+                }
+            }
+            let symbol_index = len(symbols)
+            symbols = append(symbols, Symbol {
+                kind: item.kind, item: item_index,
+                name_start: item.name_start, name_end: item.name_end, hash: hash,
+            })
+            slots[slot] = symbol_index + 1
+        }
+        item_index = item_index + 1
+    }
+    return SymbolParse { symbols: symbols, slots: slots, ok: true, error: "", error_line: 0, error_col: 0 }
+}
+
+fn find_symbol(source: string, symbols: []Symbol, slots: []int, start: int, end: int) -> int {
+    if len(slots) == 0 { return -1 }
+    let hash = symbol_hash(source, start, end)
+    let mut slot = hash % len(slots)
+    let mut probes = 0
+    while slots[slot] != 0 and probes < len(slots) {
+        let symbol_index = slots[slot] - 1
+        let symbol = symbols[symbol_index]
+        if symbol.hash == hash and span_equal(source, symbol.name_start, symbol.name_end, start, end) {
+            return symbol_index
+        }
+        slot = (slot + 1) % len(slots)
+        probes = probes + 1
+    }
+    return -1
+}
+
+fn symbol_smoke_test() -> bool {
+    let source = "fn alpha() {}\nstruct beta {}\nconst gamma = 1"
+    let lexed = lex_source(source)
+    if not lexed.ok { return false }
+    let structure = parse_structure(source, lexed.tokens)
+    if not structure.ok { return false }
+    let symbols = build_symbols(source, lexed.tokens, structure.items)
+    if not symbols.ok or len(symbols.symbols) != 3 { return false }
+    let alpha = find_symbol(source, symbols.symbols, symbols.slots, 3, 8)
+    let gamma = find_symbol(source, symbols.symbols, symbols.slots, 35, 40)
+    if alpha < 0 or gamma < 0 or find_symbol(source, symbols.symbols, symbols.slots, 0, 2) >= 0 { return false }
+
+    // `a` and `i` collide modulo the minimum eight-slot table; both must
+    // survive linear probing and remain independently discoverable.
+    let collision_source = "fn a() {}\nfn i() {}"
+    let collision_lexed = lex_source(collision_source)
+    if not collision_lexed.ok { return false }
+    let collision_structure = parse_structure(collision_source, collision_lexed.tokens)
+    if not collision_structure.ok { return false }
+    let collisions = build_symbols(collision_source, collision_lexed.tokens, collision_structure.items)
+    if not collisions.ok or len(collisions.symbols) != 2 { return false }
+    return find_symbol(collision_source, collisions.symbols, collisions.slots, 3, 4) >= 0 and
+        find_symbol(collision_source, collisions.symbols, collisions.slots, 13, 14) >= 0
+}

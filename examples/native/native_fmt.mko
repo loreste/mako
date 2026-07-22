@@ -1,0 +1,10 @@
+// format_int + f-string interpolation (string/int/bool holes).
+// Differentially validated against the C backend.
+
+fn main() {
+    let n = format_int(42)
+    print(n)
+    print(f"answer={n}")
+    print(f"sum={1 + 2}")
+    print(f"flag={true}")  // C f-string path writes bools as 0/1
+}

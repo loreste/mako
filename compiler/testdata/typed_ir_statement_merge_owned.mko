@@ -1,0 +1,12 @@
+fn make_label() -> string {
+    return "mako"
+}
+
+fn choose_side_effect(flag: bool) -> int {
+    if flag {
+        let label = make_label()
+    } else {
+        let label = make_label()
+    }
+    return 1
+}

@@ -1042,15 +1042,18 @@ Tests: `examples/testing/generic_struct_test.mko`, `generic_enum_test.mko`,
 ### Iterator protocol (seed)
 
 Types with `fn next(self) -> Option[T]` (as `Type_next`) can drive `for … in`.
-**By-value `self` does not mutate the outer value** — a `next` that always
-returns `Some(self.current)` will not terminate. Prefer explicit mutation
-patterns until mut-self iterators land. See `examples/testing/iterator_test.mko`.
+Prefer **`fn next(mut self) -> Option[T]`** so `for v in it` advances the
+binding in place. By-value `self` does not mutate the outer value (a `next`
+that only returns `Some(self.current)` will not terminate). See
+`examples/testing/iterator_test.mko`.
 
-### Mutable captures (seed)
+### Mutable captures
 
-Lambdas that **assign** to outer locals route those captures through a heap
-cell. Everyday by-value capture still works (`|x| x + n`). Multi-statement mut
-lambdas remain residual polish (`examples/testing/mutable_closure_test.mko`).
+Lambdas that **assign** to outer `let mut` ints route those captures through a
+heap cell (single- and multi-statement bodies). Everyday by-value capture still
+works (`|x| x + n`). Across **`kick`**, non-Sync mut captures are rejected —
+use `ShareInt` / Mutex / CMap / AtomicInt
+(`examples/testing/mutable_closure_outer_mut_test.mko`).
 
 ---
 

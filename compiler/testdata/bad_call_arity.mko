@@ -1,0 +1,5 @@
+fn pair(left: int, right: int) {}
+
+fn main() {
+    pair(1)
+}

@@ -1,0 +1,3 @@
+fn broken() {
+    if true print("missing block")
+}

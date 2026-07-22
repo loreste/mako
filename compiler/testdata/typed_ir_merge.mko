@@ -1,0 +1,9 @@
+fn choose(value: int) -> int {
+    let base = 1
+    if value > 0 {
+        let positive = 2
+    } else {
+        let negative = 3
+    }
+    return base
+}

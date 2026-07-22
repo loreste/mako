@@ -1,0 +1,38 @@
+// Native backend: scalar match — literal arms, or-patterns, wildcard, exhaustive
+// bool match, and an identifier catch-all that binds the scrutinee.
+// Differentially validated against the C backend.
+
+fn classify(n: int) -> int {
+    return match n {
+        0 => 100,
+        1 | 2 | 3 => 200,
+        _ => 300
+    }
+}
+
+fn bump(n: int) -> int {
+    return match n {
+        0 => 0,
+        x => x + 1000
+    }
+}
+
+fn main() {
+    print_int(classify(0))
+    print_int(classify(2))
+    print_int(classify(3))
+    print_int(classify(9))
+
+    print_int(bump(0))
+    print_int(bump(5))
+
+    let b = false
+    print_int(match b {
+        true => 1,
+        false => 0
+    })
+
+    // match as a subexpression
+    let n = 2
+    print_int(match n { 1 => 10, 2 => 20, _ => 30 } + 5)
+}

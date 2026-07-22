@@ -1,0 +1,10 @@
+fn choose_alias(flag: bool) -> int {
+    let first = "mako"
+    let second = first
+    if flag {
+        let positive = 1
+    } else {
+        let negative = 2
+    }
+    return 0
+}

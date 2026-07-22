@@ -311,3 +311,15 @@ fn TestConstFnString() {
     assert_eq(len_greet("z"), 4)
     assert_eq_str(greet("you"), "hi you")
 }
+
+// Const string indexing: s[i] folds to the byte value 0..255.
+const C_FB = "AB"[0]
+const C_SB = "AB"[1]
+const C_HI0 = "hi"[0]
+
+fn TestConstStrIndex() {
+    assert_eq(C_FB, 65)
+    assert_eq(C_SB, 66)
+    assert_eq(C_HI0, 104)
+    assert_eq("mako"[0], 109)
+}

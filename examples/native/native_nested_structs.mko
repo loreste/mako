@@ -1,0 +1,39 @@
+// Nested aggregate fields: struct field that is itself a struct, with owned
+// string fields at both levels. Exercises recursive clone/drop (per-layout
+// walk), nested field read/write, by-value copy, and functional construction.
+// Differentially validated against the C backend.
+
+struct Addr {
+    city: string
+    zip: int
+}
+
+struct Person {
+    name: string
+    addr: Addr
+}
+
+fn city_of(p: Person) -> string {
+    return p.addr.city
+}
+
+fn main() {
+    let mut p = Person {
+        name: "Ada",
+        addr: Addr { city: "Paris", zip: 75001 }
+    }
+    print(p.name)
+    print(p.addr.city)
+    print_int(p.addr.zip)
+
+    p.addr.city = "Lyon"
+    p.addr.zip = 69001
+    print(p.addr.city)
+    print_int(p.addr.zip)
+
+    var q = p
+    q.name = "Grace"
+    print(p.name)
+    print(q.name)
+    print(city_of(q))
+}

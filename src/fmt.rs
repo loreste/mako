@@ -132,7 +132,7 @@ fn import_group_kind(path: &str) -> u8 {
     }
     let first = path.split('/').next().unwrap_or(path);
     if first.contains('.') {
-        return 1; // github.com, … 
+        return 1; // github.com, …
     }
     0
 }
@@ -972,4 +972,3 @@ fn main() {
         assert!(once.contains("match "));
     }
 }
-

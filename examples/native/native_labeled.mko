@@ -1,0 +1,15 @@
+// Labeled break from nested loop. Differentially vs C.
+fn main() {
+    var n = 0
+    outer: while true {
+        var j = 0
+        while j < 3 {
+            j = j + 1
+            n = n + 1
+            if n == 2 {
+                break outer
+            }
+        }
+    }
+    print_int(n)
+}

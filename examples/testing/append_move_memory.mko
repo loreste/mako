@@ -1,0 +1,19 @@
+// Executable ownership fixture for ASan. Keep this aligned with
+// append_move_test.mko so both the Mako test harness and sanitizer path cover
+// reallocation through a returned owning slice.
+
+fn append_one_memory(xs: []int, value: int) -> []int {
+    return append(xs, value)
+}
+
+fn main() {
+    let mut xs: []int = []
+    let mut i = 0
+    while i < 128 {
+        xs = append_one_memory(xs, i)
+        i = i + 1
+    }
+    assert_eq(len(xs), 128)
+    assert_eq(xs[0], 0)
+    assert_eq(xs[127], 127)
+}

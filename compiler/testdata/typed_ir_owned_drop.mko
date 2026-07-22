@@ -1,0 +1,4 @@
+fn discard_values() -> int {
+    let values = [1, 2, 3]
+    return 7
+}

@@ -1,0 +1,9 @@
+// Shared-IR ownership fixture for []string.
+fn main() {
+    let xs = ["a", "b"]
+    print(xs[0])
+    print_int(len(xs))
+    let ys = append(xs, "c")
+    print(ys[2])
+    print_int(len(ys))
+}

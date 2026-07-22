@@ -1,0 +1,10 @@
+fn make_label() -> string {
+    return "mako"
+}
+
+fn choose_label(flag: bool) -> string {
+    if flag {
+        return make_label()
+    }
+    return make_label()
+}

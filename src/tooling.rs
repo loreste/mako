@@ -364,8 +364,7 @@ pub fn codegen_profile_from_toml(toml: &str, source_file: Option<String>) -> Cod
             in_profile_release = false;
             continue;
         }
-        if in_package {
-        }
+        if in_package {}
         if in_profile_release && t.starts_with("bounds_checks") && t.contains('=') {
             let v = t
                 .split('=')
@@ -539,7 +538,10 @@ fn lint_identity_surface(path: &Path) -> usize {
             (" var ", "prefer `let mut` (Mako) over dual `var`"),
             ("\tvar ", "prefer `let mut` (Mako) over dual `var`"),
             ("package ", "prefer `pack` (Mako) over dual `package`"),
-            ("type ", "prefer `struct`/`enum` (Mako) over dual `type … struct`"),
+            (
+                "type ",
+                "prefer `struct`/`enum` (Mako) over dual `type … struct`",
+            ),
             (":=", "prefer `let` / `let mut` (Mako) over dual `:="),
         ];
         for (pat, msg) in checks {
@@ -550,24 +552,23 @@ fn lint_identity_surface(path: &Path) -> usize {
                 }
                 if *pat == " var " || *pat == "\tvar " {
                     // skip `variant` etc.
-                    if !code.split_whitespace().any(|w| w == "var" || w.starts_with("var "))
+                    if !code
+                        .split_whitespace()
+                        .any(|w| w == "var" || w.starts_with("var "))
                         && !code.contains(" var ")
                         && !code.starts_with("var ")
                     {
                         continue;
                     }
                 }
-                eprintln!(
-                    "lint(identity): {}:{}: {msg}",
-                    path.display(),
-                    line_no
-                );
+                eprintln!("lint(identity): {}:{}: {msg}", path.display(), line_no);
                 n += 1;
                 break; // one identity hit per line
             }
         }
         // import vs pull (prefer pull)
-        if code.starts_with("import ") || code.starts_with("import(") || code.contains("\nimport ") {
+        if code.starts_with("import ") || code.starts_with("import(") || code.contains("\nimport ")
+        {
             if code.trim_start().starts_with("import") {
                 eprintln!(
                     "lint(identity): {}:{}: prefer `pull` (Mako) over dual `import`",
@@ -1238,7 +1239,11 @@ fn collect_calls_stmt(stmt: &Stmt, out: &mut Vec<String>) {
             collect_calls_block(body, out);
         }
         Stmt::CFor {
-            init, cond, post, body, ..
+            init,
+            cond,
+            post,
+            body,
+            ..
         } => {
             collect_calls_stmt(init, out);
             collect_calls_expr(cond, out);
@@ -2189,11 +2194,7 @@ fn rewrite_stmt(s: &mut Stmt, alias: &str, names: &ImportNameSets) {
         }
         Stmt::LetMulti { init, .. } => rewrite_expr(init, alias, names),
         Stmt::Assign { value, .. } => rewrite_expr(value, alias, names),
-        Stmt::IndexAssign {
-            base,
-            index,
-            value,
-        } => {
+        Stmt::IndexAssign { base, index, value } => {
             rewrite_expr(base, alias, names);
             rewrite_expr(index, alias, names);
             rewrite_expr(value, alias, names);
@@ -2228,7 +2229,11 @@ fn rewrite_stmt(s: &mut Stmt, alias: &str, names: &ImportNameSets) {
             rewrite_block(body, alias, names);
         }
         Stmt::CFor {
-            init, cond, post, body, ..
+            init,
+            cond,
+            post,
+            body,
+            ..
         } => {
             rewrite_stmt(init, alias, names);
             rewrite_expr(cond, alias, names);
@@ -2280,11 +2285,7 @@ fn rewrite_expr(e: &mut Expr, alias: &str, names: &ImportNameSets) {
                 rewrite_expr(a, alias, names);
             }
         }
-        Expr::Method {
-            receiver,
-            args,
-            ..
-        } => {
+        Expr::Method { receiver, args, .. } => {
             rewrite_expr(receiver, alias, names);
             for a in args {
                 rewrite_expr(a, alias, names);
@@ -2847,8 +2848,7 @@ fn merge_path_deps_from_manifest(
     locked_roots: Option<&crate::pkg::VerifiedDependencyRoots>,
 ) -> Result<(), String> {
     let manifest = manifest_dir.join("mako.toml");
-    let verified_manifest =
-        locked_roots.and_then(|roots| roots.package_for_path(&manifest));
+    let verified_manifest = locked_roots.and_then(|roots| roots.package_for_path(&manifest));
     if !manifest.exists() && verified_manifest.is_none() {
         return Ok(());
     }
@@ -2860,12 +2860,12 @@ fn merge_path_deps_from_manifest(
     for dep in parse_manifest_deps(&text) {
         let verified = match locked_roots {
             Some(roots) => Some(roots.get(manifest_dir, &dep.name).ok_or_else(|| {
-                    format!(
-                        "locked dependency `{}` from {} was not verified; refusing an unlocked build",
-                        dep.name,
-                        manifest_dir.display()
-                    )
-                })?),
+                format!(
+                    "locked dependency `{}` from {} was not verified; refusing an unlocked build",
+                    dep.name,
+                    manifest_dir.display()
+                )
+            })?),
             None => None,
         };
         let full = match verified {
@@ -3126,11 +3126,7 @@ fn resolve_imports_rec(
                         // Always package-qualify. Default: package clause (≠ main), else path.
                         let a = alias
                             .clone()
-                            .or_else(|| {
-                                pkg_name
-                                    .clone()
-                                    .filter(|n| n != "main" && !n.is_empty())
-                            })
+                            .or_else(|| pkg_name.clone().filter(|n| n != "main" && !n.is_empty()))
                             .or(path_alias)
                             .ok_or_else(|| {
                                 format!(
@@ -3315,7 +3311,10 @@ fn resolve_module_import_path(
                 if root.is_dir() {
                     sources_at_path(&root, locked_roots)
                 } else {
-                    Err(format!("dep `{path}` has no .mko sources at {}", root.display()))
+                    Err(format!(
+                        "dep `{path}` has no .mko sources at {}",
+                        root.display()
+                    ))
                 }
             });
         }
@@ -3347,7 +3346,10 @@ fn resolve_module_import_path(
         return Ok(srcs);
     }
 
-    Err(format!("module path `{path}` not resolved from {}", manifest_dir.display()))
+    Err(format!(
+        "module path `{path}` not resolved from {}",
+        manifest_dir.display()
+    ))
 }
 
 /// `module = "izi-iva"` at top level or under `[package]`.
@@ -3461,26 +3463,21 @@ pub fn merge_package_dir_siblings(entry: &Path, mut program: Program) -> Result<
     if !dir.is_dir() {
         return Ok(program);
     }
-    let entry_canon = entry
-        .canonicalize()
-        .unwrap_or_else(|_| entry.to_path_buf());
+    let entry_canon = entry.canonicalize().unwrap_or_else(|_| entry.to_path_buf());
     let entry_pkg = package_name_of(&program);
     let sources = match package_dir_sources(dir) {
         Ok(s) => s,
         Err(_) => return Ok(program),
     };
     for sib in sources {
-        let sib_canon = sib
-            .canonicalize()
-            .unwrap_or_else(|_| sib.clone());
+        let sib_canon = sib.canonicalize().unwrap_or_else(|_| sib.clone());
         if sib_canon == entry_canon {
             continue;
         }
         // Load sibling with its own imports; do not re-merge path deps (caller owns that).
-        let mut extra = parse_program_file_raw(&sib, None)
-            .map_err(|e| format!("{}: {e}", sib.display()))?;
-        extra = resolve_imports(&sib, extra)
-            .map_err(|e| format!("{}: {e}", sib.display()))?;
+        let mut extra =
+            parse_program_file_raw(&sib, None).map_err(|e| format!("{}: {e}", sib.display()))?;
+        extra = resolve_imports(&sib, extra).map_err(|e| format!("{}: {e}", sib.display()))?;
         let sib_pkg = package_name_of(&extra);
         match (&entry_pkg, &sib_pkg) {
             (Some(a), Some(b)) if a != b => {
@@ -3697,10 +3694,7 @@ mod locked_dependency_tests {
 
     #[test]
     fn locked_merge_does_not_fall_back_to_unverified_paths() {
-        let dir = std::env::temp_dir().join(format!(
-            "mako_locked_merge_{}",
-            std::process::id()
-        ));
+        let dir = std::env::temp_dir().join(format!("mako_locked_merge_{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         let app = dir.join("app");
         let util = dir.join("util");
@@ -3735,10 +3729,7 @@ mod locked_dependency_tests {
 
     #[test]
     fn locked_merge_compiles_the_verified_source_snapshot() {
-        let dir = std::env::temp_dir().join(format!(
-            "mako_locked_snapshot_{}",
-            std::process::id()
-        ));
+        let dir = std::env::temp_dir().join(format!("mako_locked_snapshot_{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         let app = dir.join("app");
         let util = dir.join("util");
@@ -3787,16 +3778,17 @@ mod locked_dependency_tests {
             Some(&roots),
         )
         .unwrap();
-        assert!(
-            program
-                .items
-                .iter()
-                .any(|item| matches!(item, Item::Fn(function) if function.name == "util__answer"))
-        );
+        assert!(program
+            .items
+            .iter()
+            .any(|item| matches!(item, Item::Fn(function) if function.name == "util__answer")));
 
         let (ok, report) = check_file_json_report(&app.join("main.mko"));
         assert!(!ok);
-        assert!(report.contains("integrity mismatch"), "unexpected: {report}");
+        assert!(
+            report.contains("integrity mismatch"),
+            "unexpected: {report}"
+        );
         let _ = fs::remove_dir_all(&dir);
     }
 }
