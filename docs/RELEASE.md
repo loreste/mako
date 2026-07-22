@@ -3,8 +3,10 @@
 **Product version:** **0.4.5** (`Cargo.toml` / `mako version` → `mako0.4.5`).  
 **Tree status:** native compiler language gate **367/367** on
 `mako test examples/testing --backend native` (2026-07-22).  
-**0.4.5 ship plan:** [ROADMAP.md §0.4.5](ROADMAP.md) — Tracks A (LLVM perf),
-B (packaging), C (CI/modes); tag when ship checklist is green.  
+**Backends:** default **c**; recommend `MAKO_BACKEND=native` for debug and
+`--backend llvm --release` for optimizing builds (see [BUILD.md § Backend policy](BUILD.md)).  
+**0.5.0 prep:** native-first platform policy documented; CLI default stays **c**
+until the 0.5.0 flip.  
 **Published release:** last tagged GitHub release may lag the tree — check
 [releases](https://github.com/loreste/mako/releases). Platform-specific workflow
 artifacts only; this guide does not promise a binary for every target triple.

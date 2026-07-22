@@ -15,7 +15,7 @@
 | **[The Mako Book](book/)** | Guided tour (idiomatic Mako) |
 | [COMPAT.md](COMPAT.md) | Dual forms / backward compatibility |
 | [STATUS.md](STATUS.md) | Done matrix (adversarial) |
-| [BUILD.md](BUILD.md) | Incremental cache, `-j`, residual clang |
+| [BUILD.md](BUILD.md) | Incremental cache, backends (c / native / llvm), `-j` |
 | [PERFORMANCE.md](PERFORMANCE.md) | Release `-O3 -flto`, benchmarks |
 | [DEBUG.md](DEBUG.md) | lldb/gdb, `dbg`, sanitizers |
 | [SECURITY.md](SECURITY.md) | Memory safety + cache guarantees |

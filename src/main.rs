@@ -72,6 +72,39 @@ enum BackendCli {
     Llvm,
 }
 
+/// Resolve the effective codegen backend.
+///
+/// Explicit `--backend` (anything other than the default `c`) always wins.
+/// When the CLI still says `c`, honor env overrides in order:
+/// - `env_keys` (e.g. `MAKO_TEST_BACKEND` then `MAKO_BACKEND` for tests)
+///
+/// Policy (product): default remains **c** for widest compatibility (sanitizers,
+/// cross, wasm). Recommended local workflow: `MAKO_BACKEND=native` for debug
+/// iteration; `mako build --release --backend llvm` when the llvm-backend
+/// feature is built. See docs/BUILD.md § Backend policy.
+fn resolve_backend(cli: BackendCli, env_keys: &[&str]) -> BackendCli {
+    if !matches!(cli, BackendCli::C) {
+        return cli;
+    }
+    for key in env_keys {
+        let Ok(v) = std::env::var(key) else {
+            continue;
+        };
+        match v.to_ascii_lowercase().as_str() {
+            "native" => return BackendCli::Native,
+            "llvm" => return BackendCli::Llvm,
+            "c" => return BackendCli::C,
+            other if !other.is_empty() => {
+                eprintln!(
+                    "mako: warning: {key}={other:?} ignored (use c, native, or llvm)"
+                );
+            }
+            _ => {}
+        }
+    }
+    cli
+}
+
 #[derive(Subcommand)]
 enum Commands {
     /// Create a new project (mako.toml + main.mko; optional `--workspace` / `--backend`)
@@ -1137,6 +1170,7 @@ fn run(cli: Cli) -> Result<(), ()> {
                 std::env::set_var("MAKO_STRIP", "1");
             }
             let static_link = effective_static_link(target.as_deref(), static_link, no_static_link);
+            let backend = resolve_backend(backend, &["MAKO_BACKEND"]);
             cmd_build(
                 &file,
                 package.as_deref(),
@@ -1165,18 +1199,21 @@ fn run(cli: Cli) -> Result<(), ()> {
             overflow,
             bounds,
             args,
-        } => cmd_run(
-            &file,
-            package.as_deref(),
-            release,
-            backend,
-            time,
-            !no_incremental,
-            jobs,
-            overflow.into(),
-            matches!(bounds, BoundsCli::Always),
-            &args,
-        ),
+        } => {
+            let backend = resolve_backend(backend, &["MAKO_BACKEND"]);
+            cmd_run(
+                &file,
+                package.as_deref(),
+                release,
+                backend,
+                time,
+                !no_incremental,
+                jobs,
+                overflow.into(),
+                matches!(bounds, BoundsCli::Always),
+                &args,
+            )
+        }
         Commands::Dev {
             file,
             package,
@@ -1230,17 +1267,8 @@ fn run(cli: Cli) -> Result<(), ()> {
         } => {
             let count = count.max(1);
             let sanitize = sanitize.or_else(|| race.then(|| "thread".into()));
-            // CLI --backend wins; otherwise MAKO_TEST_BACKEND={c,native,llvm}.
-            let backend = match std::env::var("MAKO_TEST_BACKEND") {
-                Ok(v) if matches!(backend, BackendCli::C) => match v.to_ascii_lowercase().as_str()
-                {
-                    "native" => BackendCli::Native,
-                    "llvm" => BackendCli::Llvm,
-                    "c" => BackendCli::C,
-                    _ => backend,
-                },
-                _ => backend,
-            };
+            // CLI --backend wins; else MAKO_TEST_BACKEND, then MAKO_BACKEND.
+            let backend = resolve_backend(backend, &["MAKO_TEST_BACKEND", "MAKO_BACKEND"]);
             let mut last_ok = Ok(());
             for i in 0..count {
                 if count > 1 {

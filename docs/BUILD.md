@@ -44,20 +44,56 @@ Independent object units compile in parallel (owned jobs + channels — no share
 | Final binary | `clang`/`ld` link of `.o`s + libs |
 | wasm / `--emit-c` / `--sanitize` / cross `--target` | Monolithic `build_c` path |
 
-## Native backend
+## Backend policy
 
-Use `--backend native` for the ownership-explicit Cranelift backend:
+Mako has three codegen backends. **There is no silent fallback** between them:
+unsupported constructs hard-error on native/LLVM rather than dropping to C.
+
+| Backend | CLI | Role | When to use |
+|---------|-----|------|-------------|
+| **C** (default) | `--backend c` | Mature Mako → C → system `cc` | Default; sanitizers; cross/`--target`; wasm; widest host support |
+| **Native** | `--backend native` | Shared IR → Cranelift object | Fast debug iteration; full language gate (`examples/testing` **367/367**) |
+| **LLVM** | `--backend llvm` | Shared IR → LLVM object (release only) | Optimizing release path when built with `--features llvm-backend` + bundled lld |
+
+**Recommended local workflow (0.5 prep):**
+
+```bash
+# Debug / test on Cranelift (or set once in the shell)
+export MAKO_BACKEND=native
+mako build app.mko -o app
+mako test examples/testing          # or MAKO_TEST_BACKEND=native
+
+# Release speed (host with llvm-backend feature)
+mako build app.mko --release --backend llvm -o app
+
+# Sanitizers / oracle remain on C
+mako test examples/testing --backend c --sanitize address
+```
+
+| Env | Meaning |
+|-----|---------|
+| `MAKO_BACKEND` | Default for `build` / `run` / `test` when CLI is still the default `c` |
+| `MAKO_TEST_BACKEND` | Test-only override (checked before `MAKO_BACKEND`) |
+| Explicit `--backend …` | Always wins over env |
+
+**CI (primary hosts):** both `mako test examples/testing` (C) and
+`mako test examples/testing --backend native` are required. LLVM is optional when
+the static toolchain is present.
+
+**Product default:** remains **c** until 0.5.0 flips the default after policy +
+CI confidence; use env/`--backend` today for native-first workflows.
+
+## Native / LLVM backends
 
 ```bash
 mako build app.mko --backend native -o app
 mako run app.mko --backend native
+mako build app.mko --release --backend llvm -o app   # needs llvm-backend feature
 ```
 
-Native builds emit machine-code objects directly and do not generate C. The
-backend currently supports scalar CFG, owned strings, typed primitive slices,
-and selected aggregate operations. Unsupported constructs are hard errors;
-there is no silent fallback to the C backend. Release LLVM support is available
-for the shared scalar/string/`[]int` subset and is being expanded incrementally.
+Native and LLVM emit machine-code objects directly (no generated C). The shared
+IR covers the full testing corpus on Cranelift. Unsupported modes (sanitize,
+some cross targets) hard-error with a pointer at the C backend.
 
 ## Memory safety of the cache
 

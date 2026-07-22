@@ -1,13 +1,16 @@
 # Changelog
 
-## Unreleased (0.5.0 residual pack on main)
+## Unreleased (0.5.0 residual + platform prep on main)
 
 ### Performance
 
 - **Immortal string share (pointer ABI):** `mako_native_string_clone_ptr` returns
   the static header pointer; drop is a full no-op (no per-clone header malloc).
 - **LLVM `[]string` append:** inline immortal/static check so literal append skips
-  the runtime clone call on the hot path.
+  the runtime clone call on the hot path; fast-path header kept in registers
+  (phi merge, no stack store/load).
+- **LLVM `[]string` index:** immortal share for element loads (no runtime clone
+  for static payloads).
 - **`[]string` drop:** inlined immortal check (no N external drop calls for
   literal-filled slices).
 - **Binary size:** compile runtime with `-ffunction-sections`/`-fdata-sections`;
@@ -16,6 +19,14 @@
   from ~**36×** slim hand-C to ~**1.01×**.
 - **Bench gate defaults:** runtime ≤ **1.25×** baselines; binary ≤ **1.05×**;
   slice RSS ≤ **1.25×** (honest residual ship bars).
+
+### Platform (0.5.0 prep)
+
+- **Backend policy** documented in [docs/BUILD.md](docs/BUILD.md) (c default;
+  recommend native for debug, llvm for release when available).
+- **`MAKO_BACKEND`** env for `build` / `run` / `test` when CLI is still default
+  `c`; `MAKO_TEST_BACKEND` still preferred for tests. Explicit `--backend`
+  always wins. No silent native→C hybrid.
 
 ### Packaging
 

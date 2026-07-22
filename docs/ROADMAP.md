@@ -169,10 +169,10 @@ silently falling back to C.
 
 | ID | Deliverable | Acceptance |
 |----|-------------|------------|
-| **50-A** | Backend policy in GUIDE/BUILD/RELEASE | Users know which backend is default for debug vs release |
-| **50-B** | CI: `mako test examples/testing --backend c` and `--backend native` required | PR red if either fails on primary matrix |
+| **50-A** | Backend policy in GUIDE/BUILD/RELEASE | **Done seed** — [BUILD.md § Backend policy](BUILD.md); GUIDE/RELEASE pointers |
+| **50-B** | CI: `mako test examples/testing --backend c` and `--backend native` required | **Done** on Linux/macOS CI jobs |
 | **50-C** | Optional LLVM CI job | Runs when toolchain present; documented skip otherwise |
-| **50-D** | Default backend selection | Either native default with C override, or explicit `MAKO_BACKEND` with documented default — no silent hybrid |
+| **50-D** | Default backend selection | **Partial** — `MAKO_BACKEND` / `MAKO_TEST_BACKEND` + explicit `--backend` (CLI default remains **c** until flip) |
 | **50-E** | Cross / WASM / static matrix truth table | Working triples listed; others hard-error |
 | **50-F** | Perf regression budget post-0.4.5 | Re-run slice/map gates; fail on >N% regression vs 0.4.5 baselines |
 

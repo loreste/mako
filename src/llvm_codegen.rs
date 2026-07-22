@@ -2085,19 +2085,9 @@ fn emit_str_slice_index_inline<'ctx>(
         .build_load(string_ty, elem_ptr, &format!("{name}.raw"))
         .map_err(builder_error)?
         .into_struct_value();
-    // Match runtime: return an owned clone of the element.
-    let clone_fn = external_function(
-        module,
-        "mako_native_string_clone",
-        string_ty.fn_type(&[string_ty.into()], false),
-    );
-    builder
-        .build_call(clone_fn, &[raw.into()], name)
-        .map_err(builder_error)?
-        .try_as_basic_value()
-        .basic()
-        .map(|v| v.into_struct_value())
-        .ok_or_else(|| LlvmError::new("string clone returned void"))
+    // Match runtime: return an owned clone of the element. Immortal/static
+    // payloads share without a runtime call.
+    emit_string_clone_or_share(context, module, builder, raw, name)
 }
 
 fn emit_str_slice_store_inline<'ctx>(
@@ -2178,6 +2168,7 @@ fn emit_str_slice_append_inline<'ctx>(
 
     builder.position_at_end(fast_bb);
     let string_ty = llvm_type(context, Type::Str);
+    let slice_ty = llvm_type(context, Type::StrSlice);
     let elem_ptr = unsafe {
         builder
             .build_gep(string_ty, data, &[len], "strappend.ptr")
@@ -2194,30 +2185,26 @@ fn emit_str_slice_append_inline<'ctx>(
     let new_len = builder
         .build_int_add(len, one, "strappend.len")
         .map_err(builder_error)?;
-    // Prefer direct phi of header fields over stack round-trip on the fast path:
-    // build the result in registers and only materialize at merge via the slot
-    // if needed. (merge still loads the slot for a unified return).
-    let slice_ty = llvm_type(context, Type::StrSlice).into_struct_type();
-    let mut hdr = slice_ty.get_undef();
-    hdr = builder
-        .build_insert_value(hdr, data, 0, "strappend.data")
+    // Keep the updated header in registers on the fast path; phi at merge
+    // instead of store/load through the result slot (hot loop traffic).
+    let mut fast_hdr = slice_ty.into_struct_type().get_undef();
+    fast_hdr = builder
+        .build_insert_value(fast_hdr, data, 0, "strappend.data")
         .map_err(builder_error)?
         .into_struct_value();
-    hdr = builder
-        .build_insert_value(hdr, new_len, 1, "strappend.newlen")
+    fast_hdr = builder
+        .build_insert_value(fast_hdr, new_len, 1, "strappend.newlen")
         .map_err(builder_error)?
         .into_struct_value();
-    hdr = builder
-        .build_insert_value(hdr, cap, 2, "strappend.cap")
+    fast_hdr = builder
+        .build_insert_value(fast_hdr, cap, 2, "strappend.cap")
         .map_err(builder_error)?
         .into_struct_value();
-    hdr = builder
-        .build_insert_value(hdr, owned, 3, "strappend.owned")
+    fast_hdr = builder
+        .build_insert_value(fast_hdr, owned, 3, "strappend.owned")
         .map_err(builder_error)?
         .into_struct_value();
-    builder
-        .build_store(result_slot, hdr)
-        .map_err(builder_error)?;
+    let fast_end = builder.get_insert_block().unwrap();
     builder
         .build_unconditional_branch(merge_bb)
         .map_err(builder_error)?;
@@ -2242,14 +2229,19 @@ fn emit_str_slice_append_inline<'ctx>(
     builder
         .build_call(f, &args, &format!("{name}.slow"))
         .map_err(builder_error)?;
+    let slow_hdr = builder
+        .build_load(slice_ty, result_slot, &format!("{name}.slow.hdr"))
+        .map_err(builder_error)?
+        .into_struct_value();
+    let slow_end = builder.get_insert_block().unwrap();
     builder
         .build_unconditional_branch(merge_bb)
         .map_err(builder_error)?;
 
     builder.position_at_end(merge_bb);
-    builder
-        .build_load(llvm_type(context, Type::StrSlice), result_slot, name)
-        .map_err(builder_error)
+    let phi = builder.build_phi(slice_ty, name).map_err(builder_error)?;
+    phi.add_incoming(&[(&fast_hdr, fast_end), (&slow_hdr, slow_end)]);
+    Ok(phi.as_basic_value())
 }
 
 fn emit_int_slice_append_inline<'ctx>(
