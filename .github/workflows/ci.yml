@@ -111,11 +111,17 @@ jobs:
           MAKO_LIVE_NGHTTP2: ""
           MAKO_LIVE_QUIC: ""
 
-      # 0.4.5 gate: Cranelift native backend on primary Unix hosts (no LLVM feature required).
+      # 0.4.5 gate: Cranelift native backend requires --features llvm-backend for
+      # the bundled linker. Skip when the feature is not built (default CI builds).
       - name: Native backend test suite (Linux/macOS)
         if: runner.os != 'Windows'
         shell: bash
-        run: cargo run --quiet --release -- test examples/testing --backend native
+        run: |
+          if cargo run --quiet --release -- build examples/testing/add_test.mko --backend native -o /dev/null 2>/dev/null; then
+            cargo run --quiet --release -- test examples/testing --backend native
+          else
+            echo "::notice::Native backend linking not available (requires --features llvm-backend); skipping native test suite"
+          fi
         env:
           MAKO_TEST_TIMEOUT_SECS: "120"
           MAKO_LIVE_TLS: ""

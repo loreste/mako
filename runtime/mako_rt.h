@@ -2546,13 +2546,9 @@ static inline uint64_t mako_hash_bytes(const char *p, size_t n) {
 }
 
 static inline uint64_t mako_hash_i64(int64_t k) {
-    /* Fast multiply-shift: single multiply, good distribution for sequential keys.
-     * Fibonacci hashing constant (golden ratio * 2^64). */
-    uint64_t x = (uint64_t)k;
-    x ^= x >> 33;
-    x *= 0xff51afd7ed558ccdULL;
-    x ^= x >> 33;
-    return x;
+    /* Fibonacci hashing: single multiply with golden-ratio constant.
+     * Distributes sequential keys well across power-of-two tables. */
+    return (uint64_t)k * 0x9E3779B97F4A7C15ULL;
 }
 
 /* Float map keys: +0/-0 same key; all NaNs share one key. */

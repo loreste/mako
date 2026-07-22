@@ -3776,7 +3776,10 @@ fn build_native_object(
         #[cfg(not(all(feature = "llvm-backend", target_os = "macos")))]
         {
             let _ = fs::remove_file(&object_path);
-            emit_plain_error("bundled lld is not implemented for this host yet");
+            emit_plain_error(
+                "native backend linking requires --features llvm-backend on this platform; \
+                 use --backend c (the default) or build with: cargo build --release --features llvm-backend"
+            );
             return Err(());
         }
     }
