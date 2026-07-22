@@ -1,0 +1,5 @@
+{
+  "schema": "mako.compile-fixtures.v1",
+  "sizes": [1000, 10000, 100000],
+  "shapes": ["single", "multi", "generic", "backend"]
+}

@@ -1,0 +1,133 @@
+// Comprehensive benchmark: CPU, memory, I/O patterns.
+// Measures real workload characteristics, not just microkernels.
+
+fn bench_cpu_fib() -> int {
+    // CPU-bound recursive workload.
+    let n = black_box(35)
+    let r = fib(n)
+    return black_box(r)
+}
+
+fn fib(n: int) -> int {
+    if n < 2 { return n }
+    return fib(n - 1) + fib(n - 2)
+}
+
+fn bench_cpu_sieve() -> int {
+    // CPU-bound: Sieve of Eratosthenes to 100K.
+    let n = black_box(100000)
+    let mut is_prime = make([]int, n, n)
+    let mut i = 0
+    while i < n {
+        is_prime[i] = 1
+        i = i + 1
+    }
+    is_prime[0] = 0
+    if n > 1 { is_prime[1] = 0 }
+    i = 2
+    while i * i < n {
+        if is_prime[i] == 1 {
+            let mut j = i * i
+            while j < n {
+                is_prime[j] = 0
+                j = j + i
+            }
+        }
+        i = i + 1
+    }
+    let mut count = 0
+    i = 0
+    while i < n {
+        count = count + is_prime[i]
+        i = i + 1
+    }
+    return black_box(count)
+}
+
+fn bench_memory_alloc() -> int {
+    // Memory allocation pressure: build and discard many small strings.
+    let iters = black_box(50000)
+    let mut total = 0
+    let mut i = 0
+    while i < iters {
+        let s = "item-" + string(i)
+        total = total + len(s)
+        i = i + 1
+    }
+    return black_box(total)
+}
+
+fn bench_memory_slice_grow() -> int {
+    // Slice growth pattern: append one-by-one forcing realloc.
+    let n = black_box(200000)
+    let mut a = make([]int, 0, 1)
+    let mut i = 0
+    while i < n {
+        a = append(a, i)
+        i = i + 1
+    }
+    return black_box(len(a))
+}
+
+fn bench_map_heavy() -> int {
+    // Map-heavy workload: insert, lookup, overwrite.
+    let n = black_box(100000)
+    let mut m = make(map[string]int)
+    let mut i = 0
+    while i < n {
+        m[string(i)] = i
+        i = i + 1
+    }
+    // Random lookups.
+    let mut sum = 0
+    i = 0
+    while i < n {
+        sum = sum + m[string(i)]
+        i = i + 1
+    }
+    return black_box(sum)
+}
+
+fn bench_string_processing() -> int {
+    // String processing: build, search, replace.
+    let base = str_repeat("abcdefghij", 1000)
+    let mut count = 0
+    let mut i = 0
+    while i < 100 {
+        if str_contains(base, "efgh") {
+            count = count + 1
+        }
+        i = i + 1
+    }
+    return black_box(count)
+}
+
+fn main() {
+    let t0 = now_ns()
+
+    let r1 = bench_cpu_fib()
+    let t1 = now_ns()
+
+    let r2 = bench_cpu_sieve()
+    let t2 = now_ns()
+
+    let r3 = bench_memory_alloc()
+    let t3 = now_ns()
+
+    let r4 = bench_memory_slice_grow()
+    let t4 = now_ns()
+
+    let r5 = bench_map_heavy()
+    let t5 = now_ns()
+
+    let r6 = bench_string_processing()
+    let t6 = now_ns()
+
+    print(f"cpu_fib35:       {(t1 - t0) / 1000000}ms  result={r1}")
+    print(f"cpu_sieve100k:   {(t2 - t1) / 1000000}ms  primes={r2}")
+    print(f"mem_alloc50k:    {(t3 - t2) / 1000000}ms  total_len={r3}")
+    print(f"mem_slice200k:   {(t4 - t3) / 1000000}ms  len={r4}")
+    print(f"map_heavy100k:   {(t5 - t4) / 1000000}ms  sum={r5}")
+    print(f"string_proc:     {(t6 - t5) / 1000000}ms  count={r6}")
+    print(f"total:           {(t6 - t0) / 1000000}ms")
+}

@@ -44,11 +44,23 @@ Book: [§11 Speed & memory safety](book/src/ch11-speed-safety.md) · Release how
 
 # HTTP throughput (requires wrk or hey):
 ./scripts/bench-http.sh
+
+# Compiler scaling (cold and cached checks, JSON output):
+python3 scripts/bench-compile.py --output out/compile-bench.json
+
+# Include full debug builds (requires the configured C compiler):
+python3 scripts/bench-compile.py --build --output out/compile-build-bench.json
 ```
 
 The CI bench gate verifies that three microkernels stay within 2× of a
 compiled baseline. This is a regression gate, not a general performance
-claim. Broader benchmarks are tracked in `scripts/bench-http.sh`.
+claim. Broader runtime benchmarks are tracked in `scripts/bench-http.sh`.
+Compiler fixtures cover exact 1k, 10k, and 100k source sizes across four
+project shapes. CI validates the complete generated matrix on Linux, exercises
+a 10k full build there, and records a 1k smoke sample on every platform without
+enforcing timing thresholds. See
+[`benchmarks/compile/README.md`](../benchmarks/compile/README.md) for the
+fixture definitions and focused-run options.
 
 The direct-native gate builds one output-validated workload with the Cranelift
 backend, the existing C backend, hand-written C, and Rust. It performs warmups,
@@ -183,6 +195,10 @@ These are built into the runtime and codegen — no user action required.
 | **Stack POD array lits** | `[a,b,c]` for int/float/bool/byte → stack buffer + `cap==0` view (no malloc/free). Escape heapifies. |
 | **Empty slices** | `[]` / `make([],0,0)` → no heap until first grow. |
 | **Cold free** | Slice free is `MAKO_UNLIKELY(cap>0)` — views and stack lits cost a predicted-not-taken branch. |
+| **Zero-alloc `print(f"...")`** | `print`, `log_info`, `log_warn`, `log_error`, `log_debug` with f-string args use `finish_view` — no malloc/free, the stack buffer is consumed directly. |
+| **Zero-alloc `http_respond(f"...")`** | `http_respond` and `http_respond_json` with f-string body use `finish_view` — response body built on stack, written to socket, no heap allocation. |
+| **`writev` print** | `print` uses a single `writev` syscall (data + newline) instead of `fwrite` + `fputc` + `fflush` (Unix). |
+| **Map probe hints** | Map get/has use `MAKO_LIKELY(FULL)` branch hints — first-probe hits skip the tombstone/empty check. |
 
 ## Memory & CPU practices
 

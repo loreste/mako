@@ -7,68 +7,400 @@
 #include "mako_rt.h"
 
 #if defined(_WIN32)
-/* Direct I/O primitives are POSIX-only for now. Windows reports unavailable. */
-typedef struct { int fd; } MakoMMap;
-static inline int64_t mako_file_open(MakoString p, int64_t m, int64_t f) { (void)p;(void)m;(void)f; return -1; }
-static inline int64_t mako_file_close(int64_t fd) { (void)fd; return -1; }
-static inline MakoString mako_pread(int64_t f, int64_t c, int64_t o) { (void)f;(void)c;(void)o; return mako_str_from_cstr(""); }
-static inline int64_t mako_pwrite(int64_t f, MakoString d, int64_t o) { (void)f;(void)d;(void)o; return -1; }
-static inline int64_t mako_file_append(int64_t f, MakoString d) { (void)f;(void)d; return -1; }
-static inline int64_t mako_file_append2(int64_t f, MakoString a, MakoString b) { (void)f;(void)a;(void)b; return -1; }
-static inline int64_t mako_file_append3(int64_t f, MakoString a, MakoString b, MakoString c) { (void)f;(void)a;(void)b;(void)c; return -1; }
-static inline int64_t mako_fsync(int64_t f) { (void)f; return -1; }
-static inline int64_t mako_fdatasync(int64_t f) { (void)f; return -1; }
-static inline int64_t mako_fallocate(int64_t f, int64_t s) { (void)f;(void)s; return -1; }
-static inline int64_t mako_file_size(int64_t f) { (void)f; return -1; }
-static inline int64_t mako_path_file_size(MakoString p) { (void)p; return -1; }
-static inline int64_t mako_file_truncate(int64_t f, int64_t s) { (void)f;(void)s; return -1; }
-static inline int64_t mako_file_seek(int64_t f, int64_t o, int64_t w) { (void)f;(void)o;(void)w; return -1; }
-static inline MakoString mako_file_read_exact(int64_t f, int64_t n) { (void)f;(void)n; return mako_str_from_cstr(""); }
-static inline int64_t mako_file_writev(int64_t f, MakoString *p, int64_t c) { (void)f;(void)p;(void)c; return -1; }
-static inline MakoMMap *mako_mmap_open(MakoString p, int64_t m) { (void)p;(void)m; return NULL; }
-static inline MakoMMap *mako_mmap_create(MakoString p, int64_t s) { (void)p;(void)s; return NULL; }
-static inline MakoString mako_mmap_read(MakoMMap *m, int64_t o, int64_t c) { (void)m;(void)o;(void)c; return mako_str_from_cstr(""); }
-static inline int64_t mako_mmap_write(MakoMMap *m, int64_t o, MakoString d) { (void)m;(void)o;(void)d; return -1; }
-static inline int64_t mako_mmap_sync(MakoMMap *m, int64_t f) { (void)m;(void)f; return -1; }
-static inline int64_t mako_mmap_size(MakoMMap *m) { (void)m; return -1; }
-static inline int64_t mako_mmap_close(MakoMMap *m) { (void)m; return -1; }
-typedef struct { int fd; char path[512]; } MakoWal;
-typedef struct { char *data; size_t size; } MakoPage;
-static inline MakoPage *mako_page_alloc(int64_t s) {
-    size_t n = s > 0 ? (size_t)s : 4096;
-    MakoPage *p = (MakoPage *)calloc(1, sizeof(MakoPage));
-    if (!p) return NULL;
-    p->data = (char *)calloc(1, n);
-    if (!p->data) { free(p); return NULL; }
-    p->size = n;
-    return p;
+#include <malloc.h>
+
+/* Windows uses native file handles behind CRT descriptors so the public
+ * descriptor API stays compatible with the POSIX implementation. */
+static inline HANDLE mako_win_file_handle(int64_t fd) {
+    if (fd < 0 || fd > INT_MAX) return INVALID_HANDLE_VALUE;
+    intptr_t raw = _get_osfhandle((int)fd);
+    return raw == -1 ? INVALID_HANDLE_VALUE : (HANDLE)raw;
 }
-static inline int64_t mako_page_size(MakoPage *p) { return p ? (int64_t)p->size : -1; }
-static inline int64_t mako_page_write(MakoPage *p, int64_t o, MakoString d) {
-    if (!p || !p->data || o < 0 || (size_t)o + d.len > p->size) return -1;
-    if (d.len && d.data) memcpy(p->data + (size_t)o, d.data, d.len);
-    return (int64_t)d.len;
+
+static inline size_t mako_win_file_alignment(HANDLE handle) {
+    FILE_ALIGNMENT_INFO info;
+    if (GetFileInformationByHandleEx(
+            handle, FileAlignmentInfo, &info, sizeof(info))) {
+        size_t alignment = (size_t)info.AlignmentRequirement + 1;
+        if (alignment >= sizeof(void *) && (alignment & (alignment - 1)) == 0) {
+            return alignment;
+        }
+    }
+    return 4096;
 }
-static inline MakoString mako_page_read(MakoPage *p, int64_t o, int64_t c) {
-    if (!p || !p->data || o < 0 || c < 0 || (size_t)o >= p->size) return mako_str_from_cstr("");
-    size_t n = (size_t)c;
-    if ((size_t)o + n > p->size) n = p->size - (size_t)o;
-    char *b = (char *)malloc(n + 1);
-    if (!b) return mako_str_from_cstr("");
-    if (n) memcpy(b, p->data + (size_t)o, n);
-    b[n] = 0;
-    return (MakoString){b, n};
+
+static inline int64_t mako_file_open(MakoString path, int64_t mode, int64_t flags) {
+    char pbuf[4096];
+    if (mako_fs_path_buf(path, pbuf, sizeof(pbuf)) < 0) return -1;
+
+    DWORD access = mode == 0 ? GENERIC_READ : GENERIC_WRITE;
+    if (mode == 2) access = GENERIC_READ | GENERIC_WRITE;
+    if (flags & (1 | 2)) access |= GENERIC_WRITE;
+
+    DWORD disposition = OPEN_EXISTING;
+    if ((flags & 1) && (flags & 32)) disposition = CREATE_NEW;
+    else if ((flags & 1) && (flags & 2)) disposition = CREATE_ALWAYS;
+    else if (flags & 1) disposition = OPEN_ALWAYS;
+    else if (flags & 2) disposition = TRUNCATE_EXISTING;
+
+    DWORD attrs = FILE_ATTRIBUTE_NORMAL;
+    if (flags & 8) attrs |= FILE_FLAG_WRITE_THROUGH;
+    if (flags & 16) attrs |= FILE_FLAG_NO_BUFFERING;
+    HANDLE handle = CreateFileA(pbuf, access,
+                                FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                                NULL, disposition, attrs, NULL);
+    if (handle == INVALID_HANDLE_VALUE) return -1;
+
+    int crt_flags = _O_BINARY | _O_NOINHERIT;
+    if (mode == 0) crt_flags |= _O_RDONLY;
+    else if (mode == 1) crt_flags |= _O_WRONLY;
+    else crt_flags |= _O_RDWR;
+    if (flags & 4) crt_flags |= _O_APPEND;
+    int fd = _open_osfhandle((intptr_t)handle, crt_flags);
+    if (fd < 0) {
+        CloseHandle(handle);
+        return -1;
+    }
+    return (int64_t)fd;
 }
-static inline int64_t mako_page_free(MakoPage *p) {
-    if (!p) return 0; free(p->data); free(p); return 0;
+
+static inline int64_t mako_file_close(int64_t fd) {
+    if (fd < 0 || fd > INT_MAX) return -1;
+    return _close((int)fd) == 0 ? 0 : -1;
 }
-static inline MakoWal *mako_wal_open(MakoString p) { (void)p; return NULL; }
-static inline int64_t mako_wal_append(MakoWal *w, MakoString r) { (void)w;(void)r; return -1; }
-static inline int64_t mako_wal_sync(MakoWal *w) { (void)w; return -1; }
-static inline int64_t mako_wal_size(MakoWal *w) { (void)w; return -1; }
-static inline MakoString mako_wal_read_at(MakoWal *w, int64_t o) { (void)w;(void)o; return mako_str_from_cstr(""); }
-static inline int64_t mako_wal_next_off(void) { return -1; }
-static inline int64_t mako_wal_close(MakoWal *w) { free(w); return 0; }
+
+static inline MakoString mako_pread(int64_t fd, int64_t count, int64_t offset) {
+    if (fd < 0 || count <= 0 || offset < 0 || (uint64_t)count >= (uint64_t)SIZE_MAX) {
+        return mako_str_from_cstr("");
+    }
+    if ((uint64_t)count > (uint64_t)INT64_MAX - (uint64_t)offset) {
+        return mako_str_from_cstr("");
+    }
+    HANDLE handle = mako_win_file_handle(fd);
+    if (handle == INVALID_HANDLE_VALUE) return mako_str_from_cstr("");
+    char *buf = (char *)malloc((size_t)count + 1);
+    if (!buf) return mako_str_from_cstr("");
+
+    size_t total = 0;
+    while (total < (size_t)count) {
+        size_t remaining = (size_t)count - total;
+        DWORD chunk = remaining > 0x7ffff000U ? 0x7ffff000U : (DWORD)remaining;
+        uint64_t pos = (uint64_t)offset + (uint64_t)total;
+        OVERLAPPED ov;
+        memset(&ov, 0, sizeof(ov));
+        ov.Offset = (DWORD)pos;
+        ov.OffsetHigh = (DWORD)(pos >> 32);
+        DWORD got = 0;
+        if (!ReadFile(handle, buf + total, chunk, &got, &ov)) {
+            DWORD error = GetLastError();
+            if (error == ERROR_INVALID_PARAMETER) {
+                size_t alignment = mako_win_file_alignment(handle);
+                if ((pos & (alignment - 1)) != 0 ||
+                    ((size_t)chunk & (alignment - 1)) != 0) {
+                    free(buf);
+                    return mako_str_from_cstr("");
+                }
+                void *aligned = _aligned_malloc((size_t)chunk, alignment);
+                if (!aligned) {
+                    free(buf);
+                    return mako_str_from_cstr("");
+                }
+                BOOL ok = ReadFile(handle, aligned, chunk, &got, &ov);
+                if (ok && got > 0) memcpy(buf + total, aligned, got);
+                _aligned_free(aligned);
+                if (!ok) {
+                    free(buf);
+                    return mako_str_from_cstr("");
+                }
+            } else if (error != ERROR_HANDLE_EOF) {
+                free(buf);
+                return mako_str_from_cstr("");
+            } else {
+                break;
+            }
+        }
+        total += (size_t)got;
+        if (got < chunk) break;
+    }
+    if (total == 0) {
+        free(buf);
+        return mako_str_from_cstr("");
+    }
+    buf[total] = 0;
+    return (MakoString){buf, total};
+}
+
+static inline int64_t mako_pwrite(int64_t fd, MakoString data, int64_t offset) {
+    if (fd < 0 || !data.data || data.len == 0 || offset < 0) return -1;
+    if ((uint64_t)data.len > (uint64_t)INT64_MAX - (uint64_t)offset) return -1;
+    HANDLE handle = mako_win_file_handle(fd);
+    if (handle == INVALID_HANDLE_VALUE) return -1;
+
+    size_t total = 0;
+    while (total < data.len) {
+        size_t remaining = data.len - total;
+        DWORD chunk = remaining > 0x7ffff000U ? 0x7ffff000U : (DWORD)remaining;
+        uint64_t pos = (uint64_t)offset + (uint64_t)total;
+        OVERLAPPED ov;
+        memset(&ov, 0, sizeof(ov));
+        ov.Offset = (DWORD)pos;
+        ov.OffsetHigh = (DWORD)(pos >> 32);
+        DWORD wrote = 0;
+        BOOL ok = WriteFile(handle, data.data + total, chunk, &wrote, &ov);
+        if (!ok && GetLastError() == ERROR_INVALID_PARAMETER) {
+            size_t alignment = mako_win_file_alignment(handle);
+            if ((pos & (alignment - 1)) == 0 &&
+                ((size_t)chunk & (alignment - 1)) == 0) {
+                void *aligned = _aligned_malloc((size_t)chunk, alignment);
+                if (aligned) {
+                    memcpy(aligned, data.data + total, chunk);
+                    ok = WriteFile(handle, aligned, chunk, &wrote, &ov);
+                    _aligned_free(aligned);
+                }
+            }
+        }
+        if (!ok || wrote == 0) {
+            return total > 0 ? (int64_t)total : -1;
+        }
+        total += (size_t)wrote;
+    }
+    return (int64_t)total;
+}
+
+static inline int64_t mako_file_append(int64_t fd, MakoString data) {
+    if (fd < 0 || !data.data || data.len == 0 || fd > INT_MAX) return -1;
+    size_t total = 0;
+    while (total < data.len) {
+        size_t remaining = data.len - total;
+        unsigned int chunk = remaining > 0x7ffff000U ? 0x7ffff000U : (unsigned int)remaining;
+        int wrote = _write((int)fd, data.data + total, chunk);
+        if (wrote <= 0) return total > 0 ? (int64_t)total : -1;
+        total += (size_t)wrote;
+    }
+    return (int64_t)total;
+}
+
+static inline int64_t mako_file_writev(int64_t fd, MakoString *parts, int64_t count) {
+    if (fd < 0 || !parts || count <= 0) return -1;
+    size_t total = 0;
+    for (int64_t i = 0; i < count; i++) {
+        if (parts[i].len > SIZE_MAX - total) return -1;
+        total += parts[i].len;
+    }
+    if (total == 0) return 0;
+    char *buf = (char *)malloc(total);
+    if (!buf) return -1;
+    size_t off = 0;
+    for (int64_t i = 0; i < count; i++) {
+        if (parts[i].len > 0 && !parts[i].data) {
+            free(buf);
+            return -1;
+        }
+        if (parts[i].len > 0) memcpy(buf + off, parts[i].data, parts[i].len);
+        off += parts[i].len;
+    }
+    int64_t wrote = mako_file_append(fd, (MakoString){buf, total});
+    free(buf);
+    return wrote;
+}
+
+static inline int64_t mako_file_append2(int64_t fd, MakoString a, MakoString b) {
+    MakoString parts[2] = {a, b};
+    return mako_file_writev(fd, parts, 2);
+}
+
+static inline int64_t mako_file_append3(int64_t fd, MakoString a, MakoString b, MakoString c) {
+    MakoString parts[3] = {a, b, c};
+    return mako_file_writev(fd, parts, 3);
+}
+
+static inline int64_t mako_fsync(int64_t fd) {
+    HANDLE handle = mako_win_file_handle(fd);
+    if (handle == INVALID_HANDLE_VALUE) return -1;
+    return FlushFileBuffers(handle) ? 0 : -1;
+}
+
+static inline int64_t mako_fdatasync(int64_t fd) {
+    return mako_fsync(fd);
+}
+
+static inline int64_t mako_fallocate(int64_t fd, int64_t size) {
+    if (fd < 0 || fd > INT_MAX || size <= 0) return -1;
+    __int64 current = _filelengthi64((int)fd);
+    if (current < 0) return -1;
+    if (current >= size) return 0;
+
+    HANDLE handle = mako_win_file_handle(fd);
+    if (handle == INVALID_HANDLE_VALUE) return -1;
+    FILE_ALLOCATION_INFO allocation;
+    allocation.AllocationSize.QuadPart = size;
+    if (!SetFileInformationByHandle(
+            handle, FileAllocationInfo, &allocation, sizeof(allocation))) {
+        return -1;
+    }
+    return _chsize_s((int)fd, (__int64)size) == 0 ? 0 : -1;
+}
+
+static inline int64_t mako_file_size(int64_t fd) {
+    if (fd < 0 || fd > INT_MAX) return -1;
+    __int64 size = _filelengthi64((int)fd);
+    return size < 0 ? -1 : (int64_t)size;
+}
+
+static inline int64_t mako_path_file_size(MakoString path) {
+    char pbuf[4096];
+    if (mako_fs_path_buf(path, pbuf, sizeof(pbuf)) < 0) return -1;
+    WIN32_FILE_ATTRIBUTE_DATA data;
+    if (!GetFileAttributesExA(pbuf, GetFileExInfoStandard, &data)) return -1;
+    ULARGE_INTEGER size;
+    size.HighPart = data.nFileSizeHigh;
+    size.LowPart = data.nFileSizeLow;
+    return size.QuadPart > INT64_MAX ? -1 : (int64_t)size.QuadPart;
+}
+
+static inline int64_t mako_file_truncate(int64_t fd, int64_t size) {
+    if (fd < 0 || fd > INT_MAX || size < 0) return -1;
+    return _chsize_s((int)fd, (__int64)size) == 0 ? 0 : -1;
+}
+
+static inline int64_t mako_file_seek(int64_t fd, int64_t offset, int64_t whence) {
+    if (fd < 0 || fd > INT_MAX) return -1;
+    int origin = whence == 1 ? SEEK_CUR : (whence == 2 ? SEEK_END : SEEK_SET);
+    __int64 pos = _lseeki64((int)fd, (__int64)offset, origin);
+    return pos < 0 ? -1 : (int64_t)pos;
+}
+
+static inline MakoString mako_file_read_exact(int64_t fd, int64_t count) {
+    if (fd < 0 || fd > INT_MAX || count <= 0 || (uint64_t)count >= (uint64_t)SIZE_MAX) {
+        return mako_str_from_cstr("");
+    }
+    char *buf = (char *)malloc((size_t)count + 1);
+    if (!buf) return mako_str_from_cstr("");
+    size_t total = 0;
+    while (total < (size_t)count) {
+        size_t remaining = (size_t)count - total;
+        unsigned int chunk = remaining > 0x7ffff000U ? 0x7ffff000U : (unsigned int)remaining;
+        int got = _read((int)fd, buf + total, chunk);
+        if (got <= 0) break;
+        total += (size_t)got;
+    }
+    if (total == 0) {
+        free(buf);
+        return mako_str_from_cstr("");
+    }
+    buf[total] = 0;
+    return (MakoString){buf, total};
+}
+
+typedef struct {
+    void *ptr;
+    size_t length;
+    int fd;
+    HANDLE mapping;
+    int writable;
+} MakoMMap;
+
+static inline MakoMMap *mako_win_mmap(int fd, int64_t mode) {
+    if (mode < 0 || mode > 2) return NULL;
+    int64_t size = mako_file_size(fd);
+    if (size <= 0 || (uint64_t)size > (uint64_t)SIZE_MAX) return NULL;
+    HANDLE file = mako_win_file_handle(fd);
+    if (file == INVALID_HANDLE_VALUE) return NULL;
+
+    DWORD protect = PAGE_READONLY;
+    DWORD access = FILE_MAP_READ;
+    if (mode == 1) {
+        protect = PAGE_READWRITE;
+        access = FILE_MAP_READ | FILE_MAP_WRITE;
+    } else if (mode == 2) {
+        protect = PAGE_WRITECOPY;
+        access = FILE_MAP_COPY;
+    }
+    HANDLE mapping = CreateFileMappingA(file, NULL, protect, 0, 0, NULL);
+    if (!mapping) return NULL;
+    void *ptr = MapViewOfFile(mapping, access, 0, 0, 0);
+    if (!ptr) {
+        CloseHandle(mapping);
+        return NULL;
+    }
+    MakoMMap *m = (MakoMMap *)calloc(1, sizeof(MakoMMap));
+    if (!m) {
+        UnmapViewOfFile(ptr);
+        CloseHandle(mapping);
+        return NULL;
+    }
+    m->ptr = ptr;
+    m->length = (size_t)size;
+    m->fd = fd;
+    m->mapping = mapping;
+    m->writable = mode != 0;
+    return m;
+}
+
+static inline MakoMMap *mako_mmap_open(MakoString path, int64_t mode) {
+    if (mode < 0 || mode > 2) return NULL;
+    int open_mode = mode == 0 ? 0 : 2;
+    int64_t fd = mako_file_open(path, open_mode, 0);
+    if (fd < 0) return NULL;
+    MakoMMap *m = mako_win_mmap((int)fd, mode);
+    if (!m) mako_file_close(fd);
+    return m;
+}
+
+static inline MakoMMap *mako_mmap_create(MakoString path, int64_t size) {
+    if (size <= 0) return NULL;
+    int64_t fd = mako_file_open(path, 2, 1 | 2);
+    if (fd < 0) return NULL;
+    if (mako_file_truncate(fd, size) != 0) {
+        mako_file_close(fd);
+        return NULL;
+    }
+    MakoMMap *m = mako_win_mmap((int)fd, 1);
+    if (!m) mako_file_close(fd);
+    return m;
+}
+
+static inline MakoString mako_mmap_read(MakoMMap *m, int64_t offset, int64_t count) {
+    if (!m || !m->ptr || offset < 0 || count <= 0 || (uint64_t)offset >= m->length) {
+        return mako_str_from_cstr("");
+    }
+    size_t available = m->length - (size_t)offset;
+    size_t n = (uint64_t)count > available ? available : (size_t)count;
+    char *buf = (char *)malloc(n + 1);
+    if (!buf) return mako_str_from_cstr("");
+    memcpy(buf, (char *)m->ptr + (size_t)offset, n);
+    buf[n] = 0;
+    return (MakoString){buf, n};
+}
+
+static inline int64_t mako_mmap_write(MakoMMap *m, int64_t offset, MakoString data) {
+    if (!m || !m->ptr || !m->writable || offset < 0 || !data.data) return -1;
+    if ((uint64_t)offset > m->length || data.len > m->length - (size_t)offset) return -1;
+    if (data.len > 0) memcpy((char *)m->ptr + (size_t)offset, data.data, data.len);
+    return (int64_t)data.len;
+}
+
+static inline int64_t mako_mmap_sync(MakoMMap *m, int64_t flags) {
+    if (!m || !m->ptr) return -1;
+    if (!FlushViewOfFile(m->ptr, m->length)) return -1;
+    if ((flags & 1) && mako_fsync(m->fd) != 0) return -1;
+    return 0;
+}
+
+static inline int64_t mako_mmap_size(MakoMMap *m) {
+    return m ? (int64_t)m->length : 0;
+}
+
+static inline int64_t mako_mmap_close(MakoMMap *m) {
+    if (!m) return -1;
+    int ok = 1;
+    if (m->ptr && !UnmapViewOfFile(m->ptr)) ok = 0;
+    if (m->mapping && !CloseHandle(m->mapping)) ok = 0;
+    if (m->fd >= 0 && mako_file_close(m->fd) != 0) ok = 0;
+    free(m);
+    return ok ? 0 : -1;
+}
+
 #else /* POSIX */
 
 /* macOS fcntl constants — use raw values to avoid _DARWIN_C_SOURCE ordering issues */
@@ -218,11 +550,13 @@ typedef struct {
     void *ptr;
     size_t length;
     int fd;
+    int writable;
 } MakoMMap;
 
 /* Memory-map a file. mode: 0=read-only, 1=read-write, 2=private (copy-on-write).
  * Returns MakoMMap pointer or NULL. */
 static inline MakoMMap *mako_mmap_open(MakoString path, int64_t mode) {
+    if (mode < 0 || mode > 2) return NULL;
     char pbuf[4096];
     if (!path.data || path.len >= sizeof(pbuf)) return NULL;
     memcpy(pbuf, path.data, path.len);
@@ -250,6 +584,7 @@ static inline MakoMMap *mako_mmap_open(MakoString path, int64_t mode) {
     m->ptr = ptr;
     m->length = len;
     m->fd = fd;
+    m->writable = mode != 0;
     return m;
 }
 
@@ -274,29 +609,30 @@ static inline MakoMMap *mako_mmap_create(MakoString path, int64_t size) {
     m->ptr = ptr;
     m->length = (size_t)size;
     m->fd = fd;
+    m->writable = 1;
     return m;
 }
 
 /* Read bytes from mmap at offset. Zero-copy — returns a view into the mapped region. */
 static inline MakoString mako_mmap_read(MakoMMap *m, int64_t offset, int64_t count) {
-    if (!m || !m->ptr || offset < 0) return mako_str_from_cstr("");
-    if ((size_t)(offset + count) > m->length) {
-        count = (int64_t)(m->length - (size_t)offset);
+    if (!m || !m->ptr || offset < 0 || count <= 0 || (uint64_t)offset >= m->length) {
+        return mako_str_from_cstr("");
     }
-    if (count <= 0) return mako_str_from_cstr("");
+    size_t available = m->length - (size_t)offset;
+    size_t n = (uint64_t)count > available ? available : (size_t)count;
     /* Return a copy (safe across potential remap) */
-    char *buf = (char *)malloc((size_t)count + 1);
+    char *buf = (char *)malloc(n + 1);
     if (!buf) return mako_str_from_cstr("");
-    memcpy(buf, (char *)m->ptr + offset, (size_t)count);
-    buf[count] = 0;
-    return (MakoString){buf, (size_t)count};
+    memcpy(buf, (char *)m->ptr + (size_t)offset, n);
+    buf[n] = 0;
+    return (MakoString){buf, n};
 }
 
 /* Write bytes into mmap at offset. Direct memory write — very fast. */
 static inline int64_t mako_mmap_write(MakoMMap *m, int64_t offset, MakoString data) {
-    if (!m || !m->ptr || offset < 0 || !data.data) return -1;
-    if ((size_t)(offset + (int64_t)data.len) > m->length) return -1;
-    memcpy((char *)m->ptr + offset, data.data, data.len);
+    if (!m || !m->ptr || !m->writable || offset < 0 || !data.data) return -1;
+    if ((uint64_t)offset > m->length || data.len > m->length - (size_t)offset) return -1;
+    memcpy((char *)m->ptr + (size_t)offset, data.data, data.len);
     return (int64_t)data.len;
 }
 
@@ -450,6 +786,8 @@ static inline MakoString mako_file_read_exact(int64_t fd, int64_t count) {
     return (MakoString){buf, total};
 }
 
+#endif /* platform-specific file and mmap operations */
+
 /* ---- Storage primitives seed: fixed pages + WAL append log ---- */
 
 #ifndef MAKO_PAGE_SIZE_DEFAULT
@@ -480,17 +818,17 @@ static inline int64_t mako_page_size(MakoPage *p) {
 }
 
 static inline int64_t mako_page_write(MakoPage *p, int64_t off, MakoString data) {
-    if (!p || !p->data || off < 0) return -1;
-    if ((size_t)off + data.len > p->size) return -1;
+    if (!p || !p->data || off < 0 || (data.len > 0 && !data.data)) return -1;
+    if ((uint64_t)off > p->size || data.len > p->size - (size_t)off) return -1;
     if (data.len && data.data) memcpy(p->data + (size_t)off, data.data, data.len);
     return (int64_t)data.len;
 }
 
 static inline MakoString mako_page_read(MakoPage *p, int64_t off, int64_t count) {
     if (!p || !p->data || off < 0 || count < 0) return mako_str_from_cstr("");
-    if ((size_t)off >= p->size) return mako_str_from_cstr("");
-    size_t n = (size_t)count;
-    if ((size_t)off + n > p->size) n = p->size - (size_t)off;
+    if ((uint64_t)off >= p->size) return mako_str_from_cstr("");
+    size_t available = p->size - (size_t)off;
+    size_t n = (uint64_t)count > available ? available : (size_t)count;
     char *d = (char *)malloc(n + 1);
     if (!d) return mako_str_from_cstr("");
     if (n) memcpy(d, p->data + (size_t)off, n);
@@ -512,29 +850,23 @@ typedef struct {
 } MakoWal;
 
 static inline MakoWal *mako_wal_open(MakoString path) {
-    if (!path.data || path.len == 0 || path.len >= 500) return NULL;
-#if defined(_WIN32)
-    return NULL;
-#else
+    if (!path.data || path.len == 0 || path.len >= sizeof(((MakoWal *)0)->path)) return NULL;
+    int64_t fd = mako_file_open(path, 2, 1 | 4);
+    if (fd < 0) return NULL;
     MakoWal *w = (MakoWal *)calloc(1, sizeof(MakoWal));
-    if (!w) return NULL;
-    memcpy(w->path, path.data, path.len);
-    w->path[path.len] = 0;
-    w->fd = open(w->path, O_RDWR | O_CREAT, 0644);
-    if (w->fd < 0) {
-        free(w);
+    if (!w) {
+        mako_file_close(fd);
         return NULL;
     }
+    w->fd = (int)fd;
+    memcpy(w->path, path.data, path.len);
+    w->path[path.len] = 0;
     return w;
-#endif
 }
 
 /* Append one record: [u32 le len][bytes]. Returns 0 ok, -1 fail. */
 static inline int64_t mako_wal_append(MakoWal *w, MakoString rec) {
-    if (!w || w->fd < 0) return -1;
-#if defined(_WIN32)
-    return -1;
-#else
+    if (!w || w->fd < 0 || rec.len > UINT32_MAX || (rec.len > 0 && !rec.data)) return -1;
     uint32_t len = (uint32_t)rec.len;
     unsigned char hdr[4] = {
         (unsigned char)(len & 0xff),
@@ -542,35 +874,19 @@ static inline int64_t mako_wal_append(MakoWal *w, MakoString rec) {
         (unsigned char)((len >> 16) & 0xff),
         (unsigned char)((len >> 24) & 0xff),
     };
-    if (write(w->fd, hdr, 4) != 4) return -1;
-    if (len > 0) {
-        if (!rec.data) return -1;
-        if (write(w->fd, rec.data, len) != (ssize_t)len) return -1;
-    }
-    return 0;
-#endif
+    MakoString header = {(char *)hdr, sizeof(hdr)};
+    int64_t wrote = rec.len > 0 ? mako_file_append2(w->fd, header, rec)
+                                : mako_file_append(w->fd, header);
+    return wrote == (int64_t)(sizeof(hdr) + rec.len) ? 0 : -1;
 }
 
 static inline int64_t mako_wal_sync(MakoWal *w) {
-    if (!w || w->fd < 0) return -1;
-#if defined(_WIN32)
-    return -1;
-#else
-    return fsync(w->fd) == 0 ? 0 : -1;
-#endif
+    return w && w->fd >= 0 ? mako_fsync(w->fd) : -1;
 }
 
 /* Byte length of WAL file. */
 static inline int64_t mako_wal_size(MakoWal *w) {
-    if (!w || w->fd < 0) return -1;
-#if defined(_WIN32)
-    return -1;
-#else
-    off_t cur = lseek(w->fd, 0, SEEK_CUR);
-    off_t end = lseek(w->fd, 0, SEEK_END);
-    if (cur >= 0) lseek(w->fd, cur, SEEK_SET);
-    return (int64_t)end;
-#endif
+    return w && w->fd >= 0 ? mako_file_size(w->fd) : -1;
 }
 
 /* Last next-offset after wal_read_at (thread-local). */
@@ -585,42 +901,35 @@ static inline int64_t mako_wal_next_off(void) {
 static inline MakoString mako_wal_read_at(MakoWal *w, int64_t off) {
     mako_wal_last_next_off = -1;
     if (!w || w->fd < 0 || off < 0) return mako_str_from_cstr("");
-#if defined(_WIN32)
-    return mako_str_from_cstr("");
-#else
-    if (lseek(w->fd, (off_t)off, SEEK_SET) < 0) return mako_str_from_cstr("");
-    unsigned char hdr[4];
-    if (read(w->fd, hdr, 4) != 4) return mako_str_from_cstr("");
+    MakoString header = mako_pread(w->fd, 4, off);
+    if (header.len != 4) {
+        mako_str_free(header);
+        return mako_str_from_cstr("");
+    }
+    const unsigned char *hdr = (const unsigned char *)header.data;
     uint32_t len = (uint32_t)hdr[0] | ((uint32_t)hdr[1] << 8) | ((uint32_t)hdr[2] << 16)
                    | ((uint32_t)hdr[3] << 24);
-    if (len > 64 * 1024 * 1024) return mako_str_from_cstr(""); /* sanity */
-    char *buf = (char *)malloc((size_t)len + 1);
-    if (!buf) return mako_str_from_cstr("");
-    size_t got = 0;
-    while (got < len) {
-        ssize_t n = read(w->fd, buf + got, len - got);
-        if (n <= 0) {
-            free(buf);
-            return mako_str_from_cstr("");
-        }
-        got += (size_t)n;
+    mako_str_free(header);
+    if (len > 64U * 1024U * 1024U) return mako_str_from_cstr("");
+    if (len == 0) {
+        mako_wal_last_next_off = off + 4;
+        return mako_str_from_cstr("");
     }
-    buf[len] = 0;
+    MakoString rec = mako_pread(w->fd, (int64_t)len, off + 4);
+    if (rec.len != len) {
+        mako_str_free(rec);
+        return mako_str_from_cstr("");
+    }
     mako_wal_last_next_off = off + 4 + (int64_t)len;
-    return (MakoString){buf, len};
-#endif
+    return rec;
 }
 
 static inline int64_t mako_wal_close(MakoWal *w) {
     if (!w) return 0;
-#if !defined(_WIN32)
-    if (w->fd >= 0) close(w->fd);
-#endif
+    int64_t result = w->fd >= 0 ? mako_file_close(w->fd) : 0;
     free(w);
-    return 0;
+    return result;
 }
-
-#endif /* !_WIN32 (POSIX) */
 
 /* ---- Hash index + transactional store seed (portable) ---- */
 
@@ -846,7 +1155,6 @@ static inline int64_t mako_store_rollback(MakoStore *s) {
 
 static inline int64_t mako_store_commit(MakoStore *s) {
     if (!s || !s->in_txn) return -1;
-#if !defined(_WIN32)
     if (s->wal) {
         /* Log one record per undo entry as "P,key,val" or "D,key" */
         for (int i = 0; i < s->undo_len; i++) {
@@ -868,9 +1176,6 @@ static inline int64_t mako_store_commit(MakoStore *s) {
         }
         if (mako_wal_sync(s->wal) != 0) return -1;
     }
-#else
-    (void)s;
-#endif
     s->undo_len = 0;
     s->in_txn = 0;
     return 0;

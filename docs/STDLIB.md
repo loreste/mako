@@ -2,7 +2,7 @@
 
 Batteries for **web and backends**, with naming conventions adapted to Mako.
 
-**Product tip:** **0.3.0**. Core stdlib packages (`io`, `encoding/json`,
+**Product tip:** **0.4.0**. Core stdlib packages (`io`, `encoding/json`,
 `context`, `collections`, `net/http`, `database/sql`) are now written in
 idiomatic Mako with generics and `mut self`. Lower-level surface remains
 builtins over C runtime headers.
@@ -217,7 +217,9 @@ Low-level unbuffered file operations and memory-mapped files (`runtime/mako_dio.
 | `hindex_*` | open-addressing int→int hash index |
 | `store_*` | transactional KV (`begin` / `commit` / `rollback`; optional WAL; `store_recover_wal`) |
 
-Tests: `dio_test.mko`, `storage_wal_test.mko`, `store_index_test.mko`, `domain_tracks_test.mko`.  
+Tests: `dio_test.mko`, `storage_portable_io_test.mko`,
+`windows_direct_io_test.mko`, `storage_wal_test.mko`, `store_index_test.mko`,
+`domain_tracks_test.mko`.
 Header: `runtime/mako_dio.h`.
 
 ---

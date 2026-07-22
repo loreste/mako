@@ -1,6 +1,6 @@
 # Mako Language Specification
 
-**Version:** 0.3.0
+**Version:** 0.4.0
 **Date:** 2026-07-13
 **Status:** Draft
 
@@ -2723,7 +2723,7 @@ LambdaExpr   = "|" [ ParamList ] "|" ( Expr | Block ) .
 ## Appendix C: Version Information
 
 ```
-mako version mako0.3.0 <os>/<arch>
+mako version mako0.4.0 <os>/<arch>
 ```
 
 The `mako version` command (also `mako --version` or `mako -V`) prints the

@@ -6131,21 +6131,7 @@ static inline void mako_map_ii_free(MakoMapII *m) {
     free(m);
 }
 
-static inline void mako_map_ss_free(MakoMapSS *m) {
-    if (!m) return;
-    for (size_t i = 0; i < m->cap; i++) {
-        if (m->state[i] == MAKO_MAP_FULL) {
-            mako_str_free(m->keys[i]);
-            m->keys[i].data = NULL; m->keys[i].len = 0;
-            mako_str_free(m->vals[i]);
-            m->vals[i].data = NULL; m->vals[i].len = 0;
-        }
-    }
-    free(m->state);
-    free(m->keys);
-    free(m->vals);
-    free(m);
-}
+/* mako_map_ss_free is defined in mako_rt.h */
 
 static inline void mako_map_if_free(MakoMapIF *m) {
     if (!m) return;

@@ -22,6 +22,7 @@
 | **0.2.4** | Soundness wave + residuals (SAFE/RT, speed, lock verify) | **Shipped** — [SOUNDNESS.md](SOUNDNESS.md) |
 | **0.2.5** | Memory safety audit, LSP, package integrity, honest docs | **Shipped** |
 | **0.3.0** | Cross-platform, CI green, ownership hardening | **Shipped** |
+| **0.4.0** | Performance — DCE, constant folding, runtime speed, lint | **Shipped** |
 | **0.4.5** | Native compiler language gate + Linux packaging | **Language gate done** — packaging/perf remaining |
 | **1.0** | Stability | Planned |
 
@@ -74,7 +75,7 @@ Optional depth (TSan soaks, monomorph take-send) remains open.
 | RT-001 | Crew exit / cancel / failure | **Done** |
 | RT-002…003 | Bounded scheduler / `spawn_blocking` | **Done** (seed) |
 | RT-004 | Channel send ownership (clone/take/timeout) | **Done** (core) |
-| RT-005 | Channel/select stress | **Seed shipped** |
+| RT-005 | Seeded channel/select stress with TSan replay | **Done** (core) |
 | RT-006 | Task/resource census APIs | **Done** |
 | Pkg lock | Build-time locked dep verification (PR #3) | **Done** |
 | Struct Own fields | Deep free of string/slice fields on drop | **Done** |
@@ -93,7 +94,7 @@ Optional depth (TSan soaks, monomorph take-send) remains open.
 1. Longer TSan soak jobs on capture matrix (CI optional).
 2. RT-004 monomorph channel take matrix beyond int/float/string.
 3. Deeper scheduler (work-stealing / dynamic resize) if pool soaks demand it.
-4. **RT-005** — randomized longer select/channel soaks.
+4. Longer channel/select soaks with additional seeds.
 5. Make discarded bag cleanup type-complete when typed expression metadata reaches codegen.
 
 ---
@@ -266,6 +267,7 @@ Move beyond what the C backend can give.
 | **Interface devirtualization** | Inline interface calls when the concrete type is known |
 | **Closure inlining** | Inline small closures at call sites |
 | **LLVM backend** | Optional direct LLVM IR emission for targets where clang is slow or unavailable |
+| **Direct machine-code backend** | Compile Mako IR directly to native object code, bypassing the source-to-Clang pipeline; staged by target with parity, debug-info, linker, and safety-gate requirements |
 
 ---
 

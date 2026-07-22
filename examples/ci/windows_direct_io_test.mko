@@ -1,0 +1,12 @@
+fn TestWindowsDirectIo() {
+    let path = path_join(temp_dir(), "mako_windows_direct_io.bin")
+    let _ = remove_file(path)
+    let block = str_repeat("D", 4096)
+    let fd = file_open(path, 2, 19)
+    assert(fd >= 0)
+    assert_eq(pwrite(fd, block, 0), 4096)
+    assert_eq(fsync(fd), 0)
+    assert_eq_str(pread(fd, 4096, 0), block)
+    assert_eq(file_close(fd), 0)
+    assert_eq(remove_file(path), 0)
+}

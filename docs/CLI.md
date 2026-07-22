@@ -330,7 +330,7 @@ VS Code extension.
 ## mako version
 
 ```bash
-mako version                       # e.g. mako version mako0.3.0 darwin/arm64
+mako version                       # e.g. mako version mako0.4.0 darwin/arm64
 mako version -v                    # include git commit hash
 mako --version                     # same as mako version
 mako -V                            # same
@@ -452,7 +452,7 @@ mako pkg publish
 ### mako pkg seal
 
 Generate a `PACKAGE.sha256` content digest for a legacy package directory
-that was published before v0.3.0. This is trust-on-first-use: it
+that was published before v0.4.0. This is trust-on-first-use: it
 legitimizes whatever content currently exists. Run this only on packages
 whose content you have verified. Will not overwrite an existing digest.
 

@@ -1,9 +1,10 @@
 fn TestFileEnv() {
-    let path = "/tmp/mako_file_env_test2.txt"
+    let path = path_join(temp_dir(), "mako_file_env_test2.txt")
     assert_eq(write_file(path, "abc"), 0)
     let s = read_file(path)
     assert_eq(str_len(s), 3)
     assert_eq(env_set("MAKO_TEST_ENV2", "xy"), 0)
     let v = env_get("MAKO_TEST_ENV2")
     assert_eq(str_len(v), 2)
+    let _ = remove_file(path)
 }

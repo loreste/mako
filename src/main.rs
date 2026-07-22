@@ -3,6 +3,7 @@ mod ast;
 mod bundled_lld;
 mod cc;
 mod codegen;
+mod dce;
 mod desugar;
 mod diag;
 #[cfg(feature = "llvm-backend")]
@@ -152,6 +153,9 @@ enum Commands {
         /// Keep bounds checks on even in release (`always`)
         #[arg(long, value_enum, default_value_t = BoundsCli::Default)]
         bounds: BoundsCli,
+        /// Strip debug symbols from the binary (smaller deploy)
+        #[arg(long, default_value_t = false)]
+        strip: bool,
     },
     /// Watch `.mko` sources and rebuild+rerun on change (hot reload seed)
     Dev {
@@ -263,6 +267,9 @@ enum Commands {
         /// Flag dual/compat spellings (`func`, `:=`, `import`, …) as style — Mako flair preferred
         #[arg(long, default_value_t = false)]
         identity: bool,
+        /// Include shadowed variable warnings
+        #[arg(long, default_value_t = false)]
+        shadow: bool,
     },
     /// Time compile+run of bench_*.mko (workspace-aware; optional `-p`)
     Bench {
@@ -1124,7 +1131,11 @@ fn run(cli: Cli) -> Result<(), ()> {
             jobs,
             overflow,
             bounds,
+            strip,
         } => {
+            if strip {
+                std::env::set_var("MAKO_STRIP", "1");
+            }
             let static_link = effective_static_link(target.as_deref(), static_link, no_static_link);
             cmd_build(
                 &file,
@@ -1254,9 +1265,15 @@ fn run(cli: Cli) -> Result<(), ()> {
             path,
             package,
             identity,
-        } => cmd_tool_paths(&path, package.as_deref(), |member| {
-            tooling::run_lint(member, identity)
-        }),
+            shadow,
+        } => {
+            if shadow {
+                std::env::set_var("MAKO_LINT_SHADOW", "1");
+            }
+            cmd_tool_paths(&path, package.as_deref(), |member| {
+                tooling::run_lint(member, identity)
+            })
+        }
         Commands::Bench {
             path,
             package,
@@ -1907,6 +1924,16 @@ fn cmd_build(
                     OptLevel::Release => "release -O3 -flto",
                 }
             );
+        }
+        // Strip debug symbols when --strip is passed.
+        if std::env::var_os("MAKO_STRIP").is_some() && out_bin.exists() {
+            let status = std::process::Command::new("strip")
+                .arg(&out_bin)
+                .status();
+            match status {
+                Ok(s) if s.success() => {}
+                _ => eprintln!("warning: strip failed (binary still usable)"),
+            }
         }
         println!("built {}", out_bin.display());
     }
@@ -3228,6 +3255,19 @@ fn compile_to_ast_with(file: &Path, incr: &incremental::IncrOptions) -> Result<a
 fn compile_to_c_timed(file: &Path) -> Result<(String, f64), ()> {
     let t0 = Instant::now();
     let program = compile_to_ast(file)?;
+    // Lint warnings: unused imports, unreachable code, unused variables.
+    dce::warn_unused_imports(file, &program, &["main".into(), "mako_main".into()]);
+    dce::warn_unreachable_code(&program);
+    dce::warn_unused_variables(&program);
+    if std::env::var_os("MAKO_LINT_SHADOW").is_some() {
+        dce::warn_shadowed_variables(&program);
+    }
+    // Dead code elimination: remove unreachable functions before codegen.
+    let program = if std::env::var_os("MAKO_NO_DCE").is_none() {
+        dce::eliminate(&program, &["main".into(), "mako_main".into()])
+    } else {
+        program
+    };
     let mut cg = Codegen::new();
     cg.source_file = Some(file.display().to_string());
     if let Some(dir) = tooling::find_nearest_manifest_dir(file) {
@@ -3269,6 +3309,19 @@ fn build_incremental(
 
     let t0 = Instant::now();
     let program = compile_to_ast_with(file, incr)?;
+    // Lint warnings.
+    dce::warn_unused_imports(file, &program, &["main".into(), "mako_main".into()]);
+    dce::warn_unreachable_code(&program);
+    dce::warn_unused_variables(&program);
+    if std::env::var_os("MAKO_LINT_SHADOW").is_some() {
+        dce::warn_shadowed_variables(&program);
+    }
+    // Dead code elimination: remove unreachable functions before codegen.
+    let program = if std::env::var_os("MAKO_NO_DCE").is_none() {
+        dce::eliminate(&program, &["main".into(), "mako_main".into()])
+    } else {
+        program
+    };
     let frontend_ms = t0.elapsed().as_secs_f64() * 1000.0;
 
     if matches!(backend, BackendCli::Native | BackendCli::Llvm) {

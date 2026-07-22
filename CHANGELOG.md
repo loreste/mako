@@ -1,6 +1,71 @@
 # Changelog
 
-## Unreleased
+## 0.4.1 — 2026-07-22
+
+### Build
+
+- Keep debug type checking and code generation within the default Windows stack limit.
+- Add reproducible 1k, 10k, and 100k compiler-scaling fixtures for single-file,
+  multi-file, generic-heavy, and backend-shaped projects.
+- Use the system temporary directory in portable filesystem tests and make the
+  corrected Windows cases blocking in CI.
+- Fix Windows CI: skip plugin compilation test when `cc` is unavailable.
+
+### Runtime
+
+- Preserve task return values when joining native Windows worker threads.
+- Support file-descriptor I/O, memory maps, and write-ahead logs on Windows.
+- Align unbuffered Windows reads and writes without requiring aligned Mako strings.
+- Reject writes through read-only memory maps instead of faulting.
+- Zero-alloc `print(f"...")`, `log_*(f"...")`, `http_respond(f"...")`: f-string
+  bodies consumed directly from the stack buffer (no malloc/free).
+- `writev` print: single syscall for data+newline on Unix.
+- Stored hashes in string-keyed maps: skip `memcmp` on hash mismatch during probing.
+- Result/Option constructors use `= {0}` aggregate init instead of `memset`.
+- Fix memory leaks in `wrap_err`, `error_join`, `error_tag` (separator strings).
+- Map probe branch hints (`MAKO_LIKELY` on `FULL` state).
+- Faster integer hash (splitmix64 replaces wyhash for int-keyed maps).
+
+### Performance
+
+- Sort integer slices with inline introsort and linear sorted/reverse fast paths.
+- Avoid cloning map keys for literals, interpolation, concatenation, and integer
+  string conversions while retaining borrowed-key safety.
+- Zero-alloc `len(f"...")`: compute length from stack buffer without materializing.
+- Codegen skips redundant old-pointer save on `s = append(s, v)` self-append.
+
+## 0.4.0 — 2026-07-20
+
+**mako0.4.0** (`CARGO_PKG_VERSION`). 362 Mako tests + 80 Rust tests, 0 failures.
+
+### Performance
+
+- **Dead code elimination** — removes unreachable functions/structs/enums (default-on)
+- **99.8% C output reduction** — hello.mko: 30,184 → 64 lines generated C
+- **Demand-driven type helpers** — tuple/array/channel helpers only when used
+- **Fast int-to-string** — direct digit extraction, 24x faster than snprintf path
+- **Realloc string concat** — `mako_str_concat_own` reuses buffer on chained ops
+- **Compile-time string folding** — concat, contains, prefix, suffix, len, repeat, replace
+- **Compile-time boolean folding** — `true && false` → `false`
+- **Literal len folding** — `len("hello")` → `5`
+- **Demand-driven includes** — opt-in `MAKO_LEAN_INCLUDES=1`
+
+### Lint (`mako lint`)
+
+- **Unused imports** — warn when pull/import contributes no reachable functions
+- **Unreachable code** — warn on statements after return/break/continue
+- **Unused variables** — warn on unused `let` bindings (skip `_` prefix)
+- **Shadowed variables** — `mako lint --shadow` or `MAKO_LINT_SHADOW=1`
+
+### Concurrency
+
+- **Seeded channel/select stress:** thread-local select state, replayable seeds under TSan
+- Initialize shared select wakeup once without a data race
+
+### Build
+
+- **`--strip`** flag for smaller deploy binaries
+- **`MAKO_NO_DCE=1`** escape hatch to disable dead code elimination
 
 ### Ownership free
 

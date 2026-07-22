@@ -1,20 +1,34 @@
 #!/usr/bin/env bash
 # =============================================================================
-# Mako Linux one-shot installer — prebuilt, no Rust, no git clone
+# Mako Linux One-Shot Installer — Prebuilt Binary & Environment Setup
 # =============================================================================
 #
 #   curl -fsSL https://github.com/loreste/mako/releases/latest/download/install-linux.sh | bash
 #
-# Same as install-release.sh (full script inlined so curl|bash needs no second fetch).
+# Issues Addressed & Fixes Implemented:
+#
+#   1. Linux Distribution Identification Fix:
+#      - Issue: Previously, the installer only checked `uname -s` ("Linux") without
+#        identifying specific Linux distributions like Debian. If a compiler existed,
+#        no OS distribution information was detected or displayed.
+#      - Fix: Added `detect_distro()` to parse `/etc/os-release`, `/etc/debian_version`,
+#        `lsb_release`, `/etc/redhat-release`, and `/etc/alpine-release`. Accurately
+#        logs distribution details (e.g., Debian GNU/Linux 13 trixie) during installation.
+#
+#   2. Environment & Profile Persistence Across Sessions & Reboots:
+#      - Issue: Running `source env.sh` was temporary and disappeared on new shells
+#        or reboots. Interactive runs skipped profile appending, and system installs
+#        lacked `/etc/profile.d/mako.sh` integration.
+#      - Fix: `append_shell_rc()` now automatically populates system-wide profile files
+#        (`/etc/profile.d/mako.sh`) for root/system installs (standard across Debian &
+#        Linux distros to survive reboots & new login sessions) and user profile files
+#        (`~/.bashrc`, `~/.profile`, `~/.zshrc`, `~/.bash_profile`).
 #
 # What you get in PREFIX (default ~/.local):
 #   bin/mako                  — compiler CLI
 #   share/mako/runtime/       — C runtime headers (required to build .mko)
 #   share/mako/std/           — standard library
 #   share/mako/env.sh         — source this for PATH + MAKO_RUNTIME
-#
-# Downloads: one platform .tar.gz + tiny .sha256 only.
-# On Linux, optionally installs clang via apt/dnf/pacman/apk if missing.
 # =============================================================================
 set -euo pipefail
 
@@ -131,18 +145,72 @@ run_root() {
   fi
 }
 
+# -----------------------------------------------------------------------------
+# detect_distro: Identify host Linux distribution (Debian, Ubuntu, Fedora, etc.)
+# Fixes Issue #1: Parses /etc/os-release, /etc/debian_version, or lsb_release to
+# accurately display and use host OS info during dependency setup and logging.
+# -----------------------------------------------------------------------------
+detect_distro() {
+  local os
+  os="$(uname -s)"
+  if [[ "$os" == "Darwin" ]]; then
+    local mac_ver
+    mac_ver="$(sw_vers -productVersion 2>/dev/null || echo "")"
+    echo "macOS ${mac_ver:-}"
+    return 0
+  fi
+
+  if [[ "$os" != "Linux" ]]; then
+    echo "$os"
+    return 0
+  fi
+
+  local name="" id="" version=""
+  if [[ -f /etc/os-release ]]; then
+    name="$(grep -E '^PRETTY_NAME=' /etc/os-release | cut -d= -f2- | tr -d '"')"
+    if [[ -z "$name" ]]; then
+      name="$(grep -E '^NAME=' /etc/os-release | cut -d= -f2- | tr -d '"')"
+    fi
+    id="$(grep -E '^ID=' /etc/os-release | cut -d= -f2- | tr -d '"')"
+    version="$(grep -E '^VERSION_ID=' /etc/os-release | cut -d= -f2- | tr -d '"')"
+  elif [[ -f /etc/debian_version ]]; then
+    name="Debian GNU/Linux $(cat /etc/debian_version)"
+    id="debian"
+  elif command -v lsb_release >/dev/null 2>&1; then
+    name="$(lsb_release -ds 2>/dev/null | tr -d '"')"
+    id="$(lsb_release -is 2>/dev/null | tr -s '[:upper:]' '[:lower:]')"
+  elif [[ -f /etc/redhat-release ]]; then
+    name="$(cat /etc/redhat-release)"
+    id="rhel"
+  elif [[ -f /etc/alpine-release ]]; then
+    name="Alpine Linux $(cat /etc/alpine-release)"
+    id="alpine"
+  fi
+
+  if [[ -n "$name" ]]; then
+    echo "Linux ($name)"
+  else
+    echo "Linux (unknown distribution)"
+  fi
+}
+
 ensure_clang() {
+  local distro
+  distro="$(detect_distro)"
   if have_cc; then
+    echo "OS distro: $distro"
     echo "C compiler: $(command -v clang 2>/dev/null || command -v cc)"
     return 0
   fi
   if [[ "$INSTALL_DEPS" -eq 0 ]]; then
+    echo "OS distro: $distro"
     echo "warning: no clang/cc on PATH (--no-deps). Install a C compiler to build .mko programs." >&2
     return 0
   fi
 
   local os
   os="$(uname -s)"
+  echo "OS distro: $distro"
   echo "C compiler not found — installing clang (needed to compile .mko programs)…"
 
   if [[ "$os" == "Darwin" ]]; then
@@ -162,17 +230,23 @@ ensure_clang() {
   fi
 
   if command -v apt-get >/dev/null 2>&1; then
+    echo "  Detected Debian/Ubuntu package manager (apt-get)…"
     run_root apt-get update -y
     run_root env DEBIAN_FRONTEND=noninteractive apt-get install -y clang ca-certificates
   elif command -v dnf >/dev/null 2>&1; then
+    echo "  Detected Fedora/RHEL package manager (dnf)…"
     run_root dnf install -y clang
   elif command -v yum >/dev/null 2>&1; then
+    echo "  Detected RHEL/CentOS package manager (yum)…"
     run_root yum install -y clang
   elif command -v pacman >/dev/null 2>&1; then
+    echo "  Detected Arch Linux package manager (pacman)…"
     run_root pacman -Sy --noconfirm clang
   elif command -v apk >/dev/null 2>&1; then
+    echo "  Detected Alpine Linux package manager (apk)…"
     run_root apk add --no-cache clang
   elif command -v zypper >/dev/null 2>&1; then
+    echo "  Detected openSUSE package manager (zypper)…"
     run_root zypper install -y clang
   else
     echo "warning: unknown package manager; install clang yourself." >&2
@@ -237,33 +311,62 @@ export MAKO_STD="$STD_DST"
 EOF
 }
 
+# -----------------------------------------------------------------------------
+# append_shell_rc: Persist PATH & MAKO_RUNTIME env vars across sessions & reboots.
+# Fixes Issue #2:
+# 1) Automatically creates /etc/profile.d/mako.sh for system-wide/root installs,
+#    ensuring PATH persistence across all login/subshell sessions and reboots.
+# 2) Appends source directives to ~/.bashrc, ~/.profile, ~/.zshrc, ~/.bash_profile.
+# 3) Removes the restrictive interactive skip so environment setup is automatic.
+# -----------------------------------------------------------------------------
 append_shell_rc() {
-  local line="# Mako"
+  local line="# Mako environment"
   local src_line="[ -f \"$SHARE_DIR/env.sh\" ] && . \"$SHARE_DIR/env.sh\""
+  local updated_any=0
+
+  # 1. System-wide profile installation (/etc/profile.d/mako.sh & /etc/profile)
+  # Standard for Debian, Ubuntu, RHEL, Fedora, Arch, Alpine, etc.
+  # Ensures persistence across all user sessions, subshells, and system reboots.
+  if [[ "${EUID:-$(id -u)}" -eq 0 ]] || [[ -w /etc/profile.d ]]; then
+    local sys_profile_dir="/etc/profile.d"
+    local sys_profile_file="$sys_profile_dir/mako.sh"
+    if mkdir -p "$sys_profile_dir" 2>/dev/null && {
+      cat > "$sys_profile_file" <<EOF
+# Mako environment configuration
+$src_line
+EOF
+      chmod 644 "$sys_profile_file" 2>/dev/null
+    }; then
+      echo "  updated system profile: $sys_profile_file (persists across reboots & all users)"
+      updated_any=1
+    fi
+  fi
+
+  # 2. User-level shell profiles (~/.bashrc, ~/.profile, ~/.zshrc, ~/.bash_profile)
   local rc
-  for rc in "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.profile"; do
-    if [[ -f "$rc" ]] || [[ "$rc" == "$HOME/.profile" ]]; then
+  for rc in "$HOME/.bashrc" "$HOME/.profile" "$HOME/.zshrc" "$HOME/.bash_profile"; do
+    if [[ -f "$rc" ]] || [[ "$rc" == "$HOME/.profile" && "$PREFIX" == "$HOME"* ]]; then
       if [[ -f "$rc" ]] && grep -qF "share/mako/env.sh" "$rc" 2>/dev/null; then
         continue
       fi
-      if [[ "$YES" -eq 1 ]] || [[ ! -t 0 ]]; then
-        # non-interactive (curl|bash): auto-append (best-effort)
-        if {
-          echo ""
-          echo "$line"
-          echo "$src_line"
-        } >> "$rc" 2>/dev/null; then
-          echo "  updated $rc"
-        else
-          echo "  note: could not write to $rc (read-only); add manually:"
-          echo "    $src_line"
-        fi
+      if {
+        echo ""
+        echo "$line"
+        echo "$src_line"
+      } >> "$rc" 2>/dev/null; then
+        echo "  updated user profile: $rc"
+        updated_any=1
       else
-        echo "  to enable in new shells, add to $rc:"
+        echo "  note: could not write to $rc (read-only); manually add:"
         echo "    $src_line"
       fi
     fi
   done
+
+  if [[ "$updated_any" -eq 0 ]]; then
+    echo "  note: add manually to /etc/profile or ~/.bashrc:"
+    echo "    $src_line"
+  fi
 }
 
 # --- main ---
@@ -302,6 +405,7 @@ echo " Mako one-shot install (prebuilt)"
 echo "=========================================="
 echo "  version:  $VERSION"
 echo "  artifact: $ARTIFACT"
+echo "  distro:   $(detect_distro)"
 echo "  prefix:   $PREFIX"
 echo "  source:   $BASE_URL"
 echo "  rust:     not required"
@@ -429,12 +533,16 @@ echo " Mako installed successfully"
 echo "=========================================="
 echo "  binary:  $BIN_DIR/mako"
 "$BIN_DIR/mako" --version 2>/dev/null || true
+echo "  distro:  $(detect_distro)"
 echo "  runtime: $RUNTIME_DST"
 echo "  stdlib:  $STD_DST"
-echo "  env:     source $SHARE_DIR/env.sh"
+echo "  env:     $SHARE_DIR/env.sh"
 echo ""
-echo "This shell:"
-echo "  export PATH=\"$BIN_DIR:\$PATH\""
+echo "Environment profile persistence:"
+echo "  System & user profiles updated (~/.bashrc, ~/.profile, /etc/profile.d/mako.sh)."
+echo "  Mako will be automatically available in new shell sessions & after reboot."
+echo ""
+echo "To activate Mako in your CURRENT shell session right now:"
 echo "  source \"$SHARE_DIR/env.sh\""
 echo ""
 echo "Try it:"

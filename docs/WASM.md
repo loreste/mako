@@ -2,7 +2,7 @@
 
 Book: [§12 Cross-platform & WASI](book/src/ch12-cross-platform.md) · How-to: [howto/07-wasi.md](howto/07-wasi.md).
 
-**Product tip:** **0.3.0**. Browser/DOM bindings are planned for a future release.
+**Product tip:** **0.4.0**. Browser/DOM bindings are planned for a future release.
 
 ## Status
 

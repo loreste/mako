@@ -1,0 +1,102 @@
+fn portable_io_path(name: string) -> string {
+    return path_join(temp_dir(), name)
+}
+
+fn TestPortableDirectIo() {
+    let path = portable_io_path("mako_portable_dio.bin")
+    let _ = remove_file(path)
+    let fd = file_open(path, 2, 3)
+    assert(fd >= 0)
+    assert_eq(pwrite(fd, "ABCDEFGH", 0), 8)
+    assert_eq_str(pread(fd, 4, 2), "CDEF")
+    assert_eq(file_size(fd), 8)
+    assert_eq(file_seek(fd, 0, 0), 0)
+    assert_eq_str(file_read_exact(fd, 4), "ABCD")
+    assert_eq(file_truncate(fd, 4), 0)
+    assert_eq(file_size(fd), 4)
+    assert_eq(fsync(fd), 0)
+    assert_eq(file_close(fd), 0)
+
+    let append = file_open(path, 2, 4)
+    assert(append >= 0)
+    assert_eq(file_append2(append, "EF", "GH"), 4)
+    assert_eq(file_append3(append, "I", "J", "K"), 3)
+    assert_eq(fdatasync(append), 0)
+    assert_eq(file_close(append), 0)
+    assert_eq_str(read_file(path), "ABCDEFGHIJK")
+    assert_eq(remove_file(path), 0)
+}
+
+fn TestPortableExclusiveAndAllocate() {
+    let path = portable_io_path("mako_portable_exclusive.bin")
+    let _ = remove_file(path)
+    let fd = file_open(path, 2, 33)
+    assert(fd >= 0)
+    assert_eq(file_open(path, 2, 33), -1)
+    assert_eq(fallocate(fd, 4096), 0)
+    assert_eq(file_size(fd), 4096)
+    assert_eq(path_file_size(path), 4096)
+    assert_eq(file_close(fd), 0)
+    assert_eq(remove_file(path), 0)
+}
+
+fn TestPortableMmap() {
+    let path = portable_io_path("mako_portable_mmap.bin")
+    let _ = remove_file(path)
+    let m = mmap_create(path, 64)
+    assert_eq(mmap_size(m), 64)
+    assert_eq(mmap_write(m, 4, "mapped"), 6)
+    assert_eq_str(mmap_read(m, 4, 6), "mapped")
+    assert_eq(mmap_sync(m, 1), 0)
+    assert_eq(mmap_close(m), 0)
+
+    let readonly = mmap_open(path, 0)
+    assert_eq(mmap_size(readonly), 64)
+    assert_eq_str(mmap_read(readonly, 4, 6), "mapped")
+    assert_eq(mmap_write(readonly, 0, "x"), -1)
+    assert_eq(mmap_close(readonly), 0)
+    let invalid = mmap_open(path, 3)
+    assert_eq(mmap_size(invalid), 0)
+    assert_eq(mmap_close(invalid), -1)
+    assert_eq(remove_file(path), 0)
+}
+
+fn TestPortableWal() {
+    let path = portable_io_path("mako_portable_wal.log")
+    let _ = remove_file(path)
+    let w = wal_open(path)
+    assert_eq(wal_append(w, "rec-a"), 0)
+    assert_eq(wal_append(w, "rec-b"), 0)
+    assert_eq(wal_sync(w), 0)
+    assert(wal_size(w) > 0)
+
+    assert_eq_str(wal_read_at(w, 0), "rec-a")
+    let next = wal_next_off()
+    assert(next > 0)
+    assert_eq_str(wal_read_at(w, next), "rec-b")
+    let end = wal_next_off()
+    assert_eq(wal_append(w, "rec-c"), 0)
+    assert_eq_str(wal_read_at(w, end), "rec-c")
+    assert_eq(wal_close(w), 0)
+
+    let reopened = wal_open(path)
+    assert_eq_str(wal_read_at(reopened, 0), "rec-a")
+    assert_eq(wal_close(reopened), 0)
+    assert_eq(remove_file(path), 0)
+}
+
+fn TestPortableStoreWal() {
+    let path = portable_io_path("mako_portable_store_wal.log")
+    let _ = remove_file(path)
+    let w = wal_open(path)
+    let s = store_new(16)
+    assert_eq(store_attach_wal(s, w), 0)
+    assert_eq(store_begin(s), 0)
+    assert_eq(store_put(s, 7, 70), 0)
+    assert_eq(store_commit(s), 0)
+    assert(wal_size(w) > 0)
+    assert(str_contains(wal_read_at(w, 0), "P,7,70"))
+    assert_eq(store_free(s), 0)
+    assert_eq(wal_close(w), 0)
+    assert_eq(remove_file(path), 0)
+}

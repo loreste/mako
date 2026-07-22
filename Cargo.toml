@@ -34,6 +34,11 @@ inkwell = { version = "0.9.0", optional = true, default-features = false, featur
 [target.'cfg(target_arch = "x86_64")'.dependencies]
 inkwell = { version = "0.9.0", optional = true, default-features = false, features = ["target-x86"] }
 
+[profile.dev]
+# The split type/codegen dispatchers deliberately stay uninlined at opt-level 0;
+# Windows CI checks them against the default 1 MiB stack. Do not flatten them.
+opt-level = 0
+
 [profile.release]
 codegen-units = 1
 lto = "thin"

@@ -40,7 +40,7 @@ Program: [SOUNDNESS.md](SOUNDNESS.md) · model: [MEMORY_MODEL.md](MEMORY_MODEL.m
 | SAFE-008 capture matrix | Done (core) |
 | SAFE-009 CMap gate | Done |
 | SAFE-010 memory model doc | Done |
-| RT-001 / RT-005 seed / RT-006 | Done |
+| RT-001 / RT-005 / RT-006 | Done |
 | RT-002/003 scheduler pool + spawn_blocking | Done (seed) |
 | RT-004 channel ownership (clone/take) | Done (core) |
 | Struct Own field free | Done |
@@ -149,7 +149,7 @@ Program: [SOUNDNESS.md](SOUNDNESS.md) · model: [MEMORY_MODEL.md](MEMORY_MODEL.m
 | Product version 0.2.0 | Done — stdlib in Mako (io, collections, context, json, http, sql pool) |
 | Product version 0.2.1 | Done — match exhaustiveness, guards, safety verification |
 | Product version 0.2.3 | Done — JWT/HTTPS input hardening on top of 0.2.2 SNI/HTTPS/JWT/lock integrity |
-| Product version 0.3.0 | Done — soundness wave (SAFE/RT), string_view, scheduler pool, stack lits, lock verify |
+| Product version 0.4.0 | Done — soundness wave (SAFE/RT), string_view, scheduler pool, stack lits, lock verify |
 | Generic structs `struct Pair[T]` + multi-param | Done — monomorph `Pair__int` · `generic_struct_test` |
 | Generic enums `enum MyBox[T]` + match | Done — `generic_enum_test` |
 | Interface bounds `fn f[T: I](…)` | Done — structural · `generic_bounds_test` · `bad/generic_bound_fail` |

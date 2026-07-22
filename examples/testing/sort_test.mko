@@ -1,3 +1,11 @@
+fn assert_sorted(values: []int) {
+    let mut i = 1
+    while i < len(values) {
+        assert(values[i - 1] <= values[i])
+        i = i + 1
+    }
+}
+
 fn TestSort() {
     let xs = sort_ints([3, 1, 2])
     assert_eq(xs[0], 1)
@@ -7,4 +15,74 @@ fn TestSort() {
     assert_eq_str(ss[0], "a")
     assert_eq_str(ss[1], "b")
     assert_eq_str(ss[2], "c")
+}
+
+fn TestSortIntrosortShapes() {
+    let boundary16 = sort_ints([
+        16, 15, 14, 13, 12, 11, 10, 9,
+        8, 7, 6, 5, 4, 3, 2, 1,
+    ])
+    assert_sorted(boundary16)
+    assert_eq(boundary16[0], 1)
+    assert_eq(boundary16[15], 16)
+
+    let boundary17 = sort_ints([
+        9, 1, 16, 4, 13, 7, 2, 17, 11,
+        5, 15, 3, 12, 8, 14, 6, 10,
+    ])
+    assert_sorted(boundary17)
+    assert_eq(boundary17[0], 1)
+    assert_eq(boundary17[16], 17)
+
+    let duplicates = sort_ints([
+        8, 3, 8, 1, 5, 3, 9, 2, 8, 5, 1,
+        7, 6, 4, 4, 9, 2, 7, 6, 0, 0,
+    ])
+    assert_sorted(duplicates)
+    assert_eq(duplicates[0], 0)
+    assert_eq(duplicates[20], 9)
+}
+
+fn TestSortPatternFastPaths() {
+    let sorted = sort_ints([
+        1, 2, 3, 4, 5, 6, 7, 8, 9,
+        10, 11, 12, 13, 14, 15, 16, 17,
+    ])
+    assert_sorted(sorted)
+
+    let reverse = sort_ints([
+        21, 20, 19, 18, 17, 16, 15, 14, 13, 12, 11,
+        10, 9, 8, 7, 6, 5, 4, 3, 2, 1,
+    ])
+    assert_sorted(reverse)
+    assert_eq(reverse[0], 1)
+    assert_eq(reverse[20], 21)
+
+    let equal = sort_ints([
+        5, 5, 5, 5, 5, 5, 5, 5, 5,
+        5, 5, 5, 5, 5, 5, 5, 5,
+    ])
+    assert_sorted(equal)
+    assert_eq(equal[0], 5)
+    assert_eq(equal[16], 5)
+}
+
+fn TestSortDepthFallback() {
+    // Median-of-three killer: exhausts the introsort depth limit at this size.
+    let mut values = make([]int, 64)
+    let mut i = 0
+    while i < 16 {
+        values[i * 2] = i * 2 + 1
+        values[i * 2 + 1] = i * 2 + 33
+        i = i + 1
+    }
+    i = 0
+    while i < 32 {
+        values[32 + i] = (i + 1) * 2
+        i = i + 1
+    }
+    let sorted = sort_ints(values)
+    assert_sorted(sorted)
+    assert_eq(sorted[0], 1)
+    assert_eq(sorted[63], 64)
 }
