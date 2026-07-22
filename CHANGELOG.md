@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.1 — 2026-07-22
 
 ### Build
 
@@ -9,6 +9,7 @@
   multi-file, generic-heavy, and backend-shaped projects.
 - Use the system temporary directory in portable filesystem tests and make the
   corrected Windows cases blocking in CI.
+- Fix Windows CI: skip plugin compilation test when `cc` is unavailable.
 
 ### Runtime
 
@@ -16,12 +17,22 @@
 - Support file-descriptor I/O, memory maps, and write-ahead logs on Windows.
 - Align unbuffered Windows reads and writes without requiring aligned Mako strings.
 - Reject writes through read-only memory maps instead of faulting.
+- Zero-alloc `print(f"...")`, `log_*(f"...")`, `http_respond(f"...")`: f-string
+  bodies consumed directly from the stack buffer (no malloc/free).
+- `writev` print: single syscall for data+newline on Unix.
+- Stored hashes in string-keyed maps: skip `memcmp` on hash mismatch during probing.
+- Result/Option constructors use `= {0}` aggregate init instead of `memset`.
+- Fix memory leaks in `wrap_err`, `error_join`, `error_tag` (separator strings).
+- Map probe branch hints (`MAKO_LIKELY` on `FULL` state).
+- Faster integer hash (splitmix64 replaces wyhash for int-keyed maps).
 
 ### Performance
 
 - Sort integer slices with inline introsort and linear sorted/reverse fast paths.
 - Avoid cloning map keys for literals, interpolation, concatenation, and integer
   string conversions while retaining borrowed-key safety.
+- Zero-alloc `len(f"...")`: compute length from stack buffer without materializing.
+- Codegen skips redundant old-pointer save on `s = append(s, v)` self-append.
 
 ## 0.4.0 — 2026-07-20
 

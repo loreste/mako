@@ -137,6 +137,10 @@ These are built into the runtime and codegen — no user action required.
 | **Stack POD array lits** | `[a,b,c]` for int/float/bool/byte → stack buffer + `cap==0` view (no malloc/free). Escape heapifies. |
 | **Empty slices** | `[]` / `make([],0,0)` → no heap until first grow. |
 | **Cold free** | Slice free is `MAKO_UNLIKELY(cap>0)` — views and stack lits cost a predicted-not-taken branch. |
+| **Zero-alloc `print(f"...")`** | `print`, `log_info`, `log_warn`, `log_error`, `log_debug` with f-string args use `finish_view` — no malloc/free, the stack buffer is consumed directly. |
+| **Zero-alloc `http_respond(f"...")`** | `http_respond` and `http_respond_json` with f-string body use `finish_view` — response body built on stack, written to socket, no heap allocation. |
+| **`writev` print** | `print` uses a single `writev` syscall (data + newline) instead of `fwrite` + `fputc` + `fflush` (Unix). |
+| **Map probe hints** | Map get/has use `MAKO_LIKELY(FULL)` branch hints — first-probe hits skip the tombstone/empty check. |
 
 ## Memory & CPU practices
 

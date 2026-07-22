@@ -12302,6 +12302,16 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                     }
                     return;
                 }
+                // Detect `s = append(s, v)` — append owns the realloc, skip reassign-free.
+                let is_self_append = if let Expr::Call { callee, args } = value {
+                    if let Expr::Ident(fn_name) = callee.as_ref() {
+                        if fn_name == "append" && !args.is_empty() {
+                            if let Expr::Ident(arg0) = &args[0] {
+                                arg0 == name
+                            } else { false }
+                        } else { false }
+                    } else { false }
+                } else { false };
                 let (vty, val) = self.emit_expr(value);
                 let val = if let Some(exp) = self.locals.get(name).cloned() {
                     if exp.starts_with("MakoIface_") && vty != exp {
@@ -12368,6 +12378,19 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                                     self.emit_line(format_args!(
                                         "if ({old}.data != {mn}.data) mako_str_free({old});"
                                     ));
+                                }
+                                self.register_own_drop(&mn, &cty);
+                                return;
+                            } else if is_self_append {
+                                // s = append(s, v): append owns the realloc,
+                                // skip reassign-free — just store the new header.
+                                if let Some(cell) = self.mut_capture_cells.get(name).cloned() {
+                                    self.emit_line(format_args!("*{cell} = {val};"));
+                                } else {
+                                    self.emit_line(format_args!("{mn} = {val};"));
+                                }
+                                if cond_own {
+                                    self.emit_line(format_args!("{mn}__own = 1;"));
                                 }
                                 self.register_own_drop(&mn, &cty);
                                 return;
@@ -12892,6 +12915,10 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                         "mako_print_str(mako_str_view(\"{esc}\", {}));",
                         s.len()
                     ));
+                    return ("void".into(), "/*void*/".into());
+                }
+                // Zero-alloc: print(f"...") → build on stack, print view, no malloc/free.
+                if self.emit_fstring_view_call(&args[0], "mako_print_str") {
                     return ("void".into(), "/*void*/".into());
                 }
                 let (ty, v) = self.emit_expr(&args[0]);
@@ -16898,6 +16925,9 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                 return ("int64_t".into(), format!("mako_random_int({lo}, {hi})"));
             }
             "log_debug" => {
+                if self.emit_fstring_view_call(&args[0], "mako_log_debug") {
+                    return ("void".into(), "/*void*/".into());
+                }
                 let (_, s) = self.emit_expr(&args[0]);
                 self.line(&format!("mako_log_debug({s});"));
                 return ("void".into(), "/*void*/".into());
@@ -21604,16 +21634,25 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                 return ("MakoString".into(), tmp);
             }
             "log_info" => {
+                if self.emit_fstring_view_call(&args[0], "mako_log_info") {
+                    return ("void".into(), "/*void*/".into());
+                }
                 let (_, s) = self.emit_expr(&args[0]);
                 self.line(&format!("mako_log_info({s});"));
                 return ("void".into(), "/*void*/".into());
             }
             "log_warn" => {
+                if self.emit_fstring_view_call(&args[0], "mako_log_warn") {
+                    return ("void".into(), "/*void*/".into());
+                }
                 let (_, s) = self.emit_expr(&args[0]);
                 self.line(&format!("mako_log_warn({s});"));
                 return ("void".into(), "/*void*/".into());
             }
             "log_error" => {
+                if self.emit_fstring_view_call(&args[0], "mako_log_error") {
+                    return ("void".into(), "/*void*/".into());
+                }
                 let (_, s) = self.emit_expr(&args[0]);
                 self.line(&format!("mako_log_error({s});"));
                 return ("void".into(), "/*void*/".into());
@@ -28067,6 +28106,14 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
             "http_respond_json" => {
                 let (_, c) = self.emit_expr(&args[0]);
                 let (_, st) = self.emit_expr(&args[1]);
+                if let Expr::StringInterp(_) = &args[2] {
+                    let bv = self.emit_fstring_as_view(&args[2]);
+                    let tmp = self.fresh("hrj");
+                    self.line(&format!(
+                        "int64_t {tmp} = mako_http_respond_json({c}, {st}, {bv});"
+                    ));
+                    return ("int64_t".into(), tmp);
+                }
                 let (_, b) = self.emit_expr(&args[2]);
                 let tmp = self.fresh("hrj");
                 self.line(&format!(
@@ -29406,6 +29453,15 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
             "http_respond" => {
                 let (_, c) = self.emit_expr(&args[0]);
                 let (_, st) = self.emit_expr(&args[1]);
+                // Zero-alloc: http_respond(c, st, f"...") → finish_view body.
+                if let Expr::StringInterp(_) = &args[2] {
+                    let bv = self.emit_fstring_as_view(&args[2]);
+                    let tmp = self.fresh("hr");
+                    self.line(&format!(
+                        "int64_t {tmp} = mako_http_respond({c}, {st}, {bv});"
+                    ));
+                    return ("int64_t".into(), tmp);
+                }
                 let (_, b) = self.emit_expr(&args[2]);
                 let tmp = self.fresh("hr");
                 self.line(&format!(
@@ -29978,6 +30034,61 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                 // Compile-time len for literals.
                 if let Some(n) = Self::const_len(&args[0]) {
                     return ("int64_t".into(), n.to_string());
+                }
+                // Zero-alloc: len(f"...") → build on stack, read .len, no malloc.
+                if let Expr::StringInterp(parts) = &args[0] {
+                    let b = self.fresh("sb");
+                    self.line(&format!("MakoSBStack {b}; mako_sbstack_init(&{b});"));
+                    for p in parts {
+                        match p {
+                            crate::ast::InterpPart::Lit(s) => {
+                                let escaped = escape_c(s);
+                                self.line(&format!(
+                                    "mako_sbstack_write_cstr(&{b}, \"{escaped}\");"
+                                ));
+                            }
+                            crate::ast::InterpPart::Expr(e, fmt) => {
+                                let (ty, v) = self.emit_expr(e);
+                                if let Some(spec) = fmt {
+                                    let esc = escape_c(spec);
+                                    let tb = self.fresh("tb");
+                                    self.line(&format!("MakoStrBuilder *{tb} = mako_str_builder_new();"));
+                                    if ty == "MakoString" {
+                                        self.line(&format!(
+                                            "mako_str_builder_write_str_spec({tb}, {v}, \"{esc}\");"
+                                        ));
+                                    } else if ty == "double" {
+                                        self.line(&format!(
+                                            "mako_str_builder_write_f64_spec({tb}, {v}, \"{esc}\");"
+                                        ));
+                                    } else {
+                                        self.line(&format!(
+                                            "mako_str_builder_write_i64_spec({tb}, (int64_t)({v}), \"{esc}\");"
+                                        ));
+                                    }
+                                    let ts = self.fresh("ts");
+                                    self.line(&format!("MakoString {ts} = mako_str_builder_finish({tb});"));
+                                    self.line(&format!("mako_sbstack_write(&{b}, {ts});"));
+                                    self.line(&format!("mako_str_free({ts});"));
+                                } else if ty == "MakoString" {
+                                    self.line(&format!("mako_sbstack_write(&{b}, {v});"));
+                                } else if ty == "int64_t" || ty == "bool" {
+                                    self.line(&format!(
+                                        "mako_sbstack_write_i64(&{b}, (int64_t)({v}));"
+                                    ));
+                                } else if ty == "double" {
+                                    self.line(&format!(
+                                        "mako_sbstack_write_f64(&{b}, {v});"
+                                    ));
+                                } else {
+                                    self.line(&format!(
+                                        "mako_sbstack_write_i64(&{b}, (int64_t)({v}));"
+                                    ));
+                                }
+                            }
+                        }
+                    }
+                    return ("int64_t".into(), format!("(int64_t){b}.len"));
                 }
                 let (ty, v) = self.emit_expr(&args[0]);
                 if ty == "MakoString" {
@@ -31079,6 +31190,78 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
             }
             _ => unreachable!(),
         }
+    }
+
+    /// Emit an f-string (StringInterp) as a stack view expression (no malloc).
+    /// Returns the C expression for the view. Caller must use it immediately.
+    fn emit_fstring_as_view(&mut self, arg: &Expr) -> String {
+        if let Expr::StringInterp(parts) = arg {
+            let b = self.fresh("sb");
+            self.line(&format!("MakoSBStack {b}; mako_sbstack_init(&{b});"));
+            for p in parts {
+                match p {
+                    crate::ast::InterpPart::Lit(s) => {
+                        let escaped = escape_c(s);
+                        self.line(&format!(
+                            "mako_sbstack_write_cstr(&{b}, \"{escaped}\");"
+                        ));
+                    }
+                    crate::ast::InterpPart::Expr(e, fmt) => {
+                        let (ty, v) = self.emit_expr(e);
+                        if let Some(spec) = fmt {
+                            let esc = escape_c(spec);
+                            let tb = self.fresh("tb");
+                            self.line(&format!("MakoStrBuilder *{tb} = mako_str_builder_new();"));
+                            if ty == "MakoString" {
+                                self.line(&format!(
+                                    "mako_str_builder_write_str_spec({tb}, {v}, \"{esc}\");"
+                                ));
+                            } else if ty == "double" {
+                                self.line(&format!(
+                                    "mako_str_builder_write_f64_spec({tb}, {v}, \"{esc}\");"
+                                ));
+                            } else {
+                                self.line(&format!(
+                                    "mako_str_builder_write_i64_spec({tb}, (int64_t)({v}), \"{esc}\");"
+                                ));
+                            }
+                            let ts = self.fresh("ts");
+                            self.line(&format!("MakoString {ts} = mako_str_builder_finish({tb});"));
+                            self.line(&format!("mako_sbstack_write(&{b}, {ts});"));
+                            self.line(&format!("mako_str_free({ts});"));
+                        } else if ty == "MakoString" {
+                            self.line(&format!("mako_sbstack_write(&{b}, {v});"));
+                        } else if ty == "int64_t" || ty == "bool" {
+                            self.line(&format!(
+                                "mako_sbstack_write_i64(&{b}, (int64_t)({v}));"
+                            ));
+                        } else if ty == "double" {
+                            self.line(&format!(
+                                "mako_sbstack_write_f64(&{b}, {v});"
+                            ));
+                        } else {
+                            self.line(&format!(
+                                "mako_sbstack_write_i64(&{b}, (int64_t)({v}));"
+                            ));
+                        }
+                    }
+                }
+            }
+            format!("mako_sbstack_finish_view(&{b})")
+        } else {
+            unreachable!("emit_fstring_as_view called on non-StringInterp");
+        }
+    }
+
+    /// Emit an f-string (StringInterp) and call `c_fn(view)` using finish_view
+    /// (zero malloc). Returns true if the arg was a StringInterp and was handled.
+    fn emit_fstring_view_call(&mut self, arg: &Expr, c_fn: &str) -> bool {
+        if matches!(arg, Expr::StringInterp(_)) {
+            let view = self.emit_fstring_as_view(arg);
+            self.line(&format!("{c_fn}({view});"));
+            return true;
+        }
+        false
     }
 
     fn emit_struct_lit_pos_expr(&mut self, expr: &Expr) -> (String, String) {
