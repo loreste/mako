@@ -12,13 +12,13 @@ cargo build --release
 ./scripts/package-linux-native.sh target/release/mako
 ```
 
-This creates `dist/mako-0.4.1-x86_64-unknown-linux-gnu.tar.gz` and a SHA-256
+This creates `dist/mako-0.4.5-x86_64-unknown-linux-gnu.tar.gz` and a SHA-256
 sidecar. The archive contains the CLI, runtime headers, standard library, and a
 local installer:
 
 ```bash
-tar -xzf dist/mako-0.4.1-x86_64-unknown-linux-gnu.tar.gz
-cd mako-0.4.1-x86_64-unknown-linux-gnu
+tar -xzf dist/mako-0.4.5-x86_64-unknown-linux-gnu.tar.gz
+cd mako-0.4.5-x86_64-unknown-linux-gnu
 PREFIX="$HOME/.local" ./install.sh
 ```
 

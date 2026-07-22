@@ -2,7 +2,7 @@
 
 Source brief: `General_Purpose_Backend_Language_Vision.md`.
 
-**Product tip:** **0.4.1**. The current roadmap cycle is the native compiler
+**Product tip:** **0.4.5**. The current roadmap cycle is the native compiler
 foundation and Linux packaging, alongside performance and stdlib depth. See
 [ROADMAP.md](ROADMAP.md) · [STATUS.md](STATUS.md).
 

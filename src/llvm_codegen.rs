@@ -74,6 +74,29 @@ fn llvm_type<'ctx>(context: &'ctx Context, ty: Type) -> BasicTypeEnum<'ctx> {
                 false,
             )
             .into(),
+        // Maps, ShareInt, slices (non-int), channels, arenas use pointer ABI.
+        Type::MapII
+        | Type::MapSI
+        | Type::MapSS
+        | Type::MapIF
+        | Type::MapFI
+        | Type::MapIPtr(_)
+        | Type::MapSPtr(_)
+        | Type::PtrSlice(_)
+        | Type::ChanI
+        | Type::ChanS
+        | Type::ChanF
+        | Type::ChanP(_)
+        | Type::Arena
+        | Type::Nursery
+        | Type::Task
+        | Type::Opaque
+        | Type::FnPtr
+        | Type::StructSlice(_)
+        | Type::ShareInt
+        | Type::FloatSlice
+        | Type::ByteSlice
+        | Type::BoolSlice => context.ptr_type(Default::default()).into(),
         // A struct value is an owning heap pointer; its concrete layout is
         // carried separately (see `struct_layouts`) for field GEPs.
         Type::Struct(_) => context.ptr_type(Default::default()).into(),
@@ -310,8 +333,41 @@ fn emit_instruction<'ctx>(
                 Type::I32 => context.i32_type().const_int(*value as u64, true).into(),
                 Type::I64 => context.i64_type().const_int(*value as u64, true).into(),
                 Type::F64 => return Err(LlvmError::new("integer constant has float type")),
-                Type::Str | Type::IntSlice | Type::StrSlice | Type::Struct(_) => {
-                    return Err(LlvmError::new("integer constant has aggregate type"))
+                Type::Str
+                | Type::IntSlice
+                | Type::FloatSlice
+                | Type::ByteSlice
+                | Type::StrSlice
+                | Type::MapII
+                | Type::MapSI
+                | Type::MapSS
+                | Type::MapIF
+                | Type::MapFI
+                | Type::MapIPtr(_)
+                | Type::MapSPtr(_)
+        | Type::PtrSlice(_)
+                | Type::ChanI
+                | Type::ChanS
+                | Type::ChanF
+                | Type::ChanP(_)
+                | Type::Arena
+                | Type::Nursery
+                | Type::Task
+                | Type::Opaque
+                | Type::FnPtr
+                | Type::StructSlice(_)
+                | Type::BoolSlice
+                | Type::ShareInt
+                | Type::Struct(_) => {
+                    // Null pointer constants for pointer-ABI types.
+                    if *value == 0 {
+                        context
+                            .ptr_type(Default::default())
+                            .const_null()
+                            .into()
+                    } else {
+                        return Err(LlvmError::new("integer constant has aggregate type"));
+                    }
                 }
             };
             values.insert(*out, value);
@@ -367,23 +423,320 @@ fn emit_instruction<'ctx>(
             .map_err(builder_error)?;
             values.insert(*out, result);
         }
+        Inst::Cast {
+            out,
+            value,
+            from,
+            to,
+        } => {
+            let name = value_name(*out);
+            let result = match (from, to) {
+                (Type::I64, Type::F64) => builder
+                    .build_signed_int_to_float(
+                        values[value].into_int_value(),
+                        context.f64_type(),
+                        &name,
+                    )
+                    .map(BasicValueEnum::from)
+                    .map_err(builder_error)?,
+                (Type::F64, Type::I64) => builder
+                    .build_float_to_signed_int(
+                        values[value].into_float_value(),
+                        context.i64_type(),
+                        &name,
+                    )
+                    .map(BasicValueEnum::from)
+                    .map_err(builder_error)?,
+                (Type::I64, Type::I1) => builder
+                    .build_int_compare(
+                        IntPredicate::NE,
+                        values[value].into_int_value(),
+                        context.i64_type().const_zero(),
+                        &name,
+                    )
+                    .map(BasicValueEnum::from)
+                    .map_err(builder_error)?,
+                (Type::I1, Type::I64) => builder
+                    .build_int_z_extend(
+                        values[value].into_int_value(),
+                        context.i64_type(),
+                        &name,
+                    )
+                    .map(BasicValueEnum::from)
+                    .map_err(builder_error)?,
+                (Type::F64, Type::I1) => builder
+                    .build_float_compare(
+                        FloatPredicate::ONE,
+                        values[value].into_float_value(),
+                        context.f64_type().const_float(0.0),
+                        &name,
+                    )
+                    .map(BasicValueEnum::from)
+                    .map_err(builder_error)?,
+                (Type::I1, Type::F64) => {
+                    let w = builder
+                        .build_int_z_extend(
+                            values[value].into_int_value(),
+                            context.i64_type(),
+                            "bool.i64",
+                        )
+                        .map_err(builder_error)?;
+                    builder
+                        .build_signed_int_to_float(w, context.f64_type(), &name)
+                        .map(BasicValueEnum::from)
+                        .map_err(builder_error)?
+                }
+                _ => return Err(LlvmError::new("LLVM backend: unsupported cast")),
+            };
+            values.insert(*out, result);
+        }
         Inst::Call {
             out,
             function,
             args,
             ret,
         } => {
-            let arguments: Vec<BasicMetadataValueEnum<'ctx>> =
-                args.iter().map(|value| values[value].into()).collect();
+            // Pointer-ABI runtime names (`*_ptr`) map to value-ABI entry points
+            // when the LLVM string ABI is a struct (not a header pointer).
+            let function_name = match function.as_str() {
+                "mako_native_parse_int_ptr" => "mako_native_parse_int",
+                "mako_native_path_join_ptr" => "mako_native_path_join",
+                "mako_native_str_len_ptr" => "mako_native_str_len",
+                "mako_native_arg_get_ptr" => "mako_native_arg_get",
+                "mako_native_env_get_ptr" => "mako_native_env_get",
+                "mako_native_env_set_ptr" => "mako_native_env_set",
+                "mako_native_read_file_ptr" => "mako_native_read_file",
+                "mako_native_write_file_ptr" => "mako_native_write_file",
+                "mako_native_base64_encode_ptr" => "mako_native_base64_encode",
+                "mako_native_base64_decode_ptr" => "mako_native_base64_decode",
+                "mako_native_str_contains_ptr" => "mako_native_str_contains",
+                "mako_native_mkdir_ptr" => "mako_native_mkdir",
+                "mako_native_file_exists_ptr" => "mako_native_file_exists",
+                "mako_native_remove_file_ptr" => "mako_native_remove_file",
+                // Byte→string: LLVM uses value-ABI string returns.
+                "mako_native_string_from_bytes_ptr" => "mako_native_string_from_bytes_val",
+                "mako_native_bytes_from_string_ptr" => "mako_native_bytes_from_string_val",
+                "mako_native_rune_count_ptr" => "mako_native_rune_count",
+                "mako_native_str_get_ptr" => "mako_native_str_get",
+                "mako_native_str_slice_ptr" => "mako_native_str_slice",
+                "mako_native_utf8_decode_rune_ptr" => "mako_native_utf8_decode_rune",
+                "mako_native_utf8_decode_width_ptr" => "mako_native_utf8_decode_width",
+                // Map string returns: LLVM uses value-ABI string structs.
+                "mako_native_map_ss_get_ptr" => "mako_native_map_ss_get_val",
+                "mako_native_map_ss_slot_key_ptr" => "mako_native_map_ss_slot_key_val",
+                "mako_native_map_ss_slot_val_ptr" => "mako_native_map_ss_slot_val_val",
+                "mako_native_map_si_slot_key_ptr" => "mako_native_map_si_slot_key_val",
+                other => other,
+            };
+            // Pointer-ABI map[string]* helpers expect *MakoNativeString for
+            // string keys (and MapSS set values). Value-ABI `*_val` helpers
+            // take/return MakoNativeString by value — no boxing.
+            // Pointer-ABI string helpers: box LLVM value-ABI strings to stack slots.
+            let needs_str_box = !function_name.ends_with("_val")
+                && (function_name.contains("map_si_")
+                    || function_name.contains("map_ss_")
+                    || function_name.contains("tcp_connect")
+                    || function_name.contains("tcp_listen_addr")
+                    || function_name.contains("http_get")
+                    || function_name.contains("http_serve")
+                    || function_name.contains("fmt_")
+                    || function_name.contains("print_raw")
+                    || function_name.contains("log_info")
+                    || function_name.contains("arena_text")
+                    || function_name.contains("parse_int")
+                    || function_name.contains("json_")
+                    || function_name.contains("regex_"));
+            // []int is value-ABI on LLVM but many runtime helpers take *header.
+            let needs_int_slice_box = function_name.contains("int_slice_copy");
+            let mut arguments: Vec<BasicMetadataValueEnum<'ctx>> = Vec::new();
+            for (i, arg) in args.iter().enumerate() {
+                let v = values[arg];
+                // Box value-ABI strings for pointer-ABI callees.
+                if needs_str_box && v.is_struct_value() {
+                    // Skip arg0 when it's a map/chan pointer (not a string).
+                    let skip = i == 0
+                        && (function_name.contains("map_si_")
+                            || function_name.contains("map_ss_")
+                            || function_name.contains("arena_text"));
+                    if !skip {
+                        let slot = builder
+                            .build_alloca(llvm_type(context, Type::Str), "str.arg")
+                            .map_err(builder_error)?;
+                        builder.build_store(slot, v).map_err(builder_error)?;
+                        arguments.push(slot.into());
+                        continue;
+                    }
+                }
+                if needs_int_slice_box && v.is_struct_value() {
+                    let slot = builder
+                        .build_alloca(llvm_type(context, Type::IntSlice), "slice.copy.arg")
+                        .map_err(builder_error)?;
+                    builder.build_store(slot, v).map_err(builder_error)?;
+                    arguments.push(slot.into());
+                } else {
+                    arguments.push(v.into());
+                }
+            }
+            let llvm_fn = if let Some(f) = functions.get(function_name) {
+                *f
+            } else {
+                let ptr = context.ptr_type(Default::default());
+                let i64t = context.i64_type();
+                let params: Vec<BasicMetadataTypeEnum> = if needs_str_box {
+                    if function_name.contains("make") {
+                        vec![i64t.into()]
+                    } else if function_name.contains("set") {
+                        if function_name.contains("map_ss_") {
+                            // (map*, key*, val*)
+                            vec![ptr.into(), ptr.into(), ptr.into()]
+                        } else {
+                            // map_si set: (map*, key*, i64)
+                            vec![ptr.into(), ptr.into(), i64t.into()]
+                        }
+                    } else if function_name.contains("len")
+                        || function_name.contains("drop")
+                        || function_name.contains("clone")
+                        || function_name.contains("cap")
+                    {
+                        vec![ptr.into()]
+                    } else if function_name.contains("slot_") {
+                        vec![ptr.into(), i64t.into()]
+                    } else {
+                        // get_ptr / has / delete with boxed key pointer
+                        vec![ptr.into(), ptr.into()]
+                    }
+                } else {
+                    arguments
+                        .iter()
+                        .map(|a| match a {
+                            BasicMetadataValueEnum::PointerValue(p) => p.get_type().into(),
+                            BasicMetadataValueEnum::IntValue(i) => i.get_type().into(),
+                            BasicMetadataValueEnum::FloatValue(f) => f.get_type().into(),
+                            BasicMetadataValueEnum::StructValue(s) => s.get_type().into(),
+                            _ => ptr.into(),
+                        })
+                        .collect()
+                };
+                let fty = if function_name.contains("maps_keys")
+                    || function_name.contains("arena_ints")
+                {
+                    // C returns *MakoNativeIntSlice; convert to value ABI after call.
+                    ptr.fn_type(&params, false)
+                } else if ret == &Some(Type::Str)
+                    && function_name.ends_with("_ptr")
+                    && !function_name.contains("map_ss_get")
+                {
+                    // Bridge string returns are *MakoNativeString (pointer ABI).
+                    ptr.fn_type(&params, false)
+                } else if matches!(
+                    ret,
+                    Some(Type::Str) if function_name.contains("uuid")
+                        || function_name.contains("http_get")
+                        || function_name.contains("sprintf")
+                        || function_name.contains("errorf")
+                        || function_name.contains("empty_settings")
+                        || function_name.contains("arena_text")
+                ) {
+                    ptr.fn_type(&params, false)
+                } else {
+                    match ret {
+                        Some(ty) => llvm_type(context, *ty).fn_type(&params, false),
+                        None => context.void_type().fn_type(&params, false),
+                    }
+                };
+                external_function(module, function_name, fty)
+            };
             let call = builder
-                .build_call(functions[function], &arguments, "call")
+                .build_call(llvm_fn, &arguments, "call")
                 .map_err(builder_error)?;
-            if let (Some(out), Some(_)) = (out, ret) {
+            if let (Some(out), Some(rty)) = (out, ret) {
                 let value = call
                     .try_as_basic_value()
                     .basic()
                     .ok_or_else(|| LlvmError::new("LLVM call did not return a value"))?;
+                // Cranelift keeps []int / strings as heap pointers; LLVM uses
+                // value-ABI structs. Convert pointer returns when needed.
+                let value = if *rty == Type::IntSlice
+                    && (function_name.contains("maps_keys")
+                        || function_name.contains("arena_ints"))
+                    && value.is_pointer_value()
+                {
+                    let hdr = value.into_pointer_value();
+                    let loaded = builder
+                        .build_load(llvm_type(context, Type::IntSlice), hdr, "maps_keys.load")
+                        .map_err(builder_error)?;
+                    let free_fn = external_function(
+                        module,
+                        "free",
+                        context
+                            .void_type()
+                            .fn_type(&[context.ptr_type(Default::default()).into()], false),
+                    );
+                    builder
+                        .build_call(free_fn, &[hdr.into()], "maps_keys.free_hdr")
+                        .map_err(builder_error)?;
+                    loaded
+                } else if *rty == Type::Str && value.is_pointer_value() {
+                    // Bridge returns *MakoNativeString; convert to value ABI.
+                    let hdr = value.into_pointer_value();
+                    let loaded = builder
+                        .build_load(llvm_type(context, Type::Str), hdr, "str.ptr.load")
+                        .map_err(builder_error)?;
+                    let free_fn = external_function(
+                        module,
+                        "free",
+                        context
+                            .void_type()
+                            .fn_type(&[context.ptr_type(Default::default()).into()], false),
+                    );
+                    builder
+                        .build_call(free_fn, &[hdr.into()], "str.hdr.free")
+                        .map_err(builder_error)?;
+                    loaded
+                } else {
+                    value
+                };
                 values.insert(*out, value);
+            }
+        }
+        Inst::FuncAddr { out, function } => {
+            let f = functions.get(function.as_str()).ok_or_else(|| {
+                LlvmError::new(format!("LLVM FuncAddr unknown function `{function}`"))
+            })?;
+            values.insert(*out, f.as_global_value().as_pointer_value().into());
+        }
+        Inst::CallIndirect {
+            out,
+            callee,
+            args,
+            param_tys,
+            ret,
+        } => {
+            let arg_tys: Vec<BasicTypeEnum> = param_tys
+                .iter()
+                .map(|t| llvm_type(context, *t))
+                .collect();
+            let fn_ty = match ret {
+                Some(r) => {
+                    let rt: BasicTypeEnum = llvm_type(context, *r);
+                    rt.fn_type(&arg_tys.iter().map(|t| (*t).into()).collect::<Vec<_>>(), false)
+                }
+                None => context.void_type().fn_type(
+                    &arg_tys.iter().map(|t| (*t).into()).collect::<Vec<_>>(),
+                    false,
+                ),
+            };
+            let callee_v = values[callee].into_pointer_value();
+            let call_args: Vec<_> = args.iter().map(|a| values[a].into()).collect();
+            let call = builder
+                .build_indirect_call(fn_ty, callee_v, &call_args, "icall")
+                .map_err(builder_error)?;
+            if let Some(out) = out {
+                let result = call
+                    .try_as_basic_value()
+                    .basic()
+                    .ok_or_else(|| LlvmError::new("LLVM indirect call returned no value"))?;
+                values.insert(*out, result);
             }
         }
         Inst::PrintInt { value } => {
@@ -429,11 +782,13 @@ fn emit_instruction<'ctx>(
             let global = module.add_global(constant.get_type(), None, &format!("str.{}", out.0));
             global.set_initializer(&constant);
             global.set_constant(true);
+            // High bit of len marks immortal static payload (clone free, drop no-op).
+            let static_len = (bytes.len() as u64) | (1u64 << 63);
             let value = pack_string(
                 context,
                 builder,
                 global.as_pointer_value(),
-                context.i64_type().const_int(bytes.len() as u64, false),
+                context.i64_type().const_int(static_len, false),
                 &value_name(*out),
             )?;
             values.insert(*out, value.into());
@@ -537,11 +892,17 @@ fn emit_instruction<'ctx>(
                 .map_err(builder_error)?;
         }
         Inst::StringLen { out, value } => {
-            // Value ABI: string is { data, len }; extract field 1.
+            // Value ABI: string is { data, len }; extract field 1 and clear the
+            // immortal/static high bit so callers see the true byte length.
+            let raw = builder
+                .build_extract_value(values[value].into_struct_value(), 1, &format!("{}.raw", value_name(*out)))
+                .map_err(builder_error)?
+                .into_int_value();
+            let mask = context.i64_type().const_int(!(1u64 << 63), false);
             let len = builder
-                .build_extract_value(values[value].into_struct_value(), 1, &value_name(*out))
+                .build_and(raw, mask, &value_name(*out))
                 .map_err(builder_error)?;
-            values.insert(*out, len);
+            values.insert(*out, len.into());
         }
         Inst::NullHeap { out, ty } => {
             let value = match ty {
@@ -569,7 +930,22 @@ fn emit_instruction<'ctx>(
                     }
                     agg.into()
                 }
-                Type::Struct(_) => context.ptr_type(Default::default()).const_null().into(),
+                Type::Struct(_)
+                | Type::MapII
+                | Type::MapSI
+                | Type::MapSS
+                | Type::MapIF
+                | Type::MapFI
+                | Type::ChanI
+        | Type::ChanS
+                | Type::Arena
+                | Type::Nursery
+                | Type::ShareInt
+                | Type::FloatSlice
+                | Type::ByteSlice
+                | Type::BoolSlice => {
+                    context.ptr_type(Default::default()).const_null().into()
+                }
                 _ => {
                     return Err(LlvmError::new(
                         "LLVM backend: NullHeap only applies to heap types",
@@ -685,104 +1061,50 @@ fn emit_instruction<'ctx>(
             values.insert(*out, result);
         }
         Inst::SliceLen { out, slice } => {
-            let len = external_function(
-                module,
-                "mako_native_int_slice_len",
-                context.i64_type().fn_type(
-                    &[
-                        context.ptr_type(Default::default()).into(),
-                        context.i64_type().into(),
-                        context.i64_type().into(),
-                        context.i64_type().into(),
-                    ],
-                    false,
-                ),
-            );
-            let args = slice_parts(builder, values[slice].into_struct_value())?;
-            let result = builder
-                .build_call(len, &args, &value_name(*out))
-                .map_err(builder_error)?
-                .try_as_basic_value()
-                .basic()
-                .ok_or_else(|| LlvmError::new("slice len returned void"))?;
-            values.insert(*out, result);
+            // Inline: len is field 1 of the value-ABI header — no runtime call.
+            let sv = values[slice].into_struct_value();
+            let len = builder
+                .build_extract_value(sv, 1, &value_name(*out))
+                .map_err(builder_error)?;
+            values.insert(*out, len);
         }
         Inst::SliceIndex { out, slice, index } => {
-            let get = external_function(
+            // Inline load with bounds check: beats an opaque runtime call so
+            // LLVM can schedule/hoist and keep the hot loop in registers.
+            let result = emit_int_slice_index_inline(
+                context,
                 module,
-                "mako_native_int_slice_get",
-                context.i64_type().fn_type(
-                    &[
-                        context.ptr_type(Default::default()).into(),
-                        context.i64_type().into(),
-                        context.i64_type().into(),
-                        context.i64_type().into(),
-                        context.i64_type().into(),
-                    ],
-                    false,
-                ),
-            );
-            let mut args = slice_parts(builder, values[slice].into_struct_value())?;
-            args.push(values[index].into());
-            let result = builder
-                .build_call(get, &args, &value_name(*out))
-                .map_err(builder_error)?
-                .try_as_basic_value()
-                .basic()
-                .ok_or_else(|| LlvmError::new("slice index returned void"))?;
-            values.insert(*out, result);
+                builder,
+                values[slice].into_struct_value(),
+                values[index].into_int_value(),
+                &value_name(*out),
+            )?;
+            values.insert(*out, result.into());
         }
         Inst::SliceStore {
             slice,
             index,
             value,
         } => {
-            let set = external_function(
+            emit_int_slice_store_inline(
+                context,
                 module,
-                "mako_native_int_slice_set",
-                context.void_type().fn_type(
-                    &[
-                        context.ptr_type(Default::default()).into(),
-                        context.i64_type().into(),
-                        context.i64_type().into(),
-                        context.i64_type().into(),
-                        context.i64_type().into(),
-                        context.i64_type().into(),
-                    ],
-                    false,
-                ),
-            );
-            let mut args = slice_parts(builder, values[slice].into_struct_value())?;
-            args.push(values[index].into());
-            args.push(values[value].into());
-            builder
-                .build_call(set, &args, "slice.set")
-                .map_err(builder_error)?;
+                builder,
+                values[slice].into_struct_value(),
+                values[index].into_int_value(),
+                values[value].into_int_value(),
+            )?;
         }
         Inst::SliceAppend { out, slice, value } => {
-            let function_type = context.void_type().fn_type(
-                &[
-                    context.ptr_type(Default::default()).into(),
-                    context.ptr_type(Default::default()).into(),
-                    context.i64_type().into(),
-                    context.i64_type().into(),
-                    context.i64_type().into(),
-                    context.i64_type().into(),
-                ],
-                false,
-            );
-            let result = call_slice_return(
+            // Fast path when the header is owned and len < cap: store in place
+            // and return the updated header. Slow path keeps the runtime grow.
+            let result = emit_int_slice_append_inline(
                 context,
                 module,
                 builder,
                 slice_result_slots[out],
-                "mako_native_int_slice_append",
-                function_type,
-                &{
-                    let mut args = slice_parts(builder, values[slice].into_struct_value())?;
-                    args.push(values[value].into());
-                    args
-                },
+                values[slice].into_struct_value(),
+                values[value].into_int_value(),
                 &value_name(*out),
             )?;
             values.insert(*out, result);
@@ -1078,105 +1400,43 @@ fn emit_instruction<'ctx>(
             values.insert(*out, loaded);
         }
         Inst::StrSliceLen { out, slice } => {
-            let parts = slice_parts(builder, values[slice].into_struct_value())?;
-            let f = external_function(
-                module,
-                "mako_native_str_slice_len",
-                context.i64_type().fn_type(
-                    &[
-                        context.ptr_type(Default::default()).into(),
-                        context.i64_type().into(),
-                        context.i64_type().into(),
-                        context.i64_type().into(),
-                    ],
-                    false,
-                ),
-            );
+            let sv = values[slice].into_struct_value();
             let len = builder
-                .build_call(f, &parts, &value_name(*out))
-                .map_err(builder_error)?
-                .try_as_basic_value()
-                .basic()
-                .ok_or_else(|| LlvmError::new("string slice len returned void"))?;
+                .build_extract_value(sv, 1, &value_name(*out))
+                .map_err(builder_error)?;
             values.insert(*out, len);
         }
         Inst::StrSliceIndex { out, slice, index } => {
-            let parts = slice_parts(builder, values[slice].into_struct_value())?;
-            let string_ty = llvm_type(context, Type::Str);
-            let f = external_function(
+            let element = emit_str_slice_index_inline(
+                context,
                 module,
-                "mako_native_str_slice_get",
-                string_ty.fn_type(
-                    &[
-                        context.ptr_type(Default::default()).into(),
-                        context.i64_type().into(),
-                        context.i64_type().into(),
-                        context.i64_type().into(),
-                        context.i64_type().into(),
-                    ],
-                    false,
-                ),
-            );
-            let mut args = parts.to_vec();
-            args.push(values[index].into());
-            let element = builder
-                .build_call(f, &args, &value_name(*out))
-                .map_err(builder_error)?
-                .try_as_basic_value()
-                .basic()
-                .ok_or_else(|| LlvmError::new("string slice get returned void"))?;
-            values.insert(*out, element);
+                builder,
+                values[slice].into_struct_value(),
+                values[index].into_int_value(),
+                &value_name(*out),
+            )?;
+            values.insert(*out, element.into());
         }
         Inst::StrSliceStore { slice, index, value } => {
-            let parts = slice_parts(builder, values[slice].into_struct_value())?;
-            let string_ty = llvm_type(context, Type::Str);
-            let f = external_function(
+            emit_str_slice_store_inline(
+                context,
                 module,
-                "mako_native_str_slice_set",
-                context.void_type().fn_type(
-                    &[
-                        context.ptr_type(Default::default()).into(),
-                        context.i64_type().into(),
-                        context.i64_type().into(),
-                        context.i64_type().into(),
-                        context.i64_type().into(),
-                        string_ty.into(),
-                    ],
-                    false,
-                ),
-            );
-            let mut args = parts.to_vec();
-            args.push(values[index].into());
-            args.push(values[value].into());
-            builder
-                .build_call(f, &args, "strslice.set")
-                .map_err(builder_error)?;
+                builder,
+                values[slice].into_struct_value(),
+                values[index].into_int_value(),
+                values[value].into_struct_value(),
+            )?;
         }
         Inst::StrSliceAppend { out, slice, value } => {
-            let parts = slice_parts(builder, values[slice].into_struct_value())?;
-            let slot = slice_result_slots[out];
-            let string_ty = llvm_type(context, Type::Str);
-            let function_type = context.void_type().fn_type(
-                &[
-                    context.ptr_type(Default::default()).into(),
-                    context.ptr_type(Default::default()).into(),
-                    context.i64_type().into(),
-                    context.i64_type().into(),
-                    context.i64_type().into(),
-                    string_ty.into(),
-                ],
-                false,
-            );
-            let f = external_function(module, "mako_native_str_slice_append", function_type);
-            let mut args: Vec<BasicMetadataValueEnum> = vec![slot.into()];
-            args.extend_from_slice(&parts);
-            args.push(values[value].into());
-            builder
-                .build_call(f, &args, "strslice.append")
-                .map_err(builder_error)?;
-            let loaded = builder
-                .build_load(llvm_type(context, Type::StrSlice), slot, &value_name(*out))
-                .map_err(builder_error)?;
+            let loaded = emit_str_slice_append_inline(
+                context,
+                module,
+                builder,
+                slice_result_slots[out],
+                values[slice].into_struct_value(),
+                values[value].into_struct_value(),
+                &value_name(*out),
+            )?;
             values.insert(*out, loaded);
         }
         Inst::StrSliceSlice {
@@ -1408,6 +1668,42 @@ fn llvm_emit_struct_clone<'ctx>(
                 "clone.nested",
             )?
             .into(),
+            Type::ShareInt => {
+                let ptr_ty = context.ptr_type(Default::default());
+                let clone = external_function(
+                    module,
+                    "mako_native_share_clone_ptr",
+                    ptr_ty.fn_type(&[ptr_ty.into()], false),
+                );
+                builder
+                    .build_call(clone, &[loaded.into()], "clone.share")
+                    .map_err(builder_error)?
+                    .try_as_basic_value()
+                    .basic()
+                    .ok_or_else(|| LlvmError::new("share clone returned void"))?
+            }
+            Type::MapII
+            | Type::MapSI
+            | Type::MapSS
+            | Type::MapIF
+            | Type::MapFI => {
+                let ptr_ty = context.ptr_type(Default::default());
+                let name = match field_ty {
+                    Type::MapII => "mako_native_map_ii_clone_ptr",
+                    Type::MapSI => "mako_native_map_si_clone_ptr",
+                    Type::MapSS => "mako_native_map_ss_clone_ptr",
+                    Type::MapIF => "mako_native_map_if_clone_ptr",
+                    Type::MapFI => "mako_native_map_fi_clone_ptr",
+                    _ => unreachable!(),
+                };
+                let clone = external_function(module, name, ptr_ty.fn_type(&[ptr_ty.into()], false));
+                builder
+                    .build_call(clone, &[loaded.into()], "clone.map")
+                    .map_err(builder_error)?
+                    .try_as_basic_value()
+                    .basic()
+                    .ok_or_else(|| LlvmError::new("map clone returned void"))?
+            }
             _ => loaded,
         };
         let dst = builder
@@ -1527,6 +1823,46 @@ fn llvm_emit_struct_drop<'ctx>(
                     )
                     .map_err(builder_error)?;
             }
+            Type::ShareInt => {
+                let loaded = builder
+                    .build_load(llvm_type(context, Type::ShareInt), gep, "drop.share")
+                    .map_err(builder_error)?;
+                let ptr_ty = context.ptr_type(Default::default());
+                let drop = external_function(
+                    module,
+                    "mako_native_share_drop_ptr",
+                    context.void_type().fn_type(&[ptr_ty.into()], false),
+                );
+                builder
+                    .build_call(drop, &[loaded.into()], "drop.share.call")
+                    .map_err(builder_error)?;
+            }
+            Type::MapII
+            | Type::MapSI
+            | Type::MapSS
+            | Type::MapIF
+            | Type::MapFI => {
+                let loaded = builder
+                    .build_load(llvm_type(context, *field_ty), gep, "drop.map")
+                    .map_err(builder_error)?;
+                let ptr_ty = context.ptr_type(Default::default());
+                let name = match field_ty {
+                    Type::MapII => "mako_native_map_ii_drop_ptr",
+                    Type::MapSI => "mako_native_map_si_drop_ptr",
+                    Type::MapSS => "mako_native_map_ss_drop_ptr",
+                    Type::MapIF => "mako_native_map_if_drop_ptr",
+                    Type::MapFI => "mako_native_map_fi_drop_ptr",
+                    _ => unreachable!(),
+                };
+                let drop = external_function(
+                    module,
+                    name,
+                    context.void_type().fn_type(&[ptr_ty.into()], false),
+                );
+                builder
+                    .build_call(drop, &[loaded.into()], "drop.map.call")
+                    .map_err(builder_error)?;
+            }
             Type::Struct(nested_id) => {
                 let loaded = builder
                     .build_load(llvm_type(context, Type::Struct(*nested_id)), gep, "drop.nested")
@@ -1631,6 +1967,397 @@ fn slice_parts<'ctx>(
                 .map_err(builder_error)
         })
         .collect()
+}
+
+/// Extract (data, len, cap, owned) as typed values.
+fn slice_fields<'ctx>(
+    builder: &Builder<'ctx>,
+    value: StructValue<'ctx>,
+) -> Result<(PointerValue<'ctx>, IntValue<'ctx>, IntValue<'ctx>, IntValue<'ctx>), LlvmError> {
+    let data = builder
+        .build_extract_value(value, 0, "slice.data")
+        .map_err(builder_error)?
+        .into_pointer_value();
+    let len = builder
+        .build_extract_value(value, 1, "slice.len")
+        .map_err(builder_error)?
+        .into_int_value();
+    let cap = builder
+        .build_extract_value(value, 2, "slice.cap")
+        .map_err(builder_error)?
+        .into_int_value();
+    let owned = builder
+        .build_extract_value(value, 3, "slice.owned")
+        .map_err(builder_error)?
+        .into_int_value();
+    Ok((data, len, cap, owned))
+}
+
+fn emit_slice_bounds_check<'ctx>(
+    context: &'ctx Context,
+    module: &Module<'ctx>,
+    builder: &Builder<'ctx>,
+    index: IntValue<'ctx>,
+    len: IntValue<'ctx>,
+) -> Result<(), LlvmError> {
+    // Single unsigned compare: (u64)index < (u64)len rejects negatives and OOB.
+    let parent = builder
+        .get_insert_block()
+        .and_then(|b| b.get_parent())
+        .ok_or_else(|| LlvmError::new("slice bounds: no insert block"))?;
+    let ok_bb = context.append_basic_block(parent, "slice.ok");
+    let bad_bb = context.append_basic_block(parent, "slice.oob");
+    let ok = builder
+        .build_int_compare(IntPredicate::ULT, index, len, "idx.ok")
+        .map_err(builder_error)?;
+    builder
+        .build_conditional_branch(ok, ok_bb, bad_bb)
+        .map_err(builder_error)?;
+    builder.position_at_end(bad_bb);
+    let abort = external_function(module, "abort", context.void_type().fn_type(&[], false));
+    builder
+        .build_call(abort, &[], "slice.abort")
+        .map_err(builder_error)?;
+    builder.build_unreachable().map_err(builder_error)?;
+    builder.position_at_end(ok_bb);
+    Ok(())
+}
+
+fn emit_int_slice_index_inline<'ctx>(
+    context: &'ctx Context,
+    module: &Module<'ctx>,
+    builder: &Builder<'ctx>,
+    slice: StructValue<'ctx>,
+    index: IntValue<'ctx>,
+    name: &str,
+) -> Result<IntValue<'ctx>, LlvmError> {
+    let (data, len, _cap, _owned) = slice_fields(builder, slice)?;
+    emit_slice_bounds_check(context, module, builder, index, len)?;
+    let elem_ptr = unsafe {
+        builder
+            .build_gep(context.i64_type(), data, &[index], &format!("{name}.ptr"))
+            .map_err(builder_error)?
+    };
+    builder
+        .build_load(context.i64_type(), elem_ptr, name)
+        .map(|v| v.into_int_value())
+        .map_err(builder_error)
+}
+
+fn emit_int_slice_store_inline<'ctx>(
+    context: &'ctx Context,
+    module: &Module<'ctx>,
+    builder: &Builder<'ctx>,
+    slice: StructValue<'ctx>,
+    index: IntValue<'ctx>,
+    value: IntValue<'ctx>,
+) -> Result<(), LlvmError> {
+    let (data, len, _cap, _owned) = slice_fields(builder, slice)?;
+    emit_slice_bounds_check(context, module, builder, index, len)?;
+    let elem_ptr = unsafe {
+        builder
+            .build_gep(context.i64_type(), data, &[index], "slice.set.ptr")
+            .map_err(builder_error)?
+    };
+    builder
+        .build_store(elem_ptr, value)
+        .map_err(builder_error)?;
+    Ok(())
+}
+
+fn emit_str_slice_index_inline<'ctx>(
+    context: &'ctx Context,
+    module: &Module<'ctx>,
+    builder: &Builder<'ctx>,
+    slice: StructValue<'ctx>,
+    index: IntValue<'ctx>,
+    name: &str,
+) -> Result<StructValue<'ctx>, LlvmError> {
+    let (data, len, _cap, _owned) = slice_fields(builder, slice)?;
+    emit_slice_bounds_check(context, module, builder, index, len)?;
+    let string_ty = llvm_type(context, Type::Str);
+    let elem_ptr = unsafe {
+        builder
+            .build_gep(string_ty, data, &[index], &format!("{name}.ptr"))
+            .map_err(builder_error)?
+    };
+    let raw = builder
+        .build_load(string_ty, elem_ptr, &format!("{name}.raw"))
+        .map_err(builder_error)?
+        .into_struct_value();
+    // Match runtime: return an owned clone of the element.
+    let clone_fn = external_function(
+        module,
+        "mako_native_string_clone",
+        string_ty.fn_type(&[string_ty.into()], false),
+    );
+    builder
+        .build_call(clone_fn, &[raw.into()], name)
+        .map_err(builder_error)?
+        .try_as_basic_value()
+        .basic()
+        .map(|v| v.into_struct_value())
+        .ok_or_else(|| LlvmError::new("string clone returned void"))
+}
+
+fn emit_str_slice_store_inline<'ctx>(
+    context: &'ctx Context,
+    module: &Module<'ctx>,
+    builder: &Builder<'ctx>,
+    slice: StructValue<'ctx>,
+    index: IntValue<'ctx>,
+    value: StructValue<'ctx>,
+) -> Result<(), LlvmError> {
+    let (data, len, _cap, _owned) = slice_fields(builder, slice)?;
+    emit_slice_bounds_check(context, module, builder, index, len)?;
+    let string_ty = llvm_type(context, Type::Str);
+    let elem_ptr = unsafe {
+        builder
+            .build_gep(string_ty, data, &[index], "strslice.set.ptr")
+            .map_err(builder_error)?
+    };
+    let old = builder
+        .build_load(string_ty, elem_ptr, "strslice.set.old")
+        .map_err(builder_error)?;
+    let drop_fn = external_function(
+        module,
+        "mako_native_string_drop",
+        context.void_type().fn_type(&[string_ty.into()], false),
+    );
+    builder
+        .build_call(drop_fn, &[old.into()], "strslice.set.drop")
+        .map_err(builder_error)?;
+    let clone_fn = external_function(
+        module,
+        "mako_native_string_clone",
+        string_ty.fn_type(&[string_ty.into()], false),
+    );
+    let cloned = builder
+        .build_call(clone_fn, &[value.into()], "strslice.set.clone")
+        .map_err(builder_error)?
+        .try_as_basic_value()
+        .basic()
+        .ok_or_else(|| LlvmError::new("string clone returned void"))?;
+    builder
+        .build_store(elem_ptr, cloned)
+        .map_err(builder_error)?;
+    Ok(())
+}
+
+fn emit_str_slice_append_inline<'ctx>(
+    context: &'ctx Context,
+    module: &Module<'ctx>,
+    builder: &Builder<'ctx>,
+    result_slot: PointerValue<'ctx>,
+    slice: StructValue<'ctx>,
+    element: StructValue<'ctx>,
+    name: &str,
+) -> Result<BasicValueEnum<'ctx>, LlvmError> {
+    let parent = builder
+        .get_insert_block()
+        .and_then(|b| b.get_parent())
+        .ok_or_else(|| LlvmError::new("strslice append: no insert block"))?;
+    let (data, len, cap, owned) = slice_fields(builder, slice)?;
+    let zero = context.i64_type().const_zero();
+    let one = context.i64_type().const_int(1, false);
+    let owned_nz = builder
+        .build_int_compare(IntPredicate::NE, owned, zero, "strslice.owned")
+        .map_err(builder_error)?;
+    let room = builder
+        .build_int_compare(IntPredicate::ULT, len, cap, "strslice.room")
+        .map_err(builder_error)?;
+    let fast = builder
+        .build_and(owned_nz, room, "strslice.append.fast")
+        .map_err(builder_error)?;
+    let fast_bb = context.append_basic_block(parent, "strappend.fast");
+    let slow_bb = context.append_basic_block(parent, "strappend.slow");
+    let merge_bb = context.append_basic_block(parent, "strappend.merge");
+    builder
+        .build_conditional_branch(fast, fast_bb, slow_bb)
+        .map_err(builder_error)?;
+
+    builder.position_at_end(fast_bb);
+    let string_ty = llvm_type(context, Type::Str);
+    let elem_ptr = unsafe {
+        builder
+            .build_gep(string_ty, data, &[len], "strappend.ptr")
+            .map_err(builder_error)?
+    };
+    let clone_fn = external_function(
+        module,
+        "mako_native_string_clone",
+        string_ty.fn_type(&[string_ty.into()], false),
+    );
+    let cloned = builder
+        .build_call(clone_fn, &[element.into()], "strappend.clone")
+        .map_err(builder_error)?
+        .try_as_basic_value()
+        .basic()
+        .ok_or_else(|| LlvmError::new("string clone returned void"))?;
+    builder
+        .build_store(elem_ptr, cloned)
+        .map_err(builder_error)?;
+    let new_len = builder
+        .build_int_add(len, one, "strappend.len")
+        .map_err(builder_error)?;
+    let slice_ty = llvm_type(context, Type::StrSlice).into_struct_type();
+    let mut hdr = slice_ty.get_undef();
+    hdr = builder
+        .build_insert_value(hdr, data, 0, "strappend.data")
+        .map_err(builder_error)?
+        .into_struct_value();
+    hdr = builder
+        .build_insert_value(hdr, new_len, 1, "strappend.newlen")
+        .map_err(builder_error)?
+        .into_struct_value();
+    hdr = builder
+        .build_insert_value(hdr, cap, 2, "strappend.cap")
+        .map_err(builder_error)?
+        .into_struct_value();
+    hdr = builder
+        .build_insert_value(hdr, owned, 3, "strappend.owned")
+        .map_err(builder_error)?
+        .into_struct_value();
+    builder
+        .build_store(result_slot, hdr)
+        .map_err(builder_error)?;
+    builder
+        .build_unconditional_branch(merge_bb)
+        .map_err(builder_error)?;
+
+    builder.position_at_end(slow_bb);
+    let parts = slice_parts(builder, slice)?;
+    let function_type = context.void_type().fn_type(
+        &[
+            context.ptr_type(Default::default()).into(),
+            context.ptr_type(Default::default()).into(),
+            context.i64_type().into(),
+            context.i64_type().into(),
+            context.i64_type().into(),
+            string_ty.into(),
+        ],
+        false,
+    );
+    let f = external_function(module, "mako_native_str_slice_append", function_type);
+    let mut args: Vec<BasicMetadataValueEnum> = vec![result_slot.into()];
+    args.extend_from_slice(&parts);
+    args.push(element.into());
+    builder
+        .build_call(f, &args, &format!("{name}.slow"))
+        .map_err(builder_error)?;
+    builder
+        .build_unconditional_branch(merge_bb)
+        .map_err(builder_error)?;
+
+    builder.position_at_end(merge_bb);
+    builder
+        .build_load(llvm_type(context, Type::StrSlice), result_slot, name)
+        .map_err(builder_error)
+}
+
+fn emit_int_slice_append_inline<'ctx>(
+    context: &'ctx Context,
+    module: &Module<'ctx>,
+    builder: &Builder<'ctx>,
+    result_slot: PointerValue<'ctx>,
+    slice: StructValue<'ctx>,
+    element: IntValue<'ctx>,
+    name: &str,
+) -> Result<BasicValueEnum<'ctx>, LlvmError> {
+    let parent = builder
+        .get_insert_block()
+        .and_then(|b| b.get_parent())
+        .ok_or_else(|| LlvmError::new("slice append: no insert block"))?;
+    let (data, len, cap, owned) = slice_fields(builder, slice)?;
+    let zero = context.i64_type().const_zero();
+    let one = context.i64_type().const_int(1, false);
+    let owned_nz = builder
+        .build_int_compare(IntPredicate::NE, owned, zero, "slice.owned")
+        .map_err(builder_error)?;
+    let room = builder
+        .build_int_compare(IntPredicate::ULT, len, cap, "slice.room")
+        .map_err(builder_error)?;
+    let fast = builder
+        .build_and(owned_nz, room, "slice.append.fast")
+        .map_err(builder_error)?;
+    let fast_bb = context.append_basic_block(parent, "append.fast");
+    let slow_bb = context.append_basic_block(parent, "append.slow");
+    let merge_bb = context.append_basic_block(parent, "append.merge");
+    builder
+        .build_conditional_branch(fast, fast_bb, slow_bb)
+        .map_err(builder_error)?;
+
+    // Fast: data[len] = element; return {data, len+1, cap, owned}
+    builder.position_at_end(fast_bb);
+    let elem_ptr = unsafe {
+        builder
+            .build_gep(context.i64_type(), data, &[len], "append.ptr")
+            .map_err(builder_error)?
+    };
+    builder
+        .build_store(elem_ptr, element)
+        .map_err(builder_error)?;
+    let new_len = builder
+        .build_int_add(len, one, "append.len")
+        .map_err(builder_error)?;
+    let slice_ty = llvm_type(context, Type::IntSlice).into_struct_type();
+    let mut hdr = slice_ty.get_undef();
+    hdr = builder
+        .build_insert_value(hdr, data, 0, "append.data")
+        .map_err(builder_error)?
+        .into_struct_value();
+    hdr = builder
+        .build_insert_value(hdr, new_len, 1, "append.newlen")
+        .map_err(builder_error)?
+        .into_struct_value();
+    hdr = builder
+        .build_insert_value(hdr, cap, 2, "append.cap")
+        .map_err(builder_error)?
+        .into_struct_value();
+    hdr = builder
+        .build_insert_value(hdr, owned, 3, "append.owned")
+        .map_err(builder_error)?
+        .into_struct_value();
+    builder
+        .build_store(result_slot, hdr)
+        .map_err(builder_error)?;
+    builder
+        .build_unconditional_branch(merge_bb)
+        .map_err(builder_error)?;
+
+    // Slow: runtime realloc/grow.
+    builder.position_at_end(slow_bb);
+    let function_type = context.void_type().fn_type(
+        &[
+            context.ptr_type(Default::default()).into(),
+            context.ptr_type(Default::default()).into(),
+            context.i64_type().into(),
+            context.i64_type().into(),
+            context.i64_type().into(),
+            context.i64_type().into(),
+        ],
+        false,
+    );
+    let mut args = slice_parts(builder, slice)?;
+    args.push(element.into());
+    let _ = call_slice_return(
+        context,
+        module,
+        builder,
+        result_slot,
+        "mako_native_int_slice_append",
+        function_type,
+        &args,
+        &format!("{name}.slow"),
+    )?;
+    builder
+        .build_unconditional_branch(merge_bb)
+        .map_err(builder_error)?;
+
+    builder.position_at_end(merge_bb);
+    builder
+        .build_load(llvm_type(context, Type::IntSlice), result_slot, name)
+        .map_err(builder_error)
 }
 
 fn pack_string<'ctx>(

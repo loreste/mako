@@ -248,6 +248,10 @@ enum Commands {
         /// Print package-level source/test coverage and test category counts
         #[arg(long = "coverage", default_value_t = false)]
         coverage: bool,
+        /// Code-generation backend: `c` (default) or direct `native` object code.
+        /// Env override: `MAKO_TEST_BACKEND=native|c` (CLI wins when set).
+        #[arg(long, value_enum, default_value_t = BackendCli::C)]
+        backend: BackendCli,
     },
     /// Lint with a few real rules + typecheck (workspace-aware; optional `-p`)
     Lint {
@@ -1211,9 +1215,21 @@ fn run(cli: Cli) -> Result<(), ()> {
             race,
             sanitize,
             coverage,
+            backend,
         } => {
             let count = count.max(1);
             let sanitize = sanitize.or_else(|| race.then(|| "thread".into()));
+            // CLI --backend wins; otherwise MAKO_TEST_BACKEND={c,native,llvm}.
+            let backend = match std::env::var("MAKO_TEST_BACKEND") {
+                Ok(v) if matches!(backend, BackendCli::C) => match v.to_ascii_lowercase().as_str()
+                {
+                    "native" => BackendCli::Native,
+                    "llvm" => BackendCli::Llvm,
+                    "c" => BackendCli::C,
+                    _ => backend,
+                },
+                _ => backend,
+            };
             let mut last_ok = Ok(());
             for i in 0..count {
                 if count > 1 {
@@ -1226,6 +1242,7 @@ fn run(cli: Cli) -> Result<(), ()> {
                     verbose,
                     coverage,
                     sanitize.as_deref(),
+                    backend,
                 );
                 if last_ok.is_err() {
                     break;
@@ -2069,8 +2086,13 @@ fn cmd_test(
     verbose: bool,
     coverage: bool,
     sanitize: Option<&str>,
+    backend: BackendCli,
 ) -> Result<(), ()> {
     let sanitize = sanitize.map(|s| s.to_string());
+    if matches!(backend, BackendCli::Native | BackendCli::Llvm) && sanitize.is_some() {
+        emit_plain_error("--sanitize is not implemented for mako test --backend native/llvm yet");
+        return Err(());
+    }
     if path.is_dir() {
         if let Some(members) = tooling::workspace_member_dirs(path) {
             let members = filter_workspace_members(members, package)?;
@@ -2104,7 +2126,9 @@ fn cmd_test(
                     run_filter,
                     verbose,
                     coverage,
-                    &|f, program, names| run_test_package(f, program, names, san.as_deref()),
+                    &|f, program, names| {
+                        run_test_package(f, program, names, san.as_deref(), backend)
+                    },
                     &|f| run_file_quiet(f),
                 )?;
             }
@@ -2131,7 +2155,7 @@ fn cmd_test(
         run_filter,
         verbose,
         coverage,
-        &|f, program, names| run_test_package(f, program, names, san.as_deref()),
+        &|f, program, names| run_test_package(f, program, names, san.as_deref(), backend),
         &|f| run_file_quiet(f),
     )
 }
@@ -2183,34 +2207,72 @@ fn run_test_package(
     program: &ast::Program,
     test_fns: &[String],
     sanitize: Option<&str>,
+    backend: BackendCli,
 ) -> Result<(), ()> {
-    let mut cg = codegen::Codegen::new().with_tests(test_fns.to_vec());
-    if let Some(dir) = tooling::find_nearest_manifest_dir(file) {
-        let manifest = dir.join("mako.toml");
-        if let Ok(text) = fs::read_to_string(&manifest) {
-            let prof = tooling::codegen_profile_from_toml(&text, Some(file.display().to_string()));
-            cg.bounds_checks_always = prof.bounds_checks_always;
-        }
-    }
-    let c_src = cg.emit(program);
     let out_bin = std::env::temp_dir().join(format!(
-        "mako_gotest_{}",
+        "mako_gotest_{}_{}",
+        match backend {
+            BackendCli::C => "c",
+            BackendCli::Native => "native",
+            BackendCli::Llvm => "llvm",
+        },
         file.file_stem().and_then(|s| s.to_str()).unwrap_or("prog")
     ));
-    build_c(
-        &c_src,
-        &out_bin,
-        false,
-        file,
-        OptLevel::Debug,
-        &BuildOpts {
-            target: None,
-            sanitize: sanitize.map(|s| s.to_string()),
-            static_link: false,
-            overflow: OverflowMode::Wrap,
-            bounds_always: false,
-        },
-    )?;
+    match backend {
+        BackendCli::C => {
+            let mut cg = codegen::Codegen::new().with_tests(test_fns.to_vec());
+            if let Some(dir) = tooling::find_nearest_manifest_dir(file) {
+                let manifest = dir.join("mako.toml");
+                if let Ok(text) = fs::read_to_string(&manifest) {
+                    let prof =
+                        tooling::codegen_profile_from_toml(&text, Some(file.display().to_string()));
+                    cg.bounds_checks_always = prof.bounds_checks_always;
+                }
+            }
+            let c_src = cg.emit(program);
+            build_c(
+                &c_src,
+                &out_bin,
+                false,
+                file,
+                OptLevel::Debug,
+                &BuildOpts {
+                    target: None,
+                    sanitize: sanitize.map(|s| s.to_string()),
+                    static_link: false,
+                    overflow: OverflowMode::Wrap,
+                    bounds_always: false,
+                },
+            )?;
+        }
+        BackendCli::Native | BackendCli::Llvm => {
+            // Shared-IR path with synthetic harness main (see native_ir::lower_with_tests).
+            // Force shared-IR-only so test failures surface as IR diagnostics, not a silent
+            // Cranelift AST fallback that lacks the harness.
+            let prev_shared = std::env::var_os("MAKO_NATIVE_SHARED_IR_ONLY");
+            std::env::set_var("MAKO_NATIVE_SHARED_IR_ONLY", "1");
+            let result = build_native_object(
+                program,
+                &out_bin,
+                file,
+                OptLevel::Debug,
+                backend,
+                &BuildOpts {
+                    target: None,
+                    sanitize: None,
+                    static_link: false,
+                    overflow: OverflowMode::Wrap,
+                    bounds_always: false,
+                },
+                test_fns,
+            );
+            match prev_shared {
+                Some(v) => std::env::set_var("MAKO_NATIVE_SHARED_IR_ONLY", v),
+                None => std::env::remove_var("MAKO_NATIVE_SHARED_IR_ONLY"),
+            }
+            result?;
+        }
+    }
     // Per-test timeout: default 60s, override with MAKO_TEST_TIMEOUT_SECS.
     let timeout_secs: u64 = std::env::var("MAKO_TEST_TIMEOUT_SECS")
         .ok()
@@ -3214,7 +3276,8 @@ fn build_incremental(
             emit_plain_error("--emit-c cannot be used with a direct native backend");
             return Err(());
         }
-        let backend_ms = build_native_object(&program, out_bin, file, level, backend, opts)?;
+        let backend_ms =
+            build_native_object(&program, out_bin, file, level, backend, opts, &[])?;
         return Ok((frontend_ms, backend_ms));
     }
 
@@ -3442,6 +3505,7 @@ fn build_native_object(
     level: OptLevel,
     backend: BackendCli,
     opts: &BuildOpts,
+    test_fns: &[String],
 ) -> Result<f64, ()> {
     if opts.target.is_some() {
         emit_plain_error("--backend native currently supports the host target only");
@@ -3465,8 +3529,9 @@ fn build_native_object(
             // The backend-neutral IR is the canonical path for the scalar
             // subset. Cranelift retains its mature AST lowering for aggregates
             // while their ownership ABI is being migrated into that IR.
+            // When test_fns is non-empty, lower_with_tests synthesizes harness main.
             let native_ir_error = std::cell::RefCell::new(None);
-            let native_ir_object = match native_ir::lower(program) {
+            let native_ir_object = match native_ir::lower_with_tests(program, test_fns) {
                 Ok(ir) => match native_codegen::compile_ir_with_overflow(
                     &ir,
                     matches!(level, OptLevel::Release),
@@ -3484,7 +3549,7 @@ fn build_native_object(
                 }
             };
             if native_ir_object.is_none()
-                && std::env::var_os("MAKO_NATIVE_SHARED_IR_ONLY").is_some()
+                && (std::env::var_os("MAKO_NATIVE_SHARED_IR_ONLY").is_some() || !test_fns.is_empty())
             {
                 emit_plain_error(&format!(
                     "--backend native shared IR lowering failed: {}",
@@ -3516,7 +3581,17 @@ fn build_native_object(
             }
             #[cfg(feature = "llvm-backend")]
             {
-                llvm_codegen::compile_object(program).map_err(|e| {
+                let ir = native_ir::lower_with_tests(program, test_fns).map_err(|e| {
+                    Diagnostic::error(
+                        &src_file.display().to_string(),
+                        "",
+                        Span::unknown(),
+                        "LLVM shared IR lowering failed",
+                    )
+                    .with_hint(e.to_string())
+                    .emit();
+                })?;
+                llvm_codegen::compile_ir(&ir).map_err(|e| {
                     Diagnostic::error(
                         &src_file.display().to_string(),
                         "",
@@ -3529,6 +3604,7 @@ fn build_native_object(
             }
             #[cfg(not(feature = "llvm-backend"))]
             {
+                let _ = test_fns;
                 emit_plain_error(
                     "--backend llvm is unavailable in this build (enable llvm-backend)",
                 );
@@ -3560,7 +3636,7 @@ fn build_native_object(
                 let _ = fs::remove_file(&object_path);
                 emit_plain_error(&error);
             })?;
-            let arguments = vec![
+            let mut arguments = vec![
                 std::ffi::OsString::from("ld64.lld"),
                 std::ffi::OsString::from("-arch"),
                 std::ffi::OsString::from(architecture),
@@ -3575,9 +3651,51 @@ fn build_native_object(
                 std::ffi::OsString::from("dynamic_lookup"),
                 object_path.as_os_str().to_owned(),
                 runtime_archive.as_os_str().to_owned(),
-                std::ffi::OsString::from("-o"),
-                out_bin.as_os_str().to_owned(),
             ];
+            // Optional backends used by the native runtime archive (TLS / GPU / H3).
+            // Without these, OpenSSL/OpenCL/quiche symbols stay unbound at load time.
+            // SDK root so -framework OpenCL / Security resolve under bundled lld.
+            for sdk in [
+                "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk",
+                "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk",
+            ] {
+                if Path::new(sdk).is_dir() {
+                    arguments.push(std::ffi::OsString::from("-syslibroot"));
+                    arguments.push(std::ffi::OsString::from(sdk));
+                    break;
+                }
+            }
+            if let Some((_inc, lib)) = find_openssl() {
+                arguments.push(std::ffi::OsString::from(format!("-L{}", lib.display())));
+                // ld64.lld uses -rpath, not clang's -Wl,-rpath.
+                arguments.push(std::ffi::OsString::from("-rpath"));
+                arguments.push(std::ffi::OsString::from(lib.display().to_string()));
+                arguments.push(std::ffi::OsString::from("-lssl"));
+                arguments.push(std::ffi::OsString::from("-lcrypto"));
+            }
+            if find_opencl().is_some() {
+                arguments.push(std::ffi::OsString::from("-framework"));
+                arguments.push(std::ffi::OsString::from("OpenCL"));
+            }
+            if let Some(q) = find_quiche() {
+                arguments.push(std::ffi::OsString::from(format!("-L{}", q.lib_dir.display())));
+                arguments.push(std::ffi::OsString::from("-rpath"));
+                arguments.push(std::ffi::OsString::from(q.lib_dir.display().to_string()));
+                if q.prefer_static {
+                    arguments.push(q.lib_dir.join("libquiche.a").into_os_string());
+                } else {
+                    arguments.push(std::ffi::OsString::from("-lquiche"));
+                }
+                arguments.push(std::ffi::OsString::from("-lc++"));
+                arguments.push(std::ffi::OsString::from("-framework"));
+                arguments.push(std::ffi::OsString::from("Security"));
+                arguments.push(std::ffi::OsString::from("-framework"));
+                arguments.push(std::ffi::OsString::from("CoreFoundation"));
+            }
+            // System C library for malloc/stdio used by the runtime archive.
+            arguments.push(std::ffi::OsString::from("-lSystem"));
+            arguments.push(std::ffi::OsString::from("-o"));
+            arguments.push(out_bin.as_os_str().to_owned());
             let argument_refs = arguments
                 .iter()
                 .map(|arg| arg.as_os_str())

@@ -100,7 +100,12 @@ mem_fixtures=(
   native_owned_tuples native_enum_payload native_nested_structs native_match_owned
   native_match_guards native_match native_for native_defer native_cfor native_labeled
   native_fmt native_mem_stress native_fibonacci
+  native_if_expr native_methods native_builtins
+  native_maps native_map_more native_map_range native_copy native_bool_slice
+  native_result
 )
+# Extra top-level examples (threaded kick / select / regex) — also 0-leak.
+# Built from examples/ not examples/native/ in the loop below via paths.
 for owned_fixture in "${mem_fixtures[@]}"; do
   native_mem="$tmp_dir/$owned_fixture"
   "$mako_bin" build "$repo_dir/examples/native/$owned_fixture.mko" --backend native -o "$native_mem"
@@ -149,6 +154,47 @@ for owned_fixture in "${mem_fixtures[@]}"; do
   fi
 done
 
+# Top-level examples with threaded kick / select / regex (0-leak verified).
+top_mem_fixtures=(concurrency channels select_syntax select_fair chan_range regex_seed parse_num struct_slice parallel)
+for owned_fixture in "${top_mem_fixtures[@]}"; do
+  native_mem="$tmp_dir/$owned_fixture"
+  "$mako_bin" build "$repo_dir/examples/$owned_fixture.mko" --backend native -o "$native_mem"
+  if [[ "$(uname -s)" == "Darwin" ]]; then
+    if [[ -r /usr/lib/libgmalloc.dylib ]]; then
+      if ! DYLD_INSERT_LIBRARIES=/usr/lib/libgmalloc.dylib \
+        MallocScribble=1 MallocPreScribble=1 "$native_mem" >/dev/null 2>"$tmp_dir/$owned_fixture-gm.txt"
+      then
+        echo "native compiler test: GuardMalloc failure in $owned_fixture" >&2
+        tail -30 "$tmp_dir/$owned_fixture-gm.txt" >&2 || true
+        exit 1
+      fi
+    fi
+    set +e
+    leaks --atExit -- "$native_mem" >"$tmp_dir/$owned_fixture-leaks.txt" 2>&1
+    leaks_status=$?
+    set -e
+    if grep -Eq "([1-9][0-9]* leaks for|[1-9][0-9]* total leaked bytes)" \
+      "$tmp_dir/$owned_fixture-leaks.txt"; then
+      echo "native compiler test: leaks detected in $owned_fixture ownership" >&2
+      grep -E "leaks for|leaked bytes" "$tmp_dir/$owned_fixture-leaks.txt" >&2 || true
+      exit 1
+    fi
+    if [[ $leaks_status -ne 0 ]]; then
+      if grep -q "Couldn't get task port" "$tmp_dir/$owned_fixture-leaks.txt"; then
+        echo "native compiler test: leaks unavailable for $owned_fixture (task port denied)" >&2
+      else
+        if ! grep -Eq "0 leaks for|0 total leaked bytes" "$tmp_dir/$owned_fixture-leaks.txt"; then
+          echo "native compiler test: leaks instrumentation failed for $owned_fixture" >&2
+          tail -20 "$tmp_dir/$owned_fixture-leaks.txt" >&2
+          exit 1
+        fi
+      fi
+    fi
+  else
+    "$native_mem" >/dev/null
+  fi
+done
+
 echo "[5/5] C/native differential execution"
 # These fixtures must use the backend-neutral IR; this opt-in prevents a
 # regression from silently selecting the legacy AST aggregate lowering.
@@ -172,7 +218,32 @@ for shared_fixture in \
   examples/native/native_labeled.mko \
   examples/native/native_fmt.mko \
   examples/native/native_match.mko \
-  examples/native/native_mem_stress.mko
+  examples/native/native_mem_stress.mko \
+  examples/native/native_if_expr.mko \
+  examples/native/native_methods.mko \
+  examples/native/native_builtins.mko \
+  examples/native/native_maps.mko \
+  examples/native/native_map_more.mko \
+  examples/native/native_map_range.mko \
+  examples/native/native_copy.mko \
+  examples/native/native_bool_slice.mko \
+  examples/native/native_result.mko \
+  examples/map.mko \
+  examples/stdlib.mko \
+  examples/slice64.mko \
+  examples/fmt_demo.mko \
+  examples/arena.mko \
+  examples/concurrency.mko \
+  examples/channels.mko \
+  examples/select_syntax.mko \
+  examples/select_fair.mko \
+  examples/chan_range.mko \
+  examples/cancel.mko \
+  examples/parallel.mko \
+  examples/struct_slice.mko \
+  examples/parse_num.mko \
+  examples/regex_seed.mko \
+  examples/json_array.mko
 do
   shared_name="$(basename "$shared_fixture" .mko)"
   MAKO_NATIVE_SHARED_IR_ONLY=1 "$repo_dir/target/debug/mako" build "$repo_dir/$shared_fixture" \
@@ -203,6 +274,31 @@ for fixture in \
   "examples/native/native_labeled.mko" \
   "examples/native/native_fmt.mko" \
   "examples/native/native_mem_stress.mko" \
+  "examples/native/native_if_expr.mko" \
+  "examples/native/native_methods.mko" \
+  "examples/native/native_builtins.mko" \
+  "examples/native/native_maps.mko" \
+  "examples/native/native_map_more.mko" \
+  "examples/native/native_map_range.mko" \
+  "examples/native/native_copy.mko" \
+  "examples/native/native_bool_slice.mko" \
+  "examples/map.mko" \
+  "examples/stdlib.mko" \
+  "examples/slice64.mko" \
+  "examples/fmt_demo.mko" \
+  "examples/arena.mko" \
+  "examples/concurrency.mko" \
+  "examples/channels.mko" \
+  "examples/select_syntax.mko" \
+  "examples/select_fair.mko" \
+  "examples/chan_range.mko" \
+  "examples/cancel.mko" \
+  "examples/parallel.mko" \
+  "examples/struct_slice.mko" \
+  "examples/parse_num.mko" \
+  "examples/regex_seed.mko" \
+  "examples/json_array.mko" \
+  "examples/native/native_result.mko" \
   "examples/native/native_fibonacci.mko" \
   "examples/native/native_match.mko"
 do

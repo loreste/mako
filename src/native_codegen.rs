@@ -885,6 +885,9 @@ pub fn compile_ir_with_overflow(
             sig.params.push(AbiParam::new(ir_clif_type(*ty)?));
         }
         if f.name == "main" {
+            // CRT entry: main(int argc, char **argv) -> int
+            sig.params.push(AbiParam::new(types::I32));
+            sig.params.push(AbiParam::new(types::I64));
             sig.returns.push(AbiParam::new(types::I32));
         } else if let Some(ty) = f.ret {
             sig.returns.push(AbiParam::new(ir_clif_type(ty)?));
@@ -949,6 +952,9 @@ pub fn compile_ir_with_overflow(
                 .push(AbiParam::new(ir_clif_type(*ty)?));
         }
         if f.name == "main" {
+            // CRT entry: main(int argc, char **argv) -> int
+            ctx.func.signature.params.push(AbiParam::new(types::I32));
+            ctx.func.signature.params.push(AbiParam::new(types::I64));
             ctx.func.signature.returns.push(AbiParam::new(types::I32));
         } else if let Some(ty) = f.ret {
             ctx.func
@@ -966,8 +972,35 @@ pub fn compile_ir_with_overflow(
             vals.insert(*v, p);
             let _ = i;
         }
+        // CRT argc/argv block params (filled in after switch_to_block).
+        let main_argv_params = if f.name == "main" {
+            let argc_i32 = fb.append_block_param(blocks[0], types::I32);
+            let argv_ptr = fb.append_block_param(blocks[0], types::I64);
+            Some((argc_i32, argv_ptr))
+        } else {
+            None
+        };
         for (bi, b) in f.blocks.iter().enumerate() {
             fb.switch_to_block(blocks[bi]);
+            // Publish process args once at the top of main.
+            if bi == 0 {
+                if let Some((argc_i32, argv_ptr)) = main_argv_params {
+                    let argc_i64 = fb.ins().sextend(types::I64, argc_i32);
+                    let mut set_sig = module.make_signature();
+                    set_sig.params.push(AbiParam::new(types::I64));
+                    set_sig.params.push(AbiParam::new(types::I64));
+                    let set_id = module
+                        .declare_function("mako_native_set_args", Linkage::Import, &set_sig)
+                        .map_err(|e| NativeError::new(e.to_string()))?;
+                    let set_ref = module.declare_func_in_func(set_id, &mut fb.func);
+                    fb.ins().call(set_ref, &[argc_i64, argv_ptr]);
+                }
+                // Register named struct schemas for reflect_type_schema / num_fields
+                // (C backend uses __attribute__((constructor)); native does it at main).
+                if f.name == "main" {
+                    emit_reflect_schema_regs(&mut module, &mut fb, ir, &mut strlit_id)?;
+                }
+            }
             for inst in &b.instructions {
                 match inst {
                     IrInst::ConstInt { out, value, ty } => {
@@ -1044,6 +1077,36 @@ pub fn compile_ir_with_overflow(
                             (BinOp::Or, IrType::I1) | (BinOp::BitOr, IrType::I1) => {
                                 fb.ins().bor(l, r)
                             }
+                            (BinOp::BitAnd, IrType::I64) => fb.ins().band(l, r),
+                            (BinOp::BitOr, IrType::I64) => fb.ins().bor(l, r),
+                            (BinOp::BitXor, IrType::I64) | (BinOp::BitXor, IrType::I1) => {
+                                fb.ins().bxor(l, r)
+                            }
+                            (BinOp::BitClear, IrType::I64) => {
+                                // a &^ b == a & !b
+                                let not_r = fb.ins().bnot(r);
+                                fb.ins().band(l, not_r)
+                            }
+                            (BinOp::Shl, IrType::I64) => fb.ins().ishl(l, r),
+                            (BinOp::Shr, IrType::I64) => fb.ins().sshr(l, r),
+                            (BinOp::Add, IrType::F64) => fb.ins().fadd(l, r),
+                            (BinOp::Sub, IrType::F64) => fb.ins().fsub(l, r),
+                            (BinOp::Mul, IrType::F64) => fb.ins().fmul(l, r),
+                            (BinOp::Div, IrType::F64) => fb.ins().fdiv(l, r),
+                            (BinOp::Eq, IrType::F64) => fb.ins().fcmp(FloatCC::Equal, l, r),
+                            (BinOp::Ne, IrType::F64) => fb.ins().fcmp(FloatCC::NotEqual, l, r),
+                            (BinOp::Lt, IrType::F64) => {
+                                fb.ins().fcmp(FloatCC::LessThan, l, r)
+                            }
+                            (BinOp::Le, IrType::F64) => {
+                                fb.ins().fcmp(FloatCC::LessThanOrEqual, l, r)
+                            }
+                            (BinOp::Gt, IrType::F64) => {
+                                fb.ins().fcmp(FloatCC::GreaterThan, l, r)
+                            }
+                            (BinOp::Ge, IrType::F64) => {
+                                fb.ins().fcmp(FloatCC::GreaterThanOrEqual, l, r)
+                            }
                             _ => {
                                 return Err(NativeError::new(
                                     "native IR Cranelift: unsupported binary operation",
@@ -1056,7 +1119,12 @@ pub fn compile_ir_with_overflow(
                         let value = vals[value];
                         let result = match (op, ty) {
                             (UnaryOp::Neg, IrType::I64) => fb.ins().ineg(value),
+                            (UnaryOp::Neg, IrType::F64) => fb.ins().fneg(value),
                             (UnaryOp::Not, IrType::I1) => fb.ins().bxor_imm(value, 1),
+                            (UnaryOp::Not, IrType::I64) => {
+                                // truthy not: x == 0
+                                fb.ins().icmp_imm(IntCC::Equal, value, 0)
+                            }
                             (UnaryOp::BitNot, IrType::I64) => fb.ins().bnot(value),
                             _ => {
                                 return Err(NativeError::new(
@@ -1066,23 +1134,148 @@ pub fn compile_ir_with_overflow(
                         };
                         vals.insert(*out, result);
                     }
+                    IrInst::Cast {
+                        out,
+                        value,
+                        from,
+                        to,
+                    } => {
+                        let v = vals[value];
+                        let result = match (from, to) {
+                            (IrType::I64, IrType::F64) => fb.ins().fcvt_from_sint(types::F64, v),
+                            (IrType::F64, IrType::I64) => fb.ins().fcvt_to_sint_sat(types::I64, v),
+                            (IrType::I64, IrType::I1) => {
+                                let z = fb.ins().iconst(types::I64, 0);
+                                fb.ins().icmp(IntCC::NotEqual, v, z)
+                            }
+                            (IrType::I1, IrType::I64) => fb.ins().uextend(types::I64, v),
+                            (IrType::F64, IrType::I1) => {
+                                let z = fb.ins().f64const(0.0);
+                                fb.ins().fcmp(FloatCC::NotEqual, v, z)
+                            }
+                            (IrType::I1, IrType::F64) => {
+                                let w = fb.ins().uextend(types::I64, v);
+                                fb.ins().fcvt_from_sint(types::F64, w)
+                            }
+                            _ => {
+                                return Err(NativeError::new(
+                                    "native IR Cranelift: unsupported cast",
+                                ))
+                            }
+                        };
+                        vals.insert(*out, result);
+                    }
                     IrInst::Call {
                         out,
                         function,
                         args,
-                        ..
+                        ret,
                     } => {
-                        let (callee, _, _) = ids.get(function).ok_or_else(|| {
-                            NativeError::new(format!(
-                                "native IR Cranelift: unknown function `{function}`"
-                            ))
-                        })?;
-                        let reference = module.declare_func_in_func(*callee, &mut fb.func);
-                        let arguments = args.iter().map(|arg| vals[arg]).collect::<Vec<_>>();
+                        let callee = if let Some((id, _, _)) = ids.get(function) {
+                            *id
+                        } else {
+                            // External runtime helper. Param types come from the
+                            // already-lowered values (i64 pointers, f64 scalars, …).
+                            // Fixed signatures for helpers that must not flip I8/I64
+                            // across call sites (Cranelift rejects redeclare).
+                            let mut sig = module.make_signature();
+                            if function == "mako_native_assert" {
+                                sig.params.push(AbiParam::new(types::I64));
+                            } else if function == "mako_native_assert_eq" {
+                                sig.params.push(AbiParam::new(types::I64));
+                                sig.params.push(AbiParam::new(types::I64));
+                            } else if function == "mako_native_bool_slice_set_ptr"
+                                || function == "mako_native_map_ii_set_ptr"
+                                || function == "mako_native_map_si_set_ptr"
+                            {
+                                // C: always i64 slots (bool stored as 0/1).
+                                for _ in 0..args.len() {
+                                    sig.params.push(AbiParam::new(types::I64));
+                                }
+                            } else if function == "mako_native_bool_slice_append_ptr" {
+                                // C: (slice*, i64 element) -> slice*
+                                sig.params.push(AbiParam::new(types::I64));
+                                sig.params.push(AbiParam::new(types::I64));
+                            } else {
+                                for arg in args {
+                                    let vty = fb.func.dfg.value_type(vals[arg]);
+                                    sig.params.push(AbiParam::new(vty));
+                                }
+                            }
+                            if let Some(rty) = ret {
+                                sig.returns.push(AbiParam::new(ir_clif_type(*rty)?));
+                            }
+                            module
+                                .declare_function(function, Linkage::Import, &sig)
+                                .map_err(|e| NativeError::new(e.to_string()))?
+                        };
+                        let reference = module.declare_func_in_func(callee, &mut fb.func);
+                        // Widen I8/I1 bool-ish args to i64 when the fixed assert
+                        // ABI expects int64_t (avoids signature mismatch).
+                        let arguments = args
+                            .iter()
+                            .map(|arg| {
+                                let v = vals[arg];
+                                let vty = fb.func.dfg.value_type(v);
+                                let widen = (function == "mako_native_assert"
+                                    || function == "mako_native_assert_eq"
+                                    || function == "mako_native_bool_slice_set_ptr"
+                                    || function == "mako_native_bool_slice_append_ptr"
+                                    || function == "mako_native_map_ii_set_ptr"
+                                    || function == "mako_native_map_si_set_ptr")
+                                    && vty != types::I64
+                                    && vty.bits() < 64;
+                                if widen {
+                                    fb.ins().uextend(types::I64, v)
+                                } else {
+                                    v
+                                }
+                            })
+                            .collect::<Vec<_>>();
                         let call = fb.ins().call(reference, &arguments);
                         if let Some(out) = out {
                             let result = *fb.inst_results(call).first().ok_or_else(|| {
                                 NativeError::new("native IR Cranelift: call returned no value")
+                            })?;
+                            vals.insert(*out, result);
+                        }
+                    }
+                    IrInst::FuncAddr { out, function } => {
+                        let callee = if let Some((id, _, _)) = ids.get(function) {
+                            *id
+                        } else {
+                            return Err(NativeError::new(format!(
+                                "native IR Cranelift: FuncAddr unknown function `{function}`"
+                            )));
+                        };
+                        let reference = module.declare_func_in_func(callee, &mut fb.func);
+                        let addr = fb.ins().func_addr(types::I64, reference);
+                        vals.insert(*out, addr);
+                    }
+                    IrInst::CallIndirect {
+                        out,
+                        callee,
+                        args,
+                        param_tys,
+                        ret,
+                    } => {
+                        // Build a signature matching the call site and call_indirect.
+                        let mut sig = module.make_signature();
+                        for pty in param_tys {
+                            sig.params
+                                .push(AbiParam::new(ir_clif_type(*pty).unwrap_or(types::I64)));
+                        }
+                        if let Some(rty) = ret {
+                            sig.returns
+                                .push(AbiParam::new(ir_clif_type(*rty).unwrap_or(types::I64)));
+                        }
+                        let sig_ref = fb.import_signature(sig);
+                        let arguments = args.iter().map(|a| vals[a]).collect::<Vec<_>>();
+                        let callee_v = vals[callee];
+                        let call = fb.ins().call_indirect(sig_ref, callee_v, &arguments);
+                        if let Some(out) = out {
+                            let result = *fb.inst_results(call).first().ok_or_else(|| {
+                                NativeError::new("native IR Cranelift: indirect call returned no value")
                             })?;
                             vals.insert(*out, result);
                         }
@@ -1127,7 +1320,9 @@ pub fn compile_ir_with_overflow(
                         let mut hdr_desc = DataDescription::new();
                         hdr_desc.set_align(8);
                         let mut header = vec![0u8; 16];
-                        header[8..16].copy_from_slice(&(bytes.len() as u64).to_le_bytes());
+                        // High bit of len: static/immortal (clone free, drop no-op).
+                        let static_len = (bytes.len() as u64) | (1u64 << 63);
+                        header[8..16].copy_from_slice(&static_len.to_le_bytes());
                         hdr_desc.define(header.into_boxed_slice());
                         let data_ref = module.declare_data_in_data(bytes_id, &mut hdr_desc);
                         hdr_desc.write_data_addr(0, data_ref, 0);
@@ -1166,12 +1361,15 @@ pub fn compile_ir_with_overflow(
                     }
                     IrInst::StringLen { out, value } => {
                         // Pointer ABI: header is { data:ptr, len:i64 }; len at +8.
-                        let len = fb.ins().load(
+                        // Clear immortal/static high bit for the true byte length.
+                        let raw = fb.ins().load(
                             types::I64,
                             MemFlagsData::new(),
                             vals[value],
                             8,
                         );
+                        let mask = fb.ins().iconst(types::I64, !(1i64 << 63));
+                        let len = fb.ins().band(raw, mask);
                         vals.insert(*out, len);
                     }
                     IrInst::IntToString { out, value } => {
@@ -1425,6 +1623,28 @@ fn ir_clif_type(ty: IrType) -> Result<cranelift_codegen::ir::Type, NativeError> 
         IrType::Str => Ok(types::I64),
         IrType::IntSlice => Ok(types::I64),
         IrType::StrSlice => Ok(types::I64),
+        IrType::MapII
+        | IrType::MapSI
+        | IrType::MapSS
+        | IrType::MapIF
+        | IrType::MapFI
+        | IrType::MapIPtr(_)
+        | IrType::MapSPtr(_)
+        | IrType::PtrSlice(_)
+        | IrType::ChanI
+        | IrType::ChanS
+        | IrType::ChanF
+        | IrType::ChanP(_)
+        | IrType::Arena
+        | IrType::Nursery
+        | IrType::Task
+        | IrType::Opaque
+        | IrType::FnPtr
+        | IrType::StructSlice(_)
+        | IrType::ShareInt
+        | IrType::FloatSlice
+        | IrType::ByteSlice
+        | IrType::BoolSlice => Ok(types::I64),
         IrType::Struct(_) => Ok(types::I64),
     }
 }
@@ -1479,6 +1699,45 @@ fn emit_struct_clone(
             }
             IrType::StrSlice => {
                 let f = module.declare_func_in_func(ss_clone, &mut fb.func);
+                let call = fb.ins().call(f, &[loaded]);
+                fb.inst_results(call)[0]
+            }
+            IrType::ShareInt => {
+                // RC bump; reuses declare-on-demand import like Call.
+                let mut sig = module.make_signature();
+                sig.params.push(AbiParam::new(types::I64));
+                sig.returns.push(AbiParam::new(types::I64));
+                let id = module
+                    .declare_function(
+                        "mako_native_share_clone_ptr",
+                        Linkage::Import,
+                        &sig,
+                    )
+                    .map_err(|e| NativeError::new(e.to_string()))?;
+                let f = module.declare_func_in_func(id, &mut fb.func);
+                let call = fb.ins().call(f, &[loaded]);
+                fb.inst_results(call)[0]
+            }
+            IrType::MapII
+            | IrType::MapSI
+            | IrType::MapSS
+            | IrType::MapIF
+            | IrType::MapFI => {
+                let name = match fty {
+                    IrType::MapII => "mako_native_map_ii_clone_ptr",
+                    IrType::MapSI => "mako_native_map_si_clone_ptr",
+                    IrType::MapSS => "mako_native_map_ss_clone_ptr",
+                    IrType::MapIF => "mako_native_map_if_clone_ptr",
+                    IrType::MapFI => "mako_native_map_fi_clone_ptr",
+                    _ => unreachable!(),
+                };
+                let mut sig = module.make_signature();
+                sig.params.push(AbiParam::new(types::I64));
+                sig.returns.push(AbiParam::new(types::I64));
+                let id = module
+                    .declare_function(name, Linkage::Import, &sig)
+                    .map_err(|e| NativeError::new(e.to_string()))?;
+                let f = module.declare_func_in_func(id, &mut fb.func);
                 let call = fb.ins().call(f, &[loaded]);
                 fb.inst_results(call)[0]
             }
@@ -1538,6 +1797,40 @@ fn emit_struct_drop(
             }
             IrType::StrSlice => {
                 let f = module.declare_func_in_func(ss_drop, &mut fb.func);
+                fb.ins().call(f, &[loaded]);
+            }
+            IrType::ShareInt => {
+                let mut sig = module.make_signature();
+                sig.params.push(AbiParam::new(types::I64));
+                let id = module
+                    .declare_function(
+                        "mako_native_share_drop_ptr",
+                        Linkage::Import,
+                        &sig,
+                    )
+                    .map_err(|e| NativeError::new(e.to_string()))?;
+                let f = module.declare_func_in_func(id, &mut fb.func);
+                fb.ins().call(f, &[loaded]);
+            }
+            IrType::MapII
+            | IrType::MapSI
+            | IrType::MapSS
+            | IrType::MapIF
+            | IrType::MapFI => {
+                let name = match fty {
+                    IrType::MapII => "mako_native_map_ii_drop_ptr",
+                    IrType::MapSI => "mako_native_map_si_drop_ptr",
+                    IrType::MapSS => "mako_native_map_ss_drop_ptr",
+                    IrType::MapIF => "mako_native_map_if_drop_ptr",
+                    IrType::MapFI => "mako_native_map_fi_drop_ptr",
+                    _ => unreachable!(),
+                };
+                let mut sig = module.make_signature();
+                sig.params.push(AbiParam::new(types::I64));
+                let id = module
+                    .declare_function(name, Linkage::Import, &sig)
+                    .map_err(|e| NativeError::new(e.to_string()))?;
+                let f = module.declare_func_in_func(id, &mut fb.func);
                 fb.ins().call(f, &[loaded]);
             }
             IrType::Struct(nested_id) => {
@@ -4771,6 +5064,117 @@ impl FunctionLowerer<'_, '_> {
             self.function_name
         ))
     }
+}
+
+/// Emit `mako_native_reflect_register_type(name, schema)` for each named user
+/// struct so `reflect_type_schema` / `reflect_struct_num_fields` work at runtime.
+fn emit_reflect_schema_regs(
+    module: &mut ObjectModule,
+    fb: &mut FunctionBuilder,
+    ir: &native_ir::Module,
+    strlit_id: &mut u32,
+) -> Result<(), NativeError> {
+    let mut reg_sig = module.make_signature();
+    reg_sig.params.push(AbiParam::new(types::I64));
+    reg_sig.params.push(AbiParam::new(types::I64));
+    reg_sig.returns.push(AbiParam::new(types::I64));
+    let reg_id = module
+        .declare_function(
+            "mako_native_reflect_register_type",
+            Linkage::Import,
+            &reg_sig,
+        )
+        .map_err(|e| NativeError::new(e.to_string()))?;
+    let reg_ref = module.declare_func_in_func(reg_id, &mut fb.func);
+
+    for layout in &ir.structs {
+        // Skip anonymous tuples / Result/Option packs (numeric or empty names).
+        if layout.name.is_empty()
+            || layout.name.chars().next().is_some_and(|c| c.is_ascii_digit())
+            || layout.name.starts_with("__")
+            || layout.name.contains("Result")
+            || layout.name.contains("Option")
+        {
+            continue;
+        }
+        // Pack-qualified names like eng__Point keep the short name for lookup
+        // when the frontend registers plain "Account".
+        let short = layout
+            .name
+            .rsplit("__")
+            .next()
+            .unwrap_or(&layout.name)
+            .to_string();
+        let schema = layout
+            .fields
+            .iter()
+            .map(|(n, t)| format!("{n}:{}", ir_type_schema_name(t, ir)))
+            .collect::<Vec<_>>()
+            .join(",");
+        if schema.is_empty() {
+            continue;
+        }
+        let name_ptr = emit_cstr_data(module, fb, &short, strlit_id, "reflect_name")?;
+        let schema_ptr = emit_cstr_data(module, fb, &schema, strlit_id, "reflect_schema")?;
+        fb.ins().call(reg_ref, &[name_ptr, schema_ptr]);
+    }
+    Ok(())
+}
+
+fn ir_type_schema_name(ty: &IrType, ir: &native_ir::Module) -> String {
+    match ty {
+        IrType::I64 | IrType::I1 => "int".into(),
+        IrType::F64 => "float".into(),
+        IrType::Str => "string".into(),
+        IrType::IntSlice => "[]int".into(),
+        IrType::FloatSlice => "[]float".into(),
+        IrType::ByteSlice => "[]byte".into(),
+        IrType::BoolSlice => "[]bool".into(),
+        IrType::StrSlice => "[]string".into(),
+        IrType::Struct(id) => ir
+            .structs
+            .get(*id as usize)
+            .map(|s| {
+                s.name
+                    .rsplit("__")
+                    .next()
+                    .unwrap_or(&s.name)
+                    .to_string()
+            })
+            .unwrap_or_else(|| "struct".into()),
+        IrType::StructSlice(id) => {
+            let inner = ir
+                .structs
+                .get(*id as usize)
+                .map(|s| s.name.rsplit("__").next().unwrap_or(&s.name).to_string())
+                .unwrap_or_else(|| "struct".into());
+            format!("[]{inner}")
+        }
+        _ => "opaque".into(),
+    }
+}
+
+fn emit_cstr_data(
+    module: &mut ObjectModule,
+    fb: &mut FunctionBuilder,
+    s: &str,
+    strlit_id: &mut u32,
+    tag: &str,
+) -> Result<Value, NativeError> {
+    let name = format!("__mako_{tag}_{strlit_id}");
+    *strlit_id += 1;
+    let id = module
+        .declare_data(&name, Linkage::Local, false, false)
+        .map_err(|e| NativeError::new(e.to_string()))?;
+    let mut content = s.as_bytes().to_vec();
+    content.push(0);
+    let mut desc = DataDescription::new();
+    desc.define(content.into_boxed_slice());
+    module
+        .define_data(id, &desc)
+        .map_err(|e| NativeError::new(e.to_string()))?;
+    let gv = module.declare_data_in_func(id, fb.func);
+    Ok(fb.ins().symbol_value(types::I64, gv))
 }
 
 fn int_cc(op: BinOp) -> IntCC {

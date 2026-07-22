@@ -1,6 +1,6 @@
 # Mako status (adversarial / verified)
 
-Last inventory: **2026-07-20** · product **mako0.4.1** (`CARGO_PKG_VERSION`).
+Last inventory: **2026-07-22** · product **mako0.4.5** (`CARGO_PKG_VERSION`).
 
 Unique Mako surface · pack/pull · map/slice/bag monomorphs · package-per-directory ·
 const-fn depth (match/while/for/strings) · suite **357+ test programs + 75 Rust unit tests** (0 failures,
@@ -14,7 +14,7 @@ ASan clean ownership suite) · [The Mako Book](book/).
 
 | Scope | Approx. |
 |-------|---------|
-| **Product version** | **0.4.1** (native compiler increment; release metadata pending) |
+| **Product version** | **0.4.5** (native compiler language gate complete; release packaging pending) |
 | **MVP / usable language** | Core compiler/runtime scope is exercised; this is not a production-readiness claim |
 | **STATUS north-star** | Tracked scope is explicit; optional depth below remains |
 | **Mako identity (preferred syntax)** | Checklist complete — [IDENTITY.md](IDENTITY.md); not a maturity score |
@@ -179,7 +179,8 @@ Program: [SOUNDNESS.md](SOUNDNESS.md) · model: [MEMORY_MODEL.md](MEMORY_MODEL.m
 | ShareInt capture (shared mut via RC handle) | Done seed — `share_capture_test` |
 | Packaging seeds (deb/rpm/winget/matrix/homebrew) | Done seed — scripts + packaging/ |
 | Book samples `mako check` / `run` | PASS — `docs/book/examples/book_*.mko` |
-| `mako test examples/testing` | PASS — **340 passed**, 0 failed (2026-07-18) |
+| `mako test examples/testing` | PASS — **363 passed**, 0 failed (C backend oracle) |
+| `mako test examples/testing --backend native` | PASS — **363 passed**, 0 failed (2026-07-22; shared-IR Cranelift + native bridge) |
 | GC removal regression checks | PASS — removed builtin and legacy `[package] gc = true` both fail, including isolated cache paths |
 | Speed gate | PASS — normal ≤2.0× and strict ≤1.5× Rust gates; final measured ratios 0.21×–0.65× |
 | Leba downstream smoke | PASS — current compiler builds/checks Leba; compiled `doctor` reports 0 errors |

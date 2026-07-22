@@ -19355,7 +19355,8 @@ fn fold_const_expr(expr: &Expr) -> Result<i64, TypeError> {
 }
 
 /// Fold with const bindings and const-fn table (for `const fn` evaluation).
-fn fold_const_expr_with(
+/// Shared with the native IR so `const MAX = …` resolves at lower time.
+pub fn fold_const_expr_with(
     expr: &Expr,
     consts: &HashMap<String, i64>,
     const_strs: &HashMap<String, String>,
@@ -19545,7 +19546,8 @@ fn bind_const_fn_args(
 }
 
 /// Fold a compile-time string expression (literals, const names, `+` concat, const fn).
-fn fold_const_str_with(
+/// Shared with the native IR const table.
+pub fn fold_const_str_with(
     expr: &Expr,
     consts: &HashMap<String, i64>,
     const_strs: &HashMap<String, String>,

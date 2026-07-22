@@ -22,13 +22,78 @@ if ! command -v rustc >/dev/null 2>&1; then
   echo "native bench: rustc is required for the Rust baseline" >&2
   exit 2
 fi
-cargo build --release --manifest-path "$repo_dir/Cargo.toml"
+# macOS: ensure a real SDK so hand-C and the Mako C backend can find headers.
+if [[ "$(uname -s)" == "Darwin" && -z "${SDKROOT:-}" ]]; then
+  if command -v xcrun >/dev/null 2>&1; then
+    export SDKROOT="$(xcrun --show-sdk-path 2>/dev/null || true)"
+  fi
+fi
+if [[ "$(uname -s)" == "Darwin" && -n "${SDKROOT:-}" ]]; then
+  export CFLAGS="${CFLAGS:-} -isysroot ${SDKROOT}"
+  export CPATH="${SDKROOT}/usr/include${CPATH:+:$CPATH}"
+fi
+
+# Prefer llvm-backend + bundled lld when the static toolchain is present
+# (same discovery as scripts/native-compiler-test.sh).
+cargo_features=()
+if [[ "$(uname -s)" == "Darwin" ]]; then
+  if [[ -z "${LLVM_SYS_211_PREFIX:-}" ]]; then
+    for candidate in /opt/homebrew/opt/llvm@21 /usr/local/opt/llvm@21; do
+      if [[ -x "$candidate/bin/llvm-config" ]]; then
+        export LLVM_SYS_211_PREFIX="$candidate"
+        break
+      fi
+    done
+  fi
+  toolchain_dir="${MAKO_NATIVE_TOOLCHAIN_DIR:-$repo_dir/out/native-toolchain}"
+  export MAKO_LLD_STATIC_DIR="${MAKO_LLD_STATIC_DIR:-$toolchain_dir/lld-build/lib}"
+  if [[ ! -f "$MAKO_LLD_STATIC_DIR/liblldMachO.a" ]]; then
+    for candidate in \
+      /private/tmp/mako-native-toolchain-smoke/lld-build/lib \
+      /private/tmp/mako-lld-static-build/lib; do
+      if [[ -f "$candidate/liblldMachO.a" ]]; then
+        export MAKO_LLD_STATIC_DIR="$candidate"
+        break
+      fi
+    done
+  fi
+  export MAKO_LLD_INCLUDE_DIR="${MAKO_LLD_INCLUDE_DIR:-$toolchain_dir/llvm-project-llvmorg-21.1.8/lld/include}"
+  if [[ ! -f "$MAKO_LLD_INCLUDE_DIR/lld/Common/Driver.h" ]]; then
+    for candidate in \
+      /private/tmp/mako-native-toolchain-smoke/llvm-project-llvmorg-21.1.8/lld/include; do
+      if [[ -f "$candidate/lld/Common/Driver.h" ]]; then
+        export MAKO_LLD_INCLUDE_DIR="$candidate"
+        break
+      fi
+    done
+  fi
+  if [[ -n "${LLVM_SYS_211_PREFIX:-}" && -f "$MAKO_LLD_STATIC_DIR/liblldMachO.a" && \
+        -f "$MAKO_LLD_INCLUDE_DIR/lld/Common/Driver.h" ]]; then
+    cargo_features=(--features llvm-backend)
+  fi
+fi
+
+cargo build --release --manifest-path "$repo_dir/Cargo.toml" "${cargo_features[@]}"
 mkdir -p "$out_dir"
+
+# Release runtime speed uses LLVM when the feature is built in; Cranelift remains
+# the debug/`--backend native` path. Runtime gates compare the optimizing
+# backend against C and Rust.
+native_backend=native
+if "$mako_bin" build --help 2>/dev/null | grep -q 'llvm'; then
+  # Prefer LLVM for release runtime when available (single-file mako with llvm-backend).
+  if "$mako_bin" build examples/bench/native_fib.mko --release --backend llvm --no-incremental \
+      -o "$out_dir/_llvm_probe" 2>/dev/null; then
+    native_backend=llvm
+    rm -f "$out_dir/_llvm_probe"
+  fi
+fi
+echo "native bench: release runtime backend=$native_backend"
 
 workloads=(native_parity native_fib native_slice native_string_slice)
 for workload in "${workloads[@]}"; do
   source_mako="$repo_dir/examples/bench/$workload.mko"
-  "$mako_bin" build "$source_mako" --release --backend native --no-incremental \
+  "$mako_bin" build "$source_mako" --release --backend "$native_backend" --no-incremental \
     -o "$out_dir/$workload-native"
   "$mako_bin" build "$source_mako" --release --backend c --no-incremental \
     -o "$out_dir/$workload-mako-c"

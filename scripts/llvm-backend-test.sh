@@ -100,7 +100,12 @@ for fixture in \
   "$repo_dir/examples/native/native_labeled.mko" \
   "$repo_dir/examples/native/native_fmt.mko" \
   "$repo_dir/examples/native/native_match.mko" \
-  "$repo_dir/examples/native/native_mem_stress.mko"
+  "$repo_dir/examples/native/native_mem_stress.mko" \
+  "$repo_dir/examples/native/native_if_expr.mko" \
+  "$repo_dir/examples/native/native_methods.mko" \
+  "$repo_dir/examples/native/native_builtins.mko" \
+  "$repo_dir/examples/native/native_maps.mko" \
+  "$repo_dir/examples/native/native_result.mko"
 do
   name="$(basename "$fixture" .mko)"
   env -u SDKROOT PATH=/nonexistent "$repo_dir/target/debug/mako" build "$fixture" \

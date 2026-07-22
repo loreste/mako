@@ -1,7 +1,7 @@
 # Mako roadmap
 
-**Product version:** **0.4.1** · Last sync: **2026-07-20**.  
-**Suite:** 360 Mako tests + 79 Rust tests, 0 failures, ASan clean.
+**Product version:** **0.4.5** · Last sync: **2026-07-22**.  
+**Suite:** 363 Mako tests (C + native backends) + Rust unit tests, 0 failures, ASan clean ownership suite.
 
 **Verified:** [STATUS.md](STATUS.md) · **Stdlib:** [STDLIB.md](STDLIB.md) · **Security:** [SECURITY.md](SECURITY.md) · **Release:** [RELEASE.md](RELEASE.md).  
 **Book:** [The Mako Book](book/) · **Identity:** [IDENTITY.md](IDENTITY.md).  
@@ -22,31 +22,31 @@
 | **0.2.4** | Soundness wave + residuals (SAFE/RT, speed, lock verify) | **Shipped** — [SOUNDNESS.md](SOUNDNESS.md) |
 | **0.2.5** | Memory safety audit, LSP, package integrity, honest docs | **Shipped** |
 | **0.3.0** | Cross-platform, CI green, ownership hardening | **Shipped** |
-| **0.4.1** | Native compiler foundation and Linux packaging | **In progress** |
+| **0.4.5** | Native compiler language gate + Linux packaging | **Language gate done** — packaging/perf remaining |
 | **1.0** | Stability | Planned |
 
 ### Native compiler completion checklist (manual implementation)
 
-The C backend remains the language-feature oracle. Native support must be
-implemented and verified feature-by-feature; unsupported constructs must remain
-hard errors rather than silently falling back to C.
+The C backend remains the language-feature oracle. Native support is verified
+feature-by-feature; unsupported constructs must remain hard errors rather than
+silently falling back to C.
 
 - [x] Backend-neutral ownership-explicit IR
 - [x] Cranelift scalar CFG, strings, primitive slices, and initial `[]string`
 - [x] Native/C differential fixtures and Guard Malloc/leak coverage
 - [x] Bundled runtime archive and Linux x86_64 package workflow
-- [ ] LLVM `[]string` lowering, recursive clone, and drop paths
-- [ ] Nested slices and nested owned aggregate layout/drop
-- [ ] Complete structs, enums, maps, tuples, and methods
-- [ ] `defer`, labeled loops, complete `match`, and guards
-- [ ] Native runtime interop (networking, TLS, database, formatting)
-- [ ] `crew`, `kick`, `fan`, channels, and `select`
+- [x] Nested slices and nested owned aggregate layout/drop (shared IR)
+- [x] Complete structs, enums, maps, tuples, methods, `?`, match (incl. arm `return`)
+- [x] `defer`, labeled loops, match guards (shared IR + corpus)
+- [x] Native runtime interop via `runtime/native_bridge.c` (net/TLS/SQL/HTTP/SIP/…)
+- [x] `crew`, `kick`, `fan`, channels, and `select` (corpus green)
+- [x] Full `examples/testing` native correctness gate — **363/363** (2026-07-22)
+- [ ] LLVM release path: broad workload runtime ≤ C and ≤ Rust (slice/map/I/O/CPU/RSS)
 - [ ] Cross-compilation, WASM, static, sanitizer, and overflow build modes
-- [ ] Full C/native/LLVM correctness, leak, latency, RSS, and binary-size gates
+- [ ] Full leak, latency, RSS, and binary-size gates in CI packaging
 
-The unchecked items are intentionally left as manual work. Each completed item
-needs a positive differential fixture, memory-safety coverage where applicable,
-and an update to [docs/NATIVE_COMPILER_PLAN.md](NATIVE_COMPILER_PLAN.md).
+Perf and packaging remain manual work. Language-feature residual fixes need a
+positive corpus fixture and an update to [docs/NATIVE_COMPILER_PLAN.md](NATIVE_COMPILER_PLAN.md).
 
 ### Soundness & runtime (SAFE / RT)
 

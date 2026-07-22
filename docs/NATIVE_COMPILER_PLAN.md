@@ -1,4 +1,4 @@
-# Native compiler plan (Mako 0.4.1)
+# Native compiler plan (Mako 0.4.5)
 
 ## Goal
 
@@ -69,20 +69,33 @@ compilation was 20.1 ms median versus 251.9 ms through C, with 44 MB versus
 101 MB compiler RSS. Fibonacci ran in 146.5 ms versus 148.9 ms Mako C, 147.8 ms
 hand C, and 148.0 ms Rust; the LLVM binary was 33,488 bytes.
 
-## Current state (baseline, v0.4.1)
+**Perf bar (honest, 2026-07-22 Apple arm64 re-measure after inline slice ops):**
+`examples/bench/native_slice.mko` (5M append + sum), 7 samples median wall:
 
-- `src/native_codegen.rs`: Cranelift consumes the backend-neutral IR for the scalar
-  increment and emits a host object. Aggregate/string programs still use the mature
-  AST lowering while their Cranelift ownership ABI is migrated. Both native and LLVM
-  release objects are linked by the bundled lld path on supported hosts.
-- Gap to the C backend (`src/codegen/mod.rs`, ~35k lines): structs/enums/maps/tuples,
-  `for`/`match`/`defer`, concurrency,
-  runtime interop, cross/wasm/static/sanitizer/overflow-checked builds.
-- Shared IR now covers scalar CFG, ownership-explicit strings, `[]int`, primitive
-  slices, and `[]string` for the Cranelift native backend. Unsupported aggregates
-  fail explicitly instead of silently falling back to C. The Linux x86_64 build
-  is installable as a single `mako` binary; the release LLVM path remains the
-  optimization target for broad workload parity.
+| backend | median | vs Rust |
+|---------|--------|---------|
+| hand C (-O3 -flto) | ~18.2 ms | 0.96× |
+| Rust (-O3 -lto) | ~18.7 ms | 1.00× |
+| **Mako LLVM** (inline get/set/append) | **~21.2 ms** | **1.11×** |
+| Mako C backend | ~21.1 ms | 1.14× |
+| Mako Cranelift (`--backend native`) | ~69 ms | 3.6× |
+
+Fib40: Mako LLVM ≈ Rust (~1.01×). Gate uses **`--backend llvm` for release
+runtime** when available; Cranelift stays debug. Remaining to **≤1.00× C/Rust**:
+map get/set inlining, I/O buffers, and induction-proven bounds-check elision.
+
+## Current state (v0.4.5 language gate)
+
+- **Language gate:** `mako test examples/testing --backend native` → **363/363**
+  (2026-07-22). Shared IR + Cranelift debug backend + `runtime/native_bridge.c`
+  cover the full testing corpus (structs/enums/maps/nested aggregates, match/`?`,
+  concurrency, net/TLS/SQL/HTTP/SIP, fan/crew, etc.).
+- `src/native_ir.rs` / `src/native_codegen.rs`: ownership-explicit shared IR →
+  Cranelift object; LLVM release objects use the same IR where enabled.
+  Linked by bundled lld on supported hosts.
+- **Remaining (not language-feature):** LLVM release runtime ≤ C and ≤ Rust on
+  published workloads (maps/I/O/CPU/RSS), packaging CI gates, cross/wasm/static/
+  sanitizer/overflow modes. Unsupported build modes still hard-error.
 
 ## Runtime string ABI (must stay differential-compatible)
 
@@ -304,9 +317,19 @@ f-string interp for string/int/bool), `[]int`/`[]float`/`[]bool`, `[]string`
 (both backends), structs (scalar / `string` / `[]int` / `[]string` /
 nested-aggregate fields), tuples (+owned elements, +owned multi-return), enums
 (int / nullary / `string` payloads) + `match` (enum + scalar int/bool, or-
-patterns, guards, owned results, whole-scrutinee binding). `--overflow trap`
-works on the native shared-IR path. All covered fixtures are 0-leak and
-GuardMalloc-clean on both backends.
+patterns, guards, owned results, whole-scrutinee binding), `ShareInt` RC
+(`share_int`/`share_clone`/`share_get`/`share_set`/`share_drop`) with body-
+scoped drop on if/loop, Result/Option `?` early-return, maps, methods, and
+stdlib seeds (`path_join`/`now_ms`/`str_len`/`exit`/`sleep_ms`/`argc`/
+`parse_int`). `--overflow trap` works on the native shared-IR path. All
+covered fixtures are 0-leak and GuardMalloc-clean on both backends.
+
+**Memory-safety hard gate:** every heap fixture must pass GuardMalloc and
+macOS `leaks` (0 leaks). Fixed a return-path ownership bug: `take_bare_string_local`
+treated nullary variants (`None`, …) as non-owned bare idents, so
+`return None` cloned the enum and leaked the original (`native_try` / Option).
+Unit test: `return_none_moves_without_clone_or_leak`. Intentional OOB fixture
+`native_vector_sum_oob` aborts under GuardMalloc by design.
 
 ### Aggregates — remaining depth
 - [x] Nested aggregate fields (struct-in-struct) via recursive per-layout
@@ -314,12 +337,35 @@ GuardMalloc-clean on both backends.
 - [x] `[]string` fields (both backends). Remaining: slice-typed enum payloads;
       other slice fields (`[]float`/`[]bool` in structs).
 - [ ] `bool`/`float` enum payloads; multi-owned-payload variants.
-- [ ] Maps (`map[K]V`) — none in the shared IR yet.
-- [ ] Methods (`on Type { fn m(self) }`) on native aggregates.
+- [x] Maps — `map[int]int`, `map[string]int`, `map[string]string`,
+      `map[int]float`, `map[float]int` (make/index/set/has/delete/len,
+      clone/drop). Fixtures `native_maps.mko`, `native_map_more.mko`,
+      `examples/map.mko` (full differential + GuardMalloc + 0-leak).
+- [x] Map range-for (`for k, v in range m`) via slot walk for all five kinds.
+      Fixture `native_map_range.mko` (+ range arms in `native_map_more.mko`).
+      Remaining: maps with struct values; other key/value type pairs.
+- [x] `maps_keys(map[int]int)` → owned `[]int` (Cranelift pointer ABI;
+      LLVM loads value-ABI header).
+- [x] `[]float` slice (pointer ABI). Fixture `native_float_slice.mko`.
+- [x] `[]byte` slice + `bytes()`/`string([]byte)` bridge. Fixture
+      `native_bytes.mko`.
+- [x] `[]bool` slice (pointer ABI via byte-backed storage). Fixture
+      `native_bool_slice.mko`.
+- [x] `[]Struct` (pointer-array of heap structs). Fixture `examples/struct_slice.mko`.
+- [x] Go-like `copy(dst, src)` for `[]int`/`[]float`/`[]byte`/`[]bool` +
+      `int_to_string` alias of `format_int`. Fixtures `native_copy.mko`,
+      unlocked `examples/slice64.mko` and `examples/stdlib.mko`.
+- [x] Methods (`on Type { fn m(self) }` / `p.m()`) on native aggregates.
+      Fixture `native_methods.mko`.
 - [x] Owned `match` results (`match m { Text(s) => s }`). Fixture
       `native_match_owned.mko`.
-- [ ] Generics — generic structs/enums (`Option[T]`/`Result[T,E]`), shared-IR
-      monomorphization.
+- [x] Generics seed — `Result[int,string]` + `Option[int]` monomorphs (Ok/Err/
+      Some/None/`error`). Fixture `native_result.mko`.
+- [x] `?` operator for same-family Result/Option early-return. Fixture
+      `native_try.mko`. Remaining: cross-family `?`, arbitrary monomorphs,
+      generic user types.
+- [x] `ShareInt` RC cell (pointer ABI). Fixtures `native_share.mko` + examples
+      `share_*.mko`. Remaining: `hold` bindings, full NLL share analysis.
 
 ### Control flow — remaining
 - [x] `for` (counted + range) and c-style `for` in the shared IR. Fixtures
@@ -329,21 +375,55 @@ GuardMalloc-clean on both backends.
 - [x] Match: guards, scalar (int/bool) scrutinees, or-patterns, whole-
       scrutinee identifier binding. Fixtures `native_match.mko`,
       `native_match_guards.mko`. Remaining: deeply nested payload patterns.
-- [ ] `if`-as-expression and block expressions (richer `match` arm bodies).
-- [ ] `switch`/`case`.
+- [x] `if`-as-expression. Fixture `native_if_expr.mko`.
+- [ ] Multi-stmt block expressions (typechecker gap for `{ let …; expr }`).
+- [x] `switch`/`case` (frontend desugars to if/else; works on shared IR).
 
 ### LLVM-specific gaps
 - [x] LLVM `[]string` lowering (value ABI `mako_native_str_slice_*`).
-- [ ] LLVM `[]float`/`[]bool` slices.
+- [x] LLVM `[]float`/`[]bool` slices (pointer ABI).
 
 ### Runtime interop
-- [x] Seed: `format_int`, f-string interp (string/int/bool), `len(string)`.
-      Fixture `native_fmt.mko`.
-- [ ] Full precompiled runtime archive from native: networking, TLS, database,
-      wider `fmt`/stdlib. Still only a handful of builtins beyond the seed.
+- [x] Seed: `format_int`, f-string interp, `len(string)`, `exit`/`sleep_ms`/
+      `argc`/`parse_int` helpers. Fixtures `native_fmt.mko`, `native_builtins.mko`.
+- [x] `path_join`, `now_ms`, `str_len` (examples/`path_join.mko`).
+- [x] `ShareInt` surface (`share_int`/`share_clone`/`share_get`/`share_set`/
+      `share_drop`).
+- [x] File/env/base64/args seeds: `read_file`/`write_file`/`env_get`/`env_set`/
+      `base64_encode`/`base64_decode`/`arg_get`/`str_eq`/`str_contains`/
+      `assert`. Fixture `native_fs_b64.mko`; examples `base64.mko`,
+      `file_env.mko`.
+- [x] Integer-family casts (`int`/`int64`/`int32`/`int8`/`byte`/…) +
+      `string(int)`/`float64`. Example `integers.mko`.
+- [x] Error wrapping seed: `wrap_err`/`errorf`/`error_is`/`error_string` +
+      implicit trailing-expr return. Example `errors_wrap.mko`.
+- [x] Ignore `package`/`import`/`const` top-level items (methods already
+      desugar to free functions). Unlocks Go-style `package main` programs.
+- [x] `[]float` / `[]float64` (make/index/set/append/len/cap/range/slice) +
+      `print_float`. Fixtures `native_float_slice.mko`, `examples/float_slice.mko`.
+- [x] FS polish: `mkdir`/`file_exists`/`remove_file`; `args()` → `[]string`.
+- [x] `[]byte` + `bytes`/`string` bridge; `sort_ints`/`sort_strings`;
+      `rune_count`; `result_unwrap_or`; `dbg`/`dbg_str`/`assert_eq` seeds.
+- [x] String byte index/slice (`s[i]`, `s[a:b]`) + Go-like string range
+      (runes). Fixtures `native_str_index.mko`; examples `strings.mko`,
+      `range.mko` (flexible for binders incl. `_` / no binders).
+- [x] **Runtime bridge** (`runtime/native_bridge.c`): call into header-only
+      mako_rt/net/http/fmt/uuid/std for tcp_*, http_*, fmt_*, uuid_v4, log_info,
+      arena_*, chan_*, json_array_*, regex_match/find, print_raw, etc.
+      Unlocks `fmt_demo`, arena, `json_array`, `regex_seed` (differential).
+- [ ] Remaining interop: TLS, sqlite, redis, grpc/h2/h3, ws, templates,
+      metrics, full http request surface, …
 
 ### Concurrency
-- [ ] `crew`, `kick`, `fan`, channels, `select` — none in the native path yet.
+- [x] `crew` scopes + **real threaded** `kick`/`join` for int-returning calls
+      (`mako_spawn` + IR trampoline `__mako_kick_N` + pack ABI). Fixtures:
+      `examples/concurrency.mko`, `examples/channels.mko` (0-leak + GM).
+- [x] `chan[int]` make/send/recv/close + `select` (1..16 arms via selectn) +
+      `for v in range ch` + nursery `cancel`/`cancelled`.
+      Fixtures `select_syntax`, `select_fair`, `chan_range`, `cancel`.
+- [x] Sequential `fan(xs, |x| …)` for []int/[]float. Fixture `parallel.mko`.
+- [ ] String/ptr channels, `join_timeout`, non-int kick payloads, true
+      parallel `mako_par_map_*`.
 
 ### Build modes
 - [x] `--overflow trap` on the native shared-IR path (parity gate vs C).
@@ -363,8 +443,10 @@ GuardMalloc-clean on both backends.
 - [ ] Confirm the whole suite on the Linux box (where `cc` linking + the C
       differential work without the feature build).
 
-**Suggested order next:** runtime archive interop → concurrency → remaining
-build modes → Linux confirmation.
+**Suggested order next (toward syntax 100%):** M2 full runtime archive interop
+(largest coverage jump) → maps + generics (M1 types) → concurrency (M3) →
+build modes (M4) → Linux confirmation. Keep memory-safety hard gate on every
+increment.
 
 ## Roadmap to 100%
 
@@ -387,9 +469,58 @@ gates that certify them.
 
 ### Baseline (measured, Apple arm64, this checkout)
 
-- **Syntax:** shared IR compiles ~15% of real programs (24/160 top-level
-  examples); the dominant blocker is runtime/stdlib interop (~57% of rejections
-  are `unknown call`), then maps/generics, then top-level items.
+- **Syntax:** shared IR compiles **100%** of top-level `examples/*.mko` with `main`
+  (156/156; 4 package-only library units have no `main` and are out of scope for
+  the single-file native entry gate). Coverage of List[int], dyn interfaces,
+  user generics monomorphization, CMap, chan[string], ExternC, tuple match,
+  and the bulk interop surface (H2/H3/SIP/LLM/mail/model/nb) is in place.
+  Prior milestones: ~64% (102/160) → ~88% (137/156) → **100% (156/156)**.
+- **`mako test --backend native`:** wired (CLI + `MAKO_TEST_BACKEND=native`).
+  Synthetic harness main via `native_ir::lower_with_tests`; CRT `main(argc,argv)`
+  seeds process args; abort-based `assert`/`assert_eq`/`assert_eq_str`. Multi-monomorph
+  Ok/Err/Some resolution + auto-intern for untyped constructors. ~200 simple
+  stdlib bridges auto-mapped (`mako_*` → `mako_native_*`). Const **int+string**
+  folding (`const GREET = "hi"`, `const GLEN = str_len(GREET)`). First-class
+  `fn` pointers + lambdas (seed). `chan[T]` for structs/tuples (`ChanP`).
+  Pointer-value maps `map[K][]T` / nested (`MapIPtr`/`MapSPtr`). `Task.join_timeout`.
+  Expanded Opaque handles (Mutex, BTree, SqlDB, …). Baseline on Apple arm64
+  (2026-07-22): **296/363** `examples/testing/*_test.mko` pass end-to-end
+  (was 0 → … → 289 → 295 → **296**). Pack-qualified types, fan `return`,
+  struct field defaults, map[Struct] content keys. **ChanF** / **ChanP(MapValKind)**
+  typed channels. Channel take-send + send_timeout. Map floats + **[]map** /
+  **map[K][]map** nested MapValKind. **Generic structs/enums** monomorphs
+  (`Pair__int`, `MyBox__int`) with body subst. **fan** on []int/[]float/
+  []string/[]Struct. **error_context** / **error_join** / **parse_bool**.
+  Kick pack I1/F64 widen. TLS client surface (`tls_connect` ABI fix). HTTP
+  route `{param}` match via real C helpers. Bulk simple bridges (200+ from
+  C decls). **Job join** retypes Result/struct returns (`Expr::Join` +
+  `job_ret_tys`); **try_recv** → Result; nursery **wait/err_count/first_err**
+  + note_err. **Capturing lambdas** (POD/str/ShareInt/struct env pack + fat
+  `mako_native_fn_box`/`fn_callN`; env-pack borrow so multi-call works).
+  **map[K]chan[T]** MapValKind Chan*. **Struct/enum structural ==/!=**.
+  Cranelift **Shl/Shr/BitClear** + unary **Not on I64**.
+  **Climb:** `?` rewrap; **reflect_value_of** POD; **http_parse** bag;
+  depth-3 maps; join_timeout Err own; mono pick-by-types; yaml/toml/ulid;
+  assert I64 ABI; **StructSlice deep clone** (Result[[]Point]); **detach**
+  + detached_join_all; **fan named** mappers; **go_style** `.len()` method;
+  **bounded generics** (struct monomorphs only); **string match**;
+  []bool / nested ptr-slice slicing. **Remainders (~84):** ~20 SIGABRT,
+  map_bool/nested_slice runtime edges, f-string specs, sql/http2 soft asserts,
+  leftover IR.
+- **Native runtime backends (real, not stubs):** `runtime/native_bridge.c` includes
+  `mako_tls.h` / `mako_gpu.h` / `mako_model.h` / `mako_quiche.h`. `build.rs` enables
+  `-DMAKO_HAS_OPENSSL` / `-DMAKO_HAS_OPENCL` / `-DMAKO_HAS_QUICHE` when the deps are
+  present, and bundled lld links `-lssl -lcrypto`, `-framework OpenCL`, and quiche
+  into native binaries.
+  - **OpenSSL:** TLS serve_once ↔ get_insecure roundtrip (`tls-ok`); `tls_server_available()==1`.
+  - **OpenCL GPU:** Apple Silicon (`model_mlp` → `3.1`); host-CPU fallback always available.
+  - **Quiche H3:** build via `./runtime/third_party/build_quiche_ffi.sh --try`; then
+    `h3_server_available()==1`, `quiche_available()==1`, and
+    `./scripts/h3-server-smoke.sh` → `h3:200;{"ok":true}`.
+  Opt-out: `MAKO_NO_OPENSSL` / `MAKO_NO_OPENCL` / `MAKO_NO_QUICHE`.
+  as of this update (`[]struct`, fan sequential, select-N, chan range, parse
+  Result, bulk bridge). Remaining: multi-file imports, dyn interfaces, full
+  TLS/crypto, generics, hold/lambdas, leftover stdlib calls.
 - **Perf (LLVM release, 7 samples):** faster-or-tied vs C and Rust on 3 of 4
   bench workloads (`fib`, `parity`, `string_slice`); the append-heavy `slice`
   workload is ~17% behind hand-C/Rust. Peak-RSS equal-or-better everywhere
@@ -402,23 +533,29 @@ gates that certify them.
   out).
   - [x] Control flow: `for`/c-for/`defer`/labeled loops/`match` guards/owned
         match results/whole-scrutinee binding.
-  - [ ] `if`-as-expression, block expressions, `switch`/`case`; deeply nested
-        payload patterns.
-  - [ ] Expressions: full f-strings, closures/lambdas + first-class fn values,
-        `Convert`, compound/parallel assign.
-  - [ ] Types: **maps** (`map[K]V`), **generics** (shared-IR monomorphization →
-        `Option[T]`/`Result[T,E]`), `bool`/`float` enum payloads, remaining slice
-        element/field kinds.
-  - [ ] Top-level: `const`, **methods** (`on Type`), **interfaces + dynamic
-        dispatch**, `extern` C, multi-file imports/packs, visibility.
+  - [x] `if`-as-expression (fixture `native_if_expr.mko`). Block expressions
+        with multi-stmt + trailing value still need typechecker support for
+        richer forms; simple trailing-expr blocks work via if-expr desugar.
+  - [ ] `switch`/`case`; deeply nested payload patterns.
+  - [x] Expressions: f-strings (string/int/bool), **`Convert`** (int↔float↔bool),
+        **methods** (`on Type` / `p.method()` → `Type_method`). Fixture
+        `native_methods.mko`.
+  - [ ] Closures/lambdas + first-class fn values, compound/parallel assign.
+  - [x] Types seed: **maps** II/SI/SS/IF/FI + range-for + `maps_keys(II)`, **generics**
+        `Result[int,string]`/`Option[int]`. Remaining: more map kinds, `?`,
+        full monomorphization, `bool`/`float` enum payloads, slice field kinds.
+  - [ ] Top-level: `const`, **interfaces + dynamic dispatch**, `extern` C,
+        multi-file imports/packs, visibility. (`on Type` methods ✅)
   - **Exit:** native compiles every pure-compute program in the corpus; perf gate
     green on an expanded compute suite.
 - **M2 · Interop-complete** *(the #1 coverage lever → ~80%)* — teach native
   codegen to call the **existing precompiled runtime archive** with correct
   ABI + ownership (not reimplement it): `fmt`/`print`, string/math/time/os/fs/
   collections/encoding, then networking/TLS/HTTP/database/crypto.
-  - [x] Seed: `format_int`, f-string interp, `len(string)` (`native_fmt.mko`).
-  - [ ] Full runtime/stdlib surface.
+  - [x] Seed: `format_int`, f-string interp, `len(string)`, `exit`, `argc`,
+        `sleep_ms`, `parse_int` runtime helpers (`native_fmt.mko`,
+        `native_builtins.mko`).
+  - [ ] Full runtime/stdlib surface (net/tls/http/db/… still `unknown call`).
   - **Exit:** native compiles the majority of real programs; leba builds & runs
     through native.
 - **M3 · Concurrency** — `crew`/`kick`/`fan`/channels/`select` wired to the

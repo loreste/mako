@@ -12,14 +12,14 @@ tidy up after themselves. The standard library covers the everyday backend
 surface — HTTP, TLS, JSON, databases, networking — and is candid about which
 corners are battle-tested and which are still shallow.
 
-**Status: experimental/alpha (v0.4.1).** The language works and compiles real
+**Status: experimental/alpha (v0.4.5).** The language works and compiles real
 programs, but the surface is young. Expect breaking changes, missing features,
 and bugs. The ownership model is actively being hardened — the full test suite
 (360 programs) passes under AddressSanitizer with zero memory errors, but edge
 cases remain. This is not yet suitable for production use without careful
 evaluation.
 
-**What's new in 0.4.1:** Mako is growing a second way to reach machine code — a
+**What's new in 0.4.5:** Mako is growing a second way to reach machine code — a
 direct backend that skips C entirely. It lowers your program to an
 ownership-explicit IR and emits object code through LLVM (release builds) or
 Cranelift (fast debug builds), then links with a bundled linker, so there's no
@@ -84,7 +84,7 @@ Options:
 ```bash
 curl -fsSL …/install-linux.sh | bash -s -- --prefix /opt/mako --yes
 curl -fsSL …/install-linux.sh | bash -s -- --no-deps    # skip clang install
-curl -fsSL …/install-linux.sh | bash -s -- --version v0.4.1
+curl -fsSL …/install-linux.sh | bash -s -- --version v0.4.5
 ```
 
 **You do not need Rust or cargo on the machine that runs Mako.**
