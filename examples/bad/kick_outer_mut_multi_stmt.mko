@@ -1,0 +1,18 @@
+// EXPECT: mutable capture
+// Multi-stmt outer mut capture must not cross a kick boundary without ShareInt.
+
+fn worker(f: fn(int) -> int, x: int) -> int {
+    return f(x)
+}
+
+fn main() {
+    let mut total = 0
+    let f: fn(int) -> int = fn(x) {
+        total = total + x
+        return total
+    }
+    crew g {
+        let j = g.kick(worker(f, 1))
+        let _ = j.join()
+    }
+}

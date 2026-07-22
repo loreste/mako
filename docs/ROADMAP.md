@@ -136,7 +136,7 @@ The foundation for everything that follows.
 | **Generic structs** | Done | `struct Pair[T] { a: T, b: T }` — monomorphized; multi-param; nested; in generic fns |
 | **Generic enums** | Done | `enum MyBox[T] { Val(T), Nothing }` — monomorphized; match works |
 | **Interface bounds** | Done | `fn f[T: Describable](x: T)` — structural method-set check; compile error on violation |
-| **Iterator protocol** | Seed | Types with `next() -> Option[T]` recognized as iterables; by-value self limits mutation |
+| **Iterator protocol** | Done | `fn next(mut self) -> Option[T]` drives `for v in it` (advances binding); by-value next remains non-advancing |
 | **Mutable closures** | Seed | Heap-cell infrastructure built; needs multi-statement lambda bodies |
 
 Tests: `generic_struct_test`, `generic_enum_test`, `generic_bounds_test`,
@@ -467,7 +467,7 @@ Metrics/prom + span-lite JSON are in; **depth seeds landed** (2026-07-14).
 
 **Still open (true residuals):**
 
-1. Stack mut-ref captures (use `ShareInt` / share handles for shared mut) · deeper NLL  
+1. Deeper NLL edge polish (core sequential mut-ref multi-stmt + kick ShareInt gate shipped)  
 2. Remaining printf exotics (`%n`, dynamic `*`, locale) — use `fmt_sprintf*`  
 3. Full debugger DWARF/locals UI (seed: `debug_set_int` / `debug_locals_json` / `debug_bp`)  
 

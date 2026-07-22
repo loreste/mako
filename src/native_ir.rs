@@ -2530,6 +2530,9 @@ struct FunctionLowerer<'a> {
     /// emitting a function Return (inlined fan mappers: `fn(x) { return x*x }`).
     /// Match/if arm bodies leave this false so `return` exits the function.
     return_as_yield: bool,
+    /// Outer `let mut` int captures redirected through a heap cell pointer (i64).
+    /// Loads/stores of the name go through `mako_native_i64_cell_{load,store}`.
+    mut_i64_cells: HashMap<String, Value>,
 }
 
 struct LoopFrame {
@@ -2610,6 +2613,7 @@ impl<'a> FunctionLowerer<'a> {
             job_ret_tys: HashMap::new(),
             job_crews: HashMap::new(),
             return_as_yield: false,
+            mut_i64_cells: HashMap::new(),
         })
     }
 
@@ -3313,6 +3317,26 @@ impl<'a> FunctionLowerer<'a> {
                         IrError::new(format!("native IR: unknown local `{name}`"))
                     })?;
                 let (mut value, actual, mut owned) = self.lower_expr(rhs)?;
+                // Sequential mut capture cell: write through the shared i64 cell.
+                if let Some(&cell) = self.mut_i64_cells.get(name) {
+                    if actual != Type::I64 || owned {
+                        return Err(IrError::new(
+                            "native IR: mut capture cell expects int assignment",
+                        ));
+                    }
+                    self.emit(Inst::Call {
+                        out: None,
+                        function: "mako_native_i64_cell_store".into(),
+                        args: vec![cell, value],
+                        ret: None,
+                    });
+                    // Keep stack local in sync for non-cell readers of the same slot.
+                    self.emit(Inst::Store {
+                        ptr: slot,
+                        value,
+                    });
+                    return Ok(());
+                }
                 match actual {
                     // Map headers share like Go maps (see Let binding).
                     Type::MapII
@@ -4820,7 +4844,11 @@ impl<'a> FunctionLowerer<'a> {
             for s in &b.stmts {
                 match s {
                     Stmt::Expr(e) | Stmt::Return(Some(e)) => walk(e, out),
-                    Stmt::Let { init, .. } | Stmt::Assign { value: init, .. } => walk(init, out),
+                    Stmt::Let { init, .. } => walk(init, out),
+                    Stmt::Assign { name, value } => {
+                        out.push(name.clone());
+                        walk(value, out);
+                    }
                     Stmt::If {
                         cond,
                         then_block,
@@ -4867,6 +4895,73 @@ impl<'a> FunctionLowerer<'a> {
         out
     }
 
+    /// Outer locals assigned inside a lambda body (for mut capture cells).
+    fn collect_lambda_assigned_locals(body: &Expr, params: &[String]) -> HashSet<String> {
+        let mut out = HashSet::new();
+        fn walk_block(b: &AstBlock, params: &[String], out: &mut HashSet<String>) {
+            for s in &b.stmts {
+                match s {
+                    Stmt::Assign { name, value } => {
+                        if !params.iter().any(|p| p == name) {
+                            out.insert(name.clone());
+                        }
+                        walk_expr(value, params, out);
+                    }
+                    Stmt::Expr(e) | Stmt::Return(Some(e)) | Stmt::Let { init: e, .. } => {
+                        walk_expr(e, params, out);
+                    }
+                    Stmt::If {
+                        cond,
+                        then_block,
+                        else_block,
+                        ..
+                    } => {
+                        walk_expr(cond, params, out);
+                        walk_block(then_block, params, out);
+                        if let Some(eb) = else_block {
+                            walk_block(eb, params, out);
+                        }
+                    }
+                    Stmt::For { body, .. } | Stmt::While { body, .. } => {
+                        walk_block(body, params, out);
+                    }
+                    _ => {}
+                }
+            }
+        }
+        fn walk_expr(e: &Expr, params: &[String], out: &mut HashSet<String>) {
+            match e {
+                Expr::Block(b) => walk_block(b, params, out),
+                Expr::IfExpr {
+                    cond,
+                    then_block,
+                    else_block,
+                    ..
+                } => {
+                    walk_expr(cond, params, out);
+                    walk_block(then_block, params, out);
+                    walk_block(else_block, params, out);
+                }
+                Expr::Call { callee, args } => {
+                    walk_expr(callee, params, out);
+                    for a in args {
+                        walk_expr(a, params, out);
+                    }
+                }
+                Expr::Binary { left, right, .. } => {
+                    walk_expr(left, params, out);
+                    walk_expr(right, params, out);
+                }
+                Expr::Unary { expr, .. } | Expr::Field { base: expr, .. } => {
+                    walk_expr(expr, params, out);
+                }
+                _ => {}
+            }
+        }
+        walk_expr(body, params, &mut out);
+        out
+    }
+
     fn lower_lambda_with_types(
         &mut self,
         params: &[String],
@@ -4874,6 +4969,15 @@ impl<'a> FunctionLowerer<'a> {
         expected_param_tys: &[Type],
     ) -> Result<(Value, Type, bool), IrError> {
         let captures = self.collect_lambda_free_locals(body, params);
+        let assigned = Self::collect_lambda_assigned_locals(body, params);
+        // Mut capture cells only for int-like outer locals (match C heap cells).
+        let mut_caps: HashSet<String> = captures
+            .iter()
+            .filter(|(n, ty)| {
+                assigned.contains(n) && matches!(ty, Type::I64 | Type::I32 | Type::I1)
+            })
+            .map(|(n, _)| n.clone())
+            .collect();
         let stubs = self
             .lambda_stubs
             .as_deref_mut()
@@ -4935,33 +5039,89 @@ impl<'a> FunctionLowerer<'a> {
         let mut body_stmts: Vec<Stmt> = Vec::new();
         if has_env {
             // let cap_i = pack_get(__env, i)  — use synthetic Call to runtime.
+            // Mut int captures store a cell pointer; bind the cell then load/store via helpers.
             for (i, (cname, cty)) in captures.iter().enumerate() {
-                let ty_ann = match cty {
-                    Type::Str => TypeExpr::Named("string".into()),
-                    Type::I1 => TypeExpr::Named("bool".into()),
-                    Type::F64 => TypeExpr::Named("float".into()),
-                    Type::Struct(id) => TypeExpr::Named(self.structs.layout_name(*id)),
-                    Type::ShareInt => TypeExpr::Named("ShareInt".into()),
-                    _ => TypeExpr::Named("int".into()),
+                let is_mut_cell = mut_caps.contains(cname);
+                let ty_ann = if is_mut_cell {
+                    TypeExpr::Named("int".into())
+                } else {
+                    match cty {
+                        Type::Str => TypeExpr::Named("string".into()),
+                        Type::I1 => TypeExpr::Named("bool".into()),
+                        Type::F64 => TypeExpr::Named("float".into()),
+                        Type::Struct(id) => TypeExpr::Named(self.structs.layout_name(*id)),
+                        Type::ShareInt => TypeExpr::Named("ShareInt".into()),
+                        _ => TypeExpr::Named("int".into()),
+                    }
                 };
-                body_stmts.push(Stmt::Let {
-                    name: cname.clone(),
-                    mutable: false,
-                    ownership: crate::ast::Ownership::None,
-                    ty: Some(ty_ann),
-                    init: Expr::Call {
-                        callee: Box::new(Expr::Ident("__mako_env_get".into())),
-                        args: vec![
-                            Expr::Ident("__env".into()),
-                            Expr::Int(i as i64),
-                        ],
-                    },
-                });
+                if is_mut_cell {
+                    let cell_name = format!("__cell_{cname}");
+                    body_stmts.push(Stmt::Let {
+                        name: cell_name.clone(),
+                        mutable: false,
+                        ownership: crate::ast::Ownership::None,
+                        ty: Some(TypeExpr::Named("int".into())),
+                        init: Expr::Call {
+                            callee: Box::new(Expr::Ident("__mako_env_get".into())),
+                            args: vec![
+                                Expr::Ident("__env".into()),
+                                Expr::Int(i as i64),
+                            ],
+                        },
+                    });
+                    // Mutable local mirrors the cell; rewritten assigns go through store.
+                    body_stmts.push(Stmt::Let {
+                        name: cname.clone(),
+                        mutable: true,
+                        ownership: crate::ast::Ownership::None,
+                        ty: Some(ty_ann),
+                        init: Expr::Call {
+                            callee: Box::new(Expr::Ident("__mako_cell_load".into())),
+                            args: vec![Expr::Ident(cell_name)],
+                        },
+                    });
+                } else {
+                    body_stmts.push(Stmt::Let {
+                        name: cname.clone(),
+                        mutable: false,
+                        ownership: crate::ast::Ownership::None,
+                        ty: Some(ty_ann),
+                        init: Expr::Call {
+                            callee: Box::new(Expr::Ident("__mako_env_get".into())),
+                            args: vec![
+                                Expr::Ident("__env".into()),
+                                Expr::Int(i as i64),
+                            ],
+                        },
+                    });
+                }
             }
         }
-        match body {
-            Expr::Block(b) => body_stmts.extend(b.stmts.clone()),
-            other => body_stmts.push(Stmt::Return(Some(other.clone()))),
+        // Rewrite assigns to mut-cell locals into store+update.
+        let raw_body: Vec<Stmt> = match body {
+            Expr::Block(b) => b.stmts.clone(),
+            other => vec![Stmt::Return(Some(other.clone()))],
+        };
+        for s in raw_body {
+            if let Stmt::Assign { name, value } = &s {
+                if mut_caps.contains(name) {
+                    let cell_name = format!("__cell_{name}");
+                    // cell_store(cell, value); name = cell_load(cell) — single eval of value.
+                    body_stmts.push(Stmt::Expr(Expr::Call {
+                        callee: Box::new(Expr::Ident("__mako_cell_store".into())),
+                        args: vec![Expr::Ident(cell_name.clone()), value.clone()],
+                    }));
+                    body_stmts.push(Stmt::Assign {
+                        name: name.clone(),
+                        value: Expr::Call {
+                            callee: Box::new(Expr::Ident("__mako_cell_load".into())),
+                            args: vec![Expr::Ident(cell_name)],
+                        },
+                    });
+                    continue;
+                }
+            }
+            body_stmts.push(s);
         }
         let body_block = AstBlock { stmts: body_stmts };
         stubs.push(FnDef {
@@ -5032,6 +5192,18 @@ impl<'a> FunctionLowerer<'a> {
                         struct_id: sid,
                     });
                     v = clone;
+                }
+                // Mut int capture: allocate a shared cell and redirect outer loads/stores.
+                if mut_caps.contains(cname) {
+                    let cell = self.value();
+                    self.emit(Inst::Call {
+                        out: Some(cell),
+                        function: "mako_native_i64_cell_new".into(),
+                        args: vec![v],
+                        ret: Some(Type::I64),
+                    });
+                    self.mut_i64_cells.insert(cname.clone(), cell);
+                    v = cell;
                 }
                 let idx = self.const_int(i as i64, Type::I64);
                 self.emit(Inst::Call {
@@ -5636,6 +5808,166 @@ impl<'a> FunctionLowerer<'a> {
         Ok(())
     }
 
+    /// Struct iterator protocol: `for v in it` calling `Type_next` (mut self preferred).
+    fn lower_for_protocol(
+        &mut self,
+        label: Option<String>,
+        binders: &[String],
+        body: &crate::ast::Block,
+        iter_val: Value,
+        iter_ty: Type,
+        iter_owned: bool,
+        type_name: &str,
+        next_fn: &str,
+    ) -> Result<(), IrError> {
+        if binders.len() > 1 {
+            return Err(IrError::new(
+                "native IR: protocol for supports at most one value binder",
+            ));
+        }
+        let (params, ret) = self
+            .signatures
+            .get(next_fn)
+            .cloned()
+            .ok_or_else(|| IrError::new(format!("native IR: missing `{next_fn}`")))?;
+        if params.is_empty() {
+            return Err(IrError::new(format!(
+                "native IR: `{next_fn}` has no receiver"
+            )));
+        }
+        let ret_ty = ret.ok_or_else(|| {
+            IrError::new(format!("native IR: `{next_fn}` must return Option[T]"))
+        })?;
+        let Type::Struct(opt_id) = ret_ty else {
+            return Err(IrError::new(format!(
+                "native IR: `{next_fn}` must return Option[T]"
+            )));
+        };
+        let some_info = self
+            .structs
+            .variant_in_enum("Some", opt_id)
+            .ok_or_else(|| IrError::new("native IR: Option Some missing"))?;
+        let none_tag = self
+            .structs
+            .variant_in_enum("None", opt_id)
+            .map(|v| v.tag)
+            .unwrap_or(1);
+        let elem_ty = self
+            .structs
+            .field_type(opt_id, some_info.slot_base as usize);
+
+        let header = self.new_block();
+        let body_bb = self.new_block();
+        let done = self.new_block();
+        self.terminate(Terminator::Jump(header))?;
+        self.current = header;
+
+        let is_mut_self = self.mut_self_fns.contains(next_fn);
+        let mut recv = iter_val;
+        // By-value self clones so the protocol never mutates the outer binding.
+        if !is_mut_self {
+            recv = self.emit_clone(iter_val, iter_ty);
+        }
+        let opt_val = self.value();
+        self.emit(Inst::Call {
+            out: Some(opt_val),
+            function: next_fn.to_string(),
+            args: vec![recv],
+            ret: Some(ret_ty),
+        });
+        if !is_mut_self {
+            self.emit_drop(recv, iter_ty);
+        }
+        // Drop Option after reading (payload moved out for Some).
+        let tag = self.value();
+        self.emit(Inst::StructField {
+            out: tag,
+            base: opt_val,
+            struct_id: opt_id,
+            index: 0,
+            ty: Type::I64,
+        });
+        let none_c = self.const_int(none_tag, Type::I64);
+        let is_none = self.value();
+        self.emit(Inst::Binary {
+            out: is_none,
+            op: BinOp::Eq,
+            left: tag,
+            right: none_c,
+            ty: Type::I64,
+        });
+        let none_bb = self.new_block();
+        self.terminate(Terminator::Branch {
+            condition: is_none,
+            then_block: none_bb,
+            else_block: body_bb,
+        })?;
+
+        // None: free the Option, then exit the loop.
+        self.current = none_bb;
+        self.emit_drop(opt_val, ret_ty);
+        self.terminate(Terminator::Jump(done))?;
+
+        self.current = body_bb;
+        let payload = self.value();
+        let payload_idx = some_info.slot_base as u32;
+        self.emit(Inst::StructField {
+            out: payload,
+            base: opt_val,
+            struct_id: opt_id,
+            index: payload_idx,
+            ty: elem_ty,
+        });
+        // Detach payload ownership from the Option block before drop.
+        let null = self.const_int(0, Type::I64);
+        self.emit(Inst::StructFieldStore {
+            base: opt_val,
+            struct_id: opt_id,
+            index: payload_idx,
+            value: null,
+        });
+        self.emit_drop(opt_val, ret_ty);
+
+        let owned_before = self.heap_owned.clone();
+        let locals_before = self.locals.clone();
+        if let Some(b) = binders.first() {
+            if b != "_" {
+                let slot = self.value();
+                self.emit(Inst::Alloca {
+                    out: slot,
+                    ty: elem_ty,
+                });
+                self.emit(Inst::Store {
+                    ptr: slot,
+                    value: payload,
+                });
+                self.locals.insert(b.clone(), (slot, elem_ty));
+                if elem_ty.is_heap() {
+                    self.heap_owned.insert(b.clone(), true);
+                }
+            }
+        }
+        self.loops.push(LoopFrame {
+            label: label.clone(),
+            break_target: done,
+            continue_target: header,
+            owned_before: owned_before.clone(),
+            locals_before: locals_before.clone(),
+        });
+        self.lower_block(body)?;
+        self.loops.pop();
+        if self.block().terminator.is_none() {
+            self.drop_loop_body_scope(&owned_before, &locals_before);
+            self.terminate(Terminator::Jump(header))?;
+        }
+        self.current = done;
+        if iter_owned && iter_ty.is_heap() {
+            self.emit_drop(iter_val, iter_ty);
+        }
+        let _ = type_name;
+        Ok(())
+    }
+
     /// `for i in n` / `for i in range n` (0..n) and `for i[, v] in range xs`
     /// over a borrowed slice/string/map. `continue` targets the increment
     /// latch; `break` exits. Owned temporary iterators are rejected.
@@ -5655,6 +5987,26 @@ impl<'a> FunctionLowerer<'a> {
         body: &crate::ast::Block,
     ) -> Result<(), IrError> {
         let (iter_val, iter_ty, iter_owned) = self.lower_expr(iter)?;
+        // Struct iterator protocol (`on T { fn next(mut self) -> Option[U] }`).
+        if let Type::Struct(id) = iter_ty {
+            let type_name = self.structs.layout_name(id);
+            let next_fn = format!("{type_name}_next");
+            if self.signatures.contains_key(&next_fn) {
+                return self.lower_for_protocol(
+                    label,
+                    binders,
+                    body,
+                    iter_val,
+                    iter_ty,
+                    iter_owned,
+                    &type_name,
+                    &next_fn,
+                );
+            }
+            return Err(IrError::new(format!(
+                "native IR: cannot iterate struct `{type_name}` — implement `on {type_name} {{ fn next(mut self) -> Option[T] }}`"
+            )));
+        }
         // Owned temps (e.g. `for x in range maps_values(m)`) are freeable after the
         // loop ends; keep the value and drop at done.
         let free_iter_after = iter_owned && iter_ty.is_heap();
@@ -6764,6 +7116,17 @@ impl<'a> FunctionLowerer<'a> {
                     self.locals.get(name).copied().ok_or_else(|| {
                         IrError::new(format!("native IR: unknown local `{name}`"))
                     })?;
+                // Sequential mut capture cell: always read the live heap value.
+                if let Some(&cell) = self.mut_i64_cells.get(name) {
+                    let out = self.value();
+                    self.emit(Inst::Call {
+                        out: Some(out),
+                        function: "mako_native_i64_cell_load".into(),
+                        args: vec![cell],
+                        ret: Some(Type::I64),
+                    });
+                    return Ok((out, Type::I64, false));
+                }
                 let out = self.value();
                 self.emit(Inst::Load { out, ptr, ty });
                 Ok((out, ty, false))
@@ -9549,6 +9912,37 @@ impl<'a> FunctionLowerer<'a> {
                         ret: Some(Type::I64),
                     });
                     return Ok((out, Type::I64, false));
+                }
+                // Mut capture cell helpers (heap i64 cell shared outer↔closure).
+                if function == "__mako_cell_load" && args.len() == 1 {
+                    let (cell, ct, co) = self.lower_expr(&args[0])?;
+                    if ct != Type::I64 || co {
+                        return Err(IrError::new("native IR: __mako_cell_load expects int cell"));
+                    }
+                    let out = self.value();
+                    self.emit(Inst::Call {
+                        out: Some(out),
+                        function: "mako_native_i64_cell_load".into(),
+                        args: vec![cell],
+                        ret: Some(Type::I64),
+                    });
+                    return Ok((out, Type::I64, false));
+                }
+                if function == "__mako_cell_store" && args.len() == 2 {
+                    let (cell, ct, co) = self.lower_expr(&args[0])?;
+                    let (v, vt, vo) = self.lower_expr(&args[1])?;
+                    if ct != Type::I64 || vt != Type::I64 || co || vo {
+                        return Err(IrError::new(
+                            "native IR: __mako_cell_store expects int cell, int value",
+                        ));
+                    }
+                    self.emit(Inst::Call {
+                        out: None,
+                        function: "mako_native_i64_cell_store".into(),
+                        args: vec![cell, v],
+                        ret: None,
+                    });
+                    return Ok((self.const_int(0, Type::I64), Type::I64, false));
                 }
                 // Runtime bridge builtins (mako_rt via native_bridge.c).
                 if let Some(result) = self.lower_runtime_builtin(function, args)? {

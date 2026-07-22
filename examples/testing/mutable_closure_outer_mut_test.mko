@@ -1,0 +1,28 @@
+// Sequential multi-stmt lambdas may mutate outer `let mut` via heap cells.
+// Kick still rejects non-Sync mut captures (see examples/bad/kick_outer_mut_multi_stmt.mko).
+
+fn apply(f: fn(int) -> int, x: int) -> int {
+    return f(x)
+}
+
+fn TestOuterMutMultiStmt() {
+    let mut total = 0
+    let f: fn(int) -> int = fn(x) {
+        total = total + x
+        return total
+    }
+    assert_eq(f(3), 3)
+    assert_eq(f(4), 7)
+    assert_eq(total, 7)
+}
+
+fn TestOuterMutMultiStmtApply() {
+    let mut total = 0
+    let f: fn(int) -> int = fn(x) {
+        total = total + x
+        return total
+    }
+    assert_eq(apply(f, 5), 5)
+    assert_eq(apply(f, 2), 7)
+    assert_eq(total, 7)
+}

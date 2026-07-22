@@ -1,4 +1,4 @@
-// Iterator protocol tests — v0.1.9
+// Iterator protocol tests — mut-self `for` advances the binding in place.
 
 struct Range {
     current: int
@@ -10,41 +10,65 @@ fn new_range(max: int) -> Range {
 }
 
 on Range {
-    fn next(self) -> Option[int] {
+    // Advancing iterator: for-loops pass &self when next takes mut self.
+    fn next(mut self) -> Option[int] {
         if self.current >= self.max {
             return None
         }
-        return Some(self.current)
+        let v = self.current
+        self.current = self.current + 1
+        return Some(v)
     }
 }
 
 fn TestIteratorNext() {
-    let r = new_range(3)
+    let mut r = new_range(3)
     let opt = r.next()
     match opt {
         Some(v) => assert_eq(v, 0),
         None => assert(false),
     }
+    assert_eq(r.current, 1)
 }
 
 fn TestIteratorManualLoop() {
     let mut r = new_range(5)
     let mut sum = 0
-    while r.current < r.max {
+    while true {
         match r.next() {
             Some(v) => {
                 sum = sum + v
             },
-            None => {},
+            None => {
+                break
+            },
         }
-        r = Range { current: r.current + 1, max: r.max }
     }
     assert_eq(sum, 10)
+    assert_eq(r.current, 5)
+}
+
+fn TestForMutNext() {
+    let mut r = new_range(5)
+    let mut sum = 0
+    for v in r {
+        sum = sum + v
+    }
+    assert_eq(sum, 10)
+    assert_eq(r.current, 5)
+}
+
+fn TestForMutNextEmpty() {
+    let mut r = new_range(0)
+    let mut n = 0
+    for _ in r {
+        n = n + 1
+    }
+    assert_eq(n, 0)
+    assert_eq(r.current, 0)
 }
 
 fn TestIteratorTypeCheck() {
-    // Verify the type checker accepts struct with next() -> Option[T]
-    // as a for-range iterable (even though by-value self limits mutation)
-    let r = new_range(1)
+    let mut r = new_range(1)
     assert_eq(r.max, 1)
 }

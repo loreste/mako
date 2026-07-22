@@ -11250,12 +11250,13 @@ impl Codegen {
             _ => false,
         };
 
-        // For full-body lambdas, captures are plain values (accessed via #define alias).
-        // For single-expression lambdas with mutable captures, use pointer cells.
+        // Mutable outer captures (sequential) use pointer cells so assigns update
+        // the shared cell; kick still rejects non-Sync mut captures in typecheck.
+        // Immutable captures stay by-value (string clone / POD copy).
         let capture_fields: Vec<(String, String)> = captures
             .iter()
             .map(|(n, t)| {
-                if !needs_full_body && mutated.contains(n) {
+                if mutated.contains(n) {
                     (mangle(n), format!("{t}*"))
                 } else {
                     (mangle(n), t.clone())
@@ -11300,6 +11301,9 @@ impl Codegen {
             // Save the main output, emit into a temporary buffer, then restore.
             let saved_out = std::mem::take(&mut self.out);
             let saved_indent = self.indent;
+            // Outer mut_capture_cells must not rewrite ids inside the helper
+            // (those cells live in the caller's frame; the helper uses e->field).
+            let saved_mut_cells = std::mem::take(&mut self.mut_capture_cells);
             self.indent = 1;
 
             // Set up locals for lambda params and captures
@@ -11317,14 +11321,17 @@ impl Codegen {
                     self.locals.insert(mangle(orig), ty);
                 }
             }
-            // For capturing lambdas, use #define to alias captured vars to env fields.
-            // This way `counter` in the lambda body resolves to `e->counter`.
-            // Mutations go directly to the env and are visible to the outer scope.
+            // Alias captured vars into the env: mut cells dereference, immut read fields.
             if !captures.is_empty() {
                 for (src_name, cty) in &captures {
                     let field = mangle(src_name);
-                    self.out
-                        .push_str(&format!("#define {field} (e->{field})\n"));
+                    if mutated.contains(src_name) {
+                        self.out
+                            .push_str(&format!("#define {field} (*(e->{field}))\n"));
+                    } else {
+                        self.out
+                            .push_str(&format!("#define {field} (e->{field})\n"));
+                    }
                     self.locals.insert(src_name.clone(), cty.clone());
                     self.locals.insert(field.clone(), cty.clone());
                 }
@@ -11347,6 +11354,7 @@ impl Codegen {
             self.indent = saved_indent;
             self.locals = saved_locals;
             self.fn_ptr_casts = saved_casts;
+            self.mut_capture_cells = saved_mut_cells;
 
             if capture_fields.is_empty() {
                 let param_cs = if pnames.is_empty() {
@@ -11377,8 +11385,24 @@ impl Codegen {
                     params_cs.push(format!("{t} {n}"));
                 }
                 let drop_helper = format!("{helper}_drop");
+                let mut drop_frees = String::new();
+                for (src_name, cty) in &captures {
+                    let field = mangle(src_name);
+                    if mutated.contains(src_name) {
+                        // Cell holds the live value; free string payload then cell.
+                        if cty == "MakoString" {
+                            drop_frees
+                                .push_str(&format!("    if (e->{field}) mako_str_free(*(e->{field}));\n"));
+                        }
+                        drop_frees.push_str(&format!("    free(e->{field});\n"));
+                    } else if cty == "MakoString" {
+                        drop_frees.push_str(&format!("    mako_str_free(e->{field});\n"));
+                    } else if cty == "MakoShareInt" {
+                        drop_frees.push_str(&format!("    mako_share_drop(e->{field});\n"));
+                    }
+                }
                 let helper_src = format!(
-                    "typedef struct {{\n{fields}\n}} {env_ty};\nstatic {ret_c} {helper}({}) {{\n    {env_ty} *e = ({env_ty}*)env;\n{body_lines}}}\nstatic void {drop_helper}(void *env) {{\n    {env_ty} *e = ({env_ty}*)env;\n    if (!e) return;\n    free(e);\n}}\n",
+                    "typedef struct {{\n{fields}\n}} {env_ty};\nstatic {ret_c} {helper}({}) {{\n    {env_ty} *e = ({env_ty}*)env;\n{body_lines}}}\nstatic void {drop_helper}(void *env) {{\n    {env_ty} *e = ({env_ty}*)env;\n    if (!e) return;\n{drop_frees}    free(e);\n}}\n",
                     params_cs.join(", ")
                 );
                 self.insert_helper(&helper_src);
@@ -11390,8 +11414,24 @@ impl Codegen {
                 for (src_name, cty) in &captures {
                     let field = mangle(src_name);
                     let val = mangle(src_name);
-                    if cty == "MakoString" {
+                    if mutated.contains(src_name) {
+                        let cell = self.fresh("cell");
+                        self.line(&format!(
+                            "{cty} *{cell} = ({cty}*)malloc(sizeof({cty}));"
+                        ));
+                        self.line(&format!("if (!{cell}) {{ fprintf(stderr, \"mako: OOM in mut capture\\n\"); abort(); }}"));
+                        if cty == "MakoString" {
+                            self.line(&format!("*{cell} = mako_str_clone({val});"));
+                        } else {
+                            self.line(&format!("*{cell} = {val};"));
+                        }
+                        self.line(&format!("{env_tmp}->{field} = {cell};"));
+                        // Outer scope reads/writes through the same cell.
+                        self.mut_capture_cells.insert(src_name.clone(), cell);
+                    } else if cty == "MakoString" {
                         self.line(&format!("{env_tmp}->{field} = mako_str_clone({val});"));
+                    } else if cty == "MakoShareInt" {
+                        self.line(&format!("{env_tmp}->{field} = mako_share_clone({val});"));
                     } else {
                         self.line(&format!("{env_tmp}->{field} = {val};"));
                     }
@@ -11863,6 +11903,8 @@ impl Codegen {
         self.own_bind_scope.clear();
         self.own_cond_flags.clear();
         self.loop_drop_bases.clear();
+        // Mut capture cells are per-function (heap cells for sequential outer mut).
+        self.mut_capture_cells.clear();
         self.result_err_enums.clear();
         self.result_ok_kinds.clear();
         self.result_ok_structs.clear();
@@ -12303,7 +12345,8 @@ impl Codegen {
         }
 
         // Iterator protocol: if the type has a `TypeName_next` method, use it.
-        // Emits: for (;;) { Option opt = Type_next(&iter); if (!opt.has) break; v = opt.value; body }
+        // `mut self` next advances in place: for (;;) { opt = Type_next(&iter); … }
+        // By-value next keeps the historical call Type_next(iter) (non-advancing).
         {
             // Find the Mako struct name from the C type name.
             let mako_name: Option<String> = self
@@ -12316,22 +12359,44 @@ impl Codegen {
                 if let Some(opt_ty) = self.fn_rets.get(&next_fn).cloned() {
                     let vtmp = self.fresh("it_opt");
                     let next_mangled = mangle(&next_fn);
+                    let recv = if self.mut_self_fns.contains(&next_fn) {
+                        format!("&{val}")
+                    } else {
+                        val.clone()
+                    };
+                    // Payload C type for Option[T] returns (int seed + kind metadata).
+                    let elem_c = self
+                        .fn_option_some_kind
+                        .get(&next_fn)
+                        .map(|k| match k.as_str() {
+                            "float" | "f64" => "double",
+                            "bool" => "bool",
+                            "string" => "MakoString",
+                            _ => "int64_t",
+                        })
+                        .unwrap_or("int64_t");
                     self.line("for (;;) {");
                     self.indent += 1;
-                    self.line(&format!("{opt_ty} {vtmp} = {next_mangled}({val});"));
+                    self.line(&format!("{opt_ty} {vtmp} = {next_mangled}({recv});"));
                     self.line(&format!("if (!{vtmp}.some) break;"));
                     match binders {
                         [] => {}
                         [a] => {
                             if a != "_" {
-                                self.line(&format!("int64_t {} = {vtmp}.value;", mangle(a)));
-                                self.locals.insert(a.clone(), "int64_t".into());
+                                self.line(&format!(
+                                    "{elem_c} {} = {vtmp}.value;",
+                                    mangle(a)
+                                ));
+                                self.locals.insert(a.clone(), elem_c.into());
                             }
                         }
                         [_, b] => {
                             if b != "_" {
-                                self.line(&format!("int64_t {} = {vtmp}.value;", mangle(b)));
-                                self.locals.insert(b.clone(), "int64_t".into());
+                                self.line(&format!(
+                                    "{elem_c} {} = {vtmp}.value;",
+                                    mangle(b)
+                                ));
+                                self.locals.insert(b.clone(), elem_c.into());
                             }
                         }
                         _ => {}
@@ -53489,6 +53554,15 @@ fn fold_const_c_env(
                 BinOp::Ge => Some(if l >= r { 1 } else { 0 }),
                 BinOp::And | BinOp::Or => None,
             }
+        }
+        // Const string index → byte 0..255.
+        Expr::Index { base, index } => {
+            let s = fold_const_c_str(base, consts, const_strs, const_fns)?;
+            let i = fold_const_c_env(index, consts, const_strs, const_fns)?;
+            if i < 0 || (i as usize) >= s.len() {
+                return None;
+            }
+            Some(s.as_bytes()[i as usize] as i64)
         }
         Expr::Unary { op, expr } => {
             let v = fold_const_c_env(expr, consts, const_strs, const_fns)?;

@@ -457,6 +457,28 @@ void *mako_native_pack_new(int64_t n) {
     return p;
 }
 
+/* Sequential mut capture cells: shared int64 heap cell for outer+closure. */
+int64_t mako_native_i64_cell_new(int64_t v) {
+    int64_t *p = (int64_t *)malloc(sizeof(int64_t));
+    if (!p) abort();
+    *p = v;
+    return (int64_t)(intptr_t)p;
+}
+
+int64_t mako_native_i64_cell_load(int64_t cell) {
+    if (!cell) return 0;
+    return *(int64_t *)(intptr_t)cell;
+}
+
+void mako_native_i64_cell_store(int64_t cell, int64_t v) {
+    if (!cell) return;
+    *(int64_t *)(intptr_t)cell = v;
+}
+
+void mako_native_i64_cell_free(int64_t cell) {
+    free((void *)(intptr_t)cell);
+}
+
 void mako_native_pack_set(void *pack, int64_t i, int64_t v) {
     if (!pack || i < 0) return;
     ((int64_t *)pack)[i] = v;

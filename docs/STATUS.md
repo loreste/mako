@@ -154,7 +154,7 @@ Program: [SOUNDNESS.md](SOUNDNESS.md) · model: [MEMORY_MODEL.md](MEMORY_MODEL.m
 | Generic enums `enum MyBox[T]` + match | Done — `generic_enum_test` |
 | Interface bounds `fn f[T: I](…)` | Done — structural · `generic_bounds_test` · `bad/generic_bound_fail` |
 | Nested generics / multi-instantiation | Done — `generic_adversarial_test` |
-| Iterator `Type_next` → `for` seed | Seed — by-value self limit · `iterator_test` |
+| Iterator `Type_next` → `for` with `mut self` | Done — advances binding · `iterator_test` |
 | Mutable closure capture cells | Seed — `mutable_closure_test` |
 | CBOR + MessagePack binary | Done — encode/decode subset · `std/encoding/{cbor,msgpack}` · `cbor_msgpack_test` |
 | List combinators (map/filter/fold style) | Done — int mono helpers · `cbor_msgpack_test` |

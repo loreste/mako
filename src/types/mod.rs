@@ -14703,12 +14703,47 @@ impl TypeChecker {
                             "cannot use two binders over an int count; use `for i in n` or `for i in range n`",
                         ));
                     }
-                    // Iterator protocol: struct with a `next` method returning Option[T]
+                    // Iterator protocol: struct with a `next` method returning Option[T].
+                    // Prefer `fn next(mut self)` so the loop advances the binding in place.
                     Type::Struct { name, .. } | Type::Named(name) => {
                         let next_fn = format!("{name}_next");
                         if let Some(Type::Fn(_, ret)) = self.fns.get(&next_fn) {
                             match ret.as_ref() {
-                                Type::Option(inner) => (Type::Int, (**inner).clone(), false, false),
+                                Type::Option(inner) => {
+                                    let mut_self = self
+                                        .fn_mut_params
+                                        .get(&next_fn)
+                                        .and_then(|m| m.first().copied())
+                                        .unwrap_or(false);
+                                    if mut_self {
+                                        match iter {
+                                            Expr::Ident(n) => {
+                                                let Some((_, is_mut)) = self.lookup(n) else {
+                                                    return Err(TypeError::new(format!(
+                                                        "cannot iterate over unknown binding `{n}`"
+                                                    )));
+                                                };
+                                                if !is_mut {
+                                                    return Err(TypeError::new(format!(
+                                                        "`{name}_next` takes mut self — iterate a `let mut` binding"
+                                                    ))
+                                                    .hint(format!(
+                                                        "use `let mut {n} = …` then `for … in {n}`"
+                                                    )));
+                                                }
+                                            }
+                                            _ => {
+                                                return Err(TypeError::new(format!(
+                                                    "`{name}_next` takes mut self — iterable must be a mutable local"
+                                                ))
+                                                .hint(
+                                                    "bind the iterator first: `let mut it = …; for v in it { … }`",
+                                                ));
+                                            }
+                                        }
+                                    }
+                                    (Type::Int, (**inner).clone(), false, false)
+                                }
                                 _ => {
                                     return Err(TypeError::new(format!(
                                         "`{name}_next` must return Option[T] for iterator protocol"
@@ -14717,7 +14752,7 @@ impl TypeChecker {
                             }
                         } else {
                             return Err(TypeError::new(format!(
-                                "cannot iterate over {}; implement `on {name} {{ fn next(self) -> Option[T] }}` for iterator support",
+                                "cannot iterate over {}; implement `on {name} {{ fn next(mut self) -> Option[T] }}` for iterator support",
                                 name
                             )));
                         }
@@ -20440,6 +20475,18 @@ pub fn fold_const_expr_with(
                 BinOp::Ge => Ok(if l >= r { 1 } else { 0 }),
                 BinOp::And | BinOp::Or => unreachable!(),
             }
+        }
+        // `s[i]` on a const string → byte value 0..255 (matches runtime string index).
+        Expr::Index { base, index } => {
+            let s = fold_const_str_with(base, consts, const_strs, const_fns)?;
+            let i = fold_const_expr_with(index, consts, const_strs, const_fns)?;
+            if i < 0 || (i as usize) >= s.len() {
+                return Err(TypeError::new(format!(
+                    "const string index out of bounds: index {i}, len {}",
+                    s.len()
+                )));
+            }
+            Ok(s.as_bytes()[i as usize] as i64)
         }
         Expr::Unary { op, expr } => {
             let v = fold_const_expr_with(expr, consts, const_strs, const_fns)?;
