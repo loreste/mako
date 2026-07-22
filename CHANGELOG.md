@@ -8,6 +8,10 @@
 - Add reproducible 1k, 10k, and 100k compiler-scaling fixtures for single-file,
   multi-file, generic-heavy, and backend-shaped projects.
 
+### Runtime
+
+- Preserve task return values when joining native Windows worker threads.
+
 ## 0.4.0 — 2026-07-20
 
 **mako0.4.0** (`CARGO_PKG_VERSION`). 362 Mako tests + 80 Rust tests, 0 failures.

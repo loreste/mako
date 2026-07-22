@@ -5525,7 +5525,7 @@ typedef struct {
     pthread_t thread;
     MakoTaskFn fn;
     void *arg;
-    void *result;
+    void *result;        /* Read only after joining or acquiring done/joined. */
     atomic_bool joined;
     bool cancelled_start; /* set if cancel before/during — cooperative */
     atomic_int done;      /* 1 when trampoline finished (for timed join) */
@@ -6405,6 +6405,11 @@ static inline MakoTask *mako_spawn_blocking(MakoNursery *n, MakoTaskFn fn, void 
     return mako_spawn_ex(n, fn, arg, /*blocking=*/1);
 }
 
+static inline void mako_task_join_thread(MakoTask *t) {
+    /* Keep retval NULL: the Windows pthread shim would replace t->result with NULL. */
+    pthread_join(t->thread, NULL);
+}
+
 static inline void *mako_await(MakoTask *t) {
     if (!t) return NULL;
     if (!atomic_load_explicit(&t->joined, memory_order_acquire)) {
@@ -6414,7 +6419,7 @@ static inline void *mako_await(MakoTask *t) {
                 nanosleep(&step, NULL);
             }
         } else {
-            pthread_join(t->thread, &t->result);
+            mako_task_join_thread(t);
             atomic_store_explicit(&t->done, 1, memory_order_release);
         }
         atomic_store_explicit(&t->joined, true, memory_order_release);
@@ -6442,7 +6447,7 @@ static inline int64_t mako_await_timeout_ms(MakoTask *t, int64_t ms, int64_t *ou
         int done = atomic_load_explicit(&t->done, memory_order_acquire);
         if (done) {
             if (!t->pooled) {
-                pthread_join(t->thread, &t->result);
+                mako_task_join_thread(t);
             }
             atomic_store_explicit(&t->joined, true, memory_order_release);
             mako_rt_counter_inc(&mako_rt_tasks_joined);
@@ -6458,7 +6463,7 @@ static inline int64_t mako_await_timeout_ms(MakoTask *t, int64_t ms, int64_t *ou
     int done = atomic_load_explicit(&t->done, memory_order_acquire);
     if (done) {
         if (!t->pooled) {
-            pthread_join(t->thread, &t->result);
+            mako_task_join_thread(t);
         }
         atomic_store_explicit(&t->joined, true, memory_order_release);
         mako_rt_counter_inc(&mako_rt_tasks_joined);

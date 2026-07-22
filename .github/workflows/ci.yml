@@ -143,6 +143,12 @@ jobs:
           cargo run --quiet --release -- test examples/testing/context_mako_test.mko
           cargo run --quiet --release -- test examples/testing/json_mako_test.mko
           cargo run --quiet --release -- test examples/testing/collections_mako_test.mko
+          cargo run --quiet --release -- test examples/testing/crew_fan_test.mko
+          cargo run --quiet --release -- test examples/testing/kick_fn_test.mko
+          cargo run --quiet --release -- test examples/testing/job_join_typed_test.mko
+          cargo run --quiet --release -- test examples/testing/actor_test.mko
+          cargo run --quiet --release -- test examples/testing/wave8_queue_test.mko
+          cargo run --quiet --release -- test examples/testing/wave10_queue_test.mko
         env:
           MAKO_TEST_TIMEOUT_SECS: "90"
 
