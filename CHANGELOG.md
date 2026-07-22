@@ -1,6 +1,21 @@
 # Changelog
 
-## 0.4.6 — 2026-07-22 (tip; tag when packaging cut)
+## 0.4.7 — 2026-07-22 (tip; tag when packaging cut)
+
+**Theme:** Modes truth table — fail closed on native/LLVM.  
+**Depends on:** 0.4.6 residual work in tree.
+
+### Modes (fail closed)
+
+- Central `validate_direct_backend_modes` for native/LLVM: hard-error on
+  `--sanitize`, `--static-link`, `--target` / wasm, `--emit-c`; llvm requires
+  `--release` and `--features llvm-backend`.
+- Errors always point at `--backend c` (no silent hybrid).
+- `mako doctor` prints the backend / modes matrix.
+- Docs: [BUILD.md § Modes matrix](docs/BUILD.md).
+- Test harness uses release opt level for `--backend llvm`.
+
+## 0.4.6 — 2026-07-22
 
 **Theme:** Post-`v0.4.5` residual patch — smaller ship, not a mega-0.5.  
 **Versioning:** [docs/VERSIONING.md](docs/VERSIONING.md) — prefer patches (`0.4.6`,

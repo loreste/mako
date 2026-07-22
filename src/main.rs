@@ -105,6 +105,81 @@ fn resolve_backend(cli: BackendCli, env_keys: &[&str]) -> BackendCli {
     cli
 }
 
+/// Name used in mode-gate error messages.
+fn backend_label(backend: BackendCli) -> &'static str {
+    match backend {
+        BackendCli::C => "c",
+        BackendCli::Native => "native",
+        BackendCli::Llvm => "llvm",
+    }
+}
+
+/// Fail closed for modes the direct backends do not implement.
+///
+/// Never silently fall back to the C backend. Users must pass `--backend c`
+/// (or drop the unsupported flag) explicitly. See docs/BUILD.md § Modes matrix.
+fn validate_direct_backend_modes(
+    backend: BackendCli,
+    level: OptLevel,
+    opts: &BuildOpts,
+    emit_c: bool,
+) -> Result<(), ()> {
+    if matches!(backend, BackendCli::C) {
+        return Ok(());
+    }
+    let name = backend_label(backend);
+    let use_c = "use `--backend c` (or drop the unsupported flag)";
+
+    if emit_c {
+        emit_plain_error(&format!(
+            "--emit-c cannot be used with --backend {name}; {use_c}"
+        ));
+        return Err(());
+    }
+    if let Some(t) = opts.target.as_deref() {
+        let wasm = t.contains("wasm");
+        emit_plain_error(&format!(
+            "--backend {name} supports the host target only (got `--target {t}`{}); {use_c}{}",
+            if wasm { " / wasm" } else { "" },
+            if wasm {
+                " for wasm32-wasip1"
+            } else {
+                " for cross-compilation"
+            }
+        ));
+        return Err(());
+    }
+    if let Some(s) = opts.sanitize.as_deref() {
+        emit_plain_error(&format!(
+            "--sanitize={s} is not implemented for --backend {name}; {use_c}"
+        ));
+        return Err(());
+    }
+    if opts.static_link {
+        emit_plain_error(&format!(
+            "--static is not implemented for --backend {name}; {use_c}"
+        ));
+        return Err(());
+    }
+    if matches!(backend, BackendCli::Llvm) && !matches!(level, OptLevel::Release) {
+        emit_plain_error(
+            "--backend llvm requires --release (debug builds: use --backend native)",
+        );
+        return Err(());
+    }
+    #[cfg(not(feature = "llvm-backend"))]
+    if matches!(backend, BackendCli::Llvm) {
+        emit_plain_error(
+            "--backend llvm is unavailable in this build (rebuild with --features llvm-backend)",
+        );
+        return Err(());
+    }
+    // Overflow wrap/trap/ignore: honored on the shared-IR path (ignore ≡ wrap).
+    // Bounds-always: typecheck/codegen still enforce SAFE release bounds on native.
+    let _ = opts.overflow;
+    Ok(())
+}
+
 #[derive(Subcommand)]
 enum Commands {
     /// Create a new project (mako.toml + main.mko; optional `--workspace` / `--backend`)
@@ -1025,6 +1100,28 @@ fn cmd_doctor() -> Result<(), ()> {
     } else {
         println!("  zig:     warn missing (optional; useful for cross-compilation)");
     }
+
+    // Backend + mode matrix (0.4.7). Fail closed: unsupported modes hard-error.
+    println!("  backends / modes (no silent fallback):");
+    println!(
+        "    c:      host+cross+wasm · sanitize · static · overflow wrap/trap/ignore · emit-c"
+    );
+    println!(
+        "    native: host only · overflow wrap/trap/ignore · no sanitize/static/cross/wasm/emit-c"
+    );
+    #[cfg(feature = "llvm-backend")]
+    {
+        println!(
+            "    llvm:    host --release only · same mode limits as native · built with llvm-backend"
+        );
+    }
+    #[cfg(not(feature = "llvm-backend"))]
+    {
+        println!(
+            "    llvm:    unavailable (rebuild mako with --features llvm-backend + bundled lld)"
+        );
+    }
+    println!("    docs:    docs/BUILD.md § Modes matrix · docs/VERSIONING.md");
 
     match discover_vscode_extension_dir() {
         Some(p) => println!("  vscode:  ok ({})", p.display()),
@@ -2144,9 +2241,21 @@ fn cmd_test(
     backend: BackendCli,
 ) -> Result<(), ()> {
     let sanitize = sanitize.map(|s| s.to_string());
-    if matches!(backend, BackendCli::Native | BackendCli::Llvm) && sanitize.is_some() {
-        emit_plain_error("--sanitize is not implemented for mako test --backend native/llvm yet");
-        return Err(());
+    if matches!(backend, BackendCli::Native | BackendCli::Llvm) {
+        let opts = BuildOpts {
+            target: None,
+            sanitize: sanitize.clone(),
+            static_link: false,
+            overflow: OverflowMode::Wrap,
+            bounds_always: false,
+        };
+        // Tests never use --release for the harness path by default; llvm needs release.
+        let level = if matches!(backend, BackendCli::Llvm) {
+            OptLevel::Release
+        } else {
+            OptLevel::Debug
+        };
+        validate_direct_backend_modes(backend, level, &opts, false)?;
     }
     if path.is_dir() {
         if let Some(members) = tooling::workspace_member_dirs(path) {
@@ -2304,13 +2413,19 @@ fn run_test_package(
             // Shared-IR path with synthetic harness main (see native_ir::lower_with_tests).
             // Force shared-IR-only so test failures surface as IR diagnostics, not a silent
             // Cranelift AST fallback that lacks the harness.
+            // LLVM is release-only; Cranelift uses debug for faster test builds.
+            let level = if matches!(backend, BackendCli::Llvm) {
+                OptLevel::Release
+            } else {
+                OptLevel::Debug
+            };
             let prev_shared = std::env::var_os("MAKO_NATIVE_SHARED_IR_ONLY");
             std::env::set_var("MAKO_NATIVE_SHARED_IR_ONLY", "1");
             let result = build_native_object(
                 program,
                 &out_bin,
                 file,
-                OptLevel::Debug,
+                level,
                 backend,
                 &BuildOpts {
                     target: None,
@@ -3353,10 +3468,7 @@ fn build_incremental(
     let frontend_ms = t0.elapsed().as_secs_f64() * 1000.0;
 
     if matches!(backend, BackendCli::Native | BackendCli::Llvm) {
-        if emit_c {
-            emit_plain_error("--emit-c cannot be used with a direct native backend");
-            return Err(());
-        }
+        validate_direct_backend_modes(backend, level, opts, emit_c)?;
         let backend_ms =
             build_native_object(&program, out_bin, file, level, backend, opts, &[])?;
         return Ok((frontend_ms, backend_ms));
@@ -3596,20 +3708,10 @@ fn build_native_object(
     opts: &BuildOpts,
     test_fns: &[String],
 ) -> Result<f64, ()> {
-    if opts.target.is_some() {
-        emit_plain_error("--backend native currently supports the host target only");
-        return Err(());
-    }
-    if opts.sanitize.is_some() {
-        emit_plain_error("--sanitize is not implemented for --backend native yet");
-        return Err(());
-    }
-    if opts.static_link {
-        emit_plain_error("--static is not implemented for --backend native yet");
-        return Err(());
-    }
+    // Mode gate (also called from build_incremental); keep here for direct callers.
+    validate_direct_backend_modes(backend, level, opts, false)?;
     if matches!(opts.overflow, OverflowMode::Ignore) {
-        // Ignore is documented as wrap-equivalent for native.
+        // Ignore is documented as wrap-equivalent for native/LLVM.
     }
 
     let t0 = Instant::now();
@@ -3664,10 +3766,7 @@ fn build_native_object(
             }
         }
         BackendCli::Llvm => {
-            if !matches!(level, OptLevel::Release) {
-                emit_plain_error("--backend llvm requires --release");
-                return Err(());
-            }
+            // Release + feature checks are in validate_direct_backend_modes.
             #[cfg(feature = "llvm-backend")]
             {
                 let ir = native_ir::lower_with_tests(program, test_fns).map_err(|e| {

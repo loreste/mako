@@ -1,4 +1,4 @@
-# Mako builds (v0.4.6 tip)
+# Mako builds (v0.4.7 tip)
 
 **Versioning:** [VERSIONING.md](VERSIONING.md) — ship small patches often.
 
@@ -94,8 +94,38 @@ mako build app.mko --release --backend llvm -o app   # needs llvm-backend featur
 ```
 
 Native and LLVM emit machine-code objects directly (no generated C). The shared
-IR covers the full testing corpus on Cranelift. Unsupported modes (sanitize,
-some cross targets) hard-error with a pointer at the C backend.
+IR covers the full testing corpus on Cranelift. Unsupported modes hard-error with
+a pointer at the C backend (**no silent fallback**).
+
+## Modes matrix (0.4.7)
+
+| Mode / flag | `--backend c` | `--backend native` | `--backend llvm` |
+|-------------|---------------|--------------------|------------------|
+| Host target (default) | yes | yes | yes (`--release` required) |
+| `--target` cross | yes (zig/clang) | **hard-error** | **hard-error** |
+| `wasm32-wasip1` | yes | **hard-error** | **hard-error** |
+| `--sanitize=…` / `--race` | yes | **hard-error** | **hard-error** |
+| `--static` | yes (non-macOS) | **hard-error** | **hard-error** |
+| `--emit-c` | yes | **hard-error** | **hard-error** |
+| `--overflow wrap` | yes | yes | yes |
+| `--overflow trap` | yes | yes (shared IR) | yes (shared IR) |
+| `--overflow ignore` | yes (≡ wrap) | yes (≡ wrap) | yes (≡ wrap) |
+| Debug (`mako build`) | yes | yes | **hard-error** (use native) |
+| Release (`--release`) | yes | yes | yes (needs `llvm-backend` feature) |
+
+Example:
+
+```bash
+# Wrong — fails closed:
+mako build app.mko --backend native --sanitize address
+# → error: --sanitize=address is not implemented for --backend native; use `--backend c`
+
+# Right:
+mako build app.mko --backend c --sanitize address
+```
+
+`mako doctor` prints this matrix for the installed binary (including whether
+llvm-backend was compiled in).
 
 ## Memory safety of the cache
 
