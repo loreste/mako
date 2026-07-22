@@ -27,12 +27,13 @@ fn write_plugin_src(path: string) -> int {
 }
 
 fn TestPluginProductLive() {
-    let dir = "/tmp/mako_plugin_product_test"
-    let _ = mkdir(dir)
-    let src = dir + "/plugin.c"
-    let so = dir + "/libdemo.dylib"
+    let dir = path_join(temp_dir(), "mako_plugin_product_test")
+    let _ = remove_all(dir)
+    assert_eq(mkdir(dir), 0)
+    let src = path_join(dir, "plugin.c")
+    let so = path_join(dir, "libdemo.dylib")
     // On Linux use .so — try both via path after build
-    let so_linux = dir + "/libdemo.so"
+    let so_linux = path_join(dir, "libdemo.so")
     assert_eq(write_plugin_src(src), 0)
     // Locate runtime headers
     let mut rt = env_get("MAKO_RUNTIME")
@@ -48,6 +49,7 @@ fn TestPluginProductLive() {
     }
     if !file_exists(lib) {
         // Soft skip if compiler unavailable
+        let _ = remove_all(dir)
         assert(true)
         return
     }
@@ -74,13 +76,15 @@ fn TestPluginProductLive() {
     assert_eq_str(plugin_call1(h2, "ping"), "pong")
     assert_eq(plugin_close(h2), 1)
     assert_eq(plugin_close_all(), 0)
+    let _ = remove_all(dir)
 }
 
 fn TestPluginManifestParse() {
-    let path = "/tmp/mako_plugin_manifest_test.toml"
+    let path = path_join(temp_dir(), "mako_plugin_manifest_test.toml")
     let body = "name = \"demo\"\nkind = \"native\"\nartifact = \"target/libdemo.so\"\n"
     assert_eq(write_file(path, body), 0)
     assert_eq_str(plugin_manifest_artifact(path), "target/libdemo.so")
     let full = plugin_manifest_lib_path(path)
     assert(str_contains(full, "libdemo.so"))
+    let _ = remove_file(path)
 }

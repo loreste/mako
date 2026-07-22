@@ -15,7 +15,7 @@ fn TestBufioReadN() {
 }
 
 fn TestBufioWriterRoundtrip() {
-    let path = "/tmp/mako_bufio_test.txt"
+    let path = path_join(temp_dir(), "mako_bufio_test.txt")
     let w = buf_writer_new(path)
     assert_eq(buf_write(w, "hello"), 5)
     assert_eq(buf_write_byte(w, 10), 1)
