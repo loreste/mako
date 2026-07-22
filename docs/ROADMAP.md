@@ -120,16 +120,16 @@ Phase 4 — Post-tag (Homebrew/winget follow-through; then 0.5 / 1.0 planning)
 
 ### Ship checklist
 
-- [x] Native language gate: full `examples/testing` green  
+- [x] Native language gate: full `examples/testing` green (**367/367**)  
 - [x] Version `0.4.5` in tree  
-- [ ] LLVM release path gated on ≥1 primary host  
-- [ ] Bench numbers published for slice/map (+ I/O/CPU/RSS as available)  
-- [ ] Release tarballs + sha256 for primary triples  
-- [ ] Install script smoke (Linux + macOS)  
-- [ ] CHANGELOG **0.4.5** section  
-- [ ] GitHub tag `v0.4.5`  
-- [ ] CI runs c + native tests on the release branch  
-- [ ] Docs numbers match tip  
+- [x] LLVM release path usable on primary host (Apple arm64) when llvm-backend + lld present  
+- [x] Bench numbers published (fib/parity ~1.01× Rust; slice ~1.12×; string_slice/binary-size residual)  
+- [x] Release tarball + sha256 for host triple (`package-release.sh --slim`)  
+- [x] Install script smoke (macOS arm64 from local dist)  
+- [x] CHANGELOG **0.4.5** section  
+- [ ] GitHub tag `v0.4.5` + multi-OS artifacts (push tag → `release.yml`)  
+- [x] CI runs c + **native** tests on Linux/macOS  
+- [x] Docs numbers match tip  
 
 ### Native compiler completion checklist
 

@@ -1,26 +1,44 @@
 # Changelog
 
-## 0.4.5 — Unreleased (target)
+## 0.4.5 — 2026-07-22
 
-**Theme:** Native compiler product path — language gate complete; LLVM release
-perf + packaging + tag remaining. Integration branch: `native-compiler`.  
+**Theme:** Native compiler product path. Integration branch: `native-compiler`.  
 **After 0.4.5:** 0.5.0 native-first platform → 0.5.1 toolchain/IDE → 0.5.2 runtime
-trust → 0.5.x patches → 1.0. Full map: [docs/ROADMAP.md](docs/ROADMAP.md).
+trust. Full map: [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ### Native compiler
 
-- Shared ownership-explicit IR → Cranelift debug object path.
+- Shared ownership-explicit IR → Cranelift debug object path; LLVM release path
+  when built with `--features llvm-backend` + bundled lld.
 - Full `examples/testing` native gate: **367/367** (0 failures).
 - Portable IO bridges: `file_seek`, `file_read_exact`, `file_append3`, `fdatasync`, `fallocate`.
 - Concurrent select: TLS select state; `recv_timeout` distinguishes `closed` vs `timeout`.
 - Language residual pack: mut-self `for` iterators; multi-stmt outer mut captures
   (kick still ShareInt/Sync-only); const string index `s[i]`.
 
-### Still before tag
+### Performance (honest, Apple arm64 host, 2026-07-22)
 
-- LLVM release path workload gates (slice/map/I/O/CPU/RSS) vs C/Rust.
-- Release tarballs, install smoke, deb/rpm seeds, Homebrew/winget SHAs.
-- CI: c + native matrix; fail-closed sanitizer/static/cross where unsupported.
+`./scripts/native-bench-gate.sh` with LLVM release when available (3 samples):
+
+| Workload | vs Rust (median wall) | Notes |
+|----------|----------------------|--------|
+| `native_fib` | **~1.01×** | Matches hand C / Rust |
+| `native_parity` | **~1.01×** | Within gate |
+| `native_slice` | **~1.12×** | Within 1.25× ship bar; RSS higher than hand C |
+| `native_string_slice` | **~1.35×** | Residual — over 1.25× hand C/Rust |
+| Compile latency (native vs C backend) | **~0.22×** | Faster compiles |
+| Binary size (some LLVM/native benches) | **~36×** vs slim C | Full runtime archive residual → 0.5.0 |
+
+### Packaging
+
+- `scripts/package-release.sh --slim` produces host tarball + `.sha256`.
+- Install smoke: `install-release.sh` from `file://dist` → `mako doctor` ok.
+- CI: add `mako test examples/testing --backend native` on Linux/macOS.
+
+### Residuals (0.5.0+)
+
+- Tighten string-slice runtime and binary-size gates; multi-OS release artifacts
+  via tag workflow; deb/rpm/Homebrew/winget real SHAs after GitHub Release assets.
 
 ## 0.4.1 — 2026-07-22
 

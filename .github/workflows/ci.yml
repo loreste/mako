@@ -111,6 +111,18 @@ jobs:
           MAKO_LIVE_NGHTTP2: ""
           MAKO_LIVE_QUIC: ""
 
+      # 0.4.5 gate: Cranelift native backend on primary Unix hosts (no LLVM feature required).
+      - name: Native backend test suite (Linux/macOS)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: cargo run --quiet --release -- test examples/testing --backend native
+        env:
+          MAKO_TEST_TIMEOUT_SECS: "120"
+          MAKO_LIVE_TLS: ""
+          MAKO_LIVE_NGHTTP2: ""
+          MAKO_LIVE_QUIC: ""
+          MAKO_RUNTIME: ${{ github.workspace }}/runtime
+
       - name: Default test suite (Windows)
         if: runner.os == 'Windows'
         shell: bash

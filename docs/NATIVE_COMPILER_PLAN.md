@@ -84,18 +84,21 @@ Fib40: Mako LLVM ≈ Rust (~1.01×). Gate uses **`--backend llvm` for release
 runtime** when available; Cranelift stays debug. Remaining to **≤1.00× C/Rust**:
 map get/set inlining, I/O buffers, and induction-proven bounds-check elision.
 
-## Current state (v0.4.5 language gate)
+## Current state (v0.4.5)
 
-- **Language gate:** `mako test examples/testing --backend native` → **363/363**
+- **Language gate:** `mako test examples/testing --backend native` → **367/367**
   (2026-07-22). Shared IR + Cranelift debug backend + `runtime/native_bridge.c`
   cover the full testing corpus (structs/enums/maps/nested aggregates, match/`?`,
-  concurrency, net/TLS/SQL/HTTP/SIP, fan/crew, etc.).
+  concurrency, net/TLS/SQL/HTTP/SIP, fan/crew, mut-self iterators, etc.).
 - `src/native_ir.rs` / `src/native_codegen.rs`: ownership-explicit shared IR →
   Cranelift object; LLVM release objects use the same IR where enabled.
   Linked by bundled lld on supported hosts.
-- **Remaining (not language-feature):** LLVM release runtime ≤ C and ≤ Rust on
-  published workloads (maps/I/O/CPU/RSS), packaging CI gates, cross/wasm/static/
-  sanitizer/overflow modes. Unsupported build modes still hard-error.
+- **Perf (Apple arm64, 2026-07-22):** fib/parity ~**1.01×** Rust; slice ~**1.12×**;
+  string_slice ~**1.35×** residual; compile latency ~**0.22×** C backend; some
+  native binaries still ~**36×** slim C size (full runtime archive) → **0.5.0**.
+- **Packaging:** host slim tarball + install smoke; multi-OS via tag workflow.
+- **Remaining after 0.4.5:** binary-size / string-slice gates, map/I/O depth,
+  cross/wasm/static modes, multi-OS release assets on tag.
 
 ## Runtime string ABI (must stay differential-compatible)
 

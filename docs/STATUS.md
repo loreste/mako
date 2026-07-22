@@ -15,7 +15,7 @@ programs on **native** (0 failures) + Rust unit tests · ASan clean ownership su
 
 | Scope | Approx. |
 |-------|---------|
-| **Product version** | **0.4.5** — language gate **367/367** native; LLVM perf + packaging + tag remaining · then **0.5.0–0.5.2** ([ROADMAP.md](ROADMAP.md) version map) |
+| **Product version** | **0.4.5** — language gate **367/367**; host package/install/LLVM path ready; **tag + multi-OS release** remaining · then **0.5.0–0.5.2** ([ROADMAP.md](ROADMAP.md)) |
 | **MVP / usable language** | Core compiler/runtime scope is exercised; this is not a production-readiness claim |
 | **STATUS north-star** | Tracked scope is explicit; optional depth below remains |
 | **Mako identity (preferred syntax)** | Checklist complete — [IDENTITY.md](IDENTITY.md); not a maturity score |
