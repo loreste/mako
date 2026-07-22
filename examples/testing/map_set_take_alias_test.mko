@@ -1,0 +1,41 @@
+fn TestBorrowedStringArrayKeyIsCloned() {
+    let keys = ["alpha", "bravo"]
+    let mut values = make(map[string]int)
+    values[keys[0]] = 1
+    values[keys[0]] = 2
+    assert_eq(values["alpha"], 2)
+    assert_eq_str(keys[0], "alpha")
+}
+
+fn TestBorrowedStringArrayKeyAndValueAreCloned() {
+    let items = ["key", "first", "second"]
+    let mut values = make(map[string]string)
+    values[items[0]] = items[1]
+    values[items[0]] = items[2]
+    assert_eq_str(values["key"], "second")
+    assert_eq_str(items[0], "key")
+    assert_eq_str(items[1], "first")
+}
+
+fn TestFreshStringKeysTransferOwnership() {
+    let mut values = make(map[string]int)
+    let mut i = 0
+    while i < 5 {
+        values["key-" + string(i)] = i
+        values[f"interp-{i}"] = i + 10
+        i = i + 1
+    }
+    values["key-" + string(2)] = 99
+    values[f"interp-{2}"] = 199
+    assert_eq(values["key-2"], 99)
+    assert_eq(values["interp-2"], 199)
+}
+
+fn TestStringConversionDoesNotTakeStringArgument() {
+    let key = "stable"
+    let mut values = make(map[string]int)
+    values[string(key)] = 1
+    values[string(key)] = 2
+    assert_eq(values["stable"], 2)
+    assert_eq_str(key, "stable")
+}
