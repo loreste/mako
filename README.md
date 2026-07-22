@@ -18,9 +18,11 @@ evaluation.
 Mako provides compiler-enforced ownership, bounds checks (including in release
 builds), escape checks, and deterministic cleanup without a tracing garbage
 collector. The safety model is still experimental and is being validated through
-sanitizer and adversarial testing — the test suite passes under ASan, UBSan,
-and TSan, but that does not prove complete memory safety. `unsafe` blocks,
-the C runtime, and FFI are outside the safety model.
+sanitizer testing — the full test suite is exercised under ASan (with leak
+detection disabled — validating invalid accesses, use-after-free, and
+double-free) and UBSan, while a focused concurrency suite is exercised under
+TSan. This does not prove complete memory safety. `unsafe` blocks, the C
+runtime, and FFI are outside the safety model.
 
 See [docs/ROADMAP.md](docs/ROADMAP.md) · [docs/SOUNDNESS.md](docs/SOUNDNESS.md).
 

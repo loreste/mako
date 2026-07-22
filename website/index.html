@@ -46,7 +46,7 @@
       <article><h3>Structured concurrency</h3><p><code>crew</code> owns <code>kick</code> jobs and cancel-joins them at scope exit. Channels, select, and timed joins are built in.</p></article>
       <article><h3>Backend standard library</h3><p>Networking, TLS, HTTP, JSON, databases, crypto, direct I/O, memory-mapped files, WAL, and observability across Linux, macOS, and Windows.</p></article>
       <article><h3>Safety mechanisms</h3><p>Move checking, bounds checks in release builds, typed errors, Send restrictions, and leak diagnostics. The safety model is experimental and actively being hardened.</p></article>
-      <article><h3>Cross platform</h3><p>Native Linux, macOS, and Windows builds. Cross-compile to Linux musl and WASI. 11 CI jobs verify every commit.</p></article>
+      <article><h3>Cross platform</h3><p>Native Linux and macOS builds with full test coverage. Native Windows builds with a required core test suite; broader Windows coverage is being hardened. Cross-compile to Linux musl and WASI.</p></article>
     </div></div></section>
     <section id="install"><div class="wrap"><h2>Install</h2><p class="note">A published binary release can be installed without Rust or Cargo. Clang is needed to compile Mako programs.</p><pre><code># Linux / macOS
 curl -fsSL https://github.com/loreste/mako/releases/latest/download/install-linux.sh | bash

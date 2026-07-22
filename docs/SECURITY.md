@@ -2,11 +2,13 @@
 
 **Status:** actively hardened, not formally proven. The ownership model
 prevents many classes of memory bugs by construction, and the full test
-suite (360 programs) passes under AddressSanitizer with zero errors. Edge
-cases are still being found and fixed. This is not yet equivalent to a
-formally verified memory model.
+suite is exercised under ASan (with leak detection disabled) and UBSan with
+zero errors. ASan validates invalid accesses, use-after-free, double-free,
+and buffer overflows — but not general leak freedom. Edge cases are still
+being found and fixed. This is not yet equivalent to a formally verified
+memory model.
 
-**Product version:** **0.4.0**.
+**Product version:** **0.4.1**.
 
 Mako treats safety as a **compiler and runtime contract**, not a style guide.
 The goal: make memory corruption and common backend footguns hard to ship —
@@ -190,7 +192,7 @@ Mako does **not** ship a full PKI product or “crypto framework.” It exposes
 | TLS client | `tls_client_new` / `tls_connect` / SNI / VERIFY_PEER | Outbound TLS, SIPS, mTLS apps |
 | TLS inspect | `tls_conn_version`, `tls_peer_cn`, `tls_conn_alpn` | Logging / policy |
 | HTTP helpers | `https_*` / `oidc_*` (+ `tls_get` / `tls_post` demos) | Verified HTTPS clients; OIDC never downgrades to `http_*` |
-| JWT verification | `jwt_verify` (HS256), `jwt_verify_rs256`, `jwt_verify_jwks` | Explicit algorithm/key type; RS256 requires RSA >= 2048 bits |
+| JWT signing / verification | `jwt_sign` (HS256), `jwt_sign_es256`, `jwt_verify`, `jwt_verify_rs256`, `jwt_verify_es256`, `jwt_verify_jwks` | Explicit algorithm/key type; ES256 requires a P-256 key; RS256 requires RSA >= 2048 bits |
 
 **Secure defaults:** TLS min 1.2; modern cipher suites; client verify and host
 name verification when using `tls_client_new(ca)` / `https_*`. Prefer Argon2id for new password storage. Use `const_eq` /

@@ -1,10 +1,11 @@
 # Mako status (adversarial / verified)
 
-Last inventory: **2026-07-19** · product **mako0.4.0** (`CARGO_PKG_VERSION`).
+Last inventory: **2026-07-22** · product **mako0.4.1** (`CARGO_PKG_VERSION`).
 
 Unique Mako surface · pack/pull · map/slice/bag monomorphs · package-per-directory ·
-const-fn depth (match/while/for/strings) · suite **357+ test programs + 75 Rust unit tests** (0 failures,
-ASan clean ownership suite) · [The Mako Book](book/).
+const-fn depth (match/while/for/strings) · run `make test` and `cargo test` for
+current counts · full suite exercised under ASan and UBSan; focused concurrency
+suite under TSan · [The Mako Book](book/).
 
 **Book:** [The Mako Book](book/) · **Guide:** [GUIDE.md](GUIDE.md) · **Identity:** [IDENTITY.md](IDENTITY.md) · **Pain points:** [PAIN_POINTS.md](PAIN_POINTS.md) · **Build:** [BUILD.md](BUILD.md) · **Stdlib:** [STDLIB.md](STDLIB.md) · **Roadmap:** [ROADMAP.md](ROADMAP.md) · **Changelog:** [../CHANGELOG.md](../CHANGELOG.md) · **Release:** [RELEASE.md](RELEASE.md) · **Soundness:** [SOUNDNESS.md](SOUNDNESS.md) · **Memory model:** [MEMORY_MODEL.md](MEMORY_MODEL.md).
 
@@ -14,7 +15,7 @@ ASan clean ownership suite) · [The Mako Book](book/).
 
 | Scope | Approx. |
 |-------|---------|
-| **Product version** | **0.4.0** ([release](https://github.com/loreste/mako/releases/tag/v0.4.0)) |
+| **Product version** | **0.4.1** ([release](https://github.com/loreste/mako/releases/tag/v0.4.1)) |
 | **MVP / usable language** | Core compiler/runtime scope is exercised; this is not a production-readiness claim |
 | **STATUS north-star** | Tracked scope is explicit; optional depth below remains |
 | **Mako identity (preferred syntax)** | Checklist complete — [IDENTITY.md](IDENTITY.md); not a maturity score |
