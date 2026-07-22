@@ -7,11 +7,15 @@
 ### Map performance
 
 - Faster native `map[int]int`: identity-key open addressing, 75% load / `grow_at`,
-  contiguous state|keys|vals slab, non-recursive rehash.
-- **LLVM inlines** `map_ii_set` / `map_ii_get` probe loops (no per-op runtime call).
+  hand-C-matched header `{keys*, vals*, state*, cap, lenp*}` (separate `len`
+  allocation so insert stores do not alias table-pointer loads), non-recursive
+  rehash that actually doubles capacity.
+- **LLVM inlines** `map_ii_set` / `map_ii_get` with hand-C probe shape (empty →
+  insert, full+match → update; cold `set_ptr` only when the table is full).
 - Bench `native_map` uses **1e6** entries. On Apple arm64 (LLVM release):  
-  **~0.29× Rust**, **~0.37× mako-c**, **~1.7× hand-C** (hand-C still wins on
-  fully inlined stack tables; residual toward ≤1.0×).
+  **~0.25× Rust**, **~1.7× hand-C** (hand-C wins on stack-resident tables with
+  register-hoisted pointers; heap-equivalent hand-C is closer). Residual gap is
+  mostly LICM of header loads vs fully exploded stack maps.
 
 ### Bench
 
