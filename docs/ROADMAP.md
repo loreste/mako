@@ -1,11 +1,16 @@
 # Mako roadmap
 
 **Product version:** **0.4.5** · Last sync: **2026-07-22**.  
-**Suite:** 363 Mako tests (C + native backends) + Rust unit tests, 0 failures, ASan clean ownership suite.
+**Suite:** **367** Mako tests on `examples/testing` (C + native backends) + Rust
+unit tests, 0 failures on the native gate · ASan clean ownership suite.
+
+**Branch:** integration work for 0.4.5 lives on **`native-compiler`** until the
+tag cut; do not merge to `main` until release (or an explicit cut decision).
 
 **Verified:** [STATUS.md](STATUS.md) · **Stdlib:** [STDLIB.md](STDLIB.md) · **Security:** [SECURITY.md](SECURITY.md) · **Release:** [RELEASE.md](RELEASE.md).  
 **Book:** [The Mako Book](book/) · **Identity:** [IDENTITY.md](IDENTITY.md).  
-**Soundness:** [SOUNDNESS.md](SOUNDNESS.md) · **Memory model:** [MEMORY_MODEL.md](MEMORY_MODEL.md).
+**Soundness:** [SOUNDNESS.md](SOUNDNESS.md) · **Memory model:** [MEMORY_MODEL.md](MEMORY_MODEL.md).  
+**Native plan detail:** [NATIVE_COMPILER_PLAN.md](NATIVE_COMPILER_PLAN.md).
 
 ---
 
@@ -23,10 +28,101 @@
 | **0.2.5** | Memory safety audit, LSP, package integrity, honest docs | **Shipped** |
 | **0.3.0** | Cross-platform, CI green, ownership hardening | **Shipped** |
 | **0.4.0** | Performance — DCE, constant folding, runtime speed, lint | **Shipped** |
-| **0.4.5** | Native compiler language gate + Linux packaging | **Language gate done** — packaging/perf remaining |
+| **0.4.5** | Native compiler product path | **Language gate done** — perf + packaging + release cut remaining |
 | **1.0** | Stability | Planned |
 
-### Native compiler completion checklist (manual implementation)
+---
+
+## 0.4.5 — Native compiler product path
+
+### North star
+
+Ship **0.4.5** as:
+
+1. **Full language on native** — Cranelift debug path runs the entire testing corpus.
+2. **Release optimizer path** — LLVM competitive with C/Rust on **published** workloads (honest per-workload gates).
+3. **Installable product** — one-binary install + packaging seeds + versioned notes/checksums.
+4. **No silent lying** — unsupported modes hard-error; docs match the tree.
+
+**Not 0.4.5:** 1.0 stability freeze, full DWARF IDE debugger product, line-for-line Go
+stdlib, free `go` outside `crew`, or lifetime parameters.
+
+### Phase 0 — Language gate — **DONE**
+
+| Item | Evidence |
+|------|----------|
+| Shared ownership-explicit IR | `src/native_ir.rs` |
+| Cranelift debug backend | `src/native_codegen.rs` |
+| Native bridge + embedded runtime archive | `runtime/native_bridge.c` |
+| Full testing corpus on native | **367/367** `mako test examples/testing --backend native` |
+| Portable IO + concurrent select | seek/read_exact/append3 bridges; TLS select; recv closed vs timeout |
+| Language residual pack | mut-self `for` iterators; multi-stmt mut captures; const `s[i]` |
+| Product version string | `0.4.5` in `Cargo.toml` |
+
+### Track A — Performance (release path) — **NEXT**
+
+LLVM is the release optimizer; Cranelift stays debug / fast-compile.
+
+| ID | Deliverable | Acceptance |
+|----|-------------|------------|
+| **A1** | `mako build --backend llvm --release` on host arm64/x86_64 (`--features llvm-backend`) | Builds + links with bundled lld; end user needs no system clang for that path |
+| **A2** | Broad workload gate vs C backend + hand C + Rust | Extend `./scripts/native-bench-gate.sh` (or sibling) for **slice, map, I/O, CPU, RSS** — medians, not one-offs |
+| **A3** | Honest published numbers | Update [NATIVE_COMPILER_PLAN.md](NATIVE_COMPILER_PLAN.md) / [PERFORMANCE.md](PERFORMANCE.md) / [SPEED.md](SPEED.md) with hardware + flags |
+| **A4** | Compile latency + binary-size gates | Documented bounds (compile vs C backend; size bar where applicable) |
+
+**Exit A:** Release path = LLVM; debug path = Cranelift; both documented; gates green on CI host.  
+**Out of scope for A:** beating every Rust crate on every microbench.
+
+### Track B — Packaging & distribution
+
+| ID | Deliverable | Acceptance |
+|----|-------------|------------|
+| **B1** | `scripts/package-release.sh` slim + full tarballs | `dist/mako-<triple>.tar.gz` + `.sha256` |
+| **B2** | Linux deb/rpm seeds | `package-deb.sh` / `package-rpm.sh` smoke |
+| **B3** | Install scripts pin v0.4.5 | `install-release.sh` / `install-linux.sh --version v0.4.5` |
+| **B4** | GitHub Release | Tag `v0.4.5`, notes from CHANGELOG, artifacts + checksums |
+| **B5** | Homebrew / winget seeds | Real SHA for the tag (soft-fail only while pending) |
+| **B6** | Clean-install doctor | `mako doctor` reports runtime + std + version |
+
+**Exit B:** curl\|bash install works for at least Linux x86_64 and macOS arm64 (or documented exceptions).
+
+### Track C — Modes, CI honesty, residual polish
+
+| ID | Deliverable | Acceptance |
+|----|-------------|------------|
+| **C1** | Sanitizer / overflow / static on native/LLVM | Implement **or** hard-error pointing at C backend |
+| **C2** | Cross-compile + WASM status | Document working triples; fail closed otherwise |
+| **C3** | CI matrix | `mako test examples/testing --backend c` + `--backend native` on PR; optional LLVM job |
+| **C4** | Leak / RSS / size in packaging CI | Fail on regression thresholds |
+| **C5** | Optional soundness soaks (non-blocking for tag) | TSan capture matrix; channel monomorph take matrix — nightly/optional |
+| **C6** | Doc drift | Corpus **367**, residual pack Done, version lines consistent |
+
+**Exit C:** CI reflects truth; 0.4.5 docs are consistent.
+
+### Phased schedule
+
+```text
+Phase 0 — Freeze language gate          [DONE]
+Phase 1 — Perf credibility (Track A)    [NEXT]
+Phase 2 — Package & publish (Track B)
+Phase 3 — CI + modes honesty (Track C) → tag v0.4.5
+Phase 4 — Post-tag (Homebrew/winget follow-through; then 0.5 / 1.0 planning)
+```
+
+### Ship checklist
+
+- [x] Native language gate: full `examples/testing` green  
+- [x] Version `0.4.5` in tree  
+- [ ] LLVM release path gated on ≥1 primary host  
+- [ ] Bench numbers published for slice/map (+ I/O/CPU/RSS as available)  
+- [ ] Release tarballs + sha256 for primary triples  
+- [ ] Install script smoke (Linux + macOS)  
+- [ ] CHANGELOG **0.4.5** section  
+- [ ] GitHub tag `v0.4.5`  
+- [ ] CI runs c + native tests on the release branch  
+- [ ] Docs numbers match tip  
+
+### Native compiler completion checklist
 
 The C backend remains the language-feature oracle. Native support is verified
 feature-by-feature; unsupported constructs must remain hard errors rather than
@@ -35,19 +131,17 @@ silently falling back to C.
 - [x] Backend-neutral ownership-explicit IR
 - [x] Cranelift scalar CFG, strings, primitive slices, and initial `[]string`
 - [x] Native/C differential fixtures and Guard Malloc/leak coverage
-- [x] Bundled runtime archive and Linux x86_64 package workflow
+- [x] Bundled runtime archive and Linux x86_64 package workflow seed
 - [x] Nested slices and nested owned aggregate layout/drop (shared IR)
 - [x] Complete structs, enums, maps, tuples, methods, `?`, match (incl. arm `return`)
 - [x] `defer`, labeled loops, match guards (shared IR + corpus)
 - [x] Native runtime interop via `runtime/native_bridge.c` (net/TLS/SQL/HTTP/SIP/…)
 - [x] `crew`, `kick`, `fan`, channels, and `select` (corpus green)
-- [x] Full `examples/testing` native correctness gate — **363/363** (2026-07-22)
+- [x] Full `examples/testing` native correctness gate — **367/367** (2026-07-22)
+- [x] Mut-self iterators · multi-stmt mut captures · const string index
 - [ ] LLVM release path: broad workload runtime ≤ C and ≤ Rust (slice/map/I/O/CPU/RSS)
-- [ ] Cross-compilation, WASM, static, sanitizer, and overflow build modes
+- [ ] Cross-compilation, WASM, static, sanitizer, and overflow build modes (or hard-error)
 - [ ] Full leak, latency, RSS, and binary-size gates in CI packaging
-
-Perf and packaging remain manual work. Language-feature residual fixes need a
-positive corpus fixture and an update to [docs/NATIVE_COMPILER_PLAN.md](NATIVE_COMPILER_PLAN.md).
 
 ### Soundness & runtime (SAFE / RT)
 

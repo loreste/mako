@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.4.5 — Unreleased (target)
+
+**Theme:** Native compiler product path — language gate complete; LLVM release
+perf + packaging + tag remaining. Integration branch: `native-compiler`.
+Full plan: [docs/ROADMAP.md](docs/ROADMAP.md) §0.4.5.
+
+### Native compiler
+
+- Shared ownership-explicit IR → Cranelift debug object path.
+- Full `examples/testing` native gate: **367/367** (0 failures).
+- Portable IO bridges: `file_seek`, `file_read_exact`, `file_append3`, `fdatasync`, `fallocate`.
+- Concurrent select: TLS select state; `recv_timeout` distinguishes `closed` vs `timeout`.
+- Language residual pack: mut-self `for` iterators; multi-stmt outer mut captures
+  (kick still ShareInt/Sync-only); const string index `s[i]`.
+
+### Still before tag
+
+- LLVM release path workload gates (slice/map/I/O/CPU/RSS) vs C/Rust.
+- Release tarballs, install smoke, deb/rpm seeds, Homebrew/winget SHAs.
+- CI: c + native matrix; fail-closed sanitizer/static/cross where unsupported.
+
 ## 0.4.1 — 2026-07-22
 
 ### Build
