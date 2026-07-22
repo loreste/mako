@@ -24,8 +24,9 @@ URL="$(grep -E 'InstallerUrl:' "$INST_FILE" | awk '{print $2}')"
 echo "  version: $VER"
 echo "  url:     $URL"
 if [[ -z "$SHA" || "$SHA" == REPLACE* ]]; then
-  echo "  sha256:  MISSING — run ./scripts/fill-release-packaging.sh v${VER}"
-  exit 1
+  echo "  sha256:  PENDING — Windows binary not yet uploaded; run ./scripts/fill-release-packaging.sh v${VER}"
+  echo "publish-winget: skip (sha256 pending)"
+  exit 0
 fi
 echo "  sha256:  $SHA"
 if command -v curl >/dev/null 2>&1; then
