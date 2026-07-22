@@ -152,6 +152,15 @@ jobs:
         env:
           MAKO_TEST_TIMEOUT_SECS: "90"
 
+      - name: Windows storage I/O
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          cargo run --quiet --release -- test examples/testing/storage_portable_io_test.mko
+          cargo run --quiet --release -- test examples/ci/windows_direct_io_test.mko
+        env:
+          MAKO_TEST_TIMEOUT_SECS: "90"
+
       - name: Init smoke
         shell: bash
         run: |

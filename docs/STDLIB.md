@@ -217,7 +217,9 @@ Low-level unbuffered file operations and memory-mapped files (`runtime/mako_dio.
 | `hindex_*` | open-addressing int→int hash index |
 | `store_*` | transactional KV (`begin` / `commit` / `rollback`; optional WAL; `store_recover_wal`) |
 
-Tests: `dio_test.mko`, `storage_wal_test.mko`, `store_index_test.mko`, `domain_tracks_test.mko`.  
+Tests: `dio_test.mko`, `storage_portable_io_test.mko`,
+`windows_direct_io_test.mko`, `storage_wal_test.mko`, `store_index_test.mko`,
+`domain_tracks_test.mko`.
 Header: `runtime/mako_dio.h`.
 
 ---

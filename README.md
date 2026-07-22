@@ -472,7 +472,7 @@ Dual spellings (`func`, `:=`, …) still parse for compatibility.
 - JPEG readable by standard viewers
 - Struct field reflection beyond schema registry
 - SMTP AUTH over TLS
-- Direct I/O and HTTP engine are POSIX-only for now
+- HTTP engine is POSIX-only for now
 
 Full list in [STATUS.md](docs/STATUS.md).
 
