@@ -22,7 +22,7 @@ tag cut; do not merge to `main` until release (or an explicit cut decision).
 | **0.3.0** | Cross-platform, CI green, ownership hardening | **Shipped** |
 | **0.4.0** | Performance — DCE, constant folding, runtime speed, lint | **Shipped** |
 | **0.4.1** | Windows/runtime/edge stability | **Shipped** (see CHANGELOG) |
-| **0.4.5** | Native compiler product path (language + release cut) | **In progress** — language gate done |
+| **0.4.5** | Native compiler product path (language + release cut) | **Tagged `v0.4.5`** — multi-OS assets via release workflow |
 | **0.5.0** | Native-first platform: default backend policy, CI green, dual-backend truth | **Planned** |
 | **0.5.1** | Toolchain & IDE depth (LSP, DAP/DWARF, doc/bench product) | **Planned** |
 | **0.5.2** | Runtime trust & production concurrency soaks | **Planned** |
@@ -127,7 +127,7 @@ Phase 4 — Post-tag (Homebrew/winget follow-through; then 0.5 / 1.0 planning)
 - [x] Release tarball + sha256 for host triple (`package-release.sh --slim`)  
 - [x] Install script smoke (macOS arm64 from local dist)  
 - [x] CHANGELOG **0.4.5** section  
-- [ ] GitHub tag `v0.4.5` + multi-OS artifacts (push tag → `release.yml`)  
+- [x] GitHub tag `v0.4.5` (multi-OS artifacts via `release.yml` on tag)  
 - [x] CI runs c + **native** tests on Linux/macOS  
 - [x] Docs numbers match tip  
 
