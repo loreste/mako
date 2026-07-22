@@ -3,7 +3,7 @@
 pack lib
 
 fn kv_path() -> string {
-    return "/tmp/mako_kv_engine.log"
+    return path_join(temp_dir(), "mako_kv_engine.log")
 }
 
 fn kv_reset() {
