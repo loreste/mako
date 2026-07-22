@@ -1903,6 +1903,21 @@ static inline MakoString mako_int_to_string(int64_t n) {
     return (MakoString){d, len};
 }
 
+/* Stack-based int-to-string for temporary use (no malloc). */
+static inline MakoString mako_int_to_stack_str(int64_t n, char *buf, size_t bufsz) {
+    int neg = 0;
+    uint64_t v;
+    if (n < 0) { neg = 1; v = (uint64_t)(-(n + 1)) + 1; }
+    else { v = (uint64_t)n; }
+    char *p = buf + bufsz - 1;
+    *p = 0;
+    if (v == 0) { *--p = '0'; }
+    else { while (v > 0) { *--p = '0' + (char)(v % 10); v /= 10; } }
+    if (neg) *--p = '-';
+    size_t len = (size_t)(buf + bufsz - 1 - p);
+    return (MakoString){p, len};
+}
+
 /* ---- String builder (growable buffer → string) ---- */
 typedef struct {
     char *data;

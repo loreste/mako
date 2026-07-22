@@ -12417,11 +12417,20 @@ let val_struct = if let Some((_, tag)) = parse_map_slice_val(&ty) {
                     }
                 }
                 if bty == "MakoMapSI*" {
-                    self.emit_line(format_args!("mako_map_si_set({b}, {i}, {v});"));
+                    // Use set_take when the key is a fresh allocation (avoids clone).
+                    if Self::expr_is_fresh_own(index) {
+                        self.emit_line(format_args!("mako_map_si_set_take({b}, {i}, {v});"));
+                    } else {
+                        self.emit_line(format_args!("mako_map_si_set({b}, {i}, {v});"));
+                    }
                 } else if bty == "MakoMapII*" {
                     self.emit_line(format_args!("mako_map_ii_set({b}, {i}, {v});"));
                 } else if bty == "MakoMapSS*" {
-                    self.emit_line(format_args!("mako_map_ss_set({b}, {i}, {v});"));
+                    if Self::expr_is_fresh_own(index) {
+                        self.emit_line(format_args!("mako_map_ss_set_take({b}, {i}, {v});"));
+                    } else {
+                        self.emit_line(format_args!("mako_map_ss_set({b}, {i}, {v});"));
+                    }
                 } else if bty == "MakoMapIF*" {
                     self.emit_line(format_args!("mako_map_if_set({b}, {i}, {v});"));
                 } else if bty == "MakoMapSF*" {
