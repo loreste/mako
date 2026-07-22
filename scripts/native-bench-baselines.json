@@ -34,8 +34,8 @@
     },
     "native_map": {
       "mako-c": 0.37,
-      "hand-c": 1.72,
-      "rust": 0.30
+      "hand-c": 1.70,
+      "rust": 0.25
     },
     "native_io": {
       "mako-c": 0.94,

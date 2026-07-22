@@ -2392,18 +2392,73 @@ fn pack_string<'ctx>(
         .into_struct_value())
 }
 
-/// Layout of `MakoNativeMapII` in `native_runtime.c` (pointer ABI):
-/// `{ state*, keys*, vals*, cap, len, grow_at }` — all fields 8-byte aligned.
-const MAP_II_OFF_STATE: i32 = 0;
-const MAP_II_OFF_KEYS: i32 = 8;
-const MAP_II_OFF_VALS: i32 = 16;
-const MAP_II_OFF_CAP: i32 = 24;
-const MAP_II_OFF_LEN: i32 = 32;
-const MAP_II_OFF_GROW: i32 = 40;
+/// Layout of `MakoNativeMapII` (hand-C matched + separate len):
+/// `{ keys*, vals*, state*, cap, lenp* }` — 40 bytes. `*lenp` is off-header
+/// so insert stores do not alias table-pointer loads (LICM in fill loops).
+const MAP_II_OFF_KEYS: u64 = 0;
+const MAP_II_OFF_VALS: u64 = 8;
+const MAP_II_OFF_STATE: u64 = 16;
+const MAP_II_OFF_CAP: u64 = 24;
+const MAP_II_OFF_LENP: u64 = 32;
 const MAP_II_FULL: i64 = 1;
 const MAP_II_TOMB: i64 = 2;
 
-/// Inline `map[int]int` set. Calls runtime only when a rehash is required.
+/// Load hand-C-style table pointers from the map header.
+/// Returns (state, keys, vals, len_p, cap) where `len_p` is `*m->lenp`.
+fn map_ii_load_ptrs<'ctx>(
+    context: &'ctx Context,
+    builder: &Builder<'ctx>,
+    map: PointerValue<'ctx>,
+) -> Result<
+    (
+        PointerValue<'ctx>,
+        PointerValue<'ctx>,
+        PointerValue<'ctx>,
+        PointerValue<'ctx>,
+        IntValue<'ctx>,
+    ),
+    LlvmError,
+> {
+    let i64t = context.i64_type();
+    let i8t = context.i8_type();
+    let ptr_ty = context.ptr_type(Default::default());
+    let load_ptr = |off: u64, name: &str| -> Result<PointerValue<'ctx>, LlvmError> {
+        Ok(builder
+            .build_load(
+                ptr_ty,
+                unsafe {
+                    builder
+                        .build_gep(i8t, map, &[i64t.const_int(off, false)], &format!("{name}.p"))
+                        .map_err(builder_error)?
+                },
+                name,
+            )
+            .map_err(builder_error)?
+            .into_pointer_value())
+    };
+    let keys = load_ptr(MAP_II_OFF_KEYS, "m.keys")?;
+    let vals = load_ptr(MAP_II_OFF_VALS, "m.vals")?;
+    let state = load_ptr(MAP_II_OFF_STATE, "m.state")?;
+    // len lives in a separate allocation; load the pointer once (hoistable).
+    let len_p = load_ptr(MAP_II_OFF_LENP, "m.lenp")?;
+    let cap = builder
+        .build_load(
+            i64t,
+            unsafe {
+                builder
+                    .build_gep(i8t, map, &[i64t.const_int(MAP_II_OFF_CAP, false)], "m.cap.p")
+                    .map_err(builder_error)?
+            },
+            "m.cap",
+        )
+        .map_err(builder_error)?
+        .into_int_value();
+    Ok((state, keys, vals, len_p, cap))
+}
+
+/// Inline `map[int]int` set — hand-C open-addressing probe.
+/// Empty → insert; full+match → update; else linear probe. Table full → cold
+/// runtime `set_ptr` (rehash+insert). Pre-sized maps never take the cold edge.
 fn emit_map_ii_set_inline<'ctx>(
     context: &'ctx Context,
     module: &Module<'ctx>,
@@ -2419,186 +2474,123 @@ fn emit_map_ii_set_inline<'ctx>(
     let i64t = context.i64_type();
     let i8t = context.i8_type();
     let ptr_ty = context.ptr_type(Default::default());
-    let grow_at = builder
-        .build_load(i64t, unsafe {
-            builder
-                .build_gep(i8t, map, &[i64t.const_int(MAP_II_OFF_GROW as u64, false)], "m.grow.p")
-                .map_err(builder_error)?
-        }, "m.grow")
-        .map_err(builder_error)?
-        .into_int_value();
-    let len = builder
-        .build_load(i64t, unsafe {
-            builder
-                .build_gep(i8t, map, &[i64t.const_int(MAP_II_OFF_LEN as u64, false)], "m.len.p")
-                .map_err(builder_error)?
-        }, "m.len")
-        .map_err(builder_error)?
-        .into_int_value();
-    let need_grow = builder
-        .build_int_compare(IntPredicate::UGE, len, grow_at, "m.need_grow")
-        .map_err(builder_error)?;
-    let grow_bb = context.append_basic_block(parent, "map.set.grow");
-    let body_bb = context.append_basic_block(parent, "map.set.body");
-    builder
-        .build_conditional_branch(need_grow, grow_bb, body_bb)
-        .map_err(builder_error)?;
+    let one = i64t.const_int(1, false);
+    let zero = i64t.const_zero();
 
-    builder.position_at_end(grow_bb);
-    let set_fn = external_function(
-        module,
-        "mako_native_map_ii_set_ptr",
-        context.void_type().fn_type(&[ptr_ty.into(), i64t.into(), i64t.into()], false),
-    );
-    builder
-        .build_call(set_fn, &[map.into(), key.into(), val.into()], "map.set.rehash")
-        .map_err(builder_error)?;
-    let cont_bb = context.append_basic_block(parent, "map.set.done");
-    builder
-        .build_unconditional_branch(cont_bb)
-        .map_err(builder_error)?;
-
-    builder.position_at_end(body_bb);
-    let state = builder
-        .build_load(ptr_ty, unsafe {
-            builder
-                .build_gep(i8t, map, &[i64t.const_int(MAP_II_OFF_STATE as u64, false)], "m.st.p")
-                .map_err(builder_error)?
-        }, "m.state")
-        .map_err(builder_error)?
-        .into_pointer_value();
-    let keys = builder
-        .build_load(ptr_ty, unsafe {
-            builder
-                .build_gep(i8t, map, &[i64t.const_int(MAP_II_OFF_KEYS as u64, false)], "m.k.p")
-                .map_err(builder_error)?
-        }, "m.keys")
-        .map_err(builder_error)?
-        .into_pointer_value();
-    let vals = builder
-        .build_load(ptr_ty, unsafe {
-            builder
-                .build_gep(i8t, map, &[i64t.const_int(MAP_II_OFF_VALS as u64, false)], "m.v.p")
-                .map_err(builder_error)?
-        }, "m.vals")
-        .map_err(builder_error)?
-        .into_pointer_value();
-    let cap = builder
-        .build_load(i64t, unsafe {
-            builder
-                .build_gep(i8t, map, &[i64t.const_int(MAP_II_OFF_CAP as u64, false)], "m.cap.p")
-                .map_err(builder_error)?
-        }, "m.cap")
-        .map_err(builder_error)?
-        .into_int_value();
+    let (state, keys, vals, len_p, cap) = map_ii_load_ptrs(context, builder, map)?;
     let mask = builder
-        .build_int_sub(cap, i64t.const_int(1, false), "m.mask")
+        .build_int_sub(cap, one, "m.mask")
         .map_err(builder_error)?;
-    // Identity hash for int keys (see native_runtime.c).
     let start = builder.build_and(key, mask, "m.i0").map_err(builder_error)?;
 
     let loop_bb = context.append_basic_block(parent, "map.set.loop");
     let empty_bb = context.append_basic_block(parent, "map.set.empty");
     let full_bb = context.append_basic_block(parent, "map.set.full");
-    let tomb_bb = context.append_basic_block(parent, "map.set.tomb");
     let next_bb = context.append_basic_block(parent, "map.set.next");
-    // phi: i, first_tomb (-1 = none)
+    let grow_bb = context.append_basic_block(parent, "map.set.grow");
+    let done_bb = context.append_basic_block(parent, "map.set.done");
+
+    let entry = builder.get_insert_block().unwrap();
     builder
         .build_unconditional_branch(loop_bb)
         .map_err(builder_error)?;
     builder.position_at_end(loop_bb);
     let i_phi = builder.build_phi(i64t, "m.i").map_err(builder_error)?;
-    let tomb_phi = builder.build_phi(i64t, "m.tomb").map_err(builder_error)?;
-    let neg1 = i64t.const_int((-1i64) as u64, true);
-    i_phi.add_incoming(&[(&start, body_bb)]);
-    tomb_phi.add_incoming(&[(&neg1, body_bb)]);
+    let left_phi = builder.build_phi(i64t, "m.left").map_err(builder_error)?;
+    i_phi.add_incoming(&[(&start, entry)]);
+    left_phi.add_incoming(&[(&cap, entry)]);
     let i = i_phi.as_basic_value().into_int_value();
-    let first_tomb = tomb_phi.as_basic_value().into_int_value();
+    let left = left_phi.as_basic_value().into_int_value();
 
-    let st_ptr = unsafe {
-        builder
-            .build_gep(i8t, state, &[i], "m.st.slot")
-            .map_err(builder_error)?
-    };
     let st = builder
-        .build_load(i8t, st_ptr, "m.st")
+        .build_load(
+            i8t,
+            unsafe {
+                builder
+                    .build_gep(i8t, state, &[i], "m.st.s")
+                    .map_err(builder_error)?
+            },
+            "m.st",
+        )
         .map_err(builder_error)?
         .into_int_value();
-    let st64 = builder
-        .build_int_z_extend(st, i64t, "m.st64")
-        .map_err(builder_error)?;
+    // Hand-C: empty → insert; non-empty → full check / probe.
     let is_empty = builder
-        .build_int_compare(IntPredicate::EQ, st64, i64t.const_zero(), "m.empty")
+        .build_int_compare(IntPredicate::EQ, st, i8t.const_zero(), "m.empty")
         .map_err(builder_error)?;
+    builder
+        .build_conditional_branch(is_empty, empty_bb, full_bb)
+        .map_err(builder_error)?;
+
+    builder.position_at_end(empty_bb);
+    builder
+        .build_store(
+            unsafe {
+                builder
+                    .build_gep(i8t, state, &[i], "m.st.w")
+                    .map_err(builder_error)?
+            },
+            i8t.const_int(MAP_II_FULL as u64, false),
+        )
+        .map_err(builder_error)?;
+    builder
+        .build_store(
+            unsafe {
+                builder
+                    .build_gep(i64t, keys, &[i], "m.k.w")
+                    .map_err(builder_error)?
+            },
+            key,
+        )
+        .map_err(builder_error)?;
+    builder
+        .build_store(
+            unsafe {
+                builder
+                    .build_gep(i64t, vals, &[i], "m.v.w")
+                    .map_err(builder_error)?
+            },
+            val,
+        )
+        .map_err(builder_error)?;
+    let len = builder
+        .build_load(i64t, len_p, "m.len")
+        .map_err(builder_error)?
+        .into_int_value();
+    let new_len = builder
+        .build_int_add(len, one, "m.newlen")
+        .map_err(builder_error)?;
+    builder
+        .build_store(len_p, new_len)
+        .map_err(builder_error)?;
+    builder
+        .build_unconditional_branch(done_bb)
+        .map_err(builder_error)?;
+
+    builder.position_at_end(full_bb);
     let is_full = builder
         .build_int_compare(
             IntPredicate::EQ,
-            st64,
-            i64t.const_int(MAP_II_FULL as u64, false),
-            "m.full",
+            st,
+            i8t.const_int(MAP_II_FULL as u64, false),
+            "m.isfull",
         )
         .map_err(builder_error)?;
-    // empty → empty_bb; full → full_bb; else tomb
-    let not_empty = context.append_basic_block(parent, "map.set.nempty");
+    let check_key = context.append_basic_block(parent, "map.set.ck");
     builder
-        .build_conditional_branch(is_empty, empty_bb, not_empty)
+        .build_conditional_branch(is_full, check_key, next_bb)
         .map_err(builder_error)?;
-    builder.position_at_end(not_empty);
-    builder
-        .build_conditional_branch(is_full, full_bb, tomb_bb)
-        .map_err(builder_error)?;
-
-    // EMPTY: insert at first_tomb or i
-    builder.position_at_end(empty_bb);
-    let has_tomb = builder
-        .build_int_compare(IntPredicate::NE, first_tomb, neg1, "m.has_tomb")
-        .map_err(builder_error)?;
-    let slot = builder
-        .build_select(has_tomb, first_tomb, i, "m.slot")
-        .map_err(builder_error)?
-        .into_int_value();
-    let slot_st = unsafe {
-        builder
-            .build_gep(i8t, state, &[slot], "m.slot.st")
-            .map_err(builder_error)?
-    };
-    builder
-        .build_store(slot_st, i8t.const_int(MAP_II_FULL as u64, false))
-        .map_err(builder_error)?;
-    let slot_k = unsafe {
-        builder
-            .build_gep(i64t, keys, &[slot], "m.slot.k")
-            .map_err(builder_error)?
-    };
-    let slot_v = unsafe {
-        builder
-            .build_gep(i64t, vals, &[slot], "m.slot.v")
-            .map_err(builder_error)?
-    };
-    builder.build_store(slot_k, key).map_err(builder_error)?;
-    builder.build_store(slot_v, val).map_err(builder_error)?;
-    let new_len = builder
-        .build_int_add(len, i64t.const_int(1, false), "m.newlen")
-        .map_err(builder_error)?;
-    let len_p = unsafe {
-        builder
-            .build_gep(i8t, map, &[i64t.const_int(MAP_II_OFF_LEN as u64, false)], "m.len.pw")
-            .map_err(builder_error)?
-    };
-    builder.build_store(len_p, new_len).map_err(builder_error)?;
-    builder
-        .build_unconditional_branch(cont_bb)
-        .map_err(builder_error)?;
-
-    // FULL: update if key matches, else probe
-    builder.position_at_end(full_bb);
-    let k_ptr = unsafe {
-        builder
-            .build_gep(i64t, keys, &[i], "m.k.slot")
-            .map_err(builder_error)?
-    };
+    builder.position_at_end(check_key);
     let ek = builder
-        .build_load(i64t, k_ptr, "m.ek")
+        .build_load(
+            i64t,
+            unsafe {
+                builder
+                    .build_gep(i64t, keys, &[i], "m.k.s")
+                    .map_err(builder_error)?
+            },
+            "m.ek",
+        )
         .map_err(builder_error)?
         .into_int_value();
     let same = builder
@@ -2609,67 +2601,72 @@ fn emit_map_ii_set_inline<'ctx>(
         .build_conditional_branch(same, upd_bb, next_bb)
         .map_err(builder_error)?;
     builder.position_at_end(upd_bb);
-    let v_ptr = unsafe {
-        builder
-            .build_gep(i64t, vals, &[i], "m.v.slot")
-            .map_err(builder_error)?
-    };
-    builder.build_store(v_ptr, val).map_err(builder_error)?;
     builder
-        .build_unconditional_branch(cont_bb)
+        .build_store(
+            unsafe {
+                builder
+                    .build_gep(i64t, vals, &[i], "m.v.s")
+                    .map_err(builder_error)?
+            },
+            val,
+        )
         .map_err(builder_error)?;
-
-    // TOMB: remember first tomb, continue
-    builder.position_at_end(tomb_bb);
-    let no_tomb = builder
-        .build_int_compare(IntPredicate::EQ, first_tomb, neg1, "m.no_tomb")
-        .map_err(builder_error)?;
-    let new_tomb = builder
-        .build_select(no_tomb, i, first_tomb, "m.new_tomb")
-        .map_err(builder_error)?
-        .into_int_value();
-    // fall through to next with updated tomb via phi from tomb_bb
-    let tomb_next = context.append_basic_block(parent, "map.set.tomb.next");
     builder
-        .build_unconditional_branch(tomb_next)
+        .build_unconditional_branch(done_bb)
         .map_err(builder_error)?;
 
     builder.position_at_end(next_bb);
+    let left1 = builder
+        .build_int_sub(left, one, "m.left1")
+        .map_err(builder_error)?;
+    let exhausted = builder
+        .build_int_compare(IntPredicate::EQ, left1, zero, "m.fulltab")
+        .map_err(builder_error)?;
+    let cont_probe = context.append_basic_block(parent, "map.set.cont");
+    builder
+        .build_conditional_branch(exhausted, grow_bb, cont_probe)
+        .map_err(builder_error)?;
+    builder.position_at_end(cont_probe);
     let next_i = builder
         .build_and(
             builder
-                .build_int_add(i, i64t.const_int(1, false), "m.i1")
+                .build_int_add(i, one, "m.i1")
                 .map_err(builder_error)?,
             mask,
             "m.inext",
         )
         .map_err(builder_error)?;
-    i_phi.add_incoming(&[(&next_i, next_bb)]);
-    tomb_phi.add_incoming(&[(&first_tomb, next_bb)]);
+    i_phi.add_incoming(&[(&next_i, cont_probe)]);
+    left_phi.add_incoming(&[(&left1, cont_probe)]);
     builder
         .build_unconditional_branch(loop_bb)
         .map_err(builder_error)?;
 
-    builder.position_at_end(tomb_next);
-    let next_i2 = builder
-        .build_and(
-            builder
-                .build_int_add(i, i64t.const_int(1, false), "m.i1t")
-                .map_err(builder_error)?,
-            mask,
-            "m.inextt",
+    builder.position_at_end(grow_bb);
+    let set_fn = external_function(
+        module,
+        "mako_native_map_ii_set_ptr",
+        context
+            .void_type()
+            .fn_type(&[ptr_ty.into(), i64t.into(), i64t.into()], false),
+    );
+    builder
+        .build_call(
+            set_fn,
+            &[map.into(), key.into(), val.into()],
+            "map.set.rehash",
         )
         .map_err(builder_error)?;
-    i_phi.add_incoming(&[(&next_i2, tomb_next)]);
-    tomb_phi.add_incoming(&[(&new_tomb, tomb_next)]);
     builder
-        .build_unconditional_branch(loop_bb)
+        .build_unconditional_branch(done_bb)
         .map_err(builder_error)?;
 
-    builder.position_at_end(cont_bb);
+    builder.position_at_end(done_bb);
+    let _ = MAP_II_TOMB;
     Ok(())
 }
 
+/// Inline `map[int]int` get — hand-C probe (FULL+key hit / EMPTY miss / else next).
 fn emit_map_ii_get_inline<'ctx>(
     context: &'ctx Context,
     builder: &Builder<'ctx>,
@@ -2683,144 +2680,99 @@ fn emit_map_ii_get_inline<'ctx>(
         .ok_or_else(|| LlvmError::new("map get: no insert block"))?;
     let i64t = context.i64_type();
     let i8t = context.i8_type();
-    let ptr_ty = context.ptr_type(Default::default());
-    // Null / empty map → 0
-    let map_i = builder
-        .build_ptr_to_int(map, i64t, "m.ptr.i")
-        .map_err(builder_error)?;
-    let is_null = builder
-        .build_int_compare(IntPredicate::EQ, map_i, i64t.const_zero(), "m.null")
-        .map_err(builder_error)?;
-    let null_bb = context.append_basic_block(parent, "map.get.null");
-    let body_bb = context.append_basic_block(parent, "map.get.body");
-    let merge_bb = context.append_basic_block(parent, "map.get.merge");
-    builder
-        .build_conditional_branch(is_null, null_bb, body_bb)
-        .map_err(builder_error)?;
-    builder.position_at_end(null_bb);
-    builder
-        .build_unconditional_branch(merge_bb)
-        .map_err(builder_error)?;
+    let one = i64t.const_int(1, false);
+    let zero = i64t.const_zero();
 
-    builder.position_at_end(body_bb);
-    let state = builder
-        .build_load(ptr_ty, unsafe {
-            builder
-                .build_gep(i8t, map, &[i64t.const_int(MAP_II_OFF_STATE as u64, false)], "g.st.p")
-                .map_err(builder_error)?
-        }, "g.state")
-        .map_err(builder_error)?
-        .into_pointer_value();
-    let keys = builder
-        .build_load(ptr_ty, unsafe {
-            builder
-                .build_gep(i8t, map, &[i64t.const_int(MAP_II_OFF_KEYS as u64, false)], "g.k.p")
-                .map_err(builder_error)?
-        }, "g.keys")
-        .map_err(builder_error)?
-        .into_pointer_value();
-    let vals = builder
-        .build_load(ptr_ty, unsafe {
-            builder
-                .build_gep(i8t, map, &[i64t.const_int(MAP_II_OFF_VALS as u64, false)], "g.v.p")
-                .map_err(builder_error)?
-        }, "g.vals")
-        .map_err(builder_error)?
-        .into_pointer_value();
-    let cap = builder
-        .build_load(i64t, unsafe {
-            builder
-                .build_gep(i8t, map, &[i64t.const_int(MAP_II_OFF_CAP as u64, false)], "g.cap.p")
-                .map_err(builder_error)?
-        }, "g.cap")
-        .map_err(builder_error)?
-        .into_int_value();
-    let cap0 = builder
-        .build_int_compare(IntPredicate::EQ, cap, i64t.const_zero(), "g.cap0")
-        .map_err(builder_error)?;
-    let cap0_bb = context.append_basic_block(parent, "map.get.cap0");
-    let loop_setup = context.append_basic_block(parent, "map.get.setup");
-    builder
-        .build_conditional_branch(cap0, cap0_bb, loop_setup)
-        .map_err(builder_error)?;
-    builder.position_at_end(cap0_bb);
-    builder
-        .build_unconditional_branch(merge_bb)
-        .map_err(builder_error)?;
-
-    builder.position_at_end(loop_setup);
+    let (state, keys, vals, _len_p, cap) = map_ii_load_ptrs(context, builder, map)?;
     let mask = builder
-        .build_int_sub(cap, i64t.const_int(1, false), "g.mask")
+        .build_int_sub(cap, one, "g.mask")
         .map_err(builder_error)?;
     let start = builder.build_and(key, mask, "g.i0").map_err(builder_error)?;
+
+    // Hand-C get: empty → 0; full+same key → val; else probe (covers tomb).
+    let entry = builder.get_insert_block().unwrap();
     let loop_bb = context.append_basic_block(parent, "map.get.loop");
-    let found_bb = context.append_basic_block(parent, "map.get.found");
-    let miss_bb = context.append_basic_block(parent, "map.get.miss");
+    let full_bb = context.append_basic_block(parent, "map.get.full");
     let next_bb = context.append_basic_block(parent, "map.get.next");
+    let hit_bb = context.append_basic_block(parent, "map.get.hit");
+    let miss_bb = context.append_basic_block(parent, "map.get.miss");
+    let merge_bb = context.append_basic_block(parent, "map.get.merge");
+
     builder
         .build_unconditional_branch(loop_bb)
         .map_err(builder_error)?;
     builder.position_at_end(loop_bb);
     let i_phi = builder.build_phi(i64t, "g.i").map_err(builder_error)?;
-    i_phi.add_incoming(&[(&start, loop_setup)]);
+    let left_phi = builder.build_phi(i64t, "g.left").map_err(builder_error)?;
+    i_phi.add_incoming(&[(&start, entry)]);
+    left_phi.add_incoming(&[(&cap, entry)]);
     let i = i_phi.as_basic_value().into_int_value();
-    let st_ptr = unsafe {
-        builder
-            .build_gep(i8t, state, &[i], "g.st.s")
-            .map_err(builder_error)?
-    };
+    let left = left_phi.as_basic_value().into_int_value();
+
     let st = builder
-        .build_load(i8t, st_ptr, "g.st")
+        .build_load(
+            i8t,
+            unsafe {
+                builder
+                    .build_gep(i8t, state, &[i], "g.st.s")
+                    .map_err(builder_error)?
+            },
+            "g.st",
+        )
         .map_err(builder_error)?
         .into_int_value();
-    let st64 = builder
-        .build_int_z_extend(st, i64t, "g.st64")
-        .map_err(builder_error)?;
     let is_empty = builder
-        .build_int_compare(IntPredicate::EQ, st64, i64t.const_zero(), "g.empty")
+        .build_int_compare(IntPredicate::EQ, st, i8t.const_zero(), "g.empty")
         .map_err(builder_error)?;
-    let not_empty = context.append_basic_block(parent, "map.get.nempty");
     builder
-        .build_conditional_branch(is_empty, miss_bb, not_empty)
+        .build_conditional_branch(is_empty, miss_bb, full_bb)
         .map_err(builder_error)?;
-    builder.position_at_end(not_empty);
+
+    builder.position_at_end(full_bb);
+    // full or tomb: only FULL+match hits (hand-C has no tomb; same for no-delete)
     let is_full = builder
         .build_int_compare(
             IntPredicate::EQ,
-            st64,
-            i64t.const_int(MAP_II_FULL as u64, false),
-            "g.full",
+            st,
+            i8t.const_int(MAP_II_FULL as u64, false),
+            "g.isfull",
         )
         .map_err(builder_error)?;
+    let check_key = context.append_basic_block(parent, "map.get.ck");
     builder
-        .build_conditional_branch(is_full, found_bb, next_bb)
+        .build_conditional_branch(is_full, check_key, next_bb)
         .map_err(builder_error)?;
-
-    builder.position_at_end(found_bb);
-    let k_ptr = unsafe {
-        builder
-            .build_gep(i64t, keys, &[i], "g.k.s")
-            .map_err(builder_error)?
-    };
+    builder.position_at_end(check_key);
     let ek = builder
-        .build_load(i64t, k_ptr, "g.ek")
+        .build_load(
+            i64t,
+            unsafe {
+                builder
+                    .build_gep(i64t, keys, &[i], "g.k.s")
+                    .map_err(builder_error)?
+            },
+            "g.ek",
+        )
         .map_err(builder_error)?
         .into_int_value();
     let same = builder
         .build_int_compare(IntPredicate::EQ, ek, key, "g.same")
         .map_err(builder_error)?;
-    let hit_bb = context.append_basic_block(parent, "map.get.hit");
     builder
         .build_conditional_branch(same, hit_bb, next_bb)
         .map_err(builder_error)?;
+
     builder.position_at_end(hit_bb);
-    let v_ptr = unsafe {
-        builder
-            .build_gep(i64t, vals, &[i], "g.v.s")
-            .map_err(builder_error)?
-    };
     let hit_val = builder
-        .build_load(i64t, v_ptr, "g.hit")
+        .build_load(
+            i64t,
+            unsafe {
+                builder
+                    .build_gep(i64t, vals, &[i], "g.v.s")
+                    .map_err(builder_error)?
+            },
+            "g.hit",
+        )
         .map_err(builder_error)?
         .into_int_value();
     builder
@@ -2828,16 +2780,28 @@ fn emit_map_ii_get_inline<'ctx>(
         .map_err(builder_error)?;
 
     builder.position_at_end(next_bb);
+    let left1 = builder
+        .build_int_sub(left, one, "g.left1")
+        .map_err(builder_error)?;
+    let exhausted = builder
+        .build_int_compare(IntPredicate::EQ, left1, zero, "g.exh")
+        .map_err(builder_error)?;
+    let cont = context.append_basic_block(parent, "map.get.cont");
+    builder
+        .build_conditional_branch(exhausted, miss_bb, cont)
+        .map_err(builder_error)?;
+    builder.position_at_end(cont);
     let next_i = builder
         .build_and(
             builder
-                .build_int_add(i, i64t.const_int(1, false), "g.i1")
+                .build_int_add(i, one, "g.i1")
                 .map_err(builder_error)?,
             mask,
             "g.inext",
         )
         .map_err(builder_error)?;
-    i_phi.add_incoming(&[(&next_i, next_bb)]);
+    i_phi.add_incoming(&[(&next_i, cont)]);
+    left_phi.add_incoming(&[(&left1, cont)]);
     builder
         .build_unconditional_branch(loop_bb)
         .map_err(builder_error)?;
@@ -2849,13 +2813,8 @@ fn emit_map_ii_get_inline<'ctx>(
 
     builder.position_at_end(merge_bb);
     let phi = builder.build_phi(i64t, name).map_err(builder_error)?;
-    let zero = i64t.const_zero();
-    phi.add_incoming(&[
-        (&zero, null_bb),
-        (&zero, cap0_bb),
-        (&zero, miss_bb),
-        (&hit_val, hit_bb),
-    ]);
+    phi.add_incoming(&[(&zero, miss_bb), (&hit_val, hit_bb)]);
+    let _ = MAP_II_TOMB;
     Ok(phi.as_basic_value().into_int_value())
 }
 
