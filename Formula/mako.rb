@@ -15,9 +15,9 @@ class Mako < Formula
   desc "Mako — systems/backend language (.mko → native via C)"
   homepage "https://github.com/loreste/mako"
   # After tagging v0.1.5: ./scripts/fill-release-packaging.sh v0.1.5
-  # sha256 filled after tag by scripts/fill-release-packaging.sh v0.4.0
-  url "https://github.com/loreste/mako/archive/refs/tags/v0.4.0.tar.gz"
-  sha256 "0cb4d2c89394f649c56c8ed133939bf56ebd10f6b76f7d1e6f603e8b01e61821"
+  # sha256 filled after tag by scripts/fill-release-packaging.sh v0.4.1
+  url "https://github.com/loreste/mako/archive/refs/tags/v0.4.1.tar.gz"
+  sha256 "8075e1094cb73a332b8b9c74f3525c4ea8db2e1ffb3897fd992be8b83d03d02c"
   license "MIT"
   head "https://github.com/loreste/mako.git", branch: "main"
 
@@ -54,7 +54,7 @@ class Mako < Formula
   end
 
   test do
-    assert_match "mako0.4.0", shell_output("#{bin}/mako --version")
+    assert_match "mako0.4.1", shell_output("#{bin}/mako --version")
     (testpath/"hello.mko").write <<~EOS
       fn main() {
           print("ok")
