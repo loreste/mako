@@ -306,7 +306,7 @@ config/log updates. Tests: `examples/testing/fs_storage_test.mko`.
 
 | Function | Signature | Description |
 |----------|-----------|-------------|
-| `file_open` | `file_open(path: string, mode: int, flags: int) -> int` | Open fd; always `O_CLOEXEC` when available |
+| `file_open` | `file_open(path: string, mode: int, flags: int) -> int` | Open a non-inheritable file descriptor |
 | `file_close` | `file_close(fd: int) -> int` | Close a file descriptor |
 | `pread` | `pread(fd: int, count: int, offset: int) -> string` | Read count bytes at offset without seeking |
 | `pwrite` | `pwrite(fd: int, data: string, offset: int) -> int` | Write data at offset without seeking |
@@ -321,8 +321,11 @@ config/log updates. Tests: `examples/testing/fs_storage_test.mko`.
 | `file_read_exact` | `file_read_exact(fd: int, count: int) -> string` | Read exactly count bytes from current position |
 
 `file_open` **mode**: `0`=RO, `1`=WO, `2`=RW.  
-**flags** bits: `1`=create, `2`=truncate, `4`=append, `8`=dsync, `16`=direct,
-`32`=exclusive create (`O_EXCL`).
+**flags** bits: `1`=create, `2`=truncate, `4`=append, `8`=dsync/write-through,
+`16`=direct/unbuffered, `32`=exclusive create. These operations, memory maps,
+and WAL files are supported on Windows, Linux, and macOS. Direct mode retains
+the operating system's size and offset alignment requirements. Windows aligns
+ordinary Mako string buffers before issuing unbuffered reads and writes.
 
 ---
 
@@ -330,7 +333,7 @@ config/log updates. Tests: `examples/testing/fs_storage_test.mko`.
 
 | Function | Signature | Description |
 |----------|-----------|-------------|
-| `mmap_open` | `mmap_open(path: string, size: int) -> MMap` | Open an existing file as a memory-mapped region |
+| `mmap_open` | `mmap_open(path: string, mode: int) -> MMap` | Open an existing file as a memory-mapped region |
 | `mmap_create` | `mmap_create(path: string, size: int) -> MMap` | Create a new memory-mapped file |
 | `mmap_read` | `mmap_read(m: MMap, offset: int, len: int) -> string` | Read bytes from a mapped region |
 | `mmap_write` | `mmap_write(m: MMap, offset: int, data: string) -> int` | Write bytes to a mapped region |
@@ -377,7 +380,8 @@ config/log updates. Tests: `examples/testing/fs_storage_test.mko`.
 | `rollback_new` / `rollback_push` / `rollback_get` / `rollback_restore_slot0` / `rollback_free` | … | Frame rollback ring |
 | `simd_dot_i64_4` / `simd_sum_i64_4` | … | Portable 4-wide seed |
 
-Tests: `storage_wal_test`, `store_index_test`, `storage_depth_test`, `domain_tracks_test`.  
+Tests: `storage_portable_io_test`, `windows_direct_io_test`, `storage_wal_test`,
+`store_index_test`, `storage_depth_test`, `domain_tracks_test`.
 **Not in scope:** SIPREC / WebRTC.
 
 ---

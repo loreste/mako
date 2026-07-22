@@ -13,6 +13,9 @@
 ### Runtime
 
 - Preserve task return values when joining native Windows worker threads.
+- Support file-descriptor I/O, memory maps, and write-ahead logs on Windows.
+- Align unbuffered Windows reads and writes without requiring aligned Mako strings.
+- Reject writes through read-only memory maps instead of faulting.
 
 ### Performance
 
