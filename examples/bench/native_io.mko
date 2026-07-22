@@ -1,0 +1,28 @@
+// Direct-native file write/read checksum (output-stable for gate cmp).
+// Uses a fixed path under /tmp so all backends see the same syscall shape.
+
+fn io_checksum(rounds: int, chunk: int) -> int {
+    let path = "/tmp/mako_native_io_bench.dat"
+    // Build a deterministic payload of length `chunk` (ASCII digits cycle).
+    var payload = ""
+    var i = 0
+    while i < chunk {
+        payload = payload + "x"
+        i = i + 1
+    }
+    var r = 0
+    var acc = 0
+    while r < rounds {
+        let w = write_file(path, payload)
+        acc = acc + w
+        let s = read_file(path)
+        acc = acc + len(s)
+        r = r + 1
+    }
+    return acc
+}
+
+fn main() {
+    // 50 rounds × 4096 bytes — enough to exercise write/read without dominating wall time.
+    print_int(io_checksum(50, 4096))
+}

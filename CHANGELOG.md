@@ -1,6 +1,22 @@
 # Changelog
 
-## 0.4.7 — 2026-07-22 (tip; tag when packaging cut)
+## 0.4.8 — 2026-07-22 (tip; tag when packaging cut)
+
+**Theme:** Map + I/O native bench workloads and regression budget.
+
+### Bench
+
+- New fixtures: `examples/bench/native_map.{mko,c,rs}` (100k `map[int]int`
+  set+sum) and `native_io.{mko,c,rs}` (50×4KiB write_file/read_file).
+- `scripts/native-bench-gate.sh` includes map/io by default; override with
+  `MAKO_NATIVE_WORKLOADS`.
+- `scripts/native-bench-baselines.json` — recorded ratios + per-workload
+  absolute limits; fail if current ratio exceeds recorded ×
+  `MAKO_NATIVE_REGRESSION` (default **1.15**).
+- Honest residual bars: map ≤ **2.50×**, io ≤ **2.00×** vs hand C/Rust;
+  core workloads remain ≤ **1.25×**. Map ≈ **1.0×** mako-c; io ≈ **0.95×** mako-c.
+
+## 0.4.7 — 2026-07-22
 
 **Theme:** Modes truth table — fail closed on native/LLVM.  
 **Depends on:** 0.4.6 residual work in tree.

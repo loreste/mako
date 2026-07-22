@@ -95,9 +95,22 @@ if "$mako_bin" build --help 2>/dev/null | grep -q 'llvm'; then
 fi
 echo "native bench: release runtime backend=$native_backend"
 
-workloads=(native_parity native_fib native_slice native_string_slice)
+# Core suite + 0.4.8 map/I/O workloads. Override with MAKO_NATIVE_WORKLOADS="a b".
+if [[ -n "${MAKO_NATIVE_WORKLOADS:-}" ]]; then
+  # shellcheck disable=SC2206
+  workloads=($MAKO_NATIVE_WORKLOADS)
+else
+  workloads=(
+    native_parity native_fib native_slice native_string_slice
+    native_map native_io
+  )
+fi
 for workload in "${workloads[@]}"; do
   source_mako="$repo_dir/examples/bench/$workload.mko"
+  if [[ ! -f "$source_mako" ]]; then
+    echo "native bench: missing $source_mako" >&2
+    exit 2
+  fi
   "$mako_bin" build "$source_mako" --release --backend "$native_backend" --no-incremental \
     -o "$out_dir/$workload-native"
   "$mako_bin" build "$source_mako" --release --backend c --no-incremental \
@@ -119,16 +132,23 @@ for workload in "${workloads[@]}"; do
   done
 done
 
+baseline_file="${MAKO_NATIVE_BASELINES:-$repo_dir/scripts/native-bench-baselines.json}"
+# Max allowed growth of (native/baseline) vs recorded ratio (1.15 = 15% worse).
+max_regression="${MAKO_NATIVE_REGRESSION:-1.15}"
+
 set +e
 python3 - "$samples" "$warmups" "$max_ratio" "$max_compile_ratio" \
   "$max_compiler_rss_ratio" "$max_runtime_rss_ratio" "$max_binary_ratio" \
-  "$mako_bin" "$repo_dir" "$out_dir" "${workloads[@]}" <<'PY'
+  "$mako_bin" "$repo_dir" "$out_dir" "$baseline_file" "$max_regression" \
+  "${workloads[@]}" <<'PY'
 import os
 import resource
 import statistics
 import subprocess
 import sys
 import time
+
+import json
 
 samples = int(sys.argv[1])
 warmups = int(sys.argv[2])
@@ -140,8 +160,19 @@ binary_limit = float(sys.argv[7])
 mako = sys.argv[8]
 repo = sys.argv[9]
 out_dir = sys.argv[10]
-workloads = sys.argv[11:]
+baseline_file = sys.argv[11]
+max_regression = float(sys.argv[12])
+workloads = sys.argv[13:]
 names = ["mako-native", "mako-c", "hand-c", "rust"]
+
+baselines = {}
+if os.path.isfile(baseline_file):
+    with open(baseline_file, encoding="utf-8") as fh:
+        baselines = json.load(fh)
+    print(f"native bench: regression baselines from {baseline_file} "
+          f"(max growth {max_regression:.2f}× recorded ratio)")
+else:
+    print(f"native bench: no baselines file at {baseline_file} — skip regression check")
 
 def run_measured(path):
     start = time.perf_counter_ns()
@@ -182,11 +213,32 @@ for workload in workloads:
               f"min={min(values_ms):.3f}ms max={max(values_ms):.3f}ms "
                      f"max-rss={statistics.median(runtime_rss[name]):.0f} "
                      f"cpu-ms={statistics.median(cpu_time[name]) / 1_000_000:.3f} n={samples}")
+    # Per-workload absolute ratio (e.g. residual map vs hand-C) from baselines
+    # file; falls back to the global limit (default 1.25×).
+    wl_limit = float(
+        baselines.get("limits", {}).get(workload, {}).get("max_ratio", limit)
+    )
     for baseline in names[1:]:
         ratio = medians["mako-native"] / medians[baseline]
         print(f"native bench {workload} ratio vs {baseline}: "
-              f"{ratio:.3f}x (max {limit:.3f}x)")
-        failed |= ratio > limit
+              f"{ratio:.3f}x (max {wl_limit:.3f}x)")
+        failed |= ratio > wl_limit
+        # Regression budget vs recorded ratio (0.4.8+).
+        rec = (
+            baselines.get("ratios", {})
+            .get(workload, {})
+            .get(baseline)
+        )
+        if rec is not None and rec > 0:
+            ceiling = float(rec) * max_regression
+            print(f"native bench {workload} regression vs {baseline}: "
+                  f"{ratio:.3f}x (recorded {float(rec):.3f}x · "
+                  f"ceiling {ceiling:.3f}x)")
+            if ratio > ceiling:
+                print(f"native bench {workload}: FAILED regression budget "
+                      f"vs {baseline}")
+                failed = True
+    # Slice fill RSS only (map/string allocate more by design).
     if workload == "native_slice":
         native_rss = statistics.median(runtime_rss["mako-native"])
         for baseline in names[1:]:
