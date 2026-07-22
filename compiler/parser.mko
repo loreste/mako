@@ -1,0 +1,227 @@
+// Compact structural parser for the self-hosted frontend.
+//
+// This first parser layer records top-level declarations and their body spans.
+// Expression/type nodes will be stored in separate flat arenas so parsing and
+// later parallel function compilation do not require recursive heap objects.
+
+const ITEM_FN = 1
+const ITEM_STRUCT = 2
+const ITEM_ENUM = 3
+const ITEM_ACTOR = 4
+const ITEM_INTERFACE = 5
+const ITEM_EXTERN = 6
+const ITEM_CONST = 7
+const ITEM_ON = 8
+const ITEM_PACKAGE = 9
+const ITEM_IMPORT = 10
+
+struct TopItem {
+    kind: int
+    token_start: int
+    token_end: int
+    name_start: int
+    name_end: int
+    body_start: int
+    body_end: int
+    exported: bool
+}
+
+struct ParseResult {
+    items: []TopItem
+    token_count: int
+    ok: bool
+    error: string
+    error_line: int
+    error_col: int
+}
+
+fn token_text(source: string, token: Token) -> string {
+    return source[token.start:token.end]
+}
+
+fn parse_error(items: []TopItem, token: Token, message: string) -> ParseResult {
+    return ParseResult {
+        items: items,
+        token_count: 0,
+        ok: false,
+        error: message,
+        error_line: token.line,
+        error_col: token.col,
+    }
+}
+
+fn matching_close(open: int) -> int {
+    if open == TK_LPAREN { return TK_RPAREN }
+    if open == TK_LBRACE { return TK_RBRACE }
+    if open == TK_LBRACKET { return TK_RBRACKET }
+    return -1
+}
+
+fn find_matching(tokens: []Token, open_index: int) -> int {
+    if open_index < 0 or open_index >= len(tokens) { return -1 }
+    let open = tokens[open_index].kind
+    let close = matching_close(open)
+    if close < 0 { return -1 }
+    let mut depth = 1
+    let mut i = open_index + 1
+    while i < len(tokens) {
+        if tokens[i].kind == open { depth = depth + 1 }
+        if tokens[i].kind == close {
+            depth = depth - 1
+            if depth == 0 { return i }
+        }
+        i = i + 1
+    }
+    return -1
+}
+
+fn find_kind(tokens: []Token, start: int, kind: int) -> int {
+    let mut i = start
+    while i < len(tokens) and tokens[i].kind != TK_EOF {
+        if tokens[i].kind == kind { return i }
+        i = i + 1
+    }
+    return -1
+}
+
+fn end_of_line(tokens: []Token, start: int) -> int {
+    let line = tokens[start].line
+    let mut i = start + 1
+    while i < len(tokens) and tokens[i].kind != TK_EOF and tokens[i].line == line {
+        i = i + 1
+    }
+    return i
+}
+
+fn append_item(
+    items: []TopItem,
+    kind: int,
+    token_start: int,
+    token_end: int,
+    name: Token,
+    body_start: int,
+    body_end: int,
+    exported: bool
+) -> []TopItem {
+    return append(items, TopItem {
+        kind: kind,
+        token_start: token_start,
+        token_end: token_end,
+        name_start: name.start,
+        name_end: name.end,
+        body_start: body_start,
+        body_end: body_end,
+        exported: exported,
+    })
+}
+
+fn parse_structure(source: string, tokens: []Token) -> ParseResult {
+    let token_count = len(tokens)
+    let mut items: []TopItem = []
+    let mut i = 0
+    while i < len(tokens) and tokens[i].kind != TK_EOF {
+        // Compiler attributes: #[stable], #[deprecated(...)], #[derive(...)].
+        while tokens[i].kind == TK_HASH {
+            if i + 1 >= len(tokens) or tokens[i + 1].kind != TK_LBRACKET {
+                return parse_error(items, tokens[i], "expected `[` after `#`")
+            }
+            let attr_end = find_matching(tokens, i + 1)
+            if attr_end < 0 {
+                return parse_error(items, tokens[i], "unterminated compiler attribute")
+            }
+            i = attr_end + 1
+        }
+
+        let item_start = i
+        let mut exported = false
+        if tokens[i].kind == TK_EXPORT {
+            exported = true
+            i = i + 1
+            if i >= len(tokens) { return parse_error(items, tokens[item_start], "expected declaration after export") }
+        }
+
+        let word = token_text(source, tokens[i])
+        if tokens[i].kind == TK_PACKAGE or (tokens[i].kind == TK_IDENT and word == "pack") {
+            if i + 1 >= len(tokens) or tokens[i + 1].kind != TK_IDENT {
+                return parse_error(items, tokens[i], "expected package name")
+            }
+            let stop = end_of_line(tokens, i)
+            items = append_item(items, ITEM_PACKAGE, item_start, stop, tokens[i + 1], -1, -1, exported)
+            i = stop
+            continue
+        }
+
+        if tokens[i].kind == TK_IMPORT or (tokens[i].kind == TK_IDENT and word == "pull") {
+            let mut stop = end_of_line(tokens, i)
+            if i + 1 < len(tokens) and (tokens[i + 1].kind == TK_LPAREN or tokens[i + 1].kind == TK_LBRACE) {
+                let group_end = find_matching(tokens, i + 1)
+                if group_end < 0 { return parse_error(items, tokens[i], "unterminated import group") }
+                stop = group_end + 1
+            }
+            let empty_name = Token { kind: TK_IDENT, start: tokens[i].end, end: tokens[i].end, line: tokens[i].line, col: tokens[i].col }
+            items = append_item(items, ITEM_IMPORT, item_start, stop, empty_name, -1, -1, exported)
+            i = stop
+            continue
+        }
+
+        let mut kind = -1
+        let mut name_index = i + 1
+        if tokens[i].kind == TK_FN or tokens[i].kind == TK_FUNC { kind = ITEM_FN }
+        if tokens[i].kind == TK_STRUCT { kind = ITEM_STRUCT }
+        if tokens[i].kind == TK_ENUM { kind = ITEM_ENUM }
+        if tokens[i].kind == TK_ACTOR { kind = ITEM_ACTOR }
+        if tokens[i].kind == TK_INTERFACE { kind = ITEM_INTERFACE }
+        if tokens[i].kind == TK_EXTERN { kind = ITEM_EXTERN }
+        if tokens[i].kind == TK_CONST { kind = ITEM_CONST }
+        if tokens[i].kind == TK_ON { kind = ITEM_ON }
+
+        // Go-compatible `type Name struct/enum`.
+        if tokens[i].kind == TK_TYPE {
+            if i + 2 >= len(tokens) or tokens[i + 1].kind != TK_IDENT {
+                return parse_error(items, tokens[i], "expected name after type")
+            }
+            name_index = i + 1
+            if tokens[i + 2].kind == TK_STRUCT { kind = ITEM_STRUCT }
+            if tokens[i + 2].kind == TK_ENUM { kind = ITEM_ENUM }
+        }
+
+        // `const fn` is a function declaration, not a value constant.
+        if tokens[i].kind == TK_CONST and i + 1 < len(tokens) and (tokens[i + 1].kind == TK_FN or tokens[i + 1].kind == TK_FUNC) {
+            kind = ITEM_FN
+            name_index = i + 2
+        }
+
+        if kind < 0 {
+            return parse_error(items, tokens[i], "expected top-level declaration")
+        }
+        if name_index >= len(tokens) or tokens[name_index].kind != TK_IDENT {
+            return parse_error(items, tokens[i], "expected declaration name")
+        }
+
+        if kind == ITEM_CONST {
+            let stop = end_of_line(tokens, i)
+            items = append_item(items, kind, item_start, stop, tokens[name_index], -1, -1, exported)
+            i = stop
+            continue
+        }
+
+        let body_open = find_kind(tokens, name_index + 1, TK_LBRACE)
+        if body_open < 0 {
+            // `extern C fn name(...) -> T` declarations have no body.
+            if kind == ITEM_EXTERN {
+                let stop = end_of_line(tokens, i)
+                items = append_item(items, kind, item_start, stop, tokens[name_index], -1, -1, exported)
+                i = stop
+                continue
+            }
+            return parse_error(items, tokens[i], "expected declaration body")
+        }
+        let body_close = find_matching(tokens, body_open)
+        if body_close < 0 {
+            return parse_error(items, tokens[body_open], "unterminated declaration body")
+        }
+        items = append_item(items, kind, item_start, body_close + 1, tokens[name_index], body_open + 1, body_close, exported)
+        i = body_close + 1
+    }
+    return ParseResult { items: items, token_count: token_count, ok: true, error: "", error_line: 0, error_col: 0 }
+}

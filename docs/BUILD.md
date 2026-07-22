@@ -1,8 +1,8 @@
-# Mako incremental builds
+# Mako builds (v0.4.5)
 
 Mako compiles packages to **cached native objects** under `.mako/cache/` (or `$MAKO_CACHE`), then links. Unchanged units skip `clang -c`.
 
-**Product tip:** **0.4.0**. Generic monomorphs and channel ptr helpers participate
+**Product tip:** **0.4.5**. Generic monomorphs and channel ptr helpers participate
 in unit fingerprints like any other generated C.
 
 ## Layout
@@ -44,7 +44,20 @@ Independent object units compile in parallel (owned jobs + channels — no share
 | Final binary | `clang`/`ld` link of `.o`s + libs |
 | wasm / `--emit-c` / `--sanitize` / cross `--target` | Monolithic `build_c` path |
 
-There is no full LLVM/cranelift backend yet; C remains the IR.
+## Native backend
+
+Use `--backend native` for the ownership-explicit Cranelift backend:
+
+```bash
+mako build app.mko --backend native -o app
+mako run app.mko --backend native
+```
+
+Native builds emit machine-code objects directly and do not generate C. The
+backend currently supports scalar CFG, owned strings, typed primitive slices,
+and selected aggregate operations. Unsupported constructs are hard errors;
+there is no silent fallback to the C backend. Release LLVM support is available
+for the shared scalar/string/`[]int` subset and is being expanded incrementally.
 
 ## Memory safety of the cache
 

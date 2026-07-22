@@ -1,0 +1,110 @@
+// Attach the currently supported Pratt expressions to flat statement nodes.
+// An `expr_root` of -1 is deliberate: the statement span remains available
+// while richer literals/control expressions are brought up incrementally.
+
+struct ExprAttach {
+    statements: []StmtNode
+    expressions: []ExprNode
+    attached: int
+}
+
+fn clone_attached_statements(statements: []StmtNode) -> []StmtNode {
+    let mut out = make([]StmtNode, 0, len(statements))
+    let mut i = 0
+    while i < len(statements) {
+        out = append(out, statements[i])
+        i = i + 1
+    }
+    return out
+}
+
+fn trim_statement_end(tokens: []Token, start: int, end: int) -> int {
+    let mut out = end
+    while out > start and tokens[out - 1].kind == TK_SEMICOLON {
+        out = out - 1
+    }
+    return out
+}
+
+fn find_value_operator(tokens: []Token, start: int, end: int) -> int {
+    let mut parens = 0
+    let mut brackets = 0
+    let mut braces = 0
+    let mut i = start
+    while i < end {
+        let kind = tokens[i].kind
+        if kind == TK_LPAREN { parens = parens + 1 }
+        if kind == TK_RPAREN { parens = parens - 1 }
+        if kind == TK_LBRACKET { brackets = brackets + 1 }
+        if kind == TK_RBRACKET { brackets = brackets - 1 }
+        if kind == TK_LBRACE { braces = braces + 1 }
+        if kind == TK_RBRACE { braces = braces - 1 }
+        if parens == 0 and brackets == 0 and braces == 0 and (
+            kind == TK_ASSIGN or kind == TK_COLON_ASSIGN or kind == TK_PLUS_EQ or
+            kind == TK_MINUS_EQ or kind == TK_STAR_EQ or kind == TK_SLASH_EQ or
+            kind == TK_PERCENT_EQ
+        ) { return i }
+        i = i + 1
+    }
+    return -1
+}
+
+fn statement_expression_bounds(tokens: []Token, statement: StmtNode) -> []int {
+    let start = statement.token_start
+    let end = trim_statement_end(tokens, start, statement.token_end)
+    if statement.kind == STMT_RETURN {
+        if start + 1 < end { return [start + 1, end] }
+        return []
+    }
+    if statement.kind == STMT_IF or statement.kind == STMT_WHILE {
+        let open = find_statement_brace(tokens, start + 1, end)
+        if open > start + 1 { return [start + 1, open] }
+        return []
+    }
+    if statement.kind == STMT_LET or statement.kind == STMT_EXPR {
+        let operator = find_value_operator(tokens, start, end)
+        if operator >= 0 and operator + 1 < end { return [operator + 1, end] }
+        if statement.kind == STMT_EXPR and start < end { return [start, end] }
+    }
+    return []
+}
+
+fn attach_statement_expressions(source: string, tokens: []Token, statements: []StmtNode, expressions: []ExprNode) -> ExprAttach {
+    let mut out_statements = clone_attached_statements(statements)
+    let mut out_expressions = clone_expr_nodes(expressions)
+    let mut attached = 0
+    let mut i = 0
+    while i < len(out_statements) {
+        let bounds = statement_expression_bounds(tokens, out_statements[i])
+        if len(bounds) == 2 {
+            let parsed = if bounds[1] == bounds[0] + 1 {
+                parse_atom(source, tokens, bounds[0], out_expressions)
+            } else {
+                parse_expression(source, tokens, bounds[0], out_expressions, 0)
+            }
+            if parsed.ok and parsed.next == bounds[1] {
+                out_expressions = clone_expr_nodes(parsed.nodes)
+                let mut statement = out_statements[i]
+                statement.expr_root = parsed.root
+                out_statements[i] = statement
+                attached = attached + 1
+            }
+        }
+        i = i + 1
+    }
+    return ExprAttach { statements: out_statements, expressions: out_expressions, attached: attached }
+}
+
+fn expression_attachment_smoke_test() -> bool {
+    let source = "fn demo(n: int) -> int {\nlet x = n + 1\nwhile x > 0 { x = x - 1 }\nreturn x\n}"
+    let lexed = lex_source(source)
+    if not lexed.ok { return false }
+    let open = find_kind(lexed.tokens, 0, TK_LBRACE)
+    if open < 0 { return false }
+    let close = find_matching(lexed.tokens, open)
+    if close < 0 { return false }
+    let body = parse_statement_block(lexed.tokens, open + 1, close, make([]StmtNode, 0, 8), make([]int, 0, 8))
+    if not body.ok { return false }
+    let attached = attach_statement_expressions(source, lexed.tokens, body.nodes, make([]ExprNode, 0, 16))
+    return attached.attached == 4 and len(attached.expressions) == 10
+}

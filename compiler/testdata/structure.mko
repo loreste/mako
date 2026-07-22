@@ -1,0 +1,39 @@
+pack sample
+
+pull "fmt"
+
+#[stable]
+export struct Point {
+    x: int
+    y: int
+}
+
+enum Choice {
+    None
+    Some(int)
+}
+
+interface Addable {
+    fn add(int) -> int
+}
+
+actor Counter {
+    receive Inc(delta) {}
+}
+
+const ANSWER = 42
+
+const fn twice(n: int) -> int {
+    return n * 2
+}
+
+on Point {
+    fn sum(self) -> int {
+        return self.x + self.y
+    }
+}
+
+fn main() {
+    let p = Point { x: ANSWER, y: twice(1) }
+    print_int(p.sum())
+}

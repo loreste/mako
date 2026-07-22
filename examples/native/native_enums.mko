@@ -1,0 +1,35 @@
+// Native backend: user enums with scalar (int) payloads + `match`.
+// Exercises variant construction (nullary and payload), by-value enum
+// parameters, and `match` as an expression with payload binding. The enum is a
+// heap block `[tag, payload...]` reusing the struct ownership machinery.
+// Differentially validated against the C backend.
+
+enum Shape {
+    Circle(int),
+    Rect(int, int),
+    Point,
+}
+
+fn describe(s: Shape) -> int {
+    return match s {
+        Circle(r) => r * r,
+        Rect(w, h) => w * h,
+        Point => 0,
+    }
+}
+
+fn classify(s: Shape) -> int {
+    return match s {
+        Point => 1,
+        _ => 0,
+    }
+}
+
+fn main() {
+    print_int(describe(Circle(5)))
+    print_int(describe(Rect(3, 4)))
+    print_int(describe(Point))
+
+    print_int(classify(Point))
+    print_int(classify(Circle(9)))
+}

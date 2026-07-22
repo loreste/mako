@@ -109,8 +109,8 @@ fn main() {
 | Generic structs / enums | Done — write `Pair[int] { … }` |
 | Nested monomorphs | Done — e.g. `Box[Pair[int]]` |
 | Interface bounds `T: I` | Done — structural method set |
-| Iterator `for` via `next` | Seed — by-value `self` does not auto-advance |
-| Mutable lambda captures | Seed — heap cell when body assigns outer locals |
+| Iterator `for` via `next` | Done — prefer `fn next(mut self) -> Option[T]`; `for v in it` advances in place |
+| Mutable lambda captures | Done — multi-stmt outer `let mut` via heap cells; kick still requires ShareInt/Sync |
 
 Full grammar: [LANGUAGE_SPEC.md](../LANGUAGE_SPEC.md) · tour: [GUIDE.md](GUIDE.md) §6 ·
 book: [ch03](book/src/ch03-language-tour.md#generics-019).
@@ -152,9 +152,9 @@ const N = clamp(50, 0, 10)  // 10
 Supported in const: `+ - * / %` bitwise, comparisons, `&&` `||` `!`, `let` /
 `assign`, `return`, `if`/`else`, `if`-expressions, **`match` on ints** (`|`, `_`,
 bind), **bounded `while` / `for`**, **C-style `for`**, bare **`break` /
-`continue`**, **string seeds** (`const S = "…"`, `+`, `str_len` / `==`), and
-**`const fn` string params/returns** (plus int fns that use string locals).
-Not a full CTFE interpreter.
+`continue`**, **string seeds** (`const S = "…"`, `+`, `str_len` / `==`,
+**`s[i]` byte index**), and **`const fn` string params/returns** (plus int fns
+that use string locals). Not a full CTFE interpreter.
 
 ## Actors
 

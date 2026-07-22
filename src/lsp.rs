@@ -510,9 +510,7 @@ fn build_param_info(label: &str) -> String {
         if let Some(pos) = label[offset..].find(p.as_str()) {
             let abs_start = offset + pos;
             let abs_end = abs_start + p.len();
-            items.push(format!(
-                r#"{{"label":[{abs_start},{abs_end}]}}"#
-            ));
+            items.push(format!(r#"{{"label":[{abs_start},{abs_end}]}}"#));
             offset = abs_end;
             // Skip the comma separator
             if i < params.len() - 1 {

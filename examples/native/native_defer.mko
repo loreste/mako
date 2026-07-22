@@ -1,0 +1,6 @@
+// defer runs LIFO on function exit (before return). Differentially vs C.
+fn main() {
+    defer print("second")
+    defer print("first")
+    print("body")
+}

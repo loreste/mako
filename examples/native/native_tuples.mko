@@ -1,0 +1,32 @@
+// Native backend: scalar tuples (anonymous positional aggregates).
+// Exercises tuple literals, tuple types in signatures, by-value tuple
+// parameters and returns, multi-return destructuring (`let a, b = ...`), and
+// mixed scalar element kinds. Differentially validated against the C backend.
+
+fn swap(a: int, b: int) -> (int, int) {
+    return (b, a)
+}
+
+fn sum2(p: (int, int)) -> int {
+    let x, y = p
+    return x + y
+}
+
+fn main() {
+    let t = (3, 4)
+    let a, b = t
+    print_int(a)
+    print_int(b)
+
+    let s = swap(10, 20)
+    let c, d = s
+    print_int(c)
+    print_int(d)
+
+    let flag = (7, true)
+    let n, ok = flag
+    print_int(n)
+    print(ok)
+
+    print_int(sum2((5, 6)))
+}

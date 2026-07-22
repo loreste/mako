@@ -113,7 +113,10 @@ pub fn stmts_always_diverges(stmts: &[Stmt]) -> bool {
             // `if init; cond` desugar's `if true { … }` scope stays transparent).
             match const_bool(cond) {
                 Some(true) => block_always_diverges(then_block),
-                Some(false) => else_block.as_ref().map(block_always_diverges).unwrap_or(false),
+                Some(false) => else_block
+                    .as_ref()
+                    .map(block_always_diverges)
+                    .unwrap_or(false),
                 None => {
                     let then_d = block_always_diverges(then_block);
                     match else_block {

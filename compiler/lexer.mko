@@ -1,0 +1,390 @@
+// Stage-1 self-hosted compiler lexer.
+//
+// Tokens keep byte spans into the source instead of allocating a string for
+// every identifier/literal. The parser decodes payloads only when needed.
+
+const TK_EOF = 0
+const TK_IDENT = 1
+const TK_INT = 2
+const TK_FLOAT = 3
+const TK_STRING = 4
+const TK_FSTRING = 5
+
+const TK_FN = 10
+const TK_LET = 11
+const TK_MUT = 12
+const TK_IF = 13
+const TK_ELSE = 14
+const TK_WHILE = 15
+const TK_FOR = 16
+const TK_IN = 17
+const TK_RANGE = 18
+const TK_BREAK = 19
+const TK_CONTINUE = 20
+const TK_FALLTHROUGH = 21
+const TK_RETURN = 22
+const TK_DEFER = 23
+const TK_TRUE = 24
+const TK_FALSE = 25
+const TK_STRUCT = 26
+const TK_ENUM = 27
+const TK_MATCH = 28
+const TK_CREW = 29
+const TK_KICK = 30
+const TK_JOIN = 31
+const TK_FAN = 32
+const TK_ARENA = 33
+const TK_ACTOR = 34
+const TK_RECEIVE = 35
+const TK_INTERFACE = 36
+const TK_EXTERN = 37
+const TK_HOLD = 38
+const TK_SHARE = 39
+const TK_UNSAFE = 40
+const TK_AS = 41
+const TK_SELECT = 42
+const TK_TIMEOUT = 43
+const TK_DEFAULT = 44
+const TK_CONST = 45
+const TK_IMPORT = 46
+const TK_AND = 47
+const TK_OR = 48
+const TK_NOT = 49
+const TK_EXPORT = 50
+const TK_ON = 51
+const TK_FUNC = 52
+const TK_VAR = 53
+const TK_PACKAGE = 54
+const TK_TYPE = 55
+
+const TK_LPAREN = 100
+const TK_RPAREN = 101
+const TK_LBRACE = 102
+const TK_RBRACE = 103
+const TK_LBRACKET = 104
+const TK_RBRACKET = 105
+const TK_COMMA = 106
+const TK_COLON = 107
+const TK_COLON_ASSIGN = 108
+const TK_SEMICOLON = 109
+const TK_DOT = 110
+const TK_DOT_DOT = 111
+const TK_ARROW = 112
+const TK_FAT_ARROW = 113
+const TK_ASSIGN = 114
+const TK_QUESTION = 115
+const TK_PIPE = 116
+const TK_PIPE_PIPE = 117
+const TK_AMP = 118
+const TK_AMP_AMP = 119
+const TK_CARET = 120
+const TK_AMP_CARET = 121
+const TK_SHL = 122
+const TK_SHR = 123
+const TK_PLUS = 124
+const TK_MINUS = 125
+const TK_STAR = 126
+const TK_SLASH = 127
+const TK_PERCENT = 128
+const TK_PLUS_EQ = 129
+const TK_MINUS_EQ = 130
+const TK_STAR_EQ = 131
+const TK_SLASH_EQ = 132
+const TK_PERCENT_EQ = 133
+const TK_PLUS_PLUS = 134
+const TK_MINUS_MINUS = 135
+const TK_EQ_EQ = 136
+const TK_BANG_EQ = 137
+const TK_LT = 138
+const TK_LE = 139
+const TK_GT = 140
+const TK_GE = 141
+const TK_BANG = 142
+const TK_HASH = 143
+
+struct Token {
+    kind: int
+    start: int
+    end: int
+    line: int
+    col: int
+}
+
+struct LexResult {
+    tokens: []Token
+    ok: bool
+    error: string
+    error_line: int
+    error_col: int
+}
+
+fn is_space(c: int) -> bool {
+    return c == 32 or c == 9 or c == 10 or c == 13
+}
+
+fn is_digit(c: int) -> bool {
+    return c >= 48 and c <= 57
+}
+
+fn is_alpha(c: int) -> bool {
+    return (c >= 65 and c <= 90) or (c >= 97 and c <= 122) or c == 95
+}
+
+fn is_ident_continue(c: int) -> bool {
+    return is_alpha(c) or is_digit(c)
+}
+
+fn keyword_kind(s: string) -> int {
+    if s == "fn" { return TK_FN }
+    if s == "func" { return TK_FUNC }
+    if s == "let" { return TK_LET }
+    if s == "var" { return TK_VAR }
+    if s == "mut" { return TK_MUT }
+    if s == "if" { return TK_IF }
+    if s == "else" { return TK_ELSE }
+    if s == "while" { return TK_WHILE }
+    if s == "for" { return TK_FOR }
+    if s == "in" { return TK_IN }
+    if s == "range" { return TK_RANGE }
+    if s == "break" { return TK_BREAK }
+    if s == "continue" { return TK_CONTINUE }
+    if s == "fallthrough" { return TK_FALLTHROUGH }
+    if s == "return" { return TK_RETURN }
+    if s == "defer" { return TK_DEFER }
+    if s == "true" { return TK_TRUE }
+    if s == "false" { return TK_FALSE }
+    if s == "struct" { return TK_STRUCT }
+    if s == "enum" { return TK_ENUM }
+    if s == "match" { return TK_MATCH }
+    if s == "crew" { return TK_CREW }
+    if s == "kick" { return TK_KICK }
+    if s == "join" { return TK_JOIN }
+    if s == "fan" { return TK_FAN }
+    if s == "arena" { return TK_ARENA }
+    if s == "actor" { return TK_ACTOR }
+    if s == "receive" { return TK_RECEIVE }
+    if s == "interface" { return TK_INTERFACE }
+    if s == "extern" { return TK_EXTERN }
+    if s == "hold" { return TK_HOLD }
+    if s == "share" { return TK_SHARE }
+    if s == "unsafe" { return TK_UNSAFE }
+    if s == "as" { return TK_AS }
+    if s == "select" { return TK_SELECT }
+    if s == "timeout" { return TK_TIMEOUT }
+    if s == "default" { return TK_DEFAULT }
+    if s == "const" { return TK_CONST }
+    if s == "import" { return TK_IMPORT }
+    if s == "and" { return TK_AND }
+    if s == "or" { return TK_OR }
+    if s == "not" { return TK_NOT }
+    if s == "export" { return TK_EXPORT }
+    if s == "on" { return TK_ON }
+    if s == "package" { return TK_PACKAGE }
+    if s == "type" { return TK_TYPE }
+    return TK_IDENT
+}
+
+fn token1(c: int) -> int {
+    if c == 40 { return TK_LPAREN }
+    if c == 41 { return TK_RPAREN }
+    if c == 123 { return TK_LBRACE }
+    if c == 125 { return TK_RBRACE }
+    if c == 91 { return TK_LBRACKET }
+    if c == 93 { return TK_RBRACKET }
+    if c == 44 { return TK_COMMA }
+    if c == 59 { return TK_SEMICOLON }
+    if c == 63 { return TK_QUESTION }
+    if c == 35 { return TK_HASH }
+    return -1
+}
+
+fn operator_width(c: int, next: int, kind: int, source: string, pos: int, n: int) -> int {
+    if kind == TK_DOT_DOT and pos + 2 < n and str_byte_at(source, pos + 2) == 46 { return 3 }
+    if next == 61 { return 2 }
+    if c == 46 and next == 46 { return 2 }
+    if c == 43 and next == 43 { return 2 }
+    if c == 45 and next == 45 { return 2 }
+    if c == 45 and next == 62 { return 2 }
+    if c == 60 and next == 60 { return 2 }
+    if c == 62 and next == 62 { return 2 }
+    if c == 124 and next == 124 { return 2 }
+    if c == 38 and next == 38 { return 2 }
+    if c == 38 and next == 94 { return 2 }
+    return 1
+}
+
+fn lex_source(source: string) -> LexResult {
+    let mut tokens: []Token = []
+    let mut pos = 0
+    let mut line = 1
+    let mut col = 1
+    let n = str_len(source)
+
+    while pos < n {
+        let c = str_byte_at(source, pos)
+        if is_space(c) {
+            pos = pos + 1
+            if c == 10 {
+                line = line + 1
+                col = 1
+            } else {
+                col = col + 1
+            }
+            continue
+        }
+        if c == 47 and pos + 1 < n and str_byte_at(source, pos + 1) == 47 {
+            while pos < n and str_byte_at(source, pos) != 10 {
+                pos = pos + 1
+                col = col + 1
+            }
+            continue
+        }
+        if c == 47 and pos + 1 < n and str_byte_at(source, pos + 1) == 42 {
+            pos = pos + 2
+            col = col + 2
+            while pos < n {
+                let d = str_byte_at(source, pos)
+                if d == 42 and pos + 1 < n and str_byte_at(source, pos + 1) == 47 {
+                    pos = pos + 2
+                    col = col + 2
+                    break
+                }
+                pos = pos + 1
+                if d == 10 {
+                    line = line + 1
+                    col = 1
+                } else {
+                    col = col + 1
+                }
+            }
+            continue
+        }
+
+        let start = pos
+        let start_line = line
+        let start_col = col
+
+        if is_alpha(c) {
+            if (c == 102 or c == 70) and pos + 1 < n and str_byte_at(source, pos + 1) == 34 {
+                pos = pos + 2
+                col = col + 2
+                let mut escaped = false
+                while pos < n {
+                    let d = str_byte_at(source, pos)
+                    pos = pos + 1
+                    col = col + 1
+                    if escaped {
+                        escaped = false
+                    } else if d == 92 {
+                        escaped = true
+                    } else if d == 34 {
+                        tokens = append(tokens, Token { kind: TK_FSTRING, start: start, end: pos, line: start_line, col: start_col })
+                        break
+                    } else if d == 10 {
+                        line = line + 1
+                        col = 1
+                    }
+                }
+                if pos >= n and str_byte_at(source, pos - 1) != 34 {
+                    return LexResult { tokens: tokens, ok: false, error: "unterminated interpolated string", error_line: start_line, error_col: start_col }
+                }
+                continue
+            }
+            pos = pos + 1
+            col = col + 1
+            while pos < n and is_ident_continue(str_byte_at(source, pos)) {
+                pos = pos + 1
+                col = col + 1
+            }
+            let word = source[start:pos]
+            if word == "async" or word == "await" {
+                return LexResult { tokens: tokens, ok: false, error: "colored async/await is not part of Mako", error_line: start_line, error_col: start_col }
+            }
+            tokens = append(tokens, Token { kind: keyword_kind(word), start: start, end: pos, line: start_line, col: start_col })
+            continue
+        }
+
+        if is_digit(c) {
+            pos = pos + 1
+            col = col + 1
+            while pos < n and is_digit(str_byte_at(source, pos)) {
+                pos = pos + 1
+                col = col + 1
+            }
+            let mut kind = TK_INT
+            if pos + 1 < n and str_byte_at(source, pos) == 46 and is_digit(str_byte_at(source, pos + 1)) {
+                kind = TK_FLOAT
+                pos = pos + 1
+                col = col + 1
+                while pos < n and is_digit(str_byte_at(source, pos)) {
+                    pos = pos + 1
+                    col = col + 1
+                }
+            }
+            tokens = append(tokens, Token { kind: kind, start: start, end: pos, line: start_line, col: start_col })
+            continue
+        }
+
+        if c == 34 {
+            pos = pos + 1
+            col = col + 1
+            let mut escaped = false
+            let mut closed = false
+            while pos < n {
+                let d = str_byte_at(source, pos)
+                pos = pos + 1
+                col = col + 1
+                if escaped {
+                    escaped = false
+                } else if d == 92 {
+                    escaped = true
+                } else if d == 34 {
+                    closed = true
+                    break
+                } else if d == 10 {
+                    line = line + 1
+                    col = 1
+                }
+            }
+            if not closed {
+                return LexResult { tokens: tokens, ok: false, error: "unterminated string", error_line: start_line, error_col: start_col }
+            }
+            tokens = append(tokens, Token { kind: TK_STRING, start: start, end: pos, line: start_line, col: start_col })
+            continue
+        }
+
+        let one = token1(c)
+        if one >= 0 {
+            pos = pos + 1
+            col = col + 1
+            tokens = append(tokens, Token { kind: one, start: start, end: pos, line: start_line, col: start_col })
+            continue
+        }
+
+        let mut kind = -1
+        let next = if pos + 1 < n { str_byte_at(source, pos + 1) } else { -1 }
+        if c == 58 { kind = if next == 61 { TK_COLON_ASSIGN } else { TK_COLON } }
+        if c == 46 { kind = if next == 46 { TK_DOT_DOT } else { TK_DOT } }
+        if c == 43 { kind = if next == 61 { TK_PLUS_EQ } else if next == 43 { TK_PLUS_PLUS } else { TK_PLUS } }
+        if c == 45 { kind = if next == 62 { TK_ARROW } else if next == 61 { TK_MINUS_EQ } else if next == 45 { TK_MINUS_MINUS } else { TK_MINUS } }
+        if c == 42 { kind = if next == 61 { TK_STAR_EQ } else { TK_STAR } }
+        if c == 47 { kind = if next == 61 { TK_SLASH_EQ } else { TK_SLASH } }
+        if c == 37 { kind = if next == 61 { TK_PERCENT_EQ } else { TK_PERCENT } }
+        if c == 61 { kind = if next == 61 { TK_EQ_EQ } else if next == 62 { TK_FAT_ARROW } else { TK_ASSIGN } }
+        if c == 33 { kind = if next == 61 { TK_BANG_EQ } else { TK_BANG } }
+        if c == 60 { kind = if next == 60 { TK_SHL } else if next == 61 { TK_LE } else { TK_LT } }
+        if c == 62 { kind = if next == 62 { TK_SHR } else if next == 61 { TK_GE } else { TK_GT } }
+        if c == 124 { kind = if next == 124 { TK_PIPE_PIPE } else { TK_PIPE } }
+        if c == 38 { kind = if next == 38 { TK_AMP_AMP } else if next == 94 { TK_AMP_CARET } else { TK_AMP } }
+        if c == 94 { kind = TK_CARET }
+        if kind < 0 {
+            return LexResult { tokens: tokens, ok: false, error: "unexpected byte " + format_int(c), error_line: start_line, error_col: start_col }
+        }
+        let width = operator_width(c, next, kind, source, pos, n)
+        pos = pos + width
+        col = col + width
+        tokens = append(tokens, Token { kind: kind, start: start, end: pos, line: start_line, col: start_col })
+    }
+    tokens = append(tokens, Token { kind: TK_EOF, start: n, end: n, line: line, col: col })
+    return LexResult { tokens: tokens, ok: true, error: "", error_line: 0, error_col: 0 }
+}

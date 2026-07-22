@@ -617,7 +617,10 @@ impl TypeChecker {
         );
         fns.insert(
             "str_at_eq".into(),
-            Type::Fn(vec![Type::String, Type::Int, Type::String], Box::new(Type::Int)),
+            Type::Fn(
+                vec![Type::String, Type::Int, Type::String],
+                Box::new(Type::Int),
+            ),
         );
         fns.insert(
             "str_byte_at".into(),
@@ -728,7 +731,10 @@ impl TypeChecker {
         fns.insert("uuid_ns_dns".into(), Type::Fn(vec![], Box::new(Type::Uuid)));
         fns.insert("uuid_ns_url".into(), Type::Fn(vec![], Box::new(Type::Uuid)));
         fns.insert("uuid_ns_oid".into(), Type::Fn(vec![], Box::new(Type::Uuid)));
-        fns.insert("uuid_ns_x500".into(), Type::Fn(vec![], Box::new(Type::Uuid)));
+        fns.insert(
+            "uuid_ns_x500".into(),
+            Type::Fn(vec![], Box::new(Type::Uuid)),
+        );
         fns.insert(
             "uuid_string".into(),
             Type::Fn(vec![Type::Uuid], Box::new(Type::String)),
@@ -883,7 +889,10 @@ impl TypeChecker {
         fns.insert("mono_us".into(), Type::Fn(vec![], Box::new(Type::Int)));
         fns.insert("mono_ms".into(), Type::Fn(vec![], Box::new(Type::Int)));
         fns.insert("mono_res_ns".into(), Type::Fn(vec![], Box::new(Type::Int)));
-        fns.insert("mono_overhead_ns".into(), Type::Fn(vec![], Box::new(Type::Int)));
+        fns.insert(
+            "mono_overhead_ns".into(),
+            Type::Fn(vec![], Box::new(Type::Int)),
+        );
         fns.insert(
             "elapsed_ns".into(),
             Type::Fn(vec![Type::Int], Box::new(Type::Int)),
@@ -1360,10 +1369,7 @@ impl TypeChecker {
             "time_since_ms",
             "time_until_ms",
         ] {
-            fns.insert(
-                name.into(),
-                Type::Fn(vec![Type::Int], Box::new(Type::Int)),
-            );
+            fns.insert(name.into(), Type::Fn(vec![Type::Int], Box::new(Type::Int)));
         }
         fns.insert(
             "time_date".into(),
@@ -1435,10 +1441,7 @@ impl TypeChecker {
             "duration_to_minutes",
             "duration_to_hours",
         ] {
-            fns.insert(
-                name.into(),
-                Type::Fn(vec![Type::Int], Box::new(Type::Int)),
-            );
+            fns.insert(name.into(), Type::Fn(vec![Type::Int], Box::new(Type::Int)));
         }
         fns.insert(
             "duration_string".into(),
@@ -1572,13 +1575,13 @@ impl TypeChecker {
             Type::Fn(vec![Type::RWMutex], Box::new(Type::Void)),
         );
         // Concurrent hashmap
-        fns.insert(
-            "cmap_new".into(),
-            Type::Fn(vec![], Box::new(Type::CMap)),
-        );
+        fns.insert("cmap_new".into(), Type::Fn(vec![], Box::new(Type::CMap)));
         fns.insert(
             "cmap_set".into(),
-            Type::Fn(vec![Type::CMap, Type::String, Type::String], Box::new(Type::Void)),
+            Type::Fn(
+                vec![Type::CMap, Type::String, Type::String],
+                Box::new(Type::Void),
+            ),
         );
         /* map set_take: move key (and val for ss) into map — no clone (hot path). */
         fns.insert(
@@ -1621,12 +1624,18 @@ impl TypeChecker {
         );
         fns.insert(
             "cmap_incr".into(),
-            Type::Fn(vec![Type::CMap, Type::String, Type::Int], Box::new(Type::Int)),
+            Type::Fn(
+                vec![Type::CMap, Type::String, Type::Int],
+                Box::new(Type::Int),
+            ),
         );
         // Direct I/O (mako_dio.h)
         fns.insert(
             "file_open".into(),
-            Type::Fn(vec![Type::String, Type::Int, Type::Int], Box::new(Type::Int)),
+            Type::Fn(
+                vec![Type::String, Type::Int, Type::Int],
+                Box::new(Type::Int),
+            ),
         );
         fns.insert(
             "file_close".into(),
@@ -1634,11 +1643,17 @@ impl TypeChecker {
         );
         fns.insert(
             "pread".into(),
-            Type::Fn(vec![Type::Int, Type::Int, Type::Int], Box::new(Type::String)),
+            Type::Fn(
+                vec![Type::Int, Type::Int, Type::Int],
+                Box::new(Type::String),
+            ),
         );
         fns.insert(
             "pwrite".into(),
-            Type::Fn(vec![Type::Int, Type::String, Type::Int], Box::new(Type::Int)),
+            Type::Fn(
+                vec![Type::Int, Type::String, Type::Int],
+                Box::new(Type::Int),
+            ),
         );
         fns.insert(
             "file_append".into(),
@@ -1701,11 +1716,17 @@ impl TypeChecker {
         );
         fns.insert(
             "mmap_read".into(),
-            Type::Fn(vec![Type::MMap, Type::Int, Type::Int], Box::new(Type::String)),
+            Type::Fn(
+                vec![Type::MMap, Type::Int, Type::Int],
+                Box::new(Type::String),
+            ),
         );
         fns.insert(
             "mmap_write".into(),
-            Type::Fn(vec![Type::MMap, Type::Int, Type::String], Box::new(Type::Int)),
+            Type::Fn(
+                vec![Type::MMap, Type::Int, Type::String],
+                Box::new(Type::Int),
+            ),
         );
         fns.insert(
             "mmap_sync".into(),
@@ -1772,10 +1793,7 @@ impl TypeChecker {
                 Box::new(Type::String),
             ),
         );
-        fns.insert(
-            "wal_next_off".into(),
-            Type::Fn(vec![], Box::new(Type::Int)),
-        );
+        fns.insert("wal_next_off".into(), Type::Fn(vec![], Box::new(Type::Int)));
         fns.insert(
             "wal_close".into(),
             Type::Fn(vec![Type::Named("Wal".into())], Box::new(Type::Int)),
@@ -1894,62 +1912,296 @@ impl TypeChecker {
             "snap_reconcile".into(),
             Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int)),
         );
-        fns.insert("snap_diff".into(), Type::Fn(vec![Type::String, Type::String], Box::new(Type::String)));
-        fns.insert("snap_apply_delta".into(), Type::Fn(vec![Type::String, Type::String], Box::new(Type::String)));
-        fns.insert("netcode_lag_comp_tick".into(), Type::Fn(vec![Type::Int, Type::Int, Type::Int], Box::new(Type::Int)));
-        fns.insert("netcode_interp".into(), Type::Fn(vec![Type::Int, Type::Int, Type::Int], Box::new(Type::Int)));
+        fns.insert(
+            "snap_diff".into(),
+            Type::Fn(vec![Type::String, Type::String], Box::new(Type::String)),
+        );
+        fns.insert(
+            "snap_apply_delta".into(),
+            Type::Fn(vec![Type::String, Type::String], Box::new(Type::String)),
+        );
+        fns.insert(
+            "netcode_lag_comp_tick".into(),
+            Type::Fn(vec![Type::Int, Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "netcode_interp".into(),
+            Type::Fn(vec![Type::Int, Type::Int, Type::Int], Box::new(Type::Int)),
+        );
 
+        fns.insert(
+            "btree_new".into(),
+            Type::Fn(vec![], Box::new(Type::Named("BTree".into()))),
+        );
+        fns.insert(
+            "btree_put".into(),
+            Type::Fn(
+                vec![Type::Named("BTree".into()), Type::Int, Type::Int],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "btree_get".into(),
+            Type::Fn(
+                vec![Type::Named("BTree".into()), Type::Int],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "btree_len".into(),
+            Type::Fn(vec![Type::Named("BTree".into())], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "btree_free".into(),
+            Type::Fn(vec![Type::Named("BTree".into())], Box::new(Type::Int)),
+        );
 
-        fns.insert("btree_new".into(), Type::Fn(vec![], Box::new(Type::Named("BTree".into()))));
-        fns.insert("btree_put".into(), Type::Fn(vec![Type::Named("BTree".into()), Type::Int, Type::Int], Box::new(Type::Int)));
-        fns.insert("btree_get".into(), Type::Fn(vec![Type::Named("BTree".into()), Type::Int], Box::new(Type::Int)));
-        fns.insert("btree_len".into(), Type::Fn(vec![Type::Named("BTree".into())], Box::new(Type::Int)));
-        fns.insert("btree_free".into(), Type::Fn(vec![Type::Named("BTree".into())], Box::new(Type::Int)));
+        fns.insert(
+            "btree_save".into(),
+            Type::Fn(
+                vec![Type::Named("BTree".into()), Type::String],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "btree_load".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Named("BTree".into()))),
+        );
+        fns.insert(
+            "sst_build4".into(),
+            Type::Fn(
+                vec![
+                    Type::String,
+                    Type::Int,
+                    Type::Int,
+                    Type::Int,
+                    Type::Int,
+                    Type::Int,
+                    Type::Int,
+                    Type::Int,
+                    Type::Int,
+                ],
+                Box::new(Type::Named("Sst".into())),
+            ),
+        );
+        fns.insert(
+            "sst_get".into(),
+            Type::Fn(
+                vec![Type::Named("Sst".into()), Type::Int],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "sst_len".into(),
+            Type::Fn(vec![Type::Named("Sst".into())], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "sst_free".into(),
+            Type::Fn(vec![Type::Named("Sst".into())], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "pcache_new".into(),
+            Type::Fn(vec![], Box::new(Type::Named("PageCache".into()))),
+        );
+        fns.insert(
+            "pcache_get".into(),
+            Type::Fn(
+                vec![Type::Named("PageCache".into()), Type::Int],
+                Box::new(Type::Named("Page".into())),
+            ),
+        );
+        fns.insert(
+            "pcache_hits".into(),
+            Type::Fn(vec![Type::Named("PageCache".into())], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "pcache_misses".into(),
+            Type::Fn(vec![Type::Named("PageCache".into())], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "pcache_free".into(),
+            Type::Fn(vec![Type::Named("PageCache".into())], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "mvcc_gc".into(),
+            Type::Fn(
+                vec![Type::Named("Mvcc".into()), Type::Int],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "mvcc_live".into(),
+            Type::Fn(vec![Type::Named("Mvcc".into())], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "simd_dot_i64_4".into(),
+            Type::Fn(
+                vec![
+                    Type::Int,
+                    Type::Int,
+                    Type::Int,
+                    Type::Int,
+                    Type::Int,
+                    Type::Int,
+                    Type::Int,
+                    Type::Int,
+                ],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "simd_sum_i64_4".into(),
+            Type::Fn(
+                vec![Type::Int, Type::Int, Type::Int, Type::Int],
+                Box::new(Type::Int),
+            ),
+        );
 
-        fns.insert("btree_save".into(), Type::Fn(vec![Type::Named("BTree".into()), Type::String], Box::new(Type::Int)));
-        fns.insert("btree_load".into(), Type::Fn(vec![Type::String], Box::new(Type::Named("BTree".into()))));
-        fns.insert("sst_build4".into(), Type::Fn(vec![Type::String, Type::Int, Type::Int, Type::Int, Type::Int, Type::Int, Type::Int, Type::Int, Type::Int], Box::new(Type::Named("Sst".into()))));
-        fns.insert("sst_get".into(), Type::Fn(vec![Type::Named("Sst".into()), Type::Int], Box::new(Type::Int)));
-        fns.insert("sst_len".into(), Type::Fn(vec![Type::Named("Sst".into())], Box::new(Type::Int)));
-        fns.insert("sst_free".into(), Type::Fn(vec![Type::Named("Sst".into())], Box::new(Type::Int)));
-        fns.insert("pcache_new".into(), Type::Fn(vec![], Box::new(Type::Named("PageCache".into()))));
-        fns.insert("pcache_get".into(), Type::Fn(vec![Type::Named("PageCache".into()), Type::Int], Box::new(Type::Named("Page".into()))));
-        fns.insert("pcache_hits".into(), Type::Fn(vec![Type::Named("PageCache".into())], Box::new(Type::Int)));
-        fns.insert("pcache_misses".into(), Type::Fn(vec![Type::Named("PageCache".into())], Box::new(Type::Int)));
-        fns.insert("pcache_free".into(), Type::Fn(vec![Type::Named("PageCache".into())], Box::new(Type::Int)));
-        fns.insert("mvcc_gc".into(), Type::Fn(vec![Type::Named("Mvcc".into()), Type::Int], Box::new(Type::Int)));
-        fns.insert("mvcc_live".into(), Type::Fn(vec![Type::Named("Mvcc".into())], Box::new(Type::Int)));
-        fns.insert("simd_dot_i64_4".into(), Type::Fn(vec![Type::Int, Type::Int, Type::Int, Type::Int, Type::Int, Type::Int, Type::Int, Type::Int], Box::new(Type::Int)));
-        fns.insert("simd_sum_i64_4".into(), Type::Fn(vec![Type::Int, Type::Int, Type::Int, Type::Int], Box::new(Type::Int)));
-
-        fns.insert("lsm_new".into(), Type::Fn(vec![Type::Int], Box::new(Type::Named("Lsm".into()))));
-        fns.insert("lsm_attach_run".into(), Type::Fn(vec![Type::Named("Lsm".into()), Type::Named("Wal".into())], Box::new(Type::Int)));
-        fns.insert("lsm_put".into(), Type::Fn(vec![Type::Named("Lsm".into()), Type::Int, Type::Int], Box::new(Type::Int)));
-        fns.insert("lsm_get".into(), Type::Fn(vec![Type::Named("Lsm".into()), Type::Int], Box::new(Type::Int)));
-        fns.insert("lsm_flush".into(), Type::Fn(vec![Type::Named("Lsm".into())], Box::new(Type::Int)));
-        fns.insert("lsm_flushes".into(), Type::Fn(vec![Type::Named("Lsm".into())], Box::new(Type::Int)));
-        fns.insert("lsm_compact".into(), Type::Fn(vec![Type::Named("Lsm".into()), Type::String], Box::new(Type::Int)));
-        fns.insert("lsm_compact_down".into(), Type::Fn(vec![Type::Named("Lsm".into()), Type::String], Box::new(Type::Int)));
-        fns.insert("lsm_sst_levels".into(), Type::Fn(vec![Type::Named("Lsm".into())], Box::new(Type::Int)));
-        fns.insert("lsm_level_len".into(), Type::Fn(vec![Type::Named("Lsm".into()), Type::Int], Box::new(Type::Int)));
-        fns.insert("lsm_compactions".into(), Type::Fn(vec![Type::Named("Lsm".into())], Box::new(Type::Int)));
-        fns.insert("lsm_free".into(), Type::Fn(vec![Type::Named("Lsm".into())], Box::new(Type::Int)));
-        fns.insert("pbtree_new".into(), Type::Fn(vec![], Box::new(Type::Named("PageBTree".into()))));
-        fns.insert("pbtree_put".into(), Type::Fn(vec![Type::Named("PageBTree".into()), Type::Int, Type::Int], Box::new(Type::Int)));
-        fns.insert("pbtree_get".into(), Type::Fn(vec![Type::Named("PageBTree".into()), Type::Int], Box::new(Type::Int)));
-        fns.insert("pbtree_len".into(), Type::Fn(vec![Type::Named("PageBTree".into())], Box::new(Type::Int)));
-        fns.insert("pbtree_pages".into(), Type::Fn(vec![Type::Named("PageBTree".into())], Box::new(Type::Int)));
-        fns.insert("pbtree_free".into(), Type::Fn(vec![Type::Named("PageBTree".into())], Box::new(Type::Int)));
+        fns.insert(
+            "lsm_new".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Named("Lsm".into()))),
+        );
+        fns.insert(
+            "lsm_attach_run".into(),
+            Type::Fn(
+                vec![Type::Named("Lsm".into()), Type::Named("Wal".into())],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "lsm_put".into(),
+            Type::Fn(
+                vec![Type::Named("Lsm".into()), Type::Int, Type::Int],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "lsm_get".into(),
+            Type::Fn(
+                vec![Type::Named("Lsm".into()), Type::Int],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "lsm_flush".into(),
+            Type::Fn(vec![Type::Named("Lsm".into())], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "lsm_flushes".into(),
+            Type::Fn(vec![Type::Named("Lsm".into())], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "lsm_compact".into(),
+            Type::Fn(
+                vec![Type::Named("Lsm".into()), Type::String],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "lsm_compact_down".into(),
+            Type::Fn(
+                vec![Type::Named("Lsm".into()), Type::String],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "lsm_sst_levels".into(),
+            Type::Fn(vec![Type::Named("Lsm".into())], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "lsm_level_len".into(),
+            Type::Fn(
+                vec![Type::Named("Lsm".into()), Type::Int],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "lsm_compactions".into(),
+            Type::Fn(vec![Type::Named("Lsm".into())], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "lsm_free".into(),
+            Type::Fn(vec![Type::Named("Lsm".into())], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "pbtree_new".into(),
+            Type::Fn(vec![], Box::new(Type::Named("PageBTree".into()))),
+        );
+        fns.insert(
+            "pbtree_put".into(),
+            Type::Fn(
+                vec![Type::Named("PageBTree".into()), Type::Int, Type::Int],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "pbtree_get".into(),
+            Type::Fn(
+                vec![Type::Named("PageBTree".into()), Type::Int],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "pbtree_len".into(),
+            Type::Fn(vec![Type::Named("PageBTree".into())], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "pbtree_pages".into(),
+            Type::Fn(vec![Type::Named("PageBTree".into())], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "pbtree_free".into(),
+            Type::Fn(vec![Type::Named("PageBTree".into())], Box::new(Type::Int)),
+        );
         // Storage polish seeds: bloom · ordered range · disk page manager
-        fns.insert("bloom_new".into(), Type::Fn(vec![], Box::new(Type::Named("Bloom".into()))));
-        fns.insert("bloom_add".into(), Type::Fn(vec![Type::Named("Bloom".into()), Type::Int], Box::new(Type::Int)));
-        fns.insert("bloom_maybe".into(), Type::Fn(vec![Type::Named("Bloom".into()), Type::Int], Box::new(Type::Int)));
-        fns.insert("bloom_len".into(), Type::Fn(vec![Type::Named("Bloom".into())], Box::new(Type::Int)));
-        fns.insert("bloom_clear".into(), Type::Fn(vec![Type::Named("Bloom".into())], Box::new(Type::Int)));
-        fns.insert("bloom_free".into(), Type::Fn(vec![Type::Named("Bloom".into())], Box::new(Type::Int)));
-        fns.insert("bloom_add_str".into(), Type::Fn(vec![Type::Named("Bloom".into()), Type::String], Box::new(Type::Int)));
-        fns.insert("bloom_maybe_str".into(), Type::Fn(vec![Type::Named("Bloom".into()), Type::String], Box::new(Type::Int)));
-        fns.insert("str_hash64".into(), Type::Fn(vec![Type::String], Box::new(Type::Int)));
+        fns.insert(
+            "bloom_new".into(),
+            Type::Fn(vec![], Box::new(Type::Named("Bloom".into()))),
+        );
+        fns.insert(
+            "bloom_add".into(),
+            Type::Fn(
+                vec![Type::Named("Bloom".into()), Type::Int],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "bloom_maybe".into(),
+            Type::Fn(
+                vec![Type::Named("Bloom".into()), Type::Int],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "bloom_len".into(),
+            Type::Fn(vec![Type::Named("Bloom".into())], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "bloom_clear".into(),
+            Type::Fn(vec![Type::Named("Bloom".into())], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "bloom_free".into(),
+            Type::Fn(vec![Type::Named("Bloom".into())], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "bloom_add_str".into(),
+            Type::Fn(
+                vec![Type::Named("Bloom".into()), Type::String],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "bloom_maybe_str".into(),
+            Type::Fn(
+                vec![Type::Named("Bloom".into()), Type::String],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "str_hash64".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
         fns.insert(
             "btree_range".into(),
             Type::Fn(
@@ -1957,10 +2209,34 @@ impl TypeChecker {
                 Box::new(Type::Int),
             ),
         );
-        fns.insert("btree_get_all".into(), Type::Fn(vec![Type::Named("BTree".into()), Type::Int], Box::new(Type::Int)));
-        fns.insert("btree_put_str".into(), Type::Fn(vec![Type::Named("BTree".into()), Type::String, Type::Int], Box::new(Type::Int)));
-        fns.insert("btree_get_str".into(), Type::Fn(vec![Type::Named("BTree".into()), Type::String], Box::new(Type::Int)));
-        fns.insert("btree_range_str".into(), Type::Fn(vec![Type::Named("BTree".into()), Type::String, Type::String], Box::new(Type::Int)));
+        fns.insert(
+            "btree_get_all".into(),
+            Type::Fn(
+                vec![Type::Named("BTree".into()), Type::Int],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "btree_put_str".into(),
+            Type::Fn(
+                vec![Type::Named("BTree".into()), Type::String, Type::Int],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "btree_get_str".into(),
+            Type::Fn(
+                vec![Type::Named("BTree".into()), Type::String],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "btree_range_str".into(),
+            Type::Fn(
+                vec![Type::Named("BTree".into()), Type::String, Type::String],
+                Box::new(Type::Int),
+            ),
+        );
         fns.insert(
             "sst_range".into(),
             Type::Fn(
@@ -1968,40 +2244,141 @@ impl TypeChecker {
                 Box::new(Type::Int),
             ),
         );
-        fns.insert("sst_build8".into(), Type::Fn(vec![
-            Type::String,
-            Type::Int, Type::Int, Type::Int, Type::Int, Type::Int, Type::Int, Type::Int, Type::Int,
-            Type::Int, Type::Int, Type::Int, Type::Int, Type::Int, Type::Int, Type::Int, Type::Int,
-        ], Box::new(Type::Named("Sst".into()))));
-        fns.insert("sst_build_n".into(), Type::Fn(vec![
-            Type::String, Type::Int,
-            Type::Int, Type::Int, Type::Int, Type::Int, Type::Int, Type::Int, Type::Int, Type::Int,
-            Type::Int, Type::Int, Type::Int, Type::Int, Type::Int, Type::Int, Type::Int, Type::Int,
-        ], Box::new(Type::Named("Sst".into()))));
+        fns.insert(
+            "sst_build8".into(),
+            Type::Fn(
+                vec![
+                    Type::String,
+                    Type::Int,
+                    Type::Int,
+                    Type::Int,
+                    Type::Int,
+                    Type::Int,
+                    Type::Int,
+                    Type::Int,
+                    Type::Int,
+                    Type::Int,
+                    Type::Int,
+                    Type::Int,
+                    Type::Int,
+                    Type::Int,
+                    Type::Int,
+                    Type::Int,
+                    Type::Int,
+                ],
+                Box::new(Type::Named("Sst".into())),
+            ),
+        );
+        fns.insert(
+            "sst_build_n".into(),
+            Type::Fn(
+                vec![
+                    Type::String,
+                    Type::Int,
+                    Type::Int,
+                    Type::Int,
+                    Type::Int,
+                    Type::Int,
+                    Type::Int,
+                    Type::Int,
+                    Type::Int,
+                    Type::Int,
+                    Type::Int,
+                    Type::Int,
+                    Type::Int,
+                    Type::Int,
+                    Type::Int,
+                    Type::Int,
+                    Type::Int,
+                    Type::Int,
+                ],
+                Box::new(Type::Named("Sst".into())),
+            ),
+        );
         fns.insert("range_len".into(), Type::Fn(vec![], Box::new(Type::Int)));
         fns.insert("range_cap".into(), Type::Fn(vec![], Box::new(Type::Int)));
-        fns.insert("range_key_at".into(), Type::Fn(vec![Type::Int], Box::new(Type::Int)));
-        fns.insert("range_val_at".into(), Type::Fn(vec![Type::Int], Box::new(Type::Int)));
+        fns.insert(
+            "range_key_at".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "range_val_at".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
         fns.insert("range_rewind".into(), Type::Fn(vec![], Box::new(Type::Int)));
         fns.insert("range_next".into(), Type::Fn(vec![], Box::new(Type::Int)));
         fns.insert("range_key".into(), Type::Fn(vec![], Box::new(Type::Int)));
         fns.insert("range_val".into(), Type::Fn(vec![], Box::new(Type::Int)));
         // Multi-value ordered map (duplicate keys)
-        fns.insert("multimap_new".into(), Type::Fn(vec![], Box::new(Type::Named("MultiMap".into()))));
-        fns.insert("multimap_put".into(), Type::Fn(vec![Type::Named("MultiMap".into()), Type::Int, Type::Int], Box::new(Type::Int)));
-        fns.insert("multimap_get".into(), Type::Fn(vec![Type::Named("MultiMap".into()), Type::Int], Box::new(Type::Int)));
-        fns.insert("multimap_get_all".into(), Type::Fn(vec![Type::Named("MultiMap".into()), Type::Int], Box::new(Type::Int)));
-        fns.insert("multimap_range".into(), Type::Fn(vec![Type::Named("MultiMap".into()), Type::Int, Type::Int], Box::new(Type::Int)));
-        fns.insert("multimap_len".into(), Type::Fn(vec![Type::Named("MultiMap".into())], Box::new(Type::Int)));
-        fns.insert("multimap_free".into(), Type::Fn(vec![Type::Named("MultiMap".into())], Box::new(Type::Int)));
+        fns.insert(
+            "multimap_new".into(),
+            Type::Fn(vec![], Box::new(Type::Named("MultiMap".into()))),
+        );
+        fns.insert(
+            "multimap_put".into(),
+            Type::Fn(
+                vec![Type::Named("MultiMap".into()), Type::Int, Type::Int],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "multimap_get".into(),
+            Type::Fn(
+                vec![Type::Named("MultiMap".into()), Type::Int],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "multimap_get_all".into(),
+            Type::Fn(
+                vec![Type::Named("MultiMap".into()), Type::Int],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "multimap_range".into(),
+            Type::Fn(
+                vec![Type::Named("MultiMap".into()), Type::Int, Type::Int],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "multimap_len".into(),
+            Type::Fn(vec![Type::Named("MultiMap".into())], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "multimap_free".into(),
+            Type::Fn(vec![Type::Named("MultiMap".into())], Box::new(Type::Int)),
+        );
         // Domain handle registry (int slots)
-        fns.insert("domain_reg_put_bloom".into(), Type::Fn(vec![Type::Named("Bloom".into())], Box::new(Type::Int)));
-        fns.insert("domain_reg_get_bloom".into(), Type::Fn(vec![Type::Int], Box::new(Type::Named("Bloom".into()))));
-        fns.insert("domain_reg_put_btree".into(), Type::Fn(vec![Type::Named("BTree".into())], Box::new(Type::Int)));
-        fns.insert("domain_reg_get_btree".into(), Type::Fn(vec![Type::Int], Box::new(Type::Named("BTree".into()))));
-        fns.insert("domain_reg_put_pman".into(), Type::Fn(vec![Type::Named("PageMan".into())], Box::new(Type::Int)));
-        fns.insert("domain_reg_get_pman".into(), Type::Fn(vec![Type::Int], Box::new(Type::Named("PageMan".into()))));
-        fns.insert("domain_reg_del".into(), Type::Fn(vec![Type::Int], Box::new(Type::Int)));
+        fns.insert(
+            "domain_reg_put_bloom".into(),
+            Type::Fn(vec![Type::Named("Bloom".into())], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "domain_reg_get_bloom".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Named("Bloom".into()))),
+        );
+        fns.insert(
+            "domain_reg_put_btree".into(),
+            Type::Fn(vec![Type::Named("BTree".into())], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "domain_reg_get_btree".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Named("BTree".into()))),
+        );
+        fns.insert(
+            "domain_reg_put_pman".into(),
+            Type::Fn(vec![Type::Named("PageMan".into())], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "domain_reg_get_pman".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Named("PageMan".into()))),
+        );
+        fns.insert(
+            "domain_reg_del".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
         fns.insert(
             "pman_open".into(),
             Type::Fn(vec![Type::String], Box::new(Type::Named("PageMan".into()))),
@@ -2010,17 +2387,46 @@ impl TypeChecker {
             "pman_alloc".into(),
             Type::Fn(vec![Type::Named("PageMan".into())], Box::new(Type::Int)),
         );
-        fns.insert("predict_new".into(), Type::Fn(vec![Type::Int], Box::new(Type::Named("Predict".into()))));
-        fns.insert("predict_tick".into(), Type::Fn(vec![Type::Named("Predict".into())], Box::new(Type::Int)));
-        fns.insert("predict_state".into(), Type::Fn(vec![Type::Named("Predict".into())], Box::new(Type::Int)));
-        fns.insert("predict_input".into(), Type::Fn(vec![Type::Named("Predict".into()), Type::Int], Box::new(Type::Int)));
-        fns.insert("predict_reconcile".into(), Type::Fn(vec![Type::Named("Predict".into()), Type::Int], Box::new(Type::Int)));
-        fns.insert("predict_free".into(), Type::Fn(vec![Type::Named("Predict".into())], Box::new(Type::Int)));
+        fns.insert(
+            "predict_new".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Named("Predict".into()))),
+        );
+        fns.insert(
+            "predict_tick".into(),
+            Type::Fn(vec![Type::Named("Predict".into())], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "predict_state".into(),
+            Type::Fn(vec![Type::Named("Predict".into())], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "predict_input".into(),
+            Type::Fn(
+                vec![Type::Named("Predict".into()), Type::Int],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "predict_reconcile".into(),
+            Type::Fn(
+                vec![Type::Named("Predict".into()), Type::Int],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "predict_free".into(),
+            Type::Fn(vec![Type::Named("Predict".into())], Box::new(Type::Int)),
+        );
 
         fns.insert(
             "pman_set".into(),
             Type::Fn(
-                vec![Type::Named("PageMan".into()), Type::Int, Type::Int, Type::Int],
+                vec![
+                    Type::Named("PageMan".into()),
+                    Type::Int,
+                    Type::Int,
+                    Type::Int,
+                ],
                 Box::new(Type::Int),
             ),
         );
@@ -2092,54 +2498,219 @@ impl TypeChecker {
             "hot_reload_watch_count".into(),
             Type::Fn(vec![], Box::new(Type::Int)),
         );
-        fns.insert("hot_reload_note_swap".into(), Type::Fn(vec![], Box::new(Type::Int)));
-        fns.insert("hot_reload_swap_count".into(), Type::Fn(vec![], Box::new(Type::Int)));
-        fns.insert("hot_reload_stamp".into(), Type::Fn(vec![], Box::new(Type::Int)));
-        fns.insert("hot_reload_status_json".into(), Type::Fn(vec![], Box::new(Type::String)));
+        fns.insert(
+            "hot_reload_note_swap".into(),
+            Type::Fn(vec![], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "hot_reload_swap_count".into(),
+            Type::Fn(vec![], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "hot_reload_stamp".into(),
+            Type::Fn(vec![], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "hot_reload_status_json".into(),
+            Type::Fn(vec![], Box::new(Type::String)),
+        );
 
-        fns.insert("mvcc_new".into(), Type::Fn(vec![], Box::new(Type::Named("Mvcc".into()))));
-        fns.insert("mvcc_begin".into(), Type::Fn(vec![Type::Named("Mvcc".into())], Box::new(Type::Int)));
-        fns.insert("mvcc_put".into(), Type::Fn(vec![Type::Named("Mvcc".into()), Type::Int, Type::Int], Box::new(Type::Int)));
-        fns.insert("mvcc_get".into(), Type::Fn(vec![Type::Named("Mvcc".into()), Type::Int, Type::Int], Box::new(Type::Int)));
-        fns.insert("mvcc_versions".into(), Type::Fn(vec![Type::Named("Mvcc".into())], Box::new(Type::Int)));
-        fns.insert("mvcc_free".into(), Type::Fn(vec![Type::Named("Mvcc".into())], Box::new(Type::Int)));
-        fns.insert("rollback_new".into(), Type::Fn(vec![Type::Int], Box::new(Type::Named("Rollback".into()))));
-        fns.insert("rollback_push".into(), Type::Fn(vec![Type::Named("Rollback".into()), Type::Int, Type::String], Box::new(Type::Int)));
-        fns.insert("rollback_get".into(), Type::Fn(vec![Type::Named("Rollback".into()), Type::Int, Type::Int], Box::new(Type::Int)));
-        fns.insert("rollback_restore_slot0".into(), Type::Fn(vec![Type::Named("Rollback".into()), Type::Int], Box::new(Type::Int)));
-        fns.insert("rollback_len".into(), Type::Fn(vec![Type::Named("Rollback".into())], Box::new(Type::Int)));
-        fns.insert("rollback_free".into(), Type::Fn(vec![Type::Named("Rollback".into())], Box::new(Type::Int)));
-        fns.insert("gfx_window_open".into(), Type::Fn(vec![Type::Int, Type::Int, Type::String], Box::new(Type::Named("GfxWindow".into()))));
-        fns.insert("gfx_window_width".into(), Type::Fn(vec![Type::Named("GfxWindow".into())], Box::new(Type::Int)));
-        fns.insert("gfx_window_height".into(), Type::Fn(vec![Type::Named("GfxWindow".into())], Box::new(Type::Int)));
-        fns.insert("gfx_window_close".into(), Type::Fn(vec![Type::Named("GfxWindow".into())], Box::new(Type::Int)));
-        fns.insert("gfx_poll".into(), Type::Fn(vec![Type::Named("GfxWindow".into())], Box::new(Type::Int)));
-        fns.insert("gfx_backend_name".into(), Type::Fn(vec![], Box::new(Type::String)));
+        fns.insert(
+            "mvcc_new".into(),
+            Type::Fn(vec![], Box::new(Type::Named("Mvcc".into()))),
+        );
+        fns.insert(
+            "mvcc_begin".into(),
+            Type::Fn(vec![Type::Named("Mvcc".into())], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "mvcc_put".into(),
+            Type::Fn(
+                vec![Type::Named("Mvcc".into()), Type::Int, Type::Int],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "mvcc_get".into(),
+            Type::Fn(
+                vec![Type::Named("Mvcc".into()), Type::Int, Type::Int],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "mvcc_versions".into(),
+            Type::Fn(vec![Type::Named("Mvcc".into())], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "mvcc_free".into(),
+            Type::Fn(vec![Type::Named("Mvcc".into())], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "rollback_new".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Named("Rollback".into()))),
+        );
+        fns.insert(
+            "rollback_push".into(),
+            Type::Fn(
+                vec![Type::Named("Rollback".into()), Type::Int, Type::String],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "rollback_get".into(),
+            Type::Fn(
+                vec![Type::Named("Rollback".into()), Type::Int, Type::Int],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "rollback_restore_slot0".into(),
+            Type::Fn(
+                vec![Type::Named("Rollback".into()), Type::Int],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "rollback_len".into(),
+            Type::Fn(vec![Type::Named("Rollback".into())], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "rollback_free".into(),
+            Type::Fn(vec![Type::Named("Rollback".into())], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "gfx_window_open".into(),
+            Type::Fn(
+                vec![Type::Int, Type::Int, Type::String],
+                Box::new(Type::Named("GfxWindow".into())),
+            ),
+        );
+        fns.insert(
+            "gfx_window_width".into(),
+            Type::Fn(vec![Type::Named("GfxWindow".into())], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "gfx_window_height".into(),
+            Type::Fn(vec![Type::Named("GfxWindow".into())], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "gfx_window_close".into(),
+            Type::Fn(vec![Type::Named("GfxWindow".into())], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "gfx_poll".into(),
+            Type::Fn(vec![Type::Named("GfxWindow".into())], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "gfx_backend_name".into(),
+            Type::Fn(vec![], Box::new(Type::String)),
+        );
 
-        fns.insert("gfx_shader_compile".into(), Type::Fn(vec![Type::String], Box::new(Type::Int)));
-        fns.insert("gfx_asset_size".into(), Type::Fn(vec![Type::String], Box::new(Type::Int)));
-        fns.insert("audio_mix".into(), Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int)));
-        fns.insert("physics_step_x".into(), Type::Fn(vec![Type::Int, Type::Int, Type::Int], Box::new(Type::Int)));
-        fns.insert("physics_step_v".into(), Type::Fn(vec![Type::Int, Type::Int, Type::Int], Box::new(Type::Int)));
-        fns.insert("ai_rope_cos".into(), Type::Fn(vec![Type::Int], Box::new(Type::Int)));
-        fns.insert("ai_rope_sin".into(), Type::Fn(vec![Type::Int], Box::new(Type::Int)));
-        fns.insert("ai_rope_apply_x".into(), Type::Fn(vec![Type::Int, Type::Int, Type::Int], Box::new(Type::Int)));
-        fns.insert("ai_rope_apply_y".into(), Type::Fn(vec![Type::Int, Type::Int, Type::Int], Box::new(Type::Int)));
-        fns.insert("kv_cache_new".into(), Type::Fn(vec![Type::Int], Box::new(Type::Named("KvCache".into()))));
-        fns.insert("kv_cache_append".into(), Type::Fn(vec![Type::Named("KvCache".into()), Type::Int, Type::Int], Box::new(Type::Int)));
-        fns.insert("kv_cache_get_k".into(), Type::Fn(vec![Type::Named("KvCache".into()), Type::Int], Box::new(Type::Int)));
-        fns.insert("kv_cache_get_v".into(), Type::Fn(vec![Type::Named("KvCache".into()), Type::Int], Box::new(Type::Int)));
-        fns.insert("kv_cache_len".into(), Type::Fn(vec![Type::Named("KvCache".into())], Box::new(Type::Int)));
-        fns.insert("kv_cache_free".into(), Type::Fn(vec![Type::Named("KvCache".into())], Box::new(Type::Int)));
-        fns.insert("gemm2x2".into(), Type::Fn(vec![Type::Int, Type::Int, Type::Int, Type::Int, Type::Int, Type::Int, Type::Int, Type::Int], Box::new(Type::Int)));
+        fns.insert(
+            "gfx_shader_compile".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "gfx_asset_size".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "audio_mix".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "physics_step_x".into(),
+            Type::Fn(vec![Type::Int, Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "physics_step_v".into(),
+            Type::Fn(vec![Type::Int, Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "ai_rope_cos".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "ai_rope_sin".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "ai_rope_apply_x".into(),
+            Type::Fn(vec![Type::Int, Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "ai_rope_apply_y".into(),
+            Type::Fn(vec![Type::Int, Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "kv_cache_new".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Named("KvCache".into()))),
+        );
+        fns.insert(
+            "kv_cache_append".into(),
+            Type::Fn(
+                vec![Type::Named("KvCache".into()), Type::Int, Type::Int],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "kv_cache_get_k".into(),
+            Type::Fn(
+                vec![Type::Named("KvCache".into()), Type::Int],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "kv_cache_get_v".into(),
+            Type::Fn(
+                vec![Type::Named("KvCache".into()), Type::Int],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "kv_cache_len".into(),
+            Type::Fn(vec![Type::Named("KvCache".into())], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "kv_cache_free".into(),
+            Type::Fn(vec![Type::Named("KvCache".into())], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "gemm2x2".into(),
+            Type::Fn(
+                vec![
+                    Type::Int,
+                    Type::Int,
+                    Type::Int,
+                    Type::Int,
+                    Type::Int,
+                    Type::Int,
+                    Type::Int,
+                    Type::Int,
+                ],
+                Box::new(Type::Int),
+            ),
+        );
         fns.insert("gemm_c01".into(), Type::Fn(vec![], Box::new(Type::Int)));
         fns.insert("gemm_c10".into(), Type::Fn(vec![], Box::new(Type::Int)));
         fns.insert("gemm_c11".into(), Type::Fn(vec![], Box::new(Type::Int)));
-        fns.insert("f32_to_f16_bits".into(), Type::Fn(vec![Type::Int], Box::new(Type::Int)));
-        fns.insert("debug_set_loc".into(), Type::Fn(vec![Type::String, Type::Int], Box::new(Type::Int)));
-        fns.insert("debug_file".into(), Type::Fn(vec![], Box::new(Type::String)));
+        fns.insert(
+            "f32_to_f16_bits".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "debug_set_loc".into(),
+            Type::Fn(vec![Type::String, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "debug_file".into(),
+            Type::Fn(vec![], Box::new(Type::String)),
+        );
         fns.insert("debug_line".into(), Type::Fn(vec![], Box::new(Type::Int)));
-        fns.insert("debug_frame_json".into(), Type::Fn(vec![], Box::new(Type::String)));
+        fns.insert(
+            "debug_frame_json".into(),
+            Type::Fn(vec![], Box::new(Type::String)),
+        );
 
         // Event loop
         fns.insert(
@@ -2148,11 +2719,17 @@ impl TypeChecker {
         );
         fns.insert(
             "evloop_add".into(),
-            Type::Fn(vec![Type::EvLoop, Type::Int, Type::Int], Box::new(Type::Int)),
+            Type::Fn(
+                vec![Type::EvLoop, Type::Int, Type::Int],
+                Box::new(Type::Int),
+            ),
         );
         fns.insert(
             "evloop_mod".into(),
-            Type::Fn(vec![Type::EvLoop, Type::Int, Type::Int], Box::new(Type::Int)),
+            Type::Fn(
+                vec![Type::EvLoop, Type::Int, Type::Int],
+                Box::new(Type::Int),
+            ),
         );
         fns.insert(
             "evloop_del".into(),
@@ -2195,17 +2772,61 @@ impl TypeChecker {
             "nb_read".into(),
             Type::Fn(vec![Type::Int], Box::new(Type::String)),
         );
-        fns.insert("gfx_window_pixels".into(), Type::Fn(vec![Type::Named("GfxWindow".into())], Box::new(Type::Int)));
-        fns.insert("gfx_window_fill".into(), Type::Fn(vec![Type::Named("GfxWindow".into()), Type::Int], Box::new(Type::Int)));
-        fns.insert("gfx_window_set_pixel".into(), Type::Fn(vec![Type::Named("GfxWindow".into()), Type::Int, Type::Int, Type::Int], Box::new(Type::Int)));
-        fns.insert("gfx_window_get_pixel".into(), Type::Fn(vec![Type::Named("GfxWindow".into()), Type::Int, Type::Int], Box::new(Type::Int)));
+        fns.insert(
+            "gfx_window_pixels".into(),
+            Type::Fn(vec![Type::Named("GfxWindow".into())], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "gfx_window_fill".into(),
+            Type::Fn(
+                vec![Type::Named("GfxWindow".into()), Type::Int],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "gfx_window_set_pixel".into(),
+            Type::Fn(
+                vec![
+                    Type::Named("GfxWindow".into()),
+                    Type::Int,
+                    Type::Int,
+                    Type::Int,
+                ],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "gfx_window_get_pixel".into(),
+            Type::Fn(
+                vec![Type::Named("GfxWindow".into()), Type::Int, Type::Int],
+                Box::new(Type::Int),
+            ),
+        );
 
-        fns.insert("hot_reload_plugin_watch".into(), Type::Fn(vec![Type::String], Box::new(Type::Int)));
-        fns.insert("hot_reload_plugin_poll".into(), Type::Fn(vec![], Box::new(Type::Int)));
-        fns.insert("hot_reload_plugin_call".into(), Type::Fn(vec![Type::String, Type::String], Box::new(Type::String)));
-        fns.insert("hot_reload_plugin_handle".into(), Type::Fn(vec![], Box::new(Type::Int)));
-        fns.insert("hot_reload_plugin_swaps".into(), Type::Fn(vec![], Box::new(Type::Int)));
-        fns.insert("hot_reload_plugin_close".into(), Type::Fn(vec![], Box::new(Type::Int)));
+        fns.insert(
+            "hot_reload_plugin_watch".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "hot_reload_plugin_poll".into(),
+            Type::Fn(vec![], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "hot_reload_plugin_call".into(),
+            Type::Fn(vec![Type::String, Type::String], Box::new(Type::String)),
+        );
+        fns.insert(
+            "hot_reload_plugin_handle".into(),
+            Type::Fn(vec![], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "hot_reload_plugin_swaps".into(),
+            Type::Fn(vec![], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "hot_reload_plugin_close".into(),
+            Type::Fn(vec![], Box::new(Type::Int)),
+        );
 
         fns.insert(
             "nb_write".into(),
@@ -2224,93 +2845,363 @@ impl TypeChecker {
             Type::Fn(vec![Type::Int], Box::new(Type::Int)),
         );
         // Binary buffer
-        fns.insert("buf_pack_new".into(), Type::Fn(vec![Type::Int], Box::new(Type::Buf)));
-        fns.insert("buf_from_string".into(), Type::Fn(vec![Type::String], Box::new(Type::Buf)));
-        fns.insert("buf_to_string".into(), Type::Fn(vec![Type::Buf], Box::new(Type::String)));
-        fns.insert("buf_len".into(), Type::Fn(vec![Type::Buf], Box::new(Type::Int)));
-        fns.insert("buf_pos".into(), Type::Fn(vec![Type::Buf], Box::new(Type::Int)));
-        fns.insert("buf_reset".into(), Type::Fn(vec![Type::Buf], Box::new(Type::Void)));
-        fns.insert("buf_seek".into(), Type::Fn(vec![Type::Buf, Type::Int], Box::new(Type::Void)));
-        fns.insert("buf_free".into(), Type::Fn(vec![Type::Buf], Box::new(Type::Void)));
-        fns.insert("buf_write_u8".into(), Type::Fn(vec![Type::Buf, Type::Int], Box::new(Type::Void)));
-        fns.insert("buf_write_u16".into(), Type::Fn(vec![Type::Buf, Type::Int], Box::new(Type::Void)));
-        fns.insert("buf_write_u32".into(), Type::Fn(vec![Type::Buf, Type::Int], Box::new(Type::Void)));
-        fns.insert("buf_write_u64".into(), Type::Fn(vec![Type::Buf, Type::Int], Box::new(Type::Void)));
-        fns.insert("buf_write_i32".into(), Type::Fn(vec![Type::Buf, Type::Int], Box::new(Type::Void)));
-        fns.insert("buf_write_f32".into(), Type::Fn(vec![Type::Buf, Type::Float], Box::new(Type::Void)));
-        fns.insert("buf_write_f64".into(), Type::Fn(vec![Type::Buf, Type::Float], Box::new(Type::Void)));
-        fns.insert("buf_write_bytes".into(), Type::Fn(vec![Type::Buf, Type::String], Box::new(Type::Void)));
-        fns.insert("buf_write_str".into(), Type::Fn(vec![Type::Buf, Type::String], Box::new(Type::Void)));
-        fns.insert("buf_write_u16be".into(), Type::Fn(vec![Type::Buf, Type::Int], Box::new(Type::Void)));
-        fns.insert("buf_write_u32be".into(), Type::Fn(vec![Type::Buf, Type::Int], Box::new(Type::Void)));
-        fns.insert("buf_read_u8".into(), Type::Fn(vec![Type::Buf], Box::new(Type::Int)));
-        fns.insert("buf_read_u16".into(), Type::Fn(vec![Type::Buf], Box::new(Type::Int)));
-        fns.insert("buf_read_u32".into(), Type::Fn(vec![Type::Buf], Box::new(Type::Int)));
-        fns.insert("buf_read_u64".into(), Type::Fn(vec![Type::Buf], Box::new(Type::Int)));
-        fns.insert("buf_read_i32".into(), Type::Fn(vec![Type::Buf], Box::new(Type::Int)));
-        fns.insert("buf_read_f32".into(), Type::Fn(vec![Type::Buf], Box::new(Type::Float)));
-        fns.insert("buf_read_f64".into(), Type::Fn(vec![Type::Buf], Box::new(Type::Float)));
-        fns.insert("buf_read_bytes".into(), Type::Fn(vec![Type::Buf, Type::Int], Box::new(Type::String)));
-        fns.insert("buf_read_str".into(), Type::Fn(vec![Type::Buf], Box::new(Type::String)));
-        fns.insert("buf_read_u16be".into(), Type::Fn(vec![Type::Buf], Box::new(Type::Int)));
-        fns.insert("buf_read_u32be".into(), Type::Fn(vec![Type::Buf], Box::new(Type::Int)));
+        fns.insert(
+            "buf_pack_new".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Buf)),
+        );
+        fns.insert(
+            "buf_from_string".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Buf)),
+        );
+        fns.insert(
+            "buf_to_string".into(),
+            Type::Fn(vec![Type::Buf], Box::new(Type::String)),
+        );
+        fns.insert(
+            "buf_len".into(),
+            Type::Fn(vec![Type::Buf], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "buf_pos".into(),
+            Type::Fn(vec![Type::Buf], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "buf_reset".into(),
+            Type::Fn(vec![Type::Buf], Box::new(Type::Void)),
+        );
+        fns.insert(
+            "buf_seek".into(),
+            Type::Fn(vec![Type::Buf, Type::Int], Box::new(Type::Void)),
+        );
+        fns.insert(
+            "buf_free".into(),
+            Type::Fn(vec![Type::Buf], Box::new(Type::Void)),
+        );
+        fns.insert(
+            "buf_write_u8".into(),
+            Type::Fn(vec![Type::Buf, Type::Int], Box::new(Type::Void)),
+        );
+        fns.insert(
+            "buf_write_u16".into(),
+            Type::Fn(vec![Type::Buf, Type::Int], Box::new(Type::Void)),
+        );
+        fns.insert(
+            "buf_write_u32".into(),
+            Type::Fn(vec![Type::Buf, Type::Int], Box::new(Type::Void)),
+        );
+        fns.insert(
+            "buf_write_u64".into(),
+            Type::Fn(vec![Type::Buf, Type::Int], Box::new(Type::Void)),
+        );
+        fns.insert(
+            "buf_write_i32".into(),
+            Type::Fn(vec![Type::Buf, Type::Int], Box::new(Type::Void)),
+        );
+        fns.insert(
+            "buf_write_f32".into(),
+            Type::Fn(vec![Type::Buf, Type::Float], Box::new(Type::Void)),
+        );
+        fns.insert(
+            "buf_write_f64".into(),
+            Type::Fn(vec![Type::Buf, Type::Float], Box::new(Type::Void)),
+        );
+        fns.insert(
+            "buf_write_bytes".into(),
+            Type::Fn(vec![Type::Buf, Type::String], Box::new(Type::Void)),
+        );
+        fns.insert(
+            "buf_write_str".into(),
+            Type::Fn(vec![Type::Buf, Type::String], Box::new(Type::Void)),
+        );
+        fns.insert(
+            "buf_write_u16be".into(),
+            Type::Fn(vec![Type::Buf, Type::Int], Box::new(Type::Void)),
+        );
+        fns.insert(
+            "buf_write_u32be".into(),
+            Type::Fn(vec![Type::Buf, Type::Int], Box::new(Type::Void)),
+        );
+        fns.insert(
+            "buf_read_u8".into(),
+            Type::Fn(vec![Type::Buf], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "buf_read_u16".into(),
+            Type::Fn(vec![Type::Buf], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "buf_read_u32".into(),
+            Type::Fn(vec![Type::Buf], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "buf_read_u64".into(),
+            Type::Fn(vec![Type::Buf], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "buf_read_i32".into(),
+            Type::Fn(vec![Type::Buf], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "buf_read_f32".into(),
+            Type::Fn(vec![Type::Buf], Box::new(Type::Float)),
+        );
+        fns.insert(
+            "buf_read_f64".into(),
+            Type::Fn(vec![Type::Buf], Box::new(Type::Float)),
+        );
+        fns.insert(
+            "buf_read_bytes".into(),
+            Type::Fn(vec![Type::Buf, Type::Int], Box::new(Type::String)),
+        );
+        fns.insert(
+            "buf_read_str".into(),
+            Type::Fn(vec![Type::Buf], Box::new(Type::String)),
+        );
+        fns.insert(
+            "buf_read_u16be".into(),
+            Type::Fn(vec![Type::Buf], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "buf_read_u32be".into(),
+            Type::Fn(vec![Type::Buf], Box::new(Type::Int)),
+        );
         // Game UDP
-        fns.insert("game_udp_bind".into(), Type::Fn(vec![Type::Int], Box::new(Type::GameUDP)));
-        fns.insert("game_udp_bind_addr".into(), Type::Fn(vec![Type::String, Type::Int], Box::new(Type::GameUDP)));
-        fns.insert("game_udp_recv".into(), Type::Fn(vec![Type::GameUDP], Box::new(Type::String)));
-        fns.insert("game_udp_sender".into(), Type::Fn(vec![Type::GameUDP], Box::new(Type::Int)));
-        fns.insert("game_udp_sender_addr".into(), Type::Fn(vec![Type::GameUDP], Box::new(Type::String)));
-        fns.insert("game_udp_send".into(), Type::Fn(vec![Type::GameUDP, Type::Int, Type::String], Box::new(Type::Int)));
-        fns.insert("game_udp_send_to".into(), Type::Fn(vec![Type::GameUDP, Type::String, Type::Int, Type::String], Box::new(Type::Int)));
-        fns.insert("game_udp_broadcast".into(), Type::Fn(vec![Type::GameUDP, Type::String], Box::new(Type::Int)));
-        fns.insert("game_udp_kick".into(), Type::Fn(vec![Type::GameUDP, Type::Int], Box::new(Type::Void)));
-        fns.insert("game_udp_peers".into(), Type::Fn(vec![Type::GameUDP], Box::new(Type::Int)));
-        fns.insert("game_udp_fd".into(), Type::Fn(vec![Type::GameUDP], Box::new(Type::Int)));
-        fns.insert("game_udp_close".into(), Type::Fn(vec![Type::GameUDP], Box::new(Type::Void)));
+        fns.insert(
+            "game_udp_bind".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::GameUDP)),
+        );
+        fns.insert(
+            "game_udp_bind_addr".into(),
+            Type::Fn(vec![Type::String, Type::Int], Box::new(Type::GameUDP)),
+        );
+        fns.insert(
+            "game_udp_recv".into(),
+            Type::Fn(vec![Type::GameUDP], Box::new(Type::String)),
+        );
+        fns.insert(
+            "game_udp_sender".into(),
+            Type::Fn(vec![Type::GameUDP], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "game_udp_sender_addr".into(),
+            Type::Fn(vec![Type::GameUDP], Box::new(Type::String)),
+        );
+        fns.insert(
+            "game_udp_send".into(),
+            Type::Fn(
+                vec![Type::GameUDP, Type::Int, Type::String],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "game_udp_send_to".into(),
+            Type::Fn(
+                vec![Type::GameUDP, Type::String, Type::Int, Type::String],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "game_udp_broadcast".into(),
+            Type::Fn(vec![Type::GameUDP, Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "game_udp_kick".into(),
+            Type::Fn(vec![Type::GameUDP, Type::Int], Box::new(Type::Void)),
+        );
+        fns.insert(
+            "game_udp_peers".into(),
+            Type::Fn(vec![Type::GameUDP], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "game_udp_fd".into(),
+            Type::Fn(vec![Type::GameUDP], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "game_udp_close".into(),
+            Type::Fn(vec![Type::GameUDP], Box::new(Type::Void)),
+        );
         // Tick timer
         fns.insert("tick_now_us".into(), Type::Fn(vec![], Box::new(Type::Int)));
-        fns.insert("tick_sleep_us".into(), Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int)));
+        fns.insert(
+            "tick_sleep_us".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int)),
+        );
         // Cloud / distributed
-        fns.insert("chash_new".into(), Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::CHash)));
-        fns.insert("chash_get".into(), Type::Fn(vec![Type::CHash, Type::String], Box::new(Type::Int)));
-        fns.insert("chash_add_node".into(), Type::Fn(vec![Type::CHash], Box::new(Type::Int)));
-        fns.insert("chash_remove_node".into(), Type::Fn(vec![Type::CHash, Type::Int], Box::new(Type::Void)));
-        fns.insert("chash_node_count".into(), Type::Fn(vec![Type::CHash], Box::new(Type::Int)));
-        fns.insert("chash_free".into(), Type::Fn(vec![Type::CHash], Box::new(Type::Void)));
-        fns.insert("ratelimit_new".into(), Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::RateLimiter)));
-        fns.insert("ratelimit_allow".into(), Type::Fn(vec![Type::RateLimiter], Box::new(Type::Int)));
-        fns.insert("ratelimit_remaining".into(), Type::Fn(vec![Type::RateLimiter], Box::new(Type::Int)));
-        fns.insert("ratelimit_free".into(), Type::Fn(vec![Type::RateLimiter], Box::new(Type::Void)));
-        fns.insert("breaker_new".into(), Type::Fn(vec![Type::Int, Type::Int, Type::Int], Box::new(Type::CircuitBreaker)));
-        fns.insert("breaker_allow".into(), Type::Fn(vec![Type::CircuitBreaker], Box::new(Type::Int)));
-        fns.insert("breaker_success".into(), Type::Fn(vec![Type::CircuitBreaker], Box::new(Type::Void)));
-        fns.insert("breaker_failure".into(), Type::Fn(vec![Type::CircuitBreaker], Box::new(Type::Void)));
-        fns.insert("breaker_state".into(), Type::Fn(vec![Type::CircuitBreaker], Box::new(Type::Int)));
-        fns.insert("breaker_reset".into(), Type::Fn(vec![Type::CircuitBreaker], Box::new(Type::Void)));
-        fns.insert("breaker_free".into(), Type::Fn(vec![Type::CircuitBreaker], Box::new(Type::Void)));
-        fns.insert("jwt_sign".into(), Type::Fn(vec![Type::String, Type::String], Box::new(Type::String)));
-        fns.insert("jwt_verify".into(), Type::Fn(vec![Type::String, Type::String], Box::new(Type::Int)));
-        fns.insert("jwt_verify_rs256".into(), Type::Fn(vec![Type::String, Type::String], Box::new(Type::Int)));
-        fns.insert("jwt_verify_jwks".into(), Type::Fn(vec![Type::String, Type::String], Box::new(Type::Int)));
-        fns.insert("jwt_payload".into(), Type::Fn(vec![Type::String], Box::new(Type::String)));
-        fns.insert("backoff_ms".into(), Type::Fn(vec![Type::Int, Type::Int, Type::Int], Box::new(Type::Int)));
-        fns.insert("env_get_or".into(), Type::Fn(vec![Type::String, Type::String], Box::new(Type::String)));
-        fns.insert("env_has".into(), Type::Fn(vec![Type::String], Box::new(Type::Int)));
+        fns.insert(
+            "chash_new".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::CHash)),
+        );
+        fns.insert(
+            "chash_get".into(),
+            Type::Fn(vec![Type::CHash, Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "chash_add_node".into(),
+            Type::Fn(vec![Type::CHash], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "chash_remove_node".into(),
+            Type::Fn(vec![Type::CHash, Type::Int], Box::new(Type::Void)),
+        );
+        fns.insert(
+            "chash_node_count".into(),
+            Type::Fn(vec![Type::CHash], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "chash_free".into(),
+            Type::Fn(vec![Type::CHash], Box::new(Type::Void)),
+        );
+        fns.insert(
+            "ratelimit_new".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::RateLimiter)),
+        );
+        fns.insert(
+            "ratelimit_allow".into(),
+            Type::Fn(vec![Type::RateLimiter], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "ratelimit_remaining".into(),
+            Type::Fn(vec![Type::RateLimiter], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "ratelimit_free".into(),
+            Type::Fn(vec![Type::RateLimiter], Box::new(Type::Void)),
+        );
+        fns.insert(
+            "breaker_new".into(),
+            Type::Fn(
+                vec![Type::Int, Type::Int, Type::Int],
+                Box::new(Type::CircuitBreaker),
+            ),
+        );
+        fns.insert(
+            "breaker_allow".into(),
+            Type::Fn(vec![Type::CircuitBreaker], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "breaker_success".into(),
+            Type::Fn(vec![Type::CircuitBreaker], Box::new(Type::Void)),
+        );
+        fns.insert(
+            "breaker_failure".into(),
+            Type::Fn(vec![Type::CircuitBreaker], Box::new(Type::Void)),
+        );
+        fns.insert(
+            "breaker_state".into(),
+            Type::Fn(vec![Type::CircuitBreaker], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "breaker_reset".into(),
+            Type::Fn(vec![Type::CircuitBreaker], Box::new(Type::Void)),
+        );
+        fns.insert(
+            "breaker_free".into(),
+            Type::Fn(vec![Type::CircuitBreaker], Box::new(Type::Void)),
+        );
+        fns.insert(
+            "jwt_sign".into(),
+            Type::Fn(vec![Type::String, Type::String], Box::new(Type::String)),
+        );
+        fns.insert(
+            "jwt_verify".into(),
+            Type::Fn(vec![Type::String, Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "jwt_verify_rs256".into(),
+            Type::Fn(vec![Type::String, Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "jwt_verify_jwks".into(),
+            Type::Fn(vec![Type::String, Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "jwt_payload".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::String)),
+        );
+        fns.insert(
+            "backoff_ms".into(),
+            Type::Fn(vec![Type::Int, Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "env_get_or".into(),
+            Type::Fn(vec![Type::String, Type::String], Box::new(Type::String)),
+        );
+        fns.insert(
+            "env_has".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
         // HTTP Engine
-        fns.insert("httpengine_new".into(), Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::HttpEngine)));
-        fns.insert("httpengine_route".into(), Type::Fn(vec![Type::HttpEngine, Type::String, Type::Int, Type::String, Type::String], Box::new(Type::Void)));
-        fns.insert("httpengine_serve".into(), Type::Fn(vec![Type::HttpEngine], Box::new(Type::Int)));
+        fns.insert(
+            "httpengine_new".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::HttpEngine)),
+        );
+        fns.insert(
+            "httpengine_route".into(),
+            Type::Fn(
+                vec![
+                    Type::HttpEngine,
+                    Type::String,
+                    Type::Int,
+                    Type::String,
+                    Type::String,
+                ],
+                Box::new(Type::Void),
+            ),
+        );
+        fns.insert(
+            "httpengine_serve".into(),
+            Type::Fn(vec![Type::HttpEngine], Box::new(Type::Int)),
+        );
         // Math
-        fns.insert("sqrt".into(), Type::Fn(vec![Type::Float], Box::new(Type::Float)));
-        fns.insert("sin".into(), Type::Fn(vec![Type::Float], Box::new(Type::Float)));
-        fns.insert("cos".into(), Type::Fn(vec![Type::Float], Box::new(Type::Float)));
-        fns.insert("atan2".into(), Type::Fn(vec![Type::Float, Type::Float], Box::new(Type::Float)));
-        fns.insert("floor_f".into(), Type::Fn(vec![Type::Float], Box::new(Type::Float)));
-        fns.insert("ceil_f".into(), Type::Fn(vec![Type::Float], Box::new(Type::Float)));
-        fns.insert("abs_f".into(), Type::Fn(vec![Type::Float], Box::new(Type::Float)));
-        fns.insert("dist2d".into(), Type::Fn(vec![Type::Float, Type::Float, Type::Float, Type::Float], Box::new(Type::Float)));
-        fns.insert("lerp".into(), Type::Fn(vec![Type::Float, Type::Float, Type::Float], Box::new(Type::Float)));
-        fns.insert("clamp_f".into(), Type::Fn(vec![Type::Float, Type::Float, Type::Float], Box::new(Type::Float)));
+        fns.insert(
+            "sqrt".into(),
+            Type::Fn(vec![Type::Float], Box::new(Type::Float)),
+        );
+        fns.insert(
+            "sin".into(),
+            Type::Fn(vec![Type::Float], Box::new(Type::Float)),
+        );
+        fns.insert(
+            "cos".into(),
+            Type::Fn(vec![Type::Float], Box::new(Type::Float)),
+        );
+        fns.insert(
+            "atan2".into(),
+            Type::Fn(vec![Type::Float, Type::Float], Box::new(Type::Float)),
+        );
+        fns.insert(
+            "floor_f".into(),
+            Type::Fn(vec![Type::Float], Box::new(Type::Float)),
+        );
+        fns.insert(
+            "ceil_f".into(),
+            Type::Fn(vec![Type::Float], Box::new(Type::Float)),
+        );
+        fns.insert(
+            "abs_f".into(),
+            Type::Fn(vec![Type::Float], Box::new(Type::Float)),
+        );
+        fns.insert(
+            "dist2d".into(),
+            Type::Fn(
+                vec![Type::Float, Type::Float, Type::Float, Type::Float],
+                Box::new(Type::Float),
+            ),
+        );
+        fns.insert(
+            "lerp".into(),
+            Type::Fn(
+                vec![Type::Float, Type::Float, Type::Float],
+                Box::new(Type::Float),
+            ),
+        );
+        fns.insert(
+            "clamp_f".into(),
+            Type::Fn(
+                vec![Type::Float, Type::Float, Type::Float],
+                Box::new(Type::Float),
+            ),
+        );
         fns.insert(
             "random_bytes".into(),
             Type::Fn(vec![Type::Int], Box::new(Type::String)),
@@ -2403,10 +3294,7 @@ impl TypeChecker {
             "atomic_write_file".into(),
             Type::Fn(vec![Type::String, Type::String], Box::new(Type::Int)),
         );
-        fns.insert(
-            "temp_dir".into(),
-            Type::Fn(vec![], Box::new(Type::String)),
-        );
+        fns.insert("temp_dir".into(), Type::Fn(vec![], Box::new(Type::String)));
         fns.insert(
             "temp_file".into(),
             Type::Fn(vec![Type::String], Box::new(Type::String)),
@@ -2495,7 +3383,13 @@ impl TypeChecker {
         fns.insert(
             "https_post".into(),
             Type::Fn(
-                vec![Type::String, Type::String, Type::String, Type::String, Type::Int],
+                vec![
+                    Type::String,
+                    Type::String,
+                    Type::String,
+                    Type::String,
+                    Type::Int,
+                ],
                 Box::new(Type::String),
             ),
         );
@@ -2532,7 +3426,10 @@ impl TypeChecker {
         );
         fns.insert(
             "llm_chat_body".into(),
-            Type::Fn(vec![Type::String, Type::String, Type::Int], Box::new(Type::String)),
+            Type::Fn(
+                vec![Type::String, Type::String, Type::Int],
+                Box::new(Type::String),
+            ),
         );
         fns.insert(
             "llm_system_user".into(),
@@ -2674,7 +3571,13 @@ impl TypeChecker {
         fns.insert(
             "llm_chat_retry".into(),
             Type::Fn(
-                vec![Type::String, Type::String, Type::String, Type::Int, Type::Int],
+                vec![
+                    Type::String,
+                    Type::String,
+                    Type::String,
+                    Type::Int,
+                    Type::Int,
+                ],
                 Box::new(Type::String),
             ),
         );
@@ -2706,21 +3609,48 @@ impl TypeChecker {
             Type::Fn(vec![Type::String], Box::new(Type::String)),
         );
         // Low-level SIP / SDP / RTP (RFC 3261 / 4566 / 3550)
-        fns.insert("sip_is_request".into(), Type::Fn(vec![Type::String], Box::new(Type::Int)));
-        fns.insert("sip_is_response".into(), Type::Fn(vec![Type::String], Box::new(Type::Int)));
-        fns.insert("sip_ok".into(), Type::Fn(vec![Type::String], Box::new(Type::Int)));
-        fns.insert("sip_method".into(), Type::Fn(vec![Type::String], Box::new(Type::String)));
-        fns.insert("sip_request_uri".into(), Type::Fn(vec![Type::String], Box::new(Type::String)));
-        fns.insert("sip_status_code".into(), Type::Fn(vec![Type::String], Box::new(Type::Int)));
-        fns.insert("sip_reason".into(), Type::Fn(vec![Type::String], Box::new(Type::String)));
-        fns.insert("sip_version".into(), Type::Fn(vec![Type::String], Box::new(Type::String)));
+        fns.insert(
+            "sip_is_request".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "sip_is_response".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "sip_ok".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "sip_method".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::String)),
+        );
+        fns.insert(
+            "sip_request_uri".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::String)),
+        );
+        fns.insert(
+            "sip_status_code".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "sip_reason".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::String)),
+        );
+        fns.insert(
+            "sip_version".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::String)),
+        );
         fns.insert(
             "sip_header".into(),
             Type::Fn(vec![Type::String, Type::String], Box::new(Type::String)),
         );
         fns.insert(
             "sip_header_n".into(),
-            Type::Fn(vec![Type::String, Type::String, Type::Int], Box::new(Type::String)),
+            Type::Fn(
+                vec![Type::String, Type::String, Type::Int],
+                Box::new(Type::String),
+            ),
         );
         fns.insert(
             "sip_header_count".into(),
@@ -2733,19 +3663,40 @@ impl TypeChecker {
         );
         fns.insert(
             "sip_header_view_n".into(),
-            Type::Fn(vec![Type::String, Type::String, Type::Int], Box::new(Type::Int)),
+            Type::Fn(
+                vec![Type::String, Type::String, Type::Int],
+                Box::new(Type::Int),
+            ),
         );
-        fns.insert("sip_body_view".into(), Type::Fn(vec![Type::String], Box::new(Type::Int)));
-        fns.insert("sip_method_view".into(), Type::Fn(vec![Type::String], Box::new(Type::Int)));
+        fns.insert(
+            "sip_body_view".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "sip_method_view".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
         fns.insert("sip_view_len".into(), Type::Fn(vec![], Box::new(Type::Int)));
-        fns.insert("sip_view_offset".into(), Type::Fn(vec![], Box::new(Type::Int)));
-        fns.insert("sip_view_eq".into(), Type::Fn(vec![Type::String], Box::new(Type::Int)));
-        fns.insert("sip_view_ci_eq".into(), Type::Fn(vec![Type::String], Box::new(Type::Int)));
+        fns.insert(
+            "sip_view_offset".into(),
+            Type::Fn(vec![], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "sip_view_eq".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "sip_view_ci_eq".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
         fns.insert(
             "sip_view_contains".into(),
             Type::Fn(vec![Type::String], Box::new(Type::Int)),
         );
-        fns.insert("sip_view_copy".into(), Type::Fn(vec![], Box::new(Type::String)));
+        fns.insert(
+            "sip_view_copy".into(),
+            Type::Fn(vec![], Box::new(Type::String)),
+        );
         fns.insert(
             "sip_header_eq".into(),
             Type::Fn(
@@ -2771,10 +3722,22 @@ impl TypeChecker {
             "sip_method_eq".into(),
             Type::Fn(vec![Type::String, Type::String], Box::new(Type::Int)),
         );
-        fns.insert("sip_body".into(), Type::Fn(vec![Type::String], Box::new(Type::String)));
-        fns.insert("sip_content_length".into(), Type::Fn(vec![Type::String], Box::new(Type::Int)));
-        fns.insert("sip_msg_complete".into(), Type::Fn(vec![Type::String], Box::new(Type::Int)));
-        fns.insert("sip_msg_needed".into(), Type::Fn(vec![Type::String], Box::new(Type::Int)));
+        fns.insert(
+            "sip_body".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::String)),
+        );
+        fns.insert(
+            "sip_content_length".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "sip_msg_complete".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "sip_msg_needed".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
         fns.insert(
             "sip_header_line".into(),
             Type::Fn(vec![Type::String, Type::String], Box::new(Type::String)),
@@ -2842,15 +3805,30 @@ impl TypeChecker {
                 Box::new(Type::String),
             ),
         );
-        fns.insert("sip_via_host".into(), Type::Fn(vec![Type::String], Box::new(Type::String)));
-        fns.insert("sip_via_port".into(), Type::Fn(vec![Type::String], Box::new(Type::Int)));
-        fns.insert("sip_via_has_rport".into(), Type::Fn(vec![Type::String], Box::new(Type::Int)));
-        fns.insert("sip_via_rport".into(), Type::Fn(vec![Type::String], Box::new(Type::Int)));
+        fns.insert(
+            "sip_via_host".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::String)),
+        );
+        fns.insert(
+            "sip_via_port".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "sip_via_has_rport".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "sip_via_rport".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
         fns.insert(
             "sip_via_received".into(),
             Type::Fn(vec![Type::String], Box::new(Type::String)),
         );
-        fns.insert("sip_via_maddr".into(), Type::Fn(vec![Type::String], Box::new(Type::String)));
+        fns.insert(
+            "sip_via_maddr".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::String)),
+        );
         fns.insert(
             "sip_via_transport".into(),
             Type::Fn(vec![Type::String], Box::new(Type::String)),
@@ -2900,7 +3878,10 @@ impl TypeChecker {
             "sip_insert_via".into(),
             Type::Fn(vec![Type::String, Type::String], Box::new(Type::String)),
         );
-        fns.insert("sip_strip_via".into(), Type::Fn(vec![Type::String], Box::new(Type::String)));
+        fns.insert(
+            "sip_strip_via".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::String)),
+        );
         fns.insert(
             "sip_first_message_len".into(),
             Type::Fn(vec![Type::String], Box::new(Type::Int)),
@@ -2927,11 +3908,23 @@ impl TypeChecker {
             "sip_cseq_value".into(),
             Type::Fn(vec![Type::Int, Type::String], Box::new(Type::String)),
         );
-        fns.insert("sip_addr_tag".into(), Type::Fn(vec![Type::String], Box::new(Type::String)));
-        fns.insert("sip_via_branch".into(), Type::Fn(vec![Type::String], Box::new(Type::String)));
-        fns.insert("sip_branch".into(), Type::Fn(vec![], Box::new(Type::String)));
+        fns.insert(
+            "sip_addr_tag".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::String)),
+        );
+        fns.insert(
+            "sip_via_branch".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::String)),
+        );
+        fns.insert(
+            "sip_branch".into(),
+            Type::Fn(vec![], Box::new(Type::String)),
+        );
         fns.insert("sip_tag".into(), Type::Fn(vec![], Box::new(Type::String)));
-        fns.insert("sip_call_id_new".into(), Type::Fn(vec![Type::String], Box::new(Type::String)));
+        fns.insert(
+            "sip_call_id_new".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::String)),
+        );
         fns.insert("sip_cseq_new".into(), Type::Fn(vec![], Box::new(Type::Int)));
         fns.insert(
             "sip_dialog_id".into(),
@@ -2944,13 +3937,28 @@ impl TypeChecker {
             "sip_txn_key".into(),
             Type::Fn(vec![Type::String, Type::String], Box::new(Type::String)),
         );
-        fns.insert("sip_uri_scheme".into(), Type::Fn(vec![Type::String], Box::new(Type::String)));
-        fns.insert("sip_uri_user".into(), Type::Fn(vec![Type::String], Box::new(Type::String)));
-        fns.insert("sip_uri_host".into(), Type::Fn(vec![Type::String], Box::new(Type::String)));
-        fns.insert("sip_uri_port".into(), Type::Fn(vec![Type::String], Box::new(Type::Int)));
+        fns.insert(
+            "sip_uri_scheme".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::String)),
+        );
+        fns.insert(
+            "sip_uri_user".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::String)),
+        );
+        fns.insert(
+            "sip_uri_host".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::String)),
+        );
+        fns.insert(
+            "sip_uri_port".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
         fns.insert(
             "sip_uri_build".into(),
-            Type::Fn(vec![Type::String, Type::String, Type::Int], Box::new(Type::String)),
+            Type::Fn(
+                vec![Type::String, Type::String, Type::Int],
+                Box::new(Type::String),
+            ),
         );
         fns.insert(
             "sip_udp_bind".into(),
@@ -2971,7 +3979,10 @@ impl TypeChecker {
             "sip_tcp_send".into(),
             Type::Fn(vec![Type::Int, Type::String], Box::new(Type::Int)),
         );
-        fns.insert("sip_md5_hex".into(), Type::Fn(vec![Type::String], Box::new(Type::String)));
+        fns.insert(
+            "sip_md5_hex".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::String)),
+        );
         fns.insert(
             "sip_digest_response".into(),
             Type::Fn(
@@ -3057,13 +4068,34 @@ impl TypeChecker {
             "sip_method_is".into(),
             Type::Fn(vec![Type::String, Type::String], Box::new(Type::Int)),
         );
-        fns.insert("sdp_ok".into(), Type::Fn(vec![Type::String], Box::new(Type::Int)));
-        fns.insert("sdp_version".into(), Type::Fn(vec![Type::String], Box::new(Type::String)));
-        fns.insert("sdp_origin".into(), Type::Fn(vec![Type::String], Box::new(Type::String)));
-        fns.insert("sdp_origin_addr".into(), Type::Fn(vec![Type::String], Box::new(Type::String)));
-        fns.insert("sdp_session_name".into(), Type::Fn(vec![Type::String], Box::new(Type::String)));
-        fns.insert("sdp_timing".into(), Type::Fn(vec![Type::String], Box::new(Type::String)));
-        fns.insert("sdp_connection".into(), Type::Fn(vec![Type::String], Box::new(Type::String)));
+        fns.insert(
+            "sdp_ok".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "sdp_version".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::String)),
+        );
+        fns.insert(
+            "sdp_origin".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::String)),
+        );
+        fns.insert(
+            "sdp_origin_addr".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::String)),
+        );
+        fns.insert(
+            "sdp_session_name".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::String)),
+        );
+        fns.insert(
+            "sdp_timing".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::String)),
+        );
+        fns.insert(
+            "sdp_connection".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::String)),
+        );
         fns.insert(
             "sdp_connection_addr".into(),
             Type::Fn(vec![Type::String], Box::new(Type::String)),
@@ -3072,7 +4104,10 @@ impl TypeChecker {
             "sdp_connection_is_ip6".into(),
             Type::Fn(vec![Type::String], Box::new(Type::Int)),
         );
-        fns.insert("sdp_media_count".into(), Type::Fn(vec![Type::String], Box::new(Type::Int)));
+        fns.insert(
+            "sdp_media_count".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
         fns.insert(
             "sdp_media".into(),
             Type::Fn(vec![Type::String, Type::Int], Box::new(Type::String)),
@@ -3112,7 +4147,10 @@ impl TypeChecker {
                 Box::new(Type::String),
             ),
         );
-        fns.insert("sdp_direction".into(), Type::Fn(vec![Type::String], Box::new(Type::String)));
+        fns.insert(
+            "sdp_direction".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::String)),
+        );
         fns.insert(
             "sdp_media_direction".into(),
             Type::Fn(vec![Type::String, Type::Int], Box::new(Type::String)),
@@ -3130,7 +4168,10 @@ impl TypeChecker {
         );
         fns.insert(
             "sdp_replace_media_port".into(),
-            Type::Fn(vec![Type::String, Type::Int, Type::Int], Box::new(Type::String)),
+            Type::Fn(
+                vec![Type::String, Type::Int, Type::Int],
+                Box::new(Type::String),
+            ),
         );
         fns.insert(
             "sdp_append_line".into(),
@@ -3166,7 +4207,10 @@ impl TypeChecker {
         );
         fns.insert(
             "sdp_attr_rtpmap".into(),
-            Type::Fn(vec![Type::Int, Type::String, Type::Int], Box::new(Type::String)),
+            Type::Fn(
+                vec![Type::Int, Type::String, Type::Int],
+                Box::new(Type::String),
+            ),
         );
         fns.insert(
             "sdp_attr_fmtp".into(),
@@ -3187,15 +4231,42 @@ impl TypeChecker {
                 Box::new(Type::String),
             ),
         );
-        fns.insert("rtp_header_len".into(), Type::Fn(vec![], Box::new(Type::Int)));
-        fns.insert("rtp_parse_ok".into(), Type::Fn(vec![Type::String], Box::new(Type::Int)));
-        fns.insert("rtp_version".into(), Type::Fn(vec![Type::String], Box::new(Type::Int)));
-        fns.insert("rtp_marker".into(), Type::Fn(vec![Type::String], Box::new(Type::Int)));
-        fns.insert("rtp_payload_type".into(), Type::Fn(vec![Type::String], Box::new(Type::Int)));
-        fns.insert("rtp_seq".into(), Type::Fn(vec![Type::String], Box::new(Type::Int)));
-        fns.insert("rtp_timestamp".into(), Type::Fn(vec![Type::String], Box::new(Type::Int)));
-        fns.insert("rtp_ssrc".into(), Type::Fn(vec![Type::String], Box::new(Type::Int)));
-        fns.insert("rtp_payload".into(), Type::Fn(vec![Type::String], Box::new(Type::String)));
+        fns.insert(
+            "rtp_header_len".into(),
+            Type::Fn(vec![], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "rtp_parse_ok".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "rtp_version".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "rtp_marker".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "rtp_payload_type".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "rtp_seq".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "rtp_timestamp".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "rtp_ssrc".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "rtp_payload".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::String)),
+        );
         fns.insert(
             "rtp_pack".into(),
             Type::Fn(
@@ -4550,11 +5621,17 @@ impl TypeChecker {
         );
         fns.insert(
             "tcp_keepalive".into(),
-            Type::Fn(vec![Type::Int, Type::Int, Type::Int, Type::Int], Box::new(Type::Int)),
+            Type::Fn(
+                vec![Type::Int, Type::Int, Type::Int, Type::Int],
+                Box::new(Type::Int),
+            ),
         );
         fns.insert(
             "tcp_listen_backlog".into(),
-            Type::Fn(vec![Type::String, Type::Int, Type::Int], Box::new(Type::Int)),
+            Type::Fn(
+                vec![Type::String, Type::Int, Type::Int],
+                Box::new(Type::Int),
+            ),
         );
         // JSON / crypto / log / metrics / share / slice / safe_add
         fns.insert(
@@ -5534,7 +6611,10 @@ impl TypeChecker {
         // Closure env free + debugger / task inspect seeds.
         fns.insert(
             "fn_drop".into(),
-            Type::Fn(vec![Type::Fn(vec![], Box::new(Type::Int))], Box::new(Type::Void)),
+            Type::Fn(
+                vec![Type::Fn(vec![], Box::new(Type::Int))],
+                Box::new(Type::Void),
+            ),
         );
         // Overload: accept any fn value — use a loose type via special-case below if needed.
         // Real typing: fn_drop is checked specially; register as taking a generic-ish.
@@ -5837,7 +6917,10 @@ impl TypeChecker {
         );
         fns.insert("gpu_metal_ok".into(), Type::Fn(vec![], Box::new(Type::Int)));
         fns.insert("gpu_cuda_ok".into(), Type::Fn(vec![], Box::new(Type::Int)));
-        fns.insert("gpu_vulkan_ok".into(), Type::Fn(vec![], Box::new(Type::Int)));
+        fns.insert(
+            "gpu_vulkan_ok".into(),
+            Type::Fn(vec![], Box::new(Type::Int)),
+        );
 
         fns.insert(
             "gpu_set_prefer_host".into(),
@@ -5887,31 +6970,19 @@ impl TypeChecker {
         );
         fns.insert(
             "gpu_add_f32".into(),
-            Type::Fn(
-                vec![Type::Int, Type::Int, Type::Int],
-                Box::new(Type::Int),
-            ),
+            Type::Fn(vec![Type::Int, Type::Int, Type::Int], Box::new(Type::Int)),
         );
         fns.insert(
             "gpu_mul_f32".into(),
-            Type::Fn(
-                vec![Type::Int, Type::Int, Type::Int],
-                Box::new(Type::Int),
-            ),
+            Type::Fn(vec![Type::Int, Type::Int, Type::Int], Box::new(Type::Int)),
         );
         fns.insert(
             "gpu_scale_f32".into(),
-            Type::Fn(
-                vec![Type::Int, Type::Int, Type::Float],
-                Box::new(Type::Int),
-            ),
+            Type::Fn(vec![Type::Int, Type::Int, Type::Float], Box::new(Type::Int)),
         );
         fns.insert(
             "gpu_fill_f32".into(),
-            Type::Fn(
-                vec![Type::Int, Type::Int, Type::Float],
-                Box::new(Type::Int),
-            ),
+            Type::Fn(vec![Type::Int, Type::Int, Type::Float], Box::new(Type::Int)),
         );
         /* AI building blocks (inference/training primitives). */
         fns.insert(
@@ -6743,11 +7814,24 @@ impl TypeChecker {
         );
         fns.insert(
             "sql_exec_str4".into(),
-            Type::Fn(vec![Type::SqlDB, Type::String, Type::String, Type::String, Type::String, Type::String], Box::new(Type::Int)),
+            Type::Fn(
+                vec![
+                    Type::SqlDB,
+                    Type::String,
+                    Type::String,
+                    Type::String,
+                    Type::String,
+                    Type::String,
+                ],
+                Box::new(Type::Int),
+            ),
         );
         fns.insert(
             "sql_query_str".into(),
-            Type::Fn(vec![Type::SqlDB, Type::String, Type::String], Box::new(Type::String)),
+            Type::Fn(
+                vec![Type::SqlDB, Type::String, Type::String],
+                Box::new(Type::String),
+            ),
         );
         fns.insert(
             "sql_query_str2".into(),
@@ -7104,7 +8188,10 @@ impl TypeChecker {
             ),
         );
         /* Go-style template engine */
-        fns.insert("tmpl_data_new".into(), Type::Fn(vec![], Box::new(Type::Int)));
+        fns.insert(
+            "tmpl_data_new".into(),
+            Type::Fn(vec![], Box::new(Type::Int)),
+        );
         fns.insert(
             "tmpl_data_free".into(),
             Type::Fn(vec![Type::Int], Box::new(Type::Int)),
@@ -7250,11 +8337,17 @@ impl TypeChecker {
         );
         fns.insert(
             "watch_add".into(),
-            Type::Fn(vec![Type::Named("Watcher".into()), Type::String], Box::new(Type::Int)),
+            Type::Fn(
+                vec![Type::Named("Watcher".into()), Type::String],
+                Box::new(Type::Int),
+            ),
         );
         fns.insert(
             "watch_poll".into(),
-            Type::Fn(vec![Type::Named("Watcher".into()), Type::Int], Box::new(Type::String)),
+            Type::Fn(
+                vec![Type::Named("Watcher".into()), Type::Int],
+                Box::new(Type::String),
+            ),
         );
         fns.insert(
             "watch_close".into(),
@@ -7341,10 +8434,7 @@ impl TypeChecker {
             "utf8_max_rune".into(),
             Type::Fn(vec![], Box::new(Type::Int)),
         );
-        fns.insert(
-            "utf8_utf_max".into(),
-            Type::Fn(vec![], Box::new(Type::Int)),
-        );
+        fns.insert("utf8_utf_max".into(), Type::Fn(vec![], Box::new(Type::Int)));
         // unicode UCD seed (range tables)
         for name in [
             "unicode_is_letter",
@@ -7363,10 +8453,7 @@ impl TypeChecker {
             "unicode_to_title",
             "unicode_simple_fold",
         ] {
-            fns.insert(
-                name.into(),
-                Type::Fn(vec![Type::Int], Box::new(Type::Int)),
-            );
+            fns.insert(name.into(), Type::Fn(vec![Type::Int], Box::new(Type::Int)));
         }
         fns.insert(
             "unicode_is".into(),
@@ -7515,11 +8602,7 @@ impl TypeChecker {
         fns.insert(
             "list_insert_str".into(),
             Type::Fn(
-                vec![
-                    Type::Array(Box::new(Type::String)),
-                    Type::Int,
-                    Type::String,
-                ],
+                vec![Type::Array(Box::new(Type::String)), Type::Int, Type::String],
                 Box::new(Type::Array(Box::new(Type::String))),
             ),
         );
@@ -8175,10 +9258,7 @@ impl TypeChecker {
             "slog_set_json".into(),
             Type::Fn(vec![Type::Int], Box::new(Type::Void)),
         );
-        fns.insert(
-            "slog_is_json".into(),
-            Type::Fn(vec![], Box::new(Type::Int)),
-        );
+        fns.insert("slog_is_json".into(), Type::Fn(vec![], Box::new(Type::Int)));
         fns.insert(
             "slog_set_service".into(),
             Type::Fn(vec![Type::String], Box::new(Type::Void)),
@@ -8187,10 +9267,7 @@ impl TypeChecker {
             "slog_set_output".into(),
             Type::Fn(vec![Type::String], Box::new(Type::Int)),
         );
-        fns.insert(
-            "slog_flush".into(),
-            Type::Fn(vec![], Box::new(Type::Void)),
-        );
+        fns.insert("slog_flush".into(), Type::Fn(vec![], Box::new(Type::Void)));
         fns.insert(
             "slog_get_level".into(),
             Type::Fn(vec![], Box::new(Type::Int)),
@@ -8946,34 +10023,118 @@ impl TypeChecker {
             "dlopen_probe".into(),
             Type::Fn(vec![Type::String], Box::new(Type::Int)),
         );
-        fns.insert("plugin_open".into(), Type::Fn(vec![Type::String], Box::new(Type::Int)));
-        fns.insert("plugin_call".into(), Type::Fn(vec![Type::Int, Type::String, Type::String], Box::new(Type::String)));
-        fns.insert("plugin_close".into(), Type::Fn(vec![Type::Int], Box::new(Type::Int)));
-        fns.insert("plugin_close_all".into(), Type::Fn(vec![], Box::new(Type::Int)));
-        fns.insert("plugin_alive".into(), Type::Fn(vec![Type::Int], Box::new(Type::Int)));
-        fns.insert("plugin_path".into(), Type::Fn(vec![Type::Int], Box::new(Type::String)));
-        fns.insert("plugin_name".into(), Type::Fn(vec![Type::Int], Box::new(Type::String)));
-        fns.insert("plugin_version".into(), Type::Fn(vec![Type::Int], Box::new(Type::String)));
-        fns.insert("plugin_kind".into(), Type::Fn(vec![Type::Int], Box::new(Type::String)));
-        fns.insert("plugin_plugin_abi".into(), Type::Fn(vec![Type::Int], Box::new(Type::Int)));
+        fns.insert(
+            "plugin_open".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "plugin_call".into(),
+            Type::Fn(
+                vec![Type::Int, Type::String, Type::String],
+                Box::new(Type::String),
+            ),
+        );
+        fns.insert(
+            "plugin_close".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "plugin_close_all".into(),
+            Type::Fn(vec![], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "plugin_alive".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "plugin_path".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::String)),
+        );
+        fns.insert(
+            "plugin_name".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::String)),
+        );
+        fns.insert(
+            "plugin_version".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::String)),
+        );
+        fns.insert(
+            "plugin_kind".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::String)),
+        );
+        fns.insert(
+            "plugin_plugin_abi".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
         fns.insert("plugin_count".into(), Type::Fn(vec![], Box::new(Type::Int)));
-        fns.insert("plugin_max_slots".into(), Type::Fn(vec![], Box::new(Type::Int)));
-        fns.insert("plugin_abi_version".into(), Type::Fn(vec![], Box::new(Type::Int)));
-        fns.insert("plugin_api_version".into(), Type::Fn(vec![], Box::new(Type::String)));
-        fns.insert("plugin_last_error".into(), Type::Fn(vec![], Box::new(Type::Int)));
-        fns.insert("plugin_last_error_str".into(), Type::Fn(vec![], Box::new(Type::String)));
-        fns.insert("plugin_call_ok".into(), Type::Fn(vec![Type::Int], Box::new(Type::Int)));
-        fns.insert("plugin_last_log".into(), Type::Fn(vec![], Box::new(Type::String)));
-        fns.insert("plugin_last_log_level".into(), Type::Fn(vec![], Box::new(Type::Int)));
-        fns.insert("plugin_log_count".into(), Type::Fn(vec![], Box::new(Type::Int)));
-        fns.insert("plugin_reload".into(), Type::Fn(vec![Type::Int], Box::new(Type::Int)));
-        fns.insert("plugin_find".into(), Type::Fn(vec![Type::String], Box::new(Type::Int)));
-        fns.insert("plugin_manifest_artifact".into(), Type::Fn(vec![Type::String], Box::new(Type::String)));
-        fns.insert("plugin_manifest_lib_path".into(), Type::Fn(vec![Type::String], Box::new(Type::String)));
-        fns.insert("plugin_open_manifest".into(), Type::Fn(vec![Type::String], Box::new(Type::Int)));
-        fns.insert("plugin_call1".into(), Type::Fn(vec![Type::Int, Type::String], Box::new(Type::String)));
-        fns.insert("plugin_info_json".into(), Type::Fn(vec![Type::Int], Box::new(Type::String)));
-        fns.insert("ffi_abi_name".into(), Type::Fn(vec![], Box::new(Type::String)));
+        fns.insert(
+            "plugin_max_slots".into(),
+            Type::Fn(vec![], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "plugin_abi_version".into(),
+            Type::Fn(vec![], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "plugin_api_version".into(),
+            Type::Fn(vec![], Box::new(Type::String)),
+        );
+        fns.insert(
+            "plugin_last_error".into(),
+            Type::Fn(vec![], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "plugin_last_error_str".into(),
+            Type::Fn(vec![], Box::new(Type::String)),
+        );
+        fns.insert(
+            "plugin_call_ok".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "plugin_last_log".into(),
+            Type::Fn(vec![], Box::new(Type::String)),
+        );
+        fns.insert(
+            "plugin_last_log_level".into(),
+            Type::Fn(vec![], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "plugin_log_count".into(),
+            Type::Fn(vec![], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "plugin_reload".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "plugin_find".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "plugin_manifest_artifact".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::String)),
+        );
+        fns.insert(
+            "plugin_manifest_lib_path".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::String)),
+        );
+        fns.insert(
+            "plugin_open_manifest".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "plugin_call1".into(),
+            Type::Fn(vec![Type::Int, Type::String], Box::new(Type::String)),
+        );
+        fns.insert(
+            "plugin_info_json".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::String)),
+        );
+        fns.insert(
+            "ffi_abi_name".into(),
+            Type::Fn(vec![], Box::new(Type::String)),
+        );
 
         fns.insert(
             "http_listen".into(),
@@ -9079,10 +10240,7 @@ impl TypeChecker {
             "ws_last_close_code".into(),
             Type::Fn(vec![], Box::new(Type::Int)),
         );
-        fns.insert(
-            "ws_last_fin".into(),
-            Type::Fn(vec![], Box::new(Type::Int)),
-        );
+        fns.insert("ws_last_fin".into(), Type::Fn(vec![], Box::new(Type::Int)));
         fns.insert(
             "ws_last_status".into(),
             Type::Fn(vec![], Box::new(Type::Int)),
@@ -9471,7 +10629,10 @@ impl TypeChecker {
         );
         fns.insert(
             "tls_client_new".into(),
-            Type::Fn(vec![Type::String], Box::new(Type::Named("TlsClient".into()))),
+            Type::Fn(
+                vec![Type::String],
+                Box::new(Type::Named("TlsClient".into())),
+            ),
         );
         fns.insert(
             "tls_client_new_insecure".into(),
@@ -9580,11 +10741,7 @@ impl TypeChecker {
         fns.insert(
             "tls_server_reload".into(),
             Type::Fn(
-                vec![
-                    Type::Named("TlsServer".into()),
-                    Type::String,
-                    Type::String,
-                ],
+                vec![Type::Named("TlsServer".into()), Type::String, Type::String],
                 Box::new(Type::Int),
             ),
         );
@@ -9654,7 +10811,10 @@ impl TypeChecker {
         );
         fns.insert(
             "tls_read_nb".into(),
-            Type::Fn(vec![Type::Named("TlsConn".into()), Type::Int], Box::new(Type::String)),
+            Type::Fn(
+                vec![Type::Named("TlsConn".into()), Type::Int],
+                Box::new(Type::String),
+            ),
         );
         fns.insert(
             "tls_write_nb".into(),
@@ -9665,7 +10825,10 @@ impl TypeChecker {
         );
         fns.insert(
             "tls_read".into(),
-            Type::Fn(vec![Type::Named("TlsConn".into()), Type::Int], Box::new(Type::String)),
+            Type::Fn(
+                vec![Type::Named("TlsConn".into()), Type::Int],
+                Box::new(Type::String),
+            ),
         );
         fns.insert(
             "tls_write".into(),
@@ -10274,7 +11437,10 @@ impl TypeChecker {
         );
         fns.insert(
             "tcp_connect_timeout".into(),
-            Type::Fn(vec![Type::String, Type::Int, Type::Int], Box::new(Type::Int)),
+            Type::Fn(
+                vec![Type::String, Type::Int, Type::Int],
+                Box::new(Type::Int),
+            ),
         );
         fns.insert(
             "tcp_set_he_delay_ms".into(),
@@ -10365,7 +11531,13 @@ impl TypeChecker {
         fns.insert(
             "http_forward".into(),
             Type::Fn(
-                vec![Type::String, Type::Int, Type::String, Type::String, Type::String],
+                vec![
+                    Type::String,
+                    Type::Int,
+                    Type::String,
+                    Type::String,
+                    Type::String,
+                ],
                 Box::new(Type::String),
             ),
         );
@@ -10451,19 +11623,31 @@ impl TypeChecker {
         );
         fns.insert(
             "proxy_io_ok".into(),
-            Type::Fn(vec![Type::Named("ProxyIoResult".into())], Box::new(Type::Int)),
+            Type::Fn(
+                vec![Type::Named("ProxyIoResult".into())],
+                Box::new(Type::Int),
+            ),
         );
         fns.insert(
             "proxy_io_bytes_written".into(),
-            Type::Fn(vec![Type::Named("ProxyIoResult".into())], Box::new(Type::Int)),
+            Type::Fn(
+                vec![Type::Named("ProxyIoResult".into())],
+                Box::new(Type::Int),
+            ),
         );
         fns.insert(
             "proxy_io_bytes_read".into(),
-            Type::Fn(vec![Type::Named("ProxyIoResult".into())], Box::new(Type::Int)),
+            Type::Fn(
+                vec![Type::Named("ProxyIoResult".into())],
+                Box::new(Type::Int),
+            ),
         );
         fns.insert(
             "http_parse".into(),
-            Type::Fn(vec![Type::String], Box::new(Type::Named("HttpParsed".into()))),
+            Type::Fn(
+                vec![Type::String],
+                Box::new(Type::Named("HttpParsed".into())),
+            ),
         );
         fns.insert(
             "http_parsed_ok".into(),
@@ -10479,23 +11663,38 @@ impl TypeChecker {
         );
         fns.insert(
             "http_parsed_method".into(),
-            Type::Fn(vec![Type::Named("HttpParsed".into())], Box::new(Type::String)),
+            Type::Fn(
+                vec![Type::Named("HttpParsed".into())],
+                Box::new(Type::String),
+            ),
         );
         fns.insert(
             "http_parsed_path".into(),
-            Type::Fn(vec![Type::Named("HttpParsed".into())], Box::new(Type::String)),
+            Type::Fn(
+                vec![Type::Named("HttpParsed".into())],
+                Box::new(Type::String),
+            ),
         );
         fns.insert(
             "http_parsed_host".into(),
-            Type::Fn(vec![Type::Named("HttpParsed".into())], Box::new(Type::String)),
+            Type::Fn(
+                vec![Type::Named("HttpParsed".into())],
+                Box::new(Type::String),
+            ),
         );
         fns.insert(
             "http_parsed_headers".into(),
-            Type::Fn(vec![Type::Named("HttpParsed".into())], Box::new(Type::String)),
+            Type::Fn(
+                vec![Type::Named("HttpParsed".into())],
+                Box::new(Type::String),
+            ),
         );
         fns.insert(
             "http_parsed_body".into(),
-            Type::Fn(vec![Type::Named("HttpParsed".into())], Box::new(Type::String)),
+            Type::Fn(
+                vec![Type::Named("HttpParsed".into())],
+                Box::new(Type::String),
+            ),
         );
         fns.insert(
             "http_parsed_header".into(),
@@ -10601,8 +11800,7 @@ impl TypeChecker {
         self.loop_labels.push(label);
         self.loop_continue_moved
             .push((HashMap::new(), HashMap::new()));
-        self.loop_break_moved
-            .push((HashMap::new(), HashMap::new()));
+        self.loop_break_moved.push((HashMap::new(), HashMap::new()));
     }
 
     fn pop_loop(&mut self) {
@@ -10765,9 +11963,10 @@ impl TypeChecker {
                 // `if init; cond` desugar's `if true { … }` scope transparent.
                 match const_bool(cond) {
                     Some(true) => block_always_diverges(then_block),
-                    Some(false) => {
-                        else_block.as_ref().map(block_always_diverges).unwrap_or(false)
-                    }
+                    Some(false) => else_block
+                        .as_ref()
+                        .map(block_always_diverges)
+                        .unwrap_or(false),
                     None => {
                         let then_d = block_always_diverges(then_block);
                         match else_block {
@@ -10784,10 +11983,7 @@ impl TypeChecker {
     /// LSP helper: run type checking and collect symbol types.
     /// Returns partial results even when the program has type errors.
     /// Returns (binding_names_with_types, all_symbol_types).
-    pub fn check_for_lsp(
-        &mut self,
-        program: &Program,
-    ) -> HashMap<String, String> {
+    pub fn check_for_lsp(&mut self, program: &Program) -> HashMap<String, String> {
         self.lsp_mode = true;
         let _ = self.check(program);
         self.lsp_mode = false;
@@ -10873,8 +12069,7 @@ impl TypeChecker {
                         self.const_fns.insert(f.name.clone(), f.clone());
                     }
                     if let crate::ast::ApiStability::Deprecated { message } = &f.stability {
-                        self.deprecated_fns
-                            .insert(f.name.clone(), message.clone());
+                        self.deprecated_fns.insert(f.name.clone(), message.clone());
                     }
                     if !f.type_params.is_empty() {
                         // Generic template — monomorphized on call.
@@ -10926,14 +12121,20 @@ impl TypeChecker {
                 }
                 Item::Import { .. } => {}
                 Item::Const(c) => {
-                    if let Ok(v) =
-                        fold_const_expr_with(&c.value, &self.const_ints, &self.const_strs, &self.const_fns)
-                    {
+                    if let Ok(v) = fold_const_expr_with(
+                        &c.value,
+                        &self.const_ints,
+                        &self.const_strs,
+                        &self.const_fns,
+                    ) {
                         self.const_ints.insert(c.name.clone(), v);
                         self.define(&c.name, Type::Int, false);
-                    } else if let Ok(s) =
-                        fold_const_str_with(&c.value, &self.const_ints, &self.const_strs, &self.const_fns)
-                    {
+                    } else if let Ok(s) = fold_const_str_with(
+                        &c.value,
+                        &self.const_ints,
+                        &self.const_strs,
+                        &self.const_fns,
+                    ) {
                         self.const_strs.insert(c.name.clone(), s);
                         self.define(&c.name, Type::String, false);
                     } else {
@@ -10992,8 +12193,7 @@ impl TypeChecker {
                             .map(|t| self.resolve_type(t).ok() == Some(Type::String))
                             .unwrap_or(false);
                         let fold_err = if ret_is_str {
-                            eval_const_fn_body_str(&f.body, &env, &str_env, &self.const_fns)
-                                .err()
+                            eval_const_fn_body_str(&f.body, &env, &str_env, &self.const_fns).err()
                         } else {
                             eval_const_fn_body(&f.body, &env, &str_env, &self.const_fns).err()
                         };
@@ -11054,10 +12254,7 @@ impl TypeChecker {
                     }
                     if let Some(Type::Fn(fp, _)) = self.fns.get(&free) {
                         if fp.len() == expected_params.len() + 1
-                            && self.types_equal_iface_self(
-                                &fp[0],
-                                &Type::Named(sname.clone()),
-                            )
+                            && self.types_equal_iface_self(&fp[0], &Type::Named(sname.clone()))
                         {
                             candidates.push(free);
                         }
@@ -12177,12 +13374,14 @@ impl TypeChecker {
                     let resolved_args = resolved_args?;
                     // Check if this is a generic struct or enum instantiation.
                     if self.generic_structs.contains_key(other) {
-                        let tags: Vec<String> = resolved_args.iter().map(|t| t.mono_tag()).collect();
+                        let tags: Vec<String> =
+                            resolved_args.iter().map(|t| t.mono_tag()).collect();
                         let mono_name = format!("{other}__{}", tags.join("__"));
                         return Ok(Type::Named(mono_name));
                     }
                     if self.generic_enums.contains_key(other) {
-                        let tags: Vec<String> = resolved_args.iter().map(|t| t.mono_tag()).collect();
+                        let tags: Vec<String> =
+                            resolved_args.iter().map(|t| t.mono_tag()).collect();
                         let mono_name = format!("{other}__{}", tags.join("__"));
                         return Ok(Type::Named(mono_name));
                     }
@@ -12345,8 +13544,8 @@ impl TypeChecker {
         // expression, or a body that provably returns on every path (e.g. an
         // `if cond { return a } else { return b }` with no fall-through) — the
         // last matching Go's rule and making `if init; cond { … }` bodies usable.
-        let has_explicit_return = stmts.iter().any(|s| matches!(s, Stmt::Return(_)))
-            || nll::stmts_always_diverges(stmts);
+        let has_explicit_return =
+            stmts.iter().any(|s| matches!(s, Stmt::Return(_))) || nll::stmts_always_diverges(stmts);
         let trailing =
             !ret_void && !has_explicit_return && matches!(stmts.last(), Some(Stmt::Expr(_)));
 
@@ -12527,7 +13726,11 @@ impl TypeChecker {
                     || body.stmts.iter().any(|s| Self::stmt_mentions(s, name))
             }
             Stmt::CFor {
-                init, cond, post, body, ..
+                init,
+                cond,
+                post,
+                body,
+                ..
             } => {
                 Self::stmt_mentions(init, name)
                     || Self::expr_mentions(cond, name)
@@ -12625,8 +13828,14 @@ impl TypeChecker {
                 else_block,
             } => {
                 Self::expr_mentions(cond, name)
-                    || then_block.stmts.iter().any(|s| Self::stmt_mentions(s, name))
-                    || else_block.stmts.iter().any(|s| Self::stmt_mentions(s, name))
+                    || then_block
+                        .stmts
+                        .iter()
+                        .any(|s| Self::stmt_mentions(s, name))
+                    || else_block
+                        .stmts
+                        .iter()
+                        .any(|s| Self::stmt_mentions(s, name))
             }
             Expr::Fan { collection, mapper } => {
                 Self::expr_mentions(collection, name) || Self::expr_mentions(mapper, name)
@@ -12736,8 +13945,7 @@ impl TypeChecker {
                 };
                 self.define(name, final_ty.clone(), *mutable);
                 if self.lsp_mode && ty.is_none() {
-                    self.lsp_bindings
-                        .push((name.clone(), final_ty.display()));
+                    self.lsp_bindings.push((name.clone(), final_ty.display()));
                 }
                 // Sub-slice stored in this binding must not outlive its base.
                 self.assert_slice_view_lifetime(name, init)?;
@@ -12811,7 +14019,12 @@ impl TypeChecker {
                         if matches!(existing, Type::Fn(_, _)) {
                             let info = match init {
                                 Expr::Tuple(values) => values
-                                    .get(names.iter().position(|name| name == n).unwrap_or(usize::MAX))
+                                    .get(
+                                        names
+                                            .iter()
+                                            .position(|name| name == n)
+                                            .unwrap_or(usize::MAX),
+                                    )
                                     .map(|value| self.fn_capture_info_for_expr(value))
                                     .unwrap_or_else(|| FnCaptureInfo {
                                         unknown: true,
@@ -13490,12 +14703,45 @@ impl TypeChecker {
                             "cannot use two binders over an int count; use `for i in n` or `for i in range n`",
                         ));
                     }
-                    // Iterator protocol: struct with a `next` method returning Option[T]
+                    // Iterator protocol: struct with a `next` method returning Option[T].
+                    // Prefer `fn next(mut self)` so the loop advances the binding in place.
                     Type::Struct { name, .. } | Type::Named(name) => {
                         let next_fn = format!("{name}_next");
                         if let Some(Type::Fn(_, ret)) = self.fns.get(&next_fn) {
                             match ret.as_ref() {
                                 Type::Option(inner) => {
+                                    let mut_self = self
+                                        .fn_mut_params
+                                        .get(&next_fn)
+                                        .and_then(|m| m.first().copied())
+                                        .unwrap_or(false);
+                                    if mut_self {
+                                        match iter {
+                                            Expr::Ident(n) => {
+                                                let Some((_, is_mut)) = self.lookup(n) else {
+                                                    return Err(TypeError::new(format!(
+                                                        "cannot iterate over unknown binding `{n}`"
+                                                    )));
+                                                };
+                                                if !is_mut {
+                                                    return Err(TypeError::new(format!(
+                                                        "`{name}_next` takes mut self — iterate a `let mut` binding"
+                                                    ))
+                                                    .hint(format!(
+                                                        "use `let mut {n} = …` then `for … in {n}`"
+                                                    )));
+                                                }
+                                            }
+                                            _ => {
+                                                return Err(TypeError::new(format!(
+                                                    "`{name}_next` takes mut self — iterable must be a mutable local"
+                                                ))
+                                                .hint(
+                                                    "bind the iterator first: `let mut it = …; for v in it { … }`",
+                                                ));
+                                            }
+                                        }
+                                    }
                                     (Type::Int, (**inner).clone(), false, false)
                                 }
                                 _ => {
@@ -13506,7 +14752,7 @@ impl TypeChecker {
                             }
                         } else {
                             return Err(TypeError::new(format!(
-                                "cannot iterate over {}; implement `on {name} {{ fn next(self) -> Option[T] }}` for iterator support",
+                                "cannot iterate over {}; implement `on {name} {{ fn next(mut self) -> Option[T] }}` for iterator support",
                                 name
                             )));
                         }
@@ -13636,10 +14882,7 @@ impl TypeChecker {
                 }
                 for (n, fields) in before_fields {
                     if !fields.is_empty() {
-                        self.hold_moved_fields
-                            .entry(n)
-                            .or_default()
-                            .extend(fields);
+                        self.hold_moved_fields.entry(n).or_default().extend(fields);
                     }
                 }
                 Ok(())
@@ -13653,9 +14896,7 @@ impl TypeChecker {
                     self.check_stmt(stmt)?;
                     // Track arena-backed locals for escape checks (SAFE-007).
                     if let Stmt::Let {
-                        name: bind,
-                        init,
-                        ..
+                        name: bind, init, ..
                     } = stmt
                     {
                         if Self::expr_is_arena_alloc(init) {
@@ -13855,7 +15096,9 @@ impl TypeChecker {
                 // Try qualified variant lookup first using return type context
                 let qctor = if let Type::Named(ret_name) = &self.current_ret {
                     self.variants.get(&format!("{ret_name}::{name}")).cloned()
-                } else { None };
+                } else {
+                    None
+                };
                 if let Some(ctor) = qctor.as_ref().or_else(|| self.variants.get(name)) {
                     if ctor.fields.is_empty() {
                         return Ok(Type::Enum {
@@ -15017,28 +16260,780 @@ impl TypeChecker {
                         } else {
                             format!("call to deprecated function `{name}`: {msg}")
                         };
-                        return Err(TypeError::new(detail).hint(
-                            "remove the call or drop `#[deprecated]` from the definition",
-                        ));
+                        return Err(TypeError::new(detail)
+                            .hint("remove the call or drop `#[deprecated]` from the definition"));
                     }
                     // User-defined generic: monomorphize on call
                     if self.generic_fns.contains_key(name) {
                         return self.check_generic_call(name, args);
                     }
-                    if let Some(result) = self.check_builtin_call_00(name, args) {
-                        return result;
-                    }
-                    if let Some(result) = self.check_builtin_call_01(name, args) {
-                        return result;
-                    }
-                    if let Some(result) = self.check_builtin_call_02(name, args) {
-                        return result;
-                    }
-                    if let Some(result) = self.check_builtin_call_03(name, args) {
-                        return result;
-                    }
-                    if let Some(result) = self.check_builtin_call_04(name, args) {
-                        return result;
+                    match name.as_str() {
+                        "gc_arena_new" | "gc_alloc" | "gc_collect" | "gc_live" | "gc_enabled"
+                        | "gc_root" | "gc_unroot" | "gc_link" | "gc_mark" | "gc_root_count" => {
+                            return Err(TypeError::new(format!(
+                                "{name} is unavailable: Mako has no garbage collector"
+                            ))
+                            .hint("use let/hold/share/arena for deterministic ownership"));
+                        }
+                        "Ok" if args.len() == 1 => {
+                            // Prefer expected Result shape from current_expected (nested
+                            // constructors) or function return type.
+                            let expected = match &self.current_expected {
+                                Some(Type::Result(ok, err)) => {
+                                    Some((ok.as_ref().clone(), err.as_ref().clone()))
+                                }
+                                _ => match &self.current_ret {
+                                    Type::Result(ok, err) => {
+                                        Some((ok.as_ref().clone(), err.as_ref().clone()))
+                                    }
+                                    _ => None,
+                                },
+                            };
+                            if let Some((ok, err)) = expected {
+                                let saved_ret = self.current_ret.clone();
+                                let saved_exp = self.current_expected.clone();
+                                self.current_expected = Some(ok.clone());
+                                if matches!(&ok, Type::Result(_, _)) {
+                                    self.current_ret = ok.clone();
+                                }
+                                let t = self.check_expr(&args[0])?;
+                                self.current_ret = saved_ret;
+                                self.current_expected = saved_exp;
+                                if !self.compatible(&t, &ok) {
+                                    return Err(TypeError::new(format!(
+                                        "Ok(...) type mismatch: expected {}, got {}",
+                                        ok.display(),
+                                        t.display()
+                                    )));
+                                }
+                                return Ok(Type::Result(Box::new(ok), Box::new(err)));
+                            }
+                            let t = self.check_expr(&args[0])?;
+                            return Ok(Type::Result(Box::new(t), Box::new(Type::String)));
+                        }
+                        "Err" if args.len() == 1 => {
+                            let expected = match &self.current_expected {
+                                Some(Type::Result(ok, err)) => {
+                                    Some((ok.as_ref().clone(), err.as_ref().clone()))
+                                }
+                                _ => match &self.current_ret {
+                                    Type::Result(ok, err) => {
+                                        Some((ok.as_ref().clone(), err.as_ref().clone()))
+                                    }
+                                    _ => None,
+                                },
+                            };
+                            if let Some((ok, err)) = expected {
+                                let e = self.check_expr(&args[0])?;
+                                if !self.compatible(&e, &err) {
+                                    return Err(TypeError::new(format!(
+                                        "Err(...) type mismatch: expected {}, got {}",
+                                        err.display(),
+                                        e.display()
+                                    )));
+                                }
+                                return Ok(Type::Result(Box::new(ok), Box::new(err)));
+                            }
+                            let e = self.check_expr(&args[0])?;
+                            return Ok(Type::Result(Box::new(Type::Int), Box::new(e)));
+                        }
+                        "error" if args.len() == 1 => {
+                            let e = self.check_expr(&args[0])?;
+                            if e != Type::String {
+                                return Err(TypeError::new("error(...) expects a string message"));
+                            }
+                            return Ok(Type::Result(Box::new(Type::Int), Box::new(Type::String)));
+                        }
+                        // error_context(r, msg) — richer error seed (alias of wrap_err)
+                        "error_context" | "wrap_err" if args.len() == 2 => {
+                            let r = self.check_expr(&args[0])?;
+                            let msg = self.check_expr(&args[1])?;
+                            match &r {
+                                Type::Result(_, e) if **e == Type::String => {
+                                    if msg != Type::String {
+                                        return Err(TypeError::new(
+                                            "wrap_err / error_context prefix must be string",
+                                        ));
+                                    }
+                                    return Ok(r);
+                                }
+                                other => {
+                                    return Err(TypeError::new(format!(
+                                        "wrap_err expects Result[_, string], got {}",
+                                        other.display()
+                                    )));
+                                }
+                            }
+                        }
+                        "errorf" if args.len() == 2 => {
+                            let fmt = self.check_expr(&args[0])?;
+                            let arg = self.check_expr(&args[1])?;
+                            if fmt != Type::String || arg != Type::String {
+                                return Err(TypeError::new(
+                                    "errorf(fmt, arg) expects two strings (Go-like fmt.Errorf)",
+                                ));
+                            }
+                            return Ok(Type::Result(Box::new(Type::Int), Box::new(Type::String)));
+                        }
+                        // error_join(a, b): if either Err, return Err with both messages; else Ok(a)
+                        "error_join" if args.len() == 2 => {
+                            let a = self.check_expr(&args[0])?;
+                            let b = self.check_expr(&args[1])?;
+                            match (&a, &b) {
+                                (Type::Result(_, e1), Type::Result(_, e2))
+                                    if **e1 == Type::String && **e2 == Type::String =>
+                                {
+                                    return Ok(a);
+                                }
+                                _ => {
+                                    return Err(TypeError::new(
+                                        "error_join expects two Result[_, string] values",
+                                    ));
+                                }
+                            }
+                        }
+                        "error_tag" if args.len() == 2 => {
+                            let tag = self.check_expr(&args[0])?;
+                            let msg = self.check_expr(&args[1])?;
+                            if tag != Type::String || msg != Type::String {
+                                return Err(TypeError::new(
+                                    "error_tag(tag, msg) expects two strings",
+                                ));
+                            }
+                            if let Type::Result(ok, err) = &self.current_ret {
+                                if **err == Type::String {
+                                    return Ok(Type::Result(ok.clone(), err.clone()));
+                                }
+                            }
+                            return Ok(Type::Result(Box::new(Type::Int), Box::new(Type::String)));
+                        }
+                        "error_is" if args.len() == 2 => {
+                            let r = self.check_expr(&args[0])?;
+                            let needle = self.check_expr(&args[1])?;
+                            match &r {
+                                Type::Result(_, e) if **e == Type::String => {
+                                    if needle != Type::String {
+                                        return Err(TypeError::new(
+                                            "error_is needle must be string",
+                                        ));
+                                    }
+                                    return Ok(Type::Bool);
+                                }
+                                other => {
+                                    return Err(TypeError::new(format!(
+                                        "error_is expects Result[_, string], got {}",
+                                        other.display()
+                                    )));
+                                }
+                            }
+                        }
+                        "error_string" if args.len() == 1 => {
+                            let r = self.check_expr(&args[0])?;
+                            match &r {
+                                Type::Result(_, e) if **e == Type::String => {
+                                    return Ok(Type::String);
+                                }
+                                other => {
+                                    return Err(TypeError::new(format!(
+                                        "error_string expects Result[_, string], got {}",
+                                        other.display()
+                                    )));
+                                }
+                            }
+                        }
+                        "error_unwrap" | "error_root" if args.len() == 1 => {
+                            let r = self.check_expr(&args[0])?;
+                            match &r {
+                                Type::Result(_, e) if **e == Type::String => {
+                                    return Ok(r);
+                                }
+                                other => {
+                                    return Err(TypeError::new(format!(
+                                        "error_unwrap/error_root expects Result[_, string], got {}",
+                                        other.display()
+                                    )));
+                                }
+                            }
+                        }
+                        "error_as_tag" if args.len() == 1 => {
+                            let r = self.check_expr(&args[0])?;
+                            match &r {
+                                Type::Result(_, e) if **e == Type::String => {
+                                    return Ok(Type::String);
+                                }
+                                other => {
+                                    return Err(TypeError::new(format!(
+                                        "error_as_tag expects Result[_, string], got {}",
+                                        other.display()
+                                    )));
+                                }
+                            }
+                        }
+                        "error_has_tag" if args.len() == 2 => {
+                            let r = self.check_expr(&args[0])?;
+                            let tag = self.check_expr(&args[1])?;
+                            match &r {
+                                Type::Result(_, e) if **e == Type::String => {
+                                    if tag != Type::String {
+                                        return Err(TypeError::new(
+                                            "error_has_tag tag must be string",
+                                        ));
+                                    }
+                                    return Ok(Type::Bool);
+                                }
+                                other => {
+                                    return Err(TypeError::new(format!(
+                                        "error_has_tag expects Result[_, string], got {}",
+                                        other.display()
+                                    )));
+                                }
+                            }
+                        }
+                        "dbg" if args.len() == 1 => {
+                            let t = self.check_expr(&args[0])?;
+                            if !matches!(
+                                t,
+                                Type::Int
+                                    | Type::Int64
+                                    | Type::Int32
+                                    | Type::Int8
+                                    | Type::Byte
+                                    | Type::Bool
+                            ) {
+                                return Err(TypeError::new(
+                                    "dbg(x) expects an integer (use dbg_str for strings)",
+                                ));
+                            }
+                            return Ok(t);
+                        }
+                        "dbg_str" if args.len() == 1 => {
+                            let t = self.check_expr(&args[0])?;
+                            if t != Type::String {
+                                return Err(TypeError::new("dbg_str expects string"));
+                            }
+                            return Ok(Type::String);
+                        }
+                        "reflect_value_of" if args.len() == 1 => {
+                            let t = self.check_expr(&args[0])?;
+                            return match &t {
+                                Type::Named(n) if self.is_reflectable_struct(n) => {
+                                    Ok(Type::Named("ReflectValue".into()))
+                                }
+                                Type::Struct { name, .. } if self.is_reflectable_struct(name) => {
+                                    Ok(Type::Named("ReflectValue".into()))
+                                }
+                                _ => Err(TypeError::new(
+                                    "reflect_value_of expects a reflectable struct (POD leaves, \
+                                     nested POD, Option/Result/array/map of reflectable fields)",
+                                )),
+                            };
+                        }
+                        "share_int" if args.len() == 1 => {
+                            let t = self.check_expr(&args[0])?;
+                            if t != Type::Int {
+                                return Err(TypeError::new(format!(
+                                    "share_int expects int, got {}",
+                                    t.display()
+                                )));
+                            }
+                            if let Expr::Ident(src) = &args[0] {
+                                if self.shared_borrows.contains_key(src) {
+                                    return Err(TypeError::new(format!(
+                                        "cannot share `{src}` — already shared"
+                                    ))
+                                    .hint("drop the existing share first (NLL: one live share of a local)"));
+                                }
+                                self.shared_borrows.insert(src.clone(), true);
+                            }
+                            return Ok(Type::Named("ShareInt".into()));
+                        }
+                        "share_drop" if args.len() == 1 => {
+                            let t = self.check_expr(&args[0])?;
+                            let _ = t;
+                            if let Expr::Ident(share_name) = &args[0] {
+                                self.share_vars.remove(share_name);
+                                self.share_scope_depth.remove(share_name);
+                                if let Some(src) = self.share_sources.remove(share_name) {
+                                    let still = self.share_sources.values().any(|s| s == &src);
+                                    if !still {
+                                        self.shared_borrows.remove(&src);
+                                    }
+                                } else {
+                                    // Unknown mapping — clear all (legacy).
+                                    self.shared_borrows.clear();
+                                }
+                            } else {
+                                self.shared_borrows.clear();
+                            }
+                            return Ok(Type::Void);
+                        }
+                        "Some" if args.len() == 1 => {
+                            // Nested Some under Ok(Some(...)) or Option return: use expected inner.
+                            let expected_inner = match &self.current_expected {
+                                Some(Type::Option(i)) => Some(i.as_ref().clone()),
+                                _ => match &self.current_ret {
+                                    Type::Option(i) => Some(i.as_ref().clone()),
+                                    _ => None,
+                                },
+                            };
+                            if let Some(inner) = expected_inner {
+                                let saved_ret = self.current_ret.clone();
+                                let saved_exp = self.current_expected.clone();
+                                self.current_expected = Some(inner.clone());
+                                if matches!(&inner, Type::Result(_, _)) {
+                                    self.current_ret = inner.clone();
+                                }
+                                let t = self.check_expr(&args[0])?;
+                                self.current_ret = saved_ret;
+                                self.current_expected = saved_exp;
+                                if !self.compatible(&t, &inner) {
+                                    return Err(TypeError::new(format!(
+                                        "Some(...) type mismatch: expected {}, got {}",
+                                        inner.display(),
+                                        t.display()
+                                    )));
+                                }
+                                return Ok(Type::Option(Box::new(inner)));
+                            }
+                            let t = self.check_expr(&args[0])?;
+                            return Ok(Type::Option(Box::new(t)));
+                        }
+                        "None" if args.is_empty() => {
+                            if let Some(Type::Option(i)) = &self.current_expected {
+                                return Ok(Type::Option(i.clone()));
+                            }
+                            if let Type::Option(i) = &self.current_ret {
+                                return Ok(Type::Option(i.clone()));
+                            }
+                            return Ok(Type::Option(Box::new(Type::Int)));
+                        }
+                        "print" => {
+                            if args.len() != 1 {
+                                return Err(TypeError::new("print takes 1 arg"));
+                            }
+                            self.check_expr(&args[0])?;
+                            return Ok(Type::Void);
+                        }
+                        "print_int64" if args.len() == 1 => {
+                            let t = self.check_expr(&args[0])?;
+                            if t != Type::Int64 {
+                                return Err(TypeError::new(format!(
+                                    "print_int64 expects int64, got {}",
+                                    t.display()
+                                ))
+                                .hint("use print_int for int, or int64(x) to convert"));
+                            }
+                            return Ok(Type::Void);
+                        }
+                        "print_int32" if args.len() == 1 => {
+                            let t = self.check_expr(&args[0])?;
+                            if t != Type::Int32 {
+                                return Err(TypeError::new(format!(
+                                    "print_int32 expects int32, got {}",
+                                    t.display()
+                                )));
+                            }
+                            return Ok(Type::Void);
+                        }
+                        "print_int8" if args.len() == 1 => {
+                            let t = self.check_expr(&args[0])?;
+                            if t != Type::Int8 {
+                                return Err(TypeError::new(format!(
+                                    "print_int8 expects int8, got {}",
+                                    t.display()
+                                )));
+                            }
+                            return Ok(Type::Void);
+                        }
+                        "print_uint64" if args.len() == 1 => {
+                            let t = self.check_expr(&args[0])?;
+                            if t != Type::UInt64 {
+                                return Err(TypeError::new(format!(
+                                    "print_uint64 expects uint64, got {}",
+                                    t.display()
+                                )));
+                            }
+                            return Ok(Type::Void);
+                        }
+                        "print_float" if args.len() == 1 => {
+                            let t = self.check_expr(&args[0])?;
+                            if t != Type::Float {
+                                return Err(TypeError::new(format!(
+                                    "print_float expects float, got {}",
+                                    t.display()
+                                )));
+                            }
+                            return Ok(Type::Void);
+                        }
+                        // Go-like conversions between integer kinds + string/[]byte
+                        "int64" if args.len() == 1 => {
+                            let t = self.check_expr(&args[0])?;
+                            if is_int_family(&t) || t == Type::Float {
+                                return Ok(Type::Int64);
+                            }
+                            return Err(TypeError::new(format!(
+                                "cannot convert {} to int64",
+                                t.display()
+                            )));
+                        }
+                        "int32" if args.len() == 1 => {
+                            let t = self.check_expr(&args[0])?;
+                            if is_int_family(&t) || t == Type::Float {
+                                return Ok(Type::Int32);
+                            }
+                            return Err(TypeError::new(format!(
+                                "cannot convert {} to int32",
+                                t.display()
+                            )));
+                        }
+                        "int8" if args.len() == 1 => {
+                            if let Ok(v) = try_fold_const(&args[0]) {
+                                if v < -128 || v > 127 {
+                                    return Err(TypeError::new(format!(
+                                        "int8({v}) out of range -128..127"
+                                    )));
+                                }
+                            }
+                            let t = self.check_expr(&args[0])?;
+                            if is_int_family(&t) || t == Type::Float {
+                                return Ok(Type::Int8);
+                            }
+                            return Err(TypeError::new(format!(
+                                "cannot convert {} to int8",
+                                t.display()
+                            )));
+                        }
+                        "uint64" if args.len() == 1 => {
+                            if let Ok(v) = try_fold_const(&args[0]) {
+                                if v < 0 {
+                                    return Err(TypeError::new(format!(
+                                        "uint64({v}) rejects negative constant"
+                                    )));
+                                }
+                            }
+                            let t = self.check_expr(&args[0])?;
+                            if is_int_family(&t) || t == Type::Float {
+                                return Ok(Type::UInt64);
+                            }
+                            return Err(TypeError::new(format!(
+                                "cannot convert {} to uint64",
+                                t.display()
+                            )));
+                        }
+                        "byte" if args.len() == 1 => {
+                            if let Ok(v) = try_fold_const(&args[0]) {
+                                if v < 0 || v > 255 {
+                                    return Err(TypeError::new(format!(
+                                        "byte({v}) out of range 0..255"
+                                    )));
+                                }
+                            }
+                            let t = self.check_expr(&args[0])?;
+                            if is_int_family(&t) || t == Type::Float {
+                                return Ok(Type::Byte);
+                            }
+                            return Err(TypeError::new(format!(
+                                "cannot convert {} to byte",
+                                t.display()
+                            )));
+                        }
+                        "int" if args.len() == 1 => {
+                            let t = self.check_expr(&args[0])?;
+                            if is_int_family(&t) || t == Type::Float {
+                                return Ok(Type::Int);
+                            }
+                            return Err(TypeError::new(format!(
+                                "cannot convert {} to int",
+                                t.display()
+                            )));
+                        }
+                        "float" | "float64" if args.len() == 1 => {
+                            let t = self.check_expr(&args[0])?;
+                            if is_int_family(&t) || t == Type::Float {
+                                return Ok(Type::Float);
+                            }
+                            return Err(TypeError::new(format!(
+                                "cannot convert {} to float",
+                                t.display()
+                            )));
+                        }
+                        // string([]byte) / string(int…) / string(string)
+                        "string" if args.len() == 1 => {
+                            let t = self.check_expr(&args[0])?;
+                            match t {
+                                Type::Array(inner) if *inner == Type::Byte => {
+                                    return Ok(Type::String);
+                                }
+                                Type::String => return Ok(Type::String),
+                                t if is_int_family(&t) => return Ok(Type::String),
+                                other => {
+                                    return Err(TypeError::new(format!(
+                                        "cannot convert {} to string (need []byte, int family, or string)",
+                                        other.display()
+                                    )));
+                                }
+                            }
+                        }
+                        // Go `[]byte(s)` — Mako uses bytes(s) (type `[]byte` is not a call)
+                        "bytes" if args.len() == 1 => {
+                            let t = self.check_expr(&args[0])?;
+                            match t {
+                                Type::String => {
+                                    return Ok(Type::Array(Box::new(Type::Byte)));
+                                }
+                                Type::Array(inner) if *inner == Type::Byte => {
+                                    return Ok(Type::Array(Box::new(Type::Byte)));
+                                }
+                                other => {
+                                    return Err(TypeError::new(format!(
+                                        "bytes(...) expects string or []byte, got {}",
+                                        other.display()
+                                    )));
+                                }
+                            }
+                        }
+                        "assert_eq" if args.len() == 2 => {
+                            let a = self.check_expr(&args[0])?;
+                            let b = if matches!(args[1], Expr::Int(_)) && is_int_family(&a) {
+                                a.clone()
+                            } else {
+                                self.check_expr(&args[1])?
+                            };
+                            let a = if matches!(args[0], Expr::Int(_)) && is_int_family(&b) {
+                                b.clone()
+                            } else {
+                                a
+                            };
+                            let ok = a == b && is_int_family(&a);
+                            if !ok {
+                                return Err(TypeError::new(format!(
+                                    "assert_eq needs matching integer kinds, got {} and {}",
+                                    a.display(),
+                                    b.display()
+                                )));
+                            }
+                            return Ok(Type::Void);
+                        }
+                        "copy" if args.len() == 2 => {
+                            let dt = self.check_expr(&args[0])?;
+                            let st = self.check_expr(&args[1])?;
+                            match (&dt, &st) {
+                                (Type::Array(a), Type::Array(b)) if self.compatible(a, b) => {
+                                    return Ok(Type::Int);
+                                }
+                                (Type::Array(_), Type::Array(_)) => {
+                                    return Err(TypeError::new(format!(
+                                        "copy element type mismatch: {} vs {}",
+                                        dt.display(),
+                                        st.display()
+                                    )));
+                                }
+                                _ => {
+                                    return Err(TypeError::new(format!(
+                                        "copy needs two slices, got {} and {}",
+                                        dt.display(),
+                                        st.display()
+                                    )));
+                                }
+                            }
+                        }
+                        "len" if args.len() == 1 => {
+                            let t = self.check_expr(&args[0])?;
+                            return match t {
+                                Type::Array(_)
+                                | Type::String
+                                | Type::Map(_, _)
+                                | Type::StrBuilder => Ok(Type::Int),
+                                Type::Named(n) if n == "string_view" => Ok(Type::Int),
+                                other => Err(TypeError::new(format!(
+                                    "len needs slice/array/string/map/string_view, got {}",
+                                    other.display()
+                                ))),
+                            };
+                        }
+                        "delete" if args.len() == 2 => {
+                            let mt = self.check_expr(&args[0])?;
+                            let kt = self.check_expr(&args[1])?;
+                            return match mt {
+                                Type::Map(k, _) => {
+                                    if !self.compatible(&kt, &k) {
+                                        return Err(TypeError::new(format!(
+                                            "delete key type mismatch: expected {}, got {}",
+                                            k.display(),
+                                            kt.display()
+                                        )));
+                                    }
+                                    Ok(Type::Void)
+                                }
+                                other => Err(TypeError::new(format!(
+                                    "delete needs a map, got {}",
+                                    other.display()
+                                ))),
+                            };
+                        }
+                        "chan_len" | "chan_cap" if args.len() == 1 => {
+                            let t = self.check_expr(&args[0])?;
+                            return match t {
+                                Type::Chan(_) => Ok(Type::Int),
+                                other => Err(TypeError::new(format!(
+                                    "{} needs a channel, got {}",
+                                    name,
+                                    other.display()
+                                ))),
+                            };
+                        }
+                        "maps_keys" if args.len() == 1 => {
+                            let t = self.check_expr(&args[0])?;
+                            return match t {
+                                Type::Map(k, _) if matches!(k.as_ref(), Type::String) => {
+                                    Ok(Type::Array(Box::new(Type::String)))
+                                }
+                                Type::Map(k, _) if matches!(k.as_ref(), Type::Int) => {
+                                    Ok(Type::Array(Box::new(Type::Int)))
+                                }
+                                Type::Map(k, _) if matches!(k.as_ref(), Type::Float) => {
+                                    Ok(Type::Array(Box::new(Type::Float)))
+                                }
+                                Type::Map(k, _) if matches!(k.as_ref(), Type::Bool) => {
+                                    Ok(Type::Array(Box::new(Type::Bool)))
+                                }
+                                Type::Map(k, _) if matches!(k.as_ref(), Type::Struct { .. }) => {
+                                    Ok(Type::Array(k))
+                                }
+                                Type::Map(k, _) if matches!(k.as_ref(), Type::Enum { .. }) => {
+                                    Ok(Type::Array(k))
+                                }
+                                other => Err(TypeError::new(format!(
+                                    "maps_keys needs a map, got {}",
+                                    other.display()
+                                ))),
+                            };
+                        }
+                        "maps_values" if args.len() == 1 => {
+                            let t = self.check_expr(&args[0])?;
+                            return match t {
+                                Type::Map(_, v) => Ok(Type::Array(v)),
+                                other => Err(TypeError::new(format!(
+                                    "maps_values needs a map, got {}",
+                                    other.display()
+                                ))),
+                            };
+                        }
+                        "maps_clear" if args.len() == 1 => {
+                            let t = self.check_expr(&args[0])?;
+                            return match t {
+                                Type::Map(_, _) => Ok(Type::Void),
+                                other => Err(TypeError::new(format!(
+                                    "maps_clear needs a map, got {}",
+                                    other.display()
+                                ))),
+                            };
+                        }
+                        "maps_clone" if args.len() == 1 => {
+                            let t = self.check_expr(&args[0])?;
+                            return match t {
+                                Type::Map(_, _) => Ok(t),
+                                other => Err(TypeError::new(format!(
+                                    "maps_clone needs a map, got {}",
+                                    other.display()
+                                ))),
+                            };
+                        }
+                        "maps_equal" if args.len() == 2 => {
+                            let a = self.check_expr(&args[0])?;
+                            let b = self.check_expr(&args[1])?;
+                            return match (&a, &b) {
+                                (Type::Map(k1, v1), Type::Map(k2, v2))
+                                    if self.compatible(k1, k2) && self.compatible(v1, v2) =>
+                                {
+                                    Ok(Type::Int)
+                                }
+                                _ => Err(TypeError::new(format!(
+                                    "maps_equal needs two maps of the same type, got {} and {}",
+                                    a.display(),
+                                    b.display()
+                                ))),
+                            };
+                        }
+                        "maps_copy" if args.len() == 2 => {
+                            let a = self.check_expr(&args[0])?;
+                            let b = self.check_expr(&args[1])?;
+                            return match (&a, &b) {
+                                (Type::Map(k1, v1), Type::Map(k2, v2))
+                                    if self.compatible(k1, k2) && self.compatible(v1, v2) =>
+                                {
+                                    Ok(Type::Void)
+                                }
+                                _ => Err(TypeError::new(format!(
+                                    "maps_copy needs two maps of the same type, got {} and {}",
+                                    a.display(),
+                                    b.display()
+                                ))),
+                            };
+                        }
+                        "has" if args.len() == 2 => {
+                            let mt = self.check_expr(&args[0])?;
+                            let kt = self.check_expr(&args[1])?;
+                            return match mt {
+                                Type::Map(k, _) => {
+                                    if !self.compatible(&kt, &k) {
+                                        return Err(TypeError::new(format!(
+                                            "has key type mismatch: expected {}, got {}",
+                                            k.display(),
+                                            kt.display()
+                                        )));
+                                    }
+                                    Ok(Type::Bool)
+                                }
+                                other => Err(TypeError::new(format!(
+                                    "has needs a map, got {}",
+                                    other.display()
+                                ))),
+                            };
+                        }
+                        "cap" if args.len() == 1 => {
+                            let t = self.check_expr(&args[0])?;
+                            return match t {
+                                Type::Array(_) => Ok(Type::Int),
+                                other => Err(TypeError::new(format!(
+                                    "cap needs slice ([]int), got {}",
+                                    other.display()
+                                ))),
+                            };
+                        }
+                        "append" if args.len() == 2 => {
+                            let st = self.check_expr(&args[0])?;
+                            match st {
+                                Type::Array(inner) => {
+                                    // Push element type so None/Some/Ok/Err match []Option / []Result.
+                                    let saved_expected = self.current_expected.clone();
+                                    self.current_expected = Some(inner.as_ref().clone());
+                                    let vt = if matches!(args[1], Expr::Int(_))
+                                        && is_literal_int_kind(inner.as_ref())
+                                    {
+                                        (*inner).clone()
+                                    } else {
+                                        self.check_expr(&args[1])?
+                                    };
+                                    self.current_expected = saved_expected;
+                                    if !self.compatible(&vt, &inner) {
+                                        return Err(TypeError::new(format!(
+                                            "append element type mismatch: expected {}, got {}",
+                                            inner.display(),
+                                            vt.display()
+                                        )));
+                                    }
+                                    return Ok(Type::Array(inner));
+                                }
+                                other => {
+                                    return Err(TypeError::new(format!(
+                                        "append needs slice, got {}",
+                                        other.display()
+                                    )));
+                                }
+                            }
+                        }
+                        _ => {}
                     }
                     // Try qualified lookup first using return type context
                     let qualified_ctor = if let Type::Named(ret_name) = &self.current_ret {
@@ -15047,7 +17042,8 @@ impl TypeChecker {
                     } else {
                         None
                     };
-                    if let Some(ctor) = qualified_ctor.or_else(|| self.variants.get(name).cloned()) {
+                    if let Some(ctor) = qualified_ctor.or_else(|| self.variants.get(name).cloned())
+                    {
                         if ctor.fields.len() != args.len() {
                             return Err(TypeError::new(format!(
                                 "variant `{name}` expects {} fields, got {}",
@@ -15076,8 +17072,13 @@ impl TypeChecker {
                 match ft {
                     Type::Fn(params, ret) => {
                         if params.len() != args.len() {
+                            let callee_name = match callee.as_ref() {
+                                Expr::Ident(name) => name.clone(),
+                                _ => "<expression>".to_owned(),
+                            };
                             return Err(TypeError::new(format!(
-                                "expected {} args, got {}",
+                                "call to `{}`: expected {} args, got {}",
+                                callee_name,
                                 params.len(),
                                 args.len()
                             )));
@@ -15252,10 +17253,7 @@ impl TypeChecker {
                             return Err(TypeError::new("crew.wait takes no arguments"));
                         }
                         // Ok(err_count) or Err(first child error message)
-                        Ok(Type::Result(
-                            Box::new(Type::Int),
-                            Box::new(Type::String),
-                        ))
+                        Ok(Type::Result(Box::new(Type::Int), Box::new(Type::String)))
                     }
                     (Type::Job(inner), "join") => {
                         if !args.is_empty() {
@@ -15273,9 +17271,7 @@ impl TypeChecker {
                         // with string Err, flatten so timeout is Err("timeout") at the
                         // same type (no Result[Result[…], string] nest).
                         match inner.as_ref() {
-                            Type::Result(ok, err)
-                                if matches!(err.as_ref(), Type::String) =>
-                            {
+                            Type::Result(ok, err) if matches!(err.as_ref(), Type::String) => {
                                 Ok(Type::Result(ok.clone(), err.clone()))
                             }
                             other => Ok(Type::Result(
@@ -15292,9 +17288,7 @@ impl TypeChecker {
                         }
                         let _ = self.check_expr(&args[0])?;
                         match inner.as_ref() {
-                            Type::Result(ok, err)
-                                if matches!(err.as_ref(), Type::String) =>
-                            {
+                            Type::Result(ok, err) if matches!(err.as_ref(), Type::String) => {
                                 Ok(Type::Result(ok.clone(), err.clone()))
                             }
                             other => Ok(Type::Result(
@@ -15395,7 +17389,9 @@ impl TypeChecker {
                         // Struct / enum associated method: `Point_distance(self, …)` → `p.distance(…)`
                         // Also covers `on Point { fn distance(self) … }` desugar.
                         let type_name = match other {
-                            Type::Enum { name, .. } | Type::Struct { name, .. } => Some(name.as_str()),
+                            Type::Enum { name, .. } | Type::Struct { name, .. } => {
+                                Some(name.as_str())
+                            }
                             Type::Named(n) if self.types.contains_key(n) => Some(n.as_str()),
                             _ => None,
                         };
@@ -16292,7 +18288,10 @@ impl TypeChecker {
                         Type::Result(ret_ok, ret_err) => {
                             // Err types must be compatible for direct rethrow.
                             if !self.compatible(&err, ret_err)
-                                && !matches!((err.as_ref(), ret_err.as_ref()), (Type::String, Type::String))
+                                && !matches!(
+                                    (err.as_ref(), ret_err.as_ref()),
+                                    (Type::String, Type::String)
+                                )
                             {
                                 // Still allow when both are string-ish or identical after display
                                 if err.display() != ret_err.display() {
@@ -16347,10 +18346,8 @@ impl TypeChecker {
                                 )));
                             }
                             // Prefer string errors for auto-None conversion.
-                            if !matches!(
-                                ret_err.as_ref(),
-                                Type::String | Type::Named(_)
-                            ) && !matches!(ret_err.as_ref(), Type::Enum { .. })
+                            if !matches!(ret_err.as_ref(), Type::String | Type::Named(_))
+                                && !matches!(ret_err.as_ref(), Type::Enum { .. })
                             {
                                 return Err(TypeError::new(
                                     "`?` on Option in Result-returning function needs string or enum Err type",
@@ -16501,12 +18498,12 @@ impl TypeChecker {
                         "fan on []string expects a string→string mapper",
                     ));
                 }
-                if matches!(elem, Type::Int | Type::Int64 | Type::Int32 | Type::Int8 | Type::Byte | Type::Bool)
-                    && matches!(ret, Type::Float | Type::String)
+                if matches!(
+                    elem,
+                    Type::Int | Type::Int64 | Type::Int32 | Type::Int8 | Type::Byte | Type::Bool
+                ) && matches!(ret, Type::Float | Type::String)
                 {
-                    return Err(TypeError::new(
-                        "fan on []int expects an int→int mapper",
-                    ));
+                    return Err(TypeError::new("fan on []int expects an int→int mapper"));
                 }
                 self.assert_fan_mapper_safe(mapper)?;
                 Ok(Type::Array(Box::new(ret)))
@@ -16569,11 +18566,7 @@ impl TypeChecker {
             (Type::String, Type::Named(n)) if n == "string_view" => true,
             (Type::Named(n), Type::String) if n == "string_view" => true,
             // string_view result of str_as_view / annotated lit.
-            (Type::Named(n), Type::Named(m))
-                if n == "string_view" && m == "string_view" =>
-            {
-                true
-            }
+            (Type::Named(n), Type::Named(m)) if n == "string_view" && m == "string_view" => true,
             (Type::Named(a), Type::Named(b)) if a == b => true,
             (Type::Array(a), Type::Array(b)) => self.compatible(a, b),
             (Type::Map(k1, v1), Type::Map(k2, v2)) => {
@@ -16583,14 +18576,11 @@ impl TypeChecker {
             (Type::Result(a1, _), Type::Result(a2, _)) => self.compatible(a1, a2),
             (Type::Job(a), Type::Job(b)) => self.compatible(a, b),
             (Type::Chan(a), Type::Chan(b)) => self.compatible(a, b),
-            (Type::Tuple(a), Type::Tuple(b)) if a.len() == b.len() => a
-                .iter()
-                .zip(b.iter())
-                .all(|(x, y)| self.compatible(x, y)),
+            (Type::Tuple(a), Type::Tuple(b)) if a.len() == b.len() => {
+                a.iter().zip(b.iter()).all(|(x, y)| self.compatible(x, y))
+            }
             (Type::Fn(pa, ra), Type::Fn(pb, rb)) if pa.len() == pb.len() => {
-                pa.iter()
-                    .zip(pb.iter())
-                    .all(|(a, b)| self.compatible(a, b))
+                pa.iter().zip(pb.iter()).all(|(a, b)| self.compatible(a, b))
                     && self.compatible(ra, rb)
             }
             (Type::Enum { name: a, .. }, Type::Enum { name: b, .. }) if a == b => true,
@@ -16749,7 +18739,11 @@ impl TypeChecker {
             .iter()
             .map(|v| EnumVariant {
                 name: v.name.clone(),
-                fields: v.fields.iter().map(|t| subst_type_expr(t, &subst)).collect(),
+                fields: v
+                    .fields
+                    .iter()
+                    .map(|t| subst_type_expr(t, &subst))
+                    .collect(),
             })
             .collect();
         let mono_enum = EnumDef {
@@ -16805,10 +18799,7 @@ impl TypeChecker {
         tp_name: &str,
     ) -> Result<(), TypeError> {
         // Find the interface definition
-        let iface = self
-            .interfaces
-            .iter()
-            .find(|d| d.name == iface_name);
+        let iface = self.interfaces.iter().find(|d| d.name == iface_name);
         let Some(iface_def) = iface else {
             return Err(TypeError::new(format!(
                 "unknown interface `{iface_name}` used as bound on `{tp_name}` in `{fn_name}`"
@@ -16887,7 +18878,10 @@ impl TypeChecker {
                 .collect();
             format!("{name}__{}", tags.join("__"))
         };
-        let ret_te = template.ret.clone().unwrap_or(TypeExpr::Named("void".into()));
+        let ret_te = template
+            .ret
+            .clone()
+            .unwrap_or(TypeExpr::Named("void".into()));
         let ret_ty = {
             let subst_te = subst_type_expr(&ret_te, &subst);
             self.resolve_type(&subst_te)?
@@ -16904,8 +18898,10 @@ impl TypeChecker {
                 mono_name.clone(),
                 mono.params.iter().map(|p| p.mutable).collect(),
             );
-            self.fns
-                .insert(mono_name.clone(), Type::Fn(params?, Box::new(ret_ty.clone())));
+            self.fns.insert(
+                mono_name.clone(),
+                Type::Fn(params?, Box::new(ret_ty.clone())),
+            );
             self.mono_generated.insert(mono_name.clone());
             self.mono_fns.push(mono.clone());
             self.check_fn(&mono)?;
@@ -17232,10 +19228,7 @@ impl TypeChecker {
                         }
                         Ok(())
                     } else {
-                        Err(TypeError::new(format!(
-                            "cannot match variant on {}",
-                            n
-                        )))
+                        Err(TypeError::new(format!("cannot match variant on {}", n)))
                     }
                 }
                 other => Err(TypeError::new(format!(
@@ -17461,10 +19454,10 @@ impl TypeChecker {
         }
         let info = self.fn_capture_info_for_expr(mapper);
         if info.unknown {
-            return Err(TypeError::new(
-                "fan mapper has an unknown capture environment",
-            )
-            .hint("use a non-capturing mapper; pass all data through the collection"));
+            return Err(
+                TypeError::new("fan mapper has an unknown capture environment")
+                    .hint("use a non-capturing mapper; pass all data through the collection"),
+            );
         }
         if let Some(name) = info.captured.iter().next() {
             return Err(TypeError::new(format!(
@@ -17481,10 +19474,13 @@ impl TypeChecker {
             Expr::Ident(name) => {
                 if let Some((ty, _)) = self.lookup(name) {
                     if matches!(ty, Type::Fn(_, _)) {
-                        return self.fn_capture_info(name).cloned().unwrap_or(FnCaptureInfo {
-                            unknown: true,
-                            ..FnCaptureInfo::default()
-                        });
+                        return self
+                            .fn_capture_info(name)
+                            .cloned()
+                            .unwrap_or(FnCaptureInfo {
+                                unknown: true,
+                                ..FnCaptureInfo::default()
+                            });
                     }
                 }
                 if self.fns.contains_key(name) {
@@ -17572,7 +19568,9 @@ impl TypeChecker {
             Pattern::Ident(name) if name != "_" => {
                 bound.insert(name.clone());
             }
-            Pattern::Variant { bindings, .. } | Pattern::Or(bindings) | Pattern::Tuple(bindings) => {
+            Pattern::Variant { bindings, .. }
+            | Pattern::Or(bindings)
+            | Pattern::Tuple(bindings) => {
                 for binding in bindings {
                     Self::collect_pattern_bindings(binding, bound);
                 }
@@ -17838,9 +19836,9 @@ impl TypeChecker {
     fn race_write_root(expr: &Expr) -> Option<&str> {
         match expr {
             Expr::Ident(name) => Some(name),
-            Expr::Field { base, .. }
-            | Expr::Index { base, .. }
-            | Expr::Slice { base, .. } => Self::race_write_root(base),
+            Expr::Field { base, .. } | Expr::Index { base, .. } | Expr::Slice { base, .. } => {
+                Self::race_write_root(base)
+            }
             Expr::Unary { expr, .. } | Expr::Try(expr) => Self::race_write_root(expr),
             _ => None,
         }
@@ -17862,11 +19860,7 @@ impl TypeChecker {
 
     /// SAFE-003/007: a sub-slice view must not outlive its base binding.
     /// Target depth must be >= base depth (same or inner scope).
-    fn assert_slice_view_lifetime(
-        &self,
-        target_name: &str,
-        value: &Expr,
-    ) -> Result<(), TypeError> {
+    fn assert_slice_view_lifetime(&self, target_name: &str, value: &Expr) -> Result<(), TypeError> {
         let Expr::Slice { base, .. } = value else {
             // Also chained index of a slice: s[1:3][0] is Index, not a view store.
             return Ok(());
@@ -17913,10 +19907,10 @@ impl TypeChecker {
                 callee.as_ref(),
                 Expr::Ident(cn) if cn.starts_with("arena_")
             ) {
-                return Err(TypeError::new(
-                    "cannot store arena allocation outside the arena",
-                )
-                .hint("keep arena-backed values inside the `arena` block"));
+                return Err(
+                    TypeError::new("cannot store arena allocation outside the arena")
+                        .hint("keep arena-backed values inside the `arena` block"),
+                );
             }
         }
         Ok(())
@@ -17959,15 +19953,13 @@ impl TypeChecker {
             }
             Expr::Ident(n) => {
                 if matches!(self.lookup(n), Some((Type::Arena, _))) {
-                    return Err(TypeError::new(
-                        "cannot return arena handle out of `arena` block",
-                    )
-                    .hint("use the arena only inside its scope"));
+                    return Err(
+                        TypeError::new("cannot return arena handle out of `arena` block")
+                            .hint("use the arena only inside its scope"),
+                    );
                 }
             }
-            Expr::Index { base, .. }
-            | Expr::Slice { base, .. }
-            | Expr::Field { base, .. } => {
+            Expr::Index { base, .. } | Expr::Slice { base, .. } | Expr::Field { base, .. } => {
                 self.assert_no_arena_escape(base)?;
             }
             Expr::Array(elems) | Expr::Tuple(elems) => {
@@ -17990,17 +19982,17 @@ impl TypeChecker {
     /// a stack value that is about to die — memory-safe by construction, free at runtime.
     fn assert_mutable_write_root(&self, expr: &Expr, kind: &str) -> Result<(), TypeError> {
         let Some(name) = Self::race_write_root(expr) else {
-            return Err(TypeError::new(format!(
-                "cannot {kind} into a temporary value"
-            ))
-            .hint("bind the target with `let mut` first"));
+            return Err(
+                TypeError::new(format!("cannot {kind} into a temporary value"))
+                    .hint("bind the target with `let mut` first"),
+            );
         };
         if let Some((_, mutable)) = self.lookup(name) {
             if !*mutable {
-                return Err(TypeError::new(format!(
-                    "cannot {kind} into immutable `{name}`"
-                ))
-                .hint(format!("use `let mut {name}`")));
+                return Err(
+                    TypeError::new(format!("cannot {kind} into immutable `{name}`"))
+                        .hint(format!("use `let mut {name}`")),
+                );
             }
         }
         Ok(())
@@ -18059,9 +20051,9 @@ impl TypeChecker {
             return false;
         }
         match self.types.get(name) {
-            Some(Type::Struct { fields, .. }) => {
-                fields.iter().all(|(_, t)| self.is_pod_leaf_ty(t, depth + 1))
-            }
+            Some(Type::Struct { fields, .. }) => fields
+                .iter()
+                .all(|(_, t)| self.is_pod_leaf_ty(t, depth + 1)),
             _ => false,
         }
     }
@@ -18085,7 +20077,10 @@ impl TypeChecker {
             | Type::Float
             | Type::String => true,
             Type::Named(n)
-                if n != "ShareInt" && n != "Arena" && n != "Crew" && (self.structs_named(n) || self.enums_named(n)) =>
+                if n != "ShareInt"
+                    && n != "Arena"
+                    && n != "Crew"
+                    && (self.structs_named(n) || self.enums_named(n)) =>
             {
                 true
             }
@@ -18141,9 +20136,7 @@ impl TypeChecker {
             Type::Struct { name, .. } if self.is_pod_struct(name) => true,
             // Fuller Send: sum types and products of sendable payloads.
             Type::Option(inner) => self.is_kick_sendable_ty(inner),
-            Type::Result(ok, err) => {
-                self.is_kick_sendable_ty(ok) && self.is_kick_sendable_ty(err)
-            }
+            Type::Result(ok, err) => self.is_kick_sendable_ty(ok) && self.is_kick_sendable_ty(err),
             Type::Tuple(elems) => elems.iter().all(|e| self.is_kick_sendable_ty(e)),
             Type::Enum { name, variants, .. } => {
                 // Named enum: prefer depth helper (covers unit + POD payloads).
@@ -18160,19 +20153,17 @@ impl TypeChecker {
 
     /// Type-level Sync: safe concurrent shared mutation (internal locking/atomics).
     fn is_sync_ty(&self, t: &Type) -> bool {
-        matches!(
-            t,
-            Type::Chan(_) | Type::CMap | Type::Mutex | Type::RWMutex
-        ) || matches!(
-            t,
-            Type::Named(n) if n == "ShareInt"
-                || n == "AtomicInt"
-                || n == "Mutex"
-                || n == "RWMutex"
-                || n == "CMap"
-                || n == "WaitGroup"
-                || n == "TlsServer"
-        )
+        matches!(t, Type::Chan(_) | Type::CMap | Type::Mutex | Type::RWMutex)
+            || matches!(
+                t,
+                Type::Named(n) if n == "ShareInt"
+                    || n == "AtomicInt"
+                    || n == "Mutex"
+                    || n == "RWMutex"
+                    || n == "CMap"
+                    || n == "WaitGroup"
+                    || n == "TlsServer"
+            )
     }
 
     /// Type-level Send: may cross a kick boundary (same as kick sendable rules).
@@ -18338,9 +20329,11 @@ fn is_kick_sendable(t: &Type) -> bool {
         Type::Named(n) if n == "Arena" || n == "Crew" => false,
         Type::Named(_) => false, // non-POD / handled in TypeChecker::is_kick_sendable_ty
         // Option/Result/tuple/enum handled in TypeChecker::is_kick_sendable_ty (fuller Send).
-        Type::Array(_) | Type::Map(_, _) | Type::Tuple(_) | Type::Option(_) | Type::Result(_, _) => {
-            false
-        }
+        Type::Array(_)
+        | Type::Map(_, _)
+        | Type::Tuple(_)
+        | Type::Option(_)
+        | Type::Result(_, _) => false,
         // First-class fn values (MakoFn fat pointer) may cross kick — env is heap.
         Type::Fn(_, _) => true,
         Type::Interface { .. } | Type::Enum { .. } => false,
@@ -18388,7 +20381,8 @@ fn fold_const_expr(expr: &Expr) -> Result<i64, TypeError> {
 }
 
 /// Fold with const bindings and const-fn table (for `const fn` evaluation).
-fn fold_const_expr_with(
+/// Shared with the native IR so `const MAX = …` resolves at lower time.
+pub fn fold_const_expr_with(
     expr: &Expr,
     consts: &HashMap<String, i64>,
     const_strs: &HashMap<String, String>,
@@ -18482,6 +20476,18 @@ fn fold_const_expr_with(
                 BinOp::And | BinOp::Or => unreachable!(),
             }
         }
+        // `s[i]` on a const string → byte value 0..255 (matches runtime string index).
+        Expr::Index { base, index } => {
+            let s = fold_const_str_with(base, consts, const_strs, const_fns)?;
+            let i = fold_const_expr_with(index, consts, const_strs, const_fns)?;
+            if i < 0 || (i as usize) >= s.len() {
+                return Err(TypeError::new(format!(
+                    "const string index out of bounds: index {i}, len {}",
+                    s.len()
+                )));
+            }
+            Ok(s.as_bytes()[i as usize] as i64)
+        }
         Expr::Unary { op, expr } => {
             let v = fold_const_expr_with(expr, consts, const_strs, const_fns)?;
             match op {
@@ -18505,7 +20511,9 @@ fn fold_const_expr_with(
         Expr::Match { scrutinee, arms } => {
             let scrut = fold_const_expr_with(scrutinee, consts, const_strs, const_fns)?;
             for arm in arms {
-                if let Some(binds) = match_const_pattern(&arm.pattern, scrut, consts, const_strs, const_fns)? {
+                if let Some(binds) =
+                    match_const_pattern(&arm.pattern, scrut, consts, const_strs, const_fns)?
+                {
                     let mut env = consts.clone();
                     for (k, v) in binds {
                         env.insert(k, v);
@@ -18542,8 +20550,7 @@ fn fold_const_expr_with(
                     f.params.len()
                 )));
             }
-            let (locals_i, locals_s) =
-                bind_const_fn_args(f, args, consts, const_strs, const_fns)?;
+            let (locals_i, locals_s) = bind_const_fn_args(f, args, consts, const_strs, const_fns)?;
             // Int-returning const fn (string-returning goes through fold_const_str_with).
             eval_const_fn_body(&f.body, &locals_i, &locals_s, const_fns)
         }
@@ -18577,7 +20584,8 @@ fn bind_const_fn_args(
 }
 
 /// Fold a compile-time string expression (literals, const names, `+` concat, const fn).
-fn fold_const_str_with(
+/// Shared with the native IR const table.
+pub fn fold_const_str_with(
     expr: &Expr,
     consts: &HashMap<String, i64>,
     const_strs: &HashMap<String, String>,
@@ -18630,8 +20638,7 @@ fn fold_const_str_with(
                     f.params.len()
                 )));
             }
-            let (locals_i, locals_s) =
-                bind_const_fn_args(f, args, consts, const_strs, const_fns)?;
+            let (locals_i, locals_s) = bind_const_fn_args(f, args, consts, const_strs, const_fns)?;
             eval_const_fn_body_str(&f.body, &locals_i, &locals_s, const_fns)
         }
         _ => Err(TypeError::new(
@@ -18757,35 +20764,31 @@ fn eval_const_fn_body(
                     return eval_const_fn_body(eb, &env, &str_env, const_fns);
                 }
             }
-            Stmt::While { cond, body: wbody, .. } => {
-                match run_const_while(cond, wbody, &mut env, &str_env, const_fns)? {
-                    Some(ret) => return Ok(ret),
-                    None => {}
-                }
-            }
+            Stmt::While {
+                cond, body: wbody, ..
+            } => match run_const_while(cond, wbody, &mut env, &str_env, const_fns)? {
+                Some(ret) => return Ok(ret),
+                None => {}
+            },
             Stmt::For {
                 binders,
                 iter,
                 body: fbody,
                 ..
-            } => {
-                match run_const_for_count(binders, iter, fbody, &mut env, &str_env, const_fns)? {
-                    Some(ret) => return Ok(ret),
-                    None => {}
-                }
-            }
+            } => match run_const_for_count(binders, iter, fbody, &mut env, &str_env, const_fns)? {
+                Some(ret) => return Ok(ret),
+                None => {}
+            },
             Stmt::CFor {
                 init,
                 cond,
                 post,
                 body: fbody,
                 ..
-            } => {
-                match run_const_cfor(init, cond, post, fbody, &mut env, &str_env, const_fns)? {
-                    Some(ret) => return Ok(ret),
-                    None => {}
-                }
-            }
+            } => match run_const_cfor(init, cond, post, fbody, &mut env, &str_env, const_fns)? {
+                Some(ret) => return Ok(ret),
+                None => {}
+            },
             Stmt::Expr(e) if is_last => {
                 return fold_const_expr_with(e, &env, &str_env, const_fns);
             }
@@ -18848,9 +20851,7 @@ fn eval_const_fn_body_str(
                     let s = fold_const_str_with(value, &env, &str_env, const_fns)?;
                     str_env.insert(name.clone(), s);
                 } else {
-                    return Err(TypeError::new(format!(
-                        "const assign to unknown `{name}`"
-                    )));
+                    return Err(TypeError::new(format!("const assign to unknown `{name}`")));
                 }
             }
             Stmt::If {
@@ -19095,7 +21096,9 @@ fn eval_const_loop_body(
             Stmt::Expr(e) => {
                 let _ = fold_const_expr_with(e, env, const_strs, const_fns)?;
             }
-            Stmt::While { cond, body: wbody, .. } => {
+            Stmt::While {
+                cond, body: wbody, ..
+            } => {
                 if let Some(v) = run_const_while(cond, wbody, env, const_strs, const_fns)? {
                     return Ok(ConstLoopCtl::Return(v));
                 }
@@ -19106,7 +21109,9 @@ fn eval_const_loop_body(
                 body: fbody,
                 ..
             } => {
-                if let Some(v) = run_const_for_count(binders, iter, fbody, env, const_strs, const_fns)? {
+                if let Some(v) =
+                    run_const_for_count(binders, iter, fbody, env, const_strs, const_fns)?
+                {
                     return Ok(ConstLoopCtl::Return(v));
                 }
             }
@@ -19117,7 +21122,9 @@ fn eval_const_loop_body(
                 body: fbody,
                 ..
             } => {
-                if let Some(v) = run_const_cfor(init, cond, post, fbody, env, const_strs, const_fns)? {
+                if let Some(v) =
+                    run_const_cfor(init, cond, post, fbody, env, const_strs, const_fns)?
+                {
                     return Ok(ConstLoopCtl::Return(v));
                 }
             }
@@ -19177,11 +21184,15 @@ pub fn type_to_type_expr(t: &Type) -> TypeExpr {
         Type::Named(n) => TypeExpr::Named(n.clone()),
         Type::Tuple(elems) => TypeExpr::Tuple(elems.iter().map(type_to_type_expr).collect()),
         Type::Option(inner) => TypeExpr::Generic("Option".into(), vec![type_to_type_expr(inner)]),
-        Type::Result(a, b) => {
-            TypeExpr::Generic("Result".into(), vec![type_to_type_expr(a), type_to_type_expr(b)])
-        }
+        Type::Result(a, b) => TypeExpr::Generic(
+            "Result".into(),
+            vec![type_to_type_expr(a), type_to_type_expr(b)],
+        ),
         Type::Job(inner) => TypeExpr::Generic("Job".into(), vec![type_to_type_expr(inner)]),
-        Type::Map(k, v) => TypeExpr::Map(Box::new(type_to_type_expr(k)), Box::new(type_to_type_expr(v))),
+        Type::Map(k, v) => TypeExpr::Map(
+            Box::new(type_to_type_expr(k)),
+            Box::new(type_to_type_expr(v)),
+        ),
         other => TypeExpr::Named(other.display()),
     }
 }
@@ -19201,10 +21212,7 @@ pub fn specialize_fn(template: &FnDef, mono_name: &str, subst: &HashMap<String, 
                 mutable: p.mutable,
             })
             .collect(),
-        ret: template
-            .ret
-            .as_ref()
-            .map(|t| subst_type_expr(t, subst)),
+        ret: template.ret.as_ref().map(|t| subst_type_expr(t, subst)),
         body: subst_block(&template.body, subst),
         exported: template.exported,
         is_const: template.is_const,
@@ -19355,7 +21363,11 @@ fn subst_expr(e: &Expr, subst: &HashMap<String, Type>) -> Expr {
             len: len.as_ref().map(|e| Box::new(subst_expr(e, subst))),
             cap: cap.as_ref().map(|e| Box::new(subst_expr(e, subst))),
         },
-        Expr::StructLit { name, fields, update } => {
+        Expr::StructLit {
+            name,
+            fields,
+            update,
+        } => {
             // Substitute type param tags in monomorphized struct names.
             // e.g. "Pair__T" with {T: int} → "Pair__int"
             let mono_name = subst_mono_name(name, subst);

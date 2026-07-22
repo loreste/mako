@@ -1,0 +1,64 @@
+// Memory-safety stress: owned strings through control flow that is easy to
+// get wrong (continue/break with loop-bound string elements, defer that
+// observes owned values, match payload move-out, nested owned fields).
+// Must stay GuardMalloc-clean and 0-leak under the gate.
+
+enum Msg {
+    Text(string)
+    Quit
+}
+
+struct Box {
+    label: string
+}
+
+fn take(s: string) -> string {
+    return s + "!"
+}
+
+fn main() {
+    // 1) []string range with continue / break — element is an owned clone
+    //    each iteration and must free on every exit path.
+    let xs = ["a", "b", "c", "d", "e"]
+    var seen = 0
+    for i, v in range xs {
+        if i == 1 {
+            continue
+        }
+        if i == 4 {
+            break
+        }
+        seen = seen + len(v)
+    }
+    print_int(seen)
+
+    // 2) reassignment + append consumption (no double-free of source)
+    var ys = ["x"]
+    ys = append(ys, "y")
+    ys = append(ys, "z")
+    print(ys[2])
+    print_int(len(ys))
+
+    // 3) owned match result (clone payload before scrutinee drops)
+    let m = Text("hi")
+    let p = match m {
+        Text(s) => s,
+        Quit => "q",
+    }
+    print(p)
+
+    // 4) defer LIFO with owned temps still live for the defer body
+    let owned = "defer-me"
+    defer print(owned)
+    print(take(owned))
+
+    // 5) nested owned field: value-copy then mutate must not free shared buffer
+    var b = Box { label: "outer" }
+    var c = b
+    c.label = "inner"
+    print(b.label)
+    print(c.label)
+
+    // 6) f-string builds owned temporaries that must free after print
+    print(f"n={seen} ok={true}")
+}

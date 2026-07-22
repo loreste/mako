@@ -1,0 +1,7 @@
+fn choose(value: int) -> int {
+    if value > 0 {
+        return value
+    } else {
+        return 0
+    }
+}

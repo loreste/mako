@@ -1,0 +1,48 @@
+// Global name resolution over the flat expression arena. A value of -1 means
+// the identifier is local, builtin, field-only, or not yet semantically bound.
+
+fn resolve_global_expressions(
+    source: string,
+    tokens: []Token,
+    expressions: []ExprNode,
+    symbols: []Symbol,
+    slots: []int
+) -> ExprResolution {
+    let mut symbol_by_expr = make([]int, len(expressions), len(expressions))
+    let mut i = 0
+    while i < len(symbol_by_expr) {
+        symbol_by_expr[i] = -1
+        i = i + 1
+    }
+    let mut resolved = 0
+    i = 0
+    while i < len(expressions) {
+        let expression = expressions[i]
+        if expression.kind == EXPR_IDENT and expression.token >= 0 and expression.token < len(tokens) {
+            let token = tokens[expression.token]
+            let symbol = find_symbol(source, symbols, slots, token.start, token.end)
+            if symbol >= 0 {
+                symbol_by_expr[i] = symbol
+                resolved = resolved + 1
+            }
+        }
+        i = i + 1
+    }
+    return ExprResolution { symbol_by_expr: symbol_by_expr, resolved: resolved }
+}
+
+fn resolution_smoke_test() -> bool {
+    let source = "fn known() {}\nfn main() { known()\nmissing() }"
+    let lexed = lex_source(source)
+    if not lexed.ok { return false }
+    let structure = parse_structure(source, lexed.tokens)
+    if not structure.ok { return false }
+    let symbols = build_symbols(source, lexed.tokens, structure.items)
+    if not symbols.ok { return false }
+    let known_call = parse_expression(source, lexed.tokens, 11, make([]ExprNode, 0, 4), 0)
+    if not known_call.ok { return false }
+    let missing_call = parse_expression(source, lexed.tokens, 14, known_call.nodes, 0)
+    if not missing_call.ok { return false }
+    let resolved = resolve_global_expressions(source, lexed.tokens, missing_call.nodes, symbols.symbols, symbols.slots)
+    return resolved.resolved == 1 and resolved.symbol_by_expr[0] >= 0 and resolved.symbol_by_expr[2] < 0
+}

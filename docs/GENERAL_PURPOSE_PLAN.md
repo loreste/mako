@@ -2,8 +2,9 @@
 
 Source brief: `General_Purpose_Backend_Language_Vision.md`.
 
-**Product tip:** **0.4.0**. The next roadmap cycle is **0.4.0** (performance ceiling and
-stdlib depth). See [ROADMAP.md](ROADMAP.md) · [STATUS.md](STATUS.md).
+**Product tip:** **0.4.5**. Current cycle: finish native product path (LLVM +
+packaging + tag), then **0.5.0** native-first platform, **0.5.1** toolchain/IDE,
+**0.5.2** runtime trust soaks. See [ROADMAP.md](ROADMAP.md) · [STATUS.md](STATUS.md).
 
 Mako's product contract is:
 

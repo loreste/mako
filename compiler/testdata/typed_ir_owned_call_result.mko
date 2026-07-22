@@ -1,0 +1,7 @@
+fn make_label() -> string {
+    return "mako"
+}
+
+fn use_label() -> string {
+    return make_label()
+}

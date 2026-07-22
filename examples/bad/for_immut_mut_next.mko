@@ -1,0 +1,25 @@
+// EXPECT: mut self
+// Immutable binding cannot be used with advancing (mut self) next.
+
+struct Range {
+    current: int
+    max: int
+}
+
+on Range {
+    fn next(mut self) -> Option[int] {
+        if self.current >= self.max {
+            return None
+        }
+        let v = self.current
+        self.current = self.current + 1
+        return Some(v)
+    }
+}
+
+fn main() {
+    let r = Range { current: 0, max: 3 }
+    for v in r {
+        print_int(v)
+    }
+}

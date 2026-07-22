@@ -1,0 +1,23 @@
+// Component fixture for the direct-native parity benchmark.
+
+fn slice_checksum(n: int) -> int {
+    let mut values = make([]int, 0, n)
+    let mut state = 1
+    let mut i = 0
+    while i < n {
+        state = (state * 48271) % 2147483647
+        values = append(values, state)
+        i = i + 1
+    }
+    let mut sum = 0
+    i = 0
+    while i < n {
+        sum = sum + values[i]
+        i = i + 1
+    }
+    return sum
+}
+
+fn main() {
+    print_int(slice_checksum(5000000))
+}

@@ -1,0 +1,4 @@
+fn discard_labels() -> int {
+    let labels = ["alpha", "beta"]
+    return 1
+}

@@ -1,16 +1,18 @@
 # Mako
 
-Mako is an experimental compiled language for backend and systems development.
-You write `.mko` files; the compiler turns them into native binaries via C.
-There is no garbage collector or VM.
+Mako is a compiled language for backend and systems work. You write `.mko`
+files; Mako turns them into standalone native binaries — no garbage collector,
+no VM, nothing extra to install next to them at runtime.
 
-Memory is managed through ownership (`hold`), shared references (`share`),
-and arenas — no tracing GC. Concurrency uses structured primitives (`crew` /
-`kick` / `fan`, channels, actors). The standard library provides HTTP, TLS,
-JSON, database, and networking APIs, though coverage is still incomplete in
-places.
+Memory is managed by ownership (`hold`), shared references (`share`), and
+arenas, so it's freed deterministically instead of by a tracing GC that stalls
+your service at the worst moment. Concurrency is built into the language rather
+than bolted on: structured `crew` / `kick` / `fan`, channels, and actors that
+tidy up after themselves. The standard library covers the everyday backend
+surface — HTTP, TLS, JSON, databases, networking — and is candid about which
+corners are battle-tested and which are still shallow.
 
-**Status: experimental/alpha (v0.4.1).** The language works and compiles real
+**Status: experimental/alpha (v0.4.5).** The language works and compiles real
 programs, but the surface is young. Expect breaking changes, missing features,
 and bugs. This is not yet suitable for production use without careful
 evaluation.
@@ -24,7 +26,14 @@ double-free) and UBSan, while a focused concurrency suite is exercised under
 TSan. This does not prove complete memory safety. `unsafe` blocks, the C
 runtime, and FFI are outside the safety model.
 
-See [docs/ROADMAP.md](docs/ROADMAP.md) · [docs/SOUNDNESS.md](docs/SOUNDNESS.md).
+**What's new in 0.4.5:** a direct native backend that skips C for many builds —
+ownership-explicit IR to Cranelift (debug) or LLVM (release) plus a bundled
+linker. The full `examples/testing` suite passes on `--backend native` (**367/367**).
+Release artifacts and install scripts ship for Linux, macOS, and Windows. Runtime
+is competitive with hand-written C and Rust on measured compute workloads (see
+[changelog](CHANGELOG.md)); binary-size and some residual benches remain open
+for 0.5.0. Full history: [changelog](CHANGELOG.md) · [roadmap](docs/ROADMAP.md) ·
+[soundness](docs/SOUNDNESS.md).
 
 [mako-lang.com](https://mako-lang.com) · [Status](docs/STATUS.md) · [Roadmap](docs/ROADMAP.md) · [Guide](docs/GUIDE.md) · [Book](docs/book/) · [Soundness](docs/SOUNDNESS.md) · [Memory model](docs/MEMORY_MODEL.md)
 
@@ -74,7 +83,7 @@ Options:
 ```bash
 curl -fsSL …/install-linux.sh | bash -s -- --prefix /opt/mako --yes
 curl -fsSL …/install-linux.sh | bash -s -- --no-deps    # skip clang install
-curl -fsSL …/install-linux.sh | bash -s -- --version v0.4.0
+curl -fsSL …/install-linux.sh | bash -s -- --version v0.4.5
 ```
 
 **You do not need Rust or cargo on the machine that runs Mako.**
@@ -119,14 +128,21 @@ routes, power (`hold` / `crew` / `arena`) only when you need it.
 
 ## How it works
 
-### Native compilation
+### From source to a binary
 
-Compiles to C, then to native binaries via clang (`-O3 -flto` in release
-mode). No interpreter, no JIT, no runtime VM. Concurrency primitives
-(`crew`, `fan`, channels) are part of the language, not a library bolt-on.
+Two paths, one language. The mature path lowers your `.mko` to C and lets clang
+optimize it (`-O3 -flto` in release) — that's what compiles the full language
+today. Alongside it, a newer **direct backend** skips C altogether: it turns
+your program into an ownership-explicit IR and emits machine code through LLVM
+(release) or Cranelift (fast debug builds), links it with a bundled linker, and
+ships a single standalone binary — no clang, no system linker, nothing to
+install. It doesn't cover the whole language yet, but where it does, the
+binaries come out small and fast.
 
-“No GC” means there is no tracing collector. Memory is freed
-deterministically through ownership, scope exits, and arenas.
+Either way there's no interpreter, no JIT, no runtime VM, and no tracing
+collector. Memory is freed deterministically — ownership, scope exits, arenas —
+and concurrency (`crew`, `fan`, channels) is part of the language, not a library
+bolt-on.
 
 ### Ownership instead of garbage collection
 

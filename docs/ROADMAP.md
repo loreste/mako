@@ -1,31 +1,301 @@
 # Mako roadmap
 
-**Product version:** **0.4.1** · Last sync: **2026-07-22**.  
-**Suite:** Run `make test` and `cargo test` for current counts. CI runs ASan, UBSan, TSan.
+**Product version:** **0.4.5** · Last sync: **2026-07-22**.  
+**Suite:** **367** Mako tests on `examples/testing` (C + native backends) + Rust
+unit tests, 0 failures on the native gate · CI ASan/UBSan/TSan as configured.
+
+**Release:** tag **`v0.4.5`** published; next work tracks **0.5.0+**.
 
 **Verified:** [STATUS.md](STATUS.md) · **Stdlib:** [STDLIB.md](STDLIB.md) · **Security:** [SECURITY.md](SECURITY.md) · **Release:** [RELEASE.md](RELEASE.md).  
 **Book:** [The Mako Book](book/) · **Identity:** [IDENTITY.md](IDENTITY.md).  
-**Soundness:** [SOUNDNESS.md](SOUNDNESS.md) · **Memory model:** [MEMORY_MODEL.md](MEMORY_MODEL.md).
+**Soundness:** [SOUNDNESS.md](SOUNDNESS.md) · **Memory model:** [MEMORY_MODEL.md](MEMORY_MODEL.md).  
+**Native plan detail:** [NATIVE_COMPILER_PLAN.md](NATIVE_COMPILER_PLAN.md).
 
 ---
 
-## What is next
+## Version map (0.4.5 → 0.5.x → 1.0)
 
 | Version | Theme | Status |
 |---------|-------|--------|
-| **0.1.9** | Generics & iterators | **Shipped** |
-| **0.1.10** | Deepen generics + speed | **Shipped** |
-| **0.2.0** | Stdlib written in Mako | **Shipped** |
-| **0.2.1** | Safety & correctness | **Shipped** |
-| **0.2.2** | TLS SNI / HTTPS / JWT / lock integrity | **Shipped** |
-| **0.2.3** | JWT/HTTPS input hardening | **Shipped** |
-| **0.2.4** | Soundness wave + residuals (SAFE/RT, speed, lock verify) | **Shipped** — [SOUNDNESS.md](SOUNDNESS.md) |
-| **0.2.5** | Memory safety audit, LSP, package integrity, honest docs | **Shipped** |
+| **0.1.9–0.2.5** | Generics → stdlib → soundness → tooling honesty | **Shipped** |
 | **0.3.0** | Cross-platform, CI green, ownership hardening | **Shipped** |
 | **0.4.0** | Performance — DCE, constant folding, runtime speed, lint | **Shipped** |
-| **1.0** | Stability | Planned |
+| **0.4.1** | Windows/runtime/edge stability | **Shipped** (see CHANGELOG) |
+| **0.4.5** | Native compiler product path (language + release cut) | **Shipped** — tag `v0.4.5` + multi-OS GitHub Release |
+| **0.5.0** | Native-first platform: default backend policy, CI green, dual-backend truth | **Planned** |
+| **0.5.1** | Toolchain & IDE depth (LSP, DAP/DWARF, doc/bench product) | **Planned** |
+| **0.5.2** | Runtime trust & production concurrency soaks | **Planned** |
+| **0.5.x** | Patch trains on 0.5 (perf, install, portability) | **Planned** as needed |
+| **1.0** | Stability contract (compat, LTS-ish discipline) | **Planned** after 0.5 series |
 
-### Soundness & runtime (SAFE / RT)
+**Principle:** ship **measurable** gates each minor; do not reopen identity (no free `go`, no lifetime params, no silent native→C fallback).
+
+```text
+0.4.5  language gate ✓ → LLVM + package + tag
+0.5.0  native-first platform (defaults + CI + honesty)
+0.5.1  toolchain/IDE product depth
+0.5.2  runtime trust soaks
+0.5.x  patches
+1.0    stability freeze
+```
+
+---
+
+## 0.4.5 — Native compiler product path
+
+### North star
+
+Ship **0.4.5** as:
+
+1. **Full language on native** — Cranelift debug path runs the entire testing corpus.
+2. **Release optimizer path** — LLVM competitive with C/Rust on **published** workloads (honest per-workload gates).
+3. **Installable product** — one-binary install + packaging seeds + versioned notes/checksums.
+4. **No silent lying** — unsupported modes hard-error; docs match the tree.
+
+**Not 0.4.5:** 1.0 stability freeze, full DWARF IDE debugger product, line-for-line Go
+stdlib, free `go` outside `crew`, or lifetime parameters.
+
+### Phase 0 — Language gate — **DONE**
+
+| Item | Evidence |
+|------|----------|
+| Shared ownership-explicit IR | `src/native_ir.rs` |
+| Cranelift debug backend | `src/native_codegen.rs` |
+| Native bridge + embedded runtime archive | `runtime/native_bridge.c` |
+| Full testing corpus on native | **367/367** `mako test examples/testing --backend native` |
+| Portable IO + concurrent select | seek/read_exact/append3 bridges; TLS select; recv closed vs timeout |
+| Language residual pack | mut-self `for` iterators; multi-stmt mut captures; const `s[i]` |
+| Product version string | `0.4.5` in `Cargo.toml` |
+
+### Track A — Performance (release path) — **NEXT**
+
+LLVM is the release optimizer; Cranelift stays debug / fast-compile.
+
+| ID | Deliverable | Acceptance |
+|----|-------------|------------|
+| **A1** | `mako build --backend llvm --release` on host arm64/x86_64 (`--features llvm-backend`) | Builds + links with bundled lld; end user needs no system clang for that path |
+| **A2** | Broad workload gate vs C backend + hand C + Rust | Extend `./scripts/native-bench-gate.sh` (or sibling) for **slice, map, I/O, CPU, RSS** — medians, not one-offs |
+| **A3** | Honest published numbers | Update [NATIVE_COMPILER_PLAN.md](NATIVE_COMPILER_PLAN.md) / [PERFORMANCE.md](PERFORMANCE.md) / [SPEED.md](SPEED.md) with hardware + flags |
+| **A4** | Compile latency + binary-size gates | Documented bounds (compile vs C backend; size bar where applicable) |
+
+**Exit A:** Release path = LLVM; debug path = Cranelift; both documented; gates green on CI host.  
+**Out of scope for A:** beating every Rust crate on every microbench.
+
+### Track B — Packaging & distribution
+
+| ID | Deliverable | Acceptance |
+|----|-------------|------------|
+| **B1** | `scripts/package-release.sh` slim + full tarballs | `dist/mako-<triple>.tar.gz` + `.sha256` |
+| **B2** | Linux deb/rpm seeds | `package-deb.sh` / `package-rpm.sh` smoke |
+| **B3** | Install scripts pin v0.4.5 | `install-release.sh` / `install-linux.sh --version v0.4.5` |
+| **B4** | GitHub Release | Tag `v0.4.5`, notes from CHANGELOG, artifacts + checksums |
+| **B5** | Homebrew / winget seeds | Real SHA for the tag (soft-fail only while pending) |
+| **B6** | Clean-install doctor | `mako doctor` reports runtime + std + version |
+
+**Exit B:** curl\|bash install works for at least Linux x86_64 and macOS arm64 (or documented exceptions).
+
+### Track C — Modes, CI honesty, residual polish
+
+| ID | Deliverable | Acceptance |
+|----|-------------|------------|
+| **C1** | Sanitizer / overflow / static on native/LLVM | Implement **or** hard-error pointing at C backend |
+| **C2** | Cross-compile + WASM status | Document working triples; fail closed otherwise |
+| **C3** | CI matrix | `mako test examples/testing --backend c` + `--backend native` on PR; optional LLVM job |
+| **C4** | Leak / RSS / size in packaging CI | Fail on regression thresholds |
+| **C5** | Optional soundness soaks (non-blocking for tag) | TSan capture matrix; channel monomorph take matrix — nightly/optional |
+| **C6** | Doc drift | Corpus **367**, residual pack Done, version lines consistent |
+
+**Exit C:** CI reflects truth; 0.4.5 docs are consistent.
+
+### Phased schedule
+
+```text
+Phase 0 — Freeze language gate          [DONE]
+Phase 1 — Perf credibility (Track A)    [NEXT]
+Phase 2 — Package & publish (Track B)
+Phase 3 — CI + modes honesty (Track C) → tag v0.4.5
+Phase 4 — Post-tag (Homebrew/winget follow-through; then 0.5 / 1.0 planning)
+```
+
+### Ship checklist
+
+- [x] Native language gate: full `examples/testing` green (**367/367**)  
+- [x] Version `0.4.5` in tree  
+- [x] LLVM release path usable on primary host (Apple arm64) when llvm-backend + lld present  
+- [x] Bench numbers published (fib/parity ~1.01× Rust; slice ~1.12×; string_slice/binary-size residual)  
+- [x] Release tarball + sha256 for host triple (`package-release.sh --slim`)  
+- [x] Install script smoke (macOS arm64 from local dist)  
+- [x] CHANGELOG **0.4.5** section  
+- [x] GitHub tag `v0.4.5` (multi-OS artifacts via `release.yml` on tag)  
+- [x] CI runs c + **native** tests on Linux/macOS  
+- [x] Docs numbers match tip  
+
+### Native compiler completion checklist
+
+The C backend remains the language-feature oracle. Native support is verified
+feature-by-feature; unsupported constructs must remain hard errors rather than
+silently falling back to C.
+
+- [x] Backend-neutral ownership-explicit IR
+- [x] Cranelift scalar CFG, strings, primitive slices, and initial `[]string`
+- [x] Native/C differential fixtures and Guard Malloc/leak coverage
+- [x] Bundled runtime archive and Linux x86_64 package workflow seed
+- [x] Nested slices and nested owned aggregate layout/drop (shared IR)
+- [x] Complete structs, enums, maps, tuples, methods, `?`, match (incl. arm `return`)
+- [x] `defer`, labeled loops, match guards (shared IR + corpus)
+- [x] Native runtime interop via `runtime/native_bridge.c` (net/TLS/SQL/HTTP/SIP/…)
+- [x] `crew`, `kick`, `fan`, channels, and `select` (corpus green)
+- [x] Full `examples/testing` native correctness gate — **367/367** (2026-07-22)
+- [x] Mut-self iterators · multi-stmt mut captures · const string index
+- [ ] LLVM release path: broad workload runtime ≤ C and ≤ Rust (slice/map/I/O/CPU/RSS)
+- [ ] Cross-compilation, WASM, static, sanitizer, and overflow build modes (or hard-error)
+- [ ] Full leak, latency, RSS, and binary-size gates in CI packaging
+
+---
+
+## 0.5.0 — Native-first platform
+
+**Depends on:** tagged **0.4.5** (or equivalent: language gate + install path + LLVM story).  
+**Theme:** make the native path the **default product experience**, with C as oracle/fallback, not the primary story.
+
+### North star
+
+1. Documented **backend policy**: debug → Cranelift; release → LLVM; C retained for oracle, sanitizers, and gaps.
+2. **CI green** on both c and native for the full testing corpus on primary hosts.
+3. Default `mako build` / `mako test` policy either switches to native or clearly offers it without hidden C fallback.
+4. Windows + Linux + macOS install paths honest for what works.
+
+### Deliverables
+
+| ID | Deliverable | Acceptance |
+|----|-------------|------------|
+| **50-A** | Backend policy in GUIDE/BUILD/RELEASE | Users know which backend is default for debug vs release |
+| **50-B** | CI: `mako test examples/testing --backend c` and `--backend native` required | PR red if either fails on primary matrix |
+| **50-C** | Optional LLVM CI job | Runs when toolchain present; documented skip otherwise |
+| **50-D** | Default backend selection | Either native default with C override, or explicit `MAKO_BACKEND` with documented default — no silent hybrid |
+| **50-E** | Cross / WASM / static matrix truth table | Working triples listed; others hard-error |
+| **50-F** | Perf regression budget post-0.4.5 | Re-run slice/map gates; fail on >N% regression vs 0.4.5 baselines |
+
+### Exit 0.5.0
+
+- Tagged `v0.5.0` with changelog.
+- Primary hosts: install + test native + (where available) LLVM release build.
+- C backend still passes full suite (oracle).
+
+### Non-goals for 0.5.0
+
+- Removing the C backend.
+- Self-hosting the full compiler in Mako.
+- Full IDE debugger product (that is 0.5.1).
+
+---
+
+## 0.5.1 — Toolchain & IDE depth
+
+**Depends on:** 0.5.0 platform defaults stable enough that tooling targets one primary native path.
+
+### North star
+
+Coherent **official toolchain**: LSP, debug, docs, bench, and doctor feel like one product.
+
+### Deliverables
+
+| ID | Deliverable | Acceptance |
+|----|-------------|------------|
+| **51-A** | LSP product depth | go-to-def / references / rename / diagnostics stable on multi-file packages |
+| **51-B** | Debugger depth | DWARF locals + DAP stdio usable from VS Code for native binaries (beyond seed) |
+| **51-C** | `mako doc` + package docs | Publishable API docs for std and user packs |
+| **51-D** | `mako bench` + gate scripts | Official microbench entry; documents vs C/Rust |
+| **51-E** | Editor extension polish | VS Code tasks, problem matcher, launch configs match 0.5 defaults |
+| **51-F** | `mako doctor` / install matrix | Catches missing runtime/std/LLVM-optional components cleanly |
+
+### Exit 0.5.1
+
+- Tagged `v0.5.1`.
+- “Open a package, jump to def, run tests, attach debugger” works for a hello backend on primary OS.
+
+### Non-goals for 0.5.1
+
+- Full JetBrains / multi-IDE parity.
+- Time-travel debugging / rr product.
+
+---
+
+## 0.5.2 — Runtime trust & production concurrency
+
+**Depends on:** 0.5.0 (and ideally 0.5.1 for debugability under load).
+
+### North star
+
+Production backends can rely on **structured concurrency + ownership** under stress, with evidence (not only unit tests).
+
+### Deliverables
+
+| ID | Deliverable | Acceptance |
+|----|-------------|------------|
+| **52-A** | TSan soaks | Capture matrix + channel/select stress in optional/nightly CI |
+| **52-B** | Channel monomorph take matrix | Beyond int/float/string for send/take/timeout |
+| **52-C** | Scheduler depth | Document pool limits; optional work-stealing only if soaks demand it |
+| **52-D** | Cancellation / deadline product | Portable timeout story end-to-end (task + channel + net APIs) |
+| **52-E** | Leak / resource census under load | RT-006-style APIs + soak that fails on growth |
+| **52-F** | Race model docs ↔ code | MEMORY_MODEL and typecheck `is_sync_ty` table stay in lockstep |
+
+### Exit 0.5.2
+
+- Tagged `v0.5.2`.
+- Published soak results; no known “must not ship” races on documented patterns.
+
+### Non-goals for 0.5.2
+
+- Claiming data-race freedom for all unsafe/FFI.
+- Actor model as the only concurrency story (crew/channels remain first-class).
+
+---
+
+## 0.5.x — Patch trains
+
+Use **0.5.3+** only for:
+
+- Perf regressions / install breakage after 0.5.0–0.5.2.
+- Portability fixes (new triple, WASM polish).
+- Security patches.
+- Doc/tooling hotfixes that do not change language surface.
+
+Avoid stuffing large language features into 0.5.x patches; open **0.6** if needed for a new theme (e.g. self-hosting, domain packs).
+
+---
+
+## Toward 1.0 (after 0.5 series)
+
+Not a commitment to ship immediately after 0.5.2. Preconditions:
+
+| Gate | Meaning |
+|------|---------|
+| Compat | 0.x → 1.0 migration story; dual syntax freeze policy ([COMPAT.md](COMPAT.md)) |
+| Backends | Native (debug+release) default; C optional oracle |
+| CI | Multi-OS matrix green for install + test |
+| Soundness | SAFE/RT core + documented soaks |
+| Docs | Book + GUIDE match preferred syntax; STATUS honest |
+
+**1.0 theme:** stability and support discipline — not a feature dump.
+
+---
+
+## Dependency sketch
+
+```text
+0.4.5 ──tag──► 0.5.0 (native-first platform)
+                  │
+                  ├──────────► 0.5.1 (toolchain / IDE)
+                  │
+                  └──────────► 0.5.2 (runtime trust soaks)
+                                   │
+                                   └── 0.5.x patches ──► 1.0 when gates hold
+```
+
+---
+
+## Soundness & runtime (SAFE / RT)
 
 Program of record: **[SOUNDNESS.md](SOUNDNESS.md)** · memory model:
 **[MEMORY_MODEL.md](MEMORY_MODEL.md)**.
@@ -112,7 +382,7 @@ The foundation for everything that follows.
 | **Generic structs** | Done | `struct Pair[T] { a: T, b: T }` — monomorphized; multi-param; nested; in generic fns |
 | **Generic enums** | Done | `enum MyBox[T] { Val(T), Nothing }` — monomorphized; match works |
 | **Interface bounds** | Done | `fn f[T: Describable](x: T)` — structural method-set check; compile error on violation |
-| **Iterator protocol** | Seed | Types with `next() -> Option[T]` recognized as iterables; by-value self limits mutation |
+| **Iterator protocol** | Done | `fn next(mut self) -> Option[T]` drives `for v in it` (advances binding); by-value next remains non-advancing |
 | **Mutable closures** | Seed | Heap-cell infrastructure built; needs multi-statement lambda bodies |
 
 Tests: `generic_struct_test`, `generic_enum_test`, `generic_bounds_test`,
@@ -443,7 +713,7 @@ Metrics/prom + span-lite JSON are in; **depth seeds landed** (2026-07-14).
 
 **Still open (true residuals):**
 
-1. Stack mut-ref captures (use `ShareInt` / share handles for shared mut) · deeper NLL  
+1. Deeper NLL edge polish (core sequential mut-ref multi-stmt + kick ShareInt gate shipped)  
 2. Remaining printf exotics (`%n`, dynamic `*`, locale) — use `fmt_sprintf*`  
 3. Full debugger DWARF/locals UI (seed: `debug_set_int` / `debug_locals_json` / `debug_bp`)  
 

@@ -1,0 +1,141 @@
+// Function-level lexical locals. Only root statements are indexed at this
+// stage, deliberately avoiding false visibility across if/match branches.
+
+fn local_name_token(tokens: []Token, statement: StmtNode) -> int {
+    if statement.kind != STMT_LET { return -1 }
+    let mut i = statement.token_start
+    while i < statement.token_end {
+        let kind = tokens[i].kind
+        if kind == TK_ASSIGN or kind == TK_COLON_ASSIGN { return -1 }
+        if kind == TK_IDENT { return i }
+        i = i + 1
+    }
+    return -1
+}
+
+fn resolve_function_locals(
+    source: string,
+    tokens: []Token,
+    items: []TopItem,
+    parameters: []ParamBinding,
+    bodies: []FnBody,
+    statement_edges: []int,
+    statements: []StmtNode,
+    expressions: []ExprNode
+) -> LocalResolution {
+    let mut locals: []LocalBinding = []
+    let mut local_by_expr = make([]int, len(expressions), len(expressions))
+    let mut i = 0
+    while i < len(local_by_expr) {
+        local_by_expr[i] = -1
+        i = i + 1
+    }
+    let mut resolved = 0
+    let mut body_index = 0
+    while body_index < len(bodies) {
+        let body = bodies[body_index]
+        let item = items[body.item]
+        let local_start = len(locals)
+        let mut parameter_index = 0
+        while parameter_index < len(parameters) {
+            let parameter = parameters[parameter_index]
+            if parameter.item == body.item {
+                locals = append(locals, LocalBinding {
+                    item: body.item, name_start: parameter.name_start, name_end: parameter.name_end,
+                    declaration_end: item.body_start, is_parameter: true,
+                    scope_start: item.body_start, scope_end: item.body_end,
+                    type_root: parameter.type_root, initializer_root: -1,
+                    ownership: LOCAL_OWN_NONE,
+                })
+            }
+            parameter_index = parameter_index + 1
+        }
+        let mut statement_index = 0
+        while statement_index < len(statements) {
+            let statement = statements[statement_index]
+            if statement.token_start >= item.body_start and statement.token_start < item.body_end {
+                let name_token = local_name_token(tokens, statement)
+                if name_token >= 0 {
+                    let name = tokens[name_token]
+                    locals = append(locals, LocalBinding {
+                        item: body.item, name_start: name.start, name_end: name.end,
+                        declaration_end: statement.token_end, is_parameter: false,
+                        scope_start: statement.scope_start, scope_end: statement.scope_end,
+                        type_root: -1, initializer_root: statement.expr_root,
+                        ownership: if tokens[statement.token_start].kind == TK_HOLD {
+                            LOCAL_OWN_HOLD
+                        } else if tokens[statement.token_start].kind == TK_SHARE {
+                            LOCAL_OWN_SHARE
+                        } else {
+                            LOCAL_OWN_NONE
+                        },
+                    })
+                }
+            }
+            statement_index = statement_index + 1
+        }
+
+        let mut expression_index = 0
+        while expression_index < len(expressions) {
+            let expression = expressions[expression_index]
+            if expression.kind == EXPR_IDENT and expression.token >= item.body_start and expression.token < item.body_end {
+                let token = tokens[expression.token]
+                let mut local_index = local_start
+                let mut selected = -1
+                while local_index < len(locals) {
+                    let local = locals[local_index]
+                    // A binding becomes visible only after its initializer's
+                    // complete statement, preventing accidental self-capture.
+                    if local.declaration_end <= expression.token and
+                        expression.token >= local.scope_start and expression.token < local.scope_end and
+                        span_equal(source, local.name_start, local.name_end, token.start, token.end) {
+                        if selected < 0 {
+                            selected = local_index
+                        } else {
+                            let previous = locals[selected]
+                            let local_width = local.scope_end - local.scope_start
+                            let previous_width = previous.scope_end - previous.scope_start
+                            if local_width < previous_width or
+                                (local_width == previous_width and local.declaration_end > previous.declaration_end) {
+                                selected = local_index
+                            }
+                        }
+                    }
+                    local_index = local_index + 1
+                }
+                if selected >= 0 {
+                    local_by_expr[expression_index] = selected
+                    resolved = resolved + 1
+                }
+            }
+            expression_index = expression_index + 1
+        }
+        body_index = body_index + 1
+    }
+    return LocalResolution { locals: locals, local_by_expr: local_by_expr, resolved: resolved }
+}
+
+fn branch_scope_smoke_test() -> bool {
+    let source = "fn main(seed: int) {\nlet x = seed\nif true {\nlet branch = x\nprint_int(branch)\n} else {\nprint_int(branch)\n}\nprint_int(branch)\n}"
+    let lexed = lex_source(source)
+    if not lexed.ok { return false }
+    let parsed = parse_frontend(source, lexed.tokens)
+    return parsed.ok and len(parsed.locals) == 3 and parsed.resolved_locals == 3
+}
+
+fn local_resolution_smoke_test() -> bool {
+    let source = "const x = 99\nfn main(seed: int) {\nlet x = seed\nprint_int(x)\nlet y = x + 1\nprint_int(y)\n}"
+    let lexed = lex_source(source)
+    if not lexed.ok { return false }
+    let parsed = parse_frontend(source, lexed.tokens)
+    if not parsed.ok or len(parsed.parameters) != 1 or len(parsed.locals) != 3 or parsed.resolved_locals != 4 { return false }
+    let mut shadowed = false
+    let mut i = 0
+    while i < len(parsed.expression_locals) {
+        if parsed.expression_locals[i] >= 0 and parsed.expression_symbols[i] >= 0 {
+            shadowed = true
+        }
+        i = i + 1
+    }
+    return shadowed
+}
