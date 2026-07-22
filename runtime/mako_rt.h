@@ -5525,7 +5525,7 @@ typedef struct {
     pthread_t thread;
     MakoTaskFn fn;
     void *arg;
-    void *result;        /* Read only after joining or acquiring done/joined. */
+    void *result;
     atomic_bool joined;
     bool cancelled_start; /* set if cancel before/during — cooperative */
     atomic_int done;      /* 1 when trampoline finished (for timed join) */
@@ -6405,11 +6405,6 @@ static inline MakoTask *mako_spawn_blocking(MakoNursery *n, MakoTaskFn fn, void 
     return mako_spawn_ex(n, fn, arg, /*blocking=*/1);
 }
 
-static inline void mako_task_join_thread(MakoTask *t) {
-    /* Keep retval NULL: the Windows pthread shim would replace t->result with NULL. */
-    pthread_join(t->thread, NULL);
-}
-
 static inline void *mako_await(MakoTask *t) {
     if (!t) return NULL;
     if (!atomic_load_explicit(&t->joined, memory_order_acquire)) {
@@ -6419,7 +6414,7 @@ static inline void *mako_await(MakoTask *t) {
                 nanosleep(&step, NULL);
             }
         } else {
-            mako_task_join_thread(t);
+            pthread_join(t->thread, &t->result);
             atomic_store_explicit(&t->done, 1, memory_order_release);
         }
         atomic_store_explicit(&t->joined, true, memory_order_release);
@@ -6447,7 +6442,7 @@ static inline int64_t mako_await_timeout_ms(MakoTask *t, int64_t ms, int64_t *ou
         int done = atomic_load_explicit(&t->done, memory_order_acquire);
         if (done) {
             if (!t->pooled) {
-                mako_task_join_thread(t);
+                pthread_join(t->thread, &t->result);
             }
             atomic_store_explicit(&t->joined, true, memory_order_release);
             mako_rt_counter_inc(&mako_rt_tasks_joined);
@@ -6463,7 +6458,7 @@ static inline int64_t mako_await_timeout_ms(MakoTask *t, int64_t ms, int64_t *ou
     int done = atomic_load_explicit(&t->done, memory_order_acquire);
     if (done) {
         if (!t->pooled) {
-            mako_task_join_thread(t);
+            pthread_join(t->thread, &t->result);
         }
         atomic_store_explicit(&t->joined, true, memory_order_release);
         mako_rt_counter_inc(&mako_rt_tasks_joined);
@@ -7108,11 +7103,51 @@ static int mako_cmp_i64(const void *a, const void *b) {
     return (x > y) - (x < y);
 }
 
+/* Inline insertion sort for small partitions. */
+static inline void mako_isort_i64(int64_t *d, size_t n) {
+    for (size_t i = 1; i < n; i++) {
+        int64_t key = d[i];
+        size_t j = i;
+        while (j > 0 && d[j - 1] > key) { d[j] = d[j - 1]; j--; }
+        d[j] = key;
+    }
+}
+
+/* Inline introsort for int64 — no function-pointer overhead. */
+static inline void mako_qsort_i64(int64_t *d, size_t n, int depth) {
+    while (n > 16) {
+        if (depth <= 0) { qsort(d, n, sizeof(int64_t), mako_cmp_i64); return; }
+        depth--;
+        size_t mid = n / 2;
+        if (d[0] > d[mid]) { int64_t t = d[0]; d[0] = d[mid]; d[mid] = t; }
+        if (d[0] > d[n-1]) { int64_t t = d[0]; d[0] = d[n-1]; d[n-1] = t; }
+        if (d[mid] > d[n-1]) { int64_t t = d[mid]; d[mid] = d[n-1]; d[n-1] = t; }
+        int64_t pivot = d[mid];
+        size_t lo = 0, hi = n - 1;
+        while (lo <= hi) {
+            while (d[lo] < pivot) lo++;
+            while (d[hi] > pivot) hi--;
+            if (lo <= hi) { int64_t t = d[lo]; d[lo] = d[hi]; d[hi] = t; lo++; if (hi == 0) break; hi--; }
+        }
+        if (hi + 1 < n - lo) { mako_qsort_i64(d, hi + 1, depth); d += lo; n -= lo; }
+        else { mako_qsort_i64(d + lo, n - lo, depth); n = hi + 1; }
+    }
+    mako_isort_i64(d, n);
+}
+
+static inline void mako_sort_i64_inplace(int64_t *d, size_t n) {
+    if (n <= 1) return;
+    int depth = 0;
+    for (size_t k = n; k > 0; k >>= 1) depth++;
+    depth *= 2;
+    mako_qsort_i64(d, n, depth);
+}
+
 static inline MakoIntArray mako_sort_ints(MakoIntArray a) {
     MakoIntArray out = mako_int_array_make((int64_t)a.len, (int64_t)a.len);
     if (a.len) memcpy(out.data, a.data, a.len * sizeof(int64_t));
     out.len = a.len;
-    if (out.len > 1) qsort(out.data, out.len, sizeof(int64_t), mako_cmp_i64);
+    if (out.len > 1) mako_sort_i64_inplace(out.data, out.len);
     return out;
 }
 
