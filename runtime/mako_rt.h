@@ -4587,8 +4587,9 @@ static inline MakoIntArray mako_slice_append(MakoIntArray s, int64_t v) {
     }
     size_t ncap = s.cap ? s.cap * 2 : 1;
     if (ncap < s.len + 1) ncap = s.len + 1;
-    /* malloc+copy (not realloc): sub-slices may alias interior pointers
-     * into the old backing array. realloc on those is undefined behavior. */
+    /* malloc+copy (not realloc): the codegen's reassign-free logic tracks
+     * the old data pointer and frees it on reassign. realloc invalidates
+     * that pointer, causing a double-free. Safe alternative: new alloc. */
     int64_t *nd = (int64_t *)malloc(ncap * sizeof(int64_t));
     if (MAKO_UNLIKELY(!nd)) mako_abort("append: out of memory");
     if (s.len) memcpy(nd, s.data, s.len * sizeof(int64_t));
@@ -7137,6 +7138,21 @@ static inline void mako_qsort_i64(int64_t *d, size_t n, int depth) {
 
 static inline void mako_sort_i64_inplace(int64_t *d, size_t n) {
     if (n <= 1) return;
+    /* Pattern detection: check if already sorted or reverse sorted. O(n). */
+    int sorted = 1, rev = 1;
+    for (size_t i = 1; i < n; i++) {
+        if (d[i] < d[i-1]) sorted = 0;
+        if (d[i] > d[i-1]) rev = 0;
+        if (!sorted && !rev) break;
+    }
+    if (sorted) return; /* Already sorted — O(n) scan, O(1) work. */
+    if (rev) {
+        /* Reverse in-place — O(n). */
+        for (size_t i = 0, j = n - 1; i < j; i++, j--) {
+            int64_t t = d[i]; d[i] = d[j]; d[j] = t;
+        }
+        return;
+    }
     int depth = 0;
     for (size_t k = n; k > 0; k >>= 1) depth++;
     depth *= 2;
