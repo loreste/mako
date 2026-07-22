@@ -2,7 +2,7 @@
 
 Source brief: `General_Purpose_Backend_Language_Vision.md`.
 
-**Product tip:** **0.4.5**. Current cycle: finish native product path (LLVM +
+**Product tip:** **0.4.6**. Patch train after v0.4.5 (LLVM residual +
 packaging + tag), then **0.5.0** native-first platform, **0.5.1** toolchain/IDE,
 **0.5.2** runtime trust soaks. See [ROADMAP.md](ROADMAP.md) · [STATUS.md](STATUS.md).
 

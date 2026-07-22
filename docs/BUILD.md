@@ -1,4 +1,6 @@
-# Mako builds (v0.4.5)
+# Mako builds (v0.4.6 tip)
+
+**Versioning:** [VERSIONING.md](VERSIONING.md) — ship small patches often.
 
 Mako compiles packages to **cached native objects** under `.mako/cache/` (or `$MAKO_CACHE`), then links. Unchanged units skip `clang -c`.
 

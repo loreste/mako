@@ -12,7 +12,7 @@ backend must honor.
 ```
 
 Scope: this is a living spec for the native compiler foundation
-(product 0.4.5). It complements — does not replace —
+(product 0.4.6 tip). It complements — does not replace —
 [docs/NATIVE_COMPILER_PLAN.md](docs/NATIVE_COMPILER_PLAN.md) (increment ladder),
 [docs/SELF_HOSTING.md](docs/SELF_HOSTING.md) (bootstrap contract), and
 [docs/MEMORY_MODEL.md](docs/MEMORY_MODEL.md) (language memory model).

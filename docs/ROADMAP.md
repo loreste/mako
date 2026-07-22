@@ -1,10 +1,11 @@
 # Mako roadmap
 
-**Product version:** **0.4.5** · Last sync: **2026-07-22**.  
+**Product version:** **0.4.6** (tip) · last tagged **v0.4.5** · Last sync: **2026-07-22**.  
 **Suite:** **367** Mako tests on `examples/testing` (C + native backends) + Rust
 unit tests, 0 failures on the native gate · CI ASan/UBSan/TSan as configured.
 
-**Release:** tag **`v0.4.5`** published; next work tracks **0.5.0+**.
+**Versioning:** [VERSIONING.md](VERSIONING.md) — **prefer small patches** over mega-minors.  
+**Release:** tag **`v0.4.5`** published; tip train **0.4.6 → 0.4.7 → … → 0.5.0**.
 
 **Verified:** [STATUS.md](STATUS.md) · **Stdlib:** [STDLIB.md](STDLIB.md) · **Security:** [SECURITY.md](SECURITY.md) · **Release:** [RELEASE.md](RELEASE.md).  
 **Book:** [The Mako Book](book/) · **Identity:** [IDENTITY.md](IDENTITY.md).  
@@ -13,7 +14,7 @@ unit tests, 0 failures on the native gate · CI ASan/UBSan/TSan as configured.
 
 ---
 
-## Version map (0.4.5 → 0.5.x → 1.0)
+## Version map (0.4.5 → patches → 0.5.x → 1.0)
 
 | Version | Theme | Status |
 |---------|-------|--------|
@@ -21,20 +22,28 @@ unit tests, 0 failures on the native gate · CI ASan/UBSan/TSan as configured.
 | **0.3.0** | Cross-platform, CI green, ownership hardening | **Shipped** |
 | **0.4.0** | Performance — DCE, constant folding, runtime speed, lint | **Shipped** |
 | **0.4.1** | Windows/runtime/edge stability | **Shipped** (see CHANGELOG) |
-| **0.4.5** | Native compiler product path (language + release cut) | **Shipped** — tag `v0.4.5` + multi-OS GitHub Release |
-| **0.5.0** | Native-first platform: default backend policy, CI green, dual-backend truth | **Planned** |
+| **0.4.5** | Native compiler product path (language + release cut) | **Shipped** — tag `v0.4.5` |
+| **0.4.6** | Residual: string_slice + binary size + bench bars + backend policy env | **In tree** (cut when ready to tag) |
+| **0.4.7** | Cross / WASM / static / sanitize truth table (hard-error gaps) | **Planned** patch |
+| **0.4.8** | Map/I/O workload gates + perf regression budget | **Planned** patch |
+| **0.4.9** | Optional LLVM CI job polish / package smoke | **Planned** patch (skip if empty) |
+| **0.5.0** | Native-first **default** (CLI default flip — minor theme) | **Planned** minor |
 | **0.5.1** | Toolchain & IDE depth (LSP, DAP/DWARF, doc/bench product) | **Planned** |
 | **0.5.2** | Runtime trust & production concurrency soaks | **Planned** |
-| **0.5.x** | Patch trains on 0.5 (perf, install, portability) | **Planned** as needed |
+| **0.5.x** | Further patches on 0.5 | **Planned** as needed |
 | **1.0** | Stability contract (compat, LTS-ish discipline) | **Planned** after 0.5 series |
 
-**Principle:** ship **measurable** gates each minor; do not reopen identity (no free `go`, no lifetime params, no silent native→C fallback).
+**Principle:** ship **measurable** gates each **patch or minor**; do not reopen identity (no free `go`, no lifetime params, no silent native→C fallback). Prefer **0.4.N** patches over waiting for **0.5.0**.
 
 ```text
-0.4.5  language gate ✓ → LLVM + package + tag
-0.5.0  native-first platform (defaults + CI + honesty)
-0.5.1  toolchain/IDE product depth
-0.5.2  runtime trust soaks
+0.4.5  language gate ✓  [tagged]
+0.4.6  residual perf + size + MAKO_BACKEND policy  [tip]
+0.4.7  modes truth table
+0.4.8  map/I/O gates
+0.4.9  LLVM CI / packaging polish (optional)
+0.5.0  native-first CLI default (minor)
+0.5.1  toolchain/IDE
+0.5.2  runtime trust
 0.5.x  patches
 1.0    stability freeze
 ```
@@ -153,28 +162,78 @@ silently falling back to C.
 
 ---
 
-## 0.5.0 — Native-first platform
+## 0.4.6 — Residual perf + size + backend policy env
 
-**Depends on:** tagged **0.4.5** (or equivalent: language gate + install path + LLVM story).  
-**Theme:** make the native path the **default product experience**, with C as oracle/fallback, not the primary story.
+**Depends on:** tagged **0.4.5**.  
+**Theme:** close the post-tag residual bars and document how to select backends — **without** flipping the CLI default yet.
+
+| ID | Deliverable | Status |
+|----|-------------|--------|
+| **46-A** | Immortal string share + LLVM `[]string` hot path | **Done** in tip |
+| **46-B** | Runtime archive dead_strip / gc-sections; binary ~1.01× slim C | **Done** in tip |
+| **46-C** | Honest bench gate defaults (runtime 1.25×, binary 1.05×, RSS 1.25×) | **Done** in tip |
+| **46-D** | Backend policy docs + `MAKO_BACKEND` / `MAKO_TEST_BACKEND` | **Done** in tip |
+| **46-E** | Tag `v0.4.6` + package SHAs when maintainers cut | **Pending** |
+
+**Exit:** CHANGELOG **0.4.6**, `Cargo.toml` **0.4.6**, gate PASS, tag optional same week.
+
+---
+
+## 0.4.7 — Modes truth table
+
+**Theme:** every unsupported mode hard-errors with a clear pointer (no silent hybrid).
+
+| ID | Deliverable | Acceptance |
+|----|-------------|------------|
+| **47-A** | Sanitize / overflow / static on native/LLVM | Implement **or** hard-error → use C |
+| **47-B** | Cross + WASM documented triples | Working list in BUILD/RELEASE; others fail closed |
+| **47-C** | Doctor reports mode support | `mako doctor` lists backend + mode matrix |
+
+---
+
+## 0.4.8 — Workload gates + regression budget
+
+| ID | Deliverable | Acceptance |
+|----|-------------|------------|
+| **48-A** | Map + I/O (+ optional CPU) benches in gate sibling | Medians vs C/Rust published |
+| **48-B** | Regression budget vs 0.4.5/0.4.6 baselines | CI or script fails on >N% regression |
+| **48-C** | string_slice toward ≤1.00× residual notes | Document remaining SSA work if still over |
+
+---
+
+## 0.4.9 — LLVM CI / packaging polish (optional patch)
+
+Skip this number if empty at cut time; renumber is fine as long as tags do not skip *after* publish.
+
+| ID | Deliverable | Acceptance |
+|----|-------------|------------|
+| **49-A** | Optional LLVM CI job | Runs when toolchain present; skip documented |
+| **49-B** | Install/package smoke on primary hosts | doctor ok on slim tarball |
+
+---
+
+## 0.5.0 — Native-first default (minor)
+
+**Depends on:** **0.4.6+** patches green (language gate + residual + policy env).  
+**Theme:** make the native path the **default product experience**, with C as oracle/fallback — **CLI default flips here**, not in a patch.
 
 ### North star
 
-1. Documented **backend policy**: debug → Cranelift; release → LLVM; C retained for oracle, sanitizers, and gaps.
-2. **CI green** on both c and native for the full testing corpus on primary hosts.
-3. Default `mako build` / `mako test` policy either switches to native or clearly offers it without hidden C fallback.
+1. Backend policy already documented (0.4.6); **default** becomes native (debug) / llvm-when-available (release) or explicit equivalent.
+2. **CI green** on both c and native (done in 0.4.5 CI; keep red-on-fail).
+3. No silent hybrid; sanitizers/cross still route to C or hard-error.
 4. Windows + Linux + macOS install paths honest for what works.
 
 ### Deliverables
 
 | ID | Deliverable | Acceptance |
 |----|-------------|------------|
-| **50-A** | Backend policy in GUIDE/BUILD/RELEASE | **Done seed** — [BUILD.md § Backend policy](BUILD.md); GUIDE/RELEASE pointers |
-| **50-B** | CI: `mako test examples/testing --backend c` and `--backend native` required | **Done** on Linux/macOS CI jobs |
-| **50-C** | Optional LLVM CI job | Runs when toolchain present; documented skip otherwise |
-| **50-D** | Default backend selection | **Partial** — `MAKO_BACKEND` / `MAKO_TEST_BACKEND` + explicit `--backend` (CLI default remains **c** until flip) |
-| **50-E** | Cross / WASM / static matrix truth table | Working triples listed; others hard-error |
-| **50-F** | Perf regression budget post-0.4.5 | Re-run slice/map gates; fail on >N% regression vs 0.4.5 baselines |
+| **50-A** | Backend policy in GUIDE/BUILD/RELEASE | **Done seed** in 0.4.6 — [BUILD.md](BUILD.md) |
+| **50-B** | CI: c + native required | **Done** on Linux/macOS CI jobs |
+| **50-C** | Optional LLVM CI job | Prefer land in **0.4.9** if ready earlier |
+| **50-D** | **Default backend flip** | `mako build` / `test` default native (or documented MAKO_BACKEND default=native); `--backend c` override |
+| **50-E** | Cross / WASM / static matrix | Prefer land in **0.4.7** |
+| **50-F** | Perf regression budget | Prefer land in **0.4.8** |
 
 ### Exit 0.5.0
 
