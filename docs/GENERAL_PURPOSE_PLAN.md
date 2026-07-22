@@ -2,9 +2,9 @@
 
 Source brief: `General_Purpose_Backend_Language_Vision.md`.
 
-**Product tip:** **0.4.5**. The current roadmap cycle is the native compiler
-foundation and Linux packaging, alongside performance and stdlib depth. See
-[ROADMAP.md](ROADMAP.md) · [STATUS.md](STATUS.md).
+**Product tip:** **0.4.5**. Current cycle: finish native product path (LLVM +
+packaging + tag), then **0.5.0** native-first platform, **0.5.1** toolchain/IDE,
+**0.5.2** runtime trust soaks. See [ROADMAP.md](ROADMAP.md) · [STATUS.md](STATUS.md).
 
 Mako's product contract is:
 
