@@ -3446,6 +3446,14 @@ fn compile_cflags(opts: &BuildOpts) -> Vec<String> {
 fn link_args_native(opts: &BuildOpts, _runtime_dir: &Path) -> Vec<String> {
     let os = cc::classify_target(opts.target.as_deref());
     let mut args = cc::base_link_args(opts);
+    // Dead-strip unused sections/symbols from the embedded runtime archive.
+    match os {
+        cc::OsKind::Macos => args.push("-Wl,-dead_strip".into()),
+        cc::OsKind::Linux | cc::OsKind::Other => {
+            args.push("-Wl,--gc-sections".into());
+        }
+        cc::OsKind::Windows | cc::OsKind::Wasm => {}
+    }
     // Optional deps: only auto-link on native (same-OS) builds — cross sysroots rarely have them.
     let native_like = opts.target.is_none() || !cc::is_cross(opts.target.as_deref());
     if !native_like {
@@ -3747,6 +3755,9 @@ fn build_native_object(
             }
             // System C library for malloc/stdio used by the runtime archive.
             arguments.push(std::ffi::OsString::from("-lSystem"));
+            // Drop unreferenced runtime symbols (full bridge archive is multi-MB
+            // without this — a hello-world would otherwise pull every builtin).
+            arguments.push(std::ffi::OsString::from("-dead_strip"));
             arguments.push(std::ffi::OsString::from("-o"));
             arguments.push(out_bin.as_os_str().to_owned());
             let argument_refs = arguments
@@ -3757,6 +3768,9 @@ fn build_native_object(
             let _ = fs::remove_file(&object_path);
             let _ = fs::remove_file(&runtime_archive);
             result.map_err(|error| emit_plain_error(&error))?;
+            if matches!(level, OptLevel::Release) {
+                let _ = Command::new("strip").arg(out_bin).status();
+            }
             return Ok(t0.elapsed().as_secs_f64() * 1000.0);
         }
         #[cfg(not(all(feature = "llvm-backend", target_os = "macos")))]
@@ -3794,7 +3808,8 @@ fn build_native_object(
         .emit();
         return Err(());
     }
-    if matches!(level, OptLevel::Release) && std::env::var_os("MAKO_STRIP").is_some() {
+    // Release: strip by default; set MAKO_NO_STRIP=1 to keep symbols.
+    if matches!(level, OptLevel::Release) && std::env::var_os("MAKO_NO_STRIP").is_none() {
         let _ = Command::new("strip").arg(out_bin).status();
     }
     Ok(t0.elapsed().as_secs_f64() * 1000.0)
@@ -3964,7 +3979,8 @@ fn build_c(
     if !keep_c {
         let _ = fs::remove_file(&c_path);
     }
-    if matches!(level, OptLevel::Release) && std::env::var_os("MAKO_STRIP").is_some() {
+    // Release: strip by default; set MAKO_NO_STRIP=1 to keep symbols.
+    if matches!(level, OptLevel::Release) && std::env::var_os("MAKO_NO_STRIP").is_none() {
         let _ = Command::new("strip").arg(out_bin).status();
     }
     Ok(ms)

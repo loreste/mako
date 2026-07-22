@@ -818,9 +818,6 @@ pub fn link_objects(
         cmd.arg(a);
     }
     cmd.arg("-o").arg(out_bin);
-    if opts.release && std::env::var_os("MAKO_STRIP").is_some() {
-        // Optional post-link strip via second pass — applied after successful link below.
-    }
     let output = cmd.output().map_err(|e| {
         Diagnostic::error(
             "",
@@ -837,7 +834,8 @@ pub fn link_objects(
             .emit();
         return Err(());
     }
-    if opts.release && std::env::var_os("MAKO_STRIP").is_some() {
+    // Release: strip by default; set MAKO_NO_STRIP=1 to keep symbols.
+    if opts.release && std::env::var_os("MAKO_NO_STRIP").is_none() {
         let _ = Command::new("strip").arg(out_bin).status();
     }
     Ok(t0.elapsed().as_secs_f64() * 1000.0)

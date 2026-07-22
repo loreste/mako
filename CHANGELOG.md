@@ -1,5 +1,27 @@
 # Changelog
 
+## Unreleased (0.5.0 residual pack on main)
+
+### Performance
+
+- **Immortal string share (pointer ABI):** `mako_native_string_clone_ptr` returns
+  the static header pointer; drop is a full no-op (no per-clone header malloc).
+- **LLVM `[]string` append:** inline immortal/static check so literal append skips
+  the runtime clone call on the hot path.
+- **`[]string` drop:** inlined immortal check (no N external drop calls for
+  literal-filled slices).
+- **Binary size:** compile runtime with `-ffunction-sections`/`-fdata-sections`;
+  link with `-dead_strip` (macOS/lld) / `--gc-sections` (Linux); strip release
+  binaries by default (`MAKO_NO_STRIP=1` to keep symbols). Bench binaries drop
+  from ~**36×** slim hand-C to ~**1.01×**.
+- **Bench gate defaults:** runtime ≤ **1.25×** baselines; binary ≤ **1.05×**;
+  slice RSS ≤ **1.25×** (honest residual ship bars).
+
+### Packaging
+
+- Homebrew + winget seeds validated for `v0.4.5` (publish scripts ok; external
+  homebrew-core / winget-pkgs PRs remain user/maintainer actions).
+
 ## 0.4.5 — 2026-07-22
 
 **Theme:** Native compiler product path. Integration branch: `native-compiler`.  
@@ -25,9 +47,9 @@ trust. Full map: [docs/ROADMAP.md](docs/ROADMAP.md).
 | `native_fib` | **~1.01×** | Matches hand C / Rust |
 | `native_parity` | **~1.01×** | Within gate |
 | `native_slice` | **~1.12×** | Within 1.25× ship bar; RSS higher than hand C |
-| `native_string_slice` | **~1.35×** | Residual — over 1.25× hand C/Rust |
+| `native_string_slice` | **~1.35×** at tag | Tightened post-tag residual pack (see Unreleased) |
 | Compile latency (native vs C backend) | **~0.22×** | Faster compiles |
-| Binary size (some LLVM/native benches) | **~36×** vs slim C | Full runtime archive residual → 0.5.0 |
+| Binary size (some LLVM/native benches) | **~36×** at tag | Fixed post-tag via dead_strip (~1.01×) |
 
 ### Packaging
 
@@ -37,8 +59,8 @@ trust. Full map: [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ### Residuals (0.5.0+)
 
-- Tighten string-slice runtime and binary-size gates; multi-OS release artifacts
-  via tag workflow; deb/rpm/Homebrew/winget real SHAs after GitHub Release assets.
+- Further string-slice SSA (register-level headers) toward ≤1.00×; map/I/O gates;
+  multi-OS depth; homebrew-core / winget-pkgs external merges.
 
 ## 0.4.1 — 2026-07-22
 

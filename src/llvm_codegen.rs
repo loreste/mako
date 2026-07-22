@@ -2183,23 +2183,20 @@ fn emit_str_slice_append_inline<'ctx>(
             .build_gep(string_ty, data, &[len], "strappend.ptr")
             .map_err(builder_error)?
     };
-    let clone_fn = external_function(
-        module,
-        "mako_native_string_clone",
-        string_ty.fn_type(&[string_ty.into()], false),
-    );
-    let cloned = builder
-        .build_call(clone_fn, &[element.into()], "strappend.clone")
-        .map_err(builder_error)?
-        .try_as_basic_value()
-        .basic()
-        .ok_or_else(|| LlvmError::new("string clone returned void"))?;
+    // Immortal/static strings (high bit of len): share the value without a
+    // runtime call — the append-literal hot path (string_slice bench).
+    // When the element is a constant with the high bit set, LLVM folds the
+    // branch away and this becomes a plain store.
+    let cloned = emit_string_clone_or_share(context, module, builder, element, "strappend.clone")?;
     builder
         .build_store(elem_ptr, cloned)
         .map_err(builder_error)?;
     let new_len = builder
         .build_int_add(len, one, "strappend.len")
         .map_err(builder_error)?;
+    // Prefer direct phi of header fields over stack round-trip on the fast path:
+    // build the result in registers and only materialize at merge via the slot
+    // if needed. (merge still loads the slot for a unified return).
     let slice_ty = llvm_type(context, Type::StrSlice).into_struct_type();
     let mut hdr = slice_ty.get_undef();
     hdr = builder
@@ -2376,6 +2373,73 @@ fn pack_string<'ctx>(
         .build_insert_value(with_data, len, 1, &format!("{name}.len"))
         .map_err(builder_error)?
         .into_struct_value())
+}
+
+/// Clone a string value, or share it when the immortal/static high bit is set.
+/// Avoids a runtime call on the literal-append hot path.
+fn emit_string_clone_or_share<'ctx>(
+    context: &'ctx Context,
+    module: &Module<'ctx>,
+    builder: &Builder<'ctx>,
+    value: StructValue<'ctx>,
+    name: &str,
+) -> Result<StructValue<'ctx>, LlvmError> {
+    let parent = builder
+        .get_insert_block()
+        .and_then(|b| b.get_parent())
+        .ok_or_else(|| LlvmError::new("string clone: no insert block"))?;
+    let string_ty = llvm_type(context, Type::Str);
+    let raw_len = builder
+        .build_extract_value(value, 1, &format!("{name}.len"))
+        .map_err(builder_error)?
+        .into_int_value();
+    // High bit of len marks immortal/static payload (see native_runtime.c).
+    let high = context.i64_type().const_int(1u64 << 63, false);
+    let is_static = builder
+        .build_int_compare(
+            IntPredicate::NE,
+            builder
+                .build_and(raw_len, high, &format!("{name}.hi"))
+                .map_err(builder_error)?,
+            context.i64_type().const_zero(),
+            &format!("{name}.static"),
+        )
+        .map_err(builder_error)?;
+    let share_bb = context.append_basic_block(parent, &format!("{name}.share"));
+    let clone_bb = context.append_basic_block(parent, &format!("{name}.heap"));
+    let merge_bb = context.append_basic_block(parent, &format!("{name}.merge"));
+    builder
+        .build_conditional_branch(is_static, share_bb, clone_bb)
+        .map_err(builder_error)?;
+
+    builder.position_at_end(share_bb);
+    builder
+        .build_unconditional_branch(merge_bb)
+        .map_err(builder_error)?;
+
+    builder.position_at_end(clone_bb);
+    let clone_fn = external_function(
+        module,
+        "mako_native_string_clone",
+        string_ty.fn_type(&[string_ty.into()], false),
+    );
+    let heap_clone = builder
+        .build_call(clone_fn, &[value.into()], &format!("{name}.call"))
+        .map_err(builder_error)?
+        .try_as_basic_value()
+        .basic()
+        .ok_or_else(|| LlvmError::new("string clone returned void"))?
+        .into_struct_value();
+    builder
+        .build_unconditional_branch(merge_bb)
+        .map_err(builder_error)?;
+
+    builder.position_at_end(merge_bb);
+    let phi = builder
+        .build_phi(string_ty, name)
+        .map_err(builder_error)?;
+    phi.add_incoming(&[(&value, share_bb), (&heap_clone, clone_bb)]);
+    Ok(phi.as_basic_value().into_struct_value())
 }
 
 fn emit_binary<'ctx>(

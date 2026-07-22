@@ -93,12 +93,14 @@ map get/set inlining, I/O buffers, and induction-proven bounds-check elision.
 - `src/native_ir.rs` / `src/native_codegen.rs`: ownership-explicit shared IR →
   Cranelift object; LLVM release objects use the same IR where enabled.
   Linked by bundled lld on supported hosts.
-- **Perf (Apple arm64, 2026-07-22):** fib/parity ~**1.01×** Rust; slice ~**1.12×**;
-  string_slice ~**1.35×** residual; compile latency ~**0.22×** C backend; some
-  native binaries still ~**36×** slim C size (full runtime archive) → **0.5.0**.
-- **Packaging:** host slim tarball + install smoke; multi-OS via tag workflow.
-- **Remaining after 0.4.5:** binary-size / string-slice gates, map/I/O depth,
-  cross/wasm/static modes, multi-OS release assets on tag.
+- **Perf (Apple arm64, 2026-07-22 post-residual):** fib/parity ~**1.01×** Rust;
+  slice ~**1.12×**; string_slice ~**1.12–1.18×** Rust (immortal literal share +
+  dead_strip); compile latency ~**0.22×** C backend; **binary size ~1.01×** slim
+  hand-C after `-dead_strip` / `--gc-sections` (was ~36× full bridge archive).
+- **Packaging:** host slim tarball + install smoke; multi-OS via tag workflow;
+  Homebrew formula + winget manifests filled for `v0.4.5` (external PRs remain).
+- **Remaining after residual pack:** map/I/O depth gates, cross/wasm/static modes,
+  further string-slice SSA (register-level headers) toward ≤1.00×.
 
 ## Runtime string ABI (must stay differential-compatible)
 
@@ -108,9 +110,10 @@ never freed); only heap strings (concat, formatting, etc.) are owned and dropped
 `print` → `mako_print_str` (newline-terminated).
 
 Cranelift's shared-IR path uses pointer wrappers in `runtime/native_runtime.c`
-(`mako_native_string_*_ptr`); each wrapper owns a copied buffer and header, so
-the explicit IR drop instruction remains backend-independent. LLVM continues to
-use the value-layout ABI above.
+(`mako_native_string_*_ptr`). Immortal/static headers (high bit of `len`) are
+shared on clone and never freed on drop — append of string literals does not
+allocate. Heap strings still own a copied buffer + header. LLVM continues to
+use the value-layout ABI with the same immortal high-bit convention.
 
 ## Increment roadmap
 

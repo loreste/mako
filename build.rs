@@ -238,6 +238,10 @@ fn main() {
     if cfg!(target_os = "macos") {
         runtime.flag("-mmacosx-version-min=13.0");
     }
+    // Per-function/data sections so linkers can dead-strip unused stdlib
+    // (native_bridge.o is otherwise one giant atom → multi-MB binaries).
+    runtime.flag_if_supported("-ffunction-sections");
+    runtime.flag_if_supported("-fdata-sections");
     runtime.flag_if_supported("-Wno-comment");
     runtime.flag_if_supported("-Wno-unused-parameter");
     runtime.flag_if_supported("-Wno-unused-variable");

@@ -65,11 +65,11 @@ MakoNativeString *mako_native_string_clone_ptr(const MakoNativeString *value) {
     // Null-safe: inactive enum payload slots hold a null header, and the flat
     // recursive clone visits every slot regardless of the active variant.
     if (value == NULL) return NULL;
+    /* Immortal/static headers live in the data section (or were heap-allocated
+     * once with the high bit set). Share the pointer: drop is a no-op, so no
+     * per-clone header malloc on the append-literal hot path. */
     if (mako_str_is_static_len(value->len)) {
-        MakoNativeString *out = malloc(sizeof(*out));
-        if (!out) abort();
-        *out = *value;
-        return out;
+        return (MakoNativeString *)value;
     }
     return mako_native_string_literal_ptr(value->data, mako_str_raw_len(value->len));
 }
@@ -104,7 +104,9 @@ void mako_native_string_print_ptr(const MakoNativeString *value) {
 
 void mako_native_string_drop_ptr(MakoNativeString *value) {
     if (value == NULL) return;
-    if (!mako_str_is_static_len(value->len)) free((void *)value->data);
+    /* Immortal/static: shared header + payload; neither may be freed. */
+    if (mako_str_is_static_len(value->len)) return;
+    free((void *)value->data);
     free(value);
 }
 
@@ -1081,8 +1083,12 @@ void mako_native_str_slice_clone(MakoNativeStrSliceValue *result, MakoNativeStri
 void mako_native_str_slice_drop(MakoNativeString *data, size_t len, size_t cap, int64_t owned) {
     (void)cap;
     if (!owned || !data) return;
+    /* Inline the immortal/static check so a []string of literals (string_slice
+     * bench) does not pay  N  external drop calls — only free the buffer. */
     for (size_t i = 0; i < len; ++i) {
-        mako_native_string_drop(data[i]);
+        if (data[i].data && !mako_str_is_static_len(data[i].len)) {
+            free((void *)data[i].data);
+        }
     }
     free(data);
 }

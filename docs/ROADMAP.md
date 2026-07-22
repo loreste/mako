@@ -122,7 +122,7 @@ Phase 4 — Post-tag (Homebrew/winget follow-through; then 0.5 / 1.0 planning)
 - [x] Native language gate: full `examples/testing` green (**367/367**)  
 - [x] Version `0.4.5` in tree  
 - [x] LLVM release path usable on primary host (Apple arm64) when llvm-backend + lld present  
-- [x] Bench numbers published (fib/parity ~1.01× Rust; slice ~1.12×; string_slice/binary-size residual)  
+- [x] Bench numbers published (fib/parity ~1.01× Rust; slice ~1.12×; string_slice ~1.15× residual; binary ~1.01× after dead_strip)  
 - [x] Release tarball + sha256 for host triple (`package-release.sh --slim`)  
 - [x] Install script smoke (macOS arm64 from local dist)  
 - [x] CHANGELOG **0.4.5** section  
