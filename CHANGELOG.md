@@ -7,6 +7,8 @@
 - Keep debug type checking and code generation within the default Windows stack limit.
 - Add reproducible 1k, 10k, and 100k compiler-scaling fixtures for single-file,
   multi-file, generic-heavy, and backend-shaped projects.
+- Use the system temporary directory in portable filesystem tests and make the
+  corrected Windows cases blocking in CI.
 
 ### Runtime
 

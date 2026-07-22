@@ -149,6 +149,11 @@ jobs:
           cargo run --quiet --release -- test examples/testing/actor_test.mko
           cargo run --quiet --release -- test examples/testing/wave8_queue_test.mko
           cargo run --quiet --release -- test examples/testing/wave10_queue_test.mko
+          cargo run --quiet --release -- test examples/testing/bufio_test.mko
+          cargo run --quiet --release -- test examples/testing/db_engine_test.mko
+          cargo run --quiet --release -- test examples/testing/file_env_test.mko
+          cargo run --quiet --release -- test examples/testing/fs_polish_test.mko
+          cargo run --quiet --release -- test examples/testing/plugin_product_test.mko
         env:
           MAKO_TEST_TIMEOUT_SECS: "90"
 

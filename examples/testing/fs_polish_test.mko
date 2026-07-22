@@ -1,9 +1,11 @@
 fn TestFsPolish() {
-    let dir = "/tmp/mako_fs_test_dir2"
-    let path = "/tmp/mako_fs_test_dir2/b.txt"
+    let dir = path_join(temp_dir(), "mako_fs_test_dir2")
+    let path = path_join(dir, "b.txt")
+    let _ = remove_all(dir)
     assert_eq(mkdir(dir), 0)
     assert_eq(write_file(path, "xy"), 0)
     assert(file_exists(path))
     assert_eq(remove_file(path), 0)
     assert(not file_exists(path))
+    assert_eq(rmdir(dir), 0)
 }
