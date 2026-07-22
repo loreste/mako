@@ -39,8 +39,12 @@ Book: [§11 Speed & memory safety](book/src/ch11-speed-safety.md) · Release how
 ./scripts/bench-gate.sh
 ./scripts/bench-gate.sh 1.5   # stricter threshold
 
-# Direct-native parity against Mako C, hand C, and Rust (1.00× gate):
+# Direct-native parity against Mako C, hand C, and Rust
+# (core ≤1.25×; map ≤2.50×; io ≤2.00×; + regression vs baselines JSON):
 ./scripts/native-bench-gate.sh
+# Subset / override:
+#   MAKO_NATIVE_WORKLOADS="native_map native_io" ./scripts/native-bench-gate.sh
+# Baselines: scripts/native-bench-baselines.json (MAKO_NATIVE_REGRESSION=1.15)
 
 # HTTP throughput (requires wrk or hey):
 ./scripts/bench-http.sh

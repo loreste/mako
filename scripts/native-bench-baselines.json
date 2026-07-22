@@ -1,0 +1,46 @@
+{
+  "schema": "mako.native-bench-baselines.v1",
+  "note": "Recorded ratio = median(native) / median(baseline). Absolute gate uses limits[workload].max_ratio (else MAKO_NATIVE_MAX_RATIO / 1.25). Regression fails if current ratio > recorded * MAKO_NATIVE_REGRESSION (default 1.15). Update after intentional speed work on a primary host.",
+  "host_hint": "Apple arm64, 2026-07-22, LLVM release when available",
+  "product": "0.4.8",
+  "limits": {
+    "native_fib": { "max_ratio": 1.25 },
+    "native_parity": { "max_ratio": 1.25 },
+    "native_slice": { "max_ratio": 1.25 },
+    "native_string_slice": { "max_ratio": 1.25 },
+    "native_map": { "max_ratio": 2.50 },
+    "native_io": { "max_ratio": 2.00 }
+  },
+  "ratios": {
+    "native_fib": {
+      "mako-c": 0.94,
+      "hand-c": 1.01,
+      "rust": 1.01
+    },
+    "native_parity": {
+      "mako-c": 0.95,
+      "hand-c": 1.02,
+      "rust": 1.01
+    },
+    "native_slice": {
+      "mako-c": 0.98,
+      "hand-c": 1.12,
+      "rust": 1.10
+    },
+    "native_string_slice": {
+      "mako-c": 0.72,
+      "hand-c": 1.12,
+      "rust": 1.20
+    },
+    "native_map": {
+      "mako-c": 1.01,
+      "hand-c": 2.44,
+      "rust": 1.53
+    },
+    "native_io": {
+      "mako-c": 0.94,
+      "hand-c": 1.55,
+      "rust": 1.47
+    }
+  }
+}

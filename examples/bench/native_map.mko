@@ -1,0 +1,21 @@
+// Direct-native map[int]int fill + sum (output-stable for gate cmp).
+
+fn map_checksum(n: int) -> int {
+    var m = make(map[int]int, n)
+    var i = 0
+    while i < n {
+        m[i] = i * 2
+        i = i + 1
+    }
+    var sum = 0
+    i = 0
+    while i < n {
+        sum = sum + m[i]
+        i = i + 1
+    }
+    return sum
+}
+
+fn main() {
+    print_int(map_checksum(100000))
+}

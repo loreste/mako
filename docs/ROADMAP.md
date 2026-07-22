@@ -1,6 +1,6 @@
 # Mako roadmap
 
-**Product version:** **0.4.7** (tip) · last tagged **v0.4.5** · Last sync: **2026-07-22**.  
+**Product version:** **0.4.8** (tip) · last tagged **v0.4.5** · Last sync: **2026-07-22**.  
 **Suite:** **367** Mako tests on `examples/testing` (C + native backends) + Rust
 unit tests, 0 failures on the native gate · CI ASan/UBSan/TSan as configured.
 
@@ -24,8 +24,8 @@ unit tests, 0 failures on the native gate · CI ASan/UBSan/TSan as configured.
 | **0.4.1** | Windows/runtime/edge stability | **Shipped** (see CHANGELOG) |
 | **0.4.5** | Native compiler product path (language + release cut) | **Shipped** — tag `v0.4.5` |
 | **0.4.6** | Residual: string_slice + binary size + bench bars + backend policy env | **In tree** (untagged; may ship with 0.4.7) |
-| **0.4.7** | Cross / WASM / static / sanitize truth table (hard-error gaps) | **In tree** (tip; cut when ready to tag) |
-| **0.4.8** | Map/I/O workload gates + perf regression budget | **Planned** patch |
+| **0.4.7** | Cross / WASM / static / sanitize truth table (hard-error gaps) | **In tree** |
+| **0.4.8** | Map/I/O workload gates + perf regression budget | **In tree** (tip; cut when ready to tag) |
 | **0.4.9** | Optional LLVM CI job polish / package smoke | **Planned** patch (skip if empty) |
 | **0.5.0** | Native-first **default** (CLI default flip — minor theme) | **Planned** minor |
 | **0.5.1** | Toolchain & IDE depth (LSP, DAP/DWARF, doc/bench product) | **Planned** |
@@ -38,8 +38,8 @@ unit tests, 0 failures on the native gate · CI ASan/UBSan/TSan as configured.
 ```text
 0.4.5  language gate ✓  [tagged]
 0.4.6  residual perf + size + MAKO_BACKEND policy  [in tree]
-0.4.7  modes truth table  [tip]
-0.4.8  map/I/O gates
+0.4.7  modes truth table  [in tree]
+0.4.8  map/I/O gates + regression baselines  [tip]
 0.4.9  LLVM CI / packaging polish (optional)
 0.5.0  native-first CLI default (minor)
 0.5.1  toolchain/IDE
@@ -194,11 +194,11 @@ silently falling back to C.
 
 ## 0.4.8 — Workload gates + regression budget
 
-| ID | Deliverable | Acceptance |
-|----|-------------|------------|
-| **48-A** | Map + I/O (+ optional CPU) benches in gate sibling | Medians vs C/Rust published |
-| **48-B** | Regression budget vs 0.4.5/0.4.6 baselines | CI or script fails on >N% regression |
-| **48-C** | string_slice toward ≤1.00× residual notes | Document remaining SSA work if still over |
+| ID | Deliverable | Status |
+|----|-------------|--------|
+| **48-A** | Map + I/O benches in `native-bench-gate.sh` | **Done** — `native_map`, `native_io` |
+| **48-B** | Regression budget vs recorded ratios | **Done** — `native-bench-baselines.json` × 1.15 |
+| **48-C** | string_slice residual notes | Residual ≤1.25× ship bar; SSA toward ≤1.00× still open |
 
 ---
 
