@@ -1,6 +1,18 @@
 # Changelog
 
-## 0.4.9 — 2026-07-22 (tip; tag when packaging cut)
+## 0.4.10 — 2026-07-22 (tip; tag when packaging cut)
+
+**Theme:** Years-up foundation — long-running services vs JVM (Java/Kotlin).
+
+### Long-running / production
+
+- **[docs/LONG_RUNNING.md](docs/LONG_RUNNING.md)** — north star: better than JVM for
+  multi-year backends on **p99 + RSS** (no GC); honest where JVM still leads.
+- **`examples/bench/long_run_soak.mko`** — compressed request cycles (map/slice/string).
+- **`scripts/long-run-soak.sh`** — ownership live-delta + multi-sample RSS stability.
+- ROADMAP **0.5.2** expanded with years-up / **52-G** evidence track.
+
+## 0.4.9 — 2026-07-22
 
 **Theme:** LLVM CI job (macOS) + install/doctor smoke on primary hosts.
 

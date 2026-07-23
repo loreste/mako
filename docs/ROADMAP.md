@@ -1,6 +1,6 @@
 # Mako roadmap
 
-**Product version:** **0.4.9** (tip) · last tagged **v0.4.5** · Last sync: **2026-07-22**.  
+**Product version:** **0.4.10** (tip) · last tagged **v0.4.5** · Last sync: **2026-07-22**.  
 **Suite:** **367** Mako tests on `examples/testing` (C + native backends) + Rust
 unit tests, 0 failures on the native gate · CI ASan/UBSan/TSan as configured.
 
@@ -26,7 +26,8 @@ unit tests, 0 failures on the native gate · CI ASan/UBSan/TSan as configured.
 | **0.4.6** | Residual: string_slice + binary size + bench bars + backend policy env | **In tree** (untagged; may ship with 0.4.7) |
 | **0.4.7** | Cross / WASM / static / sanitize truth table (hard-error gaps) | **In tree** |
 | **0.4.8** | Map/I/O workload gates + perf regression budget | **In tree** |
-| **0.4.9** | LLVM CI (macOS) + install/doctor smoke | **In tree** (tip; cut when ready to tag) |
+| **0.4.9** | LLVM CI (macOS) + install/doctor smoke | **In tree** |
+| **0.4.10** | Years-up soak foundation (vs JVM long-running) | **In tree** (tip; cut when ready to tag) |
 | **0.5.0** | Native-first **default** (CLI default flip — minor theme) | **Planned** minor |
 | **0.5.1** | Toolchain & IDE depth (LSP, DAP/DWARF, doc/bench product) | **Planned** |
 | **0.5.2** | Runtime trust & production concurrency soaks | **Planned** |
@@ -40,7 +41,8 @@ unit tests, 0 failures on the native gate · CI ASan/UBSan/TSan as configured.
 0.4.6  residual perf + size + MAKO_BACKEND policy  [in tree]
 0.4.7  modes truth table  [in tree]
 0.4.8  map/I/O gates + regression baselines  [in tree]
-0.4.9  LLVM CI (macOS) + install/doctor smoke  [tip]
+0.4.9  LLVM CI (macOS) + install/doctor smoke  [in tree]
+0.4.10 years-up soak foundation  [tip]
 0.5.0  native-first CLI default (minor)
 0.5.1  toolchain/IDE
 0.5.2  runtime trust
@@ -279,13 +281,16 @@ Coherent **official toolchain**: LSP, debug, docs, bench, and doctor feel like o
 
 ---
 
-## 0.5.2 — Runtime trust & production concurrency
+## 0.5.2 — Runtime trust & production concurrency (years-up)
 
-**Depends on:** 0.5.0 (and ideally 0.5.1 for debugability under load).
+**Depends on:** 0.5.0 (and ideally 0.5.1 for debugability under load).  
+**Product story:** backends that stay up for **months–years** should beat
+**Java/Kotlin (JVM)** on **p99 stability and RSS ceiling** (no GC). Strategy:
+[LONG_RUNNING.md](LONG_RUNNING.md). Seed gate: `scripts/long-run-soak.sh` (LR-1).
 
 ### North star
 
-Production backends can rely on **structured concurrency + ownership** under stress, with evidence (not only unit tests).
+Production backends can rely on **structured concurrency + ownership** under stress, with evidence (not only unit tests). Steady-state memory does not creep under fixed load.
 
 ### Deliverables
 
@@ -295,13 +300,15 @@ Production backends can rely on **structured concurrency + ownership** under str
 | **52-B** | Channel monomorph take matrix | Beyond int/float/string for send/take/timeout |
 | **52-C** | Scheduler depth | Document pool limits; optional work-stealing only if soaks demand it |
 | **52-D** | Cancellation / deadline product | Portable timeout story end-to-end (task + channel + net APIs) |
-| **52-E** | Leak / resource census under load | RT-006-style APIs + soak that fails on growth |
+| **52-E** | Leak / resource census under load | RT-006-style APIs + soak that fails on growth (**seed:** long-run-soak) |
 | **52-F** | Race model docs ↔ code | MEMORY_MODEL and typecheck `is_sync_ty` table stay in lockstep |
+| **52-G** | Years-up vs JVM evidence | Reproducible p99/RSS soaks; claims only with public methodology |
 
 ### Exit 0.5.2
 
 - Tagged `v0.5.2`.
 - Published soak results; no known “must not ship” races on documented patterns.
+- Long-run soak green in CI; HTTP/channel soaks documented.
 
 ### Non-goals for 0.5.2
 

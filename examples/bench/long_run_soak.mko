@@ -1,0 +1,67 @@
+// Long-running steady-state soak (compressed “years of request cycles”).
+// Each cycle allocates short-lived map + slice work and drops them on scope
+// exit — live ownership must return to baseline (LR-1 / docs/LONG_RUNNING.md).
+//
+// Output (stable for the gate):
+//   cycles acc live_delta
+// live_delta is tracked live bytes vs mark (0 = clean ownership).
+
+fn handle(id: int) -> int {
+    var m = make(map[int]int, 32)
+    var buf = make([]int, 0, 32)
+    var j = 0
+    while j < 32 {
+        m[j] = id + j
+        buf = append(buf, j * 3)
+        j = j + 1
+    }
+    var sum = 0
+    j = 0
+    while j < 32 {
+        sum = sum + m[j] + buf[j]
+        j = j + 1
+    }
+    // Small string work (fixed size — not quadratic append storms).
+    let tag = int_to_string(id)
+    if len(tag) > 0 {
+        sum = sum + len(tag)
+    }
+    return sum
+}
+
+fn main() {
+    // Intensity: override with env is left to the driver recompile; default
+    // is large enough to stress allocators without multi-minute CI.
+    let cycles = 80000
+    let _ = alloc_track_reset()
+    let mark = leak_mark()
+
+    // Warmup (allocator arenas / page cache).
+    var w = 0
+    var warm = 0
+    while w < 2000 {
+        warm = warm + handle(w)
+        w = w + 1
+    }
+
+    let mid = leak_mark()
+    var i = 0
+    var acc = 0
+    while i < cycles {
+        acc = acc + handle(i)
+        i = i + 1
+    }
+
+    let live_delta = leak_bytes_since(mid)
+    // Also report vs absolute mark (warmup + main).
+    let live_all = leak_bytes_since(mark)
+    // print_int always ends with '\n' — one field per line for the gate.
+    print_int(cycles)
+    print_int(acc)
+    print_int(live_delta)
+    print_int(live_all)
+    // Fail closed in-process if ownership leaked during the main window.
+    if live_delta != 0 {
+        exit(1)
+    }
+}

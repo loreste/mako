@@ -1,6 +1,6 @@
 # Mako release & cross-platform guide
 
-**Product version:** **0.4.9** tip (`Cargo.toml` / `mako version` → `mako0.4.9`);
+**Product version:** **0.4.10** tip (`Cargo.toml` / `mako version` → `mako0.4.10`);
 last published tag **v0.4.5**.  
 **Tree status:** native compiler language gate **367/367** on
 `mako test examples/testing --backend native` (2026-07-22).  

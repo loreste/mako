@@ -198,6 +198,15 @@ jobs:
         env:
           MAKO_BIN: ${{ github.workspace }}/target/release/mako
 
+      # 0.4.10 LR-1: years-up steady-state (Unix; Windows soak later).
+      - name: Long-run soak (RSS + ownership)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: ./scripts/long-run-soak.sh
+        env:
+          MAKO_BIN: ${{ github.workspace }}/target/release/mako
+          MAKO_LONG_RUN_BACKEND: c
+
       - name: Intel macOS cross-artifact smoke
         if: runner.os == 'macOS'
         shell: bash

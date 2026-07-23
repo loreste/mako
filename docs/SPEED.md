@@ -7,9 +7,10 @@ parallelism are language primitives, not library add-ons.
 | Priority | Bar |
 |----------|-----|
 | **1. Speed** | Native binary, no GC, release `-O3 -flto`, low-overhead defaults |
-| **2. Concurrency** | **First-class:** `crew` / `kick` / `join` / channels / `select` / actors |
-| **3. Parallelism** | **First-class:** `fan` and crew work across cores |
-| **4. Security** | Memory + resource contracts, secure defaults — see [SECURITY.md](SECURITY.md) |
+| **2. Years-up** | Stable RSS + no GC pauses for services that run for months/years — [LONG_RUNNING.md](LONG_RUNNING.md) |
+| **3. Concurrency** | **First-class:** `crew` / `kick` / `join` / channels / `select` / actors |
+| **4. Parallelism** | **First-class:** `fan` and crew work across cores |
+| **5. Security** | Memory + resource contracts, secure defaults — see [SECURITY.md](SECURITY.md) |
 
 Syntax stays **Mako’s own**. Speed is not optional. Concurrency is not bolted on.
 Security is not a linter plugin.
@@ -25,6 +26,10 @@ Security is not a linter plugin.
 - **Measure** — [PERFORMANCE.md](PERFORMANCE.md), `scripts/bench-vs-go-rust.sh`
 
 Any feature that silently slows the hot path must justify itself or stay opt-in.
+
+**Long-running servers (vs Java/Kotlin):** Mako’s structural advantage is **no GC**
+and **ownership-bounded live memory**. Microbenches alone do not prove years-up
+stability — use `./scripts/long-run-soak.sh` and read [LONG_RUNNING.md](LONG_RUNNING.md).
 
 Sanitizers and overflow traps stay **opt-in** so release hot paths stay
 fast. Safe-by-construction features (NLL, checked indexing, structured

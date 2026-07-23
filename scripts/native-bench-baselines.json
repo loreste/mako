@@ -2,7 +2,7 @@
   "schema": "mako.native-bench-baselines.v1",
   "note": "Recorded ratio = median(native) / median(baseline). Absolute gate uses limits[workload].max_ratio (else MAKO_NATIVE_MAX_RATIO / 1.25). Regression fails if current ratio > recorded * MAKO_NATIVE_REGRESSION (default 1.15). Update after intentional speed work on a primary host.",
   "host_hint": "Apple arm64, 2026-07-22, LLVM release when available",
-  "product": "0.4.9",
+  "product": "0.4.10",
   "limits": {
     "native_fib": { "max_ratio": 1.25 },
     "native_parity": { "max_ratio": 1.25 },

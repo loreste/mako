@@ -46,6 +46,10 @@ Book: [§11 Speed & memory safety](book/src/ch11-speed-safety.md) · Release how
 #   MAKO_NATIVE_WORKLOADS="native_map native_io" ./scripts/native-bench-gate.sh
 # Baselines: scripts/native-bench-baselines.json (MAKO_NATIVE_REGRESSION=1.15)
 
+# Years-up steady-state (live ownership + RSS stability):
+./scripts/long-run-soak.sh
+# See docs/LONG_RUNNING.md (north star vs Java/Kotlin long-running services).
+
 # HTTP throughput (requires wrk or hey):
 ./scripts/bench-http.sh
 
