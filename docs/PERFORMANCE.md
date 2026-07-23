@@ -1,39 +1,36 @@
 # Mako performance
 
-Mako's mature backend compiles via C; the LLVM release backend emits objects
-directly and links with embedded lld/runtime inputs. Release optimization uses
-LLVM's `default<O3>` pipeline.
-There is no garbage collector, interpreter, or VM overhead.
+The mature path compiles through C. LLVM release emits objects directly and
+links with embedded lld/runtime inputs, using LLVM’s `default<O3>` pipeline.
+No GC, no interpreter, no VM tax.
 
-The LLVM release gate currently covers scalar CFG and owned strings. On Apple
-arm64, Fibonacci compiled in 20.1 ms (LLVM) versus 251.9 ms (C), and ran in
-146.5 ms versus 148.9 ms (Mako C), 147.8 ms (hand C), and 148.0 ms (Rust).
-Run `scripts/llvm-backend-test.sh` for the correctness gate; these figures are
-workload-specific, not a universal performance claim.
+LLVM release currently covers scalar CFG and owned strings. On one Apple arm64
+box, Fibonacci compiled in 20.1 ms (LLVM) vs 251.9 ms (C), and ran in 146.5 ms
+vs 148.9 ms (Mako C), 147.8 ms (hand C), 148.0 ms (Rust). Correctness gate:
+`scripts/llvm-backend-test.sh`. Those numbers are for that workload, not a
+ranking of languages.
 
-Performance is a design goal, not a proven claim. The current benchmark
-coverage is limited to three microkernels (fib, slice, map). Broader
-workload benchmarks (HTTP throughput, JSON, allocation pressure,
-concurrent channels) are in progress but not yet published with
-reproducible methodology.
+Performance is something we design for; it isn’t a finished claim. Coverage
+today is three microkernels — fib, slice, map. HTTP, JSON, allocation
+pressure, concurrent channels are in progress and not yet published with a
+method anyone can re-run cleanly.
 
-| Principle | Practice |
-|-----------|----------|
-| Speed first | Prefer the fast design; convenience features stay off the hot path or opt-in |
-| Measure vs C/Rust | Per-workload gates vs hand-C + Rust — [SPEED_SAFE.md](SPEED_SAFE.md); update baselines after intentional changes |
-| No GC · memory safe | Scope cleanup, `hold` / `share` / `arena` — no stop-the-world tax; `memory-safety-gate` |
-| Native codegen | `.mko` → C → clang / LLVM; release **`-O3 -flto`** |
-| Low-overhead default | Scalar locals and direct calls avoid ownership/refcount synchronization; allocation and synchronization costs stay explicit |
-| Explicit cost | Heavier tools (`share`, channels, `crew`) are visible when they cost |
-| First-class concurrent/parallel | Language keywords, structured joins |
-| Measure | Reproducible scripts with documented methodology — no unverified claims |
+Bias toward the fast design. Convenience that costs belongs off the hot path
+or behind an opt-in. Measure vs hand-C and Rust per workload
+([SPEED_SAFE.md](SPEED_SAFE.md)); bump baselines when you meant to change
+them. Scope cleanup and `hold` / `share` / `arena` — no stop-the-world.
+`memory-safety-gate` is there for a reason. Codegen is native
+(`.mko` → C → clang / LLVM), release `-O3 -flto`. Locals and direct calls stay
+cheap by default; alloc and sync cost show up when you use them. `share`,
+channels, `crew` are visible when they cost. Concurrent and parallel work is
+language-level. If it isn’t in a script with a method, it isn’t a claim.
 
-Targets **backend and systems** workloads: arenas for request scope, tight
-slice/map layouts, native binaries.
+Aimed at backend and systems work: request arenas, tight slice/map layouts,
+native binaries.
 
 Book: [§11 Speed & memory safety](book/src/ch11-speed-safety.md) · Release how-to: [howto/09-release-builds.md](howto/09-release-builds.md).
 
-**Do not invent numbers.** Re-run locally:
+Don’t invent numbers. Re-run locally:
 
 ```bash
 # Microbenchmarks (fib, slice, map):

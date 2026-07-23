@@ -1,40 +1,44 @@
 # Speed · concurrency · parallelism · security
 
-Mako compiles to native code via C with `-O3 -flto` in release mode.
-There is no garbage collector, interpreter, or VM. Concurrency and
-parallelism are language primitives, not library add-ons.
+Mako compiles to native code via C with `-O3 -flto` in release. No garbage
+collector, no interpreter, no VM. Concurrency and parallelism are in the
+language, not bolted on later as libraries.
 
-| Priority | Bar |
-|----------|-----|
-| **1. Speed** | Native binary, no GC, release `-O3 -flto`, low-overhead defaults — measure vs hand-C/Rust per workload ([SPEED_SAFE.md](SPEED_SAFE.md)) |
-| **2. Memory safe** | Ownership free, no GC — [MEMORY_SAFETY.md](MEMORY_SAFETY.md); keep safe-path checks on by default |
-| **3. Years-up** | Stable RSS + no GC pauses for long-running services — [LONG_RUNNING.md](LONG_RUNNING.md) |
-| **4. Concurrency** | **First-class:** `crew` / `kick` / `join` / channels / `select` / actors |
-| **5. Parallelism** | **First-class:** `fan` and crew work across cores |
-| **6. Security** | Memory + resource contracts, secure defaults — see [SECURITY.md](SECURITY.md) |
+Order of concern, roughly:
 
-Syntax stays **Mako’s own**. Speed is not optional. Concurrency is not bolted on.
-Security is not a linter plugin.
+- **Speed** first — native binary, no GC, release `-O3 -flto`, low-overhead
+  defaults. Measure against hand-C and Rust per workload
+  ([SPEED_SAFE.md](SPEED_SAFE.md)).
+- **Memory safety** with it — ownership free, no GC
+  ([MEMORY_SAFETY.md](MEMORY_SAFETY.md)); safe-path checks stay on.
+- **Years-up** for services that live a long time — stable RSS, no GC pauses
+  ([LONG_RUNNING.md](LONG_RUNNING.md)).
+- Then **concurrency** (`crew` / `kick` / `join` / channels / `select` /
+  actors) and **parallelism** (`fan`, multi-core crew work).
+- **Security** is memory and resource contracts with secure defaults
+  ([SECURITY.md](SECURITY.md)), not a linter plugin.
+
+Syntax is Mako’s own. Speed isn’t optional.
 
 ---
 
-## Speed (design goals)
+## Speed
 
-- **No GC** — free is ownership-driven, not collector pauses
-- **Native codegen** — `.mko` → C → clang (or LLVM release path)
-- **Release:** `-O3 -flto` when building for production
-- **Visible cost** — `hold` / `share` / `arena` / channels when you pay
-- **Measure** — [PERFORMANCE.md](PERFORMANCE.md), gate scripts under `scripts/`
+Free comes from ownership, not a collector. Codegen is native
+(`.mko` → C → clang, or LLVM release). Production means `-O3 -flto`. You see
+the cost of `hold` / `share` / `arena` / channels when you use them. Numbers
+live in [PERFORMANCE.md](PERFORMANCE.md) and the scripts under `scripts/`.
 
-Features that add cost on the common path should be justified or opt-in.
+If something costs on the common path, it needs a reason — or it should be
+opt-in.
 
-**Long-running servers:** Mako’s structural advantage is **no GC** and
-**ownership-bounded live memory**. Microbenches alone do not prove years-up
-stability — use `./scripts/long-run-soak.sh` and read [LONG_RUNNING.md](LONG_RUNNING.md).
+Long-running servers get the most from no GC and ownership-bounded live
+memory. A good fib number is not years-up proof; run
+`./scripts/long-run-soak.sh` and read [LONG_RUNNING.md](LONG_RUNNING.md).
 
-Sanitizers and overflow traps stay **opt-in** so release hot paths stay
-fast. Safe-by-construction features (NLL, checked indexing, structured
-crews, parameterized DB) remain part of the default contract.
+Sanitizers and overflow traps stay opt-in so hot paths stay fast. NLL, checked
+indexing, structured crews, and parameterized DB stay in the default
+contract.
 
 ### Hot-path efficiency (current practice)
 

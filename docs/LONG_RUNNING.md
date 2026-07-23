@@ -1,103 +1,95 @@
 # Long-running applications (years-up)
 
-**Aim:** backend services that stay up for **months to years** with **stable
-latency, stable RSS, and no GC** — not only good microbench fib numbers.
+Months to years of uptime. Stable latency, stable RSS, no GC. That’s the bar
+this note is about — not “fib looked fine on my laptop.”
 
-This is a direction, not a finished claim. Evidence is built in soaks, gates,
-and docs. Last sync: **2026-07-22** · tip **0.4.15**.
+It’s a direction we’re building toward, not a finished claim. Evidence is in
+soaks, gates, and the rest of these docs. Last sync **2026-07-22**, tip
+**0.4.15**.
 
-Related: [SPEED.md](SPEED.md) · [PERFORMANCE.md](PERFORMANCE.md) ·
-[MEMORY_MODEL.md](MEMORY_MODEL.md) · [SECURITY.md](SECURITY.md) ·
+More context: [SPEED.md](SPEED.md), [PERFORMANCE.md](PERFORMANCE.md),
+[MEMORY_MODEL.md](MEMORY_MODEL.md), [SECURITY.md](SECURITY.md),
 [ROADMAP.md](ROADMAP.md) § 0.5.2.
 
 ---
 
-## Why long-running is different from microbenches
+## Microbenches don’t care about your uptime
 
-| Concern | Microbench (fib/map) | Years-up service |
-|---------|----------------------|------------------|
-| Time scale | milliseconds | months–years |
-| Failure mode | slow code | **RSS creep**, fd/thread leaks, p99 spikes |
-| Optimizer | AOT `-O3 -flto` | AOT + offline PGO + cheap hot-site feedback; **no in-process recompile** |
-| Memory | peak of one run | **steady-state** after warmup |
-| Latency | mean | **p99 / p999** under load |
+A fib run finishes in milliseconds. A service that has to stay up for years
+dies from different things: RSS creep, fd and thread leaks, p99 spikes when
+the heap is ugly under load.
 
-Runtimes that specialize only after long warmup can look strong on peak
-throughput later. Long-running products often lose on **GC pauses**, **heap
-bloat**, and **unpredictable tail latency**. Mako’s contract is the opposite:
-**no GC**, ownership + arenas, native code from process start.
+Mako’s optimizer story here is AOT (`-O3 -flto`), plus optional offline PGO
+and cheap hot-site counters. No in-process recompile. Memory that matters is
+steady state after warmup. Latency that matters is p99 / p999 under load, not
+just the mean of a short run.
 
----
-
-## How Mako is structured for years-up
-
-| Axis | Mako |
-|------|------|
-| **GC pauses** | None |
-| **p99 predictability** | Deterministic free on scope exit |
-| **Startup / cold path** | Native binary; no warmup tiers |
-| **RSS ceiling** | Live bytes ≈ owned graph |
-| **Deployment** | Single binary |
-| **Ownership** | Compiler + `hold` / `share` / `arena` |
-
-**Tradeoffs:** other stacks may still lead on peak throughput or tooling depth.
-Years-up proof for Mako is soaks and gates — grow evidence with more soaks,
-and throughput with LLVM release, LTO, optional PGO, and allocator choice —
-still without a GC.
+Some runtimes look fantastic once they’ve specialized after a long warmup, then
+lose months later to GC pauses, heap bloat, and tail latency you can’t
+schedule around. We went the other way: no GC, ownership and arenas, native
+code from the first request.
 
 ---
 
-## Design principles for years-up Mako
+## What that looks like in the runtime
 
-1. **No silent growth** — a process that runs forever must have **bounded
-   live memory** for a fixed concurrency and payload shape.
-2. **Request-scoped memory** — prefer `arena` / stack views per request; escape
-   only what must outlive the request.
-3. **Explicit sharing** — `share` / channels / Sync handles; no accidental
-   global maps that only grow.
-4. **Bounded concurrency** — crew pools, channel caps, accept queues; never
-   unbounded `kick` fans under load.
-5. **Free is cold, hot path stays simple** — drop paths stay out of the p50
-   line; allocators stay predictable.
-6. **Measure steady-state** — soak gates fail on **RSS / live-bytes growth**,
-   not only on correctness of one run.
-7. **Fail closed on leaks in CI** — `leak_mark` / `leak_scope_*` / soaks.
+No collector means no GC pauses. Free on scope exit is deterministic, which
+helps p99 stay less of a lottery. Startup is “run the binary” — no warmup
+tiers. Live bytes should track what you own, not a heap that might shrink
+later if you’re lucky. One binary to deploy. Ownership is explicit:
+`hold`, `share`, `arena`.
+
+Other stacks may still beat us on peak throughput or tooling depth. Fine.
+Years-up proof for Mako is soaks and gates, not a blog chart. Throughput still
+moves with LLVM release, LTO, optional PGO, and allocator choice — still
+without a GC.
 
 ---
 
-## Work track (ships in small patches)
+## Habits that keep a process alive
+
+Don’t let live memory grow for a fixed concurrency and payload shape. Prefer
+`arena` or stack views per request; only escape what has to outlive the
+request. Share on purpose (`share`, channels, Sync handles) — not by growing
+a global map and hoping it plateaus. Bound concurrency: crew pools, channel
+caps, accept queues. Unbounded `kick` fans under load will hurt you.
+
+Keep free off the p50 line. Measure steady state — soaks should fail on RSS /
+live-bytes growth, not only on “one run returned the right answer.” Fail
+closed on leaks in CI (`leak_mark`, `leak_scope_*`, soaks).
+
+---
+
+## Work track
 
 | Track | What | Evidence |
 |-------|------|----------|
 | **LR-1 Foundation** | Soak fixture + RSS/live-bytes gate | `scripts/long-run-soak.sh` (**done**) |
 | **LR-2 Runtime trust** | TSan soaks, channel stress, cancel/deadline | ROADMAP **0.5.2** |
-| **LR-3 Allocators** | mimalloc/jemalloc link knobs for long-run fragmentation | `MAKO_ALLOCATOR` / `MAKO_LDFLAGS` (**done seed**) |
-| **LR-4 PGO / LTO product** | Two-pass PGO recipe for release servers | `scripts/pgo-build.sh` (**done seed**) |
-| **LR-4b Adaptive opt** | Traffic feedback **without** in-process recompile | `hot_site_*` + [ADAPTIVE_OPT.md](ADAPTIVE_OPT.md) + `adaptive-opt-cycle.sh` (**done seed**) |
+| **LR-3 Allocators** | mimalloc/jemalloc knobs for fragmentation | `MAKO_ALLOCATOR` / `MAKO_LDFLAGS` (**done seed**) |
+| **LR-4 PGO / LTO** | Two-pass PGO for release servers | `scripts/pgo-build.sh` (**done seed**) |
+| **LR-4b Adaptive opt** | Traffic feedback without live recompile | `hot_site_*` + [ADAPTIVE_OPT.md](ADAPTIVE_OPT.md) + `adaptive-opt-cycle.sh` (**done seed**) |
 | **LR-5 Observability** | pprof / metrics without GC pauses | `mako profile-serve` depth |
 | **LR-6 HTTP / net soaks** | Accept loop under load, RSS while serving | `scripts/http-long-run-soak.sh` (**done seed**) |
-| **LR-7 Claims honesty** | Published soaks *only* when methodology is public | no invented numbers |
+| **LR-7 Claims honesty** | Publish soaks only with public methodology | no invented numbers |
 
-**Product tip patches** land LR-1/3/4/6 seeds. **0.5.2** owns LR-2 depth + broader soaks.
+Tip patches landed LR-1/3/4/6 seeds. **0.5.2** owns LR-2 depth and broader
+soaks.
 
 ---
 
-## How to write a years-up service in Mako (checklist)
+## Writing a service that can stay up
 
-```text
-[ ] Per-request arena or short-lived owns (no immortal request maps)
-[ ] Fixed worker pool / bounded channels (no unbounded kick)
-[ ] Timeouts on every external wait (recv_timeout / join_deadline)
-[ ] leak_scope around tests; long-run soak before ship
-[ ] Release build: -O3 -flto (and llvm backend when available)
-[ ] Cap logs / metrics series (no unbounded in-memory history)
-[ ] Graceful shutdown: drain crew, close listeners, join
-```
+Per-request arena or short-lived owns — no immortal request maps. Fixed worker
+pool and bounded channels. Timeouts on every external wait
+(`recv_timeout`, `join_deadline`). `leak_scope` in tests; long-run soak before
+you ship. Release build with `-O3 -flto` (llvm when available). Cap log and
+metrics history. Drain the crew, close listeners, join on shutdown.
 
-Pattern sketch:
+Sketch of the soak pattern:
 
 ```mko
-// Prefer request-scoped work that drops at end of the cycle.
+// Request-scoped work that drops at end of the cycle.
 fn handle(id: int) -> int {
     var m = make(map[int]int, 16)
     m[0] = id
@@ -106,7 +98,7 @@ fn handle(id: int) -> int {
 }
 
 fn main() {
-    // Compressed “years” of cycles — used by scripts/long-run-soak.sh
+    // Compressed “years” of cycles — scripts/long-run-soak.sh
     var i = 0
     var acc = 0
     while i < 100000 {
@@ -121,13 +113,13 @@ fn main() {
 
 ## Soak gates
 
-### CPU/alloc steady-state (LR-1)
+### CPU / alloc steady-state (LR-1)
 
 ```bash
 ./scripts/long-run-soak.sh
 ```
 
-**Pass criteria:** ownership live-delta **0**; multi-sample RSS growth within bar.
+Pass: ownership live-delta **0**, multi-sample RSS growth within the bar.
 
 ### HTTP accept loop (LR-6)
 
@@ -136,86 +128,83 @@ fn main() {
 # MAKO_HTTP_SOAK_REQUESTS=5000 MAKO_HTTP_SOAK_CLIENTS=16 ./scripts/http-long-run-soak.sh
 ```
 
-Drives thousands of `/` + `/health` hits against
-`examples/bench/http_long_run_server.mko` (per-request map/string work that
-must free). Samples **server RSS under load**; requires clean shutdown after
-the request budget.
+Thousands of `/` and `/health` hits against
+`examples/bench/http_long_run_server.mko`. Per-request map/string work has to
+free. Samples server RSS under load and wants a clean shutdown after the
+budget.
 
-Throughput microbench (not a soak): `./scripts/bench-http.sh` (needs wrk/hey).
+Throughput microbench (not a soak): `./scripts/bench-http.sh` (wrk or hey).
 
-### Production allocator (LR-3)
+### Allocator (LR-3)
 
-Link a long-running-friendly allocator when the host has one installed:
+If the host has a better allocator:
 
 ```bash
-# Homebrew mimalloc example:
+# Homebrew mimalloc
 MAKO_ALLOCATOR=mimalloc MAKO_LDFLAGS="-L$(brew --prefix mimalloc)/lib" \
   mako build --release app.mko -o app
 
-# jemalloc:
+# jemalloc
 MAKO_ALLOCATOR=jemalloc MAKO_LDFLAGS="-L/usr/local/lib" \
   mako build --release app.mko -o app
 
-# Explicit static archive (overrides malloc):
+# Static archive
 MAKO_ALLOCATOR=/path/to/libmimalloc.a mako build --release app.mko -o app
 
-# Raw flags:
+# Raw flags
 MAKO_LDFLAGS="-L/opt/homebrew/lib -lmimalloc" mako build --release app.mko -o app
 ```
 
-Default remains the **system** allocator. Prefer measuring with
-`http-long-run-soak` / `long-run-soak` before and after.
+Default is still the system allocator. Measure with the soak scripts before
+and after you change it.
 
-### PGO (LR-4) and adaptive opt without live recompile (LR-4b)
+### PGO and adaptive opt (LR-4 / LR-4b)
 
-We want *learning from production traffic* without the *slowdown* of
-in-process specialization (warmup, deopt, embedded compiler, GC).
+Learn from traffic without the cost of in-process specialization (warmup,
+deopt, embedded compiler, GC).
 
-- **Live process:** full AOT; optional `hot_site_hit(id)` (relaxed atomic when
-  enabled). **Never** rewrite machine code in-process. Details:
-  [ADAPTIVE_OPT.md](ADAPTIVE_OPT.md).
-- **Offline:** two-pass PGO under representative load; blue/green the result.
+Live process: full AOT, optional `hot_site_hit(id)`. Never rewrite machine code
+in-process — details in [ADAPTIVE_OPT.md](ADAPTIVE_OPT.md). Offline: two-pass
+PGO under representative load, then blue/green.
 
 ```bash
-# Adaptive cycle (AOT + guidance note + offline PGO):
 ./scripts/adaptive-opt-cycle.sh examples/bench/http_long_run_server.mko \
   -o out/http_pgo -- 2000 19820
 
-# Full two-pass recipe only:
 ./scripts/pgo-build.sh examples/bench/http_long_run_server.mko \
   -o out/http_pgo -- 2000 19820
 
-# Manual:
+# Manual
 MAKO_PGO_GEN=1 mako build --release app.mko -o app.pgo-gen
-LLVM_PROFILE_FILE=out/pgo/default-%p.profraw ./app.pgo-gen …   # train
+LLVM_PROFILE_FILE=out/pgo/default-%p.profraw ./app.pgo-gen …
 llvm-profdata merge -o out/pgo/merged.profdata out/pgo/*.profraw
 MAKO_PGO_USE=out/pgo/merged.profdata mako build --release app.mko -o app
 ```
 
-Train on **representative** traffic (same shapes as production). Combine with
-release **LTO** (default) and optional `MAKO_ALLOCATOR`.
-**Do not** ship `MAKO_PGO_GEN` instrumentation to years-up production boxes.
+Train on shapes that look like production. Keep release LTO (default); try
+`MAKO_ALLOCATOR` if you care. Don’t ship `MAKO_PGO_GEN` instrumentation to
+years-up boxes.
 
-These gates prove the **steady-state memory contract** under compressed load —
-the main failure mode that ends “years-up” processes early — not multi-year
-wall-clock uptime by themselves.
-
----
-
-## Claims policy
-
-- **Do** say: no GC; deterministic ownership; soak gates on live growth.
-- **Do not** invent “faster on all servers” without a named workload,
-  hardware, and methodology checked into `scripts/`.
-- **Do** publish native vs hand-C vs Rust micro numbers (existing gates).
-- Cross-runtime comparisons land only with **reproducible** harnesses
-  (future LR-7).
+These gates prove steady-state memory under compressed load — the usual way
+“years-up” processes die early. They are not multi-year wall-clock proof by
+themselves.
 
 ---
 
-## Next concrete steps
+## What we’ll stand behind
 
-1. Keep LLVM release + LTO as the default *product* release path (0.5.0).
-2. Expand soaks: channels, HTTP accept, metrics series bounds (0.5.2+).
-3. Optional production allocator + PGO docs once soaks are green.
-4. Only then: public years-up page with measured p99/RSS.
+No GC. Deterministic ownership. Soak gates on live growth. Micro numbers from
+the existing gates vs hand-C and Rust when the harness says so.
+
+We won’t invent “faster on all servers” without a named workload, hardware,
+and methodology in `scripts/`. Broader cross-runtime comparisons wait on
+reproducible harnesses (LR-7).
+
+---
+
+## What’s next
+
+Keep LLVM release + LTO as the product release path (0.5.0). Expand soaks —
+channels, HTTP accept, metrics series bounds (0.5.2+). Allocator and PGO docs
+can deepen once soaks stay green. Public years-up page with measured p99/RSS
+only after that.

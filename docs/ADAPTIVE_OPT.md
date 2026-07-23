@@ -1,71 +1,58 @@
 # Adaptive optimization without in-process recompile
 
-**Goal:** learn from real traffic so the **next** release binary can be better
-shaped — without rewriting machine code in the live process, and without a GC.
+Learn from real traffic so the *next* binary is better shaped. That’s the whole
+idea. No rewriting machine code in a live process, no garbage collector in the
+loop.
 
-Tip: **0.4.15+** · Related: [LONG_RUNNING.md](LONG_RUNNING.md) ·
-[PERFORMANCE.md](PERFORMANCE.md) · [MEMORY_SAFETY.md](MEMORY_SAFETY.md) ·
-[SPEED_SAFE.md](SPEED_SAFE.md) (AOT speed bar coexists with this feedback loop).
-
----
-
-## Approach
-
-| Property | Mako approach |
-|----------|----------------|
-| Production traffic | Optional live counters + offline PGO on redeploy |
-| When code gets better | Rebuild / redeploy — not mid-request |
-| Process start | Full native AOT (`-O3` + LTO on release) |
-| Live machine code | Not rewritten in-process |
-| Memory while optimizing | No GC; ownership / arenas |
-
-Working rules:
-
-1. Release AOT is the default from process start.  
-2. Do not rewrite machine code in a running process.  
-3. Live feedback is opt-in and cheap (relaxed atomics / sampling).  
-4. Heavy specialization is offline (train → merge → rebuild → ship).
+**0.4.15+**. See [LONG_RUNNING.md](LONG_RUNNING.md),
+[PERFORMANCE.md](PERFORMANCE.md), [MEMORY_SAFETY.md](MEMORY_SAFETY.md),
+[SPEED_SAFE.md](SPEED_SAFE.md).
 
 ---
 
-## Architecture (three layers)
+## How we do it
 
-```text
-┌─────────────────────────────────────────────────────────────┐
-│  Layer A — AOT always                                        │
-│  mako build --release  →  -O3 -flto  (+ optional LLVM)       │
-│  No interpreter. No warmup. No GC.                           │
-└─────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────┐
-│  Layer B — cheap runtime feedback (optional)                 │
-│  hot_site_enable(1) + hot_site_hit(id)   // atomic ++        │
-│  profile_sample_*  /  /debug/hot_sites   // export only      │
-│  Cost when off: one load + branch. When on: relaxed atomic.  │
-└─────────────────────────────────────────────────────────────┘
-                              │ export JSON / pprof-text
-                              ▼
-┌─────────────────────────────────────────────────────────────┐
-│  Layer C — offline re-opt (deploy cycle)                     │
-│  scripts/pgo-build.sh  ·  scripts/adaptive-opt-cycle.sh      │
-│  MAKO_PGO_GEN train on staging → MAKO_PGO_USE production     │
-│  Optional: MAKO_ALLOCATOR=mimalloc|jemalloc                  │
-└─────────────────────────────────────────────────────────────┘
-```
+You ship full native AOT (`-O3` + LTO on release). If traffic shapes matter,
+turn on a few cheap counters, scrape them out of band, then rebuild with
+offline PGO and blue/green the result. Mid-request, the process never patches
+itself. Free stays ownership-based the whole time.
 
-**Never in the hot request path:** clang instrumentation (`-fprofile-generate`),
-stack-walking profilers on every call, or mid-flight code patching.
+In practice that means:
+
+- Release AOT from process start is the default.
+- Live feedback is opt-in and cheap (relaxed atomics, sampling).
+- Heavy specialization is offline: train, merge, rebuild, ship.
 
 ---
 
-## Layer B API (hot sites)
+## What’s in the binary vs what’s offline
 
-Cooperative site counters — you name the sites that matter:
+**Always on: AOT.** `mako build --release` → `-O3 -flto`, optional LLVM. No
+interpreter, no warmup tier, no GC.
+
+**Optional: hot sites.** Call `hot_site_enable(1)` and `hot_site_hit(id)` on
+the sites you care about. Off by default — cost is basically a load and a
+branch. On, it’s a relaxed atomic. Pull JSON with `hot_sites_json()` or hit
+`/debug/hot_sites`. Stack sampling (`profile_sample_*`) is heavier; don’t put
+it on every request unless you mean to.
+
+**Offline: PGO and friends.** `scripts/pgo-build.sh` or
+`scripts/adaptive-opt-cycle.sh`. Train with `MAKO_PGO_GEN` on staging, rebuild
+production with `MAKO_PGO_USE`. `MAKO_ALLOCATOR=mimalloc|jemalloc` is there if
+you want to poke at fragmentation under long soaks.
+
+Leave out of production hot paths: `-fprofile-generate`-style clang
+instrumentation, stack walkers on every call, and anything that patches code
+while requests are in flight.
+
+---
+
+## Hot site API
+
+You name the sites. App-defined ids, 0..255:
 
 ```mko
 fn handle(route: int) -> int {
-    // site ids are app-defined (0..255)
     let _ = hot_site_hit(route)
     // … work …
     return 0
@@ -83,64 +70,52 @@ fn main() {
 |----------|------|
 | `hot_site_enable(on)` | Master switch; returns previous mode |
 | `hot_site_enabled()` | 0/1 |
-| `hot_site_hit(id)` | Record one hit (0 if disabled; −1 if id out of range) |
-| `hot_site_count(id)` | Current count for site |
-| `hot_site_total()` | Sum of all hits since clear |
+| `hot_site_hit(id)` | One hit (0 if disabled; −1 if id out of range) |
+| `hot_site_count(id)` | Count for a site |
+| `hot_site_total()` | Sum since last clear |
 | `hot_site_top_id` / `top_count` | Hottest site |
 | `hot_site_clear()` | Zero counters |
 | `hot_sites_json()` | Compact export (`mako.hot_sites.v1`) |
 
-HTTP seed path (same router as pprof): **`/debug/hot_sites`**.
-
-Stack sampling (heavier; still not an in-process recompile) remains under
-`profile_sample_*` — use sparingly; prefer hot sites on the request critical path.
+HTTP path sits next to pprof: `/debug/hot_sites`.
 
 ---
 
-## Layer C — production feedback loop
+## A loop that works for long-running services
 
 ```bash
-# One-shot recipe: instrumented train on representative load → optimized binary
 ./scripts/pgo-build.sh app.mko -o out/app -- <train-args>
-
-# Documented continuous cycle (export guidance + offline PGO):
 ./scripts/adaptive-opt-cycle.sh app.mko -o out/app
 ```
 
-Recommended ops loop for years-up services:
-
-1. Ship **release AOT** (LTO; optional mimalloc).
-2. Enable `hot_site_*` on a few route/handler ids; scrape `/debug/hot_sites`
-   and optional pprof text **out of band**.
-3. Nightly/staging: rebuild with `pgo-build.sh` under **real shapes**.
-4. Blue/green swap the new binary — **no process ever recompiled itself**.
+Ship release AOT first (LTO; mimalloc only if you’ve measured it helping).
+Enable `hot_site_*` on a few route or handler ids and scrape
+`/debug/hot_sites` out of band. Nightly or on staging, rebuild with
+`pgo-build.sh` under traffic that looks like production. Swap with blue/green.
+Nothing in the fleet recompiled itself.
 
 ---
 
-## Tradeoffs (modest)
+## Tradeoffs, without the pitch deck
 
-| Concern | In-process recompile (typical) | Mako adaptive AOT |
-|---------|--------------------------------|-------------------|
-| Cold start | Often slower until specialized | Full AOT from the start |
-| Live rewrite / deopt | Possible | Not used |
-| Code growth in-process | Possible | Binary size fixed at deploy |
-| GC while specializing | Possible with collectors | No GC |
-| p99 early in life | Can be spiky | Tends to be more stable |
-| Compiler in the process | Can use significant memory | None |
+Systems that specialize in-process can win on some microkernels after a long
+warmup. They also tend to bring cold-start cost, deopt stories, code growth
+inside the process, and sometimes a collector or an embedded compiler. We took
+the other side: full AOT from the start, fixed binary size at deploy, no GC,
+no compiler living in the process.
 
-Online specialization can still outperform naive AOT on some microkernels. Mako
-prioritizes **predictable free and RSS** for long runs, and uses offline PGO
-when peak throughput on a workload needs another pass.
+That doesn’t mean online specialization never wins. On a few kernels it will.
+We care more about predictable free and RSS over months, and we reach for
+offline PGO when a workload needs another shot at peak throughput.
 
 ---
 
-## Claims policy
+## Honesty bar
 
-- Do say: no GC; no live recompile; optional counters; offline PGO.  
-- Do not say the binary rewrites itself at runtime.  
-- Do not invent throughput numbers without a named soak and hardware (LONG_RUNNING LR-7).
+True: no GC, no live recompile, optional counters, offline PGO.
 
-Tests: `examples/testing/hot_site_test.mko`.
+False or oversold: “the binary rewrites itself,” or throughput numbers with no
+named soak and hardware (see LONG_RUNNING LR-7).
 
-**Invariant:** AOT layout opts should leave `hot_site_*` default-off and PGO env
-wiring unchanged.
+Tests: `examples/testing/hot_site_test.mko`. AOT layout work should leave
+`hot_site_*` default-off and the PGO env wiring alone.

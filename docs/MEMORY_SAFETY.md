@@ -1,29 +1,29 @@
 # Memory safety · no GC
 
-**Contract (non-negotiable):** Mako has **no garbage collector**. Memory is
-freed by **ownership**, **explicit share (RC)**, and **arenas** — deterministically,
-on scope exit / move / drop, not by a tracing collector.
+There is no garbage collector. Memory frees when ownership says so — scope
+exit, move, drop — or when you use explicit share (RC) or arenas. Not when a
+tracing collector eventually notices.
 
-**Product tip:** 0.4.11+ · Related: [SOUNDNESS.md](SOUNDNESS.md) ·
-[SECURITY.md](SECURITY.md) · [MEMORY_MODEL.md](MEMORY_MODEL.md) ·
-[LONG_RUNNING.md](LONG_RUNNING.md) · [SPEED.md](SPEED.md).
+That isn’t a soft preference. **0.4.11+**. More detail in
+[SOUNDNESS.md](SOUNDNESS.md), [SECURITY.md](SECURITY.md),
+[MEMORY_MODEL.md](MEMORY_MODEL.md), [LONG_RUNNING.md](LONG_RUNNING.md),
+[SPEED.md](SPEED.md).
 
 ---
 
-## What “memory safe, no GC” means in Mako
+## What that means day to day
 
-| Guarantee | How |
-|-----------|-----|
-| **No tracing GC** | No collector thread, no stop-the-world, no GC mode flag |
-| **Deterministic free** | Scope exit, reassign, `break`/`continue`/`return`/`?`, match Own free |
-| **Bounds in safe release** | Index checks abort on OOB even under `-O3 -flto` (SAFE-001) |
-| **Use-after-move** | CFG NLL + hold/move checker |
-| **Double-free guards** | Own drops once; tests under ASan |
-| **Optional RC only when asked** | `share` / `ShareInt` / channel clones — **not** a heap-wide GC |
+No collector thread, no stop-the-world, no GC mode flag. Free lands at known
+points: scope exit, reassign, `break` / `continue` / `return` / `?`, match
+Own free. Index checks still abort on OOB under `-O3 -flto` (SAFE-001).
+Use-after-move is a typecheck problem (CFG NLL + hold/move). Own drops once;
+ASan watches for double-free. RC only shows up when you ask
+(`share` / `ShareInt` / channel clones) — not as a heap-wide collector in
+disguise.
 
-**Not the same as formally verified Rust.** Safe Mako prevents whole classes of
-bugs by construction; `unsafe` / FFI sit outside that guarantee. CI runs ASan /
-UBSan / TSan as evidence, not as the only line of defense.
+This isn’t formally verified Rust. Safe Mako blocks whole classes of bugs by
+construction; `unsafe` and FFI are outside that. CI’s ASan / UBSan / TSan runs
+are evidence, not the whole defense.
 
 ---
 
@@ -93,8 +93,11 @@ See [LONG_RUNNING.md](LONG_RUNNING.md).
 
 ---
 
-## Claims policy
+## What we’ll stand behind
 
-- **Do** say: no tracing GC; ownership free; bounds in release; ASan suite green.  
-- **Do not** say: “memory-safe for all FFI” or “proven like seL4.”  
-- **Do not** add a collector later under the same product name without a major version and identity break.
+No tracing GC. Ownership free. Bounds checks in release. ASan green on the
+safe path.
+
+We won’t claim “memory-safe for all FFI” or “proven like seL4.” And we won’t
+add a collector later under the same product name without a major version and
+an identity break.
