@@ -1224,6 +1224,8 @@ crew t {
 | `job.join_timeout(ms)` | Timed join → `Result[R, string]`: `Ok(value)` or `Err("timeout")` |
 | `crew.drain(ms)` | Cancel + join with timeout |
 | `fan(collection, mapper)` | Data-parallel map: `[]int` / `[]float` / `[]string` / `[]Struct` |
+| **message queues** | First-class `queue[string]`: `make(queue[string], n)`, `.publish` / `.try_take` / `.len` / `.free` (no GC) |
+| **GraphQL** | `Graphql` via `graphql_parse(body)`; `.has` / `.data` / `.error` / `.fields` |
 | channels + `select` | Message-passing: `make(chan[T], n)` / `chan_open[T](n)` for int/bool/float/string/**struct**/enum/**tuple** (incl. pack types) |
 | `actor` / `receive` | Long-lived concurrent entities |
 

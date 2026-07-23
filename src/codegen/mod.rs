@@ -10700,6 +10700,8 @@ impl Codegen {
                 "ZipWriter" => "MakoZipWriter*".into(),
                 "ReflectValue" => "MakoReflectValue*".into(),
                 "Limits" => "MakoLimits*".into(),
+                // Language GraphQL document (query string payload).
+                "Graphql" | "GraphQL" => "MakoString".into(),
                 other if self.enums.contains_key(other) => self.enums[other].c_name.clone(),
                 other if self.structs.contains_key(other) => self.structs[other].c_name.clone(),
                 other if self.interfaces.iter().any(|(n, _)| n == other) => {
@@ -10995,6 +10997,8 @@ impl Codegen {
                 Some(TypeExpr::Tuple(_)) => "MakoChanPtr*".into(),
                 _ => "MakoChan*".into(),
             },
+            // Language message queue handle (mq broker id).
+            TypeExpr::Generic(n, _) if n == "queue" => "int64_t".into(),
             TypeExpr::Generic(n, args) if n == "List" && !args.is_empty() => {
                 self.type_expr_c(&TypeExpr::Array(Box::new(args[0].clone())))
             }
@@ -22392,6 +22396,19 @@ impl Codegen {
                 let tmp = self.fresh("gqb");
                 self.line(&format!(
                     "MakoString {tmp} = mako_graphql_query_from_body({b});"
+                ));
+                return ("MakoString".into(), tmp);
+            }
+            "graphql_parse" => {
+                // Language Graphql value = extracted query string (methods on MakoString).
+                let (_, b) = self.emit_expr(&args[0]);
+                let tmp = self.fresh("gpar");
+                self.line(&format!(
+                    "MakoString {tmp} = mako_graphql_query_from_body({b});"
+                ));
+                // If body has no "query" key, treat whole string as query document.
+                self.line(&format!(
+                    "if ({tmp}.len == 0) {{ {tmp} = mako_str_clone({b}); }}"
                 ));
                 return ("MakoString".into(), tmp);
             }
@@ -39921,6 +39938,17 @@ impl Codegen {
                             ));
                             return ("MakoString".into(), tmp);
                         }
+                        "graphql_parse" => {
+                            let (_, b) = self.emit_expr(&args[0]);
+                            let tmp = self.fresh("gpar");
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_graphql_query_from_body({b});"
+                            ));
+                            self.line(&format!(
+                                "if ({tmp}.len == 0) {{ {tmp} = mako_str_clone({b}); }}"
+                            ));
+                            return ("MakoString".into(), tmp);
+                        }
                         "graphql_variables_from_body" => {
                             let (_, b) = self.emit_expr(&args[0]);
                             let tmp = self.fresh("gvb");
@@ -48859,6 +48887,25 @@ impl Codegen {
                             }
                         }
                     }
+                    // make(queue[string], n) — language FIFO over mq_* (default queue name "_")
+                    if n == "queue" && args.len() == 1 {
+                        let cap_e = len
+                            .as_ref()
+                            .map(|e| e.as_ref())
+                            .or(cap.as_ref().map(|e| e.as_ref()));
+                        let c = if let Some(ce) = cap_e {
+                            let (_, v) = self.emit_expr(ce);
+                            v
+                        } else {
+                            "256".into()
+                        };
+                        let tmp = self.fresh("q");
+                        self.line(&format!("int64_t {tmp} = mako_mq_new();"));
+                        self.line(&format!(
+                            "if ({tmp}) (void)mako_mq_declare({tmp}, mako_str_from_cstr(\"_\"), {c});"
+                        ));
+                        return ("int64_t".into(), tmp);
+                    }
                 }
                 if let TypeExpr::Map(k, v) = ty {
                     let hint = if let Some(l) = len {
@@ -50317,15 +50364,102 @@ impl Codegen {
                         ("MakoResultInt".into(), tmp)
                     }
                     "close" => {
-                        if rty == "MakoChanStr*" {
+                        // queue[T].close() / free() uses int64_t mq handle.
+                        if rty == "int64_t" {
+                            let tmp = self.fresh("qcl");
+                            self.line(&format!("int64_t {tmp} = mako_mq_free({rv});"));
+                            ("int64_t".into(), tmp)
+                        } else if rty == "MakoChanStr*" {
                             self.line(&format!("mako_chan_str_close({rv});"));
+                            ("void".into(), "/*void*/".into())
                         } else if rty == "MakoChanPtr*" {
                             self.line(&format!("mako_chan_ptr_close({rv});"));
+                            ("void".into(), "/*void*/".into())
                         } else {
                             self.line(&format!("mako_chan_close({rv});"));
+                            ("void".into(), "/*void*/".into())
                         }
-                        ("void".into(), "/*void*/".into())
                     }
+                    // Language queue[T] methods (mq_* under the hood, default name "_")
+                    "publish" | "push" => {
+                        let (_, v) = self.emit_expr(&args[0]);
+                        let tmp = self.fresh("qpub");
+                        self.line(&format!(
+                            "int64_t {tmp} = mako_mq_publish({rv}, mako_str_from_cstr(\"_\"), {v});"
+                        ));
+                        ("int64_t".into(), tmp)
+                    }
+                    "try_take" | "take" => {
+                        let tmp = self.fresh("qtk");
+                        self.line(&format!(
+                            "MakoString {tmp} = mako_mq_try_take({rv}, mako_str_from_cstr(\"_\"));"
+                        ));
+                        ("MakoString".into(), tmp)
+                    }
+                    "purge" => {
+                        let tmp = self.fresh("qpg");
+                        self.line(&format!(
+                            "int64_t {tmp} = mako_mq_purge({rv}, mako_str_from_cstr(\"_\"));"
+                        ));
+                        ("int64_t".into(), tmp)
+                    }
+                    "free" => {
+                        let tmp = self.fresh("qfr");
+                        self.line(&format!("int64_t {tmp} = mako_mq_free({rv});"));
+                        ("int64_t".into(), tmp)
+                    }
+                    // Graphql document methods (receiver is query MakoString)
+                    "query" if rty == "MakoString" => {
+                        // Identity: document *is* the query string after parse.
+                        ("MakoString".into(), rv)
+                    }
+                    "fields" if rty == "MakoString" => {
+                        let tmp = self.fresh("gfs");
+                        self.line(&format!(
+                            "MakoString {tmp} = mako_graphql_fields({rv});"
+                        ));
+                        ("MakoString".into(), tmp)
+                    }
+                    "has" | "has_field" if rty == "MakoString" => {
+                        let (_, n) = self.emit_expr(&args[0]);
+                        (
+                            "int64_t".into(),
+                            format!("mako_graphql_has_field({rv}, {n})"),
+                        )
+                    }
+                    "arg" if rty == "MakoString" => {
+                        let (_, n) = self.emit_expr(&args[0]);
+                        let tmp = self.fresh("gar");
+                        self.line(&format!(
+                            "MakoString {tmp} = mako_graphql_arg({rv}, {n});"
+                        ));
+                        ("MakoString".into(), tmp)
+                    }
+                    "data" if rty == "MakoString" => {
+                        let (_, f) = self.emit_expr(&args[0]);
+                        let (_, j) = self.emit_expr(&args[1]);
+                        let tmp = self.fresh("gdt");
+                        self.line(&format!(
+                            "MakoString {tmp} = mako_graphql_data({f}, {j});"
+                        ));
+                        ("MakoString".into(), tmp)
+                    }
+                    "error" if rty == "MakoString" => {
+                        let (_, m) = self.emit_expr(&args[0]);
+                        let tmp = self.fresh("ger");
+                        self.line(&format!(
+                            "MakoString {tmp} = mako_graphql_error({m});"
+                        ));
+                        ("MakoString".into(), tmp)
+                    }
+                    "is_query" if rty == "MakoString" => (
+                        "int64_t".into(),
+                        format!("mako_graphql_is_query({rv})"),
+                    ),
+                    "is_mutation" if rty == "MakoString" => (
+                        "int64_t".into(),
+                        format!("mako_graphql_is_mutation({rv})"),
+                    ),
                     "cancel" => {
                         self.line(&format!("mako_nursery_cancel(&{rv});"));
                         ("void".into(), "/*void*/".into())
@@ -50420,6 +50554,14 @@ impl Codegen {
                         ("MakoResultInt".into(), tmp)
                     }
                     "len" => {
+                        // queue[T].len() — int64_t mq handle
+                        if rty == "int64_t" {
+                            let tmp = self.fresh("qln");
+                            self.line(&format!(
+                                "int64_t {tmp} = mako_mq_len({rv}, mako_str_from_cstr(\"_\"));"
+                            ));
+                            return ("int64_t".into(), tmp);
+                        }
                         // Prefer Type_len user method (Go-style receivers) over builtin.
                         let user_len = {
                             let tname = self

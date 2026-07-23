@@ -1,6 +1,22 @@
 # Changelog
 
-## 0.4.12 — 2026-07-23 (tip; tag when packaging cut)
+## 0.4.13 — 2026-07-23 (tip; tag when packaging cut)
+
+**Theme:** Language-level `queue[T]` and `Graphql` (not only free functions).
+
+### Language
+
+- **`queue[string]`** type with `make(queue[string], n)` and methods:
+  `.publish` / `.push`, `.try_take` / `.take`, `.len`, `.purge`, `.free` / `.close`.
+- **`Graphql`** type via `graphql_parse(body)` and methods:
+  `.query`, `.fields`, `.has` / `.has_field`, `.arg`, `.data`, `.error`,
+  `.is_query` / `.is_mutation`.
+- Tests: `examples/testing/lang_queue_graphql_test.mko`.
+- Docs: [MESSAGING_GRAPHQL.md](docs/MESSAGING_GRAPHQL.md).
+
+## 0.4.12 — 2026-07-23
+
+**Theme:** Messaging queues + GraphQL HTTP — backend API surface seeds (no GC).
 
 **Theme:** Messaging queues + GraphQL HTTP — backend API surface seeds (no GC).
 

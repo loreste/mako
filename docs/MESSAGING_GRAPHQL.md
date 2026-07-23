@@ -1,17 +1,63 @@
 # Messaging queues · GraphQL
 
-**Product tip:** 0.4.12 · **No GC** — payloads and responses are owned strings;
+**Product tip:** 0.4.13 · **No GC** — payloads and responses are owned strings;
 queues free on `mq_free` / `mq_purge` / take transfer.
 
 Related: [STDLIB.md](STDLIB.md) · [MEMORY_SAFETY.md](MEMORY_SAFETY.md) ·
-[GENERAL_PURPOSE_PLAN.md](GENERAL_PURPOSE_PLAN.md) wave 2.
+[LANGUAGE.md](LANGUAGE.md) · [GENERAL_PURPOSE_PLAN.md](GENERAL_PURPOSE_PLAN.md) wave 2.
 
 ---
 
-## Messaging (`std/messaging` + builtins)
+## Language surface (first-class)
 
-In-process **message queues** for work distribution and pub/sub seeds. Not a
-Kafka client yet — same API shapes can wrap external brokers later.
+### `queue[T]` (seed: `queue[string]`)
+
+Like `chan[T]`, queues are a **language type** with `make` and methods:
+
+```mko
+let q = make(queue[string], 64)
+let _ = q.publish("job-1")   // or q.push(...)
+let job = q.try_take()       // or q.take() — empty string if none
+print_int(q.len())
+let _ = q.purge()
+let _ = q.free()             // or q.close()
+```
+
+| Construct | Meaning |
+|-----------|---------|
+| `queue[string]` | FIFO message queue type |
+| `make(queue[string], n)` | Create with capacity `n` |
+| `.publish` / `.push` | Enqueue (returns 1/0) |
+| `.try_take` / `.take` | Dequeue (owned string) |
+| `.len` / `.purge` / `.free` | Depth / clear / destroy |
+
+**Tests:** `examples/testing/lang_queue_graphql_test.mko`
+
+### `Graphql` type
+
+```mko
+let g = graphql_parse(body)   // HTTP JSON body *or* raw query text
+if g.has("health") == 1 {
+    let resp = g.data("health", "{\"ok\":true}")
+}
+let fs = g.fields()
+let _ = g.is_query()
+```
+
+| Construct | Meaning |
+|-----------|---------|
+| `Graphql` | Document type (query payload) |
+| `graphql_parse(s)` | From POST body or raw query |
+| `.query` / `.fields` / `.has` / `.arg` | Inspect |
+| `.data` / `.error` | Build JSON response |
+| `.is_query` / `.is_mutation` | Operation class |
+
+---
+
+## Messaging builtins + `std/messaging`
+
+In-process **named** multi-queue broker (for multi-topic brokers and workers).
+The language `queue[T]` is a single-queue handle on top of the same runtime.
 
 | Builtin | Role |
 |---------|------|

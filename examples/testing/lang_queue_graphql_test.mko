@@ -1,0 +1,42 @@
+// Language-level queue[T] and Graphql types (not only free functions).
+
+fn TestQueueStringMakePublishTake() {
+    let q = make(queue[string], 8)
+    assert_eq(q.len(), 0)
+    assert_eq(q.publish("a"), 1)
+    assert_eq(q.push("b"), 1)
+    assert_eq(q.len(), 2)
+    assert_eq_str(q.try_take(), "a")
+    assert_eq_str(q.take(), "b")
+    assert_eq(q.len(), 0)
+    assert_eq(q.free(), 1)
+}
+
+fn TestQueueFull() {
+    let q = make(queue[string], 1)
+    assert_eq(q.publish("only"), 1)
+    assert_eq(q.publish("overflow"), 0)
+    assert_eq_str(q.try_take(), "only")
+    let _ = q.free()
+}
+
+fn TestGraphqlParseAndMethods() {
+    let body = "{\"query\":\"{ health user(id: \\\"1\\\") { name } }\"}"
+    let g = graphql_parse(body)
+    assert_eq(g.is_query(), 1)
+    assert_eq(g.is_mutation(), 0)
+    assert_eq(g.has("health"), 1)
+    assert_eq(g.has_field("user"), 1)
+    let fs = g.fields()
+    assert(str_contains(fs, "health"))
+    let resp = g.data("health", "{\"ok\":true}")
+    assert(str_contains(resp, "\"data\""))
+    let err = g.error("nope")
+    assert(str_contains(err, "errors"))
+}
+
+fn TestGraphqlParseRawQuery() {
+    let g = graphql_parse("{ health }")
+    assert_eq(g.has("health"), 1)
+    assert_eq_str(g.query(), "{ health }")
+}

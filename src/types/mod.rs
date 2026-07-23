@@ -56,6 +56,10 @@ pub enum Type {
     Result(Box<Type>, Box<Type>),
     Job(Box<Type>),
     Chan(Box<Type>),
+    /// First-class FIFO message queue: `queue[T]` (payload owned; no GC).
+    Queue(Box<Type>),
+    /// Parsed GraphQL document handle (`graphql_parse` / HTTP body).
+    Graphql,
     Fn(Vec<Type>, Box<Type>),
     Struct {
         name: String,
@@ -131,6 +135,8 @@ impl Type {
             Type::Result(t, e) => format!("Result[{}, {}]", t.display(), e.display()),
             Type::Job(t) => format!("Job[{}]", t.display()),
             Type::Chan(t) => format!("chan[{}]", t.display()),
+            Type::Queue(t) => format!("queue[{}]", t.display()),
+            Type::Graphql => "Graphql".into(),
             Type::Fn(params, ret) => {
                 let ps: Vec<_> = params.iter().map(|p| p.display()).collect();
                 format!("fn({}) -> {}", ps.join(", "), ret.display())
@@ -180,6 +186,8 @@ impl Type {
             Type::Void => "void".into(),
             Type::Array(t) => format!("arr_{}", t.mono_tag()),
             Type::Chan(t) => format!("chan_{}", t.mono_tag()),
+            Type::Queue(t) => format!("queue_{}", t.mono_tag()),
+            Type::Graphql => "Graphql".into(),
             Type::Map(k, v) => format!("map_{}_{}", k.mono_tag(), v.mono_tag()),
             Type::Option(t) => format!("Option_{}_", t.mono_tag()),
             Type::Result(t, e) => format!("Result_{}_{}", t.mono_tag(), e.mono_tag()),
@@ -5975,6 +5983,11 @@ impl TypeChecker {
         fns.insert(
             "graphql_fields".into(),
             Type::Fn(vec![Type::String], Box::new(Type::String)),
+        );
+        // Language constructor: HTTP body or raw query → Graphql value.
+        fns.insert(
+            "graphql_parse".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Graphql)),
         );
         // In-process message queues (std/messaging).
         fns.insert("mq_new".into(), Type::Fn(vec![], Box::new(Type::Int)));
@@ -13350,6 +13363,7 @@ impl TypeChecker {
                 "void" => Ok(Type::Void),
                 "Arena" => Ok(Type::Arena),
                 "Crew" => Ok(Type::Crew),
+                "Graphql" | "GraphQL" => Ok(Type::Graphql),
                 "ShareInt" => Ok(Type::Named("ShareInt".into())),
                 "Slice" => Ok(Type::Named("Slice".into())),
                 "PgConn" => Ok(Type::Named("PgConn".into())),
@@ -13395,6 +13409,21 @@ impl TypeChecker {
                         return Err(TypeError::new("chan needs 1 type arg"));
                     }
                     Ok(Type::Chan(Box::new(self.resolve_type(&args[0])?)))
+                }
+                "queue" => {
+                    if args.len() != 1 {
+                        return Err(TypeError::new("queue needs 1 type arg"));
+                    }
+                    let elem = self.resolve_type(&args[0])?;
+                    // Seed: string payloads (mq_*). Expand monomorphs later.
+                    if !matches!(elem, Type::String) {
+                        return Err(TypeError::new(format!(
+                            "queue[T] currently supports string (got {})",
+                            elem.display()
+                        ))
+                        .hint("use queue[string]; more element types planned"));
+                    }
+                    Ok(Type::Queue(Box::new(elem)))
                 }
                 "List" => {
                     if args.len() != 1 {
@@ -17218,7 +17247,15 @@ impl TypeChecker {
                 }
                 let rt = self.check_expr(receiver)?;
                 // Typed methods check args themselves; others typecheck args once here.
-                let typed_send = matches!((&rt, method.as_str()), (Type::Chan(_), "send"));
+                let typed_send = matches!(
+                    (&rt, method.as_str()),
+                    (Type::Chan(_), "send")
+                        | (Type::Queue(_), "publish" | "push")
+                        | (
+                            Type::Graphql,
+                            "has" | "has_field" | "arg" | "data" | "error"
+                        )
+                );
                 let mut arg_tys = Vec::new();
                 if !typed_send {
                     for a in args {
@@ -17255,6 +17292,109 @@ impl TypeChecker {
                             return Err(TypeError::new("chan.close takes no arguments"));
                         }
                         Ok(Type::Void)
+                    }
+                    // queue[T] methods (language-level message queue)
+                    (Type::Queue(inner), "publish" | "push") => {
+                        if args.len() != 1 {
+                            return Err(TypeError::new("queue.publish takes 1 value")
+                                .hint("q.publish(x)"));
+                        }
+                        let at = self.check_expr(&args[0])?;
+                        if !self.compatible(&at, inner) {
+                            return Err(TypeError::new(format!(
+                                "queue.publish type mismatch: queue is queue[{}], got {}",
+                                inner.display(),
+                                at.display()
+                            )));
+                        }
+                        Ok(Type::Int) // 1 ok / 0 full
+                    }
+                    (Type::Queue(inner), "try_take" | "take") => {
+                        if !args.is_empty() {
+                            return Err(TypeError::new("queue.try_take takes no arguments"));
+                        }
+                        Ok(*inner.clone())
+                    }
+                    (Type::Queue(_), "len") => {
+                        if !args.is_empty() {
+                            return Err(TypeError::new("queue.len takes no arguments"));
+                        }
+                        Ok(Type::Int)
+                    }
+                    (Type::Queue(_), "free" | "close") => {
+                        if !args.is_empty() {
+                            return Err(TypeError::new("queue.free takes no arguments"));
+                        }
+                        Ok(Type::Int)
+                    }
+                    (Type::Queue(_), "purge") => {
+                        if !args.is_empty() {
+                            return Err(TypeError::new("queue.purge takes no arguments"));
+                        }
+                        Ok(Type::Int)
+                    }
+                    // Graphql document methods
+                    (Type::Graphql, "query") => {
+                        if !args.is_empty() {
+                            return Err(TypeError::new("graphql.query takes no arguments"));
+                        }
+                        Ok(Type::String)
+                    }
+                    (Type::Graphql, "fields") => {
+                        if !args.is_empty() {
+                            return Err(TypeError::new("graphql.fields takes no arguments"));
+                        }
+                        Ok(Type::String)
+                    }
+                    (Type::Graphql, "has" | "has_field") => {
+                        if args.len() != 1 {
+                            return Err(TypeError::new("graphql.has takes 1 field name"));
+                        }
+                        let at = self.check_expr(&args[0])?;
+                        if at != Type::String {
+                            return Err(TypeError::new("graphql.has expects string field name"));
+                        }
+                        Ok(Type::Int)
+                    }
+                    (Type::Graphql, "arg") => {
+                        if args.len() != 1 {
+                            return Err(TypeError::new("graphql.arg takes 1 arg name"));
+                        }
+                        let at = self.check_expr(&args[0])?;
+                        if at != Type::String {
+                            return Err(TypeError::new("graphql.arg expects string"));
+                        }
+                        Ok(Type::String)
+                    }
+                    (Type::Graphql, "data") => {
+                        if args.len() != 2 {
+                            return Err(TypeError::new("graphql.data(field, json)")
+                                .hint("g.data(\"health\", \"{\\\"ok\\\":true}\")"));
+                        }
+                        let a0 = self.check_expr(&args[0])?;
+                        let a1 = self.check_expr(&args[1])?;
+                        if a0 != Type::String || a1 != Type::String {
+                            return Err(TypeError::new("graphql.data expects two strings"));
+                        }
+                        Ok(Type::String)
+                    }
+                    (Type::Graphql, "error") => {
+                        if args.len() != 1 {
+                            return Err(TypeError::new("graphql.error takes 1 message"));
+                        }
+                        let at = self.check_expr(&args[0])?;
+                        if at != Type::String {
+                            return Err(TypeError::new("graphql.error expects string"));
+                        }
+                        Ok(Type::String)
+                    }
+                    (Type::Graphql, "is_query" | "is_mutation") => {
+                        if !args.is_empty() {
+                            return Err(TypeError::new(format!(
+                                "graphql.{method} takes no arguments"
+                            )));
+                        }
+                        Ok(Type::Int)
                     }
                     (Type::Crew, "cancel") => {
                         if !args.is_empty() {
@@ -18035,6 +18175,33 @@ impl TypeChecker {
                             ))
                             .hint("use make(chan[T], n) or chan_open[T](n)")),
                         }
+                    }
+                    Type::Queue(elem) => {
+                        // make(queue[T], cap) — typed FIFO (seed: string)
+                        let Some(l) = len else {
+                            return Err(TypeError::new(
+                                "make(queue[T]) needs capacity: make(queue[string], n)",
+                            ));
+                        };
+                        let lt = if matches!(l.as_ref(), Expr::Int(_)) {
+                            Type::Int
+                        } else {
+                            self.check_expr(l)?
+                        };
+                        if lt != Type::Int {
+                            return Err(TypeError::new("make(queue[T]) capacity must be int"));
+                        }
+                        if cap.is_some() {
+                            return Err(TypeError::new(
+                                "make(queue[T], n) takes one capacity argument",
+                            ));
+                        }
+                        if !matches!(elem.as_ref(), Type::String) {
+                            return Err(TypeError::new(
+                                "make(queue[T]) currently supports queue[string]",
+                            ));
+                        }
+                        Ok(Type::Queue(elem))
                     }
                     Type::Map(k, v) => {
                         if let Some(l) = len {
