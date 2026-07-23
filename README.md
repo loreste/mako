@@ -140,8 +140,8 @@ ships a single standalone binary — no clang, no system linker, nothing to
 install. It doesn't cover the whole language yet, but where it does, the
 binaries come out small and fast.
 
-Either way there's no interpreter, no JIT, no runtime VM, and no tracing
-collector. Memory is freed deterministically — ownership, scope exits, arenas —
+Either way there's no interpreter, no VM, no runtime code generation, and no
+tracing collector. Memory is freed deterministically — ownership, scope exits, arenas —
 and concurrency (`crew`, `fan`, channels) is part of the language, not a library
 bolt-on.
 
