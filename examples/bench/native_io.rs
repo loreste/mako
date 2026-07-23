@@ -5,6 +5,7 @@ fn io_checksum(rounds: i64, chunk: usize) -> i64 {
     let path = "/tmp/mako_native_io_bench.dat";
     let payload = vec![b'x'; chunk];
     let mut acc = 0i64;
+    let mut buf = vec![0u8; chunk];
     for _ in 0..rounds {
         {
             let mut f = fs::File::create(path).expect("create");
@@ -12,7 +13,6 @@ fn io_checksum(rounds: i64, chunk: usize) -> i64 {
         }
         // Match Mako write_file success code 0 in the accumulator.
         acc += 0;
-        let mut buf = vec![0u8; chunk];
         {
             let mut f = fs::File::open(path).expect("open");
             let n = f.read(&mut buf).expect("read");
@@ -23,5 +23,5 @@ fn io_checksum(rounds: i64, chunk: usize) -> i64 {
 }
 
 fn main() {
-    println!("{}", io_checksum(50, 4096));
+    println!("{}", io_checksum(500, 4096));
 }

@@ -7081,6 +7081,21 @@ static inline int mako_fs_path_buf(MakoString path, char *buf, size_t cap) {
     return 0;
 }
 
+/* Prefer path.data when it is already a C string (owned Mako strings are
+ * NUL-terminated after len). Still rejects embedded NULs. Scratch is only
+ * used when data[len] is not 0 (foreign views). */
+static inline const char *mako_fs_path_cstr(MakoString path, char *scratch, size_t cap) {
+    if (!path.data || path.len == 0 || path.len >= cap) return NULL;
+    for (size_t i = 0; i < path.len; i++) {
+        if (path.data[i] == '\0') return NULL;
+    }
+    if (path.data[path.len] == '\0') return path.data;
+    if (!scratch) return NULL;
+    memcpy(scratch, path.data, path.len);
+    scratch[path.len] = 0;
+    return scratch;
+}
+
 static int mako_argc_g = 0;
 static char **mako_argv_g = NULL;
 
@@ -8462,58 +8477,146 @@ static inline int64_t mako_remove_file(MakoString path) {
 #endif
 }
 
+/* Whole-file read/write via open+read/write (not stdio seek/tell).
+ * Matches the hand-C / Rust microbench shape more closely: one size probe
+ * (fstat), one buffer, short-I/O loops. Windows uses the CRT _open path. */
 static inline MakoString mako_read_file(MakoString path) {
-    char pbuf[4096];
-    if (mako_fs_path_buf(path, pbuf, sizeof(pbuf)) < 0) {
+    char scratch[4096];
+    const char *p = mako_fs_path_cstr(path, scratch, sizeof(scratch));
+    if (!p) {
         return mako_str_from_cstr("");
     }
-    FILE *f = fopen(pbuf, "rb");
-    if (!f) {
+#if defined(_WIN32)
+    int fd = _open(p, _O_RDONLY | _O_BINARY);
+#else
+    int fd = open(p, O_RDONLY);
+#endif
+    if (fd < 0) {
         return mako_str_from_cstr("");
     }
-    if (fseek(f, 0, SEEK_END) != 0) {
-        fclose(f);
+    struct stat st;
+    if (fstat(fd, &st) != 0 || st.st_size < 0) {
+#if defined(_WIN32)
+        _close(fd);
+#else
+        close(fd);
+#endif
         return mako_str_from_cstr("");
     }
-    long sz = ftell(f);
-    if (sz < 0) {
-        fclose(f);
-        return mako_str_from_cstr("");
-    }
-    rewind(f);
-    char *buf = (char *)malloc((size_t)sz + 1);
+    size_t sz = (size_t)st.st_size;
+    char *buf = (char *)malloc(sz + 1);
     if (!buf) {
-        fclose(f);
+#if defined(_WIN32)
+        _close(fd);
+#else
+        close(fd);
+#endif
         mako_abort("read_file OOM");
     }
-    size_t n = fread(buf, 1, (size_t)sz, f);
-    fclose(f);
-    buf[n] = '\0';
-    MakoString s = {buf, n};
+    size_t got = 0;
+    while (got < sz) {
+#if defined(_WIN32)
+        int n = _read(fd, buf + got, (unsigned)(sz - got > 0x7fffffff ? 0x7fffffff : sz - got));
+#else
+        ssize_t n = read(fd, buf + got, sz - got);
+#endif
+        if (n < 0) {
+#if defined(_WIN32)
+            _close(fd);
+#else
+            close(fd);
+#endif
+            free(buf);
+            return mako_str_from_cstr("");
+        }
+        if (n == 0) break;
+        got += (size_t)n;
+    }
+#if defined(_WIN32)
+    _close(fd);
+#else
+    close(fd);
+#endif
+    buf[got] = '\0';
+    MakoString s = {buf, got};
     return s;
 }
 
 static inline int64_t mako_write_file(MakoString path, MakoString contents) {
-    char pbuf[4096];
-    if (mako_fs_path_buf(path, pbuf, sizeof(pbuf)) < 0) return -1;
-    FILE *f = fopen(pbuf, "wb");
-    if (!f) return -1;
-    size_t n = contents.len;
-    size_t w = n ? fwrite(contents.data, 1, n, f) : 0;
-    fclose(f);
-    return (w == n) ? 0 : -1;
+    char scratch[4096];
+    const char *p = mako_fs_path_cstr(path, scratch, sizeof(scratch));
+    if (!p) return -1;
+#if defined(_WIN32)
+    int fd = _open(p, _O_WRONLY | _O_CREAT | _O_TRUNC | _O_BINARY, 0666);
+#else
+    int fd = open(p, O_WRONLY | O_CREAT | O_TRUNC, 0666);
+#endif
+    if (fd < 0) return -1;
+    size_t n = contents.data ? contents.len : 0;
+    size_t put = 0;
+    const char *src = contents.data ? contents.data : "";
+    while (put < n) {
+#if defined(_WIN32)
+        int w = _write(fd, src + put, (unsigned)(n - put > 0x7fffffff ? 0x7fffffff : n - put));
+#else
+        ssize_t w = write(fd, src + put, n - put);
+#endif
+        if (w < 0) {
+#if defined(_WIN32)
+            _close(fd);
+#else
+            close(fd);
+#endif
+            return -1;
+        }
+        if (w == 0) break;
+        put += (size_t)w;
+    }
+#if defined(_WIN32)
+    if (_close(fd) != 0) return -1;
+#else
+    if (close(fd) != 0) return -1;
+#endif
+    return (put == n) ? 0 : -1;
 }
 
 /* Append bytes (create if missing). Used by append-only logs / mini engines. */
 static inline int64_t mako_append_file(MakoString path, MakoString contents) {
-    char pbuf[4096];
-    if (mako_fs_path_buf(path, pbuf, sizeof(pbuf)) < 0) return -1;
-    FILE *f = fopen(pbuf, "ab");
-    if (!f) return -1;
-    size_t n = contents.len;
-    size_t w = n ? fwrite(contents.data, 1, n, f) : 0;
-    fclose(f);
-    return (w == n) ? 0 : -1;
+    char scratch[4096];
+    const char *p = mako_fs_path_cstr(path, scratch, sizeof(scratch));
+    if (!p) return -1;
+#if defined(_WIN32)
+    int fd = _open(p, _O_WRONLY | _O_CREAT | _O_APPEND | _O_BINARY, 0666);
+#else
+    int fd = open(p, O_WRONLY | O_CREAT | O_APPEND, 0666);
+#endif
+    if (fd < 0) return -1;
+    size_t n = contents.data ? contents.len : 0;
+    size_t put = 0;
+    const char *src = contents.data ? contents.data : "";
+    while (put < n) {
+#if defined(_WIN32)
+        int w = _write(fd, src + put, (unsigned)(n - put > 0x7fffffff ? 0x7fffffff : n - put));
+#else
+        ssize_t w = write(fd, src + put, n - put);
+#endif
+        if (w < 0) {
+#if defined(_WIN32)
+            _close(fd);
+#else
+            close(fd);
+#endif
+            return -1;
+        }
+        if (w == 0) break;
+        put += (size_t)w;
+    }
+#if defined(_WIN32)
+    if (_close(fd) != 0) return -1;
+#else
+    if (close(fd) != 0) return -1;
+#endif
+    return (put == n) ? 0 : -1;
 }
 
 /* ---- Filesystem / storage helpers ---- */

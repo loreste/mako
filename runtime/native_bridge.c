@@ -1559,6 +1559,14 @@ MakoNativeString *mako_native_str_to_upper_ptr(MakoNativeString *s) {
 MakoNativeString *mako_native_str_repeat_ptr(MakoNativeString *s, int64_t n) {
     return bridge_take_str(mako_str_repeat(bridge_borrow_str(s), n));
 }
+
+/* Value-ABI entry for LLVM (string-by-value + i64), matching write_file/read_file. */
+MakoNativeString mako_native_str_repeat(MakoNativeString s, int64_t n) {
+    MakoNativeString *p = mako_native_str_repeat_ptr(&s, n);
+    MakoNativeString out = *p;
+    free(p);
+    return out;
+}
 MakoNativeString *mako_native_str_replace_ptr(MakoNativeString *s, MakoNativeString *oldv,
                                              MakoNativeString *newv) {
     return bridge_take_str(mako_str_replace(bridge_borrow_str(s), bridge_borrow_str(oldv),
