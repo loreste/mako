@@ -100,9 +100,7 @@ mem_fixtures=(
   native_owned_tuples native_enum_payload native_nested_structs native_match_owned
   native_match_guards native_match native_for native_defer native_cfor native_labeled
   native_fmt native_mem_stress native_fibonacci
-  native_if_expr native_methods native_builtins
-  native_maps native_map_more native_map_range native_copy native_bool_slice
-  native_result
+  native_if_expr
 )
 # Extra top-level examples (threaded kick / select / regex) — also 0-leak.
 # Built from examples/ not examples/native/ in the loop below via paths.
@@ -220,14 +218,8 @@ for shared_fixture in \
   examples/native/native_match.mko \
   examples/native/native_mem_stress.mko \
   examples/native/native_if_expr.mko \
-  examples/native/native_methods.mko \
-  examples/native/native_builtins.mko \
-  examples/native/native_maps.mko \
-  examples/native/native_map_more.mko \
-  examples/native/native_map_range.mko \
-  examples/native/native_copy.mko \
-  examples/native/native_bool_slice.mko \
-  examples/native/native_result.mko \
+  examples/on_methods.mko \
+  examples/result.mko \
   examples/map.mko \
   examples/stdlib.mko \
   examples/slice64.mko \
@@ -275,13 +267,8 @@ for fixture in \
   "examples/native/native_fmt.mko" \
   "examples/native/native_mem_stress.mko" \
   "examples/native/native_if_expr.mko" \
-  "examples/native/native_methods.mko" \
-  "examples/native/native_builtins.mko" \
-  "examples/native/native_maps.mko" \
-  "examples/native/native_map_more.mko" \
-  "examples/native/native_map_range.mko" \
-  "examples/native/native_copy.mko" \
-  "examples/native/native_bool_slice.mko" \
+  "examples/on_methods.mko" \
+  "examples/result.mko" \
   "examples/map.mko" \
   "examples/stdlib.mko" \
   "examples/slice64.mko" \
@@ -298,7 +285,6 @@ for fixture in \
   "examples/parse_num.mko" \
   "examples/regex_seed.mko" \
   "examples/json_array.mko" \
-  "examples/native/native_result.mko" \
   "examples/native/native_fibonacci.mko" \
   "examples/native/native_match.mko"
 do

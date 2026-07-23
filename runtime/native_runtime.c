@@ -2984,16 +2984,16 @@ int64_t mako_native_env_set_ptr(const MakoNativeString *key, const MakoNativeStr
 #endif
 }
 
-/* Resolve native path to a C string without copying when already terminated. */
+/* Convert a length-delimited native path to a C string. A borrowed view does
+ * not guarantee that data[len] is readable, so never probe past the view. */
 static const char *mako_native_path_cstr(const MakoNativeString *path, char *scratch,
                                          size_t cap) {
-    if (!path || !path->data) return NULL;
+    if (!path || !path->data || !scratch) return NULL;
     size_t plen = mako_str_raw_len(path->len);
     if (plen == 0 || plen >= cap) return NULL;
     for (size_t i = 0; i < plen; i++) {
         if (path->data[i] == 0) return NULL;
     }
-    if (path->data[plen] == 0) return path->data;
     memcpy(scratch, path->data, plen);
     scratch[plen] = 0;
     return scratch;

@@ -25,6 +25,7 @@ rm -rf "$STAGE"
 mkdir -p "$STAGE/usr/bin" "$STAGE/usr/share/mako/runtime"
 install -m 755 "$BIN" "$STAGE/usr/bin/mako"
 install -m 644 runtime/*.h "$STAGE/usr/share/mako/runtime/"
+install -m 644 runtime/native_runtime.c runtime/native_bridge.c "$STAGE/usr/share/mako/runtime/"
 [[ -d std ]] && cp -R std "$STAGE/usr/share/mako/"
 tar -C "$STAGE" -czf "$TOP/SOURCES/mako-${VERSION}.tar.gz" .
 
