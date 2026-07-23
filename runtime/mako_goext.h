@@ -16,8 +16,19 @@
 #include <unistd.h>
 #include <signal.h>
 #include <sys/wait.h>
+#include <sys/types.h>
 #include <netdb.h>
 #include <arpa/inet.h>
+#if defined(__APPLE__)
+/* macOS hides these BSD aliases under strict POSIX feature selection, while
+ * arpa/nameser.h still uses them in its public declarations. */
+typedef unsigned char u_char;
+typedef unsigned int u_int;
+typedef unsigned long u_long;
+typedef unsigned short u_short;
+#endif
+#include <arpa/nameser.h>
+#include <resolv.h>
 #include <dirent.h>
 #include <sys/stat.h>
 #else
@@ -653,6 +664,109 @@ static inline int64_t mako_dns_lookup_count(MakoString host) {
     freeaddrinfo(res);
     return n;
 }
+
+/* Query SIP's RFC 3263 NAPTR/SRV records without shelling out. The wire
+ * format returned by these helpers is intentionally compact and is consumed
+ * by the proxy's strict resolver parser:
+ *   NAPTR: order:preference:|service|regexp|replacement
+ *   SRV:   priority:weight:port:target
+ */
+#if !defined(_WIN32)
+static inline int mako_dns_rr_field_safe(const char *s) {
+    if (!s) return 0;
+    for (const unsigned char *p = (const unsigned char *)s; *p; p++) {
+        if (*p == ',' || *p == '|' || *p == ':') return 0;
+    }
+    return 1;
+}
+
+static inline MakoString mako_dns_naptr_lookup(MakoString host) {
+    const char *name = host.data ? host.data : "";
+    if (!name[0] || host.len > 253) return mako_str_from_cstr("");
+    unsigned char answer[8192];
+    int answer_len = res_query(name, ns_c_in, ns_t_naptr, answer, sizeof(answer));
+    if (answer_len <= 0) return mako_str_from_cstr("");
+    ns_msg msg;
+    if (ns_initparse(answer, answer_len, &msg) != 0) return mako_str_from_cstr("");
+    MakoStrBuilder *out = mako_str_builder_new();
+    int count = ns_msg_count(msg, ns_s_an);
+    for (int i = 0; i < count; i++) {
+        ns_rr rr;
+        if (ns_parserr(&msg, ns_s_an, i, &rr) != 0) continue;
+        if (ns_rr_type(rr) != ns_t_naptr) continue;
+        const unsigned char *p = ns_rr_rdata(rr);
+        const unsigned char *end = p + ns_rr_rdlen(rr);
+        if (p + 4 > end) continue;
+        unsigned order = ns_get16(p); p += 2;
+        unsigned preference = ns_get16(p); p += 2;
+        char flags[256], service[256], regexp[1024], replacement[1025];
+        size_t n;
+        if (p >= end || (n = *p++) > sizeof(flags) - 1 || p + n > end) continue;
+        memcpy(flags, p, n); flags[n] = 0; p += n;
+        (void)flags;
+        if (p >= end || (n = *p++) > sizeof(service) - 1 || p + n > end) continue;
+        memcpy(service, p, n); service[n] = 0; p += n;
+        if (p >= end || (n = *p++) > sizeof(regexp) - 1 || p + n > end) continue;
+        memcpy(regexp, p, n); regexp[n] = 0; p += n;
+        int expanded = dn_expand(answer, answer + answer_len, p,
+                                  replacement, sizeof(replacement));
+        if (expanded < 0 || !mako_dns_rr_field_safe(service)
+            || !mako_dns_rr_field_safe(regexp)
+            || !mako_dns_rr_field_safe(replacement)) continue;
+        char record[2300];
+        int written = snprintf(record, sizeof(record), "%u:%u:|%s|%s|%s",
+                               order, preference, service, regexp, replacement);
+        if (written <= 0 || (size_t)written >= sizeof(record)) continue;
+        if (out->len) mako_str_builder_write(out, mako_str_from_cstr(","));
+        mako_str_builder_write(out, mako_str_view(record, (size_t)written));
+    }
+    MakoString result = mako_str_builder_finish(out);
+    return result;
+}
+
+static inline MakoString mako_dns_srv_lookup(MakoString service) {
+    const char *name = service.data ? service.data : "";
+    if (!name[0] || service.len > 253) return mako_str_from_cstr("");
+    unsigned char answer[8192];
+    int answer_len = res_query(name, ns_c_in, ns_t_srv, answer, sizeof(answer));
+    if (answer_len <= 0) return mako_str_from_cstr("");
+    ns_msg msg;
+    if (ns_initparse(answer, answer_len, &msg) != 0) return mako_str_from_cstr("");
+    MakoStrBuilder *out = mako_str_builder_new();
+    int count = ns_msg_count(msg, ns_s_an);
+    for (int i = 0; i < count; i++) {
+        ns_rr rr;
+        if (ns_parserr(&msg, ns_s_an, i, &rr) != 0) continue;
+        if (ns_rr_type(rr) != ns_t_srv) continue;
+        const unsigned char *p = ns_rr_rdata(rr);
+        const unsigned char *end = p + ns_rr_rdlen(rr);
+        if (p + 6 > end) continue;
+        unsigned priority = ns_get16(p); p += 2;
+        unsigned weight = ns_get16(p); p += 2;
+        unsigned port = ns_get16(p); p += 2;
+        char target[1025];
+        if (dn_expand(answer, answer + answer_len, p, target, sizeof(target)) < 0
+            || !mako_dns_rr_field_safe(target)) continue;
+        char record[1200];
+        int written = snprintf(record, sizeof(record), "%u:%u:%u:%s",
+                               priority, weight, port, target);
+        if (written <= 0 || (size_t)written >= sizeof(record)) continue;
+        if (out->len) mako_str_builder_write(out, mako_str_from_cstr(","));
+        mako_str_builder_write(out, mako_str_view(record, (size_t)written));
+    }
+    MakoString result = mako_str_builder_finish(out);
+    return result;
+}
+#else
+static inline MakoString mako_dns_naptr_lookup(MakoString host) {
+    (void)host;
+    return mako_str_from_cstr("");
+}
+static inline MakoString mako_dns_srv_lookup(MakoString service) {
+    (void)service;
+    return mako_str_from_cstr("");
+}
+#endif
 
 static inline MakoString mako_dns_lookup_all(MakoString host) {
     mako_net_init();

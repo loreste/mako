@@ -821,6 +821,27 @@ static inline int64_t mako_udp_bind(int64_t port) {
     return mako_udp_bind_addr(mako_str_from_cstr("*"), port);
 }
 
+/* Nonblocking IPv4 UDP bind with SO_REUSEPORT. Used by multi-worker SIP
+ * ingress so each worker can own a kernel-distributed socket. */
+static inline int64_t mako_nb_udp_bind_reuseport(int64_t port) {
+    int64_t fd = mako_udp_bind_addr(mako_str_from_cstr("*"), port);
+    if (fd < 0) return -1;
+#if defined(_WIN32)
+    u_long mode = 1UL;
+    if (ioctlsocket((SOCKET)fd, FIONBIO, &mode) != 0) {
+        closesocket((SOCKET)fd);
+        return -1;
+    }
+#else
+    int flags = fcntl((int)fd, F_GETFL, 0);
+    if (flags < 0 || fcntl((int)fd, F_SETFL, flags | O_NONBLOCK) != 0) {
+        close((int)fd);
+        return -1;
+    }
+#endif
+    return fd;
+}
+
 static inline int64_t mako_udp_send_to(int64_t fd, MakoString host, int64_t port, MakoString data) {
     if (fd < 0) return -1;
     char hbuf[256], pbuf[16];

@@ -14,6 +14,7 @@
 #if defined(MAKO_HAS_OPENSSL) || defined(MAKO_USE_OPENSSL)
 #include <openssl/bio.h>
 #include <openssl/evp.h>
+#include <openssl/ec.h>
 #include <openssl/pem.h>
 #include <openssl/rsa.h>
 #define MAKO_CLOUD_OPENSSL 1
@@ -291,8 +292,9 @@ static inline void mako_breaker_reset(MakoCircuitBreaker *cb) {
 static inline void mako_breaker_free(MakoCircuitBreaker *cb) { free(cb); }
 
 /* ============================================================
- * JWT — explicit HS256 and RS256 verification.
- * `jwt_sign`/`jwt_verify` are intentionally HS256-only.  RS256 uses separate
+ * JWT — explicit HS256/ES256 signing and RS256 verification.
+ * `jwt_sign` is HS256 and `jwt_sign_es256` is ES256 with an explicit P-256
+ * private key. RS256 uses separate
  * verify APIs so a caller cannot accidentally pass a shared secret to an RSA
  * path or accept an algorithm selected by an untrusted token header.
  * ============================================================ */
@@ -745,6 +747,191 @@ static inline MakoString mako_jwt_sign(MakoString payload, MakoString secret) {
     free(input);
     mako_str_free(sig_raw);
     return (MakoString){token, total};
+}
+
+/* Sign a JWT payload with ES256 using a PEM-encoded P-256 private key.
+ * JWT ES256 signatures are the fixed-width R || S form, not DER. */
+static inline MakoString mako_jwt_sign_es256(MakoString payload, MakoString private_key_pem) {
+#if !defined(MAKO_CLOUD_OPENSSL)
+    (void)payload; (void)private_key_pem;
+    return mako_str_from_cstr("");
+#else
+    const char *hdr_json = "{\"alg\":\"ES256\",\"typ\":\"JWT\"}";
+    size_t hdr_len = strlen(hdr_json);
+    if (!payload.data || payload.len > 6000 || !private_key_pem.data
+        || private_key_pem.len == 0 || private_key_pem.len > 16384)
+        return mako_str_from_cstr("");
+
+    char hdr_b64[128], pay_b64[8192];
+    size_t hdr_b64_len = mako_b64url_encode(
+        (const uint8_t *)hdr_json, hdr_len, hdr_b64, sizeof(hdr_b64));
+    size_t pay_b64_len = mako_b64url_encode(
+        (const uint8_t *)payload.data, payload.len, pay_b64, sizeof(pay_b64));
+    if (hdr_b64_len == 0 || pay_b64_len == 0) return mako_str_from_cstr("");
+
+    size_t input_len = hdr_b64_len + 1 + pay_b64_len;
+    char *input = (char *)malloc(input_len + 1);
+    if (!input) return mako_str_from_cstr("");
+    memcpy(input, hdr_b64, hdr_b64_len);
+    input[hdr_b64_len] = '.';
+    memcpy(input + hdr_b64_len + 1, pay_b64, pay_b64_len);
+    input[input_len] = 0;
+
+    BIO *bio = BIO_new_mem_buf(private_key_pem.data, (int)private_key_pem.len);
+    EVP_PKEY *pkey = bio ? PEM_read_bio_PrivateKey(bio, NULL, NULL, NULL) : NULL;
+    if (bio) BIO_free(bio);
+    if (!pkey || EVP_PKEY_base_id(pkey) != EVP_PKEY_EC
+        || EVP_PKEY_get_bits(pkey) != 256) {
+        if (pkey) EVP_PKEY_free(pkey);
+        free(input);
+        return mako_str_from_cstr("");
+    }
+
+    EC_KEY *ec = EVP_PKEY_get1_EC_KEY(pkey);
+    const EC_GROUP *group = ec ? EC_KEY_get0_group(ec) : NULL;
+    int curve = group ? EC_GROUP_get_curve_name(group) : NID_undef;
+    if (ec) EC_KEY_free(ec);
+    if (curve != NID_X9_62_prime256v1) {
+        EVP_PKEY_free(pkey);
+        free(input);
+        return mako_str_from_cstr("");
+    }
+
+    EVP_MD_CTX *ctx = EVP_MD_CTX_new();
+    size_t der_len = 0;
+    unsigned char *der = NULL;
+    int ok = ctx && EVP_DigestSignInit(ctx, NULL, EVP_sha256(), NULL, pkey) == 1
+        && EVP_DigestSignUpdate(ctx, input, input_len) == 1
+        && EVP_DigestSignFinal(ctx, NULL, &der_len) == 1;
+    if (ok) {
+        der = (unsigned char *)malloc(der_len);
+        ok = der && EVP_DigestSignFinal(ctx, der, &der_len) == 1;
+    }
+
+    unsigned char raw_sig[64];
+    memset(raw_sig, 0, sizeof(raw_sig));
+    if (ok) {
+        const unsigned char *der_ptr = der;
+        ECDSA_SIG *ecdsa = d2i_ECDSA_SIG(NULL, &der_ptr, (long)der_len);
+        const BIGNUM *r = NULL;
+        const BIGNUM *s = NULL;
+        if (ecdsa) ECDSA_SIG_get0(ecdsa, &r, &s);
+        ok = ecdsa && r && s
+            && BN_num_bits(r) <= 256 && BN_num_bits(s) <= 256
+            && BN_bn2binpad(r, raw_sig, 32) == 32
+            && BN_bn2binpad(s, raw_sig + 32, 32) == 32;
+        if (ecdsa) ECDSA_SIG_free(ecdsa);
+    }
+
+    char sig_b64[128];
+    size_t sig_b64_len = ok
+        ? mako_b64url_encode(raw_sig, sizeof(raw_sig), sig_b64, sizeof(sig_b64)) : 0;
+    size_t total = input_len + 1 + sig_b64_len;
+    char *token = ok && sig_b64_len > 0 ? (char *)malloc(total + 1) : NULL;
+    if (token) {
+        memcpy(token, input, input_len);
+        token[input_len] = '.';
+        memcpy(token + input_len + 1, sig_b64, sig_b64_len);
+        token[total] = 0;
+    }
+
+    OPENSSL_cleanse(raw_sig, sizeof(raw_sig));
+    if (der) {
+        OPENSSL_cleanse(der, der_len);
+        free(der);
+    }
+    if (ctx) EVP_MD_CTX_free(ctx);
+    EVP_PKEY_free(pkey);
+    OPENSSL_cleanse(input, input_len + 1);
+    free(input);
+    return token ? (MakoString){token, total} : mako_str_from_cstr("");
+#endif
+}
+
+/* Verify an ES256 JWT against a PEM-encoded P-256 public key. */
+static inline int64_t mako_jwt_verify_es256(MakoString token, MakoString public_key_pem) {
+#if !defined(MAKO_CLOUD_OPENSSL)
+    (void)token; (void)public_key_pem;
+    return 0;
+#else
+    size_t first_dot = 0, second_dot = 0;
+    if (!public_key_pem.data || public_key_pem.len == 0 || public_key_pem.len > 16384
+        || mako_jwt_parts(token, &first_dot, &second_dot) != 0)
+        return 0;
+
+    char header[4097];
+    size_t header_len = 0;
+    if (mako_jwt_b64url_decode_strict(
+            token.data, first_dot, (uint8_t *)header, sizeof(header) - 1, &header_len) != 0)
+        return 0;
+    header[header_len] = 0;
+    char alg[16];
+    int has_alg = 0;
+    if (mako_jwt_json_field_string(
+            header, header_len, "alg", alg, sizeof(alg), &has_alg) != 0
+        || !has_alg || strcmp(alg, "ES256") != 0)
+        return 0;
+
+    BIO *bio = BIO_new_mem_buf(public_key_pem.data, (int)public_key_pem.len);
+    EVP_PKEY *pkey = bio ? PEM_read_bio_PUBKEY(bio, NULL, NULL, NULL) : NULL;
+    if (bio) BIO_free(bio);
+    if (!pkey || EVP_PKEY_base_id(pkey) != EVP_PKEY_EC
+        || EVP_PKEY_get_bits(pkey) != 256) {
+        if (pkey) EVP_PKEY_free(pkey);
+        return 0;
+    }
+    EC_KEY *ec = EVP_PKEY_get1_EC_KEY(pkey);
+    const EC_GROUP *group = ec ? EC_KEY_get0_group(ec) : NULL;
+    int curve = group ? EC_GROUP_get_curve_name(group) : NID_undef;
+    if (ec) EC_KEY_free(ec);
+    if (curve != NID_X9_62_prime256v1) {
+        EVP_PKEY_free(pkey);
+        return 0;
+    }
+
+    uint8_t raw_sig[64];
+    size_t raw_len = 0;
+    if (token.len - second_dot - 1 != 86
+        || mako_jwt_b64url_decode_strict(
+               token.data + second_dot + 1, token.len - second_dot - 1,
+               raw_sig, sizeof(raw_sig), &raw_len) != 0
+        || raw_len != sizeof(raw_sig)) {
+        EVP_PKEY_free(pkey);
+        return 0;
+    }
+
+    ECDSA_SIG *ecdsa = ECDSA_SIG_new();
+    BIGNUM *r = ecdsa ? BN_bin2bn(raw_sig, 32, NULL) : NULL;
+    BIGNUM *s = ecdsa ? BN_bin2bn(raw_sig + 32, 32, NULL) : NULL;
+    if (!ecdsa || !r || !s || ECDSA_SIG_set0(ecdsa, r, s) != 1) {
+        if (r) BN_free(r);
+        if (s) BN_free(s);
+        if (ecdsa) ECDSA_SIG_free(ecdsa);
+        OPENSSL_cleanse(raw_sig, sizeof(raw_sig));
+        EVP_PKEY_free(pkey);
+        return 0;
+    }
+
+    int der_len = i2d_ECDSA_SIG(ecdsa, NULL);
+    unsigned char *der = der_len > 0 ? (unsigned char *)malloc((size_t)der_len) : NULL;
+    unsigned char *der_ptr = der;
+    if (der) i2d_ECDSA_SIG(ecdsa, &der_ptr);
+    EVP_MD_CTX *ctx = EVP_MD_CTX_new();
+    int ok = der && ctx
+        && EVP_DigestVerifyInit(ctx, NULL, EVP_sha256(), NULL, pkey) == 1
+        && EVP_DigestVerifyUpdate(ctx, token.data, second_dot) == 1
+        && EVP_DigestVerifyFinal(ctx, der, (size_t)der_len) == 1;
+
+    if (ctx) EVP_MD_CTX_free(ctx);
+    if (der) {
+        OPENSSL_cleanse(der, (size_t)der_len);
+        free(der);
+    }
+    ECDSA_SIG_free(ecdsa);
+    OPENSSL_cleanse(raw_sig, sizeof(raw_sig));
+    EVP_PKEY_free(pkey);
+    return ok ? 1 : 0;
+#endif
 }
 
 /* Verify a JWT token. Returns 1 if valid, 0 if invalid. */

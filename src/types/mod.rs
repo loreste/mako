@@ -2845,6 +2845,10 @@ impl TypeChecker {
             Type::Fn(vec![Type::Int], Box::new(Type::Int)),
         );
         fns.insert(
+            "nb_udp_bind_reuseport".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
             "nb_udp_recv".into(),
             Type::Fn(vec![Type::Int], Box::new(Type::String)),
         );
@@ -3111,11 +3115,19 @@ impl TypeChecker {
             Type::Fn(vec![Type::String, Type::String], Box::new(Type::String)),
         );
         fns.insert(
+            "jwt_sign_es256".into(),
+            Type::Fn(vec![Type::String, Type::String], Box::new(Type::String)),
+        );
+        fns.insert(
             "jwt_verify".into(),
             Type::Fn(vec![Type::String, Type::String], Box::new(Type::Int)),
         );
         fns.insert(
             "jwt_verify_rs256".into(),
+            Type::Fn(vec![Type::String, Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "jwt_verify_es256".into(),
             Type::Fn(vec![Type::String, Type::String], Box::new(Type::Int)),
         );
         fns.insert(
@@ -8540,6 +8552,14 @@ impl TypeChecker {
             Type::Fn(vec![Type::String], Box::new(Type::String)),
         );
         fns.insert(
+            "dns_naptr_lookup".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::String)),
+        );
+        fns.insert(
+            "dns_srv_lookup".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::String)),
+        );
+        fns.insert(
             "dns_lookup_ipv4".into(),
             Type::Fn(vec![Type::String], Box::new(Type::String)),
         );
@@ -11071,6 +11091,56 @@ impl TypeChecker {
         fns.insert(
             "tls_client_free".into(),
             Type::Fn(vec![Type::Named("TlsClient".into())], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "tls_pool_open".into(),
+            Type::Fn(vec![Type::String, Type::Int, Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "tls_pool_send".into(),
+            Type::Fn(vec![Type::Int, Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "tls_pool_recv".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::String)),
+        );
+        fns.insert(
+            "tls_pool_fd".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "tls_pool_close".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "wss_pool_open_ca".into(),
+            Type::Fn(
+                vec![Type::String, Type::Int, Type::String, Type::String, Type::String],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "wss_pool_open_insecure".into(),
+            Type::Fn(
+                vec![Type::String, Type::Int, Type::String, Type::String],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "wss_pool_send".into(),
+            Type::Fn(vec![Type::Int, Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "wss_pool_recv".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::String)),
+        );
+        fns.insert(
+            "wss_pool_fd".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "wss_pool_close".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
         );
         fns.insert(
             "tls_connect".into(),
