@@ -7044,6 +7044,23 @@ static inline MakoIntArray mako_arena_int_array_make(MakoArena *a, int64_t len, 
     return arr;
 }
 
+static inline MakoIntArray mako_arena_int_array_append(
+    MakoArena *a, MakoIntArray s, int64_t v
+) {
+    if (s.len < s.cap) {
+        s.data[s.len++] = v;
+        return s;
+    }
+    size_t ncap = s.cap ? s.cap * 2 : 1;
+    if (ncap < s.len + 1) ncap = s.len + 1;
+    int64_t *data = (int64_t *)mako_arena_alloc(a, ncap * sizeof(int64_t));
+    if (s.len) memcpy(data, s.data, s.len * sizeof(int64_t));
+    s.data = data;
+    s.cap = ncap;
+    s.data[s.len++] = v;
+    return s;
+}
+
 static inline MakoByteArray mako_arena_byte_array_make(MakoArena *a, int64_t len, int64_t cap) {
     if (len < 0) len = 0;
     if (cap < len) cap = len;
@@ -7052,6 +7069,24 @@ static inline MakoByteArray mako_arena_byte_array_make(MakoArena *a, int64_t len
     memset(data, 0, c);
     MakoByteArray arr = {data, (size_t)len, c};
     return arr;
+}
+
+static inline MakoByteArray mako_arena_byte_array_append(
+    MakoArena *a, MakoByteArray s, int64_t v
+) {
+    if (v < 0 || v > 255) mako_abort("byte value out of range 0..255");
+    if (s.len < s.cap) {
+        s.data[s.len++] = (uint8_t)v;
+        return s;
+    }
+    size_t ncap = s.cap ? s.cap * 2 : 1;
+    if (ncap < s.len + 1) ncap = s.len + 1;
+    uint8_t *data = (uint8_t *)mako_arena_alloc(a, ncap);
+    if (s.len) memcpy(data, s.data, s.len);
+    s.data = data;
+    s.cap = ncap;
+    s.data[s.len++] = (uint8_t)v;
+    return s;
 }
 
 static inline MakoStrArray mako_arena_str_array_make(MakoArena *a, int64_t len, int64_t cap) {
@@ -7064,6 +7099,22 @@ static inline MakoStrArray mako_arena_str_array_make(MakoArena *a, int64_t len, 
     return arr;
 }
 
+static inline MakoStrArray mako_arena_str_array_append(
+    MakoArena *a, MakoStrArray s, MakoString v
+) {
+    if (s.len == s.cap) {
+        size_t ncap = s.cap ? s.cap * 2 : 1;
+        if (ncap < s.len + 1) ncap = s.len + 1;
+        MakoString *data =
+            (MakoString *)mako_arena_alloc(a, ncap * sizeof(MakoString));
+        if (s.len) memcpy(data, s.data, s.len * sizeof(MakoString));
+        s.data = data;
+        s.cap = ncap;
+    }
+    s.data[s.len++] = mako_arena_text(a, v);
+    return s;
+}
+
 static inline MakoFloatArray mako_arena_float_array_make(MakoArena *a, int64_t len, int64_t cap) {
     if (len < 0) len = 0;
     if (cap < len) cap = len;
@@ -7072,6 +7123,50 @@ static inline MakoFloatArray mako_arena_float_array_make(MakoArena *a, int64_t l
     memset(data, 0, c * sizeof(double));
     MakoFloatArray arr = {data, (size_t)len, c};
     return arr;
+}
+
+static inline MakoFloatArray mako_arena_float_array_append(
+    MakoArena *a, MakoFloatArray s, double v
+) {
+    if (s.len < s.cap) {
+        s.data[s.len++] = v;
+        return s;
+    }
+    size_t ncap = s.cap ? s.cap * 2 : 1;
+    if (ncap < s.len + 1) ncap = s.len + 1;
+    double *data = (double *)mako_arena_alloc(a, ncap * sizeof(double));
+    if (s.len) memcpy(data, s.data, s.len * sizeof(double));
+    s.data = data;
+    s.cap = ncap;
+    s.data[s.len++] = v;
+    return s;
+}
+
+static inline MakoBoolArray mako_arena_bool_array_make(MakoArena *a, int64_t len, int64_t cap) {
+    if (len < 0) len = 0;
+    if (cap < len) cap = len;
+    size_t c = (size_t)(cap ? cap : 1);
+    bool *data = (bool *)mako_arena_alloc(a, c * sizeof(bool));
+    memset(data, 0, c * sizeof(bool));
+    MakoBoolArray arr = {data, (size_t)len, c};
+    return arr;
+}
+
+static inline MakoBoolArray mako_arena_bool_array_append(
+    MakoArena *a, MakoBoolArray s, bool v
+) {
+    if (s.len < s.cap) {
+        s.data[s.len++] = v;
+        return s;
+    }
+    size_t ncap = s.cap ? s.cap * 2 : 1;
+    if (ncap < s.len + 1) ncap = s.len + 1;
+    bool *data = (bool *)mako_arena_alloc(a, ncap * sizeof(bool));
+    if (s.len) memcpy(data, s.data, s.len * sizeof(bool));
+    s.data = data;
+    s.cap = ncap;
+    s.data[s.len++] = v;
+    return s;
 }
 
 static inline int64_t mako_arena_stamp(MakoArena *a, int64_t v) {
