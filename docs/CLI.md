@@ -182,6 +182,7 @@ mako test examples/testing -r TestAdd   # filter by name
 mako test examples/testing -r "Test*"   # glob pattern
 mako test examples/testing -v           # verbose (show matched names)
 mako test --coverage                    # print coverage + category counts
+mako test examples/testing --json       # stable machine-readable report
 mako test --count 3                     # run suite 3 times
 mako test --race                        # enable ThreadSanitizer
 ```
@@ -222,9 +223,27 @@ fn TestAddNegative() {
 | `-v, --verbose` | List matched test names |
 | `--count <N>` | Run suite N times |
 | `--coverage` | Print coverage report |
+| `--json` | Emit one versioned JSON report and capture test output |
 | `--race` | Enable ThreadSanitizer |
 | `--sanitize <TYPE>` | Custom sanitizer |
 | `-p, --package <NAME>` | Focus one workspace member |
+
+JSON mode writes one object to stdout. Human output from each test process is
+captured in the file result's `stdout` and `stderr` fields, so stdout remains
+safe to pipe into a JSON parser. The top-level `schemaVersion` is `1`; reports
+include each run, file status, matched test names, duration, structured failure
+details, and aggregate counts. The command exits nonzero when any reported run
+fails. With `--count`, it stops after the first failing iteration.
+
+`status` is `passed`, `failed`, or `skipped`. A failed file has a `failure`
+object whose `kind` is `compile`, `runner`, `exit`, `signal`, `timeout`, or
+`load`; fields that do not apply are `null`, and `signal` is populated only on
+POSIX systems. Summary `passed`, `failed`, and `skipped` values count files,
+while `tests` counts matched test functions, so they need not add up. Each
+output stream retains up to 1 MiB and sets its corresponding `stdoutTruncated`
+or `stderrTruncated` flag when more was produced. New optional fields may be
+added within schema version 1, while incompatible changes require a version
+bump.
 
 ---
 

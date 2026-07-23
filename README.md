@@ -424,9 +424,13 @@ implemented features in LSP-compatible editors.
 ```bash
 mako test examples/testing
 mako test -r TestAdd -v
+mako test examples/testing --json             # stable CI report
 mako test --sanitize address examples/testing  # ASan
 mako test --race examples/testing/crew_fan_test.mko  # TSan
 ```
+
+JSON test reports remain parseable on failure and the command exits nonzero
+when any test run fails.
 
 360 test programs. The suite runs under AddressSanitizer and
 ThreadSanitizer in CI. Tests that require optional external libraries
