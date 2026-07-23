@@ -28,6 +28,7 @@ mod types;
 
 use clap::{CommandFactory, FromArgMatches, Parser as ClapParser, Subcommand, ValueEnum};
 use std::fs;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::Instant;
@@ -360,6 +361,9 @@ enum Commands {
         /// Print package-level source/test coverage and test category counts
         #[arg(long = "coverage", default_value_t = false)]
         coverage: bool,
+        /// Emit one stable JSON report and capture test output
+        #[arg(long, default_value_t = false)]
+        json: bool,
         /// Code-generation backend: `c` (default) or direct `native` object code.
         /// Env override: `MAKO_TEST_BACKEND=native|c` (CLI wins when set).
         #[arg(long, value_enum, default_value_t = BackendCli::C)]
@@ -1369,12 +1373,35 @@ fn run(cli: Cli) -> Result<(), ()> {
             race,
             sanitize,
             coverage,
+            json,
             backend,
         } => {
             let count = count.max(1);
             let sanitize = sanitize.or_else(|| race.then(|| "thread".into()));
             // CLI --backend wins; else MAKO_TEST_BACKEND, then MAKO_BACKEND.
             let backend = resolve_backend(backend, &["MAKO_TEST_BACKEND", "MAKO_BACKEND"]);
+            if json {
+                let mut reports = Vec::new();
+                for iteration in 1..=count {
+                    let run_reports = cmd_test_json(
+                        &path,
+                        package.as_deref(),
+                        run_filter.as_deref(),
+                        coverage,
+                        sanitize.as_deref(),
+                        backend,
+                        iteration,
+                    );
+                    let run_ok = run_reports.iter().all(tooling::TestRunReport::ok);
+                    reports.extend(run_reports);
+                    if !run_ok {
+                        break;
+                    }
+                }
+                let report = tooling::TestCommandReport::new(reports);
+                println!("{}", report.to_json());
+                return if report.ok() { Ok(()) } else { Err(()) };
+            }
             let mut last_ok = Ok(());
             for i in 0..count {
                 if count > 1 {
@@ -2345,6 +2372,109 @@ fn cmd_test(
     )
 }
 
+fn cmd_test_json(
+    path: &Path,
+    package: Option<&str>,
+    run_filter: Option<&str>,
+    coverage: bool,
+    sanitize: Option<&str>,
+    backend: BackendCli,
+    iteration: u32,
+) -> Vec<tooling::TestRunReport> {
+    if !path.exists() {
+        return vec![tooling::TestRunReport::error(
+            iteration,
+            path,
+            format!("path not found: {}", path.display()),
+        )];
+    }
+    if matches!(backend, BackendCli::Native | BackendCli::Llvm) {
+        let opts = BuildOpts {
+            target: None,
+            sanitize: sanitize.map(str::to_string),
+            static_link: false,
+            overflow: OverflowMode::Wrap,
+            bounds_always: false,
+        };
+        let level = if matches!(backend, BackendCli::Llvm) {
+            OptLevel::Release
+        } else {
+            OptLevel::Debug
+        };
+        if validate_direct_backend_modes(backend, level, &opts, false).is_err() {
+            return vec![tooling::TestRunReport::error(
+                iteration,
+                path,
+                "invalid backend or sanitizer combination",
+            )];
+        }
+    }
+
+    let mut roots = vec![path.to_path_buf()];
+    if path.is_dir() {
+        if let Some(members) = tooling::workspace_member_dirs(path) {
+            roots = if let Some(want) = package {
+                let matched: Vec<_> = members
+                    .into_iter()
+                    .filter(|member| member_basename(member) == want)
+                    .collect();
+                if matched.is_empty() {
+                    return vec![tooling::TestRunReport::error(
+                        iteration,
+                        path,
+                        format!("workspace has no member named `{want}`"),
+                    )];
+                }
+                matched
+            } else {
+                members
+                    .into_iter()
+                    .filter(|member| {
+                        tooling::collect_mako_files(member)
+                            .iter()
+                            .any(|file| tooling::is_test_file(file))
+                    })
+                    .collect()
+            };
+            if roots.is_empty() {
+                return vec![tooling::TestRunReport::error(
+                    iteration,
+                    path,
+                    format!("workspace {} has no *_test.mko", path.display()),
+                )];
+            }
+        } else if package.is_some() {
+            return vec![tooling::TestRunReport::error(
+                iteration,
+                path,
+                "-p/--package requires a workspace root with `[workspace] members`",
+            )];
+        }
+    } else if package.is_some() {
+        return vec![tooling::TestRunReport::error(
+            iteration,
+            path,
+            "-p/--package is only valid with a workspace directory",
+        )];
+    }
+
+    roots
+        .into_iter()
+        .map(|root| {
+            tooling::run_tests_json_report(
+                &root,
+                run_filter,
+                coverage,
+                iteration,
+                &|file, program, names| {
+                    run_test_package_json(file, program, names, sanitize, backend)
+                },
+                &run_file_json,
+            )
+        })
+        .collect()
+}
+
 fn run_file_quiet(file: &Path) -> Result<(), ()> {
     run_file_with_stdio(file, false)
 }
@@ -2354,6 +2484,55 @@ fn run_file_silent(file: &Path) -> Result<(), ()> {
 }
 
 fn run_file_with_stdio(file: &Path, silent: bool) -> Result<(), ()> {
+    let out_bin = compile_legacy_test(file)?;
+    let mut cmd = Command::new(&out_bin);
+    if silent {
+        cmd.stdout(Stdio::null()).stderr(Stdio::null());
+    }
+    let status = cmd.status().map_err(|e| {
+        emit_plain_error(&format!("could not run binary: {e}"));
+    })?;
+    if !status.success() {
+        return Err(());
+    }
+    Ok(())
+}
+
+fn run_file_json(file: &Path) -> tooling::TestExecution {
+    let out_bin = match compile_legacy_test(file) {
+        Ok(path) => path,
+        Err(()) => {
+            return tooling::TestExecution::failed(
+                tooling::TestFailure::new(
+                    tooling::TestFailureKind::Compile,
+                    format!("could not compile legacy test {}", file.display()),
+                ),
+                "",
+                "",
+            );
+        }
+    };
+    let child = match Command::new(&out_bin)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+    {
+        Ok(child) => child,
+        Err(error) => {
+            return tooling::TestExecution::failed(
+                tooling::TestFailure::new(
+                    tooling::TestFailureKind::Runner,
+                    format!("could not run test binary: {error}"),
+                ),
+                "",
+                "",
+            );
+        }
+    };
+    wait_for_test_process(file, child, test_timeout(), true)
+}
+
+fn compile_legacy_test(file: &Path) -> Result<PathBuf, ()> {
     let (c_src, _) = compile_to_c_timed(file)?;
     let out_bin = std::env::temp_dir().join(format!(
         "mako_test_{}",
@@ -2373,17 +2552,7 @@ fn run_file_with_stdio(file: &Path, silent: bool) -> Result<(), ()> {
             bounds_always: false,
         },
     )?;
-    let mut cmd = Command::new(&out_bin);
-    if silent {
-        cmd.stdout(Stdio::null()).stderr(Stdio::null());
-    }
-    let status = cmd.status().map_err(|e| {
-        emit_plain_error(&format!("could not run binary: {e}"));
-    })?;
-    if !status.success() {
-        return Err(());
-    }
-    Ok(())
+    Ok(out_bin)
 }
 
 /// Compile a test package with harness main that runs selected category tests.
@@ -2394,6 +2563,67 @@ fn run_test_package(
     sanitize: Option<&str>,
     backend: BackendCli,
 ) -> Result<(), ()> {
+    let out_bin = compile_test_package(file, program, test_fns, sanitize, backend)?;
+    let timeout = test_timeout();
+    let child = Command::new(&out_bin).spawn().map_err(|error| {
+        emit_plain_error(&format!("could not run test binary: {error}"));
+    })?;
+    let execution = wait_for_test_process(file, child, timeout, false);
+    if let Some(failure) = execution.failure {
+        emit_plain_error(&failure.message);
+        Err(())
+    } else {
+        Ok(())
+    }
+}
+
+fn run_test_package_json(
+    file: &Path,
+    program: &ast::Program,
+    test_fns: &[String],
+    sanitize: Option<&str>,
+    backend: BackendCli,
+) -> tooling::TestExecution {
+    let out_bin = match compile_test_package(file, program, test_fns, sanitize, backend) {
+        Ok(path) => path,
+        Err(()) => {
+            return tooling::TestExecution::failed(
+                tooling::TestFailure::new(
+                    tooling::TestFailureKind::Compile,
+                    format!("could not compile test package {}", file.display()),
+                ),
+                "",
+                "",
+            );
+        }
+    };
+    let child = match Command::new(&out_bin)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+    {
+        Ok(child) => child,
+        Err(error) => {
+            return tooling::TestExecution::failed(
+                tooling::TestFailure::new(
+                    tooling::TestFailureKind::Runner,
+                    format!("could not run test binary: {error}"),
+                ),
+                "",
+                "",
+            );
+        }
+    };
+    wait_for_test_process(file, child, test_timeout(), true)
+}
+
+fn compile_test_package(
+    file: &Path,
+    program: &ast::Program,
+    test_fns: &[String],
+    sanitize: Option<&str>,
+    backend: BackendCli,
+) -> Result<PathBuf, ()> {
     let out_bin = std::env::temp_dir().join(format!(
         "mako_gotest_{}_{}",
         match backend {
@@ -2464,72 +2694,149 @@ fn run_test_package(
             result?;
         }
     }
-    // Per-test timeout: default 60s, override with MAKO_TEST_TIMEOUT_SECS.
-    let timeout_secs: u64 = std::env::var("MAKO_TEST_TIMEOUT_SECS")
+    Ok(out_bin)
+}
+
+fn test_timeout() -> std::time::Duration {
+    let timeout_secs = std::env::var("MAKO_TEST_TIMEOUT_SECS")
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(60);
-    let mut child = Command::new(&out_bin).spawn().map_err(|e| {
-        emit_plain_error(&format!("could not run test binary: {e}"));
-    })?;
+    std::time::Duration::from_secs(timeout_secs)
+}
+
+fn wait_for_test_process(
+    file: &Path,
+    mut child: std::process::Child,
+    timeout: std::time::Duration,
+    capture: bool,
+) -> tooling::TestExecution {
+    let stdout_reader = if capture {
+        read_pipe(child.stdout.take())
+    } else {
+        None
+    };
+    let stderr_reader = if capture {
+        read_pipe(child.stderr.take())
+    } else {
+        None
+    };
     let start = std::time::Instant::now();
-    let timeout = std::time::Duration::from_secs(timeout_secs);
-    loop {
+    let failure = loop {
         match child.try_wait() {
             Ok(Some(status)) => {
-                if !status.success() {
-                    report_test_exit(file, &status);
-                    return Err(());
-                }
-                return Ok(());
+                break (!status.success()).then(|| test_process_failure(file, &status));
             }
             Ok(None) => {
                 if start.elapsed() >= timeout {
                     let _ = child.kill();
                     let _ = child.wait();
-                    emit_plain_error(&format!(
-                        "{}: test timed out after {}s (hung or too slow — set MAKO_TEST_TIMEOUT_SECS to increase)",
-                        file.display(),
-                        timeout_secs
-                    ));
-                    return Err(());
+                    let failure = tooling::TestFailure::new(
+                        tooling::TestFailureKind::Timeout {
+                            seconds: timeout.as_secs(),
+                        },
+                        format!(
+                            "{}: test timed out after {}s (hung or too slow — set MAKO_TEST_TIMEOUT_SECS to increase)",
+                            file.display(),
+                            timeout.as_secs()
+                        ),
+                    );
+                    break Some(failure);
                 }
                 std::thread::sleep(std::time::Duration::from_millis(50));
             }
-            Err(e) => {
-                emit_plain_error(&format!("could not wait on test binary: {e}"));
-                return Err(());
+            Err(error) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                break Some(tooling::TestFailure::new(
+                    tooling::TestFailureKind::Runner,
+                    format!("could not wait on test binary: {error}"),
+                ));
             }
         }
+    };
+    let (stdout, stdout_truncated) = join_pipe(stdout_reader);
+    let (stderr, stderr_truncated) = join_pipe(stderr_reader);
+    tooling::TestExecution {
+        stdout,
+        stderr,
+        stdout_truncated,
+        stderr_truncated,
+        failure,
     }
 }
 
-/// Explain *why* a test binary failed. Assertion failures print their own detail
-/// to stderr and exit non-zero; a crash is killed by a signal and would otherwise
-/// leave "no assertion detail". Surfacing the signal makes CI logs actionable.
-fn report_test_exit(file: &Path, status: &std::process::ExitStatus) {
+const TEST_OUTPUT_CAPTURE_LIMIT: usize = 1024 * 1024;
+
+fn read_pipe<R: Read + Send + 'static>(
+    pipe: Option<R>,
+) -> Option<std::thread::JoinHandle<(Vec<u8>, bool)>> {
+    pipe.map(|mut pipe| {
+        std::thread::spawn(move || {
+            let mut bytes = Vec::new();
+            let mut truncated = false;
+            let mut chunk = [0u8; 8192];
+            loop {
+                let read = match pipe.read(&mut chunk) {
+                    Ok(0) => break,
+                    Err(_) => {
+                        truncated = true;
+                        break;
+                    }
+                    Ok(read) => read,
+                };
+                let remaining = TEST_OUTPUT_CAPTURE_LIMIT.saturating_sub(bytes.len());
+                let keep = remaining.min(read);
+                bytes.extend_from_slice(&chunk[..keep]);
+                truncated |= keep < read;
+            }
+            (bytes, truncated)
+        })
+    })
+}
+
+fn join_pipe(reader: Option<std::thread::JoinHandle<(Vec<u8>, bool)>>) -> (String, bool) {
+    let (bytes, truncated) = reader
+        .and_then(|reader| reader.join().ok())
+        .unwrap_or_default();
+    (String::from_utf8_lossy(&bytes).into_owned(), truncated)
+}
+
+fn test_process_failure(file: &Path, status: &std::process::ExitStatus) -> tooling::TestFailure {
     #[cfg(unix)]
     {
         use std::os::unix::process::ExitStatusExt;
         if let Some(sig) = status.signal() {
-            emit_plain_error(&format!(
-                "{}: test process crashed — killed by signal {} ({}); this is a runtime fault (e.g. segfault/abort), not a failed assertion",
-                file.display(),
-                sig,
-                signal_name(sig),
-            ));
-            return;
+            let failure = tooling::TestFailure::new(
+                tooling::TestFailureKind::Signal { signal: sig },
+                format!(
+                    "{}: test process crashed — killed by signal {} ({}); this is a runtime fault (e.g. segfault/abort), not a failed assertion",
+                    file.display(),
+                    sig,
+                    signal_name(sig),
+                ),
+            );
+            return failure;
         }
     }
     if let Some(code) = status.code() {
-        emit_plain_error(&format!(
-            "{}: test process exited with code {} (see the assertion output above)",
-            file.display(),
-            code
-        ));
+        let failure = tooling::TestFailure::new(
+            tooling::TestFailureKind::Exit { code },
+            format!(
+                "{}: test process exited with code {} (see the assertion output above)",
+                file.display(),
+                code
+            ),
+        );
+        return failure;
     }
+    tooling::TestFailure::new(
+        tooling::TestFailureKind::Runner,
+        format!("{}: test process exited unsuccessfully", file.display()),
+    )
 }
 
+#[cfg(unix)]
 fn signal_name(sig: i32) -> &'static str {
     match sig {
         4 => "SIGILL",
@@ -4809,5 +5116,130 @@ mod build_policy_tests {
             true,
             true
         ));
+    }
+}
+
+#[cfg(test)]
+mod test_process_tests {
+    use super::{join_pipe, read_pipe, wait_for_test_process, TEST_OUTPUT_CAPTURE_LIMIT};
+    use std::io::{self, Cursor, Read};
+    use std::path::Path;
+    use std::process::{Command, Stdio};
+    use std::time::Duration;
+
+    fn shell(script: &str) -> Command {
+        #[cfg(windows)]
+        {
+            let mut command = Command::new("cmd");
+            command.args(["/D", "/Q", "/C", script]);
+            command
+        }
+        #[cfg(not(windows))]
+        {
+            let mut command = Command::new("sh");
+            command.args(["-c", script]);
+            command
+        }
+    }
+
+    #[test]
+    fn captured_test_process_keeps_stdout_and_stderr_separate() {
+        #[cfg(windows)]
+        let script = "echo out& echo err 1>&2";
+        #[cfg(not(windows))]
+        let script = "printf out; printf err >&2";
+
+        let child = shell(script)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let execution = wait_for_test_process(
+            Path::new("sample_test.mko"),
+            child,
+            Duration::from_secs(10),
+            true,
+        );
+
+        assert!(execution.failure.is_none());
+        assert_eq!(execution.stdout.trim(), "out");
+        assert_eq!(execution.stderr.trim(), "err");
+    }
+
+    #[test]
+    fn captured_test_process_reports_exit_codes() {
+        let child = shell("exit 7")
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let execution = wait_for_test_process(
+            Path::new("sample_test.mko"),
+            child,
+            Duration::from_secs(10),
+            true,
+        );
+        let failure = execution.failure.unwrap();
+
+        assert_eq!(
+            failure.kind,
+            super::tooling::TestFailureKind::Exit { code: 7 }
+        );
+    }
+
+    #[test]
+    fn captured_test_process_reports_timeouts() {
+        #[cfg(windows)]
+        let mut command = {
+            let mut command = Command::new("powershell");
+            command.args(["-NoProfile", "-Command", "while ($true) {}"]);
+            command
+        };
+        #[cfg(not(windows))]
+        let mut command = shell("while :; do :; done");
+
+        let child = command
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let execution = wait_for_test_process(
+            Path::new("sample_test.mko"),
+            child,
+            Duration::from_millis(100),
+            true,
+        );
+        let failure = execution.failure.unwrap();
+
+        assert_eq!(
+            failure.kind,
+            super::tooling::TestFailureKind::Timeout { seconds: 0 }
+        );
+    }
+
+    #[test]
+    fn captured_test_output_is_bounded() {
+        let input = vec![b'x'; TEST_OUTPUT_CAPTURE_LIMIT + 1024];
+        let reader = read_pipe(Some(Cursor::new(input)));
+        let (output, truncated) = join_pipe(reader);
+
+        assert_eq!(output.len(), TEST_OUTPUT_CAPTURE_LIMIT);
+        assert!(truncated);
+    }
+
+    #[test]
+    fn captured_test_output_marks_read_errors_as_truncated() {
+        struct BrokenReader;
+
+        impl Read for BrokenReader {
+            fn read(&mut self, _buffer: &mut [u8]) -> io::Result<usize> {
+                Err(io::Error::new(io::ErrorKind::Other, "broken pipe"))
+            }
+        }
+
+        let (output, truncated) = join_pipe(read_pipe(Some(BrokenReader)));
+
+        assert!(output.is_empty());
+        assert!(truncated);
     }
 }
