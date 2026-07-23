@@ -10,3 +10,25 @@ fn TestWindowsDirectIo() {
     assert_eq(file_close(fd), 0)
     assert_eq(remove_file(path), 0)
 }
+
+fn TestWindowsDirectSequentialIo() {
+    let path = path_join(temp_dir(), "mako_windows_direct_sequential_io.bin")
+    let _ = remove_file(path)
+    let a = str_repeat("A", 4096)
+    let b = str_repeat("B", 4096)
+    let c = str_repeat("C", 4096)
+    let fd = file_open(path, 2, 19)
+    assert(fd >= 0)
+    assert_eq(file_append(fd, a), 4096)
+    assert_eq(file_append2(fd, b, c), 8192)
+    assert_eq(fsync(fd), 0)
+    assert_eq(file_seek(fd, 0, 0), 0)
+
+    let data = file_read_exact(fd, 12288)
+    assert_eq(len(data), 12288)
+    assert_eq(str_slice_eq(data, 0, 4096, a), 1)
+    assert_eq(str_slice_eq(data, 4096, 4096, b), 1)
+    assert_eq(str_slice_eq(data, 8192, 4096, c), 1)
+    assert_eq(file_close(fd), 0)
+    assert_eq(remove_file(path), 0)
+}
