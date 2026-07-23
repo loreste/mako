@@ -2377,7 +2377,8 @@ extern MakoNativePtrSlice *mako_native_ptr_slice_make(int64_t len, int64_t cap);
 extern void mako_native_ptr_slice_set(MakoNativePtrSlice *s, int64_t i, void *elem);
 
 MakoNativePtrSlice *mako_native_maps_values_si_ptr(const MakoNativeMapSI *m) {
-    int64_t n = (int64_t)mako_native_map_ii_len(m);
+    /* MapSI uses inline `len`, not MapII's separate `lenp` pointer. */
+    int64_t n = m ? (int64_t)m->len : 0;
     MakoNativePtrSlice *out = mako_native_ptr_slice_make(n, n);
     if (!m || !n || !out) return out;
     size_t j = 0;
@@ -2408,7 +2409,7 @@ MakoNativePtrSlice *mako_native_maps_values_ii_as_ptr_slice(const MakoNativeMapI
 }
 
 MakoNativeIntSlice *mako_native_maps_values_si_as_i64_ptr(const MakoNativeMapSI *m) {
-    int64_t n = (int64_t)mako_native_map_ii_len(m);
+    int64_t n = m ? (int64_t)m->len : 0;
     MakoNativeIntSlice *out = mako_native_int_slice_make_ptr((size_t)n, (size_t)n);
     if (!m || !n) return out;
     size_t j = 0;
@@ -2452,7 +2453,7 @@ int64_t mako_native_maps_equal_ii(const MakoNativeMapII *a, const MakoNativeMapI
 int64_t mako_native_maps_equal_si(const MakoNativeMapSI *a, const MakoNativeMapSI *b) {
     if (a == b) return 1;
     if (!a || !b) return 0;
-    if (mako_native_map_ii_len(a) != mako_native_map_ii_len(b)) return 0;
+    if (a->len != b->len) return 0;
     for (size_t i = 0; i < a->cap; ++i) {
         if (a->state[i] != MAKO_NMAP_FULL) continue;
         MakoNativeString *k = a->keys[i];
@@ -2465,7 +2466,7 @@ int64_t mako_native_maps_equal_si(const MakoNativeMapSI *a, const MakoNativeMapS
 int64_t mako_native_maps_equal_ss(const MakoNativeMapSS *a, const MakoNativeMapSS *b) {
     if (a == b) return 1;
     if (!a || !b) return 0;
-    if (mako_native_map_ii_len(a) != mako_native_map_ii_len(b)) return 0;
+    if (a->len != b->len) return 0;
     for (size_t i = 0; i < a->cap; ++i) {
         if (a->state[i] != MAKO_NMAP_FULL) continue;
         MakoNativeString *k = a->keys[i];
@@ -2528,7 +2529,7 @@ int64_t mako_native_maps_equal_si_deep(
 ) {
     if (a == b) return 1;
     if (!a || !b) return 0;
-    if (mako_native_map_ii_len(a) != mako_native_map_ii_len(b)) return 0;
+    if (a->len != b->len) return 0;
     for (size_t i = 0; i < a->cap; ++i) {
         if (a->state[i] != MAKO_NMAP_FULL) continue;
         MakoNativeString *k = a->keys[i];
@@ -2728,9 +2729,10 @@ int64_t mako_native_map_fi_slot_val_ptr(const MakoNativeMapFI *m, int64_t i) {
     return m->vals[i];
 }
 
-/* maps_keys / maps_values for float maps */
+/* maps_keys / maps_values for float maps.
+ * MapIF/MapFI use inline `len` (same as MapSI/MapSS), not MapII `lenp`. */
 MakoNativeIntSlice *mako_native_maps_keys_if_ptr(const MakoNativeMapIF *m) {
-    int64_t n = (int64_t)mako_native_map_ii_len(m);
+    int64_t n = m ? (int64_t)m->len : 0;
     MakoNativeIntSlice *out = mako_native_int_slice_make_ptr((size_t)n, (size_t)n);
     if (!m || !n) return out;
     size_t j = 0;
@@ -2743,7 +2745,7 @@ MakoNativeIntSlice *mako_native_maps_keys_if_ptr(const MakoNativeMapIF *m) {
 }
 
 MakoNativeFloatSlice *mako_native_maps_values_if_ptr(const MakoNativeMapIF *m) {
-    int64_t n = (int64_t)mako_native_map_ii_len(m);
+    int64_t n = m ? (int64_t)m->len : 0;
     MakoNativeFloatSlice *out = mako_native_float_slice_make_ptr(n, n);
     if (!m || !n) return out;
     size_t j = 0;
@@ -2756,7 +2758,7 @@ MakoNativeFloatSlice *mako_native_maps_values_if_ptr(const MakoNativeMapIF *m) {
 }
 
 MakoNativeFloatSlice *mako_native_maps_keys_fi_ptr(const MakoNativeMapFI *m) {
-    int64_t n = (int64_t)mako_native_map_ii_len(m);
+    int64_t n = m ? (int64_t)m->len : 0;
     MakoNativeFloatSlice *out = mako_native_float_slice_make_ptr(n, n);
     if (!m || !n) return out;
     size_t j = 0;
@@ -2769,7 +2771,7 @@ MakoNativeFloatSlice *mako_native_maps_keys_fi_ptr(const MakoNativeMapFI *m) {
 }
 
 MakoNativeIntSlice *mako_native_maps_values_fi_ptr(const MakoNativeMapFI *m) {
-    int64_t n = (int64_t)mako_native_map_ii_len(m);
+    int64_t n = m ? (int64_t)m->len : 0;
     MakoNativeIntSlice *out = mako_native_int_slice_make_ptr((size_t)n, (size_t)n);
     if (!m || !n) return out;
     size_t j = 0;
@@ -2784,7 +2786,7 @@ MakoNativeIntSlice *mako_native_maps_values_fi_ptr(const MakoNativeMapFI *m) {
 int64_t mako_native_maps_equal_if(const MakoNativeMapIF *a, const MakoNativeMapIF *b) {
     if (a == b) return 1;
     if (!a || !b) return 0;
-    if (mako_native_map_ii_len(a) != mako_native_map_ii_len(b)) return 0;
+    if (a->len != b->len) return 0;
     for (size_t i = 0; i < a->cap; ++i) {
         if (a->state[i] != MAKO_NMAP_FULL) continue;
         int64_t k = a->keys[i];
@@ -2797,7 +2799,7 @@ int64_t mako_native_maps_equal_if(const MakoNativeMapIF *a, const MakoNativeMapI
 int64_t mako_native_maps_equal_fi(const MakoNativeMapFI *a, const MakoNativeMapFI *b) {
     if (a == b) return 1;
     if (!a || !b) return 0;
-    if (mako_native_map_ii_len(a) != mako_native_map_ii_len(b)) return 0;
+    if (a->len != b->len) return 0;
     for (size_t i = 0; i < a->cap; ++i) {
         if (a->state[i] != MAKO_NMAP_FULL) continue;
         double k = a->keys[i];
@@ -3228,7 +3230,7 @@ MakoNativeFloatSlice *mako_native_maps_values_ii_as_float_ptr(const MakoNativeMa
 }
 
 MakoNativeFloatSlice *mako_native_maps_values_si_as_float_ptr(const MakoNativeMapSI *m) {
-    int64_t n = (int64_t)mako_native_map_ii_len(m);
+    int64_t n = m ? (int64_t)m->len : 0;
     MakoNativeFloatSlice *out = mako_native_float_slice_make_ptr(n, n);
     if (!m || !n) return out;
     size_t j = 0;
