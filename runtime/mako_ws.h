@@ -789,6 +789,520 @@ static inline int64_t mako_ws_echo(int64_t port) {
     }
 }
 
+/* TLS I/O for WSS (header may be included before or after mako_tls.h). */
+#ifndef MAKO_TLS_H
+#include "mako_tls.h"
+#endif
+
+/* ---- WSS client: RFC6455 framing over TlsConn (combined TLS + WebSocket) --
+ * Plain `ws_client_*` uses raw TCP fds. `wss_client_*` uses the same frame
+ * layout (client masked, server unmasked) but I/O goes through `tls_write` /
+ * `tls_read` on a `TlsConn`. No GC — payloads are owned strings; close frees
+ * the TLS connection.
+ *
+ * Flow:
+ *   cli = tls_client_new(ca) | tls_client_new_insecure()
+ *   conn = wss_client_connect(cli, host, port, path, key)
+ *   wss_client_send_text(conn, …) / wss_client_recv(conn, …)
+ *   wss_client_close(conn)  // closes TlsConn
+ * Or upgrade an already-handshaken TlsConn:
+ *   wss_upgrade(conn, host, path, key) → 1/0
+ */
+
+static inline int mako_ws_tls_write_all(void *conn, const void *buf, size_t len) {
+    if (!conn || (!buf && len)) return -1;
+    const char *p = (const char *)buf;
+    size_t off = 0;
+    while (off < len) {
+        size_t chunk = len - off;
+        if (chunk > 65536) chunk = 65536;
+        MakoString slice = {(char *)(uintptr_t)(p + off), chunk};
+        int64_t n = mako_tls_write(conn, slice);
+        if (n <= 0) return -1;
+        off += (size_t)n;
+    }
+    return 0;
+}
+
+static inline int mako_ws_tls_read_exact(void *conn, void *buf, size_t len) {
+    if (!conn || (!buf && len)) return -1;
+    char *p = (char *)buf;
+    size_t off = 0;
+    while (off < len) {
+        size_t need = len - off;
+        if (need > 65536) need = 65536;
+        MakoString part = mako_tls_read(conn, (int64_t)need);
+        if (!part.data || part.len == 0) {
+            mako_str_free(part);
+            return -1;
+        }
+        size_t take = part.len;
+        if (take > need) take = need;
+        memcpy(p + off, part.data, take);
+        off += take;
+        mako_str_free(part);
+        if (take == 0) return -1;
+    }
+    return 0;
+}
+
+static inline int mako_ws_tls_drain(void *conn, uint64_t left) {
+    char dump[512];
+    while (left) {
+        size_t chunk = left > sizeof(dump) ? sizeof(dump) : (size_t)left;
+        if (mako_ws_tls_read_exact(conn, dump, chunk) < 0) return -1;
+        left -= chunk;
+    }
+    return 0;
+}
+
+/* Client→server frame over TLS (always masked). */
+static inline int mako_ws_tls_send_frame(
+    void *conn, int fin, int opcode, const char *data, size_t len, int mask_out
+) {
+    if (!conn) return -1;
+    if (len > (size_t)MAKO_WS_MAX_PAYLOAD) return -1;
+    unsigned char hdr[14];
+    size_t hlen = 0;
+    hdr[0] = (unsigned char)(((fin ? 0x80 : 0) | (opcode & 0x0f)));
+    if (len < 126) {
+        hdr[1] = (unsigned char)((mask_out ? 0x80 : 0) | len);
+        hlen = 2;
+    } else if (len < 65536) {
+        hdr[1] = (unsigned char)((mask_out ? 0x80 : 0) | 126);
+        hdr[2] = (unsigned char)((len >> 8) & 0xff);
+        hdr[3] = (unsigned char)(len & 0xff);
+        hlen = 4;
+    } else {
+        hdr[1] = (unsigned char)((mask_out ? 0x80 : 0) | 127);
+        for (int i = 0; i < 8; i++)
+            hdr[2 + i] = (unsigned char)((len >> (56 - 8 * i)) & 0xff);
+        hlen = 10;
+    }
+    unsigned char mask[4];
+    if (mask_out) {
+        mako_ws_mask_key(mask);
+        memcpy(hdr + hlen, mask, 4);
+        hlen += 4;
+    }
+    if (mako_ws_tls_write_all(conn, hdr, hlen) < 0) return -1;
+    if (len == 0) return 0;
+    if (!mask_out) return mako_ws_tls_write_all(conn, data, len);
+    char *m = (char *)malloc(len);
+    if (!m) return -1;
+    for (size_t i = 0; i < len; i++)
+        m[i] = (char)((data ? data[i] : 0) ^ mask[i % 4]);
+    int rc = mako_ws_tls_write_all(conn, m, len);
+    free(m);
+    return rc;
+}
+
+/* Server→client unmasked, or client→server masked — same as plain WS. */
+static inline int64_t mako_ws_tls_recv_frame(
+    void *conn, char *buf, size_t cap, int expect_masked
+) {
+    if (!conn) {
+        mako_ws_g_last_status = -1;
+        return -1;
+    }
+    unsigned char h[2];
+    if (mako_ws_tls_read_exact(conn, h, 2) < 0) {
+        mako_ws_g_last_status = -1;
+        return -1;
+    }
+    int fin = (h[0] & 0x80) != 0;
+    int rsv = h[0] & 0x70;
+    int opcode = h[0] & 0x0f;
+    int masked = (h[1] & 0x80) != 0;
+    uint64_t plen = h[1] & 0x7f;
+    if (rsv != 0) {
+        mako_ws_g_last_status = -1;
+        return -1;
+    }
+    if (expect_masked && !masked) {
+        mako_ws_g_last_status = -1;
+        return -1;
+    }
+    if (plen == 126) {
+        unsigned char e[2];
+        if (mako_ws_tls_read_exact(conn, e, 2) < 0) {
+            mako_ws_g_last_status = -1;
+            return -1;
+        }
+        plen = ((uint64_t)e[0] << 8) | e[1];
+    } else if (plen == 127) {
+        unsigned char e[8];
+        if (mako_ws_tls_read_exact(conn, e, 8) < 0) {
+            mako_ws_g_last_status = -1;
+            return -1;
+        }
+        plen = 0;
+        for (int i = 0; i < 8; i++) plen = (plen << 8) | e[i];
+        if (e[0] & 0x80) {
+            mako_ws_g_last_status = -1;
+            return -1;
+        }
+    }
+    if (plen > (uint64_t)MAKO_WS_MAX_PAYLOAD) {
+        mako_ws_g_last_status = -1;
+        return -1;
+    }
+    unsigned char mask[4] = {0, 0, 0, 0};
+    if (masked) {
+        if (mako_ws_tls_read_exact(conn, mask, 4) < 0) {
+            mako_ws_g_last_status = -1;
+            return -1;
+        }
+    }
+    mako_ws_g_last_fin = fin;
+    mako_ws_g_last_opcode = opcode;
+
+    if (opcode == 8) {
+        char tmp[256];
+        size_t take = plen > sizeof(tmp) ? sizeof(tmp) : (size_t)plen;
+        if (take && mako_ws_tls_read_exact(conn, tmp, take) < 0) {
+            mako_ws_g_last_status = -1;
+            return -1;
+        }
+        if (plen > take && mako_ws_tls_drain(conn, plen - take) < 0) {
+            mako_ws_g_last_status = -1;
+            return -1;
+        }
+        if (masked) {
+            for (size_t i = 0; i < take; i++)
+                tmp[i] = (char)(tmp[i] ^ mask[i % 4]);
+        }
+        if (take >= 2) {
+            mako_ws_g_last_close_code =
+                ((int)(unsigned char)tmp[0] << 8) | (unsigned char)tmp[1];
+        } else {
+            mako_ws_g_last_close_code = 0;
+        }
+        mako_ws_g_last_status = -2;
+        return -2;
+    }
+
+    if (opcode == 9) {
+        if (plen > 125) {
+            mako_ws_g_last_status = -1;
+            return -1;
+        }
+        char pbuf[125];
+        if (plen && mako_ws_tls_read_exact(conn, pbuf, (size_t)plen) < 0) {
+            mako_ws_g_last_status = -1;
+            return -1;
+        }
+        if (masked) {
+            for (size_t i = 0; i < plen; i++)
+                pbuf[i] = (char)(pbuf[i] ^ mask[i % 4]);
+        }
+        int mask_out = expect_masked ? 0 : 1;
+        if (mako_ws_tls_send_frame(conn, 1, 10, pbuf, (size_t)plen, mask_out) < 0) {
+            mako_ws_g_last_status = -1;
+            return -1;
+        }
+        mako_ws_g_last_status = -3;
+        return -3;
+    }
+
+    if (opcode == 10) {
+        if (mako_ws_tls_drain(conn, plen) < 0) {
+            mako_ws_g_last_status = -1;
+            return -1;
+        }
+        mako_ws_g_last_status = -4;
+        return -4;
+    }
+
+    if (opcode != 0 && opcode != 1 && opcode != 2) {
+        (void)mako_ws_tls_drain(conn, plen);
+        mako_ws_g_last_status = -1;
+        return -1;
+    }
+
+    if (!buf || plen >= cap) {
+        (void)mako_ws_tls_drain(conn, plen);
+        mako_ws_g_last_status = -1;
+        return -1;
+    }
+    if (plen && mako_ws_tls_read_exact(conn, buf, (size_t)plen) < 0) {
+        mako_ws_g_last_status = -1;
+        return -1;
+    }
+    if (masked) {
+        for (size_t i = 0; i < plen; i++) buf[i] = (char)(buf[i] ^ mask[i % 4]);
+    }
+    buf[plen] = 0;
+    mako_ws_g_last_status = 0;
+    return (int64_t)plen;
+}
+
+static inline int64_t mako_ws_tls_recv_message(
+    void *conn, char *buf, size_t cap, int expect_masked
+) {
+    size_t total = 0;
+    int msg_opcode = -1;
+    for (;;) {
+        if (total >= cap) {
+            mako_ws_g_last_status = -1;
+            return -1;
+        }
+        int64_t n = mako_ws_tls_recv_frame(conn, buf + total, cap - total, expect_masked);
+        if (n == -3 || n == -4) continue;
+        if (n == -2) return -2;
+        if (n < 0) return -1;
+        int op = mako_ws_g_last_opcode;
+        if (op == 0) {
+            if (msg_opcode < 0) {
+                mako_ws_g_last_status = -1;
+                return -1;
+            }
+        } else if (op == 1 || op == 2) {
+            if (msg_opcode >= 0) {
+                mako_ws_g_last_status = -1;
+                return -1;
+            }
+            msg_opcode = op;
+        } else {
+            mako_ws_g_last_status = -1;
+            return -1;
+        }
+        total += (size_t)n;
+        if (mako_ws_g_last_fin) {
+            mako_ws_g_last_opcode = msg_opcode;
+            mako_ws_g_last_status = 0;
+            if (total < cap) buf[total] = 0;
+            return (int64_t)total;
+        }
+    }
+}
+
+/* Upgrade an existing TlsConn with a WebSocket handshake (client). */
+static inline int64_t mako_wss_upgrade(
+    void *conn, MakoString host, MakoString path, MakoString key
+) {
+    if (!conn) return 0;
+    MakoString req = mako_ws_client_request(host, path, key);
+    if (mako_ws_tls_write_all(conn, req.data, req.len) < 0) {
+        mako_str_free(req);
+        return 0;
+    }
+    mako_str_free(req);
+    char resp[4096];
+    size_t total = 0;
+    while (total + 1 < sizeof(resp)) {
+        MakoString part = mako_tls_read(conn, (int64_t)(sizeof(resp) - 1 - total));
+        if (!part.data || part.len == 0) {
+            mako_str_free(part);
+            return 0;
+        }
+        size_t take = part.len;
+        if (total + take >= sizeof(resp)) take = sizeof(resp) - 1 - total;
+        memcpy(resp + total, part.data, take);
+        total += take;
+        mako_str_free(part);
+        resp[total] = 0;
+        if (strstr(resp, "\r\n\r\n")) break;
+    }
+    MakoString rs = {resp, total};
+    return mako_ws_client_accept_ok(key, rs) ? 1 : 0;
+}
+
+/* Full WSS client connect: TCP → TLS handshake → WS upgrade.
+ * `cli` is TlsClient from tls_client_new / tls_client_new_insecure.
+ * Returns TlsConn or NULL. Caller owns conn (wss_client_close / tls_conn_close). */
+static inline void *mako_wss_client_connect(
+    void *cli,
+    MakoString host,
+    int64_t port,
+    MakoString path,
+    MakoString key
+) {
+    if (!cli) return NULL;
+    if (!mako_tls_client_available()) return NULL;
+    mako_net_init();
+    int64_t cfd = mako_tcp_connect(host, port);
+    if (cfd < 0) return NULL;
+    void *conn = mako_tls_connect(cli, cfd, host);
+    if (!conn) {
+        mako_sock_close((mako_sock_t)cfd);
+        return NULL;
+    }
+    if (!mako_wss_upgrade(conn, host, path, key)) {
+        mako_tls_conn_close(conn);
+        return NULL;
+    }
+    return conn;
+}
+
+/* Convenience: insecure TLS (no peer verify) then WS upgrade. */
+static inline void *mako_wss_client_connect_insecure(
+    MakoString host, int64_t port, MakoString path, MakoString key
+) {
+    if (!mako_tls_client_available()) return NULL;
+    void *cli = mako_tls_client_new_insecure();
+    if (!cli) return NULL;
+    void *conn = mako_wss_client_connect(cli, host, port, path, key);
+    mako_tls_client_free(cli);
+    return conn;
+}
+
+/* Convenience: verified TLS with CA PEM path, then WS upgrade. */
+static inline void *mako_wss_client_connect_ca(
+    MakoString host,
+    int64_t port,
+    MakoString path,
+    MakoString key,
+    MakoString ca_pem
+) {
+    if (!mako_tls_client_available()) return NULL;
+    void *cli = mako_tls_client_new(ca_pem);
+    if (!cli) return NULL;
+    void *conn = mako_wss_client_connect(cli, host, port, path, key);
+    mako_tls_client_free(cli);
+    return conn;
+}
+
+static inline int64_t mako_wss_client_send_text(void *conn, MakoString msg) {
+    if (!conn) return -1;
+    return mako_ws_tls_send_frame(
+        conn, 1, 1, msg.data ? msg.data : "", msg.len, 1
+    );
+}
+
+static inline int64_t mako_wss_client_send_binary(void *conn, MakoString msg) {
+    if (!conn) return -1;
+    return mako_ws_tls_send_frame(
+        conn, 1, 2, msg.data ? msg.data : "", msg.len, 1
+    );
+}
+
+static inline int64_t mako_wss_client_send_ping(void *conn, MakoString msg) {
+    if (!conn || msg.len > 125) return -1;
+    return mako_ws_tls_send_frame(
+        conn, 1, 9, msg.data ? msg.data : "", msg.len, 1
+    );
+}
+
+static inline int64_t mako_wss_client_send_close(
+    void *conn, int64_t code, MakoString reason
+) {
+    if (!conn || reason.len > 123) return -1;
+    unsigned char payload[125];
+    size_t plen = 0;
+    if (code > 0) {
+        payload[plen++] = (unsigned char)((code >> 8) & 0xff);
+        payload[plen++] = (unsigned char)(code & 0xff);
+    }
+    if (reason.len) {
+        memcpy(payload + plen, reason.data ? reason.data : "", reason.len);
+        plen += reason.len;
+    }
+    return mako_ws_tls_send_frame(conn, 1, 8, (const char *)payload, plen, 1);
+}
+
+/* Client receives unmasked server frames over TLS. */
+static inline MakoString mako_wss_client_recv(void *conn, int64_t max_bytes) {
+    if (!conn) {
+        mako_ws_g_last_status = -1;
+        return mako_str_from_cstr("");
+    }
+    if (max_bytes <= 0) max_bytes = 4096;
+    if (max_bytes > MAKO_WS_MAX_PAYLOAD) max_bytes = MAKO_WS_MAX_PAYLOAD;
+    char *buf = (char *)malloc((size_t)max_bytes + 1);
+    if (!buf) mako_abort("wss client recv OOM");
+    int64_t n = mako_ws_tls_recv_message(conn, buf, (size_t)max_bytes + 1, 0);
+    if (n < 0) {
+        free(buf);
+        return mako_str_from_cstr("");
+    }
+    buf[n] = 0;
+    return (MakoString){buf, (size_t)n};
+}
+
+/* Server-side data frames over TLS (unmasked), for WSS echo / reverse proxy. */
+static inline int64_t mako_wss_server_send_text(void *conn, MakoString msg) {
+    if (!conn) return -1;
+    return mako_ws_tls_send_frame(
+        conn, 1, 1, msg.data ? msg.data : "", msg.len, 0
+    );
+}
+
+static inline int64_t mako_wss_server_send_binary(void *conn, MakoString msg) {
+    if (!conn) return -1;
+    return mako_ws_tls_send_frame(
+        conn, 1, 2, msg.data ? msg.data : "", msg.len, 0
+    );
+}
+
+static inline MakoString mako_wss_server_recv(void *conn, int64_t max_bytes) {
+    if (!conn) {
+        mako_ws_g_last_status = -1;
+        return mako_str_from_cstr("");
+    }
+    if (max_bytes <= 0) max_bytes = 4096;
+    if (max_bytes > MAKO_WS_MAX_PAYLOAD) max_bytes = MAKO_WS_MAX_PAYLOAD;
+    char *buf = (char *)malloc((size_t)max_bytes + 1);
+    if (!buf) mako_abort("wss server recv OOM");
+    int64_t n = mako_ws_tls_recv_message(conn, buf, (size_t)max_bytes + 1, 1);
+    if (n < 0) {
+        free(buf);
+        return mako_str_from_cstr("");
+    }
+    buf[n] = 0;
+    return (MakoString){buf, (size_t)n};
+}
+
+/* Complete server WS upgrade over an accepted TlsConn. Returns 1 on 101. */
+static inline int64_t mako_wss_server_upgrade(void *conn) {
+    if (!conn) return 0;
+    char req[8192];
+    size_t total = 0;
+    while (total + 1 < sizeof(req)) {
+        MakoString part = mako_tls_read(conn, (int64_t)(sizeof(req) - 1 - total));
+        if (!part.data || part.len == 0) {
+            mako_str_free(part);
+            return 0;
+        }
+        size_t take = part.len;
+        if (total + take >= sizeof(req)) take = sizeof(req) - 1 - total;
+        memcpy(req + total, part.data, take);
+        total += take;
+        mako_str_free(part);
+        req[total] = 0;
+        if (strstr(req, "\r\n\r\n")) break;
+    }
+    MakoString r = {req, total};
+    if (!mako_ws_upgrade_request_ok(r)) return 0;
+    char key[128];
+    if (!mako_ws_header_value(req, "Sec-WebSocket-Key", key, sizeof(key))) return 0;
+    MakoString k = mako_str_from_cstr(key);
+    MakoString accept = mako_ws_accept_key(k);
+    mako_str_free(k);
+    char resp[256];
+    int n = snprintf(
+        resp, sizeof(resp),
+        "HTTP/1.1 101 Switching Protocols\r\n"
+        "Upgrade: websocket\r\n"
+        "Connection: Upgrade\r\n"
+        "Sec-WebSocket-Accept: %.*s\r\n\r\n",
+        (int)accept.len, accept.data ? accept.data : ""
+    );
+    mako_str_free(accept);
+    if (n <= 0) return 0;
+    if (mako_ws_tls_write_all(conn, resp, (size_t)n) < 0) return 0;
+    return 1;
+}
+
+static inline int64_t mako_wss_client_close(void *conn) {
+    if (!conn) return 0;
+    return mako_tls_conn_close(conn) == 0 ? 1 : 0;
+}
+
+static inline int64_t mako_wss_available(void) {
+    return mako_tls_client_available();
+}
+
 #ifdef __cplusplus
 }
 #endif

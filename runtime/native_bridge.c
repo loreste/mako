@@ -11,6 +11,9 @@
 #include "mako_std.h"
 #include "mako_fmt.h"
 #include "mako_uuid.h"
+// TLS before WebSocket — WSS client frames over TlsConn.
+// mako_log.h redefines symbols already in mako_stdlib.h — use stdlib log only.
+#include "mako_tls.h"
 #include "mako_ws.h"
 #include "mako_db.h"
 #include "mako_evloop.h"
@@ -18,9 +21,7 @@
 #include "mako_cmap.h"
 #include "mako_template.h"
 #include "mako_sip.h"
-// Real TLS / GPU / H3 (gated by build.rs feature defines).
-// mako_log.h redefines symbols already in mako_stdlib.h — use stdlib log only.
-#include "mako_tls.h"
+// Real GPU / H3 (gated by build.rs feature defines).
 #include "mako_gpu.h"
 #include "mako_model.h"
 #include "mako_quiche.h"
@@ -9158,6 +9159,54 @@ int64_t mako_native_ws_client_send_binary_ptr(int64_t a0, MakoNativeString *a1) 
 int64_t mako_native_ws_client_send_close_ptr(int64_t a0, int64_t a1, MakoNativeString *a2) { return (int64_t)mako_ws_client_send_close(a0, a1, bridge_borrow_str(a2)); }
 int64_t mako_native_ws_client_send_ping_ptr(int64_t a0, MakoNativeString *a1) { return (int64_t)mako_ws_client_send_ping(a0, bridge_borrow_str(a1)); }
 int64_t mako_native_ws_client_send_text_ptr(int64_t a0, MakoNativeString *a1) { return (int64_t)mako_ws_client_send_text(a0, bridge_borrow_str(a1)); }
+
+/* WSS: TLS + WebSocket framing (TlsConn as opaque i64 pointer). */
+int64_t mako_native_wss_available(void) { return mako_wss_available(); }
+int64_t mako_native_wss_upgrade_ptr(int64_t conn, MakoNativeString *host, MakoNativeString *path, MakoNativeString *key) {
+    return mako_wss_upgrade((void *)(intptr_t)conn, bridge_borrow_str(host), bridge_borrow_str(path), bridge_borrow_str(key));
+}
+int64_t mako_native_wss_client_connect_ptr(int64_t cli, MakoNativeString *host, int64_t port, MakoNativeString *path, MakoNativeString *key) {
+    return (int64_t)(intptr_t)mako_wss_client_connect(
+        (void *)(intptr_t)cli, bridge_borrow_str(host), port, bridge_borrow_str(path), bridge_borrow_str(key));
+}
+int64_t mako_native_wss_client_connect_insecure_ptr(MakoNativeString *host, int64_t port, MakoNativeString *path, MakoNativeString *key) {
+    return (int64_t)(intptr_t)mako_wss_client_connect_insecure(
+        bridge_borrow_str(host), port, bridge_borrow_str(path), bridge_borrow_str(key));
+}
+int64_t mako_native_wss_client_connect_ca_ptr(MakoNativeString *host, int64_t port, MakoNativeString *path, MakoNativeString *key, MakoNativeString *ca) {
+    return (int64_t)(intptr_t)mako_wss_client_connect_ca(
+        bridge_borrow_str(host), port, bridge_borrow_str(path), bridge_borrow_str(key), bridge_borrow_str(ca));
+}
+int64_t mako_native_wss_client_send_text_ptr(int64_t conn, MakoNativeString *msg) {
+    return mako_wss_client_send_text((void *)(intptr_t)conn, bridge_borrow_str(msg));
+}
+int64_t mako_native_wss_client_send_binary_ptr(int64_t conn, MakoNativeString *msg) {
+    return mako_wss_client_send_binary((void *)(intptr_t)conn, bridge_borrow_str(msg));
+}
+int64_t mako_native_wss_client_send_ping_ptr(int64_t conn, MakoNativeString *msg) {
+    return mako_wss_client_send_ping((void *)(intptr_t)conn, bridge_borrow_str(msg));
+}
+int64_t mako_native_wss_client_send_close_ptr(int64_t conn, int64_t code, MakoNativeString *reason) {
+    return mako_wss_client_send_close((void *)(intptr_t)conn, code, bridge_borrow_str(reason));
+}
+MakoNativeString *mako_native_wss_client_recv_ptr(int64_t conn, int64_t max) {
+    return bridge_take_str(mako_wss_client_recv((void *)(intptr_t)conn, max));
+}
+int64_t mako_native_wss_client_close(int64_t conn) {
+    return mako_wss_client_close((void *)(intptr_t)conn);
+}
+int64_t mako_native_wss_server_upgrade(int64_t conn) {
+    return mako_wss_server_upgrade((void *)(intptr_t)conn);
+}
+int64_t mako_native_wss_server_send_text_ptr(int64_t conn, MakoNativeString *msg) {
+    return mako_wss_server_send_text((void *)(intptr_t)conn, bridge_borrow_str(msg));
+}
+int64_t mako_native_wss_server_send_binary_ptr(int64_t conn, MakoNativeString *msg) {
+    return mako_wss_server_send_binary((void *)(intptr_t)conn, bridge_borrow_str(msg));
+}
+MakoNativeString *mako_native_wss_server_recv_ptr(int64_t conn, int64_t max) {
+    return bridge_take_str(mako_wss_server_recv((void *)(intptr_t)conn, max));
+}
 int64_t mako_native_ws_close(int64_t a0) { return (int64_t)mako_ws_close(a0); }
 int64_t mako_native_ws_last_close_code(void) { return (int64_t)mako_ws_last_close_code(); }
 int64_t mako_native_ws_last_fin(void) { return (int64_t)mako_ws_last_fin(); }

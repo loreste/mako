@@ -28831,6 +28831,129 @@ impl Codegen {
             "ws_last_status" => {
                 return ("int64_t".into(), "mako_ws_last_status()".into());
             }
+            "wss_available" => {
+                return ("int64_t".into(), "mako_wss_available()".into());
+            }
+            "wss_upgrade" => {
+                let (_, c) = self.emit_expr(&args[0]);
+                let (_, h) = self.emit_expr(&args[1]);
+                let (_, p) = self.emit_expr(&args[2]);
+                let (_, k) = self.emit_expr(&args[3]);
+                return (
+                    "int64_t".into(),
+                    format!("mako_wss_upgrade({c}, {h}, {p}, {k})"),
+                );
+            }
+            "wss_client_connect" => {
+                let (_, cli) = self.emit_expr(&args[0]);
+                let (_, h) = self.emit_expr(&args[1]);
+                let (_, p) = self.emit_expr(&args[2]);
+                let (_, path) = self.emit_expr(&args[3]);
+                let (_, k) = self.emit_expr(&args[4]);
+                return (
+                    "void*".into(),
+                    format!("mako_wss_client_connect({cli}, {h}, {p}, {path}, {k})"),
+                );
+            }
+            "wss_client_connect_insecure" => {
+                let (_, h) = self.emit_expr(&args[0]);
+                let (_, p) = self.emit_expr(&args[1]);
+                let (_, path) = self.emit_expr(&args[2]);
+                let (_, k) = self.emit_expr(&args[3]);
+                return (
+                    "void*".into(),
+                    format!("mako_wss_client_connect_insecure({h}, {p}, {path}, {k})"),
+                );
+            }
+            "wss_client_connect_ca" => {
+                let (_, h) = self.emit_expr(&args[0]);
+                let (_, p) = self.emit_expr(&args[1]);
+                let (_, path) = self.emit_expr(&args[2]);
+                let (_, k) = self.emit_expr(&args[3]);
+                let (_, ca) = self.emit_expr(&args[4]);
+                return (
+                    "void*".into(),
+                    format!("mako_wss_client_connect_ca({h}, {p}, {path}, {k}, {ca})"),
+                );
+            }
+            "wss_client_send_text" => {
+                let (_, c) = self.emit_expr(&args[0]);
+                let (_, m) = self.emit_expr(&args[1]);
+                return (
+                    "int64_t".into(),
+                    format!("mako_wss_client_send_text({c}, {m})"),
+                );
+            }
+            "wss_client_send_binary" => {
+                let (_, c) = self.emit_expr(&args[0]);
+                let (_, m) = self.emit_expr(&args[1]);
+                return (
+                    "int64_t".into(),
+                    format!("mako_wss_client_send_binary({c}, {m})"),
+                );
+            }
+            "wss_client_send_ping" => {
+                let (_, c) = self.emit_expr(&args[0]);
+                let (_, m) = self.emit_expr(&args[1]);
+                return (
+                    "int64_t".into(),
+                    format!("mako_wss_client_send_ping({c}, {m})"),
+                );
+            }
+            "wss_client_send_close" => {
+                let (_, c) = self.emit_expr(&args[0]);
+                let (_, code) = self.emit_expr(&args[1]);
+                let (_, r) = self.emit_expr(&args[2]);
+                return (
+                    "int64_t".into(),
+                    format!("mako_wss_client_send_close({c}, {code}, {r})"),
+                );
+            }
+            "wss_client_recv" => {
+                let (_, c) = self.emit_expr(&args[0]);
+                let (_, max) = self.emit_expr(&args[1]);
+                let tmp = self.fresh("wssr");
+                self.line(&format!(
+                    "MakoString {tmp} = mako_wss_client_recv({c}, {max});"
+                ));
+                return ("MakoString".into(), tmp);
+            }
+            "wss_client_close" => {
+                let (_, c) = self.emit_expr(&args[0]);
+                return ("int64_t".into(), format!("mako_wss_client_close({c})"));
+            }
+            "wss_server_upgrade" => {
+                let (_, c) = self.emit_expr(&args[0]);
+                return (
+                    "int64_t".into(),
+                    format!("mako_wss_server_upgrade({c})"),
+                );
+            }
+            "wss_server_send_text" => {
+                let (_, c) = self.emit_expr(&args[0]);
+                let (_, m) = self.emit_expr(&args[1]);
+                return (
+                    "int64_t".into(),
+                    format!("mako_wss_server_send_text({c}, {m})"),
+                );
+            }
+            "wss_server_send_binary" => {
+                let (_, c) = self.emit_expr(&args[0]);
+                let (_, m) = self.emit_expr(&args[1]);
+                return (
+                    "int64_t".into(),
+                    format!("mako_wss_server_send_binary({c}, {m})"),
+                );
+            }
+            "wss_server_recv" => {
+                let (_, c) = self.emit_expr(&args[0]);
+                let (_, max) = self.emit_expr(&args[1]);
+                let tmp = self.fresh("wsssr");
+                self.line(&format!(
+                    "MakoString {tmp} = mako_wss_server_recv({c}, {max});"
+                ));
+                return ("MakoString".into(), tmp);
+            }
             "gpu_available" => {
                 return ("int64_t".into(), "mako_gpu_available()".into());
             }
@@ -46154,6 +46277,138 @@ impl Codegen {
                         }
                         "ws_last_status" => {
                             return ("int64_t".into(), "mako_ws_last_status()".into());
+                        }
+                        "wss_available" => {
+                            return ("int64_t".into(), "mako_wss_available()".into());
+                        }
+                        "wss_upgrade" => {
+                            let (_, c) = self.emit_expr(&args[0]);
+                            let (_, h) = self.emit_expr(&args[1]);
+                            let (_, p) = self.emit_expr(&args[2]);
+                            let (_, k) = self.emit_expr(&args[3]);
+                            return (
+                                "int64_t".into(),
+                                format!("mako_wss_upgrade({c}, {h}, {p}, {k})"),
+                            );
+                        }
+                        "wss_client_connect" => {
+                            let (_, cli) = self.emit_expr(&args[0]);
+                            let (_, h) = self.emit_expr(&args[1]);
+                            let (_, p) = self.emit_expr(&args[2]);
+                            let (_, path) = self.emit_expr(&args[3]);
+                            let (_, k) = self.emit_expr(&args[4]);
+                            return (
+                                "void*".into(),
+                                format!(
+                                    "mako_wss_client_connect({cli}, {h}, {p}, {path}, {k})"
+                                ),
+                            );
+                        }
+                        "wss_client_connect_insecure" => {
+                            let (_, h) = self.emit_expr(&args[0]);
+                            let (_, p) = self.emit_expr(&args[1]);
+                            let (_, path) = self.emit_expr(&args[2]);
+                            let (_, k) = self.emit_expr(&args[3]);
+                            return (
+                                "void*".into(),
+                                format!(
+                                    "mako_wss_client_connect_insecure({h}, {p}, {path}, {k})"
+                                ),
+                            );
+                        }
+                        "wss_client_connect_ca" => {
+                            let (_, h) = self.emit_expr(&args[0]);
+                            let (_, p) = self.emit_expr(&args[1]);
+                            let (_, path) = self.emit_expr(&args[2]);
+                            let (_, k) = self.emit_expr(&args[3]);
+                            let (_, ca) = self.emit_expr(&args[4]);
+                            return (
+                                "void*".into(),
+                                format!(
+                                    "mako_wss_client_connect_ca({h}, {p}, {path}, {k}, {ca})"
+                                ),
+                            );
+                        }
+                        "wss_client_send_text" => {
+                            let (_, c) = self.emit_expr(&args[0]);
+                            let (_, m) = self.emit_expr(&args[1]);
+                            return (
+                                "int64_t".into(),
+                                format!("mako_wss_client_send_text({c}, {m})"),
+                            );
+                        }
+                        "wss_client_send_binary" => {
+                            let (_, c) = self.emit_expr(&args[0]);
+                            let (_, m) = self.emit_expr(&args[1]);
+                            return (
+                                "int64_t".into(),
+                                format!("mako_wss_client_send_binary({c}, {m})"),
+                            );
+                        }
+                        "wss_client_send_ping" => {
+                            let (_, c) = self.emit_expr(&args[0]);
+                            let (_, m) = self.emit_expr(&args[1]);
+                            return (
+                                "int64_t".into(),
+                                format!("mako_wss_client_send_ping({c}, {m})"),
+                            );
+                        }
+                        "wss_client_send_close" => {
+                            let (_, c) = self.emit_expr(&args[0]);
+                            let (_, code) = self.emit_expr(&args[1]);
+                            let (_, r) = self.emit_expr(&args[2]);
+                            return (
+                                "int64_t".into(),
+                                format!("mako_wss_client_send_close({c}, {code}, {r})"),
+                            );
+                        }
+                        "wss_client_recv" => {
+                            let (_, c) = self.emit_expr(&args[0]);
+                            let (_, max) = self.emit_expr(&args[1]);
+                            let tmp = self.fresh("wssr");
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_wss_client_recv({c}, {max});"
+                            ));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "wss_client_close" => {
+                            let (_, c) = self.emit_expr(&args[0]);
+                            return (
+                                "int64_t".into(),
+                                format!("mako_wss_client_close({c})"),
+                            );
+                        }
+                        "wss_server_upgrade" => {
+                            let (_, c) = self.emit_expr(&args[0]);
+                            return (
+                                "int64_t".into(),
+                                format!("mako_wss_server_upgrade({c})"),
+                            );
+                        }
+                        "wss_server_send_text" => {
+                            let (_, c) = self.emit_expr(&args[0]);
+                            let (_, m) = self.emit_expr(&args[1]);
+                            return (
+                                "int64_t".into(),
+                                format!("mako_wss_server_send_text({c}, {m})"),
+                            );
+                        }
+                        "wss_server_send_binary" => {
+                            let (_, c) = self.emit_expr(&args[0]);
+                            let (_, m) = self.emit_expr(&args[1]);
+                            return (
+                                "int64_t".into(),
+                                format!("mako_wss_server_send_binary({c}, {m})"),
+                            );
+                        }
+                        "wss_server_recv" => {
+                            let (_, c) = self.emit_expr(&args[0]);
+                            let (_, max) = self.emit_expr(&args[1]);
+                            let tmp = self.fresh("wsssr");
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_wss_server_recv({c}, {max});"
+                            ));
+                            return ("MakoString".into(), tmp);
                         }
                         "gpu_available" => {
                             return ("int64_t".into(), "mako_gpu_available()".into());

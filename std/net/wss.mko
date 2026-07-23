@@ -1,0 +1,80 @@
+// std/net/wss — WebSocket over TLS (WSS) client framing.
+// Builtins: wss_client_* / wss_server_* / wss_upgrade / wss_available.
+// No GC: payloads are owned strings; close frees the TlsConn.
+
+export fn available() -> int {
+    return wss_available()
+}
+
+export fn connect(
+    cli: TlsClient,
+    host: string,
+    port: int,
+    path: string,
+    key: string
+) -> TlsConn {
+    return wss_client_connect(cli, host, port, path, key)
+}
+
+export fn connect_insecure(
+    host: string,
+    port: int,
+    path: string,
+    key: string
+) -> TlsConn {
+    return wss_client_connect_insecure(host, port, path, key)
+}
+
+export fn connect_ca(
+    host: string,
+    port: int,
+    path: string,
+    key: string,
+    ca_pem: string
+) -> TlsConn {
+    return wss_client_connect_ca(host, port, path, key, ca_pem)
+}
+
+export fn upgrade(conn: TlsConn, host: string, path: string, key: string) -> int {
+    return wss_upgrade(conn, host, path, key)
+}
+
+export fn send_text(conn: TlsConn, msg: string) -> int {
+    return wss_client_send_text(conn, msg)
+}
+
+export fn send_binary(conn: TlsConn, msg: string) -> int {
+    return wss_client_send_binary(conn, msg)
+}
+
+export fn send_ping(conn: TlsConn, msg: string) -> int {
+    return wss_client_send_ping(conn, msg)
+}
+
+export fn send_close(conn: TlsConn, code: int, reason: string) -> int {
+    return wss_client_send_close(conn, code, reason)
+}
+
+export fn recv(conn: TlsConn, max_bytes: int) -> string {
+    return wss_client_recv(conn, max_bytes)
+}
+
+export fn close(conn: TlsConn) -> int {
+    return wss_client_close(conn)
+}
+
+export fn server_upgrade(conn: TlsConn) -> int {
+    return wss_server_upgrade(conn)
+}
+
+export fn server_send_text(conn: TlsConn, msg: string) -> int {
+    return wss_server_send_text(conn, msg)
+}
+
+export fn server_send_binary(conn: TlsConn, msg: string) -> int {
+    return wss_server_send_binary(conn, msg)
+}
+
+export fn server_recv(conn: TlsConn, max_bytes: int) -> string {
+    return wss_server_recv(conn, max_bytes)
+}

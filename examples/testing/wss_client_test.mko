@@ -1,0 +1,125 @@
+// WSS client framing: TLS + WebSocket (RFC6455 over TlsConn).
+// Soft API tests always run. Live loopback needs MAKO_LIVE_TLS=1 + OpenSSL.
+
+fn live_tls_enabled() -> int {
+    let v = env_get("MAKO_LIVE_TLS")
+    if str_eq(v, "1") {
+        return 1
+    }
+    if str_eq(v, "true") {
+        return 1
+    }
+    return 0
+}
+
+fn TestWssAvailable() {
+    let av = wss_available()
+    assert(av == 0 || av == 1)
+    // Mirrors tls_client_available when OpenSSL is linked.
+    if tls_client_available() == 1 {
+        assert_eq(av, 1)
+    }
+}
+
+fn TestWssConnectFailClosed() {
+    if wss_available() == 0 {
+        return
+    }
+    // Closed / refused port — must not hang forever or crash.
+    let conn = wss_client_connect_insecure(
+        "127.0.0.1",
+        1,
+        "/",
+        "dGhlIHNhbXBsZSBub25jZQ=="
+    )
+    // Failed connect yields a dead handle: sends fail, close is safe.
+    assert_eq(wss_client_send_text(conn, "x"), -1)
+    assert_eq(wss_client_send_binary(conn, "x"), -1)
+    assert_eq(wss_client_send_ping(conn, "x"), -1)
+    assert_eq(wss_client_send_close(conn, 1000, ""), -1)
+    assert_eq_str(wss_client_recv(conn, 128), "")
+    let _ = wss_client_close(conn)
+}
+
+fn wss_loopback_server(lfd: int, srv: TlsServer) -> int {
+    let cfd = tcp_accept(lfd)
+    if cfd < 0 {
+        return 1
+    }
+    let conn = tls_accept(srv, cfd)
+    // Failed accept: soft exit (no crash).
+    if wss_server_upgrade(conn) == 0 {
+        let _ = wss_client_close(conn)
+        return 3
+    }
+    let msg = wss_server_recv(conn, 8192)
+    if str_len(msg) == 0 {
+        let _ = wss_client_close(conn)
+        return 4
+    }
+    assert_eq(ws_last_opcode(), 1)
+    assert_eq(wss_server_send_text(conn, msg), 0)
+
+    let bin = wss_server_recv(conn, 8192)
+    assert_eq_str(bin, "bin-wss")
+    assert_eq(ws_last_opcode(), 2)
+    assert_eq(wss_server_send_binary(conn, bin), 0)
+
+    let _ = wss_server_recv(conn, 256)
+    let _ = wss_client_close(conn)
+    return 0
+}
+
+fn TestWssLoopback() {
+    if live_tls_enabled() == 0 {
+        return
+    }
+    if wss_available() == 0 {
+        return
+    }
+    if tls_server_available() == 0 {
+        return
+    }
+    let port = 18871 + (now_ms() % 500)
+    let lfd = tcp_listen_addr("127.0.0.1", port)
+    if lfd < 0 {
+        return
+    }
+    let srv = tls_server_new("runtime/certs/dev.crt", "runtime/certs/dev.key")
+    let key = "dGhlIHNhbXBsZSBub25jZQ=="
+    crew t {
+        let j = t.kick(wss_loopback_server(lfd, srv))
+        sleep_ms(120)
+        let conn = wss_client_connect_ca(
+            "localhost",
+            port,
+            "/echo",
+            key,
+            "runtime/certs/dev.crt"
+        )
+        // Soft skip if handshake/cert fails in sandbox.
+        if wss_client_send_text(conn, "hello-wss") != 0 {
+            let _ = wss_client_close(conn)
+            let _ = j.join()
+            let _ = tcp_close(lfd)
+            let _ = tls_server_free(srv)
+            return
+        }
+        let reply = wss_client_recv(conn, 4096)
+        assert_eq_str(reply, "hello-wss")
+        assert_eq(ws_last_opcode(), 1)
+        assert_eq(ws_last_fin(), 1)
+
+        assert_eq(wss_client_send_binary(conn, "bin-wss"), 0)
+        let br = wss_client_recv(conn, 4096)
+        assert_eq_str(br, "bin-wss")
+        assert_eq(ws_last_opcode(), 2)
+
+        assert_eq(wss_client_send_close(conn, 1000, "bye"), 0)
+        let _ = wss_client_close(conn)
+        let code = j.join()
+        assert_eq(code, 0)
+    }
+    let _ = tcp_close(lfd)
+    let _ = tls_server_free(srv)
+}

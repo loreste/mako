@@ -9678,6 +9678,16 @@ impl<'a> FunctionLowerer<'a> {
                             Type::PtrSlice(vk),
                         ),
                         Type::MapSI => ("mako_native_maps_values_si_as_i64_ptr", Type::IntSlice),
+                        // map[string]bool / scalar 0-1 values stored in SI table.
+                        Type::MapSPtr(MapValKind::Other) => (
+                            "mako_native_maps_values_si_as_i64_ptr",
+                            Type::IntSlice,
+                        ),
+                        // map[int]bool / scalar 0-1 values stored in II table.
+                        Type::MapIPtr(MapValKind::Other) => (
+                            "mako_native_maps_values_ii_ptr",
+                            Type::IntSlice,
+                        ),
                         Type::MapSPtr(MapValKind::Float) => (
                             "mako_native_maps_values_si_as_float_ptr",
                             Type::FloatSlice,
@@ -27678,6 +27688,97 @@ impl<'a> FunctionLowerer<'a> {
                 &[Type::I64, Type::Str],
                 Some(Type::I64),
                 false,
+            )),
+            // WSS: TLS + WebSocket (Opaque = TlsClient / TlsConn handles).
+            "wss_available" if args.is_empty() => Some((
+                "mako_native_wss_available",
+                &[],
+                Some(Type::I64),
+                false,
+            )),
+            "wss_upgrade" if args.len() == 4 => Some((
+                "mako_native_wss_upgrade_ptr",
+                &[Type::Opaque, Type::Str, Type::Str, Type::Str],
+                Some(Type::I64),
+                false,
+            )),
+            "wss_client_connect" if args.len() == 5 => Some((
+                "mako_native_wss_client_connect_ptr",
+                &[Type::Opaque, Type::Str, Type::I64, Type::Str, Type::Str],
+                Some(Type::Opaque),
+                false,
+            )),
+            "wss_client_connect_insecure" if args.len() == 4 => Some((
+                "mako_native_wss_client_connect_insecure_ptr",
+                &[Type::Str, Type::I64, Type::Str, Type::Str],
+                Some(Type::Opaque),
+                false,
+            )),
+            "wss_client_connect_ca" if args.len() == 5 => Some((
+                "mako_native_wss_client_connect_ca_ptr",
+                &[Type::Str, Type::I64, Type::Str, Type::Str, Type::Str],
+                Some(Type::Opaque),
+                false,
+            )),
+            "wss_client_send_text" if args.len() == 2 => Some((
+                "mako_native_wss_client_send_text_ptr",
+                &[Type::Opaque, Type::Str],
+                Some(Type::I64),
+                false,
+            )),
+            "wss_client_send_binary" if args.len() == 2 => Some((
+                "mako_native_wss_client_send_binary_ptr",
+                &[Type::Opaque, Type::Str],
+                Some(Type::I64),
+                false,
+            )),
+            "wss_client_send_ping" if args.len() == 2 => Some((
+                "mako_native_wss_client_send_ping_ptr",
+                &[Type::Opaque, Type::Str],
+                Some(Type::I64),
+                false,
+            )),
+            "wss_client_send_close" if args.len() == 3 => Some((
+                "mako_native_wss_client_send_close_ptr",
+                &[Type::Opaque, Type::I64, Type::Str],
+                Some(Type::I64),
+                false,
+            )),
+            "wss_client_recv" if args.len() == 2 => Some((
+                "mako_native_wss_client_recv_ptr",
+                &[Type::Opaque, Type::I64],
+                Some(Type::Str),
+                true,
+            )),
+            "wss_client_close" if args.len() == 1 => Some((
+                "mako_native_wss_client_close",
+                &[Type::Opaque],
+                Some(Type::I64),
+                false,
+            )),
+            "wss_server_upgrade" if args.len() == 1 => Some((
+                "mako_native_wss_server_upgrade",
+                &[Type::Opaque],
+                Some(Type::I64),
+                false,
+            )),
+            "wss_server_send_text" if args.len() == 2 => Some((
+                "mako_native_wss_server_send_text_ptr",
+                &[Type::Opaque, Type::Str],
+                Some(Type::I64),
+                false,
+            )),
+            "wss_server_send_binary" if args.len() == 2 => Some((
+                "mako_native_wss_server_send_binary_ptr",
+                &[Type::Opaque, Type::Str],
+                Some(Type::I64),
+                false,
+            )),
+            "wss_server_recv" if args.len() == 2 => Some((
+                "mako_native_wss_server_recv_ptr",
+                &[Type::Opaque, Type::I64],
+                Some(Type::Str),
+                true,
             )),
             _ => None,
         };

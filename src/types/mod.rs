@@ -10519,6 +10519,120 @@ impl TypeChecker {
             "ws_last_status".into(),
             Type::Fn(vec![], Box::new(Type::Int)),
         );
+        // WSS: TLS + WebSocket client framing (combined layer).
+        fns.insert(
+            "wss_available".into(),
+            Type::Fn(vec![], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "wss_upgrade".into(),
+            Type::Fn(
+                vec![
+                    Type::Named("TlsConn".into()),
+                    Type::String,
+                    Type::String,
+                    Type::String,
+                ],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "wss_client_connect".into(),
+            Type::Fn(
+                vec![
+                    Type::Named("TlsClient".into()),
+                    Type::String,
+                    Type::Int,
+                    Type::String,
+                    Type::String,
+                ],
+                Box::new(Type::Named("TlsConn".into())),
+            ),
+        );
+        fns.insert(
+            "wss_client_connect_insecure".into(),
+            Type::Fn(
+                vec![Type::String, Type::Int, Type::String, Type::String],
+                Box::new(Type::Named("TlsConn".into())),
+            ),
+        );
+        fns.insert(
+            "wss_client_connect_ca".into(),
+            Type::Fn(
+                vec![
+                    Type::String,
+                    Type::Int,
+                    Type::String,
+                    Type::String,
+                    Type::String,
+                ],
+                Box::new(Type::Named("TlsConn".into())),
+            ),
+        );
+        fns.insert(
+            "wss_client_send_text".into(),
+            Type::Fn(
+                vec![Type::Named("TlsConn".into()), Type::String],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "wss_client_send_binary".into(),
+            Type::Fn(
+                vec![Type::Named("TlsConn".into()), Type::String],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "wss_client_send_ping".into(),
+            Type::Fn(
+                vec![Type::Named("TlsConn".into()), Type::String],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "wss_client_send_close".into(),
+            Type::Fn(
+                vec![Type::Named("TlsConn".into()), Type::Int, Type::String],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "wss_client_recv".into(),
+            Type::Fn(
+                vec![Type::Named("TlsConn".into()), Type::Int],
+                Box::new(Type::String),
+            ),
+        );
+        fns.insert(
+            "wss_client_close".into(),
+            Type::Fn(vec![Type::Named("TlsConn".into())], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "wss_server_upgrade".into(),
+            Type::Fn(vec![Type::Named("TlsConn".into())], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "wss_server_send_text".into(),
+            Type::Fn(
+                vec![Type::Named("TlsConn".into()), Type::String],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "wss_server_send_binary".into(),
+            Type::Fn(
+                vec![Type::Named("TlsConn".into()), Type::String],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "wss_server_recv".into(),
+            Type::Fn(
+                vec![Type::Named("TlsConn".into()), Type::Int],
+                Box::new(Type::String),
+            ),
+        );
         fns.insert(
             "pg_connect".into(),
             Type::Fn(vec![Type::String], Box::new(Type::Named("PgConn".into()))),

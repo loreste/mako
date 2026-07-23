@@ -2048,6 +2048,33 @@ client APIs send **masked**. WSS = compose `tls_*` + these primitives.
 | `ws_client_send_ping` | `ws_client_send_ping(conn: int, data: string) -> int` | Client: masked ping |
 | `ws_client_send_close` | `ws_client_send_close(conn: int, code: int, reason: string) -> int` | Client: masked close |
 
+### WSS — TLS + WebSocket client framing
+
+Combined layer: same RFC6455 frames as `ws_client_*`, but I/O is
+`tls_write` / `tls_read` on a **`TlsConn`**. Prefer this over hand-rolling
+upgrade + frame code for `wss://` backends.
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `wss_available` | `() -> int` | 1 if TLS client backend is linked |
+| `wss_client_connect` | `(cli: TlsClient, host, port, path, key) -> TlsConn` | TCP → TLS → WS upgrade |
+| `wss_client_connect_insecure` | `(host, port, path, key) -> TlsConn` | No peer verify (dev only) |
+| `wss_client_connect_ca` | `(host, port, path, key, ca_pem) -> TlsConn` | Verify peer with CA PEM |
+| `wss_upgrade` | `(conn: TlsConn, host, path, key) -> int` | WS upgrade on existing TLS |
+| `wss_client_send_text` / `binary` / `ping` | `(conn, data) -> int` | Masked client frames over TLS |
+| `wss_client_send_close` | `(conn, code, reason) -> int` | Masked close |
+| `wss_client_recv` | `(conn, max) -> string` | Unmasked server message |
+| `wss_client_close` | `(conn) -> int` | `tls_conn_close` |
+| `wss_server_upgrade` | `(conn: TlsConn) -> int` | Server 101 over TLS |
+| `wss_server_send_text` / `binary` | `(conn, data) -> int` | Unmasked server frames |
+| `wss_server_recv` | `(conn, max) -> string` | Masked client message |
+
+`ws_last_opcode` / `ws_last_fin` / `ws_last_status` / `ws_last_close_code`
+apply to both plain WS and WSS.
+
+Package: `std/net/wss`. Tests: `wss_client_test.mko` (soft always;
+loopback with `MAKO_LIVE_TLS=1`).
+
 Tests: `examples/testing/ws_api_test.mko` (handshake + loopback e2e).
 
 ---
