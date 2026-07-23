@@ -20,8 +20,9 @@ reproducible methodology.
 | Principle | Practice |
 |-----------|----------|
 | Speed first | Prefer the fast design; convenience features stay off the hot path or opt-in |
-| No GC | Scope cleanup, `hold` / `share` / `arena` — no stop-the-world tax |
-| Native codegen | `.mko` → C → clang; release **`-O3 -flto`** |
+| **Faster than C/Rust** | Per-workload gates vs hand-C + Rust — [SPEED_SAFE.md](SPEED_SAFE.md); update baselines after real wins |
+| No GC · memory safe | Scope cleanup, `hold` / `share` / `arena` — no stop-the-world tax; `memory-safety-gate` |
+| Native codegen | `.mko` → C → clang / LLVM; release **`-O3 -flto`** |
 | Low-overhead default | Scalar locals and direct calls avoid ownership/refcount synchronization; allocation and synchronization costs stay explicit |
 | Explicit cost | Heavier tools (`share`, channels, `crew`) are visible when they cost |
 | First-class concurrent/parallel | Language keywords, structured joins |

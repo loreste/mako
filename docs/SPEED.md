@@ -6,11 +6,12 @@ parallelism are language primitives, not library add-ons.
 
 | Priority | Bar |
 |----------|-----|
-| **1. Speed** | Native binary, no GC, release `-O3 -flto`, low-overhead defaults |
-| **2. Years-up** | Stable RSS + no GC pauses for services that run for months/years — [LONG_RUNNING.md](LONG_RUNNING.md) |
-| **3. Concurrency** | **First-class:** `crew` / `kick` / `join` / channels / `select` / actors |
-| **4. Parallelism** | **First-class:** `fan` and crew work across cores |
-| **5. Security** | Memory + resource contracts, secure defaults — see [SECURITY.md](SECURITY.md) |
+| **1. Speed** | Native binary, no GC, release `-O3 -flto`, low-overhead defaults — **beat C/Rust per published workload** ([SPEED_SAFE.md](SPEED_SAFE.md)) |
+| **2. Memory safe** | Ownership free, no GC — [MEMORY_SAFETY.md](MEMORY_SAFETY.md); never trade checks for speed on the safe path |
+| **3. Years-up** | Stable RSS + no GC pauses for services that run for months/years — [LONG_RUNNING.md](LONG_RUNNING.md) |
+| **4. Concurrency** | **First-class:** `crew` / `kick` / `join` / channels / `select` / actors |
+| **5. Parallelism** | **First-class:** `fan` and crew work across cores |
+| **6. Security** | Memory + resource contracts, secure defaults — see [SECURITY.md](SECURITY.md) |
 
 Syntax stays **Mako’s own**. Speed is not optional. Concurrency is not bolted on.
 Security is not a linter plugin.

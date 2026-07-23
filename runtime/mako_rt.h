@@ -2546,9 +2546,12 @@ static inline uint64_t mako_hash_bytes(const char *p, size_t n) {
 }
 
 static inline uint64_t mako_hash_i64(int64_t k) {
-    /* Fibonacci hashing: single multiply with golden-ratio constant.
-     * Distributes sequential keys well across power-of-two tables. */
-    return (uint64_t)k * 0x9E3779B97F4A7C15ULL;
+    /* Identity hash — same as hand-C and the native MapII path.
+     * Power-of-two open addressing already mixes via the mask; a heavy mixer
+     * destroys sequential-key locality (map[int]int fill is the published
+     * residual vs hand-C). Pathological low-bit collisions may probe longer —
+     * acceptable for map[int]*; string keys keep their own mixer. */
+    return (uint64_t)k;
 }
 
 /* Float map keys: +0/-0 same key; all NaNs share one key. */
@@ -2682,7 +2685,8 @@ static inline MakoString mako_str_clone(MakoString s) {
 
 static inline MakoMapSI mako_map_si_new(size_t hint) {
     size_t cap = 8;
-    size_t need = hint ? (hint * 4 / 3 + 1) : 8;
+    size_t need = hint ? (hint * 2) : 8;
+    if (need < 16) need = 16;
     while (cap < need) cap *= 2;
     MakoMapSI m;
     m.state = (uint8_t *)calloc(cap, 1);
@@ -2848,8 +2852,9 @@ static inline void mako_map_si_free(MakoMapSI *m) {
 
 static inline MakoMapII mako_map_ii_new(size_t hint) {
     size_t cap = 8;
-    /* Pre-size so hint entries fit under ~75% load without immediate rehash. */
-    size_t need = hint ? (hint * 4 / 3 + 1) : 8;
+    /* Pre-size for ~50% load (hand-C / native): sequential inserts stay first-try. */
+    size_t need = hint ? (hint * 2) : 8;
+    if (need < 16) need = 16;
     while (cap < need) cap *= 2;
     MakoMapII m;
     m.state = (uint8_t *)calloc(cap, 1);
@@ -2980,7 +2985,8 @@ typedef struct {
 
 static inline MakoMapIF mako_map_if_new(size_t hint) {
     size_t cap = 8;
-    size_t need = hint ? (hint * 4 / 3 + 1) : 8;
+    size_t need = hint ? (hint * 2) : 8;
+    if (need < 16) need = 16;
     while (cap < need) cap *= 2;
     MakoMapIF m;
     m.state = (uint8_t *)calloc(cap, 1);
@@ -3107,7 +3113,8 @@ typedef struct {
 
 static inline MakoMapSF mako_map_sf_new(size_t hint) {
     size_t cap = 8;
-    size_t need = hint ? (hint * 4 / 3 + 1) : 8;
+    size_t need = hint ? (hint * 2) : 8;
+    if (need < 16) need = 16;
     while (cap < need) cap *= 2;
     MakoMapSF m;
     m.state = (uint8_t *)calloc(cap, 1);
@@ -3250,7 +3257,8 @@ typedef struct {
 
 static inline MakoMapFI mako_map_fi_new(size_t hint) {
     size_t cap = 8;
-    size_t need = hint ? (hint * 4 / 3 + 1) : 8;
+    size_t need = hint ? (hint * 2) : 8;
+    if (need < 16) need = 16;
     while (cap < need) cap *= 2;
     MakoMapFI m;
     m.state = (uint8_t *)calloc(cap, 1);
@@ -3369,7 +3377,8 @@ typedef struct {
 
 static inline MakoMapFS mako_map_fs_new(size_t hint) {
     size_t cap = 8;
-    size_t need = hint ? (hint * 4 / 3 + 1) : 8;
+    size_t need = hint ? (hint * 2) : 8;
+    if (need < 16) need = 16;
     while (cap < need) cap *= 2;
     MakoMapFS m;
     m.state = (uint8_t *)calloc(cap, 1);
@@ -3496,7 +3505,8 @@ typedef struct {
 
 static inline MakoMapFF mako_map_ff_new(size_t hint) {
     size_t cap = 8;
-    size_t need = hint ? (hint * 4 / 3 + 1) : 8;
+    size_t need = hint ? (hint * 2) : 8;
+    if (need < 16) need = 16;
     while (cap < need) cap *= 2;
     MakoMapFF m;
     m.state = (uint8_t *)calloc(cap, 1);
@@ -3615,7 +3625,8 @@ typedef struct {
 
 static inline MakoMapIB mako_map_ib_new(size_t hint) {
     size_t cap = 8;
-    size_t need = hint ? (hint * 4 / 3 + 1) : 8;
+    size_t need = hint ? (hint * 2) : 8;
+    if (need < 16) need = 16;
     while (cap < need) cap *= 2;
     MakoMapIB m;
     m.state = (uint8_t *)calloc(cap, 1);
@@ -3742,7 +3753,8 @@ typedef struct {
 
 static inline MakoMapSB mako_map_sb_new(size_t hint) {
     size_t cap = 8;
-    size_t need = hint ? (hint * 4 / 3 + 1) : 8;
+    size_t need = hint ? (hint * 2) : 8;
+    if (need < 16) need = 16;
     while (cap < need) cap *= 2;
     MakoMapSB m;
     m.state = (uint8_t *)calloc(cap, 1);
@@ -3871,7 +3883,8 @@ typedef struct {
 
 static inline MakoMapFB mako_map_fb_new(size_t hint) {
     size_t cap = 8;
-    size_t need = hint ? (hint * 4 / 3 + 1) : 8;
+    size_t need = hint ? (hint * 2) : 8;
+    if (need < 16) need = 16;
     while (cap < need) cap *= 2;
     MakoMapFB m;
     m.state = (uint8_t *)calloc(cap, 1);
@@ -3998,7 +4011,8 @@ typedef struct {
 
 static inline MakoMapBI mako_map_bi_new(size_t hint) {
     size_t cap = 8;
-    size_t need = hint ? (hint * 4 / 3 + 1) : 8;
+    size_t need = hint ? (hint * 2) : 8;
+    if (need < 16) need = 16;
     while (cap < need) cap *= 2;
     MakoMapBI m;
     m.state = (uint8_t *)calloc(cap, 1);
@@ -4106,7 +4120,8 @@ typedef struct {
 
 static inline MakoMapBS mako_map_bs_new(size_t hint) {
     size_t cap = 8;
-    size_t need = hint ? (hint * 4 / 3 + 1) : 8;
+    size_t need = hint ? (hint * 2) : 8;
+    if (need < 16) need = 16;
     while (cap < need) cap *= 2;
     MakoMapBS m;
     m.state = (uint8_t *)calloc(cap, 1);
@@ -4217,7 +4232,8 @@ typedef struct {
 
 static inline MakoMapBF mako_map_bf_new(size_t hint) {
     size_t cap = 8;
-    size_t need = hint ? (hint * 4 / 3 + 1) : 8;
+    size_t need = hint ? (hint * 2) : 8;
+    if (need < 16) need = 16;
     while (cap < need) cap *= 2;
     MakoMapBF m;
     m.state = (uint8_t *)calloc(cap, 1);
@@ -4325,7 +4341,8 @@ typedef struct {
 
 static inline MakoMapBB mako_map_bb_new(size_t hint) {
     size_t cap = 8;
-    size_t need = hint ? (hint * 4 / 3 + 1) : 8;
+    size_t need = hint ? (hint * 2) : 8;
+    if (need < 16) need = 16;
     while (cap < need) cap *= 2;
     MakoMapBB m;
     m.state = (uint8_t *)calloc(cap, 1);
@@ -4435,7 +4452,8 @@ typedef struct {
 
 static inline MakoMapSS mako_map_ss_new(size_t hint) {
     size_t cap = 8;
-    size_t need = hint ? (hint * 4 / 3 + 1) : 8;
+    size_t need = hint ? (hint * 2) : 8;
+    if (need < 16) need = 16;
     while (cap < need) cap *= 2;
     MakoMapSS m;
     m.state = (uint8_t *)calloc(cap, 1);
