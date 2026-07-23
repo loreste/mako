@@ -294,9 +294,9 @@ Coherent **official toolchain**: LSP, debug, docs, bench, and doctor feel like o
 ## 0.5.2 — Runtime trust & production concurrency (years-up)
 
 **Depends on:** 0.5.0 (and ideally 0.5.1 for debugability under load).  
-**Product story:** backends that stay up for **months–years** should lead on
-**p99 stability and RSS ceiling** (no GC). Strategy:
-[LONG_RUNNING.md](LONG_RUNNING.md). Seed gate: `scripts/long-run-soak.sh` (LR-1).
+**Product story:** backends that stay up for **months–years** with steady
+**p99 and RSS** (no GC). Strategy: [LONG_RUNNING.md](LONG_RUNNING.md). Seed gate:
+`scripts/long-run-soak.sh` (LR-1).
 
 ### North star
 

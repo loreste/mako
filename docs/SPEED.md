@@ -6,9 +6,9 @@ parallelism are language primitives, not library add-ons.
 
 | Priority | Bar |
 |----------|-----|
-| **1. Speed** | Native binary, no GC, release `-O3 -flto`, low-overhead defaults — **beat C/Rust per published workload** ([SPEED_SAFE.md](SPEED_SAFE.md)) |
-| **2. Memory safe** | Ownership free, no GC — [MEMORY_SAFETY.md](MEMORY_SAFETY.md); never trade checks for speed on the safe path |
-| **3. Years-up** | Stable RSS + no GC pauses for services that run for months/years — [LONG_RUNNING.md](LONG_RUNNING.md) |
+| **1. Speed** | Native binary, no GC, release `-O3 -flto`, low-overhead defaults — measure vs hand-C/Rust per workload ([SPEED_SAFE.md](SPEED_SAFE.md)) |
+| **2. Memory safe** | Ownership free, no GC — [MEMORY_SAFETY.md](MEMORY_SAFETY.md); keep safe-path checks on by default |
+| **3. Years-up** | Stable RSS + no GC pauses for long-running services — [LONG_RUNNING.md](LONG_RUNNING.md) |
 | **4. Concurrency** | **First-class:** `crew` / `kick` / `join` / channels / `select` / actors |
 | **5. Parallelism** | **First-class:** `fan` and crew work across cores |
 | **6. Security** | Memory + resource contracts, secure defaults — see [SECURITY.md](SECURITY.md) |
@@ -18,15 +18,15 @@ Security is not a linter plugin.
 
 ---
 
-## Speed (non-negotiable)
+## Speed (design goals)
 
-- **No GC** — no stop-the-world tax on p99
-- **Native codegen** — `.mko` → C → clang
-- **Release:** `-O3 -flto`
+- **No GC** — free is ownership-driven, not collector pauses
+- **Native codegen** — `.mko` → C → clang (or LLVM release path)
+- **Release:** `-O3 -flto` when building for production
 - **Visible cost** — `hold` / `share` / `arena` / channels when you pay
-- **Measure** — [PERFORMANCE.md](PERFORMANCE.md), `scripts/bench-vs-go-rust.sh`
+- **Measure** — [PERFORMANCE.md](PERFORMANCE.md), gate scripts under `scripts/`
 
-Any feature that silently slows the hot path must justify itself or stay opt-in.
+Features that add cost on the common path should be justified or opt-in.
 
 **Long-running servers:** Mako’s structural advantage is **no GC** and
 **ownership-bounded live memory**. Microbenches alone do not prove years-up

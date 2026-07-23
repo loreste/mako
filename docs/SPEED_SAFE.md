@@ -1,109 +1,94 @@
-# Speed · memory safe · faster than C and Rust
+# Speed and memory safety
 
-**Product contract:** Mako is **memory safe without a GC**, and on **published
-workloads** the release path is **competitive with or faster than** hand-written
-C and Rust — measured, not claimed.
+Mako aims for **native speed without a GC**: ownership free, safe-by-default
+checks, and measured release builds. Claims are **per workload**, not universal.
 
 Tip: **0.4.15+** · Related: [SPEED.md](SPEED.md) · [MEMORY_SAFETY.md](MEMORY_SAFETY.md) ·
 [PERFORMANCE.md](PERFORMANCE.md) · [LONG_RUNNING.md](LONG_RUNNING.md) ·
-[ADAPTIVE_OPT.md](ADAPTIVE_OPT.md) (traffic feedback **without** live recompile).
+[ADAPTIVE_OPT.md](ADAPTIVE_OPT.md) (traffic feedback without live recompile).
 
 ---
 
-## Dual bar (both required)
+## What we optimize for
 
-| Axis | Bar | How we enforce it |
-|------|-----|-------------------|
-| **Memory safe** | No GC; deterministic free; bounds in safe release | Ownership / arenas / share · ASan fixtures · `scripts/memory-safety-gate.sh` |
-| **Faster than C/Rust** | Per-workload medians ≤ 1.0× hand-C / Rust where the gate is green | `scripts/native-bench-gate.sh` + baselines JSON |
+| Axis | Intent | How we check |
+|------|--------|----------------|
+| **Memory** | No GC; deterministic free; bounds on the safe path | Ownership / arenas / share · `scripts/memory-safety-gate.sh` |
+| **Speed** | Stay competitive with hand-C and Rust on **named** benches | `scripts/native-bench-gate.sh` + baselines JSON |
 
-We do **not** trade safety for speed by turning off checks on the safe path, and
-we do **not** accept a GC to “fix” free. Speed comes from:
+We do not turn off safe-path checks for speed, and we do not add a collector to
+simplify free. Layout, AOT opts, and optional PGO are the usual levers.
 
-1. **Native AOT** (`-O3 -flto` / LLVM release) — no interpreter, no warmup tax  
-2. **Cheap free** — views (`cap==0`), stack POD lits, immortal strings; free is cold  
-3. **Layout + hash** — hand-C-matched `map[int]int`, identity int hash, 50% load pre-size  
-4. **Explicit cost** — `share` / channels / arenas only when the program asks  
-5. **Adaptive feedback (optional)** — `hot_site_*` + offline PGO; see below  
+### Design choices that affect speed
 
-### Adaptive feedback layer stays intact
+1. **Native AOT** (`-O3 -flto` / optional LLVM) — no interpreter at runtime  
+2. **Cheap free where possible** — views (`cap==0`), stack POD lits, immortal strings  
+3. **Map layout** — open addressing; int keys use identity hash; pre-size toward ~50% load when a hint is given  
+4. **Explicit cost** — `share` / channels / arenas when the program asks  
+5. **Optional feedback** — `hot_site_*` (default off) and offline PGO for redeploys  
 
-Map and other micro-opts must **not** replace or slow the adaptive path:
+### Adaptive feedback (optional)
 
-| Layer | Status | Contract |
-|-------|--------|----------|
-| **A — AOT always** | Required | Full native at t=0; map identity hash is AOT-only |
-| **B — `hot_site_*`** | Opt-in | Default **off** (one load + branch); on = relaxed atomic; export `/debug/hot_sites` |
-| **C — offline PGO** | Deploy-time | `MAKO_PGO_GEN` / `MAKO_PGO_USE` · `scripts/pgo-build.sh` · `adaptive-opt-cycle.sh` |
+| Layer | Role |
+|-------|------|
+| **A — AOT** | Full native at process start |
+| **B — `hot_site_*`** | Opt-in counters; default off; export `/debug/hot_sites` |
+| **C — offline PGO** | Staging train → rebuild → deploy (`pgo-build.sh`, `adaptive-opt-cycle.sh`) |
 
-**Never** on the live production hot path: `-fprofile-generate`, mid-process
-code rewrite, or making `hot_site_hit` mandatory for correctness. Speed work
-(layout, hash, LTO) is Layer A; learning from traffic is B→C.
+Production hot paths should not rely on heavy instrumentation. Counters are
+optional; correctness does not depend on them.
 
-Tests: `examples/testing/hot_site_test.mko` (incl. map + counters).
+Tests: `examples/testing/hot_site_test.mko`.
 
 ---
 
-## Current evidence (Apple arm64, 2026-07-23 sample)
+## Sample measurements (not a blanket claim)
 
-After map pre-size (50% load) + identity int hash (same as hand-C / native):
+Host: Apple arm64, 2026-07-23. Re-run locally before quoting.
 
 `MAKO_NATIVE_WORKLOADS=native_map ./scripts/native-bench-gate.sh`
 
-| Workload | vs hand-C | vs Rust | Notes |
-|----------|-----------|---------|-------|
-| **map[int]int** fill+sum 1e6 | **~1.7×** residual | **~0.27×** (**~3.7× faster than Rust**) | Both Mako C and native; owned free |
-| **fib** (prior sample) | **~1.01×** | **~1.01×** | Parity |
-| **slice** (prior sample) | **~1.13×** | **~1.10×** | Within 1.25× bar |
+| Workload (sample) | Rough vs hand-C | Rough vs Rust | Notes |
+|-------------------|-----------------|---------------|--------|
+| map[int]int fill+sum 1e6 | ~1.7× slower | ~0.27× (faster on this host) | Owned map; free on scope exit |
+| fib (earlier sample) | ~parity | ~parity | No heap |
+| slice sum (earlier sample) | within ~1.25× gate | within gate | Checked index on safe path |
 
-**Read this honestly:**
-
-- On **map**, Mako is **already much faster than Rust** with **ownership free** (no GC).
-- Residual vs **hand-C** is stack header + LICM — not “turn off safety.”
-- On **fib**, we are **tied** with hand-C and Rust (within noise).
-
-Update numbers only by re-running the scripts. Do not invent ratios.
+**Caveats:** numbers move with hardware, flags, and thermal noise. Residual map
+gap vs hand-C is partly layout (stack header / LICM), not “turn off safety.”
+Do not invent or extrapolate ratios.
 
 ---
 
-## How to stay memory safe *and* fast (checklist)
+## Habits that help both speed and steady memory
 
 ```text
-[ ] Prefer stack / non-escaping POD slices in hot loops (cap==0 views)
-[ ] make([]T, 0, n) / make(map[K]V, n) — pre-size; avoid rehash/realloc
-[ ] No share/RC on the p50 path unless sharing is required
-[ ] Request-scoped arena for HTTP / messaging handlers
-[ ] Release build: mako build --release (and llvm backend when available)
-[ ] Gate before ship: memory-safety-gate + native-bench-gate
-[ ] Long-run: long-run-soak / http-long-run-soak (RSS, not just mean latency)
+[ ] Pre-size: make([]T, 0, n), make(map[K]V, n)
+[ ] Prefer short-lived owns / arenas for request work
+[ ] Avoid share/RC on the common path unless sharing is required
+[ ] Release build: mako build --release (LLVM when available)
+[ ] Before ship: memory-safety-gate + native-bench-gate when relevant
+[ ] Long-run: long-run-soak / http-long-run-soak for RSS, not only mean latency
 ```
 
 ---
 
-## Residual C gap (map) — still safe
+## Map residual (honest)
 
-Hand-C keeps the map **header on the stack** and inlines the probe with
-perfect LICM. Mako keeps a **heap header** so ownership drop is reliable.
-
-That is an intentional safety/layout trade: free is deterministic; the
-binary still beats Rust on this bench. Closing the rest of the hand-C gap is
-LICM / stack-eligible maps for proven non-escaping `make(map)` — **without**
-dropping bounds or ownership.
+Hand-written C often keeps the map header on the stack. Mako keeps a heap
+header so ownership drop stays simple and reliable. That can cost a bit on
+microbenches while still freeing correctly. Further gains (e.g. non-escaping
+maps) should preserve ownership, not drop it.
 
 ---
 
 ## Commands
 
 ```bash
-# Speed vs C / hand-C / Rust
 ./scripts/native-bench-gate.sh
-# Map only, looser absolute bar while tuning:
 MAKO_NATIVE_WORKLOADS=native_map ./scripts/native-bench-gate.sh 2.0
 
-# Memory safe, no GC
 ./scripts/memory-safety-gate.sh
-
-# Years-up RSS
 ./scripts/long-run-soak.sh
 ./scripts/http-long-run-soak.sh
 ```

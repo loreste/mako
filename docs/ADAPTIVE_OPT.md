@@ -1,8 +1,7 @@
 # Adaptive optimization without in-process recompile
 
-**Goal:** the longer a Mako service runs, the more we know about its real
-hot paths — and the next binary is better — **without ever rewriting machine
-code in the live process**, and **without a GC**.
+**Goal:** learn from real traffic so the **next** release binary can be better
+shaped — without rewriting machine code in the live process, and without a GC.
 
 Tip: **0.4.15+** · Related: [LONG_RUNNING.md](LONG_RUNNING.md) ·
 [PERFORMANCE.md](PERFORMANCE.md) · [MEMORY_SAFETY.md](MEMORY_SAFETY.md) ·
@@ -10,27 +9,22 @@ Tip: **0.4.15+** · Related: [LONG_RUNNING.md](LONG_RUNNING.md) ·
 
 ---
 
-## What we take from profile-guided systems — and what we refuse
+## Approach
 
-| Property | Mako stance |
-|----------|-------------|
-| Learns from production traffic | **Yes** — feedback from live counters + offline PGO |
-| Hot paths get better over time | **Yes** — at **redeploy / rebuild**, not mid-request |
-| Interpreter / multi-tier compilers | **No** — full native from process start |
-| Warmup latency tax | **No** — cold path is already AOT `-O3` (+ LTO) |
-| Deopt / code-cache pressure | **No** — no in-process recompile |
-| GC while optimizing | **No** — ownership / arenas; no GC |
+| Property | Mako approach |
+|----------|----------------|
+| Production traffic | Optional live counters + offline PGO on redeploy |
+| When code gets better | Rebuild / redeploy — not mid-request |
+| Process start | Full native AOT (`-O3` + LTO on release) |
+| Live machine code | Not rewritten in-process |
+| Memory while optimizing | No GC; ownership / arenas |
 
-The product contract:
+Working rules:
 
-1. **t = 0 is already native and release-optimized.**
-2. **Live process never rewrites its own machine code.**
-3. **Feedback is opt-in and cheap** (relaxed atomics / sampling), never full
-   PGO instrumentation in production.
-4. **Heavier specialization is offline** (train → merge → rebuild → ship).
-
-That is profile-guided learning from traffic, without the slowdown of an
-in-process compiler.
+1. Release AOT is the default from process start.  
+2. Do not rewrite machine code in a running process.  
+3. Live feedback is opt-in and cheap (relaxed atomics / sampling).  
+4. Heavy specialization is offline (train → merge → rebuild → ship).
 
 ---
 
@@ -123,31 +117,30 @@ Recommended ops loop for years-up services:
 
 ---
 
-## Why this stays faster than in-process recompile
+## Tradeoffs (modest)
 
-| Failure mode | In-process recompile | Mako adaptive AOT |
-|--------------|----------------------|-------------------|
-| Cold start | Slow tiers / warmup | Full speed immediately |
-| Deoptimization storms | Possible | Impossible (no live rewrite) |
-| Code cache growth in-process | Yes | Binary size fixed at deploy |
-| GC while compiling | Common with collectors | No GC |
-| p99 during “warmup” | Spiky | Stable from first request |
-| Memory for compiler in-process | Large | Zero |
+| Concern | In-process recompile (typical) | Mako adaptive AOT |
+|---------|--------------------------------|-------------------|
+| Cold start | Often slower until specialized | Full AOT from the start |
+| Live rewrite / deopt | Possible | Not used |
+| Code growth in-process | Possible | Binary size fixed at deploy |
+| GC while specializing | Possible with collectors | No GC |
+| p99 early in life | Can be spiky | Tends to be more stable |
+| Compiler in the process | Can use significant memory | None |
 
-Peak throughput after long online specialization can still win some microkernels
-elsewhere. Mako’s bet is **stable p99 + stable RSS + no GC** for months–years,
-with PGO closing the peak gap **offline**.
+Online specialization can still outperform naive AOT on some microkernels. Mako
+prioritizes **predictable free and RSS** for long runs, and uses offline PGO
+when peak throughput on a workload needs another pass.
 
 ---
 
 ## Claims policy
 
-- Do say: no GC; no in-process recompile; optional cheap feedback; offline PGO.
-- Do not say “self-optimizing binary rewrites itself at runtime.”
-- Do not invent throughput claims without a named soak + hardware (see
-  LONG_RUNNING LR-7).
+- Do say: no GC; no live recompile; optional counters; offline PGO.  
+- Do not say the binary rewrites itself at runtime.  
+- Do not invent throughput numbers without a named soak and hardware (LONG_RUNNING LR-7).
 
-Tests: `examples/testing/hot_site_test.mko` (counters + map workload coexistence).
+Tests: `examples/testing/hot_site_test.mko`.
 
-**Invariant:** AOT map/layout opts (identity int hash, pre-size, LTO) must leave
-`hot_site_*` default-off and PGO env wiring unchanged. Speed ≠ live recompile.
+**Invariant:** AOT layout opts should leave `hot_site_*` default-off and PGO env
+wiring unchanged.

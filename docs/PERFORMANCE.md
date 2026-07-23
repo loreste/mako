@@ -20,7 +20,7 @@ reproducible methodology.
 | Principle | Practice |
 |-----------|----------|
 | Speed first | Prefer the fast design; convenience features stay off the hot path or opt-in |
-| **Faster than C/Rust** | Per-workload gates vs hand-C + Rust — [SPEED_SAFE.md](SPEED_SAFE.md); update baselines after real wins |
+| Measure vs C/Rust | Per-workload gates vs hand-C + Rust — [SPEED_SAFE.md](SPEED_SAFE.md); update baselines after intentional changes |
 | No GC · memory safe | Scope cleanup, `hold` / `share` / `arena` — no stop-the-world tax; `memory-safety-gate` |
 | Native codegen | `.mko` → C → clang / LLVM; release **`-O3 -flto`** |
 | Low-overhead default | Scalar locals and direct calls avoid ownership/refcount synchronization; allocation and synchronization costs stay explicit |
@@ -51,7 +51,7 @@ Book: [§11 Speed & memory safety](book/src/ch11-speed-safety.md) · Release how
 ./scripts/long-run-soak.sh
 # HTTP accept-loop soak (RSS under concurrent clients):
 ./scripts/http-long-run-soak.sh
-# See docs/LONG_RUNNING.md (years-up north star for long-running services).
+# See docs/LONG_RUNNING.md (years-up soaks for long-running services).
 # Optional: MAKO_ALLOCATOR=mimalloc|jemalloc · scripts/pgo-build.sh for PGO.
 # Adaptive opt (traffic feedback, offline PGO): docs/ADAPTIVE_OPT.md · scripts/adaptive-opt-cycle.sh
 

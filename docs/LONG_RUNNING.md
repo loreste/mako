@@ -1,11 +1,10 @@
 # Long-running applications (years-up)
 
-**North star:** Mako should be the better default for backend services that stay
-up for **months to years** — not only for microbench fib, but for **stable
-latency, stable RSS, and no GC tax**.
+**Aim:** backend services that stay up for **months to years** with **stable
+latency, stable RSS, and no GC** — not only good microbench fib numbers.
 
-This is a product commitment, not a completed claim. Evidence is built in
-patches (soaks, gates, docs). Last sync: **2026-07-22** · tip **0.4.15**.
+This is a direction, not a finished claim. Evidence is built in soaks, gates,
+and docs. Last sync: **2026-07-22** · tip **0.4.15**.
 
 Related: [SPEED.md](SPEED.md) · [PERFORMANCE.md](PERFORMANCE.md) ·
 [MEMORY_MODEL.md](MEMORY_MODEL.md) · [SECURITY.md](SECURITY.md) ·
@@ -41,11 +40,10 @@ bloat**, and **unpredictable tail latency**. Mako’s contract is the opposite:
 | **Deployment** | Single binary |
 | **Ownership** | Compiler + `hold` / `share` / `arena` |
 
-**Tradeoffs to be honest about:** peak throughput after long online
-specialization elsewhere can still win some microkernels; ecosystem and APM
-depth are still maturing. **Our proof** for years-up is soaks + gates — close
-the *evidence* gap with soaks and tooling, and the *throughput* gap with LLVM
-release, LTO, optional PGO, and allocator choice — without ever taking a GC.
+**Tradeoffs:** other stacks may still lead on peak throughput or tooling depth.
+Years-up proof for Mako is soaks and gates — grow evidence with more soaks,
+and throughput with LLVM release, LTO, optional PGO, and allocator choice —
+still without a GC.
 
 ---
 
