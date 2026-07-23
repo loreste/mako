@@ -65,14 +65,15 @@ That single command:
 
 1. Installs **clang** if missing (so `.mko` files can compile)
 2. Downloads the **cargo-built** `mako` binary package for your CPU
-3. Installs runtime headers + standard library beside it
+3. Installs runtime headers, native-link support sources, and the standard library
 4. Verifies SHA-256, writes `env.sh`, updates shell RC when possible
 
 ```bash
 mako init hello && cd hello && mako run main.mko
 ```
 
-Or grab the raw binary only (still needs headers via the tarball/installer for compiles):
+Or grab the archive directly (the bare binary alone cannot compile programs
+without the runtime files shipped in the archive):
 
 ```text
 https://github.com/loreste/mako/releases/latest/download/mako-x86_64-unknown-linux-gnu.tar.gz

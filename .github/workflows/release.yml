@@ -75,6 +75,9 @@ jobs:
           mako doctor
           mako init "${RUNNER_TEMP}/hello" --name hello
           mako run "${RUNNER_TEMP}/hello/main.mko"
+          mako build "${GITHUB_WORKSPACE}/examples/native/native_if_expr.mko" \
+            --backend native -o "${RUNNER_TEMP}/native-if-expr"
+          "${RUNNER_TEMP}/native-if-expr"
 
       - name: Upload workflow artifacts
         uses: actions/upload-artifact@v4

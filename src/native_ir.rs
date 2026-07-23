@@ -2691,7 +2691,25 @@ impl<'a> FunctionLowerer<'a> {
                         )));
                     }
                     if ty.is_heap() {
-                        owned = self.take_bare_string_local(expr, owned);
+                        if matches!(expr, Expr::Slice { .. })
+                            && matches!(
+                                ty,
+                                Type::IntSlice
+                                    | Type::FloatSlice
+                                    | Type::ByteSlice
+                                    | Type::BoolSlice
+                                    | Type::StrSlice
+                                    | Type::StructSlice(_)
+                                    | Type::PtrSlice(_)
+                            )
+                        {
+                            let view = value;
+                            value = self.emit_clone(view, ty);
+                            self.emit_drop(view, ty);
+                            owned = true;
+                        } else {
+                            owned = self.take_bare_string_local(expr, owned);
+                        }
                         if !owned {
                             value = self.emit_clone(value, ty);
                         }
@@ -3317,6 +3335,27 @@ impl<'a> FunctionLowerer<'a> {
                         IrError::new(format!("native IR: unknown local `{name}`"))
                     })?;
                 let (mut value, actual, mut owned) = self.lower_expr(rhs)?;
+                // A slice expression owns its heap header but borrows its
+                // backing allocation. Assignment may drop the destination's
+                // old backing, so materialize an independent slice first and
+                // release the temporary view header.
+                if matches!(rhs, Expr::Slice { .. })
+                    && matches!(
+                        actual,
+                        Type::IntSlice
+                            | Type::FloatSlice
+                            | Type::ByteSlice
+                            | Type::BoolSlice
+                            | Type::StrSlice
+                            | Type::StructSlice(_)
+                            | Type::PtrSlice(_)
+                    )
+                {
+                    let view = value;
+                    value = self.emit_clone(view, actual);
+                    self.emit_drop(view, actual);
+                    owned = true;
+                }
                 // Sequential mut capture cell: write through the shared i64 cell.
                 if let Some(&cell) = self.mut_i64_cells.get(name) {
                     if actual != Type::I64 || owned {
@@ -3779,44 +3818,6 @@ impl<'a> FunctionLowerer<'a> {
                             self.emit(Inst::DropString { value: val });
                         }
                     }
-                    Type::MapSPtr(_) => {
-                        if it != Type::Str {
-                            return Err(IrError::new(
-                                "native IR: map[string]V assignment key must be string",
-                            ));
-                        }
-                        if !vt.is_ptr_sized() {
-                            return Err(IrError::new(
-                                "native IR: map[string]V assignment value unsupported",
-                            ));
-                        }
-                        let mut v = val;
-                        if vt == Type::F64 {
-                            let bits = self.value();
-                            self.emit(Inst::Call {
-                                out: Some(bits),
-                                function: "mako_native_f64_to_bits".into(),
-                                args: vec![v],
-                                ret: Some(Type::I64),
-                            });
-                            v = bits;
-                        } else if vo {
-                            if let Expr::Ident(name) = value {
-                                self.heap_owned.insert(name.clone(), false);
-                            }
-                        } else if vt.is_heap() {
-                            v = self.emit_clone(v, vt);
-                        }
-                        self.emit(Inst::Call {
-                            out: None,
-                            function: "mako_native_map_si_set_ptr".into(),
-                            args: vec![slice, idx, v],
-                            ret: None,
-                        });
-                        if io {
-                            self.emit(Inst::DropString { value: idx });
-                        }
-                    }
                     _ => {
                         return Err(IrError::new(
                             "native IR: index assignment on unsupported base",
@@ -3899,7 +3900,25 @@ impl<'a> FunctionLowerer<'a> {
                             // The function is ending, so moving a bare owned
                             // local out is safe (it is never used afterwards);
                             // a borrow is cloned so the caller receives an owner.
-                            owned = self.take_bare_string_local(expr, owned);
+                            if matches!(expr, Expr::Slice { .. })
+                                && matches!(
+                                    ty,
+                                    Type::IntSlice
+                                        | Type::FloatSlice
+                                        | Type::ByteSlice
+                                        | Type::BoolSlice
+                                        | Type::StrSlice
+                                        | Type::StructSlice(_)
+                                        | Type::PtrSlice(_)
+                                )
+                            {
+                                let view = value;
+                                value = self.emit_clone(view, ty);
+                                self.emit_drop(view, ty);
+                                owned = true;
+                            } else {
+                                owned = self.take_bare_string_local(expr, owned);
+                            }
                             if !owned {
                                 value = self.emit_clone(value, ty);
                             }
@@ -4273,7 +4292,6 @@ impl<'a> FunctionLowerer<'a> {
             } => {
                 self.lower_select(timeout_ms, arms, default_arm.as_ref())?;
             }
-            _ => return Err(IrError::new("native IR: statement not implemented yet")),
         }
         Ok(())
     }
@@ -5524,7 +5542,6 @@ impl<'a> FunctionLowerer<'a> {
                     let tmp_name = format!("__kick_tmp_{}", slot.0);
                     self.locals.insert(tmp_name.clone(), (slot, ty));
                     self.heap_owned.insert(tmp_name, true);
-                    v = loaded;
                 }
             }
         }
@@ -7707,12 +7724,13 @@ impl<'a> FunctionLowerer<'a> {
                         }
                     }
                 }
-                // Borrowed base → non-owning *view* (C sets owned=0). IR marks
-                // it unowned so:
+                // Borrowed base → non-owning backing *view* (C sets owned=0).
+                // The pointer-ABI header itself is heap allocated, so IR marks
+                // the value owned and drops that header after its last use:
                 //   let t = s[a:b]  // shared writes into s (Go-like)
                 //   s = s[a:b]      // Assign force-clones before dropping s
-                // Marking the view owned would free s's buffer under the view.
-                Ok((out, sty, false))
+                // drop_ptr observes owned=0 and therefore never frees s's buffer.
+                Ok((out, sty, true))
             }
             Expr::Make { ty, len, cap } => {
                 // Maps / struct slices / scalar slices
@@ -9365,7 +9383,7 @@ impl<'a> FunctionLowerer<'a> {
                     return Ok((loaded, result_ty, true));
                 }
                 if function == "append" && args.len() == 2 {
-                    let (s, t, _) = self.lower_expr(&args[0])?;
+                    let (mut s, t, expression_owned) = self.lower_expr(&args[0])?;
                     if !matches!(
                         t,
                         Type::IntSlice
@@ -9406,14 +9424,22 @@ impl<'a> FunctionLowerer<'a> {
                             ))
                         }
                     }
-                    // `append` consumes its slice source — it grows the buffer in
-                    // place or reallocs and frees the old one — so an owned source
-                    // local must not be dropped again. (The Ident read reports
-                    // `owned=false`; consult the local's real ownership instead.)
-                    if let Expr::Ident(name) = &args[0] {
+                    // `append` consumes its input header. A borrowed parameter
+                    // or alias must first be cloned; otherwise append would free
+                    // a caller-owned header. An owned local/temp transfers its
+                    // header directly and is cleared from scope-drop tracking.
+                    let source_owned = if let Expr::Ident(name) = &args[0] {
                         if self.heap_owned.get(name).copied().unwrap_or(false) {
                             self.heap_owned.insert(name.clone(), false);
+                            true
+                        } else {
+                            false
                         }
+                    } else {
+                        expression_owned
+                    };
+                    if !source_owned {
+                        s = self.emit_clone(s, t);
                     }
                     let out = self.value();
                     match t {
@@ -9673,10 +9699,6 @@ impl<'a> FunctionLowerer<'a> {
                             "mako_native_maps_values_ii_as_ptr_slice",
                             Type::PtrSlice(MapValKind::Struct(eid)),
                         ),
-                        Type::MapIPtr(vk) => (
-                            "mako_native_maps_values_ii_as_ptr_slice",
-                            Type::PtrSlice(vk),
-                        ),
                         Type::MapSI => ("mako_native_maps_values_si_as_i64_ptr", Type::IntSlice),
                         // map[string]bool / scalar 0-1 values stored in SI table.
                         Type::MapSPtr(MapValKind::Other) => (
@@ -9695,6 +9717,10 @@ impl<'a> FunctionLowerer<'a> {
                         Type::MapIPtr(MapValKind::Float) => (
                             "mako_native_maps_values_ii_as_float_ptr",
                             Type::FloatSlice,
+                        ),
+                        Type::MapIPtr(vk) => (
+                            "mako_native_maps_values_ii_as_ptr_slice",
+                            Type::PtrSlice(vk),
                         ),
                         Type::MapSPtr(vk) => (
                             "mako_native_maps_values_si_ptr",
@@ -12379,7 +12405,7 @@ impl<'a> FunctionLowerer<'a> {
                 let type_name = self.structs.layout_name(id);
                 let preferred = format!("{type_name}_{method}");
                 if let Some((params, ret)) = self.signatures.get(&preferred).cloned() {
-                    let mut call_args = vec![s];
+                    let call_args = vec![s];
                     if params.len() != 1 {
                         return Err(IrError::new("native IR: method len arity mismatch"));
                     }
@@ -15404,6 +15430,24 @@ impl<'a> FunctionLowerer<'a> {
             return already_owned;
         };
         if self.heap_owned.get(name) == Some(&true) {
+            // Slice headers can represent borrowed views (owned=0 in the
+            // runtime header). Without a separate backing-ownership bit in
+            // this map, conservatively clone on ordinary transfers. Builtins
+            // such as append handle their explicit consuming move separately.
+            if matches!(
+                self.locals.get(name).map(|(_, ty)| *ty),
+                Some(
+                    Type::IntSlice
+                        | Type::FloatSlice
+                        | Type::ByteSlice
+                        | Type::BoolSlice
+                        | Type::StrSlice
+                        | Type::StructSlice(_)
+                        | Type::PtrSlice(_)
+                )
+            ) {
+                return false;
+            }
             self.heap_owned.insert(name.clone(), false);
             true
         } else {
@@ -29890,6 +29934,47 @@ mod tests {
     }
 
     #[test]
+    fn drops_borrowed_slice_headers_and_clones_escaping_views() {
+        let source = r#"
+            fn tail(xs: []int) -> []int { return xs[1:] }
+            fn main() {
+                let xs = [1, 2, 3]
+                let view = xs[1:]
+                print_int(len(view))
+                print_int(len(xs[0:1]))
+            }
+        "#;
+        let tokens = Lexer::new(source).tokenize().unwrap();
+        let program = Parser::new(tokens).parse().unwrap();
+        let module = lower(&program).unwrap();
+        let instructions = module
+            .functions
+            .iter()
+            .flat_map(|f| f.blocks.iter())
+            .flat_map(|b| &b.instructions)
+            .collect::<Vec<_>>();
+        let views = instructions
+            .iter()
+            .filter(|i| matches!(i, Inst::SliceSlice { .. }))
+            .count();
+        let drops = instructions
+            .iter()
+            .filter(|i| matches!(i, Inst::DropSlice { .. }))
+            .count();
+        assert_eq!(views, 3);
+        assert!(
+            drops >= views,
+            "every heap-allocated view header must be released"
+        );
+        assert!(
+            instructions
+                .iter()
+                .any(|i| matches!(i, Inst::SliceClone { .. })),
+            "a returned view must clone its borrowed backing"
+        );
+    }
+
+    #[test]
     fn lowers_nested_struct_fields() {
         let source = r#"
             struct Addr { city: string, zip: int }
@@ -29992,7 +30077,3 @@ mod tests {
  
 
 // gap-close 1784647512
-
-
-
-

@@ -2,7 +2,7 @@
 # Package a self-contained Mako release from a cargo-built binary.
 # Everything users need without installing Rust/cargo on their machine:
 #   bin/mako (the full release binary cargo produced)
-#   share/mako/runtime/*.h + certs
+#   share/mako/runtime/*.h + native runtime sources + certs
 #   share/mako/std/
 #   install scripts
 #
@@ -86,6 +86,9 @@ fi
 for h in "$ROOT"/runtime/*.h; do
   cp "$h" "$STAGE/share/mako/runtime/"
 done
+for c in native_runtime.c native_bridge.c; do
+  cp "$ROOT/runtime/$c" "$STAGE/share/mako/runtime/"
+done
 if [[ -d "$ROOT/runtime/certs" ]]; then
   mkdir -p "$STAGE/share/mako/runtime/certs"
   cp -R "$ROOT/runtime/certs/." "$STAGE/share/mako/runtime/certs/"
@@ -129,7 +132,7 @@ cat > "$STAGE/README.txt" << EOF
 Mako release layout ($NAME) — $MODE_LABEL package
 
   bin/mako                 — compiler CLI (stripped)
-  share/mako/runtime/      — C runtime headers (required to compile .mko)
+  share/mako/runtime/      — runtime headers and native support sources
   share/mako/std/          — standard library sources
   scripts/install.sh       — install this artifact into PREFIX
   scripts/install-release.sh — one-shot download + verify + install

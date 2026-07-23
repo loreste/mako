@@ -467,6 +467,12 @@ if [[ ! -x "$STAGE/bin/mako" ]]; then
   ls -laR "$WORK" >&2 || true
   exit 1
 fi
+for source in native_runtime.c native_bridge.c; do
+  if [[ ! -f "$STAGE/share/mako/runtime/$source" ]]; then
+    echo "error: archive missing share/mako/runtime/$source" >&2
+    exit 1
+  fi
+done
 
 BIN_DIR="$PREFIX/bin"
 SHARE_DIR="$PREFIX/share/mako"
@@ -482,6 +488,9 @@ if [[ -d "$STAGE/share/mako/runtime" ]]; then
   shopt -s nullglob
   for h in "$STAGE/share/mako/runtime"/*.h; do
     install -m 644 "$h" "$RUNTIME_DST/"
+  done
+  for source in native_runtime.c native_bridge.c; do
+    install -m 644 "$STAGE/share/mako/runtime/$source" "$RUNTIME_DST/"
   done
   if [[ -d "$STAGE/share/mako/runtime/certs" ]]; then
     mkdir -p "$RUNTIME_DST/certs"
@@ -537,10 +546,12 @@ echo "  distro:  $(detect_distro)"
 echo "  runtime: $RUNTIME_DST"
 echo "  stdlib:  $STD_DST"
 echo "  env:     $SHARE_DIR/env.sh"
-echo ""
-echo "Environment profile persistence:"
-echo "  System & user profiles updated (~/.bashrc, ~/.profile, /etc/profile.d/mako.sh)."
-echo "  Mako will be automatically available in new shell sessions & after reboot."
+if [[ "$MODIFY_SHELL" -eq 1 ]]; then
+  echo ""
+  echo "Environment profile persistence:"
+  echo "  Shell profile setup was requested; see the shell setup result above."
+  echo "  Mako will be available in new shells after a successful profile update."
+fi
 echo ""
 echo "To activate Mako in your CURRENT shell session right now:"
 echo "  source \"$SHARE_DIR/env.sh\""

@@ -34,6 +34,9 @@ Copy-Item $Bin (Join-Path $Stage "bin\mako.exe")
 Get-ChildItem (Join-Path $Root "runtime\*.h") | ForEach-Object {
     Copy-Item $_.FullName $Runtime
 }
+foreach ($Source in @("native_runtime.c", "native_bridge.c")) {
+    Copy-Item (Join-Path $Root "runtime\$Source") $Runtime
+}
 $Certs = Join-Path $Root "runtime\certs"
 if (Test-Path $Certs) {
     Copy-Item $Certs (Join-Path $Runtime "certs") -Recurse
@@ -66,7 +69,7 @@ Copy-Item (Join-Path $Root "scripts\install-release.sh") (Join-Path $Scripts "in
 Mako release layout ($ArtifactName)
 
   bin\mako.exe              — compiler CLI
-  share\mako\runtime\       — C runtime headers (required to compile .mko)
+  share\mako\runtime\       — runtime headers and native support sources
   share\mako\std\           — standard library sources
   share\mako\editors\       — editor integration scaffolds
   share\mako\docs\          — release docs snapshot
