@@ -206,9 +206,15 @@ enum Commands {
         /// Focus a single workspace member (name from `[workspace] members`)
         #[arg(short = 'p', long = "package")]
         package: Option<String>,
-        /// Emit machine-readable JSON diagnostics (array for multi-package checks)
-        #[arg(long, default_value_t = false)]
-        json: bool,
+        /// Emit JSON diagnostics; use `--json=v1` for the versioned schema
+        #[arg(
+            long,
+            value_enum,
+            num_args = 0..=1,
+            default_missing_value = "legacy",
+            require_equals = true
+        )]
+        json: Option<CheckJsonCli>,
         /// Disable incremental typecheck cache (default: on)
         #[arg(long, default_value_t = false)]
         no_incremental: bool,
@@ -488,6 +494,14 @@ enum Commands {
     },
     /// Minimal language server (stdio JSON-RPC: initialize / hover / shutdown)
     Lsp,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
+enum CheckJsonCli {
+    /// Preserve the original array output used by existing consumers.
+    Legacy,
+    /// Emit the versioned `mako check` report envelope.
+    V1,
 }
 
 #[derive(Subcommand)]
@@ -2003,20 +2017,35 @@ fn cmd_dev(
     }
 }
 
-fn cmd_check(path: &Path, package: Option<&str>, incremental: bool, json: bool) -> Result<(), ()> {
-    let targets = resolve_compile_targets(path, package)?;
-    if json {
-        let mut reports = Vec::new();
-        let mut ok = true;
-        for t in &targets {
-            let (file_ok, report) = tooling::check_file_json_report(t);
-            if !file_ok {
-                ok = false;
-            }
-            reports.push(report);
+fn cmd_check(
+    path: &Path,
+    package: Option<&str>,
+    incremental: bool,
+    json: Option<CheckJsonCli>,
+) -> Result<(), ()> {
+    let targets = match resolve_compile_targets(path, package) {
+        Ok(targets) => targets,
+        Err(()) if matches!(json, Some(CheckJsonCli::V1)) => {
+            let report = tooling::CheckCommandReport::command_error(
+                "could not resolve check targets; details were written to stderr",
+            );
+            println!("{}", report.to_json());
+            return Err(());
         }
-        println!("[{}]", reports.join(","));
-        return if ok { Ok(()) } else { Err(()) };
+        Err(()) => return Err(()),
+    };
+    if let Some(format) = json {
+        let report = tooling::CheckCommandReport::new(
+            targets
+                .iter()
+                .map(|target| tooling::check_file_report(target))
+                .collect(),
+        );
+        match format {
+            CheckJsonCli::Legacy => println!("{}", report.to_legacy_json()),
+            CheckJsonCli::V1 => println!("{}", report.to_json()),
+        }
+        return if report.ok() { Ok(()) } else { Err(()) };
     }
     let multi = targets.len() > 1;
     let incr = make_incr_opts(
@@ -5084,6 +5113,38 @@ fn nearest_package_name(start: &Path) -> Option<String> {
         }
     }
     None
+}
+
+#[cfg(test)]
+mod check_json_cli_tests {
+    use super::{CheckJsonCli, Cli, Commands};
+    use clap::Parser;
+    use std::path::PathBuf;
+
+    fn parse_check(args: &[&str]) -> (PathBuf, Option<CheckJsonCli>) {
+        let cli = Cli::try_parse_from(args).unwrap();
+        match cli.command {
+            Commands::Check { file, json, .. } => (file, json),
+            _ => panic!("expected check command"),
+        }
+    }
+
+    #[test]
+    fn bare_json_keeps_the_legacy_format() {
+        let (file, json) = parse_check(&["mako", "check", "--json", "main.mko"]);
+
+        assert_eq!(file, PathBuf::from("main.mko"));
+        assert_eq!(json, Some(CheckJsonCli::Legacy));
+    }
+
+    #[test]
+    fn versioned_json_requires_an_explicit_value() {
+        let (file, json) = parse_check(&["mako", "check", "--json=v1", "main.mko"]);
+
+        assert_eq!(file, PathBuf::from("main.mko"));
+        assert_eq!(json, Some(CheckJsonCli::V1));
+        assert!(Cli::try_parse_from(["mako", "check", "--json=v2", "main.mko"]).is_err());
+    }
 }
 
 #[cfg(test)]

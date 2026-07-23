@@ -78,6 +78,30 @@ jobs:
           printf '%s' "$failure_json" |
             python -c 'import json,sys; r=json.load(sys.stdin); f=r["runs"][0]["files"][0]; assert not r["ok"] and f["status"] == "failed" and f["failure"]["kind"] == "exit"'
 
+      - name: JSON check report
+        shell: bash
+        run: |
+          legacy_json="$(./target/release/mako check --json examples/testing/add_test.mko)"
+          printf '%s' "$legacy_json" |
+            python -c 'import json,sys; r=json.load(sys.stdin); assert isinstance(r, list) and r[0]["ok"] and "schemaVersion" not in r[0]'
+          versioned_json="$(./target/release/mako check --json=v1 examples/testing/add_test.mko)"
+          printf '%s' "$versioned_json" |
+            python -c 'import json,sys; r=json.load(sys.stdin); assert r["schemaVersion"] == 1 and r["command"] == "check" and r["ok"] and r["summary"]["passed"] == 1'
+          set +e
+          failure_json="$(./target/release/mako check --json=v1 examples/bad/labeled_break_unknown.mko)"
+          failure_status=$?
+          set -e
+          test "$failure_status" -ne 0
+          printf '%s' "$failure_json" |
+            python -c 'import json,sys; r=json.load(sys.stdin); assert not r["ok"] and r["summary"]["failed"] == 1 and r["targets"][0]["diagnostics"]'
+          set +e
+          resolution_json="$(./target/release/mako check --json=v1 examples/ci/missing-check-input.mko 2>/dev/null)"
+          resolution_status=$?
+          set -e
+          test "$resolution_status" -ne 0
+          printf '%s' "$resolution_json" |
+            python -c 'import json,sys; r=json.load(sys.stdin); assert not r["ok"] and not r["targets"] and r["errors"]'
+
       - name: Validate compiler benchmark matrix
         if: runner.os == 'Linux'
         run: >-

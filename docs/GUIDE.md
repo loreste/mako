@@ -2348,7 +2348,8 @@ cargo run --release -- test examples/testing -r '/Add|Mul/'
 
 ```bash
 mako check path.mko          # lex, parse, typecheck (incremental)
-mako check --json path.mko   # JSON diagnostics for CI/IDE/AI tooling
+mako check --json path.mko   # legacy JSON diagnostics array
+mako check --json=v1 path.mko # versioned report for new integrations
 mako build path.mko -o bin   # → C → .o cache → link (debug -O0; --release -O3 -flto)
 mako build -j 8 --no-incremental path.mko   # parallel jobs; disable cache
 mako run path.mko [-- args...]   # compile + run; trailing args → argc/args
