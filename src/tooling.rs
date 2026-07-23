@@ -4516,6 +4516,7 @@ impl TestCommandReport {
 }
 
 fn normalized_duration(duration_ms: f64) -> f64 {
+    // Keep stable JSON formatting from emitting "-0.000".
     duration_ms + 0.0
 }
 

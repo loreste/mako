@@ -189,7 +189,7 @@ Repeats stop at the first failing iteration.
 
 `mako test --json` emits one object with `schemaVersion: 1`. It records each
 iteration and test file, matched function names, duration, captured stdout and
-stderr, and structured exit, signal, timeout, compile, or runner failures.
+stderr, and structured exit, signal, timeout, compile, runner, or load failures.
 Coverage data is included when `--coverage` is also present. Test-process output
 is captured rather than mixed into the JSON stream and is capped at 1 MiB per
 stream with explicit truncation flags. The command exits nonzero if a run fails.

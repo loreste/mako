@@ -2352,7 +2352,7 @@ mako check --json path.mko   # JSON diagnostics for CI/IDE/AI tooling
 mako build path.mko -o bin   # → C → .o cache → link (debug -O0; --release -O3 -flto)
 mako build -j 8 --no-incremental path.mko   # parallel jobs; disable cache
 mako run path.mko [-- args...]   # compile + run; trailing args → argc/args
-mako test [path] [--run PAT] [-v] [--count N] [--coverage] [--json]  # tests + categories
+mako test [path] [--run PAT] [-v] [--count N] [--coverage] [--json] [--race] [--sanitize TYPE] [-p NAME]  # tests + categories
 mako fmt [paths...] [-w|-l|-d] [-p NAME]   # formatter: stdout / write / list / diff
 mako lint [path] [-p NAME]            # workspace-aware typecheck + rules
 mako bench [path] [-p NAME] [--json]  # workspace-aware bench_*.mko wall time
