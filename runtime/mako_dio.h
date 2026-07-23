@@ -29,6 +29,34 @@ static inline size_t mako_win_file_alignment(HANDLE handle) {
     return 4096;
 }
 
+static inline int mako_win_write(int fd, const char *data, unsigned int count) {
+    int wrote = _write(fd, data, count);
+    if (wrote >= 0 || errno != EINVAL) return wrote;
+
+    HANDLE handle = mako_win_file_handle(fd);
+    if (handle == INVALID_HANDLE_VALUE) return -1;
+    void *aligned = _aligned_malloc(count, mako_win_file_alignment(handle));
+    if (!aligned) return -1;
+    memcpy(aligned, data, count);
+    wrote = _write(fd, aligned, count);
+    _aligned_free(aligned);
+    return wrote;
+}
+
+static inline int mako_win_read(int fd, char *data, unsigned int count) {
+    int got = _read(fd, data, count);
+    if (got >= 0 || errno != EINVAL) return got;
+
+    HANDLE handle = mako_win_file_handle(fd);
+    if (handle == INVALID_HANDLE_VALUE) return -1;
+    void *aligned = _aligned_malloc(count, mako_win_file_alignment(handle));
+    if (!aligned) return -1;
+    got = _read(fd, aligned, count);
+    if (got > 0) memcpy(data, aligned, (size_t)got);
+    _aligned_free(aligned);
+    return got;
+}
+
 static inline int64_t mako_file_open(MakoString path, int64_t mode, int64_t flags) {
     char pbuf[4096];
     if (mako_fs_path_buf(path, pbuf, sizeof(pbuf)) < 0) return -1;
@@ -173,7 +201,7 @@ static inline int64_t mako_file_append(int64_t fd, MakoString data) {
     while (total < data.len) {
         size_t remaining = data.len - total;
         unsigned int chunk = remaining > 0x7ffff000U ? 0x7ffff000U : (unsigned int)remaining;
-        int wrote = _write((int)fd, data.data + total, chunk);
+        int wrote = mako_win_write((int)fd, data.data + total, chunk);
         if (wrote <= 0) return total > 0 ? (int64_t)total : -1;
         total += (size_t)wrote;
     }
@@ -232,13 +260,24 @@ static inline int64_t mako_fallocate(int64_t fd, int64_t size) {
 
     HANDLE handle = mako_win_file_handle(fd);
     if (handle == INVALID_HANDLE_VALUE) return -1;
+    FILE_STANDARD_INFO standard;
+    BOOL have_standard = GetFileInformationByHandleEx(
+        handle, FileStandardInfo, &standard, sizeof(standard)
+    );
     FILE_ALLOCATION_INFO allocation;
     allocation.AllocationSize.QuadPart = size;
     if (!SetFileInformationByHandle(
             handle, FileAllocationInfo, &allocation, sizeof(allocation))) {
         return -1;
     }
-    return _chsize_s((int)fd, (__int64)size) == 0 ? 0 : -1;
+    if (_chsize_s((int)fd, (__int64)size) == 0) return 0;
+    if (have_standard) {
+        allocation.AllocationSize = standard.AllocationSize;
+        (void)SetFileInformationByHandle(
+            handle, FileAllocationInfo, &allocation, sizeof(allocation)
+        );
+    }
+    return -1;
 }
 
 static inline int64_t mako_file_size(int64_t fd) {
@@ -280,7 +319,7 @@ static inline MakoString mako_file_read_exact(int64_t fd, int64_t count) {
     while (total < (size_t)count) {
         size_t remaining = (size_t)count - total;
         unsigned int chunk = remaining > 0x7ffff000U ? 0x7ffff000U : (unsigned int)remaining;
-        int got = _read((int)fd, buf + total, chunk);
+        int got = mako_win_read((int)fd, buf + total, chunk);
         if (got <= 0) break;
         total += (size_t)got;
     }

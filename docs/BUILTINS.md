@@ -324,8 +324,8 @@ config/log updates. Tests: `examples/testing/fs_storage_test.mko`.
 **flags** bits: `1`=create, `2`=truncate, `4`=append, `8`=dsync/write-through,
 `16`=direct/unbuffered, `32`=exclusive create. These operations, memory maps,
 and WAL files are supported on Windows, Linux, and macOS. Direct mode retains
-the operating system's size and offset alignment requirements. Windows aligns
-ordinary Mako string buffers before issuing unbuffered reads and writes.
+the operating system's size and offset alignment requirements. When those
+requirements are met, Windows supplies aligned buffers for ordinary Mako strings.
 
 ---
 
