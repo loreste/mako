@@ -6877,6 +6877,43 @@ impl TypeChecker {
             "profile_http_route".into(),
             Type::Fn(vec![Type::String], Box::new(Type::String)),
         );
+        // Adaptive hot-site counters: years-up feedback without online JIT.
+        fns.insert(
+            "hot_site_enable".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "hot_site_enabled".into(),
+            Type::Fn(vec![], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "hot_site_clear".into(),
+            Type::Fn(vec![], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "hot_site_hit".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "hot_site_count".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "hot_site_total".into(),
+            Type::Fn(vec![], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "hot_site_top_id".into(),
+            Type::Fn(vec![], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "hot_site_top_count".into(),
+            Type::Fn(vec![], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "hot_sites_json".into(),
+            Type::Fn(vec![], Box::new(Type::String)),
+        );
         fns.insert(
             "ecs_world_new".into(),
             Type::Fn(vec![Type::Int], Box::new(Type::Int)),

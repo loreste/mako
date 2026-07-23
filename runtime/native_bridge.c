@@ -6412,6 +6412,42 @@ MakoNativeString *mako_native_profile_http_route_ptr(MakoNativeString *a0) {
     return ret;
 }
 
+int64_t mako_native_hot_site_enable(int64_t a0) {
+    return (int64_t)mako_hot_site_enable(a0);
+}
+
+int64_t mako_native_hot_site_enabled(void) {
+    return (int64_t)mako_hot_site_enabled();
+}
+
+int64_t mako_native_hot_site_clear(void) {
+    return (int64_t)mako_hot_site_clear();
+}
+
+int64_t mako_native_hot_site_hit(int64_t a0) {
+    return (int64_t)mako_hot_site_hit(a0);
+}
+
+int64_t mako_native_hot_site_count(int64_t a0) {
+    return (int64_t)mako_hot_site_count(a0);
+}
+
+int64_t mako_native_hot_site_total(void) {
+    return (int64_t)mako_hot_site_total();
+}
+
+int64_t mako_native_hot_site_top_id(void) {
+    return (int64_t)mako_hot_site_top_id();
+}
+
+int64_t mako_native_hot_site_top_count(void) {
+    return (int64_t)mako_hot_site_top_count();
+}
+
+MakoNativeString *mako_native_hot_sites_json_ptr(void) {
+    return bridge_take_str(mako_hot_sites_json());
+}
+
 MakoNativeString *mako_native_quic_initial_client_hp_hex_ptr(MakoNativeString *a0) {
     MakoNativeString *ret = bridge_take_str(mako_quic_initial_client_hp_hex(bridge_borrow_str(a0)));
     return ret;

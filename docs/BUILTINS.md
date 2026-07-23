@@ -2208,6 +2208,17 @@ Tests: `examples/testing/strong_log_test.mko`.
 | `profile_sample_count` / `len` | `() -> int` | Total recorded · slots filled |
 | `profile_sample_cpu_us` / `wall_ns` | `() -> int` | CPU / wall while active |
 | `profile_samples_json` | `() -> string` | Export `mako.profile_samples.v1` |
+| `hot_site_enable` | `(on: int) -> int` | Enable (1) / disable (0) counters; returns previous |
+| `hot_site_enabled` | `() -> int` | 0/1 master switch (default off) |
+| `hot_site_clear` | `() -> int` | Zero all site counters |
+| `hot_site_hit` | `(id: int) -> int` | Hit site `0..255`; 0 if disabled; −1 if bad id |
+| `hot_site_count` | `(id: int) -> int` | Count for site |
+| `hot_site_total` | `() -> int` | Sum of hits since clear |
+| `hot_site_top_id` / `hot_site_top_count` | `() -> int` | Hottest site (−1 id if empty) |
+| `hot_sites_json` | `() -> string` | Export `mako.hot_sites.v1` |
+
+Adaptive opt (no online JIT): [ADAPTIVE_OPT.md](ADAPTIVE_OPT.md). HTTP seed path
+`/debug/hot_sites` via `profile_http_route`.
 
 ---
 

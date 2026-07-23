@@ -23490,6 +23490,38 @@ impl Codegen {
                 self.line(&format!("MakoString {tmp} = mako_profile_http_route({p});"));
                 return ("MakoString".into(), tmp);
             }
+            "hot_site_enable" => {
+                let (_, on) = self.emit_expr(&args[0]);
+                return ("int64_t".into(), format!("mako_hot_site_enable({on})"));
+            }
+            "hot_site_enabled" => {
+                return ("int64_t".into(), "mako_hot_site_enabled()".into());
+            }
+            "hot_site_clear" => {
+                return ("int64_t".into(), "mako_hot_site_clear()".into());
+            }
+            "hot_site_hit" => {
+                let (_, id) = self.emit_expr(&args[0]);
+                return ("int64_t".into(), format!("mako_hot_site_hit({id})"));
+            }
+            "hot_site_count" => {
+                let (_, id) = self.emit_expr(&args[0]);
+                return ("int64_t".into(), format!("mako_hot_site_count({id})"));
+            }
+            "hot_site_total" => {
+                return ("int64_t".into(), "mako_hot_site_total()".into());
+            }
+            "hot_site_top_id" => {
+                return ("int64_t".into(), "mako_hot_site_top_id()".into());
+            }
+            "hot_site_top_count" => {
+                return ("int64_t".into(), "mako_hot_site_top_count()".into());
+            }
+            "hot_sites_json" => {
+                let tmp = self.fresh("hsj");
+                self.line(&format!("MakoString {tmp} = mako_hot_sites_json();"));
+                return ("MakoString".into(), tmp);
+            }
             "ecs_world_new" => {
                 let (_, cap) = self.emit_expr(&args[0]);
                 return ("int64_t".into(), format!("mako_ecs_world_new({cap})"));
@@ -40939,6 +40971,38 @@ impl Codegen {
                             let (_, p) = self.emit_expr(&args[0]);
                             let tmp = self.fresh("phr");
                             self.line(&format!("MakoString {tmp} = mako_profile_http_route({p});"));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "hot_site_enable" => {
+                            let (_, on) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_hot_site_enable({on})"));
+                        }
+                        "hot_site_enabled" => {
+                            return ("int64_t".into(), "mako_hot_site_enabled()".into());
+                        }
+                        "hot_site_clear" => {
+                            return ("int64_t".into(), "mako_hot_site_clear()".into());
+                        }
+                        "hot_site_hit" => {
+                            let (_, id) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_hot_site_hit({id})"));
+                        }
+                        "hot_site_count" => {
+                            let (_, id) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_hot_site_count({id})"));
+                        }
+                        "hot_site_total" => {
+                            return ("int64_t".into(), "mako_hot_site_total()".into());
+                        }
+                        "hot_site_top_id" => {
+                            return ("int64_t".into(), "mako_hot_site_top_id()".into());
+                        }
+                        "hot_site_top_count" => {
+                            return ("int64_t".into(), "mako_hot_site_top_count()".into());
+                        }
+                        "hot_sites_json" => {
+                            let tmp = self.fresh("hsj");
+                            self.line(&format!("MakoString {tmp} = mako_hot_sites_json();"));
                             return ("MakoString".into(), tmp);
                         }
                         "ecs_world_new" => {

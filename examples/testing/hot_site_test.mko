@@ -1,0 +1,58 @@
+// Adaptive hot-site counters — years-up feedback without online JIT.
+
+fn TestHotSiteDisabledByDefault() {
+    assert_eq(hot_site_clear(), 1)
+    // Default off: hits are free no-ops.
+    assert_eq(hot_site_enabled(), 0)
+    assert_eq(hot_site_hit(1), 0)
+    assert_eq(hot_site_count(1), 0)
+    assert_eq(hot_site_total(), 0)
+}
+
+fn TestHotSiteHitAndTop() {
+    assert_eq(hot_site_clear(), 1)
+    let prev = hot_site_enable(1)
+    assert_eq(prev, 0)
+    assert_eq(hot_site_enabled(), 1)
+
+    assert_eq(hot_site_hit(7), 1)
+    assert_eq(hot_site_hit(7), 2)
+    assert_eq(hot_site_hit(3), 1)
+    assert_eq(hot_site_hit(7), 3)
+    assert_eq(hot_site_count(7), 3)
+    assert_eq(hot_site_count(3), 1)
+    assert_eq(hot_site_total(), 4)
+    assert_eq(hot_site_top_id(), 7)
+    assert_eq(hot_site_top_count(), 3)
+
+    let js = hot_sites_json()
+    assert(str_contains(js, "mako.hot_sites.v1"))
+    assert(str_contains(js, "\"id\":7"))
+    assert(str_contains(js, "\"count\":3"))
+    assert(str_contains(js, "total_hits"))
+
+    // Disable: further hits must not move counters.
+    assert_eq(hot_site_enable(0), 1)
+    assert_eq(hot_site_hit(7), 0)
+    assert_eq(hot_site_count(7), 3)
+    assert_eq(hot_site_total(), 4)
+
+    // HTTP export seed
+    let _ = hot_site_enable(1)
+    let http = profile_http_route("/debug/hot_sites")
+    assert(str_contains(http, "HTTP/1.0 200"))
+    assert(str_contains(http, "mako.hot_sites.v1"))
+
+    assert_eq(hot_site_clear(), 1)
+    assert_eq(hot_site_total(), 0)
+    assert_eq(hot_site_top_id(), -1)
+    assert_eq(hot_site_enable(0), 1)
+}
+
+fn TestHotSiteBadId() {
+    assert_eq(hot_site_enable(1), 0)
+    assert_eq(hot_site_hit(-1), -1)
+    assert_eq(hot_site_hit(256), -1)
+    assert_eq(hot_site_count(-1), -1)
+    assert_eq(hot_site_enable(0), 1)
+}

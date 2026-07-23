@@ -1,6 +1,22 @@
 # Changelog
 
-## 0.4.13 — 2026-07-23 (tip; tag when packaging cut)
+## 0.4.14 — 2026-07-22 (tip; tag when packaging cut)
+
+**Theme:** Adaptive optimization without online JIT — longer-running services
+get better via **offline** feedback, not in-process code rewrite. No GC.
+
+### Adaptive opt (LR-4b)
+
+- **`hot_site_*` builtins** — opt-in relaxed atomic counters (256 sites).
+  Default **off** (hit is one load + branch). Export `mako.hot_sites.v1` and
+  HTTP `/debug/hot_sites` via `profile_http_route`.
+- **Docs:** [docs/ADAPTIVE_OPT.md](docs/ADAPTIVE_OPT.md) — Java-like *learning*
+  without warmup/deopt/code-cache tax; contract is AOT always + offline PGO.
+- **Script:** `scripts/adaptive-opt-cycle.sh` (AOT + guidance + `pgo-build.sh`).
+- **Test:** `examples/testing/hot_site_test.mko`.
+- LONG_RUNNING / PERFORMANCE / BUILTINS updated.
+
+## 0.4.13 — 2026-07-23
 
 **Theme:** Language-level `queue[T]` and `Graphql` (not only free functions).
 

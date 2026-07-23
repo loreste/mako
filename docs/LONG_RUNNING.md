@@ -5,7 +5,7 @@ backend services that stay up for **months to years** — not only for microbenc
 fib, but for **stable latency, stable RSS, and no GC tax**.
 
 This is a product commitment, not a completed claim. Evidence is built in
-patches (soaks, gates, docs). Last sync: **2026-07-22** · tip **0.4.9+**.
+patches (soaks, gates, docs). Last sync: **2026-07-22** · tip **0.4.14**.
 
 Related: [SPEED.md](SPEED.md) · [PERFORMANCE.md](PERFORMANCE.md) ·
 [MEMORY_MODEL.md](MEMORY_MODEL.md) · [SECURITY.md](SECURITY.md) ·
@@ -19,7 +19,7 @@ Related: [SPEED.md](SPEED.md) · [PERFORMANCE.md](PERFORMANCE.md) ·
 |---------|----------------------|------------------|
 | Time scale | milliseconds | months–years |
 | Failure mode | slow code | **RSS creep**, fd/thread leaks, p99 spikes |
-| Optimizer | AOT `-O3 -flto` | AOT + PGO; **no JIT warmup tax** |
+| Optimizer | AOT `-O3 -flto` | AOT + offline PGO + cheap hot-site feedback; **no JIT warmup tax** |
 | Memory | peak of one run | **steady-state** after warmup |
 | Latency | mean | **p99 / p999** under load |
 
@@ -84,6 +84,7 @@ without ever taking a GC.
 | **LR-2 Runtime trust** | TSan soaks, channel stress, cancel/deadline | ROADMAP **0.5.2** |
 | **LR-3 Allocators** | mimalloc/jemalloc link knobs for long-run fragmentation | `MAKO_ALLOCATOR` / `MAKO_LDFLAGS` (**done seed**) |
 | **LR-4 PGO / LTO product** | Two-pass PGO recipe for release servers | `scripts/pgo-build.sh` (**done seed**) |
+| **LR-4b Adaptive opt** | Java-like learning **without** online JIT | `hot_site_*` + [ADAPTIVE_OPT.md](ADAPTIVE_OPT.md) + `adaptive-opt-cycle.sh` (**done seed**) |
 | **LR-5 Observability** | pprof / metrics without GC pauses | `mako profile-serve` depth |
 | **LR-6 HTTP / net soaks** | Accept loop under load, RSS while serving | `scripts/http-long-run-soak.sh` (**done seed**) |
 | **LR-7 Claims honesty** | Published soaks vs JVM *only* when methodology is public | no invented numbers |
@@ -176,10 +177,22 @@ MAKO_LDFLAGS="-L/opt/homebrew/lib -lmimalloc" mako build --release app.mko -o ap
 Default remains the **system** allocator. Prefer measuring with
 `http-long-run-soak` / `long-run-soak` before and after.
 
-### PGO (LR-4)
+### PGO (LR-4) and adaptive opt without JIT (LR-4b)
+
+We want the *learning* property of Java JIT (traffic teaches the optimizer)
+without the *slowdown* property (warmup, deopt, in-process compiler, GC).
+
+- **Live process:** full AOT; optional `hot_site_hit(id)` (relaxed atomic when
+  enabled). **Never** rewrite machine code in-process. Details:
+  [ADAPTIVE_OPT.md](ADAPTIVE_OPT.md).
+- **Offline:** two-pass PGO under representative load; blue/green the result.
 
 ```bash
-# Full two-pass recipe (instrument → train → merge → rebuild):
+# Adaptive cycle (AOT + guidance note + offline PGO):
+./scripts/adaptive-opt-cycle.sh examples/bench/http_long_run_server.mko \
+  -o out/http_pgo -- 2000 19820
+
+# Full two-pass recipe only:
 ./scripts/pgo-build.sh examples/bench/http_long_run_server.mko \
   -o out/http_pgo -- 2000 19820
 
@@ -192,6 +205,7 @@ MAKO_PGO_USE=out/pgo/merged.profdata mako build --release app.mko -o app
 
 Train on **representative** traffic (same shapes as production). Combine with
 release **LTO** (default) and optional `MAKO_ALLOCATOR`.
+**Do not** ship `MAKO_PGO_GEN` instrumentation to years-up production boxes.
 
 These gates prove the **steady-state memory contract** under compressed load —
 the main failure mode that ends “years-up” processes early — not multi-year

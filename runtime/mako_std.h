@@ -2192,6 +2192,9 @@ static inline MakoString mako_profile_samples_pprof_text(void) {
     return (MakoString){buf, len};
 }
 
+/* Forward: defined with adaptive hot-site counters below. */
+static inline MakoString mako_hot_sites_json(void);
+
 /* Continuous-ish export: pprof-text body suitable for GET /debug/pprof/text. */
 static inline MakoString mako_profile_pprof_http_body(void) {
     MakoString body = mako_profile_samples_pprof_text();
@@ -2263,9 +2266,30 @@ static inline MakoString mako_profile_http_route(MakoString path) {
         }
         return (MakoString){buf, (size_t)n};
     }
+    if (path.len >= 16 && memcmp(path.data, "/debug/hot_sites", 16) == 0) {
+        MakoString body = mako_hot_sites_json();
+        size_t cap = body.len + 128;
+        char *buf = (char *)malloc(cap);
+        if (!buf) {
+            mako_str_free(body);
+            abort();
+        }
+        int n = snprintf(
+            buf, cap,
+            "HTTP/1.0 200 OK\r\nContent-Type: application/json\r\n"
+            "Content-Length: %zu\r\nConnection: close\r\n\r\n%.*s",
+            body.len, (int)body.len, body.data ? body.data : ""
+        );
+        mako_str_free(body);
+        if (n < 0) {
+            free(buf);
+            return mako_str_from_cstr("");
+        }
+        return (MakoString){buf, (size_t)n};
+    }
     return mako_str_from_cstr(
         "HTTP/1.0 404 Not Found\r\nContent-Type: text/plain\r\n\r\n"
-        "paths: /debug/pprof/text /debug/pprof/json /debug/profile\n"
+        "paths: /debug/pprof/text /debug/pprof/json /debug/profile /debug/hot_sites\n"
     );
 }
 
@@ -2286,6 +2310,137 @@ static inline int64_t mako_profile_sample_thread_count(void) {
         if (!found && nseen < MAKO_PROF_SAMPLE_MAX) seen[nseen++] = tid;
     }
     return nseen;
+}
+
+/* ---- Adaptive hot-site counters (years-up feedback without JIT) ----------
+ * Java-like "gets smarter from traffic" via *offline* re-opt, not in-process
+ * code rewrite. When disabled, hit() is a single relaxed load + branch.
+ * When enabled, hit is one relaxed atomic increment — no stack walks, no
+ * safepoints, no code cache, no GC. Export JSON for ops; train next binary
+ * with scripts/pgo-build.sh / scripts/adaptive-opt-cycle.sh.
+ */
+#define MAKO_HOT_SITE_MAX 256
+
+static atomic_llong mako_hot_site_counts[MAKO_HOT_SITE_MAX];
+static atomic_int mako_hot_site_on = 0;
+static atomic_llong mako_hot_site_hits_total = 0;
+
+/* Enable (1) / disable (0) counters. Returns previous mode. Default: off. */
+static inline int64_t mako_hot_site_enable(int64_t on) {
+    int prev = atomic_exchange_explicit(
+        &mako_hot_site_on, on ? 1 : 0, memory_order_relaxed);
+    return (int64_t)prev;
+}
+
+static inline int64_t mako_hot_site_enabled(void) {
+    return (int64_t)atomic_load_explicit(&mako_hot_site_on, memory_order_relaxed);
+}
+
+/* Zero all site counters and the total hit counter. */
+static inline int64_t mako_hot_site_clear(void) {
+    for (int i = 0; i < MAKO_HOT_SITE_MAX; i++) {
+        atomic_store_explicit(&mako_hot_site_counts[i], 0, memory_order_relaxed);
+    }
+    atomic_store_explicit(&mako_hot_site_hits_total, 0, memory_order_relaxed);
+    return 1;
+}
+
+/* Record one hit on site id (0..255). No-op when disabled (returns 0).
+ * When enabled, returns the new count for that site. */
+static inline int64_t mako_hot_site_hit(int64_t id) {
+    if (!atomic_load_explicit(&mako_hot_site_on, memory_order_relaxed)) return 0;
+    if (id < 0 || id >= MAKO_HOT_SITE_MAX) return -1;
+    atomic_fetch_add_explicit(&mako_hot_site_hits_total, 1, memory_order_relaxed);
+    long long v = atomic_fetch_add_explicit(
+        &mako_hot_site_counts[(int)id], 1, memory_order_relaxed);
+    return (int64_t)(v + 1);
+}
+
+static inline int64_t mako_hot_site_count(int64_t id) {
+    if (id < 0 || id >= MAKO_HOT_SITE_MAX) return -1;
+    return (int64_t)atomic_load_explicit(
+        &mako_hot_site_counts[(int)id], memory_order_relaxed);
+}
+
+static inline int64_t mako_hot_site_total(void) {
+    return (int64_t)atomic_load_explicit(&mako_hot_site_hits_total, memory_order_relaxed);
+}
+
+/* Hottest site id in 0..255 (ties → lowest id). -1 if all zero. */
+static inline int64_t mako_hot_site_top_id(void) {
+    long long best = 0;
+    int best_i = -1;
+    for (int i = 0; i < MAKO_HOT_SITE_MAX; i++) {
+        long long c = atomic_load_explicit(
+            &mako_hot_site_counts[i], memory_order_relaxed);
+        if (c > best) {
+            best = c;
+            best_i = i;
+        }
+    }
+    return (int64_t)best_i;
+}
+
+static inline int64_t mako_hot_site_top_count(void) {
+    int64_t id = mako_hot_site_top_id();
+    if (id < 0) return 0;
+    return mako_hot_site_count(id);
+}
+
+/* Compact JSON: only non-zero sites (keeps export cheap for long runs). */
+static inline MakoString mako_hot_sites_json(void) {
+    size_t cap = 2048;
+    char *buf = (char *)malloc(cap);
+    if (!buf) abort();
+    size_t len = 0;
+    int n = snprintf(
+        buf, cap,
+        "{\"schema\":\"mako.hot_sites.v1\",\"enabled\":%" PRId64
+        ",\"slots\":%d,\"total_hits\":%" PRId64
+        ",\"top_id\":%" PRId64 ",\"top_count\":%" PRId64 ",\"sites\":[",
+        mako_hot_site_enabled(),
+        MAKO_HOT_SITE_MAX,
+        mako_hot_site_total(),
+        mako_hot_site_top_id(),
+        mako_hot_site_top_count()
+    );
+    if (n > 0) len = (size_t)n;
+    int first = 1;
+    for (int i = 0; i < MAKO_HOT_SITE_MAX; i++) {
+        long long c = atomic_load_explicit(
+            &mako_hot_site_counts[i], memory_order_relaxed);
+        if (c <= 0) continue;
+        if (len + 64 >= cap) {
+            cap *= 2;
+            char *nb = (char *)realloc(buf, cap);
+            if (!nb) {
+                free(buf);
+                abort();
+            }
+            buf = nb;
+        }
+        n = snprintf(
+            buf + len, cap - len,
+            "%s{\"id\":%d,\"count\":%lld}",
+            first ? "" : ",",
+            i,
+            c
+        );
+        if (n > 0) len += (size_t)n;
+        first = 0;
+    }
+    if (len + 4 >= cap) {
+        char *nb = (char *)realloc(buf, len + 8);
+        if (!nb) {
+            free(buf);
+            abort();
+        }
+        buf = nb;
+    }
+    buf[len++] = ']';
+    buf[len++] = '}';
+    buf[len] = 0;
+    return (MakoString){buf, len};
 }
 
 /* Prometheus text exposition (0.0.4-ish) for the same 64 slots. */

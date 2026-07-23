@@ -941,7 +941,9 @@ fn cmd_profile_serve(port: u16, max_requests: u64) -> Result<(), ()> {
     let listener = TcpListener::bind(&addr).map_err(|e| {
         emit_plain_error(&format!("profile-serve: bind {addr}: {e}"));
     })?;
-    eprintln!("mako profile-serve: http://{addr}/debug/pprof/text (and /json, /debug/profile)");
+    eprintln!(
+        "mako profile-serve: http://{addr}/debug/pprof/text (and /json, /debug/profile, /debug/hot_sites)"
+    );
     let mut served: u64 = 0;
     for stream in listener.incoming() {
         let mut stream = match stream {
@@ -961,19 +963,26 @@ fn cmd_profile_serve(port: u16, max_requests: u64) -> Result<(), ()> {
         } else if path.starts_with("/debug/pprof/json") {
             r#"{"schema":"mako.profile_samples.v1","count":0,"samples":[],"note":"cli seed"}"#
                 .into()
+        } else if path.starts_with("/debug/hot_sites") {
+            r#"{"schema":"mako.hot_sites.v1","enabled":0,"slots":256,"total_hits":0,"top_id":-1,"top_count":0,"sites":[],"note":"cli seed"}"#
+                .into()
         } else if path.starts_with("/debug/profile") {
             r#"{"schema":"mako.profile_snapshot.v1","note":"cli seed"}"#.into()
         } else if path == "/" || path == "/health" {
             "ok\n".into()
         } else {
-            "paths: /debug/pprof/text /debug/pprof/json /debug/profile /health\n".into()
+            "paths: /debug/pprof/text /debug/pprof/json /debug/profile /debug/hot_sites /health\n"
+                .into()
         };
         let status = if path.starts_with("/debug/") || path == "/" || path == "/health" {
             "200 OK"
         } else {
             "404 Not Found"
         };
-        let ctype = if path.contains("json") || path == "/debug/profile" {
+        let ctype = if path.contains("json")
+            || path == "/debug/profile"
+            || path.starts_with("/debug/hot_sites")
+        {
             "application/json"
         } else {
             "text/plain; charset=utf-8"
