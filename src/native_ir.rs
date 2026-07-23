@@ -3838,34 +3838,46 @@ impl<'a> FunctionLowerer<'a> {
                     .structs
                     .field(id, field)
                     .ok_or_else(|| IrError::new(format!("native IR: unknown field `{field}`")))?;
-                let (val, vt, mut vo) = self.lower_expr(value)?;
+                let (mut val, vt, mut vo) = self.lower_expr(value)?;
                 if vt != field_ty {
                     return Err(IrError::new("native IR: field assignment type mismatch"));
                 }
                 if field_ty.is_shared_handle() {
                     vo = self.take_bare_string_local(value, vo);
                 }
+                // A slice expression owns its heap header but borrows its backing
+                // allocation. `self.xs = self.xs[a:b]` would store a view that
+                // aliases the very buffer this assignment is about to free, so
+                // materialize an independent slice first and release the view
+                // header (mirrors the local-`Assign` path).
+                if matches!(value, Expr::Slice { .. })
+                    && matches!(
+                        field_ty,
+                        Type::IntSlice
+                            | Type::FloatSlice
+                            | Type::ByteSlice
+                            | Type::BoolSlice
+                            | Type::StrSlice
+                            | Type::StructSlice(_)
+                            | Type::PtrSlice(_)
+                    )
+                {
+                    let view = val;
+                    val = self.emit_clone(view, field_ty);
+                    self.emit_drop(view, field_ty);
+                    vo = true;
+                }
                 // Overwriting an owned field: own the new value *before* dropping
                 // the old one so `self.xs = self.xs[a:b]` clones the view while
                 // the base buffer is still live (otherwise UAF).
-                // Exception: `b.xs = append(b.xs, v)` where append may free the
-                // old buffer on realloc.
-                let consumes_old_field = field_ty.is_heap()
-                    && matches!(
-                        value,
-                        Expr::Call { callee, args }
-                            if matches!(callee.as_ref(), Expr::Ident(n) if n == "append")
-                                && matches!(
-                                    args.first(),
-                                    Some(Expr::Field {
-                                        base: src_base,
-                                        field: src_field,
-                                    }) if src_field == field
-                                        && Self::field_base_same_local(base, src_base)
-                                )
-                    );
+                //
+                // The old field is *always* dropped. `self.xs = append(self.xs, v)`
+                // does not consume the original: a field read is a borrow, so the
+                // append lowering clones it and frees that clone — the original
+                // header would leak if we skipped this drop. A reslice was already
+                // materialized into an independent slice above.
                 let stored = self.own_field_value(val, field_ty, vo)?;
-                if field_ty.is_heap() && !consumes_old_field {
+                if field_ty.is_heap() {
                     let old = self.value();
                     self.emit(Inst::StructField {
                         out: old,
@@ -15479,12 +15491,6 @@ impl<'a> FunctionLowerer<'a> {
     }
 
     /// True when both expressions name the same local (field-assign consume).
-    fn field_base_same_local(a: &Expr, b: &Expr) -> bool {
-        match (a, b) {
-            (Expr::Ident(x), Expr::Ident(y)) => x == y,
-            _ => false,
-        }
-    }
 
     fn drop_owned_locals(&mut self) {
         let owned = self
