@@ -7063,6 +7063,7 @@ static inline int64_t mako_arena_stamp(MakoArena *a, int64_t v) {
 #include <sys/stat.h>
 #if defined(_WIN32)
 #include <direct.h>
+#include <fcntl.h>
 #include <io.h>
 #else
 #include <unistd.h>
