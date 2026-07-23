@@ -1,0 +1,28 @@
+// GraphQL HTTP body helpers + seed resolver.
+
+fn TestGraphqlQueryFromBody() {
+    let body = "{\"query\":\"{ health }\",\"variables\":{\"x\":1}}"
+    assert_eq_str(graphql_query_from_body(body), "{ health }")
+    let vars = graphql_variables_from_body(body)
+    assert(str_contains(vars, "x"))
+}
+
+fn TestGraphqlFields() {
+    let q = "query { health user(id: 1) { name } }"
+    let fs = graphql_fields(q)
+    assert(str_contains(fs, "health"))
+    assert(str_contains(fs, "user"))
+}
+
+fn TestGraphqlHandleHttpBody() {
+    // Builtins path (no package import required for tests).
+    let body = "{\"query\":\"{ health }\"}"
+    let q = graphql_query_from_body(body)
+    assert_eq(graphql_has_field(q, "health"), 1)
+    let resp = graphql_data("health", "{\"ok\":true}")
+    assert(str_contains(resp, "\"data\""))
+    assert(str_contains(resp, "health"))
+
+    let bad = graphql_error("missing query")
+    assert(str_contains(bad, "errors"))
+}

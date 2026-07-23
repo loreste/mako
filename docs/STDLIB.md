@@ -68,6 +68,8 @@ symbol-for-symbol parity with Go or any optional platform integration.
 | `syscall` | **Done** | portable OS primitives (`std/syscall`): pid/uid/host/pipe/dup/… |
 | `time` | **Done** | clocks + calendar + parse/format + duration (`std/time`) |
 | `collections` | **Done** | List[T]=[]T + set/heap/ring/stack/queue/stats |
+| `graphql` | **Done seed** | HTTP body query/vars, field list, data/error JSON ([MESSAGING_GRAPHQL.md](MESSAGING_GRAPHQL.md)) |
+| `messaging` | **Done seed** | In-process message queues `mq_*` ([MESSAGING_GRAPHQL.md](MESSAGING_GRAPHQL.md)) |
 | `embed` | **Done** | helper (not compile-time) |
 
 Runtime: `mako_rt.h` + `mako_goext.h` (Waves 1–9). Tests: `goext_wave{,3,4,5,6,7,8,9}_test.mko`.

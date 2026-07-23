@@ -1,6 +1,29 @@
 # Changelog
 
-## 0.4.11 — 2026-07-23 (tip; tag when packaging cut)
+## 0.4.12 — 2026-07-23 (tip; tag when packaging cut)
+
+**Theme:** Messaging queues + GraphQL HTTP — backend API surface seeds (no GC).
+
+### Messaging (`mq_*` / `std/messaging`)
+
+- In-process broker: `mq_new` / `mq_free` / `mq_declare` / `mq_publish` /
+  `mq_try_take` / `mq_len` / `mq_purge` (mutex-safe, owned string payloads).
+- Package: `std/messaging/messaging.mko`.
+- Tests: `examples/testing/messaging_queue_test.mko`.
+- Demo: `examples/messaging_worker.mko`.
+
+### GraphQL
+
+- HTTP body helpers: `graphql_query_from_body`, `graphql_variables_from_body`,
+  `graphql_fields` (root field list).
+- Expanded `std/graphql` (`handle_http_body` seed resolver).
+- Tests: `graphql_http_test.mko` (+ existing `graphql_seed_test.mko`).
+- Demo: `examples/graphql_http_server.mko` (POST `/graphql`).
+- Docs: [docs/MESSAGING_GRAPHQL.md](docs/MESSAGING_GRAPHQL.md).
+
+## 0.4.11 — 2026-07-23
+
+**Theme:** HTTP long-run soak + production allocator/PGO knobs (years-up LR-3/4/6).
 
 **Theme:** HTTP long-run soak + production allocator/PGO knobs (years-up LR-3/4/6).
 

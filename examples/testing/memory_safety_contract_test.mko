@@ -1,0 +1,61 @@
+// Memory-safety contract smoke: ownership drops + leak scopes, no GC.
+// Run: mako test examples/testing/memory_safety_contract_test.mko
+// Gate: scripts/memory-safety-gate.sh
+
+fn owns_and_drops(n: int) -> int {
+    var m = make(map[int]int, 8)
+    var s = make([]int, 0, 8)
+    var i = 0
+    while i < 8 {
+        m[i] = n + i
+        s = append(s, i)
+        i = i + 1
+    }
+    var sum = 0
+    i = 0
+    while i < 8 {
+        sum = sum + m[i] + s[i]
+        i = i + 1
+    }
+    let tag = int_to_string(n)
+    return sum + len(tag)
+}
+
+fn TestOwnershipCyclesLeakClear() {
+    let _ = alloc_track_reset()
+    let mark = leak_mark()
+    var i = 0
+    var acc = 0
+    while i < 200 {
+        acc = acc + owns_and_drops(i)
+        i = i + 1
+    }
+    // After all owns drop, tracked live bytes must not grow past the mark.
+    assert_eq(leak_bytes_since(mark), 0)
+    assert_eq(leak_detected(mark), 0)
+    assert(acc != 0)
+}
+
+fn TestLeakScopeNest() {
+    let _ = alloc_track_reset()
+    let _ = leak_scope_enter()
+    assert_eq(alloc_track_alloc(48), 48)
+    assert_eq(leak_check(), 48)
+    assert_eq(alloc_track_free(48), 0)
+    assert_eq(leak_scope_exit(), 0)
+    assert_eq(leak_assert_scope(), 1)
+}
+
+fn TestReassignDropsPrevious() {
+    // Reassign must free the previous owned map (no double-live).
+    let _ = alloc_track_reset()
+    let mark = leak_mark()
+    var m = make(map[int]int, 4)
+    m[0] = 1
+    m = make(map[int]int, 4)
+    m[1] = 2
+    assert_eq(m[1], 2)
+    // Drop m by leaving scope — live should return.
+    m = make(map[int]int, 0)
+    assert_eq(leak_bytes_since(mark), 0)
+}

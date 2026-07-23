@@ -1,0 +1,73 @@
+// Minimal GraphQL-over-HTTP seed server (POST /graphql).
+// Build: mako build examples/graphql_http_server.mko -o out/graphql_http
+// Curl:
+//   curl -sS -X POST http://127.0.0.1:18200/graphql \
+//     -H 'content-type: application/json' \
+//     -d '{"query":"{ health }"}'
+// Serves at most N requests (default 20). Args: [max] [port]
+
+fn handle_gql(body: string) -> string {
+    let q = graphql_query_from_body(body)
+    if len(q) == 0 {
+        return graphql_error("missing query")
+    }
+    if graphql_has_field(q, "health") == 1 {
+        return graphql_data("health", "{\"ok\":true,\"server\":\"mako\"}")
+    }
+    return graphql_error("unknown field")
+}
+
+fn main() {
+    var max = 20
+    var port = 18200
+    if argc() > 1 {
+        match parse_int(arg_get(1)) {
+            Ok(v) => {
+                if v > 0 {
+                    max = v
+                }
+            }
+            Err(_) => {}
+        }
+    }
+    if argc() > 2 {
+        match parse_int(arg_get(2)) {
+            Ok(v) => {
+                if v > 0 {
+                    port = v
+                }
+            }
+            Err(_) => {}
+        }
+    }
+    let fd = http_bind(port)
+    if fd < 0 {
+        print("graphql_http: bind failed")
+        exit(2)
+    }
+    print("graphql_http on port")
+    print_int(port)
+    var n = 0
+    while n < max {
+        let c = http_accept(fd)
+        if c < 0 {
+        } else {
+            let p = http_path(c)
+            if str_eq(p, "/graphql") {
+                let body = http_body(c)
+                let resp = handle_gql(body)
+                let _ = http_respond_ct(c, 200, "application/json", resp)
+            } else {
+                if str_eq(p, "/health") {
+                    let _ = http_respond_ct(c, 200, "application/json", "{\"ok\":true}\n")
+                } else {
+                    let _ = http_respond(c, 404, "missing\n")
+                }
+            }
+            let _ = http_close(c)
+            n = n + 1
+        }
+    }
+    let _ = http_close_listener(fd)
+    print("graphql_http done")
+}

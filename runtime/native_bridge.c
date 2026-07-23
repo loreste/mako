@@ -5265,6 +5265,10 @@ int64_t mako_native_leak_assert_scope(void) {
     return (int64_t)mako_leak_assert_scope();
 }
 
+int64_t mako_native_leak_check(void) {
+    return (int64_t)mako_leak_check();
+}
+
 MakoNativeIntSlice *mako_native_list_range_int_ptr(int64_t a0, int64_t a1) {
     MakoIntArray arr=mako_list_range_int(a0, a1);
     MakoNativeIntSlice *out=mako_native_int_slice_make_ptr(arr.len,arr.len?arr.len:1);

@@ -1,0 +1,38 @@
+// In-process message queue (no GC, owned payloads).
+
+fn TestMqPublishTake() {
+    let b = mq_new()
+    assert(b > 0)
+    assert_eq(mq_declare(b, "jobs", 16), 1)
+    assert_eq(mq_len(b, "jobs"), 0)
+    assert_eq(mq_publish(b, "jobs", "task-1"), 1)
+    assert_eq(mq_publish(b, "jobs", "task-2"), 1)
+    assert_eq(mq_len(b, "jobs"), 2)
+    assert_eq_str(mq_try_take(b, "jobs"), "task-1")
+    assert_eq_str(mq_try_take(b, "jobs"), "task-2")
+    assert_eq_str(mq_try_take(b, "jobs"), "")
+    assert_eq(mq_len(b, "jobs"), 0)
+    assert_eq(mq_free(b), 1)
+}
+
+fn TestMqFullAndPurge() {
+    let b = mq_new()
+    assert_eq(mq_declare(b, "q", 2), 1)
+    assert_eq(mq_publish(b, "q", "a"), 1)
+    assert_eq(mq_publish(b, "q", "b"), 1)
+    assert_eq(mq_publish(b, "q", "c"), 0) // full
+    assert_eq(mq_purge(b, "q"), 1)
+    assert_eq(mq_len(b, "q"), 0)
+    assert_eq(mq_publish(b, "q", "d"), 1)
+    assert_eq_str(mq_try_take(b, "q"), "d")
+    let _ = mq_free(b)
+}
+
+fn TestMqRedeclareIdempotent() {
+    let b = mq_new()
+    assert_eq(mq_declare(b, "events", 8), 1)
+    assert_eq(mq_declare(b, "events", 8), 1)
+    assert_eq(mq_publish(b, "events", "ping"), 1)
+    assert_eq(mq_len(b, "events"), 1)
+    let _ = mq_free(b)
+}

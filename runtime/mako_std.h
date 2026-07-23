@@ -3036,6 +3036,255 @@ static inline MakoString mako_graphql_data2(MakoString f1, MakoString j1, MakoSt
     return (MakoString){d, (size_t)wrote};
 }
 
+/* HTTP GraphQL body helpers (JSON POST) — no GC, allocate result strings. */
+static inline MakoString mako_graphql_query_from_body(MakoString body) {
+    return mako_json_get_string(body, mako_str_from_cstr("query"));
+}
+
+static inline MakoString mako_graphql_variables_from_body(MakoString body) {
+    MakoString v = mako_json_get_object(body, mako_str_from_cstr("variables"));
+    if (!v.data || v.len == 0) return mako_str_from_cstr("{}");
+    return v;
+}
+
+/* Root field names after first `{`, comma-separated (depth-1 only). */
+static inline MakoString mako_graphql_fields(MakoString query) {
+    if (!query.data || query.len == 0) return mako_str_from_cstr("");
+    size_t i = 0;
+    while (i < query.len && query.data[i] != '{') i++;
+    if (i >= query.len) return mako_str_from_cstr("");
+    i++;
+    char buf[512];
+    size_t bo = 0;
+    int depth = 1;
+    while (i < query.len && depth > 0 && bo + 2 < sizeof(buf)) {
+        i = mako_gql_skip_ws(query, i);
+        if (i >= query.len) break;
+        char c = query.data[i];
+        if (c == '{') {
+            depth++;
+            i++;
+            continue;
+        }
+        if (c == '}') {
+            depth--;
+            i++;
+            continue;
+        }
+        if (c == '(') {
+            /* skip argument list */
+            int p = 1;
+            i++;
+            while (i < query.len && p > 0) {
+                if (query.data[i] == '(') p++;
+                else if (query.data[i] == ')') p--;
+                i++;
+            }
+            continue;
+        }
+        if (depth == 1 && mako_gql_is_ident_start(c)) {
+            size_t start = i;
+            size_t end = mako_gql_skip_ident(query, i);
+            size_t n = end - start;
+            if (bo > 0 && bo + 1 < sizeof(buf)) buf[bo++] = ',';
+            if (bo + n < sizeof(buf)) {
+                memcpy(buf + bo, query.data + start, n);
+                bo += n;
+            }
+            i = end;
+            continue;
+        }
+        i++;
+    }
+    char *d = (char *)malloc(bo + 1);
+    if (!d) mako_abort("graphql_fields OOM");
+    if (bo) memcpy(d, buf, bo);
+    d[bo] = 0;
+    return (MakoString){d, bo};
+}
+
+/* ---- In-process message queues (no GC; owned string payloads) ------------
+ * Product seed for backend messaging (Kafka/NATS/AMQP adapters later).
+ * Concurrent publish/consume protected by a mutex per broker.
+ */
+#ifndef MAKO_MQ_MAX_BROKERS
+#define MAKO_MQ_MAX_BROKERS 32
+#endif
+#ifndef MAKO_MQ_MAX_QUEUES
+#define MAKO_MQ_MAX_QUEUES 64
+#endif
+#ifndef MAKO_MQ_NAME_MAX
+#define MAKO_MQ_NAME_MAX 64
+#endif
+
+typedef struct {
+    char name[MAKO_MQ_NAME_MAX];
+    MakoString *ring;
+    size_t cap;
+    size_t head;
+    size_t len;
+    int used;
+} MakoMqQueue;
+
+typedef struct {
+    int used;
+    pthread_mutex_t mu;
+    MakoMqQueue qs[MAKO_MQ_MAX_QUEUES];
+} MakoMqBroker;
+
+static MakoMqBroker mako_mq_table[MAKO_MQ_MAX_BROKERS];
+static pthread_mutex_t mako_mq_global = PTHREAD_MUTEX_INITIALIZER;
+
+static MakoMqQueue *mako_mq_find(MakoMqBroker *b, MakoString name) {
+    if (!b || !name.data || name.len == 0) return NULL;
+    for (int i = 0; i < MAKO_MQ_MAX_QUEUES; i++) {
+        if (!b->qs[i].used) continue;
+        size_t n = strlen(b->qs[i].name);
+        if (n == name.len && memcmp(b->qs[i].name, name.data, n) == 0) return &b->qs[i];
+    }
+    return NULL;
+}
+
+static inline int64_t mako_mq_new(void) {
+    pthread_mutex_lock(&mako_mq_global);
+    for (int i = 0; i < MAKO_MQ_MAX_BROKERS; i++) {
+        if (mako_mq_table[i].used) continue;
+        memset(&mako_mq_table[i], 0, sizeof(mako_mq_table[i]));
+        mako_mq_table[i].used = 1;
+        pthread_mutex_init(&mako_mq_table[i].mu, NULL);
+        pthread_mutex_unlock(&mako_mq_global);
+        return (int64_t)(i + 1);
+    }
+    pthread_mutex_unlock(&mako_mq_global);
+    return 0;
+}
+
+static inline int64_t mako_mq_free(int64_t id) {
+    if (id < 1 || id > MAKO_MQ_MAX_BROKERS) return 0;
+    MakoMqBroker *b = &mako_mq_table[id - 1];
+    pthread_mutex_lock(&mako_mq_global);
+    if (!b->used) {
+        pthread_mutex_unlock(&mako_mq_global);
+        return 0;
+    }
+    pthread_mutex_lock(&b->mu);
+    for (int i = 0; i < MAKO_MQ_MAX_QUEUES; i++) {
+        if (!b->qs[i].used) continue;
+        for (size_t k = 0; k < b->qs[i].len; k++) {
+            size_t idx = (b->qs[i].head + k) % b->qs[i].cap;
+            mako_str_free(b->qs[i].ring[idx]);
+        }
+        free(b->qs[i].ring);
+        b->qs[i].used = 0;
+    }
+    pthread_mutex_unlock(&b->mu);
+    pthread_mutex_destroy(&b->mu);
+    b->used = 0;
+    pthread_mutex_unlock(&mako_mq_global);
+    return 1;
+}
+
+static inline int64_t mako_mq_declare(int64_t id, MakoString name, int64_t cap) {
+    if (id < 1 || id > MAKO_MQ_MAX_BROKERS || !name.data || name.len == 0 || name.len >= MAKO_MQ_NAME_MAX)
+        return 0;
+    size_t c = cap > 0 ? (size_t)cap : 256;
+    if (c < 1) c = 1;
+    MakoMqBroker *b = &mako_mq_table[id - 1];
+    if (!b->used) return 0;
+    pthread_mutex_lock(&b->mu);
+    if (mako_mq_find(b, name)) {
+        pthread_mutex_unlock(&b->mu);
+        return 1; /* already declared */
+    }
+    for (int i = 0; i < MAKO_MQ_MAX_QUEUES; i++) {
+        if (b->qs[i].used) continue;
+        MakoString *ring = (MakoString *)calloc(c, sizeof(MakoString));
+        if (!ring) {
+            pthread_mutex_unlock(&b->mu);
+            return 0;
+        }
+        memset(b->qs[i].name, 0, MAKO_MQ_NAME_MAX);
+        memcpy(b->qs[i].name, name.data, name.len);
+        b->qs[i].ring = ring;
+        b->qs[i].cap = c;
+        b->qs[i].head = 0;
+        b->qs[i].len = 0;
+        b->qs[i].used = 1;
+        pthread_mutex_unlock(&b->mu);
+        return 1;
+    }
+    pthread_mutex_unlock(&b->mu);
+    return 0;
+}
+
+static inline int64_t mako_mq_publish(int64_t id, MakoString name, MakoString body) {
+    if (id < 1 || id > MAKO_MQ_MAX_BROKERS) return 0;
+    MakoMqBroker *b = &mako_mq_table[id - 1];
+    if (!b->used) return 0;
+    pthread_mutex_lock(&b->mu);
+    MakoMqQueue *q = mako_mq_find(b, name);
+    if (!q || q->len >= q->cap) {
+        pthread_mutex_unlock(&b->mu);
+        return 0;
+    }
+    size_t slot = (q->head + q->len) % q->cap;
+    /* Own a clone so callers can free their body independently. */
+    q->ring[slot] = mako_str_clone(body);
+    q->len++;
+    pthread_mutex_unlock(&b->mu);
+    return 1;
+}
+
+static inline MakoString mako_mq_try_take(int64_t id, MakoString name) {
+    if (id < 1 || id > MAKO_MQ_MAX_BROKERS) return mako_str_from_cstr("");
+    MakoMqBroker *b = &mako_mq_table[id - 1];
+    if (!b->used) return mako_str_from_cstr("");
+    pthread_mutex_lock(&b->mu);
+    MakoMqQueue *q = mako_mq_find(b, name);
+    if (!q || q->len == 0) {
+        pthread_mutex_unlock(&b->mu);
+        return mako_str_from_cstr("");
+    }
+    MakoString out = q->ring[q->head];
+    q->ring[q->head] = (MakoString){NULL, 0};
+    q->head = (q->head + 1) % q->cap;
+    q->len--;
+    pthread_mutex_unlock(&b->mu);
+    return out; /* ownership transferred to caller */
+}
+
+static inline int64_t mako_mq_len(int64_t id, MakoString name) {
+    if (id < 1 || id > MAKO_MQ_MAX_BROKERS) return 0;
+    MakoMqBroker *b = &mako_mq_table[id - 1];
+    if (!b->used) return 0;
+    pthread_mutex_lock(&b->mu);
+    MakoMqQueue *q = mako_mq_find(b, name);
+    int64_t n = q ? (int64_t)q->len : 0;
+    pthread_mutex_unlock(&b->mu);
+    return n;
+}
+
+static inline int64_t mako_mq_purge(int64_t id, MakoString name) {
+    if (id < 1 || id > MAKO_MQ_MAX_BROKERS) return 0;
+    MakoMqBroker *b = &mako_mq_table[id - 1];
+    if (!b->used) return 0;
+    pthread_mutex_lock(&b->mu);
+    MakoMqQueue *q = mako_mq_find(b, name);
+    if (!q) {
+        pthread_mutex_unlock(&b->mu);
+        return 0;
+    }
+    for (size_t k = 0; k < q->len; k++) {
+        size_t idx = (q->head + k) % q->cap;
+        mako_str_free(q->ring[idx]);
+        q->ring[idx] = (MakoString){NULL, 0};
+    }
+    q->head = 0;
+    q->len = 0;
+    pthread_mutex_unlock(&b->mu);
+    return 1;
+}
+
 static inline MakoString mako_sse_event(MakoString event, MakoString data) {
     size_t newline_count = 0;
     for (size_t i = 0; i < data.len; i++) {

@@ -1,0 +1,40 @@
+// std/messaging — in-process message queues (no GC).
+// Backend seed for pub/sub and work queues. External brokers (NATS/Kafka/AMQP)
+// can plug in later behind the same shapes.
+//
+// Builtins: mq_new / mq_free / mq_declare / mq_publish / mq_try_take /
+// mq_len / mq_purge.
+
+export fn broker() -> int {
+    return mq_new()
+}
+
+export fn close(id: int) -> int {
+    return mq_free(id)
+}
+
+export fn declare(id: int, name: string, cap: int) -> int {
+    return mq_declare(id, name, cap)
+}
+
+export fn publish(id: int, name: string, body: string) -> int {
+    return mq_publish(id, name, body)
+}
+
+export fn try_take(id: int, name: string) -> string {
+    return mq_try_take(id, name)
+}
+
+export fn len(id: int, name: string) -> int {
+    return mq_len(id, name)
+}
+
+export fn purge(id: int, name: string) -> int {
+    return mq_purge(id, name)
+}
+
+// Convenience: declare if needed, then publish.
+export fn ensure_publish(id: int, name: string, body: string, cap: int) -> int {
+    let _ = mq_declare(id, name, cap)
+    return mq_publish(id, name, body)
+}

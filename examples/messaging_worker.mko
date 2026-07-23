@@ -1,0 +1,27 @@
+// In-process job queue demo (no GC).
+// Build: mako build examples/messaging_worker.mko -o out/messaging_worker
+// Prints: published, then drained job bodies.
+
+fn main() {
+    let b = mq_new()
+    if b <= 0 {
+        print("mq_new failed")
+        exit(1)
+    }
+    let _ = mq_declare(b, "jobs", 64)
+    var i = 0
+    while i < 5 {
+        let body = int_to_string(i)
+        let _ = mq_publish(b, "jobs", body)
+        i = i + 1
+    }
+    print("published=")
+    print_int(mq_len(b, "jobs"))
+    while mq_len(b, "jobs") > 0 {
+        let job = mq_try_take(b, "jobs")
+        print("job=")
+        print(job)
+    }
+    let _ = mq_free(b)
+    print("ok")
+}

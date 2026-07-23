@@ -1,7 +1,10 @@
-// std/graphql — request/response helpers + query parse seeds
+// std/graphql — request/response helpers + HTTP body parse + query seeds
+// No GC: responses allocate owned strings; free with normal string drop.
+
 fn is_mutation(query: string) -> int { return graphql_is_mutation(query) }
 fn is_query(query: string) -> int { return graphql_is_query(query) }
 fn field(query: string) -> string { return graphql_field(query) }
+fn fields(query: string) -> string { return graphql_fields(query) }
 fn arg(query: string, name: string) -> string { return graphql_arg(query, name) }
 fn has_field(query: string, name: string) -> int { return graphql_has_field(query, name) }
 fn operation_name(query: string) -> string { return graphql_operation_name(query) }
@@ -13,4 +16,32 @@ fn error(message: string) -> string { return graphql_error(message) }
 fn request(query: string) -> string { return graphql_request(query) }
 fn request_vars(query: string, vars_json: string) -> string {
     return graphql_request_vars(query, vars_json)
+}
+
+// HTTP POST body: {"query":"…","variables":{…}}
+fn query_from_body(body: string) -> string {
+    return graphql_query_from_body(body)
+}
+fn variables_from_body(body: string) -> string {
+    return graphql_variables_from_body(body)
+}
+
+// Minimal resolver seed: health field only; unknown → GraphQL error.
+fn resolve_seed(query: string) -> string {
+    if graphql_has_field(query, "health") == 1 {
+        return graphql_data("health", "{\"ok\":true}")
+    }
+    if graphql_has_field(query, "__typename") == 1 {
+        return graphql_data("__typename", "\"Query\"")
+    }
+    return graphql_error("unknown field")
+}
+
+// Full HTTP body → GraphQL JSON response (seed).
+fn handle_http_body(body: string) -> string {
+    let q = graphql_query_from_body(body)
+    if len(q) == 0 {
+        return graphql_error("missing query")
+    }
+    return resolve_seed(q)
 }

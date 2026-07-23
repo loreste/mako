@@ -22387,6 +22387,72 @@ impl Codegen {
                 ));
                 return ("MakoString".into(), tmp);
             }
+            "graphql_query_from_body" => {
+                let (_, b) = self.emit_expr(&args[0]);
+                let tmp = self.fresh("gqb");
+                self.line(&format!(
+                    "MakoString {tmp} = mako_graphql_query_from_body({b});"
+                ));
+                return ("MakoString".into(), tmp);
+            }
+            "graphql_variables_from_body" => {
+                let (_, b) = self.emit_expr(&args[0]);
+                let tmp = self.fresh("gvb");
+                self.line(&format!(
+                    "MakoString {tmp} = mako_graphql_variables_from_body({b});"
+                ));
+                return ("MakoString".into(), tmp);
+            }
+            "graphql_fields" => {
+                let (_, q) = self.emit_expr(&args[0]);
+                let tmp = self.fresh("gfl");
+                self.line(&format!("MakoString {tmp} = mako_graphql_fields({q});"));
+                return ("MakoString".into(), tmp);
+            }
+            "mq_new" => {
+                return ("int64_t".into(), "mako_mq_new()".into());
+            }
+            "mq_free" => {
+                let (_, id) = self.emit_expr(&args[0]);
+                return ("int64_t".into(), format!("mako_mq_free({id})"));
+            }
+            "mq_declare" => {
+                let (_, id) = self.emit_expr(&args[0]);
+                let (_, n) = self.emit_expr(&args[1]);
+                let (_, c) = self.emit_expr(&args[2]);
+                return (
+                    "int64_t".into(),
+                    format!("mako_mq_declare({id}, {n}, {c})"),
+                );
+            }
+            "mq_publish" => {
+                let (_, id) = self.emit_expr(&args[0]);
+                let (_, n) = self.emit_expr(&args[1]);
+                let (_, b) = self.emit_expr(&args[2]);
+                return (
+                    "int64_t".into(),
+                    format!("mako_mq_publish({id}, {n}, {b})"),
+                );
+            }
+            "mq_try_take" => {
+                let (_, id) = self.emit_expr(&args[0]);
+                let (_, n) = self.emit_expr(&args[1]);
+                let tmp = self.fresh("mqt");
+                self.line(&format!(
+                    "MakoString {tmp} = mako_mq_try_take({id}, {n});"
+                ));
+                return ("MakoString".into(), tmp);
+            }
+            "mq_len" => {
+                let (_, id) = self.emit_expr(&args[0]);
+                let (_, n) = self.emit_expr(&args[1]);
+                return ("int64_t".into(), format!("mako_mq_len({id}, {n})"));
+            }
+            "mq_purge" => {
+                let (_, id) = self.emit_expr(&args[0]);
+                let (_, n) = self.emit_expr(&args[1]);
+                return ("int64_t".into(), format!("mako_mq_purge({id}, {n})"));
+            }
             "time_offset_named" => {
                 let (_, n) = self.emit_expr(&args[0]);
                 return (
@@ -39846,6 +39912,74 @@ impl Codegen {
                                 "MakoString {tmp} = mako_graphql_data2({a}, {b}, {c}, {d});"
                             ));
                             return ("MakoString".into(), tmp);
+                        }
+                        "graphql_query_from_body" => {
+                            let (_, b) = self.emit_expr(&args[0]);
+                            let tmp = self.fresh("gqb");
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_graphql_query_from_body({b});"
+                            ));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "graphql_variables_from_body" => {
+                            let (_, b) = self.emit_expr(&args[0]);
+                            let tmp = self.fresh("gvb");
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_graphql_variables_from_body({b});"
+                            ));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "graphql_fields" => {
+                            let (_, q) = self.emit_expr(&args[0]);
+                            let tmp = self.fresh("gfl");
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_graphql_fields({q});"
+                            ));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "mq_new" => {
+                            return ("int64_t".into(), "mako_mq_new()".into());
+                        }
+                        "mq_free" => {
+                            let (_, id) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_mq_free({id})"));
+                        }
+                        "mq_declare" => {
+                            let (_, id) = self.emit_expr(&args[0]);
+                            let (_, n) = self.emit_expr(&args[1]);
+                            let (_, c) = self.emit_expr(&args[2]);
+                            return (
+                                "int64_t".into(),
+                                format!("mako_mq_declare({id}, {n}, {c})"),
+                            );
+                        }
+                        "mq_publish" => {
+                            let (_, id) = self.emit_expr(&args[0]);
+                            let (_, n) = self.emit_expr(&args[1]);
+                            let (_, b) = self.emit_expr(&args[2]);
+                            return (
+                                "int64_t".into(),
+                                format!("mako_mq_publish({id}, {n}, {b})"),
+                            );
+                        }
+                        "mq_try_take" => {
+                            let (_, id) = self.emit_expr(&args[0]);
+                            let (_, n) = self.emit_expr(&args[1]);
+                            let tmp = self.fresh("mqt");
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_mq_try_take({id}, {n});"
+                            ));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "mq_len" => {
+                            let (_, id) = self.emit_expr(&args[0]);
+                            let (_, n) = self.emit_expr(&args[1]);
+                            return ("int64_t".into(), format!("mako_mq_len({id}, {n})"));
+                        }
+                        "mq_purge" => {
+                            let (_, id) = self.emit_expr(&args[0]);
+                            let (_, n) = self.emit_expr(&args[1]);
+                            return ("int64_t".into(), format!("mako_mq_purge({id}, {n})"));
                         }
                         "time_offset_named" => {
                             let (_, n) = self.emit_expr(&args[0]);

@@ -5965,6 +5965,50 @@ impl TypeChecker {
             ),
         );
         fns.insert(
+            "graphql_query_from_body".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::String)),
+        );
+        fns.insert(
+            "graphql_variables_from_body".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::String)),
+        );
+        fns.insert(
+            "graphql_fields".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::String)),
+        );
+        // In-process message queues (std/messaging).
+        fns.insert("mq_new".into(), Type::Fn(vec![], Box::new(Type::Int)));
+        fns.insert(
+            "mq_free".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "mq_declare".into(),
+            Type::Fn(
+                vec![Type::Int, Type::String, Type::Int],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "mq_publish".into(),
+            Type::Fn(
+                vec![Type::Int, Type::String, Type::String],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "mq_try_take".into(),
+            Type::Fn(vec![Type::Int, Type::String], Box::new(Type::String)),
+        );
+        fns.insert(
+            "mq_len".into(),
+            Type::Fn(vec![Type::Int, Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "mq_purge".into(),
+            Type::Fn(vec![Type::Int, Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
             "time_offset_named".into(),
             Type::Fn(vec![Type::String], Box::new(Type::Int)),
         );

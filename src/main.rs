@@ -3875,109 +3875,149 @@ fn build_native_object(
         emit_plain_error(&format!("could not write native object: {e}"));
     })?;
 
+    // Single-file product path: when llvm-backend is built on macOS, both
+    // native and llvm objects link via bundled ld64.lld + embedded runtime.
+    // Without that feature, Cranelift native falls through to the system `cc`
+    // (memory-safety / CI host path). LLVM without the feature is unavailable.
+    #[cfg(all(feature = "llvm-backend", target_os = "macos"))]
     if matches!(backend, BackendCli::Native | BackendCli::Llvm) {
-        #[cfg(all(feature = "llvm-backend", target_os = "macos"))]
-        {
-            let architecture = match std::env::consts::ARCH {
-                "aarch64" => "arm64",
-                architecture => architecture,
-            };
-            let runtime_archive = embedded_runtime::materialize(&object_path).map_err(|error| {
-                let _ = fs::remove_file(&object_path);
-                emit_plain_error(&error);
-            })?;
-            let mut arguments = vec![
-                std::ffi::OsString::from("ld64.lld"),
-                std::ffi::OsString::from("-arch"),
-                std::ffi::OsString::from(architecture),
-                std::ffi::OsString::from("-platform_version"),
-                std::ffi::OsString::from("macos"),
-                std::ffi::OsString::from("13.0"),
-                std::ffi::OsString::from("13.0"),
-                // macOS supplies the process runtime symbols through dyld. Let
-                // those imports remain dynamic so a shipped compiler does not
-                // need an SDK, Xcode, or a host linker at install time.
-                std::ffi::OsString::from("-undefined"),
-                std::ffi::OsString::from("dynamic_lookup"),
-                object_path.as_os_str().to_owned(),
-                runtime_archive.as_os_str().to_owned(),
-            ];
-            // Optional backends used by the native runtime archive (TLS / GPU / H3).
-            // Without these, OpenSSL/OpenCL/quiche symbols stay unbound at load time.
-            // SDK root so -framework OpenCL / Security resolve under bundled lld.
-            for sdk in [
-                "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk",
-                "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk",
-            ] {
-                if Path::new(sdk).is_dir() {
-                    arguments.push(std::ffi::OsString::from("-syslibroot"));
-                    arguments.push(std::ffi::OsString::from(sdk));
-                    break;
-                }
-            }
-            if let Some((_inc, lib)) = find_openssl() {
-                arguments.push(std::ffi::OsString::from(format!("-L{}", lib.display())));
-                // ld64.lld uses -rpath, not clang's -Wl,-rpath.
-                arguments.push(std::ffi::OsString::from("-rpath"));
-                arguments.push(std::ffi::OsString::from(lib.display().to_string()));
-                arguments.push(std::ffi::OsString::from("-lssl"));
-                arguments.push(std::ffi::OsString::from("-lcrypto"));
-            }
-            if find_opencl().is_some() {
-                arguments.push(std::ffi::OsString::from("-framework"));
-                arguments.push(std::ffi::OsString::from("OpenCL"));
-            }
-            if let Some(q) = find_quiche() {
-                arguments.push(std::ffi::OsString::from(format!("-L{}", q.lib_dir.display())));
-                arguments.push(std::ffi::OsString::from("-rpath"));
-                arguments.push(std::ffi::OsString::from(q.lib_dir.display().to_string()));
-                if q.prefer_static {
-                    arguments.push(q.lib_dir.join("libquiche.a").into_os_string());
-                } else {
-                    arguments.push(std::ffi::OsString::from("-lquiche"));
-                }
-                arguments.push(std::ffi::OsString::from("-lc++"));
-                arguments.push(std::ffi::OsString::from("-framework"));
-                arguments.push(std::ffi::OsString::from("Security"));
-                arguments.push(std::ffi::OsString::from("-framework"));
-                arguments.push(std::ffi::OsString::from("CoreFoundation"));
-            }
-            // System C library for malloc/stdio used by the runtime archive.
-            arguments.push(std::ffi::OsString::from("-lSystem"));
-            // Drop unreferenced runtime symbols (full bridge archive is multi-MB
-            // without this — a hello-world would otherwise pull every builtin).
-            arguments.push(std::ffi::OsString::from("-dead_strip"));
-            arguments.push(std::ffi::OsString::from("-o"));
-            arguments.push(out_bin.as_os_str().to_owned());
-            let argument_refs = arguments
-                .iter()
-                .map(|arg| arg.as_os_str())
-                .collect::<Vec<_>>();
-            let result = bundled_lld::link_macho(&argument_refs);
+        let architecture = match std::env::consts::ARCH {
+            "aarch64" => "arm64",
+            architecture => architecture,
+        };
+        let runtime_archive = embedded_runtime::materialize(&object_path).map_err(|error| {
             let _ = fs::remove_file(&object_path);
-            let _ = fs::remove_file(&runtime_archive);
-            result.map_err(|error| emit_plain_error(&error))?;
-            if matches!(level, OptLevel::Release) {
-                let _ = Command::new("strip").arg(out_bin).status();
+            emit_plain_error(&error);
+        })?;
+        let mut arguments = vec![
+            std::ffi::OsString::from("ld64.lld"),
+            std::ffi::OsString::from("-arch"),
+            std::ffi::OsString::from(architecture),
+            std::ffi::OsString::from("-platform_version"),
+            std::ffi::OsString::from("macos"),
+            std::ffi::OsString::from("13.0"),
+            std::ffi::OsString::from("13.0"),
+            // macOS supplies the process runtime symbols through dyld. Let
+            // those imports remain dynamic so a shipped compiler does not
+            // need an SDK, Xcode, or a host linker at install time.
+            std::ffi::OsString::from("-undefined"),
+            std::ffi::OsString::from("dynamic_lookup"),
+            object_path.as_os_str().to_owned(),
+            runtime_archive.as_os_str().to_owned(),
+        ];
+        // Optional backends used by the native runtime archive (TLS / GPU / H3).
+        // Without these, OpenSSL/OpenCL/quiche symbols stay unbound at load time.
+        // SDK root so -framework OpenCL / Security resolve under bundled lld.
+        for sdk in [
+            "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk",
+            "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk",
+        ] {
+            if Path::new(sdk).is_dir() {
+                arguments.push(std::ffi::OsString::from("-syslibroot"));
+                arguments.push(std::ffi::OsString::from(sdk));
+                break;
             }
-            return Ok(t0.elapsed().as_secs_f64() * 1000.0);
         }
-        #[cfg(not(all(feature = "llvm-backend", target_os = "macos")))]
-        {
-            let _ = fs::remove_file(&object_path);
-            emit_plain_error(
-                "native backend linking requires --features llvm-backend on this platform; \
-                 use --backend c (the default) or build with: cargo build --release --features llvm-backend"
-            );
-            return Err(());
+        if let Some((_inc, lib)) = find_openssl() {
+            arguments.push(std::ffi::OsString::from(format!("-L{}", lib.display())));
+            // ld64.lld uses -rpath, not clang's -Wl,-rpath.
+            arguments.push(std::ffi::OsString::from("-rpath"));
+            arguments.push(std::ffi::OsString::from(lib.display().to_string()));
+            arguments.push(std::ffi::OsString::from("-lssl"));
+            arguments.push(std::ffi::OsString::from("-lcrypto"));
         }
+        if find_opencl().is_some() {
+            arguments.push(std::ffi::OsString::from("-framework"));
+            arguments.push(std::ffi::OsString::from("OpenCL"));
+        }
+        if let Some(q) = find_quiche() {
+            arguments.push(std::ffi::OsString::from(format!("-L{}", q.lib_dir.display())));
+            arguments.push(std::ffi::OsString::from("-rpath"));
+            arguments.push(std::ffi::OsString::from(q.lib_dir.display().to_string()));
+            if q.prefer_static {
+                arguments.push(q.lib_dir.join("libquiche.a").into_os_string());
+            } else {
+                arguments.push(std::ffi::OsString::from("-lquiche"));
+            }
+            arguments.push(std::ffi::OsString::from("-lc++"));
+            arguments.push(std::ffi::OsString::from("-framework"));
+            arguments.push(std::ffi::OsString::from("Security"));
+            arguments.push(std::ffi::OsString::from("-framework"));
+            arguments.push(std::ffi::OsString::from("CoreFoundation"));
+        }
+        // System C library for malloc/stdio used by the runtime archive.
+        arguments.push(std::ffi::OsString::from("-lSystem"));
+        // Drop unreferenced runtime symbols (full bridge archive is multi-MB
+        // without this — a hello-world would otherwise pull every builtin).
+        arguments.push(std::ffi::OsString::from("-dead_strip"));
+        arguments.push(std::ffi::OsString::from("-o"));
+        arguments.push(out_bin.as_os_str().to_owned());
+        let argument_refs = arguments
+            .iter()
+            .map(|arg| arg.as_os_str())
+            .collect::<Vec<_>>();
+        let result = bundled_lld::link_macho(&argument_refs);
+        let _ = fs::remove_file(&object_path);
+        let _ = fs::remove_file(&runtime_archive);
+        result.map_err(|error| emit_plain_error(&error))?;
+        if matches!(level, OptLevel::Release) {
+            let _ = Command::new("strip").arg(out_bin).status();
+        }
+        return Ok(t0.elapsed().as_secs_f64() * 1000.0);
+    }
+    if matches!(backend, BackendCli::Llvm) {
+        let _ = fs::remove_file(&object_path);
+        #[cfg(feature = "llvm-backend")]
+        emit_plain_error("bundled lld for --backend llvm is only available on macOS today");
+        #[cfg(not(feature = "llvm-backend"))]
+        emit_plain_error("--backend llvm is unavailable in this build (enable llvm-backend)");
+        return Err(());
     }
 
+    // Cranelift native without llvm-backend: system cc + runtime C sources
+    // (ownership drops / leak builtins live in native_runtime + bridge).
     let cc_bin = cc::resolve_cc(opts);
     let mut cmd = Command::new(&cc_bin);
     cc::apply_cc_prefix(&mut cmd, &cc_bin);
-    cmd.arg(&object_path).arg("-o").arg(out_bin);
+    match level {
+        OptLevel::Debug => {
+            cmd.arg("-O0").arg("-g");
+        }
+        OptLevel::Release => {
+            if std::env::var_os("MAKO_NO_LTO").is_some() {
+                cmd.arg("-O3").arg("-DNDEBUG");
+            } else {
+                cmd.arg("-O3").arg("-flto").arg("-DNDEBUG");
+            }
+        }
+    }
+    cmd.arg(&object_path);
     let runtime_dir = runtime_include_dir().unwrap_or_else(|_| PathBuf::new());
+    // Prefer repo runtime/ when developing; install layout otherwise.
+    let runtime_c_candidates = [
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("runtime"),
+        runtime_dir.clone(),
+    ];
+    let mut linked_runtime = false;
+    for root in &runtime_c_candidates {
+        let nr = root.join("native_runtime.c");
+        let nb = root.join("native_bridge.c");
+        if nr.is_file() && nb.is_file() {
+            cmd.arg(format!("-I{}", root.display()));
+            cmd.arg(&nr).arg(&nb);
+            linked_runtime = true;
+            break;
+        }
+    }
+    if !linked_runtime {
+        let _ = fs::remove_file(&object_path);
+        emit_plain_error(
+            "native link needs runtime/native_runtime.c + native_bridge.c \
+             (or rebuild with --features llvm-backend for the embedded archive)",
+        );
+        return Err(());
+    }
+    cmd.arg("-o").arg(out_bin);
     for arg in link_args_native(opts, &runtime_dir) {
         cmd.arg(arg);
     }

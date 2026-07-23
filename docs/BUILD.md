@@ -1,4 +1,4 @@
-# Mako builds (v0.4.11 tip)
+# Mako builds (v0.4.12 tip)
 
 **Versioning:** [VERSIONING.md](VERSIONING.md) — ship small patches often.
 

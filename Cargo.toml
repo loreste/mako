@@ -1,6 +1,6 @@
 [package]
 name = "mako"
-version = "0.4.11"
+version = "0.4.12"
 edition = "2021"
 description = "Mako — compiled language for backend development (no GC, native binaries, structured concurrency)"
 license = "MIT"

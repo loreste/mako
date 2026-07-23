@@ -38,7 +38,8 @@ See [ROADMAP.md](ROADMAP.md) version map. Tip after `v0.4.5`:
 0.4.8  map/I/O bench gates + perf regression budget
 0.4.9  LLVM CI (macOS) + install/doctor smoke
 0.4.10 years-up soak foundation
-0.4.11 HTTP soak + allocator/PGO product  (tip)
+0.4.11 HTTP soak + allocator/PGO product
+0.4.12 messaging queues + GraphQL HTTP seeds  (tip)
 0.5.0  native-first default (CLI default flip — minor)
 0.5.1  toolchain / IDE depth
 0.5.2  runtime trust soaks

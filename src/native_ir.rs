@@ -21247,6 +21247,12 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::I64),
                 false,
             )),
+            "leak_check" if args.len() == 0 => Some((
+                "mako_native_leak_check",
+                &[],
+                Some(Type::I64),
+                false,
+            )),
             "leak_assert_scope" if args.len() == 0 => Some((
                 "mako_native_leak_assert_scope",
                 &[],
