@@ -48,7 +48,10 @@ Book: [§11 Speed & memory safety](book/src/ch11-speed-safety.md) · Release how
 
 # Years-up steady-state (live ownership + RSS stability):
 ./scripts/long-run-soak.sh
+# HTTP accept-loop soak (RSS under concurrent clients):
+./scripts/http-long-run-soak.sh
 # See docs/LONG_RUNNING.md (north star vs Java/Kotlin long-running services).
+# Optional: MAKO_ALLOCATOR=mimalloc|jemalloc · scripts/pgo-build.sh for PGO.
 
 # HTTP throughput (requires wrk or hey):
 ./scripts/bench-http.sh

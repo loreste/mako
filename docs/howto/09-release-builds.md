@@ -80,23 +80,41 @@ by Mako source fingerprints.
 
 ## Profile-guided optimization (PGO)
 
-Two-pass PGO with the system C compiler:
+Two-pass PGO with the system C compiler (years-up servers: train on real traffic
+shapes — see [LONG_RUNNING.md](../LONG_RUNNING.md)):
 
 ```bash
+# Recipe script (instrument → train → llvm-profdata merge → rebuild):
+./scripts/pgo-build.sh main.mko -o server -- /* train args */
+
+# Manual:
 # 1) Instrument
 MAKO_PGO_GEN=1 mako build --release main.mko -o server
 # 2) Train on representative load
-./server …   # writes default.profraw / .gcda next to the binary (compiler-dependent)
-# 3) Rebuild using profiles (clang: llvm-profdata merge may be needed first)
-MAKO_PGO_USE=1 mako build --release main.mko -o server
-# Or point at a profile directory / .profdata path:
-MAKO_PGO_USE=/path/to/default.profdata mako build --release main.mko -o server
+LLVM_PROFILE_FILE=default-%p.profraw ./server …
+# 3) Merge (clang) and rebuild
+llvm-profdata merge -o default.profdata default-*.profraw
+MAKO_PGO_USE=default.profdata mako build --release main.mko -o server
 ```
 
-Extra C flags for both compile and link:
+## Production allocators (optional)
+
+For multi-month processes, a purpose-built allocator can reduce fragmentation
+vs the system `malloc` (measure with `scripts/long-run-soak.sh` /
+`scripts/http-long-run-soak.sh`):
+
+```bash
+MAKO_ALLOCATOR=mimalloc MAKO_LDFLAGS="-L$(brew --prefix mimalloc 2>/dev/null)/lib" \
+  mako build --release main.mko -o server
+MAKO_ALLOCATOR=jemalloc mako build --release main.mko -o server
+MAKO_ALLOCATOR=/path/to/libmimalloc.a mako build --release main.mko -o server
+```
+
+## Extra flags
 
 ```bash
 MAKO_CFLAGS="-march=native" mako build --release main.mko -o server
+MAKO_LDFLAGS="-L/opt/lib -lfoo" mako build --release main.mko -o server
 ```
 
 ## Static linking

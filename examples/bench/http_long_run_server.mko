@@ -1,0 +1,85 @@
+// HTTP long-run soak server — accept N requests then exit cleanly.
+// Per request does a small map/string alloc that must free (ownership under load).
+// Used by scripts/http-long-run-soak.sh (docs/LONG_RUNNING.md LR-6).
+//
+// Args: [max_requests=2000] [port=19810]
+
+fn request_work(n: int) -> int {
+    var m = make(map[int]int, 16)
+    var j = 0
+    while j < 16 {
+        m[j] = n + j
+        j = j + 1
+    }
+    var sum = 0
+    j = 0
+    while j < 16 {
+        sum = sum + m[j]
+        j = j + 1
+    }
+    let tag = int_to_string(n)
+    return sum + len(tag)
+}
+
+fn main() {
+    var max = 2000
+    var port = 19810
+    if argc() > 1 {
+        match parse_int(arg_get(1)) {
+            Ok(v) => {
+                if v > 0 {
+                    max = v
+                }
+            }
+            Err(_) => {}
+        }
+    }
+    if argc() > 2 {
+        match parse_int(arg_get(2)) {
+            Ok(v) => {
+                if v > 0 {
+                    port = v
+                }
+            }
+            Err(_) => {}
+        }
+    }
+
+    let fd = http_bind(port)
+    if fd < 0 {
+        print("http_long_run: bind failed")
+        exit(2)
+    }
+    print("http_long_run on :")
+    print_int(port)
+    print(" max=")
+    print_int(max)
+
+    var n = 0
+    var work = 0
+    while n < max {
+        let c = http_accept(fd)
+        if c < 0 {
+            // retry
+        } else {
+            let p = http_path(c)
+            work = work + request_work(n)
+            if str_eq(p, "/health") {
+                let _ = http_respond_ct(c, 200, "application/json", "{\"ok\":true}\n")
+            } else {
+                if str_eq(p, "/") {
+                    let _ = http_respond(c, 200, "{\"status\":\"ok\",\"server\":\"mako\"}\n")
+                } else {
+                    let _ = http_respond(c, 404, "missing\n")
+                }
+            }
+            let _ = http_close(c)
+            n = n + 1
+        }
+    }
+    let _ = http_close_listener(fd)
+    print("http_long_run done work=")
+    print_int(work)
+    print(" n=")
+    print_int(n)
+}

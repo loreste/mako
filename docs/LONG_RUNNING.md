@@ -80,16 +80,15 @@ without ever taking a GC.
 
 | Track | What | Evidence |
 |-------|------|----------|
-| **LR-1 Foundation** | Soak fixture + RSS/live-bytes gate | `scripts/long-run-soak.sh` |
+| **LR-1 Foundation** | Soak fixture + RSS/live-bytes gate | `scripts/long-run-soak.sh` (**done**) |
 | **LR-2 Runtime trust** | TSan soaks, channel stress, cancel/deadline | ROADMAP **0.5.2** |
-| **LR-3 Allocators** | Document/link mimalloc/jemalloc for long-run fragmentation | optional `MAKO_*` link flags |
-| **LR-4 PGO / LTO product** | Documented PGO recipe for release servers | howto + CI optional |
+| **LR-3 Allocators** | mimalloc/jemalloc link knobs for long-run fragmentation | `MAKO_ALLOCATOR` / `MAKO_LDFLAGS` (**done seed**) |
+| **LR-4 PGO / LTO product** | Two-pass PGO recipe for release servers | `scripts/pgo-build.sh` (**done seed**) |
 | **LR-5 Observability** | pprof / metrics without GC pauses | `mako profile-serve` depth |
-| **LR-6 HTTP / net soaks** | Accept loop under load, connection caps | `bench-http` + soak |
+| **LR-6 HTTP / net soaks** | Accept loop under load, RSS while serving | `scripts/http-long-run-soak.sh` (**done seed**) |
 | **LR-7 Claims honesty** | Published soaks vs JVM *only* when methodology is public | no invented numbers |
 
-**Product tip patches** can land LR-1 immediately. **0.5.2** owns LR-2.
-Later **0.5.x** patches own LR-3–LR-6 as evidence appears.
+**Product tip patches** land LR-1/3/4/6 seeds. **0.5.2** owns LR-2 depth + broader soaks.
 
 ---
 
@@ -130,24 +129,73 @@ fn main() {
 
 ---
 
-## Soak gate (LR-1)
+## Soak gates
+
+### CPU/alloc steady-state (LR-1)
 
 ```bash
 ./scripts/long-run-soak.sh
-# Override intensity:
-#   MAKO_LONG_RUN_CYCLES=200000 ./scripts/long-run-soak.sh
 ```
 
-**Pass criteria (default):**
+**Pass criteria:** ownership live-delta **0**; multi-sample RSS growth within bar.
 
-1. Process exits 0 with stable checksum.
-2. **Tracked live bytes** after the run ≈ baseline (ownership held).
-3. **RSS after warmup** does not grow more than the configured ratio across
-   samples (host allocator noise allowed within bound).
+### HTTP accept loop (LR-6)
 
-This does **not** yet prove multi-year wall-clock uptime. It proves the
-**steady-state memory contract** under compressed load — the main failure mode
-that ends “years-up” processes early.
+```bash
+./scripts/http-long-run-soak.sh
+# MAKO_HTTP_SOAK_REQUESTS=5000 MAKO_HTTP_SOAK_CLIENTS=16 ./scripts/http-long-run-soak.sh
+```
+
+Drives thousands of `/` + `/health` hits against
+`examples/bench/http_long_run_server.mko` (per-request map/string work that
+must free). Samples **server RSS under load**; requires clean shutdown after
+the request budget.
+
+Throughput microbench (not a soak): `./scripts/bench-http.sh` (needs wrk/hey).
+
+### Production allocator (LR-3)
+
+Link a long-running-friendly allocator when the host has one installed:
+
+```bash
+# Homebrew mimalloc example:
+MAKO_ALLOCATOR=mimalloc MAKO_LDFLAGS="-L$(brew --prefix mimalloc)/lib" \
+  mako build --release app.mko -o app
+
+# jemalloc:
+MAKO_ALLOCATOR=jemalloc MAKO_LDFLAGS="-L/usr/local/lib" \
+  mako build --release app.mko -o app
+
+# Explicit static archive (overrides malloc):
+MAKO_ALLOCATOR=/path/to/libmimalloc.a mako build --release app.mko -o app
+
+# Raw flags:
+MAKO_LDFLAGS="-L/opt/homebrew/lib -lmimalloc" mako build --release app.mko -o app
+```
+
+Default remains the **system** allocator. Prefer measuring with
+`http-long-run-soak` / `long-run-soak` before and after.
+
+### PGO (LR-4)
+
+```bash
+# Full two-pass recipe (instrument → train → merge → rebuild):
+./scripts/pgo-build.sh examples/bench/http_long_run_server.mko \
+  -o out/http_pgo -- 2000 19820
+
+# Manual:
+MAKO_PGO_GEN=1 mako build --release app.mko -o app.pgo-gen
+LLVM_PROFILE_FILE=out/pgo/default-%p.profraw ./app.pgo-gen …   # train
+llvm-profdata merge -o out/pgo/merged.profdata out/pgo/*.profraw
+MAKO_PGO_USE=out/pgo/merged.profdata mako build --release app.mko -o app
+```
+
+Train on **representative** traffic (same shapes as production). Combine with
+release **LTO** (default) and optional `MAKO_ALLOCATOR`.
+
+These gates prove the **steady-state memory contract** under compressed load —
+the main failure mode that ends “years-up” processes early — not multi-year
+wall-clock uptime by themselves.
 
 ---
 

@@ -1,6 +1,6 @@
 # Mako roadmap
 
-**Product version:** **0.4.10** (tip) · last tagged **v0.4.5** · Last sync: **2026-07-22**.  
+**Product version:** **0.4.11** (tip) · last tagged **v0.4.5** · Last sync: **2026-07-22**.  
 **Suite:** **367** Mako tests on `examples/testing` (C + native backends) + Rust
 unit tests, 0 failures on the native gate · CI ASan/UBSan/TSan as configured.
 
@@ -27,7 +27,8 @@ unit tests, 0 failures on the native gate · CI ASan/UBSan/TSan as configured.
 | **0.4.7** | Cross / WASM / static / sanitize truth table (hard-error gaps) | **In tree** |
 | **0.4.8** | Map/I/O workload gates + perf regression budget | **In tree** |
 | **0.4.9** | LLVM CI (macOS) + install/doctor smoke | **In tree** |
-| **0.4.10** | Years-up soak foundation (vs JVM long-running) | **In tree** (tip; cut when ready to tag) |
+| **0.4.10** | Years-up soak foundation (vs JVM long-running) | **In tree** |
+| **0.4.11** | HTTP long-run soak + allocator/PGO product | **In tree** (tip; cut when ready to tag) |
 | **0.5.0** | Native-first **default** (CLI default flip — minor theme) | **Planned** minor |
 | **0.5.1** | Toolchain & IDE depth (LSP, DAP/DWARF, doc/bench product) | **Planned** |
 | **0.5.2** | Runtime trust & production concurrency soaks | **Planned** |
@@ -42,7 +43,8 @@ unit tests, 0 failures on the native gate · CI ASan/UBSan/TSan as configured.
 0.4.7  modes truth table  [in tree]
 0.4.8  map/I/O gates + regression baselines  [in tree]
 0.4.9  LLVM CI (macOS) + install/doctor smoke  [in tree]
-0.4.10 years-up soak foundation  [tip]
+0.4.10 years-up soak foundation  [in tree]
+0.4.11 HTTP soak + allocator/PGO  [tip]
 0.5.0  native-first CLI default (minor)
 0.5.1  toolchain/IDE
 0.5.2  runtime trust

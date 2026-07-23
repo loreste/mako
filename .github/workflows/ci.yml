@@ -207,6 +207,18 @@ jobs:
           MAKO_BIN: ${{ github.workspace }}/target/release/mako
           MAKO_LONG_RUN_BACKEND: c
 
+      # 0.4.11 LR-6: HTTP accept loop under concurrent clients.
+      - name: HTTP long-run soak
+        if: runner.os != 'Windows'
+        shell: bash
+        run: ./scripts/http-long-run-soak.sh
+        env:
+          MAKO_BIN: ${{ github.workspace }}/target/release/mako
+          MAKO_HTTP_SOAK_BACKEND: c
+          MAKO_HTTP_SOAK_REQUESTS: "1200"
+          MAKO_HTTP_SOAK_CLIENTS: "8"
+          MAKO_HTTP_SOAK_PORT: "19810"
+
       - name: Intel macOS cross-artifact smoke
         if: runner.os == 'macOS'
         shell: bash

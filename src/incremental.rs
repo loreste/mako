@@ -801,6 +801,7 @@ pub fn link_objects(
             }
         }
     }
+    // Link-time PGO needs the same -fprofile-* flags as compile.
     if std::env::var_os("MAKO_PGO_GEN").is_some() {
         cmd.arg("-fprofile-generate");
     }

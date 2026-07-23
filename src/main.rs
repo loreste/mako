@@ -1838,11 +1838,23 @@ fn make_incr_opts(
     // changing Mako source.  They are intentionally non-cacheable: a raw
     // flag string cannot describe headers or changing profile contents.
     let external_codegen_inputs = std::env::var_os("MAKO_CFLAGS").is_some()
+        || std::env::var_os("MAKO_LDFLAGS").is_some()
+        || std::env::var_os("MAKO_ALLOCATOR").is_some()
         || std::env::var_os("MAKO_PGO_GEN").is_some()
         || std::env::var_os("MAKO_PGO_USE").is_some();
     if let Ok(extra) = std::env::var("MAKO_CFLAGS") {
         flags.push_str("external-cflags=");
         flags.push_str(&extra);
+        flags.push(';');
+    }
+    if let Ok(extra) = std::env::var("MAKO_LDFLAGS") {
+        flags.push_str("external-ldflags=");
+        flags.push_str(&extra);
+        flags.push(';');
+    }
+    if let Ok(alloc) = std::env::var("MAKO_ALLOCATOR") {
+        flags.push_str("allocator=");
+        flags.push_str(&alloc);
         flags.push(';');
     }
     if let Some(mode) = std::env::var_os("MAKO_PGO_GEN") {
@@ -3583,6 +3595,44 @@ fn compile_cflags(opts: &BuildOpts) -> Vec<String> {
     v
 }
 
+/// Optional production allocators for long-running processes (LR-3).
+/// `MAKO_ALLOCATOR=mimalloc|jemalloc|system` or a path to a static `.a`.
+fn push_allocator_link_args(args: &mut Vec<String>, os: cc::OsKind) {
+    let Ok(raw) = std::env::var("MAKO_ALLOCATOR") else {
+        return;
+    };
+    let name = raw.trim();
+    if name.is_empty() || name.eq_ignore_ascii_case("system") {
+        return;
+    }
+    if name.ends_with(".a") || name.ends_with(".lib") || name.contains('/') || name.contains('\\')
+    {
+        // Static archive path — put first so it can override malloc symbols.
+        args.insert(0, name.to_string());
+        return;
+    }
+    match name.to_ascii_lowercase().as_str() {
+        "mimalloc" => {
+            args.push("-lmimalloc".into());
+            // mimalloc often needs C++ runtime when linked as shared; static is preferred.
+            if os == cc::OsKind::Linux || os == cc::OsKind::Other {
+                args.push("-lpthread".into());
+            }
+        }
+        "jemalloc" => {
+            args.push("-ljemalloc".into());
+            if os == cc::OsKind::Linux || os == cc::OsKind::Other {
+                args.push("-lpthread".into());
+                args.push("-ldl".into());
+            }
+        }
+        other => {
+            // Treat as -l<name>
+            args.push(format!("-l{other}"));
+        }
+    }
+}
+
 fn link_args_native(opts: &BuildOpts, _runtime_dir: &Path) -> Vec<String> {
     let os = cc::classify_target(opts.target.as_deref());
     let mut args = cc::base_link_args(opts);
@@ -3593,6 +3643,18 @@ fn link_args_native(opts: &BuildOpts, _runtime_dir: &Path) -> Vec<String> {
             args.push("-Wl,--gc-sections".into());
         }
         cc::OsKind::Windows | cc::OsKind::Wasm => {}
+    }
+    // Years-up: optional production allocator (docs/LONG_RUNNING.md · LR-3).
+    //   MAKO_ALLOCATOR=mimalloc|jemalloc|system
+    //   MAKO_ALLOCATOR=/path/to/libmimalloc.a
+    // Extra link flags: MAKO_LDFLAGS="-L/opt/homebrew/lib -lmimalloc"
+    push_allocator_link_args(&mut args, os);
+    if let Ok(extra) = std::env::var("MAKO_LDFLAGS") {
+        for a in extra.split_whitespace() {
+            if !a.is_empty() {
+                args.push(a.to_string());
+            }
+        }
     }
     // Optional deps: only auto-link on native (same-OS) builds — cross sysroots rarely have them.
     let native_like = opts.target.is_none() || !cc::is_cross(opts.target.as_deref());
@@ -4014,6 +4076,7 @@ fn build_c(
     //   MAKO_PGO_GEN=1 mako build --release …
     //   ./bin …  # train
     //   MAKO_PGO_USE=. mako build --release …
+    // Full recipe: scripts/pgo-build.sh (docs/LONG_RUNNING.md · LR-4).
     if std::env::var_os("MAKO_PGO_GEN").is_some() {
         cmd.arg("-fprofile-generate");
     }

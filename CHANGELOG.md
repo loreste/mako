@@ -1,6 +1,25 @@
 # Changelog
 
-## 0.4.10 — 2026-07-22 (tip; tag when packaging cut)
+## 0.4.11 — 2026-07-23 (tip; tag when packaging cut)
+
+**Theme:** HTTP long-run soak + production allocator/PGO knobs (years-up LR-3/4/6).
+
+### HTTP soak (LR-6)
+
+- `examples/bench/http_long_run_server.mko` — accept budget + per-request map/string work.
+- `scripts/http-long-run-soak.sh` — concurrent clients, server RSS under load, clean exit.
+- Wired into Unix CI (1200 requests default in CI).
+
+### Allocator + PGO (LR-3 / LR-4)
+
+- `MAKO_ALLOCATOR=mimalloc|jemalloc|system` or path to a static `.a`.
+- `MAKO_LDFLAGS` for extra link flags (fingerprinted; bypasses incremental).
+- `scripts/pgo-build.sh` — instrument → train → `llvm-profdata merge` → rebuild.
+- Docs: [LONG_RUNNING.md](docs/LONG_RUNNING.md), [howto/09-release-builds.md](docs/howto/09-release-builds.md).
+
+## 0.4.10 — 2026-07-22
+
+**Theme:** Years-up foundation — long-running services vs JVM (Java/Kotlin).
 
 **Theme:** Years-up foundation — long-running services vs JVM (Java/Kotlin).
 
