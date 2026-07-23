@@ -19,14 +19,14 @@ Related: [SPEED.md](SPEED.md) · [PERFORMANCE.md](PERFORMANCE.md) ·
 |---------|----------------------|------------------|
 | Time scale | milliseconds | months–years |
 | Failure mode | slow code | **RSS creep**, fd/thread leaks, p99 spikes |
-| Optimizer | AOT `-O3 -flto` | AOT + offline PGO + cheap hot-site feedback; **no JIT warmup tax** |
+| Optimizer | AOT `-O3 -flto` | AOT + offline PGO + cheap hot-site feedback; **no in-process recompile** |
 | Memory | peak of one run | **steady-state** after warmup |
 | Latency | mean | **p99 / p999** under load |
 
-Managed runtimes with online JIT can look strong on peak throughput after
-warmup. Long-running products often lose on **GC pauses**, **heap bloat**, and
-**unpredictable tail latency**. Mako’s contract is the opposite: **no GC**,
-ownership + arenas, native code from process start.
+Runtimes that specialize only after long warmup can look strong on peak
+throughput later. Long-running products often lose on **GC pauses**, **heap
+bloat**, and **unpredictable tail latency**. Mako’s contract is the opposite:
+**no GC**, ownership + arenas, native code from process start.
 
 ---
 
@@ -75,7 +75,7 @@ release, LTO, optional PGO, and allocator choice — without ever taking a GC.
 | **LR-2 Runtime trust** | TSan soaks, channel stress, cancel/deadline | ROADMAP **0.5.2** |
 | **LR-3 Allocators** | mimalloc/jemalloc link knobs for long-run fragmentation | `MAKO_ALLOCATOR` / `MAKO_LDFLAGS` (**done seed**) |
 | **LR-4 PGO / LTO product** | Two-pass PGO recipe for release servers | `scripts/pgo-build.sh` (**done seed**) |
-| **LR-4b Adaptive opt** | Traffic feedback **without** online JIT | `hot_site_*` + [ADAPTIVE_OPT.md](ADAPTIVE_OPT.md) + `adaptive-opt-cycle.sh` (**done seed**) |
+| **LR-4b Adaptive opt** | Traffic feedback **without** in-process recompile | `hot_site_*` + [ADAPTIVE_OPT.md](ADAPTIVE_OPT.md) + `adaptive-opt-cycle.sh` (**done seed**) |
 | **LR-5 Observability** | pprof / metrics without GC pauses | `mako profile-serve` depth |
 | **LR-6 HTTP / net soaks** | Accept loop under load, RSS while serving | `scripts/http-long-run-soak.sh` (**done seed**) |
 | **LR-7 Claims honesty** | Published soaks *only* when methodology is public | no invented numbers |
@@ -168,10 +168,10 @@ MAKO_LDFLAGS="-L/opt/homebrew/lib -lmimalloc" mako build --release app.mko -o ap
 Default remains the **system** allocator. Prefer measuring with
 `http-long-run-soak` / `long-run-soak` before and after.
 
-### PGO (LR-4) and adaptive opt without JIT (LR-4b)
+### PGO (LR-4) and adaptive opt without live recompile (LR-4b)
 
-We want *learning from production traffic* without the *slowdown* of online
-JIT (warmup, deopt, in-process compiler, GC).
+We want *learning from production traffic* without the *slowdown* of
+in-process specialization (warmup, deopt, embedded compiler, GC).
 
 - **Live process:** full AOT; optional `hot_site_hit(id)` (relaxed atomic when
   enabled). **Never** rewrite machine code in-process. Details:

@@ -1,8 +1,8 @@
-# Adaptive optimization without JIT tax
+# Adaptive optimization without in-process recompile
 
 **Goal:** the longer a Mako service runs, the more we know about its real
-hot paths — and the next binary is better — **without ever slowing the live
-process with online JIT**, and **without a GC**.
+hot paths — and the next binary is better — **without ever rewriting machine
+code in the live process**, and **without a GC**.
 
 Tip: **0.4.15+** · Related: [LONG_RUNNING.md](LONG_RUNNING.md) ·
 [PERFORMANCE.md](PERFORMANCE.md) · [MEMORY_SAFETY.md](MEMORY_SAFETY.md) ·
@@ -29,8 +29,8 @@ The product contract:
    PGO instrumentation in production.
 4. **Heavier specialization is offline** (train → merge → rebuild → ship).
 
-That is profile-guided learning on the *traffic* axis, without the *slowdown*
-axis of an online JIT.
+That is profile-guided learning from traffic, without the slowdown of an
+in-process compiler.
 
 ---
 
@@ -98,8 +98,8 @@ fn main() {
 
 HTTP seed path (same router as pprof): **`/debug/hot_sites`**.
 
-Stack sampling (heavier, still non-JIT) remains under `profile_sample_*` —
-use sparingly; prefer hot sites on the request critical path.
+Stack sampling (heavier; still not an in-process recompile) remains under
+`profile_sample_*` — use sparingly; prefer hot sites on the request critical path.
 
 ---
 
@@ -123,11 +123,11 @@ Recommended ops loop for years-up services:
 
 ---
 
-## Why this stays faster than “JIT on the box”
+## Why this stays faster than in-process recompile
 
-| Failure mode | Online JIT | Mako adaptive AOT |
-|--------------|------------|-------------------|
-| Cold start | Slow tiers | Full speed immediately |
+| Failure mode | In-process recompile | Mako adaptive AOT |
+|--------------|----------------------|-------------------|
+| Cold start | Slow tiers / warmup | Full speed immediately |
 | Deoptimization storms | Possible | Impossible (no live rewrite) |
 | Code cache growth in-process | Yes | Binary size fixed at deploy |
 | GC while compiling | Common with collectors | No GC |
@@ -142,7 +142,7 @@ with PGO closing the peak gap **offline**.
 
 ## Claims policy
 
-- Do say: no GC; no online JIT; optional cheap feedback; offline PGO.
+- Do say: no GC; no in-process recompile; optional cheap feedback; offline PGO.
 - Do not say “self-optimizing binary rewrites itself at runtime.”
 - Do not invent throughput claims without a named soak + hardware (see
   LONG_RUNNING LR-7).
@@ -150,4 +150,4 @@ with PGO closing the peak gap **offline**.
 Tests: `examples/testing/hot_site_test.mko` (counters + map workload coexistence).
 
 **Invariant:** AOT map/layout opts (identity int hash, pre-size, LTO) must leave
-`hot_site_*` default-off and PGO env wiring unchanged. Speed ≠ online JIT.
+`hot_site_*` default-off and PGO env wiring unchanged. Speed ≠ live recompile.

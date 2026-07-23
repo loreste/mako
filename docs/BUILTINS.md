@@ -2244,8 +2244,8 @@ Tests: `examples/testing/strong_log_test.mko`.
 | `hot_site_top_id` / `hot_site_top_count` | `() -> int` | Hottest site (−1 id if empty) |
 | `hot_sites_json` | `() -> string` | Export `mako.hot_sites.v1` |
 
-Adaptive opt (no online JIT): [ADAPTIVE_OPT.md](ADAPTIVE_OPT.md). HTTP seed path
-`/debug/hot_sites` via `profile_http_route`.
+Adaptive opt (traffic feedback, offline PGO): [ADAPTIVE_OPT.md](ADAPTIVE_OPT.md).
+HTTP seed path `/debug/hot_sites` via `profile_http_route`.
 
 ---
 

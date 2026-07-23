@@ -7057,7 +7057,7 @@ impl TypeChecker {
             "profile_http_route".into(),
             Type::Fn(vec![Type::String], Box::new(Type::String)),
         );
-        // Adaptive hot-site counters: years-up feedback without online JIT.
+        // Adaptive hot-site counters: years-up feedback without live recompile.
         fns.insert(
             "hot_site_enable".into(),
             Type::Fn(vec![Type::Int], Box::new(Type::Int)),

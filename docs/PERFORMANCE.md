@@ -53,7 +53,7 @@ Book: [§11 Speed & memory safety](book/src/ch11-speed-safety.md) · Release how
 ./scripts/http-long-run-soak.sh
 # See docs/LONG_RUNNING.md (years-up north star for long-running services).
 # Optional: MAKO_ALLOCATOR=mimalloc|jemalloc · scripts/pgo-build.sh for PGO.
-# Adaptive opt without online JIT: docs/ADAPTIVE_OPT.md · scripts/adaptive-opt-cycle.sh
+# Adaptive opt (traffic feedback, offline PGO): docs/ADAPTIVE_OPT.md · scripts/adaptive-opt-cycle.sh
 
 # HTTP throughput (requires wrk or hey):
 ./scripts/bench-http.sh

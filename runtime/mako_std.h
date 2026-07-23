@@ -2312,7 +2312,7 @@ static inline int64_t mako_profile_sample_thread_count(void) {
     return nseen;
 }
 
-/* ---- Adaptive hot-site counters (years-up feedback without JIT) ----------
+/* ---- Adaptive hot-site counters (years-up feedback, no live recompile) ----
  * Gets smarter from traffic via *offline* re-opt, not in-process code rewrite.
  * When disabled, hit() is a single relaxed load + branch. When enabled, hit is
  * one relaxed atomic increment — no stack walks, no safepoints, no code cache,
