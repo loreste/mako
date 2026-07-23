@@ -10,13 +10,13 @@ Tip: **0.4.15+** · Related: [LONG_RUNNING.md](LONG_RUNNING.md) ·
 
 ---
 
-## What we like about Java JIT — and what we refuse
+## What we take from profile-guided systems — and what we refuse
 
-| Java JIT trait | Mako stance |
-|----------------|-------------|
+| Property | Mako stance |
+|----------|-------------|
 | Learns from production traffic | **Yes** — feedback from live counters + offline PGO |
-| Hot methods get better over time | **Yes** — at **redeploy / rebuild**, not mid-request |
-| Interpreter / C1 / C2 tiers | **No** — full native from process start |
+| Hot paths get better over time | **Yes** — at **redeploy / rebuild**, not mid-request |
+| Interpreter / multi-tier compilers | **No** — full native from process start |
 | Warmup latency tax | **No** — cold path is already AOT `-O3` (+ LTO) |
 | Deopt / code-cache pressure | **No** — no in-process recompile |
 | GC while optimizing | **No** — ownership / arenas; no GC |
@@ -29,7 +29,8 @@ The product contract:
    PGO instrumentation in production.
 4. **Heavier specialization is offline** (train → merge → rebuild → ship).
 
-That is “like JIT” on the *learning* axis, without the *slowdown* axis.
+That is profile-guided learning on the *traffic* axis, without the *slowdown*
+axis of an online JIT.
 
 ---
 
@@ -128,14 +129,14 @@ Recommended ops loop for years-up services:
 |--------------|------------|-------------------|
 | Cold start | Slow tiers | Full speed immediately |
 | Deoptimization storms | Possible | Impossible (no live rewrite) |
-| Code cache / metaspace growth | Yes | Binary size fixed at deploy |
-| GC while compiling | Common on JVM | No GC |
+| Code cache growth in-process | Yes | Binary size fixed at deploy |
+| GC while compiling | Common with collectors | No GC |
 | p99 during “warmup” | Spiky | Stable from first request |
 | Memory for compiler in-process | Large | Zero |
 
-Throughput *peak* after hours of JVM C2 can still win some microkernels.
-Mako’s bet is **stable p99 + stable RSS + no GC** for months–years, with
-PGO closing the peak gap **offline**.
+Peak throughput after long online specialization can still win some microkernels
+elsewhere. Mako’s bet is **stable p99 + stable RSS + no GC** for months–years,
+with PGO closing the peak gap **offline**.
 
 ---
 
@@ -143,7 +144,8 @@ PGO closing the peak gap **offline**.
 
 - Do say: no GC; no online JIT; optional cheap feedback; offline PGO.
 - Do not say “self-optimizing binary rewrites itself at runtime.”
-- Do not claim vs Java without a named soak + hardware (see LONG_RUNNING LR-7).
+- Do not invent throughput claims without a named soak + hardware (see
+  LONG_RUNNING LR-7).
 
 Tests: `examples/testing/hot_site_test.mko` (counters + map workload coexistence).
 

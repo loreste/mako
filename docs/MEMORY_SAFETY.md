@@ -83,7 +83,7 @@ There is **no** “let the GC clean it up later.”
 
 ## Long-running servers
 
-No GC is why Mako targets **years-up** p99 stability vs the JVM. Combine:
+No GC is why Mako targets **years-up** p99 stability. Combine:
 
 1. Request-scoped owns / arenas  
 2. `./scripts/long-run-soak.sh` and `./scripts/http-long-run-soak.sh`  

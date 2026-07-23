@@ -42,7 +42,7 @@ get better via **offline** feedback, not in-process code rewrite. No GC.
 - **`hot_site_*` builtins** — opt-in relaxed atomic counters (256 sites).
   Default **off** (hit is one load + branch). Export `mako.hot_sites.v1` and
   HTTP `/debug/hot_sites` via `profile_http_route`.
-- **Docs:** [docs/ADAPTIVE_OPT.md](docs/ADAPTIVE_OPT.md) — Java-like *learning*
+- **Docs:** [docs/ADAPTIVE_OPT.md](docs/ADAPTIVE_OPT.md) — traffic *learning*
   without warmup/deopt/code-cache tax; contract is AOT always + offline PGO.
 - **Script:** `scripts/adaptive-opt-cycle.sh` (AOT + guidance + `pgo-build.sh`).
 - **Test:** `examples/testing/hot_site_test.mko`.
@@ -106,14 +106,12 @@ get better via **offline** feedback, not in-process code rewrite. No GC.
 
 ## 0.4.10 — 2026-07-22
 
-**Theme:** Years-up foundation — long-running services vs JVM (Java/Kotlin).
-
-**Theme:** Years-up foundation — long-running services vs JVM (Java/Kotlin).
+**Theme:** Years-up foundation — long-running services (no GC, stable p99/RSS).
 
 ### Long-running / production
 
-- **[docs/LONG_RUNNING.md](docs/LONG_RUNNING.md)** — north star: better than JVM for
-  multi-year backends on **p99 + RSS** (no GC); honest where JVM still leads.
+- **[docs/LONG_RUNNING.md](docs/LONG_RUNNING.md)** — north star: multi-year backends
+  on **p99 + RSS** with **no GC**; honest about evidence gaps.
 - **`examples/bench/long_run_soak.mko`** — compressed request cycles (map/slice/string).
 - **`scripts/long-run-soak.sh`** — ownership live-delta + multi-sample RSS stability.
 - ROADMAP **0.5.2** expanded with years-up / **52-G** evidence track.

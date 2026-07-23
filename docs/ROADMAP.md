@@ -27,7 +27,7 @@ unit tests, 0 failures on the native gate · CI ASan/UBSan/TSan as configured.
 | **0.4.7** | Cross / WASM / static / sanitize truth table (hard-error gaps) | **In tree** |
 | **0.4.8** | Map/I/O workload gates + perf regression budget | **In tree** |
 | **0.4.9** | LLVM CI (macOS) + install/doctor smoke | **In tree** |
-| **0.4.10** | Years-up soak foundation (vs JVM long-running) | **In tree** |
+| **0.4.10** | Years-up soak foundation (long-running services) | **In tree** |
 | **0.4.11** | HTTP long-run soak + allocator/PGO product | **In tree** |
 | **0.4.12** | Messaging queues + GraphQL HTTP seeds | **In tree** |
 | **0.4.13** | Language `queue[T]` + `Graphql` types | **In tree** |
@@ -294,8 +294,8 @@ Coherent **official toolchain**: LSP, debug, docs, bench, and doctor feel like o
 ## 0.5.2 — Runtime trust & production concurrency (years-up)
 
 **Depends on:** 0.5.0 (and ideally 0.5.1 for debugability under load).  
-**Product story:** backends that stay up for **months–years** should beat
-**Java/Kotlin (JVM)** on **p99 stability and RSS ceiling** (no GC). Strategy:
+**Product story:** backends that stay up for **months–years** should lead on
+**p99 stability and RSS ceiling** (no GC). Strategy:
 [LONG_RUNNING.md](LONG_RUNNING.md). Seed gate: `scripts/long-run-soak.sh` (LR-1).
 
 ### North star
@@ -312,7 +312,7 @@ Production backends can rely on **structured concurrency + ownership** under str
 | **52-D** | Cancellation / deadline product | Portable timeout story end-to-end (task + channel + net APIs) |
 | **52-E** | Leak / resource census under load | RT-006-style APIs + soak that fails on growth (**seed:** long-run-soak) |
 | **52-F** | Race model docs ↔ code | MEMORY_MODEL and typecheck `is_sync_ty` table stay in lockstep |
-| **52-G** | Years-up vs JVM evidence | Reproducible p99/RSS soaks; claims only with public methodology |
+| **52-G** | Years-up evidence | Reproducible p99/RSS soaks; claims only with public methodology |
 
 ### Exit 0.5.2
 

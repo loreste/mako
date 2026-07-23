@@ -28,8 +28,8 @@ Security is not a linter plugin.
 
 Any feature that silently slows the hot path must justify itself or stay opt-in.
 
-**Long-running servers (vs Java/Kotlin):** Mako’s structural advantage is **no GC**
-and **ownership-bounded live memory**. Microbenches alone do not prove years-up
+**Long-running servers:** Mako’s structural advantage is **no GC** and
+**ownership-bounded live memory**. Microbenches alone do not prove years-up
 stability — use `./scripts/long-run-soak.sh` and read [LONG_RUNNING.md](LONG_RUNNING.md).
 
 Sanitizers and overflow traps stay **opt-in** so release hot paths stay

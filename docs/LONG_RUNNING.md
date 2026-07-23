@@ -1,11 +1,11 @@
 # Long-running applications (years-up)
 
-**North star:** Mako should be the better default than **Java / Kotlin (JVM)** for
-backend services that stay up for **months to years** — not only for microbench
-fib, but for **stable latency, stable RSS, and no GC tax**.
+**North star:** Mako should be the better default for backend services that stay
+up for **months to years** — not only for microbench fib, but for **stable
+latency, stable RSS, and no GC tax**.
 
 This is a product commitment, not a completed claim. Evidence is built in
-patches (soaks, gates, docs). Last sync: **2026-07-22** · tip **0.4.14**.
+patches (soaks, gates, docs). Last sync: **2026-07-22** · tip **0.4.15**.
 
 Related: [SPEED.md](SPEED.md) · [PERFORMANCE.md](PERFORMANCE.md) ·
 [MEMORY_MODEL.md](MEMORY_MODEL.md) · [SECURITY.md](SECURITY.md) ·
@@ -23,38 +23,29 @@ Related: [SPEED.md](SPEED.md) · [PERFORMANCE.md](PERFORMANCE.md) ·
 | Memory | peak of one run | **steady-state** after warmup |
 | Latency | mean | **p99 / p999** under load |
 
-Java/Kotlin can look strong on peak throughput after JIT warmup. Long-running
-products often lose on **GC pauses**, **heap bloat**, and **unpredictable
-tail latency**. Mako’s contract is the opposite: **no GC**, ownership + arenas,
-native code from process start.
+Managed runtimes with online JIT can look strong on peak throughput after
+warmup. Long-running products often lose on **GC pauses**, **heap bloat**, and
+**unpredictable tail latency**. Mako’s contract is the opposite: **no GC**,
+ownership + arenas, native code from process start.
 
 ---
 
-## Honest comparison vs Java / Kotlin
+## How Mako is structured for years-up
 
-### Where Mako is already structured to win
+| Axis | Mako |
+|------|------|
+| **GC pauses** | None |
+| **p99 predictability** | Deterministic free on scope exit |
+| **Startup / cold path** | Native binary; no warmup tiers |
+| **RSS ceiling** | Live bytes ≈ owned graph |
+| **Deployment** | Single binary |
+| **Ownership** | Compiler + `hold` / `share` / `arena` |
 
-| Axis | Mako | JVM (typical) |
-|------|------|----------------|
-| **GC pauses** | None | Tuning required; still present |
-| **p99 predictability** | Deterministic free on scope exit | GC + safepoints |
-| **Startup / cold path** | Native binary | Class load + JIT warmup |
-| **RSS ceiling** | Live bytes ≈ owned graph | Heap + metaspace + JIT code cache |
-| **Deployment** | Single binary | JRE / container image tax |
-| **Ownership** | Compiler + `hold` / `share` / `arena` | GC + finalizers / cleaners |
-
-### Where the JVM still has advantages today
-
-| Axis | Reality check |
-|------|----------------|
-| **Peak throughput** after hours of JIT | Can beat naive AOT on some hot loops |
-| **Ecosystem** | Decades of libraries, APM, profilers |
-| **Operational muscle** | GC logs, heap dumps, flight recorder |
-| **Our proof** | Micro + map gates exist; **years-up soaks are the missing product evidence** |
-
-**Goal:** close the *evidence* gap with soaks and production tooling, and the
-*throughput* gap with LLVM release, LTO, optional PGO, and allocator choice —
-without ever taking a GC.
+**Tradeoffs to be honest about:** peak throughput after long online
+specialization elsewhere can still win some microkernels; ecosystem and APM
+depth are still maturing. **Our proof** for years-up is soaks + gates — close
+the *evidence* gap with soaks and tooling, and the *throughput* gap with LLVM
+release, LTO, optional PGO, and allocator choice — without ever taking a GC.
 
 ---
 
@@ -84,10 +75,10 @@ without ever taking a GC.
 | **LR-2 Runtime trust** | TSan soaks, channel stress, cancel/deadline | ROADMAP **0.5.2** |
 | **LR-3 Allocators** | mimalloc/jemalloc link knobs for long-run fragmentation | `MAKO_ALLOCATOR` / `MAKO_LDFLAGS` (**done seed**) |
 | **LR-4 PGO / LTO product** | Two-pass PGO recipe for release servers | `scripts/pgo-build.sh` (**done seed**) |
-| **LR-4b Adaptive opt** | Java-like learning **without** online JIT | `hot_site_*` + [ADAPTIVE_OPT.md](ADAPTIVE_OPT.md) + `adaptive-opt-cycle.sh` (**done seed**) |
+| **LR-4b Adaptive opt** | Traffic feedback **without** online JIT | `hot_site_*` + [ADAPTIVE_OPT.md](ADAPTIVE_OPT.md) + `adaptive-opt-cycle.sh` (**done seed**) |
 | **LR-5 Observability** | pprof / metrics without GC pauses | `mako profile-serve` depth |
 | **LR-6 HTTP / net soaks** | Accept loop under load, RSS while serving | `scripts/http-long-run-soak.sh` (**done seed**) |
-| **LR-7 Claims honesty** | Published soaks vs JVM *only* when methodology is public | no invented numbers |
+| **LR-7 Claims honesty** | Published soaks *only* when methodology is public | no invented numbers |
 
 **Product tip patches** land LR-1/3/4/6 seeds. **0.5.2** owns LR-2 depth + broader soaks.
 
@@ -179,8 +170,8 @@ Default remains the **system** allocator. Prefer measuring with
 
 ### PGO (LR-4) and adaptive opt without JIT (LR-4b)
 
-We want the *learning* property of Java JIT (traffic teaches the optimizer)
-without the *slowdown* property (warmup, deopt, in-process compiler, GC).
+We want *learning from production traffic* without the *slowdown* of online
+JIT (warmup, deopt, in-process compiler, GC).
 
 - **Live process:** full AOT; optional `hot_site_hit(id)` (relaxed atomic when
   enabled). **Never** rewrite machine code in-process. Details:
@@ -216,10 +207,11 @@ wall-clock uptime by themselves.
 ## Claims policy
 
 - **Do** say: no GC; deterministic ownership; soak gates on live growth.
-- **Do not** say “faster than Java on all servers” without a named workload,
+- **Do not** invent “faster on all servers” without a named workload,
   hardware, and methodology checked into `scripts/`.
 - **Do** publish native vs hand-C vs Rust micro numbers (existing gates).
-- JVM comparisons land only with **reproducible** harnesses (future LR-7).
+- Cross-runtime comparisons land only with **reproducible** harnesses
+  (future LR-7).
 
 ---
 
@@ -228,4 +220,4 @@ wall-clock uptime by themselves.
 1. Keep LLVM release + LTO as the default *product* release path (0.5.0).
 2. Expand soaks: channels, HTTP accept, metrics series bounds (0.5.2+).
 3. Optional production allocator + PGO docs once soaks are green.
-4. Only then: public “years-up vs JVM” page with measured p99/RSS.
+4. Only then: public years-up page with measured p99/RSS.

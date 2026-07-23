@@ -51,7 +51,7 @@ Book: [§11 Speed & memory safety](book/src/ch11-speed-safety.md) · Release how
 ./scripts/long-run-soak.sh
 # HTTP accept-loop soak (RSS under concurrent clients):
 ./scripts/http-long-run-soak.sh
-# See docs/LONG_RUNNING.md (north star vs Java/Kotlin long-running services).
+# See docs/LONG_RUNNING.md (years-up north star for long-running services).
 # Optional: MAKO_ALLOCATOR=mimalloc|jemalloc · scripts/pgo-build.sh for PGO.
 # Adaptive opt without online JIT: docs/ADAPTIVE_OPT.md · scripts/adaptive-opt-cycle.sh
 
