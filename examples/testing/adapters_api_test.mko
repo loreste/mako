@@ -1,0 +1,90 @@
+// NATS / Redis messaging adapters · GraphQL schema/resolvers · gRPC · OpenAPI
+
+fn TestNatsPubSub() {
+    let n = nats_new()
+    assert(n > 0)
+    assert_eq(nats_sub(n, "jobs.resize", 8), 1)
+    assert_eq(nats_pub(n, "jobs.resize", "{\"w\":64}"), 1)
+    assert_eq(nats_pub(n, "jobs.resize", "{\"w\":128}"), 1)
+    assert_eq(nats_len(n, "jobs.resize"), 2)
+    assert_eq_str(nats_try_next(n, "jobs.resize"), "{\"w\":64}")
+    assert_eq_str(nats_try_next(n, "jobs.resize"), "{\"w\":128}")
+    assert_eq(nats_len(n, "jobs.resize"), 0)
+    let frame = nats_pub_frame("events", "hi")
+    assert(str_contains(frame, "PUB events"))
+    assert(str_contains(frame, "hi"))
+    assert(str_contains(nats_connect_frame(), "CONNECT"))
+    assert(str_contains(nats_ping_frame(), "PING"))
+    assert_eq(nats_free(n), 1)
+}
+
+fn TestRedisMqList() {
+    let r = redis_mq_new()
+    assert(r > 0)
+    assert_eq(redis_mq_declare(r, "q:jobs", 16), 1)
+    assert_eq(redis_mq_lpush(r, "q:jobs", "a"), 1)
+    assert_eq(redis_mq_lpush(r, "q:jobs", "b"), 1)
+    assert_eq(redis_mq_llen(r, "q:jobs"), 2)
+    // LPUSH + RPOP → FIFO: first pushed "a" comes out first from tail.
+    assert_eq_str(redis_mq_rpop(r, "q:jobs"), "a")
+    assert_eq_str(redis_mq_rpop(r, "q:jobs"), "b")
+    assert_eq(redis_mq_llen(r, "q:jobs"), 0)
+    assert_eq(redis_mq_free(r), 1)
+}
+
+fn TestGraphqlSchemaResolvers() {
+    let s = graphql_schema_new()
+    assert(s > 0)
+    assert_eq(graphql_schema_add_type(s, "Query"), 1)
+    assert_eq(graphql_schema_add_field(s, "Query", "health", "Boolean"), 1)
+    assert_eq(graphql_schema_add_field(s, "Query", "version", "String"), 1)
+    assert_eq(graphql_schema_set_resolver(s, "health", "true"), 1)
+    assert_eq(graphql_schema_set_resolver(s, "version", "\"0.4.15\""), 1)
+    assert_eq(graphql_schema_has_type(s, "Query"), 1)
+    assert_eq(graphql_schema_has_resolver(s, "health"), 1)
+    let sdl = graphql_schema_sdl(s)
+    assert(str_contains(sdl, "type Query"))
+    assert(str_contains(sdl, "health: Boolean"))
+    let resp = graphql_schema_resolve(s, "{ health version }")
+    assert(str_contains(resp, "\"data\""))
+    assert(str_contains(resp, "health"))
+    assert(str_contains(resp, "true"))
+    assert(str_contains(resp, "version"))
+    assert_eq(graphql_schema_free(s), 1)
+}
+
+fn TestOpenApiBuilders() {
+    let r1 = openapi_route("GET", "/health", "Liveness")
+    let r2 = openapi_route("POST", "/v1/jobs", "Enqueue job")
+    let paths = openapi_paths_merge(r1, r2)
+    assert(str_contains(paths, "/health"))
+    assert(str_contains(paths, "/v1/jobs"))
+    let info = openapi_info("Mako API", "1.0.0", "backend seed")
+    assert(str_contains(info, "Mako API"))
+    let doc = openapi_doc_full(info, paths)
+    assert(str_contains(doc, "\"openapi\":\"3.1.0\""))
+    assert(str_contains(doc, "paths"))
+    let op = openapi_operation("GET", "Health", "ops")
+    assert(str_contains(op, "\"get\""))
+    assert(str_contains(op, "ops"))
+    let resp = openapi_response("201", "Created")
+    assert(str_contains(resp, "201"))
+}
+
+fn TestGrpcServiceRegistry() {
+    let svc = grpc_service_new("mako.jobs.v1.Jobs")
+    assert(svc > 0)
+    assert_eq_str(grpc_service_name(svc), "mako.jobs.v1.Jobs")
+    assert_eq(grpc_service_add_method(svc, "Enqueue", "{\"id\":1}"), 1)
+    assert_eq(grpc_service_add_method(svc, "Status", "{\"state\":\"ok\"}"), 1)
+    assert_eq(grpc_service_has_method(svc, "Enqueue"), 1)
+    let methods = grpc_service_methods(svc)
+    assert(str_contains(methods, "Enqueue"))
+    assert(str_contains(methods, "Status"))
+    let framed = grpc_service_handle(svc, "Enqueue", "{}")
+    assert(len(framed) > 5)
+    let payload = grpc_message_payload(framed)
+    assert(str_contains(payload, "id"))
+    assert_eq(len(grpc_service_handle(svc, "Missing", "{}")), 0)
+    assert_eq(grpc_service_free(svc), 1)
+}

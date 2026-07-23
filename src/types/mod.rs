@@ -6021,6 +6021,186 @@ impl TypeChecker {
             "mq_purge".into(),
             Type::Fn(vec![Type::Int, Type::String], Box::new(Type::Int)),
         );
+        // NATS adapter (in-process subject bus + wire frames).
+        fns.insert("nats_new".into(), Type::Fn(vec![], Box::new(Type::Int)));
+        fns.insert(
+            "nats_free".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "nats_sub".into(),
+            Type::Fn(
+                vec![Type::Int, Type::String, Type::Int],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "nats_pub".into(),
+            Type::Fn(
+                vec![Type::Int, Type::String, Type::String],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "nats_try_next".into(),
+            Type::Fn(vec![Type::Int, Type::String], Box::new(Type::String)),
+        );
+        fns.insert(
+            "nats_len".into(),
+            Type::Fn(vec![Type::Int, Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "nats_pub_frame".into(),
+            Type::Fn(vec![Type::String, Type::String], Box::new(Type::String)),
+        );
+        fns.insert(
+            "nats_sub_frame".into(),
+            Type::Fn(vec![Type::String, Type::String], Box::new(Type::String)),
+        );
+        fns.insert(
+            "nats_connect_frame".into(),
+            Type::Fn(vec![], Box::new(Type::String)),
+        );
+        fns.insert(
+            "nats_ping_frame".into(),
+            Type::Fn(vec![], Box::new(Type::String)),
+        );
+        // Redis list messaging (in-process adapter).
+        fns.insert(
+            "redis_mq_new".into(),
+            Type::Fn(vec![], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "redis_mq_free".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "redis_mq_declare".into(),
+            Type::Fn(
+                vec![Type::Int, Type::String, Type::Int],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "redis_mq_lpush".into(),
+            Type::Fn(
+                vec![Type::Int, Type::String, Type::String],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "redis_mq_rpop".into(),
+            Type::Fn(vec![Type::Int, Type::String], Box::new(Type::String)),
+        );
+        fns.insert(
+            "redis_mq_llen".into(),
+            Type::Fn(vec![Type::Int, Type::String], Box::new(Type::Int)),
+        );
+        // GraphQL schema + resolvers.
+        fns.insert(
+            "graphql_schema_new".into(),
+            Type::Fn(vec![], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "graphql_schema_free".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "graphql_schema_add_type".into(),
+            Type::Fn(vec![Type::Int, Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "graphql_schema_add_field".into(),
+            Type::Fn(
+                vec![Type::Int, Type::String, Type::String, Type::String],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "graphql_schema_set_resolver".into(),
+            Type::Fn(
+                vec![Type::Int, Type::String, Type::String],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "graphql_schema_has_type".into(),
+            Type::Fn(vec![Type::Int, Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "graphql_schema_has_resolver".into(),
+            Type::Fn(vec![Type::Int, Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "graphql_schema_sdl".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::String)),
+        );
+        fns.insert(
+            "graphql_schema_resolve".into(),
+            Type::Fn(vec![Type::Int, Type::String], Box::new(Type::String)),
+        );
+        // OpenAPI builders.
+        fns.insert(
+            "openapi_response".into(),
+            Type::Fn(vec![Type::String, Type::String], Box::new(Type::String)),
+        );
+        fns.insert(
+            "openapi_operation".into(),
+            Type::Fn(
+                vec![Type::String, Type::String, Type::String],
+                Box::new(Type::String),
+            ),
+        );
+        fns.insert(
+            "openapi_paths_merge".into(),
+            Type::Fn(vec![Type::String, Type::String], Box::new(Type::String)),
+        );
+        fns.insert(
+            "openapi_info".into(),
+            Type::Fn(
+                vec![Type::String, Type::String, Type::String],
+                Box::new(Type::String),
+            ),
+        );
+        fns.insert(
+            "openapi_doc_full".into(),
+            Type::Fn(vec![Type::String, Type::String], Box::new(Type::String)),
+        );
+        // gRPC service registry.
+        fns.insert(
+            "grpc_service_new".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "grpc_service_free".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "grpc_service_add_method".into(),
+            Type::Fn(
+                vec![Type::Int, Type::String, Type::String],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "grpc_service_has_method".into(),
+            Type::Fn(vec![Type::Int, Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "grpc_service_handle".into(),
+            Type::Fn(
+                vec![Type::Int, Type::String, Type::String],
+                Box::new(Type::String),
+            ),
+        );
+        fns.insert(
+            "grpc_service_methods".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::String)),
+        );
+        fns.insert(
+            "grpc_service_name".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::String)),
+        );
         fns.insert(
             "time_offset_named".into(),
             Type::Fn(vec![Type::String], Box::new(Type::Int)),
@@ -10447,6 +10627,48 @@ impl TypeChecker {
             "redis_conn_exists".into(),
             Type::Fn(
                 vec![Type::Named("RedisConn".into()), Type::String],
+                Box::new(Type::String),
+            ),
+        );
+        fns.insert(
+            "redis_conn_lpush".into(),
+            Type::Fn(
+                vec![Type::Named("RedisConn".into()), Type::String, Type::String],
+                Box::new(Type::String),
+            ),
+        );
+        fns.insert(
+            "redis_conn_rpop".into(),
+            Type::Fn(
+                vec![Type::Named("RedisConn".into()), Type::String],
+                Box::new(Type::String),
+            ),
+        );
+        fns.insert(
+            "redis_conn_llen".into(),
+            Type::Fn(
+                vec![Type::Named("RedisConn".into()), Type::String],
+                Box::new(Type::String),
+            ),
+        );
+        fns.insert(
+            "redis_lpush".into(),
+            Type::Fn(
+                vec![Type::String, Type::Int, Type::String, Type::String],
+                Box::new(Type::String),
+            ),
+        );
+        fns.insert(
+            "redis_rpop".into(),
+            Type::Fn(
+                vec![Type::String, Type::Int, Type::String],
+                Box::new(Type::String),
+            ),
+        );
+        fns.insert(
+            "redis_llen".into(),
+            Type::Fn(
+                vec![Type::String, Type::Int, Type::String],
                 Box::new(Type::String),
             ),
         );

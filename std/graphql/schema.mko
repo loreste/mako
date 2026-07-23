@@ -1,0 +1,48 @@
+// std/graphql/schema — GraphQL schema + field resolvers (no GC).
+// Register types/fields, attach JSON resolvers, resolve queries, emit SDL.
+
+export fn new() -> int {
+    return graphql_schema_new()
+}
+
+export fn free(id: int) -> int {
+    return graphql_schema_free(id)
+}
+
+export fn add_type(id: int, name: string) -> int {
+    return graphql_schema_add_type(id, name)
+}
+
+export fn add_field(id: int, type_name: string, field: string, ret_type: string) -> int {
+    return graphql_schema_add_field(id, type_name, field, ret_type)
+}
+
+// Resolver body is a JSON value (object/array/string/number/bool/null).
+export fn set_resolver(id: int, field: string, json_value: string) -> int {
+    return graphql_schema_set_resolver(id, field, json_value)
+}
+
+export fn has_type(id: int, name: string) -> int {
+    return graphql_schema_has_type(id, name)
+}
+
+export fn has_resolver(id: int, field: string) -> int {
+    return graphql_schema_has_resolver(id, field)
+}
+
+export fn sdl(id: int) -> string {
+    return graphql_schema_sdl(id)
+}
+
+export fn resolve(id: int, query: string) -> string {
+    return graphql_schema_resolve(id, query)
+}
+
+// Convenience: Query type with one field + resolver.
+export fn seed_query(field: string, ret_type: string, json_value: string) -> int {
+    let id = graphql_schema_new()
+    let _ = graphql_schema_add_type(id, "Query")
+    let _ = graphql_schema_add_field(id, "Query", field, ret_type)
+    let _ = graphql_schema_set_resolver(id, field, json_value)
+    return id
+}

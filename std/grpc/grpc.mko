@@ -1,0 +1,45 @@
+// std/grpc — unary frame helpers + service method registry (no GC).
+
+export fn encode(payload: string) -> string {
+    return grpc_encode_message(payload)
+}
+
+export fn payload(framed: string) -> string {
+    return grpc_message_payload(framed)
+}
+
+export fn content_type() -> string {
+    return grpc_content_type()
+}
+
+export fn status_trailer(code: int) -> string {
+    return grpc_status_trailer(code)
+}
+
+export fn service_new(name: string) -> int {
+    return grpc_service_new(name)
+}
+
+export fn service_free(id: int) -> int {
+    return grpc_service_free(id)
+}
+
+export fn add_method(id: int, method: string, response_payload: string) -> int {
+    return grpc_service_add_method(id, method, response_payload)
+}
+
+export fn has_method(id: int, method: string) -> int {
+    return grpc_service_has_method(id, method)
+}
+
+export fn handle(id: int, method: string, request: string) -> string {
+    return grpc_service_handle(id, method, request)
+}
+
+export fn methods(id: int) -> string {
+    return grpc_service_methods(id)
+}
+
+export fn service_name(id: int) -> string {
+    return grpc_service_name(id)
+}

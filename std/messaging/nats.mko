@@ -1,0 +1,43 @@
+// std/messaging/nats — NATS-shaped subject bus (in-process, no GC).
+// Same publish/consume shapes as messaging.mq; wire frames for real servers.
+
+export fn connect() -> int {
+    return nats_new()
+}
+
+export fn close(id: int) -> int {
+    return nats_free(id)
+}
+
+export fn subscribe(id: int, subject: string, cap: int) -> int {
+    return nats_sub(id, subject, cap)
+}
+
+export fn publish(id: int, subject: string, body: string) -> int {
+    return nats_pub(id, subject, body)
+}
+
+export fn try_next(id: int, subject: string) -> string {
+    return nats_try_next(id, subject)
+}
+
+export fn len(id: int, subject: string) -> int {
+    return nats_len(id, subject)
+}
+
+// Wire protocol seeds (for TCP clients talking to nats-server).
+export fn pub_frame(subject: string, body: string) -> string {
+    return nats_pub_frame(subject, body)
+}
+
+export fn sub_frame(subject: string, sid: string) -> string {
+    return nats_sub_frame(subject, sid)
+}
+
+export fn connect_frame() -> string {
+    return nats_connect_frame()
+}
+
+export fn ping_frame() -> string {
+    return nats_ping_frame()
+}

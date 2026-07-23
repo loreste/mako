@@ -3440,6 +3440,1014 @@ static inline int64_t mako_mq_purge(int64_t id, MakoString name) {
     return 1;
 }
 
+/* ---- NATS adapter (in-process subject bus; no GC) ------------------------
+ * Same shapes as mq_*: pub/sub by subject. TCP client seed talks NATS text
+ * protocol when a real server is available (optional; tests use in-process).
+ */
+#ifndef MAKO_NATS_MAX
+#define MAKO_NATS_MAX 32
+#endif
+#ifndef MAKO_NATS_SUBJ_MAX
+#define MAKO_NATS_SUBJ_MAX 96
+#endif
+#ifndef MAKO_NATS_SUBS
+#define MAKO_NATS_SUBS 64
+#endif
+
+typedef struct {
+    char subject[MAKO_NATS_SUBJ_MAX];
+    MakoString *ring;
+    size_t cap;
+    size_t head;
+    size_t len;
+    int used;
+} MakoNatsSub;
+
+typedef struct {
+    int used;
+    pthread_mutex_t mu;
+    MakoNatsSub subs[MAKO_NATS_SUBS];
+} MakoNatsBus;
+
+static MakoNatsBus mako_nats_table[MAKO_NATS_MAX];
+static pthread_mutex_t mako_nats_global = PTHREAD_MUTEX_INITIALIZER;
+
+static MakoNatsSub *mako_nats_find(MakoNatsBus *b, MakoString subject) {
+    if (!b || !subject.data || subject.len == 0) return NULL;
+    for (int i = 0; i < MAKO_NATS_SUBS; i++) {
+        if (!b->subs[i].used) continue;
+        size_t n = strlen(b->subs[i].subject);
+        if (n == subject.len && memcmp(b->subs[i].subject, subject.data, n) == 0)
+            return &b->subs[i];
+    }
+    return NULL;
+}
+
+static inline int64_t mako_nats_new(void) {
+    pthread_mutex_lock(&mako_nats_global);
+    for (int i = 0; i < MAKO_NATS_MAX; i++) {
+        if (mako_nats_table[i].used) continue;
+        memset(&mako_nats_table[i], 0, sizeof(mako_nats_table[i]));
+        mako_nats_table[i].used = 1;
+        pthread_mutex_init(&mako_nats_table[i].mu, NULL);
+        pthread_mutex_unlock(&mako_nats_global);
+        return (int64_t)(i + 1);
+    }
+    pthread_mutex_unlock(&mako_nats_global);
+    return 0;
+}
+
+static inline int64_t mako_nats_free(int64_t id) {
+    if (id < 1 || id > MAKO_NATS_MAX) return 0;
+    MakoNatsBus *b = &mako_nats_table[id - 1];
+    pthread_mutex_lock(&mako_nats_global);
+    if (!b->used) {
+        pthread_mutex_unlock(&mako_nats_global);
+        return 0;
+    }
+    pthread_mutex_lock(&b->mu);
+    for (int i = 0; i < MAKO_NATS_SUBS; i++) {
+        if (!b->subs[i].used) continue;
+        for (size_t k = 0; k < b->subs[i].len; k++) {
+            size_t idx = (b->subs[i].head + k) % b->subs[i].cap;
+            mako_str_free(b->subs[i].ring[idx]);
+        }
+        free(b->subs[i].ring);
+        b->subs[i].used = 0;
+    }
+    pthread_mutex_unlock(&b->mu);
+    pthread_mutex_destroy(&b->mu);
+    b->used = 0;
+    pthread_mutex_unlock(&mako_nats_global);
+    return 1;
+}
+
+/* Subscribe (create subject inbox). cap defaults to 256. */
+static inline int64_t mako_nats_sub(int64_t id, MakoString subject, int64_t cap) {
+    if (id < 1 || id > MAKO_NATS_MAX || !subject.data || subject.len == 0
+        || subject.len >= MAKO_NATS_SUBJ_MAX)
+        return 0;
+    size_t c = cap > 0 ? (size_t)cap : 256;
+    MakoNatsBus *b = &mako_nats_table[id - 1];
+    if (!b->used) return 0;
+    pthread_mutex_lock(&b->mu);
+    if (mako_nats_find(b, subject)) {
+        pthread_mutex_unlock(&b->mu);
+        return 1;
+    }
+    for (int i = 0; i < MAKO_NATS_SUBS; i++) {
+        if (b->subs[i].used) continue;
+        MakoString *ring = (MakoString *)calloc(c, sizeof(MakoString));
+        if (!ring) {
+            pthread_mutex_unlock(&b->mu);
+            return 0;
+        }
+        memset(b->subs[i].subject, 0, MAKO_NATS_SUBJ_MAX);
+        memcpy(b->subs[i].subject, subject.data, subject.len);
+        b->subs[i].ring = ring;
+        b->subs[i].cap = c;
+        b->subs[i].head = 0;
+        b->subs[i].len = 0;
+        b->subs[i].used = 1;
+        pthread_mutex_unlock(&b->mu);
+        return 1;
+    }
+    pthread_mutex_unlock(&b->mu);
+    return 0;
+}
+
+static inline int64_t mako_nats_pub(int64_t id, MakoString subject, MakoString body) {
+    if (id < 1 || id > MAKO_NATS_MAX) return 0;
+    MakoNatsBus *b = &mako_nats_table[id - 1];
+    if (!b->used) return 0;
+    pthread_mutex_lock(&b->mu);
+    MakoNatsSub *s = mako_nats_find(b, subject);
+    if (!s || s->len >= s->cap) {
+        pthread_mutex_unlock(&b->mu);
+        return 0;
+    }
+    size_t slot = (s->head + s->len) % s->cap;
+    s->ring[slot] = mako_str_clone(body);
+    s->len++;
+    pthread_mutex_unlock(&b->mu);
+    return 1;
+}
+
+static inline MakoString mako_nats_try_next(int64_t id, MakoString subject) {
+    if (id < 1 || id > MAKO_NATS_MAX) return mako_str_from_cstr("");
+    MakoNatsBus *b = &mako_nats_table[id - 1];
+    if (!b->used) return mako_str_from_cstr("");
+    pthread_mutex_lock(&b->mu);
+    MakoNatsSub *s = mako_nats_find(b, subject);
+    if (!s || s->len == 0) {
+        pthread_mutex_unlock(&b->mu);
+        return mako_str_from_cstr("");
+    }
+    MakoString out = s->ring[s->head];
+    s->ring[s->head] = (MakoString){NULL, 0};
+    s->head = (s->head + 1) % s->cap;
+    s->len--;
+    pthread_mutex_unlock(&b->mu);
+    return out;
+}
+
+static inline int64_t mako_nats_len(int64_t id, MakoString subject) {
+    if (id < 1 || id > MAKO_NATS_MAX) return 0;
+    MakoNatsBus *b = &mako_nats_table[id - 1];
+    if (!b->used) return 0;
+    pthread_mutex_lock(&b->mu);
+    MakoNatsSub *s = mako_nats_find(b, subject);
+    int64_t n = s ? (int64_t)s->len : 0;
+    pthread_mutex_unlock(&b->mu);
+    return n;
+}
+
+/* Minimal NATS text-protocol PUB frame (for real servers / tests). */
+static inline MakoString mako_nats_pub_frame(MakoString subject, MakoString body) {
+    size_t bl = body.data ? body.len : 0;
+    size_t n = subject.len + bl + 64;
+    char *d = (char *)malloc(n);
+    if (!d) mako_abort("nats_pub_frame OOM");
+    int wrote = snprintf(
+        d, n, "PUB %.*s %zu\r\n%.*s\r\n",
+        (int)subject.len, subject.data ? subject.data : "",
+        bl,
+        (int)bl, body.data ? body.data : ""
+    );
+    if (wrote < 0) wrote = 0;
+    return (MakoString){d, (size_t)wrote};
+}
+
+static inline MakoString mako_nats_sub_frame(MakoString subject, MakoString sid) {
+    size_t n = subject.len + sid.len + 32;
+    char *d = (char *)malloc(n);
+    if (!d) mako_abort("nats_sub_frame OOM");
+    int wrote = snprintf(
+        d, n, "SUB %.*s %.*s\r\n",
+        (int)subject.len, subject.data ? subject.data : "",
+        (int)sid.len, sid.data ? sid.data : "1"
+    );
+    if (wrote < 0) wrote = 0;
+    return (MakoString){d, (size_t)wrote};
+}
+
+static inline MakoString mako_nats_connect_frame(void) {
+    return mako_str_from_cstr("CONNECT {\"verbose\":false,\"pedantic\":false,\"lang\":\"mako\",\"version\":\"0.4.15\"}\r\n");
+}
+
+static inline MakoString mako_nats_ping_frame(void) {
+    return mako_str_from_cstr("PING\r\n");
+}
+
+/* ---- Redis list messaging adapter (in-process; LPUSH/RPOP shapes) --------
+ * Live Redis uses redis_conn_lpush / redis_conn_rpop / redis_conn_llen.
+ * This in-process bus lets workers develop without redis-server (no GC).
+ */
+#ifndef MAKO_REDIS_MQ_MAX
+#define MAKO_REDIS_MQ_MAX 32
+#endif
+
+typedef struct {
+    int used;
+    pthread_mutex_t mu;
+    MakoMqQueue qs[MAKO_MQ_MAX_QUEUES];
+} MakoRedisMq;
+
+static MakoRedisMq mako_redis_mq_table[MAKO_REDIS_MQ_MAX];
+static pthread_mutex_t mako_redis_mq_global = PTHREAD_MUTEX_INITIALIZER;
+
+static MakoMqQueue *mako_redis_mq_find(MakoRedisMq *b, MakoString name) {
+    if (!b || !name.data || name.len == 0) return NULL;
+    for (int i = 0; i < MAKO_MQ_MAX_QUEUES; i++) {
+        if (!b->qs[i].used) continue;
+        size_t n = strlen(b->qs[i].name);
+        if (n == name.len && memcmp(b->qs[i].name, name.data, n) == 0) return &b->qs[i];
+    }
+    return NULL;
+}
+
+static inline int64_t mako_redis_mq_new(void) {
+    pthread_mutex_lock(&mako_redis_mq_global);
+    for (int i = 0; i < MAKO_REDIS_MQ_MAX; i++) {
+        if (mako_redis_mq_table[i].used) continue;
+        memset(&mako_redis_mq_table[i], 0, sizeof(mako_redis_mq_table[i]));
+        mako_redis_mq_table[i].used = 1;
+        pthread_mutex_init(&mako_redis_mq_table[i].mu, NULL);
+        pthread_mutex_unlock(&mako_redis_mq_global);
+        return (int64_t)(i + 1);
+    }
+    pthread_mutex_unlock(&mako_redis_mq_global);
+    return 0;
+}
+
+static inline int64_t mako_redis_mq_free(int64_t id) {
+    if (id < 1 || id > MAKO_REDIS_MQ_MAX) return 0;
+    MakoRedisMq *b = &mako_redis_mq_table[id - 1];
+    pthread_mutex_lock(&mako_redis_mq_global);
+    if (!b->used) {
+        pthread_mutex_unlock(&mako_redis_mq_global);
+        return 0;
+    }
+    pthread_mutex_lock(&b->mu);
+    for (int i = 0; i < MAKO_MQ_MAX_QUEUES; i++) {
+        if (!b->qs[i].used) continue;
+        for (size_t k = 0; k < b->qs[i].len; k++) {
+            size_t idx = (b->qs[i].head + k) % b->qs[i].cap;
+            mako_str_free(b->qs[i].ring[idx]);
+        }
+        free(b->qs[i].ring);
+        b->qs[i].used = 0;
+    }
+    pthread_mutex_unlock(&b->mu);
+    pthread_mutex_destroy(&b->mu);
+    b->used = 0;
+    pthread_mutex_unlock(&mako_redis_mq_global);
+    return 1;
+}
+
+static inline int64_t mako_redis_mq_declare(int64_t id, MakoString key, int64_t cap) {
+    if (id < 1 || id > MAKO_REDIS_MQ_MAX || !key.data || key.len == 0 || key.len >= MAKO_MQ_NAME_MAX)
+        return 0;
+    size_t c = cap > 0 ? (size_t)cap : 256;
+    MakoRedisMq *b = &mako_redis_mq_table[id - 1];
+    if (!b->used) return 0;
+    pthread_mutex_lock(&b->mu);
+    if (mako_redis_mq_find(b, key)) {
+        pthread_mutex_unlock(&b->mu);
+        return 1;
+    }
+    for (int i = 0; i < MAKO_MQ_MAX_QUEUES; i++) {
+        if (b->qs[i].used) continue;
+        MakoString *ring = (MakoString *)calloc(c, sizeof(MakoString));
+        if (!ring) {
+            pthread_mutex_unlock(&b->mu);
+            return 0;
+        }
+        memset(b->qs[i].name, 0, MAKO_MQ_NAME_MAX);
+        memcpy(b->qs[i].name, key.data, key.len);
+        b->qs[i].ring = ring;
+        b->qs[i].cap = c;
+        b->qs[i].head = 0;
+        b->qs[i].len = 0;
+        b->qs[i].used = 1;
+        pthread_mutex_unlock(&b->mu);
+        return 1;
+    }
+    pthread_mutex_unlock(&b->mu);
+    return 0;
+}
+
+/* LPUSH semantics: push to head (try_take/rpop from tail for FIFO). */
+static inline int64_t mako_redis_mq_lpush(int64_t id, MakoString key, MakoString body) {
+    if (id < 1 || id > MAKO_REDIS_MQ_MAX) return 0;
+    MakoRedisMq *b = &mako_redis_mq_table[id - 1];
+    if (!b->used) return 0;
+    pthread_mutex_lock(&b->mu);
+    MakoMqQueue *q = mako_redis_mq_find(b, key);
+    if (!q || q->len >= q->cap) {
+        pthread_mutex_unlock(&b->mu);
+        return 0;
+    }
+    /* Grow toward lower indices: new head. */
+    size_t new_head = (q->head + q->cap - 1) % q->cap;
+    q->ring[new_head] = mako_str_clone(body);
+    q->head = new_head;
+    q->len++;
+    pthread_mutex_unlock(&b->mu);
+    return 1;
+}
+
+/* RPOP: take from the opposite end of LPUSH → FIFO when paired. */
+static inline MakoString mako_redis_mq_rpop(int64_t id, MakoString key) {
+    if (id < 1 || id > MAKO_REDIS_MQ_MAX) return mako_str_from_cstr("");
+    MakoRedisMq *b = &mako_redis_mq_table[id - 1];
+    if (!b->used) return mako_str_from_cstr("");
+    pthread_mutex_lock(&b->mu);
+    MakoMqQueue *q = mako_redis_mq_find(b, key);
+    if (!q || q->len == 0) {
+        pthread_mutex_unlock(&b->mu);
+        return mako_str_from_cstr("");
+    }
+    size_t tail = (q->head + q->len - 1) % q->cap;
+    MakoString out = q->ring[tail];
+    q->ring[tail] = (MakoString){NULL, 0};
+    q->len--;
+    pthread_mutex_unlock(&b->mu);
+    return out;
+}
+
+static inline int64_t mako_redis_mq_llen(int64_t id, MakoString key) {
+    if (id < 1 || id > MAKO_REDIS_MQ_MAX) return 0;
+    MakoRedisMq *b = &mako_redis_mq_table[id - 1];
+    if (!b->used) return 0;
+    pthread_mutex_lock(&b->mu);
+    MakoMqQueue *q = mako_redis_mq_find(b, key);
+    int64_t n = q ? (int64_t)q->len : 0;
+    pthread_mutex_unlock(&b->mu);
+    return n;
+}
+
+/* ---- GraphQL schema + resolvers (in-process; no GC) ---------------------- */
+#ifndef MAKO_GQL_SCHEMA_MAX
+#define MAKO_GQL_SCHEMA_MAX 16
+#endif
+#ifndef MAKO_GQL_TYPE_MAX
+#define MAKO_GQL_TYPE_MAX 32
+#endif
+#ifndef MAKO_GQL_FIELD_MAX
+#define MAKO_GQL_FIELD_MAX 64
+#endif
+#ifndef MAKO_GQL_NAME_MAX
+#define MAKO_GQL_NAME_MAX 48
+#endif
+#ifndef MAKO_GQL_TYPE_STR
+#define MAKO_GQL_TYPE_STR 48
+#endif
+#ifndef MAKO_GQL_RESOLVER_MAX
+#define MAKO_GQL_RESOLVER_MAX 64
+#endif
+
+typedef struct {
+    char name[MAKO_GQL_NAME_MAX];
+    char ret_type[MAKO_GQL_TYPE_STR];
+    int used;
+} MakoGqlField;
+
+typedef struct {
+    char name[MAKO_GQL_NAME_MAX];
+    MakoGqlField fields[MAKO_GQL_FIELD_MAX];
+    int used;
+} MakoGqlType;
+
+typedef struct {
+    char field[MAKO_GQL_NAME_MAX];
+    MakoString body; /* owned JSON value for the field */
+    int used;
+} MakoGqlResolver;
+
+typedef struct {
+    int used;
+    pthread_mutex_t mu;
+    MakoGqlType types[MAKO_GQL_TYPE_MAX];
+    MakoGqlResolver resolvers[MAKO_GQL_RESOLVER_MAX];
+} MakoGqlSchema;
+
+static MakoGqlSchema mako_gql_schemas[MAKO_GQL_SCHEMA_MAX];
+static pthread_mutex_t mako_gql_schema_global = PTHREAD_MUTEX_INITIALIZER;
+
+static inline int64_t mako_graphql_schema_new(void) {
+    pthread_mutex_lock(&mako_gql_schema_global);
+    for (int i = 0; i < MAKO_GQL_SCHEMA_MAX; i++) {
+        if (mako_gql_schemas[i].used) continue;
+        memset(&mako_gql_schemas[i], 0, sizeof(mako_gql_schemas[i]));
+        mako_gql_schemas[i].used = 1;
+        pthread_mutex_init(&mako_gql_schemas[i].mu, NULL);
+        pthread_mutex_unlock(&mako_gql_schema_global);
+        return (int64_t)(i + 1);
+    }
+    pthread_mutex_unlock(&mako_gql_schema_global);
+    return 0;
+}
+
+static inline int64_t mako_graphql_schema_free(int64_t id) {
+    if (id < 1 || id > MAKO_GQL_SCHEMA_MAX) return 0;
+    MakoGqlSchema *s = &mako_gql_schemas[id - 1];
+    pthread_mutex_lock(&mako_gql_schema_global);
+    if (!s->used) {
+        pthread_mutex_unlock(&mako_gql_schema_global);
+        return 0;
+    }
+    pthread_mutex_lock(&s->mu);
+    for (int i = 0; i < MAKO_GQL_RESOLVER_MAX; i++) {
+        if (!s->resolvers[i].used) continue;
+        mako_str_free(s->resolvers[i].body);
+        s->resolvers[i].used = 0;
+    }
+    pthread_mutex_unlock(&s->mu);
+    pthread_mutex_destroy(&s->mu);
+    s->used = 0;
+    pthread_mutex_unlock(&mako_gql_schema_global);
+    return 1;
+}
+
+static inline int64_t mako_graphql_schema_add_type(int64_t id, MakoString name) {
+    if (id < 1 || id > MAKO_GQL_SCHEMA_MAX || !name.data || name.len == 0
+        || name.len >= MAKO_GQL_NAME_MAX)
+        return 0;
+    MakoGqlSchema *s = &mako_gql_schemas[id - 1];
+    if (!s->used) return 0;
+    pthread_mutex_lock(&s->mu);
+    for (int i = 0; i < MAKO_GQL_TYPE_MAX; i++) {
+        if (s->types[i].used
+            && strlen(s->types[i].name) == name.len
+            && memcmp(s->types[i].name, name.data, name.len) == 0) {
+            pthread_mutex_unlock(&s->mu);
+            return 1;
+        }
+    }
+    for (int i = 0; i < MAKO_GQL_TYPE_MAX; i++) {
+        if (s->types[i].used) continue;
+        memset(s->types[i].name, 0, MAKO_GQL_NAME_MAX);
+        memcpy(s->types[i].name, name.data, name.len);
+        s->types[i].used = 1;
+        pthread_mutex_unlock(&s->mu);
+        return 1;
+    }
+    pthread_mutex_unlock(&s->mu);
+    return 0;
+}
+
+static inline int64_t mako_graphql_schema_add_field(
+    int64_t id, MakoString type_name, MakoString field_name, MakoString ret_type
+) {
+    if (id < 1 || id > MAKO_GQL_SCHEMA_MAX || !type_name.data || !field_name.data
+        || type_name.len >= MAKO_GQL_NAME_MAX || field_name.len >= MAKO_GQL_NAME_MAX
+        || !ret_type.data || ret_type.len >= MAKO_GQL_TYPE_STR)
+        return 0;
+    MakoGqlSchema *s = &mako_gql_schemas[id - 1];
+    if (!s->used) return 0;
+    pthread_mutex_lock(&s->mu);
+    MakoGqlType *t = NULL;
+    for (int i = 0; i < MAKO_GQL_TYPE_MAX; i++) {
+        if (!s->types[i].used) continue;
+        if (strlen(s->types[i].name) == type_name.len
+            && memcmp(s->types[i].name, type_name.data, type_name.len) == 0) {
+            t = &s->types[i];
+            break;
+        }
+    }
+    if (!t) {
+        pthread_mutex_unlock(&s->mu);
+        return 0;
+    }
+    for (int i = 0; i < MAKO_GQL_FIELD_MAX; i++) {
+        if (t->fields[i].used
+            && strlen(t->fields[i].name) == field_name.len
+            && memcmp(t->fields[i].name, field_name.data, field_name.len) == 0) {
+            memset(t->fields[i].ret_type, 0, MAKO_GQL_TYPE_STR);
+            memcpy(t->fields[i].ret_type, ret_type.data, ret_type.len);
+            pthread_mutex_unlock(&s->mu);
+            return 1;
+        }
+    }
+    for (int i = 0; i < MAKO_GQL_FIELD_MAX; i++) {
+        if (t->fields[i].used) continue;
+        memset(t->fields[i].name, 0, MAKO_GQL_NAME_MAX);
+        memcpy(t->fields[i].name, field_name.data, field_name.len);
+        memset(t->fields[i].ret_type, 0, MAKO_GQL_TYPE_STR);
+        memcpy(t->fields[i].ret_type, ret_type.data, ret_type.len);
+        t->fields[i].used = 1;
+        pthread_mutex_unlock(&s->mu);
+        return 1;
+    }
+    pthread_mutex_unlock(&s->mu);
+    return 0;
+}
+
+static inline int64_t mako_graphql_schema_set_resolver(
+    int64_t id, MakoString field, MakoString json_value
+) {
+    if (id < 1 || id > MAKO_GQL_SCHEMA_MAX || !field.data || field.len == 0
+        || field.len >= MAKO_GQL_NAME_MAX)
+        return 0;
+    MakoGqlSchema *s = &mako_gql_schemas[id - 1];
+    if (!s->used) return 0;
+    pthread_mutex_lock(&s->mu);
+    for (int i = 0; i < MAKO_GQL_RESOLVER_MAX; i++) {
+        if (s->resolvers[i].used
+            && strlen(s->resolvers[i].field) == field.len
+            && memcmp(s->resolvers[i].field, field.data, field.len) == 0) {
+            mako_str_free(s->resolvers[i].body);
+            s->resolvers[i].body = mako_str_clone(json_value);
+            pthread_mutex_unlock(&s->mu);
+            return 1;
+        }
+    }
+    for (int i = 0; i < MAKO_GQL_RESOLVER_MAX; i++) {
+        if (s->resolvers[i].used) continue;
+        memset(s->resolvers[i].field, 0, MAKO_GQL_NAME_MAX);
+        memcpy(s->resolvers[i].field, field.data, field.len);
+        s->resolvers[i].body = mako_str_clone(json_value);
+        s->resolvers[i].used = 1;
+        pthread_mutex_unlock(&s->mu);
+        return 1;
+    }
+    pthread_mutex_unlock(&s->mu);
+    return 0;
+}
+
+static inline int64_t mako_graphql_schema_has_type(int64_t id, MakoString name) {
+    if (id < 1 || id > MAKO_GQL_SCHEMA_MAX || !name.data) return 0;
+    MakoGqlSchema *s = &mako_gql_schemas[id - 1];
+    if (!s->used) return 0;
+    pthread_mutex_lock(&s->mu);
+    for (int i = 0; i < MAKO_GQL_TYPE_MAX; i++) {
+        if (!s->types[i].used) continue;
+        if (strlen(s->types[i].name) == name.len
+            && memcmp(s->types[i].name, name.data, name.len) == 0) {
+            pthread_mutex_unlock(&s->mu);
+            return 1;
+        }
+    }
+    pthread_mutex_unlock(&s->mu);
+    return 0;
+}
+
+static inline int64_t mako_graphql_schema_has_resolver(int64_t id, MakoString field) {
+    if (id < 1 || id > MAKO_GQL_SCHEMA_MAX || !field.data) return 0;
+    MakoGqlSchema *s = &mako_gql_schemas[id - 1];
+    if (!s->used) return 0;
+    pthread_mutex_lock(&s->mu);
+    for (int i = 0; i < MAKO_GQL_RESOLVER_MAX; i++) {
+        if (!s->resolvers[i].used) continue;
+        if (strlen(s->resolvers[i].field) == field.len
+            && memcmp(s->resolvers[i].field, field.data, field.len) == 0) {
+            pthread_mutex_unlock(&s->mu);
+            return 1;
+        }
+    }
+    pthread_mutex_unlock(&s->mu);
+    return 0;
+}
+
+static inline MakoString mako_graphql_schema_sdl(int64_t id) {
+    if (id < 1 || id > MAKO_GQL_SCHEMA_MAX) return mako_str_from_cstr("");
+    MakoGqlSchema *s = &mako_gql_schemas[id - 1];
+    if (!s->used) return mako_str_from_cstr("");
+    size_t cap = 2048;
+    char *buf = (char *)malloc(cap);
+    if (!buf) mako_abort("graphql_schema_sdl OOM");
+    size_t len = 0;
+    pthread_mutex_lock(&s->mu);
+    for (int ti = 0; ti < MAKO_GQL_TYPE_MAX; ti++) {
+        if (!s->types[ti].used) continue;
+        int n = snprintf(buf + len, cap - len, "type %s {\n", s->types[ti].name);
+        if (n > 0) len += (size_t)n;
+        for (int fi = 0; fi < MAKO_GQL_FIELD_MAX; fi++) {
+            if (!s->types[ti].fields[fi].used) continue;
+            if (len + 128 >= cap) {
+                cap *= 2;
+                char *nb = (char *)realloc(buf, cap);
+                if (!nb) {
+                    free(buf);
+                    pthread_mutex_unlock(&s->mu);
+                    mako_abort("graphql_schema_sdl OOM");
+                }
+                buf = nb;
+            }
+            n = snprintf(
+                buf + len, cap - len, "  %s: %s\n",
+                s->types[ti].fields[fi].name,
+                s->types[ti].fields[fi].ret_type
+            );
+            if (n > 0) len += (size_t)n;
+        }
+        if (len + 4 >= cap) {
+            cap *= 2;
+            char *nb = (char *)realloc(buf, cap);
+            if (!nb) {
+                free(buf);
+                pthread_mutex_unlock(&s->mu);
+                mako_abort("graphql_schema_sdl OOM");
+            }
+            buf = nb;
+        }
+        buf[len++] = '}';
+        buf[len++] = '\n';
+        buf[len] = 0;
+    }
+    pthread_mutex_unlock(&s->mu);
+    return (MakoString){buf, len};
+}
+
+/* Resolve root fields against registered resolvers → GraphQL JSON. */
+static inline MakoString mako_graphql_schema_resolve(int64_t id, MakoString query) {
+    if (id < 1 || id > MAKO_GQL_SCHEMA_MAX) return mako_graphql_error(mako_str_from_cstr("bad schema"));
+    MakoGqlSchema *s = &mako_gql_schemas[id - 1];
+    if (!s->used) return mako_graphql_error(mako_str_from_cstr("schema not found"));
+    MakoString fields = mako_graphql_fields(query);
+    if (!fields.data || fields.len == 0) {
+        mako_str_free(fields);
+        return mako_graphql_error(mako_str_from_cstr("no fields"));
+    }
+    size_t cap = 1024;
+    char *buf = (char *)malloc(cap);
+    if (!buf) {
+        mako_str_free(fields);
+        mako_abort("graphql_schema_resolve OOM");
+    }
+    size_t len = 0;
+    buf[len++] = '{';
+    buf[len++] = '"';
+    memcpy(buf + len, "data", 4);
+    len += 4;
+    buf[len++] = '"';
+    buf[len++] = ':';
+    buf[len++] = '{';
+    int first = 1;
+    int any = 0;
+    size_t i = 0;
+    pthread_mutex_lock(&s->mu);
+    while (i < fields.len) {
+        size_t start = i;
+        while (i < fields.len && fields.data[i] != ',') i++;
+        size_t flen = i - start;
+        if (flen > 0 && flen < MAKO_GQL_NAME_MAX) {
+            MakoString *body = NULL;
+            for (int r = 0; r < MAKO_GQL_RESOLVER_MAX; r++) {
+                if (!s->resolvers[r].used) continue;
+                if (strlen(s->resolvers[r].field) == flen
+                    && memcmp(s->resolvers[r].field, fields.data + start, flen) == 0) {
+                    body = &s->resolvers[r].body;
+                    break;
+                }
+            }
+            if (body && body->data) {
+                if (len + flen + body->len + 16 >= cap) {
+                    while (len + flen + body->len + 16 >= cap) cap *= 2;
+                    char *nb = (char *)realloc(buf, cap);
+                    if (!nb) {
+                        free(buf);
+                        mako_str_free(fields);
+                        pthread_mutex_unlock(&s->mu);
+                        mako_abort("graphql_schema_resolve OOM");
+                    }
+                    buf = nb;
+                }
+                if (!first) buf[len++] = ',';
+                buf[len++] = '"';
+                memcpy(buf + len, fields.data + start, flen);
+                len += flen;
+                buf[len++] = '"';
+                buf[len++] = ':';
+                memcpy(buf + len, body->data, body->len);
+                len += body->len;
+                first = 0;
+                any = 1;
+            }
+        }
+        if (i < fields.len && fields.data[i] == ',') i++;
+    }
+    pthread_mutex_unlock(&s->mu);
+    mako_str_free(fields);
+    if (!any) {
+        free(buf);
+        return mako_graphql_error(mako_str_from_cstr("unresolved field"));
+    }
+    if (len + 4 >= cap) {
+        char *nb = (char *)realloc(buf, len + 8);
+        if (!nb) {
+            free(buf);
+            mako_abort("graphql_schema_resolve OOM");
+        }
+        buf = nb;
+    }
+    buf[len++] = '}';
+    buf[len++] = '}';
+    buf[len] = 0;
+    return (MakoString){buf, len};
+}
+
+/* ---- OpenAPI 3.1 builders (expand path docs) ----------------------------- */
+static inline MakoString mako_openapi_response(MakoString code, MakoString description) {
+    MakoString ec = mako_json_escape(code);
+    MakoString ed = mako_json_escape(description);
+    size_t n = ec.len + ed.len + 64;
+    char *d = (char *)malloc(n);
+    if (!d) mako_abort("openapi_response OOM");
+    int wrote = snprintf(
+        d, n, "{\"%s\":{\"description\":\"%s\"}}",
+        ec.data ? ec.data : "200",
+        ed.data ? ed.data : "OK"
+    );
+    if (wrote < 0) wrote = 0;
+    return (MakoString){d, (size_t)wrote};
+}
+
+static inline MakoString mako_openapi_operation(
+    MakoString method, MakoString summary, MakoString tags_csv
+) {
+    MakoString em = mako_json_escape(method);
+    for (size_t i = 0; i < em.len; i++) {
+        if (em.data[i] >= 'A' && em.data[i] <= 'Z')
+            em.data[i] = (char)(em.data[i] - 'A' + 'a');
+    }
+    MakoString es = mako_json_escape(summary);
+    /* tags_csv → ["a","b"] seed (single tag if no commas). */
+    size_t n = em.len + es.len + (tags_csv.data ? tags_csv.len : 0) + 160;
+    char *d = (char *)malloc(n);
+    if (!d) mako_abort("openapi_operation OOM");
+    int wrote;
+    if (tags_csv.data && tags_csv.len > 0) {
+        MakoString et = mako_json_escape(tags_csv);
+        wrote = snprintf(
+            d, n,
+            "\"%s\":{\"summary\":\"%s\",\"tags\":[\"%s\"],\"responses\":{\"200\":{\"description\":\"OK\"}}}",
+            em.data, es.data, et.data
+        );
+    } else {
+        wrote = snprintf(
+            d, n,
+            "\"%s\":{\"summary\":\"%s\",\"responses\":{\"200\":{\"description\":\"OK\"}}}",
+            em.data, es.data
+        );
+    }
+    if (wrote < 0) wrote = 0;
+    return (MakoString){d, (size_t)wrote};
+}
+
+/* Merge two path objects: {…},{…} → {…, …} (strip braces). */
+static inline MakoString mako_openapi_paths_merge(MakoString a, MakoString b) {
+    const char *ad = a.data ? a.data : "{}";
+    const char *bd = b.data ? b.data : "{}";
+    size_t al = a.data ? a.len : 2;
+    size_t bl = b.data ? b.len : 2;
+    /* Expect {…} shapes; fall back to concat. */
+    size_t ai = 0, bi = 0;
+    if (al >= 2 && ad[0] == '{') {
+        ai = 1;
+        while (al > ai && ad[al - 1] != '}') al--;
+        if (al > 0 && ad[al - 1] == '}') al--;
+    }
+    if (bl >= 2 && bd[0] == '{') {
+        bi = 1;
+        while (bl > bi && bd[bl - 1] != '}') bl--;
+        if (bl > 0 && bd[bl - 1] == '}') bl--;
+    }
+    size_t inner_a = al > ai ? al - ai : 0;
+    size_t inner_b = bl > bi ? bl - bi : 0;
+    size_t n = inner_a + inner_b + 8;
+    char *d = (char *)malloc(n);
+    if (!d) mako_abort("openapi_paths_merge OOM");
+    size_t pos = 0;
+    d[pos++] = '{';
+    if (inner_a) {
+        memcpy(d + pos, ad + ai, inner_a);
+        pos += inner_a;
+    }
+    if (inner_a && inner_b) d[pos++] = ',';
+    if (inner_b) {
+        /* skip leading whitespace/comma on b */
+        size_t bstart = bi;
+        while (bstart < bl && (bd[bstart] == ' ' || bd[bstart] == ',' || bd[bstart] == '\n'))
+            bstart++;
+        size_t blen = bl > bstart ? bl - bstart : 0;
+        if (blen) {
+            memcpy(d + pos, bd + bstart, blen);
+            pos += blen;
+        }
+    }
+    d[pos++] = '}';
+    d[pos] = 0;
+    return (MakoString){d, pos};
+}
+
+static inline MakoString mako_openapi_info(
+    MakoString title, MakoString version, MakoString description
+) {
+    MakoString et = mako_json_escape(title);
+    MakoString ev = mako_json_escape(version);
+    MakoString ed = mako_json_escape(description);
+    size_t n = et.len + ev.len + ed.len + 96;
+    char *d = (char *)malloc(n);
+    if (!d) mako_abort("openapi_info OOM");
+    int wrote = snprintf(
+        d, n,
+        "{\"title\":\"%s\",\"version\":\"%s\",\"description\":\"%s\"}",
+        et.data ? et.data : "",
+        ev.data ? ev.data : "0.0.1",
+        ed.data ? ed.data : ""
+    );
+    if (wrote < 0) wrote = 0;
+    return (MakoString){d, (size_t)wrote};
+}
+
+static inline MakoString mako_openapi_doc_full(MakoString info_json, MakoString paths) {
+    const char *inf = info_json.data && info_json.len ? info_json.data
+        : "{\"title\":\"API\",\"version\":\"1.0.0\"}";
+    const char *p = paths.data && paths.len ? paths.data : "{}";
+    size_t n = (info_json.data ? info_json.len : 40) + (paths.data ? paths.len : 2) + 64;
+    char *d = (char *)malloc(n);
+    if (!d) mako_abort("openapi_doc_full OOM");
+    int wrote = snprintf(
+        d, n,
+        "{\"openapi\":\"3.1.0\",\"info\":%s,\"paths\":%s}",
+        inf, p
+    );
+    if (wrote < 0) wrote = 0;
+    return (MakoString){d, (size_t)wrote};
+}
+
+/* Forward: full def with existing gRPC frame helpers later in this header. */
+static inline MakoString mako_grpc_encode_message(MakoString payload);
+
+/* ---- gRPC service registry (unary method map; no GC) --------------------- */
+#ifndef MAKO_GRPC_SVC_MAX
+#define MAKO_GRPC_SVC_MAX 16
+#endif
+#ifndef MAKO_GRPC_METHOD_MAX
+#define MAKO_GRPC_METHOD_MAX 32
+#endif
+#ifndef MAKO_GRPC_NAME_MAX
+#define MAKO_GRPC_NAME_MAX 64
+#endif
+
+typedef struct {
+    char name[MAKO_GRPC_NAME_MAX];
+    MakoString response; /* owned payload for unary seed */
+    int used;
+} MakoGrpcMethod;
+
+typedef struct {
+    int used;
+    char service[MAKO_GRPC_NAME_MAX];
+    pthread_mutex_t mu;
+    MakoGrpcMethod methods[MAKO_GRPC_METHOD_MAX];
+} MakoGrpcService;
+
+static MakoGrpcService mako_grpc_svcs[MAKO_GRPC_SVC_MAX];
+static pthread_mutex_t mako_grpc_svc_global = PTHREAD_MUTEX_INITIALIZER;
+
+static inline int64_t mako_grpc_service_new(MakoString name) {
+    if (!name.data || name.len == 0 || name.len >= MAKO_GRPC_NAME_MAX) return 0;
+    pthread_mutex_lock(&mako_grpc_svc_global);
+    for (int i = 0; i < MAKO_GRPC_SVC_MAX; i++) {
+        if (mako_grpc_svcs[i].used) continue;
+        memset(&mako_grpc_svcs[i], 0, sizeof(mako_grpc_svcs[i]));
+        mako_grpc_svcs[i].used = 1;
+        memcpy(mako_grpc_svcs[i].service, name.data, name.len);
+        pthread_mutex_init(&mako_grpc_svcs[i].mu, NULL);
+        pthread_mutex_unlock(&mako_grpc_svc_global);
+        return (int64_t)(i + 1);
+    }
+    pthread_mutex_unlock(&mako_grpc_svc_global);
+    return 0;
+}
+
+static inline int64_t mako_grpc_service_free(int64_t id) {
+    if (id < 1 || id > MAKO_GRPC_SVC_MAX) return 0;
+    MakoGrpcService *s = &mako_grpc_svcs[id - 1];
+    pthread_mutex_lock(&mako_grpc_svc_global);
+    if (!s->used) {
+        pthread_mutex_unlock(&mako_grpc_svc_global);
+        return 0;
+    }
+    pthread_mutex_lock(&s->mu);
+    for (int i = 0; i < MAKO_GRPC_METHOD_MAX; i++) {
+        if (!s->methods[i].used) continue;
+        mako_str_free(s->methods[i].response);
+        s->methods[i].used = 0;
+    }
+    pthread_mutex_unlock(&s->mu);
+    pthread_mutex_destroy(&s->mu);
+    s->used = 0;
+    pthread_mutex_unlock(&mako_grpc_svc_global);
+    return 1;
+}
+
+static inline int64_t mako_grpc_service_add_method(
+    int64_t id, MakoString method, MakoString response_payload
+) {
+    if (id < 1 || id > MAKO_GRPC_SVC_MAX || !method.data || method.len == 0
+        || method.len >= MAKO_GRPC_NAME_MAX)
+        return 0;
+    MakoGrpcService *s = &mako_grpc_svcs[id - 1];
+    if (!s->used) return 0;
+    pthread_mutex_lock(&s->mu);
+    for (int i = 0; i < MAKO_GRPC_METHOD_MAX; i++) {
+        if (s->methods[i].used
+            && strlen(s->methods[i].name) == method.len
+            && memcmp(s->methods[i].name, method.data, method.len) == 0) {
+            mako_str_free(s->methods[i].response);
+            s->methods[i].response = mako_str_clone(response_payload);
+            pthread_mutex_unlock(&s->mu);
+            return 1;
+        }
+    }
+    for (int i = 0; i < MAKO_GRPC_METHOD_MAX; i++) {
+        if (s->methods[i].used) continue;
+        memset(s->methods[i].name, 0, MAKO_GRPC_NAME_MAX);
+        memcpy(s->methods[i].name, method.data, method.len);
+        s->methods[i].response = mako_str_clone(response_payload);
+        s->methods[i].used = 1;
+        pthread_mutex_unlock(&s->mu);
+        return 1;
+    }
+    pthread_mutex_unlock(&s->mu);
+    return 0;
+}
+
+static inline int64_t mako_grpc_service_has_method(int64_t id, MakoString method) {
+    if (id < 1 || id > MAKO_GRPC_SVC_MAX || !method.data) return 0;
+    MakoGrpcService *s = &mako_grpc_svcs[id - 1];
+    if (!s->used) return 0;
+    pthread_mutex_lock(&s->mu);
+    for (int i = 0; i < MAKO_GRPC_METHOD_MAX; i++) {
+        if (!s->methods[i].used) continue;
+        if (strlen(s->methods[i].name) == method.len
+            && memcmp(s->methods[i].name, method.data, method.len) == 0) {
+            pthread_mutex_unlock(&s->mu);
+            return 1;
+        }
+    }
+    pthread_mutex_unlock(&s->mu);
+    return 0;
+}
+
+/* Unary handle: return framed gRPC message for method, or empty if missing. */
+static inline MakoString mako_grpc_service_handle(
+    int64_t id, MakoString method, MakoString request_payload
+) {
+    (void)request_payload; /* seed ignores request body; real handlers later */
+    if (id < 1 || id > MAKO_GRPC_SVC_MAX || !method.data) return mako_str_from_cstr("");
+    MakoGrpcService *s = &mako_grpc_svcs[id - 1];
+    if (!s->used) return mako_str_from_cstr("");
+    pthread_mutex_lock(&s->mu);
+    for (int i = 0; i < MAKO_GRPC_METHOD_MAX; i++) {
+        if (!s->methods[i].used) continue;
+        if (strlen(s->methods[i].name) == method.len
+            && memcmp(s->methods[i].name, method.data, method.len) == 0) {
+            MakoString payload = mako_str_clone(s->methods[i].response);
+            pthread_mutex_unlock(&s->mu);
+            MakoString framed = mako_grpc_encode_message(payload);
+            mako_str_free(payload);
+            return framed;
+        }
+    }
+    pthread_mutex_unlock(&s->mu);
+    return mako_str_from_cstr("");
+}
+
+static inline MakoString mako_grpc_service_methods(int64_t id) {
+    if (id < 1 || id > MAKO_GRPC_SVC_MAX) return mako_str_from_cstr("");
+    MakoGrpcService *s = &mako_grpc_svcs[id - 1];
+    if (!s->used) return mako_str_from_cstr("");
+    char buf[1024];
+    size_t len = 0;
+    pthread_mutex_lock(&s->mu);
+    for (int i = 0; i < MAKO_GRPC_METHOD_MAX; i++) {
+        if (!s->methods[i].used) continue;
+        size_t n = strlen(s->methods[i].name);
+        if (len + n + 2 >= sizeof(buf)) break;
+        if (len) buf[len++] = ',';
+        memcpy(buf + len, s->methods[i].name, n);
+        len += n;
+    }
+    pthread_mutex_unlock(&s->mu);
+    char *d = (char *)malloc(len + 1);
+    if (!d) mako_abort("grpc_service_methods OOM");
+    if (len) memcpy(d, buf, len);
+    d[len] = 0;
+    return (MakoString){d, len};
+}
+
+static inline MakoString mako_grpc_service_name(int64_t id) {
+    if (id < 1 || id > MAKO_GRPC_SVC_MAX) return mako_str_from_cstr("");
+    MakoGrpcService *s = &mako_grpc_svcs[id - 1];
+    if (!s->used) return mako_str_from_cstr("");
+    return mako_str_from_cstr(s->service);
+}
+
 static inline MakoString mako_sse_event(MakoString event, MakoString data) {
     size_t newline_count = 0;
     for (size_t i = 0; i < data.len; i++) {
