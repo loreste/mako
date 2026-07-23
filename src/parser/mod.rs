@@ -1121,10 +1121,24 @@ impl Parser {
             let ret = self.parse_type()?;
             return Ok(TypeExpr::Fn(params, Box::new(ret)));
         }
-        let name = self.expect_ident()?;
+        // Language type constructors reserved in the lexer: `queue[T]`, `graphql`/`Graphql`.
+        let name = match self.peek_kind().clone() {
+            TokenKind::Queue => {
+                self.bump();
+                "queue".to_string()
+            }
+            TokenKind::Graphql => {
+                self.bump();
+                "Graphql".to_string()
+            }
+            _ => self.expect_ident()?,
+        };
         // Pack-qualified type: `eng.Table` → `eng__Table` (matches import prefix rewrite).
         // Call sites already use `eng.table_new()`; type annotations use the same surface.
-        let name = if matches!(self.peek_kind(), TokenKind::Dot) {
+        // (Keywords queue/graphql cannot lead a pack path.)
+        let name = if !matches!(name.as_str(), "queue" | "Graphql")
+            && matches!(self.peek_kind(), TokenKind::Dot)
+        {
             self.bump();
             let ty_name = self.expect_ident()?;
             // Multi-segment rare; keep one pack level (alias.Type) like pull rewrite.
@@ -1140,7 +1154,7 @@ impl Parser {
             let val = self.parse_type()?;
             return Ok(TypeExpr::Map(Box::new(key), Box::new(val)));
         }
-        // Dual generics: Result[T,E] and Result<T,E>
+        // Dual generics: Result[T,E] and Result<T,E> / queue[string] / chan[T]
         if matches!(self.peek_kind(), TokenKind::LBracket | TokenKind::Lt) {
             let close = if matches!(self.peek_kind(), TokenKind::LBracket) {
                 self.bump();

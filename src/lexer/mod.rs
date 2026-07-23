@@ -71,6 +71,10 @@ pub enum TokenKind {
     Package,
     /// Dual: `type Point struct { … }`
     Type,
+    /// Message queue type constructor: `queue[string]`
+    Queue,
+    /// GraphQL document type / surface: `graphql` / `Graphql` annotations
+    Graphql,
 
     // Punctuation
     LParen,
@@ -626,6 +630,9 @@ impl<'a> Lexer<'a> {
             "not" => TokenKind::Not,
             "export" => TokenKind::Export,
             "on" => TokenKind::On,
+            // First-class messaging + GraphQL type constructors (language surface).
+            "queue" => TokenKind::Queue,
+            "graphql" | "Graphql" | "GraphQL" => TokenKind::Graphql,
             _ => TokenKind::Ident(s.to_string()),
         }
     }
@@ -640,6 +647,30 @@ mod tests {
         let tokens = Lexer::new("fn main() { let x = 1 }").tokenize().unwrap();
         assert!(matches!(tokens[0].kind, TokenKind::Fn));
         assert!(matches!(tokens[1].kind, TokenKind::Ident(ref s) if s == "main"));
+    }
+
+    #[test]
+    fn lex_queue_and_graphql_keywords() {
+        let tokens = Lexer::new("let q: queue[string] = make(queue[string], 8)")
+            .tokenize()
+            .unwrap();
+        assert!(tokens.iter().any(|t| matches!(t.kind, TokenKind::Queue)));
+        // queue is keyword; string remains ident; make remains ident
+        assert!(tokens
+            .iter()
+            .any(|t| matches!(t.kind, TokenKind::Ident(ref s) if s == "make")));
+        assert!(tokens
+            .iter()
+            .any(|t| matches!(t.kind, TokenKind::Ident(ref s) if s == "string")));
+
+        let g = Lexer::new("let g: Graphql = graphql_parse(body)")
+            .tokenize()
+            .unwrap();
+        assert!(g.iter().any(|t| matches!(t.kind, TokenKind::Graphql)));
+        // compound name stays an Ident
+        assert!(g
+            .iter()
+            .any(|t| matches!(t.kind, TokenKind::Ident(ref s) if s == "graphql_parse")));
     }
 
     #[test]

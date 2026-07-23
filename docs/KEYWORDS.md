@@ -1,18 +1,19 @@
 # Mako keywords
 
-Source of truth: `src/lexer/mod.rs` → `lex_ident` (**46** reserved words, including duals; `pack`/`pull`/`go`/`switch` are contextual).  
+Source of truth: `src/lexer/mod.rs` → `lex_ident` (**48** reserved words, including duals; `pack`/`pull`/`go`/`switch` are contextual).  
 Every identifier that matches one of these strings is always a keyword token — never
 an `Ident`. There are **no contextual keywords** today: you cannot name a variable `crew` or `default`.
 
 **Mako flair (preferred):** `fn`, `let`, `pack`, `pull`, `on`, `hold`, `share`, `arena`,
-`crew`, `kick`, `join`, `fan`, `export`, … — see [IDENTITY.md](IDENTITY.md).
+`crew`, `kick`, `join`, `fan`, `export`, `queue`, `graphql`, … — see [IDENTITY.md](IDENTITY.md).
 
 **Dual / compat:** `func`, `var`, `package`, `import`, `type`, plus `:=` (token, not a keyword).
 
 **Not keywords** (ordinary identifiers / builtins): type names (`int`, `int8`, `int32`, `int64`,
-`uint64`, `byte`, `float`/`float64`, `string`, …), `map` (type constructor `map[K]V`, not reserved),
+`uint64`, `byte`, `float`/`float64`, `string`, …), `map` / `chan` (type constructors, not reserved),
 conversions `T(x)` / `bytes(s)`, `Ok`/`Err`/`assert*`/`t_run`, `len`/`cap`/`append`/`copy`/
-`rune_count`/`has`/`delete`/`str_builder`/`builder_*`/`uuid_*`, etc. See [GUIDE.md](GUIDE.md).
+`rune_count`/`has`/`delete`/`str_builder`/`builder_*`/`uuid_*` / `graphql_parse` / `mq_*`, etc.
+See [GUIDE.md](GUIDE.md).
 
 Guided tour: [The Mako Book](book/) · Current syntax: [GUIDE.md](GUIDE.md) · Design: [LANGUAGE.md](LANGUAGE.md).
 
@@ -91,12 +92,22 @@ Guided tour: [The Mako Book](book/) · Current syntax: [GUIDE.md](GUIDE.md) · D
 | `share` | Shared / RC-style binding (seed) |
 | `as` | Type / ownership cast helper in expressions |
 
+## Messaging / GraphQL (language types)
+
+| Keyword | Meaning |
+|---------|---------|
+| `queue` | FIFO message queue type constructor: `queue[string]`, `make(queue[string], n)` |
+| `graphql` / `Graphql` / `GraphQL` | GraphQL document type keyword (methods after `graphql_parse`) |
+
+See [MESSAGING_GRAPHQL.md](MESSAGING_GRAPHQL.md).
+
 ## Alphabetical (complete)
 
 ```
 actor and arena as break const continue crew default defer else enum extern false
-fallthrough fan fn for hold if import in interface join kick let match mut not or
-range receive return select share struct timeout true while
+fallthrough fan fn for graphql hold if import in interface join kick let match mut
+not on or queue range receive return select share struct timeout true while
 ```
+(also duals: `func` `var` `package` `type` `import` · export is reserved)
 
 (Count must match `lex_ident` keywords; duals `func`/`var`/`package`/`type`/`pull`/`pack` also reserved.)
