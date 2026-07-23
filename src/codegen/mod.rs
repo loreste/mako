@@ -32177,30 +32177,54 @@ impl Codegen {
                 };
                 let tmp = self.fresh("ap");
                 if sty == "MakoByteArray" {
-                    self.line(&format!(
-                        "MakoByteArray {tmp} = mako_byte_append({s}, {v});"
-                    ));
+                    if let Some(arena) = self.current_arena.clone() {
+                        self.line(&format!(
+                            "MakoByteArray {tmp} = mako_arena_byte_array_append(&{arena}, {s}, {v});"
+                        ));
+                    } else {
+                        self.line(&format!(
+                            "MakoByteArray {tmp} = mako_byte_append({s}, {v});"
+                        ));
+                    }
                     return ("MakoByteArray".into(), tmp);
                 }
                 if sty == "MakoStrArray" {
-                    self.line(&format!(
-                        "MakoStrArray {tmp} = mako_str_array_append({s}, {v});"
-                    ));
+                    if let Some(arena) = self.current_arena.clone() {
+                        self.line(&format!(
+                            "MakoStrArray {tmp} = mako_arena_str_array_append(&{arena}, {s}, {v});"
+                        ));
+                    } else {
+                        self.line(&format!(
+                            "MakoStrArray {tmp} = mako_str_array_append({s}, {v});"
+                        ));
+                    }
                     if Self::expr_is_owned_print_temp(&args[1]) {
                         self.emit_line(format_args!("mako_str_free({v});"));
                     }
                     return ("MakoStrArray".into(), tmp);
                 }
                 if sty == "MakoFloatArray" {
-                    self.line(&format!(
-                        "MakoFloatArray {tmp} = mako_float_array_append({s}, {v});"
-                    ));
+                    if let Some(arena) = self.current_arena.clone() {
+                        self.line(&format!(
+                            "MakoFloatArray {tmp} = mako_arena_float_array_append(&{arena}, {s}, {v});"
+                        ));
+                    } else {
+                        self.line(&format!(
+                            "MakoFloatArray {tmp} = mako_float_array_append({s}, {v});"
+                        ));
+                    }
                     return ("MakoFloatArray".into(), tmp);
                 }
                 if sty == "MakoBoolArray" {
-                    self.line(&format!(
-                        "MakoBoolArray {tmp} = mako_bool_array_append({s}, {v});"
-                    ));
+                    if let Some(arena) = self.current_arena.clone() {
+                        self.line(&format!(
+                            "MakoBoolArray {tmp} = mako_arena_bool_array_append(&{arena}, {s}, {v});"
+                        ));
+                    } else {
+                        self.line(&format!(
+                            "MakoBoolArray {tmp} = mako_bool_array_append({s}, {v});"
+                        ));
+                    }
                     return ("MakoBoolArray".into(), tmp);
                 }
                 if let Some(sn) = sty.strip_prefix("MakoArr_") {
@@ -32224,9 +32248,15 @@ impl Codegen {
                     }
                     return (format!("MakoArr_{sn}"), tmp);
                 }
-                self.line(&format!(
-                    "MakoIntArray {tmp} = mako_slice_append({s}, {v});"
-                ));
+                if let Some(arena) = self.current_arena.clone() {
+                    self.line(&format!(
+                        "MakoIntArray {tmp} = mako_arena_int_array_append(&{arena}, {s}, {v});"
+                    ));
+                } else {
+                    self.line(&format!(
+                        "MakoIntArray {tmp} = mako_slice_append({s}, {v});"
+                    ));
+                }
                 return ("MakoIntArray".into(), tmp);
             }
         })
@@ -49294,30 +49324,54 @@ impl Codegen {
                             };
                             let tmp = self.fresh("ap");
                             if sty == "MakoByteArray" {
-                                self.line(&format!(
-                                    "MakoByteArray {tmp} = mako_byte_append({s}, {v});"
-                                ));
+                                if let Some(arena) = self.current_arena.clone() {
+                                    self.line(&format!(
+                                        "MakoByteArray {tmp} = mako_arena_byte_array_append(&{arena}, {s}, {v});"
+                                    ));
+                                } else {
+                                    self.line(&format!(
+                                        "MakoByteArray {tmp} = mako_byte_append({s}, {v});"
+                                    ));
+                                }
                                 return ("MakoByteArray".into(), tmp);
                             }
                             if sty == "MakoStrArray" {
-                                self.line(&format!(
-                                    "MakoStrArray {tmp} = mako_str_array_append({s}, {v});"
-                                ));
+                                if let Some(arena) = self.current_arena.clone() {
+                                    self.line(&format!(
+                                        "MakoStrArray {tmp} = mako_arena_str_array_append(&{arena}, {s}, {v});"
+                                    ));
+                                } else {
+                                    self.line(&format!(
+                                        "MakoStrArray {tmp} = mako_str_array_append({s}, {v});"
+                                    ));
+                                }
                                 if Self::expr_is_owned_print_temp(&args[1]) {
                                     self.emit_line(format_args!("mako_str_free({v});"));
                                 }
                                 return ("MakoStrArray".into(), tmp);
                             }
                             if sty == "MakoFloatArray" {
-                                self.line(&format!(
-                                    "MakoFloatArray {tmp} = mako_float_array_append({s}, {v});"
-                                ));
+                                if let Some(arena) = self.current_arena.clone() {
+                                    self.line(&format!(
+                                        "MakoFloatArray {tmp} = mako_arena_float_array_append(&{arena}, {s}, {v});"
+                                    ));
+                                } else {
+                                    self.line(&format!(
+                                        "MakoFloatArray {tmp} = mako_float_array_append({s}, {v});"
+                                    ));
+                                }
                                 return ("MakoFloatArray".into(), tmp);
                             }
                             if sty == "MakoBoolArray" {
-                                self.line(&format!(
-                                    "MakoBoolArray {tmp} = mako_bool_array_append({s}, {v});"
-                                ));
+                                if let Some(arena) = self.current_arena.clone() {
+                                    self.line(&format!(
+                                        "MakoBoolArray {tmp} = mako_arena_bool_array_append(&{arena}, {s}, {v});"
+                                    ));
+                                } else {
+                                    self.line(&format!(
+                                        "MakoBoolArray {tmp} = mako_bool_array_append({s}, {v});"
+                                    ));
+                                }
                                 return ("MakoBoolArray".into(), tmp);
                             }
                             if let Some(sn) = sty.strip_prefix("MakoArr_") {
@@ -49341,9 +49395,15 @@ impl Codegen {
                                 }
                                 return (format!("MakoArr_{sn}"), tmp);
                             }
-                            self.line(&format!(
-                                "MakoIntArray {tmp} = mako_slice_append({s}, {v});"
-                            ));
+                            if let Some(arena) = self.current_arena.clone() {
+                                self.line(&format!(
+                                    "MakoIntArray {tmp} = mako_arena_int_array_append(&{arena}, {s}, {v});"
+                                ));
+                            } else {
+                                self.line(&format!(
+                                    "MakoIntArray {tmp} = mako_slice_append({s}, {v});"
+                                ));
+                            }
                             return ("MakoIntArray".into(), tmp);
                         }
                         "copy" => {
@@ -50630,6 +50690,12 @@ impl Codegen {
                             "MakoFloatArray {tmp} = mako_arena_float_array_make(&{arena}, {l}, {c});"
                         ));
                         return ("MakoFloatArray".into(), tmp);
+                    }
+                    if is_bool {
+                        self.line(&format!(
+                            "MakoBoolArray {tmp} = mako_arena_bool_array_make(&{arena}, {l}, {c});"
+                        ));
+                        return ("MakoBoolArray".into(), tmp);
                     }
                     if let Some(sn) = struct_elem.clone() {
                         self.line(&format!(
