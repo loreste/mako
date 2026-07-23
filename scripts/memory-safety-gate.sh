@@ -48,6 +48,11 @@ fixtures=(
   examples/testing/leak_detector_test.mko
   examples/testing/match_own_free_test.mko
   examples/testing/own_branch_regress_test.mko
+  # Messaging / GraphQL / gRPC / OpenAPI adversarial (no GC, free-closed ids)
+  examples/testing/adapters_adversarial_test.mko
+  examples/testing/adapters_api_test.mko
+  examples/testing/messaging_queue_test.mko
+  examples/testing/hot_site_test.mko
 )
 
 run_backend() {

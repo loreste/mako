@@ -7867,6 +7867,47 @@ impl<'a> FunctionLowerer<'a> {
                         return Ok((out, made_ty, true));
                     }
                 }
+                // make(queue[string], n) → mq_new + mq_declare("_", n); handle is I64.
+                if let TypeExpr::Generic(name, gargs) = ty {
+                    if name == "queue" && gargs.len() == 1 {
+                        let cap_expr = len
+                            .as_deref()
+                            .or(cap.as_deref());
+                        let cv = if let Some(ce) = cap_expr {
+                            let (v, t, o) = self.lower_expr(ce)?;
+                            if t != Type::I64 || o {
+                                return Err(IrError::new(
+                                    "native IR: make(queue) capacity must int",
+                                ));
+                            }
+                            v
+                        } else {
+                            self.const_int(256, Type::I64)
+                        };
+                        let id = self.value();
+                        self.emit(Inst::Call {
+                            out: Some(id),
+                            function: "mako_native_mq_new".into(),
+                            args: vec![],
+                            ret: Some(Type::I64),
+                        });
+                        let name_lit = self.value();
+                        self.emit(Inst::StringLiteral {
+                            out: name_lit,
+                            bytes: b"_".to_vec(),
+                        });
+                        let name_owned = self.emit_clone(name_lit, Type::Str);
+                        let _decl = self.value();
+                        self.emit(Inst::Call {
+                            out: Some(_decl),
+                            function: "mako_native_mq_declare".into(),
+                            args: vec![id, name_owned, cv],
+                            ret: Some(Type::I64),
+                        });
+                        self.emit_drop(name_owned, Type::Str);
+                        return Ok((id, Type::I64, false));
+                    }
+                }
                 Err(IrError::new("native IR: unsupported make type"))
             }
             Expr::ChanOpen { elem, cap } => {
@@ -12282,6 +12323,23 @@ impl<'a> FunctionLowerer<'a> {
                         self.emit(Inst::StringLen { out, value: s });
                         true
                     }
+                    // Language queue[T] handle (mq_*) — .len() via mq_len("_").
+                    Type::I64 => {
+                        let name_lit = self.value();
+                        self.emit(Inst::StringLiteral {
+                            out: name_lit,
+                            bytes: b"_".to_vec(),
+                        });
+                        let name_owned = self.emit_clone(name_lit, Type::Str);
+                        self.emit(Inst::Call {
+                            out: Some(out),
+                            function: "mako_native_mq_len".into(),
+                            args: vec![s, name_owned],
+                            ret: Some(Type::I64),
+                        });
+                        self.emit_drop(name_owned, Type::Str);
+                        true
+                    }
                     Type::Struct(_) => false,
                     Type::StructSlice(_) | Type::PtrSlice(_) | Type::MapII | Type::MapSI
                     | Type::MapSS | Type::MapIF | Type::MapFI | Type::MapIPtr(_)
@@ -13330,6 +13388,255 @@ impl<'a> FunctionLowerer<'a> {
                         "native IR: unknown channel method `{method}`"
                     )));
                 }
+            }
+        }
+
+        // Language queue[T] methods — receiver is mq handle (I64).
+        // Typecheck only allows these on Queue; int locals never have .publish.
+        if rty == Type::I64 {
+            match (method, args.len()) {
+                ("publish" | "push", 1) => {
+                    let (v, vt, vo) = self.lower_expr(&args[0])?;
+                    if vt != Type::Str {
+                        return Err(IrError::new(
+                            "native IR: queue.publish expects string payload",
+                        ));
+                    }
+                    let mut payload = v;
+                    if !vo {
+                        payload = self.emit_clone(v, Type::Str);
+                    }
+                    let name_lit = self.value();
+                    self.emit(Inst::StringLiteral {
+                        out: name_lit,
+                        bytes: b"_".to_vec(),
+                    });
+                    let name_owned = self.emit_clone(name_lit, Type::Str);
+                    let out = self.value();
+                    self.emit(Inst::Call {
+                        out: Some(out),
+                        function: "mako_native_mq_publish".into(),
+                        args: vec![recv, name_owned, payload],
+                        ret: Some(Type::I64),
+                    });
+                    self.emit_drop(name_owned, Type::Str);
+                    if vo {
+                        self.emit_drop(payload, Type::Str);
+                    } else {
+                        self.emit_drop(payload, Type::Str);
+                    }
+                    return Ok((out, Type::I64, false));
+                }
+                ("try_take" | "take", 0) => {
+                    let name_lit = self.value();
+                    self.emit(Inst::StringLiteral {
+                        out: name_lit,
+                        bytes: b"_".to_vec(),
+                    });
+                    let name_owned = self.emit_clone(name_lit, Type::Str);
+                    let out = self.value();
+                    self.emit(Inst::Call {
+                        out: Some(out),
+                        function: "mako_native_mq_try_take_ptr".into(),
+                        args: vec![recv, name_owned],
+                        ret: Some(Type::Str),
+                    });
+                    self.emit_drop(name_owned, Type::Str);
+                    return Ok((out, Type::Str, true));
+                }
+                ("len", 0) => {
+                    let name_lit = self.value();
+                    self.emit(Inst::StringLiteral {
+                        out: name_lit,
+                        bytes: b"_".to_vec(),
+                    });
+                    let name_owned = self.emit_clone(name_lit, Type::Str);
+                    let out = self.value();
+                    self.emit(Inst::Call {
+                        out: Some(out),
+                        function: "mako_native_mq_len".into(),
+                        args: vec![recv, name_owned],
+                        ret: Some(Type::I64),
+                    });
+                    self.emit_drop(name_owned, Type::Str);
+                    return Ok((out, Type::I64, false));
+                }
+                ("purge", 0) => {
+                    let name_lit = self.value();
+                    self.emit(Inst::StringLiteral {
+                        out: name_lit,
+                        bytes: b"_".to_vec(),
+                    });
+                    let name_owned = self.emit_clone(name_lit, Type::Str);
+                    let out = self.value();
+                    self.emit(Inst::Call {
+                        out: Some(out),
+                        function: "mako_native_mq_purge".into(),
+                        args: vec![recv, name_owned],
+                        ret: Some(Type::I64),
+                    });
+                    self.emit_drop(name_owned, Type::Str);
+                    return Ok((out, Type::I64, false));
+                }
+                ("free" | "close", 0) => {
+                    let out = self.value();
+                    self.emit(Inst::Call {
+                        out: Some(out),
+                        function: "mako_native_mq_free".into(),
+                        args: vec![recv],
+                        ret: Some(Type::I64),
+                    });
+                    return Ok((out, Type::I64, false));
+                }
+                _ => {}
+            }
+        }
+
+        // Graphql document methods (receiver is owned query string).
+        if rty == Type::Str {
+            match (method, args.len()) {
+                ("query", 0) => {
+                    // Identity: document is the query string.
+                    return Ok((recv, Type::Str, rowned));
+                }
+                ("fields", 0) => {
+                    let out = self.value();
+                    self.emit(Inst::Call {
+                        out: Some(out),
+                        function: "mako_native_graphql_fields_ptr".into(),
+                        args: vec![recv],
+                        ret: Some(Type::Str),
+                    });
+                    if rowned {
+                        self.emit_drop(recv, Type::Str);
+                    }
+                    return Ok((out, Type::Str, true));
+                }
+                ("has" | "has_field", 1) => {
+                    let (n, nt, no) = self.lower_expr(&args[0])?;
+                    if nt != Type::Str {
+                        return Err(IrError::new("native IR: Graphql.has expects string"));
+                    }
+                    let mut name = n;
+                    if !no {
+                        name = self.emit_clone(n, Type::Str);
+                    }
+                    let out = self.value();
+                    self.emit(Inst::Call {
+                        out: Some(out),
+                        function: "mako_native_graphql_has_field_ptr".into(),
+                        args: vec![recv, name],
+                        ret: Some(Type::I64),
+                    });
+                    if no {
+                        self.emit_drop(name, Type::Str);
+                    } else {
+                        self.emit_drop(name, Type::Str);
+                    }
+                    if rowned {
+                        self.emit_drop(recv, Type::Str);
+                    }
+                    return Ok((out, Type::I64, false));
+                }
+                ("arg", 1) => {
+                    let (n, nt, no) = self.lower_expr(&args[0])?;
+                    if nt != Type::Str {
+                        return Err(IrError::new("native IR: Graphql.arg expects string"));
+                    }
+                    let mut name = n;
+                    if !no {
+                        name = self.emit_clone(n, Type::Str);
+                    }
+                    let out = self.value();
+                    self.emit(Inst::Call {
+                        out: Some(out),
+                        function: "mako_native_graphql_arg_ptr".into(),
+                        args: vec![recv, name],
+                        ret: Some(Type::Str),
+                    });
+                    self.emit_drop(name, Type::Str);
+                    if rowned {
+                        self.emit_drop(recv, Type::Str);
+                    }
+                    return Ok((out, Type::Str, true));
+                }
+                ("data", 2) => {
+                    let (f, ft, fo) = self.lower_expr(&args[0])?;
+                    let (j, jt, jo) = self.lower_expr(&args[1])?;
+                    if ft != Type::Str || jt != Type::Str {
+                        return Err(IrError::new("native IR: Graphql.data expects strings"));
+                    }
+                    let mut field = f;
+                    let mut json = j;
+                    if !fo {
+                        field = self.emit_clone(f, Type::Str);
+                    }
+                    if !jo {
+                        json = self.emit_clone(j, Type::Str);
+                    }
+                    let out = self.value();
+                    self.emit(Inst::Call {
+                        out: Some(out),
+                        function: "mako_native_graphql_data_ptr".into(),
+                        args: vec![field, json],
+                        ret: Some(Type::Str),
+                    });
+                    self.emit_drop(field, Type::Str);
+                    self.emit_drop(json, Type::Str);
+                    if rowned {
+                        self.emit_drop(recv, Type::Str);
+                    }
+                    return Ok((out, Type::Str, true));
+                }
+                ("error", 1) => {
+                    let (m, mt, mo) = self.lower_expr(&args[0])?;
+                    if mt != Type::Str {
+                        return Err(IrError::new("native IR: Graphql.error expects string"));
+                    }
+                    let mut msg = m;
+                    if !mo {
+                        msg = self.emit_clone(m, Type::Str);
+                    }
+                    let out = self.value();
+                    self.emit(Inst::Call {
+                        out: Some(out),
+                        function: "mako_native_graphql_error_ptr".into(),
+                        args: vec![msg],
+                        ret: Some(Type::Str),
+                    });
+                    self.emit_drop(msg, Type::Str);
+                    if rowned {
+                        self.emit_drop(recv, Type::Str);
+                    }
+                    return Ok((out, Type::Str, true));
+                }
+                ("is_query", 0) => {
+                    let out = self.value();
+                    self.emit(Inst::Call {
+                        out: Some(out),
+                        function: "mako_native_graphql_is_query_ptr".into(),
+                        args: vec![recv],
+                        ret: Some(Type::I64),
+                    });
+                    if rowned {
+                        self.emit_drop(recv, Type::Str);
+                    }
+                    return Ok((out, Type::I64, false));
+                }
+                ("is_mutation", 0) => {
+                    let out = self.value();
+                    self.emit(Inst::Call {
+                        out: Some(out),
+                        function: "mako_native_graphql_is_mutation_ptr".into(),
+                        args: vec![recv],
+                        ret: Some(Type::I64),
+                    });
+                    if rowned {
+                        self.emit_drop(recv, Type::Str);
+                    }
+                    return Ok((out, Type::I64, false));
+                }
+                _ => {}
             }
         }
 
@@ -22839,6 +23146,298 @@ impl<'a> FunctionLowerer<'a> {
             "hot_sites_json" if args.len() == 0 => Some((
                 "mako_native_hot_sites_json_ptr",
                 &[],
+                Some(Type::Str),
+                true,
+            )),
+            // Messaging queues + NATS / Redis list adapters
+            "mq_new" if args.len() == 0 => Some((
+                "mako_native_mq_new",
+                &[],
+                Some(Type::I64),
+                false,
+            )),
+            "mq_free" if args.len() == 1 => Some((
+                "mako_native_mq_free",
+                &[Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "mq_declare" if args.len() == 3 => Some((
+                "mako_native_mq_declare",
+                &[Type::I64, Type::Str, Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "mq_publish" if args.len() == 3 => Some((
+                "mako_native_mq_publish",
+                &[Type::I64, Type::Str, Type::Str],
+                Some(Type::I64),
+                false,
+            )),
+            "mq_try_take" if args.len() == 2 => Some((
+                "mako_native_mq_try_take_ptr",
+                &[Type::I64, Type::Str],
+                Some(Type::Str),
+                true,
+            )),
+            "mq_len" if args.len() == 2 => Some((
+                "mako_native_mq_len",
+                &[Type::I64, Type::Str],
+                Some(Type::I64),
+                false,
+            )),
+            "mq_purge" if args.len() == 2 => Some((
+                "mako_native_mq_purge",
+                &[Type::I64, Type::Str],
+                Some(Type::I64),
+                false,
+            )),
+            "nats_new" if args.len() == 0 => Some((
+                "mako_native_nats_new",
+                &[],
+                Some(Type::I64),
+                false,
+            )),
+            "nats_free" if args.len() == 1 => Some((
+                "mako_native_nats_free",
+                &[Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "nats_sub" if args.len() == 3 => Some((
+                "mako_native_nats_sub",
+                &[Type::I64, Type::Str, Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "nats_pub" if args.len() == 3 => Some((
+                "mako_native_nats_pub",
+                &[Type::I64, Type::Str, Type::Str],
+                Some(Type::I64),
+                false,
+            )),
+            "nats_try_next" if args.len() == 2 => Some((
+                "mako_native_nats_try_next_ptr",
+                &[Type::I64, Type::Str],
+                Some(Type::Str),
+                true,
+            )),
+            "nats_len" if args.len() == 2 => Some((
+                "mako_native_nats_len",
+                &[Type::I64, Type::Str],
+                Some(Type::I64),
+                false,
+            )),
+            "nats_pub_frame" if args.len() == 2 => Some((
+                "mako_native_nats_pub_frame_ptr",
+                &[Type::Str, Type::Str],
+                Some(Type::Str),
+                true,
+            )),
+            "nats_sub_frame" if args.len() == 2 => Some((
+                "mako_native_nats_sub_frame_ptr",
+                &[Type::Str, Type::Str],
+                Some(Type::Str),
+                true,
+            )),
+            "nats_connect_frame" if args.len() == 0 => Some((
+                "mako_native_nats_connect_frame_ptr",
+                &[],
+                Some(Type::Str),
+                true,
+            )),
+            "nats_ping_frame" if args.len() == 0 => Some((
+                "mako_native_nats_ping_frame_ptr",
+                &[],
+                Some(Type::Str),
+                true,
+            )),
+            "redis_mq_new" if args.len() == 0 => Some((
+                "mako_native_redis_mq_new",
+                &[],
+                Some(Type::I64),
+                false,
+            )),
+            "redis_mq_free" if args.len() == 1 => Some((
+                "mako_native_redis_mq_free",
+                &[Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "redis_mq_declare" if args.len() == 3 => Some((
+                "mako_native_redis_mq_declare",
+                &[Type::I64, Type::Str, Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "redis_mq_lpush" if args.len() == 3 => Some((
+                "mako_native_redis_mq_lpush",
+                &[Type::I64, Type::Str, Type::Str],
+                Some(Type::I64),
+                false,
+            )),
+            "redis_mq_rpop" if args.len() == 2 => Some((
+                "mako_native_redis_mq_rpop_ptr",
+                &[Type::I64, Type::Str],
+                Some(Type::Str),
+                true,
+            )),
+            "redis_mq_llen" if args.len() == 2 => Some((
+                "mako_native_redis_mq_llen",
+                &[Type::I64, Type::Str],
+                Some(Type::I64),
+                false,
+            )),
+            // GraphQL schema + HTTP body helpers
+            "graphql_schema_new" if args.len() == 0 => Some((
+                "mako_native_graphql_schema_new",
+                &[],
+                Some(Type::I64),
+                false,
+            )),
+            "graphql_schema_free" if args.len() == 1 => Some((
+                "mako_native_graphql_schema_free",
+                &[Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "graphql_schema_add_type" if args.len() == 2 => Some((
+                "mako_native_graphql_schema_add_type",
+                &[Type::I64, Type::Str],
+                Some(Type::I64),
+                false,
+            )),
+            "graphql_schema_add_field" if args.len() == 4 => Some((
+                "mako_native_graphql_schema_add_field",
+                &[Type::I64, Type::Str, Type::Str, Type::Str],
+                Some(Type::I64),
+                false,
+            )),
+            "graphql_schema_set_resolver" if args.len() == 3 => Some((
+                "mako_native_graphql_schema_set_resolver",
+                &[Type::I64, Type::Str, Type::Str],
+                Some(Type::I64),
+                false,
+            )),
+            "graphql_schema_has_type" if args.len() == 2 => Some((
+                "mako_native_graphql_schema_has_type",
+                &[Type::I64, Type::Str],
+                Some(Type::I64),
+                false,
+            )),
+            "graphql_schema_has_resolver" if args.len() == 2 => Some((
+                "mako_native_graphql_schema_has_resolver",
+                &[Type::I64, Type::Str],
+                Some(Type::I64),
+                false,
+            )),
+            "graphql_schema_sdl" if args.len() == 1 => Some((
+                "mako_native_graphql_schema_sdl_ptr",
+                &[Type::I64],
+                Some(Type::Str),
+                true,
+            )),
+            "graphql_schema_resolve" if args.len() == 2 => Some((
+                "mako_native_graphql_schema_resolve_ptr",
+                &[Type::I64, Type::Str],
+                Some(Type::Str),
+                true,
+            )),
+            "graphql_query_from_body" if args.len() == 1 => Some((
+                "mako_native_graphql_query_from_body_ptr",
+                &[Type::Str],
+                Some(Type::Str),
+                true,
+            )),
+            "graphql_variables_from_body" if args.len() == 1 => Some((
+                "mako_native_graphql_variables_from_body_ptr",
+                &[Type::Str],
+                Some(Type::Str),
+                true,
+            )),
+            "graphql_fields" if args.len() == 1 => Some((
+                "mako_native_graphql_fields_ptr",
+                &[Type::Str],
+                Some(Type::Str),
+                true,
+            )),
+            "graphql_parse" if args.len() == 1 => Some((
+                "mako_native_graphql_parse_ptr",
+                &[Type::Str],
+                Some(Type::Str),
+                true,
+            )),
+            // OpenAPI builders
+            "openapi_response" if args.len() == 2 => Some((
+                "mako_native_openapi_response_ptr",
+                &[Type::Str, Type::Str],
+                Some(Type::Str),
+                true,
+            )),
+            "openapi_operation" if args.len() == 3 => Some((
+                "mako_native_openapi_operation_ptr",
+                &[Type::Str, Type::Str, Type::Str],
+                Some(Type::Str),
+                true,
+            )),
+            "openapi_paths_merge" if args.len() == 2 => Some((
+                "mako_native_openapi_paths_merge_ptr",
+                &[Type::Str, Type::Str],
+                Some(Type::Str),
+                true,
+            )),
+            "openapi_info" if args.len() == 3 => Some((
+                "mako_native_openapi_info_ptr",
+                &[Type::Str, Type::Str, Type::Str],
+                Some(Type::Str),
+                true,
+            )),
+            "openapi_doc_full" if args.len() == 2 => Some((
+                "mako_native_openapi_doc_full_ptr",
+                &[Type::Str, Type::Str],
+                Some(Type::Str),
+                true,
+            )),
+            // gRPC service registry
+            "grpc_service_new" if args.len() == 1 => Some((
+                "mako_native_grpc_service_new_ptr",
+                &[Type::Str],
+                Some(Type::I64),
+                false,
+            )),
+            "grpc_service_free" if args.len() == 1 => Some((
+                "mako_native_grpc_service_free",
+                &[Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "grpc_service_add_method" if args.len() == 3 => Some((
+                "mako_native_grpc_service_add_method",
+                &[Type::I64, Type::Str, Type::Str],
+                Some(Type::I64),
+                false,
+            )),
+            "grpc_service_has_method" if args.len() == 2 => Some((
+                "mako_native_grpc_service_has_method",
+                &[Type::I64, Type::Str],
+                Some(Type::I64),
+                false,
+            )),
+            "grpc_service_handle" if args.len() == 3 => Some((
+                "mako_native_grpc_service_handle_ptr",
+                &[Type::I64, Type::Str, Type::Str],
+                Some(Type::Str),
+                true,
+            )),
+            "grpc_service_methods" if args.len() == 1 => Some((
+                "mako_native_grpc_service_methods_ptr",
+                &[Type::I64],
+                Some(Type::Str),
+                true,
+            )),
+            "grpc_service_name" if args.len() == 1 => Some((
+                "mako_native_grpc_service_name_ptr",
+                &[Type::I64],
                 Some(Type::Str),
                 true,
             )),

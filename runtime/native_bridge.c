@@ -6448,6 +6448,149 @@ MakoNativeString *mako_native_hot_sites_json_ptr(void) {
     return bridge_take_str(mako_hot_sites_json());
 }
 
+
+/* ---- Messaging / GraphQL / OpenAPI / gRPC service (0.4.15+) ---- */
+
+int64_t mako_native_mq_new(void) { return mako_mq_new(); }
+int64_t mako_native_mq_free(int64_t a0) { return mako_mq_free(a0); }
+int64_t mako_native_mq_declare(int64_t a0, MakoNativeString *a1, int64_t a2) {
+    return mako_mq_declare(a0, bridge_borrow_str(a1), a2);
+}
+int64_t mako_native_mq_publish(int64_t a0, MakoNativeString *a1, MakoNativeString *a2) {
+    return mako_mq_publish(a0, bridge_borrow_str(a1), bridge_borrow_str(a2));
+}
+MakoNativeString *mako_native_mq_try_take_ptr(int64_t a0, MakoNativeString *a1) {
+    return bridge_take_str(mako_mq_try_take(a0, bridge_borrow_str(a1)));
+}
+int64_t mako_native_mq_len(int64_t a0, MakoNativeString *a1) {
+    return mako_mq_len(a0, bridge_borrow_str(a1));
+}
+int64_t mako_native_mq_purge(int64_t a0, MakoNativeString *a1) {
+    return mako_mq_purge(a0, bridge_borrow_str(a1));
+}
+
+int64_t mako_native_nats_new(void) { return mako_nats_new(); }
+int64_t mako_native_nats_free(int64_t a0) { return mako_nats_free(a0); }
+int64_t mako_native_nats_sub(int64_t a0, MakoNativeString *a1, int64_t a2) {
+    return mako_nats_sub(a0, bridge_borrow_str(a1), a2);
+}
+int64_t mako_native_nats_pub(int64_t a0, MakoNativeString *a1, MakoNativeString *a2) {
+    return mako_nats_pub(a0, bridge_borrow_str(a1), bridge_borrow_str(a2));
+}
+MakoNativeString *mako_native_nats_try_next_ptr(int64_t a0, MakoNativeString *a1) {
+    return bridge_take_str(mako_nats_try_next(a0, bridge_borrow_str(a1)));
+}
+int64_t mako_native_nats_len(int64_t a0, MakoNativeString *a1) {
+    return mako_nats_len(a0, bridge_borrow_str(a1));
+}
+MakoNativeString *mako_native_nats_pub_frame_ptr(MakoNativeString *a0, MakoNativeString *a1) {
+    return bridge_take_str(mako_nats_pub_frame(bridge_borrow_str(a0), bridge_borrow_str(a1)));
+}
+MakoNativeString *mako_native_nats_sub_frame_ptr(MakoNativeString *a0, MakoNativeString *a1) {
+    return bridge_take_str(mako_nats_sub_frame(bridge_borrow_str(a0), bridge_borrow_str(a1)));
+}
+MakoNativeString *mako_native_nats_connect_frame_ptr(void) {
+    return bridge_take_str(mako_nats_connect_frame());
+}
+MakoNativeString *mako_native_nats_ping_frame_ptr(void) {
+    return bridge_take_str(mako_nats_ping_frame());
+}
+
+int64_t mako_native_redis_mq_new(void) { return mako_redis_mq_new(); }
+int64_t mako_native_redis_mq_free(int64_t a0) { return mako_redis_mq_free(a0); }
+int64_t mako_native_redis_mq_declare(int64_t a0, MakoNativeString *a1, int64_t a2) {
+    return mako_redis_mq_declare(a0, bridge_borrow_str(a1), a2);
+}
+int64_t mako_native_redis_mq_lpush(int64_t a0, MakoNativeString *a1, MakoNativeString *a2) {
+    return mako_redis_mq_lpush(a0, bridge_borrow_str(a1), bridge_borrow_str(a2));
+}
+MakoNativeString *mako_native_redis_mq_rpop_ptr(int64_t a0, MakoNativeString *a1) {
+    return bridge_take_str(mako_redis_mq_rpop(a0, bridge_borrow_str(a1)));
+}
+int64_t mako_native_redis_mq_llen(int64_t a0, MakoNativeString *a1) {
+    return mako_redis_mq_llen(a0, bridge_borrow_str(a1));
+}
+
+int64_t mako_native_graphql_schema_new(void) { return mako_graphql_schema_new(); }
+int64_t mako_native_graphql_schema_free(int64_t a0) { return mako_graphql_schema_free(a0); }
+int64_t mako_native_graphql_schema_add_type(int64_t a0, MakoNativeString *a1) {
+    return mako_graphql_schema_add_type(a0, bridge_borrow_str(a1));
+}
+int64_t mako_native_graphql_schema_add_field(int64_t a0, MakoNativeString *a1, MakoNativeString *a2, MakoNativeString *a3) {
+    return mako_graphql_schema_add_field(a0, bridge_borrow_str(a1), bridge_borrow_str(a2), bridge_borrow_str(a3));
+}
+int64_t mako_native_graphql_schema_set_resolver(int64_t a0, MakoNativeString *a1, MakoNativeString *a2) {
+    return mako_graphql_schema_set_resolver(a0, bridge_borrow_str(a1), bridge_borrow_str(a2));
+}
+int64_t mako_native_graphql_schema_has_type(int64_t a0, MakoNativeString *a1) {
+    return mako_graphql_schema_has_type(a0, bridge_borrow_str(a1));
+}
+int64_t mako_native_graphql_schema_has_resolver(int64_t a0, MakoNativeString *a1) {
+    return mako_graphql_schema_has_resolver(a0, bridge_borrow_str(a1));
+}
+MakoNativeString *mako_native_graphql_schema_sdl_ptr(int64_t a0) {
+    return bridge_take_str(mako_graphql_schema_sdl(a0));
+}
+MakoNativeString *mako_native_graphql_schema_resolve_ptr(int64_t a0, MakoNativeString *a1) {
+    return bridge_take_str(mako_graphql_schema_resolve(a0, bridge_borrow_str(a1)));
+}
+MakoNativeString *mako_native_graphql_query_from_body_ptr(MakoNativeString *a0) {
+    return bridge_take_str(mako_graphql_query_from_body(bridge_borrow_str(a0)));
+}
+MakoNativeString *mako_native_graphql_variables_from_body_ptr(MakoNativeString *a0) {
+    return bridge_take_str(mako_graphql_variables_from_body(bridge_borrow_str(a0)));
+}
+MakoNativeString *mako_native_graphql_fields_ptr(MakoNativeString *a0) {
+    return bridge_take_str(mako_graphql_fields(bridge_borrow_str(a0)));
+}
+/* graphql_parse: body JSON → query string (or clone body). */
+MakoNativeString *mako_native_graphql_parse_ptr(MakoNativeString *a0) {
+    MakoString b = bridge_borrow_str(a0);
+    MakoString q = mako_graphql_query_from_body(b);
+    if (!q.data || q.len == 0) {
+        mako_str_free(q);
+        return bridge_take_str(mako_str_clone(b));
+    }
+    return bridge_take_str(q);
+}
+
+MakoNativeString *mako_native_openapi_response_ptr(MakoNativeString *a0, MakoNativeString *a1) {
+    return bridge_take_str(mako_openapi_response(bridge_borrow_str(a0), bridge_borrow_str(a1)));
+}
+MakoNativeString *mako_native_openapi_operation_ptr(MakoNativeString *a0, MakoNativeString *a1, MakoNativeString *a2) {
+    return bridge_take_str(mako_openapi_operation(bridge_borrow_str(a0), bridge_borrow_str(a1), bridge_borrow_str(a2)));
+}
+MakoNativeString *mako_native_openapi_paths_merge_ptr(MakoNativeString *a0, MakoNativeString *a1) {
+    return bridge_take_str(mako_openapi_paths_merge(bridge_borrow_str(a0), bridge_borrow_str(a1)));
+}
+MakoNativeString *mako_native_openapi_info_ptr(MakoNativeString *a0, MakoNativeString *a1, MakoNativeString *a2) {
+    return bridge_take_str(mako_openapi_info(bridge_borrow_str(a0), bridge_borrow_str(a1), bridge_borrow_str(a2)));
+}
+MakoNativeString *mako_native_openapi_doc_full_ptr(MakoNativeString *a0, MakoNativeString *a1) {
+    return bridge_take_str(mako_openapi_doc_full(bridge_borrow_str(a0), bridge_borrow_str(a1)));
+}
+
+int64_t mako_native_grpc_service_new_ptr(MakoNativeString *a0) {
+    return mako_grpc_service_new(bridge_borrow_str(a0));
+}
+int64_t mako_native_grpc_service_free(int64_t a0) { return mako_grpc_service_free(a0); }
+int64_t mako_native_grpc_service_add_method(int64_t a0, MakoNativeString *a1, MakoNativeString *a2) {
+    return mako_grpc_service_add_method(a0, bridge_borrow_str(a1), bridge_borrow_str(a2));
+}
+int64_t mako_native_grpc_service_has_method(int64_t a0, MakoNativeString *a1) {
+    return mako_grpc_service_has_method(a0, bridge_borrow_str(a1));
+}
+MakoNativeString *mako_native_grpc_service_handle_ptr(int64_t a0, MakoNativeString *a1, MakoNativeString *a2) {
+    return bridge_take_str(mako_grpc_service_handle(a0, bridge_borrow_str(a1), bridge_borrow_str(a2)));
+}
+MakoNativeString *mako_native_grpc_service_methods_ptr(int64_t a0) {
+    return bridge_take_str(mako_grpc_service_methods(a0));
+}
+MakoNativeString *mako_native_grpc_service_name_ptr(int64_t a0) {
+    return bridge_take_str(mako_grpc_service_name(a0));
+}
+
+
 MakoNativeString *mako_native_quic_initial_client_hp_hex_ptr(MakoNativeString *a0) {
     MakoNativeString *ret = bridge_take_str(mako_quic_initial_client_hp_hex(bridge_borrow_str(a0)));
     return ret;
