@@ -41,7 +41,7 @@ See [ROADMAP.md](ROADMAP.md) version map. Tip after `v0.4.5`:
 0.4.11 HTTP soak + allocator/PGO product
 0.4.12 messaging queues + GraphQL HTTP seeds
 0.4.13 language queue[T] + Graphql types
-0.4.14 adaptive opt without online JIT
+0.4.14 adaptive opt (hot sites + offline PGO)
 0.4.15 NATS/Redis + GraphQL schema + gRPC/OpenAPI  (tip)
 0.5.0  native-first default (CLI default flip — minor)
 0.5.1  toolchain / IDE depth

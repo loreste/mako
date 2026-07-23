@@ -34,8 +34,8 @@ service registry, OpenAPI builders — backend API surface, no GC.
 
 ## 0.4.14 — 2026-07-22
 
-**Theme:** Adaptive optimization without online JIT — longer-running services
-get better via **offline** feedback, not in-process code rewrite. No GC.
+**Theme:** Adaptive optimization — longer-running services get better via
+**offline** feedback, not in-process code rewrite. No GC.
 
 ### Adaptive opt (LR-4b)
 

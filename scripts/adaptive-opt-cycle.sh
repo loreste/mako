@@ -68,7 +68,7 @@ echo "adaptive-opt: [1/3] release AOT → $out.aot"
 
 echo "adaptive-opt: [2/3] guidance note (hot_site / profile are in-process APIs)"
 cat >"$guide_dir/README.txt" <<EOF
-Adaptive opt guidance (no online JIT)
+Adaptive opt guidance (no live recompile)
 =====================================
 - Ship $out.aot (or the PGO binary below) — full native from t=0.
 - In production, call hot_site_enable(1) and hot_site_hit(id) on routes.

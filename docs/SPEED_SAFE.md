@@ -6,7 +6,7 @@ C and Rust — measured, not claimed.
 
 Tip: **0.4.15+** · Related: [SPEED.md](SPEED.md) · [MEMORY_SAFETY.md](MEMORY_SAFETY.md) ·
 [PERFORMANCE.md](PERFORMANCE.md) · [LONG_RUNNING.md](LONG_RUNNING.md) ·
-[ADAPTIVE_OPT.md](ADAPTIVE_OPT.md) (JIT-like feedback **without** online JIT tax).
+[ADAPTIVE_OPT.md](ADAPTIVE_OPT.md) (traffic feedback **without** live recompile).
 
 ---
 
@@ -20,13 +20,13 @@ Tip: **0.4.15+** · Related: [SPEED.md](SPEED.md) · [MEMORY_SAFETY.md](MEMORY_S
 We do **not** trade safety for speed by turning off checks on the safe path, and
 we do **not** accept a GC to “fix” free. Speed comes from:
 
-1. **Native AOT** (`-O3 -flto` / LLVM release) — no interpreter, no JIT warmup tax  
+1. **Native AOT** (`-O3 -flto` / LLVM release) — no interpreter, no warmup tax  
 2. **Cheap free** — views (`cap==0`), stack POD lits, immortal strings; free is cold  
 3. **Layout + hash** — hand-C-matched `map[int]int`, identity int hash, 50% load pre-size  
 4. **Explicit cost** — `share` / channels / arenas only when the program asks  
 5. **Adaptive feedback (optional)** — `hot_site_*` + offline PGO; see below  
 
-### Adaptive / “JIT-like” layer stays intact
+### Adaptive feedback layer stays intact
 
 Map and other micro-opts must **not** replace or slow the adaptive path:
 

@@ -31,7 +31,7 @@ unit tests, 0 failures on the native gate · CI ASan/UBSan/TSan as configured.
 | **0.4.11** | HTTP long-run soak + allocator/PGO product | **In tree** |
 | **0.4.12** | Messaging queues + GraphQL HTTP seeds | **In tree** |
 | **0.4.13** | Language `queue[T]` + `Graphql` types | **In tree** |
-| **0.4.14** | Adaptive opt without online JIT (hot sites + offline PGO cycle) | **In tree** |
+| **0.4.14** | Adaptive opt: hot sites + offline PGO cycle | **In tree** |
 | **0.4.15** | NATS/Redis adapters · GraphQL schema/resolvers · gRPC/OpenAPI | **In tree** (tip; cut when ready to tag) |
 | **0.5.0** | Native-first **default** (CLI default flip — minor theme) | **Planned** minor |
 | **0.5.1** | Toolchain & IDE depth (LSP, DAP/DWARF, doc/bench product) | **Planned** |
@@ -51,7 +51,7 @@ unit tests, 0 failures on the native gate · CI ASan/UBSan/TSan as configured.
 0.4.11 HTTP soak + allocator/PGO  [in tree]
 0.4.12 messaging queues + GraphQL HTTP  [in tree]
 0.4.13 language queue[T] + Graphql
-0.4.14 adaptive opt (no online JIT)
+0.4.14 adaptive opt (hot sites + offline PGO)
 0.4.15 NATS/Redis + GraphQL schema + gRPC/OpenAPI  [tip]
 0.5.0  native-first CLI default (minor)
 0.5.1  toolchain/IDE

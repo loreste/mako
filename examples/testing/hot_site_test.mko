@@ -1,4 +1,4 @@
-// Adaptive hot-site counters — years-up feedback without online JIT.
+// Adaptive hot-site counters — years-up feedback without live recompile.
 
 fn TestHotSiteDisabledByDefault() {
     assert_eq(hot_site_clear(), 1)
