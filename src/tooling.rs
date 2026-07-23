@@ -3580,11 +3580,27 @@ fn parse_program_file_verified(
     resolve_imports_with_verified(path, program, Some(locked_roots))
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum TestPackageLoadError {
+    NoTestFunctions,
+    Invalid(String),
+}
+
+impl std::fmt::Display for TestPackageLoadError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NoTestFunctions => write!(f, "no test functions"),
+            Self::Invalid(message) => f.write_str(message),
+        }
+    }
+}
+
 /// Merge test file with same-directory package sources; strip `main` (harness provides it).
-pub fn load_test_package(test_file: &Path) -> Result<(Program, Vec<String>), String> {
-    let mut program = parse_program_file(test_file)?;
-    program = merge_package_dir_siblings(test_file, program)?;
-    program = merge_path_dependencies(test_file, program)?;
+pub fn load_test_package(test_file: &Path) -> Result<(Program, Vec<String>), TestPackageLoadError> {
+    let mut program = parse_program_file(test_file).map_err(TestPackageLoadError::Invalid)?;
+    program =
+        merge_package_dir_siblings(test_file, program).map_err(TestPackageLoadError::Invalid)?;
+    program = merge_path_dependencies(test_file, program).map_err(TestPackageLoadError::Invalid)?;
     program
         .items
         .retain(|item| !matches!(item, Item::Fn(f) if f.name == "main"));
@@ -3595,7 +3611,8 @@ pub fn load_test_package(test_file: &Path) -> Result<(Program, Vec<String>), Str
             apply_package_safety_flags(&mut tc, &text);
         }
     }
-    tc.check(&program).map_err(|e| format!("{e}"))?;
+    tc.check(&program)
+        .map_err(|error| TestPackageLoadError::Invalid(error.to_string()))?;
     for f in tc.mono_fns {
         if !program
             .items
@@ -3625,10 +3642,7 @@ pub fn load_test_package(test_file: &Path) -> Result<(Program, Vec<String>), Str
     }
     let tests = list_test_fns(&program);
     if tests.is_empty() {
-        return Err(format!(
-            "{}: no Test/Fuzz/Property/Snapshot/Mock/Fixture functions (empty params)",
-            test_file.display()
-        ));
+        return Err(TestPackageLoadError::NoTestFunctions);
     }
     Ok((program, tests))
 }
@@ -4158,6 +4172,365 @@ mod metadata_tests {
     }
 }
 
+/// Stable failure classes exposed by `mako test --json`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum TestFailureKind {
+    Compile,
+    Runner,
+    Exit {
+        code: i32,
+    },
+    #[cfg_attr(windows, allow(dead_code))]
+    Signal {
+        signal: i32,
+    },
+    Timeout {
+        seconds: u64,
+    },
+    Load,
+}
+
+impl TestFailureKind {
+    fn as_str(&self) -> &'static str {
+        match self {
+            Self::Compile => "compile",
+            Self::Runner => "runner",
+            Self::Exit { .. } => "exit",
+            Self::Signal { .. } => "signal",
+            Self::Timeout { .. } => "timeout",
+            Self::Load => "load",
+        }
+    }
+
+    fn exit_code(&self) -> Option<i32> {
+        match self {
+            Self::Exit { code } => Some(*code),
+            _ => None,
+        }
+    }
+
+    fn signal(&self) -> Option<i32> {
+        match self {
+            Self::Signal { signal } => Some(*signal),
+            _ => None,
+        }
+    }
+
+    fn timeout_seconds(&self) -> Option<u64> {
+        match self {
+            Self::Timeout { seconds } => Some(*seconds),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TestFailure {
+    pub kind: TestFailureKind,
+    pub message: String,
+}
+
+impl TestFailure {
+    pub fn new(kind: TestFailureKind, message: impl Into<String>) -> Self {
+        Self {
+            kind,
+            message: message.into(),
+        }
+    }
+
+    fn to_json(&self) -> String {
+        format!(
+            r#"{{"kind":"{}","message":"{}","exitCode":{},"signal":{},"timeoutSeconds":{}}}"#,
+            self.kind.as_str(),
+            json_escape(&self.message),
+            json_optional_i32(self.kind.exit_code()),
+            json_optional_i32(self.kind.signal()),
+            json_optional_u64(self.kind.timeout_seconds()),
+        )
+    }
+}
+
+/// Captured result from one compiled test process.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TestExecution {
+    pub stdout: String,
+    pub stderr: String,
+    pub stdout_truncated: bool,
+    pub stderr_truncated: bool,
+    pub failure: Option<TestFailure>,
+}
+
+impl TestExecution {
+    #[cfg(test)]
+    pub fn passed(stdout: impl Into<String>, stderr: impl Into<String>) -> Self {
+        Self {
+            stdout: stdout.into(),
+            stderr: stderr.into(),
+            stdout_truncated: false,
+            stderr_truncated: false,
+            failure: None,
+        }
+    }
+
+    pub fn failed(
+        failure: TestFailure,
+        stdout: impl Into<String>,
+        stderr: impl Into<String>,
+    ) -> Self {
+        Self {
+            stdout: stdout.into(),
+            stderr: stderr.into(),
+            stdout_truncated: false,
+            stderr_truncated: false,
+            failure: Some(failure),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum TestFileOutcome {
+    Passed,
+    Skipped,
+    Failed(TestFailure),
+}
+
+impl TestFileOutcome {
+    fn status(&self) -> &'static str {
+        match self {
+            Self::Passed => "passed",
+            Self::Skipped => "skipped",
+            Self::Failed(_) => "failed",
+        }
+    }
+
+    fn failure(&self) -> Option<&TestFailure> {
+        match self {
+            Self::Failed(failure) => Some(failure),
+            Self::Passed | Self::Skipped => None,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct TestFileReport {
+    pub file: String,
+    pub outcome: TestFileOutcome,
+    pub tests: Vec<String>,
+    pub legacy: bool,
+    pub duration_ms: f64,
+    pub stdout: String,
+    pub stderr: String,
+    pub stdout_truncated: bool,
+    pub stderr_truncated: bool,
+}
+
+impl TestFileReport {
+    fn to_json(&self) -> String {
+        let tests = self
+            .tests
+            .iter()
+            .map(|name| format!(r#""{}""#, json_escape(name)))
+            .collect::<Vec<_>>()
+            .join(",");
+        let failure = self
+            .outcome
+            .failure()
+            .map(TestFailure::to_json)
+            .unwrap_or_else(|| "null".into());
+        format!(
+            r#"{{"file":"{}","status":"{}","tests":[{}],"legacy":{},"durationMs":{:.3},"stdout":"{}","stderr":"{}","stdoutTruncated":{},"stderrTruncated":{},"failure":{}}}"#,
+            json_escape(&self.file),
+            self.outcome.status(),
+            tests,
+            self.legacy,
+            normalized_duration(self.duration_ms),
+            json_escape(&self.stdout),
+            json_escape(&self.stderr),
+            self.stdout_truncated,
+            self.stderr_truncated,
+            failure,
+        )
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct TestRunReport {
+    pub iteration: u32,
+    pub path: String,
+    pub files: Vec<TestFileReport>,
+    pub source_files: usize,
+    pub matched_tests: usize,
+    pub coverage: Option<TestCoverageReport>,
+    pub errors: Vec<String>,
+}
+
+impl TestRunReport {
+    pub fn error(iteration: u32, path: &Path, message: impl Into<String>) -> Self {
+        Self {
+            iteration,
+            path: path.display().to_string(),
+            files: Vec::new(),
+            source_files: 0,
+            matched_tests: 0,
+            coverage: None,
+            errors: vec![message.into()],
+        }
+    }
+
+    pub fn ok(&self) -> bool {
+        self.errors.is_empty()
+            && self
+                .files
+                .iter()
+                .all(|file| !matches!(&file.outcome, TestFileOutcome::Failed(_)))
+    }
+
+    fn counts(&self) -> (usize, usize, usize) {
+        self.files
+            .iter()
+            .fold((0, 0, 0), |(passed, failed, skipped), file| {
+                match &file.outcome {
+                    TestFileOutcome::Passed => (passed + 1, failed, skipped),
+                    TestFileOutcome::Failed(_) => (passed, failed + 1, skipped),
+                    TestFileOutcome::Skipped => (passed, failed, skipped + 1),
+                }
+            })
+    }
+
+    fn duration_ms(&self) -> f64 {
+        self.files.iter().map(|file| file.duration_ms).sum()
+    }
+
+    fn to_json(&self) -> String {
+        let files = self
+            .files
+            .iter()
+            .map(TestFileReport::to_json)
+            .collect::<Vec<_>>()
+            .join(",");
+        let errors = self
+            .errors
+            .iter()
+            .map(|error| format!(r#""{}""#, json_escape(error)))
+            .collect::<Vec<_>>()
+            .join(",");
+        let (passed, failed, skipped) = self.counts();
+        let coverage = self
+            .coverage
+            .as_ref()
+            .map(TestCoverageReport::to_json)
+            .unwrap_or_else(|| "null".into());
+        format!(
+            r#"{{"iteration":{},"path":"{}","ok":{},"files":[{}],"summary":{{"passed":{},"failed":{},"skipped":{},"tests":{},"sourceFiles":{},"durationMs":{:.3}}},"coverage":{},"errors":[{}]}}"#,
+            self.iteration,
+            json_escape(&self.path),
+            self.ok(),
+            files,
+            passed,
+            failed,
+            skipped,
+            self.matched_tests,
+            self.source_files,
+            normalized_duration(self.duration_ms()),
+            coverage,
+            errors,
+        )
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct TestCoverageReport {
+    pub source_files: usize,
+    pub test_files: usize,
+    pub test_functions: usize,
+    pub file_coverage: f64,
+    pub categories: BTreeMap<&'static str, usize>,
+}
+
+impl TestCoverageReport {
+    fn to_json(&self) -> String {
+        let categories = ["unit", "fuzz", "property", "snapshot", "mock", "fixture"]
+            .iter()
+            .map(|kind| {
+                format!(
+                    r#""{}":{}"#,
+                    kind,
+                    self.categories.get(kind).copied().unwrap_or(0)
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(",");
+        format!(
+            r#"{{"sourceFiles":{},"testFiles":{},"testFunctions":{},"fileCoverage":{:.1},"categories":{{{}}}}}"#,
+            self.source_files, self.test_files, self.test_functions, self.file_coverage, categories,
+        )
+    }
+}
+
+/// Versioned command-level report written by `mako test --json`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TestCommandReport {
+    pub runs: Vec<TestRunReport>,
+}
+
+impl TestCommandReport {
+    pub fn new(runs: Vec<TestRunReport>) -> Self {
+        Self { runs }
+    }
+
+    pub fn ok(&self) -> bool {
+        !self.runs.is_empty() && self.runs.iter().all(TestRunReport::ok)
+    }
+
+    pub fn to_json(&self) -> String {
+        let runs = self
+            .runs
+            .iter()
+            .map(TestRunReport::to_json)
+            .collect::<Vec<_>>()
+            .join(",");
+        let (passed, failed, skipped, tests, duration_ms) = self.runs.iter().fold(
+            (0, 0, 0, 0, 0.0),
+            |(passed, failed, skipped, tests, duration_ms), run| {
+                let counts = run.counts();
+                (
+                    passed + counts.0,
+                    failed + counts.1,
+                    skipped + counts.2,
+                    tests + run.matched_tests,
+                    duration_ms + run.duration_ms(),
+                )
+            },
+        );
+        format!(
+            r#"{{"schemaVersion":1,"command":"test","ok":{},"runs":[{}],"summary":{{"passed":{},"failed":{},"skipped":{},"tests":{},"durationMs":{:.3}}}}}"#,
+            self.ok(),
+            runs,
+            passed,
+            failed,
+            skipped,
+            tests,
+            normalized_duration(duration_ms),
+        )
+    }
+}
+
+fn normalized_duration(duration_ms: f64) -> f64 {
+    duration_ms + 0.0
+}
+
+fn json_optional_i32(value: Option<i32>) -> String {
+    value
+        .map(|value| value.to_string())
+        .unwrap_or_else(|| "null".into())
+}
+
+fn json_optional_u64(value: Option<u64>) -> String {
+    value
+        .map(|value| value.to_string())
+        .unwrap_or_else(|| "null".into())
+}
+
 /// Discover `*_test.mko`, compile each with a category-aware harness, run, report.
 pub fn run_tests(
     path: &Path,
@@ -4233,7 +4606,7 @@ pub fn run_tests(
                     }
                 }
             }
-            Err(e) if e.contains("no Test/") => {
+            Err(TestPackageLoadError::NoTestFunctions) => {
                 if run_filter.is_some() {
                     println!("skip  {} (legacy main; -run ignores)\n", t.display());
                     skipped_files += 1;
@@ -4254,7 +4627,7 @@ pub fn run_tests(
                     }
                 }
             }
-            Err(e) => {
+            Err(TestPackageLoadError::Invalid(e)) => {
                 eprintln!("error: {e}");
                 println!("FAIL  {}\n", t.display());
                 failed += 1;
@@ -4292,6 +4665,445 @@ pub fn run_tests(
         Err(())
     } else {
         Ok(())
+    }
+}
+
+/// Run one test root without printing and return its structured result.
+pub fn run_tests_json_report(
+    path: &Path,
+    run_filter: Option<&str>,
+    coverage: bool,
+    iteration: u32,
+    compile_and_run_tests: &dyn Fn(&Path, &Program, &[String]) -> TestExecution,
+    legacy_main_run: &dyn Fn(&Path) -> TestExecution,
+) -> TestRunReport {
+    let files = collect_mako_files(path);
+    let source_files = files.iter().filter(|file| !is_test_file(file)).count();
+    let tests: Vec<_> = files
+        .into_iter()
+        .filter(|file| is_test_file(file))
+        .collect();
+    if tests.is_empty() {
+        return TestRunReport::error(
+            iteration,
+            path,
+            format!("no *_test.mko under {}", path.display()),
+        );
+    }
+
+    let mut reports = Vec::new();
+    let mut matched_tests = 0;
+    let mut category_counts: BTreeMap<&'static str, usize> = BTreeMap::new();
+    for test_file in &tests {
+        let started = Instant::now();
+        let mut report = match load_test_package(test_file) {
+            Ok((program, names)) => {
+                let names: Vec<String> = if let Some(filter) = run_filter {
+                    names
+                        .into_iter()
+                        .filter(|name| test_name_matches(name, filter))
+                        .collect()
+                } else {
+                    names
+                };
+                if names.is_empty() {
+                    TestFileReport {
+                        file: test_file.display().to_string(),
+                        outcome: TestFileOutcome::Skipped,
+                        tests: Vec::new(),
+                        legacy: false,
+                        duration_ms: 0.0,
+                        stdout: String::new(),
+                        stderr: String::new(),
+                        stdout_truncated: false,
+                        stderr_truncated: false,
+                    }
+                } else {
+                    matched_tests += names.len();
+                    for name in &names {
+                        if let Some(kind) = test_category(name) {
+                            *category_counts.entry(kind).or_insert(0) += 1;
+                        }
+                    }
+                    let execution = compile_and_run_tests(test_file, &program, &names);
+                    let outcome = execution
+                        .failure
+                        .map(TestFileOutcome::Failed)
+                        .unwrap_or(TestFileOutcome::Passed);
+                    TestFileReport {
+                        file: test_file.display().to_string(),
+                        outcome,
+                        tests: names,
+                        legacy: false,
+                        duration_ms: 0.0,
+                        stdout: execution.stdout,
+                        stderr: execution.stderr,
+                        stdout_truncated: execution.stdout_truncated,
+                        stderr_truncated: execution.stderr_truncated,
+                    }
+                }
+            }
+            Err(TestPackageLoadError::NoTestFunctions) if run_filter.is_some() => TestFileReport {
+                file: test_file.display().to_string(),
+                outcome: TestFileOutcome::Skipped,
+                tests: Vec::new(),
+                legacy: true,
+                duration_ms: 0.0,
+                stdout: String::new(),
+                stderr: String::new(),
+                stdout_truncated: false,
+                stderr_truncated: false,
+            },
+            Err(TestPackageLoadError::NoTestFunctions) => {
+                let execution = legacy_main_run(test_file);
+                let outcome = execution
+                    .failure
+                    .map(TestFileOutcome::Failed)
+                    .unwrap_or(TestFileOutcome::Passed);
+                TestFileReport {
+                    file: test_file.display().to_string(),
+                    outcome,
+                    tests: Vec::new(),
+                    legacy: true,
+                    duration_ms: 0.0,
+                    stdout: execution.stdout,
+                    stderr: execution.stderr,
+                    stdout_truncated: execution.stdout_truncated,
+                    stderr_truncated: execution.stderr_truncated,
+                }
+            }
+            Err(TestPackageLoadError::Invalid(error)) => TestFileReport {
+                file: test_file.display().to_string(),
+                outcome: TestFileOutcome::Failed(TestFailure::new(TestFailureKind::Load, error)),
+                tests: Vec::new(),
+                legacy: false,
+                duration_ms: 0.0,
+                stdout: String::new(),
+                stderr: String::new(),
+                stdout_truncated: false,
+                stderr_truncated: false,
+            },
+        };
+        report.duration_ms = started.elapsed().as_secs_f64() * 1000.0;
+        reports.push(report);
+    }
+
+    let coverage = coverage.then(|| {
+        let covered = tests.len();
+        let total = source_files + covered;
+        let file_coverage = if total == 0 {
+            100.0
+        } else {
+            (covered as f64 / total as f64) * 100.0
+        };
+        TestCoverageReport {
+            source_files,
+            test_files: tests.len(),
+            test_functions: matched_tests,
+            file_coverage,
+            categories: category_counts,
+        }
+    });
+
+    TestRunReport {
+        iteration,
+        path: path.display().to_string(),
+        files: reports,
+        source_files,
+        matched_tests,
+        coverage,
+        errors: Vec::new(),
+    }
+}
+
+#[cfg(test)]
+mod json_test_report_tests {
+    use super::*;
+    use serde_json::{json, Value};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    fn temp_dir(tag: &str) -> PathBuf {
+        static NEXT: AtomicUsize = AtomicUsize::new(0);
+        let path = std::env::temp_dir().join(format!(
+            "mako-json-tests-{}-{}-{}",
+            tag,
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir_all(&path).unwrap();
+        path
+    }
+
+    #[test]
+    fn json_test_report_has_a_stable_envelope() {
+        let report = TestCommandReport::new(vec![TestRunReport {
+            iteration: 1,
+            path: "tests".into(),
+            files: vec![TestFileReport {
+                file: "tests/add_test.mko".into(),
+                outcome: TestFileOutcome::Failed(TestFailure {
+                    kind: TestFailureKind::Exit { code: 7 },
+                    message: "exited with code 7".into(),
+                }),
+                tests: vec!["TestAdd".into()],
+                legacy: false,
+                duration_ms: 12.5,
+                stdout: "before\n".into(),
+                stderr: "bad \"value\"\n".into(),
+                stdout_truncated: false,
+                stderr_truncated: false,
+            }],
+            source_files: 2,
+            matched_tests: 1,
+            coverage: None,
+            errors: Vec::new(),
+        }]);
+
+        assert_eq!(
+            report.to_json(),
+            r#"{"schemaVersion":1,"command":"test","ok":false,"runs":[{"iteration":1,"path":"tests","ok":false,"files":[{"file":"tests/add_test.mko","status":"failed","tests":["TestAdd"],"legacy":false,"durationMs":12.500,"stdout":"before\n","stderr":"bad \"value\"\n","stdoutTruncated":false,"stderrTruncated":false,"failure":{"kind":"exit","message":"exited with code 7","exitCode":7,"signal":null,"timeoutSeconds":null}}],"summary":{"passed":0,"failed":1,"skipped":0,"tests":1,"sourceFiles":2,"durationMs":12.500},"coverage":null,"errors":[]}],"summary":{"passed":0,"failed":1,"skipped":0,"tests":1,"durationMs":12.500}}"#
+        );
+    }
+
+    #[test]
+    fn json_test_report_round_trips_escaped_text() {
+        let text = "quote \" slash \\ carriage\r tab\t control \u{1} replacement \u{fffd} café✓";
+        let report = TestCommandReport::new(vec![TestRunReport {
+            iteration: 1,
+            path: text.into(),
+            files: vec![TestFileReport {
+                file: text.into(),
+                outcome: TestFileOutcome::Failed(TestFailure::new(TestFailureKind::Load, text)),
+                tests: vec![text.into()],
+                legacy: false,
+                duration_ms: -0.0,
+                stdout: text.into(),
+                stderr: text.into(),
+                stdout_truncated: false,
+                stderr_truncated: false,
+            }],
+            source_files: 0,
+            matched_tests: 1,
+            coverage: None,
+            errors: vec![text.into()],
+        }]);
+
+        let value: Value = serde_json::from_str(&report.to_json()).unwrap();
+        assert_eq!(value["runs"][0]["path"], text);
+        assert_eq!(value["runs"][0]["files"][0]["file"], text);
+        assert_eq!(value["runs"][0]["files"][0]["tests"][0], text);
+        assert_eq!(value["runs"][0]["files"][0]["stdout"], text);
+        assert_eq!(value["runs"][0]["files"][0]["stderr"], text);
+        assert_eq!(value["runs"][0]["files"][0]["failure"]["message"], text);
+        assert_eq!(value["runs"][0]["errors"][0], text);
+        assert_eq!(value["summary"]["durationMs"], 0.0);
+    }
+
+    #[test]
+    fn json_test_failures_preserve_variant_payloads() {
+        let cases = [
+            (
+                TestFailureKind::Compile,
+                "compile",
+                json!([null, null, null]),
+            ),
+            (TestFailureKind::Runner, "runner", json!([null, null, null])),
+            (
+                TestFailureKind::Exit { code: 7 },
+                "exit",
+                json!([7, null, null]),
+            ),
+            (
+                TestFailureKind::Signal { signal: 11 },
+                "signal",
+                json!([null, 11, null]),
+            ),
+            (
+                TestFailureKind::Timeout { seconds: 90 },
+                "timeout",
+                json!([null, null, 90]),
+            ),
+            (TestFailureKind::Load, "load", json!([null, null, null])),
+        ];
+
+        for (kind, expected_kind, expected_payloads) in cases {
+            let value: Value =
+                serde_json::from_str(&TestFailure::new(kind, "message").to_json()).unwrap();
+            assert_eq!(value["kind"], expected_kind);
+            assert_eq!(
+                json!([value["exitCode"], value["signal"], value["timeoutSeconds"]]),
+                expected_payloads
+            );
+        }
+    }
+
+    #[test]
+    fn json_test_report_serializes_repeat_coverage_and_file_flags() {
+        let mut categories = BTreeMap::new();
+        categories.insert("unit", 2);
+        categories.insert("property", 1);
+        let first = TestRunReport {
+            iteration: 1,
+            path: "tests".into(),
+            files: vec![TestFileReport {
+                file: "tests/legacy_test.mko".into(),
+                outcome: TestFileOutcome::Passed,
+                tests: Vec::new(),
+                legacy: true,
+                duration_ms: 1.25,
+                stdout: "x".repeat(8),
+                stderr: String::new(),
+                stdout_truncated: true,
+                stderr_truncated: false,
+            }],
+            source_files: 3,
+            matched_tests: 0,
+            coverage: Some(TestCoverageReport {
+                source_files: 3,
+                test_files: 1,
+                test_functions: 3,
+                file_coverage: 25.0,
+                categories,
+            }),
+            errors: Vec::new(),
+        };
+        let second = TestRunReport {
+            iteration: 2,
+            path: "tests".into(),
+            files: vec![TestFileReport {
+                file: "tests/skipped_test.mko".into(),
+                outcome: TestFileOutcome::Skipped,
+                tests: Vec::new(),
+                legacy: false,
+                duration_ms: 0.5,
+                stdout: String::new(),
+                stderr: String::new(),
+                stdout_truncated: false,
+                stderr_truncated: false,
+            }],
+            source_files: 3,
+            matched_tests: 0,
+            coverage: None,
+            errors: Vec::new(),
+        };
+
+        let value: Value =
+            serde_json::from_str(&TestCommandReport::new(vec![first, second]).to_json()).unwrap();
+        assert_eq!(value["runs"].as_array().unwrap().len(), 2);
+        assert_eq!(value["runs"][1]["iteration"], 2);
+        assert_eq!(value["runs"][0]["files"][0]["legacy"], true);
+        assert_eq!(value["runs"][0]["files"][0]["stdoutTruncated"], true);
+        assert_eq!(value["runs"][0]["coverage"]["sourceFiles"], 3);
+        assert_eq!(value["runs"][0]["coverage"]["categories"]["unit"], 2);
+        assert_eq!(value["runs"][0]["coverage"]["categories"]["property"], 1);
+        assert_eq!(value["summary"]["passed"], 1);
+        assert_eq!(value["summary"]["skipped"], 1);
+    }
+
+    #[test]
+    fn json_test_report_covers_filtering_output_and_coverage() {
+        let dir = temp_dir("filter");
+        fs::write(
+            dir.join("sample_test.mko"),
+            "fn TestOne() {}\nfn PropertyRoundTrip() {}\n",
+        )
+        .unwrap();
+        fs::write(dir.join("lib.mko"), "fn helper() -> int { return 1 }\n").unwrap();
+
+        let report = run_tests_json_report(
+            &dir,
+            Some("TestOne"),
+            true,
+            2,
+            &|_, _, names| {
+                assert_eq!(names, ["TestOne"]);
+                TestExecution::passed("--- PASS: TestOne\nPASS\n", "")
+            },
+            &|_| unreachable!(),
+        );
+        let _ = fs::remove_dir_all(&dir);
+
+        assert!(report.ok());
+        assert_eq!(report.iteration, 2);
+        assert_eq!(report.matched_tests, 1);
+        assert_eq!(report.files[0].outcome, TestFileOutcome::Passed);
+        assert_eq!(report.files[0].stdout, "--- PASS: TestOne\nPASS\n");
+        let coverage = report.coverage.unwrap();
+        assert_eq!(coverage.source_files, 1);
+        assert_eq!(coverage.test_files, 1);
+        assert_eq!(coverage.test_functions, 1);
+        assert_eq!(coverage.categories.get("unit"), Some(&1));
+        assert_eq!(coverage.categories.get("property"), None);
+    }
+
+    #[test]
+    fn json_test_report_records_skips_and_load_failures() {
+        let dir = temp_dir("failure");
+        fs::write(dir.join("good_test.mko"), "fn TestOne() {}\n").unwrap();
+        fs::write(dir.join("broken_test.mko"), "fn TestBroken( {\n").unwrap();
+
+        let report = run_tests_json_report(
+            &dir,
+            Some("Other"),
+            false,
+            1,
+            &|_, _, _| unreachable!(),
+            &|_| unreachable!(),
+        );
+        let _ = fs::remove_dir_all(&dir);
+
+        assert!(!report.ok());
+        assert_eq!(report.files.len(), 2);
+        assert!(report
+            .files
+            .iter()
+            .any(|file| file.outcome == TestFileOutcome::Skipped));
+        let failed = report
+            .files
+            .iter()
+            .find_map(|file| match &file.outcome {
+                TestFileOutcome::Failed(failure) => Some(failure),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(failed.kind, TestFailureKind::Load);
+    }
+
+    #[test]
+    fn test_package_load_distinguishes_legacy_files_from_errors() {
+        let dir = temp_dir("load-outcomes");
+        let legacy = dir.join("legacy_test.mko");
+        let invalid = dir.join("invalid_test.mko");
+        fs::write(&legacy, "fn main() {}\n").unwrap();
+        fs::write(&invalid, "fn TestBroken( {\n").unwrap();
+
+        assert!(matches!(
+            load_test_package(&legacy),
+            Err(TestPackageLoadError::NoTestFunctions)
+        ));
+        assert!(matches!(
+            load_test_package(&invalid),
+            Err(TestPackageLoadError::Invalid(_))
+        ));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn json_test_report_fails_cleanly_when_no_tests_exist() {
+        let dir = temp_dir("empty");
+        fs::write(dir.join("main.mko"), "fn main() {}\n").unwrap();
+        let report = run_tests_json_report(
+            &dir,
+            None,
+            false,
+            1,
+            &|_, _, _| unreachable!(),
+            &|_| unreachable!(),
+        );
+        let _ = fs::remove_dir_all(&dir);
+
+        assert!(!report.ok());
+        assert!(report.errors[0].contains("no *_test.mko"));
     }
 }
 

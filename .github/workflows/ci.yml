@@ -64,6 +64,20 @@ jobs:
         shell: bash
         run: ./target/release/mako --help
 
+      - name: JSON test report
+        shell: bash
+        run: |
+          set -o pipefail
+          ./target/release/mako test examples/testing/add_test.mko --json --coverage |
+            python -c 'import json,sys; r=json.load(sys.stdin); assert r["schemaVersion"] == 1 and r["ok"] and r["summary"]["passed"] == 1 and r["summary"]["tests"] == 3 and r["runs"][0]["coverage"]["testFunctions"] == 3 and r["runs"][0]["files"][0]["stdout"].splitlines()[-1] == "PASS"'
+          set +e
+          failure_json="$(./target/release/mako test examples/ci/json_report_failure_test.mko --json)"
+          failure_status=$?
+          set -e
+          test "$failure_status" -ne 0
+          printf '%s' "$failure_json" |
+            python -c 'import json,sys; r=json.load(sys.stdin); f=r["runs"][0]["files"][0]; assert not r["ok"] and f["status"] == "failed" and f["failure"]["kind"] == "exit"'
+
       - name: Validate compiler benchmark matrix
         if: runner.os == 'Linux'
         run: >-

@@ -2276,8 +2276,9 @@ See `examples/import_paths/` for a full service-style import block.
 | Run all | `mako test [path]` |
 | Filter | `mako test --run TestAdd` or `-r 'Test*'` or `-r '/^TestAdd$/'` |
 | Verbose | `mako test -v` / `--verbose` (lists matched test functions) |
-| Repeat | `mako test --count N` |
+| Repeat | `mako test --count N` (stops at the first failing iteration) |
 | Coverage | `mako test --coverage` |
+| JSON report | `mako test --json` (schema version 1; captures output and exits nonzero on failure) |
 | Categories | `fn FuzzXxx()` / `PropertyXxx()` / `SnapshotXxx()` / `MockXxx()` / `FixtureXxx()` |
 | Subtests | `t_run("name")` · nest with `t_run_nested("child")` → `Parent/child` |
 
@@ -2351,7 +2352,7 @@ mako check --json path.mko   # JSON diagnostics for CI/IDE/AI tooling
 mako build path.mko -o bin   # → C → .o cache → link (debug -O0; --release -O3 -flto)
 mako build -j 8 --no-incremental path.mko   # parallel jobs; disable cache
 mako run path.mko [-- args...]   # compile + run; trailing args → argc/args
-mako test [path] [--run PAT] [-v] [--count N] [--coverage]  # tests + categories
+mako test [path] [--run PAT] [-v] [--count N] [--coverage] [--json]  # tests + categories
 mako fmt [paths...] [-w|-l|-d] [-p NAME]   # formatter: stdout / write / list / diff
 mako lint [path] [-p NAME]            # workspace-aware typecheck + rules
 mako bench [path] [-p NAME] [--json]  # workspace-aware bench_*.mko wall time

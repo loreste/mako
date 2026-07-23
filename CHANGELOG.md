@@ -31,6 +31,8 @@ service registry, OpenAPI builders — backend API surface, no GC.
 
 - `examples/testing/adapters_api_test.mko`
 - [docs/MESSAGING_GRAPHQL.md](docs/MESSAGING_GRAPHQL.md) rewritten for all surfaces.
+- `mako test --json` emits a versioned report with per-file results, captured
+  output, structured failures, repeat runs, and optional coverage data.
 
 ## 0.4.14 — 2026-07-22
 

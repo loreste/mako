@@ -738,6 +738,7 @@ Supported patterns: literals, `.`, `*`, `+`, `?`, `|`, `[abc]`, `[a-z]`,
 | `-v` / `--verbose` | List matched functions, verbose output |
 | `--count N`     | Repeat tests N times                     |
 | `--coverage`    | Instrument for coverage reporting        |
+| `--json`        | Emit one versioned JSON test report       |
 | `-p NAME`       | Test one workspace member                |
 
 ### `mako fmt` Flags

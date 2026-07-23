@@ -48,10 +48,11 @@ The checker validates:
 
 ### JSON Output
 
-With `--json`, diagnostics are emitted as one JSON object per line:
+With `--json`, the checker emits one JSON array. Each checked target has its
+own result and diagnostics array:
 
 ```json
-{"file":"main.mko","line":12,"col":5,"severity":"error","message":"use of moved value `x`"}
+[{"ok":false,"file":"main.mko","diagnostics":[{"severity":"error","file":"main.mko","line":12,"column":5,"message":"use of moved value `x`"}]}]
 ```
 
 This integrates with CI systems and editor plugins.
@@ -142,6 +143,7 @@ mako test examples/testing           # run all tests in a directory
 mako test examples/testing/add_test.mko  # run tests in one file
 mako test .                          # run tests in all workspace members
 mako test -p mylib                   # run tests for one member
+mako test path --json               # stable machine-readable report
 ```
 
 ### Filtering with `-r` / `--run`
@@ -181,6 +183,18 @@ mako test path --count 10            # run matching tests 10 times
 ```
 
 Useful for catching flaky tests that depend on timing or concurrency.
+Repeats stop at the first failing iteration.
+
+### JSON Reports
+
+`mako test --json` emits one object with `schemaVersion: 1`. It records each
+iteration and test file, matched function names, duration, captured stdout and
+stderr, and structured exit, signal, timeout, compile, or runner failures.
+Coverage data is included when `--coverage` is also present. Test-process output
+is captured rather than mixed into the JSON stream and is capped at 1 MiB per
+stream with explicit truncation flags. The command exits nonzero if a run fails.
+Summary pass/fail/skip values count files, while `tests` counts matched test
+functions. Signal numbers are reported only on POSIX systems.
 
 ### Coverage
 
@@ -579,7 +593,7 @@ mako deploy plugin my-plugin --name my-plugin --kind native
 | `mako check`       | Typecheck without building           | `--json`, `-p`               |
 | `mako build`       | Compile to native binary             | `--release`, `-j`, `--target`|
 | `mako run`         | Compile and execute                  | `-- args...`                 |
-| `mako test`        | Discover and run tests               | `-r`, `-v`, `--coverage`     |
+| `mako test`        | Discover and run tests               | `-r`, `-v`, `--coverage`, `--json` |
 | `mako fmt`         | Format source code                   | `-w`, `-l`, `-d`             |
 | `mako lint`        | Lint with additional rules           | `-p`                         |
 | `mako bench`       | Run benchmarks                       | `--json`, `-p`               |
