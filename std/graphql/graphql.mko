@@ -45,3 +45,16 @@ fn handle_http_body(body: string) -> string {
     }
     return resolve_seed(q)
 }
+
+// Schema-backed resolve (see also std/graphql/schema.mko).
+fn resolve_with_schema(schema_id: int, query: string) -> string {
+    return graphql_schema_resolve(schema_id, query)
+}
+
+fn handle_http_body_schema(schema_id: int, body: string) -> string {
+    let q = graphql_query_from_body(body)
+    if len(q) == 0 {
+        return graphql_error("missing query")
+    }
+    return graphql_schema_resolve(schema_id, q)
+}

@@ -1,6 +1,6 @@
 // std/messaging — in-process message queues (no GC).
-// Backend seed for pub/sub and work queues. External brokers (NATS/Kafka/AMQP)
-// can plug in later behind the same shapes.
+// Backend seed for pub/sub and work queues.
+// Adapters: nats.mko (subjects), redis.mko (list LPUSH/RPOP).
 //
 // Builtins: mq_new / mq_free / mq_declare / mq_publish / mq_try_take /
 // mq_len / mq_purge.

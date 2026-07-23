@@ -1,0 +1,42 @@
+// std/openapi — OpenAPI 3.1 document builders (no GC).
+
+export fn route(method: string, path: string, summary: string) -> string {
+    return openapi_route(method, path, summary)
+}
+
+export fn doc(title: string, version: string, paths: string) -> string {
+    return openapi_doc(title, version, paths)
+}
+
+export fn response(code: string, description: string) -> string {
+    return openapi_response(code, description)
+}
+
+export fn operation(method: string, summary: string, tags: string) -> string {
+    return openapi_operation(method, summary, tags)
+}
+
+export fn paths_merge(a: string, b: string) -> string {
+    return openapi_paths_merge(a, b)
+}
+
+export fn info(title: string, version: string, description: string) -> string {
+    return openapi_info(title, version, description)
+}
+
+export fn doc_full(info_json: string, paths: string) -> string {
+    return openapi_doc_full(info_json, paths)
+}
+
+// Build a two-route doc seed.
+export fn doc_two(
+    title: string,
+    version: string,
+    m1: string, p1: string, s1: string,
+    m2: string, p2: string, s2: string
+) -> string {
+    let a = openapi_route(m1, p1, s1)
+    let b = openapi_route(m2, p2, s2)
+    let paths = openapi_paths_merge(a, b)
+    return openapi_doc(title, version, paths)
+}

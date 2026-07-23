@@ -1,0 +1,33 @@
+// std/messaging/redis — Redis list adapter (LPUSH/RPOP shapes, no GC).
+// In-process: redis_mq_* (no redis-server required).
+// Live Redis: redis_conn_lpush / redis_conn_rpop / redis_conn_llen / redis_lpush.
+
+export fn connect() -> int {
+    return redis_mq_new()
+}
+
+export fn close(id: int) -> int {
+    return redis_mq_free(id)
+}
+
+export fn declare(id: int, key: string, cap: int) -> int {
+    return redis_mq_declare(id, key, cap)
+}
+
+// Enqueue (LPUSH) / dequeue (RPOP) / depth (LLEN).
+export fn publish(id: int, key: string, body: string) -> int {
+    return redis_mq_lpush(id, key, body)
+}
+
+export fn try_take(id: int, key: string) -> string {
+    return redis_mq_rpop(id, key)
+}
+
+export fn len(id: int, key: string) -> int {
+    return redis_mq_llen(id, key)
+}
+
+export fn ensure_publish(id: int, key: string, body: string, cap: int) -> int {
+    let _ = redis_mq_declare(id, key, cap)
+    return redis_mq_lpush(id, key, body)
+}

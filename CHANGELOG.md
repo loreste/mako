@@ -1,6 +1,38 @@
 # Changelog
 
-## 0.4.14 — 2026-07-22 (tip; tag when packaging cut)
+## 0.4.15 — 2026-07-22 (tip; tag when packaging cut)
+
+**Theme:** NATS + Redis messaging adapters, GraphQL schema/resolvers, gRPC
+service registry, OpenAPI builders — backend API surface, no GC.
+
+### Messaging adapters
+
+- **NATS:** `nats_new` / `sub` / `pub` / `try_next` / `len` + wire frames
+  (`pub_frame`, `sub_frame`, `connect_frame`, `ping_frame`).
+  Package: `std/messaging/nats.mko`.
+- **Redis lists:** in-process `redis_mq_*` (LPUSH/RPOP/LLEN shapes) plus live
+  `redis_conn_lpush` / `rpop` / `llen` and host/port one-shots.
+  Package: `std/messaging/redis.mko`.
+
+### GraphQL schema + resolvers
+
+- `graphql_schema_new` / `add_type` / `add_field` / `set_resolver` /
+  `resolve` / `sdl` / `has_type` / `has_resolver`.
+- Package: `std/graphql/schema.mko`; HTTP helpers extended.
+
+### gRPC + OpenAPI
+
+- **gRPC service registry:** `grpc_service_new` / `add_method` / `handle` /
+  `methods` (unary framed responses). Package: `std/grpc`.
+- **OpenAPI:** `openapi_paths_merge` / `operation` / `response` / `info` /
+  `doc_full`. Package: `std/openapi`.
+
+### Tests / docs
+
+- `examples/testing/adapters_api_test.mko`
+- [docs/MESSAGING_GRAPHQL.md](docs/MESSAGING_GRAPHQL.md) rewritten for all surfaces.
+
+## 0.4.14 — 2026-07-22
 
 **Theme:** Adaptive optimization without online JIT — longer-running services
 get better via **offline** feedback, not in-process code rewrite. No GC.

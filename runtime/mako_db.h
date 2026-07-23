@@ -879,6 +879,69 @@ static inline MakoString mako_redis_conn_exists(MakoRedisConn c, MakoString key)
     return mako_redis_recv_simple((int)c.handle);
 }
 
+/* List messaging on a live connection (LPUSH / RPOP / LLEN). */
+static inline MakoString mako_redis_conn_lpush(
+    MakoRedisConn c, MakoString key, MakoString val
+) {
+    if (c.handle <= 0) return mako_str_from_cstr("");
+    if (mako_redis_send_array((int)c.handle, "LPUSH", key, val) < 0)
+        return mako_str_from_cstr("");
+    return mako_redis_recv_simple((int)c.handle);
+}
+
+static inline MakoString mako_redis_conn_rpop(MakoRedisConn c, MakoString key) {
+    if (c.handle <= 0) return mako_str_from_cstr("");
+    if (mako_redis_send_array((int)c.handle, "RPOP", key, (MakoString){0}) < 0)
+        return mako_str_from_cstr("");
+    return mako_redis_recv_simple((int)c.handle);
+}
+
+static inline MakoString mako_redis_conn_llen(MakoRedisConn c, MakoString key) {
+    if (c.handle <= 0) return mako_str_from_cstr("");
+    if (mako_redis_send_array((int)c.handle, "LLEN", key, (MakoString){0}) < 0)
+        return mako_str_from_cstr("");
+    return mako_redis_recv_simple((int)c.handle);
+}
+
+/* One-shot host/port list ops (open connection per call). */
+static inline MakoString mako_redis_lpush(
+    MakoString host, int64_t port, MakoString key, MakoString val
+) {
+    int fd = mako_redis_tcp_connect(host, port);
+    if (fd < 0) return mako_str_from_cstr("");
+    if (mako_redis_send_array(fd, "LPUSH", key, val) < 0) {
+        mako_sock_close(fd);
+        return mako_str_from_cstr("");
+    }
+    MakoString out = mako_redis_recv_simple(fd);
+    mako_sock_close(fd);
+    return out;
+}
+
+static inline MakoString mako_redis_rpop(MakoString host, int64_t port, MakoString key) {
+    int fd = mako_redis_tcp_connect(host, port);
+    if (fd < 0) return mako_str_from_cstr("");
+    if (mako_redis_send_array(fd, "RPOP", key, (MakoString){0}) < 0) {
+        mako_sock_close(fd);
+        return mako_str_from_cstr("");
+    }
+    MakoString out = mako_redis_recv_simple(fd);
+    mako_sock_close(fd);
+    return out;
+}
+
+static inline MakoString mako_redis_llen(MakoString host, int64_t port, MakoString key) {
+    int fd = mako_redis_tcp_connect(host, port);
+    if (fd < 0) return mako_str_from_cstr("");
+    if (mako_redis_send_array(fd, "LLEN", key, (MakoString){0}) < 0) {
+        mako_sock_close(fd);
+        return mako_str_from_cstr("");
+    }
+    MakoString out = mako_redis_recv_simple(fd);
+    mako_sock_close(fd);
+    return out;
+}
+
 /* SET key value → "OK" or "". */
 static inline MakoString mako_redis_set(
     MakoString host, int64_t port, MakoString key, MakoString val
