@@ -266,7 +266,7 @@ map: [docs/ROADMAP.md](docs/ROADMAP.md) · [docs/VERSIONING.md](docs/VERSIONING.
 
 - Preserve task return values when joining native Windows worker threads.
 - Support file-descriptor I/O, memory maps, and write-ahead logs on Windows.
-- Align unbuffered Windows reads and writes without requiring aligned Mako strings.
+- Supply aligned buffers for Windows direct I/O when size and offset are aligned.
 - Reject writes through read-only memory maps instead of faulting.
 - Zero-alloc `print(f"...")`, `log_*(f"...")`, `http_respond(f"...")`: f-string
   bodies consumed directly from the stack buffer (no malloc/free).
