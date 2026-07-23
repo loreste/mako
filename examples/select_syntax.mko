@@ -10,9 +10,11 @@ fn main() {
     let a = chan_new(2)
     let b = chan_new(2)
     crew t {
-        let _ = t.kick(sender(a, 11, 40))
-        let _ = t.kick(sender(b, 22, 15))
-        select timeout 500 {
+        // Keep only b ready for the first select. A large gap prevents a busy
+        // CI runner from making both buffered channels ready before selection.
+        let _ = t.kick(sender(a, 11, 500))
+        let _ = t.kick(sender(b, 22, 0))
+        select timeout 2000 {
             a => {
                 print("got a")
                 print_int(chan_select_value())
@@ -22,7 +24,7 @@ fn main() {
                 print_int(chan_select_value())
             }
         }
-        select timeout 500 {
+        select timeout 2000 {
             a => {
                 print("got a")
                 print_int(chan_select_value())
