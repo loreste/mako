@@ -1,8 +1,7 @@
-// Regression: a growing append must not free a backing array that an aliased
-// slice header still points at. Structs are passed by value, so a slice field
-// is shallow-copied (shared backing); appending through one copy used to
-// realloc-and-free the shared buffer, dangling the other copy — a double-free
-// on the next append (regression from real xid_status-style handling).
+// Regression: copying a struct with an owned slice field must deep-copy that
+// field. Growing append consumes its owned backing allocation; a shallow copy
+// would therefore dangle and double-free on the next append (regression from
+// real xid_status-style handling).
 
 struct Box {
     xs: []int
@@ -22,7 +21,7 @@ func TestSliceAliasNoDoubleFree() {
     var a = Box{ xs: make([]int, 0, 2) }
     a.xs = append(a.xs, 100)
 
-    // Copy the struct by value — b.xs shares a's backing array.
+    // Copy the struct by value — b.xs receives independent owned storage.
     var b = a
 
     // Grow both through many reallocations. The old buffers must stay valid.
