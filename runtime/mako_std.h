@@ -2,6 +2,14 @@
 #ifndef MAKO_STD_H
 #define MAKO_STD_H
 
+/* Portability: PTHREAD_MUTEX_INITIALIZER is unavailable on Windows cross-compile
+ * targets that lack a pthreads shim. Provide a zero-init fallback. */
+#if defined(_WIN32) && !defined(PTHREAD_MUTEX_INITIALIZER)
+#define MAKO_MUTEX_INIT {0}
+#else
+#define MAKO_MUTEX_INIT PTHREAD_MUTEX_INITIALIZER
+#endif
+
 #include "mako_rt.h"
 #include "mako_stdlib.h"
 #include "mako_plugin.h"
@@ -1035,7 +1043,7 @@ static inline void mako_sess_cancel_mu_ensure(void) {
             Sleep(0);
     }
 #else
-    static pthread_mutex_t boot = PTHREAD_MUTEX_INITIALIZER;
+    static pthread_mutex_t boot = MAKO_MUTEX_INIT;
     pthread_mutex_lock(&boot);
     if (!mako_sess_cancel_mu_ready) {
         pthread_mutex_init(&mako_sess_cancel_mu, NULL);
@@ -3288,7 +3296,7 @@ typedef struct {
 } MakoMqBroker;
 
 static MakoMqBroker mako_mq_table[MAKO_MQ_MAX_BROKERS];
-static pthread_mutex_t mako_mq_global = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t mako_mq_global = MAKO_MUTEX_INIT;
 
 static MakoMqQueue *mako_mq_find(MakoMqBroker *b, MakoString name) {
     if (!b || !name.data || name.len == 0) return NULL;
@@ -3470,7 +3478,7 @@ typedef struct {
 } MakoNatsBus;
 
 static MakoNatsBus mako_nats_table[MAKO_NATS_MAX];
-static pthread_mutex_t mako_nats_global = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t mako_nats_global = MAKO_MUTEX_INIT;
 
 static MakoNatsSub *mako_nats_find(MakoNatsBus *b, MakoString subject) {
     if (!b || !subject.data || subject.len == 0) return NULL;
@@ -3654,7 +3662,7 @@ typedef struct {
 } MakoRedisMq;
 
 static MakoRedisMq mako_redis_mq_table[MAKO_REDIS_MQ_MAX];
-static pthread_mutex_t mako_redis_mq_global = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t mako_redis_mq_global = MAKO_MUTEX_INIT;
 
 static MakoMqQueue *mako_redis_mq_find(MakoRedisMq *b, MakoString name) {
     if (!b || !name.data || name.len == 0) return NULL;
@@ -3833,7 +3841,7 @@ typedef struct {
 } MakoGqlSchema;
 
 static MakoGqlSchema mako_gql_schemas[MAKO_GQL_SCHEMA_MAX];
-static pthread_mutex_t mako_gql_schema_global = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t mako_gql_schema_global = MAKO_MUTEX_INIT;
 
 static inline int64_t mako_graphql_schema_new(void) {
     pthread_mutex_lock(&mako_gql_schema_global);
@@ -4306,7 +4314,7 @@ typedef struct {
 } MakoGrpcService;
 
 static MakoGrpcService mako_grpc_svcs[MAKO_GRPC_SVC_MAX];
-static pthread_mutex_t mako_grpc_svc_global = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t mako_grpc_svc_global = MAKO_MUTEX_INIT;
 
 static inline int64_t mako_grpc_service_new(MakoString name) {
     if (!name.data || name.len == 0 || name.len >= MAKO_GRPC_NAME_MAX) return 0;
