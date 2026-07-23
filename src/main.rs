@@ -4002,10 +4002,11 @@ fn build_native_object(
     }
     cmd.arg(&object_path);
     let runtime_dir = runtime_include_dir().unwrap_or_else(|_| PathBuf::new());
-    // Prefer repo runtime/ when developing; install layout otherwise.
+    // Honor the selected/installed runtime first; fall back to the checkout
+    // for source-tree development.
     let runtime_c_candidates = [
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("runtime"),
         runtime_dir.clone(),
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("runtime"),
     ];
     let mut linked_runtime = false;
     for root in &runtime_c_candidates {

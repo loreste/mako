@@ -269,12 +269,26 @@ jobs:
           test -f out/native-toolchain/llvm-project-llvmorg-21.1.8/lld/include/lld/Common/Driver.h
 
       - name: LLVM backend correctness gate
-        continue-on-error: true
         run: ./scripts/llvm-backend-test.sh
         env:
           MAKO_RUNTIME: ${{ github.workspace }}/runtime
           # Fail hard on macOS when toolchain is present (do not soft-skip).
           MAKO_LLVM_SKIP_IF_UNAVAILABLE: "0"
+
+  native-memory-safety:
+    name: Native backend memory safety (macOS)
+    runs-on: macos-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Native differential + GuardMalloc + leaks gate
+        run: ./scripts/native-compiler-test.sh
+        env:
+          MAKO_RUNTIME: ${{ github.workspace }}/runtime
 
   cross-smoke:
     name: Cross-compile artifacts (Windows + Linux musl + WASI)

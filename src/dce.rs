@@ -45,6 +45,22 @@ pub fn eliminate(program: &Program, roots: &[String]) -> Program {
         }
     }
 
+    // Variant constructors/patterns are represented as bare call-like names
+    // (`Text("hi")`, `Text(s)`) in expression walks. Map those names back to
+    // their declaring enum so DCE does not discard a locally inferred enum
+    // that never appears in a function signature.
+    for item in &program.items {
+        if let Item::Enum(def) = item {
+            if def
+                .variants
+                .iter()
+                .any(|variant| reachable_fns.contains(&variant.name))
+            {
+                reachable_types.insert(def.name.clone());
+            }
+        }
+    }
+
     // Check for unused imports (if source file is provided).
     // This runs after BFS so reachable_fns is complete.
 
@@ -858,5 +874,41 @@ fn collect_type_refs(ty: &TypeExpr, types: &mut HashSet<String>) {
                 collect_type_refs(e, types);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::lexer::Lexer;
+    use crate::parser::Parser;
+
+    #[test]
+    fn keeps_enum_referenced_only_by_variant_construction_and_match() {
+        let source = r#"
+enum Msg {
+    Text(string)
+    Quit
+}
+
+fn main() {
+    let msg = Text("hi")
+    let text = match msg {
+        Text(s) => s,
+        Quit => "q",
+    }
+    print(text)
+}
+"#;
+        let tokens = Lexer::new(source).tokenize().expect("lex");
+        let program = Parser::new(tokens).parse().expect("parse");
+        let kept = eliminate(&program, &["main".into()]);
+
+        assert!(
+            kept.items
+                .iter()
+                .any(|item| matches!(item, Item::Enum(def) if def.name == "Msg")),
+            "variant use must retain its enum declaration"
+        );
     }
 }

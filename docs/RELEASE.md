@@ -72,7 +72,7 @@ What the installer does:
 | System deps | Installs **clang** if missing (apt/dnf/pacman/apk/zypper; macOS hints Xcode CLT) |
 | Download | **One** slim platform tarball + `.sha256` (no Rust, no git clone) |
 | Verify | SHA-256 (`sha256sum` / `shasum` / `openssl`) |
-| Install | `PREFIX/bin/mako` + `share/mako/{runtime,std}` (default `~/.local`) |
+| Install | `PREFIX/bin/mako` + `share/mako/{runtime,std}` (default `~/.local`); runtime includes the native-link support sources |
 | Env | Writes `share/mako/env.sh`; appends source line to `~/.bashrc` / `~/.zshrc` when piped |
 | Check | Runs `mako doctor` |
 
@@ -116,7 +116,13 @@ mako doctor
 mako test examples/testing
 ```
 
-Runtime headers land in `$PREFIX/share/mako/runtime` (Unix) or `%USERPROFILE%\.local\share\mako\runtime` (Windows default). The installer also copies `std/` and the VS Code scaffold under `$PREFIX/share/mako/`. Discovery: `MAKO_RUNTIME` → binary-relative `../share/mako/runtime` → checkout `./runtime`.
+Runtime headers plus `native_runtime.c` and `native_bridge.c` land in
+`$PREFIX/share/mako/runtime` (Unix) or
+`%USERPROFILE%\.local\share\mako\runtime` (Windows default). The native backend
+requires those sources when the compiler was built without its embedded runtime
+archive. The installer also copies `std/` and the VS Code scaffold under
+`$PREFIX/share/mako/`. Discovery: `MAKO_RUNTIME` → binary-relative
+`../share/mako/runtime` → checkout `./runtime`.
 
 Uninstall:
 
@@ -269,6 +275,7 @@ Layout inside tarball/zip:
 
 - `bin/mako` / `bin/mako.exe`
 - `share/mako/runtime/*.h`
+- `share/mako/runtime/{native_runtime.c,native_bridge.c}`
 - `share/mako/std/`
 - `share/mako/editors/vscode/`
 - `share/mako/docs/`
@@ -289,11 +296,12 @@ Layout inside tarball/zip:
 - [ ] `mako --version` matches `Cargo.toml`
 - [ ] `mako doctor` passes on a clean installed prefix
 - [ ] `mako update --from . --prefix <tmp>` refreshes a test prefix
-- [ ] `scripts/package-release.*` artifact includes runtime, stdlib, docs, editor scaffold, install/uninstall scripts, checksums
+- [ ] `scripts/package-release.*` artifact includes runtime headers + native support sources, stdlib, docs, editor scaffold, install/uninstall scripts, checksums
 - [ ] Unpacked artifact installs with `scripts/install.* --skip-build` and installed `mako doctor` passes
 - [ ] `scripts/install-release.sh --base-url file://<dist> --artifact <name>` verifies checksum and installs
-- [ ] Release workflow install-smokes each OS artifact before uploading/publishing assets
+- [ ] Release workflow install-smokes each OS artifact before uploading/publishing assets, including an installed-prefix `--backend native` build on Unix
 - [ ] `mako test examples/testing` → all pass (no live env)
+- [ ] Required CI native memory-safety and LLVM correctness jobs pass (neither is allowed to soft-fail)
 - [ ] Spot-check: `mako init /tmp/demo && mako run /tmp/demo/main.mko`
 - [ ] Optional: one cross smoke (`--target x86_64-pc-windows-gnu` with zig)
 - [ ] CHANGELOG.md updated

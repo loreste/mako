@@ -18,6 +18,23 @@ echo "install-smoke: version"
 echo "install-smoke: doctor"
 "$mako_bin" doctor
 
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*) ;;
+  *)
+    echo "install-smoke: installed-prefix native runtime"
+    install_root="${RUNNER_TEMP:-${TMPDIR:-/tmp}}/mako-install-prefix-$$"
+    PREFIX="$install_root" "$repo_dir/scripts/install.sh" --skip-build
+    test -f "$install_root/share/mako/runtime/native_runtime.c"
+    test -f "$install_root/share/mako/runtime/native_bridge.c"
+    MAKO_RUNTIME="$install_root/share/mako/runtime" \
+      "$install_root/bin/mako" build \
+      "$repo_dir/examples/native/native_if_expr.mko" --backend native \
+      -o "$install_root/native-if-expr"
+    "$install_root/native-if-expr" >/dev/null
+    rm -rf "$install_root"
+    ;;
+esac
+
 echo "install-smoke: init + run"
 tmp="${RUNNER_TEMP:-${TMPDIR:-/tmp}}/mako-install-smoke-$$"
 rm -rf "$tmp"

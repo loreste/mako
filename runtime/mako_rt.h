@@ -722,6 +722,7 @@ static inline MakoStrArray mako_str_array_append(MakoStrArray s, MakoString v) {
         MakoString *nd = (MakoString *)malloc(ncap * sizeof(MakoString));
         if (!nd) mako_abort("append: out of memory");
         if (s.len) memcpy(nd, s.data, s.len * sizeof(MakoString));
+        if (s.cap > 0 && s.data) free(s.data);
         s.data = nd;
         s.cap = ncap;
     }
@@ -7082,16 +7083,14 @@ static inline int mako_fs_path_buf(MakoString path, char *buf, size_t cap) {
     return 0;
 }
 
-/* Prefer path.data when it is already a C string (owned Mako strings are
- * NUL-terminated after len). Still rejects embedded NULs. Scratch is only
- * used when data[len] is not 0 (foreign views). */
+/* Convert a length-delimited path to a C string. Always copy: borrowed and
+ * foreign views only guarantee that [data, data + len) is readable, so probing
+ * data[len] for a trailing NUL would be an out-of-bounds read. */
 static inline const char *mako_fs_path_cstr(MakoString path, char *scratch, size_t cap) {
-    if (!path.data || path.len == 0 || path.len >= cap) return NULL;
+    if (!path.data || !scratch || path.len == 0 || path.len >= cap) return NULL;
     for (size_t i = 0; i < path.len; i++) {
         if (path.data[i] == '\0') return NULL;
     }
-    if (path.data[path.len] == '\0') return path.data;
-    if (!scratch) return NULL;
     memcpy(scratch, path.data, path.len);
     scratch[path.len] = 0;
     return scratch;

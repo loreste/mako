@@ -1,0 +1,17 @@
+// Native/C differential coverage for if expressions, including owned strings.
+
+fn absolute(n: int) -> int {
+    return if n < 0 { -n } else { n }
+}
+
+fn main() {
+    let x = if 3 > 2 { 10 } else { 20 }
+    print_int(x)
+    print_int(absolute(-7))
+
+    let nested = if false { 1 } else if true { 2 } else { 3 }
+    print_int(nested)
+
+    let label = if x == 10 { "yes" } else { "no" }
+    print(label)
+}

@@ -93,6 +93,10 @@ pub struct Codegen {
     own_drop_scopes: Vec<Vec<(String, String)>>,
     /// Still-live own-drop keys (mangled); skip if already freed.
     own_drop_live: std::collections::HashSet<String>,
+    /// Fresh builtin results whose ownership is unambiguous enough to drop at
+    /// ordinary scope exit. Other legacy entries retain the conservative
+    /// closed-scope behavior until their alias metadata is made path-sensitive.
+    scope_drop_safe: std::collections::HashSet<String>,
     /// Mangled local → `own_drop_scopes` index where the binding was introduced.
     /// Own free entries must be recorded in that scope (not a nested if/match arm),
     /// or arm-exit free double-frees / use-after-frees outer muts (`out = b` in `if`).
@@ -237,6 +241,7 @@ impl Codegen {
             fn_env_live: std::collections::HashSet::new(),
             own_drop_scopes: Vec::new(),
             own_drop_live: std::collections::HashSet::new(),
+            scope_drop_safe: std::collections::HashSet::new(),
             own_bind_scope: std::collections::HashMap::new(),
             own_cond_flags: std::collections::HashSet::new(),
             loop_drop_bases: Vec::new(),
@@ -2310,6 +2315,10 @@ impl Codegen {
                 let tag = &other["MakoArr_".len()..];
                 Some(format!("mako_arr_{tag}_free"))
             }
+            other if other.starts_with("MakoEnum_") => {
+                let name = &other["MakoEnum_".len()..];
+                Some(format!("mako_enum_{name}_free"))
+            }
             other if other.starts_with("MakoMap") && other.ends_with('*') => {
                 // Monomorph: MakoMapS_Point* → mako_map_s_Point_free
                 // Slice/map val: MakoMapS_arr_int* → mako_map_s_arr_int_free
@@ -2424,6 +2433,57 @@ impl Codegen {
             // Match / if-expr results take ownership of arm values (pattern binds
             // move or outer owns are cloned into the result temp).
             Expr::Match { .. } | Expr::IfExpr { .. } => true,
+            _ => false,
+        }
+    }
+
+    /// Fresh values whose generated representation is unambiguously owned.
+    ///
+    /// Arbitrary calls and methods are deliberately excluded: legacy C ABI
+    /// functions may return borrowed views even when the source expression looks
+    /// fresh. Keeping this narrower than `expr_is_fresh_own` lets scope cleanup
+    /// reclaim proven allocations without freeing ambiguous aliases.
+    fn expr_is_scope_drop_safe(&self, init: &Expr, c_ty: &str) -> bool {
+        match init {
+            Expr::Array(_)
+            | Expr::Make { .. }
+            | Expr::StructLit { .. }
+            | Expr::StructLitPos { .. }
+            | Expr::String(_)
+            | Expr::StringInterp(_) => true,
+            // Aggregate-valued control-flow expressions still carry legacy
+            // aliases in some C lowering paths. Direct runtime Own types have
+            // unambiguous clone/transfer behavior and are safe to reclaim.
+            Expr::Match { .. } | Expr::IfExpr { .. } => Self::own_free_fn(c_ty).is_some(),
+            Expr::Binary {
+                op: crate::ast::BinOp::Add,
+                ..
+            } => true,
+            Expr::Call { callee, .. } => matches!(
+                callee.as_ref(),
+                Expr::Ident(name)
+                    if name == "read_file"
+                        || name == "str_repeat"
+                        || self.variant_to_enum.contains_key(name)
+            ),
+            _ => false,
+        }
+    }
+
+    /// A string expression materialized solely for `print` and owned by that
+    /// call site. Indexing and fields are borrows and must never be reclaimed
+    /// here even though some other index operations return owning containers.
+    fn expr_is_owned_print_temp(expr: &Expr) -> bool {
+        match expr {
+            Expr::StringInterp(_) | Expr::Match { .. } | Expr::IfExpr { .. } => true,
+            Expr::Binary {
+                op: crate::ast::BinOp::Add,
+                ..
+            } => true,
+            Expr::Call { callee, .. } => !matches!(
+                callee.as_ref(),
+                Expr::Ident(name) if name == "str_as_view"
+            ),
             _ => false,
         }
     }
@@ -2855,6 +2915,7 @@ impl Codegen {
             scope.retain(|(n, _)| n != mangled);
         }
         self.own_drop_live.remove(mangled);
+        self.scope_drop_safe.remove(mangled);
         self.own_cond_flags.remove(mangled);
         self.own_bind_scope.insert(mangled.to_string(), idx);
     }
@@ -3019,7 +3080,20 @@ impl Codegen {
 
     fn pop_share_scope(&mut self) {
         // Owning slices/maps first (SAFE-003/004), then fn env, then shares.
+        // A borrowed/aliased legacy entry may not be safe to free without
+        // path-sensitive metadata. Fresh allocating builtin results are known
+        // owners, so drop those while their C binding is still in scope.
+        if let Some(entries) = self.own_drop_scopes.last().cloned() {
+            for (name, free_fn) in entries.iter().rev() {
+                if self.scope_drop_safe.contains(name) && self.own_drop_live.remove(name) {
+                    self.emit_free_one(name, free_fn);
+                }
+            }
+        }
         if let Some(entries) = self.own_drop_scopes.pop() {
+            for (name, _) in &entries {
+                self.scope_drop_safe.remove(name);
+            }
             self.emit_own_drops_for_scope(entries);
         }
         // Drop MakoFn capture envs before share drops.
@@ -3125,6 +3199,7 @@ impl Codegen {
         std::collections::HashSet<String>,
         Vec<Vec<(String, String)>>,
         std::collections::HashSet<String>,
+        std::collections::HashSet<String>,
         Vec<Vec<String>>,
         std::collections::HashSet<String>,
         Vec<Vec<String>>,
@@ -3132,6 +3207,7 @@ impl Codegen {
         (
             self.own_drop_live.clone(),
             self.own_drop_scopes.clone(),
+            self.scope_drop_safe.clone(),
             self.share_live.clone(),
             self.share_scopes.clone(),
             self.fn_env_live.clone(),
@@ -3145,14 +3221,16 @@ impl Codegen {
             std::collections::HashSet<String>,
             Vec<Vec<(String, String)>>,
             std::collections::HashSet<String>,
+            std::collections::HashSet<String>,
             Vec<Vec<String>>,
             std::collections::HashSet<String>,
             Vec<Vec<String>>,
         ),
     ) {
-        let (ol, os, sl, ss, fl, fs) = snap;
+        let (ol, os, sd, sl, ss, fl, fs) = snap;
         self.own_drop_live = ol;
         self.own_drop_scopes = os;
+        self.scope_drop_safe = sd;
         self.share_live = sl;
         self.share_scopes = ss;
         self.fn_env_live = fl;
@@ -3439,10 +3517,7 @@ impl Codegen {
         let tmp = self.fresh("sarr");
         let vals: Vec<String> = elems
             .iter()
-            .map(|e| {
-                let (_, v) = self.emit_expr(e);
-                v
-            })
+            .map(|e| self.emit_str_arg(e))
             .collect();
         let lit = self.fresh("slit");
         let body = if vals.is_empty() {
@@ -3456,6 +3531,11 @@ impl Codegen {
             "MakoStrArray {tmp} = mako_str_array_of({lit}, {});",
             elems.len()
         ));
+        for (expr, val) in elems.iter().zip(&vals) {
+            if Self::expr_is_owned_print_temp(expr) {
+                self.emit_line(format_args!("mako_str_free({val});"));
+            }
+        }
         ("MakoStrArray".into(), tmp)
     }
 
@@ -4005,6 +4085,35 @@ impl Codegen {
         let _ = writeln!(self.out, "    MakoString s0;");
         let _ = writeln!(self.out, "    MakoString s1;");
         let _ = writeln!(self.out, "}} {c_name};");
+        let _ = writeln!(
+            self.out,
+            "static inline void mako_enum_{}_free({c_name} v) {{",
+            e.name
+        );
+        let mut by_tag: Vec<(usize, Vec<&str>)> = info
+            .variants
+            .iter()
+            .map(|(_, (tag, fields))| (*tag, fields.clone()))
+            .collect();
+        by_tag.sort_by_key(|(tag, _)| *tag);
+        let _ = writeln!(self.out, "    switch (v.tag) {{");
+        for (tag, fields) in &by_tag {
+            let _ = writeln!(self.out, "    case {tag}:");
+            let mut string_slot = 0usize;
+            for kind in fields {
+                if *kind == "string" {
+                    let _ = writeln!(
+                        self.out,
+                        "        mako_str_free(v.s{string_slot});"
+                    );
+                    string_slot += 1;
+                }
+            }
+            let _ = writeln!(self.out, "        break;");
+        }
+        let _ = writeln!(self.out, "    default: break;");
+        let _ = writeln!(self.out, "    }}");
+        let _ = writeln!(self.out, "}}");
         // Structural equality: same tag + payload fields (strings by content).
         let _ = writeln!(
             self.out,
@@ -4012,12 +4121,6 @@ impl Codegen {
         );
         let _ = writeln!(self.out, "    if (a.tag != b.tag) return false;");
         // Build switch by tag index; field kinds from variant metadata.
-        let mut by_tag: Vec<(usize, Vec<&str>)> = info
-            .variants
-            .iter()
-            .map(|(_, (tag, fields))| (*tag, fields.clone()))
-            .collect();
-        by_tag.sort_by_key(|(t, _)| *t);
         if by_tag.iter().any(|(_, f)| !f.is_empty()) {
             let _ = writeln!(self.out, "    switch (a.tag) {{");
             for (tag, fields) in &by_tag {
@@ -11904,6 +12007,7 @@ impl Codegen {
         self.fn_env_live.clear();
         self.own_drop_scopes.clear();
         self.own_drop_live.clear();
+        self.scope_drop_safe.clear();
         self.own_bind_scope.clear();
         self.own_cond_flags.clear();
         self.loop_drop_bases.clear();
@@ -11977,13 +12081,13 @@ impl Codegen {
                 self.transfer_own_on_return(e);
                 // Stack/view POD slices must be heap-copied before leaving the frame.
                 let val = self.ensure_slice_owned(&ty, val);
-                self.pop_share_scope();
                 self.emit_defers();
+                self.pop_share_scope();
                 self.emit_line(format_args!("return {val};"));
             }
         } else if !ret_void && !stmts.iter().any(|s| matches!(s, Stmt::Return(_))) {
-            self.pop_share_scope();
             self.emit_defers();
+            self.pop_share_scope();
             if matches!(
                 f.ret.as_ref(),
                 Some(TypeExpr::Named(n))
@@ -11997,8 +12101,8 @@ impl Codegen {
                 self.line("return 0;");
             }
         } else if !stmts.iter().any(|s| matches!(s, Stmt::Return(_))) {
-            self.pop_share_scope();
             self.emit_defers();
+            self.pop_share_scope();
         }
         self.indent = 0;
         self.out.push_str("}\n\n");
@@ -12913,6 +13017,9 @@ impl Codegen {
                             && !self.struct_own_field_frees(&ty).is_empty();
                         if !is_struct_borrow {
                             self.register_own_drop(name, &ty);
+                            if self.expr_is_scope_drop_safe(init, &ty) {
+                                self.scope_drop_safe.insert(name.to_string());
+                            }
                         }
                     }
                     // SAFE: if call/method takes an owning argument of the same type,
@@ -13332,8 +13439,6 @@ impl Codegen {
                                     self.register_own_drop(&mn, &cty);
                                     return;
                                 }
-                                self.register_own_drop(&mn, &cty);
-                                return;
                             } else if is_self_append {
                                 // s = append(s, v): append owns the realloc,
                                 // skip reassign-free — just store the new header.
@@ -13510,6 +13615,25 @@ impl Codegen {
                 } else {
                     "."
                 };
+                if let Expr::Ident(base_name) = base {
+                    let mn = mangle(base_name);
+                    if let Some(field_free) = Self::own_free_fn(&vty) {
+                        if self.own_cond_flags.contains(&mn) {
+                            self.emit_line(format_args!(
+                                "if ({mn}__own) {field_free}({b}{arrow}{field});"
+                            ));
+                            self.emit_line(format_args!("{mn}__own = 1;"));
+                        } else if self.own_drop_live.contains(&mn) {
+                            self.emit_line(format_args!("{field_free}({b}{arrow}{field});"));
+                        }
+                    }
+                    if Self::own_free_fn(&bty).is_some()
+                        || !self.struct_own_field_frees(&bty).is_empty()
+                    {
+                        self.register_own_drop(&mn, &bty);
+                        self.scope_drop_safe.insert(mn);
+                    }
+                }
                 self.emit_line(format_args!("{b}{arrow}{field} = {v};"));
             }
             Stmt::Expr(e) => {
@@ -13532,10 +13656,10 @@ impl Codegen {
                 // Snapshot tracking so sibling if-arms / later stmts still see
                 // the pre-return live set (return destroys scope stacks otherwise).
                 let snap = self.snapshot_drop_state();
+                self.emit_defers();
                 while !self.share_scopes.is_empty() {
                     self.pop_share_scope();
                 }
-                self.emit_defers();
                 self.line("return;");
                 self.restore_drop_state(snap);
             }
@@ -13567,10 +13691,10 @@ impl Codegen {
                 self.transfer_own_on_return(e);
                 // Stack-backed array lits / cap==0 views: copy to heap on escape.
                 let val = self.ensure_slice_owned(&ty, val);
+                self.emit_defers();
                 while !self.share_scopes.is_empty() {
                     self.pop_share_scope();
                 }
-                self.emit_defers();
                 self.emit_line(format_args!("return {val};"));
                 self.restore_drop_state(snap);
             }
@@ -13863,6 +13987,9 @@ impl Codegen {
                 match ty.as_str() {
                     "MakoString" => {
                         self.emit_line(format_args!("mako_print_str({v});"));
+                        if Self::expr_is_owned_print_temp(&args[0]) {
+                            self.emit_line(format_args!("mako_str_free({v});"));
+                        }
                     }
                     "int64_t" | "/*auto*/" => {
                         self.emit_line(format_args!("mako_print_int({v});"));
@@ -14742,7 +14869,7 @@ impl Codegen {
                         return ("MakoString".into(), format!("mako_str_from_cstr(\"{escaped}\")"));
                     }
                 }
-                let (_, a) = self.emit_expr(&args[0]);
+                let a = self.emit_str_arg(&args[0]);
                 let (_, n) = self.emit_expr(&args[1]);
                 let tmp = self.fresh("srp");
                 self.line(&format!("MakoString {tmp} = mako_str_repeat({a}, {n});"));
@@ -17878,21 +18005,21 @@ impl Codegen {
                 return ("void".into(), "/*void*/".into());
             }
             "read_file" => {
-                let (_, p) = self.emit_expr(&args[0]);
+                let p = self.emit_str_arg(&args[0]);
                 let tmp = self.fresh("rf");
                 self.line(&format!("MakoString {tmp} = mako_read_file({p});"));
                 return ("MakoString".into(), tmp);
             }
             "write_file" => {
-                let (_, p) = self.emit_expr(&args[0]);
-                let (_, c) = self.emit_expr(&args[1]);
+                let p = self.emit_str_arg(&args[0]);
+                let c = self.emit_str_arg(&args[1]);
                 let tmp = self.fresh("wf");
                 self.line(&format!("int64_t {tmp} = mako_write_file({p}, {c});"));
                 return ("int64_t".into(), tmp);
             }
             "append_file" => {
-                let (_, p) = self.emit_expr(&args[0]);
-                let (_, c) = self.emit_expr(&args[1]);
+                let p = self.emit_str_arg(&args[0]);
+                let c = self.emit_str_arg(&args[1]);
                 let tmp = self.fresh("af");
                 self.line(&format!("int64_t {tmp} = mako_append_file({p}, {c});"));
                 return ("int64_t".into(), tmp);
@@ -31941,7 +32068,11 @@ impl Codegen {
             }
             "append" => {
                 let (sty, s) = self.emit_expr(&args[0]);
-                let (vty, mut v) = self.emit_expr(&args[1]);
+                let (vty, mut v) = if sty == "MakoStrArray" {
+                    ("MakoString".into(), self.emit_str_arg(&args[1]))
+                } else {
+                    self.emit_expr(&args[1])
+                };
                 let tmp = self.fresh("ap");
                 if sty == "MakoByteArray" {
                     self.line(&format!(
@@ -31953,6 +32084,9 @@ impl Codegen {
                     self.line(&format!(
                         "MakoStrArray {tmp} = mako_str_array_append({s}, {v});"
                     ));
+                    if Self::expr_is_owned_print_temp(&args[1]) {
+                        self.emit_line(format_args!("mako_str_free({v});"));
+                    }
                     return ("MakoStrArray".into(), tmp);
                 }
                 if sty == "MakoFloatArray" {
@@ -32119,6 +32253,7 @@ impl Codegen {
         let mut arg_tys = Vec::new();
         let mut arg_raw = Vec::new();
         let expected_params = self.fn_param_typeexprs.get(name).cloned();
+        let expected_c_params = self.fn_params.get(name).cloned();
         for (i, a) in args.iter().enumerate() {
             let (aty, v) = if let Expr::Lambda { params, body } = a {
                 if let Some(TypeExpr::Fn(ps, ret)) =
@@ -32133,6 +32268,13 @@ impl Codegen {
                 } else {
                     self.emit_expr(a)
                 }
+            } else if matches!(a, Expr::String(_))
+                && expected_c_params
+                    .as_ref()
+                    .and_then(|params| params.get(i))
+                    .is_some_and(|ty| ty == "MakoString")
+            {
+                ("MakoString".into(), self.emit_str_arg(a))
             } else {
                 self.emit_expr(a)
             };
@@ -32411,13 +32553,25 @@ impl Codegen {
                         );
                     }
                 }
-                let (lt, lv) = self.emit_expr(left);
-                let (rt, rv) = self.emit_expr(right);
+                let (lt, lv) = if *op == BinOp::Add && matches!(left.as_ref(), Expr::String(_)) {
+                    ("MakoString".into(), self.emit_str_arg(left))
+                } else {
+                    self.emit_expr(left)
+                };
+                let (rt, rv) =
+                    if *op == BinOp::Add && matches!(right.as_ref(), Expr::String(_)) {
+                        ("MakoString".into(), self.emit_str_arg(right))
+                    } else {
+                        self.emit_expr(right)
+                    };
                 if *op == BinOp::Add && lt == "MakoString" {
                     let tmp = self.fresh("s");
                     // Use concat_own (realloc) when the left side is a fresh temp
                     // (call result, another concat, f-string — not a named variable).
-                    let left_is_fresh = Self::expr_is_fresh_own(left);
+                    // Literal operands are emitted as static views above and cannot
+                    // be passed to the reallocating concat_own path.
+                    let left_is_fresh =
+                        Self::expr_is_fresh_own(left) && !matches!(left.as_ref(), Expr::String(_));
                     let fn_name = if left_is_fresh {
                         "mako_str_concat_own"
                     } else {
@@ -32568,6 +32722,9 @@ impl Codegen {
                             match ty.as_str() {
                                 "MakoString" => {
                                     self.emit_line(format_args!("mako_print_str({v});"));
+                                    if Self::expr_is_owned_print_temp(&args[0]) {
+                                        self.emit_line(format_args!("mako_str_free({v});"));
+                                    }
                                 }
                                 "int64_t" | "/*auto*/" => {
                                     self.emit_line(format_args!("mako_print_int({v});"));
@@ -33382,7 +33539,7 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "str_repeat" => {
-                            let (_, a) = self.emit_expr(&args[0]);
+                            let a = self.emit_str_arg(&args[0]);
                             let (_, n) = self.emit_expr(&args[1]);
                             let tmp = self.fresh("srp");
                             self.line(&format!("MakoString {tmp} = mako_str_repeat({a}, {n});"));
@@ -36304,21 +36461,21 @@ impl Codegen {
                             return ("void".into(), "/*void*/".into());
                         }
                         "read_file" => {
-                            let (_, p) = self.emit_expr(&args[0]);
+                            let p = self.emit_str_arg(&args[0]);
                             let tmp = self.fresh("rf");
                             self.line(&format!("MakoString {tmp} = mako_read_file({p});"));
                             return ("MakoString".into(), tmp);
                         }
                         "write_file" => {
-                            let (_, p) = self.emit_expr(&args[0]);
-                            let (_, c) = self.emit_expr(&args[1]);
+                            let p = self.emit_str_arg(&args[0]);
+                            let c = self.emit_str_arg(&args[1]);
                             let tmp = self.fresh("wf");
                             self.line(&format!("int64_t {tmp} = mako_write_file({p}, {c});"));
                             return ("int64_t".into(), tmp);
                         }
                         "append_file" => {
-                            let (_, p) = self.emit_expr(&args[0]);
-                            let (_, c) = self.emit_expr(&args[1]);
+                            let p = self.emit_str_arg(&args[0]);
+                            let c = self.emit_str_arg(&args[1]);
                             let tmp = self.fresh("af");
                             self.line(&format!("int64_t {tmp} = mako_append_file({p}, {c});"));
                             return ("int64_t".into(), tmp);
@@ -49028,7 +49185,11 @@ impl Codegen {
                         }
                         "append" => {
                             let (sty, s) = self.emit_expr(&args[0]);
-                            let (vty, mut v) = self.emit_expr(&args[1]);
+                            let (vty, mut v) = if sty == "MakoStrArray" {
+                                ("MakoString".into(), self.emit_str_arg(&args[1]))
+                            } else {
+                                self.emit_expr(&args[1])
+                            };
                             let tmp = self.fresh("ap");
                             if sty == "MakoByteArray" {
                                 self.line(&format!(
@@ -49040,6 +49201,9 @@ impl Codegen {
                                 self.line(&format!(
                                     "MakoStrArray {tmp} = mako_str_array_append({s}, {v});"
                                 ));
+                                if Self::expr_is_owned_print_temp(&args[1]) {
+                                    self.emit_line(format_args!("mako_str_free({v});"));
+                                }
                                 return ("MakoStrArray".into(), tmp);
                             }
                             if sty == "MakoFloatArray" {
@@ -49188,6 +49352,7 @@ impl Codegen {
                             let mut arg_tys = Vec::new();
                             let mut arg_raw = Vec::new();
                             let expected_params = self.fn_param_typeexprs.get(name).cloned();
+                            let expected_c_params = self.fn_params.get(name).cloned();
                             for (i, a) in args.iter().enumerate() {
                                 let (aty, v) = if let Expr::Lambda { params, body } = a {
                                     if let Some(TypeExpr::Fn(ps, ret)) =
@@ -49202,6 +49367,13 @@ impl Codegen {
                                     } else {
                                         self.emit_expr(a)
                                     }
+                                } else if matches!(a, Expr::String(_))
+                                    && expected_c_params
+                                        .as_ref()
+                                        .and_then(|params| params.get(i))
+                                        .is_some_and(|ty| ty == "MakoString")
+                                {
+                                    ("MakoString".into(), self.emit_str_arg(a))
                                 } else {
                                     self.emit_expr(a)
                                 };
@@ -49280,7 +49452,6 @@ impl Codegen {
                             return (ret, tmp);
                         }
                     }
-                    return self.emit_named_call(name, args);
                 }
                 // Indirect call: (expr)(args…) where expr is a function pointer.
                 {
@@ -49326,8 +49497,22 @@ impl Codegen {
                 self.line(&format!("{cty} {tmp};"));
                 if let Some(base) = update {
                     let (_, bv) = self.emit_expr(base);
-                    // Functional update: copy base then override listed fields.
+                    // Functional update: copy scalar fields and clone inherited
+                    // owners. A plain C struct copy would make the new value and
+                    // base free the same string/slice allocation.
                     self.line(&format!("{tmp} = {bv};"));
+                    if let Some(ref inf) = info {
+                        for (fname, fty) in &inf.fields {
+                            if fields.iter().any(|(name, _)| name == fname) {
+                                continue;
+                            }
+                            if Self::own_free_fn(fty).is_some() {
+                                let cloned =
+                                    self.clone_own_val(fty, &format!("{tmp}.{fname}"));
+                                self.line(&format!("{tmp}.{fname} = {cloned};"));
+                            }
+                        }
+                    }
                 } else {
                     self.line(&format!("memset(&{tmp}, 0, sizeof({tmp}));"));
                     // Apply field defaults for omitted fields.
@@ -55254,6 +55439,8 @@ fn fold_const_c_loop_body(
 #[cfg(test)]
 mod ownership_tests {
     use super::*;
+    use crate::lexer::Lexer;
+    use crate::parser::Parser;
 
     #[test]
     fn only_owned_string_expressions_can_transfer_map_keys() {
@@ -55309,5 +55496,150 @@ mod ownership_tests {
         assert!(codegen.out.contains("MakoResultFloat discard_"));
         assert!(codegen.out.contains(".err);"));
         assert!(!codegen.out.contains("err_kind"));
+    }
+
+    #[test]
+    fn drops_owned_read_file_results_at_loop_scope_exit() {
+        let source = r#"
+fn main() {
+    var i = 0
+    while i < 3 {
+        let got = read_file("/tmp/mako_codegen_drop_test")
+        print_int(len(got))
+        i = i + 1
+    }
+}
+"#;
+        let tokens = Lexer::new(source).tokenize().expect("lex");
+        let program = Parser::new(tokens).parse().expect("parse");
+        let generated = Codegen::new().emit(&program);
+
+        assert!(
+            generated.contains("mako_str_free(got);"),
+            "loop-local read_file result must be dropped:\n{generated}"
+        );
+        assert!(
+            generated.contains("mako_read_file(mako_str_view("),
+            "literal path arguments must be non-owning views:\n{generated}"
+        );
+    }
+
+    #[test]
+    fn borrows_literal_argument_and_drops_str_repeat_result() {
+        let source = r#"
+fn repeat(n: int) {
+    let label = "repeat"
+    print(label)
+    let payload = str_repeat("x", n)
+    print_int(len(payload))
+}
+"#;
+        let tokens = Lexer::new(source).tokenize().expect("lex");
+        let program = Parser::new(tokens).parse().expect("parse");
+        let generated = Codegen::new().emit(&program);
+
+        assert!(
+            generated.contains("mako_str_repeat(mako_str_view("),
+            "literal str_repeat argument must not allocate:\n{generated}"
+        );
+        assert!(
+            generated.contains("mako_str_free(payload);"),
+            "str_repeat result must be dropped:\n{generated}"
+        );
+        assert!(
+            generated.contains("mako_str_free(label);"),
+            "owned literal locals must be dropped:\n{generated}"
+        );
+    }
+
+    #[test]
+    fn runs_defers_before_dropping_captured_owned_locals() {
+        let source = r#"
+fn main() {
+    let owned = "defer-me"
+    defer print(owned)
+}
+"#;
+        let tokens = Lexer::new(source).tokenize().expect("lex");
+        let program = Parser::new(tokens).parse().expect("parse");
+        let generated = Codegen::new().emit(&program);
+        let deferred_print = generated
+            .rfind("mako_print_str(owned);")
+            .expect("deferred print");
+        let drop = generated
+            .rfind("mako_str_free(owned);")
+            .expect("owned drop");
+
+        assert!(
+            deferred_print < drop,
+            "defer must observe owned locals before scope destruction:\n{generated}"
+        );
+    }
+
+    #[test]
+    fn drops_fresh_aggregate_owners_without_freeing_index_borrows() {
+        let source = r#"
+enum Msg {
+    Text(string)
+    Quit
+}
+
+struct Box {
+    label: string
+}
+
+fn make_text(s: string) -> string {
+    return s + "!"
+}
+
+fn main() {
+    let xs = ["a", "b"]
+    var ys = ["x"]
+    ys = append(ys, "y")
+    print(ys[1])
+    let msg = Text("hi")
+    let payload = match msg {
+        Text(s) => s,
+        Quit => "q",
+    }
+    let decorated = "value=" + payload
+    print(decorated)
+    print(make_text(payload))
+    var outer = Box { label: "outer" }
+    var inner = outer
+    inner.label = "inner"
+}
+"#;
+        let tokens = Lexer::new(source).tokenize().expect("lex");
+        let program = Parser::new(tokens).parse().expect("parse");
+        let generated = Codegen::new().emit(&program);
+
+        assert!(
+            generated.contains("mako_str_array_free(xs);")
+                && generated.contains("mako_str_array_free(ys);"),
+            "fresh string arrays must be dropped:\n{generated}"
+        );
+        assert!(
+            generated.contains("mako_enum_Msg_free(msg);")
+                && generated.contains("mako_str_free(payload);"),
+            "enum payloads and owned match results must be dropped:\n{generated}"
+        );
+        assert!(
+            generated.contains("mako_str_free(inner.label);")
+                && generated.contains("mako_str_free(outer.label);"),
+            "mutated struct aliases must own and drop their replacement fields:\n{generated}"
+        );
+        assert!(
+            !generated.contains("mako_str_free(sg_"),
+            "a string obtained by indexing an array is borrowed:\n{generated}"
+        );
+        assert!(
+            generated.contains("mako_str_array_append(ys, mako_str_view("),
+            "append must borrow literal arguments before cloning them:\n{generated}"
+        );
+        assert!(
+            !generated.contains("mako_str_concat_own(mako_str_view("),
+            "static string views cannot be passed to reallocating concat:\n{generated}"
+        );
     }
 }

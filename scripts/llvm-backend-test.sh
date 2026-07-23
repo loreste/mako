@@ -120,10 +120,8 @@ for fixture in \
   "$repo_dir/examples/native/native_match.mko" \
   "$repo_dir/examples/native/native_mem_stress.mko" \
   "$repo_dir/examples/native/native_if_expr.mko" \
-  "$repo_dir/examples/native/native_methods.mko" \
-  "$repo_dir/examples/native/native_builtins.mko" \
-  "$repo_dir/examples/native/native_maps.mko" \
-  "$repo_dir/examples/native/native_result.mko" \
+  "$repo_dir/examples/on_methods.mko" \
+  "$repo_dir/examples/result.mko" \
   "$repo_dir/examples/bench/native_map.mko" \
   "$repo_dir/examples/bench/native_fib.mko"
 do

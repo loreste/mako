@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Install mako binary + runtime headers under PREFIX.
+# Install mako binary + runtime support files under PREFIX.
 # Usage:
 #   ./scripts/install.sh              # PREFIX=$HOME/.local
 #   PREFIX=/usr/local ./scripts/install.sh
@@ -58,14 +58,23 @@ if [[ ! -f "$RUNTIME_SRC/mako_rt.h" ]]; then
   echo "error: missing runtime/mako_rt.h (looked under checkout and release artifact layout)" >&2
   exit 1
 fi
+for source in native_runtime.c native_bridge.c; do
+  if [[ ! -f "$RUNTIME_SRC/$source" ]]; then
+    echo "error: missing runtime/$source (required by --backend native)" >&2
+    exit 1
+  fi
+done
 
 mkdir -p "$BIN_DIR" "$RUNTIME_DST" "$STD_DST"
 install -m 755 "$BIN" "$BIN_DIR/mako"
 
-# Headers only (+ certs). Skip vendored quiche trees.
+# Runtime headers and the two native-link support sources (+ certs).
 shopt -s nullglob
 for h in "$RUNTIME_SRC"/*.h; do
   install -m 644 "$h" "$RUNTIME_DST/"
+done
+for source in native_runtime.c native_bridge.c; do
+  install -m 644 "$RUNTIME_SRC/$source" "$RUNTIME_DST/"
 done
 if [[ -d "$RUNTIME_SRC/certs" ]]; then
   mkdir -p "$RUNTIME_DST/certs"
