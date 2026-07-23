@@ -380,6 +380,12 @@ static inline MakoIntArray mako_int_array_of(const int64_t *vals, size_t n) {
     return a;
 }
 
+/* Value-copy an owning or borrowed slice into independent heap storage. */
+static inline MakoIntArray mako_int_array_clone(MakoIntArray a) {
+    if (a.len == 0) return mako_int_array_empty();
+    return mako_int_array_of(a.data, a.len);
+}
+
 /* Escape / return: identity if already heap-owned (cap>0); else copy to heap. */
 static inline MakoIntArray mako_int_array_to_owned(MakoIntArray a) {
     if (MAKO_LIKELY(a.cap > 0)) return a;
@@ -473,6 +479,11 @@ static inline MakoByteArray mako_byte_array_of_u8(const uint8_t *vals, size_t n)
     return a;
 }
 
+static inline MakoByteArray mako_byte_array_clone(MakoByteArray a) {
+    if (a.len == 0) return mako_byte_array_empty();
+    return mako_byte_array_of_u8(a.data, a.len);
+}
+
 static inline MakoByteArray mako_byte_array_to_owned(MakoByteArray a) {
     if (MAKO_LIKELY(a.cap > 0)) return a;
     if (a.len == 0) return mako_byte_array_empty();
@@ -523,6 +534,7 @@ static inline MakoByteArray mako_byte_append(MakoByteArray s, int64_t v) {
     uint8_t *nd = (uint8_t *)malloc(ncap);
     if (MAKO_UNLIKELY(!nd)) mako_abort("append: out of memory");
     if (s.len) memcpy(nd, s.data, s.len);
+    if (s.cap > 0 && s.data) free(s.data);
     s.data = nd;
     s.cap = ncap;
     s.data[s.len++] = (uint8_t)v;
@@ -801,6 +813,11 @@ static inline MakoFloatArray mako_float_array_of(const double *vals, size_t n) {
     return a;
 }
 
+static inline MakoFloatArray mako_float_array_clone(MakoFloatArray a) {
+    if (a.len == 0) return mako_float_array_empty();
+    return mako_float_array_of(a.data, a.len);
+}
+
 static inline MakoFloatArray mako_float_array_to_owned(MakoFloatArray a) {
     if (MAKO_LIKELY(a.cap > 0)) return a;
     if (a.len == 0) return mako_float_array_empty();
@@ -838,6 +855,7 @@ static inline MakoFloatArray mako_float_array_append(MakoFloatArray s, double v)
         double *nd = (double *)malloc(ncap * sizeof(double));
         if (!nd) mako_abort("append: out of memory");
         if (s.len) memcpy(nd, s.data, s.len * sizeof(double));
+        if (s.cap > 0 && s.data) free(s.data);
         s.data = nd;
         s.cap = ncap;
     }
@@ -913,6 +931,11 @@ static inline MakoBoolArray mako_bool_array_of(const bool *vals, size_t n) {
     return a;
 }
 
+static inline MakoBoolArray mako_bool_array_clone(MakoBoolArray a) {
+    if (a.len == 0) return mako_bool_array_empty();
+    return mako_bool_array_of(a.data, a.len);
+}
+
 static inline MakoBoolArray mako_bool_array_to_owned(MakoBoolArray a) {
     if (MAKO_LIKELY(a.cap > 0)) return a;
     if (a.len == 0) return mako_bool_array_empty();
@@ -950,6 +973,7 @@ static inline MakoBoolArray mako_bool_array_append(MakoBoolArray s, bool v) {
         bool *nd = (bool *)malloc(ncap * sizeof(bool));
         if (!nd) mako_abort("append: out of memory");
         if (s.len) memcpy(nd, s.data, s.len * sizeof(bool));
+        if (s.cap > 0 && s.data) free(s.data);
         s.data = nd;
         s.cap = ncap;
     }
@@ -4677,11 +4701,8 @@ static inline int64_t mako_array_cap(MakoIntArray a) {
 }
 
 /* Go-like append: may reallocate; returns new header (caller must assign).
- * Growing allocates a *fresh* backing array and copies — it never frees the old
- * one. This matches Go: after a growing append the source slice still points at
- * a valid (older) backing array, so a struct passed by value (which shallow-
- * copies the slice header, sharing the backing store) can't be left holding a
- * freed pointer. Freeing here would double-free / use-after-free such aliases. */
+ * Growing consumes owned storage (cap>0). Borrowed views have cap==0, so their
+ * backing storage is never freed; appending a view creates an independent owner. */
 static inline MakoIntArray mako_slice_append(MakoIntArray s, int64_t v) {
     if (MAKO_LIKELY(s.len < s.cap)) {
         s.data[s.len++] = v;
@@ -4694,6 +4715,7 @@ static inline MakoIntArray mako_slice_append(MakoIntArray s, int64_t v) {
     int64_t *nd = (int64_t *)malloc(ncap * sizeof(int64_t));
     if (MAKO_UNLIKELY(!nd)) mako_abort("append: out of memory");
     if (s.len) memcpy(nd, s.data, s.len * sizeof(int64_t));
+    if (s.cap > 0 && s.data) free(s.data);
     s.data = nd;
     s.cap = ncap;
     s.data[s.len++] = v;

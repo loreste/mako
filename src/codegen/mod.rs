@@ -307,12 +307,16 @@ impl Codegen {
     /// Emit a string argument: literals become zero-copy `mako_str_view`,
     /// other expressions go through full `emit_expr` (no double evaluation).
     fn emit_str_arg(&mut self, expr: &Expr) -> String {
-        if let Expr::String(s) = expr {
-            let esc = escape_c(s);
-            format!("mako_str_view(\"{esc}\", {})", s.len())
-        } else {
-            self.emit_expr(expr).1
+        let literal = match expr {
+            Expr::String(s) => Some(s.clone()),
+            Expr::Ident(name) => self.const_strs.get(name).cloned(),
+            _ => None,
+        };
+        if let Some(s) = literal {
+            let esc = escape_c(&s);
+            return format!("mako_str_view(\"{esc}\", {})", s.len());
         }
+        self.emit_expr(expr).1
     }
 
     /// True when any scalar-key map of this value monomorph is used.
@@ -2565,6 +2569,24 @@ impl Codegen {
         !matches!(expr, Expr::Index { .. } | Expr::Field { .. }) && Self::expr_is_fresh_own(expr)
     }
 
+    fn note_discarded_bag_payload_moved(&mut self, expr: &Expr) {
+        let Expr::Call { callee, args } = expr else {
+            return;
+        };
+        let Expr::Ident(constructor) = callee.as_ref() else {
+            return;
+        };
+        if !matches!(constructor.as_str(), "Some" | "Ok" | "Err") {
+            return;
+        }
+        if let Some(Expr::Ident(name)) = args.first() {
+            let mangled = mangle(name);
+            if self.own_drop_live.contains(&mangled) {
+                self.note_own_drop_moved(&mangled);
+            }
+        }
+    }
+
     fn scalar_option_type() -> TypeExpr {
         TypeExpr::Generic("Option".into(), vec![TypeExpr::Named("int".into())])
     }
@@ -2686,6 +2708,7 @@ impl Codegen {
             let tmp = self.fresh("discard");
             self.emit_line(format_args!("MakoResultFloat {tmp} = {val};"));
             self.emit_line(format_args!("if (!{tmp}.ok) mako_str_free({tmp}.err);"));
+            self.note_discarded_bag_payload_moved(expr);
             return true;
         }
         if inferred_ty.is_none() {
@@ -2705,6 +2728,7 @@ impl Codegen {
         let tmp = self.fresh("discard");
         self.emit_line(format_args!("{c_ty} {tmp} = {val};"));
         self.emit_bag_drop(&tmp, &bag_ty);
+        self.note_discarded_bag_payload_moved(expr);
         true
     }
 
@@ -3377,22 +3401,22 @@ impl Codegen {
             }
             "MakoIntArray" => {
                 self.emit_line(format_args!(
-                    "MakoIntArray {tmp} = mako_int_array_to_owned({val});"
+                    "MakoIntArray {tmp} = mako_int_array_clone({val});"
                 ));
             }
             "MakoByteArray" => {
                 self.emit_line(format_args!(
-                    "MakoByteArray {tmp} = mako_byte_array_to_owned({val});"
+                    "MakoByteArray {tmp} = mako_byte_array_clone({val});"
                 ));
             }
             "MakoFloatArray" => {
                 self.emit_line(format_args!(
-                    "MakoFloatArray {tmp} = mako_float_array_to_owned({val});"
+                    "MakoFloatArray {tmp} = mako_float_array_clone({val});"
                 ));
             }
             "MakoBoolArray" => {
                 self.emit_line(format_args!(
-                    "MakoBoolArray {tmp} = mako_bool_array_to_owned({val});"
+                    "MakoBoolArray {tmp} = mako_bool_array_clone({val});"
                 ));
             }
             "MakoStrArray" => {
@@ -3408,9 +3432,32 @@ impl Codegen {
                     "for (int64_t _i = 0; _i < {val}.len; _i++) {{ {tmp}.data[_i] = mako_str_clone({val}.data[_i]); }}"
                 ));
             }
+            enum_ty if enum_ty.starts_with("MakoEnum_") => {
+                let name = &enum_ty["MakoEnum_".len()..];
+                self.emit_line(format_args!(
+                    "{c_ty} {tmp} = mako_enum_{name}_clone({val});"
+                ));
+            }
             _ => {
-                // For other owning types, shallow copy is safe (maps are ptrs).
+                let fields = self.struct_own_field_frees(c_ty);
                 self.emit_line(format_args!("{c_ty} {tmp} = {val};"));
+                for (field, _) in fields {
+                    let field_ty = self
+                        .structs
+                        .values()
+                        .find(|s| s.c_name == c_ty)
+                        .or_else(|| self.structs.get(c_ty))
+                        .and_then(|s| {
+                            s.fields
+                                .iter()
+                                .find(|(name, _)| name == &field)
+                                .map(|(_, ty)| ty.clone())
+                        });
+                    if let Some(field_ty) = field_ty {
+                        let cloned = self.clone_own_val(&field_ty, &format!("{tmp}.{field}"));
+                        self.emit_line(format_args!("{tmp}.{field} = {cloned};"));
+                    }
+                }
             }
         }
         tmp
@@ -4113,6 +4160,30 @@ impl Codegen {
         }
         let _ = writeln!(self.out, "    default: break;");
         let _ = writeln!(self.out, "    }}");
+        let _ = writeln!(self.out, "}}");
+        let _ = writeln!(
+            self.out,
+            "static inline {c_name} mako_enum_{}_clone({c_name} v) {{",
+            e.name
+        );
+        let _ = writeln!(self.out, "    switch (v.tag) {{");
+        for (tag, fields) in &by_tag {
+            let _ = writeln!(self.out, "    case {tag}:");
+            let mut string_slot = 0usize;
+            for kind in fields {
+                if *kind == "string" {
+                    let _ = writeln!(
+                        self.out,
+                        "        v.s{string_slot} = mako_str_clone(v.s{string_slot});"
+                    );
+                    string_slot += 1;
+                }
+            }
+            let _ = writeln!(self.out, "        break;");
+        }
+        let _ = writeln!(self.out, "    default: break;");
+        let _ = writeln!(self.out, "    }}");
+        let _ = writeln!(self.out, "    return v;");
         let _ = writeln!(self.out, "}}");
         // Structural equality: same tag + payload fields (strings by content).
         let _ = writeln!(
@@ -12983,6 +13054,16 @@ impl Codegen {
                         }
                     }
                 }
+                let clone_ident_own = matches!(init, Expr::Ident(_))
+                    && *ownership != Ownership::Share
+                    && (Self::own_free_fn(&ty).is_some()
+                        || !self.struct_own_field_frees(&ty).is_empty())
+                    && self.current_arena.is_none();
+                let val = if clone_ident_own {
+                    self.clone_own_val(&ty, &val)
+                } else {
+                    val
+                };
                 self.line(&format!("{ty} {name} = {val};"));
                 if *ownership == Ownership::Share {
                     self.register_share_local(name);
@@ -13032,6 +13113,9 @@ impl Codegen {
                             }
                         }
                     }
+                } else if clone_ident_own {
+                    self.register_own_drop(name, &ty);
+                    self.scope_drop_safe.insert(name.to_string());
                 } else if let Expr::Ident(_src) = init {
                     // Non-`hold` Ident bind is an *alias* of the same Own value
                     // (typecheck allows re-use of `src`). Only the original owner
@@ -13615,9 +13699,27 @@ impl Codegen {
                 } else {
                     "."
                 };
+                let consumes_old_field = matches!(
+                    value,
+                    Expr::Call { callee, args }
+                        if matches!(callee.as_ref(), Expr::Ident(name) if name == "append")
+                            && matches!(
+                                args.first(),
+                                Some(Expr::Field {
+                                    base: source_base,
+                                    field: source_field,
+                                }) if source_field == field
+                                    && matches!(
+                                        (base, source_base.as_ref()),
+                                        (Expr::Ident(lhs), Expr::Ident(rhs)) if lhs == rhs
+                                    )
+                            )
+                );
                 if let Expr::Ident(base_name) = base {
                     let mn = mangle(base_name);
-                    if let Some(field_free) = Self::own_free_fn(&vty) {
+                    if let Some(field_free) = Self::own_free_fn(&vty)
+                        .filter(|_| !consumes_old_field)
+                    {
                         if self.own_cond_flags.contains(&mn) {
                             self.emit_line(format_args!(
                                 "if ({mn}__own) {field_free}({b}{arrow}{field});"
@@ -14473,8 +14575,8 @@ impl Codegen {
     ) -> Option<(String, String)> {
         emit_builtin_match!(name, {
             "assert_eq_str" => {
-                let (_, a) = self.emit_expr(&args[0]);
-                let (_, b) = self.emit_expr(&args[1]);
+                let a = self.emit_str_arg(&args[0]);
+                let b = self.emit_str_arg(&args[1]);
                 self.line(&format!("mako_assert_eq_str({a}, {b});"));
                 return ("void".into(), "/*void*/".into());
             }
@@ -15618,7 +15720,7 @@ impl Codegen {
             }
             "str_as_view" => {
                 // Zero-copy: same header, must not free (view of base).
-                let (_, s) = self.emit_expr(&args[0]);
+                let s = self.emit_str_arg(&args[0]);
                 return ("MakoString".into(), s);
             }
             "str_to_owned" => {
@@ -33182,8 +33284,8 @@ impl Codegen {
                             return ("void".into(), "/*void*/".into());
                         }
                         "assert_eq_str" => {
-                            let (_, a) = self.emit_expr(&args[0]);
-                            let (_, b) = self.emit_expr(&args[1]);
+                            let a = self.emit_str_arg(&args[0]);
+                            let b = self.emit_str_arg(&args[1]);
                             self.line(&format!("mako_assert_eq_str({a}, {b});"));
                             return ("void".into(), "/*void*/".into());
                         }
@@ -34167,7 +34269,7 @@ impl Codegen {
                         }
                         "str_as_view" => {
                             // Zero-copy: same header, must not free (view of base).
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg(&args[0]);
                             return ("MakoString".into(), s);
                         }
                         "str_to_owned" => {

@@ -48,7 +48,7 @@ Related: [SECURITY.md](SECURITY.md) · [MEMORY_MODEL.md](MEMORY_MODEL.md) ·
 |--|--|
 | **Contract** | Owning slices free at scope exit / reassign (when backing pointer changes). Views use `cap==0`. Nested `[][]T` free outer + scalar inners at final drop; free-on-reassign uses `*_release_replaced` so shared inners after append/grow are not double-freed. |
 | **Code** | `mako_*_array_free`, `mako_arr_arr_*_free` / `*_release_replaced`; codegen `own_drop_scopes` + reassign free; nested append uses malloc+copy (not realloc). |
-| **Evidence** | `own_drop_slice_test`, `slice_return_own_test`, `nested_arr_drop_test`, ASan reassign/break/append probes. |
+| **Evidence** | `own_drop_slice_test`, `slice_return_own_test`, `nested_arr_drop_test`, ASan reassign/break/append probes. `slice_alias_test.mko` gates owned-field value copies, consuming append, and zero leaks. |
 | **Also** | Return transfers ownership + materialize-before-free; view escape/return type errors; stack POD lits (`cap==0`) heapify on escape. |
 
 ### SAFE-004 — Compiler-generated drops for maps — **Done**
