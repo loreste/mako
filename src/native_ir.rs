@@ -17856,6 +17856,18 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::I64),
                 false,
             )),
+            "jwt_sign_es256" if args.len() == 2 => Some((
+                "mako_native_jwt_sign_es256_ptr",
+                &[Type::Str, Type::Str],
+                Some(Type::Str),
+                true,
+            )),
+            "jwt_verify_es256" if args.len() == 2 => Some((
+                "mako_native_jwt_verify_es256_ptr",
+                &[Type::Str, Type::Str],
+                Some(Type::I64),
+                false,
+            )),
             "jwt_verify_rs256" if args.len() == 2 => Some((
                 "mako_native_jwt_verify_rs256_ptr",
                 &[Type::Str, Type::Str],
@@ -21343,6 +21355,12 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::Str),
                 true,
             )),
+            "tcp_read_fast" if args.len() == 1 => Some((
+                "mako_native_tcp_read_fast_ptr",
+                &[Type::I64],
+                Some(Type::Str),
+                true,
+            )),
             "tcp_write_all" if args.len() == 2 => Some((
                 "mako_native_tcp_write_all_ptr",
                 &[Type::I64, Type::Str],
@@ -22772,6 +22790,18 @@ impl<'a> FunctionLowerer<'a> {
             )),
             "dns_lookup_all" if args.len() == 1 => Some((
                 "mako_native_dns_lookup_all_ptr",
+                &[Type::Str],
+                Some(Type::Str),
+                true,
+            )),
+            "dns_naptr_lookup" if args.len() == 1 => Some((
+                "mako_native_dns_naptr_lookup_ptr",
+                &[Type::Str],
+                Some(Type::Str),
+                true,
+            )),
+            "dns_srv_lookup" if args.len() == 1 => Some((
+                "mako_native_dns_srv_lookup_ptr",
                 &[Type::Str],
                 Some(Type::Str),
                 true,
@@ -25564,6 +25594,72 @@ impl<'a> FunctionLowerer<'a> {
             "tls_client_free" if args.len() == 1 => Some((
                 "mako_native_tls_client_free",
                 &[Type::Opaque],
+                Some(Type::I64),
+                false,
+            )),
+            "tls_pool_open" if args.len() == 3 => Some((
+                "mako_native_tls_pool_open_ptr",
+                &[Type::Str, Type::I64, Type::Str],
+                Some(Type::I64),
+                false,
+            )),
+            "tls_pool_send" if args.len() == 2 => Some((
+                "mako_native_tls_pool_send_ptr",
+                &[Type::I64, Type::Str],
+                Some(Type::I64),
+                false,
+            )),
+            "tls_pool_recv" if args.len() == 2 => Some((
+                "mako_native_tls_pool_recv_ptr",
+                &[Type::I64, Type::I64],
+                Some(Type::Str),
+                true,
+            )),
+            "tls_pool_fd" if args.len() == 1 => Some((
+                "mako_native_tls_pool_fd",
+                &[Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "tls_pool_close" if args.len() == 1 => Some((
+                "mako_native_tls_pool_close",
+                &[Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "wss_pool_open_ca" if args.len() == 5 => Some((
+                "mako_native_wss_pool_open_ca_ptr",
+                &[Type::Str, Type::I64, Type::Str, Type::Str, Type::Str],
+                Some(Type::I64),
+                false,
+            )),
+            "wss_pool_open_insecure" if args.len() == 4 => Some((
+                "mako_native_wss_pool_open_insecure_ptr",
+                &[Type::Str, Type::I64, Type::Str, Type::Str],
+                Some(Type::I64),
+                false,
+            )),
+            "wss_pool_send" if args.len() == 2 => Some((
+                "mako_native_wss_pool_send_ptr",
+                &[Type::I64, Type::Str],
+                Some(Type::I64),
+                false,
+            )),
+            "wss_pool_recv" if args.len() == 2 => Some((
+                "mako_native_wss_pool_recv_ptr",
+                &[Type::I64, Type::I64],
+                Some(Type::Str),
+                true,
+            )),
+            "wss_pool_fd" if args.len() == 1 => Some((
+                "mako_native_wss_pool_fd",
+                &[Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "wss_pool_close" if args.len() == 1 => Some((
+                "mako_native_wss_pool_close",
+                &[Type::I64],
                 Some(Type::I64),
                 false,
             )),

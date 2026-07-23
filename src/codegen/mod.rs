@@ -17601,6 +17601,12 @@ impl Codegen {
                 self.line(&format!("int64_t {tmp} = mako_nb_udp_bind({p});"));
                 return ("int64_t".into(), tmp);
             }
+            "nb_udp_bind_reuseport" => {
+                let (_, p) = self.emit_expr(&args[0]);
+                let tmp = self.fresh("nubr");
+                self.line(&format!("int64_t {tmp} = mako_nb_udp_bind_reuseport({p});"));
+                return ("int64_t".into(), tmp);
+            }
             "nb_udp_recv" => {
                 let (_, f) = self.emit_expr(&args[0]);
                 let tmp = self.fresh("nur");
@@ -17927,6 +17933,13 @@ impl Codegen {
                 self.line(&format!("MakoString {tmp} = mako_jwt_sign({p}, {s});"));
                 return ("MakoString".into(), tmp);
             }
+            "jwt_sign_es256" => {
+                let (_, p) = self.emit_expr(&args[0]);
+                let (_, k) = self.emit_expr(&args[1]);
+                let tmp = self.fresh("jse");
+                self.line(&format!("MakoString {tmp} = mako_jwt_sign_es256({p}, {k});"));
+                return ("MakoString".into(), tmp);
+            }
             "jwt_verify" => {
                 let (_, t) = self.emit_expr(&args[0]);
                 let (_, s) = self.emit_expr(&args[1]);
@@ -17940,6 +17953,15 @@ impl Codegen {
                 let tmp = self.fresh("jvr");
                 self.line(&format!(
                     "int64_t {tmp} = mako_jwt_verify_rs256({t}, {k});"
+                ));
+                return ("int64_t".into(), tmp);
+            }
+            "jwt_verify_es256" => {
+                let (_, t) = self.emit_expr(&args[0]);
+                let (_, k) = self.emit_expr(&args[1]);
+                let tmp = self.fresh("jve");
+                self.line(&format!(
+                    "int64_t {tmp} = mako_jwt_verify_es256({t}, {k});"
                 ));
                 return ("int64_t".into(), tmp);
             }
@@ -25649,6 +25671,18 @@ impl Codegen {
                 self.line(&format!("MakoString {tmp} = mako_dns_lookup_all({h});"));
                 return ("MakoString".into(), tmp);
             }
+            "dns_naptr_lookup" => {
+                let (_, h) = self.emit_expr(&args[0]);
+                let tmp = self.fresh("dnn");
+                self.line(&format!("MakoString {tmp} = mako_dns_naptr_lookup({h});"));
+                return ("MakoString".into(), tmp);
+            }
+            "dns_srv_lookup" => {
+                let (_, h) = self.emit_expr(&args[0]);
+                let tmp = self.fresh("dns");
+                self.line(&format!("MakoString {tmp} = mako_dns_srv_lookup({h});"));
+                return ("MakoString".into(), tmp);
+            }
             "dns_lookup_ipv4" => {
                 let (_, h) = self.emit_expr(&args[0]);
                 let tmp = self.fresh("dl4");
@@ -29835,6 +29869,67 @@ impl Codegen {
             "tls_client_free" => {
                 let (_, c) = self.emit_expr(&args[0]);
                 return ("int64_t".into(), format!("mako_tls_client_free({c})"));
+            }
+            "tls_pool_open" => {
+                let (_, h) = self.emit_expr(&args[0]);
+                let (_, p) = self.emit_expr(&args[1]);
+                let (_, ca) = self.emit_expr(&args[2]);
+                return ("int64_t".into(), format!("mako_tls_pool_open({h}, {p}, {ca})"));
+            }
+            "tls_pool_send" => {
+                let (_, c) = self.emit_expr(&args[0]);
+                let (_, m) = self.emit_expr(&args[1]);
+                return ("int64_t".into(), format!("mako_tls_pool_send({c}, {m})"));
+            }
+            "tls_pool_recv" => {
+                let (_, c) = self.emit_expr(&args[0]);
+                let (_, n) = self.emit_expr(&args[1]);
+                let tmp = self.fresh("tpr");
+                self.line(&format!("MakoString {tmp} = mako_tls_pool_recv({c}, {n});"));
+                return ("MakoString".into(), tmp);
+            }
+            "tls_pool_fd" => {
+                let (_, c) = self.emit_expr(&args[0]);
+                return ("int64_t".into(), format!("mako_tls_pool_fd({c})"));
+            }
+            "tls_pool_close" => {
+                let (_, c) = self.emit_expr(&args[0]);
+                return ("int64_t".into(), format!("mako_tls_pool_close({c})"));
+            }
+            "wss_pool_open_ca" => {
+                let (_, h) = self.emit_expr(&args[0]);
+                let (_, p) = self.emit_expr(&args[1]);
+                let (_, path) = self.emit_expr(&args[2]);
+                let (_, key) = self.emit_expr(&args[3]);
+                let (_, ca) = self.emit_expr(&args[4]);
+                return ("int64_t".into(), format!("mako_wss_pool_open_ca({h}, {p}, {path}, {key}, {ca})"));
+            }
+            "wss_pool_open_insecure" => {
+                let (_, h) = self.emit_expr(&args[0]);
+                let (_, p) = self.emit_expr(&args[1]);
+                let (_, path) = self.emit_expr(&args[2]);
+                let (_, key) = self.emit_expr(&args[3]);
+                return ("int64_t".into(), format!("mako_wss_pool_open_insecure({h}, {p}, {path}, {key})"));
+            }
+            "wss_pool_send" => {
+                let (_, c) = self.emit_expr(&args[0]);
+                let (_, m) = self.emit_expr(&args[1]);
+                return ("int64_t".into(), format!("mako_wss_pool_send({c}, {m})"));
+            }
+            "wss_pool_recv" => {
+                let (_, c) = self.emit_expr(&args[0]);
+                let (_, n) = self.emit_expr(&args[1]);
+                let tmp = self.fresh("wpr");
+                self.line(&format!("MakoString {tmp} = mako_wss_pool_recv({c}, {n});"));
+                return ("MakoString".into(), tmp);
+            }
+            "wss_pool_fd" => {
+                let (_, c) = self.emit_expr(&args[0]);
+                return ("int64_t".into(), format!("mako_wss_pool_fd({c})"));
+            }
+            "wss_pool_close" => {
+                let (_, c) = self.emit_expr(&args[0]);
+                return ("int64_t".into(), format!("mako_wss_pool_close({c})"));
             }
             "tls_connect" => {
                 let (_, ctx) = self.emit_expr(&args[0]);
@@ -36092,6 +36187,12 @@ impl Codegen {
                             self.line(&format!("int64_t {tmp} = mako_nb_udp_bind({p});"));
                             return ("int64_t".into(), tmp);
                         }
+                        "nb_udp_bind_reuseport" => {
+                            let (_, p) = self.emit_expr(&args[0]);
+                            let tmp = self.fresh("nubr");
+                            self.line(&format!("int64_t {tmp} = mako_nb_udp_bind_reuseport({p});"));
+                            return ("int64_t".into(), tmp);
+                        }
                         "nb_udp_recv" => {
                             let (_, f) = self.emit_expr(&args[0]);
                             let tmp = self.fresh("nur");
@@ -36423,6 +36524,13 @@ impl Codegen {
                             self.line(&format!("MakoString {tmp} = mako_jwt_sign({p}, {s});"));
                             return ("MakoString".into(), tmp);
                         }
+                        "jwt_sign_es256" => {
+                            let (_, p) = self.emit_expr(&args[0]);
+                            let (_, k) = self.emit_expr(&args[1]);
+                            let tmp = self.fresh("jse");
+                            self.line(&format!("MakoString {tmp} = mako_jwt_sign_es256({p}, {k});"));
+                            return ("MakoString".into(), tmp);
+                        }
                         "jwt_verify" => {
                             let (_, t) = self.emit_expr(&args[0]);
                             let (_, s) = self.emit_expr(&args[1]);
@@ -36435,6 +36543,13 @@ impl Codegen {
                             let (_, k) = self.emit_expr(&args[1]);
                             let tmp = self.fresh("jvr");
                             self.line(&format!("int64_t {tmp} = mako_jwt_verify_rs256({t}, {k});"));
+                            return ("int64_t".into(), tmp);
+                        }
+                        "jwt_verify_es256" => {
+                            let (_, t) = self.emit_expr(&args[0]);
+                            let (_, k) = self.emit_expr(&args[1]);
+                            let tmp = self.fresh("jve");
+                            self.line(&format!("int64_t {tmp} = mako_jwt_verify_es256({t}, {k});"));
                             return ("int64_t".into(), tmp);
                         }
                         "jwt_verify_jwks" => {
@@ -43516,6 +43631,18 @@ impl Codegen {
                             self.line(&format!("MakoString {tmp} = mako_dns_lookup_all({h});"));
                             return ("MakoString".into(), tmp);
                         }
+                        "dns_naptr_lookup" => {
+                            let (_, h) = self.emit_expr(&args[0]);
+                            let tmp = self.fresh("dnn");
+                            self.line(&format!("MakoString {tmp} = mako_dns_naptr_lookup({h});"));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "dns_srv_lookup" => {
+                            let (_, h) = self.emit_expr(&args[0]);
+                            let tmp = self.fresh("dns");
+                            self.line(&format!("MakoString {tmp} = mako_dns_srv_lookup({h});"));
+                            return ("MakoString".into(), tmp);
+                        }
                         "dns_lookup_ipv4" => {
                             let (_, h) = self.emit_expr(&args[0]);
                             let tmp = self.fresh("dl4");
@@ -47245,6 +47372,67 @@ impl Codegen {
                         "tls_client_free" => {
                             let (_, c) = self.emit_expr(&args[0]);
                             return ("int64_t".into(), format!("mako_tls_client_free({c})"));
+                        }
+                        "tls_pool_open" => {
+                            let (_, h) = self.emit_expr(&args[0]);
+                            let (_, p) = self.emit_expr(&args[1]);
+                            let (_, ca) = self.emit_expr(&args[2]);
+                            return ("int64_t".into(), format!("mako_tls_pool_open({h}, {p}, {ca})"));
+                        }
+                        "tls_pool_send" => {
+                            let (_, c) = self.emit_expr(&args[0]);
+                            let (_, m) = self.emit_expr(&args[1]);
+                            return ("int64_t".into(), format!("mako_tls_pool_send({c}, {m})"));
+                        }
+                        "tls_pool_recv" => {
+                            let (_, c) = self.emit_expr(&args[0]);
+                            let (_, n) = self.emit_expr(&args[1]);
+                            let tmp = self.fresh("tpr");
+                            self.line(&format!("MakoString {tmp} = mako_tls_pool_recv({c}, {n});"));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "tls_pool_fd" => {
+                            let (_, c) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_tls_pool_fd({c})"));
+                        }
+                        "tls_pool_close" => {
+                            let (_, c) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_tls_pool_close({c})"));
+                        }
+                        "wss_pool_open_ca" => {
+                            let (_, h) = self.emit_expr(&args[0]);
+                            let (_, p) = self.emit_expr(&args[1]);
+                            let (_, path) = self.emit_expr(&args[2]);
+                            let (_, key) = self.emit_expr(&args[3]);
+                            let (_, ca) = self.emit_expr(&args[4]);
+                            return ("int64_t".into(), format!("mako_wss_pool_open_ca({h}, {p}, {path}, {key}, {ca})"));
+                        }
+                        "wss_pool_open_insecure" => {
+                            let (_, h) = self.emit_expr(&args[0]);
+                            let (_, p) = self.emit_expr(&args[1]);
+                            let (_, path) = self.emit_expr(&args[2]);
+                            let (_, key) = self.emit_expr(&args[3]);
+                            return ("int64_t".into(), format!("mako_wss_pool_open_insecure({h}, {p}, {path}, {key})"));
+                        }
+                        "wss_pool_send" => {
+                            let (_, c) = self.emit_expr(&args[0]);
+                            let (_, m) = self.emit_expr(&args[1]);
+                            return ("int64_t".into(), format!("mako_wss_pool_send({c}, {m})"));
+                        }
+                        "wss_pool_recv" => {
+                            let (_, c) = self.emit_expr(&args[0]);
+                            let (_, n) = self.emit_expr(&args[1]);
+                            let tmp = self.fresh("wpr");
+                            self.line(&format!("MakoString {tmp} = mako_wss_pool_recv({c}, {n});"));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "wss_pool_fd" => {
+                            let (_, c) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_wss_pool_fd({c})"));
+                        }
+                        "wss_pool_close" => {
+                            let (_, c) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_wss_pool_close({c})"));
                         }
                         "tls_connect" => {
                             let (_, ctx) = self.emit_expr(&args[0]);

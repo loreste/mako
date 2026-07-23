@@ -2738,6 +2738,14 @@ int64_t mako_native_jwt_verify_jwks_ptr(MakoNativeString *a0, MakoNativeString *
     return (int64_t)mako_jwt_verify_jwks(bridge_borrow_str(a0), bridge_borrow_str(a1));
 }
 
+MakoNativeString *mako_native_jwt_sign_es256_ptr(MakoNativeString *a0, MakoNativeString *a1) {
+    return bridge_take_str(mako_jwt_sign_es256(bridge_borrow_str(a0), bridge_borrow_str(a1)));
+}
+
+int64_t mako_native_jwt_verify_es256_ptr(MakoNativeString *a0, MakoNativeString *a1) {
+    return (int64_t)mako_jwt_verify_es256(bridge_borrow_str(a0), bridge_borrow_str(a1));
+}
+
 int64_t mako_native_jwt_verify_rs256_ptr(MakoNativeString *a0, MakoNativeString *a1) {
     return (int64_t)mako_jwt_verify_rs256(bridge_borrow_str(a0), bridge_borrow_str(a1));
 }
@@ -5127,6 +5135,10 @@ MakoNativeString *mako_native_tcp_read_ptr(int64_t a0) {
     return bridge_take_str(mako_tcp_read(a0));
 }
 
+MakoNativeString *mako_native_tcp_read_fast_ptr(int64_t a0) {
+    return bridge_take_str(mako_tcp_read_fast(a0));
+}
+
 int64_t mako_native_tcp_write_all_ptr(int64_t a0, MakoNativeString *a1) {
     return (int64_t)mako_tcp_write_all(a0, bridge_borrow_str(a1));
 }
@@ -6143,6 +6155,16 @@ MakoNativeIntSlice *mako_native_avro_decode_array_long_ptr(MakoNativeString *a0)
 
 MakoNativeString *mako_native_dns_lookup_all_ptr(MakoNativeString *a0) {
     MakoNativeString *ret = bridge_take_str(mako_dns_lookup_all(bridge_borrow_str(a0)));
+    return ret;
+}
+
+MakoNativeString *mako_native_dns_naptr_lookup_ptr(MakoNativeString *a0) {
+    MakoNativeString *ret = bridge_take_str(mako_dns_naptr_lookup(bridge_borrow_str(a0)));
+    return ret;
+}
+
+MakoNativeString *mako_native_dns_srv_lookup_ptr(MakoNativeString *a0) {
+    MakoNativeString *ret = bridge_take_str(mako_dns_srv_lookup(bridge_borrow_str(a0)));
     return ret;
 }
 
@@ -8530,6 +8552,61 @@ int64_t mako_native_hot_reload_swap_count(void) {
 
 int64_t mako_native_tls_client_free(int64_t c) {
     return mako_tls_client_free((void *)(intptr_t)c);
+}
+
+int64_t mako_native_tls_pool_open_ptr(MakoNativeString *host, int64_t port, MakoNativeString *ca) {
+    return mako_tls_pool_open(bridge_borrow_str(host), port, bridge_borrow_str(ca));
+}
+
+int64_t mako_native_tls_pool_send_ptr(int64_t handle, MakoNativeString *data) {
+    return mako_tls_pool_send(handle, bridge_borrow_str(data));
+}
+
+MakoNativeString *mako_native_tls_pool_recv_ptr(int64_t handle, int64_t max) {
+    return bridge_take_str(mako_tls_pool_recv(handle, max));
+}
+
+int64_t mako_native_tls_pool_fd(int64_t handle) {
+    return mako_tls_pool_fd(handle);
+}
+
+int64_t mako_native_tls_pool_close(int64_t handle) {
+    return mako_tls_pool_close(handle);
+}
+
+int64_t mako_native_wss_pool_open_ca_ptr(
+    MakoNativeString *host, int64_t port, MakoNativeString *path,
+    MakoNativeString *key, MakoNativeString *ca
+) {
+    return mako_wss_pool_open_ca(
+        bridge_borrow_str(host), port, bridge_borrow_str(path),
+        bridge_borrow_str(key), bridge_borrow_str(ca)
+    );
+}
+
+int64_t mako_native_wss_pool_open_insecure_ptr(
+    MakoNativeString *host, int64_t port, MakoNativeString *path,
+    MakoNativeString *key
+) {
+    return mako_wss_pool_open_insecure(
+        bridge_borrow_str(host), port, bridge_borrow_str(path), bridge_borrow_str(key)
+    );
+}
+
+int64_t mako_native_wss_pool_send_ptr(int64_t handle, MakoNativeString *data) {
+    return mako_wss_pool_send(handle, bridge_borrow_str(data));
+}
+
+MakoNativeString *mako_native_wss_pool_recv_ptr(int64_t handle, int64_t max) {
+    return bridge_take_str(mako_wss_pool_recv(handle, max));
+}
+
+int64_t mako_native_wss_pool_fd(int64_t handle) {
+    return mako_wss_pool_fd(handle);
+}
+
+int64_t mako_native_wss_pool_close(int64_t handle) {
+    return mako_wss_pool_close(handle);
 }
 
 int64_t mako_native_middleware_allow_methods_ptr(int64_t req, MakoNativeString *methods) {

@@ -4006,6 +4006,13 @@ fn link_args_native(opts: &BuildOpts, _runtime_dir: &Path) -> Vec<String> {
     if !native_like {
         return args;
     }
+    // RFC 3263 NAPTR/SRV resolution uses the platform resolver API on
+    // Unix-like targets.  Darwin exposes the resolver entry points through
+    // libresolv as well, but does not pull it in implicitly when linking the
+    // generated executable.
+    if os == cc::OsKind::Macos || os == cc::OsKind::Linux || os == cc::OsKind::Other {
+        args.push("-lresolv".into());
+    }
     if let Some((inc, lib)) = find_openssl() {
         args.push(format!("-I{}", inc.display()));
         args.push(format!("-L{}", lib.display()));

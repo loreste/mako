@@ -685,7 +685,7 @@ static inline int64_t mako_ws_client_connect(
 ) {
     mako_net_init();
     /* Dual-stack Happy Eyeballs connect (mako_tcp_connect). */
-    int64_t cfd = mako_tcp_connect(host, port);
+    int64_t cfd = mako_tcp_connect_timeout(host, port, 1200);
     if (cfd < 0) return -1;
     int fd = (int)cfd;
     MakoString req = mako_ws_client_request(host, path, key);
@@ -1301,6 +1301,120 @@ static inline int64_t mako_wss_client_close(void *conn) {
 
 static inline int64_t mako_wss_available(void) {
     return mako_tls_client_available();
+}
+
+/* Persistent outbound WSS associations.  SIP over WebSocket is a reliable,
+ * long-lived transport: the proxy must keep the TLS/WebSocket object alive
+ * after sending a request so provisional/final responses and ACK/BYE traffic
+ * can use the same association.  Handles are process-local and bounded, just
+ * like the TLS pool handles in mako_tls.h. */
+#define MAKO_WSS_POOL_MAX 256
+typedef struct {
+    void *conn;
+    int used;
+} MakoWssPoolSlot;
+
+static MakoWssPoolSlot mako_wss_pool_slots[MAKO_WSS_POOL_MAX];
+static pthread_mutex_t mako_wss_pool_mu = PTHREAD_MUTEX_INITIALIZER;
+
+static inline int64_t mako_wss_pool_open_ca(
+    MakoString host, int64_t port, MakoString path,
+    MakoString key, MakoString ca_pem
+) {
+    if (!mako_wss_available() || !host.data || host.len == 0) return -1;
+    void *conn = mako_wss_client_connect_ca(host, port, path, key, ca_pem);
+    if (!conn) return -1;
+
+    pthread_mutex_lock(&mako_wss_pool_mu);
+    int slot = -1;
+    for (int i = 0; i < MAKO_WSS_POOL_MAX; i++) {
+        if (!mako_wss_pool_slots[i].used) { slot = i; break; }
+    }
+    if (slot >= 0) {
+        mako_wss_pool_slots[slot].conn = conn;
+        mako_wss_pool_slots[slot].used = 1;
+    }
+    pthread_mutex_unlock(&mako_wss_pool_mu);
+    if (slot < 0) {
+        (void)mako_wss_client_close(conn);
+        return -1;
+    }
+    return slot + 1;
+}
+
+static inline int64_t mako_wss_pool_open_insecure(
+    MakoString host, int64_t port, MakoString path, MakoString key
+) {
+    if (!mako_wss_available() || !host.data || host.len == 0) return -1;
+    void *conn = mako_wss_client_connect_insecure(host, port, path, key);
+    if (!conn) return -1;
+
+    pthread_mutex_lock(&mako_wss_pool_mu);
+    int slot = -1;
+    for (int i = 0; i < MAKO_WSS_POOL_MAX; i++) {
+        if (!mako_wss_pool_slots[i].used) { slot = i; break; }
+    }
+    if (slot >= 0) {
+        mako_wss_pool_slots[slot].conn = conn;
+        mako_wss_pool_slots[slot].used = 1;
+    }
+    pthread_mutex_unlock(&mako_wss_pool_mu);
+    if (slot < 0) {
+        (void)mako_wss_client_close(conn);
+        return -1;
+    }
+    return slot + 1;
+}
+
+static inline int64_t mako_wss_pool_send(int64_t handle, MakoString data) {
+    int slot = (int)handle - 1;
+    if (slot < 0 || slot >= MAKO_WSS_POOL_MAX || !data.data) return -1;
+    pthread_mutex_lock(&mako_wss_pool_mu);
+    MakoWssPoolSlot *s = &mako_wss_pool_slots[slot];
+    if (!s->used || !s->conn) {
+        pthread_mutex_unlock(&mako_wss_pool_mu);
+        return -1;
+    }
+    int64_t rc = mako_wss_client_send_text(s->conn, data);
+    pthread_mutex_unlock(&mako_wss_pool_mu);
+    return rc == 0 ? (int64_t)data.len : -1;
+}
+
+static inline MakoString mako_wss_pool_recv(int64_t handle, int64_t max) {
+    int slot = (int)handle - 1;
+    if (slot < 0 || slot >= MAKO_WSS_POOL_MAX) return mako_str_from_cstr("");
+    pthread_mutex_lock(&mako_wss_pool_mu);
+    MakoWssPoolSlot *s = &mako_wss_pool_slots[slot];
+    MakoString result = s->used && s->conn
+        ? mako_wss_client_recv(s->conn, max) : mako_str_from_cstr("");
+    pthread_mutex_unlock(&mako_wss_pool_mu);
+    return result;
+}
+
+static inline int64_t mako_wss_pool_fd(int64_t handle) {
+    int slot = (int)handle - 1;
+    if (slot < 0 || slot >= MAKO_WSS_POOL_MAX) return -1;
+    pthread_mutex_lock(&mako_wss_pool_mu);
+    int64_t fd = mako_wss_pool_slots[slot].used && mako_wss_pool_slots[slot].conn
+        ? mako_tls_conn_fd(mako_wss_pool_slots[slot].conn) : -1;
+    pthread_mutex_unlock(&mako_wss_pool_mu);
+    return fd;
+}
+
+static inline int64_t mako_wss_pool_close(int64_t handle) {
+    int slot = (int)handle - 1;
+    if (slot < 0 || slot >= MAKO_WSS_POOL_MAX) return -1;
+    pthread_mutex_lock(&mako_wss_pool_mu);
+    MakoWssPoolSlot old = mako_wss_pool_slots[slot];
+    memset(&mako_wss_pool_slots[slot], 0, sizeof(mako_wss_pool_slots[slot]));
+    pthread_mutex_unlock(&mako_wss_pool_mu);
+    if (!old.used) return -1;
+    if (old.conn) {
+        MakoString reason = {"proxy-close", 11};
+        (void)mako_wss_client_send_close(old.conn, 1000, reason);
+        (void)mako_wss_client_close(old.conn);
+    }
+    return 0;
 }
 
 #ifdef __cplusplus
