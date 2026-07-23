@@ -4,8 +4,9 @@
 hot paths — and the next binary is better — **without ever slowing the live
 process with online JIT**, and **without a GC**.
 
-Tip: **0.4.14** · Related: [LONG_RUNNING.md](LONG_RUNNING.md) ·
-[PERFORMANCE.md](PERFORMANCE.md) · [MEMORY_SAFETY.md](MEMORY_SAFETY.md).
+Tip: **0.4.15+** · Related: [LONG_RUNNING.md](LONG_RUNNING.md) ·
+[PERFORMANCE.md](PERFORMANCE.md) · [MEMORY_SAFETY.md](MEMORY_SAFETY.md) ·
+[SPEED_SAFE.md](SPEED_SAFE.md) (AOT speed bar coexists with this feedback loop).
 
 ---
 
@@ -144,4 +145,7 @@ PGO closing the peak gap **offline**.
 - Do not say “self-optimizing binary rewrites itself at runtime.”
 - Do not claim vs Java without a named soak + hardware (see LONG_RUNNING LR-7).
 
-Tests: `examples/testing/hot_site_test.mko`.
+Tests: `examples/testing/hot_site_test.mko` (counters + map workload coexistence).
+
+**Invariant:** AOT map/layout opts (identity int hash, pre-size, LTO) must leave
+`hot_site_*` default-off and PGO env wiring unchanged. Speed ≠ online JIT.

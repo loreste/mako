@@ -56,3 +56,43 @@ fn TestHotSiteBadId() {
     assert_eq(hot_site_count(-1), -1)
     assert_eq(hot_site_enable(0), 1)
 }
+
+// Map AOT opts (identity hash / pre-size) must not break adaptive feedback:
+// hot_site still counts; map work still frees; export still valid.
+fn TestHotSiteCoexistsWithMapWork() {
+    assert_eq(hot_site_clear(), 1)
+    assert_eq(hot_site_enable(1), 0)
+    var round = 0
+    var acc = 0
+    while round < 8 {
+        let _ = hot_site_hit(42)
+        var m = make(map[int]int, 256)
+        var i = 0
+        while i < 256 {
+            m[i] = i * 3
+            i = i + 1
+        }
+        i = 0
+        while i < 256 {
+            acc = acc + m[i]
+            i = i + 1
+        }
+        // m drops here — ownership free; counters independent of map free
+        round = round + 1
+    }
+    assert_eq(hot_site_total(), 8)
+    assert_eq(hot_site_top_id(), 42)
+    assert_eq(hot_site_count(42), 8)
+    assert(acc > 0)
+    let js = hot_sites_json()
+    assert(str_contains(js, "mako.hot_sites.v1"))
+    assert(str_contains(js, "\"id\":42"))
+    // Off again: map-heavy path must not require counters for correctness
+    assert_eq(hot_site_enable(0), 1)
+    var m2 = make(map[int]int, 64)
+    m2[0] = 1
+    assert_eq(m2[0], 1)
+    assert_eq(hot_site_hit(42), 0)
+    assert_eq(hot_site_count(42), 8)
+    assert_eq(hot_site_clear(), 1)
+}

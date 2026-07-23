@@ -5,7 +5,8 @@ workloads** the release path is **competitive with or faster than** hand-written
 C and Rust — measured, not claimed.
 
 Tip: **0.4.15+** · Related: [SPEED.md](SPEED.md) · [MEMORY_SAFETY.md](MEMORY_SAFETY.md) ·
-[PERFORMANCE.md](PERFORMANCE.md) · [LONG_RUNNING.md](LONG_RUNNING.md).
+[PERFORMANCE.md](PERFORMANCE.md) · [LONG_RUNNING.md](LONG_RUNNING.md) ·
+[ADAPTIVE_OPT.md](ADAPTIVE_OPT.md) (JIT-like feedback **without** online JIT tax).
 
 ---
 
@@ -23,6 +24,23 @@ we do **not** accept a GC to “fix” free. Speed comes from:
 2. **Cheap free** — views (`cap==0`), stack POD lits, immortal strings; free is cold  
 3. **Layout + hash** — hand-C-matched `map[int]int`, identity int hash, 50% load pre-size  
 4. **Explicit cost** — `share` / channels / arenas only when the program asks  
+5. **Adaptive feedback (optional)** — `hot_site_*` + offline PGO; see below  
+
+### Adaptive / “JIT-like” layer stays intact
+
+Map and other micro-opts must **not** replace or slow the adaptive path:
+
+| Layer | Status | Contract |
+|-------|--------|----------|
+| **A — AOT always** | Required | Full native at t=0; map identity hash is AOT-only |
+| **B — `hot_site_*`** | Opt-in | Default **off** (one load + branch); on = relaxed atomic; export `/debug/hot_sites` |
+| **C — offline PGO** | Deploy-time | `MAKO_PGO_GEN` / `MAKO_PGO_USE` · `scripts/pgo-build.sh` · `adaptive-opt-cycle.sh` |
+
+**Never** on the live production hot path: `-fprofile-generate`, mid-process
+code rewrite, or making `hot_site_hit` mandatory for correctness. Speed work
+(layout, hash, LTO) is Layer A; learning from traffic is B→C.
+
+Tests: `examples/testing/hot_site_test.mko` (incl. map + counters).
 
 ---
 
