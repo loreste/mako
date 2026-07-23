@@ -1,4 +1,4 @@
-# Install mako binary + runtime headers on Windows.
+# Install mako binary + runtime support files on Windows.
 # Usage:
 #   .\scripts\install.ps1
 #   .\scripts\install.ps1 -Prefix "$env:LOCALAPPDATA\mako" -SkipBuild
@@ -53,6 +53,11 @@ if (-not (Test-Path $VsSrc)) {
 if (-not (Test-Path (Join-Path $RuntimeSrc "mako_rt.h"))) {
     throw "missing runtime\mako_rt.h (looked under checkout and release artifact layout)"
 }
+foreach ($Source in @("native_runtime.c", "native_bridge.c")) {
+    if (-not (Test-Path (Join-Path $RuntimeSrc $Source))) {
+        throw "missing runtime\$Source (required by --backend native)"
+    }
+}
 
 New-Item -ItemType Directory -Force -Path $BinDir | Out-Null
 New-Item -ItemType Directory -Force -Path $RuntimeDst | Out-Null
@@ -60,6 +65,9 @@ New-Item -ItemType Directory -Force -Path $StdDst | Out-Null
 Copy-Item $Bin (Join-Path $BinDir "mako.exe") -Force
 Get-ChildItem (Join-Path $RuntimeSrc "*.h") | ForEach-Object {
     Copy-Item $_.FullName $RuntimeDst -Force
+}
+foreach ($Source in @("native_runtime.c", "native_bridge.c")) {
+    Copy-Item (Join-Path $RuntimeSrc $Source) $RuntimeDst -Force
 }
 $Certs = Join-Path $RuntimeSrc "certs"
 if (Test-Path $Certs) {

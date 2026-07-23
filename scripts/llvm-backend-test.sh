@@ -120,10 +120,8 @@ for fixture in \
   "$repo_dir/examples/native/native_match.mko" \
   "$repo_dir/examples/native/native_mem_stress.mko" \
   "$repo_dir/examples/native/native_if_expr.mko" \
-  "$repo_dir/examples/native/native_methods.mko" \
-  "$repo_dir/examples/native/native_builtins.mko" \
-  "$repo_dir/examples/native/native_maps.mko" \
-  "$repo_dir/examples/native/native_result.mko" \
+  "$repo_dir/examples/on_methods.mko" \
+  "$repo_dir/examples/result.mko" \
   "$repo_dir/examples/bench/native_map.mko" \
   "$repo_dir/examples/bench/native_fib.mko"
 do
@@ -167,29 +165,26 @@ grep -Eq "unsupported|not implemented|not in the scalar|generic|failed" "$tmp_di
 
 echo "[5/5] LLVM release performance and artifact parity"
 # Keep these gates opt-out configurable for slower CI hosts, but make the
-# comparison part of the authoritative LLVM smoke test.  A single warmup and
-# three alternating samples are enough to catch accidental debug/fallback
-# regressions without turning this script into a benchmark suite.
-samples="${MAKO_LLVM_GATE_SAMPLES:-3}"
+# comparison part of the authoritative LLVM smoke test. A single warmup and
+# five paired, alternating samples catch accidental debug/fallback regressions
+# without letting runner load drift penalize whichever backend runs second.
+samples="${MAKO_LLVM_GATE_SAMPLES:-5}"
 python3 - "$samples" "$repo_dir/target/debug/mako" "$scalar_fixture" "$tmp_dir" <<'PY'
 import os, statistics, subprocess, sys, time
 samples = int(sys.argv[1]); mako = sys.argv[2]; fixture = sys.argv[3]; out = sys.argv[4]
-paths = {}
-compile_stats = {}
-for backend in ("c", "llvm"):
-    path = os.path.join(out, "gate-" + backend)
-    vals = []
-    for i in range(samples):
+paths = {backend: os.path.join(out, "gate-" + backend) for backend in ("c", "llvm")}
+compile_stats = {backend: [] for backend in paths}
+for i in range(samples):
+    order = ("c", "llvm") if i % 2 == 0 else ("llvm", "c")
+    for backend in order:
         start = time.perf_counter_ns()
         env = os.environ.copy()
         if backend == "llvm":
             env.pop("SDKROOT", None); env["PATH"] = "/nonexistent"
         subprocess.run([mako, "build", fixture, "--release", "--backend", backend,
-                        "--no-incremental", "-o", path], check=True,
+                        "--no-incremental", "-o", paths[backend]], check=True,
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=env)
-        vals.append(time.perf_counter_ns() - start)
-    compile_stats[backend] = vals
-    paths[backend] = path
+        compile_stats[backend].append(time.perf_counter_ns() - start)
 def run(path):
     t = time.perf_counter_ns(); pid = os.fork()
     if pid == 0:
@@ -199,12 +194,20 @@ def run(path):
     if status != 0: raise SystemExit("LLVM gate: generated program failed")
     return time.perf_counter_ns()-t, usage.ru_maxrss
 for p in paths.values(): run(p)  # warmup
-stats = {k: [run(v) for _ in range(samples)] for k,v in paths.items()}
+stats = {backend: [] for backend in paths}
+paired_ratios = []
+for i in range(samples):
+    order = ("c", "llvm") if i % 2 == 0 else ("llvm", "c")
+    pair = {}
+    for backend in order:
+        pair[backend] = run(paths[backend])
+        stats[backend].append(pair[backend])
+    paired_ratios.append(pair["llvm"][0] / pair["c"][0])
 for k, vals in stats.items():
     print("LLVM gate", k, "runtime-ms=%.3f rss=%d" %
           (statistics.median(x[0] for x in vals)/1e6,
            statistics.median(x[1] for x in vals)))
-ratio = statistics.median(x[0] for x in stats["llvm"]) / statistics.median(x[0] for x in stats["c"])
+ratio = statistics.median(paired_ratios)
 rss_ratio = statistics.median(x[1] for x in stats["llvm"]) / statistics.median(x[1] for x in stats["c"])
 size_ratio = os.path.getsize(paths["llvm"]) / os.path.getsize(paths["c"])
 compile_ratio = statistics.median(compile_stats["llvm"]) / statistics.median(compile_stats["c"])

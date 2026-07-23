@@ -25,9 +25,10 @@ if [[ ! -x "$BIN" ]]; then
 fi
 install -m 755 "$BIN" "$STAGE/usr/bin/mako"
 cp -R runtime "$STAGE/usr/share/mako/" 2>/dev/null || true
-# headers only
+# Runtime headers and native-link support sources.
 mkdir -p "$STAGE/usr/share/mako/runtime"
 install -m 644 runtime/*.h "$STAGE/usr/share/mako/runtime/"
+install -m 644 runtime/native_runtime.c runtime/native_bridge.c "$STAGE/usr/share/mako/runtime/"
 if [[ -d runtime/certs ]]; then cp -R runtime/certs "$STAGE/usr/share/mako/runtime/"; fi
 if [[ -d std ]]; then cp -R std "$STAGE/usr/share/mako/"; fi
 

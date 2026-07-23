@@ -75,6 +75,27 @@ run_backend() {
     echo "file-io-regression: native_io output want 2048000 got $got (backend=$backend)" >&2
     exit 1
   fi
+  if [[ "$(uname -s)" == "Darwin" ]]; then
+    if [[ -r /usr/lib/libgmalloc.dylib ]]; then
+      DYLD_INSERT_LIBRARIES=/usr/lib/libgmalloc.dylib \
+        MallocScribble=1 MallocPreScribble=1 "$out/native_io-$backend" >/dev/null
+    fi
+    local leaks_log="$out/native_io-$backend.leaks"
+    local leaks_status
+    set +e
+    leaks --atExit -- "$out/native_io-$backend" >"$leaks_log" 2>&1
+    leaks_status=$?
+    set -e
+    if grep -Eq "([1-9][0-9]* leaks? for|[1-9][0-9]* total leaked bytes)" "$leaks_log"; then
+      echo "file-io-regression: leaks in native_io (backend=$backend)" >&2
+      grep -E "leaks? for|leaked bytes" "$leaks_log" >&2 || true
+      exit 1
+    fi
+    if [[ $leaks_status -ne 0 ]] && ! grep -q "Couldn't get task port" "$leaks_log"; then
+      tail -20 "$leaks_log" >&2
+      exit 1
+    fi
+  fi
 }
 
 run_backend c "${fixtures_full[@]}"

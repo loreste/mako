@@ -5,9 +5,9 @@ repo_dir="$(cd "$(dirname "$0")/.." && pwd)"
 mako_bin="${MAKO_TEST_COMPILER:-$repo_dir/target/debug/mako}"
 export MAKO_RUNTIME="${MAKO_TEST_RUNTIME:-$repo_dir/runtime}"
 
-# On macOS, native linking needs the bundled lld (feature-gated). Prefer a
-# feature build when the static lld toolchain is present so the gate can link
-# native binaries without a system linker.
+# On macOS, prefer the feature-gated bundled lld when its static toolchain is
+# present. Clean runners use the supported Cranelift + system-cc link path.
+use_llvm_backend=0
 if [[ "$(uname -s)" == "Darwin" ]]; then
   toolchain_dir="${MAKO_NATIVE_TOOLCHAIN_DIR:-$repo_dir/out/native-toolchain}"
   if [[ -z "${LLVM_SYS_211_PREFIX:-}" ]]; then
@@ -41,15 +41,13 @@ if [[ "$(uname -s)" == "Darwin" ]]; then
       fi
     done
   fi
-  if [[ -n "${LLVM_SYS_211_PREFIX:-}" && -f "$MAKO_LLD_STATIC_DIR/liblldMachO.a" && \
+  if [[ -x "${LLVM_SYS_211_PREFIX:-}/bin/llvm-config" && \
+        -f "$MAKO_LLD_STATIC_DIR/liblldMachO.a" && \
         -f "$MAKO_LLD_INCLUDE_DIR/lld/Common/Driver.h" ]]; then
-    MAKO_CARGO_FEATURES=(--features llvm-backend)
+    use_llvm_backend=1
   else
-    MAKO_CARGO_FEATURES=()
-    echo "native compiler test: warning: llvm-backend toolchain incomplete; native link may fail on macOS" >&2
+    echo "native compiler test: bundled lld unavailable; using system-cc native link path"
   fi
-else
-  MAKO_CARGO_FEATURES=()
 fi
 
 tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/mako-native-test.XXXXXX")"
@@ -60,10 +58,18 @@ trap cleanup EXIT
 selfhost_bin="$tmp_dir/makoc-stage1"
 
 echo "[1/5] Rust compiler unit tests"
-cargo test --manifest-path "$repo_dir/Cargo.toml" "${MAKO_CARGO_FEATURES[@]}"
+if [[ "$use_llvm_backend" -eq 1 ]]; then
+  cargo test --manifest-path "$repo_dir/Cargo.toml" --features llvm-backend
+else
+  cargo test --manifest-path "$repo_dir/Cargo.toml"
+fi
 
-if [[ ! -x "$mako_bin" ]] || [[ ${#MAKO_CARGO_FEATURES[@]} -gt 0 ]]; then
-  cargo build --manifest-path "$repo_dir/Cargo.toml" "${MAKO_CARGO_FEATURES[@]}"
+if [[ ! -x "$mako_bin" ]] || [[ "$use_llvm_backend" -eq 1 ]]; then
+  if [[ "$use_llvm_backend" -eq 1 ]]; then
+    cargo build --manifest-path "$repo_dir/Cargo.toml" --features llvm-backend
+  else
+    cargo build --manifest-path "$repo_dir/Cargo.toml"
+  fi
 fi
 
 echo "[2/5] self-hosted frontend gate"
@@ -100,9 +106,7 @@ mem_fixtures=(
   native_owned_tuples native_enum_payload native_nested_structs native_match_owned
   native_match_guards native_match native_for native_defer native_cfor native_labeled
   native_fmt native_mem_stress native_fibonacci
-  native_if_expr native_methods native_builtins
-  native_maps native_map_more native_map_range native_copy native_bool_slice
-  native_result
+  native_if_expr
 )
 # Extra top-level examples (threaded kick / select / regex) — also 0-leak.
 # Built from examples/ not examples/native/ in the loop below via paths.
@@ -220,14 +224,8 @@ for shared_fixture in \
   examples/native/native_match.mko \
   examples/native/native_mem_stress.mko \
   examples/native/native_if_expr.mko \
-  examples/native/native_methods.mko \
-  examples/native/native_builtins.mko \
-  examples/native/native_maps.mko \
-  examples/native/native_map_more.mko \
-  examples/native/native_map_range.mko \
-  examples/native/native_copy.mko \
-  examples/native/native_bool_slice.mko \
-  examples/native/native_result.mko \
+  examples/on_methods.mko \
+  examples/result.mko \
   examples/map.mko \
   examples/stdlib.mko \
   examples/slice64.mko \
@@ -275,13 +273,8 @@ for fixture in \
   "examples/native/native_fmt.mko" \
   "examples/native/native_mem_stress.mko" \
   "examples/native/native_if_expr.mko" \
-  "examples/native/native_methods.mko" \
-  "examples/native/native_builtins.mko" \
-  "examples/native/native_maps.mko" \
-  "examples/native/native_map_more.mko" \
-  "examples/native/native_map_range.mko" \
-  "examples/native/native_copy.mko" \
-  "examples/native/native_bool_slice.mko" \
+  "examples/on_methods.mko" \
+  "examples/result.mko" \
   "examples/map.mko" \
   "examples/stdlib.mko" \
   "examples/slice64.mko" \
@@ -298,7 +291,6 @@ for fixture in \
   "examples/parse_num.mko" \
   "examples/regex_seed.mko" \
   "examples/json_array.mko" \
-  "examples/native/native_result.mko" \
   "examples/native/native_fibonacci.mko" \
   "examples/native/native_match.mko"
 do

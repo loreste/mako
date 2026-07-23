@@ -97,8 +97,12 @@ map get/set inlining, I/O buffers, and induction-proven bounds-check elision.
   slice ~**1.12×**; string_slice ~**1.12–1.18×** Rust (immortal literal share +
   dead_strip); compile latency ~**0.22×** C backend; **binary size ~1.01×** slim
   hand-C after `-dead_strip` / `--gc-sections` (was ~36× full bridge archive).
-- **Packaging:** host slim tarball + install smoke; multi-OS via tag workflow;
-  Homebrew formula + winget manifests filled for `v0.4.5` (external PRs remain).
+- **Packaging:** host slim tarball ships `native_runtime.c` + `native_bridge.c`;
+  install and release CI compile a native fixture using the installed runtime;
+  multi-OS via tag workflow; Homebrew formula + winget manifests filled for
+  `v0.4.5` (external PRs remain).
+- **CI:** the macOS native differential/GuardMalloc/`leaks` gate and LLVM
+  correctness gate are required checks; failures are not soft-failed.
 - **Remaining after residual pack:** map/I/O depth gates, cross/wasm/static modes,
   further string-slice SSA (register-level headers) toward ≤1.00×.
 
@@ -345,10 +349,10 @@ Unit test: `return_none_moves_without_clone_or_leak`. Intentional OOB fixture
 - [ ] `bool`/`float` enum payloads; multi-owned-payload variants.
 - [x] Maps — `map[int]int`, `map[string]int`, `map[string]string`,
       `map[int]float`, `map[float]int` (make/index/set/has/delete/len,
-      clone/drop). Fixtures `native_maps.mko`, `native_map_more.mko`,
-      `examples/map.mko` (full differential + GuardMalloc + 0-leak).
+      clone/drop). Fixture `examples/map.mko` (full differential +
+      GuardMalloc + 0-leak).
 - [x] Map range-for (`for k, v in range m`) via slot walk for all five kinds.
-      Fixture `native_map_range.mko` (+ range arms in `native_map_more.mko`).
+      Fixture `examples/map.mko`.
       Remaining: maps with struct values; other key/value type pairs.
 - [x] `maps_keys(map[int]int)` → owned `[]int` (Cranelift pointer ABI;
       LLVM loads value-ABI header).
@@ -356,17 +360,18 @@ Unit test: `return_none_moves_without_clone_or_leak`. Intentional OOB fixture
 - [x] `[]byte` slice + `bytes()`/`string([]byte)` bridge. Fixture
       `native_bytes.mko`.
 - [x] `[]bool` slice (pointer ABI via byte-backed storage). Fixture
-      `native_bool_slice.mko`.
+      `native_primitive_slices.mko`.
 - [x] `[]Struct` (pointer-array of heap structs). Fixture `examples/struct_slice.mko`.
 - [x] Go-like `copy(dst, src)` for `[]int`/`[]float`/`[]byte`/`[]bool` +
-      `int_to_string` alias of `format_int`. Fixtures `native_copy.mko`,
-      unlocked `examples/slice64.mko` and `examples/stdlib.mko`.
+      `int_to_string` alias of `format_int`. Fixtures `examples/slice64.mko`
+      and `examples/stdlib.mko`.
 - [x] Methods (`on Type { fn m(self) }` / `p.m()`) on native aggregates.
-      Fixture `native_methods.mko`.
+      Fixture `examples/on_methods.mko`.
 - [x] Owned `match` results (`match m { Text(s) => s }`). Fixture
       `native_match_owned.mko`.
 - [x] Generics seed — `Result[int,string]` + `Option[int]` monomorphs (Ok/Err/
-      Some/None/`error`). Fixture `native_result.mko`.
+      Some/None/`error`). Fixtures `examples/result.mko` and
+      `examples/types_ok.mko`.
 - [x] `?` operator for same-family Result/Option early-return. Fixture
       `native_try.mko`. Remaining: cross-family `?`, arbitrary monomorphs,
       generic user types.
@@ -391,7 +396,8 @@ Unit test: `return_none_moves_without_clone_or_leak`. Intentional OOB fixture
 
 ### Runtime interop
 - [x] Seed: `format_int`, f-string interp, `len(string)`, `exit`/`sleep_ms`/
-      `argc`/`parse_int` helpers. Fixtures `native_fmt.mko`, `native_builtins.mko`.
+      `argc`/`parse_int` helpers. Fixtures `native_fmt.mko` and
+      `examples/stdlib.mko`.
 - [x] `path_join`, `now_ms`, `str_len` (examples/`path_join.mko`).
 - [x] `ShareInt` surface (`share_int`/`share_clone`/`share_get`/`share_set`/
       `share_drop`).
@@ -545,7 +551,7 @@ gates that certify them.
   - [ ] `switch`/`case`; deeply nested payload patterns.
   - [x] Expressions: f-strings (string/int/bool), **`Convert`** (int↔float↔bool),
         **methods** (`on Type` / `p.method()` → `Type_method`). Fixture
-        `native_methods.mko`.
+        `examples/on_methods.mko`.
   - [ ] Closures/lambdas + first-class fn values, compound/parallel assign.
   - [x] Types seed: **maps** II/SI/SS/IF/FI + range-for + `maps_keys(II)`, **generics**
         `Result[int,string]`/`Option[int]`. Remaining: more map kinds, `?`,
@@ -560,7 +566,7 @@ gates that certify them.
   collections/encoding, then networking/TLS/HTTP/database/crypto.
   - [x] Seed: `format_int`, f-string interp, `len(string)`, `exit`, `argc`,
         `sleep_ms`, `parse_int` runtime helpers (`native_fmt.mko`,
-        `native_builtins.mko`).
+        `examples/stdlib.mko`).
   - [ ] Full runtime/stdlib surface (net/tls/http/db/… still `unknown call`).
   - **Exit:** native compiles the majority of real programs; leba builds & runs
     through native.
