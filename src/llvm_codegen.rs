@@ -534,6 +534,7 @@ fn emit_instruction<'ctx>(
                 "mako_native_write_file_ptr" => "mako_native_write_file",
                 "mako_native_base64_encode_ptr" => "mako_native_base64_encode",
                 "mako_native_base64_decode_ptr" => "mako_native_base64_decode",
+                "mako_native_str_repeat_ptr" => "mako_native_str_repeat",
                 "mako_native_str_contains_ptr" => "mako_native_str_contains",
                 "mako_native_mkdir_ptr" => "mako_native_mkdir",
                 "mako_native_file_exists_ptr" => "mako_native_file_exists",

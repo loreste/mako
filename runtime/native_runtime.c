@@ -1,4 +1,5 @@
 #include <errno.h>
+#include <fcntl.h>
 #include <limits.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -8,7 +9,9 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <time.h>
-#if !defined(_WIN32)
+#if defined(_WIN32)
+#include <io.h>
+#else
 #include <unistd.h>
 #endif
 
@@ -2981,53 +2984,120 @@ int64_t mako_native_env_set_ptr(const MakoNativeString *key, const MakoNativeStr
 #endif
 }
 
+/* Resolve native path to a C string without copying when already terminated. */
+static const char *mako_native_path_cstr(const MakoNativeString *path, char *scratch,
+                                         size_t cap) {
+    if (!path || !path->data) return NULL;
+    size_t plen = mako_str_raw_len(path->len);
+    if (plen == 0 || plen >= cap) return NULL;
+    for (size_t i = 0; i < plen; i++) {
+        if (path->data[i] == 0) return NULL;
+    }
+    if (path->data[plen] == 0) return path->data;
+    memcpy(scratch, path->data, plen);
+    scratch[plen] = 0;
+    return scratch;
+}
+
+/* Whole-file I/O: open + fstat/read or write (parity with mako_read/write_file). */
 MakoNativeString *mako_native_read_file_ptr(const MakoNativeString *path) {
-    if (!path || !path->data) return mako_native_string_literal_ptr("", 0);
-    FILE *f = fopen(path->data, "rb");
-    if (!f) return mako_native_string_literal_ptr("", 0);
-    if (fseek(f, 0, SEEK_END) != 0) {
-        fclose(f);
+    char scratch[4096];
+    const char *p = mako_native_path_cstr(path, scratch, sizeof(scratch));
+    if (!p) return mako_native_string_literal_ptr("", 0);
+#if defined(_WIN32)
+    int fd = _open(p, _O_RDONLY | _O_BINARY);
+#else
+    int fd = open(p, O_RDONLY);
+#endif
+    if (fd < 0) return mako_native_string_literal_ptr("", 0);
+    struct stat st;
+    if (fstat(fd, &st) != 0 || st.st_size < 0) {
+#if defined(_WIN32)
+        _close(fd);
+#else
+        close(fd);
+#endif
         return mako_native_string_literal_ptr("", 0);
     }
-    long sz = ftell(f);
-    if (sz < 0) {
-        fclose(f);
-        return mako_native_string_literal_ptr("", 0);
-    }
-    rewind(f);
-    char *buf = malloc((size_t)sz + 1);
+    size_t sz = (size_t)st.st_size;
+    char *buf = malloc(sz + 1);
     if (!buf) {
-        fclose(f);
+#if defined(_WIN32)
+        _close(fd);
+#else
+        close(fd);
+#endif
         abort();
     }
-    size_t n = fread(buf, 1, (size_t)sz, f);
-    fclose(f);
-    buf[n] = '\0';
+    size_t got = 0;
+    while (got < sz) {
+#if defined(_WIN32)
+        int n = _read(fd, buf + got, (unsigned)(sz - got > 0x7fffffff ? 0x7fffffff : sz - got));
+#else
+        ssize_t n = read(fd, buf + got, sz - got);
+#endif
+        if (n < 0) {
+#if defined(_WIN32)
+            _close(fd);
+#else
+            close(fd);
+#endif
+            free(buf);
+            return mako_native_string_literal_ptr("", 0);
+        }
+        if (n == 0) break;
+        got += (size_t)n;
+    }
+#if defined(_WIN32)
+    _close(fd);
+#else
+    close(fd);
+#endif
+    buf[got] = '\0';
     MakoNativeString *out = malloc(sizeof(*out));
     if (!out) abort();
     out->data = buf;
-    out->len = n;
+    out->len = got;
     return out;
 }
 
 int64_t mako_native_write_file_ptr(const MakoNativeString *path,
                                    const MakoNativeString *contents) {
-    if (!path || !path->data) return -1;
-    /* Reject embedded NUL — match mako_write_file / mako_fs_path_buf. */
-    size_t plen = mako_str_raw_len(path->len);
-    for (size_t i = 0; i < plen; i++) {
-        if (path->data[i] == 0) return -1;
-    }
-    char pbuf[4096];
-    if (plen >= sizeof(pbuf)) return -1;
-    memcpy(pbuf, path->data, plen);
-    pbuf[plen] = 0;
-    FILE *f = fopen(pbuf, "wb");
-    if (!f) return -1;
+    char scratch[4096];
+    const char *p = mako_native_path_cstr(path, scratch, sizeof(scratch));
+    if (!p) return -1;
+#if defined(_WIN32)
+    int fd = _open(p, _O_WRONLY | _O_CREAT | _O_TRUNC | _O_BINARY, 0666);
+#else
+    int fd = open(p, O_WRONLY | O_CREAT | O_TRUNC, 0666);
+#endif
+    if (fd < 0) return -1;
     size_t n = contents && contents->data ? mako_str_raw_len(contents->len) : 0;
-    size_t w = n ? fwrite(contents->data, 1, n, f) : 0;
-    fclose(f);
-    return (w == n) ? 0 : -1;
+    size_t put = 0;
+    const char *src = contents && contents->data ? contents->data : "";
+    while (put < n) {
+#if defined(_WIN32)
+        int w = _write(fd, src + put, (unsigned)(n - put > 0x7fffffff ? 0x7fffffff : n - put));
+#else
+        ssize_t w = write(fd, src + put, n - put);
+#endif
+        if (w < 0) {
+#if defined(_WIN32)
+            _close(fd);
+#else
+            close(fd);
+#endif
+            return -1;
+        }
+        if (w == 0) break;
+        put += (size_t)w;
+    }
+#if defined(_WIN32)
+    if (_close(fd) != 0) return -1;
+#else
+    if (close(fd) != 0) return -1;
+#endif
+    return (put == n) ? 0 : -1;
 }
 
 static const char MAKO_NATIVE_B64[] =
