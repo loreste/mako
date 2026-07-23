@@ -51136,8 +51136,10 @@ impl Codegen {
                             ("void".into(), "/*void*/".into())
                         }
                     }
-                    // Language queue[T] methods (mq_* under the hood, default name "_")
-                    "publish" | "push" => {
+                    // Language queue[T] methods (mq_* under the hood, default name "_").
+                    // Gate on int64_t handle so stack/list .push / .free etc. fall through
+                    // to Type_method dispatch (e.g. collections__IntStack_push).
+                    "publish" | "push" if rty == "int64_t" => {
                         let (_, v) = self.emit_expr(&args[0]);
                         let tmp = self.fresh("qpub");
                         self.line(&format!(
@@ -51145,21 +51147,21 @@ impl Codegen {
                         ));
                         ("int64_t".into(), tmp)
                     }
-                    "try_take" | "take" => {
+                    "try_take" | "take" if rty == "int64_t" => {
                         let tmp = self.fresh("qtk");
                         self.line(&format!(
                             "MakoString {tmp} = mako_mq_try_take({rv}, mako_str_from_cstr(\"_\"));"
                         ));
                         ("MakoString".into(), tmp)
                     }
-                    "purge" => {
+                    "purge" if rty == "int64_t" => {
                         let tmp = self.fresh("qpg");
                         self.line(&format!(
                             "int64_t {tmp} = mako_mq_purge({rv}, mako_str_from_cstr(\"_\"));"
                         ));
                         ("int64_t".into(), tmp)
                     }
-                    "free" => {
+                    "free" if rty == "int64_t" => {
                         let tmp = self.fresh("qfr");
                         self.line(&format!("int64_t {tmp} = mako_mq_free({rv});"));
                         ("int64_t".into(), tmp)
