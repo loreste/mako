@@ -1080,6 +1080,10 @@ int64_t mako_native_str_has_prefix_ptr(MakoNativeString *s, MakoNativeString *pr
     return mako_str_has_prefix(bridge_borrow_str(s), bridge_borrow_str(pref));
 }
 
+int64_t mako_native_str_has_prefix(MakoNativeString s, MakoNativeString pref) {
+    return mako_native_str_has_prefix_ptr(&s, &pref);
+}
+
 void mako_native_metric_add(int64_t id, int64_t delta) {
     mako_metric_add(id, delta);
 }
@@ -1220,6 +1224,10 @@ int64_t mako_native_uuid_check_ptr(MakoNativeString *s) {
 
 int64_t mako_native_str_has_suffix_ptr(MakoNativeString *s, MakoNativeString *suf) {
     return mako_str_has_suffix(bridge_borrow_str(s), bridge_borrow_str(suf));
+}
+
+int64_t mako_native_str_has_suffix(MakoNativeString s, MakoNativeString suf) {
+    return mako_native_str_has_suffix_ptr(&s, &suf);
 }
 
 MakoNativeString *mako_native_http_body_ptr(int64_t conn) {
@@ -2068,6 +2076,10 @@ void mako_native_assert_eq_str_ptr(MakoNativeString *a, MakoNativeString *b) {
     }
 }
 
+void mako_native_assert_eq_str(MakoNativeString a, MakoNativeString b) {
+    mako_native_assert_eq_str_ptr(&a, &b);
+}
+
 // ---- High-frequency stdlib helpers used by examples/testing -----------------
 
 MakoNativeString *mako_native_env_get_or_ptr(MakoNativeString *name, MakoNativeString *def) {
@@ -2136,6 +2148,11 @@ int64_t mako_native_alloc_track_reset(void) {
 
 int64_t mako_native_append_file_ptr(MakoNativeString *a0, MakoNativeString *a1) {
     return (int64_t)mako_append_file(bridge_borrow_str(a0), bridge_borrow_str(a1));
+}
+
+/* Value-ABI (LLVM): string-by-value args. */
+int64_t mako_native_append_file(MakoNativeString a0, MakoNativeString a1) {
+    return mako_native_append_file_ptr(&a0, &a1);
 }
 
 MakoNativeString *mako_native_auth_bearer_ptr(MakoNativeString *a0) {
@@ -2387,6 +2404,10 @@ int64_t mako_native_reflect_register_type(const char *name, const char *schema) 
 
 int64_t mako_native_remove_all_ptr(MakoNativeString *a0) {
     return (int64_t)mako_remove_all(bridge_borrow_str(a0));
+}
+
+int64_t mako_native_remove_all(MakoNativeString a0) {
+    return mako_native_remove_all_ptr(&a0);
 }
 
 int64_t mako_native_reqctx_new(void) {
@@ -2735,6 +2756,10 @@ int64_t mako_native_mail_address_ok_ptr(MakoNativeString *a0) {
 
 int64_t mako_native_mkdir_all_ptr(MakoNativeString *a0) {
     return (int64_t)mako_mkdir_all(bridge_borrow_str(a0));
+}
+
+int64_t mako_native_mkdir_all(MakoNativeString a0) {
+    return mako_native_mkdir_all_ptr(&a0);
 }
 
 int64_t mako_native_model_tensor_count(int64_t a0) {
@@ -4390,6 +4415,11 @@ int64_t mako_native_path_size_ptr(MakoNativeString *p) {
     return (int64_t)mako_path_size(bridge_borrow_str(p));
 }
 
+/* Value-ABI for LLVM (string-by-value). */
+int64_t mako_native_path_size(MakoNativeString p) {
+    return mako_native_path_size_ptr(&p);
+}
+
 MakoNativeString *mako_native_url_query_ptr(MakoNativeString *u) {
     return bridge_take_str(mako_url_query(bridge_borrow_str(u)));
 }
@@ -4825,6 +4855,10 @@ MakoNativeString *mako_native_aes_gcm_open_ptr(MakoNativeString *a0, MakoNativeS
 
 int64_t mako_native_atomic_write_file_ptr(MakoNativeString *a0, MakoNativeString *a1) {
     return (int64_t)mako_atomic_write_file(bridge_borrow_str(a0), bridge_borrow_str(a1));
+}
+
+int64_t mako_native_atomic_write_file(MakoNativeString a0, MakoNativeString a1) {
+    return mako_native_atomic_write_file_ptr(&a0, &a1);
 }
 
 int64_t mako_native_auth_check_basic_ptr(MakoNativeString *a0, MakoNativeString *a1, MakoNativeString *a2) {
@@ -5785,6 +5819,10 @@ MakoNativeString *mako_native_reflect_type_of_int_ptr(int64_t a0) {
 
 int64_t mako_native_rmdir_ptr(MakoNativeString *a0) {
     return (int64_t)mako_rmdir(bridge_borrow_str(a0));
+}
+
+int64_t mako_native_rmdir(MakoNativeString a0) {
+    return mako_native_rmdir_ptr(&a0);
 }
 
 MakoNativeString *mako_native_scram_gs2_header_ptr(MakoNativeString *a0) {

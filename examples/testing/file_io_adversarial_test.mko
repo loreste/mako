@@ -1,0 +1,170 @@
+// Adversarial whole-file I/O (open+fstat+read/write path).
+// Run: mako test examples/testing/file_io_adversarial_test.mko
+// Gate: scripts/file-io-regression.sh
+
+fn TestEmptyWriteRead() {
+    let path = path_join(temp_dir(), "mako_adv_empty.dat")
+    let _ = remove_file(path)
+    assert_eq(write_file(path, ""), 0)
+    let s = read_file(path)
+    assert_eq(len(s), 0)
+    assert_eq(path_size(path), 0)
+    assert_eq(remove_file(path), 0)
+}
+
+fn TestMissingReadReturnsEmpty() {
+    let path = path_join(temp_dir(), "mako_adv_missing_nope_xyz.dat")
+    let _ = remove_file(path)
+    let s = read_file(path)
+    assert_eq(len(s), 0)
+}
+
+fn TestOverwriteTruncates() {
+    let path = path_join(temp_dir(), "mako_adv_trunc.dat")
+    assert_eq(write_file(path, "abcdefghij"), 0)
+    assert_eq(len(read_file(path)), 10)
+    assert_eq(write_file(path, "xy"), 0)
+    let s = read_file(path)
+    assert_eq(len(s), 2)
+    assert_eq_str(s, "xy")
+    // Truncate all the way to empty via overwrite.
+    assert_eq(write_file(path, ""), 0)
+    assert_eq(len(read_file(path)), 0)
+    assert_eq(path_size(path), 0)
+    assert_eq(remove_file(path), 0)
+}
+
+fn TestBinaryRoundTrip() {
+    let path = path_join(temp_dir(), "mako_adv_bin.dat")
+    // NUL and high bytes must survive (length-based I/O, not C-string trunc).
+    let payload = "a\0b\0c" + str_repeat("\xff", 16) + "z"
+    assert_eq(write_file(path, payload), 0)
+    let got = read_file(path)
+    assert_eq(len(got), len(payload))
+    assert_eq_str(got, payload)
+    assert_eq(remove_file(path), 0)
+}
+
+fn TestAppendThenRead() {
+    let path = path_join(temp_dir(), "mako_adv_append.dat")
+    let _ = remove_file(path)
+    assert_eq(write_file(path, "ab"), 0)
+    assert_eq(append_file(path, "cd"), 0)
+    assert_eq(append_file(path, "ef"), 0)
+    assert_eq_str(read_file(path), "abcdef")
+    assert_eq(path_size(path), 6)
+    // Empty append must not change content.
+    assert_eq(append_file(path, ""), 0)
+    assert_eq_str(read_file(path), "abcdef")
+    assert_eq(remove_file(path), 0)
+}
+
+fn TestAppendCreatesIfMissing() {
+    let path = path_join(temp_dir(), "mako_adv_append_create.dat")
+    let _ = remove_file(path)
+    assert_eq(append_file(path, "new"), 0)
+    assert_eq_str(read_file(path), "new")
+    assert_eq(remove_file(path), 0)
+}
+
+fn TestLargeRoundTrip() {
+    let path = path_join(temp_dir(), "mako_adv_large.dat")
+    // 256 KiB — past one page, exercises short-read/write loops.
+    let n = 262144
+    let payload = str_repeat("Q", n)
+    assert_eq(len(payload), n)
+    assert_eq(write_file(path, payload), 0)
+    let got = read_file(path)
+    assert_eq(len(got), n)
+    assert_eq(path_size(path), n)
+    assert(str_has_prefix(got, "QQQQ"))
+    assert_eq_str(got, payload)
+    assert_eq(remove_file(path), 0)
+}
+
+fn TestManySmallCyclesNoLeak() {
+    let path = path_join(temp_dir(), "mako_adv_cycle.dat")
+    let _ = alloc_track_reset()
+    let mark = leak_mark()
+    var i = 0
+    var acc = 0
+    while i < 200 {
+        let body = str_repeat("x", 64 + (i % 17))
+        assert_eq(write_file(path, body), 0)
+        let s = read_file(path)
+        acc = acc + len(s)
+        i = i + 1
+    }
+    assert(acc > 0)
+    assert_eq(leak_bytes_since(mark), 0)
+    assert_eq(leak_detected(mark), 0)
+    let _ = remove_file(path)
+}
+
+fn TestStrRepeatWriteRead() {
+    // Regression: LLVM value-ABI str_repeat + write_file.
+    let path = path_join(temp_dir(), "mako_adv_repeat.dat")
+    let payload = str_repeat("xy", 2048)
+    assert_eq(len(payload), 4096)
+    assert_eq(write_file(path, payload), 0)
+    let got = read_file(path)
+    assert_eq(len(got), 4096)
+    assert(str_has_prefix(got, "xyxyxy"))
+    assert_eq_str(got, payload)
+    assert_eq(remove_file(path), 0)
+}
+
+fn TestAtomicWriteStillWorks() {
+    let path = path_join(temp_dir(), "mako_adv_atomic.json")
+    assert_eq(atomic_write_file(path, "{\"v\":1}\n"), 0)
+    assert_eq_str(read_file(path), "{\"v\":1}\n")
+    assert_eq(atomic_write_file(path, "{\"v\":2}\n"), 0)
+    assert_eq_str(read_file(path), "{\"v\":2}\n")
+    assert_eq(remove_file(path), 0)
+}
+
+fn TestWriteRejectsBadPathShape() {
+    // Empty path must fail (not create a weird file).
+    assert(write_file("", "nope") != 0)
+    assert(append_file("", "nope") != 0)
+    assert(atomic_write_file("", "nope") != 0)
+}
+
+fn TestReadAfterRemoveIsEmpty() {
+    let path = path_join(temp_dir(), "mako_adv_gone.dat")
+    assert_eq(write_file(path, "bye"), 0)
+    assert_eq(remove_file(path), 0)
+    assert_eq(len(read_file(path)), 0)
+}
+
+fn TestAlternatingSizes() {
+    // Grow then shrink repeatedly — catches truncate bugs.
+    let path = path_join(temp_dir(), "mako_adv_alt.dat")
+    var i = 0
+    while i < 40 {
+        let big = str_repeat("B", 1000 + i * 10)
+        let small = str_repeat("s", 3 + (i % 5))
+        assert_eq(write_file(path, big), 0)
+        assert_eq(len(read_file(path)), len(big))
+        assert_eq(write_file(path, small), 0)
+        assert_eq_str(read_file(path), small)
+        i = i + 1
+    }
+    assert_eq(remove_file(path), 0)
+}
+
+fn TestAppendStressNoLeak() {
+    let path = path_join(temp_dir(), "mako_adv_append_stress.dat")
+    let _ = remove_file(path)
+    let _ = alloc_track_reset()
+    let mark = leak_mark()
+    assert_eq(write_file(path, ""), 0)
+    var i = 0
+    while i < 100 {
+        assert_eq(append_file(path, "x"), 0)
+        i = i + 1
+    }
+    assert_eq(len(read_file(path)), 100)
+    assert_eq(leak_bytes_since(mark), 0)
+    assert_eq(remove_file(path), 0)
+}

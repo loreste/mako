@@ -532,11 +532,20 @@ fn emit_instruction<'ctx>(
                 "mako_native_env_set_ptr" => "mako_native_env_set",
                 "mako_native_read_file_ptr" => "mako_native_read_file",
                 "mako_native_write_file_ptr" => "mako_native_write_file",
+                "mako_native_append_file_ptr" => "mako_native_append_file",
+                "mako_native_atomic_write_file_ptr" => "mako_native_atomic_write_file",
+                "mako_native_assert_eq_str_ptr" => "mako_native_assert_eq_str",
+                "mako_native_path_size_ptr" => "mako_native_path_size",
                 "mako_native_base64_encode_ptr" => "mako_native_base64_encode",
                 "mako_native_base64_decode_ptr" => "mako_native_base64_decode",
                 "mako_native_str_repeat_ptr" => "mako_native_str_repeat",
                 "mako_native_str_contains_ptr" => "mako_native_str_contains",
+                "mako_native_str_has_prefix_ptr" => "mako_native_str_has_prefix",
+                "mako_native_str_has_suffix_ptr" => "mako_native_str_has_suffix",
                 "mako_native_mkdir_ptr" => "mako_native_mkdir",
+                "mako_native_mkdir_all_ptr" => "mako_native_mkdir_all",
+                "mako_native_rmdir_ptr" => "mako_native_rmdir",
+                "mako_native_remove_all_ptr" => "mako_native_remove_all",
                 "mako_native_file_exists_ptr" => "mako_native_file_exists",
                 "mako_native_remove_file_ptr" => "mako_native_remove_file",
                 // Byte→string: LLVM uses value-ABI string returns.
@@ -558,6 +567,7 @@ fn emit_instruction<'ctx>(
             // string keys (and MapSS set values). Value-ABI `*_val` helpers
             // take/return MakoNativeString by value — no boxing.
             // Pointer-ABI string helpers: box LLVM value-ABI strings to stack slots.
+            // Prefer value-ABI remaps in the match above for hot I/O/fs helpers.
             let needs_str_box = !function_name.ends_with("_val")
                 && (function_name.contains("map_si_")
                     || function_name.contains("map_ss_")
