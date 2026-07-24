@@ -134,30 +134,135 @@ pub fn check_file(path: &Path) -> Result<Program, ()> {
     Ok(program)
 }
 
-pub fn check_file_json_report(path: &Path) -> (bool, String) {
-    match check_file_structured(path) {
-        Ok(program) => {
-            let symbols = top_level_symbol_count(&program);
-            (
-                true,
-                format!(
-                    r#"{{"ok":true,"file":"{}","diagnostics":[],"symbols":{symbols}}}"#,
-                    json_escape(&path.display().to_string())
-                ),
-            )
-        }
-        Err(diagnostic) => {
-            let file = path.display().to_string();
-            (
-                false,
-                format!(
-                    r#"{{"ok":false,"file":"{}","diagnostics":[{}]}}"#,
-                    json_escape(&file),
-                    diagnostic.to_json()
-                ),
-            )
+#[derive(Debug, Clone)]
+enum CheckFileOutcome {
+    Passed { symbols: usize },
+    Failed { diagnostic: Diagnostic },
+}
+
+#[derive(Debug, Clone)]
+pub struct CheckFileReport {
+    file: String,
+    outcome: CheckFileOutcome,
+}
+
+impl CheckFileReport {
+    pub fn ok(&self) -> bool {
+        matches!(&self.outcome, CheckFileOutcome::Passed { .. })
+    }
+
+    fn diagnostic_count(&self) -> usize {
+        usize::from(matches!(&self.outcome, CheckFileOutcome::Failed { .. }))
+    }
+
+    fn to_legacy_json(&self) -> String {
+        match &self.outcome {
+            CheckFileOutcome::Passed { symbols } => format!(
+                r#"{{"ok":true,"file":"{}","diagnostics":[],"symbols":{symbols}}}"#,
+                json_escape(&self.file)
+            ),
+            CheckFileOutcome::Failed { diagnostic } => format!(
+                r#"{{"ok":false,"file":"{}","diagnostics":[{}]}}"#,
+                json_escape(&self.file),
+                diagnostic.to_json()
+            ),
         }
     }
+
+    fn to_json(&self) -> String {
+        match &self.outcome {
+            CheckFileOutcome::Passed { symbols } => format!(
+                r#"{{"file":"{}","ok":true,"symbols":{symbols},"diagnostics":[]}}"#,
+                json_escape(&self.file)
+            ),
+            CheckFileOutcome::Failed { diagnostic } => format!(
+                r#"{{"file":"{}","ok":false,"symbols":null,"diagnostics":[{}]}}"#,
+                json_escape(&self.file),
+                diagnostic.to_json()
+            ),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct CheckCommandReport {
+    targets: Vec<CheckFileReport>,
+    errors: Vec<String>,
+}
+
+impl CheckCommandReport {
+    pub fn new(targets: Vec<CheckFileReport>) -> Self {
+        Self {
+            targets,
+            errors: Vec::new(),
+        }
+    }
+
+    pub fn command_error(message: impl Into<String>) -> Self {
+        Self {
+            targets: Vec::new(),
+            errors: vec![message.into()],
+        }
+    }
+
+    pub fn ok(&self) -> bool {
+        self.errors.is_empty() && self.targets.iter().all(CheckFileReport::ok)
+    }
+
+    pub fn to_legacy_json(&self) -> String {
+        format!(
+            "[{}]",
+            self.targets
+                .iter()
+                .map(CheckFileReport::to_legacy_json)
+                .collect::<Vec<_>>()
+                .join(",")
+        )
+    }
+
+    pub fn to_json(&self) -> String {
+        let checked = self.targets.len();
+        let passed = self.targets.iter().filter(|target| target.ok()).count();
+        let failed = checked - passed;
+        let diagnostics = self
+            .targets
+            .iter()
+            .map(CheckFileReport::diagnostic_count)
+            .sum::<usize>();
+        let targets = self
+            .targets
+            .iter()
+            .map(CheckFileReport::to_json)
+            .collect::<Vec<_>>()
+            .join(",");
+        let errors = self
+            .errors
+            .iter()
+            .map(|error| format!(r#""{}""#, json_escape(error)))
+            .collect::<Vec<_>>()
+            .join(",");
+        format!(
+            r#"{{"schemaVersion":1,"command":"check","ok":{},"targets":[{targets}],"summary":{{"checked":{checked},"passed":{passed},"failed":{failed},"diagnostics":{diagnostics}}},"errors":[{errors}]}}"#,
+            self.ok()
+        )
+    }
+}
+
+pub fn check_file_report(path: &Path) -> CheckFileReport {
+    let file = path.display().to_string();
+    let outcome = match check_file_structured(path) {
+        Ok(program) => CheckFileOutcome::Passed {
+            symbols: top_level_symbol_count(&program),
+        },
+        Err(diagnostic) => CheckFileOutcome::Failed { diagnostic },
+    };
+    CheckFileReport { file, outcome }
+}
+
+#[cfg(test)]
+pub fn check_file_json_report(path: &Path) -> (bool, String) {
+    let report = check_file_report(path);
+    (report.ok(), report.to_legacy_json())
 }
 
 fn check_file_structured(path: &Path) -> Result<Program, Diagnostic> {
@@ -4078,6 +4183,7 @@ mod test_filter_tests {
 #[cfg(test)]
 mod metadata_tests {
     use super::*;
+    use serde_json::{json, Value};
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn temp_mko(name: &str, src: &str) -> PathBuf {
@@ -4111,6 +4217,90 @@ mod metadata_tests {
         assert!(report.contains(r#""severity":"error"#));
         assert!(report.contains(r#""line":"#));
         assert!(report.contains(r#""column":"#));
+    }
+
+    #[test]
+    fn check_legacy_json_shape_is_unchanged() {
+        let report = CheckCommandReport::new(vec![
+            CheckFileReport {
+                file: "main.mko".into(),
+                outcome: CheckFileOutcome::Passed { symbols: 2 },
+            },
+            CheckFileReport {
+                file: "bad.mko".into(),
+                outcome: CheckFileOutcome::Failed {
+                    diagnostic: Diagnostic::error("bad.mko", "", Span::unknown(), "broken"),
+                },
+            },
+        ]);
+
+        assert_eq!(
+            report.to_legacy_json(),
+            r#"[{"ok":true,"file":"main.mko","diagnostics":[],"symbols":2},{"ok":false,"file":"bad.mko","diagnostics":[{"severity":"error","file":"bad.mko","line":0,"column":0,"message":"broken"}]}]"#
+        );
+    }
+
+    #[test]
+    fn check_versioned_json_round_trips_all_fields() {
+        let diagnostic = Diagnostic::error(
+            "bad\"file.mko",
+            "let value = bad\n",
+            Span::new(1, 13),
+            "unknown name \"bad\"\ntry another value",
+        )
+        .with_hint("define `bad` or use a different value");
+        let report = CheckCommandReport::new(vec![
+            CheckFileReport {
+                file: "ok\\file.mko".into(),
+                outcome: CheckFileOutcome::Passed { symbols: 3 },
+            },
+            CheckFileReport {
+                file: "bad\"file.mko".into(),
+                outcome: CheckFileOutcome::Failed { diagnostic },
+            },
+        ]);
+
+        let value: Value = serde_json::from_str(&report.to_json()).unwrap();
+        assert_eq!(value["schemaVersion"], 1);
+        assert_eq!(value["command"], "check");
+        assert_eq!(value["ok"], false);
+        assert_eq!(
+            value["summary"],
+            json!({"checked": 2, "passed": 1, "failed": 1, "diagnostics": 1})
+        );
+        assert_eq!(value["errors"], json!([]));
+        assert_eq!(value["targets"][0]["file"], "ok\\file.mko");
+        assert_eq!(value["targets"][0]["symbols"], 3);
+        assert_eq!(value["targets"][1]["symbols"], Value::Null);
+        assert_eq!(
+            value["targets"][1]["diagnostics"][0]["message"],
+            "unknown name \"bad\"\ntry another value"
+        );
+        assert_eq!(
+            value["targets"][1]["diagnostics"][0]["hint"],
+            "define `bad` or use a different value"
+        );
+        assert_eq!(
+            value["targets"][1]["diagnostics"][0]["sourceLine"],
+            "let value = bad"
+        );
+    }
+
+    #[test]
+    fn check_versioned_command_errors_are_structured() {
+        let report = CheckCommandReport::command_error("missing \"workspace\"\ntry another path");
+
+        let value: Value = serde_json::from_str(&report.to_json()).unwrap();
+        assert_eq!(value["ok"], false);
+        assert_eq!(value["targets"], json!([]));
+        assert_eq!(
+            value["summary"],
+            json!({"checked": 0, "passed": 0, "failed": 0, "diagnostics": 0})
+        );
+        assert_eq!(
+            value["errors"],
+            json!(["missing \"workspace\"\ntry another path"])
+        );
     }
 
     #[test]

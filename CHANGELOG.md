@@ -33,6 +33,8 @@ service registry, OpenAPI builders — backend API surface, no GC.
 - [docs/MESSAGING_GRAPHQL.md](docs/MESSAGING_GRAPHQL.md) rewritten for all surfaces.
 - `mako test --json` emits a versioned report with per-file results, captured
   output, structured failures, repeat runs, and optional coverage data.
+- `mako check --json=v1` adds a stable diagnostics envelope while bare
+  `--json` retains the original array for existing integrations.
 
 ## 0.4.14 — 2026-07-22
 

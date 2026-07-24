@@ -160,15 +160,22 @@ errors in a file (not only the first).
 mako check main.mko               # check one file
 mako check .                       # check all workspace members
 mako check -p lib                  # check one member
-mako check --json main.mko        # machine-readable diagnostics
+mako check --json main.mko        # legacy JSON array
+mako check --json=v1 main.mko     # versioned JSON report
 ```
 
 | Flag | Description |
 |------|-------------|
 | `[FILE]` | Source file or directory (default: `.`) |
 | `-p, --package <NAME>` | Focus one workspace member |
-| `--json` | Emit JSON diagnostics |
+| `--json[=legacy\|v1]` | Emit JSON diagnostics; bare `--json` preserves the legacy array |
 | `--no-incremental` | Disable typecheck cache |
+
+The versioned form returns a stable envelope containing `schemaVersion`,
+`command`, `ok`, `targets`, aggregate `summary` fields, and command-level
+`errors`. Incompatible changes require a new schema version; consumers should
+ignore unknown fields added to v1. Both JSON formats exit non-zero when any
+target fails.
 
 ---
 

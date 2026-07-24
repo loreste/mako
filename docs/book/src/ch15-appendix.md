@@ -726,7 +726,8 @@ Supported patterns: literals, `.`, `*`, `+`, `?`, `|`, `[abc]`, `[a-z]`,
 
 | Flag         | Purpose                                |
 |--------------|----------------------------------------|
-| `--json`     | Emit JSON diagnostics                  |
+| `--json`     | Emit the legacy JSON diagnostics array |
+| `--json=v1`  | Emit the versioned diagnostics report   |
 | `-p NAME`    | Check one workspace member             |
 
 ### `mako test` Flags
