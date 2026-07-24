@@ -2,14 +2,6 @@
 #ifndef MAKO_STD_H
 #define MAKO_STD_H
 
-/* Portability: PTHREAD_MUTEX_INITIALIZER is unavailable on Windows cross-compile
- * targets that lack a pthreads shim. Provide a zero-init fallback. */
-#if defined(_WIN32) && !defined(PTHREAD_MUTEX_INITIALIZER)
-#define MAKO_MUTEX_INIT {0}
-#else
-#define MAKO_MUTEX_INIT PTHREAD_MUTEX_INITIALIZER
-#endif
-
 #include "mako_rt.h"
 #include "mako_stdlib.h"
 #include "mako_plugin.h"

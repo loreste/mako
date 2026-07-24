@@ -4549,7 +4549,7 @@ typedef struct {
 } MakoTlsPoolSlot;
 
 static MakoTlsPoolSlot mako_tls_pool_slots[MAKO_TLS_POOL_MAX];
-static pthread_mutex_t mako_tls_pool_mu = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t mako_tls_pool_mu = MAKO_MUTEX_INIT;
 
 static inline int64_t mako_tls_pool_open(
     MakoString host, int64_t port, MakoString ca_pem_path

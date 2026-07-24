@@ -1315,7 +1315,7 @@ typedef struct {
 } MakoWssPoolSlot;
 
 static MakoWssPoolSlot mako_wss_pool_slots[MAKO_WSS_POOL_MAX];
-static pthread_mutex_t mako_wss_pool_mu = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t mako_wss_pool_mu = MAKO_MUTEX_INIT;
 
 static inline int64_t mako_wss_pool_open_ca(
     MakoString host, int64_t port, MakoString path,

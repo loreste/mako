@@ -37,7 +37,7 @@ static inline void mako_slog_mu_ensure(void) {
             Sleep(0);
     }
 #else
-    static pthread_mutex_t boot = PTHREAD_MUTEX_INITIALIZER;
+    static pthread_mutex_t boot = MAKO_MUTEX_INIT;
     pthread_mutex_lock(&boot);
     if (!mako_slog_mu_ready) {
         pthread_mutex_init(&mako_slog_mu, NULL);
