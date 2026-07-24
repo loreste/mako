@@ -1,6 +1,58 @@
 # Changelog
 
-## 0.4.15 — 2026-07-22 (tip; tag when packaging cut)
+## 0.4.16 — 2026-07-23 (tip; tag when packaging cut)
+
+**Theme:** Real GraphQL query executor; native backend `List[T]` for non-scalar
+`T`; name the adaptive-optimization loop **Anneal**. Version bump 0.4.15 →
+0.4.16.
+
+### GraphQL — full query executor
+
+- Replaced the placeholder resolver with a real recursive executor behind the
+  existing `graphql_schema_resolve` API (both C and native backends, no ABI
+  change). Now supports: nested selection projection over object and array
+  results, field aliases, arguments with operation variable defaults,
+  `__typename`, `__schema` / `__type` introspection, named and inline fragments,
+  field validation, and spec-shaped `{"data":…,"errors":[…]}` output.
+- Fixed a pre-existing per-request memory leak: `graphql_schema_resolve` results
+  and owned query-argument temporaries were never reclaimed. String-returning
+  builtins are now allowlisted in scope-drop cleanup; the resolve hot path is
+  leak-free per request (verified flat under LeakSanitizer over 500 calls).
+- New `examples/testing/graphql_exec_test.mko` (13 cases; ASan/UBSan clean).
+
+### Memory safety — owned values returned from user functions
+
+- Fixed a pervasive pre-existing leak: an owned **leaf value** (string, slice,
+  map) returned from a user-defined function and bound to a local was never
+  reclaimed when dropped — one allocation leaked per call, which accumulates in
+  a long-running server. Such call results are now recognized as owned producers
+  in scope-drop cleanup, so they free at scope exit (move analysis still
+  suppresses the drop when the value is returned/passed on/stored). Enums are
+  excluded (they are `match`-consumed; an unconditional free would double-free),
+  as are structs (freed field-by-field). New
+  `examples/testing/owned_return_drop_test.mko`. Verified: full suite green under
+  AddressSanitizer (no double-free/UAF), leak eliminated for `[]int` / `string`
+  / `List[Struct]` returns, generic-enum tests still pass.
+
+### Native backend — `List[T]`
+
+- `List[T]` now lowers on the native backend for **any** element type (structs,
+  nested `List[List[int]]`, strings, pointer arrays) by aliasing `[]T`, instead
+  of erroring for non-scalar `T`. New `examples/testing/native_list_generic_test.mko`,
+  differentially valid vs the C backend.
+
+### Anneal — adaptive optimization
+
+- Named the adaptive-optimization loop **Anneal**: ship a compiled binary, read
+  hot-site guidance from real traffic, fold it into the *next* offline build —
+  no live recompile, no warmup, no collector. See `docs/ADAPTIVE_OPT.md`.
+- Added `scripts/anneal-cycle.sh` (product-named entry point over
+  `scripts/adaptive-opt-cycle.sh`; same args/env). Stable `hot_site_*` API and
+  `/debug/hot_sites` export unchanged.
+- Broadened `hot_site_test.mko`: boundary ids, top reassignment, enable-mode
+  transitions, and concurrent atomic-counter tallies (single- and multi-site).
+
+## 0.4.15 — 2026-07-22 (tag when packaging cut)
 
 **Theme:** NATS + Redis messaging adapters, GraphQL schema/resolvers, gRPC
 service registry, OpenAPI builders — backend API surface, no GC.

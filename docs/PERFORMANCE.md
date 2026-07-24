@@ -50,7 +50,7 @@ Don’t invent numbers. Re-run locally:
 ./scripts/http-long-run-soak.sh
 # See docs/LONG_RUNNING.md (years-up soaks for long-running services).
 # Optional: MAKO_ALLOCATOR=mimalloc|jemalloc · scripts/pgo-build.sh for PGO.
-# Adaptive opt (traffic feedback, offline PGO): docs/ADAPTIVE_OPT.md · scripts/adaptive-opt-cycle.sh
+# Anneal — adaptive opt (traffic feedback, offline PGO): docs/ADAPTIVE_OPT.md · scripts/anneal-cycle.sh
 
 # HTTP throughput (requires wrk or hey):
 ./scripts/bench-http.sh

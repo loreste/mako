@@ -1,0 +1,131 @@
+// GraphQL executor — nested projection, aliases, arguments, __typename,
+// introspection, fragments, and validation errors over the static-resolver model.
+
+fn build() -> int {
+    let s = graphql_schema_new()
+    let _ = graphql_schema_add_type(s, "Query")
+    let _ = graphql_schema_add_type(s, "User")
+    let _ = graphql_schema_add_field(s, "Query", "health", "Boolean")
+    let _ = graphql_schema_add_field(s, "Query", "user", "User")
+    let _ = graphql_schema_add_field(s, "Query", "users", "[User]")
+    let _ = graphql_schema_add_field(s, "User", "name", "String")
+    let _ = graphql_schema_add_field(s, "User", "email", "String")
+    let _ = graphql_schema_add_field(s, "User", "age", "Int")
+    let _ = graphql_schema_set_resolver(s, "health", "true")
+    let _ = graphql_schema_set_resolver(s, "user", "{\"name\":\"Ann\",\"email\":\"a@x.com\",\"age\":30}")
+    let _ = graphql_schema_set_resolver(s, "users", "[{\"name\":\"A\",\"age\":1},{\"name\":\"B\",\"age\":2}]")
+    return s
+}
+
+fn TestFlatResolvers() {
+    let s = build()
+    let r = graphql_schema_resolve(s, "{ health }")
+    assert(str_contains(r, "\"data\""))
+    assert(str_contains(r, "\"health\":true"))
+    let _ = graphql_schema_free(s)
+}
+
+fn TestAlias() {
+    let s = build()
+    let r = graphql_schema_resolve(s, "{ ok: health }")
+    assert(str_contains(r, "\"ok\":true"))
+    let _ = graphql_schema_free(s)
+}
+
+fn TestNestedProjection() {
+    let s = build()
+    let r = graphql_schema_resolve(s, "{ user { name email } }")
+    assert(str_contains(r, "\"user\":{"))
+    assert(str_contains(r, "\"name\":\"Ann\""))
+    assert(str_contains(r, "\"email\":\"a@x.com\""))
+    // age was not requested — projection must drop it
+    assert(!str_contains(r, "age"))
+    assert(!str_contains(r, "30"))
+    let _ = graphql_schema_free(s)
+}
+
+fn TestArrayProjection() {
+    let s = build()
+    let r = graphql_schema_resolve(s, "{ users { name } }")
+    assert(str_contains(r, "\"users\":["))
+    assert(str_contains(r, "\"name\":\"A\""))
+    assert(str_contains(r, "\"name\":\"B\""))
+    // age dropped from every element
+    assert(!str_contains(r, "age"))
+    let _ = graphql_schema_free(s)
+}
+
+fn TestTypename() {
+    let s = build()
+    let r = graphql_schema_resolve(s, "{ __typename }")
+    assert(str_contains(r, "\"__typename\":\"Query\""))
+    let _ = graphql_schema_free(s)
+}
+
+fn TestIntrospectType() {
+    let s = build()
+    let r = graphql_schema_resolve(s, "{ __type(name: \"User\") { name fields { name } } }")
+    assert(str_contains(r, "\"name\":\"User\""))
+    assert(str_contains(r, "\"fields\":["))
+    assert(str_contains(r, "\"name\":\"email\""))
+    let _ = graphql_schema_free(s)
+}
+
+fn TestIntrospectSchema() {
+    let s = build()
+    let r = graphql_schema_resolve(s, "{ __schema { types { name } } }")
+    assert(str_contains(r, "\"types\":["))
+    assert(str_contains(r, "\"name\":\"Query\""))
+    assert(str_contains(r, "\"name\":\"User\""))
+    let _ = graphql_schema_free(s)
+}
+
+fn TestNamedFragment() {
+    let s = build()
+    let r = graphql_schema_resolve(s, "fragment F on User { name email } query { user { ...F } }")
+    assert(str_contains(r, "\"name\":\"Ann\""))
+    assert(str_contains(r, "\"email\":\"a@x.com\""))
+    let _ = graphql_schema_free(s)
+}
+
+fn TestInlineFragment() {
+    let s = build()
+    let r = graphql_schema_resolve(s, "{ user { ... on User { name } } }")
+    assert(str_contains(r, "\"name\":\"Ann\""))
+    let _ = graphql_schema_free(s)
+}
+
+fn TestVariableDefault() {
+    let s = build()
+    let r = graphql_schema_resolve(s, "query($t: String = \"User\") { __type(name: $t) { name } }")
+    assert(str_contains(r, "\"name\":\"User\""))
+    let _ = graphql_schema_free(s)
+}
+
+fn TestUnknownFieldError() {
+    let s = build()
+    let r = graphql_schema_resolve(s, "{ missing }")
+    assert(str_contains(r, "\"errors\""))
+    assert(str_contains(r, "Cannot query field"))
+    assert(str_contains(r, "missing"))
+    // partial data with null
+    assert(str_contains(r, "\"missing\":null"))
+    let _ = graphql_schema_free(s)
+}
+
+fn TestNestedUnknownFieldError() {
+    let s = build()
+    let r = graphql_schema_resolve(s, "{ user { name nope } }")
+    assert(str_contains(r, "\"name\":\"Ann\""))
+    assert(str_contains(r, "\"errors\""))
+    assert(str_contains(r, "\"nope\""))
+    let _ = graphql_schema_free(s)
+}
+
+fn TestMultipleRootFields() {
+    let s = build()
+    let r = graphql_schema_resolve(s, "{ health user { name } }")
+    assert(str_contains(r, "\"health\":true"))
+    assert(str_contains(r, "\"name\":\"Ann\""))
+    let _ = graphql_schema_free(s)
+}

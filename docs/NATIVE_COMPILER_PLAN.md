@@ -134,6 +134,11 @@ compile as early as possible.
    Guard Malloc + `leaks` in the gate (`[4b/5]`)]*
 3. **Aggregates** — structs, tuples, slices (`[]T`), maps; `make`, indexing, slicing,
    field access, literals; their ownership/drops.
+   - *3-List [done]* — `List[T]` is a transparent alias for `[]T` and lowers for
+     **any** element type (structs, nested `List[List[int]]`, strings, pointer
+     arrays), reusing the full slice support instead of the scalar-only set.
+     Fixture `examples/testing/native_list_generic_test.mko`, differentially
+     valid vs the C backend.
    - *3a [done]* — `[]int` slices: array literals, `make([]int, n[, cap])` (calloc),
      bounds-checked indexing, `len`, iteration, reassignment (drop-on-reassign),
      move between locals, indexing/`len` of owned temporaries, and freeing discarded

@@ -7,10 +7,10 @@ about.
 If someone asks “is Mako faster than X?”, the honest answer is always *on
 which workload?* There’s no universal ranking here.
 
-Tip is **0.4.15+**. Background reading: [SPEED.md](SPEED.md),
+Tip is **0.4.16+**. Background reading: [SPEED.md](SPEED.md),
 [MEMORY_SAFETY.md](MEMORY_SAFETY.md), [PERFORMANCE.md](PERFORMANCE.md),
-[LONG_RUNNING.md](LONG_RUNNING.md). Traffic feedback without live recompile is
-in [ADAPTIVE_OPT.md](ADAPTIVE_OPT.md).
+[LONG_RUNNING.md](LONG_RUNNING.md). Traffic feedback without live recompile —
+**Anneal** — is in [ADAPTIVE_OPT.md](ADAPTIVE_OPT.md).
 
 ---
 

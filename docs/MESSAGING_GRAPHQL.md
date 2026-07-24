@@ -1,6 +1,6 @@
 # Messaging · GraphQL · gRPC · OpenAPI
 
-**Product tip:** 0.4.15 · **No GC** — payloads and responses are owned strings;
+**Product tip:** 0.4.16 · **No GC** — payloads and responses are owned strings;
 queues free on `*_free` / take transfer.
 
 Related: [STDLIB.md](STDLIB.md) · [MEMORY_SAFETY.md](MEMORY_SAFETY.md) ·
@@ -89,18 +89,37 @@ Beyond body/field helpers, schemas are first-class handles:
 | `graphql_schema_new` / `free` | Schema handle |
 | `graphql_schema_add_type` / `add_field` | Type system seed |
 | `graphql_schema_set_resolver(field, json)` | Root field → JSON value |
-| `graphql_schema_resolve(id, query)` | Full `{"data":…}` or error |
+| `graphql_schema_resolve(id, query)` | Execute a query → `{"data":…}` (+ `errors`) |
 | `graphql_schema_sdl(id)` | Emit SDL text |
 | `graphql_schema_has_type` / `has_resolver` | Introspection seeds |
 
 ```mko
 let s = graphql_schema_new()
 let _ = graphql_schema_add_type(s, "Query")
-let _ = graphql_schema_add_field(s, "Query", "health", "Boolean")
-let _ = graphql_schema_set_resolver(s, "health", "true")
-let resp = graphql_schema_resolve(s, "{ health }")
-let sdl = graphql_schema_sdl(s)
+let _ = graphql_schema_add_type(s, "User")
+let _ = graphql_schema_add_field(s, "Query", "user", "User")
+let _ = graphql_schema_add_field(s, "User", "name", "String")
+let _ = graphql_schema_set_resolver(s, "user", "{\"name\":\"Ann\",\"age\":30}")
+// Sub-selections shape the resolver's JSON; only requested fields come back.
+let resp = graphql_schema_resolve(s, "{ user { name } __typename }")
+// → {"data":{"user":{"name":"Ann"},"__typename":"Query"}}
 ```
+
+`graphql_schema_resolve` is a real query executor, not a field-echo. It handles:
+
+- **Nested selection projection** over object and array resolver values —
+  sub-selections shape the returned JSON (unrequested fields are dropped).
+- **Aliases** (`ok: health`) and **arguments** with operation **variable
+  defaults** (`query($t: String = "User") { __type(name: $t) { name } }`).
+- **`__typename`** and **introspection** (`__schema`, `__type(name:)`).
+- **Named and inline fragments** (`...Frag`, `... on Type { … }`).
+- **Field validation** — unknown fields yield a spec-shaped
+  `{"data":…,"errors":[{"message":"Cannot query field …"}]}`.
+
+Resolvers hold static/templated JSON values; a sub-selection projects them.
+Both the C and native backends share the executor (same runtime), and the
+resolve hot path is leak-free per request. See
+`examples/testing/graphql_exec_test.mko`.
 
 Packages: `std/graphql` · `std/graphql/schema.mko`.
 
