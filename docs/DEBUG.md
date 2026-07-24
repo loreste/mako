@@ -474,24 +474,47 @@ cat /tmp/myapp.c
 ## Tooling integration with mako check --json
 
 For editor integrations, CI pipelines, and custom tooling, `mako check` can
-output diagnostics as JSON:
+emit a stable, versioned JSON report:
 
 ```bash
-mako check --json main.mko
+mako check --json=v1 main.mko
 ```
 
-Output format (one JSON object per line):
+The report contains one entry per checked target:
 
 ```json
 {
-  "file": "main.mko",
-  "line": 12,
-  "col": 5,
-  "severity": "error",
-  "message": "type mismatch: expected int, got string",
-  "help": "convert with parse_int() or change the type annotation"
+  "schemaVersion": 1,
+  "command": "check",
+  "ok": false,
+  "targets": [
+    {
+      "file": "main.mko",
+      "ok": false,
+      "symbols": null,
+      "diagnostics": [
+        {
+          "severity": "error",
+          "file": "main.mko",
+          "line": 12,
+          "column": 5,
+          "message": "type mismatch: expected int, got string"
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "checked": 1,
+    "passed": 0,
+    "failed": 1,
+    "diagnostics": 1
+  },
+  "errors": []
 }
 ```
+
+Bare `--json` retains the original array output for existing integrations.
+New consumers should use v1 and ignore unknown fields added to that version.
 
 Use this for:
 
@@ -503,7 +526,7 @@ Use this for:
 Example in a CI script:
 
 ```bash
-mako check --json src/main.mko > diagnostics.json
+mako check --json=v1 src/main.mko > diagnostics.json
 if [ $? -ne 0 ]; then
     echo "Type errors found:"
     cat diagnostics.json
@@ -677,7 +700,7 @@ Both pass cleanly. The bug is fixed and guarded by a test.
 | Release build | `mako build --release main.mko` |
 | Inline debug print | `dbg(value)` / `dbg_str(value)` |
 | Type check only | `mako check main.mko` |
-| Type check as JSON | `mako check --json main.mko` |
+| Type check as JSON | `mako check --json=v1 main.mko` |
 | Inspect generated C | `mako build --emit-c main.mko` |
 | Run in lldb | `mako build main.mko && lldb ./main` |
 | Address sanitizer | `mako build --sanitize address main.mko` |

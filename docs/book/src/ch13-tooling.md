@@ -34,7 +34,8 @@ producing a binary. This is the fastest way to verify correctness.
 mako check main.mko                 # check a single file
 mako check .                        # check all workspace members
 mako check -p mylib                 # check one workspace member
-mako check --json main.mko          # JSON diagnostics for CI/IDE/AI tooling
+mako check --json main.mko          # legacy JSON diagnostics array
+mako check --json=v1 main.mko       # versioned report for new integrations
 ```
 
 The checker validates:
@@ -48,14 +49,25 @@ The checker validates:
 
 ### JSON Output
 
-With `--json`, the checker emits one JSON array. Each checked target has its
-own result and diagnostics array:
+Bare `--json` preserves the original JSON array for existing CI and editor
+integrations. Each checked target has its own result and diagnostics array:
 
 ```json
 [{"ok":false,"file":"main.mko","diagnostics":[{"severity":"error","file":"main.mko","line":12,"column":5,"message":"use of moved value `x`"}]}]
 ```
 
-This integrates with CI systems and editor plugins.
+New integrations should use `--json=v1`. It wraps the target reports in a
+versioned envelope and adds aggregate counts:
+
+```json
+{"schemaVersion":1,"command":"check","ok":false,"targets":[{"file":"main.mko","ok":false,"symbols":null,"diagnostics":[{"severity":"error","file":"main.mko","line":12,"column":5,"message":"use of moved value `x`"}]}],"summary":{"checked":1,"passed":0,"failed":1,"diagnostics":1},"errors":[]}
+```
+
+Successful targets report their top-level `symbols` count. Failed targets use
+`null` because symbol collection did not complete. Resolution failures such as
+a missing path use the top-level `errors` array and leave `targets` empty.
+Incompatible changes require a new schema version; consumers should ignore
+unknown fields added to v1. Both formats exit non-zero when any target fails.
 
 ---
 
