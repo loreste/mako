@@ -2,6 +2,14 @@
 #ifndef MAKO_RT_H
 #define MAKO_RT_H
 
+/* Portability: PTHREAD_MUTEX_INITIALIZER is unavailable on Windows cross-compile
+ * targets that lack a pthreads shim. Provide a zero-init fallback. */
+#if defined(_WIN32) && !defined(PTHREAD_MUTEX_INITIALIZER)
+#define MAKO_MUTEX_INIT {0}
+#else
+#define MAKO_MUTEX_INIT PTHREAD_MUTEX_INITIALIZER
+#endif
+
 #ifndef _WIN32
 /* _GNU_SOURCE (glibc) exposes splice/accept4 used by the proxy hot path; it
  * implies _DEFAULT_SOURCE/_POSIX_C_SOURCE. Must precede any system header. */
@@ -2429,7 +2437,7 @@ static inline void mako_box_mu_ensure(void) {
             Sleep(0);
     }
 #else
-    static pthread_mutex_t boot = PTHREAD_MUTEX_INITIALIZER;
+    static pthread_mutex_t boot = MAKO_MUTEX_INIT;
     pthread_mutex_lock(&boot);
     if (!mako_box_mu_ready) {
         pthread_mutex_init(&mako_box_mu, NULL);
@@ -5676,7 +5684,7 @@ static int mako_debug_trap_enabled = 0;
 static pthread_mutex_t mako_task_reg_mu;
 static volatile LONG mako_task_reg_mu_once = 0;
 #else
-static pthread_mutex_t mako_task_reg_mu = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t mako_task_reg_mu = MAKO_MUTEX_INIT;
 #endif
 
 static inline void mako_task_reg_mu_ensure(void) {
@@ -6646,7 +6654,7 @@ static inline void mako_detached_mu_ensure(void) {
             Sleep(0);
     }
 #else
-    static pthread_mutex_t boot = PTHREAD_MUTEX_INITIALIZER;
+    static pthread_mutex_t boot = MAKO_MUTEX_INIT;
     pthread_mutex_lock(&boot);
     if (!mako_detached_mu_ready) {
         pthread_mutex_init(&mako_detached_mu, NULL);
