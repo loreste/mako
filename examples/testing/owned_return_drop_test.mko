@@ -1,0 +1,79 @@
+// Owned values returned from user functions must be reclaimed when dropped
+// locally, and must NOT be double-freed when moved out / passed on. Adversarial
+// for the scope-drop classifier; run clean under the sanitizers.
+
+fn mkslice(n: int) -> []int {
+    return [n, n + 1, n + 2]
+}
+
+fn mkstr(n: int) -> string {
+    return "row-" + int_to_string(n)
+}
+
+fn sum_borrow(xs: []int) -> int {
+    var i = 0
+    var s = 0
+    while i < len(xs) {
+        s = s + xs[i]
+        i = i + 1
+    }
+    return s
+}
+
+// Build + drop an owned slice return every iteration (previously leaked).
+fn TestReturnDropChurn() {
+    var i = 0
+    var acc = 0
+    while i < 64 {
+        let s = mkslice(i)
+        acc = acc + s[0] + s[2]
+        i = i + 1
+        // s drops here — owned slice free, no leak
+    }
+    // sum over i 0..63 of (i + i+2) = (2*i + 2) = 2*2016 + 128 = 4160
+    assert_eq(acc, 4160)
+}
+
+// Move the owned value out through a return — must not free before/after twice.
+fn passthrough(n: int) -> []int {
+    let s = mkslice(n)
+    return s
+}
+
+fn TestReturnMoveOut() {
+    var i = 0
+    var acc = 0
+    while i < 64 {
+        let s = passthrough(i)
+        acc = acc + len(s) + s[1]
+        i = i + 1
+    }
+    // sum of (3 + (i+1)) over 0..63 = 64*4 + 2016 = 2272
+    assert_eq(acc, 2272)
+}
+
+// Pass an owned return into a borrowing function, then drop.
+fn TestReturnBorrowThenDrop() {
+    var i = 0
+    var acc = 0
+    while i < 64 {
+        let s = mkslice(i)
+        acc = acc + sum_borrow(s)
+        i = i + 1
+        // s still owned here; drops after the borrow
+    }
+    // sum over i of (i + i+1 + i+2) = (3*i + 3) = 3*2016 + 192 = 6240
+    assert_eq(acc, 6240)
+}
+
+// Owned string returns, dropped each iteration.
+fn TestStringReturnDropChurn() {
+    var i = 0
+    var total = 0
+    while i < 64 {
+        let msg = mkstr(i)
+        total = total + len(msg)
+        i = i + 1
+    }
+    assert(total > 0)
+}

@@ -3632,7 +3632,7 @@ static inline MakoString mako_nats_sub_frame(MakoString subject, MakoString sid)
 }
 
 static inline MakoString mako_nats_connect_frame(void) {
-    return mako_str_from_cstr("CONNECT {\"verbose\":false,\"pedantic\":false,\"lang\":\"mako\",\"version\":\"0.4.15\"}\r\n");
+    return mako_str_from_cstr("CONNECT {\"verbose\":false,\"pedantic\":false,\"lang\":\"mako\",\"version\":\"0.4.16\"}\r\n");
 }
 
 static inline MakoString mako_nats_ping_frame(void) {
@@ -4061,91 +4061,753 @@ static inline MakoString mako_graphql_schema_sdl(int64_t id) {
 }
 
 /* Resolve root fields against registered resolvers → GraphQL JSON. */
-static inline MakoString mako_graphql_schema_resolve(int64_t id, MakoString query) {
-    if (id < 1 || id > MAKO_GQL_SCHEMA_MAX) return mako_graphql_error(mako_str_from_cstr("bad schema"));
-    MakoGqlSchema *s = &mako_gql_schemas[id - 1];
-    if (!s->used) return mako_graphql_error(mako_str_from_cstr("schema not found"));
-    MakoString fields = mako_graphql_fields(query);
-    if (!fields.data || fields.len == 0) {
-        mako_str_free(fields);
-        return mako_graphql_error(mako_str_from_cstr("no fields"));
+/* ===================================================================== *
+ *  GraphQL query executor (full)                                         *
+ *  Nested selection sets, aliases, arguments (+ operation variable        *
+ *  defaults), __typename, __schema/__type introspection, named + inline   *
+ *  fragments, field validation, and spec-shaped {"data":..,"errors":[..]} *
+ *  output. Data model: each root field maps to a static owned JSON value; *
+ *  a sub-selection shapes that JSON (objects and arrays of objects).      *
+ * ===================================================================== */
+#ifndef MAKO_GQLX_MAX_DEPTH
+#define MAKO_GQLX_MAX_DEPTH 24
+#endif
+
+typedef struct {
+    char *data;
+    size_t len;
+    size_t cap;
+} MakoGqlxBuf;
+
+static inline void mako_gqlx_init(MakoGqlxBuf *b) {
+    b->cap = 256;
+    b->len = 0;
+    b->data = (char *)malloc(b->cap);
+    if (!b->data) mako_abort("graphql executor OOM");
+    b->data[0] = 0;
+}
+static inline void mako_gqlx_reserve(MakoGqlxBuf *b, size_t extra) {
+    if (b->len + extra + 1 <= b->cap) return;
+    size_t nc = b->cap ? b->cap : 256;
+    while (b->len + extra + 1 > nc) nc *= 2;
+    char *nb = (char *)realloc(b->data, nc);
+    if (!nb) {
+        free(b->data);
+        mako_abort("graphql executor OOM");
     }
-    size_t cap = 1024;
-    char *buf = (char *)malloc(cap);
-    if (!buf) {
-        mako_str_free(fields);
-        mako_abort("graphql_schema_resolve OOM");
+    b->data = nb;
+    b->cap = nc;
+}
+static inline void mako_gqlx_putc(MakoGqlxBuf *b, char c) {
+    mako_gqlx_reserve(b, 1);
+    b->data[b->len++] = c;
+    b->data[b->len] = 0;
+}
+static inline void mako_gqlx_put(MakoGqlxBuf *b, const char *s, size_t n) {
+    if (!n || !s) return;
+    mako_gqlx_reserve(b, n);
+    memcpy(b->data + b->len, s, n);
+    b->len += n;
+    b->data[b->len] = 0;
+}
+static inline void mako_gqlx_puts(MakoGqlxBuf *b, const char *s) {
+    if (s) mako_gqlx_put(b, s, strlen(s));
+}
+
+/* ---- JSON value navigation over a (ptr,len) view --------------------- */
+static size_t mako_gqlx_jws(const char *s, size_t n, size_t i) {
+    while (i < n && (s[i] == ' ' || s[i] == '\t' || s[i] == '\n' || s[i] == '\r')) i++;
+    return i;
+}
+static size_t mako_gqlx_jstr(const char *s, size_t n, size_t i) {
+    i++; /* past opening quote */
+    while (i < n) {
+        if (s[i] == '\\') {
+            i += 2;
+            continue;
+        }
+        if (s[i] == '"') return i + 1;
+        i++;
     }
-    size_t len = 0;
-    buf[len++] = '{';
-    buf[len++] = '"';
-    memcpy(buf + len, "data", 4);
-    len += 4;
-    buf[len++] = '"';
-    buf[len++] = ':';
-    buf[len++] = '{';
-    int first = 1;
-    int any = 0;
+    return i;
+}
+static size_t mako_gqlx_jend(const char *s, size_t n, size_t i) {
+    i = mako_gqlx_jws(s, n, i);
+    if (i >= n) return i;
+    char c = s[i];
+    if (c == '"') return mako_gqlx_jstr(s, n, i);
+    if (c == '{' || c == '[') {
+        int depth = 0;
+        while (i < n) {
+            char d = s[i];
+            if (d == '"') {
+                i = mako_gqlx_jstr(s, n, i);
+                continue;
+            }
+            if (d == '{' || d == '[') {
+                depth++;
+                i++;
+                continue;
+            }
+            if (d == '}' || d == ']') {
+                depth--;
+                i++;
+                if (depth == 0) return i;
+                continue;
+            }
+            i++;
+        }
+        return i;
+    }
+    while (i < n) {
+        char d = s[i];
+        if (d == ',' || d == '}' || d == ']' || d == ' ' || d == '\t' || d == '\n' || d == '\r') break;
+        i++;
+    }
+    return i;
+}
+/* Raw JSON value span for `key` within object text s[0..n). */
+static int mako_gqlx_jget(const char *s, size_t n, const char *key, size_t klen,
+                          size_t *vs, size_t *ve) {
+    size_t i = mako_gqlx_jws(s, n, 0);
+    if (i >= n || s[i] != '{') return 0;
+    i++;
+    while (i < n) {
+        i = mako_gqlx_jws(s, n, i);
+        while (i < n && s[i] == ',') {
+            i++;
+            i = mako_gqlx_jws(s, n, i);
+        }
+        if (i >= n || s[i] == '}') break;
+        if (s[i] != '"') {
+            i = mako_gqlx_jend(s, n, i);
+            continue;
+        }
+        size_t kstart = i + 1;
+        size_t kend = mako_gqlx_jstr(s, n, i);
+        size_t keylen = (kend >= kstart + 1) ? (kend - 1 - kstart) : 0;
+        i = mako_gqlx_jws(s, n, kend);
+        if (i < n && s[i] == ':') i++;
+        i = mako_gqlx_jws(s, n, i);
+        size_t vstart = i;
+        size_t vend = mako_gqlx_jend(s, n, i);
+        if (keylen == klen && key && memcmp(s + kstart, key, klen) == 0) {
+            *vs = vstart;
+            *ve = vend;
+            return 1;
+        }
+        i = vend;
+    }
+    return 0;
+}
+
+/* ---- GraphQL query text helpers -------------------------------------- */
+static int mako_gqlx_id0(char c) {
+    return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || c == '_';
+}
+static int mako_gqlx_idc(char c) { return mako_gqlx_id0(c) || (c >= '0' && c <= '9'); }
+static size_t mako_gqlx_qws(MakoString q, size_t i) {
+    while (i < q.len && (q.data[i] == ' ' || q.data[i] == '\t' || q.data[i] == '\n'
+                         || q.data[i] == '\r' || q.data[i] == ','))
+        i++;
+    return i;
+}
+static size_t mako_gqlx_qid(MakoString q, size_t i) {
+    while (i < q.len && mako_gqlx_idc(q.data[i])) i++;
+    return i;
+}
+/* Skip a balanced (...) or {...} starting at q[i]==open; index past close. */
+static size_t mako_gqlx_qbalance(MakoString q, size_t i, char open, char close) {
+    int d = 0;
+    while (i < q.len) {
+        char c = q.data[i];
+        if (c == '"') {
+            i++;
+            while (i < q.len) {
+                if (q.data[i] == '\\') {
+                    i += 2;
+                    continue;
+                }
+                if (q.data[i] == '"') {
+                    i++;
+                    break;
+                }
+                i++;
+            }
+            continue;
+        }
+        if (c == open) {
+            d++;
+            i++;
+            continue;
+        }
+        if (c == close) {
+            d--;
+            i++;
+            if (d == 0) return i;
+            continue;
+        }
+        i++;
+    }
+    return i;
+}
+/* Root selection-set '{' (skips leading fragment defs + operation header). */
+static size_t mako_gqlx_root_brace(MakoString q) {
+    size_t i = mako_gqlx_qws(q, 0);
+    while (i < q.len) {
+        if (q.data[i] == '{') return i;
+        if (mako_gqlx_id0(q.data[i])) {
+            size_t e = mako_gqlx_qid(q, i);
+            if (e - i == 8 && memcmp(q.data + i, "fragment", 8) == 0) {
+                i = mako_gqlx_qws(q, e);
+                i = mako_gqlx_qid(q, i); /* name */
+                i = mako_gqlx_qws(q, i);
+                i = mako_gqlx_qid(q, i); /* on */
+                i = mako_gqlx_qws(q, i);
+                i = mako_gqlx_qid(q, i); /* type */
+                i = mako_gqlx_qws(q, i);
+                if (i < q.len && q.data[i] == '{') i = mako_gqlx_qbalance(q, i, '{', '}');
+                i = mako_gqlx_qws(q, i);
+                continue;
+            }
+            i = mako_gqlx_qws(q, e);
+            if (i < q.len && mako_gqlx_id0(q.data[i])) i = mako_gqlx_qid(q, i); /* op name */
+            i = mako_gqlx_qws(q, i);
+            if (i < q.len && q.data[i] == '(') i = mako_gqlx_qbalance(q, i, '(', ')');
+            i = mako_gqlx_qws(q, i);
+            while (i < q.len && q.data[i] == '@') {
+                i++;
+                i = mako_gqlx_qid(q, i);
+                i = mako_gqlx_qws(q, i);
+                if (i < q.len && q.data[i] == '(') i = mako_gqlx_qbalance(q, i, '(', ')');
+                i = mako_gqlx_qws(q, i);
+            }
+            continue;
+        }
+        i++;
+    }
+    return q.len;
+}
+/* Operation variable-definition text (inside '(' ')') for $var defaults. */
+static MakoString mako_gqlx_vardefs(MakoString q) {
+    size_t i = mako_gqlx_qws(q, 0);
+    if (i < q.len && mako_gqlx_id0(q.data[i])) {
+        size_t e = mako_gqlx_qid(q, i);
+        if (e - i == 8 && memcmp(q.data + i, "fragment", 8) == 0) {
+            MakoString empty = {(char *)0, 0};
+            return empty;
+        }
+        i = mako_gqlx_qws(q, e);
+        if (i < q.len && mako_gqlx_id0(q.data[i])) i = mako_gqlx_qid(q, i);
+        i = mako_gqlx_qws(q, i);
+    }
+    if (i < q.len && q.data[i] == '(') {
+        size_t s0 = i + 1;
+        size_t e0 = mako_gqlx_qbalance(q, i, '(', ')');
+        if (e0 > s0 + 1) {
+            MakoString out = {q.data + s0, e0 - 1 - s0};
+            return out;
+        }
+    }
+    MakoString empty = {(char *)0, 0};
+    return empty;
+}
+/* Default value text for $name within vardefs (borrowed slice or {0,0}). */
+static MakoString mako_gqlx_var_default(MakoString vardefs, const char *name, size_t nlen) {
+    MakoString empty = {(char *)0, 0};
+    if (!vardefs.data || vardefs.len == 0) return empty;
     size_t i = 0;
-    pthread_mutex_lock(&s->mu);
-    while (i < fields.len) {
-        size_t start = i;
-        while (i < fields.len && fields.data[i] != ',') i++;
-        size_t flen = i - start;
-        if (flen > 0 && flen < MAKO_GQL_NAME_MAX) {
-            MakoString *body = NULL;
+    while (i < vardefs.len) {
+        if (vardefs.data[i] == '$') {
+            size_t s0 = i + 1;
+            size_t e0 = mako_gqlx_qid(vardefs, s0);
+            if (e0 - s0 == nlen && memcmp(vardefs.data + s0, name, nlen) == 0) {
+                size_t j = mako_gqlx_qws(vardefs, e0);
+                if (j < vardefs.len && vardefs.data[j] == ':') {
+                    j++;
+                    int d = 0;
+                    while (j < vardefs.len) {
+                        char c = vardefs.data[j];
+                        if (c == '[' || c == '(') d++;
+                        else if (c == ']' || c == ')') d--;
+                        else if (d == 0 && (c == '=' || c == ',')) break;
+                        j++;
+                    }
+                    if (j < vardefs.len && vardefs.data[j] == '=') {
+                        j = mako_gqlx_qws(vardefs, j + 1);
+                        size_t ve = mako_gqlx_jend(vardefs.data, vardefs.len, j);
+                        MakoString out = {vardefs.data + j, ve - j};
+                        return out;
+                    }
+                }
+                return empty;
+            }
+            i = e0;
+            continue;
+        }
+        i++;
+    }
+    return empty;
+}
+/* Argument `name` value within args span q[as..ae) ($var → default). */
+static MakoString mako_gqlx_arg_raw(MakoString q, size_t as, size_t ae, const char *name,
+                                    size_t nlen, MakoString vardefs) {
+    MakoString empty = {(char *)0, 0};
+    size_t i = as;
+    while (i < ae) {
+        if (mako_gqlx_id0(q.data[i])) {
+            size_t s0 = i;
+            size_t e0 = mako_gqlx_qid(q, i);
+            size_t j = mako_gqlx_qws(q, e0);
+            if (j < ae && q.data[j] == ':') {
+                if (e0 - s0 == nlen && memcmp(q.data + s0, name, nlen) == 0) {
+                    j = mako_gqlx_qws(q, j + 1);
+                    if (j < ae && q.data[j] == '$') {
+                        size_t vs = j + 1;
+                        size_t ve = mako_gqlx_qid(q, vs);
+                        return mako_gqlx_var_default(vardefs, q.data + vs, ve - vs);
+                    }
+                    size_t ve = mako_gqlx_jend(q.data, ae, j);
+                    MakoString out = {q.data + j, ve - j};
+                    return out;
+                }
+                j = mako_gqlx_qws(q, j + 1);
+                i = mako_gqlx_jend(q.data, ae, j);
+                continue;
+            }
+            i = e0;
+            continue;
+        }
+        i++;
+    }
+    return empty;
+}
+
+/* ---- schema lookups (schema mutex held by caller) -------------------- */
+static void mako_gqlx_base_type(char *dst, size_t dcap, const char *ret, size_t rl) {
+    size_t o = 0;
+    for (size_t k = 0; k < rl && o + 1 < dcap; k++) {
+        char c = ret[k];
+        if (c == '[' || c == ']' || c == '!' || c == ' ') continue;
+        dst[o++] = c;
+    }
+    if (dcap) dst[o] = 0;
+}
+/* 1: field found (dst=base ret type); 0: type known, field undeclared; -1: type unknown. */
+static int mako_gqlx_field_ret(MakoGqlSchema *s, const char *type_name, const char *field_name,
+                               size_t fnlen, char *dst, size_t dcap) {
+    if (dcap) dst[0] = 0;
+    if (!type_name || !type_name[0]) return -1;
+    size_t tnl = strlen(type_name);
+    for (int i = 0; i < MAKO_GQL_TYPE_MAX; i++) {
+        if (!s->types[i].used) continue;
+        if (strlen(s->types[i].name) == tnl && memcmp(s->types[i].name, type_name, tnl) == 0) {
+            for (int f = 0; f < MAKO_GQL_FIELD_MAX; f++) {
+                if (!s->types[i].fields[f].used) continue;
+                if (strlen(s->types[i].fields[f].name) == fnlen
+                    && memcmp(s->types[i].fields[f].name, field_name, fnlen) == 0) {
+                    mako_gqlx_base_type(dst, dcap, s->types[i].fields[f].ret_type,
+                                        strlen(s->types[i].fields[f].ret_type));
+                    return 1;
+                }
+            }
+            return 0;
+        }
+    }
+    return -1;
+}
+static int mako_gqlx_type_exists(MakoGqlSchema *s, const char *name) {
+    size_t nl = strlen(name);
+    for (int i = 0; i < MAKO_GQL_TYPE_MAX; i++)
+        if (s->types[i].used && strlen(s->types[i].name) == nl
+            && memcmp(s->types[i].name, name, nl) == 0)
+            return 1;
+    return 0;
+}
+static const char *mako_gqlx_first_type(MakoGqlSchema *s) {
+    for (int i = 0; i < MAKO_GQL_TYPE_MAX; i++)
+        if (s->types[i].used) return s->types[i].name;
+    return "";
+}
+/* ---- introspection JSON builders ------------------------------------- */
+static void mako_gqlx_introspect_type(MakoGqlSchema *s, const char *tn, MakoGqlxBuf *out) {
+    mako_gqlx_puts(out, "{\"kind\":\"OBJECT\",\"name\":\"");
+    mako_gqlx_puts(out, tn);
+    mako_gqlx_puts(out, "\",\"fields\":[");
+    size_t tnl = strlen(tn);
+    int first = 1;
+    for (int i = 0; i < MAKO_GQL_TYPE_MAX; i++) {
+        if (!s->types[i].used) continue;
+        if (!(strlen(s->types[i].name) == tnl && memcmp(s->types[i].name, tn, tnl) == 0)) continue;
+        for (int f = 0; f < MAKO_GQL_FIELD_MAX; f++) {
+            if (!s->types[i].fields[f].used) continue;
+            if (!first) mako_gqlx_putc(out, ',');
+            first = 0;
+            char base[MAKO_GQL_TYPE_STR];
+            mako_gqlx_base_type(base, sizeof base, s->types[i].fields[f].ret_type,
+                                strlen(s->types[i].fields[f].ret_type));
+            mako_gqlx_puts(out, "{\"name\":\"");
+            mako_gqlx_puts(out, s->types[i].fields[f].name);
+            mako_gqlx_puts(out, "\",\"type\":{\"name\":\"");
+            mako_gqlx_puts(out, base);
+            mako_gqlx_puts(out, "\",\"kind\":\"OBJECT\"}}");
+        }
+        break;
+    }
+    mako_gqlx_puts(out, "]}");
+}
+static void mako_gqlx_introspect_schema(MakoGqlSchema *s, MakoGqlxBuf *out) {
+    mako_gqlx_puts(out, "{\"queryType\":{\"name\":\"Query\"},\"mutationType\":");
+    if (mako_gqlx_type_exists(s, "Mutation")) mako_gqlx_puts(out, "{\"name\":\"Mutation\"}");
+    else mako_gqlx_puts(out, "null");
+    mako_gqlx_puts(out, ",\"types\":[");
+    int first = 1;
+    for (int i = 0; i < MAKO_GQL_TYPE_MAX; i++) {
+        if (!s->types[i].used) continue;
+        if (!first) mako_gqlx_putc(out, ',');
+        first = 0;
+        mako_gqlx_introspect_type(s, s->types[i].name, out);
+    }
+    mako_gqlx_puts(out, "]}");
+}
+/* Operation is a mutation? (non-allocating; avoids leaky str_from_cstr temp). */
+static int mako_gqlx_is_mutation(MakoString q) {
+    size_t i = mako_gqlx_qws(q, 0);
+    if (i >= q.len || !mako_gqlx_id0(q.data[i])) return 0;
+    size_t e = mako_gqlx_qid(q, i);
+    return (e - i == 8 && memcmp(q.data + i, "mutation", 8) == 0) ? 1 : 0;
+}
+/* Locate named fragment's selection-set body span. */
+static int mako_gqlx_find_fragment(MakoString q, const char *name, size_t nlen,
+                                   size_t *body_i, size_t *after_i) {
+    size_t i = 0;
+    while (i < q.len) {
+        if (mako_gqlx_id0(q.data[i])) {
+            size_t s0 = i;
+            size_t e0 = mako_gqlx_qid(q, i);
+            if (e0 - s0 == 8 && memcmp(q.data + s0, "fragment", 8) == 0) {
+                size_t k = mako_gqlx_qws(q, e0);
+                size_t fns = k;
+                size_t fne = mako_gqlx_qid(q, k);
+                k = mako_gqlx_qws(q, fne);
+                k = mako_gqlx_qid(q, k); /* on */
+                k = mako_gqlx_qws(q, k);
+                k = mako_gqlx_qid(q, k); /* type */
+                k = mako_gqlx_qws(q, k);
+                if (k < q.len && q.data[k] == '{') {
+                    size_t b = k + 1;
+                    size_t a = mako_gqlx_qbalance(q, k, '{', '}');
+                    if (fne - fns == nlen && memcmp(q.data + fns, name, nlen) == 0) {
+                        *body_i = b;
+                        *after_i = a;
+                        return 1;
+                    }
+                    i = a;
+                    continue;
+                }
+            }
+            i = e0;
+            continue;
+        }
+        i++;
+    }
+    return 0;
+}
+
+static void mako_gqlx_emit_value(MakoGqlSchema *s, MakoString q, const char *fname, size_t fnlen,
+                                 size_t args_s, size_t args_e, int has_args, int has_sub,
+                                 size_t sub_i, const char *cur_type, const char *ctx,
+                                 size_t ctxlen, int is_root, MakoString vardefs, MakoGqlxBuf *out,
+                                 MakoGqlxBuf *errs, int depth);
+static size_t mako_gqlx_exec_pairs(MakoGqlSchema *s, MakoString q, size_t i, const char *cur_type,
+                                   const char *ctx, size_t ctxlen, int is_root, MakoString vardefs,
+                                   MakoGqlxBuf *out, MakoGqlxBuf *errs, int depth, int *first);
+
+static size_t mako_gqlx_exec_pairs(MakoGqlSchema *s, MakoString q, size_t i, const char *cur_type,
+                                   const char *ctx, size_t ctxlen, int is_root, MakoString vardefs,
+                                   MakoGqlxBuf *out, MakoGqlxBuf *errs, int depth, int *first) {
+    if (depth > MAKO_GQLX_MAX_DEPTH) {
+        int d = 1;
+        while (i < q.len && d > 0) {
+            if (q.data[i] == '{') d++;
+            else if (q.data[i] == '}') d--;
+            i++;
+        }
+        return i;
+    }
+    while (i < q.len) {
+        i = mako_gqlx_qws(q, i);
+        if (i >= q.len) break;
+        if (q.data[i] == '}') {
+            i++;
+            break;
+        }
+        if (q.data[i] == '.' && i + 2 < q.len && q.data[i + 1] == '.' && q.data[i + 2] == '.') {
+            i = mako_gqlx_qws(q, i + 3);
+            if (i < q.len && mako_gqlx_id0(q.data[i])) {
+                size_t ns = i;
+                size_t ne = mako_gqlx_qid(q, i);
+                if (ne - ns == 2 && memcmp(q.data + ns, "on", 2) == 0) {
+                    i = mako_gqlx_qws(q, ne);
+                    size_t ts = i;
+                    size_t te = mako_gqlx_qid(q, i);
+                    i = mako_gqlx_qws(q, te);
+                    if (i < q.len && q.data[i] == '{') {
+                        size_t body = i + 1;
+                        size_t after = mako_gqlx_qbalance(q, i, '{', '}');
+                        int run = 1;
+                        if (cur_type && cur_type[0] && te > ts) {
+                            size_t ctl = strlen(cur_type);
+                            run = (te - ts == ctl && memcmp(q.data + ts, cur_type, ctl) == 0);
+                        }
+                        if (run)
+                            mako_gqlx_exec_pairs(s, q, body, cur_type, ctx, ctxlen, is_root, vardefs,
+                                                 out, errs, depth + 1, first);
+                        i = after;
+                    }
+                } else {
+                    size_t fbody, fafter;
+                    if (mako_gqlx_find_fragment(q, q.data + ns, ne - ns, &fbody, &fafter))
+                        mako_gqlx_exec_pairs(s, q, fbody, cur_type, ctx, ctxlen, is_root, vardefs,
+                                             out, errs, depth + 1, first);
+                }
+            }
+            continue;
+        }
+        if (!mako_gqlx_id0(q.data[i])) {
+            i++;
+            continue;
+        }
+        size_t as0 = i;
+        size_t ae0 = mako_gqlx_qid(q, i);
+        size_t j = mako_gqlx_qws(q, ae0);
+        const char *alias_p = q.data + as0;
+        size_t alias_n = ae0 - as0;
+        const char *fname_p;
+        size_t fname_n;
+        if (j < q.len && q.data[j] == ':') {
+            j = mako_gqlx_qws(q, j + 1);
+            size_t fs = j;
+            size_t fe = mako_gqlx_qid(q, j);
+            fname_p = q.data + fs;
+            fname_n = fe - fs;
+            i = fe;
+        } else {
+            fname_p = q.data + as0;
+            fname_n = ae0 - as0;
+            i = ae0;
+        }
+        i = mako_gqlx_qws(q, i);
+        int has_args = 0;
+        size_t args_s = 0, args_e = 0;
+        if (i < q.len && q.data[i] == '(') {
+            has_args = 1;
+            args_s = i + 1;
+            size_t e = mako_gqlx_qbalance(q, i, '(', ')');
+            args_e = (e > 0 ? e - 1 : i);
+            i = e;
+        }
+        i = mako_gqlx_qws(q, i);
+        while (i < q.len && q.data[i] == '@') {
+            i++;
+            i = mako_gqlx_qid(q, i);
+            i = mako_gqlx_qws(q, i);
+            if (i < q.len && q.data[i] == '(') i = mako_gqlx_qbalance(q, i, '(', ')');
+            i = mako_gqlx_qws(q, i);
+        }
+        int has_sub = 0;
+        size_t sub_i = 0;
+        if (i < q.len && q.data[i] == '{') {
+            has_sub = 1;
+            sub_i = i + 1;
+            i = mako_gqlx_qbalance(q, i, '{', '}');
+        }
+        if (!*first) mako_gqlx_putc(out, ',');
+        *first = 0;
+        mako_gqlx_putc(out, '"');
+        mako_gqlx_put(out, alias_p, alias_n);
+        mako_gqlx_puts(out, "\":");
+        mako_gqlx_emit_value(s, q, fname_p, fname_n, args_s, args_e, has_args, has_sub, sub_i,
+                             cur_type, ctx, ctxlen, is_root, vardefs, out, errs, depth);
+    }
+    return i;
+}
+
+static void mako_gqlx_emit_error(MakoGqlxBuf *errs, const char *fname, size_t fnlen,
+                                 const char *type_name) {
+    if (errs->len > 0) mako_gqlx_putc(errs, ',');
+    mako_gqlx_puts(errs, "{\"message\":\"Cannot query field \\\"");
+    mako_gqlx_put(errs, fname, fnlen);
+    mako_gqlx_puts(errs, "\\\" on type \\\"");
+    mako_gqlx_puts(errs, (type_name && type_name[0]) ? type_name : "Query");
+    mako_gqlx_puts(errs, "\\\".\"}");
+}
+
+static void mako_gqlx_emit_value(MakoGqlSchema *s, MakoString q, const char *fname, size_t fnlen,
+                                 size_t args_s, size_t args_e, int has_args, int has_sub,
+                                 size_t sub_i, const char *cur_type, const char *ctx,
+                                 size_t ctxlen, int is_root, MakoString vardefs, MakoGqlxBuf *out,
+                                 MakoGqlxBuf *errs, int depth) {
+    if (fnlen == 10 && memcmp(fname, "__typename", 10) == 0) {
+        mako_gqlx_putc(out, '"');
+        mako_gqlx_puts(out, (cur_type && cur_type[0]) ? cur_type : "Query");
+        mako_gqlx_putc(out, '"');
+        return;
+    }
+
+    MakoGqlxBuf tmp;
+    int have_tmp = 0;
+    const char *val = NULL;
+    size_t vlen = 0;
+    char child_type[MAKO_GQL_TYPE_STR];
+    child_type[0] = 0;
+    const char *child = NULL;
+
+    if (is_root) {
+        if (fnlen == 8 && memcmp(fname, "__schema", 8) == 0) {
+            mako_gqlx_init(&tmp);
+            have_tmp = 1;
+            mako_gqlx_introspect_schema(s, &tmp);
+            val = tmp.data;
+            vlen = tmp.len;
+        } else if (fnlen == 6 && memcmp(fname, "__type", 6) == 0) {
+            MakoString tn = has_args
+                ? mako_gqlx_arg_raw(q, args_s, args_e, "name", 4, vardefs)
+                : (MakoString){(char *)0, 0};
+            char tnbuf[MAKO_GQL_NAME_MAX];
+            size_t o = 0;
+            if (tn.data)
+                for (size_t k = 0; k < tn.len && o + 1 < sizeof tnbuf; k++) {
+                    char c = tn.data[k];
+                    if (c == '"') continue;
+                    tnbuf[o++] = c;
+                }
+            tnbuf[o] = 0;
+            mako_gqlx_init(&tmp);
+            have_tmp = 1;
+            if (o > 0 && mako_gqlx_type_exists(s, tnbuf)) mako_gqlx_introspect_type(s, tnbuf, &tmp);
+            else mako_gqlx_puts(&tmp, "null");
+            val = tmp.data;
+            vlen = tmp.len;
+        } else {
             for (int r = 0; r < MAKO_GQL_RESOLVER_MAX; r++) {
                 if (!s->resolvers[r].used) continue;
-                if (strlen(s->resolvers[r].field) == flen
-                    && memcmp(s->resolvers[r].field, fields.data + start, flen) == 0) {
-                    body = &s->resolvers[r].body;
+                if (strlen(s->resolvers[r].field) == fnlen
+                    && memcmp(s->resolvers[r].field, fname, fnlen) == 0) {
+                    val = s->resolvers[r].body.data;
+                    vlen = s->resolvers[r].body.len;
                     break;
                 }
             }
-            if (body && body->data) {
-                if (len + flen + body->len + 16 >= cap) {
-                    while (len + flen + body->len + 16 >= cap) cap *= 2;
-                    char *nb = (char *)realloc(buf, cap);
-                    if (!nb) {
-                        free(buf);
-                        mako_str_free(fields);
-                        pthread_mutex_unlock(&s->mu);
-                        mako_abort("graphql_schema_resolve OOM");
-                    }
-                    buf = nb;
-                }
-                if (!first) buf[len++] = ',';
-                buf[len++] = '"';
-                memcpy(buf + len, fields.data + start, flen);
-                len += flen;
-                buf[len++] = '"';
-                buf[len++] = ':';
-                memcpy(buf + len, body->data, body->len);
-                len += body->len;
-                first = 0;
-                any = 1;
+            if (!val) {
+                mako_gqlx_puts(out, "null");
+                mako_gqlx_emit_error(errs, fname, fnlen, cur_type);
+                return;
             }
+            if (mako_gqlx_field_ret(s, cur_type, fname, fnlen, child_type, sizeof child_type) == 1
+                && child_type[0])
+                child = child_type;
         }
-        if (i < fields.len && fields.data[i] == ',') i++;
+    } else {
+        size_t vs, ve;
+        if (ctx && mako_gqlx_jget(ctx, ctxlen, fname, fnlen, &vs, &ve)) {
+            val = ctx + vs;
+            vlen = ve - vs;
+            if (mako_gqlx_field_ret(s, cur_type, fname, fnlen, child_type, sizeof child_type) == 1
+                && child_type[0])
+                child = child_type;
+        } else {
+            if (mako_gqlx_field_ret(s, cur_type, fname, fnlen, child_type, sizeof child_type) == 0)
+                mako_gqlx_emit_error(errs, fname, fnlen, cur_type);
+            mako_gqlx_puts(out, "null");
+            return;
+        }
     }
+
+    if (has_sub && val) {
+        size_t p = mako_gqlx_jws(val, vlen, 0);
+        if (p < vlen && val[p] == '{') {
+            int f2 = 1;
+            mako_gqlx_putc(out, '{');
+            mako_gqlx_exec_pairs(s, q, sub_i, child, val, vlen, 0, vardefs, out, errs, depth + 1,
+                                 &f2);
+            mako_gqlx_putc(out, '}');
+        } else if (p < vlen && val[p] == '[') {
+            mako_gqlx_putc(out, '[');
+            size_t i2 = p + 1;
+            int firstEl = 1;
+            while (i2 < vlen) {
+                i2 = mako_gqlx_jws(val, vlen, i2);
+                while (i2 < vlen && val[i2] == ',') {
+                    i2++;
+                    i2 = mako_gqlx_jws(val, vlen, i2);
+                }
+                if (i2 >= vlen || val[i2] == ']') break;
+                size_t es = i2;
+                size_t ee = mako_gqlx_jend(val, vlen, i2);
+                if (!firstEl) mako_gqlx_putc(out, ',');
+                firstEl = 0;
+                size_t ep = mako_gqlx_jws(val, ee, es);
+                if (ep < ee && val[ep] == '{') {
+                    int f3 = 1;
+                    mako_gqlx_putc(out, '{');
+                    mako_gqlx_exec_pairs(s, q, sub_i, child, val + es, ee - es, 0, vardefs, out,
+                                         errs, depth + 1, &f3);
+                    mako_gqlx_putc(out, '}');
+                } else {
+                    mako_gqlx_put(out, val + es, ee - es);
+                }
+                i2 = ee;
+            }
+            mako_gqlx_putc(out, ']');
+        } else {
+            mako_gqlx_put(out, val, vlen);
+        }
+    } else if (val && vlen) {
+        mako_gqlx_put(out, val, vlen);
+    } else {
+        mako_gqlx_puts(out, "null");
+    }
+
+    if (have_tmp) free(tmp.data);
+}
+
+static inline MakoString mako_graphql_schema_resolve(int64_t id, MakoString query) {
+    if (id < 1 || id > MAKO_GQL_SCHEMA_MAX)
+        return mako_graphql_error(mako_str_from_cstr("bad schema"));
+    MakoGqlSchema *s = &mako_gql_schemas[id - 1];
+    if (!s->used) return mako_graphql_error(mako_str_from_cstr("schema not found"));
+
+    size_t rb = mako_gqlx_root_brace(query);
+    if (rb >= query.len) return mako_graphql_error(mako_str_from_cstr("no fields"));
+
+    MakoString vardefs = mako_gqlx_vardefs(query);
+    MakoGqlxBuf out;
+    mako_gqlx_init(&out);
+    MakoGqlxBuf errs;
+    mako_gqlx_init(&errs);
+
+    pthread_mutex_lock(&s->mu);
+    const char *rt = mako_gqlx_is_mutation(query) ? "Mutation" : "Query";
+    if (!mako_gqlx_type_exists(s, rt)) {
+        const char *ft = mako_gqlx_first_type(s);
+        if (ft[0]) rt = ft;
+    }
+    mako_gqlx_puts(&out, "{\"data\":{");
+    int first = 1;
+    mako_gqlx_exec_pairs(s, query, rb + 1, rt, NULL, 0, 1, vardefs, &out, &errs, 0, &first);
+    mako_gqlx_puts(&out, "}");
+    if (errs.len > 0) {
+        mako_gqlx_puts(&out, ",\"errors\":[");
+        mako_gqlx_put(&out, errs.data, errs.len);
+        mako_gqlx_puts(&out, "]");
+    }
+    mako_gqlx_puts(&out, "}");
     pthread_mutex_unlock(&s->mu);
-    mako_str_free(fields);
-    if (!any) {
-        free(buf);
-        return mako_graphql_error(mako_str_from_cstr("unresolved field"));
-    }
-    if (len + 4 >= cap) {
-        char *nb = (char *)realloc(buf, len + 8);
-        if (!nb) {
-            free(buf);
-            mako_abort("graphql_schema_resolve OOM");
-        }
-        buf = nb;
-    }
-    buf[len++] = '}';
-    buf[len++] = '}';
-    buf[len] = 0;
-    return (MakoString){buf, len};
+
+    free(errs.data);
+    MakoString result = {out.data, out.len};
+    return result;
 }
 
 /* ---- OpenAPI 3.1 builders (expand path docs) ----------------------------- */
