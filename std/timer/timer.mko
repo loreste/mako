@@ -1,0 +1,15 @@
+// General deadline timer heap.
+pack timer
+
+export fn heap_new(max_timers: int) -> int { return timer_heap_new(max_timers) }
+export fn heap_free(h: int) -> int { return timer_heap_free(h) }
+export fn heap_arm(h: int, deadline_ms: int, kind: int, id: int) -> int {
+    return timer_heap_arm(h, deadline_ms, kind, id)
+}
+export fn heap_cancel(h: int, index: int) -> int { return timer_heap_cancel(h, index) }
+export fn heap_next(h: int) -> int { return timer_heap_next(h) }
+export fn heap_pop_due(h: int, now_ms: int) -> int { return timer_heap_pop_due1(h, now_ms) }
+export fn last_kind() -> int { return timer_last_kind() }
+export fn last_id() -> int { return timer_last_id() }
+export fn heap_count(h: int) -> int { return timer_heap_count(h) }
+export fn heap_drops(h: int) -> int { return timer_heap_drops(h) }

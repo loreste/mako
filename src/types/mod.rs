@@ -11097,6 +11097,46 @@ impl TypeChecker {
             Type::Fn(vec![Type::String, Type::Int, Type::String], Box::new(Type::Int)),
         );
         fns.insert(
+            "tls_pool_open_timeout".into(),
+            Type::Fn(
+                vec![Type::String, Type::Int, Type::String, Type::Int],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "tls_pool_open_mtls".into(),
+            Type::Fn(
+                vec![
+                    Type::String,
+                    Type::Int,
+                    Type::String,
+                    Type::String,
+                    Type::String,
+                    Type::Int,
+                ],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "tls_pool_open_mtls_full".into(),
+            Type::Fn(
+                vec![
+                    Type::String,
+                    Type::Int,
+                    Type::String,
+                    Type::String,
+                    Type::String,
+                    Type::Int,
+                    Type::Int,
+                ],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "tls_pool_set_timeout".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
             "tls_pool_send".into(),
             Type::Fn(vec![Type::Int, Type::String], Box::new(Type::Int)),
         );
@@ -11112,6 +11152,659 @@ impl TypeChecker {
             "tls_pool_close".into(),
             Type::Fn(vec![Type::Int], Box::new(Type::Int)),
         );
+                fns.insert(
+            "timer_heap_new".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "timer_heap_free".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "timer_heap_arm".into(),
+            Type::Fn(vec![Type::Int, Type::Int, Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "timer_heap_cancel".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "timer_heap_next".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "timer_heap_pop_due1".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "timer_last_kind".into(),
+            Type::Fn(vec![], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "timer_last_id".into(),
+            Type::Fn(vec![], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "timer_heap_count".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "timer_heap_drops".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "peer_table_new".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "peer_table_free".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "peer_table_add".into(),
+            Type::Fn(vec![Type::Int, Type::String, Type::String, Type::Int, Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "peer_table_set_conn".into(),
+            Type::Fn(vec![Type::Int, Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "peer_table_get_conn".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "peer_table_set_state".into(),
+            Type::Fn(vec![Type::Int, Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "peer_table_get_state".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "peer_table_touch".into(),
+            Type::Fn(vec![Type::Int, Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "peer_table_last_ms".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "peer_table_route_add".into(),
+            Type::Fn(vec![Type::Int, Type::String, Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "peer_table_route_lookup".into(),
+            Type::Fn(vec![Type::Int, Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "peer_table_count".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "peer_table_drops".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "peer_table_host".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::String)),
+        );
+        fns.insert(
+            "peer_table_port".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "peer_table_transport".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "peer_table_capacity".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "peer_table_alive".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "sctp_available".into(),
+            Type::Fn(vec![], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "sctp_listen".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "sctp_listen_addr".into(),
+            Type::Fn(vec![Type::String, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "sctp_accept".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "sctp_connect".into(),
+            Type::Fn(vec![Type::String, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "sctp_connect_timeout".into(),
+            Type::Fn(vec![Type::String, Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "sctp_close".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "sctp_shutdown".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "sctp_set_timeout".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "sctp_write".into(),
+            Type::Fn(vec![Type::Int, Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "sctp_write_all".into(),
+            Type::Fn(vec![Type::Int, Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "sctp_read".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::String)),
+        );
+        fns.insert(
+            "sctp_read_n".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::String)),
+        );
+        fns.insert(
+            "sctp_peer_addr".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::String)),
+        );
+        fns.insert(
+            "sctp_local_addr".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::String)),
+        );
+        fns.insert(
+            "sctp_send_stream".into(),
+            Type::Fn(vec![Type::Int, Type::Int, Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "sctp_recv_stream".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::String)),
+        );
+        fns.insert(
+            "sctp_last_stream".into(),
+            Type::Fn(vec![], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "sctp_last_ppid".into(),
+            Type::Fn(vec![], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "sctp_set_streams".into(),
+            Type::Fn(vec![Type::Int, Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "sctp_get_streams".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "sctp_send_ex".into(),
+            Type::Fn(vec![Type::Int, Type::Int, Type::Int, Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "sctp_set_heartbeat".into(),
+            Type::Fn(vec![Type::Int, Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "sctp_set_rto".into(),
+            Type::Fn(vec![Type::Int, Type::Int, Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "sctp_bindx_add".into(),
+            Type::Fn(vec![Type::Int, Type::String, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "sctp_bindx_rem".into(),
+            Type::Fn(vec![Type::Int, Type::String, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "sctp_connectx".into(),
+            Type::Fn(vec![Type::String, Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "sctp_getpaddrs".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::String)),
+        );
+        fns.insert(
+            "sctp_getladdrs".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::String)),
+        );
+        fns.insert(
+            "sctp_set_primary".into(),
+            Type::Fn(vec![Type::Int, Type::String, Type::Int], Box::new(Type::Int)),
+        );
+                fns.insert(
+            "diameter_limits_set".into(),
+            Type::Fn(vec![Type::Int, Type::Int, Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "diameter_limits_max_msg".into(),
+            Type::Fn(vec![], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "diameter_limits_inbuf".into(),
+            Type::Fn(vec![], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "diameter_limits_inq_bytes".into(),
+            Type::Fn(vec![], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "diameter_limits_reasm_ms".into(),
+            Type::Fn(vec![], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "diameter_tcm_set_run_budget".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+fns.insert(
+            "diameter_tcm_new".into(),
+            Type::Fn(vec![Type::Int, Type::Int, Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "diameter_tcm_free".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "diameter_tcm_set_origin".into(),
+            Type::Fn(vec![Type::Int, Type::String, Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "diameter_tcm_set_watchdog".into(),
+            Type::Fn(vec![Type::Int, Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "diameter_tcm_peer_add".into(),
+            Type::Fn(vec![Type::Int, Type::String, Type::String, Type::Int, Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "diameter_tcm_route_add".into(),
+            Type::Fn(vec![Type::Int, Type::String, Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "diameter_tcm_route_lookup".into(),
+            Type::Fn(vec![Type::Int, Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "diameter_tcm_arm".into(),
+            Type::Fn(vec![Type::Int, Type::Int, Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "diameter_tcm_cancel".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "diameter_tcm_poll_deadline".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "diameter_tcm_run_due".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "diameter_tcm_peer_count".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "diameter_tcm_timer_count".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "diameter_tcm_drops".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "diameter_tcm_inject_in".into(),
+            Type::Fn(vec![Type::Int, Type::Int, Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "diameter_tcm_take_out".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::String)),
+        );
+        fns.insert(
+            "diameter_tcm_handle_io".into(),
+            Type::Fn(vec![Type::Int, Type::Int, Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "diameter_header_len".into(),
+            Type::Fn(vec![], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "diameter_msg_len".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "diameter_msg_complete".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "diameter_msg_needed".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "diameter_first_message_len".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "diameter_version".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "diameter_flags".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "diameter_is_request".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "diameter_is_answer".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "diameter_is_error".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "diameter_cmd".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "diameter_app_id".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "diameter_hbh".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "diameter_e2e".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "diameter_header_build".into(),
+            Type::Fn(vec![Type::Int, Type::Int, Type::Int, Type::Int, Type::Int, Type::Int], Box::new(Type::String)),
+        );
+        fns.insert(
+            "diameter_msg_build".into(),
+            Type::Fn(vec![Type::Int, Type::Int, Type::Int, Type::Int, Type::Int, Type::String], Box::new(Type::String)),
+        );
+        fns.insert(
+            "diameter_set_hbh".into(),
+            Type::Fn(vec![Type::String, Type::Int], Box::new(Type::String)),
+        );
+        fns.insert(
+            "diameter_set_e2e".into(),
+            Type::Fn(vec![Type::String, Type::Int], Box::new(Type::String)),
+        );
+        fns.insert(
+            "diameter_avp_encode".into(),
+            Type::Fn(vec![Type::Int, Type::Int, Type::Int, Type::String], Box::new(Type::String)),
+        );
+        fns.insert(
+            "diameter_avp_put_u32".into(),
+            Type::Fn(vec![Type::Int, Type::Int, Type::Int, Type::Int], Box::new(Type::String)),
+        );
+        fns.insert(
+            "diameter_avp_put_str".into(),
+            Type::Fn(vec![Type::Int, Type::Int, Type::Int, Type::String], Box::new(Type::String)),
+        );
+        fns.insert(
+            "diameter_avp_at".into(),
+            Type::Fn(vec![Type::String, Type::Int], Box::new(Type::String)),
+        );
+        fns.insert(
+            "diameter_avp_find".into(),
+            Type::Fn(vec![Type::String, Type::Int], Box::new(Type::String)),
+        );
+        fns.insert(
+            "diameter_avp_find_vendor".into(),
+            Type::Fn(vec![Type::String, Type::Int, Type::Int], Box::new(Type::String)),
+        );
+        fns.insert(
+            "diameter_avp_u32".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "diameter_avp_str".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::String)),
+        );
+        fns.insert(
+            "diameter_result_code".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "diameter_txn_key".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::String)),
+        );
+        fns.insert(
+            "diameter_e2e_key".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::String)),
+        );
+        fns.insert(
+            "diameter_session_key".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::String)),
+        );
+        fns.insert(
+            "diameter_hbh_new".into(),
+            Type::Fn(vec![], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "diameter_e2e_new".into(),
+            Type::Fn(vec![], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "diameter_build_cer".into(),
+            Type::Fn(vec![Type::String, Type::String, Type::Int, Type::Int], Box::new(Type::String)),
+        );
+        fns.insert(
+            "diameter_build_cea".into(),
+            Type::Fn(vec![Type::String, Type::String, Type::String, Type::Int], Box::new(Type::String)),
+        );
+        fns.insert(
+            "diameter_build_dwr".into(),
+            Type::Fn(vec![Type::String, Type::String, Type::Int, Type::Int], Box::new(Type::String)),
+        );
+        fns.insert(
+            "diameter_build_dwa".into(),
+            Type::Fn(vec![Type::String, Type::String, Type::String, Type::Int], Box::new(Type::String)),
+        );
+        fns.insert(
+            "diameter_build_dpr".into(),
+            Type::Fn(vec![Type::String, Type::String, Type::Int, Type::Int, Type::Int], Box::new(Type::String)),
+        );
+        fns.insert(
+            "diameter_build_dpa".into(),
+            Type::Fn(vec![Type::String, Type::String, Type::String, Type::Int], Box::new(Type::String)),
+        );
+        fns.insert(
+            "diameter_conn_new".into(),
+            Type::Fn(vec![], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "diameter_conn_free".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "diameter_conn_reset".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "diameter_conn_set_origin".into(),
+            Type::Fn(vec![Type::Int, Type::String, Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "diameter_conn_state".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "diameter_conn_set_state".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "diameter_conn_feed".into(),
+            Type::Fn(vec![Type::Int, Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "diameter_conn_pop".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::String)),
+        );
+        fns.insert(
+            "diameter_conn_pending".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "diameter_conn_queue_out".into(),
+            Type::Fn(vec![Type::Int, Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "diameter_conn_take_out".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::String)),
+        );
+        fns.insert(
+            "diameter_conn_next_hbh".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "diameter_conn_register".into(),
+            Type::Fn(vec![Type::Int, Type::Int, Type::Int, Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "diameter_conn_match".into(),
+            Type::Fn(vec![Type::Int, Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "diameter_conn_expire".into(),
+            Type::Fn(vec![Type::Int, Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "diameter_conn_on_cea".into(),
+            Type::Fn(vec![Type::Int, Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "diameter_pool_open".into(),
+            Type::Fn(vec![Type::String, Type::Int, Type::Int, Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "diameter_pool_acquire".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "diameter_pool_release".into(),
+            Type::Fn(vec![Type::Int, Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "diameter_pool_close".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "diameter_pool_idle".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "diameter_mgr_new".into(),
+            Type::Fn(vec![], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "diameter_mgr_free".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "diameter_mgr_set_origin".into(),
+            Type::Fn(vec![Type::Int, Type::String, Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "diameter_mgr_set_watchdog".into(),
+            Type::Fn(vec![Type::Int, Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "diameter_peer_add".into(),
+            Type::Fn(vec![Type::Int, Type::String, Type::String, Type::Int, Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "diameter_peer_remove".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "diameter_peer_state".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "diameter_peer_count".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "diameter_peer_fd".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "diameter_peer_attach_fd".into(),
+            Type::Fn(vec![Type::Int, Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "diameter_peer_mark_open".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "diameter_peer_mark_closed".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "diameter_route_add".into(),
+            Type::Fn(vec![Type::Int, Type::String, Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "diameter_route_remove".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "diameter_route_lookup".into(),
+            Type::Fn(vec![Type::Int, Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "diameter_mgr_pick_failover".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "diameter_mgr_handle_io".into(),
+            Type::Fn(vec![Type::Int, Type::Int, Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "diameter_mgr_poll".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::String)),
+        );
+        fns.insert(
+            "diameter_mgr_tick".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "diameter_mgr_request".into(),
+            Type::Fn(vec![Type::Int, Type::String, Type::Int, Type::Int, Type::Int, Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "diameter_mgr_flush".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "diameter_mgr_take_out".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::String)),
+        );
+        fns.insert(
+            "diameter_mgr_inject_in".into(),
+            Type::Fn(vec![Type::Int, Type::Int, Type::String], Box::new(Type::Int)),
+        );
+
         fns.insert(
             "wss_pool_open_ca".into(),
             Type::Fn(

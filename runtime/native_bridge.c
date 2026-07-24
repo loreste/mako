@@ -21,6 +21,10 @@
 #include "mako_cmap.h"
 #include "mako_template.h"
 #include "mako_sip.h"
+#include "mako_sctp.h"
+#include "mako_timer.h"
+#include "mako_peer.h"
+#include "mako_diameter.h"
 // Real GPU / H3 (gated by build.rs feature defines).
 #include "mako_gpu.h"
 #include "mako_model.h"
@@ -8558,6 +8562,38 @@ int64_t mako_native_tls_pool_open_ptr(MakoNativeString *host, int64_t port, Mako
     return mako_tls_pool_open(bridge_borrow_str(host), port, bridge_borrow_str(ca));
 }
 
+int64_t mako_native_tls_pool_open_timeout_ptr(
+    MakoNativeString *host, int64_t port, MakoNativeString *ca, int64_t timeout_ms
+) {
+    return mako_tls_pool_open_timeout(
+        bridge_borrow_str(host), port, bridge_borrow_str(ca), timeout_ms
+    );
+}
+
+int64_t mako_native_tls_pool_open_mtls_ptr(
+    MakoNativeString *host, int64_t port, MakoNativeString *ca,
+    MakoNativeString *cert, MakoNativeString *key, int64_t timeout_ms
+) {
+    return mako_tls_pool_open_mtls(
+        bridge_borrow_str(host), port, bridge_borrow_str(ca),
+        bridge_borrow_str(cert), bridge_borrow_str(key), timeout_ms
+    );
+}
+
+int64_t mako_native_tls_pool_open_mtls_full_ptr(
+    MakoNativeString *host, int64_t port, MakoNativeString *ca,
+    MakoNativeString *cert, MakoNativeString *key, int64_t connect_ms, int64_t io_ms
+) {
+    return mako_tls_pool_open_mtls_full(
+        bridge_borrow_str(host), port, bridge_borrow_str(ca),
+        bridge_borrow_str(cert), bridge_borrow_str(key), connect_ms, io_ms
+    );
+}
+
+int64_t mako_native_tls_pool_set_timeout(int64_t handle, int64_t io_ms) {
+    return mako_tls_pool_set_timeout(handle, io_ms);
+}
+
 int64_t mako_native_tls_pool_send_ptr(int64_t handle, MakoNativeString *data) {
     return mako_tls_pool_send(handle, bridge_borrow_str(data));
 }
@@ -10044,3 +10080,647 @@ MakoNativeString *mako_native_tls_server_application_traffic_secret_hex_ptr(
 int64_t mako_native_unicode_is_graphic(int64_t r) {
     return mako_unicode_is_graphic(r);
 }
+
+/* ---- SCTP + Diameter (generated) ---- */
+
+int64_t mako_native_sctp_available(void) {
+    return mako_sctp_available();
+}
+
+int64_t mako_native_sctp_listen(int64_t a0) {
+    return mako_sctp_listen(a0);
+}
+
+int64_t mako_native_sctp_listen_addr_ptr(MakoNativeString *a0, int64_t a1) {
+    return mako_sctp_listen_addr(bridge_borrow_str(a0), a1);
+}
+
+int64_t mako_native_sctp_accept(int64_t a0) {
+    return mako_sctp_accept(a0);
+}
+
+int64_t mako_native_sctp_connect_ptr(MakoNativeString *a0, int64_t a1) {
+    return mako_sctp_connect(bridge_borrow_str(a0), a1);
+}
+
+int64_t mako_native_sctp_connect_timeout_ptr(MakoNativeString *a0, int64_t a1, int64_t a2) {
+    return mako_sctp_connect_timeout(bridge_borrow_str(a0), a1, a2);
+}
+
+int64_t mako_native_sctp_close(int64_t a0) {
+    return mako_sctp_close(a0);
+}
+
+int64_t mako_native_sctp_shutdown(int64_t a0, int64_t a1) {
+    return mako_sctp_shutdown(a0, a1);
+}
+
+int64_t mako_native_sctp_set_timeout(int64_t a0, int64_t a1) {
+    return mako_sctp_set_timeout(a0, a1);
+}
+
+int64_t mako_native_sctp_write_ptr(int64_t a0, MakoNativeString *a1) {
+    return mako_sctp_write(a0, bridge_borrow_str(a1));
+}
+
+int64_t mako_native_sctp_write_all_ptr(int64_t a0, MakoNativeString *a1) {
+    return mako_sctp_write_all(a0, bridge_borrow_str(a1));
+}
+
+MakoNativeString *mako_native_sctp_read_ptr(int64_t a0, int64_t a1) {
+    return bridge_take_str(mako_sctp_read(a0, a1));
+}
+
+MakoNativeString *mako_native_sctp_read_n_ptr(int64_t a0, int64_t a1) {
+    return bridge_take_str(mako_sctp_read_n(a0, a1));
+}
+
+MakoNativeString *mako_native_sctp_peer_addr_ptr(int64_t a0) {
+    return bridge_take_str(mako_sctp_peer_addr(a0));
+}
+
+MakoNativeString *mako_native_sctp_local_addr_ptr(int64_t a0) {
+    return bridge_take_str(mako_sctp_local_addr(a0));
+}
+
+int64_t mako_native_sctp_send_stream_ptr(int64_t a0, int64_t a1, MakoNativeString *a2) {
+    return mako_sctp_send_stream(a0, a1, bridge_borrow_str(a2));
+}
+
+MakoNativeString *mako_native_sctp_recv_stream_ptr(int64_t a0, int64_t a1) {
+    return bridge_take_str(mako_sctp_recv_stream(a0, a1));
+}
+
+int64_t mako_native_sctp_last_stream(void) {
+    return mako_sctp_last_stream();
+}
+
+int64_t mako_native_sctp_last_ppid(void) {
+    return mako_sctp_last_ppid();
+}
+
+int64_t mako_native_diameter_header_len(void) {
+    return mako_diameter_header_len();
+}
+
+int64_t mako_native_diameter_msg_len_ptr(MakoNativeString *a0) {
+    return mako_diameter_msg_len(bridge_borrow_str(a0));
+}
+
+int64_t mako_native_diameter_msg_complete_ptr(MakoNativeString *a0) {
+    return mako_diameter_msg_complete(bridge_borrow_str(a0));
+}
+
+int64_t mako_native_diameter_msg_needed_ptr(MakoNativeString *a0) {
+    return mako_diameter_msg_needed(bridge_borrow_str(a0));
+}
+
+int64_t mako_native_diameter_first_message_len_ptr(MakoNativeString *a0) {
+    return mako_diameter_first_message_len(bridge_borrow_str(a0));
+}
+
+int64_t mako_native_diameter_version_ptr(MakoNativeString *a0) {
+    return mako_diameter_version(bridge_borrow_str(a0));
+}
+
+int64_t mako_native_diameter_flags_ptr(MakoNativeString *a0) {
+    return mako_diameter_flags(bridge_borrow_str(a0));
+}
+
+int64_t mako_native_diameter_is_request_ptr(MakoNativeString *a0) {
+    return mako_diameter_is_request(bridge_borrow_str(a0));
+}
+
+int64_t mako_native_diameter_is_answer_ptr(MakoNativeString *a0) {
+    return mako_diameter_is_answer(bridge_borrow_str(a0));
+}
+
+int64_t mako_native_diameter_is_error_ptr(MakoNativeString *a0) {
+    return mako_diameter_is_error(bridge_borrow_str(a0));
+}
+
+int64_t mako_native_diameter_cmd_ptr(MakoNativeString *a0) {
+    return mako_diameter_cmd(bridge_borrow_str(a0));
+}
+
+int64_t mako_native_diameter_app_id_ptr(MakoNativeString *a0) {
+    return mako_diameter_app_id(bridge_borrow_str(a0));
+}
+
+int64_t mako_native_diameter_hbh_ptr(MakoNativeString *a0) {
+    return mako_diameter_hbh(bridge_borrow_str(a0));
+}
+
+int64_t mako_native_diameter_e2e_ptr(MakoNativeString *a0) {
+    return mako_diameter_e2e(bridge_borrow_str(a0));
+}
+
+MakoNativeString *mako_native_diameter_header_build_ptr(int64_t a0, int64_t a1, int64_t a2, int64_t a3, int64_t a4, int64_t a5) {
+    return bridge_take_str(mako_diameter_header_build(a0, a1, a2, a3, a4, a5));
+}
+
+MakoNativeString *mako_native_diameter_msg_build_ptr(int64_t a0, int64_t a1, int64_t a2, int64_t a3, int64_t a4, MakoNativeString *a5) {
+    return bridge_take_str(mako_diameter_msg_build(a0, a1, a2, a3, a4, bridge_borrow_str(a5)));
+}
+
+MakoNativeString *mako_native_diameter_set_hbh_ptr(MakoNativeString *a0, int64_t a1) {
+    return bridge_take_str(mako_diameter_set_hbh(bridge_borrow_str(a0), a1));
+}
+
+MakoNativeString *mako_native_diameter_set_e2e_ptr(MakoNativeString *a0, int64_t a1) {
+    return bridge_take_str(mako_diameter_set_e2e(bridge_borrow_str(a0), a1));
+}
+
+MakoNativeString *mako_native_diameter_avp_encode_ptr(int64_t a0, int64_t a1, int64_t a2, MakoNativeString *a3) {
+    return bridge_take_str(mako_diameter_avp_encode(a0, a1, a2, bridge_borrow_str(a3)));
+}
+
+MakoNativeString *mako_native_diameter_avp_put_u32_ptr(int64_t a0, int64_t a1, int64_t a2, int64_t a3) {
+    return bridge_take_str(mako_diameter_avp_put_u32(a0, a1, a2, a3));
+}
+
+MakoNativeString *mako_native_diameter_avp_put_str_ptr(int64_t a0, int64_t a1, int64_t a2, MakoNativeString *a3) {
+    return bridge_take_str(mako_diameter_avp_put_str(a0, a1, a2, bridge_borrow_str(a3)));
+}
+
+MakoNativeString *mako_native_diameter_avp_at_ptr(MakoNativeString *a0, int64_t a1) {
+    return bridge_take_str(mako_diameter_avp_at(bridge_borrow_str(a0), a1));
+}
+
+MakoNativeString *mako_native_diameter_avp_find_ptr(MakoNativeString *a0, int64_t a1) {
+    return bridge_take_str(mako_diameter_avp_find(bridge_borrow_str(a0), a1));
+}
+
+MakoNativeString *mako_native_diameter_avp_find_vendor_ptr(MakoNativeString *a0, int64_t a1, int64_t a2) {
+    return bridge_take_str(mako_diameter_avp_find_vendor(bridge_borrow_str(a0), a1, a2));
+}
+
+int64_t mako_native_diameter_avp_u32_ptr(MakoNativeString *a0) {
+    return mako_diameter_avp_u32(bridge_borrow_str(a0));
+}
+
+MakoNativeString *mako_native_diameter_avp_str_ptr(MakoNativeString *a0) {
+    return bridge_take_str(mako_diameter_avp_str(bridge_borrow_str(a0)));
+}
+
+int64_t mako_native_diameter_result_code_ptr(MakoNativeString *a0) {
+    return mako_diameter_result_code(bridge_borrow_str(a0));
+}
+
+MakoNativeString *mako_native_diameter_txn_key_ptr(int64_t a0, int64_t a1) {
+    return bridge_take_str(mako_diameter_txn_key(a0, a1));
+}
+
+MakoNativeString *mako_native_diameter_e2e_key_ptr(int64_t a0, int64_t a1) {
+    return bridge_take_str(mako_diameter_e2e_key(a0, a1));
+}
+
+MakoNativeString *mako_native_diameter_session_key_ptr(MakoNativeString *a0) {
+    return bridge_take_str(mako_diameter_session_key(bridge_borrow_str(a0)));
+}
+
+int64_t mako_native_diameter_hbh_new(void) {
+    return mako_diameter_hbh_new();
+}
+
+int64_t mako_native_diameter_e2e_new(void) {
+    return mako_diameter_e2e_new();
+}
+
+MakoNativeString *mako_native_diameter_build_cer_ptr(MakoNativeString *a0, MakoNativeString *a1, int64_t a2, int64_t a3) {
+    return bridge_take_str(mako_diameter_build_cer(bridge_borrow_str(a0), bridge_borrow_str(a1), a2, a3));
+}
+
+MakoNativeString *mako_native_diameter_build_cea_ptr(MakoNativeString *a0, MakoNativeString *a1, MakoNativeString *a2, int64_t a3) {
+    return bridge_take_str(mako_diameter_build_cea(bridge_borrow_str(a0), bridge_borrow_str(a1), bridge_borrow_str(a2), a3));
+}
+
+MakoNativeString *mako_native_diameter_build_dwr_ptr(MakoNativeString *a0, MakoNativeString *a1, int64_t a2, int64_t a3) {
+    return bridge_take_str(mako_diameter_build_dwr(bridge_borrow_str(a0), bridge_borrow_str(a1), a2, a3));
+}
+
+MakoNativeString *mako_native_diameter_build_dwa_ptr(MakoNativeString *a0, MakoNativeString *a1, MakoNativeString *a2, int64_t a3) {
+    return bridge_take_str(mako_diameter_build_dwa(bridge_borrow_str(a0), bridge_borrow_str(a1), bridge_borrow_str(a2), a3));
+}
+
+MakoNativeString *mako_native_diameter_build_dpr_ptr(MakoNativeString *a0, MakoNativeString *a1, int64_t a2, int64_t a3, int64_t a4) {
+    return bridge_take_str(mako_diameter_build_dpr(bridge_borrow_str(a0), bridge_borrow_str(a1), a2, a3, a4));
+}
+
+MakoNativeString *mako_native_diameter_build_dpa_ptr(MakoNativeString *a0, MakoNativeString *a1, MakoNativeString *a2, int64_t a3) {
+    return bridge_take_str(mako_diameter_build_dpa(bridge_borrow_str(a0), bridge_borrow_str(a1), bridge_borrow_str(a2), a3));
+}
+
+int64_t mako_native_diameter_conn_new(void) {
+    return mako_diameter_conn_new();
+}
+
+int64_t mako_native_diameter_conn_free(int64_t a0) {
+    return mako_diameter_conn_free(a0);
+}
+
+int64_t mako_native_diameter_conn_reset(int64_t a0) {
+    return mako_diameter_conn_reset(a0);
+}
+
+int64_t mako_native_diameter_conn_set_origin_ptr(int64_t a0, MakoNativeString *a1, MakoNativeString *a2) {
+    return mako_diameter_conn_set_origin(a0, bridge_borrow_str(a1), bridge_borrow_str(a2));
+}
+
+int64_t mako_native_diameter_conn_state(int64_t a0) {
+    return mako_diameter_conn_state(a0);
+}
+
+int64_t mako_native_diameter_conn_set_state(int64_t a0, int64_t a1) {
+    return mako_diameter_conn_set_state(a0, a1);
+}
+
+int64_t mako_native_diameter_conn_feed_ptr(int64_t a0, MakoNativeString *a1) {
+    return mako_diameter_conn_feed(a0, bridge_borrow_str(a1));
+}
+
+MakoNativeString *mako_native_diameter_conn_pop_ptr(int64_t a0) {
+    return bridge_take_str(mako_diameter_conn_pop(a0));
+}
+
+int64_t mako_native_diameter_conn_pending(int64_t a0) {
+    return mako_diameter_conn_pending(a0);
+}
+
+int64_t mako_native_diameter_conn_queue_out_ptr(int64_t a0, MakoNativeString *a1) {
+    return mako_diameter_conn_queue_out(a0, bridge_borrow_str(a1));
+}
+
+MakoNativeString *mako_native_diameter_conn_take_out_ptr(int64_t a0) {
+    return bridge_take_str(mako_diameter_conn_take_out(a0));
+}
+
+int64_t mako_native_diameter_conn_next_hbh(int64_t a0) {
+    return mako_diameter_conn_next_hbh(a0);
+}
+
+int64_t mako_native_diameter_conn_register(int64_t a0, int64_t a1, int64_t a2, int64_t a3, int64_t a4) {
+    return mako_diameter_conn_register(a0, a1, a2, a3, a4);
+}
+
+int64_t mako_native_diameter_conn_match_ptr(int64_t a0, MakoNativeString *a1) {
+    return mako_diameter_conn_match(a0, bridge_borrow_str(a1));
+}
+
+int64_t mako_native_diameter_conn_expire(int64_t a0, int64_t a1, int64_t a2) {
+    return mako_diameter_conn_expire(a0, a1, a2);
+}
+
+int64_t mako_native_diameter_conn_on_cea_ptr(int64_t a0, MakoNativeString *a1) {
+    return mako_diameter_conn_on_cea(a0, bridge_borrow_str(a1));
+}
+
+int64_t mako_native_diameter_pool_open_ptr(MakoNativeString *a0, int64_t a1, int64_t a2, int64_t a3, int64_t a4) {
+    return mako_diameter_pool_open(bridge_borrow_str(a0), a1, a2, a3, a4);
+}
+
+int64_t mako_native_diameter_pool_acquire(int64_t a0) {
+    return mako_diameter_pool_acquire(a0);
+}
+
+int64_t mako_native_diameter_pool_release(int64_t a0, int64_t a1, int64_t a2) {
+    return mako_diameter_pool_release(a0, a1, a2);
+}
+
+int64_t mako_native_diameter_pool_close(int64_t a0) {
+    return mako_diameter_pool_close(a0);
+}
+
+int64_t mako_native_diameter_pool_idle(int64_t a0) {
+    return mako_diameter_pool_idle(a0);
+}
+
+int64_t mako_native_diameter_mgr_new(void) {
+    return mako_diameter_mgr_new();
+}
+
+int64_t mako_native_diameter_mgr_free(int64_t a0) {
+    return mako_diameter_mgr_free(a0);
+}
+
+int64_t mako_native_diameter_mgr_set_origin_ptr(int64_t a0, MakoNativeString *a1, MakoNativeString *a2) {
+    return mako_diameter_mgr_set_origin(a0, bridge_borrow_str(a1), bridge_borrow_str(a2));
+}
+
+int64_t mako_native_diameter_mgr_set_watchdog(int64_t a0, int64_t a1, int64_t a2) {
+    return mako_diameter_mgr_set_watchdog(a0, a1, a2);
+}
+
+int64_t mako_native_diameter_peer_add_ptr(int64_t a0, MakoNativeString *a1, MakoNativeString *a2, int64_t a3, int64_t a4, int64_t a5) {
+    return mako_diameter_peer_add(a0, bridge_borrow_str(a1), bridge_borrow_str(a2), a3, a4, a5);
+}
+
+int64_t mako_native_diameter_peer_remove(int64_t a0, int64_t a1) {
+    return mako_diameter_peer_remove(a0, a1);
+}
+
+int64_t mako_native_diameter_peer_state(int64_t a0, int64_t a1) {
+    return mako_diameter_peer_state(a0, a1);
+}
+
+int64_t mako_native_diameter_peer_count(int64_t a0) {
+    return mako_diameter_peer_count(a0);
+}
+
+int64_t mako_native_diameter_peer_fd(int64_t a0, int64_t a1) {
+    return mako_diameter_peer_fd(a0, a1);
+}
+
+int64_t mako_native_diameter_peer_attach_fd(int64_t a0, int64_t a1, int64_t a2) {
+    return mako_diameter_peer_attach_fd(a0, a1, a2);
+}
+
+int64_t mako_native_diameter_peer_mark_open(int64_t a0, int64_t a1) {
+    return mako_diameter_peer_mark_open(a0, a1);
+}
+
+int64_t mako_native_diameter_peer_mark_closed(int64_t a0, int64_t a1) {
+    return mako_diameter_peer_mark_closed(a0, a1);
+}
+
+int64_t mako_native_diameter_route_add_ptr(int64_t a0, MakoNativeString *a1, MakoNativeString *a2) {
+    return mako_diameter_route_add(a0, bridge_borrow_str(a1), bridge_borrow_str(a2));
+}
+
+int64_t mako_native_diameter_route_remove(int64_t a0, int64_t a1) {
+    return mako_diameter_route_remove(a0, a1);
+}
+
+int64_t mako_native_diameter_route_lookup_ptr(int64_t a0, MakoNativeString *a1) {
+    return mako_diameter_route_lookup(a0, bridge_borrow_str(a1));
+}
+
+int64_t mako_native_diameter_mgr_pick_failover(int64_t a0, int64_t a1) {
+    return mako_diameter_mgr_pick_failover(a0, a1);
+}
+
+int64_t mako_native_diameter_mgr_handle_io_ptr(int64_t a0, int64_t a1, MakoNativeString *a2) {
+    return mako_diameter_mgr_handle_io(a0, a1, bridge_borrow_str(a2));
+}
+
+MakoNativeString *mako_native_diameter_mgr_poll_ptr(int64_t a0) {
+    return bridge_take_str(mako_diameter_mgr_poll(a0));
+}
+
+int64_t mako_native_diameter_mgr_tick(int64_t a0, int64_t a1) {
+    return mako_diameter_mgr_tick(a0, a1);
+}
+
+int64_t mako_native_diameter_mgr_request_ptr(int64_t a0, MakoNativeString *a1, int64_t a2, int64_t a3, int64_t a4, MakoNativeString *a5) {
+    return mako_diameter_mgr_request(a0, bridge_borrow_str(a1), a2, a3, a4, bridge_borrow_str(a5));
+}
+
+int64_t mako_native_diameter_mgr_flush(int64_t a0) {
+    return mako_diameter_mgr_flush(a0);
+}
+
+MakoNativeString *mako_native_diameter_mgr_take_out_ptr(int64_t a0, int64_t a1) {
+    return bridge_take_str(mako_diameter_mgr_take_out(a0, a1));
+}
+
+int64_t mako_native_diameter_mgr_inject_in_ptr(int64_t a0, int64_t a1, MakoNativeString *a2) {
+    return mako_diameter_mgr_inject_in(a0, a1, bridge_borrow_str(a2));
+}
+
+/* ---- SCTP advanced + Diameter TCM ---- */
+int64_t mako_native_sctp_set_streams(int64_t a0, int64_t a1, int64_t a2) {
+    return mako_sctp_set_streams(a0, a1, a2);
+}
+
+int64_t mako_native_sctp_get_streams(int64_t a0) {
+    return mako_sctp_get_streams(a0);
+}
+
+int64_t mako_native_sctp_send_ex_ptr(int64_t a0, int64_t a1, int64_t a2, MakoNativeString *a3) {
+    return mako_sctp_send_ex(a0, a1, a2, bridge_borrow_str(a3));
+}
+
+int64_t mako_native_sctp_set_heartbeat(int64_t a0, int64_t a1, int64_t a2) {
+    return mako_sctp_set_heartbeat(a0, a1, a2);
+}
+
+int64_t mako_native_sctp_set_rto(int64_t a0, int64_t a1, int64_t a2, int64_t a3) {
+    return mako_sctp_set_rto(a0, a1, a2, a3);
+}
+
+int64_t mako_native_sctp_bindx_add_ptr(int64_t a0, MakoNativeString *a1, int64_t a2) {
+    return mako_sctp_bindx_add(a0, bridge_borrow_str(a1), a2);
+}
+
+int64_t mako_native_sctp_bindx_rem_ptr(int64_t a0, MakoNativeString *a1, int64_t a2) {
+    return mako_sctp_bindx_rem(a0, bridge_borrow_str(a1), a2);
+}
+
+int64_t mako_native_sctp_connectx_ptr(MakoNativeString *a0, int64_t a1, int64_t a2) {
+    return mako_sctp_connectx(bridge_borrow_str(a0), a1, a2);
+}
+
+MakoNativeString *mako_native_sctp_getpaddrs_ptr(int64_t a0) {
+    return bridge_take_str(mako_sctp_getpaddrs(a0));
+}
+
+MakoNativeString *mako_native_sctp_getladdrs_ptr(int64_t a0) {
+    return bridge_take_str(mako_sctp_getladdrs(a0));
+}
+
+int64_t mako_native_sctp_set_primary_ptr(int64_t a0, MakoNativeString *a1, int64_t a2) {
+    return mako_sctp_set_primary(a0, bridge_borrow_str(a1), a2);
+}
+
+int64_t mako_native_diameter_tcm_new(int64_t a0, int64_t a1, int64_t a2, int64_t a3) {
+    return mako_diameter_tcm_new(a0, a1, a2, a3);
+}
+
+int64_t mako_native_diameter_tcm_free(int64_t a0) {
+    return mako_diameter_tcm_free(a0);
+}
+
+int64_t mako_native_diameter_tcm_set_origin_ptr(int64_t a0, MakoNativeString *a1, MakoNativeString *a2) {
+    return mako_diameter_tcm_set_origin(a0, bridge_borrow_str(a1), bridge_borrow_str(a2));
+}
+
+int64_t mako_native_diameter_tcm_set_watchdog(int64_t a0, int64_t a1, int64_t a2) {
+    return mako_diameter_tcm_set_watchdog(a0, a1, a2);
+}
+
+int64_t mako_native_diameter_tcm_peer_add_ptr(int64_t a0, MakoNativeString *a1, MakoNativeString *a2, int64_t a3, int64_t a4, int64_t a5) {
+    return mako_diameter_tcm_peer_add(a0, bridge_borrow_str(a1), bridge_borrow_str(a2), a3, a4, a5);
+}
+
+int64_t mako_native_diameter_tcm_route_add_ptr(int64_t a0, MakoNativeString *a1, MakoNativeString *a2) {
+    return mako_diameter_tcm_route_add(a0, bridge_borrow_str(a1), bridge_borrow_str(a2));
+}
+
+int64_t mako_native_diameter_tcm_route_lookup_ptr(int64_t a0, MakoNativeString *a1) {
+    return mako_diameter_tcm_route_lookup(a0, bridge_borrow_str(a1));
+}
+
+int64_t mako_native_diameter_tcm_arm(int64_t a0, int64_t a1, int64_t a2, int64_t a3) {
+    return mako_diameter_tcm_arm(a0, a1, a2, a3);
+}
+
+int64_t mako_native_diameter_tcm_cancel(int64_t a0, int64_t a1) {
+    return mako_diameter_tcm_cancel(a0, a1);
+}
+
+int64_t mako_native_diameter_tcm_poll_deadline(int64_t a0, int64_t a1) {
+    return mako_diameter_tcm_poll_deadline(a0, a1);
+}
+
+int64_t mako_native_diameter_tcm_run_due(int64_t a0, int64_t a1) {
+    return mako_diameter_tcm_run_due(a0, a1);
+}
+
+int64_t mako_native_diameter_tcm_peer_count(int64_t a0) {
+    return mako_diameter_tcm_peer_count(a0);
+}
+
+int64_t mako_native_diameter_tcm_timer_count(int64_t a0) {
+    return mako_diameter_tcm_timer_count(a0);
+}
+
+int64_t mako_native_diameter_tcm_drops(int64_t a0) {
+    return mako_diameter_tcm_drops(a0);
+}
+
+int64_t mako_native_diameter_tcm_inject_in_ptr(int64_t a0, int64_t a1, MakoNativeString *a2) {
+    return mako_diameter_tcm_inject_in(a0, a1, bridge_borrow_str(a2));
+}
+
+MakoNativeString *mako_native_diameter_tcm_take_out_ptr(int64_t a0, int64_t a1) {
+    return bridge_take_str(mako_diameter_tcm_take_out(a0, a1));
+}
+
+int64_t mako_native_diameter_tcm_handle_io_ptr(int64_t a0, int64_t a1, MakoNativeString *a2) {
+    return mako_diameter_tcm_handle_io(a0, a1, bridge_borrow_str(a2));
+}
+
+int64_t mako_native_diameter_limits_set(int64_t a, int64_t b, int64_t c, int64_t d) {
+    return mako_diameter_limits_set(a,b,c,d);
+}
+int64_t mako_native_diameter_limits_max_msg(void) { return mako_diameter_limits_max_msg(); }
+int64_t mako_native_diameter_limits_inbuf(void) { return mako_diameter_limits_inbuf(); }
+int64_t mako_native_diameter_limits_inq_bytes(void) { return mako_diameter_limits_inq_bytes(); }
+int64_t mako_native_diameter_limits_reasm_ms(void) { return mako_diameter_limits_reasm_ms(); }
+int64_t mako_native_diameter_tcm_set_run_budget(int64_t h, int64_t b) {
+    return mako_diameter_tcm_set_run_budget(h,b);
+}
+
+/* ---- General timer heap + peer table ---- */
+int64_t mako_native_timer_heap_new(int64_t a0) {
+    return mako_timer_heap_new(a0);
+}
+
+int64_t mako_native_timer_heap_free(int64_t a0) {
+    return mako_timer_heap_free(a0);
+}
+
+int64_t mako_native_timer_heap_arm(int64_t a0, int64_t a1, int64_t a2, int64_t a3) {
+    return mako_timer_heap_arm(a0, a1, a2, a3);
+}
+
+int64_t mako_native_timer_heap_cancel(int64_t a0, int64_t a1) {
+    return mako_timer_heap_cancel(a0, a1);
+}
+
+int64_t mako_native_timer_heap_next(int64_t a0) {
+    return mako_timer_heap_next(a0);
+}
+
+int64_t mako_native_timer_heap_pop_due1(int64_t a0, int64_t a1) {
+    return mako_timer_heap_pop_due1(a0, a1);
+}
+
+int64_t mako_native_timer_last_kind(void) {
+    return mako_timer_last_kind();
+}
+
+int64_t mako_native_timer_last_id(void) {
+    return mako_timer_last_id();
+}
+
+int64_t mako_native_timer_heap_count(int64_t a0) {
+    return mako_timer_heap_count(a0);
+}
+
+int64_t mako_native_timer_heap_drops(int64_t a0) {
+    return mako_timer_heap_drops(a0);
+}
+
+int64_t mako_native_peer_table_new(int64_t a0, int64_t a1) {
+    return mako_peer_table_new(a0, a1);
+}
+
+int64_t mako_native_peer_table_free(int64_t a0) {
+    return mako_peer_table_free(a0);
+}
+
+int64_t mako_native_peer_table_add_ptr(int64_t a0, MakoNativeString *a1, MakoNativeString *a2, int64_t a3, int64_t a4, int64_t a5) {
+    return mako_peer_table_add(a0, bridge_borrow_str(a1), bridge_borrow_str(a2), a3, a4, a5);
+}
+
+int64_t mako_native_peer_table_set_conn(int64_t a0, int64_t a1, int64_t a2) {
+    return mako_peer_table_set_conn(a0, a1, a2);
+}
+
+int64_t mako_native_peer_table_get_conn(int64_t a0, int64_t a1) {
+    return mako_peer_table_get_conn(a0, a1);
+}
+
+int64_t mako_native_peer_table_set_state(int64_t a0, int64_t a1, int64_t a2) {
+    return mako_peer_table_set_state(a0, a1, a2);
+}
+
+int64_t mako_native_peer_table_get_state(int64_t a0, int64_t a1) {
+    return mako_peer_table_get_state(a0, a1);
+}
+
+int64_t mako_native_peer_table_touch(int64_t a0, int64_t a1, int64_t a2) {
+    return mako_peer_table_touch(a0, a1, a2);
+}
+
+int64_t mako_native_peer_table_last_ms(int64_t a0, int64_t a1) {
+    return mako_peer_table_last_ms(a0, a1);
+}
+
+int64_t mako_native_peer_table_route_add_ptr(int64_t a0, MakoNativeString *a1, MakoNativeString *a2) {
+    return mako_peer_table_route_add(a0, bridge_borrow_str(a1), bridge_borrow_str(a2));
+}
+
+int64_t mako_native_peer_table_route_lookup_ptr(int64_t a0, MakoNativeString *a1) {
+    return mako_peer_table_route_lookup(a0, bridge_borrow_str(a1));
+}
+
+int64_t mako_native_peer_table_count(int64_t a0) {
+    return mako_peer_table_count(a0);
+}
+
+int64_t mako_native_peer_table_drops(int64_t a0) {
+    return mako_peer_table_drops(a0);
+}
+
+MakoNativeString *mako_native_peer_table_host_ptr(int64_t a0, int64_t a1) {
+    return bridge_take_str(mako_peer_table_host(a0, a1));
+}
+
+int64_t mako_native_peer_table_port(int64_t a0, int64_t a1) {
+    return mako_peer_table_port(a0, a1);
+}
+
+int64_t mako_native_peer_table_transport(int64_t a0, int64_t a1) {
+    return mako_peer_table_transport(a0, a1);
+}
+
+int64_t mako_native_peer_table_capacity(int64_t a0) {
+    return mako_peer_table_capacity(a0);
+}
+
+int64_t mako_native_peer_table_alive(int64_t a0, int64_t a1) {
+    return mako_peer_table_alive(a0, a1);
+}
+

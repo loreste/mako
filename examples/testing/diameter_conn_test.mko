@@ -1,0 +1,101 @@
+// Diameter connection: reassembly, HbH register/match, expire.
+
+fn diam_test_limits() {
+    // Explicit limits for tests (no invented runtime defaults).
+    // max_msg, inbuf, inq_bytes, reasm_ms (0 = no reasm timeout)
+    assert_eq(diameter_limits_set(262144, 524288, 524288, 0), 0)
+}
+
+fn TestDiameterConnFeedPop() {
+    diam_test_limits()
+    let h = diameter_conn_new()
+    assert(h > 0)
+    let msg = diameter_msg_build(128, 257, 0, 7, 8, "")
+    // feed in two chunks
+    let half = len(msg) / 2
+    let a = msg[0:half]
+    let b = msg[half:len(msg)]
+    assert_eq(diameter_conn_pending(h), 0)
+    let _ = diameter_conn_feed(h, a)
+    assert_eq(diameter_conn_pending(h), 0)
+    let _ = diameter_conn_feed(h, b)
+    assert_eq(diameter_conn_pending(h), 1)
+    let got = diameter_conn_pop(h)
+    assert_eq(diameter_cmd(got), 257)
+    assert_eq(diameter_hbh(got), 7)
+    assert_eq(diameter_conn_pending(h), 0)
+    let _ = diameter_conn_free(h)
+}
+
+fn TestDiameterConnRegisterMatch() {
+    diam_test_limits()
+    let h = diameter_conn_new()
+    let hbh = diameter_conn_next_hbh(h)
+    assert(hbh > 0)
+    let e2e = diameter_e2e_new()
+    assert_eq(diameter_conn_register(h, hbh, e2e, 272, 0), 0)
+    let ans = diameter_msg_build(0, 272, 0, hbh, e2e, "")
+    assert_eq(diameter_conn_match(h, ans), 1)
+    assert_eq(diameter_conn_match(h, ans), 0)
+    let _ = diameter_conn_free(h)
+}
+
+fn TestDiameterConnMatchRequiresCmd() {
+    diam_test_limits()
+    let h = diameter_conn_new()
+    let hbh = diameter_conn_next_hbh(h)
+    assert_eq(diameter_conn_register(h, hbh, 99, 257, 0), 0)
+    // Wrong command (DWA) must not clear pending CER.
+    let wrong = diameter_msg_build(0, 280, 0, hbh, 99, "")
+    assert_eq(diameter_conn_match(h, wrong), 0)
+    let right = diameter_msg_build(0, 257, 0, hbh, 99, "")
+    assert_eq(diameter_conn_match(h, right), 1)
+    let _ = diameter_conn_free(h)
+}
+
+fn TestDiameterConnHandleAba() {
+    diam_test_limits()
+    let a = diameter_conn_new()
+    assert(a > 0)
+    assert_eq(diameter_conn_free(a), 0)
+    let b = diameter_conn_new()
+    // Generation in handle: stale a must not touch reissued slot.
+    assert_eq(diameter_conn_feed(a, "xxxx"), -1)
+    assert_eq(diameter_conn_pending(a), -1)
+    assert(b > 0)
+    let _ = diameter_conn_free(b)
+}
+
+fn TestDiameterConnCorruptFeedDrops() {
+    diam_test_limits()
+    let h = diameter_conn_new()
+    // Invalid framing (not version 1) must not hang; pending stays 0.
+    let junk = "@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@"
+    let _ = diameter_conn_feed(h, junk)
+    assert_eq(diameter_conn_pending(h), 0)
+    let _ = diameter_conn_free(h)
+}
+
+fn TestDiameterConnExpire() {
+    diam_test_limits()
+    let h = diameter_conn_new()
+    let hbh = diameter_conn_next_hbh(h)
+    let _ = diameter_conn_register(h, hbh, 1, 272, 0)
+    // Explicit timeout required (no default).
+    assert_eq(diameter_conn_expire(h, mono_ms() + 100000, 0), -1)
+    let n = diameter_conn_expire(h, mono_ms() + 100000, 1)
+    assert(n >= 1)
+    let _ = diameter_conn_free(h)
+}
+
+fn TestDiameterConnTakeOut() {
+    diam_test_limits()
+    let h = diameter_conn_new()
+    let msg = diameter_msg_build(128, 280, 0, 1, 1, "")
+    assert(diameter_conn_queue_out(h, msg) > 0)
+    let out = diameter_conn_take_out(h)
+    assert_eq(len(out), len(msg))
+    let empty = diameter_conn_take_out(h)
+    assert(str_eq(empty, ""))
+    let _ = diameter_conn_free(h)
+}

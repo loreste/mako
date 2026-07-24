@@ -1,0 +1,25 @@
+// Diameter AVP encode/find helpers.
+
+fn TestDiameterAvpU32() {
+    assert_eq(diameter_limits_set(262144, 524288, 524288, 0), 0)
+    let avp = diameter_avp_put_u32(268, 64, 0, 2001)
+    assert(len(avp) >= 12)
+    let msg = diameter_msg_build(0, 257, 0, 1, 1, avp)
+    let v = diameter_avp_find(msg, 268)
+    assert_eq(diameter_avp_u32(v), 2001)
+}
+
+fn TestDiameterAvpStr() {
+    assert_eq(diameter_limits_set(262144, 524288, 524288, 0), 0)
+    let avp = diameter_avp_put_str(264, 64, 0, "host.example")
+    let msg = diameter_msg_build(128, 257, 0, 1, 1, avp)
+    let v = diameter_avp_find(msg, 264)
+    assert(str_eq(v, "host.example"))
+}
+
+fn TestDiameterTxnKey() {
+    let k = diameter_txn_key(42, 0)
+    assert(len(k) > 0)
+    let s = diameter_session_key("sess-1")
+    assert(str_eq(s, "sess-1"))
+}

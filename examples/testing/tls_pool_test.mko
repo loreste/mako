@@ -1,0 +1,48 @@
+// TLS connection pool: open / timeout / mTLS surface.
+// Offline-friendly: no live peer required for negative paths.
+
+fn TestTlsPoolInvalidArgs() {
+    // 3-arg open refuses implicit timeout (must use open_timeout / open_mtls*).
+    assert_eq(tls_pool_open("127.0.0.1", 443, ""), -1)
+    assert_eq(tls_pool_open_timeout("", 443, "", 100), -1)
+    assert_eq(tls_pool_open_timeout("127.0.0.1", 0, "", 100), -1)
+    assert_eq(tls_pool_open_timeout("127.0.0.1", 443, "", 0), -1)
+    // cert without key / key without cert rejected
+    assert_eq(tls_pool_open_mtls("127.0.0.1", 443, "", "c.pem", "", 100), -1)
+    assert_eq(tls_pool_open_mtls("127.0.0.1", 443, "", "", "k.pem", 100), -1)
+    assert_eq(tls_pool_open_mtls("127.0.0.1", 443, "", "", "", 100), -1)
+    assert_eq(tls_pool_close(-1), -1)
+    assert_eq(tls_pool_fd(-1), -1)
+    assert_eq(tls_pool_send(-1, "x"), -1)
+    assert(str_eq(tls_pool_recv(-1, 16), ""))
+}
+
+fn TestTlsPoolTimeoutUnreachable() {
+    // Port 1 is typically closed; short timeout fails quickly.
+    let h = tls_pool_open_timeout("127.0.0.1", 1, "", 50)
+    assert_eq(h, -1)
+    let m = tls_pool_open_mtls("127.0.0.1", 1, "", "/no/such/cert", "/no/such/key", 50)
+    assert_eq(m, -1)
+}
+
+fn TestTlsPoolCloseIdempotent() {
+    assert_eq(tls_pool_close(0), -1)
+    assert_eq(tls_pool_close(99999), -1)
+}
+
+fn TestTlsPoolHostInjectionRejected() {
+    // Embedded CR / LF in host or paths must fail closed.
+    assert_eq(tls_pool_open_timeout("127.0.0.1\n", 443, "", 50), -1)
+    assert_eq(tls_pool_open_timeout("127.0.0.1", 443, "ca\r.pem", 50), -1)
+    assert_eq(tls_pool_open_mtls("bad\nhost", 443, "ca", "c", "k", 50), -1)
+}
+
+fn TestTlsPoolTimeoutsSurface() {
+    assert_eq(tls_pool_set_timeout(-1, 100), -1)
+    assert_eq(tls_pool_set_timeout(0, 100), -1)
+    // full mTLS open without files fails closed
+    assert_eq(
+        tls_pool_open_mtls_full("127.0.0.1", 1, "", "/no/c", "/no/k", 50, 100),
+        -1
+    )
+}

@@ -1,0 +1,77 @@
+// Diameter TCM facade over general peer_table + timer_heap.
+
+fn diam_tcm_limits() {
+    assert_eq(diameter_limits_set(262144, 524288, 524288, 0), 0)
+}
+
+fn TestDiameterTcmNewFree() {
+    // Capacities are required arguments (no invented defaults).
+    assert_eq(diameter_tcm_new(0, 16, 64, 64), -1)
+    let t = diameter_tcm_new(16, 16, 64, 64)
+    assert(t > 0)
+    assert_eq(diameter_tcm_peer_count(t), 0)
+    assert_eq(diameter_tcm_timer_count(t), 0)
+    assert_eq(diameter_tcm_drops(t), 0)
+    assert_eq(diameter_tcm_free(t), 0)
+    assert_eq(diameter_tcm_free(t), -1)
+}
+
+fn TestDiameterTcmPeerRoute() {
+    diam_tcm_limits()
+    let t = diameter_tcm_new(32, 32, 128, 128)
+    assert_eq(diameter_tcm_set_origin(t, "client.example", "example.com"), 0)
+    let p0 = diameter_tcm_peer_add(t, "pcrf1", "127.0.0.1", 3868, 0, 10)
+    let p1 = diameter_tcm_peer_add(t, "pcrf2", "127.0.0.1", 3869, 0, 20)
+    assert(p0 >= 0)
+    assert(p1 >= 0)
+    assert_eq(diameter_tcm_peer_count(t), 2)
+    let _ = diameter_tcm_route_add(t, "ims.example", "pcrf1")
+    let _ = diameter_tcm_route_add(t, "*", "pcrf2")
+    assert_eq(diameter_tcm_route_lookup(t, "ims.example"), p0)
+    assert_eq(diameter_tcm_route_lookup(t, "other"), p1)
+    let _ = diameter_tcm_free(t)
+}
+
+fn TestDiameterTcmTimers() {
+    diam_tcm_limits()
+    let t = diameter_tcm_new(8, 8, 32, 32)
+    let p = diameter_tcm_peer_add(t, "p", "127.0.0.1", 3868, 0, 1)
+    let id = diameter_tcm_arm(t, 100, 1, p)
+    assert(id >= 0)
+    assert(diameter_tcm_timer_count(t) >= 1)
+    let next = diameter_tcm_poll_deadline(t, 0)
+    assert_eq(next, 100)
+    let n = diameter_tcm_run_due(t, 1000)
+    assert(n >= 0)
+    let _ = diameter_tcm_free(t)
+}
+
+fn TestDiameterTcmBounds() {
+    diam_tcm_limits()
+    // Tiny timer table — arming past cap increments drops.
+    let t = diameter_tcm_new(4, 4, 8, 2)
+    let p = diameter_tcm_peer_add(t, "p", "127.0.0.1", 3868, 0, 1)
+    let a = diameter_tcm_arm(t, 10, 1, p)
+    let b = diameter_tcm_arm(t, 20, 1, p)
+    let c = diameter_tcm_arm(t, 30, 1, p)
+    assert(a >= 0)
+    assert(b >= 0)
+    assert_eq(c, -1)
+    assert(diameter_tcm_drops(t) >= 1)
+    let _ = diameter_tcm_free(t)
+}
+
+fn TestDiameterTcmCer() {
+    diam_tcm_limits()
+    let t = diameter_tcm_new(8, 8, 32, 32)
+    assert_eq(diameter_tcm_set_origin(t, "server.example", "example.com"), 0)
+    let p = diameter_tcm_peer_add(t, "peer", "127.0.0.1", 3868, 0, 1)
+    let cer = diameter_build_cer("remote.example", "remote.com", 1, 2)
+    let n = diameter_tcm_inject_in(t, p, cer)
+    assert(n >= 1)
+    let out = diameter_tcm_take_out(t, p)
+    assert(len(out) >= 20)
+    assert_eq(diameter_is_answer(out), 1)
+    assert_eq(diameter_result_code(out), 2001)
+    let _ = diameter_tcm_free(t)
+}

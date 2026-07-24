@@ -1,5 +1,45 @@
 # Changelog
 
+## Unreleased
+
+### General networking primitives (protocol-agnostic)
+
+These are the building blocks for **any** backend — not one application.
+
+- **`timer_heap_*` / `std/timer`** — deadline min-heap; kind/id are opaque app tags
+  (`runtime/mako_timer.h`).
+- **`peer_table_*` / `std/peer`** — named peers + string-key routes + conn/state
+  handles; `capacity` / `alive` for scanning (`runtime/mako_peer.h`).
+- **`tls_pool_*`** — pooled outbound TLS/mTLS with **caller-supplied** connect/I/O
+  timeouts (`open_timeout`, `open_mtls`, `open_mtls_full`, `set_timeout`).
+- **`sctp_*` / `std/sctp`** — one-to-one SCTP: streams, PPID, heartbeats, RTO,
+  multihoming where the kernel allows. Linux real path; soft stubs elsewhere.
+- **No invented defaults:** callers pass timeouts/caps; `<=0` does not invent
+  30s / 16 streams / 5 retrans.
+
+Tests: `timer_heap_test`, `peer_table_test`, `tls_pool_test`, `sctp_api_test`.
+
+### Diameter — optional protocol pack (not the general layer)
+
+- `runtime/mako_diameter.h` / `std/diameter`: RFC 6733 framing, AVP helpers, HbH
+  multiplex, optional `diameter_mgr_*`, TCP/SCTP pools, auto base CER/CEA/DWR.
+- **`diameter_tcm_*`** is a thin Diameter facade that **composes** general
+  `peer_table` + `timer_heap` (plus Origin/Tw/DWR only). Prefer the general
+  primitives for multi-protocol services.
+- `diameter_limits_set` for wire caps; absolute ceilings only for allocator DoS.
+- Out of scope: Gx/S6a SMs, full AVP dictionary.
+
+### Adversarial / memory-safety hardening
+
+- Diameter framing fail-closed; message/reassembly/inq caps; CEA needs Origin;
+  txn match `{hbh,app,cmd}`; conn generation (ABA).
+- **Handle generation (ABA)** on `timer_heap`, `peer_table`, `tls_pool`,
+  `diameter_tcm` — free+reuse rejects stale handles.
+- **Timer cancel by stable token** (not heap index after reorders).
+- **TLS pool inflight** — close concurrent with send/recv defers free (no UAF).
+- TLS pool rejects host/path CR/LF/NUL; SCTP read requires explicit max;
+  SCTP resolve rejects host NUL/CR/LF.
+
 ## 0.4.16 — 2026-07-23 (tip; tag when packaging cut)
 
 **Theme:** Real GraphQL query executor; native backend `List[T]` for non-scalar

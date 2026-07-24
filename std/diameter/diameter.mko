@@ -1,0 +1,133 @@
+// std/diameter — optional RFC 6733 protocol pack.
+// Wire codec + optional mgr/tcm. Not the general peer/timer layer:
+// compose std/timer + std/peer + tcp/sctp/tls_pool for multi-protocol apps.
+// tcm_* composes peer_table + timer_heap under the hood.
+// Out of scope: Gx/S6a application state machines, full AVP dictionary.
+
+pack diameter
+
+export fn limits_set(max_msg: int, inbuf: int, inq_bytes: int, reasm_ms: int) -> int {
+    return diameter_limits_set(max_msg, inbuf, inq_bytes, reasm_ms)
+}
+export fn limits_max_msg() -> int { return diameter_limits_max_msg() }
+export fn limits_inbuf() -> int { return diameter_limits_inbuf() }
+
+export fn header_len() -> int { return diameter_header_len() }
+export fn msg_len(buf: string) -> int { return diameter_msg_len(buf) }
+export fn msg_complete(buf: string) -> int { return diameter_msg_complete(buf) }
+export fn first_message_len(buf: string) -> int { return diameter_first_message_len(buf) }
+export fn is_request(msg: string) -> int { return diameter_is_request(msg) }
+export fn is_answer(msg: string) -> int { return diameter_is_answer(msg) }
+export fn cmd(msg: string) -> int { return diameter_cmd(msg) }
+export fn app_id(msg: string) -> int { return diameter_app_id(msg) }
+export fn hbh(msg: string) -> int { return diameter_hbh(msg) }
+export fn e2e(msg: string) -> int { return diameter_e2e(msg) }
+export fn msg_build(flags: int, cmd: int, app: int, hbh: int, e2e: int, avps: string) -> string {
+    return diameter_msg_build(flags, cmd, app, hbh, e2e, avps)
+}
+export fn avp_put_u32(code: int, flags: int, vendor: int, n: int) -> string {
+    return diameter_avp_put_u32(code, flags, vendor, n)
+}
+export fn avp_put_str(code: int, flags: int, vendor: int, s: string) -> string {
+    return diameter_avp_put_str(code, flags, vendor, s)
+}
+export fn avp_find(msg: string, code: int) -> string { return diameter_avp_find(msg, code) }
+export fn result_code(msg: string) -> int { return diameter_result_code(msg) }
+export fn txn_key(hbh: int, app: int) -> string { return diameter_txn_key(hbh, app) }
+export fn hbh_new() -> int { return diameter_hbh_new() }
+export fn e2e_new() -> int { return diameter_e2e_new() }
+
+export fn build_cer(host: string, realm: string, hbh: int, e2e: int) -> string {
+    return diameter_build_cer(host, realm, hbh, e2e)
+}
+export fn build_cea(req: string, host: string, realm: string, result: int) -> string {
+    return diameter_build_cea(req, host, realm, result)
+}
+export fn build_dwr(host: string, realm: string, hbh: int, e2e: int) -> string {
+    return diameter_build_dwr(host, realm, hbh, e2e)
+}
+export fn build_dwa(req: string, host: string, realm: string, result: int) -> string {
+    return diameter_build_dwa(req, host, realm, result)
+}
+
+export fn conn_new() -> int { return diameter_conn_new() }
+export fn conn_free(h: int) -> int { return diameter_conn_free(h) }
+export fn conn_feed(h: int, bytes: string) -> int { return diameter_conn_feed(h, bytes) }
+export fn conn_pop(h: int) -> string { return diameter_conn_pop(h) }
+export fn conn_next_hbh(h: int) -> int { return diameter_conn_next_hbh(h) }
+export fn conn_register(h: int, hbh: int, e2e: int, cmd: int, app: int) -> int {
+    return diameter_conn_register(h, hbh, e2e, cmd, app)
+}
+export fn conn_match(h: int, answer: string) -> int { return diameter_conn_match(h, answer) }
+
+export fn mgr_new() -> int { return diameter_mgr_new() }
+export fn mgr_free(h: int) -> int { return diameter_mgr_free(h) }
+export fn mgr_set_origin(h: int, host: string, realm: string) -> int {
+    return diameter_mgr_set_origin(h, host, realm)
+}
+export fn mgr_set_watchdog(h: int, tw_ms: int, timeout_ms: int) -> int {
+    return diameter_mgr_set_watchdog(h, tw_ms, timeout_ms)
+}
+export fn peer_add(
+    h: int, identity: string, host: string, port: int, transport: int, priority: int
+) -> int {
+    return diameter_peer_add(h, identity, host, port, transport, priority)
+}
+export fn route_add(h: int, realm: string, peer_identity: string) -> int {
+    return diameter_route_add(h, realm, peer_identity)
+}
+export fn route_lookup(h: int, realm: string) -> int {
+    return diameter_route_lookup(h, realm)
+}
+export fn mgr_handle_io(h: int, peer_id: int, inbound: string) -> int {
+    return diameter_mgr_handle_io(h, peer_id, inbound)
+}
+export fn mgr_poll(h: int) -> string { return diameter_mgr_poll(h) }
+export fn mgr_tick(h: int, now_ms: int) -> int { return diameter_mgr_tick(h, now_ms) }
+export fn mgr_take_out(h: int, peer_id: int) -> string {
+    return diameter_mgr_take_out(h, peer_id)
+}
+
+// Bounded high-volume timer/connection manager
+export fn tcm_new(max_peers: int, max_conns: int, max_pending: int, max_timers: int) -> int {
+    return diameter_tcm_new(max_peers, max_conns, max_pending, max_timers)
+}
+export fn tcm_free(h: int) -> int { return diameter_tcm_free(h) }
+export fn tcm_set_origin(h: int, host: string, realm: string) -> int {
+    return diameter_tcm_set_origin(h, host, realm)
+}
+export fn tcm_set_watchdog(h: int, tw_ms: int, timeout_ms: int) -> int {
+    return diameter_tcm_set_watchdog(h, tw_ms, timeout_ms)
+}
+export fn tcm_peer_add(
+    h: int, identity: string, host: string, port: int, transport: int, priority: int
+) -> int {
+    return diameter_tcm_peer_add(h, identity, host, port, transport, priority)
+}
+export fn tcm_route_add(h: int, realm: string, peer_identity: string) -> int {
+    return diameter_tcm_route_add(h, realm, peer_identity)
+}
+export fn tcm_route_lookup(h: int, realm: string) -> int {
+    return diameter_tcm_route_lookup(h, realm)
+}
+export fn tcm_arm(h: int, deadline_ms: int, kind: int, peer_id: int) -> int {
+    return diameter_tcm_arm(h, deadline_ms, kind, peer_id)
+}
+export fn tcm_cancel(h: int, timer_id: int) -> int {
+    return diameter_tcm_cancel(h, timer_id)
+}
+export fn tcm_poll_deadline(h: int, now_ms: int) -> int {
+    return diameter_tcm_poll_deadline(h, now_ms)
+}
+export fn tcm_run_due(h: int, now_ms: int) -> int {
+    return diameter_tcm_run_due(h, now_ms)
+}
+export fn tcm_peer_count(h: int) -> int { return diameter_tcm_peer_count(h) }
+export fn tcm_timer_count(h: int) -> int { return diameter_tcm_timer_count(h) }
+export fn tcm_drops(h: int) -> int { return diameter_tcm_drops(h) }
+export fn tcm_inject_in(h: int, peer_id: int, msg: string) -> int {
+    return diameter_tcm_inject_in(h, peer_id, msg)
+}
+export fn tcm_take_out(h: int, peer_id: int) -> string {
+    return diameter_tcm_take_out(h, peer_id)
+}

@@ -1,0 +1,77 @@
+// General-purpose peer + route table (not protocol-specific).
+
+fn TestPeerTableNewFree() {
+    assert_eq(peer_table_new(0, 8), -1)
+    assert_eq(peer_table_new(8, 0), -1)
+    let t = peer_table_new(16, 16)
+    assert(t > 0)
+    assert_eq(peer_table_count(t), 0)
+    assert_eq(peer_table_free(t), 0)
+    assert_eq(peer_table_free(t), -1)
+}
+
+fn TestPeerTableAddRoute() {
+    let t = peer_table_new(16, 16)
+    let p0 = peer_table_add(t, "backend-a", "10.0.0.1", 8080, 0, 10)
+    let p1 = peer_table_add(t, "backend-b", "10.0.0.2", 8080, 1, 20)
+    assert(p0 >= 0)
+    assert(p1 >= 0)
+    assert_eq(peer_table_count(t), 2)
+    assert_eq(peer_table_port(t, p0), 8080)
+    assert(str_eq(peer_table_host(t, p0), "10.0.0.1"))
+    assert_eq(peer_table_transport(t, p1), 1)
+    let _ = peer_table_route_add(t, "api", "backend-a")
+    let _ = peer_table_route_add(t, "*", "backend-b")
+    assert_eq(peer_table_route_lookup(t, "api"), p0)
+    assert_eq(peer_table_route_lookup(t, "other"), p1)
+    assert_eq(peer_table_set_conn(t, p0, 99), 0)
+    assert_eq(peer_table_get_conn(t, p0), 99)
+    assert_eq(peer_table_set_state(t, p0, 2), 0)
+    assert_eq(peer_table_get_state(t, p0), 2)
+    assert_eq(peer_table_touch(t, p0, 12345), 0)
+    assert_eq(peer_table_last_ms(t, p0), 12345)
+    let _ = peer_table_free(t)
+}
+
+fn TestPeerTableDrops() {
+    let t = peer_table_new(1, 1)
+    assert(peer_table_add(t, "a", "127.0.0.1", 1, 0, 0) >= 0)
+    assert_eq(peer_table_add(t, "b", "127.0.0.1", 2, 0, 0), -1)
+    assert(peer_table_drops(t) >= 1)
+    let _ = peer_table_free(t)
+}
+
+fn TestPeerTableScan() {
+    // Capacity + alive let any app scan peers without protocol knowledge.
+    let t = peer_table_new(4, 4)
+    assert_eq(peer_table_capacity(t), 4)
+    let p = peer_table_add(t, "worker", "10.0.0.9", 9000, 0, 1)
+    assert(p >= 0)
+    assert_eq(peer_table_alive(t, p), 1)
+    assert_eq(peer_table_alive(t, p + 1), 0)
+    let _ = peer_table_free(t)
+}
+
+fn TestPeerTableHandleAba() {
+    let t1 = peer_table_new(4, 4)
+    assert(t1 > 0)
+    assert_eq(peer_table_free(t1), 0)
+    assert_eq(peer_table_free(t1), -1)
+    assert_eq(peer_table_add(t1, "a", "127.0.0.1", 1, 0, 0), -1)
+    let t2 = peer_table_new(4, 4)
+    assert(t2 > 0)
+    assert_eq(peer_table_add(t1, "a", "127.0.0.1", 1, 0, 0), -1)
+    assert(peer_table_add(t2, "a", "127.0.0.1", 1, 0, 0) >= 0)
+    let _ = peer_table_free(t2)
+}
+
+fn TestPeerTableRejectInjection() {
+    let t = peer_table_new(4, 4)
+    // Host must not carry CR/LF (C-string / log injection).
+    assert_eq(peer_table_add(t, "a", "10.0.0.1\n", 80, 0, 0), -1)
+    assert_eq(peer_table_add(t, "a", "10.0.0.1\r", 80, 0, 0), -1)
+    assert_eq(peer_table_add(t, "", "10.0.0.1", 80, 0, 0), -1)
+    assert_eq(peer_table_add(t, "a", "", 80, 0, 0), -1)
+    assert_eq(peer_table_add(t, "a", "10.0.0.1", 0, 0, 0), -1)
+    let _ = peer_table_free(t)
+}
