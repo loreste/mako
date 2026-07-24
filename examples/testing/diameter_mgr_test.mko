@@ -1,0 +1,104 @@
+// Diameter manager: realm routing, CER auto-answer, watchdog DWR, failover pick.
+
+fn diam_mgr_limits() {
+    assert_eq(diameter_limits_set(262144, 524288, 524288, 0), 0)
+}
+
+fn TestDiameterMgrRoute() {
+    diam_mgr_limits()
+    let m = diameter_mgr_new()
+    assert(m > 0)
+    assert_eq(diameter_mgr_set_origin(m, "client.example", "example.com"), 0)
+    let p0 = diameter_peer_add(m, "pcrf1", "127.0.0.1", 3868, 0, 10)
+    let p1 = diameter_peer_add(m, "pcrf2", "127.0.0.1", 3869, 0, 20)
+    assert(p0 >= 0)
+    assert(p1 >= 0)
+    assert_eq(diameter_peer_count(m), 2)
+    let _ = diameter_route_add(m, "ims.mnc001.mcc001.3gppnetwork.org", "pcrf1")
+    let _ = diameter_route_add(m, "*", "pcrf2")
+    let hit = diameter_route_lookup(m, "ims.mnc001.mcc001.3gppnetwork.org")
+    assert_eq(hit, p0)
+    let def = diameter_route_lookup(m, "other.realm")
+    assert_eq(def, p1)
+    let _ = diameter_mgr_free(m)
+}
+
+fn TestDiameterMgrCerAuto() {
+    diam_mgr_limits()
+    let m = diameter_mgr_new()
+    let _ = diameter_mgr_set_origin(m, "server.example", "example.com")
+    let p = diameter_peer_add(m, "peer-a", "127.0.0.1", 3868, 0, 1)
+    let _ = diameter_peer_mark_open(m, p)
+    let cer = diameter_build_cer("remote.example", "remote.com", 9, 11)
+    let n = diameter_mgr_inject_in(m, p, cer)
+    assert(n >= 1)
+    let out = diameter_mgr_take_out(m, p)
+    assert(len(out) >= 20)
+    assert_eq(diameter_cmd(out), 257)
+    assert_eq(diameter_is_answer(out), 1)
+    assert_eq(diameter_result_code(out), 2001)
+    let _ = diameter_mgr_free(m)
+}
+
+fn TestDiameterMgrCerRequiresOrigin() {
+    diam_mgr_limits()
+    let m = diameter_mgr_new()
+    // No set_origin — must not open with success 2001.
+    let p = diameter_peer_add(m, "peer-a", "127.0.0.1", 3868, 0, 1)
+    let cer = diameter_build_cer("remote.example", "remote.com", 9, 11)
+    let n = diameter_mgr_inject_in(m, p, cer)
+    assert(n >= 1)
+    let out = diameter_mgr_take_out(m, p)
+    assert(len(out) >= 20)
+    assert_eq(diameter_is_answer(out), 1)
+    assert(diameter_result_code(out) != 2001)
+    let _ = diameter_mgr_free(m)
+}
+
+fn TestDiameterMgrAttachFdRejectsStdio() {
+    diam_mgr_limits()
+    let m = diameter_mgr_new()
+    let p = diameter_peer_add(m, "peer-a", "127.0.0.1", 3868, 0, 1)
+    assert_eq(diameter_peer_attach_fd(m, p, -1), -1)
+    assert_eq(diameter_peer_attach_fd(m, p, 0), -1)
+    assert_eq(diameter_peer_attach_fd(m, p, 1), -1)
+    assert_eq(diameter_peer_attach_fd(m, p, 2), -1)
+    let _ = diameter_mgr_free(m)
+}
+
+fn TestDiameterMgrWatchdog() {
+    diam_mgr_limits()
+    let m = diameter_mgr_new()
+    let _ = diameter_mgr_set_origin(m, "client.example", "example.com")
+    // Explicit Tw / DWA timeout (ms) — no defaults.
+    assert_eq(diameter_mgr_set_watchdog(m, 100, 50), 0)
+    let p = diameter_peer_add(m, "peer-a", "127.0.0.1", 3868, 0, 1)
+    let _ = diameter_peer_mark_open(m, p)
+    let now = mono_ms() + 1000
+    let q = diameter_mgr_tick(m, now)
+    assert(q >= 1)
+    let out = diameter_mgr_take_out(m, p)
+    assert(len(out) >= 20)
+    assert_eq(diameter_cmd(out), 280)
+    assert_eq(diameter_is_request(out), 1)
+    let _ = diameter_mgr_free(m)
+}
+
+fn TestDiameterMgrFailoverPick() {
+    let m = diameter_mgr_new()
+    let p0 = diameter_peer_add(m, "a", "127.0.0.1", 3868, 0, 10)
+    let p1 = diameter_peer_add(m, "b", "127.0.0.1", 3869, 0, 20)
+    let next = diameter_mgr_pick_failover(m, p0)
+    assert_eq(next, p1)
+    let _ = diameter_mgr_free(m)
+}
+
+fn TestDiameterBuildCerCea() {
+    let cer = diameter_build_cer("h.example", "example.com", 1, 2)
+    assert_eq(diameter_cmd(cer), 257)
+    assert_eq(diameter_is_request(cer), 1)
+    let cea = diameter_build_cea(cer, "s.example", "example.com", 2001)
+    assert_eq(diameter_is_answer(cea), 1)
+    assert_eq(diameter_hbh(cea), 1)
+    assert_eq(diameter_result_code(cea), 2001)
+}

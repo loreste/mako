@@ -26,6 +26,42 @@ fn server_sni_remove(server: TlsServer, hostname: string) -> int {
 fn client_new_mtls(ca: string, cert: string, key: string) -> TlsClient {
     return tls_client_new_mtls(ca, cert, key)
 }
+// Pooled outbound TLS: CA verify, historical 1200 ms connect timeout.
+fn pool_open(host: string, port: int, ca: string) -> int {
+    return tls_pool_open(host, port, ca)
+}
+// Pooled outbound TLS with configurable connect timeout_ms.
+fn pool_open_timeout(host: string, port: int, ca: string, timeout_ms: int) -> int {
+    return tls_pool_open_timeout(host, port, ca, timeout_ms)
+}
+// Pooled mTLS: present client cert+key, verify peer with CA.
+fn pool_open_mtls(
+    host: string, port: int, ca: string, cert: string, key: string, timeout_ms: int
+) -> int {
+    return tls_pool_open_mtls(host, port, ca, cert, key, timeout_ms)
+}
+// mTLS with independent connect + I/O timeouts (ms).
+fn pool_open_mtls_full(
+    host: string, port: int, ca: string, cert: string, key: string,
+    connect_ms: int, io_ms: int
+) -> int {
+    return tls_pool_open_mtls_full(host, port, ca, cert, key, connect_ms, io_ms)
+}
+fn pool_set_timeout(handle: int, io_ms: int) -> int {
+    return tls_pool_set_timeout(handle, io_ms)
+}
+fn pool_send(handle: int, data: string) -> int {
+    return tls_pool_send(handle, data)
+}
+fn pool_recv(handle: int, max: int) -> string {
+    return tls_pool_recv(handle, max)
+}
+fn pool_fd(handle: int) -> int {
+    return tls_pool_fd(handle)
+}
+fn pool_close(handle: int) -> int {
+    return tls_pool_close(handle)
+}
 fn unique(conn: TlsConn) -> string {
     return tls_unique(conn)
 }

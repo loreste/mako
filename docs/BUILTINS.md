@@ -1444,6 +1444,112 @@ Default `ch.send(s)` still clones so the caller may reuse `s`. Prefer take on pr
 | `tcp_accept4` | `tcp_accept4(listener: int) -> int` | Accept with `NONBLOCK\|CLOEXEC` |
 | `tcp_close` | `tcp_close(conn: int) -> int` | Close a TCP connection |
 
+### Timer heap (general)
+
+Protocol-agnostic deadline min-heap. Callers supply `max_timers` and every
+deadline/kind/id. Kind and id are opaque application tags. Handles pack a
+**generation** (ABA-safe after free/reuse); `arm` returns a **stable token**
+for cancel (not a heap index).
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `timer_heap_new` | `(max_timers) -> int` | Create heap (`max_timers` > 0 required) |
+| `timer_heap_free` | `(h) -> int` | Free heap |
+| `timer_heap_arm` | `(h, deadline_ms, kind, id) -> int` | Arm timer; returns **stable token** (>0) or −1 |
+| `timer_heap_cancel` | `(h, token) -> int` | Lazy-cancel by token (safe after heap reorders) |
+| `timer_heap_next` | `(h) -> int` | Next deadline or −1 |
+| `timer_heap_pop_due1` | `(h, now_ms) -> int` | Pop one due (1/0); sets `timer_last_kind`/`id` |
+| `timer_last_kind` / `timer_last_id` | `() -> int` | Last pop side channel |
+| `timer_heap_count` / `timer_heap_drops` | `(h) -> int` | Armed count / drop count |
+
+### Peer table (general)
+
+Named peers + opaque string-key routes → peer identity. No protocol semantics.
+Attach your own connection handles via `peer_table_set_conn`. Handles pack a
+**generation** (ABA-safe). Hosts reject CR/LF/NUL.
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `peer_table_new` | `(max_peers, max_routes) -> int` | Both capacities required |
+| `peer_table_add` | `(h, identity, host, port, transport, priority) -> int` | Peer id |
+| `peer_table_route_add` / `route_lookup` | key → peer (empty/`*` = default) | |
+| `peer_table_set_conn` / `get_conn` | Opaque int64 handle storage | |
+| `peer_table_set_state` / `get_state` / `touch` / `last_ms` | App state + activity | |
+| `peer_table_host` / `port` / `transport` / `count` / `drops` | Inspect | |
+| `peer_table_capacity` / `alive` | Slot capacity; whether peer id is live (for scanning) | |
+
+### SCTP (general transport)
+
+One-to-one SCTP associations plus multistreaming, PPID, heartbeats, multihoming.
+**Linux** + libsctp for advanced options; **macOS / Windows** report
+`sctp_available() == 0` and advanced ops return −1.
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `sctp_available` | `() -> int` | Kernel SCTP usable (1/0) |
+| `sctp_listen` / `sctp_listen_addr` | `(port)` / `(host, port) -> int` | Listen fd |
+| `sctp_accept` | `(fd) -> int` | Accept association |
+| `sctp_connect` / `sctp_connect_timeout` | `(host, port[, ms]) -> int` | Connect |
+| `sctp_close` / `sctp_shutdown` / `sctp_set_timeout` | fd lifecycle | Same conventions as TCP |
+| `sctp_write` / `sctp_write_all` / `sctp_read` / `sctp_read_n` | I/O on association | Stream 0 by default |
+| `sctp_send_stream` / `sctp_recv_stream` | `(fd, stream_id, data)` / `(fd, max)` | Stream-aware when libsctp linked |
+| `sctp_send_ex` | `(fd, stream_id, ppid, data) -> int` | Stream + PPID (host-order ppid) |
+| `sctp_set_streams` / `sctp_get_streams` | INITMSG before connect; status packed `out<<16\|in` | Multistreaming |
+| `sctp_set_heartbeat` | `(fd, interval_ms, path_max_retrans) -> int` | Peer-addr HB (`0` disables when supported) |
+| `sctp_set_rto` | `(fd, initial, min, max) -> int` | RTO parameters (ms) |
+| `sctp_bindx_add` / `sctp_bindx_rem` | Multihoming local addresses | libsctp |
+| `sctp_connectx` | `(hosts_csv, port, timeout_ms) -> int` | Multi-homed connect (comma-separated hosts) |
+| `sctp_getpaddrs` / `sctp_getladdrs` | `() -> string` | `"ip:port,ip:port"` lists |
+| `sctp_set_primary` | `(fd, host, port) -> int` | Primary path |
+| `sctp_last_stream` / `sctp_last_ppid` | `() -> int` | Thread-local side channel after `recv_stream` |
+| `sctp_peer_addr` / `sctp_local_addr` | `(fd) -> string` | Endpoint addresses |
+
+Pack: `std/sctp`. Advanced ops need **Linux + libsctp**; elsewhere `-1` / empty.
+
+### Diameter (one protocol pack — optional)
+
+Runtime: `runtime/mako_diameter.h`. Pack: **`std/diameter`**.
+
+**Not** the general peer/timer/transport layer. For multi-protocol or
+app-owned routing, compose `timer_heap_*` + `peer_table_*` + `tcp_*` /
+`sctp_*` / `tls_pool_*` directly. Use Diameter only when speaking RFC 6733.
+
+**Is:** framing, AVP helpers, per-conn HbH multiplexing, optional multi-peer
+manager with realm routing / failover / DWR, TCP/SCTP pools, auto base
+CER/CEA/DWR/DWA/DPR/DPA. Optional `diameter_tcm_*` is a thin facade that
+**composes** general `peer_table` + `timer_heap` plus Diameter-only Origin/Tw/DWR.
+
+**Limits (required):** call `diameter_limits_set(max_msg, inbuf_max, inq_bytes_max, reasm_ms)`
+before `conn_feed` / pools. `0` for a size disables that bound where safe; `inbuf_max`
+must be set for reassembly. No invented timeouts — `mgr_set_watchdog` / `conn_expire`
+require explicit positive values; watchdog Tw starts at **0** (DWR off) until set.
+
+**Threat model:** treat the wire as hostile. Corrupt frames drop the reassembly
+buffer (no slow resync). Auto-CEA requires `mgr_set_origin` and a peer Origin-Host
+AVP (else non-2xxx Result-Code). HbH match also requires Command-Code. Conn handles
+include a generation so free/reuse does not alias. Still require **peer authentication**
+(mTLS / IP allowlist) at the app layer.
+
+**Out of scope:** Gx/S6a application state machines, full AVP dictionary, DTLS,
+multi-stream per-App-Id policy. You own app answers, Session-Id maps, and I/O
+loops (`crew` + `io_poll` / `mgr_flush`).
+
+| Area | Surface |
+|------|---------|
+| Framing | `diameter_msg_len` / `msg_complete` / `msg_needed` / `first_message_len` |
+| Header | `diameter_flags` / `is_request` / `is_answer` / `cmd` / `app_id` / `hbh` / `e2e` |
+| Build | `diameter_msg_build` / `header_build` / `set_hbh` / `set_e2e` |
+| AVP | `diameter_avp_encode` / `avp_put_u32` / `avp_put_str` / `avp_find` / `result_code` |
+| Keys | `diameter_txn_key` / `e2e_key` / `session_key` / `hbh_new` / `e2e_new` |
+| Base msgs | `diameter_build_cer` / `cea` / `dwr` / `dwa` / `dpr` / `dpa` |
+| Conn | `diameter_conn_new` / `feed` / `pop` / `register` / `match` / `expire` / `take_out` |
+| Pool | `diameter_pool_open(host, port, max, timeout_ms, transport)` transport: 0=TCP, 1=SCTP |
+| Manager | `diameter_mgr_new` / `set_origin` / `set_watchdog` / `peer_add` / `route_add` / `route_lookup` |
+| Failover / I/O | `diameter_mgr_pick_failover` / `handle_io` / `tick` / `request` / `flush` / `poll` |
+| Optional TCM | `diameter_tcm_*` — Diameter facade over **general** `peer_table` + `timer_heap` |
+
+Tests: `timer_heap_test`, `peer_table_test`, `diameter_*_test`.
+
 Sockets created by listen/connect/udp_bind use **CLOEXEC** when available.
 
 **IPv6 / dual-stack:** `tcp_listen` / `tcp_listen_addr("")` or `"*"` prefer `::` with
@@ -1592,8 +1698,16 @@ read/write/close. Prefer `tls_client_new(ca_pem)` (VERIFY_PEER) over
 | `tls_client_available` | `tls_client_available() -> int` | OpenSSL client backend present (1/0) |
 | `tls_client_new` | `tls_client_new(ca_pem: string) -> TlsClient` | Client ctx; verify peer against CA PEM |
 | `tls_client_new_insecure` | `tls_client_new_insecure() -> TlsClient` | Client ctx; **no** cert verify (dev only) |
+| `tls_client_new_mtls` | `tls_client_new_mtls(ca, cert, key) -> TlsClient` | Client ctx; VERIFY_PEER + present client cert |
 | `tls_client_free` | `tls_client_free(cli: TlsClient) -> int` | Free client context |
 | `tls_connect` | `tls_connect(cli: TlsClient, fd: int, host: string) -> TlsConn` | Blocking handshake + SNI |
+| `tls_pool_open` | `(host, port, ca) -> int` | **Always −1** — no implicit timeout; use `open_timeout` / `open_mtls*` |
+| `tls_pool_open_timeout` | `(host, port, ca, connect_ms) -> int` | CA verify; **connect_ms must be > 0** |
+| `tls_pool_open_mtls` | `(host, port, ca, cert, key, connect_ms) -> int` | mTLS; connect_ms > 0; I/O timeout unset |
+| `tls_pool_open_mtls_full` | `(…, connect_ms, io_ms) -> int` | mTLS; connect_ms > 0; io_ms ≥ 0 (`0` = leave socket default) |
+| `tls_pool_set_timeout` | `(handle, io_ms) -> int` | Update I/O timeout on live handle |
+| `tls_pool_send` / `tls_pool_recv` | `(handle, …) -> int` / `string` | Write / read on pool handle |
+| `tls_pool_fd` / `tls_pool_close` | `(handle) -> int` | Underlying fd / close (0 ok, -1 bad) |
 
 The generic `https_*` client is the verified HTTP/1.1 convenience layer over
 this TLS client. It is the required transport for the `oidc_*` helpers; do not

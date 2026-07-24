@@ -1,0 +1,67 @@
+// SCTP API surface. On platforms without kernel SCTP, available()==0
+// and ops return -1 — suite must stay green on macOS.
+
+fn TestSctpAvailableShape() {
+    let a = sctp_available()
+    assert(a == 0 || a == 1)
+}
+
+fn TestSctpUnavailableFails() {
+    if sctp_available() != 0 {
+        return
+    }
+    assert_eq(sctp_listen(0), -1)
+    assert_eq(sctp_listen_addr("127.0.0.1", 3868), -1)
+    assert_eq(sctp_connect("127.0.0.1", 3868), -1)
+    assert_eq(sctp_connect_timeout("127.0.0.1", 3868, 50), -1)
+    assert_eq(sctp_accept(-1), -1)
+    assert_eq(sctp_write(-1, "x"), -1)
+    assert(str_eq(sctp_read(-1, 16), ""))
+    assert_eq(sctp_send_stream(-1, 0, "x"), -1)
+    assert(str_eq(sctp_recv_stream(-1, 16), ""))
+}
+
+fn TestSctpAdvancedUnavailable() {
+    // On platforms without libsctp/kernel, advanced ops fail closed.
+    if sctp_available() != 0 {
+        // Still may lack libsctp for options — just call; must not crash.
+        let _ = sctp_set_streams(-1, 16, 16)
+        let _ = sctp_send_ex(-1, 0, 46, "x")
+        let _ = sctp_set_heartbeat(-1, 1000, 5)
+        let _ = sctp_connectx("127.0.0.1", 1, 50)
+        return
+    }
+    assert_eq(sctp_set_streams(-1, 16, 16), -1)
+    assert_eq(sctp_get_streams(-1), -1)
+    assert_eq(sctp_send_ex(-1, 0, 46, "x"), -1)
+    assert_eq(sctp_set_heartbeat(-1, 1000, 5), -1)
+    assert_eq(sctp_set_rto(-1, 3000, 1000, 60000), -1)
+    assert_eq(sctp_bindx_add(-1, "127.0.0.1", 3868), -1)
+    assert_eq(sctp_connectx("127.0.0.1", 3868, 50), -1)
+    assert(str_eq(sctp_getpaddrs(-1), ""))
+    assert_eq(sctp_set_primary(-1, "127.0.0.1", 3868), -1)
+}
+
+fn TestSctpLoopbackWhenAvailable() {
+    if sctp_available() == 0 {
+        return
+    }
+    let lfd2 = sctp_listen_addr("127.0.0.1", 19868)
+    if lfd2 < 0 {
+        return
+    }
+    let cfd = sctp_connect_timeout("127.0.0.1", 19868, 1000)
+    if cfd < 0 {
+        let _ = sctp_close(lfd2)
+        return
+    }
+    let afd = sctp_accept(lfd2)
+    if afd >= 0 {
+        let n = sctp_write_all(cfd, "ping")
+        assert(n >= 0)
+        let _ = sctp_read(afd, 64)
+        let _ = sctp_close(afd)
+    }
+    let _ = sctp_close(cfd)
+    let _ = sctp_close(lfd2)
+}

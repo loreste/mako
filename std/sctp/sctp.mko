@@ -1,0 +1,80 @@
+// std/sctp — thin pack over platform sctp_* builtins.
+// Real associations on Linux with kernel SCTP; elsewhere available()==0.
+
+pack sctp
+
+export fn available() -> int {
+    return sctp_available()
+}
+export fn listen(port: int) -> int {
+    return sctp_listen(port)
+}
+export fn listen_addr(host: string, port: int) -> int {
+    return sctp_listen_addr(host, port)
+}
+export fn accept(fd: int) -> int {
+    return sctp_accept(fd)
+}
+export fn connect(host: string, port: int) -> int {
+    return sctp_connect(host, port)
+}
+export fn connect_timeout(host: string, port: int, timeout_ms: int) -> int {
+    return sctp_connect_timeout(host, port, timeout_ms)
+}
+export fn close(fd: int) -> int {
+    return sctp_close(fd)
+}
+export fn write(fd: int, data: string) -> int {
+    return sctp_write(fd, data)
+}
+export fn write_all(fd: int, data: string) -> int {
+    return sctp_write_all(fd, data)
+}
+export fn read(fd: int, max: int) -> string {
+    return sctp_read(fd, max)
+}
+export fn send_stream(fd: int, stream_id: int, data: string) -> int {
+    return sctp_send_stream(fd, stream_id, data)
+}
+export fn recv_stream(fd: int, max: int) -> string {
+    return sctp_recv_stream(fd, max)
+}
+export fn last_stream() -> int {
+    return sctp_last_stream()
+}
+export fn last_ppid() -> int {
+    return sctp_last_ppid()
+}
+export fn set_streams(fd: int, out_streams: int, in_streams: int) -> int {
+    return sctp_set_streams(fd, out_streams, in_streams)
+}
+export fn get_streams(fd: int) -> int {
+    return sctp_get_streams(fd)
+}
+export fn send_ex(fd: int, stream_id: int, ppid: int, data: string) -> int {
+    return sctp_send_ex(fd, stream_id, ppid, data)
+}
+export fn set_heartbeat(fd: int, interval_ms: int, path_max_retrans: int) -> int {
+    return sctp_set_heartbeat(fd, interval_ms, path_max_retrans)
+}
+export fn set_rto(fd: int, initial_ms: int, min_ms: int, max_ms: int) -> int {
+    return sctp_set_rto(fd, initial_ms, min_ms, max_ms)
+}
+export fn bindx_add(fd: int, host: string, port: int) -> int {
+    return sctp_bindx_add(fd, host, port)
+}
+export fn bindx_rem(fd: int, host: string, port: int) -> int {
+    return sctp_bindx_rem(fd, host, port)
+}
+export fn connectx(hosts: string, port: int, timeout_ms: int) -> int {
+    return sctp_connectx(hosts, port, timeout_ms)
+}
+export fn getpaddrs(fd: int) -> string {
+    return sctp_getpaddrs(fd)
+}
+export fn getladdrs(fd: int) -> string {
+    return sctp_getladdrs(fd)
+}
+export fn set_primary(fd: int, host: string, port: int) -> int {
+    return sctp_set_primary(fd, host, port)
+}

@@ -67,6 +67,10 @@ symbol-for-symbol parity with Go or any optional platform integration.
 | `plugin` | **Done** | product host (`std/plugin`): load/call/meta/reload/manifest + live dylib |
 | `syscall` | **Done** | portable OS primitives (`std/syscall`): pid/uid/host/pipe/dup/… |
 | `time` | **Done** | clocks + calendar + parse/format + duration (`std/time`) |
+| `timer` | **Done** | general deadline min-heap (`timer_heap_*`) — protocol-agnostic |
+| `peer` | **Done** | general named peers + string-key routes (`peer_table_*`) |
+| `sctp` | **Done** | general SCTP transport (streams/PPID/HB/multihome where kernel allows) |
+| `diameter` | **Optional pack** | RFC 6733 codec + optional managers; one protocol over general primitives |
 | `collections` | **Done** | List[T]=[]T + set/heap/ring/stack/queue/stats |
 | `graphql` | **Done seed** | HTTP body query/vars, field list, data/error JSON ([MESSAGING_GRAPHQL.md](MESSAGING_GRAPHQL.md)) |
 | `messaging` | **Done seed** | In-process message queues `mq_*` ([MESSAGING_GRAPHQL.md](MESSAGING_GRAPHQL.md)) |
@@ -870,6 +874,8 @@ writers for self-signed / CSR / reload:
 | `crypto.x509.make_self_signed` / `make_csr` | Write PEMs for lab / rotation workflows |
 | `crypto.tls.server_reload` | Hot-reload cert+key on an existing server ctx |
 | `crypto.tls.server_new_mtls` / `client_new_mtls` / `unique` | mTLS + tls-unique |
+| `crypto.tls.pool_open` / `pool_open_timeout` / `pool_open_mtls` | Pooled outbound TLS / mTLS handles |
+| `crypto.tls.pool_send` / `pool_recv` / `pool_fd` / `pool_close` | Pool I/O lifecycle |
 
 Not a CA product: no HSM, ACME, or full WebPKI store. Tests:
 `security_product_test.mko`, `security_residuals_test.mko`.
@@ -1496,6 +1502,25 @@ fn main() {
 ```
 
 ---
+
+## General networking building blocks
+
+These are protocol-agnostic. Any backend (HTTP, SIP, custom binary, Diameter, …)
+composes them; no pack invents timeouts or peer policy defaults.
+
+| Pack / builtins | Role |
+|-----------------|------|
+| `tcp_pool_*` / `tls_pool_*` | Connection pools with **caller-supplied** timeouts; mTLS optional |
+| `sctp_*` / `std/sctp` | General SCTP (streams, PPID, HB, multihoming where kernel allows) |
+| `timer_heap_*` / `std/timer` | Protocol-agnostic deadline min-heap |
+| `peer_table_*` / `std/peer` | Protocol-agnostic named peers + string-key routing + scan helpers |
+
+## Diameter (`std/diameter`) — optional protocol pack
+
+RFC 6733 framing/AVP + optional managers. **Not** the general peer layer:
+`diameter_tcm_*` composes `peer_table` + `timer_heap` and only adds Diameter
+Origin/Tw/DWR. Prefer composing the general packs for multi-protocol services.
+Runtime: `runtime/mako_diameter.h`.
 
 ## SIP proxy library (built-in)
 

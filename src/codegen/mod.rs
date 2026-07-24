@@ -3731,6 +3731,10 @@ impl Codegen {
             self.out.push_str("#include \"mako_cmap.h\"\n");
             self.out.push_str("#include \"mako_dio.h\"\n");
             self.out.push_str("#include \"mako_domain.h\"\n");
+            self.out.push_str("#include \"mako_sctp.h\"\n");
+            self.out.push_str("#include \"mako_timer.h\"\n");
+            self.out.push_str("#include \"mako_peer.h\"\n");
+            self.out.push_str("#include \"mako_diameter.h\"\n");
             self.out.push_str("#include \"mako_evloop.h\"\n");
             self.out.push_str("#include \"mako_game.h\"\n");
             self.out.push_str("#include \"mako_gpu.h\"\n");
@@ -4093,6 +4097,10 @@ impl Codegen {
             (&["mako_sql_", "sql_", "sqlite_", "pg_", "redis_", "mysql_"], "mako_db.h"),
             (&["mako_dio_", "dio_", "direct_io", "wal_", "page_", "btree_", "multistore_", "store_", "kv_", "fs_store"], "mako_dio.h"),
             (&["mako_domain_", "domain_"], "mako_domain.h"),
+            (&["mako_sctp_", "sctp_"], "mako_sctp.h"),
+            (&["mako_timer_", "timer_heap_", "timer_last_"], "mako_timer.h"),
+            (&["mako_peer_", "peer_table_"], "mako_peer.h"),
+            (&["mako_diameter_", "diameter_"], "mako_diameter.h"),
             (&["mako_evloop", "evloop_"], "mako_evloop.h"),
             (&["mako_game_", "game_udp"], "mako_game.h"),
             (&["mako_gpu_", "gpu_"], "mako_gpu.h"),
@@ -29905,6 +29913,371 @@ impl Codegen {
                 let (_, ca) = self.emit_expr(&args[2]);
                 return ("int64_t".into(), format!("mako_tls_pool_open({h}, {p}, {ca})"));
             }
+            "tls_pool_open_timeout" => {
+                let (_, h) = self.emit_expr(&args[0]);
+                let (_, p) = self.emit_expr(&args[1]);
+                let (_, ca) = self.emit_expr(&args[2]);
+                let (_, ms) = self.emit_expr(&args[3]);
+                return (
+                    "int64_t".into(),
+                    format!("mako_tls_pool_open_timeout({h}, {p}, {ca}, {ms})"),
+                );
+            }
+            "tls_pool_open_mtls" => {
+                let (_, h) = self.emit_expr(&args[0]);
+                let (_, p) = self.emit_expr(&args[1]);
+                let (_, ca) = self.emit_expr(&args[2]);
+                let (_, cert) = self.emit_expr(&args[3]);
+                let (_, key) = self.emit_expr(&args[4]);
+                let (_, ms) = self.emit_expr(&args[5]);
+                return (
+                    "int64_t".into(),
+                    format!("mako_tls_pool_open_mtls({h}, {p}, {ca}, {cert}, {key}, {ms})"),
+                );
+            }
+            "tls_pool_open_mtls_full" => {
+                let (_, h) = self.emit_expr(&args[0]);
+                let (_, p) = self.emit_expr(&args[1]);
+                let (_, ca) = self.emit_expr(&args[2]);
+                let (_, cert) = self.emit_expr(&args[3]);
+                let (_, key) = self.emit_expr(&args[4]);
+                let (_, cms) = self.emit_expr(&args[5]);
+                let (_, ims) = self.emit_expr(&args[6]);
+                return (
+                    "int64_t".into(),
+                    format!("mako_tls_pool_open_mtls_full({h}, {p}, {ca}, {cert}, {key}, {cms}, {ims})"),
+                );
+            }
+            "tls_pool_set_timeout" => {
+                let (_, h) = self.emit_expr(&args[0]);
+                let (_, ms) = self.emit_expr(&args[1]);
+                return ("int64_t".into(), format!("mako_tls_pool_set_timeout({h}, {ms})"));
+            }
+            "timer_heap_new" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                return ("int64_t".into(), format!("mako_timer_heap_new({a0})"));
+            }
+            "timer_heap_free" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                return ("int64_t".into(), format!("mako_timer_heap_free({a0})"));
+            }
+            "timer_heap_arm" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                let (_, a1) = self.emit_expr(&args[1]);
+                let (_, a2) = self.emit_expr(&args[2]);
+                let (_, a3) = self.emit_expr(&args[3]);
+                return ("int64_t".into(), format!("mako_timer_heap_arm({a0}, {a1}, {a2}, {a3})"));
+            }
+            "timer_heap_cancel" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                let (_, a1) = self.emit_expr(&args[1]);
+                return ("int64_t".into(), format!("mako_timer_heap_cancel({a0}, {a1})"));
+            }
+            "timer_heap_next" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                return ("int64_t".into(), format!("mako_timer_heap_next({a0})"));
+            }
+            "timer_heap_pop_due1" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                let (_, a1) = self.emit_expr(&args[1]);
+                return ("int64_t".into(), format!("mako_timer_heap_pop_due1({a0}, {a1})"));
+            }
+            "timer_last_kind" => {
+                return ("int64_t".into(), format!("mako_timer_last_kind()"));
+            }
+            "timer_last_id" => {
+                return ("int64_t".into(), format!("mako_timer_last_id()"));
+            }
+            "timer_heap_count" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                return ("int64_t".into(), format!("mako_timer_heap_count({a0})"));
+            }
+            "timer_heap_drops" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                return ("int64_t".into(), format!("mako_timer_heap_drops({a0})"));
+            }
+            "peer_table_new" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                let (_, a1) = self.emit_expr(&args[1]);
+                return ("int64_t".into(), format!("mako_peer_table_new({a0}, {a1})"));
+            }
+            "peer_table_free" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                return ("int64_t".into(), format!("mako_peer_table_free({a0})"));
+            }
+            "peer_table_add" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                let (_, a1) = self.emit_expr(&args[1]);
+                let (_, a2) = self.emit_expr(&args[2]);
+                let (_, a3) = self.emit_expr(&args[3]);
+                let (_, a4) = self.emit_expr(&args[4]);
+                let (_, a5) = self.emit_expr(&args[5]);
+                return ("int64_t".into(), format!("mako_peer_table_add({a0}, {a1}, {a2}, {a3}, {a4}, {a5})"));
+            }
+            "peer_table_set_conn" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                let (_, a1) = self.emit_expr(&args[1]);
+                let (_, a2) = self.emit_expr(&args[2]);
+                return ("int64_t".into(), format!("mako_peer_table_set_conn({a0}, {a1}, {a2})"));
+            }
+            "peer_table_get_conn" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                let (_, a1) = self.emit_expr(&args[1]);
+                return ("int64_t".into(), format!("mako_peer_table_get_conn({a0}, {a1})"));
+            }
+            "peer_table_set_state" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                let (_, a1) = self.emit_expr(&args[1]);
+                let (_, a2) = self.emit_expr(&args[2]);
+                return ("int64_t".into(), format!("mako_peer_table_set_state({a0}, {a1}, {a2})"));
+            }
+            "peer_table_get_state" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                let (_, a1) = self.emit_expr(&args[1]);
+                return ("int64_t".into(), format!("mako_peer_table_get_state({a0}, {a1})"));
+            }
+            "peer_table_touch" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                let (_, a1) = self.emit_expr(&args[1]);
+                let (_, a2) = self.emit_expr(&args[2]);
+                return ("int64_t".into(), format!("mako_peer_table_touch({a0}, {a1}, {a2})"));
+            }
+            "peer_table_last_ms" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                let (_, a1) = self.emit_expr(&args[1]);
+                return ("int64_t".into(), format!("mako_peer_table_last_ms({a0}, {a1})"));
+            }
+            "peer_table_route_add" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                let (_, a1) = self.emit_expr(&args[1]);
+                let (_, a2) = self.emit_expr(&args[2]);
+                return ("int64_t".into(), format!("mako_peer_table_route_add({a0}, {a1}, {a2})"));
+            }
+            "peer_table_route_lookup" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                let (_, a1) = self.emit_expr(&args[1]);
+                return ("int64_t".into(), format!("mako_peer_table_route_lookup({a0}, {a1})"));
+            }
+            "peer_table_count" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                return ("int64_t".into(), format!("mako_peer_table_count({a0})"));
+            }
+            "peer_table_drops" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                return ("int64_t".into(), format!("mako_peer_table_drops({a0})"));
+            }
+            "peer_table_host" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                let (_, a1) = self.emit_expr(&args[1]);
+                let tmp = self.fresh("dx");
+                self.line(&format!("MakoString {tmp} = mako_peer_table_host({a0}, {a1});"));
+                return ("MakoString".into(), tmp);
+            }
+            "peer_table_port" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                let (_, a1) = self.emit_expr(&args[1]);
+                return ("int64_t".into(), format!("mako_peer_table_port({a0}, {a1})"));
+            }
+            "peer_table_transport" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                let (_, a1) = self.emit_expr(&args[1]);
+                return ("int64_t".into(), format!("mako_peer_table_transport({a0}, {a1})"));
+            }
+            "peer_table_capacity" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                return ("int64_t".into(), format!("mako_peer_table_capacity({a0})"));
+            }
+            "peer_table_alive" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                let (_, a1) = self.emit_expr(&args[1]);
+                return ("int64_t".into(), format!("mako_peer_table_alive({a0}, {a1})"));
+            }
+            "diameter_limits_set" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                let (_, a1) = self.emit_expr(&args[1]);
+                let (_, a2) = self.emit_expr(&args[2]);
+                let (_, a3) = self.emit_expr(&args[3]);
+                return ("int64_t".into(), format!("mako_diameter_limits_set({a0}, {a1}, {a2}, {a3})"));
+            }
+            "diameter_limits_max_msg" => {
+                return ("int64_t".into(), format!("mako_diameter_limits_max_msg()"));
+            }
+            "diameter_limits_inbuf" => {
+                return ("int64_t".into(), format!("mako_diameter_limits_inbuf()"));
+            }
+            "diameter_limits_inq_bytes" => {
+                return ("int64_t".into(), format!("mako_diameter_limits_inq_bytes()"));
+            }
+            "diameter_limits_reasm_ms" => {
+                return ("int64_t".into(), format!("mako_diameter_limits_reasm_ms()"));
+            }
+            "diameter_tcm_set_run_budget" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                let (_, a1) = self.emit_expr(&args[1]);
+                return ("int64_t".into(), format!("mako_diameter_tcm_set_run_budget({a0}, {a1})"));
+            }
+            "sctp_set_streams" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                let (_, a1) = self.emit_expr(&args[1]);
+                let (_, a2) = self.emit_expr(&args[2]);
+                return ("int64_t".into(), format!("mako_sctp_set_streams({a0}, {a1}, {a2})"));
+            }
+            "sctp_get_streams" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                return ("int64_t".into(), format!("mako_sctp_get_streams({a0})"));
+            }
+            "sctp_send_ex" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                let (_, a1) = self.emit_expr(&args[1]);
+                let (_, a2) = self.emit_expr(&args[2]);
+                let (_, a3) = self.emit_expr(&args[3]);
+                return ("int64_t".into(), format!("mako_sctp_send_ex({a0}, {a1}, {a2}, {a3})"));
+            }
+            "sctp_set_heartbeat" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                let (_, a1) = self.emit_expr(&args[1]);
+                let (_, a2) = self.emit_expr(&args[2]);
+                return ("int64_t".into(), format!("mako_sctp_set_heartbeat({a0}, {a1}, {a2})"));
+            }
+            "sctp_set_rto" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                let (_, a1) = self.emit_expr(&args[1]);
+                let (_, a2) = self.emit_expr(&args[2]);
+                let (_, a3) = self.emit_expr(&args[3]);
+                return ("int64_t".into(), format!("mako_sctp_set_rto({a0}, {a1}, {a2}, {a3})"));
+            }
+            "sctp_bindx_add" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                let (_, a1) = self.emit_expr(&args[1]);
+                let (_, a2) = self.emit_expr(&args[2]);
+                return ("int64_t".into(), format!("mako_sctp_bindx_add({a0}, {a1}, {a2})"));
+            }
+            "sctp_bindx_rem" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                let (_, a1) = self.emit_expr(&args[1]);
+                let (_, a2) = self.emit_expr(&args[2]);
+                return ("int64_t".into(), format!("mako_sctp_bindx_rem({a0}, {a1}, {a2})"));
+            }
+            "sctp_connectx" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                let (_, a1) = self.emit_expr(&args[1]);
+                let (_, a2) = self.emit_expr(&args[2]);
+                return ("int64_t".into(), format!("mako_sctp_connectx({a0}, {a1}, {a2})"));
+            }
+            "sctp_getpaddrs" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                let tmp = self.fresh("dx");
+                self.line(&format!("MakoString {tmp} = mako_sctp_getpaddrs({a0});"));
+                return ("MakoString".into(), tmp);
+            }
+            "sctp_getladdrs" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                let tmp = self.fresh("dx");
+                self.line(&format!("MakoString {tmp} = mako_sctp_getladdrs({a0});"));
+                return ("MakoString".into(), tmp);
+            }
+            "sctp_set_primary" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                let (_, a1) = self.emit_expr(&args[1]);
+                let (_, a2) = self.emit_expr(&args[2]);
+                return ("int64_t".into(), format!("mako_sctp_set_primary({a0}, {a1}, {a2})"));
+            }
+            "diameter_tcm_new" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                let (_, a1) = self.emit_expr(&args[1]);
+                let (_, a2) = self.emit_expr(&args[2]);
+                let (_, a3) = self.emit_expr(&args[3]);
+                return ("int64_t".into(), format!("mako_diameter_tcm_new({a0}, {a1}, {a2}, {a3})"));
+            }
+            "diameter_tcm_free" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                return ("int64_t".into(), format!("mako_diameter_tcm_free({a0})"));
+            }
+            "diameter_tcm_set_origin" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                let (_, a1) = self.emit_expr(&args[1]);
+                let (_, a2) = self.emit_expr(&args[2]);
+                return ("int64_t".into(), format!("mako_diameter_tcm_set_origin({a0}, {a1}, {a2})"));
+            }
+            "diameter_tcm_set_watchdog" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                let (_, a1) = self.emit_expr(&args[1]);
+                let (_, a2) = self.emit_expr(&args[2]);
+                return ("int64_t".into(), format!("mako_diameter_tcm_set_watchdog({a0}, {a1}, {a2})"));
+            }
+            "diameter_tcm_peer_add" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                let (_, a1) = self.emit_expr(&args[1]);
+                let (_, a2) = self.emit_expr(&args[2]);
+                let (_, a3) = self.emit_expr(&args[3]);
+                let (_, a4) = self.emit_expr(&args[4]);
+                let (_, a5) = self.emit_expr(&args[5]);
+                return ("int64_t".into(), format!("mako_diameter_tcm_peer_add({a0}, {a1}, {a2}, {a3}, {a4}, {a5})"));
+            }
+            "diameter_tcm_route_add" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                let (_, a1) = self.emit_expr(&args[1]);
+                let (_, a2) = self.emit_expr(&args[2]);
+                return ("int64_t".into(), format!("mako_diameter_tcm_route_add({a0}, {a1}, {a2})"));
+            }
+            "diameter_tcm_route_lookup" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                let (_, a1) = self.emit_expr(&args[1]);
+                return ("int64_t".into(), format!("mako_diameter_tcm_route_lookup({a0}, {a1})"));
+            }
+            "diameter_tcm_arm" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                let (_, a1) = self.emit_expr(&args[1]);
+                let (_, a2) = self.emit_expr(&args[2]);
+                let (_, a3) = self.emit_expr(&args[3]);
+                return ("int64_t".into(), format!("mako_diameter_tcm_arm({a0}, {a1}, {a2}, {a3})"));
+            }
+            "diameter_tcm_cancel" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                let (_, a1) = self.emit_expr(&args[1]);
+                return ("int64_t".into(), format!("mako_diameter_tcm_cancel({a0}, {a1})"));
+            }
+            "diameter_tcm_poll_deadline" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                let (_, a1) = self.emit_expr(&args[1]);
+                return ("int64_t".into(), format!("mako_diameter_tcm_poll_deadline({a0}, {a1})"));
+            }
+            "diameter_tcm_run_due" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                let (_, a1) = self.emit_expr(&args[1]);
+                return ("int64_t".into(), format!("mako_diameter_tcm_run_due({a0}, {a1})"));
+            }
+            "diameter_tcm_peer_count" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                return ("int64_t".into(), format!("mako_diameter_tcm_peer_count({a0})"));
+            }
+            "diameter_tcm_timer_count" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                return ("int64_t".into(), format!("mako_diameter_tcm_timer_count({a0})"));
+            }
+            "diameter_tcm_drops" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                return ("int64_t".into(), format!("mako_diameter_tcm_drops({a0})"));
+            }
+            "diameter_tcm_inject_in" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                let (_, a1) = self.emit_expr(&args[1]);
+                let (_, a2) = self.emit_expr(&args[2]);
+                return ("int64_t".into(), format!("mako_diameter_tcm_inject_in({a0}, {a1}, {a2})"));
+            }
+            "diameter_tcm_take_out" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                let (_, a1) = self.emit_expr(&args[1]);
+                let tmp = self.fresh("dx");
+                self.line(&format!("MakoString {tmp} = mako_diameter_tcm_take_out({a0}, {a1});"));
+                return ("MakoString".into(), tmp);
+            }
+            "diameter_tcm_handle_io" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                let (_, a1) = self.emit_expr(&args[1]);
+                let (_, a2) = self.emit_expr(&args[2]);
+                return ("int64_t".into(), format!("mako_diameter_tcm_handle_io({a0}, {a1}, {a2})"));
+            }
             "tls_pool_send" => {
                 let (_, c) = self.emit_expr(&args[0]);
                 let (_, m) = self.emit_expr(&args[1]);
@@ -29924,6 +30297,570 @@ impl Codegen {
             "tls_pool_close" => {
                 let (_, c) = self.emit_expr(&args[0]);
                 return ("int64_t".into(), format!("mako_tls_pool_close({c})"));
+            }
+            "sctp_available" => {
+                return ("int64_t".into(), format!("mako_sctp_available()"));
+            }
+            "sctp_listen" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                return ("int64_t".into(), format!("mako_sctp_listen({a0})"));
+            }
+            "sctp_listen_addr" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                let (_, a1) = self.emit_expr(&args[1]);
+                return ("int64_t".into(), format!("mako_sctp_listen_addr({a0}, {a1})"));
+            }
+            "sctp_accept" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                return ("int64_t".into(), format!("mako_sctp_accept({a0})"));
+            }
+            "sctp_connect" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                let (_, a1) = self.emit_expr(&args[1]);
+                return ("int64_t".into(), format!("mako_sctp_connect({a0}, {a1})"));
+            }
+            "sctp_connect_timeout" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                let (_, a1) = self.emit_expr(&args[1]);
+                let (_, a2) = self.emit_expr(&args[2]);
+                return ("int64_t".into(), format!("mako_sctp_connect_timeout({a0}, {a1}, {a2})"));
+            }
+            "sctp_close" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                return ("int64_t".into(), format!("mako_sctp_close({a0})"));
+            }
+            "sctp_shutdown" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                let (_, a1) = self.emit_expr(&args[1]);
+                return ("int64_t".into(), format!("mako_sctp_shutdown({a0}, {a1})"));
+            }
+            "sctp_set_timeout" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                let (_, a1) = self.emit_expr(&args[1]);
+                return ("int64_t".into(), format!("mako_sctp_set_timeout({a0}, {a1})"));
+            }
+            "sctp_write" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                let (_, a1) = self.emit_expr(&args[1]);
+                return ("int64_t".into(), format!("mako_sctp_write({a0}, {a1})"));
+            }
+            "sctp_write_all" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                let (_, a1) = self.emit_expr(&args[1]);
+                return ("int64_t".into(), format!("mako_sctp_write_all({a0}, {a1})"));
+            }
+            "sctp_read" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                let (_, a1) = self.emit_expr(&args[1]);
+                let tmp = self.fresh("dx");
+                self.line(&format!("MakoString {tmp} = mako_sctp_read({a0}, {a1});"));
+                return ("MakoString".into(), tmp);
+            }
+            "sctp_read_n" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                let (_, a1) = self.emit_expr(&args[1]);
+                let tmp = self.fresh("dx");
+                self.line(&format!("MakoString {tmp} = mako_sctp_read_n({a0}, {a1});"));
+                return ("MakoString".into(), tmp);
+            }
+            "sctp_peer_addr" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                let tmp = self.fresh("dx");
+                self.line(&format!("MakoString {tmp} = mako_sctp_peer_addr({a0});"));
+                return ("MakoString".into(), tmp);
+            }
+            "sctp_local_addr" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                let tmp = self.fresh("dx");
+                self.line(&format!("MakoString {tmp} = mako_sctp_local_addr({a0});"));
+                return ("MakoString".into(), tmp);
+            }
+            "sctp_send_stream" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                let (_, a1) = self.emit_expr(&args[1]);
+                let (_, a2) = self.emit_expr(&args[2]);
+                return ("int64_t".into(), format!("mako_sctp_send_stream({a0}, {a1}, {a2})"));
+            }
+            "sctp_recv_stream" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                let (_, a1) = self.emit_expr(&args[1]);
+                let tmp = self.fresh("dx");
+                self.line(&format!("MakoString {tmp} = mako_sctp_recv_stream({a0}, {a1});"));
+                return ("MakoString".into(), tmp);
+            }
+            "sctp_last_stream" => {
+                return ("int64_t".into(), format!("mako_sctp_last_stream()"));
+            }
+            "sctp_last_ppid" => {
+                return ("int64_t".into(), format!("mako_sctp_last_ppid()"));
+            }
+            "diameter_header_len" => {
+                return ("int64_t".into(), format!("mako_diameter_header_len()"));
+            }
+            "diameter_msg_len" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                return ("int64_t".into(), format!("mako_diameter_msg_len({a0})"));
+            }
+            "diameter_msg_complete" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                return ("int64_t".into(), format!("mako_diameter_msg_complete({a0})"));
+            }
+            "diameter_msg_needed" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                return ("int64_t".into(), format!("mako_diameter_msg_needed({a0})"));
+            }
+            "diameter_first_message_len" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                return ("int64_t".into(), format!("mako_diameter_first_message_len({a0})"));
+            }
+            "diameter_version" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                return ("int64_t".into(), format!("mako_diameter_version({a0})"));
+            }
+            "diameter_flags" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                return ("int64_t".into(), format!("mako_diameter_flags({a0})"));
+            }
+            "diameter_is_request" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                return ("int64_t".into(), format!("mako_diameter_is_request({a0})"));
+            }
+            "diameter_is_answer" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                return ("int64_t".into(), format!("mako_diameter_is_answer({a0})"));
+            }
+            "diameter_is_error" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                return ("int64_t".into(), format!("mako_diameter_is_error({a0})"));
+            }
+            "diameter_cmd" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                return ("int64_t".into(), format!("mako_diameter_cmd({a0})"));
+            }
+            "diameter_app_id" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                return ("int64_t".into(), format!("mako_diameter_app_id({a0})"));
+            }
+            "diameter_hbh" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                return ("int64_t".into(), format!("mako_diameter_hbh({a0})"));
+            }
+            "diameter_e2e" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                return ("int64_t".into(), format!("mako_diameter_e2e({a0})"));
+            }
+            "diameter_header_build" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                let (_, a1) = self.emit_expr(&args[1]);
+                let (_, a2) = self.emit_expr(&args[2]);
+                let (_, a3) = self.emit_expr(&args[3]);
+                let (_, a4) = self.emit_expr(&args[4]);
+                let (_, a5) = self.emit_expr(&args[5]);
+                let tmp = self.fresh("dx");
+                self.line(&format!("MakoString {tmp} = mako_diameter_header_build({a0}, {a1}, {a2}, {a3}, {a4}, {a5});"));
+                return ("MakoString".into(), tmp);
+            }
+            "diameter_msg_build" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                let (_, a1) = self.emit_expr(&args[1]);
+                let (_, a2) = self.emit_expr(&args[2]);
+                let (_, a3) = self.emit_expr(&args[3]);
+                let (_, a4) = self.emit_expr(&args[4]);
+                let (_, a5) = self.emit_expr(&args[5]);
+                let tmp = self.fresh("dx");
+                self.line(&format!("MakoString {tmp} = mako_diameter_msg_build({a0}, {a1}, {a2}, {a3}, {a4}, {a5});"));
+                return ("MakoString".into(), tmp);
+            }
+            "diameter_set_hbh" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                let (_, a1) = self.emit_expr(&args[1]);
+                let tmp = self.fresh("dx");
+                self.line(&format!("MakoString {tmp} = mako_diameter_set_hbh({a0}, {a1});"));
+                return ("MakoString".into(), tmp);
+            }
+            "diameter_set_e2e" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                let (_, a1) = self.emit_expr(&args[1]);
+                let tmp = self.fresh("dx");
+                self.line(&format!("MakoString {tmp} = mako_diameter_set_e2e({a0}, {a1});"));
+                return ("MakoString".into(), tmp);
+            }
+            "diameter_avp_encode" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                let (_, a1) = self.emit_expr(&args[1]);
+                let (_, a2) = self.emit_expr(&args[2]);
+                let (_, a3) = self.emit_expr(&args[3]);
+                let tmp = self.fresh("dx");
+                self.line(&format!("MakoString {tmp} = mako_diameter_avp_encode({a0}, {a1}, {a2}, {a3});"));
+                return ("MakoString".into(), tmp);
+            }
+            "diameter_avp_put_u32" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                let (_, a1) = self.emit_expr(&args[1]);
+                let (_, a2) = self.emit_expr(&args[2]);
+                let (_, a3) = self.emit_expr(&args[3]);
+                let tmp = self.fresh("dx");
+                self.line(&format!("MakoString {tmp} = mako_diameter_avp_put_u32({a0}, {a1}, {a2}, {a3});"));
+                return ("MakoString".into(), tmp);
+            }
+            "diameter_avp_put_str" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                let (_, a1) = self.emit_expr(&args[1]);
+                let (_, a2) = self.emit_expr(&args[2]);
+                let (_, a3) = self.emit_expr(&args[3]);
+                let tmp = self.fresh("dx");
+                self.line(&format!("MakoString {tmp} = mako_diameter_avp_put_str({a0}, {a1}, {a2}, {a3});"));
+                return ("MakoString".into(), tmp);
+            }
+            "diameter_avp_at" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                let (_, a1) = self.emit_expr(&args[1]);
+                let tmp = self.fresh("dx");
+                self.line(&format!("MakoString {tmp} = mako_diameter_avp_at({a0}, {a1});"));
+                return ("MakoString".into(), tmp);
+            }
+            "diameter_avp_find" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                let (_, a1) = self.emit_expr(&args[1]);
+                let tmp = self.fresh("dx");
+                self.line(&format!("MakoString {tmp} = mako_diameter_avp_find({a0}, {a1});"));
+                return ("MakoString".into(), tmp);
+            }
+            "diameter_avp_find_vendor" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                let (_, a1) = self.emit_expr(&args[1]);
+                let (_, a2) = self.emit_expr(&args[2]);
+                let tmp = self.fresh("dx");
+                self.line(&format!("MakoString {tmp} = mako_diameter_avp_find_vendor({a0}, {a1}, {a2});"));
+                return ("MakoString".into(), tmp);
+            }
+            "diameter_avp_u32" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                return ("int64_t".into(), format!("mako_diameter_avp_u32({a0})"));
+            }
+            "diameter_avp_str" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                let tmp = self.fresh("dx");
+                self.line(&format!("MakoString {tmp} = mako_diameter_avp_str({a0});"));
+                return ("MakoString".into(), tmp);
+            }
+            "diameter_result_code" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                return ("int64_t".into(), format!("mako_diameter_result_code({a0})"));
+            }
+            "diameter_txn_key" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                let (_, a1) = self.emit_expr(&args[1]);
+                let tmp = self.fresh("dx");
+                self.line(&format!("MakoString {tmp} = mako_diameter_txn_key({a0}, {a1});"));
+                return ("MakoString".into(), tmp);
+            }
+            "diameter_e2e_key" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                let (_, a1) = self.emit_expr(&args[1]);
+                let tmp = self.fresh("dx");
+                self.line(&format!("MakoString {tmp} = mako_diameter_e2e_key({a0}, {a1});"));
+                return ("MakoString".into(), tmp);
+            }
+            "diameter_session_key" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                let tmp = self.fresh("dx");
+                self.line(&format!("MakoString {tmp} = mako_diameter_session_key({a0});"));
+                return ("MakoString".into(), tmp);
+            }
+            "diameter_hbh_new" => {
+                return ("int64_t".into(), format!("mako_diameter_hbh_new()"));
+            }
+            "diameter_e2e_new" => {
+                return ("int64_t".into(), format!("mako_diameter_e2e_new()"));
+            }
+            "diameter_build_cer" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                let (_, a1) = self.emit_expr(&args[1]);
+                let (_, a2) = self.emit_expr(&args[2]);
+                let (_, a3) = self.emit_expr(&args[3]);
+                let tmp = self.fresh("dx");
+                self.line(&format!("MakoString {tmp} = mako_diameter_build_cer({a0}, {a1}, {a2}, {a3});"));
+                return ("MakoString".into(), tmp);
+            }
+            "diameter_build_cea" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                let (_, a1) = self.emit_expr(&args[1]);
+                let (_, a2) = self.emit_expr(&args[2]);
+                let (_, a3) = self.emit_expr(&args[3]);
+                let tmp = self.fresh("dx");
+                self.line(&format!("MakoString {tmp} = mako_diameter_build_cea({a0}, {a1}, {a2}, {a3});"));
+                return ("MakoString".into(), tmp);
+            }
+            "diameter_build_dwr" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                let (_, a1) = self.emit_expr(&args[1]);
+                let (_, a2) = self.emit_expr(&args[2]);
+                let (_, a3) = self.emit_expr(&args[3]);
+                let tmp = self.fresh("dx");
+                self.line(&format!("MakoString {tmp} = mako_diameter_build_dwr({a0}, {a1}, {a2}, {a3});"));
+                return ("MakoString".into(), tmp);
+            }
+            "diameter_build_dwa" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                let (_, a1) = self.emit_expr(&args[1]);
+                let (_, a2) = self.emit_expr(&args[2]);
+                let (_, a3) = self.emit_expr(&args[3]);
+                let tmp = self.fresh("dx");
+                self.line(&format!("MakoString {tmp} = mako_diameter_build_dwa({a0}, {a1}, {a2}, {a3});"));
+                return ("MakoString".into(), tmp);
+            }
+            "diameter_build_dpr" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                let (_, a1) = self.emit_expr(&args[1]);
+                let (_, a2) = self.emit_expr(&args[2]);
+                let (_, a3) = self.emit_expr(&args[3]);
+                let (_, a4) = self.emit_expr(&args[4]);
+                let tmp = self.fresh("dx");
+                self.line(&format!("MakoString {tmp} = mako_diameter_build_dpr({a0}, {a1}, {a2}, {a3}, {a4});"));
+                return ("MakoString".into(), tmp);
+            }
+            "diameter_build_dpa" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                let (_, a1) = self.emit_expr(&args[1]);
+                let (_, a2) = self.emit_expr(&args[2]);
+                let (_, a3) = self.emit_expr(&args[3]);
+                let tmp = self.fresh("dx");
+                self.line(&format!("MakoString {tmp} = mako_diameter_build_dpa({a0}, {a1}, {a2}, {a3});"));
+                return ("MakoString".into(), tmp);
+            }
+            "diameter_conn_new" => {
+                return ("int64_t".into(), format!("mako_diameter_conn_new()"));
+            }
+            "diameter_conn_free" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                return ("int64_t".into(), format!("mako_diameter_conn_free({a0})"));
+            }
+            "diameter_conn_reset" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                return ("int64_t".into(), format!("mako_diameter_conn_reset({a0})"));
+            }
+            "diameter_conn_set_origin" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                let (_, a1) = self.emit_expr(&args[1]);
+                let (_, a2) = self.emit_expr(&args[2]);
+                return ("int64_t".into(), format!("mako_diameter_conn_set_origin({a0}, {a1}, {a2})"));
+            }
+            "diameter_conn_state" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                return ("int64_t".into(), format!("mako_diameter_conn_state({a0})"));
+            }
+            "diameter_conn_set_state" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                let (_, a1) = self.emit_expr(&args[1]);
+                return ("int64_t".into(), format!("mako_diameter_conn_set_state({a0}, {a1})"));
+            }
+            "diameter_conn_feed" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                let (_, a1) = self.emit_expr(&args[1]);
+                return ("int64_t".into(), format!("mako_diameter_conn_feed({a0}, {a1})"));
+            }
+            "diameter_conn_pop" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                let tmp = self.fresh("dx");
+                self.line(&format!("MakoString {tmp} = mako_diameter_conn_pop({a0});"));
+                return ("MakoString".into(), tmp);
+            }
+            "diameter_conn_pending" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                return ("int64_t".into(), format!("mako_diameter_conn_pending({a0})"));
+            }
+            "diameter_conn_queue_out" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                let (_, a1) = self.emit_expr(&args[1]);
+                return ("int64_t".into(), format!("mako_diameter_conn_queue_out({a0}, {a1})"));
+            }
+            "diameter_conn_take_out" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                let tmp = self.fresh("dx");
+                self.line(&format!("MakoString {tmp} = mako_diameter_conn_take_out({a0});"));
+                return ("MakoString".into(), tmp);
+            }
+            "diameter_conn_next_hbh" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                return ("int64_t".into(), format!("mako_diameter_conn_next_hbh({a0})"));
+            }
+            "diameter_conn_register" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                let (_, a1) = self.emit_expr(&args[1]);
+                let (_, a2) = self.emit_expr(&args[2]);
+                let (_, a3) = self.emit_expr(&args[3]);
+                let (_, a4) = self.emit_expr(&args[4]);
+                return ("int64_t".into(), format!("mako_diameter_conn_register({a0}, {a1}, {a2}, {a3}, {a4})"));
+            }
+            "diameter_conn_match" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                let (_, a1) = self.emit_expr(&args[1]);
+                return ("int64_t".into(), format!("mako_diameter_conn_match({a0}, {a1})"));
+            }
+            "diameter_conn_expire" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                let (_, a1) = self.emit_expr(&args[1]);
+                let (_, a2) = self.emit_expr(&args[2]);
+                return ("int64_t".into(), format!("mako_diameter_conn_expire({a0}, {a1}, {a2})"));
+            }
+            "diameter_conn_on_cea" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                let (_, a1) = self.emit_expr(&args[1]);
+                return ("int64_t".into(), format!("mako_diameter_conn_on_cea({a0}, {a1})"));
+            }
+            "diameter_pool_open" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                let (_, a1) = self.emit_expr(&args[1]);
+                let (_, a2) = self.emit_expr(&args[2]);
+                let (_, a3) = self.emit_expr(&args[3]);
+                let (_, a4) = self.emit_expr(&args[4]);
+                return ("int64_t".into(), format!("mako_diameter_pool_open({a0}, {a1}, {a2}, {a3}, {a4})"));
+            }
+            "diameter_pool_acquire" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                return ("int64_t".into(), format!("mako_diameter_pool_acquire({a0})"));
+            }
+            "diameter_pool_release" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                let (_, a1) = self.emit_expr(&args[1]);
+                let (_, a2) = self.emit_expr(&args[2]);
+                return ("int64_t".into(), format!("mako_diameter_pool_release({a0}, {a1}, {a2})"));
+            }
+            "diameter_pool_close" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                return ("int64_t".into(), format!("mako_diameter_pool_close({a0})"));
+            }
+            "diameter_pool_idle" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                return ("int64_t".into(), format!("mako_diameter_pool_idle({a0})"));
+            }
+            "diameter_mgr_new" => {
+                return ("int64_t".into(), format!("mako_diameter_mgr_new()"));
+            }
+            "diameter_mgr_free" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                return ("int64_t".into(), format!("mako_diameter_mgr_free({a0})"));
+            }
+            "diameter_mgr_set_origin" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                let (_, a1) = self.emit_expr(&args[1]);
+                let (_, a2) = self.emit_expr(&args[2]);
+                return ("int64_t".into(), format!("mako_diameter_mgr_set_origin({a0}, {a1}, {a2})"));
+            }
+            "diameter_mgr_set_watchdog" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                let (_, a1) = self.emit_expr(&args[1]);
+                let (_, a2) = self.emit_expr(&args[2]);
+                return ("int64_t".into(), format!("mako_diameter_mgr_set_watchdog({a0}, {a1}, {a2})"));
+            }
+            "diameter_peer_add" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                let (_, a1) = self.emit_expr(&args[1]);
+                let (_, a2) = self.emit_expr(&args[2]);
+                let (_, a3) = self.emit_expr(&args[3]);
+                let (_, a4) = self.emit_expr(&args[4]);
+                let (_, a5) = self.emit_expr(&args[5]);
+                return ("int64_t".into(), format!("mako_diameter_peer_add({a0}, {a1}, {a2}, {a3}, {a4}, {a5})"));
+            }
+            "diameter_peer_remove" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                let (_, a1) = self.emit_expr(&args[1]);
+                return ("int64_t".into(), format!("mako_diameter_peer_remove({a0}, {a1})"));
+            }
+            "diameter_peer_state" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                let (_, a1) = self.emit_expr(&args[1]);
+                return ("int64_t".into(), format!("mako_diameter_peer_state({a0}, {a1})"));
+            }
+            "diameter_peer_count" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                return ("int64_t".into(), format!("mako_diameter_peer_count({a0})"));
+            }
+            "diameter_peer_fd" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                let (_, a1) = self.emit_expr(&args[1]);
+                return ("int64_t".into(), format!("mako_diameter_peer_fd({a0}, {a1})"));
+            }
+            "diameter_peer_attach_fd" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                let (_, a1) = self.emit_expr(&args[1]);
+                let (_, a2) = self.emit_expr(&args[2]);
+                return ("int64_t".into(), format!("mako_diameter_peer_attach_fd({a0}, {a1}, {a2})"));
+            }
+            "diameter_peer_mark_open" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                let (_, a1) = self.emit_expr(&args[1]);
+                return ("int64_t".into(), format!("mako_diameter_peer_mark_open({a0}, {a1})"));
+            }
+            "diameter_peer_mark_closed" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                let (_, a1) = self.emit_expr(&args[1]);
+                return ("int64_t".into(), format!("mako_diameter_peer_mark_closed({a0}, {a1})"));
+            }
+            "diameter_route_add" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                let (_, a1) = self.emit_expr(&args[1]);
+                let (_, a2) = self.emit_expr(&args[2]);
+                return ("int64_t".into(), format!("mako_diameter_route_add({a0}, {a1}, {a2})"));
+            }
+            "diameter_route_remove" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                let (_, a1) = self.emit_expr(&args[1]);
+                return ("int64_t".into(), format!("mako_diameter_route_remove({a0}, {a1})"));
+            }
+            "diameter_route_lookup" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                let (_, a1) = self.emit_expr(&args[1]);
+                return ("int64_t".into(), format!("mako_diameter_route_lookup({a0}, {a1})"));
+            }
+            "diameter_mgr_pick_failover" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                let (_, a1) = self.emit_expr(&args[1]);
+                return ("int64_t".into(), format!("mako_diameter_mgr_pick_failover({a0}, {a1})"));
+            }
+            "diameter_mgr_handle_io" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                let (_, a1) = self.emit_expr(&args[1]);
+                let (_, a2) = self.emit_expr(&args[2]);
+                return ("int64_t".into(), format!("mako_diameter_mgr_handle_io({a0}, {a1}, {a2})"));
+            }
+            "diameter_mgr_poll" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                let tmp = self.fresh("dx");
+                self.line(&format!("MakoString {tmp} = mako_diameter_mgr_poll({a0});"));
+                return ("MakoString".into(), tmp);
+            }
+            "diameter_mgr_tick" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                let (_, a1) = self.emit_expr(&args[1]);
+                return ("int64_t".into(), format!("mako_diameter_mgr_tick({a0}, {a1})"));
+            }
+            "diameter_mgr_request" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                let (_, a1) = self.emit_expr(&args[1]);
+                let (_, a2) = self.emit_expr(&args[2]);
+                let (_, a3) = self.emit_expr(&args[3]);
+                let (_, a4) = self.emit_expr(&args[4]);
+                let (_, a5) = self.emit_expr(&args[5]);
+                return ("int64_t".into(), format!("mako_diameter_mgr_request({a0}, {a1}, {a2}, {a3}, {a4}, {a5})"));
+            }
+            "diameter_mgr_flush" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                return ("int64_t".into(), format!("mako_diameter_mgr_flush({a0})"));
+            }
+            "diameter_mgr_take_out" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                let (_, a1) = self.emit_expr(&args[1]);
+                let tmp = self.fresh("dx");
+                self.line(&format!("MakoString {tmp} = mako_diameter_mgr_take_out({a0}, {a1});"));
+                return ("MakoString".into(), tmp);
+            }
+            "diameter_mgr_inject_in" => {
+                let (_, a0) = self.emit_expr(&args[0]);
+                let (_, a1) = self.emit_expr(&args[1]);
+                let (_, a2) = self.emit_expr(&args[2]);
+                return ("int64_t".into(), format!("mako_diameter_mgr_inject_in({a0}, {a1}, {a2})"));
             }
             "wss_pool_open_ca" => {
                 let (_, h) = self.emit_expr(&args[0]);
@@ -47415,6 +48352,371 @@ impl Codegen {
                             let (_, ca) = self.emit_expr(&args[2]);
                             return ("int64_t".into(), format!("mako_tls_pool_open({h}, {p}, {ca})"));
                         }
+                        "tls_pool_open_timeout" => {
+                            let (_, h) = self.emit_expr(&args[0]);
+                            let (_, p) = self.emit_expr(&args[1]);
+                            let (_, ca) = self.emit_expr(&args[2]);
+                            let (_, ms) = self.emit_expr(&args[3]);
+                            return (
+                                "int64_t".into(),
+                                format!("mako_tls_pool_open_timeout({h}, {p}, {ca}, {ms})"),
+                            );
+                        }
+                        "tls_pool_open_mtls" => {
+                            let (_, h) = self.emit_expr(&args[0]);
+                            let (_, p) = self.emit_expr(&args[1]);
+                            let (_, ca) = self.emit_expr(&args[2]);
+                            let (_, cert) = self.emit_expr(&args[3]);
+                            let (_, key) = self.emit_expr(&args[4]);
+                            let (_, ms) = self.emit_expr(&args[5]);
+                            return (
+                                "int64_t".into(),
+                                format!("mako_tls_pool_open_mtls({h}, {p}, {ca}, {cert}, {key}, {ms})"),
+                            );
+                        }
+                        "tls_pool_open_mtls_full" => {
+                            let (_, h) = self.emit_expr(&args[0]);
+                            let (_, p) = self.emit_expr(&args[1]);
+                            let (_, ca) = self.emit_expr(&args[2]);
+                            let (_, cert) = self.emit_expr(&args[3]);
+                            let (_, key) = self.emit_expr(&args[4]);
+                            let (_, cms) = self.emit_expr(&args[5]);
+                            let (_, ims) = self.emit_expr(&args[6]);
+                            return (
+                                "int64_t".into(),
+                                format!("mako_tls_pool_open_mtls_full({h}, {p}, {ca}, {cert}, {key}, {cms}, {ims})"),
+                            );
+                        }
+                        "tls_pool_set_timeout" => {
+                            let (_, h) = self.emit_expr(&args[0]);
+                            let (_, ms) = self.emit_expr(&args[1]);
+                            return ("int64_t".into(), format!("mako_tls_pool_set_timeout({h}, {ms})"));
+                        }
+                        "timer_heap_new" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_timer_heap_new({a0})"));
+                        }
+                        "timer_heap_free" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_timer_heap_free({a0})"));
+                        }
+                        "timer_heap_arm" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            let (_, a1) = self.emit_expr(&args[1]);
+                            let (_, a2) = self.emit_expr(&args[2]);
+                            let (_, a3) = self.emit_expr(&args[3]);
+                            return ("int64_t".into(), format!("mako_timer_heap_arm({a0}, {a1}, {a2}, {a3})"));
+                        }
+                        "timer_heap_cancel" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            let (_, a1) = self.emit_expr(&args[1]);
+                            return ("int64_t".into(), format!("mako_timer_heap_cancel({a0}, {a1})"));
+                        }
+                        "timer_heap_next" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_timer_heap_next({a0})"));
+                        }
+                        "timer_heap_pop_due1" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            let (_, a1) = self.emit_expr(&args[1]);
+                            return ("int64_t".into(), format!("mako_timer_heap_pop_due1({a0}, {a1})"));
+                        }
+                        "timer_last_kind" => {
+                            return ("int64_t".into(), format!("mako_timer_last_kind()"));
+                        }
+                        "timer_last_id" => {
+                            return ("int64_t".into(), format!("mako_timer_last_id()"));
+                        }
+                        "timer_heap_count" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_timer_heap_count({a0})"));
+                        }
+                        "timer_heap_drops" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_timer_heap_drops({a0})"));
+                        }
+                        "peer_table_new" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            let (_, a1) = self.emit_expr(&args[1]);
+                            return ("int64_t".into(), format!("mako_peer_table_new({a0}, {a1})"));
+                        }
+                        "peer_table_free" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_peer_table_free({a0})"));
+                        }
+                        "peer_table_add" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            let (_, a1) = self.emit_expr(&args[1]);
+                            let (_, a2) = self.emit_expr(&args[2]);
+                            let (_, a3) = self.emit_expr(&args[3]);
+                            let (_, a4) = self.emit_expr(&args[4]);
+                            let (_, a5) = self.emit_expr(&args[5]);
+                            return ("int64_t".into(), format!("mako_peer_table_add({a0}, {a1}, {a2}, {a3}, {a4}, {a5})"));
+                        }
+                        "peer_table_set_conn" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            let (_, a1) = self.emit_expr(&args[1]);
+                            let (_, a2) = self.emit_expr(&args[2]);
+                            return ("int64_t".into(), format!("mako_peer_table_set_conn({a0}, {a1}, {a2})"));
+                        }
+                        "peer_table_get_conn" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            let (_, a1) = self.emit_expr(&args[1]);
+                            return ("int64_t".into(), format!("mako_peer_table_get_conn({a0}, {a1})"));
+                        }
+                        "peer_table_set_state" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            let (_, a1) = self.emit_expr(&args[1]);
+                            let (_, a2) = self.emit_expr(&args[2]);
+                            return ("int64_t".into(), format!("mako_peer_table_set_state({a0}, {a1}, {a2})"));
+                        }
+                        "peer_table_get_state" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            let (_, a1) = self.emit_expr(&args[1]);
+                            return ("int64_t".into(), format!("mako_peer_table_get_state({a0}, {a1})"));
+                        }
+                        "peer_table_touch" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            let (_, a1) = self.emit_expr(&args[1]);
+                            let (_, a2) = self.emit_expr(&args[2]);
+                            return ("int64_t".into(), format!("mako_peer_table_touch({a0}, {a1}, {a2})"));
+                        }
+                        "peer_table_last_ms" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            let (_, a1) = self.emit_expr(&args[1]);
+                            return ("int64_t".into(), format!("mako_peer_table_last_ms({a0}, {a1})"));
+                        }
+                        "peer_table_route_add" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            let (_, a1) = self.emit_expr(&args[1]);
+                            let (_, a2) = self.emit_expr(&args[2]);
+                            return ("int64_t".into(), format!("mako_peer_table_route_add({a0}, {a1}, {a2})"));
+                        }
+                        "peer_table_route_lookup" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            let (_, a1) = self.emit_expr(&args[1]);
+                            return ("int64_t".into(), format!("mako_peer_table_route_lookup({a0}, {a1})"));
+                        }
+                        "peer_table_count" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_peer_table_count({a0})"));
+                        }
+                        "peer_table_drops" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_peer_table_drops({a0})"));
+                        }
+                        "peer_table_host" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            let (_, a1) = self.emit_expr(&args[1]);
+                            let tmp = self.fresh("dx");
+                            self.line(&format!("MakoString {tmp} = mako_peer_table_host({a0}, {a1});"));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "peer_table_port" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            let (_, a1) = self.emit_expr(&args[1]);
+                            return ("int64_t".into(), format!("mako_peer_table_port({a0}, {a1})"));
+                        }
+                        "peer_table_transport" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            let (_, a1) = self.emit_expr(&args[1]);
+                            return ("int64_t".into(), format!("mako_peer_table_transport({a0}, {a1})"));
+                        }
+                        "peer_table_capacity" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_peer_table_capacity({a0})"));
+                        }
+                        "peer_table_alive" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            let (_, a1) = self.emit_expr(&args[1]);
+                            return ("int64_t".into(), format!("mako_peer_table_alive({a0}, {a1})"));
+                        }
+                        "diameter_limits_set" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            let (_, a1) = self.emit_expr(&args[1]);
+                            let (_, a2) = self.emit_expr(&args[2]);
+                            let (_, a3) = self.emit_expr(&args[3]);
+                            return ("int64_t".into(), format!("mako_diameter_limits_set({a0}, {a1}, {a2}, {a3})"));
+                        }
+                        "diameter_limits_max_msg" => {
+                            return ("int64_t".into(), format!("mako_diameter_limits_max_msg()"));
+                        }
+                        "diameter_limits_inbuf" => {
+                            return ("int64_t".into(), format!("mako_diameter_limits_inbuf()"));
+                        }
+                        "diameter_limits_inq_bytes" => {
+                            return ("int64_t".into(), format!("mako_diameter_limits_inq_bytes()"));
+                        }
+                        "diameter_limits_reasm_ms" => {
+                            return ("int64_t".into(), format!("mako_diameter_limits_reasm_ms()"));
+                        }
+                        "diameter_tcm_set_run_budget" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            let (_, a1) = self.emit_expr(&args[1]);
+                            return ("int64_t".into(), format!("mako_diameter_tcm_set_run_budget({a0}, {a1})"));
+                        }
+                        "sctp_set_streams" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            let (_, a1) = self.emit_expr(&args[1]);
+                            let (_, a2) = self.emit_expr(&args[2]);
+                            return ("int64_t".into(), format!("mako_sctp_set_streams({a0}, {a1}, {a2})"));
+                        }
+                        "sctp_get_streams" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_sctp_get_streams({a0})"));
+                        }
+                        "sctp_send_ex" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            let (_, a1) = self.emit_expr(&args[1]);
+                            let (_, a2) = self.emit_expr(&args[2]);
+                            let (_, a3) = self.emit_expr(&args[3]);
+                            return ("int64_t".into(), format!("mako_sctp_send_ex({a0}, {a1}, {a2}, {a3})"));
+                        }
+                        "sctp_set_heartbeat" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            let (_, a1) = self.emit_expr(&args[1]);
+                            let (_, a2) = self.emit_expr(&args[2]);
+                            return ("int64_t".into(), format!("mako_sctp_set_heartbeat({a0}, {a1}, {a2})"));
+                        }
+                        "sctp_set_rto" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            let (_, a1) = self.emit_expr(&args[1]);
+                            let (_, a2) = self.emit_expr(&args[2]);
+                            let (_, a3) = self.emit_expr(&args[3]);
+                            return ("int64_t".into(), format!("mako_sctp_set_rto({a0}, {a1}, {a2}, {a3})"));
+                        }
+                        "sctp_bindx_add" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            let (_, a1) = self.emit_expr(&args[1]);
+                            let (_, a2) = self.emit_expr(&args[2]);
+                            return ("int64_t".into(), format!("mako_sctp_bindx_add({a0}, {a1}, {a2})"));
+                        }
+                        "sctp_bindx_rem" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            let (_, a1) = self.emit_expr(&args[1]);
+                            let (_, a2) = self.emit_expr(&args[2]);
+                            return ("int64_t".into(), format!("mako_sctp_bindx_rem({a0}, {a1}, {a2})"));
+                        }
+                        "sctp_connectx" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            let (_, a1) = self.emit_expr(&args[1]);
+                            let (_, a2) = self.emit_expr(&args[2]);
+                            return ("int64_t".into(), format!("mako_sctp_connectx({a0}, {a1}, {a2})"));
+                        }
+                        "sctp_getpaddrs" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            let tmp = self.fresh("dx");
+                            self.line(&format!("MakoString {tmp} = mako_sctp_getpaddrs({a0});"));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "sctp_getladdrs" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            let tmp = self.fresh("dx");
+                            self.line(&format!("MakoString {tmp} = mako_sctp_getladdrs({a0});"));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "sctp_set_primary" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            let (_, a1) = self.emit_expr(&args[1]);
+                            let (_, a2) = self.emit_expr(&args[2]);
+                            return ("int64_t".into(), format!("mako_sctp_set_primary({a0}, {a1}, {a2})"));
+                        }
+                        "diameter_tcm_new" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            let (_, a1) = self.emit_expr(&args[1]);
+                            let (_, a2) = self.emit_expr(&args[2]);
+                            let (_, a3) = self.emit_expr(&args[3]);
+                            return ("int64_t".into(), format!("mako_diameter_tcm_new({a0}, {a1}, {a2}, {a3})"));
+                        }
+                        "diameter_tcm_free" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_diameter_tcm_free({a0})"));
+                        }
+                        "diameter_tcm_set_origin" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            let (_, a1) = self.emit_expr(&args[1]);
+                            let (_, a2) = self.emit_expr(&args[2]);
+                            return ("int64_t".into(), format!("mako_diameter_tcm_set_origin({a0}, {a1}, {a2})"));
+                        }
+                        "diameter_tcm_set_watchdog" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            let (_, a1) = self.emit_expr(&args[1]);
+                            let (_, a2) = self.emit_expr(&args[2]);
+                            return ("int64_t".into(), format!("mako_diameter_tcm_set_watchdog({a0}, {a1}, {a2})"));
+                        }
+                        "diameter_tcm_peer_add" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            let (_, a1) = self.emit_expr(&args[1]);
+                            let (_, a2) = self.emit_expr(&args[2]);
+                            let (_, a3) = self.emit_expr(&args[3]);
+                            let (_, a4) = self.emit_expr(&args[4]);
+                            let (_, a5) = self.emit_expr(&args[5]);
+                            return ("int64_t".into(), format!("mako_diameter_tcm_peer_add({a0}, {a1}, {a2}, {a3}, {a4}, {a5})"));
+                        }
+                        "diameter_tcm_route_add" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            let (_, a1) = self.emit_expr(&args[1]);
+                            let (_, a2) = self.emit_expr(&args[2]);
+                            return ("int64_t".into(), format!("mako_diameter_tcm_route_add({a0}, {a1}, {a2})"));
+                        }
+                        "diameter_tcm_route_lookup" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            let (_, a1) = self.emit_expr(&args[1]);
+                            return ("int64_t".into(), format!("mako_diameter_tcm_route_lookup({a0}, {a1})"));
+                        }
+                        "diameter_tcm_arm" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            let (_, a1) = self.emit_expr(&args[1]);
+                            let (_, a2) = self.emit_expr(&args[2]);
+                            let (_, a3) = self.emit_expr(&args[3]);
+                            return ("int64_t".into(), format!("mako_diameter_tcm_arm({a0}, {a1}, {a2}, {a3})"));
+                        }
+                        "diameter_tcm_cancel" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            let (_, a1) = self.emit_expr(&args[1]);
+                            return ("int64_t".into(), format!("mako_diameter_tcm_cancel({a0}, {a1})"));
+                        }
+                        "diameter_tcm_poll_deadline" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            let (_, a1) = self.emit_expr(&args[1]);
+                            return ("int64_t".into(), format!("mako_diameter_tcm_poll_deadline({a0}, {a1})"));
+                        }
+                        "diameter_tcm_run_due" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            let (_, a1) = self.emit_expr(&args[1]);
+                            return ("int64_t".into(), format!("mako_diameter_tcm_run_due({a0}, {a1})"));
+                        }
+                        "diameter_tcm_peer_count" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_diameter_tcm_peer_count({a0})"));
+                        }
+                        "diameter_tcm_timer_count" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_diameter_tcm_timer_count({a0})"));
+                        }
+                        "diameter_tcm_drops" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_diameter_tcm_drops({a0})"));
+                        }
+                        "diameter_tcm_inject_in" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            let (_, a1) = self.emit_expr(&args[1]);
+                            let (_, a2) = self.emit_expr(&args[2]);
+                            return ("int64_t".into(), format!("mako_diameter_tcm_inject_in({a0}, {a1}, {a2})"));
+                        }
+                        "diameter_tcm_take_out" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            let (_, a1) = self.emit_expr(&args[1]);
+                            let tmp = self.fresh("dx");
+                            self.line(&format!("MakoString {tmp} = mako_diameter_tcm_take_out({a0}, {a1});"));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "diameter_tcm_handle_io" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            let (_, a1) = self.emit_expr(&args[1]);
+                            let (_, a2) = self.emit_expr(&args[2]);
+                            return ("int64_t".into(), format!("mako_diameter_tcm_handle_io({a0}, {a1}, {a2})"));
+                        }
                         "tls_pool_send" => {
                             let (_, c) = self.emit_expr(&args[0]);
                             let (_, m) = self.emit_expr(&args[1]);
@@ -47434,6 +48736,570 @@ impl Codegen {
                         "tls_pool_close" => {
                             let (_, c) = self.emit_expr(&args[0]);
                             return ("int64_t".into(), format!("mako_tls_pool_close({c})"));
+                        }
+                        "sctp_available" => {
+                            return ("int64_t".into(), format!("mako_sctp_available()"));
+                        }
+                        "sctp_listen" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_sctp_listen({a0})"));
+                        }
+                        "sctp_listen_addr" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            let (_, a1) = self.emit_expr(&args[1]);
+                            return ("int64_t".into(), format!("mako_sctp_listen_addr({a0}, {a1})"));
+                        }
+                        "sctp_accept" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_sctp_accept({a0})"));
+                        }
+                        "sctp_connect" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            let (_, a1) = self.emit_expr(&args[1]);
+                            return ("int64_t".into(), format!("mako_sctp_connect({a0}, {a1})"));
+                        }
+                        "sctp_connect_timeout" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            let (_, a1) = self.emit_expr(&args[1]);
+                            let (_, a2) = self.emit_expr(&args[2]);
+                            return ("int64_t".into(), format!("mako_sctp_connect_timeout({a0}, {a1}, {a2})"));
+                        }
+                        "sctp_close" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_sctp_close({a0})"));
+                        }
+                        "sctp_shutdown" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            let (_, a1) = self.emit_expr(&args[1]);
+                            return ("int64_t".into(), format!("mako_sctp_shutdown({a0}, {a1})"));
+                        }
+                        "sctp_set_timeout" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            let (_, a1) = self.emit_expr(&args[1]);
+                            return ("int64_t".into(), format!("mako_sctp_set_timeout({a0}, {a1})"));
+                        }
+                        "sctp_write" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            let (_, a1) = self.emit_expr(&args[1]);
+                            return ("int64_t".into(), format!("mako_sctp_write({a0}, {a1})"));
+                        }
+                        "sctp_write_all" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            let (_, a1) = self.emit_expr(&args[1]);
+                            return ("int64_t".into(), format!("mako_sctp_write_all({a0}, {a1})"));
+                        }
+                        "sctp_read" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            let (_, a1) = self.emit_expr(&args[1]);
+                            let tmp = self.fresh("dx");
+                            self.line(&format!("MakoString {tmp} = mako_sctp_read({a0}, {a1});"));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "sctp_read_n" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            let (_, a1) = self.emit_expr(&args[1]);
+                            let tmp = self.fresh("dx");
+                            self.line(&format!("MakoString {tmp} = mako_sctp_read_n({a0}, {a1});"));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "sctp_peer_addr" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            let tmp = self.fresh("dx");
+                            self.line(&format!("MakoString {tmp} = mako_sctp_peer_addr({a0});"));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "sctp_local_addr" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            let tmp = self.fresh("dx");
+                            self.line(&format!("MakoString {tmp} = mako_sctp_local_addr({a0});"));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "sctp_send_stream" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            let (_, a1) = self.emit_expr(&args[1]);
+                            let (_, a2) = self.emit_expr(&args[2]);
+                            return ("int64_t".into(), format!("mako_sctp_send_stream({a0}, {a1}, {a2})"));
+                        }
+                        "sctp_recv_stream" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            let (_, a1) = self.emit_expr(&args[1]);
+                            let tmp = self.fresh("dx");
+                            self.line(&format!("MakoString {tmp} = mako_sctp_recv_stream({a0}, {a1});"));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "sctp_last_stream" => {
+                            return ("int64_t".into(), format!("mako_sctp_last_stream()"));
+                        }
+                        "sctp_last_ppid" => {
+                            return ("int64_t".into(), format!("mako_sctp_last_ppid()"));
+                        }
+                        "diameter_header_len" => {
+                            return ("int64_t".into(), format!("mako_diameter_header_len()"));
+                        }
+                        "diameter_msg_len" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_diameter_msg_len({a0})"));
+                        }
+                        "diameter_msg_complete" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_diameter_msg_complete({a0})"));
+                        }
+                        "diameter_msg_needed" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_diameter_msg_needed({a0})"));
+                        }
+                        "diameter_first_message_len" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_diameter_first_message_len({a0})"));
+                        }
+                        "diameter_version" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_diameter_version({a0})"));
+                        }
+                        "diameter_flags" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_diameter_flags({a0})"));
+                        }
+                        "diameter_is_request" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_diameter_is_request({a0})"));
+                        }
+                        "diameter_is_answer" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_diameter_is_answer({a0})"));
+                        }
+                        "diameter_is_error" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_diameter_is_error({a0})"));
+                        }
+                        "diameter_cmd" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_diameter_cmd({a0})"));
+                        }
+                        "diameter_app_id" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_diameter_app_id({a0})"));
+                        }
+                        "diameter_hbh" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_diameter_hbh({a0})"));
+                        }
+                        "diameter_e2e" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_diameter_e2e({a0})"));
+                        }
+                        "diameter_header_build" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            let (_, a1) = self.emit_expr(&args[1]);
+                            let (_, a2) = self.emit_expr(&args[2]);
+                            let (_, a3) = self.emit_expr(&args[3]);
+                            let (_, a4) = self.emit_expr(&args[4]);
+                            let (_, a5) = self.emit_expr(&args[5]);
+                            let tmp = self.fresh("dx");
+                            self.line(&format!("MakoString {tmp} = mako_diameter_header_build({a0}, {a1}, {a2}, {a3}, {a4}, {a5});"));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "diameter_msg_build" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            let (_, a1) = self.emit_expr(&args[1]);
+                            let (_, a2) = self.emit_expr(&args[2]);
+                            let (_, a3) = self.emit_expr(&args[3]);
+                            let (_, a4) = self.emit_expr(&args[4]);
+                            let (_, a5) = self.emit_expr(&args[5]);
+                            let tmp = self.fresh("dx");
+                            self.line(&format!("MakoString {tmp} = mako_diameter_msg_build({a0}, {a1}, {a2}, {a3}, {a4}, {a5});"));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "diameter_set_hbh" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            let (_, a1) = self.emit_expr(&args[1]);
+                            let tmp = self.fresh("dx");
+                            self.line(&format!("MakoString {tmp} = mako_diameter_set_hbh({a0}, {a1});"));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "diameter_set_e2e" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            let (_, a1) = self.emit_expr(&args[1]);
+                            let tmp = self.fresh("dx");
+                            self.line(&format!("MakoString {tmp} = mako_diameter_set_e2e({a0}, {a1});"));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "diameter_avp_encode" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            let (_, a1) = self.emit_expr(&args[1]);
+                            let (_, a2) = self.emit_expr(&args[2]);
+                            let (_, a3) = self.emit_expr(&args[3]);
+                            let tmp = self.fresh("dx");
+                            self.line(&format!("MakoString {tmp} = mako_diameter_avp_encode({a0}, {a1}, {a2}, {a3});"));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "diameter_avp_put_u32" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            let (_, a1) = self.emit_expr(&args[1]);
+                            let (_, a2) = self.emit_expr(&args[2]);
+                            let (_, a3) = self.emit_expr(&args[3]);
+                            let tmp = self.fresh("dx");
+                            self.line(&format!("MakoString {tmp} = mako_diameter_avp_put_u32({a0}, {a1}, {a2}, {a3});"));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "diameter_avp_put_str" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            let (_, a1) = self.emit_expr(&args[1]);
+                            let (_, a2) = self.emit_expr(&args[2]);
+                            let (_, a3) = self.emit_expr(&args[3]);
+                            let tmp = self.fresh("dx");
+                            self.line(&format!("MakoString {tmp} = mako_diameter_avp_put_str({a0}, {a1}, {a2}, {a3});"));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "diameter_avp_at" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            let (_, a1) = self.emit_expr(&args[1]);
+                            let tmp = self.fresh("dx");
+                            self.line(&format!("MakoString {tmp} = mako_diameter_avp_at({a0}, {a1});"));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "diameter_avp_find" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            let (_, a1) = self.emit_expr(&args[1]);
+                            let tmp = self.fresh("dx");
+                            self.line(&format!("MakoString {tmp} = mako_diameter_avp_find({a0}, {a1});"));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "diameter_avp_find_vendor" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            let (_, a1) = self.emit_expr(&args[1]);
+                            let (_, a2) = self.emit_expr(&args[2]);
+                            let tmp = self.fresh("dx");
+                            self.line(&format!("MakoString {tmp} = mako_diameter_avp_find_vendor({a0}, {a1}, {a2});"));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "diameter_avp_u32" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_diameter_avp_u32({a0})"));
+                        }
+                        "diameter_avp_str" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            let tmp = self.fresh("dx");
+                            self.line(&format!("MakoString {tmp} = mako_diameter_avp_str({a0});"));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "diameter_result_code" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_diameter_result_code({a0})"));
+                        }
+                        "diameter_txn_key" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            let (_, a1) = self.emit_expr(&args[1]);
+                            let tmp = self.fresh("dx");
+                            self.line(&format!("MakoString {tmp} = mako_diameter_txn_key({a0}, {a1});"));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "diameter_e2e_key" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            let (_, a1) = self.emit_expr(&args[1]);
+                            let tmp = self.fresh("dx");
+                            self.line(&format!("MakoString {tmp} = mako_diameter_e2e_key({a0}, {a1});"));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "diameter_session_key" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            let tmp = self.fresh("dx");
+                            self.line(&format!("MakoString {tmp} = mako_diameter_session_key({a0});"));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "diameter_hbh_new" => {
+                            return ("int64_t".into(), format!("mako_diameter_hbh_new()"));
+                        }
+                        "diameter_e2e_new" => {
+                            return ("int64_t".into(), format!("mako_diameter_e2e_new()"));
+                        }
+                        "diameter_build_cer" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            let (_, a1) = self.emit_expr(&args[1]);
+                            let (_, a2) = self.emit_expr(&args[2]);
+                            let (_, a3) = self.emit_expr(&args[3]);
+                            let tmp = self.fresh("dx");
+                            self.line(&format!("MakoString {tmp} = mako_diameter_build_cer({a0}, {a1}, {a2}, {a3});"));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "diameter_build_cea" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            let (_, a1) = self.emit_expr(&args[1]);
+                            let (_, a2) = self.emit_expr(&args[2]);
+                            let (_, a3) = self.emit_expr(&args[3]);
+                            let tmp = self.fresh("dx");
+                            self.line(&format!("MakoString {tmp} = mako_diameter_build_cea({a0}, {a1}, {a2}, {a3});"));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "diameter_build_dwr" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            let (_, a1) = self.emit_expr(&args[1]);
+                            let (_, a2) = self.emit_expr(&args[2]);
+                            let (_, a3) = self.emit_expr(&args[3]);
+                            let tmp = self.fresh("dx");
+                            self.line(&format!("MakoString {tmp} = mako_diameter_build_dwr({a0}, {a1}, {a2}, {a3});"));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "diameter_build_dwa" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            let (_, a1) = self.emit_expr(&args[1]);
+                            let (_, a2) = self.emit_expr(&args[2]);
+                            let (_, a3) = self.emit_expr(&args[3]);
+                            let tmp = self.fresh("dx");
+                            self.line(&format!("MakoString {tmp} = mako_diameter_build_dwa({a0}, {a1}, {a2}, {a3});"));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "diameter_build_dpr" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            let (_, a1) = self.emit_expr(&args[1]);
+                            let (_, a2) = self.emit_expr(&args[2]);
+                            let (_, a3) = self.emit_expr(&args[3]);
+                            let (_, a4) = self.emit_expr(&args[4]);
+                            let tmp = self.fresh("dx");
+                            self.line(&format!("MakoString {tmp} = mako_diameter_build_dpr({a0}, {a1}, {a2}, {a3}, {a4});"));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "diameter_build_dpa" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            let (_, a1) = self.emit_expr(&args[1]);
+                            let (_, a2) = self.emit_expr(&args[2]);
+                            let (_, a3) = self.emit_expr(&args[3]);
+                            let tmp = self.fresh("dx");
+                            self.line(&format!("MakoString {tmp} = mako_diameter_build_dpa({a0}, {a1}, {a2}, {a3});"));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "diameter_conn_new" => {
+                            return ("int64_t".into(), format!("mako_diameter_conn_new()"));
+                        }
+                        "diameter_conn_free" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_diameter_conn_free({a0})"));
+                        }
+                        "diameter_conn_reset" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_diameter_conn_reset({a0})"));
+                        }
+                        "diameter_conn_set_origin" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            let (_, a1) = self.emit_expr(&args[1]);
+                            let (_, a2) = self.emit_expr(&args[2]);
+                            return ("int64_t".into(), format!("mako_diameter_conn_set_origin({a0}, {a1}, {a2})"));
+                        }
+                        "diameter_conn_state" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_diameter_conn_state({a0})"));
+                        }
+                        "diameter_conn_set_state" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            let (_, a1) = self.emit_expr(&args[1]);
+                            return ("int64_t".into(), format!("mako_diameter_conn_set_state({a0}, {a1})"));
+                        }
+                        "diameter_conn_feed" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            let (_, a1) = self.emit_expr(&args[1]);
+                            return ("int64_t".into(), format!("mako_diameter_conn_feed({a0}, {a1})"));
+                        }
+                        "diameter_conn_pop" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            let tmp = self.fresh("dx");
+                            self.line(&format!("MakoString {tmp} = mako_diameter_conn_pop({a0});"));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "diameter_conn_pending" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_diameter_conn_pending({a0})"));
+                        }
+                        "diameter_conn_queue_out" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            let (_, a1) = self.emit_expr(&args[1]);
+                            return ("int64_t".into(), format!("mako_diameter_conn_queue_out({a0}, {a1})"));
+                        }
+                        "diameter_conn_take_out" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            let tmp = self.fresh("dx");
+                            self.line(&format!("MakoString {tmp} = mako_diameter_conn_take_out({a0});"));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "diameter_conn_next_hbh" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_diameter_conn_next_hbh({a0})"));
+                        }
+                        "diameter_conn_register" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            let (_, a1) = self.emit_expr(&args[1]);
+                            let (_, a2) = self.emit_expr(&args[2]);
+                            let (_, a3) = self.emit_expr(&args[3]);
+                            let (_, a4) = self.emit_expr(&args[4]);
+                            return ("int64_t".into(), format!("mako_diameter_conn_register({a0}, {a1}, {a2}, {a3}, {a4})"));
+                        }
+                        "diameter_conn_match" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            let (_, a1) = self.emit_expr(&args[1]);
+                            return ("int64_t".into(), format!("mako_diameter_conn_match({a0}, {a1})"));
+                        }
+                        "diameter_conn_expire" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            let (_, a1) = self.emit_expr(&args[1]);
+                            let (_, a2) = self.emit_expr(&args[2]);
+                            return ("int64_t".into(), format!("mako_diameter_conn_expire({a0}, {a1}, {a2})"));
+                        }
+                        "diameter_conn_on_cea" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            let (_, a1) = self.emit_expr(&args[1]);
+                            return ("int64_t".into(), format!("mako_diameter_conn_on_cea({a0}, {a1})"));
+                        }
+                        "diameter_pool_open" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            let (_, a1) = self.emit_expr(&args[1]);
+                            let (_, a2) = self.emit_expr(&args[2]);
+                            let (_, a3) = self.emit_expr(&args[3]);
+                            let (_, a4) = self.emit_expr(&args[4]);
+                            return ("int64_t".into(), format!("mako_diameter_pool_open({a0}, {a1}, {a2}, {a3}, {a4})"));
+                        }
+                        "diameter_pool_acquire" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_diameter_pool_acquire({a0})"));
+                        }
+                        "diameter_pool_release" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            let (_, a1) = self.emit_expr(&args[1]);
+                            let (_, a2) = self.emit_expr(&args[2]);
+                            return ("int64_t".into(), format!("mako_diameter_pool_release({a0}, {a1}, {a2})"));
+                        }
+                        "diameter_pool_close" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_diameter_pool_close({a0})"));
+                        }
+                        "diameter_pool_idle" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_diameter_pool_idle({a0})"));
+                        }
+                        "diameter_mgr_new" => {
+                            return ("int64_t".into(), format!("mako_diameter_mgr_new()"));
+                        }
+                        "diameter_mgr_free" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_diameter_mgr_free({a0})"));
+                        }
+                        "diameter_mgr_set_origin" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            let (_, a1) = self.emit_expr(&args[1]);
+                            let (_, a2) = self.emit_expr(&args[2]);
+                            return ("int64_t".into(), format!("mako_diameter_mgr_set_origin({a0}, {a1}, {a2})"));
+                        }
+                        "diameter_mgr_set_watchdog" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            let (_, a1) = self.emit_expr(&args[1]);
+                            let (_, a2) = self.emit_expr(&args[2]);
+                            return ("int64_t".into(), format!("mako_diameter_mgr_set_watchdog({a0}, {a1}, {a2})"));
+                        }
+                        "diameter_peer_add" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            let (_, a1) = self.emit_expr(&args[1]);
+                            let (_, a2) = self.emit_expr(&args[2]);
+                            let (_, a3) = self.emit_expr(&args[3]);
+                            let (_, a4) = self.emit_expr(&args[4]);
+                            let (_, a5) = self.emit_expr(&args[5]);
+                            return ("int64_t".into(), format!("mako_diameter_peer_add({a0}, {a1}, {a2}, {a3}, {a4}, {a5})"));
+                        }
+                        "diameter_peer_remove" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            let (_, a1) = self.emit_expr(&args[1]);
+                            return ("int64_t".into(), format!("mako_diameter_peer_remove({a0}, {a1})"));
+                        }
+                        "diameter_peer_state" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            let (_, a1) = self.emit_expr(&args[1]);
+                            return ("int64_t".into(), format!("mako_diameter_peer_state({a0}, {a1})"));
+                        }
+                        "diameter_peer_count" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_diameter_peer_count({a0})"));
+                        }
+                        "diameter_peer_fd" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            let (_, a1) = self.emit_expr(&args[1]);
+                            return ("int64_t".into(), format!("mako_diameter_peer_fd({a0}, {a1})"));
+                        }
+                        "diameter_peer_attach_fd" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            let (_, a1) = self.emit_expr(&args[1]);
+                            let (_, a2) = self.emit_expr(&args[2]);
+                            return ("int64_t".into(), format!("mako_diameter_peer_attach_fd({a0}, {a1}, {a2})"));
+                        }
+                        "diameter_peer_mark_open" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            let (_, a1) = self.emit_expr(&args[1]);
+                            return ("int64_t".into(), format!("mako_diameter_peer_mark_open({a0}, {a1})"));
+                        }
+                        "diameter_peer_mark_closed" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            let (_, a1) = self.emit_expr(&args[1]);
+                            return ("int64_t".into(), format!("mako_diameter_peer_mark_closed({a0}, {a1})"));
+                        }
+                        "diameter_route_add" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            let (_, a1) = self.emit_expr(&args[1]);
+                            let (_, a2) = self.emit_expr(&args[2]);
+                            return ("int64_t".into(), format!("mako_diameter_route_add({a0}, {a1}, {a2})"));
+                        }
+                        "diameter_route_remove" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            let (_, a1) = self.emit_expr(&args[1]);
+                            return ("int64_t".into(), format!("mako_diameter_route_remove({a0}, {a1})"));
+                        }
+                        "diameter_route_lookup" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            let (_, a1) = self.emit_expr(&args[1]);
+                            return ("int64_t".into(), format!("mako_diameter_route_lookup({a0}, {a1})"));
+                        }
+                        "diameter_mgr_pick_failover" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            let (_, a1) = self.emit_expr(&args[1]);
+                            return ("int64_t".into(), format!("mako_diameter_mgr_pick_failover({a0}, {a1})"));
+                        }
+                        "diameter_mgr_handle_io" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            let (_, a1) = self.emit_expr(&args[1]);
+                            let (_, a2) = self.emit_expr(&args[2]);
+                            return ("int64_t".into(), format!("mako_diameter_mgr_handle_io({a0}, {a1}, {a2})"));
+                        }
+                        "diameter_mgr_poll" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            let tmp = self.fresh("dx");
+                            self.line(&format!("MakoString {tmp} = mako_diameter_mgr_poll({a0});"));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "diameter_mgr_tick" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            let (_, a1) = self.emit_expr(&args[1]);
+                            return ("int64_t".into(), format!("mako_diameter_mgr_tick({a0}, {a1})"));
+                        }
+                        "diameter_mgr_request" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            let (_, a1) = self.emit_expr(&args[1]);
+                            let (_, a2) = self.emit_expr(&args[2]);
+                            let (_, a3) = self.emit_expr(&args[3]);
+                            let (_, a4) = self.emit_expr(&args[4]);
+                            let (_, a5) = self.emit_expr(&args[5]);
+                            return ("int64_t".into(), format!("mako_diameter_mgr_request({a0}, {a1}, {a2}, {a3}, {a4}, {a5})"));
+                        }
+                        "diameter_mgr_flush" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_diameter_mgr_flush({a0})"));
+                        }
+                        "diameter_mgr_take_out" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            let (_, a1) = self.emit_expr(&args[1]);
+                            let tmp = self.fresh("dx");
+                            self.line(&format!("MakoString {tmp} = mako_diameter_mgr_take_out({a0}, {a1});"));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "diameter_mgr_inject_in" => {
+                            let (_, a0) = self.emit_expr(&args[0]);
+                            let (_, a1) = self.emit_expr(&args[1]);
+                            let (_, a2) = self.emit_expr(&args[2]);
+                            return ("int64_t".into(), format!("mako_diameter_mgr_inject_in({a0}, {a1}, {a2})"));
                         }
                         "wss_pool_open_ca" => {
                             let (_, h) = self.emit_expr(&args[0]);

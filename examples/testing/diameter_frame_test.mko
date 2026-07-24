@@ -1,0 +1,84 @@
+// Diameter framing / header accessors (offline, no peer).
+
+fn diam_frame_limits() {
+    assert_eq(diameter_limits_set(262144, 524288, 524288, 0), 0)
+}
+
+fn TestDiameterHeaderLen() {
+    assert_eq(diameter_header_len(), 20)
+}
+
+fn TestDiameterMsgBuildAndParse() {
+    diam_frame_limits()
+    // flags 0x80 = request bit (128)
+    let avps = diameter_avp_put_u32(268, 64, 0, 2001)
+    let msg = diameter_msg_build(128, 257, 0, 42, 99, avps)
+    assert(len(msg) >= 20)
+    assert_eq(diameter_msg_len(msg), len(msg))
+    assert_eq(diameter_msg_complete(msg), 1)
+    assert_eq(diameter_first_message_len(msg), len(msg))
+    assert_eq(diameter_version(msg), 1)
+    assert_eq(diameter_is_request(msg), 1)
+    assert_eq(diameter_is_answer(msg), 0)
+    assert_eq(diameter_cmd(msg), 257)
+    assert_eq(diameter_app_id(msg), 0)
+    assert_eq(diameter_hbh(msg), 42)
+    assert_eq(diameter_e2e(msg), 99)
+    assert_eq(diameter_result_code(msg), 2001)
+}
+
+fn TestDiameterIncomplete() {
+    diam_frame_limits()
+    // Full message truncated to header only → incomplete body.
+    let full = diameter_msg_build(128, 257, 0, 1, 1, diameter_avp_put_u32(268, 64, 0, 2001))
+    assert(len(full) > 20)
+    let short = full[0:10]
+    assert_eq(diameter_msg_complete(short), 0)
+    assert(diameter_msg_needed(short) > 0)
+    assert_eq(diameter_first_message_len(short), 0)
+    let empty = ""
+    assert_eq(diameter_msg_complete(empty), 0)
+    assert_eq(diameter_first_message_len(empty), 0)
+}
+
+fn TestDiameterTwoMessages() {
+    diam_frame_limits()
+    let a = diameter_msg_build(128, 257, 0, 1, 1, "")
+    let b = diameter_msg_build(0, 257, 0, 1, 1, "")
+    let buf = a + b
+    let n = diameter_first_message_len(buf)
+    assert_eq(n, len(a))
+    let rest = buf[n:len(buf)]
+    assert_eq(diameter_first_message_len(rest), len(b))
+}
+
+fn TestDiameterSetHbhE2e() {
+    diam_frame_limits()
+    let msg = diameter_msg_build(128, 280, 0, 10, 20, "")
+    let m2 = diameter_set_hbh(msg, 55)
+    assert_eq(diameter_hbh(m2), 55)
+    let m3 = diameter_set_e2e(m2, 66)
+    assert_eq(diameter_e2e(m3), 66)
+}
+
+fn TestDiameterOversizedRejected() {
+    diam_frame_limits()
+    let ok = diameter_avp_put_u32(268, 64, 0, 2001)
+    assert(len(ok) > 0)
+    let msg = diameter_msg_build(0, 257, 0, 1, 1, ok)
+    assert(len(msg) >= 20)
+    assert_eq(diameter_msg_complete(msg), 1)
+    assert(diameter_msg_len(msg) <= diameter_limits_max_msg())
+}
+
+fn TestDiameterLimitsRequired() {
+    // Unconfigured max_msg still allows tiny builds if cap is 0 for encode?
+    // feed requires inbuf limit.
+    assert_eq(diameter_limits_set(0, 0, 0, 0), 0)
+    let h = diameter_conn_new()
+    let msg = diameter_msg_build(128, 257, 0, 1, 1, "")
+    // Without inbuf limit, feed fails closed.
+    assert_eq(diameter_conn_feed(h, msg), -1)
+    let _ = diameter_conn_free(h)
+    diam_frame_limits()
+}

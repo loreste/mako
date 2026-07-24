@@ -190,6 +190,7 @@ Mako does **not** ship a full PKI product or “crypto framework.” It exposes
 | Secrets | `secret_from_str` / `secret_len` / `secret_eq_str` / `secret_drop` | Wipe keys after use |
 | TLS server | `tls_server_new` / `tls_accept` / `tls_read`/`write` (+ NB handshake) | HTTPS, STARTTLS terminate |
 | TLS client | `tls_client_new` / `tls_connect` / SNI / VERIFY_PEER | Outbound TLS, SIPS, mTLS apps |
+| TLS pool / mTLS | `tls_pool_open_timeout` / `_mtls` / `_mtls_full` + client cert paths | General pooled outbound TLS (any app); caller-supplied timeouts |
 | TLS inspect | `tls_conn_version`, `tls_peer_cn`, `tls_conn_alpn` | Logging / policy |
 | HTTP helpers | `https_*` / `oidc_*` (+ `tls_get` / `tls_post` demos) | Verified HTTPS clients; OIDC never downgrades to `http_*` |
 | JWT signing / verification | `jwt_sign` (HS256), `jwt_sign_es256`, `jwt_verify`, `jwt_verify_rs256`, `jwt_verify_es256`, `jwt_verify_jwks` | Explicit algorithm/key type; ES256 requires a P-256 key; RS256 requires RSA >= 2048 bits |

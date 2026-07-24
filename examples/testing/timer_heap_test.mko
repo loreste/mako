@@ -1,0 +1,71 @@
+// General-purpose deadline timer heap (not protocol-specific).
+
+fn TestTimerHeapNewFree() {
+    assert_eq(timer_heap_new(0), -1)
+    assert_eq(timer_heap_new(-1), -1)
+    let h = timer_heap_new(32)
+    assert(h > 0)
+    assert_eq(timer_heap_count(h), 0)
+    assert_eq(timer_heap_drops(h), 0)
+    assert_eq(timer_heap_free(h), 0)
+    assert_eq(timer_heap_free(h), -1)
+}
+
+fn TestTimerHeapArmPop() {
+    let h = timer_heap_new(16)
+    // kind and id are opaque application tags
+    let a = timer_heap_arm(h, 100, 7, 42)
+    let b = timer_heap_arm(h, 50, 8, 99)
+    assert(a >= 0)
+    assert(b >= 0)
+    assert_eq(timer_heap_next(h), 50)
+    assert_eq(timer_heap_pop_due1(h, 40), 0)
+    assert_eq(timer_heap_pop_due1(h, 50), 1)
+    assert_eq(timer_last_kind(), 8)
+    assert_eq(timer_last_id(), 99)
+    assert_eq(timer_heap_pop_due1(h, 100), 1)
+    assert_eq(timer_last_kind(), 7)
+    assert_eq(timer_last_id(), 42)
+    assert_eq(timer_heap_pop_due1(h, 1000), 0)
+    let _ = timer_heap_free(h)
+}
+
+fn TestTimerHeapBounds() {
+    let h = timer_heap_new(2)
+    assert(timer_heap_arm(h, 1, 1, 1) >= 0)
+    assert(timer_heap_arm(h, 2, 1, 2) >= 0)
+    assert_eq(timer_heap_arm(h, 3, 1, 3), -1)
+    assert(timer_heap_drops(h) >= 1)
+    let _ = timer_heap_free(h)
+}
+
+fn TestTimerHeapCancelToken() {
+    // arm returns a stable token; cancel is by token after heap reorders.
+    let h = timer_heap_new(16)
+    let tok_late = timer_heap_arm(h, 100, 1, 1)
+    let tok_early = timer_heap_arm(h, 10, 2, 2)
+    assert(tok_late > 0)
+    assert(tok_early > 0)
+    assert_eq(timer_heap_cancel(h, tok_early), 0)
+    assert_eq(timer_heap_pop_due1(h, 50), 0) // early cancelled
+    assert_eq(timer_heap_pop_due1(h, 100), 1)
+    assert_eq(timer_last_kind(), 1)
+    assert_eq(timer_heap_cancel(h, tok_late), -1) // already fired
+    let _ = timer_heap_free(h)
+}
+
+fn TestTimerHeapHandleAba() {
+    // Free + reuse must not honor a stale handle (generation).
+    let h1 = timer_heap_new(8)
+    assert(h1 > 0)
+    assert_eq(timer_heap_free(h1), 0)
+    assert_eq(timer_heap_free(h1), -1)
+    assert_eq(timer_heap_arm(h1, 1, 1, 1), -1)
+    assert_eq(timer_heap_count(h1), -1)
+    let h2 = timer_heap_new(8)
+    assert(h2 > 0)
+    // Stale h1 must not alias h2.
+    assert_eq(timer_heap_arm(h1, 1, 1, 1), -1)
+    assert(timer_heap_arm(h2, 1, 1, 1) >= 0)
+    let _ = timer_heap_free(h2)
+}

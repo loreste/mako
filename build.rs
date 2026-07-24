@@ -358,10 +358,53 @@ fn main() {
     println!("cargo:rerun-if-env-changed=MAKO_NO_SQLITE");
     println!("cargo:rerun-if-env-changed=MAKO_NO_LIBPQ");
 
+    // Optional libsctp (Linux). Kernel SCTP may work without it; headers enable
+    // stream-aware send/recv. macOS/Windows leave sctp_available()==0.
+    if env::var_os("MAKO_NO_SCTP").is_none() {
+        let mut found = false;
+        for base in [
+            PathBuf::from("/usr"),
+            PathBuf::from("/usr/local"),
+            PathBuf::from("/opt/homebrew"),
+        ] {
+            let inc = base.join("include");
+            if inc.join("netinet/sctp.h").exists() {
+                runtime.define("MAKO_HAS_SCTP", None);
+                if base != PathBuf::from("/usr") {
+                    runtime.include(&inc);
+                }
+                let lib = base.join("lib");
+                if lib.join("libsctp.so").exists()
+                    || lib.join("libsctp.a").exists()
+                    || lib.join("libsctp.dylib").exists()
+                {
+                    println!("cargo:rustc-link-search=native={}", lib.display());
+                    println!("cargo:rustc-link-lib=sctp");
+                } else {
+                    // Debian/Ubuntu often put libsctp in multiarch paths; try -lsctp.
+                    println!("cargo:rustc-link-lib=sctp");
+                }
+                println!(
+                    "cargo:warning=native-runtime: SCTP headers enabled ({})",
+                    inc.display()
+                );
+                found = true;
+                break;
+            }
+        }
+        if !found {
+            println!("cargo:warning=native-runtime: netinet/sctp.h not found; SCTP uses soft stubs/kernel probe");
+        }
+    }
+    println!("cargo:rerun-if-env-changed=MAKO_NO_SCTP");
+
     runtime.compile("mako_native_runtime");
     println!("cargo:rerun-if-changed=runtime/native_runtime.c");
     println!("cargo:rerun-if-changed=runtime/native_bridge.c");
     println!("cargo:rerun-if-changed=runtime/mako_extern_demo.c");
+    println!("cargo:rerun-if-changed=runtime/mako_sctp.h");
+    println!("cargo:rerun-if-changed=runtime/mako_diameter.h");
+    println!("cargo:rerun-if-changed=runtime/mako_tls.h");
     println!("cargo:rustc-link-search=native={}", lld_static.display());
     println!("cargo:rustc-link-lib=static=lldMachO");
     println!("cargo:rustc-link-lib=static=lldCommon");

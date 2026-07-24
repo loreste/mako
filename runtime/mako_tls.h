@@ -4546,18 +4546,84 @@ typedef struct {
     void *ctx;
     void *conn;
     int used;
+    int dying;           /* closed while I/O in flight — last I/O frees */
+    int inflight;        /* concurrent send/recv count */
+    int io_timeout_ms;   /* SO_RCV/SNDTIMEO after handshake; 0 = leave default */
+    uint32_t gen;        /* ABA: packed into handle */
 } MakoTlsPoolSlot;
 
 static MakoTlsPoolSlot mako_tls_pool_slots[MAKO_TLS_POOL_MAX];
 static pthread_mutex_t mako_tls_pool_mu = MAKO_MUTEX_INIT;
 
-static inline int64_t mako_tls_pool_open(
-    MakoString host, int64_t port, MakoString ca_pem_path
+static inline int64_t mako_tls_pool_pack_handle(int slot, uint32_t gen) {
+    if (gen == 0) gen = 1;
+    return (int64_t)(((uint32_t)(slot + 1) & 0xffffu)
+                     | ((gen & 0xffffu) << 16));
+}
+static inline int mako_tls_pool_handle_slot(int64_t h) {
+    int id = (int)(h & 0xffff);
+    if (id <= 0 || id > MAKO_TLS_POOL_MAX) return -1;
+    return id - 1;
+}
+static inline uint32_t mako_tls_pool_handle_gen(int64_t h) {
+    return (uint32_t)((h >> 16) & 0xffffu);
+}
+
+/* Shared open: optional client cert/key; connect_ms for TCP connect;
+ * io_ms for post-handshake socket RCV/SND timeouts (0 = do not set). */
+static inline int64_t mako_tls_pool_open_ex(
+    MakoString host, int64_t port, MakoString ca_pem_path,
+    MakoString client_cert, MakoString client_key,
+    int64_t connect_ms, int64_t io_ms
 ) {
     if (!mako_tls_client_available() || !host.data || host.len == 0) return -1;
-    void *ctx = mako_tls_client_new(ca_pem_path);
+    if (port <= 0 || port > 65535) return -1;
+    if (host.len >= 256) return -1;
+    /* Reject NUL/CR/LF in host and PEM paths (injection / C-string truncation). */
+    for (size_t i = 0; i < host.len; i++) {
+        if (host.data[i] == 0 || host.data[i] == '\r' || host.data[i] == '\n') return -1;
+    }
+    if (ca_pem_path.data) {
+        for (size_t i = 0; i < ca_pem_path.len; i++) {
+            if (ca_pem_path.data[i] == 0 || ca_pem_path.data[i] == '\r'
+                || ca_pem_path.data[i] == '\n') {
+                return -1;
+            }
+        }
+    }
+    int use_mtls = (client_cert.data && client_cert.len > 0
+                    && client_key.data && client_key.len > 0);
+    if ((client_cert.data && client_cert.len > 0) != (client_key.data && client_key.len > 0)) {
+        return -1; /* cert without key or key without cert */
+    }
+    if (use_mtls) {
+        for (size_t i = 0; i < client_cert.len; i++) {
+            if (client_cert.data[i] == 0 || client_cert.data[i] == '\r'
+                || client_cert.data[i] == '\n') {
+                return -1;
+            }
+        }
+        for (size_t i = 0; i < client_key.len; i++) {
+            if (client_key.data[i] == 0 || client_key.data[i] == '\r'
+                || client_key.data[i] == '\n') {
+                return -1;
+            }
+        }
+    }
+    void *ctx = use_mtls
+        ? mako_tls_client_new_mtls(ca_pem_path, client_cert, client_key)
+        : mako_tls_client_new(ca_pem_path);
     if (!ctx) return -1;
-    int64_t fd = mako_tcp_connect_timeout(host, port, 1200);
+    /* connect_ms must be explicit and positive — no invented default. */
+    if (connect_ms <= 0) {
+        mako_tls_client_free(ctx);
+        return -1;
+    }
+    if (io_ms < 0) {
+        mako_tls_client_free(ctx);
+        return -1;
+    }
+    int64_t fd = mako_tcp_connect_timeout(host, port, connect_ms);
     if (fd < 0) {
         mako_tls_client_free(ctx);
         return -1;
@@ -4568,16 +4634,32 @@ static inline int64_t mako_tls_pool_open(
         mako_tls_client_free(ctx);
         return -1;
     }
+    if (io_ms > 0) {
+        (void)mako_tcp_set_timeout(fd, io_ms);
+    }
 
     pthread_mutex_lock(&mako_tls_pool_mu);
     int slot = -1;
     for (int i = 0; i < MAKO_TLS_POOL_MAX; i++) {
-        if (!mako_tls_pool_slots[i].used) { slot = i; break; }
+        /* Reuse only slots not in use and not awaiting deferred free. */
+        if (!mako_tls_pool_slots[i].used && mako_tls_pool_slots[i].inflight == 0
+            && !mako_tls_pool_slots[i].dying) {
+            slot = i;
+            break;
+        }
     }
+    int64_t handle = -1;
     if (slot >= 0) {
-        mako_tls_pool_slots[slot].ctx = ctx;
-        mako_tls_pool_slots[slot].conn = conn;
-        mako_tls_pool_slots[slot].used = 1;
+        MakoTlsPoolSlot *s = &mako_tls_pool_slots[slot];
+        uint32_t prev_gen = s->gen;
+        memset(s, 0, sizeof(*s));
+        s->ctx = ctx;
+        s->conn = conn;
+        s->used = 1;
+        s->io_timeout_ms = (int)io_ms;
+        s->gen = (prev_gen + 1) & 0xffffu;
+        if (s->gen == 0) s->gen = 1;
+        handle = mako_tls_pool_pack_handle(slot, s->gen);
     }
     pthread_mutex_unlock(&mako_tls_pool_mu);
     if (slot < 0) {
@@ -4585,63 +4667,180 @@ static inline int64_t mako_tls_pool_open(
         mako_tls_client_free(ctx);
         return -1;
     }
-    return slot + 1;
+    return handle;
 }
 
-static inline int64_t mako_tls_pool_send(int64_t handle, MakoString data) {
-    int slot = (int)handle - 1;
-    if (slot < 0 || slot >= MAKO_TLS_POOL_MAX || !data.data) return -1;
+/* CA-only open: connect_ms required (no default). io_ms fixed to 0 (unset). */
+static inline int64_t mako_tls_pool_open(
+    MakoString host, int64_t port, MakoString ca_pem_path
+) {
+    (void)host; (void)port; (void)ca_pem_path;
+    /* No implicit timeout — use tls_pool_open_timeout / open_mtls_full. */
+    return -1;
+}
+
+static inline int64_t mako_tls_pool_open_timeout(
+    MakoString host, int64_t port, MakoString ca_pem_path, int64_t timeout_ms
+) {
+    MakoString empty = {NULL, 0};
+    return mako_tls_pool_open_ex(host, port, ca_pem_path, empty, empty, timeout_ms, 0);
+}
+
+/* mTLS: connect_ms required; io timeout left unset (0). */
+static inline int64_t mako_tls_pool_open_mtls(
+    MakoString host, int64_t port, MakoString ca_pem_path,
+    MakoString client_cert, MakoString client_key, int64_t timeout_ms
+) {
+    if (!client_cert.data || client_cert.len == 0
+        || !client_key.data || client_key.len == 0) {
+        return -1;
+    }
+    return mako_tls_pool_open_ex(
+        host, port, ca_pem_path, client_cert, client_key, timeout_ms, 0
+    );
+}
+
+/* mTLS with independent connect + I/O timeouts. */
+static inline int64_t mako_tls_pool_open_mtls_full(
+    MakoString host, int64_t port, MakoString ca_pem_path,
+    MakoString client_cert, MakoString client_key,
+    int64_t connect_ms, int64_t io_ms
+) {
+    if (!client_cert.data || client_cert.len == 0
+        || !client_key.data || client_key.len == 0) {
+        return -1;
+    }
+    return mako_tls_pool_open_ex(
+        host, port, ca_pem_path, client_cert, client_key, connect_ms, io_ms
+    );
+}
+
+/* Apply/update SO_RCVTIMEO+SO_SNDTIMEO on a live pool connection. */
+static inline int64_t mako_tls_pool_set_timeout(int64_t handle, int64_t io_ms) {
+    int slot = mako_tls_pool_handle_slot(handle);
+    if (slot < 0) return -1;
     pthread_mutex_lock(&mako_tls_pool_mu);
     MakoTlsPoolSlot *s = &mako_tls_pool_slots[slot];
-    if (!s->used || !s->conn) {
+    if (!s->used || s->dying || mako_tls_pool_handle_gen(handle) != s->gen || !s->conn) {
         pthread_mutex_unlock(&mako_tls_pool_mu);
         return -1;
     }
+    int64_t fd = mako_tls_conn_fd(s->conn);
+    s->io_timeout_ms = (int)(io_ms > 0 ? io_ms : 0);
+    pthread_mutex_unlock(&mako_tls_pool_mu);
+    if (fd < 0) return -1;
+    return mako_tcp_set_timeout(fd, io_ms > 0 ? io_ms : 0) ? 0 : -1;
+}
+
+/* End an in-flight I/O: drop inflight; if dying, last waiter frees resources. */
+static inline void mako_tls_pool_end_io(int slot, uint32_t gen) {
+    void *conn = NULL, *ctx = NULL;
+    pthread_mutex_lock(&mako_tls_pool_mu);
+    MakoTlsPoolSlot *s = &mako_tls_pool_slots[slot];
+    if (s->gen == gen && s->inflight > 0) s->inflight--;
+    if (s->gen == gen && s->dying && s->inflight == 0) {
+        conn = s->conn;
+        ctx = s->ctx;
+        uint32_t g = s->gen;
+        memset(s, 0, sizeof(*s));
+        s->gen = g;
+    }
+    pthread_mutex_unlock(&mako_tls_pool_mu);
+    if (conn) mako_tls_conn_close(conn);
+    if (ctx) mako_tls_client_free(ctx);
+}
+
+static inline int64_t mako_tls_pool_send(int64_t handle, MakoString data) {
+    int slot = mako_tls_pool_handle_slot(handle);
+    if (slot < 0 || !data.data) return -1;
+    /* Snapshot conn under lock; bump inflight so close cannot free under us. */
+    pthread_mutex_lock(&mako_tls_pool_mu);
+    MakoTlsPoolSlot *s = &mako_tls_pool_slots[slot];
+    void *conn = NULL;
+    uint32_t gen = 0;
+    if (s->used && !s->dying && mako_tls_pool_handle_gen(handle) == s->gen && s->conn) {
+        conn = s->conn;
+        gen = s->gen;
+        s->inflight++;
+    }
+    pthread_mutex_unlock(&mako_tls_pool_mu);
+    if (!conn) return -1;
     size_t off = 0;
+    int64_t rc = -1;
     while (off < data.len) {
         MakoString part = {data.data + off, data.len - off};
-        int64_t n = mako_tls_write(s->conn, part);
+        int64_t n = mako_tls_write(conn, part);
         if (n <= 0) {
-            pthread_mutex_unlock(&mako_tls_pool_mu);
-            return -1;
+            rc = -1;
+            goto out;
         }
         off += (size_t)n;
     }
-    pthread_mutex_unlock(&mako_tls_pool_mu);
-    return (int64_t)off;
+    rc = (int64_t)off;
+out:
+    mako_tls_pool_end_io(slot, gen);
+    return rc;
 }
 
 static inline MakoString mako_tls_pool_recv(int64_t handle, int64_t max) {
-    int slot = (int)handle - 1;
-    if (slot < 0 || slot >= MAKO_TLS_POOL_MAX) return mako_str_from_cstr("");
+    int slot = mako_tls_pool_handle_slot(handle);
+    if (slot < 0) return mako_str_from_cstr("");
+    if (max <= 0) return mako_str_from_cstr(""); /* no invented size */
+    if (max > 4 * 1024 * 1024) max = 4 * 1024 * 1024;
     pthread_mutex_lock(&mako_tls_pool_mu);
     MakoTlsPoolSlot *s = &mako_tls_pool_slots[slot];
-    MakoString result = s->used && s->conn
-        ? mako_tls_read(s->conn, max) : mako_str_from_cstr("");
+    void *conn = NULL;
+    uint32_t gen = 0;
+    if (s->used && !s->dying && mako_tls_pool_handle_gen(handle) == s->gen && s->conn) {
+        conn = s->conn;
+        gen = s->gen;
+        s->inflight++;
+    }
     pthread_mutex_unlock(&mako_tls_pool_mu);
-    return result;
+    if (!conn) return mako_str_from_cstr("");
+    MakoString out = mako_tls_read(conn, max);
+    mako_tls_pool_end_io(slot, gen);
+    return out;
 }
 
 static inline int64_t mako_tls_pool_fd(int64_t handle) {
-    int slot = (int)handle - 1;
-    if (slot < 0 || slot >= MAKO_TLS_POOL_MAX) return -1;
+    int slot = mako_tls_pool_handle_slot(handle);
+    if (slot < 0) return -1;
     pthread_mutex_lock(&mako_tls_pool_mu);
-    int64_t fd = mako_tls_pool_slots[slot].used && mako_tls_pool_slots[slot].conn
-        ? mako_tls_conn_fd(mako_tls_pool_slots[slot].conn) : -1;
+    MakoTlsPoolSlot *s = &mako_tls_pool_slots[slot];
+    int64_t fd = -1;
+    if (s->used && !s->dying && mako_tls_pool_handle_gen(handle) == s->gen && s->conn) {
+        fd = mako_tls_conn_fd(s->conn);
+    }
     pthread_mutex_unlock(&mako_tls_pool_mu);
     return fd;
 }
 
 static inline int64_t mako_tls_pool_close(int64_t handle) {
-    int slot = (int)handle - 1;
-    if (slot < 0 || slot >= MAKO_TLS_POOL_MAX) return -1;
+    int slot = mako_tls_pool_handle_slot(handle);
+    if (slot < 0) return -1;
+    void *conn = NULL, *ctx = NULL;
     pthread_mutex_lock(&mako_tls_pool_mu);
-    MakoTlsPoolSlot old = mako_tls_pool_slots[slot];
-    memset(&mako_tls_pool_slots[slot], 0, sizeof(mako_tls_pool_slots[slot]));
+    MakoTlsPoolSlot *s = &mako_tls_pool_slots[slot];
+    if (!s->used || s->dying || mako_tls_pool_handle_gen(handle) != s->gen) {
+        pthread_mutex_unlock(&mako_tls_pool_mu);
+        return -1;
+    }
+    if (s->inflight > 0) {
+        /* Defer free until last in-flight I/O ends (no UAF). */
+        s->used = 0;
+        s->dying = 1;
+        pthread_mutex_unlock(&mako_tls_pool_mu);
+        return 0;
+    }
+    conn = s->conn;
+    ctx = s->ctx;
+    uint32_t gen = s->gen;
+    memset(s, 0, sizeof(*s));
+    s->gen = gen;
     pthread_mutex_unlock(&mako_tls_pool_mu);
-    if (!old.used) return -1;
-    if (old.conn) mako_tls_conn_close(old.conn);
-    if (old.ctx) mako_tls_client_free(old.ctx);
+    if (conn) mako_tls_conn_close(conn);
+    if (ctx) mako_tls_client_free(ctx);
     return 0;
 }
 
@@ -4733,6 +4932,29 @@ static inline int64_t mako_tls_client_free(void *ctx) {
 }
 static inline int64_t mako_tls_pool_open(MakoString host, int64_t port, MakoString ca) {
     (void)host; (void)port; (void)ca; return -1;
+}
+static inline int64_t mako_tls_pool_open_timeout(
+    MakoString host, int64_t port, MakoString ca, int64_t timeout_ms
+) {
+    (void)host; (void)port; (void)ca; (void)timeout_ms; return -1;
+}
+static inline int64_t mako_tls_pool_open_mtls(
+    MakoString host, int64_t port, MakoString ca,
+    MakoString cert, MakoString key, int64_t timeout_ms
+) {
+    (void)host; (void)port; (void)ca; (void)cert; (void)key; (void)timeout_ms;
+    return -1;
+}
+static inline int64_t mako_tls_pool_open_mtls_full(
+    MakoString host, int64_t port, MakoString ca,
+    MakoString cert, MakoString key, int64_t connect_ms, int64_t io_ms
+) {
+    (void)host; (void)port; (void)ca; (void)cert; (void)key;
+    (void)connect_ms; (void)io_ms;
+    return -1;
+}
+static inline int64_t mako_tls_pool_set_timeout(int64_t handle, int64_t io_ms) {
+    (void)handle; (void)io_ms; return -1;
 }
 static inline int64_t mako_tls_pool_send(int64_t handle, MakoString data) {
     (void)handle; (void)data; return -1;

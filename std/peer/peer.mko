@@ -1,0 +1,43 @@
+// General peer + route table.
+pack peer
+
+export fn table_new(max_peers: int, max_routes: int) -> int {
+    return peer_table_new(max_peers, max_routes)
+}
+export fn table_free(h: int) -> int { return peer_table_free(h) }
+export fn table_add(
+    h: int, identity: string, host: string, port: int, transport: int, priority: int
+) -> int {
+    return peer_table_add(h, identity, host, port, transport, priority)
+}
+export fn table_route_add(h: int, key: string, peer_identity: string) -> int {
+    return peer_table_route_add(h, key, peer_identity)
+}
+export fn table_route_lookup(h: int, key: string) -> int {
+    return peer_table_route_lookup(h, key)
+}
+export fn table_set_conn(h: int, peer_id: int, conn: int) -> int {
+    return peer_table_set_conn(h, peer_id, conn)
+}
+export fn table_get_conn(h: int, peer_id: int) -> int {
+    return peer_table_get_conn(h, peer_id)
+}
+export fn table_count(h: int) -> int { return peer_table_count(h) }
+export fn table_drops(h: int) -> int { return peer_table_drops(h) }
+export fn table_capacity(h: int) -> int { return peer_table_capacity(h) }
+export fn table_alive(h: int, peer_id: int) -> int { return peer_table_alive(h, peer_id) }
+export fn table_host(h: int, peer_id: int) -> string { return peer_table_host(h, peer_id) }
+export fn table_port(h: int, peer_id: int) -> int { return peer_table_port(h, peer_id) }
+export fn table_transport(h: int, peer_id: int) -> int { return peer_table_transport(h, peer_id) }
+export fn table_set_state(h: int, peer_id: int, state: int) -> int {
+    return peer_table_set_state(h, peer_id, state)
+}
+export fn table_get_state(h: int, peer_id: int) -> int {
+    return peer_table_get_state(h, peer_id)
+}
+export fn table_touch(h: int, peer_id: int, now_ms: int) -> int {
+    return peer_table_touch(h, peer_id, now_ms)
+}
+export fn table_last_ms(h: int, peer_id: int) -> int {
+    return peer_table_last_ms(h, peer_id)
+}
