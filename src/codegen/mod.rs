@@ -2460,14 +2460,25 @@ impl Codegen {
             return false;
         }
         // Owned-producing operation families (fresh output, never a view).
+        // Suffix families: the operation *builds/serializes/converts* content
+        // into a new buffer. Accessor/getter families (`_get_string`, `_header`,
+        // plain `_string` like `buf_to_string`) are intentionally NOT here —
+        // they can return borrowed views, so leaving them unclassified only
+        // risks a leak, never a double-free.
         name.ends_with("_encode")
             || name.ends_with("_decode")
+            || name.ends_with("_encode_string")
+            || name.ends_with("_decode_string")
             || name.ends_with("_to_string")
             || name.ends_with("_hash")
             || name.ends_with("_sign")
             || name.ends_with("_hex")
             || name.ends_with("_json")
             || name.ends_with("_sdl")
+            || name.ends_with("_frame")
+            || name.ends_with("_connect_url")
+            || name.ends_with("_request")
+            || name.ends_with("_response")
             || name.starts_with("format_")
             || name.starts_with("base64_")
             || name.starts_with("base32_")
