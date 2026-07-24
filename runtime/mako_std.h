@@ -3116,6 +3116,7 @@ static inline MakoString mako_graphql_request(MakoString query) {
     if (!d) mako_abort("graphql_request: out of memory");
     int wrote = snprintf(d, n, "{\"query\":\"%s\"}", eq.data);
     if (wrote < 0) wrote = 0;
+    mako_str_free(eq); /* escaped temp is always owned — reclaim it. */
     return (MakoString){d, (size_t)wrote};
 }
 
@@ -3153,6 +3154,7 @@ static inline MakoString mako_graphql_request_vars(MakoString query, MakoString 
     if (!d) mako_abort("graphql_request_vars OOM");
     int wrote = snprintf(d, n, "{\"query\":\"%s\",\"variables\":%.*s}", eq.data, (int)vlen, vj);
     if (wrote < 0) wrote = 0;
+    mako_str_free(eq); /* escaped temp is always owned — reclaim it. */
     return (MakoString){d, (size_t)wrote};
 }
 
