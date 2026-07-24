@@ -40,6 +40,18 @@ Tests: `timer_heap_test`, `peer_table_test`, `tls_pool_test`, `sctp_api_test`.
 - TLS pool rejects host/path CR/LF/NUL; SCTP read requires explicit max;
   SCTP resolve rejects host NUL/CR/LF.
 
+### Memory safety — JSON builder internal leaks
+
+- Many JSON-building runtime helpers (`json_object_str`, `json_si`, `json_ss`,
+  `json_i`, `graphql_request`/`_vars`, LLM message builders, …) escaped their
+  arguments via `mako_json_escape` (which always allocates) into a temp used
+  only for `snprintf`, but never freed the temp — one buffer leaked per call on
+  JSON-serialization hot paths. Reclaimed the escape temps across ~20 flat
+  builders in `mako_std.h` / `mako_llm.h`. Verified: `json_object_str` etc. now
+  CLEAN under LeakSanitizer; json/adapters/graphql suites pass under
+  AddressSanitizer (no double-free). Loop-based / guarded-return builders (7
+  in `mako_std.h`) are left for a follow-up careful pass.
+
 ### Memory safety — owned string temporaries reclaimed
 
 - **String-concat right operand:** an owned string used as the right side of `+`

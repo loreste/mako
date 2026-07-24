@@ -54,6 +54,8 @@ static inline MakoString mako_llm_message(MakoString role, MakoString content) {
         free(d);
         return mako_str_from_cstr("");
     }
+        mako_str_free(er);
+        mako_str_free(ec);
     return (MakoString){d, (size_t)w};
 }
 
@@ -118,6 +120,7 @@ static inline MakoString mako_llm_chat_body(
         free(d);
         return mako_str_from_cstr("");
     }
+        mako_str_free(em);
     return (MakoString){d, (size_t)w};
 }
 
@@ -1014,6 +1017,7 @@ static inline MakoString mako_llm_chat_stream(
         free(out);
         return mako_str_from_cstr("{\"error\":\"format\"}");
     }
+        mako_str_free(esc);
     return (MakoString){out, (size_t)w};
 }
 
@@ -1038,6 +1042,8 @@ static inline MakoString mako_llm_embed_body(MakoString model, MakoString input)
         free(d);
         return mako_str_from_cstr("");
     }
+        mako_str_free(em);
+        mako_str_free(ei);
     return (MakoString){d, (size_t)w};
 }
 
@@ -1153,6 +1159,8 @@ static inline MakoString mako_llm_embed_body(MakoString model, MakoString input)
         free(d);
         return mako_str_from_cstr("");
     }
+        mako_str_free(em);
+        mako_str_free(ei);
     return (MakoString){d, (size_t)w};
 }
 

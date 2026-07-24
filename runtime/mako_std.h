@@ -2525,6 +2525,8 @@ static inline MakoString mako_json_object_str(MakoString key, MakoString val) {
     char *d = (char *)malloc(n);
     int wrote = snprintf(d, n, "{\"%s\":\"%s\"}", ek.data, ev.data);
     if (wrote < 0) wrote = 0;
+        mako_str_free(ek);
+        mako_str_free(ev);
     return (MakoString){d, (size_t)wrote};
 }
 
@@ -2549,6 +2551,9 @@ static inline MakoString mako_json_si(
         (long long)v2
     );
     if (wrote < 0) wrote = 0;
+        mako_str_free(e1);
+        mako_str_free(ev);
+        mako_str_free(e2);
     return (MakoString){d, (size_t)wrote};
 }
 
@@ -2574,6 +2579,10 @@ static inline MakoString mako_json_ss(
         b.data
     );
     if (wrote < 0) wrote = 0;
+        mako_str_free(e1);
+        mako_str_free(a);
+        mako_str_free(e2);
+        mako_str_free(b);
     return (MakoString){d, (size_t)wrote};
 }
 
@@ -2583,6 +2592,7 @@ static inline MakoString mako_json_i(MakoString key, int64_t val) {
     char *d = (char *)malloc(n);
     int wrote = snprintf(d, n, "{\"%s\":%lld}", ek.data, (long long)val);
     if (wrote < 0) wrote = 0;
+        mako_str_free(ek);
     return (MakoString){d, (size_t)wrote};
 }
 
@@ -2595,6 +2605,8 @@ static inline int64_t mako_json_has_string(MakoString json, MakoString key, Mako
     snprintf(pat, n, "\"%s\":\"%s\"", needle_key.data, needle_val.data);
     int found = strstr(json.data ? json.data : "", pat) != NULL;
     free(pat);
+        mako_str_free(needle_key);
+        mako_str_free(needle_val);
     return found ? 1 : 0;
 }
 
@@ -2649,6 +2661,7 @@ static inline MakoString mako_json_nest(MakoString key, MakoString inner) {
         inner.data ? inner.data : "null"
     );
     if (wrote < 0) wrote = 0;
+        mako_str_free(ek);
     return (MakoString){d, (size_t)wrote};
 }
 
@@ -2866,6 +2879,8 @@ static inline MakoString mako_json_array_strings2(MakoString a, MakoString b) {
     char *d = (char *)malloc(n);
     int wrote = snprintf(d, n, "[\"%s\",\"%s\"]", ea.data, eb.data);
     if (wrote < 0) wrote = 0;
+        mako_str_free(ea);
+        mako_str_free(eb);
     return (MakoString){d, (size_t)wrote};
 }
 
@@ -2982,6 +2997,9 @@ static inline MakoString mako_openapi_route(MakoString method, MakoString path, 
         es.data
     );
     if (wrote < 0) wrote = 0;
+        mako_str_free(em);
+        mako_str_free(ep);
+        mako_str_free(es);
     return (MakoString){d, (size_t)wrote};
 }
 
@@ -3001,6 +3019,8 @@ static inline MakoString mako_openapi_doc(MakoString title, MakoString version, 
         p
     );
     if (wrote < 0) wrote = 0;
+        mako_str_free(et);
+        mako_str_free(ev);
     return (MakoString){d, (size_t)wrote};
 }
 
@@ -3096,6 +3116,7 @@ static inline MakoString mako_graphql_data(MakoString field, MakoString json) {
     if (!d) mako_abort("graphql_data: out of memory");
     int wrote = snprintf(d, n, "{\"data\":{\"%s\":%.*s}}", ef.data, (int)payload_len, payload);
     if (wrote < 0) wrote = 0;
+        mako_str_free(ef);
     return (MakoString){d, (size_t)wrote};
 }
 
@@ -3106,6 +3127,7 @@ static inline MakoString mako_graphql_error(MakoString message) {
     if (!d) mako_abort("graphql_error: out of memory");
     int wrote = snprintf(d, n, "{\"errors\":[{\"message\":\"%s\"}]}", em.data);
     if (wrote < 0) wrote = 0;
+        mako_str_free(em);
     return (MakoString){d, (size_t)wrote};
 }
 
@@ -3190,6 +3212,8 @@ static inline MakoString mako_graphql_data2(MakoString f1, MakoString j1, MakoSt
                          (int)(j1.data && j1.len ? j1.len : 4), p1, e2.data,
                          (int)(j2.data && j2.len ? j2.len : 4), p2);
     if (wrote < 0) wrote = 0;
+        mako_str_free(e1);
+        mako_str_free(e2);
     return (MakoString){d, (size_t)wrote};
 }
 
@@ -4825,6 +4849,8 @@ static inline MakoString mako_openapi_response(MakoString code, MakoString descr
         ed.data ? ed.data : "OK"
     );
     if (wrote < 0) wrote = 0;
+        mako_str_free(ec);
+        mako_str_free(ed);
     return (MakoString){d, (size_t)wrote};
 }
 
@@ -4923,6 +4949,9 @@ static inline MakoString mako_openapi_info(
         ed.data ? ed.data : ""
     );
     if (wrote < 0) wrote = 0;
+        mako_str_free(et);
+        mako_str_free(ev);
+        mako_str_free(ed);
     return (MakoString){d, (size_t)wrote};
 }
 
@@ -5166,6 +5195,7 @@ static inline MakoString mako_rpc_frame(MakoString method, MakoString payload) {
     if (!d) mako_abort("rpc_frame: out of memory");
     int wrote = snprintf(d, n, "{\"method\":\"%s\",\"payload\":%s}", em.data, p);
     if (wrote < 0) wrote = 0;
+        mako_str_free(em);
     return (MakoString){d, (size_t)wrote};
 }
 
