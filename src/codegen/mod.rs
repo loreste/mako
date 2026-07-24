@@ -2474,6 +2474,21 @@ impl Codegen {
                         || name == "graphql_schema_resolve"
                         || name == "graphql_schema_sdl"
                         || self.variant_to_enum.contains_key(name)
+                        // A user-defined function whose return type is a leaf
+                        // owned value (string / slice / map — freed by a single
+                        // `own_free_fn`) transfers that ownership to the caller;
+                        // reclaim it at scope exit or a long-running caller leaks
+                        // one allocation per call. Enums are excluded: `match`
+                        // consumes them, so an unconditional scope free would
+                        // double-free. Structs use field-frees (`own_free_fn` is
+                        // None) and are excluded here too. Builtins are not in
+                        // `fn_ret_types`, so legacy C ABIs that may return
+                        // borrowed views stay excluded. Move analysis still
+                        // suppresses the drop when the value is passed on /
+                        // returned / stored.
+                        || (self.fn_ret_types.contains_key(name)
+                            && Self::own_free_fn(c_ty).is_some()
+                            && !c_ty.starts_with("MakoEnum_"))
             ),
             _ => false,
         }

@@ -20,6 +20,20 @@
   leak-free per request (verified flat under LeakSanitizer over 500 calls).
 - New `examples/testing/graphql_exec_test.mko` (13 cases; ASan/UBSan clean).
 
+### Memory safety — owned values returned from user functions
+
+- Fixed a pervasive pre-existing leak: an owned **leaf value** (string, slice,
+  map) returned from a user-defined function and bound to a local was never
+  reclaimed when dropped — one allocation leaked per call, which accumulates in
+  a long-running server. Such call results are now recognized as owned producers
+  in scope-drop cleanup, so they free at scope exit (move analysis still
+  suppresses the drop when the value is returned/passed on/stored). Enums are
+  excluded (they are `match`-consumed; an unconditional free would double-free),
+  as are structs (freed field-by-field). New
+  `examples/testing/owned_return_drop_test.mko`. Verified: full suite green under
+  AddressSanitizer (no double-free/UAF), leak eliminated for `[]int` / `string`
+  / `List[Struct]` returns, generic-enum tests still pass.
+
 ### Native backend — `List[T]`
 
 - `List[T]` now lowers on the native backend for **any** element type (structs,
