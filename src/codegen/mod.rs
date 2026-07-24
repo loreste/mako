@@ -2441,6 +2441,48 @@ impl Codegen {
         }
     }
 
+    /// Ownership metadata for string-returning builtins: whether a call to
+    /// `name` yields a freshly allocated owned string the caller must reclaim.
+    ///
+    /// Conservative by construction. Only builtins whose *operation produces*
+    /// fresh content — encode / decode / convert / hash / sign / serialize — are
+    /// owned; such output can never be a borrowed view of an argument, so
+    /// reclaiming it is always safe. Every other builtin (domain accessors,
+    /// container/buffer views, polymorphic `string(x)`) is treated as not-owned,
+    /// so an unclassified builtin may leak but can never double-free. Known
+    /// view-returners are denied explicitly.
+    ///
+    /// This replaces the former hand-maintained per-name allowlist: a new
+    /// encode/format builtin is covered by its family suffix automatically.
+    fn builtin_returns_owned_string(name: &str) -> bool {
+        // Borrowed views into an argument / container / buffer — never free.
+        if matches!(name, "str_as_view" | "bytes_as_str" | "buf_to_string") {
+            return false;
+        }
+        // Owned-producing operation families (fresh output, never a view).
+        name.ends_with("_encode")
+            || name.ends_with("_decode")
+            || name.ends_with("_to_string")
+            || name.ends_with("_hash")
+            || name.ends_with("_sign")
+            || name.ends_with("_hex")
+            || name.ends_with("_json")
+            || name.ends_with("_sdl")
+            || name.starts_with("format_")
+            || name.starts_with("base64_")
+            || name.starts_with("base32_")
+            // Owned results that do not fit a family suffix/prefix.
+            || matches!(
+                name,
+                "read_file"
+                    | "str_repeat"
+                    | "csv_join_row"
+                    | "auth_bearer"
+                    | "auth_basic_header"
+                    | "graphql_schema_resolve"
+            )
+    }
+
     /// Fresh values whose generated representation is unambiguously owned.
     ///
     /// Arbitrary calls and methods are deliberately excluded: legacy C ABI
@@ -2473,21 +2515,11 @@ impl Codegen {
                         // long-running server leaks one buffer per request.
                         || name == "graphql_schema_resolve"
                         || name == "graphql_schema_sdl"
-                        // Owned-string conversion / encode / build helpers: the
-                        // returned string is freshly computed output, never a
-                        // borrowed view of an argument, so it is unambiguously
-                        // owned (verified under LeakSanitizer). `string(x)` is
-                        // deliberately excluded — polymorphic (identity for a
-                        // string arg), so freeing it could double-free a borrow.
-                        || name == "int_to_string"
-                        || name == "format_int"
-                        || name == "base64_encode"
-                        || name == "base32_encode"
-                        || name == "base64_decode"
-                        || name == "bytes_to_hex"
-                        || name == "csv_join_row"
-                        || name == "auth_bearer"
-                        || name == "auth_basic_header"
+                        // Owned-string builtins (encode / decode / convert /
+                        // hash / serialize families) are classified centrally in
+                        // `builtin_returns_owned_string` — a new such builtin is
+                        // covered by its family suffix without editing this list.
+                        || Self::builtin_returns_owned_string(name)
                         || self.variant_to_enum.contains_key(name)
                         // A user-defined function whose return type is a leaf
                         // owned value (string / slice / map — freed by a single
