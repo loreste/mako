@@ -27,6 +27,9 @@
 /docs/internal/
 /docs/CLAIMS.md
 
+# Website (deployed separately, not part of public repo)
+/website/
+
 # Local agent / editor state (do not commit)
 .claude/
 .cursor/
