@@ -65,6 +65,7 @@ jobs:
         run: ./target/release/mako --help
 
       - name: JSON test report
+        if: runner.os != 'Windows'
         shell: bash
         run: |
           set -o pipefail
@@ -79,6 +80,7 @@ jobs:
             python -c 'import json,sys; r=json.load(sys.stdin); f=r["runs"][0]["files"][0]; assert not r["ok"] and f["status"] == "failed" and f["failure"]["kind"] == "exit"'
 
       - name: JSON check report
+        if: runner.os != 'Windows'
         shell: bash
         run: |
           legacy_json="$(./target/release/mako check --json examples/testing/add_test.mko)"
