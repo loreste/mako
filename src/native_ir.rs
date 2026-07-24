@@ -1475,6 +1475,11 @@ fn resolve_type(ty: &TypeExpr, structs: &StructRegistry) -> Result<Type, IrError
             let elem = resolve_type(&args[0], structs)?;
             Ok(Type::ChanP(MapValKind::from_type(elem)))
         }
+        // List[T] is an alias for []T: reuse the full slice support (structs,
+        // nested [][]T, []Option, pointer arrays) instead of the scalar-only set.
+        TypeExpr::Generic(name, args) if name == "List" && args.len() == 1 => {
+            resolve_type(&TypeExpr::Array(Box::new(args[0].clone())), structs)
+        }
         // User monomorph: Pair[int] → layout registered as Pair__int (typecheck/parser).
         TypeExpr::Generic(name, args)
             if !matches!(

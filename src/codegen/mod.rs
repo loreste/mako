@@ -2468,6 +2468,11 @@ impl Codegen {
                 Expr::Ident(name)
                     if name == "read_file"
                         || name == "str_repeat"
+                        // Builtins that return a freshly malloc'd owned string;
+                        // their results must be reclaimed at scope exit or a
+                        // long-running server leaks one buffer per request.
+                        || name == "graphql_schema_resolve"
+                        || name == "graphql_schema_sdl"
                         || self.variant_to_enum.contains_key(name)
             ),
             _ => false,
@@ -22870,12 +22875,21 @@ impl Codegen {
                 return ("MakoString".into(), tmp);
             }
             "graphql_schema_resolve" => {
+                // Free the query temp after the call when it is an owned producer
+                // (literal / concat / owned-returning call); borrowed locals are
+                // reclaimed at their own scope, so gating avoids a double free.
+                let free_q = self.expr_is_scope_drop_safe(&args[1], "MakoString");
                 let (_, id) = self.emit_expr(&args[0]);
                 let (_, q) = self.emit_expr(&args[1]);
+                let qtmp = self.fresh("gqq");
+                self.line(&format!("MakoString {qtmp} = {q};"));
                 let tmp = self.fresh("gres");
                 self.line(&format!(
-                    "MakoString {tmp} = mako_graphql_schema_resolve({id}, {q});"
+                    "MakoString {tmp} = mako_graphql_schema_resolve({id}, {qtmp});"
                 ));
+                if free_q {
+                    self.line(&format!("mako_str_free({qtmp});"));
+                }
                 return ("MakoString".into(), tmp);
             }
             "openapi_response" => {
@@ -40974,12 +40988,19 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "graphql_schema_resolve" => {
+                            let free_q =
+                                self.expr_is_scope_drop_safe(&args[1], "MakoString");
                             let (_, id) = self.emit_expr(&args[0]);
                             let (_, q) = self.emit_expr(&args[1]);
+                            let qtmp = self.fresh("gqq");
+                            self.line(&format!("MakoString {qtmp} = {q};"));
                             let tmp = self.fresh("gres");
                             self.line(&format!(
-                                "MakoString {tmp} = mako_graphql_schema_resolve({id}, {q});"
+                                "MakoString {tmp} = mako_graphql_schema_resolve({id}, {qtmp});"
                             ));
+                            if free_q {
+                                self.line(&format!("mako_str_free({qtmp});"));
+                            }
                             return ("MakoString".into(), tmp);
                         }
                         "openapi_response" => {

@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Adaptive optimization cycle (docs/ADAPTIVE_OPT.md).
+# Anneal — adaptive optimization cycle (docs/ADAPTIVE_OPT.md).
+# Also invokable by its product name via scripts/anneal-cycle.sh.
 #
 # Never rewrites a running binary. Flow:
 #   1) Release AOT build (Layer A)

@@ -1,4 +1,5 @@
-// Adaptive hot-site counters — years-up feedback without live recompile.
+// Anneal — adaptive hot-site counters. Years-up traffic feedback folded into
+// the next offline build; never a live in-process recompile.
 
 fn TestHotSiteDisabledByDefault() {
     assert_eq(hot_site_clear(), 1)
@@ -55,6 +56,106 @@ fn TestHotSiteBadId() {
     assert_eq(hot_site_hit(256), -1)
     assert_eq(hot_site_count(-1), -1)
     assert_eq(hot_site_enable(0), 1)
+}
+
+// Lowest (0) and highest (255) ids are valid; MAKO_HOT_SITE_MAX (256) is not.
+fn TestHotSiteBoundaryIds() {
+    assert_eq(hot_site_clear(), 1)
+    assert_eq(hot_site_enable(1), 0)
+    assert_eq(hot_site_hit(0), 1)
+    assert_eq(hot_site_hit(255), 1)
+    assert_eq(hot_site_count(0), 1)
+    assert_eq(hot_site_count(255), 1)
+    // One past the top edge and below zero are rejected without moving totals.
+    assert_eq(hot_site_hit(256), -1)
+    assert_eq(hot_site_hit(-5), -1)
+    assert_eq(hot_site_count(256), -1)
+    assert_eq(hot_site_total(), 2)
+    assert_eq(hot_site_enable(0), 1)
+    assert_eq(hot_site_clear(), 1)
+}
+
+// The top site tracks the current leader as a later site overtakes it.
+fn TestHotSiteTopReassign() {
+    assert_eq(hot_site_clear(), 1)
+    assert_eq(hot_site_enable(1), 0)
+    let _ = hot_site_hit(3)
+    let _ = hot_site_hit(3)
+    assert_eq(hot_site_top_id(), 3)
+    assert_eq(hot_site_top_count(), 2)
+    // Site 9 overtakes site 3 — the leader must follow.
+    let _ = hot_site_hit(9)
+    let _ = hot_site_hit(9)
+    let _ = hot_site_hit(9)
+    assert_eq(hot_site_top_id(), 9)
+    assert_eq(hot_site_top_count(), 3)
+    assert_eq(hot_site_total(), 5)
+    assert_eq(hot_site_enable(0), 1)
+    assert_eq(hot_site_clear(), 1)
+}
+
+// enable() returns the previous mode across every transition; idempotent flips
+// report no change.
+fn TestHotSiteEnableTransitions() {
+    let _ = hot_site_enable(0)
+    assert_eq(hot_site_enable(1), 0)
+    assert_eq(hot_site_enable(1), 1)
+    assert_eq(hot_site_enabled(), 1)
+    assert_eq(hot_site_enable(0), 1)
+    assert_eq(hot_site_enable(0), 0)
+    assert_eq(hot_site_enabled(), 0)
+}
+
+// Concurrent hits on one site: relaxed-atomic counters must not lose an
+// increment. This is the long-running-server path — many workers, exact tally.
+fn beat(id: int, n: int) -> int {
+    var i = 0
+    while i < n {
+        let _ = hot_site_hit(id)
+        i = i + 1
+    }
+    return n
+}
+
+fn TestHotSiteConcurrentHits() {
+    assert_eq(hot_site_clear(), 1)
+    assert_eq(hot_site_enable(1), 0)
+    crew t {
+        let a = t.kick(beat(5, 2000))
+        let b = t.kick(beat(5, 2000))
+        let c = t.kick(beat(5, 2000))
+        let d = t.kick(beat(5, 2000))
+        assert_eq(a.join() + b.join() + c.join() + d.join(), 8000)
+    }
+    // No lost updates across threads: the site and the global total agree.
+    assert_eq(hot_site_count(5), 8000)
+    assert_eq(hot_site_total(), 8000)
+    assert_eq(hot_site_top_id(), 5)
+    assert_eq(hot_site_top_count(), 8000)
+    assert_eq(hot_site_enable(0), 1)
+    assert_eq(hot_site_clear(), 1)
+}
+
+// Concurrent hits fanned across distinct sites: per-site counts stay isolated
+// and the global total is their exact sum.
+fn TestHotSiteConcurrentMultiSite() {
+    assert_eq(hot_site_clear(), 1)
+    assert_eq(hot_site_enable(1), 0)
+    crew t {
+        let a = t.kick(beat(10, 1500))
+        let b = t.kick(beat(20, 1500))
+        let c = t.kick(beat(30, 1500))
+        assert_eq(a.join() + b.join() + c.join(), 4500)
+    }
+    assert_eq(hot_site_count(10), 1500)
+    assert_eq(hot_site_count(20), 1500)
+    assert_eq(hot_site_count(30), 1500)
+    assert_eq(hot_site_total(), 4500)
+    let js = hot_sites_json()
+    assert(str_contains(js, "mako.hot_sites.v1"))
+    assert(str_contains(js, "total_hits"))
+    assert_eq(hot_site_enable(0), 1)
+    assert_eq(hot_site_clear(), 1)
 }
 
 // Map AOT opts (identity hash / pre-size) must not break adaptive feedback:

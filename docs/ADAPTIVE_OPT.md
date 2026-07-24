@@ -1,4 +1,12 @@
-# Adaptive optimization
+# Anneal — adaptive optimization
+
+**Anneal** is Mako's adaptive-optimization loop: ship a fully compiled binary,
+take a cheap reading of what runs hot in real traffic, and fold that reading
+back into the *next* build — repeated over a service's long life. The name is
+metallurgical: annealing settles a material into a stronger, more stable
+structure through repeated, *offline* heat-and-cool cycles, never by reworking
+it while it's in use. Same here — hot-site counters are the heat map, each
+offline train/rebuild/swap is one cycle, and the process never rewrites itself.
 
 Most languages that "learn" from a running program do it live: they watch the
 process, then rewrite its machine code in place while requests are in flight.
