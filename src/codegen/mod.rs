@@ -2475,6 +2475,19 @@ impl Codegen {
                         || name == "graphql_schema_sdl"
                         || name == "int_to_string"
                         || name == "format_int"
+                        // Encode / decode / build helpers: the returned string is
+                        // freshly computed output (never a borrowed view of an
+                        // argument), so it is unambiguously owned. Verified owned
+                        // under LeakSanitizer. `string(x)` is deliberately NOT
+                        // here: it is polymorphic (identity for string input),
+                        // so freeing it could double-free a borrow.
+                        || name == "base64_encode"
+                        || name == "base32_encode"
+                        || name == "base64_decode"
+                        || name == "bytes_to_hex"
+                        || name == "csv_join_row"
+                        || name == "auth_bearer"
+                        || name == "auth_basic_header"
                         || self.variant_to_enum.contains_key(name)
                         // A user-defined function whose return type is a leaf
                         // owned value (string / slice / map — freed by a single

@@ -20,6 +20,19 @@
   leak-free per request (verified flat under LeakSanitizer over 500 calls).
 - New `examples/testing/graphql_exec_test.mko` (13 cases; ASan/UBSan clean).
 
+### Memory safety — owned results of encode/build string builtins
+
+- Recognized several encode/build string builtins (`base64_encode`,
+  `base32_encode`, `base64_decode`, `bytes_to_hex`, `csv_join_row`,
+  `auth_bearer`, `auth_basic_header`) as owned producers so their results are
+  reclaimed at scope exit / after concat instead of leaking one buffer per call.
+  Their output is freshly computed and can never be a borrowed view, so this is
+  double-free-safe (full suite green under ASan). `string(x)` is intentionally
+  excluded — it is polymorphic (identity for string input) and freeing it could
+  double-free a borrow. Note: a few of these builtins still leak a temporary
+  *inside* their C implementation (a separate runtime-level issue tracked apart
+  from scope-drop ownership).
+
 ### Memory safety — owned temporaries in string concat
 
 - Fixed a pre-existing leak: an owned string temporary used as the **right
