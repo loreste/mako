@@ -20,6 +20,17 @@
   leak-free per request (verified flat under LeakSanitizer over 500 calls).
 - New `examples/testing/graphql_exec_test.mko` (13 cases; ASan/UBSan clean).
 
+### Memory safety — owned temporaries in string concat
+
+- Fixed a pre-existing leak: an owned string temporary used as the **right
+  operand** of `+` (e.g. `"row-" + int_to_string(n)`) was copied by
+  `mako_str_concat` but never freed — one buffer leaked per concat. The right
+  operand is now reclaimed after the concat when it is an unambiguously owned
+  temporary (`expr_is_scope_drop_safe`, which excludes literal views, index, and
+  method borrows, so no double-free). `int_to_string` / `format_int` results are
+  recognized as owned. New `examples/testing/concat_owned_operand_test.mko`;
+  full suite green under ASan, leak eliminated over 500 concats.
+
 ### Memory safety — owned values returned from user functions
 
 - Fixed a pervasive pre-existing leak: an owned **leaf value** (string, slice,

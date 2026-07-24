@@ -2473,6 +2473,8 @@ impl Codegen {
                         // long-running server leaks one buffer per request.
                         || name == "graphql_schema_resolve"
                         || name == "graphql_schema_sdl"
+                        || name == "int_to_string"
+                        || name == "format_int"
                         || self.variant_to_enum.contains_key(name)
                         // A user-defined function whose return type is a leaf
                         // owned value (string / slice / map — freed by a single
@@ -32833,7 +32835,25 @@ impl Codegen {
                     } else {
                         "mako_str_concat"
                     };
-                    self.emit_line(format_args!("MakoString {tmp} = {fn_name}({lv}, {rv});"));
+                    // The right operand is copied by concat, never consumed. If it
+                    // is an unambiguously owned temporary (call to an owned-string
+                    // builtin/user-fn, f-string, nested concat — never a literal
+                    // view, index, or method borrow), reclaim it after the concat
+                    // or it leaks one buffer per call. `expr_is_scope_drop_safe`
+                    // is the conservative gate, so borrowed views are never freed.
+                    let right_is_owned = rt == "MakoString"
+                        && !matches!(right.as_ref(), Expr::String(_))
+                        && self.expr_is_scope_drop_safe(right, &rt);
+                    if right_is_owned {
+                        let rtmp = self.fresh("cr");
+                        self.emit_line(format_args!("MakoString {rtmp} = {rv};"));
+                        self.emit_line(format_args!(
+                            "MakoString {tmp} = {fn_name}({lv}, {rtmp});"
+                        ));
+                        self.emit_line(format_args!("mako_str_free({rtmp});"));
+                    } else {
+                        self.emit_line(format_args!("MakoString {tmp} = {fn_name}({lv}, {rv});"));
+                    }
                     return ("MakoString".into(), tmp);
                 }
                 if (*op == BinOp::Eq || *op == BinOp::Ne)
