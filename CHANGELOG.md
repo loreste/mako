@@ -40,6 +40,25 @@ Tests: `timer_heap_test`, `peer_table_test`, `tls_pool_test`, `sctp_api_test`.
 - TLS pool rejects host/path CR/LF/NUL; SCTP read requires explicit max;
   SCTP resolve rejects host NUL/CR/LF.
 
+### Memory safety — owned string temporaries reclaimed
+
+- **String-concat right operand:** an owned string used as the right side of `+`
+  (e.g. `"row-" + int_to_string(n)`) was copied by `mako_str_concat` but never
+  freed — one buffer leaked per concat. It is now reclaimed after the concat
+  when it is an unambiguously owned temporary (gated by `expr_is_scope_drop_safe`,
+  which excludes literal views / index / method borrows — no double-free).
+- **Owned-string builtin results:** `int_to_string`, `format_int`,
+  `base64_encode`, `base32_encode`, `base64_decode`, `bytes_to_hex`,
+  `csv_join_row`, `auth_bearer`, `auth_basic_header` are recognized as owned
+  producers so their results free at scope exit / after concat instead of
+  leaking per call. Their output is freshly computed (never a borrowed view), so
+  this is double-free-safe. `string(x)` stays excluded — polymorphic.
+- Verified on Linux: leaks eliminated over 500-call churns; full suite green
+  under AddressSanitizer (no double-free/UAF). New
+  `examples/testing/concat_owned_operand_test.mko`. A residual leak *inside* a
+  few builtin implementations (e.g. `base64_encode`) is a separate runtime-level
+  issue tracked apart from scope-drop ownership.
+
 ## 0.4.16 — 2026-07-23 (tip; tag when packaging cut)
 
 **Theme:** Real GraphQL query executor; native backend `List[T]` for non-scalar
