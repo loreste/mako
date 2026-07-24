@@ -47,12 +47,17 @@ Tests: `timer_heap_test`, `peer_table_test`, `tls_pool_test`, `sctp_api_test`.
   freed — one buffer leaked per concat. It is now reclaimed after the concat
   when it is an unambiguously owned temporary (gated by `expr_is_scope_drop_safe`,
   which excludes literal views / index / method borrows — no double-free).
-- **Owned-string builtin results:** `int_to_string`, `format_int`,
-  `base64_encode`, `base32_encode`, `base64_decode`, `bytes_to_hex`,
-  `csv_join_row`, `auth_bearer`, `auth_basic_header` are recognized as owned
-  producers so their results free at scope exit / after concat instead of
-  leaking per call. Their output is freshly computed (never a borrowed view), so
-  this is double-free-safe. `string(x)` stays excluded — polymorphic.
+- **Owned-string builtin results (ownership-metadata classifier):** replaced the
+  hand-maintained per-name allowlist with `builtin_returns_owned_string(name)` —
+  a conservative classifier keyed on operation families whose output is freshly
+  computed and can never be a borrowed view (`_encode`, `_decode`, `_to_string`,
+  `_hash`, `_sign`, `_hex`, `_json`, `_sdl`, `format_*`, `base64_*`, `base32_*`).
+  Their dropped results now free instead of leaking per call; any unclassified
+  builtin stays not-owned (may leak, never double-free). View-returners
+  (`str_as_view`, `bytes_as_str`, `buf_to_string`) and polymorphic `string(x)`
+  are excluded. Covers ~90+ builtins (was ~10); a new encode/format builtin is
+  handled by its family with no code change. Full suite green under ASan
+  (390/0). New `examples/testing/owned_string_builtin_test.mko`.
 - Verified on Linux: leaks eliminated over 500-call churns; full suite green
   under AddressSanitizer (no double-free/UAF). New
   `examples/testing/concat_owned_operand_test.mko`. A residual leak *inside* a
