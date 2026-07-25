@@ -140,7 +140,6 @@ jobs:
         if: runner.os == 'Windows'
         shell: bash
         run: cargo run --quiet -- test examples/testing/deep_expr_stack_test.mko
-        continue-on-error: true
 
       - name: Default test suite (Linux/macOS)
         if: runner.os != 'Windows'
@@ -154,10 +153,15 @@ jobs:
 
       # 0.4.5 gate: Cranelift native backend requires --features llvm-backend for
       # the bundled linker. Skip when the feature is not built (default CI builds).
-      # Some tests (proxy, SQL) SIGPIPE/SIGABRT without their backend services.
+      #
+      # This step used to run with continue-on-error, on the belief that the
+      # proxy and SQL failures came from missing backend services. They did not:
+      # the SQL abort was free() on a handle owned by SQLite, and the proxy
+      # crashes were SIGPIPE the native test harness never ignored. Both were
+      # fixed in 0.4.16, so the step gates again (417-A). If it fails, a real
+      # fault is being reported — do not re-suppress it.
       - name: Native backend test suite (Linux/macOS)
         if: runner.os != 'Windows'
-        continue-on-error: true
         shell: bash
         run: |
           if cargo run --quiet --release -- build examples/testing/add_test.mko --backend native -o /dev/null 2>/dev/null; then
@@ -176,7 +180,6 @@ jobs:
         if: runner.os == 'Windows'
         shell: bash
         run: cargo run --quiet --release -- test examples/testing
-        continue-on-error: true
         env:
           MAKO_TEST_TIMEOUT_SECS: "90"
           MAKO_LIVE_TLS: ""
