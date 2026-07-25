@@ -115,6 +115,14 @@ exports `free_string`, so it stays borrowed; the aliasing string-array helpers
 share buffers, so freeing both input and output would be a double free;
 `sctp_connectx` passes a non-packed address array.
 
+`mako_native_opaque_drop` is now a no-op, which trades a heap corruption for a
+leak: `Type::Opaque` covers both blocks this runtime allocated and handles owned
+by a foreign library, and nothing at runtime distinguishes them, so the boxes in
+the first group are no longer reclaimed. Emitting a typed drop from codegen
+would let it free the ones it owns again and would also close the leaks in the
+`http_request_parse` opaque box and in struct-key map drops, which have the same
+root cause.
+
 ### General networking primitives (protocol-agnostic)
 
 These are the building blocks for **any** backend — not one application.
