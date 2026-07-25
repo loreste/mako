@@ -756,10 +756,17 @@ fn main() {
     // Use an explicit worker stack so compiler capacity is deterministic across
     // platforms (macOS' main-thread default is particularly small). This is a
     // bootstrap safeguard; iterative IR walks remain the self-hosted design.
+    // A debug build of the compiler needs a much larger stack than a release
+    // one for the same input: nothing is inlined and every frame carries full
+    // locals, so a deeply nested expression walks far more stack per level.
+    // 16 MB is enough in release but overflows on Windows in debug, whose
+    // default thread stack is 1 MB against 8 MB on Linux — deep_expr_stack_test
+    // is exactly that case.
+    let default_stack_mb = if cfg!(debug_assertions) { 64 } else { 16 };
     let stack_mb = std::env::var("MAKO_COMPILER_STACK_MB")
         .ok()
         .and_then(|s| s.parse::<usize>().ok())
-        .unwrap_or(16)
+        .unwrap_or(default_stack_mb)
         .clamp(4, 256);
     let result = std::thread::Builder::new()
         .name("mako-compiler".into())
