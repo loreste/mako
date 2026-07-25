@@ -2296,6 +2296,10 @@ impl Codegen {
             "MakoFloatArray" => Some("mako_float_array_free".into()),
             "MakoBoolArray" => Some("mako_bool_array_free".into()),
             "MakoString" => Some("mako_str_free".into()),
+            // str_builder() mallocs the struct and its buffer; the destructor
+            // existed but nothing emitted a call to it, so every builder leaked
+            // 88 bytes plus whatever the buffer grew to.
+            "MakoStrBuilder*" => Some("mako_str_builder_free".into()),
             "MakoArr_arr_int" => Some("mako_arr_arr_int_free".into()),
             "MakoArr_arr_string" => Some("mako_arr_arr_string_free".into()),
             "MakoArr_arr_float" => Some("mako_arr_arr_float_free".into()),
@@ -2474,7 +2478,11 @@ impl Codegen {
     /// `MakoStrArray` to `mako_str_array_free`; move analysis still suppresses
     /// the drop when the value is returned, passed on, or stored.
     fn builtin_returns_owned_slice(name: &str) -> bool {
-        matches!(name, "env_keys" | "read_dir")
+        // `str_builder` is not a slice, but it belongs to the same category:
+        // a builtin handing back a freshly allocated handle that `own_free_fn`
+        // knows how to release. Without it the scope-exit drop is never
+        // emitted and every builder leaks its struct and buffer.
+        matches!(name, "env_keys" | "read_dir" | "str_builder")
     }
 
     fn builtin_returns_borrowed_string(name: &str) -> bool {
