@@ -6791,6 +6791,13 @@ static inline MakoIntArray mako_par_map_int(MakoIntArray in, MakoMapFn fn) {
 
     pthread_t *threads = (pthread_t *)malloc(nthreads * sizeof(pthread_t));
     MakoParChunk *chunks = (MakoParChunk *)malloc(nthreads * sizeof(MakoParChunk));
+    /* Which indices actually spawned: joining an uninitialized pthread_t when
+     * pthread_create fails is undefined behavior, so track it explicitly. */
+    unsigned char *spawned = (unsigned char *)calloc(nthreads, 1);
+    if (!threads || !chunks || !spawned) {
+        fprintf(stderr, "mako: OOM in par_map_int\n");
+        abort();
+    }
     size_t chunk = (in.len + nthreads - 1) / nthreads;
 
     for (size_t t = 0; t < nthreads; t++) {
@@ -6798,13 +6805,20 @@ static inline MakoIntArray mako_par_map_int(MakoIntArray in, MakoMapFn fn) {
         size_t end = start + chunk;
         if (end > in.len) end = in.len;
         chunks[t] = (MakoParChunk){in.data, out.data, fn, start, end};
-        pthread_create(&threads[t], NULL, mako_par_worker, &chunks[t]);
+        if (pthread_create(&threads[t], NULL, mako_par_worker, &chunks[t]) == 0) {
+            spawned[t] = 1;
+        } else {
+            /* Out of threads: do this chunk on the calling thread so the
+             * result is still complete. */
+            mako_par_worker(&chunks[t]);
+        }
     }
     for (size_t t = 0; t < nthreads; t++) {
-        pthread_join(threads[t], NULL);
+        if (spawned[t]) pthread_join(threads[t], NULL);
     }
     free(threads);
     free(chunks);
+    free(spawned);
     return out;
 }
 
@@ -6841,6 +6855,11 @@ static inline MakoFloatArray mako_par_map_float(MakoFloatArray in, MakoMapFnF64 
 
     pthread_t *threads = (pthread_t *)malloc(nthreads * sizeof(pthread_t));
     MakoParChunkF64 *chunks = (MakoParChunkF64 *)malloc(nthreads * sizeof(MakoParChunkF64));
+    unsigned char *spawned = (unsigned char *)calloc(nthreads, 1);
+    if (!threads || !chunks || !spawned) {
+        fprintf(stderr, "mako: OOM in par_map_float\n");
+        abort();
+    }
     size_t chunk = (in.len + nthreads - 1) / nthreads;
 
     for (size_t t = 0; t < nthreads; t++) {
@@ -6848,13 +6867,18 @@ static inline MakoFloatArray mako_par_map_float(MakoFloatArray in, MakoMapFnF64 
         size_t end = start + chunk;
         if (end > in.len) end = in.len;
         chunks[t] = (MakoParChunkF64){in.data, out.data, fn, start, end};
-        pthread_create(&threads[t], NULL, mako_par_worker_f64, &chunks[t]);
+        if (pthread_create(&threads[t], NULL, mako_par_worker_f64, &chunks[t]) == 0) {
+            spawned[t] = 1;
+        } else {
+            mako_par_worker_f64(&chunks[t]);
+        }
     }
     for (size_t t = 0; t < nthreads; t++) {
-        pthread_join(threads[t], NULL);
+        if (spawned[t]) pthread_join(threads[t], NULL);
     }
     free(threads);
     free(chunks);
+    free(spawned);
     return out;
 }
 
@@ -6895,6 +6919,11 @@ static inline MakoStrArray mako_par_map_str(MakoStrArray in, MakoMapFnStr fn) {
 
     pthread_t *threads = (pthread_t *)malloc(nthreads * sizeof(pthread_t));
     MakoParChunkStr *chunks = (MakoParChunkStr *)malloc(nthreads * sizeof(MakoParChunkStr));
+    unsigned char *spawned = (unsigned char *)calloc(nthreads, 1);
+    if (!threads || !chunks || !spawned) {
+        fprintf(stderr, "mako: OOM in par_map_str\n");
+        abort();
+    }
     size_t chunk = (in.len + nthreads - 1) / nthreads;
 
     for (size_t t = 0; t < nthreads; t++) {
@@ -6902,11 +6931,16 @@ static inline MakoStrArray mako_par_map_str(MakoStrArray in, MakoMapFnStr fn) {
         size_t end = start + chunk;
         if (end > in.len) end = in.len;
         chunks[t] = (MakoParChunkStr){in.data, out.data, fn, start, end};
-        pthread_create(&threads[t], NULL, mako_par_worker_str, &chunks[t]);
+        if (pthread_create(&threads[t], NULL, mako_par_worker_str, &chunks[t]) == 0) {
+            spawned[t] = 1;
+        } else {
+            mako_par_worker_str(&chunks[t]);
+        }
     }
     for (size_t t = 0; t < nthreads; t++) {
-        pthread_join(threads[t], NULL);
+        if (spawned[t]) pthread_join(threads[t], NULL);
     }
+    free(spawned);
     free(threads);
     free(chunks);
     return out;
@@ -6947,6 +6981,11 @@ static inline void mako_par_map_bytes(
     pthread_t *threads = (pthread_t *)malloc(nthreads * sizeof(pthread_t));
     MakoParChunkBytes *chunks =
         (MakoParChunkBytes *)malloc(nthreads * sizeof(MakoParChunkBytes));
+    unsigned char *spawned = (unsigned char *)calloc(nthreads, 1);
+    if (!threads || !chunks || !spawned) {
+        fprintf(stderr, "mako: OOM in par_map_bytes\n");
+        abort();
+    }
     size_t chunk = (n + nthreads - 1) / nthreads;
     for (size_t t = 0; t < nthreads; t++) {
         size_t start = t * chunk;
@@ -6954,11 +6993,18 @@ static inline void mako_par_map_bytes(
         if (end > n) end = n;
         chunks[t] = (MakoParChunkBytes){
             (const char *)in, (char *)out, esz, fn, start, end};
-        pthread_create(&threads[t], NULL, mako_par_worker_bytes, &chunks[t]);
+        if (pthread_create(&threads[t], NULL, mako_par_worker_bytes, &chunks[t]) == 0) {
+            spawned[t] = 1;
+        } else {
+            mako_par_worker_bytes(&chunks[t]);
+        }
     }
-    for (size_t t = 0; t < nthreads; t++) pthread_join(threads[t], NULL);
+    for (size_t t = 0; t < nthreads; t++) {
+        if (spawned[t]) pthread_join(threads[t], NULL);
+    }
     free(threads);
     free(chunks);
+    free(spawned);
 }
 
 /* float64 bits ↔ int64 for int-ring channels */
