@@ -2330,6 +2330,15 @@ pub fn lower_with_tests(program: &Program, test_fns: &[String]) -> Result<Module
     // Synthetic harness main for `mako test --backend native`: call each TestXxx().
     let harness_main: Option<FnDef> = if !signatures.contains_key("main") && !test_fns.is_empty() {
         let mut stmts = Vec::new();
+        // Match the C backend's test harness, which installs SIG_IGN for
+        // SIGPIPE before running any test. Without it a fixture that writes to
+        // a socket the peer already closed — proxy and TLS pool tests race on
+        // exactly that — is killed by signal 13 rather than seeing EPIPE.
+        // macOS masks this per-socket, so it only reproduces on Linux.
+        stmts.push(Stmt::Expr(Expr::Call {
+            callee: Box::new(Expr::Ident("signal_ignore".into())),
+            args: vec![Expr::String("PIPE".into())],
+        }));
         for t in test_fns {
             if !signatures.contains_key(t) {
                 return Err(IrError::new(format!(

@@ -1039,8 +1039,27 @@ MakoNativeIntSlice *mako_native_int_map_apply(MakoNativeIntSlice *src, void *fn_
     return out;
 }
 
+/* Type::Opaque covers two unrelated kinds of handle, and nothing at runtime
+ * distinguishes them:
+ *
+ *   1. blocks this runtime malloc'd (e.g. the box behind http_request_parse),
+ *      which free() would correctly reclaim;
+ *   2. handles owned by a foreign library or by one of our registries — a
+ *      sqlite3* from mako_sql_open_sqlite, a TlsConn — which must be released
+ *      through their own API (sqlite3_close, tls_conn_close) and must never be
+ *      passed to free().
+ *
+ * The SqlDB value handed to Mako code is `(int64_t)(intptr_t)db.sqlite`
+ * (mako_sql_meta_key), so a bare free() here corrupts the heap on every scope
+ * exit that holds a database handle: glibc aborts with "free(): invalid
+ * pointer", and macOS silently tolerates it, which is why this only ever
+ * reproduced on Linux.
+ *
+ * Until codegen emits a typed drop that knows which kind it has, do nothing.
+ * Kind 2 must not be freed at all; kind 1 leaks its box, which is recoverable.
+ * Corrupting the allocator is not. */
 void mako_native_opaque_drop(void *p) {
-    free(p);
+    (void)p;
 }
 
 // parse_int → try: returns 1 and writes *out on success, else 0.
