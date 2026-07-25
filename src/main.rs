@@ -2726,7 +2726,11 @@ fn compile_test_package(
                 backend,
                 &BuildOpts {
                     target: None,
-                    sanitize: None,
+                    // Propagate --sanitize like the C arm above. Dropping it
+                    // here produced test binaries with no sanitizer runtime
+                    // linked at all, so `mako test --backend native --sanitize
+                    // leak` reported success while measuring nothing.
+                    sanitize: sanitize.map(|s| s.to_string()),
                     static_link: false,
                     overflow: OverflowMode::Wrap,
                     bounds_always: false,
