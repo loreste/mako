@@ -1151,7 +1151,7 @@ fn cmd_doctor() -> Result<(), ()> {
         "    c:      host+cross+wasm · sanitize · static · overflow wrap/trap/ignore · emit-c"
     );
     println!(
-        "    native: host only · overflow wrap/trap/ignore · no sanitize/static/cross/wasm/emit-c"
+        "    native: host only · overflow wrap/trap/ignore · sanitize leak/address · no static/cross/wasm/emit-c"
     );
     #[cfg(feature = "llvm-backend")]
     {

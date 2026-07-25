@@ -84,6 +84,37 @@ if [[ "$(uname -s)" != "Windows_NT" && "$(uname -s)" != MINGW* ]]; then
   fi
 fi
 
+# Native backend under LeakSanitizer. The direct backends accept --sanitize
+# leak/address: the C runtime is compiled from source at link time so it is
+# instrumented, and the allocator is intercepted process-wide, which covers
+# allocations made from generated code too. A bad access *inside* Cranelift
+# output is still not visible — that is what the C backend's ASan run is for.
+#
+# Soft-fails like the ASan step below: not every host has a sanitizer runtime,
+# and this gate must stay runnable on developer machines.
+echo "=== memory-safety-gate: native backend under LeakSanitizer ==="
+if [[ "$(uname -s)" == "Linux" ]] && "$mako_bin" build --help 2>/dev/null | grep -q 'native'; then
+  ms_native_leak_failed=0
+  for f in examples/testing/memory_safety_contract_test.mko \
+           examples/testing/leak_detector_test.mko \
+           examples/testing/own_branch_regress_test.mko \
+           examples/testing/env_vars_test.mko; do
+    if ! "$mako_bin" test "$repo_dir/$f" --backend native --sanitize leak \
+         >/tmp/mako-ms-native-leak.out 2>&1; then
+      echo "memory-safety-gate: native LSan FAILED on $f" >&2
+      tail -20 /tmp/mako-ms-native-leak.out >&2 || true
+      ms_native_leak_failed=1
+    else
+      echo "  native+lsan ok $f"
+    fi
+  done
+  [[ "$ms_native_leak_failed" -eq 0 ]] || exit 1
+else
+  # macOS: the ASan/LSan runtime deadlocks at startup here, so this is not
+  # evidence on a Mac and is skipped rather than reported as passing.
+  echo "memory-safety-gate: native LSan skipped (Linux-only; Mac sanitizer runtime hangs)"
+fi
+
 echo "=== memory-safety-gate: ASan (optional if toolchain supports) ==="
 set +e
 "$mako_bin" test "$repo_dir/examples/testing/memory_safety_contract_test.mko" \

@@ -99,7 +99,11 @@ call sites leak the `mako_str_from_cstr` temporary — 4–13 bytes per call
 (`str_trim` 13, `str_len` 11, `str_replace` 10, `sha256` 8, `json_object` 4).
 Pre-existing and unchanged by this release; bound arguments and user-defined
 functions are unaffected. The fix needs a shared argument-emission path that
-does not exist yet — see SPEC.md §3. `sip_test` still accounts for 1.54 MB of
+does not exist yet: builtin arms are spread across ~100 generated emitters with
+no common place to reclaim an argument temporary. Emitting literals as borrowed
+views instead would free static storage, and tagging them with an immortal bit
+would require masking every length read in the runtime — the bug class that
+produced a `str_join` abort. `sip_test` still accounts for 1.54 MB of
 residual leak across 140k allocations; it barely moved here, so it is a
 different class and remains untriaged. Channels have no destructor, and a
 naive one is a use-after-free whenever a spawned task outlives the creating

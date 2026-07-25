@@ -108,7 +108,8 @@ a pointer at the C backend (**no silent fallback**).
 | Host target (default) | yes | yes | yes (`--release` required) |
 | `--target` cross | yes (zig/clang) | **hard-error** | **hard-error** |
 | `wasm32-wasip1` | yes | **hard-error** | **hard-error** |
-| `--sanitize=…` / `--race` | yes | **hard-error** | **hard-error** |
+| `--sanitize=leak\|address` | yes | yes (see note) | yes (see note) |
+| `--sanitize=thread\|memory` / `--race` | yes | **hard-error** | **hard-error** |
 | `--static` | yes (non-macOS) | **hard-error** | **hard-error** |
 | `--emit-c` | yes | **hard-error** | **hard-error** |
 | `--overflow wrap` | yes | yes | yes |
@@ -120,13 +121,25 @@ a pointer at the C backend (**no silent fallback**).
 Example:
 
 ```bash
-# Wrong — fails closed:
-mako build app.mko --backend native --sanitize address
-# → error: --sanitize=address is not implemented for --backend native; use `--backend c`
+# Works — leak/address are supported on the direct backends:
+mako build app.mko --backend native --sanitize leak
 
-# Right:
-mako build app.mko --backend c --sanitize address
+# Wrong — fails closed, because thread/memory need instrumented loads/stores
+# that an uninstrumented code generator cannot provide:
+mako build app.mko --backend native --sanitize thread
+# → error: --sanitize=thread is not implemented for --backend native (only
+#   `leak` and `address` are; they rely on allocator interception, while
+#   thread needs instrumented loads/stores); use `--backend c`
 ```
+
+**Note on direct-backend sanitizers.** `leak` and `address` work because
+essentially all heap traffic goes through the C runtime, which is compiled from
+source at link time and so *is* instrumented, and because both sanitizers also
+intercept the allocator process-wide — that covers allocations made from
+generated code. What they cannot see is a bad access *inside* Cranelift- or
+LLVM-emitted machine code, which carries no redzones or shadow memory. For that,
+use `--backend c`. Sanitizer runs must happen on Linux: the runtime deadlocks at
+startup on macOS.
 
 `mako doctor` prints this matrix for the installed binary (including whether
 llvm-backend was compiled in).

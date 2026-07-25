@@ -31,11 +31,12 @@
 # Website (deployed separately, not part of public repo)
 /website/
 
-# Local agent / editor state (do not commit).
-# `.claude/skills/` is the exception: those are project skills that document
-# how to work on Mako, so they belong to the repo rather than to one machine.
-.claude/*
-!.claude/skills/
+# Local agent / editor state and build-assistant docs — never commit these.
+# They describe how the project is worked on, not the product, and stay local.
+.claude/
+CLAUDE.md
+SPEC.md
+AGENTS.md
 .cursor/
 .grok/
 .idea/
