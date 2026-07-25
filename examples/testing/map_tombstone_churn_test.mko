@@ -1,9 +1,12 @@
-// Delete leaves a tombstone. If growth is triggered on `len` alone, a
-// delete/insert cycle keeps `len` flat while tombstones fill the table, and
-// the insert probe — which only reuses a tombstone after finding an EMPTY
-// slot — spins forever. This hangs rather than failing when it regresses.
+// Delete leaves a tombstone. If growth counts only `len`, a delete/insert
+// cycle keeps `len` flat while tombstones fill the table. The C map's probe is
+// unbounded and spins forever; the native map's is bounded and aborts. Either
+// way a long-running service with key churn stops serving.
+//
+// A regression here hangs rather than fails — that is the honest shape for
+// this bug, so the suite timeout is what catches it.
 
-fn TestMapSsTombstoneChurn() {
+fn TestMapChurnStringKeys() {
     var m = make(map[string]string, 8)
     var i = 0
     while i < 20000 {
@@ -13,4 +16,25 @@ fn TestMapSsTombstoneChurn() {
         i = i + 1
     }
     assert_eq(len(m), 0)
+}
+
+fn TestMapChurnAcrossFlavors() {
+    var a = make(map[string]int, 8)
+    var b = make(map[int]int, 8)
+    var c = make(map[string]float, 8)
+    var d = make(map[int]bool, 8)
+    var i = 0
+    while i < 8000 {
+        let k = "k" + int_to_string(i)
+        a[k] = i
+        b[i] = i
+        c[k] = 1.5
+        d[i] = true
+        delete(a, k)
+        delete(b, i)
+        delete(c, k)
+        delete(d, i)
+        i = i + 1
+    }
+    assert_eq(len(a) + len(b) + len(c) + len(d), 0)
 }

@@ -1266,6 +1266,9 @@ typedef struct {
     uint8_t *state;
     size_t cap;
     size_t *lenp; /* separately allocated; *lenp is entry count */
+    /* Tombstones from delete; counted toward growth so a
+     * delete/insert cycle cannot fill every slot. */
+    size_t tombs;
 } MakoNativeMapII;
 
 static inline uint8_t *mako_native_map_ii_state(const MakoNativeMapII *m) {
@@ -1291,6 +1294,9 @@ typedef struct {
     int64_t *vals;
     size_t cap;
     size_t len;
+    /* Tombstones from delete; counted toward growth so a
+     * delete/insert cycle cannot fill every slot. */
+    size_t tombs;
 } MakoNativeMapSI;
 
 /* Integer map keys use their own bits as the hash. Open-addressing with a
@@ -1407,7 +1413,7 @@ static void mako_native_map_ii_rehash(MakoNativeMapII *m, size_t ncap);
 
 void mako_native_map_ii_set_ptr(MakoNativeMapII *m, int64_t key, int64_t val) {
     if (!m || !m->lenp) abort();
-    if (*m->lenp >= mako_native_map_ii_grow_at(m->cap)) {
+    if (*m->lenp + m->tombs >= mako_native_map_ii_grow_at(m->cap)) {
         mako_native_map_ii_rehash(m, m->cap * 2);
     }
     uint8_t *state = m->state;
@@ -1421,6 +1427,7 @@ void mako_native_map_ii_set_ptr(MakoNativeMapII *m, int64_t key, int64_t val) {
         uint8_t st = state[i];
         if (st == MAKO_NMAP_EMPTY) {
             size_t slot = first_tomb != (size_t)-1 ? first_tomb : i;
+            if (first_tomb != (size_t)-1 && m->tombs) m->tombs--;
             state[slot] = MAKO_NMAP_FULL;
             keys[slot] = key;
             vals[slot] = val;
@@ -1515,6 +1522,7 @@ void mako_native_map_ii_delete_ptr(MakoNativeMapII *m, int64_t key) {
         if (st == MAKO_NMAP_FULL && keys[i] == key) {
             state[i] = MAKO_NMAP_TOMB;
             (*m->lenp)--;
+            m->tombs++;
             return;
         }
         i = (i + 1) & mask;
@@ -1908,12 +1916,13 @@ static void mako_native_map_si_rehash(MakoNativeMapSI *m, size_t ncap);
 
 void mako_native_map_si_set_ptr(MakoNativeMapSI *m, MakoNativeString *key, int64_t val) {
     if (!m) abort();
-    if (m->len * 10 >= m->cap * 7) mako_native_map_si_rehash(m, m->cap * 2);
+    if ((m->len + m->tombs) * 10 >= m->cap * 7) mako_native_map_si_rehash(m, m->cap * 2);
     size_t i = (size_t)(mako_native_hash_str(key) & (m->cap - 1));
     size_t first_tomb = (size_t)-1;
     for (size_t n = 0; n < m->cap; ++n) {
         if (m->state[i] == MAKO_NMAP_EMPTY) {
             size_t slot = first_tomb != (size_t)-1 ? first_tomb : i;
+            if (first_tomb != (size_t)-1 && m->tombs) m->tombs--;
             m->state[slot] = MAKO_NMAP_FULL;
             m->keys[slot] = mako_native_string_clone_ptr(key);
             m->vals[slot] = val;
@@ -1978,6 +1987,7 @@ void mako_native_map_si_delete_ptr(MakoNativeMapSI *m, MakoNativeString *key) {
             m->keys[i] = NULL;
             m->state[i] = MAKO_NMAP_TOMB;
             m->len--;
+            m->tombs++;
             return;
         }
         i = (i + 1) & (m->cap - 1);
@@ -2158,6 +2168,9 @@ typedef struct {
     double *vals;
     size_t cap;
     size_t len;
+    /* Tombstones from delete; counted toward growth so a
+     * delete/insert cycle cannot fill every slot. */
+    size_t tombs;
 } MakoNativeMapIF;
 
 static MakoNativeMapIF *mako_native_map_if_new(size_t hint) {
@@ -2181,12 +2194,13 @@ static void mako_native_map_if_rehash(MakoNativeMapIF *m, size_t ncap);
 
 void mako_native_map_if_set_ptr(MakoNativeMapIF *m, int64_t key, double val) {
     if (!m) abort();
-    if (m->len * 10 >= m->cap * 7) mako_native_map_if_rehash(m, m->cap * 2);
+    if ((m->len + m->tombs) * 10 >= m->cap * 7) mako_native_map_if_rehash(m, m->cap * 2);
     size_t i = (size_t)(mako_native_hash_i64(key) & (m->cap - 1));
     size_t first_tomb = (size_t)-1;
     for (size_t n = 0; n < m->cap; ++n) {
         if (m->state[i] == MAKO_NMAP_EMPTY) {
             size_t slot = first_tomb != (size_t)-1 ? first_tomb : i;
+            if (first_tomb != (size_t)-1 && m->tombs) m->tombs--;
             m->state[slot] = MAKO_NMAP_FULL;
             m->keys[slot] = key;
             m->vals[slot] = val;
@@ -2243,6 +2257,7 @@ void mako_native_map_if_delete_ptr(MakoNativeMapIF *m, int64_t key) {
         if (m->state[i] == MAKO_NMAP_FULL && m->keys[i] == key) {
             m->state[i] = MAKO_NMAP_TOMB;
             m->len--;
+            m->tombs++;
             return;
         }
         i = (i + 1) & (m->cap - 1);
@@ -2276,6 +2291,9 @@ typedef struct {
     int64_t *vals;
     size_t cap;
     size_t len;
+    /* Tombstones from delete; counted toward growth so a
+     * delete/insert cycle cannot fill every slot. */
+    size_t tombs;
 } MakoNativeMapFI;
 
 static uint64_t mako_native_hash_f64(double k) {
@@ -2305,12 +2323,13 @@ static void mako_native_map_fi_rehash(MakoNativeMapFI *m, size_t ncap);
 
 void mako_native_map_fi_set_ptr(MakoNativeMapFI *m, double key, int64_t val) {
     if (!m) abort();
-    if (m->len * 10 >= m->cap * 7) mako_native_map_fi_rehash(m, m->cap * 2);
+    if ((m->len + m->tombs) * 10 >= m->cap * 7) mako_native_map_fi_rehash(m, m->cap * 2);
     size_t i = (size_t)(mako_native_hash_f64(key) & (m->cap - 1));
     size_t first_tomb = (size_t)-1;
     for (size_t n = 0; n < m->cap; ++n) {
         if (m->state[i] == MAKO_NMAP_EMPTY) {
             size_t slot = first_tomb != (size_t)-1 ? first_tomb : i;
+            if (first_tomb != (size_t)-1 && m->tombs) m->tombs--;
             m->state[slot] = MAKO_NMAP_FULL;
             m->keys[slot] = key;
             m->vals[slot] = val;
@@ -2367,6 +2386,7 @@ void mako_native_map_fi_delete_ptr(MakoNativeMapFI *m, double key) {
         if (m->state[i] == MAKO_NMAP_FULL && m->keys[i] == key) {
             m->state[i] = MAKO_NMAP_TOMB;
             m->len--;
+            m->tombs++;
             return;
         }
         i = (i + 1) & (m->cap - 1);

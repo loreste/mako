@@ -2509,6 +2509,9 @@ typedef struct {
     int64_t *vals;
     size_t cap;
     size_t len;
+    /* Tombstones from delete; counted toward growth so churn
+     * cannot fill every slot with FULL or TOMB. */
+    size_t tombs;
 } MakoMapSI;
 
 typedef struct {
@@ -2517,6 +2520,9 @@ typedef struct {
     int64_t *vals;
     size_t cap;
     size_t len;
+    /* Tombstones from delete; counted toward growth so churn
+     * cannot fill every slot with FULL or TOMB. */
+    size_t tombs;
 } MakoMapII;
 
 /* ---- wyhash core (self-contained, no external deps) ----
@@ -2739,6 +2745,7 @@ static inline MakoMapSI mako_map_si_new(size_t hint) {
     }
     m.cap = cap;
     m.len = 0;
+    m.tombs = 0;
     return m;
 }
 
@@ -2746,7 +2753,7 @@ static inline void mako_map_si_rehash(MakoMapSI *m, size_t ncap);
 
 /* Insert/update with *owned* key move (no clone). Caller must not free/use key after. */
 static inline void mako_map_si_set_take(MakoMapSI *m, MakoString key, int64_t val) {
-    if (MAKO_UNLIKELY((m->len + 1) * 4 >= m->cap * 3)) {
+    if (MAKO_UNLIKELY((m->len + m->tombs + 1) * 4 >= m->cap * 3)) {
         mako_map_si_rehash(m, m->cap * 2);
     }
     uint64_t h = mako_hash_bytes(key.data, key.len);
@@ -2757,6 +2764,7 @@ static inline void mako_map_si_set_take(MakoMapSI *m, MakoString key, int64_t va
         uint8_t st = m->state[i];
         if (MAKO_LIKELY(st == MAKO_MAP_EMPTY)) {
             size_t slot = (first_tomb != (size_t)-1) ? first_tomb : i;
+            if (first_tomb != (size_t)-1 && m->tombs) m->tombs--;
             m->state[slot] = MAKO_MAP_FULL;
             m->hashes[slot] = h;
             m->keys[slot] = key; /* take ownership */
@@ -2858,7 +2866,7 @@ static inline void mako_map_si_delete(MakoMapSI *m, MakoString key) {
             m->keys[i].data = NULL;
             m->keys[i].len = 0;
             m->state[i] = MAKO_MAP_TOMB;
-            m->len--;
+            m->len--; m->tombs++;
             return;
         }
         i = (i + 1) & (m->cap - 1);
@@ -2906,6 +2914,7 @@ static inline MakoMapII mako_map_ii_new(size_t hint) {
     }
     m.cap = cap;
     m.len = 0;
+    m.tombs = 0;
     return m;
 }
 
@@ -2913,7 +2922,7 @@ static inline void mako_map_ii_rehash(MakoMapII *m, size_t ncap);
 
 static inline void mako_map_ii_set(MakoMapII *m, int64_t key, int64_t val) {
     /* Grow at ~75% load (was 70%) — fewer rehashes on sequential inserts. */
-    if (MAKO_UNLIKELY((m->len + 1) * 4 >= m->cap * 3)) {
+    if (MAKO_UNLIKELY((m->len + m->tombs + 1) * 4 >= m->cap * 3)) {
         mako_map_ii_rehash(m, m->cap * 2);
     }
     uint64_t h = mako_hash_i64(key);
@@ -2924,6 +2933,7 @@ static inline void mako_map_ii_set(MakoMapII *m, int64_t key, int64_t val) {
         uint8_t st = m->state[i];
         if (MAKO_LIKELY(st == MAKO_MAP_EMPTY)) {
             size_t slot = (first_tomb != (size_t)-1) ? first_tomb : i;
+            if (first_tomb != (size_t)-1 && m->tombs) m->tombs--;
             m->state[slot] = MAKO_MAP_FULL;
             m->keys[slot] = key;
             m->vals[slot] = val;
@@ -2989,7 +2999,7 @@ static inline void mako_map_ii_delete(MakoMapII *m, int64_t key) {
         if (m->state[i] == MAKO_MAP_EMPTY) return;
         if (m->state[i] == MAKO_MAP_FULL && m->keys[i] == key) {
             m->state[i] = MAKO_MAP_TOMB;
-            m->len--;
+            m->len--; m->tombs++;
             return;
         }
         i = (i + 1) & (m->cap - 1);
@@ -3021,6 +3031,9 @@ typedef struct {
     double *vals;
     size_t cap;
     size_t len;
+    /* Tombstones from delete; counted toward growth so churn
+     * cannot fill every slot with FULL or TOMB. */
+    size_t tombs;
 } MakoMapIF;
 
 static inline MakoMapIF mako_map_if_new(size_t hint) {
@@ -3038,13 +3051,14 @@ static inline MakoMapIF mako_map_if_new(size_t hint) {
     }
     m.cap = cap;
     m.len = 0;
+    m.tombs = 0;
     return m;
 }
 
 static inline void mako_map_if_rehash(MakoMapIF *m, size_t ncap);
 
 static inline void mako_map_if_set(MakoMapIF *m, int64_t key, double val) {
-    if (MAKO_UNLIKELY((m->len + 1) * 4 >= m->cap * 3)) {
+    if (MAKO_UNLIKELY((m->len + m->tombs + 1) * 4 >= m->cap * 3)) {
         mako_map_if_rehash(m, m->cap * 2);
     }
     uint64_t h = mako_hash_i64(key);
@@ -3055,6 +3069,7 @@ static inline void mako_map_if_set(MakoMapIF *m, int64_t key, double val) {
         uint8_t st = m->state[i];
         if (MAKO_LIKELY(st == MAKO_MAP_EMPTY)) {
             size_t slot = (first_tomb != (size_t)-1) ? first_tomb : i;
+            if (first_tomb != (size_t)-1 && m->tombs) m->tombs--;
             m->state[slot] = MAKO_MAP_FULL;
             m->keys[slot] = key;
             m->vals[slot] = val;
@@ -3127,7 +3142,7 @@ static inline void mako_map_if_delete(MakoMapIF *m, int64_t key) {
         if (m->state[i] == MAKO_MAP_EMPTY) return;
         if (m->state[i] == MAKO_MAP_FULL && m->keys[i] == key) {
             m->state[i] = MAKO_MAP_TOMB;
-            m->len--;
+            m->len--; m->tombs++;
             return;
         }
         i = (i + 1) & (m->cap - 1);
@@ -3149,6 +3164,9 @@ typedef struct {
     double *vals;
     size_t cap;
     size_t len;
+    /* Tombstones from delete; counted toward growth so churn
+     * cannot fill every slot with FULL or TOMB. */
+    size_t tombs;
 } MakoMapSF;
 
 static inline MakoMapSF mako_map_sf_new(size_t hint) {
@@ -3166,13 +3184,14 @@ static inline MakoMapSF mako_map_sf_new(size_t hint) {
     }
     m.cap = cap;
     m.len = 0;
+    m.tombs = 0;
     return m;
 }
 
 static inline void mako_map_sf_rehash(MakoMapSF *m, size_t ncap);
 
 static inline void mako_map_sf_set_take(MakoMapSF *m, MakoString key, double val) {
-    if (MAKO_UNLIKELY((m->len + 1) * 4 >= m->cap * 3)) {
+    if (MAKO_UNLIKELY((m->len + m->tombs + 1) * 4 >= m->cap * 3)) {
         mako_map_sf_rehash(m, m->cap * 2);
     }
     uint64_t h = mako_hash_bytes(key.data, key.len);
@@ -3183,6 +3202,7 @@ static inline void mako_map_sf_set_take(MakoMapSF *m, MakoString key, double val
         uint8_t st = m->state[i];
         if (MAKO_LIKELY(st == MAKO_MAP_EMPTY)) {
             size_t slot = (first_tomb != (size_t)-1) ? first_tomb : i;
+            if (first_tomb != (size_t)-1 && m->tombs) m->tombs--;
             m->state[slot] = MAKO_MAP_FULL;
             m->keys[slot] = key;
             m->vals[slot] = val;
@@ -3271,7 +3291,7 @@ static inline void mako_map_sf_delete(MakoMapSF *m, MakoString key) {
             m->keys[i].data = NULL;
             m->keys[i].len = 0;
             m->state[i] = MAKO_MAP_TOMB;
-            m->len--;
+            m->len--; m->tombs++;
             return;
         }
         i = (i + 1) & (m->cap - 1);
@@ -3293,6 +3313,9 @@ typedef struct {
     int64_t *vals;
     size_t cap;
     size_t len;
+    /* Tombstones from delete; counted toward growth so churn
+     * cannot fill every slot with FULL or TOMB. */
+    size_t tombs;
 } MakoMapFI;
 
 static inline MakoMapFI mako_map_fi_new(size_t hint) {
@@ -3310,12 +3333,13 @@ static inline MakoMapFI mako_map_fi_new(size_t hint) {
     }
     m.cap = cap;
     m.len = 0;
+    m.tombs = 0;
     return m;
 }
 static inline void mako_map_fi_rehash(MakoMapFI *m, size_t ncap);
 static inline void mako_map_fi_set(MakoMapFI *m, double key, int64_t val) {
     key = mako_f64_key_norm(key);
-    if (MAKO_UNLIKELY((m->len + 1) * 4 >= m->cap * 3)) mako_map_fi_rehash(m, m->cap * 2);
+    if (MAKO_UNLIKELY((m->len + m->tombs + 1) * 4 >= m->cap * 3)) mako_map_fi_rehash(m, m->cap * 2);
     uint64_t h = mako_hash_f64(key);
     size_t mask = m->cap - 1;
     size_t i = (size_t)(h & mask);
@@ -3324,6 +3348,7 @@ static inline void mako_map_fi_set(MakoMapFI *m, double key, int64_t val) {
         uint8_t st = m->state[i];
         if (st == MAKO_MAP_EMPTY) {
             size_t slot = (first_tomb != (size_t)-1) ? first_tomb : i;
+            if (first_tomb != (size_t)-1 && m->tombs) m->tombs--;
             m->state[slot] = MAKO_MAP_FULL;
             m->keys[slot] = key;
             m->vals[slot] = val;
@@ -3393,7 +3418,7 @@ static inline void mako_map_fi_delete(MakoMapFI *m, double key) {
         if (m->state[i] == MAKO_MAP_EMPTY) return;
         if (m->state[i] == MAKO_MAP_FULL && mako_f64_key_eq(m->keys[i], key)) {
             m->state[i] = MAKO_MAP_TOMB;
-            m->len--;
+            m->len--; m->tombs++;
             return;
         }
         i = (i + 1) & (m->cap - 1);
@@ -3413,6 +3438,9 @@ typedef struct {
     MakoString *vals;
     size_t cap;
     size_t len;
+    /* Tombstones from delete; counted toward growth so churn
+     * cannot fill every slot with FULL or TOMB. */
+    size_t tombs;
 } MakoMapFS;
 
 static inline MakoMapFS mako_map_fs_new(size_t hint) {
@@ -3430,12 +3458,13 @@ static inline MakoMapFS mako_map_fs_new(size_t hint) {
     }
     m.cap = cap;
     m.len = 0;
+    m.tombs = 0;
     return m;
 }
 static inline void mako_map_fs_rehash(MakoMapFS *m, size_t ncap);
 static inline void mako_map_fs_set_take(MakoMapFS *m, double key, MakoString val) {
     key = mako_f64_key_norm(key);
-    if (MAKO_UNLIKELY((m->len + 1) * 4 >= m->cap * 3)) mako_map_fs_rehash(m, m->cap * 2);
+    if (MAKO_UNLIKELY((m->len + m->tombs + 1) * 4 >= m->cap * 3)) mako_map_fs_rehash(m, m->cap * 2);
     uint64_t h = mako_hash_f64(key);
     size_t mask = m->cap - 1;
     size_t i = (size_t)(h & mask);
@@ -3444,6 +3473,7 @@ static inline void mako_map_fs_set_take(MakoMapFS *m, double key, MakoString val
         uint8_t st = m->state[i];
         if (st == MAKO_MAP_EMPTY) {
             size_t slot = (first_tomb != (size_t)-1) ? first_tomb : i;
+            if (first_tomb != (size_t)-1 && m->tombs) m->tombs--;
             m->state[slot] = MAKO_MAP_FULL;
             m->keys[slot] = key;
             m->vals[slot] = val;
@@ -3521,7 +3551,7 @@ static inline void mako_map_fs_delete(MakoMapFS *m, double key) {
             m->vals[i].data = NULL;
             m->vals[i].len = 0;
             m->state[i] = MAKO_MAP_TOMB;
-            m->len--;
+            m->len--; m->tombs++;
             return;
         }
         i = (i + 1) & (m->cap - 1);
@@ -3541,6 +3571,9 @@ typedef struct {
     double *vals;
     size_t cap;
     size_t len;
+    /* Tombstones from delete; counted toward growth so churn
+     * cannot fill every slot with FULL or TOMB. */
+    size_t tombs;
 } MakoMapFF;
 
 static inline MakoMapFF mako_map_ff_new(size_t hint) {
@@ -3558,12 +3591,13 @@ static inline MakoMapFF mako_map_ff_new(size_t hint) {
     }
     m.cap = cap;
     m.len = 0;
+    m.tombs = 0;
     return m;
 }
 static inline void mako_map_ff_rehash(MakoMapFF *m, size_t ncap);
 static inline void mako_map_ff_set(MakoMapFF *m, double key, double val) {
     key = mako_f64_key_norm(key);
-    if (MAKO_UNLIKELY((m->len + 1) * 4 >= m->cap * 3)) mako_map_ff_rehash(m, m->cap * 2);
+    if (MAKO_UNLIKELY((m->len + m->tombs + 1) * 4 >= m->cap * 3)) mako_map_ff_rehash(m, m->cap * 2);
     uint64_t h = mako_hash_f64(key);
     size_t mask = m->cap - 1;
     size_t i = (size_t)(h & mask);
@@ -3572,6 +3606,7 @@ static inline void mako_map_ff_set(MakoMapFF *m, double key, double val) {
         uint8_t st = m->state[i];
         if (st == MAKO_MAP_EMPTY) {
             size_t slot = (first_tomb != (size_t)-1) ? first_tomb : i;
+            if (first_tomb != (size_t)-1 && m->tombs) m->tombs--;
             m->state[slot] = MAKO_MAP_FULL;
             m->keys[slot] = key;
             m->vals[slot] = val;
@@ -3641,7 +3676,7 @@ static inline void mako_map_ff_delete(MakoMapFF *m, double key) {
         if (m->state[i] == MAKO_MAP_EMPTY) return;
         if (m->state[i] == MAKO_MAP_FULL && mako_f64_key_eq(m->keys[i], key)) {
             m->state[i] = MAKO_MAP_TOMB;
-            m->len--;
+            m->len--; m->tombs++;
             return;
         }
         i = (i + 1) & (m->cap - 1);
@@ -3661,6 +3696,9 @@ typedef struct {
     bool *vals;
     size_t cap;
     size_t len;
+    /* Tombstones from delete; counted toward growth so churn
+     * cannot fill every slot with FULL or TOMB. */
+    size_t tombs;
 } MakoMapIB;
 
 static inline MakoMapIB mako_map_ib_new(size_t hint) {
@@ -3678,13 +3716,14 @@ static inline MakoMapIB mako_map_ib_new(size_t hint) {
     }
     m.cap = cap;
     m.len = 0;
+    m.tombs = 0;
     return m;
 }
 
 static inline void mako_map_ib_rehash(MakoMapIB *m, size_t ncap);
 
 static inline void mako_map_ib_set(MakoMapIB *m, int64_t key, bool val) {
-    if (MAKO_UNLIKELY((m->len + 1) * 4 >= m->cap * 3)) {
+    if (MAKO_UNLIKELY((m->len + m->tombs + 1) * 4 >= m->cap * 3)) {
         mako_map_ib_rehash(m, m->cap * 2);
     }
     uint64_t h = mako_hash_i64(key);
@@ -3695,6 +3734,7 @@ static inline void mako_map_ib_set(MakoMapIB *m, int64_t key, bool val) {
         uint8_t st = m->state[i];
         if (MAKO_LIKELY(st == MAKO_MAP_EMPTY)) {
             size_t slot = (first_tomb != (size_t)-1) ? first_tomb : i;
+            if (first_tomb != (size_t)-1 && m->tombs) m->tombs--;
             m->state[slot] = MAKO_MAP_FULL;
             m->keys[slot] = key;
             m->vals[slot] = val;
@@ -3767,7 +3807,7 @@ static inline void mako_map_ib_delete(MakoMapIB *m, int64_t key) {
         if (m->state[i] == MAKO_MAP_EMPTY) return;
         if (m->state[i] == MAKO_MAP_FULL && m->keys[i] == key) {
             m->state[i] = MAKO_MAP_TOMB;
-            m->len--;
+            m->len--; m->tombs++;
             return;
         }
         i = (i + 1) & (m->cap - 1);
@@ -3789,6 +3829,9 @@ typedef struct {
     bool *vals;
     size_t cap;
     size_t len;
+    /* Tombstones from delete; counted toward growth so churn
+     * cannot fill every slot with FULL or TOMB. */
+    size_t tombs;
 } MakoMapSB;
 
 static inline MakoMapSB mako_map_sb_new(size_t hint) {
@@ -3806,13 +3849,14 @@ static inline MakoMapSB mako_map_sb_new(size_t hint) {
     }
     m.cap = cap;
     m.len = 0;
+    m.tombs = 0;
     return m;
 }
 
 static inline void mako_map_sb_rehash(MakoMapSB *m, size_t ncap);
 
 static inline void mako_map_sb_set(MakoMapSB *m, MakoString key, bool val) {
-    if (MAKO_UNLIKELY((m->len + 1) * 4 >= m->cap * 3)) {
+    if (MAKO_UNLIKELY((m->len + m->tombs + 1) * 4 >= m->cap * 3)) {
         mako_map_sb_rehash(m, m->cap * 2);
     }
     uint64_t h = mako_hash_bytes(key.data, key.len);
@@ -3823,6 +3867,7 @@ static inline void mako_map_sb_set(MakoMapSB *m, MakoString key, bool val) {
         uint8_t st = m->state[i];
         if (MAKO_LIKELY(st == MAKO_MAP_EMPTY)) {
             size_t slot = (first_tomb != (size_t)-1) ? first_tomb : i;
+            if (first_tomb != (size_t)-1 && m->tombs) m->tombs--;
             m->state[slot] = MAKO_MAP_FULL;
             m->keys[slot] = mako_str_clone(key);
             m->vals[slot] = val;
@@ -3897,7 +3942,7 @@ static inline void mako_map_sb_delete(MakoMapSB *m, MakoString key) {
             mako_str_free(m->keys[i]);
             m->keys[i].data = NULL; m->keys[i].len = 0;
             m->state[i] = MAKO_MAP_TOMB;
-            m->len--;
+            m->len--; m->tombs++;
             return;
         }
         i = (i + 1) & (m->cap - 1);
@@ -3919,6 +3964,9 @@ typedef struct {
     bool *vals;
     size_t cap;
     size_t len;
+    /* Tombstones from delete; counted toward growth so churn
+     * cannot fill every slot with FULL or TOMB. */
+    size_t tombs;
 } MakoMapFB;
 
 static inline MakoMapFB mako_map_fb_new(size_t hint) {
@@ -3936,13 +3984,14 @@ static inline MakoMapFB mako_map_fb_new(size_t hint) {
     }
     m.cap = cap;
     m.len = 0;
+    m.tombs = 0;
     return m;
 }
 
 static inline void mako_map_fb_rehash(MakoMapFB *m, size_t ncap);
 
 static inline void mako_map_fb_set(MakoMapFB *m, double key, bool val) {
-    if (MAKO_UNLIKELY((m->len + 1) * 4 >= m->cap * 3)) {
+    if (MAKO_UNLIKELY((m->len + m->tombs + 1) * 4 >= m->cap * 3)) {
         mako_map_fb_rehash(m, m->cap * 2);
     }
     uint64_t h = mako_hash_f64(key);
@@ -3953,6 +4002,7 @@ static inline void mako_map_fb_set(MakoMapFB *m, double key, bool val) {
         uint8_t st = m->state[i];
         if (MAKO_LIKELY(st == MAKO_MAP_EMPTY)) {
             size_t slot = (first_tomb != (size_t)-1) ? first_tomb : i;
+            if (first_tomb != (size_t)-1 && m->tombs) m->tombs--;
             m->state[slot] = MAKO_MAP_FULL;
             m->keys[slot] = key;
             m->vals[slot] = val;
@@ -4025,7 +4075,7 @@ static inline void mako_map_fb_delete(MakoMapFB *m, double key) {
         if (m->state[i] == MAKO_MAP_EMPTY) return;
         if (m->state[i] == MAKO_MAP_FULL && mako_f64_key_eq(m->keys[i], key)) {
             m->state[i] = MAKO_MAP_TOMB;
-            m->len--;
+            m->len--; m->tombs++;
             return;
         }
         i = (i + 1) & (m->cap - 1);
@@ -4047,6 +4097,9 @@ typedef struct {
     int64_t *vals;
     size_t cap;
     size_t len;
+    /* Tombstones from delete; counted toward growth so churn
+     * cannot fill every slot with FULL or TOMB. */
+    size_t tombs;
 } MakoMapBI;
 
 static inline MakoMapBI mako_map_bi_new(size_t hint) {
@@ -4062,13 +4115,13 @@ static inline MakoMapBI mako_map_bi_new(size_t hint) {
         fprintf(stderr, "mako: OOM in map_bi_new\n");
         abort();
     }
-    m.cap = cap; m.len = 0; return m;
+    m.cap = cap; m.len = 0; m.tombs = 0; return m;
 }
 
 static inline void mako_map_bi_rehash(MakoMapBI *m, size_t ncap);
 
 static inline void mako_map_bi_set(MakoMapBI *m, bool key, int64_t val) {
-    if (MAKO_UNLIKELY((m->len + 1) * 4 >= m->cap * 3)) mako_map_bi_rehash(m, m->cap * 2);
+    if (MAKO_UNLIKELY((m->len + m->tombs + 1) * 4 >= m->cap * 3)) mako_map_bi_rehash(m, m->cap * 2);
     uint64_t h = mako_hash_i64(key ? 1 : 0);
     size_t mask = m->cap - 1;
     size_t i = (size_t)(h & mask);
@@ -4077,6 +4130,7 @@ static inline void mako_map_bi_set(MakoMapBI *m, bool key, int64_t val) {
         uint8_t st = m->state[i];
         if (MAKO_LIKELY(st == MAKO_MAP_EMPTY)) {
             size_t slot = (first_tomb != (size_t)-1) ? first_tomb : i;
+            if (first_tomb != (size_t)-1 && m->tombs) m->tombs--;
             m->state[slot] = MAKO_MAP_FULL;
             m->keys[slot] = key;
             m->vals[slot] = val;
@@ -4136,7 +4190,7 @@ static inline void mako_map_bi_delete(MakoMapBI *m, bool key) {
     for (;;) {
         if (m->state[i] == MAKO_MAP_EMPTY) return;
         if (m->state[i] == MAKO_MAP_FULL && m->keys[i] == key) {
-            m->state[i] = MAKO_MAP_TOMB; m->len--; return;
+            m->state[i] = MAKO_MAP_TOMB; m->len--; m->tombs++; return;
         }
         i = (i + 1) & (m->cap - 1);
     }
@@ -4156,6 +4210,9 @@ typedef struct {
     MakoString *vals;
     size_t cap;
     size_t len;
+    /* Tombstones from delete; counted toward growth so churn
+     * cannot fill every slot with FULL or TOMB. */
+    size_t tombs;
 } MakoMapBS;
 
 static inline MakoMapBS mako_map_bs_new(size_t hint) {
@@ -4171,13 +4228,13 @@ static inline MakoMapBS mako_map_bs_new(size_t hint) {
         fprintf(stderr, "mako: OOM in map_bs_new\n");
         abort();
     }
-    m.cap = cap; m.len = 0; return m;
+    m.cap = cap; m.len = 0; m.tombs = 0; return m;
 }
 
 static inline void mako_map_bs_rehash(MakoMapBS *m, size_t ncap);
 
 static inline void mako_map_bs_set(MakoMapBS *m, bool key, MakoString val) {
-    if (MAKO_UNLIKELY((m->len + 1) * 4 >= m->cap * 3)) mako_map_bs_rehash(m, m->cap * 2);
+    if (MAKO_UNLIKELY((m->len + m->tombs + 1) * 4 >= m->cap * 3)) mako_map_bs_rehash(m, m->cap * 2);
     uint64_t h = mako_hash_i64(key ? 1 : 0);
     size_t mask = m->cap - 1;
     size_t i = (size_t)(h & mask);
@@ -4186,6 +4243,7 @@ static inline void mako_map_bs_set(MakoMapBS *m, bool key, MakoString val) {
         uint8_t st = m->state[i];
         if (MAKO_LIKELY(st == MAKO_MAP_EMPTY)) {
             size_t slot = (first_tomb != (size_t)-1) ? first_tomb : i;
+            if (first_tomb != (size_t)-1 && m->tombs) m->tombs--;
             m->state[slot] = MAKO_MAP_FULL;
             m->keys[slot] = key;
             m->vals[slot] = mako_str_clone(val);
@@ -4248,7 +4306,7 @@ static inline void mako_map_bs_delete(MakoMapBS *m, bool key) {
         if (m->state[i] == MAKO_MAP_EMPTY) return;
         if (m->state[i] == MAKO_MAP_FULL && m->keys[i] == key) {
             mako_str_free(m->vals[i]); m->vals[i].data = NULL; m->vals[i].len = 0;
-            m->state[i] = MAKO_MAP_TOMB; m->len--; return;
+            m->state[i] = MAKO_MAP_TOMB; m->len--; m->tombs++; return;
         }
         i = (i + 1) & (m->cap - 1);
     }
@@ -4268,6 +4326,9 @@ typedef struct {
     double *vals;
     size_t cap;
     size_t len;
+    /* Tombstones from delete; counted toward growth so churn
+     * cannot fill every slot with FULL or TOMB. */
+    size_t tombs;
 } MakoMapBF;
 
 static inline MakoMapBF mako_map_bf_new(size_t hint) {
@@ -4283,13 +4344,13 @@ static inline MakoMapBF mako_map_bf_new(size_t hint) {
         fprintf(stderr, "mako: OOM in map_bf_new\n");
         abort();
     }
-    m.cap = cap; m.len = 0; return m;
+    m.cap = cap; m.len = 0; m.tombs = 0; return m;
 }
 
 static inline void mako_map_bf_rehash(MakoMapBF *m, size_t ncap);
 
 static inline void mako_map_bf_set(MakoMapBF *m, bool key, double val) {
-    if (MAKO_UNLIKELY((m->len + 1) * 4 >= m->cap * 3)) mako_map_bf_rehash(m, m->cap * 2);
+    if (MAKO_UNLIKELY((m->len + m->tombs + 1) * 4 >= m->cap * 3)) mako_map_bf_rehash(m, m->cap * 2);
     uint64_t h = mako_hash_i64(key ? 1 : 0);
     size_t mask = m->cap - 1;
     size_t i = (size_t)(h & mask);
@@ -4298,6 +4359,7 @@ static inline void mako_map_bf_set(MakoMapBF *m, bool key, double val) {
         uint8_t st = m->state[i];
         if (MAKO_LIKELY(st == MAKO_MAP_EMPTY)) {
             size_t slot = (first_tomb != (size_t)-1) ? first_tomb : i;
+            if (first_tomb != (size_t)-1 && m->tombs) m->tombs--;
             m->state[slot] = MAKO_MAP_FULL;
             m->keys[slot] = key;
             m->vals[slot] = val;
@@ -4357,7 +4419,7 @@ static inline void mako_map_bf_delete(MakoMapBF *m, bool key) {
     for (;;) {
         if (m->state[i] == MAKO_MAP_EMPTY) return;
         if (m->state[i] == MAKO_MAP_FULL && m->keys[i] == key) {
-            m->state[i] = MAKO_MAP_TOMB; m->len--; return;
+            m->state[i] = MAKO_MAP_TOMB; m->len--; m->tombs++; return;
         }
         i = (i + 1) & (m->cap - 1);
     }
@@ -4377,6 +4439,9 @@ typedef struct {
     bool *vals;
     size_t cap;
     size_t len;
+    /* Tombstones from delete; counted toward growth so churn
+     * cannot fill every slot with FULL or TOMB. */
+    size_t tombs;
 } MakoMapBB;
 
 static inline MakoMapBB mako_map_bb_new(size_t hint) {
@@ -4392,13 +4457,13 @@ static inline MakoMapBB mako_map_bb_new(size_t hint) {
         fprintf(stderr, "mako: OOM in map_bb_new\n");
         abort();
     }
-    m.cap = cap; m.len = 0; return m;
+    m.cap = cap; m.len = 0; m.tombs = 0; return m;
 }
 
 static inline void mako_map_bb_rehash(MakoMapBB *m, size_t ncap);
 
 static inline void mako_map_bb_set(MakoMapBB *m, bool key, bool val) {
-    if (MAKO_UNLIKELY((m->len + 1) * 4 >= m->cap * 3)) mako_map_bb_rehash(m, m->cap * 2);
+    if (MAKO_UNLIKELY((m->len + m->tombs + 1) * 4 >= m->cap * 3)) mako_map_bb_rehash(m, m->cap * 2);
     uint64_t h = mako_hash_i64(key ? 1 : 0);
     size_t mask = m->cap - 1;
     size_t i = (size_t)(h & mask);
@@ -4407,6 +4472,7 @@ static inline void mako_map_bb_set(MakoMapBB *m, bool key, bool val) {
         uint8_t st = m->state[i];
         if (MAKO_LIKELY(st == MAKO_MAP_EMPTY)) {
             size_t slot = (first_tomb != (size_t)-1) ? first_tomb : i;
+            if (first_tomb != (size_t)-1 && m->tombs) m->tombs--;
             m->state[slot] = MAKO_MAP_FULL;
             m->keys[slot] = key;
             m->vals[slot] = val;
@@ -4466,7 +4532,7 @@ static inline void mako_map_bb_delete(MakoMapBB *m, bool key) {
     for (;;) {
         if (m->state[i] == MAKO_MAP_EMPTY) return;
         if (m->state[i] == MAKO_MAP_FULL && m->keys[i] == key) {
-            m->state[i] = MAKO_MAP_TOMB; m->len--; return;
+            m->state[i] = MAKO_MAP_TOMB; m->len--; m->tombs++; return;
         }
         i = (i + 1) & (m->cap - 1);
     }
