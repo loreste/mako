@@ -4488,6 +4488,10 @@ typedef struct {
     MakoString *vals;
     size_t cap;
     size_t len;
+    /* Tombstones left by delete. Growth must account for these: `len` alone
+     * stays flat under a delete/insert cycle while tombstones fill the table,
+     * and a probe that finds no EMPTY slot never terminates. */
+    size_t tombs;
 } MakoMapSS;
 
 static inline MakoMapSS mako_map_ss_new(size_t hint) {
@@ -4503,11 +4507,12 @@ static inline MakoMapSS mako_map_ss_new(size_t hint) {
     if (!m.state || !m.hashes || !m.keys || !m.vals) {
         free(m.state); free(m.hashes); free(m.keys); free(m.vals);
         m.state = NULL; m.hashes = NULL; m.keys = NULL; m.vals = NULL;
-        m.cap = 0; m.len = 0;
+        m.cap = 0; m.len = 0; m.tombs = 0;
         return m;
     }
     m.cap = cap;
     m.len = 0;
+    m.tombs = 0;
     return m;
 }
 
@@ -4515,7 +4520,10 @@ static inline void mako_map_ss_rehash(MakoMapSS *m, size_t ncap);
 
 /* Take ownership of key and val (no clone). */
 static inline void mako_map_ss_set_take(MakoMapSS *m, MakoString key, MakoString val) {
-    if (MAKO_UNLIKELY((m->len + 1) * 4 >= m->cap * 3)) {
+    /* Count tombstones toward the load factor. Growing on `len` alone lets a
+     * delete/insert cycle fill every slot with FULL or TOMB, after which the
+     * probe below finds no EMPTY and spins forever. Rehash drops tombstones. */
+    if (MAKO_UNLIKELY((m->len + m->tombs + 1) * 4 >= m->cap * 3)) {
         mako_map_ss_rehash(m, m->cap * 2);
     }
     uint64_t h = mako_hash_bytes(key.data, key.len);
@@ -4526,6 +4534,7 @@ static inline void mako_map_ss_set_take(MakoMapSS *m, MakoString key, MakoString
         uint8_t st = m->state[i];
         if (MAKO_LIKELY(st == MAKO_MAP_EMPTY)) {
             size_t slot = (first_tomb != (size_t)-1) ? first_tomb : i;
+            if (first_tomb != (size_t)-1 && m->tombs) m->tombs--;
             m->state[slot] = MAKO_MAP_FULL;
             m->hashes[slot] = h;
             m->keys[slot] = key;
@@ -4628,6 +4637,7 @@ static inline void mako_map_ss_delete(MakoMapSS *m, MakoString key) {
             m->vals[i].len = 0;
             m->state[i] = MAKO_MAP_TOMB;
             m->len--;
+            m->tombs++;
             return;
         }
         i = (i + 1) & (m->cap - 1);

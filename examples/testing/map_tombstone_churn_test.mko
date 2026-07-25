@@ -1,0 +1,16 @@
+// Delete leaves a tombstone. If growth is triggered on `len` alone, a
+// delete/insert cycle keeps `len` flat while tombstones fill the table, and
+// the insert probe — which only reuses a tombstone after finding an EMPTY
+// slot — spins forever. This hangs rather than failing when it regresses.
+
+fn TestMapSsTombstoneChurn() {
+    var m = make(map[string]string, 8)
+    var i = 0
+    while i < 20000 {
+        let k = "k" + int_to_string(i)
+        m[k] = "v"
+        delete(m, k)
+        i = i + 1
+    }
+    assert_eq(len(m), 0)
+}
