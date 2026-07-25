@@ -7,10 +7,10 @@ BIN_DIR ?= $(PREFIX)/bin
 SHARE_DIR ?= $(PREFIX)/share/mako
 RUNTIME_DST ?= $(SHARE_DIR)/runtime
 CARGO ?= cargo
-TARGET_DIR ?= $(shell $(CARGO) metadata --format-version 1 --no-deps 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin)["target_directory"])' 2>/dev/null || echo target)
+TARGET_DIR ?= $(shell$(CARGO) metadata --format-version 1 --no-deps 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin)["target_directory"])' 2>/dev/null || echo target)
 MAKO_BIN := $(TARGET_DIR)/release/mako
 
-.PHONY: all release build install uninstall test help clean version
+.PHONY: all release build install uninstall test help clean version structure
 
 all: release
 
@@ -31,18 +31,11 @@ install: release
 	  install -m 644 runtime/third_party/README.md "$(RUNTIME_DST)/third_party/"; \
 	fi
 	@if [ -d std ]; then \
-	  rm -rf "$(SHARE_DIR)/std"; mkdir -p "$(SHARE_DIR)/std"; cp -R std/. "$(SHARE_DIR)/std/"; \
-	fi
-	@VER=$$("$(BIN_DIR)/mako" version 2>/dev/null || true); \
+	  rm -rf "$(SHARE_DIR)/std"; mkdir -p "$(SHARE_DIR)/std"; cp -R std/. "$(SHARE_DIR)/std/"; \ 	fi 	@VER=$$("$(BIN_DIR)/mako" version 2>/dev/null || true); \
 	HOST=$$(uname -s 2>/dev/null)-$$(uname -m 2>/dev/null); \
-	TS=$$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date); \
-	printf '%s\n' \
-	  '{' \
-	  '  "schema": "mako.install.v1",' \
-	  "  \"version\": \"$$VER\"," \
+	TS=$$(date -u +\%Y-\%m-\%dT\%H:\%M:\%SZ 2>/dev/null \vert{}\vert{} date); \ 	printf '\%s\n' \ 	  '{' \ 	  '  "schema": "mako.install.v1",' \ 	  "  \"version\": \"$$VER\"," \
 	  "  \"prefix\": \"$(PREFIX)\"," \
-	  "  \"host\": \"$$HOST\"," \
-	  "  \"installedAt\": \"$$TS\"," \
+	  "  \"host\": \"$$HOST\"," \ 	  "  \"installedAt\": \"$$TS\"," \
 	  "  \"runtime\": \"$(RUNTIME_DST)\"," \
 	  "  \"std\": \"$(SHARE_DIR)/std\"" \
 	  '}' > "$(SHARE_DIR)/install-manifest.json"
@@ -63,8 +56,11 @@ version:
 	$(CARGO) run --quiet --release -- --version
 
 help:
-	@echo "Targets: release install uninstall test version help"
+	@echo "Targets: release install uninstall test version help structure"
 	@echo "PREFIX=$(PREFIX)  RUNTIME_DST=$(RUNTIME_DST)"
 
 clean:
 	$(CARGO) clean
+
+structure:
+	@bash scripts/update_structure.sh

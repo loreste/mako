@@ -44,6 +44,7 @@ MAKO_LIVE_TLS=1 cargo run --release -- test examples/testing
 ```
 
 ## Project structure
+To help you navigate the codebase, here is an overview of how the repository is organized:
 
 ```
 src/              Compiler (Rust) — lexer, parser, types, codegen, CLI
