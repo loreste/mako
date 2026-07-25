@@ -327,13 +327,16 @@ static inline int mako_gpu_ocl_init_slot(int di) {
     cl_context ctx = clCreateContext(NULL, 1, &dev, NULL, NULL, &err);
     if (err != CL_SUCCESS || !ctx) return 0;
     /* 1.x queue API — portable across Apple, NVIDIA, AMD, Intel ICDs. */
-#if defined(__clang__)
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+/* `#pragma GCC diagnostic` is honored by clang as well, so one form suppresses
+ * the 1.x-queue deprecation on both toolchains. `__GNUC__` is defined by clang
+ * too, which is why it alone is enough here. */
+#if defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 #endif
     cl_command_queue q = clCreateCommandQueue(ctx, dev, 0, &err);
-#if defined(__clang__)
-#pragma clang diagnostic pop
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
 #endif
     if (err != CL_SUCCESS || !q) {
         clReleaseContext(ctx);
