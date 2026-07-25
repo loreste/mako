@@ -774,7 +774,11 @@ static inline MakoStrArray mako_slices_unique_strs(MakoStrArray a) {
     MakoStrArray out = mako_str_array_make((int64_t)n, (int64_t)n);
     size_t j = 0;
     for (size_t i = 0; i < sorted.len; i++) {
-        if (i == 0 || !mako_str_eq(sorted.data[i], sorted.data[i - 1])) {
+        /* Compare against the last *kept* element, not sorted.data[i - 1]:
+         * a duplicate at i-1 was freed on the previous iteration, so reading
+         * it here is a use-after-free. The input is sorted, so duplicates are
+         * adjacent and the last kept element is the correct anchor. */
+        if (j == 0 || !mako_str_eq(sorted.data[i], out.data[j - 1])) {
             out.data[j++] = sorted.data[i]; /* move */
         } else {
             mako_str_free(sorted.data[i]); /* duplicate clone — drop */
