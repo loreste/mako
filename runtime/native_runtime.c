@@ -2014,6 +2014,9 @@ typedef struct {
     MakoNativeString **vals;
     size_t cap;
     size_t len;
+    /* Tombstones from delete: growth on len alone lets churn fill every
+     * slot with FULL or TOMB, and the bounded probe then finds none. */
+    size_t tombs;
 } MakoNativeMapSS;
 
 static MakoNativeMapSS *mako_native_map_ss_new(size_t hint) {
@@ -2038,12 +2041,13 @@ static void mako_native_map_ss_rehash(MakoNativeMapSS *m, size_t ncap);
 void mako_native_map_ss_set_ptr(MakoNativeMapSS *m, MakoNativeString *key,
                                 MakoNativeString *val) {
     if (!m) abort();
-    if (m->len * 10 >= m->cap * 7) mako_native_map_ss_rehash(m, m->cap * 2);
+    if ((m->len + m->tombs) * 10 >= m->cap * 7) mako_native_map_ss_rehash(m, m->cap * 2);
     size_t i = (size_t)(mako_native_hash_str(key) & (m->cap - 1));
     size_t first_tomb = (size_t)-1;
     for (size_t n = 0; n < m->cap; ++n) {
         if (m->state[i] == MAKO_NMAP_EMPTY) {
             size_t slot = first_tomb != (size_t)-1 ? first_tomb : i;
+            if (first_tomb != (size_t)-1 && m->tombs) m->tombs--;
             m->state[slot] = MAKO_NMAP_FULL;
             m->keys[slot] = mako_native_string_clone_ptr(key);
             m->vals[slot] = mako_native_string_clone_ptr(val);
@@ -2114,6 +2118,7 @@ void mako_native_map_ss_delete_ptr(MakoNativeMapSS *m, MakoNativeString *key) {
             m->keys[i] = NULL; m->vals[i] = NULL;
             m->state[i] = MAKO_NMAP_TOMB;
             m->len--;
+            m->tombs++;
             return;
         }
         i = (i + 1) & (m->cap - 1);
