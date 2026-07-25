@@ -150,11 +150,28 @@ fn validate_direct_backend_modes(
         ));
         return Err(());
     }
+    // `leak` and `address` work on the direct backends because effectively all
+    // heap traffic goes through the C runtime, which is compiled from source at
+    // link time and therefore *is* instrumented, and because both sanitizers
+    // additionally intercept the allocator process-wide — that catches leaks,
+    // double frees and invalid frees even in allocations made from generated
+    // code. What they cannot see is a bad access inside Cranelift/LLVM-emitted
+    // machine code itself, which carries no redzones or shadow memory.
+    //
+    // `thread` and `memory` are rejected: both need every load/store
+    // instrumented to mean anything, so on an uninstrumented code generator
+    // they would report "clean" while seeing almost nothing. A silent
+    // under-report is worse than an explicit refusal.
     if let Some(s) = opts.sanitize.as_deref() {
-        emit_plain_error(&format!(
-            "--sanitize={s} is not implemented for --backend {name}; {use_c}"
-        ));
-        return Err(());
+        if !matches!(s, "leak" | "address") {
+            emit_plain_error(&format!(
+                "--sanitize={s} is not implemented for --backend {name} \
+                 (only `leak` and `address` are; they rely on allocator \
+                 interception, while {s} needs instrumented loads/stores); \
+                 {use_c}"
+            ));
+            return Err(());
+        }
     }
     if opts.static_link {
         emit_plain_error(&format!(
