@@ -121,42 +121,47 @@ necessary for broad optimizing parity.
 
 ### 2026-07-25 Apple arm64, LLVM release, fifteen samples
 
-Full gate on a quiet host. Ratios are median(mako-native) / median(baseline),
-so below 1.000 means Mako wins.
+Full gate on an otherwise idle host. Ratios are median(mako-native) divided by
+median(baseline), so 1.000 is equal and higher is slower.
 
-| workload | vs hand C | vs Rust |
-|----------|----------:|--------:|
-| `native_fib` | **0.986** | **0.998** |
+| workload | vs baseline C | vs baseline Rust |
+|----------|--------------:|-----------------:|
+| `native_fib` | 0.986 | 0.998 |
 | `native_parity` | 1.011 | 1.002 |
 | `native_slice` | 1.113 | 1.096 |
 | `native_string_slice` | 1.154 | 1.252 |
-| `native_map` | 1.540 | **0.229** |
+| `native_map` | 1.540 | 0.229 |
 | `native_io` | 1.122 | 1.139 |
 
-`native_fib` is at or slightly past both baselines, and `native_map` is 4.4×
-faster than Rust (8.088 ms vs 35.301 ms) while remaining 1.54× behind hand C
-(5.252 ms). Compile latency stays far ahead: 68.120 ms native versus 331.082 ms
-for the C backend (0.206×) at 0.687× compiler RSS.
+Compile latency was 68.120 ms for the native backend against 331.082 ms for the
+C backend, at 0.687× the compiler RSS.
 
-Two honest notes. First, sample count matters more than expected at this scale:
-`native_string_slice` vs Rust measured 1.203, 1.333, 1.356 and 1.415 across four
-seven-sample runs, then settled at 1.252 with twenty-five. The gate default moved
-to fifteen because a spread that wide can report a regression that is not there —
-one was reported and then disproved this session by rebuilding the pre-change
-compiler and measuring both under identical conditions (5.27 ms before, 5.07 ms
-after).
+The baselines are the programs in `examples/bench/*.c` and `*.rs`. They are
+small, single-purpose, and written to do the same work as the Mako version;
+they are not tuned implementations and should not be read as a statement about
+those languages. The numbers are here to catch regressions between Mako
+releases.
 
-Second, the remaining gaps are structural rather than waste. `mako_str_clone` is
-already `malloc` + `memcpy` + terminator, identical to `strdup`, and codegen
-already passes string literals as borrowed views rather than allocating. The
-`string_slice` gap is a 16-byte length-carrying `MakoString` against an 8-byte
-`char *`, which also explains the RSS gap (9.5 MB vs 3.8 MB). Closing it means
-small-string optimization — inline storage for short strings, making the workload
-allocation-free where `strdup` and `to_owned` cannot be. The `native_map` gap
-measures ~1.4 ns per operation over two million operations, consistent with the
-per-`set` growth check and tombstone bookkeeping that the hand-C baseline omits
-because it never grows and never deletes; beating it likely needs a pre-sized
-no-grow map shape rather than micro-tuning.
+Two things worth recording about the method. Sample count matters at this
+scale: `native_string_slice` measured 1.203, 1.333, 1.356 and 1.415 against the
+Rust baseline across four seven-sample runs, then settled at 1.252 with
+twenty-five. That spread is wide enough to report a regression that is not
+there, and one was reported this session before being disproved by rebuilding
+the previous compiler and measuring both under the same conditions (5.27 ms
+before the change, 5.07 ms after). The gate default is now fifteen samples.
+
+The remaining gaps look structural rather than accidental. `mako_str_clone` is
+already `malloc` plus `memcpy` plus a terminator, and codegen already passes
+string literals as borrowed views instead of allocating them, so the
+`string_slice` gap is not redundant work — it is a 16-byte length-carrying
+`MakoString` against an 8-byte pointer, which also accounts for the RSS
+difference (9.5 MB against 3.8 MB). Inline storage for short strings would
+remove the allocation entirely; that is an ABI change across the runtime and
+has not been attempted. The `native_map` gap works out to roughly 1.4 ns per
+operation over two million operations, which is consistent with the per-`set`
+growth check and tombstone bookkeeping that a fixed-size baseline does not need
+to do. A pre-sized map that cannot grow or delete would close it; micro-tuning
+the existing one probably will not.
 
 **IDs on the hot path:** `Uuid` / ULID are **16-byte Copy POD** (stack, no GC).
 Prefer `uuid_v7` / `ulid_new` for time-ordered keys; format to string only at

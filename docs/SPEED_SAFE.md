@@ -1,11 +1,12 @@
 # Speed and memory safety
 
-We want both. Native speed without a garbage collector, free that happens when
-ownership says so, and release builds we actually measure instead of talking
-about.
+Both matter here. Compiled output with no garbage collector, frees that happen
+where ownership says they do, and release builds that get measured.
 
-If someone asks “is Mako faster than X?”, the honest answer is always *on
-which workload?* There’s no universal ranking here.
+Performance questions only have answers per workload. The numbers in
+[PERFORMANCE.md](PERFORMANCE.md) are recorded against small reference programs
+in `examples/bench` and are there to catch regressions between releases, not to
+rank languages.
 
 Tip is **0.4.16+**. Background reading: [SPEED.md](SPEED.md),
 [MEMORY_SAFETY.md](MEMORY_SAFETY.md), [PERFORMANCE.md](PERFORMANCE.md),
@@ -20,13 +21,14 @@ Memory first in spirit, even when we’re chasing speed: no GC, free is
 deterministic, bounds checks stay on the safe path. The gate for that is
 `scripts/memory-safety-gate.sh`.
 
-Speed is the other bar — stay competitive with hand-written C and Rust on
-*named* benches, not slogans. That’s `scripts/native-bench-gate.sh` and the
-JSON baselines next to it.
+Speed is the other bar, tracked per named workload by
+`scripts/native-bench-gate.sh` against the JSON baselines next to it. A
+workload that regresses fails the gate; a workload we are slow on stays in the
+table.
 
-Turning off safe-path checks to win a microbench is cheating. Adding a
-collector so free feels “automatic” is a different language. What we actually
-do is care about layout, AOT opts, and (when it helps) offline PGO.
+Disabling safe-path checks to improve a microbench is out of bounds, and so is
+adding a collector. The levers are data layout, ahead-of-time optimization, and
+offline PGO where it measurably helps.
 
 ---
 
@@ -62,10 +64,12 @@ Apple arm64, 2026-07-23. Re-run before you quote anything:
 MAKO_NATIVE_WORKLOADS=native_map ./scripts/native-bench-gate.sh
 ```
 
-On that box, map[int]int fill+sum of 1e6 was about 1.7× slower than hand-C and
-about 3.7× faster than Rust — owned map, free on scope exit. Fib has been near
-parity with both in earlier samples. Slice sum stayed inside the ~1.25× gate
-with checked index still on.
+On that box, `map[int]int` fill-and-sum over 1e6 entries ran at ratio 1.54
+against the C reference program and 0.23 against the Rust one. `fib` measured
+near 1.0 against both. Slice sum stayed inside the 1.25 gate with the checked
+index still enabled. Ratios are Mako divided by reference, so higher is slower.
+The reference programs are small and untuned; see
+[PERFORMANCE.md](PERFORMANCE.md) for the full table and the sampling caveats.
 
 Hardware, flags, thermal noise — all of it moves the numbers. The leftover map
 gap vs hand-C is partly layout (stack header and freer LICM in the C version),

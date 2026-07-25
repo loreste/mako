@@ -79,9 +79,10 @@ Learned the hard way in 0.4.16, when a double-free shipped with the gate green.
    adding its fixture to the list in `scripts/memory-safety-gate.sh`.
 2. **A per-call leak is invisible to a run-once fixture.** It passes whether
    the result is reclaimed or not. Loop thousands of iterations with
-   *let-bound* arguments — the real-server shape — under LeakSanitizer, and
-   require the leak total to be flat in the iteration count. Linear growth is
-   one leak per call: fine in a CLI, fatal in a service.
+   *let-bound* arguments — the shape a server actually uses — under
+   LeakSanitizer, and require the leak total to be flat in the iteration count.
+   Growth that scales with the loop is one leak per call, which a short-lived
+   process will never show.
 3. **Sanitizers run on Linux.** The ASan runtime deadlocks at startup on macOS,
    so results from a Mac host are not evidence. Note also that standalone LSan
    tolerates a double-free — use `--sanitize address`, or a plain build, to

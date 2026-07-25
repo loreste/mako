@@ -71,7 +71,7 @@ unit tests, 0 failures on the native gate · CI ASan/UBSan/TSan as configured.
 Ship **0.4.5** as:
 
 1. **Full language on native** — Cranelift debug path runs the entire testing corpus.
-2. **Release optimizer path** — LLVM competitive with C/Rust on **published** workloads (honest per-workload gates).
+2. **Release optimizer path** — LLVM backend measured on **published** workloads, with per-workload gates and results recorded either way.
 3. **Installable product** — one-binary install + packaging seeds + versioned notes/checksums.
 4. **No silent lying** — unsupported modes hard-error; docs match the tree.
 

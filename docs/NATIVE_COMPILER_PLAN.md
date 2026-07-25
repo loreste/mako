@@ -3,8 +3,9 @@
 ## Goal
 
 Replace the C backend with mako's own compiler that emits machine code directly.
-Priorities, in order: **runtime speed** (faster than C/Rust per workload),
-**fast compiles**, and **zero install-time dependencies** for end users.
+Priorities, in order: **runtime speed** (tracked per workload against the
+reference programs in `examples/bench`), **fast compiles**, and **zero
+install-time dependencies** for end users.
 
 ## Architecture (decided)
 
@@ -26,7 +27,7 @@ depend on no external toolchain.
   no pointer UB, ownership-driven bounds-check elision, guaranteed devirtualization,
   and PGO.
 - **Debug backend = statically-linked Cranelift** (the existing `src/native_codegen.rs`).
-  Optimizes for compile speed; beats clang debug builds.
+  Optimizes for compile speed rather than output speed.
 - **Linker = bundled `lld`** (ships with LLVM). No external `ld` needed.
 - **Runtime C library** is precompiled once (when mako is built) into a static
   archive shipped inside mako and linked by `lld`. No per-program C compilation.
