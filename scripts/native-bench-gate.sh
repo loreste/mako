@@ -14,8 +14,13 @@ max_runtime_rss_ratio="${MAKO_NATIVE_RUNTIME_RSS_RATIO:-1.25}"
 # ~1.01× slim hand-C is the residual floor after dead_strip (a few hundred
 # bytes of runtime entrypoints); allow a little headroom for host variance.
 max_binary_ratio="${MAKO_NATIVE_BINARY_RATIO:-1.05}"
-samples="${MAKO_NATIVE_BENCH_SAMPLES:-7}"
-warmups="${MAKO_NATIVE_BENCH_WARMUPS:-2}"
+# These workloads run 3-5ms, which is short enough that 7 samples does not
+# resolve them on a loaded host: native_string_slice vs rust measured 1.203,
+# 1.333, 1.356 and 1.415 across four n=7 runs, then settled at 1.252 with
+# n=25. Median of 15 with round-robin interleaving keeps the gate honest
+# without doubling its wall time. Raise it further when re-baselining.
+samples="${MAKO_NATIVE_BENCH_SAMPLES:-15}"
+warmups="${MAKO_NATIVE_BENCH_WARMUPS:-3}"
 out_dir="${MAKO_NATIVE_BENCH_OUT:-$repo_dir/out/native-bench}"
 mako_bin="$repo_dir/target/release/mako"
 
