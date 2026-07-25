@@ -906,7 +906,10 @@ static inline void mako_diam_conn_extract_msgs(MakoDiamConn *c) {
             return;
         }
         size_t inq_lim = mako_diam_eff_inq_bytes();
-        if (inq_lim > 0 && c->inq_bytes > inq_lim - (size_t)mlen) {
+        /* mlen is wire-supplied: check it against the budget before subtracting
+         * (mlen > inq_lim would wrap and let the message through). */
+        if (inq_lim > 0
+            && ((size_t)mlen > inq_lim || c->inq_bytes > inq_lim - (size_t)mlen)) {
             /* Memory budget: refuse to queue more complete messages. */
             return;
         }

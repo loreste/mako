@@ -887,7 +887,9 @@ static inline int64_t mako_reqctx_set(int64_t ctx_id, MakoString key, MakoString
     for (int64_t i = 0; i < MAKO_REQCTX_ENTRY_MAX; i++) {
         MakoReqCtxEntry *e = &mako_reqctx_entries[i];
         if (e->live && e->ctx == ctx_id && mako_str_eq(e->key, key)) {
+            MakoString old = e->value;
             e->value = mako_str_clone(value);
+            mako_str_free(old);
             return 1;
         }
     }
@@ -1017,7 +1019,7 @@ static inline MakoString mako_http_header(int64_t conn, MakoString name) {
         return c->content_type_req;
     char tmp[512];
     if (mako_http_find_header(c->raw, nbuf, tmp, sizeof(tmp)))
-        return mako_arena_text(&c->arena, mako_str_from_cstr(tmp));
+        return mako_arena_cstr(&c->arena, tmp);
     return mako_str_from_cstr("");
 }
 
@@ -1130,7 +1132,9 @@ static inline MakoString mako_http_health_json(MakoString service, int64_t ready
 static inline int64_t mako_http_respond_health(int64_t conn, MakoString service, int64_t ready) {
     if (mako_http_shutdown_state.requested) ready = 0;
     MakoString body = mako_http_health_json(service, ready);
-    return mako_http_respond_json(conn, ready ? 200 : 503, body);
+    int64_t rc = mako_http_respond_json(conn, ready ? 200 : 503, body);
+    mako_str_free(body);
+    return rc;
 }
 
 static inline int64_t mako_http_shutdown_drain_conn(int64_t conn) {
@@ -1995,14 +1999,15 @@ static inline MakoString mako_http2_response_ex(
         default: {
             char code[16];
             snprintf(code, sizeof(code), "%lld", (long long)status);
-            sh = mako_hpack_encode_literal(mako_str_from_cstr(":status"),
-                                           mako_str_from_cstr(code));
+            /* Views: encode_literal copies, so no owned temps to reclaim. */
+            sh = mako_hpack_encode_literal(mako_str_view(":status", 7),
+                                           mako_str_view(code, strlen(code)));
         }
     }
     MakoString block = sh;
     if (content_type.data && content_type.len > 0) {
         MakoString cth = mako_hpack_encode_literal(
-            mako_str_from_cstr("content-type"), content_type
+            mako_str_view("content-type", 12), content_type
         );
         MakoString next = mako_str_concat(block, cth);
         mako_str_free(block);
@@ -2011,8 +2016,8 @@ static inline MakoString mako_http2_response_ex(
     }
     char clen[24];
     snprintf(clen, sizeof(clen), "%zu", body.data ? body.len : 0);
-    MakoString clh = mako_hpack_encode_literal(mako_str_from_cstr("content-length"),
-                                               mako_str_from_cstr(clen));
+    MakoString clh = mako_hpack_encode_literal(mako_str_view("content-length", 14),
+                                               mako_str_view(clen, strlen(clen)));
     {
         MakoString next = mako_str_concat(block, clh);
         mako_str_free(block);
@@ -4175,7 +4180,9 @@ static inline MakoString mako_http_request_ct(
     memset(&addr, 0, sizeof(addr));
     addr.sin_family = AF_INET;
     addr.sin_port = htons((uint16_t)port);
-    memcpy(&addr.sin_addr, he->h_addr_list[0], (size_t)he->h_length);
+    size_t alen = (size_t)he->h_length;
+    if (alen > sizeof(addr.sin_addr)) alen = sizeof(addr.sin_addr);
+    memcpy(&addr.sin_addr, he->h_addr_list[0], alen);
     if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
         mako_sock_close(fd);
         return mako_str_from_cstr("");

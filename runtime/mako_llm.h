@@ -125,8 +125,8 @@ static inline MakoString mako_llm_chat_body(
 static inline MakoString mako_llm_system_user(
     MakoString model, MakoString system, MakoString user
 ) {
-    MakoString s = mako_llm_message(mako_str_from_cstr("system"), system);
-    MakoString u = mako_llm_message(mako_str_from_cstr("user"), user);
+    MakoString s = mako_llm_message(mako_str_view("system", 6), system);
+    MakoString u = mako_llm_message(mako_str_view("user", 4), user);
     MakoString arr = mako_str_from_cstr("[]");
     MakoString a1 = mako_llm_messages_append(arr, s);
     mako_str_free(arr);
@@ -202,9 +202,8 @@ static inline MakoString mako_llm_content(MakoString response_json) {
     const char *src = response_json.data ? response_json.data : "";
     const char *msg = strstr(src, "\"message\"");
     const char *scan = msg ? msg : src;
-    MakoString key = mako_str_from_cstr("content");
     MakoString out = mako_json_get_string(
-        (MakoString){(char *)(uintptr_t)scan, strlen(scan)}, key
+        (MakoString){(char *)(uintptr_t)scan, strlen(scan)}, mako_str_view("content", 7)
     );
     /* Unescape common sequences in place */
     if (!out.data) return mako_str_from_cstr("");
@@ -238,7 +237,7 @@ static inline MakoString mako_llm_content(MakoString response_json) {
 }
 
 static inline MakoString mako_llm_finish_reason(MakoString response_json) {
-    return mako_json_get_string(response_json, mako_str_from_cstr("finish_reason"));
+    return mako_json_get_string(response_json, mako_str_view("finish_reason", 13));
 }
 
 static inline int64_t mako_llm_usage_prompt_tokens(MakoString response_json) {
@@ -247,7 +246,7 @@ static inline int64_t mako_llm_usage_prompt_tokens(MakoString response_json) {
     if (!u) return -1;
     return mako_json_get_int(
         (MakoString){(char *)(uintptr_t)u, strlen(u)},
-        mako_str_from_cstr("prompt_tokens")
+        mako_str_view("prompt_tokens", 13)
     );
 }
 
@@ -257,7 +256,7 @@ static inline int64_t mako_llm_usage_completion_tokens(MakoString response_json)
     if (!u) return -1;
     return mako_json_get_int(
         (MakoString){(char *)(uintptr_t)u, strlen(u)},
-        mako_str_from_cstr("completion_tokens")
+        mako_str_view("completion_tokens", 17)
     );
 }
 
@@ -267,7 +266,7 @@ static inline int64_t mako_llm_usage_total_tokens(MakoString response_json) {
     if (!u) return -1;
     return mako_json_get_int(
         (MakoString){(char *)(uintptr_t)u, strlen(u)},
-        mako_str_from_cstr("total_tokens")
+        mako_str_view("total_tokens", 12)
     );
 }
 
@@ -312,7 +311,7 @@ static inline MakoString mako_llm_tool_call_name(MakoString response_json, int64
     if (!p) return mako_str_from_cstr("");
     return mako_json_get_string(
         (MakoString){(char *)(uintptr_t)p, strlen(p)},
-        mako_str_from_cstr("name")
+        mako_str_view("name", 4)
     );
 }
 
@@ -323,7 +322,7 @@ static inline MakoString mako_llm_tool_call_args(MakoString response_json, int64
     if (!p) return mako_str_from_cstr("");
     return mako_json_get_string(
         (MakoString){(char *)(uintptr_t)p, strlen(p)},
-        mako_str_from_cstr("arguments")
+        mako_str_view("arguments", 9)
     );
 }
 
@@ -363,7 +362,7 @@ static inline MakoString mako_llm_sse_delta(MakoString chunk_json) {
     if (!delta) return mako_str_from_cstr("");
     return mako_json_get_string(
         (MakoString){(char *)(uintptr_t)delta, strlen(delta)},
-        mako_str_from_cstr("content")
+        mako_str_view("content", 7)
     );
 }
 
@@ -737,7 +736,7 @@ static inline MakoString mako_llm_chat(
     memcpy(url, b, bl);
     memcpy(url + bl, "/chat/completions", 18);
     MakoString resp = mako_llm_https_post(
-        mako_str_from_cstr(url), api_key, body, timeout_ms, 1
+        mako_str_view(url, bl + 17), api_key, body, timeout_ms, 1
     );
     return resp;
 }
@@ -826,7 +825,7 @@ static inline MakoString mako_llm_chat_stream(
     char host[256], path[1024];
     int port = 443;
     if (!mako_llm_parse_https_url(
-            mako_str_from_cstr(url), host, sizeof(host), &port, path, sizeof(path)
+            mako_str_view(url, bl + 17), host, sizeof(host), &port, path, sizeof(path)
         )) {
         mako_str_free(sbody);
         return mako_str_from_cstr("{\"error\":\"invalid_https_url\"}");
@@ -1055,7 +1054,7 @@ static inline MakoString mako_llm_embeddings(
     memcpy(url, b, bl);
     memcpy(url + bl, "/embeddings", 12);
     return mako_llm_https_post(
-        mako_str_from_cstr(url), api_key, body, timeout_ms, 1
+        mako_str_view(url, bl + 11), api_key, body, timeout_ms, 1
     );
 }
 
@@ -1226,7 +1225,7 @@ static inline MakoString mako_llm_error_message(MakoString resp) {
     if (*q == '{') {
         MakoString msg = mako_json_get_string(
             (MakoString){(char *)(uintptr_t)q, strlen(q)},
-            mako_str_from_cstr("message")
+            mako_str_view("message", 7)
         );
         if (msg.data && msg.len) return msg;
         mako_str_free(msg);

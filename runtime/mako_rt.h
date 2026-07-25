@@ -1594,9 +1594,10 @@ static inline MakoResultInt mako_errorf(MakoString fmt, MakoString arg) {
         }
     }
     if (!has_pct) {
-        MakoString sep = mako_str_from_cstr(": ");
-        MakoString mid = mako_str_concat(fmt, sep);
-        return mako_err_int(mako_str_concat(mid, arg));
+        MakoString mid = mako_str_concat(fmt, mako_str_view(": ", 2));
+        MakoString out = mako_str_concat(mid, arg);
+        mako_str_free(mid);
+        return mako_err_int(out);
     }
     /* Split on first "%s" */
     size_t pos = 0;
@@ -1606,7 +1607,9 @@ static inline MakoResultInt mako_errorf(MakoString fmt, MakoString arg) {
     MakoString left = {fmt.data, pos};
     MakoString right = {fmt.data + pos + 2, fmt.len - pos - 2};
     MakoString mid = mako_str_concat(left, arg);
-    return mako_err_int(mako_str_concat(mid, right));
+    MakoString out = mako_str_concat(mid, right);
+    mako_str_free(mid);
+    return mako_err_int(out);
 }
 
 /* Extract Err message; empty string if Ok. */
@@ -1752,7 +1755,11 @@ static inline int64_t mako_rune_count(MakoString s) {
 }
 
 static inline bool mako_str_eq(MakoString a, MakoString b) {
-    return a.len == b.len && memcmp(a.data, b.data, a.len) == 0;
+    if (a.len != b.len) return false;
+    /* memcmp is declared non-null in both args even for n == 0, and an empty
+     * MakoString may carry data == NULL — guard before calling it. */
+    if (a.len == 0) return true;
+    return memcmp(a.data, b.data, a.len) == 0;
 }
 
 static inline bool mako_str_contains(MakoString hay, MakoString needle) {
@@ -6716,6 +6723,9 @@ static inline int64_t mako_nursery_drain(MakoNursery *n, int64_t timeout_ms) {
         n->tasks[i] = NULL;
         joined++;
     }
+    free(n->first_err);
+    n->first_err = NULL;
+    n->first_err_len = 0;
     free(n->tasks);
     n->tasks = NULL;
     n->len = n->cap = 0;
@@ -6981,6 +6991,7 @@ static inline MakoArena mako_arena_new(void) {
     a.cap = 4096;
     a.len = 0;
     a.buf = (char *)malloc(a.cap);
+    if (!a.buf) mako_abort("arena: out of memory");
     return a;
 }
 
@@ -6992,7 +7003,10 @@ static inline void *mako_arena_alloc(MakoArena *a, size_t n) {
     if (need > a->cap) {
         size_t nc = a->cap ? a->cap : 4096;
         while (nc < need) nc *= 2;
-        a->buf = (char *)realloc(a->buf, nc);
+        /* Keep the old block on failure — realloc into a temp, then commit. */
+        char *nb = (char *)realloc(a->buf, nc);
+        if (!nb) mako_abort("arena: out of memory");
+        a->buf = nb;
         a->cap = nc;
     }
     a->len += pad;
@@ -7435,15 +7449,16 @@ static inline MakoStrArray mako_sort_strings(MakoStrArray a) {
 /* Regex: `.` ; `*`/`+`/`?` ; `|` ; `[abc]`/`[a-z]`/`[^…]` ; `(…)` numbered captures ; `^`/`$`.
  * RE2-ish escapes: `\d` `\D` `\w` `\W` `\s` `\S` ; literal `\\` `\.` etc.
  * `regex_capture(pat, text, n)` returns group n (1-based); n=0 is full match. */
+/* Match state is per-thread: concurrent tasks must not share capture slots. */
 #define MAKO_RE_MAX_CAPS 9
-static size_t mako_re_cap_off[MAKO_RE_MAX_CAPS];
-static size_t mako_re_cap_len[MAKO_RE_MAX_CAPS];
-static int mako_re_cap_set[MAKO_RE_MAX_CAPS];
-static int mako_re_capture_on;
-static int mako_re_alt_number; /* only top-level | numbering */
-static int mako_re_group_seq;
-static const char *mako_re_text_base;
-static int mako_re_allow_prefix; /* 1 = pattern end succeeds without consuming all text */
+static __thread size_t mako_re_cap_off[MAKO_RE_MAX_CAPS];
+static __thread size_t mako_re_cap_len[MAKO_RE_MAX_CAPS];
+static __thread int mako_re_cap_set[MAKO_RE_MAX_CAPS];
+static __thread int mako_re_capture_on;
+static __thread int mako_re_alt_number; /* only top-level | numbering */
+static __thread int mako_re_group_seq;
+static __thread const char *mako_re_text_base;
+static __thread int mako_re_allow_prefix; /* 1 = pattern end succeeds without consuming all text */
 
 static inline int mako_re_here(const char *pat, size_t plen, const char *text, size_t tlen);
 static inline int mako_re_piece(const char *pat, size_t plen, const char *text, size_t tlen);
@@ -9095,22 +9110,91 @@ static inline int64_t mako_remove_all(MakoString path) {
     return mako_remove_all_depth(pbuf, 0);
 }
 
+/* Copy into a NUL-terminated heap buffer for the C env APIs.
+ *
+ * A borrowed MakoString (mako_str_view) is not guaranteed NUL-terminated, so
+ * handing `.data` straight to getenv/setenv is an over-read. An embedded NUL is
+ * rejected rather than silently truncating the name or value. Caller frees. */
+static inline char *mako_env_cstr(MakoString s) {
+    for (size_t i = 0; i < s.len; i++) {
+        if (s.data[i] == '\0') return NULL;
+    }
+    char *d = (char *)malloc(s.len + 1);
+    if (!d) return NULL;
+    if (s.len) memcpy(d, s.data, s.len);
+    d[s.len] = 0;
+    return d;
+}
+
 static inline MakoString mako_env_get(MakoString key) {
-    const char *k = key.data ? key.data : "";
+    char *k = mako_env_cstr(key);
+    if (!k) return mako_str_from_cstr("");
     const char *v = getenv(k);
-    return mako_str_from_cstr(v ? v : "");
+    MakoString out = mako_str_from_cstr(v ? v : "");
+    free(k);
+    return out;
 }
 
 static inline int64_t mako_env_set(MakoString key, MakoString val) {
-    const char *k = key.data ? key.data : "";
-    const char *v = val.data ? val.data : "";
 #if defined(__wasi__)
     /* WASI preview1: no setenv in wasi-libc — soft-fail. */
-    (void)k;
-    (void)v;
+    (void)key;
+    (void)val;
     return -1;
 #else
-    return mako_setenv(k, v);
+    char *k = mako_env_cstr(key);
+    if (!k) return -1;
+    char *v = mako_env_cstr(val);
+    if (!v) {
+        free(k);
+        return -1;
+    }
+    int rc = mako_setenv(k, v);
+    free(k);
+    free(v);
+    return rc;
+#endif
+}
+
+static inline int64_t mako_env_unset(MakoString key) {
+#if defined(__wasi__)
+    (void)key;
+    return -1;
+#else
+    char *k = mako_env_cstr(key);
+    if (!k) return -1;
+    int rc = mako_unsetenv(k);
+    free(k);
+    return rc;
+#endif
+}
+
+#if defined(_WIN32)
+extern char **_environ;
+#define MAKO_ENVIRON _environ
+#elif defined(__APPLE__)
+#include <crt_externs.h>
+#define MAKO_ENVIRON (*_NSGetEnviron())
+#elif !defined(__wasi__)
+extern char **environ;
+#define MAKO_ENVIRON environ
+#endif
+
+/* Names of every variable in the environment, in platform order. */
+static inline MakoStrArray mako_env_keys(void) {
+    MakoStrArray a = mako_str_array_make(0, 16);
+#if defined(__wasi__)
+    return a;
+#else
+    char **e = MAKO_ENVIRON;
+    if (!e) return a;
+    for (; *e; ++e) {
+        const char *eq = strchr(*e, '=');
+        size_t n = eq ? (size_t)(eq - *e) : strlen(*e);
+        /* append clones its argument — pass a borrow so no temp is leaked. */
+        a = mako_str_array_append(a, mako_str_view(*e, n));
+    }
+    return a;
 #endif
 }
 
@@ -9631,6 +9715,9 @@ static inline void longjmp(jmp_buf env, int val) {
 
 static jmp_buf mako_test_jmp;
 static volatile int mako_test_failed = 0;
+/* Owned copy of the failure text: the caller's MakoString may be a stack view
+ * or freed before mako_test_run prints it. */
+static char mako_test_fail_buf[512];
 static const char *mako_test_fail_msg = NULL;
 static const char *mako_test_current = NULL;
 static char mako_test_sub[128];
@@ -9710,7 +9797,11 @@ static inline void mako_t_run_nested(MakoString name) {
 
 static inline void mako_fail(MakoString msg) {
     mako_test_failed = 1;
-    mako_test_fail_msg = msg.data ? msg.data : "(fail)";
+    size_t fn = msg.data ? msg.len : 0;
+    if (fn >= sizeof(mako_test_fail_buf)) fn = sizeof(mako_test_fail_buf) - 1;
+    if (fn) memcpy(mako_test_fail_buf, msg.data, fn);
+    mako_test_fail_buf[fn] = 0;
+    mako_test_fail_msg = fn ? mako_test_fail_buf : "(fail)";
     if (mako_test_had_sub && mako_test_sub[0]) {
         mako_test_sub_failed = 1;
         fprintf(
@@ -9728,7 +9819,7 @@ static inline void mako_fail(MakoString msg) {
 
 static inline void mako_assert(int64_t cond) {
     if (!cond) {
-        mako_fail(mako_str_from_cstr("assert failed"));
+        mako_fail(mako_str_view("assert failed", 13));
     }
 }
 
@@ -9737,7 +9828,7 @@ static inline void mako_assert_eq(int64_t a, int64_t b) {
         char buf[160];
         snprintf(buf, sizeof(buf), "assert_eq failed: got %lld, want %lld",
                  (long long)a, (long long)b);
-        mako_fail(mako_str_from_cstr(buf));
+        mako_fail(mako_str_view(buf, strlen(buf)));
     }
 }
 
@@ -9747,7 +9838,7 @@ static inline void mako_assert_eq_at(const char *file, int line, int64_t a, int6
         snprintf(buf, sizeof(buf),
                  "assert_eq failed at %s:%d: got %lld, want %lld",
                  file ? file : "?", line, (long long)a, (long long)b);
-        mako_fail(mako_str_from_cstr(buf));
+        mako_fail(mako_str_view(buf, strlen(buf)));
     }
 }
 
@@ -9763,7 +9854,7 @@ static inline void mako_assert_eq_str(MakoString a, MakoString b) {
             (int)b.len,
             b.data ? b.data : ""
         );
-        mako_fail(mako_str_from_cstr(buf));
+        mako_fail(mako_str_view(buf, strlen(buf)));
     }
 }
 

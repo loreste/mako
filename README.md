@@ -12,7 +12,11 @@ tidy up after themselves. The standard library covers the everyday backend
 surface — HTTP, TLS, JSON, databases, networking — and is candid about which
 corners are battle-tested and which are still shallow.
 
-**Status: experimental/alpha (v0.4.13 tip; last tag v0.4.5).** The language works and compiles real
+For services that run for months, **Anneal** folds what actually runs hot in
+production back into the next build — the tuning happens on your build machine,
+never inside the running process. See [Anneal](#anneal--builds-that-learn-from-production).
+
+**Status: experimental/alpha (v0.4.16).** The language works and compiles real
 programs, but the surface is young. Expect breaking changes, missing features,
 and bugs. This is not yet suitable for production use without careful
 evaluation.
@@ -28,7 +32,7 @@ runtime, and FFI are outside the safety model.
 
 **What's new in 0.4.5+:** a direct native backend that skips C for many builds —
 ownership-explicit IR to Cranelift (debug) or LLVM (release) plus a bundled
-linker. The full `examples/testing` suite passes on `--backend native` (**367/367**).
+linker. The full `examples/testing` suite passes on `--backend native` (**390/390**).
 Release artifacts and install scripts ship for Linux, macOS, and Windows. Runtime
 is competitive with hand-written C and Rust on measured compute workloads (see
 [changelog](CHANGELOG.md)); binary-size and some residual benches remain open
@@ -84,7 +88,7 @@ Options:
 ```bash
 curl -fsSL …/install-linux.sh | bash -s -- --prefix /opt/mako --yes
 curl -fsSL …/install-linux.sh | bash -s -- --no-deps    # skip clang install
-curl -fsSL …/install-linux.sh | bash -s -- --version v0.4.5
+curl -fsSL …/install-linux.sh | bash -s -- --version v0.4.16   # pin a release
 ```
 
 **You do not need Rust or cargo on the machine that runs Mako.**
@@ -218,6 +222,37 @@ fn main() {
 
 Incremental by default. Release builds use `-O3 -flto`.
 [Benchmarks](docs/PERFORMANCE.md).
+
+### Anneal — builds that learn from production
+
+A long-running service drifts away from the assumptions its build was made
+under. Anneal closes that loop without putting an optimizer inside your
+process: ship the compiled binary, take a cheap reading of which paths actually
+run hot under real traffic, and fold that reading into the *next* build.
+
+The trade is deliberate. Learning from a live process means rewriting machine
+code while requests are in flight — that buys peak throughput on a few hot
+kernels, and costs you a warmup period, a code generator resident in your
+address space, occasional de-optimization stalls, and usually a tracing
+collector to go with it. Mako takes the other side: your program is compiled
+ahead of time and stays that way. No warmup tier, no optimizer living in the
+process, no collector. The binary you deploy is the binary that runs, start to
+finish.
+
+The cycle is offline:
+
+1. **Ship a release build** — `-O3 -flto` plus the optimizing LLVM backend
+   where enabled. This is the default and needs no setup.
+2. **Observe cheaply.** Name the sites you care about and read the tallies with
+   `hot_sites_json()` or over HTTP at `/debug/hot_sites`. Off by default; a hit
+   costs about a branch and a relaxed atomic.
+3. **Retrain on the build machine** — `MAKO_PGO_GEN` to record, `MAKO_PGO_USE`
+   to apply. `scripts/anneal-cycle.sh` drives train → merge → rebuild.
+4. **Swap** the new binary in however you already deploy.
+
+Nothing in the fleet rewrites itself; the next artifact is simply better shaped
+for the work it is doing. Requires 0.4.15+.
+[Adaptive optimization](docs/ADAPTIVE_OPT.md).
 
 ---
 

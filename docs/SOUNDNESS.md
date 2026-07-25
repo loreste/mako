@@ -56,7 +56,7 @@ Related: [SECURITY.md](SECURITY.md) · [MEMORY_MODEL.md](MEMORY_MODEL.md) ·
 | | |
 |--|--|
 | **Contract** | Built-in and monomorph `map[K]V` heap handles free on scope exit (`mako_map_*_free` / `{fnp}_free`). |
-| **Code** | `emit_map_heap_free` for monomorphs; built-ins in `mako_rt.h` / `mako_goext.h`. |
+| **Code** | `emit_map_heap_free` for monomorphs; built-ins in `mako_rt.h` / `mako_goext.h`. All 15 flavors are mapped explicitly in `own_free_fn`, with a `MakoMapXY*` fallback. |
 | **Evidence** | `map_*` suite including nested/helpers; map pointer arrays free shallowly (no alias double-free). |
 
 ### SAFE-005 — String ownership / view annotations and drop verification — **Done**

@@ -242,9 +242,10 @@ static inline MakoUuid mako_uuid_ns_x500(void) {
 
 /* Raw 16 bytes as MakoString (binary, not hex). Bounds-checked. */
 static inline MakoString mako_uuid_bytes(MakoUuid u) {
-    char *p = (char *)malloc(16);
+    char *p = (char *)malloc(17);
     if (!p) mako_abort("uuid_bytes: OOM");
     memcpy(p, u.b, 16);
+    p[16] = 0; /* MakoString buffers are always NUL-terminated */
     return (MakoString){p, 16};
 }
 

@@ -227,6 +227,10 @@ static inline MakoString mako_mail_b64_wrap(const char *data, size_t n) {
     /* wrap at 76 chars */
     size_t outcap = b64.len + b64.len / 76 * 2 + 4;
     char *o = (char *)malloc(outcap);
+    if (!o) {
+        mako_str_free(b64);
+        return mako_str_from_cstr("");
+    }
     size_t j = 0, col = 0;
     for (size_t i = 0; i < b64.len; i++) {
         o[j++] = b64.data[i];
@@ -647,6 +651,7 @@ static inline int64_t mako_smtp_do_auth_plain(int64_t h, MakoString user, MakoSt
     /* Build AUTH PLAIN payload */
     size_t raw_len = 1 + user.len + 1 + pass.len;
     char *raw = (char *)malloc(raw_len);
+    if (!raw) return 0;
     size_t o = 0;
     raw[o++] = 0;
     if (user.len) {

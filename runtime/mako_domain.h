@@ -61,6 +61,7 @@ static inline int64_t mako_btree_get(MakoBTree *t, int64_t key) {
 static inline void mako_btree_split_child(MakoBNode *parent, int i) {
     MakoBNode *y = parent->kids[i];
     MakoBNode *z = mako_bnode_new(y->leaf);
+    if (!z) return; /* OOM: caller re-checks fullness */
     int mid = MAKO_BTREE_MAX_KEYS / 2;
     z->n = MAKO_BTREE_MAX_KEYS - mid - 1;
     for (int j = 0; j < z->n; j++) {
@@ -106,6 +107,7 @@ static inline void mako_btree_insert_nonfull(MakoBNode *n, int64_t key, int64_t 
         }
         if (n->kids[i]->n == MAKO_BTREE_MAX_KEYS) {
             mako_btree_split_child(n, i);
+            if (n->kids[i]->n == MAKO_BTREE_MAX_KEYS) return; /* split failed */
             if (key > n->keys[i]) i++;
             else if (key == n->keys[i]) {
                 n->vals[i] = val;
@@ -121,6 +123,7 @@ static inline int64_t mako_btree_put(MakoBTree *t, int64_t key, int64_t val) {
     MakoBNode *r = t->root;
     if (r->n == MAKO_BTREE_MAX_KEYS) {
         MakoBNode *s = mako_bnode_new(0);
+        if (!s) return -1; /* keep the old root rather than losing the tree */
         t->root = s;
         s->kids[0] = r;
         mako_btree_split_child(s, 0);
@@ -1328,19 +1331,19 @@ static inline int mako_range_ensure(int64_t need) {
         ncap *= 2;
         if (ncap > MAKO_RANGE_HEAP_MAX) ncap = MAKO_RANGE_HEAP_MAX;
     }
+    /* Adopt each buffer as soon as realloc succeeds: the old pointer is already
+     * freed, so freeing the new one on a later failure would strand a dangler. */
+    int from_tls = !mako_range_keys_dyn;
     int64_t *nk = (int64_t *)realloc(mako_range_keys_dyn, (size_t)ncap * sizeof(int64_t));
+    if (!nk) return -1;
+    mako_range_keys_dyn = nk;
     int64_t *nv = (int64_t *)realloc(mako_range_vals_dyn, (size_t)ncap * sizeof(int64_t));
-    if (!nk || !nv) {
-        free(nk);
-        free(nv);
-        return -1;
-    }
-    if (!mako_range_keys_dyn && mako_range_n > 0) {
+    if (!nv) return -1;
+    mako_range_vals_dyn = nv;
+    if (from_tls && mako_range_n > 0) {
         memcpy(nk, mako_range_keys_tls, (size_t)mako_range_n * sizeof(int64_t));
         memcpy(nv, mako_range_vals_tls, (size_t)mako_range_n * sizeof(int64_t));
     }
-    mako_range_keys_dyn = nk;
-    mako_range_vals_dyn = nv;
     mako_range_capacity = ncap;
     return 0;
 }
@@ -1688,14 +1691,12 @@ static inline int mako_multimap_grow(MakoMultiMap *m, int64_t need) {
     if (need <= m->cap) return 0;
     int64_t ncap = m->cap ? m->cap * 2 : 16;
     while (ncap < need) ncap *= 2;
+    /* Adopt each buffer immediately; realloc already freed the old pointer. */
     int64_t *nk = (int64_t *)realloc(m->keys, (size_t)ncap * sizeof(int64_t));
-    int64_t *nv = (int64_t *)realloc(m->vals, (size_t)ncap * sizeof(int64_t));
-    if (!nk || !nv) {
-        free(nk);
-        free(nv);
-        return -1;
-    }
+    if (!nk) return -1;
     m->keys = nk;
+    int64_t *nv = (int64_t *)realloc(m->vals, (size_t)ncap * sizeof(int64_t));
+    if (!nv) return -1;
     m->vals = nv;
     m->cap = ncap;
     return 0;
@@ -1911,8 +1912,10 @@ typedef struct {
 static inline MakoGfxWindow *mako_gfx_window_open(int64_t w, int64_t h, MakoString title) {
     MakoGfxWindow *win = (MakoGfxWindow *)calloc(1, sizeof(MakoGfxWindow));
     if (!win) return NULL;
-    win->w = w > 0 ? w : 640;
-    win->h = h > 0 ? h : 480;
+    /* Clamp to the framebuffer cap so w*h cannot overflow: an overflowed npix
+     * can land back inside the cap and leave set_pixel writing past the buffer. */
+    win->w = (w > 0 && w <= 4096) ? w : 640;
+    win->h = (h > 0 && h <= 4096) ? h : 480;
     win->open = 1;
     size_t n = title.len < 63 ? title.len : 63;
     if (title.data && n) memcpy(win->title, title.data, n);

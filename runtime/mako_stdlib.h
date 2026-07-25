@@ -104,7 +104,10 @@ static inline MakoString mako_str_trim_right(MakoString s, MakoString cutset) {
 }
 
 static inline MakoString mako_str_trim(MakoString s, MakoString cutset) {
-    return mako_str_trim_right(mako_str_trim_left(s, cutset), cutset);
+    MakoString left = mako_str_trim_left(s, cutset);
+    MakoString out = mako_str_trim_right(left, cutset);
+    mako_str_free(left);
+    return out;
 }
 
 static inline MakoString mako_str_to_lower(MakoString s) {
@@ -280,14 +283,15 @@ static inline MakoString mako_format_bool(int64_t v) {
 }
 
 static inline MakoResultInt mako_parse_bool(MakoString s) {
-    if (mako_str_eq(s, mako_str_from_cstr("true")) ||
-        mako_str_eq(s, mako_str_from_cstr("1")) ||
-        mako_str_eq(s, mako_str_from_cstr("TRUE"))) {
+    /* Borrowed views: comparing against a literal must not allocate. */
+    if (mako_str_eq(s, mako_str_view("true", 4)) ||
+        mako_str_eq(s, mako_str_view("1", 1)) ||
+        mako_str_eq(s, mako_str_view("TRUE", 4))) {
         return mako_ok_int(1);
     }
-    if (mako_str_eq(s, mako_str_from_cstr("false")) ||
-        mako_str_eq(s, mako_str_from_cstr("0")) ||
-        mako_str_eq(s, mako_str_from_cstr("FALSE"))) {
+    if (mako_str_eq(s, mako_str_view("false", 5)) ||
+        mako_str_eq(s, mako_str_view("0", 1)) ||
+        mako_str_eq(s, mako_str_view("FALSE", 5))) {
         return mako_ok_int(0);
     }
     return mako_err_int(mako_str_from_cstr("parse_bool failed"));
@@ -325,9 +329,11 @@ static inline MakoString mako_fmt_sprintf_d(MakoString fmt, int64_t arg) {
             if (as.len) memcpy(d + i, as.data, as.len);
             memcpy(d + i + as.len, p + i + 2, n - i - 2);
             d[out_len] = 0;
+            mako_str_free(as);
             return (MakoString){d, out_len};
         }
     }
+    mako_str_free(as);
     return mako_str_clone(fmt);
 }
 
@@ -499,7 +505,10 @@ static inline MakoString mako_getcwd(void) {
 }
 
 static inline int64_t mako_chdir(MakoString path) {
-    const char *p = path.data ? path.data : "";
+    /* A borrowed view is not NUL-terminated; copy before the C string API. */
+    char scratch[4096];
+    const char *p = mako_fs_path_cstr(path, scratch, sizeof(scratch));
+    if (!p) return -1;
 #if defined(_WIN32)
     return _chdir(p) == 0 ? 0 : -1;
 #else
@@ -508,7 +517,10 @@ static inline int64_t mako_chdir(MakoString path) {
 }
 
 static inline int64_t mako_is_dir(MakoString path) {
-    const char *p = path.data ? path.data : "";
+    /* A borrowed view is not NUL-terminated; copy before the C string API. */
+    char scratch[4096];
+    const char *p = mako_fs_path_cstr(path, scratch, sizeof(scratch));
+    if (!p) return 0;
     struct stat st;
     if (stat(p, &st) != 0) return 0;
 #if defined(_WIN32)
@@ -529,7 +541,8 @@ static inline MakoStrArray mako_read_dir(MakoString path) {
     if (h == INVALID_HANDLE_VALUE) return a;
     do {
         if (strcmp(fd.cFileName, ".") == 0 || strcmp(fd.cFileName, "..") == 0) continue;
-        a = mako_str_array_append(a, mako_str_from_cstr(fd.cFileName));
+        /* append clones — pass a borrow so the temp is not leaked per entry. */
+        a = mako_str_array_append(a, mako_str_view(fd.cFileName, strlen(fd.cFileName)));
     } while (FindNextFileA(h, &fd));
     FindClose(h);
 #else
@@ -538,7 +551,8 @@ static inline MakoStrArray mako_read_dir(MakoString path) {
     struct dirent *ent;
     while ((ent = readdir(d)) != NULL) {
         if (strcmp(ent->d_name, ".") == 0 || strcmp(ent->d_name, "..") == 0) continue;
-        a = mako_str_array_append(a, mako_str_from_cstr(ent->d_name));
+        /* append clones — pass a borrow so the temp is not leaked per entry. */
+        a = mako_str_array_append(a, mako_str_view(ent->d_name, strlen(ent->d_name)));
     }
     closedir(d);
 #endif
@@ -761,10 +775,13 @@ static inline MakoStrArray mako_slices_unique_strs(MakoStrArray a) {
     size_t j = 0;
     for (size_t i = 0; i < sorted.len; i++) {
         if (i == 0 || !mako_str_eq(sorted.data[i], sorted.data[i - 1])) {
-            out.data[j++] = sorted.data[i];
+            out.data[j++] = sorted.data[i]; /* move */
+        } else {
+            mako_str_free(sorted.data[i]); /* duplicate clone — drop */
         }
     }
     out.len = j;
+    free(sorted.data); /* headers only: kept strings were moved into out */
     return out;
 }
 static inline MakoStrArray mako_slices_reverse_strs(MakoStrArray a) {
@@ -1583,30 +1600,36 @@ static inline MakoString mako_syscall_read(int64_t fd, int64_t maxn) {
 }
 static inline int64_t mako_syscall_access(MakoString path, int64_t mode) {
     /* mode: 0=F_OK, 1=X_OK, 2=W_OK, 4=R_OK (unix values) */
-    if (!path.data) return -1;
+    /* A borrowed view is not NUL-terminated; copy before the C string API. */
+    char scratch[4096];
+    const char *p = mako_fs_path_cstr(path, scratch, sizeof(scratch));
+    if (!p) return -1;
 #if defined(_WIN32)
     int m = 0;
     if (mode & 4) m |= 04;
     if (mode & 2) m |= 02;
-    return _access(path.data, m) == 0 ? 0 : -1;
+    return _access(p, m) == 0 ? 0 : -1;
 #elif defined(MAKO_WASI)
-    (void)path;
+    (void)p;
     (void)mode;
     return -1;
 #else
-    return access(path.data, (int)mode) == 0 ? 0 : -1;
+    return access(p, (int)mode) == 0 ? 0 : -1;
 #endif
 }
 static inline int64_t mako_syscall_chmod(MakoString path, int64_t mode) {
-    if (!path.data) return -1;
+    /* A borrowed view is not NUL-terminated; copy before the C string API. */
+    char scratch[4096];
+    const char *p = mako_fs_path_cstr(path, scratch, sizeof(scratch));
+    if (!p) return -1;
 #if defined(_WIN32)
-    return _chmod(path.data, (int)mode) == 0 ? 0 : -1;
+    return _chmod(p, (int)mode) == 0 ? 0 : -1;
 #elif defined(MAKO_WASI)
-    (void)path;
+    (void)p;
     (void)mode;
     return -1;
 #else
-    return chmod(path.data, (mode_t)mode) == 0 ? 0 : -1;
+    return chmod(p, (mode_t)mode) == 0 ? 0 : -1;
 #endif
 }
 static inline int64_t mako_syscall_symlink(MakoString target, MakoString linkpath) {
@@ -1806,9 +1829,13 @@ static inline MakoString mako_random_bytes(int64_t n) {
 static inline int64_t mako_random_int(int64_t lo, int64_t hi) {
     if (hi <= lo) return lo;
     MakoString b = mako_random_bytes(8);
-    if (b.len < 8) return lo;
+    if (b.len < 8) {
+        mako_str_free(b);
+        return lo;
+    }
     uint64_t v = 0;
     for (int i = 0; i < 8; i++) v = (v << 8) | (unsigned char)b.data[i];
+    mako_str_free(b);
     uint64_t span = (uint64_t)(hi - lo);
     return lo + (int64_t)(v % span);
 }

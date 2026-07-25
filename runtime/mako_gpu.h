@@ -317,6 +317,8 @@ static inline int mako_gpu_ocl_build(MakoGpuDev *d) {
     return 1;
 }
 
+static inline void mako_gpu_ocl_release_dev(MakoGpuDev *d);
+
 static inline int mako_gpu_ocl_init_slot(int di) {
     cl_platform_id plat;
     cl_device_id dev;
@@ -348,8 +350,8 @@ static inline int mako_gpu_ocl_init_slot(int di) {
     clGetDeviceInfo(dev, CL_DEVICE_NAME, sizeof(d->name), d->name, NULL);
     clGetDeviceInfo(dev, CL_DEVICE_VENDOR, sizeof(d->vendor), d->vendor, NULL);
     if (!mako_gpu_ocl_build(d)) {
-        clReleaseCommandQueue(q);
-        clReleaseContext(ctx);
+        /* Releases the kernels/program built before the failure too. */
+        mako_gpu_ocl_release_dev(d);
         memset(d, 0, sizeof(*d));
         return 0;
     }

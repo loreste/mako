@@ -94,7 +94,14 @@ static inline void mako_buf_grow(MakoBuf *b, size_t extra) {
         size_t nc = b->cap * 2;
         while (nc < b->len + extra) nc *= 2;
         uint8_t *nd = (uint8_t *)realloc(b->data, nc);
-        if (nd) { b->data = nd; b->cap = nc; }
+        /* Callers write unconditionally after grow — a silent failure here
+         * would overflow the old buffer. */
+        if (!nd) {
+            fprintf(stderr, "mako: OOM in buf_grow\n");
+            abort();
+        }
+        b->data = nd;
+        b->cap = nc;
     }
 }
 

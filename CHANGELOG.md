@@ -1,6 +1,115 @@
 # Changelog
 
-## Unreleased
+## 0.4.16
+
+### Memory-safety and security audit (runtime-wide)
+
+A sweep of every runtime header, the native bridge, and the ownership
+classifier. Findings are grouped by what they cost, not by file.
+
+**Regression fixed — double-free on a success path.** The previous release's
+"free json_escape temps" change appended a second `mako_str_free` to five
+`mako_llm.h` builders that *already* freed after `snprintf`, aborting on the
+normal path of every `llm_message` / `llm_chat_body` / `llm_embed_body` call.
+Confirmed under Valgrind and AddressSanitizer. `examples/testing/llm_test.mko`
+and `json_mako_test.mko` are now in `scripts/memory-safety-gate.sh` — the gate
+did not previously cover them, which is why the regression shipped green.
+
+**Bounds and overflow on untrusted input.**
+
+- `mako_proxy.h` — chunked decoder guarded the hex accumulator *before* the
+  shift, so 16 `F` digits reached `size == SIZE_MAX`; the length check then
+  wrapped, the capacity check wrapped, and no buffer was allocated, reaching a
+  `memcpy` with `SIZE_MAX`. Reachable from both proxy directions. Both chunked
+  paths now use the non-wrapping `size > len - i` form.
+- `mako_quiche.h` — `h3_free_conn` left a dead connection's ready-queue slots
+  marked live; 64 aborted requests permanently wedged the server, and slot
+  reuse could route a response to the wrong connection.
+- `mako_tls.h` — `free()` on the shared empty singleton (a static address)
+  when `SSL_get_finished` produced no data, reachable via SCRAM channel bind.
+- `mako_sip.h` — six decimal accumulators over unbounded wire digits were
+  signed-overflow UB, and the wrapped negative made message framing fail
+  *open*. All saturate now.
+- `mako_diameter.h` — inbound-queue budget check underflowed for a wire length
+  larger than the limit.
+- `mako_httpengine.h` — off-by-one admitted a read one byte past the request
+  buffer.
+- `mako_goext.h` — zip reader trusted `usize` while bounds-checking `csize`
+  (heap over-read); `mako_db.h` — a >2 GiB URL made an `int`-cast length check
+  pass negative and overrun a stack buffer; `mako_domain.h` — framebuffer
+  `w * h` overflowed past its cap while pixel writes bounds-checked the
+  unclamped dimensions, and a b-tree split failure allowed a write past the key
+  array.
+- `mako_template.h` — `printf` with a template-supplied format string (`%n` is
+  an arbitrary write); now restricted to a single `%s`.
+- `mako_model.h` — signed overflow let a crafted model file pass its size cap.
+- `mako_std.h` — `graphql_schema_sdl` returned a length covering uninitialized
+  heap bytes on truncation, and a non-NUL-terminated buffer for an empty
+  schema.
+
+**Correctness.**
+
+- Struct-key maps rehashed by the raw key pointer while lookups probed by
+  content hash: a 40-entry `map[Point]int` returned wrong values for 22 of 40
+  keys. Now content-hash aware, with the cloned keys freed on delete.
+- Regex match state was file-static and shared across threads; now
+  thread-local.
+- `mako_fail` stored the caller's message pointer without copying, leaving a
+  dangling read after `longjmp`.
+- `mako_str_eq` passed NULL to `memcmp`, which is declared non-null even for
+  zero length.
+
+**Per-call leaks.** Reclaimed owned temporaries across the JSON, GraphQL,
+OpenAPI, auth, YAML/TOML, SIP, HTTP/2, DB, and LLM builders — including
+`json_get_string`, the highest-fan-in accessor in the runtime, and the
+per-element leaks in `yaml_get_list` / `yaml_keys` / `toml_keys` that grew with
+document size. Eleven native-bridge shims violated the compiler's
+`consumes_first` contract by never freeing the argument the compiler had
+already released: a 200k-iteration loop over the affected list builtins went
+from 45.1 MB to 6.6 MB peak RSS.
+
+**Ownership classification.** 797 string-returning builtins were classified
+against their C implementations by walking every return path, rather than by
+name convention. 122 were previously classified owned; **650 more were leaking
+one buffer per call**. The default is unchanged — an unclassified builtin is
+still treated as borrowed, so the failure mode stays "may leak" and never
+"double free". A live invalid-free was fixed in the same pass: `print(...)` of
+a borrowed builtin such as `http_path` or `tcp_read_fast` emitted a
+`mako_str_free` on a connection-table field or a static buffer.
+
+**Verified.** On Linux, all 57 builtins that previously leaked one buffer per
+call now measure 0 bytes/call under LeakSanitizer, with none regressed. The
+double-free is gone, confirmed independently by a plain build, AddressSanitizer
+and Valgrind. UndefinedBehaviorSanitizer is clean across 113 fixtures, and
+there are no use-after-free, double-free or out-of-bounds errors anywhere in
+the ASan sweep. Total leaked bytes across the fixture suite fell from 2,103,705
+to 1,756,957; `ws_api_test` dropped 75% and `diameter_conn_test` went from
+4,249 bytes to 48. The 391-fixture suite passes on both the C and native
+backends. `env_keys` and `read_dir` both measure 0 bytes per call under
+LeakSanitizer and Valgrind; `read_dir` was leaking 271 bytes per call in
+shipped code, so this closes a pre-existing leak as well as the new one.
+
+Sanitizers do not run on the native backend — `--sanitize` is rejected there —
+so all sanitizer evidence above is C-backend only. The native backend was
+exercised as a plain functional run, and no memory-safety claim for it should
+rest on this audit.
+
+**Known open** (tracked, not fixed here): string *literals* passed to builtin
+call sites leak the `mako_str_from_cstr` temporary — 4–13 bytes per call
+(`str_trim` 13, `str_len` 11, `str_replace` 10, `sha256` 8, `json_object` 4).
+Pre-existing and unchanged by this release; bound arguments and user-defined
+functions are unaffected. The fix needs a shared argument-emission path that
+does not exist yet — see SPEC.md §3. `sip_test` still accounts for 1.54 MB of
+residual leak across 140k allocations; it barely moved here, so it is a
+different class and remains untriaged. Channels have no destructor, and a
+naive one is a use-after-free whenever a spawned task outlives the creating
+scope — the documented leak is the safer trade until a refcount or a
+shutdown-drained registry exists; `buf_to_string` is proven owned but left
+borrowed (one buffer per call) rather than flipped in a release-blocking
+change; `plugin_call` is genuinely two-valued depending on whether the plugin
+exports `free_string`, so it stays borrowed; the aliasing string-array helpers
+share buffers, so freeing both input and output would be a double free;
+`sctp_connectx` passes a non-packed address array.
 
 ### General networking primitives (protocol-agnostic)
 
@@ -39,6 +148,42 @@ Tests: `timer_heap_test`, `peer_table_test`, `tls_pool_test`, `sctp_api_test`.
 - **TLS pool inflight** — close concurrent with send/recv defers free (no UAF).
 - TLS pool rejects host/path CR/LF/NUL; SCTP read requires explicit max;
   SCTP resolve rejects host NUL/CR/LF.
+
+### Memory safety — JSON builder internal leaks
+
+- Many JSON-building runtime helpers (`json_object_str`, `json_si`, `json_ss`,
+  `json_i`, `graphql_request`/`_vars`, LLM message builders, …) escaped their
+  arguments via `mako_json_escape` (which always allocates) into a temp used
+  only for `snprintf`, but never freed the temp — one buffer leaked per call on
+  JSON-serialization hot paths. Reclaimed the escape temps across ~20 flat
+  builders in `mako_std.h` / `mako_llm.h`. Verified: `json_object_str` etc. now
+  CLEAN under LeakSanitizer; json/adapters/graphql suites pass under
+  AddressSanitizer (no double-free). Loop-based / guarded-return builders (7
+  in `mako_std.h`) are left for a follow-up careful pass.
+
+### Memory safety — owned string temporaries reclaimed
+
+- **String-concat right operand:** an owned string used as the right side of `+`
+  (e.g. `"row-" + int_to_string(n)`) was copied by `mako_str_concat` but never
+  freed — one buffer leaked per concat. It is now reclaimed after the concat
+  when it is an unambiguously owned temporary (gated by `expr_is_scope_drop_safe`,
+  which excludes literal views / index / method borrows — no double-free).
+- **Owned-string builtin results (ownership-metadata classifier):** replaced the
+  hand-maintained per-name allowlist with `builtin_returns_owned_string(name)` —
+  a conservative classifier keyed on operation families whose output is freshly
+  computed and can never be a borrowed view (`_encode`, `_decode`, `_to_string`,
+  `_hash`, `_sign`, `_hex`, `_json`, `_sdl`, `format_*`, `base64_*`, `base32_*`).
+  Their dropped results now free instead of leaking per call; any unclassified
+  builtin stays not-owned (may leak, never double-free). View-returners
+  (`str_as_view`, `bytes_as_str`, `buf_to_string`) and polymorphic `string(x)`
+  are excluded. Covers ~90+ builtins (was ~10); a new encode/format builtin is
+  handled by its family with no code change. Full suite green under ASan
+  (390/0). New `examples/testing/owned_string_builtin_test.mko`.
+- Verified on Linux: leaks eliminated over 500-call churns; full suite green
+  under AddressSanitizer (no double-free/UAF). New
+  `examples/testing/concat_owned_operand_test.mko`. A residual leak *inside* a
+  few builtin implementations (e.g. `base64_encode`) is a separate runtime-level
+  issue tracked apart from scope-drop ownership.
 
 ## 0.4.16 — 2026-07-23 (tip; tag when packaging cut)
 

@@ -968,8 +968,18 @@ static inline int mako_h3_alloc_conn(MakoH3Server *s) {
     return -1;
 }
 
-static inline void mako_h3_free_conn(MakoH3Conn *c) {
-    if (!c) return;
+/* Free connection `idx` and reclaim its queued request slots. Without the
+ * second part, a peer that disconnects mid-request strands its ready slots
+ * forever (the queue fills after MAKO_H3_RT_READY aborts) and a reused conn
+ * slot would inherit the stale entries. */
+static inline void mako_h3_free_conn(MakoH3Server *s, int idx) {
+    if (!s || idx < 0 || idx >= MAKO_H3_RT_CONNS) return;
+    MakoH3Conn *c = &s->conns[idx];
+    for (int i = 0; i < MAKO_H3_RT_READY; i++) {
+        if (!s->ready[i].live || s->ready[i].conn_idx != idx) continue;
+        if (!s->ready[i].taken && s->ready_count > 0) s->ready_count--;
+        memset(&s->ready[i], 0, sizeof(s->ready[i]));
+    }
     if (c->h3) quiche_h3_conn_free(c->h3);
     if (c->conn) quiche_conn_free(c->conn);
     memset(c, 0, sizeof(*c));
@@ -1184,7 +1194,7 @@ static inline void mako_h3_process_one_packet(
     mako_h3_flush_conn(s, c);
 
     if (quiche_conn_is_closed(c->conn)) {
-        mako_h3_free_conn(c);
+        mako_h3_free_conn(s, ci);
     }
 }
 
@@ -1211,7 +1221,7 @@ static inline void mako_h3_server_drive(int64_t handle) {
         if (s->conns[i].h3) mako_h3_poll_h3_events(s, i);
         mako_h3_flush_conn(s, &s->conns[i]);
         if (quiche_conn_is_closed(s->conns[i].conn)) {
-            mako_h3_free_conn(&s->conns[i]);
+            mako_h3_free_conn(s, i);
         }
     }
 }
@@ -1631,7 +1641,7 @@ static inline int64_t mako_h3_server_close(int64_t handle) {
     MakoH3Server *s = &mako_h3_servers[handle];
     if (!s->live) return 0;
     for (int i = 0; i < MAKO_H3_RT_CONNS; i++) {
-        if (s->conns[i].live) mako_h3_free_conn(&s->conns[i]);
+        if (s->conns[i].live) mako_h3_free_conn(s, i);
     }
     if (s->h3config) quiche_h3_config_free(s->h3config);
     if (s->qconfig) quiche_config_free(s->qconfig);

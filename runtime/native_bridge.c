@@ -61,6 +61,19 @@ static MakoString bridge_borrow_str(const MakoNativeString *s) {
     return m;
 }
 
+/* Copy a BORROWED MakoString into an owned native header.
+ *
+ * Use this, not bridge_take_str, when the source is not a fresh allocation:
+ * a static/thread-local buffer (tcp_read_fast), a field of a long-lived table
+ * (http_path/method/header/body), a container-owned element (mq/nats/redis/
+ * diameter queue heads), or plugin-owned memory. The native and LLVM backends
+ * free every MakoNativeString they are handed, so transferring one of those
+ * pointers is an invalid free rather than a leak. */
+static MakoNativeString *bridge_clone_str(MakoString s) {
+    if (!s.data) return mako_native_string_literal_ptr("", 0);
+    return mako_native_string_literal_ptr(s.data, s.len);
+}
+
 static MakoNativeString *bridge_take_str(MakoString s) {
     if (mako_str_is_empty_singleton(s) || !s.data) {
         return mako_native_string_literal_ptr("", 0);
@@ -619,11 +632,11 @@ int64_t mako_native_chan_select_value(void) {
 // ---- http path/method, json, regex ----------------------------------------
 
 MakoNativeString *mako_native_http_path_ptr(int64_t conn) {
-    return bridge_take_str(mako_http_path(conn));
+    return bridge_clone_str(mako_http_path(conn));
 }
 
 MakoNativeString *mako_native_http_method_ptr(int64_t conn) {
-    return bridge_take_str(mako_http_method(conn));
+    return bridge_clone_str(mako_http_method(conn));
 }
 
 MakoNativeString *mako_native_json_array_ints3(int64_t a, int64_t b, int64_t c) {
@@ -842,7 +855,7 @@ int64_t mako_native_http_respond_ptr(int64_t conn, int64_t status, MakoNativeStr
 }
 
 MakoNativeString *mako_native_http_header_ptr(int64_t conn, MakoNativeString *name) {
-    return bridge_take_str(mako_http_header(conn, bridge_borrow_str(name)));
+    return bridge_clone_str(mako_http_header(conn, bridge_borrow_str(name)));
 }
 
 int64_t mako_native_ws_echo_once(int64_t port) {
@@ -1135,6 +1148,7 @@ MakoNativeString *mako_native_json_object_from_map_ss(void *m) {
         }
     }
     free(cm.state);
+    free(cm.hashes);
     free(cm.keys);
     free(cm.vals);
     return bridge_take_str(j);
@@ -1235,7 +1249,7 @@ int64_t mako_native_str_has_suffix(MakoNativeString s, MakoNativeString suf) {
 }
 
 MakoNativeString *mako_native_http_body_ptr(int64_t conn) {
-    return bridge_take_str(mako_http_body(conn));
+    return bridge_clone_str(mako_http_body(conn));
 }
 
 int64_t mako_native_http_next(int64_t conn) {
@@ -1660,15 +1674,12 @@ MakoNativeString *mako_native_str_join_ptr(MakoNativeStrSliceHdr *parts, MakoNat
     a.data = (MakoString *)calloc(parts->len, sizeof(MakoString));
     if (!a.data) abort();
     a.len = parts->len;
+    a.cap = parts->len;
     for (size_t i = 0; i < parts->len; ++i) {
         MakoNativeString *el = parts->data ? parts->data[i] : NULL;
-        if (el) {
-            a.data[i].data = (char *)el->data;
-            a.data[i].len = el->len;
-        } else {
-            a.data[i].data = (char *)"";
-            a.data[i].len = 0;
-        }
+        /* bridge_borrow_str strips the immortal/static high bit from len; a raw
+         * el->len would make str_join size arithmetic overflow on literals. */
+        a.data[i] = bridge_borrow_str(el);
     }
     MakoString out = mako_str_join(a, bridge_borrow_str(sep));
     free(a.data);
@@ -3155,6 +3166,35 @@ MakoNativeStringSlicePtr *mako_native_read_dir_ptr(MakoNativeString *path) {
     return h;
 }
 
+int64_t mako_native_env_has_ptr(MakoNativeString *key) {
+    return mako_env_has(bridge_borrow_str(key));
+}
+
+int64_t mako_native_env_unset_ptr(MakoNativeString *key) {
+    return mako_env_unset(bridge_borrow_str(key));
+}
+
+MakoNativeStringSlicePtr *mako_native_env_keys_ptr(void) {
+    MakoStrArray a = mako_env_keys();
+    MakoNativeStringSlicePtr *h =
+        (MakoNativeStringSlicePtr *)calloc(1, sizeof(*h));
+    if (!h) abort();
+    h->len = a.len;
+    h->cap = a.len ? a.len : 1;
+    h->owned = 1;
+    h->data = (MakoNativeString **)calloc(h->cap, sizeof(MakoNativeString *));
+    if (!h->data) abort();
+    for (size_t i = 0; i < a.len; ++i) {
+        /* Take ownership of each MakoString into a native header. */
+        h->data[i] = bridge_take_str(a.data[i]);
+        if (!h->data[i]) {
+            h->data[i] = mako_native_string_literal_ptr("", 0);
+        }
+    }
+    free(a.data);
+    return h;
+}
+
 int64_t mako_native_deadline_ns(int64_t a0) {
     return (int64_t)mako_deadline_ns(a0);
 }
@@ -3469,8 +3509,8 @@ MakoNativeByteSlice *mako_native_as_bytes_ptr(MakoNativeString *s) {
 }
 
 MakoNativeString *mako_native_bytes_as_str_ptr(MakoNativeByteSlice *b) {
-    const char *p = (const char *)(b && b->data ? b->data : "");
-    size_t n = b ? b->len : 0;
+    const char *p = (const char *)(b && b->data ? (const char *)b->data : "");
+    size_t n = (b && b->data) ? b->len : 0;
     return mako_native_string_literal_ptr(p, n);
 }
 
@@ -4027,6 +4067,7 @@ int64_t mako_native_dns_is_loopback_ptr(MakoNativeString *ip) {
 
 /* ---- list[int] aliases (IntSlice pointer ABI) ---- */
 MakoNativeIntSlice *mako_native_int_slice_append_ptr(MakoNativeIntSlice *value, int64_t element);
+void mako_native_int_slice_drop_ptr(MakoNativeIntSlice *value);
 int64_t mako_native_int_slice_len_ptr(const MakoNativeIntSlice *value);
 int64_t mako_native_int_slice_get_ptr(const MakoNativeIntSlice *value, int64_t index);
 typedef struct {
@@ -4036,6 +4077,7 @@ typedef struct {
     int64_t owned;
 } MakoNativeStringSlice;
 MakoNativeStringSlice *mako_native_string_slice_clone_ptr(const MakoNativeStringSlice *value);
+void mako_native_string_slice_drop_ptr(MakoNativeStringSlice *value);
 
 MakoNativeIntSlice *mako_native_list_push_int_ptr(MakoNativeIntSlice *a, int64_t v) {
     return mako_native_int_slice_append_ptr(a, v);
@@ -4103,6 +4145,7 @@ MakoNativeIntSlice *mako_native_list_insert_int_ptr(
     out->data[at] = v;
     for (size_t i = at; i < n; i++) out->data[i + 1] = a->data[i];
     out->len = n + 1;
+    mako_native_int_slice_drop_ptr(a);
     return out;
 }
 
@@ -4117,12 +4160,16 @@ MakoNativeIntSlice *mako_native_list_remove_int_ptr(MakoNativeIntSlice *a, int64
         out->data[j++] = a->data[i];
     }
     out->len = n - 1;
+    mako_native_int_slice_drop_ptr(a);
     return out;
 }
 
-/* strings_copy → str slice clone */
+/* strings_copy → str slice clone. The IR marks this as consuming its first
+ * argument (see `consumes_first` in native_ir), so free the input here. */
 MakoNativeStringSlice *mako_native_strings_copy_ptr(MakoNativeStringSlice *a) {
-    return mako_native_string_slice_clone_ptr(a);
+    MakoNativeStringSlice *out = mako_native_string_slice_clone_ptr(a);
+    mako_native_string_slice_drop_ptr(a);
+    return out;
 }
 
 /* ---- hmac / csrf / rwmutex ---- */
@@ -4237,6 +4284,7 @@ MakoNativeStringSlice *mako_native_list_insert_str_ptr(
     for (size_t i = at; i < n; i++)
         out->data[i + 1] = mako_native_string_clone_ptr(a->data[i]);
     out->len = n + 1;
+    mako_native_string_slice_drop_ptr(a);
     return out;
 }
 
@@ -4253,6 +4301,7 @@ MakoNativeStringSlice *mako_native_list_remove_str_ptr(
         out->data[j++] = mako_native_string_clone_ptr(a->data[i]);
     }
     out->len = n - 1;
+    mako_native_string_slice_drop_ptr(a);
     return out;
 }
 
@@ -4281,6 +4330,7 @@ MakoNativeIntSlice *mako_native_queue_pop_int_ptr(MakoNativeIntSlice *a) {
     MakoNativeIntSlice *out = mako_native_int_slice_make_ptr((int64_t)(a->len - 1), (int64_t)(a->len - 1));
     for (size_t i = 1; i < a->len; i++) out->data[i - 1] = a->data[i];
     out->len = a->len - 1;
+    mako_native_int_slice_drop_ptr(a);
     return out;
 }
 
@@ -4288,14 +4338,16 @@ int64_t mako_native_queue_popped_int(void) {
     return mako_native_queue_popped_int_tls;
 }
 
-/* ---- slices_reverse / unique ---- */
+/* ---- slices_reverse / unique ----
+ * The IR marks this family as consuming its first argument (`consumes_first`
+ * in native_ir), so each shim frees the input slice before returning. */
 MakoNativeStringSlice *mako_native_slices_reverse_strs_ptr(MakoNativeStringSlice *a) {
     size_t n = a ? a->len : 0;
     MakoNativeStringSlice *out = mako_native_string_slice_make_ptr(n, n);
-    if (!a || !n) return out;
     for (size_t i = 0; i < n; i++)
         out->data[i] = mako_native_string_clone_ptr(a->data[n - 1 - i]);
     out->len = n;
+    mako_native_string_slice_drop_ptr(a);
     return out;
 }
 
@@ -4304,7 +4356,6 @@ MakoNativeStringSlice *mako_native_slices_unique_strs_ptr(MakoNativeStringSlice 
      * simple O(n^2) unique preserving first occurrence. */
     size_t n = a ? a->len : 0;
     MakoNativeStringSlice *out = mako_native_string_slice_make_ptr(n, n);
-    if (!a || !n) return out;
     size_t j = 0;
     for (size_t i = 0; i < n; i++) {
         MakoNativeString *s = a->data[i];
@@ -4322,22 +4373,26 @@ MakoNativeStringSlice *mako_native_slices_unique_strs_ptr(MakoNativeStringSlice 
             out->data[j++] = mako_native_string_clone_ptr(s);
     }
     out->len = j;
+    mako_native_string_slice_drop_ptr(a);
     return out;
 }
 
 MakoNativeIntSlice *mako_native_slices_reverse_ints_ptr(MakoNativeIntSlice *a) {
     size_t n = a ? a->len : 0;
     MakoNativeIntSlice *out = mako_native_int_slice_make_ptr(n, n);
-    if (!a || !n) return out;
     for (size_t i = 0; i < n; i++) out->data[i] = a->data[n - 1 - i];
     out->len = n;
+    mako_native_int_slice_drop_ptr(a);
     return out;
 }
 
 MakoNativeIntSlice *mako_native_slices_unique_ints_ptr(MakoNativeIntSlice *a) {
     /* Match C runtime: sort then unique so order is ascending (tests expect u[0]==1). */
     size_t n = a ? a->len : 0;
-    if (!a || !n) return mako_native_int_slice_make_ptr(0, 0);
+    if (!n) {
+        mako_native_int_slice_drop_ptr(a);
+        return mako_native_int_slice_make_ptr(0, 0);
+    }
     MakoIntArray arr = mako_int_array_view(a->data, a->len);
     MakoIntArray uniq = mako_slices_unique_ints(arr);
     size_t j = uniq.len;
@@ -4345,6 +4400,7 @@ MakoNativeIntSlice *mako_native_slices_unique_ints_ptr(MakoNativeIntSlice *a) {
     for (size_t i = 0; i < j; i++) out->data[i] = uniq.data[i];
     free(uniq.data);
     out->len = j;
+    mako_native_int_slice_drop_ptr(a);
     return out;
 }
 
@@ -5140,7 +5196,7 @@ MakoNativeString *mako_native_tcp_read_ptr(int64_t a0) {
 }
 
 MakoNativeString *mako_native_tcp_read_fast_ptr(int64_t a0) {
-    return bridge_take_str(mako_tcp_read_fast(a0));
+    return bridge_clone_str(mako_tcp_read_fast(a0));
 }
 
 int64_t mako_native_tcp_write_all_ptr(int64_t a0, MakoNativeString *a1) {
@@ -6471,7 +6527,7 @@ MakoNativeIntSlice *mako_native_msgpack_decode_array_int_ptr(MakoNativeString *a
 }
 
 MakoNativeString *mako_native_plugin_call_ptr(int64_t a0, MakoNativeString *a1, MakoNativeString *a2) {
-    MakoNativeString *ret = bridge_take_str(mako_plugin_call(a0, bridge_borrow_str(a1), bridge_borrow_str(a2)));
+    MakoNativeString *ret = bridge_clone_str(mako_plugin_call(a0, bridge_borrow_str(a1), bridge_borrow_str(a2)));
     return ret;
 }
 
@@ -6533,7 +6589,7 @@ int64_t mako_native_mq_publish(int64_t a0, MakoNativeString *a1, MakoNativeStrin
     return mako_mq_publish(a0, bridge_borrow_str(a1), bridge_borrow_str(a2));
 }
 MakoNativeString *mako_native_mq_try_take_ptr(int64_t a0, MakoNativeString *a1) {
-    return bridge_take_str(mako_mq_try_take(a0, bridge_borrow_str(a1)));
+    return bridge_clone_str(mako_mq_try_take(a0, bridge_borrow_str(a1)));
 }
 int64_t mako_native_mq_len(int64_t a0, MakoNativeString *a1) {
     return mako_mq_len(a0, bridge_borrow_str(a1));
@@ -6551,7 +6607,7 @@ int64_t mako_native_nats_pub(int64_t a0, MakoNativeString *a1, MakoNativeString 
     return mako_nats_pub(a0, bridge_borrow_str(a1), bridge_borrow_str(a2));
 }
 MakoNativeString *mako_native_nats_try_next_ptr(int64_t a0, MakoNativeString *a1) {
-    return bridge_take_str(mako_nats_try_next(a0, bridge_borrow_str(a1)));
+    return bridge_clone_str(mako_nats_try_next(a0, bridge_borrow_str(a1)));
 }
 int64_t mako_native_nats_len(int64_t a0, MakoNativeString *a1) {
     return mako_nats_len(a0, bridge_borrow_str(a1));
@@ -6578,7 +6634,7 @@ int64_t mako_native_redis_mq_lpush(int64_t a0, MakoNativeString *a1, MakoNativeS
     return mako_redis_mq_lpush(a0, bridge_borrow_str(a1), bridge_borrow_str(a2));
 }
 MakoNativeString *mako_native_redis_mq_rpop_ptr(int64_t a0, MakoNativeString *a1) {
-    return bridge_take_str(mako_redis_mq_rpop(a0, bridge_borrow_str(a1)));
+    return bridge_clone_str(mako_redis_mq_rpop(a0, bridge_borrow_str(a1)));
 }
 int64_t mako_native_redis_mq_llen(int64_t a0, MakoNativeString *a1) {
     return mako_redis_mq_llen(a0, bridge_borrow_str(a1));
@@ -6835,7 +6891,7 @@ MakoNativeString *mako_native_llm_sse_delta_ptr(MakoNativeString *a0) {
 }
 
 MakoNativeString *mako_native_plugin_call1_ptr(int64_t a0, MakoNativeString *a1) {
-    MakoNativeString *ret = bridge_take_str(mako_plugin_call1(a0, bridge_borrow_str(a1)));
+    MakoNativeString *ret = bridge_clone_str(mako_plugin_call1(a0, bridge_borrow_str(a1)));
     return ret;
 }
 
@@ -8362,6 +8418,8 @@ MakoNativeStringSlice *mako_native_queue_pop_str_ptr(MakoNativeStringSlice *a) {
     MakoNativeStringSlice *out = mako_native_string_slice_make_ptr(n, n);
     for (size_t i = 0; i < n; i++) out->data[i] = mako_native_string_clone_ptr(a->data[i + 1]);
     out->len = n;
+    /* IR marks queue_pop_str as consuming its first argument. */
+    mako_native_string_slice_drop_ptr(a);
     return out;
 }
 
@@ -8476,8 +8534,11 @@ MakoNativeString *mako_native_hkdf_sha256_ptr(
 }
 
 int64_t mako_native_unsafe_index_ptr(MakoNativeString *s, int64_t i) {
-    if (!s || i < 0 || (size_t)i >= s->len) return -1;
-    return (unsigned char)s->data[i];
+    /* bridge_borrow_str strips the immortal/static high bit; a raw s->len would
+     * make this bound check pass for every index on a string literal. */
+    MakoString m = bridge_borrow_str(s);
+    if (!s || i < 0 || (size_t)i >= m.len) return -1;
+    return (unsigned char)m.data[i];
 }
 
 int64_t mako_native_reqctx_set_ptr(int64_t id, MakoNativeString *key, MakoNativeString *val) {
@@ -8961,7 +9022,7 @@ int64_t mako_native_det_rng_next(int64_t seed) {
     return mako_deterministic_rng_next(seed);
 }
 int64_t mako_native_game_udp_bind(int64_t port) {
-    MakoGameUDP *u = mako_game_udp_bind_addr(mako_str_from_cstr("0.0.0.0"), port);
+    MakoGameUDP *u = mako_game_udp_bind_addr(mako_str_view("0.0.0.0", 7), port);
     return u ? (int64_t)(intptr_t)u : 0;
 }
 MakoNativeIntSlice *mako_native_cbor_decode_array_int_ptr(MakoNativeString *bin) {
@@ -8987,6 +9048,7 @@ MakoNativeMapSS *mako_native_gob_decode_map_ss_ptr(MakoNativeString *g) {
             mako_native_string_drop_ptr(k);
             mako_native_string_drop_ptr(v);
         }
+        mako_map_ss_free(cm);
     }
     return out;
 }
@@ -10340,7 +10402,7 @@ int64_t mako_native_diameter_conn_feed_ptr(int64_t a0, MakoNativeString *a1) {
 }
 
 MakoNativeString *mako_native_diameter_conn_pop_ptr(int64_t a0) {
-    return bridge_take_str(mako_diameter_conn_pop(a0));
+    return bridge_clone_str(mako_diameter_conn_pop(a0));
 }
 
 int64_t mako_native_diameter_conn_pending(int64_t a0) {
@@ -10464,7 +10526,7 @@ int64_t mako_native_diameter_mgr_handle_io_ptr(int64_t a0, int64_t a1, MakoNativ
 }
 
 MakoNativeString *mako_native_diameter_mgr_poll_ptr(int64_t a0) {
-    return bridge_take_str(mako_diameter_mgr_poll(a0));
+    return bridge_clone_str(mako_diameter_mgr_poll(a0));
 }
 
 int64_t mako_native_diameter_mgr_tick(int64_t a0, int64_t a1) {

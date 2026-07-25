@@ -1,10 +1,10 @@
 # Mako status (adversarial / verified)
 
-Last inventory: **2026-07-23** · product **mako0.4.16** (tip; last tag **v0.4.5**) ·
+Last inventory: **2026-07-24** · product **mako0.4.16** (tip; last tag **v0.4.16**) ·
 versioning: small patches — [VERSIONING.md](VERSIONING.md).
 
 Unique Mako surface · pack/pull · map/slice/bag monomorphs · package-per-directory ·
-const-fn depth (match/while/for/strings · `s[i]`) · suite **367** `examples/testing`
+const-fn depth (match/while/for/strings · `s[i]`) · suite **390** `examples/testing`
 programs on **native** (0 failures) + Rust unit tests · full suite under ASan/UBSan;
 focused concurrency suite under TSan · [The Mako Book](book/).
 

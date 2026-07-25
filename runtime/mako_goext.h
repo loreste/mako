@@ -96,23 +96,29 @@ static inline MakoString mako_flag_string(MakoString name, MakoString def) {
 }
 
 static inline int64_t mako_flag_int(MakoString name, int64_t def) {
-    MakoString s = mako_flag_string(name, mako_str_from_cstr(""));
-    if (s.len == 0) return def;
-    MakoResultInt r = mako_parse_int(s);
-    return r.ok ? r.value : def;
+    MakoString s = mako_flag_string(name, mako_str_empty);
+    int64_t out = def;
+    if (s.len > 0) {
+        MakoResultInt r = mako_parse_int(s);
+        if (r.ok) out = r.value;
+    }
+    mako_str_free(s);
+    return out;
 }
 
 static inline int64_t mako_flag_bool(MakoString name, int64_t def) {
-    MakoString s = mako_flag_string(name, mako_str_from_cstr(""));
-    if (s.len == 0) return def;
-    if (mako_str_eq(s, mako_str_from_cstr("1")) ||
-        mako_str_eq(s, mako_str_from_cstr("true")) ||
-        mako_str_eq(s, mako_str_from_cstr("TRUE")))
-        return 1;
-    if (mako_str_eq(s, mako_str_from_cstr("0")) ||
-        mako_str_eq(s, mako_str_from_cstr("false")))
-        return 0;
-    return def;
+    MakoString s = mako_flag_string(name, mako_str_empty);
+    int64_t out = def;
+    if (mako_str_eq(s, mako_str_view("1", 1)) ||
+        mako_str_eq(s, mako_str_view("true", 4)) ||
+        mako_str_eq(s, mako_str_view("TRUE", 4))) {
+        out = 1;
+    } else if (mako_str_eq(s, mako_str_view("0", 1)) ||
+               mako_str_eq(s, mako_str_view("false", 5))) {
+        out = 0;
+    }
+    mako_str_free(s);
+    return out;
 }
 
 /* ---- os/exec ---- */
@@ -258,7 +264,7 @@ static inline MakoStrArray mako_csv_split_line(MakoString line) {
 static inline MakoString mako_csv_join_row(MakoStrArray fields) {
     MakoStrBuilder *b = mako_str_builder_new();
     for (size_t i = 0; i < fields.len; i++) {
-        if (i) mako_str_builder_write(b, mako_str_from_cstr(","));
+        if (i) mako_str_builder_write(b, mako_str_view(",", 1));
         MakoString f = fields.data[i];
         int need_q = 0;
         for (size_t j = 0; j < f.len; j++) {
@@ -428,23 +434,26 @@ static inline MakoString mako_tar_first_name(MakoString tar_path) {
 
 /* ---- mime ---- */
 static inline MakoString mako_mime_type_by_ext(MakoString path) {
+    /* Compare against borrowed views: allocating a literal per branch leaked. */
     MakoString e = mako_path_ext(path);
-    if (mako_str_eq(e, mako_str_from_cstr(".html")) || mako_str_eq(e, mako_str_from_cstr(".htm")))
-        return mako_str_from_cstr("text/html; charset=utf-8");
-    if (mako_str_eq(e, mako_str_from_cstr(".css"))) return mako_str_from_cstr("text/css; charset=utf-8");
-    if (mako_str_eq(e, mako_str_from_cstr(".js"))) return mako_str_from_cstr("application/javascript");
-    if (mako_str_eq(e, mako_str_from_cstr(".json"))) return mako_str_from_cstr("application/json");
-    if (mako_str_eq(e, mako_str_from_cstr(".png"))) return mako_str_from_cstr("image/png");
-    if (mako_str_eq(e, mako_str_from_cstr(".jpg")) || mako_str_eq(e, mako_str_from_cstr(".jpeg")))
-        return mako_str_from_cstr("image/jpeg");
-    if (mako_str_eq(e, mako_str_from_cstr(".gif"))) return mako_str_from_cstr("image/gif");
-    if (mako_str_eq(e, mako_str_from_cstr(".svg"))) return mako_str_from_cstr("image/svg+xml");
-    if (mako_str_eq(e, mako_str_from_cstr(".txt"))) return mako_str_from_cstr("text/plain; charset=utf-8");
-    if (mako_str_eq(e, mako_str_from_cstr(".xml"))) return mako_str_from_cstr("application/xml");
-    if (mako_str_eq(e, mako_str_from_cstr(".pdf"))) return mako_str_from_cstr("application/pdf");
-    if (mako_str_eq(e, mako_str_from_cstr(".wasm"))) return mako_str_from_cstr("application/wasm");
-    if (mako_str_eq(e, mako_str_from_cstr(".gz"))) return mako_str_from_cstr("application/gzip");
-    return mako_str_from_cstr("application/octet-stream");
+    const char *t = "application/octet-stream";
+    if (mako_str_eq(e, mako_str_view(".html", 5)) || mako_str_eq(e, mako_str_view(".htm", 4)))
+        t = "text/html; charset=utf-8";
+    else if (mako_str_eq(e, mako_str_view(".css", 4))) t = "text/css; charset=utf-8";
+    else if (mako_str_eq(e, mako_str_view(".js", 3))) t = "application/javascript";
+    else if (mako_str_eq(e, mako_str_view(".json", 5))) t = "application/json";
+    else if (mako_str_eq(e, mako_str_view(".png", 4))) t = "image/png";
+    else if (mako_str_eq(e, mako_str_view(".jpg", 4)) || mako_str_eq(e, mako_str_view(".jpeg", 5)))
+        t = "image/jpeg";
+    else if (mako_str_eq(e, mako_str_view(".gif", 4))) t = "image/gif";
+    else if (mako_str_eq(e, mako_str_view(".svg", 4))) t = "image/svg+xml";
+    else if (mako_str_eq(e, mako_str_view(".txt", 4))) t = "text/plain; charset=utf-8";
+    else if (mako_str_eq(e, mako_str_view(".xml", 4))) t = "application/xml";
+    else if (mako_str_eq(e, mako_str_view(".pdf", 4))) t = "application/pdf";
+    else if (mako_str_eq(e, mako_str_view(".wasm", 5))) t = "application/wasm";
+    else if (mako_str_eq(e, mako_str_view(".gz", 3))) t = "application/gzip";
+    mako_str_free(e);
+    return mako_str_from_cstr(t);
 }
 
 /* ---- context-like deadline helpers ---- */
@@ -542,9 +551,9 @@ static inline MakoString mako_template_execute(MakoString tmpl, MakoString key, 
     /* Replace all {{key}} with val */
     char needle[256];
     if (key.len + 4 >= sizeof(needle)) return mako_str_clone(tmpl);
-    snprintf(needle, sizeof(needle), "{{%.*s}}", (int)key.len, key.data ? key.data : "");
-    MakoString n = mako_str_from_cstr(needle);
-    return mako_str_replace(tmpl, n, val);
+    int nn = snprintf(needle, sizeof(needle), "{{%.*s}}", (int)key.len, key.data ? key.data : "");
+    if (nn < 0) return mako_str_clone(tmpl);
+    return mako_str_replace(tmpl, mako_str_view(needle, (size_t)nn), val);
 }
 
 /* ---- encoding/base32 (RFC 4648) ---- */
@@ -576,6 +585,7 @@ static inline MakoString mako_sha1_hex(MakoString s) {
     unsigned char dig[CC_SHA1_DIGEST_LENGTH];
     CC_SHA1(s.data ? s.data : "", (CC_LONG)s.len, dig);
     char *o = (char *)malloc(41);
+    if (!o) mako_abort("sha1_hex OOM");
     for (int i = 0; i < 20; i++) sprintf(o + i * 2, "%02x", dig[i]);
     o[40] = 0;
     return (MakoString){o, 40};
@@ -583,6 +593,7 @@ static inline MakoString mako_sha1_hex(MakoString s) {
     unsigned char dig[SHA_DIGEST_LENGTH];
     SHA1((const unsigned char *)(s.data ? s.data : ""), s.len, dig);
     char *o = (char *)malloc(41);
+    if (!o) mako_abort("sha1_hex OOM");
     for (int i = 0; i < 20; i++) sprintf(o + i * 2, "%02x", dig[i]);
     o[40] = 0;
     return (MakoString){o, 40};
@@ -597,6 +608,7 @@ static inline MakoString mako_sha512_hex(MakoString s) {
     unsigned char dig[CC_SHA512_DIGEST_LENGTH];
     CC_SHA512(s.data ? s.data : "", (CC_LONG)s.len, dig);
     char *o = (char *)malloc(129);
+    if (!o) mako_abort("sha512_hex OOM");
     for (int i = 0; i < 64; i++) sprintf(o + i * 2, "%02x", dig[i]);
     o[128] = 0;
     return (MakoString){o, 128};
@@ -604,6 +616,7 @@ static inline MakoString mako_sha512_hex(MakoString s) {
     unsigned char dig[SHA512_DIGEST_LENGTH];
     SHA512((const unsigned char *)(s.data ? s.data : ""), s.len, dig);
     char *o = (char *)malloc(129);
+    if (!o) mako_abort("sha512_hex OOM");
     for (int i = 0; i < 64; i++) sprintf(o + i * 2, "%02x", dig[i]);
     o[128] = 0;
     return (MakoString){o, 128};
@@ -717,7 +730,7 @@ static inline MakoString mako_dns_naptr_lookup(MakoString host) {
         int written = snprintf(record, sizeof(record), "%u:%u:|%s|%s|%s",
                                order, preference, service, regexp, replacement);
         if (written <= 0 || (size_t)written >= sizeof(record)) continue;
-        if (out->len) mako_str_builder_write(out, mako_str_from_cstr(","));
+        if (out->len) mako_str_builder_write(out, mako_str_view(",", 1));
         mako_str_builder_write(out, mako_str_view(record, (size_t)written));
     }
     MakoString result = mako_str_builder_finish(out);
@@ -751,7 +764,7 @@ static inline MakoString mako_dns_srv_lookup(MakoString service) {
         int written = snprintf(record, sizeof(record), "%u:%u:%u:%s",
                                priority, weight, port, target);
         if (written <= 0 || (size_t)written >= sizeof(record)) continue;
-        if (out->len) mako_str_builder_write(out, mako_str_from_cstr(","));
+        if (out->len) mako_str_builder_write(out, mako_str_view(",", 1));
         mako_str_builder_write(out, mako_str_view(record, (size_t)written));
     }
     MakoString result = mako_str_builder_finish(out);
@@ -1331,11 +1344,13 @@ static inline void mako_filepath_walk_into(MakoString root, int64_t depth, int64
     MakoStrArray top = mako_read_dir(root);
     for (size_t i = 0; i < top.len; i++) {
         MakoString full = mako_path_join(root, top.data[i]);
-        *out = mako_str_array_append(*out, full);
+        *out = mako_str_array_append(*out, full); /* append clones */
         if (mako_is_dir(full) && depth < max_depth) {
             mako_filepath_walk_into(full, depth + 1, max_depth, out);
         }
+        mako_str_free(full);
     }
+    mako_str_array_free(top);
 }
 
 static inline MakoStrArray mako_filepath_walk_n(MakoString root, int64_t max_depth) {
@@ -1375,6 +1390,7 @@ static inline MakoIntArray mako_slices_unique_ints(MakoIntArray a) {
         }
     }
     out.len = j;
+    mako_int_array_free(sorted);
     return out;
 }
 
@@ -1557,25 +1573,28 @@ static inline int64_t mako_zip_write_file(MakoString zip_path, MakoString name, 
 
 static inline MakoString mako_zip_first_name(MakoString zip_path) {
     MakoString raw = mako_read_file(zip_path);
-    if (raw.len < 30) return mako_str_from_cstr("");
-    const unsigned char *p = (const unsigned char *)raw.data;
-    if (mako_zip_ru32(p) != 0x04034b50u) return mako_str_from_cstr("");
-    uint16_t nlen = mako_zip_ru16(p + 26);
-    uint16_t elen = mako_zip_ru16(p + 28);
-    if (30u + nlen > raw.len) return mako_str_from_cstr("");
-    (void)elen;
-    char *d = (char *)malloc(nlen + 1);
-    memcpy(d, raw.data + 30, nlen);
-    d[nlen] = 0;
-    return (MakoString){d, nlen};
+    MakoString out = mako_str_from_cstr("");
+    if (raw.len >= 30) {
+        const unsigned char *p = (const unsigned char *)raw.data;
+        uint16_t nlen = mako_zip_ru16(p + 26);
+        if (mako_zip_ru32(p) == 0x04034b50u && 30u + nlen <= raw.len) {
+            char *d = (char *)malloc((size_t)nlen + 1);
+            if (!d) mako_abort("zip_first_name OOM");
+            memcpy(d, raw.data + 30, nlen);
+            d[nlen] = 0;
+            out = (MakoString){d, nlen};
+        }
+    }
+    mako_str_free(raw);
+    return out;
 }
 
 static inline MakoString mako_zip_read_file(MakoString zip_path, MakoString name) {
     MakoString raw = mako_read_file(zip_path);
-    if (raw.len < 30) return mako_str_from_cstr("");
+    MakoString found = mako_str_from_cstr("");
     const unsigned char *p = (const unsigned char *)raw.data;
     size_t off = 0;
-    while (off + 30 <= raw.len) {
+    while (raw.len >= 30 && off + 30 <= raw.len) {
         if (mako_zip_ru32(p + off) != 0x04034b50u) break;
         uint16_t method = mako_zip_ru16(p + off + 8);
         uint32_t csize = mako_zip_ru32(p + off + 18);
@@ -1587,29 +1606,35 @@ static inline MakoString mako_zip_read_file(MakoString zip_path, MakoString name
                        && memcmp(raw.data + off + 30, name.data ? name.data : "", nlen) == 0);
         const unsigned char *payload = (const unsigned char *)(raw.data + off + 30 + nlen + elen);
         if (name_ok) {
-            if (method == 0) {
-                char *d = (char *)malloc(usize + 1);
+            /* Stored entries have usize == csize; a larger usize would over-read. */
+            if (method == 0 && usize == csize) {
+                char *d = (char *)malloc((size_t)usize + 1);
+                if (!d) mako_abort("zip_read_file OOM");
                 memcpy(d, payload, usize);
                 d[usize] = 0;
-                return (MakoString){d, usize};
+                found = (MakoString){d, usize};
             }
 #if defined(MAKO_ZLIB)
-            if (method == 8) {
-                unsigned char *out = NULL;
+            else if (method == 8) {
+                unsigned char *inf = NULL;
                 size_t outlen = 0;
-                if (mako_zip_inflate_raw(payload, csize, &out, &outlen, usize) != 0)
-                    return mako_str_from_cstr("");
-                char *d = (char *)realloc(out, outlen + 1);
-                if (!d) { free(out); return mako_str_from_cstr(""); }
-                d[outlen] = 0;
-                return (MakoString){d, outlen};
+                if (mako_zip_inflate_raw(payload, csize, &inf, &outlen, usize) == 0) {
+                    char *d = (char *)realloc(inf, outlen + 1);
+                    if (d) {
+                        d[outlen] = 0;
+                        found = (MakoString){d, outlen};
+                    } else {
+                        free(inf);
+                    }
+                }
             }
 #endif
-            return mako_str_from_cstr("");
+            break;
         }
         off += 30 + nlen + elen + csize;
     }
-    return mako_str_from_cstr("");
+    mako_str_free(raw);
+    return found;
 }
 
 /* ---- image/png (grayscale 8-bit encode/decode; RGB24 encode) ---- */
@@ -3480,20 +3505,24 @@ static inline int64_t mako_multipart_file_allowed(
     if (max_bytes >= 0 && size > max_bytes) return 0;
     if (allowed_types.len == 0) return 1;
     MakoString ct = mako_multipart_file_content_type(body, boundary, name);
-    if (ct.len == 0) return 0;
+    int64_t ok = 0;
     const char *p = allowed_types.data ? allowed_types.data : "";
     size_t i = 0;
-    while (i <= allowed_types.len) {
+    while (ct.len > 0 && i <= allowed_types.len) {
         while (i < allowed_types.len && (p[i] == ' ' || p[i] == ',')) i++;
         size_t start = i;
         while (i < allowed_types.len && p[i] != ',') i++;
         size_t end = i;
         while (end > start && p[end - 1] == ' ') end--;
-        if (end > start && end - start == ct.len && memcmp(p + start, ct.data, ct.len) == 0) return 1;
+        if (end > start && end - start == ct.len && memcmp(p + start, ct.data, ct.len) == 0) {
+            ok = 1;
+            break;
+        }
         if (i >= allowed_types.len) break;
         i++;
     }
-    return 0;
+    mako_str_free(ct);
+    return ok;
 }
 
 /* ---- regexp RE2-ish extras: find_all, replace, \d\w\s classes ---- */
@@ -3507,8 +3536,12 @@ static inline MakoStrArray mako_regex_find_all(MakoString pat, MakoString text, 
     while (found < limit && base < text.len) {
         MakoString slice = mako_str_slice(text, (int64_t)base, (int64_t)text.len);
         MakoString m = mako_regex_find(pat, slice);
-        if (m.len == 0) break;
-        out = mako_str_array_append(out, m);
+        mako_str_free(slice);
+        if (m.len == 0) {
+            mako_str_free(m);
+            break;
+        }
+        out = mako_str_array_append(out, m); /* append clones */
         found++;
         /* advance past match */
         const char *t = text.data ? text.data : "";
@@ -3516,6 +3549,7 @@ static inline MakoStrArray mako_regex_find_all(MakoString pat, MakoString text, 
         for (size_t i = base; i + m.len <= text.len; i++) {
             if (memcmp(t + i, m.data, m.len) == 0) { hit = t + i; base = i + (m.len ? m.len : 1); break; }
         }
+        mako_str_free(m);
         if (!hit) break;
         (void)rest;
     }
@@ -3524,19 +3558,27 @@ static inline MakoStrArray mako_regex_find_all(MakoString pat, MakoString text, 
 
 static inline MakoString mako_regex_replace(MakoString pat, MakoString text, MakoString repl) {
     MakoString m = mako_regex_find(pat, text);
-    if (m.len == 0) return mako_str_clone(text);
+    if (m.len == 0) {
+        mako_str_free(m);
+        return mako_str_clone(text);
+    }
     const char *t = text.data ? text.data : "";
     size_t pos = (size_t)-1;
     for (size_t i = 0; i + m.len <= text.len; i++) {
         if (memcmp(t + i, m.data, m.len) == 0) { pos = i; break; }
     }
-    if (pos == (size_t)-1) return mako_str_clone(text);
+    if (pos == (size_t)-1) {
+        mako_str_free(m);
+        return mako_str_clone(text);
+    }
     size_t nlen = text.len - m.len + repl.len;
     char *d = (char *)malloc(nlen + 1);
+    if (!d) mako_abort("regex_replace OOM");
     memcpy(d, t, pos);
     if (repl.len) memcpy(d + pos, repl.data, repl.len);
     memcpy(d + pos + repl.len, t + pos + m.len, text.len - pos - m.len);
     d[nlen] = 0;
+    mako_str_free(m);
     return (MakoString){d, nlen};
 }
 
@@ -4194,21 +4236,24 @@ static inline void mako_zip_close(MakoZipWriter *z) {
 static inline MakoStrArray mako_zip_list(MakoString zip_path) {
     MakoStrArray out = mako_str_array_make(0, 8);
     MakoString raw = mako_read_file(zip_path);
-    if (raw.len < 30) return out;
     const unsigned char *p = (const unsigned char *)raw.data;
     size_t off = 0;
-    while (off + 30 <= raw.len) {
+    while (raw.len >= 30 && off + 30 <= raw.len) {
         if (mako_zip_ru32(p + off) != 0x04034b50u) break;
         uint32_t csize = mako_zip_ru32(p + off + 18);
         uint16_t nlen = mako_zip_ru16(p + off + 26);
         uint16_t elen = mako_zip_ru16(p + off + 28);
         if (off + 30 + nlen + elen + csize > raw.len) break;
-        char *d = (char *)malloc(nlen + 1);
+        char *d = (char *)malloc((size_t)nlen + 1);
+        if (!d) mako_abort("zip_list OOM");
         memcpy(d, raw.data + off + 30, nlen);
         d[nlen] = 0;
-        out = mako_str_array_append(out, (MakoString){d, nlen});
+        MakoString entry = {d, nlen};
+        out = mako_str_array_append(out, entry); /* append clones */
+        mako_str_free(entry);
         off += 30 + nlen + elen + csize;
     }
+    mako_str_free(raw);
     return out;
 }
 

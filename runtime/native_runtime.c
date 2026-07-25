@@ -1582,13 +1582,71 @@ static void *mako_native_struct_key_clone(
     return out;
 }
 
+/* Release a key produced by mako_native_struct_key_clone. */
+static void mako_native_struct_key_free(
+    void *key, int64_t nfields, int64_t str_mask,
+    int64_t nest_mask, int64_t nest_nf_pack, int64_t nest_sm_pack
+) {
+    if (!key || nfields <= 0) return;
+    if (nfields > 62) nfields = 62;
+    int64_t nest_nf[62], nest_sm[62];
+    mako_native_unpack_nest(nest_mask, nest_nf_pack, nest_sm_pack, nest_nf, nest_sm);
+    int64_t *in = (int64_t *)key;
+    for (int64_t i = 0; i < nfields; i++) {
+        if (str_mask & (1LL << i)) {
+            mako_native_string_drop_ptr((MakoNativeString *)(intptr_t)in[i]);
+        } else if (nest_mask & (1LL << i)) {
+            mako_native_struct_key_free(
+                (void *)(intptr_t)in[i], nest_nf[i], nest_sm[i], 0, 0, 0
+            );
+        }
+    }
+    free(key);
+}
+
+/* Struct keys bucket by content hash, so growth cannot reuse
+ * mako_native_map_ii_rehash — that re-buckets by the raw key-pointer word and
+ * strands every entry where lookups can no longer find it. Move the already
+ * cloned key pointers into fresh tables using the content hash. */
+static void mako_native_map_struct_key_rehash(
+    MakoNativeMapII *m, size_t ncap, int64_t nfields, int64_t str_mask,
+    int64_t nest_mask, int64_t nest_nf_pack, int64_t nest_sm_pack
+) {
+    int64_t *okeys = m->keys;
+    int64_t *ovals = m->vals;
+    uint8_t *ostate = m->state;
+    size_t ocap = m->cap;
+    size_t cap = 8;
+    while (cap < ncap) cap *= 2;
+    if (cap < ocap * 2) cap = ocap * 2;
+    mako_native_map_ii_alloc_tables(m, cap);
+    for (size_t i = 0; i < ocap; ++i) {
+        if (ostate[i] != MAKO_NMAP_FULL) continue;
+        int64_t hk = mako_native_struct_content_key(
+            (void *)(intptr_t)okeys[i], nfields, str_mask,
+            nest_mask, nest_nf_pack, nest_sm_pack
+        );
+        size_t j = (size_t)(mako_native_hash_i64(hk) & (m->cap - 1));
+        while (m->state[j] == MAKO_NMAP_FULL) j = (j + 1) & (m->cap - 1);
+        m->state[j] = MAKO_NMAP_FULL;
+        m->keys[j] = okeys[i];
+        m->vals[j] = ovals[i];
+        (*m->lenp)++;
+    }
+    free(okeys);
+    free(ovals);
+    free(ostate);
+}
+
 void mako_native_map_struct_key_set_ptr(
     MakoNativeMapII *m, void *key, int64_t nfields, int64_t str_mask,
     int64_t nest_mask, int64_t nest_nf_pack, int64_t nest_sm_pack, int64_t val
 ) {
     if (!m || !key || !m->lenp) abort();
     if (*m->lenp >= mako_native_map_ii_grow_at(m->cap)) {
-        mako_native_map_ii_rehash(m, m->cap * 2);
+        mako_native_map_struct_key_rehash(
+            m, m->cap * 2, nfields, str_mask, nest_mask, nest_nf_pack, nest_sm_pack
+        );
     }
     uint8_t *state = mako_native_map_ii_state(m);
     int64_t *keys = mako_native_map_ii_keys(m);
@@ -1693,6 +1751,10 @@ void mako_native_map_struct_key_delete_ptr(
             if (mako_native_struct_key_eq(
                     exist, key, nfields, str_mask, nest_mask, nest_nf_pack, nest_sm_pack
                 )) {
+                mako_native_struct_key_free(
+                    exist, nfields, str_mask, nest_mask, nest_nf_pack, nest_sm_pack
+                );
+                keys[i] = 0;
                 state[i] = MAKO_NMAP_TOMB;
                 (*m->lenp)--;
                 return;
@@ -1730,7 +1792,17 @@ void mako_native_maps_copy_struct_key(
 ) {
     if (dst && dst->state) {
         uint8_t *st = mako_native_map_ii_state(dst);
-        for (size_t i = 0; i < dst->cap; ++i) st[i] = MAKO_NMAP_EMPTY;
+        int64_t *dk = mako_native_map_ii_keys(dst);
+        for (size_t i = 0; i < dst->cap; ++i) {
+            if (st[i] == MAKO_NMAP_FULL) {
+                mako_native_struct_key_free(
+                    (void *)(intptr_t)dk[i], nfields, str_mask,
+                    nest_mask, nest_nf_pack, nest_sm_pack
+                );
+                dk[i] = 0;
+            }
+            st[i] = MAKO_NMAP_EMPTY;
+        }
         if (dst->lenp) *dst->lenp = 0;
     }
     if (!src || !dst) return;
@@ -2664,33 +2736,31 @@ MakoNativeString *mako_native_map_ss_slot_val_ptr(const MakoNativeMapSS *m, int6
     return mako_native_string_clone_ptr(m->vals[i]);
 }
 
+/* Unwrap a heap header into a value-ABI string. The clone helpers share
+ * immortal/static headers (and those may live in the data section or in a
+ * caller stack slot), so only a non-static header may be released here. */
+static MakoNativeString mako_native_string_unbox(MakoNativeString *p) {
+    if (!p) return (MakoNativeString){NULL, 0};
+    MakoNativeString out = *p;
+    if (!mako_str_is_static_len(p->len)) free(p);
+    return out;
+}
+
 // Value-ABI wrappers for LLVM (string struct by value; free the heap header).
 MakoNativeString mako_native_map_ss_get_val(const MakoNativeMapSS *m, MakoNativeString key) {
-    MakoNativeString *p = mako_native_map_ss_get_ptr(m, &key);
-    MakoNativeString out = p ? *p : (MakoNativeString){NULL, 0};
-    free(p);
-    return out;
+    return mako_native_string_unbox(mako_native_map_ss_get_ptr(m, &key));
 }
 
 MakoNativeString mako_native_map_ss_slot_key_val(const MakoNativeMapSS *m, int64_t i) {
-    MakoNativeString *p = mako_native_map_ss_slot_key_ptr(m, i);
-    MakoNativeString out = p ? *p : (MakoNativeString){NULL, 0};
-    free(p);
-    return out;
+    return mako_native_string_unbox(mako_native_map_ss_slot_key_ptr(m, i));
 }
 
 MakoNativeString mako_native_map_ss_slot_val_val(const MakoNativeMapSS *m, int64_t i) {
-    MakoNativeString *p = mako_native_map_ss_slot_val_ptr(m, i);
-    MakoNativeString out = p ? *p : (MakoNativeString){NULL, 0};
-    free(p);
-    return out;
+    return mako_native_string_unbox(mako_native_map_ss_slot_val_ptr(m, i));
 }
 
 MakoNativeString mako_native_map_si_slot_key_val(const MakoNativeMapSI *m, int64_t i) {
-    MakoNativeString *p = mako_native_map_si_slot_key_ptr(m, i);
-    MakoNativeString out = p ? *p : (MakoNativeString){NULL, 0};
-    free(p);
-    return out;
+    return mako_native_string_unbox(mako_native_map_si_slot_key_ptr(m, i));
 }
 
 // MapIF / MapFI slot iteration.
@@ -2939,10 +3009,10 @@ MakoNativeString *mako_native_path_join_ptr(const MakoNativeString *a,
 
 // Value-ABI variants for the LLVM backend.
 MakoNativeString mako_native_path_join(MakoNativeString a, MakoNativeString b) {
-    MakoNativeString *p = mako_native_path_join_ptr(&a, &b);
-    MakoNativeString out = *p;
-    free(p);
-    return out;
+    /* path_join_ptr returns clone_ptr(a|b) when the other side is empty, and
+     * clone_ptr shares immortal headers — here that is a stack slot, so unbox
+     * rather than free unconditionally. */
+    return mako_native_string_unbox(mako_native_path_join_ptr(&a, &b));
 }
 
 int64_t mako_native_str_len(MakoNativeString s) {

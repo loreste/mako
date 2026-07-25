@@ -1286,7 +1286,9 @@ static inline MakoString mako_auth_bearer(MakoString authorization) {
 
 static inline int64_t mako_auth_check_bearer(MakoString authorization, MakoString expected_token) {
     MakoString got = mako_auth_bearer(authorization);
-    return mako_const_eq(got, expected_token);
+    int64_t ok = mako_const_eq(got, expected_token);
+    mako_str_free(got);
+    return ok;
 }
 
 static inline MakoString mako_auth_basic_header(MakoString user, MakoString pass) {
@@ -1308,12 +1310,15 @@ static inline MakoString mako_auth_basic_header(MakoString user, MakoString pass
     memcpy(out, "Basic ", 6);
     memcpy(out + 6, b64.data, b64.len);
     out[out_len] = 0;
+    mako_str_free(b64);
     return (MakoString){out, out_len};
 }
 
 static inline int64_t mako_auth_check_basic(MakoString authorization, MakoString user, MakoString pass) {
     MakoString expected = mako_auth_basic_header(user, pass);
-    return mako_const_eq(authorization, expected);
+    int64_t ok = mako_const_eq(authorization, expected);
+    mako_str_free(expected);
+    return ok;
 }
 
 static inline int mako_auth_csv_contains(MakoString csv, MakoString item) {
@@ -1370,6 +1375,7 @@ static inline MakoString mako_auth_token_sign(MakoString subject, MakoString sec
     memcpy(out + pos, sig.data, sig.len);
     pos += sig.len;
     out[pos] = 0;
+    mako_str_free(sig);
     return (MakoString){out, pos};
 }
 
@@ -1383,14 +1389,22 @@ static inline MakoString mako_auth_token_subject(MakoString token) {
 
 static inline int64_t mako_auth_token_check(MakoString token, MakoString secret) {
     MakoString subject = mako_auth_token_subject(token);
-    if (!subject.data || subject.len == 0) return 0;
+    if (!subject.data || subject.len == 0) {
+        mako_str_free(subject);
+        return 0;
+    }
     MakoString expected = mako_auth_token_sign(subject, secret);
-    return mako_const_eq(token, expected);
+    int64_t ok = mako_const_eq(token, expected);
+    mako_str_free(subject);
+    mako_str_free(expected);
+    return ok;
 }
 
 static inline int64_t mako_auth_session_cookie(MakoString cookie_header, MakoString cookie_name, MakoString expected) {
     MakoString got = mako_cookie_get(cookie_header, cookie_name);
-    return mako_const_eq(got, expected);
+    int64_t ok = mako_const_eq(got, expected);
+    mako_str_free(got);
+    return ok;
 }
 
 /* ---- Backend rate limiting, compression negotiation, and TTL cache ---- */
@@ -1691,7 +1705,7 @@ static inline MakoString mako_slog_redact(MakoString value) {
 }
 
 static inline void mako_slog_with_redacted(MakoString level, MakoString msg, MakoString key) {
-    mako_slog_with(level, msg, key, mako_str_from_cstr("[REDACTED]"));
+    mako_slog_with(level, msg, key, mako_str_view("[REDACTED]", 10));
 }
 #endif
 
@@ -2498,6 +2512,7 @@ static inline MakoString mako_metrics_export_prom(void) {
 static inline MakoString mako_json_escape(MakoString s) {
     size_t cap = s.len * 2 + 8;
     char *d = (char *)malloc(cap);
+    if (!d) mako_abort("json_escape: out of memory");
     size_t j = 0;
     for (size_t i = 0; i < s.len; i++) {
         char c = s.data[i];
@@ -2525,6 +2540,8 @@ static inline MakoString mako_json_object_str(MakoString key, MakoString val) {
     char *d = (char *)malloc(n);
     int wrote = snprintf(d, n, "{\"%s\":\"%s\"}", ek.data, ev.data);
     if (wrote < 0) wrote = 0;
+        mako_str_free(ek);
+        mako_str_free(ev);
     return (MakoString){d, (size_t)wrote};
 }
 
@@ -2549,6 +2566,9 @@ static inline MakoString mako_json_si(
         (long long)v2
     );
     if (wrote < 0) wrote = 0;
+        mako_str_free(e1);
+        mako_str_free(ev);
+        mako_str_free(e2);
     return (MakoString){d, (size_t)wrote};
 }
 
@@ -2574,6 +2594,10 @@ static inline MakoString mako_json_ss(
         b.data
     );
     if (wrote < 0) wrote = 0;
+        mako_str_free(e1);
+        mako_str_free(a);
+        mako_str_free(e2);
+        mako_str_free(b);
     return (MakoString){d, (size_t)wrote};
 }
 
@@ -2583,6 +2607,7 @@ static inline MakoString mako_json_i(MakoString key, int64_t val) {
     char *d = (char *)malloc(n);
     int wrote = snprintf(d, n, "{\"%s\":%lld}", ek.data, (long long)val);
     if (wrote < 0) wrote = 0;
+        mako_str_free(ek);
     return (MakoString){d, (size_t)wrote};
 }
 
@@ -2595,6 +2620,8 @@ static inline int64_t mako_json_has_string(MakoString json, MakoString key, Mako
     snprintf(pat, n, "\"%s\":\"%s\"", needle_key.data, needle_val.data);
     int found = strstr(json.data ? json.data : "", pat) != NULL;
     free(pat);
+        mako_str_free(needle_key);
+        mako_str_free(needle_val);
     return found ? 1 : 0;
 }
 
@@ -2607,8 +2634,12 @@ static inline MakoString mako_json_get_string(MakoString json, MakoString key) {
     const char *src = json.data ? json.data : "";
     const char *p = strstr(src, pat);
     free(pat);
-    if (!p) return mako_str_from_cstr("");
+    if (!p) {
+        mako_str_free(ek);
+        return mako_str_from_cstr("");
+    }
     p += ek.len + 4; /* past "key":" */
+    mako_str_free(ek);
     const char *end = p;
     while (*end && *end != '"') {
         if (*end == '\\' && end[1]) end += 2;
@@ -2630,8 +2661,12 @@ static inline int64_t mako_json_get_int(MakoString json, MakoString key) {
     const char *src = json.data ? json.data : "";
     const char *p = strstr(src, pat);
     free(pat);
-    if (!p) return 0;
+    if (!p) {
+        mako_str_free(ek);
+        return 0;
+    }
     p += ek.len + 3; /* past "key": */
+    mako_str_free(ek);
     while (*p == ' ' || *p == '\t') p++;
     return (int64_t)strtoll(p, NULL, 10);
 }
@@ -2649,6 +2684,7 @@ static inline MakoString mako_json_nest(MakoString key, MakoString inner) {
         inner.data ? inner.data : "null"
     );
     if (wrote < 0) wrote = 0;
+        mako_str_free(ek);
     return (MakoString){d, (size_t)wrote};
 }
 
@@ -2661,8 +2697,12 @@ static inline MakoString mako_json_get_object(MakoString json, MakoString key) {
     const char *src = json.data ? json.data : "";
     const char *p = strstr(src, pat);
     free(pat);
-    if (!p) return mako_str_from_cstr("");
+    if (!p) {
+        mako_str_free(ek);
+        return mako_str_from_cstr("");
+    }
     p += ek.len + 3;
+    mako_str_free(ek);
     while (*p == ' ' || *p == '\t') p++;
     if (*p != '{' && *p != '[') return mako_str_from_cstr("");
     char open = *p;
@@ -2706,6 +2746,7 @@ static inline MakoString mako_json_path_string(
 ) {
     MakoString obj = mako_json_get_object(json, k1);
     MakoString out = mako_json_get_string(obj, k2);
+    mako_str_free(obj);
     return out;
 }
 
@@ -2715,7 +2756,9 @@ static inline int64_t mako_json_path_int(
     MakoString k2
 ) {
     MakoString obj = mako_json_get_object(json, k1);
-    return mako_json_get_int(obj, k2);
+    int64_t out = mako_json_get_int(obj, k2);
+    mako_str_free(obj);
+    return out;
 }
 
 /* ---- JSON arrays (Partial — top-level [...] of ints/strings) ---- */
@@ -2866,6 +2909,8 @@ static inline MakoString mako_json_array_strings2(MakoString a, MakoString b) {
     char *d = (char *)malloc(n);
     int wrote = snprintf(d, n, "[\"%s\",\"%s\"]", ea.data, eb.data);
     if (wrote < 0) wrote = 0;
+        mako_str_free(ea);
+        mako_str_free(eb);
     return (MakoString){d, (size_t)wrote};
 }
 
@@ -2887,6 +2932,7 @@ static inline MakoString mako_json_array_push_string(MakoString arr, MakoString 
     else
         wrote = snprintf(d, n, "%.*s,\"%s\"]", (int)(al - 1), s, ev.data);
     if (wrote < 0) wrote = 0;
+    mako_str_free(ev);
     return (MakoString){d, (size_t)wrote};
 }
 
@@ -2915,6 +2961,8 @@ static inline MakoString mako_json_object_from_map_ss(MakoMapSS *m) {
         d[len++] = '"';
         memcpy(d + len, ev.data, ev.len); len += ev.len;
         d[len++] = '"';
+        mako_str_free(ek);
+        mako_str_free(ev);
     }
     d[len++] = '}';
     d[len] = 0;
@@ -2982,6 +3030,9 @@ static inline MakoString mako_openapi_route(MakoString method, MakoString path, 
         es.data
     );
     if (wrote < 0) wrote = 0;
+        mako_str_free(em);
+        mako_str_free(ep);
+        mako_str_free(es);
     return (MakoString){d, (size_t)wrote};
 }
 
@@ -3001,6 +3052,8 @@ static inline MakoString mako_openapi_doc(MakoString title, MakoString version, 
         p
     );
     if (wrote < 0) wrote = 0;
+        mako_str_free(et);
+        mako_str_free(ev);
     return (MakoString){d, (size_t)wrote};
 }
 
@@ -3035,7 +3088,7 @@ static inline int64_t mako_graphql_is_mutation(MakoString query) {
     size_t i = mako_gql_skip_ws(query, 0);
     if (i >= query.len || !query.data || !mako_gql_is_ident_start(query.data[i])) return 0;
     size_t end = mako_gql_skip_ident(query, i);
-    return mako_gql_ident_eq(query, i, end, mako_str_from_cstr("mutation")) ? 1 : 0;
+    return mako_gql_ident_eq(query, i, end, mako_str_view("mutation", 8)) ? 1 : 0;
 }
 
 static inline MakoString mako_graphql_field(MakoString query) {
@@ -3096,6 +3149,7 @@ static inline MakoString mako_graphql_data(MakoString field, MakoString json) {
     if (!d) mako_abort("graphql_data: out of memory");
     int wrote = snprintf(d, n, "{\"data\":{\"%s\":%.*s}}", ef.data, (int)payload_len, payload);
     if (wrote < 0) wrote = 0;
+        mako_str_free(ef);
     return (MakoString){d, (size_t)wrote};
 }
 
@@ -3106,6 +3160,7 @@ static inline MakoString mako_graphql_error(MakoString message) {
     if (!d) mako_abort("graphql_error: out of memory");
     int wrote = snprintf(d, n, "{\"errors\":[{\"message\":\"%s\"}]}", em.data);
     if (wrote < 0) wrote = 0;
+        mako_str_free(em);
     return (MakoString){d, (size_t)wrote};
 }
 
@@ -3116,6 +3171,7 @@ static inline MakoString mako_graphql_request(MakoString query) {
     if (!d) mako_abort("graphql_request: out of memory");
     int wrote = snprintf(d, n, "{\"query\":\"%s\"}", eq.data);
     if (wrote < 0) wrote = 0;
+    mako_str_free(eq); /* escaped temp is always owned — reclaim it. */
     return (MakoString){d, (size_t)wrote};
 }
 
@@ -3126,7 +3182,7 @@ static inline int64_t mako_graphql_is_query(MakoString query) {
     if (query.data[i] == '{') return 1;
     if (!mako_gql_is_ident_start(query.data[i])) return 0;
     size_t end = mako_gql_skip_ident(query, i);
-    return mako_gql_ident_eq(query, i, end, mako_str_from_cstr("query")) ? 1 : 0;
+    return mako_gql_ident_eq(query, i, end, mako_str_view("query", 5)) ? 1 : 0;
 }
 
 static inline MakoString mako_graphql_operation_name(MakoString query) {
@@ -3134,9 +3190,9 @@ static inline MakoString mako_graphql_operation_name(MakoString query) {
     if (i >= query.len || !query.data) return mako_str_from_cstr("");
     if (!mako_gql_is_ident_start(query.data[i])) return mako_str_from_cstr("");
     size_t end = mako_gql_skip_ident(query, i);
-    int is_op = mako_gql_ident_eq(query, i, end, mako_str_from_cstr("query"))
-        || mako_gql_ident_eq(query, i, end, mako_str_from_cstr("mutation"))
-        || mako_gql_ident_eq(query, i, end, mako_str_from_cstr("subscription"));
+    int is_op = mako_gql_ident_eq(query, i, end, mako_str_view("query", 5))
+        || mako_gql_ident_eq(query, i, end, mako_str_view("mutation", 8))
+        || mako_gql_ident_eq(query, i, end, mako_str_view("subscription", 12));
     if (!is_op) return mako_str_from_cstr("");
     i = mako_gql_skip_ws(query, end);
     if (i >= query.len || !mako_gql_is_ident_start(query.data[i])) return mako_str_from_cstr("");
@@ -3153,6 +3209,7 @@ static inline MakoString mako_graphql_request_vars(MakoString query, MakoString 
     if (!d) mako_abort("graphql_request_vars OOM");
     int wrote = snprintf(d, n, "{\"query\":\"%s\",\"variables\":%.*s}", eq.data, (int)vlen, vj);
     if (wrote < 0) wrote = 0;
+    mako_str_free(eq); /* escaped temp is always owned — reclaim it. */
     return (MakoString){d, (size_t)wrote};
 }
 
@@ -3160,6 +3217,7 @@ static inline int64_t mako_graphql_has_field(MakoString query, MakoString name) 
     if (!name.data || name.len == 0) return 0;
     MakoString f = mako_graphql_field(query);
     int64_t ok = (f.len == name.len && f.data && memcmp(f.data, name.data, name.len) == 0) ? 1 : 0;
+    mako_str_free(f);
     /* also scan for name as identifier after `{` */
     if (!ok && query.data) {
         for (size_t i = 0; i + name.len <= query.len; i++) {
@@ -3188,17 +3246,22 @@ static inline MakoString mako_graphql_data2(MakoString f1, MakoString j1, MakoSt
                          (int)(j1.data && j1.len ? j1.len : 4), p1, e2.data,
                          (int)(j2.data && j2.len ? j2.len : 4), p2);
     if (wrote < 0) wrote = 0;
+        mako_str_free(e1);
+        mako_str_free(e2);
     return (MakoString){d, (size_t)wrote};
 }
 
 /* HTTP GraphQL body helpers (JSON POST) — no GC, allocate result strings. */
 static inline MakoString mako_graphql_query_from_body(MakoString body) {
-    return mako_json_get_string(body, mako_str_from_cstr("query"));
+    return mako_json_get_string(body, mako_str_view("query", 5));
 }
 
 static inline MakoString mako_graphql_variables_from_body(MakoString body) {
-    MakoString v = mako_json_get_object(body, mako_str_from_cstr("variables"));
-    if (!v.data || v.len == 0) return mako_str_from_cstr("{}");
+    MakoString v = mako_json_get_object(body, mako_str_view("variables", 9));
+    if (!v.data || v.len == 0) {
+        mako_str_free(v);
+        return mako_str_from_cstr("{}");
+    }
     return v;
 }
 
@@ -4021,6 +4084,16 @@ static inline MakoString mako_graphql_schema_sdl(int64_t id) {
     pthread_mutex_lock(&s->mu);
     for (int ti = 0; ti < MAKO_GQL_TYPE_MAX; ti++) {
         if (!s->types[ti].used) continue;
+        if (len + 128 >= cap) {
+            cap *= 2;
+            char *nb = (char *)realloc(buf, cap);
+            if (!nb) {
+                free(buf);
+                pthread_mutex_unlock(&s->mu);
+                mako_abort("graphql_schema_sdl OOM");
+            }
+            buf = nb;
+        }
         int n = snprintf(buf + len, cap - len, "type %s {\n", s->types[ti].name);
         if (n > 0) len += (size_t)n;
         for (int fi = 0; fi < MAKO_GQL_FIELD_MAX; fi++) {
@@ -4056,6 +4129,7 @@ static inline MakoString mako_graphql_schema_sdl(int64_t id) {
         buf[len++] = '\n';
         buf[len] = 0;
     }
+    buf[len] = 0; /* schemas with no types never entered the loop body */
     pthread_mutex_unlock(&s->mu);
     return (MakoString){buf, len};
 }
@@ -4774,12 +4848,12 @@ static void mako_gqlx_emit_value(MakoGqlSchema *s, MakoString q, const char *fna
 
 static inline MakoString mako_graphql_schema_resolve(int64_t id, MakoString query) {
     if (id < 1 || id > MAKO_GQL_SCHEMA_MAX)
-        return mako_graphql_error(mako_str_from_cstr("bad schema"));
+        return mako_graphql_error(mako_str_view("bad schema", 10));
     MakoGqlSchema *s = &mako_gql_schemas[id - 1];
-    if (!s->used) return mako_graphql_error(mako_str_from_cstr("schema not found"));
+    if (!s->used) return mako_graphql_error(mako_str_view("schema not found", 16));
 
     size_t rb = mako_gqlx_root_brace(query);
-    if (rb >= query.len) return mako_graphql_error(mako_str_from_cstr("no fields"));
+    if (rb >= query.len) return mako_graphql_error(mako_str_view("no fields", 9));
 
     MakoString vardefs = mako_gqlx_vardefs(query);
     MakoGqlxBuf out;
@@ -4823,6 +4897,8 @@ static inline MakoString mako_openapi_response(MakoString code, MakoString descr
         ed.data ? ed.data : "OK"
     );
     if (wrote < 0) wrote = 0;
+        mako_str_free(ec);
+        mako_str_free(ed);
     return (MakoString){d, (size_t)wrote};
 }
 
@@ -4847,6 +4923,7 @@ static inline MakoString mako_openapi_operation(
             "\"%s\":{\"summary\":\"%s\",\"tags\":[\"%s\"],\"responses\":{\"200\":{\"description\":\"OK\"}}}",
             em.data, es.data, et.data
         );
+        mako_str_free(et);
     } else {
         wrote = snprintf(
             d, n,
@@ -4855,6 +4932,8 @@ static inline MakoString mako_openapi_operation(
         );
     }
     if (wrote < 0) wrote = 0;
+    mako_str_free(em);
+    mako_str_free(es);
     return (MakoString){d, (size_t)wrote};
 }
 
@@ -4921,6 +5000,9 @@ static inline MakoString mako_openapi_info(
         ed.data ? ed.data : ""
     );
     if (wrote < 0) wrote = 0;
+        mako_str_free(et);
+        mako_str_free(ev);
+        mako_str_free(ed);
     return (MakoString){d, (size_t)wrote};
 }
 
@@ -5164,15 +5246,16 @@ static inline MakoString mako_rpc_frame(MakoString method, MakoString payload) {
     if (!d) mako_abort("rpc_frame: out of memory");
     int wrote = snprintf(d, n, "{\"method\":\"%s\",\"payload\":%s}", em.data, p);
     if (wrote < 0) wrote = 0;
+        mako_str_free(em);
     return (MakoString){d, (size_t)wrote};
 }
 
 static inline MakoString mako_rpc_method(MakoString frame) {
-    return mako_json_get_string(frame, mako_str_from_cstr("method"));
+    return mako_json_get_string(frame, mako_str_view("method", 6));
 }
 
 static inline MakoString mako_rpc_payload(MakoString frame) {
-    return mako_json_get_object(frame, mako_str_from_cstr("payload"));
+    return mako_json_get_object(frame, mako_str_view("payload", 7));
 }
 
 /* ---- Binary serialize int little-endian hex ---- */
@@ -5328,12 +5411,13 @@ static inline MakoString mako_yaml_pair(MakoString key, MakoString val) {
 
 static inline MakoString mako_yaml_pair_int(MakoString key, int64_t val) {
     char buf[32];
-    snprintf(buf, sizeof(buf), "%lld", (long long)val);
-    return mako_yaml_pair(key, mako_str_from_cstr(buf));
+    int n = snprintf(buf, sizeof(buf), "%lld", (long long)val);
+    if (n < 0) n = 0;
+    return mako_yaml_pair(key, mako_str_view(buf, (size_t)n));
 }
 
 static inline MakoString mako_yaml_pair_bool(MakoString key, int64_t val) {
-    return mako_yaml_pair(key, mako_str_from_cstr(val ? "true" : "false"));
+    return mako_yaml_pair(key, val ? mako_str_view("true", 4) : mako_str_view("false", 5));
 }
 
 static inline MakoString mako_yaml_merge(MakoString a, MakoString b) {
@@ -5372,7 +5456,8 @@ static inline MakoStrArray mako_yaml_get_list(MakoString doc, MakoString key) {
             j++;
             while (j < line_end && (p[j] == ' ' || p[j] == '\t')) j++;
             MakoString item = mako_trim_config_value(p + j, line_end - j);
-            out = mako_str_array_append(out, item);
+            out = mako_str_array_append(out, item); /* append clones — drop our copy */
+            mako_str_free(item);
         } else if (j < line_end && p[j] != '#') {
             break;
         }
@@ -5399,7 +5484,8 @@ static inline MakoStrArray mako_yaml_keys(MakoString doc) {
             if (!d) continue;
             memcpy(d, p + k0, i - k0);
             d[i - k0] = 0;
-            out = mako_str_array_append(out, (MakoString){d, i - k0});
+            out = mako_str_array_append(out, (MakoString){d, i - k0}); /* clones */
+            free(d);
         }
     }
     return out;
@@ -5630,7 +5716,8 @@ static inline MakoStrArray mako_toml_keys(MakoString doc) {
             if (!d) continue;
             memcpy(d, p + k0, k1 - k0);
             d[k1 - k0] = 0;
-            out = mako_str_array_append(out, (MakoString){d, k1 - k0});
+            out = mako_str_array_append(out, (MakoString){d, k1 - k0}); /* clones */
+            free(d);
         }
     }
     return out;
@@ -6344,6 +6431,7 @@ static inline MakoString mako_hmac_sha256_hex(MakoString key, MakoString msg) {
 #else
     MakoString both = mako_str_concat(key, msg);
     MakoString h = mako_sha256_hex(both);
+    mako_str_free(both);
     return h;
 #endif
     char *out = (char *)malloc(65);
@@ -7629,7 +7717,7 @@ static inline MakoString mako_grpc_http2_unary(
     int64_t stream, MakoString name, int64_t id
 ) {
     MakoString ct = mako_grpc_content_type();
-    MakoString lit = mako_hpack_encode_literal(mako_str_from_cstr("content-type"), ct);
+    MakoString lit = mako_hpack_encode_literal(mako_str_view("content-type", 12), ct);
     mako_str_free(ct);
     MakoString hdrs = mako_http2_headers_frame(stream, lit, 0x4); /* END_HEADERS */
     mako_str_free(lit);
@@ -7668,7 +7756,7 @@ static inline MakoString mako_grpc_http2_unary_response_status(
     int64_t stream, MakoString name, int64_t id, int64_t status
 ) {
     MakoString ct = mako_grpc_content_type();
-    MakoString lit = mako_hpack_encode_literal(mako_str_from_cstr("content-type"), ct);
+    MakoString lit = mako_hpack_encode_literal(mako_str_view("content-type", 12), ct);
     mako_str_free(ct);
     MakoString hdrs = mako_http2_headers_frame(stream, lit, 0x4); /* END_HEADERS */
     mako_str_free(lit);
@@ -7683,7 +7771,7 @@ static inline MakoString mako_grpc_http2_unary_response_status(
         return (MakoString){NULL, 0};
     }
     MakoString tlit = mako_hpack_encode_literal(
-        mako_str_from_cstr("grpc-status"), mako_str_from_cstr(scode)
+        mako_str_view("grpc-status", 11), mako_str_view(scode, (size_t)sn)
     );
     MakoString th = mako_http2_headers_frame(stream, tlit, 0x5); /* END_HEADERS|END_STREAM */
     mako_str_free(tlit);

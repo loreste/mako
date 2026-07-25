@@ -557,7 +557,8 @@ static inline int64_t mako_pg_close(MakoPgConn c) {
 /* Parse postgres://user:pass@host:port/db → libpq keyword string (Partial).
  * Empty on malformed URL. Does not connect. Works without libpq. */
 static inline MakoString mako_pg_connect_url(MakoString url) {
-    if (!url.data || url.len < 11) return mako_str_from_cstr("");
+    /* 512 caps the field lengths so the `out` bound checks below cannot wrap. */
+    if (!url.data || url.len < 11 || url.len >= 512) return mako_str_from_cstr("");
     const char *p = url.data;
     size_t n = url.len;
     size_t skip = 0;
@@ -706,6 +707,8 @@ static inline MakoString mako_redis_connect_url(MakoString url) {
         (long long)(u.has_db ? u.db : 0),
         (long long)(u.pass.len > 0 ? 1 : 0)
     );
+    mako_str_free(u.host);
+    mako_str_free(u.pass);
     if (n < 0) return mako_str_from_cstr("");
     return mako_str_from_cstr(buf);
 }
@@ -804,27 +807,41 @@ static inline MakoString mako_redis_ping(MakoString host, int64_t port) {
 static inline MakoRedisConn mako_redis_connect(MakoString url) {
     MakoRedisUrl u = mako_redis_parse_url(url);
     int fd = mako_redis_tcp_connect(u.host, u.port);
-    if (fd < 0) return (MakoRedisConn){0};
+    mako_str_free(u.host);
+    if (fd < 0) {
+        mako_str_free(u.pass);
+        return (MakoRedisConn){0};
+    }
     if (u.pass.len > 0) {
         if (mako_redis_send_array(fd, "AUTH", u.pass, (MakoString){0}) < 0) {
+            mako_str_free(u.pass);
             mako_sock_close(fd);
             return (MakoRedisConn){0};
         }
         MakoString auth = mako_redis_recv_simple(fd);
-        if (!mako_str_eq(auth, mako_str_from_cstr("OK"))) {
+        int auth_ok = mako_str_eq(auth, mako_str_view("OK", 2));
+        mako_str_free(auth);
+        if (!auth_ok) {
+            mako_str_free(u.pass);
             mako_sock_close(fd);
             return (MakoRedisConn){0};
         }
     }
+    mako_str_free(u.pass);
     if (u.has_db) {
         char dbuf[32];
-        snprintf(dbuf, sizeof(dbuf), "%lld", (long long)u.db);
-        if (mako_redis_send_array(fd, "SELECT", mako_str_from_cstr(dbuf), (MakoString){0}) < 0) {
+        int dn = snprintf(dbuf, sizeof(dbuf), "%lld", (long long)u.db);
+        if (dn < 0) dn = 0;
+        if (mako_redis_send_array(
+                fd, "SELECT", mako_str_view(dbuf, (size_t)dn), (MakoString){0}
+            ) < 0) {
             mako_sock_close(fd);
             return (MakoRedisConn){0};
         }
         MakoString sel = mako_redis_recv_simple(fd);
-        if (!mako_str_eq(sel, mako_str_from_cstr("OK"))) {
+        int sel_ok = mako_str_eq(sel, mako_str_view("OK", 2));
+        mako_str_free(sel);
+        if (!sel_ok) {
             mako_sock_close(fd);
             return (MakoRedisConn){0};
         }
@@ -1293,9 +1310,18 @@ static inline MakoMysqlUrl mako_mysql_parse_url(MakoString url) {
     return out;
 }
 
+/* Release the owned strings a parsed MySQL URL holds. */
+static inline void mako_mysql_url_free(MakoMysqlUrl u) {
+    mako_str_free(u.host);
+    mako_str_free(u.db);
+}
+
 static inline MakoString mako_mysql_connect_url(MakoString url) {
     MakoMysqlUrl u = mako_mysql_parse_url(url);
-    if (!u.ok) return mako_str_from_cstr("");
+    if (!u.ok) {
+        mako_mysql_url_free(u);
+        return mako_str_from_cstr("");
+    }
     char buf[384];
     int n = snprintf(
         buf,
@@ -1308,12 +1334,14 @@ static inline MakoString mako_mysql_connect_url(MakoString url) {
         (int)u.db.len,
         u.db.data ? u.db.data : ""
     );
+    mako_mysql_url_free(u);
     if (n < 0) return mako_str_from_cstr("");
     return mako_str_from_cstr(buf);
 }
 
 static inline MakoMysqlConn mako_mysql_connect(MakoString url) {
     MakoMysqlUrl u = mako_mysql_parse_url(url);
+    mako_mysql_url_free(u);
     return (MakoMysqlConn){u.ok ? 1 : 0};
 }
 
@@ -1328,11 +1356,13 @@ static inline int64_t mako_mysql_close(MakoMysqlConn c) {
 
 static inline int64_t mako_mysql_is_mariadb(MakoString url) {
     MakoMysqlUrl u = mako_mysql_parse_url(url);
+    mako_mysql_url_free(u);
     return u.ok && u.mariadb ? 1 : 0;
 }
 
 static inline MakoString mako_mysql_driver_name(MakoString url) {
     MakoMysqlUrl u = mako_mysql_parse_url(url);
+    mako_mysql_url_free(u);
     if (!u.ok) return mako_str_from_cstr("");
     return mako_str_from_cstr(u.mariadb ? "mariadb" : "mysql");
 }
@@ -1389,6 +1419,13 @@ static inline MakoStoreUrl mako_store_parse_url(
     return out;
 }
 
+/* Release the owned strings a parsed store URL holds. */
+static inline void mako_store_url_free(MakoStoreUrl u) {
+    mako_str_free(u.driver);
+    mako_str_free(u.host);
+    mako_str_free(u.db);
+}
+
 static inline MakoString mako_store_url_info(MakoStoreUrl u) {
     if (!u.ok) return mako_str_from_cstr("");
     char buf[512];
@@ -1410,9 +1447,10 @@ static inline MakoString mako_store_url_info(MakoStoreUrl u) {
 }
 
 static inline MakoString mako_mongo_connect_url(MakoString url) {
-    return mako_store_url_info(
-        mako_store_parse_url(url, "mongodb://", "mongodb", 27017)
-    );
+    MakoStoreUrl u = mako_store_parse_url(url, "mongodb://", "mongodb", 27017);
+    MakoString out = mako_store_url_info(u);
+    mako_store_url_free(u);
+    return out;
 }
 
 static inline MakoString mako_mongo_find_one_request(
@@ -1434,9 +1472,10 @@ static inline MakoString mako_mongo_find_one_request(
 }
 
 static inline MakoString mako_cassandra_connect_url(MakoString url) {
-    return mako_store_url_info(
-        mako_store_parse_url(url, "cassandra://", "cassandra", 9042)
-    );
+    MakoStoreUrl u = mako_store_parse_url(url, "cassandra://", "cassandra", 9042);
+    MakoString out = mako_store_url_info(u);
+    mako_store_url_free(u);
+    return out;
 }
 
 static inline MakoString mako_cassandra_select(
@@ -1462,9 +1501,10 @@ static inline MakoString mako_cassandra_select(
 }
 
 static inline MakoString mako_clickhouse_connect_url(MakoString url) {
-    return mako_store_url_info(
-        mako_store_parse_url(url, "clickhouse://", "clickhouse", 8123)
-    );
+    MakoStoreUrl u = mako_store_parse_url(url, "clickhouse://", "clickhouse", 8123);
+    MakoString out = mako_store_url_info(u);
+    mako_store_url_free(u);
+    return out;
 }
 
 static inline MakoString mako_clickhouse_select(
@@ -1492,9 +1532,12 @@ static inline MakoString mako_clickhouse_select(
 static inline MakoString mako_elastic_connect_url(MakoString url) {
     MakoStoreUrl u = mako_store_parse_url(url, "elastic://", "elasticsearch", 9200);
     if (!u.ok) {
+        mako_store_url_free(u);
         u = mako_store_parse_url(url, "elasticsearch://", "elasticsearch", 9200);
     }
-    return mako_store_url_info(u);
+    MakoString out = mako_store_url_info(u);
+    mako_store_url_free(u);
+    return out;
 }
 
 static inline MakoString mako_elastic_search_request(MakoString index, MakoString query) {
@@ -2139,9 +2182,7 @@ static inline int64_t mako_sql_last_insert_id(MakoSqlDB db) {
 #endif
 #if defined(MAKO_HAS_LIBPQ)
     if (db.driver == 2 && db.pg.handle) {
-        MakoString q = mako_str_from_cstr("select lastval()");
-        int64_t v = mako_pg_query_int_params(db.pg, q, NULL, 0);
-        return v;
+        return mako_pg_query_int_params(db.pg, mako_str_view("select lastval()", 16), NULL, 0);
     }
 #endif
     int64_t key = mako_sql_meta_key(db);
@@ -2166,17 +2207,17 @@ static inline int64_t mako_sql_rows_affected(MakoSqlDB db) {
 
 static inline int64_t mako_sql_begin(MakoSqlDB db) {
     MakoIntArray empty = {NULL, 0, 0};
-    return mako_sql_exec(db, mako_str_from_cstr("begin"), empty);
+    return mako_sql_exec(db, mako_str_view("begin", 5), empty);
 }
 
 static inline int64_t mako_sql_commit(MakoSqlDB db) {
     MakoIntArray empty = {NULL, 0, 0};
-    return mako_sql_exec(db, mako_str_from_cstr("commit"), empty);
+    return mako_sql_exec(db, mako_str_view("commit", 6), empty);
 }
 
 static inline int64_t mako_sql_rollback(MakoSqlDB db) {
     MakoIntArray empty = {NULL, 0, 0};
-    return mako_sql_exec(db, mako_str_from_cstr("rollback"), empty);
+    return mako_sql_exec(db, mako_str_view("rollback", 8), empty);
 }
 
 /* ---- Unified prepared SQL statements ----
@@ -2251,6 +2292,7 @@ static inline int64_t mako_sql_prepare(MakoSqlDB db, MakoString sql) {
                 st->sqlite_stmt = mako_sqlite_prepare_handle(db.sqlite, sql);
             } else if (db.driver == 2) {
                 if (!db.pg.handle) {
+                    mako_str_free(st->sql);
                     memset(st, 0, sizeof(*st));
                     return 0;
                 }
@@ -2258,6 +2300,7 @@ static inline int64_t mako_sql_prepare(MakoSqlDB db, MakoString sql) {
                 MakoString q = mako_sql_qmark_to_dollar(sql);
                 if (mako_pg_prepare_name(db.pg, st->pg_name, q) != 0) {
                     mako_str_free(q);
+                    mako_str_free(st->sql);
                     memset(st, 0, sizeof(*st));
                     return 0;
                 }
@@ -2298,6 +2341,7 @@ static inline int64_t mako_sql_stmt_close(int64_t stmt) {
     MakoSqlStmt *st = mako_sql_stmt_ref(stmt);
     if (!st) return 0;
     if (st->driver == 1) mako_sqlite_finalize_stmt(st->sqlite_stmt);
+    mako_str_free(st->sql); /* cloned in sql_prepare */
     memset(st, 0, sizeof(*st));
     return 1;
 }
@@ -2757,7 +2801,8 @@ static inline MakoStrArray mako_sql_query_col_str(MakoSqlDB db, MakoString sql, 
             out.data = nd;
             out.cap = ncap;
         }
-        out.data[out.len++] = mako_str_clone(mako_sql_rows_str(h, 0));
+        /* rows_str already returns an owned copy — cloning it would leak. */
+        out.data[out.len++] = mako_sql_rows_str(h, 0);
         n++;
     }
     mako_sql_rows_close(h);
@@ -2778,27 +2823,19 @@ static inline MakoIntArray mako_sql_one_int_arg(int64_t value) {
 
 static inline int64_t mako_sql_migrations_ensure(MakoSqlDB db) {
     MakoIntArray empty = {NULL, 0, 0};
-    return mako_sql_exec(
-        db,
-        mako_str_from_cstr(
-            "create table if not exists mako_schema_migrations "
-            "(version integer primary key, applied_at integer)"
-        ),
-        empty
-    );
+    static const char kSql[] =
+        "create table if not exists mako_schema_migrations "
+        "(version integer primary key, applied_at integer)";
+    return mako_sql_exec(db, mako_str_view(kSql, sizeof(kSql) - 1), empty);
 }
 
 static inline int64_t mako_sql_migration_applied(MakoSqlDB db, int64_t version) {
     if (version <= 0) return -1;
     if (mako_sql_migrations_ensure(db) != 0) return -1;
     MakoIntArray args = mako_sql_one_int_arg(version);
-    int64_t n = mako_sql_query_int(
-        db,
-        mako_str_from_cstr(
-            "select count(*) from mako_schema_migrations where version = ?"
-        ),
-        args
-    );
+    static const char kSql[] =
+        "select count(*) from mako_schema_migrations where version = ?";
+    int64_t n = mako_sql_query_int(db, mako_str_view(kSql, sizeof(kSql) - 1), args);
     free(args.data);
     return n;
 }
@@ -2817,13 +2854,9 @@ static inline int64_t mako_sql_migrate(MakoSqlDB db, int64_t version, MakoString
         return -1;
     }
     MakoIntArray args = mako_sql_one_int_arg(version);
-    int64_t marked = mako_sql_exec(
-        db,
-        mako_str_from_cstr(
-            "insert into mako_schema_migrations(version, applied_at) values (?, 0)"
-        ),
-        args
-    );
+    static const char kSql[] =
+        "insert into mako_schema_migrations(version, applied_at) values (?, 0)";
+    int64_t marked = mako_sql_exec(db, mako_str_view(kSql, sizeof(kSql) - 1), args);
     free(args.data);
     if (marked != 0) {
         (void)mako_sql_rollback(db);
@@ -3232,8 +3265,12 @@ static inline int64_t mako_sql_pool_close(int64_t pool) {
     MakoSqlPool *p = mako_sql_pool_ref(pool);
     if (!p) return 0;
     for (int64_t i = 0; i < p->max; i++) {
-        if (p->slot_live[i]) mako_sql_close(p->slots[i]);
+        if (p->slot_live[i]) {
+            mako_sql_close(p->slots[i]);
+            mako_str_free(p->slots[i].dsn); /* cloned by sql_open_* */
+        }
     }
+    mako_str_free(p->dsn);
     memset(p, 0, sizeof(*p));
     return 1;
 }

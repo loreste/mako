@@ -2441,6 +2441,302 @@ impl Codegen {
         }
     }
 
+    /// String-returning builtins that hand back a *borrowed* view: a pointer
+    /// into an argument, into live connection / queue / ring state, into a
+    /// plugin-owned buffer, into an arena block, or into a static scratch
+    /// buffer. Freeing one of these is a double free or an invalid free, so no
+    /// drop site may ever treat them as owned.
+    ///
+    /// Verified against the C implementations in `runtime/`:
+    /// `str_as_view` / `bytes_as_str` return `mako_str_view`; `dbg_str`
+    /// returns its argument unchanged; `error_string` returns the
+    /// Result's `err` field; the `http_*` request accessors return fields of
+    /// the global conn table; the list/stack/queue/ring readers return an
+    /// element still owned by the container; the `plugin_call*` family returns
+    /// memory owned by the loaded plugin; `arena_text` is arena-allocated (not
+    /// `malloc`); `tcp_read_fast` returns a static receive buffer.
+    /// `buf_to_string` is the one entry here that is provably owned
+    /// (`mako_buf_to_string`, `runtime/mako_game.h:62`, returns a `malloc`ed
+    /// copy or the shared empty singleton). It stays borrowed — and therefore
+    /// leaks one buffer per call — because the `Type::Buf` pack family has no
+    /// native IR lowering, so a fixture proving the ownership cannot run on
+    /// `--backend native` and there is no way to leave permanent regression
+    /// coverage for it. Move it once that family lowers natively.
+    /// Builtins returning a freshly built owned *container* rather than a
+    /// string. `builtin_returns_owned_string` only covers `MakoString`, so
+    /// without this the array leaks once per call — measured at 708 B/call for
+    /// `env_keys` under LeakSanitizer.
+    ///
+    /// Verified against the C implementations: `mako_env_keys`
+    /// (`runtime/mako_rt.h`) and `mako_read_dir` (`runtime/mako_stdlib.h`) both
+    /// build a new array with `mako_str_array_make` and append into it, so the
+    /// caller owns the array and every element. `own_free_fn` already maps
+    /// `MakoStrArray` to `mako_str_array_free`; move analysis still suppresses
+    /// the drop when the value is returned, passed on, or stored.
+    fn builtin_returns_owned_slice(name: &str) -> bool {
+        matches!(name, "env_keys" | "read_dir")
+    }
+
+    fn builtin_returns_borrowed_string(name: &str) -> bool {
+        matches!(
+            name,
+            "arena_text"
+                | "buf_to_string"
+                | "bytes_as_str"
+                | "dbg_str"
+                | "diameter_conn_pop"
+                | "diameter_mgr_poll"
+                | "error_string"
+                | "hot_reload_plugin_call"
+                | "http_body"
+                | "http_header"
+                | "http_method"
+                | "http_path"
+                | "http_req_body"
+                | "http_req_method"
+                | "http_req_path"
+                | "list_get_str"
+                | "list_popped_str"
+                | "mq_try_take"
+                | "nats_try_next"
+                | "plugin_call"
+                | "plugin_call1"
+                | "queue_popped_str"
+                | "redis_mq_rpop"
+                | "stack_peek_str"
+                | "str_as_view"
+                | "tcp_read_fast"
+        )
+    }
+
+    /// Every string-returning builtin proven to hand back a freshly allocated
+    /// buffer, minus the ones already covered by an operation family below.
+    ///
+    /// Derived by cross-referencing the builtin signature table in
+    /// `src/types/mod.rs` against the C definitions in `runtime/`: a name is
+    /// listed only when *every* return path of its runtime function is a
+    /// `malloc`/`realloc`-backed buffer, an owning helper (`mako_str_clone`,
+    /// `mako_str_from_cstr`, `mako_str_concat`, `mako_str_slice`, the string
+    /// builders), or the shared empty singleton (which `mako_str_free` skips).
+    /// Anything not provable stays out and is handled as borrowed — an
+    /// unlisted builtin may leak, but can never double-free.
+    ///
+    /// Must stay sorted: looked up with `binary_search`.
+    const OWNED_STRING_BUILTINS: &'static [&'static str] = &[
+        "aes_ctr", "aes_gcm_open", "aes_gcm_seal", "arg_get", "auth_token_subject",
+        "avro_encode_array_long", "avro_encode_bool", "avro_encode_long", "avro_encode_null",
+        "bin_encode_int", "binary_put_u16be", "binary_put_u16le", "binary_put_u32be",
+        "binary_put_u32le", "binary_put_u64be", "binary_put_u64le", "buf_read",
+        "buf_read_bytes", "buf_read_line", "buf_read_str", "builder_string",
+        "bytes_buffer_string", "cache_get", "cassandra_select", "cbor_encode_array_int",
+        "cbor_encode_bool", "cbor_encode_int", "cbor_encode_null", "chacha20_poly1305_open",
+        "chacha20_poly1305_seal", "chan_select_value_str", "clickhouse_select", "cmap_get",
+        "cookie_get", "cookie_make", "csrf_token", "dap_request_command", "dap_stopped_event",
+        "debug_file", "diameter_avp_at", "diameter_avp_find", "diameter_avp_find_vendor",
+        "diameter_avp_put_str", "diameter_avp_put_u32", "diameter_avp_str",
+        "diameter_build_cea", "diameter_build_cer", "diameter_build_dpa", "diameter_build_dpr",
+        "diameter_build_dwa", "diameter_build_dwr", "diameter_conn_take_out",
+        "diameter_e2e_key", "diameter_header_build", "diameter_mgr_take_out",
+        "diameter_msg_build", "diameter_session_key", "diameter_set_e2e", "diameter_set_hbh",
+        "diameter_tcm_take_out", "diameter_txn_key", "dns_join_host_port", "dns_lookup_all",
+        "dns_lookup_ipv4", "dns_lookup_ipv6", "dns_naptr_lookup", "dns_normalize_host",
+        "dns_split_host", "dns_srv_lookup", "duration_string", "embed_file", "env_get",
+        "env_get_or", "error_as_tag", "exec_output", "ffi_abi_name", "file_read_exact",
+        "flag_string", "fmt_errorf", "fmt_errorf2", "fmt_sprint", "fmt_sprint2", "fmt_sprint3",
+        "fmt_sprintf", "fmt_sprintf2", "fmt_sprintf3", "fmt_sprintf4", "fmt_sprintf_d",
+        "fmt_sprintf_dd", "fmt_sprintf_f", "fmt_sprintln", "fmt_sprintln2", "fsm_rule",
+        "fsm_transition", "game_udp_recv", "game_udp_sender_addr", "getcwd",
+        "gfx_backend_name", "gif_decode_rgb", "gif_decode_rgb_lzw", "gif_encode_rgb",
+        "gif_encode_rgb_lzw", "gob_encode_int", "gob_encode_map_ss", "gob_encode_strs",
+        "gob_encode_struct", "gpu_backend", "gpu_buf_read", "gpu_device_backend",
+        "gpu_device_name", "gpu_device_vendor", "graphql_arg", "graphql_data", "graphql_data2",
+        "graphql_error", "graphql_field", "graphql_fields", "graphql_operation_name",
+        "graphql_query_from_body", "graphql_request_vars", "graphql_variables_from_body",
+        "grpc_content_type", "grpc_encode_message", "grpc_http2_client_stream_flow",
+        "grpc_http2_response_payload", "grpc_http2_stream_data", "grpc_http2_stream_two",
+        "grpc_http2_unary", "grpc_http2_unary_payload", "grpc_http2_unary_response_status",
+        "grpc_message_payload", "grpc_service_handle", "grpc_service_methods",
+        "grpc_service_name", "grpc_status_trailer", "grpc_unary_name", "gzip_compress",
+        "gzip_decompress", "h3_stream_authority", "h3_stream_body", "h3_stream_method",
+        "h3_stream_path", "h3_stream_read", "hex_to_bytes", "hkdf_sha256", "hmac_sha1",
+        "hmac_sha1_raw", "hmac_sha256", "hmac_sha256_raw", "hpack_decoded_name",
+        "hpack_decoded_value", "hpack_dyn_name", "hpack_dyn_name_at", "hpack_dyn_value",
+        "hpack_dyn_value_at", "hpack_encode_indexed", "hpack_encode_literal",
+        "hpack_literal_name", "hpack_literal_value", "hpack_static_name", "hpack_static_value",
+        "html_escape", "html_template_execute", "html_template_execute2",
+        "html_template_execute3", "html_template_if", "html_template_nested",
+        "html_template_range", "html_template_with", "http2_client_preface",
+        "http2_concat_frames", "http2_conn_auto_settings_ack", "http2_conn_goaway",
+        "http2_conn_header_block", "http2_conn_pump", "http2_empty_settings", "http2_frame_at",
+        "http2_frame_payload", "http2_header_block", "http2_response_ct",
+        "http2_server_preface", "http2_settings_ack", "http2_settings_max_concurrent",
+        "http2_stream_body", "http_compress_if_accepted", "http_content_encoding",
+        "http_decode_chunked", "http_forward", "http_forward_body", "http_forward_headers",
+        "http_get", "http_get_timeout", "http_last_header", "http_parsed_body",
+        "http_parsed_header", "http_parsed_headers", "http_parsed_host", "http_parsed_method",
+        "http_parsed_path", "http_post", "http_post_timeout", "http_request_body",
+        "http_request_ct", "http_request_method", "http_request_path", "http_route_param",
+        "https_get", "https_last_header", "https_post", "httptest_get", "httptest_header",
+        "jpeg_decode_gray", "jpeg_encode_gray", "jpeg_encode_gray_baseline",
+        "jpeg_encode_gray_dct", "jpeg_encode_gray_huff", "jpeg_encode_gray_jfif",
+        "jpeg_huff_block", "json_array_get_string", "json_array_ints3", "json_array_push_int",
+        "json_array_push_string", "json_array_strings2", "json_get_object", "json_get_string",
+        "json_i", "json_merge", "json_nest", "json_object", "json_object_from_map_ss",
+        "json_path_string", "json_si", "json_ss", "jwt_payload", "jwt_sign_es256", "lb_pick2",
+        "lb_pick3", "llm_api_key", "llm_ask", "llm_base_url", "llm_body_force_stream",
+        "llm_body_with_tools", "llm_chat", "llm_chat_body", "llm_chat_retry",
+        "llm_chat_stream", "llm_content", "llm_default_model", "llm_embed", "llm_embed_body",
+        "llm_embeddings", "llm_error_message", "llm_finish_reason", "llm_https_post",
+        "llm_json_extract", "llm_message", "llm_messages_append", "llm_redact_key",
+        "llm_sse_data", "llm_sse_delta", "llm_stream_append", "llm_system_user",
+        "llm_tool_call_args", "llm_tool_call_name", "lookup_host", "mail_header_get",
+        "mail_msg_build", "mail_msg_envelope_from", "mail_msg_rcpt_at", "mail_parse_address",
+        "mail_simple", "metrics_export", "metrics_export_prom", "middleware_trace",
+        "mime_type", "mmap_read", "model_tensor_name", "msgpack_encode_array_int",
+        "msgpack_encode_bool", "msgpack_encode_int", "msgpack_encode_nil",
+        "multipart_boundary", "multipart_file_content_type", "multipart_file_name",
+        "multipart_file_value", "multipart_form_value", "mysql_driver_name", "nb_read",
+        "nb_udp_recv", "nghttp2_get", "nghttp2_get_two", "nghttp2_post", "oidc_discovery",
+        "oidc_token", "open_at_rest", "open_file_at_rest", "openapi_doc", "openapi_doc_full",
+        "openapi_info", "openapi_operation", "openapi_paths_merge", "openapi_route",
+        "page_read", "path_base", "path_clean", "path_dir", "path_ext", "path_join",
+        "pb_encode_bytes", "pb_encode_field_varint", "pb_encode_key", "pb_encode_nested",
+        "pb_encode_repeated_varint", "pb_encode_simple", "pb_encode_sint", "pb_encode_varint",
+        "pb_nested_inner", "pb_simple_name", "pbkdf2_sha256", "peer_table_host",
+        "pem_extract_block", "pem_load_file", "plugin_api_version", "plugin_kind",
+        "plugin_last_error_str", "plugin_last_log", "plugin_manifest_artifact",
+        "plugin_manifest_lib_path", "plugin_name", "plugin_path", "plugin_version",
+        "pman_read_page", "png_decode_gray", "png_encode_gray", "png_encode_rgb", "pread",
+        "profile_http_route", "profile_pprof_http_body", "profile_samples_pprof_text",
+        "quic_crypto_data", "quic_crypto_payload", "quic_dcid", "quic_header_protect_apply",
+        "quic_header_protect_remove", "quic_header_protection_mask", "quic_hkdf_expand_label",
+        "quic_initial_client_hp", "quic_initial_client_iv", "quic_initial_client_key",
+        "quic_initial_client_secret", "quic_initial_hp_mask", "quic_initial_packet_protect",
+        "quic_initial_packet_unprotect", "quic_initial_protect", "quic_initial_unprotect",
+        "quic_payload_crypto_data", "quic_scid", "quic_stream_data", "quiche_h3_get",
+        "quiche_h3_get_two", "quiche_h3_post", "quiche_handshake", "quiche_version",
+        "random_bytes", "readlink", "realpath", "redis_conn_del", "redis_conn_exists",
+        "redis_conn_get", "redis_conn_llen", "redis_conn_lpush", "redis_conn_ping",
+        "redis_conn_rpop", "redis_conn_set", "redis_del", "redis_exists", "redis_get",
+        "redis_llen", "redis_lpush", "redis_ping", "redis_rpop", "redis_set",
+        "reflect_kind_of_int", "reflect_kind_of_string", "reflect_struct_field_name",
+        "reflect_struct_field_type", "reflect_type_name_at", "reflect_type_of_int",
+        "reflect_type_of_string", "reflect_type_schema", "reflect_value_field_at",
+        "reflect_value_get", "reflect_value_schema", "reflect_value_string_int",
+        "reflect_value_string_str", "regex_capture", "regex_find", "regex_quote_meta",
+        "regex_replace", "regex_replace_all", "replay_append", "reqctx_get", "router_match",
+        "router_match_path", "router_param", "rpc_method", "rpc_payload", "rtp_pack",
+        "rtp_payload", "scram_cbind_b64", "scram_client_final_without_proof",
+        "scram_gs2_header", "scram_plus_client_final_bare", "scram_tls_unique_cbind",
+        "sctp_getladdrs", "sctp_getpaddrs", "sctp_local_addr", "sctp_peer_addr", "sctp_read",
+        "sctp_read_n", "sctp_recv_stream", "sdp_append_line", "sdp_attr", "sdp_attr_candidate",
+        "sdp_attr_fmtp", "sdp_attr_rtpmap", "sdp_build_audio", "sdp_build_av",
+        "sdp_connection", "sdp_connection_addr", "sdp_direction", "sdp_media",
+        "sdp_media_attr", "sdp_media_connection", "sdp_media_connection_addr",
+        "sdp_media_direction", "sdp_media_formats", "sdp_media_proto", "sdp_media_type",
+        "sdp_origin", "sdp_origin_addr", "sdp_replace_connection_addr",
+        "sdp_replace_media_port", "sdp_session_name", "sdp_set_media_direction", "sdp_timing",
+        "sdp_version", "seal_at_rest", "session_cancel_token", "session_id_new", "sg_gather2",
+        "sg_gather3", "sg_slice", "sha1", "sha256", "sha256_raw", "sha512", "sip_addr_tag",
+        "sip_auth_param", "sip_authorization_digest", "sip_body", "sip_branch",
+        "sip_call_id_new", "sip_contact_value", "sip_cseq_value", "sip_dialog_id",
+        "sip_digest_response_ha1", "sip_ensure_to_tag", "sip_from_value", "sip_header",
+        "sip_header_line", "sip_header_n", "sip_headers_append", "sip_insert_via",
+        "sip_method", "sip_msg_fix_top_via", "sip_msg_response_host", "sip_prepend_header",
+        "sip_proxy_authenticate", "sip_reason", "sip_record_route", "sip_reply",
+        "sip_reply_with_to_tag", "sip_request_uri", "sip_strip_via", "sip_tag", "sip_to_value",
+        "sip_txn_key", "sip_udp_recv", "sip_uri_build", "sip_uri_host", "sip_uri_scheme",
+        "sip_uri_user", "sip_version", "sip_via_add_received", "sip_via_branch",
+        "sip_via_fix_source", "sip_via_host", "sip_via_maddr", "sip_via_received",
+        "sip_via_response_addr", "sip_via_response_host", "sip_via_transport", "sip_via_value",
+        "sip_via_value_nat", "sip_via_value_rport", "sip_view_copy", "sip_www_authenticate",
+        "slog_redact", "smtp_auth_plain", "smtp_format_message", "smtp_last_reply",
+        "smtp_mock_last_from", "smtp_mock_last_message", "smtp_mock_last_rcpt",
+        "snap_apply_delta", "snap_diff", "snap_encode2", "snap_encode4", "sql_query_str",
+        "sql_query_str2", "sql_query_str3", "sql_query_str4", "sql_rows_str",
+        "sqlite_query_text", "sse_event", "sse_retry", "stack_trace", "str_join",
+        "str_replace", "str_to_lower", "str_to_owned", "str_to_upper", "str_trim",
+        "str_trim_left", "str_trim_right", "str_trim_space", "syscall_errno_str",
+        "syscall_hostname", "syscall_read", "syscall_readlink", "syscall_uname_machine",
+        "syscall_uname_release", "syscall_uname_sysname", "tar_first_name", "tcp_local_addr",
+        "tcp_peer_addr", "tcp_read", "tcp_read_n", "temp_dir", "temp_file", "template_execute",
+        "time_format", "time_format_clock", "time_format_date", "time_format_local",
+        "time_format_offset", "tls_aead_open", "tls_aead_seal", "tls_certificate",
+        "tls_certificate_der", "tls_certificate_verify", "tls_certificate_verify_sig",
+        "tls_client_application_traffic_secret", "tls_client_handshake_traffic_secret",
+        "tls_client_hello", "tls_client_hello_random", "tls_conn_alpn", "tls_conn_version",
+        "tls_derive_secret", "tls_encrypted_extensions", "tls_finished",
+        "tls_finished_verify_data", "tls_get", "tls_get_insecure", "tls_grpc_stream",
+        "tls_grpc_unary", "tls_h2_get", "tls_h2_get_twice", "tls_h2_mux", "tls_h2_post",
+        "tls_h2_settings_exchange", "tls_h2_window_get", "tls_handshake_ok",
+        "tls_handshake_version", "tls_peer_cn", "tls_pool_recv", "tls_post", "tls_read",
+        "tls_read_nb", "tls_record_appdata_open", "tls_record_appdata_open_seq",
+        "tls_record_appdata_seal", "tls_record_appdata_seal_seq",
+        "tls_server_application_traffic_secret", "tls_server_handshake_traffic_secret",
+        "tls_server_hello", "tls_server_hello_random", "tls_unique", "tmpl_execute",
+        "tmpl_html", "tmpl_html_execute", "tmpl_text", "tok_token", "toml_escape",
+        "toml_get_in", "toml_get_string", "toml_merge", "toml_pair", "toml_pair_bool",
+        "toml_pair_int", "toml_section", "trace_current", "trace_export_otlp_pb", "trace_id",
+        "trace_span_id", "udp_last_sender", "udp_last_sender_host", "udp_recv",
+        "udp_recv_from", "ulid_string", "unix_read", "url_host", "url_path", "url_query",
+        "url_query_escape", "url_scheme", "utf8_encode_rune", "uuid_bytes", "uuid_string",
+        "uuid_string_upper", "uuid_urn", "wal_read_at", "watch_poll", "ws_accept_key",
+        "ws_client_recv", "ws_recv", "wss_client_recv", "wss_pool_recv", "wss_server_recv",
+        "xml_escape", "xml_tag_text", "xor_bytes", "yaml_escape", "yaml_get_string",
+        "yaml_merge", "yaml_pair", "yaml_pair_bool", "yaml_pair_int", "zip_first_name",
+        "zip_read_file",
+    ];
+
+    /// Ownership metadata for string-returning builtins: whether a call to
+    /// `name` yields a freshly allocated owned string the caller must reclaim.
+    ///
+    /// Conservative by construction. A builtin is owned only when it belongs to
+    /// an operation family that *produces* fresh content — encode / decode /
+    /// convert / hash / sign / serialize — or when it is listed in
+    /// `OWNED_STRING_BUILTINS` after checking its runtime implementation. Every
+    /// other builtin is treated as not-owned, so an unclassified builtin may
+    /// leak but can never double-free. Known view-returners are denied first.
+    fn builtin_returns_owned_string(name: &str) -> bool {
+        // Borrowed views into an argument / container / buffer — never free.
+        if Self::builtin_returns_borrowed_string(name) {
+            return false;
+        }
+        // Owned-producing operation families (fresh output, never a view).
+        // Suffix families: the operation *builds/serializes/converts* content
+        // into a new buffer. Accessor/getter families (`_get_string`, `_header`,
+        // plain `_string` like `buf_to_string`) are intentionally NOT here —
+        // they can return borrowed views, so leaving them unclassified only
+        // risks a leak, never a double-free.
+        name.ends_with("_encode")
+            || name.ends_with("_decode")
+            || name.ends_with("_encode_string")
+            || name.ends_with("_decode_string")
+            || name.ends_with("_to_string")
+            || name.ends_with("_hash")
+            || name.ends_with("_sign")
+            || name.ends_with("_hex")
+            || name.ends_with("_json")
+            || name.ends_with("_sdl")
+            || name.ends_with("_frame")
+            || name.ends_with("_connect_url")
+            || name.ends_with("_request")
+            || name.ends_with("_response")
+            || name.starts_with("format_")
+            || name.starts_with("base64_")
+            || name.starts_with("base32_")
+            // Owned results that do not fit a family suffix/prefix.
+            || matches!(
+                name,
+                "read_file"
+                    | "str_repeat"
+                    | "csv_join_row"
+                    | "auth_bearer"
+                    | "auth_basic_header"
+                    | "graphql_schema_resolve"
+            )
+            || Self::OWNED_STRING_BUILTINS.binary_search(&name).is_ok()
+    }
+
     /// Fresh values whose generated representation is unambiguously owned.
     ///
     /// Arbitrary calls and methods are deliberately excluded: legacy C ABI
@@ -2473,6 +2769,12 @@ impl Codegen {
                         // long-running server leaks one buffer per request.
                         || name == "graphql_schema_resolve"
                         || name == "graphql_schema_sdl"
+                        // Owned-string builtins (encode / decode / convert /
+                        // hash / serialize families) are classified centrally in
+                        // `builtin_returns_owned_string` — a new such builtin is
+                        // covered by its family suffix without editing this list.
+                        || Self::builtin_returns_owned_string(name)
+                        || Self::builtin_returns_owned_slice(name)
                         || self.variant_to_enum.contains_key(name)
                         // A user-defined function whose return type is a leaf
                         // owned value (string / slice / map — freed by a single
@@ -2504,9 +2806,13 @@ impl Codegen {
                 op: crate::ast::BinOp::Add,
                 ..
             } => true,
+            // A builtin that hands back a borrowed view (an argument, a conn /
+            // ring slot, plugin or arena memory, a static buffer) must not be
+            // reclaimed here — the same buffer is still owned elsewhere, so the
+            // free is a double free rather than a leak.
             Expr::Call { callee, .. } => !matches!(
                 callee.as_ref(),
-                Expr::Ident(name) if name == "str_as_view"
+                Expr::Ident(name) if Self::builtin_returns_borrowed_string(name)
             ),
             _ => false,
         }
@@ -18189,6 +18495,17 @@ impl Codegen {
                 self.line(&format!("int64_t {tmp} = mako_env_set({k}, {v});"));
                 return ("int64_t".into(), tmp);
             }
+            "env_unset" => {
+                let (_, k) = self.emit_expr(&args[0]);
+                let tmp = self.fresh("eu");
+                self.line(&format!("int64_t {tmp} = mako_env_unset({k});"));
+                return ("int64_t".into(), tmp);
+            }
+            "env_keys" => {
+                let tmp = self.fresh("ek");
+                self.line(&format!("MakoStrArray {tmp} = mako_env_keys();"));
+                return ("MakoStrArray".into(), tmp);
+            }
             "mkdir" => {
                 let (_, p) = self.emit_expr(&args[0]);
                 let tmp = self.fresh("md");
@@ -33770,7 +34087,25 @@ impl Codegen {
                     } else {
                         "mako_str_concat"
                     };
-                    self.emit_line(format_args!("MakoString {tmp} = {fn_name}({lv}, {rv});"));
+                    // The right operand is copied by concat, never consumed. If it
+                    // is an unambiguously owned temporary (owned-string builtin /
+                    // user-fn result, f-string, nested concat — never a literal
+                    // view, index, or method borrow), reclaim it after the concat
+                    // or it leaks one buffer per call. `expr_is_scope_drop_safe`
+                    // is the conservative gate, so borrowed views are never freed.
+                    let right_is_owned = rt == "MakoString"
+                        && !matches!(right.as_ref(), Expr::String(_))
+                        && self.expr_is_scope_drop_safe(right, &rt);
+                    if right_is_owned {
+                        let rtmp = self.fresh("cr");
+                        self.emit_line(format_args!("MakoString {rtmp} = {rv};"));
+                        self.emit_line(format_args!(
+                            "MakoString {tmp} = {fn_name}({lv}, {rtmp});"
+                        ));
+                        self.emit_line(format_args!("mako_str_free({rtmp});"));
+                    } else {
+                        self.emit_line(format_args!("MakoString {tmp} = {fn_name}({lv}, {rv});"));
+                    }
                     return ("MakoString".into(), tmp);
                 }
                 if (*op == BinOp::Eq || *op == BinOp::Ne)
@@ -37705,6 +38040,17 @@ impl Codegen {
                             let tmp = self.fresh("es");
                             self.line(&format!("int64_t {tmp} = mako_env_set({k}, {v});"));
                             return ("int64_t".into(), tmp);
+                        }
+                        "env_unset" => {
+                            let (_, k) = self.emit_expr(&args[0]);
+                            let tmp = self.fresh("eu");
+                            self.line(&format!("int64_t {tmp} = mako_env_unset({k});"));
+                            return ("int64_t".into(), tmp);
+                        }
+                        "env_keys" => {
+                            let tmp = self.fresh("ek");
+                            self.line(&format!("MakoStrArray {tmp} = mako_env_keys();"));
+                            return ("MakoStrArray".into(), tmp);
                         }
                         "mkdir" => {
                             let (_, p) = self.emit_expr(&args[0]);

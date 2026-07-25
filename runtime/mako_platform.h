@@ -110,6 +110,21 @@ static inline int mako_setenv(const char *k, const char *v) {
 #endif
 }
 
+/* Remove a variable. On Windows an empty value deletes the entry. */
+static inline int mako_unsetenv(const char *k) {
+#if defined(_MSC_VER)
+    return _putenv_s(k, "") == 0 ? 0 : -1;
+#else
+    size_t n = strlen(k) + 2;
+    char *buf = (char *)malloc(n);
+    if (!buf) return -1;
+    snprintf(buf, n, "%s=", k);
+    int rc = _putenv(buf);
+    free(buf);
+    return rc == 0 ? 0 : -1;
+#endif
+}
+
 /* Use winpthreads only when explicitly requested; otherwise native shims keep
  * zig/mingw cross builds independent of pthread.h. */
 #if defined(MAKO_USE_WINPTHREADS)
@@ -294,6 +309,10 @@ static inline int mako_gettimeofday(struct timeval *tv, void *tz) {
 
 static inline int mako_setenv(const char *k, const char *v) {
     return setenv(k, v, 1) == 0 ? 0 : -1;
+}
+
+static inline int mako_unsetenv(const char *k) {
+    return unsetenv(k) == 0 ? 0 : -1;
 }
 
 #if defined(__APPLE__) || defined(__wasi__)

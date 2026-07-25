@@ -585,6 +585,8 @@ static inline int64_t mako_sip_content_length(MakoString msg) {
     int64_t v = 0;
     for (size_t i = 0; i < cl.len; i++) {
         if (cl.data[i] < '0' || cl.data[i] > '9') break;
+        /* Wire digits are unbounded: saturate instead of overflowing (UB). */
+        if (v > (INT64_MAX - 9) / 10) { v = INT64_MAX; break; }
         v = v * 10 + (cl.data[i] - '0');
     }
     mako_str_free(cl);
@@ -682,9 +684,10 @@ static inline MakoString mako_sip_request(
     char clv[32];
     snprintf(clv, sizeof(clv), "%zu", blen);
     MakoString h = headers;
-    /* append Content-Length (caller may also set; we always append final) */
+    /* append Content-Length (caller may also set; we always append final).
+     * Name/value are non-owned views — headers_append copies, never frees. */
     MakoString h2 = mako_sip_headers_append(
-        h, mako_str_from_cstr("Content-Length"), mako_str_from_cstr(clv)
+        h, MAKO_SIP_LIT("Content-Length"), mako_str_view(clv, strlen(clv))
     );
     size_t n = method.len + uri.len + h2.len + blen + 32;
     char *d = (char *)malloc(n);
@@ -725,8 +728,9 @@ static inline MakoString mako_sip_response(
     size_t blen = body.data ? body.len : 0;
     char clv[32];
     snprintf(clv, sizeof(clv), "%zu", blen);
+    /* Non-owned name/value views — headers_append copies, never frees. */
     MakoString h2 = mako_sip_headers_append(
-        headers, mako_str_from_cstr("Content-Length"), mako_str_from_cstr(clv)
+        headers, MAKO_SIP_LIT("Content-Length"), mako_str_view(clv, strlen(clv))
     );
     const char *rs = reason.data && reason.len ? reason.data : "OK";
     size_t rlen = reason.data && reason.len ? reason.len : 2;
@@ -939,6 +943,7 @@ static inline int64_t mako_sip_via_rport(MakoString via) {
     int64_t p = 0;
     for (size_t i = 0; i < vl; i++) {
         if (vs[i] < '0' || vs[i] > '9') break;
+        if (p > (INT64_MAX - 9) / 10) break; /* saturate; no signed overflow */
         p = p * 10 + (vs[i] - '0');
     }
     return p > 0 ? p : 0;
@@ -1017,6 +1022,7 @@ static inline int64_t mako_sip_via_port(MakoString via) {
     i++;
     int64_t p = 0;
     while (i < via.len && via.data[i] >= '0' && via.data[i] <= '9') {
+        if (p > (INT64_MAX - 9) / 10) break; /* saturate; no signed overflow */
         p = p * 10 + (via.data[i] - '0');
         i++;
     }
@@ -1736,6 +1742,7 @@ static inline void mako_sip_uri_parts(
             int64_t pt = 0;
             for (size_t k = rb + 2; k < he; k++) {
                 if (p[k] < '0' || p[k] > '9') break;
+                if (pt > (INT64_MAX - 9) / 10) break; /* no signed overflow */
                 pt = pt * 10 + (p[k] - '0');
             }
             *port = pt;
@@ -1751,6 +1758,7 @@ static inline void mako_sip_uri_parts(
             int64_t pt = 0;
             for (size_t k = colon + 1; k < he; k++) {
                 if (p[k] < '0' || p[k] > '9') break;
+                if (pt > (INT64_MAX - 9) / 10) break; /* no signed overflow */
                 pt = pt * 10 + (p[k] - '0');
             }
             *port = pt;
@@ -2342,6 +2350,7 @@ static inline int64_t mako_sdp_media_port(MakoString sdp, int64_t i) {
     /* port or port/nports */
     int64_t port = 0;
     while (j < m.len && m.data[j] >= '0' && m.data[j] <= '9') {
+        if (port > (INT64_MAX - 9) / 10) break; /* no signed overflow */
         port = port * 10 + (m.data[j] - '0');
         j++;
     }

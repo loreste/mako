@@ -9076,6 +9076,50 @@ impl<'a> FunctionLowerer<'a> {
                     }
                     return Ok((out, Type::I64, false));
                 }
+                if function == "env_has" && args.len() == 1 {
+                    let (k, kt, ko) = self.lower_expr(&args[0])?;
+                    if kt != Type::Str {
+                        return Err(IrError::new("native IR: env_has expects string"));
+                    }
+                    let out = self.value();
+                    self.emit(Inst::Call {
+                        out: Some(out),
+                        function: "mako_native_env_has_ptr".into(),
+                        args: vec![k],
+                        ret: Some(Type::I64),
+                    });
+                    if ko {
+                        self.emit(Inst::DropString { value: k });
+                    }
+                    return Ok((out, Type::I64, false));
+                }
+                if function == "env_unset" && args.len() == 1 {
+                    let (k, kt, ko) = self.lower_expr(&args[0])?;
+                    if kt != Type::Str {
+                        return Err(IrError::new("native IR: env_unset expects string"));
+                    }
+                    let out = self.value();
+                    self.emit(Inst::Call {
+                        out: Some(out),
+                        function: "mako_native_env_unset_ptr".into(),
+                        args: vec![k],
+                        ret: Some(Type::I64),
+                    });
+                    if ko {
+                        self.emit(Inst::DropString { value: k });
+                    }
+                    return Ok((out, Type::I64, false));
+                }
+                if function == "env_keys" && args.is_empty() {
+                    let out = self.value();
+                    self.emit(Inst::Call {
+                        out: Some(out),
+                        function: "mako_native_env_keys_ptr".into(),
+                        args: vec![],
+                        ret: Some(Type::StrSlice),
+                    });
+                    return Ok((out, Type::StrSlice, true));
+                }
                 if function == "path_join" && args.len() == 2 {
                     let (a, at, ao) = self.lower_expr(&args[0])?;
                     let (b, bt, bo) = self.lower_expr(&args[1])?;

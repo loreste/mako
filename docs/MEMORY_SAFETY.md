@@ -67,7 +67,30 @@ There is **no** “let the GC clean it up later.”
 ```bash
 # Ownership + leak tests on C and native; ASan when the toolchain supports it:
 ./scripts/memory-safety-gate.sh
+MAKO_MS_SKIP_HTTP=1 ./scripts/memory-safety-gate.sh   # skip the slow HTTP soak
 ```
+
+### Three rules that make the evidence mean something
+
+Learned the hard way in 0.4.16, when a double-free shipped with the gate green.
+
+1. **A fixture not in the gate is not covered.** The regression lived in a
+   builder family whose fixture the gate never ran. Adding a builtin means
+   adding its fixture to the list in `scripts/memory-safety-gate.sh`.
+2. **A per-call leak is invisible to a run-once fixture.** It passes whether
+   the result is reclaimed or not. Loop thousands of iterations with
+   *let-bound* arguments — the real-server shape — under LeakSanitizer, and
+   require the leak total to be flat in the iteration count. Linear growth is
+   one leak per call: fine in a CLI, fatal in a service.
+3. **Sanitizers run on Linux.** The ASan runtime deadlocks at startup on macOS,
+   so results from a Mac host are not evidence. Note also that standalone LSan
+   tolerates a double-free — use `--sanitize address`, or a plain build, to
+   catch frees.
+
+C-runtime builtins carry no ownership annotation across the ABI, so each is
+classified owned or borrowed by the compiler. Misclassification is asymmetric:
+borrowed-when-owned leaks every call, owned-when-borrowed is a double-free.
+When uncertain, it stays borrowed.
 
 ---
 

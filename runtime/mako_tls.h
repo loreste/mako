@@ -1129,11 +1129,12 @@ static inline MakoString mako_tls_unique(void *conn) {
 
 /* SCRAM-SHA-256-PLUS c= attribute: base64(gs2 "p=tls-unique,," || Finished). */
 static inline MakoString mako_scram_tls_unique_cbind(void *conn) {
-    MakoString gs2 = mako_scram_gs2_header(mako_str_from_cstr("tls-unique"));
+    MakoString gs2 = mako_scram_gs2_header(mako_str_view("tls-unique", 10));
     MakoString fin = mako_tls_unique(conn);
     MakoString c = mako_scram_cbind_b64(gs2, fin);
-    free(gs2.data);
-    free(fin.data);
+    /* mako_str_free: fin may be the shared empty singleton (never free()able). */
+    mako_str_free(gs2);
+    mako_str_free(fin);
     return c;
 }
 
@@ -1141,7 +1142,7 @@ static inline MakoString mako_scram_tls_unique_cbind(void *conn) {
 static inline MakoString mako_scram_plus_client_final_bare(void *conn, MakoString nonce) {
     MakoString c = mako_scram_tls_unique_cbind(conn);
     MakoString bare = mako_scram_client_final_without_proof(c, nonce);
-    free(c.data);
+    mako_str_free(c);
     return bare;
 }
 
@@ -3255,7 +3256,8 @@ static inline int64_t mako_tls_serve_h2_n(
     MakoString body,
     int64_t max_reqs
 ) {
-    MakoString health = mako_str_from_cstr("ok\n");
+    /* Non-owned literal — serve_h2_routes borrows and never frees it. */
+    MakoString health = mako_str_view("ok\n", 3);
     return mako_tls_serve_h2_routes(port, cert_path, key_path, body, health, max_reqs);
 }
 
@@ -4059,7 +4061,7 @@ static inline MakoString mako_tls_grpc_unary(
     }
     mako_tls_h2_write_frame(ssl, 0x01, 0x04, 1, hblock, (size_t)hblen); /* END_HEADERS */
 
-    MakoString body = mako_grpc_unary_request(mako_str_from_cstr(nbuf), id);
+    MakoString body = mako_grpc_unary_request(mako_str_view(nbuf, strlen(nbuf)), id);
     if (!body.data) {
         SSL_shutdown(ssl);
         SSL_free(ssl);
@@ -4198,7 +4200,7 @@ static inline MakoString mako_tls_grpc_stream_response(
     int64_t status
 ) {
     MakoString ct = mako_grpc_content_type();
-    MakoString lit = mako_hpack_encode_literal(mako_str_from_cstr("content-type"), ct);
+    MakoString lit = mako_hpack_encode_literal(mako_str_view("content-type", 12), ct);
     mako_str_free(ct);
     MakoString hdrs = mako_http2_headers_frame(stream, lit, 0x4);
     mako_str_free(lit);
@@ -4213,7 +4215,7 @@ static inline MakoString mako_tls_grpc_stream_response(
         return (MakoString){NULL, 0};
     }
     MakoString tlit = mako_hpack_encode_literal(
-        mako_str_from_cstr("grpc-status"), mako_str_from_cstr(scode)
+        mako_str_view("grpc-status", 11), mako_str_view(scode, (size_t)sn)
     );
     MakoString th = mako_http2_headers_frame(stream, tlit, 0x5);
     mako_str_free(tlit);
@@ -4412,7 +4414,8 @@ static inline MakoString mako_tls_grpc_stream(
     mako_tls_h2_write_frame(ssl, 0x01, 0x04, 1, hblock, (size_t)hblen);
 
     MakoString two = mako_grpc_http2_stream_two(
-        1, mako_str_from_cstr(n1buf), id1, mako_str_from_cstr(n2buf), id2
+        1, mako_str_view(n1buf, strlen(n1buf)), id1,
+        mako_str_view(n2buf, strlen(n2buf)), id2
     );
     if (!two.data) {
         SSL_shutdown(ssl);

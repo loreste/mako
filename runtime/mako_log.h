@@ -297,7 +297,7 @@ static inline void mako_slog_emit(
         fprintf(fp, " msg=");
         /* quote msg if spaces */
         int need_q = 0;
-        for (size_t i = 0; i < msg.len; i++) {
+        for (size_t i = 0; msg.data && i < msg.len; i++) {
             char c = msg.data[i];
             if (c == ' ' || c == '"' || c == '=' || c == '\n') {
                 need_q = 1;
@@ -359,17 +359,19 @@ static inline void mako_slog_log(MakoString level, MakoString msg) {
     mako_slog_emit(level, msg, NULL, 0);
 }
 
+/* Levels are borrowed views of literals — emit only reads them, so allocating
+ * (and leaking) a fresh string per log call is unnecessary. */
 static inline void mako_slog_info(MakoString msg) {
-    mako_slog_log(mako_str_from_cstr("info"), msg);
+    mako_slog_log(mako_str_view("info", 4), msg);
 }
 static inline void mako_slog_warn(MakoString msg) {
-    mako_slog_log(mako_str_from_cstr("warn"), msg);
+    mako_slog_log(mako_str_view("warn", 4), msg);
 }
 static inline void mako_slog_error(MakoString msg) {
-    mako_slog_log(mako_str_from_cstr("error"), msg);
+    mako_slog_log(mako_str_view("error", 5), msg);
 }
 static inline void mako_slog_debug(MakoString msg) {
-    mako_slog_log(mako_str_from_cstr("debug"), msg);
+    mako_slog_log(mako_str_view("debug", 5), msg);
 }
 
 static inline void mako_slog_with(
@@ -454,7 +456,7 @@ static inline MakoString mako_slog_redact(MakoString value) {
 static inline void mako_slog_with_redacted(
     MakoString level, MakoString msg, MakoString key
 ) {
-    mako_slog_with(level, msg, key, mako_str_from_cstr("[REDACTED]"));
+    mako_slog_with(level, msg, key, mako_str_view("[REDACTED]", 10));
 }
 
 /* Strong log_* — same backend as slog (level filter + format). */

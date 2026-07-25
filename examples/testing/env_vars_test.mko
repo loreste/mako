@@ -1,0 +1,51 @@
+fn TestEnvSetGetUnset() {
+    assert_eq(env_set("MAKO_ENV_VARS_T1", "hello"), 0)
+    assert_eq(env_has("MAKO_ENV_VARS_T1"), 1)
+    assert_eq_str(env_get("MAKO_ENV_VARS_T1"), "hello")
+
+    // Overwrite replaces rather than appends.
+    assert_eq(env_set("MAKO_ENV_VARS_T1", "world2"), 0)
+    assert_eq_str(env_get("MAKO_ENV_VARS_T1"), "world2")
+
+    assert_eq(env_unset("MAKO_ENV_VARS_T1"), 0)
+    assert_eq(env_has("MAKO_ENV_VARS_T1"), 0)
+    // Reading an unset name yields empty, not a stale value.
+    assert_eq(str_len(env_get("MAKO_ENV_VARS_T1")), 0)
+}
+
+fn TestEnvGetOrDefault() {
+    assert_eq(env_unset("MAKO_ENV_VARS_T2"), 0)
+    assert_eq_str(env_get_or("MAKO_ENV_VARS_T2", "fallback"), "fallback")
+    assert_eq(env_set("MAKO_ENV_VARS_T2", "real"), 0)
+    assert_eq_str(env_get_or("MAKO_ENV_VARS_T2", "fallback"), "real")
+    let _ = env_unset("MAKO_ENV_VARS_T2")
+}
+
+fn TestEnvKeys() {
+    assert_eq(env_set("MAKO_ENV_VARS_T3", "v"), 0)
+    let keys = env_keys()
+    // The name we just set must be present, and keys carry no '=' separator.
+    let mut found = 0
+    for k in keys {
+        if k == "MAKO_ENV_VARS_T3" {
+            found = found + 1
+        }
+    }
+    assert_eq(found, 1)
+    let _ = env_unset("MAKO_ENV_VARS_T3")
+}
+
+fn TestEnvChurnIsFlat() {
+    // Per-call ownership check: a leak here grows with the loop count.
+    let name = "MAKO_ENV_VARS_T4"
+    let mut i = 0
+    while i < 64 {
+        let _ = env_set(name, "x")
+        let v = env_get(name)
+        assert_eq(str_len(v), 1)
+        let ks = env_keys()
+        assert_eq(env_has(name), 1)
+        let _ = env_unset(name)
+        i = i + 1
+    }
+}

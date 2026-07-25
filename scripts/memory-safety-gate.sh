@@ -48,6 +48,10 @@ fixtures=(
   examples/testing/leak_detector_test.mko
   examples/testing/match_own_free_test.mko
   examples/testing/own_branch_regress_test.mko
+  # Builder families that free escape temps — a double-free here aborts on the
+  # success path in a plain build, which this gate previously did not cover.
+  examples/testing/llm_test.mko
+  examples/testing/json_mako_test.mko
   # Messaging / GraphQL / gRPC / OpenAPI adversarial (no GC, free-closed ids)
   examples/testing/adapters_adversarial_test.mko
   examples/testing/adapters_api_test.mko

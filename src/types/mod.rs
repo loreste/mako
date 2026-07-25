@@ -3262,6 +3262,14 @@ impl TypeChecker {
             Type::Fn(vec![Type::String, Type::String], Box::new(Type::Int)),
         );
         fns.insert(
+            "env_unset".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "env_keys".into(),
+            Type::Fn(vec![], Box::new(Type::Array(Box::new(Type::String)))),
+        );
+        fns.insert(
             "mkdir".into(),
             Type::Fn(vec![Type::String], Box::new(Type::Int)),
         );

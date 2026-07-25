@@ -499,8 +499,34 @@ static inline int64_t mako_ws_upgrade_request_ok(MakoString req) {
     return strstr(upgrade, "websocket") && strstr(conn, "upgrade") && strcmp(version, "13") == 0 ? 1 : 0;
 }
 
-static inline MakoString mako_ws_client_request(MakoString host, MakoString path, MakoString key) {
-    size_t cap = host.len + path.len + key.len + 256;
+/* Validate caller-supplied extra handshake headers: CRLF-separated
+ * "Name: Value" lines with no trailing CRLF. Rejects request splitting — a
+ * blank line would end the header block and inject a body, and a bare CR/LF
+ * would forge a header. Header text is often user data (cookies, tokens). */
+static inline int mako_ws_extra_headers_ok(MakoString h) {
+    if (h.len == 0) return 1;
+    if (!h.data) return 0;
+    for (size_t i = 0; i < h.len; i++) {
+        char c = h.data[i];
+        if (c == 0 || c == '\n') return 0; /* NUL, or LF not part of a CRLF */
+        if (c == '\r') {
+            if (i + 1 >= h.len || h.data[i + 1] != '\n') return 0; /* bare CR */
+            if (i + 2 >= h.len) return 0;                          /* trailing CRLF */
+            if (h.data[i + 2] == '\r') return 0;                   /* blank line */
+            i++;                                                   /* consume the LF */
+        }
+    }
+    return 1;
+}
+
+/* Handshake request with extra headers (Origin, User-Agent, Cookie, ...).
+ * `extra` is CRLF-separated with no trailing CRLF; empty for none.
+ * Returns the shared empty string if `extra` fails validation. */
+static inline MakoString mako_ws_client_request_h(
+    MakoString host, MakoString path, MakoString key, MakoString extra
+) {
+    if (!mako_ws_extra_headers_ok(extra)) return mako_str_empty;
+    size_t cap = host.len + path.len + key.len + extra.len + 256;
     char *d = (char *)malloc(cap);
     if (!d) mako_abort("ws client request OOM");
     int n = snprintf(
@@ -510,13 +536,20 @@ static inline MakoString mako_ws_client_request(MakoString host, MakoString path
         "Upgrade: websocket\r\n"
         "Connection: Upgrade\r\n"
         "Sec-WebSocket-Key: %.*s\r\n"
-        "Sec-WebSocket-Version: 13\r\n\r\n",
+        "Sec-WebSocket-Version: 13\r\n"
+        "%.*s%s\r\n",
         (int)path.len, path.data ? path.data : "/",
         (int)host.len, host.data ? host.data : "",
-        (int)key.len, key.data ? key.data : ""
+        (int)key.len, key.data ? key.data : "",
+        (int)extra.len, extra.data ? extra.data : "",
+        extra.len ? "\r\n" : ""
     );
     if (n < 0) n = 0;
     return (MakoString){d, (size_t)n};
+}
+
+static inline MakoString mako_ws_client_request(MakoString host, MakoString path, MakoString key) {
+    return mako_ws_client_request_h(host, path, key, mako_str_empty);
 }
 
 static inline int64_t mako_ws_client_accept_ok(MakoString key, MakoString response) {
@@ -1078,11 +1111,12 @@ static inline int64_t mako_ws_tls_recv_message(
 }
 
 /* Upgrade an existing TlsConn with a WebSocket handshake (client). */
-static inline int64_t mako_wss_upgrade(
-    void *conn, MakoString host, MakoString path, MakoString key
+static inline int64_t mako_wss_upgrade_h(
+    void *conn, MakoString host, MakoString path, MakoString key, MakoString extra
 ) {
     if (!conn) return 0;
-    MakoString req = mako_ws_client_request(host, path, key);
+    MakoString req = mako_ws_client_request_h(host, path, key, extra);
+    if (req.len == 0) return 0; /* rejected extra headers */
     if (mako_ws_tls_write_all(conn, req.data, req.len) < 0) {
         mako_str_free(req);
         return 0;
@@ -1108,15 +1142,24 @@ static inline int64_t mako_wss_upgrade(
     return mako_ws_client_accept_ok(key, rs) ? 1 : 0;
 }
 
+static inline int64_t mako_wss_upgrade(
+    void *conn, MakoString host, MakoString path, MakoString key
+) {
+    return mako_wss_upgrade_h(conn, host, path, key, mako_str_empty);
+}
+
 /* Full WSS client connect: TCP → TLS handshake → WS upgrade.
  * `cli` is TlsClient from tls_client_new / tls_client_new_insecure.
+ * `extra` adds handshake headers (Origin, User-Agent, Cookie, ...) that some
+ * endpoints require; CRLF-separated, no trailing CRLF, empty for none.
  * Returns TlsConn or NULL. Caller owns conn (wss_client_close / tls_conn_close). */
-static inline void *mako_wss_client_connect(
+static inline void *mako_wss_client_connect_h(
     void *cli,
     MakoString host,
     int64_t port,
     MakoString path,
-    MakoString key
+    MakoString key,
+    MakoString extra
 ) {
     if (!cli) return NULL;
     if (!mako_tls_client_available()) return NULL;
@@ -1128,11 +1171,21 @@ static inline void *mako_wss_client_connect(
         mako_sock_close((mako_sock_t)cfd);
         return NULL;
     }
-    if (!mako_wss_upgrade(conn, host, path, key)) {
+    if (!mako_wss_upgrade_h(conn, host, path, key, extra)) {
         mako_tls_conn_close(conn);
         return NULL;
     }
     return conn;
+}
+
+static inline void *mako_wss_client_connect(
+    void *cli,
+    MakoString host,
+    int64_t port,
+    MakoString path,
+    MakoString key
+) {
+    return mako_wss_client_connect_h(cli, host, port, path, key, mako_str_empty);
 }
 
 /* Convenience: insecure TLS (no peer verify) then WS upgrade. */

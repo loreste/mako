@@ -1,0 +1,42 @@
+// Owned temporaries used as the right operand of string concat are copied by
+// `mako_str_concat`, never consumed — they must be freed after the concat or a
+// long-running builder leaks one buffer per call. Adversarial for the concat
+// operand-ownership path; run clean under the sanitizers.
+
+fn label(n: int) -> string {
+    return "row-" + int_to_string(n)
+}
+
+fn TestConcatIntToString() {
+    var i = 0
+    var total = 0
+    while i < 64 {
+        let s = "row-" + int_to_string(i)
+        total = total + len(s)
+        i = i + 1
+        // s drops; the int_to_string temp must not leak
+    }
+    assert(total > 0)
+}
+
+fn TestConcatReturnedBuilder() {
+    var i = 0
+    var total = 0
+    while i < 64 {
+        let s = label(i)
+        total = total + len(s)
+        i = i + 1
+    }
+    assert(total > 0)
+}
+
+fn TestConcatChain() {
+    // Multiple owned operands in one expression.
+    let s = "a" + int_to_string(1) + "-" + int_to_string(22) + "-" + int_to_string(333)
+    assert(str_contains(s, "a1-22-333"))
+}
+
+fn TestConcatValue() {
+    let s = "n=" + int_to_string(42)
+    assert(s == "n=42")
+}

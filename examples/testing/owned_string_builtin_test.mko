@@ -1,0 +1,78 @@
+// Ownership-metadata classifier: encode/decode/convert/hex builtins return
+// freshly computed owned strings, so their dropped results must be reclaimed.
+// Adversarial for `builtin_returns_owned_string`; run clean under sanitizers.
+
+fn TestEncodeFamilyDropChurn() {
+    var i = 0
+    var n = 0
+    while i < 64 {
+        let a = base64_encode("payload-data")
+        let b = base32_encode("payload-data")
+        let c = bytes_to_hex("payload")
+        n = n + len(a) + len(b) + len(c)
+        i = i + 1
+        // a, b, c drop here — owned encode outputs must not leak
+    }
+    assert(n > 0)
+}
+
+fn TestDecodeFamilyDropChurn() {
+    var i = 0
+    var n = 0
+    while i < 64 {
+        let d = base64_decode("cGF5bG9hZA==")
+        n = n + len(d)
+        i = i + 1
+    }
+    assert(n > 0)
+}
+
+fn TestFormatFamilyDropChurn() {
+    var i = 0
+    var n = 0
+    while i < 64 {
+        let f = format_int(i)
+        n = n + len(f)
+        i = i + 1
+    }
+    assert(n > 0)
+}
+
+fn TestEncodeInConcat() {
+    // Encode results as owned concat operands — reclaimed after concat.
+    let s = "hex=" + bytes_to_hex("x") + " b64=" + base64_encode("y")
+    assert(str_contains(s, "hex="))
+    assert(str_contains(s, "b64="))
+}
+
+fn TestVerifiedOwnedListDropChurn() {
+    // Builtins covered by the verified OWNED_STRING_BUILTINS list rather than by
+    // an operation-family suffix. Each mallocs a fresh buffer per call, so a
+    // long-running loop must not grow.
+    var i = 0
+    var n = 0
+    while i < 64 {
+        let a = str_trim("  padded  ", " ")
+        let b = str_replace("a-b-c", "-", "+")
+        let c = url_query_escape("k v")
+        let d = json_object("k", "v")
+        let e = sha256("payload")
+        n = n + len(a) + len(b) + len(c) + len(d) + len(e)
+        i = i + 1
+    }
+    assert(n > 0)
+}
+
+fn TestBorrowedAccessorNoDoubleFree() {
+    // env_get_or now always returns a fresh allocation, so the classifier may
+    // reclaim it. The default path is the one that used to hand back a borrow.
+    var i = 0
+    var n = 0
+    while i < 64 {
+        let v = env_get_or("MAKO_NOT_SET_XYZZY", "fallback")
+        assert(v == "fallback")
+        n = n + len(v)
+        i = i + 1
+    }
+    assert(n > 0)
+}

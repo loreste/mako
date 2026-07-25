@@ -900,7 +900,9 @@ static inline int64_t mako_model_load(int64_t h, MakoString path) {
             }
         }
         int64_t ne = 0;
-        if (fread(&ne, 8, 1, f) != 1 || ne <= 0 || ne * 4 > MAKO_GPU_MAX_BYTES) break;
+        /* Divide rather than multiply: `ne` is file-controlled and `ne * 4`
+         * overflows for large values. */
+        if (fread(&ne, 8, 1, f) != 1 || ne <= 0 || ne > MAKO_GPU_MAX_BYTES / 4) break;
         MakoFloatArray vals = mako_float_array_make(ne, ne);
         for (int64_t j = 0; j < ne; j++) {
             float fv = 0;

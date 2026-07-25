@@ -1151,14 +1151,17 @@ static inline int64_t mako_backoff_ms(int64_t attempt, int64_t base_ms, int64_t 
  * Secure environment / secrets helpers.
  * ============================================================ */
 
-/* Get env var or return default. Never returns NULL. */
+/* Get env var or return default. Never returns NULL.
+ * Always returns an owned string — the default is cloned rather than handed
+ * back borrowed, so every path has the same ownership and the caller can
+ * unconditionally free the result. */
 static inline MakoString mako_env_get_or(MakoString name, MakoString def) {
     char nbuf[512];
-    if (!name.data || name.len >= sizeof(nbuf)) return def;
+    if (!name.data || name.len >= sizeof(nbuf)) return mako_str_clone(def);
     memcpy(nbuf, name.data, name.len);
     nbuf[name.len] = 0;
     const char *val = getenv(nbuf);
-    if (!val || val[0] == 0) return def;
+    if (!val || val[0] == 0) return mako_str_clone(def);
     return mako_str_from_cstr(val);
 }
 

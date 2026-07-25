@@ -97,7 +97,8 @@ static inline HengResponse heng_build_response(int status, const char *ctype, co
 static inline int heng_path_match(const char *buf, size_t buf_len, size_t start, const char *path, size_t path_len) {
     size_t i = start;
     while (i < buf_len && buf[i] != ' ') i++;  /* skip method */
-    if (++i + path_len > buf_len) return 0;
+    /* `>=`: buf[i + path_len] is read below, so that byte must be in range. */
+    if (++i + path_len >= buf_len) return 0;
     if (memcmp(buf + i, path, path_len) != 0) return 0;
     char next = buf[i + path_len];
     return (next == ' ' || next == '?' || next == '\r');

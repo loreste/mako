@@ -372,7 +372,8 @@ static inline int mako_proxy_chunked_complete(const char *body, size_t blen) {
             }
             return 0;
         }
-        if (i + size > blen) return 0;
+        /* Overflow-safe bound: `i + size` can wrap for a wire-supplied size. */
+        if (size > blen - i) return 0;
         i += size;
         /* require CRLF after chunk data */
         if (i + 1 < blen && body[i] == '\r' && body[i + 1] == '\n') i += 2;
@@ -432,7 +433,8 @@ static inline int64_t mako_proxy_decode_chunked(
             }
             break;
         }
-        if (i + size > raw_len) { free(acc); return -1; }
+        /* Overflow-safe bound: `i + size` can wrap for a wire-supplied size. */
+        if (size > raw_len - i) { free(acc); return -1; }
         if (acc_len + size + 1 > acc_cap) {
             size_t nc = acc_cap ? acc_cap * 2 : 4096;
             while (nc < acc_len + size + 1) {
@@ -745,6 +747,8 @@ static inline int64_t mako_tcp_pool_release(int64_t pool, int64_t fd, int64_t re
     MakoTcpPoolSlot *p = &mako_tcp_pools[pool];
     if (!p->live || fd < 0) {
         pthread_mutex_unlock(&mako_tcp_pools_mu);
+        /* Pool already closed: nobody will pool this fd, so close it here. */
+        if (fd >= 0) mako_sock_close((int)fd);
         return 0;
     }
     /* Cap idle list; never exceed max. */

@@ -472,6 +472,27 @@ static inline int mako_tmpl_find_else(
     return 0;
 }
 
+/* True when `f` has exactly one conversion and it is a string one. The only
+ * printf argument here is a `const char *`, so any other conversion (%d, %n, …)
+ * is undefined behaviour on a template-supplied format. */
+static inline int mako_tmpl_fmt_is_str(const char *f) {
+    int convs = 0;
+    for (const char *p = f; *p; p++) {
+        if (*p != '%') continue;
+        p++;
+        if (*p == '%') continue;
+        while (*p == '-' || *p == '+' || *p == ' ' || *p == '#' || *p == '0') p++;
+        while (*p >= '0' && *p <= '9') p++;
+        if (*p == '.') {
+            p++;
+            while (*p >= '0' && *p <= '9') p++;
+        }
+        if (*p != 's') return 0;
+        convs++;
+    }
+    return convs == 1;
+}
+
 static inline int mako_tmpl_exec_action(MakoTmplCtx *c, const char *act, size_t alen) {
     mako_tmpl_trim(&act, &alen);
     if (alen == 0) return 1;
@@ -551,8 +572,9 @@ static inline int mako_tmpl_exec_action(MakoTmplCtx *c, const char *act, size_t 
             if (*p == '"') p++;
             while (*p == ' ') p++;
             const char *v = mako_tmpl_lookup(c, p[0] ? p : ".");
-            if (strcmp(fmt, "%s") == 0) mako_tmpl_emit_value(c, v);
-            else {
+            if (strcmp(fmt, "%s") == 0 || !mako_tmpl_fmt_is_str(fmt)) {
+                mako_tmpl_emit_value(c, v);
+            } else {
                 char tmp[512];
                 snprintf(tmp, sizeof(tmp), fmt, v);
                 mako_tmpl_emit_value(c, tmp);

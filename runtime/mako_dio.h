@@ -532,7 +532,9 @@ static inline int64_t mako_file_close(int64_t fd) {
 
 /* Read up to `count` bytes at file offset. Returns bytes read or -1. */
 static inline MakoString mako_pread(int64_t fd, int64_t count, int64_t offset) {
-    if (fd < 0 || count <= 0) return mako_str_from_cstr("");
+    if (fd < 0 || count <= 0 || (uint64_t)count >= (uint64_t)SIZE_MAX) {
+        return mako_str_from_cstr("");
+    }
     char *buf = (char *)malloc((size_t)count + 1);
     if (!buf) return mako_str_from_cstr("");
     ssize_t n = pread((int)fd, buf, (size_t)count, (off_t)offset);
@@ -811,7 +813,9 @@ static inline int64_t mako_file_append3(int64_t fd, MakoString a, MakoString b, 
 
 /* Read exactly `count` bytes from fd at current position. Retries on short reads. */
 static inline MakoString mako_file_read_exact(int64_t fd, int64_t count) {
-    if (fd < 0 || count <= 0) return mako_str_from_cstr("");
+    if (fd < 0 || count <= 0 || (uint64_t)count >= (uint64_t)SIZE_MAX) {
+        return mako_str_from_cstr("");
+    }
     char *buf = (char *)malloc((size_t)count + 1);
     if (!buf) return mako_str_from_cstr("");
     size_t total = 0;
