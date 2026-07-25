@@ -225,6 +225,50 @@ silently falling back to C.
 
 ---
 
+## 0.4.16 — Memory-safety and security audit — **Done**
+
+Runtime-wide audit; see [CHANGELOG](../CHANGELOG.md). Ownership classification
+for 797 string-returning builtins, bounds/overflow fixes in the wire parsers,
+tombstone accounting in every map, and two faults that only reproduce on Linux.
+Known-open items are listed there rather than omitted, and drive 0.4.17 below.
+
+---
+
+## 0.4.17 — Close the audit's open items
+
+**Theme:** finish what 0.4.16 documented instead of fixed, and stop CI from
+hiding failures. Ordered by leverage, not by size.
+
+| ID | Deliverable | Notes |
+|----|-------------|-------|
+| **417-A** | Native suite gates CI | Drop `continue-on-error` from the native step in `ci.yml`. Its comment blames "missing backend services" for the proxy and SQL failures; those were a heap corruption and a missing SIGPIPE handler, both fixed in 0.4.16. The suppression now hides nothing. |
+| **417-B** | Windows gates CI | The whole Windows suite runs under `continue-on-error`, so a platform that ships release artifacts and install scripts never blocks a merge. Establish whether it currently passes, then gate it. |
+| **417-C** | Sanitizer sweeps cover the whole suite | 0.4.16 swept 113 of 392 fixtures and reported clean; the use-after-free in `slices_unique_strs` was in the remainder and was caught by CI, not by the sweep. Any sanitizer claim runs all fixtures. |
+| **417-D** | Native LeakSanitizer step executes | `--sanitize` now reaches native test binaries, but the gate step added in 0.4.16 has never run with instrumentation. Needs one genuine green run before it counts as coverage. |
+| **417-E** | Typed drop for opaque handles | One change closes three leaks — the opaque box, `http_request_parse`, and struct-key map drops — which share a root cause: one drop function for two kinds of handle with nothing to tell them apart. Lets `mako_native_opaque_drop` stop being a no-op. |
+| **417-F** | Triage `sip_test` | 1.54 MB across 140k allocations, the largest single leak in the suite and never investigated. Measure before assuming a cause. |
+| **417-G** | Literal arguments at builtin call sites | 4-13 bytes per call. Needs a shared argument-emission path; builtin arms are spread across ~100 generated emitters with no common place to reclaim a temporary. Emitting borrowed views frees static storage; an immortal bit needs masking every length read. Design decision first. |
+| **417-H** | Channel lifetime | No destructor exists, and a naive one is a use-after-free when a spawned task outlives the creating scope. Needs a refcount or a shutdown-drained registry — a decision, not a patch. Blocks scheduler work. |
+| **417-I** | Ownership inlay hints in the LSP | `textDocument/inlayHint` is already implemented. Owned / borrowed / dropped-here is invisible in source and is what produced the double-free, the use-after-free and 650 per-call leaks. Small change, disproportionate payoff. |
+| **417-J** | LSP client and editor reach | Replace the hand-rolled JSON-RPC client in the VS Code extension with `vscode-languageclient`, and document Neovim / Helix / Zed setup. The server already implements 15 methods. |
+
+### Deferred to 0.5.x, deliberately
+
+| ID | Deliverable | Why not now |
+|----|-------------|-------------|
+| **417-X1** | Small-string optimization | The change that would make short-string workloads allocation-free and close the RSS gap (9.5 MB vs 3.8 MB on `native_string_slice`). It is an ABI change across the runtime — every `.data` read becomes an accessor — and the same shape as the immortal-bit idea rejected in 0.4.16 after raw tagged-length reads caused a `str_join` abort. Needs staging. |
+| **417-X2** | Concurrency efficiency | Named as the focus after 0.4.16. The scheduler is a single global ring queue behind one mutex and one condvar, with no per-worker queues or stealing. Nothing in `examples/bench` is concurrent, so **no concurrency claim is measurable today** — the benchmark comes first, and thread-scheduling variance is wider than the effects being measured. |
+| **417-X3** | `plugin_call`, aliasing string-array helpers, `sctp_connectx`, `buf_to_string` | Each needs a design decision rather than effort. `buf_to_string` is additionally blocked: `Type::Buf` has no native lowering, so no fixture can cover it on both backends. |
+
+### Acceptance
+
+- CI gates on the native suite and on Windows, or documents precisely why not.
+- Sanitizer runs cover all fixtures, on Linux, with the native step instrumented.
+- The known-open list in the changelog shrinks by whatever 417-E/F close, and
+  anything still open carries a measured number rather than an adjective.
+
+---
+
 ## 0.5.0 — Native-first default (minor)
 
 **Depends on:** **0.4.6+** patches green (language gate + residual + policy env).  
