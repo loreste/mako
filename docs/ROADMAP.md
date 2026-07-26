@@ -273,6 +273,26 @@ missing dependency, an unused one, and a package imported from more than one
 file — plus the case where the same package is reachable by two paths, which is
 where a naive tidy corrupts a working manifest.
 
+### Flaky test triage — 417-F1..F3
+
+Removing `continue-on-error` (417-A/B) made CI report failures it had been
+swallowing. Some are real and fixed; the rest are instability that was always
+present. A gate that fails at random gets suppressed again, which is precisely
+how a heap corruption and a missing SIGPIPE handler survived in the proxy and
+SQL fixtures, so this is on the critical path rather than housekeeping.
+
+| ID | Deliverable | Notes |
+|----|-------------|-------|
+| **417-F1** | Identify what is actually flaky | Observed so far: `wave11_queue_test` failed on the CI macOS runner but passes locally on macOS; `adapters_adversarial_test` failed on Windows on a **docs-only** commit, which proves it is not caused by the change under test. Collect failures across runs rather than reacting to one. |
+| **417-F2** | Fix or quarantine, explicitly | A flaky test is either repaired or moved to a named non-gating set with the reason recorded. What is not acceptable is `continue-on-error` on a step that also carries real failures — that is the state 417-A found, where genuine bugs hid behind an "expected failures" comment. |
+| **417-F3** | Make failures diagnosable | The suite prints a fixture name and an exit code. For a timing-dependent failure that is not enough to tell a race from an environment difference. Capture enough context on failure to distinguish them. |
+
+Worth noting for whoever picks this up: a test that passes on retry is not
+evidence of flakiness. The `slices_unique_strs` use-after-free presented
+exactly that way — intermittent, passing on re-run — and was a real memory bug
+that read whatever the allocator happened to leave behind. Rule out a real
+fault before labelling anything flaky.
+
 ### Package distribution — shared registry
 
 **Not a new package manager.** `mako pkg` already does init / add / remove /
