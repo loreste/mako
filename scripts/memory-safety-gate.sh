@@ -96,6 +96,7 @@ echo "=== memory-safety-gate: native backend under LeakSanitizer ==="
 if [[ "$(uname -s)" == "Linux" ]] && "$mako_bin" build --help 2>/dev/null | grep -q 'native'; then
   ms_native_leak_failed=0
   for f in examples/testing/memory_safety_contract_test.mko \
+           examples/native/owned_handle_drop/native_owned_handle_drop_test.mko \
            examples/testing/leak_detector_test.mko \
            examples/testing/own_branch_regress_test.mko \
            examples/testing/env_vars_test.mko; do

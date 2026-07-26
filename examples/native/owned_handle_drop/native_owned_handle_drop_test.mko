@@ -1,0 +1,64 @@
+struct Counter {
+    label: string
+    n: int
+}
+
+interface Adder {
+    fn add(int) -> int
+}
+
+struct AdderHolder {
+    value: Adder
+}
+
+struct RequestHolder {
+    value: HttpRequest
+}
+
+fn Adder_add(self: Counter, delta: int) -> int {
+    return self.n + delta
+}
+
+struct Label {
+    text: string
+    id: int
+}
+
+fn interface_once(n: int) -> int {
+    let counter = Counter { label: int_to_string(n), n: n }
+    let adder: Adder = counter
+    let first = AdderHolder { value: adder }
+    let second = first
+    return first.value.add(1) + second.value.add(1)
+}
+
+fn request_once() -> int {
+    let raw = "POST /items HTTP/1.1\r\nHost: example.test\r\n\r\nbody"
+    let request = http_request_parse(raw)
+    let first = RequestHolder { value: request }
+    let second = first
+    return len(http_request_method(first.value)) + len(http_request_path(second.value))
+}
+
+fn struct_key_map_once(n: int) -> int {
+    let text = int_to_string(n)
+    let mut values = make(map[Label]Label)
+    values[Label { text: text, id: n }] = Label {
+        text: int_to_string(n + 1),
+        id: n + 1,
+    }
+    let copy = maps_clone(values)
+    return copy[Label { text: text, id: n }].id
+}
+
+fn TestOwnedNativeHandlesDrop() {
+    let mut i = 0
+    let mut total = 0
+    while i < 200 {
+        total = total + interface_once(i)
+        total = total + request_once()
+        total = total + struct_key_map_once(i)
+        i = i + 1
+    }
+    assert(total > 0)
+}

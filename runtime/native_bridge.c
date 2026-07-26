@@ -1039,29 +1039,6 @@ MakoNativeIntSlice *mako_native_int_map_apply(MakoNativeIntSlice *src, void *fn_
     return out;
 }
 
-/* Type::Opaque covers two unrelated kinds of handle, and nothing at runtime
- * distinguishes them:
- *
- *   1. blocks this runtime malloc'd (e.g. the box behind http_request_parse),
- *      which free() would correctly reclaim;
- *   2. handles owned by a foreign library or by one of our registries — a
- *      sqlite3* from mako_sql_open_sqlite, a TlsConn — which must be released
- *      through their own API (sqlite3_close, tls_conn_close) and must never be
- *      passed to free().
- *
- * The SqlDB value handed to Mako code is `(int64_t)(intptr_t)db.sqlite`
- * (mako_sql_meta_key), so a bare free() here corrupts the heap on every scope
- * exit that holds a database handle: glibc aborts with "free(): invalid
- * pointer", and macOS silently tolerates it, which is why this only ever
- * reproduced on Linux.
- *
- * Until codegen emits a typed drop that knows which kind it has, do nothing.
- * Kind 2 must not be freed at all; kind 1 leaks its box, which is recoverable.
- * Corrupting the allocator is not. */
-void mako_native_opaque_drop(void *p) {
-    (void)p;
-}
-
 // parse_int → try: returns 1 and writes *out on success, else 0.
 int64_t mako_native_parse_int_try_ptr(MakoNativeString *s, int64_t *out) {
     MakoResultInt r = mako_parse_int(bridge_borrow_str(s));
@@ -1737,18 +1714,44 @@ int64_t mako_native_http2_conn_new(void) {
     return c ? (int64_t)(intptr_t)c : -1;
 }
 
-/* Interface fat pointer: { tag, data* } */
+void mako_native_struct_drop_typed(
+    void *value, int64_t nfields, int64_t str_mask,
+    int64_t nest_mask, int64_t nest_nf_pack, int64_t nest_sm_pack
+);
+
+/* Interface fat pointer with the concrete value's drop metadata. */
 typedef struct {
     int64_t tag;
     void *data;
+    int64_t nfields;
+    int64_t str_mask;
+    int64_t nest_mask;
+    int64_t nest_nf_pack;
+    int64_t nest_sm_pack;
+    _Atomic size_t refs;
 } MakoNativeIface;
 
-void *mako_native_iface_box(int64_t tag, void *data) {
+void *mako_native_iface_box(
+    int64_t tag, void *data, int64_t nfields, int64_t str_mask,
+    int64_t nest_mask, int64_t nest_nf_pack, int64_t nest_sm_pack
+) {
     MakoNativeIface *b = (MakoNativeIface *)malloc(sizeof(MakoNativeIface));
     if (!b) abort();
     b->tag = tag;
     b->data = data; /* takes ownership of struct heap block */
+    b->nfields = nfields;
+    b->str_mask = str_mask;
+    b->nest_mask = nest_mask;
+    b->nest_nf_pack = nest_nf_pack;
+    b->nest_sm_pack = nest_sm_pack;
+    atomic_init(&b->refs, 1);
     return b;
+}
+
+void *mako_native_iface_clone(void *box) {
+    MakoNativeIface *b = (MakoNativeIface *)box;
+    if (b) atomic_fetch_add_explicit(&b->refs, 1, memory_order_relaxed);
+    return box;
 }
 
 int64_t mako_native_iface_tag(void *box) {
@@ -1759,9 +1762,16 @@ void *mako_native_iface_data(void *box) {
     return box ? ((MakoNativeIface *)box)->data : NULL;
 }
 
-/* opaque_drop already frees; iface box free frees header only if data freed separately.
- * For owned iface drop: free data via struct drop then free box — IR uses opaque_drop
- * which free(box) only. Leak of struct data — acceptable seed; improve later. */
+void mako_native_iface_drop(void *box) {
+    MakoNativeIface *b = (MakoNativeIface *)box;
+    if (!b) return;
+    if (atomic_fetch_sub_explicit(&b->refs, 1, memory_order_acq_rel) != 1) return;
+    mako_native_struct_drop_typed(
+        b->data, b->nfields, b->str_mask,
+        b->nest_mask, b->nest_nf_pack, b->nest_sm_pack
+    );
+    free(box);
+}
 
 int64_t mako_native_http2_conn_use(int64_t c) {
     return mako_http2_conn_use((MakoHttp2Conn *)(intptr_t)c);
@@ -8507,6 +8517,19 @@ typedef struct {
     MakoNativeString *path;
     MakoNativeString *body;
 } MakoNativeHttpRequest;
+
+static MakoNativeHttpRequest *mako_native_http_request_clone(
+    const MakoNativeHttpRequest *src
+) {
+    if (!src) return NULL;
+    MakoNativeHttpRequest *box = (MakoNativeHttpRequest *)calloc(1, sizeof(*box));
+    if (!box) abort();
+    box->method = mako_native_string_clone_ptr(src->method);
+    box->path = mako_native_string_clone_ptr(src->path);
+    box->body = mako_native_string_clone_ptr(src->body);
+    return box;
+}
+
 int64_t mako_native_http_request_parse_ptr(MakoNativeString *raw) {
     MakoHttpRequest r = mako_http_request_parse(bridge_borrow_str(raw));
     MakoNativeHttpRequest *box = (MakoNativeHttpRequest *)calloc(1, sizeof(*box));
@@ -8515,6 +8538,19 @@ int64_t mako_native_http_request_parse_ptr(MakoNativeString *raw) {
     box->path = bridge_take_str(mako_http_request_path(r));
     box->body = bridge_take_str(mako_http_request_body(r));
     return (int64_t)(intptr_t)box;
+}
+int64_t mako_native_http_request_clone_ptr(int64_t h) {
+    return (int64_t)(intptr_t)mako_native_http_request_clone(
+        (MakoNativeHttpRequest *)(intptr_t)h
+    );
+}
+void mako_native_http_request_drop_ptr(int64_t h) {
+    MakoNativeHttpRequest *box = (MakoNativeHttpRequest *)(intptr_t)h;
+    if (!box) return;
+    mako_native_string_drop_ptr(box->method);
+    mako_native_string_drop_ptr(box->path);
+    mako_native_string_drop_ptr(box->body);
+    free(box);
 }
 MakoNativeString *mako_native_http_request_method_ptr(int64_t h) {
     MakoNativeHttpRequest *b = (MakoNativeHttpRequest *)(intptr_t)h;
@@ -10816,4 +10852,3 @@ int64_t mako_native_peer_table_capacity(int64_t a0) {
 int64_t mako_native_peer_table_alive(int64_t a0, int64_t a1) {
     return mako_peer_table_alive(a0, a1);
 }
-
