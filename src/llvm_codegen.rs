@@ -1,7 +1,7 @@
 //! Optimizing LLVM emitter for backend-neutral native IR.
 
 use crate::ast::{BinOp, UnaryOp};
-use crate::native_ir::{self, Inst, OpaqueKind, Terminator, Type, Value};
+use crate::native_ir::{self, Inst, Terminator, Type, Value};
 use inkwell::basic_block::BasicBlock;
 use inkwell::builder::Builder;
 use inkwell::context::Context;
@@ -1722,10 +1722,7 @@ fn llvm_emit_struct_clone<'ctx>(
             }
             Type::OwnedOpaque(kind) => {
                 let ptr_ty = context.ptr_type(Default::default());
-                let name = match kind {
-                    OpaqueKind::Interface => "mako_native_iface_clone",
-                    OpaqueKind::HttpRequest => "mako_native_http_request_clone_ptr",
-                };
+                let name = kind.clone_fn();
                 let clone = external_function(
                     module,
                     name,
@@ -1898,10 +1895,7 @@ fn llvm_emit_struct_drop<'ctx>(
                     .build_load(llvm_type(context, *field_ty), gep, "drop.owned_opaque")
                     .map_err(builder_error)?;
                 let ptr_ty = context.ptr_type(Default::default());
-                let name = match kind {
-                    OpaqueKind::Interface => "mako_native_iface_drop",
-                    OpaqueKind::HttpRequest => "mako_native_http_request_drop_ptr",
-                };
+                let name = kind.drop_fn();
                 let drop = external_function(
                     module,
                     name,

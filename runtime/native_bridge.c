@@ -1714,36 +1714,22 @@ int64_t mako_native_http2_conn_new(void) {
     return c ? (int64_t)(intptr_t)c : -1;
 }
 
-void mako_native_struct_drop_typed(
-    void *value, int64_t nfields, int64_t str_mask,
-    int64_t nest_mask, int64_t nest_nf_pack, int64_t nest_sm_pack
-);
+typedef void (*MakoNativeIfaceDrop)(void *);
 
-/* Interface fat pointer with the concrete value's drop metadata. */
+/* Interface fat pointer with the concrete value's compiler-generated drop. */
 typedef struct {
     int64_t tag;
     void *data;
-    int64_t nfields;
-    int64_t str_mask;
-    int64_t nest_mask;
-    int64_t nest_nf_pack;
-    int64_t nest_sm_pack;
+    MakoNativeIfaceDrop drop;
     _Atomic size_t refs;
 } MakoNativeIface;
 
-void *mako_native_iface_box(
-    int64_t tag, void *data, int64_t nfields, int64_t str_mask,
-    int64_t nest_mask, int64_t nest_nf_pack, int64_t nest_sm_pack
-) {
+void *mako_native_iface_box(int64_t tag, void *data, MakoNativeIfaceDrop drop) {
     MakoNativeIface *b = (MakoNativeIface *)malloc(sizeof(MakoNativeIface));
     if (!b) abort();
     b->tag = tag;
     b->data = data; /* takes ownership of struct heap block */
-    b->nfields = nfields;
-    b->str_mask = str_mask;
-    b->nest_mask = nest_mask;
-    b->nest_nf_pack = nest_nf_pack;
-    b->nest_sm_pack = nest_sm_pack;
+    b->drop = drop;
     atomic_init(&b->refs, 1);
     return b;
 }
@@ -1766,10 +1752,7 @@ void mako_native_iface_drop(void *box) {
     MakoNativeIface *b = (MakoNativeIface *)box;
     if (!b) return;
     if (atomic_fetch_sub_explicit(&b->refs, 1, memory_order_acq_rel) != 1) return;
-    mako_native_struct_drop_typed(
-        b->data, b->nfields, b->str_mask,
-        b->nest_mask, b->nest_nf_pack, b->nest_sm_pack
-    );
+    if (b->drop) b->drop(b->data);
     free(box);
 }
 

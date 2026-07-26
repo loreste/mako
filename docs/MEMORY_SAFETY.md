@@ -65,7 +65,7 @@ There is **no** “let the GC clean it up later.”
 | **Gate script** | `./scripts/memory-safety-gate.sh` |
 
 ```bash
-# Ownership + leak tests on C and native; ASan when the toolchain supports it:
+# Ownership tests on C and native; native ASan/LSan when the toolchain supports it:
 ./scripts/memory-safety-gate.sh
 MAKO_MS_SKIP_HTTP=1 ./scripts/memory-safety-gate.sh   # skip the slow HTTP soak
 ```

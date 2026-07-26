@@ -1721,12 +1721,7 @@ fn emit_struct_clone(
                 fb.inst_results(call)[0]
             }
             IrType::OwnedOpaque(kind) => {
-                let name = match kind {
-                    native_ir::OpaqueKind::Interface => "mako_native_iface_clone",
-                    native_ir::OpaqueKind::HttpRequest => {
-                        "mako_native_http_request_clone_ptr"
-                    }
-                };
+                let name = kind.clone_fn();
                 let mut sig = module.make_signature();
                 sig.params.push(AbiParam::new(types::I64));
                 sig.returns.push(AbiParam::new(types::I64));
@@ -1832,12 +1827,7 @@ fn emit_struct_drop(
                 fb.ins().call(f, &[loaded]);
             }
             IrType::OwnedOpaque(kind) => {
-                let name = match kind {
-                    native_ir::OpaqueKind::Interface => "mako_native_iface_drop",
-                    native_ir::OpaqueKind::HttpRequest => {
-                        "mako_native_http_request_drop_ptr"
-                    }
-                };
+                let name = kind.drop_fn();
                 let mut sig = module.make_signature();
                 sig.params.push(AbiParam::new(types::I64));
                 let id = module

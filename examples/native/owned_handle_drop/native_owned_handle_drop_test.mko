@@ -11,12 +11,29 @@ struct AdderHolder {
     value: Adder
 }
 
+struct Bag {
+    items: []int
+    tag: string
+}
+
+interface Summer {
+    fn sum(int) -> int
+}
+
+struct SummerHolder {
+    value: Summer
+}
+
 struct RequestHolder {
     value: HttpRequest
 }
 
 fn Adder_add(self: Counter, delta: int) -> int {
     return self.n + delta
+}
+
+fn Summer_sum(self: Bag, delta: int) -> int {
+    return self.items[0] + self.items[1] + len(self.tag) + delta
 }
 
 struct Label {
@@ -29,15 +46,35 @@ fn interface_once(n: int) -> int {
     let adder: Adder = counter
     let first = AdderHolder { value: adder }
     let second = first
-    return first.value.add(1) + second.value.add(1)
+    let result = first.value.add(1) + second.value.add(1)
+    assert_eq(result, n * 2 + 2)
+    return result
+}
+
+fn nonflat_interface_once(n: int) -> int {
+    let bag = Bag {
+        items: [n, n + 1],
+        tag: int_to_string(n),
+    }
+    let summer: Summer = bag
+    let first = SummerHolder { value: summer }
+    let second = first
+    let third = second
+    let expected = n * 2 + 2 + len(int_to_string(n))
+    assert_eq(first.value.sum(1), expected)
+    assert_eq(second.value.sum(1), expected)
+    assert_eq(third.value.sum(1), expected)
+    return expected * 3
 }
 
 fn request_once() -> int {
-    let raw = "POST /items HTTP/1.1\r\nHost: example.test\r\n\r\nbody"
-    let request = http_request_parse(raw)
+    var request = http_request_parse("GET /old HTTP/1.1\r\n\r\n")
+    request = http_request_parse("POST /items HTTP/1.1\r\nHost: example.test\r\n\r\nbody")
     let first = RequestHolder { value: request }
     let second = first
-    return len(http_request_method(first.value)) + len(http_request_path(second.value))
+    let result = len(http_request_method(first.value)) + len(http_request_path(second.value))
+    assert_eq(result, 10)
+    return result
 }
 
 fn struct_key_map_once(n: int) -> int {
@@ -47,8 +84,14 @@ fn struct_key_map_once(n: int) -> int {
         text: int_to_string(n + 1),
         id: n + 1,
     }
+    values[Label { text: text, id: n }] = Label {
+        text: int_to_string(n + 2),
+        id: n + 2,
+    }
     let copy = maps_clone(values)
-    return copy[Label { text: text, id: n }].id
+    let result = copy[Label { text: text, id: n }].id
+    assert_eq(result, n + 2)
+    return result
 }
 
 fn TestOwnedNativeHandlesDrop() {
@@ -56,9 +99,11 @@ fn TestOwnedNativeHandlesDrop() {
     let mut total = 0
     while i < 200 {
         total = total + interface_once(i)
+        total = total + nonflat_interface_once(i)
         total = total + request_once()
         total = total + struct_key_map_once(i)
         i = i + 1
     }
-    assert(total > 0)
+    assert_eq(i, 200)
+    assert_eq(total, 184570)
 }

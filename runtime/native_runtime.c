@@ -1568,6 +1568,7 @@ static void *mako_native_struct_key_clone(
     int64_t nest_mask, int64_t nest_nf_pack, int64_t nest_sm_pack
 ) {
     if (!key || nfields <= 0) return NULL;
+    if (nfields > 62) nfields = 62;
     size_t bytes = (size_t)nfields * sizeof(int64_t);
     int64_t *out = (int64_t *)malloc(bytes);
     if (!out) abort();

@@ -17,6 +17,22 @@ pub enum OpaqueKind {
     HttpRequest,
 }
 
+impl OpaqueKind {
+    pub(crate) fn clone_fn(self) -> &'static str {
+        match self {
+            Self::Interface => "mako_native_iface_clone",
+            Self::HttpRequest => "mako_native_http_request_clone_ptr",
+        }
+    }
+
+    pub(crate) fn drop_fn(self) -> &'static str {
+        match self {
+            Self::Interface => "mako_native_iface_drop",
+            Self::HttpRequest => "mako_native_http_request_drop_ptr",
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Type {
     I1,
@@ -819,6 +835,28 @@ pub struct StructLayout {
 pub struct Module {
     pub functions: Vec<Function>,
     pub structs: Vec<StructLayout>,
+}
+
+fn struct_drop_helper_name(id: u32) -> String {
+    format!("__mako.drop_struct.{id}")
+}
+
+fn struct_drop_helper(id: u32) -> Function {
+    let value = Value(0);
+    Function {
+        name: struct_drop_helper_name(id),
+        params: vec![("value".into(), value, Type::Struct(id))],
+        ret: None,
+        blocks: vec![BasicBlock {
+            instructions: vec![Inst::DropStruct {
+                value,
+                struct_id: id,
+            }],
+            terminator: Some(Terminator::Return(None)),
+        }],
+        entry: BlockId(0),
+        next_value: 1,
+    }
 }
 
 /// Registry of aggregate layouts. Named structs are resolved up front;
@@ -2496,6 +2534,21 @@ pub fn lower_with_tests(program: &Program, test_fns: &[String]) -> Result<Module
         );
     }
     functions.extend(kick_stubs);
+    validate_struct_key_metadata(&structs)?;
+    let mut drop_helpers = functions
+        .iter()
+        .flat_map(|function| &function.blocks)
+        .flat_map(|block| &block.instructions)
+        .filter_map(|instruction| match instruction {
+            Inst::FuncAddr { function, .. } => function
+                .strip_prefix("__mako.drop_struct.")
+                .and_then(|id| id.parse::<u32>().ok()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    drop_helpers.sort_unstable();
+    drop_helpers.dedup();
+    functions.extend(drop_helpers.into_iter().map(struct_drop_helper));
     // Dedupe by name (monomorph + kick edge cases).
     {
         let mut seen = std::collections::HashSet::new();
@@ -2505,6 +2558,46 @@ pub fn lower_with_tests(program: &Program, test_fns: &[String]) -> Result<Module
         functions,
         structs: structs.into_layouts(),
     })
+}
+
+fn validate_struct_key_metadata(structs: &StructRegistry) -> Result<(), IrError> {
+    let layouts = structs.layouts.borrow();
+    for layout in layouts.iter() {
+        if layout.fields.len() > 62 {
+            return Err(IrError::new(format!(
+                "native IR: struct `{}` has {} fields; native struct metadata supports at most 62",
+                layout.name,
+                layout.fields.len()
+            )));
+        }
+
+        let nested = layout
+            .fields
+            .iter()
+            .filter_map(|(_, ty)| match ty {
+                Type::Struct(id) => Some(*id),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        if nested.len() > 4 {
+            return Err(IrError::new(format!(
+                "native IR: struct `{}` has {} nested struct fields; native struct metadata supports at most 4",
+                layout.name,
+                nested.len()
+            )));
+        }
+        for id in nested {
+            let nested_layout = &layouts[id as usize];
+            if nested_layout.fields.len() > 16 {
+                return Err(IrError::new(format!(
+                    "native IR: nested struct `{}` has {} fields; native struct metadata supports at most 16",
+                    nested_layout.name,
+                    nested_layout.fields.len()
+                )));
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Fold `const NAME = …` / `const fn` initializers into int and string tables.
@@ -29383,12 +29476,16 @@ impl<'a> FunctionLowerer<'a> {
             .copied()
             .unwrap_or(0);
         let tag_v = self.const_int(tag, Type::I64);
-        let (nf, sm, nm, nfp, nsp) = self.struct_key_meta(id);
+        let drop_fn = self.value();
+        self.emit(Inst::FuncAddr {
+            out: drop_fn,
+            function: struct_drop_helper_name(id),
+        });
         let out = self.value();
         self.emit(Inst::Call {
             out: Some(out),
             function: "mako_native_iface_box".into(),
-            args: vec![tag_v, value, nf, sm, nm, nfp, nsp],
+            args: vec![tag_v, value, drop_fn],
             ret: Some(Type::OwnedOpaque(OpaqueKind::Interface)),
         });
         Ok(out)
@@ -29635,17 +29732,10 @@ impl<'a> FunctionLowerer<'a> {
                 args: vec![value],
                 ret: None,
             }),
-            Type::Opaque => {
-                // No-op: the set mixes runtime-allocated blocks with handles
-                // owned by a foreign library, and nothing distinguishes them.
-                // See mako_native_opaque_drop in native_bridge.c.
-                self.emit(Inst::Call {
-                    out: None,
-                    function: "mako_native_opaque_drop".into(),
-                    args: vec![value],
-                    ret: None,
-                });
-            }
+            // Foreign handles may be interior or library-owned pointers. They
+            // must be released by their explicit close APIs; a generic free
+            // here has previously corrupted the allocator.
+            Type::Opaque => {}
             Type::Builder => {
                 // Owned by this runtime — struct plus buffer, both reclaimable.
                 self.emit(Inst::Call {
@@ -29657,11 +29747,7 @@ impl<'a> FunctionLowerer<'a> {
             }
             Type::OwnedOpaque(kind) => self.emit(Inst::Call {
                 out: None,
-                function: match kind {
-                    OpaqueKind::Interface => "mako_native_iface_drop",
-                    OpaqueKind::HttpRequest => "mako_native_http_request_drop_ptr",
-                }
-                .into(),
+                function: kind.drop_fn().into(),
                 args: vec![value],
                 ret: None,
             }),
@@ -30942,15 +31028,9 @@ impl<'a> FunctionLowerer<'a> {
                 // Handles are not deep-cloned; share the pointer (caller owns).
                 return value;
             }
-            Type::OwnedOpaque(OpaqueKind::HttpRequest) => self.emit(Inst::Call {
+            Type::OwnedOpaque(kind) => self.emit(Inst::Call {
                 out: Some(out),
-                function: "mako_native_http_request_clone_ptr".into(),
-                args: vec![value],
-                ret: Some(ty),
-            }),
-            Type::OwnedOpaque(OpaqueKind::Interface) => self.emit(Inst::Call {
-                out: Some(out),
-                function: "mako_native_iface_clone".into(),
+                function: kind.clone_fn().into(),
                 args: vec![value],
                 ret: Some(ty),
             }),
@@ -31551,21 +31631,32 @@ mod tests {
     #[test]
     fn emits_typed_drops_for_owned_handles_and_struct_key_maps() {
         let source = r#"
-            struct Counter { n: int }
+            struct Counter { label: string, n: int }
             interface Adder { fn add(int) -> int }
             fn Adder_add(self: Counter, delta: int) -> int {
                 return self.n + delta
             }
+            struct Bag { items: []int, tag: string }
+            interface Summer { fn sum(int) -> int }
+            fn Summer_sum(self: Bag, delta: int) -> int {
+                return self.items[0] + delta
+            }
             struct Label { text: string, id: int }
             fn main() {
-                let counter = Counter { n: 2 }
+                let counter = Counter { label: "n", n: 2 }
                 let adder: Adder = counter
                 let adder_copy = adder
+                let bag = Bag { items: [1, 2], tag: "bag" }
+                let summer: Summer = bag
+                let summer_copy = summer
                 let request = http_request_parse("GET / HTTP/1.1\r\n\r\n")
                 let request_copy = request
                 let mut values = make(map[Label]int)
                 values[Label { text: "a", id: 1 }] = 1
-                print_int(adder_copy.add(len(http_request_method(request_copy))) + len(values))
+                print_int(
+                    adder_copy.add(len(http_request_method(request_copy))) +
+                    summer_copy.sum(1) + len(values)
+                )
             }
         "#;
         let tokens = Lexer::new(source).tokenize().unwrap();
@@ -31585,6 +31676,108 @@ mod tests {
         assert!(calls.contains(&"mako_native_iface_drop"));
         assert!(calls.contains(&"mako_native_http_request_drop_ptr"));
         assert!(calls.contains(&"mako_native_map_struct_key_drop_ptr"));
+
+        let bag_id = module
+            .structs
+            .iter()
+            .position(|layout| layout.name == "Bag")
+            .unwrap() as u32;
+        let helper_name = struct_drop_helper_name(bag_id);
+        let helper = module
+            .functions
+            .iter()
+            .find(|function| function.name == helper_name)
+            .expect("interface backing structs need a full drop helper");
+        assert!(helper.blocks.iter().flat_map(|block| &block.instructions).any(
+            |instruction| matches!(
+                instruction,
+                Inst::DropStruct {
+                    struct_id,
+                    ..
+                } if *struct_id == bag_id
+            )
+        ));
+        assert!(module
+            .functions
+            .iter()
+            .flat_map(|function| &function.blocks)
+            .flat_map(|block| &block.instructions)
+            .any(|instruction| matches!(
+                instruction,
+                Inst::FuncAddr { function, .. } if function == &helper_name
+            )));
+    }
+
+    #[test]
+    fn rejects_struct_layouts_too_wide_for_native_metadata() {
+        let fields = (0..63)
+            .map(|index| format!("f{index}: int"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let source = format!("struct Wide {{ {fields} }} fn main() {{}}");
+        let tokens = Lexer::new(&source).tokenize().unwrap();
+        let program = Parser::new(tokens).parse().unwrap();
+        let error = lower(&program).unwrap_err();
+        assert!(error.to_string().contains("supports at most 62"));
+    }
+
+    #[test]
+    fn rejects_too_many_nested_struct_metadata_fields() {
+        let source = r#"
+            struct Inner { value: int }
+            struct Outer {
+                a: Inner
+                b: Inner
+                c: Inner
+                d: Inner
+                e: Inner
+            }
+            fn main() {}
+        "#;
+        let tokens = Lexer::new(source).tokenize().unwrap();
+        let program = Parser::new(tokens).parse().unwrap();
+        let error = lower(&program).unwrap_err();
+        assert!(error.to_string().contains("supports at most 4"));
+    }
+
+    #[test]
+    fn rejects_nested_structs_too_wide_for_packed_metadata() {
+        let fields = (0..17)
+            .map(|index| format!("f{index}: int"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let source =
+            format!("struct Inner {{ {fields} }} struct Outer {{ inner: Inner }} fn main() {{}}");
+        let tokens = Lexer::new(&source).tokenize().unwrap();
+        let program = Parser::new(tokens).parse().unwrap();
+        let error = lower(&program).unwrap_err();
+        assert!(error.to_string().contains("supports at most 16"));
+    }
+
+    #[test]
+    fn leaves_foreign_handles_on_their_explicit_close_path() {
+        let source = r#"
+            fn main() {
+                let db = sql_open_sqlite(":memory:")
+                sql_close(db)
+            }
+        "#;
+        let tokens = Lexer::new(source).tokenize().unwrap();
+        let program = Parser::new(tokens).parse().unwrap();
+        let module = lower(&program).unwrap();
+        let calls = module
+            .functions
+            .iter()
+            .flat_map(|function| &function.blocks)
+            .flat_map(|block| &block.instructions)
+            .filter_map(|instruction| match instruction {
+                Inst::Call { function, .. } => Some(function.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(calls.contains(&"mako_native_sql_open_sqlite_ptr"));
+        assert!(calls.contains(&"mako_native_sql_close"));
+        assert!(!calls.iter().any(|name| name.contains("opaque_drop")));
     }
 }
 

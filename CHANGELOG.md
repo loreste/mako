@@ -119,9 +119,11 @@ share buffers, so freeing both input and output would be a double free;
 values from foreign handles. Interface boxes are reference-counted,
 `http_request_parse` results are deep-cloned and dropped, and foreign database,
 registry, and OS handles remain on their explicit close paths. Content-keyed
-struct maps also clone and release their owned keys and values on read,
-overwrite, delete, copy, clear, and final drop. The focused native fixture and
-the full struct-key map suite pass under LeakSanitizer and AddressSanitizer.
+struct maps also clone values returned by reads and release stored keys and
+values on overwrite, delete, copy, clear, and final drop. Interface boxes retain
+the concrete type's compiler-generated recursive destructor, including slices,
+maps, nested structs, and owned handles. The focused native fixture and the full
+struct-key map suite pass under LeakSanitizer and AddressSanitizer.
 
 ### General networking primitives (protocol-agnostic)
 
