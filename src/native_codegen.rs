@@ -1639,6 +1639,7 @@ fn ir_clif_type(ty: IrType) -> Result<cranelift_codegen::ir::Type, NativeError> 
         | IrType::Nursery
         | IrType::Task
         | IrType::Opaque
+        | IrType::Builder
         | IrType::FnPtr
         | IrType::StructSlice(_)
         | IrType::ShareInt

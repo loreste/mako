@@ -38,8 +38,18 @@ pub enum Type {
     Nursery,
     /// Threaded kick job handle (`MakoTask*`).
     Task,
-    /// Opaque runtime handle (TlsConn, SqlDB, StrBuilder, …) — pointer-sized.
+    /// Opaque runtime handle (TlsConn, SqlDB, …) — pointer-sized.
+    ///
+    /// These are *not* dropped: the set spans handles this runtime allocated
+    /// and handles owned by a foreign library or one of our registries, and
+    /// nothing at runtime tells them apart. A `SqlDB` is
+    /// `(int64_t)(intptr_t)db.sqlite`, so freeing one corrupts the allocator.
+    /// A handle the runtime does own belongs in its own variant, like
+    /// `Builder` below, so it can carry a real destructor.
     Opaque,
+    /// `StrBuilder` — a handle this runtime allocated (struct plus buffer) and
+    /// therefore knows how to free, unlike the `Opaque` catch-all.
+    Builder,
     /// `[]Struct` — owned pointer-array of heap struct pointers.
     StructSlice(u32),
     /// `map[int]int` — owned pointer to open-addressing table.
@@ -462,6 +472,7 @@ impl Type {
                 | Type::Nursery
                 | Type::Task
                 | Type::Opaque
+                | Type::Builder
                 | Type::StructSlice(_)
                 | Type::ShareInt
                 | Type::Struct(_)
@@ -475,6 +486,7 @@ impl Type {
         matches!(
             self,
             Type::Opaque
+                | Type::Builder
                 | Type::ChanI
                 | Type::ChanS
                 | Type::ChanF
@@ -495,6 +507,8 @@ impl Type {
                 | Type::F64
                 | Type::FnPtr
                 | Type::Opaque
+                | Type::Builder
+                | Type::Builder
                 | Type::ShareInt
                 | Type::ChanI
                 | Type::ChanS
@@ -1160,12 +1174,14 @@ fn scalar_type(ty: &TypeExpr) -> Result<Type, IrError> {
             let _ = (params, ret);
             Ok(Type::FnPtr)
         }
+        // Owned by this runtime — has a real destructor, so it gets its own
+        // variant rather than joining the undroppable Opaque set.
+        TypeExpr::Named(name) if name == "StrBuilder" => Ok(Type::Builder),
         TypeExpr::Named(name)
             if matches!(
                 name.as_str(),
                 "TlsConn"
                     | "SqlDB"
-                    | "StrBuilder"
                     | "HttpConn"
                     | "MailMsg"
                     | "GpuDevice"
@@ -1283,6 +1299,7 @@ fn is_field_type(ty: Type) -> bool {
             | Type::Nursery
             | Type::Task
             | Type::Opaque
+            | Type::Builder
             | Type::FnPtr
             | Type::StructSlice(_)
             | Type::ShareInt
@@ -16073,7 +16090,7 @@ impl<'a> FunctionLowerer<'a> {
             "str_builder" if args.is_empty() => Some((
                 "mako_native_str_builder",
                 &[],
-                Some(Type::Opaque),
+                Some(Type::Builder),
                 true,
             )),
             "tmpl_data_new" if args.is_empty() => Some((
@@ -16434,25 +16451,25 @@ impl<'a> FunctionLowerer<'a> {
             )),
             "builder_write" if args.len() == 2 => Some((
                 "mako_native_builder_write_ptr",
-                &[Type::Opaque, Type::Str],
+                &[Type::Builder, Type::Str],
                 None,
                 false,
             )),
             "builder_write_byte" if args.len() == 2 => Some((
                 "mako_native_builder_write_byte",
-                &[Type::Opaque, Type::I64],
+                &[Type::Builder, Type::I64],
                 None,
                 false,
             )),
             "builder_len" if args.len() == 1 => Some((
                 "mako_native_builder_len",
-                &[Type::Opaque],
+                &[Type::Builder],
                 Some(Type::I64),
                 false,
             )),
             "builder_string" if args.len() == 1 => Some((
                 "mako_native_builder_string",
-                &[Type::Opaque],
+                &[Type::Builder],
                 Some(Type::Str),
                 true,
             )),
@@ -19207,7 +19224,7 @@ impl<'a> FunctionLowerer<'a> {
             )),
             "builder_write_slice" if args.len() == 4 => Some((
                 "mako_native_builder_write_slice_ptr",
-                &[Type::Opaque, Type::Str, Type::I64, Type::I64],
+                &[Type::Builder, Type::Str, Type::I64, Type::I64],
                 None,
                 false,
             )),
@@ -29427,10 +29444,21 @@ impl<'a> FunctionLowerer<'a> {
                 ret: None,
             }),
             Type::Opaque => {
-                // Opaque handles: free if non-null (best-effort).
+                // No-op: the set mixes runtime-allocated blocks with handles
+                // owned by a foreign library, and nothing distinguishes them.
+                // See mako_native_opaque_drop in native_bridge.c.
                 self.emit(Inst::Call {
                     out: None,
                     function: "mako_native_opaque_drop".into(),
+                    args: vec![value],
+                    ret: None,
+                });
+            }
+            Type::Builder => {
+                // Owned by this runtime — struct plus buffer, both reclaimable.
+                self.emit(Inst::Call {
+                    out: None,
+                    function: "mako_native_str_builder_free_ptr".into(),
                     args: vec![value],
                     ret: None,
                 });

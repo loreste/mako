@@ -1334,6 +1334,13 @@ void *mako_native_str_builder(void) {
     return mako_str_builder_new();
 }
 
+/* Release a builder handle. mako_str_builder_new allocates the struct and its
+ * buffer, so a builder that is never freed leaks both. Unlike the handles
+ * behind Type::Opaque, this one is owned by the runtime and is safe to free. */
+void mako_native_str_builder_free_ptr(void *b) {
+    if (b) mako_str_builder_free((MakoStrBuilder *)b);
+}
+
 void mako_native_builder_write_ptr(void *b, MakoNativeString *s) {
     if (b) mako_str_builder_write((MakoStrBuilder *)b, bridge_borrow_str(s));
 }
