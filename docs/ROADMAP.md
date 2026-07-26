@@ -252,6 +252,27 @@ hiding failures. Ordered by leverage, not by size.
 | **417-I** | Ownership inlay hints in the LSP | `textDocument/inlayHint` is already implemented. Owned / borrowed / dropped-here is invisible in source and is what produced the double-free, the use-after-free and 650 per-call leaks. Small change, disproportionate payoff. |
 | **417-J** | LSP client and editor reach | Replace the hand-rolled JSON-RPC client in the VS Code extension with `vscode-languageclient`, and document Neovim / Helix / Zed setup. The server already implements 15 methods. |
 
+### Module management — reconcile the manifest with the source
+
+**Also not from scratch.** `mako.toml` is the manifest and `mako.lock` the
+resolved, content-hashed lock; `mako pkg add` / `remove` / `install` / `update`
+maintain them. What is missing is the link between the manifest and what the
+code actually imports: nothing in `pkg.rs` reads `pull` statements, so
+dependencies are recorded by hand and drift from the source silently.
+
+| ID | Deliverable | Notes |
+|----|-------------|-------|
+| **417-M1** | Import scan | Walk the module's `.mko` sources for `pull` statements and classify each: stdlib, in-module package, or external dependency. Everything below depends on this. |
+| **417-M2** | `mako pkg tidy` | Add manifest entries for imports that lack one, drop `[dependencies]` entries nothing imports, refresh `mako.lock`. Reports what it changed rather than editing silently. |
+| **417-M3** | Import path → package identity | Decide what a `pull` string means for an external module: the manifest key, a registry name, or a path. Today the key is chosen by whoever wrote the entry, so two projects can name the same package differently. This is the design decision the rest rests on. |
+| **417-M4** | Resolve on build | A `pull` with no manifest entry currently fails at resolution. It should either resolve and record automatically, or fail with the exact `mako pkg` command that fixes it. Automatic is friendlier; explicit is more predictable for reproducible builds — pick one deliberately and document why. |
+| **417-M5** | `mako pkg why <pkg>` | Show which import pulled a dependency in. Falls out of 417-M1 and is what makes a large dependency set debuggable. |
+
+Verification note: 417-M2 edits the manifest, so it needs fixtures covering a
+missing dependency, an unused one, and a package imported from more than one
+file — plus the case where the same package is reachable by two paths, which is
+where a naive tidy corrupts a working manifest.
+
 ### Package distribution — shared registry
 
 **Not a new package manager.** `mako pkg` already does init / add / remove /
