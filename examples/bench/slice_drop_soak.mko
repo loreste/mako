@@ -20,12 +20,29 @@ fn build(n: int) -> int {
     return len(a)
 }
 
+// Same shape one level over: `str_to_upper` allocates its result, so it cannot
+// alias `a` and `a` is still ours to free. Transferring the argument because the
+// call returns an owning type leaked the source string on every call — 236 MB
+// over the loop below, against ~7 MB once the drop is kept.
+fn shout(n: int) -> string {
+    let a = str_repeat("x", n)
+    return str_to_upper(a)
+}
+
 fn main() {
     let n = black_box(200000)
     let mut i = 0
     let mut acc = 0
     while i < 500 {
         acc = acc + build(n)
+        i = i + 1
+    }
+
+    let m = black_box(100000)
+    i = 0
+    while i < 2000 {
+        let s = shout(m)
+        acc = acc + str_len(s)
         i = i + 1
     }
     print_int(acc)

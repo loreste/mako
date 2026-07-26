@@ -3800,7 +3800,19 @@ impl Codegen {
                 }
             }
             // Ok(x), Err(x), Some(x) — transfer the inner argument.
-            Expr::Call { args, .. } => {
+            Expr::Call { callee, args, .. } => {
+                // A builtin classified as returning an *owned* string/slice
+                // allocates its result, so that result cannot alias the
+                // arguments and the argument locals are still ours to free.
+                // `return str_to_upper(a)` otherwise disarmed a's drop and
+                // leaked the source string on every call.
+                if let Expr::Ident(name) = callee.as_ref() {
+                    if Self::builtin_returns_owned_string(name)
+                        || Self::builtin_returns_owned_slice(name)
+                    {
+                        return;
+                    }
+                }
                 for a in args {
                     self.transfer_own_on_return(a);
                 }
