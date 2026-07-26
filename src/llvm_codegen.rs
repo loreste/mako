@@ -91,6 +91,7 @@ fn llvm_type<'ctx>(context: &'ctx Context, ty: Type) -> BasicTypeEnum<'ctx> {
         | Type::Nursery
         | Type::Task
         | Type::Opaque
+        | Type::Builder
         | Type::OwnedOpaque(_)
         | Type::FnPtr
         | Type::StructSlice(_)
@@ -355,6 +356,7 @@ fn emit_instruction<'ctx>(
                 | Type::Nursery
                 | Type::Task
                 | Type::Opaque
+                | Type::Builder
                 | Type::OwnedOpaque(_)
                 | Type::FnPtr
                 | Type::StructSlice(_)
