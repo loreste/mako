@@ -824,17 +824,25 @@ MakoNativePtrSlice *mako_native_ptr_slice_clone_deep(const MakoNativePtrSlice *s
     return out;
 }
 
-/* Subslice of pointer array [low:high); owned shallow copy of pointers. */
-MakoNativePtrSlice *mako_native_ptr_slice_slice(const MakoNativePtrSlice *s, int64_t low, int64_t high, int64_t max) {
-    (void)max;
+/* Subslice of pointer array [low:high); non-owning view of the backing array. */
+MakoNativePtrSlice *mako_native_ptr_slice_slice(
+    const MakoNativePtrSlice *s, int64_t low, int64_t high, int64_t max
+) {
     if (!s) return mako_native_ptr_slice_make(0, 0);
     int64_t n = (int64_t)s->len;
     if (low < 0) low = 0;
     if (high < 0 || high > n) high = n;
     if (low > high) low = high;
-    int64_t len = high - low;
-    MakoNativePtrSlice *out = mako_native_ptr_slice_make(len, len);
-    for (int64_t i = 0; i < len; ++i) out->data[i] = s->data[low + i];
+    int64_t cap = max >= 0 && max <= (int64_t)s->cap
+        ? max - low
+        : (int64_t)s->cap - low;
+    if (cap < high - low) cap = high - low;
+    MakoNativePtrSlice *out = (MakoNativePtrSlice *)calloc(1, sizeof(*out));
+    if (!out) abort();
+    out->data = s->data ? s->data + low : NULL;
+    out->len = (size_t)(high - low);
+    out->cap = (size_t)cap;
+    out->owned = 0;
     return out;
 }
 
@@ -8526,6 +8534,21 @@ int64_t mako_native_http_request_clone_ptr(int64_t h) {
     return (int64_t)(intptr_t)mako_native_http_request_clone(
         (MakoNativeHttpRequest *)(intptr_t)h
     );
+}
+int64_t mako_native_http_request_eq_ptr(int64_t a, int64_t b) {
+    MakoNativeHttpRequest *left = (MakoNativeHttpRequest *)(intptr_t)a;
+    MakoNativeHttpRequest *right = (MakoNativeHttpRequest *)(intptr_t)b;
+    if (left == right) return 1;
+    if (!left || !right) return 0;
+    return mako_str_eq(
+               bridge_borrow_str(left->method), bridge_borrow_str(right->method)
+           ) &&
+           mako_str_eq(
+               bridge_borrow_str(left->path), bridge_borrow_str(right->path)
+           ) &&
+           mako_str_eq(
+               bridge_borrow_str(left->body), bridge_borrow_str(right->body)
+           );
 }
 void mako_native_http_request_drop_ptr(int64_t h) {
     MakoNativeHttpRequest *box = (MakoNativeHttpRequest *)(intptr_t)h;

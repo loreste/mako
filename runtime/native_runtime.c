@@ -1632,6 +1632,7 @@ typedef struct {
 void *mako_native_iface_clone(void *box);
 void mako_native_iface_drop(void *box);
 int64_t mako_native_http_request_clone_ptr(int64_t handle);
+int64_t mako_native_http_request_eq_ptr(int64_t a, int64_t b);
 void mako_native_http_request_drop_ptr(int64_t handle);
 
 MakoNativeStructSlice *mako_native_struct_slice_clone_ptr(
@@ -2081,7 +2082,67 @@ void mako_native_maps_clear_struct_key(
     m->tombs = 0;
 }
 
-/* val_kind: 0 = i64 bits, 1 = string content, 2 = nested struct value. */
+static int64_t mako_native_struct_map_value_eq(
+    int64_t a, int64_t b, int64_t kind, int64_t nfields, int64_t str_mask,
+    int64_t nest_mask, int64_t nest_nf_pack, int64_t nest_sm_pack
+) {
+    if (a == b) return 1;
+    if (!a || !b) return 0;
+    switch (kind) {
+        case 1:
+            return mako_native_str_content_eq(
+                (MakoNativeString *)(intptr_t)a,
+                (MakoNativeString *)(intptr_t)b
+            );
+        case 2:
+            return mako_native_struct_key_eq(
+                (void *)(intptr_t)a, (void *)(intptr_t)b, nfields, str_mask,
+                nest_mask, nest_nf_pack, nest_sm_pack
+            );
+        case 3: {
+            MakoNativeIntSlice *sa = (MakoNativeIntSlice *)(intptr_t)a;
+            MakoNativeIntSlice *sb = (MakoNativeIntSlice *)(intptr_t)b;
+            return sa->len == sb->len &&
+                   (!sa->len || memcmp(sa->data, sb->data, sa->len * sizeof(*sa->data)) == 0);
+        }
+        case 4: {
+            MakoNativeStringSlice *sa = (MakoNativeStringSlice *)(intptr_t)a;
+            MakoNativeStringSlice *sb = (MakoNativeStringSlice *)(intptr_t)b;
+            if (sa->len != sb->len) return 0;
+            for (size_t i = 0; i < sa->len; ++i) {
+                if (!mako_native_str_content_eq(sa->data[i], sb->data[i])) return 0;
+            }
+            return 1;
+        }
+        case 5: {
+            MakoNativeFloatSlice *sa = (MakoNativeFloatSlice *)(intptr_t)a;
+            MakoNativeFloatSlice *sb = (MakoNativeFloatSlice *)(intptr_t)b;
+            if (sa->len != sb->len) return 0;
+            for (size_t i = 0; i < sa->len; ++i) {
+                if (sa->data[i] != sb->data[i]) return 0;
+            }
+            return 1;
+        }
+        case 6: {
+            MakoNativeStructSlice *sa = (MakoNativeStructSlice *)(intptr_t)a;
+            MakoNativeStructSlice *sb = (MakoNativeStructSlice *)(intptr_t)b;
+            if (sa->len != sb->len) return 0;
+            for (size_t i = 0; i < sa->len; ++i) {
+                if (!mako_native_struct_key_eq(
+                        sa->data[i], sb->data[i], nfields, str_mask,
+                        nest_mask, nest_nf_pack, nest_sm_pack
+                    ))
+                    return 0;
+            }
+            return 1;
+        }
+        case 8:
+            return mako_native_http_request_eq_ptr(a, b);
+        default:
+            return 0;
+    }
+}
+
 int64_t mako_native_maps_equal_struct_key(
     const MakoNativeMapII *a,
     const MakoNativeMapII *b,
@@ -2092,7 +2153,10 @@ int64_t mako_native_maps_equal_struct_key(
     int64_t nest_sm_pack,
     int64_t val_kind,
     int64_t val_nfields,
-    int64_t val_str_mask
+    int64_t val_str_mask,
+    int64_t val_nest_mask,
+    int64_t val_nest_nf_pack,
+    int64_t val_nest_sm_pack
 ) {
     if (!a || !b) return a == b ? 1 : 0;
     if (mako_native_map_ii_len(a) != mako_native_map_ii_len(b)) return 0;
@@ -2110,16 +2174,10 @@ int64_t mako_native_maps_equal_struct_key(
         int64_t vb = mako_native_map_struct_key_get_ptr(
             b, k, nfields, str_mask, nest_mask, nest_nf_pack, nest_sm_pack
         );
-        if (val_kind == 1) {
-            MakoNativeString *sa = (MakoNativeString *)(intptr_t)va;
-            MakoNativeString *sb = (MakoNativeString *)(intptr_t)vb;
-            if (!mako_native_str_content_eq(sa, sb)) return 0;
-        } else if (val_kind == 2) {
-            void *pa = (void *)(intptr_t)va;
-            void *pb = (void *)(intptr_t)vb;
-            if (!mako_native_struct_key_eq(pa, pb, val_nfields, val_str_mask, 0, 0, 0))
-                return 0;
-        } else if (va != vb) {
+        if (!mako_native_struct_map_value_eq(
+                va, vb, val_kind, val_nfields, val_str_mask,
+                val_nest_mask, val_nest_nf_pack, val_nest_sm_pack
+            )) {
             return 0;
         }
     }
@@ -2827,10 +2885,15 @@ MakoNativeStructSlice *mako_native_maps_values_struct_key(
     size_t j = 0;
     for (size_t i = 0; i < m->cap; ++i) {
         if (m->state[i] == MAKO_NMAP_FULL) {
-            out->data[j++] = (void *)(intptr_t)mako_native_struct_map_value_clone(
-                m->vals[i], val_kind, val_nfields, val_str_mask,
-                val_nest_mask, val_nest_nf_pack, val_nest_sm_pack
-            );
+            int64_t value = m->vals[i];
+            /* Slice values remain shared views, matching ordinary maps_values. */
+            if (val_kind < 3 || val_kind > 6) {
+                value = mako_native_struct_map_value_clone(
+                    value, val_kind, val_nfields, val_str_mask,
+                    val_nest_mask, val_nest_nf_pack, val_nest_sm_pack
+                );
+            }
+            out->data[j++] = (void *)(intptr_t)value;
         }
     }
     out->len = j;

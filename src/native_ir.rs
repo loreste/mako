@@ -3344,13 +3344,8 @@ impl<'a> FunctionLowerer<'a> {
                         raw_v = f;
                     }
                     // Pointer maps return a borrow of map storage — clone so the
-                    // binding owns an independent value (avoids double-free with
-                    // the map). MapSS get already returns an owned string clone.
-                    // Shared handles (chan/opaque/…) must stay borrowed: clone is
-                    // identity and force-owning would chan_drop while the map
-                    // still holds the same pointer.
-                    // StructKeyStr stores the string pointer as i64 — treat like
-                    // MapSPtr string values (clone for ownership of the binding).
+                    // binding owns an independent value. MapSS get already
+                    // returns an owned string clone.
                     let ptr_map = matches!(mty, Type::MapIPtr(_) | Type::MapSPtr(_))
                         || (struct_key_sid.is_some() && vty.is_heap());
                     if (ptr_map || vty == Type::Str && struct_key_sid.is_some())
@@ -7638,13 +7633,12 @@ impl<'a> FunctionLowerer<'a> {
                             }
                             return Ok((f, Type::F64, false));
                         }
-                        let (fixed, value_owned) =
-                            if vty.is_heap() && !vty.is_shared_handle() {
-                                let clone = self.emit_clone(out, vty);
-                                (self.null_to_empty_heap(clone, vty)?, true)
-                            } else {
-                                (out, false)
-                            };
+                        let (fixed, value_owned) = if matches!(vty, Type::OwnedOpaque(_)) {
+                            let clone = self.emit_clone(out, vty);
+                            (self.null_to_empty_heap(clone, vty)?, true)
+                        } else {
+                            (self.null_to_empty_heap(out, vty)?, false)
+                        };
                         if owned {
                             self.emit_drop(slice, sty);
                         }
@@ -7699,13 +7693,12 @@ impl<'a> FunctionLowerer<'a> {
                             }
                             return Ok((f, Type::F64, false));
                         }
-                        let (fixed, value_owned) =
-                            if vty.is_heap() && !vty.is_shared_handle() {
-                                let clone = self.emit_clone(out, vty);
-                                (self.null_to_empty_heap(clone, vty)?, true)
-                            } else {
-                                (out, false)
-                            };
+                        let (fixed, value_owned) = if matches!(vty, Type::OwnedOpaque(_)) {
+                            let clone = self.emit_clone(out, vty);
+                            (self.null_to_empty_heap(clone, vty)?, true)
+                        } else {
+                            (self.null_to_empty_heap(out, vty)?, false)
+                        };
                         if owned {
                             self.emit_drop(slice, sty);
                         }
@@ -7916,12 +7909,7 @@ impl<'a> FunctionLowerer<'a> {
                             return Ok((clone, sty, true));
                         }
                         Type::StructSlice(_) | Type::PtrSlice(_) => {
-                            self.emit(Inst::Call {
-                                out: Some(clone),
-                                function: "mako_native_ptr_slice_clone".into(),
-                                args: vec![out],
-                                ret: Some(sty),
-                            });
+                            let clone = self.emit_clone(out, sty);
                             self.emit_drop(slice, sty);
                             self.emit_drop(out, sty);
                             return Ok((clone, sty, true));
@@ -10108,27 +10096,15 @@ impl<'a> FunctionLowerer<'a> {
                     if let Type::MapIPtr(vk) = at {
                         if let Some(sid) = vk.struct_key_id() {
                             let (nf, sm, nm, nfp, nsp) = self.struct_key_meta(sid);
-                            let (val_kind, val_nf, val_sm) = match vk {
-                                MapValKind::StructKeyStr(_) => (
-                                    self.const_int(1, Type::I64),
-                                    self.const_int(0, Type::I64),
-                                    self.const_int(0, Type::I64),
-                                ),
-                                MapValKind::StructKeyToStruct(_, vid) => {
-                                    let (vnf, vsm, _vnm, _vnfp, _vnsp) = self.struct_key_meta(vid);
-                                    (self.const_int(2, Type::I64), vnf, vsm)
-                                }
-                                // Int / float-bits / other scalar values.
-                                _ => (
-                                    self.const_int(0, Type::I64),
-                                    self.const_int(0, Type::I64),
-                                    self.const_int(0, Type::I64),
-                                ),
-                            };
+                            let (val_kind, val_nf, val_sm, val_nm, val_nfp, val_nsp) =
+                                self.struct_map_value_meta(vk);
                             self.emit(Inst::Call {
                                 out: Some(out),
                                 function: "mako_native_maps_equal_struct_key".into(),
-                                args: vec![a, b, nf, sm, nm, nfp, nsp, val_kind, val_nf, val_sm],
+                                args: vec![
+                                    a, b, nf, sm, nm, nfp, nsp, val_kind, val_nf, val_sm,
+                                    val_nm, val_nfp, val_nsp,
+                                ],
                                 ret: Some(Type::I64),
                             });
                             if ao {
@@ -29787,15 +29763,7 @@ impl<'a> FunctionLowerer<'a> {
                 ret: None,
             }),
             Type::PtrSlice(vk) => {
-                if matches!(
-                    vk,
-                    MapValKind::IntSlice
-                        | MapValKind::StrSlice
-                        | MapValKind::FloatSlice
-                        | MapValKind::Struct(_)
-                        | MapValKind::StructSlice(_)
-                        | MapValKind::OwnedOpaque(_)
-                ) {
+                if matches!(vk, MapValKind::OwnedOpaque(_)) {
                     let (vkind, vnf, vsm, vnm, vnfp, vnsp) =
                         self.struct_map_value_meta(vk);
                     self.emit(Inst::Call {
@@ -29805,9 +29773,14 @@ impl<'a> FunctionLowerer<'a> {
                         ret: None,
                     });
                 } else {
+                    let free_elems = matches!(vk.to_type(), Type::Struct(_));
                     self.emit(Inst::Call {
                         out: None,
-                        function: "mako_native_ptr_slice_drop".into(),
+                        function: if free_elems {
+                            "mako_native_ptr_slice_drop_free_elems".into()
+                        } else {
+                            "mako_native_ptr_slice_drop".into()
+                        },
                         args: vec![value],
                         ret: None,
                     });
@@ -31056,17 +31029,7 @@ impl<'a> FunctionLowerer<'a> {
                 args: vec![value],
                 ret: Some(ty),
             }),
-            Type::PtrSlice(vk)
-                if matches!(
-                    vk,
-                    MapValKind::IntSlice
-                        | MapValKind::StrSlice
-                        | MapValKind::FloatSlice
-                        | MapValKind::Struct(_)
-                        | MapValKind::StructSlice(_)
-                        | MapValKind::OwnedOpaque(_)
-                ) =>
-            {
+            Type::PtrSlice(vk) if matches!(vk, MapValKind::OwnedOpaque(_)) => {
                 let (vkind, vnf, vsm, vnm, vnfp, vnsp) =
                     self.struct_map_value_meta(vk);
                 self.emit(Inst::Call {
