@@ -29501,6 +29501,20 @@ impl Codegen {
                     format!("mako_wss_client_connect_ca({h}, {p}, {path}, {k}, {ca})"),
                 );
             }
+            "wss_client_connect_headers" => {
+                let (_, h) = self.emit_expr(&args[0]);
+                let (_, p) = self.emit_expr(&args[1]);
+                let (_, path) = self.emit_expr(&args[2]);
+                let (_, k) = self.emit_expr(&args[3]);
+                let (_, ca) = self.emit_expr(&args[4]);
+                let (_, extra) = self.emit_expr(&args[5]);
+                return (
+                    "void*".into(),
+                    format!(
+                        "mako_wss_client_connect_ca_h({h}, {p}, {path}, {k}, {ca}, {extra})"
+                    ),
+                );
+            }
             "wss_client_send_text" => {
                 let (_, c) = self.emit_expr(&args[0]);
                 let (_, m) = self.emit_expr(&args[1]);
@@ -48072,7 +48086,21 @@ impl Codegen {
                                 ),
                             );
                         }
-                        "wss_client_send_text" => {
+                        "wss_client_connect_headers" => {
+                let (_, h) = self.emit_expr(&args[0]);
+                let (_, p) = self.emit_expr(&args[1]);
+                let (_, path) = self.emit_expr(&args[2]);
+                let (_, k) = self.emit_expr(&args[3]);
+                let (_, ca) = self.emit_expr(&args[4]);
+                let (_, extra) = self.emit_expr(&args[5]);
+                return (
+                    "void*".into(),
+                    format!(
+                        "mako_wss_client_connect_ca_h({h}, {p}, {path}, {k}, {ca}, {extra})"
+                    ),
+                );
+            }
+            "wss_client_send_text" => {
                             let (_, c) = self.emit_expr(&args[0]);
                             let (_, m) = self.emit_expr(&args[1]);
                             return (

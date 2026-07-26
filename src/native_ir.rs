@@ -28944,6 +28944,19 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::Opaque),
                 false,
             )),
+            "wss_client_connect_headers" if args.len() == 6 => Some((
+                "mako_native_wss_client_connect_headers_ptr",
+                &[
+                    Type::Str,
+                    Type::I64,
+                    Type::Str,
+                    Type::Str,
+                    Type::Str,
+                    Type::Str,
+                ],
+                Some(Type::Opaque),
+                false,
+            )),
             "wss_client_send_text" if args.len() == 2 => Some((
                 "mako_native_wss_client_send_text_ptr",
                 &[Type::Opaque, Type::Str],

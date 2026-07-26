@@ -9424,6 +9424,11 @@ int64_t mako_native_wss_client_connect_ca_ptr(MakoNativeString *host, int64_t po
     return (int64_t)(intptr_t)mako_wss_client_connect_ca(
         bridge_borrow_str(host), port, bridge_borrow_str(path), bridge_borrow_str(key), bridge_borrow_str(ca));
 }
+int64_t mako_native_wss_client_connect_headers_ptr(MakoNativeString *host, int64_t port, MakoNativeString *path, MakoNativeString *key, MakoNativeString *ca, MakoNativeString *extra) {
+    return (int64_t)(intptr_t)mako_wss_client_connect_ca_h(
+        bridge_borrow_str(host), port, bridge_borrow_str(path), bridge_borrow_str(key),
+        bridge_borrow_str(ca), bridge_borrow_str(extra));
+}
 int64_t mako_native_wss_client_send_text_ptr(int64_t conn, MakoNativeString *msg) {
     return mako_wss_client_send_text((void *)(intptr_t)conn, bridge_borrow_str(msg));
 }

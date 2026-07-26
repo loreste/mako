@@ -1047,7 +1047,9 @@ pub fn run_api_diff(old: &Path, new: &Path) -> Result<(), ()> {
     }
 }
 
-fn api_surface(path: &Path) -> Result<BTreeMap<String, String>, ()> {
+/// Public API surface as symbol -> signature. Used by `mako api diff` and by
+/// `mako pkg publish` to refuse a breaking change under a compatible bump.
+pub(crate) fn api_surface(path: &Path) -> Result<BTreeMap<String, String>, ()> {
     let files = collect_mako_files(path);
     if files.is_empty() {
         eprintln!("mako api diff: no .mko files under {}", path.display());

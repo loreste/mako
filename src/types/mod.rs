@@ -10597,6 +10597,23 @@ impl TypeChecker {
                 Box::new(Type::Named("TlsConn".into())),
             ),
         );
+        // host, port, path, key, ca_pem, extra_headers.
+        // `extra` is CRLF-separated "Name: Value" lines with no trailing CRLF;
+        // endpoints that require Origin / User-Agent / Cookie need this.
+        fns.insert(
+            "wss_client_connect_headers".into(),
+            Type::Fn(
+                vec![
+                    Type::String,
+                    Type::Int,
+                    Type::String,
+                    Type::String,
+                    Type::String,
+                    Type::String,
+                ],
+                Box::new(Type::Named("TlsConn".into())),
+            ),
+        );
         fns.insert(
             "wss_client_send_text".into(),
             Type::Fn(

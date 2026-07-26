@@ -1216,6 +1216,26 @@ static inline void *mako_wss_client_connect_ca(
     return conn;
 }
 
+/* Verified TLS by CA PEM, plus extra handshake headers. `extra` is
+ * CRLF-separated "Name: Value" with no trailing CRLF; endpoints that require
+ * Origin / User-Agent / Cookie reject a bare upgrade without them. Returns
+ * NULL if `extra` fails the request-splitting check. */
+static inline void *mako_wss_client_connect_ca_h(
+    MakoString host,
+    int64_t port,
+    MakoString path,
+    MakoString key,
+    MakoString ca_pem,
+    MakoString extra
+) {
+    if (!mako_tls_client_available()) return NULL;
+    void *cli = mako_tls_client_new(ca_pem);
+    if (!cli) return NULL;
+    void *conn = mako_wss_client_connect_h(cli, host, port, path, key, extra);
+    mako_tls_client_free(cli);
+    return conn;
+}
+
 static inline int64_t mako_wss_client_send_text(void *conn, MakoString msg) {
     if (!conn) return -1;
     return mako_ws_tls_send_frame(

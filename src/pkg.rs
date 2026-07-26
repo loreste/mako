@@ -1775,6 +1775,99 @@ pub fn pkg_seal(dir: &Path) -> Result<(), String> {
 /// are immutable (CLI-enforced), so publishing the same name and version
 /// returns an error. A content digest is written inside the staging directory
 /// before the atomic rename and verified whenever a registry package is resolved.
+/// Refuse to publish a breaking API change under a version bump that claims
+/// compatibility. SemVer allows breaking changes on a major bump, and — by the
+/// convention Cargo and others follow — on a minor bump while the major is 0.
+///
+/// Compares against the highest already-published version below this one. No
+/// previous version means nothing to break.
+fn check_api_compatibility(
+    project: &Path,
+    package_dir: &Path,
+    version: &str,
+) -> Result<(), String> {
+    let Some((maj, min, _)) = parse_semver(version) else {
+        return Ok(());
+    };
+    let entries = match fs::read_dir(package_dir) {
+        Ok(e) => e,
+        Err(_) => return Ok(()), // first publish
+    };
+    let mut prev: Option<((u64, u64, u64), PathBuf)> = None;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+        let Some(nm) = path.file_name().and_then(|s| s.to_str()) else {
+            continue;
+        };
+        let Some(v) = parse_semver(nm) else { continue };
+        if v >= (maj, min, u64::MAX) && v >= parse_semver(version).unwrap_or((0, 0, 0)) {
+            continue;
+        }
+        if v >= parse_semver(version).unwrap_or((0, 0, 0)) {
+            continue;
+        }
+        if prev.as_ref().is_none_or(|(pv, _)| v > *pv) {
+            prev = Some((v, path));
+        }
+    }
+    let Some((pv, prev_dir)) = prev else {
+        return Ok(());
+    };
+
+    // A bump that is allowed to break: major, or minor while major is 0.
+    let breaking_allowed = maj > pv.0 || (maj == 0 && pv.0 == 0 && min > pv.1);
+    if breaking_allowed {
+        return Ok(());
+    }
+
+    let (Ok(old), Ok(new)) = (
+        crate::tooling::api_surface(&prev_dir),
+        crate::tooling::api_surface(project),
+    ) else {
+        // Surface extraction failed on one side; do not block the publish on
+        // an analysis that could not run, but say so.
+        eprintln!("mako pkg publish: warning: API surface unavailable, compatibility not checked");
+        return Ok(());
+    };
+
+    let mut breaking = Vec::new();
+    for (sym, old_sig) in &old {
+        match new.get(sym) {
+            None => breaking.push(format!("removed `{sym}` ({old_sig})")),
+            Some(new_sig) if new_sig != old_sig => breaking.push(format!(
+                "changed `{sym}`\n    old: {old_sig}\n    new: {new_sig}"
+            )),
+            Some(_) => {}
+        }
+    }
+    if breaking.is_empty() {
+        return Ok(());
+    }
+    let mut msg = format!(
+        "publishing {version} would break {} public symbol(s) against {}.{}.{}:",
+        breaking.len(),
+        pv.0,
+        pv.1,
+        pv.2
+    );
+    for b in &breaking {
+        msg.push_str(&format!("\n  - {b}"));
+    }
+    let next_major = if maj == 0 {
+        format!("0.{}.0", min + 1)
+    } else {
+        format!("{}.0.0", maj + 1)
+    };
+    msg.push_str(&format!(
+        "\n\nbump to {next_major} to publish this, or keep the old signatures. \
+         Set MAKO_PUBLISH_ALLOW_BREAKING=1 to override."
+    ));
+    Err(msg)
+}
+
 pub fn pkg_publish(project: &Path) -> Result<(), String> {
     let manifest = project.join("mako.toml");
     if !manifest.exists() {
@@ -1813,6 +1906,11 @@ pub fn pkg_publish(project: &Path) -> Result<(), String> {
         return Err(format!(
             "package `{name}@{version}` is already published; choose a new version"
         ));
+    }
+    // A module must not ship a breaking change under a version that claims
+    // compatibility — consumers resolve by SemVer range and would pick it up.
+    if std::env::var("MAKO_PUBLISH_ALLOW_BREAKING").is_err() {
+        check_api_compatibility(project, &package_dir, &version)?;
     }
     fs::create_dir_all(&package_dir).map_err(|e| format!("mkdir: {e}"))?;
     let staging = package_dir.join(format!(
