@@ -200,9 +200,6 @@ pub enum MapValKind {
     StructKeyStrSlice(u32),
     StructKeyFloatSlice(u32),
     StructKeyStructSlice(u32, u32),
-    /// `map[Struct]V` for other pointer-sized values (chan, map, nested, …).
-    /// Value is stored as i64; get retypes via expression context / from_type.
-    StructKeyPtr(u32),
 }
 
 impl MapValKind {
@@ -421,8 +418,6 @@ impl MapValKind {
             MapValKind::StructKeyStrSlice(_) => Type::StrSlice,
             MapValKind::StructKeyFloatSlice(_) => Type::FloatSlice,
             MapValKind::StructKeyStructSlice(_, eid) => Type::StructSlice(eid),
-            // Pointer-sized payload; callers retype (chan/map/…) after get.
-            MapValKind::StructKeyPtr(_) => Type::I64,
         }
     }
 
@@ -434,8 +429,7 @@ impl MapValKind {
             | MapValKind::StructKeyFloat(id)
             | MapValKind::StructKeyIntSlice(id)
             | MapValKind::StructKeyStrSlice(id)
-            | MapValKind::StructKeyFloatSlice(id)
-            | MapValKind::StructKeyPtr(id) => Some(id),
+            | MapValKind::StructKeyFloatSlice(id) => Some(id),
             MapValKind::StructKeyToStruct(kid, _) | MapValKind::StructKeyStructSlice(kid, _) => {
                 Some(kid)
             }
@@ -507,7 +501,6 @@ impl Type {
                 | Type::F64
                 | Type::FnPtr
                 | Type::Opaque
-                | Type::Builder
                 | Type::Builder
                 | Type::ShareInt
                 | Type::ChanI
@@ -2268,6 +2261,7 @@ fn monomorphize_generics(
     Ok(out)
 }
 
+#[cfg(any(feature = "llvm-backend", test))]
 pub fn lower(program: &Program) -> Result<Module, IrError> {
     lower_with_tests(program, &[])
 }
