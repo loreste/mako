@@ -252,6 +252,29 @@ hiding failures. Ordered by leverage, not by size.
 | **417-I** | Ownership inlay hints in the LSP | `textDocument/inlayHint` is already implemented. Owned / borrowed / dropped-here is invisible in source and is what produced the double-free, the use-after-free and 650 per-call leaks. Small change, disproportionate payoff. |
 | **417-J** | LSP client and editor reach | Replace the hand-rolled JSON-RPC client in the VS Code extension with `vscode-languageclient`, and document Neovim / Helix / Zed setup. The server already implements 15 methods. |
 
+### Package distribution — shared registry
+
+**Not a new package manager.** `mako pkg` already does init / add / remove /
+list / fetch / lock / install / update / publish / audit, resolves SemVer, path,
+git and registry sources, writes `mako.lock` with sha256 content hashes, and
+audits against advisory and license policy files. What is missing is that the
+registry is filesystem-only (`$MAKO_REGISTRY` or `.mako/registry`), so
+`mako pkg publish` puts a package somewhere only the publisher can see.
+
+| ID | Deliverable | Notes |
+|----|-------------|-------|
+| **417-P1** | Registry index format | Immutable name/version → source URL + sha256, servable as static files. Reuse the digest `mako.lock` already records; no new hashing scheme. |
+| **417-P2** | Remote registry source | Teach the resolver an `https` registry alongside path/git/local, honouring the existing lock and audit paths. Offline and vendored builds must keep working. |
+| **417-P3** | `mako get <pkg>` | One step: resolve, fetch, record in `mako.toml`, refresh `mako.lock`. `mako pkg add` already records a dependency; this is the fetch-and-wire-in front end. |
+| **417-P4** | Publish to a remote | Extend `mako pkg publish` past the local tree, with immutability enforced by the index rather than by convention. |
+| **417-P5** | Discovery | `mako pkg search`, and a way to see what a package pulls in before adding it. |
+
+Open questions to settle before building: who hosts the index and what the
+namespace looks like (flat names, or org-scoped); whether publish requires
+signing or only a digest; and what a yank or a security advisory does to
+builds that already pinned the version. The audit command exists and reads
+local advisory files, so the advisory format is the natural place to start.
+
 ### Deferred to 0.5.x, deliberately
 
 | ID | Deliverable | Why not now |
