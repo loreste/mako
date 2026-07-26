@@ -2727,12 +2727,22 @@ static inline MakoHttp2Conn *mako_http2_conn_new(void) {
     MakoHttp2Conn *c = (MakoHttp2Conn *)malloc(sizeof(MakoHttp2Conn));
     if (!c) return NULL;
     /* Derive the default field values from conn_reset without disturbing the
-     * currently-active connection: stash globals, reset, snapshot, restore. */
-    MakoHttp2Conn tmp;
-    mako_h2_conn_save(&tmp);
+     * currently-active connection: stash globals, reset, snapshot, restore.
+     *
+     * The stash goes on the heap. MakoHttp2Conn is over 4 MB — stream_body
+     * alone is MAKO_H2_STREAM_SLOTS * MAKO_H2_STREAM_BODY_MAX — so declaring
+     * one as a local overflows the thread stack and segfaults. That is what it
+     * did on Linux; macOS happened to survive it. */
+    MakoHttp2Conn *tmp = (MakoHttp2Conn *)malloc(sizeof(MakoHttp2Conn));
+    if (!tmp) {
+        free(c);
+        return NULL;
+    }
+    mako_h2_conn_save(tmp);
     mako_http2_conn_reset();
     mako_h2_conn_save(c);
-    mako_h2_conn_load(&tmp);
+    mako_h2_conn_load(tmp);
+    free(tmp);
     return c;
 }
 

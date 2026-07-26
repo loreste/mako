@@ -4214,6 +4214,16 @@ fn link_args_native(opts: &BuildOpts, _runtime_dir: &Path) -> Vec<String> {
         args.push("-DMAKO_HAS_QUICHE".into());
         if q.prefer_static {
             args.push(q.lib_dir.join("libquiche.a").display().to_string());
+            // libquiche statically contains BoringSSL, which defines SSL_CTX_new,
+            // SSL_new and friends under the same names as OpenSSL. If those stay
+            // global the linker can bind our OpenSSL calls to BoringSSL, and
+            // passing an OpenSSL method pointer into BoringSSL's SSL_CTX_new
+            // segfaults. Only quiche_* is needed from this archive, so keep its
+            // symbols out of the executable's global namespace. GNU ld / lld
+            // only; Apple's ld does not take this flag.
+            if os == cc::OsKind::Linux || os == cc::OsKind::Other {
+                args.push("-Wl,--exclude-libs,libquiche.a".into());
+            }
         } else {
             args.push("-lquiche".into());
         }

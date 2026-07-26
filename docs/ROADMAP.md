@@ -241,11 +241,11 @@ hiding failures. Ordered by leverage, not by size.
 
 | ID | Deliverable | Notes |
 |----|-------------|-------|
-| **417-A** | Native suite gates CI | Drop `continue-on-error` from the native step in `ci.yml`. Its comment blames "missing backend services" for the proxy and SQL failures; those were a heap corruption and a missing SIGPIPE handler, both fixed in 0.4.16. The suppression now hides nothing. |
-| **417-B** | Windows gates CI | The whole Windows suite runs under `continue-on-error`, so a platform that ships release artifacts and install scripts never blocks a merge. Establish whether it currently passes, then gate it. |
+| **417-A** | Native suite gates CI | **Done** — suppression removed; exposed a debug-build stack overflow on Windows |
+| **417-B** | Windows gates CI | **Done** — Windows suite and recursive-depth test gate; compiler stack now scales with build profile |
 | **417-C** | Sanitizer claims state their coverage | CI's ASan and UBSan jobs already run all 392 fixtures — that is how the `slices_unique_strs` use-after-free was caught. The gap was in reporting: an ad-hoc sweep covered 113 fixtures and was described as "clean". A sanitizer result carries the number of fixtures it ran. |
 | **417-D** | Native LeakSanitizer step executes | **Done** — the test binary links the runtime (169 symbols), the four gate fixtures pass, and a positive control leaks 44,000 bytes in 1,000 allocations, so the step fails when there is something to find. The leak it detects is 417-E's. |
-| **417-E** | Typed drop for opaque handles | One change closes three leaks — the opaque box, `http_request_parse`, and struct-key map drops — which share a root cause: one drop function for two kinds of handle with nothing to tell them apart. Lets `mako_native_opaque_drop` stop being a no-op. |
+| **417-E** | Typed drop for opaque handles | **Done for StrBuilder** — Type::Builder separates runtime-owned handles from the Opaque catch-all; native 44000 bytes to zero. http_request_parse and struct-key map drops still need the same treatment |
 | **417-F** | Triage `sip_test` | 1.54 MB across 140k allocations, the largest single leak in the suite and never investigated. Measure before assuming a cause. |
 | **417-G** | Literal arguments at builtin call sites | 4-13 bytes per call. Needs a shared argument-emission path; builtin arms are spread across ~100 generated emitters with no common place to reclaim a temporary. Emitting borrowed views frees static storage; an immortal bit needs masking every length read. Design decision first. |
 | **417-H** | Channel lifetime | No destructor exists, and a naive one is a use-after-free when a spawned task outlives the creating scope. Needs a refcount or a shutdown-drained registry — a decision, not a patch. Blocks scheduler work. |
@@ -262,9 +262,9 @@ dependencies are recorded by hand and drift from the source silently.
 
 | ID | Deliverable | Notes |
 |----|-------------|-------|
-| **417-M1** | Import scan | Walk the module's `.mko` sources for `pull` statements and classify each: stdlib, in-module package, or external dependency. Everything below depends on this. |
-| **417-M2** | `mako pkg tidy` | Add manifest entries for imports that lack one, drop `[dependencies]` entries nothing imports, refresh `mako.lock`. Reports what it changed rather than editing silently. |
-| **417-M3** | Import path → package identity | Decide what a `pull` string means for an external module: the manifest key, a registry name, or a path. Today the key is chosen by whoever wrote the entry, so two projects can name the same package differently. This is the design decision the rest rests on. |
+| **417-M1** | Import scan | **Done** — `mako pkg imports` |
+| **417-M2** | `mako pkg tidy` | **Done** — `mako pkg tidy`, with `--check` and opt-in `--prune` |
+| **417-M3** | Import path → package identity | **Done** — settled by reading the resolver: the manifest key is the full import path |
 | **417-M4** | Resolve on build | A `pull` with no manifest entry currently fails at resolution. It should either resolve and record automatically, or fail with the exact `mako pkg` command that fixes it. Automatic is friendlier; explicit is more predictable for reproducible builds — pick one deliberately and document why. |
 | **417-M5** | `mako pkg why <pkg>` | Show which import pulled a dependency in. Falls out of 417-M1 and is what makes a large dependency set debuggable. |
 

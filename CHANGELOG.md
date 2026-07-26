@@ -1,5 +1,77 @@
 # Changelog
 
+## Unreleased (0.4.17)
+
+### CI reports failures instead of swallowing them
+
+Three steps ran with `continue-on-error`, so their failures never blocked a
+merge. The native suite's comment blamed "missing backend services" for the
+proxy and SQL failures; those were a `free()` on a handle owned by SQLite and a
+SIGPIPE the native test harness never ignored, both fixed in 0.4.16. The
+Windows default suite and its recursive-depth test were suppressed too, leaving
+a platform that ships release artifacts unable to block anything.
+
+Removing the suppressions immediately surfaced a real bug: the compiler thread
+reserved a release-sized 16 MB stack, and a debug build — which inlines nothing
+and carries full locals per frame — overflowed it on Windows, whose default
+thread stack is 1 MB against Linux's 8 MB. Debug now defaults to 64 MB.
+
+### Memory
+
+`MakoHttp2Conn` is over 4 MB (`stream_body` alone is 64 × 64 KB) and
+`mako_http2_conn_new` declared one as a stack local, overflowing the thread
+stack. Found by Valgrind on Linux; macOS survived it by luck of stack layout.
+
+`str_builder` leaked its struct and buffer on every call — 88 bytes plus
+growth. `mako_str_builder_free` already existed; nothing emitted a call to it.
+Measured over 500 iterations: 48000 bytes in 1500 allocations before, zero
+after on the native backend, and 4000 on the C backend, the remainder being the
+literal-argument leak still tracked as open.
+
+`Type::Builder` separates handles this runtime owns from the `Type::Opaque`
+catch-all, which cannot be dropped because it also holds handles owned by
+foreign libraries — a `SqlDB` is the `sqlite3*` pointer itself. This is the
+pattern the remaining opaque leaks need.
+
+### Modules
+
+`mako pkg imports` lists every `pull` in a module, classified as relative,
+stdlib, internal or external, and reports where the manifest disagrees. It
+parses rather than matching text, so aliases and blank imports are handled by
+the grammar.
+
+`mako pkg tidy` reconciles `[dependencies]` with what the source imports.
+Additions are automatic; removal is behind `--prune`, because the scan skips
+files that fail to parse and a needed dependency can be invisible to it.
+`--check` reports without writing, for CI.
+
+Dependencies are keyed by the **full import path**, matching
+`resolve_module_import_path`, not by the first path segment.
+
+### Packages
+
+`mako pkg publish` now refuses a breaking API change under a version that
+claims compatibility. `mako api diff` and `publish` both existed and nothing
+connected them, so a module could ship a changed signature as a patch and
+consumers resolving by SemVer range would take it. A break needs a major bump,
+or a minor bump while major is 0. Additions are not breaking.
+
+### Networking
+
+`wss_client_connect_headers` exposes the extra-header handshake that existed in
+the runtime but was never wired to a builtin, so Mako code could not send
+Origin, User-Agent or Cookie on an upgrade. The header block is validated
+against request splitting.
+
+### Known
+
+Rebuilding `libquiche` from source produces an archive that exports BoringSSL's
+`SSL_*` symbols, which collide with OpenSSL and segfault TLS setup. See
+`runtime/third_party/quiche/BUILD_NOTES.md`. Quiche is optional; without the
+archive, H3 falls back to header stubs.
+
+---
+
 ## 0.4.16
 
 ### Memory-safety and security audit (runtime-wide)
