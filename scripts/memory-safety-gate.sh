@@ -61,6 +61,7 @@ fixtures=(
 
 run_backend() {
   local backend="$1"
+  local failed=0
   echo "=== memory-safety-gate: backend=$backend ==="
   for f in "${fixtures[@]}"; do
     if [[ ! -f "$repo_dir/$f" ]]; then
@@ -68,11 +69,22 @@ run_backend() {
       exit 2
     fi
     echo "  test $f"
-    "$mako_bin" test "$repo_dir/$f" --backend "$backend"
+    # Check every fixture. This script runs without `set -e`, and a bash
+    # function returns only its *last* command's status, so an unchecked loop
+    # discarded every failure but the final fixture's — an aborting double-free
+    # mid-list still printed "all checks passed".
+    if ! "$mako_bin" test "$repo_dir/$f" --backend "$backend"; then
+      echo "memory-safety-gate: FAILED $f (backend=$backend)" >&2
+      failed=1
+    fi
   done
+  return "$failed"
 }
 
-run_backend c
+run_backend c || {
+  echo "memory-safety-gate: C backend failed ownership suite" >&2
+  exit 1
+}
 
 if [[ "$(uname -s)" != "Windows_NT" && "$(uname -s)" != MINGW* ]]; then
   # Cranelift native path — same ownership rules, no GC.
@@ -135,6 +147,32 @@ else
     exit 1
   fi
 fi
+
+echo "=== memory-safety-gate: per-call slice drop (absolute peak RSS) ==="
+# A drop suppressed per call is invisible to the across-run RSS ratio below:
+# every run leaks the same amount, so the ratio stays flat while the process
+# peaks near 800 MB. Only an absolute bound on one process catches it.
+ms_soak_bin="$(mktemp -d)/slice_drop_soak"
+"$mako_bin" build --release --no-incremental \
+  "$repo_dir/examples/bench/slice_drop_soak.mko" -o "$ms_soak_bin" >/dev/null
+python3 - "$ms_soak_bin" "${MAKO_SLICE_DROP_MAX_RSS_KIB:-102400}" <<'PY'
+import resource, subprocess, sys
+
+bin_path, max_kib = sys.argv[1], int(sys.argv[2])
+subprocess.run([bin_path], check=True, stdout=subprocess.DEVNULL)
+rss = resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss
+if sys.platform == "darwin":
+    rss = int(rss / 1024)  # ru_maxrss: Linux KiB, macOS bytes
+print(f"slice-drop-soak: peak_rss_kib={rss} (bar {max_kib})")
+if rss > max_kib:
+    print(
+        f"slice-drop-soak: FAIL peak RSS {rss} KiB > {max_kib} KiB — "
+        "a per-call slice drop is being suppressed (leak)",
+        file=sys.stderr,
+    )
+    raise SystemExit(1)
+print("slice-drop-soak: per-call slice drop ok")
+PY
 
 echo "=== memory-safety-gate: years-up soaks (ownership under load) ==="
 "$repo_dir/scripts/long-run-soak.sh"

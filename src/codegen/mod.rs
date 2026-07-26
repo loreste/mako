@@ -14108,7 +14108,25 @@ impl Codegen {
                 let snap = self.snapshot_drop_state();
                 // SAFE-003/004: returning an owned local transfers it to the caller —
                 // must not free before `return` (use-after-free).
-                self.transfer_own_on_return(e);
+                //
+                // Skip the transfer only for a result that provably cannot carry a
+                // pointer out of this frame. `return len(a)` yields an int64_t, so
+                // the local is still ours to free; the Expr::Call arm below is
+                // written for Ok/Err/Some but matches every call shape, which
+                // dropped that free and leaked the whole backing allocation per
+                // call — invisible in a run-once program, fatal in a server.
+                //
+                // Whitelist, not a blocklist: bags (Option/Result), structs, enums
+                // and handles carry owned payloads that the C type alone does not
+                // advertise, and freeing under them is a use-after-free. Anything
+                // not known-scalar keeps transferring exactly as before.
+                let ret_is_scalar = matches!(
+                    ty.as_str(),
+                    "int64_t" | "double" | "bool" | "uint8_t" | "void"
+                );
+                if !ret_is_scalar {
+                    self.transfer_own_on_return(e);
+                }
                 // Stack-backed array lits / cap==0 views: copy to heap on escape.
                 let val = self.ensure_slice_owned(&ty, val);
                 self.emit_defers();

@@ -1,0 +1,32 @@
+// Per-call slice drop soak.
+//
+// `build` allocates a 200k-element backing array, appends into it, and returns
+// an int derived from it. The int cannot alias the array, so the array must be
+// freed when `build` returns. If that drop is suppressed — as it was when any
+// `return f(local)` marked the local moved — this leaks 1.6 MB per call and
+// peaks near 800 MB instead of a few MB.
+//
+// The leak is invisible to a run-once fixture and to an across-run RSS ratio
+// (every run leaks the same amount, so the ratio stays flat). Only the peak RSS
+// of a single process over many calls shows it. See scripts/memory-safety-gate.sh.
+
+fn build(n: int) -> int {
+    let mut a = make([]int, 0, n)
+    let mut i = 0
+    while i < n {
+        a = append(a, i)
+        i = i + 1
+    }
+    return len(a)
+}
+
+fn main() {
+    let n = black_box(200000)
+    let mut i = 0
+    let mut acc = 0
+    while i < 500 {
+        acc = acc + build(n)
+        i = i + 1
+    }
+    print_int(acc)
+}
