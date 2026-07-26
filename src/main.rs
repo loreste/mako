@@ -696,6 +696,22 @@ enum PkgCmd {
         #[arg(default_value = ".")]
         path: PathBuf,
     },
+    /// List every `pull` in the module and flag manifest drift
+    Imports {
+        #[arg(default_value = ".")]
+        path: PathBuf,
+    },
+    /// Reconcile [dependencies] with what the sources import
+    Tidy {
+        #[arg(default_value = ".")]
+        path: PathBuf,
+        /// Report what would change without editing mako.toml
+        #[arg(long)]
+        check: bool,
+        /// Also remove [dependencies] entries nothing imports
+        #[arg(long = "prune")]
+        prune: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -3375,6 +3391,140 @@ fn run_pkg(cmd: PkgCmd) -> Result<(), ()> {
         }
         PkgCmd::Remove { name, project } => pkg_remove(&project, &name),
         PkgCmd::Audit { path } => tooling::pkg_audit(&path),
+        PkgCmd::Imports { path } => pkg_imports(&path),
+        PkgCmd::Tidy { path, check, prune } => pkg_tidy(&path, check, prune),
+    }
+}
+
+/// `mako pkg tidy` — reconcile `[dependencies]` with the imports in the source.
+///
+/// Adding is safe: an import with no entry cannot resolve today, so recording
+/// it can only help. Removing is not, which is why `--prune` is opt-in: a
+/// dependency can be needed without appearing in any `pull` this scan sees —
+/// a file that fails to parse is skipped, and a blank import in a
+/// conditionally compiled path still matters. Deleting those silently would
+/// break a working build.
+fn pkg_tidy(project: &Path, check: bool, prune: bool) -> Result<(), ()> {
+    let manifest = project.join("mako.toml");
+    if !manifest.exists() {
+        emit_plain_error("no mako.toml — run `mako pkg init` first");
+        return Err(());
+    }
+    let (needed, unused) = pkg::manifest_drift(project).map_err(|e| emit_plain_error(&e))?;
+
+    if needed.is_empty() && (unused.is_empty() || !prune) {
+        if !unused.is_empty() {
+            println!("in [dependencies] but never imported (use --prune to remove):");
+            for n in &unused {
+                println!("  {n}");
+            }
+        }
+        println!("mako.toml matches imports");
+        return Ok(());
+    }
+
+    for n in &needed {
+        println!("+ {n}  (imported, missing from [dependencies])");
+    }
+    if prune {
+        for n in &unused {
+            println!("- {n}  (declared, never imported)");
+        }
+    } else if !unused.is_empty() {
+        println!("in [dependencies] but never imported (use --prune to remove):");
+        for n in &unused {
+            println!("  {n}");
+        }
+    }
+    if check {
+        println!("\n--check: mako.toml not modified");
+        return if needed.is_empty() { Ok(()) } else { Err(()) };
+    }
+
+    let mut text = fs::read_to_string(&manifest).map_err(|e| {
+        emit_plain_error(&format!("read mako.toml: {e}"));
+    })?;
+    if !needed.is_empty() && !text.contains("[dependencies]") {
+        text.push_str("\n[dependencies]\n");
+    }
+    if prune && !unused.is_empty() {
+        let drop: std::collections::HashSet<&str> = unused.iter().map(|s| s.as_str()).collect();
+        text = text
+            .lines()
+            .filter(|line| {
+                let t = line.trim();
+                let Some(rest) = t.strip_prefix('"') else {
+                    return true;
+                };
+                let Some(end) = rest.find('"') else {
+                    return true;
+                };
+                !drop.contains(&rest[..end])
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        text.push('\n');
+    }
+    for n in &needed {
+        // No source is known from an import alone — record the entry so the
+        // name is tracked, and leave the source for the user or `pkg add`.
+        text.push_str(&format!(
+            "\"{n}\" = {{ path = \"deps/{n}\" }}  # added by tidy: set the real source\n"
+        ));
+    }
+    fs::write(&manifest, text).map_err(|e| {
+        emit_plain_error(&format!("write mako.toml: {e}"));
+    })?;
+    println!("\nmako.toml updated");
+    Ok(())
+}
+
+/// `mako pkg imports` — what the sources actually pull, and where the manifest
+/// disagrees. Reports drift; does not edit anything (that is `tidy`, 417-M2).
+fn pkg_imports(project: &Path) -> Result<(), ()> {
+    let imports = pkg::scan_module_imports(project).map_err(|e| emit_plain_error(&e))?;
+    if imports.is_empty() {
+        println!("no imports found under {}", project.display());
+    }
+    let mut last: Option<pkg::ImportKind> = None;
+    for imp in &imports {
+        if last != Some(imp.kind) {
+            println!("{:?}:", imp.kind);
+            last = Some(imp.kind);
+        }
+        let rel = imp
+            .file
+            .strip_prefix(project)
+            .unwrap_or(&imp.file)
+            .display()
+            .to_string();
+        println!("  {:<34} {}", imp.path, rel);
+    }
+    match pkg::manifest_drift(project) {
+        Ok((needed, unused)) => {
+            if !needed.is_empty() {
+                println!("\nimported but not in [dependencies]:");
+                for n in &needed {
+                    println!("  {n}");
+                }
+            }
+            if !unused.is_empty() {
+                println!("\nin [dependencies] but never imported:");
+                for n in &unused {
+                    println!("  {n}");
+                }
+            }
+            if needed.is_empty() && unused.is_empty() {
+                println!("\nmanifest matches imports");
+            }
+            Ok(())
+        }
+        // No manifest is normal for a bare file or example directory.
+        Err(e) if e.contains("read mako.toml") => Ok(()),
+        Err(e) => {
+            emit_plain_error(&e);
+            Err(())
+        }
     }
 }
 

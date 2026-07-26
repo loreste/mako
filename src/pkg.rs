@@ -1884,6 +1884,138 @@ pub fn pkg_publish(project: &Path) -> Result<(), String> {
     Ok(())
 }
 
+/// Where a `pull` statement resolves to, for manifest reconciliation.
+///
+/// Mirrors the search order in `tooling::resolve_import_targets`: a relative or
+/// file path, then the standard library, then a module/dependency path.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum ImportKind {
+    /// `./x.mko`, `../pkg`, absolute, or anything ending in `.mko`.
+    Relative,
+    /// Resolved under the standard library root.
+    Std,
+    /// A package inside this module's own tree.
+    Internal,
+    /// Anything else — must be satisfied by `[dependencies]`.
+    External,
+}
+
+/// One `pull` statement found in the module's sources.
+#[derive(Debug, Clone)]
+pub struct ImportRef {
+    pub path: String,
+    pub kind: ImportKind,
+    pub file: PathBuf,
+}
+
+/// Every `pull` statement under `root`, classified.
+///
+/// Parses each `.mko` rather than pattern-matching the text, so aliases,
+/// blank imports and multi-line forms are all handled by the real grammar. A
+/// file that does not parse is skipped rather than failing the scan: `tidy`
+/// should still be usable while part of the tree is mid-edit.
+pub fn scan_module_imports(root: &Path) -> Result<Vec<ImportRef>, String> {
+    let std_root = crate::tooling::find_std_root();
+    let mut out = Vec::new();
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        let entries = match fs::read_dir(&dir) {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            if path.is_dir() {
+                // Skip build and dependency trees: their imports belong to
+                // those packages, not to this module's manifest.
+                if matches!(
+                    name.as_ref(),
+                    ".git" | ".mako" | "target" | "out" | "dist" | "node_modules" | "vendor"
+                ) {
+                    continue;
+                }
+                stack.push(path);
+                continue;
+            }
+            if !name.ends_with(".mko") {
+                continue;
+            }
+            // Raw parse: parse_program_file resolves imports away, which is
+            // exactly the information this scan needs.
+            let program = match crate::tooling::parse_program_file_raw(&path, None) {
+                Ok(p) => p,
+                Err(_) => continue,
+            };
+            for item in &program.items {
+                let crate::ast::Item::Import { path: imp, .. } = item else {
+                    continue;
+                };
+                let kind = classify_import(imp, root, std_root.as_deref());
+                out.push(ImportRef {
+                    path: imp.clone(),
+                    kind,
+                    file: path.clone(),
+                });
+            }
+        }
+    }
+    out.sort_by(|a, b| (a.kind, &a.path, &a.file).cmp(&(b.kind, &b.path, &b.file)));
+    out.dedup_by(|a, b| a.path == b.path && a.file == b.file);
+    Ok(out)
+}
+
+fn classify_import(path: &str, module_root: &Path, std_root: Option<&Path>) -> ImportKind {
+    if path.starts_with("./")
+        || path.starts_with("../")
+        || path.starts_with('/')
+        || path.ends_with(".mko")
+    {
+        return ImportKind::Relative;
+    }
+    let pkg = path.trim_matches('/');
+    if let Some(std_root) = std_root {
+        if std_root.join(pkg).is_dir() || std_root.join(format!("{pkg}.mko")).is_file() {
+            return ImportKind::Std;
+        }
+    }
+    if module_root.join(pkg).is_dir() {
+        return ImportKind::Internal;
+    }
+    ImportKind::External
+}
+
+/// Imports that must be satisfied by `[dependencies]`, and manifest entries
+/// nothing imports. Both directions of the drift `tidy` exists to fix.
+///
+/// A dependency is keyed by the **full import path**, not by its first
+/// segment: `tooling::resolve_module_import_path` matches `dep.name == path`
+/// exactly, and only the module's own path gets prefix treatment. Suggesting a
+/// root segment here would produce a manifest entry the resolver never finds.
+pub fn manifest_drift(root: &Path) -> Result<(Vec<String>, Vec<String>), String> {
+    let imports = scan_module_imports(root)?;
+    let manifest_text = fs::read_to_string(root.join("mako.toml"))
+        .map_err(|e| format!("read mako.toml: {e}"))?;
+    let declared: HashSet<String> = parse_manifest_deps(&manifest_text)
+        .into_iter()
+        .map(|d| d.name)
+        .collect();
+
+    let used: HashSet<String> = imports
+        .iter()
+        .filter(|i| i.kind == ImportKind::External)
+        .map(|i| i.path.trim_matches('/').to_string())
+        .collect();
+
+    let mut needed: Vec<String> = used.difference(&declared).cloned().collect();
+    needed.sort();
+    let mut unused: Vec<String> = declared.difference(&used).cloned().collect();
+    unused.sort();
+
+    Ok((needed, unused))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

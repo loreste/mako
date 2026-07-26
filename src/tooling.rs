@@ -3659,7 +3659,10 @@ pub fn find_std_root() -> Option<PathBuf> {
 }
 
 /// Parse + desugar without resolving imports (used by import recursion).
-fn parse_program_file_raw(
+/// Parse without resolving imports, so `Item::Import` survives in the result.
+/// `parse_program_file` inlines and removes them, which is wrong for anything
+/// that needs to see what a file actually pulls (`mako pkg imports`).
+pub(crate) fn parse_program_file_raw(
     path: &Path,
     locked_roots: Option<&crate::pkg::VerifiedDependencyRoots>,
 ) -> Result<Program, String> {
