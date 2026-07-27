@@ -1310,8 +1310,14 @@ static inline int64_t mako_tls_make_csr(MakoString csr_path, MakoString key_path
     return ok ? 0 : -1;
 }
 
-/* Client context with SSL_VERIFY_NONE — demos / self-signed only. */
+/* Client context with SSL_VERIFY_NONE — demos / self-signed only.
+ * WARNING: disables certificate verification. Do not use in production. */
 static inline void *mako_tls_client_new_insecure(void) {
+    static int warned = 0;
+    if (!warned) {
+        fprintf(stderr, "tls: using insecure client (SSL_VERIFY_NONE) — not for production\n");
+        warned = 1;
+    }
     SSL_CTX *ctx = mako_tls_make_client_ctx();
     if (!ctx) return NULL;
     SSL_CTX_set_verify(ctx, SSL_VERIFY_NONE, NULL);

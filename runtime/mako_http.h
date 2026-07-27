@@ -108,6 +108,7 @@ typedef struct {
     int fd;
     bool live;
     bool keep_alive;
+    int64_t accept_ms; /* timestamp for idle timeout reaping */
     MakoArena arena;
     MakoString method;
     MakoString path;
@@ -118,6 +119,11 @@ typedef struct {
     char raw[8192];
     size_t raw_len;
 } MakoHttpConn;
+
+/* Idle keep-alive connections older than this are reaped (seconds). */
+#ifndef MAKO_HTTP_KEEPALIVE_TIMEOUT_S
+#define MAKO_HTTP_KEEPALIVE_TIMEOUT_S 60
+#endif
 
 #define MAKO_HTTP_CONN_MAX 1024
 static MakoHttpConn mako_http_conns[MAKO_HTTP_CONN_MAX];
@@ -484,9 +490,20 @@ static inline int64_t mako_http_bind(int64_t port) {
  * Without this, one-shot servers that never call http_next/http_close fill
  * MAKO_HTTP_CONN_MAX after ~1024 requests. */
 static inline void mako_http_reap_dead(void) {
+    int64_t now = mako_now_ms();
+    int64_t timeout = (int64_t)MAKO_HTTP_KEEPALIVE_TIMEOUT_S * 1000;
     for (int i = 0; i < MAKO_HTTP_CONN_MAX; i++) {
         MakoHttpConn *c = &mako_http_conns[i];
         if (!c->live || c->fd < 0) continue;
+        /* Reap idle keep-alive connections past the timeout. */
+        if (c->keep_alive && c->accept_ms > 0 && (now - c->accept_ms) > timeout) {
+            mako_sock_close(c->fd);
+            mako_arena_free(&c->arena);
+            pthread_mutex_lock(&mako_http_conn_mu);
+            mako_http_conn_set_live(c, 0);
+            pthread_mutex_unlock(&mako_http_conn_mu);
+            continue;
+        }
         fd_set rfds, efds;
         FD_ZERO(&rfds);
         FD_ZERO(&efds);
@@ -547,6 +564,7 @@ static inline int64_t mako_http_accept(int64_t listen_fd) {
     }
     MakoHttpConn *c = &mako_http_conns[slot];
     c->fd = cfd;
+    c->accept_ms = mako_now_ms();
     atomic_fetch_add_explicit(&mako_http_active_conn_count, 1, memory_order_relaxed);
     c->keep_alive = false;
     c->arena = mako_arena_new();
