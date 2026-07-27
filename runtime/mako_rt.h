@@ -6657,8 +6657,13 @@ static inline int64_t mako_await_timeout_ms(MakoTask *t, int64_t ms, int64_t *ou
         return 1;
     }
     if (ms < 0) ms = 0;
-    int64_t waited = 0;
-    while (waited < ms) {
+    /* Measure the deadline on the monotonic clock. Counting `waited += 2` per
+     * 2ms nanosleep assumes the sleep returns on time; under load it does not,
+     * so the loop ran far past the caller's timeout. A join_timeout(40) against
+     * 400ms of work then kept polling until the task finished and reported
+     * success — the timeout did not bound the wait at all. */
+    const int64_t deadline = mako_now_ns() + ms * 1000000;
+    while (mako_now_ns() < deadline) {
         int done = atomic_load_explicit(&t->done, memory_order_acquire);
         if (done) {
             if (!t->pooled) {
@@ -6670,9 +6675,12 @@ static inline int64_t mako_await_timeout_ms(MakoTask *t, int64_t ms, int64_t *ou
             if (out) *out = (int64_t)(intptr_t)t->result;
             return 1;
         }
-        struct timespec step = {0, 2 * 1000000L}; /* 2ms */
+        /* Do not overshoot the deadline on the last hop. */
+        int64_t left_ns = deadline - mako_now_ns();
+        if (left_ns <= 0) break;
+        int64_t step_ns = left_ns < 2000000 ? left_ns : 2000000; /* <= 2ms */
+        struct timespec step = {0, (long)step_ns};
         nanosleep(&step, NULL);
-        waited += 2;
     }
     /* Final check after last sleep */
     int done = atomic_load_explicit(&t->done, memory_order_acquire);
