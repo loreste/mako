@@ -8,7 +8,7 @@ Performance questions only have answers per workload. The numbers in
 in `examples/bench` and are there to catch regressions between releases, not to
 rank languages.
 
-Tip is **0.4.16+**. Background reading: [SPEED.md](SPEED.md),
+Tip is **0.4.17+**. Background reading: [SPEED.md](SPEED.md),
 [MEMORY_SAFETY.md](MEMORY_SAFETY.md), [PERFORMANCE.md](PERFORMANCE.md),
 [LONG_RUNNING.md](LONG_RUNNING.md). Traffic feedback without live recompile —
 **Anneal** — is in [ADAPTIVE_OPT.md](ADAPTIVE_OPT.md).

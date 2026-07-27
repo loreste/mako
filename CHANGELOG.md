@@ -1,6 +1,102 @@
 # Changelog
 
-## Unreleased (0.4.17)
+## 0.4.17 — 2026-07-27
+
+### Ownership: a returned value that cannot alias no longer suppresses the drop
+
+`transfer_own_on_return` marks a returned local as moved so it is not freed
+before `return`. Its `Expr::Call` arm is written for the bag constructors
+(`Ok`/`Err`/`Some`) but matched every call shape, so any `return f(local)`
+disarmed that local's drop. `return len(a)` yields an `int64_t`, which cannot
+alias the backing array, yet the array was never freed: 1.6 MB leaked per call,
+813 MB over 500 calls where it now holds at 8 MB.
+
+The same shape appeared four more times, each fixed by cloning a borrow while
+leaving a live owner alone:
+
+- a builtin that allocates its result borrows its arguments, so
+  `return str_to_upper(a)` must still free `a` (236 MB → 6.7 MB over 2000 calls)
+- struct literals stored a borrowed parameter verbatim, so
+  `fn wrap(s: string) -> Holder { return Holder{ s: s } }` returned a struct
+  holding the caller's buffer
+- bag payloads and tuple elements did the same (`mako_some_str` is `o.ok_s = s`)
+- `is_field_borrow_return` covered `Expr::Field` but not `Expr::Index`, so
+  `return a[0]` handed back a borrow of a slice element
+
+With every escape path cloning, `return user_fn(local)` is finally safe to free.
+A first attempt at the top-level guard used a blocklist and aborted five
+C-backend fixtures with SIGTRAP; the shipped guard is a whitelist over scalar C
+types, so anything that might carry ownership keeps transferring.
+
+This also closed the whole append gap against C. A 10M-element append loop ran
+6.5 ms against C's 3.2 ms purely because every call faulted in fresh pages; it
+now measures 3.20–3.57 ms against C's 3.16–3.39 ms.
+
+The gate could not have caught any of it: its RSS check is a ratio across runs,
+and every run leaked the same amount, so the ratio stayed flat at 800 MB. Adds
+`examples/bench/slice_drop_soak.mko` and a gate step with an absolute peak-RSS
+bound. `run_backend` now checks every fixture — the script has no `set -e` and a
+bash function returns only its last command's status, so failures mid-list were
+discarded.
+
+### Windows: static mutexes were unusable, and crypto silently produced garbage
+
+`pthread_mutex_t` mapped to `CRITICAL_SECTION` and `pthread_mutex_lock` called
+`EnterCriticalSection`, but entering a zeroed CRITICAL_SECTION is undefined and
+faults. `MAKO_MUTEX_INIT` resolves to `{0}` on Windows, and fifteen runtime
+mutexes are declared that way and never passed to `pthread_mutex_init`. Each
+faulted on first lock, which was the entire SIGSEGV group in the Windows suite —
+the owners line up one-to-one with the crashing fixtures. Mapped to `SRWLOCK`,
+whose documented static initializer is `{0}`.
+
+`sha256_hex` smeared a 64-bit FNV hash across 32 bytes and returned it formatted
+as a digest; `hmac_sha256_raw` parsed that back into "MAC" bytes; `hmac_sha1`
+returned `""`; `pbkdf2_sha256` had no fallback at all. An empty MAC compares
+equal to an empty MAC, so a signature check built on any of these passed for
+every input, on the platform where that is hardest to notice. Adds RFC 3174
+SHA-1, FIPS 180-4 SHA-256, RFC 2104 HMAC and RFC 2898 PBKDF2, verified against
+published vectors and cross-checked against CommonCrypto.
+
+Windows went from 38 failing fixtures to 21. The remainder is unported platform
+surface — filesystem semantics, socket address behaviour, signals, the sampling
+profiler, AEAD/HKDF — so the full suite now reports with an annotation carrying
+the count rather than gating, while the core language tests still gate.
+
+### join_timeout did not bound its wait
+
+`mako_await_timeout_ms` polled in 2 ms steps and advanced its own counter by 2
+per hop, assuming every `nanosleep` returned on schedule. Under contention it
+does not, so the loop ran past the caller's timeout and the final check reported
+the now-finished task as success: `join_timeout(40)` against 400 ms of work
+returned `Ok`. Now measured against the monotonic clock, with the last hop
+clamped so the wait cannot overshoot.
+
+### Array literals build from the element type
+
+The literal-shape checks only matched `Expr::String` / `Expr::Float` /
+`Expr::Bool` / `Expr::Array`, so `[s]` holding a string *variable* fell through
+to the int-family path and emitted `int64_t lit[] = { s }`, which does not
+compile. Dispatches on the emitted element type instead. The nested case moves
+rather than copies, since `mako_arr_*_of` takes ownership of the element headers.
+
+### LSP completes from the real builtin table
+
+Completion offered a hand-written seed of thirteen builtins against a type
+checker table of roughly 2500, so almost nothing the language provides was
+discoverable and the seed drifted every time a builtin landed. Now read from
+`TypeChecker::builtin_signatures()`, with each item carrying its rendered
+signature. `serverInfo` advertised a hardcoded 0.5.0 while the crate was 0.4.16;
+it now reports `CARGO_PKG_VERSION`.
+
+### Dead code
+
+Removed ~20,200 lines: 103 `emit_builtin_call_*` functions and 5
+`check_builtin_call_*` functions that were an unreachable second copy of the live
+emit and check paths, the two macros that fed them, `const_len`, and
+`MapValKind::StructKeyPtr`. `native_ir::lower` only looked unused in a default
+build — it is used by the LLVM backend and the `native_ir` unit tests — and is
+now gated on `any(feature = "llvm-backend", test)`.
+
 
 ### CI reports failures instead of swallowing them
 

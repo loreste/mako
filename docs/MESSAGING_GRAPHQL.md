@@ -1,6 +1,6 @@
 # Messaging · GraphQL · gRPC · OpenAPI
 
-**Product tip:** 0.4.16 · **No GC** — payloads and responses are owned strings;
+**Product tip:** 0.4.17 · **No GC** — payloads and responses are owned strings;
 queues free on `*_free` / take transfer.
 
 Related: [STDLIB.md](STDLIB.md) · [MEMORY_SAFETY.md](MEMORY_SAFETY.md) ·

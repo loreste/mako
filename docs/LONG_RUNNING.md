@@ -5,7 +5,7 @@ this note is about — not “fib looked fine on my laptop.”
 
 It’s a direction we’re building toward, not a finished claim. Evidence is in
 soaks, gates, and the rest of these docs. Last sync **2026-07-23**, tip
-**0.4.16**.
+**0.4.17**.
 
 More context: [SPEED.md](SPEED.md), [PERFORMANCE.md](PERFORMANCE.md),
 [MEMORY_MODEL.md](MEMORY_MODEL.md), [SECURITY.md](SECURITY.md),

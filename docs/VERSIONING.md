@@ -43,7 +43,8 @@ See [ROADMAP.md](ROADMAP.md) version map. Tip after `v0.4.5`:
 0.4.13 language queue[T] + Graphql types
 0.4.14 Anneal adaptive opt (hot sites + offline PGO)
 0.4.15 NATS/Redis + GraphQL schema + gRPC/OpenAPI
-0.4.16 Anneal naming + adaptive-opt test coverage  (tip)
+0.4.16 Anneal naming + adaptive-opt test coverage
+0.4.17 return-drop ownership fixes · Windows mutex/crypto · LSP builtins  (tip)
 0.5.0  native-first default (CLI default flip — minor)
 0.5.1  toolchain / IDE depth
 0.5.2  runtime trust soaks

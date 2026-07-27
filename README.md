@@ -17,7 +17,7 @@ counters from a production run, then feed them into the next build. The
 rebuild happens on your build machine, not in the running process. See
 [Anneal](#anneal--builds-that-learn-from-production).
 
-**Status: experimental/alpha (v0.4.16).** The language works and compiles real
+**Status: experimental/alpha (v0.4.17).** The language works and compiles real
 programs, but the surface is young. Expect breaking changes, missing features,
 and bugs. This is not yet suitable for production use without careful
 evaluation.
@@ -90,7 +90,7 @@ Options:
 ```bash
 curl -fsSL …/install-linux.sh | bash -s -- --prefix /opt/mako --yes
 curl -fsSL …/install-linux.sh | bash -s -- --no-deps    # skip clang install
-curl -fsSL …/install-linux.sh | bash -s -- --version v0.4.16   # pin a release
+curl -fsSL …/install-linux.sh | bash -s -- --version v0.4.17   # pin a release
 ```
 
 **You do not need Rust or cargo on the machine that runs Mako.**
