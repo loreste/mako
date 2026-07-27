@@ -2,8 +2,13 @@
 #ifndef MAKO_RT_H
 #define MAKO_RT_H
 
-/* Portability: PTHREAD_MUTEX_INITIALIZER is unavailable on Windows cross-compile
- * targets that lack a pthreads shim. Provide a zero-init fallback. */
+/* Portability: this runs before <pthread.h> is reachable, so on Windows
+ * PTHREAD_MUTEX_INITIALIZER is never defined here and the zero-init arm is
+ * always taken. That is correct only because the Windows shim in
+ * mako_platform.h maps pthread_mutex_t to SRWLOCK, whose documented static
+ * initializer SRWLOCK_INIT *is* {0}. It was not correct under the previous
+ * CRITICAL_SECTION mapping: locking a zeroed CRITICAL_SECTION faults, so every
+ * statically-initialized mutex crashed on first use. Keep the two in step. */
 #if defined(_WIN32) && !defined(PTHREAD_MUTEX_INITIALIZER)
 #define MAKO_MUTEX_INIT {0}
 #else

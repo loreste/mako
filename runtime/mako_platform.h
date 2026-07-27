@@ -161,7 +161,17 @@ static inline int mako_win_nanosleep(const struct timespec *req, struct timespec
 #define clock_gettime mako_win_clock_gettime
 #define nanosleep mako_win_nanosleep
 
-typedef CRITICAL_SECTION pthread_mutex_t;
+/* SRWLOCK, not CRITICAL_SECTION: a zero-initialized SRWLOCK is valid (that is
+ * exactly what SRWLOCK_INIT is), while EnterCriticalSection on a zeroed
+ * CRITICAL_SECTION is undefined and faults. Every
+ * `static pthread_mutex_t m = MAKO_MUTEX_INIT;` in the runtime is never passed
+ * to pthread_mutex_init, so under CRITICAL_SECTION the first lock crashed —
+ * which is why the Windows suite SIGSEGV'd in each subsystem holding a static
+ * mutex (diameter, peer table, the mako_std registries).
+ *
+ * SRWLOCK is not recursive, but neither is PTHREAD_MUTEX_INITIALIZER on POSIX,
+ * so the runtime already may not lock recursively. */
+typedef SRWLOCK pthread_mutex_t;
 typedef CONDITION_VARIABLE pthread_cond_t;
 typedef HANDLE pthread_t;
 typedef void *pthread_attr_t;
@@ -170,19 +180,19 @@ typedef void *pthread_condattr_t;
 
 static inline int pthread_mutex_init(pthread_mutex_t *m, const pthread_mutexattr_t *a) {
     (void)a;
-    InitializeCriticalSection(m);
+    InitializeSRWLock(m);
     return 0;
 }
 static inline int pthread_mutex_destroy(pthread_mutex_t *m) {
-    DeleteCriticalSection(m);
+    (void)m; /* SRWLOCK needs no teardown */
     return 0;
 }
 static inline int pthread_mutex_lock(pthread_mutex_t *m) {
-    EnterCriticalSection(m);
+    AcquireSRWLockExclusive(m);
     return 0;
 }
 static inline int pthread_mutex_unlock(pthread_mutex_t *m) {
-    LeaveCriticalSection(m);
+    ReleaseSRWLockExclusive(m);
     return 0;
 }
 static inline int pthread_cond_init(pthread_cond_t *c, const pthread_condattr_t *a) {
@@ -195,7 +205,7 @@ static inline int pthread_cond_destroy(pthread_cond_t *c) {
     return 0;
 }
 static inline int pthread_cond_wait(pthread_cond_t *c, pthread_mutex_t *m) {
-    return SleepConditionVariableCS(c, m, INFINITE) ? 0 : -1;
+    return SleepConditionVariableSRW(c, m, INFINITE, 0) ? 0 : -1;
 }
 /* Absolute-time timed wait (POSIX-shaped). Converts abstime → relative ms. */
 #ifndef ETIMEDOUT
@@ -217,7 +227,7 @@ static inline int pthread_cond_timedwait(
         return ETIMEDOUT;
     }
     if (wait_ms > 0x7fffffff) wait_ms = 0x7fffffff;
-    if (SleepConditionVariableCS(c, m, (DWORD)wait_ms)) return 0;
+    if (SleepConditionVariableSRW(c, m, (DWORD)wait_ms, 0)) return 0;
     if (GetLastError() == ERROR_TIMEOUT) return ETIMEDOUT;
     return -1;
 }
