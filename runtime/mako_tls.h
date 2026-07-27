@@ -4558,18 +4558,20 @@ typedef struct {
 static MakoTlsPoolSlot mako_tls_pool_slots[MAKO_TLS_POOL_MAX];
 static pthread_mutex_t mako_tls_pool_mu = MAKO_MUTEX_INIT;
 
+/* Handle layout: low 16 bits = slot+1, upper 48 bits = generation counter.
+ * 48-bit gen (281 trillion) prevents ABA on high-churn pools. */
 static inline int64_t mako_tls_pool_pack_handle(int slot, uint32_t gen) {
     if (gen == 0) gen = 1;
-    return (int64_t)(((uint32_t)(slot + 1) & 0xffffu)
-                     | ((gen & 0xffffu) << 16));
+    return (int64_t)((uint64_t)((slot + 1) & 0xffff)
+                     | ((uint64_t)gen << 16));
 }
 static inline int mako_tls_pool_handle_slot(int64_t h) {
-    int id = (int)(h & 0xffff);
+    int id = (int)((uint64_t)h & 0xffff);
     if (id <= 0 || id > MAKO_TLS_POOL_MAX) return -1;
     return id - 1;
 }
 static inline uint32_t mako_tls_pool_handle_gen(int64_t h) {
-    return (uint32_t)((h >> 16) & 0xffffu);
+    return (uint32_t)((uint64_t)h >> 16);
 }
 
 /* Shared open: optional client cert/key; connect_ms for TCP connect;
@@ -4660,7 +4662,7 @@ static inline int64_t mako_tls_pool_open_ex(
         s->conn = conn;
         s->used = 1;
         s->io_timeout_ms = (int)io_ms;
-        s->gen = (prev_gen + 1) & 0xffffu;
+        s->gen = prev_gen + 1;
         if (s->gen == 0) s->gen = 1;
         handle = mako_tls_pool_pack_handle(slot, s->gen);
     }

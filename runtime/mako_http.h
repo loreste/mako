@@ -2400,6 +2400,10 @@ static inline int64_t mako_http2_push_promise_stream(MakoString s) {
  * States: 0 idle, 1 open, 2 half-closed (local and/or remote), 3 closed.
  * Direction flags track END_STREAM: remote=received, local=sent.
  * Slot limits / max_frame_size / sids / states declared earlier (response path). */
+/* H2 state is global-per-process; designed for single-connection-at-a-time use.
+ * Multi-connection programs must save/restore via mako_h2_conn_save/restore.
+ * Not _Thread_local because the body buffers (64 × 64KB = 4MB) are too large
+ * to duplicate per thread. A future per-connection struct would be cleaner. */
 static int mako_h2_es_remote[MAKO_H2_STREAM_SLOTS];
 static int mako_h2_es_local[MAKO_H2_STREAM_SLOTS];
 /* Send windows: how much DATA we may still send (peer-granted). */
