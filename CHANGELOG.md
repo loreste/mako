@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.4.18 — 2026-07-27
+
+### Hex, binary, and octal integer literals
+
+`0xFF`, `0b1010`, `0o77` with underscore separators (`0xFF_FF`, `0b1111_0000`).
+
+### Security hardening (white-hat audit)
+
+All three tiers from the security audit scope (`docs/SECURITY_AUDIT_SCOPE.md`):
+
+- **Box freelist**: poison `0xDE` on free, zero on alloc, double-free walk (capped at 64), freelist corruption detection
+- **String builder**: null data pointer after free prevents double-free
+- **HTTP Connection header**: replaced 64-byte stack buffer with zero-copy view scan — eliminates overflow on long Connection values
+- **HTTP connection table**: `mako_http_conn_mu` mutex on slot claim/release; all fields initialized under lock before `live = true` (fixes partial-init race where `select()` could poll fd 0)
+- **HTTP idle timeout**: 60-second keep-alive reaping via `accept_ms` timestamp (slowloris mitigation)
+- **WebSocket**: `_Thread_local` globals eliminate data race on concurrent recv; cumulative fragment cap at `MAKO_WS_MAX_PAYLOAD` (16 MiB) prevents memory exhaustion
+- **TLS pool**: generation counter widened from 16-bit to 32-bit (~4 billion reuses per slot before ABA); insecure client logs stderr warning on first use
+- **Framebuffer**: explicit `w * h` overflow guard before pixel allocation
+- **Temp files**: PID suffix on all temporary binary and C file paths
+
+Audited and confirmed safe (no changes needed): SCTP/Diameter parsing (bounds-checked), HPACK decode (bounded), `MAKO_CFLAGS` (no shell, `Command::arg`).
+
 ## 0.4.17 — 2026-07-27
 
 ### Ownership: a returned value that cannot alias no longer suppresses the drop
