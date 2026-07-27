@@ -1,13 +1,13 @@
 # yaml-language-server: $schema=https://aka.ms/winget-manifest.installer.1.12.0.schema.json
 PackageIdentifier: loreste.mako
-PackageVersion: 0.4.16
+PackageVersion: 0.4.17
 InstallerType: zip
 NestedInstallerType: portable
 ReleaseDate: 2026-07-22
 Installers:
 - Architecture: x64
-  InstallerUrl: https://github.com/loreste/mako/releases/download/v0.4.16/mako-x86_64-pc-windows-msvc.zip
-  InstallerSha256: 10CFB95846070DB3940E070250AA46B407B45F462017E766A87FC44AEDDE2CAE
+  InstallerUrl: https://github.com/loreste/mako/releases/download/v0.4.17/mako-x86_64-pc-windows-msvc.zip
+  InstallerSha256: ED48590BC986FDFE7F2D7E479C8C62838D3B6EF5B0E0258A4B86399468577A58
   NestedInstallerFiles:
   - RelativeFilePath: mako-x86_64-pc-windows-msvc\bin\mako.exe
     PortableCommandAlias: mako

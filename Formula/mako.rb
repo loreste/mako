@@ -16,8 +16,8 @@ class Mako < Formula
   homepage "https://github.com/loreste/mako"
   # After tagging v0.1.5: ./scripts/fill-release-packaging.sh v0.1.5
   # sha256 filled after tag by scripts/fill-release-packaging.sh v0.4.1
-  url "https://github.com/loreste/mako/archive/refs/tags/v0.4.16.tar.gz"
-  sha256 "26fd68e7e0512b93d741f75354fb204a74efe753b96e30ca3c3f8c7c366c44f0"
+  url "https://github.com/loreste/mako/archive/refs/tags/v0.4.17.tar.gz"
+  sha256 "3ba82b2e19105391080a47a1ae2dfd3ebb42eb2abdfc6bf6310e4802d35c2811"
   license "MIT"
   head "https://github.com/loreste/mako.git", branch: "main"
 
@@ -54,7 +54,7 @@ class Mako < Formula
   end
 
   test do
-    assert_match "mako0.4.16", shell_output("#{bin}/mako --version")
+    assert_match "mako0.4.17", shell_output("#{bin}/mako --version")
     (testpath/"hello.mko").write <<~EOS
       fn main() {
           print("ok")
