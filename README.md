@@ -33,7 +33,7 @@ runtime, and FFI are outside the safety model.
 
 **What's new in 0.4.5+:** a direct native backend that skips C for many builds —
 ownership-explicit IR to Cranelift (debug) or LLVM (release) plus a bundled
-linker. The full `examples/testing` suite passes on `--backend native` (**391/391**).
+linker. The full `examples/testing` suite passes on `--backend native` (**393/393**).
 Release artifacts and install scripts ship for Linux, macOS, and Windows.
 Benchmark results for the workloads in `examples/bench`, including the ones
 where Mako is slower, are recorded in [PERFORMANCE.md](docs/PERFORMANCE.md).
