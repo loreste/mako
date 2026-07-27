@@ -140,10 +140,10 @@ static inline int mako_ws_header_value(const char *req, const char *name, char *
 
 #define MAKO_WS_MAX_PAYLOAD (16 * 1024 * 1024)
 
-static int mako_ws_g_last_opcode = 0;
-static int mako_ws_g_last_fin = 1;
-static int mako_ws_g_last_close_code = 0;
-static int mako_ws_g_last_status = 0; /* 0 ok, -1 err, -2 close, -3 ping, -4 pong */
+static _Thread_local int mako_ws_g_last_opcode = 0;
+static _Thread_local int mako_ws_g_last_fin = 1;
+static _Thread_local int mako_ws_g_last_close_code = 0;
+static _Thread_local int mako_ws_g_last_status = 0; /* 0 ok, -1 err, -2 close, -3 ping, -4 pong */
 
 static inline int mako_ws_write_all(int fd, const void *buf, size_t len) {
     const char *p = (const char *)buf;
@@ -397,12 +397,14 @@ static inline int64_t mako_ws_recv_frame(
 }
 
 /* Read a complete message (handles fragmentation). Server expects masked.
- * Returns length, -2 close, -1 error. Auto handles ping/pong. */
+ * Returns length, -2 close, -1 error. Auto handles ping/pong.
+ * Cumulative fragment size is capped at MAKO_WS_MAX_PAYLOAD to prevent
+ * memory exhaustion from many small continuation frames. */
 static inline int64_t mako_ws_recv_message(int fd, char *buf, size_t cap, int expect_masked) {
     size_t total = 0;
     int msg_opcode = -1;
     for (;;) {
-        if (total >= cap) {
+        if (total >= cap || total > MAKO_WS_MAX_PAYLOAD) {
             mako_ws_g_last_status = -1;
             return -1;
         }

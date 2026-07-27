@@ -2420,7 +2420,9 @@ static inline MakoString mako_str_builder_finish(MakoStrBuilder *b) {
 
 static inline void mako_str_builder_free(MakoStrBuilder *b) {
     if (!b) return;
-    free(b->data);
+    if (b->data) { free(b->data); b->data = NULL; }
+    b->len = 0;
+    b->cap = 0;
     free(b);
 }
 
@@ -2476,27 +2478,47 @@ static inline size_t mako_box_bin_size(int bin) {
 static inline void *mako_box_alloc(size_t sz) {
     int bin = mako_box_bin(sz);
     if (bin >= 0) {
+        size_t bsz = mako_box_bin_size(bin);
         mako_box_mu_ensure();
         pthread_mutex_lock(&mako_box_mu);
         void *p = mako_box_freelist[bin];
         if (p) {
             mako_box_freelist[bin] = *(void **)p;
             pthread_mutex_unlock(&mako_box_mu);
+            /* Clear poison so caller gets zeroed memory. */
+            memset(p, 0, bsz);
             return p;
         }
         pthread_mutex_unlock(&mako_box_mu);
-        return malloc(mako_box_bin_size(bin));
+        return calloc(1, bsz);
     }
-    return malloc(sz);
+    return calloc(1, sz);
 }
+
+/* Poison byte written past the next-pointer in freed freelist blocks.
+ * mako_box_alloc checks for it to catch double-free. */
+#define MAKO_BOX_POISON 0xDE
 
 static inline void mako_box_free(void *p, size_t sz) {
     if (!p) return;
     int bin = mako_box_bin(sz);
     if (bin >= 0) {
+        size_t bsz = mako_box_bin_size(bin);
         mako_box_mu_ensure();
         pthread_mutex_lock(&mako_box_mu);
+        /* Walk freelist to detect double-free (capped at 64 to bound lock time). */
+        int walk = 0;
+        for (void *cur = mako_box_freelist[bin]; cur && walk < 64; cur = *(void **)cur, walk++) {
+            if (cur == p) {
+                pthread_mutex_unlock(&mako_box_mu);
+                fprintf(stderr, "mako: double-free detected in box_free (bin %d, ptr %p)\n", bin, p);
+                return; /* swallow rather than corrupt the freelist */
+            }
+        }
         *(void **)p = mako_box_freelist[bin];
+        /* Poison remaining bytes so use-after-free reads garbage. */
+        if (bsz > sizeof(void *))
+            memset((char *)p + sizeof(void *), MAKO_BOX_POISON, bsz - sizeof(void *));
         mako_box_freelist[bin] = p;
         pthread_mutex_unlock(&mako_box_mu);
         return;

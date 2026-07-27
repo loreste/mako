@@ -1912,10 +1912,12 @@ typedef struct {
 static inline MakoGfxWindow *mako_gfx_window_open(int64_t w, int64_t h, MakoString title) {
     MakoGfxWindow *win = (MakoGfxWindow *)calloc(1, sizeof(MakoGfxWindow));
     if (!win) return NULL;
-    /* Clamp to the framebuffer cap so w*h cannot overflow: an overflowed npix
-     * can land back inside the cap and leave set_pixel writing past the buffer. */
+    /* Clamp dimensions; explicit overflow check on w*h. */
     win->w = (w > 0 && w <= 4096) ? w : 640;
     win->h = (h > 0 && h <= 4096) ? h : 480;
+    if (win->w > 0 && win->h > (int64_t)16777216 / win->w) {
+        win->w = 640; win->h = 480; /* fallback on overflow */
+    }
     win->open = 1;
     size_t n = title.len < 63 ? title.len : 63;
     if (title.data && n) memcpy(win->title, title.data, n);

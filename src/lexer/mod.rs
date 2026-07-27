@@ -540,6 +540,83 @@ impl<'a> Lexer<'a> {
         let start = self.pos;
         let line = self.line;
         let col = self.col;
+
+        // 0x / 0b / 0o prefixed integer literals
+        if self.peek() == Some(b'0') {
+            match self.peek2() {
+                Some(b'x' | b'X') => {
+                    self.bump(); // '0'
+                    self.bump(); // 'x'
+                    if !matches!(self.peek(), Some(b'0'..=b'9' | b'a'..=b'f' | b'A'..=b'F')) {
+                        return Err(LexError::NumberOutOfRange {
+                            literal: "0x".to_string(),
+                            line,
+                            col,
+                        });
+                    }
+                    while matches!(self.peek(), Some(b'0'..=b'9' | b'a'..=b'f' | b'A'..=b'F' | b'_')) {
+                        self.bump();
+                    }
+                    let s = std::str::from_utf8(&self.src[start + 2..self.pos]).unwrap();
+                    let clean: String = s.chars().filter(|&c| c != '_').collect();
+                    return i64::from_str_radix(&clean, 16)
+                        .map(TokenKind::Int)
+                        .map_err(|_| LexError::NumberOutOfRange {
+                            literal: std::str::from_utf8(&self.src[start..self.pos]).unwrap().to_string(),
+                            line,
+                            col,
+                        });
+                }
+                Some(b'b' | b'B') => {
+                    self.bump(); // '0'
+                    self.bump(); // 'b'
+                    if !matches!(self.peek(), Some(b'0' | b'1')) {
+                        return Err(LexError::NumberOutOfRange {
+                            literal: "0b".to_string(),
+                            line,
+                            col,
+                        });
+                    }
+                    while matches!(self.peek(), Some(b'0' | b'1' | b'_')) {
+                        self.bump();
+                    }
+                    let s = std::str::from_utf8(&self.src[start + 2..self.pos]).unwrap();
+                    let clean: String = s.chars().filter(|&c| c != '_').collect();
+                    return i64::from_str_radix(&clean, 2)
+                        .map(TokenKind::Int)
+                        .map_err(|_| LexError::NumberOutOfRange {
+                            literal: std::str::from_utf8(&self.src[start..self.pos]).unwrap().to_string(),
+                            line,
+                            col,
+                        });
+                }
+                Some(b'o' | b'O') => {
+                    self.bump(); // '0'
+                    self.bump(); // 'o'
+                    if !matches!(self.peek(), Some(b'0'..=b'7')) {
+                        return Err(LexError::NumberOutOfRange {
+                            literal: "0o".to_string(),
+                            line,
+                            col,
+                        });
+                    }
+                    while matches!(self.peek(), Some(b'0'..=b'7' | b'_')) {
+                        self.bump();
+                    }
+                    let s = std::str::from_utf8(&self.src[start + 2..self.pos]).unwrap();
+                    let clean: String = s.chars().filter(|&c| c != '_').collect();
+                    return i64::from_str_radix(&clean, 8)
+                        .map(TokenKind::Int)
+                        .map_err(|_| LexError::NumberOutOfRange {
+                            literal: std::str::from_utf8(&self.src[start..self.pos]).unwrap().to_string(),
+                            line,
+                            col,
+                        });
+                }
+                _ => {}
+            }
+        }
+
         while matches!(self.peek(), Some(b'0'..=b'9')) {
             self.bump();
         }

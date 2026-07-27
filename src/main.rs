@@ -2205,8 +2205,9 @@ fn cmd_run(
     };
     let incr = make_incr_opts(incremental, release, jobs, &opts);
     let out_bin = std::env::temp_dir().join(format!(
-        "mako_run_{}",
-        file.file_stem().and_then(|s| s.to_str()).unwrap_or("prog")
+        "mako_run_{}_{}",
+        file.file_stem().and_then(|s| s.to_str()).unwrap_or("prog"),
+        std::process::id()
     ));
     let (frontend_ms, backend_ms) =
         build_incremental(&file, &out_bin, false, backend, level, &opts, &incr)?;
@@ -2303,8 +2304,9 @@ fn cmd_profile(
     };
     let incr = make_incr_opts(incremental, release, jobs, &opts);
     let out_bin = std::env::temp_dir().join(format!(
-        "mako_profile_{}",
-        file.file_stem().and_then(|s| s.to_str()).unwrap_or("prog")
+        "mako_profile_{}_{}",
+        file.file_stem().and_then(|s| s.to_str()).unwrap_or("prog"),
+        std::process::id()
     ));
     let (frontend_ms, backend_ms) =
         build_incremental(&file, &out_bin, false, BackendCli::C, level, &opts, &incr)?;
@@ -2604,8 +2606,9 @@ fn run_file_json(file: &Path) -> tooling::TestExecution {
 fn compile_legacy_test(file: &Path) -> Result<PathBuf, ()> {
     let (c_src, _) = compile_to_c_timed(file)?;
     let out_bin = std::env::temp_dir().join(format!(
-        "mako_test_{}",
-        file.file_stem().and_then(|s| s.to_str()).unwrap_or("prog")
+        "mako_test_{}_{}",
+        file.file_stem().and_then(|s| s.to_str()).unwrap_or("prog"),
+        std::process::id()
     ));
     build_c(
         &c_src,
@@ -2694,13 +2697,14 @@ fn compile_test_package(
     backend: BackendCli,
 ) -> Result<PathBuf, ()> {
     let out_bin = std::env::temp_dir().join(format!(
-        "mako_gotest_{}_{}",
+        "mako_gotest_{}_{}_{}",
         match backend {
             BackendCli::C => "c",
             BackendCli::Native => "native",
             BackendCli::Llvm => "llvm",
         },
-        file.file_stem().and_then(|s| s.to_str()).unwrap_or("prog")
+        file.file_stem().and_then(|s| s.to_str()).unwrap_or("prog"),
+        std::process::id()
     ));
     match backend {
         BackendCli::C => {
@@ -4603,11 +4607,12 @@ fn build_c(
         src_file.with_extension("c")
     } else {
         std::env::temp_dir().join(format!(
-            "mako_{}.c",
+            "mako_{}_{}.c",
             src_file
                 .file_stem()
                 .and_then(|s| s.to_str())
-                .unwrap_or("out")
+                .unwrap_or("out"),
+            std::process::id()
         ))
     };
     fs::write(&c_path, c_src).map_err(|e| {

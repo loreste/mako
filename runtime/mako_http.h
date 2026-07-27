@@ -108,6 +108,7 @@ typedef struct {
     int fd;
     bool live;
     bool keep_alive;
+    int64_t accept_ms; /* timestamp for idle timeout reaping */
     MakoArena arena;
     MakoString method;
     MakoString path;
@@ -119,9 +120,15 @@ typedef struct {
     size_t raw_len;
 } MakoHttpConn;
 
+/* Idle keep-alive connections older than this are reaped (seconds). */
+#ifndef MAKO_HTTP_KEEPALIVE_TIMEOUT_S
+#define MAKO_HTTP_KEEPALIVE_TIMEOUT_S 60
+#endif
+
 #define MAKO_HTTP_CONN_MAX 1024
 static MakoHttpConn mako_http_conns[MAKO_HTTP_CONN_MAX];
 static volatile atomic_llong mako_http_active_conn_count = 0;
+static pthread_mutex_t mako_http_conn_mu = MAKO_MUTEX_INIT;
 
 /* Keep the atomic active-count in sync with c->live transitions. */
 static inline void mako_http_conn_set_live(MakoHttpConn *c, int live) {
@@ -432,16 +439,36 @@ static inline void mako_http_fill_conn(MakoHttpConn *c, const char *req, size_t 
         c->content_type_req = mako_http_intern_ctype(vp, vlen);
     else
         c->content_type_req = mako_str_empty;
-    /* Keep-alive: only Connection needs a mutable temp for case fold. */
+    /* Keep-alive: scan Connection header view in-place (no fixed buffer). */
     c->keep_alive = 0;
-    char tmp[64];
-    if (mako_http_find_header(c->raw, "Connection", tmp, sizeof(tmp))) {
-        for (char *p = tmp; *p; p++)
-            if (*p >= 'A' && *p <= 'Z') *p = (char)(*p - 'A' + 'a');
-        if (strstr(tmp, "keep-alive")) c->keep_alive = 1;
-        if (strstr(tmp, "close")) c->keep_alive = 0;
-    } else if (strstr(c->raw, "HTTP/1.1")) {
-        c->keep_alive = 1; /* HTTP/1.1 default */
+    {
+        const char *cvp = NULL;
+        size_t cvlen = 0;
+        if (mako_http_find_header_view(c->raw, "Connection", &cvp, &cvlen) && cvlen > 0) {
+            /* Case-insensitive substring search within the view. */
+            int got_ka = 0, got_close = 0;
+            for (size_t ci = 0; ci + 4 <= cvlen; ci++) {
+                char lo = cvp[ci] | 0x20;
+                if (lo == 'k' && ci + 10 <= cvlen) {
+                    int match = 1;
+                    const char *want = "keep-alive";
+                    for (int wi = 0; wi < 10 && match; wi++)
+                        if ((cvp[ci + wi] | 0x20) != want[wi]) match = 0;
+                    if (match) got_ka = 1;
+                }
+                if (lo == 'c' && ci + 5 <= cvlen) {
+                    int match = 1;
+                    const char *want = "close";
+                    for (int wi = 0; wi < 5 && match; wi++)
+                        if ((cvp[ci + wi] | 0x20) != want[wi]) match = 0;
+                    if (match) got_close = 1;
+                }
+            }
+            if (got_ka) c->keep_alive = 1;
+            if (got_close) c->keep_alive = 0;
+        } else if (strstr(c->raw, "HTTP/1.1")) {
+            c->keep_alive = 1; /* HTTP/1.1 default */
+        }
     }
 }
 
@@ -463,9 +490,20 @@ static inline int64_t mako_http_bind(int64_t port) {
  * Without this, one-shot servers that never call http_next/http_close fill
  * MAKO_HTTP_CONN_MAX after ~1024 requests. */
 static inline void mako_http_reap_dead(void) {
+    int64_t now = mako_now_ms();
+    int64_t timeout = (int64_t)MAKO_HTTP_KEEPALIVE_TIMEOUT_S * 1000;
     for (int i = 0; i < MAKO_HTTP_CONN_MAX; i++) {
         MakoHttpConn *c = &mako_http_conns[i];
         if (!c->live || c->fd < 0) continue;
+        /* Reap idle keep-alive connections past the timeout. */
+        if (c->keep_alive && c->accept_ms > 0 && (now - c->accept_ms) > timeout) {
+            mako_sock_close(c->fd);
+            mako_arena_free(&c->arena);
+            pthread_mutex_lock(&mako_http_conn_mu);
+            mako_http_conn_set_live(c, 0);
+            pthread_mutex_unlock(&mako_http_conn_mu);
+            continue;
+        }
         fd_set rfds, efds;
         FD_ZERO(&rfds);
         FD_ZERO(&efds);
@@ -477,7 +515,9 @@ static inline void mako_http_reap_dead(void) {
         if (FD_ISSET(c->fd, &efds)) {
             mako_sock_close(c->fd);
             mako_arena_free(&c->arena);
+            pthread_mutex_lock(&mako_http_conn_mu);
             mako_http_conn_set_live(c, 0);
+            pthread_mutex_unlock(&mako_http_conn_mu);
             continue;
         }
         if (!FD_ISSET(c->fd, &rfds)) continue;
@@ -487,7 +527,9 @@ static inline void mako_http_reap_dead(void) {
         if (n == 0) {
             mako_sock_close(c->fd);
             mako_arena_free(&c->arena);
+            pthread_mutex_lock(&mako_http_conn_mu);
             mako_http_conn_set_live(c, 0);
+            pthread_mutex_unlock(&mako_http_conn_mu);
         }
         /* n > 0 → leave for http_next; n < 0 → leave (EAGAIN etc.) */
     }
@@ -504,24 +546,31 @@ static inline int64_t mako_http_accept(int64_t listen_fd) {
     if (n < 0) n = 0;
     req[n] = 0;
 
+    /* Atomic slot claim: lock prevents two threads grabbing the same slot.
+     * All fields are initialized before setting live — no partial init visible. */
+    pthread_mutex_lock(&mako_http_conn_mu);
     int slot = -1;
     for (int i = 0; i < MAKO_HTTP_CONN_MAX; i++) {
         if (!mako_http_conns[i].live) {
             slot = i;
+            /* Initialize fully under lock before marking live. */
+            MakoHttpConn *c = &mako_http_conns[i];
+            c->fd = cfd;
+            c->accept_ms = mako_now_ms();
+            c->keep_alive = false;
+            c->arena = mako_arena_new();
+            mako_http_fill_conn(c, req, (size_t)n);
+            c->live = true;
+            atomic_fetch_add_explicit(&mako_http_active_conn_count, 1, memory_order_relaxed);
             break;
         }
     }
+    pthread_mutex_unlock(&mako_http_conn_mu);
     if (slot < 0) {
         mako_sock_close(cfd);
         fprintf(stderr, "error: http_accept: connection table full\n");
         return -1;
     }
-    MakoHttpConn *c = &mako_http_conns[slot];
-    memset(c, 0, sizeof(*c));
-    c->fd = cfd;
-    mako_http_conn_set_live(c, 1);
-    c->arena = mako_arena_new();
-    mako_http_fill_conn(c, req, (size_t)n);
     return (int64_t)slot;
 }
 
@@ -1159,7 +1208,9 @@ static inline int64_t mako_http_close(int64_t conn) {
     MakoHttpConn *c = &mako_http_conns[conn];
     mako_sock_close(c->fd);
     mako_arena_free(&c->arena);
+    pthread_mutex_lock(&mako_http_conn_mu);
     mako_http_conn_set_live(c, 0);
+    pthread_mutex_unlock(&mako_http_conn_mu);
     return 1;
 }
 
@@ -2369,6 +2420,10 @@ static inline int64_t mako_http2_push_promise_stream(MakoString s) {
  * States: 0 idle, 1 open, 2 half-closed (local and/or remote), 3 closed.
  * Direction flags track END_STREAM: remote=received, local=sent.
  * Slot limits / max_frame_size / sids / states declared earlier (response path). */
+/* H2 state is global-per-process; designed for single-connection-at-a-time use.
+ * Multi-connection programs must save/restore via mako_h2_conn_save/restore.
+ * Not _Thread_local because the body buffers (64 × 64KB = 4MB) are too large
+ * to duplicate per thread. A future per-connection struct would be cleaner. */
 static int mako_h2_es_remote[MAKO_H2_STREAM_SLOTS];
 static int mako_h2_es_local[MAKO_H2_STREAM_SLOTS];
 /* Send windows: how much DATA we may still send (peer-granted). */
