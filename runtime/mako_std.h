@@ -6357,6 +6357,158 @@ static inline MakoString mako_avro_long_hex(int64_t v) {
 }
 
 /* ---- SHA-256 / HMAC ---- */
+/* Portable SHA-256 (FIPS 180-4) for hosts with neither CommonCrypto nor
+ * OpenSSL — Windows. The previous fallbacks here were not merely unavailable,
+ * they were wrong in a dangerous direction: sha256_hex smeared a 64-bit FNV
+ * hash across 32 bytes and returned it formatted as a digest, and
+ * hmac_sha256_raw decoded that back into "MAC" bytes. Anything hashing a token
+ * or password on Windows got a trivially invertible value that looked like
+ * SHA-256, and pbkdf2_sha256 had no `#else` at all so it returned "". */
+static const uint32_t mako_sha256_k_[64] = {
+    0x428a2f98u, 0x71374491u, 0xb5c0fbcfu, 0xe9b5dba5u, 0x3956c25bu, 0x59f111f1u,
+    0x923f82a4u, 0xab1c5ed5u, 0xd807aa98u, 0x12835b01u, 0x243185beu, 0x550c7dc3u,
+    0x72be5d74u, 0x80deb1feu, 0x9bdc06a7u, 0xc19bf174u, 0xe49b69c1u, 0xefbe4786u,
+    0x0fc19dc6u, 0x240ca1ccu, 0x2de92c6fu, 0x4a7484aau, 0x5cb0a9dcu, 0x76f988dau,
+    0x983e5152u, 0xa831c66du, 0xb00327c8u, 0xbf597fc7u, 0xc6e00bf3u, 0xd5a79147u,
+    0x06ca6351u, 0x14292967u, 0x27b70a85u, 0x2e1b2138u, 0x4d2c6dfcu, 0x53380d13u,
+    0x650a7354u, 0x766a0abbu, 0x81c2c92eu, 0x92722c85u, 0xa2bfe8a1u, 0xa81a664bu,
+    0xc24b8b70u, 0xc76c51a3u, 0xd192e819u, 0xd6990624u, 0xf40e3585u, 0x106aa070u,
+    0x19a4c116u, 0x1e376c08u, 0x2748774cu, 0x34b0bcb5u, 0x391c0cb3u, 0x4ed8aa4au,
+    0x5b9cca4fu, 0x682e6ff3u, 0x748f82eeu, 0x78a5636fu, 0x84c87814u, 0x8cc70208u,
+    0x90befffau, 0xa4506cebu, 0xbef9a3f7u, 0xc67178f2u};
+
+static inline uint32_t mako_sha256_ror_(uint32_t x, int n) {
+    return (x >> n) | (x << (32 - n));
+}
+
+static inline void mako_sha256_block_(uint32_t h[8], const unsigned char *p) {
+    uint32_t w[64];
+    for (int i = 0; i < 16; i++) {
+        w[i] = ((uint32_t)p[i * 4] << 24) | ((uint32_t)p[i * 4 + 1] << 16)
+             | ((uint32_t)p[i * 4 + 2] << 8) | (uint32_t)p[i * 4 + 3];
+    }
+    for (int i = 16; i < 64; i++) {
+        uint32_t s0 = mako_sha256_ror_(w[i - 15], 7) ^ mako_sha256_ror_(w[i - 15], 18)
+                    ^ (w[i - 15] >> 3);
+        uint32_t s1 = mako_sha256_ror_(w[i - 2], 17) ^ mako_sha256_ror_(w[i - 2], 19)
+                    ^ (w[i - 2] >> 10);
+        w[i] = w[i - 16] + s0 + w[i - 7] + s1;
+    }
+    uint32_t a = h[0], b = h[1], c = h[2], d = h[3];
+    uint32_t e = h[4], f = h[5], g = h[6], hh = h[7];
+    for (int i = 0; i < 64; i++) {
+        uint32_t S1 = mako_sha256_ror_(e, 6) ^ mako_sha256_ror_(e, 11) ^ mako_sha256_ror_(e, 25);
+        uint32_t ch = (e & f) ^ ((~e) & g);
+        uint32_t t1 = hh + S1 + ch + mako_sha256_k_[i] + w[i];
+        uint32_t S0 = mako_sha256_ror_(a, 2) ^ mako_sha256_ror_(a, 13) ^ mako_sha256_ror_(a, 22);
+        uint32_t maj = (a & b) ^ (a & c) ^ (b & c);
+        uint32_t t2 = S0 + maj;
+        hh = g; g = f; f = e; e = d + t1;
+        d = c; c = b; b = a; a = t1 + t2;
+    }
+    h[0] += a; h[1] += b; h[2] += c; h[3] += d;
+    h[4] += e; h[5] += f; h[6] += g; h[7] += hh;
+}
+
+static inline void mako_sha256_digest_(const unsigned char *data, size_t len,
+                                       unsigned char out[32]) {
+    uint32_t h[8] = {0x6a09e667u, 0xbb67ae85u, 0x3c6ef372u, 0xa54ff53au,
+                     0x510e527fu, 0x9b05688cu, 0x1f83d9abu, 0x5be0cd19u};
+    const unsigned char *p = data ? data : (const unsigned char *)"";
+    size_t i = 0;
+    /* `len - i` is safe: i advances in 64-byte steps and never passes len. */
+    while (len - i >= 64) {
+        mako_sha256_block_(h, p + i);
+        i += 64;
+    }
+    unsigned char tail[128];
+    size_t r = len - i; /* r <= 63 */
+    if (r) memcpy(tail, p + i, r);
+    tail[r++] = 0x80;
+    size_t pad = (r <= 56) ? (56 - r) : (120 - r);
+    memset(tail + r, 0, pad);
+    r += pad;
+    uint64_t bits = (uint64_t)len * 8u;
+    for (int j = 7; j >= 0; j--) tail[r++] = (unsigned char)((bits >> (j * 8)) & 0xffu);
+    for (size_t o = 0; o < r; o += 64) mako_sha256_block_(h, tail + o);
+    for (int j = 0; j < 8; j++) {
+        out[j * 4] = (unsigned char)(h[j] >> 24);
+        out[j * 4 + 1] = (unsigned char)(h[j] >> 16);
+        out[j * 4 + 2] = (unsigned char)(h[j] >> 8);
+        out[j * 4 + 3] = (unsigned char)h[j];
+    }
+}
+
+/* HMAC-SHA256 (RFC 2104). */
+static inline int mako_hmac_sha256_digest_(const unsigned char *key, size_t klen,
+                                           const unsigned char *msg, size_t mlen,
+                                           unsigned char out[32]) {
+    unsigned char k[64];
+    memset(k, 0, sizeof(k));
+    if (klen > 64) {
+        mako_sha256_digest_(key, klen, k);
+    } else if (klen) {
+        memcpy(k, key, klen);
+    }
+    unsigned char ipad[64], opad[64];
+    for (int i = 0; i < 64; i++) {
+        ipad[i] = (unsigned char)(k[i] ^ 0x36);
+        opad[i] = (unsigned char)(k[i] ^ 0x5c);
+    }
+    if (mlen > (size_t)-1 - 64) return 0; /* refuse a length that would wrap */
+    unsigned char inner[32];
+    size_t n = 64 + mlen;
+    unsigned char *b = (unsigned char *)malloc(n);
+    if (!b) return 0;
+    memcpy(b, ipad, 64);
+    if (mlen) memcpy(b + 64, msg, mlen);
+    mako_sha256_digest_(b, n, inner);
+    free(b);
+    unsigned char outer[96];
+    memcpy(outer, opad, 64);
+    memcpy(outer + 64, inner, 32);
+    mako_sha256_digest_(outer, sizeof(outer), out);
+    return 1;
+}
+
+/* PBKDF2-HMAC-SHA256 (RFC 2898). */
+static inline int mako_pbkdf2_sha256_(const unsigned char *pw, size_t pwlen,
+                                      const unsigned char *salt, size_t saltlen,
+                                      uint64_t iters, unsigned char *out, size_t dklen) {
+    if (!iters || !dklen) return 0;
+    if (saltlen > (size_t)-1 - 4) return 0;
+    unsigned char *si = (unsigned char *)malloc(saltlen + 4);
+    if (!si) return 0;
+    if (saltlen) memcpy(si, salt, saltlen);
+    size_t done = 0;
+    uint32_t block = 1;
+    while (done < dklen) {
+        si[saltlen] = (unsigned char)(block >> 24);
+        si[saltlen + 1] = (unsigned char)(block >> 16);
+        si[saltlen + 2] = (unsigned char)(block >> 8);
+        si[saltlen + 3] = (unsigned char)block;
+        unsigned char u[32], t[32];
+        if (!mako_hmac_sha256_digest_(pw, pwlen, si, saltlen + 4, u)) {
+            free(si);
+            return 0;
+        }
+        memcpy(t, u, 32);
+        for (uint64_t it = 1; it < iters; it++) {
+            if (!mako_hmac_sha256_digest_(pw, pwlen, u, 32, u)) {
+                free(si);
+                return 0;
+            }
+            for (int j = 0; j < 32; j++) t[j] ^= u[j];
+        }
+        size_t take = dklen - done < 32 ? dklen - done : 32;
+        memcpy(out + done, t, take);
+        done += take;
+        block++;
+    }
+    free(si);
+    return 1;
+}
+
 static inline MakoString mako_sha256_hex(MakoString s) {
     unsigned char dig[32];
 #if defined(MAKO_HAS_CC)
@@ -6364,13 +6516,7 @@ static inline MakoString mako_sha256_hex(MakoString s) {
 #elif defined(MAKO_HAS_OPENSSL)
     SHA256((const unsigned char *)s.data, s.len, dig);
 #else
-    /* Fallback: not cryptographic — FNV-ish fill for portability */
-    uint64_t h = 0xcbf29ce484222325ULL;
-    for (size_t i = 0; i < s.len; i++) {
-        h ^= (unsigned char)s.data[i];
-        h *= 0x100000001b3ULL;
-    }
-    for (int i = 0; i < 32; i++) dig[i] = (unsigned char)((h >> ((i % 8) * 8)) & 0xff);
+    mako_sha256_digest_((const unsigned char *)(s.data ? s.data : ""), s.len, dig);
 #endif
     char *out = (char *)malloc(65);
     for (int i = 0; i < 32; i++) sprintf(out + i * 2, "%02x", dig[i]);
@@ -6449,20 +6595,11 @@ static inline MakoString mako_hmac_sha256_raw(MakoString key, MakoString msg) {
     unsigned int len = 32;
     HMAC(EVP_sha256(), key.data, (int)key.len, (const unsigned char *)msg.data, msg.len, dig, &len);
 #else
-    {
-        /* Non-crypto fallback: reuse hex digest bytes (demo only). */
-        MakoString h = mako_hmac_sha256_hex(key, msg);
-        if (!h.data || h.len < 64) { mako_str_free(h); return mako_str_from_cstr(""); }
-        char *d = (char *)malloc(33);
-        if (!d) { mako_str_free(h); return mako_str_from_cstr(""); }
-        for (int i = 0; i < 32; i++) {
-            unsigned int v = 0;
-            sscanf(h.data + i * 2, "%02x", &v);
-            d[i] = (char)v;
-        }
-        d[32] = 0;
-        mako_str_free(h);
-        return (MakoString){d, 32};
+    if (!mako_hmac_sha256_digest_(
+            (const unsigned char *)(key.data ? key.data : ""), key.len,
+            (const unsigned char *)(msg.data ? msg.data : ""), msg.len, dig
+        )) {
+        return mako_str_from_cstr("");
     }
 #endif
     {
@@ -6560,6 +6697,11 @@ static inline MakoString mako_pbkdf2_sha256(MakoString password, MakoString salt
     ok = PKCS5_PBKDF2_HMAC(password.data ? password.data : "", (int)password.len,
                            (const unsigned char *)(salt.data ? salt.data : ""), (int)salt.len,
                            (int)iterations, EVP_sha256(), (int)dklen, out) == 1;
+#else
+    ok = mako_pbkdf2_sha256_((const unsigned char *)(password.data ? password.data : ""),
+                             password.len,
+                             (const unsigned char *)(salt.data ? salt.data : ""), salt.len,
+                             (uint64_t)iterations, out, (size_t)dklen);
 #endif
     if (!ok) { free(out); return mako_str_from_cstr(""); }
     out[dklen] = 0;
