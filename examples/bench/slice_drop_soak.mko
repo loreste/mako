@@ -29,6 +29,18 @@ fn shout(n: int) -> string {
     return str_to_upper(a)
 }
 
+// One more level of indirection: a user function cannot return a borrow of its
+// argument (every escape path clones), so the caller still owns `a` and must
+// free it. Transferring through the call instead leaked the source string.
+fn upper_of(s: string) -> string {
+    return str_to_upper(s)
+}
+
+fn via_fn(n: int) -> string {
+    let a = str_repeat("z", n)
+    return upper_of(a)
+}
+
 fn main() {
     let n = black_box(200000)
     let mut i = 0
@@ -42,6 +54,13 @@ fn main() {
     i = 0
     while i < 2000 {
         let s = shout(m)
+        acc = acc + str_len(s)
+        i = i + 1
+    }
+
+    i = 0
+    while i < 2000 {
+        let s = via_fn(m)
         acc = acc + str_len(s)
         i = i + 1
     }

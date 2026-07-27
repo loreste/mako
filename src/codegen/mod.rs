@@ -3839,6 +3839,14 @@ impl Codegen {
                     {
                         return;
                     }
+                    // A user function cannot hand back a borrow of an argument:
+                    // it never frees a parameter, and every escape path clones —
+                    // bare return, struct field, indexed element, struct literal,
+                    // bag payload, tuple element, map insert. So the argument is
+                    // still the caller's to free, and transferring leaked it.
+                    if self.fn_ret_types.contains_key(name) {
+                        return;
+                    }
                 }
                 for a in args {
                     self.transfer_own_on_return(a);
