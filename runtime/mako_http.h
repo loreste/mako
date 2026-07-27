@@ -122,6 +122,7 @@ typedef struct {
 #define MAKO_HTTP_CONN_MAX 1024
 static MakoHttpConn mako_http_conns[MAKO_HTTP_CONN_MAX];
 static volatile atomic_llong mako_http_active_conn_count = 0;
+static pthread_mutex_t mako_http_conn_mu = MAKO_MUTEX_INIT;
 
 /* Keep the atomic active-count in sync with c->live transitions. */
 static inline void mako_http_conn_set_live(MakoHttpConn *c, int live) {
@@ -497,7 +498,9 @@ static inline void mako_http_reap_dead(void) {
         if (FD_ISSET(c->fd, &efds)) {
             mako_sock_close(c->fd);
             mako_arena_free(&c->arena);
+            pthread_mutex_lock(&mako_http_conn_mu);
             mako_http_conn_set_live(c, 0);
+            pthread_mutex_unlock(&mako_http_conn_mu);
             continue;
         }
         if (!FD_ISSET(c->fd, &rfds)) continue;
@@ -507,7 +510,9 @@ static inline void mako_http_reap_dead(void) {
         if (n == 0) {
             mako_sock_close(c->fd);
             mako_arena_free(&c->arena);
+            pthread_mutex_lock(&mako_http_conn_mu);
             mako_http_conn_set_live(c, 0);
+            pthread_mutex_unlock(&mako_http_conn_mu);
         }
         /* n > 0 → leave for http_next; n < 0 → leave (EAGAIN etc.) */
     }
@@ -524,22 +529,26 @@ static inline int64_t mako_http_accept(int64_t listen_fd) {
     if (n < 0) n = 0;
     req[n] = 0;
 
+    /* Atomic slot claim: lock prevents two threads grabbing the same slot. */
+    pthread_mutex_lock(&mako_http_conn_mu);
     int slot = -1;
     for (int i = 0; i < MAKO_HTTP_CONN_MAX; i++) {
         if (!mako_http_conns[i].live) {
             slot = i;
+            mako_http_conns[i].live = true; /* claim under lock */
             break;
         }
     }
+    pthread_mutex_unlock(&mako_http_conn_mu);
     if (slot < 0) {
         mako_sock_close(cfd);
         fprintf(stderr, "error: http_accept: connection table full\n");
         return -1;
     }
     MakoHttpConn *c = &mako_http_conns[slot];
-    memset(c, 0, sizeof(*c));
     c->fd = cfd;
-    mako_http_conn_set_live(c, 1);
+    atomic_fetch_add_explicit(&mako_http_active_conn_count, 1, memory_order_relaxed);
+    c->keep_alive = false;
     c->arena = mako_arena_new();
     mako_http_fill_conn(c, req, (size_t)n);
     return (int64_t)slot;
@@ -1179,7 +1188,9 @@ static inline int64_t mako_http_close(int64_t conn) {
     MakoHttpConn *c = &mako_http_conns[conn];
     mako_sock_close(c->fd);
     mako_arena_free(&c->arena);
+    pthread_mutex_lock(&mako_http_conn_mu);
     mako_http_conn_set_live(c, 0);
+    pthread_mutex_unlock(&mako_http_conn_mu);
     return 1;
 }
 
