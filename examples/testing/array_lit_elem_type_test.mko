@@ -1,0 +1,44 @@
+// Array literals dispatched on element *syntax*, not element type. The checks
+// only matched `Expr::String` / `Expr::Float` / `Expr::Bool` / `Expr::Array`,
+// so a literal holding a *variable* fell through to the int-family path and
+// emitted `int64_t lit[] = { s }` — a compile error, not a wrong answer.
+//
+// Each case below holds a variable rather than a literal.
+
+fn TestArrayLitFromStringVar() {
+    let s = str_repeat("x", 3)
+    let a = [s]
+    assert_eq(len(a), 1)
+    assert_eq_str(a[0], "xxx")
+}
+
+fn TestArrayLitFromFloatVar() {
+    let f = 1.5
+    let a = [f]
+    assert_eq(len(a), 1)
+    assert(a[0] > 1.4)
+}
+
+fn TestArrayLitFromBoolVar() {
+    let b = true
+    let a = [b]
+    assert_eq(len(a), 1)
+    assert(a[0])
+}
+
+fn TestArrayLitFromSliceVar() {
+    let mut x = make([]int, 0, 2)
+    x = append(x, 7)
+    let w = [x]
+    assert_eq(len(w), 1)
+    assert_eq(len(w[0]), 1)
+    assert_eq(w[0][0], 7)
+}
+
+fn TestArrayLitMixedVarAndLiteral() {
+    let s = str_repeat("y", 2)
+    let a = [s, "z"]
+    assert_eq(len(a), 2)
+    assert_eq_str(a[0], "yy")
+    assert_eq_str(a[1], "z")
+}

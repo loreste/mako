@@ -33081,6 +33081,60 @@ impl Codegen {
                         ));
                         return (outer, tmp);
                     }
+                    // Dispatch on the element *type*, not its syntax. The
+                    // literal-shape checks above only match `Expr::String`,
+                    // `Expr::Float`, `Expr::Bool` and `Expr::Array`, so `[s]`
+                    // holding a string *variable* matched none of them and fell
+                    // into the int-family path below, emitting
+                    // `int64_t lit[] = { s }` — which does not compile.
+                    let elem_arr = match ty0.as_str() {
+                        "MakoString" => Some(("MakoString", "MakoStrArray", "mako_str_array_of")),
+                        "double" => Some(("double", "MakoFloatArray", "mako_float_array_view")),
+                        "bool" => Some(("bool", "MakoBoolArray", "mako_bool_array_view")),
+                        _ => None,
+                    };
+                    if let Some((c_elem, outer, ctor)) = elem_arr {
+                        let mut vals = vec![v0];
+                        for e in elems.iter().skip(1) {
+                            let (_, v) = self.emit_expr(e);
+                            vals.push(v);
+                        }
+                        let tmp = self.fresh("earr");
+                        let lit = self.fresh("elit");
+                        self.line(&format!("{c_elem} {lit}[] = {{ {} }};", vals.join(", ")));
+                        self.line(&format!(
+                            "{outer} {tmp} = {ctor}({lit}, {});",
+                            elems.len()
+                        ));
+                        return (outer.to_string(), tmp);
+                    }
+                    // Element is itself a slice (`[a]` where a is []int): build
+                    // the nested array the same way the `[[…]]` literal does.
+                    //
+                    // `mako_arr_*_of` memcpy's the element headers and the outer
+                    // free deep-frees each inner, so it *takes* ownership. The
+                    // `[[…]]` path only ever hands it fresh temps; a variable
+                    // element must be moved (or cloned if borrowed) or the local
+                    // and the outer array both free the same buffer.
+                    if ty0.ends_with("Array") || ty0.starts_with("MakoArr_") {
+                        let v0 = self.prepare_own_store_rhs(&elems[0], &ty0, v0);
+                        let mut vals = vec![v0];
+                        for e in elems.iter().skip(1) {
+                            let (ety, v) = self.emit_expr(e);
+                            let v = self.prepare_own_store_rhs(e, &ety, v);
+                            vals.push(v);
+                        }
+                        let tag = c_type_mono_tag(&ty0);
+                        let outer = format!("MakoArr_{tag}");
+                        let tmp = self.fresh("varr");
+                        let lit = self.fresh("vlit");
+                        self.line(&format!("{ty0} {lit}[] = {{ {} }};", vals.join(", ")));
+                        self.line(&format!(
+                            "{outer} {tmp} = mako_arr_{tag}_of({lit}, {});",
+                            elems.len()
+                        ));
+                        return (outer, tmp);
+                    }
                     // Non-map first element: int-family array (legacy path).
                     // Stack buffer + cap=0 view — zero malloc/free in hot loops.
                     let mut vals = vec![v0];
