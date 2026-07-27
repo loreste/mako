@@ -3630,10 +3630,37 @@ impl Codegen {
         self.own_drop_live = live;
     }
 
-    /// True when expr is a field access on a struct (e.g. `self.name`, `s.color`).
-    /// Returning such a field borrows from the struct — must clone for ownership transfer.
+    /// True when expr borrows out of a container it does not own: a struct field
+    /// (`self.name`, `s.color`) or an element (`a[0]`). Returning either hands
+    /// back a borrow — `mako_str_array_get` is `return a.data[i]` — so it must be
+    /// cloned for ownership transfer. `prepare_own_store_rhs` already clones both
+    /// shapes on a store; a return is the same escape.
     fn is_field_borrow_return(expr: &Expr) -> bool {
-        matches!(expr, Expr::Field { .. })
+        matches!(expr, Expr::Field { .. } | Expr::Index { .. })
+    }
+
+    /// Payload for a container that stores its element verbatim — bag
+    /// constructors (`Some`/`Ok`/`Err`) and tuples.
+    ///
+    /// `mako_some_str` is `o.ok_s = s` and a tuple emits `tup_0._0 = s`, so a
+    /// *borrowed* payload leaves the container pointing at data owned elsewhere,
+    /// and `return Some(param)` / `return (param, 1)` hands the caller back a
+    /// borrow of its own argument. Clone those. A live owner is deliberately
+    /// left alone: the source local stays the owner and frees at scope exit,
+    /// which is the existing contract (a fresh temp payload is already owned
+    /// and dropped by the container).
+    fn clone_if_borrowed(&mut self, value: &Expr, c_ty: &str, val: String) -> String {
+        if Self::own_free_fn(c_ty).is_none() {
+            return val;
+        }
+        match value {
+            Expr::Ident(n)
+                if !self.own_drop_live.contains(&mangle(n)) && self.locals.contains_key(n) =>
+            {
+                self.clone_own_val(c_ty, &val)
+            }
+            _ => val,
+        }
     }
 
     /// RHS for store into a new Own destination: move live owner, else clone borrows/aliases.
@@ -14880,6 +14907,7 @@ impl Codegen {
                         "Ok" => {
                             let (vty, v) = self.emit_expr(&args[0]);
                             if vty == "MakoString" {
+                                let v = self.clone_if_borrowed(&args[0], &vty, v);
                                 return ("MakoResultInt".into(), format!("mako_ok_str({v})"));
                             }
                             if vty == "double" {
@@ -15135,6 +15163,7 @@ impl Codegen {
                                 );
                             }
                             if vty == "MakoString" {
+                                let v = self.clone_if_borrowed(&args[0], &vty, v);
                                 return ("MakoOptionInt".into(), format!("mako_some_str({v})"));
                             }
                             if vty == "double" {
@@ -32825,6 +32854,7 @@ impl Codegen {
                         tys.push(t);
                         vals.push(tmp);
                     } else {
+                        let v = self.clone_if_borrowed(e, &t, v);
                         tys.push(t);
                         vals.push(v);
                     }
