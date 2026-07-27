@@ -96,6 +96,8 @@ fn llvm_type<'ctx>(context: &'ctx Context, ty: Type) -> BasicTypeEnum<'ctx> {
         | Type::ShareInt
         | Type::FloatSlice
         | Type::ByteSlice
+        // MakoStrBuilder* — pointer ABI like the rest of this group.
+        | Type::Builder
         | Type::BoolSlice => context.ptr_type(Default::default()).into(),
         // A struct value is an owning heap pointer; its concrete layout is
         // carried separately (see `struct_layouts`) for field GEPs.
@@ -358,6 +360,7 @@ fn emit_instruction<'ctx>(
                 | Type::StructSlice(_)
                 | Type::BoolSlice
                 | Type::ShareInt
+                | Type::Builder
                 | Type::Struct(_) => {
                     // Null pointer constants for pointer-ABI types.
                     if *value == 0 {
