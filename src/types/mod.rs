@@ -354,6 +354,23 @@ pub struct TypeChecker {
 }
 
 impl TypeChecker {
+    /// Builtin names with rendered signatures, for editor completion.
+    ///
+    /// `fns` is the one place that knows the whole builtin surface (~2500
+    /// entries). The LSP previously completed from a hand-written seed of a
+    /// dozen names, so almost nothing the language offers was discoverable and
+    /// the list drifted every time a builtin landed. Read it from here instead.
+    pub fn builtin_signatures() -> Vec<(String, String)> {
+        let tc = TypeChecker::new();
+        let mut out: Vec<(String, String)> = tc
+            .fns
+            .iter()
+            .map(|(name, ty)| (name.clone(), ty.display()))
+            .collect();
+        out.sort_by(|a, b| a.0.cmp(&b.0));
+        out
+    }
+
     pub fn new() -> Self {
         let mut fns = HashMap::new();
         // Builtins

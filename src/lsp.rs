@@ -1236,6 +1236,15 @@ fn publish_diagnostics(stdout: &mut impl Write, uri: &str, src: &str) -> io::Res
     write_message(stdout, &body)
 }
 
+/// Builtin (name, signature) pairs, computed once.
+///
+/// TypeChecker::new() builds the whole builtin table, which is far too much work
+/// to repeat per keystroke, so cache it for the life of the server.
+fn builtin_completions() -> &'static [(String, String)] {
+    static CACHE: std::sync::OnceLock<Vec<(String, String)>> = std::sync::OnceLock::new();
+    CACHE.get_or_init(TypeChecker::builtin_signatures)
+}
+
 fn completion_items(prefix: &str) -> String {
     let mut items = Vec::new();
     for kw in KEYWORDS {
@@ -1245,24 +1254,29 @@ fn completion_items(prefix: &str) -> String {
             ));
         }
     }
-    // builtins seed
-    for b in [
-        "print",
-        "print_int",
-        "assert",
-        "assert_eq",
-        "len",
-        "append",
-        "regex_match",
-        "regex_find",
-        "regex_capture",
-        "sleep_ms",
-        "now_ms",
-        "now_ns",
-        "exit",
-    ] {
-        if prefix.is_empty() || b.starts_with(prefix) {
-            items.push(format!(r#"{{"label":"{b}","kind":3,"detail":"builtin"}}"#));
+    // Builtins come from the type checker's own table (~2500 entries) rather
+    // than a hand-written seed, so completion covers what the language actually
+    // offers and cannot drift as builtins land. Each item carries its rendered
+    // signature as the detail.
+    //
+    // Completing on an empty prefix would ship the whole table on every
+    // keystroke, so require a prefix before offering builtins; keywords still
+    // complete unprefixed.
+    if !prefix.is_empty() {
+        let mut n = 0usize;
+        for (name, sig) in builtin_completions() {
+            if !name.starts_with(prefix) {
+                continue;
+            }
+            items.push(format!(
+                r#"{{"label":"{}","kind":3,"detail":"{}"}}"#,
+                json_escape(name),
+                json_escape(sig)
+            ));
+            n += 1;
+            if n >= 200 {
+                break; // editors truncate anyway; keep the payload small
+            }
         }
     }
     format!("[{}]", items.join(","))
@@ -1398,7 +1412,11 @@ pub fn run_stdio() -> io::Result<()> {
 
         match method {
             "initialize" => {
-                let result = r#"{"capabilities":{"hoverProvider":true,"completionProvider":{"triggerCharacters":["."]},"textDocumentSync":{"openClose":true,"change":1},"definitionProvider":true,"documentSymbolProvider":true,"workspaceSymbolProvider":true,"referencesProvider":true,"codeActionProvider":true,"signatureHelpProvider":{"triggerCharacters":["(",","]},"renameProvider":{"prepareProvider":true},"inlayHintProvider":true},"serverInfo":{"name":"mako-lsp","version":"0.5.0"}}"#;
+                // Report the crate version rather than a literal: the hardcoded
+                // one had drifted to 0.5.0 while the crate was 0.4.16, so editors
+                // showed a version that does not exist.
+                let caps = r#"{"capabilities":{"hoverProvider":true,"completionProvider":{"triggerCharacters":["."]},"textDocumentSync":{"openClose":true,"change":1},"definitionProvider":true,"documentSymbolProvider":true,"workspaceSymbolProvider":true,"referencesProvider":true,"codeActionProvider":true,"signatureHelpProvider":{"triggerCharacters":["(",","]},"renameProvider":{"prepareProvider":true},"inlayHintProvider":true},"serverInfo":{"name":"mako-lsp","version":""#;
+                let result = format!("{caps}{}\"}}}}", env!("CARGO_PKG_VERSION"));
                 let body = format!(r#"{{"jsonrpc":"2.0","id":{id},"result":{result}}}"#);
                 write_message(&mut stdout, &body)?;
             }
