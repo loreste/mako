@@ -1313,10 +1313,10 @@ static inline int64_t mako_tls_make_csr(MakoString csr_path, MakoString key_path
 /* Client context with SSL_VERIFY_NONE — demos / self-signed only.
  * WARNING: disables certificate verification. Do not use in production. */
 static inline void *mako_tls_client_new_insecure(void) {
-    static int warned = 0;
+    static volatile int warned = 0;
     if (!warned) {
+        warned = 1; /* benign race: worst case is two warnings */
         fprintf(stderr, "tls: using insecure client (SSL_VERIFY_NONE) — not for production\n");
-        warned = 1;
     }
     SSL_CTX *ctx = mako_tls_make_client_ctx();
     if (!ctx) return NULL;
@@ -4564,8 +4564,8 @@ typedef struct {
 static MakoTlsPoolSlot mako_tls_pool_slots[MAKO_TLS_POOL_MAX];
 static pthread_mutex_t mako_tls_pool_mu = MAKO_MUTEX_INIT;
 
-/* Handle layout: low 16 bits = slot+1, upper 48 bits = generation counter.
- * 48-bit gen (281 trillion) prevents ABA on high-churn pools. */
+/* Handle layout: low 16 bits = slot+1, bits 16-47 = generation counter.
+ * 32-bit gen (~4 billion reuses per slot) prevents ABA on high-churn pools. */
 static inline int64_t mako_tls_pool_pack_handle(int slot, uint32_t gen) {
     if (gen == 0) gen = 1;
     return (int64_t)((uint64_t)((slot + 1) & 0xffff)

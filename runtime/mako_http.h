@@ -546,13 +546,22 @@ static inline int64_t mako_http_accept(int64_t listen_fd) {
     if (n < 0) n = 0;
     req[n] = 0;
 
-    /* Atomic slot claim: lock prevents two threads grabbing the same slot. */
+    /* Atomic slot claim: lock prevents two threads grabbing the same slot.
+     * All fields are initialized before setting live — no partial init visible. */
     pthread_mutex_lock(&mako_http_conn_mu);
     int slot = -1;
     for (int i = 0; i < MAKO_HTTP_CONN_MAX; i++) {
         if (!mako_http_conns[i].live) {
             slot = i;
-            mako_http_conns[i].live = true; /* claim under lock */
+            /* Initialize fully under lock before marking live. */
+            MakoHttpConn *c = &mako_http_conns[i];
+            c->fd = cfd;
+            c->accept_ms = mako_now_ms();
+            c->keep_alive = false;
+            c->arena = mako_arena_new();
+            mako_http_fill_conn(c, req, (size_t)n);
+            c->live = true;
+            atomic_fetch_add_explicit(&mako_http_active_conn_count, 1, memory_order_relaxed);
             break;
         }
     }
@@ -562,13 +571,6 @@ static inline int64_t mako_http_accept(int64_t listen_fd) {
         fprintf(stderr, "error: http_accept: connection table full\n");
         return -1;
     }
-    MakoHttpConn *c = &mako_http_conns[slot];
-    c->fd = cfd;
-    c->accept_ms = mako_now_ms();
-    atomic_fetch_add_explicit(&mako_http_active_conn_count, 1, memory_order_relaxed);
-    c->keep_alive = false;
-    c->arena = mako_arena_new();
-    mako_http_fill_conn(c, req, (size_t)n);
     return (int64_t)slot;
 }
 
