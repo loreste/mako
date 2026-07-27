@@ -108,7 +108,7 @@ def rss_kib(pid: int) -> int:
             for line in f:
                 if line.startswith("VmRSS:"):
                     return int(line.split()[1])
-    except FileNotFoundError:
+    except (FileNotFoundError, ProcessLookupError, OSError):
         return 0
     return 0
 
