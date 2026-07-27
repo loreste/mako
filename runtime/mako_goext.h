@@ -579,6 +579,111 @@ static inline MakoString mako_base32_encode(MakoString s) {
     return (MakoString){o, j};
 }
 
+/* Portable SHA-1 (RFC 3174) for hosts with neither CommonCrypto nor OpenSSL —
+ * Windows, most notably. Without it the `#else` arms below returned an empty
+ * string, so sha1_hex and hmac_sha1 silently produced "" instead of failing:
+ * an empty MAC compares equal to an empty MAC, which is a fail-open on an
+ * authentication primitive. */
+static inline void mako_sha1_block_(uint32_t h[5], const unsigned char *p) {
+    uint32_t w[80];
+    for (int i = 0; i < 16; i++) {
+        w[i] = ((uint32_t)p[i * 4] << 24) | ((uint32_t)p[i * 4 + 1] << 16)
+             | ((uint32_t)p[i * 4 + 2] << 8) | (uint32_t)p[i * 4 + 3];
+    }
+    for (int i = 16; i < 80; i++) {
+        uint32_t v = w[i - 3] ^ w[i - 8] ^ w[i - 14] ^ w[i - 16];
+        w[i] = (v << 1) | (v >> 31);
+    }
+    uint32_t a = h[0], b = h[1], c = h[2], d = h[3], e = h[4];
+    for (int i = 0; i < 80; i++) {
+        uint32_t f, k;
+        if (i < 20) {
+            f = (b & c) | ((~b) & d);
+            k = 0x5A827999u;
+        } else if (i < 40) {
+            f = b ^ c ^ d;
+            k = 0x6ED9EBA1u;
+        } else if (i < 60) {
+            f = (b & c) | (b & d) | (c & d);
+            k = 0x8F1BBCDCu;
+        } else {
+            f = b ^ c ^ d;
+            k = 0xCA62C1D6u;
+        }
+        uint32_t t = ((a << 5) | (a >> 27)) + f + e + k + w[i];
+        e = d;
+        d = c;
+        c = (b << 30) | (b >> 2);
+        b = a;
+        a = t;
+    }
+    h[0] += a;
+    h[1] += b;
+    h[2] += c;
+    h[3] += d;
+    h[4] += e;
+}
+
+static inline void mako_sha1_digest_(const unsigned char *data, size_t len,
+                                     unsigned char out[20]) {
+    uint32_t h[5] = {0x67452301u, 0xEFCDAB89u, 0x98BADCFEu, 0x10325476u, 0xC3D2E1F0u};
+    const unsigned char *p = data ? data : (const unsigned char *)"";
+    size_t i = 0;
+    /* `len - i` is safe: i advances in 64-byte steps and never passes len. */
+    while (len - i >= 64) {
+        mako_sha1_block_(h, p + i);
+        i += 64;
+    }
+    unsigned char tail[128];
+    size_t r = len - i; /* r <= 63 */
+    if (r) memcpy(tail, p + i, r);
+    tail[r++] = 0x80;
+    size_t pad = (r <= 56) ? (56 - r) : (120 - r);
+    memset(tail + r, 0, pad);
+    r += pad;
+    uint64_t bits = (uint64_t)len * 8u;
+    for (int j = 7; j >= 0; j--) tail[r++] = (unsigned char)((bits >> (j * 8)) & 0xffu);
+    for (size_t o = 0; o < r; o += 64) mako_sha1_block_(h, tail + o);
+    for (int j = 0; j < 5; j++) {
+        out[j * 4] = (unsigned char)(h[j] >> 24);
+        out[j * 4 + 1] = (unsigned char)(h[j] >> 16);
+        out[j * 4 + 2] = (unsigned char)(h[j] >> 8);
+        out[j * 4 + 3] = (unsigned char)h[j];
+    }
+}
+
+/* HMAC-SHA1 (RFC 2104) over the portable digest. */
+static inline int mako_hmac_sha1_digest_(const unsigned char *key, size_t klen,
+                                         const unsigned char *msg, size_t mlen,
+                                         unsigned char out[20]) {
+    unsigned char k[64];
+    memset(k, 0, sizeof(k));
+    if (klen > 64) {
+        mako_sha1_digest_(key, klen, k);
+    } else if (klen) {
+        memcpy(k, key, klen);
+    }
+    unsigned char ipad[64], opad[64];
+    for (int i = 0; i < 64; i++) {
+        ipad[i] = (unsigned char)(k[i] ^ 0x36);
+        opad[i] = (unsigned char)(k[i] ^ 0x5c);
+    }
+    unsigned char inner[20];
+    if (mlen > (size_t)-1 - 64) return 0; /* refuse a length that would wrap */
+    size_t n = 64 + mlen;
+    unsigned char *b = (unsigned char *)malloc(n);
+    if (!b) return 0;
+    memcpy(b, ipad, 64);
+    if (mlen) memcpy(b + 64, msg, mlen);
+    mako_sha1_digest_(b, n, inner);
+    free(b);
+    unsigned char outer[84];
+    memcpy(outer, opad, 64);
+    memcpy(outer + 64, inner, 20);
+    mako_sha1_digest_(outer, sizeof(outer), out);
+    return 1;
+}
+
 /* ---- crypto digests (portable SHA-1 / SHA-512 via CommonCrypto or OpenSSL or soft) ---- */
 static inline MakoString mako_sha1_hex(MakoString s) {
 #if defined(MAKO_HAS_CC)
@@ -598,8 +703,13 @@ static inline MakoString mako_sha1_hex(MakoString s) {
     o[40] = 0;
     return (MakoString){o, 40};
 #else
-    (void)s;
-    return mako_str_from_cstr(""); /* need CommonCrypto or OpenSSL */
+    unsigned char dig[20];
+    mako_sha1_digest_((const unsigned char *)(s.data ? s.data : ""), s.len, dig);
+    char *o = (char *)malloc(41);
+    if (!o) mako_abort("sha1_hex OOM");
+    for (int i = 0; i < 20; i++) sprintf(o + i * 2, "%02x", dig[i]);
+    o[40] = 0;
+    return (MakoString){o, 40};
 #endif
 }
 
@@ -2952,9 +3062,18 @@ static inline MakoString mako_hmac_sha1_raw(MakoString key, MakoString msg) {
     o[dlen] = 0;
     return (MakoString){o, dlen};
 #else
-    (void)key;
-    (void)msg;
-    return mako_str_from_cstr("");
+    unsigned char dig[20];
+    if (!mako_hmac_sha1_digest_(
+            (const unsigned char *)(key.data ? key.data : ""), key.len,
+            (const unsigned char *)(msg.data ? msg.data : ""), msg.len, dig
+        )) {
+        return mako_str_from_cstr("");
+    }
+    char *o = (char *)malloc(21);
+    if (!o) return mako_str_from_cstr("");
+    memcpy(o, dig, 20);
+    o[20] = 0;
+    return (MakoString){o, 20};
 #endif
 }
 
