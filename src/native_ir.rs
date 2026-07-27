@@ -5775,12 +5775,20 @@ impl<'a> FunctionLowerer<'a> {
         label: Option<String>,
         binder: &str,
         ch: Value,
+        chan_ty: Type,
         body: &crate::ast::Block,
     ) -> Result<(), IrError> {
+        // Determine the binder type from the channel element type.
+        let bind_ty = match &chan_ty {
+            Type::ChanS => Type::Str,
+            Type::ChanF => Type::F64,
+            Type::ChanP(vk) => vk.to_type(),
+            _ => Type::I64, // ChanI
+        };
         let out_slot = self.value();
         self.emit(Inst::Alloca {
             out: out_slot,
-            ty: Type::I64,
+            ty: bind_ty.clone(),
         });
         let one = self.const_int(1, Type::I64);
         let pack = self.value();
@@ -5804,15 +5812,29 @@ impl<'a> FunctionLowerer<'a> {
             args: vec![ch, pack],
             ret: Some(Type::I64),
         });
-        // pack[0] holds value when ok
+        // pack[0] holds raw int64 value when ok
         let z = self.const_int(0, Type::I64);
-        let val = self.value();
+        let raw = self.value();
         self.emit(Inst::Call {
-            out: Some(val),
+            out: Some(raw),
             function: "mako_native_pack_get".into(),
             args: vec![pack, z],
             ret: Some(Type::I64),
         });
+        // Convert raw int64 to the correct element type.
+        let val = match &chan_ty {
+            Type::ChanF => {
+                let f = self.value();
+                self.emit(Inst::Call {
+                    out: Some(f),
+                    function: "mako_native_bits_to_f64".into(),
+                    args: vec![raw],
+                    ret: Some(Type::F64),
+                });
+                f
+            }
+            _ => raw, // ChanI: already i64; ChanS/ChanP: i64 holds ptr bits
+        };
         self.emit(Inst::Store {
             ptr: out_slot,
             value: val,
@@ -5835,7 +5857,11 @@ impl<'a> FunctionLowerer<'a> {
         let locals_before = self.locals.clone();
         if binder != "_" {
             self.locals
-                .insert(binder.to_string(), (out_slot, Type::I64));
+                .insert(binder.to_string(), (out_slot, bind_ty.clone()));
+            // Mark heap-owned binders so they get dropped at end of each iteration.
+            if bind_ty.is_heap() {
+                self.heap_owned.insert(binder.to_string(), true);
+            }
         }
         self.loops.push(LoopFrame {
             label: label.clone(),
@@ -6103,16 +6129,14 @@ impl<'a> FunctionLowerer<'a> {
                 }
                 ForIter::Slice(iter_ty)
             }
-            Type::ChanI => {
+            Type::ChanI | Type::ChanS | Type::ChanF | Type::ChanP(_) => {
                 // `for v in range ch` — receive until closed.
                 if binders.len() != 1 {
                     return Err(IrError::new(
                         "native IR: channel range requires one value binder",
                     ));
                 }
-                // Handled specially below (not Counted/Slice).
-                // Reuse Slice path with a synthetic marker via special case after.
-                return self.lower_for_chan(label, &binders[0], iter_val, body);
+                return self.lower_for_chan(label, &binders[0], iter_val, iter_ty, body);
             }
             Type::Str if is_range => {
                 if binders.len() > 2 {

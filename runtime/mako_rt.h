@@ -5426,6 +5426,35 @@ static inline MakoString mako_chan_str_recv(MakoChanStr *c) {
     return v;
 }
 
+/* Recv until close: returns 1 and writes *out (owned), or 0 if closed+empty. */
+static inline int64_t mako_chan_str_recv_ok(MakoChanStr *c, MakoString *out) {
+    pthread_mutex_lock(&c->mu);
+    c->waiters_recv++;
+    while (c->count == 0 && !c->closed) {
+        pthread_cond_wait(&c->can_recv, &c->mu);
+    }
+    c->waiters_recv--;
+    if (c->count == 0 && c->closed) {
+        pthread_mutex_unlock(&c->mu);
+        return 0;
+    }
+    MakoString v;
+    if (c->cap == 0) {
+        v = c->buf[0];
+        c->buf[0] = (MakoString){NULL, 0};
+        c->count = 0;
+    } else {
+        v = c->buf[c->head];
+        c->buf[c->head] = (MakoString){NULL, 0};
+        c->head = (c->head + 1) % c->cap;
+        c->count--;
+    }
+    pthread_cond_broadcast(&c->can_send);
+    pthread_mutex_unlock(&c->mu);
+    if (out) *out = v;
+    return 1;
+}
+
 static inline int64_t mako_chan_str_len(MakoChanStr *c) {
     if (!c) return 0;
     pthread_mutex_lock(&c->mu);
@@ -5614,6 +5643,35 @@ static inline void *mako_chan_ptr_recv(MakoChanPtr *c) {
     pthread_cond_broadcast(&c->can_send);
     pthread_mutex_unlock(&c->mu);
     return v;
+}
+
+/* Recv until close: returns 1 and writes *out (caller-owned), or 0 if closed+empty. */
+static inline int64_t mako_chan_ptr_recv_ok(MakoChanPtr *c, void **out) {
+    pthread_mutex_lock(&c->mu);
+    c->waiters_recv++;
+    while (c->count == 0 && !c->closed) {
+        pthread_cond_wait(&c->can_recv, &c->mu);
+    }
+    c->waiters_recv--;
+    if (c->count == 0 && c->closed) {
+        pthread_mutex_unlock(&c->mu);
+        return 0;
+    }
+    void *v;
+    if (c->cap == 0) {
+        v = c->buf[0];
+        c->buf[0] = NULL;
+        c->count = 0;
+    } else {
+        v = c->buf[c->head];
+        c->buf[c->head] = NULL;
+        c->head = (c->head + 1) % c->cap;
+        c->count--;
+    }
+    pthread_cond_broadcast(&c->can_send);
+    pthread_mutex_unlock(&c->mu);
+    if (out) *out = v;
+    return 1;
 }
 
 static inline void mako_chan_ptr_close(MakoChanPtr *c) {

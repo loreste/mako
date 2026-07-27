@@ -12669,6 +12669,7 @@ impl Codegen {
 
         // Channel range: receive until close (`for v in range ch`)
         if ty == "MakoChan*" && is_range {
+            let is_f64 = self.chan_float.contains(&val);
             let vtmp = self.fresh("cv");
             let ok = self.fresh("cok");
             self.line(&format!("int64_t {vtmp};"));
@@ -12681,8 +12682,94 @@ impl Codegen {
             match binders {
                 [] => {}
                 [a] if a != "_" => {
-                    self.line(&format!("int64_t {} = {vtmp};", mangle(a)));
-                    self.locals.insert(a.clone(), "int64_t".into());
+                    if is_f64 {
+                        self.line(&format!("double {} = mako_bits_to_f64({vtmp});", mangle(a)));
+                        self.locals.insert(a.clone(), "double".into());
+                    } else {
+                        self.line(&format!("int64_t {} = {vtmp};", mangle(a)));
+                        self.locals.insert(a.clone(), "int64_t".into());
+                    }
+                }
+                _ => {}
+            }
+            for s in &body.stmts {
+                self.emit_stmt(s);
+            }
+            if let Some(lab) = label {
+                self.emit_line(format_args!("__mako_cont_{lab}: ;"));
+            }
+            self.indent -= 1;
+            self.line("}");
+            if let Some(lab) = label {
+                self.emit_line(format_args!("__mako_break_{lab}: ;"));
+            }
+            return;
+        }
+
+        // String channel range: receive MakoString until close
+        if ty == "MakoChanStr*" && is_range {
+            let vtmp = self.fresh("csv");
+            let ok = self.fresh("csok");
+            self.line(&format!("MakoString {vtmp};"));
+            self.line("while (1) {");
+            self.indent += 1;
+            self.line(&format!(
+                "int64_t {ok} = mako_chan_str_recv_ok({val}, &{vtmp});"
+            ));
+            self.line(&format!("if (!{ok}) break;"));
+            match binders {
+                [] => {}
+                [a] if a != "_" => {
+                    self.line(&format!("MakoString {} = {vtmp};", mangle(a)));
+                    self.locals.insert(a.clone(), "MakoString".into());
+                }
+                _ => {}
+            }
+            for s in &body.stmts {
+                self.emit_stmt(s);
+            }
+            if let Some(lab) = label {
+                self.emit_line(format_args!("__mako_cont_{lab}: ;"));
+            }
+            self.indent -= 1;
+            self.line("}");
+            if let Some(lab) = label {
+                self.emit_line(format_args!("__mako_break_{lab}: ;"));
+            }
+            return;
+        }
+
+        // Struct/ptr channel range: receive boxed pointer until close
+        if ty == "MakoChanPtr*" && is_range {
+            let st = self
+                .chan_ptr_elems
+                .get(&val)
+                .cloned()
+                .unwrap_or_else(|| "int64_t".into());
+            let cname = self
+                .structs
+                .get(&st)
+                .map(|s| s.c_name.clone())
+                .or_else(|| self.enums.get(&st).map(|e| e.c_name.clone()))
+                .unwrap_or_else(|| st.clone());
+            let ptmp = self.fresh("cpv");
+            let ok = self.fresh("cpok");
+            self.line(&format!("void *{ptmp} = NULL;"));
+            self.line("while (1) {");
+            self.indent += 1;
+            self.line(&format!(
+                "int64_t {ok} = mako_chan_ptr_recv_ok({val}, &{ptmp});"
+            ));
+            self.line(&format!("if (!{ok}) break;"));
+            match binders {
+                [] => {}
+                [a] if a != "_" => {
+                    let bvar = mangle(a);
+                    self.line(&format!("{cname} {bvar};"));
+                    self.line(&format!(
+                        "if ({ptmp}) {{ {bvar} = *({cname}*){ptmp}; mako_box_free({ptmp}, sizeof({cname})); }} else {{ memset(&{bvar}, 0, sizeof({bvar})); }}"
+                    ));
+                    self.locals.insert(a.clone(), cname.clone());
                 }
                 _ => {}
             }
