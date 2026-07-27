@@ -32668,9 +32668,12 @@ impl Codegen {
                     let (fty, v) = self.emit_expr(fexpr);
                     // Heapify POD stack/view slices stored in struct fields.
                     let v = self.ensure_slice_owned(&fty, v);
-                    if let Expr::Ident(n) = fexpr {
-                        self.note_own_drop_moved(&mangle(n));
-                    }
+                    // Move a live owner into the field, but *clone* a borrow.
+                    // A bare move of a parameter stored the caller's buffer in
+                    // the returned struct (`st_0.s = s`), so the struct outlived
+                    // a borrow it did not own — safe only because the caller was
+                    // then forced to leak the original.
+                    let v = self.prepare_own_store_rhs(fexpr, &fty, v);
                     self.line(&format!("{tmp}.{fname} = {v};"));
                 }
                 (cty, tmp)
@@ -32765,9 +32768,8 @@ impl Codegen {
                 for (i, vexpr) in values.iter().enumerate() {
                     let (fty, v) = self.emit_expr(vexpr);
                     let v = self.ensure_slice_owned(&fty, v);
-                    if let Expr::Ident(n) = vexpr {
-                        self.note_own_drop_moved(&mangle(n));
-                    }
+                    // Same as the named form: move a live owner, clone a borrow.
+                    let v = self.prepare_own_store_rhs(vexpr, &fty, v);
                     if let Some(fname) = field_names.get(i) {
                         self.line(&format!("{tmp}.{fname} = {v};"));
                     }
