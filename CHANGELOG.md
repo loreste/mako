@@ -3362,3 +3362,9 @@ STATUS north-star / MVP: **100%** (homebrew-core publish remains an external blo
 
 - SIMD / GPU / optional GC / full LSP / production gRPC framework / in-process H3 server
 - WASI sockets / preview2 / browser DOM
+### Application C source linking (0.4.18)
+
+`mako build`, `mako run`, and `mako test` accept repeatable
+`--native-source <FILE>` arguments for explicitly compiling and linking
+regular `.c` files. Paths are validated, passed without a shell, included in
+incremental and direct native link paths, and rejected for WebAssembly.

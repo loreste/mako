@@ -250,6 +250,9 @@ enum Commands {
         /// Write generated C to stdout / beside sources instead of linking only
         #[arg(long)]
         emit_c: bool,
+        /// Additional C source file to compile and link (repeatable; native targets only)
+        #[arg(long = "native-source", value_name = "FILE")]
+        native_sources: Vec<PathBuf>,
         /// Code-generation backend: `c` (default) or direct `native` object code
         #[arg(long, value_enum, default_value_t = BackendCli::C)]
         backend: BackendCli,
@@ -321,6 +324,9 @@ enum Commands {
         /// Code-generation backend: `c` (default) or direct `native` object code
         #[arg(long, value_enum, default_value_t = BackendCli::C)]
         backend: BackendCli,
+        /// Additional C source file to compile and link (repeatable; native targets only)
+        #[arg(long = "native-source", value_name = "FILE")]
+        native_sources: Vec<PathBuf>,
         /// Print compile timings before the program runs
         #[arg(long)]
         time: bool,
@@ -391,6 +397,9 @@ enum Commands {
         /// Env override: `MAKO_TEST_BACKEND=native|c` (CLI wins when set).
         #[arg(long, value_enum, default_value_t = BackendCli::C)]
         backend: BackendCli,
+        /// Additional C source file to compile and link (repeatable; native targets only)
+        #[arg(long = "native-source", value_name = "FILE")]
+        native_sources: Vec<PathBuf>,
     },
     /// Lint with a few real rules + typecheck (workspace-aware; optional `-p`)
     Lint {
@@ -731,6 +740,7 @@ pub(crate) struct BuildOpts {
     pub(crate) static_link: bool,
     pub(crate) overflow: OverflowMode,
     pub(crate) bounds_always: bool,
+    pub(crate) native_sources: Vec<PathBuf>,
 }
 
 impl Default for BuildOpts {
@@ -741,6 +751,7 @@ impl Default for BuildOpts {
             static_link: false,
             overflow: OverflowMode::Wrap,
             bounds_always: false,
+            native_sources: Vec::new(),
         }
     }
 }
@@ -1279,6 +1290,45 @@ fn command_on_path(cmd: &str) -> bool {
         .unwrap_or(false)
 }
 
+fn resolve_native_sources(
+    sources: Vec<PathBuf>,
+    target: Option<&str>,
+) -> Result<Vec<PathBuf>, ()> {
+    if sources.is_empty() {
+        return Ok(Vec::new());
+    }
+    if target.is_some_and(|t| t.contains("wasm")) {
+        emit_plain_error("--native-source is unavailable for wasm targets");
+        return Err(());
+    }
+
+    let mut resolved = Vec::with_capacity(sources.len());
+    for source in sources {
+        let path = source.canonicalize().map_err(|e| {
+            emit_plain_error(&format!(
+                "native source {} cannot be read: {e}",
+                source.display()
+            ));
+        })?;
+        if !path.is_file() {
+            emit_plain_error(&format!(
+                "native source {} is not a regular file",
+                path.display()
+            ));
+            return Err(());
+        }
+        if path.extension().and_then(|e| e.to_str()) != Some("c") {
+            emit_plain_error(&format!(
+                "native source {} must have a .c extension",
+                path.display()
+            ));
+            return Err(());
+        }
+        resolved.push(path);
+    }
+    Ok(resolved)
+}
+
 fn opt_level(release: bool) -> OptLevel {
     if release {
         OptLevel::Release
@@ -1317,6 +1367,7 @@ fn run(cli: Cli) -> Result<(), ()> {
             package,
             out,
             emit_c,
+            native_sources,
             backend,
             release,
             time,
@@ -1341,6 +1392,7 @@ fn run(cli: Cli) -> Result<(), ()> {
                 out,
                 emit_c,
                 backend,
+                native_sources,
                 release,
                 time,
                 target,
@@ -1357,6 +1409,7 @@ fn run(cli: Cli) -> Result<(), ()> {
             package,
             release,
             backend,
+            native_sources,
             time,
             no_incremental,
             jobs,
@@ -1370,6 +1423,7 @@ fn run(cli: Cli) -> Result<(), ()> {
                 package.as_deref(),
                 release,
                 backend,
+                native_sources,
                 time,
                 !no_incremental,
                 jobs,
@@ -1429,6 +1483,7 @@ fn run(cli: Cli) -> Result<(), ()> {
             coverage,
             json,
             backend,
+            native_sources,
         } => {
             let count = count.max(1);
             let sanitize = sanitize.or_else(|| race.then(|| "thread".into()));
@@ -1441,10 +1496,11 @@ fn run(cli: Cli) -> Result<(), ()> {
                         &path,
                         package.as_deref(),
                         run_filter.as_deref(),
-                        coverage,
-                        sanitize.as_deref(),
-                        backend,
-                        iteration,
+                coverage,
+                sanitize.as_deref(),
+                backend,
+                native_sources.clone(),
+                iteration,
                     );
                     let run_ok = run_reports.iter().all(tooling::TestRunReport::ok);
                     reports.extend(run_reports);
@@ -1465,11 +1521,12 @@ fn run(cli: Cli) -> Result<(), ()> {
                     &path,
                     package.as_deref(),
                     run_filter.as_deref(),
-                    verbose,
-                    coverage,
-                    sanitize.as_deref(),
-                    backend,
-                );
+                verbose,
+                coverage,
+                sanitize.as_deref(),
+                backend,
+                native_sources.clone(),
+            );
                 if last_ok.is_err() {
                     break;
                 }
@@ -2025,6 +2082,7 @@ fn cmd_dev(
         package,
         release,
         BackendCli::C,
+        Vec::new(),
         false,
         true,
         None,
@@ -2043,10 +2101,11 @@ fn cmd_dev(
             eprintln!("mako dev: change detected — rebuild");
             let _ = cmd_run(
                 path,
-                package,
-                release,
-                BackendCli::C,
-                false,
+            package,
+            release,
+            BackendCli::C,
+            Vec::new(),
+            false,
                 true,
                 None,
                 overflow,
@@ -2095,10 +2154,11 @@ fn cmd_check(
         &BuildOpts {
             target: None,
             sanitize: None,
-            static_link: false,
-            overflow: OverflowMode::Wrap,
-            bounds_always: false,
-        },
+                static_link: false,
+                overflow: OverflowMode::Wrap,
+                bounds_always: false,
+                native_sources: Vec::new(),
+            },
     );
     for t in &targets {
         if multi {
@@ -2123,6 +2183,7 @@ fn cmd_build(
     out: Option<PathBuf>,
     emit_c: bool,
     backend: BackendCli,
+    native_sources: Vec<PathBuf>,
     release: bool,
     time: bool,
     target: Option<String>,
@@ -2134,6 +2195,7 @@ fn cmd_build(
     bounds_always: bool,
 ) -> Result<(), ()> {
     let level = opt_level(release);
+    let native_sources = resolve_native_sources(native_sources, target.as_deref())?;
     let targets = resolve_package_entries(path, true, package)?;
     if targets.len() > 1 && out.is_some() {
         emit_plain_error(
@@ -2150,6 +2212,7 @@ fn cmd_build(
         static_link,
         overflow,
         bounds_always,
+        native_sources,
     };
     let incr = make_incr_opts(incremental, release, jobs, &opts);
     for file in &targets {
@@ -2187,6 +2250,7 @@ fn cmd_run(
     package: Option<&str>,
     release: bool,
     backend: BackendCli,
+    native_sources: Vec<PathBuf>,
     time: bool,
     incremental: bool,
     jobs: Option<usize>,
@@ -2195,6 +2259,7 @@ fn cmd_run(
     args: &[String],
 ) -> Result<(), ()> {
     let file = resolve_run_entry(path, package)?;
+    let native_sources = resolve_native_sources(native_sources, None)?;
     let level = opt_level(release);
     let opts = BuildOpts {
         target: None,
@@ -2202,6 +2267,7 @@ fn cmd_run(
         static_link: false,
         overflow,
         bounds_always,
+        native_sources,
     };
     let incr = make_incr_opts(incremental, release, jobs, &opts);
     let out_bin = std::env::temp_dir().join(format!(
@@ -2301,6 +2367,7 @@ fn cmd_profile(
         static_link: false,
         overflow: OverflowMode::Wrap,
         bounds_always: false,
+        native_sources: Vec::new(),
     };
     let incr = make_incr_opts(incremental, release, jobs, &opts);
     let out_bin = std::env::temp_dir().join(format!(
@@ -2358,8 +2425,10 @@ fn cmd_test(
     coverage: bool,
     sanitize: Option<&str>,
     backend: BackendCli,
+    native_sources: Vec<PathBuf>,
 ) -> Result<(), ()> {
     let sanitize = sanitize.map(|s| s.to_string());
+    let native_sources = resolve_native_sources(native_sources, None)?;
     if matches!(backend, BackendCli::Native | BackendCli::Llvm) {
         let opts = BuildOpts {
             target: None,
@@ -2367,6 +2436,7 @@ fn cmd_test(
             static_link: false,
             overflow: OverflowMode::Wrap,
             bounds_always: false,
+            native_sources: native_sources.clone(),
         };
         // Tests never use --release for the harness path by default; llvm needs release.
         let level = if matches!(backend, BackendCli::Llvm) {
@@ -2410,7 +2480,14 @@ fn cmd_test(
                     verbose,
                     coverage,
                     &|f, program, names| {
-                        run_test_package(f, program, names, san.as_deref(), backend)
+                    run_test_package(
+                        f,
+                        program,
+                        names,
+                        san.as_deref(),
+                        backend,
+                        &native_sources,
+                    )
                     },
                     &|f| run_file_quiet(f),
                 )?;
@@ -2438,7 +2515,9 @@ fn cmd_test(
         run_filter,
         verbose,
         coverage,
-        &|f, program, names| run_test_package(f, program, names, san.as_deref(), backend),
+        &|f, program, names| {
+            run_test_package(f, program, names, san.as_deref(), backend, &native_sources)
+        },
         &|f| run_file_quiet(f),
     )
 }
@@ -2450,6 +2529,7 @@ fn cmd_test_json(
     coverage: bool,
     sanitize: Option<&str>,
     backend: BackendCli,
+    native_sources: Vec<PathBuf>,
     iteration: u32,
 ) -> Vec<tooling::TestRunReport> {
     if !path.exists() {
@@ -2459,6 +2539,16 @@ fn cmd_test_json(
             format!("path not found: {}", path.display()),
         )];
     }
+    let native_sources = match resolve_native_sources(native_sources, None) {
+        Ok(sources) => sources,
+        Err(()) => {
+            return vec![tooling::TestRunReport::error(
+                iteration,
+                path,
+                "invalid native source",
+            )];
+        }
+    };
     if matches!(backend, BackendCli::Native | BackendCli::Llvm) {
         let opts = BuildOpts {
             target: None,
@@ -2466,6 +2556,7 @@ fn cmd_test_json(
             static_link: false,
             overflow: OverflowMode::Wrap,
             bounds_always: false,
+            native_sources: native_sources.clone(),
         };
         let level = if matches!(backend, BackendCli::Llvm) {
             OptLevel::Release
@@ -2538,7 +2629,14 @@ fn cmd_test_json(
                 coverage,
                 iteration,
                 &|file, program, names| {
-                    run_test_package_json(file, program, names, sanitize, backend)
+                    run_test_package_json(
+                        file,
+                        program,
+                        names,
+                        sanitize,
+                        backend,
+                        &native_sources,
+                    )
                 },
                 &run_file_json,
             )
@@ -2619,10 +2717,11 @@ fn compile_legacy_test(file: &Path) -> Result<PathBuf, ()> {
         &BuildOpts {
             target: None,
             sanitize: None,
-            static_link: false,
-            overflow: OverflowMode::Wrap,
-            bounds_always: false,
-        },
+                static_link: false,
+                overflow: OverflowMode::Wrap,
+                bounds_always: false,
+                native_sources: Vec::new(),
+            },
     )?;
     Ok(out_bin)
 }
@@ -2634,8 +2733,16 @@ fn run_test_package(
     test_fns: &[String],
     sanitize: Option<&str>,
     backend: BackendCli,
+    native_sources: &[PathBuf],
 ) -> Result<(), ()> {
-    let out_bin = compile_test_package(file, program, test_fns, sanitize, backend)?;
+    let out_bin = compile_test_package(
+        file,
+        program,
+        test_fns,
+        sanitize,
+        backend,
+        native_sources,
+    )?;
     let timeout = test_timeout();
     let child = Command::new(&out_bin).spawn().map_err(|error| {
         emit_plain_error(&format!("could not run test binary: {error}"));
@@ -2655,8 +2762,16 @@ fn run_test_package_json(
     test_fns: &[String],
     sanitize: Option<&str>,
     backend: BackendCli,
+    native_sources: &[PathBuf],
 ) -> tooling::TestExecution {
-    let out_bin = match compile_test_package(file, program, test_fns, sanitize, backend) {
+    let out_bin = match compile_test_package(
+        file,
+        program,
+        test_fns,
+        sanitize,
+        backend,
+        native_sources,
+    ) {
         Ok(path) => path,
         Err(()) => {
             return tooling::TestExecution::failed(
@@ -2695,6 +2810,7 @@ fn compile_test_package(
     test_fns: &[String],
     sanitize: Option<&str>,
     backend: BackendCli,
+    native_sources: &[PathBuf],
 ) -> Result<PathBuf, ()> {
     let out_bin = std::env::temp_dir().join(format!(
         "mako_gotest_{}_{}_{}",
@@ -2729,8 +2845,9 @@ fn compile_test_package(
                     sanitize: sanitize.map(|s| s.to_string()),
                     static_link: false,
                     overflow: OverflowMode::Wrap,
-                    bounds_always: false,
-                },
+                bounds_always: false,
+                native_sources: native_sources.to_vec(),
+            },
             )?;
         }
         BackendCli::Native | BackendCli::Llvm => {
@@ -2760,8 +2877,9 @@ fn compile_test_package(
                     sanitize: sanitize.map(|s| s.to_string()),
                     static_link: false,
                     overflow: OverflowMode::Wrap,
-                    bounds_always: false,
-                },
+                bounds_always: false,
+                native_sources: native_sources.to_vec(),
+            },
                 test_fns,
             );
             match prev_shared {
@@ -4176,6 +4294,9 @@ fn link_args_native(opts: &BuildOpts, _runtime_dir: &Path) -> Vec<String> {
     //   MAKO_ALLOCATOR=/path/to/libmimalloc.a
     // Extra link flags: MAKO_LDFLAGS="-L/opt/homebrew/lib -lmimalloc"
     push_allocator_link_args(&mut args, os);
+    for source in &opts.native_sources {
+        args.push(source.display().to_string());
+    }
     if let Ok(extra) = std::env::var("MAKO_LDFLAGS") {
         for a in extra.split_whitespace() {
             if !a.is_empty() {
@@ -5345,6 +5466,27 @@ mod check_json_cli_tests {
         assert_eq!(file, PathBuf::from("main.mko"));
         assert_eq!(json, Some(CheckJsonCli::V1));
         assert!(Cli::try_parse_from(["mako", "check", "--json=v2", "main.mko"]).is_err());
+    }
+
+    #[test]
+    fn native_source_is_repeatable_for_test_commands() {
+        let cli = Cli::try_parse_from([
+            "mako",
+            "test",
+            "suite.mko",
+            "--native-source",
+            "bridge.c",
+            "--native-source",
+            "capture.c",
+        ])
+        .unwrap();
+        match cli.command {
+            Commands::Test { native_sources, .. } => assert_eq!(
+                native_sources,
+                vec![PathBuf::from("bridge.c"), PathBuf::from("capture.c")]
+            ),
+            _ => panic!("expected test command"),
+        }
     }
 }
 

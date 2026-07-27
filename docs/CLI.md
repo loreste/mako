@@ -676,3 +676,18 @@ The compiler and runtime pass **320+ tests** covering:
 
 Init scaffolds (`mako init`) generate projects using the current `pack`/`pull`/
 `export` conventions by default.
+## Application C sources
+
+Native applications may explicitly add C source files to `build`, `run`, or
+`test`:
+
+```bash
+mako build main.mko --native-source native/bridge.c
+mako test tests --native-source native/test_bridge.c --native-source native/capture.c
+```
+
+`--native-source <FILE>` is repeatable and accepts only regular `.c` files.
+Mako passes each path as a compiler argument, never through a shell, and does
+not scan the project directory for sources. This avoids accidentally linking
+an unrelated file or a second `main`. The option is rejected for WebAssembly
+targets and is applied to both incremental and direct native link paths.

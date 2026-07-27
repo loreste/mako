@@ -357,6 +357,7 @@ mod tests {
             static_link: true,
             overflow: crate::overflow::OverflowMode::Wrap,
             bounds_always: false,
+            native_sources: Vec::new(),
         });
         assert!(args.iter().any(|a| a == "-static"));
         assert!(args.iter().any(|a| a == "-pthread"));
