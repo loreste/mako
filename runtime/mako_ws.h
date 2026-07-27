@@ -140,10 +140,10 @@ static inline int mako_ws_header_value(const char *req, const char *name, char *
 
 #define MAKO_WS_MAX_PAYLOAD (16 * 1024 * 1024)
 
-static int mako_ws_g_last_opcode = 0;
-static int mako_ws_g_last_fin = 1;
-static int mako_ws_g_last_close_code = 0;
-static int mako_ws_g_last_status = 0; /* 0 ok, -1 err, -2 close, -3 ping, -4 pong */
+static _Thread_local int mako_ws_g_last_opcode = 0;
+static _Thread_local int mako_ws_g_last_fin = 1;
+static _Thread_local int mako_ws_g_last_close_code = 0;
+static _Thread_local int mako_ws_g_last_status = 0; /* 0 ok, -1 err, -2 close, -3 ping, -4 pong */
 
 static inline int mako_ws_write_all(int fd, const void *buf, size_t len) {
     const char *p = (const char *)buf;

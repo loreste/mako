@@ -432,16 +432,36 @@ static inline void mako_http_fill_conn(MakoHttpConn *c, const char *req, size_t 
         c->content_type_req = mako_http_intern_ctype(vp, vlen);
     else
         c->content_type_req = mako_str_empty;
-    /* Keep-alive: only Connection needs a mutable temp for case fold. */
+    /* Keep-alive: scan Connection header view in-place (no fixed buffer). */
     c->keep_alive = 0;
-    char tmp[64];
-    if (mako_http_find_header(c->raw, "Connection", tmp, sizeof(tmp))) {
-        for (char *p = tmp; *p; p++)
-            if (*p >= 'A' && *p <= 'Z') *p = (char)(*p - 'A' + 'a');
-        if (strstr(tmp, "keep-alive")) c->keep_alive = 1;
-        if (strstr(tmp, "close")) c->keep_alive = 0;
-    } else if (strstr(c->raw, "HTTP/1.1")) {
-        c->keep_alive = 1; /* HTTP/1.1 default */
+    {
+        const char *cvp = NULL;
+        size_t cvlen = 0;
+        if (mako_http_find_header_view(c->raw, "Connection", &cvp, &cvlen) && cvlen > 0) {
+            /* Case-insensitive substring search within the view. */
+            int got_ka = 0, got_close = 0;
+            for (size_t ci = 0; ci + 4 <= cvlen; ci++) {
+                char lo = cvp[ci] | 0x20;
+                if (lo == 'k' && ci + 10 <= cvlen) {
+                    int match = 1;
+                    const char *want = "keep-alive";
+                    for (int wi = 0; wi < 10 && match; wi++)
+                        if ((cvp[ci + wi] | 0x20) != want[wi]) match = 0;
+                    if (match) got_ka = 1;
+                }
+                if (lo == 'c' && ci + 5 <= cvlen) {
+                    int match = 1;
+                    const char *want = "close";
+                    for (int wi = 0; wi < 5 && match; wi++)
+                        if ((cvp[ci + wi] | 0x20) != want[wi]) match = 0;
+                    if (match) got_close = 1;
+                }
+            }
+            if (got_ka) c->keep_alive = 1;
+            if (got_close) c->keep_alive = 0;
+        } else if (strstr(c->raw, "HTTP/1.1")) {
+            c->keep_alive = 1; /* HTTP/1.1 default */
+        }
     }
 }
 

@@ -69,3 +69,4 @@ runtime/third_party/quiche/bin/
 
 # Lock files (mako.lock is committed intentionally; Cargo.lock too)
 fsig
+sctp_api_test

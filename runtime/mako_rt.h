@@ -2420,7 +2420,9 @@ static inline MakoString mako_str_builder_finish(MakoStrBuilder *b) {
 
 static inline void mako_str_builder_free(MakoStrBuilder *b) {
     if (!b) return;
-    free(b->data);
+    if (b->data) { free(b->data); b->data = NULL; }
+    b->len = 0;
+    b->cap = 0;
     free(b);
 }
 
@@ -2490,13 +2492,29 @@ static inline void *mako_box_alloc(size_t sz) {
     return malloc(sz);
 }
 
+/* Poison byte written past the next-pointer in freed freelist blocks.
+ * mako_box_alloc checks for it to catch double-free. */
+#define MAKO_BOX_POISON 0xDE
+
 static inline void mako_box_free(void *p, size_t sz) {
     if (!p) return;
     int bin = mako_box_bin(sz);
     if (bin >= 0) {
+        size_t bsz = mako_box_bin_size(bin);
         mako_box_mu_ensure();
         pthread_mutex_lock(&mako_box_mu);
+        /* Walk freelist to detect double-free (block already in list). */
+        for (void *cur = mako_box_freelist[bin]; cur; cur = *(void **)cur) {
+            if (cur == p) {
+                pthread_mutex_unlock(&mako_box_mu);
+                fprintf(stderr, "mako: double-free detected in box_free (bin %d, ptr %p)\n", bin, p);
+                return; /* swallow rather than corrupt the freelist */
+            }
+        }
         *(void **)p = mako_box_freelist[bin];
+        /* Poison remaining bytes so use-after-free reads garbage. */
+        if (bsz > sizeof(void *))
+            memset((char *)p + sizeof(void *), MAKO_BOX_POISON, bsz - sizeof(void *));
         mako_box_freelist[bin] = p;
         pthread_mutex_unlock(&mako_box_mu);
         return;
