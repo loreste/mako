@@ -2331,6 +2331,9 @@ impl Codegen {
                     Some(format!("mako_map_{}_free", body.to_ascii_lowercase()))
                 }
             }
+            "MakoChan*" => Some("mako_chan_free".into()),
+            "MakoChanStr*" => Some("mako_chan_str_free".into()),
+            "MakoChanPtr*" => Some("mako_chan_ptr_free".into()),
             _ => None,
         }
     }

@@ -1,0 +1,201 @@
+// Comprehensive sanitizer stress test — exercises ownership, allocation,
+// concurrency, and control flow paths under ASan+UBSan+TSan.
+
+fn TestStringOwnershipChurn() {
+    let mut x = "start"
+    for i in 100 {
+        x = x + "!"
+    }
+    assert(len(x) == 105)
+    // reassign to shorter — old buffer must be freed
+    x = "done"
+    assert(len(x) == 4)
+}
+
+fn TestMapInsertDeleteCycle() {
+    let mut m = make(map[int]int)
+    for i in 300 {
+        m[i] = i * 3
+    }
+    assert(len(m) == 300)
+    // overwrite all values — no leak
+    for i in 300 {
+        m[i] = 0
+    }
+    assert(len(m) == 300)
+}
+
+fn TestStringMapOwnership() {
+    let mut m = make(map[string]string)
+    for i in 100 {
+        let k = fmt_sprintf_d("key_%d", i)
+        let v = fmt_sprintf_d("val_%d", i)
+        m[k] = v
+    }
+    assert(len(m) == 100)
+    // overwrite — old string values must free
+    for i in 100 {
+        let k = fmt_sprintf_d("key_%d", i)
+        m[k] = "replaced"
+    }
+}
+
+fn TestSliceAppendPattern() {
+    let mut items = make([]int, 0, 4)
+    for i in 200 {
+        items = append(items, i)
+    }
+    assert(len(items) == 200)
+}
+
+fn TestSliceStringAppend() {
+    let mut ss = make([]string, 0, 4)
+    for i in 200 {
+        ss = append(ss, fmt_sprintf_d("s_%d", i))
+    }
+    assert(len(ss) == 200)
+}
+
+fn TestOptionMatchExhaustive() {
+    let vals = [0, 1, 2, 3, 4]
+    for i, v in range vals {
+        let opt = Some(v)
+        match opt {
+            Some(n) => assert(n == v)
+            None => assert(false)
+        }
+    }
+    let n = None
+    match n {
+        Some(x) => assert(false)
+        None => assert(true)
+    }
+}
+
+fn TestResultBranching() {
+    let ok_val = Ok(42)
+    let err_val = Err("bad")
+    match ok_val {
+        Ok(n) => assert(n == 42)
+        Err(e) => assert(false)
+    }
+    match err_val {
+        Ok(n) => assert(false)
+        Err(e) => assert(e == "bad")
+    }
+}
+
+fn TestDeeplyNestedControlFlow() {
+    let mut total = 0
+    for a in 5 {
+        for b in 5 {
+            for c in 5 {
+                if a + b + c > 6 {
+                    total = total + 1
+                }
+            }
+        }
+    }
+    assert(total > 0)
+}
+
+fn TestLoopBreakContinue() {
+    let mut sum = 0
+    for i in 100 {
+        if i == 50 {
+            break
+        }
+        if i % 2 == 0 {
+            continue
+        }
+        sum = sum + i
+    }
+    assert(sum > 0)
+}
+
+fn send_worker(ch: chan[int], count: int) -> int {
+    for i in count {
+        let _ = ch.send(i)
+    }
+    ch.close()
+    return 0
+}
+
+fn TestChannelIntStress() {
+    let ch = make(chan[int], 16)
+    crew t {
+        let p = t.kick(send_worker(ch, 100))
+        let mut received = 0
+        for v in range ch {
+            received = received + 1
+        }
+        assert(received == 100)
+        let _ = p.join()
+    }
+}
+
+fn send_str_worker(ch: chan[string], count: int) -> int {
+    for i in count {
+        let _ = ch.send("msg")
+    }
+    ch.close()
+    return 0
+}
+
+fn TestChannelStringOwnership() {
+    let ch = make(chan[string], 16)
+    crew t {
+        let p = t.kick(send_str_worker(ch, 100))
+        let mut count = 0
+        for msg in range ch {
+            let _ = msg
+            count = count + 1
+        }
+        assert(count == 100)
+        let _ = p.join()
+    }
+}
+
+fn multi_worker(ch: chan[int], n: int) -> int {
+    for i in n {
+        let _ = ch.send(i)
+    }
+    return 0
+}
+
+fn TestMultiProducerChannel() {
+    let ch = make(chan[int], 256)
+    crew t {
+        let p1 = t.kick(multi_worker(ch, 10))
+        let p2 = t.kick(multi_worker(ch, 10))
+        let p3 = t.kick(multi_worker(ch, 10))
+        let _ = p1.join()
+        let _ = p2.join()
+        let _ = p3.join()
+    }
+}
+
+fn TestIfElseOwnership() {
+    let mut result = "none"
+    for i in 100 {
+        if i % 3 == 0 {
+            result = "fizz"
+        } else if i % 5 == 0 {
+            result = "buzz"
+        } else {
+            result = fmt_sprintf_d("num_%d", i)
+        }
+    }
+    assert(len(result) > 0)
+}
+
+fn fib(n: int) -> int {
+    if n < 2 {
+        return n
+    }
+    return fib(n - 1) + fib(n - 2)
+}
+
+fn TestRecursionStack() {
+    assert(fib(15) == 610)
+}

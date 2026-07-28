@@ -5073,6 +5073,19 @@ static inline void mako_chan_close(MakoChan *c) {
     mako_select_notify(); /* wake select waiters watching this channel */
 }
 
+/* Free a channel. Closes if not already closed, drains remaining items,
+ * destroys synchronization primitives, frees the ring buffer and struct. */
+static inline void mako_chan_free(MakoChan *c) {
+    if (!c) return;
+    /* Close to unblock any waiters before destroying. */
+    if (!c->closed) mako_chan_close(c);
+    pthread_mutex_destroy(&c->mu);
+    pthread_cond_destroy(&c->can_send);
+    pthread_cond_destroy(&c->can_recv);
+    free(c->buf);
+    free(c);
+}
+
 /* Non-blocking try-recv: 1 + value via out, or 0 if empty (not closed wait). */
 static inline int64_t mako_chan_try_recv(MakoChan *c, int64_t *out) {
     pthread_mutex_lock(&c->mu);
@@ -5499,6 +5512,24 @@ static inline void mako_chan_str_close(MakoChanStr *c) {
     pthread_mutex_unlock(&c->mu);
 }
 
+/* Free a string channel. Drains and frees any remaining buffered strings. */
+static inline void mako_chan_str_free(MakoChanStr *c) {
+    if (!c) return;
+    if (!c->closed) mako_chan_str_close(c);
+    /* Free remaining buffered strings. */
+    size_t slots = mako_chan_alloc_slots(c->cap);
+    while (c->count > 0) {
+        mako_str_free(c->buf[c->head]);
+        c->head = (c->head + 1) % slots;
+        c->count--;
+    }
+    pthread_mutex_destroy(&c->mu);
+    pthread_cond_destroy(&c->can_send);
+    pthread_cond_destroy(&c->can_recv);
+    free(c->buf);
+    free(c);
+}
+
 /* Nonblocking try-recv for string channels. Returns 1 and owns *out on success. */
 static inline int64_t mako_chan_str_try_recv(MakoChanStr *c, MakoString *out) {
     if (!c) return 0;
@@ -5703,6 +5734,25 @@ static inline void mako_chan_ptr_close(MakoChanPtr *c) {
     pthread_cond_broadcast(&c->can_send);
     pthread_cond_broadcast(&c->can_recv);
     pthread_mutex_unlock(&c->mu);
+}
+
+/* Free a pointer channel. Drains and frees any remaining buffered boxes. */
+static inline void mako_chan_ptr_free(MakoChanPtr *c) {
+    if (!c) return;
+    if (!c->closed) mako_chan_ptr_close(c);
+    /* Free remaining buffered boxes (heap-allocated struct copies). */
+    size_t slots = mako_chan_alloc_slots(c->cap);
+    while (c->count > 0) {
+        void *p = c->buf[c->head];
+        if (p) free(p);
+        c->head = (c->head + 1) % slots;
+        c->count--;
+    }
+    pthread_mutex_destroy(&c->mu);
+    pthread_cond_destroy(&c->can_send);
+    pthread_cond_destroy(&c->can_recv);
+    free(c->buf);
+    free(c);
 }
 
 /* Depth / capacity for pointer channels (struct, tuple, enum payload boxes). */
