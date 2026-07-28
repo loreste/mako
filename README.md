@@ -4,53 +4,15 @@ Mako is a compiled language for backend and systems work. You write `.mko`
 files; Mako turns them into standalone native binaries — no garbage collector,
 no VM, nothing extra to install next to them at runtime.
 
-Memory is managed by ownership (`hold`), shared references (`share`), and
-arenas. Frees happen at known points — scope exit, move, drop — rather than
-when a collector decides to run. Concurrency is part of the language: `crew` /
-`kick` / `fan`, channels, and actors. The standard library covers HTTP, TLS,
-JSON, databases, and networking; coverage is uneven, and
-[STDLIB.md](docs/STDLIB.md) records which parts have real integration tests and
-which only verify their shape.
+**Status: alpha (v0.4.19).** It works, it compiles real programs, people have
+built things with it. It is not stable. APIs will change, features are missing,
+and there are bugs. If that's fine with you, read on.
 
-`Anneal` is an optional workflow for long-running services: collect hot-site
-counters from a production run, then feed them into the next build. The
-rebuild happens on your build machine, not in the running process. See
-[Anneal](#anneal--builds-that-learn-from-production).
-
-**Status: experimental/alpha (v0.4.19).** The language works and compiles real
-programs, but the surface is young. Expect breaking changes, missing features,
-and bugs. This is not yet suitable for production use without careful
-evaluation.
-
-Mako provides compiler-enforced ownership, bounds checks (including in release
-builds), escape checks, and deterministic cleanup without a tracing garbage
-collector. The safety model is still experimental and is being validated through
-sanitizer testing — the full test suite is exercised under ASan (with leak
-detection disabled — validating invalid accesses, use-after-free, and
-double-free) and UBSan, while a focused concurrency suite is exercised under
-TSan. This does not prove complete memory safety. `unsafe` blocks, the C
-runtime, and FFI are outside the safety model.
-
-**What's new in 0.4.5+:** a direct native backend that skips C for many builds —
-ownership-explicit IR to Cranelift (debug) or LLVM (release) plus a bundled
-linker. The full `examples/testing` suite passes on `--backend native` (**393/393**).
-Release artifacts and install scripts ship for Linux, macOS, and Windows.
-Benchmark results for the workloads in `examples/bench`, including the ones
-where Mako is slower, are recorded in [PERFORMANCE.md](docs/PERFORMANCE.md).
-Binary size and several benchmarks remain open for 0.5.0. Full history:
-[changelog](CHANGELOG.md) · [roadmap](docs/ROADMAP.md) ·
-[soundness](docs/SOUNDNESS.md).
-
-[mako-lang.com](https://mako-lang.com) · [Status](docs/STATUS.md) · [Roadmap](docs/ROADMAP.md) · [Guide](docs/GUIDE.md) · [Book](docs/book/) · [Soundness](docs/SOUNDNESS.md) · [Memory model](docs/MEMORY_MODEL.md)
+[mako-lang.com](https://mako-lang.com) · [Changelog](CHANGELOG.md) · [Roadmap](docs/ROADMAP.md) · [Status](docs/STATUS.md)
 
 ---
 
 ## Install
-
-### One-shot (recommended) — prebuilt binary, no Rust/cargo
-
-Mako is built with cargo **on our CI**. You download the finished binary
-bundle (CLI + runtime + std). You never install Rust or run cargo yourself.
 
 **Linux**
 
@@ -67,465 +29,164 @@ curl -fsSL https://github.com/loreste/mako/releases/latest/download/install-rele
 source "$HOME/.local/share/mako/env.sh"
 ```
 
-That single command:
+**Windows** — grab the `.zip` from [Releases](https://github.com/loreste/mako/releases),
+or build from source with LLVM clang on PATH.
 
-1. Installs **clang** if missing (so `.mko` files can compile)
-2. Downloads the **cargo-built** `mako` binary package for your CPU
-3. Installs runtime headers, native-link support sources, and the standard library
-4. Verifies SHA-256, writes `env.sh`, updates shell RC when possible
-
-```bash
-mako init hello && cd hello && mako run main.mko
-```
-
-Or grab the archive directly (the bare binary alone cannot compile programs
-without the runtime files shipped in the archive):
-
-```text
-https://github.com/loreste/mako/releases/latest/download/mako-x86_64-unknown-linux-gnu.tar.gz
-```
-
-Options:
-
-```bash
-curl -fsSL …/install-linux.sh | bash -s -- --prefix /opt/mako --yes
-curl -fsSL …/install-linux.sh | bash -s -- --no-deps    # skip clang install
-curl -fsSL …/install-linux.sh | bash -s -- --version v0.4.17   # pin a release
-```
-
-**You do not need Rust or cargo on the machine that runs Mako.**
-
-### From source (large — installs Rust toolchain + crates)
+**From source** (needs Rust):
 
 ```bash
 make install
 mako version
 ```
 
-### Windows
-
-Prefer the `.zip` from [Releases](https://github.com/loreste/mako/releases), or build from source with LLVM clang on PATH.
+You do not need Rust on the machine that runs Mako. The installer downloads a
+prebuilt binary bundle.
 
 ---
 
-## Write something
+## What it looks like
+
+```mko
+fn main() {
+    let ch = make(chan[string], 4)
+    crew t {
+        let p = t.kick(produce(ch))
+        for msg in range ch {
+            print(msg)
+        }
+        let _ = p.join()
+    }
+}
+
+fn produce(ch: chan[string]) -> int {
+    let _ = ch.send("hello")
+    let _ = ch.send("world")
+    ch.close()
+    return 0
+}
+```
 
 ```bash
 mako init hello && cd hello
 mako run main.mko
+mako build --release main.mko -o hello
 ```
+
+## What actually works
+
+**Language.** Static types with local inference. `Result[T, E]` and `Option[T]`
+with `?` propagation. Pattern matching. Enums with payloads. Generics
+(monomorphized). Interfaces (structural, like Go). Closures. Tuples and
+multi-return. Integer literals in decimal, hex (`0xFF`), binary (`0b1010`),
+and octal (`0o77`) with `_` separators. `defer`. Labeled loops. F-strings.
+Struct update syntax.
+
+**Memory.** Ownership tracking with compile-time move checks. Arenas for
+bulk allocation. Bounds checks in debug and release. Escape analysis.
+Deterministic cleanup — no GC, no reference counting on the hot path.
+The safety model is validated under ASan, UBSan, and TSan in CI but is
+not proven complete. `unsafe` and FFI are outside the model.
+
+**Concurrency.** `crew` / `kick` / `join` — structured concurrency where jobs
+cannot outlive their scope. Typed channels (`chan[int]`, `chan[string]`,
+`chan[T]`), `select`, `fan` for parallel map. Actors with mailboxes. No free
+`go` keyword — every spawned task has an owner.
+
+**Stdlib.** HTTP server and client. TLS (OpenSSL). WebSocket. JSON. SQLite and
+Postgres. SIP parsing and building. HEP (Homer) ingest. UDP/TCP/Unix sockets.
+File I/O. Regex. UUID. Base64. Binary buffers. Prometheus metrics. Crypto
+(SHA-256, HMAC, PBKDF2, AEAD). Coverage is uneven — [STDLIB.md](docs/STDLIB.md)
+records what has real tests and what only verifies its shape.
+
+**Backends.** Two compilation paths: a C backend (mature, full language) and a
+native backend (Cranelift for debug, LLVM for release). The native backend
+passes 393/393 tests but does not cover every language feature yet. Both
+produce standalone binaries.
+
+**Packages.** `mako pkg` manages dependencies with a lockfile, SHA-256 content
+hashes, and SemVer resolution. Supports path deps, git deps, local registry,
+and remote HTTPS registry. Packages can be signed with ed25519 and verified
+on fetch.
+
+**Tooling.** `mako fmt`, `mako lint`, `mako test` (with JSON reports), `mako check`.
+LSP server with completions, go-to-def, references, rename, diagnostics,
+and inlay hints. VS Code extension.
+
+## What does not work yet
+
+- The native backend does not cover the full language (use `--backend c` for everything)
+- No debugger product (lldb works, but no IDE integration beyond seeds)
+- Stdlib coverage is uneven — some APIs are shape-only
+- No stable ABI promise
+- Package registry is new and has no public hosted instance yet
+- Windows HTTP engine is incomplete
+
+[STATUS.md](docs/STATUS.md) has the full honest list.
+
+## Concurrency
+
+Mako has no free `go`. Every task belongs to a `crew`:
 
 ```mko
-fn main() {
-    print("hello from mako")
-    print(fib(10))
+crew t {
+    let a = t.kick(work(1))
+    let b = t.kick(work(2))
+    print(a.join())
+    print(b.join())
 }
-
-fn fib(n: int) -> int {
-    if n <= 1 { return n }
-    return fib(n - 1) + fib(n - 2)
-}
+// both tasks joined here, guaranteed
 ```
 
-Real work, low ceremony: infer locals, one `print`, `?` for errors, `match` for
-routes, power (`hold` / `crew` / `arena`) only when you need it.
-[Ergonomics](docs/ERGONOMICS.md).
-
----
-
-## How it works
-
-### From source to a binary
-
-Two paths, one language. The mature path lowers your `.mko` to C and lets clang
-optimize it (`-O3 -flto` in release) — that's what compiles the full language
-today. Alongside it, a newer **direct backend** skips C altogether: it turns
-your program into an ownership-explicit IR and emits machine code through LLVM
-(release) or Cranelift (fast debug builds), links it with a bundled linker, and
-ships a single standalone binary — no clang, no system linker, nothing to
-install. It doesn't cover the whole language yet, but where it does, the
-binaries come out small and fast.
-
-Either way there's no interpreter, no VM, no runtime code generation, and no
-tracing collector. Memory is freed deterministically — ownership, scope exits, arenas —
-and concurrency (`crew`, `fan`, channels) is part of the language, not a library
-bolt-on.
-
-### Ownership instead of garbage collection
-
-The compiler tracks who owns what. `hold` bindings move when you use them —
-try to use a value after it's moved and the compiler stops you. For
-request-scoped work, arenas let you allocate a bunch of things and free them
-all at once when the scope ends:
+Channels are typed and work across kicked tasks:
 
 ```mko
-arena a {
-    let msg = arena_text(a, "hello arena")
-    let xs = arena_ints(a, 1000)
+let ch = make(chan[string], 8)
+// send from one task, range-recv in another
+for msg in range ch {
+    print(msg)
 }
-// everything in `a` is gone — one free, zero bookkeeping
 ```
 
-### Concurrency that cleans up
+## Errors
 
-`crew` blocks own jobs started with `kick`. When the block ends, those jobs are
-cancelled and joined. Explicit `detach` is a process-scoped escape and must be
-followed by `detached_join_all()`:
+If a function returns `Result`, you have to handle it:
 
 ```mko
-fn main() {
-    let ch = chan_new(4)
-    crew t {
-        let p = t.kick(producer(ch, 5))
-        let c = t.kick(consumer(ch))
-        let _ = p.join()
-        print_int(c.join())
-    }
-    // everything joined and done here
+fn load(path: string) -> Result[string, string] {
+    let data = read_file(path)?
+    Ok(data)
 }
 ```
 
-### Errors the compiler enforces
-
-If a function returns a `Result`, you have to deal with it. The compiler
-won't let you ignore one:
-
-```mko
-fn load() -> Result[int, string] {
-    let fd = open_cfg("config.toml")?
-    Ok(fd)
-}
-```
-
-### Standard library
-
-The stdlib provides APIs for common backend tasks: HTTP server/client,
-TLS, WebSocket, JSON, SQLite, regex, file I/O, channels, binary buffers,
-and more. Some are fully tested integrations; others are early API surfaces
-that verify shape but lack deep integration testing. External dependencies
-(OpenSSL, SQLite, etc.) are optional — the stdlib soft-skips when they're
-absent. See [STDLIB](docs/STDLIB.md) for what's implemented vs. planned.
-
-```mko
-fn main() {
-    let fd = http_bind(8080)
-    while true {
-        let c = http_accept(fd)
-        let path = http_path(c)
-        if str_eq(path, "/health") {
-            let _ = http_respond_json(c, 200, "{\"ok\":true}")
-        }
-        let _ = http_close(c)
-    }
-}
-```
-
-### Builds
-
-Incremental by default. Release builds use `-O3 -flto`.
-[Benchmarks](docs/PERFORMANCE.md).
-
-### Anneal — profile-guided rebuilds
-
-Anneal is a profile-guided optimization workflow with the profiling step made
-cheap enough to leave on in production. The program is compiled ahead of time
-and is not modified while it runs; the optimization happens in the next build.
-
-The cycle:
-
-1. **Ship a release build.** `-O3 -flto`, plus the LLVM backend where it is
-   compiled in. This is the default and needs no setup.
-2. **Collect hot-site counters.** Name the sites you want counted and read the
-   tallies with `hot_sites_json()` or over HTTP at `/debug/hot_sites`. Counters
-   are off by default; when enabled, a hit is a branch and a relaxed atomic
-   add. Stack sampling (`profile_sample_*`) is heavier — keep it off the
-   request path.
-3. **Rebuild with the profile.** `MAKO_PGO_GEN` to record, `MAKO_PGO_USE` to
-   apply. `scripts/anneal-cycle.sh` runs train → merge → rebuild.
-4. **Deploy the new binary** the way you normally would.
-
-This is ordinary PGO with a defined place for the profiling data to come from.
-It does not speed up a process that is already running, and the gain depends on
-whether your production traffic differs from the training run. Requires
-0.4.15+. Details in [ADAPTIVE_OPT.md](docs/ADAPTIVE_OPT.md).
-
----
-
-## Syntax tour
-
-```mko
-// Defer — runs on exit, last-in first-out
-defer print("cleanup")
-
-// Enums with methods
-enum Shape {
-    Circle(int),
-    Rect(int, int),
-}
-
-fn Shape_area(self: Shape) -> int {
-    match self {
-        Circle(r) => r * r,
-        Rect(w, h) => w * h,
-    }
-}
-
-// Interfaces
-interface Writer {
-    fn write(string) -> int
-}
-
-// Derive macros
-#[derive(json)]
-struct Person {
-    name: string
-    age: int
-}
-
-// Actors
-actor Session {
-    receive Invite { print("invite") }
-    receive Bye    { print("bye") }
-}
-
-// Memory-mapped files
-let m = mmap_create("data.bin", 4096)
-let _ = mmap_write(m, 0, "hello")
-
-// Binary protocols
-let b = buf_pack_new(64)
-buf_write_u32be(b, 1024)
-
-// Concurrent hashmaps
-let m = cmap_new()
-cmap_set(m, "key", "value")
-
-// FFI
-extern "C" fn my_c_function(n: int) -> int
-```
-
-**Putting it all together** — struct, database, error handling, arenas, and
-concurrency in one program ([examples/showcase.mko](examples/showcase.mko)):
-
-```mko
-#[derive(json)]
-struct Task {
-    id: int
-    title: string
-    done: int
-}
-
-fn insert_task(db: SqlDB, title: string) -> Result[int, string] {
-    let rc = sql_exec_str4(db, "INSERT INTO tasks (title, done) VALUES ($1, $2)", title, "0", "", "")
-    if rc != 0 { return error("insert failed") }
-    Ok(0)
-}
-
-fn worker(ch: chan[int], id: int, results: CMap) -> int {
-    arena a {
-        let label = arena_text(a, format_int(id))
-        while true {
-            let task_id = ch.recv()
-            if task_id == 0 { break }
-            cmap_set(results, format_int(task_id), "worker " + label + " done")
-        }
-    }
-    return id
-}
-
-fn main() {
-    let db = sql_open_sqlite("/tmp/showcase.db")
-    let _ = sql_exec_plain(db, "CREATE TABLE IF NOT EXISTS tasks (id INTEGER PRIMARY KEY, title TEXT, done INTEGER)")
-
-    match insert_task(db, "write tests") {
-        Ok(_) => print("inserted"),
-        Err(e) => print("error: " + e),
-    }
-
-    let results = cmap_new()
-    let ch = chan_new(10)
-    crew t {
-        let w1 = t.kick(worker(ch, 1, results))
-        let w2 = t.kick(worker(ch, 2, results))
-        for i in 5 { let _ = ch.send(i + 1) }
-        let _ = ch.send(0)
-        let _ = ch.send(0)
-        let _ = w1.join()
-        let _ = w2.join()
-    }
-
-    for i in 5 { print(cmap_get(results, format_int(i + 1))) }
-    let _ = sql_close(db)
-}
-```
-
-More in [examples/](examples/) and [The Mako Book](docs/book/).
-
----
-
-## Commands
+## Testing
 
 ```bash
-mako init myapp                  # new project
-mako run main.mko                # compile and run
-mako build main.mko              # compile
-mako build --release main.mko    # optimized
-mako test examples/testing       # test suite
-mako fmt -w                      # format
-mako lint                        # lint
-mako check main.mko              # type-check only
-mako build --target wasm32-wasip1 main.mko  # WebAssembly
+mako test examples/testing               # run all tests
+mako test -r TestAdd -v                   # filter + verbose
+mako test --sanitize address examples/testing  # under ASan
 ```
 
-## Multi-file projects
-
-Split your code across files, import what you need:
-
-```mko
-// main.mko
-import "./db.mko"
-import "./routes.mko"
-
-fn main() {
-    let _ = db_init()
-    let fd = http_bind(8080)
-    while true {
-        let c = http_accept(fd)
-        handle(c)
-        let _ = http_close(c)
-    }
-}
-```
-
-Grouped and aliased imports work too:
-
-```mko
-import (
-    "./db.mko"
-    "./routes.mko"
-    "strings"
-)
-
-import "./helpers.mko" as h
-```
-
-For separate packages, use `mako.toml`:
-
-```toml
-[dependencies]
-helper = { path = "../helper" }
-```
+393 test files. The suite runs under ASan, UBSan, and TSan in CI.
 
 ## Docs
 
 | | |
 |---|---|
-| **[The Mako Book](docs/book/)** | Start here |
-| **[Identity](docs/IDENTITY.md)** | Our syntax + identity checklist |
-| [Dual-form inventory](docs/GO_SYNTAX_CHECKLIST.md) | Optional sugar (not preferred) |
-| [How-to Guides](docs/howto/README.md) | Practical walkthroughs |
-| [Language Guide](docs/GUIDE.md) | Current syntax reference (Mako-native) |
-| [Compat](docs/COMPAT.md) | Dual forms / what won't break |
+| [The Mako Book](docs/book/) | Start here |
+| [Language Guide](docs/GUIDE.md) | Syntax reference |
 | [Standard Library](docs/STDLIB.md) | What's included |
-| [Built-in Functions](docs/BUILTINS.md) | Documented built-ins and signatures |
-| [Language Spec](LANGUAGE_SPEC.md) | Formal specification |
-| [CLI Reference](docs/CLI.md) | Current commands, flags, and workflows |
-| [Tutorials](website/tutorials/) | Backend, game networking, databases, FFI, concurrency, cloud |
+| [CLI Reference](docs/CLI.md) | Commands and flags |
 | [Examples](docs/EXAMPLES.md) | Runnable programs |
-| [Debugging](docs/DEBUG.md) | dbg(), lldb, sanitizers, error messages |
+| [Performance](docs/PERFORMANCE.md) | Benchmarks (including where Mako is slower) |
+| [Soundness](docs/SOUNDNESS.md) | Memory safety program |
 | [Security](docs/SECURITY.md) | Safety model |
-| [Soundness](docs/SOUNDNESS.md) | SAFE/RT program (bounds, drops, ownership) |
-| [Memory model](docs/MEMORY_MODEL.md) | Concurrency, crew lifecycle, channel ownership |
-| [Performance](docs/PERFORMANCE.md) | Benchmarks |
 | [Status](docs/STATUS.md) | What works, what doesn't |
-| [Roadmap](docs/ROADMAP.md) | What's next |
-| [Changelog](CHANGELOG.md) | What changed |
 
 ## Editor support
 
-VS Code extension with syntax highlighting, LSP, format-on-save, launch
-configurations, and a custom dark theme. Debugging uses host adapters where
-available. See [editors/vscode/](editors/vscode/).
-
-The language server (`mako lsp`) speaks stdio JSON-RPC and supports the
-implemented features in LSP-compatible editors.
-
-## Testing
-
-```bash
-mako test examples/testing
-mako test -r TestAdd -v
-mako test examples/testing --json             # stable CI report
-mako test --sanitize address examples/testing  # ASan
-mako test --race examples/testing/crew_fan_test.mko  # TSan
-```
-
-JSON test reports remain parseable on failure and the command exits nonzero
-when any test run fails.
-
-360 test programs. The suite runs under AddressSanitizer and
-ThreadSanitizer in CI. Tests that require optional external libraries
-(SQLite, QUIC) soft-skip when the dep is absent — they verify API shape
-but not full integration. See [TEST_CATEGORIES.md](examples/testing/TEST_CATEGORIES.md)
-for what each test actually proves.
-
-## Our syntax — its own
-
-Mako is **its own language** with **its own syntax**. We take simplicity and
-control as *goals*, and we design the surface around the problems backend
-engineers actually hit — GC pauses, null, error-handling noise, leaked tasks,
-and lifetime ceremony — solving them with Mako's own tools rather than borrowing
-another look.
-
-Keywords: `fn`, `on`, `pack`, `pull`, `hold`, `share`, `arena`, `crew`, `kick`,
-`match`, `export`.  
-[Identity](docs/IDENTITY.md) · [Pain points](docs/PAIN_POINTS.md).
-
-```mko
-export struct Point {
-    x: int
-    y: int
-}
-
-on Point {
-    fn distance(self) -> int {
-        return self.x + self.y
-    }
-}
-
-fn divmod(a: int, b: int) -> (int, int) {
-    return (a / b, a % b)
-}
-
-fn main() {
-    let p = Point { x: 3, y: 4 }
-    print(p.distance())
-
-    let q, r = divmod(17, 5)
-    print(q)
-    print(r)
-
-    // Structured concurrency (ordinary kicked tasks are joined)
-    crew t {
-        let j = t.kick(work())
-        print(j.join())
-    }
-}
-```
-
-Identity: [docs/IDENTITY.md](docs/IDENTITY.md).  
-Sample: [examples/mako_style.mko](examples/mako_style.mko).  
-Dual spellings (`func`, `:=`, …) still parse for compatibility.
-
-## What's not done yet
-
-- Full Unicode property database for regex
-- JPEG readable by standard viewers
-- Struct field reflection beyond schema registry
-- SMTP AUTH over TLS
-- HTTP engine is POSIX-only for now
-
-Full list in [STATUS.md](docs/STATUS.md).
+VS Code extension with syntax highlighting, LSP, format-on-save, and a dark
+theme. The language server (`mako lsp`) speaks stdio JSON-RPC.
+See [editors/vscode/](editors/vscode/).
 
 ## Contributing
 
