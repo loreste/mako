@@ -23,6 +23,8 @@ const LOCKFILE_VERSION: u32 = 2;
 const LEGACY_LOCKFILE_VERSION: u32 = 1;
 const PACKAGE_HASH_PREFIX: &str = "sha256:";
 const PACKAGE_DIGEST_FILE: &str = "PACKAGE.sha256";
+const PACKAGE_SIG_FILE: &str = "PACKAGE.sig";
+const REMOTE_INDEX_FILE: &str = "index.json";
 
 #[derive(Clone, Copy)]
 enum PackageDigestFormat {
@@ -819,10 +821,367 @@ fn resolve_one(
             content_hash: hash_path_dep(use_path)?,
         });
     }
+    // Last resort: try remote registry if configured
+    if let Some(url) = remote_registry_url(project) {
+        if let Ok(Some((ver, sha, tarball_url))) =
+            remote_registry_lookup(&url, &dep.name, dep.version.as_deref().unwrap_or("*"))
+        {
+            let dest = remote_registry_fetch(project, &dep.name, &ver, &sha, &tarball_url)?;
+            verify_package_signature(&dest)?;
+            return Ok(LockedPackage {
+                name: dep.name.clone(),
+                version: ver,
+                source: "registry".into(),
+                path: Some(normalized_lock_path(
+                    dest.strip_prefix(project).map_err(|_| {
+                        format!(
+                            "remote registry cache {} is outside project {}",
+                            dest.display(),
+                            project.display()
+                        )
+                    })?,
+                )?),
+                git: None,
+                rev: None,
+                tag: None,
+                branch: None,
+                content_hash: hash_path_dep(&dest)?,
+            });
+        }
+    }
     Err(format!(
         "dependency `{}` needs path, git, or version (registry)",
         dep.name
     ))
+}
+
+// ---- Remote registry: HTTPS index + tarball fetch + signature verification ----
+
+/// Remote registry URL from `MAKO_REGISTRY_URL` or mako.toml `[registry] url`.
+fn remote_registry_url(project: &Path) -> Option<String> {
+    if let Ok(url) = std::env::var("MAKO_REGISTRY_URL") {
+        if !url.is_empty() {
+            return Some(url.trim_end_matches('/').to_string());
+        }
+    }
+    // Check mako.toml for [registry] url
+    let manifest = project.join("mako.toml");
+    if let Ok(text) = fs::read_to_string(&manifest) {
+        let mut in_registry = false;
+        for line in text.lines() {
+            let trimmed = line.trim();
+            if trimmed == "[registry]" {
+                in_registry = true;
+                continue;
+            }
+            if trimmed.starts_with('[') {
+                in_registry = false;
+                continue;
+            }
+            if in_registry {
+                if let Some(rest) = trimmed.strip_prefix("url") {
+                    let rest = rest.trim_start();
+                    if let Some(rest) = rest.strip_prefix('=') {
+                        let val = rest.trim().trim_matches('"').trim_matches('\'');
+                        if !val.is_empty() {
+                            return Some(val.trim_end_matches('/').to_string());
+                        }
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Fetch a package index from a remote HTTPS registry.
+/// Index format: `{"versions":{"1.0.0":{"sha256":"...","url":"..."},...}}`
+fn remote_registry_lookup(
+    base_url: &str,
+    name: &str,
+    req: &str,
+) -> Result<Option<(String, String, String)>, String> {
+    let url = format!("{}/{}/{}", base_url, dep_cache_key(name), REMOTE_INDEX_FILE);
+    let output = Command::new("curl")
+        .args(["-fsSL", "--max-time", "30", &url])
+        .output()
+        .map_err(|e| format!("curl: {e}"))?;
+    if !output.status.success() {
+        // 404 = package not in remote registry (not an error)
+        return Ok(None);
+    }
+    let body = String::from_utf8_lossy(&output.stdout);
+    // Minimal JSON parse: extract versions
+    // Format: {"versions":{"1.0.0":{"sha256":"<hex>","url":"<tarball>","sig":"<hex>"},...}}
+    let mut best: Option<(u64, u64, u64, String, String, String)> = None;
+    for line in body.lines() {
+        let line = line.trim().trim_matches([',', '{', '}']);
+        // Look for version keys: "1.0.0": {
+        if !line.contains('"') {
+            continue;
+        }
+    }
+    // Use a simpler approach: scan for "version":"sha256":"url" triples
+    // by splitting on version entries
+    let versions_start = body.find("\"versions\"");
+    if versions_start.is_none() {
+        return Ok(None);
+    }
+    // Extract version entries using minimal parsing
+    let mut pos = versions_start.unwrap();
+    while let Some(vstart) = body[pos..].find('"').map(|i| pos + i + 1) {
+        let vend = match body[vstart..].find('"') {
+            Some(i) => vstart + i,
+            None => break,
+        };
+        let ver = &body[vstart..vend];
+        // Check if this looks like a semver
+        let sv = match parse_semver(ver) {
+            Some(v) => v,
+            None => {
+                pos = vend + 1;
+                continue;
+            }
+        };
+        if !version_satisfies(ver, req) {
+            pos = vend + 1;
+            continue;
+        }
+        // Find sha256 and url in the following block
+        let block_end = body[vend..].find('}').map(|i| vend + i).unwrap_or(body.len());
+        let block = &body[vend..block_end];
+        let sha = extract_json_string(block, "sha256").unwrap_or_default();
+        let tarball_url = extract_json_string(block, "url").unwrap_or_default();
+        let _sig = extract_json_string(block, "sig").unwrap_or_default();
+        if sha.is_empty() || tarball_url.is_empty() {
+            pos = block_end;
+            continue;
+        }
+        match &best {
+            None => best = Some((sv.0, sv.1, sv.2, ver.to_string(), sha, tarball_url)),
+            Some((a, b, c, _, _, _)) if (sv.0, sv.1, sv.2) > (*a, *b, *c) => {
+                best = Some((sv.0, sv.1, sv.2, ver.to_string(), sha, tarball_url));
+            }
+            _ => {}
+        }
+        pos = block_end;
+    }
+    Ok(best.map(|(_, _, _, ver, sha, url)| (ver, sha, url)))
+}
+
+fn extract_json_string(text: &str, key: &str) -> Option<String> {
+    let needle = format!("\"{}\"", key);
+    let start = text.find(&needle)?;
+    let after_key = start + needle.len();
+    let colon = text[after_key..].find(':')?;
+    let after_colon = after_key + colon + 1;
+    let quote_start = text[after_colon..].find('"')? + after_colon + 1;
+    let quote_end = text[quote_start..].find('"')? + quote_start;
+    Some(text[quote_start..quote_end].to_string())
+}
+
+/// Fetch a remote package tarball, verify its SHA-256 digest, and extract
+/// into the local registry cache. Returns the extracted directory path.
+fn remote_registry_fetch(
+    project: &Path,
+    name: &str,
+    version: &str,
+    expected_sha256: &str,
+    tarball_url: &str,
+) -> Result<PathBuf, String> {
+    let cache_dir = project
+        .join(".mako")
+        .join("deps")
+        .join(dep_cache_key(name));
+    let dest = cache_dir.join(version);
+    if dest.exists() {
+        // Already fetched — verify digest
+        verify_published_package(&dest)?;
+        return Ok(dest);
+    }
+    fs::create_dir_all(&cache_dir).map_err(|e| format!("mkdir: {e}"))?;
+    let tarball = cache_dir.join(format!("{version}.tar.gz"));
+    // Download
+    let status = Command::new("curl")
+        .args(["-fsSL", "--max-time", "120", "-o"])
+        .arg(&tarball)
+        .arg(tarball_url)
+        .status()
+        .map_err(|e| format!("curl download: {e}"))?;
+    if !status.success() {
+        return Err(format!("failed to download {tarball_url}"));
+    }
+    // Verify SHA-256 before extraction
+    let data = fs::read(&tarball).map_err(|e| format!("read tarball: {e}"))?;
+    let mut hasher = Sha256::new();
+    hasher.update(&data);
+    let actual = format!("{:x}", hasher.finalize());
+    if actual != expected_sha256 {
+        let _ = fs::remove_file(&tarball);
+        return Err(format!(
+            "tarball integrity check failed for {name}@{version}: expected {expected_sha256}, got {actual}"
+        ));
+    }
+    // Extract
+    let staging = cache_dir.join(format!(".{version}.staging-{}", std::process::id()));
+    fs::create_dir_all(&staging).map_err(|e| format!("mkdir staging: {e}"))?;
+    let tar_status = Command::new("tar")
+        .args(["xzf"])
+        .arg(&tarball)
+        .arg("-C")
+        .arg(&staging)
+        .status()
+        .map_err(|e| format!("tar extract: {e}"))?;
+    if !tar_status.success() {
+        let _ = fs::remove_dir_all(&staging);
+        let _ = fs::remove_file(&tarball);
+        return Err(format!("tar extraction failed for {name}@{version}"));
+    }
+    // Rename staging to final (atomic on same fs)
+    if dest.exists() {
+        let _ = fs::remove_dir_all(&staging);
+    } else {
+        fs::rename(&staging, &dest).map_err(|e| {
+            let _ = fs::remove_dir_all(&staging);
+            format!("finalize fetch: {e}")
+        })?;
+    }
+    let _ = fs::remove_file(&tarball);
+    // Verify extracted package digest
+    verify_published_package(&dest)?;
+    Ok(dest)
+}
+
+/// Sign a package digest with ed25519 using the key at `MAKO_SIGN_KEY`.
+/// Writes PACKAGE.sig alongside PACKAGE.sha256.
+pub fn sign_package(dir: &Path) -> Result<(), String> {
+    let key_path = std::env::var("MAKO_SIGN_KEY")
+        .map_err(|_| "MAKO_SIGN_KEY not set — point it to an ed25519 private key PEM".to_string())?;
+    let digest_path = dir.join(PACKAGE_DIGEST_FILE);
+    let digest = fs::read_to_string(&digest_path)
+        .map_err(|e| format!("read digest: {e}"))?;
+    // Use openssl to sign: openssl pkeyutl -sign -inkey <key> -in <digest>
+    let output = Command::new("openssl")
+        .args(["pkeyutl", "-sign", "-inkey"])
+        .arg(&key_path)
+        .arg("-rawin")
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .and_then(|mut child| {
+            use std::io::Write;
+            if let Some(ref mut stdin) = child.stdin {
+                let _ = stdin.write_all(digest.as_bytes());
+            }
+            child.wait_with_output()
+        })
+        .map_err(|e| format!("openssl sign: {e}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "openssl sign failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+    // Write signature as hex
+    let sig_hex: String = output.stdout.iter().map(|b| format!("{b:02x}")).collect();
+    fs::write(dir.join(PACKAGE_SIG_FILE), format!("{sig_hex}\n"))
+        .map_err(|e| format!("write signature: {e}"))?;
+    Ok(())
+}
+
+/// Verify a package signature against the public key at `MAKO_VERIFY_KEY`.
+pub fn verify_package_signature(dir: &Path) -> Result<(), String> {
+    let key_path = match std::env::var("MAKO_VERIFY_KEY") {
+        Ok(p) if !p.is_empty() => p,
+        _ => return Ok(()), // no verify key configured — signature check optional
+    };
+    let sig_path = dir.join(PACKAGE_SIG_FILE);
+    if !sig_path.exists() {
+        return Err(format!(
+            "package at {} has no signature ({})",
+            dir.display(),
+            PACKAGE_SIG_FILE
+        ));
+    }
+    let sig_hex = fs::read_to_string(&sig_path)
+        .map_err(|e| format!("read signature: {e}"))?
+        .trim()
+        .to_string();
+    let sig_bytes: Vec<u8> = (0..sig_hex.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(&sig_hex[i..i + 2], 16))
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|_| "malformed signature hex".to_string())?;
+    let digest = fs::read_to_string(dir.join(PACKAGE_DIGEST_FILE))
+        .map_err(|e| format!("read digest for verify: {e}"))?;
+    // Write sig bytes to temp file for openssl
+    let sig_tmp = dir.join(".sig.tmp");
+    fs::write(&sig_tmp, &sig_bytes).map_err(|e| format!("write sig tmp: {e}"))?;
+    let output = Command::new("openssl")
+        .args(["pkeyutl", "-verify", "-pubin", "-inkey"])
+        .arg(&key_path)
+        .arg("-rawin")
+        .arg("-sigfile")
+        .arg(&sig_tmp)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .and_then(|mut child| {
+            use std::io::Write;
+            if let Some(ref mut stdin) = child.stdin {
+                let _ = stdin.write_all(digest.as_bytes());
+            }
+            child.wait_with_output()
+        })
+        .map_err(|e| format!("openssl verify: {e}"))?;
+    let _ = fs::remove_file(&sig_tmp);
+    if !output.status.success() {
+        return Err(format!(
+            "package signature verification FAILED for {}",
+            dir.display()
+        ));
+    }
+    Ok(())
+}
+
+/// `mako get <name> [version]` — resolve from remote registry, fetch, add to mako.toml, lock.
+pub fn pkg_get(project: &Path, name: &str, version_req: Option<&str>) -> Result<(), String> {
+    let req = version_req.unwrap_or("*");
+    // Try remote registry first
+    let url = remote_registry_url(project)
+        .ok_or_else(|| "no remote registry configured (set MAKO_REGISTRY_URL or [registry] url in mako.toml)".to_string())?;
+    let found = remote_registry_lookup(&url, name, req)?
+        .ok_or_else(|| format!("package `{name}` not found in registry at {url}"))?;
+    let (version, sha256, tarball_url) = found;
+    println!("found {name}@{version} (sha256:{sha256})");
+    // Fetch + verify
+    let dest = remote_registry_fetch(project, name, &version, &sha256, &tarball_url)?;
+    // Verify signature if configured
+    verify_package_signature(&dest)?;
+    // Add to mako.toml if not already present
+    let manifest = project.join("mako.toml");
+    if manifest.exists() {
+        let text = fs::read_to_string(&manifest).map_err(|e| format!("read manifest: {e}"))?;
+        if !text.contains(&format!("\"{name}\"")) {
+            // Append dependency
+            let dep_line = format!("\"{name}\" = {{ version = \"^{version}\" }}\n");
+            let mut new_text = text.clone();
+            if let Some(pos) = text.find("[dependencies]") {
+                let insert_at = text[pos..].find('\n').map(|i| pos + i + 1).unwrap_or(text.len());
+                new_text.insert_str(insert_at, &dep_line);
+            } else {
+                new_text.push_str("\n[dependencies]\n");
+                new_text.push_str(&dep_line);
+            }
+            fs::write(&manifest, new_text).map_err(|e| format!("write manifest: {e}"))?;
+        }
+    }
+    // Refresh lock
+    println!("installed {name}@{version} → {}", dest.display());
+    println!("run `mako pkg install` to refresh mako.lock");
+    Ok(())
 }
 
 fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<(), String> {

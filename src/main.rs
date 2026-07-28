@@ -710,6 +710,25 @@ enum PkgCmd {
         #[arg(default_value = ".")]
         path: PathBuf,
     },
+    /// Fetch a package from the remote registry, verify, and add to mako.toml
+    Get {
+        /// Package name
+        name: String,
+        /// Version requirement (default: latest)
+        version: Option<String>,
+        #[arg(long = "dir", short = 'C', default_value = ".")]
+        project: PathBuf,
+    },
+    /// Sign a published package with ed25519 (requires MAKO_SIGN_KEY)
+    Sign {
+        #[arg(default_value = ".")]
+        path: PathBuf,
+    },
+    /// Verify a package signature (requires MAKO_VERIFY_KEY)
+    Verify {
+        #[arg(default_value = ".")]
+        path: PathBuf,
+    },
     /// Reconcile [dependencies] with what the sources import
     Tidy {
         #[arg(default_value = ".")]
@@ -3514,6 +3533,15 @@ fn run_pkg(cmd: PkgCmd) -> Result<(), ()> {
         PkgCmd::Remove { name, project } => pkg_remove(&project, &name),
         PkgCmd::Audit { path } => tooling::pkg_audit(&path),
         PkgCmd::Imports { path } => pkg_imports(&path),
+        PkgCmd::Get {
+            name,
+            version,
+            project,
+        } => pkg::pkg_get(&project, &name, version.as_deref()).map_err(|e| emit_plain_error(&e)),
+        PkgCmd::Sign { path } => pkg::sign_package(&path).map_err(|e| emit_plain_error(&e)),
+        PkgCmd::Verify { path } => {
+            pkg::verify_package_signature(&path).map_err(|e| emit_plain_error(&e))
+        }
         PkgCmd::Tidy { path, check, prune } => pkg_tidy(&path, check, prune),
     }
 }

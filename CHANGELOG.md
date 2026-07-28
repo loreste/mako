@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.4.19 — 2026-07-27
+
+### Remote package registry + signed packages
+
+`mako pkg get <name> [version]` fetches packages from an HTTPS registry,
+verifies SHA-256 tarball integrity, and adds the dependency to `mako.toml`.
+The resolver falls back to the remote registry automatically when local
+and git sources miss.
+
+- **Remote registry**: `MAKO_REGISTRY_URL` or `[registry] url` in mako.toml
+- **Index format**: `<url>/<name>/index.json` with versions, SHA-256 digests, and tarball URLs
+- **Package signing**: `mako pkg sign` signs with ed25519 (`MAKO_SIGN_KEY`);
+  `mako pkg verify` checks against `MAKO_VERIFY_KEY`. Signatures are
+  verified automatically on remote fetch when the verify key is configured.
+- **Tarball integrity**: SHA-256 verified before extraction; extraction into
+  staging directory with atomic rename.
+
 ## 0.4.18 — 2026-07-27
 
 ### Hex, binary, and octal integer literals
