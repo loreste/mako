@@ -1,11 +1,11 @@
 # Mako roadmap
 
-**Product version:** **0.4.19** (tip) · last tagged **v0.4.19** · Last sync: **2026-07-27**.  
+**Product version:** **0.4.20** (tip) · last tagged **v0.4.20** · Last sync: **2026-07-28**.  
 **Suite:** **393** Mako tests on `examples/testing` (C + native backends) + Rust
 unit tests, 0 failures on the native gate · CI ASan/UBSan/TSan as configured.
 
 **Versioning:** [VERSIONING.md](VERSIONING.md) — **prefer small patches** over mega-minors.  
-**Release:** tag **`v0.4.17`** published; tip train **0.4.18+ → 0.5.0**.
+**Release:** tag **`v0.4.20`** published; tip train **0.4.20+ → 0.5.0**.
 
 **Verified:** [STATUS.md](STATUS.md) · **Stdlib:** [STDLIB.md](STDLIB.md) · **Security:** [SECURITY.md](SECURITY.md) · **Release:** [RELEASE.md](RELEASE.md).  
 **Book:** [The Mako Book](book/) · **Identity:** [IDENTITY.md](IDENTITY.md).  
@@ -37,6 +37,7 @@ unit tests, 0 failures on the native gate · CI ASan/UBSan/TSan as configured.
 | **0.4.17** | Return-drop ownership fixes · Windows static mutexes + portable crypto · array-literal element typing · LSP builtin completion · range-over-typed-channel codegen · security audit scope | **Tagged** |
 | **0.4.18** | Hex/bin/oct literals · security hardening (all three audit tiers) · white-hat review fixes | **Tagged** |
 | **0.4.19** | Remote HTTPS registry · ed25519 package signing · `mako pkg get` | **Tagged** |
+| **0.4.20** | `#line` source mapping directives · debugger-friendly C output | **Tagged** |
 | **0.5.0** | Native-first **default** (CLI default flip — minor theme) | **Planned** minor |
 | **0.5.1** | Toolchain & IDE depth (LSP, DAP/DWARF, doc/bench product) | **Planned** |
 | **0.5.2** | Runtime trust & production concurrency soaks | **Planned** |

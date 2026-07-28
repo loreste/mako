@@ -4,7 +4,7 @@ Mako is a compiled language for backend and systems work. You write `.mko`
 files; Mako turns them into standalone native binaries — no garbage collector,
 no VM, nothing extra to install next to them at runtime.
 
-**Status: alpha (v0.4.19).** It works, it compiles real programs, people have
+**Status: alpha (v0.4.20).** It works, it compiles real programs, people have
 built things with it. It is not stable. APIs will change, features are missing,
 and there are bugs. If that's fine with you, read on.
 
@@ -115,7 +115,7 @@ and inlay hints. VS Code extension.
 ## What does not work yet
 
 - The native backend does not cover the full language (use `--backend c` for everything)
-- No debugger product (lldb works, but no IDE integration beyond seeds)
+- No debugger product (lldb works with `#line` source mapping, but no IDE integration beyond seeds)
 - Stdlib coverage is uneven — some APIs are shape-only
 - No stable ABI promise
 - Package registry is new and has no public hosted instance yet

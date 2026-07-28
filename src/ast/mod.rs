@@ -242,6 +242,18 @@ impl fmt::Display for TypeExpr {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Block {
     pub stmts: Vec<Stmt>,
+    /// Source line number for each stmt (may be shorter than stmts or empty).
+    /// Only populated by the parser; synthetic blocks leave this empty.
+    /// Boxed slice avoids excess Vec capacity after parsing.
+    pub source_lines: Box<[usize]>,
+}
+
+impl Block {
+    /// Get the source line for stmt at index `i`, or 0 if unknown.
+    #[inline]
+    pub fn line_of(&self, i: usize) -> usize {
+        self.source_lines.get(i).copied().unwrap_or(0)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]

@@ -108,6 +108,8 @@ pub struct Codegen {
     pub overflow_mode: OverflowMode,
     /// Source path for `#line` directives (debug mapping).
     pub source_file: Option<String>,
+    /// Last emitted `#line` number (avoids duplicate directives).
+    last_emitted_line: usize,
     /// Emitted tuple typedef tags.
     tuple_typedefs: std::collections::HashSet<String>,
     /// `MakoTup_*` C name → per-element C types (authoritative for multi-return unpack).
@@ -237,6 +239,7 @@ impl Codegen {
             current_fn_ret: None,
             overflow_mode: OverflowMode::Wrap,
             source_file: None,
+            last_emitted_line: 0,
             tuple_typedefs: std::collections::HashSet::new(),
             tuple_fields: HashMap::new(),
             pending_tuple_typedefs: Vec::new(),
@@ -11881,9 +11884,7 @@ impl Codegen {
             }
 
             if let Expr::Block(b) = body {
-                for s in &b.stmts {
-                    self.emit_stmt(s);
-                }
+                self.emit_body(b);
             }
 
             // Add #undef for capture aliases
@@ -12505,7 +12506,8 @@ impl Codegen {
         } else {
             stmts.len()
         };
-        for stmt in &stmts[..emit_count] {
+        for (i, stmt) in stmts[..emit_count].iter().enumerate() {
+            self.emit_source_line(&f.body, i);
             self.emit_stmt(stmt);
         }
         if implicit_return {
@@ -12605,9 +12607,7 @@ impl Codegen {
             self.push_share_scope();
             self.loop_drop_bases
                 .push(self.own_drop_scopes.len().saturating_sub(1));
-            for s in &body.stmts {
-                self.emit_stmt(s);
-            }
+            self.emit_body(body);
             self.loop_drop_bases.pop();
             self.pop_share_scope();
             if let Some(lab) = label {
@@ -12653,9 +12653,7 @@ impl Codegen {
                 _ => {}
             }
             self.line(&format!("{i} += {w};"));
-            for s in &body.stmts {
-                self.emit_stmt(s);
-            }
+            self.emit_body(body);
             if let Some(lab) = label {
                 self.emit_line(format_args!("__mako_cont_{lab}: ;"));
             }
@@ -12692,9 +12690,7 @@ impl Codegen {
                 }
                 _ => {}
             }
-            for s in &body.stmts {
-                self.emit_stmt(s);
-            }
+            self.emit_body(body);
             if let Some(lab) = label {
                 self.emit_line(format_args!("__mako_cont_{lab}: ;"));
             }
@@ -12725,9 +12721,7 @@ impl Codegen {
                 }
                 _ => {}
             }
-            for s in &body.stmts {
-                self.emit_stmt(s);
-            }
+            self.emit_body(body);
             if let Some(lab) = label {
                 self.emit_line(format_args!("__mako_cont_{lab}: ;"));
             }
@@ -12773,9 +12767,7 @@ impl Codegen {
                 }
                 _ => {}
             }
-            for s in &body.stmts {
-                self.emit_stmt(s);
-            }
+            self.emit_body(body);
             if let Some(lab) = label {
                 self.emit_line(format_args!("__mako_cont_{lab}: ;"));
             }
@@ -12961,9 +12953,7 @@ impl Codegen {
                 }
                 _ => {}
             }
-            for s in &body.stmts {
-                self.emit_stmt(s);
-            }
+            self.emit_body(body);
             if let Some(lab) = label {
                 self.emit_line(format_args!("__mako_cont_{lab}: ;"));
             }
@@ -13033,9 +13023,7 @@ impl Codegen {
                         _ => {}
                     }
                     self.push_share_scope();
-                    for s in &body.stmts {
-                        self.emit_stmt(s);
-                    }
+                    self.emit_body(body);
                     self.pop_share_scope();
                     if let Some(lab) = label {
                         self.emit_line(format_args!("__mako_cont_{lab}: ;"));
@@ -13085,9 +13073,7 @@ impl Codegen {
             _ => {}
         }
 
-        for s in &body.stmts {
-            self.emit_stmt(s);
-        }
+        self.emit_body(body);
         self.loop_drop_bases.pop();
         self.pop_share_scope();
         if let Some(lab) = label {
@@ -13167,10 +13153,28 @@ impl Codegen {
 
     fn emit_defers(&mut self) {
         let bodies: Vec<Block> = self.defer_stack.iter().rev().cloned().collect();
-        for body in bodies {
-            for s in &body.stmts {
-                self.emit_stmt(s);
+        for body in &bodies {
+            self.emit_body(body);
+        }
+    }
+
+    /// Emit a `#line` directive for statement `i` in `body` (if source info exists).
+    #[inline]
+    fn emit_source_line(&mut self, body: &Block, i: usize) {
+        let line = body.line_of(i);
+        if line > 0 && line != self.last_emitted_line {
+            if let Some(src) = &self.source_file {
+                let _ = writeln!(self.out, "#line {} \"{}\"", line, escape_c(src));
+                self.last_emitted_line = line;
             }
+        }
+    }
+
+    /// Emit all statements in a block, with `#line` directives for source mapping.
+    fn emit_body(&mut self, body: &Block) {
+        for (i, s) in body.stmts.iter().enumerate() {
+            self.emit_source_line(body, i);
+            self.emit_stmt(s);
         }
     }
 
@@ -14298,7 +14302,8 @@ impl Codegen {
                 self.push_share_scope();
                 let arm_idx = self.own_drop_scopes.len().saturating_sub(1);
                 let saved_live = self.own_drop_live.clone();
-                for s in &then_block.stmts {
+                for (si, s) in then_block.stmts.iter().enumerate() {
+                    self.emit_source_line(then_block, si);
                     self.emit_stmt(s);
                 }
                 let after_then = self.own_drop_live.clone();
@@ -14310,7 +14315,8 @@ impl Codegen {
                     self.push_share_scope();
                     let arm_idx_else = self.own_drop_scopes.len().saturating_sub(1);
                     let saved_live_else = self.own_drop_live.clone();
-                    for s in &eb.stmts {
+                    for (si, s) in eb.stmts.iter().enumerate() {
+                        self.emit_source_line(eb, si);
                         self.emit_stmt(s);
                     }
                     let after_else = self.own_drop_live.clone();
@@ -14335,9 +14341,7 @@ impl Codegen {
                 self.push_share_scope();
                 self.loop_drop_bases
                     .push(self.own_drop_scopes.len().saturating_sub(1));
-                for s in &body.stmts {
-                    self.emit_stmt(s);
-                }
+                self.emit_body(body);
                 self.loop_drop_bases.pop();
                 self.pop_share_scope();
                 if let Some(lab) = label {
@@ -14396,9 +14400,7 @@ impl Codegen {
                 self.push_share_scope();
                 self.loop_drop_bases
                     .push(self.own_drop_scopes.len().saturating_sub(1));
-                for s in &body.stmts {
-                    self.emit_stmt(s);
-                }
+                self.emit_body(body);
                 self.loop_drop_bases.pop();
                 self.pop_share_scope();
                 if let Some(lab) = label {
@@ -14416,9 +14418,7 @@ impl Codegen {
                 self.locals.insert(name.clone(), "MakoNursery".into());
                 self.emit_line(format_args!("MakoNursery {name} = mako_nursery_new();"));
                 self.crew_stack.push(name.clone());
-                for s in &body.stmts {
-                    self.emit_stmt(s);
-                }
+                self.emit_body(body);
                 self.crew_stack.pop();
                 self.emit_line(format_args!("mako_nursery_cancel_join(&{name});"));
             }
@@ -14426,18 +14426,14 @@ impl Codegen {
                 self.locals.insert(name.clone(), "MakoArena".into());
                 self.emit_line(format_args!("MakoArena {name} = mako_arena_new();"));
                 let prev = self.current_arena.replace(name.clone());
-                for s in &body.stmts {
-                    self.emit_stmt(s);
-                }
+                self.emit_body(body);
                 self.current_arena = prev;
                 self.emit_line(format_args!("mako_arena_free(&{name});"));
             }
             Stmt::Unsafe { body } => {
                 self.line("/* unsafe: caller assumes the index invariant */");
                 self.unsafe_depth += 1;
-                for s in &body.stmts {
-                    self.emit_stmt(s);
-                }
+                self.emit_body(body);
                 self.unsafe_depth -= 1;
             }
             Stmt::Select {
@@ -14493,17 +14489,13 @@ impl Codegen {
                         self.emit_line(format_args!("}} else if ({which} == {i}) {{"));
                     }
                     self.indent += 1;
-                    for s in &body.stmts {
-                        self.emit_stmt(s);
-                    }
+                    self.emit_body(body);
                     self.indent -= 1;
                 }
                 if let Some(def) = default_arm {
                     self.emit_line(format_args!("}} else if ({which} < 0) {{"));
                     self.indent += 1;
-                    for s in &def.stmts {
-                        self.emit_stmt(s);
-                    }
+                    self.emit_body(def);
                     self.indent -= 1;
                 }
                 self.line("}");
@@ -35371,9 +35363,7 @@ impl Codegen {
                 self.line("{");
                 self.indent += 1;
                 self.push_share_scope();
-                for s in &b.stmts {
-                    self.emit_stmt(s);
-                }
+                self.emit_body(b);
                 self.pop_share_scope();
                 self.indent -= 1;
                 self.line("}");
@@ -35571,6 +35561,7 @@ impl Codegen {
     fn emit_block_trailing(&mut self, block: &Block) -> (String, String) {
         let n = block.stmts.len();
         for (i, stmt) in block.stmts.iter().enumerate() {
+            self.emit_source_line(block, i);
             if i + 1 == n {
                 match stmt {
                     Stmt::Expr(e) => return self.emit_expr(e),

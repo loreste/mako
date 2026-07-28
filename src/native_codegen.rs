@@ -5285,6 +5285,7 @@ mod tests {
                         },
                         then_block: Block {
                             stmts: vec![Stmt::Return(Some(Expr::Ident("n".into())))],
+                            source_lines: Box::default(),
                         },
                         else_block: None,
                     },
@@ -5294,6 +5295,7 @@ mod tests {
                         right: Box::new(right),
                     })),
                 ],
+                source_lines: Box::default(),
             },
             exported: false,
             is_const: false,
@@ -5417,6 +5419,7 @@ mod tests {
                     },
                 },
             ],
+            source_lines: Box::default(),
         };
         let pattern = vector_sum_pattern(&cond, &body).expect("sum loop should vectorize");
         assert_eq!(pattern.slice, "values");
@@ -5435,7 +5438,7 @@ mod tests {
     #[test]
     fn emits_host_object_for_minimal_main() {
         let program = Program {
-            items: vec![function("main", None, Block { stmts: vec![] })],
+            items: vec![function("main", None, Block { stmts: vec![], source_lines: Box::default() })],
         };
         let object = compile_object(&program, false).unwrap();
         assert!(object.len() > 64);
@@ -5461,6 +5464,7 @@ mod tests {
                 None,
                 Block {
                     stmts: vec![Stmt::Expr(call)],
+                    source_lines: Box::default(),
                 },
             )],
         };
@@ -5487,6 +5491,7 @@ mod tests {
                 None,
                 Block {
                     stmts: vec![Stmt::Expr(call)],
+                    source_lines: Box::default(),
                 },
             )],
         };
@@ -5527,6 +5532,7 @@ mod tests {
                                 field: "a".into(),
                             }],
                         })],
+                        source_lines: Box::default(),
                     },
                 ),
             ],
@@ -5553,8 +5559,10 @@ mod tests {
                                 callee: Box::new(Expr::Ident("print_int".into())),
                                 args: vec![Expr::Ident("i".into())],
                             })],
+                            source_lines: Box::default(),
                         },
                     }],
+                    source_lines: Box::default(),
                 },
             )],
         };
@@ -5589,6 +5597,7 @@ mod tests {
                         callee: Box::new(Expr::Ident("print_int".into())),
                         args: vec![m],
                     })],
+                    source_lines: Box::default(),
                 },
             )],
         };
@@ -5604,6 +5613,7 @@ mod tests {
                 None,
                 Block {
                     stmts: vec![Stmt::Expr(Expr::Tuple(vec![Expr::Int(1), Expr::Int(2)]))],
+                    source_lines: Box::default(),
                 },
             )],
         };

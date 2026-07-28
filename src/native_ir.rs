@@ -1963,6 +1963,7 @@ fn subst_block(block: &AstBlock, map: &HashMap<String, TypeExpr>) -> AstBlock {
                 other => other.clone(),
             })
             .collect(),
+        source_lines: block.source_lines.clone(),
     }
 }
 
@@ -2368,7 +2369,7 @@ pub fn lower_with_tests(program: &Program, test_fns: &[String]) -> Result<Module
             type_params: Vec::new(),
             params: Vec::new(),
             ret: Some(TypeExpr::Named("int".into())),
-            body: AstBlock { stmts },
+            body: AstBlock { stmts, source_lines: Box::default() },
             exported: false,
             is_const: false,
             stability: crate::ast::ApiStability::Unspecified,
@@ -5178,7 +5179,7 @@ impl<'a> FunctionLowerer<'a> {
             }
             body_stmts.push(s);
         }
-        let body_block = AstBlock { stmts: body_stmts };
+        let body_block = AstBlock { stmts: body_stmts, source_lines: Box::default() };
         stubs.push(FnDef {
             type_bounds: HashMap::new(),
             name: name.clone(),

@@ -21783,6 +21783,7 @@ pub fn specialize_fn(template: &FnDef, mono_name: &str, subst: &HashMap<String, 
 fn subst_block(b: &Block, subst: &HashMap<String, Type>) -> Block {
     Block {
         stmts: b.stmts.iter().map(|s| subst_stmt(s, subst)).collect(),
+        source_lines: b.source_lines.clone(),
     }
 }
 

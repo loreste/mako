@@ -1183,11 +1183,14 @@ impl Parser {
     fn parse_block(&mut self) -> Result<Block, ParseError> {
         self.expect(TokenKind::LBrace)?;
         let mut stmts = Vec::new();
+        let mut lines = Vec::new();
         while !matches!(self.peek_kind(), TokenKind::RBrace) {
+            let line = self.tokens.get(self.pos).map(|t| t.line).unwrap_or(0);
             stmts.push(self.parse_stmt()?);
+            lines.push(line);
         }
         self.expect(TokenKind::RBrace)?;
-        Ok(Block { stmts })
+        Ok(Block { stmts, source_lines: lines.into_boxed_slice() })
     }
 
     fn parse_stmt(&mut self) -> Result<Stmt, ParseError> {
@@ -1275,6 +1278,7 @@ impl Parser {
                     Ok(Stmt::Defer {
                         body: Block {
                             stmts: vec![Stmt::Expr(e)],
+                            source_lines: Box::default(),
                         },
                     })
                 }
@@ -1621,7 +1625,7 @@ impl Parser {
             if matches!(self.peek_kind(), TokenKind::If) {
                 // else if → wrap as block with single if stmt
                 let inner = self.parse_if()?;
-                Some(Block { stmts: vec![inner] })
+                Some(Block { stmts: vec![inner], source_lines: vec![0].into_boxed_slice() })
             } else {
                 Some(self.parse_block()?)
             }
@@ -2498,6 +2502,7 @@ impl Parser {
             // else-if: the else branch is itself an if-expression.
             Block {
                 stmts: vec![Stmt::Expr(self.parse_if_expr()?)],
+                source_lines: Box::default(),
             }
         } else {
             self.parse_block()?
@@ -2752,6 +2757,7 @@ impl Parser {
             };
             else_block = Some(Block {
                 stmts: vec![if_stmt],
+                source_lines: Box::default(),
             });
         }
         // `else_block` now holds the whole chain (or just the default, or nothing).
@@ -2763,7 +2769,7 @@ impl Parser {
                     // Degenerate empty switch → no-op.
                     init: None,
                     cond: Expr::Bool(false),
-                    then_block: Block { stmts: vec![] },
+                    then_block: Block { stmts: vec![], source_lines: Box::default() },
                     else_block: None,
                 },
                 _ => body_stmts.remove(0),
@@ -2774,7 +2780,7 @@ impl Parser {
         Ok(Stmt::If {
             init: None,
             cond: Expr::Bool(true),
-            then_block: Block { stmts: prelude },
+            then_block: Block { stmts: prelude, source_lines: vec![0].into_boxed_slice() },
             else_block: None,
         })
     }
@@ -2831,7 +2837,8 @@ impl Parser {
         } else {
             false
         };
-        Ok((Block { stmts }, falls))
+        let n = stmts.len();
+        Ok((Block { stmts, source_lines: vec![0; n].into_boxed_slice() }, falls))
     }
 
     fn parse_pattern(&mut self) -> Result<Pattern, ParseError> {

@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.4.20 — 2026-07-28
+
+### Source mapping (`#line` directives)
+
+Generated C output now includes `#line` directives that map back to the
+original `.mko` source file. Debuggers (gdb, lldb) can step through Mako
+source lines instead of generated C. Directives are emitted across all
+codegen paths: function bodies, if/else, while, for (all variants),
+defer, crew, arena, unsafe, select, closures, and block expressions.
+
+- **Memory efficient**: `Block::source_lines` uses `Box<[usize]>` — zero
+  heap allocation for synthetic blocks, exact-fit for parsed blocks
+- **Propagated through monomorphization**: type substitution and native IR
+  lowering preserve source line info
+- **Deduplicated emission**: consecutive statements on the same source line
+  produce only one `#line` directive
+
 ## 0.4.19 — 2026-07-27
 
 ### Remote package registry + signed packages
