@@ -1,6 +1,6 @@
 # Mako status (adversarial / verified)
 
-Last inventory: **2026-07-28** · product **mako0.4.20** (tip; last tag **v0.4.20**) ·
+Last inventory: **2026-07-28** · product **mako0.4.21** (tip; last tag **v0.4.21**) ·
 versioning: small patches — [VERSIONING.md](VERSIONING.md).
 
 Unique Mako surface · pack/pull · map/slice/bag monomorphs · package-per-directory ·
@@ -16,7 +16,7 @@ focused concurrency suite under TSan · [The Mako Book](book/).
 
 | Scope | Approx. |
 |-------|---------|
-| **Product version** | **0.4.20** tip · last tag [**v0.4.20**](https://github.com/loreste/mako/releases/tag/v0.4.20) · then **0.5.0** ([ROADMAP.md](ROADMAP.md), [VERSIONING.md](VERSIONING.md)) |
+| **Product version** | **0.4.21** tip · last tag [**v0.4.21**](https://github.com/loreste/mako/releases/tag/v0.4.21) · then **0.5.0** ([ROADMAP.md](ROADMAP.md), [VERSIONING.md](VERSIONING.md)) |
 | **MVP / usable language** | Core compiler/runtime scope is exercised; this is not a production-readiness claim |
 | **STATUS north-star** | Tracked scope is explicit; optional depth below remains |
 | **Mako identity (preferred syntax)** | Checklist complete — [IDENTITY.md](IDENTITY.md); not a maturity score |
@@ -100,7 +100,7 @@ Program: [SOUNDNESS.md](SOUNDNESS.md) · model: [MEMORY_MODEL.md](MEMORY_MODEL.m
 |-------|--------|
 | Ownership free + no double-free (match Own, bind-scope, alias mut `__own`, move/clone) | PASS — ASan: `double_free_guard_test`, `match_own_free_test`, `own_branch_regress_test`, ownership suite |
 | `cargo build --release` | PASS |
-| `cargo test --release` | PASS — 75 unit tests |
+| `cargo test --release` | PASS — 134 unit tests |
 | `map[K]Option[T]` / `map[K]Result[T,E]` | PASS — `map_option_result_test` (11 tests) |
 | Security residuals (at-rest, limits, cancel, mTLS, SCRAM cbind) | PASS — `security_residuals_test` |
 | Security product polish (path size, PEM, CSR/self-signed, prom/trace, SCRAM-PLUS helpers) | PASS — `security_product_test` |
@@ -181,8 +181,8 @@ Program: [SOUNDNESS.md](SOUNDNESS.md) · model: [MEMORY_MODEL.md](MEMORY_MODEL.m
 | ShareInt capture (shared mut via RC handle) | Done seed — `share_capture_test` |
 | Packaging seeds (deb/rpm/winget/matrix/homebrew) | Done seed — scripts + packaging/ |
 | Book samples `mako check` / `run` | PASS — `docs/book/examples/book_*.mko` |
-| `mako test examples/testing` | PASS — **363 passed**, 0 failed (C backend oracle) |
-| `mako test examples/testing --backend native` | PASS — **363 passed**, 0 failed (2026-07-22; shared-IR Cranelift + native bridge) |
+| `mako test examples/testing` | PASS — **393 passed**, 0 failed (C backend oracle) |
+| `mako test examples/testing --backend native` | PASS — **393 passed**, 0 failed (2026-07-22; shared-IR Cranelift + native bridge) |
 | GC removal regression checks | PASS — removed builtin and legacy `[package] gc = true` both fail, including isolated cache paths |
 | Speed gate | PASS — normal ≤2.0× and strict ≤1.5× Rust gates; final measured ratios 0.21×–0.65× |
 | Leba downstream smoke | PASS — current compiler builds/checks Leba; compiled `doctor` reports 0 errors |

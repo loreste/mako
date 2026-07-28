@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.4.21 — 2026-07-28
+
+### Public package registry + wildcard version fix
+
+The default public registry (`https://loreste.github.io/mako-packages`) is
+now built in — `mako pkg get <name>` works out of the box with no
+configuration. Override with `MAKO_REGISTRY_URL` or `[registry] url` in
+mako.toml.
+
+- **Default registry**: fallback to GitHub Pages when no env/config is set
+- **Wildcard fix**: `version_satisfies` now handles `*` (previously
+  rejected all versions when no version requirement was specified)
+- **Publish script**: `scripts/publish-registry.sh` for pushing packages
+  to the registry
+
 ## 0.4.20 — 2026-07-28
 
 ### Source mapping (`#line` directives)

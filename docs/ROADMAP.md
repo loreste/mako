@@ -1,11 +1,11 @@
 # Mako roadmap
 
-**Product version:** **0.4.20** (tip) · last tagged **v0.4.20** · Last sync: **2026-07-28**.  
-**Suite:** **393** Mako tests on `examples/testing` (C + native backends) + Rust
-unit tests, 0 failures on the native gate · CI ASan/UBSan/TSan as configured.
+**Product version:** **0.4.21** (tip) · last tagged **v0.4.21** · Last sync: **2026-07-28**.  
+**Suite:** **393** Mako tests on `examples/testing` (C + native backends) + 134
+Rust unit tests, 0 failures on the native gate · CI ASan/UBSan/TSan as configured.
 
 **Versioning:** [VERSIONING.md](VERSIONING.md) — **prefer small patches** over mega-minors.  
-**Release:** tag **`v0.4.20`** published; tip train **0.4.20+ → 0.5.0**.
+**Release:** tag **`v0.4.21`** published; tip train **0.4.21+ → 0.5.0**.
 
 **Verified:** [STATUS.md](STATUS.md) · **Stdlib:** [STDLIB.md](STDLIB.md) · **Security:** [SECURITY.md](SECURITY.md) · **Release:** [RELEASE.md](RELEASE.md).  
 **Book:** [The Mako Book](book/) · **Identity:** [IDENTITY.md](IDENTITY.md).  
@@ -23,21 +23,13 @@ unit tests, 0 failures on the native gate · CI ASan/UBSan/TSan as configured.
 | **0.4.0** | Performance — DCE, constant folding, runtime speed, lint | **Shipped** |
 | **0.4.1** | Windows/runtime/edge stability | **Shipped** (see CHANGELOG) |
 | **0.4.5** | Native compiler product path (language + release cut) | **Shipped** — tag `v0.4.5` |
-| **0.4.6** | Residual: string_slice + binary size + bench bars + backend policy env | **In tree** (untagged; may ship with 0.4.7) |
-| **0.4.7** | Cross / WASM / static / sanitize truth table (hard-error gaps) | **In tree** |
-| **0.4.8** | Map/I/O workload gates + perf regression budget | **In tree** |
-| **0.4.9** | LLVM CI (macOS) + install/doctor smoke | **In tree** |
-| **0.4.10** | Years-up soak foundation (long-running services) | **In tree** |
-| **0.4.11** | HTTP long-run soak + allocator/PGO product | **In tree** |
-| **0.4.12** | Messaging queues + GraphQL HTTP seeds | **In tree** |
-| **0.4.13** | Language `queue[T]` + `Graphql` types | **In tree** |
-| **0.4.14** | Adaptive opt: hot sites + offline PGO cycle | **In tree** |
-| **0.4.15** | NATS/Redis adapters · GraphQL schema/resolvers · gRPC/OpenAPI | **In tree** |
-| **0.4.16** | Anneal naming for adaptive opt · broadened hot-site tests | **Tagged** |
-| **0.4.17** | Return-drop ownership fixes · Windows static mutexes + portable crypto · array-literal element typing · LSP builtin completion · range-over-typed-channel codegen · security audit scope | **Tagged** |
-| **0.4.18** | Hex/bin/oct literals · security hardening (all three audit tiers) · white-hat review fixes | **Tagged** |
-| **0.4.19** | Remote HTTPS registry · ed25519 package signing · `mako pkg get` | **Tagged** |
-| **0.4.20** | `#line` source mapping directives · debugger-friendly C output | **Tagged** |
+| **0.4.6–0.4.15** | Perf gates, cross/WASM/static, LLVM CI, soaks, messaging, adaptive opt | **Shipped** (folded into later tags) |
+| **0.4.16** | Memory-safety audit · anneal naming · hot-site tests | **Shipped** |
+| **0.4.17** | Ownership fixes · Windows mutexes · portable crypto · LSP · security audit | **Shipped** |
+| **0.4.18** | Hex/bin/oct literals · security hardening (white-hat audit) | **Shipped** |
+| **0.4.19** | Remote HTTPS registry · ed25519 package signing · `mako pkg get` | **Shipped** |
+| **0.4.20** | `#line` source mapping directives · debugger-friendly C output | **Shipped** |
+| **0.4.21** | Public package registry · default registry URL · wildcard version fix | **Shipped** |
 | **0.5.0** | Native-first **default** (CLI default flip — minor theme) | **Planned** minor |
 | **0.5.1** | Toolchain & IDE depth (LSP, DAP/DWARF, doc/bench product) | **Planned** |
 | **0.5.2** | Runtime trust & production concurrency soaks | **Planned** |
@@ -47,24 +39,19 @@ unit tests, 0 failures on the native gate · CI ASan/UBSan/TSan as configured.
 **Principle:** ship **measurable** gates each **patch or minor**; do not reopen identity (no free `go`, no lifetime params, no silent native→C fallback). Prefer **0.4.N** patches over waiting for **0.5.0**.
 
 ```text
-0.4.5  language gate ✓  [tagged]
-0.4.6  residual perf + size + MAKO_BACKEND policy  [in tree]
-0.4.7  modes truth table  [in tree]
-0.4.8  map/I/O gates + regression baselines  [in tree]
-0.4.9  LLVM CI (macOS) + install/doctor smoke  [in tree]
-0.4.10 years-up soak foundation  [in tree]
-0.4.11 HTTP soak + allocator/PGO  [in tree]
-0.4.12 messaging queues + GraphQL HTTP  [in tree]
-0.4.13 language queue[T] + Graphql
-0.4.14 adaptive opt (hot sites + offline PGO)
-0.4.15 NATS/Redis + GraphQL schema + gRPC/OpenAPI
-0.4.16 Anneal naming + adaptive-opt tests
-0.4.17 return-drop ownership · Windows mutex + portable crypto · LSP  [tip]
-0.5.0  native-first CLI default (minor)
-0.5.1  toolchain/IDE
-0.5.2  runtime trust
-0.5.x  patches
-1.0    stability freeze
+0.4.5       language gate                                     [shipped]
+0.4.6–0.15  perf gates, cross, soaks, messaging, adaptive opt [shipped]
+0.4.16      memory-safety audit                               [shipped]
+0.4.17      ownership fixes, Windows, crypto, LSP             [shipped]
+0.4.18      hex/bin/oct literals, security hardening           [shipped]
+0.4.19      remote HTTPS registry, ed25519 signing            [shipped]
+0.4.20      #line source mapping directives                   [shipped]
+0.4.21      public package registry, wildcard version fix      [shipped]
+0.5.0       native-first CLI default (minor)
+0.5.1       toolchain/IDE
+0.5.2       runtime trust
+0.5.x       patches
+1.0         stability freeze
 ```
 
 ---
@@ -298,28 +285,19 @@ exactly that way — intermittent, passing on re-run — and was a real memory b
 that read whatever the allocator happened to leave behind. Rule out a real
 fault before labelling anything flaky.
 
-### Package distribution — shared registry
+### Package distribution — shared registry — **Done**
 
-**Not a new package manager.** `mako pkg` already does init / add / remove /
-list / fetch / lock / install / update / publish / audit, resolves SemVer, path,
-git and registry sources, writes `mako.lock` with sha256 content hashes, and
-audits against advisory and license policy files. What is missing is that the
-registry is filesystem-only (`$MAKO_REGISTRY` or `.mako/registry`), so
-`mako pkg publish` puts a package somewhere only the publisher can see.
+| ID | Deliverable | Status |
+|----|-------------|--------|
+| **417-P1** | Registry index format | **Done** — `<name>/index.json` with versions, SHA-256, tarball URLs |
+| **417-P2** | Remote registry source | **Done** — HTTPS registry alongside path/git/local (0.4.19) |
+| **417-P3** | `mako pkg get <pkg>` | **Done** — resolve, fetch, verify SHA-256, record in mako.toml (0.4.19) |
+| **417-P4** | Publish to a remote | **Done** — `scripts/publish-registry.sh` pushes to GitHub Pages registry (0.4.21) |
+| **417-P5** | Discovery | Open — `mako pkg search` not yet implemented |
 
-| ID | Deliverable | Notes |
-|----|-------------|-------|
-| **417-P1** | Registry index format | Immutable name/version → source URL + sha256, servable as static files. Reuse the digest `mako.lock` already records; no new hashing scheme. |
-| **417-P2** | Remote registry source | Teach the resolver an `https` registry alongside path/git/local, honouring the existing lock and audit paths. Offline and vendored builds must keep working. |
-| **417-P3** | `mako get <pkg>` | One step: resolve, fetch, record in `mako.toml`, refresh `mako.lock`. `mako pkg add` already records a dependency; this is the fetch-and-wire-in front end. |
-| **417-P4** | Publish to a remote | Extend `mako pkg publish` past the local tree, with immutability enforced by the index rather than by convention. |
-| **417-P5** | Discovery | `mako pkg search`, and a way to see what a package pulls in before adding it. |
-
-Open questions to settle before building: who hosts the index and what the
-namespace looks like (flat names, or org-scoped); whether publish requires
-signing or only a digest; and what a yank or a security advisory does to
-builds that already pinned the version. The audit command exists and reads
-local advisory files, so the advisory format is the natural place to start.
+Default public registry: `https://loreste.github.io/mako-packages` (GitHub
+Pages, static files). Flat namespace. Packages optionally signed with ed25519.
+Tarball integrity verified via SHA-256 before extraction.
 
 ### Deferred to 0.5.x, deliberately
 
